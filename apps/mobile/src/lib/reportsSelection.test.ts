@@ -1,58 +1,45 @@
 import { describe, expect, it } from "vitest";
 import {
   applyReportFilterDraft,
+  normalizeReportSelection,
   openReportFilterDraft,
-  refreshReportFilterDraft,
+  reportSelectionIncludes,
   selectAllReportFilterDraft,
   toggleReportCategory,
-  toggleReportFilterDraftKey
+  toggleReportFilterDraftKey,
 } from "./reportsSelection";
-
-describe("Reports category selection", () => {
-  it("supports All to one to All and additive/removal selection", () => {
-    const one = toggleReportCategory({ mode: "all" }, "a");
-    expect(one).toEqual({ mode: "include", keys: ["a"] });
-    const two = toggleReportCategory(one, "b");
-    expect(two).toEqual({ mode: "include", keys: ["a", "b"] });
-    const bOnly = toggleReportCategory(two, "a");
-    expect(bOnly).toEqual({ mode: "include", keys: ["b"] });
-    expect(toggleReportCategory(bOnly, "b")).toEqual({ mode: "all" });
-  });
-
-  it("keeps a draft atomic and rejects an empty applied subset", () => {
-    const opened = openReportFilterDraft({ mode: "all" }, ["a", "b"]);
-    const withoutA = toggleReportFilterDraftKey(opened, "a");
-    expect(applyReportFilterDraft(withoutA)).toEqual({ mode: "include", keys: ["b"] });
-    expect(applyReportFilterDraft(toggleReportFilterDraftKey(withoutA, "b"))).toBeNull();
-    expect(applyReportFilterDraft(selectAllReportFilterDraft(withoutA))).toEqual({ mode: "all" });
-  });
-
-  it("does not select a category that arrives while an explicit draft is open", () => {
-    const draft = openReportFilterDraft({ mode: "include", keys: ["a"] }, ["a", "b"]);
-    expect(refreshReportFilterDraft(draft, ["a", "b", "c"])).toEqual({
+describe("Revision 2 all/some/none", () => {
+  const universe = ["a", "b", "uncategorized"];
+  it("all toggles exclude one, final deselection is none and final selection is all", () => {
+    const first = toggleReportCategory({ mode: "all" }, "a", universe);
+    expect(first).toEqual({ mode: "include", keys: ["b", "uncategorized"] });
+    expect(
+      toggleReportCategory({ mode: "include", keys: ["a"] }, "a", universe),
+    ).toEqual({ mode: "none" });
+    expect(toggleReportCategory(first, "a", universe)).toEqual({ mode: "all" });
+    expect(toggleReportCategory({ mode: "none" }, "a", universe)).toEqual({
       mode: "include",
       keys: ["a"],
-      universe: ["a", "b", "c"]
     });
   });
-
-  it("does not silently include a category that arrives after an All draft opens", () => {
-    const draft = openReportFilterDraft({ mode: "all" }, ["a", "b"]);
-    expect(refreshReportFilterDraft(draft, ["a", "b", "c"])).toEqual({
-      mode: "include",
-      keys: ["a", "b"],
-      universe: ["a", "b", "c"]
-    });
-  });
-
-  it("preserves missing IDs, duplicate-name identities, and Uncategorized keys", () => {
-    const draft = openReportFilterDraft(
-      { mode: "include", keys: ["same-name-a", "same-name-b", "uncategorized", "missing"] },
-      ["same-name-a", "same-name-b", "uncategorized"]
+  it("All is a genuine toggle and zero selection applies", () => {
+    const none = selectAllReportFilterDraft(
+      openReportFilterDraft({ mode: "all" }, universe),
     );
-    expect(applyReportFilterDraft(draft)).toEqual({
-      mode: "include",
-      keys: ["same-name-a", "same-name-b", "uncategorized", "missing"]
+    expect(applyReportFilterDraft(none)).toEqual({ mode: "none" });
+    expect(selectAllReportFilterDraft(none).mode).toBe("all");
+    expect(toggleReportFilterDraftKey(none, "b").mode).toBe("include");
+    expect(reportSelectionIncludes(none, "a")).toBe(false);
+  });
+  it("preserves unavailable IDs and deduplicates stable IDs", () => {
+    expect(
+      normalizeReportSelection(
+        { mode: "include", keys: ["gone", "gone"] },
+        universe,
+      ),
+    ).toEqual({ mode: "include", keys: ["gone"] });
+    expect(normalizeReportSelection({ mode: "include", keys: [] })).toEqual({
+      mode: "none",
     });
   });
 });

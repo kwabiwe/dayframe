@@ -89,20 +89,6 @@ export type MobileDateRange = {
   weekEnd: string;
 };
 
-export type EntryWindowCoverage = {
-  from: string;
-  toExclusive: string;
-  limit: number;
-  hasMore: boolean;
-};
-
-export type BootstrapEntryCoverage = {
-  capturedAt: string;
-  dayEntries: EntryWindowCoverage;
-  weekEntries: EntryWindowCoverage;
-  historyEntries: EntryWindowCoverage;
-};
-
 export type MobileSeriesPoint = {
   key: string;
   label: string;
@@ -198,7 +184,6 @@ export type MobileBootstrap = {
   historyEntries?: MobileTimeEntry[];
   dayEntries?: MobileTimeEntry[];
   weekEntries?: MobileTimeEntry[];
-  entryCoverage?: BootstrapEntryCoverage;
   places: Array<{
     id: string;
     name: string;

@@ -93,12 +93,6 @@ describe("Review sync store contracts", () => {
   });
 
   it("caches dashboard presentation without location coordinates or raw evidence", () => {
-    const entryCoverage = {
-      capturedAt: "2026-09-08T12:00:00.000Z",
-      dayEntries: { from: "2026-09-08T00:00:00.000Z", toExclusive: "2026-09-09T00:00:00.000Z", limit: 100, hasMore: true },
-      weekEntries: { from: "2026-09-07T00:00:00.000Z", toExclusive: "2026-09-14T00:00:00.000Z", limit: 300, hasMore: false },
-      historyEntries: { from: "2026-07-11T00:00:00.000Z", toExclusive: "2026-09-09T00:00:00.000Z", limit: 2000, hasMore: false }
-    };
     const safe = sanitiseDashboardBootstrapForCache({
       ...bootstrap([reviewItem({
         rawPayload: {
@@ -118,7 +112,6 @@ describe("Review sync store contracts", () => {
         defaultProjectId: null,
         defaultCategoryId: null
       }],
-      entryCoverage,
       learnedPlaces: [{
         id: "learned-1",
         name: "Candidate",
@@ -150,7 +143,6 @@ describe("Review sync store contracts", () => {
     expect(safe.places[0]).not.toHaveProperty("latitude");
     expect(safe.places[0]).not.toHaveProperty("longitude");
     expect(safe.learnedPlaces).toBeUndefined();
-    expect(safe.entryCoverage).toEqual(entryCoverage);
     expect(safe.reviewItems[0].rawPayload).toEqual({
       algorithmVersion: "location-v2.0"
     });

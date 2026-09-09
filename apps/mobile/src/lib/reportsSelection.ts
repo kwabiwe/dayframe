@@ -1,109 +1,94 @@
 export const UNCATEGORIZED_REPORT_KEY = "uncategorized";
-
-export type ReportCategoryKey = string;
-
 export type ReportCategorySelection =
   | { mode: "all" }
-  | { mode: "include"; keys: readonly ReportCategoryKey[] };
-
+  | { mode: "none" }
+  | { mode: "include"; keys: readonly string[] };
 export type ReportCategoryOption = {
-  key: ReportCategoryKey;
+  key: string;
   name: string;
   color: string;
   isUncategorized: boolean;
   isUnavailable: boolean;
 };
-
-export type ReportFilterDraft =
-  | { mode: "all"; universe: readonly ReportCategoryKey[] }
-  | {
-      mode: "include";
-      keys: readonly ReportCategoryKey[];
-      universe: readonly ReportCategoryKey[];
-    };
-
+export type ReportFilterDraft = ReportCategorySelection & {
+  universe: readonly string[];
+};
 export function normalizeReportSelection(
-  selection: ReportCategorySelection
-): ReportCategorySelection {
-  if (selection.mode === "all") return selection;
-  const keys = uniqueKeys(selection.keys);
-  return keys.length > 0 ? { mode: "include", keys } : { mode: "all" };
-}
-
-export function toggleReportCategory(
   selection: ReportCategorySelection,
-  key: ReportCategoryKey
+  universe: readonly string[] = [],
 ): ReportCategorySelection {
-  if (!key) return selection;
-  if (selection.mode === "all") return { mode: "include", keys: [key] };
-  const keys = uniqueKeys(selection.keys);
-  if (!keys.includes(key)) return { mode: "include", keys: [...keys, key] };
-  const remaining = keys.filter((candidate) => candidate !== key);
-  return remaining.length > 0 ? { mode: "include", keys: remaining } : { mode: "all" };
+  if (selection.mode !== "include") return { mode: selection.mode };
+  const keys = [...new Set(selection.keys.filter(Boolean))];
+  if (!keys.length) return { mode: "none" };
+  if (
+    universe.length &&
+    keys.length === new Set(universe).size &&
+    universe.every((key) => keys.includes(key))
+  )
+    return { mode: "all" };
+  return { mode: "include", keys };
 }
-
 export function reportSelectionIncludes(
   selection: ReportCategorySelection,
-  key: ReportCategoryKey
+  key: string,
 ) {
-  return selection.mode === "all" || selection.keys.includes(key);
+  return (
+    selection.mode === "all" ||
+    (selection.mode === "include" && selection.keys.includes(key))
+  );
 }
-
+export function toggleReportCategory(
+  selection: ReportCategorySelection,
+  key: string,
+  universe: readonly string[] = [],
+): ReportCategorySelection {
+  const keys =
+    selection.mode === "all"
+      ? [...universe]
+      : selection.mode === "none"
+        ? []
+        : [...selection.keys];
+  return normalizeReportSelection(
+    {
+      mode: "include",
+      keys: keys.includes(key)
+        ? keys.filter((item) => item !== key)
+        : [...keys, key],
+    },
+    universe,
+  );
+}
 export function openReportFilterDraft(
   selection: ReportCategorySelection,
-  optionKeys: readonly ReportCategoryKey[]
+  universe: readonly string[],
 ): ReportFilterDraft {
-  const universe = uniqueKeys(optionKeys);
-  return selection.mode === "all"
-    ? { mode: "all", universe }
-    : { mode: "include", keys: uniqueKeys(selection.keys), universe };
+  return { ...selection, universe: [...new Set(universe)] };
 }
-
 export function toggleReportFilterDraftKey(
   draft: ReportFilterDraft,
-  key: ReportCategoryKey
+  key: string,
 ): ReportFilterDraft {
-  if (!key) return draft;
-  if (draft.mode === "all") {
-    return {
-      mode: "include",
-      keys: draft.universe.filter((candidate) => candidate !== key),
-      universe: draft.universe
-    };
-  }
-  const keys = draft.keys.includes(key)
-    ? draft.keys.filter((candidate) => candidate !== key)
-    : [...draft.keys, key];
-  return { ...draft, keys: uniqueKeys(keys) };
+  return {
+    ...toggleReportCategory(draft, key, draft.universe),
+    universe: draft.universe,
+  };
 }
-
 export function selectAllReportFilterDraft(
-  draft: ReportFilterDraft
+  draft: ReportFilterDraft,
 ): ReportFilterDraft {
-  return { mode: "all", universe: draft.universe };
+  return {
+    mode: draft.mode === "all" ? "none" : "all",
+    universe: draft.universe,
+  };
 }
-
 export function refreshReportFilterDraft(
   draft: ReportFilterDraft,
-  optionKeys: readonly ReportCategoryKey[]
+  universe: readonly string[],
 ): ReportFilterDraft {
-  const universe = uniqueKeys(optionKeys);
-  if (draft.mode === "include") return { mode: "include", keys: draft.keys, universe };
-  const previousUniverse = new Set(draft.universe);
-  const hasNewOption = universe.some((key) => !previousUniverse.has(key));
-  return hasNewOption
-    ? { mode: "include", keys: draft.universe, universe }
-    : { mode: "all", universe };
+  return { ...draft, universe: [...new Set(universe)] };
 }
-
 export function applyReportFilterDraft(
-  draft: ReportFilterDraft
-): ReportCategorySelection | null {
-  if (draft.mode === "all") return { mode: "all" };
-  const keys = uniqueKeys(draft.keys);
-  return keys.length > 0 ? { mode: "include", keys } : null;
-}
-
-function uniqueKeys(keys: readonly ReportCategoryKey[]) {
-  return [...new Set(keys.filter(Boolean))];
+  draft: ReportFilterDraft,
+): ReportCategorySelection {
+  return normalizeReportSelection(draft, draft.universe);
 }

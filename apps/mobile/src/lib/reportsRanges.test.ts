@@ -1,46 +1,88 @@
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { buildReportsRanges, reportWindowQuality } from "./reportsRanges";
+import { describe, expect, it } from "vitest";
+import { ReportSummaryRequestSchema } from "@dayframe/shared";
+import {
+  addLocalDays,
+  buildReportRange,
+  calendarDayCount,
+  formatLocalDateKey,
+  parseLocalDate,
+  validateCustomRange,
+} from "./reportsRanges";
 
-describe("Reports local ranges and source coverage", () => {
-  const originalTimezone = process.env.TZ;
-  beforeAll(() => { process.env.TZ = "Europe/London"; });
-  afterAll(() => { process.env.TZ = originalTimezone; });
-
-  it("builds seven contiguous calendar days without assuming fixed milliseconds", () => {
-    const ranges = buildReportsRanges(new Date(2026, 2, 29, 12).getTime());
-    expect(ranges.weekDays).toHaveLength(7);
-    for (let index = 1; index < ranges.weekDays.length; index += 1) {
-      expect(ranges.weekDays[index - 1].end.getTime()).toBe(ranges.weekDays[index].start.getTime());
-    }
+describe("Revision 2 local report ranges", () => {
+  it.each(["2026-03-29", "2026-10-25"])(
+    "partitions DST day %s into actual clock hours",
+    (key) => {
+      // Run this suite with TZ=Europe/London; no runtime TZ mutation in worker threads.
+      const now = +parseLocalDate(key)! + 12 * 3_600_000;
+      const range = buildReportRange({ start: key, end: key }, now);
+      expect(range.buckets.length).toBe(
+        (+range.end - +range.start) / 3_600_000,
+      );
+      if (Intl.DateTimeFormat().resolvedOptions().timeZone === "Europe/London")
+        expect(range.buckets.length).toBe(key.includes("03-29") ? 23 : 25);
+      expect(new Set(range.buckets.map((b) => b.key)).size).toBe(
+        range.buckets.length,
+      );
+      expect(ReportSummaryRequestSchema.safeParse(range.request).success).toBe(
+        true,
+      );
+    },
+  );
+  it.each([1, 2, 31, 32, 180, 181, 366])(
+    "builds a valid exact %s-day custom partition",
+    (count) => {
+      const start = new Date(2025, 0, 1);
+      const end = addLocalDays(start, count - 1);
+      const range = buildReportRange(
+        { start: formatLocalDateKey(start), end: formatLocalDateKey(end) },
+        +new Date(2027, 0, 1),
+      );
+      expect(calendarDayCount(range.start, addLocalDays(range.end, -1))).toBe(
+        count,
+      );
+      expect(ReportSummaryRequestSchema.safeParse(range.request).success).toBe(
+        true,
+      );
+      expect(range.buckets[0].start).toEqual(range.start);
+      expect(range.buckets.at(-1)?.end).toEqual(range.end);
+      expect(range.buckets.length).toBeLessThanOrEqual(
+        count === 1 ? 25 : count <= 31 ? 31 : count <= 180 ? 27 : 13,
+      );
+    },
+  );
+  it("normalizes reverse/same-day selection, rejects future/invalid/367 days", () => {
+    const now = +new Date(2026, 11, 31);
+    expect(validateCustomRange("2026-09-09", "2026-09-01", now).value).toEqual({
+      start: "2026-09-01",
+      end: "2026-09-09",
+    });
+    expect(
+      validateCustomRange("2026-09-09", "2026-09-09", now).value,
+    ).toBeDefined();
+    expect(
+      validateCustomRange("2026-01-01", "2027-01-02", +new Date(2027, 1, 1))
+        .error,
+    ).toContain("366");
+    expect(
+      validateCustomRange("2026-12-31", "2027-01-01", now).error,
+    ).toContain("Future");
+    expect(parseLocalDate("2026-02-30")).toBeNull();
   });
-
-  it("preserves 23-hour and 25-hour local days across DST", () => {
-    const spring = buildReportsRanges(new Date(2026, 2, 29, 12).getTime()).today;
-    const autumn = buildReportsRanges(new Date(2026, 9, 25, 12).getTime()).today;
-    expect(spring.end.getTime() - spring.start.getTime()).toBe(23 * 60 * 60 * 1000);
-    expect(autumn.end.getTime() - autumn.start.getTime()).toBe(25 * 60 * 60 * 1000);
-  });
-
-  it("distinguishes complete, partial, and metadata-free windows", () => {
-    const required = { start: new Date("2026-09-07T00:00:00.000Z"), end: new Date("2026-09-14T00:00:00.000Z") };
-    const base = {
-      capturedAt: "2026-09-08T12:00:00.000Z",
-      dayEntries: { from: "2026-09-08T00:00:00.000Z", toExclusive: "2026-09-09T00:00:00.000Z", limit: 100, hasMore: false },
-      weekEntries: { from: required.start.toISOString(), toExclusive: required.end.toISOString(), limit: 300, hasMore: false },
-      historyEntries: { from: "2026-07-01T00:00:00.000Z", toExclusive: "2026-09-09T00:00:00.000Z", limit: 2000, hasMore: false }
-    };
-    expect(reportWindowQuality(undefined, required)).toBe("unknown");
-    expect(reportWindowQuality(base, required)).toBe("complete");
-    expect(reportWindowQuality({ ...base, weekEntries: { ...base.weekEntries, hasMore: true }, historyEntries: { ...base.historyEntries, hasMore: true } }, required)).toBe("partial");
-  });
-
-  it("does not mistake a gap between complete windows for complete coverage", () => {
-    const required = { start: new Date("2026-09-07T00:00:00.000Z"), end: new Date("2026-09-14T00:00:00.000Z") };
-    expect(reportWindowQuality({
-      capturedAt: "2026-09-08T12:00:00.000Z",
-      dayEntries: { from: "2026-09-07T00:00:00.000Z", toExclusive: "2026-09-09T00:00:00.000Z", limit: 100, hasMore: false },
-      weekEntries: { from: "2026-09-10T00:00:00.000Z", toExclusive: "2026-09-14T00:00:00.000Z", limit: 300, hasMore: false },
-      historyEntries: { from: "2026-07-01T00:00:00.000Z", toExclusive: "2026-09-07T00:00:00.000Z", limit: 2000, hasMore: false }
-    }, required)).toBe("partial");
+  it("uses Monday week, calendar month and leap calendar year", () => {
+    expect(
+      buildReportRange("week", +new Date(2026, 8, 13)).start.getDay(),
+    ).toBe(1);
+    expect(
+      buildReportRange("month", +new Date(2024, 1, 20)).buckets,
+    ).toHaveLength(29);
+    expect(
+      buildReportRange("year", +new Date(2024, 1, 20)).buckets,
+    ).toHaveLength(12);
+    expect(
+      buildReportRange("year", +new Date(2024, 1, 20))
+        .buckets.filter((b) => b.label)
+        .map((b) => b.start.getMonth()),
+    ).toEqual([0, 3, 6, 9]);
   });
 });

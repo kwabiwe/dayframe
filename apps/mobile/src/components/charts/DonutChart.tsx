@@ -1,10 +1,17 @@
 import { useEffect, useId, useState } from "react";
-import { StyleSheet, Text, View, useWindowDimensions, type LayoutChangeEvent } from "react-native";
+import {
+  StyleSheet,
+  Text,
+  View,
+  useWindowDimensions,
+  type LayoutChangeEvent,
+} from "react-native";
 import Animated, {
   createAnimatedComponent,
   useAnimatedProps,
+  useAnimatedStyle,
   useSharedValue,
-  withTiming
+  withTiming,
 } from "react-native-reanimated";
 import Svg, { Circle, Defs, Path, Pattern, Rect } from "react-native-svg";
 import { donutSlicePath, prepareDonutArcs } from "@/lib/donutGeometry";
@@ -31,7 +38,7 @@ export function DonutChart({
   reduceMotion,
   segments,
   settleImmediately,
-  theme
+  theme,
 }: {
   animateEntrance: boolean;
   centerLabel: string;
@@ -45,20 +52,32 @@ export function DonutChart({
   const patternId = `uncategorized-${useId().replace(/[^a-zA-Z0-9_-]/g, "")}`;
   const { fontScale } = useWindowDimensions();
   const [availableWidth, setAvailableWidth] = useState(DEFAULT_SIZE);
-  const geometryScale = Math.max(1, fontScale);
-  const size = Math.min(availableWidth, DEFAULT_SIZE * geometryScale);
+  const size = Math.min(availableWidth, DEFAULT_SIZE);
   const centerWidth = DEFAULT_CENTER_WIDTH * (size / DEFAULT_SIZE);
   const arcs = prepareDonutArcs(segments);
+  const centerOpacity = useSharedValue(
+    animateEntrance && !reduceMotion ? 0 : 1,
+  );
+  useEffect(() => {
+    centerOpacity.value = withTiming(1, {
+      duration: reduceMotion || settleImmediately ? 0 : MOBILE_MOTION.control,
+    });
+  }, [animateEntrance, centerOpacity, reduceMotion, settleImmediately]);
+  const centerStyle = useAnimatedStyle(() => ({
+    opacity: centerOpacity.value,
+  }));
   const measureAvailableWidth = (event: LayoutChangeEvent) => {
     const nextWidth = event.nativeEvent.layout.width;
-    if (Number.isFinite(nextWidth) && nextWidth > 0) setAvailableWidth(nextWidth);
+    if (Number.isFinite(nextWidth) && nextWidth > 0)
+      setAvailableWidth(nextWidth);
   };
   return (
     <View
-      accessibilityLabel={`${centerLabel} ${centerValue}. Category controls follow the chart.`}
+      accessible
+      accessibilityLabel={`Category breakdown. ${centerLabel} ${centerValue}. ${segments.length} categories. Category controls follow the chart.`}
       accessibilityRole="image"
       onLayout={measureAvailableWidth}
-      style={[styles.measurementBox, { height: size }]}
+      style={styles.measurementBox}
     >
       <View style={[styles.chart, { height: size, width: size }]}>
         <Svg
@@ -69,21 +88,36 @@ export function DonutChart({
           viewBox="0 0 184 184"
         >
           <Defs>
-            <Pattern id={patternId} patternUnits="userSpaceOnUse" width={8} height={8}>
+            <Pattern
+              id={patternId}
+              patternUnits="userSpaceOnUse"
+              width={8}
+              height={8}
+            >
               <Rect width={8} height={8} fill={uncategorizedFill(theme)} />
-              <Path d="M-2 8 8 -2M2 10 10 2" stroke={uncategorizedStripe(theme)} strokeWidth={1.4} />
+              <Path
+                d="M-2 8 8 -2M2 10 10 2"
+                stroke={uncategorizedStripe(theme)}
+                strokeWidth={1.4}
+              />
             </Pattern>
           </Defs>
           <Circle cx={92} cy={92} r={84} fill={theme.chartTrack} />
           {arcs.map((arc) => {
-            const segment = segments.find((candidate) => candidate.id === arc.id)!;
+            const segment = segments.find(
+              (candidate) => candidate.id === arc.id,
+            )!;
             return (
               <AnimatedDonutSlice
                 key={arc.id}
                 animateEntrance={animateEntrance}
-                color={segment.isUncategorized ? `url(#${patternId})` : segment.color}
+                color={
+                  segment.isUncategorized ? `url(#${patternId})` : segment.color
+                }
                 endAngle={arc.endAngle}
-                onPress={onSegmentPress ? () => onSegmentPress(arc.id) : undefined}
+                onPress={
+                  onSegmentPress ? () => onSegmentPress(arc.id) : undefined
+                }
                 reduceMotion={reduceMotion}
                 selected={segment.selected}
                 settleImmediately={settleImmediately}
@@ -93,13 +127,40 @@ export function DonutChart({
           })}
           <Circle cx={92} cy={92} r={57} fill={theme.surfaceRaised} />
         </Svg>
-        <View pointerEvents="none" style={[styles.center, { width: centerWidth }]}>
-          <Text style={[styles.centerLabel, { color: theme.textSecondary }]}>{centerLabel}</Text>
-          <Text style={[styles.centerValue, { color: theme.textPrimary }]}>
+        <Animated.View
+          pointerEvents="none"
+          style={[styles.center, { width: centerWidth }, centerStyle]}
+        >
+          <Text
+            maxFontSizeMultiplier={1.2}
+            style={[styles.centerLabel, { color: theme.textSecondary }]}
+          >
+            {centerLabel}
+          </Text>
+          <Text
+            adjustsFontSizeToFit
+            numberOfLines={1}
+            maxFontSizeMultiplier={1.2}
+            style={[styles.centerValue, { color: theme.textPrimary }]}
+          >
+            {centerValue}
+          </Text>
+        </Animated.View>
+      </View>
+      {fontScale > 1.3 ? (
+        <View style={styles.accessibleTotal}>
+          <Text style={{ color: theme.textSecondary }}>{centerLabel}</Text>
+          <Text
+            style={{
+              color: theme.textPrimary,
+              fontSize: 22,
+              fontVariant: ["tabular-nums"],
+            }}
+          >
             {centerValue}
           </Text>
         </View>
-      </View>
+      ) : null}
     </View>
   );
 }
@@ -112,7 +173,7 @@ function AnimatedDonutSlice({
   reduceMotion,
   selected,
   settleImmediately = false,
-  startAngle
+  startAngle,
 }: {
   animateEntrance: boolean;
   color: string;
@@ -124,26 +185,51 @@ function AnimatedDonutSlice({
   startAngle: number;
 }) {
   const animatedStart = useSharedValue(startAngle);
-  const animatedEnd = useSharedValue(animateEntrance && !reduceMotion ? startAngle : endAngle);
+  const animatedEnd = useSharedValue(
+    animateEntrance && !reduceMotion ? startAngle : endAngle,
+  );
   const targetOpacity = selected ? 1 : 0.22;
-  const opacity = useSharedValue(reduceMotion || animateEntrance ? targetOpacity : 0);
+  const opacity = useSharedValue(
+    reduceMotion || animateEntrance ? targetOpacity : 0,
+  );
 
   useEffect(() => {
-    const duration = reduceMotion || settleImmediately ? 0 : animateEntrance ? 260 : MOBILE_MOTION.layout;
+    const duration =
+      reduceMotion || settleImmediately
+        ? 0
+        : animateEntrance
+          ? 260
+          : MOBILE_MOTION.layout;
     animatedStart.value = withTiming(startAngle, { duration });
     animatedEnd.value = withTiming(endAngle, { duration });
-  }, [animateEntrance, animatedEnd, animatedStart, endAngle, reduceMotion, settleImmediately, startAngle]);
+  }, [
+    animateEntrance,
+    animatedEnd,
+    animatedStart,
+    endAngle,
+    reduceMotion,
+    settleImmediately,
+    startAngle,
+  ]);
 
   useEffect(() => {
-    opacity.value = withTiming(selected ? 1 : 0.22, { duration: reduceMotion || settleImmediately ? 0 : MOBILE_MOTION.control });
+    opacity.value = withTiming(selected ? 1 : 0.22, {
+      duration: reduceMotion || settleImmediately ? 0 : MOBILE_MOTION.control,
+    });
   }, [opacity, reduceMotion, selected, settleImmediately]);
 
   const animatedProps = useAnimatedProps(() => ({
     d: donutSlicePath(92, 92, 84, 57, animatedStart.value, animatedEnd.value),
-    fillOpacity: opacity.value
+    fillOpacity: opacity.value,
   }));
 
-  return <AnimatedPath animatedProps={animatedProps} fill={color} onPress={onPress} />;
+  return (
+    <AnimatedPath
+      animatedProps={animatedProps}
+      fill={color}
+      onPress={onPress}
+    />
+  );
 }
 
 function uncategorizedFill(theme: MobileTheme) {
@@ -155,9 +241,35 @@ function uncategorizedStripe(theme: MobileTheme) {
 }
 
 const styles = StyleSheet.create({
-  chart: { alignItems: "center", justifyContent: "center", position: "relative" },
-  measurementBox: { alignItems: "center", justifyContent: "center", width: "100%" },
-  center: { alignItems: "center", justifyContent: "center", position: "absolute" },
-  centerLabel: { fontFamily: "System", fontSize: 11, fontWeight: "600", lineHeight: 15, textAlign: "center" },
-  centerValue: { fontFamily: "System", fontSize: 22, fontVariant: ["tabular-nums"], fontWeight: "700", lineHeight: 27, textAlign: "center" }
+  chart: {
+    alignItems: "center",
+    justifyContent: "center",
+    position: "relative",
+  },
+  measurementBox: {
+    alignItems: "center",
+    justifyContent: "center",
+    width: "100%",
+  },
+  accessibleTotal: { alignItems: "center", marginTop: 8 },
+  center: {
+    alignItems: "center",
+    justifyContent: "center",
+    position: "absolute",
+  },
+  centerLabel: {
+    fontFamily: "System",
+    fontSize: 11,
+    fontWeight: "600",
+    lineHeight: 15,
+    textAlign: "center",
+  },
+  centerValue: {
+    fontFamily: "System",
+    fontSize: 22,
+    fontVariant: ["tabular-nums"],
+    fontWeight: "700",
+    lineHeight: 27,
+    textAlign: "center",
+  },
 });

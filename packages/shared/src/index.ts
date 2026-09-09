@@ -1,4 +1,5 @@
 import { z } from "zod";
+export { ReportSummaryRequestSchema, ReportSummarySchema, REPORT_MAX_RANGE_MS, type ReportSummaryRequest, type ReportSummary } from "./reportSummary";
 
 export {
   TAG_DISPLAY_NAME_MAX_LENGTH,

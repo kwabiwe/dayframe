@@ -1,5 +1,8 @@
 # Mobile Reports UX — Stage A
 
+> Historical Revision 1 evidence. Revision 2 supersedes this design and its review
+> conclusions; see [Revision 2 evidence](2026-09-09-reports-revision-2.md).
+
 ## Scope and baseline
 
 - Plan: `dayframe_reports_implementation_plan.md`, revision 1, prepared 2026-09-08.
@@ -64,3 +67,8 @@ The implementation keeps the existing entry-array limits and fetches only one ad
 - Browser smoke against the exact Preview at desktop and phone widths: **NOT RUN** pending Preview.
 
 The remaining large-dataset limitation is intentional: a capped history source stays partial and Stage A adds no pagination/read-model redesign. Stages B–D remain outside this change.
+# Historical evidence — superseded by Revision 2
+
+The Revision 1 UI, coverage transport and review conclusions below are historical.
+They do not establish acceptance for the owner-approved Revision 2 design on PR #194.
+See [Revision 2 evidence](2026-09-09-reports-revision-2.md).

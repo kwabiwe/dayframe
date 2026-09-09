@@ -20,7 +20,7 @@ Web and iOS bootstrap/read models <──── workspace/user-scoped Postgres q
 - `packages/db/migrations` is the ordered local Postgres/PostGIS schema history. `packages/db/scripts/setup.ts` applies every SQL migration in filename order, then seed data.
 - `supabase/migrations` is the ordered hosted Supabase migration history, including RLS, hosted indexes/functions, tags, location, Review receipts, Health reconciliation, and Live Activity delivery.
 
-Bootstrap keeps its existing bounded day/week/history entry arrays at 100/300/2,000 rows. The server reads at most one additional row for each window and returns optional `entryCoverage` metadata with the captured instant, source window, limit, and `hasMore` result. Older clients ignore it and older account-owned cached snapshots may lack it. Mobile Reports unions the already projected arrays by entry ID, gives the projected active entry precedence, and uses only untruncated contiguous coverage windows to call a report complete; filters never upgrade partial coverage. This adds no report fetch path, cache, persistence table, or sync owner.
+Bootstrap retains its bounded 100/300/2,000 day/week/history arrays without Reports-only coverage metadata. Mobile Reports reads POST `/api/reports/summary`: authenticated app-read session first, workspace AND user predicates, validated contiguous unique buckets covering an exclusive bounded range (at most 366 days plus one DST hour, at most 366 buckets and 100 KB request). One SQL aggregate returns category and bucket seconds, not historical rows or sensitive payloads. One captured server instant clips active/future time. Fractional seconds remain unrounded until labels, so bucket/category/Total values reconcile. No schema or web Reports contract change.
 
 ## Event-first write model
 
@@ -65,7 +65,7 @@ Every protected route resolves a `RequestSession` before data access. Personal r
 
 React Native owns authentication, bootstrap data, routing, API mutations, offline reconciliation, timer truth, and sheet presentation. Targeted Swift/SwiftUI modules receive serializable presentation data and emit semantic actions; they must not call Dayframe APIs or maintain a second domain store.
 
-The extracted mobile Reports component is a presentation consumer of that React-owned bootstrap and clock. Its Today/Week, Pie/Bars, category selection, filter draft, and first-presentation motion state are ephemeral and keyed by backend/workspace/user identity. It performs no fetch, mutation, queue, Health/Location interpretation, or timer projection.
+The extracted mobile Reports owner remains keyed by backend/workspace/user and consumes the existing Dashboard clock and projected timer. Its all/include/none category filter, Today/Week/Month/Year/custom choice, drafts and entrance state are ephemeral. A maximum eight exact-range aggregates live only in that mounted owner; requests are abortable, deadline-bound and session/generation checked. The response includes only the active entry identity/category/start and per-bucket contribution to replace with Dashboard's projected active/stopped state, never a second timer store or mutation path. Uncached offline ranges have no numbers; stale exact-range results are explicitly qualified. Session replacement clears results and drafts. Review, Health, Location and sync ownership are unchanged.
 
 Offline storage is intentionally split by responsibility:
 

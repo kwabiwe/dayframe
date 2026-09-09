@@ -182,10 +182,13 @@ Timeline/review:
 
 Mobile Reports:
 
-- Today and current-week totals distinguish Total logged from unique Time covered while preserving the shared meaningful-overlap rule.
-- One local multi-category selection filters totals, coverage, overlap copy, category bars, and current-week Daily bars. Pie geometry retains all eligible category time as context and dims excluded categories instead of renormalising them away.
-- Confirmed running entries contribute through the current captured time. Review suggestions and entries that still need Review do not contribute.
-- Cross-midnight entries are clipped into each device-local calendar day. Bounded or metadata-free bootstrap sources remain usable but are labelled partial or unknown rather than presented as definitive.
+- One compact mobile Reports surface uses a horizontally scrolling Today / Week / Month / Year strip, separate calendar action, range heading and category-filter icon/count.
+- The donut centre shows Total: summed confirmed logged activity clipped to the selected range. Concurrent entries count independently; there is no Time covered card or overlap explanation in mobile Reports. Web/Today goal coverage semantics are unchanged.
+- Category slices and percentages retain the all-category denominator; excluded categories stay dimmed. Compact accessible category rows and slices toggle the same all/include/none selection. Zero selection is valid and says No categories selected. All positive categories remain reachable, including Uncategorized and unavailable stable IDs.
+- Custom ranges use inclusive device-local dates, reversible endpoint selection, no future dates and a maximum of 366 calendar days. Presets use local calendar boundaries and Week begins Monday.
+- Activity over time follows the same selected range and filter: clock hours for Today/one day (including 23/25-hour DST days), days for Week/Month or 2–31 custom days, clipped weeks for 32–180 days and clipped months for 181–366 days/Year. Bars have a zero baseline, nice duration axis, sparse labels and accessible single-bucket tooltips.
+- Confirmed active timer contribution follows the existing projected timer through one current instant; Review-needed entries and suggestions never contribute. Month/Year/custom use bounded authenticated aggregates rather than raw history. An unavailable uncached range says Connect to load this report range; cached results never masquerade as another range.
+- Donut geometry follows available width, never font scale. At accessibility text sizes, a scalable Total appears in normal flow beside the bounded centre text. First populated focused entrance occurs once per mounted account owner; later changes interpolate locally and Reduce Motion settles geometry.
 
 Automation:
 

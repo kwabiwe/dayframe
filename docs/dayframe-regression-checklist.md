@@ -67,7 +67,7 @@ Review this checklist before and after changes that touch Dayframe UI, timer beh
 - Overlaps of at least one minute save from web/mobile Add and Edit, Calendar resize, every explicit Review confirmation path, and offline Review replay. Warnings explain the automatically detected overlap without disabling the primary action; shorter intersections are boundary noise.
 - Boundary-touching entries have no overlap marker. Contained, partial, chained, cross-midnight, running, and dense overlaps show deterministic markers and Calendar geometry.
 - Calendar taps open the visible intended block in contained and dense collisions; enlarged hidden hit targets do not cover neighbouring blocks.
-- Timeline/History and Reports distinguish Total logged from Time covered. Category allocation and timesheets remain logged-time views, while daily/weekly goals advance on covered time.
+- Timeline/History and web Reports distinguish Total logged from Time covered; mobile Reports shows summed Total only. Daily/weekly goals retain covered-time semantics.
 - Automatic Health and location overlap decisions remain Review-first and explicitly say the user can still confirm.
 - Selected time blocks can be deleted from edit controls, context actions, or keyboard delete/backspace where supported.
 - Calendar zoom controls change time granularity without breaking layout.
@@ -236,9 +236,9 @@ Review this checklist before and after changes that touch Dayframe UI, timer beh
 
 - Dashboard shows Today and This Week totals, review count, streak/summary, day timeline, review inbox, and recent activity.
 - Reports show category, source and place breakdowns as the normal user-facing views.
-- Mobile Reports uses matching 44-point Today/Week and Pie/Bars controls, compact growable Total logged/Time covered cards, and a separate Filters row. One stable-ID All/include category selection drives selected totals, recomputed union coverage, overlap copy, selected-only vertical category bars and the explicitly current-week Daily bars. Pie slices/percentages retain the all-category period denominator and excluded slices as dimmed context; legend and slices toggle selection, bars do not. All positive categories remain reachable, including Uncategorized, same-name IDs, archived/missing catalogue categories and the ninth category onward.
-- Mobile Reports deduplicates projected entries by ID, gives the active projection precedence, includes the confirmed running timer through one `now`, excludes Review-needed entries/suggestions, and clips entries across local midnight/DST without fixed 24-hour arithmetic. Zero days render no false positive fill. Missing/capped/gapped bootstrap coverage is qualified independently for the selected period and current-week Daily panel; filtering cannot turn partial data into a definitive empty report.
-- Report filter state survives ordinary refresh, reconnect and tab/view/range changes for the current mounted owner, but resets on cold mount, logout, backend/workspace/user replacement. Filter Apply is atomic; Cancel, backdrop, route blur and owner replacement discard the draft. Donut entrance runs once on the first actual focused populated presentation, not eager hidden mount; later updates do not replay it, interruption settles to current data, and Reduce Motion preserves all information/actions without travel.
+- Mobile Reports uses Today/Week/Month/Year plus an inclusive local custom range (at most 366 days), one Total donut and compact category rows, with no Pie/Bars, coverage cards, overlap explanation, Review warning or fixed-week chart. All/include/none filtering keeps all-context angles/percentages; none applies and explains No categories selected. All positive categories, stable IDs and Uncategorized remain available.
+- Mobile Reports uses bounded authenticated category/bucket aggregates, one captured now and existing projected timer contribution; Review-needed entries remain excluded. Category/bucket/Total sums reconcile without rounding drift or overlap union. Ranges clip across local DST boundaries. Exact-range memory cache is account-owned; uncached offline ranges expose no borrowed values. Verify late request/session rejection and maximum-font donut geometry.
+- Report filter and range state survive refresh/reconnect/tab switches for the mounted owner and reset on account replacement. Apply/Cancel are atomic. Donut entrance occurs once on first focused populated presentation; subsequent updates use local stable-ID geometry/opacity, scalable rows and Reduce Motion. Activity bars follow the selected range with a nice duration axis, zero fill, sparse labels and one bounded accessible tooltip.
 - Reports use one explicit Day, Week, Month or Custom date range for every total, chart and breakdown; historical navigation never leaves a chart anchored to the real current week.
 - Entries crossing a report boundary contribute only the time inside the selected range. Daily and weekly goal progress uses persisted user goals and appears only for matching Day/Week ranges.
 - Categories, Tags, Reports, Places, Review Inbox, Settings, Search, Profile, workspace switching, Appearance, and Help remain navigable on desktop and mobile web.
@@ -293,7 +293,7 @@ Review this checklist before and after changes that touch Dayframe UI, timer beh
 
 For docs-only PRs, `git diff --check` plus GitHub/Vercel check observation is enough unless the docs change build or release configuration.
 
-For implementation PRs that affect shipped mobile/API behavior, do not ask KB to test until:
+Before merging implementation PRs, ask KB to test the exact Ready Preview promoted to the stable staging alias using a signed isolated staging iPhone build; record STAGING badge, identity and baked staging API. Never use production data/configuration. Missing device acceptance blocks merge. After an explicitly authorized merge, production/TestFlight release checks are:
 
 - PR is merged into `main` and local `main` is synced.
 - Tracker reflects merged PR number/status.

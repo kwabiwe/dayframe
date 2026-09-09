@@ -1,19 +1,12 @@
-import { analyzeTimeIntervals, paletteColorFor } from "@dayframe/shared";
+import { paletteColorFor, type ReportSummary } from "@dayframe/shared";
 import type { MobileBootstrap, MobileTimeEntry } from "./api";
-import { hasReviewNeededActivityForRange, isReviewNeededEntry } from "./review";
+import type { MobileTheme } from "./mobileTheme";
+import type { ReportRange, ReportWindow } from "./reportsRanges";
 import {
-  UNCATEGORIZED_REPORT_KEY,
   reportSelectionIncludes,
   type ReportCategoryOption,
-  type ReportCategorySelection
+  type ReportCategorySelection,
 } from "./reportsSelection";
-import {
-  buildReportsRanges,
-  reportWindowQuality,
-  type ReportDataQuality,
-  type ReportWindow
-} from "./reportsRanges";
-import type { MobileTheme } from "./mobileTheme";
 
 export type ReportCategoryDuration = {
   key: string;
@@ -24,223 +17,194 @@ export type ReportCategoryDuration = {
   selected: boolean;
 };
 
-export type ReportDailyDuration = {
-  key: string;
-  label: string;
-  durationMs: number;
-};
-
-export type ReportsPresentation = {
-  selectedPeriod: "today" | "week";
-  allCategorySegments: ReportCategoryDuration[];
-  selectedCategoryBars: ReportCategoryDuration[];
-  selectedLoggedSeconds: number;
-  selectedCoveredSeconds: number;
-  selectedAdditionalOverlapSeconds: number;
-  selectedWeekDailyBars: ReportDailyDuration[];
-  selectedWeekLoggedSeconds: number;
-  contextDurationMs: number;
-  filterOptions: ReportCategoryOption[];
-  hasSuggestedActivity: boolean;
-  dataQuality: {
-    selectedPeriod: ReportDataQuality;
-    currentWeek: ReportDataQuality;
-  };
-};
-
-export function buildReportsPresentation(input: {
-  data: MobileBootstrap;
-  nowMs: number;
-  period: "today" | "week";
-  selection: ReportCategorySelection;
-  themeMode: MobileTheme["mode"];
-}): ReportsPresentation {
-  const ranges = buildReportsRanges(input.nowMs);
-  const selectedWindow = input.period === "today" ? ranges.today : ranges.week;
-  const entries = reportEntryUnion(input.data);
-  const eligibleEntries = entries
-    .filter((entry) => validReportEntry(entry, input.data.activeEntry?.id ?? null))
-    .filter((entry) => !isReviewNeededEntry(entry));
-  const selectedEntries = eligibleEntries.filter((entry) =>
-    reportSelectionIncludes(input.selection, reportCategoryKey(entry))
-  );
-  const selectedPeriodEntries = entriesOverlapping(selectedEntries, selectedWindow, input.nowMs);
-  const selectedWeekEntries = entriesOverlapping(selectedEntries, ranges.week, input.nowMs);
-  const allPeriodEntries = entriesOverlapping(eligibleEntries, selectedWindow, input.nowMs);
-  const selectedAnalysis = analyze(selectedPeriodEntries, selectedWindow, input.nowMs);
-  const selectedWeekAnalysis = analyze(selectedWeekEntries, ranges.week, input.nowMs);
-  const allCategorySegments = buildCategoryDurations(
-    allPeriodEntries,
-    selectedWindow,
-    input.nowMs,
-    input.selection,
-    input.themeMode
-  );
-
-  return {
-    selectedPeriod: input.period,
-    allCategorySegments,
-    selectedCategoryBars: allCategorySegments.filter((segment) => segment.selected),
-    selectedLoggedSeconds: selectedAnalysis.loggedSeconds,
-    selectedCoveredSeconds: selectedAnalysis.coveredSeconds,
-    selectedAdditionalOverlapSeconds: selectedAnalysis.additionalOverlappingActivitySeconds,
-    selectedWeekDailyBars: ranges.weekDays.map((day) => ({
-      key: day.key,
-      label: day.label,
-      durationMs: selectedWeekEntries.reduce(
-        (sum, entry) => sum + entryOverlapMs(entry, day, input.nowMs),
-        0
-      )
-    })),
-    selectedWeekLoggedSeconds: selectedWeekAnalysis.loggedSeconds,
-    contextDurationMs: allCategorySegments.reduce((sum, segment) => sum + segment.durationMs, 0),
-    filterOptions: buildReportCategoryOptions(input.data, entries, input.selection, input.themeMode),
-    hasSuggestedActivity: hasReviewNeededActivityForRange({
-      entries: entriesOverlapping(entries, selectedWindow, input.nowMs),
-      now: input.nowMs,
-      rangeStart: selectedWindow.start,
-      rangeEnd: selectedWindow.end,
-      reviewItems: input.data.reviewItems ?? []
-    }),
-    dataQuality: {
-      selectedPeriod: reportWindowQuality(input.data.entryCoverage, selectedWindow),
-      currentWeek: reportWindowQuality(input.data.entryCoverage, ranges.week)
-    }
-  };
-}
-
 export function reportEntryUnion(data: MobileBootstrap) {
-  const byId = new Map<string, MobileTimeEntry>();
+  const entries = new Map<string, MobileTimeEntry>();
   for (const entry of [
     ...(data.historyEntries ?? []),
     ...(data.entries ?? []),
     ...(data.weekEntries ?? []),
-    ...(data.dayEntries ?? [])
-  ]) {
-    if (entry?.id) byId.set(entry.id, entry);
-  }
-  if (data.activeEntry?.id) {
-    byId.set(data.activeEntry.id, {
-      ...(byId.get(data.activeEntry.id) ?? data.activeEntry),
-      ...data.activeEntry,
-      stoppedAt: null
-    });
-  }
-  return [...byId.values()];
+    ...(data.dayEntries ?? []),
+  ])
+    if (entry?.id) entries.set(entry.id, entry);
+  if (data.activeEntry?.id)
+    entries.set(data.activeEntry.id, { ...data.activeEntry, stoppedAt: null });
+  return [...entries.values()];
 }
-
-function buildCategoryDurations(
-  entries: MobileTimeEntry[],
-  range: ReportWindow,
-  nowMs: number,
-  selection: ReportCategorySelection,
-  themeMode: MobileTheme["mode"]
+export function entryOverlapMs(
+  entry: Pick<MobileTimeEntry, "startedAt" | "stoppedAt">,
+  window: ReportWindow,
+  now: number,
 ) {
-  const totals = new Map<string, ReportCategoryDuration>();
-  for (const entry of entries) {
-    const durationMs = entryOverlapMs(entry, range, nowMs);
-    if (durationMs <= 0) continue;
-    const key = reportCategoryKey(entry);
-    const current = totals.get(key);
-    totals.set(key, {
-      key,
-      categoryName: reportCategoryName(entry),
-      durationMs: (current?.durationMs ?? 0) + durationMs,
-      color: current?.color ?? reportCategoryColor(entry, themeMode),
-      isUncategorized: key === UNCATEGORIZED_REPORT_KEY,
-      selected: reportSelectionIncludes(selection, key)
-    });
-  }
-  return [...totals.values()].sort(
-    (left, right) => right.durationMs - left.durationMs || left.key.localeCompare(right.key)
+  const start = Date.parse(entry.startedAt);
+  const end = Math.min(
+    entry.stoppedAt ? Date.parse(entry.stoppedAt) : now,
+    now,
   );
+  return Number.isFinite(start) && Number.isFinite(end)
+    ? Math.max(0, Math.min(end, +window.end) - Math.max(start, +window.start))
+    : 0;
 }
+export function reportCategoryKey(entry: Pick<MobileTimeEntry, "categoryId">) {
+  return entry.categoryId || "uncategorized";
+}
+const eligible = (entry: MobileTimeEntry) =>
+  entry.reviewStatus === "confirmed" || entry.reviewStatus === "accepted";
 
-function buildReportCategoryOptions(
-  data: MobileBootstrap,
-  entries: MobileTimeEntry[],
-  selection: ReportCategorySelection,
-  themeMode: MobileTheme["mode"]
-) {
-  const options = new Map<string, ReportCategoryOption>();
-  for (const category of data.categories ?? []) {
-    options.set(category.id, {
-      key: category.id,
-      name: category.name,
-      color: paletteColorFor(category.color ?? category.id, category.name, themeMode),
-      isUncategorized: false,
-      isUnavailable: false
-    });
-  }
-  for (const entry of entries) {
-    const key = reportCategoryKey(entry);
-    if (options.has(key)) continue;
-    options.set(key, {
-      key,
-      name: reportCategoryName(entry),
-      color: reportCategoryColor(entry, themeMode),
-      isUncategorized: key === UNCATEGORIZED_REPORT_KEY,
-      isUnavailable: false
-    });
-  }
-  if (selection.mode === "include") {
-    for (const key of selection.keys) {
-      if (options.has(key)) continue;
-      options.set(key, {
-        key,
-        name: "Unavailable category",
-        color: themeMode === "dark" ? "#323946" : "#EEF2F6",
-        isUncategorized: key === UNCATEGORIZED_REPORT_KEY,
-        isUnavailable: true
-      });
+/** Replace only the server's current timer contribution with the existing Dashboard projection. */
+export function buildReportsPresentation(input: {
+  data: MobileBootstrap;
+  summary: ReportSummary;
+  range: ReportRange;
+  nowMs: number;
+  selection: ReportCategorySelection;
+  themeMode: MobileTheme["mode"];
+}) {
+  const { data, summary, range, selection, themeMode, nowMs } = input;
+  const categories = new Map(summary.categories.map((c) => [c.key, { ...c }]));
+  const buckets = summary.buckets.map((b) => ({
+    ...b,
+    byCategory: new Map(b.byCategory.map((c) => [c.key, c.seconds])),
+  }));
+  const entries = reportEntryUnion(data);
+  const active = summary.active;
+  if (active) {
+    const key = active.categoryId || "uncategorized";
+    for (const contribution of active.buckets) {
+      const bucket = buckets.find((b) => b.key === contribution.key);
+      if (bucket)
+        bucket.byCategory.set(
+          key,
+          Math.max(0, (bucket.byCategory.get(key) ?? 0) - contribution.seconds),
+        );
     }
   }
-  return [...options.values()].sort(
-    (left, right) => left.name.localeCompare(right.name) || left.key.localeCompare(right.key)
-  );
+  const replacements = new Map<string, MobileTimeEntry>();
+  if (active) {
+    const replacement = entries.find((entry) => entry.id === active.id);
+    if (replacement) replacements.set(replacement.id, replacement);
+  }
+  if (
+    data.activeEntry &&
+    (data.activeEntry.id === active?.id ||
+      data.activeEntry.id.startsWith("optimistic-active-timer:") ||
+      Date.parse(data.activeEntry.startedAt) >= Date.parse(summary.capturedNow))
+  )
+    replacements.set(data.activeEntry.id, data.activeEntry);
+  for (const entry of replacements.values()) {
+    if (!eligible(entry)) continue;
+    const key = reportCategoryKey(entry);
+    categories.set(key, {
+      key,
+      categoryId: entry.categoryId ?? null,
+      name: entry.categoryId
+        ? entry.categoryName || "Unknown category"
+        : "Uncategorized",
+      color: entry.categoryColor ?? null,
+      seconds: 0,
+    });
+    range.buckets.forEach((window, index) => {
+      const seconds = entryOverlapMs(entry, window, nowMs) / 1000;
+      buckets[index].byCategory.set(
+        key,
+        (buckets[index].byCategory.get(key) ?? 0) + seconds,
+      );
+    });
+  }
+  // Sum the same unrounded pieces for every view; round only duration labels.
+  const allCategorySegments: ReportCategoryDuration[] = [...categories.values()]
+    .map((c) => ({
+      key: c.key,
+      categoryName: c.name,
+      durationMs:
+        buckets.reduce((sum, b) => sum + (b.byCategory.get(c.key) ?? 0), 0) *
+        1000,
+      color: paletteColorFor(c.color ?? c.key, c.name, themeMode),
+      isUncategorized: c.key === "uncategorized",
+      selected: reportSelectionIncludes(selection, c.key),
+    }))
+    .filter((c) => c.durationMs > 0);
+  const filterOptions = new Map<string, ReportCategoryOption>();
+  for (const c of data.categories ?? [])
+    filterOptions.set(c.id, {
+      key: c.id,
+      name: c.name,
+      color: paletteColorFor(c.color ?? c.id, c.name, themeMode),
+      isUncategorized: false,
+      isUnavailable: false,
+    });
+  for (const c of categories.values())
+    if (!filterOptions.has(c.key))
+      filterOptions.set(c.key, {
+        key: c.key,
+        name: c.name,
+        color: paletteColorFor(c.color ?? c.key, c.name, themeMode),
+        isUncategorized: c.key === "uncategorized",
+        isUnavailable: false,
+      });
+  filterOptions.set("uncategorized", {
+    key: "uncategorized",
+    name: "Uncategorized",
+    color: paletteColorFor("uncategorized", "Uncategorized", themeMode),
+    isUncategorized: true,
+    isUnavailable: false,
+  });
+  if (selection.mode === "include")
+    for (const key of selection.keys)
+      if (!filterOptions.has(key))
+        filterOptions.set(key, {
+          key,
+          name: "Unavailable category",
+          color: paletteColorFor(key, key, themeMode),
+          isUncategorized: false,
+          isUnavailable: true,
+        });
+  return {
+    allCategorySegments,
+    selectedLoggedSeconds: allCategorySegments
+      .filter((c) => c.selected)
+      .reduce((sum, c) => sum + c.durationMs / 1000, 0),
+    contextDurationMs: allCategorySegments.reduce(
+      (sum, c) => sum + c.durationMs,
+      0,
+    ),
+    buckets: buckets.map((b, index) => ({
+      ...range.buckets[index],
+      seconds: [...b.byCategory].reduce(
+        (sum, [key, seconds]) =>
+          sum + (reportSelectionIncludes(selection, key) ? seconds : 0),
+        0,
+      ),
+    })),
+    filterOptions: [...filterOptions.values()].sort(
+      (a, b) => a.name.localeCompare(b.name) || a.key.localeCompare(b.key),
+    ),
+  };
 }
-
-function analyze(entries: MobileTimeEntry[], range: ReportWindow, nowMs: number) {
-  return analyzeTimeIntervals(
-    entries.map((entry) => ({ id: entry.id, startedAt: entry.startedAt, stoppedAt: entry.stoppedAt })),
-    { range, now: nowMs }
-  );
+export function formatReportDuration(seconds: number) {
+  const minutes = Math.floor(Math.max(0, seconds) / 60);
+  if (seconds > 0 && minutes === 0) return "<1m";
+  const hours = Math.floor(minutes / 60);
+  return hours
+    ? `${hours}h${minutes % 60 ? ` ${minutes % 60}m` : ""}`
+    : `${minutes}m`;
 }
-
-function validReportEntry(entry: MobileTimeEntry, activeEntryId: string | null) {
-  if (!entry.id) return false;
-  const start = Date.parse(entry.startedAt);
-  const end = entry.stoppedAt === null ? null : Date.parse(entry.stoppedAt);
-  return Number.isFinite(start) && (
-    end === null ? entry.id === activeEntryId : Number.isFinite(end) && end > start
-  );
+export function formatReportPercent(value: number, total: number) {
+  const percent = total > 0 ? (value / total) * 100 : 0;
+  return percent > 0 && percent < 1 ? "<1%" : `${Math.round(percent)}%`;
 }
-
-function entriesOverlapping(entries: MobileTimeEntry[], range: ReportWindow, nowMs: number) {
-  return entries.filter((entry) => entryOverlapMs(entry, range, nowMs) > 0);
-}
-
-export function entryOverlapMs(entry: MobileTimeEntry, range: ReportWindow, nowMs: number) {
-  const start = Date.parse(entry.startedAt);
-  const rawEnd = entry.stoppedAt === null ? nowMs : Date.parse(entry.stoppedAt);
-  if (!Number.isFinite(start) || !Number.isFinite(rawEnd) || rawEnd <= start) return 0;
-  return Math.max(0, Math.min(rawEnd, range.end.getTime()) - Math.max(start, range.start.getTime()));
-}
-
-export function reportCategoryKey(entry: Pick<MobileTimeEntry, "categoryId">) {
-  return entry.categoryId || UNCATEGORIZED_REPORT_KEY;
-}
-
-function reportCategoryName(entry: MobileTimeEntry) {
-  if (!entry.categoryId) return "Uncategorized";
-  return entry.categoryName?.trim() || "Unknown category";
-}
-
-function reportCategoryColor(entry: MobileTimeEntry, mode: MobileTheme["mode"]) {
-  if (!entry.categoryId) return mode === "dark" ? "#323946" : "#EEF2F6";
-  return paletteColorFor(
-    entry.categoryColor ?? entry.categoryId,
-    reportCategoryName(entry),
-    mode
-  );
+export function reportAxis(maxSeconds: number) {
+  const candidates = [
+    60, 120, 300, 600, 900, 1800, 3600, 7200, 10800, 21600, 43200, 86400,
+    172800, 604800, 1209600,
+  ];
+  const step =
+    candidates.find((value) => value * 4 >= maxSeconds) ??
+    Math.ceil(maxSeconds / 4 / 604800) * 604800;
+  return {
+    maximum: step * 4,
+    ticks: [4, 3, 2, 1, 0].map((n) => ({
+      seconds: n * step,
+      label: formatReportDuration(n * step),
+    })),
+  };
 }

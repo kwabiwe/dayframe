@@ -57,35 +57,31 @@ The [merged documentation audit](../audits/2026-09-08-documentation-code-alignme
 
 The approved automatic-logging/overlap policy is already in the PRD. This programme does not loosen it or reimplement it in chart or Calendar code. Preserve category-first tracking, optional descriptions/categories and user-facing tags; do not return projects or clients to the normal UX.
 
-## 4. Stage A: Reports decisions
+## 4. Stage A: Reports decisions — Revision 2
 
-### Layout and theme
+The owner-approved Reports implementation plan Revision 2 supersedes the earlier
+Stage A layout and filtering decisions. Continue existing PR #194, not a second
+Reports PR. Preserve the extracted Reports owner and useful chart primitives.
 
-Both **Today / Week** and **Pie / Bars** use the same theme-consistent outer capsule with two inner segments. Replace the inconsistent dark-outer/white-selected treatment; use existing Dayframe semantic surface, selection and contrast tokens in Light, Dark and System modes.
+- One compact mobile Reports surface uses a horizontally scrolling Today / Week / Month / Year strip, separate calendar action, range heading and category-filter icon/count.
+- The donut centre shows Total: summed confirmed logged activity clipped to the selected range. Concurrent entries count independently; there is no Time covered card or overlap explanation in mobile Reports. Web/Today goal coverage semantics are unchanged.
+- Category slices and percentages retain the all-category denominator; excluded categories stay dimmed. Compact accessible category rows and slices toggle the same all/include/none selection. Zero selection is valid and says No categories selected. All positive categories remain reachable, including Uncategorized and unavailable stable IDs.
+- Custom ranges use inclusive device-local dates, reversible endpoint selection, no future dates and a maximum of 366 calendar days. Presets use local calendar boundaries and Week begins Monday.
+- Activity over time follows the same selected range and filter: clock hours for Today/one day (including 23/25-hour DST days), days for Week/Month or 2–31 custom days, clipped weeks for 32–180 days and clipped months for 181–366 days/Year. Bars have a zero baseline, nice duration axis, sparse labels and accessible single-bucket tooltips.
+- Confirmed active timer contribution follows the existing projected timer through one current instant; Review-needed entries and suggestions never contribute. Month/Year/custom use bounded authenticated aggregates rather than raw history. An unavailable uncached range says Connect to load this report range; cached results never masquerade as another range.
+- Donut geometry follows available width, never font scale. At accessibility text sizes, a scalable Total appears in normal flow beside the bounded centre text. First populated focused entrance occurs once per mounted account owner; later changes interpolate locally and Reduce Motion settles geometry.
 
-Reduce the vertical padding of **Total logged** and **Time covered**, retaining their widths, prominent values and legibility. Remove the **Category Breakdown** heading. Place the period label, such as **Today**, on the left and Pie/Bars on the right. Put **Filters** on the next line, right-aligned.
+Remove the superseded Pie/Bars switch, vertical category chart, two summary cards,
+visible Review warning and fixed Current week Daily bars. Filters remain Reports-only.
+Use a bounded workspace/user-scoped summary endpoint, a mounted exact-range memory
+cache and abort/generation/session guards. Remove Reports-only bootstrap coverage
+metadata; no new sync owner, persisted store, schema or native dependency.
 
-Use this overlap explanation, with the duration formatted appropriately:
-
-> 1m overlaps another activity. Total logged counts every entry; Time covered counts overlapping time once.
-
-### Filters and charts
-
-| Decision | Agreed behaviour |
-| --- | --- |
-| Category selection | Multi-select; all categories by default. |
-| Filter scope | Both chart modes, Total logged, Time covered, overlap explanation and Daily bars use the same selected data. Recalculate covered time from selected intervals, not by adding category coverage totals. |
-| Pie interaction | Slice taps select/filter a category. Tapping the sole selected category again clears that slice selection. With multi-selection active, slice taps add/remove categories. |
-| Context | Unselected pie categories remain visible but dimmed. They are context, not contributions to the filtered totals. |
-| Category bar chart | Vertical bars, category labels beneath, readable values, horizontal scrolling when needed rather than compressed labels. |
-| Bar interaction | Tapping a vertical bar does **not** change the category filter. |
-| Week | Category charts aggregate the seven-day period; Daily bars retain the day-by-day view beneath. |
-| Animation | Subtle first-presentation sweep/grow/settle. Later refreshes, filters and Today/Week changes transition smoothly without replaying the full entrance. Reduce Motion removes nonessential travel. |
-| Reuse | Share only the small controls, donut rendering, colour and motion primitives actually needed later. No generic chart-framework rewrite. |
-
-**Filtering belongs in Reports only.** Do not add filtering to the new Today donut.
-
-The detailed A plan must make dimmed-context chart geometry/percentage denominators explicit and define reset, empty selection, uncategorised entries and persistence behaviour before implementation. Do not let an unfiltered denominator masquerade as the selected total. The completed-only decision below is explicitly for Today; do not silently change Reports' running-entry accounting as a side effect.
+Acceptance requires focused and repository checks, disposable database integration,
+final-head independent Claude review via OpenClaw, exact Ready staging Preview and
+signed staging iPhone checks (including maximum Dynamic Type). Revision 1 approvals
+are historical, not Revision 2 acceptance. Do not merge automatically. Stages B–D
+below remain unchanged and out of this PR.
 
 ## 5. Stage B: Today and integrated Review decisions
 
