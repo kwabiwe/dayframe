@@ -28,6 +28,12 @@ export function prepareDonutArcs(
   });
 }
 
+function polarPoint(cx: number, cy: number, radius: number, angle: number) {
+  "worklet";
+  const radians = ((angle - 90) * Math.PI) / 180;
+  return { x: cx + radius * Math.cos(radians), y: cy + radius * Math.sin(radians) };
+}
+
 export function donutSlicePath(
   centerX: number,
   centerY: number,
@@ -68,10 +74,4 @@ export function donutSlicePath(
     `A ${innerRadius} ${innerRadius} 0 ${largeArc} 0 ${innerStart.x} ${innerStart.y}`,
     "Z"
   ].join(" ");
-}
-
-function polarPoint(cx: number, cy: number, radius: number, angle: number) {
-  "worklet";
-  const radians = ((angle - 90) * Math.PI) / 180;
-  return { x: cx + radius * Math.cos(radians), y: cy + radius * Math.sin(radians) };
 }
