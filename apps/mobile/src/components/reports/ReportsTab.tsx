@@ -85,16 +85,19 @@ export function ReportsTab({
   const { fontScale } = useWindowDimensions();
   const { reduceMotion, resolved } = useResolvedReduceMotionPreference();
   const focusedNow = useRef(nowMs);
-  if (isFocused && foreground)
-    focusedNow.current = data.activeEntry
-      ? nowMs
-      : Math.floor(nowMs / 60_000) * 60_000;
-  const reportNow = focusedNow.current;
   const day = formatLocalDateKey(new Date(nowMs));
   const range = useMemo(() => buildReportRange(choice, nowMs), [choice, day]);
   const requestKey = JSON.stringify(range.request);
   const summary =
     loaded?.key === requestKey ? loaded.summary : cache.current.get(requestKey);
+  // A cached running contribution can still need replacement after an optimistic Stop.
+  // Keep its exact clock until the aggregate catches up, not just while activeEntry exists.
+  if (isFocused && foreground)
+    focusedNow.current =
+      data.activeEntry || summary?.active
+        ? nowMs
+        : Math.floor(nowMs / 60_000) * 60_000;
+  const reportNow = focusedNow.current;
   useEffect(() => {
     const subscription = AppState.addEventListener("change", (state) =>
       setForeground(state === "active"),
@@ -278,7 +281,13 @@ export function ReportsTab({
                 : `Filter categories, ${filterCount} categories selected`
             }
             onPress={() => setDraft(openReportFilterDraft(selection, universe))}
-            style={[s.iconAction, { backgroundColor: theme.surfaceMuted }]}
+            style={[
+              s.iconAction,
+              {
+                backgroundColor:
+                  filterCount !== null ? theme.accentSoft : theme.surfaceMuted,
+              },
+            ]}
           >
             <ReportIcon color={theme.textPrimary} />
             {filterCount !== null ? (
@@ -397,6 +406,8 @@ export function ReportsTab({
                         style={{
                           color: theme.textSecondary,
                           fontVariant: ["tabular-nums"],
+                          maxWidth: "100%",
+                          flexShrink: 1,
                         }}
                       >
                         {formatReportPercent(
@@ -410,6 +421,8 @@ export function ReportsTab({
                             ? theme.textPrimary
                             : theme.textSecondary,
                           fontVariant: ["tabular-nums"],
+                          maxWidth: "100%",
+                          flexShrink: 1,
                         }}
                       >
                         {formatReportDuration(segment.durationMs / 1000)}
@@ -595,7 +608,12 @@ const s = StyleSheet.create({
   },
   stacked: { flexDirection: "column", alignItems: "stretch" },
   name: { flex: 1, fontSize: 14 },
-  numbers: { flexDirection: "row", gap: 16, justifyContent: "space-between" },
+  numbers: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 16,
+    justifyContent: "space-between",
+  },
   unavailable: { paddingVertical: 24, gap: 12 },
   retry: { minHeight: 44, justifyContent: "center" },
 });

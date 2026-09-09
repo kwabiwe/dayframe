@@ -76,6 +76,21 @@ substitute for them. Revision 1 approvals are historical only.
 
 ## Owner acceptance still required before merge
 
+Independent OpenClaw → Claude Sonnet review of `732cc9e` returned REQUEST CHANGES:
+the idle clock could truncate up to 59 seconds immediately after Stop, DST tests
+could silently skip outside London, and the filter/calendar sheets lacked direct
+interaction coverage. The follow-up keeps the exact clock while a cached active
+contribution still needs replacement, makes London DST assertions unconditional
+and self-contained (also run from `TZ=UTC`), and tests actual sheet taps, tri-state,
+search, zero Apply, reverse/same-day selection, future/366-day limits and dismissal.
+The filter now uses its selected fill for subset/none; category numbers can wrap.
+A stale non-active running row cannot replace an aggregate contribution. These
+changes require another frozen-head independent review; its verdict belongs in
+the PR evidence, not an assumed approval here.
+
+Recurring guardrail: test optimistic Stop with non-zero seconds while aggregate
+refresh is deferred. Compare exact bucket sums, not rounded duration labels.
+
 Use the exact Ready Preview promoted to the stable staging alias and a freshly
 signed staging app with verified bundle, App Groups, STAGING badge and baked API.
 Check Today/Week/Month/Year; inclusive/reversed/same-day custom ranges and 366-day

@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { ReportSummaryRequestSchema } from "@dayframe/shared";
 import {
   addLocalDays,
@@ -10,17 +10,26 @@ import {
 } from "./reportsRanges";
 
 describe("Revision 2 local report ranges", () => {
+  const originalTimezone = process.env.TZ;
+  beforeEach(() => {
+    process.env.TZ = "Europe/London";
+  });
+  afterEach(() => {
+    if (originalTimezone === undefined) delete process.env.TZ;
+    else process.env.TZ = originalTimezone;
+  });
   it.each(["2026-03-29", "2026-10-25"])(
     "partitions DST day %s into actual clock hours",
     (key) => {
-      // Run this suite with TZ=Europe/London; no runtime TZ mutation in worker threads.
+      expect(Intl.DateTimeFormat().resolvedOptions().timeZone).toBe(
+        "Europe/London",
+      );
       const now = +parseLocalDate(key)! + 12 * 3_600_000;
       const range = buildReportRange({ start: key, end: key }, now);
       expect(range.buckets.length).toBe(
         (+range.end - +range.start) / 3_600_000,
       );
-      if (Intl.DateTimeFormat().resolvedOptions().timeZone === "Europe/London")
-        expect(range.buckets.length).toBe(key.includes("03-29") ? 23 : 25);
+      expect(range.buckets.length).toBe(key.includes("03-29") ? 23 : 25);
       expect(new Set(range.buckets.map((b) => b.key)).size).toBe(
         range.buckets.length,
       );

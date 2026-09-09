@@ -246,7 +246,7 @@ Required checks:
 - Verify intersections shorter than one minute remain stored exactly but do not trigger Overlap copy, markers, collision layout or overlap totals (automatic eligibility uses its independent policy).
 - Re-run source idempotency and one-active-timer cases so overlap permission cannot weaken technical duplicate prevention.
 - Verify hybrid Calendar geometry: full-width isolated blocks, inset overlays only for substantially shorter contained pairs, lanes for partial/similar pairs, compact lanes for dense collisions, width-aware text suppression, deterministic z-order, and taps reaching the intended visible block.
-- Verify `Total logged`, `Time covered`, overlap markers, and goal-covered semantics across Dashboard, Timeline/History, Reports, and Settings copy.
+- Verify `Total logged`, `Time covered`, overlap markers, and goal-covered semantics across Dashboard, Timeline/History, web Reports, and Settings copy. Mobile Reports Revision 2 shows only summed `Total`; overlapping confirmed activity counts independently, with no coverage metric. Exercise optimistic Stop at non-zero seconds while its aggregate refresh is deferred and assert exact bucket sums rather than rounded labels.
 
 Mobile Reports Stage A Revision 2 additionally requires:
 

@@ -126,21 +126,77 @@ const render = async () => {
   return tree;
 };
 describe("Revision 2 Reports owner", () => {
+  it("preserves seconds after Stop while replacing a cached active contribution", async () => {
+    const startedAt = new Date(nowMs - 3600000).toISOString();
+    mocks.fetch.mockImplementationOnce(async (input: ReportSummaryRequest) => ({
+      ...result(input),
+      active: {
+        id: "timer",
+        categoryId: "a",
+        startedAt,
+        buckets: [{ key: input.buckets[0].key, seconds: 3600 }],
+      },
+    }));
+    const tree = await render();
+    mocks.fetch.mockImplementation(() => new Promise(() => undefined));
+    const stoppedNow = nowMs + 45000;
+    const stopped = {
+      id: "timer",
+      categoryId: "a",
+      startedAt,
+      stoppedAt: new Date(stoppedNow).toISOString(),
+      reviewStatus: "confirmed",
+    };
+    await act(async () =>
+      tree.update(
+        <ReportsTab
+          data={{ ...data, entries: [stopped] } as MobileBootstrap}
+          isFocused
+          nowMs={stoppedNow}
+          styles={{} as never}
+          theme={{ mode: "dark" } as never}
+        />,
+      ),
+    );
+    const buckets = tree.root.findByType("ReportActivityChart" as never).props
+      .buckets;
+    expect(
+      buckets.reduce(
+        (sum: number, b: { seconds: number }) => sum + b.seconds,
+        0,
+      ),
+    ).toBe(3645);
+    act(() => tree.unmount());
+  });
   it("coalesces same-range refreshes without starving a slow response", async () => {
     let finish!: (value: ReportSummary) => void;
     let requested!: ReportSummaryRequest;
     mocks.fetch.mockImplementationOnce((input: ReportSummaryRequest) => {
       requested = input;
-      return new Promise((resolve) => { finish = resolve; });
+      return new Promise((resolve) => {
+        finish = resolve;
+      });
     });
     const tree = await render();
     const signal = mocks.fetch.mock.calls[0][2] as AbortSignal;
-    await act(async () => tree.update(<ReportsTab data={{ ...data }} isFocused nowMs={nowMs} styles={{} as never} theme={{ mode: "dark" } as never} />));
+    await act(async () =>
+      tree.update(
+        <ReportsTab
+          data={{ ...data }}
+          isFocused
+          nowMs={nowMs}
+          styles={{} as never}
+          theme={{ mode: "dark" } as never}
+        />,
+      ),
+    );
     expect(signal.aborted).toBe(false);
     expect(mocks.fetch).toHaveBeenCalledTimes(1);
     await act(async () => finish(result(requested)));
     expect(mocks.fetch).toHaveBeenCalledTimes(2);
-    expect(tree.root.findByType("DonutChart" as never).props.centerValue).toBe("1h");
+    expect(tree.root.findByType("DonutChart" as never).props.centerValue).toBe(
+      "1h",
+    );
     act(() => tree.unmount());
   });
   beforeEach(() => {

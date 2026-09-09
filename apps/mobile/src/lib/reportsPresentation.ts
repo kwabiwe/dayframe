@@ -81,7 +81,12 @@ export function buildReportsPresentation(input: {
   const replacements = new Map<string, MobileTimeEntry>();
   if (active) {
     const replacement = entries.find((entry) => entry.id === active.id);
-    if (replacement) replacements.set(replacement.id, replacement);
+    if (
+      replacement &&
+      (replacement.stoppedAt !== null ||
+        replacement.id === data.activeEntry?.id)
+    )
+      replacements.set(replacement.id, replacement);
   }
   if (
     data.activeEntry &&

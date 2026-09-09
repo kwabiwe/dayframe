@@ -207,4 +207,4 @@ After each stage merges, reconcile the remaining sequence and add only significa
 
 When all stages finish, promote enduring requirements and guardrails to their canonical documents, then remove this temporary roadmap and its navigation links or replace it with a short dated historical completion note. Preserve useful decisions in Git history; do not leave a stale active roadmap behind.
 
-**Next action after roadmap adoption:** re-read the then-current main and prepare the detailed **Stage A: Reports polish** Markdown plan, its short implementation prompt and its short independent review prompt. Do not implement Stage A from this roadmap alone.
+**Next action:** finish Revision 2 implementation review and staging/iPhone acceptance on existing PR #194. The owner-approved Revision 2 plan supersedes Revision 1. Do not start Stage B or merge automatically; the tracker and PR hold current validation evidence.

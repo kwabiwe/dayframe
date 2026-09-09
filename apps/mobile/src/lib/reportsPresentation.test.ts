@@ -117,6 +117,11 @@ describe("Revision 2 Reports projection", () => {
         themeMode: "dark",
       }).selectedLoggedSeconds,
     ).toBe(5400);
+    stopped.entries = [entry()];
+    expect(buildReportsPresentation({
+      data: stopped, summary: snap, range, nowMs: now,
+      selection: { mode: "all" }, themeMode: "dark",
+    }).selectedLoggedSeconds).toBe(3600);
     expect(
       buildReportsPresentation({
         data: data(),
