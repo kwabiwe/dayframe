@@ -212,7 +212,11 @@ export function ReportsTab({
           </Animated.View>
         ) : (
           <Animated.View key="bars" testID="reports-bars-chart" entering={FadeIn.duration(reduceMotion ? 0 : MOBILE_MOTION.control)} exiting={FadeOut.duration(reduceMotion ? 0 : MOBILE_MOTION.control)}>
-            {selectedCategoriesHaveNoTime ? null : <CategoryBars segments={segments.filter((segment) => segment.selected)} theme={theme} />}
+            {selectedCategoriesHaveNoTime ? null : segments.length === 0 ? (
+              <EmptyReportCopy partial={partialSelected} selected={false} theme={theme} />
+            ) : (
+              <CategoryBars segments={segments.filter((segment) => segment.selected)} theme={theme} />
+            )}
           </Animated.View>
         )}
       </View>
@@ -263,7 +267,6 @@ function CategorySwatch({ segment, theme }: { segment: ReportCategoryDuration; t
 }
 
 function CategoryBars({ segments, theme }: { segments: ReportCategoryDuration[]; theme: MobileTheme }) {
-  if (segments.length === 0) return <Text style={[localStyles.empty, { color: theme.textSecondary }]}>No logged time for the selected categories.</Text>;
   const max = Math.max(...segments.map((segment) => segment.durationMs));
   return <ScrollView horizontal showsHorizontalScrollIndicator contentContainerStyle={localStyles.categoryBars} directionalLockEnabled>{segments.map((segment) => <View key={segment.key} accessible accessibilityLabel={`${segment.categoryName}, ${formatDuration(segment.durationMs / 1000)}`} style={localStyles.categoryBarColumn}><Text style={[localStyles.barDuration, { color: theme.textPrimary }]}>{formatDuration(segment.durationMs / 1000)}</Text><View style={[localStyles.categoryBarTrack, { backgroundColor: theme.chartTrack }]}><View style={[localStyles.categoryBarFill, { backgroundColor: segment.color, height: `${(segment.durationMs / max) * 100}%` }]} /></View><Text style={[localStyles.barName, { color: theme.textSecondary }]}>{segment.categoryName}</Text></View>)}</ScrollView>;
 }

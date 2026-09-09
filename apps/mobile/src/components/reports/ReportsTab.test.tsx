@@ -124,6 +124,16 @@ describe("ReportsTab", () => {
     expect(bars).not.toBe(pie);
   });
 
+  it("uses the unfiltered empty-state copy in Bars when the report has no time", () => {
+    const emptyData = { ...data, entries: [] };
+    let tree!: ReturnType<typeof create>;
+    act(() => { tree = create(<ReportsTab data={emptyData} isFocused nowMs={Date.parse("2026-09-08T12:00:00.000Z")} styles={sharedStyles} theme={theme} />); });
+    const chartControl = tree.root.findAllByType("SegmentedPillControl" as never).find((node) => node.props.accessibilityLabel === "Category chart type")!;
+    act(() => chartControl.props.onChange("bars"));
+    expect(tree.root.findAllByProps({ children: "No tracked time yet." })).toHaveLength(1);
+    expect(tree.root.findAllByProps({ children: "No logged time for the selected categories." })).toHaveLength(0);
+  });
+
   it("qualifies summary, chart context, and Daily independently when completeness is unknown", () => {
     let tree!: ReturnType<typeof create>;
     act(() => { tree = create(<ReportsTab data={data} isFocused nowMs={Date.parse("2026-09-08T12:00:00.000Z")} styles={sharedStyles} theme={theme} />); });
