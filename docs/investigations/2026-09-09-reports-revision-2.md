@@ -37,6 +37,53 @@ and disables nonessential entrance/reflow. Background/unfocus settles the chart.
 
 ## Validation
 
-Implementation and validation are in progress. Physical iPhone acceptance,
-signed staging identity/API checks, final-head independent review and staging
-browser checks are NOT RUN for Revision 2. Revision 1 results are not R2 evidence.
+## Recorded implementation checkpoint
+
+At `129b4fddf6d2c90dd174d78b959a15d53f31d745`:
+
+- PASS: repository typecheck, lint (two existing `_values` warnings in web
+  event-service tests), web build, documentation alignment and diff whitespace.
+- PASS: complete rerun with `TZ=Europe/London` and disposable localhost database:
+  mobile 111 files / 1,035 tests; web 131 files / 899 tests, with one existing
+  skipped test; shared 15 files / 246 tests.
+- One intervening broad run failed the unrelated CategoryPicker Writing-option
+  assertion under concurrent native compilation. Its isolated rerun passed all
+  six tests and the complete subsequent run passed. Do not erase this history.
+- PASS: disposable PostgreSQL summary and route checks (2 files / 9 tests),
+  including shared-workspace users, foreign workspace, overlap, Review exclusion,
+  active midnight clipping and fractional category/bucket/Total reconciliation.
+  Fixtures used temporary tables inside a rolled-back transaction, not staging or
+  production records. The disposable cluster is under `/tmp`, outside the repo.
+- PASS: full unsigned Simulator and signed physical-device-target Staging builds.
+  Built-app and signed-app configuration checks passed. Signed bundle identity:
+  `com.layereight.dayframe.staging`, build 1. Compilation/signing is not installation
+  or physical acceptance; later source corrections require a refreshed bundle.
+- PASS: exact Ready Preview `https://dayframe-l1nvxibso-dayframeworkshop.vercel.app`
+  rejects anonymous summary POST with 401 `session_cookie_missing`; `/reports`
+  redirects to login and no console warning/error was captured on the public page.
+- NOT RUN: authenticated desktop/phone Reports browser checks (staging sign-in
+  required), stable-alias promotion, installed STAGING badge/runtime API checks,
+  simulator motion recording, physical iPhone acceptance and device performance.
+- Independent review attempt: OpenClaw invoked Claude Sonnet against the full
+  Revision 2 plan and frozen head, but the parent 600-second deadline expired
+  before a verdict. This is not an approval or completed review.
+
+Follow-up corrections cover the stale API coverage bullet, outside-chart tooltip
+dismissal, zero-to-populated centre fade, filter draft universe refresh, preserved
+idle clock behaviour and coalesced same-range fetches. The PR records final-head
+revalidation and the fresh independent review result; earlier checkpoints do not
+substitute for them. Revision 1 approvals are historical only.
+
+## Owner acceptance still required before merge
+
+Use the exact Ready Preview promoted to the stable staging alias and a freshly
+signed staging app with verified bundle, App Groups, STAGING badge and baked API.
+Check Today/Week/Month/Year; inclusive/reversed/same-day custom ranges and 366-day
+limit; all/some/none and unavailable categories; overlap/running timer; >8 rows;
+hour/day/week/month tooltips, zero bars and DST; Light/Dark/System; default, large
+and MAX Dynamic Type; VoiceOver; normal and Reduce Motion; warm/offline/resume and
+account replacement. Measure representative Year and many-category interactions.
+Then check timer Start/Stop/Switch/Edit/Delete/Undo, Today categories/tags, Calendar,
+one safe Review action, Health, Location, Settings and reconnect. Record each as
+PASS/FAIL/NOT RUN with exact device/build/SHA. No production configuration or data,
+no automatic merge, and no claim that signing/unit tests prove device behaviour.

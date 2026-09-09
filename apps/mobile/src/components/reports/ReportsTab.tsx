@@ -31,6 +31,7 @@ import {
 import {
   applyReportFilterDraft,
   openReportFilterDraft,
+  refreshReportFilterDraft,
   toggleReportCategory,
   type ReportCategorySelection,
   type ReportFilterDraft,
@@ -72,6 +73,9 @@ export function ReportsTab({
   } | null>(null);
   const [failedKey, setFailedKey] = useState<string | null>(null);
   const [reload, setReload] = useState(0);
+  const [touchRevision, setTouchRevision] = useState(0);
+  const refreshRequest = useRef<(() => void) | null>(null);
+  const refreshInput = useRef({ data, reload });
   const cache = useRef(new ReportRangeCache());
   const generation = useRef(0);
   const presented = useRef(false);
@@ -80,6 +84,12 @@ export function ReportsTab({
   const calendarRef = useRef<View>(null);
   const { fontScale } = useWindowDimensions();
   const { reduceMotion, resolved } = useResolvedReduceMotionPreference();
+  const focusedNow = useRef(nowMs);
+  if (isFocused && foreground)
+    focusedNow.current = data.activeEntry
+      ? nowMs
+      : Math.floor(nowMs / 60_000) * 60_000;
+  const reportNow = focusedNow.current;
   const day = formatLocalDateKey(new Date(nowMs));
   const range = useMemo(() => buildReportRange(choice, nowMs), [choice, day]);
   const requestKey = JSON.stringify(range.request);
@@ -107,26 +117,59 @@ export function ReportsTab({
     if (!isFocused || !foreground) return;
     const current = ++generation.current;
     const controller = new AbortController();
-    setFailedKey(null);
-    void fetchReportSummary(
-      range.request,
-      { userId: data.user.id, workspaceId: data.workspace.id },
-      controller.signal,
-    )
-      .then((result) => {
-        if (controller.signal.aborted || current !== generation.current) return;
-        cache.current.put(requestKey, result);
-        setLoaded({ key: requestKey, summary: result });
-      })
-      .catch(() => {
+    let running = false;
+    let queued = false;
+    const load = async () => {
+      if (controller.signal.aborted || current !== generation.current) return;
+      if (running) {
+        queued = true;
+        return;
+      }
+      running = true;
+      setFailedKey(null);
+      try {
+        const result = await fetchReportSummary(
+          range.request,
+          { userId: data.user.id, workspaceId: data.workspace.id },
+          controller.signal,
+        );
+        if (!controller.signal.aborted && current === generation.current) {
+          cache.current.put(requestKey, result);
+          setLoaded({ key: requestKey, summary: result });
+        }
+      } catch {
         if (!controller.signal.aborted && current === generation.current)
           setFailedKey(requestKey);
-      });
+      } finally {
+        running = false;
+        if (queued) {
+          queued = false;
+          void load();
+        }
+      }
+    };
+    // Coalesce bootstrap refreshes instead of repeatedly aborting a slow, valid
+    // same-range read. Range/account/focus changes still invalidate immediately.
+    refreshInput.current = { data, reload };
+    refreshRequest.current = () => {
+      void load();
+    };
+    void load();
     return () => {
       controller.abort();
       generation.current++;
+      refreshRequest.current = null;
     };
-  }, [requestKey, data, isFocused, foreground, reload]);
+  }, [requestKey, data.user.id, data.workspace.id, isFocused, foreground]);
+  useEffect(() => {
+    if (
+      refreshInput.current.data !== data ||
+      refreshInput.current.reload !== reload
+    ) {
+      refreshInput.current = { data, reload };
+      refreshRequest.current?.();
+    }
+  }, [data, reload]);
   useEffect(() => {
     if (!isFocused) {
       setDraft(null);
@@ -140,12 +183,12 @@ export function ReportsTab({
             data,
             summary,
             range,
-            nowMs,
+            nowMs: reportNow,
             selection,
             themeMode: theme.mode,
           })
         : null,
-    [data, summary, range, nowMs, selection, theme.mode],
+    [data, summary, range, reportNow, selection, theme.mode],
   );
   const segments = useMemo(() => {
     if (!report) return [];
@@ -167,6 +210,12 @@ export function ReportsTab({
     if (entrance) presented.current = true;
   }, [entrance]);
   const universe = report?.filterOptions.map((option) => option.key) ?? [];
+  const universeKey = JSON.stringify(universe);
+  useEffect(() => {
+    setDraft((current) =>
+      current ? refreshReportFilterDraft(current, universe) : null,
+    );
+  }, [universeKey]);
   const toggle = (key: string) =>
     setSelection((current) => toggleReportCategory(current, key, universe));
   const close = (calendar: boolean) => {
@@ -184,7 +233,10 @@ export function ReportsTab({
         ? selection.keys.length
         : null;
   return (
-    <View style={styles.tabScreenStack}>
+    <View
+      style={styles.tabScreenStack}
+      onTouchStart={() => setTouchRevision((value) => value + 1)}
+    >
       <View style={[s.surface, { backgroundColor: theme.surfaceRaised }]}>
         <Text style={styles.reportScreenTitle}>Reports</Text>
         <View style={s.row}>
@@ -371,7 +423,7 @@ export function ReportsTab({
               buckets={report.buckets}
               theme={theme}
               reduceMotion={reduceMotion}
-              contextKey={`${requestKey}:${JSON.stringify(selection)}`}
+              contextKey={`${requestKey}:${JSON.stringify(selection)}:${touchRevision}:${isFocused}:${foreground}:${calendarOpen}:${Boolean(draft)}`}
             />
           </>
         )}

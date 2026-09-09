@@ -24,7 +24,7 @@ export function buildMobileReportSummaryQuery(
       select te.id, te.category_id, te.started_at, te.stopped_at,
         least(coalesce(te.stopped_at, $3::text::timestamptz), $3::text::timestamptz) as end_at,
         coalesce(te.category_id::text, 'uncategorized') as category_key,
-        coalesce(c.name, 'Uncategorized') as name, c.color
+        case when te.category_id is null then 'Uncategorized' else coalesce(c.name, 'Unavailable category') end as name, c.color
       from time_entries te
       left join categories c on c.workspace_id = te.workspace_id and c.id = te.category_id
       where te.workspace_id = $1::uuid and te.user_id = $2::uuid

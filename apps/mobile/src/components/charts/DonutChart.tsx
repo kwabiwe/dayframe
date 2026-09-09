@@ -59,9 +59,11 @@ export function DonutChart({
     animateEntrance && !reduceMotion ? 0 : 1,
   );
   useEffect(() => {
-    centerOpacity.value = withTiming(1, {
-      duration: reduceMotion || settleImmediately ? 0 : MOBILE_MOTION.control,
-    });
+    if (reduceMotion || settleImmediately) centerOpacity.value = 1;
+    else if (animateEntrance) {
+      centerOpacity.value = 0;
+      centerOpacity.value = withTiming(1, { duration: MOBILE_MOTION.control });
+    }
   }, [animateEntrance, centerOpacity, reduceMotion, settleImmediately]);
   const centerStyle = useAnimatedStyle(() => ({
     opacity: centerOpacity.value,

@@ -126,6 +126,23 @@ const render = async () => {
   return tree;
 };
 describe("Revision 2 Reports owner", () => {
+  it("coalesces same-range refreshes without starving a slow response", async () => {
+    let finish!: (value: ReportSummary) => void;
+    let requested!: ReportSummaryRequest;
+    mocks.fetch.mockImplementationOnce((input: ReportSummaryRequest) => {
+      requested = input;
+      return new Promise((resolve) => { finish = resolve; });
+    });
+    const tree = await render();
+    const signal = mocks.fetch.mock.calls[0][2] as AbortSignal;
+    await act(async () => tree.update(<ReportsTab data={{ ...data }} isFocused nowMs={nowMs} styles={{} as never} theme={{ mode: "dark" } as never} />));
+    expect(signal.aborted).toBe(false);
+    expect(mocks.fetch).toHaveBeenCalledTimes(1);
+    await act(async () => finish(result(requested)));
+    expect(mocks.fetch).toHaveBeenCalledTimes(2);
+    expect(tree.root.findByType("DonutChart" as never).props.centerValue).toBe("1h");
+    act(() => tree.unmount());
+  });
   beforeEach(() => {
     mocks.fetch
       .mockReset()

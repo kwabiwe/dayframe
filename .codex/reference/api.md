@@ -36,7 +36,7 @@ Reports, ingest, timer mutations or bootstrap caps.
 ## Data Access
 
 - Reuse existing database clients, repositories, models, and transaction helpers.
-- `/api/bootstrap` entry windows remain capped at 100 day, 300 week, and 2,000 history rows. Fetch only `limit + 1` inside each existing workspace/user-scoped query to derive optional `entryCoverage.{dayEntries,weekEntries,historyEntries}.hasMore`, then return no more than the original limit. Each descriptor uses the same captured server time and exact half-open query window. Keep ordering deterministic with an ID tie-break; do not add an unbounded count or report pagination path under this descriptor.
+- `/api/bootstrap` entry windows remain capped at 100 day, 300 week, and 2,000 history rows. Reports uses its separate bounded aggregate read, not overflow metadata or raw-history pagination. Keep entry ordering deterministic with an ID tie-break.
 - Prefer parameterized queries or ORM query builders.
 - Make ownership checks explicit for user-owned records.
 - Use transactions when writing `activity_events` plus derived `time_entries` or `review_items`.
