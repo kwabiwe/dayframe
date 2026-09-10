@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import {
   Modal,
   Pressable,
@@ -11,12 +11,18 @@ import {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import type { MobileTheme } from "@/lib/mobileTheme";
 import {
-  addLocalDays,
   formatLocalDateKey,
   parseLocalDate,
-  startOfLocalWeek,
-  validateCustomRange,
+  type ReportRangeChoice,
+  type ReportPreset,
 } from "@/lib/reportsRanges";
+import {
+  openReportDateDraft,
+  reportDraftHighlight,
+  reportDraftResult,
+  selectReportDraftDay,
+} from "@/lib/reportDateDraft";
+import { REPORT_TEXT_CAP } from "@/lib/reportsTypography";
 import {
   reportSelectionIncludes,
   selectAllReportFilterDraft,
@@ -24,6 +30,10 @@ import {
   type ReportCategoryOption,
   type ReportFilterDraft,
 } from "@/lib/reportsSelection";
+import {
+  CalendarGlyph,
+  DatePickerCalendar,
+} from "@/components/calendar/DatePickerCalendar";
 
 export function ReportFiltersSheet({
   draft,
@@ -53,6 +63,7 @@ export function ReportFiltersSheet({
       onApply={onApply}
     >
       <TextInput
+        maxFontSizeMultiplier={REPORT_TEXT_CAP.control}
         accessibilityLabel="Search categories"
         value={search}
         onChangeText={setSearch}
@@ -111,6 +122,7 @@ function Option({
 }) {
   return (
     <Pressable
+      accessible
       accessibilityRole="checkbox"
       accessibilityLabel={label}
       accessibilityState={{ checked }}
@@ -118,24 +130,19 @@ function Option({
       style={[s.option, { borderBottomColor: theme.border }]}
     >
       {color ? <View style={[s.dot, { backgroundColor: color }]} /> : null}
-      <Text style={[s.optionText, { color: theme.textPrimary }]}>{label}</Text>
-      <View
-        style={[
-          s.checkbox,
-          {
-            backgroundColor: checked ? theme.accentSoft : theme.surfaceInset,
-            borderColor: theme.borderStrong,
-          },
-        ]}
+      <Text
+        numberOfLines={1}
+        ellipsizeMode="tail"
+        maxFontSizeMultiplier={REPORT_TEXT_CAP.name}
+        style={[s.optionText, { color: theme.textPrimary }]}
       >
+        {label}
+      </Text>
+      <View style={s.glyphSlot}>
         {checked ? (
-          <View
-            style={{
-              height: checked === "mixed" ? 2 : 10,
-              width: 10,
-              borderRadius: 2,
-              backgroundColor: theme.accentText,
-            }}
+          <CalendarGlyph
+            kind={checked === "mixed" ? "mixed" : "tick"}
+            color={theme.accentText}
           />
         ) : null}
       </View>
@@ -150,146 +157,107 @@ export function ReportDateSheet({
   onCancel,
   onApply,
 }: {
-  initial: { start: string; end: string } | null;
+  initial: ReportRangeChoice;
   nowMs: number;
   theme: MobileTheme;
   reduceMotion: boolean;
   onCancel: () => void;
-  onApply: (range: { start: string; end: string }) => void;
+  onApply: (range: ReportRangeChoice) => void;
 }) {
-  const today = formatLocalDateKey(new Date(nowMs));
-  const [first, setFirst] = useState<string | null>(initial?.start ?? null);
-  const [second, setSecond] = useState<string | null>(initial?.end ?? null);
-  const [month, setMonth] = useState(() => {
-    const date = parseLocalDate(initial?.start ?? today)!;
-    return new Date(date.getFullYear(), date.getMonth(), 1);
-  });
-  const result =
-    first && second ? validateCustomRange(first, second, nowMs) : null;
-  const start = first && second ? (first < second ? first : second) : first;
-  const end = first && second ? (first < second ? second : first) : first;
-  const gridStart = startOfLocalWeek(month);
-  const dayCount =
-    Math.ceil(
-      (new Date(month.getFullYear(), month.getMonth() + 1, 0).getDate() +
-        ((month.getDay() + 6) % 7)) /
-        7,
-    ) * 7;
+  const [draft, setDraft] = useState(() => openReportDateDraft(initial, nowMs));
+  const applied = useRef(false);
+  const result = reportDraftResult(draft, nowMs);
+  const highlight = reportDraftHighlight(draft, nowMs);
+  const readable = (key: string) =>
+    parseLocalDate(key)!.toLocaleDateString(undefined, {
+      day: "numeric",
+      month: "short",
+      year: "numeric",
+    });
   return (
     <ReportSheet
-      title="Custom range"
+      title="Choose report dates"
+      hideTitle
       theme={theme}
       reduceMotion={reduceMotion}
       onCancel={onCancel}
       action="Done"
-      disabled={!result?.value}
+      disabled={!result.value}
       onApply={() => {
-        if (result?.value) onApply(result.value);
+        const current = reportDraftResult(draft, nowMs);
+        if (current.value && !applied.current) {
+          applied.current = true;
+          onApply(current.value);
+        }
       }}
     >
-      <Text style={{ color: theme.textSecondary }}>
-        {first
-          ? second
-            ? `${start} – ${end}`
-            : "Choose the end date"
-          : "Choose the start date"}
-      </Text>
-      <View style={s.monthHeader}>
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel="Previous month"
-          onPress={() =>
-            setMonth(new Date(month.getFullYear(), month.getMonth() - 1, 1))
-          }
-          style={s.action}
-        >
-          <Text style={{ color: theme.textPrimary }}>Previous</Text>
-        </Pressable>
-        <Text style={[s.monthTitle, { color: theme.textPrimary }]}>
-          {month.toLocaleDateString(undefined, {
-            month: "long",
-            year: "numeric",
-          })}
-        </Text>
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel="Next month"
-          disabled={
-            month.getFullYear() === new Date(nowMs).getFullYear() &&
-            month.getMonth() === new Date(nowMs).getMonth()
-          }
-          onPress={() =>
-            setMonth(new Date(month.getFullYear(), month.getMonth() + 1, 1))
-          }
-          style={s.action}
-        >
-          <Text style={{ color: theme.textPrimary }}>Next</Text>
-        </Pressable>
-      </View>
-      <ScrollView horizontal contentContainerStyle={{ flexGrow: 1 }}>
-        <View style={{ flex: 1, minWidth: 308 }}>
-          <View style={s.week}>
-            {["M", "T", "W", "T", "F", "S", "S"].map((label, i) => (
-              <Text key={i} style={[s.weekday, { color: theme.textSecondary }]}>
-                {label}
+      <ScrollView
+        horizontal
+        showsHorizontalScrollIndicator={false}
+        contentContainerStyle={s.presets}
+      >
+        {(["today", "week", "month", "year"] as ReportPreset[]).map(
+          (preset) => (
+            <Pressable
+              key={preset}
+              accessibilityRole="button"
+              accessibilityLabel={preset[0].toUpperCase() + preset.slice(1)}
+              accessibilityState={{ selected: draft.choice === preset }}
+              onPress={() => setDraft(openReportDateDraft(preset, nowMs))}
+              style={[
+                s.preset,
+                {
+                  backgroundColor:
+                    draft.choice === preset
+                      ? theme.accentSoft
+                      : theme.surfaceMuted,
+                },
+              ]}
+            >
+              <Text
+                numberOfLines={1}
+                maxFontSizeMultiplier={REPORT_TEXT_CAP.control}
+                style={[
+                  s.actionText,
+                  {
+                    color:
+                      draft.choice === preset
+                        ? theme.accentText
+                        : theme.textPrimary,
+                  },
+                ]}
+              >
+                {preset[0].toUpperCase() + preset.slice(1)}
               </Text>
-            ))}
-          </View>
-          {Array.from({ length: dayCount / 7 }, (_, row) => (
-            <View key={row} style={s.week}>
-              {Array.from({ length: 7 }, (_, column) => {
-                const day = addLocalDays(gridStart, row * 7 + column);
-                const key = formatLocalDateKey(day);
-                const selected = Boolean(
-                  start && end && key >= start && key <= end,
-                );
-                const endpoint = key === first || key === second;
-                return (
-                  <Pressable
-                    key={key}
-                    accessibilityRole="button"
-                    accessibilityLabel={day.toLocaleDateString(undefined, {
-                      dateStyle: "full",
-                    })}
-                    accessibilityState={{ disabled: key > today, selected }}
-                    disabled={key > today}
-                    onPress={() => {
-                      if (!first || second) {
-                        setFirst(key);
-                        setSecond(null);
-                      } else setSecond(key);
-                    }}
-                    style={[
-                      s.day,
-                      {
-                        backgroundColor: endpoint
-                          ? theme.accent
-                          : selected
-                            ? theme.accentSoft
-                            : "transparent",
-                        opacity: key > today ? 0.4 : 1,
-                      },
-                    ]}
-                  >
-                    <Text
-                      style={{
-                        color: endpoint
-                          ? theme.onAccent
-                          : day.getMonth() === month.getMonth()
-                            ? theme.textPrimary
-                            : theme.textSecondary,
-                      }}
-                    >
-                      {day.getDate()}
-                    </Text>
-                  </Pressable>
-                );
-              })}
-            </View>
-          ))}
-        </View>
+            </Pressable>
+          ),
+        )}
       </ScrollView>
-      {result?.error ? (
+      <Text style={{ color: theme.textSecondary }}>
+        {draft.choice && highlight.start && highlight.end
+          ? `${readable(highlight.start)} – ${readable(highlight.end)}`
+          : "Choose the end date"}
+      </Text>
+      <View style={s.calendar}>
+        <DatePickerCalendar
+          month={draft.displayedMonth}
+          onMonthChange={(displayedMonth) =>
+            setDraft((d) => ({ ...d, displayedMonth }))
+          }
+          start={highlight.start}
+          end={highlight.end}
+          today={formatLocalDateKey(new Date(nowMs))}
+          maxDate={formatLocalDateKey(new Date(nowMs))}
+          onSelect={(date) =>
+            setDraft((d) =>
+              selectReportDraftDay(d, formatLocalDateKey(date), nowMs),
+            )
+          }
+          theme={theme}
+          reduceMotion={reduceMotion}
+        />
+      </View>
+      {draft.choice && result.error ? (
         <Text accessibilityRole="alert" style={{ color: theme.warningText }}>
           {result.error}
         </Text>
@@ -299,6 +267,7 @@ export function ReportDateSheet({
 }
 function ReportSheet({
   title,
+  hideTitle = false,
   theme,
   reduceMotion,
   onCancel,
@@ -308,6 +277,7 @@ function ReportSheet({
   children,
 }: {
   title: string;
+  hideTitle?: boolean;
   theme: MobileTheme;
   reduceMotion: boolean;
   onCancel: () => void;
@@ -333,6 +303,8 @@ function ReportSheet({
         />
         <View
           accessibilityViewIsModal
+          accessibilityLabel={title}
+          onAccessibilityEscape={onCancel}
           style={[
             s.sheet,
             {
@@ -342,19 +314,32 @@ function ReportSheet({
           ]}
         >
           <View style={s.header}>
-            <Text style={[s.title, { color: theme.textPrimary }]}>{title}</Text>
+            {!hideTitle ? (
+              <Text
+                maxFontSizeMultiplier={REPORT_TEXT_CAP.heading}
+                style={[s.title, { color: theme.textPrimary }]}
+              >
+                {title}
+              </Text>
+            ) : null}
             <Pressable
               onPress={onCancel}
               accessibilityRole="button"
               accessibilityLabel={`Cancel ${title}`}
               style={s.action}
             >
-              <Text style={{ color: theme.textSecondary }}>Cancel</Text>
+              <Text
+                maxFontSizeMultiplier={REPORT_TEXT_CAP.control}
+                style={[s.actionText, { color: theme.textSecondary }]}
+              >
+                Cancel
+              </Text>
             </Pressable>
           </View>
           <ScrollView
             keyboardShouldPersistTaps="handled"
-            contentContainerStyle={{ gap: 8 }}
+            automaticallyAdjustKeyboardInsets
+            contentContainerStyle={{ gap: 4 }}
           >
             {children}
           </ScrollView>
@@ -370,10 +355,11 @@ function ReportSheet({
             ]}
           >
             <Text
-              style={{
-                color: disabled ? theme.textSecondary : theme.onAccent,
-                fontWeight: "600",
-              }}
+              maxFontSizeMultiplier={REPORT_TEXT_CAP.control}
+              style={[
+                s.actionText,
+                { color: disabled ? theme.textSecondary : theme.onAccent },
+              ]}
             >
               {action}
             </Text>
@@ -386,14 +372,19 @@ function ReportSheet({
 const s = StyleSheet.create({
   modal: { flex: 1, justifyContent: "flex-end" },
   sheet: {
-    maxHeight: "86%",
+    maxHeight: "90%",
     borderTopLeftRadius: 24,
     borderTopRightRadius: 24,
     padding: 16,
+    gap: 8,
+  },
+  header: {
+    flexDirection: "row",
+    justifyContent: "flex-end",
+    alignItems: "center",
     gap: 12,
   },
-  header: { flexDirection: "row", alignItems: "center", gap: 12 },
-  title: { flex: 1, fontSize: 22, fontWeight: "600" },
+  title: { flex: 1, fontSize: 20, fontWeight: "600" },
   action: {
     minHeight: 44,
     minWidth: 44,
@@ -401,6 +392,7 @@ const s = StyleSheet.create({
     justifyContent: "center",
     paddingHorizontal: 8,
   },
+  actionText: { fontSize: 14, fontWeight: "600" },
   apply: {
     minHeight: 48,
     borderRadius: 999,
@@ -408,36 +400,29 @@ const s = StyleSheet.create({
     justifyContent: "center",
     padding: 12,
   },
-  search: { minHeight: 48, padding: 12, borderRadius: 12, fontSize: 16 },
+  search: { minHeight: 44, padding: 10, borderRadius: 12, fontSize: 15 },
   option: {
-    minHeight: 48,
+    minHeight: 44,
     flexDirection: "row",
     alignItems: "center",
-    gap: 12,
-    paddingVertical: 8,
+    gap: 10,
+    paddingVertical: 6,
     borderBottomWidth: StyleSheet.hairlineWidth,
   },
-  optionText: { flex: 1, fontSize: 15 },
+  optionText: { flex: 1, minWidth: 0, fontSize: 14 },
   dot: { height: 10, width: 10, borderRadius: 5 },
-  checkbox: {
-    height: 24,
+  glyphSlot: {
     width: 24,
-    borderWidth: 1,
-    borderRadius: 6,
+    height: 24,
     alignItems: "center",
     justifyContent: "center",
   },
-  monthHeader: { flexDirection: "row", alignItems: "center", flexWrap: "wrap" },
-  monthTitle: { flex: 1, textAlign: "center", fontWeight: "600" },
-  week: { flexDirection: "row" },
-  weekday: { flex: 1, minWidth: 44, textAlign: "center" },
-  day: {
-    flex: 1,
-    minWidth: 44,
+  presets: { gap: 6 },
+  preset: {
     minHeight: 44,
-    paddingVertical: 8,
-    alignItems: "center",
     justifyContent: "center",
-    borderRadius: 22,
+    paddingHorizontal: 12,
+    borderRadius: 10,
   },
+  calendar: { marginHorizontal: -10 },
 });

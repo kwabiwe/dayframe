@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import Animated, {
   FadeIn,
@@ -9,9 +9,21 @@ import Animated, {
 } from "react-native-reanimated";
 import type { MobileTheme } from "@/lib/mobileTheme";
 import { MOBILE_MOTION } from "@/lib/motion";
-import { formatReportDuration, reportAxis } from "@/lib/reportsPresentation";
+import {
+  formatReportDuration,
+  spokenReportDuration,
+  reportAxis,
+} from "@/lib/reportsPresentation";
+import {
+  reportBucketAtX,
+  reportBucketLabel,
+  reportLabelIndices,
+  reportTooltipLeft,
+} from "@/lib/reportPlot";
+import { REPORT_TEXT_CAP } from "@/lib/reportsTypography";
 import type { ReportBucket } from "@/lib/reportsRanges";
-
+import { CalendarGlyph } from "@/components/calendar/DatePickerCalendar";
+const HEIGHT = 168;
 export function ReportActivityChart({
   buckets,
   theme,
@@ -24,27 +36,56 @@ export function ReportActivityChart({
   contextKey: string;
 }) {
   const [tooltip, setTooltip] = useState<string | null>(null);
-  const [plotWidth, setPlotWidth] = useState(240);
-  const [scrollX, setScrollX] = useState(0);
+  const [plotWidth, setPlotWidth] = useState(220);
+  const [gutter, setGutter] = useState(38);
+  const touch = useRef({ y: 0, moved: false });
   useEffect(() => setTooltip(null), [contextKey]);
   const axis = reportAxis(Math.max(0, ...buckets.map((b) => b.seconds)));
-  const selected = buckets.find((b) => b.key === tooltip);
+  const selectedIndex = buckets.findIndex((b) => b.key === tooltip);
+  const selected = buckets[selectedIndex];
+  const labels = reportLabelIndices(buckets.length, plotWidth);
+  const slot = plotWidth / Math.max(1, buckets.length);
+  const move = (offset: number) => {
+    const index =
+      selectedIndex < 0
+        ? 0
+        : Math.max(0, Math.min(buckets.length - 1, selectedIndex + offset));
+    if (buckets[index]) setTooltip(buckets[index].key);
+  };
   return (
-    <Pressable
-      accessible={false}
-      onPress={() => setTooltip(null)}
-      style={s.root}
-    >
-      <Text style={[s.title, { color: theme.textPrimary }]}>
-        Activity over time
-      </Text>
+    <View style={s.root} onTouchEnd={(event) => event.stopPropagation()}>
+      <Pressable accessible={false} onPress={() => setTooltip(null)}>
+        <Text
+          maxFontSizeMultiplier={REPORT_TEXT_CAP.heading}
+          style={[s.title, { color: theme.textPrimary }]}
+        >
+          Activity over time
+        </Text>
+      </Pressable>
       <View style={s.plotRow}>
-        <View style={s.axis}>
+        <View style={{ width: gutter, height: HEIGHT }}>
           {axis.ticks.map((tick) => (
             <Text
               key={tick.seconds}
-              maxFontSizeMultiplier={1.3}
-              style={[s.tick, { color: theme.textSecondary }]}
+              maxFontSizeMultiplier={REPORT_TEXT_CAP.small}
+              numberOfLines={1}
+              onTextLayout={(event) => {
+                const measured =
+                  Math.ceil(
+                    Math.max(
+                      0,
+                      ...event.nativeEvent.lines.map((line) => line.width),
+                    ),
+                  ) + 4;
+                setGutter((current) => Math.max(current, measured));
+              }}
+              style={[
+                s.tick,
+                {
+                  color: theme.textSecondary,
+                  top: (1 - tick.seconds / axis.maximum) * HEIGHT - 8,
+                },
+              ]}
             >
               {tick.label}
             </Text>
@@ -54,98 +95,228 @@ export function ReportActivityChart({
           style={s.plot}
           onLayout={(event) => setPlotWidth(event.nativeEvent.layout.width)}
         >
-          <View pointerEvents="none" style={s.grid}>
-            {axis.ticks.map((tick) => (
-              <View
-                key={tick.seconds}
-                style={{
-                  borderTopWidth: StyleSheet.hairlineWidth,
-                  borderColor: theme.border,
-                }}
-              />
-            ))}
-          </View>
-          <ScrollView
-            horizontal
-            directionalLockEnabled
-            onScroll={(event) => setScrollX(event.nativeEvent.contentOffset.x)}
-            scrollEventThrottle={32}
-            onScrollBeginDrag={() => setTooltip(null)}
-            showsHorizontalScrollIndicator
-            contentContainerStyle={s.columns}
+          <Pressable
+            testID="report-plot"
+            accessibilityRole="adjustable"
+            accessibilityLabel="Activity over time, select a bucket"
+            accessibilityValue={{
+              min: 1,
+              max: buckets.length,
+              now: Math.max(1, selectedIndex + 1),
+              text: selected
+                ? `${selected.fullLabel}, ${spokenReportDuration(selected.seconds)}`
+                : "Adjust to inspect each period",
+            }}
+            accessibilityActions={[
+              { name: "increment", label: "Next bucket" },
+              { name: "decrement", label: "Previous bucket" },
+            ]}
+            onAccessibilityAction={(event) => {
+              if (event.nativeEvent.actionName === "increment") move(1);
+              else if (event.nativeEvent.actionName === "decrement") move(-1);
+            }}
+            onTouchStart={(event) => {
+              touch.current = { y: event.nativeEvent.pageY, moved: false };
+            }}
+            onTouchMove={(event) => {
+              if (Math.abs(event.nativeEvent.pageY - touch.current.y) > 8)
+                touch.current.moved = true;
+            }}
+            onPress={(event) => {
+              event.stopPropagation();
+              if (touch.current.moved) return;
+              const i = reportBucketAtX(
+                event.nativeEvent.locationX,
+                plotWidth,
+                buckets.length,
+              );
+              if (i !== null) setTooltip(buckets[i].key);
+            }}
+            style={{ height: HEIGHT }}
           >
-            {buckets.map((bucket) => (
-              <Pressable
-                key={bucket.key}
-                accessibilityRole={bucket.seconds > 0 ? "button" : "text"}
-                accessibilityLabel={`${bucket.fullLabel}, ${formatReportDuration(bucket.seconds)}`}
-                onPress={(event) => {
-                  event.stopPropagation();
-                  setTooltip(bucket.seconds > 0 ? bucket.key : null);
-                }}
-                style={s.column}
-              >
-                <View style={s.barTrack}>
+            <View
+              pointerEvents="none"
+              accessible={false}
+              accessibilityElementsHidden
+              style={StyleSheet.absoluteFill}
+            >
+              {axis.ticks.map((tick) => (
+                <View
+                  key={tick.seconds}
+                  style={{
+                    position: "absolute",
+                    left: 0,
+                    right: 0,
+                    top: (1 - tick.seconds / axis.maximum) * HEIGHT,
+                    borderTopWidth: StyleSheet.hairlineWidth,
+                    borderColor: theme.border,
+                  }}
+                />
+              ))}
+              {buckets.map((bucket, i) => (
+                <View
+                  key={bucket.key}
+                  style={{
+                    position: "absolute",
+                    left: i * slot,
+                    width: slot,
+                    bottom: 0,
+                    alignItems: "center",
+                  }}
+                >
                   <ReportBar
-                    height={(bucket.seconds / axis.maximum) * 160}
+                    height={(bucket.seconds / axis.maximum) * HEIGHT}
+                    width={Math.min(24, slot * 0.65)}
                     theme={theme}
                     reduceMotion={reduceMotion}
                   />
                 </View>
+              ))}
+            </View>
+          </Pressable>
+          <View
+            pointerEvents="none"
+            accessibilityElementsHidden
+            style={s.labels}
+          >
+            {buckets.map((bucket, i) =>
+              labels.has(i) ? (
                 <Text
-                  maxFontSizeMultiplier={1.3}
-                  style={[s.xLabel, { color: theme.textSecondary }]}
+                  key={bucket.key}
+                  numberOfLines={1}
+                  maxFontSizeMultiplier={REPORT_TEXT_CAP.small}
+                  style={[
+                    s.xLabel,
+                    {
+                      color: theme.textSecondary,
+                      width: Math.min(42, plotWidth),
+                      left: Math.max(
+                        0,
+                        Math.min(plotWidth - 42, (i + 0.5) * slot - 21),
+                      ),
+                    },
+                  ]}
                 >
-                  {bucket.label}
+                  {reportBucketLabel(bucket, buckets.length)}
                 </Text>
-              </Pressable>
-            ))}
-          </ScrollView>
+              ) : null,
+            )}
+          </View>
           {selected ? (
-            <Animated.View
-              pointerEvents="none"
-              entering={FadeIn.duration(
-                reduceMotion ? 0 : MOBILE_MOTION.control,
-              )}
-              exiting={FadeOut.duration(
-                reduceMotion ? 0 : MOBILE_MOTION.control,
-              )}
-              style={[
-                s.tooltip,
-                {
-                  width: Math.min(220, plotWidth),
-                  left: Math.max(
-                    0,
-                    Math.min(
-                      plotWidth - Math.min(220, plotWidth),
-                      buckets.indexOf(selected) *
-                        Math.max(44, plotWidth / buckets.length) -
-                        scrollX,
-                    ),
-                  ),
-                  backgroundColor: theme.surfaceMuted,
-                },
-              ]}
-            >
-              <Text
-                accessibilityLiveRegion="polite"
-                style={{ color: theme.textPrimary }}
-              >
-                {selected.fullLabel}: {formatReportDuration(selected.seconds)}
-              </Text>
-            </Animated.View>
+            <ReportTooltip
+              bucket={selected}
+              index={selectedIndex}
+              count={buckets.length}
+              plotWidth={plotWidth}
+              theme={theme}
+              reduceMotion={reduceMotion}
+              onMove={move}
+              onClose={() => setTooltip(null)}
+            />
           ) : null}
         </View>
       </View>
-    </Pressable>
+    </View>
+  );
+}
+function ReportTooltip({
+  bucket,
+  index,
+  count,
+  plotWidth,
+  theme,
+  reduceMotion,
+  onMove,
+  onClose,
+}: {
+  bucket: ReportBucket & { seconds: number };
+  index: number;
+  count: number;
+  plotWidth: number;
+  theme: MobileTheme;
+  reduceMotion: boolean;
+  onMove: (offset: number) => void;
+  onClose: () => void;
+}) {
+  const width = Math.min(240, plotWidth);
+  const target = reportTooltipLeft(index, count, plotWidth, width);
+  const left = useSharedValue(target),
+    opacity = useSharedValue(1);
+  useEffect(() => {
+    left.value = withTiming(target, {
+      duration: reduceMotion ? 0 : MOBILE_MOTION.layout,
+    });
+    opacity.value = reduceMotion ? 1 : 0.45;
+    opacity.value = withTiming(1, {
+      duration: reduceMotion ? 0 : MOBILE_MOTION.control,
+    });
+  }, [bucket.key, target, reduceMotion, left, opacity]);
+  const style = useAnimatedStyle(() => ({
+    left: left.value,
+    opacity: opacity.value,
+  }));
+  return (
+    <Animated.View
+      testID="report-tooltip"
+      entering={FadeIn.duration(reduceMotion ? 0 : MOBILE_MOTION.control)}
+      exiting={FadeOut.duration(reduceMotion ? 0 : MOBILE_MOTION.control)}
+      style={[s.tooltip, { width, backgroundColor: theme.surfaceMuted }, style]}
+    >
+      <ScrollView style={{ maxHeight: 112 }}>
+        <Text
+          maxFontSizeMultiplier={REPORT_TEXT_CAP.control}
+          accessibilityLabel={`${bucket.fullLabel}, ${spokenReportDuration(bucket.seconds)}`}
+          style={{ color: theme.textPrimary, fontSize: 14 }}
+        >
+          {bucket.fullLabel}: {formatReportDuration(bucket.seconds)}
+        </Text>
+      </ScrollView>
+      <View style={s.actions}>
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel="Previous bucket"
+          accessibilityState={{ disabled: index === 0 }}
+          disabled={index === 0}
+          onPress={() => onMove(-1)}
+          style={s.action}
+        >
+          <CalendarGlyph kind="left" color={theme.textPrimary} />
+        </Pressable>
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel="Close bucket details"
+          onPress={onClose}
+          style={s.action}
+        >
+          <Text
+            maxFontSizeMultiplier={REPORT_TEXT_CAP.control}
+            style={{ color: theme.textPrimary, fontSize: 13 }}
+          >
+            Close
+          </Text>
+        </Pressable>
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel="Next bucket"
+          accessibilityState={{ disabled: index === count - 1 }}
+          disabled={index === count - 1}
+          onPress={() => onMove(1)}
+          style={s.action}
+        >
+          <CalendarGlyph kind="right" color={theme.textPrimary} />
+        </Pressable>
+      </View>
+    </Animated.View>
   );
 }
 function ReportBar({
   height,
+  width,
   theme,
   reduceMotion,
 }: {
   height: number;
+  width: number;
   theme: MobileTheme;
   reduceMotion: boolean;
 }) {
@@ -159,34 +330,37 @@ function ReportBar({
   return (
     <Animated.View
       testID="report-activity-bar"
-      style={[s.bar, { backgroundColor: theme.accent }, style]}
+      style={[s.bar, { width, backgroundColor: theme.accent }, style]}
     />
   );
 }
 const s = StyleSheet.create({
-  root: { gap: 12, paddingTop: 24 },
+  root: { gap: 16, paddingTop: 24 },
   title: { fontSize: 18, fontWeight: "600" },
+  plotRow: { flexDirection: "row", gap: 8, paddingTop: 8 },
+  plot: { flex: 1, minWidth: 0 },
+  tick: {
+    position: "absolute",
+    right: 0,
+    fontSize: 10,
+    fontVariant: ["tabular-nums"],
+    textAlign: "right",
+  },
+  labels: { height: 30 },
+  xLabel: { position: "absolute", top: 8, fontSize: 10, textAlign: "center" },
+  bar: { borderTopLeftRadius: 3, borderTopRightRadius: 3 },
   tooltip: {
     position: "absolute",
-    bottom: 42,
+    bottom: 32,
     borderRadius: 12,
-    padding: 12,
+    padding: 8,
     maxWidth: "100%",
   },
-  plotRow: { flexDirection: "row", gap: 8 },
-  axis: { height: 160, justifyContent: "space-between", minWidth: 38 },
-  tick: { fontSize: 10, fontVariant: ["tabular-nums"] },
-  plot: { flex: 1, minWidth: 0 },
-  grid: {
-    position: "absolute",
-    left: 0,
-    right: 0,
-    height: 160,
-    justifyContent: "space-between",
+  actions: { flexDirection: "row", justifyContent: "space-between" },
+  action: {
+    minWidth: 44,
+    minHeight: 44,
+    alignItems: "center",
+    justifyContent: "center",
   },
-  columns: { flexGrow: 1 },
-  column: { alignItems: "center", minWidth: 44, flex: 1 },
-  barTrack: { height: 160, justifyContent: "flex-end", alignItems: "center" },
-  bar: { width: 12, borderTopLeftRadius: 4, borderTopRightRadius: 4 },
-  xLabel: { fontSize: 11, paddingTop: 8, minHeight: 28 },
 });

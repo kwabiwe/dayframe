@@ -1,4 +1,4 @@
-import { useEffect, useId, useState } from "react";
+import { useCallback, useEffect, useId, useRef, useState } from "react";
 import {
   StyleSheet,
   Text,
@@ -8,13 +8,19 @@ import {
 } from "react-native";
 import Animated, {
   createAnimatedComponent,
+  runOnJS,
   useAnimatedProps,
   useAnimatedStyle,
   useSharedValue,
   withTiming,
 } from "react-native-reanimated";
 import Svg, { Circle, Defs, Path, Pattern, Rect } from "react-native-svg";
-import { donutSlicePath, prepareDonutArcs } from "@/lib/donutGeometry";
+import {
+  canRemoveDonutVisual,
+  donutSlicePath,
+  donutTransitionTargets,
+  prepareDonutArcs,
+} from "@/lib/donutGeometry";
 import { MOBILE_MOTION } from "@/lib/motion";
 import type { MobileTheme } from "@/lib/mobileTheme";
 
@@ -34,6 +40,7 @@ export function DonutChart({
   animateEntrance,
   centerLabel,
   centerValue,
+  spokenValue,
   onSegmentPress,
   reduceMotion,
   segments,
@@ -43,6 +50,7 @@ export function DonutChart({
   animateEntrance: boolean;
   centerLabel: string;
   centerValue: string;
+  spokenValue?: string;
   onSegmentPress?: (id: string) => void;
   reduceMotion: boolean;
   segments: readonly DonutChartSegment[];
@@ -54,7 +62,44 @@ export function DonutChart({
   const [availableWidth, setAvailableWidth] = useState(DEFAULT_SIZE);
   const size = Math.min(availableWidth, DEFAULT_SIZE);
   const centerWidth = DEFAULT_CENTER_WIDTH * (size / DEFAULT_SIZE);
-  const arcs = prepareDonutArcs(segments);
+  const [visuals, setVisuals] = useState(() =>
+    segments.map((segment, i) => ({
+      ...segment,
+      ...prepareDonutArcs(segments)[i],
+    })),
+  );
+  const generation = useRef(0);
+  const desiredIds = useRef(segments.map((segment) => segment.id));
+  desiredIds.current = segments.map((segment) => segment.id);
+  const targetKey = JSON.stringify(segments);
+  const generationKey = useRef(targetKey);
+  if (generationKey.current !== targetKey) {
+    generationKey.current = targetKey;
+    generation.current++;
+  }
+  const transitionGeneration = generation.current;
+  const targets = donutTransitionTargets(visuals, segments);
+  const drawing = targets.map((arc) => ({
+    ...(segments.find((s) => s.id === arc.id) ??
+      visuals.find((s) => s.id === arc.id)!),
+    ...arc,
+  }));
+  useEffect(() => {
+    setVisuals(
+      reduceMotion || settleImmediately
+        ? drawing.filter((s) => desiredIds.current.includes(s.id))
+        : drawing,
+    );
+  }, [targetKey, reduceMotion, settleImmediately]);
+  const completeExit = useCallback((id: string, token: number) => {
+    if (canRemoveDonutVisual(token, generation.current, id, desiredIds.current))
+      setVisuals((current) => current.filter((s) => s.id !== id));
+  }, []);
+  const centreSize = 16;
+  const valueWidth =
+    centerValue.length * centreSize * Math.min(fontScale, 1.2) * 0.72;
+  const useFlowValue = valueWidth > centerWidth;
+
   const centerOpacity = useSharedValue(
     animateEntrance && !reduceMotion ? 0 : 1,
   );
@@ -76,7 +121,7 @@ export function DonutChart({
   return (
     <View
       accessible
-      accessibilityLabel={`Category breakdown. ${centerLabel} ${centerValue}. ${segments.length} categories. Category controls follow the chart.`}
+      accessibilityLabel={`Category breakdown. ${centerLabel} ${spokenValue ?? centerValue}. ${segments.length} categories. Category controls follow the chart.`}
       accessibilityRole="image"
       onLayout={measureAvailableWidth}
       style={styles.measurementBox}
@@ -105,25 +150,28 @@ export function DonutChart({
             </Pattern>
           </Defs>
           <Circle cx={92} cy={92} r={84} fill={theme.chartTrack} />
-          {arcs.map((arc) => {
-            const segment = segments.find(
-              (candidate) => candidate.id === arc.id,
-            )!;
+          {drawing.map((segment) => {
+            const active = desiredIds.current.includes(segment.id);
             return (
               <AnimatedDonutSlice
-                key={arc.id}
+                key={segment.id}
+                id={segment.id}
+                generation={transitionGeneration}
                 animateEntrance={animateEntrance}
                 color={
                   segment.isUncategorized ? `url(#${patternId})` : segment.color
                 }
-                endAngle={arc.endAngle}
+                endAngle={segment.endAngle}
+                startAngle={segment.startAngle}
                 onPress={
-                  onSegmentPress ? () => onSegmentPress(arc.id) : undefined
+                  active && onSegmentPress
+                    ? () => onSegmentPress(segment.id)
+                    : undefined
                 }
                 reduceMotion={reduceMotion}
-                selected={segment.selected}
+                selected={active}
                 settleImmediately={settleImmediately}
-                startAngle={arc.startAngle}
+                onExitComplete={completeExit}
               />
             );
           })}
@@ -139,35 +187,39 @@ export function DonutChart({
           >
             {centerLabel}
           </Text>
-          <Text
-            adjustsFontSizeToFit
-            numberOfLines={1}
-            maxFontSizeMultiplier={1.2}
-            style={[styles.centerValue, { color: theme.textPrimary }]}
-          >
-            {centerValue}
-          </Text>
+          {!useFlowValue ? (
+            <Text
+              numberOfLines={1}
+              maxFontSizeMultiplier={1.2}
+              style={[
+                styles.centerValue,
+                { fontSize: centreSize, color: theme.textPrimary },
+              ]}
+            >
+              {centerValue}
+            </Text>
+          ) : null}
         </Animated.View>
       </View>
-      {fontScale > 1.3 ? (
-        <View style={styles.accessibleTotal}>
-          <Text style={{ color: theme.textSecondary }}>{centerLabel}</Text>
-          <Text
-            style={{
-              color: theme.textPrimary,
-              fontSize: 22,
-              fontVariant: ["tabular-nums"],
-            }}
-          >
-            {centerValue}
-          </Text>
-        </View>
+      {useFlowValue ? (
+        <Text
+          numberOfLines={1}
+          maxFontSizeMultiplier={1.2}
+          style={[
+            styles.centerValue,
+            { fontSize: 16, marginTop: 8, color: theme.textPrimary },
+          ]}
+        >
+          {centerValue}
+        </Text>
       ) : null}
     </View>
   );
 }
 
 function AnimatedDonutSlice({
+  id,
+  generation,
   animateEntrance,
   color,
   endAngle,
@@ -176,6 +228,7 @@ function AnimatedDonutSlice({
   selected,
   settleImmediately = false,
   startAngle,
+  onExitComplete,
 }: {
   animateEntrance: boolean;
   color: string;
@@ -185,12 +238,15 @@ function AnimatedDonutSlice({
   selected: boolean;
   settleImmediately?: boolean;
   startAngle: number;
+  id: string;
+  generation: number;
+  onExitComplete: (id: string, generation: number) => void;
 }) {
   const animatedStart = useSharedValue(startAngle);
   const animatedEnd = useSharedValue(
-    animateEntrance && !reduceMotion ? startAngle : endAngle,
+    !reduceMotion && !settleImmediately ? startAngle : endAngle,
   );
-  const targetOpacity = selected ? 1 : 0.22;
+  const targetOpacity = selected ? 1 : 0;
   const opacity = useSharedValue(
     reduceMotion || animateEntrance ? targetOpacity : 0,
   );
@@ -203,7 +259,9 @@ function AnimatedDonutSlice({
           ? 260
           : MOBILE_MOTION.layout;
     animatedStart.value = withTiming(startAngle, { duration });
-    animatedEnd.value = withTiming(endAngle, { duration });
+    animatedEnd.value = withTiming(endAngle, { duration }, (finished) => {
+      if (finished && !selected) runOnJS(onExitComplete)(id, generation);
+    });
   }, [
     animateEntrance,
     animatedEnd,
@@ -212,10 +270,14 @@ function AnimatedDonutSlice({
     reduceMotion,
     settleImmediately,
     startAngle,
+    selected,
+    generation,
+    id,
+    onExitComplete,
   ]);
 
   useEffect(() => {
-    opacity.value = withTiming(selected ? 1 : 0.22, {
+    opacity.value = withTiming(selected ? 1 : 0, {
       duration: reduceMotion || settleImmediately ? 0 : MOBILE_MOTION.control,
     });
   }, [opacity, reduceMotion, selected, settleImmediately]);
@@ -263,7 +325,6 @@ const styles = StyleSheet.create({
     fontFamily: "System",
     fontSize: 11,
     fontWeight: "600",
-    lineHeight: 15,
     textAlign: "center",
   },
   centerValue: {
@@ -271,7 +332,6 @@ const styles = StyleSheet.create({
     fontSize: 22,
     fontVariant: ["tabular-nums"],
     fontWeight: "700",
-    lineHeight: 27,
     textAlign: "center",
   },
 });

@@ -127,7 +127,7 @@ export function buildReportsPresentation(input: {
       isUncategorized: c.key === "uncategorized",
       selected: reportSelectionIncludes(selection, c.key),
     }))
-    .filter((c) => c.durationMs > 0);
+    .filter((c) => Number.isFinite(c.durationMs) && c.durationMs > 0);
   const filterOptions = new Map<string, ReportCategoryOption>();
   for (const c of data.categories ?? [])
     filterOptions.set(c.id, {
@@ -163,11 +163,16 @@ export function buildReportsPresentation(input: {
           isUncategorized: false,
           isUnavailable: true,
         });
+  const visibleCategorySegments = allCategorySegments.filter((c) => c.selected);
+  const selectedDurationMs = visibleCategorySegments.reduce(
+    (sum, c) => sum + c.durationMs,
+    0,
+  );
   return {
     allCategorySegments,
-    selectedLoggedSeconds: allCategorySegments
-      .filter((c) => c.selected)
-      .reduce((sum, c) => sum + c.durationMs / 1000, 0),
+    visibleCategorySegments,
+    selectedDurationMs,
+    selectedLoggedSeconds: selectedDurationMs / 1000,
     contextDurationMs: allCategorySegments.reduce(
       (sum, c) => sum + c.durationMs,
       0,
@@ -186,30 +191,48 @@ export function buildReportsPresentation(input: {
   };
 }
 export function formatReportDuration(seconds: number) {
-  const minutes = Math.floor(Math.max(0, seconds) / 60);
-  if (seconds > 0 && minutes === 0) return "<1m";
-  const hours = Math.floor(minutes / 60);
-  return hours
-    ? `${hours}h${minutes % 60 ? ` ${minutes % 60}m` : ""}`
-    : `${minutes}m`;
+  if (!Number.isFinite(seconds)) return "Unavailable";
+  const whole = Math.floor(Math.max(0, seconds));
+  return [Math.floor(whole / 3600), Math.floor(whole / 60) % 60, whole % 60]
+    .map((value) => String(value).padStart(2, "0"))
+    .join(":");
+}
+export function spokenReportDuration(seconds: number) {
+  if (!Number.isFinite(seconds)) return "Duration unavailable";
+  const whole = Math.floor(Math.max(0, seconds));
+  const values = [
+    Math.floor(whole / 3600),
+    Math.floor(whole / 60) % 60,
+    whole % 60,
+  ];
+  return values
+    .flatMap((value, i) =>
+      value || (whole === 0 && i === 2)
+        ? [
+            `${value} ${["hour", "minute", "second"][i]}${value === 1 ? "" : "s"}`,
+          ]
+        : [],
+    )
+    .join(", ");
 }
 export function formatReportPercent(value: number, total: number) {
   const percent = total > 0 ? (value / total) * 100 : 0;
   return percent > 0 && percent < 1 ? "<1%" : `${Math.round(percent)}%`;
 }
 export function reportAxis(maxSeconds: number) {
-  const candidates = [
-    60, 120, 300, 600, 900, 1800, 3600, 7200, 10800, 21600, 43200, 86400,
-    172800, 604800, 1209600,
-  ];
-  const step =
-    candidates.find((value) => value * 4 >= maxSeconds) ??
-    Math.ceil(maxSeconds / 4 / 604800) * 604800;
+  const max = Number.isFinite(maxSeconds) ? Math.max(0, maxSeconds) : 0;
+  const unit = max > 3600 ? 3600 : max > 60 ? 60 : 1;
+  const raw = max / unit;
+  const power = 10 ** Math.floor(Math.log10(Math.max(1, raw)));
+  const ceiling =
+    [1, 2, 3, 4, 5, 6, 8, 10].find((n) => n * power >= raw)! * power;
+  const maximum = max === 0 ? 60 : ceiling * unit;
+  const tickUnit = maximum > 3600 ? 3600 : maximum >= 60 ? 60 : 1;
   return {
-    maximum: step * 4,
-    ticks: [4, 3, 2, 1, 0].map((n) => ({
-      seconds: n * step,
-      label: formatReportDuration(n * step),
+    maximum,
+    ticks: [1, 0.5, 0].map((n) => ({
+      seconds: n * maximum,
+      label: `${Number(((n * maximum) / tickUnit).toFixed(2))}${tickUnit === 3600 ? "h" : tickUnit === 60 ? "m" : "s"}`,
     })),
   };
 }

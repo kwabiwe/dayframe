@@ -37,6 +37,8 @@ vi.mock("react-native", () => ({
 }));
 vi.mock("react-native-reanimated", () => ({
   default: { View: "AnimatedView" },
+  FadeIn: { duration: () => ({}) },
+  FadeOut: { duration: () => ({}) },
   LinearTransition: { duration: () => ({}) },
 }));
 vi.mock("react-native-svg", () => ({ default: "Svg", Path: "Path" }));
@@ -85,6 +87,13 @@ vi.mock("@/lib/reportsClient", () => ({
     }
   },
 }));
+vi.mock(
+  "@/lib/reportsTypography",
+  async () => import("../../lib/reportsTypography"),
+);
+vi.mock("@/components/calendar/DatePickerCalendar", () => ({
+  CalendarGlyph: "CalendarGlyph",
+}));
 import { ReportsTab } from "./ReportsTab";
 const data = {
   activeEntry: null,
@@ -125,7 +134,20 @@ const render = async () => {
   });
   return tree;
 };
-describe("Revision 2 Reports owner", () => {
+async function chooseRange(tree: ReturnType<typeof create>, choice: string) {
+  await act(async () =>
+    tree.root
+      .findAllByType("Pressable" as never)
+      .find((n) =>
+        n.props.accessibilityLabel?.startsWith("Choose report dates"),
+      )!
+      .props.onPress(),
+  );
+  await act(async () =>
+    tree.root.findByType("ReportDateSheet" as never).props.onApply(choice),
+  );
+}
+describe("Revision 3 Reports owner", () => {
   it("preserves seconds after Stop while replacing a cached active contribution", async () => {
     const startedAt = new Date(nowMs - 3600000).toISOString();
     mocks.fetch.mockImplementationOnce(async (input: ReportSummaryRequest) => ({
@@ -195,7 +217,7 @@ describe("Revision 2 Reports owner", () => {
     await act(async () => finish(result(requested)));
     expect(mocks.fetch).toHaveBeenCalledTimes(2);
     expect(tree.root.findByType("DonutChart" as never).props.centerValue).toBe(
-      "1h",
+      "01:00:00",
     );
     act(() => tree.unmount());
   });
@@ -205,20 +227,17 @@ describe("Revision 2 Reports owner", () => {
       .mockImplementation(async (input: ReportSummaryRequest) => result(input));
     mocks.fontScale = 1;
   });
-  it("renders only new design and all/some/none keeps context slices", async () => {
+  it("renders selected-only slices and preserves all/some/none recovery", async () => {
     const tree = await render();
     expect(JSON.stringify(tree.toJSON())).not.toMatch(
       /Time covered|Total logged|Daily bars|Category chart type/,
     );
     const chart = () => tree.root.findByType("DonutChart" as never);
     expect(chart().props.centerLabel).toBe("Total");
-    expect(chart().props.centerValue).toBe("1h");
+    expect(chart().props.centerValue).toBe("01:00:00");
     await act(async () => chart().props.onSegmentPress("a"));
-    expect(chart().props.centerValue).toBe("0m");
-    expect(chart().props.segments[0]).toMatchObject({
-      selected: false,
-      value: 3600000,
-    });
+    expect(chart().props.centerValue).toBe("00:00:00");
+    expect(chart().props.segments).toHaveLength(0);
     expect(JSON.stringify(tree.toJSON())).toContain(
       "No logged time for the selected categories.",
     );
@@ -258,17 +277,9 @@ describe("Revision 2 Reports owner", () => {
       }
       return Promise.resolve(result(input));
     });
-    await act(async () =>
-      tree.root
-        .findByProps({ accessibilityLabel: "Show year reports" })
-        .props.onPress(),
-    );
+    await chooseRange(tree, "year");
     expect(tree.root.findAllByType("DonutChart" as never)).toHaveLength(0);
-    await act(async () =>
-      tree.root
-        .findByProps({ accessibilityLabel: "Show month reports" })
-        .props.onPress(),
-    );
+    await chooseRange(tree, "month");
     await act(async () =>
       resolveYear({ ...result(year), totalSeconds: 999999 }),
     );
@@ -276,11 +287,7 @@ describe("Revision 2 Reports owner", () => {
       tree.root.findByType("ReportActivityChart" as never).props.buckets,
     ).toHaveLength(30);
     mocks.fetch.mockRejectedValue(new Error("offline"));
-    await act(async () =>
-      tree.root
-        .findByProps({ accessibilityLabel: "Show week reports" })
-        .props.onPress(),
-    );
+    await chooseRange(tree, "week");
     expect(tree.root.findAllByType("DonutChart" as never)).toHaveLength(0);
     expect(JSON.stringify(tree.toJSON())).toContain(
       "Connect to load this report range",

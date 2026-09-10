@@ -1,13 +1,19 @@
-import { useEffect, useMemo, useState } from "react";
-import { Pressable, Text, View } from "react-native";
+import { useEffect, useState } from "react";
+import { Pressable, Text, View, useWindowDimensions } from "react-native";
 import Reanimated from "react-native-reanimated";
-import Svg, { Path } from "react-native-svg";
-import { pressable, type MobileStyles, type MobileTheme } from "@/lib/mobileTheme";
+import {
+  pressable,
+  type MobileStyles,
+  type MobileTheme,
+} from "@/lib/mobileTheme";
 import {
   localPresenceEntering,
   localPresenceExiting,
-  useReduceMotionPreference
+  useReduceMotionPreference,
 } from "@/lib/motion";
+import { DatePickerCalendar } from "@/components/calendar/DatePickerCalendar";
+import { formatLocalDateKey, startOfLocalDay } from "@/lib/reportsRanges";
+import { REPORT_TEXT_CAP } from "@/lib/reportsTypography";
 
 export function FloatingDatePicker({
   maxDate = null,
@@ -16,7 +22,7 @@ export function FloatingDatePicker({
   selectedDate,
   styles,
   theme,
-  visible
+  visible,
 }: {
   maxDate?: Date | null;
   onClose: () => void;
@@ -27,29 +33,27 @@ export function FloatingDatePicker({
   visible: boolean;
 }) {
   const reduceMotion = useReduceMotionPreference();
-  const [month, setMonth] = useState(() => startOfMonth(selectedDate));
-  const selectedDayKey = formatDateKey(selectedDate);
-  const today = startOfDay(new Date());
-  const maxDay = maxDate ? startOfDay(maxDate) : null;
-  const todayKey = formatDateKey(today);
-
+  const { width, height } = useWindowDimensions();
+  const selectedDayKey = formatLocalDateKey(selectedDate);
+  const [month, setMonth] = useState(() => `${selectedDayKey.slice(0, 7)}-01`);
+  const today = startOfLocalDay(new Date());
   useEffect(() => {
-    if (visible) setMonth(startOfMonth(selectedDate));
+    if (visible) setMonth(`${selectedDayKey.slice(0, 7)}-01`);
   }, [selectedDayKey, visible]);
-
-  const days = useMemo(() => monthGridDays(month), [month]);
-  const nextMonthDisabled = Boolean(
-    maxDay && addMonths(month, 1).getTime() > startOfMonth(maxDay).getTime()
-  );
-
   if (!visible) return null;
-
   return (
     <Reanimated.View
       accessibilityViewIsModal
+      onAccessibilityEscape={onClose}
       entering={localPresenceEntering(reduceMotion)}
       exiting={localPresenceExiting(reduceMotion)}
-      style={styles.datePickerOverlay}
+      style={[
+        styles.datePickerOverlay,
+        {
+          paddingHorizontal: 0,
+          paddingTop: Math.min(118, Math.max(12, (height - 450) / 2)),
+        },
+      ]}
     >
       <Pressable
         accessibilityLabel="Close date picker"
@@ -60,157 +64,54 @@ export function FloatingDatePicker({
       <Reanimated.View
         accessibilityLabel="Choose a date"
         entering={localPresenceEntering(reduceMotion, "rise")}
-        style={styles.datePickerSheet}
+        style={[
+          styles.datePickerSheet,
+          { width: Math.min(361, width), paddingHorizontal: 6 },
+        ]}
       >
-          <View style={styles.datePickerHeader}>
-            <Pressable
-              accessibilityLabel="Previous month"
-              accessibilityRole="button"
-              onPress={() => setMonth((current) => addMonths(current, -1))}
-              style={pressable(styles.datePickerNavButton, styles.buttonPressed)}
-            >
-              <CalendarChevronGlyph color={theme.textPrimary} direction="left" />
-            </Pressable>
-            <Text style={styles.datePickerMonth}>
-              {month.toLocaleDateString(undefined, { month: "long", year: "numeric" })}
-            </Text>
-            <Pressable
-              accessibilityLabel="Next month"
-              accessibilityRole="button"
-              accessibilityState={{ disabled: nextMonthDisabled }}
-              disabled={nextMonthDisabled}
-              onPress={() => setMonth((current) => addMonths(current, 1))}
-              style={({ pressed }) => [
-                styles.datePickerNavButton,
-                nextMonthDisabled ? styles.buttonDisabled : null,
-                pressed && !nextMonthDisabled ? styles.buttonPressed : null
-              ]}
-            >
-              <CalendarChevronGlyph color={theme.textPrimary} direction="right" />
-            </Pressable>
-          </View>
-          <View style={styles.datePickerWeekdays}>
-            {["M", "T", "W", "T", "F", "S", "S"].map((label, index) => (
-              <Text key={`${label}-${index}`} style={styles.datePickerWeekday}>{label}</Text>
-            ))}
-          </View>
-          <Reanimated.View
-            key={formatDateKey(month)}
-            entering={localPresenceEntering(reduceMotion)}
-            exiting={localPresenceExiting(reduceMotion)}
-            style={styles.datePickerGrid}
+        <DatePickerCalendar
+          month={month}
+          onMonthChange={setMonth}
+          start={selectedDayKey}
+          end={selectedDayKey}
+          today={formatLocalDateKey(today)}
+          maxDate={maxDate ? formatLocalDateKey(maxDate) : null}
+          onSelect={onSelect}
+          theme={theme}
+          reduceMotion={reduceMotion}
+        />
+        <View style={styles.datePickerActions}>
+          <Pressable
+            accessibilityLabel="Select today"
+            accessibilityRole="button"
+            onPress={() => onSelect(today)}
+            style={pressable(
+              styles.datePickerTodayButton,
+              styles.buttonPressed,
+            )}
           >
-            {days.map((date) => {
-              const dayKey = formatDateKey(date);
-              const selected = dayKey === selectedDayKey;
-              const isToday = dayKey === todayKey;
-              const inMonth = date.getMonth() === month.getMonth();
-              const disabled = Boolean(maxDay && startOfDay(date).getTime() > maxDay.getTime());
-              return (
-                <Pressable
-                  key={dayKey}
-                  accessibilityLabel={date.toLocaleDateString(undefined, {
-                    day: "numeric",
-                    month: "long",
-                    weekday: "long",
-                    year: "numeric"
-                  })}
-                  accessibilityRole="button"
-                  accessibilityState={{ disabled, selected }}
-                  disabled={disabled}
-                  onPress={() => onSelect(date)}
-                  style={({ pressed }) => [
-                    styles.datePickerDay,
-                    isToday ? styles.datePickerDayToday : null,
-                    selected ? styles.datePickerDaySelected : null,
-                    disabled ? styles.buttonDisabled : null,
-                    pressed && !disabled ? styles.buttonPressed : null
-                  ]}
-                >
-                  <Text style={[
-                    styles.datePickerDayText,
-                    !inMonth || disabled ? styles.datePickerDayTextOutside : null,
-                    selected ? styles.datePickerDayTextSelected : null
-                  ]}>
-                    {date.getDate()}
-                  </Text>
-                </Pressable>
-              );
-            })}
-          </Reanimated.View>
-          <View style={styles.datePickerActions}>
-            <Pressable
-              accessibilityLabel="Select today"
-              accessibilityRole="button"
-              onPress={() => onSelect(today)}
-              style={pressable(styles.datePickerTodayButton, styles.buttonPressed)}
+            <Text
+              maxFontSizeMultiplier={REPORT_TEXT_CAP.control}
+              style={styles.datePickerTodayText}
             >
-              <Text style={styles.datePickerTodayText}>Today</Text>
-            </Pressable>
-            <Pressable
-              accessibilityLabel="Close date picker"
-              accessibilityRole="button"
-              onPress={onClose}
-              style={pressable(styles.datePickerDoneButton, styles.buttonPressed)}
+              Today
+            </Text>
+          </Pressable>
+          <Pressable
+            accessibilityLabel="Close date picker"
+            accessibilityRole="button"
+            onPress={onClose}
+            style={pressable(styles.datePickerDoneButton, styles.buttonPressed)}
+          >
+            <Text
+              maxFontSizeMultiplier={REPORT_TEXT_CAP.control}
+              style={styles.datePickerDoneText}
             >
-              <Text style={styles.datePickerDoneText}>Done</Text>
-            </Pressable>
-          </View>
+              Done
+            </Text>
+          </Pressable>
+        </View>
       </Reanimated.View>
     </Reanimated.View>
   );
-}
-
-function CalendarChevronGlyph({ color, direction }: { color: string; direction: "left" | "right" }) {
-  return (
-    <Svg width={18} height={18} viewBox="0 0 24 24">
-      <Path
-        d={direction === "left" ? "m15 18-6-6 6-6" : "m9 18 6-6-6-6"}
-        fill="none"
-        stroke={color}
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        strokeWidth={2}
-      />
-    </Svg>
-  );
-}
-
-function startOfDay(date: Date) {
-  const copy = new Date(date);
-  copy.setHours(0, 0, 0, 0);
-  return copy;
-}
-
-function startOfMonth(date: Date) {
-  const copy = startOfDay(date);
-  copy.setDate(1);
-  return copy;
-}
-
-function addDays(date: Date, days: number) {
-  const copy = new Date(date);
-  copy.setDate(copy.getDate() + days);
-  return copy;
-}
-
-function addMonths(date: Date, months: number) {
-  const copy = startOfMonth(date);
-  copy.setMonth(copy.getMonth() + months);
-  return copy;
-}
-
-function monthGridDays(month: Date) {
-  const firstDay = startOfMonth(month);
-  const mondayOffset = (firstDay.getDay() + 6) % 7;
-  const gridStart = addDays(firstDay, -mondayOffset);
-  return Array.from({ length: 42 }, (_, index) => addDays(gridStart, index));
-}
-
-function formatDateKey(date: Date) {
-  return [date.getFullYear(), pad2(date.getMonth() + 1), pad2(date.getDate())].join("-");
-}
-
-function pad2(value: number) {
-  return value.toString().padStart(2, "0");
 }

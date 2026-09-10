@@ -187,9 +187,9 @@ describe("Revision 2 Reports projection", () => {
     (max) => {
       const axis = reportAxis(max);
       expect(axis.maximum).toBeGreaterThanOrEqual(max);
-      expect(axis.ticks).toHaveLength(5);
+      expect(axis.ticks).toHaveLength(3);
       expect(axis.ticks.at(-1)?.seconds).toBe(0);
-      expect(axis.ticks.every((t) => !t.label.includes("."))).toBe(true);
+      expect(new Set(axis.ticks.map((t) => t.label)).size).toBe(3);
     },
   );
 });

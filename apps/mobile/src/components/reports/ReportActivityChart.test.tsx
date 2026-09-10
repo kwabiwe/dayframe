@@ -26,6 +26,14 @@ vi.mock(
   "@/lib/reportsPresentation",
   async () => import("../../lib/reportsPresentation"),
 );
+vi.mock("@/lib/reportPlot", async () => import("../../lib/reportPlot"));
+vi.mock(
+  "@/lib/reportsTypography",
+  async () => import("../../lib/reportsTypography"),
+);
+vi.mock("@/components/calendar/DatePickerCalendar", () => ({
+  CalendarGlyph: "CalendarGlyph",
+}));
 import { ReportActivityChart } from "./ReportActivityChart";
 const buckets = [0, 7200].map((seconds, index) => ({
   key: String(index),
@@ -36,7 +44,7 @@ const buckets = [0, 7200].map((seconds, index) => ({
   seconds,
 }));
 describe("Activity chart", () => {
-  it("retains zero-height data, 44pt targets, concurrency and a bounded non-reflow tooltip", () => {
+  function mount() {
     let tree!: ReturnType<typeof create>;
     act(() => {
       tree = create(
@@ -48,21 +56,69 @@ describe("Activity chart", () => {
         />,
       );
     });
+    const plot = () => tree.root.findByProps({ testID: "report-plot" });
+    const tap = (x: number) =>
+      act(() =>
+        plot().props.onPress({
+          stopPropagation: vi.fn(),
+          nativeEvent: { locationX: x },
+        }),
+      );
+    return { tree, plot, tap };
+  }
+  it("fits one adjustable plot, zero-height data and bounded tooltip controls", () => {
+    const { tree, plot, tap } = mount();
     const bars = tree.root.findAllByProps({ testID: "report-activity-bar" });
     expect(bars[0].props.style.at(-1).height).toBe(0);
     expect(bars[1].props.style.at(-1).height).toBeGreaterThan(0);
-    const target = tree.root.findByProps({ accessibilityLabel: "Hour 1, 2h" });
-    expect(target.props.style.minWidth).toBe(44);
-    act(() => target.props.onPress({ stopPropagation: vi.fn() }));
-    const tooltip = tree.root
-      .findAllByType("AnimatedView" as never)
-      .find(
-        (node) =>
-          Array.isArray(node.props.style) &&
-          node.props.style[0]?.position === "absolute",
-      );
-    expect(tooltip).toBeDefined();
-    expect(tooltip!.props.style[1].width).toBeLessThanOrEqual(240);
+    expect(plot().props.accessibilityRole).toBe("adjustable");
+    expect(tree.root.findAllByType("ScrollView" as never)).toHaveLength(0);
+    tap(180);
+    const tooltip = tree.root.findByProps({ testID: "report-tooltip" });
+    expect(tooltip.props.style[0].position).toBe("absolute");
+    expect(tooltip.props.style[1].width).toBeLessThanOrEqual(220);
+    expect(plot().props.accessibilityValue.text).toBe("Hour 1, 2 hours");
+    for (const name of [
+      "Previous bucket",
+      "Next bucket",
+      "Close bucket details",
+    ])
+      expect(
+        tree.root.findByProps({ accessibilityLabel: name }).props.style
+          .minWidth,
+      ).toBe(44);
+    tap(0);
+    expect(plot().props.accessibilityValue.text).toBe("Hour 0, 0 seconds");
+    act(() =>
+      plot().props.onAccessibilityAction({
+        nativeEvent: { actionName: "increment" },
+      }),
+    );
+    expect(plot().props.accessibilityValue.now).toBe(2);
+    act(() => tree.unmount());
+  });
+  it("keeps live ticks selected, ignores vertical scrolling, and dismisses on context change", () => {
+    const { tree, plot, tap } = mount();
+    tap(180);
+    act(() =>
+      tree.update(
+        <ReportActivityChart
+          buckets={buckets.map((b) => ({ ...b, seconds: b.seconds + 1 }))}
+          theme={{} as never}
+          reduceMotion
+          contextKey="one"
+        />,
+      ),
+    );
+    expect(plot().props.accessibilityValue.text).toBe(
+      "Hour 1, 2 hours, 1 second",
+    );
+    act(() => {
+      plot().props.onTouchStart({ nativeEvent: { pageY: 0 } });
+      plot().props.onTouchMove({ nativeEvent: { pageY: 30 } });
+    });
+    tap(0);
+    expect(plot().props.accessibilityValue.now).toBe(2);
     act(() =>
       tree.update(
         <ReportActivityChart
@@ -73,39 +129,9 @@ describe("Activity chart", () => {
         />,
       ),
     );
-    expect(
-      tree.root.findAllByProps({ accessibilityLiveRegion: "polite" }),
-    ).toHaveLength(0);
-    act(() => tree.unmount());
-  });
-  it("outside press and zero buckets dismiss the latest tooltip", () => {
-    let tree!: ReturnType<typeof create>;
-    act(() => {
-      tree = create(
-        <ReportActivityChart
-          buckets={buckets}
-          theme={{} as never}
-          reduceMotion
-          contextKey="one"
-        />,
-      );
-    });
-    const tap = (label: string) =>
-      act(() =>
-        tree.root
-          .findByProps({ accessibilityLabel: label })
-          .props.onPress({ stopPropagation: vi.fn() }),
-      );
-    tap("Hour 1, 2h");
-    tap("Hour 0, 0m");
-    expect(
-      tree.root.findAllByProps({ accessibilityLiveRegion: "polite" }),
-    ).toHaveLength(0);
-    tap("Hour 1, 2h");
-    act(() => tree.root.findByProps({ accessible: false }).props.onPress());
-    expect(
-      tree.root.findAllByProps({ accessibilityLiveRegion: "polite" }),
-    ).toHaveLength(0);
+    expect(tree.root.findAllByProps({ testID: "report-tooltip" })).toHaveLength(
+      0,
+    );
     act(() => tree.unmount());
   });
 });

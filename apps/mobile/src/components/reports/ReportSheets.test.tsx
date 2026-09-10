@@ -22,6 +22,29 @@ vi.mock(
   "@/lib/reportsSelection",
   async () => import("../../lib/reportsSelection"),
 );
+vi.mock(
+  "@/lib/reportDateDraft",
+  async () => import("../../lib/reportDateDraft"),
+);
+vi.mock(
+  "@/lib/reportsTypography",
+  async () => import("../../lib/reportsTypography"),
+);
+vi.mock(
+  "@/lib/datePickerCalendar",
+  async () => import("../../lib/datePickerCalendar"),
+);
+vi.mock("@/lib/motion", () => ({ MOBILE_MOTION: { control: 140 } }));
+vi.mock(
+  "@/components/calendar/DatePickerCalendar",
+  async () => import("../calendar/DatePickerCalendar"),
+);
+vi.mock("react-native-svg", () => ({ default: "Svg", Path: "Path" }));
+vi.mock("react-native-reanimated", () => ({
+  default: { View: "AnimatedView" },
+  FadeIn: { duration: () => ({}) },
+  FadeOut: { duration: () => ({}) },
+}));
 import { ReportDateSheet, ReportFiltersSheet } from "./ReportSheets";
 const theme = {} as never;
 const options = ["Work", "Rest"].map((name) => ({
@@ -39,7 +62,11 @@ function mount(element: React.ReactElement) {
   const button = (label: string) =>
     tree.root
       .findAllByType("Pressable" as never)
-      .find((node) => node.props.accessibilityLabel === label)!;
+      .find(
+        (node) =>
+          node.props.accessibilityLabel === label ||
+          node.props.accessibilityLabel?.startsWith(`${label},`),
+      )!;
   const press = (label: string) =>
     act(() => {
       const node = button(label);
@@ -100,7 +127,7 @@ describe("Reports sheet interactions", () => {
         onCancel = vi.fn();
       const { tree, button, press } = mount(
         <ReportDateSheet
-          initial={null}
+          initial="today"
           nowMs={+new Date(2026, 8, 9, 12)}
           {...{ theme, onApply, onCancel }}
           reduceMotion={false}
@@ -110,12 +137,12 @@ describe("Reports sheet interactions", () => {
         new Date(2026, 8, n).toLocaleDateString(undefined, {
           dateStyle: "full",
         });
-      expect(button("Done").props.disabled).toBe(true);
+      expect(button("Done").props.disabled).toBe(false);
       expect(button("Next month").props.disabled).toBe(true);
       expect(button(day(10)).props.disabled).toBe(true);
-      expect(button(day(9)).props.style[0]).toMatchObject({
-        minHeight: 44,
-        minWidth: 44,
+      expect(button(day(9)).props.style).toMatchObject({
+        height: 44,
+        width: `${100 / 7}%`,
       });
       press(day(9));
       expect(button("Done").props.disabled).toBe(true);
@@ -130,7 +157,7 @@ describe("Reports sheet interactions", () => {
       expect(button("Next month").props.disabled).toBe(false);
       press("Next month");
       expect(button("Next month").props.disabled).toBe(true);
-      press("Cancel Custom range");
+      press("Cancel Choose report dates");
       expect(onCancel).toHaveBeenCalledOnce();
       expect(tree.root.findByType("Modal" as never).props.animationType).toBe(
         "fade",
@@ -142,7 +169,7 @@ describe("Reports sheet interactions", () => {
     const onApply = vi.fn();
     const { tree, button, press } = mount(
       <ReportDateSheet
-        initial={null}
+        initial="today"
         nowMs={+new Date(2026, 8, 9, 12)}
         theme={theme}
         onApply={onApply}
