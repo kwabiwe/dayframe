@@ -137,6 +137,10 @@ describe("Reports sheet interactions", () => {
         new Date(2026, 8, n).toLocaleDateString(undefined, {
           dateStyle: "full",
         });
+      const body = tree.root.findAllByType("ScrollView" as never).find(n => !n.props.horizontal)!;
+      // At 320pt: 288pt sheet content + 20pt viewport expansion = 308 / 7 = 44.
+      expect(body.props.style.marginHorizontal).toBe(-10);
+      expect(body.props.contentContainerStyle.paddingHorizontal).toBe(10);
       expect(button("Done").props.disabled).toBe(false);
       expect(button("Next month").props.disabled).toBe(true);
       expect(button(day(10)).props.disabled).toBe(true);

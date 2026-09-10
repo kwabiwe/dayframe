@@ -1,5 +1,9 @@
 # Reports Revision 2 implementation evidence
 
+Historical evidence: the owner-approved Revision 3 plan supersedes this UI and
+its acceptance requirements. Preserve the tested aggregate/API/sync foundations;
+V2 approvals do not approve V3. See the Revision 3 investigation for current work.
+
 Revision 2 supersedes the Revision 1 design and acceptance evidence for PR #194.
 Starting head: `09e7e2012ea440dc9b0847e4edf45f4b2135079c`; fetched main:
 `439601c64880fe7bc4bc4618920149b0ce85e341`. Worktree initially clean.

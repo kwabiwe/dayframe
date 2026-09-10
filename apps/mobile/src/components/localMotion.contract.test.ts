@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
 const pickerSource = source("./FloatingDatePicker.tsx");
+const calendarSource = source("./calendar/DatePickerCalendar.tsx");
 const reviewSource = source("../../app/review.tsx");
 const placesSource = source("../../app/places.tsx");
 
@@ -12,7 +13,12 @@ describe("local motion ownership contracts", () => {
   it("keeps picker presence and month continuity with the local Reanimated owner", () => {
     expect(pickerSource).toContain("localPresenceEntering");
     expect(pickerSource).toContain("localPresenceExiting");
-    expect(pickerSource).toContain("key={formatDateKey(month)}");
+    expect(pickerSource).toContain("<DatePickerCalendar");
+    expect(calendarSource).toContain("key={month}");
+    expect(calendarSource).toContain("height: 264");
+    expect(calendarSource).toContain("FadeIn.duration");
+    expect(calendarSource).toContain("FadeOut.duration");
+    expect(calendarSource).not.toContain("LayoutAnimation.configureNext");
     expect(pickerSource).not.toContain("LayoutAnimation.configureNext");
   });
 

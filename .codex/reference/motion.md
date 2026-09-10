@@ -69,6 +69,18 @@ Tests should protect state ordering, timers, rollback, stable keys, and animatio
 
 ## Anti-Patterns
 
+Reports Revision 3 uses one fixed six-week calendar frame for month fades, not two
+in-flow months. Outgoing calendar/row/donut visuals must cease interaction and
+accessibility immediately. Donut exits retain IDs until zero-sweep completion;
+cleanup checks the current transition generation and desired IDs so rapid removal,
+restore and removal cannot delete a newer visual. Survivors interpolate to the
+selected-only denominator. Row removal restores focus to Filters. One bounded
+tooltip moves/replaces locally and keeps its selection on live timer ticks;
+outside presses and range/filter/focus/background changes dismiss it. Reduce
+Motion and background settle current state without replaying the entrance.
+Validate the complete transition and rapid interruption on an identified binary;
+mock timing and screenshots alone do not establish smooth device motion.
+
 - Conditionally mounting or removing a visible surface with no entrance or exit treatment.
 - Animating a swiped row while leaving its action stationary or animating the action while the resulting list reflow jumps.
 - Giving entrance motion to a notice but no exit, timeout, replacement, or Undo-restoration motion.

@@ -48,21 +48,30 @@ Use this when working on frontend components.
 - Mobile connectivity status has one root state/announcement owner and one fixed 44-point visual slot immediately after the Dayframe wordmark in the shared primary-tab header. The slot remains reserved when settled so status transitions never move the wordmark, staging badge, Settings action or page content. Confirmed offline uses a neutral `textSecondary` cloud-slash and supersedes the other one-slot states. Confirmed online durable work waiting for connectivity, dependency, or retry is background-only and leaves the slot visually empty; only a live reconnect/recovery delivery attempt shows and rotates neutral circular arrows. A live account-owned pending-count transition from non-zero to zero uses a neutral cloud-check for about two seconds before the slot becomes visually empty. Permanent timer Stop or time-entry Edit/Delete rejection uses a persistent neutral cloud-X button that opens Settings > Sync & diagnostics whenever offline is not current. Rejected Stops restore server timer truth and appear in the existing diagnostics list with plain Retry Stop and Discard Stop actions. The root announces each distinct transition once; the focused tab's icon remains one manually revisitable labelled element without duplicate SVG traversal. Reduce Motion preserves short opacity changes but stops rotation. Never infer completion from reachability/pass outcome or use status to disable an offline-capable action.
 - Move location and HealthKit permission controls to onboarding and Settings.
 
-## Mobile Reports Revision 2
+## Mobile Reports Revision 3
 
-- One compact mobile Reports surface uses a horizontally scrolling Today / Week / Month / Year strip, separate calendar action, range heading and category-filter icon/count.
+- One compact mobile Reports surface has one range chooser and one funnel/count action. Today / Week / Month / Year presets live inside the shared date sheet, not on a permanent strip or a duplicate range heading. Date changes remain drafts until Done; Cancel, backdrop and blur discard them; unchanged Done does not refetch.
 - The donut centre shows Total: summed confirmed logged activity clipped to the selected range. Concurrent entries count independently; there is no Time covered card or overlap explanation in mobile Reports. Web/Today goal coverage semantics are unchanged.
-- Category slices and percentages retain the all-category denominator; excluded categories stay dimmed. Compact accessible category rows and slices toggle the same all/include/none selection. Zero selection is valid and says No categories selected. All positive categories remain reachable, including Uncategorized and unavailable stable IDs.
+- Only selected positive categories appear in the donut and summary rows. Angles, totals and percentages use the selected denominator, including spoken values. All/include/none stays reversible through the full category catalogue; None is valid and explains No categories selected. Bare ticks/dashes show filter selection, including mixed All. Uncategorized, duplicate names and unavailable stable IDs remain distinct.
 - Custom ranges use inclusive device-local dates, reversible endpoint selection, no future dates and a maximum of 366 calendar days. Presets use local calendar boundaries and Week begins Monday.
-- Activity over time follows the same selected range and filter: clock hours for Today/one day (including 23/25-hour DST days), days for Week/Month or 2–31 custom days, clipped weeks for 32–180 days and clipped months for 181–366 days/Year. Bars have a zero baseline, nice duration axis, sparse labels and accessible single-bucket tooltips.
+- Activity over time follows the same selected range and filter: clock hours for Today/one day (including 23/25-hour DST days), days for Week/Month or 2–31 custom days, clipped weeks for 32–180 days and clipped months for 181–366 days/Year. The entire plot fits without horizontal scrolling: zero-height zero buckets, three nice axis ticks, sparse labels and one bounded moving tooltip. One plot-level nearest-slot target supports zero buckets; adjustable accessibility and 44-point Previous/Next actions replace overlapping invisible per-bar targets.
 - Confirmed active timer contribution follows the existing projected timer through one current instant; Review-needed entries and suggestions never contribute. Month/Year/custom use bounded authenticated aggregates rather than raw history. An unavailable uncached range says Connect to load this report range; cached results never masquerade as another range.
-- Donut geometry follows available width, never font scale. At accessibility text sizes, a scalable Total appears in normal flow beside the bounded centre text. First populated focused entrance occurs once per mounted account owner; later changes interpolate locally and Reduce Motion settles geometry.
+- Donut geometry follows available width, never font scale; show its clock total once, in the centre when it fits or in one bounded companion line. Durations use unbounded-hour HH:MM:SS, flooring only final labels, with natural spoken durations. Category rows remain one line at every supported width/text size: only names ellipsise; percentages and durations remain complete. Dense roles have explicit local scaling caps, not global suppression.
 
-Use local Reanimated slice/centre/bar/row owners and existing modal presentation;
-no global LayoutAnimation. Filter drafts apply none without a validation blocker;
-All exposes checked/mixed/unchecked semantics and toggles off/on. Keep horizontal
-preset targets fully visible on selection and at least 44 points. Tooltip overlays
-must not reflow the plot, must stay bounded, and dismiss on range/filter/outside press.
+Use local Reanimated owners and existing modal presentation; no global LayoutAnimation.
+The shared popup calendar reserves 42 Monday-first cells in six 44-point rows.
+Each endpoint is a square 36-point circular foreground, independent of the full-cell
+continuous range band; shared callers retain their own timestamp and commit rules.
+Month transitions use one fixed-height frame, with outgoing visuals non-interactive.
+Donut removals retain stable visual IDs through zero-sweep exit, disable outgoing
+interaction immediately, and ignore stale cleanup generations. Row removal returns
+focus to Filters. First populated focused entrance runs once; background/blur and
+Reduce Motion settle without replay. Tooltip replacement moves/fades locally,
+survives live ticks and dismisses on outside or semantic-context changes.
+
+Local caps: heading 1.5, controls 1.3, names 1.35, numbers/centre/badge/axis 1.2,
+calendar 1.25. Explanations retain system scaling. Never stack category numeric
+columns, truncate durations/percentages or manually scale a font twice.
 
 ## State And Forms
 

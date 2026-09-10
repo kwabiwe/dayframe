@@ -339,7 +339,8 @@ function ReportSheet({
           <ScrollView
             keyboardShouldPersistTaps="handled"
             automaticallyAdjustKeyboardInsets
-            contentContainerStyle={{ gap: 4 }}
+            style={hideTitle ? { marginHorizontal: -10 } : undefined}
+            contentContainerStyle={{ gap: 4, paddingHorizontal: hideTitle ? 10 : 0 }}
           >
             {children}
           </ScrollView>
