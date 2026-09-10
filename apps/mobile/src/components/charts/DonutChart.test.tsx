@@ -7,6 +7,7 @@ vi.mock("react", async () => {
 });
 
 let fontScale = 1;
+const animation = vi.hoisted(() => ({ completions: [] as Array<(finished: boolean) => void> }));
 
 vi.mock("react-native", () => ({
   StyleSheet: { create: (styles: unknown) => styles },
@@ -21,7 +22,11 @@ vi.mock("react-native-reanimated", () => ({
   createAnimatedComponent: () => "AnimatedPath",
   useAnimatedProps: (factory: () => unknown) => factory(),
   useSharedValue: (value: unknown) => ({ value }),
-  withTiming: (value: unknown) => value,
+  runOnJS: (fn: (...args: unknown[]) => unknown) => fn,
+  withTiming: (value: unknown, _config: unknown, completion?: (finished: boolean) => void) => {
+    if (completion) animation.completions.push(completion);
+    return value;
+  },
 }));
 
 vi.mock("react-native-svg", () => ({
@@ -52,6 +57,42 @@ const segments = [
 ];
 
 describe("DonutChart", () => {
+  it("keeps exact natural spoken seconds without opting the total into live announcements", () => {
+    let tree!: ReturnType<typeof create>;
+    const render = (value: string, spoken: string) => <DonutChart animateEntrance={false} centerLabel="Total" centerValue={value} spokenValue={spoken} reduceMotion segments={segments} theme={theme} />;
+    act(() => { tree = create(render("01:00:00", "1 hour")); });
+    const chart = () => tree.root.findByProps({ accessibilityRole: "image" });
+    expect(chart().props.accessibilityLiveRegion).toBe("none");
+    act(() => tree.update(render("01:00:01", "1 hour, 1 second")));
+    expect(chart().props.accessibilityLabel).toContain("Total 1 hour, 1 second. 1 categories.");
+    expect(chart().props.accessibilityLiveRegion).toBe("none");
+    act(() => tree.unmount());
+  });
+
+  it("retains inert outgoing IDs and rejects their stale completion after restore and another removal", () => {
+    animation.completions = [];
+    let tree!: ReturnType<typeof create>;
+    const all = [...segments, { id: "rest", value: 1000, color: "red", selected: true }];
+    const render = (items: typeof all) => <DonutChart animateEntrance={false} centerLabel="Total" centerValue="01:00:01" reduceMotion={false} segments={items} theme={theme} onSegmentPress={vi.fn()} />;
+    act(() => { tree = create(render(all)); });
+    act(() => tree.update(render(all.slice(1))));
+    const oldExit = [...animation.completions];
+    const paths = () => tree.root.findAllByType("AnimatedPath" as never);
+    expect(paths()).toHaveLength(2);
+    expect(paths().find(p => p.props.fill === "blue")?.props.onPress).toBeUndefined();
+    act(() => tree.update(render(all)));
+    act(() => oldExit.forEach(done => done(true)));
+    expect(paths()).toHaveLength(2);
+    expect(paths().find(p => p.props.fill === "blue")?.props.onPress).toBeTypeOf("function");
+    act(() => tree.update(render(all.slice(1))));
+    act(() => oldExit.forEach(done => done(true)));
+    expect(paths()).toHaveLength(2);
+    const latest = [...animation.completions];
+    act(() => latest.forEach(done => done(true)));
+    expect(paths()).toHaveLength(1);
+    expect(paths()[0].props.fill).toBe("red");
+    act(() => tree.unmount());
+  });
   it.each([
     [1.25, 184, 104],
     [1.5, 184, 104],

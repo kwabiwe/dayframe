@@ -121,6 +121,9 @@ export function DonutChart({
   return (
     <View
       accessible
+      // Read the exact current total when visited, never opt this ticking value
+      // into live announcements. iOS label assignment is passive (no notification).
+      accessibilityLiveRegion="none"
       accessibilityLabel={`Category breakdown. ${centerLabel} ${spokenValue ?? centerValue}. ${segments.length} categories. Category controls follow the chart.`}
       accessibilityRole="image"
       onLayout={measureAvailableWidth}

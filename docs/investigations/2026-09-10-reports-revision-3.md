@@ -80,3 +80,58 @@ selection (9 files, 80 tests). New pure contracts include clock durations throug
 cleanup. These are not physical layout or animation evidence. Full repository,
 new native binary and independent review are still NOT RUN at this checkpoint.
 Canonical documentation updates remain part of the unfinished V3 implementation.
+
+### Reviewed implementation checkpoint and follow-up
+
+Checkpoint `13b1b03f84246c3cce2735bd81a944420cd5fe8f` passed the full local
+suite: mobile 1079, web 898 (two skips), shared 246 tests. The disposable localhost
+PostgreSQL report/API run separately passed all nine tests, including the SQL
+fixture skipped without a database. UTC and Europe/London focused runs each
+passed 45 tests. Lint passed with two existing unused-variable warnings in web
+tests; typecheck, development-auth web build, docs (132 Markdown files), brand,
+iOS configuration, Review/Location SQLite and 44 native shared-storage checks
+passed. An initial full run failed one obsolete calendar source-location
+assertion; the shared-component contract was corrected and the full run passed.
+CI's clean Simulator, both disposable PostGIS jobs, docs and Preview checks passed.
+
+The signed Staging build was installed and launched on the owner's iPhone 11
+(iOS 27.0 beta, build 24A5418b): isolated bundle
+`com.layereight.dayframe.staging`, version 0.1.0 (1), source checkpoint above.
+Its bundled JavaScript SHA-256 is
+`2c2d54df8e496c85195373d62cc9f5938719f6a5e6201f1bd4008285be27c8a3`.
+The compiled API default was verified as `https://dayframe-staging.vercel.app`,
+and signed-app configuration checks passed. A separate clean Staging Simulator
+build passed. Build/install/launch do not establish physical UI acceptance.
+
+The exact Ready Preview is `https://dayframe-ghm22or5e-dayframeworkshop.vercel.app`,
+deployment `dpl_Efj9fpsAkKfEPEkQDE7HC9RMdYNm`. Its unauthenticated summary endpoint
+returned 401 as required. Stable-alias promotion, authenticated browser checks and
+physical V3 acceptance are still NOT RUN. Sensitive Preview environment values
+are redacted by Vercel; an empty CLI export is not backend-verification evidence.
+No production configuration or records were used for testing.
+
+Independent Claude review through OpenClaw examined the whole diff at this
+checkpoint: no Blocker, one Important concern about a ticking accessibility
+label, and acceptance conditional on physical evidence. Native RN 0.85.3 tracing
+shows `RCTViewComponentView.mm` assigns a changed accessibility label without
+posting an accessibility notification; the notification in `RCTViewManager.m`
+belongs to an accessibility-state update, not the label setter. Keep the exact
+spoken seconds when visited rather than introducing stale spoken totals.
+The follow-up explicitly marks the chart non-live and tests exact spoken updates
+and stale removal callbacks after restore/re-removal. The live-region property
+alone is not an iOS fix or proof of VoiceOver behaviour: focused and unfocused
+timer announcements still require physical verification and independent re-review.
+
+Remaining release gates include measured native text/container bounds at normal
+and maximum text, complete one-line numeric visibility, Bold Text, light/dark,
+VoiceOver, Reduce Motion and rapid/interrupted transitions, shared-picker
+running/stopped/Add Time flows, timer/Review/sync staging acceptance, verified
+staging backend and exact Preview promotion. iPhone 17 remains out of scope;
+iPhone 11 access/sign-in requires the owner. No gate is implied passed by mocks.
+
+Rollback before merge uses ordinary revert commits on this same branch, retaining
+the aggregate/API foundations and history; never reset unrelated work or delete
+entries, receipts, queues or account data. An app rollback can reinstall a known
+previous staging binary while leaving the compatible read-only API available.
+If the staging alias is promoted, record its previous deployment first so it can
+be restored explicitly. No production promotion or automatic merge is authorised.
