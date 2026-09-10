@@ -159,6 +159,9 @@ function createStyles(theme: MobileTheme) {
     todayListContent: {
       paddingBottom: 112
     },
+    reportsScrollContent: {
+      paddingBottom: 112
+    },
     settingsScrollView: {
       flex: 1
     },

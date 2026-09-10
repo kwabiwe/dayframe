@@ -2581,7 +2581,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
     return (
       <SafeAreaView collapsable={false} edges={["top", "left", "right"]} style={styles.safeArea}>
         <ScrollView
-          contentContainerStyle={styles.container}
+          contentContainerStyle={[styles.container, styles.reportsScrollContent]}
           directionalLockEnabled
           keyboardShouldPersistTaps="handled"
           refreshControl={

@@ -55,6 +55,41 @@ Owner assistance was requested to reproduce the maximum setting on iPhone 11;
 iPhone 17 settings have not been changed. No global cap reduction, Text defaults,
 dependency upgrade or Pods patch has been made.
 
+### Owner maximum-text screenshots, 20:40
+
+The owner supplied `IMG_0547.PNG` and `IMG_0548.PNG` from the iPhone 11 diagnostic
+at maximum accessibility text size. Reports, Today, Activity and the proxy Total
+have complete visible glyphs in both scroll positions. Today and the natural-
+height reference are deliberately uncapped controls; their enlargement/wrapping
+is not the reported crop. Content cut at a viewport edge scrolls into view in the
+second image. This is **PASS for the isolated visible text reproduction**, not
+acceptance of the actual Reports/Today/Calendar/header layout or donut centre.
+The displayed 308-point calendar is also not the failing 390-point fixture.
+
+Screenshot SHA-256 values (images remain local, not committed):
+- `IMG_0547.PNG`: `af17ed38562880df32ba1cffee51f4e45688482bcef672d366c8d0db6d594492`
+- `IMG_0548.PNG`: `184bacb4c2969d21cb3bf3e3b84e5b3902f51b385e1812367b314585c0aca8bd`
+
+The first geometry export after receiving the screenshots was stale (scale 1).
+Restarting only the diagnostic app produced fresh **scale 0.941** geometry, with
+Reports/Today line height 31.443 inside a 31.5-point frame. No OS setting was
+changed by the agent. This later sample must not be labelled the screenshots'
+MAX-text geometry; whether the owner restored text size after capture remains
+to be confirmed. Local export: `/tmp/dayframe-r31-iphone11-owner-max-cold.json`.
+The evidence weakens a general native text-engine failure hypothesis, but does
+not establish the real screens' failing parent/transition constraint.
+
+The owner confirmed they had restored text size after the screenshots, then set
+it back to maximum. A fresh diagnostic cold launch at 20:49 captured **scale
+3.571** on iPhone 11. Line heights fit their native Text frames: Reports
+50.121/50.5pt, uncapped Today 119.322/119.5pt, Activity 32.221/32.5pt, proxy Total
+17.184/17.5pt; the three-line reference totals 230.120/230.5pt. Together with the
+owner screenshots, this is **PASS for isolated MAX-text glyph/line-box fit on
+iOS 27**, including cold-launch measurement. Export:
+`/tmp/dayframe-r31-iphone11-confirmed-max.json`. It does not test the real donut
+label or production parent/transition constraints. No OS text setting was changed
+by the agent; the missing MAX-setting evidence is now collected.
+
 Native numeric probe at scale 3.571, 14-point tabular font capped at 1.2:
 `100%` 48 points, `<1%` 38, two-hour-digit duration 73, three 83, four 93,
 six 113 (each includes ceil-to-point plus 2-point safety). This proves the
@@ -64,6 +99,58 @@ SHA-256 `b13c5082ed78423fd67418693299622ceb13aa68a13ca69e9139a8fd51214ab3`;
 geometry `/tmp/dayframe-r31-native-numeric-max.json`.
 
 ## Validation checkpoint
+
+### Assembled Reports and native tab clearance follow-up
+
+The owner confirmed that the original clipping screenshots came from **Dayframe
+Staging**, not the separate Dayframe installation. Both use repeated build
+numbers, so this identifies the app but does not recover the screenshot's bundle
+fingerprint. The original clipping remains open pending actual-parent evidence.
+
+An explicit, network-disabled diagnostic bundles the real ReportsTab, chart and
+sheets with synthetic Sleep 6h / Work 2h / Travel 1h data and the existing native
+tab / SafeAreaView / ScrollView geometry. At 375 points, iOS 26.5, font scale
+3.571, Light: Reports, Activity and the real donut Total render complete glyphs;
+numeric rows remain one line (48-point percentage, 73-point duration, 6-point
+gap). Full category names remain in accessibility labels. Tapping the summary
+and donut leaves selection unchanged; filter-sheet Sleep deselection plus Apply
+produces 03:00:00 with Work 67% and Travel 33%. These are synthetic simulator
+presentation checks, not authenticated-app, Bold Text or physical acceptance.
+
+The initial diagnostic omitted SafeAreaProvider and failed when opening Filters;
+adding the provider corrected this **harness-only failure**, not a product bug.
+CUA drag/scroll attempts did not move the simulator reliably, so gesture
+acceptance is NOT RUN. A dedicated diagnostic action invokes native scrollToEnd
+and captures final offset/content/viewport geometry instead.
+
+At maximum extent with the original 20-point parent bottom padding, final axis
+labels remain under the expanded native floating tab bar. This **FAIL** is not
+transient overlap during scrolling. The contained correction applies the existing
+Today 112-point convention once at the Reports dashboard scroll-content owner;
+no chart padding, tab owner or lifecycle changes. The regression ownership test
+failed before the change. Motion contract: the existing native ScrollView owns
+direct scrolling, settling and interruption; this static content inset adds no
+animation, async work, rollback or Reduce Motion branch. Physical gesture feel
+and the normal authenticated app remain separate checks.
+
+After correction, the same MAX-text simulator shows the final 00/05/09/14/18/23
+axis labels completely above the expanded tab bar; the zero-bucket callout and
+Previous/Close/Next controls are bounded and reachable. Accessible Next moves
+from 00:00 to 01:00 without changing totals. **PASS for synthetic native-container
+maximum-extent clearance and these bucket actions**, not gesture/frame-pacing
+or normal-app acceptance. Before diagnostic bundle SHA-256:
+`39cd7419aa53a8c072da50f4bc620f081e03212c0911d699176f7f6d76119203`;
+after: `18fbf7758c248bac1b22ca29feef430e6f3a70e31e6024b700931833a051c461`.
+Geometry remains local at `/tmp/dayframe-r31-clearance-after.json`.
+
+Clearance-change validation: full typecheck, lint (the same two existing warnings),
+docs (133 files), brand assets and diff whitespace PASS. The full workspace test
+run passed web 898 (two skips) and shared 246, but mobile had one unchanged
+worklet-compilation test exceed its 5-second timeout while Metro was running
+(1,086 passed). A serial mobile rerun with unchanged timeout/assertions passed
+all **1,087** tests. Logs: `/tmp/dayframe-r31-clearance-tests.log` and
+`/tmp/dayframe-r31-clearance-mobile-rerun.log`. This records the failed attempt,
+not a claim that the first full command passed.
 
 - **PASS** full workspace typecheck, including mobile.
 - **PASS** lint (two pre-existing web `_values` warnings, no errors), docs
