@@ -74,7 +74,10 @@ in-flow months. Outgoing calendar/row/donut visuals must cease interaction and
 accessibility immediately. Donut exits retain IDs until zero-sweep completion;
 cleanup checks the current transition generation and desired IDs so rapid removal,
 restore and removal cannot delete a newer visual. Survivors interpolate to the
-selected-only denominator. Row removal restores focus to Filters. One bounded
+selected-only denominator. Category changes occur only through filter-sheet Apply;
+informational rows/slices never move focus. Month fade copies are immediately
+touch/AX hidden; queued taps validate the current generation, including A–B–A.
+One bounded
 tooltip moves/replaces locally and keeps its selection on live timer ticks;
 outside presses and range/filter/focus/background changes dismiss it. Reduce
 Motion and background settle current state without replaying the entrance.

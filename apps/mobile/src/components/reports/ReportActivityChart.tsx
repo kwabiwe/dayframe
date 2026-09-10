@@ -23,6 +23,7 @@ import {
 import { REPORT_TEXT_CAP } from "@/lib/reportsTypography";
 import type { ReportBucket } from "@/lib/reportsRanges";
 import { CalendarGlyph } from "@/components/calendar/DatePickerCalendar";
+import { useReportTextMeasure } from "./ReportTextMeasure";
 const HEIGHT = 168;
 export function ReportActivityChart({
   buckets,
@@ -37,10 +38,20 @@ export function ReportActivityChart({
 }) {
   const [tooltip, setTooltip] = useState<string | null>(null);
   const [plotWidth, setPlotWidth] = useState(220);
-  const [gutter, setGutter] = useState(38);
   const touch = useRef({ y: 0, moved: false });
   useEffect(() => setTooltip(null), [contextKey]);
   const axis = reportAxis(Math.max(0, ...buckets.map((b) => b.seconds)));
+  const measuredTicks = useReportTextMeasure(
+    axis.ticks.map((tick) => tick.label),
+    { fontSize: 10, fontVariant: ["tabular-nums"] },
+    REPORT_TEXT_CAP.small,
+  );
+  const gutter = Math.max(
+    1,
+    ...axis.ticks.map(
+      (tick) => measuredTicks.widths[tick.label] ?? tick.label.length * 8,
+    ),
+  );
   const selectedIndex = buckets.findIndex((b) => b.key === tooltip);
   const selected = buckets[selectedIndex];
   const labels = reportLabelIndices(buckets.length, plotWidth);
@@ -54,6 +65,7 @@ export function ReportActivityChart({
   };
   return (
     <View style={s.root} onTouchEnd={(event) => event.stopPropagation()}>
+      {measuredTicks.probe}
       <Pressable accessible={false} onPress={() => setTooltip(null)}>
         <Text
           maxFontSizeMultiplier={REPORT_TEXT_CAP.heading}
@@ -63,22 +75,12 @@ export function ReportActivityChart({
         </Text>
       </Pressable>
       <View style={s.plotRow}>
-        <View style={{ width: gutter, height: HEIGHT }}>
+        <View testID="report-axis" style={{ width: gutter, height: HEIGHT }}>
           {axis.ticks.map((tick) => (
             <Text
               key={tick.seconds}
               maxFontSizeMultiplier={REPORT_TEXT_CAP.small}
               numberOfLines={1}
-              onTextLayout={(event) => {
-                const measured =
-                  Math.ceil(
-                    Math.max(
-                      0,
-                      ...event.nativeEvent.lines.map((line) => line.width),
-                    ),
-                  ) + 4;
-                setGutter((current) => Math.max(current, measured));
-              }}
               style={[
                 s.tick,
                 {
@@ -341,10 +343,10 @@ const s = StyleSheet.create({
   plot: { flex: 1, minWidth: 0 },
   tick: {
     position: "absolute",
-    right: 0,
+    left: 0,
     fontSize: 10,
     fontVariant: ["tabular-nums"],
-    textAlign: "right",
+    textAlign: "left",
   },
   labels: { height: 30 },
   xLabel: { position: "absolute", top: 8, fontSize: 10, textAlign: "center" },

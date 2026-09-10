@@ -25,6 +25,17 @@ import {
 import { reportNumericColumns } from "./reportsTypography";
 const now = +new Date(2026, 8, 10, 12);
 describe("Revision 3 pure presentation contracts", () => {
+  it("reserves actual hour capacity, remains stable within it and recovers name space on shrink", () => {
+    const columns = (duration: string) =>
+      reportNumericColumns(256, 3.2, [duration]);
+    expect(columns("00:00:01")).toEqual(columns("26:30:50"));
+    expect(columns("99:59:59").durationSample).toBe("88:88:88");
+    expect(columns("100:00:00").durationSample).toBe("888:88:88");
+    expect(columns("9999:59:59").durationWidth).toBeGreaterThan(
+      columns("26:30:50").durationWidth,
+    );
+    expect(columns("00:00:01").gap).toBe(6);
+  });
   it.each([
     [0, "00:00:00"],
     [0.999, "00:00:00"],

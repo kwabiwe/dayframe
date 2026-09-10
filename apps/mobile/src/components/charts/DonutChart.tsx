@@ -41,7 +41,6 @@ export function DonutChart({
   centerLabel,
   centerValue,
   spokenValue,
-  onSegmentPress,
   reduceMotion,
   segments,
   settleImmediately,
@@ -51,7 +50,6 @@ export function DonutChart({
   centerLabel: string;
   centerValue: string;
   spokenValue?: string;
-  onSegmentPress?: (id: string) => void;
   reduceMotion: boolean;
   segments: readonly DonutChartSegment[];
   settleImmediately?: boolean;
@@ -121,10 +119,8 @@ export function DonutChart({
   return (
     <View
       accessible
-      // Read the exact current total when visited, never opt this ticking value
-      // into live announcements. iOS label assignment is passive (no notification).
-      accessibilityLiveRegion="none"
-      accessibilityLabel={`Category breakdown. ${centerLabel} ${spokenValue ?? centerValue}. ${segments.length} categories. Category controls follow the chart.`}
+      // Fabric assigns this exact label passively on iOS; no live announcement.
+      accessibilityLabel={`Category breakdown. ${centerLabel} ${spokenValue ?? centerValue}. ${segments.length} categories. Category information follows the chart.`}
       accessibilityRole="image"
       onLayout={measureAvailableWidth}
       style={styles.measurementBox}
@@ -166,11 +162,6 @@ export function DonutChart({
                 }
                 endAngle={segment.endAngle}
                 startAngle={segment.startAngle}
-                onPress={
-                  active && onSegmentPress
-                    ? () => onSegmentPress(segment.id)
-                    : undefined
-                }
                 reduceMotion={reduceMotion}
                 selected={active}
                 settleImmediately={settleImmediately}
@@ -226,7 +217,6 @@ function AnimatedDonutSlice({
   animateEntrance,
   color,
   endAngle,
-  onPress,
   reduceMotion,
   selected,
   settleImmediately = false,
@@ -236,7 +226,6 @@ function AnimatedDonutSlice({
   animateEntrance: boolean;
   color: string;
   endAngle: number;
-  onPress?: () => void;
   reduceMotion: boolean;
   selected: boolean;
   settleImmediately?: boolean;
@@ -290,13 +279,7 @@ function AnimatedDonutSlice({
     fillOpacity: opacity.value,
   }));
 
-  return (
-    <AnimatedPath
-      animatedProps={animatedProps}
-      fill={color}
-      onPress={onPress}
-    />
-  );
+  return <AnimatedPath animatedProps={animatedProps} fill={color} />;
 }
 
 function uncategorizedFill(theme: MobileTheme) {

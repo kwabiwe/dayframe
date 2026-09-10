@@ -5,6 +5,11 @@ vi.mock("react", async () => {
   return import("../../../../../node_modules/react/index.js");
 });
 vi.mock("react-native", () => ({
+  AccessibilityInfo: {
+    isBoldTextEnabled: async () => false,
+    addEventListener: () => ({ remove: vi.fn() }),
+  },
+  useWindowDimensions: () => ({ width: 375, fontScale: 1 }),
   Pressable: "Pressable",
   ScrollView: "ScrollView",
   StyleSheet: { create: (s: unknown) => s, hairlineWidth: 1 },
@@ -44,6 +49,48 @@ const buckets = [0, 7200].map((seconds, index) => ({
   seconds,
 }));
 describe("Activity chart", () => {
+  it("shrinks its current-label gutter and keeps labels anchored to the content left", () => {
+    let tree!: ReturnType<typeof create>;
+    const render = (seconds: number) => (
+      <ReportActivityChart
+        buckets={buckets.map((b) => ({ ...b, seconds }))}
+        theme={{} as never}
+        reduceMotion
+        contextKey={String(seconds)}
+      />
+    );
+    act(() => {
+      tree = create(render(99999999));
+    });
+    const probes = () =>
+      tree.root.findAll(
+        (n) =>
+          typeof n.props.testID === "string" &&
+          n.props.testID.startsWith("report-measure-"),
+      );
+    act(() =>
+      probes().forEach((n) =>
+        n.props.onTextLayout({ nativeEvent: { lines: [{ width: 100 }] } }),
+      ),
+    );
+    expect(
+      tree.root.findByProps({ testID: "report-axis" }).props.style.width,
+    ).toBe(102);
+    act(() => tree.update(render(60)));
+    act(() =>
+      probes().forEach((n) =>
+        n.props.onTextLayout({ nativeEvent: { lines: [{ width: 18 }] } }),
+      ),
+    );
+    const axis = tree.root.findByProps({ testID: "report-axis" });
+    expect(axis.props.style.width).toBe(20);
+    for (const label of axis.findAllByType("Text" as never))
+      expect(label.props.style[0]).toMatchObject({
+        left: 0,
+        textAlign: "left",
+      });
+    act(() => tree.unmount());
+  });
   function mount() {
     let tree!: ReturnType<typeof create>;
     act(() => {

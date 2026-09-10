@@ -193,7 +193,7 @@ The product UI uses system fonts. On iOS use San Francisco through React Nativeâ
 
 Use `font-variant-numeric: tabular-nums` on timers, durations, clock labels and report figures. Do not force monospace typography across the interface. Allow Dynamic Type to grow without clipping; labels may wrap before touch targets shrink.
 
-Mobile Reports Revision 3 is an explicit dense-layout exception: category rows
+Mobile Reports Revision 3 plus the final-fixes addendum is an explicit dense-layout exception: category rows
 remain one line at 320â€“430-point widths and maximum text size. Only long names
 ellipsise; complete percentages and HH:MM:SS values occupy reserved trailing
 columns and retain full spoken names/durations. Use local caps of 1.5 for headings,

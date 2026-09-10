@@ -1,5 +1,10 @@
+import { useLayoutEffect, useRef, useState } from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
-import Animated, { FadeIn, FadeOut } from "react-native-reanimated";
+import Animated, {
+  useAnimatedStyle,
+  useSharedValue,
+  withTiming,
+} from "react-native-reanimated";
 import Svg, { Path } from "react-native-svg";
 import { datePickerCells } from "@/lib/datePickerCalendar";
 import { formatLocalDateKey, parseLocalDate } from "@/lib/reportsRanges";
@@ -73,7 +78,42 @@ export function DatePickerCalendar({
   const nextDisabled = Boolean(
     maxDate && move(1) > `${maxDate.slice(0, 7)}-01`,
   );
-  const cells = datePickerCells(month, start, end, today, maxDate);
+  const activeMonth = useRef({ month, generation: 0 });
+  if (activeMonth.current.month !== month) {
+    activeMonth.current = {
+      month,
+      generation: activeMonth.current.generation + 1,
+    };
+  }
+  const generation = activeMonth.current.generation;
+  const [transition, setTransition] = useState({
+    month,
+    previous: null as string | null,
+  });
+  if (transition.month !== month) {
+    setTransition({ month, previous: reduceMotion ? null : transition.month });
+  }
+  const progress = useSharedValue(1);
+  const incomingStyle = useAnimatedStyle(() => ({ opacity: progress.value }));
+  const outgoingStyle = useAnimatedStyle(() => ({
+    opacity: 1 - progress.value,
+  }));
+  useLayoutEffect(() => {
+    if (!transition.previous || reduceMotion) {
+      progress.value = 1;
+      return;
+    }
+    progress.value = 0;
+    progress.value = withTiming(1, { duration: MOBILE_MOTION.control });
+    const timer = setTimeout(
+      () =>
+        setTransition((value) =>
+          value.month === month ? { month, previous: null } : value,
+        ),
+      MOBILE_MOTION.control + 32,
+    );
+    return () => clearTimeout(timer);
+  }, [month, transition.previous, reduceMotion, progress]);
   return (
     <View testID="date-picker-calendar">
       <View style={s.header}>
@@ -121,78 +161,119 @@ export function DatePickerCalendar({
         ))}
       </View>
       <View style={s.frame}>
-        <Animated.View
-          key={month}
-          entering={FadeIn.duration(reduceMotion ? 0 : MOBILE_MOTION.control)}
-          exiting={FadeOut.duration(reduceMotion ? 0 : MOBILE_MOTION.control)}
-          style={s.grid}
-        >
-          {cells.map((cell) => (
-            <Pressable
-              key={cell.key}
-              testID={`calendar-day-${cell.key}`}
-              accessibilityRole="button"
-              accessibilityLabel={`${cell.date.toLocaleDateString(undefined, { dateStyle: "full" })}${cell.meaning ? `, ${cell.meaning}` : ""}`}
-              accessibilityState={{
-                disabled: cell.disabled,
-                selected: cell.selected,
-              }}
-              disabled={cell.disabled}
-              onPress={() => onSelect(cell.date)}
-              style={s.cell}
+        {[
+          ...(transition.previous && !reduceMotion
+            ? [transition.previous]
+            : []),
+          month,
+        ].map((visibleMonth) => {
+          const outgoing = visibleMonth !== month;
+          const cells = datePickerCells(
+            visibleMonth,
+            start,
+            end,
+            today,
+            maxDate,
+          );
+          return (
+            <Animated.View
+              key={visibleMonth}
+              testID={outgoing ? "calendar-outgoing" : "calendar-current"}
+              pointerEvents={outgoing ? "none" : "auto"}
+              accessibilityElementsHidden={outgoing}
+              importantForAccessibility={
+                outgoing ? "no-hide-descendants" : "auto"
+              }
+              style={[s.grid, outgoing ? outgoingStyle : incomingStyle]}
             >
-              {cell.band !== "none" ? (
+              {Array.from({ length: 6 }, (_, week) => (
                 <View
-                  pointerEvents="none"
-                  testID={`calendar-band-${cell.key}`}
-                  style={[
-                    s.band,
-                    {
-                      backgroundColor: theme.accentSoft,
-                      left: cell.band === "start" ? "50%" : 0,
-                      right: cell.band === "end" ? "50%" : 0,
-                      borderTopLeftRadius: cell.column === 0 ? 6 : 0,
-                      borderBottomLeftRadius: cell.column === 0 ? 6 : 0,
-                      borderTopRightRadius: cell.column === 6 ? 6 : 0,
-                      borderBottomRightRadius: cell.column === 6 ? 6 : 0,
-                    },
-                  ]}
-                />
-              ) : null}
-              <View
-                pointerEvents="none"
-                testID={`calendar-circle-${cell.key}`}
-                style={[
-                  s.circle,
-                  {
-                    backgroundColor: cell.endpoint
-                      ? theme.accent
-                      : cell.today && !cell.selected
-                        ? theme.surfaceMuted
-                        : "transparent",
-                  },
-                ]}
-              >
-                <Text
-                  maxFontSizeMultiplier={REPORT_TEXT_CAP.calendar}
-                  numberOfLines={1}
-                  style={[
-                    s.day,
-                    {
-                      color: cell.endpoint
-                        ? theme.onAccent
-                        : cell.disabled || !cell.inMonth
-                          ? theme.textSecondary
-                          : theme.textPrimary,
-                    },
-                  ]}
+                  key={week}
+                  testID={`calendar-${outgoing ? "outgoing-" : ""}week-${visibleMonth}-${week}`}
+                  style={s.weekRow}
                 >
-                  {cell.date.getDate()}
-                </Text>
-              </View>
-            </Pressable>
-          ))}
-        </Animated.View>
+                  {cells.slice(week * 7, week * 7 + 7).map((cell) => (
+                    <Pressable
+                      key={cell.key}
+                      testID={`calendar-${outgoing ? "outgoing-" : ""}day-${cell.key}`}
+                      accessibilityRole="button"
+                      accessibilityLabel={`${cell.date.toLocaleDateString(undefined, { dateStyle: "full" })}${cell.meaning ? `, ${cell.meaning}` : ""}`}
+                      accessibilityState={{
+                        disabled: outgoing || cell.disabled,
+                        selected: cell.selected,
+                      }}
+                      disabled={outgoing || cell.disabled}
+                      onPress={
+                        outgoing
+                          ? undefined
+                          : () => {
+                              if (
+                                activeMonth.current.generation === generation &&
+                                activeMonth.current.month === visibleMonth &&
+                                !cell.disabled
+                              )
+                                onSelect(cell.date);
+                            }
+                      }
+                      style={s.cell}
+                    >
+                      {cell.band !== "none" ? (
+                        <View
+                          pointerEvents="none"
+                          testID={`calendar-band-${cell.key}`}
+                          style={[
+                            s.band,
+                            {
+                              backgroundColor: theme.accentSoft,
+                              left: cell.band === "start" ? "50%" : 0,
+                              right: cell.band === "end" ? "50%" : 0,
+                              borderTopLeftRadius: cell.column === 0 ? 6 : 0,
+                              borderBottomLeftRadius: cell.column === 0 ? 6 : 0,
+                              borderTopRightRadius: cell.column === 6 ? 6 : 0,
+                              borderBottomRightRadius:
+                                cell.column === 6 ? 6 : 0,
+                            },
+                          ]}
+                        />
+                      ) : null}
+                      <View
+                        pointerEvents="none"
+                        testID={`calendar-circle-${cell.key}`}
+                        style={[
+                          s.circle,
+                          {
+                            backgroundColor: cell.endpoint
+                              ? theme.accent
+                              : cell.today && !cell.selected
+                                ? theme.surfaceMuted
+                                : "transparent",
+                          },
+                        ]}
+                      >
+                        <Text
+                          maxFontSizeMultiplier={REPORT_TEXT_CAP.calendar}
+                          numberOfLines={1}
+                          style={[
+                            s.day,
+                            {
+                              color: cell.endpoint
+                                ? theme.onAccent
+                                : cell.disabled || !cell.inMonth
+                                  ? theme.textSecondary
+                                  : theme.textPrimary,
+                            },
+                          ]}
+                        >
+                          {cell.date.getDate()}
+                        </Text>
+                      </View>
+                    </Pressable>
+                  ))}
+                </View>
+              ))}
+            </Animated.View>
+          );
+        })}
       </View>
     </View>
   );
@@ -213,8 +294,16 @@ const s = StyleSheet.create({
     fontSize: 16,
     fontWeight: "600",
   },
-  week: { flexDirection: "row", paddingVertical: 8 },
-  weekday: { flex: 1, textAlign: "center", fontSize: 11, fontWeight: "600" },
+  week: { flexDirection: "row", flexWrap: "nowrap", paddingVertical: 8 },
+  weekday: {
+    flexGrow: 1,
+    flexShrink: 1,
+    flexBasis: 0,
+    minWidth: 0,
+    textAlign: "center",
+    fontSize: 11,
+    fontWeight: "600",
+  },
   frame: { height: 264 },
   grid: {
     position: "absolute",
@@ -222,11 +311,13 @@ const s = StyleSheet.create({
     bottom: 0,
     left: 0,
     right: 0,
-    flexDirection: "row",
-    flexWrap: "wrap",
   },
+  weekRow: { flexDirection: "row", flexWrap: "nowrap", height: 44 },
   cell: {
-    width: `${100 / 7}%`,
+    flexGrow: 1,
+    flexShrink: 1,
+    flexBasis: 0,
+    minWidth: 0,
     height: 44,
     justifyContent: "center",
     alignItems: "center",

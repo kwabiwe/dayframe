@@ -36,7 +36,6 @@ import {
   applyReportFilterDraft,
   openReportFilterDraft,
   refreshReportFilterDraft,
-  toggleReportCategory,
   type ReportCategorySelection,
   type ReportFilterDraft,
 } from "@/lib/reportsSelection";
@@ -44,6 +43,7 @@ import { fetchReportSummary, ReportRangeCache } from "@/lib/reportsClient";
 import { subscribeAuthenticatedSession } from "@/lib/secure-session";
 import { ReportActivityChart } from "./ReportActivityChart";
 import { ReportDateSheet, ReportFiltersSheet } from "./ReportSheets";
+import { useReportTextMeasure } from "./ReportTextMeasure";
 
 export function ReportsTab({
   data,
@@ -264,19 +264,23 @@ export function ReportsTab({
     fontScale,
     segments.map((s) => formatReportDuration(s.durationMs / 1000)),
   );
+  const measuredNumbers = useReportTextMeasure(
+    ["100%", "<1%", columns.durationSample],
+    { fontSize: columns.fontSize, fontVariant: ["tabular-nums"] },
+    REPORT_TEXT_CAP.numeric,
+  );
+  columns.percentWidth = Math.max(
+    measuredNumbers.widths["100%"] ?? columns.percentWidth,
+    measuredNumbers.widths["<1%"] ?? 0,
+  );
+  columns.durationWidth =
+    measuredNumbers.widths[columns.durationSample] ?? columns.durationWidth;
   const universeKey = JSON.stringify(universe);
   useEffect(() => {
     setDraft((current) =>
       current ? refreshReportFilterDraft(current, universe) : null,
     );
   }, [universeKey]);
-  const toggle = (key: string) => {
-    setSelection((current) => toggleReportCategory(current, key, universe));
-    requestAnimationFrame(() => {
-      const node = findNodeHandle(filterRef.current);
-      if (node) AccessibilityInfo.setAccessibilityFocus(node);
-    });
-  };
   const close = (calendar: boolean) => {
     setDraft(null);
     setCalendarOpen(false);
@@ -302,6 +306,7 @@ export function ReportsTab({
         }
         style={[s.surface, { backgroundColor: theme.surfaceRaised }]}
       >
+        {measuredNumbers.probe}
         <Text
           maxFontSizeMultiplier={REPORT_TEXT_CAP.heading}
           style={styles.reportScreenTitle}
@@ -393,7 +398,6 @@ export function ReportsTab({
                 centerLabel="Total"
                 spokenValue={spokenReportDuration(report.selectedLoggedSeconds)}
                 centerValue={formatReportDuration(report.selectedLoggedSeconds)}
-                onSegmentPress={toggle}
                 reduceMotion={reduceMotion}
                 settleImmediately={!isFocused || !foreground}
                 segments={segments.map((segment) => ({
@@ -433,12 +437,10 @@ export function ReportsTab({
                     : LinearTransition.duration(MOBILE_MOTION.layout)
                 }
               >
-                <Pressable
+                <View
                   accessible
-                  accessibilityRole="button"
+                  accessibilityRole="text"
                   accessibilityLabel={`${segment.categoryName}, ${formatReportPercent(segment.durationMs, report.selectedDurationMs)} of selected time, ${spokenReportDuration(segment.durationMs / 1000)}`}
-                  accessibilityHint="Removes this category. Restore it in Filters."
-                  onPress={() => toggle(segment.key)}
                   style={[
                     s.category,
                     { borderBottomColor: theme.border, gap: columns.gap },
@@ -486,7 +488,7 @@ export function ReportsTab({
                       {formatReportDuration(segment.durationMs / 1000)}
                     </Text>
                   </View>
-                </Pressable>
+                </View>
               </Animated.View>
             ))}
             <ReportActivityChart
@@ -577,7 +579,12 @@ const s = StyleSheet.create({
   },
   dot: { height: 10, width: 10, borderRadius: 5 },
   name: { flex: 1, minWidth: 0, fontSize: 14 },
-  numbers: { flexDirection: "row", flexWrap: "nowrap", flexShrink: 0 },
+  numbers: {
+    flexDirection: "row",
+    flexWrap: "nowrap",
+    flexShrink: 0,
+    alignItems: "baseline",
+  },
   number: { textAlign: "right", fontVariant: ["tabular-nums"], flexShrink: 0 },
   unavailable: { paddingVertical: 24, gap: 12 },
   retry: { minHeight: 44, justifyContent: "center" },

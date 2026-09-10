@@ -235,7 +235,31 @@ describe("Revision 3 Reports owner", () => {
     const chart = () => tree.root.findByType("DonutChart" as never);
     expect(chart().props.centerLabel).toBe("Total");
     expect(chart().props.centerValue).toBe("01:00:00");
-    await act(async () => chart().props.onSegmentPress("a"));
+    expect(chart().props.onSegmentPress).toBeUndefined();
+    const row = tree.root
+      .findAllByProps({ accessibilityRole: "text" })
+      .find((node) => node.props.accessibilityLabel.startsWith("Work,"))!;
+    expect(row.props.onPress).toBeUndefined();
+    expect(row.props.accessibilityHint).toBeUndefined();
+    await act(async () =>
+      tree.root
+        .findByProps({
+          accessibilityLabel: "Filter categories, all categories selected",
+        })
+        .props.onPress(),
+    );
+    await act(async () =>
+      tree.root
+        .findByType("ReportFiltersSheet" as never)
+        .props.onChange({
+          mode: "include",
+          keys: ["uncategorized"],
+          universe: ["a", "uncategorized"],
+        }),
+    );
+    await act(async () =>
+      tree.root.findByType("ReportFiltersSheet" as never).props.onApply(),
+    );
     expect(chart().props.centerValue).toBe("00:00:00");
     expect(chart().props.segments).toHaveLength(0);
     expect(JSON.stringify(tree.toJSON())).toContain(

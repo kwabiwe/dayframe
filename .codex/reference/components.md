@@ -53,25 +53,33 @@ Use this when working on frontend components.
 - One compact mobile Reports surface has one range chooser and one funnel/count action. Today / Week / Month / Year presets live inside the shared date sheet, not on a permanent strip or a duplicate range heading. Date changes remain drafts until Done; Cancel, backdrop and blur discard them; unchanged Done does not refetch.
 - The donut centre shows Total: summed confirmed logged activity clipped to the selected range. Concurrent entries count independently; there is no Time covered card or overlap explanation in mobile Reports. Web/Today goal coverage semantics are unchanged.
 - Only selected positive categories appear in the donut and summary rows. Angles, totals and percentages use the selected denominator, including spoken values. All/include/none stays reversible through the full category catalogue; None is valid and explains No categories selected. Bare ticks/dashes show filter selection, including mixed All. Uncategorized, duplicate names and unavailable stable IDs remain distinct.
+- The filter sheet is the only category-selection surface: Apply commits, Cancel discards. Donut slices and category rows are informational, never filter/remove actions or extra popups; each row speaks its complete name, selected-time percentage and duration without moving focus.
 - Custom ranges use inclusive device-local dates, reversible endpoint selection, no future dates and a maximum of 366 calendar days. Presets use local calendar boundaries and Week begins Monday.
 - Activity over time follows the same selected range and filter: clock hours for Today/one day (including 23/25-hour DST days), days for Week/Month or 2–31 custom days, clipped weeks for 32–180 days and clipped months for 181–366 days/Year. The entire plot fits without horizontal scrolling: zero-height zero buckets, three nice axis ticks, sparse labels and one bounded moving tooltip. One plot-level nearest-slot target supports zero buckets; adjustable accessibility and 44-point Previous/Next actions replace overlapping invisible per-bar targets.
 - Confirmed active timer contribution follows the existing projected timer through one current instant; Review-needed entries and suggestions never contribute. Month/Year/custom use bounded authenticated aggregates rather than raw history. An unavailable uncached range says Connect to load this report range; cached results never masquerade as another range.
 - Donut geometry follows available width, never font scale; show its clock total once, in the centre when it fits or in one bounded companion line. Durations use unbounded-hour HH:MM:SS, flooring only final labels, with natural spoken durations. Category rows remain one line at every supported width/text size: only names ellipsise; percentages and durations remain complete. Dense roles have explicit local scaling caps, not global suppression.
 
 Use local Reanimated owners and existing modal presentation; no global LayoutAnimation.
-The shared popup calendar reserves 42 Monday-first cells in six 44-point rows.
+The shared popup calendar reserves 42 Monday-first cells in six explicit nowrap
+44-point rows, each with seven equal flex-basis-zero cells. Weekday headers use
+the same allocation; never use percentage-width wrapping to infer week rows.
 Each endpoint is a square 36-point circular foreground, independent of the full-cell
 continuous range band; shared callers retain their own timestamp and commit rules.
 Month transitions use one fixed-height frame, with outgoing visuals non-interactive.
 Donut removals retain stable visual IDs through zero-sweep exit, disable outgoing
-interaction immediately, and ignore stale cleanup generations. Row removal returns
-focus to Filters. First populated focused entrance runs once; background/blur and
+interaction immediately, and ignore stale cleanup generations. All category changes
+come from filter-sheet Apply, with its existing focus return. First populated focused entrance runs once; background/blur and
 Reduce Motion settle without replay. Tooltip replacement moves/fades locally,
 survives live ticks and dismisses on outside or semantic-context changes.
 
 Local caps: heading 1.5, controls 1.3, names 1.35, numbers/centre/badge/axis 1.2,
 calendar 1.25. Explanations retain system scaling. Never stack category numeric
 columns, truncate durations/percentages or manually scale a font twice.
+Numeric columns use intrinsic native measurements for the currently required
+hour-digit capacity, not a four-digit minimum, with a 6-point inter-column gap.
+Current-label axis measurements grow and shrink; labels share the category-dot
+and heading left anchor. Width/font-scale/Bold Text changes invalidate measurements;
+zero-size hidden probes never affect scrolling, focus or touch targets.
 
 ## State And Forms
 

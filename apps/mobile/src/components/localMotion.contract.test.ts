@@ -14,10 +14,11 @@ describe("local motion ownership contracts", () => {
     expect(pickerSource).toContain("localPresenceEntering");
     expect(pickerSource).toContain("localPresenceExiting");
     expect(pickerSource).toContain("<DatePickerCalendar");
-    expect(calendarSource).toContain("key={month}");
+    expect(calendarSource).toContain("key={visibleMonth}");
     expect(calendarSource).toContain("height: 264");
-    expect(calendarSource).toContain("FadeIn.duration");
-    expect(calendarSource).toContain("FadeOut.duration");
+    expect(calendarSource).toContain("withTiming(1");
+    expect(calendarSource).toContain("accessibilityElementsHidden={outgoing}");
+    expect(calendarSource).toContain('pointerEvents={outgoing ? "none" : "auto"}');
     expect(calendarSource).not.toContain("LayoutAnimation.configureNext");
     expect(pickerSource).not.toContain("LayoutAnimation.configureNext");
   });

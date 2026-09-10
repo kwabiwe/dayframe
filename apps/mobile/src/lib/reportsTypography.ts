@@ -14,11 +14,12 @@ export function reportNumericColumns(
   fontScale: number,
   durations: string[],
 ) {
-  // Reserve at least four hour digits and grow in two-digit groups, not each tick.
-  const hours = Math.max(4, ...durations.map((s) => s.split(":")[0].length));
-  const digits = Math.ceil(hours / 2) * 2 + 6;
+  // Stable within the actual hour-digit capacity; native samples replace these
+  // provisional widths after layout. No speculative four-digit reservation.
+  const hours = Math.max(2, ...durations.map((s) => s.split(":")[0].length));
+  const digits = hours + 6;
   const scale = Math.min(Math.max(1, fontScale), REPORT_TEXT_CAP.numeric);
-  const gap = width < 300 ? 6 : 10;
+  const gap = 6;
   const usable = width - 10 - gap * 3 - 36; // dot, gaps, minimum name space
   const fontSize = Math.max(
     12,
@@ -30,5 +31,6 @@ export function reportNumericColumns(
     gap,
     percentWidth: Math.ceil(4 * cell),
     durationWidth: Math.ceil(digits * cell),
+    durationSample: `${"8".repeat(hours)}:88:88`,
   };
 }
