@@ -1,4 +1,11 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import {
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import {
   AccessibilityInfo,
   AppState,
@@ -43,6 +50,7 @@ import { fetchReportSummary, ReportRangeCache } from "@/lib/reportsClient";
 import { subscribeAuthenticatedSession } from "@/lib/secure-session";
 import { ReportActivityChart } from "./ReportActivityChart";
 import { ReportDateSheet, ReportFiltersSheet } from "./ReportSheets";
+import { ReportsSheetPortalContext } from "./ReportsSheetPortal";
 import { useReportTextMeasure } from "./ReportTextMeasure";
 
 type FilterPresentation = {
@@ -69,6 +77,8 @@ export function ReportsTab({
   theme: MobileTheme;
 }) {
   const [choice, setChoice] = useState<ReportRangeChoice>("today");
+  const sheetPortal = useContext(ReportsSheetPortalContext);
+  const onSheetPortalChange = sheetPortal?.present;
   const [selection, setSelection] = useState<ReportCategorySelection>({
     mode: "all",
   });
@@ -233,51 +243,64 @@ export function ReportsTab({
   useEffect(() => {
     if (entrance) presented.current = true;
   }, [entrance]);
-  const filterOptions = report?.filterOptions ?? [
-    ...(loaded?.summary.categories ?? [])
-      .filter(
-        (c) =>
-          !(data.categories ?? []).some((known) => known.id === c.key) &&
-          c.key !== "uncategorized",
-      )
-      .map((c) => ({
-        key: c.key,
-        name: c.name,
-        color: paletteColorFor(c.color ?? c.key, c.name, theme.mode),
-        isUncategorized: false,
-        isUnavailable: false,
-      })),
-    ...(data.categories ?? []).map((c) => ({
-      key: c.id,
-      name: c.name,
-      color: paletteColorFor(c.color ?? c.id, c.name, theme.mode),
-      isUncategorized: false,
-      isUnavailable: false,
-    })),
-    {
-      key: "uncategorized",
-      name: "Uncategorized",
-      color: theme.textSecondary,
-      isUncategorized: true,
-      isUnavailable: false,
-    },
-    ...(selection.mode === "include"
-      ? selection.keys
+  const filterOptions = useMemo(
+    () =>
+      report?.filterOptions ?? [
+        ...(loaded?.summary.categories ?? [])
           .filter(
-            (key) =>
-              key !== "uncategorized" &&
-              !(data.categories ?? []).some((c) => c.id === key) &&
-              !(loaded?.summary.categories ?? []).some((c) => c.key === key),
+            (c) =>
+              !(data.categories ?? []).some((known) => known.id === c.key) &&
+              c.key !== "uncategorized",
           )
-          .map((key) => ({
-            key,
-            name: "Unavailable category",
-            color: theme.textSecondary,
+          .map((c) => ({
+            key: c.key,
+            name: c.name,
+            color: paletteColorFor(c.color ?? c.key, c.name, theme.mode),
             isUncategorized: false,
-            isUnavailable: true,
-          }))
-      : []),
-  ];
+            isUnavailable: false,
+          })),
+        ...(data.categories ?? []).map((c) => ({
+          key: c.id,
+          name: c.name,
+          color: paletteColorFor(c.color ?? c.id, c.name, theme.mode),
+          isUncategorized: false,
+          isUnavailable: false,
+        })),
+        {
+          key: "uncategorized",
+          name: "Uncategorized",
+          color: theme.textSecondary,
+          isUncategorized: true,
+          isUnavailable: false,
+        },
+        ...(selection.mode === "include"
+          ? selection.keys
+              .filter(
+                (key) =>
+                  key !== "uncategorized" &&
+                  !(data.categories ?? []).some((c) => c.id === key) &&
+                  !(loaded?.summary.categories ?? []).some(
+                    (c) => c.key === key,
+                  ),
+              )
+              .map((key) => ({
+                key,
+                name: "Unavailable category",
+                color: theme.textSecondary,
+                isUncategorized: false,
+                isUnavailable: true,
+              }))
+          : []),
+      ],
+    [
+      data.categories,
+      loaded?.summary.categories,
+      report?.filterOptions,
+      selection,
+      theme.mode,
+      theme.textSecondary,
+    ],
+  );
   const universe = filterOptions.map((option) => option.key);
   const columns = reportNumericColumns(
     contentWidth,
@@ -307,24 +330,96 @@ export function ReportsTab({
     );
   }, [universeKey]);
 
-  const restoreTriggerFocus = (calendar: boolean) => {
+  const restoreTriggerFocus = useCallback((calendar: boolean) => {
     requestAnimationFrame(() => {
       const node = findNodeHandle((calendar ? calendarRef : filterRef).current);
       if (node) AccessibilityInfo.setAccessibilityFocus(node);
     });
-  };
-  const releaseFilterPresentation = (presentationId: number) => {
+  }, []);
+  const releaseFilterPresentation = useCallback((presentationId: number) => {
     if (activeFilterPresentation.current?.id !== presentationId) return;
     activeFilterPresentation.current = null;
     setFilterPresentation(null);
     if (reportsOwnerActive.current) restoreTriggerFocus(false);
-  };
-  const releaseDatePresentation = (presentationId: number) => {
+  }, [restoreTriggerFocus]);
+  const releaseDatePresentation = useCallback((presentationId: number) => {
     if (activeDatePresentation.current?.id !== presentationId) return;
     activeDatePresentation.current = null;
     setDatePresentation(null);
     if (reportsOwnerActive.current) restoreTriggerFocus(true);
-  };
+  }, [restoreTriggerFocus]);
+  const filterSheet = useMemo(
+    () =>
+      filterPresentation ? (
+        <ReportFiltersSheet
+          rootHosted={Boolean(onSheetPortalChange)}
+          presentationId={filterPresentation.id}
+          draft={filterPresentation.draft}
+          options={filterOptions}
+          theme={theme}
+          reduceMotion={reduceMotion}
+          onChange={(nextDraft) =>
+            setFilterPresentation((current) =>
+              current?.id === filterPresentation.id
+                ? { ...current, draft: nextDraft }
+                : current,
+            )
+          }
+          onApply={() => {
+            const current = activeFilterPresentation.current;
+            if (current?.id !== filterPresentation.id) return false;
+            setSelection(applyReportFilterDraft(current.draft));
+            return true;
+          }}
+          onDismissed={releaseFilterPresentation}
+        />
+      ) : null,
+    [
+      filterOptions,
+      filterPresentation,
+      reduceMotion,
+      releaseFilterPresentation,
+      theme,
+    ],
+  );
+  const dateSheet = useMemo(
+    () =>
+      datePresentation ? (
+        <ReportDateSheet
+          rootHosted={Boolean(onSheetPortalChange)}
+          presentationId={datePresentation.id}
+          initial={datePresentation.initial}
+          nowMs={nowMs}
+          theme={theme}
+          reduceMotion={reduceMotion}
+          onApply={(value) => {
+            if (activeDatePresentation.current?.id !== datePresentation.id)
+              return false;
+            setChoice(value);
+            return true;
+          }}
+          onDismissed={releaseDatePresentation}
+        />
+      ) : null,
+    [
+      datePresentation,
+      nowMs,
+      reduceMotion,
+      releaseDatePresentation,
+      theme,
+    ],
+  );
+  const presentedSheet = filterSheet ?? dateSheet;
+  useEffect(() => {
+    if (!onSheetPortalChange) return;
+    onSheetPortalChange(presentedSheet);
+  }, [onSheetPortalChange, presentedSheet]);
+  useEffect(
+    () => () => {
+      onSheetPortalChange?.(null);
+    },
+    [onSheetPortalChange],
+  );
   const filterCount =
     selection.mode === "none"
       ? 0
@@ -553,47 +648,7 @@ export function ReportsTab({
             />
           </>
         )}
-        {filterPresentation ? (
-          <ReportFiltersSheet
-            presentationId={filterPresentation.id}
-            draft={filterPresentation.draft}
-            options={filterOptions}
-            theme={theme}
-            reduceMotion={reduceMotion}
-            onChange={(nextDraft) =>
-              setFilterPresentation((current) =>
-                current?.id === filterPresentation.id
-                  ? { ...current, draft: nextDraft }
-                  : current,
-              )
-            }
-            onApply={() => {
-              const current = activeFilterPresentation.current;
-              if (current?.id !== filterPresentation.id) return false;
-              setSelection(applyReportFilterDraft(current.draft));
-              return true;
-            }}
-            onDismissed={releaseFilterPresentation}
-          />
-        ) : null}
-        {datePresentation ? (
-          <ReportDateSheet
-            presentationId={datePresentation.id}
-            initial={datePresentation.initial}
-            nowMs={nowMs}
-            theme={theme}
-            reduceMotion={reduceMotion}
-            onApply={(value) => {
-              if (
-                activeDatePresentation.current?.id !== datePresentation.id
-              )
-                return false;
-              setChoice(value);
-              return true;
-            }}
-            onDismissed={releaseDatePresentation}
-          />
-        ) : null}
+        {onSheetPortalChange ? null : presentedSheet}
       </View>
     </View>
   );

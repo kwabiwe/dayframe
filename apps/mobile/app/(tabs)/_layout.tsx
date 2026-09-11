@@ -1,15 +1,19 @@
+import { useContext } from "react";
 import { NativeTabs } from "expo-router/unstable-native-tabs";
 import { DayframeDashboardProvider } from "@/components/DayframeDashboard";
+import { ReportsSheetPortalContext } from "@/components/reports/ReportsSheetPortal";
 import { useMobileTheme } from "@/lib/mobileTheme";
 import { DAYFRAME_NATIVE_TABS, DAYFRAME_NATIVE_TAB_MINIMIZE_BEHAVIOR } from "@/lib/nativeTabs";
 
 export default function DashboardTabsLayout() {
   const { theme } = useMobileTheme();
+  const reportsSheetPortal = useContext(ReportsSheetPortalContext);
 
   return (
     <DayframeDashboardProvider>
       {/* Leave the bar material unconfigured so UITabBar owns Liquid Glass and its older-iOS fallback. */}
       <NativeTabs
+        hidden={reportsSheetPortal?.isPresented ?? false}
         iconColor={{ default: theme.textSecondary, selected: theme.accentText }}
         labelStyle={{
           default: {

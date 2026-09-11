@@ -29,7 +29,8 @@ describe("shared swipe-dismiss ownership integration", () => {
     expect(reportsSource).toContain("presentationId={presentationId}");
     expect(reportsSource).toContain("onDismissStart=");
     expect(reportsSource).toContain("onDismiss=");
-    expect(reportsSource).toContain("handleAccessory={");
+    expect(reportsSource).not.toContain("handleAccessory={");
+    expect(reportsSource).toContain("backgroundColor: theme.borderStrong");
   });
 
   it("keeps the backdrop inside the shared transition owner", () => {

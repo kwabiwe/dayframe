@@ -25,6 +25,9 @@ vi.mock("react-native", () => ({
 vi.mock("react-native-safe-area-context", () => ({
   useSafeAreaInsets: () => ({ bottom: 0 }),
 }));
+vi.mock("react-native-screens", () => ({
+  FullWindowOverlay: "FullWindowOverlay",
+}));
 vi.mock("@/lib/reportsRanges", async () => import("../../lib/reportsRanges"));
 vi.mock(
   "@/lib/reportsSelection",
@@ -90,9 +93,13 @@ vi.mock("react-native-reanimated", () => ({
   useAnimatedStyle: (factory: () => unknown) => factory(),
   withTiming: (value: number) => value,
 }));
-import { ReportDateSheet, ReportFiltersSheet } from "./ReportSheets";
+import {
+  REPORT_SHEET_NATIVE_TAB_OFFSET,
+  ReportDateSheet,
+  ReportFiltersSheet,
+} from "./ReportSheets";
 import { DatePickerCalendar } from "../calendar/DatePickerCalendar";
-const theme = {} as never;
+const theme = { borderStrong: "strong-handle" } as never;
 const options = ["Work", "Rest"].map((name) => ({
   key: name,
   name,
@@ -293,7 +300,17 @@ describe("Reports sheet interactions", () => {
       expect(button("Work")).toBeUndefined();
       expect(button("Rest")).toBeDefined();
       expect(button("All categories")).toBeDefined();
-      press("Cancel Categories");
+      expect(button("Cancel Categories")).toBeUndefined();
+      const scroll = tree.root.findByType("ScrollView" as never);
+      expect(scroll.props.showsVerticalScrollIndicator).toBe(false);
+      expect(scroll.findAllByType("TextInput" as never)).toHaveLength(0);
+      expect(tree.root.findAllByType("TextInput" as never)).toHaveLength(1);
+      expect(button("Apply").props.style[0]).toMatchObject({
+        alignSelf: "center",
+        width: 160,
+        maxWidth: "60%",
+      });
+      press("Close Categories");
       expect(onDismissed).toHaveBeenCalledWith(1);
       expect(onApply).toHaveBeenCalledOnce();
       expect(tree.root.findByType("Modal" as never).props.animationType).toBe(
@@ -303,7 +320,7 @@ describe("Reports sheet interactions", () => {
       act(() => tree.unmount());
     },
   );
-  it("routes Cancel through one discard outcome and one coordinated release", () => {
+  it("has no visible Cancel and routes backdrop dismissal through one coordinated release", () => {
     const onApply = vi.fn();
     const onDismissed = vi.fn();
     const { tree, press } = mount(
@@ -318,11 +335,48 @@ describe("Reports sheet interactions", () => {
         onDismissed={onDismissed}
       />,
     );
-    press("Cancel Categories");
+    const sheet = tree.root.findByType("SwipeDismissSheet" as never);
+    expect(sheet.props.handleAccessory).toBeUndefined();
+    expect(sheet.props.handleStyle[1].backgroundColor).toBe("strong-handle");
+    expect(
+      tree.root
+        .findAllByType("Text" as never)
+        .some((node) => node.props.children === "Categories"),
+    ).toBe(false);
+    press("Close Categories");
     press("Close Categories");
     expect(onApply).not.toHaveBeenCalled();
     expect(onDismissed).toHaveBeenCalledOnce();
     expect(onDismissed).toHaveBeenCalledWith(7);
+    act(() => tree.unmount());
+  });
+  it("renders directly into the app-root portal without a nested modal", () => {
+    const { tree } = mount(
+      <ReportFiltersSheet
+        rootHosted
+        presentationId={9}
+        draft={{ mode: "all", universe: ["Work", "Rest"] }}
+        options={options}
+        theme={theme}
+        reduceMotion
+        onChange={vi.fn()}
+        onApply={vi.fn()}
+        onDismissed={vi.fn()}
+      />,
+    );
+    expect(tree.root.findAllByType("Modal" as never)).toHaveLength(0);
+    expect(
+      tree.root.findByType("FullWindowOverlay" as never).props
+        .unstable_accessibilityContainerViewIsModal,
+    ).toBe(true);
+    const sheet = tree.root.findByType("SwipeDismissSheet" as never);
+    expect(sheet.props.translateYOffset).toBe(REPORT_SHEET_NATIVE_TAB_OFFSET);
+    expect(sheet.props.backdropStyle[1].bottom).toBe(
+      -REPORT_SHEET_NATIVE_TAB_OFFSET,
+    );
+    expect(sheet.props.style[2].paddingBottom).toBe(
+      10 + REPORT_SHEET_NATIVE_TAB_OFFSET,
+    );
     act(() => tree.unmount());
   });
   it("lets an earlier swipe discard win over a later Apply", () => {
@@ -371,6 +425,7 @@ describe("Reports sheet interactions", () => {
         });
       const sheet = tree.root.findByType("SwipeDismissSheet" as never);
       expect(sheet.props.gestureHandleOnly).toBe(true);
+      expect(sheet.props.handleAccessory).toBeUndefined();
       expect(sheet.props.presentationId).toBe(2);
       expect(sheet.props.style[1].paddingHorizontal).toBe(6);
       const calendar = tree.root
@@ -385,6 +440,12 @@ describe("Reports sheet interactions", () => {
       });
       expect(preset.findByType("View" as never).props.style[0].height).toBe(34);
       expect(button("Done").props.disabled).toBe(false);
+      expect(button("Done").props.style[0]).toMatchObject({
+        alignSelf: "center",
+        width: 160,
+        maxWidth: "60%",
+      });
+      expect(button("Done").props.style[1]).toMatchObject({ marginTop: 16 });
       expect(button("Next month").props.disabled).toBe(true);
       expect(button(day(10)).props.disabled).toBe(true);
       expect(button(day(9)).props.style).toMatchObject({

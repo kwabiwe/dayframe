@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { DAYFRAME_NATIVE_TABS, DAYFRAME_NATIVE_TAB_MINIMIZE_BEHAVIOR } from "./nativeTabs";
 
@@ -22,5 +24,36 @@ describe("native tab configuration", () => {
       selected: "chart.bar.fill"
     });
     expect(DAYFRAME_NATIVE_TAB_MINIMIZE_BEHAVIOR).toBe("onScrollDown");
+  });
+
+  it("removes the native tab-bar gap while a Reports sheet owns the viewport", () => {
+    const rootLayout = readFileSync(
+      fileURLToPath(
+        new URL("../../app/_layout.tsx", import.meta.url),
+      ),
+      "utf8",
+    );
+    const reports = readFileSync(
+      fileURLToPath(
+        new URL("../components/reports/ReportsTab.tsx", import.meta.url),
+      ),
+      "utf8",
+    );
+    const tabsLayout = readFileSync(
+      fileURLToPath(
+        new URL("../../app/(tabs)/_layout.tsx", import.meta.url),
+      ),
+      "utf8",
+    );
+    expect(rootLayout).toContain(
+      "<ReportsSheetPortalContext.Provider value={reportsSheetPortal}>",
+    );
+    expect(rootLayout).toContain("{reportsSheet}");
+    expect(reports).toContain("onSheetPortalChange(presentedSheet)");
+    expect(reports).toContain("onSheetPortalChange ? null : presentedSheet");
+    expect(tabsLayout).toContain(
+      "hidden={reportsSheetPortal?.isPresented ?? false}",
+    );
+    expect(reports).toContain("rootHosted={Boolean(onSheetPortalChange)}");
   });
 });

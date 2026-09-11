@@ -317,3 +317,94 @@ Final-source automated evidence:
   database identity. A staging URL and successful login are not proof of database
   isolation, so no Preview promotion or hosted mutation is claimed here.
 - **NOT RUN by workflow** Claude whole-PR review and merge. No merge is authorised.
+
+## Owner sheet-polish checkpoint (11 September 2026)
+
+Owner screenshots from the signed V3.2 staging build show the Reports date and
+filter sheets stopping above the native tab-bar region, a Cancel accessory beside
+the drag handle, full-width Done/Apply actions, and (for filters) a scrolling
+title/search field plus a visible scroll indicator. The owner now explicitly
+supersedes V3.2's visible Cancel requirement: Reports retains discard through the
+shared handle/swipe, backdrop, accessibility escape, native close, account change
+and lifecycle invalidation, but exposes no Cancel or Clear/reset action.
+
+Two causes were checked before implementation. First, the Cancel accessory
+selects `SwipeDismissSheet`'s accessory-row handle geometry and Reports supplies
+`theme.textMuted`, while Edit Entry uses the accessory-free centred handle and
+`theme.borderStrong`; removing the accessory and using the established token
+proved the handle mismatch was local styling. Second, the Reports modal was
+owned inside a native-tab screen whereas Edit Entry is mounted by the dashboard
+provider outside `NativeTabs`; the matching bottom gap in the network-disabled
+native-tab harness confirmed native tab presentation ownership rather than
+safe-area padding: public window and screen metrics both remained 667 points
+while the sheet stopped 52 points above the viewport.
+
+Motion contract for this refinement:
+
+- **Trigger and owner:** the existing Reports range/filter actions publish one
+  sheet to the app-root portal. Its iOS full-window overlay is static;
+  `SwipeDismissSheet` remains the sole slide/scrim/handle-pan owner, matching Edit
+  Entry. The portal hides native tab chrome without a competing animation.
+- **Entrance/update/exit:** entrance and exit retain the shared sheet timing;
+  search text and category checks update in place. Done/Apply still commits once;
+  handle swipe, backdrop, escape/native close and invalidation discard once.
+- **Surrounding layout:** the surface is anchored through the bottom viewport and
+  the compact centred action is laid out inside it. The filter search remains in a
+  fixed header while only category rows scroll; no list mutation reflows the
+  sheet shell.
+- **Interruption/async:** rejected swipes restore the current draft; accepted
+  swipes, backdrop/escape and rapid reopen keep the existing presentation-ID and
+  stale-callback guards. There is no async mutation inside either sheet.
+- **Accessibility:** the handle remains a named 44-point dismiss control; removing
+  visible Cancel removes that focus stop but not accessibility escape. Dynamic
+  Type caps, keyboard handoff, VoiceOver focus restoration and the shared Reduce
+  Motion fade path remain unchanged. Physical gesture feel and focus still need
+  identified-device validation.
+
+Implemented presentation boundary: Reports still owns every draft, selection,
+commit and discard decision. The app root only hosts the current React sheet and
+reports whether one is present so `NativeTabs` can hide its bar until the shared
+exit callback finishes. The iOS full-window overlay extends its backdrop and
+sheet motion by the identified native-tab reservation; matching bottom padding
+keeps calendar/filter content and the centred actions in their original positions
+while the material continues to the screen edge. No CocoaPods or
+`react-native-screens` source patch remains.
+
+Final isolated simulator evidence uses **Dayframe Sheet QA SE**, iPhone SE (3rd
+generation), iOS 26.5, 375×667 points, ordinary text, Light, synthetic 6h/2h/1h
+category data and networking disabled. Baseline sheet exposure was **52 points**;
+the corrected date and filter sheets both measure **0 points**. The date capture
+shows the 42-cell calendar, 16-point calendar-to-action gap and centred 160-point
+Done action. The filter capture shows no title or visible Cancel, the fixed search
+above the row scroller, no scroll indicator and a fully visible centred 160-point
+Apply action. Accessibility exposes the named Dismiss sheet handle, backdrop
+close, dates/checkboxes and Done/Apply; full long category names remain spoken.
+
+Local evidence (not committed):
+
+- `/tmp/dayframe-pr194-final-date-sheet.png`, 750×1334 pixels, SHA-256
+  `f6bbced4885f5a65aec398289108376a696de782a7942c72ccc2f8745ac6e64a`.
+- `/tmp/dayframe-pr194-final-filter-sheet.png`, 750×1334 pixels, SHA-256
+  `9b42e97bafae394e878f2f3deb67001c1f4cb6c8245b4d09fbd1ef2a8ce43119`.
+- Clean-dependency Staging simulator build log:
+  `/tmp/dayframe-pr194-final-sheet-qa-padding.log`; synthetic embedded bundle
+  SHA-256 `f537b88e521b6613b2fa995c957e7707cf6fedf6ab6378996171e810146db54c`.
+
+Focused post-fix tests pass in both UTC and Europe/London: four files and 36
+tests per run. This closes the synthetic bottom-geometry regression only.
+Authenticated staging, physical iPhone motion/VoiceOver/Bold Text and timer /
+Review / sync acceptance remain NOT RUN until the signed final-head build is
+installed and tested.
+
+Repository validation after the sheet fix: **PASS** lint (the same two existing
+web `_values` warnings, zero errors), full workspace typecheck, documentation
+alignment (133 Markdown files), iOS configuration, brand assets, diff whitespace
+and `DAYFRAME_AUTH_MODE=dev npm run build` (39 generated routes). The bounded
+full test run passed mobile 1,101, web 898 (two skipped) and shared 246. Expanded
+Reports-focused coverage passed 13 files / 112 tests in both UTC and
+Europe/London; a final UTC rerun after portal cleanup also passed 13 / 112.
+One unbounded repeat recorded an unrelated 5-second timeout in the existing web
+`calendarClickCreate.dom.test.tsx`; mobile and shared passed in that attempt. The
+unchanged failing file then passed 9 / 9 alone, and correctly forwarded
+`--maxWorkers=2` workspace reruns passed mobile 1,101, web 898 (two skipped) and
+shared 246. The first repeat remains FAIL evidence rather than being relabelled.
