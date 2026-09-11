@@ -234,6 +234,7 @@ function AnimatedDonutSlice({
   generation: number;
   onExitComplete: (id: string, generation: number) => void;
 }) {
+  const entranceConsumed = useRef(false);
   const animatedStart = useSharedValue(startAngle);
   const animatedEnd = useSharedValue(
     !reduceMotion && !settleImmediately ? startAngle : endAngle,
@@ -244,15 +245,32 @@ function AnimatedDonutSlice({
   );
 
   useEffect(() => {
+    const enterNow =
+      animateEntrance &&
+      !entranceConsumed.current &&
+      !reduceMotion &&
+      !settleImmediately;
+    if (!animateEntrance) entranceConsumed.current = false;
+    if (enterNow) {
+      entranceConsumed.current = true;
+      // A native tab may eagerly mount and settle this slice while hidden.
+      // Collapse from its current settled geometry before the first visible sweep.
+      animatedStart.value = startAngle;
+      animatedEnd.value = startAngle;
+    }
     const duration =
       reduceMotion || settleImmediately
         ? 0
-        : animateEntrance
+        : enterNow
           ? 260
           : MOBILE_MOTION.layout;
     animatedStart.value = withTiming(startAngle, { duration });
     animatedEnd.value = withTiming(endAngle, { duration }, (finished) => {
       if (finished && !selected) runOnJS(onExitComplete)(id, generation);
+    });
+    if (enterNow) opacity.value = 0;
+    opacity.value = withTiming(selected ? 1 : 0, {
+      duration: reduceMotion || settleImmediately ? 0 : MOBILE_MOTION.control,
     });
   }, [
     animateEntrance,
@@ -265,14 +283,9 @@ function AnimatedDonutSlice({
     selected,
     generation,
     id,
+    opacity,
     onExitComplete,
   ]);
-
-  useEffect(() => {
-    opacity.value = withTiming(selected ? 1 : 0, {
-      duration: reduceMotion || settleImmediately ? 0 : MOBILE_MOTION.control,
-    });
-  }, [opacity, reduceMotion, selected, settleImmediately]);
 
   const animatedProps = useAnimatedProps(() => ({
     d: donutSlicePath(92, 92, 84, 57, animatedStart.value, animatedEnd.value),

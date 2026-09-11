@@ -57,7 +57,8 @@ describe("Activity chart", () => {
         axisLayout="custom"
         theme={{} as never}
         reduceMotion
-        contextKey={String(seconds)}
+        semanticContextKey={String(seconds)}
+        outsidePressDismissal={0}
       />
     );
     act(() => {
@@ -101,7 +102,8 @@ describe("Activity chart", () => {
           axisLayout="custom"
           theme={{} as never}
           reduceMotion
-          contextKey="one"
+          semanticContextKey="one"
+          outsidePressDismissal={0}
         />,
       );
     });
@@ -164,7 +166,8 @@ describe("Activity chart", () => {
           axisLayout="single-day"
           theme={{} as never}
           reduceMotion
-          contextKey="today"
+          semanticContextKey="today"
+          outsidePressDismissal={0}
         />,
       );
     });
@@ -193,7 +196,7 @@ describe("Activity chart", () => {
     ).toBe(true);
     act(() => tree.unmount());
   });
-  it("keeps live ticks selected, ignores vertical scrolling, and dismisses on context change", () => {
+  it("keeps chart actions, live ticks, theme updates and vertical scrolling selected", () => {
     const { tree, plot, tap } = mount();
     tap(180);
     act(() =>
@@ -203,7 +206,8 @@ describe("Activity chart", () => {
           axisLayout="custom"
           theme={{} as never}
           reduceMotion
-          contextKey="one"
+          semanticContextKey="one"
+          outsidePressDismissal={0}
         />,
       ),
     );
@@ -221,9 +225,52 @@ describe("Activity chart", () => {
         <ReportActivityChart
           buckets={buckets}
           axisLayout="custom"
+          theme={{ accent: "updated-theme" } as never}
+          reduceMotion={false}
+          semanticContextKey="one"
+          outsidePressDismissal={0}
+        />,
+      ),
+    );
+    expect(tree.root.findAllByProps({ testID: "report-tooltip" })).toHaveLength(
+      1,
+    );
+    act(() =>
+      tree.root
+        .findByProps({ accessibilityLabel: "Previous bucket" })
+        .props.onPress(),
+    );
+    expect(plot().props.accessibilityValue.now).toBe(1);
+    act(() => tree.unmount());
+  });
+  it("dismisses only for an explicit outside press or semantic context change", () => {
+    const { tree, tap } = mount();
+    tap(180);
+    act(() =>
+      tree.update(
+        <ReportActivityChart
+          buckets={buckets}
+          axisLayout="custom"
           theme={{} as never}
           reduceMotion
-          contextKey="two"
+          semanticContextKey="one"
+          outsidePressDismissal={1}
+        />,
+      ),
+    );
+    expect(tree.root.findAllByProps({ testID: "report-tooltip" })).toHaveLength(
+      0,
+    );
+    tap(180);
+    act(() =>
+      tree.update(
+        <ReportActivityChart
+          buckets={buckets}
+          axisLayout="custom"
+          theme={{} as never}
+          reduceMotion
+          semanticContextKey="two"
+          outsidePressDismissal={1}
         />,
       ),
     );

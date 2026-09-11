@@ -95,7 +95,7 @@ export function ReportsTab({
   } | null>(null);
   const [failedKey, setFailedKey] = useState<string | null>(null);
   const [reload, setReload] = useState(0);
-  const [outsideRevision, setOutsideRevision] = useState(0);
+  const [tooltipOutsidePress, setTooltipOutsidePress] = useState(0);
   const [contentWidth, setContentWidth] = useState(256);
   const refreshRequest = useRef<(() => void) | null>(null);
   const refreshInput = useRef({ data, reload });
@@ -427,10 +427,7 @@ export function ReportsTab({
         ? selection.keys.length
         : null;
   return (
-    <View
-      style={styles.tabScreenStack}
-      onTouchEnd={() => setOutsideRevision((value) => value + 1)}
-    >
+    <View style={styles.tabScreenStack}>
       <View
         onLayout={(event) =>
           setContentWidth(Math.max(1, event.nativeEvent.layout.width - 32))
@@ -438,18 +435,25 @@ export function ReportsTab({
         style={[s.surface, { backgroundColor: theme.surfaceRaised }]}
       >
         {measuredNumbers.probe}
-        <Text
-          maxFontSizeMultiplier={REPORT_TEXT_CAP.heading}
-          style={styles.reportScreenTitle}
+        <Pressable
+          accessible={false}
+          onPress={() => setTooltipOutsidePress((value) => value + 1)}
+          testID="report-tooltip-outside-title"
         >
-          Reports
-        </Text>
+          <Text
+            maxFontSizeMultiplier={REPORT_TEXT_CAP.heading}
+            style={styles.reportScreenTitle}
+          >
+            Reports
+          </Text>
+        </Pressable>
         <View style={s.row}>
           <Pressable
             ref={calendarRef}
             accessibilityRole="button"
             accessibilityLabel={`Choose report dates, ${range.title}`}
             onPress={() => {
+              setTooltipOutsidePress((value) => value + 1);
               const id = ++presentationSequence.current;
               const presentation = { id, initial: choice };
               activeDatePresentation.current = presentation;
@@ -476,6 +480,7 @@ export function ReportsTab({
                 : `Filter categories, ${filterCount} categories selected`
             }
             onPress={() => {
+              setTooltipOutsidePress((value) => value + 1);
               const id = ++presentationSequence.current;
               const presentation = {
                 id,
@@ -530,7 +535,12 @@ export function ReportsTab({
             ) : null}
           </View>
         ) : (
-          <>
+          <Pressable
+            accessible={false}
+            onPress={() => setTooltipOutsidePress((value) => value + 1)}
+            style={s.outsideDismissSurface}
+            testID="report-tooltip-outside-summary"
+          >
             {failedKey === requestKey ? (
               <Text style={{ color: theme.textSecondary }}>
                 Saved report for this range. Connect to refresh.
@@ -639,15 +649,18 @@ export function ReportsTab({
                 ))}
               </View>
             ) : null}
-            <ReportActivityChart
-              buckets={report.buckets}
-              axisLayout={range.axisLayout}
-              theme={theme}
-              reduceMotion={reduceMotion || !isFocused || !foreground}
-              contextKey={`${requestKey}:${JSON.stringify(selection)}:${outsideRevision}:${isFocused}:${foreground}:${Boolean(datePresentation)}:${Boolean(filterPresentation)}`}
-            />
-          </>
+          </Pressable>
         )}
+        {report ? (
+          <ReportActivityChart
+            buckets={report.buckets}
+            axisLayout={range.axisLayout}
+            theme={theme}
+            reduceMotion={reduceMotion || !isFocused || !foreground}
+            semanticContextKey={`${requestKey}:${JSON.stringify(selection)}:${isFocused}:${foreground}:${Boolean(datePresentation)}:${Boolean(filterPresentation)}`}
+            outsidePressDismissal={tooltipOutsidePress}
+          />
+        ) : null}
         {onSheetPortalChange ? null : presentedSheet}
       </View>
     </View>
@@ -655,6 +668,7 @@ export function ReportsTab({
 }
 const s = StyleSheet.create({
   surface: { padding: 16, borderRadius: 20, gap: 12 },
+  outsideDismissSurface: { gap: 12 },
   row: { flexDirection: "row", alignItems: "center", gap: 8 },
   rangeAction: {
     flex: 1,

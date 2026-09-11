@@ -9,6 +9,7 @@ vi.mock("react", async () => {
 let fontScale = 1;
 const animation = vi.hoisted(() => ({
   completions: [] as Array<(finished: boolean) => void>,
+  timings: [] as Array<{ value: unknown; duration: number | undefined }>,
 }));
 
 vi.mock("react-native", () => ({
@@ -18,22 +19,30 @@ vi.mock("react-native", () => ({
   useWindowDimensions: () => ({ fontScale, height: 844, width: 390 }),
 }));
 
-vi.mock("react-native-reanimated", () => ({
-  default: { View: "View" },
-  useAnimatedStyle: (factory: () => unknown) => factory(),
-  createAnimatedComponent: () => "AnimatedPath",
-  useAnimatedProps: (factory: () => unknown) => factory(),
-  useSharedValue: (value: unknown) => ({ value }),
-  runOnJS: (fn: (...args: unknown[]) => unknown) => fn,
-  withTiming: (
-    value: unknown,
-    _config: unknown,
-    completion?: (finished: boolean) => void,
-  ) => {
-    if (completion) animation.completions.push(completion);
-    return value;
-  },
-}));
+vi.mock("react-native-reanimated", async () => {
+  // @ts-expect-error The renderer peer React is installed at the repository root.
+  const React = await import("../../../../../node_modules/react/index.js");
+  return {
+    default: { View: "View" },
+    useAnimatedStyle: (factory: () => unknown) => factory(),
+    createAnimatedComponent: () => "AnimatedPath",
+    useAnimatedProps: (factory: () => unknown) => factory(),
+    useSharedValue: (value: unknown) => React.useRef({ value }).current,
+    runOnJS: (fn: (...args: unknown[]) => unknown) => fn,
+    withTiming: (
+      value: unknown,
+      _config: unknown,
+      completion?: (finished: boolean) => void,
+    ) => {
+      animation.timings.push({
+        value,
+        duration: (_config as { duration?: number } | undefined)?.duration,
+      });
+      if (completion) animation.completions.push(completion);
+      return value;
+    },
+  };
+});
 
 vi.mock("react-native-svg", () => ({
   default: "Svg",
@@ -63,6 +72,117 @@ const segments = [
 ];
 
 describe("DonutChart", () => {
+  it("runs a real first-visible entrance after an eagerly settled hidden mount", () => {
+    animation.timings = [];
+    let tree!: ReturnType<typeof create>;
+    const render = (
+      animateEntrance: boolean,
+      settleImmediately: boolean,
+      items = segments,
+      color = "blue",
+    ) => (
+      <DonutChart
+        animateEntrance={animateEntrance}
+        centerLabel="Total"
+        centerValue="01:00:00"
+        reduceMotion={false}
+        settleImmediately={settleImmediately}
+        segments={items.map((segment) => ({ ...segment, color }))}
+        theme={theme}
+      />
+    );
+    act(() => {
+      tree = create(render(false, true));
+    });
+    expect(animation.timings.every((call) => call.duration === 0)).toBe(true);
+    animation.timings = [];
+    act(() => tree.update(render(true, false)));
+    expect(animation.timings).toContainEqual({ value: 360, duration: 260 });
+    expect(animation.timings).toContainEqual({ value: 1, duration: 140 });
+
+    animation.timings = [];
+    act(() =>
+      tree.update(
+        render(
+          true,
+          false,
+          [{ ...segments[0], value: segments[0].value + 1 }],
+          "updated-theme",
+        ),
+      ),
+    );
+    expect(animation.timings.some((call) => call.duration === 260)).toBe(false);
+    expect(animation.timings.some((call) => call.duration === 180)).toBe(true);
+    act(() => tree.unmount());
+  });
+
+  it("starts entrance when positive data arrives asynchronously without replaying it for filtering", () => {
+    animation.timings = [];
+    let tree!: ReturnType<typeof create>;
+    const render = (
+      items: typeof segments,
+      animateEntrance: boolean,
+      reduceMotion = false,
+    ) => (
+      <DonutChart
+        animateEntrance={animateEntrance}
+        centerLabel="Total"
+        centerValue="01:00:00"
+        reduceMotion={reduceMotion}
+        segments={items}
+        theme={theme}
+      />
+    );
+    act(() => {
+      tree = create(render([], false));
+    });
+    animation.timings = [];
+    act(() => tree.update(render(segments, true)));
+    expect(animation.timings.some((call) => call.duration === 260)).toBe(true);
+    animation.timings = [];
+    act(() =>
+      tree.update(
+        render(
+          [
+            ...segments,
+            { id: "rest", value: 1_000, color: "red", selected: true },
+          ],
+          false,
+        ),
+      ),
+    );
+    expect(animation.timings.some((call) => call.duration === 260)).toBe(false);
+    expect(animation.timings.some((call) => call.duration === 180)).toBe(true);
+    act(() => tree.unmount());
+  });
+
+  it.each([
+    [true, false],
+    [false, true],
+  ])(
+    "settles an entrance without sweep travel for Reduce Motion %s and background %s",
+    (reduceMotion, settleImmediately) => {
+      animation.timings = [];
+      let tree!: ReturnType<typeof create>;
+      act(() => {
+        tree = create(
+          <DonutChart
+            animateEntrance
+            centerLabel="Total"
+            centerValue="01:00:00"
+            reduceMotion={reduceMotion}
+            settleImmediately={settleImmediately}
+            segments={segments}
+            theme={theme}
+          />,
+        );
+      });
+      expect(animation.timings.length).toBeGreaterThan(0);
+      expect(animation.timings.every((call) => call.duration === 0)).toBe(true);
+      act(() => tree.unmount());
+    },
+  );
+
   it("keeps exact natural spoken seconds without opting the total into live announcements", () => {
     let tree!: ReturnType<typeof create>;
     const render = (value: string, spoken: string) => (

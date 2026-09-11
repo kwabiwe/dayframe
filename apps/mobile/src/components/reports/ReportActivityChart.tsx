@@ -30,18 +30,21 @@ export function ReportActivityChart({
   axisLayout,
   theme,
   reduceMotion,
-  contextKey,
+  semanticContextKey,
+  outsidePressDismissal,
 }: {
   buckets: Array<ReportBucket & { seconds: number }>;
   axisLayout: ReportAxisLayout;
   theme: MobileTheme;
   reduceMotion: boolean;
-  contextKey: string;
+  semanticContextKey: string;
+  outsidePressDismissal: number;
 }) {
   const [tooltip, setTooltip] = useState<string | null>(null);
   const [plotWidth, setPlotWidth] = useState(220);
   const touch = useRef({ y: 0, moved: false });
-  useEffect(() => setTooltip(null), [contextKey]);
+  useEffect(() => setTooltip(null), [semanticContextKey]);
+  useEffect(() => setTooltip(null), [outsidePressDismissal]);
   const axis = reportAxis(Math.max(0, ...buckets.map((b) => b.seconds)));
   const measuredTicks = useReportTextMeasure(
     axis.ticks.map((tick) => tick.label),
@@ -70,7 +73,7 @@ export function ReportActivityChart({
     if (buckets[index]) setTooltip(buckets[index].key);
   };
   return (
-    <View style={s.root} onTouchEnd={(event) => event.stopPropagation()}>
+    <View style={s.root}>
       {measuredTicks.probe}
       <Pressable accessible={false} onPress={() => setTooltip(null)}>
         <Text

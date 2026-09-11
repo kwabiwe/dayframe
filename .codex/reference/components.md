@@ -50,10 +50,10 @@ Use this when working on frontend components.
 
 ## Mobile Reports Revision 3.2
 
-- One compact mobile Reports surface has one range chooser and one funnel/count action. Equal compact Today / Week / Month / Year controls sit directly below the shared date sheet handle and Cancel action, not on a permanent strip or below a duplicate title. Both Reports sheets use `SwipeDismissSheet` as the only transition owner. Done/Apply claims one commit; Cancel, backdrop, escape, successful swipe, blur and lifecycle/account invalidation discard. Keep the presentation mounted until coordinated exit completion, reject stale presentation IDs, restore opener focus afterwards, and never add Clear or implicit reset-to-Today behaviour.
+- One compact mobile Reports surface has one range chooser and one funnel/count action. Equal compact Today / Week / Month / Year controls sit directly below the shared date sheet handle, not on a permanent strip or below a duplicate title. Both Reports sheets use `SwipeDismissSheet` as the only transition owner. Done/Apply claims one commit; the handle, backdrop, escape, successful swipe, blur and lifecycle/account invalidation discard. Keep the presentation mounted until coordinated exit completion, reject stale presentation IDs, restore opener focus afterwards, and expose no Cancel, Clear or implicit reset-to-Today behaviour.
 - The donut centre shows Total: summed confirmed logged activity clipped to the selected range. Concurrent entries count independently; there is no Time covered card or overlap explanation in mobile Reports. Web/Today goal coverage semantics are unchanged.
 - Only selected positive categories appear in the donut and compact zero-gap summary list. Sort exact unrounded duration descending, then stable category key ascending, and give the donut that same array. Angles, totals and percentages use the selected denominator, including spoken values. All/include/none stays reversible through the full category catalogue; None is valid and explains No categories selected. Bare ticks/dashes show filter selection, including mixed All. Uncategorized, duplicate names and unavailable stable IDs remain distinct.
-- The filter sheet is the only category-selection surface: Apply commits, Cancel discards. Donut slices and category rows are informational, never filter/remove actions or extra popups; each row speaks its complete name, selected-time percentage and duration without moving focus.
+- The filter sheet is the only category-selection surface: Apply commits and the shared dismissal routes discard. Donut slices and category rows are informational, never filter/remove actions or extra popups; each row speaks its complete name, selected-time percentage and duration without moving focus.
 - Custom ranges use inclusive device-local dates, reversible endpoint selection, no future dates and a maximum of 366 calendar days. Presets use whole local calendar boundaries, Week begins Monday, and future portions remain visible with zero contribution.
 - Activity over time uses explicit local presentation metadata, never bucket-count/duration inference. Today/custom one day send one full local-day bucket and show one centred bar with weekday plus `DD/MM`; Week shows seven daily bars and seven two-line labels; Month/custom show only requested first/last `DD/MM`; Year shows twelve bars with Jan/Mar/May/Jul/Sep/Nov at normal widths and a deliberate quarterly fallback only when measured width cannot fit six. Longer custom ranges retain clipped calendar weeks/months. The plot fits without horizontal scrolling and keeps zero-height zero buckets, three nice ticks, one nearest-slot target and one bounded accessible tooltip.
 - Reports reserves floating-tab clearance once at the dashboard ScrollView content owner, using the existing 112-point Today convention. Do not duplicate that inset in the chart/card. Verify final labels and open bucket actions at maximum scroll extent; ordinary content passing behind the native overlay is not a failure.
@@ -73,9 +73,12 @@ host. Reports presets use four non-overlapping 44-point equal targets around
 Month transitions use one fixed-height frame, with outgoing visuals non-interactive.
 Donut removals retain stable visual IDs through zero-sweep exit, disable outgoing
 interaction immediately, and ignore stale cleanup generations. All category changes
-come from filter-sheet Apply, with its existing focus return. First populated focused entrance runs once; background/blur and
+come from filter-sheet Apply, with its existing focus return. First populated focused entrance runs once, including when a hidden eager mount was already settled; background/blur and
 Reduce Motion settle without replay. Tooltip replacement moves/fades locally,
-survives live ticks and dismisses on outside or semantic-context changes.
+survives live ticks and dismisses on explicit outside presses or semantic-context
+changes. Never use a screen-root bubbled touch counter as tooltip state: ordinary
+vertical scrolling and chart/tooltip actions retain selection, while the dedicated
+title/summary outside surfaces and range/filter/focus/background changes dismiss it.
 
 Local caps: heading 1.5, controls 1.3, names 1.35, numbers/centre/badge/axis 1.2,
 calendar 1.25. Explanations retain system scaling. Never stack category numeric

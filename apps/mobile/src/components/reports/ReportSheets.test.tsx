@@ -404,6 +404,33 @@ describe("Reports sheet interactions", () => {
     expect(onDismissed).toHaveBeenCalledOnce();
     act(() => tree.unmount());
   });
+  it("keeps an earlier Apply committed when a stale swipe callback arrives", () => {
+    const onApply = vi.fn(() => true);
+    const onDismissed = vi.fn();
+    const { tree, press } = mount(
+      <ReportFiltersSheet
+        presentationId={11}
+        draft={{ mode: "all", universe: ["Work", "Rest"] }}
+        options={options}
+        theme={theme}
+        reduceMotion
+        onChange={vi.fn()}
+        onApply={onApply}
+        onDismissed={onDismissed}
+      />,
+    );
+    const sheet = tree.root.findByType("SwipeDismissSheet" as never);
+    press("Apply");
+    expect(onApply).toHaveBeenCalledOnce();
+    expect(onDismissed).toHaveBeenCalledOnce();
+    expect(onDismissed).toHaveBeenCalledWith(11);
+    act(() => expect(sheet.props.onDismissStart(11)).toBe(true));
+    press("Apply");
+    expect(onApply).toHaveBeenCalledOnce();
+    act(() => sheet.props.onDismiss(10));
+    expect(onDismissed).toHaveBeenCalledOnce();
+    act(() => tree.unmount());
+  });
   it.each([1, 9])(
     "requires two taps and normalizes reverse/same-day ending %s",
     (endDay) => {

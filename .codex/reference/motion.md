@@ -79,7 +79,9 @@ informational rows/slices never move focus. Month fade copies are immediately
 touch/AX hidden; queued taps validate the current generation, including A–B–A.
 One bounded
 tooltip moves/replaces locally and keeps its selection on live timer ticks;
-outside presses and range/filter/focus/background changes dismiss it. Reduce
+dedicated outside presses and range/filter/focus/background changes dismiss it.
+The screen root must not translate every bubbled touch into a reset key: vertical
+scrolling and the plot/tooltip actions retain the current selection. Reduce
 Motion and background settle current state without replaying the entrance.
 Validate the complete transition and rapid interruption on an identified binary;
 mock timing and screenshots alone do not establish smooth device motion.

@@ -301,6 +301,95 @@ describe("Revision 3 Reports owner", () => {
     ).toBe(true);
     act(() => tree.unmount());
   });
+  it("uses explicit outside presses and semantic context instead of bubbled screen touches", async () => {
+    const tree = await render();
+    const activity = () =>
+      tree.root.findByType("ReportActivityChart" as never);
+    const title = tree.root.findByProps({
+      testID: "report-tooltip-outside-title",
+    });
+    const summary = tree.root.findByProps({
+      testID: "report-tooltip-outside-summary",
+    });
+    expect(title.props.onTouchEnd).toBeUndefined();
+    expect(summary.props.onTouchStart).toBeUndefined();
+    expect(summary.props.onTouchMove).toBeUndefined();
+    expect(summary.props.onTouchEnd).toBeUndefined();
+    const initialOutsidePress = activity().props.outsidePressDismissal;
+    act(() => title.props.onPress());
+    expect(activity().props.outsidePressDismissal).toBe(
+      initialOutsidePress + 1,
+    );
+    const initialContext = activity().props.semanticContextKey;
+    await act(async () =>
+      tree.root
+        .findByProps({
+          accessibilityLabel: "Filter categories, all categories selected",
+        })
+        .props.onPress(),
+    );
+    expect(activity().props.semanticContextKey).not.toBe(initialContext);
+    act(() => tree.unmount());
+  });
+  it("waits for first focused data, then never replays entrance for updates", async () => {
+    let finish!: (value: ReportSummary) => void;
+    let requested!: ReportSummaryRequest;
+    mocks.fetch.mockImplementationOnce((input: ReportSummaryRequest) => {
+      requested = input;
+      return new Promise((resolve) => {
+        finish = resolve;
+      });
+    });
+    const view = (
+      isFocused: boolean,
+      tick = nowMs,
+      mode: "dark" | "light" = "dark",
+    ) => (
+      <ReportsTab
+        data={data}
+        isFocused={isFocused}
+        nowMs={tick}
+        styles={{} as never}
+        theme={{ mode } as never}
+      />
+    );
+    let tree!: ReturnType<typeof create>;
+    await act(async () => {
+      tree = create(view(false));
+    });
+    expect(mocks.fetch).not.toHaveBeenCalled();
+    await act(async () => tree.update(view(true)));
+    expect(mocks.fetch).toHaveBeenCalledOnce();
+    expect(tree.root.findAllByType("DonutChart" as never)).toHaveLength(0);
+    await act(async () => finish(result(requested)));
+    const donut = () => tree.root.findByType("DonutChart" as never);
+    expect(donut().props.animateEntrance).toBe(true);
+    await act(async () => tree.update(view(true, nowMs + 1_000)));
+    expect(donut().props.animateEntrance).toBe(false);
+    await act(async () => tree.update(view(true, nowMs + 1_000, "light")));
+    expect(donut().props.animateEntrance).toBe(false);
+    await act(async () => tree.update(view(false, nowMs + 1_000, "light")));
+    expect(donut().props.settleImmediately).toBe(true);
+    await act(async () => tree.update(view(true, nowMs + 1_000, "light")));
+    expect(donut().props.animateEntrance).toBe(false);
+    await act(async () =>
+      tree.root
+        .findByProps({
+          accessibilityLabel: "Filter categories, all categories selected",
+        })
+        .props.onPress(),
+    );
+    const sheet = tree.root.findByType("ReportFiltersSheet" as never);
+    await act(async () =>
+      sheet.props.onChange({
+        mode: "none",
+        universe: ["a", "uncategorized"],
+      }),
+    );
+    await act(async () => sheet.props.onApply());
+    expect(donut().props.animateEntrance).toBe(false);
+    act(() => tree.unmount());
+  });
   it("ignores late Year after Month and never reuses numbers for uncached failed range", async () => {
     const tree = await render();
     let resolveYear!: (value: ReportSummary) => void;

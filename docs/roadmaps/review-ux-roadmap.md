@@ -66,8 +66,9 @@ Stage A layout and filtering decisions. Continue existing PR #194, not a second
 Reports PR. Preserve the extracted Reports owner and useful chart primitives.
 Revision 3.2 retains the final-fixes addendum's unaffected requirements:
 filter-sheet-only selection, explicit seven-cell week rows, compact measured
-numeric columns, adaptive left-aligned axis gutters and evidence-led text fixes;
-it keeps Cancel and forbids Clear or dismiss-to-Today reset behaviour.
+numeric columns, adaptive left-aligned axis gutters and evidence-led text fixes.
+The owner's later sheet refinements remove visible Cancel and continue to forbid
+Clear or dismiss-to-Today reset behaviour.
 Native clipping and physical acceptance remain open until reproduced/retested;
 see `docs/investigations/2026-09-10-reports-final-fixes.md`. A new Claude whole-PR
 review follows known fixes and owner physical retests, not before them.

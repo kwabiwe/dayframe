@@ -408,3 +408,38 @@ One unbounded repeat recorded an unrelated 5-second timeout in the existing web
 unchanged failing file then passed 9 / 9 alone, and correctly forwarded
 `--maxWorkers=2` workspace reruns passed mobile 1,101, web 898 (two skipped) and
 shared 246. The first repeat remains FAIL evidence rather than being relabelled.
+
+## Whole-PR review corrections after `b85c7f7`
+
+Claude's independent whole-PR review of exact head
+`b85c7f78c56431269b8210a775adcd089a770094` reported no Blockers and two
+Important findings: tooltip dismissal still depended on a screen-root bubbled
+touch revision, and first-entrance lifecycle tests were absent. The second
+finding exposed a real implementation defect as well as missing coverage. A
+donut eagerly mounted and settled while its native tab was hidden already held
+its final arc angles; changing `animateEntrance` on first focus therefore timed
+the final angles to themselves and produced no visible sweep.
+
+The focused correction keeps tooltip selection local to `ReportActivityChart`
+but splits its invalidation inputs by meaning. Dedicated title/summary presses
+emit an outside-press dismissal, while range/filter/focus/background changes use
+a semantic context key. The screen root no longer observes or increments every
+bubbled touch, and the chart no longer depends on `stopPropagation()` to protect
+selection. Plot selection, Previous/Next, live timer values, theme updates and
+vertical scroll gestures retain the active bucket; an explicit outside press or
+semantic context change clears it.
+
+Each donut slice now edge-detects its first visible entrance. When a hidden eager
+mount was settled, that edge collapses the slice to its start angle before the
+260 ms sweep. The edge is consumed once, so asynchronous first data enters but
+subsequent timer/theme/filter changes use the normal local update duration;
+background and Reduce Motion settle immediately. Existing generation-guarded
+exit cleanup remains unchanged. Focused component coverage also proves the
+inverse sheet race: a committed Apply cannot be duplicated or undone by a stale
+swipe/presentation callback.
+
+Initial focused validation for this correction: **PASS**, four files and 36
+tests plus the mobile TypeScript check. Full repository, clean Simulator,
+signed staging and physical-device evidence must be recorded against the final
+follow-up SHA; the earlier installed `b85c7f7` binary does not validate these
+new motion/dismissal changes.
