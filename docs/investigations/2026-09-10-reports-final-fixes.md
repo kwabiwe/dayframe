@@ -291,10 +291,10 @@ stale callbacks; closing content becomes inert and focus returns only to a still
 active Reports owner. Reduce Motion uses the shared fade path. Physical swipe feel,
 keyboard transitions, interruption and focus still require device acceptance.
 
-Final-source automated evidence before commit:
+Final-source automated evidence:
 
 - **PASS** focused Reports/range/plot/sheet/shared-swipe/geometry tests under UTC
-  and Europe/London: 47 tests in each run.
+  and Europe/London: seven files and 82 tests in each run.
 - **PASS** mobile typecheck.
 - **PASS** full workspace tests with `--maxWorkers=2`: mobile 1,099; web 898
   (two skipped); shared 246.
