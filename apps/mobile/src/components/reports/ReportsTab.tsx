@@ -45,6 +45,16 @@ import { ReportActivityChart } from "./ReportActivityChart";
 import { ReportDateSheet, ReportFiltersSheet } from "./ReportSheets";
 import { useReportTextMeasure } from "./ReportTextMeasure";
 
+type FilterPresentation = {
+  id: number;
+  draft: ReportFilterDraft;
+};
+
+type DatePresentation = {
+  id: number;
+  initial: ReportRangeChoice;
+};
+
 export function ReportsTab({
   data,
   isFocused,
@@ -62,8 +72,10 @@ export function ReportsTab({
   const [selection, setSelection] = useState<ReportCategorySelection>({
     mode: "all",
   });
-  const [draft, setDraft] = useState<ReportFilterDraft | null>(null);
-  const [calendarOpen, setCalendarOpen] = useState(false);
+  const [filterPresentation, setFilterPresentation] =
+    useState<FilterPresentation | null>(null);
+  const [datePresentation, setDatePresentation] =
+    useState<DatePresentation | null>(null);
   const [foreground, setForeground] = useState(
     AppState.currentState === "active",
   );
@@ -79,13 +91,19 @@ export function ReportsTab({
   const refreshInput = useRef({ data, reload });
   const cache = useRef(new ReportRangeCache());
   const generation = useRef(0);
+  const presentationSequence = useRef(0);
+  const activeFilterPresentation = useRef(filterPresentation);
+  const activeDatePresentation = useRef(datePresentation);
+  const reportsOwnerActive = useRef(isFocused && foreground);
   const presented = useRef(false);
-  const stableOrder = useRef<string[]>([]);
   const filterRef = useRef<View>(null);
   const calendarRef = useRef<View>(null);
   const { fontScale } = useWindowDimensions();
   const { reduceMotion, resolved } = useResolvedReduceMotionPreference();
   const focusedNow = useRef(nowMs);
+  activeFilterPresentation.current = filterPresentation;
+  activeDatePresentation.current = datePresentation;
+  reportsOwnerActive.current = isFocused && foreground;
   const day = formatLocalDateKey(new Date(nowMs));
   const range = useMemo(() => buildReportRange(choice, nowMs), [choice, day]);
   const requestKey = JSON.stringify(range.request);
@@ -100,9 +118,16 @@ export function ReportsTab({
         : Math.floor(nowMs / 60_000) * 60_000;
   const reportNow = focusedNow.current;
   useEffect(() => {
-    const subscription = AppState.addEventListener("change", (state) =>
-      setForeground(state === "active"),
-    );
+    const subscription = AppState.addEventListener("change", (state) => {
+      const active = state === "active";
+      setForeground(active);
+      if (!active) {
+        activeFilterPresentation.current = null;
+        activeDatePresentation.current = null;
+        setFilterPresentation(null);
+        setDatePresentation(null);
+      }
+    });
     return () => subscription.remove();
   }, []);
   useEffect(
@@ -110,10 +135,12 @@ export function ReportsTab({
       subscribeAuthenticatedSession(() => {
         generation.current++;
         cache.current.clear();
+        activeFilterPresentation.current = null;
+        activeDatePresentation.current = null;
         setLoaded(null);
         setSelection({ mode: "all" });
-        setDraft(null);
-        setCalendarOpen(false);
+        setFilterPresentation(null);
+        setDatePresentation(null);
       }),
     [],
   );
@@ -176,8 +203,10 @@ export function ReportsTab({
   }, [data, reload]);
   useEffect(() => {
     if (!isFocused) {
-      setDraft(null);
-      setCalendarOpen(false);
+      activeFilterPresentation.current = null;
+      activeDatePresentation.current = null;
+      setFilterPresentation(null);
+      setDatePresentation(null);
     }
   }, [isFocused]);
   const report = useMemo(
@@ -194,16 +223,7 @@ export function ReportsTab({
         : null,
     [data, summary, range, reportNow, selection, theme.mode],
   );
-  const segments = useMemo(() => {
-    if (!report) return [];
-    for (const segment of report.allCategorySegments)
-      if (!stableOrder.current.includes(segment.key))
-        stableOrder.current.push(segment.key);
-    return [...report.visibleCategorySegments].sort(
-      (a, b) =>
-        stableOrder.current.indexOf(a.key) - stableOrder.current.indexOf(b.key),
-    );
-  }, [report]);
+  const segments = report?.visibleCategorySegments ?? [];
   const entrance =
     isFocused &&
     foreground &&
@@ -277,17 +297,33 @@ export function ReportsTab({
     measuredNumbers.widths[columns.durationSample] ?? columns.durationWidth;
   const universeKey = JSON.stringify(universe);
   useEffect(() => {
-    setDraft((current) =>
-      current ? refreshReportFilterDraft(current, universe) : null,
+    setFilterPresentation((current) =>
+      current
+        ? {
+            ...current,
+            draft: refreshReportFilterDraft(current.draft, universe),
+          }
+        : null,
     );
   }, [universeKey]);
-  const close = (calendar: boolean) => {
-    setDraft(null);
-    setCalendarOpen(false);
+
+  const restoreTriggerFocus = (calendar: boolean) => {
     requestAnimationFrame(() => {
       const node = findNodeHandle((calendar ? calendarRef : filterRef).current);
       if (node) AccessibilityInfo.setAccessibilityFocus(node);
     });
+  };
+  const releaseFilterPresentation = (presentationId: number) => {
+    if (activeFilterPresentation.current?.id !== presentationId) return;
+    activeFilterPresentation.current = null;
+    setFilterPresentation(null);
+    if (reportsOwnerActive.current) restoreTriggerFocus(false);
+  };
+  const releaseDatePresentation = (presentationId: number) => {
+    if (activeDatePresentation.current?.id !== presentationId) return;
+    activeDatePresentation.current = null;
+    setDatePresentation(null);
+    if (reportsOwnerActive.current) restoreTriggerFocus(true);
   };
   const filterCount =
     selection.mode === "none"
@@ -318,7 +354,12 @@ export function ReportsTab({
             ref={calendarRef}
             accessibilityRole="button"
             accessibilityLabel={`Choose report dates, ${range.title}`}
-            onPress={() => setCalendarOpen(true)}
+            onPress={() => {
+              const id = ++presentationSequence.current;
+              const presentation = { id, initial: choice };
+              activeDatePresentation.current = presentation;
+              setDatePresentation(presentation);
+            }}
             style={[s.rangeAction, { backgroundColor: theme.surfaceMuted }]}
           >
             <CalendarGlyph kind="calendar" color={theme.textPrimary} />
@@ -339,7 +380,15 @@ export function ReportsTab({
                 ? "Filter categories, all categories selected"
                 : `Filter categories, ${filterCount} categories selected`
             }
-            onPress={() => setDraft(openReportFilterDraft(selection, universe))}
+            onPress={() => {
+              const id = ++presentationSequence.current;
+              const presentation = {
+                id,
+                draft: openReportFilterDraft(selection, universe),
+              };
+              activeFilterPresentation.current = presentation;
+              setFilterPresentation(presentation);
+            }}
             style={[
               s.iconAction,
               {
@@ -422,108 +471,127 @@ export function ReportsTab({
                     : "No tracked time yet."}
               </Text>
             ) : null}
-            {segments.map((segment) => (
-              <Animated.View
-                key={segment.key}
-                entering={FadeIn.duration(
-                  reduceMotion ? 0 : MOBILE_MOTION.control,
-                )}
-                exiting={FadeOut.duration(
-                  reduceMotion ? 0 : MOBILE_MOTION.control,
-                )}
-                layout={
-                  reduceMotion
-                    ? undefined
-                    : LinearTransition.duration(MOBILE_MOTION.layout)
-                }
-              >
-                <View
-                  accessible
-                  accessibilityRole="text"
-                  accessibilityLabel={`${segment.categoryName}, ${formatReportPercent(segment.durationMs, report.selectedDurationMs)} of selected time, ${spokenReportDuration(segment.durationMs / 1000)}`}
-                  style={[
-                    s.category,
-                    { borderBottomColor: theme.border, gap: columns.gap },
-                  ]}
-                >
-                  <View style={[s.dot, { backgroundColor: segment.color }]} />
-                  <Text
-                    numberOfLines={1}
-                    ellipsizeMode="tail"
-                    maxFontSizeMultiplier={REPORT_TEXT_CAP.name}
-                    style={[s.name, { color: theme.textPrimary }]}
+            {segments.length ? (
+              <View style={s.categoryList}>
+                {segments.map((segment) => (
+                  <Animated.View
+                    key={segment.key}
+                    entering={FadeIn.duration(
+                      reduceMotion ? 0 : MOBILE_MOTION.control,
+                    )}
+                    exiting={FadeOut.duration(
+                      reduceMotion ? 0 : MOBILE_MOTION.control,
+                    )}
+                    layout={
+                      reduceMotion
+                        ? undefined
+                        : LinearTransition.duration(MOBILE_MOTION.layout)
+                    }
                   >
-                    {segment.categoryName}
-                  </Text>
-                  <View style={[s.numbers, { gap: columns.gap }]}>
-                    <Text
-                      numberOfLines={1}
-                      maxFontSizeMultiplier={REPORT_TEXT_CAP.numeric}
+                    <View
+                      accessible
+                      accessibilityRole="text"
+                      accessibilityLabel={`${segment.categoryName}, ${formatReportPercent(segment.durationMs, report.selectedDurationMs)} of selected time, ${spokenReportDuration(segment.durationMs / 1000)}`}
                       style={[
-                        s.number,
-                        {
-                          color: theme.textSecondary,
-                          width: columns.percentWidth,
-                          fontSize: columns.fontSize,
-                        },
+                        s.category,
+                        { borderBottomColor: theme.border, gap: columns.gap },
                       ]}
                     >
-                      {formatReportPercent(
-                        segment.durationMs,
-                        report.selectedDurationMs,
-                      )}
-                    </Text>
-                    <Text
-                      numberOfLines={1}
-                      maxFontSizeMultiplier={REPORT_TEXT_CAP.numeric}
-                      style={[
-                        s.number,
-                        {
-                          color: theme.textPrimary,
-                          width: columns.durationWidth,
-                          fontSize: columns.fontSize,
-                        },
-                      ]}
-                    >
-                      {formatReportDuration(segment.durationMs / 1000)}
-                    </Text>
-                  </View>
-                </View>
-              </Animated.View>
-            ))}
+                      <View style={[s.dot, { backgroundColor: segment.color }]} />
+                      <Text
+                        numberOfLines={1}
+                        ellipsizeMode="tail"
+                        maxFontSizeMultiplier={REPORT_TEXT_CAP.name}
+                        style={[s.name, { color: theme.textPrimary }]}
+                      >
+                        {segment.categoryName}
+                      </Text>
+                      <View style={[s.numbers, { gap: columns.gap }]}>
+                        <Text
+                          numberOfLines={1}
+                          maxFontSizeMultiplier={REPORT_TEXT_CAP.numeric}
+                          style={[
+                            s.number,
+                            {
+                              color: theme.textSecondary,
+                              width: columns.percentWidth,
+                              fontSize: columns.fontSize,
+                            },
+                          ]}
+                        >
+                          {formatReportPercent(
+                            segment.durationMs,
+                            report.selectedDurationMs,
+                          )}
+                        </Text>
+                        <Text
+                          numberOfLines={1}
+                          maxFontSizeMultiplier={REPORT_TEXT_CAP.numeric}
+                          style={[
+                            s.number,
+                            {
+                              color: theme.textPrimary,
+                              width: columns.durationWidth,
+                              fontSize: columns.fontSize,
+                            },
+                          ]}
+                        >
+                          {formatReportDuration(segment.durationMs / 1000)}
+                        </Text>
+                      </View>
+                    </View>
+                  </Animated.View>
+                ))}
+              </View>
+            ) : null}
             <ReportActivityChart
               buckets={report.buckets}
+              axisLayout={range.axisLayout}
               theme={theme}
               reduceMotion={reduceMotion || !isFocused || !foreground}
-              contextKey={`${requestKey}:${JSON.stringify(selection)}:${outsideRevision}:${isFocused}:${foreground}:${calendarOpen}:${Boolean(draft)}`}
+              contextKey={`${requestKey}:${JSON.stringify(selection)}:${outsideRevision}:${isFocused}:${foreground}:${Boolean(datePresentation)}:${Boolean(filterPresentation)}`}
             />
           </>
         )}
-        {draft ? (
+        {filterPresentation ? (
           <ReportFiltersSheet
-            draft={draft}
+            presentationId={filterPresentation.id}
+            draft={filterPresentation.draft}
             options={filterOptions}
             theme={theme}
             reduceMotion={reduceMotion}
-            onChange={setDraft}
-            onCancel={() => close(false)}
+            onChange={(nextDraft) =>
+              setFilterPresentation((current) =>
+                current?.id === filterPresentation.id
+                  ? { ...current, draft: nextDraft }
+                  : current,
+              )
+            }
             onApply={() => {
-              setSelection(applyReportFilterDraft(draft));
-              close(false);
+              const current = activeFilterPresentation.current;
+              if (current?.id !== filterPresentation.id) return false;
+              setSelection(applyReportFilterDraft(current.draft));
+              return true;
             }}
+            onDismissed={releaseFilterPresentation}
           />
         ) : null}
-        {calendarOpen ? (
+        {datePresentation ? (
           <ReportDateSheet
-            initial={choice}
+            presentationId={datePresentation.id}
+            initial={datePresentation.initial}
             nowMs={nowMs}
             theme={theme}
             reduceMotion={reduceMotion}
-            onCancel={() => close(true)}
             onApply={(value) => {
+              if (
+                activeDatePresentation.current?.id !== datePresentation.id
+              )
+                return false;
               setChoice(value);
-              close(true);
+              return true;
             }}
+            onDismissed={releaseDatePresentation}
           />
         ) : null}
       </View>
@@ -568,12 +636,13 @@ const s = StyleSheet.create({
     borderRadius: 999,
   },
   chart: { alignItems: "center", paddingVertical: 8 },
+  categoryList: { gap: 0 },
   category: {
     flexDirection: "row",
     flexWrap: "nowrap",
     alignItems: "center",
-    minHeight: 44,
-    paddingVertical: 10,
+    minHeight: 38,
+    paddingVertical: 5,
     gap: 10,
     borderBottomWidth: StyleSheet.hairlineWidth,
   },

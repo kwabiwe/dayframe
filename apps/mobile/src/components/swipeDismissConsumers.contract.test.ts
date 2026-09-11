@@ -10,6 +10,7 @@ const sheetSource = read("./SwipeDismissSheet.tsx");
 const editSource = read("./ActiveTimerEditSheet.tsx");
 const placesSource = read("../../app/places.tsx");
 const settingsSource = read("../../app/settings.tsx");
+const reportsSource = read("./reports/ReportSheets.tsx");
 const consumerSources = [editSource, placesSource, settingsSource];
 
 describe("shared swipe-dismiss ownership integration", () => {
@@ -18,6 +19,17 @@ describe("shared swipe-dismiss ownership integration", () => {
       expect(source).not.toMatch(/animationType=.*slide/);
       expect(source).toContain('animationType="none"');
     }
+    expect(reportsSource).toContain('animationType="none"');
+    expect(reportsSource).not.toMatch(/animationType=.*(?:fade|slide)/);
+  });
+
+  it("gives both Reports sheets one handle-only shared motion owner", () => {
+    expect(reportsSource).toContain("<SwipeDismissSheet");
+    expect(reportsSource).toContain("gestureHandleOnly");
+    expect(reportsSource).toContain("presentationId={presentationId}");
+    expect(reportsSource).toContain("onDismissStart=");
+    expect(reportsSource).toContain("onDismiss=");
+    expect(reportsSource).toContain("handleAccessory={");
   });
 
   it("keeps the backdrop inside the shared transition owner", () => {

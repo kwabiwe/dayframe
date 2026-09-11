@@ -84,6 +84,19 @@ Motion and background settle current state without replaying the entrance.
 Validate the complete transition and rapid interruption on an identified binary;
 mock timing and screenshots alone do not establish smooth device motion.
 
+Reports Revision 3.2 routes both date and category sheets through the shared
+`SwipeDismissSheet` owner inside a transparent Modal with no native animation.
+Normal motion couples the sheet's slide and scrim; Reduce Motion keeps the shared
+restrained opacity path. Only the centred handle owns the pan, leaving calendar,
+search and list scrolling independent. Done/Apply or a discard route claims one
+terminal result for one presentation ID, makes outgoing controls inert, and keeps
+the host mounted until the shared exit callback. Cancel, backdrop, escape and a
+successful swipe all discard; rejected swipes retain the draft. Delayed callbacks
+cannot release a newer presentation, and opener focus returns only after the
+current exit. Test rapid Apply/swipe, double actions, interrupted entrance,
+keyboard-open handle drag, rejected/accepted drags and reopen in normal and
+reduced motion; a source contract or still frame is not physical gesture evidence.
+
 - Conditionally mounting or removing a visible surface with no entrance or exit treatment.
 - Animating a swiped row while leaving its action stationary or animating the action while the resulting list reflow jumps.
 - Giving entrance motion to a notice but no exit, timeout, replacement, or Undo-restoration motion.

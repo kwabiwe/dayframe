@@ -51,9 +51,9 @@ const summary = (): ReportSummary => ({
   ],
   buckets: range.buckets.map((b, index) => ({
     key: b.key,
-    seconds: index === 11 ? 7200 : 0,
+    seconds: index === 0 ? 7200 : 0,
     byCategory:
-      index === 11
+      index === 0
         ? [
             { key: "a", seconds: 3600 },
             { key: "b", seconds: 3600 },
@@ -92,7 +92,7 @@ describe("Revision 2 Reports projection", () => {
       id: "timer",
       categoryId: "a",
       startedAt: entry().startedAt,
-      buckets: [{ key: range.buckets[11].key, seconds: 3600 }],
+      buckets: [{ key: range.buckets[0].key, seconds: 3600 }],
     };
     const result = buildReportsPresentation({
       data: data(entry()),
@@ -181,6 +181,86 @@ describe("Revision 2 Reports projection", () => {
       result.filterOptions.find((o) => o.key === "gone")?.isUnavailable,
     ).toBe(true);
     expect(formatReportPercent(1, 1000)).toBe("<1%");
+  });
+  it("orders selected categories by exact duration then stable category key", () => {
+    const snap = summary();
+    snap.categories = [
+      { key: "sleep", categoryId: "sleep", name: "Sleep", color: null, seconds: 21600 },
+      { key: "general", categoryId: "general", name: "General", color: null, seconds: 7200 },
+      { key: "test-z", categoryId: "test-z", name: "Test Z", color: null, seconds: 1800 },
+      { key: "uncategorized", categoryId: null, name: "Uncategorized", color: null, seconds: 2700 },
+      { key: "test-a", categoryId: "test-a", name: "Test A", color: null, seconds: 1800 },
+    ];
+    snap.buckets[0].byCategory = snap.categories.map((category) => ({
+      key: category.key,
+      seconds: category.seconds,
+    }));
+    const result = buildReportsPresentation({
+      data: data(),
+      summary: snap,
+      range,
+      nowMs: now,
+      selection: { mode: "all" },
+      themeMode: "dark",
+    });
+    expect(result.visibleCategorySegments.map((segment) => segment.key)).toEqual([
+      "sleep",
+      "general",
+      "uncategorized",
+      "test-a",
+      "test-z",
+    ]);
+  });
+  it("clips a future projected timer to now instead of creating future time", () => {
+    const future = entry({
+      id: "optimistic-active-timer:future",
+      startedAt: new Date(now + 60_000).toISOString(),
+    });
+    const result = buildReportsPresentation({
+      data: data(future),
+      summary: summary(),
+      range,
+      nowMs: now,
+      selection: { mode: "all" },
+      themeMode: "dark",
+    });
+    expect(result.selectedLoggedSeconds).toBe(7200);
+    expect(result.buckets).toHaveLength(1);
+    expect(result.buckets[0].seconds).toBe(7200);
+  });
+  it("allows a running timer to cross ranks without freezing first-seen order", () => {
+    const snap = summary();
+    snap.categories = [
+      { key: "a", categoryId: "a", name: "A", color: null, seconds: 3600 },
+      { key: "b", categoryId: "b", name: "B", color: null, seconds: 3500 },
+    ];
+    snap.buckets[0].byCategory = [
+      { key: "a", seconds: 3600 },
+      { key: "b", seconds: 3500 },
+    ];
+    const running = entry({
+      id: "timer",
+      categoryId: "b",
+      categoryName: "B",
+      startedAt: new Date(now - 3_500_000).toISOString(),
+    });
+    snap.active = {
+      id: "timer",
+      categoryId: "b",
+      startedAt: running.startedAt,
+      buckets: [{ key: range.buckets[0].key, seconds: 3500 }],
+    };
+    const ordered = (at: number) =>
+      buildReportsPresentation({
+        data: data(running),
+        summary: snap,
+        range,
+        nowMs: at,
+        selection: { mode: "all" },
+        themeMode: "dark",
+      }).visibleCategorySegments.map((segment) => segment.key);
+    expect(ordered(now)).toEqual(["a", "b"]);
+    expect(ordered(now + 200_000)).toEqual(["b", "a"]);
   });
   it.each([0, 60, 3600, 7200, 1000000])(
     "uses a zero-based nice axis above %s seconds",

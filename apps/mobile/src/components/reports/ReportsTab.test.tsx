@@ -143,9 +143,10 @@ async function chooseRange(tree: ReturnType<typeof create>, choice: string) {
       )!
       .props.onPress(),
   );
-  await act(async () =>
-    tree.root.findByType("ReportDateSheet" as never).props.onApply(choice),
-  );
+  const sheet = tree.root.findByType("ReportDateSheet" as never);
+  await act(async () => sheet.props.onApply(choice));
+  expect(tree.root.findAllByType("ReportDateSheet" as never)).toHaveLength(1);
+  await act(async () => sheet.props.onDismissed(sheet.props.presentationId));
 }
 describe("Revision 3 Reports owner", () => {
   it("preserves seconds after Stop while replacing a cached active contribution", async () => {
@@ -241,6 +242,15 @@ describe("Revision 3 Reports owner", () => {
       .find((node) => node.props.accessibilityLabel.startsWith("Work,"))!;
     expect(row.props.onPress).toBeUndefined();
     expect(row.props.accessibilityHint).toBeUndefined();
+    expect(row.props.style[0]).toMatchObject({
+      minHeight: 38,
+      paddingVertical: 5,
+    });
+    expect(
+      tree.root
+        .findAllByType("View" as never)
+        .some((node) => node.props.style?.gap === 0),
+    ).toBe(true);
     await act(async () =>
       tree.root
         .findByProps({
@@ -257,9 +267,12 @@ describe("Revision 3 Reports owner", () => {
           universe: ["a", "uncategorized"],
         }),
     );
-    await act(async () =>
-      tree.root.findByType("ReportFiltersSheet" as never).props.onApply(),
+    let sheet = tree.root.findByType("ReportFiltersSheet" as never);
+    await act(async () => sheet.props.onApply());
+    expect(tree.root.findAllByType("ReportFiltersSheet" as never)).toHaveLength(
+      1,
     );
+    await act(async () => sheet.props.onDismissed(sheet.props.presentationId));
     expect(chart().props.centerValue).toBe("00:00:00");
     expect(chart().props.segments).toHaveLength(0);
     expect(JSON.stringify(tree.toJSON())).toContain(
@@ -277,9 +290,9 @@ describe("Revision 3 Reports owner", () => {
         .findByType("ReportFiltersSheet" as never)
         .props.onChange({ mode: "none", universe: ["a", "uncategorized"] }),
     );
-    await act(async () =>
-      tree.root.findByType("ReportFiltersSheet" as never).props.onApply(),
-    );
+    sheet = tree.root.findByType("ReportFiltersSheet" as never);
+    await act(async () => sheet.props.onApply());
+    await act(async () => sheet.props.onDismissed(sheet.props.presentationId));
     expect(JSON.stringify(tree.toJSON())).toContain("No categories selected");
     expect(
       tree.root
@@ -322,6 +335,56 @@ describe("Revision 3 Reports owner", () => {
     const tree = await render();
     await act(async () => mocks.subscriber?.());
     expect(tree.root.findAllByType("DonutChart" as never)).toHaveLength(0);
+    act(() => tree.unmount());
+  });
+  it("ignores a stale sheet completion and releases only the current presentation", async () => {
+    const tree = await render();
+    await act(async () =>
+      tree.root
+        .findByProps({
+          accessibilityLabel: "Filter categories, all categories selected",
+        })
+        .props.onPress(),
+    );
+    const sheet = tree.root.findByType("ReportFiltersSheet" as never);
+    expect(sheet.props.presentationId).toBeGreaterThan(0);
+    await act(async () => sheet.props.onDismissed(sheet.props.presentationId - 1));
+    expect(tree.root.findAllByType("ReportFiltersSheet" as never)).toHaveLength(1);
+    await act(async () => sheet.props.onDismissed(sheet.props.presentationId));
+    expect(tree.root.findAllByType("ReportFiltersSheet" as never)).toHaveLength(0);
+    act(() => tree.unmount());
+  });
+  it("feeds the same exact-duration order to the donut and summary list", async () => {
+    mocks.fetch.mockImplementationOnce(async (input: ReportSummaryRequest) => ({
+      ...result(input),
+      totalSeconds: 10_800,
+      categories: [
+        { key: "a", categoryId: "a", name: "Work", color: "blue", seconds: 3600 },
+        { key: "b", categoryId: "b", name: "Rest", color: "red", seconds: 7200 },
+      ],
+      buckets: input.buckets.map((bucket, index) => ({
+        key: bucket.key,
+        seconds: index === 0 ? 10_800 : 0,
+        byCategory:
+          index === 0
+            ? [
+                { key: "a", seconds: 3600 },
+                { key: "b", seconds: 7200 },
+              ]
+            : [],
+      })),
+    }));
+    const tree = await render();
+    expect(
+      tree.root
+        .findByType("DonutChart" as never)
+        .props.segments.map((segment: { id: string }) => segment.id),
+    ).toEqual(["b", "a"]);
+    expect(
+      tree.root
+        .findAllByProps({ accessibilityRole: "text" })
+        .map((node) => node.props.accessibilityLabel.split(",")[0]),
+    ).toEqual(["Rest", "Work"]);
     act(() => tree.unmount());
   });
 });

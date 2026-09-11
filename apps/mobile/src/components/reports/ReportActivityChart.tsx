@@ -16,22 +16,24 @@ import {
 } from "@/lib/reportsPresentation";
 import {
   reportBucketAtX,
-  reportBucketLabel,
-  reportLabelIndices,
+  reportAxisLabels,
   reportTooltipLeft,
 } from "@/lib/reportPlot";
 import { REPORT_TEXT_CAP } from "@/lib/reportsTypography";
-import type { ReportBucket } from "@/lib/reportsRanges";
+import type { ReportAxisLayout, ReportBucket } from "@/lib/reportsRanges";
 import { CalendarGlyph } from "@/components/calendar/DatePickerCalendar";
 import { useReportTextMeasure } from "./ReportTextMeasure";
 const HEIGHT = 168;
+const LABEL_HEIGHT = 38;
 export function ReportActivityChart({
   buckets,
+  axisLayout,
   theme,
   reduceMotion,
   contextKey,
 }: {
   buckets: Array<ReportBucket & { seconds: number }>;
+  axisLayout: ReportAxisLayout;
   theme: MobileTheme;
   reduceMotion: boolean;
   contextKey: string;
@@ -54,8 +56,12 @@ export function ReportActivityChart({
   );
   const selectedIndex = buckets.findIndex((b) => b.key === tooltip);
   const selected = buckets[selectedIndex];
-  const labels = reportLabelIndices(buckets.length, plotWidth);
+  const labels = reportAxisLabels(buckets, axisLayout, plotWidth);
   const slot = plotWidth / Math.max(1, buckets.length);
+  const barWidth =
+    buckets.length === 1
+      ? Math.min(64, plotWidth * 0.25)
+      : Math.min(20, slot * 0.65);
   const move = (offset: number) => {
     const index =
       selectedIndex < 0
@@ -168,7 +174,7 @@ export function ReportActivityChart({
                 >
                   <ReportBar
                     height={(bucket.seconds / axis.maximum) * HEIGHT}
-                    width={Math.min(24, slot * 0.65)}
+                    width={barWidth}
                     theme={theme}
                     reduceMotion={reduceMotion}
                   />
@@ -181,28 +187,41 @@ export function ReportActivityChart({
             accessibilityElementsHidden
             style={s.labels}
           >
-            {buckets.map((bucket, i) =>
-              labels.has(i) ? (
-                <Text
-                  key={bucket.key}
-                  numberOfLines={1}
-                  maxFontSizeMultiplier={REPORT_TEXT_CAP.small}
-                  style={[
-                    s.xLabel,
-                    {
-                      color: theme.textSecondary,
-                      width: Math.min(42, plotWidth),
-                      left: Math.max(
-                        0,
-                        Math.min(plotWidth - 42, (i + 0.5) * slot - 21),
-                      ),
-                    },
-                  ]}
+            {labels.map((label) => {
+              const position =
+                label.anchor === "left"
+                  ? { left: 0, width: 52, alignItems: "flex-start" as const }
+                  : label.anchor === "right"
+                    ? { right: 0, width: 52, alignItems: "flex-end" as const }
+                    : {
+                        left: label.index * slot,
+                        width: slot,
+                        alignItems: "center" as const,
+                      };
+              return (
+                <View
+                  key={`${label.index}:${label.primary}`}
+                  style={[s.xLabelSlot, position]}
                 >
-                  {reportBucketLabel(bucket, buckets.length)}
-                </Text>
-              ) : null,
-            )}
+                  <Text
+                    numberOfLines={1}
+                    maxFontSizeMultiplier={REPORT_TEXT_CAP.small}
+                    style={[s.xLabel, { color: theme.textSecondary }]}
+                  >
+                    {label.primary}
+                  </Text>
+                  {label.secondary ? (
+                    <Text
+                      numberOfLines={1}
+                      maxFontSizeMultiplier={REPORT_TEXT_CAP.small}
+                      style={[s.xLabel, { color: theme.textSecondary }]}
+                    >
+                      {label.secondary}
+                    </Text>
+                  ) : null}
+                </View>
+              );
+            })}
           </View>
           {selected ? (
             <ReportTooltip
@@ -348,12 +367,16 @@ const s = StyleSheet.create({
     fontVariant: ["tabular-nums"],
     textAlign: "left",
   },
-  labels: { height: 30 },
-  xLabel: { position: "absolute", top: 8, fontSize: 10, textAlign: "center" },
+  labels: { height: LABEL_HEIGHT },
+  xLabelSlot: {
+    position: "absolute",
+    top: 6,
+  },
+  xLabel: { fontSize: 9, textAlign: "center" },
   bar: { borderTopLeftRadius: 3, borderTopRightRadius: 3 },
   tooltip: {
     position: "absolute",
-    bottom: 32,
+    bottom: LABEL_HEIGHT + 2,
     borderRadius: 12,
     padding: 8,
     maxWidth: "100%",

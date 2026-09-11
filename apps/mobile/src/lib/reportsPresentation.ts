@@ -17,6 +17,14 @@ export type ReportCategoryDuration = {
   selected: boolean;
 };
 
+export function compareReportCategoryDuration(
+  left: ReportCategoryDuration,
+  right: ReportCategoryDuration,
+) {
+  const duration = right.durationMs - left.durationMs;
+  return duration || (left.key < right.key ? -1 : left.key > right.key ? 1 : 0);
+}
+
 export function reportEntryUnion(data: MobileBootstrap) {
   const entries = new Map<string, MobileTimeEntry>();
   for (const entry of [
@@ -163,7 +171,10 @@ export function buildReportsPresentation(input: {
           isUncategorized: false,
           isUnavailable: true,
         });
-  const visibleCategorySegments = allCategorySegments.filter((c) => c.selected);
+  allCategorySegments.sort(compareReportCategoryDuration);
+  const visibleCategorySegments = allCategorySegments
+    .filter((c) => c.selected)
+    .sort(compareReportCategoryDuration);
   const selectedDurationMs = visibleCategorySegments.reduce(
     (sum, c) => sum + c.durationMs,
     0,

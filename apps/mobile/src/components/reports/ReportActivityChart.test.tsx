@@ -54,6 +54,7 @@ describe("Activity chart", () => {
     const render = (seconds: number) => (
       <ReportActivityChart
         buckets={buckets.map((b) => ({ ...b, seconds }))}
+        axisLayout="custom"
         theme={{} as never}
         reduceMotion
         contextKey={String(seconds)}
@@ -97,6 +98,7 @@ describe("Activity chart", () => {
       tree = create(
         <ReportActivityChart
           buckets={buckets}
+          axisLayout="custom"
           theme={{} as never}
           reduceMotion
           contextKey="one"
@@ -116,6 +118,7 @@ describe("Activity chart", () => {
   it("fits one adjustable plot, zero-height data and bounded tooltip controls", () => {
     const { tree, plot, tap } = mount();
     const bars = tree.root.findAllByProps({ testID: "report-activity-bar" });
+    expect(bars.every((bar) => bar.props.style[1].width === 20)).toBe(true);
     expect(bars[0].props.style.at(-1).height).toBe(0);
     expect(bars[1].props.style.at(-1).height).toBeGreaterThan(0);
     expect(plot().props.accessibilityRole).toBe("adjustable");
@@ -144,6 +147,52 @@ describe("Activity chart", () => {
     expect(plot().props.accessibilityValue.now).toBe(2);
     act(() => tree.unmount());
   });
+  it("centres one restrained daily bar with the actual weekday/date label", () => {
+    let tree!: ReturnType<typeof create>;
+    const day = {
+      key: "today",
+      start: new Date(2026, 8, 11),
+      end: new Date(2026, 8, 12),
+      label: "11",
+      fullLabel: "11 Sep 2026",
+      seconds: 3600,
+    };
+    act(() => {
+      tree = create(
+        <ReportActivityChart
+          buckets={[day]}
+          axisLayout="single-day"
+          theme={{} as never}
+          reduceMotion
+          contextKey="today"
+        />,
+      );
+    });
+    const bar = tree.root.findByProps({ testID: "report-activity-bar" });
+    expect(bar.props.style[1].width).toBe(55);
+    expect(
+      tree.root
+        .findAllByType("Text" as never)
+        .map((node) => node.props.children)
+        .filter((value) => value === "F" || value === "11/09"),
+    ).toEqual(["F", "11/09"]);
+    const plot = tree.root.findByProps({ testID: "report-plot" });
+    act(() =>
+      plot.props.onPress({
+        stopPropagation: vi.fn(),
+        nativeEvent: { locationX: 110 },
+      }),
+    );
+    expect(
+      tree.root.findByProps({ accessibilityLabel: "Previous bucket" }).props
+        .disabled,
+    ).toBe(true);
+    expect(
+      tree.root.findByProps({ accessibilityLabel: "Next bucket" }).props
+        .disabled,
+    ).toBe(true);
+    act(() => tree.unmount());
+  });
   it("keeps live ticks selected, ignores vertical scrolling, and dismisses on context change", () => {
     const { tree, plot, tap } = mount();
     tap(180);
@@ -151,6 +200,7 @@ describe("Activity chart", () => {
       tree.update(
         <ReportActivityChart
           buckets={buckets.map((b) => ({ ...b, seconds: b.seconds + 1 }))}
+          axisLayout="custom"
           theme={{} as never}
           reduceMotion
           contextKey="one"
@@ -170,6 +220,7 @@ describe("Activity chart", () => {
       tree.update(
         <ReportActivityChart
           buckets={buckets}
+          axisLayout="custom"
           theme={{} as never}
           reduceMotion
           contextKey="two"

@@ -19,20 +19,19 @@ describe("Revision 2 local report ranges", () => {
     else process.env.TZ = originalTimezone;
   });
   it.each(["2026-03-29", "2026-10-25"])(
-    "partitions DST day %s into actual clock hours",
+    "keeps DST day %s as one bucket with its actual duration",
     (key) => {
       expect(Intl.DateTimeFormat().resolvedOptions().timeZone).toBe(
         "Europe/London",
       );
       const now = +parseLocalDate(key)! + 12 * 3_600_000;
       const range = buildReportRange({ start: key, end: key }, now);
-      expect(range.buckets.length).toBe(
-        (+range.end - +range.start) / 3_600_000,
+      expect(range.buckets).toHaveLength(1);
+      expect((+range.end - +range.start) / 3_600_000).toBe(
+        key.includes("03-29") ? 23 : 25,
       );
-      expect(range.buckets.length).toBe(key.includes("03-29") ? 23 : 25);
-      expect(new Set(range.buckets.map((b) => b.key)).size).toBe(
-        range.buckets.length,
-      );
+      expect(range.bucketUnit).toBe("day");
+      expect(range.axisLayout).toBe("single-day");
       expect(ReportSummaryRequestSchema.safeParse(range.request).success).toBe(
         true,
       );
@@ -56,7 +55,7 @@ describe("Revision 2 local report ranges", () => {
       expect(range.buckets[0].start).toEqual(range.start);
       expect(range.buckets.at(-1)?.end).toEqual(range.end);
       expect(range.buckets.length).toBeLessThanOrEqual(
-        count === 1 ? 25 : count <= 31 ? 31 : count <= 180 ? 27 : 13,
+        count <= 31 ? count : count <= 180 ? 27 : 13,
       );
     },
   );
@@ -88,10 +87,25 @@ describe("Revision 2 local report ranges", () => {
     expect(
       buildReportRange("year", +new Date(2024, 1, 20)).buckets,
     ).toHaveLength(12);
-    expect(
-      buildReportRange("year", +new Date(2024, 1, 20))
-        .buckets.filter((b) => b.label)
-        .map((b) => b.start.getMonth()),
-    ).toEqual([0, 3, 6, 9]);
+    expect(buildReportRange("week", +new Date(2024, 1, 20))).toMatchObject({
+      bucketUnit: "day",
+      axisLayout: "week",
+    });
+    expect(buildReportRange("year", +new Date(2024, 1, 20))).toMatchObject({
+      bucketUnit: "month",
+      axisLayout: "year",
+    });
+  });
+  it("keeps full future portions of presets while custom future dates remain invalid", () => {
+    const now = +new Date(2026, 8, 11, 10);
+    const week = buildReportRange("week", now);
+    const month = buildReportRange("month", now);
+    const year = buildReportRange("year", now);
+    expect(formatLocalDateKey(addLocalDays(week.end, -1))).toBe("2026-09-13");
+    expect(formatLocalDateKey(addLocalDays(month.end, -1))).toBe("2026-09-30");
+    expect(formatLocalDateKey(addLocalDays(year.end, -1))).toBe("2026-12-31");
+    expect(validateCustomRange("2026-09-11", "2026-09-12", now).error).toContain(
+      "Future",
+    );
   });
 });

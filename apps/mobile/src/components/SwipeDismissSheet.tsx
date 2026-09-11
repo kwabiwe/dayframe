@@ -69,6 +69,8 @@ type SwipeDismissSheetProps = {
   children: ReactNode;
   disabled?: boolean;
   dismissGestureRef?: MutableRefObject<GestureType | undefined>;
+  gestureHandleOnly?: boolean;
+  handleAccessory?: ReactNode;
   handleStyle: StyleProp<ViewStyle>;
   keyboardInset?: number;
   onDismiss: (presentationId: number) => void;
@@ -94,6 +96,8 @@ function SwipeDismissSheet({
   children,
   disabled = false,
   dismissGestureRef,
+  gestureHandleOnly = false,
+  handleAccessory,
   handleStyle,
   keyboardInset = 0,
   onDismiss,
@@ -552,6 +556,54 @@ function SwipeDismissSheet({
     opacity: presence.value *
       backdropProgressForTranslation(translationY.value, exitTarget.value)
   }));
+  const dismissHandleControl = (
+    <View
+      accessible
+      accessibilityHint="Swipe down or double tap to close"
+      accessibilityLabel="Dismiss sheet"
+      accessibilityRole="button"
+      accessibilityState={{ disabled }}
+      onAccessibilityTap={disabled ? undefined : requestBackdropDismiss}
+      style={handleAccessory ? HANDLE_CENTER_CONTROL_STYLE : HANDLE_TOUCH_STYLE}
+      testID={testID ? `${testID}-handle` : undefined}
+    >
+      <View pointerEvents="none" style={handleStyle} />
+    </View>
+  );
+  const dismissHandle = handleAccessory ? (
+    <View style={HANDLE_ACCESSORY_ROW_STYLE}>
+      {gestureHandleOnly ? (
+        <GestureDetector gesture={gesture}>
+          {dismissHandleControl}
+        </GestureDetector>
+      ) : dismissHandleControl}
+      <View style={HANDLE_ACCESSORY_STYLE}>{handleAccessory}</View>
+    </View>
+  ) : gestureHandleOnly ? (
+    <GestureDetector gesture={gesture}>{dismissHandleControl}</GestureDetector>
+  ) : dismissHandleControl;
+  const sheet = (
+    <Reanimated.View
+      accessibilityLabel={accessibilityLabel}
+      accessibilityViewIsModal
+      onAccessibilityEscape={disabled ? undefined : requestBackdropDismiss}
+      onLayout={(event) => {
+        const measuredTarget = Math.max(
+          event.nativeEvent.layout.height + OFFSCREEN_PADDING,
+          windowHeight + OFFSCREEN_PADDING
+        );
+        measuredSheetHeight.value = event.nativeEvent.layout.height;
+        exitTarget.value = measuredTarget;
+        onLayout?.(event);
+      }}
+      pointerEvents={visible ? "auto" : "none"}
+      style={[style, sheetAnimatedStyle]}
+      testID={testID}
+    >
+      {dismissHandle}
+      {children}
+    </Reanimated.View>
+  );
 
   return (
     <>
@@ -570,36 +622,9 @@ function SwipeDismissSheet({
         />
       </Reanimated.View>
       <ReactNativeAnimated.View style={{ transform: [{ translateY: translateYOffset }] }}>
-        <GestureDetector gesture={gesture}>
-          <Reanimated.View
-            accessibilityLabel={accessibilityLabel}
-            accessibilityViewIsModal
-            onLayout={(event) => {
-              const measuredTarget = Math.max(
-                event.nativeEvent.layout.height + OFFSCREEN_PADDING,
-                windowHeight + OFFSCREEN_PADDING
-              );
-              measuredSheetHeight.value = event.nativeEvent.layout.height;
-              exitTarget.value = measuredTarget;
-              onLayout?.(event);
-            }}
-            style={[style, sheetAnimatedStyle]}
-            testID={testID}
-          >
-            <View
-              accessibilityHint="Swipe down or double tap to close"
-              accessibilityLabel="Dismiss sheet"
-              accessibilityRole="button"
-              accessibilityState={{ disabled }}
-              onAccessibilityTap={disabled ? undefined : requestBackdropDismiss}
-              style={HANDLE_TOUCH_STYLE}
-              testID={testID ? `${testID}-handle` : undefined}
-            >
-              <View pointerEvents="none" style={handleStyle} />
-            </View>
-            {children}
-          </Reanimated.View>
-        </GestureDetector>
+        {gestureHandleOnly ? sheet : (
+          <GestureDetector gesture={gesture}>{sheet}</GestureDetector>
+        )}
       </ReactNativeAnimated.View>
     </>
   );
@@ -616,4 +641,27 @@ const HANDLE_TOUCH_STYLE: ViewStyle = {
   marginBottom: -8,
   marginHorizontal: -16,
   marginTop: -8
+};
+
+const HANDLE_ACCESSORY_ROW_STYLE: ViewStyle = {
+  alignItems: "center",
+  justifyContent: "center",
+  minHeight: 44,
+  marginTop: -8
+};
+
+const HANDLE_CENTER_CONTROL_STYLE: ViewStyle = {
+  alignItems: "center",
+  justifyContent: "center",
+  minHeight: 44,
+  width: 96
+};
+
+const HANDLE_ACCESSORY_STYLE: ViewStyle = {
+  bottom: 0,
+  justifyContent: "center",
+  minHeight: 44,
+  position: "absolute",
+  right: 0,
+  top: 0
 };

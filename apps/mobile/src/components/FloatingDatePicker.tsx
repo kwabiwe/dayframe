@@ -14,6 +14,10 @@ import {
 import { DatePickerCalendar } from "@/components/calendar/DatePickerCalendar";
 import { formatLocalDateKey, startOfLocalDay } from "@/lib/reportsRanges";
 import { REPORT_TEXT_CAP } from "@/lib/reportsTypography";
+import {
+  DATE_PICKER_HORIZONTAL_INSET,
+  DATE_PICKER_SHELL_MAX_WIDTH,
+} from "@/lib/datePickerGeometry";
 
 export function FloatingDatePicker({
   maxDate = null,
@@ -66,7 +70,10 @@ export function FloatingDatePicker({
         entering={localPresenceEntering(reduceMotion, "rise")}
         style={[
           styles.datePickerSheet,
-          { width: Math.min(361, width), paddingHorizontal: 6 },
+          {
+            width: Math.min(DATE_PICKER_SHELL_MAX_WIDTH, width),
+            paddingHorizontal: DATE_PICKER_HORIZONTAL_INSET,
+          },
         ]}
       >
         <DatePickerCalendar

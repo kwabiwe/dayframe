@@ -98,6 +98,11 @@ describe("mobile aggregate SQL", () => {
           category,
           "10000000-0000-4000-8000-000000000099",
         );
+        await insert(
+          7,
+          "2026-09-10T01:00:00Z",
+          "2026-09-10T02:00:00Z",
+        );
         const captured = "2026-09-10T00:30:00.500Z";
         const sql = buildMobileReportSummaryQuery(session, input, captured);
         const response = await client.query<{ summary: ReportSummary }>(
@@ -119,6 +124,58 @@ describe("mobile aggregate SQL", () => {
         expect(
           result.categories.find((c) => c.key === "uncategorized")?.seconds,
         ).toBe(3600.5);
+
+        const oneDayInput = {
+          start,
+          end: middle,
+          buckets: [{ key: "daily-total", start, end: middle }],
+        };
+        const oneDaySql = buildMobileReportSummaryQuery(
+          session,
+          oneDayInput,
+          captured,
+        );
+        const oneDayResponse = await client.query<{ summary: ReportSummary }>(
+          oneDaySql.text,
+          oneDaySql.values,
+        );
+        const oneDay = ReportSummarySchema.parse(
+          oneDayResponse.rows[0].summary,
+        );
+        expect(oneDay.buckets).toMatchObject([
+          { key: "daily-total", seconds: 9000 },
+        ]);
+        expect(oneDay.totalSeconds).toBe(9000);
+
+        const weekStart = "2026-09-07T00:00:00.000Z";
+        const weekEnd = "2026-09-14T00:00:00.000Z";
+        const weekBuckets = Array.from({ length: 7 }, (_, index) => {
+          const bucketStart = new Date(
+            Date.parse(weekStart) + index * 86_400_000,
+          ).toISOString();
+          const bucketEnd = new Date(
+            Date.parse(weekStart) + (index + 1) * 86_400_000,
+          ).toISOString();
+          return {
+            key: `week-${index}`,
+            start: bucketStart,
+            end: bucketEnd,
+          };
+        });
+        const weekSql = buildMobileReportSummaryQuery(
+          session,
+          { start: weekStart, end: weekEnd, buckets: weekBuckets },
+          captured,
+        );
+        const weekResponse = await client.query<{ summary: ReportSummary }>(
+          weekSql.text,
+          weekSql.values,
+        );
+        const week = ReportSummarySchema.parse(weekResponse.rows[0].summary);
+        expect(week.buckets).toHaveLength(7);
+        expect(week.buckets.slice(4).map((bucket) => bucket.seconds)).toEqual([
+          0, 0, 0,
+        ]);
       } finally {
         await client.query("rollback");
         await client.end();

@@ -1,3 +1,5 @@
+import type { ReportAxisLayout, ReportBucket } from "./reportsRanges";
+
 export function reportBucketAtX(x: number, width: number, count: number) {
   if (!Number.isFinite(x) || width <= 0 || count <= 0 || x < 0 || x > width)
     return null;
@@ -17,27 +19,74 @@ export function reportTooltipLeft(
     ),
   );
 }
-export function reportLabelIndices(count: number, width: number) {
-  if (count <= 1) return new Set(count === 1 ? [0] : []);
-  const capacity = Math.max(2, Math.min(count, Math.floor(width / 42)));
-  if (count <= 7 && count <= capacity)
-    return new Set(Array.from({ length: count }, (_, i) => i));
-  return new Set(
-    Array.from({ length: capacity }, (_, i) =>
-      Math.round((i * (count - 1)) / (capacity - 1)),
-    ),
-  );
-}
-export function reportBucketLabel(
-  bucket: { start: Date; end: Date },
-  count: number,
-) {
-  const duration = +bucket.end - +bucket.start;
-  if (duration <= 3_600_000)
-    return String(bucket.start.getHours()).padStart(2, "0");
-  if (duration > 27 * 86_400_000)
-    return bucket.start.toLocaleDateString(undefined, { month: "short" });
-  if (count === 7)
-    return ["S", "M", "T", "W", "T", "F", "S"][bucket.start.getDay()];
-  return String(bucket.start.getDate());
+
+export type ReportAxisLabel = {
+  index: number;
+  primary: string;
+  secondary?: string;
+  anchor: "left" | "center" | "right";
+};
+
+const dayMonth = (date: Date) =>
+  `${String(date.getDate()).padStart(2, "0")}/${String(date.getMonth() + 1).padStart(2, "0")}`;
+
+const weekdayInitial = (date: Date) =>
+  date.toLocaleDateString(undefined, { weekday: "narrow" });
+
+const inclusiveEnd = (bucket: ReportBucket) => {
+  const result = new Date(bucket.end);
+  result.setDate(result.getDate() - 1);
+  return result < bucket.start ? bucket.start : result;
+};
+
+export function reportAxisLabels(
+  buckets: ReportBucket[],
+  layout: ReportAxisLayout,
+  plotWidth: number,
+): ReportAxisLabel[] {
+  if (buckets.length === 0) return [];
+  if (layout === "single-day")
+    return [
+      {
+        index: 0,
+        primary: weekdayInitial(buckets[0].start),
+        secondary: dayMonth(buckets[0].start),
+        anchor: "center",
+      },
+    ];
+  if (layout === "week")
+    return buckets.map((bucket, index) => ({
+      index,
+      primary: weekdayInitial(bucket.start),
+      secondary: dayMonth(bucket.start),
+      anchor: "center" as const,
+    }));
+  if (layout === "year") {
+    const cadence = plotWidth >= 210 ? [0, 2, 4, 6, 8, 10] : [0, 3, 6, 9];
+    return cadence
+      .filter((index) => index < buckets.length)
+      .map((index) => ({
+        index,
+        primary: buckets[index].start.toLocaleDateString(undefined, {
+          month: "short",
+        }),
+        anchor: "center" as const,
+      }));
+  }
+  if (buckets.length === 1)
+    return [
+      {
+        index: 0,
+        primary: dayMonth(buckets[0].start),
+        anchor: "center",
+      },
+    ];
+  return [
+    { index: 0, primary: dayMonth(buckets[0].start), anchor: "left" },
+    {
+      index: buckets.length - 1,
+      primary: dayMonth(inclusiveEnd(buckets.at(-1)!)),
+      anchor: "right",
+    },
+  ];
 }

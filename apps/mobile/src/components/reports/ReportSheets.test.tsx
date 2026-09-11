@@ -6,12 +6,20 @@ vi.mock("react", async () => {
   return import("../../../../../node_modules/react/index.js");
 });
 vi.mock("react-native", () => ({
+  Dimensions: { get: () => ({ width: 320, height: 844 }) },
+  Keyboard: {
+    addListener: () => ({ remove: vi.fn() }),
+    dismiss: vi.fn(),
+    scheduleLayoutAnimation: vi.fn(),
+  },
   Modal: "Modal",
+  Platform: { OS: "ios" },
   Pressable: "Pressable",
   ScrollView: "ScrollView",
   Text: "Text",
   TextInput: "TextInput",
   View: "View",
+  useWindowDimensions: () => ({ width: 320, height: 844 }),
   StyleSheet: { create: (s: unknown) => s, absoluteFill: {}, hairlineWidth: 1 },
 }));
 vi.mock("react-native-safe-area-context", () => ({
@@ -31,10 +39,44 @@ vi.mock(
   async () => import("../../lib/reportsTypography"),
 );
 vi.mock(
+  "@/lib/datePickerGeometry",
+  async () => import("../../lib/datePickerGeometry"),
+);
+vi.mock(
+  "@/lib/editSheetKeyboard",
+  async () => import("../../lib/editSheetKeyboard"),
+);
+vi.mock(
   "@/lib/datePickerCalendar",
   async () => import("../../lib/datePickerCalendar"),
 );
 vi.mock("@/lib/motion", () => ({ MOBILE_MOTION: { control: 140 } }));
+vi.mock("@/components/SwipeDismissSheet", async () => {
+  // @ts-expect-error The renderer peer React is installed at the repository root.
+  const React = await import("../../../../../node_modules/react/index.js");
+  const SwipeDismissSheet = React.forwardRef(
+    (props: Record<string, any>, ref: React.ForwardedRef<unknown>) => {
+      const dismiss = () => {
+        if (props.disabled) return;
+        if (props.onDismissStart?.(props.presentationId) === false) return;
+        props.onDismiss(props.presentationId);
+      };
+      React.useImperativeHandle(ref, () => ({ dismiss }));
+      return React.createElement(
+        "SwipeDismissSheet",
+        props,
+        React.createElement("Pressable", {
+          accessibilityLabel: props.backdropAccessibilityLabel,
+          disabled: props.disabled,
+          onPress: dismiss,
+        }),
+        props.handleAccessory,
+        props.children,
+      );
+    },
+  );
+  return { SwipeDismissSheet };
+});
 vi.mock(
   "@/components/calendar/DatePickerCalendar",
   async () => import("../calendar/DatePickerCalendar"),
@@ -219,14 +261,16 @@ describe("Reports sheet interactions", () => {
     (mode) => {
       const onChange = vi.fn(),
         onApply = vi.fn(),
-        onCancel = vi.fn();
+        onDismissed = vi.fn();
       const draft: ReportFilterDraft =
         mode === "include"
           ? { mode, keys: ["Work"], universe: ["Work", "Rest"] }
           : { mode, universe: ["Work", "Rest"] };
       const { tree, button, press } = mount(
         <ReportFiltersSheet
-          {...{ draft, options, theme, onChange, onApply, onCancel }}
+          {...{ draft, options, theme, onChange, onApply }}
+          presentationId={1}
+          onDismissed={onDismissed}
           reduceMotion
         />,
       );
@@ -234,6 +278,7 @@ describe("Reports sheet interactions", () => {
         mode === "all" ? true : mode === "none" ? false : "mixed",
       );
       expect(button("Apply").props.disabled).toBe(false);
+      press("Apply");
       press("Apply");
       expect(onApply).toHaveBeenCalledOnce();
       press("All categories");
@@ -249,26 +294,74 @@ describe("Reports sheet interactions", () => {
       expect(button("Rest")).toBeDefined();
       expect(button("All categories")).toBeDefined();
       press("Cancel Categories");
-      press("Close Categories");
-      act(() => tree.root.findByType("Modal" as never).props.onRequestClose());
-      expect(onCancel).toHaveBeenCalledTimes(3);
+      expect(onDismissed).toHaveBeenCalledWith(1);
       expect(onApply).toHaveBeenCalledOnce();
       expect(tree.root.findByType("Modal" as never).props.animationType).toBe(
         "none",
       );
+      expect(JSON.stringify(tree.toJSON())).not.toContain("Clear");
       act(() => tree.unmount());
     },
   );
+  it("routes Cancel through one discard outcome and one coordinated release", () => {
+    const onApply = vi.fn();
+    const onDismissed = vi.fn();
+    const { tree, press } = mount(
+      <ReportFiltersSheet
+        presentationId={7}
+        draft={{ mode: "all", universe: ["Work", "Rest"] }}
+        options={options}
+        theme={theme}
+        reduceMotion
+        onChange={vi.fn()}
+        onApply={onApply}
+        onDismissed={onDismissed}
+      />,
+    );
+    press("Cancel Categories");
+    press("Close Categories");
+    expect(onApply).not.toHaveBeenCalled();
+    expect(onDismissed).toHaveBeenCalledOnce();
+    expect(onDismissed).toHaveBeenCalledWith(7);
+    act(() => tree.unmount());
+  });
+  it("lets an earlier swipe discard win over a later Apply", () => {
+    const onApply = vi.fn();
+    const onDismissed = vi.fn();
+    const { tree, press } = mount(
+      <ReportFiltersSheet
+        presentationId={8}
+        draft={{ mode: "all", universe: ["Work", "Rest"] }}
+        options={options}
+        theme={theme}
+        reduceMotion
+        onChange={vi.fn()}
+        onApply={onApply}
+        onDismissed={onDismissed}
+      />,
+    );
+    const sheet = tree.root.findByType("SwipeDismissSheet" as never);
+    act(() => expect(sheet.props.onDismissStart(8)).toBe(true));
+    press("Apply");
+    expect(onApply).not.toHaveBeenCalled();
+    act(() => sheet.props.onDismiss(7));
+    expect(onDismissed).not.toHaveBeenCalled();
+    act(() => sheet.props.onDismiss(8));
+    expect(onDismissed).toHaveBeenCalledOnce();
+    act(() => tree.unmount());
+  });
   it.each([1, 9])(
     "requires two taps and normalizes reverse/same-day ending %s",
     (endDay) => {
       const onApply = vi.fn(),
-        onCancel = vi.fn();
+        onDismissed = vi.fn();
       const { tree, button, press } = mount(
         <ReportDateSheet
           initial="today"
           nowMs={+new Date(2026, 8, 9, 12)}
-          {...{ theme, onApply, onCancel }}
+          {...{ theme, onApply }}
+          presentationId={2}
+          onDismissed={onDismissed}
           reduceMotion={false}
         />,
       );
@@ -276,12 +369,21 @@ describe("Reports sheet interactions", () => {
         new Date(2026, 8, n).toLocaleDateString(undefined, {
           dateStyle: "full",
         });
-      const body = tree.root
-        .findAllByType("ScrollView" as never)
-        .find((n) => !n.props.horizontal)!;
-      // At 320pt: 288pt sheet content + 20pt viewport expansion = 308 / 7 = 44.
-      expect(body.props.style.marginHorizontal).toBe(-10);
-      expect(body.props.contentContainerStyle.paddingHorizontal).toBe(10);
+      const sheet = tree.root.findByType("SwipeDismissSheet" as never);
+      expect(sheet.props.gestureHandleOnly).toBe(true);
+      expect(sheet.props.presentationId).toBe(2);
+      expect(sheet.props.style[1].paddingHorizontal).toBe(6);
+      const calendar = tree.root
+        .findAllByType("View" as never)
+        .find((node) => node.props.style?.maxWidth === 349)!;
+      expect(calendar.props.style).toMatchObject({ width: "100%", maxWidth: 349 });
+      const preset = button("Today");
+      expect(preset.props.style).toMatchObject({
+        flex: 1,
+        minHeight: 44,
+        minWidth: 0,
+      });
+      expect(preset.findByType("View" as never).props.style[0].height).toBe(34);
       expect(button("Done").props.disabled).toBe(false);
       expect(button("Next month").props.disabled).toBe(true);
       expect(button(day(10)).props.disabled).toBe(true);
@@ -295,19 +397,18 @@ describe("Reports sheet interactions", () => {
       expect(button("Done").props.disabled).toBe(true);
       press(day(endDay));
       expect(button("Done").props.disabled).toBe(false);
+      press("Previous month");
+      expect(button("Next month").props.disabled).toBe(false);
+      press("Next month");
+      expect(button("Next month").props.disabled).toBe(true);
       press("Done");
       expect(onApply).toHaveBeenCalledWith({
         start: `2026-09-0${endDay}`,
         end: "2026-09-09",
       });
-      press("Previous month");
-      expect(button("Next month").props.disabled).toBe(false);
-      press("Next month");
-      expect(button("Next month").props.disabled).toBe(true);
-      press("Cancel Choose report dates");
-      expect(onCancel).toHaveBeenCalledOnce();
+      expect(onDismissed).toHaveBeenCalledWith(2);
       expect(tree.root.findByType("Modal" as never).props.animationType).toBe(
-        "fade",
+        "none",
       );
       act(() => tree.unmount());
     },
@@ -320,7 +421,8 @@ describe("Reports sheet interactions", () => {
         nowMs={+new Date(2026, 8, 9, 12)}
         theme={theme}
         onApply={onApply}
-        onCancel={vi.fn()}
+        presentationId={3}
+        onDismissed={vi.fn()}
         reduceMotion
       />,
     );

@@ -13,10 +13,10 @@ import {
 } from "./donutGeometry";
 import {
   reportBucketAtX,
-  reportBucketLabel,
-  reportLabelIndices,
+  reportAxisLabels,
   reportTooltipLeft,
 } from "./reportPlot";
+import { buildReportRange } from "./reportsRanges";
 import {
   formatReportDuration,
   spokenReportDuration,
@@ -169,18 +169,90 @@ describe("Revision 3 pure presentation contracts", () => {
       }
       expect(reportBucketAtX(208, 208, count)).toBe(count - 1);
       expect(reportBucketAtX(-1, 208, count)).toBeNull();
-      expect(reportLabelIndices(count, 208).size).toBeLessThanOrEqual(4);
     },
   );
-  it("handles empty and hourly sparse labels", () => {
-    expect([...reportLabelIndices(0, 208)]).toEqual([]);
-    expect([...reportLabelIndices(1, 208)]).toEqual([0]);
+  it("uses explicit period labels without rounded-index sampling", () => {
+    const instant = +new Date(2026, 8, 11, 10);
+    const today = buildReportRange("today", instant);
+    expect(reportAxisLabels(today.buckets, today.axisLayout, 208)).toEqual([
+      { index: 0, primary: "F", secondary: "11/09", anchor: "center" },
+    ]);
+    const week = buildReportRange("week", instant);
+    expect(reportAxisLabels(week.buckets, week.axisLayout, 208)).toHaveLength(7);
     expect(
-      reportBucketLabel(
-        { start: new Date(2026, 8, 10, 7), end: new Date(2026, 8, 10, 8) },
-        24,
+      reportAxisLabels(week.buckets, week.axisLayout, 208).map(
+        ({ primary, secondary }) => [primary, secondary],
       ),
-    ).toBe("07");
+    ).toEqual([
+      ["M", "07/09"],
+      ["T", "08/09"],
+      ["W", "09/09"],
+      ["T", "10/09"],
+      ["F", "11/09"],
+      ["S", "12/09"],
+      ["S", "13/09"],
+    ]);
+    const month = buildReportRange("month", instant);
+    expect(reportAxisLabels(month.buckets, month.axisLayout, 208)).toEqual([
+      { index: 0, primary: "01/09", anchor: "left" },
+      { index: 29, primary: "30/09", anchor: "right" },
+    ]);
+    const year = buildReportRange("year", instant);
+    expect(
+      reportAxisLabels(year.buckets, year.axisLayout, 220).map((label) => [
+        label.index,
+        label.primary,
+      ]),
+    ).toEqual([
+      [0, "Jan"],
+      [2, "Mar"],
+      [4, "May"],
+      [6, "Jul"],
+      [8, "Sep"],
+      [10, "Nov"],
+    ]);
+    expect(
+      reportAxisLabels(year.buckets, year.axisLayout, 200).map(
+        (label) => label.index,
+      ),
+    ).toEqual([0, 3, 6, 9]);
+    const sevenDayCustom = buildReportRange(
+      { start: "2026-09-01", end: "2026-09-07" },
+      instant,
+    );
+    expect(sevenDayCustom.axisLayout).toBe("custom");
+    expect(
+      reportAxisLabels(
+        sevenDayCustom.buckets,
+        sevenDayCustom.axisLayout,
+        220,
+      ),
+    ).toEqual([
+      { index: 0, primary: "01/09", anchor: "left" },
+      { index: 6, primary: "07/09", anchor: "right" },
+    ]);
+    const clippedMonths = buildReportRange(
+      { start: "2026-01-15", end: "2026-09-10" },
+      instant,
+    );
+    const clippedLabels = reportAxisLabels(
+      clippedMonths.buckets,
+      clippedMonths.axisLayout,
+      220,
+    );
+    expect(clippedMonths.bucketUnit).toBe("month");
+    for (const part of ["15", "Jan", "2026", "–"])
+      expect(clippedMonths.buckets[0].fullLabel).toContain(part);
+    for (const part of ["10", "Sep", "2026", "–"])
+      expect(clippedMonths.buckets.at(-1)?.fullLabel).toContain(part);
+    expect(clippedLabels).toEqual([
+      { index: 0, primary: "15/01", anchor: "left" },
+      {
+        index: clippedMonths.buckets.length - 1,
+        primary: "10/09",
+        anchor: "right",
+      },
+    ]);
   });
   it("retains outgoing donut IDs but prevents stale cleanup of restored/newer visuals", () => {
     const original = prepareDonutArcs([

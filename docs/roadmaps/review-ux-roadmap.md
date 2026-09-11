@@ -57,26 +57,29 @@ The [merged documentation audit](../audits/2026-09-08-documentation-code-alignme
 
 The approved automatic-logging/overlap policy is already in the PRD. This programme does not loosen it or reimplement it in chart or Calendar code. Preserve category-first tracking, optional descriptions/categories and user-facing tags; do not return projects or clients to the normal UX.
 
-## 4. Stage A: Reports decisions — Revision 3
+## 4. Stage A: Reports decisions — Revision 3.2
 
-The owner-approved Reports implementation plan Revision 3 supersedes the earlier
+The owner-approved Reports refinements Revision 3.2 supersede conflicting V3.1/V3
+presentation requirements while retaining their unaffected safety and acceptance
+rules. Revision 3 supersedes the earlier
 Stage A layout and filtering decisions. Continue existing PR #194, not a second
 Reports PR. Preserve the extracted Reports owner and useful chart primitives.
-The final-fixes addendum overrides conflicting V3 presentation requirements:
+Revision 3.2 retains the final-fixes addendum's unaffected requirements:
 filter-sheet-only selection, explicit seven-cell week rows, compact measured
-numeric columns, adaptive left-aligned axis gutters and evidence-led text fixes.
+numeric columns, adaptive left-aligned axis gutters and evidence-led text fixes;
+it keeps Cancel and forbids Clear or dismiss-to-Today reset behaviour.
 Native clipping and physical acceptance remain open until reproduced/retested;
 see `docs/investigations/2026-09-10-reports-final-fixes.md`. A new Claude whole-PR
 review follows known fixes and owner physical retests, not before them.
 
-- One compact mobile Reports surface has one range chooser and one funnel/count action. Today / Week / Month / Year presets live inside the shared date sheet, not on a permanent strip or a duplicate range heading. Date changes remain drafts until Done; Cancel, backdrop and blur discard them; unchanged Done does not refetch.
+- One compact mobile Reports surface has one range chooser and one funnel/count action. Equal compact Today / Week / Month / Year controls live below the shared date sheet's swipe handle and Cancel action, not on a permanent strip or below a duplicate title. Both Reports sheets use `SwipeDismissSheet`; Done/Apply commits once, dismissal discards, and the current presentation remains mounted until its coordinated exit completes.
 - The donut centre shows Total: summed confirmed logged activity clipped to the selected range. Concurrent entries count independently; there is no Time covered card or overlap explanation in mobile Reports. Web/Today goal coverage semantics are unchanged.
-- Only selected positive categories appear in the donut and summary rows. Angles, totals and percentages use the selected denominator, including spoken values. All/include/none stays reversible through the full category catalogue; None is valid and explains No categories selected. Bare ticks/dashes show filter selection, including mixed All. Uncategorized, duplicate names and unavailable stable IDs remain distinct.
+- Only selected positive categories appear in the donut and compact zero-gap summary list. Both use exact duration descending with stable category-key tie order. Angles, totals and percentages use the selected denominator, including spoken values. All/include/none stays reversible through the full category catalogue; None is valid and explains No categories selected. Bare ticks/dashes show filter selection, including mixed All. Uncategorized, duplicate names and unavailable stable IDs remain distinct.
 - The filter sheet is the only category-selection surface: Apply commits, Cancel discards. Donut slices and category rows are informational, never filter/remove actions or extra popups; each row speaks its complete name, selected-time percentage and duration without moving focus.
-- Custom ranges use inclusive device-local dates, reversible endpoint selection, no future dates and a maximum of 366 calendar days. Presets use local calendar boundaries and Week begins Monday.
-- Activity over time follows the same selected range and filter: clock hours for Today/one day (including 23/25-hour DST days), days for Week/Month or 2–31 custom days, clipped weeks for 32–180 days and clipped months for 181–366 days/Year. The entire plot fits without horizontal scrolling: zero-height zero buckets, three nice axis ticks, sparse labels and one bounded moving tooltip. One plot-level nearest-slot target supports zero buckets; adjustable accessibility and 44-point Previous/Next actions replace overlapping invisible per-bar targets.
+- Custom ranges use inclusive device-local dates, reversible endpoint selection, no future dates and a maximum of 366 calendar days. Presets use whole local calendar periods, Week begins Monday, and future portions stay present with zero contribution.
+- Activity over time uses one daily-total bar for Today/custom one day, seven daily Week bars, daily Month bars, twelve monthly Year bars, and clipped calendar-week/month custom buckets. Labels are weekday plus `DD/MM` for one day/Week, first and last `DD/MM` for Month/custom, and Jan/Mar/May/Jul/Sep/Nov for Year at normal widths. The plot remains fitted and non-scrolling with zero-height zero buckets, three nice ticks, one plot-level target and one bounded accessible tooltip.
 - Confirmed active timer contribution follows the existing projected timer through one current instant; Review-needed entries and suggestions never contribute. Month/Year/custom use bounded authenticated aggregates rather than raw history. An unavailable uncached range says Connect to load this report range; cached results never masquerade as another range.
-- Donut geometry follows available width, never font scale; show its clock total once, in the centre when it fits or in one bounded companion line. Durations use unbounded-hour HH:MM:SS, flooring only final labels, with natural spoken durations. Category rows remain one line at every supported width/text size: only names ellipsise; percentages and durations remain complete. Dense roles have explicit local scaling caps, not global suppression.
+- Donut geometry follows available width, never font scale; show its clock total once, in the centre when it fits or in one bounded companion line. Durations use unbounded-hour HH:MM:SS, flooring only final labels, with natural spoken durations. Informational category rows target a measured 38–42-point ordinary pitch without a sibling gap and retain minimum-only height. They remain one line at every supported width/text size: only names ellipsise; percentages and durations remain complete. The Reports grid shares the entry picker's 349-point inner cap, adapting to 308 points at a 320-point host while retaining six 44-point rows.
 
 Remove the superseded Pie/Bars switch, vertical category chart, two summary cards,
 visible Review warning and fixed Current week Daily bars. Filters remain Reports-only.
@@ -214,4 +217,4 @@ After each stage merges, reconcile the remaining sequence and add only significa
 
 When all stages finish, promote enduring requirements and guardrails to their canonical documents, then remove this temporary roadmap and its navigation links or replace it with a short dated historical completion note. Preserve useful decisions in Git history; do not leave a stale active roadmap behind.
 
-**Next action:** finish Revision 3 implementation review and staging/iPhone acceptance on existing PR #194. The owner-approved Revision 3 plan supersedes Revisions 1 and 2. Do not start Stage B or merge automatically; the tracker and PR hold current validation evidence.
+**Next action:** finish Revision 3.2 implementation validation and staging/iPhone acceptance on existing PR #194, then request a new whole-PR Claude review. V3.2 wins conflicts with V3.1/V3; V1/V2 remain historical. Do not start Stage B or merge automatically; the tracker and PR hold current validation evidence.

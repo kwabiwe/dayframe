@@ -1,6 +1,13 @@
 import type { ReportSummaryRequest } from "@dayframe/shared";
 
 export type ReportPreset = "today" | "week" | "month" | "year";
+export type ReportBucketUnit = "day" | "week" | "month";
+export type ReportAxisLayout =
+  | "single-day"
+  | "week"
+  | "month"
+  | "year"
+  | "custom";
 export type ReportWindow = { start: Date; end: Date };
 export type ReportRangeChoice = ReportPreset | { start: string; end: string };
 export type ReportBucket = ReportWindow & {
@@ -10,6 +17,8 @@ export type ReportBucket = ReportWindow & {
 };
 export type ReportRange = ReportWindow & {
   title: string;
+  bucketUnit: ReportBucketUnit;
+  axisLayout: ReportAxisLayout;
   buckets: ReportBucket[];
   request: ReportSummaryRequest;
 };
@@ -103,47 +112,51 @@ export function buildReportRange(
     title = `${shortDate(start)} – ${shortDate(addLocalDays(end, -1))}`;
   }
   const days = calendarDayCount(start, addLocalDays(end, -1));
-  const unit =
+  const bucketUnit: ReportBucketUnit =
     choice === "year"
       ? "month"
-      : days === 1
-        ? "hour"
-        : days <= 31
+      : days <= 31
           ? "day"
           : days <= 180
             ? "week"
             : "month";
+  const axisLayout: ReportAxisLayout =
+    days === 1
+      ? "single-day"
+      : choice === "week"
+        ? "week"
+        : choice === "month"
+          ? "month"
+          : choice === "year"
+            ? "year"
+            : "custom";
   const buckets: ReportBucket[] = [];
   let cursor = start;
   while (cursor < end) {
     const next =
-      unit === "hour"
-        ? new Date(cursor.getTime() + 3_600_000)
-        : unit === "day"
+      bucketUnit === "day"
           ? addLocalDays(cursor, 1)
-          : unit === "week"
+          : bucketUnit === "week"
             ? addLocalDays(startOfLocalWeek(cursor), 7)
             : new Date(cursor.getFullYear(), cursor.getMonth() + 1, 1);
     const stop = new Date(Math.min(next.getTime(), end.getTime()));
     const label =
-      unit === "hour"
-        ? String(cursor.getHours()).padStart(2, "0")
-        : unit === "month"
+      bucketUnit === "month"
           ? cursor.toLocaleDateString(undefined, { month: "short" })
           : choice === "week"
             ? cursor.toLocaleDateString(undefined, { weekday: "short" })
             : String(cursor.getDate());
     const fullLabel =
-      unit === "hour"
-        ? `${shortDate(cursor)}, ${cursor.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit", timeZoneName: "short" })}`
-        : unit === "week"
+      bucketUnit === "week"
           ? `${shortDate(cursor)} – ${shortDate(addLocalDays(stop, -1))}`
-          : unit === "month"
+          : bucketUnit === "month" && axisLayout === "year"
             ? cursor.toLocaleDateString(undefined, {
                 month: "long",
                 year: "numeric",
               })
-            : shortDate(cursor);
+            : bucketUnit === "month"
+              ? `${shortDate(cursor)} – ${shortDate(addLocalDays(stop, -1))}`
+              : fullDay(cursor);
     buckets.push({
       key: cursor.toISOString(),
       start: cursor,
@@ -153,25 +166,12 @@ export function buildReportRange(
     });
     cursor = stop;
   }
-  buckets.forEach((b, index) => {
-    const show =
-      unit === "hour"
-        ? b.start.getHours() % 6 === 0
-        : choice === "week"
-          ? true
-          : choice === "month"
-            ? [1, 8, 15, 22, days].includes(b.start.getDate())
-            : choice === "year"
-              ? index % 3 === 0
-              : index === 0 ||
-                index === buckets.length - 1 ||
-                index % Math.max(1, Math.ceil(buckets.length / 4)) === 0;
-    if (!show) b.label = "";
-  });
   return {
     start,
     end,
     title,
+    bucketUnit,
+    axisLayout,
     buckets,
     request: {
       start: start.toISOString(),
@@ -188,6 +188,14 @@ function shortDate(date: Date) {
   return date.toLocaleDateString(undefined, {
     day: "numeric",
     month: "short",
+    year: "numeric",
+  });
+}
+function fullDay(date: Date) {
+  return date.toLocaleDateString(undefined, {
+    weekday: "long",
+    day: "numeric",
+    month: "long",
     year: "numeric",
   });
 }
