@@ -146,7 +146,8 @@ unrelated dependency/configuration change.
 
 ## Remaining validation gates
 
-The staging-backed Preview/alias smoke, identified ordinary signed staging
-build and owner physical-iPhone acceptance remain separate from the completed
-local checks. None is claimed by this note until recorded with the actual SHA,
-backend identity and result.
+Draft PR #196 was opened from
+`2b1b49fbb6f7e373ca8fad66f6e698a42d3e8c43`. The staging-backed Preview/alias
+smoke, identified ordinary signed staging build and owner physical-iPhone
+acceptance remain separate from the completed local checks. None is claimed by
+this note until recorded with the actual SHA, backend identity and result.
