@@ -114,9 +114,15 @@ Review this checklist before and after changes that touch Dayframe UI, timer beh
   materialises once, including Sleep reuse and multi-source structural result
   links. Unknown/rejected outcomes remain distinct and safe.
 - Verify capped/partial/cache/offline states never claim zero or complete
-  coverage, Open Review reaches older backlog, and an exact generic, V2
-  Location, legacy-entry, saved-issue, or canonical target follows its typed
-  existing route rather than a neighbouring record.
+  coverage. In Review, the accessible Load more action reaches the 101st
+  backlog source without mixing a changed snapshot into the prior page or
+  calling a truncated collection the total. An exact generic, V2 Location,
+  legacy-entry, saved-issue, or canonical target follows its typed existing
+  route rather than a neighbouring record.
+- For an equivalent acceptance without a receipt entry ID, verify the saved
+  source remains durable until its explicit scoped source-result link and
+  current canonical entry/missing evidence are both read; no time/title
+  matching, bootstrap omission, or duplicate canonical interval is allowed.
 - Quick Confirm requires the exact fresh proposal, commits through the existing
   Review outbox before visual change, preserves old envelopes, handles duplicate
   taps/cross-surface attempts, and keeps the proposal actionable on local

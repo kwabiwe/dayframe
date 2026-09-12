@@ -45,6 +45,15 @@ logged time. Context pruning/byte budgets may remove disposable display data
 only; they never delete unresolved envelopes/effects or change the independent
 Location Evidence TTL/LRU policy.
 
+An equivalent generic accept/confirm may have no entry ID in its valid receipt.
+Its foreground presentation reader must first look up every affected source as
+one bounded action, then follow only an explicit accepted source-to-entry link
+from that scoped canonical response in a second bounded entry lookup. It must
+not infer an entry from time, title, category, position, or a missing bootstrap
+row. Keep all structural sources together; a merge/split receipt with a known
+no-entry outcome does not justify inventing one, while any returned entry still
+needs current Dashboard-cache or explicit-`missing` proof before retirement.
+
 ## Synchronisation and rollback
 
 - Keep one serial mutation queue, one drain promise and the existing root reconnect coordinator. Review stays foreground-only and never acquires the finite timer background assertion.

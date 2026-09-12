@@ -132,9 +132,12 @@ Prove owner/backend isolation, malformed/body/cursor/zone/ID bounds,
 snapshot-change restart, 100/101/200 sources, completed-entry overflow, legacy
 deduplication, source/result links, partial cache retention, old-envelope
 compatibility, v4/v5/v6-to-v7 migration/reopen/rollback, and multi-source
-terminal handover. Exercise completed/pending/saved/canonical/rejected/unknown
-accounting, reused Sleep, overlapping/cross-midnight/DST intervals, and no
-fake entry conversion.
+terminal handover. Exercise the equivalent-without-entry-ID two-step source
+lookup/link/result proof, then prove a 101st backlog source is reachable by the
+accessible next-page action without appending a changed snapshot or presenting
+a truncated list as the total. Exercise completed/pending/saved/canonical/
+rejected/unknown accounting, reused Sleep, overlapping/cross-midnight/DST
+intervals, and no fake entry conversion.
 
 At mobile widths/default/MAX/Bold Text verify one summary control, bounded
 labels/centre, non-overlapping 44-point sibling controls, exact pending

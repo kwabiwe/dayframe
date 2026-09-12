@@ -12,9 +12,9 @@ contracts remain owned by the PRD, architecture and canonical references.
   verified PR #195 merge baseline.
 - The source worktree was clean before the isolated worktree was created; no
   local change was adopted or reverted.
-- The roadmap and feature tracker still describe PR #195 as open. That is
-  stale coordination text, not deployment or physical-device evidence; Stage
-  B updates that text without claiming a new hosted or device result.
+- The roadmap and feature tracker record PR #195 as merged. Their Stage B
+  coordination text remains distinct from deployment or physical-device
+  evidence; this work does not claim a new hosted or device result.
 
 ## Preserved ownership boundaries
 
@@ -76,7 +76,14 @@ The ordered source commits, all based on
 - `0d48b7a7c23fcaacb10a5c290985a69398199d3a` — test-mock lint hygiene; and
 - `9a2bf3ad8f2e1d7bbb3e9222f8ce6f749d5eb3da` — native exact-focus handover;
   and
-- `5745ea8a4134ef14b5c6444ec65fc96bab9f5beb` — exact-head review corrections.
+- `5745ea8a4134ef14b5c6444ec65fc96bab9f5beb` — first exact-head review
+  corrections;
+- `e3c8962fce046b4f92c2cefe0bf17c9786d0e93a` — explicit equivalent-result
+  handover proof; and
+- `f12aabcebb5947ef82ed128adb2727c7cdde5684` — accessible bounded Review
+  backlog paging; and
+- `068bde70990318c8a3f8fc7e3af1b1546f0c3694` — retryable foreground
+  handover proof.
 
 The required gates were deliberately run before the donut was introduced:
 
@@ -93,8 +100,8 @@ row, summary, history, Quick Confirm, Review SQLite and guarded Reports/
 accessibility suites also passed. The final partial-summary guard was rerun
 with the donut and Reports suites: PASS (4 files, 27 tests).
 
-All four disposable-data validators passed again at
-`5745ea8a4134ef14b5c6444ec65fc96bab9f5beb`. The SQLite scripts create and
+All four disposable-data validators passed again at code head
+`068bde70990318c8a3f8fc7e3af1b1546f0c3694`. The SQLite scripts create and
 remove their own temporary databases. The two Postgres validators ran after a
 fresh local PostgreSQL 17 instance was initialised on loopback with ordered
 schemas in databases named `dayframe_stage_b_review_test` and
@@ -102,13 +109,14 @@ schemas in databases named `dayframe_stage_b_review_test` and
 refusal and fixture cleanup were retained. That local server was stopped after
 the run. No staging or production data was contacted.
 
-At source head `5745ea8a4134ef14b5c6444ec65fc96bab9f5beb`, the final broad
-test command passed: mobile 134 files / 1,178 tests; web 134 files / 909 tests
-with 2 existing skips; shared 16 files / 250 tests. The time-zone-sensitive
-Today presentation/client/label/focus suite also passed 19 tests each with
-`TZ=UTC`, `TZ=Europe/London`, and `TZ=America/Los_Angeles`. `npm run lint`,
-documentation alignment, iOS configuration and the web production build
-passed; lint retains only two pre-existing warnings in
+At code head `068bde70990318c8a3f8fc7e3af1b1546f0c3694`, the broad test
+command passed: mobile 138 files / 1,188 tests; web 134 passed files plus one
+intentional skipped file / 909 passed tests plus two intentional skips; shared
+16 files / 250 tests. The time-zone-sensitive Today presentation/client/label/
+focus/handover suite also passed 20 tests each with `TZ=UTC`,
+`TZ=Europe/London`, and `TZ=America/Los_Angeles`. `npm run lint`,
+documentation alignment, iOS configuration, brand-asset checks and the web
+production build passed; lint retains only two pre-existing warnings in
 `event-service.test.ts`.
 
 The web production build passed. At
@@ -140,8 +148,26 @@ GitHub App lacks repository access. A local read-only review of the former
 
 `5745ea8a4134ef14b5c6444ec65fc96bab9f5beb` checks terminal state before the
 optional hash and suppresses the saved row whenever explicit, current canonical
-evidence is visible. It adds targeted regression coverage for both cases. A
-fresh read-only exact-head re-review remains required after the final evidence
+evidence is visible. It adds targeted regression coverage for both cases.
+
+The subsequent exact-head review found two further proof gaps: ordinary Today
+reads did not trigger a terminal/result lookup for an already acknowledged
+Review effect, and Review did not expose a page after the capped bootstrap
+list. `e3c8962fce046b4f92c2cefe0bf17c9786d0e93a` adds one cancellable display
+handover reader that requests all structural sources together, follows only
+explicit accepted source-to-entry links, and requires current result/missing
+evidence before the existing store can retire its effect. It also makes lookup
+lineage include the persisted receipt relation used by the normal reader.
+`f12aabcebb5947ef82ed128adb2727c7cdde5684` adds serial, cancellable 100-item
+backlog pages to the existing Review route, an accessible Load more action, one
+bounded snapshot restart and truthful count qualification. Neither correction
+adds a queue, mutation owner, timer, Health, Location, auth, or sync owner.
+`068bde70990318c8a3f8fc7e3af1b1546f0c3694` clears only an ephemeral failed
+foreground-handover dedupe marker, allowing a later existing foreground or
+store-subscription trigger to retry the bounded proof without a poll, timer or
+new delivery owner. Its hook regression proves the ordinary Today reader
+invokes the handover reader.
+Fresh exact-head review remains required after the final documentation/evidence
 commit; no earlier review approval is treated as approval of this corrected
 head.
 
