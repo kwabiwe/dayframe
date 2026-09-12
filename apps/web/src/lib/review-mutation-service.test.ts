@@ -362,7 +362,8 @@ function clientForNewLocation() {
 }
 
 function clientForOverlappingGenericEdit(reviewItemId: string) {
-  const query = vi.fn(async (statement: string, _values?: unknown[]) => {
+  const query = vi.fn(async (statement: string, values?: unknown[]) => {
+    void values;
     if (statement.includes("pg_try_advisory_xact_lock")) {
       return { rows: [{ acquired: true }] };
     }

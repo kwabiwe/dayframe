@@ -18,7 +18,8 @@ const entryId = "40000000-0000-4000-8000-000000000001";
 
 describe("getReviewPresentation", () => {
   it("uses one bounded read-only snapshot, scoped lookup IDs, and no mutation locks", async () => {
-    const query = vi.fn(async (statement: string, _values?: unknown[]) => {
+    const query = vi.fn(async (statement: string, values?: unknown[]) => {
+      void values;
       if (statement.startsWith("begin read only")) return { rows: [] };
       if (statement.includes("current_setting")) return { rows: [{ transaction_timeout: null }] };
       if (statement.includes("set_config")) return { rows: [] };
