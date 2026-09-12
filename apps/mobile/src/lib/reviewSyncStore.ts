@@ -206,6 +206,17 @@ export type ReviewPresentationStoreEffect = {
   localEffect: "hidden" | "restore";
   resolution: "none" | "pending" | "verified" | "unknown" | "rejected";
   canonicalEntryIds: string[];
+  source: {
+    reviewItemId: string;
+    sourceKind: "generic" | "location_v2";
+    title: string;
+    category: { id: string | null; name: string | null; color: string | null };
+    placeLabel: string | null;
+    interval: { start: string | null; end: string | null };
+    createdAt: string;
+    eventSource: string | null;
+    eventType: string | null;
+  } | null;
 };
 
 export type ReviewPresentationStoreSnapshot = {
@@ -1487,9 +1498,10 @@ async function readPresentationEffects(db: SQLite.SQLiteDatabase, accountKeyValu
     local_effect: "hidden" | "restore";
     resolution_status: string | null;
     acknowledgement_json: string | null;
+    snapshot_json: string;
   }>(
     `select e.review_item_id, o.action_kind, o.state, e.local_effect,
-            o.resolution_status, o.acknowledgement_json
+            o.resolution_status, o.acknowledgement_json, e.snapshot_json
      from review_mutation_effects e
      join review_mutation_outbox o
        on o.client_mutation_id = e.client_mutation_id and o.account_key = e.account_key
@@ -1503,8 +1515,29 @@ async function readPresentationEffects(db: SQLite.SQLiteDatabase, accountKeyValu
     state: row.state,
     localEffect: row.local_effect,
     resolution: reviewPresentationResolution(row.state, row.resolution_status),
-    canonicalEntryIds: acknowledgementEntryIds(parseAcknowledgement(row.acknowledgement_json) ?? {})
+    canonicalEntryIds: acknowledgementEntryIds(parseAcknowledgement(row.acknowledgement_json) ?? {}),
+    source: presentationEffectSource(row.review_item_id, row.snapshot_json)
   }));
+}
+
+function presentationEffectSource(reviewItemId: string, snapshotJson: string): ReviewPresentationStoreEffect["source"] {
+  const item = parseReviewSnapshot(snapshotJson);
+  if (!item) return null;
+  return {
+    reviewItemId,
+    sourceKind: item.type === "location" ? "location_v2" : "generic",
+    title: item.title,
+    category: {
+      id: item.suggestedCategoryId,
+      name: item.categoryName,
+      color: item.categoryColor ?? null
+    },
+    placeLabel: item.placeName,
+    interval: { start: item.suggestedStartedAt, end: item.suggestedStoppedAt },
+    createdAt: item.createdAt,
+    eventSource: item.eventSource,
+    eventType: item.eventType
+  };
 }
 
 function reviewPresentationResolution(state: ReviewMutationState, status: string | null): ReviewPresentationStoreEffect["resolution"] {
