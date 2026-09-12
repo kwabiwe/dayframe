@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { projectTodayReviewPresentation } from "./todayReviewPresentation";
-import type { ReviewPresentationResponse } from "@dayframe/shared";
+import type { ReviewPresentationSnapshot } from "@dayframe/shared";
 import type { MobileTimeEntry } from "./api";
 import type { ReviewPresentationStoreEffect } from "./reviewSyncStore";
 
@@ -88,6 +88,33 @@ describe("projectTodayReviewPresentation", () => {
     expect(presentation.todayReviewCount).toEqual({ value: 3, exact: false });
   });
 
+  it("keeps an unknown saved outcome out of both logged and pending accounting", () => {
+    const walk = review("walk", "Walk", "2026-09-12T12:00:00.000Z", "2026-09-12T12:30:00.000Z");
+    const presentation = project({
+      response: response([walk], 1, 1),
+      effects: [{ ...effect("walk", "unknown"), source: {
+        reviewItemId: "walk",
+        sourceKind: "generic",
+        title: "Walk",
+        category: { id: null, name: null, color: null },
+        placeLabel: null,
+        interval: { start: walk.interval.start, end: walk.interval.end },
+        createdAt: walk.createdAt,
+        eventSource: walk.eventSource,
+        eventType: walk.eventType
+      } }]
+    });
+
+    expect(presentation.completedLoggedMs).toBe(0);
+    expect(presentation.awaitingReviewMs).toBe(0);
+    expect(presentation.donutSegments).toEqual([]);
+    expect(presentation.daySections[0].activities[0]).toMatchObject({
+      state: "needs_attention",
+      resolution: "unknown",
+      awaitingDecision: false
+    });
+  });
+
   it("keeps incomplete and legacy sources reachable without inventing intervals or a shortcut", () => {
     const incomplete = {
       ...review("incomplete", "Detected activity", "2026-09-12T08:00:00.000Z", "2026-09-12T08:30:00.000Z"),
@@ -140,7 +167,7 @@ function project(input: Partial<Parameters<typeof projectTodayReviewPresentation
   });
 }
 
-function response(records: unknown[], globalCount: number, todayCount: number, complete = true): ReviewPresentationResponse {
+function response(records: unknown[], globalCount: number, todayCount: number, complete = true): ReviewPresentationSnapshot {
   const openReviewItemIds = records
     .filter((record): record is ReturnType<typeof review> => Boolean(record && typeof record === "object" && (record as { kind?: string }).kind === "review"))
     .map((record) => record.reviewItemId);

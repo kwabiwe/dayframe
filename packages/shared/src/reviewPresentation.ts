@@ -12,6 +12,7 @@ export const REVIEW_PRESENTATION_DEFAULT_LIMIT = 100;
 export const REVIEW_PRESENTATION_MAX_LIMIT = 200;
 export const REVIEW_PRESENTATION_MAX_IDS = 100;
 export const REVIEW_PRESENTATION_MAX_CURSOR_LENGTH = 2_048;
+export const REVIEW_PRESENTATION_MAX_SNAPSHOT_RECORDS = 5_000;
 // Sixty local calendar days can include a DST rollback. The request remains
 // deliberately bounded even when a caller supplies absolute instants.
 export const REVIEW_PRESENTATION_MAX_WINDOW_MS = 61 * 24 * 60 * 60 * 1_000;
@@ -138,6 +139,19 @@ const category = z
   .strict();
 const place = z.object({ id: uuid.nullable(), label: z.string().max(240).nullable() }).strict();
 const interval = z.object({ start: instant.nullable(), end: instant.nullable() }).strict();
+const legacyEditor = z
+  .object({
+    projectId: uuid.nullable(),
+    projectName: z.string().max(240).nullable(),
+    projectColor: z.string().max(80).nullable(),
+    clientName: z.string().max(240).nullable(),
+    placeKind: z.enum(["saved", "one_time"]).nullable(),
+    source: z.string().max(100),
+    description: z.string().max(2_000).nullable(),
+    durationSeconds: z.number().int().nonnegative(),
+    tagNames: z.array(z.string().min(1).max(240)).max(24)
+  })
+  .strict();
 
 export const ReviewProposalPresentationSchema = z
   .object({
@@ -174,7 +188,12 @@ export const LegacyReviewEntryPresentationSchema = z
     confidence: z.string().max(80),
     status: z.enum(["needs_review", "missing"]),
     updatedAt: instant,
-    linkedReviewItemId: uuid.nullable()
+    linkedReviewItemId: uuid.nullable(),
+    /**
+     * Actual, narrowly whitelisted values needed by the existing legacy-entry
+     * editor. This avoids fabricating a MobileTimeEntry from display fields.
+     */
+    editor: legacyEditor
   })
   .strict();
 
@@ -220,6 +239,7 @@ const ReviewLookupResultSchema = z.union([
 ]);
 const EntryLookupResultSchema = z.union([
   CompletedTodayEntryPresentationSchema,
+  LegacyReviewEntryPresentationSchema,
   MissingEntryLookupSchema
 ]);
 
@@ -231,7 +251,9 @@ export const ReviewPresentationResponseSchema = z
         mode: z.enum(["window", "backlog", "lookup"]),
         window: localWindow.optional(),
         today: localWindow.optional(),
-        timeZone
+        timeZone,
+        reviewItemIds: uniqueIds.optional(),
+        entryIds: uniqueIds.optional()
       })
       .strict(),
     snapshotToken: z.string().min(1).max(512),
@@ -263,10 +285,23 @@ export const ReviewPresentationResponseSchema = z
   })
   .strict();
 
+/**
+ * The network response is one bounded page. The mobile cache may combine the
+ * pages of one verified snapshot before rendering Today, so it needs a
+ * separate strict shape with the same whitelisted fields and a bounded
+ * collection limit. It is deliberately not used by the route handler.
+ */
+export const ReviewPresentationSnapshotSchema = ReviewPresentationResponseSchema.extend({
+  records: z.array(ReviewPresentationRecordSchema).max(REVIEW_PRESENTATION_MAX_SNAPSHOT_RECORDS),
+  links: z.array(ReviewPresentationLinkSchema).max(REVIEW_PRESENTATION_MAX_SNAPSHOT_RECORDS)
+});
+
 export type ReviewPresentationRequest = z.output<typeof ReviewPresentationRequestSchema>;
 export type ReviewPresentationRecord = z.output<typeof ReviewPresentationRecordSchema>;
 export type ReviewPresentationResponse = z.output<typeof ReviewPresentationResponseSchema>;
+export type ReviewPresentationSnapshot = z.output<typeof ReviewPresentationSnapshotSchema>;
 export type ReviewProposalPresentation = z.output<typeof ReviewProposalPresentationSchema>;
+export type LegacyReviewEntryPresentation = z.output<typeof LegacyReviewEntryPresentationSchema>;
 export type CompletedTodayEntryPresentation = z.output<typeof CompletedTodayEntryPresentationSchema>;
 
 export function isIanaTimeZone(value: string) {

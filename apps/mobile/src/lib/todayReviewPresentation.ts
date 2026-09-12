@@ -1,6 +1,6 @@
 import type {
   CompletedTodayEntryPresentation,
-  ReviewPresentationResponse,
+  ReviewPresentationSnapshot,
   ReviewProposalPresentation
 } from "@dayframe/shared";
 import type { MobileTimeEntry } from "./api";
@@ -26,6 +26,9 @@ export type TodayActivity = {
   canonicalEntryIds: readonly string[];
   interval: { startMs: number; endMs: number } | null;
   clippedInterval: { startMs: number; endMs: number } | null;
+  /** A valid detected timestamp preserves incomplete-item ordering without inventing an interval. */
+  detectedAtMs: number | null;
+  reviewSourceKind: "generic" | "location_v2" | null;
   title: string;
   category: CategoryPresentation | null;
   placeLabel: string | null;
@@ -67,7 +70,7 @@ export type TodayReviewPresentation = {
 export type TodayReviewProjectionInput = {
   ownerKey: string;
   snapshotOwnerKey: string | null;
-  response: ReviewPresentationResponse | null;
+  response: ReviewPresentationSnapshot | null;
   effects: readonly ReviewPresentationStoreEffect[];
   dashboardEntries: readonly MobileTimeEntry[];
   /** Existing timer/edit/delete owner projections, already evidenced locally. */
@@ -126,6 +129,8 @@ export function projectTodayReviewPresentation(input: TodayReviewProjectionInput
       canonicalEntryIds: [entry.id],
       interval: { startMs: entry.startMs, endMs: entry.endMs },
       clippedInterval: clipped,
+      detectedAtMs: null,
+      reviewSourceKind: null,
       title: entry.title,
       category: entry.category,
       placeLabel: entry.placeLabel,
@@ -161,8 +166,11 @@ export function projectTodayReviewPresentation(input: TodayReviewProjectionInput
     ]);
     const canonicalVisible = explicitCanonicalIds.some((id) => canonicalEntries.has(id));
     const resolution = effect?.resolution ?? "none";
-    const saved = Boolean(effect && effect.localEffect === "hidden" && resolution !== "rejected");
+    const saved = Boolean(effect && effect.localEffect === "hidden" && (
+      resolution === "pending" || resolution === "verified"
+    ));
     const restoredAttention = Boolean(effect && effect.localEffect === "restore");
+    const unresolved = Boolean(effect && effect.localEffect === "hidden" && resolution === "unknown");
 
     // A receipt-linked canonical entry wins the row. Keeping a second saved
     // source here would duplicate a real entry merely to preserve animation.
@@ -174,9 +182,9 @@ export function projectTodayReviewPresentation(input: TodayReviewProjectionInput
     const source: ActivitySource = { kind: "review", reviewItemId: candidate.record.reviewItemId };
     const state: TodayActivity["state"] = saved
       ? "accepted_locally"
-      : restoredAttention ? "needs_attention"
+      : restoredAttention || unresolved ? "needs_attention"
       : "needs_review";
-    const awaitingDecision = !saved;
+    const awaitingDecision = !saved && !unresolved;
     const quickConfirm = quickConfirmEligibility({
       source: candidate.record,
       ownerMatches: true,
@@ -192,6 +200,8 @@ export function projectTodayReviewPresentation(input: TodayReviewProjectionInput
       canonicalEntryIds: explicitCanonicalIds,
       interval,
       clippedInterval: clipped,
+      detectedAtMs: parseInstant(candidate.record.createdAt),
+      reviewSourceKind: candidate.record.sourceKind,
       title: candidate.record.title,
       category: candidate.record.category,
       placeLabel: candidate.record.place.label,
@@ -204,6 +214,10 @@ export function projectTodayReviewPresentation(input: TodayReviewProjectionInput
       savedConfirmationCount += 1;
       continue;
     }
+    // A proof gap is neither a fresh proposal nor a canonical result. Keep
+    // its owned row visible for diagnostics, but never let it re-enter pending
+    // geometry or accounting merely because its old interval is still cached.
+    if (unresolved) continue;
     if (clipped) {
       pendingSegments.push({
         id: `review:${candidate.record.reviewItemId}`,
@@ -233,6 +247,8 @@ export function projectTodayReviewPresentation(input: TodayReviewProjectionInput
       canonicalEntryIds: [],
       interval,
       clippedInterval: clipped,
+      detectedAtMs: parseInstant(record.updatedAt),
+      reviewSourceKind: null,
       title: record.title,
       category: record.category,
       placeLabel: record.place.label,
@@ -289,7 +305,7 @@ export function projectTodayReviewPresentation(input: TodayReviewProjectionInput
   };
 }
 
-function canonicalEntryMap(input: TodayReviewProjectionInput, response: ReviewPresentationResponse) {
+function canonicalEntryMap(input: TodayReviewProjectionInput, response: ReviewPresentationSnapshot) {
   const responseEntries = presentationEntries(response);
   const fromResponse = new Map(responseEntries.map((entry) => [entry.id, entry]));
   const responseIsComplete = response.scope.mode === "window" && response.completeness.completedToday;
@@ -306,7 +322,7 @@ function canonicalEntryMap(input: TodayReviewProjectionInput, response: ReviewPr
   return entries;
 }
 
-function presentationEntries(response: ReviewPresentationResponse) {
+function presentationEntries(response: ReviewPresentationSnapshot) {
   const records = [...response.records, ...response.lookup.entries]
     .filter((record): record is CompletedTodayEntryPresentation => record.kind === "completed_entry")
     .map(presentationEntry);
@@ -342,7 +358,7 @@ function presentationEntry(entry: CompletedTodayEntryPresentation): CanonicalEnt
 }
 
 function reviewCandidates(
-  response: ReviewPresentationResponse,
+  response: ReviewPresentationSnapshot,
   links: Map<string, string[]>,
   effects: readonly ReviewPresentationStoreEffect[]
 ) {
@@ -384,7 +400,7 @@ function reviewCandidates(
 }
 
 function adjustedCounts(
-  response: ReviewPresentationResponse,
+  response: ReviewPresentationSnapshot,
   effects: readonly ReviewPresentationStoreEffect[],
   reviews: ReviewCandidate[],
   dayStart: number,
@@ -435,9 +451,14 @@ function isDetectedInDay(value: string, dayStart: number, dayEnd: number) {
   return Number.isFinite(timestamp) && timestamp >= dayStart && timestamp < dayEnd;
 }
 
+function parseInstant(value: string) {
+  const timestamp = Date.parse(value);
+  return Number.isFinite(timestamp) ? timestamp : null;
+}
+
 function compareActivity(left: TodayActivity, right: TodayActivity) {
-  const leftAt = left.interval?.startMs ?? Number.NEGATIVE_INFINITY;
-  const rightAt = right.interval?.startMs ?? Number.NEGATIVE_INFINITY;
+  const leftAt = left.interval?.startMs ?? left.detectedAtMs ?? Number.NEGATIVE_INFINITY;
+  const rightAt = right.interval?.startMs ?? right.detectedAtMs ?? Number.NEGATIVE_INFINITY;
   if (leftAt !== rightAt) return rightAt - leftAt;
   return left.presentationKey.localeCompare(right.presentationKey);
 }

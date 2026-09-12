@@ -106,4 +106,59 @@ describe("getReviewPresentation", () => {
       })
     });
   });
+
+  it("returns an exact legacy target with actual editor fields rather than a synthetic entry", async () => {
+    const query = vi.fn(async (statement: string) => {
+      if (statement.startsWith("begin read only")) return { rows: [] };
+      if (statement.includes("current_setting")) return { rows: [{ transaction_timeout: null }] };
+      if (statement.includes("set_config") || statement.includes("repeatable read") || statement === "commit") return { rows: [] };
+      if (statement.includes("with open_reviews")) {
+        return { rows: [{ globalCount: 1, todayCount: 0, openReviewItemIds: [] }] };
+      }
+      if (statement.includes("te.review_status = 'needs_review'")) {
+        return { rows: [{
+          id: entryId,
+          eventId: null,
+          projectId: null,
+          projectName: null,
+          projectColor: null,
+          clientName: null,
+          title: "Imported walk",
+          categoryId: null,
+          categoryName: "Health",
+          categoryColor: "moss",
+          placeId: null,
+          placeLabel: null,
+          placeKind: null,
+          startedAt: "2026-09-12T08:00:00.000Z",
+          stoppedAt: "2026-09-12T08:30:00.000Z",
+          confidence: "medium",
+          updatedAt: "2026-09-12T08:31:00.000Z",
+          source: "healthkit",
+          description: "Imported walk",
+          durationSeconds: 1800,
+          tagNames: ["Synthetic"],
+          linkedReviewItemId: null
+        }] };
+      }
+      if (statement.includes("from time_entries te")) return { rows: [] };
+      return { rows: [] };
+    });
+    mocks.connect.mockResolvedValue({ query, release: vi.fn() });
+
+    const presentation = await getReviewPresentation(session, {
+      version: 1,
+      mode: "lookup",
+      timeZone: "Europe/London",
+      entryIds: [entryId],
+      limit: 100
+    });
+
+    expect(presentation.scope.entryIds).toEqual([entryId]);
+    expect(presentation.lookup.entries).toMatchObject([{
+      kind: "legacy_review_entry",
+      entryId,
+      editor: { description: "Imported walk", durationSeconds: 1800, tagNames: ["Synthetic"] }
+    }]);
+  });
 });

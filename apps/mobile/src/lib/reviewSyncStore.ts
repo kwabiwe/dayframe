@@ -4,13 +4,13 @@ import * as SQLite from "expo-sqlite";
 import { REVIEW_EFFECTS_V5_SQL, REVIEW_PRESENTATION_V7_SQL, REVIEW_RECOVERY_V6_SQL } from "./reviewSyncSchema";
 import {
   LocationReviewEvidenceDtoSchema,
-  ReviewPresentationResponseSchema,
+  ReviewPresentationSnapshotSchema,
   ReviewMutationEnvelopeSchema,
   ReviewReconciliationResponseSchema,
   validReviewAcknowledgement,
   ReviewMutationSchema,
   type LocationReviewEvidenceDto,
-  type ReviewPresentationResponse,
+  type ReviewPresentationSnapshot,
   type ReviewProposalPresentation,
   type ReviewMutation,
   type ReviewMutationEnvelope
@@ -220,7 +220,7 @@ export type ReviewPresentationStoreEffect = {
 };
 
 export type ReviewPresentationStoreSnapshot = {
-  response: ReviewPresentationResponse;
+  response: ReviewPresentationSnapshot;
   cachedAt: string;
   localRevision: number;
   effects: ReviewPresentationStoreEffect[];
@@ -1092,9 +1092,9 @@ export async function cacheDashboardBootstrap(bootstrap: MobileBootstrap) {
  */
 export async function cacheReviewPresentation(input: {
   owner: ReviewPresentationOwner;
-  response: ReviewPresentationResponse;
+  response: ReviewPresentationSnapshot;
 }) {
-  const response = ReviewPresentationResponseSchema.parse(input.response);
+  const response = ReviewPresentationSnapshotSchema.parse(input.response);
   const db = await database();
   const key = accountKey(input.owner);
   const scopeKey = reviewPresentationScopeKey(input.owner.backendId, response);
@@ -1179,7 +1179,7 @@ export async function cacheReviewPresentation(input: {
  * raw payloads or queued request JSON to a consuming Today component. */
 export async function readReviewPresentationSnapshot(input: {
   owner: ReviewPresentationOwner;
-  response: Pick<ReviewPresentationResponse, "scope">;
+  response: Pick<ReviewPresentationSnapshot, "scope">;
 }): Promise<ReviewPresentationStoreSnapshot | null> {
   const db = await database();
   const account = await activeAccount(db);
@@ -1191,7 +1191,7 @@ export async function readReviewPresentationSnapshot(input: {
     account.user_id !== input.owner.userId ||
     !input.owner.backendId
   ) return null;
-  const scopeKey = reviewPresentationScopeKey(input.owner.backendId, input.response as ReviewPresentationResponse);
+  const scopeKey = reviewPresentationScopeKey(input.owner.backendId, input.response as ReviewPresentationSnapshot);
   const row = await db.getFirstAsync<PresentationContextRow>(
     `select scope_key, backend_id, contract_version, snapshot_token, captured_at,
             cached_at, complete, context_json
@@ -1202,9 +1202,9 @@ export async function readReviewPresentationSnapshot(input: {
     input.owner.backendId
   );
   if (!row) return null;
-  let response: ReviewPresentationResponse;
+  let response: ReviewPresentationSnapshot;
   try {
-    response = ReviewPresentationResponseSchema.parse(JSON.parse(row.context_json));
+    response = ReviewPresentationSnapshotSchema.parse(JSON.parse(row.context_json));
   } catch {
     return null;
   }
@@ -1224,7 +1224,7 @@ export async function readReviewPresentationSnapshot(input: {
  * rendered row to close over stale proposal values. */
 export async function readCurrentReviewSourceForQuickConfirm(input: {
   owner: ReviewPresentationOwner;
-  response: Pick<ReviewPresentationResponse, "scope">;
+  response: Pick<ReviewPresentationSnapshot, "scope">;
   reviewItemId: string;
 }): Promise<CurrentQuickConfirmSource | null> {
   const snapshot = await readReviewPresentationSnapshot({
@@ -1255,7 +1255,7 @@ export async function readCurrentReviewSourceForQuickConfirm(input: {
 
 export function reviewPresentationScopeKey(
   backendId: string,
-  response: Pick<ReviewPresentationResponse, "scope">
+  response: Pick<ReviewPresentationSnapshot, "scope">
 ) {
   const { scope } = response;
   return canonicalJson({
@@ -1264,11 +1264,13 @@ export function reviewPresentationScopeKey(
     mode: scope.mode,
     window: scope.window ?? null,
     today: scope.today ?? null,
-    timeZone: scope.timeZone
+    timeZone: scope.timeZone,
+    reviewItemIds: scope.reviewItemIds ? [...scope.reviewItemIds].sort() : null,
+    entryIds: scope.entryIds ? [...scope.entryIds].sort() : null
   });
 }
 
-function presentationReviewItems(response: ReviewPresentationResponse) {
+function presentationReviewItems(response: ReviewPresentationSnapshot) {
   const records = [
     ...response.records,
     ...response.lookup.reviewItems
@@ -1286,6 +1288,9 @@ function mobileReviewItemFromPresentation(record: ReviewProposalPresentation): M
   return {
     id: record.reviewItemId,
     type: record.sourceKind === "location_v2" ? "location" : "review",
+    ...(record.sourceKind === "location_v2"
+      ? { presentationSourceKind: "location_v2" as const }
+      : {}),
     title: record.title,
     eventSource: record.eventSource,
     eventType: record.eventType,
@@ -1306,7 +1311,7 @@ function mobileReviewItemFromPresentation(record: ReviewProposalPresentation): M
 
 function proposalHashFromPresentationContext(contextJson: string, reviewItemId: string) {
   try {
-    const response = ReviewPresentationResponseSchema.parse(JSON.parse(contextJson));
+    const response = ReviewPresentationSnapshotSchema.parse(JSON.parse(contextJson));
     const source = [...response.records, ...response.lookup.reviewItems]
       .find((record): record is ReviewProposalPresentation =>
         record.kind === "review" && record.reviewItemId === reviewItemId
@@ -1322,7 +1327,7 @@ async function recordTerminalPresentationSources(
   accountKeyValue: string,
   scopeKey: string,
   backendId: string,
-  response: ReviewPresentationResponse
+  response: ReviewPresentationSnapshot
 ) {
   for (const record of [...response.records, ...response.lookup.reviewItems]) {
     if (record.kind !== "review" || !["accepted", "ignored", "missing"].includes(record.status)) continue;
@@ -1380,7 +1385,7 @@ async function pruneReviewPresentationContexts(
 async function materialiseAcknowledgedReviewHandover(
   transaction: SQLite.SQLiteDatabase,
   accountKeyValue: string,
-  response: ReviewPresentationResponse
+  response: ReviewPresentationSnapshot
 ) {
   const rows = await transaction.getAllAsync<{
     client_mutation_id: string;
@@ -1429,7 +1434,7 @@ async function materialiseAcknowledgedReviewHandover(
   }
 }
 
-function terminalStatusesFromPresentation(response: ReviewPresentationResponse) {
+function terminalStatusesFromPresentation(response: ReviewPresentationSnapshot) {
   const statuses = new Map<string, "accepted" | "ignored" | "missing">();
   for (const record of [...response.records, ...response.lookup.reviewItems]) {
     if (record.kind === "review" && (
@@ -1441,7 +1446,7 @@ function terminalStatusesFromPresentation(response: ReviewPresentationResponse) 
   return statuses;
 }
 
-function entryLookupFromPresentation(response: ReviewPresentationResponse) {
+function entryLookupFromPresentation(response: ReviewPresentationSnapshot) {
   const statuses = new Map<string, "present" | "missing">();
   for (const record of [...response.records, ...response.lookup.entries]) {
     if (record.kind === "completed_entry") statuses.set(record.entryId, "present");
@@ -1563,7 +1568,7 @@ export async function enqueueReviewMutation(input: {
   affectedItems?: MobileReviewItem[];
   presentation?: {
     backendId: string;
-    scope: ReviewPresentationResponse["scope"];
+    scope: ReviewPresentationSnapshot["scope"];
   };
 }) {
   const envelope = ReviewMutationEnvelopeSchema.parse({ clientMutationId: input.clientMutationId, mutation: input.mutation });

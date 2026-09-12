@@ -4,6 +4,7 @@ import {
   REVIEW_PRESENTATION_VERSION,
   ReviewPresentationResponseSchema,
   type CompletedTodayEntryPresentation,
+  type LegacyReviewEntryPresentation,
   type ReviewPresentationRecord,
   type ReviewPresentationRequest,
   type ReviewPresentationResponse,
@@ -42,6 +43,10 @@ type ReviewRow = {
 type LegacyRow = {
   id: string;
   eventId: string | null;
+  projectId: string | null;
+  projectName: string | null;
+  projectColor: string | null;
+  clientName: string | null;
   title: string;
   categoryId: string | null;
   categoryName: string | null;
@@ -52,6 +57,11 @@ type LegacyRow = {
   stoppedAt: Date | string | null;
   confidence: string;
   updatedAt: Date | string;
+  source: string;
+  description: string | null;
+  placeKind: "saved" | "one_time" | null;
+  durationSeconds: number | string;
+  tagNames: string[] | null;
   linkedReviewItemId: string | null;
 };
 
@@ -71,6 +81,8 @@ type EntryRow = {
   updatedAt: Date | string;
   source: string;
 };
+
+type LookupEntryRow = EntryRow | LegacyRow;
 
 type CountsRow = {
   globalCount: number | string;
@@ -165,7 +177,13 @@ export async function getReviewPresentation(
         mode: input.mode,
         ...(input.window ? { window: input.window } : {}),
         ...(input.today ? { today: input.today } : {}),
-        timeZone: input.timeZone
+        timeZone: input.timeZone,
+        ...(input.reviewItemIds?.length
+          ? { reviewItemIds: [...input.reviewItemIds].sort() }
+          : {}),
+        ...(input.entryIds?.length
+          ? { entryIds: [...input.entryIds].sort() }
+          : {})
       },
       snapshotToken,
       capturedAt,
@@ -317,13 +335,32 @@ async function loadLegacyRows(client: pg.PoolClient, session: RequestSession, in
     : [session.workspaceId, session.userId];
   const result = await client.query<LegacyRow>(
     `select te.id, te.created_from_event_id as "eventId",
+            p.id as "projectId", p.name as "projectName", p.color as "projectColor",
+            cl.name as "clientName",
             coalesce(nullif(te.description, ''), c.name, 'Untitled activity') as title,
             c.id as "categoryId", c.name as "categoryName", c.color as "categoryColor",
             pl.id as "placeId", coalesce(pl.name, te.place_label) as "placeLabel",
+            case
+              when pl.id is not null then 'saved'
+              when te.place_label is not null then 'one_time'
+              else null
+            end as "placeKind",
             te.started_at as "startedAt", te.stopped_at as "stoppedAt", te.confidence,
-            te.updated_at as "updatedAt",
+            te.updated_at as "updatedAt", te.source, te.description,
+            case
+              when te.stopped_at is null then 0
+              else greatest(0, extract(epoch from (te.stopped_at - te.started_at)))::int
+            end as "durationSeconds",
+            (
+              select coalesce(array_agg(t.name order by t.name), '{}')
+              from time_entry_tags tet
+              join tags t on t.id = tet.tag_id and t.workspace_id = te.workspace_id
+              where tet.time_entry_id = te.id and tet.workspace_id = te.workspace_id
+            ) as "tagNames",
             linked.id as "linkedReviewItemId"
      from time_entries te
+     left join projects p on p.id = te.project_id and p.workspace_id = te.workspace_id
+     left join clients cl on cl.id = p.client_id and cl.workspace_id = te.workspace_id
      left join categories c on c.id = te.category_id and c.workspace_id = te.workspace_id
      left join places pl on pl.id = te.place_id and pl.workspace_id = te.workspace_id
      left join lateral (
@@ -370,15 +407,18 @@ async function loadLookupRows(client: pg.PoolClient, session: RequestSession, in
   if (reviewIds.length > REVIEW_PRESENTATION_MAX_IDS || entryIds.length > REVIEW_PRESENTATION_MAX_IDS) {
     throw new ReviewPresentationError("presentation_unavailable", "Lookup IDs exceed the bounded request.");
   }
-  const [reviews, entries] = await Promise.all([
+  const [reviews, completedEntries, legacyEntries] = await Promise.all([
     reviewIds.length
       ? loadReviewRowsByIds(client, session, reviewIds)
       : Promise.resolve([]),
     entryIds.length
-      ? loadEntriesByIds(client, session, entryIds)
+      ? loadCompletedEntriesByIds(client, session, entryIds)
+      : Promise.resolve([]),
+    entryIds.length
+      ? loadLegacyRowsByIds(client, session, entryIds)
       : Promise.resolve([])
   ]);
-  return { reviews, entries };
+  return { reviews, entries: [...completedEntries, ...legacyEntries] };
 }
 
 async function loadReviewRowsByIds(client: pg.PoolClient, session: RequestSession, ids: string[]) {
@@ -409,7 +449,7 @@ async function loadReviewRowsByIds(client: pg.PoolClient, session: RequestSessio
   return result.rows;
 }
 
-async function loadEntriesByIds(client: pg.PoolClient, session: RequestSession, ids: string[]) {
+async function loadCompletedEntriesByIds(client: pg.PoolClient, session: RequestSession, ids: string[]) {
   const result = await client.query<EntryRow>(
     `select te.id, te.created_from_event_id as "eventId",
             coalesce(nullif(te.description, ''), c.name, 'Untitled activity') as title,
@@ -422,6 +462,52 @@ async function loadEntriesByIds(client: pg.PoolClient, session: RequestSession, 
      left join places pl on pl.id = te.place_id and pl.workspace_id = te.workspace_id
      where te.workspace_id = $1 and te.user_id = $2 and te.id = any($3::uuid[])
        and te.review_status in ('confirmed', 'accepted') and te.stopped_at is not null
+     order by te.id`,
+    [session.workspaceId, session.userId, ids]
+  );
+  return result.rows;
+}
+
+async function loadLegacyRowsByIds(client: pg.PoolClient, session: RequestSession, ids: string[]) {
+  const result = await client.query<LegacyRow>(
+    `select te.id, te.created_from_event_id as "eventId",
+            p.id as "projectId", p.name as "projectName", p.color as "projectColor",
+            cl.name as "clientName",
+            coalesce(nullif(te.description, ''), c.name, 'Untitled activity') as title,
+            c.id as "categoryId", c.name as "categoryName", c.color as "categoryColor",
+            pl.id as "placeId", coalesce(pl.name, te.place_label) as "placeLabel",
+            case
+              when pl.id is not null then 'saved'
+              when te.place_label is not null then 'one_time'
+              else null
+            end as "placeKind",
+            te.started_at as "startedAt", te.stopped_at as "stoppedAt", te.confidence,
+            te.updated_at as "updatedAt", te.source, te.description,
+            case
+              when te.stopped_at is null then 0
+              else greatest(0, extract(epoch from (te.stopped_at - te.started_at)))::int
+            end as "durationSeconds",
+            (
+              select coalesce(array_agg(t.name order by t.name), '{}')
+              from time_entry_tags tet
+              join tags t on t.id = tet.tag_id and t.workspace_id = te.workspace_id
+              where tet.time_entry_id = te.id and tet.workspace_id = te.workspace_id
+            ) as "tagNames",
+            linked.id as "linkedReviewItemId"
+     from time_entries te
+     left join projects p on p.id = te.project_id and p.workspace_id = te.workspace_id
+     left join clients cl on cl.id = p.client_id and cl.workspace_id = te.workspace_id
+     left join categories c on c.id = te.category_id and c.workspace_id = te.workspace_id
+     left join places pl on pl.id = te.place_id and pl.workspace_id = te.workspace_id
+     left join lateral (
+       select ri.id
+       from review_items ri
+       where ri.workspace_id = te.workspace_id and ri.user_id = te.user_id
+         and ri.status = 'open' and ri.event_id = te.created_from_event_id
+       limit 1
+     ) linked on true
+     where te.workspace_id = $1 and te.user_id = $2 and te.id = any($3::uuid[])
+       and te.review_status = 'needs_review' and linked.id is null
      order by te.id`,
     [session.workspaceId, session.userId, ids]
   );
@@ -477,7 +563,18 @@ function toLegacyRecord(row: LegacyRow): InternalRecord {
     confidence: row.confidence,
     status: "needs_review",
     updatedAt: isoOrNull(row.updatedAt)!,
-    linkedReviewItemId: row.linkedReviewItemId
+    linkedReviewItemId: row.linkedReviewItemId,
+    editor: {
+      projectId: row.projectId,
+      projectName: row.projectName,
+      projectColor: row.projectColor,
+      clientName: row.clientName,
+      placeKind: row.placeKind,
+      source: row.source,
+      description: row.description,
+      durationSeconds: Math.max(0, Number(row.durationSeconds) || 0),
+      tagNames: row.tagNames ?? []
+    }
   };
   return {
     record,
@@ -514,14 +611,19 @@ function lookupReviewsFor(ids: string[], rows: ReviewRow[]) {
   });
 }
 
-function lookupEntriesFor(ids: string[], rows: EntryRow[]) {
+function lookupEntriesFor(ids: string[], rows: LookupEntryRow[]) {
   const byId = new Map(rows.map((row) => [row.id, row]));
   return ids.map((id) => {
     const row = byId.get(id);
-    return row
-      ? toCompletedEntryRecord(row).record as CompletedTodayEntryPresentation
-      : { kind: "missing_entry" as const, entryId: id };
+    if (!row) return { kind: "missing_entry" as const, entryId: id };
+    return isLegacyRow(row)
+      ? toLegacyRecord(row).record as LegacyReviewEntryPresentation
+      : toCompletedEntryRecord(row).record as CompletedTodayEntryPresentation;
   });
+}
+
+function isLegacyRow(row: LookupEntryRow): row is LegacyRow {
+  return "linkedReviewItemId" in row;
 }
 
 function linksFor(rows: ReviewRow[]) {
@@ -543,7 +645,9 @@ function scopeFor(input: ReviewPresentationRequest) {
       mode: input.mode,
       window: input.window ?? null,
       today: input.today ?? null,
-      timeZone: input.timeZone
+      timeZone: input.timeZone,
+      reviewItemIds: input.reviewItemIds ? [...input.reviewItemIds].sort() : null,
+      entryIds: input.entryIds ? [...input.entryIds].sort() : null
     }))
     .digest("base64url");
 }
@@ -552,7 +656,7 @@ function snapshotFor(
   scope: string,
   counts: CountsRow,
   records: InternalRecord[],
-  lookup: { reviews: ReviewRow[]; entries: EntryRow[] }
+  lookup: { reviews: ReviewRow[]; entries: LookupEntryRow[] }
 ) {
   return createHash("sha256")
     .update(canonicalJson({
@@ -565,7 +669,9 @@ function snapshotFor(
       records: records.map(({ record }) => record),
       lookup: {
         reviews: lookup.reviews.map((row) => toReviewRecord(row).record),
-        entries: lookup.entries.map((row) => toCompletedEntryRecord(row).record)
+        entries: lookup.entries.map((row) => isLegacyRow(row)
+          ? toLegacyRecord(row).record as LegacyReviewEntryPresentation
+          : toCompletedEntryRecord(row).record)
       }
     }))
     .digest("base64url");

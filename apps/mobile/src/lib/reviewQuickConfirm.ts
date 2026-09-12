@@ -1,4 +1,4 @@
-import type { ReviewMutation, ReviewPresentationResponse, ReviewProposalPresentation } from "@dayframe/shared";
+import type { ReviewMutation, ReviewPresentationSnapshot, ReviewProposalPresentation } from "@dayframe/shared";
 import type {
   CurrentQuickConfirmSource,
   ReviewPresentationOwner,
@@ -11,7 +11,7 @@ export type QuickConfirmEligibility =
 
 export type QuickConfirmInput = {
   owner: ReviewPresentationOwner;
-  response: Pick<ReviewPresentationResponse, "scope">;
+  response: Pick<ReviewPresentationSnapshot, "scope">;
   reviewItemId: string;
   proposalHash: string;
   onCommitted?: (input: { clientMutationId: string }) => void | Promise<void>;
@@ -21,7 +21,7 @@ type QuickConfirmStore = {
   createReviewClientMutationId: () => string;
   readCurrentReviewSourceForQuickConfirm: (input: {
     owner: ReviewPresentationOwner;
-    response: Pick<ReviewPresentationResponse, "scope">;
+    response: Pick<ReviewPresentationSnapshot, "scope">;
     reviewItemId: string;
   }) => Promise<CurrentQuickConfirmSource | null>;
   enqueueReviewMutation: (input: {
@@ -29,7 +29,7 @@ type QuickConfirmStore = {
     item: CurrentQuickConfirmSource["item"];
     mutation: ReviewMutation;
     clientMutationId: string;
-    presentation: { backendId: string; scope: ReviewPresentationResponse["scope"] };
+    presentation: { backendId: string; scope: ReviewPresentationSnapshot["scope"] };
   }) => Promise<{ envelope: { clientMutationId: string } }>;
   synchroniseReviewMutations: () => Promise<unknown>;
 };
