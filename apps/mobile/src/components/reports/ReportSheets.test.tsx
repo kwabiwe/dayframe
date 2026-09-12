@@ -1,12 +1,18 @@
 import { act, create } from "react-test-renderer";
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { ReportFilterDraft } from "../../lib/reportsSelection";
+const mockLayout = vi.hoisted(() => ({
+  safeAreaBottom: 0,
+  windowHeight: 844,
+}));
 vi.mock("react", async () => {
   // @ts-expect-error The renderer peer React is installed at the repository root.
   return import("../../../../../node_modules/react/index.js");
 });
 vi.mock("react-native", () => ({
-  Dimensions: { get: () => ({ width: 320, height: 844 }) },
+  Dimensions: {
+    get: () => ({ width: 320, height: mockLayout.windowHeight }),
+  },
   Keyboard: {
     addListener: () => ({ remove: vi.fn() }),
     dismiss: vi.fn(),
@@ -19,11 +25,14 @@ vi.mock("react-native", () => ({
   Text: "Text",
   TextInput: "TextInput",
   View: "View",
-  useWindowDimensions: () => ({ width: 320, height: 844 }),
+  useWindowDimensions: () => ({
+    width: 320,
+    height: mockLayout.windowHeight,
+  }),
   StyleSheet: { create: (s: unknown) => s, absoluteFill: {}, hairlineWidth: 1 },
 }));
 vi.mock("react-native-safe-area-context", () => ({
-  useSafeAreaInsets: () => ({ bottom: 0 }),
+  useSafeAreaInsets: () => ({ bottom: mockLayout.safeAreaBottom }),
 }));
 vi.mock("react-native-screens", () => ({
   FullWindowOverlay: "FullWindowOverlay",
@@ -97,6 +106,7 @@ import {
   REPORT_SHEET_NATIVE_TAB_OFFSET,
   ReportDateSheet,
   ReportFiltersSheet,
+  reportSheetBottomGeometry,
 } from "./ReportSheets";
 import { DatePickerCalendar } from "../calendar/DatePickerCalendar";
 const theme = { borderStrong: "strong-handle" } as never;
@@ -128,6 +138,10 @@ function mount(element: React.ReactElement) {
   return { tree, button, press };
 }
 describe("Reports sheet interactions", () => {
+  beforeEach(() => {
+    mockLayout.safeAreaBottom = 0;
+    mockLayout.windowHeight = 844;
+  });
   it("makes outgoing months inert immediately and rejects stale taps, including an A–B–A replacement", () => {
     const onSelect = vi.fn();
     const renderMonth = (month: string) => (
@@ -301,10 +315,24 @@ describe("Reports sheet interactions", () => {
       expect(button("Rest")).toBeDefined();
       expect(button("All categories")).toBeDefined();
       expect(button("Cancel Categories")).toBeUndefined();
-      const scroll = tree.root.findByType("ScrollView" as never);
+      const scroll = tree.root.findByProps({
+        testID: "report-filter-options-scroll",
+      });
       expect(scroll.props.showsVerticalScrollIndicator).toBe(false);
       expect(scroll.findAllByType("TextInput" as never)).toHaveLength(0);
+      expect(
+        scroll.findAllByProps({ testID: "report-filter-sheet-action" }),
+      ).toHaveLength(0);
+      expect(
+        scroll.findAllByProps({ accessibilityLabel: "Rest" }),
+      ).toHaveLength(1);
       expect(tree.root.findAllByType("TextInput" as never)).toHaveLength(1);
+      expect(tree.root.findByProps({ testID: "report-filter-search" })).toBe(
+        tree.root.findByType("TextInput" as never),
+      );
+      expect(
+        tree.root.findByProps({ testID: "report-filter-sheet-action" }),
+      ).toBe(button("Apply"));
       expect(button("Apply").props.style[0]).toMatchObject({
         alignSelf: "center",
         width: 160,
@@ -350,7 +378,8 @@ describe("Reports sheet interactions", () => {
     expect(onDismissed).toHaveBeenCalledWith(7);
     act(() => tree.unmount());
   });
-  it("renders directly into the app-root portal without a nested modal", () => {
+  it("applies the root native-tab and safe-area compensation exactly once", () => {
+    mockLayout.safeAreaBottom = 34;
     const { tree } = mount(
       <ReportFiltersSheet
         rootHosted
@@ -370,14 +399,28 @@ describe("Reports sheet interactions", () => {
         .unstable_accessibilityContainerViewIsModal,
     ).toBe(true);
     const sheet = tree.root.findByType("SwipeDismissSheet" as never);
-    expect(sheet.props.translateYOffset).toBe(REPORT_SHEET_NATIVE_TAB_OFFSET);
-    expect(sheet.props.backdropStyle[1].bottom).toBe(
-      -REPORT_SHEET_NATIVE_TAB_OFFSET,
-    );
-    expect(sheet.props.style[2].paddingBottom).toBe(
-      10 + REPORT_SHEET_NATIVE_TAB_OFFSET,
-    );
+    const rootOffset = REPORT_SHEET_NATIVE_TAB_OFFSET + 34;
+    expect(sheet.props.style[1]).toMatchObject({ maxHeight: "100%" });
+    expect(sheet.props.translateYOffset).toBe(rootOffset);
+    expect(sheet.props.backdropStyle[1].bottom).toBe(-rootOffset);
+    const surfaceStyle = sheet.props.style.at(-1);
+    expect(surfaceStyle.paddingBottom).toBe(34 + rootOffset);
+    expect(surfaceStyle.paddingBottom - sheet.props.translateYOffset).toBe(34);
     act(() => tree.unmount());
+  });
+  it("omits root compensation for modal-hosted sheets", () => {
+    expect(
+      reportSheetBottomGeometry({
+        rootHosted: false,
+        safeAreaBottom: 34,
+        keyboardInset: 0,
+      }),
+    ).toEqual({
+      backdropBottom: 0,
+      contentPaddingBottom: 34,
+      nativeTabsBottomOffset: 0,
+      surfaceTranslateY: 0,
+    });
   });
   it("lets an earlier swipe discard win over a later Apply", () => {
     const onApply = vi.fn();
@@ -455,10 +498,30 @@ describe("Reports sheet interactions", () => {
       expect(sheet.props.handleAccessory).toBeUndefined();
       expect(sheet.props.presentationId).toBe(2);
       expect(sheet.props.style[1].paddingHorizontal).toBe(6);
+      expect(tree.root.findAllByType("ScrollView" as never)).toHaveLength(0);
+      const dateBody = tree.root.findByProps({
+        testID: "report-date-sheet-body",
+      });
+      expect(
+        dateBody.findAll(
+          (node) =>
+            typeof node.props.testID === "string" &&
+            /^calendar-week-2026-09-01-\d$/.test(node.props.testID),
+        ),
+      ).toHaveLength(6);
+      expect(
+        dateBody.findAllByProps({ testID: "report-date-sheet-action" }),
+      ).toHaveLength(0);
+      expect(
+        tree.root.findByProps({ testID: "report-date-sheet-action" }),
+      ).toBe(button("Done"));
       const calendar = tree.root
         .findAllByType("View" as never)
         .find((node) => node.props.style?.maxWidth === 349)!;
-      expect(calendar.props.style).toMatchObject({ width: "100%", maxWidth: 349 });
+      expect(calendar.props.style).toMatchObject({
+        width: "100%",
+        maxWidth: 349,
+      });
       const preset = button("Today");
       expect(preset.props.style).toMatchObject({
         flex: 1,
@@ -501,6 +564,39 @@ describe("Reports sheet interactions", () => {
       act(() => tree.unmount());
     },
   );
+  it("keeps all date controls visible in the compact non-scrolling layout", () => {
+    mockLayout.windowHeight = 667;
+    const { tree, button } = mount(
+      <ReportDateSheet
+        initial="today"
+        nowMs={+new Date(2026, 8, 9, 12)}
+        theme={theme}
+        onApply={vi.fn()}
+        presentationId={12}
+        onDismissed={vi.fn()}
+        reduceMotion
+      />,
+    );
+    expect(tree.root.findAllByType("ScrollView" as never)).toHaveLength(0);
+    for (const preset of ["Today", "Week", "Month", "Year"])
+      expect(button(preset)).toBeDefined();
+    expect(
+      tree.root
+        .findAllByType("Text" as never)
+        .some((node) =>
+          String(node.props.accessibilityLabel ?? "").includes("–"),
+        ),
+    ).toBe(true);
+    expect(
+      tree.root.findAll(
+        (node) =>
+          typeof node.props.testID === "string" &&
+          /^calendar-week-2026-09-01-\d$/.test(node.props.testID),
+      ),
+    ).toHaveLength(6);
+    expect(button("Done").props.style[2]).toMatchObject({ marginTop: 6 });
+    act(() => tree.unmount());
+  });
   it("rejects an over-366-day range selected across calendar navigation", () => {
     const onApply = vi.fn();
     const { tree, button, press } = mount(

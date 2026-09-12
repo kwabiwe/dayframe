@@ -443,3 +443,48 @@ tests plus the mobile TypeScript check. Full repository, clean Simulator,
 signed staging and physical-device evidence must be recorded against the final
 follow-up SHA; the earlier installed `b85c7f7` binary does not validate these
 new motion/dismissal changes.
+
+## Final fixed-sheet layout contract (12 September 2026)
+
+The last owner pass makes the range sheet structurally non-scrolling. Its four
+presets, range caption, shared month header, weekday headings and all six fixed
+44-point calendar rows are one fixed body; Done is a sibling below that body.
+On a 667-point window the sheet reduces only its surrounding gaps and top
+padding. It does not reduce calendar rows or 44-point targets and does not grow
+the shared 349-point calendar cap. The filter structure is the inverse: Search
+and Apply are fixed siblings and its category-row region is the only vertical
+`ScrollView`, with the indicator hidden.
+
+The root-hosted geometry diagnosis now distinguishes the NativeTabs control
+from the home-indicator safe area. The earlier 375×667 iPhone SE probe correctly
+measured a 52-point reservation because that device has a zero bottom safe-area
+inset. Home-indicator devices reserve that same 52-point control plus their
+reported bottom safe area. Reports now derives one compensation value from both,
+uses it once for surface translation and backdrop coverage, and adds it once to
+content padding. Subtracting the surface translation from content padding leaves
+exactly the normal safe-area/keyboard inset, so Done/Apply rests above the home
+indicator rather than 52 points too high, and the surface reaches the viewport
+bottom. Modal-hosted compatibility consumers receive no NativeTabs correction.
+
+Focused source evidence covers the fixed/non-scrolling ownership, six calendar
+rows, fixed Search/Done/Apply regions, 667-point compact spacing, zero-indicator
+category scroller, zero-offset modal case, 34-point home-indicator case and both
+commit-before-swipe and swipe-before-commit terminal races.
+
+The actual root-hosted NativeTabs fixture also passed on **Dayframe Reports QA
+17**, iPhone 17 Simulator, iOS 26.5, 402×874 points, 34-point bottom safe area,
+ordinary text and synthetic network-disabled data. XCTest accessibility frames
+measured all six calendar rows at 349×44 points, the fixed date body at
+390×413.33, and Done at 160×48 ending at y=840. The filter measured Search at
+370×44, the sole category scroller at 370×236 and Apply at 160×48 ending at
+y=840. Both actions therefore preserve exactly the 34-point safe-area inset;
+both sheet surfaces cross the clipped window bottom, leaving **0 points** of
+exposed Reports background. The first probe caught the shorter filter shell
+retaining the NativeTabs content-height anchor (Apply ended at y=790); applying
+the same full-height anchoring constraint as the date sheet moved it down exactly
+50 points, and the repeated native test passed. Evidence log:
+`/tmp/dayframe-pr194-final-ui-qa17-tests-rerun.log`.
+
+Signed staging identity and physical VoiceOver/Dynamic Type/Reduce Motion
+acceptance must still be recorded against the final commit and must not be
+inferred from simulator or structural tests.

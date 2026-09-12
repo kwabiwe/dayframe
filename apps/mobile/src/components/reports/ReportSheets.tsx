@@ -81,6 +81,7 @@ export function ReportFiltersSheet({
       onDismissed={onDismissed}
       fixedHeader={
         <TextInput
+          testID="report-filter-search"
           maxFontSizeMultiplier={REPORT_TEXT_CAP.control}
           accessibilityLabel="Search categories"
           value={search}
@@ -251,9 +252,7 @@ export function ReportDateSheet({
                     style={[
                       s.actionText,
                       {
-                        color: selected
-                          ? theme.accentText
-                          : theme.textPrimary,
+                        color: selected ? theme.accentText : theme.textPrimary,
                       },
                     ]}
                   >
@@ -285,11 +284,7 @@ export function ReportDateSheet({
           maxDate={formatLocalDateKey(new Date(nowMs))}
           onSelect={(date) =>
             setDraft((current) =>
-              selectReportDraftDay(
-                current,
-                formatLocalDateKey(date),
-                nowMs,
-              ),
+              selectReportDraftDay(current, formatLocalDateKey(date), nowMs),
             )
           }
           theme={theme}
@@ -311,6 +306,32 @@ type ReportSheetOutcome = "commit" | "discard";
 // The Reports overlay is attached to UIWindow, so it can safely settle through
 // that strip while the tab bar is hidden by the root portal owner.
 export const REPORT_SHEET_NATIVE_TAB_OFFSET = 52;
+
+export function reportSheetBottomGeometry({
+  rootHosted,
+  safeAreaBottom,
+  keyboardInset,
+}: {
+  rootHosted: boolean;
+  safeAreaBottom: number;
+  keyboardInset: number;
+}) {
+  // NativeTabs reserves its 52-point control plus the device safe area. The
+  // root-hosted sheet crosses both once, then restores the safe area as
+  // content padding so the action remains above the home indicator.
+  const nativeTabsBottomOffset = rootHosted
+    ? REPORT_SHEET_NATIVE_TAB_OFFSET + safeAreaBottom
+    : 0;
+  const contentBottomInset =
+    keyboardInset > 0 ? keyboardInset + 16 : Math.max(10, safeAreaBottom);
+
+  return {
+    backdropBottom: nativeTabsBottomOffset === 0 ? 0 : -nativeTabsBottomOffset,
+    contentPaddingBottom: contentBottomInset + nativeTabsBottomOffset,
+    nativeTabsBottomOffset,
+    surfaceTranslateY: nativeTabsBottomOffset,
+  };
+}
 
 function ReportSheet({
   rootHosted,
@@ -341,9 +362,7 @@ function ReportSheet({
 }) {
   const insets = useSafeAreaInsets();
   const { height: windowHeight } = useWindowDimensions();
-  const nativeTabsBottomOffset = rootHosted
-    ? REPORT_SHEET_NATIVE_TAB_OFFSET
-    : 0;
+  const compactCalendarLayout = calendarLayout && windowHeight <= 700;
   const sheetRef = useRef<SwipeDismissSheetHandle>(null);
   const outcome = useRef<{
     presentationId: number;
@@ -351,6 +370,11 @@ function ReportSheet({
   } | null>(null);
   const [closing, setClosing] = useState(false);
   const [keyboardInset, setKeyboardInset] = useState(0);
+  const bottomGeometry = reportSheetBottomGeometry({
+    rootHosted,
+    safeAreaBottom: insets.bottom,
+    keyboardInset,
+  });
 
   useEffect(() => {
     outcome.current = null;
@@ -418,58 +442,72 @@ function ReportSheet({
 
   const overlay = (
     <View style={s.modal}>
-        <SwipeDismissSheet
-          ref={sheetRef}
-          accessibilityLabel={title}
-          backdropAccessibilityLabel={`Close ${title}`}
-          backdropStyle={[
-            StyleSheet.absoluteFill,
-            {
-              backgroundColor: theme.overlay,
-              bottom: -nativeTabsBottomOffset,
-            },
-          ]}
-          disabled={closing}
-          gestureHandleOnly
-          handleStyle={[s.handle, { backgroundColor: theme.borderStrong }]}
-          keyboardInset={keyboardInset}
-          onDismiss={(dismissedPresentationId) => {
-            if (dismissedPresentationId !== presentationId) return;
-            onDismissed(dismissedPresentationId);
-          }}
-          onDismissStart={(dismissedPresentationId) => {
-            if (dismissedPresentationId !== presentationId) return false;
-            return outcome.current?.presentationId === presentationId
-              ? true
-              : claimDiscard();
-          }}
-          onGestureStart={() => Keyboard.dismiss()}
-          presentationId={presentationId}
-          reduceMotion={reduceMotion}
+      <SwipeDismissSheet
+        ref={sheetRef}
+        accessibilityLabel={title}
+        backdropAccessibilityLabel={`Close ${title}`}
+        backdropStyle={[
+          StyleSheet.absoluteFill,
+          {
+            backgroundColor: theme.overlay,
+            bottom: bottomGeometry.backdropBottom,
+          },
+        ]}
+        disabled={closing}
+        gestureHandleOnly
+        handleStyle={[s.handle, { backgroundColor: theme.borderStrong }]}
+        keyboardInset={keyboardInset}
+        onDismiss={(dismissedPresentationId) => {
+          if (dismissedPresentationId !== presentationId) return;
+          onDismissed(dismissedPresentationId);
+        }}
+        onDismissStart={(dismissedPresentationId) => {
+          if (dismissedPresentationId !== presentationId) return false;
+          return outcome.current?.presentationId === presentationId
+            ? true
+            : claimDiscard();
+        }}
+        onGestureStart={() => Keyboard.dismiss()}
+        presentationId={presentationId}
+        reduceMotion={reduceMotion}
+        style={[
+          s.sheet,
+          calendarLayout ? s.dateSheet : s.filterSheet,
+          compactCalendarLayout ? s.compactDateSheet : null,
+          {
+            backgroundColor: theme.surfaceRaised,
+            paddingBottom: bottomGeometry.contentPaddingBottom,
+          },
+        ]}
+        testID={calendarLayout ? "report-date-sheet" : "report-filter-sheet"}
+        translateYOffset={bottomGeometry.surfaceTranslateY}
+        visible
+      >
+        <View
+          accessibilityElementsHidden={closing}
+          importantForAccessibility={closing ? "no-hide-descendants" : "auto"}
+          pointerEvents={closing ? "none" : "auto"}
           style={[
-            s.sheet,
-            calendarLayout ? s.dateSheet : null,
-            {
-              backgroundColor: theme.surfaceRaised,
-              paddingBottom:
-                (keyboardInset > 0
-                  ? keyboardInset + 16
-                  : Math.max(10, Math.min(16, insets.bottom))) +
-                nativeTabsBottomOffset,
-            },
+            s.sheetContent,
+            calendarLayout ? s.dateSheetContent : s.filterSheetContent,
+            compactCalendarLayout ? s.compactDateSheetContent : null,
           ]}
-          testID={calendarLayout ? "report-date-sheet" : "report-filter-sheet"}
-          translateYOffset={nativeTabsBottomOffset}
-          visible
         >
-          <View
-            accessibilityElementsHidden={closing}
-            importantForAccessibility={closing ? "no-hide-descendants" : "auto"}
-            pointerEvents={closing ? "none" : "auto"}
-            style={s.sheetContent}
-          >
-            {fixedHeader}
+          {fixedHeader}
+          {calendarLayout ? (
+            <View
+              testID="report-date-sheet-body"
+              style={[
+                s.body,
+                s.dateBody,
+                compactCalendarLayout ? s.compactDateBody : null,
+              ]}
+            >
+              {children}
+            </View>
+          ) : (
             <ScrollView
+              testID="report-filter-options-scroll"
               keyboardShouldPersistTaps="handled"
               automaticallyAdjustKeyboardInsets
               contentContainerStyle={s.body}
@@ -478,38 +516,43 @@ function ReportSheet({
             >
               {children}
             </ScrollView>
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel={action}
-              accessibilityState={{ disabled: disabled || closing }}
-              disabled={disabled || closing}
-              onPress={requestCommit}
+          )}
+          <Pressable
+            testID={
+              calendarLayout
+                ? "report-date-sheet-action"
+                : "report-filter-sheet-action"
+            }
+            accessibilityRole="button"
+            accessibilityLabel={action}
+            accessibilityState={{ disabled: disabled || closing }}
+            disabled={disabled || closing}
+            onPress={requestCommit}
+            style={[
+              s.apply,
+              calendarLayout ? s.dateAction : null,
+              compactCalendarLayout ? s.compactDateAction : null,
+              {
+                backgroundColor:
+                  disabled || closing ? theme.surfaceMuted : theme.accent,
+              },
+            ]}
+          >
+            <Text
+              maxFontSizeMultiplier={REPORT_TEXT_CAP.control}
               style={[
-                s.apply,
-                calendarLayout ? s.dateAction : null,
+                s.actionText,
                 {
-                  backgroundColor:
-                    disabled || closing ? theme.surfaceMuted : theme.accent,
+                  color:
+                    disabled || closing ? theme.textSecondary : theme.onAccent,
                 },
               ]}
             >
-              <Text
-                maxFontSizeMultiplier={REPORT_TEXT_CAP.control}
-                style={[
-                  s.actionText,
-                  {
-                    color:
-                      disabled || closing
-                        ? theme.textSecondary
-                        : theme.onAccent,
-                  },
-                ]}
-              >
-                {action}
-              </Text>
-            </Pressable>
-          </View>
-        </SwipeDismissSheet>
+              {action}
+            </Text>
+          </Pressable>
+        </View>
+      </SwipeDismissSheet>
     </View>
   );
 
@@ -540,12 +583,19 @@ const s = StyleSheet.create({
     paddingHorizontal: 16,
     paddingTop: 8,
   },
-  dateSheet: { paddingHorizontal: 6 },
+  dateSheet: { maxHeight: "100%", paddingHorizontal: 6 },
+  filterSheet: { maxHeight: "100%" },
+  compactDateSheet: { paddingTop: 4 },
   sheetContent: { flexShrink: 1, gap: 8 },
+  dateSheetContent: { flexShrink: 0 },
+  compactDateSheetContent: { gap: 4 },
+  filterSheetContent: { flexShrink: 1, minHeight: 0 },
   handle: { width: 42, height: 5, borderRadius: 999 },
   actionText: { fontSize: 14, fontWeight: "600" },
   scroll: { flexShrink: 1, minHeight: 0 },
   body: { gap: 4 },
+  dateBody: { flexShrink: 0 },
+  compactDateBody: { gap: 0 },
   apply: {
     alignSelf: "center",
     width: 160,
@@ -557,6 +607,7 @@ const s = StyleSheet.create({
     padding: 12,
   },
   dateAction: { marginTop: 16 },
+  compactDateAction: { marginTop: 6 },
   search: { minHeight: 44, padding: 10, borderRadius: 12, fontSize: 15 },
   option: {
     minHeight: 44,
