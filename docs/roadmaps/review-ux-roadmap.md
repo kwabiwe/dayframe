@@ -7,9 +7,9 @@
 | --- | --- |
 | Owner | KB |
 | Prepared / last reviewed | 12 September 2026 |
-| Revision | 2 |
+| Revision | 3 |
 | Repository | `kwabiwe/dayframe` |
-| Verified preparation baseline | `origin/main` at `00491f797bc25d6957cf96b668d79989b1f78c19`, the merge of Reports PR #194 |
+| Verified preparation baseline | `origin/main` at `e9ca2652542619cd83b91bb7778a608a13e1d01e`, the merge of mobile accessibility PR #195 |
 | Intended repository location | `docs/roadmaps/review-ux-roadmap.md` |
 
 ## 1. Purpose and document ownership
@@ -27,8 +27,8 @@ Planned differences from current UI are intentional. An unanticipated conflict w
 | Stage | Scope | Dependency / boundary |
 | --- | --- | --- |
 | A | **Reports polish and small reusable chart/control components** | Merged as PR #194. No new Review presentation or sync architecture. |
-| A→B prerequisite | **Mobile accessibility baseline** | One focused mobile presentation PR after A and before B; preserve the merged Reports implementation and existing state owners. |
-| B | **Today donut, provisional activity list and Quick Confirm** | Starts after the accessibility prerequisite merges. Establishes the shared activity presentation projection over existing state owners. |
+| A→B prerequisite | **Mobile accessibility baseline** | Merged as PR #195. Preserve its scoped typography, measurement, focus and action contracts alongside Reports. |
+| B | **Today donut, provisional activity list and Quick Confirm** | Current authorised implementation lane. Establishes the shared activity presentation projection over existing state owners; C/D remain future. |
 | C | **Calendar provisional Review generalisation** | Starts after B merges. Reuses its identities, accounting and resolution behaviour. |
 | D | **Web integrated Review** | Starts after C merges. Reuses the product rules and server contracts, with desktop-appropriate presentation. |
 
@@ -37,8 +37,8 @@ These are sequential dependencies, **not stacked branches**:
 ```text
 Roadmap adopted on main
   -> A: Reports PR #194 merged
-  -> refresh main and deliver the mobile accessibility prerequisite
-  -> refresh main and prepare B's detailed plan
+  -> mobile accessibility PR #195 merged
+  -> refresh main and prepare/implement B's detailed plan
   -> B: implement / review / revise / test / merge
   -> refresh main and prepare C's detailed plan
   -> C: implement / review / revise / test / merge
@@ -109,6 +109,11 @@ separately as PASS/FAIL/NOT RUN.
 
 ## 6. Stage B: Today and integrated Review decisions
 
+PR #195 is merged at `e9ca2652542619cd83b91bb7778a608a13e1d01e`; Stage B is
+the active, Today-only implementation lane. Its detailed plan owns exact
+delivery/test evidence. Calendar (C) and web (D) remain future work and are not
+implicitly authorised by this section.
+
 ### Today arrangement
 
 ```text
@@ -133,6 +138,14 @@ Total logged     <- smaller, light-grey / secondary text
 Below and outside it, show a restrained `+ 1h 12m awaiting review` when applicable. The running timer contributes **nothing to this donut or its centre total until stopped**; its normal live timer display remains unchanged.
 
 Pending duration participates in slice geometry but contributes nothing to Total logged before user acceptance. The donut represents activity-duration distribution, not a 24-hour clock or unique coverage. Concurrent completed activities count in full towards logged duration; unique clock coverage remains a separate calculation.
+
+A local Quick Confirm is saved through the existing Review outbox before its
+row changes. It removes that source from awaiting/pending geometry but creates
+no provisional canonical interval and adds no logged total. Keep the same row
+as saved/syncing until an explicit result link and current canonical evidence
+resolve it; a reused Sleep entry remains one entry. This Today-only activation
+does not change Reports: its category donut remains informational, does not
+show provisional Review slices, and retains its merged running-timer behaviour.
 
 The Open Review control shows **all outstanding items across dates**, with secondary today context, for example `13 items to review` / `4 today`. When backlog exists but none falls today, retain the control with `None today`. The chart/list only show the portion belonging to the displayed day.
 

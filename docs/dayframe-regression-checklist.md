@@ -103,6 +103,30 @@ Review this checklist before and after changes that touch Dayframe UI, timer beh
 - Today history deletion begins immediately without a confirmation surface and shows the five-second inverse-colour Undo bean before persistence is committed. Row/group removal, surrounding list reflow, Undo entrance/exit, expiry, exact restoration, and persistence-failure rollback transition continuously rather than popping. A rapid second delete deterministically commits the older pending deletion, starts a fresh five-second window, and cannot be dismissed or restored by an older timer/callback. Blank uncategorized entries remain individual rows with direct edit/delete access instead of collapsing into a non-deletable aggregate.
 - Timesheet view groups work by category/activity, shows day totals and row totals, and remains readable.
 
+## Today integrated Review (Stage B)
+
+- Today renders one completed-only local-day donut beneath the existing timer;
+  running timers do not contribute. Concurrent stopped entries count
+  independently, finite pending sources remain individually identifiable, and
+  incomplete sources have no invented interval/duration/slice.
+- Verify pending → locally saved removes only awaiting/provisional accounting;
+  it does not add a canonical interval. Verify explicit canonical result
+  materialises once, including Sleep reuse and multi-source structural result
+  links. Unknown/rejected outcomes remain distinct and safe.
+- Verify capped/partial/cache/offline states never claim zero or complete
+  coverage, Open Review reaches older backlog, and an exact generic, V2
+  Location, legacy-entry, saved-issue, or canonical target follows its typed
+  existing route rather than a neighbouring record.
+- Quick Confirm requires the exact fresh proposal, commits through the existing
+  Review outbox before visual change, preserves old envelopes, handles duplicate
+  taps/cross-surface attempts, and keeps the proposal actionable on local
+  storage failure or server `proposal_changed`.
+- At default/MAX/Bold text and narrow widths, verify measured labels, full row
+  context, 44-point sibling Open/check controls, VoiceOver labels/announcement,
+  pending slice exact activation, inert confirmed slices, Reports regression,
+  first entrance/local updates/restore and Reduce Motion. Record signed staging
+  and physical-device results separately from tests/simulator diagnostics.
+
 ## Mobile Sheets And Direct Manipulation
 
 - Edit entry, Edit running timer, learned-place details, saved-place information, and location-suggestions information use the shared handle-owned sheet; no consumer restores a local swipe implementation.

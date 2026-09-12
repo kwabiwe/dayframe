@@ -52,6 +52,17 @@ Before declaring hosted auth/timer/event changes ready, verify:
 
 SQLite v5 adds account-owned per-source mutation effects and backfills v4 outbox rows transactionally; v6 adds contention, reconciliation, resolution, and validated-acknowledgement metadata without replacing immutable envelopes or effect anchors. Neither migration removes queued intent or compatibility columns. Two-source merge intent must reserve both IDs atomically. Postgres already has the boundary fields, `commute_segments.max_gap_seconds` and Review mutation receipts; changing these policies needs no new Postgres migration. The max-gap column means maximum internal observation gap (ceil to integral seconds), not total commute duration. Verify existing columns, receipt uniqueness and indexes in staging before smoke tests; do not fabricate bounds for old rows. Keep same-source Sleep lookup plus insertion under its existing user lock, and preserve `user_edited_at` protection.
 
+SQLite v7 is an additive migration inside the existing Review-store exclusive
+transaction. It adds owner/backend-bound Review-presentation context and
+terminal-source evidence only; it does not rename the database, rewrite queued
+request JSON, alter old UUIDs/hashes/anchors, or add a hosted migration. A
+context is a bounded, whitelisted display snapshot, not a second canonical
+entry store. A capped bootstrap or evicted display context cannot prune an
+effect. Retire an acknowledged envelope only after every affected source has
+explicit terminal status and every receipt-linked entry is current in the
+existing Dashboard cache or explicitly `missing`; prove that transaction and
+v4/v5/v6-to-v7 rollback/reopen path against a disposable SQLite database.
+
 ## Sync recovery schema and transaction checks
 
 Apply `supabase/migrations/202609040001_health_sleep_resolution_link.sql` to staging before the sync-server Preview. The corresponding clean/local migration is `packages/db/migrations/006_health_sleep_resolution_link.sql`. It adds a nullable, indexed, server-owned Sleep resolution link with delete-to-null behavior; it performs no data repair. Production application requires explicit release approval and this migration before deploying the dependent code.

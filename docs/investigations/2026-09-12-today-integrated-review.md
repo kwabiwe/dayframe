@@ -57,6 +57,45 @@ Only a current scoped canonical result linked by persisted evidence may add a
 completed interval, once per actual entry ID. A receipt proves a saved action;
 it is not itself a canonical interval.
 
+## Completed implementation and focused gates
+
+The ordered source commits, all based on
+`e9ca2652542619cd83b91bb7778a608a13e1d01e`, are:
+
+- `343fcc99ff665f4ba6b40c9a2ebc8099402bdfe0` — baseline evidence;
+- `86782435185f9f2e43b83eb22986c9e13a0ed758` — bounded presentation read;
+- `8630908eb3b227491590a7ffbbfb808da23f42fd` — durable handover evidence;
+- `9b9ae268fc4e95c2d2cfa13ded418e8bb1345207` — guarded Quick Confirm;
+- `5369c54af780fac5df05389bc6db20e783593321` — pure Today accounting;
+- `b2142aff77bda8cd61b1073195b77e7542a6df77` — scoped cache hardening;
+- `8dcc97cdbe06390576c474634a6c82996bab9086` — Today rows and exact Review
+  navigation;
+- `9c0fb30ea113742ede41601f6c93b4329c5f15bd` — opt-in Today donut and its
+  accessibility contract; and
+- `90f643aea4e906392b0dd1c6fc997cc9246cc0db` — partial-summary qualification.
+
+The required gates were deliberately run before the donut was introduced:
+
+```text
+@dayframe/mobile Review store, Quick Confirm, presentation-client and pure
+Today projection suite: PASS (4 files, 47 tests)
+@dayframe/web presentation/mutation/Location Review suite: PASS (3 files,
+21 tests)
+@dayframe/shared presentation/acknowledgement suite: PASS (2 files, 14 tests)
+```
+
+After the Today rows and then after the donut, the focused mobile navigation,
+row, summary, history, Quick Confirm, Review SQLite and guarded Reports/
+accessibility suites also passed. The final partial-summary guard was rerun
+with the donut and Reports suites: PASS (4 files, 27 tests).
+
+All four disposable-data validators passed. The SQLite scripts create and
+remove their own temporary databases. The two Postgres validators ran after a
+fresh local PostgreSQL 17 instance was initialised on loopback with a database
+named `dayframe_test`; their built-in localhost-and-`*_test` refusal and
+fixture cleanup were retained. That local server was stopped after the run.
+No staging or production data was contacted.
+
 ## Motion contract
 
 - Trigger: a complete Today presentation generation arrives, or a Review
