@@ -5,7 +5,7 @@ vi.mock("react", async () => {
   // @ts-expect-error Renderer peer lives at the repository root.
   return import("../../../../../node_modules/react/index.js");
 });
-const mocks = vi.hoisted(() => ({ context: null as any }));
+const mocks = vi.hoisted(() => ({ context: null as any, donutProps: null as any }));
 vi.mock("react-native", () => ({ Pressable: "Pressable", Text: "Text", View: "View" }));
 vi.mock("@/lib/mobileTypography", () => ({ mobileTextProps: () => ({}) }));
 vi.mock("@/lib/mobileTheme", () => ({
@@ -23,13 +23,23 @@ vi.mock("@/lib/mobileTheme", () => ({
     theme: { textPrimary: "primary" }
   })
 }));
+vi.mock("@/lib/motion", () => ({
+  useResolvedReduceMotionPreference: () => ({ reduceMotion: false, resolved: true })
+}));
 vi.mock("./TodayReviewPresentationContext", () => ({
   useTodayReviewPresentationContext: () => mocks.context
+}));
+vi.mock("./TodayReviewDonut", () => ({
+  TodayReviewDonut: (props: unknown) => {
+    mocks.donutProps = props;
+    return null;
+  }
 }));
 
 import { TodayReviewSummary } from "./TodayReviewSummary";
 
 beforeEach(() => {
+  mocks.donutProps = null;
   mocks.context = {
     isSummaryAvailable: true,
     error: null,
@@ -38,6 +48,9 @@ beforeEach(() => {
       completedLoggedMs: 3_600_000,
       awaitingReviewMs: 1_800_000,
       savedConfirmationCount: 1,
+      dayKey: "2026-09-12",
+      donutSegments: [],
+      daySections: [],
       coverage: "complete",
       globalReviewCount: { value: 2, exact: true },
       todayReviewCount: { value: 1, exact: true }
@@ -52,8 +65,11 @@ describe("TodayReviewSummary", () => {
       tree = create(<TodayReviewSummary isFocused />);
     });
     const text = tree.root.findAllByType("Text" as never).map((node) => node.children.join(""));
-    expect(text).toContain("Total logged");
-    expect(text).toContain("1h");
+    expect(mocks.donutProps).toMatchObject({
+      completedLoggedMs: 3_600_000,
+      animateEntrance: true,
+      isFocused: true
+    });
     expect(text).toContain("+ 30m awaiting review");
     expect(text).toContain("1 confirmation syncing");
     const actions = tree.root.findAllByType("Pressable" as never);

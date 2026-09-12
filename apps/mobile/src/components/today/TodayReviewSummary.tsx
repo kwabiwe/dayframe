@@ -1,28 +1,34 @@
 import { Pressable, Text, View } from "react-native";
 import { pressable, useMobileTheme } from "@/lib/mobileTheme";
+import { useResolvedReduceMotionPreference } from "@/lib/motion";
 import { mobileTextProps } from "@/lib/mobileTypography";
 import { useTodayReviewPresentationContext } from "./TodayReviewPresentationContext";
+import { TodayReviewDonut } from "./TodayReviewDonut";
 
-export function TodayReviewSummary({ isFocused: _isFocused }: { isFocused: boolean }) {
+export function TodayReviewSummary({ isFocused }: { isFocused: boolean }) {
   const context = useTodayReviewPresentationContext();
   const { styles, theme } = useMobileTheme();
+  const { reduceMotion } = useResolvedReduceMotionPreference();
   if (!context?.isSummaryAvailable || !context.presentation) return null;
   const presentation = context.presentation;
+  const activities = presentation.daySections.flatMap((section) => section.activities);
   const outstanding = presentation.globalReviewCount;
   const today = presentation.todayReviewCount;
   const hideOpenReview = presentation.coverage === "complete" && outstanding.exact && outstanding.value === 0;
 
   return (
     <View testID="today-review-summary" style={styles.todayReviewSummary}>
-      {/* The full donut is deliberately introduced after the row/navigation
-          gate. This compact completed-total surface keeps the data contract
-          testable without making a chart an accidental second owner. */}
-      <View accessible accessibilityRole="text" accessibilityLabel={`Total logged: ${formatDuration(presentation.completedLoggedMs)}`}>
-        <Text {...mobileTextProps("metadata")} style={styles.todayReviewAwaiting}>Total logged</Text>
-        <Text {...mobileTextProps("numeric")} style={[styles.todayReviewAwaiting, { color: theme.textPrimary, fontSize: 22 }]}>
-          {formatDuration(presentation.completedLoggedMs)}
-        </Text>
-      </View>
+      <TodayReviewDonut
+        key={`${context.owner?.backendId ?? "none"}:${context.owner?.workspaceId ?? "none"}:${context.owner?.userId ?? "none"}:${presentation.dayKey}`}
+        activities={activities}
+        animateEntrance={isFocused}
+        completedLoggedMs={presentation.completedLoggedMs}
+        isFocused={isFocused}
+        onOpenActivity={context.openActivity}
+        reduceMotion={reduceMotion}
+        segments={presentation.donutSegments}
+        theme={theme}
+      />
       {presentation.awaitingReviewMs > 0 ? (
         <Text {...mobileTextProps("numeric")} style={styles.todayReviewAwaiting}>
           + {formatDuration(presentation.awaitingReviewMs)} awaiting review
