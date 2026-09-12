@@ -174,7 +174,10 @@ export function projectTodayReviewPresentation(input: TodayReviewProjectionInput
 
     // A receipt-linked canonical entry wins the row. Keeping a second saved
     // source here would duplicate a real entry merely to preserve animation.
-    if (saved && canonicalVisible && resolution === "verified") continue;
+    // Persisted source lineage plus a current scoped canonical entry is enough
+    // to replace the visual Review row. Delivery acknowledgement still stays
+    // in the existing outbox until its terminal proof is safe to retire.
+    if (saved && canonicalVisible) continue;
 
     const interval = finiteInterval(candidate.record.interval.start, candidate.record.interval.end);
     const clipped = interval ? clipInterval(interval.startMs, interval.endMs, dayStart, capturedEnd) : null;

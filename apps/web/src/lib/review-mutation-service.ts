@@ -398,11 +398,11 @@ async function resolveGenericMutation(
     );
   }
   const item = await lockGenericReview(client, reviewItemId, session);
-  if (mutation.action === "accept" && mutation.expectedProposalHash) {
-    assertExpectedGenericProposal(item, mutation.expectedProposalHash);
-  }
   if (item.status !== "open") {
     return resolveClosedGenericReview(client, item, mutation, session);
+  }
+  if (mutation.action === "accept" && mutation.expectedProposalHash) {
+    assertExpectedGenericProposal(item, mutation.expectedProposalHash);
   }
   if (mutation.action === "ignore_once") {
     await resolveGenericReviewAndEvent(client, item, session, "ignored");

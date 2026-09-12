@@ -64,6 +64,20 @@ describe("projectTodayReviewPresentation", () => {
     expect(presentation.daySections[0].activities.filter((activity) => activity.source.kind === "review")).toHaveLength(1);
   });
 
+  it("uses an explicitly linked current Sleep entry before the local receipt is acknowledged", () => {
+    const sleep = entry("sleep-entry", "Sleep", "2026-09-12T00:00:00.000Z", "2026-09-12T07:00:00.000Z");
+    const revision = review("sleep-review", "Sleep revision", "2026-09-12T00:00:00.000Z", "2026-09-12T07:00:00.000Z", ["sleep-entry"]);
+    const presentation = project({
+      response: response([sleep, revision], 1, 1),
+      effects: [effect("sleep-review", "pending")]
+    });
+
+    expect(presentation.completedLoggedMs).toBe(7 * 3_600_000);
+    expect(presentation.savedConfirmationCount).toBe(0);
+    expect(presentation.daySections[0].activities.filter((activity) => activity.source.kind === "entry")).toHaveLength(1);
+    expect(presentation.daySections[0].activities.filter((activity) => activity.source.kind === "review")).toHaveLength(0);
+  });
+
   it("clips cross-midnight pending time, counts overlaps independently, and excludes running timers", () => {
     const first = entry("first", "First", "2026-09-12T09:00:00.000Z", "2026-09-12T10:00:00.000Z");
     const second = entry("second", "Second", "2026-09-12T09:30:00.000Z", "2026-09-12T10:30:00.000Z");

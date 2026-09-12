@@ -301,6 +301,37 @@ describe("idempotent Review mutations", () => {
     expect(receipt?.[1]?.[6]).toContain(expectedProposalHash);
   });
 
+  it("replays an equivalent closed guarded generic accept instead of treating it as a changed proposal", async () => {
+    const reviewItemId = "30000000-0000-4000-8000-000000000006";
+    const client = clientForClosedGenericAccept(reviewItemId);
+    mocks.connect.mockResolvedValue(client);
+    const expectedProposalHash = reviewProposalHash({
+      reviewItemId,
+      eventId: "40000000-0000-4000-8000-000000000002",
+      locationSegmentId: null,
+      sourceKind: "generic",
+      title: "Walk",
+      categoryId: null,
+      placeId: null,
+      startedAt: "2026-07-27T10:00:00.000Z",
+      stoppedAt: "2026-07-27T11:00:00.000Z",
+      confidence: "medium",
+      eventSource: "health_workout",
+      eventType: null,
+      semanticRevision: null
+    });
+
+    await expect(resolveIdempotentReviewMutation(reviewItemId, {
+      clientMutationId: "d87c35ce-2a63-4e44-a8fc-4370f2a5cdaa",
+      mutation: { action: "accept", expectedProposalHash }
+    }, session)).resolves.toMatchObject({
+      status: "accepted",
+      alreadyResolved: true,
+      equivalent: true,
+      expectedProposalHash
+    });
+  });
+
   it("persists exact guarded Location intent while passing the strict domain action downstream", async () => {
     const expectedProposalHash = "a".repeat(64);
     const result = { ok: true, action: "confirm", status: "accepted", entryId: "entry-guarded" };
@@ -395,6 +426,56 @@ function clientForOverlappingGenericEdit(reviewItemId: string) {
     }
     if (statement.includes("insert into time_entries")) {
       return { rows: [{ id: "overlapping-entry" }] };
+    }
+    return { rows: [] };
+  });
+  return {
+    query,
+    release: vi.fn()
+  } as unknown as import("pg").PoolClient & { query: typeof query };
+}
+
+function clientForClosedGenericAccept(reviewItemId: string) {
+  const query = vi.fn(async (statement: string) => {
+    if (statement.includes("pg_try_advisory_xact_lock")) {
+      return { rows: [{ acquired: true }] };
+    }
+    if (statement.includes("from review_mutation_receipts")) return { rows: [] };
+    if (statement.includes("for update of ri nowait")) {
+      return {
+        rows: [{
+          id: reviewItemId,
+          eventId: "40000000-0000-4000-8000-000000000002",
+          title: "Walk",
+          status: "accepted",
+          suggestedCategoryId: null,
+          suggestedPlaceId: null,
+          suggestedStartedAt: "2026-07-27T10:00:00.000Z",
+          suggestedStoppedAt: "2026-07-27T11:00:00.000Z",
+          confidence: "medium",
+          eventSource: "health_workout",
+          eventType: null,
+          semanticRevision: null,
+          locationSegmentId: null
+        }]
+      };
+    }
+    if (statement.includes("location_segment_id") && statement.includes("from review_items")) {
+      return { rows: [{ locationSegmentId: null }] };
+    }
+    if (statement.includes("from time_entries") && statement.includes("created_from_event_id")) {
+      return { rows: [{ id: "overlapping-entry" }] };
+    }
+    if (statement.includes("from time_entries") && statement.includes("where id = $1")) {
+      return {
+        rows: [{
+          categoryId: null,
+          placeId: null,
+          description: "Walk",
+          startedAt: "2026-07-27T10:00:00.000Z",
+          stoppedAt: "2026-07-27T11:00:00.000Z"
+        }]
+      };
     }
     return { rows: [] };
   });
