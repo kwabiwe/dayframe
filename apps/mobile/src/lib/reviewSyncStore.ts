@@ -1,14 +1,17 @@
 import { createOwnerSyncCoalescer } from "./ownerSyncCoalescer";
 import type { SyncLaneOutcome } from "./syncLane";
 import * as SQLite from "expo-sqlite";
-import { REVIEW_EFFECTS_V5_SQL, REVIEW_RECOVERY_V6_SQL } from "./reviewSyncSchema";
+import { REVIEW_EFFECTS_V5_SQL, REVIEW_PRESENTATION_V7_SQL, REVIEW_RECOVERY_V6_SQL } from "./reviewSyncSchema";
 import {
   LocationReviewEvidenceDtoSchema,
+  ReviewPresentationResponseSchema,
   ReviewMutationEnvelopeSchema,
   ReviewReconciliationResponseSchema,
   validReviewAcknowledgement,
   ReviewMutationSchema,
   type LocationReviewEvidenceDto,
+  type ReviewPresentationResponse,
+  type ReviewProposalPresentation,
   type ReviewMutation,
   type ReviewMutationEnvelope
 } from "@dayframe/shared";
@@ -32,10 +35,13 @@ import { createSerialMutationQueue } from "./location/mutationQueue";
 import { isLocationReviewItem } from "./review";
 
 const DATABASE_NAME = "dayframe-review-sync.db";
-const DATABASE_VERSION = 6;
+const DATABASE_VERSION = 7;
 const ACTIVE_ACCOUNT_KEY = "active_account";
 const LAST_CACHE_AT_KEY = "last_cache_at";
 const LAST_SUCCESSFUL_SYNC_AT_KEY = "last_successful_sync_at";
+const PRESENTATION_REVISION_KEY = "presentation_revision";
+const REVIEW_PRESENTATION_CONTEXT_LIMIT = 3;
+const REVIEW_PRESENTATION_DISPLAY_CACHE_MAX_BYTES = 4 * 1024 * 1024;
 export const LOCATION_REVIEW_EVIDENCE_MAX_AGE_MS = 7 * 86_400_000;
 export const LOCATION_REVIEW_EVIDENCE_MAX_ITEMS = 25;
 export const LOCATION_REVIEW_EVIDENCE_MAX_BYTES = 5 * 1024 * 1024;
@@ -169,6 +175,44 @@ type CachedEvidenceRow = {
   fetched_at: string;
   expires_at: string;
   byte_size: number;
+};
+
+type PresentationContextRow = {
+  scope_key: string;
+  backend_id: string;
+  contract_version: number;
+  snapshot_token: string;
+  captured_at: string;
+  cached_at: string;
+  complete: number;
+  context_json: string;
+};
+
+type TerminalSourceRow = {
+  review_item_id: string;
+  status: "accepted" | "ignored" | "missing";
+};
+
+export type ReviewPresentationOwner = {
+  workspaceId: string;
+  userId: string;
+  backendId: string;
+};
+
+export type ReviewPresentationStoreEffect = {
+  reviewItemId: string;
+  action: string;
+  state: ReviewMutationState;
+  localEffect: "hidden" | "restore";
+  resolution: "none" | "pending" | "verified" | "unknown" | "rejected";
+  canonicalEntryIds: string[];
+};
+
+export type ReviewPresentationStoreSnapshot = {
+  response: ReviewPresentationResponse;
+  cachedAt: string;
+  localRevision: number;
+  effects: ReviewPresentationStoreEffect[];
 };
 
 type EvidenceCacheSizeRow = {
@@ -318,6 +362,7 @@ async function database() {
         }
         await transaction.execAsync(REVIEW_EFFECTS_V5_SQL);
         if ((version?.user_version ?? 0) < 6) await transaction.execAsync(REVIEW_RECOVERY_V6_SQL);
+        if ((version?.user_version ?? 0) < 7) await transaction.execAsync(REVIEW_PRESENTATION_V7_SQL);
         await transaction.execAsync(`PRAGMA user_version = ${DATABASE_VERSION}`);
       });
     }
@@ -460,16 +505,20 @@ export async function processReviewBootstrap(bootstrap: MobileBootstrap) {
         now,
         key
       );
-      await transaction.runAsync(
-        "delete from review_item_cache where account_key = ?",
-        key
-      );
+      // Bootstrap's Review list is deliberately capped. Treat it as a partial
+      // open-source update: it can refresh returned rows, never prove that an
+      // older cached proposal or an acknowledged intent no longer exists.
       for (const [position, item] of bootstrap.reviewItems.entries()) {
         if (item.status !== "open") continue;
         await transaction.runAsync(
           `insert into review_item_cache (
              account_key, review_item_id, snapshot_json, server_status, position, cached_at
-           ) values (?, ?, ?, ?, ?, ?)`,
+           ) values (?, ?, ?, ?, ?, ?)
+           on conflict(account_key, review_item_id) do update set
+             snapshot_json = excluded.snapshot_json,
+             server_status = excluded.server_status,
+             position = excluded.position,
+             cached_at = excluded.cached_at`,
           key,
           item.id,
           JSON.stringify(sanitiseReviewItemForCache(item)),
@@ -478,26 +527,20 @@ export async function processReviewBootstrap(bootstrap: MobileBootstrap) {
           now
         );
       }
-      await transaction.runAsync(
-        "delete from review_category_cache where account_key = ?",
-        key
-      );
       for (const category of bootstrap.categories) {
         await transaction.runAsync(
           `insert into review_category_cache (
              account_key, category_id, category_json, cached_at
-           ) values (?, ?, ?, ?)`,
+           ) values (?, ?, ?, ?)
+           on conflict(account_key, category_id) do update set
+             category_json = excluded.category_json,
+             cached_at = excluded.cached_at`,
           key,
           category.id,
           JSON.stringify(category),
           now
         );
       }
-      const openIds = new Set(
-        bootstrap.reviewItems
-          .filter((item) => item.status === "open")
-          .map((item) => item.id)
-      );
       const commuteIds = new Set(
         bootstrap.reviewItems
           .filter((item) => item.status === "open" && item.eventType === "commute_detected")
@@ -517,55 +560,15 @@ export async function processReviewBootstrap(bootstrap: MobileBootstrap) {
           commuteId
         );
       }
-      const acknowledged = await transaction.getAllAsync<{
-        client_mutation_id: string;
-        review_item_id: string;
-      }>(
-        `select o.client_mutation_id, e.review_item_id
-         from review_mutation_outbox o
-         join review_mutation_effects e on e.client_mutation_id = o.client_mutation_id and e.account_key = o.account_key
-         where o.account_key = ? and o.state = 'acknowledged'`,
-        key
-      );
-      for (const row of acknowledged) {
-        if (!acknowledged.some((effect) => effect.client_mutation_id === row.client_mutation_id && openIds.has(effect.review_item_id))) {
-          await transaction.runAsync(
-            "delete from review_mutation_outbox where client_mutation_id = ?",
-            row.client_mutation_id
-          );
-        }
-      }
-      await transaction.runAsync(
-        `update review_mutation_effects set local_effect = 'hidden'
-         where account_key = ? and local_effect = 'restore'
-           and not exists (select 1 from review_item_cache c
-             where c.account_key = review_mutation_effects.account_key
-               and c.review_item_id = review_mutation_effects.review_item_id and c.server_status = 'open')`, key
-      );
-      const cachedEvidence = await transaction.getAllAsync<{
-        review_item_id: string;
-      }>(
-        `select review_item_id
-         from location_review_evidence_cache
-         where account_key = ?`,
-        key
-      );
-      for (const row of cachedEvidence) {
-        if (!openIds.has(row.review_item_id)) {
-          await transaction.runAsync(
-            `delete from location_review_evidence_cache
-             where account_key = ? and review_item_id = ?`,
-            key,
-            row.review_item_id
-          );
-        }
-      }
+      // A bootstrap omission is not terminal proof. Restore/hidden effects,
+      // acknowledged envelopes and map evidence therefore survive until an
+      // explicit scoped presentation result or their own retention policy.
       await pruneLocationReviewEvidenceCacheForAccount(transaction, key, now);
     })
   );
 
   emitChange();
-  return projectReviewBootstrap(bootstrap, await hiddenReviewItemIds(key));
+  return projectReviewBootstrap(bootstrap, await suppressedReviewItemIds(key));
 }
 
 export async function activateReviewAccount(input: {
@@ -679,7 +682,7 @@ export async function loadCachedReviewBootstrap(): Promise<{
         : [];
     })
   );
-  const hiddenIds = await hiddenReviewItemIds(account.account_key);
+  const hiddenIds = await suppressedReviewItemIds(account.account_key);
   const reviewItems = orderedItems.filter((item) => !hiddenIds.has(item.id));
   const cachedAt = await metadata(
     accountMetadataKey(LAST_CACHE_AT_KEY, account.account_key),
@@ -738,7 +741,7 @@ export async function projectReviewBootstrapFromStore(
   }
   return projectReviewBootstrap(
     bootstrap,
-    await hiddenReviewItemIds(account.account_key)
+    await suppressedReviewItemIds(account.account_key)
   );
 }
 
@@ -1028,7 +1031,7 @@ export async function loadCachedDashboardBootstrap(): Promise<{
     return {
       bootstrap: projectReviewBootstrap(
         bootstrap,
-        await hiddenReviewItemIds(account.account_key)
+        await suppressedReviewItemIds(account.account_key)
       ),
       cachedAt: row.cached_at
     };
@@ -1062,6 +1065,408 @@ export async function cacheDashboardBootstrap(bootstrap: MobileBootstrap) {
     )
   );
   return true;
+}
+
+/**
+ * Persist one server-verified presentation generation under the existing
+ * Review store. Its response schema is whitelisted by the shared contract;
+ * raw event payloads and saved mutation envelopes never enter this cache.
+ */
+export async function cacheReviewPresentation(input: {
+  owner: ReviewPresentationOwner;
+  response: ReviewPresentationResponse;
+}) {
+  const response = ReviewPresentationResponseSchema.parse(input.response);
+  const db = await database();
+  const key = accountKey(input.owner);
+  const scopeKey = reviewPresentationScopeKey(input.owner.backendId, response);
+  const contextJson = JSON.stringify(response);
+  if (new TextEncoder().encode(contextJson).byteLength > REVIEW_PRESENTATION_DISPLAY_CACHE_MAX_BYTES) {
+    return false;
+  }
+  const now = new Date().toISOString();
+  let wrote = false;
+  await serialiseReviewMutation(() => db.withExclusiveTransactionAsync(async (transaction) => {
+    const account = await activeAccount(transaction);
+    if (
+      !account ||
+      account.account_key !== key ||
+      account.workspace_id !== input.owner.workspaceId ||
+      account.user_id !== input.owner.userId ||
+      !input.owner.backendId
+    ) {
+      return;
+    }
+
+    const existing = await transaction.getFirstAsync<{ backend_id: string }>(
+      `select backend_id from review_presentation_context
+       where account_key = ? and scope_key = ?`,
+      key,
+      scopeKey
+    );
+    if (existing && existing.backend_id !== input.owner.backendId) return;
+
+    const cachedReviewItems = presentationReviewItems(response);
+    for (const [position, item] of cachedReviewItems.entries()) {
+      await transaction.runAsync(
+        `insert into review_item_cache (
+           account_key, review_item_id, snapshot_json, server_status, position, cached_at
+         ) values (?, ?, ?, 'open', ?, ?)
+         on conflict(account_key, review_item_id) do update set
+           snapshot_json = excluded.snapshot_json,
+           server_status = excluded.server_status,
+           position = excluded.position,
+           cached_at = excluded.cached_at`,
+        key,
+        item.id,
+        JSON.stringify(sanitiseReviewItemForCache(item)),
+        position,
+        now
+      );
+    }
+    await transaction.runAsync(
+      `insert into review_presentation_context (
+         account_key, scope_key, backend_id, contract_version, snapshot_token,
+         captured_at, cached_at, complete, context_json
+       ) values (?, ?, ?, ?, ?, ?, ?, ?, ?)
+       on conflict(account_key, scope_key) do update set
+         backend_id = excluded.backend_id,
+         contract_version = excluded.contract_version,
+         snapshot_token = excluded.snapshot_token,
+         captured_at = excluded.captured_at,
+         cached_at = excluded.cached_at,
+         complete = excluded.complete,
+         context_json = excluded.context_json`,
+      key,
+      scopeKey,
+      input.owner.backendId,
+      response.version,
+      response.snapshotToken,
+      response.capturedAt,
+      now,
+      response.completeness.records && response.completeness.outstandingCounts ? 1 : 0,
+      contextJson
+    );
+    await recordTerminalPresentationSources(transaction, key, scopeKey, input.owner.backendId, response);
+    await pruneReviewPresentationContexts(transaction, key, scopeKey);
+    await materialiseAcknowledgedReviewHandover(transaction, key, response);
+    await bumpPresentationRevision(key, transaction);
+    wrote = true;
+  }));
+  if (wrote) emitChange();
+  return wrote;
+}
+
+/** Reads a stable, owner- and backend-bound display snapshot without exposing
+ * raw payloads or queued request JSON to a consuming Today component. */
+export async function readReviewPresentationSnapshot(input: {
+  owner: ReviewPresentationOwner;
+  response: Pick<ReviewPresentationResponse, "scope">;
+}): Promise<ReviewPresentationStoreSnapshot | null> {
+  const db = await database();
+  const account = await activeAccount(db);
+  const key = accountKey(input.owner);
+  if (
+    !account ||
+    account.account_key !== key ||
+    account.workspace_id !== input.owner.workspaceId ||
+    account.user_id !== input.owner.userId ||
+    !input.owner.backendId
+  ) return null;
+  const scopeKey = reviewPresentationScopeKey(input.owner.backendId, input.response as ReviewPresentationResponse);
+  const row = await db.getFirstAsync<PresentationContextRow>(
+    `select scope_key, backend_id, contract_version, snapshot_token, captured_at,
+            cached_at, complete, context_json
+     from review_presentation_context
+     where account_key = ? and scope_key = ? and backend_id = ?`,
+    key,
+    scopeKey,
+    input.owner.backendId
+  );
+  if (!row) return null;
+  let response: ReviewPresentationResponse;
+  try {
+    response = ReviewPresentationResponseSchema.parse(JSON.parse(row.context_json));
+  } catch {
+    return null;
+  }
+  const activeAfterRead = await activeAccount(db);
+  if (activeAfterRead?.account_key !== key) return null;
+  const effects = await readPresentationEffects(db, key);
+  const revision = Number(await metadata(accountMetadataKey(PRESENTATION_REVISION_KEY, key), db) ?? "0");
+  return {
+    response,
+    cachedAt: row.cached_at,
+    localRevision: Number.isFinite(revision) ? revision : 0,
+    effects
+  };
+}
+
+export function reviewPresentationScopeKey(
+  backendId: string,
+  response: Pick<ReviewPresentationResponse, "scope">
+) {
+  const { scope } = response;
+  return canonicalJson({
+    backendId,
+    version: 1,
+    mode: scope.mode,
+    window: scope.window ?? null,
+    today: scope.today ?? null,
+    timeZone: scope.timeZone
+  });
+}
+
+function presentationReviewItems(response: ReviewPresentationResponse) {
+  const records = [
+    ...response.records,
+    ...response.lookup.reviewItems
+  ];
+  const byId = new Map<string, MobileReviewItem>();
+  for (const record of records) {
+    if (record.kind !== "review" || record.status !== "open") continue;
+    const item = mobileReviewItemFromPresentation(record);
+    byId.set(item.id, item);
+  }
+  return [...byId.values()];
+}
+
+function mobileReviewItemFromPresentation(record: ReviewProposalPresentation): MobileReviewItem {
+  return {
+    id: record.reviewItemId,
+    type: record.sourceKind === "location_v2" ? "location" : "review",
+    title: record.title,
+    eventSource: record.eventSource,
+    eventType: record.eventType,
+    categoryName: record.category.name,
+    categoryColor: record.category.color,
+    placeName: record.place.label,
+    suggestedCategoryId: record.category.id,
+    suggestedPlaceId: record.place.id,
+    suggestedStartedAt: record.interval.start,
+    suggestedStoppedAt: record.interval.end,
+    confidence: record.confidence,
+    status: record.status,
+    notes: null,
+    rawPayload: null,
+    createdAt: record.createdAt
+  };
+}
+
+async function recordTerminalPresentationSources(
+  transaction: SQLite.SQLiteDatabase,
+  accountKeyValue: string,
+  scopeKey: string,
+  backendId: string,
+  response: ReviewPresentationResponse
+) {
+  for (const record of [...response.records, ...response.lookup.reviewItems]) {
+    if (record.kind !== "review" || !["accepted", "ignored", "missing"].includes(record.status)) continue;
+    await transaction.runAsync(
+      `insert into review_presentation_terminal_source (
+         account_key, review_item_id, scope_key, backend_id, snapshot_token, status, captured_at
+       ) values (?, ?, ?, ?, ?, ?, ?)
+       on conflict(account_key, review_item_id) do update set
+         scope_key = excluded.scope_key,
+         backend_id = excluded.backend_id,
+         snapshot_token = excluded.snapshot_token,
+         status = excluded.status,
+         captured_at = excluded.captured_at`,
+      accountKeyValue,
+      record.reviewItemId,
+      scopeKey,
+      backendId,
+      response.snapshotToken,
+      record.status,
+      response.capturedAt
+    );
+  }
+}
+
+async function pruneReviewPresentationContexts(
+  transaction: SQLite.SQLiteDatabase,
+  accountKeyValue: string,
+  currentScopeKey: string
+) {
+  const rows = await transaction.getAllAsync<PresentationContextRow>(
+    `select scope_key, backend_id, contract_version, snapshot_token, captured_at,
+            cached_at, complete, context_json
+     from review_presentation_context
+     where account_key = ?
+     order by cached_at desc, scope_key desc`,
+    accountKeyValue
+  );
+  let retainedBytes = 0;
+  for (const [index, row] of rows.entries()) {
+    const bytes = new TextEncoder().encode(row.context_json).byteLength;
+    const shouldKeep = index < REVIEW_PRESENTATION_CONTEXT_LIMIT &&
+      retainedBytes + bytes <= REVIEW_PRESENTATION_DISPLAY_CACHE_MAX_BYTES;
+    if (shouldKeep || row.scope_key === currentScopeKey) {
+      retainedBytes += bytes;
+      continue;
+    }
+    await transaction.runAsync(
+      `delete from review_presentation_context where account_key = ? and scope_key = ?`,
+      accountKeyValue,
+      row.scope_key
+    );
+  }
+}
+
+async function materialiseAcknowledgedReviewHandover(
+  transaction: SQLite.SQLiteDatabase,
+  accountKeyValue: string,
+  response: ReviewPresentationResponse
+) {
+  const rows = await transaction.getAllAsync<{
+    client_mutation_id: string;
+    review_item_id: string;
+    request_json: string;
+    acknowledgement_json: string | null;
+  }>(
+    `select client_mutation_id, review_item_id, request_json, acknowledgement_json
+     from review_mutation_outbox
+     where account_key = ? and state = 'acknowledged'`,
+    accountKeyValue
+  );
+  const terminalById = terminalStatusesFromPresentation(response);
+  const lookupEntries = entryLookupFromPresentation(response);
+  const dashboardEntries = await cachedDashboardEntryIds(transaction, accountKeyValue);
+  for (const row of rows) {
+    const envelope = parseReviewMutationEnvelope(row.request_json);
+    const acknowledgement = parseAcknowledgement(row.acknowledgement_json);
+    if (!envelope || !acknowledgement || !validReviewAcknowledgement(acknowledgement, envelope, row.review_item_id)) continue;
+    const effects = await transaction.getAllAsync<{ review_item_id: string }>(
+      `select review_item_id from review_mutation_effects
+       where account_key = ? and client_mutation_id = ?`,
+      accountKeyValue,
+      row.client_mutation_id
+    );
+    if (!effects.length || effects.some((effect) => !terminalById.has(effect.review_item_id))) continue;
+    const resultEntryIds = acknowledgementEntryIds(acknowledgement);
+    const materialised = resultEntryIds.every((entryId) => {
+      const status = lookupEntries.get(entryId);
+      return status === "missing" || (status === "present" && dashboardEntries.has(entryId));
+    });
+    if (!materialised) continue;
+    for (const effect of effects) {
+      await transaction.runAsync(
+        `delete from review_item_cache where account_key = ? and review_item_id = ?`,
+        accountKeyValue,
+        effect.review_item_id
+      );
+    }
+    await transaction.runAsync(
+      `delete from review_mutation_outbox
+       where account_key = ? and client_mutation_id = ? and state = 'acknowledged'`,
+      accountKeyValue,
+      row.client_mutation_id
+    );
+  }
+}
+
+function terminalStatusesFromPresentation(response: ReviewPresentationResponse) {
+  const statuses = new Map<string, "accepted" | "ignored" | "missing">();
+  for (const record of [...response.records, ...response.lookup.reviewItems]) {
+    if (record.kind === "review" && (
+      record.status === "accepted" || record.status === "ignored" || record.status === "missing"
+    )) {
+      statuses.set(record.reviewItemId, record.status);
+    }
+  }
+  return statuses;
+}
+
+function entryLookupFromPresentation(response: ReviewPresentationResponse) {
+  const statuses = new Map<string, "present" | "missing">();
+  for (const record of [...response.records, ...response.lookup.entries]) {
+    if (record.kind === "completed_entry") statuses.set(record.entryId, "present");
+    if (record.kind === "missing_entry") statuses.set(record.entryId, "missing");
+  }
+  return statuses;
+}
+
+async function cachedDashboardEntryIds(transaction: SQLite.SQLiteDatabase, accountKeyValue: string) {
+  const row = await transaction.getFirstAsync<CachedDashboardRow>(
+    `select snapshot_json, cached_at from dashboard_snapshot_cache where account_key = ?`,
+    accountKeyValue
+  );
+  if (!row) return new Set<string>();
+  try {
+    const bootstrap = JSON.parse(row.snapshot_json) as MobileBootstrap;
+    const entries = [
+      ...bootstrap.entries,
+      ...(bootstrap.historyEntries ?? []),
+      ...(bootstrap.dayEntries ?? []),
+      ...(bootstrap.weekEntries ?? [])
+    ];
+    return new Set(entries.map((entry) => entry.id));
+  } catch {
+    return new Set<string>();
+  }
+}
+
+function parseAcknowledgement(value: string | null) {
+  if (!value) return null;
+  try {
+    const parsed = JSON.parse(value);
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed)
+      ? parsed as Record<string, unknown>
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+function acknowledgementEntryIds(value: Record<string, unknown>) {
+  const ids = [
+    typeof value.entryId === "string" ? value.entryId : null,
+    ...(Array.isArray(value.entryIds) ? value.entryIds.filter((id): id is string => typeof id === "string") : [])
+  ].filter((id): id is string => Boolean(id));
+  return [...new Set(ids)];
+}
+
+async function readPresentationEffects(db: SQLite.SQLiteDatabase, accountKeyValue: string) {
+  const rows = await db.getAllAsync<{
+    review_item_id: string;
+    action_kind: string;
+    state: ReviewMutationState;
+    local_effect: "hidden" | "restore";
+    resolution_status: string | null;
+    acknowledgement_json: string | null;
+  }>(
+    `select e.review_item_id, o.action_kind, o.state, e.local_effect,
+            o.resolution_status, o.acknowledgement_json
+     from review_mutation_effects e
+     join review_mutation_outbox o
+       on o.client_mutation_id = e.client_mutation_id and o.account_key = e.account_key
+     where e.account_key = ?
+     order by o.created_at, e.review_item_id`,
+    accountKeyValue
+  );
+  return rows.map((row): ReviewPresentationStoreEffect => ({
+    reviewItemId: row.review_item_id,
+    action: row.action_kind,
+    state: row.state,
+    localEffect: row.local_effect,
+    resolution: reviewPresentationResolution(row.state, row.resolution_status),
+    canonicalEntryIds: acknowledgementEntryIds(parseAcknowledgement(row.acknowledgement_json) ?? {})
+  }));
+}
+
+function reviewPresentationResolution(state: ReviewMutationState, status: string | null): ReviewPresentationStoreEffect["resolution"] {
+  if (state === "acknowledged") return "verified";
+  if (state === "needs_attention") return status === "resolution_unknown" ? "unknown" : "rejected";
+  return "pending";
+}
+
+async function bumpPresentationRevision(accountKeyValue: string, transaction: SQLite.SQLiteDatabase) {
+  const value = Number(await metadata(accountMetadataKey(PRESENTATION_REVISION_KEY, accountKeyValue), transaction) ?? "0");
+  await setMetadata(
+    accountMetadataKey(PRESENTATION_REVISION_KEY, accountKeyValue),
+    String((Number.isFinite(value) ? value : 0) + 1),
+    transaction
+  );
 }
 
 export async function enqueueReviewMutation(input: {
@@ -1299,6 +1704,10 @@ async function acknowledgeReviewMutation(row: MutationRow, body: Record<string,u
     await transaction.runAsync("update review_mutation_effects set local_effect='hidden' where client_mutation_id=? and account_key=?",row.client_mutation_id,row.account_key);
     await setMetadata(accountMetadataKey(LAST_SUCCESSFUL_SYNC_AT_KEY,row.account_key),now,transaction);
   }));
+  // Today is subscribed to the same durable owner. Publish at the committed
+  // acknowledgement boundary rather than waiting for the rest of a 25-item
+  // delivery drain to settle.
+  emitChange();
 }
 
 async function scheduleRetry(
@@ -1671,6 +2080,25 @@ async function hiddenReviewItemIds(accountKeyValue: string) {
     `select review_item_id
      from review_mutation_effects
      where account_key = ? and local_effect = 'hidden'`,
+    accountKeyValue
+  );
+  return new Set(rows.map((row) => row.review_item_id));
+}
+
+async function suppressedReviewItemIds(accountKeyValue: string) {
+  const [hidden, terminal] = await Promise.all([
+    hiddenReviewItemIds(accountKeyValue),
+    terminalReviewItemIds(accountKeyValue)
+  ]);
+  return new Set([...hidden, ...terminal]);
+}
+
+async function terminalReviewItemIds(accountKeyValue: string) {
+  const db = await database();
+  const rows = await db.getAllAsync<{ review_item_id: string }>(
+    `select review_item_id
+     from review_presentation_terminal_source
+     where account_key = ?`,
     accountKeyValue
   );
   return new Set(rows.map((row) => row.review_item_id));

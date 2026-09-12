@@ -436,6 +436,8 @@ function toReviewRecord(row: ReviewRow): InternalRecord {
     eventId: row.eventId,
     locationSegmentId: row.locationSegmentId,
     sourceKind,
+    eventSource: row.eventSource,
+    eventType: row.eventType,
     title: row.title,
     category: { id: row.categoryId, name: row.categoryName, color: row.categoryColor },
     place: { id: row.placeId, label: row.placeLabel },

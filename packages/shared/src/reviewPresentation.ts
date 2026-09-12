@@ -146,6 +146,8 @@ export const ReviewProposalPresentationSchema = z
     eventId: uuid.nullable(),
     locationSegmentId: uuid.nullable(),
     sourceKind: z.enum(["generic", "location_v2"]),
+    eventSource: z.string().max(100).nullable(),
+    eventType: z.string().max(100).nullable(),
     title: z.string().max(500),
     category,
     place,
