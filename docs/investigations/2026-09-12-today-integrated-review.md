@@ -111,14 +111,13 @@ documentation alignment, iOS configuration and the web production build
 passed; lint retains only two pre-existing warnings in
 `event-service.test.ts`.
 
-The web production build passed. A clean `expo run:ios` Debug simulator build
-previously passed at the pre-correction head
-`c2fa2921c919e862dd83257e228687730d157863` and installed on `Dayframe
-Accessibility Max QA`; its built host and extension lane metadata passed the
-built-product iOS configuration check. The compiler emitted one pre-existing
-duplicate `-lc++` linker warning. That simulator build must be repeated for the
-corrected exact head before final handoff. It is configuration/compilation
-evidence only, not a signed staging or physical-iPhone acceptance claim.
+The web production build passed. At
+`6042bbb8dd25c3f1ddab7620bb95223f6dc87e50`, a clean `expo run:ios` Debug
+simulator build passed and installed on `Dayframe Accessibility Max QA`; its
+built host and extension lane metadata passed the built-product iOS
+configuration check. The compiler emitted one pre-existing duplicate `-lc++`
+linker warning. This is configuration/compilation evidence only, not a signed
+staging or physical-iPhone acceptance claim.
 
 `npm run typecheck` remains **FAIL** only at the unmodified baseline file
 `apps/mobile/src/components/ConnectivityStatusStrip.tsx(27,43)`: TypeScript
