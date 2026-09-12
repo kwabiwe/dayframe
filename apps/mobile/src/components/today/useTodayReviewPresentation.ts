@@ -189,6 +189,11 @@ export function useTodayReviewPresentation(input: Input): TodayReviewPresentatio
         setError(null);
       } catch (cause) {
         if (controller.signal.aborted || generation !== identityGeneration.current) return;
+        // A failed foreground read never changes durable delivery state. Clear
+        // only this ephemeral de-duplication token so a later existing
+        // foreground/subscription trigger may retry the proof; do not create a
+        // timer or polling loop here.
+        acknowledgedHandoverSignature.current = null;
         // A malformed or unavailable new response leaves the last verified
         // snapshot mounted and qualified instead of replacing it with zero.
         setError(presentationErrorCopy(cause));
