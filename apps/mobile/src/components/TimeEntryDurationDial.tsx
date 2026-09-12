@@ -10,6 +10,7 @@ import {
   type DayframeDurationDialInteraction
 } from "../../modules/dayframe-duration-dial";
 import { pressable, type MobileStyles, type MobileTheme } from "@/lib/mobileTheme";
+import { mobileTextProps } from "@/lib/mobileTypography";
 import {
   adjustTimeEntryDial,
   roundTimeEntryDialDuration,
@@ -241,7 +242,7 @@ function DialAction({
       ], styles.buttonPressed)}
       testID={testID}
     >
-      <Text style={variant === "field"
+      <Text {...mobileTextProps("control")} style={variant === "field"
         ? styles.durationDialFieldActionText
         : styles.durationDialInnerActionText}
       >

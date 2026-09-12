@@ -22,6 +22,7 @@ vi.mock("react-native", () => ({
   },
 }));
 import { useReportTextMeasure } from "./ReportTextMeasure";
+import { useIntrinsicTextMeasure } from "../accessibility/IntrinsicTextMeasure";
 function Probe({ sample }: { sample: string }) {
   const { widths, probe } = useReportTextMeasure(
     [sample],
@@ -39,6 +40,26 @@ function Probe({ sample }: { sample: string }) {
   );
 }
 describe("native report measurements", () => {
+  it("keeps the Reports adapter IDs and hidden native probe contract while sharing the neutral hook", () => {
+    function AdapterProbe() {
+      const report = useReportTextMeasure(["88:88"], { fontSize: 14 }, 1.2);
+      const neutral = useIntrinsicTextMeasure(["88:88"], { fontSize: 14 }, 1.2);
+      return <>{report.probe}{neutral.probe}</>;
+    }
+    let tree!: ReturnType<typeof create>;
+    act(() => { tree = create(<AdapterProbe />); });
+    const textNodes = tree.root.findAllByType("Text" as never);
+    expect(textNodes.map((node) => node.props.testID)).toEqual([
+      "report-measure-88:88",
+      "intrinsic-measure-88:88",
+    ]);
+    expect(textNodes.every((node) => node.props.maxFontSizeMultiplier === 1.2)).toBe(true);
+    const probe = tree.root.findAllByType("View" as never).filter((node) => node.props.style?.width === 0);
+    expect(probe).toHaveLength(2);
+    expect(probe.every((node) => node.props.accessibilityElementsHidden && node.props.pointerEvents === "none")).toBe(true);
+    act(() => tree.unmount());
+  });
+
   it("grows and shrinks with current samples, rejects stale layout, and invalidates all font/width inputs", () => {
     let tree!: ReturnType<typeof create>;
     act(() => {

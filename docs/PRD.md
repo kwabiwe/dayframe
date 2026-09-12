@@ -191,6 +191,13 @@ Mobile Reports:
 - Confirmed active timer contribution follows the existing projected timer through one current instant; Review-needed entries and suggestions never contribute. Month/Year/custom use bounded authenticated aggregates rather than raw history. An unavailable uncached range says Connect to load this report range; cached results never masquerade as another range.
 - Donut geometry follows available width, never font scale; show its clock total once, in the centre when it fits or in one bounded companion line. Durations use unbounded-hour HH:MM:SS, flooring only final labels, with natural spoken durations. Category rows form a zero-gap informational list with a 38–42-point ordinary measured pitch and minimum-only height; they remain one line at every supported width/text size, only names ellipsise, and percentages/durations remain complete. Dense roles have explicit local scaling caps, not global suppression. The Reports calendar shares the entry picker's 349-point inner cap (308 points at a 320-point host) while keeping six 44-point rows and seven equal columns.
 
+Mobile accessibility and Dynamic Type:
+
+- Keep iOS system font scaling enabled. Assign local scaling roles only to compact presentation text: screen headings (1.5), section headings (1.5), items (1.35), controls (1.3), metadata (1.3), numerals (1.2), counters (1.2), and inputs (1.35). Explanations, warnings, help, errors, and ordinary body copy remain uncapped. Reports keeps its separately approved dense-layout roles and staging-badge exception.
+- A scaling cap is not evidence that a layout fits. Measure intrinsic text against the actual available native width and reflow before content or actions become unusable. Preserve complete times, durations, counts, labels, destinations, and VoiceOver context; wrap or stack content while keeping interactive targets at least 44 points.
+- History, Review, Settings, timer editors, location evidence, and native Calendar must preserve their existing data, mutation, navigation, accessibility-action, and gesture owners. Typography changes are presentation-only and must not write user data or create parallel state owners.
+- Validate ordinary and maximum system text sizes, Bold Text, Reduce Motion, supported phone widths, VoiceOver labels/actions, and both themes. Separate simulator/diagnostic evidence from signed staging and physical-device acceptance; synthetic fixtures never constitute physical acceptance.
+
 Automation:
 
 - Trusted-place auto-start.

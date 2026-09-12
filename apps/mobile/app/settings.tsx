@@ -102,6 +102,9 @@ import {
   shouldShowSettingsRefreshSpinner
 } from "@/lib/settingsRefresh";
 import { clampSettingsScrollOffset, settingsScrollNeedsClamp } from "@/lib/settingsScroll";
+import { mobileTextProps } from "@/lib/mobileTypography";
+import { recordMobileLayout, recordMobileTextLayout } from "@/components/accessibility/diagnostics";
+import type { MobileAccessibilityDiagnostic } from "@/components/accessibility/diagnostics";
 import { drainNativeShortcutQueue, syncShortcutCatalog } from "@/lib/shortcuts";
 import {
   configureLocationIntelligence,
@@ -1326,7 +1329,7 @@ export default function SettingsScreen() {
           >
             <BackGlyph color={theme.accent} />
           </Pressable>
-          <Text style={styles.settingsTitle} numberOfLines={1}>{settingsTitle}</Text>
+          <Text {...mobileTextProps("screenHeading")} style={styles.settingsTitle}>{settingsTitle}</Text>
         </View>
       </View>
       <ScrollView
@@ -1433,7 +1436,7 @@ export default function SettingsScreen() {
 
           {settingsSection === "appearance" ? (
             <View style={styles.appearanceStack}>
-              <Text style={styles.appearanceIntro}>Choose how Dayframe follows your iPhone.</Text>
+              <Text {...mobileTextProps("body")} style={styles.appearanceIntro}>Choose how Dayframe follows your iPhone.</Text>
               <View style={styles.segmentedControl}>
                 {themeOptions.map((option) => {
                   const selected = option.value === themePreference;
@@ -1449,7 +1452,7 @@ export default function SettingsScreen() {
                       )}
                       onPress={() => setThemePreference(option.value)}
                     >
-                      <Text style={[styles.segmentButtonText, selected ? styles.segmentButtonTextSelected : null]}>
+                      <Text {...mobileTextProps("control")} style={[styles.segmentButtonText, selected ? styles.segmentButtonTextSelected : null]}>
                         {option.label}
                       </Text>
                     </Pressable>
@@ -1457,10 +1460,10 @@ export default function SettingsScreen() {
                 })}
               </View>
               <View style={styles.appearanceSelectionCard}>
-                <Text style={styles.appearanceSelectionTitle}>
+                <Text {...mobileTextProps("itemTitle")} style={styles.appearanceSelectionTitle}>
                   {themePreference === "system" ? "System" : themePreference === "light" ? "Light" : "Dark"}
                 </Text>
-                <Text style={styles.appearanceSelectionMeta}>
+                <Text {...mobileTextProps("body")} style={styles.appearanceSelectionMeta}>
                   {themePreference === "system"
                     ? "Automatically matches iOS appearance."
                     : themePreference === "light"
@@ -1469,21 +1472,21 @@ export default function SettingsScreen() {
                 </Text>
               </View>
 
-              <Text style={styles.appearanceSectionLabel}>Preview</Text>
+              <Text {...mobileTextProps("sectionHeading")} style={styles.appearanceSectionLabel}>Preview</Text>
               <View style={styles.appearancePreviewRow}>
                 <AppearancePreviewCard mode="light" selected={themePreference === "light"} styles={styles} />
                 <AppearancePreviewCard mode="dark" selected={themePreference === "dark"} styles={styles} />
               </View>
 
-              <Text style={styles.appearanceSectionLabel}>Display details</Text>
+              <Text {...mobileTextProps("sectionHeading")} style={styles.appearanceSectionLabel}>Display details</Text>
               <View style={styles.appearanceDetailsCard}>
                 <View style={styles.appearanceDetailRow}>
-                  <Text style={styles.appearanceDetailTitle}>Midnight Core</Text>
-                  <Text style={styles.appearanceDetailMeta}>Always preserved</Text>
+                  <Text {...mobileTextProps("itemTitle")} style={styles.appearanceDetailTitle}>Midnight Core</Text>
+                  <Text {...mobileTextProps("metadata")} style={styles.appearanceDetailMeta}>Always preserved</Text>
                 </View>
                 <View style={[styles.appearanceDetailRow, styles.appearanceDetailDivider]}>
-                  <Text style={styles.appearanceDetailTitle}>Colour logo</Text>
-                  <Text style={styles.appearanceDetailMeta}>Never recoloured</Text>
+                  <Text {...mobileTextProps("itemTitle")} style={styles.appearanceDetailTitle}>Colour logo</Text>
+                  <Text {...mobileTextProps("metadata")} style={styles.appearanceDetailMeta}>Never recoloured</Text>
                 </View>
               </View>
             </View>
@@ -1515,6 +1518,8 @@ export default function SettingsScreen() {
                         />
                         <TextInput
                           ref={categoryEditRef}
+                          accessibilityLabel="Category name"
+                          {...mobileTextProps("input")}
                           style={[styles.textInput, styles.categoryEditInput]}
                           value={editingCategoryName}
                           onChangeText={setEditingCategoryName}
@@ -1536,7 +1541,7 @@ export default function SettingsScreen() {
                           style={pressable(styles.secondaryButton, styles.buttonPressed)}
                           onPress={cancelEditCategory}
                         >
-                          <Text style={styles.secondaryButtonText}>Cancel</Text>
+                          <Text {...mobileTextProps("control")} style={styles.secondaryButtonText}>Cancel</Text>
                         </Pressable>
                         <Pressable
                           accessibilityLabel={`Delete ${category.name}`}
@@ -1544,14 +1549,14 @@ export default function SettingsScreen() {
                           style={pressable(styles.secondaryButton, styles.buttonPressed)}
                           onPress={() => confirmDeleteCategory(category)}
                         >
-                          <Text style={styles.activeEditDeleteText}>Delete</Text>
+                          <Text {...mobileTextProps("control")} style={styles.activeEditDeleteText}>Delete</Text>
                         </Pressable>
                         <Pressable
                           accessibilityRole="button"
                           style={pressable(styles.primaryInlineButton, styles.buttonPressed)}
                           onPress={() => saveCategoryEdit(category)}
                         >
-                          <Text style={styles.primaryButtonText}>Save</Text>
+                          <Text {...mobileTextProps("control")} style={styles.primaryButtonText}>Save</Text>
                         </Pressable>
                       </View>
                     </Reanimated.View>
@@ -1572,8 +1577,8 @@ export default function SettingsScreen() {
                     >
                       <View style={[styles.colorDot, { backgroundColor: categoryColor }]} />
                       <View style={styles.categoryTextStack}>
-                        <Text style={styles.categoryName} numberOfLines={1}>{category.name}</Text>
-                        <Text style={[styles.categoryMeta, category.isPinned ? styles.categoryMetaPinned : null]}>
+                    <Text {...mobileTextProps("itemTitle")} style={styles.categoryName}>{category.name}</Text>
+                        <Text {...mobileTextProps("metadata")} style={[styles.categoryMeta, category.isPinned ? styles.categoryMetaPinned : null]}>
                           {category.isPinned ? "Pinned" : "Unpinned"}
                         </Text>
                       </View>
@@ -1619,6 +1624,7 @@ export default function SettingsScreen() {
                 <TextInput
                   ref={newCategoryInputRef}
                   accessibilityLabel="New category name"
+                  {...mobileTextProps("input")}
                   style={[styles.textInput, styles.categoryCreateInput]}
                   value={newCategoryName}
                   onChangeText={setNewCategoryName}
@@ -1681,7 +1687,7 @@ export default function SettingsScreen() {
                       style={pressable(styles.secondaryButton, styles.buttonPressed)}
                       onPress={cancelCreateCategory}
                     >
-                      <Text style={styles.secondaryButtonText}>Cancel</Text>
+                      <Text {...mobileTextProps("control")} style={styles.secondaryButtonText}>Cancel</Text>
                     </Pressable>
                     <Pressable
                       accessibilityLabel={pinNewCategory ? "New category pinned" : "New category unpinned"}
@@ -1698,7 +1704,7 @@ export default function SettingsScreen() {
                       ) : (
                         <PinOffGlyph color={theme.textSecondary} />
                       )}
-                      <Text style={styles.secondaryButtonText}>
+                      <Text {...mobileTextProps("control")} style={styles.secondaryButtonText}>
                         {pinNewCategory ? "Pinned" : "Unpinned"}
                       </Text>
                     </Pressable>
@@ -1712,7 +1718,7 @@ export default function SettingsScreen() {
                       ]}
                       onPress={addCategory}
                     >
-                      <Text style={styles.primaryButtonText}>Create</Text>
+                      <Text {...mobileTextProps("control")} style={styles.primaryButtonText}>Create</Text>
                     </Pressable>
                   </View>
                 </Reanimated.View>
@@ -1723,22 +1729,22 @@ export default function SettingsScreen() {
 
           {settingsSection === "profile" ? (
           <View style={styles.panel}>
-            <Text style={styles.sectionTitle}>Account</Text>
+            <Text {...mobileTextProps("sectionHeading")} style={styles.sectionTitle}>Account</Text>
             {data?.user || data?.workspace ? (
               <View style={styles.accountList}>
                 {data.user ? (
                   <View style={styles.accountRow}>
-                    <Text style={styles.label}>Signed in as</Text>
-                    <Text style={styles.accountValue} numberOfLines={1}>
+                    <Text {...mobileTextProps("metadata")} style={styles.label}>Signed in as</Text>
+                    <Text {...mobileTextProps("body")} style={styles.accountValue}>
                       {data.user.name || data.user.email}
                     </Text>
-                    <Text style={styles.accountMeta} numberOfLines={1}>{data.user.email}</Text>
+                    <Text {...mobileTextProps("body")} style={styles.accountMeta}>{data.user.email}</Text>
                   </View>
                 ) : null}
                 {data.workspace ? (
                   <View style={styles.accountRow}>
-                    <Text style={styles.label}>Workspace</Text>
-                    <Text style={styles.accountValue} numberOfLines={1}>{data.workspace.name}</Text>
+                    <Text {...mobileTextProps("metadata")} style={styles.label}>Workspace</Text>
+                    <Text {...mobileTextProps("body")} style={styles.accountValue}>{data.workspace.name}</Text>
                   </View>
                 ) : null}
               </View>
@@ -1753,7 +1759,7 @@ export default function SettingsScreen() {
                 )}
                 onPress={signOut}
               >
-                <Text style={styles.secondaryButtonText}>
+                <Text {...mobileTextProps("control")} style={styles.secondaryButtonText}>
                   {signingOut ? "Logging out..." : "Log out"}
                 </Text>
               </Pressable>
@@ -1765,7 +1771,7 @@ export default function SettingsScreen() {
           <>
           <View style={styles.panel}>
             <View style={styles.healthPreferenceHeader}>
-              <Text style={styles.sectionTitle}>Places</Text>
+              <Text {...mobileTextProps("sectionHeading")} style={styles.sectionTitle}>Places</Text>
               <InfoButton
                 accessibilityLabel="About saved places"
                 onPress={() => setLocationInfoSheet("places")}
@@ -1773,14 +1779,14 @@ export default function SettingsScreen() {
                 theme={theme}
               />
             </View>
-            <Text style={styles.muted}>Save locations Dayframe should recognise.</Text>
+            <Text {...mobileTextProps("body")} style={styles.muted}>Save locations Dayframe should recognise.</Text>
             <View style={styles.buttonRow}>
               <Pressable
                 accessibilityRole="button"
                 style={pressable(styles.secondaryButton, styles.buttonPressed)}
                 onPress={() => router.push("./places")}
               >
-                <Text style={styles.secondaryButtonText}>Manage places</Text>
+                <Text {...mobileTextProps("control")} style={styles.secondaryButtonText}>Manage places</Text>
               </Pressable>
             </View>
           </View>
@@ -1789,10 +1795,10 @@ export default function SettingsScreen() {
 
           {settingsSection === "sync" ? (
           <View style={styles.panel}>
-            <Text style={styles.sectionTitle}>Device sync</Text>
-            <Text style={styles.statusText}>{deviceSyncStatus}</Text>
+            <Text {...mobileTextProps("sectionHeading")} style={styles.sectionTitle}>Device sync</Text>
+            <Text {...mobileTextProps("body")} style={styles.statusText}>{deviceSyncStatus}</Text>
             {lastSyncResult?.firstError ? (
-              <Text style={styles.muted}>Some queued data still needs attention. Details are available below.</Text>
+              <Text {...mobileTextProps("body")} style={styles.muted}>Some queued data still needs attention. Details are available below.</Text>
             ) : null}
             <Pressable
               accessibilityRole="button"
@@ -1803,51 +1809,51 @@ export default function SettingsScreen() {
                 setShowQueueDetails((current) => !current);
               }}
             >
-              <Text style={styles.detailsToggleText}>Troubleshooting details</Text>
+              <Text {...mobileTextProps("control")} style={styles.detailsToggleText}>Troubleshooting details</Text>
               <DisclosureChevronGlyph color={theme.textSecondary} expanded={showQueueDetails} />
             </Pressable>
             {showQueueDetails ? (
               <View style={styles.queueDiagnosticCard}>
-                <Text style={styles.label}>Queue</Text>
-                <Text style={styles.accountMeta}>
+                <Text {...mobileTextProps("metadata")} style={styles.label}>Queue</Text>
+                <Text {...mobileTextProps("body")} style={styles.accountMeta}>
                   Queued {queueDiagnostics.queuedCount} · Last synced {lastSyncResult?.syncedCount ?? 0} · Failed{" "}
                   {queueDiagnostics.failedCount}
                 </Text>
                 {queueDiagnostics.failedCount > 0 ? (
-                  <Text style={styles.accountMeta}>
+                  <Text {...mobileTextProps("body")} style={styles.accountMeta}>
                     Retryable {queueDiagnostics.retryableFailedCount} · Invalid {queueDiagnostics.permanentFailedCount}
                     {queueDiagnostics.nextRetryAt ? ` · Next retry ${formatQueueTime(queueDiagnostics.nextRetryAt)}` : ""}
                   </Text>
                 ) : null}
                 {firstFailedEvent ? (
                   <>
-                    <Text style={styles.label}>First failed event</Text>
-                    <Text style={styles.accountValue} numberOfLines={2}>
+                    <Text {...mobileTextProps("metadata")} style={styles.label}>First failed event</Text>
+                    <Text {...mobileTextProps("body")} style={styles.accountValue}>
                       {formatSourceLabel(firstFailedEvent.source)} · {formatEventLabel(firstFailedEvent.type)} ·{" "}
                       {formatQueueTime(firstFailedEvent.occurredAt)}
                     </Text>
-                    <Text style={styles.accountMeta} numberOfLines={3}>
+                    <Text {...mobileTextProps("body")} style={styles.accountMeta}>
                       {firstFailedEvent.lastError ?? "No error message was recorded."}
                     </Text>
                     {firstFailedEvent.lastAttemptedAt || firstFailedEvent.failedAt ? (
-                      <Text style={styles.accountMeta}>
+                      <Text {...mobileTextProps("body")} style={styles.accountMeta}>
                         Last attempt {formatQueueTime(firstFailedEvent.lastAttemptedAt ?? firstFailedEvent.failedAt)}
                       </Text>
                     ) : null}
                     {firstFailedEvent.nextRetryAt ? (
-                      <Text style={styles.accountMeta}>
+                      <Text {...mobileTextProps("body")} style={styles.accountMeta}>
                         Next automatic retry {formatQueueTime(firstFailedEvent.nextRetryAt)}
                       </Text>
                     ) : null}
                   </>
                 ) : (
-                  <Text style={styles.accountMeta}>No failed queued events.</Text>
+                  <Text {...mobileTextProps("body")} style={styles.accountMeta}>No failed queued events.</Text>
                 )}
               </View>
             ) : null}
             <View style={styles.queueDiagnosticCard}>
-              <Text style={styles.label}>Timer Stops</Text>
-              <Text style={styles.accountMeta}>
+              <Text {...mobileTextProps("metadata")} style={styles.label}>Timer Stops</Text>
+              <Text {...mobileTextProps("body")} style={styles.accountMeta}>
                 Pending {timerStopSyncDiagnostics?.pendingCount ?? 0} · Needs attention{" "}
                 {timerStopSyncDiagnostics?.needsAttentionCount ?? 0}
               </Text>
@@ -1859,10 +1865,10 @@ export default function SettingsScreen() {
                   layout={localLayoutTransition(reduceMotion)}
                   style={styles.accountRow}
                 >
-                  <Text style={styles.accountValue}>
+                  <Text {...mobileTextProps("body")} style={styles.accountValue}>
                     Timer Stop rejected · {formatQueueTime(issue.failedAt ?? issue.queuedAt)}
                   </Text>
-                  <Text style={styles.accountMeta}>
+                  <Text {...mobileTextProps("body")} style={styles.accountMeta}>
                     The server did not accept this Stop. Retry it, or discard it to keep the server timer unchanged.
                   </Text>
                   <TimerStopIssueActions
@@ -1875,34 +1881,34 @@ export default function SettingsScreen() {
               ))}
             </View>
             <View style={styles.queueDiagnosticCard}>
-              <Text style={styles.label}>Time entry changes</Text>
-              <Text style={styles.accountMeta}>
+              <Text {...mobileTextProps("metadata")} style={styles.label}>Time entry changes</Text>
+              <Text {...mobileTextProps("body")} style={styles.accountMeta}>
                 Pending {timeEntrySyncDiagnostics?.pendingCount ?? 0} · Needs attention{" "}
                 {timeEntrySyncDiagnostics?.needsAttentionCount ?? 0} · Account quarantine{" "}
                 {timeEntrySyncDiagnostics?.quarantinedCount ?? 0}
               </Text>
               {(timeEntrySyncDiagnostics?.deviceQuarantinedCount ?? 0) > 0 ? (
-                <Text style={styles.accountMeta}>
+                <Text {...mobileTextProps("body")} style={styles.accountMeta}>
                   Device-wide quarantine {timeEntrySyncDiagnostics?.deviceQuarantinedCount ?? 0} · owner could not be recovered
                 </Text>
               ) : null}
               {timeEntrySyncDiagnostics?.nextRetryAt ? (
-                <Text style={styles.accountMeta}>
+                <Text {...mobileTextProps("body")} style={styles.accountMeta}>
                   Next retry {formatQueueTime(timeEntrySyncDiagnostics.nextRetryAt)}
                 </Text>
               ) : null}
               {timeEntrySyncDiagnostics?.lastError ? (
-                <Text style={styles.accountMeta} numberOfLines={3}>
+                <Text {...mobileTextProps("body")} style={styles.accountMeta}>
                   Last error {timeEntrySyncDiagnostics.lastError}
                 </Text>
               ) : null}
               {timeEntrySyncIssues.map((issue) => (
                 <View key={issue.clientCommandId} style={styles.accountRow}>
-                  <Text style={styles.accountValue}>
+                  <Text {...mobileTextProps("body")} style={styles.accountValue}>
                     {issue.operation === "delete" ? "Delete" : "Edit"} rejected ·{" "}
                     {formatQueueTime(issue.updatedAt)}
                   </Text>
-                  <Text style={styles.accountMeta} numberOfLines={3}>
+                  <Text {...mobileTextProps("body")} style={styles.accountMeta}>
                     Entry {(issue.targetEntryId ?? issue.optimisticEntryId ?? "unknown").slice(0, 8)}
                     {issue.lastStatusCode ? ` · HTTP ${issue.lastStatusCode}` : ""}
                     {issue.lastError ? ` · ${issue.lastError}` : ""}
@@ -1913,14 +1919,14 @@ export default function SettingsScreen() {
                       style={pressable(styles.secondaryButton, styles.buttonPressed)}
                       onPress={() => retryTimeEntryIssue(issue.clientCommandId)}
                     >
-                      <Text style={styles.secondaryButtonText}>Retry change</Text>
+                      <Text {...mobileTextProps("control")} style={styles.secondaryButtonText}>Retry change</Text>
                     </Pressable>
                     <Pressable
                       accessibilityRole="button"
                       style={pressable(styles.secondaryButton, styles.buttonPressed)}
                       onPress={() => confirmDiscardTimeEntryIssue(issue.clientCommandId)}
                     >
-                      <Text style={styles.secondaryButtonText}>Discard change</Text>
+                      <Text {...mobileTextProps("control")} style={styles.secondaryButtonText}>Discard change</Text>
                     </Pressable>
                   </View>
                 </View>
@@ -1932,7 +1938,7 @@ export default function SettingsScreen() {
                     style={pressable(styles.secondaryButton, styles.buttonPressed)}
                     onPress={confirmClearTimeEntryQuarantine}
                   >
-                    <Text style={styles.secondaryButtonText}>Clear quarantined data</Text>
+                    <Text {...mobileTextProps("control")} style={styles.secondaryButtonText}>Clear quarantined data</Text>
                   </Pressable>
                 </View>
               ) : null}
@@ -1943,63 +1949,63 @@ export default function SettingsScreen() {
                     style={pressable(styles.secondaryButton, styles.buttonPressed)}
                     onPress={confirmClearDeviceTimeEntryQuarantine}
                   >
-                    <Text style={styles.secondaryButtonText}>Clear device-wide quarantine</Text>
+                    <Text {...mobileTextProps("control")} style={styles.secondaryButtonText}>Clear device-wide quarantine</Text>
                   </Pressable>
                 </View>
               ) : null}
             </View>
             <View style={styles.queueDiagnosticCard}>
-              <Text style={styles.label}>Review changes</Text>
-              <Text style={styles.accountMeta}>
+              <Text {...mobileTextProps("metadata")} style={styles.label}>Review changes</Text>
+              <Text {...mobileTextProps("body")} style={styles.accountMeta}>
                 Pending {reviewSyncDiagnostics?.pendingCount ?? 0} · Retry wait{" "}
                 {reviewSyncDiagnostics?.retryWaitCount ?? 0} · Sign-in required{" "}
                 {reviewSyncDiagnostics?.authenticationRequiredCount ?? 0} · Needs attention{" "}
                 {reviewSyncDiagnostics?.needsAttentionCount ?? 0}
               </Text>
               {reviewSyncDiagnostics?.oldestQueuedAt ? (
-                <Text style={styles.accountMeta}>
+                <Text {...mobileTextProps("body")} style={styles.accountMeta}>
                   Oldest saved {formatQueueTime(reviewSyncDiagnostics.oldestQueuedAt)}
                 </Text>
               ) : null}
               {reviewSyncDiagnostics?.lastSuccessfulSyncAt ? (
-                <Text style={styles.accountMeta}>
+                <Text {...mobileTextProps("body")} style={styles.accountMeta}>
                   Last successful Review sync{" "}
                   {formatQueueTime(reviewSyncDiagnostics.lastSuccessfulSyncAt)}
                 </Text>
               ) : null}
               {reviewSyncDiagnostics?.nextRetryAt ? (
-                <Text style={styles.accountMeta}>
+                <Text {...mobileTextProps("body")} style={styles.accountMeta}>
                   Next retry {formatQueueTime(reviewSyncDiagnostics.nextRetryAt)}
                 </Text>
               ) : null}
               {reviewSyncDiagnostics?.lastError ? (
-                <Text style={styles.accountMeta}>
+                <Text {...mobileTextProps("body")} style={styles.accountMeta}>
                   Last error {reviewSyncDiagnostics.lastError}
                 </Text>
               ) : null}
               {reviewSyncIssues.map((issue) => (
                 <Reanimated.View key={issue.clientMutationId} style={styles.accountRow}
                   entering={localPresenceEntering(reduceMotion)} exiting={localPresenceExiting(reduceMotion)} layout={localLayoutTransition(reduceMotion)}>
-                  <Text style={styles.accountValue}>
+                  <Text {...mobileTextProps("body")} style={styles.accountValue}>
                     {formatReviewMutationAction(issue.action)} · {formatQueueTime(issue.createdAt)}
                   </Text>
-                  <Text style={styles.accountMeta}>
+                  <Text {...mobileTextProps("body")} style={styles.accountMeta}>
                     Item {issue.reviewItemId.slice(0, 8)} · Mutation {issue.clientMutationId.slice(0, 8)}
                     {issue.lastHttpStatus ? ` · HTTP ${issue.lastHttpStatus}` : ""}
                   </Text>
-                  <Text style={styles.accountMeta}>
+                  <Text {...mobileTextProps("body")} style={styles.accountMeta}>
                     {issue.resolutionStatus === "resolution_unknown" ? "Outcome not yet verified. Your saved change is preserved." : "This saved change needs attention."}
                   </Text>
                   <Pressable accessibilityRole="button" accessibilityLabel="Reconcile saved Review change"
                     style={pressable(styles.secondaryButton, styles.buttonPressed)}
                     onPress={() => void synchroniseReviewMutations({ force: true, clientMutationId: issue.clientMutationId })
                       .then(refreshReviewDiagnostics).catch(() => setSyncStatusMessageAndCache("Unable to reconcile. Your saved change is preserved."))}>
-                    <Text style={styles.secondaryButtonText}>Reconcile now</Text>
+                    <Text {...mobileTextProps("control")} style={styles.secondaryButtonText}>Reconcile now</Text>
                   </Pressable>
                   {issue.resolutionStatus !== "resolution_unknown" ? (
                     <Pressable accessibilityRole="button" style={pressable(styles.secondaryButton, styles.buttonPressed)}
                       onPress={() => confirmDiscardReviewIssue(issue.clientMutationId)}>
-                      <Text style={styles.secondaryButtonText}>Discard failed change</Text>
+                      <Text {...mobileTextProps("control")} style={styles.secondaryButtonText}>Discard failed change</Text>
                     </Pressable>
                   ) : null}
                 </Reanimated.View>
@@ -2007,7 +2013,7 @@ export default function SettingsScreen() {
             </View>
             <View style={styles.buttonRow}>
               <Pressable style={pressable(styles.secondaryButton, styles.buttonPressed)} onPress={() => void syncAndReload()}>
-                <Text style={styles.secondaryButtonText}>Sync now</Text>
+                <Text {...mobileTextProps("control")} style={styles.secondaryButtonText}>Sync now</Text>
               </Pressable>
               <Pressable
                 disabled={!canRetryFailed}
@@ -2018,7 +2024,7 @@ export default function SettingsScreen() {
                 ]}
                 onPress={retryFailedAndReload}
               >
-                <Text style={styles.secondaryButtonText}>Retry failed</Text>
+                <Text {...mobileTextProps("control")} style={styles.secondaryButtonText}>Retry failed</Text>
               </Pressable>
               <Pressable
                 disabled={!canClearFailed}
@@ -2029,10 +2035,10 @@ export default function SettingsScreen() {
                 ]}
                 onPress={confirmClearFailedQueue}
               >
-                <Text style={styles.secondaryButtonText}>Clear failed/invalid</Text>
+                <Text {...mobileTextProps("control")} style={styles.secondaryButtonText}>Clear failed/invalid</Text>
               </Pressable>
               <Pressable style={pressable(styles.secondaryButton, styles.buttonPressed)} onPress={exportQueueDiagnostics}>
-                <Text style={styles.secondaryButtonText}>Export diagnostics</Text>
+                <Text {...mobileTextProps("control")} style={styles.secondaryButtonText}>Export diagnostics</Text>
               </Pressable>
             </View>
           </View>
@@ -2041,7 +2047,7 @@ export default function SettingsScreen() {
           {settingsSection === "automations" ? (
           <View style={styles.panel}>
             <View style={styles.healthPreferenceHeader}>
-              <Text style={styles.sectionTitle}>Location suggestions</Text>
+              <Text {...mobileTextProps("sectionHeading")} style={styles.sectionTitle}>Location suggestions</Text>
               <InfoButton
                 accessibilityLabel="How location suggestions work"
                 onPress={() => setLocationInfoSheet("suggestions")}
@@ -2052,14 +2058,15 @@ export default function SettingsScreen() {
             <View style={styles.healthPreferenceRow}>
               <View style={styles.healthPreferenceHeader}>
                 <View style={styles.healthPreferenceText}>
-                  <Text style={styles.categoryName}>Suggest visits and journeys</Text>
-                  <Text style={styles.categoryMeta}>
+                  <Text {...mobileTextProps("itemTitle")} style={styles.categoryName}>Suggest visits and journeys</Text>
+                  <Text {...mobileTextProps("body")} style={styles.categoryMeta}>
                     {locationDiagnostics?.locationLearningEnabled
                       ? "Background location can create suggestions in Review."
                       : "Location suggestions are off."}
                   </Text>
                 </View>
                 <Switch
+                  style={{ flexShrink: 0 }}
                   accessibilityLabel="Commute and regular-place learning"
                   value={locationDiagnostics?.locationLearningEnabled ?? false}
                   onValueChange={toggleLocationLearning}
@@ -2069,10 +2076,10 @@ export default function SettingsScreen() {
                 />
               </View>
             </View>
-            <Text style={styles.statusText}>Background access: {backgroundAccessSummary}</Text>
+            <Text {...mobileTextProps("body")} style={styles.statusText}>Background access: {backgroundAccessSummary}</Text>
             <View style={styles.buttonRow}>
               <Pressable style={pressable(styles.secondaryButton, styles.buttonPressed)} onPress={enableLocation}>
-                <Text style={styles.secondaryButtonText}>{locationActionLabel}</Text>
+                <Text {...mobileTextProps("control")} style={styles.secondaryButtonText}>{locationActionLabel}</Text>
               </Pressable>
             </View>
             <Pressable
@@ -2084,7 +2091,7 @@ export default function SettingsScreen() {
                 setShowLocationTroubleshooting((current) => !current);
               }}
             >
-              <Text style={styles.detailsToggleText}>Privacy & troubleshooting</Text>
+              <Text {...mobileTextProps("control")} style={styles.detailsToggleText}>Privacy & troubleshooting</Text>
               <DisclosureChevronGlyph color={theme.textSecondary} expanded={showLocationTroubleshooting} />
             </Pressable>
             {showLocationTroubleshooting ? (
@@ -2094,30 +2101,30 @@ export default function SettingsScreen() {
                 layout={localLayoutTransition(reduceMotion)}
                 style={styles.healthPreferenceRow}
               >
-                <Text style={styles.muted}>
+                <Text {...mobileTextProps("body")} style={styles.muted}>
                   Exact map evidence is private and deleted after seven days. Confirmed entries and saved places remain until you delete them.
                 </Text>
                 {locationV2Diagnostics?.lastUploadAt ? (
-                  <Text style={styles.muted}>Last evidence sync {formatQueueTime(locationV2Diagnostics.lastUploadAt)}</Text>
+                  <Text {...mobileTextProps("body")} style={styles.muted}>Last evidence sync {formatQueueTime(locationV2Diagnostics.lastUploadAt)}</Text>
                 ) : null}
                 {locationV2Diagnostics?.lastServerReplayAt ? (
-                  <Text style={styles.muted}>
+                  <Text {...mobileTextProps("body")} style={styles.muted}>
                     Last location review check {formatQueueTime(locationV2Diagnostics.lastServerReplayAt)} · {locationV2Diagnostics.lastServerReplayFinalisedCount} finalised
                   </Text>
                 ) : null}
-                <Text style={styles.muted}>
+                <Text {...mobileTextProps("body")} style={styles.muted}>
                   Foreground access: {formatPermissionStatus(locationDiagnostics?.foregroundPermission ?? "unknown")} · Background access: {backgroundAccessSummary}
                 </Text>
-                {locationDiagnostics ? <Text style={styles.muted}>{locationMonitorCountText(locationDiagnostics)}</Text> : null}
+                {locationDiagnostics ? <Text {...mobileTextProps("body")} style={styles.muted}>{locationMonitorCountText(locationDiagnostics)}</Text> : null}
                 <View style={styles.buttonRow}>
                   <Pressable style={pressable(styles.secondaryButton, styles.buttonPressed)} onPress={enableLocation}>
-                    <Text style={styles.secondaryButtonText}>Refresh monitoring</Text>
+                    <Text {...mobileTextProps("control")} style={styles.secondaryButtonText}>Refresh monitoring</Text>
                   </Pressable>
                   <Pressable style={pressable(styles.secondaryButton, styles.buttonPressed)} onPress={() => void shareLocationDiagnostics()}>
-                    <Text style={styles.secondaryButtonText}>Share diagnostics</Text>
+                    <Text {...mobileTextProps("control")} style={styles.secondaryButtonText}>Share diagnostics</Text>
                   </Pressable>
                   <Pressable style={pressable(styles.secondaryButton, styles.buttonPressed)} onPress={confirmDeleteLocationEvidence}>
-                    <Text style={styles.secondaryButtonText}>Delete recent evidence</Text>
+                    <Text {...mobileTextProps("control")} style={styles.secondaryButtonText}>Delete recent evidence</Text>
                   </Pressable>
                 </View>
               </Reanimated.View>
@@ -2127,17 +2134,17 @@ export default function SettingsScreen() {
 
           {settingsSection === "health" ? (
           <View style={styles.panel}>
-            <Text style={styles.sectionTitle}>Apple Health</Text>
-            <Text style={styles.muted}>
+            <Text {...mobileTextProps("sectionHeading")} style={styles.sectionTitle}>Apple Health</Text>
+            <Text {...mobileTextProps("body")} style={styles.muted}>
               Sleep and workouts are queued as health activity events first, then logged when confidence is high.
             </Text>
-            <Text style={styles.statusText}>
+            <Text {...mobileTextProps("body")} style={styles.statusText}>
               {healthAvailability?.notes ?? "Apple Health status not checked"}
             </Text>
-            {healthPermissionStatus ? <Text style={styles.muted}>{healthPermissionStatus.notes}</Text> : null}
-            <Text style={styles.muted}>Sleep: {sleepStatus?.notes ?? "Not synced yet."}</Text>
-            <Text style={styles.muted}>Workouts: {workoutStatus?.notes ?? "Not synced yet."}</Text>
-            {healthDebugStatus ? <Text style={styles.muted}>{healthDebugStatus}</Text> : null}
+            {healthPermissionStatus ? <Text {...mobileTextProps("body")} style={styles.muted}>{healthPermissionStatus.notes}</Text> : null}
+            <Text {...mobileTextProps("body")} style={styles.muted}>Sleep: {sleepStatus?.notes ?? "Not synced yet."}</Text>
+            <Text {...mobileTextProps("body")} style={styles.muted}>Workouts: {workoutStatus?.notes ?? "Not synced yet."}</Text>
+            {healthDebugStatus ? <Text {...mobileTextProps("body")} style={styles.muted}>{healthDebugStatus}</Text> : null}
             <View style={styles.healthPreferenceList}>
               {HEALTH_IMPORT_PREFERENCE_OPTIONS.map((option) => {
                 const enabled = healthImportPreferences?.[option.key] ?? option.defaultEnabled;
@@ -2149,14 +2156,15 @@ export default function SettingsScreen() {
                   <View key={option.key} style={styles.healthPreferenceRow}>
                     <View style={styles.healthPreferenceHeader}>
                       <View style={styles.healthPreferenceText}>
-                        <Text style={styles.categoryName}>{option.label}</Text>
-                        <Text style={styles.categoryMeta}>
+                        <Text {...mobileTextProps("itemTitle")} style={styles.categoryName}>{option.label}</Text>
+                        <Text {...mobileTextProps("body")} style={styles.categoryMeta}>
                           {enabled
                             ? `Logs to ${selectedCategoryName}`
                             : "Ignored during Health sync"}
                         </Text>
                       </View>
                       <Switch
+                        style={{ flexShrink: 0 }}
                         accessibilityLabel={`${option.label} Apple Health auto-log`}
                         value={enabled}
                         onValueChange={(value) => updateHealthImportPreference(option.key, value)}
@@ -2167,7 +2175,7 @@ export default function SettingsScreen() {
                     </View>
                     {enabled ? (
                       <View style={styles.healthMappingPanel}>
-                        <Text style={styles.healthMappingLabel}>Category</Text>
+                        <Text {...mobileTextProps("metadata")} style={styles.healthMappingLabel}>Category</Text>
                         <ScrollView
                           horizontal
                           showsHorizontalScrollIndicator={false}
@@ -2188,6 +2196,7 @@ export default function SettingsScreen() {
                             )}
                           >
                             <Text
+                              {...mobileTextProps("control")}
                               style={[
                                 styles.categoryChoiceText,
                                 !mapping.categoryId ? styles.categoryChoiceTextSelected : null,
@@ -2225,6 +2234,7 @@ export default function SettingsScreen() {
                                   ]}
                                 />
                                 <Text
+                                  {...mobileTextProps("control")}
                                   style={[
                                     styles.categoryChoiceText,
                                     selected ? styles.categoryChoiceTextSelected : null,
@@ -2238,8 +2248,10 @@ export default function SettingsScreen() {
                             );
                           })}
                         </ScrollView>
-                        <Text style={styles.healthMappingLabel}>Description</Text>
+                        <Text {...mobileTextProps("metadata")} style={styles.healthMappingLabel}>Description</Text>
                         <TextInput
+                          accessibilityLabel={`${option.label} description`}
+                          {...mobileTextProps("input")}
                           key={`${option.key}:${mapping.description ?? ""}`}
                           style={[styles.textInput, styles.healthMappingInput]}
                           defaultValue={mapping.description ?? ""}
@@ -2260,10 +2272,10 @@ export default function SettingsScreen() {
             </View>
             <View style={styles.buttonRow}>
               <Pressable style={pressable(styles.secondaryButton, styles.buttonPressed)} onPress={connectAppleHealth}>
-                <Text style={styles.secondaryButtonText}>Connect</Text>
+                <Text {...mobileTextProps("control")} style={styles.secondaryButtonText}>Connect</Text>
               </Pressable>
               <Pressable style={pressable(styles.secondaryButton, styles.buttonPressed)} onPress={() => syncAppleHealth()}>
-                <Text style={styles.secondaryButtonText}>Sync now</Text>
+                <Text {...mobileTextProps("control")} style={styles.secondaryButtonText}>Sync now</Text>
               </Pressable>
               <Pressable
                 disabled={exportingHealthDebug}
@@ -2274,7 +2286,7 @@ export default function SettingsScreen() {
                 ]}
                 onPress={exportAppleHealthDebug}
               >
-                <Text style={styles.secondaryButtonText}>{exportingHealthDebug ? "Exporting..." : "Export debug"}</Text>
+                <Text {...mobileTextProps("control")} style={styles.secondaryButtonText}>{exportingHealthDebug ? "Exporting..." : "Export debug"}</Text>
               </Pressable>
             </View>
           </View>
@@ -2352,7 +2364,7 @@ function LocationInformationSheet({
           visible
         >
           <View style={styles.sheetHeader}>
-            <Text style={styles.sheetTitle}>{isPlaces ? "About saved places" : "About location suggestions"}</Text>
+            <Text {...mobileTextProps("sectionHeading")} style={styles.sheetTitle}>{isPlaces ? "About saved places" : "About location suggestions"}</Text>
             <Pressable
               accessibilityLabel="Close information"
               accessibilityRole="button"
@@ -2368,20 +2380,20 @@ function LocationInformationSheet({
           >
             {isPlaces ? (
               <>
-                <Text style={styles.muted}>
+                <Text {...mobileTextProps("body")} style={styles.muted}>
                   Saved places help Dayframe recognise where you spent time. Detected visits appear in Review before they become time entries.
                 </Text>
-                <Text style={styles.muted}>You can edit a saved name and radius at any time.</Text>
+                <Text {...mobileTextProps("body")} style={styles.muted}>You can edit a saved name and radius at any time.</Text>
               </>
             ) : (
               <>
-                <Text style={styles.muted}>
+                <Text {...mobileTextProps("body")} style={styles.muted}>
                   Dayframe uses background location to suggest visits and journeys. Suggestions go to Review before becoming time entries.
                 </Text>
-                <Text style={styles.muted}>
+                <Text {...mobileTextProps("body")} style={styles.muted}>
                   Exact map evidence is private and deleted after seven days. Confirmed entries and saved places remain until you delete them.
                 </Text>
-                <Text style={styles.muted}>
+                <Text {...mobileTextProps("body")} style={styles.muted}>
                   iOS can pause or limit background updates, so Dayframe may not capture every movement.
                 </Text>
               </>
@@ -2430,11 +2442,11 @@ function CategoryColorPicker({
   );
 }
 
-function SettingsGroup({ children, title }: { children: ReactNode; title: string }) {
+export function SettingsGroup({ children, title }: { children: ReactNode; title: string }) {
   const { styles } = useMobileTheme();
   return (
     <View style={styles.settingsGroup}>
-      <Text style={styles.settingsGroupTitle}>{title}</Text>
+      <Text {...mobileTextProps("counter")} style={styles.settingsGroupTitle}>{title}</Text>
       <View style={styles.settingsGroupRows}>{children}</View>
     </View>
   );
@@ -2452,7 +2464,7 @@ function AppearancePreviewCard({
   const dark = mode === "dark";
   return (
     <View style={styles.appearancePreviewColumn}>
-      <Text style={styles.appearancePreviewLabel}>{dark ? "Dark" : "Light"}</Text>
+      <Text {...mobileTextProps("metadata")} style={styles.appearancePreviewLabel}>{dark ? "Dark" : "Light"}</Text>
       <View style={[
         styles.appearancePreviewCard,
         dark ? styles.appearancePreviewCardDark : styles.appearancePreviewCardLight,
@@ -2479,14 +2491,15 @@ function AppearancePreviewCard({
   );
 }
 
-function SettingsMenuRow({
+export function SettingsMenuRow({
   icon,
   label,
   last = false,
   onPress,
   styles,
   theme,
-  value
+  value,
+  diagnostic
 }: {
   icon: SettingsIcon;
   label: string;
@@ -2495,23 +2508,28 @@ function SettingsMenuRow({
   styles: MobileStyles;
   theme: MobileTheme;
   value?: string;
+  diagnostic?: MobileAccessibilityDiagnostic;
 }) {
   return (
     <View>
       <Pressable
         accessibilityLabel={label}
+        accessibilityValue={value ? { text: value } : undefined}
         accessibilityRole="button"
         style={pressable(styles.settingsMenuRow, styles.buttonPressed)}
+        onLayout={(event) => recordMobileLayout(diagnostic, "settings.row", event)}
         onPress={onPress}
       >
-        <View style={styles.settingsMenuIcon}>
+        <View style={styles.settingsMenuIcon} onLayout={(event) => recordMobileLayout(diagnostic, "settings.icon", event)}>
           <SettingsRowGlyph name={icon} color={theme.accentText} />
         </View>
-        <View style={styles.settingsMenuText}>
-          <Text style={styles.settingsMenuTitle} numberOfLines={1}>{label}</Text>
-          {value ? <Text style={styles.settingsMenuMeta} numberOfLines={1}>{value}</Text> : null}
+        <View style={styles.settingsMenuText} onLayout={(event) => recordMobileLayout(diagnostic, "settings.text-column", event)}>
+          <Text {...mobileTextProps("itemTitle")} style={styles.settingsMenuTitle} onLayout={(event) => recordMobileLayout(diagnostic, "settings.label.frame", event)} onTextLayout={(event) => recordMobileTextLayout(diagnostic, "settings.label", event, "itemTitle", styles.settingsMenuTitle)}>{label}</Text>
+          {value ? <Text {...mobileTextProps("metadata")} style={styles.settingsMenuMeta} onLayout={(event) => recordMobileLayout(diagnostic, "settings.value.frame", event)} onTextLayout={(event) => recordMobileTextLayout(diagnostic, "settings.value", event, "metadata", styles.settingsMenuMeta)}>{value}</Text> : null}
         </View>
-        <ChevronGlyph color={theme.textSecondary} />
+        <View style={styles.settingsMenuChevron} onLayout={(event) => recordMobileLayout(diagnostic, "settings.chevron", event)}>
+          <ChevronGlyph color={theme.textSecondary} />
+        </View>
       </Pressable>
       {!last ? <View pointerEvents="none" style={styles.settingsMenuDivider} /> : null}
     </View>

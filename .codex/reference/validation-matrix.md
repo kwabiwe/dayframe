@@ -53,6 +53,18 @@ Required whenever a feature adds or changes navigation, presentation, gestures, 
 - Record a simulator video for ordinary presence/layout motion. Use a physical iPhone for direct manipulation, native surfaces, frame pacing, background behaviour, or device-only APIs, and inspect frame pacing with Xcode tooling when the issue warrants it.
 - Do not claim smoothness from unit tests or still screenshots alone. Record any device or tooling limitation explicitly.
 
+## Mobile Dynamic Type And Accessibility Layout
+
+Required when changing text roles, row composition, settings presentation, Review copy, or native Calendar header geometry:
+
+- Run mobile typecheck and focused component tests, then the full repository checks required by the PR. Include contract coverage for scoped role caps, native measurement invalidation/stale callbacks, actual row reflow thresholds, preserved Report measurement adapter, and Calendar header-only bounds.
+- Mount the actual changed components in the local synthetic diagnostic entry. Record source SHA, diagnostic bundle identity, OS/runtime, simulator/device model, viewport, pixel ratio, system font scale/content-size category, Bold Text, appearance, Reduce Motion, measured text lines/frames, and relevant ancestor frames/clipping ownership. Do not put fixture strings, descriptions, tags, account/profile data, location, Health payloads, credentials, or real user screenshots in the diagnostic output.
+- Exercise 320, 375, 390 and 430 point widths where the surface supports them; ordinary, largest available and maximum Dynamic Type; Bold Text on/off; Light, Dark and System; and Reduce Motion. Include long names/reasons, full duration/time ranges, counters 1/2/99/999/10000, inline/stacked transitions and 44-point non-overlapping actions. A multiplier cap does not pass a layout.
+- On simulator, inspect actual line/frame geometry and screenshots for Today/history, Review notice/list/detail, Logged summary, Settings index and relevant sections, tags, timer editor and native Calendar header. Record presentation failures separately from diagnostic instrumentation failures.
+- Validate the normal app separately using an ordinary signed **Staging** build with the staging bundle ID/API and staging backend only. A custom QA bundle or synthetic mount does not prove the production app is wired correctly. Verify Reports remains unchanged against its merged contract.
+- Physical iPhone acceptance is a separate owner matrix: signed staging identity/isolation; Default/Large/Maximum Dynamic Type and Bold Text; VoiceOver focus/order/actions; no clipping, overlap or horizontal scroll; Settings fields/keyboard; Today history expand/delete Undo; Review resolution; Calendar zoom/scroll/action; timer start/edit/stop/reconciliation; Health/Location unchanged; and Reduce Motion. Record exact build/OS and PASS/FAIL/NOT RUN. Simulator or synthetic results cannot substitute for these tests.
+- Do not change accessibility settings, install a build, alter staging data, or exercise write paths on a physical device without the device owner's approval. Never use production data for PR validation.
+
 ## Health And Review
 
 Required checks when touching Health import, Review, Confirm/Dismiss, or reprocess:

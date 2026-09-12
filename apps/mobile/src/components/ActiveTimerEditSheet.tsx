@@ -39,6 +39,7 @@ import {
 import { PrimaryTimerGlyph } from "@/components/PrimaryTimerAction";
 import { TimeEntryDurationDial } from "@/components/TimeEntryDurationDial";
 import { pressable, type MobileStyles, type MobileTheme } from "@/lib/mobileTheme";
+import { mobileTextProps } from "@/lib/mobileTypography";
 import {
   editSheetKeyboardLayout,
   keyboardInsetFromScreenY
@@ -2165,7 +2166,7 @@ export function ActiveTimerEditSheet({
       testID="time-entry-sheet-hero"
     >
       <View style={styles.activeEditElapsedStack}>
-        <Text style={styles.activeEditElapsed} testID="time-entry-sheet-elapsed">
+        <Text {...mobileTextProps("numeric")} style={styles.activeEditElapsed} testID="time-entry-sheet-elapsed">
           {elapsedText}
         </Text>
       </View>
@@ -2271,7 +2272,7 @@ export function ActiveTimerEditSheet({
                     ]}
                     testID="time-entry-sheet-done"
                   >
-                    <Text style={styles.sheetDoneText}>Done</Text>
+                    <Text {...mobileTextProps("control")} style={styles.sheetDoneText}>Done</Text>
                   </Pressable>
                 </View>
               ) : null}
@@ -2338,7 +2339,7 @@ export function ActiveTimerEditSheet({
                   descriptionSectionLayoutRef.current = { height, width, x, y };
                   scheduleGeometryMeasurement();
                 }}>
-                  <Text style={styles.activeEditSectionLabel}>Description</Text>
+                  <Text {...mobileTextProps("metadata")} style={styles.activeEditSectionLabel}>Description</Text>
                   <View
                     collapsable={false}
                     onLayout={(event) => {
@@ -2351,6 +2352,7 @@ export function ActiveTimerEditSheet({
                   >
                     <TextInput
                       ref={descriptionInputRef}
+                      {...mobileTextProps("input")}
                       accessibilityHint="Type a hashtag to add optional tag context"
                       accessibilityLabel={isRunningMode ? "Timer description" : "Entry description"}
                       blurOnSubmit
@@ -2474,7 +2476,7 @@ export function ActiveTimerEditSheet({
                       style={[styles.tagAutocompletePanel, hashtagPanelAnimatedStyle]}
                     >
                       <View style={styles.tagAutocompleteHeader}>
-                        <Text style={styles.tagAutocompleteTitle}>TAGS</Text>
+                        <Text {...mobileTextProps("counter")} style={styles.tagAutocompleteTitle}>TAGS</Text>
                       </View>
                       <ScrollView
                         keyboardShouldPersistTaps="always"
@@ -2509,7 +2511,7 @@ export function ActiveTimerEditSheet({
                           />
                         ) : null}
                         {matchingTags.length === 0 && !createTagName ? (
-                          <Text style={styles.tagSuggestionEmptyText}>Type a name to search or create</Text>
+                          <Text {...mobileTextProps("body")} style={styles.tagSuggestionEmptyText}>Type a name to search or create</Text>
                         ) : null}
                       </ScrollView>
                     </Animated.View>
@@ -2536,7 +2538,7 @@ export function ActiveTimerEditSheet({
                         busy ? styles.buttonDisabled : null
                       ]}
                     >
-                      <Text style={styles.tagAddButtonText}>Add a tag</Text>
+                      <Text {...mobileTextProps("control")} style={styles.tagAddButtonText}>Add a tag</Text>
                     </Pressable>
                     {appliedTagNames.length > 0 ? (
                       <TagMetadata
@@ -2574,7 +2576,7 @@ export function ActiveTimerEditSheet({
                   layoutDensity === "compact" ? styles.activeEditSectionCompact : null,
                   layoutDensity === "condensed" ? styles.activeEditSectionCondensed : null
                 ]}>
-                  <Text style={styles.activeEditSectionLabel}>Category</Text>
+                  <Text {...mobileTextProps("metadata")} style={styles.activeEditSectionLabel}>Category</Text>
                   <View style={styles.activeEditCategoryViewport}>
                     <ScrollView
                       alwaysBounceVertical={false}
@@ -2625,23 +2627,25 @@ export function ActiveTimerEditSheet({
                     windowDimensions.fontScale >= 1.6 ? styles.activeEditTimeGroupsStacked : null
                   ]}>
                     <View pointerEvents="box-none" style={styles.activeEditTimeGroup}>
-                      <Text style={styles.activeEditSectionLabel}>Start</Text>
+                      <Text {...mobileTextProps("metadata")} style={styles.activeEditSectionLabel}>Start</Text>
                       <View style={styles.activeEditCompactTimeRow}>
                         <Pressable
                           accessibilityLabel="Edit start date"
+                          accessibilityValue={{ text: formatPickerDate(displayedStartAt) }}
                           accessibilityRole="button"
                           disabled={busy}
                           onPress={openStartPicker}
                           style={pressable(styles.activeEditCompactDate, styles.buttonPressed)}
                           testID="time-entry-start-date"
                         >
-                          <Text style={styles.activeEditCompactDateText} numberOfLines={1}>
+                          <Text {...mobileTextProps("metadata")} style={styles.activeEditCompactDateText} numberOfLines={1}>
                             {formatPickerDate(displayedStartAt)}
                           </Text>
                         </Pressable>
                         <View pointerEvents="none" style={styles.activeEditTimeDivider} />
                         <TextInput
                           ref={timeInputRef}
+                          {...mobileTextProps("input")}
                           accessibilityLabel="Start time"
                           blurOnSubmit
                           caretHidden
@@ -2670,24 +2674,26 @@ export function ActiveTimerEditSheet({
                       </View>
                     </View>
                     <View pointerEvents="box-none" style={styles.activeEditTimeGroup}>
-                      <Text style={styles.activeEditSectionLabel}>End</Text>
+                      <Text {...mobileTextProps("metadata")} style={styles.activeEditSectionLabel}>End</Text>
                       {hasStoppedTime ? (
                         <View style={styles.activeEditCompactTimeRow}>
                           <Pressable
                             accessibilityLabel="Edit end date"
+                            accessibilityValue={{ text: formatPickerDate(displayedEndAt) }}
                             accessibilityRole="button"
                             disabled={busy}
                             onPress={openEndPicker}
                             style={pressable(styles.activeEditCompactDate, styles.buttonPressed)}
                             testID="time-entry-end-date"
                           >
-                            <Text style={styles.activeEditCompactDateText} numberOfLines={1}>
+                            <Text {...mobileTextProps("metadata")} style={styles.activeEditCompactDateText} numberOfLines={1}>
                               {formatPickerDate(displayedEndAt)}
                             </Text>
                           </Pressable>
                           <View pointerEvents="none" style={styles.activeEditTimeDivider} />
                           <TextInput
                             ref={endTimeInputRef}
+                            {...mobileTextProps("input")}
                             accessibilityLabel="End time"
                             blurOnSubmit
                             caretHidden
@@ -2716,18 +2722,18 @@ export function ActiveTimerEditSheet({
                         </View>
                       ) : (
                         <View style={styles.activeEditRunningEndSummary}>
-                          <Text style={styles.activeEditCompactDateText} numberOfLines={1}>
+                          <Text {...mobileTextProps("metadata")} style={styles.activeEditCompactDateText} numberOfLines={1}>
                             {formatPickerDate(new Date(dialNowMs))}
                           </Text>
                           <View pointerEvents="none" style={styles.activeEditTimeDivider} />
-                          <Text style={styles.activeEditRunningEndTime}>
+                          <Text {...mobileTextProps("numeric")} style={styles.activeEditRunningEndTime}>
                             {formatTimeInput(new Date(dialNowMs))}
                           </Text>
                         </View>
                       )}
                     </View>
                   </View>
-                  {validationError ? <Text style={styles.errorText}>{validationError}</Text> : null}
+                  {validationError ? <Text {...mobileTextProps("body")} style={styles.errorText}>{validationError}</Text> : null}
                 </View>
 
                 <TimeEntryDurationDial
@@ -2764,7 +2770,7 @@ export function ActiveTimerEditSheet({
                     ]}
                     testID="time-entry-sheet-delete"
                   >
-                    <Text style={styles.activeEditDeleteText}>Delete entry</Text>
+                    <Text {...mobileTextProps("control")} style={styles.activeEditDeleteText}>Delete entry</Text>
                   </Pressable>
                 ) : null}
                 </View>
@@ -2897,7 +2903,7 @@ function HashtagSuggestionRow({
       {!isFirst ? (
         <View pointerEvents="none" style={styles.tagSuggestionDivider} />
       ) : null}
-      <Text style={create ? styles.tagSuggestionCreateText : styles.tagSuggestionText} numberOfLines={1}>
+      <Text {...mobileTextProps("control")} style={create ? styles.tagSuggestionCreateText : styles.tagSuggestionText} numberOfLines={1}>
         {create ? "+ " : ""}{label}
       </Text>
     </Pressable>
@@ -2943,7 +2949,7 @@ function CategoryChip({
       <Text style={[
         styles.activeEditCategoryChipText,
         selected ? styles.activeEditCategoryChipTextSelected : null
-      ]} maxFontSizeMultiplier={1.5}>
+      ]} {...mobileTextProps("control")}>
         {label}
       </Text>
     </Pressable>

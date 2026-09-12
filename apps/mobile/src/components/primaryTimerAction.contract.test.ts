@@ -5,6 +5,7 @@ import { describe, expect, it } from "vitest";
 const componentRoot = fileURLToPath(new URL("./", import.meta.url));
 const primaryAction = readFileSync(`${componentRoot}PrimaryTimerAction.tsx`, "utf8");
 const dashboard = readFileSync(`${componentRoot}DayframeDashboard.tsx`, "utf8");
+const timerSurface = readFileSync(`${componentRoot}accessibility/TodayTimerSurface.tsx`, "utf8");
 const editSheet = readFileSync(`${componentRoot}ActiveTimerEditSheet.tsx`, "utf8");
 const theme = readFileSync(fileURLToPath(new URL("../lib/mobileTheme.ts", import.meta.url)), "utf8");
 const layout = readFileSync(fileURLToPath(new URL("../lib/timerCardLayout.ts", import.meta.url)), "utf8");
@@ -25,9 +26,9 @@ describe("primary mobile timer action geometry", () => {
   });
 
   it("uses the shared primary glyph for idle, running and running-edit controls", () => {
-    expect(dashboard.match(/<PrimaryTimerAction/g)).toHaveLength(2);
-    expect(dashboard).toContain('mode="play"');
-    expect(dashboard).toContain('mode="stop"');
+    expect(timerSurface.match(/<PrimaryTimerAction/g)).toHaveLength(2);
+    expect(timerSurface).toContain('mode="play"');
+    expect(timerSurface).toContain('mode="stop"');
     expect(primaryAction).toContain("<PrimaryTimerGlyph color={glyphColor} mode={mode} />");
     expect(editSheet).toContain('<PrimaryTimerGlyph color={theme.onAccent} mode="stop" />');
     expect(editSheet).not.toContain("function StopGlyph");
@@ -49,9 +50,9 @@ describe("primary mobile timer action geometry", () => {
   });
 
   it("keeps the idle timer hierarchy task-first without a reserved sync-copy row", () => {
-    const taskIndex = dashboard.indexOf("What are you working on?");
-    const labelIndex = dashboard.indexOf("QUICK ACTIONS");
-    const actionsIndex = dashboard.indexOf('accessibilityLabel="Quick actions"');
+    const taskIndex = timerSurface.indexOf("What are you working on?");
+    const labelIndex = timerSurface.indexOf("QUICK ACTIONS");
+    const actionsIndex = timerSurface.indexOf('accessibilityLabel="Quick actions"');
 
     expect(taskIndex).toBeGreaterThan(-1);
     expect(labelIndex).toBeGreaterThan(taskIndex);
@@ -64,15 +65,18 @@ describe("primary mobile timer action geometry", () => {
   });
 
   it("uses one explicit idle/running card geometry and a bottom-anchored action column", () => {
-    expect(dashboard).toContain("styles.idleTimerPanel");
-    expect(dashboard).toContain("styles.quickActionsGroup");
+    expect(timerSurface).toContain("styles.idleTimerPanel");
+    expect(timerSurface).toContain("styles.quickActionsGroup");
     expect(theme.match(/minHeight: TIMER_CARD_MIN_HEIGHT/g)).toHaveLength(2);
     expect(theme.match(/paddingHorizontal: TIMER_CARD_HORIZONTAL_INSET/g)).toHaveLength(2);
     expect(theme.match(/paddingVertical: TIMER_CARD_VERTICAL_INSET/g)).toHaveLength(2);
     expect(theme.match(/width: TIMER_CARD_ACTION_COLUMN_WIDTH/g)).toHaveLength(2);
     expect(theme.match(/justifyContent: "space-between"/g)?.length ?? 0).toBeGreaterThanOrEqual(2);
     expect(theme).toContain("minHeight: TIMER_CARD_QUICK_ACTION_PILL_HEIGHT");
-    expect(dashboard).toContain("TIMER_CARD_QUICK_ACTION_HIT_SLOP");
+    expect(timerSurface).toContain("TIMER_CARD_QUICK_ACTION_HIT_SLOP");
+    expect(dashboard).toContain("<TodayTimerSurface");
+    expect(dashboard).toContain("onStop={() => { void stopActiveTimer(); }}");
+    expect(dashboard).toContain('onOpenActiveTimer={() => presentActiveEditor("existing_active_timer")}' );
     expect(theme).not.toMatch(/idleTimerPanel: \{[^}]*paddingBottom: 8/);
   });
 });

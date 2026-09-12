@@ -6,10 +6,10 @@
 | Field | Value |
 | --- | --- |
 | Owner | KB |
-| Prepared / last reviewed | 8 September 2026 |
-| Revision | 1 |
+| Prepared / last reviewed | 12 September 2026 |
+| Revision | 2 |
 | Repository | `kwabiwe/dayframe` |
-| Verified preparation baseline | `origin/main` at `7db150c7ab65a157c15d0549c0f8578f2df36b77`, the merge of documentation-audit PR #192 |
+| Verified preparation baseline | `origin/main` at `00491f797bc25d6957cf96b668d79989b1f78c19`, the merge of Reports PR #194 |
 | Intended repository location | `docs/roadmaps/review-ux-roadmap.md` |
 
 ## 1. Purpose and document ownership
@@ -26,8 +26,9 @@ Planned differences from current UI are intentional. An unanticipated conflict w
 
 | Stage | Scope | Dependency / boundary |
 | --- | --- | --- |
-| A | **Reports polish and small reusable chart/control components** | First implementation stage. No new Review presentation or sync architecture. |
-| B | **Today donut, provisional activity list and Quick Confirm** | Starts after A merges. Establishes the shared activity presentation projection over existing state owners. |
+| A | **Reports polish and small reusable chart/control components** | Merged as PR #194. No new Review presentation or sync architecture. |
+| A→B prerequisite | **Mobile accessibility baseline** | One focused mobile presentation PR after A and before B; preserve the merged Reports implementation and existing state owners. |
+| B | **Today donut, provisional activity list and Quick Confirm** | Starts after the accessibility prerequisite merges. Establishes the shared activity presentation projection over existing state owners. |
 | C | **Calendar provisional Review generalisation** | Starts after B merges. Reuses its identities, accounting and resolution behaviour. |
 | D | **Web integrated Review** | Starts after C merges. Reuses the product rules and server contracts, with desktop-appropriate presentation. |
 
@@ -35,7 +36,8 @@ These are sequential dependencies, **not stacked branches**:
 
 ```text
 Roadmap adopted on main
-  -> A: implement / review / revise / test / merge
+  -> A: Reports PR #194 merged
+  -> refresh main and deliver the mobile accessibility prerequisite
   -> refresh main and prepare B's detailed plan
   -> B: implement / review / revise / test / merge
   -> refresh main and prepare C's detailed plan
@@ -57,13 +59,12 @@ The [merged documentation audit](../audits/2026-09-08-documentation-code-alignme
 
 The approved automatic-logging/overlap policy is already in the PRD. This programme does not loosen it or reimplement it in chart or Calendar code. Preserve category-first tracking, optional descriptions/categories and user-facing tags; do not return projects or clients to the normal UX.
 
-## 4. Stage A: Reports decisions — Revision 3.2
+## 4. Stage A: Reports decisions — Revision 3.2 (merged)
 
 The owner-approved Reports refinements Revision 3.2 supersede conflicting V3.1/V3
 presentation requirements while retaining their unaffected safety and acceptance
 rules. Revision 3 supersedes the earlier
-Stage A layout and filtering decisions. Continue existing PR #194, not a second
-Reports PR. Preserve the extracted Reports owner and useful chart primitives.
+Stage A layout and filtering decisions. PR #194 is merged at `00491f797bc25d6957cf96b668d79989b1f78c19` from head `f428a8b0f9f27a27aa1849242059b8dadca3244b`; do not reopen it or use its branch. Preserve the extracted Reports owner and useful chart primitives.
 Revision 3.2 retains the final-fixes addendum's unaffected requirements:
 filter-sheet-only selection, explicit seven-cell week rows, compact measured
 numeric columns, adaptive left-aligned axis gutters and evidence-led text fixes.
@@ -88,13 +89,25 @@ Use a bounded workspace/user-scoped summary endpoint, a mounted exact-range memo
 cache and abort/generation/session guards. Remove Reports-only bootstrap coverage
 metadata; no new sync owner, persisted store, schema or native dependency.
 
-Acceptance requires focused and repository checks, disposable database integration,
-final-head independent Claude review via OpenClaw, exact Ready staging Preview and
-signed staging iPhone checks (including maximum Dynamic Type). Revision 1/2 approvals
-are historical, not Revision 3 acceptance. Do not merge automatically. Stages B–D
-below remain unchanged and out of this PR.
+The merge records code delivery, not complete release/device acceptance. The merged
+PR records pending physical Dynamic Type/VoiceOver/motion checks and no verified
+stable staging promotion; see its linked investigation for the exact results.
+Revision 1/2 approvals are historical. Stages B–D below retain their approved UX.
 
-## 5. Stage B: Today and integrated Review decisions
+## 5. Mobile accessibility prerequisite before Stage B
+
+Before Stage B, ship one focused iOS accessibility presentation PR covering Today
+and history, Settings, current Review/detail and the native Calendar header. Use
+scoped Dynamic Type roles with explicit reflow for compact rows; preserve complete
+time, duration, count, action, destination and safety copy. Measure actual native
+components with synthetic data at supported widths, and validate the ordinary
+signed staging build. Do not globally disable font scaling, use synthetic output
+as physical acceptance, or add a timer, Review, Health, Location, auth or sync
+owner. Keep Reports at its merged Stage A contract. Follow the PR-specific plan,
+documentation governance and validation matrix; record physical results
+separately as PASS/FAIL/NOT RUN.
+
+## 6. Stage B: Today and integrated Review decisions
 
 ### Today arrangement
 
@@ -149,7 +162,7 @@ Map the provisional/local identity to the canonical result without rendering or 
 
 The B plan must explicitly settle local-versus-canonical total presentation, persistence across relaunch, stale bootstrap handling and canonical-ID handover before coding. A normal-looking local acceptance must not claim that server sync completed. Reuse existing stores; any minimal additional correlation metadata requires a justified, reviewed change within the existing owner.
 
-## 6. Cross-surface accounting and identity
+## 7. Cross-surface accounting and identity
 
 Use the same day clipping, identity and inclusion rules wherever an activity appears. A pending Sleep from 23:30 to 07:00 contributes 30 minutes to the first local day and seven hours to the second; it remains **one Review item**. Confirmation resolves every representation, not two separate mutations.
 
@@ -159,7 +172,7 @@ Global backlog counts, per-day pending counts and pending duration must be separ
 
 Preserve offline warmth, draft state, stable keys, account/backend ownership and current intent during refresh. No chart animation, navigation cancellation or filter change may cancel or erase a durable user decision.
 
-## 7. Stages C and D
+## 8. Stages C and D
 
 ### C: Calendar
 
@@ -173,7 +186,7 @@ Adopt the same provisional activity concept in Timeline/List and Calendar, retai
 
 The exact web scope and whether a matching dashboard donut belongs in D will be settled in its detailed plan. Do not assume every mobile visual must be reproduced on web, or introduce offline browser persistence without separate approval.
 
-## 8. Implementation, independent review and revision cycle
+## 9. Implementation, independent review and revision cycle
 
 Each stage receives **one versioned Markdown implementation plan**, one short Codex implementation prompt, and one short OpenClaw/Claude review prompt. Prepare the next stage only after the previous one merges and its actual changes have been examined.
 
@@ -188,7 +201,7 @@ Each stage receives **one versioned Markdown implementation plan**, one short Co
 
 The reviewer must not rely solely on the PR description or the implementer's summary. A plan attachment in Codex is not automatically available to Claude: OpenClaw must save/locate it and explicitly pass its path. Keep approved amendments and the current plan revision with the review handoff. Store review evidence in the PR or an appropriately sanitised repository note, not solely in a transient agent conversation.
 
-## 9. Validation and release boundaries
+## 10. Validation and release boundaries
 
 Follow the current [validation matrix](../../.codex/reference/validation-matrix.md), [regression checklist](../dayframe-regression-checklist.md) and [release runbook](../../.codex/reference/release-and-testflight.md). The programme does not waive existing release gaps identified by the documentation audit.
 
@@ -202,7 +215,7 @@ For UI, require real device/browser evidence, Light/Dark/System, Dynamic Type, V
 
 A source merge, green CI, Vercel deployment, schema readiness and a signed mobile release are separate facts. Record PASS / FAIL / NOT RUN and exact tested identities; do not mark missing historical release evidence as completed to tidy the roadmap.
 
-## 10. Programme boundaries and remaining design detail
+## 11. Programme boundaries and remaining design detail
 
 Keep automation policy, rollout decisions, existing sync/status presentation, retention, permissions and timer background execution intact. This programme does not add telemetry, full deletion semantics, native NFC, external beta/App Store scope, persisted icons, commute endpoint learning or raw-evidence reconstruction. Those remain in the canonical decision register.
 
@@ -210,12 +223,12 @@ Before each stage's implementation, resolve only its necessary remaining details
 
 Do not impose a blanket prohibition on every read-model or metadata change if one is genuinely needed. Require evidence, a small scope, compatibility tests and the existing ownership boundary instead of creating parallel architecture.
 
-## 11. Roadmap lifecycle and next action
+## 12. Roadmap lifecycle and next action
 
-Adopt this file through a **small documentation-only feature branch and PR**, not a direct push to main. Add one discoverability link from the contributor documentation and identify it as temporary programme coordination. The canonical tracker remains the only release-status register. Run `npm run check:docs` and `git diff --check`; independent review should confirm document scope and no accidental current-state claims. A pure roadmap addition needs no new iPhone binary or production migration.
+This is active temporary programme coordination. Keep the canonical tracker as the only release-status register. Run `npm run check:docs` and `git diff --check`; independent review should confirm document scope and no accidental current-state claims.
 
-After each stage merges, reconcile the remaining sequence and add only significant owner-approved decision changes here. Link to the tracker/PR evidence rather than copying mutable release tables or command logs. Revision history starts with revision 1: agreed Reports, Today, Calendar and web scope following PR #192.
+After each stage merges, reconcile the remaining sequence and add only significant owner-approved decision changes here. Link to the tracker/PR evidence rather than copying mutable release tables or command logs. Revision 1 recorded the agreed Reports, Today, Calendar and web scope following PR #192. Revision 2 records the merged Reports PR #194 and inserts the mobile accessibility prerequisite before Stage B.
 
 When all stages finish, promote enduring requirements and guardrails to their canonical documents, then remove this temporary roadmap and its navigation links or replace it with a short dated historical completion note. Preserve useful decisions in Git history; do not leave a stale active roadmap behind.
 
-**Next action:** finish Revision 3.2 implementation validation and staging/iPhone acceptance on existing PR #194, then request a new whole-PR Claude review. V3.2 wins conflicts with V3.1/V3; V1/V2 remain historical. Do not start Stage B or merge automatically; the tracker and PR hold current validation evidence.
+**Next action:** complete the separate mobile accessibility prerequisite against the freshly verified post-#194 main baseline, then review, merge, and refresh main before preparing Stage B. PR #194 is already merged; do not reopen it or use its branch. V3.2 wins conflicts with V3.1/V3; V1/V2 remain historical. Do not start Stage B until this prerequisite has passed its own gates. Current delivery evidence belongs in the tracker and prerequisite investigation note.

@@ -9,6 +9,10 @@ const dashboardSource = readFileSync(
   fileURLToPath(new URL("./DayframeDashboard.tsx", import.meta.url)),
   "utf8"
 );
+const timerSurfaceSource = readFileSync(
+  fileURLToPath(new URL("./accessibility/TodayTimerSurface.tsx", import.meta.url)),
+  "utf8"
+);
 const mobileThemeSource = readFileSync(
   fileURLToPath(new URL("../lib/mobileTheme.ts", import.meta.url)),
   "utf8"
@@ -63,6 +67,35 @@ describe("Today history swipe-to-delete contract", () => {
     expect(dashboardSource).toContain("createDeletionCoordinator");
     expect(dashboardSource).toContain("coordinator.prepare(entries, snapshot)");
     expect(dashboardSource).toContain("coordinator.activate(prepared.token)");
+  });
+
+  it("exposes VoiceOver Delete through the existing undoable callback for exact completed entries", () => {
+    const historySource = dashboardSource.slice(
+      dashboardSource.indexOf("export function HistoryDayCard("),
+      dashboardSource.indexOf("function dedupeEntriesById(")
+    );
+
+    expect(historySource).toContain('name: "delete"');
+    expect(historySource).toContain('event.nativeEvent.actionName === "delete"');
+    expect(historySource).toContain("group.entries.every(({ entry: groupedEntry }) => Boolean(groupedEntry.stoppedAt))");
+    expect(historySource).toContain("onDeleteEntries(group.entries.map(({ entry: groupedEntry }) => groupedEntry))");
+    expect(historySource).toContain("onDeleteEntries([childEntry])");
+    expect(historySource).toContain("accessibilityLabel={`${title}. ${detailContext}`}");
+    expect(dashboardSource).toContain("accessibilityLabel={`Delete ${accessibilityLabel}`}");
+    expect(dashboardSource).toContain("coordinator.prepare(entries, snapshot)");
+    expect(historySource).not.toContain("Alert.alert");
+  });
+
+  it("keeps the short history overlap indicator compact while preserving full accessible detail", () => {
+    const historySource = dashboardSource.slice(
+      dashboardSource.indexOf("export function HistoryDayCard("),
+      dashboardSource.indexOf("function dedupeEntriesById(")
+    );
+
+    expect(historySource).toMatch(/\.\.\.mobileTextProps\("metadata"\)\}\s+accessibilityLabel="Overlap"/);
+    expect(historySource).toMatch(/\.\.\.mobileTextProps\("metadata"\)\}\s+accessibilityLabel=\{`Overlap:/);
+    expect(historySource).toContain("uniqueOverlapSeconds");
+    expect(historySource).toContain("accessibilityLabel={`${title}. ${detailContext}`}");
   });
 
   it("uses the shared tombstone filter for refresh and optimistic state", () => {
@@ -242,7 +275,7 @@ describe("Today history swipe-to-delete contract", () => {
     expect(presentationSource).toContain('presentation.reason !== "blank_timer_started"');
     expect(presentationSource).toContain("blankTimerStartGate.current.release(blankStart.token)");
     expect(dashboardSource).toContain("onPresented={completeActiveEditorPresentation}");
-    expect(dashboardSource).toContain('accessibilityLabel="Start task"');
+    expect(timerSurfaceSource).toContain('accessibilityLabel="Start task"');
   });
 
   it("limits conservative disposal to account/provider boundaries", () => {

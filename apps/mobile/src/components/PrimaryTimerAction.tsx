@@ -92,6 +92,14 @@ export function CompactReplayPlayGlyph({ color }: { color: string }) {
   );
 }
 
+export function PlusGlyph({ color }: { color: string }) {
+  return (
+    <Svg width={20} height={20} viewBox="0 0 24 24">
+      <Path d="M12 5v14M5 12h14" fill="none" stroke={color} strokeLinecap="round" strokeWidth={2.2} />
+    </Svg>
+  );
+}
+
 const styles = StyleSheet.create({
   control: {
     alignItems: "center",

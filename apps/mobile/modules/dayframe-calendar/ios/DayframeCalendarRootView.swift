@@ -133,6 +133,7 @@ struct DayframeCalendarRootView: View {
       }
       .frame(maxWidth: .infinity, alignment: .leading)
     }
+    .dynamicTypeSize(.xSmall ... .xxxLarge)
   }
 
   @ViewBuilder
@@ -158,7 +159,7 @@ struct DayframeCalendarRootView: View {
     presentation: DayframeCalendarPresentation,
     theme: DayframeCalendarTheme
   ) -> some View {
-    VStack(alignment: .trailing, spacing: 2) {
+    VStack(alignment: .leading, spacing: 2) {
       Text("\(presentation.loggedLabel) logged")
         .font(.title3.weight(.semibold))
         .foregroundStyle(Color(dayframeCSS: theme.accentText))
@@ -169,8 +170,6 @@ struct DayframeCalendarRootView: View {
       }
     }
     .monospacedDigit()
-    .lineLimit(1)
-    .minimumScaleFactor(0.75)
     .accessibilityLabel(
       "Selected day, \(presentation.loggedLabel) logged, \(presentation.coveredLabel) covered"
     )

@@ -45,11 +45,13 @@ describe("offline-first Review screen contracts", () => {
 
   it("uses Settings-style titles and delays cold evidence feedback", () => {
     expect(reviewSource).toContain(
-      '<Text style={styles.settingsTitle} numberOfLines={1}>Review</Text>'
+      '<Text {...mobileTextProps("screenHeading")} style={styles.settingsTitle}>Review</Text>'
     );
     expect(detailSource).toContain(
-      '<Text style={styles.settingsTitle} numberOfLines={1}>Location evidence</Text>'
+      '<Text {...mobileTextProps("screenHeading")} style={styles.settingsTitle}>Location evidence</Text>'
     );
+    expect(reviewSource).not.toContain('style={styles.settingsTitle} numberOfLines={1}');
+    expect(detailSource).not.toContain('style={styles.settingsTitle} numberOfLines={1}');
     expect(reviewSource).not.toContain("DayframeBrand");
     expect(detailSource).not.toContain("DayframeBrand");
     expect(detailSource).toContain("scheduleLocationEvidenceLoadingFeedback");
