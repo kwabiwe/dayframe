@@ -74,7 +74,9 @@ The ordered source commits, all based on
   accessibility contract; and
 - `90f643aea4e906392b0dd1c6fc997cc9246cc0db` — partial-summary qualification;
 - `0d48b7a7c23fcaacb10a5c290985a69398199d3a` — test-mock lint hygiene; and
-- `9a2bf3ad8f2e1d7bbb3e9222f8ce6f749d5eb3da` — native exact-focus handover.
+- `9a2bf3ad8f2e1d7bbb3e9222f8ce6f749d5eb3da` — native exact-focus handover;
+  and
+- `5745ea8a4134ef14b5c6444ec65fc96bab9f5beb` — exact-head review corrections.
 
 The required gates were deliberately run before the donut was introduced:
 
@@ -91,28 +93,32 @@ row, summary, history, Quick Confirm, Review SQLite and guarded Reports/
 accessibility suites also passed. The final partial-summary guard was rerun
 with the donut and Reports suites: PASS (4 files, 27 tests).
 
-All four disposable-data validators passed. The SQLite scripts create and
+All four disposable-data validators passed again at
+`5745ea8a4134ef14b5c6444ec65fc96bab9f5beb`. The SQLite scripts create and
 remove their own temporary databases. The two Postgres validators ran after a
-fresh local PostgreSQL 17 instance was initialised on loopback with a database
-named `dayframe_test`; their built-in localhost-and-`*_test` refusal and
-fixture cleanup were retained. That local server was stopped after the run.
-No staging or production data was contacted.
+fresh local PostgreSQL 17 instance was initialised on loopback with ordered
+schemas in databases named `dayframe_stage_b_review_test` and
+`dayframe_stage_b_location_test`; their built-in localhost-and-`*_test`
+refusal and fixture cleanup were retained. That local server was stopped after
+the run. No staging or production data was contacted.
 
-At source head `9a2bf3ad8f2e1d7bbb3e9222f8ce6f749d5eb3da`, the final broad
-test command passed: mobile 134 files / 1,177 tests; web 134 files / 908 tests
+At source head `5745ea8a4134ef14b5c6444ec65fc96bab9f5beb`, the final broad
+test command passed: mobile 134 files / 1,178 tests; web 134 files / 909 tests
 with 2 existing skips; shared 16 files / 250 tests. The time-zone-sensitive
-Today presentation/client/label/focus suite also passed 18 tests each with
+Today presentation/client/label/focus suite also passed 19 tests each with
 `TZ=UTC`, `TZ=Europe/London`, and `TZ=America/Los_Angeles`. `npm run lint`,
-documentation alignment, iOS configuration, brand-asset and native
-shared-storage checks passed; lint retains only two pre-existing warnings in
+documentation alignment, iOS configuration and the web production build
+passed; lint retains only two pre-existing warnings in
 `event-service.test.ts`.
 
 The web production build passed. A clean `expo run:ios` Debug simulator build
-also passed and installed on `Dayframe Accessibility Max QA`; its built host and
-extension lane metadata passed the built-product iOS configuration check. The
-compiler emitted one pre-existing duplicate `-lc++` linker warning. This is
-configuration/compilation evidence only, not a signed staging or physical-iPhone
-acceptance claim.
+previously passed at the pre-correction head
+`c2fa2921c919e862dd83257e228687730d157863` and installed on `Dayframe
+Accessibility Max QA`; its built host and extension lane metadata passed the
+built-product iOS configuration check. The compiler emitted one pre-existing
+duplicate `-lc++` linker warning. That simulator build must be repeated for the
+corrected exact head before final handoff. It is configuration/compilation
+evidence only, not a signed staging or physical-iPhone acceptance claim.
 
 `npm run typecheck` remains **FAIL** only at the unmodified baseline file
 `apps/mobile/src/components/ConnectivityStatusStrip.tsx(27,43)`: TypeScript
@@ -120,6 +126,25 @@ cannot resolve `expo-symbols`. Mobile, web and shared Stage B diagnostics do
 not appear; web and shared typechecks complete after the mobile failure. This
 pre-existing dependency-resolution issue is recorded rather than masked by an
 unrelated dependency/configuration change.
+
+## Independent review correction
+
+The available cloud whole-PR review integration could not start because its
+GitHub App lacks repository access. A local read-only review of the former
+`c2fa2921c919e862dd83257e228687730d157863` head found two actionable issues:
+
+- a guarded generic accept checked its proposal hash before resolving an
+  already-closed source; and
+- a locally saved Sleep Review whose explicit canonical entry was already
+  visible could display both the saved row and that entry before receipt
+  verification, even though duration was not counted twice.
+
+`5745ea8a4134ef14b5c6444ec65fc96bab9f5beb` checks terminal state before the
+optional hash and suppresses the saved row whenever explicit, current canonical
+evidence is visible. It adds targeted regression coverage for both cases. A
+fresh read-only exact-head re-review remains required after the final evidence
+commit; no earlier review approval is treated as approval of this corrected
+head.
 
 ## Motion contract
 
@@ -146,8 +171,11 @@ unrelated dependency/configuration change.
 
 ## Remaining validation gates
 
-Draft PR #196 was opened from
-`2b1b49fbb6f7e373ca8fad66f6e698a42d3e8c43`. The staging-backed Preview/alias
+Draft PR #196 remains unmerged. The corrected-head staging-backed Preview/alias
 smoke, identified ordinary signed staging build and owner physical-iPhone
-acceptance remain separate from the completed local checks. None is claimed by
-this note until recorded with the actual SHA, backend identity and result.
+acceptance remain separate from the completed local checks. An attempt to
+create the ordinary `preview` iOS build stopped before a build was created:
+this host has neither an authenticated Expo account nor an `EXPO_TOKEN`.
+Accordingly the signed-build and physical acceptance results are **NOT RUN**,
+not inferred from diagnostics. None of these gates is claimed until recorded
+with the actual SHA, backend identity and result.
