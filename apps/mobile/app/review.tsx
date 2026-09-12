@@ -11,12 +11,13 @@ import {
 } from "react-native";
 import Reanimated from "react-native-reanimated";
 import Svg, { Circle, Path } from "react-native-svg";
-import { router, useFocusEffect, useNavigation } from "expo-router";
+import { router, useFocusEffect, useLocalSearchParams, useNavigation } from "expo-router";
 import type { NativeStackNavigationProp } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
 import {
   paletteColorFor,
   readableLocationNameFromParts,
+  type LegacyReviewEntryPresentation,
   type ReviewMutation
 } from "@dayframe/shared";
 import { ActiveTimerEditSheet } from "@/components/ActiveTimerEditSheet";
@@ -72,6 +73,7 @@ import { mobileTextProps } from "@/lib/mobileTypography";
 import { recordMobileLayout, recordMobileTextLayout } from "@/components/accessibility/diagnostics";
 import type { MobileAccessibilityDiagnostic } from "@/components/accessibility/diagnostics";
 import {
+  cacheReviewPresentation,
   createReviewClientMutationId,
   enqueueReviewMutation,
   getReviewItemSyncStates,
@@ -84,6 +86,12 @@ import {
   type ReviewItemSyncState,
   type ReviewSyncDiagnostics
 } from "@/lib/reviewSyncStore";
+import { DAYFRAME_BACKEND_ID } from "@/lib/backendIdentity";
+import { fetchReviewPresentationSnapshot } from "@/lib/reviewPresentationClient";
+import {
+  legacyReviewPresentationToMobileEntry,
+  parseReviewFocusRequest
+} from "@/lib/reviewFocus";
 import {
   reviewSyncStatusCopy
 } from "@/lib/reviewSyncPresentation";
@@ -110,6 +118,14 @@ type ReviewLoadOptions = {
 const HEALTH_REPROCESS_TIMEOUT_MS = 45_000;
 
 export default function ReviewScreen() {
+  const routeParams = useLocalSearchParams<{
+    focusReviewId?: string | string[];
+    focusEntryId?: string | string[];
+  }>();
+  const focusRequest = useMemo(
+    () => parseReviewFocusRequest(routeParams),
+    [routeParams.focusEntryId, routeParams.focusReviewId]
+  );
   const { reloadThemePreference, styles, theme } = useMobileTheme();
   const { isOffline, isOnline, reconnectEpoch } = useConnectivity();
   const {
@@ -124,6 +140,8 @@ export default function ReviewScreen() {
   const [showReviewInfo, setShowReviewInfo] = useState(false);
   const [reviewMenuState, setReviewMenuState] = useState(CLOSED_REVIEW_MENU_STATE);
   const [reviewAvailabilityMessage, setReviewAvailabilityMessage] = useState<string | null>(null);
+  const [focusedLegacyEntry, setFocusedLegacyEntry] = useState<MobileTimeEntry | null>(null);
+  const [highlightedFocusKey, setHighlightedFocusKey] = useState<string | null>(null);
   const [reviewSyncDiagnostics, setReviewSyncDiagnostics] = useState<ReviewSyncDiagnostics | null>(
     null
   );
@@ -147,6 +165,11 @@ export default function ReviewScreen() {
   const reviewMenuStateRef = useRef(CLOSED_REVIEW_MENU_STATE);
   const reviewMenuActionSequence = useRef(0);
   const reviewMutations = useRef(new Map<string, number>());
+  const reviewScrollRef = useRef<ScrollView>(null);
+  const focusRowOffsets = useRef(new Map<string, number>());
+  const focusPendingKey = useRef<string | null>(null);
+  const focusConsumedKey = useRef<string | null>(null);
+  const focusLookupKey = useRef<string | null>(null);
   const loadRef = useRef<(options?: ReviewLoadOptions) => Promise<void>>(
     async () => undefined
   );
@@ -533,13 +556,144 @@ export default function ReviewScreen() {
     () => collectReviewNeededEntries(data),
     [data]
   );
-  const totalNeedsReview = openReviewItems.length + reviewNeededEntries.length;
+  const displayedReviewNeededEntries = useMemo(() => {
+    const byId = new Map(reviewNeededEntries.map((entry) => [entry.id, entry]));
+    if (focusedLegacyEntry) byId.set(focusedLegacyEntry.id, focusedLegacyEntry);
+    return [...byId.values()].sort(
+      (left, right) => new Date(right.startedAt).getTime() - new Date(left.startedAt).getTime()
+    );
+  }, [focusedLegacyEntry, reviewNeededEntries]);
+  const totalNeedsReview = openReviewItems.length + displayedReviewNeededEntries.length;
   const editingEntry = editTarget?.entry ?? null;
   const overflowItemId =
     reviewMenuState.openItemId ?? reviewMenuState.closingItemId;
   const overflowTarget = (data?.reviewItems ?? []).find(
     (item) => item.id === overflowItemId
   ) ?? null;
+
+  const scrollExactFocusIntoView = useCallback((key: string) => {
+    if (focusPendingKey.current !== key || focusConsumedKey.current === key) return;
+    const offset = focusRowOffsets.current.get(key);
+    if (offset === undefined) return;
+    focusPendingKey.current = null;
+    focusConsumedKey.current = key;
+    requestAnimationFrame(() => {
+      reviewScrollRef.current?.scrollTo({
+        y: Math.max(0, offset - 16),
+        animated: !reduceMotion
+      });
+      AccessibilityInfo.announceForAccessibility("Opened the exact Review item.");
+    });
+  }, [reduceMotion]);
+
+  const beginExactFocus = useCallback((key: string) => {
+    if (focusConsumedKey.current === key) return;
+    focusPendingKey.current = key;
+    setHighlightedFocusKey(key);
+    scrollExactFocusIntoView(key);
+  }, [scrollExactFocusIntoView]);
+
+  const recordFocusRowLayout = useCallback((key: string, y: number) => {
+    if (!Number.isFinite(y)) return;
+    focusRowOffsets.current.set(key, y);
+    scrollExactFocusIntoView(key);
+  }, [scrollExactFocusIntoView]);
+
+  useEffect(() => {
+    const request = focusRequest;
+    if (!request) {
+      setFocusedLegacyEntry(null);
+      setHighlightedFocusKey(null);
+      return;
+    }
+    const focusKey = reviewFocusKey(request.kind, request.id);
+    if (focusConsumedKey.current === focusKey) return;
+    if (!data) return;
+
+    if (request.kind === "review") {
+      if (openReviewItems.some((item) => item.id === request.id)) {
+        beginExactFocus(focusKey);
+        return;
+      }
+    } else if (displayedReviewNeededEntries.some((entry) => entry.id === request.id)) {
+      beginExactFocus(focusKey);
+      return;
+    }
+
+    if (focusLookupKey.current === focusKey) return;
+    if (!DAYFRAME_BACKEND_ID) {
+      focusConsumedKey.current = focusKey;
+      setReviewAvailabilityMessage("This exact Review item cannot be resolved in this app build. Refresh Review.");
+      return;
+    }
+    focusLookupKey.current = focusKey;
+    const owner = {
+      backendId: DAYFRAME_BACKEND_ID,
+      workspaceId: data.workspace.id,
+      userId: data.user.id
+    };
+    const origin = { workspaceId: data.workspace.id, userId: data.user.id };
+    void fetchReviewPresentationSnapshot({
+      owner,
+      request: {
+        version: 1,
+        mode: "lookup",
+        timeZone: currentPresentationTimeZone(),
+        ...(request.kind === "review"
+          ? { reviewItemIds: [request.id] }
+          : { entryIds: [request.id] }),
+        limit: 100
+      }
+    }).then(async (response) => {
+      const current = dataRef.current;
+      if (
+        !current ||
+        current.workspace.id !== origin.workspaceId ||
+        current.user.id !== origin.userId ||
+        focusLookupKey.current !== focusKey ||
+        focusConsumedKey.current === focusKey
+      ) return;
+      const wrote = await cacheReviewPresentation({ owner, response });
+      if (!wrote) return;
+      if (request.kind === "review") {
+        const cached = await loadCachedReviewBootstrap();
+        const target = cached?.bootstrap.reviewItems.find((item) => item.id === request.id) ?? null;
+        if (target) {
+          const latest = dataRef.current;
+          if (latest && latest.workspace.id === origin.workspaceId && latest.user.id === origin.userId) {
+            commitData(mergeFocusedReviewItem(latest, target));
+          }
+          return;
+        }
+      } else {
+        const target = response.lookup.entries.find((entry): entry is LegacyReviewEntryPresentation => (
+          entry.kind === "legacy_review_entry" && entry.entryId === request.id
+        ));
+        const entry = target ? legacyReviewPresentationToMobileEntry(target) : null;
+        if (entry) {
+          setFocusedLegacyEntry(entry);
+          return;
+        }
+      }
+      focusConsumedKey.current = focusKey;
+      setReviewAvailabilityMessage("This Review item is already resolved or no longer available. Refreshing Review.");
+      void loadRef.current({ preserveMenu: true, queueIfBusy: true, silent: true, skipReprocess: true });
+    }).catch((error) => {
+      if (focusConsumedKey.current === focusKey) return;
+      if (error instanceof AuthRequiredError) {
+        router.replace("/");
+        return;
+      }
+      focusConsumedKey.current = focusKey;
+      setReviewAvailabilityMessage("Couldn’t find that exact Review item. It may have changed; refresh Review.");
+    });
+  }, [
+    beginExactFocus,
+    data,
+    displayedReviewNeededEntries,
+    focusRequest,
+    openReviewItems
+  ]);
 
   useEffect(() => {
     applyReviewMenuEvent({
@@ -829,6 +983,7 @@ export default function ReviewScreen() {
         </View>
       </View>
       <ScrollView
+        ref={reviewScrollRef}
         style={styles.settingsScrollView}
         contentContainerStyle={styles.settingsScrollContent}
         refreshControl={
@@ -901,9 +1056,16 @@ export default function ReviewScreen() {
               {openReviewItems.map((item) => (
                   <Reanimated.View
                     key={item.id}
+                    onLayout={(event) => recordFocusRowLayout(
+                      reviewFocusKey("review", item.id),
+                      event.nativeEvent.layout.y
+                    )}
                     entering={localPresenceEntering(reduceMotion)}
                     exiting={localPresenceExiting(reduceMotion)}
                     layout={localLayoutTransition(reduceMotion)}
+                    style={highlightedFocusKey === reviewFocusKey("review", item.id)
+                      ? styles.reviewFocusHighlight
+                      : undefined}
                   >
                     <ReviewItemCard
                       item={item}
@@ -923,17 +1085,30 @@ export default function ReviewScreen() {
                   </Reanimated.View>
               ))}
             </View>
-            {reviewNeededEntries.length > 0 ? (
+            {displayedReviewNeededEntries.length > 0 ? (
               <View style={styles.reviewList}>
-                {reviewNeededEntries.map((entry) => (
-                  <ReviewNeededEntryCard
+                {displayedReviewNeededEntries.map((entry) => (
+                  <Reanimated.View
                     key={entry.id}
-                    entry={entry}
-                    now={now}
-                    onEdit={() => beginReviewNeededEntryEdit(entry)}
-                    styles={styles}
-                    theme={theme}
-                  />
+                    onLayout={(event) => recordFocusRowLayout(
+                      reviewFocusKey("legacy_entry", entry.id),
+                      event.nativeEvent.layout.y
+                    )}
+                    entering={localPresenceEntering(reduceMotion)}
+                    exiting={localPresenceExiting(reduceMotion)}
+                    layout={localLayoutTransition(reduceMotion)}
+                    style={highlightedFocusKey === reviewFocusKey("legacy_entry", entry.id)
+                      ? styles.reviewFocusHighlight
+                      : undefined}
+                  >
+                    <ReviewNeededEntryCard
+                      entry={entry}
+                      now={now}
+                      onEdit={() => beginReviewNeededEntryEdit(entry)}
+                      styles={styles}
+                      theme={theme}
+                    />
+                  </Reanimated.View>
                 ))}
               </View>
             ) : null}
@@ -1265,6 +1440,32 @@ export function mergeReviewBootstrapProjection(
         }
       : projection.stats
   };
+}
+
+function mergeFocusedReviewItem(current: MobileBootstrap, target: MobileReviewItem): MobileBootstrap {
+  const existing = current.reviewItems.find((item) => item.id === target.id);
+  if (existing) {
+    return {
+      ...current,
+      reviewItems: current.reviewItems.map((item) => item.id === target.id ? target : item)
+    };
+  }
+  return {
+    ...current,
+    // A targeted source belongs at the visible top of Review. It is not a
+    // replacement for bootstrap's capped collection or a claim about global
+    // order; its exact identity is what matters for the focused route.
+    reviewItems: [target, ...current.reviewItems]
+  };
+}
+
+function reviewFocusKey(kind: "review" | "legacy_entry", id: string) {
+  return `${kind}:${id}`;
+}
+
+function currentPresentationTimeZone() {
+  const zone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+  return zone || "Etc/UTC";
 }
 
 function reviewItemTitle(item: MobileReviewItem) {

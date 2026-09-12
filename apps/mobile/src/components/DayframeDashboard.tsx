@@ -60,6 +60,9 @@ import {
   PlusGlyph
 } from "@/components/PrimaryTimerAction";
 import { TodayTimerSurface } from "@/components/accessibility/TodayTimerSurface";
+import { TodayReviewPresentationProvider, useTodayReviewPresentationContext } from "./today/TodayReviewPresentationContext";
+import { TodayReviewRow } from "./today/TodayReviewRow";
+import { TodayReviewSummary } from "./today/TodayReviewSummary";
 import {
   AuthRequiredError,
   createManualTimeEntry,
@@ -164,8 +167,10 @@ import {
   buildHistoryDaySections,
   groupHistoryDayEntries,
   historyDayLabel,
-  type HistoryDaySection
+  type HistoryDaySection,
+  type HistoryEntryGroup
 } from "@/lib/historyPresentation";
+import type { TodayActivity } from "@/lib/todayReviewPresentation";
 import {
   pressable,
   useMobileTheme,
@@ -2307,6 +2312,12 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
   function renderTodayTab(isFocused: boolean) {
     const currentDate = new Date(now);
     return (
+      <TodayReviewPresentationProvider
+        bootstrap={data}
+        dashboardEntries={historySourceEntries}
+        isFocused={isFocused}
+        nowMs={now}
+      >
       <SafeAreaView collapsable={false} edges={["top", "left", "right"]} style={styles.safeArea}>
         <Reanimated.FlatList
           contentContainerStyle={[styles.container, styles.todayListContent]}
@@ -2359,6 +2370,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
                 styles={styles}
                 theme={theme}
               />
+              <TodayReviewSummary isFocused={isFocused} />
             </Animated.View>
           )}
           renderItem={({ item }) => (
@@ -2391,6 +2403,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
           showsVerticalScrollIndicator={false}
         />
       </SafeAreaView>
+      </TodayReviewPresentationProvider>
     );
   }
 
@@ -2813,6 +2826,24 @@ export function HistoryDayCard({
   const [expandedGroups, setExpandedGroups] = useState<Set<string>>(() => new Set());
   const [availableRowWidth, setAvailableRowWidth] = useState(0);
   const entryGroups = useMemo(() => groupHistoryDayEntries(section.entries), [section.entries]);
+  const todayReview = useTodayReviewPresentationContext();
+  const reviewTodayActivities = useMemo(() => {
+    if (!section.isToday || !todayReview?.isSummaryAvailable || !todayReview.presentation) return [];
+    // Confirmed entries stay in the existing grouped History owner. This
+    // insertion path is only for typed Review/saved sources, so a completed
+    // entry from the presentation read cannot duplicate a normal row or lose
+    // its established edit/replay/delete actions.
+    return (todayReview.presentation.daySections.find((candidate) => candidate.title === "Today")?.activities ?? [])
+      .filter((activity) => activity.source.kind !== "entry");
+  }, [section.isToday, todayReview?.isSummaryAvailable, todayReview?.presentation]);
+  const incompleteReviewActivities = useMemo(() => {
+    if (!section.isToday || !todayReview?.isSummaryAvailable || !todayReview.presentation) return [];
+    return todayReview.presentation.daySections.find((candidate) => candidate.title === "Incomplete time")?.activities ?? [];
+  }, [section.isToday, todayReview?.isSummaryAvailable, todayReview?.presentation]);
+  const displayRows = useMemo(
+    () => mergeHistoryRows(entryGroups, reviewTodayActivities),
+    [entryGroups, reviewTodayActivities]
+  );
   const longestDuration = useMemo(
     () => formatDuration(Math.max(0, ...entryGroups.map((group) => group.totalSeconds))),
     [entryGroups]
@@ -2891,14 +2922,38 @@ export function HistoryDayCard({
       >
         {durationMeasure.probe}
         {groupCountMeasure.probe}
-        {section.entries.length === 0 ? (
+        {displayRows.length === 0 ? (
           <Reanimated.View
             entering={localPresenceEntering(reduceMotion)}
             layout={localLayoutTransition(reduceMotion)}
           >
             <Text {...mobileTextProps("body")} style={styles.todayEmptyText}>No tracked time for this day.</Text>
           </Reanimated.View>
-        ) : entryGroups.map((group, index) => {
+        ) : displayRows.map((displayRow, index) => {
+          if (displayRow.kind === "review") {
+            const activity = displayRow.activity;
+            return (
+              <Reanimated.View
+                key={activity.presentationKey}
+                entering={localPresenceEntering(reduceMotion)}
+                exiting={localPresenceExiting(reduceMotion)}
+                layout={localLayoutTransition(reduceMotion)}
+                style={index > 0 ? styles.todayEntryDivider : null}
+              >
+                <TodayReviewRow
+                  activity={activity}
+                  committing={activity.source.kind === "review" && todayReview ? todayReview.isCommitting(activity.source.reviewItemId) : false}
+                  message={activity.source.kind === "review" && todayReview ? todayReview.messageFor(activity.source.reviewItemId) : null}
+                  nowMs={now}
+                  onOpen={() => todayReview?.openActivity(activity)}
+                  onQuickConfirm={() => todayReview?.quickConfirm(activity)}
+                  styles={styles}
+                  theme={theme}
+                />
+              </Reanimated.View>
+            );
+          }
+          const group = displayRow.group;
           const { entry } = group.representative;
           const probeId = group.entries[0].entry.id;
           const grouped = group.entries.length > 1;
@@ -3149,7 +3204,34 @@ export function HistoryDayCard({
           );
         })}
       </View>
-      {reviewCount > 0 ? (
+      {incompleteReviewActivities.length > 0 ? (
+        <View style={styles.todaySummaryBlock}>
+          <Text {...mobileTextProps("sectionHeading")} style={styles.historyDayTitle}>Incomplete time</Text>
+          <View style={styles.todayEntryCard}>
+            {incompleteReviewActivities.map((activity, index) => (
+              <Reanimated.View
+                key={activity.presentationKey}
+                entering={localPresenceEntering(reduceMotion)}
+                exiting={localPresenceExiting(reduceMotion)}
+                layout={localLayoutTransition(reduceMotion)}
+                style={index > 0 ? styles.todayEntryDivider : null}
+              >
+                <TodayReviewRow
+                  activity={activity}
+                  committing={activity.source.kind === "review" && todayReview ? todayReview.isCommitting(activity.source.reviewItemId) : false}
+                  message={activity.source.kind === "review" && todayReview ? todayReview.messageFor(activity.source.reviewItemId) : null}
+                  nowMs={now}
+                  onOpen={() => todayReview?.openActivity(activity)}
+                  onQuickConfirm={() => todayReview?.quickConfirm(activity)}
+                  styles={styles}
+                  theme={theme}
+                />
+              </Reanimated.View>
+            ))}
+          </View>
+        </View>
+      ) : null}
+      {reviewCount > 0 && !(section.isToday && todayReview?.isSummaryAvailable) ? (
         <View onLayout={(event) => {
           recordMobileLayout(diagnostic, "review-notice.container", event);
           const width = event?.nativeEvent?.layout?.width;
@@ -3189,6 +3271,32 @@ export function HistoryDayCard({
       />
     </View>
   );
+}
+
+type HistoryCardDisplayRow =
+  | { kind: "entry_group"; group: HistoryEntryGroup }
+  | { kind: "review"; activity: TodayActivity };
+
+/** Keeps ordinary grouping untouched while inserting typed Review rows by time. */
+function mergeHistoryRows(
+  groups: readonly HistoryEntryGroup[],
+  reviewActivities: readonly TodayActivity[]
+): HistoryCardDisplayRow[] {
+  return [
+    ...groups.map((group) => ({ kind: "entry_group" as const, group })),
+    ...reviewActivities.map((activity) => ({ kind: "review" as const, activity }))
+  ].sort((left, right) => {
+    const leftAt = left.kind === "entry_group"
+      ? Date.parse(left.group.representative.entry.startedAt)
+      : left.activity.interval?.startMs ?? left.activity.detectedAtMs ?? Number.NEGATIVE_INFINITY;
+    const rightAt = right.kind === "entry_group"
+      ? Date.parse(right.group.representative.entry.startedAt)
+      : right.activity.interval?.startMs ?? right.activity.detectedAtMs ?? Number.NEGATIVE_INFINITY;
+    if (leftAt !== rightAt) return rightAt - leftAt;
+    const leftKey = left.kind === "entry_group" ? `entry:${left.group.key}` : left.activity.presentationKey;
+    const rightKey = right.kind === "entry_group" ? `entry:${right.group.key}` : right.activity.presentationKey;
+    return leftKey.localeCompare(rightKey);
+  });
 }
 
 function dedupeEntriesById(entries: TimeEntry[]) {

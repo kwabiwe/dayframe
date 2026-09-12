@@ -66,6 +66,12 @@ vi.mock("@/components/PrimaryTimerAction", () => ({
   PlusGlyph: () => null,
 }));
 vi.mock("@/components/accessibility/TodayTimerSurface", () => ({ TodayTimerSurface: () => null }));
+vi.mock("./today/TodayReviewPresentationContext", () => ({
+  TodayReviewPresentationProvider: ({ children }: { children: unknown }) => children,
+  useTodayReviewPresentationContext: () => null,
+}));
+vi.mock("./today/TodayReviewRow", () => ({ TodayReviewRow: () => null }));
+vi.mock("./today/TodayReviewSummary", () => ({ TodayReviewSummary: () => null }));
 
 vi.mock("@/lib/mobileTheme", () => ({ pressable: vi.fn(), useMobileTheme: vi.fn() }));
 vi.mock("../lib/mobileTheme", () => ({ pressable: vi.fn(), useMobileTheme: vi.fn() }));
