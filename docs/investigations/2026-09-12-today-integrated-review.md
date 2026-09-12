@@ -205,8 +205,15 @@ corrected head.
 
 ## Remaining validation gates
 
-Draft PR #196 remains unmerged. The latest-head staging-backed Preview/alias
-smoke, identified ordinary signed staging build and owner physical-iPhone
+Draft PR #196 remains unmerged. Its Ready Preview for
+`4d931dd8afb0cb3a2a05612931b8b14b5306c048` was promoted to
+`https://dayframe-staging.vercel.app`; the staging root returned 200 and an
+unauthenticated `POST /api/review/presentation` returned the expected
+private/no-store 401 boundary. This is a deployment and anonymous auth-boundary
+smoke only: no authenticated staging user, Health or Location data, or physical
+device was used.
+
+The identified ordinary signed staging build and owner physical-iPhone
 acceptance remain separate from the completed local checks. An attempt to
 create the ordinary `preview` iOS build stopped before a build was created:
 this host has neither an authenticated Expo account nor an `EXPO_TOKEN`.
