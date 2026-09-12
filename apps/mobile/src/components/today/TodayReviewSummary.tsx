@@ -9,7 +9,17 @@ export function TodayReviewSummary({ isFocused }: { isFocused: boolean }) {
   const context = useTodayReviewPresentationContext();
   const { styles, theme } = useMobileTheme();
   const { reduceMotion } = useResolvedReduceMotionPreference();
-  if (!context?.isSummaryAvailable || !context.presentation) return null;
+  if (!context) return null;
+  if (!context.isSummaryAvailable || !context.presentation) {
+    if (!context.owner) return null;
+    return (
+      <View testID="today-review-summary-status" style={styles.todayReviewSummary}>
+        <Text {...mobileTextProps("metadata")} style={styles.todayReviewSaved}>
+          {context.error ? "Connect to load today's summary." : "Today's summary is still loading."}
+        </Text>
+      </View>
+    );
+  }
   const presentation = context.presentation;
   const activities = presentation.daySections.flatMap((section) => section.activities);
   const outstanding = presentation.globalReviewCount;
@@ -29,6 +39,13 @@ export function TodayReviewSummary({ isFocused }: { isFocused: boolean }) {
         segments={presentation.donutSegments}
         theme={theme}
       />
+      {presentation.coverage !== "complete" ? (
+        <Text {...mobileTextProps("metadata")} style={styles.todayReviewSaved}>
+          {presentation.coverage === "partial"
+            ? "Today's summary is partial. Open Review for more items."
+            : "Showing Review data saved on this iPhone."}
+        </Text>
+      ) : null}
       {presentation.awaitingReviewMs > 0 ? (
         <Text {...mobileTextProps("numeric")} style={styles.todayReviewAwaiting}>
           + {formatDuration(presentation.awaitingReviewMs)} awaiting review

@@ -90,4 +90,38 @@ describe("TodayReviewSummary", () => {
     });
     expect(tree.root.findAllByType("Pressable" as never)).toHaveLength(0);
   });
+
+  it("qualifies a cached or partial presentation instead of presenting it as complete", () => {
+    mocks.context.presentation = {
+      ...mocks.context.presentation,
+      coverage: "partial",
+      globalReviewCount: { value: 5, exact: false },
+      todayReviewCount: { value: 2, exact: false }
+    };
+    let tree!: ReturnType<typeof create>;
+    act(() => {
+      tree = create(<TodayReviewSummary isFocused />);
+    });
+    const text = tree.root.findAllByType("Text" as never).map((node) => node.children.join(""));
+    expect(text).toContain("Today's summary is partial. Open Review for more items.");
+    expect(text).toContain("Open Review for the latest available items");
+  });
+
+  it("keeps the timer surface unblocked while an unavailable summary is loading", () => {
+    mocks.context = {
+      isSummaryAvailable: false,
+      isLoading: true,
+      owner: { backendId: "staging", workspaceId: "workspace", userId: "user" },
+      error: null,
+      presentation: null
+    };
+    let tree!: ReturnType<typeof create>;
+    act(() => {
+      tree = create(<TodayReviewSummary isFocused />);
+    });
+    expect(tree.root.findByProps({ testID: "today-review-summary-status" })
+      .findByType("Text" as never).children.join(""))
+      .toContain("Today's summary is still loading.");
+    expect(mocks.donutProps).toBeNull();
+  });
 });
