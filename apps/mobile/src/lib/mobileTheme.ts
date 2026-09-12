@@ -32,6 +32,11 @@ import {
   TIMER_CARD_TRAILING_SCROLL_INSET,
   TIMER_CARD_VERTICAL_INSET
 } from "./timerCardLayout";
+import {
+  HISTORY_REPLAY_ACTION_GAP,
+  HISTORY_REPLAY_ACTION_WIDTH,
+  HISTORY_STACKED_DURATION_TRAILING_INSET
+} from "./mobileAccessibilityLayout";
 
 export type ThemeMode = "light" | "dark";
 export type ThemePreference = ThemeMode | "system";
@@ -1353,11 +1358,11 @@ function createStyles(theme: MobileTheme) {
       minHeight: 44,
       flexDirection: "row",
       alignItems: "center",
-      gap: 3
+      gap: HISTORY_REPLAY_ACTION_GAP
     },
     historyReplayButton: {
-      width: 44,
-      height: 44,
+      width: HISTORY_REPLAY_ACTION_WIDTH,
+      height: HISTORY_REPLAY_ACTION_WIDTH,
       borderRadius: 999,
       alignItems: "center",
       justifyContent: "center"
@@ -1427,7 +1432,7 @@ function createStyles(theme: MobileTheme) {
       fontWeight: "600",
       fontVariant: ["tabular-nums"],
       alignSelf: "flex-end",
-      marginRight: 47
+      marginRight: HISTORY_STACKED_DURATION_TRAILING_INSET
     },
     compactCategoryScroller: {
       gap: 7,

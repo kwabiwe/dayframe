@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { historyRowLayout, summaryLayout } from "./mobileAccessibilityLayout";
+import {
+  HISTORY_REPLAY_ACTION_GAP,
+  HISTORY_REPLAY_ACTION_WIDTH,
+  HISTORY_STACKED_DURATION_TRAILING_INSET,
+  historyRowLayout,
+  summaryLayout
+} from "./mobileAccessibilityLayout";
 
 describe("mobile accessibility presentation budgets", () => {
   it("reserves the title, complete measured duration, and replay target at supported phone widths", () => {
@@ -41,5 +47,13 @@ describe("mobile accessibility presentation budgets", () => {
       countBadgeWidth: 42,
       durationWidth: 62,
     })).toBe("stacked");
+  });
+
+  it("keeps the stacked duration inset tied to the replay target and its action gap", () => {
+    expect(HISTORY_REPLAY_ACTION_WIDTH).toBe(44);
+    expect(HISTORY_REPLAY_ACTION_GAP).toBe(3);
+    expect(HISTORY_STACKED_DURATION_TRAILING_INSET).toBe(
+      HISTORY_REPLAY_ACTION_WIDTH + HISTORY_REPLAY_ACTION_GAP
+    );
   });
 });

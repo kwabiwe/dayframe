@@ -172,7 +172,11 @@ import {
   type MobileStyles,
   type MobileTheme
 } from "@/lib/mobileTheme";
-import { historyRowLayout, summaryLayout } from "@/lib/mobileAccessibilityLayout";
+import {
+  HISTORY_REPLAY_ACTION_WIDTH,
+  historyRowLayout,
+  summaryLayout
+} from "@/lib/mobileAccessibilityLayout";
 import { mobileTextProps } from "@/lib/mobileTypography";
 import { subscribeMobileSignedOut } from "@/lib/mobileSessionTransition";
 import {
@@ -2817,7 +2821,8 @@ export function HistoryDayCard({
   const durationMeasure = useIntrinsicTextMeasure(
     [durationSample],
     styles.todayEntryDuration,
-    1.2
+    1.2,
+    "history-duration-measure"
   );
   const longestGroupCount = Math.max(0, ...entryGroups.map((group) => group.entries.length));
   const groupCountSample = String(longestGroupCount).replace(/[0-9]/g, "8");
@@ -2825,6 +2830,7 @@ export function HistoryDayCard({
     [groupCountSample],
     styles.historyGroupCountText,
     1.2,
+    "history-group-count-measure"
   );
   const historyAnalysis = useMemo(() => {
     const rangeStart = new Date(section.date);
@@ -2847,7 +2853,8 @@ export function HistoryDayCard({
   const noticeMeasure = useIntrinsicTextMeasure(
     [noticeLabel, "Open Review"],
     styles.reviewNoteText,
-    1.3
+    1.3,
+    "history-review-notice-measure"
   );
   const [noticeWidth, setNoticeWidth] = useState(0);
   const noticeStacked = !noticeMeasure.widths[noticeLabel] || !noticeMeasure.widths["Open Review"] ||
@@ -2883,6 +2890,7 @@ export function HistoryDayCard({
         }}
       >
         {durationMeasure.probe}
+        {groupCountMeasure.probe}
         {section.entries.length === 0 ? (
           <Reanimated.View
             entering={localPresenceEntering(reduceMotion)}
@@ -2897,16 +2905,17 @@ export function HistoryDayCard({
           const expanded = grouped && expandedGroups.has(group.key);
           const canReplay = Boolean(entry.categoryId || entry.description?.trim());
           const title = displayEntryTitle(entry);
-          const durationWidth = durationMeasure.widths[durationSample] ?? 0;
-          const rowLayout = historyRowLayout({
-            availableWidth: availableRowWidth,
-            countBadgeWidth: grouped
-              ? Math.max(34, (groupCountMeasure.widths[groupCountSample] ?? 0) + 16)
-              : 0,
-            durationWidth,
-            replayWidth: 44,
-            gap: 10
-          });
+          const durationWidth = durationMeasure.widths[durationSample];
+          const groupCountWidth = groupCountMeasure.widths[groupCountSample];
+          const rowLayout = durationWidth === undefined || (grouped && groupCountWidth === undefined)
+            ? "stacked"
+            : historyRowLayout({
+              availableWidth: availableRowWidth,
+              countBadgeWidth: grouped ? Math.max(34, groupCountWidth + 16) : 0,
+              durationWidth,
+              replayWidth: HISTORY_REPLAY_ACTION_WIDTH,
+              gap: 10
+            });
           const duration = formatDuration(group.totalSeconds);
           const categoryPlace = [entry.categoryName, entry.placeName].filter(Boolean).join(" · ");
           const tagNames = entry.tagNames ?? entry.tags?.map((tag) => tag.name) ?? [];

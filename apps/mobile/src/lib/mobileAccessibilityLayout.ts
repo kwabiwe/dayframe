@@ -1,5 +1,10 @@
 export type HistoryRowLayout = "inline" | "stacked";
 
+export const HISTORY_REPLAY_ACTION_WIDTH = 44;
+export const HISTORY_REPLAY_ACTION_GAP = 3;
+export const HISTORY_STACKED_DURATION_TRAILING_INSET =
+  HISTORY_REPLAY_ACTION_WIDTH + HISTORY_REPLAY_ACTION_GAP;
+
 export function historyRowLayout(input: {
   availableWidth: number;
   countBadgeWidth?: number;
@@ -17,7 +22,7 @@ export function historyRowLayout(input: {
     gap = 10,
     minimumTitleWidth = 96,
     durationWidth,
-    replayWidth = 44,
+    replayWidth = HISTORY_REPLAY_ACTION_WIDTH,
     padding = 0,
   } = input;
   const main = countBadgeWidth + dotWidth + gap * (countBadgeWidth ? 2 : 1) + minimumTitleWidth;
