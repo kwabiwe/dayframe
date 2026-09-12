@@ -77,6 +77,8 @@ export function ReportActivityChart({
       {measuredTicks.probe}
       <Pressable accessible={false} onPress={() => setTooltip(null)}>
         <Text
+          testID="reports-activity-title"
+          numberOfLines={1}
           maxFontSizeMultiplier={REPORT_TEXT_CAP.heading}
           style={[s.title, { color: theme.textPrimary }]}
         >
@@ -360,7 +362,12 @@ function ReportBar({
 }
 const s = StyleSheet.create({
   root: { gap: 16, paddingTop: 24 },
-  title: { fontSize: 18, fontWeight: "600" },
+  title: {
+    fontSize: 18,
+    lineHeight: 24,
+    paddingVertical: 1,
+    fontWeight: "600",
+  },
   plotRow: { flexDirection: "row", gap: 8, paddingTop: 8 },
   plot: { flex: 1, minWidth: 0 },
   tick: {

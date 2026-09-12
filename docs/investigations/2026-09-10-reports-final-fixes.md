@@ -488,3 +488,44 @@ the same full-height anchoring constraint as the date sheet moved it down exactl
 Signed staging identity and physical VoiceOver/Dynamic Type/Reduce Motion
 acceptance must still be recorded against the final commit and must not be
 inferred from simulator or structural tests.
+
+## Final accessibility line-box follow-up (12 September 2026)
+
+Owner screenshots from the signed staging app at maximum accessibility text
+showed the Reports and Activity-over-time headings clipped vertically, the
+custom same-day range arbitrarily truncated, and the shared STAGING badge
+compressed to `STAG…`. This is a presentation-only follow-up: Reports
+accounting, API/cache ownership, chart geometry, sheet motion and every timer,
+Review, Health, Location and sync owner remain unchanged.
+
+The network-disabled iPhone 17 diagnostic at the starting head `89d4d126` and
+ordinary scale 0.941 measured the implicit Reports line at 31.443 points inside
+a 31.667-point Text frame and Activity at 20.213 inside 20.333 points. These
+fractional native line boxes left only 0.224 and 0.120 points of vertical slack,
+respectively, corroborating the clipping seen after capped scaling and animated
+parent placement. The ordinary STAGING text measured 49.393 points inside a
+65.667-point badge, but its shared logo lockup was the flexible shrinking member
+of a 370-point header; the maximum-text screenshot records the resulting
+horizontal compression. The Reports range label received 234 points before the
+follow-up spacing change.
+
+The contained correction preserves the heading cap and adds explicit line
+height plus one point of vertical safety to both affected text roles. The shared
+environment badge now caps at 1.0 and resists flex shrink without increasing the
+header. Reports gives the range label six additional points in the measured
+402-point diagnostic fixture. Presets retain their existing titles; a custom
+single day uses one locale-aware date and custom multi-day ranges use the
+platform's compact locale-aware range formatting when available. The full
+existing `range.title` remains the control's VoiceOver label.
+
+The corrected network-disabled iPhone 17 probe ran at the confirmed maximum
+system font scale **3.571**. Reports measured a 54-point line inside a 56-point
+Text frame; Activity over time measured 36 inside 38 points. The STAGING text
+measured 51.953×12 points inside a non-shrinking 68×22-point badge within the
+unchanged 46-point header. The range label had 240 points available: the old
+duplicated same-day string measured 241.228 points and therefore necessarily
+truncated, while the compact single date measured 110.427 points. This confirms
+both causes and the corrected native geometry without relying on the cap alone.
+The diagnostic entry remains isolated, synthetic and network-disabled; normal
+Expo Router never imports it and no diagnostic UI or logging is added to the
+shipping code path.

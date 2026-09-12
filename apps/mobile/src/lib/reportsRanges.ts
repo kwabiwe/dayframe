@@ -23,6 +23,30 @@ export type ReportRange = ReportWindow & {
   request: ReportSummaryRequest;
 };
 
+/** Compact visual label for the one-line Reports range control.
+ * `ReportRange.title` remains the complete spoken/accessibility description.
+ */
+export function reportRangeDisplayTitle(
+  range: ReportRange,
+  choice: ReportRangeChoice,
+) {
+  if (typeof choice === "string") return range.title;
+  const start = range.start;
+  const end = addLocalDays(range.end, -1);
+  const formatter = new Intl.DateTimeFormat(undefined, {
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+  });
+  if (formatLocalDateKey(start) === formatLocalDateKey(end))
+    return formatter.format(start);
+  if ("formatRange" in formatter)
+    return formatter.formatRange(start, end);
+  // Older Intl implementations still get a deliberate bounded fallback,
+  // rather than the duplicated long-form title being clipped arbitrarily.
+  return `${formatLocalDateKey(start)} – ${formatLocalDateKey(end)}`;
+}
+
 export function startOfLocalDay(date: Date) {
   const result = new Date(date);
   result.setHours(0, 0, 0, 0);

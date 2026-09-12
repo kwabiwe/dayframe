@@ -233,7 +233,7 @@ export type DayframeDashboardTab = "timer" | "calendar" | "reports";
 
 function StagingBadge({ styles }: { styles: MobileStyles }) {
   if (!IS_DAYFRAME_STAGING) return null;
-  return <Text maxFontSizeMultiplier={1.2} numberOfLines={1} accessibilityLabel="Staging environment" style={styles.environmentBadge}>STAGING</Text>;
+  return <Text testID="staging-environment-badge" maxFontSizeMultiplier={1} numberOfLines={1} accessibilityLabel="Staging environment" style={styles.environmentBadge}>STAGING</Text>;
 }
 
 function DashboardBrandLockup({

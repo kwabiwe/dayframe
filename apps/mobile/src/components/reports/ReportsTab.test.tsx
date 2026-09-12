@@ -134,7 +134,10 @@ const render = async () => {
   });
   return tree;
 };
-async function chooseRange(tree: ReturnType<typeof create>, choice: string) {
+async function chooseRange(
+  tree: ReturnType<typeof create>,
+  choice: string | { start: string; end: string },
+) {
   await act(async () =>
     tree.root
       .findAllByType("Pressable" as never)
@@ -149,6 +152,37 @@ async function chooseRange(tree: ReturnType<typeof create>, choice: string) {
   await act(async () => sheet.props.onDismissed(sheet.props.presentationId));
 }
 describe("Revision 3 Reports owner", () => {
+  it("keeps capped headings and the one-line range label accessible at large text", async () => {
+    mocks.fontScale = 3.571;
+    const tree = await render();
+    const title = tree.root.findByProps({ testID: "reports-title" });
+    expect(title.props).toMatchObject({
+      numberOfLines: 1,
+      maxFontSizeMultiplier: 1.5,
+    });
+    const rangeControl = tree.root.findByProps({
+      testID: "reports-range-control",
+    });
+    const rangeLabel = tree.root.findByProps({ testID: "reports-range-label" });
+    expect(rangeLabel.props).toMatchObject({
+      numberOfLines: 1,
+      ellipsizeMode: "tail",
+      maxFontSizeMultiplier: 1.3,
+    });
+    expect(rangeControl.props.accessibilityLabel).toBe(
+      "Choose report dates, Today",
+    );
+    expect(rangeLabel.props.children).toBe("Today");
+    await chooseRange(tree, { start: "2026-09-09", end: "2026-09-09" });
+    const compactLabel = tree.root.findByProps({ testID: "reports-range-label" });
+    const exactControl = tree.root.findByProps({
+      testID: "reports-range-control",
+    });
+    expect(compactLabel.props.children).not.toContain("–");
+    expect(exactControl.props.accessibilityLabel).toContain("–");
+    expect(exactControl.props.accessibilityLabel).toContain("2026");
+    act(() => tree.unmount());
+  });
   it("preserves seconds after Stop while replacing a cached active contribution", async () => {
     const startedAt = new Date(nowMs - 3600000).toISOString();
     mocks.fetch.mockImplementationOnce(async (input: ReportSummaryRequest) => ({

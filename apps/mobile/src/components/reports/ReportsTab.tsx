@@ -37,6 +37,7 @@ import {
 import {
   buildReportRange,
   formatLocalDateKey,
+  reportRangeDisplayTitle,
   type ReportRangeChoice,
 } from "@/lib/reportsRanges";
 import {
@@ -426,6 +427,7 @@ export function ReportsTab({
       : selection.mode === "include"
         ? selection.keys.length
         : null;
+  const rangeDisplayTitle = reportRangeDisplayTitle(range, choice);
   return (
     <View style={styles.tabScreenStack}>
       <View
@@ -441,6 +443,8 @@ export function ReportsTab({
           testID="report-tooltip-outside-title"
         >
           <Text
+            testID="reports-title"
+            numberOfLines={1}
             maxFontSizeMultiplier={REPORT_TEXT_CAP.heading}
             style={styles.reportScreenTitle}
           >
@@ -449,6 +453,7 @@ export function ReportsTab({
         </Pressable>
         <View style={s.row}>
           <Pressable
+            testID="reports-range-control"
             ref={calendarRef}
             accessibilityRole="button"
             accessibilityLabel={`Choose report dates, ${range.title}`}
@@ -463,12 +468,13 @@ export function ReportsTab({
           >
             <CalendarGlyph kind="calendar" color={theme.textPrimary} />
             <Text
+              testID="reports-range-label"
               numberOfLines={1}
               ellipsizeMode="tail"
               maxFontSizeMultiplier={REPORT_TEXT_CAP.control}
               style={[s.rangeLabel, { color: theme.textPrimary }]}
             >
-              {range.title}
+              {rangeDisplayTitle}
             </Text>
           </Pressable>
           <Pressable
@@ -676,9 +682,9 @@ const s = StyleSheet.create({
     minHeight: 44,
     flexDirection: "row",
     alignItems: "center",
-    gap: 8,
+    gap: 6,
     borderRadius: 12,
-    paddingHorizontal: 12,
+    paddingHorizontal: 10,
     paddingVertical: 8,
   },
   rangeLabel: { flex: 1, minWidth: 0, fontSize: 15, fontWeight: "600" },

@@ -450,9 +450,11 @@ function createStyles(theme: MobileTheme) {
       borderRadius: 999,
       color: theme.background,
       fontSize: 10,
+      lineHeight: 12,
       fontWeight: "800",
       letterSpacing: 0.6,
       overflow: "hidden",
+      flexShrink: 0,
       paddingHorizontal: 8,
       paddingVertical: 5
     },
@@ -1192,6 +1194,8 @@ function createStyles(theme: MobileTheme) {
       color: theme.textPrimary,
       fontFamily: monoFont,
       fontSize: 28,
+      lineHeight: 36,
+      paddingVertical: 1,
       fontWeight: "700",
       letterSpacing: -0.35
     },

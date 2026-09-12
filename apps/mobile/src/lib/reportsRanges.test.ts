@@ -6,6 +6,7 @@ import {
   calendarDayCount,
   formatLocalDateKey,
   parseLocalDate,
+  reportRangeDisplayTitle,
   validateCustomRange,
 } from "./reportsRanges";
 
@@ -107,5 +108,41 @@ describe("Revision 2 local report ranges", () => {
     expect(validateCustomRange("2026-09-11", "2026-09-12", now).error).toContain(
       "Future",
     );
+  });
+  it("uses deliberate compact one-line display labels without changing the full title", () => {
+    const now = +new Date(2026, 11, 31);
+    const sameDayChoice = { start: "2026-09-11", end: "2026-09-11" };
+    const sameDay = buildReportRange(sameDayChoice, now);
+    expect(sameDay.title.split("2026")).toHaveLength(3);
+    expect(reportRangeDisplayTitle(sameDay, sameDayChoice)).toBe(
+      new Intl.DateTimeFormat(undefined, {
+        day: "numeric",
+        month: "short",
+        year: "numeric",
+      }).format(sameDay.start),
+    );
+
+    const sameMonthChoice = { start: "2026-09-11", end: "2026-09-17" };
+    const sameMonthDisplay = reportRangeDisplayTitle(
+      buildReportRange(sameMonthChoice, now),
+      sameMonthChoice,
+    );
+    expect(sameMonthDisplay).toContain("2026");
+    expect(sameMonthDisplay.length).toBeLessThan(
+      buildReportRange(sameMonthChoice, now).title.length,
+    );
+
+    const crossMonthChoice = { start: "2026-09-28", end: "2026-10-04" };
+    const crossMonthDisplay = reportRangeDisplayTitle(
+      buildReportRange(crossMonthChoice, now),
+      crossMonthChoice,
+    );
+    expect(crossMonthDisplay).toContain("2026");
+    expect(crossMonthDisplay.length).toBeLessThan(
+      buildReportRange(crossMonthChoice, now).title.length,
+    );
+    expect(
+      reportRangeDisplayTitle(buildReportRange("today", now), "today"),
+    ).toBe("Today");
   });
 });

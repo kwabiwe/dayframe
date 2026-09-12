@@ -49,6 +49,20 @@ const buckets = [0, 7200].map((seconds, index) => ({
   seconds,
 }));
 describe("Activity chart", () => {
+  it("keeps the capped one-line heading in a line box with vertical safety", () => {
+    const { tree } = mount();
+    const title = tree.root.findByProps({ testID: "reports-activity-title" });
+    expect(title.props).toMatchObject({
+      numberOfLines: 1,
+      maxFontSizeMultiplier: 1.5,
+    });
+    expect(title.props.style[0]).toMatchObject({
+      fontSize: 18,
+      lineHeight: 24,
+      paddingVertical: 1,
+    });
+    act(() => tree.unmount());
+  });
   it("shrinks its current-label gutter and keeps labels anchored to the content left", () => {
     let tree!: ReturnType<typeof create>;
     const render = (seconds: number) => (

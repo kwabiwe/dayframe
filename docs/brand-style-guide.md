@@ -197,11 +197,17 @@ Mobile Reports Revision 3.2 is an explicit dense-layout exception: category rows
 remain one line at 320–430-point widths and maximum text size. Only long names
 ellipsise; complete percentages and HH:MM:SS values occupy reserved trailing
 columns and retain full spoken names/durations. Use local caps of 1.5 for headings,
-1.3 for controls, 1.35 for names, 1.2 for numeric/centre/badge/axis roles and 1.25
-for calendar days. Explanatory text retains system scaling. This owner-approved
+1.3 for controls, 1.35 for names, 1.2 for numeric/centre/filter-badge/axis roles
+and 1.25 for calendar days. The small shared STAGING environment badge is capped
+at 1.0 and must resist flex shrink so its complete one-line status remains visible;
+its VoiceOver label remains `Staging environment`. Explanatory text retains system
+scaling. This owner-approved
 trade-off is not a claim of unrestricted Dynamic Type enlargement. Do not suppress
 scaling globally, manually scale twice, or constrain glyphs with incompatible
-line metrics. Keep one bounded donut total, not duplicate enlarged values.
+line metrics. Capped headings still require explicit line-box safety at the cap.
+The one-line Reports range control uses a locale-aware compact visual form for
+custom ranges while exposing the complete range through its accessibility label.
+Keep one bounded donut total, not duplicate enlarged values.
 Place these informational rows in a zero-gap divider list and target a measured
 38–42-point pitch at ordinary text size with minimum-only height; do not shrink
 the 44-point targets of actual controls. Sort exact duration descending with
