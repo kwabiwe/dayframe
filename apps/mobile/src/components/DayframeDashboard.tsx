@@ -31,7 +31,7 @@ import Reanimated, {
   useAnimatedStyle,
   type SharedValue
 } from "react-native-reanimated";
-import Svg, { Circle, Defs, G, Path, Pattern, Rect } from "react-native-svg";
+import Svg, { Circle, Path } from "react-native-svg";
 import { router, useFocusEffect, useIsFocused } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
 import {
@@ -47,6 +47,7 @@ import { DayframeCalendarView } from "../../modules/dayframe-calendar";
 import { ActiveTimerEditSheet } from "@/components/ActiveTimerEditSheet";
 import { ConnectivityStatusIndicator } from "@/components/ConnectivityStatusStrip";
 import { TagMetadata } from "@/components/TagMetadata";
+import { ReportsTab } from "@/components/reports/ReportsTab";
 import { DayframeBrand } from "@/components/brand";
 import {
   CompactReplayPlayGlyph,
@@ -71,6 +72,7 @@ import {
   type TimeEntryUpdatePatch
 } from "@/lib/api";
 import { handleDayframeUrl } from "@/lib/deepLinks";
+import { DAYFRAME_BACKEND_ID } from "@/lib/backendIdentity";
 import { resolveCalendarManualEntryRequest } from "@/lib/calendarManualEntry";
 import { IS_DAYFRAME_STAGING } from "@/lib/config";
 import { useConnectivity } from "@/lib/connectivity";
@@ -171,12 +173,7 @@ import {
   type NativeCalendarActionKind,
   type NativeCalendarEntry
 } from "@/lib/nativeCalendarPresentation";
-import {
-  REVIEW_COPY,
-  hasReviewNeededActivityForRange,
-  isOpenReviewItem,
-  isReviewNeededEntry
-} from "@/lib/review";
+import { isOpenReviewItem, isReviewNeededEntry } from "@/lib/review";
 import { drainNativeShortcutQueue, syncShortcutCatalog } from "@/lib/shortcuts";
 import {
   MOBILE_MOTION,
@@ -236,7 +233,7 @@ export type DayframeDashboardTab = "timer" | "calendar" | "reports";
 
 function StagingBadge({ styles }: { styles: MobileStyles }) {
   if (!IS_DAYFRAME_STAGING) return null;
-  return <Text style={styles.environmentBadge}>STAGING</Text>;
+  return <Text testID="staging-environment-badge" maxFontSizeMultiplier={1} numberOfLines={1} accessibilityLabel="Staging environment" style={styles.environmentBadge}>STAGING</Text>;
 }
 
 function DashboardBrandLockup({
@@ -266,16 +263,6 @@ function DashboardBrandLockup({
     </View>
   );
 }
-type ReportRange = "today" | "week";
-type ReportChartView = "pie" | "bars";
-type SummarySegment = {
-  key: string;
-  categoryName: string;
-  seconds: number;
-  share: number;
-  color: string;
-  isUncategorized: boolean;
-};
 const RECENT_LAST_STOP_WINDOW_MS = 24 * 60 * 60 * 1000;
 const HISTORY_DELETE_ACTION_BUTTON_WIDTH = 64;
 const HISTORY_DELETE_ACTION_GAP = 14;
@@ -296,11 +283,9 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
   const [authSubmitting, setAuthSubmitting] = useState(false);
   const [authState, setAuthState] = useState<AuthState>("checking");
   const [selectedDayKey, setSelectedDayKey] = useState(() => formatDateKey(new Date()));
-  const [reportRange, setReportRange] = useState<ReportRange>("today");
   const [calendarEditEntry, setCalendarEditEntry] = useState<NativeCalendarEntry | null>(null);
   const [calendarEditPresentation, setCalendarEditPresentation] = useState<TimeEntrySheetPresentation | null>(null);
   const [calendarTransitionDirection, setCalendarTransitionDirection] = useState(1);
-  const [reportChartView, setReportChartView] = useState<ReportChartView>("pie");
   const [authView, setAuthView] = useState<AuthView>("login");
   const [authEmail, setAuthEmail] = useState("");
   const [authPassword, setAuthPassword] = useState("");
@@ -526,16 +511,6 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
     refreshQueued.current = false;
     void loadRef.current({ silent: true });
   }
-
-  const changeReportRange = useCallback((nextRange: ReportRange) => {
-    scheduleLayoutTransition(reduceMotion);
-    setReportRange(nextRange);
-  }, [reduceMotion]);
-
-  const changeReportChart = useCallback((nextView: ReportChartView) => {
-    scheduleLayoutTransition(reduceMotion);
-    setReportChartView(nextView);
-  }, [reduceMotion]);
 
   async function hydrateTimerEntryIdCorrelations() {
     if (timerIdCorrelationsLoaded.current) return;
@@ -1389,10 +1364,6 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
       selectedDayKey,
       theme
     ]
-  );
-  const reports = useMemo(
-    () => buildReports(data, reportRange, todayKey, now, theme.mode),
-    [data, now, reportRange, theme.mode, todayKey]
   );
   useEffect(() => {
     if (liveActivityReconciliationDeferred.current) return;
@@ -2610,7 +2581,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
     return (
       <SafeAreaView collapsable={false} edges={["top", "left", "right"]} style={styles.safeArea}>
         <ScrollView
-          contentContainerStyle={styles.container}
+          contentContainerStyle={[styles.container, styles.reportsScrollContent]}
           directionalLockEnabled
           keyboardShouldPersistTaps="handled"
           refreshControl={
@@ -2635,20 +2606,16 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
             </Pressable>
           </View>
 
-          <ReportsTab
-            chartView={reportChartView}
-            dailyBars={reports.dailyBars}
-            range={reportRange}
-            segments={reports.segments}
-            hasSuggestedActivity={reports.hasSuggestedActivity}
-            onChartViewChange={changeReportChart}
-            styles={styles}
-            theme={theme}
-            coveredTotal={reports.coveredTotal}
-            additionalOverlapTotal={reports.additionalOverlapTotal}
-            loggedTotal={reports.loggedTotal}
-            onRangeChange={changeReportRange}
-          />
+          {data ? (
+            <ReportsTab
+              key={`${DAYFRAME_BACKEND_ID ?? data.serverBuild?.backendId ?? "unknown-backend"}:${data.workspace.id}:${data.user.id}`}
+              data={data}
+              isFocused={isFocused}
+              nowMs={now}
+              styles={styles}
+              theme={theme}
+            />
+          ) : null}
           </Animated.View>
         </ScrollView>
       </SafeAreaView>
@@ -2765,213 +2732,6 @@ export function DayframeDashboardScreen({ tab }: { tab: DayframeDashboardTab }) 
   const isFocused = useIsFocused();
   if (!dashboard) throw new Error("DayframeDashboardScreen must be used within DayframeDashboardProvider");
   return dashboard.renderTab(tab, isFocused);
-}
-
-function ReportsTab({
-  additionalOverlapTotal,
-  chartView,
-  dailyBars,
-  hasSuggestedActivity,
-  onChartViewChange,
-  onRangeChange,
-  range,
-  segments,
-  styles,
-  theme,
-  coveredTotal,
-  loggedTotal
-}: {
-  additionalOverlapTotal: number;
-  chartView: ReportChartView;
-  dailyBars: Array<{ key: string; label: string; seconds: number }>;
-  hasSuggestedActivity: boolean;
-  onChartViewChange: (view: ReportChartView) => void;
-  onRangeChange: (range: ReportRange) => void;
-  range: ReportRange;
-  segments: SummarySegment[];
-  styles: MobileStyles;
-  theme: MobileTheme;
-  coveredTotal: number;
-  loggedTotal: number;
-}) {
-  const maxSegmentSeconds = Math.max(1, ...segments.map((segment) => segment.seconds));
-  const maxDailySeconds = Math.max(1, ...dailyBars.map((bar) => bar.seconds));
-
-  return (
-    <View style={styles.tabScreenStack}>
-      <View style={styles.panel}>
-        <Text style={styles.reportScreenTitle}>Reports</Text>
-        <View style={styles.reportRangeRow}>
-          {(["today", "week"] as const).map((option) => {
-            const selected = option === range;
-            return (
-              <Pressable
-                key={option}
-                accessibilityLabel={`Show ${option === "today" ? "today" : "this week"} reports`}
-                accessibilityRole="button"
-                accessibilityState={{ selected }}
-                onPress={() => onRangeChange(option)}
-                style={({ pressed }) => [
-                  styles.reportRangeChip,
-                  selected ? styles.reportRangeChipSelected : null,
-                  pressed ? styles.buttonPressed : null
-                ]}
-              >
-                <Text style={[
-                  styles.reportRangeChipText,
-                  selected ? styles.reportRangeChipTextSelected : null
-                ]}>
-                  {option === "today" ? "Today" : "Week"}
-                </Text>
-              </Pressable>
-            );
-          })}
-        </View>
-
-        <View style={styles.reportTotalsRow}>
-          <View style={styles.reportTotalCard}>
-            <Text style={styles.label}>Total logged</Text>
-            <Text style={styles.reportTotalValue}>{formatDuration(loggedTotal)}</Text>
-          </View>
-          <View style={styles.reportTotalCard}>
-            <Text style={styles.label}>Time covered</Text>
-            <Text style={styles.reportTotalValue}>{formatDuration(coveredTotal)}</Text>
-          </View>
-        </View>
-        <Text style={styles.muted}>
-          {additionalOverlapTotal > 0
-            ? `${formatDuration(additionalOverlapTotal)} additional overlapping activity. Each entry counts in full; covered time counts concurrent entries once.`
-            : "Each entry counts in full. Covered time counts concurrent entries once; there are no overlaps in this range."}
-        </Text>
-      </View>
-
-      <View style={styles.lifecyclePanel}>
-        <View style={styles.summaryHeader}>
-          <View>
-            <Text style={styles.label}>Category breakdown</Text>
-            <Text style={styles.sectionTitle}>{range === "today" ? "Today" : "This week"}</Text>
-          </View>
-        </View>
-        {hasSuggestedActivity ? (
-          <Text style={styles.reviewNote}>{REVIEW_COPY.suggestedNote}</Text>
-        ) : null}
-
-        {segments.length === 0 ? (
-          <Text style={styles.muted}>No tracked time yet.</Text>
-        ) : (
-          <>
-            <View style={styles.reportChartSwitchRow}>
-              {(["pie", "bars"] as const).map((option) => {
-                const selected = option === chartView;
-                return (
-                  <Pressable
-                    key={option}
-                    accessibilityLabel={`Show category ${option === "pie" ? "pie chart" : "bar chart"}`}
-                    accessibilityRole="button"
-                    accessibilityState={{ selected }}
-                    onPress={() => onChartViewChange(option)}
-                    style={({ pressed }) => [
-                      styles.reportChartSwitchButton,
-                      selected ? styles.reportChartSwitchButtonSelected : null,
-                      pressed ? styles.buttonPressed : null
-                    ]}
-                  >
-                    <Text style={[
-                      styles.reportChartSwitchText,
-                      selected ? styles.reportChartSwitchTextSelected : null
-                    ]}>
-                      {option === "pie" ? "Pie" : "Bars"}
-                    </Text>
-                  </Pressable>
-                );
-              })}
-            </View>
-            {chartView === "pie" ? (
-              <>
-                <View style={styles.chartWrap}>
-                  <DonutChart progress={1} segments={segments} styles={styles} theme={theme} total={segments.reduce((sum, segment) => sum + segment.seconds, 0)} />
-                </View>
-                <View style={styles.legendList}>
-                  {segments.map((segment) => (
-                    <View key={segment.key} style={styles.legendRow}>
-                      <SegmentSwatch segment={segment} styles={styles} theme={theme} variant="legend" />
-                      <View style={styles.legendText}>
-                        <Text style={styles.legendPlace} numberOfLines={1}>{segment.categoryName}</Text>
-                        <Text style={styles.legendProject}>Category</Text>
-                      </View>
-                      <View style={styles.legendNumbers}>
-                        <Text style={styles.legendDuration}>{formatDuration(segment.seconds)}</Text>
-                        <Text style={styles.legendShare}>{segment.share}%</Text>
-                      </View>
-                    </View>
-                  ))}
-                </View>
-              </>
-            ) : (
-              <View style={styles.reportCategoryList}>
-                {segments.map((segment) => (
-                  <View key={segment.key} style={styles.reportCategoryRow}>
-                    <SegmentSwatch segment={segment} styles={styles} theme={theme} variant="report" />
-                    <View style={styles.reportCategoryBody}>
-                      <View style={styles.reportCategoryHeader}>
-                        <Text style={styles.legendPlace} numberOfLines={1}>{segment.categoryName}</Text>
-                        <Text style={styles.legendDuration}>{formatDuration(segment.seconds)}</Text>
-                      </View>
-                      <View style={styles.reportBarTrack}>
-                        <View
-                          style={[
-                            styles.reportBarFill,
-                            segment.isUncategorized ? styles.reportBarFillUncategorized : null,
-                            {
-                              backgroundColor: segment.color,
-                              width: `${Math.max(4, Math.round((segment.seconds / maxSegmentSeconds) * 100))}%`
-                            }
-                          ]}
-                        />
-                      </View>
-                      <Text style={styles.legendShare}>{segment.share}%</Text>
-                    </View>
-                  </View>
-                ))}
-              </View>
-            )}
-          </>
-        )}
-      </View>
-
-      <View style={styles.panel}>
-        <View style={styles.summaryHeader}>
-          <View>
-            <Text style={styles.label}>Daily bars</Text>
-            <Text style={styles.sectionTitle}>Current week</Text>
-          </View>
-        </View>
-        <View style={styles.reportDailyChart}>
-          {dailyBars.map((bar) => (
-            <View
-              key={bar.key}
-              accessibilityLabel={`${bar.label}: ${formatDuration(bar.seconds)}`}
-              accessible
-              style={styles.reportDailySlot}
-            >
-              <View style={styles.reportDailyTrack}>
-                <View
-                  style={[
-                    styles.reportDailyFill,
-                    {
-                      height: `${Math.max(4, Math.round((bar.seconds / maxDailySeconds) * 100))}%`,
-                      backgroundColor: bar.seconds > 0 ? theme.accent : theme.borderStrong
-                    }
-                  ]}
-                />
-              </View>
-              <Text style={styles.reportDailyLabel}>{bar.label}</Text>
-            </View>
-          ))}
-        </View>
-      </View>
-    </View>
-  );
 }
 
 function SettingsGlyph({ color }: { color: string }) {
@@ -3398,175 +3158,10 @@ function historyGroupMeta(entry: TimeEntry, count: number) {
   return `${count} entries · ${category}`;
 }
 
-function DonutChart({
-  progress,
-  segments,
-  styles,
-  theme,
-  total
-}: {
-  progress: number;
-  segments: SummarySegment[];
-  styles: MobileStyles;
-  theme: MobileTheme;
-  total: number;
-}) {
-  const size = 184;
-  const center = size / 2;
-  const outerRadius = 84;
-  const innerRadius = 57;
-  let cursor = 0;
-
-  return (
-    <View
-      accessibilityLabel={`Tracked time total ${formatDuration(total)}. Category details follow the chart.`}
-      accessibilityRole="image"
-      accessible
-      style={styles.chartBox}
-    >
-      <Svg
-        accessibilityElementsHidden
-        importantForAccessibility="no-hide-descendants"
-        width={size}
-        height={size}
-        viewBox={`0 0 ${size} ${size}`}
-      >
-        <Defs>
-          <Pattern id="uncategorizedHatch" patternUnits="userSpaceOnUse" width={8} height={8}>
-            <Rect width={8} height={8} fill={uncategorizedFillColor(theme.mode)} />
-            <Path
-              d="M-2 8 8 -2M2 10 10 2"
-              stroke={uncategorizedStripeColor(theme.mode)}
-              strokeLinecap="round"
-              strokeWidth={1.4}
-            />
-          </Pattern>
-        </Defs>
-        <Circle cx={center} cy={center} r={outerRadius} fill={theme.chartTrack} />
-        <Circle cx={center} cy={center} r={innerRadius} fill={theme.surfaceRaised} />
-        <G>
-          {total > 0
-            ? segments.map((segment) => {
-                const fullSweep = (segment.seconds / total) * 360;
-                const start = cursor;
-                const gap = fullSweep > 8 ? 2 : 0;
-                const end = start + Math.max(0, fullSweep * progress - gap);
-                cursor += fullSweep;
-                if (end <= start) return null;
-
-                return (
-                  <Path
-                    key={segment.key}
-                    d={donutSlicePath(center, center, outerRadius, innerRadius, start, end)}
-                    fill={segment.isUncategorized ? "url(#uncategorizedHatch)" : segment.color}
-                    stroke={segment.isUncategorized ? uncategorizedStripeColor(theme.mode) : undefined}
-                    strokeOpacity={segment.isUncategorized ? 0.65 : undefined}
-                    strokeWidth={segment.isUncategorized ? 0.75 : undefined}
-                  />
-                );
-              })
-            : null}
-        </G>
-      </Svg>
-      <View style={styles.chartCenter}>
-        <Text style={styles.chartCenterLabel}>Total</Text>
-        <Text style={styles.chartCenterValue}>{formatDuration(total)}</Text>
-      </View>
-    </View>
-  );
-}
-
-function SegmentSwatch({
-  segment,
-  styles,
-  theme,
-  variant
-}: {
-  segment: SummarySegment;
-  styles: MobileStyles;
-  theme: MobileTheme;
-  variant: "legend" | "report";
-}) {
-  const swatchStyle = variant === "legend" ? styles.legendSwatch : styles.reportCategorySwatch;
-  if (!segment.isUncategorized) {
-    return <View style={[swatchStyle, { backgroundColor: segment.color }]} />;
-  }
-
-  const width = 12;
-  const height = variant === "legend" ? 32 : 36;
-  return (
-    <View style={[swatchStyle, styles.uncategorizedSwatch]}>
-      <Svg width={width} height={height} viewBox={`0 0 ${width} ${height}`}>
-        <Rect width={width} height={height} fill={uncategorizedFillColor(theme.mode)} />
-        {Array.from({ length: 8 }, (_, index) => (
-          <Path
-            key={index}
-            d={`M${index * 6 - height} ${height} L${index * 6} 0`}
-            stroke={uncategorizedStripeColor(theme.mode)}
-            strokeWidth={1.4}
-          />
-        ))}
-      </Svg>
-    </View>
-  );
-}
-
 function dedupeEntriesById(entries: TimeEntry[]) {
   const byId = new Map<string, TimeEntry>();
   for (const entry of entries) byId.set(entry.id, entry);
   return Array.from(byId.values());
-}
-
-function buildReports(
-  data: MobileBootstrap | null,
-  range: ReportRange,
-  todayKey: string,
-  now: number,
-  mode: MobileTheme["mode"]
-) {
-  const weekStart = data?.dateRange?.weekStart ? new Date(data.dateRange.weekStart) : startOfWeekDate(new Date(now));
-  const weekEnd = addDaysToDate(weekStart, 7);
-  const todayStart = dateFromKey(todayKey);
-  const todayEnd = addDaysToDate(todayStart, 1);
-  const dayEntries = data
-    ? mergeActiveEntry(data.dayEntries ?? data.entries, data.activeEntry)
-    : [];
-  const weekEntries = data
-    ? mergeActiveEntry(data.weekEntries ?? data.entries, data.activeEntry)
-    : [];
-  const selectedEntries = range === "today" ? dayEntries : weekEntries;
-  const rangeStart = range === "today" ? todayStart : weekStart;
-  const rangeEnd = range === "today" ? todayEnd : weekEnd;
-  const confirmedDayEntries = dayEntries.filter((entry) => !isReviewNeededEntry(entry));
-  const confirmedWeekEntries = weekEntries.filter((entry) => !isReviewNeededEntry(entry));
-  const confirmedSelectedEntries = selectedEntries.filter((entry) => !isReviewNeededEntry(entry));
-  const todayTotal = sumRangeSeconds(confirmedDayEntries, todayStart, todayEnd, now);
-  const weekTotal = sumRangeSeconds(confirmedWeekEntries, weekStart, weekEnd, now);
-  const selectedAnalysis = analyzeTimeIntervals(
-    confirmedSelectedEntries.map((entry) => ({
-      id: entry.id,
-      startedAt: entry.startedAt,
-      stoppedAt: entry.stoppedAt
-    })),
-    { range: { start: rangeStart, end: rangeEnd }, now }
-  );
-
-  return {
-    todayTotal,
-    weekTotal,
-    loggedTotal: selectedAnalysis.loggedSeconds,
-    coveredTotal: selectedAnalysis.coveredSeconds,
-    additionalOverlapTotal: selectedAnalysis.additionalOverlappingActivitySeconds,
-    segments: buildCategorySegments(confirmedSelectedEntries, rangeStart, rangeEnd, now, mode),
-    dailyBars: buildDailyBars(confirmedWeekEntries, weekStart, now),
-    hasSuggestedActivity: hasReviewNeededActivityForRange({
-      entries: selectedEntries,
-      now,
-      rangeEnd,
-      rangeStart,
-      reviewItems: data?.reviewItems ?? []
-    })
-  };
 }
 
 function mergeActiveEntry(entries: TimeEntry[], activeEntry: MobileBootstrap["activeEntry"]) {
@@ -3642,76 +3237,6 @@ function createManualDraftEntry(nowMs: number): TimeEntry {
   };
 }
 
-function buildCategorySegments(
-  entries: TimeEntry[],
-  rangeStart: Date,
-  rangeEnd: Date,
-  now: number,
-  mode: MobileTheme["mode"]
-): SummarySegment[] {
-  const totals = new Map<string, Omit<SummarySegment, "share">>();
-
-  for (const entry of entries) {
-    const seconds = entryOverlapSeconds(entry, rangeStart, rangeEnd, now);
-    if (seconds <= 0) continue;
-    const categoryName = entry.categoryName ?? "Uncategorized";
-    const key = entry.categoryId ?? "uncategorized";
-    const isUncategorized = !entry.categoryId && !entry.categoryName;
-    const current = totals.get(key);
-    totals.set(key, {
-      key,
-      categoryName,
-      seconds: (current?.seconds ?? 0) + seconds,
-      color: current?.color ?? entryCategoryColor(entry, mode),
-      isUncategorized: current?.isUncategorized ?? isUncategorized
-    });
-  }
-
-  const total = Array.from(totals.values()).reduce((sum, segment) => sum + segment.seconds, 0);
-  return Array.from(totals.values())
-    .map((segment) => ({
-      ...segment,
-      share: total > 0 ? Math.round((segment.seconds / total) * 100) : 0
-    }))
-    .sort((a, b) => b.seconds - a.seconds)
-    .slice(0, 8);
-}
-
-function buildDailyBars(entries: TimeEntry[], weekStart: Date, now: number) {
-  return Array.from({ length: 7 }, (_, index) => {
-    const day = addDaysToDate(weekStart, index);
-    const key = formatDateKey(day);
-    return {
-      key,
-      label: formatWeekday(day),
-      seconds: sumStartedInDaySeconds(entries, key, now)
-    };
-  });
-}
-
-function sumStartedInDaySeconds(entries: TimeEntry[], dayKey: string, now: number) {
-  return entries.reduce((sum, entry) => {
-    if (formatDateKey(new Date(entry.startedAt)) !== dayKey) return sum;
-    return sum + entryDurationSeconds(entry, now);
-  }, 0);
-}
-
-function sumRangeSeconds(entries: TimeEntry[], rangeStart: Date, rangeEnd: Date, now: number) {
-  return entries.reduce((sum, entry) => {
-    return sum + entryOverlapSeconds(entry, rangeStart, rangeEnd, now);
-  }, 0);
-}
-
-function entryOverlapSeconds(entry: TimeEntry, rangeStart: Date, rangeEnd: Date, now: number) {
-  const startedAt = new Date(entry.startedAt);
-  const stoppedAt = entry.stoppedAt ? new Date(entry.stoppedAt) : new Date(now);
-  if (Number.isNaN(startedAt.getTime()) || Number.isNaN(stoppedAt.getTime())) return 0;
-  const overlapStart = Math.max(startedAt.getTime(), rangeStart.getTime());
-  const overlapEnd = Math.min(stoppedAt.getTime(), rangeEnd.getTime());
-  if (overlapEnd <= overlapStart) return 0;
-  return Math.floor((overlapEnd - overlapStart) / 1000);
-}
-
 function entryDurationSeconds(entry: TimeEntry, now: number) {
   const startedAt = new Date(entry.startedAt).getTime();
   if (entry.stoppedAt) return Math.max(0, entry.durationSeconds);
@@ -3747,10 +3272,6 @@ function formatLongDay(date: Date) {
   });
 }
 
-function formatWeekday(date: Date) {
-  return date.toLocaleDateString(undefined, { weekday: "short" });
-}
-
 function formatTimeOfDay(date: Date) {
   if (Number.isNaN(date.getTime())) return "--:--";
   return `${pad2(date.getHours())}:${pad2(date.getMinutes())}`;
@@ -3777,15 +3298,6 @@ function clamp(value: number, min: number, max: number) {
   return Math.min(max, Math.max(min, value));
 }
 
-function startOfWeekDate(date: Date) {
-  const copy = new Date(date);
-  const day = copy.getDay();
-  const diff = day === 0 ? -6 : 1 - day;
-  copy.setDate(copy.getDate() + diff);
-  copy.setHours(0, 0, 0, 0);
-  return copy;
-}
-
 function addDaysToDate(date: Date, days: number) {
   const copy = new Date(date);
   copy.setDate(copy.getDate() + days);
@@ -3808,10 +3320,6 @@ function sameTimerStopOwner(left: TimerStopOwner, right: TimerStopOwner) {
 
 function uncategorizedFillColor(mode: MobileTheme["mode"]) {
   return mode === "dark" ? "#323946" : "#EEF2F6";
-}
-
-function uncategorizedStripeColor(mode: MobileTheme["mode"]) {
-  return mode === "dark" ? "#8792A3" : "#98A4B3";
 }
 
 function recentStoppedEntryTime(entries: TimeEntry[], activeEntry: MobileBootstrap["activeEntry"]) {
@@ -3841,38 +3349,6 @@ function recentStoppedEntryTime(entries: TimeEntry[], activeEntry: MobileBootstr
 
 function pad2(value: number) {
   return value.toString().padStart(2, "0");
-}
-
-function donutSlicePath(
-  cx: number,
-  cy: number,
-  outerRadius: number,
-  innerRadius: number,
-  startAngle: number,
-  endAngle: number
-) {
-  const safeEndAngle = Math.min(endAngle, startAngle + 359.99);
-  const outerStart = polarToCartesian(cx, cy, outerRadius, safeEndAngle);
-  const outerEnd = polarToCartesian(cx, cy, outerRadius, startAngle);
-  const innerStart = polarToCartesian(cx, cy, innerRadius, startAngle);
-  const innerEnd = polarToCartesian(cx, cy, innerRadius, safeEndAngle);
-  const largeArcFlag = safeEndAngle - startAngle <= 180 ? "0" : "1";
-
-  return [
-    `M ${outerStart.x} ${outerStart.y}`,
-    `A ${outerRadius} ${outerRadius} 0 ${largeArcFlag} 0 ${outerEnd.x} ${outerEnd.y}`,
-    `L ${innerStart.x} ${innerStart.y}`,
-    `A ${innerRadius} ${innerRadius} 0 ${largeArcFlag} 1 ${innerEnd.x} ${innerEnd.y}`,
-    "Z"
-  ].join(" ");
-}
-
-function polarToCartesian(cx: number, cy: number, radius: number, angleInDegrees: number) {
-  const angleInRadians = ((angleInDegrees - 90) * Math.PI) / 180;
-  return {
-    x: cx + radius * Math.cos(angleInRadians),
-    y: cy + radius * Math.sin(angleInRadians)
-  };
 }
 
 function formatClockDuration(seconds: number) {

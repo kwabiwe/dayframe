@@ -205,6 +205,7 @@ describe("time-entry range query", () => {
     expect(statement.text).toContain('te.updated_at as "updatedAt"');
     expect(statement.text).toContain('coalesce(pl.name, te.place_label) as "placeName"');
     expect(statement.text).toContain('end as "placeKind"');
+    expect(statement.text).toContain("order by te.started_at desc, te.id desc");
     expect(statement.values).toEqual([
       session.workspaceId,
       session.userId,

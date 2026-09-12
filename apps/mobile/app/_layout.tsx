@@ -1,10 +1,11 @@
 import { DarkTheme, DefaultTheme, Stack, ThemeProvider } from "expo-router";
-import { useMemo } from "react";
-import { StatusBar, View } from "react-native";
+import { useCallback, useMemo, useState, type ReactNode } from "react";
+import { StatusBar, StyleSheet, View } from "react-native";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 import { ConnectivityStatusProvider } from "@/components/ConnectivityStatusStrip";
 import { ConnectivityRecoveryOwner } from "@/components/ConnectivityRecoveryOwner";
+import { ReportsSheetPortalContext } from "@/components/reports/ReportsSheetPortal";
 import { ConnectivityProvider } from "@/lib/connectivity";
 import { MobileThemeProvider, useMobileTheme } from "@/lib/mobileTheme";
 import { MOBILE_MOTION, useReduceMotionPreference } from "@/lib/motion";
@@ -27,11 +28,28 @@ export default function RootLayout() {
 }
 
 function ConnectivityAppShell() {
+  const [reportsSheet, setReportsSheet] = useState<ReactNode>(null);
+  const presentReportsSheet = useCallback(
+    (sheet: ReactNode) => setReportsSheet(sheet),
+    [],
+  );
+  const reportsSheetPortal = useMemo(
+    () => ({
+      isPresented: Boolean(reportsSheet),
+      present: presentReportsSheet,
+    }),
+    [presentReportsSheet, reportsSheet],
+  );
   return (
-    <View style={{ flex: 1 }}>
-      <ThemedStack />
-      <ConnectivityRecoveryOwner />
-    </View>
+    <ReportsSheetPortalContext.Provider value={reportsSheetPortal}>
+      <View style={{ flex: 1 }}>
+        <ThemedStack />
+        <ConnectivityRecoveryOwner />
+        {reportsSheet ? (
+          <View style={StyleSheet.absoluteFill}>{reportsSheet}</View>
+        ) : null}
+      </View>
+    </ReportsSheetPortalContext.Provider>
   );
 }
 

@@ -48,6 +48,47 @@ Use this when working on frontend components.
 - Mobile connectivity status has one root state/announcement owner and one fixed 44-point visual slot immediately after the Dayframe wordmark in the shared primary-tab header. The slot remains reserved when settled so status transitions never move the wordmark, staging badge, Settings action or page content. Confirmed offline uses a neutral `textSecondary` cloud-slash and supersedes the other one-slot states. Confirmed online durable work waiting for connectivity, dependency, or retry is background-only and leaves the slot visually empty; only a live reconnect/recovery delivery attempt shows and rotates neutral circular arrows. A live account-owned pending-count transition from non-zero to zero uses a neutral cloud-check for about two seconds before the slot becomes visually empty. Permanent timer Stop or time-entry Edit/Delete rejection uses a persistent neutral cloud-X button that opens Settings > Sync & diagnostics whenever offline is not current. Rejected Stops restore server timer truth and appear in the existing diagnostics list with plain Retry Stop and Discard Stop actions. The root announces each distinct transition once; the focused tab's icon remains one manually revisitable labelled element without duplicate SVG traversal. Reduce Motion preserves short opacity changes but stops rotation. Never infer completion from reachability/pass outcome or use status to disable an offline-capable action.
 - Move location and HealthKit permission controls to onboarding and Settings.
 
+## Mobile Reports Revision 3.2
+
+- One compact mobile Reports surface has one range chooser and one funnel/count action. Equal compact Today / Week / Month / Year controls sit directly below the shared date sheet handle, not on a permanent strip or below a duplicate title. Both Reports sheets use `SwipeDismissSheet` as the only transition owner. Done/Apply claims one commit; the handle, backdrop, escape, successful swipe, blur and lifecycle/account invalidation discard. Keep the presentation mounted until coordinated exit completion, reject stale presentation IDs, restore opener focus afterwards, and expose no Cancel, Clear or implicit reset-to-Today behaviour.
+- The donut centre shows Total: summed confirmed logged activity clipped to the selected range. Concurrent entries count independently; there is no Time covered card or overlap explanation in mobile Reports. Web/Today goal coverage semantics are unchanged.
+- Only selected positive categories appear in the donut and compact zero-gap summary list. Sort exact unrounded duration descending, then stable category key ascending, and give the donut that same array. Angles, totals and percentages use the selected denominator, including spoken values. All/include/none stays reversible through the full category catalogue; None is valid and explains No categories selected. Bare ticks/dashes show filter selection, including mixed All. Uncategorized, duplicate names and unavailable stable IDs remain distinct.
+- The filter sheet is the only category-selection surface: Apply commits and the shared dismissal routes discard. Donut slices and category rows are informational, never filter/remove actions or extra popups; each row speaks its complete name, selected-time percentage and duration without moving focus.
+- Custom ranges use inclusive device-local dates, reversible endpoint selection, no future dates and a maximum of 366 calendar days. Presets use whole local calendar boundaries, Week begins Monday, and future portions remain visible with zero contribution.
+- Activity over time uses explicit local presentation metadata, never bucket-count/duration inference. Today/custom one day send one full local-day bucket and show one centred bar with weekday plus `DD/MM`; Week shows seven daily bars and seven two-line labels; Month/custom show only requested first/last `DD/MM`; Year shows twelve bars with Jan/Mar/May/Jul/Sep/Nov at normal widths and a deliberate quarterly fallback only when measured width cannot fit six. Longer custom ranges retain clipped calendar weeks/months. The plot fits without horizontal scrolling and keeps zero-height zero buckets, three nice ticks, one nearest-slot target and one bounded accessible tooltip.
+- Reports reserves floating-tab clearance once at the dashboard ScrollView content owner, using the existing 112-point Today convention. Do not duplicate that inset in the chart/card. Verify final labels and open bucket actions at maximum scroll extent; ordinary content passing behind the native overlay is not a failure.
+- Confirmed active timer contribution follows the existing projected timer through one current instant; Review-needed entries and suggestions never contribute. Month/Year/custom use bounded authenticated aggregates rather than raw history. An unavailable uncached range says Connect to load this report range; cached results never masquerade as another range.
+- Donut geometry follows available width, never font scale; show its clock total once, in the centre when it fits or in one bounded companion line. Durations use unbounded-hour HH:MM:SS, flooring only final labels, with natural spoken durations. Category rows target a measured 38–42-point ordinary pitch in a zero-gap list and use minimum-only height; they remain one line at every supported width/text size, only names ellipsise, and percentages/durations remain complete. Dense roles have explicit local scaling caps, not global suppression.
+
+Use local Reanimated owners and existing modal presentation; no global LayoutAnimation.
+The shared popup calendar reserves 42 Monday-first cells in six explicit nowrap
+44-point rows, each with seven equal flex-basis-zero cells. Weekday headers use
+the same allocation; never use percentage-width wrapping to infer week rows.
+Each endpoint is a square 36-point circular foreground, independent of the full-cell
+continuous range band; shared callers retain their own timestamp and commit rules.
+The entry picker shell cap is 361 points with 6-point insets; the Reports calendar
+centres the resulting 349-point inner cap and adapts to 308 points at a 320-point
+host. Reports presets use four non-overlapping 44-point equal targets around
+34-point fills. Calendar and entry workflows still have separate state owners.
+Month transitions use one fixed-height frame, with outgoing visuals non-interactive.
+Donut removals retain stable visual IDs through zero-sweep exit, disable outgoing
+interaction immediately, and ignore stale cleanup generations. All category changes
+come from filter-sheet Apply, with its existing focus return. First populated focused entrance runs once, including when a hidden eager mount was already settled; background/blur and
+Reduce Motion settle without replay. Tooltip replacement moves/fades locally,
+survives live ticks and dismisses on explicit outside presses or semantic-context
+changes. Never use a screen-root bubbled touch counter as tooltip state: ordinary
+vertical scrolling and chart/tooltip actions retain selection, while the dedicated
+title/summary outside surfaces and range/filter/focus/background changes dismiss it.
+
+Local caps: heading 1.5, controls 1.3, names 1.35, numbers/centre/badge/axis 1.2,
+calendar 1.25. Explanations retain system scaling. Never stack category numeric
+columns, truncate durations/percentages or manually scale a font twice.
+Numeric columns use intrinsic native measurements for the currently required
+hour-digit capacity, not a four-digit minimum, with a 6-point inter-column gap.
+Current-label axis measurements grow and shrink; labels share the category-dot
+and heading left anchor. Width/font-scale/Bold Text changes invalidate measurements;
+zero-size hidden probes never affect scrolling, focus or touch targets.
+
 ## State And Forms
 
 - Prefer controlled form state only where it adds clarity.

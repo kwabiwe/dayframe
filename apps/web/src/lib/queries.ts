@@ -741,7 +741,7 @@ export function buildTimeEntriesQuery(
      left join categories cat on cat.id = te.category_id and cat.workspace_id = te.workspace_id
      left join places pl on pl.id = te.place_id and pl.workspace_id = te.workspace_id
      where ${where.join(" and ")}
-     order by te.started_at desc
+     order by te.started_at desc, te.id desc
      limit $${values.length}`,
     values
   };

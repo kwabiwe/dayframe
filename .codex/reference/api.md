@@ -2,6 +2,26 @@
 
 Use this when adding or changing API routes, server actions, controllers, services, or backend handlers.
 
+## Mobile Reports summary
+
+`POST /api/reports/summary` resolves an app-read session before reading input.
+The strict body supplies ISO start/end (exclusive) and unique ordered contiguous
+bucket boundaries covering that exact range. Bound the raw body to 100 KB, buckets
+to 366 and elapsed range to 366 days plus one DST rollback hour. Do not accept
+client category metadata, workspace IDs or user IDs. One parameterized SQL query
+scopes entries to both session workspace and user, includes confirmed/accepted
+entries and captures one server instant. Clip every contribution to its bucket,
+range and current instant; concurrent activities count independently.
+
+The private/no-store response contains capturedNow, range, summed seconds,
+category metadata/totals, bucket category allocations and the minimal current
+timer contribution used by the existing mobile projection. Never return raw
+history, descriptions, Health/Location payloads or project/client metadata.
+Fractional seconds remain unrounded across all aggregates; UI labels alone round.
+Test real SQL with synthetic disposable-localhost fixtures and shared-workspace
+users, as well as malformed/auth/oversize failures. This does not change web
+Reports, ingest, timer mutations or bootstrap caps.
+
 ## Request Handling
 
 - Validate all external input.
@@ -16,6 +36,7 @@ Use this when adding or changing API routes, server actions, controllers, servic
 ## Data Access
 
 - Reuse existing database clients, repositories, models, and transaction helpers.
+- `/api/bootstrap` entry windows remain capped at 100 day, 300 week, and 2,000 history rows. Reports uses its separate bounded aggregate read, not overflow metadata or raw-history pagination. Keep entry ordering deterministic with an ID tie-break.
 - Prefer parameterized queries or ORM query builders.
 - Make ownership checks explicit for user-owned records.
 - Use transactions when writing `activity_events` plus derived `time_entries` or `review_items`.

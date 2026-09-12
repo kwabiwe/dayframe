@@ -193,6 +193,29 @@ The product UI uses system fonts. On iOS use San Francisco through React Native�
 
 Use `font-variant-numeric: tabular-nums` on timers, durations, clock labels and report figures. Do not force monospace typography across the interface. Allow Dynamic Type to grow without clipping; labels may wrap before touch targets shrink.
 
+Mobile Reports Revision 3.2 is an explicit dense-layout exception: category rows
+remain one line at 320–430-point widths and maximum text size. Only long names
+ellipsise; complete percentages and HH:MM:SS values occupy reserved trailing
+columns and retain full spoken names/durations. Use local caps of 1.5 for headings,
+1.3 for controls, 1.35 for names, 1.2 for numeric/centre/filter-badge/axis roles
+and 1.25 for calendar days. The small shared STAGING environment badge is capped
+at 1.0 and must resist flex shrink so its complete one-line status remains visible;
+its VoiceOver label remains `Staging environment`. Explanatory text retains system
+scaling. This owner-approved
+trade-off is not a claim of unrestricted Dynamic Type enlargement. Do not suppress
+scaling globally, manually scale twice, or constrain glyphs with incompatible
+line metrics. Capped headings still require explicit line-box safety at the cap.
+The one-line Reports range control uses a locale-aware compact visual form for
+custom ranges while exposing the complete range through its accessibility label.
+Keep one bounded donut total, not duplicate enlarged values.
+Place these informational rows in a zero-gap divider list and target a measured
+38–42-point pitch at ordinary text size with minimum-only height; do not shrink
+the 44-point targets of actual controls. Sort exact duration descending with
+stable-key ties and preserve that order in the donut. Reports' full-width date
+sheet centres the shared 349-point calendar-content cap and uses four equal
+44-point preset targets with approximately 34-point visible fills. Keep Cancel;
+there is no Clear or dismiss-to-Today treatment.
+
 ## Interface consistency
 
 Shared components own their internal typography, spacing, anatomy and states. A host may position or size a component's outer surface, but it must not apply broad descendant selectors that restyle nested fields or actions. Select the component's explicit role classes or its direct option rows instead. This keeps the same feature identical in the timer, dialogs and compact editors.
