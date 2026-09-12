@@ -120,12 +120,16 @@ production build passed; lint retains only two pre-existing warnings in
 `event-service.test.ts`.
 
 The web production build passed. At
-`6042bbb8dd25c3f1ddab7620bb95223f6dc87e50`, a clean `expo run:ios` Debug
+`6042bbb8dd25c3f1ddab7620bb95223f6dc87e50`, and again at
+`578c98fe715c1182a9edeeab49937a5b58862af2`, a clean `expo run:ios` Debug
 simulator build passed and installed on `Dayframe Accessibility Max QA`; its
 built host and extension lane metadata passed the built-product iOS
-configuration check. The compiler emitted one pre-existing duplicate `-lc++`
-linker warning. This is configuration/compilation evidence only, not a signed
-staging or physical-iPhone acceptance claim.
+configuration check. The final run needed a local `pod install` to repair a
+generated CocoaPods sandbox/lock mismatch; its three path-dependent checksum
+changes were restored before the repository check. The compiler emitted one
+pre-existing duplicate `-lc++` linker warning. This is
+configuration/compilation evidence only, not a signed staging or physical-
+iPhone acceptance claim.
 
 `npm run typecheck` remains **FAIL** only at the unmodified baseline file
 `apps/mobile/src/components/ConnectivityStatusStrip.tsx(27,43)`: TypeScript
@@ -167,9 +171,14 @@ foreground-handover dedupe marker, allowing a later existing foreground or
 store-subscription trigger to retry the bounded proof without a poll, timer or
 new delivery owner. Its hook regression proves the ordinary Today reader
 invokes the handover reader.
-Fresh exact-head review remains required after the final documentation/evidence
-commit; no earlier review approval is treated as approval of this corrected
-head.
+
+An additional exact-head external read-only review was attempted at
+`578c98fe715c1182a9edeeab49937a5b58862af2`, but the available local reviewer
+returned an execution error without findings after its bounded read window.
+That result is **NOT RUN**, not approval. Direct exact-head maintainer review
+found no new actionable contract conflict, but does not substitute for an
+independent review; no earlier review approval is treated as approval of this
+corrected head.
 
 ## Motion contract
 
@@ -196,7 +205,7 @@ head.
 
 ## Remaining validation gates
 
-Draft PR #196 remains unmerged. The corrected-head staging-backed Preview/alias
+Draft PR #196 remains unmerged. The latest-head staging-backed Preview/alias
 smoke, identified ordinary signed staging build and owner physical-iPhone
 acceptance remain separate from the completed local checks. An attempt to
 create the ordinary `preview` iOS build stopped before a build was created:
