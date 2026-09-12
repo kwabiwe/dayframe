@@ -577,13 +577,11 @@ export default function ReviewScreen() {
     if (offset === undefined) return;
     focusPendingKey.current = null;
     focusConsumedKey.current = key;
-    requestAnimationFrame(() => {
-      reviewScrollRef.current?.scrollTo({
-        y: Math.max(0, offset - 16),
-        animated: !reduceMotion
-      });
-      AccessibilityInfo.announceForAccessibility("Opened the exact Review item.");
+    reviewScrollRef.current?.scrollTo({
+      y: Math.max(0, offset - 16),
+      animated: !reduceMotion
     });
+    AccessibilityInfo.announceForAccessibility("Opened the exact Review item.");
   }, [reduceMotion]);
 
   const beginExactFocus = useCallback((key: string) => {
