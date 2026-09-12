@@ -7,6 +7,28 @@ const mobileRoot = fileURLToPath(new URL("../../", import.meta.url));
 const moduleRoot = fileURLToPath(new URL("../../modules/dayframe-calendar/", import.meta.url));
 
 describe("native Calendar production contract", () => {
+  it("bounds Dynamic Type only around the native header and lets totals use the stacked fallback", () => {
+    const rootView = readFileSync(`${moduleRoot}ios/DayframeCalendarRootView.swift`, "utf8");
+    const header = rootView.slice(
+      rootView.indexOf("private func calendarHeader("),
+      rootView.indexOf("private func calendarTitle(")
+    );
+    const total = rootView.slice(
+      rootView.indexOf("private func calendarTotal("),
+      rootView.indexOf("private struct DayframeCalendarTimelineCanvas")
+    );
+    expect(header).toContain("ViewThatFits(in: .horizontal)");
+    expect(header).toContain(".dynamicTypeSize(.xSmall ... .xxxLarge)");
+    expect(header.match(/dynamicTypeSize/g)).toHaveLength(1);
+    expect(total).toContain("VStack(alignment: .leading, spacing: 2)");
+    expect(total).toContain("presentation.loggedLabel");
+    expect(total).toContain("presentation.coveredLabel");
+    expect(total).not.toContain("minimumScaleFactor");
+    expect(total).not.toContain("lineLimit(1)");
+    expect(rootView.slice(rootView.indexOf("private func calendarPanel("), rootView.indexOf("private func calendarHeader(")))
+      .toContain("DayframeCalendarTimelineCanvas");
+  });
+
   it("removes the React pinch, temporary transform, and outer-scroll ownership", () => {
     const source = readFileSync(dashboardPath, "utf8");
 

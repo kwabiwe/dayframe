@@ -68,6 +68,9 @@ import {
   reviewItemDurationSeconds,
   type ReviewMenuEvent
 } from "@/lib/review";
+import { mobileTextProps } from "@/lib/mobileTypography";
+import { recordMobileLayout, recordMobileTextLayout } from "@/components/accessibility/diagnostics";
+import type { MobileAccessibilityDiagnostic } from "@/components/accessibility/diagnostics";
 import {
   createReviewClientMutationId,
   enqueueReviewMutation,
@@ -822,7 +825,7 @@ export default function ReviewScreen() {
       <View style={styles.settingsFloatingHeader}>
         <View style={styles.settingsHeader}>
           <MobileBackButton accessibilityLabel="Back" onPress={() => router.back()} />
-          <Text style={styles.settingsTitle} numberOfLines={1}>Review</Text>
+          <Text {...mobileTextProps("screenHeading")} style={styles.settingsTitle}>Review</Text>
         </View>
       </View>
       <ScrollView
@@ -844,12 +847,12 @@ export default function ReviewScreen() {
           <View style={styles.panel}>
             <View style={styles.summaryHeader}>
               <View>
-                <Text style={styles.label}>{REVIEW_COPY.needsReview}</Text>
-                <Text style={styles.sectionTitle}>Review</Text>
+                <Text {...mobileTextProps("counter")} style={styles.label}>{REVIEW_COPY.needsReview}</Text>
+                <Text {...mobileTextProps("sectionHeading")} style={styles.sectionTitle}>Review</Text>
               </View>
-              <Text style={styles.summaryTotal}>{totalNeedsReview}</Text>
+              <Text {...mobileTextProps("numeric")} style={styles.summaryTotal}>{totalNeedsReview}</Text>
             </View>
-            <Text style={styles.muted}>Detected visits and suggested time entries stay here until you confirm, edit or ignore them.</Text>
+            <Text {...mobileTextProps("body")} style={styles.muted}>Detected visits and suggested time entries stay here until you confirm, edit or ignore them.</Text>
             <Pressable
               accessibilityRole="button"
               accessibilityState={{ expanded: showReviewInfo }}
@@ -859,7 +862,7 @@ export default function ReviewScreen() {
                 setShowReviewInfo((current) => !current);
               }}
             >
-              <Text style={styles.detailsToggleText}>About Review</Text>
+              <Text {...mobileTextProps("control")} style={styles.detailsToggleText}>About Review</Text>
               <ReviewChevronGlyph color={theme.textSecondary} expanded={showReviewInfo} />
             </Pressable>
             {showReviewInfo ? (
@@ -868,14 +871,14 @@ export default function ReviewScreen() {
                 exiting={localPresenceExiting(reduceMotion)}
                 layout={localLayoutTransition(reduceMotion)}
               >
-                <Text style={styles.muted}>Dayframe keeps uncertain Health and location activity here so you can confirm the time, edit its details, or dismiss it without silently changing your timeline.</Text>
+                <Text {...mobileTextProps("body")} style={styles.muted}>Dayframe keeps uncertain Health and location activity here so you can confirm the time, edit its details, or dismiss it without silently changing your timeline.</Text>
               </Reanimated.View>
             ) : null}
           </View>
 
           {reviewAvailabilityMessage ? (
             <View style={styles.queueDiagnosticCard}>
-              <Text accessibilityLiveRegion="polite" style={styles.muted}>
+              <Text {...mobileTextProps("body")} accessibilityLiveRegion="polite" style={styles.muted}>
                 {reviewAvailabilityMessage}
               </Text>
             </View>
@@ -890,9 +893,9 @@ export default function ReviewScreen() {
           />
 
           <View style={styles.reviewItemsSection}>
-            <Text style={styles.sectionTitle}>Review items</Text>
+            <Text {...mobileTextProps("sectionHeading")} style={styles.sectionTitle}>Review items</Text>
             {totalNeedsReview === 0 ? (
-              <Text style={styles.muted}>{REVIEW_COPY.emptyState}</Text>
+              <Text {...mobileTextProps("body")} style={styles.muted}>{REVIEW_COPY.emptyState}</Text>
             ) : null}
             <View style={styles.reviewList}>
               {openReviewItems.map((item) => (
@@ -994,7 +997,7 @@ function ReviewSyncStatus({
       accessibilityLiveRegion={diagnostics.needsAttentionCount > 0 ? "assertive" : "polite"}
       style={styles.queueDiagnosticCard}
     >
-      <Text style={styles.reviewMetaLine}>{copy}</Text>
+      <Text {...mobileTextProps("body")} style={styles.reviewMetaLine}>{copy}</Text>
       <View style={styles.buttonRow}>
         {diagnostics.needsAttentionCount > 0 ? (
           <Pressable
@@ -1002,7 +1005,7 @@ function ReviewSyncStatus({
             style={pressable(styles.secondaryButton, styles.buttonPressed)}
             onPress={onReviewIssue}
           >
-            <Text style={styles.secondaryButtonText}>Review issue</Text>
+            <Text {...mobileTextProps("control")} style={styles.secondaryButtonText}>Review issue</Text>
           </Pressable>
         ) : null}
       </View>
@@ -1010,7 +1013,7 @@ function ReviewSyncStatus({
   );
 }
 
-function ReviewItemCard({
+export function ReviewItemCard({
   item,
   menuOpen,
   now,
@@ -1020,7 +1023,8 @@ function ReviewItemCard({
   overlapCount,
   syncState,
   styles,
-  theme
+  theme,
+  diagnostic
 }: {
   item: MobileReviewItem;
   menuOpen: boolean;
@@ -1032,6 +1036,7 @@ function ReviewItemCard({
   syncState: ReviewItemSyncState | null;
   styles: ReturnType<typeof useMobileTheme>["styles"];
   theme: ReturnType<typeof useMobileTheme>["theme"];
+  diagnostic?: MobileAccessibilityDiagnostic;
 }) {
   const durationSeconds = reviewItemDurationSeconds(item, now);
   const title = reviewItemTitle(item);
@@ -1049,32 +1054,32 @@ function ReviewItemCard({
   const syncCopy = reviewItemSyncStatusCopy(syncState);
 
   return (
-    <View style={styles.reviewCard}>
+    <View style={styles.reviewCard} onLayout={(event) => recordMobileLayout(diagnostic, "review.card", event)}>
       <View
         pointerEvents="none"
         style={[styles.reviewCardAccentRail, { backgroundColor: categoryColor }]}
       />
-      <View style={styles.reviewCardHeader}>
+      <View style={styles.reviewCardHeader} onLayout={(event) => recordMobileLayout(diagnostic, "review.header", event)}>
         <View style={styles.reviewTitleStack}>
-          <Text style={styles.reviewTitle} numberOfLines={2}>{title}</Text>
-          <Text style={styles.reviewMetaLine}>{formatReviewItemMeta(item, durationSeconds)}</Text>
+          <Text {...mobileTextProps("itemTitle")} style={styles.reviewTitle} numberOfLines={2} onLayout={(event) => diagnostic?.onLayout?.("review.title.frame", event.nativeEvent.layout)} onTextLayout={(event) => recordMobileTextLayout(diagnostic, "review.title", event, "itemTitle", styles.reviewTitle)}>{title}</Text>
+          <Text {...mobileTextProps("metadata")} style={styles.reviewMetaLine}>{formatReviewItemMeta(item, durationSeconds)}</Text>
         </View>
-        <View style={styles.reviewBadge}>
-          <Text style={styles.reviewBadgeText}>
+        <View style={styles.reviewBadge} onLayout={(event) => recordMobileLayout(diagnostic, "review.badge", event)}>
+          <Text {...mobileTextProps("counter")} style={styles.reviewBadgeText}>
             {syncCopy?.badge ?? REVIEW_COPY.needsReview}
           </Text>
         </View>
       </View>
 
       {syncCopy ? (
-        <Text accessibilityLiveRegion="polite" style={styles.reviewMetaLine}>
+        <Text {...mobileTextProps("body")} accessibilityLiveRegion="polite" style={styles.reviewMetaLine}>
           {syncCopy.detail}
         </Text>
       ) : null}
 
       <View style={styles.calendarBlockTitleRow}>
         <View style={[styles.colorDot, { backgroundColor: categoryColor }]} />
-        <Text style={styles.reviewMetaLine} numberOfLines={1}>
+        <Text {...mobileTextProps("metadata")} style={[styles.reviewMetaLine, { flex: 1, minWidth: 0 }]}>
           {categoryName}
           {item.placeName ? ` · ${item.placeName}` : ""}
         </Text>
@@ -1084,7 +1089,7 @@ function ReviewItemCard({
         accessibilityLabel={`Confidence: ${confidence.label}, ${confidence.score} of 5`}
         style={styles.reviewConfidenceRow}
       >
-        <Text style={styles.reviewConfidenceLabel}>Confidence</Text>
+        <Text {...mobileTextProps("metadata")} style={styles.reviewConfidenceLabel}>Confidence</Text>
         <View accessibilityElementsHidden style={styles.reviewConfidenceDots}>
           {[1, 2, 3, 4, 5].map((score) => (
             <View
@@ -1100,10 +1105,10 @@ function ReviewItemCard({
             />
           ))}
         </View>
-        <Text style={styles.reviewConfidenceValue}>{confidence.label}</Text>
+        <Text {...mobileTextProps("metadata")} style={styles.reviewConfidenceValue}>{confidence.label}</Text>
       </View>
       {summary ? (
-        <Text numberOfLines={3} style={styles.reviewSummary}>{summary}</Text>
+        <Text {...mobileTextProps("body")} style={styles.reviewSummary} onLayout={(event) => recordMobileLayout(diagnostic, "review.reason.frame", event)} onTextLayout={(event) => recordMobileTextLayout(diagnostic, "review.reason", event, "body", styles.reviewSummary)}>{summary}</Text>
       ) : null}
       {overlapCount && !locationReason ? (
         <View
@@ -1112,7 +1117,7 @@ function ReviewItemCard({
           style={styles.reviewOverlapRow}
         >
           <WarningGlyph color={theme.warningText} />
-          <Text style={styles.reviewOverlapText}>
+          <Text {...mobileTextProps("body")} style={styles.reviewOverlapText}>
             Overlaps {overlapCount} other {overlapCount === 1 ? "entry" : "entries"} · You can still confirm
           </Text>
         </View>
@@ -1130,7 +1135,7 @@ function ReviewItemCard({
             ]}
             onPress={onViewEvidence}
           >
-            <Text style={styles.reviewSecondaryButtonText}>View evidence</Text>
+            <Text {...mobileTextProps("control")} style={styles.reviewSecondaryButtonText}>View evidence</Text>
           </Pressable>
         ) : null}
         <Pressable
@@ -1143,7 +1148,7 @@ function ReviewItemCard({
           ]}
           onPress={onConfirm}
         >
-          <Text style={styles.primaryButtonText}>{reviewConfirmLabel(item)}</Text>
+          <Text {...mobileTextProps("control")} style={styles.primaryButtonText}>{reviewConfirmLabel(item)}</Text>
         </Pressable>
         <View style={styles.reviewOverflowRow}>
           <Pressable
@@ -1194,18 +1199,18 @@ function ReviewNeededEntryCard({
       />
       <View style={styles.reviewCardHeader}>
         <View style={styles.reviewTitleStack}>
-          <Text style={styles.reviewTitle} numberOfLines={2}>{displayEntryTitle(entry)}</Text>
-          <Text style={styles.reviewMetaLine}>
+          <Text {...mobileTextProps("itemTitle")} style={styles.reviewTitle} numberOfLines={2}>{displayEntryTitle(entry)}</Text>
+          <Text {...mobileTextProps("metadata")} style={styles.reviewMetaLine}>
             {formatEntryTimeRange(entry, now)} · {formatDuration(entryDurationSeconds(entry, now))}
           </Text>
         </View>
         <View style={styles.reviewBadge}>
-          <Text style={styles.reviewBadgeText}>{REVIEW_COPY.needsReview}</Text>
+          <Text {...mobileTextProps("counter")} style={styles.reviewBadgeText}>{REVIEW_COPY.needsReview}</Text>
         </View>
       </View>
       <View style={styles.calendarBlockTitleRow}>
         <View style={[styles.colorDot, { backgroundColor: categoryColor }]} />
-        <Text style={styles.reviewMetaLine} numberOfLines={1}>
+        <Text {...mobileTextProps("metadata")} style={[styles.reviewMetaLine, { flex: 1, minWidth: 0 }]}>
           {categoryName}
           {entry.placeName ? ` · ${entry.placeName}` : ""}
         </Text>
@@ -1216,10 +1221,10 @@ function ReviewNeededEntryCard({
           style={pressable(styles.reviewSecondaryButton, styles.buttonPressed)}
           onPress={onEdit}
         >
-          <Text style={styles.reviewSecondaryButtonText}>{REVIEW_COPY.editDetails}</Text>
+          <Text {...mobileTextProps("control")} style={styles.reviewSecondaryButtonText}>{REVIEW_COPY.editDetails}</Text>
         </Pressable>
       </View>
-      <Text style={styles.reviewMetaLine}>Confirm and ignore are available for suggested time entries.</Text>
+      <Text {...mobileTextProps("body")} style={styles.reviewMetaLine}>Confirm and ignore are available for suggested time entries.</Text>
     </View>
   );
 }

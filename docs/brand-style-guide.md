@@ -193,6 +193,30 @@ The product UI uses system fonts. On iOS use San Francisco through React Nativeâ
 
 Use `font-variant-numeric: tabular-nums` on timers, durations, clock labels and report figures. Do not force monospace typography across the interface. Allow Dynamic Type to grow without clipping; labels may wrap before touch targets shrink.
 
+### iOS Dynamic Type roles
+
+System font scaling stays enabled. The shared mobile role helper applies only
+these local caps to compact presentation roles:
+
+| Role | Maximum multiplier | Layout contract |
+| --- | ---: | --- |
+| Screen / section heading | 1.5 | Wrap or stack within measured space. |
+| Item | 1.35 | Keep the primary item readable before secondary metadata. |
+| Control | 1.3 | Preserve a minimum 44-point hit target and visible action. |
+| Metadata | 1.3 | Wrap or move to a second line when required. |
+| Numeric | 1.2 | Measure the complete number/duration; never clip it. |
+| Counter | 1.2 | Grow intrinsically and preserve the full spoken count. |
+| Input | 1.35 | Keep user-entered text editable and fully visible. |
+| Body / explanation / help / warning / error | Uncapped | Grow naturally; allow the owning surface to scroll. |
+
+A multiplier cap alone never establishes fit. When sibling text/actions compete,
+measure their intrinsic widths against the real available native width and reflow
+before truncation or target collapse. Full times, durations, counts, destination
+labels and accessibility names remain available. Do not globally suppress system
+scaling or scale a value manually after React Native has scaled it. Reports retains
+its explicit Revision 3.2 role contract and STAGING badge exception below; this
+table does not change Reports or introduce a global style.
+
 Mobile Reports Revision 3.2 is an explicit dense-layout exception: category rows
 remain one line at 320â€“430-point widths and maximum text size. Only long names
 ellipsise; complete percentages and HH:MM:SS values occupy reserved trailing

@@ -1,15 +1,23 @@
 import { Pressable, Text, View } from "react-native";
 import Svg, { Path } from "react-native-svg";
 import type { MobileStyles, MobileTheme } from "@/lib/mobileTheme";
+import { mobileTextProps } from "../lib/mobileTypography";
+import { recordMobileLayout, recordMobileTextLayout, type MobileAccessibilityDiagnostic } from "./accessibility/diagnostics";
 
 export function TagMetadata({
+  accessibilityHidden = false,
   active = false,
+  diagnostic,
+  diagnosticPrefix,
   onPressTag,
   styles,
   tagNames,
   theme
 }: {
+  accessibilityHidden?: boolean;
   active?: boolean;
+  diagnostic?: MobileAccessibilityDiagnostic;
+  diagnosticPrefix?: string;
   onPressTag?: (tagName: string) => void;
   styles: MobileStyles;
   tagNames: string[];
@@ -21,8 +29,14 @@ export function TagMetadata({
 
   return (
     <View
+      accessible={!onPressTag && !accessibilityHidden}
+      accessibilityElementsHidden={accessibilityHidden}
+      importantForAccessibility={accessibilityHidden ? "no-hide-descendants" : "auto"}
       accessibilityLabel={onPressTag ? undefined : `Tags: ${label}`}
       style={styles.tagMetadataRow}
+      onLayout={(event) => {
+        if (diagnosticPrefix) recordMobileLayout(diagnostic, diagnosticPrefix, event);
+      }}
     >
       <Svg accessibilityElementsHidden height={14} viewBox="0 0 24 24" width={14}>
         <Path
@@ -33,28 +47,56 @@ export function TagMetadata({
         />
       </Svg>
       {tagNames.map((tagName, index) => (
-        <View key={`${tagName}:${index}`} style={styles.tagMetadataTagGroup}>
+        <View
+          key={`${tagName}:${index}`}
+          style={styles.tagMetadataTagGroup}
+          onLayout={(event) => {
+            if (diagnosticPrefix) recordMobileLayout(diagnostic, `${diagnosticPrefix}.group.${index}`, event);
+          }}
+        >
           {index > 0 ? (
-            <Text style={[styles.tagMetadataSeparator, active ? { color: theme.accentText } : null]}>·</Text>
+            <Text {...mobileTextProps("counter")} accessibilityElementsHidden style={[styles.tagMetadataSeparator, active ? { color: theme.accentText } : null]}>·</Text>
           ) : null}
           {onPressTag ? (
             <Pressable
               accessibilityHint="Removes this tag from the draft; save the entry to confirm"
               accessibilityLabel={`Remove tag ${tagName}`}
               accessibilityRole="button"
-              hitSlop={8}
               onPress={() => onPressTag(tagName)}
+              onLayout={(event) => {
+                if (diagnosticPrefix) recordMobileLayout(diagnostic, `${diagnosticPrefix}.remove.${index}`, event);
+              }}
               style={({ pressed }) => [
                 styles.tagMetadataTagButton,
                 pressed ? styles.buttonPressed : null
               ]}
             >
-              <Text numberOfLines={1} style={[styles.tagMetadataText, active ? { color: theme.accentText } : null]}>
+              <Text
+                {...mobileTextProps("metadata")}
+                numberOfLines={1}
+                style={[styles.tagMetadataText, active ? { color: theme.accentText } : null]}
+                onLayout={(event) => {
+                  if (diagnosticPrefix) recordMobileLayout(diagnostic, `${diagnosticPrefix}.text.${index}.frame`, event);
+                }}
+                onTextLayout={(event) => {
+                  if (diagnosticPrefix) recordMobileTextLayout(diagnostic, `${diagnosticPrefix}.text.${index}`, event, "metadata", styles.tagMetadataText);
+                }}
+              >
                 {tagName}
               </Text>
             </Pressable>
           ) : (
-            <Text numberOfLines={1} style={[styles.tagMetadataText, active ? { color: theme.accentText } : null]}>
+            <Text
+              {...mobileTextProps("metadata")}
+              numberOfLines={1}
+              style={[styles.tagMetadataText, active ? { color: theme.accentText } : null]}
+              onLayout={(event) => {
+                if (diagnosticPrefix) recordMobileLayout(diagnostic, `${diagnosticPrefix}.text.${index}.frame`, event);
+              }}
+              onTextLayout={(event) => {
+                if (diagnosticPrefix) recordMobileTextLayout(diagnostic, `${diagnosticPrefix}.text.${index}`, event, "metadata", styles.tagMetadataText);
+              }}
+            >
               {tagName}
             </Text>
           )}

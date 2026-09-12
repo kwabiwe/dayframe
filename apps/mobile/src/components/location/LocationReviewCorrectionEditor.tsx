@@ -48,6 +48,7 @@ import {
   type PlaceSearchState
 } from "@/lib/placeSearch";
 import { pressable, useMobileTheme, type MobileTheme } from "@/lib/mobileTheme";
+import { mobileTextProps } from "@/lib/mobileTypography";
 import {
   localLayoutTransition,
   localPresenceEntering,
@@ -456,9 +457,9 @@ export function LocationReviewCorrectionEditor({
       >
         <View style={styles.contentStack}>
           <View style={styles.panel}>
-            <Text style={styles.label}>Location evidence</Text>
-            <Text style={styles.sectionTitle}>{locationActivityLabel(evidence)}</Text>
-            <Text style={styles.reviewMetaLine}>{formatEvidenceTimeRange(evidence)}</Text>
+            <Text {...mobileTextProps("counter")} style={styles.label}>Location evidence</Text>
+            <Text {...mobileTextProps("sectionHeading")} style={styles.sectionTitle}>{locationActivityLabel(evidence)}</Text>
+            <Text {...mobileTextProps("metadata")} style={styles.reviewMetaLine}>{formatEvidenceTimeRange(evidence)}</Text>
           </View>
 
           {statusMessage ? (
@@ -468,7 +469,7 @@ export function LocationReviewCorrectionEditor({
               layout={localLayoutTransition(reduceMotion)}
               style={styles.queueDiagnosticCard}
             >
-              <Text accessibilityLiveRegion="polite" style={styles.reviewMetaLine}>{statusMessage}</Text>
+              <Text {...mobileTextProps("body")} accessibilityLiveRegion="polite" style={styles.reviewMetaLine}>{statusMessage}</Text>
             </Reanimated.View>
           ) : null}
           <Reanimated.View layout={localLayoutTransition(reduceMotion)} style={styles.panel}>
@@ -486,7 +487,7 @@ export function LocationReviewCorrectionEditor({
               onSelectSavedPlace={evidence.segment.kind === "stay" ? chooseSavedPlace : undefined}
             />
             {editingCentre ? (
-              <Text style={editorStyles.helperText}>Tap the map to move the pin.</Text>
+              <Text {...mobileTextProps("body")} style={editorStyles.helperText}>Tap the map to move the pin.</Text>
             ) : null}
           </Reanimated.View>
 
@@ -508,10 +509,10 @@ export function LocationReviewCorrectionEditor({
                         <ActivityGlyph name="place" color={theme.accentText} />
                       </View>
                       <View style={editorStyles.answerText}>
-                        <Text style={editorStyles.answerTitle}>{placeAnswer}</Text>
-                        {placeDetail ? <Text style={editorStyles.answerMeta}>{placeDetail}</Text> : null}
+                        <Text {...mobileTextProps("itemTitle")} style={editorStyles.answerTitle}>{placeAnswer}</Text>
+                        {placeDetail ? <Text {...mobileTextProps("body")} style={editorStyles.answerMeta}>{placeDetail}</Text> : null}
                         {newPlace ? (
-                          <Text style={editorStyles.answerMeta}>
+                          <Text {...mobileTextProps("body")} style={editorStyles.answerMeta}>
                             {saveForFuture
                               ? "This place will be saved for future visits."
                               : "This name will be used for this visit only."}
@@ -559,12 +560,12 @@ export function LocationReviewCorrectionEditor({
                       layout={localLayoutTransition(reduceMotion)}
                       style={editorStyles.resultSection}
                     >
-                      <Text style={editorStyles.fieldLabel}>Nearby places</Text>
+                      <Text {...mobileTextProps("metadata")} style={editorStyles.fieldLabel}>Nearby places</Text>
                       {nearbyState.status === "loading" ? (
-                        <Text accessibilityLiveRegion="polite" style={editorStyles.helperText}>Finding nearby places…</Text>
+                        <Text {...mobileTextProps("body")} accessibilityLiveRegion="polite" style={editorStyles.helperText}>Finding nearby places…</Text>
                       ) : null}
                       {nearbyState.message ? (
-                        <Text accessibilityLiveRegion="polite" style={editorStyles.helperText}>{nearbyState.message}</Text>
+                        <Text {...mobileTextProps("body")} accessibilityLiveRegion="polite" style={editorStyles.helperText}>{nearbyState.message}</Text>
                       ) : null}
                       {nearbyChoices.length > 0 ? (
                         <View accessibilityLabel={`${nearbyChoices.length} nearby places`} style={editorStyles.placeChoices}>
@@ -588,11 +589,12 @@ export function LocationReviewCorrectionEditor({
                     </Reanimated.View>
                   ) : null}
 
-                  <Text style={editorStyles.fieldLabel}>Search other places</Text>
+                  <Text {...mobileTextProps("metadata")} style={editorStyles.fieldLabel}>Search other places</Text>
                   <View style={editorStyles.searchField}>
                     <SearchGlyph color={theme.textSecondary} />
                     <TextInput
                       ref={searchInputRef}
+                      {...mobileTextProps("input")}
                       accessibilityLabel="Search other places"
                       autoCapitalize="words"
                       autoCorrect={false}
@@ -619,13 +621,13 @@ export function LocationReviewCorrectionEditor({
                     ) : null}
                   </View>
                   {searchState.status === "loading" ? (
-                    <Text accessibilityLiveRegion="polite" style={editorStyles.helperText}>Searching…</Text>
+                    <Text {...mobileTextProps("body")} accessibilityLiveRegion="polite" style={editorStyles.helperText}>Searching…</Text>
                   ) : null}
                   {searchState.status === "typing" && searchQuery.trim().length === 1 ? (
-                    <Text style={editorStyles.helperText}>Type one more character to search.</Text>
+                    <Text {...mobileTextProps("body")} style={editorStyles.helperText}>Type one more character to search.</Text>
                   ) : null}
                   {searchState.message ? (
-                    <Text accessibilityLiveRegion="polite" style={editorStyles.helperText}>{searchState.message}</Text>
+                    <Text {...mobileTextProps("body")} accessibilityLiveRegion="polite" style={editorStyles.helperText}>{searchState.message}</Text>
                   ) : null}
                   {searchState.suggestions.length > 0 ? (
                     <Reanimated.View
@@ -650,9 +652,9 @@ export function LocationReviewCorrectionEditor({
                         >
                           <ActivityGlyph name="place" color={theme.accentText} />
                           <View style={editorStyles.answerText}>
-                            <Text style={editorStyles.suggestionTitle}>{suggestion.title}</Text>
+                            <Text {...mobileTextProps("itemTitle")} style={editorStyles.suggestionTitle}>{suggestion.title}</Text>
                             {suggestion.subtitle ? (
-                              <Text style={editorStyles.suggestionSubtitle} numberOfLines={2}>{suggestion.subtitle}</Text>
+                              <Text {...mobileTextProps("metadata")} style={editorStyles.suggestionSubtitle} numberOfLines={2}>{suggestion.subtitle}</Text>
                             ) : null}
                           </View>
                         </Pressable>
@@ -662,8 +664,8 @@ export function LocationReviewCorrectionEditor({
                   {newPlace ? (
                     <View style={editorStyles.toggleRow}>
                       <View style={editorStyles.answerText}>
-                        <Text style={editorStyles.toggleTitle}>Save for future visits</Text>
-                        <Text style={editorStyles.answerMeta}>Creates a saved place that Dayframe can learn from later.</Text>
+                        <Text {...mobileTextProps("control")} style={editorStyles.toggleTitle}>Save for future visits</Text>
+                        <Text {...mobileTextProps("body")} style={editorStyles.answerMeta}>Creates a saved place that Dayframe can learn from later.</Text>
                       </View>
                       <Switch
                         accessibilityLabel="Save for future visits"
@@ -689,6 +691,7 @@ export function LocationReviewCorrectionEditor({
               />
               <TextInput
                 ref={activityInputRef}
+                {...mobileTextProps("input")}
                 accessibilityLabel="Activity"
                 editable={!saving}
                 maxLength={500}
@@ -700,7 +703,7 @@ export function LocationReviewCorrectionEditor({
                 style={styles.textInput}
                 value={description}
               />
-              <Text style={editorStyles.fieldLabel}>Category</Text>
+              <Text {...mobileTextProps("metadata")} style={editorStyles.fieldLabel}>Category</Text>
               <ScrollView
                 contentContainerStyle={editorStyles.categoryScroller}
                 horizontal
@@ -751,9 +754,10 @@ export function LocationReviewCorrectionEditor({
               <SectionHeading glyph="time" label="When?" theme={theme} />
               <View style={[editorStyles.timeGroups, fontScale >= 1.45 ? editorStyles.timeGroupsStacked : null]}>
                 <View style={editorStyles.timeGroup}>
-                  <Text style={editorStyles.fieldLabel}>Start</Text>
+                  <Text {...mobileTextProps("metadata")} style={editorStyles.fieldLabel}>Start</Text>
                   <View style={editorStyles.timeField}>
                     <TextInput
+                      {...mobileTextProps("input")}
                       accessibilityLabel="Start time"
                       caretHidden
                       contextMenuHidden
@@ -773,10 +777,11 @@ export function LocationReviewCorrectionEditor({
                   </View>
                 </View>
                 <View style={editorStyles.timeGroup}>
-                  <Text style={editorStyles.fieldLabel}>End</Text>
+                  <Text {...mobileTextProps("metadata")} style={editorStyles.fieldLabel}>End</Text>
                   {stopAt ? (
                     <View style={editorStyles.timeField}>
                       <TextInput
+                        {...mobileTextProps("input")}
                         accessibilityLabel="End time"
                         caretHidden
                         contextMenuHidden
@@ -796,23 +801,23 @@ export function LocationReviewCorrectionEditor({
                     </View>
                   ) : (
                     <View style={editorStyles.answerRow}>
-                      <Text style={editorStyles.answerMeta}>Ongoing</Text>
+                      <Text {...mobileTextProps("metadata")} style={editorStyles.answerMeta}>Ongoing</Text>
                     </View>
                   )}
                 </View>
                 <View style={editorStyles.timeGroup}>
-                  <Text style={editorStyles.fieldLabel}>Duration</Text>
+                  <Text {...mobileTextProps("metadata")} style={editorStyles.fieldLabel}>Duration</Text>
                   <View
                     accessible
                     accessibilityLabel={`Duration ${editableDuration}`}
                     style={editorStyles.timeField}
                   >
-                    <Text style={editorStyles.durationValue}>{editableDuration}</Text>
+                    <Text {...mobileTextProps("numeric")} style={editorStyles.durationValue}>{editableDuration}</Text>
                   </View>
                 </View>
               </View>
               {validationError ? (
-                <Text accessibilityLiveRegion="assertive" style={editorStyles.errorText}>{validationError}</Text>
+                <Text {...mobileTextProps("body")} accessibilityLiveRegion="assertive" style={editorStyles.errorText}>{validationError}</Text>
               ) : null}
             </View>
           </Reanimated.View>
@@ -827,7 +832,7 @@ export function LocationReviewCorrectionEditor({
               saving ? styles.buttonDisabled : null
             ]}
           >
-            <Text style={styles.primaryButtonText}>{primaryLabel}</Text>
+            <Text {...mobileTextProps("control")} style={styles.primaryButtonText}>{primaryLabel}</Text>
           </Pressable>
 
           <Reanimated.View layout={localLayoutTransition(reduceMotion)} style={styles.panel}>
@@ -842,7 +847,7 @@ export function LocationReviewCorrectionEditor({
               }}
               style={pressable(editorStyles.disclosure, styles.buttonPressed)}
             >
-              <Text style={editorStyles.disclosureText}>More options</Text>
+              <Text {...mobileTextProps("control")} style={editorStyles.disclosureText}>More options</Text>
               <ChevronGlyph color={theme.textSecondary} expanded={advancedExpanded} />
             </Pressable>
 
@@ -855,17 +860,18 @@ export function LocationReviewCorrectionEditor({
               >
                 {evidence.segment.kind === "stay" ? (
                   <View style={editorStyles.advancedGroup}>
-                    <Text style={editorStyles.fieldLabel}>Use a map pin instead</Text>
+                    <Text {...mobileTextProps("metadata")} style={editorStyles.fieldLabel}>Use a map pin instead</Text>
                     <Pressable
                       accessibilityRole="button"
                       disabled={saving}
                       onPress={() => setEditingCentre((current) => !current)}
                       style={pressable(editorStyles.secondaryAction, styles.buttonPressed)}
                     >
-                      <Text style={editorStyles.secondaryActionText}>{editingCentre ? "Finish moving pin" : "Move map pin"}</Text>
+                      <Text {...mobileTextProps("control")} style={editorStyles.secondaryActionText}>{editingCentre ? "Finish moving pin" : "Move map pin"}</Text>
                     </Pressable>
                     <TextInput
                       accessibilityLabel="New saved place name"
+                      {...mobileTextProps("input")}
                       editable={!saving}
                       onChangeText={setManualPlaceName}
                       placeholder="Place name"
@@ -883,14 +889,14 @@ export function LocationReviewCorrectionEditor({
                         saving || !selectedPoint || !manualPlaceName.trim() ? styles.buttonDisabled : null
                       ]}
                     >
-                      <Text style={editorStyles.secondaryActionText}>Use this pin</Text>
+                    <Text {...mobileTextProps("control")} style={editorStyles.secondaryActionText}>Use this pin</Text>
                     </Pressable>
                   </View>
                 ) : null}
 
                 {evidence.suggestedSplitPoints.length > 0 ? (
                   <View style={editorStyles.advancedGroup}>
-                    <Text style={editorStyles.fieldLabel}>Split detected time</Text>
+                    <Text {...mobileTextProps("metadata")} style={editorStyles.fieldLabel}>Split detected time</Text>
                     {evidence.suggestedSplitPoints.map((split) => (
                       <Pressable
                         accessibilityRole="button"
@@ -899,7 +905,7 @@ export function LocationReviewCorrectionEditor({
                         onPress={() => setSelectedSplitAt(split.at)}
                         style={pressable(editorStyles.secondaryAction, styles.buttonPressed)}
                       >
-                        <Text style={editorStyles.secondaryActionText}>Split near {formatTime(split.at)}</Text>
+                        <Text {...mobileTextProps("control")} style={editorStyles.secondaryActionText}>Split near {formatTime(split.at)}</Text>
                       </Pressable>
                     ))}
                     {selectedSplitAt ? (
@@ -908,8 +914,8 @@ export function LocationReviewCorrectionEditor({
                         exiting={localPresenceExiting(reduceMotion)}
                         style={editorStyles.splitSummary}
                       >
-                        <Text style={editorStyles.answerMeta}>Before: {formatTime(evidence.segment.startedAt)}–{formatTime(selectedSplitAt)}</Text>
-                        <Text style={editorStyles.answerMeta}>After: {formatTime(selectedSplitAt)}–{evidence.segment.stoppedAt ? formatTime(evidence.segment.stoppedAt) : "ongoing"}</Text>
+                        <Text {...mobileTextProps("metadata")} style={editorStyles.answerMeta}>Before: {formatTime(evidence.segment.startedAt)}–{formatTime(selectedSplitAt)}</Text>
+                        <Text {...mobileTextProps("metadata")} style={editorStyles.answerMeta}>After: {formatTime(selectedSplitAt)}–{evidence.segment.stoppedAt ? formatTime(evidence.segment.stoppedAt) : "ongoing"}</Text>
                         <Pressable
                           accessibilityRole="button"
                           disabled={saving}
@@ -919,7 +925,7 @@ export function LocationReviewCorrectionEditor({
                           )}
                           style={pressable(editorStyles.secondaryAction, styles.buttonPressed)}
                         >
-                          <Text style={editorStyles.secondaryActionText}>Confirm split</Text>
+                          <Text {...mobileTextProps("control")} style={editorStyles.secondaryActionText}>Confirm split</Text>
                         </Pressable>
                       </Reanimated.View>
                     ) : null}
@@ -937,7 +943,7 @@ export function LocationReviewCorrectionEditor({
                     }, "The adjacent visits were merged into one review item.")}
                     style={pressable(editorStyles.secondaryAction, styles.buttonPressed)}
                   >
-                    <Text style={editorStyles.secondaryActionText}>Merge with adjacent visit</Text>
+                    <Text {...mobileTextProps("control")} style={editorStyles.secondaryActionText}>Merge with adjacent visit</Text>
                   </Pressable>
                 ) : null}
 
@@ -947,7 +953,7 @@ export function LocationReviewCorrectionEditor({
                   onPress={() => void recordOnce()}
                   style={pressable(editorStyles.secondaryAction, styles.buttonPressed)}
                 >
-                  <Text style={editorStyles.secondaryActionText}>Record once</Text>
+                  <Text {...mobileTextProps("control")} style={editorStyles.secondaryActionText}>Record once</Text>
                 </Pressable>
                 <Pressable
                   accessibilityRole="button"
@@ -955,7 +961,7 @@ export function LocationReviewCorrectionEditor({
                   onPress={() => void onResolve({ action: "ignore_once_location" }, "This suggestion was ignored.")}
                   style={pressable(editorStyles.secondaryAction, styles.buttonPressed)}
                 >
-                  <Text style={[editorStyles.secondaryActionText, { color: theme.danger }]}>Ignore suggestion</Text>
+                  <Text {...mobileTextProps("control")} style={[editorStyles.secondaryActionText, { color: theme.danger }]}>Ignore suggestion</Text>
                 </Pressable>
               </Reanimated.View>
             ) : null}
@@ -982,7 +988,7 @@ function SectionHeading({
           ? <ClockGlyph color={theme.accentText} />
           : <ActivityGlyph name={glyph} color={theme.accentText} />}
       </View>
-      <Text style={[sectionHeadingStyles.label, { color: theme.textPrimary }]}>{label}</Text>
+      <Text {...mobileTextProps("sectionHeading")} style={[sectionHeadingStyles.label, { color: theme.textPrimary }]}>{label}</Text>
     </View>
   );
 }
@@ -1013,8 +1019,8 @@ function PlaceChoice({
       ]}
     >
       <View style={placeChoiceStyles.text}>
-        <Text style={[placeChoiceStyles.name, { color: theme.textPrimary }]}>{name}</Text>
-        <Text style={[placeChoiceStyles.detail, { color: theme.textSecondary }]}>{detail}</Text>
+        <Text {...mobileTextProps("itemTitle")} style={[placeChoiceStyles.name, { color: theme.textPrimary }]}>{name}</Text>
+        <Text {...mobileTextProps("metadata")} style={[placeChoiceStyles.detail, { color: theme.textSecondary }]}>{detail}</Text>
       </View>
       {selected ? <CheckGlyph color={theme.accentText} /> : null}
     </Pressable>
@@ -1056,7 +1062,7 @@ function CategoryChoice({
         ]}
       >
         <View style={[categoryChoiceStyles.dot, { backgroundColor: color }]} />
-        <Text style={[categoryChoiceStyles.text, { color: selected ? theme.accentText : theme.textPrimary }]}>
+        <Text {...mobileTextProps("control")} style={[categoryChoiceStyles.text, { color: selected ? theme.accentText : theme.textPrimary }]}>
           {label}
         </Text>
       </View>

@@ -89,6 +89,16 @@ Current-label axis measurements grow and shrink; labels share the category-dot
 and heading left anchor. Width/font-scale/Bold Text changes invalidate measurements;
 zero-size hidden probes never affect scrolling, focus or touch targets.
 
+## Mobile Dynamic Type And Accessibility Layout
+
+- Keep React Native system font scaling enabled. Assign only the scoped heading, item, control, metadata, numeric, counter and input roles from `docs/brand-style-guide.md`; body copy, explanations, help, warnings and errors remain uncapped. Reports retains its separate Revision 3.2 contract.
+- A local multiplier cap is not a fit test. Use native intrinsic text measurements at the actual content width, remeasure when width/font scale/Bold Text/style changes, ignore stale callbacks, and wrap or stack before labels, actions or full values become unusable. Do not measure by invoking component functions directly or substitute a synthetic result for rendered native evidence.
+- Preserve full times, durations, counts, destination names and accessible context. Keep controls at least 44 points, avoid overlapping hit areas, and give accessible rows a combined label/value while retaining their original route or action callback.
+- Keep changes presentation-only. Today/history grouping and deletion, Review resolution, timer mutation/form/keyboard, Health and Location interpretation/permissions, Settings route state, Calendar timeline/gesture and Reports accounting/sheet owners stay with their existing components. Do not write data to resolve a layout condition.
+- The neutral `IntrinsicTextMeasure` hook owns only hidden native text probes and intrinsic width. Feature adapters keep their stable IDs and interfaces; the Reports adapter must preserve all existing numerical fit, accessibility, overlay, and sheet behavior.
+- Native Calendar may constrain Dynamic Type only on its compact header subtree when it retains the existing horizontal-to-stacked measured fallback. Do not constrain timeline labels/blocks or add a second zoom/scroll/gesture owner.
+- Local-only diagnostic fixtures mount real components and report geometry/trait metadata without logging text or user data. Mark simulator, ordinary signed staging, and physical-device results separately; a synthetic fixture is never physical acceptance.
+
 ## State And Forms
 
 - Prefer controlled form state only where it adds clarity.

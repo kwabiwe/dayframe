@@ -15,6 +15,7 @@ import type {
   LocationReviewEvidenceDto
 } from "@dayframe/shared";
 import { LocationReviewCorrectionEditor } from "@/components/location/LocationReviewCorrectionEditor";
+import { mobileTextProps } from "@/lib/mobileTypography";
 import { MobileBackButton } from "@/components/MobileBackButton";
 import {
   AuthRequiredError,
@@ -397,7 +398,7 @@ export default function LocationReviewDetailScreen() {
             accessibilityLabel="Back to Review"
             onPress={() => router.back()}
           />
-          <Text style={styles.settingsTitle} numberOfLines={1}>Location evidence</Text>
+          <Text {...mobileTextProps("screenHeading")} style={styles.settingsTitle}>Location evidence</Text>
         </View>
       </View>
 
@@ -409,7 +410,7 @@ export default function LocationReviewDetailScreen() {
           >
             <View style={styles.panel}>
               <ActivityIndicator color={theme.accent} />
-              <Text accessibilityLiveRegion="polite" style={styles.muted}>Loading private map evidence…</Text>
+              <Text {...mobileTextProps("body")} accessibilityLiveRegion="polite" style={styles.muted}>Loading private map evidence…</Text>
             </View>
           </ScrollView>
         ) : null
@@ -419,13 +420,13 @@ export default function LocationReviewDetailScreen() {
           contentContainerStyle={styles.settingsScrollContent}
         >
           <View style={styles.panel}>
-            <Text accessibilityLiveRegion="assertive" style={styles.reviewMetaLine}>{screenState.message}</Text>
+            <Text {...mobileTextProps("body")} accessibilityLiveRegion="assertive" style={styles.reviewMetaLine}>{screenState.message}</Text>
             <Pressable
               accessibilityRole="button"
               style={pressable(styles.secondaryButton, styles.buttonPressed)}
               onPress={() => setReloadSequence((current) => current + 1)}
             >
-              <Text style={styles.secondaryButtonText}>Try again</Text>
+              <Text {...mobileTextProps("control")} style={styles.secondaryButtonText}>Try again</Text>
             </Pressable>
           </View>
         </ScrollView>

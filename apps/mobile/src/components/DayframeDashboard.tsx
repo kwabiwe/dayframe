@@ -47,12 +47,19 @@ import { DayframeCalendarView } from "../../modules/dayframe-calendar";
 import { ActiveTimerEditSheet } from "@/components/ActiveTimerEditSheet";
 import { ConnectivityStatusIndicator } from "@/components/ConnectivityStatusStrip";
 import { TagMetadata } from "@/components/TagMetadata";
+import { useIntrinsicTextMeasure } from "@/components/accessibility/IntrinsicTextMeasure";
+import { TodayDateHeading } from "@/components/accessibility/TodayDateHeading";
+import { TodayLoggedSummary } from "@/components/accessibility/TodayLoggedSummary";
+import { recordMobileLayout, recordMobileTextLayout } from "@/components/accessibility/diagnostics";
+import type { MobileAccessibilityDiagnostic } from "@/components/accessibility/diagnostics";
 import { ReportsTab } from "@/components/reports/ReportsTab";
 import { DayframeBrand } from "@/components/brand";
 import {
   CompactReplayPlayGlyph,
-  PrimaryTimerAction
+  PrimaryTimerAction,
+  PlusGlyph
 } from "@/components/PrimaryTimerAction";
+import { TodayTimerSurface } from "@/components/accessibility/TodayTimerSurface";
 import {
   AuthRequiredError,
   createManualTimeEntry,
@@ -165,6 +172,8 @@ import {
   type MobileStyles,
   type MobileTheme
 } from "@/lib/mobileTheme";
+import { historyRowLayout, summaryLayout } from "@/lib/mobileAccessibilityLayout";
+import { mobileTextProps } from "@/lib/mobileTypography";
 import { subscribeMobileSignedOut } from "@/lib/mobileSessionTransition";
 import {
   buildNativeCalendarBridgeState,
@@ -212,7 +221,6 @@ import {
   shouldAwaitTimerMutationAcceptance,
   sortMobileCategoriesByUsage
 } from "@/lib/timerPresentation";
-import { TIMER_CARD_QUICK_ACTION_HIT_SLOP } from "@/lib/timerCardLayout";
 
 type TimeEntry = MobileBootstrap["entries"][number];
 type AuthView = "login" | "signup";
@@ -2323,163 +2331,30 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
                 </Pressable>
               </View>
 
-              <View style={styles.todayHeading}>
-                <Text style={styles.todayTitle}>Today</Text>
-                <Text style={styles.todaySubtitle}>{formatLongDay(currentDate)}</Text>
-              </View>
+              <TodayDateHeading dateLabel={formatLongDay(currentDate)} styles={styles} />
 
-              {displayedActiveEntry ? (
-                <Pressable
-                  accessibilityLabel={hasLiveActiveTimer ? "Edit running timer" : undefined}
-                  accessibilityRole={hasLiveActiveTimer ? "button" : undefined}
-                  disabled={!hasLiveActiveTimer}
-                  onPress={() => presentActiveEditor("existing_active_timer")}
-                  style={({ pressed }) => [
-                    styles.timerPanel,
-                    pressed && hasLiveActiveTimer ? styles.buttonPressed : null
-                  ]}
-                >
-                  {activeCategoryColor ? (
-                    <View
-                      pointerEvents="none"
-                      style={[styles.activeTimerAccentRail, { backgroundColor: activeCategoryColor }]}
-                    />
-                  ) : null}
-                  <View style={styles.activeTimerHeader}>
-                    <View style={styles.activeTimerTextStack}>
-                      <View style={styles.activeTitleRow}>
-                        {activeCategoryColor ? (
-                          <View style={[styles.colorDot, { backgroundColor: activeCategoryColor }]} />
-                        ) : null}
-                        <Text
-                          style={[
-                            styles.timerText,
-                            styles.activeTitleText,
-                            activeTitleIsPlaceholder ? styles.activeTitlePlaceholderText : null
-                          ]}
-                          numberOfLines={2}
-                        >
-                          {activeTitle}
-                        </Text>
-                      </View>
-                      <Animated.View style={[styles.activeTimerExpandedContent, activeTimerDetailsStyle]}>
-                        {activeCategoryLabel ? (
-                          <Text style={styles.activeDescription}>{activeCategoryLabel}</Text>
-                        ) : null}
-                        <Text style={styles.activeElapsed}>{formatClockDuration(displayedActiveDurationSeconds)}</Text>
-                      </Animated.View>
-                    </View>
-                    <Animated.View
-                      pointerEvents={hasLiveActiveTimer ? "auto" : "none"}
-                      style={[styles.activeTimerActions, activeTimerActionsStyle]}
-                    >
-                      <PrimaryTimerAction
-                        accessibilityLabel="Stop current timer"
-                        backgroundColor={theme.accent}
-                        glyphColor={theme.onAccent}
-                        mode="stop"
-                        onPress={(event) => {
-                          event.stopPropagation();
-                          void stopActiveTimer();
-                        }}
-                      />
-                      <Pressable
-                        accessibilityLabel="Add past time"
-                        accessibilityRole="button"
-                        onPress={(event) => {
-                          event.stopPropagation();
-                          openManualEntry();
-                        }}
-                        style={pressable(styles.addPastTimeButton, styles.buttonPressed)}
-                        testID="active-timer-add-past-time"
-                      >
-                        <PlusGlyph color={theme.accentText} />
-                      </Pressable>
-                    </Animated.View>
-                  </View>
-                </Pressable>
-              ) : (
-                <View style={[styles.panel, styles.idleTimerPanel]}>
-                  <View style={styles.startInputRow}>
-                    <View style={styles.startComposerMain}>
-                      <Pressable
-                        accessibilityLabel="Start timer and add details"
-                        accessibilityRole="button"
-                        style={pressable([styles.textInput, styles.startInput], styles.buttonPressed)}
-                        onPress={startBlankTask}
-                      >
-                        <Text style={styles.startInputText} numberOfLines={1}>What are you working on?</Text>
-                      </Pressable>
-                      <View style={styles.quickActionsGroup}>
-                        <Text style={styles.quickCategoryHint}>QUICK ACTIONS</Text>
-                        <ScrollView
-                          accessibilityLabel="Quick actions"
-                          horizontal
-                          keyboardShouldPersistTaps="handled"
-                          showsHorizontalScrollIndicator={false}
-                          style={styles.quickActionsInline}
-                          contentContainerStyle={styles.compactCategoryScroller}
-                        >
-                          {quickActions.map((action) => {
-                            const categoryColor = action.isUncategorized
-                              ? null
-                              : paletteColorFor(action.color, action.subtitle ?? action.name, theme.mode);
-                            return (
-                              <Pressable
-                                key={action.key}
-                                accessibilityRole="button"
-                                accessibilityLabel={`Start ${action.name}`}
-                                hitSlop={{
-                                  top: TIMER_CARD_QUICK_ACTION_HIT_SLOP,
-                                  bottom: TIMER_CARD_QUICK_ACTION_HIT_SLOP
-                                }}
-                                style={pressable(styles.categoryPillTouch, styles.buttonPressed)}
-                                onPress={() => {
-                                  void startTask(action.id, action.description ?? "");
-                                }}
-                              >
-                                <View
-                                  style={[
-                                    styles.categoryPill,
-                                    categoryColor
-                                      ? { backgroundColor: colorWithAlpha(categoryColor, theme.mode === "dark" ? 0.18 : 0.13) }
-                                      : styles.categoryPillMuted
-                                  ]}
-                                >
-                                  <View
-                                    style={[
-                                      styles.colorDot,
-                                      categoryColor ? { backgroundColor: categoryColor } : styles.colorDotMuted
-                                    ]}
-                                  />
-                                  <Text style={styles.categoryPillText} numberOfLines={1}>{action.name}</Text>
-                                </View>
-                              </Pressable>
-                            );
-                          })}
-                        </ScrollView>
-                      </View>
-                    </View>
-                    <View style={styles.startActionColumn}>
-                      <PrimaryTimerAction
-                        accessibilityLabel="Start task"
-                        backgroundColor={theme.accent}
-                        glyphColor={theme.onAccent}
-                        mode="play"
-                        onPress={startBlankTask}
-                      />
-                      <Pressable
-                        accessibilityLabel="Add past time"
-                        accessibilityRole="button"
-                        style={pressable(styles.addPastTimeButton, styles.buttonPressed)}
-                        onPress={openManualEntry}
-                      >
-                        <PlusGlyph color={theme.accentText} />
-                      </Pressable>
-                    </View>
-                  </View>
-                </View>
-              )}
+              <TodayTimerSurface
+                active={displayedActiveEntry ? {
+                  categoryColor: activeCategoryColor,
+                  categoryLabel: activeCategoryLabel,
+                  elapsedLabel: formatClockDuration(displayedActiveDurationSeconds),
+                  hasLiveActiveTimer,
+                  title: activeTitle,
+                  titleIsPlaceholder: activeTitleIsPlaceholder,
+                } : null}
+                activeTimerActionsStyle={activeTimerActionsStyle}
+                activeTimerDetailsStyle={activeTimerDetailsStyle}
+                onAddTime={openManualEntry}
+                onOpenActiveTimer={() => presentActiveEditor("existing_active_timer")}
+                onStartBlank={startBlankTask}
+                onStartQuickAction={(action) => {
+                  void startTask(action.id, action.description ?? "");
+                }}
+                onStop={() => { void stopActiveTimer(); }}
+                quickActions={quickActions}
+                styles={styles}
+                theme={theme}
+              />
             </Animated.View>
           )}
           renderItem={({ item }) => (
@@ -2755,14 +2630,6 @@ function SettingsGlyph({ color }: { color: string }) {
   );
 }
 
-function PlusGlyph({ color }: { color: string }) {
-  return (
-    <Svg width={20} height={20} viewBox="0 0 24 24">
-      <Path d="M12 5v14M5 12h14" fill="none" stroke={color} strokeLinecap="round" strokeWidth={2.2} />
-    </Svg>
-  );
-}
-
 function PasswordVisibilityGlyph({
   color,
   passwordVisible
@@ -2881,6 +2748,7 @@ function SwipeableHistoryEntry({
   styles: MobileStyles;
   theme: MobileTheme;
 }) {
+  const [measuredHeight, setMeasuredHeight] = useState(minHeight);
   return (
     <ReanimatedSwipeable
       enabled={enabled}
@@ -2891,7 +2759,7 @@ function SwipeableHistoryEntry({
         <SwipeDeleteAction
           accessibilityLabel={accessibilityLabel}
           entry={entry}
-          minHeight={minHeight}
+          minHeight={measuredHeight}
           onDelete={onDelete}
           styles={styles}
           swipeable={swipeable}
@@ -2900,12 +2768,19 @@ function SwipeableHistoryEntry({
         />
       ) : null}
     >
-      {children}
+      <View
+        onLayout={(event) => {
+          const height = Math.ceil(event.nativeEvent.layout.height);
+          setMeasuredHeight((current) => current === height ? current : Math.max(minHeight, height));
+        }}
+      >
+        {children}
+      </View>
     </ReanimatedSwipeable>
   );
 }
 
-function HistoryDayCard({
+export function HistoryDayCard({
   activeTimerRunning,
   now,
   onDeleteEntries,
@@ -2915,7 +2790,8 @@ function HistoryDayCard({
   reviewCount,
   section,
   styles,
-  theme
+  theme,
+  diagnostic
 }: {
   activeTimerRunning: boolean;
   now: number;
@@ -2927,10 +2803,29 @@ function HistoryDayCard({
   section: HistoryDaySection;
   styles: MobileStyles;
   theme: MobileTheme;
+  diagnostic?: MobileAccessibilityDiagnostic;
 }) {
   const reduceMotion = useReduceMotionPreference();
   const [expandedGroups, setExpandedGroups] = useState<Set<string>>(() => new Set());
+  const [availableRowWidth, setAvailableRowWidth] = useState(0);
   const entryGroups = useMemo(() => groupHistoryDayEntries(section.entries), [section.entries]);
+  const longestDuration = useMemo(
+    () => formatDuration(Math.max(0, ...entryGroups.map((group) => group.totalSeconds))),
+    [entryGroups]
+  );
+  const durationSample = longestDuration.replace(/[0-9]/g, "8");
+  const durationMeasure = useIntrinsicTextMeasure(
+    [durationSample],
+    styles.todayEntryDuration,
+    1.2
+  );
+  const longestGroupCount = Math.max(0, ...entryGroups.map((group) => group.entries.length));
+  const groupCountSample = String(longestGroupCount).replace(/[0-9]/g, "8");
+  const groupCountMeasure = useIntrinsicTextMeasure(
+    [groupCountSample],
+    styles.historyGroupCountText,
+    1.2,
+  );
   const historyAnalysis = useMemo(() => {
     const rangeStart = new Date(section.date);
     rangeStart.setHours(0, 0, 0, 0);
@@ -2948,6 +2843,22 @@ function HistoryDayCard({
     () => new Map(historyAnalysis.entries.map((entry) => [entry.id, entry])),
     [historyAnalysis.entries]
   );
+  const noticeLabel = `${reviewCount} ${reviewCount === 1 ? "item needs" : "items need"} review`;
+  const noticeMeasure = useIntrinsicTextMeasure(
+    [noticeLabel, "Open Review"],
+    styles.reviewNoteText,
+    1.3
+  );
+  const [noticeWidth, setNoticeWidth] = useState(0);
+  const noticeStacked = !noticeMeasure.widths[noticeLabel] || !noticeMeasure.widths["Open Review"] ||
+    summaryLayout({
+      availableWidth: noticeWidth,
+      labelWidth: noticeMeasure.widths[noticeLabel] ?? 0,
+      valueWidth: noticeMeasure.widths["Open Review"] ?? 0,
+      gap: 10,
+      padding: 24
+    }) === "stacked";
+  const loggedValue = formatDuration(historyAnalysis.loggedSeconds);
 
   function toggleGroup(groupKey: string) {
     setExpandedGroups((current) => {
@@ -2960,21 +2871,58 @@ function HistoryDayCard({
 
   return (
     <View style={styles.todaySummaryBlock}>
-      <Text style={styles.historyDayTitle}>{historyDayLabel(section, now)}</Text>
-      <View style={styles.todayEntryCard}>
+      <Text {...mobileTextProps("sectionHeading")} style={styles.historyDayTitle}>{historyDayLabel(section, now)}</Text>
+      <View
+        style={styles.todayEntryCard}
+        onLayout={(event) => {
+          const layout = event?.nativeEvent?.layout;
+          if (!layout) return;
+          diagnostic?.onLayout?.("history.card", layout);
+          const width = Math.max(0, layout.width - 28);
+          setAvailableRowWidth((current) => current === width ? current : width);
+        }}
+      >
+        {durationMeasure.probe}
         {section.entries.length === 0 ? (
           <Reanimated.View
             entering={localPresenceEntering(reduceMotion)}
             layout={localLayoutTransition(reduceMotion)}
           >
-            <Text style={styles.todayEmptyText}>No tracked time for this day.</Text>
+            <Text {...mobileTextProps("body")} style={styles.todayEmptyText}>No tracked time for this day.</Text>
           </Reanimated.View>
         ) : entryGroups.map((group, index) => {
           const { entry } = group.representative;
+          const probeId = group.entries[0].entry.id;
           const grouped = group.entries.length > 1;
           const expanded = grouped && expandedGroups.has(group.key);
           const canReplay = Boolean(entry.categoryId || entry.description?.trim());
           const title = displayEntryTitle(entry);
+          const durationWidth = durationMeasure.widths[durationSample] ?? 0;
+          const rowLayout = historyRowLayout({
+            availableWidth: availableRowWidth,
+            countBadgeWidth: grouped
+              ? Math.max(34, (groupCountMeasure.widths[groupCountSample] ?? 0) + 16)
+              : 0,
+            durationWidth,
+            replayWidth: 44,
+            gap: 10
+          });
+          const duration = formatDuration(group.totalSeconds);
+          const categoryPlace = [entry.categoryName, entry.placeName].filter(Boolean).join(" · ");
+          const tagNames = entry.tagNames ?? entry.tags?.map((tag) => tag.name) ?? [];
+          const timeRange = grouped
+            ? `${formatEntryTimeRange(entry, now)} · ${group.entries.length} entries`
+            : formatEntryTimeRange(entry, now);
+          const hasOverlap = group.entries.some(({ entry: groupedEntry }) =>
+            (historyOverlapById.get(groupedEntry.id)?.overlapCount ?? 0) > 0
+          );
+          const detailContext = [
+            timeRange,
+            categoryPlace,
+            tagNames.length ? `Tags: ${tagNames.join(", ")}` : null,
+            hasOverlap ? "Overlaps other tracked time" : null,
+            duration
+          ].filter(Boolean).join(". ");
           return (
             <Reanimated.View
               key={`${section.key}:${group.key}`}
@@ -2983,7 +2931,7 @@ function HistoryDayCard({
               layout={localLayoutTransition(reduceMotion)}
             >
               <SwipeableHistoryEntry
-                accessibilityLabel={title}
+                accessibilityLabel={`${title}. ${detailContext}`}
                 enabled={group.entries.every(({ entry: groupedEntry }) => Boolean(groupedEntry.stoppedAt))}
                 entry={entry}
                 minHeight={56}
@@ -2991,46 +2939,77 @@ function HistoryDayCard({
                 styles={styles}
                 theme={theme}
               >
-                <View
-                  style={[
-                    styles.todayEntryRow,
-                    index > 0 ? styles.todayEntryDivider : null
-                  ]}
-                >
+                <View style={[
+                  styles.todayEntryRow,
+                  rowLayout === "stacked" ? styles.historyEntryStackedRow : null,
+                  index > 0 ? styles.todayEntryDivider : null
+                ]} onLayout={(event) => {
+                  recordMobileLayout(diagnostic, `history.row.${probeId}`, event);
+                  const staleDurationPrefix = rowLayout === "inline"
+                    ? `history.duration-stacked.${probeId}`
+                    : `history.duration.${probeId}`;
+                  diagnostic?.onRemove?.(`${staleDurationPrefix}.frame`);
+                  diagnostic?.onRemove?.(`${staleDurationPrefix}.text`);
+                }}>
+                  <View style={rowLayout === "stacked" ? styles.historyEntryStackedTop : styles.historyEntryInlineTop}>
                   <Pressable
-                  accessibilityLabel={grouped
+                  accessibilityLabel={`${grouped
                     ? `${expanded ? "Collapse" : "Expand"} ${group.entries.length} ${title} entries`
-                    : `Edit ${title}`}
+                    : `Edit ${title}`}. ${detailContext}`}
                   accessibilityRole="button"
                   accessibilityState={grouped ? { expanded } : undefined}
+                  accessibilityActions={group.entries.every(({ entry: groupedEntry }) => Boolean(groupedEntry.stoppedAt))
+                    ? [{ name: "delete", label: `Delete ${grouped ? `${group.entries.length} ${title} entries` : title}` }]
+                    : undefined}
+                  onAccessibilityAction={(event) => {
+                    if (event.nativeEvent.actionName === "delete" && group.entries.every(({ entry: groupedEntry }) => Boolean(groupedEntry.stoppedAt))) {
+                      onDeleteEntries(group.entries.map(({ entry: groupedEntry }) => groupedEntry));
+                    }
+                  }}
                   onPress={() => {
                     if (grouped) toggleGroup(group.key);
                     else onOpenEntry(entry);
                   }}
                   style={({ pressed }) => [styles.historyEntryMain, pressed ? styles.buttonPressed : null]}
+                  onLayout={(event) => recordMobileLayout(diagnostic, `history.main.${probeId}`, event)}
                 >
                   {grouped ? (
-                    <View style={styles.historyGroupCountBadge}>
-                      <Text style={styles.historyGroupCountText}>{group.entries.length}</Text>
+                    <View
+                      style={styles.historyGroupCountBadge}
+                      onLayout={(event) => recordMobileLayout(diagnostic, `history.count.${probeId}`, event)}
+                    >
+                      <Text
+                        {...mobileTextProps("counter")}
+                        style={styles.historyGroupCountText}
+                        onLayout={(event) => recordMobileLayout(diagnostic, `history.count-text.${probeId}.frame`, event)}
+                        onTextLayout={(event) => recordMobileTextLayout(diagnostic, `history.count-text.${probeId}`, event, "counter", styles.historyGroupCountText)}
+                      >
+                        {group.entries.length}
+                      </Text>
                     </View>
                   ) : null}
                   <View style={[styles.todayEntryDot, { backgroundColor: entryCategoryColor(entry, theme.mode) }]} />
                   <View style={styles.todayEntryText}>
-                    <Text style={styles.todayEntryTitle} numberOfLines={1}>{title}</Text>
-                    <Text style={styles.todayEntryMeta} numberOfLines={1}>
-                      {grouped
-                        ? historyGroupMeta(entry, group.entries.length)
-                        : `${formatEntryTimeRange(entry, now)}${entry.categoryName ? ` · ${entry.categoryName}` : ""}${entry.placeName ? ` · ${entry.placeName}` : ""}`}
+                    <Text {...mobileTextProps("itemTitle")} style={styles.todayEntryTitle} numberOfLines={rowLayout === "stacked" ? 2 : 1} onLayout={(event) => recordMobileLayout(diagnostic, `history.title.${probeId}.frame`, event)} onTextLayout={(event) => recordMobileTextLayout(diagnostic, `history.title.${probeId}`, event, "itemTitle", styles.todayEntryTitle)}>{title}</Text>
+                    <Text {...mobileTextProps("metadata")} style={styles.todayEntryMeta} onLayout={(event) => recordMobileLayout(diagnostic, `history.time.${probeId}.frame`, event)} onTextLayout={(event) => recordMobileTextLayout(diagnostic, `history.time.${probeId}`, event, "metadata", styles.todayEntryMeta)}>
+                      {timeRange}
                     </Text>
+                    {categoryPlace ? (
+                      <Text {...mobileTextProps("metadata")} style={styles.todayEntryOptionalMeta} numberOfLines={rowLayout === "stacked" ? 2 : 1}>
+                        {categoryPlace}
+                      </Text>
+                    ) : null}
                     <TagMetadata
+                      accessibilityHidden
+                      diagnostic={diagnostic}
+                      diagnosticPrefix={`history.tags.${probeId}`}
                       styles={styles}
                       tagNames={entry.tagNames ?? entry.tags?.map((tag) => tag.name) ?? []}
                       theme={theme}
                     />
-                    {group.entries.some(({ entry: groupedEntry }) =>
-                      (historyOverlapById.get(groupedEntry.id)?.overlapCount ?? 0) > 0
-                    ) ? (
+                    {hasOverlap ? (
                       <Text
+                        {...mobileTextProps("metadata")}
                         accessibilityLabel="Overlap"
                         style={[styles.reviewMetaLine, { color: theme.warningText }]}
                       >
@@ -3039,8 +3018,10 @@ function HistoryDayCard({
                     ) : null}
                   </View>
                   </Pressable>
-                  <View style={styles.historyEntryActions}>
-                    <Text style={styles.todayEntryDuration}>{formatDuration(group.totalSeconds)}</Text>
+                  <View style={styles.historyEntryActions} onLayout={(event) => recordMobileLayout(diagnostic, `history.actions.${probeId}`, event)}>
+                    {rowLayout === "inline" ? (
+                    <Text {...mobileTextProps("numeric")} style={styles.todayEntryDuration} onLayout={(event) => recordMobileLayout(diagnostic, `history.duration.${probeId}.frame`, event)} onTextLayout={(event) => recordMobileTextLayout(diagnostic, `history.duration.${probeId}`, event, "numeric", styles.todayEntryDuration)}>{duration}</Text>
+                    ) : null}
                     <Pressable
                       accessibilityLabel={activeTimerRunning
                         ? `Switch the running timer to ${title}`
@@ -3048,7 +3029,8 @@ function HistoryDayCard({
                       accessibilityRole="button"
                       accessibilityState={{ disabled: !canReplay }}
                       disabled={!canReplay}
-                      onPress={() => onReplayEntry(entry)}
+                        onPress={() => onReplayEntry(entry)}
+                        onLayout={(event) => recordMobileLayout(diagnostic, `history.replay.${probeId}`, event)}
                       style={({ pressed }) => [
                         styles.historyReplayButton,
                         !canReplay ? styles.buttonDisabled : null,
@@ -3060,6 +3042,17 @@ function HistoryDayCard({
                       />
                     </Pressable>
                   </View>
+                  </View>
+                  {rowLayout === "stacked" ? (
+                    <Text
+                      {...mobileTextProps("numeric")}
+                      style={styles.historyEntryStackedDuration}
+                      onLayout={(event) => recordMobileLayout(diagnostic, `history.duration-stacked.${probeId}.frame`, event)}
+                      onTextLayout={(event) => recordMobileTextLayout(diagnostic, `history.duration-stacked.${probeId}`, event, "numeric", styles.historyEntryStackedDuration)}
+                    >
+                      {duration}
+                    </Text>
+                  ) : null}
                 </View>
               </SwipeableHistoryEntry>
               {expanded ? (
@@ -3067,7 +3060,7 @@ function HistoryDayCard({
                   entering={localPresenceEntering(reduceMotion)}
                   exiting={localPresenceExiting(reduceMotion)}
                   layout={localLayoutTransition(reduceMotion)}
-                  style={styles.historyGroupChildren}
+                  style={[styles.historyGroupChildren, rowLayout === "stacked" ? styles.historyGroupChildrenStacked : null]}
                 >
                   {group.entries.map(({ entry: childEntry, overlapSeconds }, childIndex) => (
                     <Reanimated.View
@@ -3077,7 +3070,7 @@ function HistoryDayCard({
                       layout={localLayoutTransition(reduceMotion)}
                     >
                       <SwipeableHistoryEntry
-                        accessibilityLabel={displayEntryTitle(childEntry)}
+                        accessibilityLabel={`${displayEntryTitle(childEntry)}, ${formatEntryTimeRange(childEntry, now)}, ${formatDuration(overlapSeconds)}`}
                         enabled={Boolean(childEntry.stoppedAt)}
                         entry={childEntry}
                         minHeight={46}
@@ -3085,23 +3078,50 @@ function HistoryDayCard({
                         styles={styles}
                         theme={theme}
                       >
+                        <View style={[styles.historyGroupChildDetails, childIndex > 0 ? styles.historyGroupChildDivider : null]}>
                         <Pressable
-                          accessibilityLabel={`Edit ${displayEntryTitle(childEntry)} from ${formatEntryTimeRange(childEntry, now)}`}
+                          accessibilityLabel={`Edit ${displayEntryTitle(childEntry)}. ${formatEntryTimeRange(childEntry, now)}. ${formatDuration(overlapSeconds)}.${(childEntry.tagNames ?? childEntry.tags?.map((tag) => tag.name) ?? []).length ? ` Tags: ${(childEntry.tagNames ?? childEntry.tags?.map((tag) => tag.name) ?? []).join(", ")}.` : ""}${(historyOverlapById.get(childEntry.id)?.overlapCount ?? 0) > 0 ? " Overlaps other tracked time." : ""}`}
                           accessibilityRole="button"
+                          accessibilityActions={Boolean(childEntry.stoppedAt)
+                            ? [{ name: "delete", label: `Delete ${displayEntryTitle(childEntry)}` }]
+                            : undefined}
+                          onAccessibilityAction={(event) => {
+                            if (event.nativeEvent.actionName === "delete" && childEntry.stoppedAt) {
+                              onDeleteEntries([childEntry]);
+                            }
+                          }}
                           onPress={() => onOpenEntry(childEntry)}
                           style={({ pressed }) => [
                             styles.historyGroupChild,
-                            childIndex > 0 ? styles.historyGroupChildDivider : null,
                             pressed ? styles.buttonPressed : null
                           ]}
                         >
-                          <View style={[styles.todayEntryDot, { backgroundColor: entryCategoryColor(childEntry, theme.mode) }]} />
-                          <Text style={styles.historyGroupChildTime} numberOfLines={1}>
-                            {formatEntryTimeRange(childEntry, now)}
-                          </Text>
-                          <Text style={styles.todayEntryDuration}>{formatDuration(overlapSeconds)}</Text>
+                          <View style={styles.historyGroupChildMain}>
+                            <View style={[styles.todayEntryDot, { backgroundColor: entryCategoryColor(childEntry, theme.mode) }]} />
+                            <Text {...mobileTextProps("metadata")} style={styles.historyGroupChildTime} onLayout={(event) => recordMobileLayout(diagnostic, `history.child-time.${probeId}.${childIndex}.frame`, event)} onTextLayout={(event) => recordMobileTextLayout(diagnostic, `history.child-time.${probeId}.${childIndex}`, event, "metadata", styles.historyGroupChildTime)}>
+                              {formatEntryTimeRange(childEntry, now)}
+                            </Text>
+                            <Text
+                              {...mobileTextProps("numeric")}
+                              style={styles.todayEntryDuration}
+                              onLayout={(event) => recordMobileLayout(diagnostic, `history.child-duration.${probeId}.${childIndex}.frame`, event)}
+                              onTextLayout={(event) => recordMobileTextLayout(diagnostic, `history.child-duration.${probeId}.${childIndex}`, event, "numeric", styles.todayEntryDuration)}
+                            >
+                              {formatDuration(overlapSeconds)}
+                            </Text>
+                          </View>
+                        </Pressable>
+                        <TagMetadata
+                          accessibilityHidden
+                          diagnostic={diagnostic}
+                          diagnosticPrefix={`history.child-tags.${probeId}.${childIndex}`}
+                          styles={styles}
+                          tagNames={childEntry.tagNames ?? childEntry.tags?.map((tag) => tag.name) ?? []}
+                          theme={theme}
+                        />
                           {(historyOverlapById.get(childEntry.id)?.overlapCount ?? 0) > 0 ? (
                             <Text
+                              {...mobileTextProps("metadata")}
                               accessibilityLabel={`Overlap: ${formatDuration(
                                 historyOverlapById.get(childEntry.id)?.uniqueOverlapSeconds ?? 0
                               )} shared with other entries`}
@@ -3110,7 +3130,7 @@ function HistoryDayCard({
                               Overlap
                             </Text>
                           ) : null}
-                        </Pressable>
+                        </View>
                       </SwipeableHistoryEntry>
                     </Reanimated.View>
                   ))}
@@ -3121,41 +3141,45 @@ function HistoryDayCard({
         })}
       </View>
       {reviewCount > 0 ? (
+        <View onLayout={(event) => {
+          recordMobileLayout(diagnostic, "review-notice.container", event);
+          const width = event?.nativeEvent?.layout?.width;
+          if (width === undefined) return;
+          setNoticeWidth((current) => current === width ? current : width);
+        }}>
+        {noticeMeasure.probe}
         <Pressable
           accessibilityLabel={`${reviewCount} ${reviewCount === 1 ? "item needs" : "items need"} review. Open Review.`}
           accessibilityRole="button"
           onPress={onOpenReview}
           style={({ pressed }) => [
             styles.reviewNoteButton,
+            noticeStacked ? styles.reviewNoteButtonStacked : null,
             pressed ? styles.buttonPressed : null
           ]}
         >
-          <Text style={styles.reviewNoteText}>
-            {reviewCount} {reviewCount === 1 ? "item needs" : "items need"} review
+            <Text
+            {...mobileTextProps("control")}
+            style={[styles.reviewNoteText, noticeStacked ? styles.reviewNoteTextStacked : null]}
+            onLayout={(event) => recordMobileLayout(diagnostic, "review-notice.count.frame", event)}
+            onTextLayout={(event) => recordMobileTextLayout(diagnostic, "review-notice.count", event, "control", styles.reviewNoteText)}
+          >
+            {noticeLabel}
           </Text>
-          <Text style={styles.reviewNoteAction}>Open Review</Text>
+          <Text {...mobileTextProps("control")} style={styles.reviewNoteAction} onLayout={(event) => recordMobileLayout(diagnostic, "review-notice.action.frame", event)} onTextLayout={(event) => recordMobileTextLayout(diagnostic, "review-notice.action", event, "control", styles.reviewNoteAction)}>Open Review</Text>
         </Pressable>
-      ) : null}
-      <View style={styles.todayTrackedRow}>
-        <Text style={styles.todayTrackedLabel}>Logged</Text>
-        <View>
-          <Text style={styles.todayTrackedValue}>{formatDuration(historyAnalysis.loggedSeconds)}</Text>
-          {historyAnalysis.additionalOverlapSeconds > 0 ? (
-            <Text style={[styles.reviewMetaLine, { textAlign: "right" }]}>
-              {formatDuration(historyAnalysis.coveredSeconds)} covered
-            </Text>
-          ) : null}
         </View>
-      </View>
+      ) : null}
+      <TodayLoggedSummary
+        value={loggedValue}
+        coveredValue={historyAnalysis.additionalOverlapSeconds > 0
+          ? `${formatDuration(historyAnalysis.coveredSeconds)} covered`
+          : null}
+        styles={styles}
+        diagnostic={diagnostic}
+      />
     </View>
   );
-}
-
-function historyGroupMeta(entry: TimeEntry, count: number) {
-  const title = displayEntryTitle(entry).trim().toLocaleLowerCase();
-  const category = entry.categoryName?.trim();
-  if (!category || category.toLocaleLowerCase() === title) return `${count} entries`;
-  return `${count} entries · ${category}`;
 }
 
 function dedupeEntriesById(entries: TimeEntry[]) {
@@ -3302,16 +3326,6 @@ function addDaysToDate(date: Date, days: number) {
   const copy = new Date(date);
   copy.setDate(copy.getDate() + days);
   return copy;
-}
-
-function colorWithAlpha(hex: string, alpha: number) {
-  const match = /^#?([0-9a-f]{6})$/i.exec(hex);
-  if (!match) return hex;
-  const value = match[1];
-  const red = Number.parseInt(value.slice(0, 2), 16);
-  const green = Number.parseInt(value.slice(2, 4), 16);
-  const blue = Number.parseInt(value.slice(4, 6), 16);
-  return `rgba(${red}, ${green}, ${blue}, ${alpha})`;
 }
 
 function sameTimerStopOwner(left: TimerStopOwner, right: TimerStopOwner) {

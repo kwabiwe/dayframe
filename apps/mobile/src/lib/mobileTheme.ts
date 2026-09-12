@@ -251,6 +251,7 @@ function createStyles(theme: MobileTheme) {
     settingsMenuIcon: {
       width: 36,
       height: 36,
+      flexShrink: 0,
       borderRadius: 999,
       backgroundColor: theme.surfaceMuted,
       alignItems: "center",
@@ -260,6 +261,13 @@ function createStyles(theme: MobileTheme) {
       flex: 1,
       minWidth: 0,
       gap: 3
+    },
+    settingsMenuChevron: {
+      width: 18,
+      height: 18,
+      flexShrink: 0,
+      alignItems: "center",
+      justifyContent: "center"
     },
     settingsMenuTitle: {
       color: theme.textPrimary,
@@ -974,7 +982,8 @@ function createStyles(theme: MobileTheme) {
       flexDirection: "row",
       alignItems: "flex-start",
       justifyContent: "space-between",
-      gap: 10
+      gap: 10,
+      flexWrap: "wrap"
     },
     reviewBadge: {
       alignSelf: "flex-start",
@@ -982,7 +991,8 @@ function createStyles(theme: MobileTheme) {
       backgroundColor: theme.surfaceMuted,
       borderRadius: 999,
       paddingHorizontal: 10,
-      justifyContent: "center"
+      justifyContent: "center",
+      flexShrink: 0
     },
     reviewBadgeText: {
       color: theme.warningText,
@@ -992,7 +1002,7 @@ function createStyles(theme: MobileTheme) {
     },
     reviewTitleStack: {
       flex: 1,
-      minWidth: 0,
+      minWidth: 180,
       gap: 4
     },
     reviewTitle: {
@@ -1018,7 +1028,8 @@ function createStyles(theme: MobileTheme) {
       minHeight: 24,
       flexDirection: "row",
       alignItems: "center",
-      gap: 8
+      gap: 8,
+      flexWrap: "wrap"
     },
     reviewConfidenceLabel: {
       color: theme.textPrimary,
@@ -1176,19 +1187,32 @@ function createStyles(theme: MobileTheme) {
       justifyContent: "space-between",
       gap: 10
     },
+    reviewNoteButtonStacked: {
+      borderRadius: 16,
+      flexDirection: "column",
+      alignItems: "stretch",
+      justifyContent: "center",
+      gap: 6
+    },
     reviewNoteText: {
       flex: 1,
+      flexShrink: 1,
       color: theme.textPrimary,
       fontFamily: monoFont,
       fontSize: 12,
       fontWeight: "600",
       lineHeight: 17
     },
+    reviewNoteTextStacked: {
+      flex: 0,
+      width: "100%"
+    },
     reviewNoteAction: {
       color: theme.accentText,
       fontFamily: monoFont,
       fontSize: 12,
-      fontWeight: "600"
+      fontWeight: "600",
+      flexShrink: 0
     },
     reportScreenTitle: {
       color: theme.textPrimary,
@@ -1250,6 +1274,12 @@ function createStyles(theme: MobileTheme) {
       fontSize: 11,
       fontWeight: "400"
     },
+    todayEntryOptionalMeta: {
+      color: theme.textSecondary,
+      fontFamily: monoFont,
+      fontSize: 11,
+      fontWeight: "400"
+    },
     todayEntryDuration: {
       color: theme.textPrimary,
       fontFamily: monoFont,
@@ -1267,9 +1297,10 @@ function createStyles(theme: MobileTheme) {
     },
     historyGroupCountBadge: {
       minWidth: 34,
-      height: 34,
+      minHeight: 34,
       borderRadius: 999,
       paddingHorizontal: 8,
+      paddingVertical: 5,
       backgroundColor: theme.surfaceMuted,
       alignItems: "center",
       justifyContent: "center"
@@ -1286,12 +1317,24 @@ function createStyles(theme: MobileTheme) {
       borderTopWidth: 1,
       borderTopColor: theme.border
     },
+    historyGroupChildrenStacked: {
+      marginLeft: 16
+    },
+    historyGroupChildDetails: {
+      paddingLeft: 10,
+      gap: 2
+    },
     historyGroupChild: {
+      minHeight: 44,
+      flexDirection: "column",
+      alignItems: "stretch",
+      justifyContent: "center"
+    },
+    historyGroupChildMain: {
       minHeight: 46,
       flexDirection: "row",
       alignItems: "center",
-      gap: 9,
-      paddingLeft: 10
+      gap: 9
     },
     historyGroupChildDivider: {
       borderTopWidth: 1,
@@ -1340,6 +1383,13 @@ function createStyles(theme: MobileTheme) {
       alignItems: "center",
       justifyContent: "space-between"
     },
+    todayTrackedRowStacked: {
+      alignItems: "flex-start",
+      justifyContent: "center",
+      flexDirection: "column",
+      paddingVertical: 10,
+      gap: 4
+    },
     todayTrackedLabel: {
       color: theme.textSecondary,
       fontFamily: monoFont,
@@ -1352,6 +1402,32 @@ function createStyles(theme: MobileTheme) {
       fontSize: 17,
       fontWeight: "700",
       fontVariant: ["tabular-nums"]
+    },
+    historyEntryStackedRow: {
+      minHeight: 0,
+      flexDirection: "column",
+      alignItems: "stretch",
+      paddingVertical: 8,
+      gap: 2
+    },
+    historyEntryInlineTop: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 4
+    },
+    historyEntryStackedTop: {
+      flexDirection: "row",
+      alignItems: "flex-start",
+      gap: 4
+    },
+    historyEntryStackedDuration: {
+      color: theme.textPrimary,
+      fontFamily: monoFont,
+      fontSize: 13,
+      fontWeight: "600",
+      fontVariant: ["tabular-nums"],
+      alignSelf: "flex-end",
+      marginRight: 47
     },
     compactCategoryScroller: {
       gap: 7,
@@ -1382,7 +1458,8 @@ function createStyles(theme: MobileTheme) {
       color: theme.textPrimary,
       fontFamily: monoFont,
       fontSize: 12,
-      fontWeight: "600"
+      fontWeight: "600",
+      maxWidth: 168
     },
     quickCategoryHint: {
       color: theme.textSecondary,
@@ -1532,7 +1609,7 @@ function createStyles(theme: MobileTheme) {
       paddingRight: 4
     },
     categoryChoice: {
-      minHeight: 32,
+      minHeight: 44,
       backgroundColor: theme.surfaceMuted,
       borderRadius: 999,
       paddingHorizontal: 11,
@@ -2437,6 +2514,7 @@ function createStyles(theme: MobileTheme) {
       minWidth: 0,
       flexDirection: "row",
       alignItems: "center",
+      flexWrap: "wrap",
       gap: 5
     },
     tagMetadataTagGroup: {
@@ -2446,9 +2524,10 @@ function createStyles(theme: MobileTheme) {
       gap: 5
     },
     tagMetadataTagButton: {
-      minWidth: 0,
-      minHeight: 28,
-      justifyContent: "center"
+      minWidth: 44,
+      minHeight: 44,
+      justifyContent: "center",
+      paddingHorizontal: 4
     },
     tagMetadataSeparator: {
       color: theme.textSecondary,
