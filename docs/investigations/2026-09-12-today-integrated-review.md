@@ -72,7 +72,9 @@ The ordered source commits, all based on
   navigation;
 - `9c0fb30ea113742ede41601f6c93b4329c5f15bd` — opt-in Today donut and its
   accessibility contract; and
-- `90f643aea4e906392b0dd1c6fc997cc9246cc0db` — partial-summary qualification.
+- `90f643aea4e906392b0dd1c6fc997cc9246cc0db` — partial-summary qualification;
+- `0d48b7a7c23fcaacb10a5c290985a69398199d3a` — test-mock lint hygiene; and
+- `9a2bf3ad8f2e1d7bbb3e9222f8ce6f749d5eb3da` — native exact-focus handover.
 
 The required gates were deliberately run before the donut was introduced:
 
@@ -95,6 +97,29 @@ fresh local PostgreSQL 17 instance was initialised on loopback with a database
 named `dayframe_test`; their built-in localhost-and-`*_test` refusal and
 fixture cleanup were retained. That local server was stopped after the run.
 No staging or production data was contacted.
+
+At source head `9a2bf3ad8f2e1d7bbb3e9222f8ce6f749d5eb3da`, the final broad
+test command passed: mobile 134 files / 1,177 tests; web 134 files / 908 tests
+with 2 existing skips; shared 16 files / 250 tests. The time-zone-sensitive
+Today presentation/client/label/focus suite also passed 18 tests each with
+`TZ=UTC`, `TZ=Europe/London`, and `TZ=America/Los_Angeles`. `npm run lint`,
+documentation alignment, iOS configuration, brand-asset and native
+shared-storage checks passed; lint retains only two pre-existing warnings in
+`event-service.test.ts`.
+
+The web production build passed. A clean `expo run:ios` Debug simulator build
+also passed and installed on `Dayframe Accessibility Max QA`; its built host and
+extension lane metadata passed the built-product iOS configuration check. The
+compiler emitted one pre-existing duplicate `-lc++` linker warning. This is
+configuration/compilation evidence only, not a signed staging or physical-iPhone
+acceptance claim.
+
+`npm run typecheck` remains **FAIL** only at the unmodified baseline file
+`apps/mobile/src/components/ConnectivityStatusStrip.tsx(27,43)`: TypeScript
+cannot resolve `expo-symbols`. Mobile, web and shared Stage B diagnostics do
+not appear; web and shared typechecks complete after the mobile failure. This
+pre-existing dependency-resolution issue is recorded rather than masked by an
+unrelated dependency/configuration change.
 
 ## Motion contract
 
@@ -121,7 +146,7 @@ No staging or production data was contacted.
 
 ## Remaining validation gates
 
-Automated checks, a staging-backed Preview/alias smoke, and an identified
-ordinary signed staging build plus owner physical-iPhone acceptance are
-separate evidence. None is claimed by this note until recorded with the
-actual SHA, backend identity and result.
+The staging-backed Preview/alias smoke, identified ordinary signed staging
+build and owner physical-iPhone acceptance remain separate from the completed
+local checks. None is claimed by this note until recorded with the actual SHA,
+backend identity and result.
