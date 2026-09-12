@@ -14,6 +14,7 @@ import { ReviewResolutionError } from "../event-service";
 import type { RequestSession } from "../session";
 import { syncTimeEntryTags } from "../tag-service";
 import { ensureCommuteCategoryId } from "../automatic-category-service";
+import { reviewProposalHash } from "../review-proposal-hash";
 
 type LockedReview = {
   id: string;
@@ -34,6 +35,9 @@ type LockedReview = {
   placeMatchKind: string | null;
   centreLatitude: number | null;
   centreLongitude: number | null;
+  eventSource: string | null;
+  eventType: string | null;
+  semanticRevision: Date | string | null;
 };
 
 type ConfirmedPlaceIdentity = {
@@ -147,7 +151,8 @@ export async function resolveLocationReviewActionWithClient(
   client: pg.PoolClient,
   reviewItemId: string,
   input: unknown,
-  session: RequestSession
+  session: RequestSession,
+  options: { expectedProposalHash?: string } = {}
 ) {
   const action = LocationReviewActionSchema.parse(input);
   setSyncPhase(client, "review_lock");
@@ -166,6 +171,9 @@ export async function resolveLocationReviewActionWithClient(
       "Location review item not found.",
       { status: 404 }
     );
+  }
+  if (item.status === "open" && options.expectedProposalHash) {
+    assertExpectedLocationProposal(item, options.expectedProposalHash);
   }
   if (item.status !== "open") {
     return resolveClosedLocationReview(client, item, action, session);
@@ -210,7 +218,10 @@ async function lockLocationReviews(
             st.learned_place_id as "learnedPlaceId",
             st.metadata ->> 'placeMatchKind' as "placeMatchKind",
             case when st.centre is null then null else ST_Y(st.centre::geometry) end as "centreLatitude",
-            case when st.centre is null then null else ST_X(st.centre::geometry) end as "centreLongitude"
+            case when st.centre is null then null else ST_X(st.centre::geometry) end as "centreLongitude",
+            ae.source as "eventSource",
+            ae.event_type as "eventType",
+            coalesce(st.updated_at, cs.updated_at, ri.resolved_at, ri.created_at) as "semanticRevision"
      from review_items ri
      join activity_events ae
        on ae.id = ri.event_id and ae.workspace_id = ri.workspace_id and ae.user_id = ri.user_id
@@ -271,6 +282,38 @@ function locationReviewLocked(reviewItemId: string) {
       details: {
         reviewItemId,
         canonicalStatus: "unknown", reason: "lock_unavailable", retryAfterMs: 5_000
+      }
+    }
+  );
+}
+
+function assertExpectedLocationProposal(item: LockedReview, expectedProposalHash: string) {
+  const actual = reviewProposalHash({
+    reviewItemId: item.id,
+    eventId: item.eventId,
+    locationSegmentId: item.segmentId,
+    sourceKind: "location_v2",
+    title: item.title,
+    categoryId: item.suggestedCategoryId,
+    placeId: item.suggestedPlaceId,
+    startedAt: item.suggestedStartedAt,
+    stoppedAt: item.suggestedStoppedAt,
+    confidence: item.confidence,
+    eventSource: item.eventSource,
+    eventType: item.eventType,
+    semanticRevision: item.semanticRevision
+  });
+  if (actual === expectedProposalHash) return;
+  throw new ReviewResolutionError(
+    "proposal_changed",
+    "This Review proposal changed before it could be confirmed. Refresh it before trying again.",
+    {
+      status: 409,
+      details: {
+        reviewItemId: item.id,
+        canonicalStatus: "open",
+        canonicalReviewStatuses: { [item.id]: "open" },
+        proposalHash: actual
       }
     }
   );

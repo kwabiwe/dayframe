@@ -215,6 +215,13 @@ export type ReviewPresentationStoreSnapshot = {
   effects: ReviewPresentationStoreEffect[];
 };
 
+export type CurrentQuickConfirmSource = {
+  source: ReviewProposalPresentation;
+  item: MobileReviewItem;
+  bootstrap: MobileBootstrap;
+  effect: ReviewPresentationStoreEffect | null;
+};
+
 type EvidenceCacheSizeRow = {
   review_item_id: string;
   byte_size: number;
@@ -1202,6 +1209,39 @@ export async function readReviewPresentationSnapshot(input: {
   };
 }
 
+/** Re-reads the cached source under the current owner instead of allowing a
+ * rendered row to close over stale proposal values. */
+export async function readCurrentReviewSourceForQuickConfirm(input: {
+  owner: ReviewPresentationOwner;
+  response: Pick<ReviewPresentationResponse, "scope">;
+  reviewItemId: string;
+}): Promise<CurrentQuickConfirmSource | null> {
+  const snapshot = await readReviewPresentationSnapshot({
+    owner: input.owner,
+    response: input.response
+  });
+  if (!snapshot) return null;
+  const source = [...snapshot.response.records, ...snapshot.response.lookup.reviewItems]
+    .find((record): record is ReviewProposalPresentation =>
+      record.kind === "review" && record.reviewItemId === input.reviewItemId
+    );
+  if (!source) return null;
+  const bootstrap = await loadCachedReviewBootstrap();
+  if (
+    !bootstrap ||
+    bootstrap.bootstrap.workspace.id !== input.owner.workspaceId ||
+    bootstrap.bootstrap.user.id !== input.owner.userId
+  ) return null;
+  const item = bootstrap.bootstrap.reviewItems.find((candidate) => candidate.id === input.reviewItemId);
+  if (!item) return null;
+  return {
+    source,
+    item,
+    bootstrap: bootstrap.bootstrap,
+    effect: snapshot.effects.find((effect) => effect.reviewItemId === input.reviewItemId) ?? null
+  };
+}
+
 export function reviewPresentationScopeKey(
   backendId: string,
   response: Pick<ReviewPresentationResponse, "scope">
@@ -1251,6 +1291,19 @@ function mobileReviewItemFromPresentation(record: ReviewProposalPresentation): M
     rawPayload: null,
     createdAt: record.createdAt
   };
+}
+
+function proposalHashFromPresentationContext(contextJson: string, reviewItemId: string) {
+  try {
+    const response = ReviewPresentationResponseSchema.parse(JSON.parse(contextJson));
+    const source = [...response.records, ...response.lookup.reviewItems]
+      .find((record): record is ReviewProposalPresentation =>
+        record.kind === "review" && record.reviewItemId === reviewItemId
+      );
+    return source?.status === "open" ? source.proposalHash : null;
+  } catch {
+    return null;
+  }
 }
 
 async function recordTerminalPresentationSources(
@@ -1475,6 +1528,10 @@ export async function enqueueReviewMutation(input: {
   mutation: ReviewMutation;
   clientMutationId: string;
   affectedItems?: MobileReviewItem[];
+  presentation?: {
+    backendId: string;
+    scope: ReviewPresentationResponse["scope"];
+  };
 }) {
   const envelope = ReviewMutationEnvelopeSchema.parse({ clientMutationId: input.clientMutationId, mutation: input.mutation });
   const mutation = envelope.mutation;
@@ -1547,6 +1604,30 @@ export async function enqueueReviewMutation(input: {
           return;
         }
         throw new Error("A different saved Review change already exists for one of these suggestions.");
+      }
+    }
+    const expectedProposalHash = mutation.action === "accept" || mutation.action === "confirm"
+      ? mutation.expectedProposalHash
+      : undefined;
+    if (expectedProposalHash) {
+      if (!input.presentation?.backendId) {
+        throw new Error("Refresh Review before saving this confirmation.");
+      }
+      const scopeKey = reviewPresentationScopeKey(input.presentation.backendId, { scope: input.presentation.scope });
+      const context = await transaction.getFirstAsync<PresentationContextRow>(
+        `select scope_key, backend_id, contract_version, snapshot_token, captured_at,
+                cached_at, complete, context_json
+         from review_presentation_context
+         where account_key = ? and scope_key = ? and backend_id = ?`,
+        key,
+        scopeKey,
+        input.presentation.backendId
+      );
+      const currentHash = context
+        ? proposalHashFromPresentationContext(context.context_json, input.item.id)
+        : null;
+      if (currentHash !== expectedProposalHash) {
+        throw new Error("This Review proposal changed. Refresh it before confirming.");
       }
     }
     if (idempotent) return;

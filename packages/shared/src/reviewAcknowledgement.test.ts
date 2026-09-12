@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { ReviewReconciliationRequestSchema, validReviewAcknowledgement } from "./reviewMutations";
+import { ReviewMutationEnvelopeSchema, ReviewReconciliationRequestSchema, validReviewAcknowledgement } from "./reviewMutations";
 const envelope = { clientMutationId: "92000000-0000-4000-8000-000000000001", mutation: { action: "accept" as const } };
 const reviewId = "92000000-0000-4000-8000-000000000002";
 describe("durable Review acknowledgement contract", () => {
@@ -15,5 +15,23 @@ describe("durable Review acknowledgement contract", () => {
   });
   it("bounds reconciliation input before any owner-scoped database work", () => {
     expect(ReviewReconciliationRequestSchema.safeParse({mutations:Array.from({length:26},()=>({...envelope,reviewItemId:reviewId}))}).success).toBe(false);
+  });
+  it("keeps historical envelopes valid while requiring exact proof for guarded Quick Confirm", () => {
+    const guarded = ReviewMutationEnvelopeSchema.parse({
+      clientMutationId: envelope.clientMutationId,
+      mutation: { action: "accept", expectedProposalHash: "a".repeat(64) }
+    });
+    expect(validReviewAcknowledgement({
+      ok: true, action: "accept", status: "accepted", entryId: "entry",
+      clientMutationId: guarded.clientMutationId, reviewItemId: reviewId,
+      expectedProposalHash: "a".repeat(64)
+    }, guarded, reviewId)).toBe(true);
+    expect(validReviewAcknowledgement({
+      ok: true, action: "accept", status: "accepted", entryId: "entry"
+    }, guarded, reviewId)).toBe(false);
+    expect(ReviewMutationEnvelopeSchema.safeParse({
+      clientMutationId: envelope.clientMutationId,
+      mutation: { action: "confirm", expectedProposalHash: "not-a-hash" }
+    }).success).toBe(false);
   });
 });

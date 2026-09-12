@@ -314,6 +314,52 @@ describe("Review real SQLite transactions", () => {
     expect(count("review_mutation_outbox")).toBe(0);
     expect((await store.loadCachedReviewBootstrap())!.bootstrap.reviewItems.map((candidate) => candidate.id)).not.toContain(item.id);
   });
+  it("compares a guarded Quick Confirm against the current cached presentation inside its transaction", async () => {
+    const data = bootstrap();
+    const item = data.reviewItems[0];
+    const owner = { workspaceId: data.workspace.id, userId: data.user.id, backendId: "staging-fixture" };
+    const hash = "a".repeat(64);
+    const response = openPresentation(data, item.id, hash);
+    await store.cacheReviewPresentation({ owner, response });
+    await store.enqueueReviewMutation({
+      bootstrap: data,
+      item,
+      clientMutationId: syntheticId(998),
+      mutation: { action: "accept", expectedProposalHash: hash },
+      presentation: { backendId: owner.backendId, scope: response.scope }
+    });
+    expect(count("review_mutation_outbox")).toBe(1);
+    await expect(store.enqueueReviewMutation({
+      bootstrap: data,
+      item: data.reviewItems[1],
+      clientMutationId: syntheticId(999),
+      mutation: { action: "accept", expectedProposalHash: "b".repeat(64) },
+      presentation: { backendId: owner.backendId, scope: response.scope }
+    })).rejects.toThrow("proposal changed");
+    expect(count("review_mutation_outbox")).toBe(1);
+  });
+  it("restores only the explicitly open source when a guarded proposal changed remotely", async () => {
+    const data = bootstrap();
+    const item = data.reviewItems[0];
+    const owner = { workspaceId: data.workspace.id, userId: data.user.id, backendId: "staging-fixture" };
+    const response = openPresentation(data, item.id, "a".repeat(64));
+    await store.cacheReviewPresentation({ owner, response });
+    await store.enqueueReviewMutation({
+      bootstrap: data,
+      item,
+      clientMutationId: syntheticId(1_001),
+      mutation: { action: "accept", expectedProposalHash: "a".repeat(64) },
+      presentation: { backendId: owner.backendId, scope: response.scope }
+    });
+    mocks.fetch.mockResolvedValue({ status: 409, json: async () => ({
+      code: "proposal_changed",
+      canonicalReviewStatuses: { [item.id]: "open" },
+      canonicalStatus: "open"
+    }) });
+    await store.synchroniseReviewMutations();
+    expect(db.prepare("select state from review_mutation_outbox").get()!.state).toBe("needs_attention");
+    expect((await store.loadCachedReviewBootstrap())!.bootstrap.reviewItems.map((candidate) => candidate.id)).toContain(item.id);
+  });
   it("repairs a server-rejected split that an older client queued for a commute", async () => {
     const data = bootstrap();
     const visit = data.reviewItems[2];
@@ -388,6 +434,29 @@ function terminalPresentation(
     lookup: {
       reviewItems: reviewIds.map((id) => presentationReview(data.reviewItems.find((item) => item.id === id)!, entryId)),
       entries: entryId ? [presentationEntry(data, entryId)] : []
+    }
+  };
+}
+
+function openPresentation(data: ReturnType<typeof bootstrap>, reviewItemId: string, hash: string) {
+  const item = data.reviewItems.find((candidate) => candidate.id === reviewItemId)!;
+  return {
+    version: 1 as const,
+    scope: { mode: "lookup" as const, timeZone: "Europe/London" },
+    snapshotToken: `open-${reviewItemId}`,
+    capturedAt: "2026-08-28T18:00:00.000Z",
+    nextCursor: null,
+    completeness: { records: true, outstandingCounts: true, completedToday: false, partialReason: null },
+    outstanding: { globalCount: 1, todayCount: 0, openReviewItemIds: [reviewItemId] },
+    records: [],
+    links: [{ reviewItemId, entryIds: [], status: "open" as const }],
+    lookup: {
+      reviewItems: [{
+        ...presentationReview(item),
+        status: "open" as const,
+        proposalHash: hash
+      }],
+      entries: []
     }
   };
 }

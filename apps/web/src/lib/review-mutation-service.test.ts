@@ -25,6 +25,7 @@ vi.mock("./tag-service", () => ({
 const { resolveIdempotentReviewMutation } = await import(
   "./review-mutation-service"
 );
+const { reviewProposalHash } = await import("./review-proposal-hash");
 
 const session = {
   workspaceId: "10000000-0000-4000-8000-000000000001",
@@ -249,6 +250,84 @@ describe("idempotent Review mutations", () => {
     expect(matchIndex).toBeGreaterThan(lockIndex);
     expect(updateIndex).toBeGreaterThan(matchIndex);
   });
+
+  it("rejects a changed guarded generic proposal before writing an entry or receipt", async () => {
+    const reviewItemId = "30000000-0000-4000-8000-000000000004";
+    const client = clientForOverlappingGenericEdit(reviewItemId);
+    mocks.connect.mockResolvedValue(client);
+
+    await expect(resolveIdempotentReviewMutation(reviewItemId, {
+      clientMutationId: "d87c35ce-2a63-4e44-a8fc-4370f2a5cda7",
+      mutation: { action: "accept", expectedProposalHash: "0".repeat(64) }
+    }, session)).rejects.toMatchObject({ code: "proposal_changed", status: 409 });
+
+    const statements = client.query.mock.calls.map(([statement]) => String(statement));
+    expect(statements.some((statement) => statement.includes("insert into time_entries"))).toBe(false);
+    expect(statements.some((statement) => statement.includes("insert into review_mutation_receipts"))).toBe(false);
+  });
+
+  it("accepts an exact guarded generic proposal and persists its receipt identity", async () => {
+    const reviewItemId = "30000000-0000-4000-8000-000000000005";
+    const client = clientForOverlappingGenericEdit(reviewItemId);
+    mocks.connect.mockResolvedValue(client);
+    const expectedProposalHash = reviewProposalHash({
+      reviewItemId,
+      eventId: "40000000-0000-4000-8000-000000000002",
+      locationSegmentId: null,
+      sourceKind: "generic",
+      title: "Walk",
+      categoryId: null,
+      placeId: null,
+      startedAt: "2026-07-27T10:00:00.000Z",
+      stoppedAt: "2026-07-27T11:00:00.000Z",
+      confidence: "medium",
+      eventSource: "health_workout",
+      eventType: null,
+      semanticRevision: null
+    });
+    const clientMutationId = "d87c35ce-2a63-4e44-a8fc-4370f2a5cda9";
+
+    await expect(resolveIdempotentReviewMutation(reviewItemId, {
+      clientMutationId,
+      mutation: { action: "accept", expectedProposalHash }
+    }, session)).resolves.toMatchObject({
+      status: "accepted",
+      entryId: "overlapping-entry",
+      clientMutationId,
+      reviewItemId,
+      expectedProposalHash
+    });
+    const receipt = client.query.mock.calls.find(([statement]) => String(statement).includes("insert into review_mutation_receipts"));
+    expect(receipt?.[1]?.[6]).toContain(expectedProposalHash);
+  });
+
+  it("persists exact guarded Location intent while passing the strict domain action downstream", async () => {
+    const expectedProposalHash = "a".repeat(64);
+    const result = { ok: true, action: "confirm", status: "accepted", entryId: "entry-guarded" };
+    const client = clientForNewLocation();
+    mocks.connect.mockResolvedValue(client);
+    mocks.resolveLocation.mockResolvedValue(result);
+
+    await expect(resolveIdempotentReviewMutation(
+      "30000000-0000-4000-8000-000000000001",
+      {
+        clientMutationId: "d87c35ce-2a63-4e44-a8fc-4370f2a5cda8",
+        mutation: { action: "confirm", expectedProposalHash }
+      },
+      session
+    )).resolves.toMatchObject({
+      ...result,
+      expectedProposalHash,
+      reviewItemId: "30000000-0000-4000-8000-000000000001"
+    });
+    expect(mocks.resolveLocation).toHaveBeenCalledWith(
+      expect.anything(),
+      "30000000-0000-4000-8000-000000000001",
+      { action: "confirm" },
+      session,
+      { expectedProposalHash }
+    );
+  });
 });
 
 function clientForReceipt(receipt: {
@@ -283,7 +362,7 @@ function clientForNewLocation() {
 }
 
 function clientForOverlappingGenericEdit(reviewItemId: string) {
-  const query = vi.fn(async (statement: string) => {
+  const query = vi.fn(async (statement: string, _values?: unknown[]) => {
     if (statement.includes("pg_try_advisory_xact_lock")) {
       return { rows: [{ acquired: true }] };
     }
@@ -301,6 +380,8 @@ function clientForOverlappingGenericEdit(reviewItemId: string) {
           suggestedStoppedAt: "2026-07-27T11:00:00.000Z",
           confidence: "medium",
           eventSource: "health_workout",
+          eventType: null,
+          semanticRevision: null,
           locationSegmentId: null
         }]
       };

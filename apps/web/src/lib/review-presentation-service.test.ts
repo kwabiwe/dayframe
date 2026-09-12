@@ -5,6 +5,7 @@ const mocks = vi.hoisted(() => ({ connect: vi.fn() }));
 vi.mock("./db", () => ({ pool: { connect: mocks.connect } }));
 
 const { getReviewPresentation } = await import("./review-presentation-service");
+const { reviewProposalHash } = await import("./review-proposal-hash");
 
 const session = {
   workspaceId: "10000000-0000-4000-8000-000000000001",
@@ -87,5 +88,22 @@ describe("getReviewPresentation", () => {
     const lookupQuery = query.mock.calls.find(([statement]) => String(statement).includes("ri.id = any"));
     expect(lookupQuery?.[1]).toEqual([session.workspaceId, session.userId, [reviewId]]);
     expect(query.mock.calls.some(([statement]) => String(statement).includes("repeatable read"))).toBe(true);
+    expect(presentation.lookup.reviewItems[0]).toMatchObject({
+      proposalHash: reviewProposalHash({
+        reviewItemId: reviewId,
+        eventId: "50000000-0000-4000-8000-000000000001",
+        locationSegmentId: null,
+        sourceKind: "generic",
+        title: "Morning walk",
+        categoryId: null,
+        placeId: null,
+        startedAt: "2026-09-12T08:00:00.000Z",
+        stoppedAt: "2026-09-12T08:30:00.000Z",
+        confidence: "medium",
+        eventSource: "healthkit",
+        eventType: "workout",
+        semanticRevision: "2026-09-12T08:31:00.000Z"
+      })
+    });
   });
 });
