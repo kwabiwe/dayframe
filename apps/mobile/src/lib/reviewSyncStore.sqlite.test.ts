@@ -292,6 +292,27 @@ describe("Review real SQLite transactions", () => {
     expect(count("review_mutation_outbox")).toBe(0);
     expect(count("review_mutation_effects")).toBe(0);
   });
+  it("selects one complete acknowledged structural action for a bounded handover lookup", async () => {
+    const input = mergeInput();
+    await store.enqueueReviewMutation(input);
+    mocks.fetch.mockResolvedValue({ status: 200, json: async () => ({
+      ok: true,
+      action: "merge",
+      status: "accepted",
+      mergedSegmentId: syntheticId(99)
+    }) });
+    await store.synchroniseReviewMutations();
+
+    await expect(store.readAcknowledgedReviewHandoverLookup({ owner: {
+      workspaceId: input.bootstrap.workspace.id,
+      userId: input.bootstrap.user.id,
+      backendId: "staging-fixture"
+    } })).resolves.toMatchObject({
+      clientMutationId: input.clientMutationId,
+      reviewItemIds: [input.item.id, input.mutation.adjacentReviewItemId].sort(),
+      entryIds: []
+    });
+  });
   it("only retires an accepted source after a current result is in the Dashboard cache", async () => {
     const data = bootstrap();
     const item = data.reviewItems[0];
@@ -311,6 +332,53 @@ describe("Review real SQLite transactions", () => {
     };
     await store.cacheDashboardBootstrap({ ...data, entries: [canonical] });
     await store.cacheReviewPresentation({ owner, response: result });
+    expect(count("review_mutation_outbox")).toBe(0);
+    expect((await store.loadCachedReviewBootstrap())!.bootstrap.reviewItems.map((candidate) => candidate.id)).not.toContain(item.id);
+  });
+  it("follows an explicit source link before retiring an equivalent acknowledgement without an entry receipt", async () => {
+    const data = bootstrap();
+    const item = data.reviewItems[0];
+    const entryId = syntheticId(995);
+    await store.enqueueReviewMutation({
+      bootstrap: data,
+      item,
+      clientMutationId: syntheticId(994),
+      mutation: { action: "accept" }
+    });
+    mocks.fetch.mockResolvedValue({
+      status: 200,
+      json: async () => ({
+        ok: true,
+        action: "accept",
+        status: "accepted",
+        alreadyResolved: true,
+        equivalent: true
+      })
+    });
+    await store.synchroniseReviewMutations();
+    const owner = {
+      workspaceId: data.workspace.id,
+      userId: data.user.id,
+      backendId: "staging-fixture"
+    };
+    const linked = terminalPresentation(data, [item.id], entryId);
+    const sourceOnly = {
+      ...linked,
+      lookup: { ...linked.lookup, entries: [] }
+    };
+
+    await store.cacheReviewPresentation({ owner, response: sourceOnly });
+    expect(count("review_mutation_outbox")).toBe(1);
+
+    const canonical = {
+      ...data.entries[1],
+      id: entryId,
+      startedAt: "2026-08-28T17:00:00.000Z",
+      stoppedAt: "2026-08-28T17:30:00.000Z"
+    };
+    await store.cacheDashboardBootstrap({ ...data, entries: [canonical] });
+    await store.cacheReviewPresentation({ owner, response: linked });
+
     expect(count("review_mutation_outbox")).toBe(0);
     expect((await store.loadCachedReviewBootstrap())!.bootstrap.reviewItems.map((candidate) => candidate.id)).not.toContain(item.id);
   });

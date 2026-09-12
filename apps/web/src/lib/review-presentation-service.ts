@@ -437,10 +437,26 @@ async function loadReviewRowsByIds(client: pg.PoolClient, session: RequestSessio
      left join stay_segments st on st.id = ri.location_segment_id and st.workspace_id = ri.workspace_id and st.user_id = ri.user_id
      left join commute_segments cs on cs.id = ri.location_segment_id and cs.workspace_id = ri.workspace_id and cs.user_id = ri.user_id
      left join lateral (
-       select coalesce(array_agg(distinct te.id::text), array[]::text[]) as entry_ids
-       from time_entries te
-       where te.workspace_id = ri.workspace_id and te.user_id = ri.user_id
-         and (te.created_from_event_id = ri.event_id or te.id = ae.resolved_time_entry_id)
+       select coalesce(array_agg(distinct matched.id::text), array[]::text[]) as entry_ids
+       from time_entries matched
+       where matched.workspace_id = ri.workspace_id and matched.user_id = ri.user_id
+         and (
+           matched.created_from_event_id = ri.event_id
+           or matched.id = ae.resolved_time_entry_id
+           or matched.id in (
+             select receipt_id::uuid
+             from (
+               select r.result_json ->> 'entryId' as receipt_id
+               from review_mutation_receipts r
+               where r.workspace_id = ri.workspace_id and r.user_id = ri.user_id and r.review_item_id = ri.id
+               union all
+               select jsonb_array_elements_text(coalesce(r.result_json -> 'entryIds', '[]'::jsonb))
+               from review_mutation_receipts r
+               where r.workspace_id = ri.workspace_id and r.user_id = ri.user_id and r.review_item_id = ri.id
+             ) receipt_values
+             where receipt_id ~ '^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'
+           )
+         )
      ) links on true
      where ri.workspace_id = $1 and ri.user_id = $2 and ri.id = any($3::uuid[])
      order by ri.id`,

@@ -4,6 +4,7 @@ import * as SQLite from "expo-sqlite";
 import { REVIEW_EFFECTS_V5_SQL, REVIEW_PRESENTATION_V7_SQL, REVIEW_RECOVERY_V6_SQL } from "./reviewSyncSchema";
 import {
   LocationReviewEvidenceDtoSchema,
+  REVIEW_PRESENTATION_MAX_IDS,
   ReviewPresentationSnapshotSchema,
   ReviewMutationEnvelopeSchema,
   ReviewReconciliationResponseSchema,
@@ -224,6 +225,18 @@ export type ReviewPresentationStoreSnapshot = {
   cachedAt: string;
   localRevision: number;
   effects: ReviewPresentationStoreEffect[];
+};
+
+/**
+ * One bounded, durable-proof lookup request. The existing outbox remains the
+ * owner of delivery and retention; this exposes only opaque source/result IDs
+ * to the cancellable presentation reader after a receipt is acknowledged.
+ */
+export type AcknowledgedReviewHandoverLookup = {
+  clientMutationId: string;
+  reviewItemIds: string[];
+  entryIds: string[];
+  signature: string;
 };
 
 export type CurrentQuickConfirmSource = {
@@ -1175,6 +1188,81 @@ export async function cacheReviewPresentation(input: {
   return wrote;
 }
 
+/**
+ * Select one whole acknowledged mutation for a terminal presentation read.
+ * A structural action never has its affected sources split between requests;
+ * subsequent foreground reads take the next acknowledged mutation. Old or
+ * malformed envelopes are deliberately retained instead of being inferred as
+ * resolved.
+ */
+export async function readAcknowledgedReviewHandoverLookup(input: {
+  owner: ReviewPresentationOwner;
+}): Promise<AcknowledgedReviewHandoverLookup | null> {
+  const db = await database();
+  const account = await activeAccount(db);
+  const key = accountKey(input.owner);
+  if (
+    !account ||
+    account.account_key !== key ||
+    account.workspace_id !== input.owner.workspaceId ||
+    account.user_id !== input.owner.userId ||
+    !input.owner.backendId
+  ) return null;
+
+  const rows = await db.getAllAsync<{
+    client_mutation_id: string;
+    review_item_id: string;
+    request_json: string;
+    acknowledgement_json: string | null;
+  }>(
+    `select client_mutation_id, review_item_id, request_json, acknowledgement_json
+     from review_mutation_outbox
+     where account_key = ? and state = 'acknowledged'
+     order by coalesce(acknowledged_at, updated_at), client_mutation_id
+     limit ?`,
+    key,
+    REVIEW_PRESENTATION_MAX_IDS
+  );
+
+  for (const row of rows) {
+    const envelope = parseReviewMutationEnvelope(row.request_json);
+    const acknowledgement = parseAcknowledgement(row.acknowledgement_json);
+    if (!envelope || !acknowledgement || !validReviewAcknowledgement(acknowledgement, envelope, row.review_item_id)) {
+      continue;
+    }
+    const effects = await db.getAllAsync<{ review_item_id: string }>(
+      `select review_item_id from review_mutation_effects
+       where account_key = ? and client_mutation_id = ?
+       order by review_item_id`,
+      key,
+      row.client_mutation_id
+    );
+    const reviewItemIds = [...new Set(effects.map((effect) => effect.review_item_id))].sort();
+    const entryIds = acknowledgementEntryIds(acknowledgement).sort();
+    if (
+      !reviewItemIds.length ||
+      reviewItemIds.length > REVIEW_PRESENTATION_MAX_IDS ||
+      entryIds.length > REVIEW_PRESENTATION_MAX_IDS
+    ) {
+      // Do not query a partial structural action or an unbounded legacy value.
+      // Its durable receipt/effects remain recoverable for the existing
+      // reconciliation path.
+      continue;
+    }
+    return {
+      clientMutationId: row.client_mutation_id,
+      reviewItemIds,
+      entryIds,
+      signature: canonicalJson({
+        clientMutationId: row.client_mutation_id,
+        reviewItemIds,
+        entryIds
+      })
+    };
+  }
+  return null;
+}
+
 /** Reads a stable, owner- and backend-bound display snapshot without exposing
  * raw payloads or queued request JSON to a consuming Today component. */
 export async function readReviewPresentationSnapshot(input: {
@@ -1400,6 +1488,7 @@ async function materialiseAcknowledgedReviewHandover(
   );
   const terminalById = terminalStatusesFromPresentation(response);
   const lookupEntries = entryLookupFromPresentation(response);
+  const linksByReviewId = new Map(response.links.map((link) => [link.reviewItemId, link]));
   const dashboardEntries = await cachedDashboardEntryIds(transaction, accountKeyValue);
   for (const row of rows) {
     const envelope = parseReviewMutationEnvelope(row.request_json);
@@ -1412,7 +1501,28 @@ async function materialiseAcknowledgedReviewHandover(
       row.client_mutation_id
     );
     if (!effects.length || effects.some((effect) => !terminalById.has(effect.review_item_id))) continue;
-    const resultEntryIds = acknowledgementEntryIds(acknowledgement);
+    const acknowledgementIds = acknowledgementEntryIds(acknowledgement);
+    const requiresLinkedResult = acknowledgementRequiresLinkedResult(
+      acknowledgement,
+      envelope
+    );
+    const linkedEntryIds: string[] = [];
+    let missingAcceptedProof = false;
+    for (const effect of effects) {
+      if (terminalById.get(effect.review_item_id) !== "accepted") continue;
+      const link = linksByReviewId.get(effect.review_item_id);
+      const sourceEntryIds = link?.status === "accepted" ? link.entryIds : [];
+      linkedEntryIds.push(...sourceEntryIds);
+      // An equivalent accept/confirm intentionally has no result ID in its
+      // receipt. It must first follow the server's explicit source-to-entry
+      // link; ordinary merge/split structural receipts already identify their
+      // canonical outcome (or have no time-entry outcome at all).
+      if (requiresLinkedResult && !sourceEntryIds.length) {
+        missingAcceptedProof = true;
+      }
+    }
+    if (missingAcceptedProof) continue;
+    const resultEntryIds = [...new Set([...acknowledgementIds, ...linkedEntryIds])];
     const materialised = resultEntryIds.every((entryId) => {
       const status = lookupEntries.get(entryId);
       return status === "missing" || (status === "present" && dashboardEntries.has(entryId));
@@ -1493,6 +1603,17 @@ function acknowledgementEntryIds(value: Record<string, unknown>) {
     ...(Array.isArray(value.entryIds) ? value.entryIds.filter((id): id is string => typeof id === "string") : [])
   ].filter((id): id is string => Boolean(id));
   return [...new Set(ids)];
+}
+
+function acknowledgementRequiresLinkedResult(
+  acknowledgement: Record<string, unknown>,
+  envelope: ReviewMutationEnvelope
+) {
+  return (
+    (envelope.mutation.action === "accept" || envelope.mutation.action === "confirm") &&
+    acknowledgement.alreadyResolved === true &&
+    acknowledgement.equivalent === true
+  );
 }
 
 async function readPresentationEffects(db: SQLite.SQLiteDatabase, accountKeyValue: string) {

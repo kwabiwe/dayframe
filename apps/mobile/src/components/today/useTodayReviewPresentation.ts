@@ -9,6 +9,7 @@ import { DAYFRAME_BACKEND_ID } from "@/lib/backendIdentity";
 import type { MobileBootstrap, MobileTimeEntry } from "@/lib/api";
 import {
   cacheReviewPresentation,
+  readAcknowledgedReviewHandoverLookup,
   readReviewPresentationSnapshot,
   reviewPresentationScopeKey,
   subscribeReviewSync,
@@ -19,6 +20,7 @@ import {
   fetchReviewPresentationSnapshot,
   ReviewPresentationSnapshotChangedError
 } from "@/lib/reviewPresentationClient";
+import { reconcileAcknowledgedReviewPresentationHandover } from "@/lib/reviewPresentationHandover";
 import {
   projectTodayReviewPresentation,
   type TodayReviewPresentation
@@ -68,6 +70,7 @@ export function useTodayReviewPresentation(input: Input): TodayReviewPresentatio
   const [queuedReadSequence, setQueuedReadSequence] = useState(0);
   const identityGeneration = useRef(0);
   const read = useRef<NetworkRead | null>(null);
+  const acknowledgedHandoverSignature = useRef<string | null>(null);
 
   useEffect(() => {
     const subscription = AppState.addEventListener("change", (next) => {
@@ -80,6 +83,7 @@ export function useTodayReviewPresentation(input: Input): TodayReviewPresentatio
 
   useEffect(() => {
     identityGeneration.current += 1;
+    acknowledgedHandoverSignature.current = null;
     setSnapshot(null);
     setError(null);
     if (!owner || !scope) return;
@@ -95,6 +99,23 @@ export function useTodayReviewPresentation(input: Input): TodayReviewPresentatio
     if (!owner || !scope) return;
     let disposed = false;
     let scheduled = false;
+    const queueAcknowledgedHandoverRead = () => {
+      const generation = identityGeneration.current;
+      void readAcknowledgedReviewHandoverLookup({ owner }).then((handover) => {
+        if (disposed || generation !== identityGeneration.current) return;
+        if (!handover) {
+          acknowledgedHandoverSignature.current = null;
+          return;
+        }
+        if (acknowledgedHandoverSignature.current === handover.signature) return;
+        acknowledgedHandoverSignature.current = handover.signature;
+        // An acknowledgement is a local durable-state change, not a network
+        // delivery trigger. Queue one cancellable foreground read so its
+        // explicit terminal/result proof can be materialised by the existing
+        // store without polling or a second sync owner.
+        setQueuedReadSequence((current) => current + 1);
+      }).catch(() => undefined);
+    };
     const refresh = () => {
       if (scheduled) return;
       scheduled = true;
@@ -108,7 +129,9 @@ export function useTodayReviewPresentation(input: Input): TodayReviewPresentatio
           if (next) setProjectionNowMs(Date.now());
         });
       });
+      queueAcknowledgedHandoverRead();
     };
+    queueAcknowledgedHandoverRead();
     return subscribeReviewSync(refresh);
   }, [ownerKey, scopeKey]);
 
@@ -152,6 +175,13 @@ export function useTodayReviewPresentation(input: Input): TodayReviewPresentatio
         if (generation !== identityGeneration.current || controller.signal.aborted) return;
         const wrote = await cacheReviewPresentation({ owner, response });
         if (!wrote || generation !== identityGeneration.current || controller.signal.aborted) return;
+        const handover = await reconcileAcknowledgedReviewPresentationHandover({
+          owner,
+          timeZone: scope.timeZone,
+          signal: controller.signal
+        });
+        if (handover.signature) acknowledgedHandoverSignature.current = handover.signature;
+        if (generation !== identityGeneration.current || controller.signal.aborted) return;
         const next = await readCachedSnapshot({ owner, scope });
         if (generation !== identityGeneration.current || controller.signal.aborted) return;
         setSnapshot(next);

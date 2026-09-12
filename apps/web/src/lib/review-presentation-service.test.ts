@@ -88,6 +88,7 @@ describe("getReviewPresentation", () => {
     expect(query.mock.calls.some(([statement]) => String(statement).includes("pg_try_advisory"))).toBe(false);
     const lookupQuery = query.mock.calls.find(([statement]) => String(statement).includes("ri.id = any"));
     expect(lookupQuery?.[1]).toEqual([session.workspaceId, session.userId, [reviewId]]);
+    expect(String(lookupQuery?.[0])).toContain("review_mutation_receipts");
     expect(query.mock.calls.some(([statement]) => String(statement).includes("repeatable read"))).toBe(true);
     expect(presentation.lookup.reviewItems[0]).toMatchObject({
       proposalHash: reviewProposalHash({
