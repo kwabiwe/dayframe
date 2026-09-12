@@ -87,7 +87,16 @@ import {
   type ReviewSyncDiagnostics
 } from "@/lib/reviewSyncStore";
 import { DAYFRAME_BACKEND_ID } from "@/lib/backendIdentity";
-import { fetchReviewPresentationSnapshot } from "@/lib/reviewPresentationClient";
+import {
+  fetchReviewPresentationPage,
+  fetchReviewPresentationSnapshot,
+  ReviewPresentationSnapshotChangedError
+} from "@/lib/reviewPresentationClient";
+import {
+  mergeReviewBacklogPage,
+  projectReviewBacklogPage,
+  type ReviewBacklogState
+} from "@/lib/reviewBacklog";
 import {
   legacyReviewPresentationToMobileEntry,
   parseReviewFocusRequest
@@ -115,6 +124,18 @@ type ReviewLoadOptions = {
   skipReprocess?: boolean;
 };
 
+type ReviewBacklogRead = {
+  controller: AbortController;
+  generation: number;
+};
+
+type ReviewBacklogLoadOptions = {
+  cursor?: string;
+  reset: boolean;
+  replace?: boolean;
+  restartAttempt?: number;
+};
+
 const HEALTH_REPROCESS_TIMEOUT_MS = 45_000;
 
 export default function ReviewScreen() {
@@ -133,6 +154,8 @@ export default function ReviewScreen() {
     resolved: reduceMotionPreferenceResolved
   } = useResolvedReduceMotionPreference();
   const [data, setData] = useState<MobileBootstrap | null>(null);
+  const [reviewBacklog, setReviewBacklog] = useState<ReviewBacklogState | null>(null);
+  const [reviewBacklogLoading, setReviewBacklogLoading] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [editTarget, setEditTarget] = useState<ReviewEditTarget | null>(null);
   const [editPresentation, setEditPresentation] = useState<TimeEntrySheetPresentation | null>(null);
@@ -166,6 +189,8 @@ export default function ReviewScreen() {
   const reviewMenuActionSequence = useRef(0);
   const reviewMutations = useRef(new Map<string, number>());
   const reviewScrollRef = useRef<ScrollView>(null);
+  const reviewBacklogRef = useRef<ReviewBacklogState | null>(null);
+  const reviewBacklogRead = useRef<ReviewBacklogRead | null>(null);
   const focusRowOffsets = useRef(new Map<string, number>());
   const focusPendingKey = useRef<string | null>(null);
   const focusConsumedKey = useRef<string | null>(null);
@@ -214,6 +239,21 @@ export default function ReviewScreen() {
   }, []);
 
   const commitData = useCallback((nextData: MobileBootstrap | null) => {
+    const previousData = dataRef.current;
+    if (
+      previousData &&
+      nextData &&
+      (previousData.workspace.id !== nextData.workspace.id || previousData.user.id !== nextData.user.id)
+    ) {
+      // Backlog pages include legacy editor fields, so they must never bridge
+      // an account replacement even for the one render before the next page
+      // starts. The active Review cache remains separately owner-bound.
+      reviewBacklogRead.current?.controller.abort();
+      reviewBacklogRead.current = null;
+      reviewBacklogRef.current = null;
+      setReviewBacklog(null);
+      setReviewBacklogLoading(false);
+    }
     const openItemIds = (nextData?.reviewItems ?? [])
       .filter(isOpenReviewItem)
       .map((item) => item.id);
@@ -295,6 +335,148 @@ export default function ReviewScreen() {
     }
   }, [applyReviewMenuEvent, commitEditPresentation, commitEditTarget]);
 
+  const commitReviewBacklog = useCallback((next: ReviewBacklogState | null) => {
+    reviewBacklogRef.current = next;
+    setReviewBacklog(next);
+  }, []);
+
+  const cancelReviewBacklogRead = useCallback(() => {
+    reviewBacklogRead.current?.controller.abort();
+    reviewBacklogRead.current = null;
+    setReviewBacklogLoading(false);
+  }, []);
+
+  const loadReviewBacklogPage = useCallback(async function loadReviewBacklogPage(
+    options: ReviewBacklogLoadOptions
+  ): Promise<void> {
+    const bootstrap = dataRef.current;
+    if (!bootstrap || !DAYFRAME_BACKEND_ID || !screenFocusedRef.current) return;
+    const existing = reviewBacklogRead.current;
+    if (existing) {
+      if (!options.replace) return;
+      existing.controller.abort();
+    }
+    if (options.reset) commitReviewBacklog(null);
+
+    const owner = {
+      backendId: DAYFRAME_BACKEND_ID,
+      workspaceId: bootstrap.workspace.id,
+      userId: bootstrap.user.id
+    };
+    const origin = { workspaceId: bootstrap.workspace.id, userId: bootstrap.user.id };
+    const generation = screenOwnerGeneration.current;
+    const controller = new AbortController();
+    reviewBacklogRead.current = { controller, generation };
+    setReviewBacklogLoading(true);
+    let restart = false;
+
+    try {
+      const response = await fetchReviewPresentationPage({
+        owner,
+        request: {
+          version: 1,
+          mode: "backlog",
+          timeZone: currentPresentationTimeZone(),
+          ...(options.cursor ? { cursor: options.cursor } : {}),
+          limit: 100
+        },
+        signal: controller.signal
+      });
+      if (
+        controller.signal.aborted ||
+        generation !== screenOwnerGeneration.current ||
+        !screenFocusedRef.current
+      ) {
+        return;
+      }
+      const page = projectReviewBacklogPage(response);
+      const nextBacklog = mergeReviewBacklogPage(
+        reviewBacklogRef.current,
+        page,
+        options.reset
+      );
+      if (!nextBacklog) {
+        restart = (options.restartAttempt ?? 0) < 1;
+        if (!restart) {
+          setReviewAvailabilityMessage(
+            "Review changed while more items were loading. Pull to refresh the list."
+          );
+        }
+      } else {
+        const wrote = await cacheReviewPresentation({ owner, response });
+        if (
+          !wrote ||
+          controller.signal.aborted ||
+          generation !== screenOwnerGeneration.current ||
+          !screenFocusedRef.current
+        ) {
+          return;
+        }
+        const cached = await loadCachedReviewBootstrap();
+        const current = dataRef.current;
+        if (
+          !cached ||
+          !current ||
+          current.workspace.id !== origin.workspaceId ||
+          current.user.id !== origin.userId ||
+          controller.signal.aborted ||
+          generation !== screenOwnerGeneration.current ||
+          !screenFocusedRef.current
+        ) {
+          return;
+        }
+        const nextBootstrap = mergeReviewBootstrapProjection(current, cached.bootstrap);
+        scheduleLayoutTransition(reduceMotion);
+        commitData(nextBootstrap);
+        commitReviewBacklog(nextBacklog);
+        startEvidencePrefetch(nextBootstrap);
+        setReviewAvailabilityMessage(null);
+      }
+    } catch (error) {
+      if (controller.signal.aborted || generation !== screenOwnerGeneration.current) return;
+      if (error instanceof AuthRequiredError) {
+        router.replace("/");
+        return;
+      }
+      if (error instanceof ReviewPresentationSnapshotChangedError) {
+        restart = (options.restartAttempt ?? 0) < 1;
+        if (!restart) {
+          setReviewAvailabilityMessage(
+            "Review changed while more items were loading. Pull to refresh the list."
+          );
+        }
+      } else {
+        setReviewAvailabilityMessage(
+          connectivityRef.current.isOffline
+            ? "Connect to load more Review items."
+            : "Couldn’t load more Review items. Try again."
+        );
+      }
+    } finally {
+      if (reviewBacklogRead.current?.controller === controller) {
+        reviewBacklogRead.current = null;
+        setReviewBacklogLoading(false);
+      }
+    }
+
+    if (
+      restart &&
+      generation === screenOwnerGeneration.current &&
+      screenFocusedRef.current
+    ) {
+      await loadReviewBacklogPage({
+        reset: true,
+        replace: true,
+        restartAttempt: (options.restartAttempt ?? 0) + 1
+      });
+    }
+  }, [
+    commitData,
+    commitReviewBacklog,
+    reduceMotion,
+    startEvidencePrefetch
+  ]);
+
   const load = useCallback(async (options?: ReviewLoadOptions) => {
     if (refreshInFlight.current) {
       if (options?.queueIfBusy) bootstrapRefreshQueued.current = true;
@@ -319,6 +501,10 @@ export default function ReviewScreen() {
       setReviewAvailabilityMessage(null);
       await refreshReviewSyncDiagnostics();
       startEvidencePrefetch(bootstrap);
+      // Bootstrap intentionally remains capped. The existing Review screen
+      // stays responsive while this separate bounded display page makes an
+      // older 101st source reachable.
+      void loadReviewBacklogPage({ reset: true, replace: true });
     } catch (error) {
       if (error instanceof AuthRequiredError) {
         router.replace("/");
@@ -379,6 +565,7 @@ export default function ReviewScreen() {
     applyReviewMenuEvent,
     commitBootstrap,
     evidencePrefetcher,
+    loadReviewBacklogPage,
     refreshReviewSyncDiagnostics,
     startEvidencePrefetch
   ]);
@@ -461,8 +648,9 @@ export default function ReviewScreen() {
     screenFocusedRef.current = false;
     screenOwnerGeneration.current += 1;
     evidencePrefetcher.stop();
+    cancelReviewBacklogRead();
     cancelPendingReviewHandover();
-  }, [cancelPendingReviewHandover, evidencePrefetcher]);
+  }, [cancelPendingReviewHandover, cancelReviewBacklogRead, evidencePrefetcher]);
 
   useEffect(() => navigation.addListener("beforeRemove", stopReviewPresentationWork), [navigation, stopReviewPresentationWork]);
   useEffect(() => navigation.addListener("transitionStart", (event) => {
@@ -501,11 +689,13 @@ export default function ReviewScreen() {
         screenFocusedRef.current = false;
         screenOwnerGeneration.current += 1;
         evidencePrefetcher.stop();
+        cancelReviewBacklogRead();
         cancelPendingReviewHandover();
       };
     }, [
       applyReviewMenuEvent,
       cancelPendingReviewHandover,
+      cancelReviewBacklogRead,
       evidencePrefetcher,
       hydrateReviewFromCache,
       load,
@@ -525,6 +715,7 @@ export default function ReviewScreen() {
       appStateRef.current = nextState;
       if (nextState !== "active") {
         evidencePrefetcher.stop();
+        cancelReviewBacklogRead();
         cancelPendingReviewHandover();
         return;
       }
@@ -546,15 +737,37 @@ export default function ReviewScreen() {
       }
     });
     return () => subscription.remove();
-  }, [cancelPendingReviewHandover, evidencePrefetcher, load, recoverReviewAfterReconnect]);
+  }, [
+    cancelPendingReviewHandover,
+    cancelReviewBacklogRead,
+    evidencePrefetcher,
+    load,
+    recoverReviewAfterReconnect
+  ]);
 
-  const openReviewItems = useMemo(
+  const cachedOpenReviewItems = useMemo(
     () => (data?.reviewItems ?? []).filter(isOpenReviewItem),
     [data?.reviewItems]
   );
+  const openReviewItems = useMemo(() => {
+    if (!reviewBacklog) return cachedOpenReviewItems;
+    const byId = new Map(cachedOpenReviewItems.map((item) => [item.id, item]));
+    const ordered = reviewBacklog.reviewItemIds.flatMap((id) => {
+      const item = byId.get(id);
+      return item ? [item] : [];
+    });
+    const loadedIds = new Set(ordered.map((item) => item.id));
+    // Partial cache safety retains sources from a previous verified scope.
+    // Put them after the immutable current page rather than letting equal
+    // SQLite positions interleave an older page with this one.
+    return [
+      ...ordered,
+      ...cachedOpenReviewItems.filter((item) => !loadedIds.has(item.id))
+    ];
+  }, [cachedOpenReviewItems, reviewBacklog]);
   const reviewNeededEntries = useMemo(
-    () => collectReviewNeededEntries(data),
-    [data]
+    () => collectReviewNeededEntries(data, reviewBacklog?.legacyEntries ?? []),
+    [data, reviewBacklog]
   );
   const displayedReviewNeededEntries = useMemo(() => {
     const byId = new Map(reviewNeededEntries.map((entry) => [entry.id, entry]));
@@ -563,13 +776,41 @@ export default function ReviewScreen() {
       (left, right) => new Date(right.startedAt).getTime() - new Date(left.startedAt).getTime()
     );
   }, [focusedLegacyEntry, reviewNeededEntries]);
-  const totalNeedsReview = openReviewItems.length + displayedReviewNeededEntries.length;
+  const visibleReviewItemCount = openReviewItems.length + displayedReviewNeededEntries.length;
+  const hasUnmaterialisedReviewEffects = Boolean(reviewSyncDiagnostics && (
+    reviewSyncDiagnostics.pendingCount +
+    reviewSyncDiagnostics.retryWaitCount +
+    reviewSyncDiagnostics.authenticationRequiredCount +
+    reviewSyncDiagnostics.needsAttentionCount +
+    reviewSyncDiagnostics.acknowledgedCount > 0
+  ));
+  const reviewCountIsExact = reviewBacklog !== null && !hasUnmaterialisedReviewEffects;
+  const totalNeedsReview = reviewCountIsExact
+    ? reviewBacklog.globalCount
+    : visibleReviewItemCount;
+  const reviewCountCopy = reviewCountIsExact
+    ? `${reviewBacklog.globalCount} ${reviewBacklog.globalCount === 1 ? "item" : "items"} need review`
+    : reviewBacklog
+      ? "Review available · count updating"
+      : `At least ${visibleReviewItemCount} ${visibleReviewItemCount === 1 ? "item" : "items"} need review`;
+  const backlogProgressCopy = reviewBacklog?.nextCursor
+    ? `Loaded ${reviewBacklog.recordKeys.length} of ${reviewBacklog.globalCount} Review items.`
+    : reviewBacklog && !reviewBacklog.recordsComplete
+      ? `Loaded ${reviewBacklog.recordKeys.length} of ${reviewBacklog.globalCount} Review items. More Review items may be available after this bounded collection.`
+      : null;
+  const showEmptyReviewState = reviewCountIsExact && totalNeedsReview === 0 && visibleReviewItemCount === 0;
   const editingEntry = editTarget?.entry ?? null;
   const overflowItemId =
     reviewMenuState.openItemId ?? reviewMenuState.closingItemId;
   const overflowTarget = (data?.reviewItems ?? []).find(
     (item) => item.id === overflowItemId
   ) ?? null;
+
+  const loadMoreReviewBacklog = useCallback(() => {
+    const cursor = reviewBacklogRef.current?.nextCursor;
+    if (!cursor) return;
+    void loadReviewBacklogPage({ cursor, reset: false });
+  }, [loadReviewBacklogPage]);
 
   const scrollExactFocusIntoView = useCallback((key: string) => {
     if (focusPendingKey.current !== key || focusConsumedKey.current === key) return;
@@ -1003,9 +1244,20 @@ export default function ReviewScreen() {
                 <Text {...mobileTextProps("counter")} style={styles.label}>{REVIEW_COPY.needsReview}</Text>
                 <Text {...mobileTextProps("sectionHeading")} style={styles.sectionTitle}>Review</Text>
               </View>
-              <Text {...mobileTextProps("numeric")} style={styles.summaryTotal}>{totalNeedsReview}</Text>
+              <Text
+                {...mobileTextProps("numeric")}
+                accessibilityLabel={reviewCountCopy}
+                style={styles.summaryTotal}
+              >
+                {totalNeedsReview}
+              </Text>
             </View>
             <Text {...mobileTextProps("body")} style={styles.muted}>Detected visits and suggested time entries stay here until you confirm, edit or ignore them.</Text>
+            {!reviewCountIsExact ? (
+              <Text {...mobileTextProps("metadata")} accessibilityLiveRegion="polite" style={styles.reviewMetaLine}>
+                {reviewCountCopy}
+              </Text>
+            ) : null}
             <Pressable
               accessibilityRole="button"
               accessibilityState={{ expanded: showReviewInfo }}
@@ -1047,7 +1299,7 @@ export default function ReviewScreen() {
 
           <View style={styles.reviewItemsSection}>
             <Text {...mobileTextProps("sectionHeading")} style={styles.sectionTitle}>Review items</Text>
-            {totalNeedsReview === 0 ? (
+            {showEmptyReviewState ? (
               <Text {...mobileTextProps("body")} style={styles.muted}>{REVIEW_COPY.emptyState}</Text>
             ) : null}
             <View style={styles.reviewList}>
@@ -1109,6 +1361,29 @@ export default function ReviewScreen() {
                   </Reanimated.View>
                 ))}
               </View>
+            ) : null}
+            {backlogProgressCopy ? (
+              <Text {...mobileTextProps("metadata")} accessibilityLiveRegion="polite" style={styles.reviewMetaLine}>
+                {backlogProgressCopy}
+              </Text>
+            ) : null}
+            {reviewBacklog?.nextCursor ? (
+              <Pressable
+                accessibilityLabel={`Load more Review items. ${backlogProgressCopy ?? ""}`.trim()}
+                accessibilityRole="button"
+                accessibilityState={{ busy: reviewBacklogLoading, disabled: reviewBacklogLoading }}
+                disabled={reviewBacklogLoading}
+                style={({ pressed }) => [
+                  styles.secondaryButton,
+                  pressed && !reviewBacklogLoading ? styles.buttonPressed : null,
+                  reviewBacklogLoading ? styles.buttonDisabled : null
+                ]}
+                onPress={loadMoreReviewBacklog}
+              >
+                <Text {...mobileTextProps("control")} style={styles.secondaryButtonText}>
+                  {reviewBacklogLoading ? "Loading more Review items…" : "Load more Review items"}
+                </Text>
+              </Pressable>
             ) : null}
           </View>
         </View>
@@ -1402,12 +1677,16 @@ function ReviewNeededEntryCard({
   );
 }
 
-function collectReviewNeededEntries(data: MobileBootstrap | null) {
+function collectReviewNeededEntries(
+  data: MobileBootstrap | null,
+  backlogEntries: readonly MobileTimeEntry[] = []
+) {
   const byId = new Map<string, MobileTimeEntry>();
   for (const entry of [
     ...(data?.dayEntries ?? []),
     ...(data?.weekEntries ?? []),
-    ...(data?.entries ?? [])
+    ...(data?.entries ?? []),
+    ...backlogEntries
   ]) {
     if (isReviewNeededEntry(entry)) byId.set(entry.id, entry);
   }
