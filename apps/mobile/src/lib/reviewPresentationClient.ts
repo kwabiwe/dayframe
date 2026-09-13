@@ -126,7 +126,7 @@ export function mergeReviewPresentationPages(
   const first = pages[0];
   if (!first) throw new Error("Review presentation did not return a page.");
   const recordById = new Map<string, ReviewPresentationSnapshot["records"][number]>();
-  const links = new Map<string, { reviewItemId: string; entryIds: Set<string>; status: "open" | "accepted" | "ignored" | "missing" }>();
+  const links = new Map<string, { reviewItemId: string; entryIds: Set<string>; status: "open" | "accepted" | "ignored" }>();
   const lookupReviewById = new Map<string, ReviewPresentationSnapshot["lookup"]["reviewItems"][number]>();
   const lookupEntryById = new Map<string, ReviewPresentationSnapshot["lookup"]["entries"][number]>();
 

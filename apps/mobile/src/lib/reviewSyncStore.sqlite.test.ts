@@ -382,6 +382,61 @@ describe("Review real SQLite transactions", () => {
     expect(count("review_mutation_outbox")).toBe(0);
     expect((await store.loadCachedReviewBootstrap())!.bootstrap.reviewItems.map((candidate) => candidate.id)).not.toContain(item.id);
   });
+  it("scopes terminal suppression to its backend and clears it on an authoritative open record", async () => {
+    const data = bootstrap();
+    const item = data.reviewItems[0];
+    const owner = { workspaceId: data.workspace.id, userId: data.user.id, backendId: "staging-fixture" };
+
+    await store.cacheReviewPresentation({
+      owner,
+      response: terminalPresentation(data, [item.id])
+    });
+    expect((await store.loadCachedReviewBootstrap())!.bootstrap.reviewItems.map((candidate) => candidate.id))
+      .not.toContain(item.id);
+
+    db.prepare("update review_presentation_terminal_source set backend_id = ? where review_item_id = ?")
+      .run("other-backend", item.id);
+    expect((await store.loadCachedReviewBootstrap())!.bootstrap.reviewItems.map((candidate) => candidate.id))
+      .toContain(item.id);
+
+    db.prepare("update review_presentation_terminal_source set backend_id = ? where review_item_id = ?")
+      .run(owner.backendId, item.id);
+    await store.cacheReviewPresentation({
+      owner,
+      response: openPresentation(data, item.id, "a".repeat(64))
+    });
+
+    expect(count("review_presentation_terminal_source")).toBe(1);
+    await store.cacheReviewPresentation({
+      owner,
+      response: {
+        ...openPresentation(data, item.id, "a".repeat(64)),
+        capturedAt: "2026-08-28T18:01:00.000Z"
+      }
+    });
+
+    expect(count("review_presentation_terminal_source")).toBe(0);
+    expect((await store.loadCachedReviewBootstrap())!.bootstrap.reviewItems.map((candidate) => candidate.id))
+      .toContain(item.id);
+  });
+  it("records a missing_review lookup as explicit terminal evidence", async () => {
+    const data = bootstrap();
+    const item = data.reviewItems[0];
+    const owner = { workspaceId: data.workspace.id, userId: data.user.id, backendId: "staging-fixture" };
+    const response = {
+      ...terminalPresentation(data, [item.id]),
+      links: [],
+      lookup: {
+        reviewItems: [{ kind: "missing_review" as const, reviewItemId: item.id }],
+        entries: []
+      }
+    };
+
+    await store.cacheReviewPresentation({ owner, response });
+
+    expect(db.prepare("select status from review_presentation_terminal_source where review_item_id = ?")
+      .get(item.id)!.status).toBe("missing");
+  });
   it("compares a guarded Quick Confirm against the current cached presentation inside its transaction", async () => {
     const data = bootstrap();
     const item = data.reviewItems[0];

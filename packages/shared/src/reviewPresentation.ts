@@ -167,7 +167,7 @@ export const ReviewProposalPresentationSchema = z
     place,
     interval,
     confidence: z.string().max(80),
-    status: z.enum(["open", "accepted", "ignored", "missing"]),
+    status: z.enum(["open", "accepted", "ignored"]),
     createdAt: instant,
     updatedAt: instant,
     proposalHash: z.string().regex(/^[a-f0-9]{64}$/).nullable(),
@@ -223,7 +223,7 @@ export const ReviewPresentationLinkSchema = z
   .object({
     reviewItemId: uuid,
     entryIds: z.array(uuid).max(25),
-    status: z.enum(["open", "accepted", "ignored", "missing"])
+    status: z.enum(["open", "accepted", "ignored"])
   })
   .strict();
 

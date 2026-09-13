@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { ReviewPresentationRequestSchema } from "./reviewPresentation";
+import {
+  ReviewPresentationRequestSchema,
+  ReviewPresentationSnapshotSchema,
+  ReviewProposalPresentationSchema
+} from "./reviewPresentation";
 
 const windowRequest = {
   version: 1 as const,
@@ -58,5 +62,50 @@ describe("ReviewPresentationRequestSchema", () => {
       reviewItemIds: [id],
       window: windowRequest.window
     }).success).toBe(false);
+  });
+});
+
+describe("Review presentation terminal representation", () => {
+  const reviewItemId = "00000000-0000-4000-8000-000000000001";
+  const review = {
+    kind: "review" as const,
+    reviewItemId,
+    eventId: null,
+    locationSegmentId: null,
+    sourceKind: "generic" as const,
+    eventSource: null,
+    eventType: null,
+    title: "Synthetic Review",
+    category: { id: null, name: null, color: null },
+    place: { id: null, label: null },
+    interval: { start: "2026-03-01T09:00:00.000Z", end: "2026-03-01T09:30:00.000Z" },
+    confidence: "medium",
+    status: "open" as const,
+    createdAt: "2026-03-01T09:00:00.000Z",
+    updatedAt: "2026-03-01T09:00:00.000Z",
+    proposalHash: "a".repeat(64),
+    canonicalEntryIds: [],
+    semanticRevision: null
+  };
+
+  it("uses missing_review for an absent lookup rather than a missing Review status", () => {
+    expect(ReviewProposalPresentationSchema.safeParse({ ...review, status: "missing" }).success).toBe(false);
+    expect(ReviewPresentationSnapshotSchema.safeParse({
+      version: 1,
+      scope: { mode: "lookup", timeZone: "Europe/London", reviewItemIds: [reviewItemId] },
+      snapshotToken: "synthetic",
+      capturedAt: "2026-03-01T10:00:00.000Z",
+      nextCursor: null,
+      completeness: {
+        records: true,
+        outstandingCounts: true,
+        completedToday: false,
+        partialReason: null
+      },
+      outstanding: { globalCount: 0, todayCount: 0, openReviewItemIds: [] },
+      records: [],
+      links: [],
+      lookup: { reviewItems: [{ kind: "missing_review", reviewItemId }], entries: [] }
+    }).success).toBe(true);
   });
 });

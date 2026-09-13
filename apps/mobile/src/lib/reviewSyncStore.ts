@@ -599,7 +599,10 @@ export async function processReviewBootstrap(bootstrap: MobileBootstrap) {
   );
 
   emitChange();
-  return projectReviewBootstrap(bootstrap, await suppressedReviewItemIds(key));
+  return projectReviewBootstrap(
+    bootstrap,
+    await suppressedReviewItemIds(key, await presentationBackendIdForBootstrap(key, bootstrap))
+  );
 }
 
 export async function activateReviewAccount(input: {
@@ -713,7 +716,10 @@ export async function loadCachedReviewBootstrap(): Promise<{
         : [];
     })
   );
-  const hiddenIds = await suppressedReviewItemIds(account.account_key);
+  const hiddenIds = await suppressedReviewItemIds(
+    account.account_key,
+    await latestPresentationBackendId(account.account_key)
+  );
   const reviewItems = orderedItems.filter((item) => !hiddenIds.has(item.id));
   const cachedAt = await metadata(
     accountMetadataKey(LAST_CACHE_AT_KEY, account.account_key),
@@ -772,7 +778,10 @@ export async function projectReviewBootstrapFromStore(
   }
   return projectReviewBootstrap(
     bootstrap,
-    await suppressedReviewItemIds(account.account_key)
+    await suppressedReviewItemIds(
+      account.account_key,
+      await presentationBackendIdForBootstrap(account.account_key, bootstrap)
+    )
   );
 }
 
@@ -1062,7 +1071,10 @@ export async function loadCachedDashboardBootstrap(): Promise<{
     return {
       bootstrap: projectReviewBootstrap(
         bootstrap,
-        await suppressedReviewItemIds(account.account_key)
+        await suppressedReviewItemIds(
+          account.account_key,
+          await presentationBackendIdForBootstrap(account.account_key, bootstrap)
+        )
       ),
       cachedAt: row.cached_at
     };
@@ -1417,8 +1429,24 @@ async function recordTerminalPresentationSources(
   backendId: string,
   response: ReviewPresentationSnapshot
 ) {
-  for (const record of [...response.records, ...response.lookup.reviewItems]) {
-    if (record.kind !== "review" || !["accepted", "ignored", "missing"].includes(record.status)) continue;
+  const records = [...response.records, ...response.lookup.reviewItems];
+  for (const record of records) {
+    // Only a later authoritative open record reverses terminal suppression
+    // from this backend. An older or equal captured snapshot cannot resurrect
+    // a source after a delayed response arrives, and another backend stays
+    // isolated.
+    if (record.kind !== "review" || record.status !== "open") continue;
+    await transaction.runAsync(
+      `delete from review_presentation_terminal_source
+       where account_key = ? and review_item_id = ? and backend_id = ?
+         and captured_at < ?`,
+      accountKeyValue,
+      record.reviewItemId,
+      backendId,
+      response.capturedAt
+    );
+  }
+  for (const [reviewItemId, status] of terminalStatusesFromPresentation(response)) {
     await transaction.runAsync(
       `insert into review_presentation_terminal_source (
          account_key, review_item_id, scope_key, backend_id, snapshot_token, status, captured_at
@@ -1430,11 +1458,11 @@ async function recordTerminalPresentationSources(
          status = excluded.status,
          captured_at = excluded.captured_at`,
       accountKeyValue,
-      record.reviewItemId,
+      reviewItemId,
       scopeKey,
       backendId,
       response.snapshotToken,
-      record.status,
+      status,
       response.capturedAt
     );
   }
@@ -1547,8 +1575,10 @@ async function materialiseAcknowledgedReviewHandover(
 function terminalStatusesFromPresentation(response: ReviewPresentationSnapshot) {
   const statuses = new Map<string, "accepted" | "ignored" | "missing">();
   for (const record of [...response.records, ...response.lookup.reviewItems]) {
-    if (record.kind === "review" && (
-      record.status === "accepted" || record.status === "ignored" || record.status === "missing"
+    if (record.kind === "missing_review") {
+      statuses.set(record.reviewItemId, "missing");
+    } else if (record.kind === "review" && (
+      record.status === "accepted" || record.status === "ignored"
     )) {
       statuses.set(record.reviewItemId, record.status);
     }
@@ -2325,23 +2355,45 @@ async function hiddenReviewItemIds(accountKeyValue: string) {
   return new Set(rows.map((row) => row.review_item_id));
 }
 
-async function suppressedReviewItemIds(accountKeyValue: string) {
+async function suppressedReviewItemIds(accountKeyValue: string, backendId: string | null) {
   const [hidden, terminal] = await Promise.all([
     hiddenReviewItemIds(accountKeyValue),
-    terminalReviewItemIds(accountKeyValue)
+    terminalReviewItemIds(accountKeyValue, backendId)
   ]);
   return new Set([...hidden, ...terminal]);
 }
 
-async function terminalReviewItemIds(accountKeyValue: string) {
+async function terminalReviewItemIds(accountKeyValue: string, backendId: string | null) {
+  if (!backendId) return new Set<string>();
   const db = await database();
   const rows = await db.getAllAsync<{ review_item_id: string }>(
     `select review_item_id
      from review_presentation_terminal_source
-     where account_key = ?`,
-    accountKeyValue
+     where account_key = ? and backend_id = ?`,
+    accountKeyValue,
+    backendId
   );
   return new Set(rows.map((row) => row.review_item_id));
+}
+
+async function latestPresentationBackendId(accountKeyValue: string) {
+  const db = await database();
+  const row = await db.getFirstAsync<{ backend_id: string }>(
+    `select backend_id
+     from review_presentation_context
+     where account_key = ?
+     order by cached_at desc, scope_key desc
+     limit 1`,
+    accountKeyValue
+  );
+  return row?.backend_id ?? null;
+}
+
+async function presentationBackendIdForBootstrap(
+  accountKeyValue: string,
+  bootstrap: MobileBootstrap
+) {
+  return bootstrap.serverBuild?.backendId ?? await latestPresentationBackendId(accountKeyValue);
 }
 
 export function projectReviewBootstrap(

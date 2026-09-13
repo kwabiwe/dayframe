@@ -643,7 +643,7 @@ function isLegacyRow(row: LookupEntryRow): row is LegacyRow {
 }
 
 function linksFor(rows: ReviewRow[]) {
-  const links = new Map<string, { reviewItemId: string; entryIds: string[]; status: "open" | "accepted" | "ignored" | "missing" }>();
+  const links = new Map<string, { reviewItemId: string; entryIds: string[]; status: "open" | "accepted" | "ignored" }>();
   for (const row of rows) {
     links.set(row.id, {
       reviewItemId: row.id,
