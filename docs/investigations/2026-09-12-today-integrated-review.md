@@ -225,6 +225,23 @@ approval of the descendant. Re-review, exact-head Preview/staging smoke, the
 ordinary signed staging build, and owner physical-iPhone acceptance remain
 separate gates.
 
+## 2026-09-13 staging backend-identity correction
+
+On the signed staging iPhone build, the Stage B Today summary and donut were
+absent. The mobile app correctly failed closed: its canonical
+`dayframe-staging` identity did not match the staging Supabase-project-ref
+`backendId` returned by bootstrap.
+
+Correction commit/head: `9c4d0df29b59e89e2bee857aafc1272308a5b403`.
+`serverBuild.backendId` now reports `dayframe-staging` for staging and
+`dayframe-production` for production; local and development behavior is
+unchanged. Focused automated evidence covers those server metadata identities,
+and the staging-style bootstrap regression passed with the owner established
+and the Today presentation read proceeding (`useTodayReviewPresentation.test.tsx`:
+1 file, 2 tests). The fixture preserves the complete `serverBuild` shape so
+the PR introduces no TS2739 error. A physical signed-staging retest remains
+**NOT RUN** at the time of this note.
+
 ## Motion contract
 
 - Trigger: a complete Today presentation generation arrives, or a Review

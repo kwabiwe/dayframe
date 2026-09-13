@@ -91,7 +91,10 @@ describe("useTodayReviewPresentation", () => {
     await act(async () => {
       tree = create(<Probe bootstrap={{
         ...bootstrap,
-        serverBuild: { backendId: "staging-project-ref" }
+        serverBuild: {
+          ...bootstrap.serverBuild!,
+          backendId: "staging-project-ref"
+        }
       }} />);
       await Promise.resolve();
     });
@@ -122,7 +125,13 @@ const bootstrap = {
   entries: [],
   reviewItems: [],
   stats: { todaySeconds: 0, weekSeconds: 0, reviewCount: 0 },
-  serverBuild: { backendId: "dayframe-staging" }
+  serverBuild: {
+    sourceSha: null,
+    deploymentId: null,
+    backendId: "dayframe-staging",
+    environment: "staging",
+    syncContractVersion: 1
+  }
 } as unknown as MobileBootstrap;
 
 function snapshot(
