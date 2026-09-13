@@ -1,5 +1,5 @@
 import { act, create } from "react-test-renderer";
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import type {
   ReviewPresentationRequest,
   ReviewPresentationSnapshot
@@ -26,7 +26,7 @@ vi.mock("react-native", () => ({
     addEventListener: () => ({ remove: vi.fn() })
   }
 }));
-vi.mock("@/lib/backendIdentity", () => ({ DAYFRAME_BACKEND_ID: "staging-fixture" }));
+vi.mock("@/lib/backendIdentity", () => ({ DAYFRAME_BACKEND_ID: "dayframe-staging" }));
 vi.mock("@/lib/reviewSyncStore", () => ({
   cacheReviewPresentation: mocks.cache,
   readAcknowledgedReviewHandoverLookup: mocks.lookup,
@@ -51,7 +51,12 @@ vi.mock("@/lib/todayReviewPresentation", () => ({
 import { useTodayReviewPresentation } from "./useTodayReviewPresentation";
 
 describe("useTodayReviewPresentation", () => {
-  it("runs acknowledged handover proof from the normal cancellable Today read", async () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mocks.subscribe = null;
+  });
+
+  it("establishes the staging owner and reads presentation from a staging-style bootstrap", async () => {
     mocks.cache.mockResolvedValue(true);
     mocks.lookup.mockResolvedValue(null);
     mocks.readSnapshot.mockResolvedValue(null);
@@ -71,7 +76,7 @@ describe("useTodayReviewPresentation", () => {
     expect(mocks.fetch).toHaveBeenCalledOnce();
     expect(mocks.handover).toHaveBeenCalledWith(expect.objectContaining({
       owner: {
-        backendId: "staging-fixture",
+        backendId: "dayframe-staging",
         workspaceId: bootstrap.workspace.id,
         userId: bootstrap.user.id
       },
@@ -80,11 +85,27 @@ describe("useTodayReviewPresentation", () => {
     expect(mocks.cache).toHaveBeenCalledOnce();
     act(() => tree.unmount());
   });
+
+  it("fails closed when bootstrap declares a different backend", async () => {
+    let tree!: ReturnType<typeof create>;
+    await act(async () => {
+      tree = create(<Probe bootstrap={{
+        ...bootstrap,
+        serverBuild: { backendId: "staging-project-ref" }
+      }} />);
+      await Promise.resolve();
+    });
+
+    expect(mocks.fetch).not.toHaveBeenCalled();
+    expect(mocks.cache).not.toHaveBeenCalled();
+    expect(mocks.handover).not.toHaveBeenCalled();
+    act(() => tree.unmount());
+  });
 });
 
-function Probe() {
+function Probe({ bootstrap: source = bootstrap }: { bootstrap?: MobileBootstrap }) {
   useTodayReviewPresentation({
-    bootstrap,
+    bootstrap: source,
     dashboardEntries: [],
     manualProjectedEntries: [],
     isFocused: true,
@@ -101,7 +122,7 @@ const bootstrap = {
   entries: [],
   reviewItems: [],
   stats: { todaySeconds: 0, weekSeconds: 0, reviewCount: 0 },
-  serverBuild: { backendId: "staging-fixture" }
+  serverBuild: { backendId: "dayframe-staging" }
 } as unknown as MobileBootstrap;
 
 function snapshot(
