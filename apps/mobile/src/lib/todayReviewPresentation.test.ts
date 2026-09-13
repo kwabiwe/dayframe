@@ -78,6 +78,34 @@ describe("projectTodayReviewPresentation", () => {
     expect(presentation.daySections[0].activities.filter((activity) => activity.source.kind === "review")).toHaveLength(0);
   });
 
+  it("keeps a local manual completion once through complete snapshot convergence", () => {
+    const local = mobileEntry(
+      "manual-local",
+      "Manual stop",
+      "2026-09-12T14:00:00.000Z",
+      "2026-09-12T14:30:00.000Z"
+    );
+    const beforeCanonicalArrival = project({
+      response: response([], 0, 0),
+      manualProjectedEntries: [local]
+    });
+    const afterCanonicalArrival = project({
+      response: response([
+        entry("manual-local", "Manual stop", "2026-09-12T14:00:00.000Z", "2026-09-12T14:30:00.000Z")
+      ], 0, 0),
+      manualProjectedEntries: [local]
+    });
+
+    expect(beforeCanonicalArrival.completedLoggedMs).toBe(30 * 60_000);
+    expect(beforeCanonicalArrival.daySections[0].activities.filter(
+      (activity) => activity.source.kind === "entry" && activity.source.entryId === local.id
+    )).toHaveLength(1);
+    expect(afterCanonicalArrival.completedLoggedMs).toBe(30 * 60_000);
+    expect(afterCanonicalArrival.daySections[0].activities.filter(
+      (activity) => activity.source.kind === "entry" && activity.source.entryId === local.id
+    )).toHaveLength(1);
+  });
+
   it("clips cross-midnight pending time, counts overlaps independently, and excludes running timers", () => {
     const first = entry("first", "First", "2026-09-12T09:00:00.000Z", "2026-09-12T10:00:00.000Z");
     const second = entry("second", "Second", "2026-09-12T09:30:00.000Z", "2026-09-12T10:30:00.000Z");

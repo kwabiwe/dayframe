@@ -38,6 +38,7 @@ export type TodayReviewPresentationState = {
 type Input = {
   bootstrap: MobileBootstrap | null;
   dashboardEntries: readonly MobileTimeEntry[];
+  manualProjectedEntries: readonly MobileTimeEntry[];
   isFocused: boolean;
   nowMs: number;
 };
@@ -224,6 +225,7 @@ export function useTodayReviewPresentation(input: Input): TodayReviewPresentatio
       response: snapshot.response,
       effects: snapshot.effects,
       dashboardEntries: input.dashboardEntries,
+      manualProjectedEntries: input.manualProjectedEntries,
       day: {
         key: dayKey,
         startMs: Date.parse(today.start),
@@ -233,7 +235,16 @@ export function useTodayReviewPresentation(input: Input): TodayReviewPresentatio
       // second. A committed store/cache change refreshes this bounded instant.
       nowMs: projectionNowMs
     });
-  }, [dayKey, input.dashboardEntries, owner, ownerKey, projectionNowMs, scope, snapshot]);
+  }, [
+    dayKey,
+    input.dashboardEntries,
+    input.manualProjectedEntries,
+    owner,
+    ownerKey,
+    projectionNowMs,
+    scope,
+    snapshot
+  ]);
 
   return { owner, scope, snapshot, presentation, isLoading, error };
 }

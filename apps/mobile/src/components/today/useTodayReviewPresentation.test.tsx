@@ -86,6 +86,7 @@ function Probe() {
   useTodayReviewPresentation({
     bootstrap,
     dashboardEntries: [],
+    manualProjectedEntries: [],
     isFocused: true,
     nowMs: Date.parse("2026-09-12T12:00:00.000Z")
   });

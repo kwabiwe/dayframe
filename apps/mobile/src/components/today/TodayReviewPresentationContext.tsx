@@ -25,16 +25,24 @@ export function TodayReviewPresentationProvider({
   bootstrap,
   children,
   dashboardEntries,
+  manualProjectedEntries,
   isFocused,
   nowMs
 }: {
   bootstrap: MobileBootstrap | null;
   children: ReactNode;
   dashboardEntries: readonly MobileTimeEntry[];
+  manualProjectedEntries: readonly MobileTimeEntry[];
   isFocused: boolean;
   nowMs: number;
 }) {
-  const state = useTodayReviewPresentation({ bootstrap, dashboardEntries, isFocused, nowMs });
+  const state = useTodayReviewPresentation({
+    bootstrap,
+    dashboardEntries,
+    manualProjectedEntries,
+    isFocused,
+    nowMs
+  });
   const [committingIds, setCommittingIds] = useState<Set<string>>(() => new Set());
   const [messages, setMessages] = useState<Map<string, string>>(() => new Map());
   const isSummaryAvailable = Boolean(state.presentation && state.presentation.coverage !== "unavailable");
