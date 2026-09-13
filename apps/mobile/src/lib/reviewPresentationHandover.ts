@@ -30,10 +30,12 @@ export async function reconcileAcknowledgedReviewPresentationHandover(input: {
   const handover = await readAcknowledgedReviewHandoverLookup({ owner: input.owner });
   if (!handover) return { attempted: false, signature: null };
 
+  const durableEntryIds = uniqueIds(handover.entryIds);
+  const durableEntrySet = new Set(durableEntryIds);
   const firstRequest = lookupRequest({
     timeZone: input.timeZone,
     reviewItemIds: handover.reviewItemIds,
-    entryIds: handover.entryIds
+    entryIds: durableEntryIds
   });
   const first = await fetchReviewPresentationSnapshot({
     owner: input.owner,
@@ -45,10 +47,10 @@ export async function reconcileAcknowledgedReviewPresentationHandover(input: {
   }
 
   const entryIds = uniqueIds([
-    ...handover.entryIds,
+    ...durableEntryIds,
     ...linkedAcceptedEntryIds(first, handover.reviewItemIds)
   ]);
-  if (entryIds.length === handover.entryIds.length) {
+  if (entryIds.every((id) => durableEntrySet.has(id))) {
     return { attempted: true, signature: handover.signature };
   }
   if (entryIds.length > REVIEW_PRESENTATION_MAX_IDS) {

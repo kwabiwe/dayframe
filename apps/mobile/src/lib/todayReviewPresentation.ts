@@ -315,10 +315,12 @@ function canonicalEntryMap(input: TodayReviewProjectionInput, response: ReviewPr
   const entries = responseIsComplete
     ? fromResponse
     : new Map([
-        ...input.dashboardEntries.map((entry) => [entry.id, mobileEntry(entry)] as const),
+        ...input.dashboardEntries.filter((entry) => entry.reviewStatus !== "needs_review")
+          .map((entry) => [entry.id, mobileEntry(entry)] as const),
         ...fromResponse
       ]);
   for (const entry of input.manualProjectedEntries ?? []) {
+    if (entry.reviewStatus === "needs_review") continue;
     const projected = mobileEntry(entry);
     entries.set(projected.id, projected);
   }

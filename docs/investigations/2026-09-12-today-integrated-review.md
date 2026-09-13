@@ -276,6 +276,23 @@ performed.
 
 ## Motion contract
 
+### 2026-09-13 accounting and proposal review corrections
+
+Reviewed base for this correction: `a1ed63fc714e5aa1768b339871c5e0ac693bd7cd`.
+Dashboard now excludes review-needed entries from manual projection, and the
+pure Today projection independently excludes them from both mobile entry
+inputs. Complete and partial snapshot regressions require zero logged time,
+one pending activity, and one provisional slice for the pending source.
+Durable handover deduplicates IDs and tests membership before deciding whether
+a newly discovered accepted link needs another lookup. Both server page and
+lookup hashes use raw suggested IDs; joined category/place fields are display
+only. Authentication redirects precede backlog diagnostics. Quick Confirm
+unavailability uses refresh guidance separately from a failed local save.
+
+Existing row, animation, navigation, connectivity and durable mutation owners
+remain in place. Focused tests cover these paths; physical retest and deployment
+remain NOT RUN for this correction.
+
 ### 2026-09-13 owner correction: quiet presentation failures
 
 Following `0a7c70f710cdb16d1c37b935099486e87ee537b8`, the owner decided that

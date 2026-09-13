@@ -9,6 +9,23 @@ const end = Date.parse("2026-09-13T00:00:00.000Z");
 const ownerKey = "staging:workspace:user";
 
 describe("projectTodayReviewPresentation", () => {
+  it.each([true, false])("never logs a needs-review mobile entry alongside its pending source (complete=%s)", (complete) => {
+    const pending = { ...mobileEntry("pending-entry", "Walk", "2026-09-12T12:00:00.000Z", "2026-09-12T12:30:00.000Z"), reviewStatus: "needs_review" as const };
+    const source = review("walk", "Walk", pending.startedAt, pending.stoppedAt!);
+    const presentation = project({
+      response: response([source], 1, 1, complete),
+      dashboardEntries: [pending],
+      manualProjectedEntries: [pending]
+    });
+    expect(presentation.completedLoggedMs).toBe(0);
+    expect(presentation.awaitingReviewMs).toBe(30 * 60_000);
+    expect(presentation.daySections.flatMap((section) => section.activities)).toEqual([
+      expect.objectContaining({ state: "needs_review", countsAsLogged: false })
+    ]);
+    expect(presentation.donutSegments).toEqual([
+      expect.objectContaining({ provisional: true, valueMs: 30 * 60_000 })
+    ]);
+  });
   it("keeps completed and provisional accounting separate", () => {
     const work = entry("work", "Work", "2026-09-12T09:00:00.000Z", "2026-09-12T11:00:00.000Z");
     const walk = review("walk", "Walk", "2026-09-12T12:00:00.000Z", "2026-09-12T12:30:00.000Z");

@@ -2324,7 +2324,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
       <TodayReviewPresentationProvider
         bootstrap={data}
         dashboardEntries={historySourceEntries}
-        manualProjectedEntries={historySourceEntries}
+        manualProjectedEntries={historySourceEntries.filter((entry) => !isReviewNeededEntry(entry))}
         isFocused={isFocused}
         nowMs={now}
         refreshGeneration={todayPresentationRefreshGeneration}

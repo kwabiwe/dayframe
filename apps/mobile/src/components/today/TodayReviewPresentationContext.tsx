@@ -2,7 +2,7 @@ import { createContext, useCallback, useContext, useMemo, useState, type ReactNo
 import { AccessibilityInfo } from "react-native";
 import { router } from "expo-router";
 import type { MobileBootstrap, MobileTimeEntry } from "@/lib/api";
-import { saveQuickReviewConfirmation } from "@/lib/reviewQuickConfirm";
+import { QuickConfirmUnavailableError, saveQuickReviewConfirmation } from "@/lib/reviewQuickConfirm";
 import { todayReviewNavigationTarget } from "@/lib/todayReviewNavigation";
 import type { TodayActivity } from "@/lib/todayReviewPresentation";
 import {
@@ -96,7 +96,13 @@ export function TodayReviewPresentationProvider({
           "This confirmation is already being saved on this iPhone."
         ));
       }
-    }).catch(() => {
+    }).catch((error) => {
+      if (error instanceof QuickConfirmUnavailableError) {
+        const guidance = "This Review proposal is no longer available. Refresh it before confirming.";
+        setMessages((current) => new Map(current).set(reviewItemId, guidance));
+        AccessibilityInfo.announceForAccessibility(guidance);
+        return;
+      }
       // This is deliberately a local-persistence error, not a transport
       // status. The existing source stays visible and usable.
       setMessages((current) => new Map(current).set(

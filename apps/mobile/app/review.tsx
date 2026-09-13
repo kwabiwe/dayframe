@@ -441,15 +441,15 @@ export default function ReviewScreen() {
       }
     } catch (error) {
       if (controller.signal.aborted || generation !== screenOwnerGeneration.current) return;
+      if (error instanceof AuthRequiredError) {
+        router.replace("/");
+        return;
+      }
       recordReviewPresentationRead(owner, "backlog",
         error instanceof ReviewPresentationSnapshotChangedError ? "snapshot_changed"
           : error instanceof ReviewPresentationValidationError ? "validation"
             : readPhase === "cache" ? "cache"
               : isMobileTransportFailure(error) ? "offline" : "server");
-      if (error instanceof AuthRequiredError) {
-        router.replace("/");
-        return;
-      }
       if (error instanceof ReviewPresentationSnapshotChangedError) {
         restart = (options.restartAttempt ?? 0) < 1;
         if (!restart) {

@@ -5,6 +5,15 @@ import { describe, expect, it } from "vitest";
 const reviewScreen = readFileSync(resolve(__dirname, "../../app/review.tsx"), "utf8");
 
 describe("Review backlog paging contract", () => {
+  it("redirects authentication before recording a presentation server failure", () => {
+    const failure = reviewScreen.slice(reviewScreen.indexOf('} catch (error) {', reviewScreen.indexOf('const loadReviewBacklogPage')));
+    const auth = failure.indexOf('if (error instanceof AuthRequiredError)');
+    const record = failure.indexOf('recordReviewPresentationRead');
+    expect(auth).toBeGreaterThan(-1);
+    expect(record).toBeGreaterThan(auth);
+    expect(failure.slice(auth, record)).toContain('router.replace("/");');
+    expect(failure.slice(auth, record)).toContain('return;');
+  });
   it("keeps failed reads in diagnostics while preserving the mounted page and retry action", () => {
     expect(reviewScreen).not.toContain("Connect to load more Review items.");
     expect(reviewScreen).not.toContain("Couldn’t load more Review items. Try again.");

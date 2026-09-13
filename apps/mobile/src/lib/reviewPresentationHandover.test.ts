@@ -51,6 +51,15 @@ beforeEach(() => {
 });
 
 describe("acknowledged Review presentation handover", () => {
+  it("follows a new accepted link even when duplicate durable IDs hide the length change", async () => {
+    const discoveredId = "70000000-0000-4000-8000-000000000099";
+    mocks.lookup.mockResolvedValue({ reviewItemIds: [reviewId], entryIds: [entryId, entryId], signature: "duplicate-durable-ids" });
+    mocks.fetch.mockResolvedValue(lookupResponse([entryId, discoveredId]));
+    await reconcileAcknowledgedReviewPresentationHandover({ owner, timeZone: "Europe/London" });
+    expect(mocks.fetch).toHaveBeenCalledTimes(2);
+    expect(mocks.fetch.mock.calls[0][0].request.entryIds).toEqual([entryId]);
+    expect(mocks.fetch.mock.calls[1][0].request.entryIds).toEqual([entryId, discoveredId]);
+  });
   it("follows an explicit accepted source link before asking for an equivalent result entry", async () => {
     mocks.lookup.mockResolvedValue({
       clientMutationId: "70000000-0000-4000-8000-000000000005",

@@ -19,6 +19,8 @@ const COLLECTION_LIMIT = 5_000;
 const SQL_COLLECTION_LIMIT = COLLECTION_LIMIT + 1;
 
 type ReviewRow = {
+  suggestedCategoryId: string | null;
+  suggestedPlaceId: string | null;
   id: string;
   eventId: string | null;
   locationSegmentId: string | null;
@@ -292,6 +294,7 @@ async function loadReviewRows(client: pg.PoolClient, session: RequestSession, in
             ri.type,
             ri.title,
             ri.status,
+            ri.suggested_category_id as "suggestedCategoryId", ri.suggested_place_id as "suggestedPlaceId",
             c.id as "categoryId", c.name as "categoryName", c.color as "categoryColor",
             pl.id as "placeId", pl.name as "placeLabel",
             ri.suggested_started_at as "startedAt", ri.suggested_stopped_at as "stoppedAt",
@@ -441,6 +444,7 @@ async function loadReviewRowsByIds(client: pg.PoolClient, session: RequestSessio
   // Keep this query's selected fields intentionally identical to the read page.
   const result = await client.query<ReviewRow>(
     `select ri.id, ri.event_id as "eventId", ri.location_segment_id as "locationSegmentId", ri.type, ri.title, ri.status,
+            ri.suggested_category_id as "suggestedCategoryId", ri.suggested_place_id as "suggestedPlaceId",
             c.id as "categoryId", c.name as "categoryName", c.color as "categoryColor",
             pl.id as "placeId", pl.name as "placeLabel", ri.suggested_started_at as "startedAt", ri.suggested_stopped_at as "stoppedAt",
             ri.confidence, ri.created_at as "createdAt", coalesce(st.updated_at, cs.updated_at, ri.resolved_at, ri.created_at) as "semanticRevision",
@@ -567,7 +571,7 @@ function toReviewRecord(row: ReviewRow): InternalRecord {
     proposalHash: row.status === "open"
       ? reviewProposalHash({
           reviewItemId: row.id, eventId: row.eventId, locationSegmentId: row.locationSegmentId,
-          sourceKind, title: row.title, categoryId: row.categoryId, placeId: row.placeId,
+          sourceKind, title: row.title, categoryId: row.suggestedCategoryId, placeId: row.suggestedPlaceId,
           startedAt: row.startedAt, stoppedAt: row.stoppedAt, confidence: row.confidence,
           eventSource: row.eventSource, eventType: row.eventType, semanticRevision: row.semanticRevision
         })

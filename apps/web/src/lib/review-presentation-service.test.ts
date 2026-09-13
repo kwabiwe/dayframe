@@ -17,6 +17,40 @@ const reviewId = "30000000-0000-4000-8000-000000000001";
 const entryId = "40000000-0000-4000-8000-000000000001";
 
 describe("getReviewPresentation", () => {
+  it.each(["backlog", "lookup"] as const)("hashes raw suggested IDs when display joins miss (%s)", async (mode) => {
+    const raw = {
+      ...reviewRow(reviewId),
+      suggestedCategoryId: "60000000-0000-4000-8000-000000000001",
+      suggestedPlaceId: "60000000-0000-4000-8000-000000000002"
+    };
+    const query = vi.fn(async (sql: string) => {
+      if (sql.includes("current_setting")) return { rows: [{ transaction_timeout: null }] };
+      if (sql.includes("with open_reviews")) return { rows: [{ globalCount: 1, todayCount: 1, openReviewItemIds: [reviewId] }] };
+      if (sql.includes("from time_entries te")) return { rows: [] };
+      if (sql.includes("from review_items ri")) {
+        expect(sql).toContain('ri.suggested_category_id as "suggestedCategoryId"');
+        expect(sql).toContain('ri.suggested_place_id as "suggestedPlaceId"');
+        return { rows: [raw] };
+      }
+      return { rows: [] };
+    });
+    mocks.connect.mockResolvedValue({ query, release: vi.fn() });
+    const result = await getReviewPresentation(session, {
+      version: 1, mode, timeZone: "Etc/UTC", limit: 100,
+      ...(mode === "lookup" ? { reviewItemIds: [reviewId] } : {})
+    });
+    const record = mode === "lookup" ? result.lookup.reviewItems[0] : result.records[0];
+    expect(record).toMatchObject({
+      category: { id: null, name: null }, place: { id: null, label: null },
+      proposalHash: reviewProposalHash({
+        reviewItemId: reviewId, eventId: raw.eventId, locationSegmentId: raw.locationSegmentId,
+        sourceKind: "generic", title: raw.title,
+        categoryId: raw.suggestedCategoryId, placeId: raw.suggestedPlaceId,
+        startedAt: raw.startedAt, stoppedAt: raw.stoppedAt, confidence: raw.confidence,
+        eventSource: raw.eventSource, eventType: raw.eventType, semanticRevision: raw.semanticRevision
+      })
+    });
+  });
   it("uses one bounded read-only snapshot, scoped lookup IDs, and no mutation locks", async () => {
     const query = vi.fn(async (statement: string, values?: unknown[]) => {
       void values;
@@ -34,6 +68,8 @@ describe("getReviewPresentation", () => {
           type: "health",
           title: "Morning walk",
           status: "open",
+          suggestedCategoryId: null,
+          suggestedPlaceId: null,
           categoryId: null,
           categoryName: null,
           categoryColor: null,
@@ -198,6 +234,8 @@ describe("getReviewPresentation", () => {
 
 function reviewRow(id: string) {
   return {
+    suggestedCategoryId: null,
+    suggestedPlaceId: null,
     id,
     eventId: null,
     locationSegmentId: null,

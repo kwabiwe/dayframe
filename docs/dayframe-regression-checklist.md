@@ -360,6 +360,8 @@ Before merging implementation PRs, ask KB to test the exact Ready Preview promot
 
 ## Review automation and friction acceptance
 
+- A `needs_review` mobile entry must never contribute confirmed Today time through either dashboard fallback or manual projection. With its pending server source, expect zero logged time and exactly one pending row/slice. Proposal hashes use raw suggested category/place IDs even when display joins miss; stale Quick Confirm uses refresh guidance, and handover follows newly linked accepted IDs despite duplicate durable IDs.
+
 - Routine Today/Review presentation-read failures add no technical/connectivity banner. Verified cached content remains mounted, refresh/load-more can retry, and genuine partial coverage stays qualified. Safe read classifications/timestamps appear only in existing Sync & diagnostics; connectivity icon ownership and durable queue counts remain unchanged.
 
 - Verify the automatic decision table in `docs/PRD.md`: medium-high/high; independently valid start/stop bounds at 299999/300000/300001 ms; maximum single overlap at the same edges; running and touching intervals; source provenance; Health coexistence and duplicate/session safety. Medium saved-route commutes require all exception conditions. Existing Review/terminal decisions and deleted automatic entries cannot be recreated.
