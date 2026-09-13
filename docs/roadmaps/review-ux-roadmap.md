@@ -244,11 +244,11 @@ After each stage merges, reconcile the remaining sequence and add only significa
 
 When all stages finish, promote enduring requirements and guardrails to their canonical documents, then remove this temporary roadmap and its navigation links or replace it with a short dated historical completion note. Preserve useful decisions in Git history; do not leave a stale active roadmap behind.
 
-**Next action:** obtain an independent review of the latest Stage B
-handover/backlog correction head, then complete the ordinary signed staging
-build and owner physical-iPhone acceptance before considering merge. The
-selected Ready Preview is already promoted to staging, but its anonymous smoke
-does not replace authenticated or device evidence. The mobile accessibility
-prerequisite is already merged as PR #195; do not reopen PR #194 or #195.
-Calendar (C) and web (D) remain future work. Current delivery evidence belongs
-in the tracker and the Stage B investigation note.
+**Next action:** independently re-review the corrected Stage B head after the
+read-only review of `b724de278f9cd862e19d85ae6593c6b2ddd0c983`, then complete
+the exact-head Ready Preview, ordinary signed staging build and owner
+physical-iPhone acceptance before considering merge. A Preview from an earlier
+head and its anonymous smoke do not replace authenticated or device evidence.
+The mobile accessibility prerequisite is already merged as PR #195; do not
+reopen PR #194 or #195. Calendar (C) and web (D) remain future work. Current
+delivery evidence belongs in the tracker and the Stage B investigation note.

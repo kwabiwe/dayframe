@@ -180,6 +180,51 @@ found no new actionable contract conflict, but does not substitute for an
 independent review; no earlier review approval is treated as approval of this
 corrected head.
 
+## 2026-09-13 independent-review follow-up
+
+Claude Sonnet's read-only review compared base
+`e9ca2652542619cd83b91bb7778a608a13e1d01e` with PR #196 head
+`b724de278f9cd862e19d85ae6593c6b2ddd0c983`. It reported the six existing CI
+checks green for that reviewed head and requested changes rather than merge:
+
+- the complete Today presentation did not receive the existing Dashboard
+  manual timer/edit/delete projection, so a just-saved local manual completion
+  could be absent until a server presentation read; and
+- terminal Review suppression was account-only, and the typed Review-record
+  schema exposed an unreachable `missing` status even though lookup misses are
+  represented as `missing_review`.
+
+`ecea295389942dea8d83a5252edaadc65120bf5d` wires the existing Dashboard
+projection into `manualProjectedEntries` without adding a timer or Review
+owner. Its regression begins with an otherwise complete empty response plus a
+local stopped manual entry, then delivers the same canonical entry and proves
+the completed total and row remain once.
+
+`d69f6a8be6ed94f55d7f07ed6b2887f9e5ed3148` scopes terminal evidence by
+account and backend, permits only a strictly later same-backend canonical
+`open` record to clear it, treats `missing_review` as lookup evidence rather
+than a Review status, and removes the unreachable schema branch. Store and
+shared regressions cover backend isolation, delayed/equal-age non-revival,
+later canonical reopening, and lookup-missing evidence.
+
+At correction code head `d69f6a8be6ed94f55d7f07ed6b2887f9e5ed3148`, focused
+mobile/shared/web suites passed. `npm run lint`, `npm run test` (mobile 138
+files / 1,191 tests; web 134 passed files plus one intentional skipped file /
+909 passed tests plus two intentional skips; shared 16 files / 251 tests),
+`npm run build`, `npm run check:brand-assets`, and `git diff --check` passed.
+All plan validators passed using only disposable data: both SQLite validators;
+Review mutation and Location V2 database validators against fresh base and all
+ordered PostgreSQL 17 schemas on loopback databases ending in `_test`.
+`npm run typecheck` still fails only at the unmodified baseline
+`ConnectivityStatusStrip.tsx(27,43)` `expo-symbols` resolution; web and shared
+typechecks complete after that mobile failure. The temporary PostgreSQL server
+contains only synthetic validator fixtures and is stopped after validation.
+
+This fixes findings from the review of `b724de2`; it is not an independent
+approval of the descendant. Re-review, exact-head Preview/staging smoke, the
+ordinary signed staging build, and owner physical-iPhone acceptance remain
+separate gates.
+
 ## Motion contract
 
 - Trigger: a complete Today presentation generation arrives, or a Review
@@ -209,9 +254,10 @@ Draft PR #196 remains unmerged. Its Ready Preview for
 `4d931dd8afb0cb3a2a05612931b8b14b5306c048` was promoted to
 `https://dayframe-staging.vercel.app`; the staging root returned 200 and an
 unauthenticated `POST /api/review/presentation` returned the expected
-private/no-store 401 boundary. This is a deployment and anonymous auth-boundary
-smoke only: no authenticated staging user, Health or Location data, or physical
-device was used.
+private/no-store 401 boundary. That earlier Preview cannot establish deployment
+evidence for the later correction head. This is a deployment and anonymous
+auth-boundary smoke only: no authenticated staging user, Health or Location
+data, or physical device was used.
 
 The identified ordinary signed staging build and owner physical-iPhone
 acceptance remain separate from the completed local checks. An attempt to

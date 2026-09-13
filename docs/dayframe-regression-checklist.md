@@ -113,6 +113,11 @@ Review this checklist before and after changes that touch Dayframe UI, timer beh
   it does not add a canonical interval. Verify explicit canonical result
   materialises once, including Sleep reuse and multi-source structural result
   links. Unknown/rejected outcomes remain distinct and safe.
+- With a complete Today snapshot, the existing Dashboard manual-entry
+  projection overlays by actual entry ID: a stopped local manual entry appears
+  before its canonical response and remains exactly once when that record
+  arrives. Never use this projection to make a saved Review decision into an
+  entry.
 - Verify capped/partial/cache/offline states never claim zero or complete
   coverage. In Review, the accessible Load more action reaches the 101st
   backlog source without mixing a changed snapshot into the prior page or
@@ -123,6 +128,10 @@ Review this checklist before and after changes that touch Dayframe UI, timer beh
   source remains durable until its explicit scoped source-result link and
   current canonical entry/missing evidence are both read; no time/title
   matching, bootstrap omission, or duplicate canonical interval is allowed.
+- Terminal Review suppression is account/backend scoped. A `missing_review`
+  lookup is terminal evidence; only a same-backend explicit `open` record with
+  a strictly later server capture may reverse it. An older or equal response
+  stays suppressed.
 - Quick Confirm requires the exact fresh proposal, commits through the existing
   Review outbox before visual change, preserves old envelopes, handles duplicate
   taps/cross-surface attempts, and keeps the proposal actionable on local

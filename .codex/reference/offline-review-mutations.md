@@ -35,6 +35,13 @@ zone/range or lookup IDs and backend identity. Older contexts and ordinary
 bootstrap arrays are partial open-source evidence: absence never prunes a
 saved action, acknowledgement, effect, or map evidence.
 
+Terminal-source evidence is read only when both account and backend identity
+match. `missing_review` is a typed lookup result, not a Review-record status;
+it may record terminal `missing` evidence. Only an explicit same-backend
+`open` Review record with a strictly later server `capturedAt` may clear that
+suppression. A delayed or equal-age response must not resurrect a terminal
+source.
+
 An acknowledged envelope may retire only in one SQLite transaction after valid
 receipt identity, explicit terminal evidence for every affected source, and
 current canonical proof for every returned entry ID (materialised in the
