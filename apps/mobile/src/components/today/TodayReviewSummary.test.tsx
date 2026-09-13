@@ -43,6 +43,7 @@ beforeEach(() => {
   mocks.context = {
     isSummaryAvailable: true,
     error: null,
+    errorKind: null,
     openReview: vi.fn(),
     presentation: {
       completedLoggedMs: 3_600_000,
@@ -123,5 +124,29 @@ describe("TodayReviewSummary", () => {
       .findByType("Text" as never).children.join(""))
       .toContain("Today's summary is still loading.");
     expect(mocks.donutProps).toBeNull();
+  });
+
+  it("uses Connect only for an offline summary and keeps other failures safely classified", () => {
+    const unavailable = (errorKind: string) => {
+      mocks.context = {
+        isSummaryAvailable: false,
+        isLoading: false,
+        owner: { backendId: "staging", workspaceId: "workspace", userId: "user" },
+        error: "Safe diagnostic copy only",
+        errorKind,
+        presentation: null
+      };
+      let tree!: ReturnType<typeof create>;
+      act(() => {
+        tree = create(<TodayReviewSummary isFocused />);
+      });
+      return tree.root.findByProps({ testID: "today-review-summary-status" })
+        .findByType("Text" as never).children.join("");
+    };
+
+    expect(unavailable("offline")).toBe("Connect to load today's summary.");
+    expect(unavailable("server")).toBe("Today's summary is temporarily unavailable. Pull to refresh.");
+    expect(unavailable("validation")).toBe("Today's summary could not be verified. Pull to refresh.");
+    expect(unavailable("cache")).toBe("Today's saved summary could not be read. Pull to refresh.");
   });
 });

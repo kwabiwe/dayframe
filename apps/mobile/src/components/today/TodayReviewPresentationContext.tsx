@@ -27,7 +27,8 @@ export function TodayReviewPresentationProvider({
   dashboardEntries,
   manualProjectedEntries,
   isFocused,
-  nowMs
+  nowMs,
+  refreshGeneration
 }: {
   bootstrap: MobileBootstrap | null;
   children: ReactNode;
@@ -35,13 +36,15 @@ export function TodayReviewPresentationProvider({
   manualProjectedEntries: readonly MobileTimeEntry[];
   isFocused: boolean;
   nowMs: number;
+  refreshGeneration?: number;
 }) {
   const state = useTodayReviewPresentation({
     bootstrap,
     dashboardEntries,
     manualProjectedEntries,
     isFocused,
-    nowMs
+    nowMs,
+    refreshGeneration
   });
   const [committingIds, setCommittingIds] = useState<Set<string>>(() => new Set());
   const [messages, setMessages] = useState<Map<string, string>>(() => new Map());

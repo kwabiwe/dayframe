@@ -20,10 +20,9 @@ describe("getReviewPresentation", () => {
   it("uses one bounded read-only snapshot, scoped lookup IDs, and no mutation locks", async () => {
     const query = vi.fn(async (statement: string, values?: unknown[]) => {
       void values;
-      if (statement.startsWith("begin read only")) return { rows: [] };
+      if (statement.startsWith("begin isolation level repeatable read read only")) return { rows: [] };
       if (statement.includes("current_setting")) return { rows: [{ transaction_timeout: null }] };
       if (statement.includes("set_config")) return { rows: [] };
-      if (statement.includes("set transaction isolation level repeatable read")) return { rows: [] };
       if (statement.includes("with open_reviews")) {
         return { rows: [{ globalCount: 1, todayCount: 0, openReviewItemIds: [reviewId] }] };
       }
@@ -89,7 +88,8 @@ describe("getReviewPresentation", () => {
     const lookupQuery = query.mock.calls.find(([statement]) => String(statement).includes("ri.id = any"));
     expect(lookupQuery?.[1]).toEqual([session.workspaceId, session.userId, [reviewId]]);
     expect(String(lookupQuery?.[0])).toContain("review_mutation_receipts");
-    expect(query.mock.calls.some(([statement]) => String(statement).includes("repeatable read"))).toBe(true);
+    expect(String(query.mock.calls[0]?.[0])).toMatch(/^begin isolation level repeatable read read only;/i);
+    expect(query.mock.calls.some(([statement]) => String(statement) === "set transaction isolation level repeatable read")).toBe(false);
     expect(presentation.lookup.reviewItems[0]).toMatchObject({
       proposalHash: reviewProposalHash({
         reviewItemId: reviewId,
@@ -111,7 +111,7 @@ describe("getReviewPresentation", () => {
 
   it("returns an exact legacy target with actual editor fields rather than a synthetic entry", async () => {
     const query = vi.fn(async (statement: string) => {
-      if (statement.startsWith("begin read only")) return { rows: [] };
+      if (statement.startsWith("begin isolation level repeatable read read only")) return { rows: [] };
       if (statement.includes("current_setting")) return { rows: [{ transaction_timeout: null }] };
       if (statement.includes("set_config") || statement.includes("repeatable read") || statement === "commit") return { rows: [] };
       if (statement.includes("with open_reviews")) {
@@ -163,4 +163,59 @@ describe("getReviewPresentation", () => {
       editor: { description: "Imported walk", durationSeconds: 1800, tagNames: ["Synthetic"] }
     }]);
   });
+
+  it("keeps 501 loaded Review rows page-linked within the response bound", async () => {
+    const rows = Array.from({ length: 501 }, (_, index) => reviewRow(
+      `30000000-0000-4000-8000-${String(index + 100).padStart(12, "0")}`
+    ));
+    const query = vi.fn(async (statement: string) => {
+      if (statement.startsWith("begin isolation level repeatable read read only")) return { rows: [] };
+      if (statement.includes("current_setting")) return { rows: [{ transaction_timeout: null }] };
+      if (statement.includes("set_config") || statement === "commit") return { rows: [] };
+      if (statement.includes("with open_reviews")) {
+        return { rows: [{ globalCount: rows.length, todayCount: rows.length, openReviewItemIds: rows.map((row) => row.id) }] };
+      }
+      if (statement.includes("from time_entries te")) return { rows: [] };
+      if (statement.includes("from review_items ri")) return { rows };
+      return { rows: [] };
+    });
+    mocks.connect.mockResolvedValue({ query, release: vi.fn() });
+
+    const presentation = await getReviewPresentation(session, {
+      version: 1,
+      mode: "backlog",
+      timeZone: "Europe/London",
+      limit: 200
+    });
+
+    expect(presentation.records).toHaveLength(200);
+    expect(presentation.nextCursor).not.toBeNull();
+    expect(presentation.links).toHaveLength(200);
+    expect(presentation.links.map((link) => link.reviewItemId).sort())
+      .toEqual(presentation.records.flatMap((record) => record.kind === "review" ? [record.reviewItemId] : []).sort());
+  });
 });
+
+function reviewRow(id: string) {
+  return {
+    id,
+    eventId: null,
+    locationSegmentId: null,
+    type: "health",
+    title: "Synthetic Review",
+    status: "open" as const,
+    categoryId: null,
+    categoryName: null,
+    categoryColor: null,
+    placeId: null,
+    placeLabel: null,
+    startedAt: "2026-09-12T08:00:00.000Z",
+    stoppedAt: "2026-09-12T08:30:00.000Z",
+    confidence: "medium",
+    createdAt: "2026-09-12T08:31:00.000Z",
+    semanticRevision: "2026-09-12T08:31:00.000Z",
+    eventSource: null,
+    eventType: null,
+    canonicalEntryIds: []
+  };
+}

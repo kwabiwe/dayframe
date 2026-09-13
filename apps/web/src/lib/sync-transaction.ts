@@ -28,6 +28,8 @@ export type SyncTransactionOptions = {
   deadlineAt?: number;
   cleanupReserveMs?: number;
   readOnly?: boolean;
+  /** Applied as part of BEGIN, before transaction-local configuration reads. */
+  isolationLevel?: "repeatable read";
   databasePool?: Pick<pg.Pool, "connect">;
 };
 
@@ -111,7 +113,7 @@ export async function withSyncTransaction<T>(
       phase = "begin";
       began = true;
       // A single protocol message installs the idle guard immediately after BEGIN.
-      await queryRaw(`begin${options.readOnly ? " read only" : ""}; set local idle_in_transaction_session_timeout = '${SYNC_IDLE_MS}ms'; set local statement_timeout = '${Math.max(1, Math.min(SYNC_STATEMENT_MS, remainingMs()))}ms'; set local lock_timeout = '${Math.max(1, Math.min(SYNC_LOCK_MS, remainingMs()))}ms'`);
+      await queryRaw(`begin${options.isolationLevel === "repeatable read" ? " isolation level repeatable read" : ""}${options.readOnly ? " read only" : ""}; set local idle_in_transaction_session_timeout = '${SYNC_IDLE_MS}ms'; set local statement_timeout = '${Math.max(1, Math.min(SYNC_STATEMENT_MS, remainingMs()))}ms'; set local lock_timeout = '${Math.max(1, Math.min(SYNC_LOCK_MS, remainingMs()))}ms'`);
       check();
       phase = "configure";
       await queryRaw("select set_config('application_name', $1, true)", [`dayframe.sync.${operation}`]);

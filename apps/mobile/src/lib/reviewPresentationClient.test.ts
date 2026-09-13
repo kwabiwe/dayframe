@@ -16,6 +16,7 @@ vi.mock("./secure-session", () => ({
 import {
   fetchReviewPresentationPage,
   ReviewPresentationSnapshotChangedError,
+  ReviewPresentationValidationError,
   mergeReviewPresentationPages
 } from "./reviewPresentationClient";
 import type { ReviewPresentationResponse } from "@dayframe/shared";
@@ -81,6 +82,33 @@ describe("fetchReviewPresentationPage", () => {
         limit: 100
       }
     })).rejects.toBeInstanceOf(ReviewPresentationSnapshotChangedError);
+  });
+
+  it("classifies a malformed successful response without exposing its body", async () => {
+    vi.mocked(readOwnedAuthenticatedSessionSnapshot).mockResolvedValue({
+      status: "authenticated",
+      snapshot: { token: "fixture-token", owner: { workspaceId: "10000000-0000-4000-8000-000000000001", userId: "20000000-0000-4000-8000-000000000001" } }
+    } as never);
+    vi.mocked(isAuthenticatedSessionSnapshotCurrent).mockReturnValue(true);
+    vi.mocked(mobileJsonRequest).mockResolvedValue({
+      response: { ok: true, status: 200 } as Response,
+      body: { unexpected: true }
+    } as never);
+
+    await expect(fetchReviewPresentationPage({
+      owner: {
+        backendId: "staging-fixture",
+        workspaceId: "10000000-0000-4000-8000-000000000001",
+        userId: "20000000-0000-4000-8000-000000000001"
+      },
+      request: {
+        version: 1,
+        mode: "lookup",
+        timeZone: "Etc/UTC",
+        reviewItemIds: ["30000000-0000-4000-8000-000000000001"],
+        limit: 100
+      }
+    })).rejects.toBeInstanceOf(ReviewPresentationValidationError);
   });
 });
 

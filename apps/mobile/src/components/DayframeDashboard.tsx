@@ -297,6 +297,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
   const connectivity = useConnectivity();
   const [data, setData] = useState<MobileBootstrap | null>(null);
   const [refreshing, setRefreshing] = useState(false);
+  const [todayPresentationRefreshGeneration, setTodayPresentationRefreshGeneration] = useState(0);
   const [authSubmitting, setAuthSubmitting] = useState(false);
   const [authState, setAuthState] = useState<AuthState>("checking");
   const [selectedDayKey, setSelectedDayKey] = useState(() => formatDateKey(new Date()));
@@ -837,6 +838,14 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
     }
   }, [transitionToSignedOut]);
   loadRef.current = load;
+
+  const refreshTodayPresentation = useCallback(() => {
+    // An explicit Today pull-to-refresh is also an explicit foreground retry
+    // for the read-only presentation. It uses the existing owner and lets the
+    // hook coalesce with an in-flight read; it does not start a poll or queue.
+    setTodayPresentationRefreshGeneration((current) => current + 1);
+    void load({ visibleRefresh: true });
+  }, [load]);
 
   function updateDashboardData(
     update: (current: MobileBootstrap | null) => MobileBootstrap | null
@@ -2318,6 +2327,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
         manualProjectedEntries={historySourceEntries}
         isFocused={isFocused}
         nowMs={now}
+        refreshGeneration={todayPresentationRefreshGeneration}
       >
       <SafeAreaView collapsable={false} edges={["top", "left", "right"]} style={styles.safeArea}>
         <Reanimated.FlatList
@@ -2328,7 +2338,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
           refreshControl={
             <RefreshControl
               refreshing={isFocused && refreshing}
-              onRefresh={() => load({ visibleRefresh: true })}
+              onRefresh={refreshTodayPresentation}
               tintColor={theme.accent}
               colors={[theme.accent]}
             />

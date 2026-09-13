@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AppState } from "react-native";
 import {
   isIanaTimeZone,
@@ -18,9 +18,11 @@ import {
 } from "@/lib/reviewSyncStore";
 import {
   fetchReviewPresentationSnapshot,
-  ReviewPresentationSnapshotChangedError
+  ReviewPresentationSnapshotChangedError,
+  ReviewPresentationValidationError
 } from "@/lib/reviewPresentationClient";
 import { reconcileAcknowledgedReviewPresentationHandover } from "@/lib/reviewPresentationHandover";
+import { isMobileTransportFailure } from "@/lib/mobile-network";
 import {
   projectTodayReviewPresentation,
   type TodayReviewPresentation
@@ -33,7 +35,16 @@ export type TodayReviewPresentationState = {
   presentation: TodayReviewPresentation | null;
   isLoading: boolean;
   error: string | null;
+  /** Safe classification only; raw transport/server details never reach Today. */
+  errorKind: TodayReviewPresentationErrorKind | null;
 };
+
+export type TodayReviewPresentationErrorKind =
+  | "offline"
+  | "server"
+  | "validation"
+  | "cache"
+  | "snapshot_changed";
 
 type Input = {
   bootstrap: MobileBootstrap | null;
@@ -41,6 +52,7 @@ type Input = {
   manualProjectedEntries: readonly MobileTimeEntry[];
   isFocused: boolean;
   nowMs: number;
+  refreshGeneration?: number;
 };
 
 type NetworkRead = {
@@ -49,6 +61,13 @@ type NetworkRead = {
   queued: boolean;
   running: boolean;
 };
+
+class PresentationCacheError extends Error {
+  constructor() {
+    super("Review presentation cache is unavailable.");
+    this.name = "PresentationCacheError";
+  }
+}
 
 /**
  * One foreground display-read coordinator for Today. It only owns cancellable
@@ -67,11 +86,17 @@ export function useTodayReviewPresentation(input: Input): TodayReviewPresentatio
   const [snapshot, setSnapshot] = useState<ReviewPresentationStoreSnapshot | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [errorKind, setErrorKind] = useState<TodayReviewPresentationErrorKind | null>(null);
   const [projectionNowMs, setProjectionNowMs] = useState(() => Date.now());
   const [queuedReadSequence, setQueuedReadSequence] = useState(0);
   const identityGeneration = useRef(0);
   const read = useRef<NetworkRead | null>(null);
   const acknowledgedHandoverSignature = useRef<string | null>(null);
+
+  const setPresentationError = useCallback((kind: TodayReviewPresentationErrorKind) => {
+    setErrorKind(kind);
+    setError(presentationErrorCopy(kind));
+  }, []);
 
   useEffect(() => {
     const subscription = AppState.addEventListener("change", (next) => {
@@ -87,14 +112,18 @@ export function useTodayReviewPresentation(input: Input): TodayReviewPresentatio
     acknowledgedHandoverSignature.current = null;
     setSnapshot(null);
     setError(null);
+    setErrorKind(null);
     if (!owner || !scope) return;
     const generation = identityGeneration.current;
     void readCachedSnapshot({ owner, scope }).then((next) => {
       if (generation !== identityGeneration.current) return;
       setSnapshot(next);
       if (next) setProjectionNowMs(Date.now());
+    }).catch(() => {
+      if (generation !== identityGeneration.current) return;
+      setPresentationError("cache");
     });
-  }, [ownerKey, scopeKey]);
+  }, [ownerKey, scopeKey, setPresentationError]);
 
   useEffect(() => {
     if (!owner || !scope) return;
@@ -128,17 +157,21 @@ export function useTodayReviewPresentation(input: Input): TodayReviewPresentatio
           if (disposed || generation !== identityGeneration.current) return;
           setSnapshot(next);
           if (next) setProjectionNowMs(Date.now());
+        }).catch(() => {
+          if (disposed || generation !== identityGeneration.current) return;
+          setPresentationError("cache");
         });
       });
       queueAcknowledgedHandoverRead();
     };
     queueAcknowledgedHandoverRead();
     return subscribeReviewSync(refresh);
-  }, [ownerKey, scopeKey]);
+  }, [ownerKey, scopeKey, setPresentationError]);
 
   const bootstrapRefreshKey = input.bootstrap
     ? `${input.bootstrap.workspace.id}:${input.bootstrap.user.id}:${input.bootstrap.serverBuild?.sourceSha ?? "local"}:${input.bootstrap.reviewItems.length}:${input.bootstrap.entries.length}`
     : "none";
+  const explicitRefreshKey = input.refreshGeneration ?? 0;
 
   useEffect(() => {
     if (!owner || !scope || !scopeKey || !input.isFocused || !appIsActive) {
@@ -174,8 +207,14 @@ export function useTodayReviewPresentation(input: Input): TodayReviewPresentatio
           signal: controller.signal
         });
         if (generation !== identityGeneration.current || controller.signal.aborted) return;
-        const wrote = await cacheReviewPresentation({ owner, response });
-        if (!wrote || generation !== identityGeneration.current || controller.signal.aborted) return;
+        let wrote: boolean;
+        try {
+          wrote = await cacheReviewPresentation({ owner, response });
+        } catch {
+          throw new PresentationCacheError();
+        }
+        if (!wrote) throw new PresentationCacheError();
+        if (generation !== identityGeneration.current || controller.signal.aborted) return;
         const handover = await reconcileAcknowledgedReviewPresentationHandover({
           owner,
           timeZone: scope.timeZone,
@@ -183,11 +222,18 @@ export function useTodayReviewPresentation(input: Input): TodayReviewPresentatio
         });
         if (handover.signature) acknowledgedHandoverSignature.current = handover.signature;
         if (generation !== identityGeneration.current || controller.signal.aborted) return;
-        const next = await readCachedSnapshot({ owner, scope });
+        let next: ReviewPresentationStoreSnapshot | null;
+        try {
+          next = await readCachedSnapshot({ owner, scope });
+        } catch {
+          throw new PresentationCacheError();
+        }
+        if (!next) throw new PresentationCacheError();
         if (generation !== identityGeneration.current || controller.signal.aborted) return;
         setSnapshot(next);
         setProjectionNowMs(Date.now());
         setError(null);
+        setErrorKind(null);
       } catch (cause) {
         if (controller.signal.aborted || generation !== identityGeneration.current) return;
         // A failed foreground read never changes durable delivery state. Clear
@@ -197,7 +243,7 @@ export function useTodayReviewPresentation(input: Input): TodayReviewPresentatio
         acknowledgedHandoverSignature.current = null;
         // A malformed or unavailable new response leaves the last verified
         // snapshot mounted and qualified instead of replacing it with zero.
-        setError(presentationErrorCopy(cause));
+        setPresentationError(presentationErrorKind(cause));
       } finally {
         if (read.current !== operation) return;
         operation.running = false;
@@ -213,7 +259,7 @@ export function useTodayReviewPresentation(input: Input): TodayReviewPresentatio
       }
     };
     void run();
-  }, [appIsActive, bootstrapRefreshKey, input.isFocused, ownerKey, queuedReadSequence, scopeKey]);
+  }, [appIsActive, bootstrapRefreshKey, explicitRefreshKey, input.isFocused, ownerKey, queuedReadSequence, scopeKey, setPresentationError]);
 
   const presentation = useMemo(() => {
     if (!owner || !scope || !snapshot) return null;
@@ -246,7 +292,7 @@ export function useTodayReviewPresentation(input: Input): TodayReviewPresentatio
     snapshot
   ]);
 
-  return { owner, scope, snapshot, presentation, isLoading, error };
+  return { owner, scope, snapshot, presentation, isLoading, error, errorKind };
 }
 
 async function readCachedSnapshot(input: {
@@ -298,9 +344,25 @@ function currentTimeZone() {
   return value && isIanaTimeZone(value) ? value : null;
 }
 
-function presentationErrorCopy(cause: unknown) {
-  if (cause instanceof ReviewPresentationSnapshotChangedError) {
-    return "Review changed while Today was loading. Showing the last saved view.";
+function presentationErrorKind(cause: unknown): TodayReviewPresentationErrorKind {
+  if (cause instanceof ReviewPresentationSnapshotChangedError) return "snapshot_changed";
+  if (cause instanceof ReviewPresentationValidationError) return "validation";
+  if (cause instanceof PresentationCacheError) return "cache";
+  if (isMobileTransportFailure(cause)) return "offline";
+  return "server";
+}
+
+function presentationErrorCopy(kind: TodayReviewPresentationErrorKind) {
+  switch (kind) {
+    case "offline":
+      return "Today could not reach Dayframe. Showing the last saved view when available.";
+    case "validation":
+      return "Today received an unavailable summary. Showing the last saved view when available.";
+    case "cache":
+      return "Today could not read its saved summary. Pull to refresh.";
+    case "snapshot_changed":
+      return "Review changed while Today was loading. Showing the last saved view.";
+    case "server":
+      return "Review could not refresh. Showing the last saved view when available.";
   }
-  return "Review could not refresh. Showing the last saved view when available.";
 }

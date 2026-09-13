@@ -29,6 +29,14 @@ export class ReviewPresentationSnapshotChangedError extends Error {
   }
 }
 
+/** A response that cannot satisfy the whitelisted presentation contract. */
+export class ReviewPresentationValidationError extends Error {
+  constructor() {
+    super("Review presentation response was empty or malformed.");
+    this.name = "ReviewPresentationValidationError";
+  }
+}
+
 /**
  * Read-only, owner-bound mobile adapter for the Stage B presentation contract.
  * It is intentionally separate from the Review mutation synchroniser: callers
@@ -71,7 +79,9 @@ export async function fetchReviewPresentationPage(input: {
             ? value as { code?: unknown }
             : null;
         }
-        return ReviewPresentationResponseSchema.parse(value);
+        const parsed = ReviewPresentationResponseSchema.safeParse(value);
+        if (!parsed.success) throw new ReviewPresentationValidationError();
+        return parsed.data;
       }
     }
   );
@@ -83,7 +93,7 @@ export async function fetchReviewPresentationPage(input: {
     throw new MobileHttpResponseError(response.status, "Unable to load Review presentation.");
   }
   const parsed = ReviewPresentationResponseSchema.safeParse(body);
-  if (!parsed.success) throw new Error("Review presentation response was empty or malformed.");
+  if (!parsed.success) throw new ReviewPresentationValidationError();
   return parsed.data;
 }
 

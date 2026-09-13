@@ -132,8 +132,8 @@ export async function getReviewPresentation(
   return withSyncTransaction("review_presentation", async ({ client, phase }) => {
     phase("canonical_read");
     // Multiple bounded reads need one snapshot; no row locks or advisory locks
-    // are acquired for presentation.
-    await client.query("set transaction isolation level repeatable read");
+    // are acquired for presentation. Repeatable Read is selected by the
+    // transaction owner at BEGIN, before its configuration SELECTs.
 
     const [counts, reviewRows, legacyRows, entryRows, lookup] = await Promise.all([
       loadCounts(client, session, input),
@@ -170,7 +170,17 @@ export async function getReviewPresentation(
           recordId: page.records.at(-1)!.recordId
         })
       : null;
-    const links = linksFor([...reviewRows, ...lookup.reviews]);
+    // A response is one page, not the whole server-side collection. Return
+    // lineage for the Review records it actually exposes (or explicitly looks
+    // up), so each page stays within the response bound and the mobile snapshot
+    // merger can assemble complete linkage across its verified pages.
+    const pageReviewIds = new Set(page.records.flatMap(({ record }) => (
+      record.kind === "review" ? [record.reviewItemId] : []
+    )));
+    const links = linksFor([
+      ...reviewRows.filter((row) => pageReviewIds.has(row.id)),
+      ...lookup.reviews
+    ]);
     const response: ReviewPresentationResponse = {
       version: REVIEW_PRESENTATION_VERSION,
       scope: {
@@ -209,7 +219,13 @@ export async function getReviewPresentation(
       }
     };
     return ReviewPresentationResponseSchema.parse(response);
-  }, { ...options, deadlineAt, readOnly: true, cleanupReserveMs: 500 });
+  }, {
+    ...options,
+    deadlineAt,
+    isolationLevel: "repeatable read",
+    readOnly: true,
+    cleanupReserveMs: 500
+  });
 }
 
 async function loadCounts(client: pg.PoolClient, session: RequestSession, input: ReviewPresentationRequest) {

@@ -17,6 +17,7 @@ const mocks = vi.hoisted(() => ({
   handover: vi.fn(),
   lookup: vi.fn(),
   readSnapshot: vi.fn(),
+  state: null as any,
   subscribe: null as null | (() => void)
 }));
 
@@ -39,7 +40,11 @@ vi.mock("@/lib/reviewSyncStore", () => ({
 }));
 vi.mock("@/lib/reviewPresentationClient", () => ({
   fetchReviewPresentationSnapshot: mocks.fetch,
-  ReviewPresentationSnapshotChangedError: class extends Error {}
+  ReviewPresentationSnapshotChangedError: class extends Error {},
+  ReviewPresentationValidationError: class extends Error {}
+}));
+vi.mock("@/lib/mobile-network", () => ({
+  isMobileTransportFailure: (error: unknown) => error instanceof TypeError
 }));
 vi.mock("@/lib/reviewPresentationHandover", () => ({
   reconcileAcknowledgedReviewPresentationHandover: mocks.handover
@@ -59,7 +64,7 @@ describe("useTodayReviewPresentation", () => {
   it("establishes the staging owner and reads presentation from a staging-style bootstrap", async () => {
     mocks.cache.mockResolvedValue(true);
     mocks.lookup.mockResolvedValue(null);
-    mocks.readSnapshot.mockResolvedValue(null);
+    mocks.readSnapshot.mockResolvedValue(cachedSnapshot());
     mocks.handover.mockResolvedValue({ attempted: false, signature: null });
     mocks.fetch.mockImplementation(async ({ request }: {
       request: Omit<ReviewPresentationRequest, "cursor">;
@@ -86,6 +91,40 @@ describe("useTodayReviewPresentation", () => {
     act(() => tree.unmount());
   });
 
+  it("retries a failed presentation read on explicit refresh with unchanged bootstrap counts", async () => {
+    mocks.cache.mockResolvedValue(true);
+    mocks.lookup.mockResolvedValue(null);
+    mocks.readSnapshot.mockResolvedValue(cachedSnapshot());
+    mocks.handover.mockResolvedValue({ attempted: false, signature: null });
+    mocks.fetch
+      .mockRejectedValueOnce(new TypeError("Network request failed"))
+      .mockImplementationOnce(async ({ request }: {
+        request: Omit<ReviewPresentationRequest, "cursor">;
+      }) => snapshot(request));
+
+    let tree!: ReturnType<typeof create>;
+    act(() => {
+      tree = create(<Probe refreshGeneration={0} />);
+    });
+    await act(async () => {
+      await vi.waitFor(() => expect(mocks.fetch).toHaveBeenCalledOnce());
+    });
+    await vi.waitFor(() => expect(mocks.state).toMatchObject({ errorKind: "offline", isLoading: false }));
+
+    act(() => {
+      tree.update(<Probe refreshGeneration={1} />);
+    });
+    await act(async () => {
+      await vi.waitFor(() => expect(mocks.fetch).toHaveBeenCalledTimes(2));
+    });
+
+    expect(bootstrap.entries).toHaveLength(0);
+    expect(bootstrap.reviewItems).toHaveLength(0);
+    expect(mocks.fetch.mock.calls[1]?.[0].request).toMatchObject({ mode: "window", limit: 200 });
+    expect(mocks.state).toMatchObject({ error: null, errorKind: null });
+    act(() => tree.unmount());
+  });
+
   it("fails closed when bootstrap declares a different backend", async () => {
     let tree!: ReturnType<typeof create>;
     await act(async () => {
@@ -106,13 +145,20 @@ describe("useTodayReviewPresentation", () => {
   });
 });
 
-function Probe({ bootstrap: source = bootstrap }: { bootstrap?: MobileBootstrap }) {
-  useTodayReviewPresentation({
+function Probe({
+  bootstrap: source = bootstrap,
+  refreshGeneration
+}: {
+  bootstrap?: MobileBootstrap;
+  refreshGeneration?: number;
+}) {
+  mocks.state = useTodayReviewPresentation({
     bootstrap: source,
     dashboardEntries: [],
     manualProjectedEntries: [],
     isFocused: true,
-    nowMs: Date.parse("2026-09-12T12:00:00.000Z")
+    nowMs: Date.parse("2026-09-12T12:00:00.000Z"),
+    refreshGeneration
   });
   return null;
 }
@@ -153,5 +199,22 @@ function snapshot(
     records: [],
     links: [],
     lookup: { reviewItems: [], entries: [] }
+  };
+}
+
+function cachedSnapshot() {
+  const request: Omit<ReviewPresentationRequest, "cursor"> = {
+    version: 1,
+    mode: "window",
+    timeZone: "Etc/UTC",
+    window: { start: "2026-07-15T00:00:00.000Z", end: "2026-09-13T00:00:00.000Z" },
+    today: { start: "2026-09-12T00:00:00.000Z", end: "2026-09-13T00:00:00.000Z" },
+    limit: 200
+  };
+  return {
+    response: snapshot(request),
+    cachedAt: "2026-09-12T12:00:00.000Z",
+    localRevision: 1,
+    effects: []
   };
 }

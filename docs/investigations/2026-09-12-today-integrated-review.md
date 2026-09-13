@@ -242,6 +242,38 @@ and the Today presentation read proceeding (`useTodayReviewPresentation.test.tsx
 the PR introduces no TS2739 error. A physical signed-staging retest remains
 **NOT RUN** at the time of this note.
 
+## 2026-09-13 presentation-read transaction correction
+
+At inspected PR head `a37225ce0c25e0f500b38bdf5fe8ac8a62f5d720`, a real
+all-ordered disposable PostgreSQL 17 service invocation failed with SQLSTATE
+`25001`: `SET TRANSACTION ISOLATION LEVEL must be called before any query`.
+The presentation service issued that command after the shared transaction
+helper had already run its transaction-local configuration `SELECT`s.
+
+The helper now has one narrowly typed `repeatable read` option, applied in its
+`BEGIN` statement before all configuration reads. Presentation requests use
+that option and remain read-only; the late `SET TRANSACTION` is removed.
+Existing callers retain their default `BEGIN`, deadlines, cancellation,
+rollback, and checked-out-client cleanup behavior.
+
+Page lineage now covers only Review records actually returned by that page,
+plus explicit lookup rows. This matches the 500-link response boundary while
+the mobile snapshot merger retains lineage across verified pages. A 501-Review
+fixture covers the bound. Today keeps the existing foreground presentation
+owner: an explicit pull-to-refresh supplies one read generation even when the
+bootstrap array lengths are unchanged, with no poll or new sync queue. Its
+unavailable copy distinguishes offline transport from safe server, validation,
+cache, and snapshot-change classifications.
+
+Focused evidence: real PostgreSQL service tests passed for window, backlog and
+lookup modes; the valid response → shared mobile schema → existing SQLite cache
+→ visible Today summary test passed; failed read → unchanged-bootstrap explicit
+refresh → recovery passed; and the genuine backend-mismatch fail-closed test
+remains covered. `npm run validate:sync-transactions` also passed against the
+same disposable local `*_test` database. This is local synthetic-data evidence
+only; no Vercel, staging promotion, signed iPhone build, or physical retest was
+performed.
+
 ## Motion contract
 
 - Trigger: a complete Today presentation generation arrives, or a Review
