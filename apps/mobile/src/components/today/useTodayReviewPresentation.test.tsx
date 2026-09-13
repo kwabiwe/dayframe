@@ -4,7 +4,7 @@ import type {
   ReviewPresentationRequest,
   ReviewPresentationSnapshot
 } from "@dayframe/shared";
-import type { MobileBootstrap } from "@/lib/api";
+import { AuthRequiredError, type MobileBootstrap } from "@/lib/api";
 
 vi.mock("react", async () => {
   // @ts-expect-error Renderer peer lives at the repository root.
@@ -29,6 +29,7 @@ vi.mock("react-native", () => ({
   }
 }));
 vi.mock("@/lib/backendIdentity", () => ({ DAYFRAME_BACKEND_ID: "dayframe-staging" }));
+vi.mock("@/lib/api", () => ({ AuthRequiredError: class extends Error {} }));
 vi.mock("@/lib/reviewSyncStore", () => ({
   recordReviewPresentationRead: mocks.recordRead,
   cacheReviewPresentation: mocks.cache,
@@ -145,6 +146,33 @@ describe("useTodayReviewPresentation", () => {
     expect(mocks.fetch).not.toHaveBeenCalled();
     expect(mocks.cache).not.toHaveBeenCalled();
     expect(mocks.handover).not.toHaveBeenCalled();
+    act(() => tree.unmount());
+  });
+
+  it.each([
+    [new AuthRequiredError(), null],
+    [new Error("Service unavailable"), "server"],
+    [new TypeError("Network request failed"), "offline"]
+  ] as const)("keeps authentication separate from read diagnostics (%s)", async (cause, classification) => {
+    mocks.lookup.mockResolvedValue(null);
+    mocks.readSnapshot.mockResolvedValue(null);
+    mocks.fetch.mockRejectedValueOnce(cause);
+    let tree!: ReturnType<typeof create>;
+    act(() => { tree = create(<Probe />); });
+    await act(async () => {
+      await vi.waitFor(() => expect(mocks.fetch).toHaveBeenCalledOnce());
+    });
+    await vi.waitFor(() => expect(mocks.state.isLoading).toBe(false));
+    expect(mocks.state.errorKind).toBe(classification);
+    if (classification === null) {
+      expect(mocks.state.error).toBeNull();
+      expect(mocks.recordRead).not.toHaveBeenCalled();
+    } else {
+      expect(mocks.state.error).toEqual(expect.any(String));
+      expect(mocks.recordRead).toHaveBeenCalledExactlyOnceWith(
+        expect.objectContaining({ backendId: "dayframe-staging" }), "today", classification
+      );
+    }
     act(() => tree.unmount());
   });
 });

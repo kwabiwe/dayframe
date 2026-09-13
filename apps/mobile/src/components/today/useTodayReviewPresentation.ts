@@ -6,7 +6,7 @@ import {
   type ReviewPresentationSnapshot
 } from "@dayframe/shared";
 import { DAYFRAME_BACKEND_ID } from "@/lib/backendIdentity";
-import type { MobileBootstrap, MobileTimeEntry } from "@/lib/api";
+import { AuthRequiredError, type MobileBootstrap, type MobileTimeEntry } from "@/lib/api";
 import {
   cacheReviewPresentation,
   recordReviewPresentationRead,
@@ -239,6 +239,8 @@ export function useTodayReviewPresentation(input: Input): TodayReviewPresentatio
         recordReviewPresentationRead(owner, "today", "success");
       } catch (cause) {
         if (controller.signal.aborted || generation !== identityGeneration.current) return;
+        // Authentication/session recovery belongs to the existing auth owner.
+        if (cause instanceof AuthRequiredError) return;
         // A failed foreground read never changes durable delivery state. Clear
         // only this ephemeral de-duplication token so a later existing
         // foreground/subscription trigger may retry the proof; do not create a
