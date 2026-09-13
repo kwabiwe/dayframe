@@ -24,6 +24,43 @@ The additive v5→v6 migration records contention count, reconciliation attempts
 
 Before retrying an interrupted, old, repeatedly contended, or explicit-attention mutation, mobile calls the authenticated read-only `/api/review/mutations/reconcile` proof route. Only an exact envelope-matching receipt/effect result may acknowledge the saved intent. An open result permits the same original request to retry; missing, conflicting, malformed, or still-unknown proof remains actionable without inventing success. `resolution_unknown` offers reconciliation and cannot be discarded as a known permanent failure.
 
+## SQLite v7 presentation evidence
+
+V7 extends this same owner with additive, account/backend-bound Review
+presentation contexts and terminal-source evidence. The context stores only
+strictly whitelisted display/count/lineage data from the bounded
+`/api/review/presentation` read; it is not a new queue, canonical entry store,
+or substitute for the Location Evidence cache. Scope includes the exact mode,
+zone/range or lookup IDs and backend identity. Older contexts and ordinary
+bootstrap arrays are partial open-source evidence: absence never prunes a
+saved action, acknowledgement, effect, or map evidence.
+
+Terminal-source evidence is read only when both account and backend identity
+match. `missing_review` is a typed lookup result, not a Review-record status;
+it may record terminal `missing` evidence. Only an explicit same-backend
+`open` Review record with a strictly later server `capturedAt` may clear that
+suppression. A delayed or equal-age response must not resurrect a terminal
+source.
+
+An acknowledged envelope may retire only in one SQLite transaction after valid
+receipt identity, explicit terminal evidence for every affected source, and
+current canonical proof for every returned entry ID (materialised in the
+existing Dashboard cache or explicitly `missing`). A receipt is not a
+canonical interval. Until that handover completes, a Today row can say saved
+locally and leave pending accounting, but it must not fabricate or double-count
+logged time. Context pruning/byte budgets may remove disposable display data
+only; they never delete unresolved envelopes/effects or change the independent
+Location Evidence TTL/LRU policy.
+
+An equivalent generic accept/confirm may have no entry ID in its valid receipt.
+Its foreground presentation reader must first look up every affected source as
+one bounded action, then follow only an explicit accepted source-to-entry link
+from that scoped canonical response in a second bounded entry lookup. It must
+not infer an entry from time, title, category, position, or a missing bootstrap
+row. Keep all structural sources together; a merge/split receipt with a known
+no-entry outcome does not justify inventing one, while any returned entry still
+needs current Dashboard-cache or explicit-`missing` proof before retirement.
+
 ## Synchronisation and rollback
 
 - Keep one serial mutation queue, one drain promise and the existing root reconnect coordinator. Review stays foreground-only and never acquires the finite timer background assertion.

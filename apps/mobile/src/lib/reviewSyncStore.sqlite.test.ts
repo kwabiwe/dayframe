@@ -209,7 +209,7 @@ describe("Review real SQLite transactions", () => {
     expect(mocks.fetch).toHaveBeenCalledOnce();
     expect(db.prepare("select attempt_count from review_mutation_outbox").get()!.attempt_count).toBe(1);
   });
-  it("keeps a locked mutation hidden until a later retry is acknowledged", async () => {
+  it("keeps an acknowledged mutation until an explicit scoped handover proves its result", async () => {
     const data = bootstrap();
     const item = data.reviewItems[0];
     await store.enqueueReviewMutation({
@@ -238,7 +238,7 @@ describe("Review real SQLite transactions", () => {
       ...data,
       reviewItems: data.reviewItems.filter((candidate) => candidate.id !== item.id)
     });
-    expect(count("review_mutation_outbox")).toBe(0);
+    expect(count("review_mutation_outbox")).toBe(1);
   });
   it("restores only canonically open sources after a permanent conflict", async () => {
     const input = mergeInput(); await store.enqueueReviewMutation(input);
@@ -252,14 +252,236 @@ describe("Review real SQLite transactions", () => {
     expect(afterDiscard).not.toContain(input.item.id);
     expect(afterDiscard).toContain(input.mutation.adjacentReviewItemId);
   });
-  it("retains acknowledged merge tombstones until both source IDs disappear", async () => {
+  it("does not use absence from a capped bootstrap as merge handover proof", async () => {
     const input = mergeInput(); await store.enqueueReviewMutation(input);
     mocks.fetch.mockResolvedValue({ status: 200, json: async () => ({ ok: true, action: "merge", status: "accepted", mergedSegmentId: syntheticId(99) }) });
     await store.synchroniseReviewMutations();
     await store.processReviewBootstrap({ ...input.bootstrap, reviewItems: input.bootstrap.reviewItems.filter(x => x.id !== input.item.id) });
     expect(count("review_mutation_outbox")).toBe(1);
     await store.processReviewBootstrap({ ...input.bootstrap, reviewItems: input.bootstrap.reviewItems.slice(0, 2) });
-    expect(count("review_mutation_outbox")).toBe(0); expect(count("review_mutation_effects")).toBe(0);
+    expect(count("review_mutation_outbox")).toBe(1); expect(count("review_mutation_effects")).toBe(2);
+  });
+  it("upserts a partial bootstrap without deleting older cached Review sources", async () => {
+    const data = bootstrap();
+    await store.processReviewBootstrap({ ...data, reviewItems: [data.reviewItems[0]] });
+    expect(count("review_item_cache")).toBe(4);
+    expect((await store.loadCachedReviewBootstrap())!.bootstrap.reviewItems.map((item) => item.id))
+      .toEqual(expect.arrayContaining(data.reviewItems.map((item) => item.id)));
+  });
+  it("requires explicit terminal evidence for every structural source before handover", async () => {
+    const input = mergeInput();
+    await store.enqueueReviewMutation(input);
+    mocks.fetch.mockResolvedValue({ status: 200, json: async () => ({
+      ok: true, action: "merge", status: "accepted", mergedSegmentId: syntheticId(99)
+    }) });
+    await store.synchroniseReviewMutations();
+    const owner = {
+      workspaceId: input.bootstrap.workspace.id,
+      userId: input.bootstrap.user.id,
+      backendId: "staging-fixture"
+    };
+    await store.cacheReviewPresentation({
+      owner,
+      response: terminalPresentation(input.bootstrap, [input.item.id])
+    });
+    expect(count("review_mutation_outbox")).toBe(1);
+    await store.cacheReviewPresentation({
+      owner,
+      response: terminalPresentation(input.bootstrap, [input.item.id, input.mutation.adjacentReviewItemId])
+    });
+    expect(count("review_mutation_outbox")).toBe(0);
+    expect(count("review_mutation_effects")).toBe(0);
+  });
+  it("selects one complete acknowledged structural action for a bounded handover lookup", async () => {
+    const input = mergeInput();
+    await store.enqueueReviewMutation(input);
+    mocks.fetch.mockResolvedValue({ status: 200, json: async () => ({
+      ok: true,
+      action: "merge",
+      status: "accepted",
+      mergedSegmentId: syntheticId(99)
+    }) });
+    await store.synchroniseReviewMutations();
+
+    await expect(store.readAcknowledgedReviewHandoverLookup({ owner: {
+      workspaceId: input.bootstrap.workspace.id,
+      userId: input.bootstrap.user.id,
+      backendId: "staging-fixture"
+    } })).resolves.toMatchObject({
+      clientMutationId: input.clientMutationId,
+      reviewItemIds: [input.item.id, input.mutation.adjacentReviewItemId].sort(),
+      entryIds: []
+    });
+  });
+  it("only retires an accepted source after a current result is in the Dashboard cache", async () => {
+    const data = bootstrap();
+    const item = data.reviewItems[0];
+    const entryId = syntheticId(996);
+    await store.enqueueReviewMutation({ bootstrap: data, item, clientMutationId: syntheticId(997), mutation: { action: "accept" } });
+    mocks.fetch.mockResolvedValue({ status: 200, json: async () => ({ ok: true, action: "accept", status: "accepted", entryId }) });
+    await store.synchroniseReviewMutations();
+    const owner = { workspaceId: data.workspace.id, userId: data.user.id, backendId: "staging-fixture" };
+    const result = terminalPresentation(data, [item.id], entryId);
+    await store.cacheReviewPresentation({ owner, response: result });
+    expect(count("review_mutation_outbox")).toBe(1);
+    const canonical = {
+      ...data.entries[1],
+      id: entryId,
+      stoppedAt: "2026-08-28T17:30:00.000Z",
+      startedAt: "2026-08-28T17:00:00.000Z"
+    };
+    await store.cacheDashboardBootstrap({ ...data, entries: [canonical] });
+    await store.cacheReviewPresentation({ owner, response: result });
+    expect(count("review_mutation_outbox")).toBe(0);
+    expect((await store.loadCachedReviewBootstrap())!.bootstrap.reviewItems.map((candidate) => candidate.id)).not.toContain(item.id);
+  });
+  it("follows an explicit source link before retiring an equivalent acknowledgement without an entry receipt", async () => {
+    const data = bootstrap();
+    const item = data.reviewItems[0];
+    const entryId = syntheticId(995);
+    await store.enqueueReviewMutation({
+      bootstrap: data,
+      item,
+      clientMutationId: syntheticId(994),
+      mutation: { action: "accept" }
+    });
+    mocks.fetch.mockResolvedValue({
+      status: 200,
+      json: async () => ({
+        ok: true,
+        action: "accept",
+        status: "accepted",
+        alreadyResolved: true,
+        equivalent: true
+      })
+    });
+    await store.synchroniseReviewMutations();
+    const owner = {
+      workspaceId: data.workspace.id,
+      userId: data.user.id,
+      backendId: "staging-fixture"
+    };
+    const linked = terminalPresentation(data, [item.id], entryId);
+    const sourceOnly = {
+      ...linked,
+      lookup: { ...linked.lookup, entries: [] }
+    };
+
+    await store.cacheReviewPresentation({ owner, response: sourceOnly });
+    expect(count("review_mutation_outbox")).toBe(1);
+
+    const canonical = {
+      ...data.entries[1],
+      id: entryId,
+      startedAt: "2026-08-28T17:00:00.000Z",
+      stoppedAt: "2026-08-28T17:30:00.000Z"
+    };
+    await store.cacheDashboardBootstrap({ ...data, entries: [canonical] });
+    await store.cacheReviewPresentation({ owner, response: linked });
+
+    expect(count("review_mutation_outbox")).toBe(0);
+    expect((await store.loadCachedReviewBootstrap())!.bootstrap.reviewItems.map((candidate) => candidate.id)).not.toContain(item.id);
+  });
+  it("scopes terminal suppression to its backend and clears it on an authoritative open record", async () => {
+    const data = bootstrap();
+    const item = data.reviewItems[0];
+    const owner = { workspaceId: data.workspace.id, userId: data.user.id, backendId: "staging-fixture" };
+
+    await store.cacheReviewPresentation({
+      owner,
+      response: terminalPresentation(data, [item.id])
+    });
+    expect((await store.loadCachedReviewBootstrap())!.bootstrap.reviewItems.map((candidate) => candidate.id))
+      .not.toContain(item.id);
+
+    db.prepare("update review_presentation_terminal_source set backend_id = ? where review_item_id = ?")
+      .run("other-backend", item.id);
+    expect((await store.loadCachedReviewBootstrap())!.bootstrap.reviewItems.map((candidate) => candidate.id))
+      .toContain(item.id);
+
+    db.prepare("update review_presentation_terminal_source set backend_id = ? where review_item_id = ?")
+      .run(owner.backendId, item.id);
+    await store.cacheReviewPresentation({
+      owner,
+      response: openPresentation(data, item.id, "a".repeat(64))
+    });
+
+    expect(count("review_presentation_terminal_source")).toBe(1);
+    await store.cacheReviewPresentation({
+      owner,
+      response: {
+        ...openPresentation(data, item.id, "a".repeat(64)),
+        capturedAt: "2026-08-28T18:01:00.000Z"
+      }
+    });
+
+    expect(count("review_presentation_terminal_source")).toBe(0);
+    expect((await store.loadCachedReviewBootstrap())!.bootstrap.reviewItems.map((candidate) => candidate.id))
+      .toContain(item.id);
+  });
+  it("records a missing_review lookup as explicit terminal evidence", async () => {
+    const data = bootstrap();
+    const item = data.reviewItems[0];
+    const owner = { workspaceId: data.workspace.id, userId: data.user.id, backendId: "staging-fixture" };
+    const response = {
+      ...terminalPresentation(data, [item.id]),
+      links: [],
+      lookup: {
+        reviewItems: [{ kind: "missing_review" as const, reviewItemId: item.id }],
+        entries: []
+      }
+    };
+
+    await store.cacheReviewPresentation({ owner, response });
+
+    expect(db.prepare("select status from review_presentation_terminal_source where review_item_id = ?")
+      .get(item.id)!.status).toBe("missing");
+  });
+  it("compares a guarded Quick Confirm against the current cached presentation inside its transaction", async () => {
+    const data = bootstrap();
+    const item = data.reviewItems[0];
+    const owner = { workspaceId: data.workspace.id, userId: data.user.id, backendId: "staging-fixture" };
+    const hash = "a".repeat(64);
+    const response = openPresentation(data, item.id, hash);
+    await store.cacheReviewPresentation({ owner, response });
+    await store.enqueueReviewMutation({
+      bootstrap: data,
+      item,
+      clientMutationId: syntheticId(998),
+      mutation: { action: "accept", expectedProposalHash: hash },
+      presentation: { backendId: owner.backendId, scope: response.scope }
+    });
+    expect(count("review_mutation_outbox")).toBe(1);
+    await expect(store.enqueueReviewMutation({
+      bootstrap: data,
+      item: data.reviewItems[1],
+      clientMutationId: syntheticId(999),
+      mutation: { action: "accept", expectedProposalHash: "b".repeat(64) },
+      presentation: { backendId: owner.backendId, scope: response.scope }
+    })).rejects.toThrow("proposal changed");
+    expect(count("review_mutation_outbox")).toBe(1);
+  });
+  it("restores only the explicitly open source when a guarded proposal changed remotely", async () => {
+    const data = bootstrap();
+    const item = data.reviewItems[0];
+    const owner = { workspaceId: data.workspace.id, userId: data.user.id, backendId: "staging-fixture" };
+    const response = openPresentation(data, item.id, "a".repeat(64));
+    await store.cacheReviewPresentation({ owner, response });
+    await store.enqueueReviewMutation({
+      bootstrap: data,
+      item,
+      clientMutationId: syntheticId(1_001),
+      mutation: { action: "accept", expectedProposalHash: "a".repeat(64) },
+      presentation: { backendId: owner.backendId, scope: response.scope }
+    });
+    mocks.fetch.mockResolvedValue({ status: 409, json: async () => ({
+      code: "proposal_changed",
+      canonicalReviewStatuses: { [item.id]: "open" },
+      canonicalStatus: "open"
+    }) });
+    await store.synchroniseReviewMutations();
+    expect(db.prepare("select state from review_mutation_outbox").get()!.state).toBe("needs_attention");
+    expect((await store.loadCachedReviewBootstrap())!.bootstrap.reviewItems.map((candidate) => candidate.id)).toContain(item.id);
   });
   it("repairs a server-rejected split that an older client queued for a commute", async () => {
     const data = bootstrap();
@@ -296,9 +518,17 @@ describe("Review real SQLite transactions", () => {
     for (const column of ["contention_count","reconciliation_attempt_count","last_reconciled_at","resolution_status","acknowledgement_json"]) db.exec(`alter table review_mutation_outbox drop column ${column}`);
     db.exec("drop table review_mutation_effects; drop index review_mutation_owner_idx; pragma user_version=4;");
     await reopen(); await store.loadCachedReviewBootstrap();
-    expect(db.prepare("pragma user_version").get()!.user_version).toBe(6);
+    expect(db.prepare("pragma user_version").get()!.user_version).toBe(7);
     expect(count("review_mutation_effects")).toBe(1);
     expect(db.prepare("select request_json from review_mutation_outbox").get()!.request_json).toBe(request);
+  });
+  it("upgrades a direct v6 database atomically to v7 presentation tables", async () => {
+    db.exec("drop table review_presentation_terminal_source; drop table review_presentation_context; pragma user_version=6;");
+    await reopen();
+    await store.loadCachedReviewBootstrap();
+    expect(db.prepare("pragma user_version").get()!.user_version).toBe(7);
+    expect(count("review_presentation_context")).toBe(0);
+    expect(count("review_presentation_terminal_source")).toBe(0);
   });
   it("rejects cross-account effects and clears sensitive intent on account replacement", async () => {
     await store.enqueueReviewMutation(mergeInput());
@@ -308,3 +538,88 @@ describe("Review real SQLite transactions", () => {
     await expect(store.enqueueReviewMutation(mergeInput())).rejects.toThrow("not configured");
   });
 });
+
+function terminalPresentation(
+  data: ReturnType<typeof bootstrap>,
+  reviewIds: string[],
+  entryId?: string
+) {
+  return {
+    version: 1 as const,
+    scope: { mode: "lookup" as const, timeZone: "Europe/London" },
+    snapshotToken: `snapshot-${reviewIds.join("-")}-${entryId ?? "none"}`,
+    capturedAt: "2026-08-28T18:00:00.000Z",
+    nextCursor: null,
+    completeness: { records: true, outstandingCounts: true, completedToday: false, partialReason: null },
+    outstanding: { globalCount: 0, todayCount: 0, openReviewItemIds: [] },
+    records: [],
+    links: reviewIds.map((reviewItemId) => ({ reviewItemId, entryIds: entryId ? [entryId] : [], status: "accepted" as const })),
+    lookup: {
+      reviewItems: reviewIds.map((id) => presentationReview(data.reviewItems.find((item) => item.id === id)!, entryId)),
+      entries: entryId ? [presentationEntry(data, entryId)] : []
+    }
+  };
+}
+
+function openPresentation(data: ReturnType<typeof bootstrap>, reviewItemId: string, hash: string) {
+  const item = data.reviewItems.find((candidate) => candidate.id === reviewItemId)!;
+  return {
+    version: 1 as const,
+    scope: { mode: "lookup" as const, timeZone: "Europe/London" },
+    snapshotToken: `open-${reviewItemId}`,
+    capturedAt: "2026-08-28T18:00:00.000Z",
+    nextCursor: null,
+    completeness: { records: true, outstandingCounts: true, completedToday: false, partialReason: null },
+    outstanding: { globalCount: 1, todayCount: 0, openReviewItemIds: [reviewItemId] },
+    records: [],
+    links: [{ reviewItemId, entryIds: [], status: "open" as const }],
+    lookup: {
+      reviewItems: [{
+        ...presentationReview(item),
+        status: "open" as const,
+        proposalHash: hash
+      }],
+      entries: []
+    }
+  };
+}
+
+function presentationReview(item: import("./api").MobileReviewItem, entryId?: string) {
+  return {
+    kind: "review" as const,
+    reviewItemId: item.id,
+    eventId: null,
+    locationSegmentId: null,
+    sourceKind: "generic" as const,
+    eventSource: item.eventSource,
+    eventType: item.eventType,
+    title: item.title,
+    category: { id: item.suggestedCategoryId, name: item.categoryName, color: item.categoryColor ?? null },
+    place: { id: item.suggestedPlaceId, label: item.placeName },
+    interval: { start: item.suggestedStartedAt, end: item.suggestedStoppedAt },
+    confidence: item.confidence,
+    status: "accepted" as const,
+    createdAt: item.createdAt,
+    updatedAt: item.createdAt,
+    proposalHash: null,
+    canonicalEntryIds: entryId ? [entryId] : [],
+    semanticRevision: item.createdAt
+  };
+}
+
+function presentationEntry(data: ReturnType<typeof bootstrap>, entryId: string) {
+  const entry = data.entries[1];
+  return {
+    kind: "completed_entry" as const,
+    entryId,
+    eventId: null,
+    title: entry.description ?? "Synthetic entry",
+    category: { id: entry.categoryId, name: entry.categoryName, color: entry.categoryColor ?? null },
+    place: { id: null, label: entry.placeName },
+    interval: { start: "2026-08-28T17:00:00.000Z", end: "2026-08-28T17:30:00.000Z" },
+    confidence: entry.confidence,
+    reviewStatus: "confirmed" as const,
+    updatedAt: "2026-08-28T18:00:00.000Z",
+    source: entry.source
+  };
+}

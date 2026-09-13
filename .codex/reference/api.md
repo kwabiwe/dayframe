@@ -22,6 +22,34 @@ Test real SQL with synthetic disposable-localhost fixtures and shared-workspace
 users, as well as malformed/auth/oversize failures. This does not change web
 Reports, ingest, timer mutations or bootstrap caps.
 
+## Review presentation read
+
+`POST /api/review/presentation` is a private, read-only app-session route for
+the mobile Today/Review presentation. It accepts only contract version 1 and a
+strict `window`, `backlog`, or ID-bounded `lookup` request. Validate the 64 KiB
+body before expensive work, IANA zone/local-day boundaries, ordered finite
+instants, the 61-day DST-allowance window, page limit (1–200), opaque cursor,
+and unique Review/entry UUID lists (at most 100 each). Ingest/integration
+tokens do not authorise this route.
+
+Resolve the app-read session before any database access and scope every
+Review/event/entry/link query by its workspace **and** user. Return a
+whitelisted snapshot token, completeness, exact global/today outstanding
+counts, bounded records, explicit persisted source/result links and lookup
+statuses. Do not expose raw Health/location/provider payloads, coordinates,
+tokens, mutation requests, or fabricated full entry objects. Page reads share
+a bounded repeatable-read snapshot; a stale cursor returns typed
+`snapshot_changed`, not mixed generations. This route is never a mutation
+receipt and does not acquire timer/user advisory locks or Review row locks.
+
+`accept` and Location `confirm` may carry the optional 64-lower-hex
+`expectedProposalHash`. New Today Quick Confirm envelopes require it and the
+server checks it under the existing mutation lock immediately before applying
+the existing action. A mismatch returns `proposal_changed` with scoped
+canonical-open evidence and writes no entry. Historical envelopes without the
+field, and receipt-first replay of their original request hashes, remain
+compatible.
+
 ## Request Handling
 
 - Validate all external input.

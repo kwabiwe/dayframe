@@ -149,6 +149,28 @@ zero-size hidden probes never affect scrolling, focus or touch targets.
 - Before `.began`, normal vertical scroll, horizontal swipe, pinch, refresh, second touch, hour-axis and semantic entry-hit rejection remain authoritative. After `.began`, creation owns the finger until end/cancel; only its one retained coordinator display link may edge-autoscroll the vertical timeline. Restore every normal gesture immediately on exit.
 - After release, React creates the DST-safe blank/Uncategorized/tag-free 30-minute draft, presents the existing `ActiveTimerEditSheet` in Add mode, saves through `createManualTimeEntry`, and refreshes bootstrap. Do not change the Plus route, prefill from timer/recent/place metadata, or stop/replace an active timer.
 
+## Today integrated Review
+
+- `DayframeDashboard` remains the only authenticated bootstrap/timer owner. Its
+  foreground Today presentation adapter may read the bounded Review
+  presentation cache/service and subscribe to `reviewSyncStore`, but it never
+  owns mutation delivery, a timer, Health/Location processing, or another
+  persistent store.
+- Render provisional Review/saved rows as typed siblings of existing confirmed
+  history grouping. Never cast one to a `MobileTimeEntry`, pass it to replay or
+  Delete, or add it to a confirmed group aggregate. Generic Review, V2
+  Location, legacy entry, saved-sync issue, and canonical entry use their
+  existing exact route/action boundaries.
+- A pending row's Open and 44-point Quick Confirm controls are sibling
+  Pressables. Quick Confirm gates only its own local SQLite commit; it must not
+  bubble into Open, await HTTP, or show a normal spinner. Saved/unknown rows
+  retain their typed status rather than gaining invented edit/delete/replay
+  actions.
+- Today owns one completed-only donut and one global Open Review control. Its
+  pending slices are exact-item activations; confirmed category slices remain
+  inert. Cached/partial/no-snapshot states use honest inline copy and leave
+  the timer/history usable. Reports keeps its informational donut contract.
+
 ## Review Checklist
 
 - [ ] Component follows existing naming and folder conventions.

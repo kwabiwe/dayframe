@@ -322,4 +322,32 @@ describe("DonutChart", () => {
       .map((node) => node.props.id);
     expect(new Set(patternIds).size).toBe(2);
   });
+
+  it("keeps Reports-compatible arcs inert while an opt-in provisional slice is hatched and exact", () => {
+    const onPressSegment = vi.fn();
+    let tree!: ReturnType<typeof create>;
+    act(() => {
+      tree = create(
+        <DonutChart
+          animateEntrance={false}
+          centerLabel="Total logged"
+          centerValue="1h 30m"
+          onPressSegment={onPressSegment}
+          reduceMotion
+          segments={[
+            { id: "confirmed", value: 3_600_000, color: "blue", selected: true, interactive: false },
+            { id: "pending", value: 1_800_000, color: "coral", selected: true, provisional: true, interactive: true },
+          ]}
+          theme={theme}
+        />,
+      );
+    });
+    const paths = tree.root.findAllByType("AnimatedPath" as never);
+    expect(paths.find((path) => path.props.fill === "blue")?.props.onPress).toBeUndefined();
+    const pending = paths.find((path) => path.props.fill === "coral");
+    expect(pending?.props.onPress).toBeTypeOf("function");
+    expect(paths.some((path) => String(path.props.fill).startsWith("url(#provisional-"))).toBe(true);
+    act(() => pending!.props.onPress());
+    expect(onPressSegment).toHaveBeenCalledWith(expect.objectContaining({ id: "pending", provisional: true }));
+  });
 });

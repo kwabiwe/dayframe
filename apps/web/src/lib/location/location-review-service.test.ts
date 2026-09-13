@@ -132,6 +132,50 @@ describe("location review confirmation semantics", () => {
     ))).toBe(false);
   });
 
+  it("rejects a changed guarded Location proposal after the source lock and before its effect", async () => {
+    const client = {
+      query: vi.fn(async (statement: string) => {
+        if (statement.includes("for update of ri, ae nowait")) {
+          return { rows: [{
+            id: "review-guarded",
+            eventId: "event-guarded",
+            status: "open",
+            title: "Visit library",
+            confidence: "high",
+            suggestedCategoryId: null,
+            suggestedPlaceId: null,
+            suggestedStartedAt: "2026-07-27T10:00:00.000Z",
+            suggestedStoppedAt: "2026-07-27T11:00:00.000Z",
+            segmentId: "segment-guarded",
+            segmentKind: "stay",
+            segmentStatus: "review",
+            deviceId: "device-1",
+            algorithmVersion: "location-v2.0",
+            learnedPlaceId: null,
+            placeMatchKind: null,
+            centreLatitude: null,
+            centreLongitude: null,
+            eventSource: "location_learning",
+            eventType: "stay_detected",
+            semanticRevision: "2026-07-27T11:01:00.000Z"
+          }] };
+        }
+        return { rows: [] };
+      })
+    } as unknown as import("pg").PoolClient & { query: ReturnType<typeof vi.fn> };
+
+    await expect(resolveLocationReviewActionWithClient(
+      client,
+      "review-guarded",
+      { action: "confirm" },
+      session,
+      { expectedProposalHash: "0".repeat(64) }
+    )).rejects.toMatchObject({ code: "proposal_changed", status: 409 });
+    const statements = client.query.mock.calls.map(([statement]) => String(statement));
+    expect(statements.some((statement) => statement.includes("from stay_segments") && statement.includes("for update nowait"))).toBe(false);
+    expect(statements.some((statement) => statement.includes("insert into time_entries"))).toBe(false);
+  });
+
   it("commits a saved-place correction and entry edits through one transaction owner", async () => {
     const placeId = "30000000-0000-4000-8000-000000000003";
     const categoryId = "40000000-0000-4000-8000-000000000004";

@@ -103,6 +103,45 @@ Review this checklist before and after changes that touch Dayframe UI, timer beh
 - Today history deletion begins immediately without a confirmation surface and shows the five-second inverse-colour Undo bean before persistence is committed. Row/group removal, surrounding list reflow, Undo entrance/exit, expiry, exact restoration, and persistence-failure rollback transition continuously rather than popping. A rapid second delete deterministically commits the older pending deletion, starts a fresh five-second window, and cannot be dismissed or restored by an older timer/callback. Blank uncategorized entries remain individual rows with direct edit/delete access instead of collapsing into a non-deletable aggregate.
 - Timesheet view groups work by category/activity, shows day totals and row totals, and remains readable.
 
+## Today integrated Review (Stage B)
+
+- Today renders one completed-only local-day donut beneath the existing timer;
+  running timers do not contribute. Concurrent stopped entries count
+  independently, finite pending sources remain individually identifiable, and
+  incomplete sources have no invented interval/duration/slice.
+- Verify pending → locally saved removes only awaiting/provisional accounting;
+  it does not add a canonical interval. Verify explicit canonical result
+  materialises once, including Sleep reuse and multi-source structural result
+  links. Unknown/rejected outcomes remain distinct and safe.
+- With a complete Today snapshot, the existing Dashboard manual-entry
+  projection overlays by actual entry ID: a stopped local manual entry appears
+  before its canonical response and remains exactly once when that record
+  arrives. Never use this projection to make a saved Review decision into an
+  entry.
+- Verify capped/partial/cache/offline states never claim zero or complete
+  coverage. In Review, the accessible Load more action reaches the 101st
+  backlog source without mixing a changed snapshot into the prior page or
+  calling a truncated collection the total. An exact generic, V2 Location,
+  legacy-entry, saved-issue, or canonical target follows its typed existing
+  route rather than a neighbouring record.
+- For an equivalent acceptance without a receipt entry ID, verify the saved
+  source remains durable until its explicit scoped source-result link and
+  current canonical entry/missing evidence are both read; no time/title
+  matching, bootstrap omission, or duplicate canonical interval is allowed.
+- Terminal Review suppression is account/backend scoped. A `missing_review`
+  lookup is terminal evidence; only a same-backend explicit `open` record with
+  a strictly later server capture may reverse it. An older or equal response
+  stays suppressed.
+- Quick Confirm requires the exact fresh proposal, commits through the existing
+  Review outbox before visual change, preserves old envelopes, handles duplicate
+  taps/cross-surface attempts, and keeps the proposal actionable on local
+  storage failure or server `proposal_changed`.
+- At default/MAX/Bold text and narrow widths, verify measured labels, full row
+  context, 44-point sibling Open/check controls, VoiceOver labels/announcement,
+  pending slice exact activation, inert confirmed slices, Reports regression,
+  first entrance/local updates/restore and Reduce Motion. Record signed staging
+  and physical-device results separately from tests/simulator diagnostics.
+
 ## Mobile Sheets And Direct Manipulation
 
 - Edit entry, Edit running timer, learned-place details, saved-place information, and location-suggestions information use the shared handle-owned sheet; no consumer restores a local swipe implementation.

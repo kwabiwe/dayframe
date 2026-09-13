@@ -118,6 +118,36 @@ Offline Review mutation changes additionally require:
   `change_place` may require a connection; force-quit does not guarantee
   background synchronisation even though saved Review intent remains durable.
 
+## Today integrated Review Stage B
+
+When changing the Today Review presentation/read contract, run shared schema
+and proposal-hash tests; web presentation/mutation/Location tests; mobile
+presentation-cache, Quick Confirm, projection, navigation, row, donut and
+Reports/accessibility guards; then the applicable full workspace checks. Run
+the Review SQLite and disposable-local Review/Location database validators.
+Use `TZ=UTC`, `TZ=Europe/London`, and one non-UK zone for the date-sensitive
+projection/read suites.
+
+Prove owner/backend isolation, malformed/body/cursor/zone/ID bounds,
+snapshot-change restart, 100/101/200 sources, completed-entry overflow, legacy
+deduplication, source/result links, partial cache retention, old-envelope
+compatibility, v4/v5/v6-to-v7 migration/reopen/rollback, and multi-source
+terminal handover. Exercise the equivalent-without-entry-ID two-step source
+lookup/link/result proof, then prove a 101st backlog source is reachable by the
+accessible next-page action without appending a changed snapshot or presenting
+a truncated list as the total. Exercise completed/pending/saved/canonical/
+rejected/unknown accounting, reused Sleep, overlapping/cross-midnight/DST
+intervals, and no fake entry conversion.
+
+At mobile widths/default/MAX/Bold Text verify one summary control, bounded
+labels/centre, non-overlapping 44-point sibling controls, exact pending
+activation, inert confirmed slices, loading/partial/cached status, focus
+return, first entrance/local update/restore and Reduce Motion. On the signed
+staging build, separately record the Stage B physical matrix—including
+Airplane Mode → termination → offline relaunch → reconnect → reuse—using only
+synthetic staging data. Diagnostics, a clean simulator build, or an unsigned
+binary are not physical acceptance.
+
 ## Timer And Sync
 
 Required checks:
