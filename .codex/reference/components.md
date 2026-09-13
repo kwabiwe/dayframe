@@ -101,6 +101,8 @@ zero-size hidden probes never affect scrolling, focus or touch targets.
 
 ## State And Forms
 
+- Today donut labels use the midpoint of the existing prepared slice geometry, stay on that side, and connect to the perimeter after bounded vertical collision resolution. Titles ellipsise on line one; complete measured durations occupy line two. Today/history entries use at most description, time, and one category/tag metadata line; place remains available to editing/accessibility. These rows do not present overlap visually or in VoiceOver; interval analysis and other surfaces retain their overlap behavior.
+
 - Routine Today/Review presentation-read failures stay out of the main UI. The shared connectivity icon owns connectivity state; the existing Review diagnostics in Settings > Sync & diagnostics exposes only safe read classifications and timestamps. Keep verified cached content and explicit refresh/load-more usable. Preserve genuine partial-coverage copy and actionable Review snapshot-integrity guidance.
 
 - Prefer controlled form state only where it adds clarity.

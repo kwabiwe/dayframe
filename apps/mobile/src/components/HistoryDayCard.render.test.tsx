@@ -267,6 +267,34 @@ beforeEach(() => {
 });
 
 describe("rendered Today history card", () => {
+  it("keeps expanded children bounded with inline metadata and no overlap announcement", () => {
+    const first = { ...makeEntry({ id: "first", seconds: 600 }), categoryName: "Test", tagNames: ["tag"], placeName: "Place" };
+    const rendered = renderCard(makeSection([first, { ...first, id: "second" }]));
+    act(() => deleteAction(rendered.tree, "Expand 2 Test entries").props.onPress());
+    expect(rendered.tree.root.findAllByProps({ testID: "history-entry-metadata" })).toHaveLength(3);
+    const child = deleteAction(rendered.tree, "Edit Test");
+    expect(child.props.accessibilityLabel).toContain("Place");
+    expect(child.props.accessibilityLabel).not.toMatch(/overlap/i);
+    expect(child.findAllByType("Text" as never).filter((node) => node.props.style === "todayEntryTitle").every((node) => node.props.numberOfLines === 1)).toBe(true);
+    expect(rendered.tree.root.findAllByType("Text" as never).some((node) => node.props.children === "Overlap")).toBe(false);
+  });
+  it("keeps title, time and combined category/tags to three lines without overlap copy", () => {
+    const entry = { ...makeEntry({ id: "one", seconds: 600 }), categoryName: "Test", tagNames: ["tag one", "tag two"], placeName: "Private place" };
+    const rendered = renderCard(makeSection([entry, { ...entry, id: "two", description: "Other" }]));
+    const metadata = rendered.tree.root.findAllByProps({ testID: "history-entry-metadata" });
+    expect(metadata).toHaveLength(2);
+    expect(metadata[0].props.children).toBe("Test · tag one · tag two");
+    expect(metadata.every((node) => node.props.numberOfLines === 1 && node.props.style === "todayEntryOptionalMeta")).toBe(true);
+    const title = rendered.tree.root.findAllByType("Text" as never).filter((node) => node.props.style === "todayEntryTitle");
+    expect(title.every((node) => node.props.numberOfLines === 1)).toBe(true);
+    const times = rendered.tree.root.findAllByType("Text" as never).filter((node) => node.props.style === "todayEntryMeta");
+    expect(times.every((node) => node.props.numberOfLines === 1)).toBe(true);
+    const labels = rendered.tree.root.findAll((node) => typeof node.props.accessibilityLabel === "string").map((node) => node.props.accessibilityLabel);
+    expect(labels.some((label) => label.includes("Private place"))).toBe(true);
+    expect(labels.join(" ")).not.toMatch(/overlap/i);
+    expect(rendered.tree.root.findAllByType("Text" as never).some((node) => node.props.children === "Overlap" || node.props.children === "Private place")).toBe(false);
+    for (const node of metadata) expect(node.parent!.findAllByType("Text" as never)).toHaveLength(3);
+  });
   it("routes VoiceOver Delete to the completed group or exact child and blocks a running entry", () => {
     const entries = [
       makeEntry({ id: "first", seconds: 600, stopOffsetSeconds: 120 }),

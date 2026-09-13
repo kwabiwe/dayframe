@@ -11,8 +11,10 @@ vi.mock("react-native", () => ({
   Pressable: "Pressable",
   StyleSheet: { create: (styles: unknown) => styles },
   Text: "Text",
-  View: "View"
+  View: "View",
+  useWindowDimensions: () => ({ fontScale: 1 })
 }));
+vi.mock("react-native-svg", () => ({ default: "Svg", Path: "Path" }));
 vi.mock("../../lib/mobileTypography", () => ({ mobileTextProps: () => ({}) }));
 vi.mock("../accessibility/IntrinsicTextMeasure", () => ({
   useIntrinsicTextMeasure: (samples: string[]) => ({
@@ -34,6 +36,16 @@ const theme = {
 } as never;
 
 describe("TodayReviewDonut", () => {
+  it("keeps a mixed-hour duration together on the second line", () => {
+    let tree!: ReturnType<typeof create>;
+    act(() => { tree = create(<TodayReviewDonut activities={[]} animateEntrance={false} completedLoggedMs={26_460_000} isFocused onOpenActivity={vi.fn()} reduceMotion segments={[{ ...segments()[0], title: "Sleep", valueMs: 26_460_000 }]} theme={theme} />); });
+    act(() => tree.root.findByProps({ testID: "today-review-donut" }).props.onLayout({ nativeEvent: { layout: { width: 390 } } }));
+    expect(tree.root.findByProps({ testID: "today-donut-label-title" }).props.children).toBe("Sleep");
+    const duration = tree.root.findByProps({ testID: "today-donut-label-duration" });
+    expect(duration.props.children).toBe("7h 21m");
+    expect(duration.props.numberOfLines).toBe(1);
+    expect(duration.props.maxFontSizeMultiplier).toBe(1.3);
+  });
   it("activates only the exact pending source; completed category arcs stay inert", () => {
     const onOpenActivity = vi.fn();
     let tree!: ReturnType<typeof create>;
@@ -54,6 +66,14 @@ describe("TodayReviewDonut", () => {
     const root = tree.root.findByProps({ testID: "today-review-donut" });
     act(() => root.props.onLayout({ nativeEvent: { layout: { width: 390 } } }));
     const chart = tree.root.findByProps({ testID: "today-donut-chart" });
+    const titles = tree.root.findAllByProps({ testID: "today-donut-label-title" });
+    const durations = tree.root.findAllByProps({ testID: "today-donut-label-duration" });
+    expect(titles).toHaveLength(2);
+    expect(durations).toHaveLength(2);
+    expect(titles.every((label) => label.props.numberOfLines === 1 && label.props.ellipsizeMode === "tail")).toBe(true);
+    expect(durations.every((label) => label.props.numberOfLines === 1)).toBe(true);
+    expect(durations.map((label) => label.props.children)).toEqual(expect.arrayContaining(["1h", "30m"]));
+    expect(tree.root.findAllByType("Path" as never)).toHaveLength(2);
     const chartSegments = chart.props.segments as Array<{ id: string; interactive?: boolean; provisional?: boolean }>;
     expect(chartSegments.find((segment) => segment.id === "category:work")).toMatchObject({ interactive: false, provisional: false });
     expect(chartSegments.find((segment) => segment.id === "review:10000000-0000-4000-8000-000000000001")).toMatchObject({ interactive: true, provisional: true });

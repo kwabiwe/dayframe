@@ -276,6 +276,30 @@ performed.
 
 ## Motion contract
 
+### 2026-09-13 owner screenshot: label association and row hierarchy
+
+Starting from `6ca7954469f638aa04a093eea50f9730b83ed174`, the supplied staging
+screenshot shows alternating labels detached from their slices, split duration
+text, separate tag rows, and yellow overlap copy. The installed build is not
+independently attested; this correction targets the verified PR source only.
+Labels now use `prepareDonutArcs` and the shared polar primitive, including the
+slice gap, before selecting the bounded largest labels. Same-side collision
+resolution keeps slots inside the chart height; perimeter leaders identify
+their source. Native measurements omit labels whose complete duration cannot
+fit. Titles and durations occupy separate single lines with matching scaling.
+
+Normal and expanded history rows retain bounded description/time/combined
+category-tag metadata. Place stays in the underlying entry and accessibility
+context. Overlap notices and announcements are removed only from these rows;
+the interval analysis and covered-time calculation remain unchanged.
+
+Motion: existing chart and history presence/layout owners retain entrance,
+update, exit and interruption behavior. Labels derive from the same target
+arcs without introducing an animation or data owner; pending label actions
+still open the exact source. Reduce Motion preserves geometry and actions.
+Renderer/geometry tests are local evidence; signed-device motion, Dynamic Type
+and physical acceptance are NOT RUN in this pass.
+
 ### 2026-09-13 accounting and proposal review corrections
 
 Reviewed base for this correction: `a1ed63fc714e5aa1768b339871c5e0ac693bd7cd`.

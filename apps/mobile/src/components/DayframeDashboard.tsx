@@ -46,7 +46,6 @@ import {
 import { DayframeCalendarView } from "../../modules/dayframe-calendar";
 import { ActiveTimerEditSheet } from "@/components/ActiveTimerEditSheet";
 import { ConnectivityStatusIndicator } from "@/components/ConnectivityStatusStrip";
-import { TagMetadata } from "@/components/TagMetadata";
 import { useIntrinsicTextMeasure } from "@/components/accessibility/IntrinsicTextMeasure";
 import { TodayDateHeading } from "@/components/accessibility/TodayDateHeading";
 import { TodayLoggedSummary } from "@/components/accessibility/TodayLoggedSummary";
@@ -2887,10 +2886,6 @@ export function HistoryDayCard({
       { range: { start: rangeStart, end: rangeEnd }, now }
     );
   }, [now, section.date, section.entries]);
-  const historyOverlapById = useMemo(
-    () => new Map(historyAnalysis.entries.map((entry) => [entry.id, entry])),
-    [historyAnalysis.entries]
-  );
   const noticeLabel = `${reviewCount} ${reviewCount === 1 ? "item needs" : "items need"} review`;
   const noticeMeasure = useIntrinsicTextMeasure(
     [noticeLabel, "Open Review"],
@@ -2988,14 +2983,10 @@ export function HistoryDayCard({
           const timeRange = grouped
             ? `${formatEntryTimeRange(entry, now)} · ${group.entries.length} entries`
             : formatEntryTimeRange(entry, now);
-          const hasOverlap = group.entries.some(({ entry: groupedEntry }) =>
-            (historyOverlapById.get(groupedEntry.id)?.overlapCount ?? 0) > 0
-          );
           const detailContext = [
             timeRange,
             categoryPlace,
             tagNames.length ? `Tags: ${tagNames.join(", ")}` : null,
-            hasOverlap ? "Overlaps other tracked time" : null,
             duration
           ].filter(Boolean).join(". ");
           return (
@@ -3065,30 +3056,13 @@ export function HistoryDayCard({
                   ) : null}
                   <View style={[styles.todayEntryDot, { backgroundColor: entryCategoryColor(entry, theme.mode) }]} />
                   <View style={styles.todayEntryText}>
-                    <Text {...mobileTextProps("itemTitle")} style={styles.todayEntryTitle} numberOfLines={rowLayout === "stacked" ? 2 : 1} onLayout={(event) => recordMobileLayout(diagnostic, `history.title.${probeId}.frame`, event)} onTextLayout={(event) => recordMobileTextLayout(diagnostic, `history.title.${probeId}`, event, "itemTitle", styles.todayEntryTitle)}>{title}</Text>
-                    <Text {...mobileTextProps("metadata")} style={styles.todayEntryMeta} onLayout={(event) => recordMobileLayout(diagnostic, `history.time.${probeId}.frame`, event)} onTextLayout={(event) => recordMobileTextLayout(diagnostic, `history.time.${probeId}`, event, "metadata", styles.todayEntryMeta)}>
+                    <Text {...mobileTextProps("itemTitle")} style={styles.todayEntryTitle} numberOfLines={1} onLayout={(event) => recordMobileLayout(diagnostic, `history.title.${probeId}.frame`, event)} onTextLayout={(event) => recordMobileTextLayout(diagnostic, `history.title.${probeId}`, event, "itemTitle", styles.todayEntryTitle)}>{title}</Text>
+                    <Text {...mobileTextProps("metadata")} style={styles.todayEntryMeta} numberOfLines={1} onLayout={(event) => recordMobileLayout(diagnostic, `history.time.${probeId}.frame`, event)} onTextLayout={(event) => recordMobileTextLayout(diagnostic, `history.time.${probeId}`, event, "metadata", styles.todayEntryMeta)}>
                       {timeRange}
                     </Text>
-                    {categoryPlace ? (
-                      <Text {...mobileTextProps("metadata")} style={styles.todayEntryOptionalMeta} numberOfLines={rowLayout === "stacked" ? 2 : 1}>
-                        {categoryPlace}
-                      </Text>
-                    ) : null}
-                    <TagMetadata
-                      accessibilityHidden
-                      diagnostic={diagnostic}
-                      diagnosticPrefix={`history.tags.${probeId}`}
-                      styles={styles}
-                      tagNames={entry.tagNames ?? entry.tags?.map((tag) => tag.name) ?? []}
-                      theme={theme}
-                    />
-                    {hasOverlap ? (
-                      <Text
-                        {...mobileTextProps("metadata")}
-                        accessibilityLabel="Overlap"
-                        style={[styles.reviewMetaLine, { color: theme.warningText }]}
-                      >
-                        Overlap
+                    {entry.categoryName || tagNames.length ? (
+                      <Text {...mobileTextProps("metadata")} testID="history-entry-metadata" style={styles.todayEntryOptionalMeta} numberOfLines={1} ellipsizeMode="tail">
+                        {[entry.categoryName, ...tagNames].filter(Boolean).join(" · ")}
                       </Text>
                     ) : null}
                   </View>
@@ -3155,7 +3129,7 @@ export function HistoryDayCard({
                       >
                         <View style={[styles.historyGroupChildDetails, childIndex > 0 ? styles.historyGroupChildDivider : null]}>
                         <Pressable
-                          accessibilityLabel={`Edit ${displayEntryTitle(childEntry)}. ${formatEntryTimeRange(childEntry, now)}. ${formatDuration(overlapSeconds)}.${(childEntry.tagNames ?? childEntry.tags?.map((tag) => tag.name) ?? []).length ? ` Tags: ${(childEntry.tagNames ?? childEntry.tags?.map((tag) => tag.name) ?? []).join(", ")}.` : ""}${(historyOverlapById.get(childEntry.id)?.overlapCount ?? 0) > 0 ? " Overlaps other tracked time." : ""}`}
+                          accessibilityLabel={`Edit ${displayEntryTitle(childEntry)}. ${childEntry.placeName ? `Place: ${childEntry.placeName}.` : ""} ${formatEntryTimeRange(childEntry, now)}. ${formatDuration(overlapSeconds)}.${(childEntry.tagNames ?? childEntry.tags?.map((tag) => tag.name) ?? []).length ? ` Tags: ${(childEntry.tagNames ?? childEntry.tags?.map((tag) => tag.name) ?? []).join(", ")}.` : ""}`}
                           accessibilityRole="button"
                           accessibilityActions={Boolean(childEntry.stoppedAt)
                             ? [{ name: "delete", label: `Delete ${displayEntryTitle(childEntry)}` }]
@@ -3171,9 +3145,10 @@ export function HistoryDayCard({
                             pressed ? styles.buttonPressed : null
                           ]}
                         >
+                          <Text {...mobileTextProps("itemTitle")} style={styles.todayEntryTitle} numberOfLines={1} ellipsizeMode="tail">{displayEntryTitle(childEntry)}</Text>
                           <View style={styles.historyGroupChildMain}>
                             <View style={[styles.todayEntryDot, { backgroundColor: entryCategoryColor(childEntry, theme.mode) }]} />
-                            <Text {...mobileTextProps("metadata")} style={styles.historyGroupChildTime} onLayout={(event) => recordMobileLayout(diagnostic, `history.child-time.${probeId}.${childIndex}.frame`, event)} onTextLayout={(event) => recordMobileTextLayout(diagnostic, `history.child-time.${probeId}.${childIndex}`, event, "metadata", styles.historyGroupChildTime)}>
+                            <Text {...mobileTextProps("metadata")} style={styles.historyGroupChildTime} numberOfLines={1} onLayout={(event) => recordMobileLayout(diagnostic, `history.child-time.${probeId}.${childIndex}.frame`, event)} onTextLayout={(event) => recordMobileTextLayout(diagnostic, `history.child-time.${probeId}.${childIndex}`, event, "metadata", styles.historyGroupChildTime)}>
                               {formatEntryTimeRange(childEntry, now)}
                             </Text>
                             <Text
@@ -3186,25 +3161,9 @@ export function HistoryDayCard({
                             </Text>
                           </View>
                         </Pressable>
-                        <TagMetadata
-                          accessibilityHidden
-                          diagnostic={diagnostic}
-                          diagnosticPrefix={`history.child-tags.${probeId}.${childIndex}`}
-                          styles={styles}
-                          tagNames={childEntry.tagNames ?? childEntry.tags?.map((tag) => tag.name) ?? []}
-                          theme={theme}
-                        />
-                          {(historyOverlapById.get(childEntry.id)?.overlapCount ?? 0) > 0 ? (
-                            <Text
-                              {...mobileTextProps("metadata")}
-                              accessibilityLabel={`Overlap: ${formatDuration(
-                                historyOverlapById.get(childEntry.id)?.uniqueOverlapSeconds ?? 0
-                              )} shared with other entries`}
-                              style={[styles.reviewMetaLine, { color: theme.warningText }]}
-                            >
-                              Overlap
-                            </Text>
-                          ) : null}
+                        <Text {...mobileTextProps("metadata")} testID="history-entry-metadata" style={styles.todayEntryOptionalMeta} numberOfLines={1} ellipsizeMode="tail">
+                          {[childEntry.categoryName, ...(childEntry.tagNames ?? childEntry.tags?.map((tag) => tag.name) ?? [])].filter(Boolean).join(" · ")}
+                        </Text>
                         </View>
                       </SwipeableHistoryEntry>
                     </Reanimated.View>

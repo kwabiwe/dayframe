@@ -53,7 +53,7 @@ export function prepareDonutArcs(
   });
 }
 
-function polarPoint(cx: number, cy: number, radius: number, angle: number) {
+export function polarPoint(cx: number, cy: number, radius: number, angle: number) {
   "worklet";
   const radians = ((angle - 90) * Math.PI) / 180;
   return {

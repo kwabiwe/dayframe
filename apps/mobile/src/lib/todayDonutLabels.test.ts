@@ -1,7 +1,31 @@
 import { describe, expect, it } from "vitest";
 import { layoutTodayDonutLabels } from "./todayDonutLabels";
+import { polarPoint, prepareDonutArcs } from "./donutGeometry";
 
 describe("layoutTodayDonutLabels", () => {
+  it("anchors to the actual ordered slice midpoint and resolves same-side collisions within the canvas", () => {
+    const candidates = [1, 1, 1, 20].map((valueMs, index) => ({ id: String(index), title: "Title", valueMs, provisional: false }));
+    const labels = layoutTodayDonutLabels({ availableWidth: 390, chartSize: 184, candidates, measuredWidths: {}, rowHeight: 44 });
+    const arcs = prepareDonutArcs(candidates.map((item) => ({ id: item.id, value: item.valueMs })));
+    for (const label of labels) {
+      const arc = arcs.find((item) => item.id === label.id)!;
+      expect(label.anchor).toEqual(polarPoint(195, 92, 84, (arc.startAngle + arc.endAngle) / 2));
+      expect(label.side).toBe(label.anchor.x < 195 ? "left" : "right");
+      expect(label.connector).toContain(`M ${label.anchor.x} ${label.anchor.y}`);
+      expect(label.y).toBeGreaterThanOrEqual(0);
+      expect(label.y + label.height).toBeLessThanOrEqual(184);
+    }
+    for (const side of ["left", "right"]) {
+      const group = labels.filter((label) => label.side === side).sort((a, b) => a.y - b.y);
+      for (let i = 1; i < group.length; i++) expect(group[i].y).toBeGreaterThanOrEqual(group[i - 1].y + group[i - 1].height);
+    }
+  });
+
+  it("omits a label whose measured complete duration cannot fit rather than clipping it", () => {
+    expect(layoutTodayDonutLabels({ availableWidth: 300, chartSize: 184,
+      candidates: [{ id: "long", title: "Long", valueMs: 100, provisional: false }],
+      measuredWidths: {}, durationWidths: { long: 90 } })).toEqual([]);
+  });
   it("uses at most the four largest positive source IDs with stable ties", () => {
     const labels = layoutTodayDonutLabels({
       availableWidth: 390,

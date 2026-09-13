@@ -86,15 +86,17 @@ describe("Today history swipe-to-delete contract", () => {
     expect(historySource).not.toContain("Alert.alert");
   });
 
-  it("keeps the short history overlap indicator compact while preserving full accessible detail", () => {
+  it("omits row overlap copy while retaining underlying interval analysis", () => {
     const historySource = dashboardSource.slice(
       dashboardSource.indexOf("export function HistoryDayCard("),
       dashboardSource.indexOf("function dedupeEntriesById(")
     );
 
-    expect(historySource).toMatch(/\.\.\.mobileTextProps\("metadata"\)\}\s+accessibilityLabel="Overlap"/);
-    expect(historySource).toMatch(/\.\.\.mobileTextProps\("metadata"\)\}\s+accessibilityLabel=\{`Overlap:/);
-    expect(historySource).toContain("uniqueOverlapSeconds");
+    expect(historySource).not.toContain('accessibilityLabel="Overlap"');
+    expect(historySource).not.toContain("Overlaps other tracked time");
+    expect(historySource).not.toContain("Overlap:");
+    expect(historySource).toContain("analyzeTimeIntervals(");
+    expect(historySource).toContain("historyAnalysis.additionalOverlapSeconds");
     expect(historySource).toContain("accessibilityLabel={`${title}. ${detailContext}`}");
   });
 

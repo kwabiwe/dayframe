@@ -1,5 +1,6 @@
 import { useMemo, useState } from "react";
-import { Pressable, StyleSheet, Text, View } from "react-native";
+import { Pressable, StyleSheet, Text, View, useWindowDimensions } from "react-native";
+import Svg, { Path } from "react-native-svg";
 import { paletteColorFor } from "@dayframe/shared";
 import { DonutChart, type DonutChartSegment } from "../charts/DonutChart";
 import { useIntrinsicTextMeasure } from "../accessibility/IntrinsicTextMeasure";
@@ -29,6 +30,7 @@ export function TodayReviewDonut({
   reduceMotion: boolean;
   theme: MobileTheme;
 }) {
+  const { fontScale } = useWindowDimensions();
   const [availableWidth, setAvailableWidth] = useState(0);
   const activityBySegmentId = useMemo(() => new Map(segments.flatMap((segment) => {
     const activity = activityForSegment(segment, activities);
@@ -44,7 +46,7 @@ export function TodayReviewDonut({
     interactive: Boolean(segment.provisional && activityBySegmentId.get(segment.id))
   })), [activityBySegmentId, segments, theme]);
   const labelSamples = useMemo(
-    () => segments.map((segment) => labelText(segment)),
+    () => [...new Set(segments.flatMap((segment) => [labelText(segment), formatDuration(segment.valueMs)]))],
     [segments]
   );
   const labelMeasure = useIntrinsicTextMeasure(
@@ -68,9 +70,11 @@ export function TodayReviewDonut({
         valueMs: segment.valueMs,
         provisional: segment.provisional
       })),
-      measuredWidths
+      measuredWidths,
+      durationWidths: Object.fromEntries(segments.map((segment) => [segment.id, labelMeasure.widths[formatDuration(segment.valueMs)] ?? Infinity])),
+      rowHeight: Math.max(44, 28 * Math.min(fontScale, 1.3) + 4)
     });
-  }, [availableWidth, measuredWidths, segments]);
+  }, [availableWidth, measuredWidths, segments, labelMeasure.widths, fontScale]);
 
   return (
     <View
@@ -100,55 +104,28 @@ export function TodayReviewDonut({
             theme={theme}
           />
         </View>
+        <Svg pointerEvents="none" accessible={false} accessibilityElementsHidden width={availableWidth} height={CHART_SIZE} style={StyleSheet.absoluteFill}>
+          {labels.map((label) => <Path key={label.id} d={label.connector} stroke={theme.borderStrong} strokeWidth={1} fill="none" />)}
+        </Svg>
         {labels.map((label) => {
-          const segment = segments.find((candidate) => candidate.id === label.id);
+          const segment = segments.find((candidate) => candidate.id === label.id)!;
           const activity = activityBySegmentId.get(label.id);
-          const content = (
-            <Text
-              {...mobileTextProps("metadata")}
-              numberOfLines={2}
-              style={[styles.labelText, { color: theme.textSecondary, textAlign: label.side === "left" ? "right" : "left" }]}
-            >
-              {label.title}
-            </Text>
-          );
-          const position = { left: label.x, top: label.y, width: label.width };
-          return activity && segment?.provisional ? (
-            <View key={label.id}>
-              <View
-                pointerEvents="none"
-                style={[
-                  styles.labelLeader,
-                  { backgroundColor: theme.borderStrong },
-                  label.side === "left"
-                    ? { left: label.x + label.width, top: label.y + 17 }
-                    : { left: label.x - 8, top: label.y + 17 }
-                ]}
-              />
-              <Pressable
-                accessibilityLabel={`Open Review proposal: ${label.title}`}
-                accessibilityRole="button"
-                onPress={() => onOpenActivity(activity)}
-                style={({ pressed }) => [styles.labelSlot, position, pressed ? { opacity: 0.7 } : null]}
-              >
-                {content}
-              </Pressable>
-            </View>
+          const textStyle = [styles.labelText, { color: theme.textSecondary, textAlign: label.side === "left" ? "right" as const : "left" as const }];
+          const content = <>
+            <Text {...mobileTextProps("metadata")} maxFontSizeMultiplier={1.3} testID="today-donut-label-title" numberOfLines={1} ellipsizeMode="tail" style={textStyle}>{label.title}</Text>
+            <Text {...mobileTextProps("metadata")} maxFontSizeMultiplier={1.3} testID="today-donut-label-duration" numberOfLines={1} style={textStyle}>{formatDuration(segment.valueMs)}</Text>
+          </>;
+          const position = { left: label.x, top: label.y, width: label.width, height: label.height };
+          const accessibilityLabel = `${label.title}. ${spokenDuration(segment.valueMs)}`;
+          return activity && segment.provisional ? (
+            <Pressable key={label.id} accessibilityLabel={`Open Review proposal: ${accessibilityLabel}`} accessibilityRole="button"
+              onPress={() => onOpenActivity(activity)}
+              style={({ pressed }) => [styles.labelSlot, position, pressed ? { opacity: 0.7 } : null]}>
+              {content}
+            </Pressable>
           ) : (
-            <View key={label.id}>
-              <View
-                pointerEvents="none"
-                style={[
-                  styles.labelLeader,
-                  { backgroundColor: theme.borderStrong },
-                  label.side === "left"
-                    ? { left: label.x + label.width, top: label.y + 17 }
-                    : { left: label.x - 8, top: label.y + 17 }
-                ]}
-              />
-              <View accessible={false} pointerEvents="none" style={[styles.labelSlot, position]}>
-                {content}
-              </View>
+            <View key={label.id} accessible accessibilityLabel={accessibilityLabel} pointerEvents="none" style={[styles.labelSlot, position]}>
+              {content}
             </View>
           );
         })}
@@ -189,7 +166,7 @@ function activityForSegment(segment: TodayDonutSegment, activities: readonly Tod
 
 function labelText(segment: TodayDonutSegment) {
   const title = segment.kind === "pending" ? `? ${segment.title}` : segment.title;
-  return `${title} · ${formatDuration(segment.valueMs)}`;
+  return title;
 }
 
 function formatDuration(valueMs: number) {
@@ -224,10 +201,5 @@ const styles = StyleSheet.create({
     top: 0
   },
   labelSlot: { position: "absolute", justifyContent: "center", minHeight: 34 },
-  labelLeader: {
-    height: 1,
-    position: "absolute",
-    width: 8
-  },
   labelText: { fontFamily: "System", fontSize: 10, lineHeight: 14, fontWeight: "600" }
 });
