@@ -101,6 +101,8 @@ zero-size hidden probes never affect scrolling, focus or touch targets.
 
 ## State And Forms
 
+- Routine Today/Review presentation-read failures stay out of the main UI. The shared connectivity icon owns connectivity state; the existing Review diagnostics in Settings > Sync & diagnostics exposes only safe read classifications and timestamps. Keep verified cached content and explicit refresh/load-more usable. Preserve genuine partial-coverage copy and actionable Review snapshot-integrity guidance.
+
 - Prefer controlled form state only where it adds clarity.
 - On web, use the shared field/control classes before adding route-local geometry. Inputs with nested reveal, clear, tag or search actions must use one compound wrapper focus owner; do not stack wrapper and input perimeters.
 - In editable web Description controls, a selected tag is a normal-weight plain-text remove action with no default fill and a thin visible `X`. Keep its button target 44px high while a separate 22–24px visual wrapper owns the hover/focus fill, darker accent text and compact `6px` radius; the hidden width measure must mirror that label-plus-X wrapper. Clicking the text or `X` removes the tag. Keep this shared between the persistent timer and `TimeEntryQuickEditor` instead of styling each surface separately; `+N` overflow stays quieter and neutral.

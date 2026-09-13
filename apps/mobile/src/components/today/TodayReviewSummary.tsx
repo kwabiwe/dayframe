@@ -11,11 +11,11 @@ export function TodayReviewSummary({ isFocused }: { isFocused: boolean }) {
   const { reduceMotion } = useResolvedReduceMotionPreference();
   if (!context) return null;
   if (!context.isSummaryAvailable || !context.presentation) {
-    if (!context.owner) return null;
+    if (!context.owner || context.error) return null;
     return (
       <View testID="today-review-summary-status" style={styles.todayReviewSummary}>
         <Text {...mobileTextProps("metadata")} style={styles.todayReviewSaved}>
-          {context.error ? unavailableSummaryCopy(context.errorKind) : "Today's summary is still loading."}
+          Today's summary is still loading.
         </Text>
       </View>
     );
@@ -56,9 +56,6 @@ export function TodayReviewSummary({ isFocused }: { isFocused: boolean }) {
           {presentation.savedConfirmationCount} {presentation.savedConfirmationCount === 1 ? "confirmation" : "confirmations"} syncing
         </Text>
       ) : null}
-      {context.error ? (
-        <Text {...mobileTextProps("metadata")} style={styles.todayReviewSaved}>{context.error}</Text>
-      ) : null}
       {!hideOpenReview ? (
         <Pressable
           accessibilityLabel={openReviewAccessibilityLabel(outstanding, today)}
@@ -74,22 +71,6 @@ export function TodayReviewSummary({ isFocused }: { isFocused: boolean }) {
       ) : null}
     </View>
   );
-}
-
-function unavailableSummaryCopy(kind: string | null | undefined) {
-  switch (kind) {
-    case "offline":
-      return "Connect to load today's summary.";
-    case "validation":
-      return "Today's summary could not be verified. Pull to refresh.";
-    case "cache":
-      return "Today's saved summary could not be read. Pull to refresh.";
-    case "snapshot_changed":
-      return "Today's summary changed. Pull to refresh.";
-    case "server":
-    default:
-      return "Today's summary is temporarily unavailable. Pull to refresh.";
-  }
 }
 
 function openReviewCopy(

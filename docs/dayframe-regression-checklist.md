@@ -360,6 +360,8 @@ Before merging implementation PRs, ask KB to test the exact Ready Preview promot
 
 ## Review automation and friction acceptance
 
+- Routine Today/Review presentation-read failures add no technical/connectivity banner. Verified cached content remains mounted, refresh/load-more can retry, and genuine partial coverage stays qualified. Safe read classifications/timestamps appear only in existing Sync & diagnostics; connectivity icon ownership and durable queue counts remain unchanged.
+
 - Verify the automatic decision table in `docs/PRD.md`: medium-high/high; independently valid start/stop bounds at 299999/300000/300001 ms; maximum single overlap at the same edges; running and touching intervals; source provenance; Health coexistence and duplicate/session safety. Medium saved-route commutes require all exception conditions. Existing Review/terminal decisions and deleted automatic entries cannot be recreated.
 - Test overlapping saved radii in multiple input orders; keep the deterministic baseline first/selected, bounded alternatives and up to three transient POIs within 750 m. Confirm one-time names do not save a place and save-place actions are atomic.
 - Run Review SQLite v4→v5→v6 migration, two-source merge reservation/rollback, immutable-envelope retention, interrupted-delivery/receipt reconciliation, account/session isolation, canonical-only restore, acknowledgement retention, unresolved-outcome discard prevention and foreground retry; exercise all strict complex envelopes with disposable Postgres receipts and failed structural rollback.

@@ -126,7 +126,7 @@ describe("TodayReviewSummary", () => {
     expect(mocks.donutProps).toBeNull();
   });
 
-  it("uses Connect only for an offline summary and keeps other failures safely classified", () => {
+  it("keeps unavailable diagnostic failures out of Today", () => {
     const unavailable = (errorKind: string) => {
       mocks.context = {
         isSummaryAvailable: false,
@@ -140,13 +140,24 @@ describe("TodayReviewSummary", () => {
       act(() => {
         tree = create(<TodayReviewSummary isFocused />);
       });
-      return tree.root.findByProps({ testID: "today-review-summary-status" })
-        .findByType("Text" as never).children.join("");
+      return tree.toJSON();
     };
 
-    expect(unavailable("offline")).toBe("Connect to load today's summary.");
-    expect(unavailable("server")).toBe("Today's summary is temporarily unavailable. Pull to refresh.");
-    expect(unavailable("validation")).toBe("Today's summary could not be verified. Pull to refresh.");
-    expect(unavailable("cache")).toBe("Today's saved summary could not be read. Pull to refresh.");
+    for (const kind of ["offline", "server", "validation", "cache", "snapshot_changed"]) {
+      expect(unavailable(kind)).toBeNull();
+    }
+  });
+
+  it("keeps verified content mounted without error copy after a failed refresh", () => {
+    let tree!: ReturnType<typeof create>;
+    act(() => { tree = create(<TodayReviewSummary isFocused />); });
+    const mounted = tree.root.findByProps({ testID: "today-review-summary" });
+    for (const kind of ["offline", "server", "validation", "cache", "snapshot_changed"]) {
+      mocks.context = { ...mocks.context, error: "Private failure must stay out of Today", errorKind: kind };
+      act(() => { tree.update(<TodayReviewSummary isFocused />); });
+      expect(tree.root.findByProps({ testID: "today-review-summary" })).toBe(mounted);
+      expect(JSON.stringify(tree.toJSON())).not.toContain("Private failure");
+      expect(mocks.donutProps.completedLoggedMs).toBe(3_600_000);
+    }
   });
 });

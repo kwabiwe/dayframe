@@ -9,6 +9,7 @@ import { DAYFRAME_BACKEND_ID } from "@/lib/backendIdentity";
 import type { MobileBootstrap, MobileTimeEntry } from "@/lib/api";
 import {
   cacheReviewPresentation,
+  recordReviewPresentationRead,
   readAcknowledgedReviewHandoverLookup,
   readReviewPresentationSnapshot,
   reviewPresentationScopeKey,
@@ -96,7 +97,8 @@ export function useTodayReviewPresentation(input: Input): TodayReviewPresentatio
   const setPresentationError = useCallback((kind: TodayReviewPresentationErrorKind) => {
     setErrorKind(kind);
     setError(presentationErrorCopy(kind));
-  }, []);
+    if (owner) recordReviewPresentationRead(owner, "today", kind);
+  }, [ownerKey]);
 
   useEffect(() => {
     const subscription = AppState.addEventListener("change", (next) => {
@@ -234,6 +236,7 @@ export function useTodayReviewPresentation(input: Input): TodayReviewPresentatio
         setProjectionNowMs(Date.now());
         setError(null);
         setErrorKind(null);
+        recordReviewPresentationRead(owner, "today", "success");
       } catch (cause) {
         if (controller.signal.aborted || generation !== identityGeneration.current) return;
         // A failed foreground read never changes durable delivery state. Clear

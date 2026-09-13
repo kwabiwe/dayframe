@@ -74,6 +74,7 @@ import { recordMobileLayout, recordMobileTextLayout } from "@/components/accessi
 import type { MobileAccessibilityDiagnostic } from "@/components/accessibility/diagnostics";
 import {
   cacheReviewPresentation,
+  recordReviewPresentationRead,
   createReviewClientMutationId,
   enqueueReviewMutation,
   getReviewItemSyncStates,
@@ -90,8 +91,10 @@ import { DAYFRAME_BACKEND_ID } from "@/lib/backendIdentity";
 import {
   fetchReviewPresentationPage,
   fetchReviewPresentationSnapshot,
-  ReviewPresentationSnapshotChangedError
+  ReviewPresentationSnapshotChangedError,
+  ReviewPresentationValidationError
 } from "@/lib/reviewPresentationClient";
+import { isMobileTransportFailure } from "@/lib/mobile-network";
 import {
   mergeReviewBacklogPage,
   projectReviewBacklogPage,
@@ -356,7 +359,6 @@ export default function ReviewScreen() {
       if (!options.replace) return;
       existing.controller.abort();
     }
-    if (options.reset) commitReviewBacklog(null);
 
     const owner = {
       backendId: DAYFRAME_BACKEND_ID,
@@ -369,6 +371,7 @@ export default function ReviewScreen() {
     reviewBacklogRead.current = { controller, generation };
     setReviewBacklogLoading(true);
     let restart = false;
+    let readPhase: "server" | "cache" = "server";
 
     try {
       const response = await fetchReviewPresentationPage({
@@ -396,6 +399,7 @@ export default function ReviewScreen() {
         options.reset
       );
       if (!nextBacklog) {
+        recordReviewPresentationRead(owner, "backlog", "snapshot_changed");
         restart = (options.restartAttempt ?? 0) < 1;
         if (!restart) {
           setReviewAvailabilityMessage(
@@ -403,7 +407,9 @@ export default function ReviewScreen() {
           );
         }
       } else {
+        readPhase = "cache";
         const wrote = await cacheReviewPresentation({ owner, response });
+        if (!wrote) recordReviewPresentationRead(owner, "backlog", "cache");
         if (
           !wrote ||
           controller.signal.aborted ||
@@ -431,9 +437,15 @@ export default function ReviewScreen() {
         commitReviewBacklog(nextBacklog);
         startEvidencePrefetch(nextBootstrap);
         setReviewAvailabilityMessage(null);
+        recordReviewPresentationRead(owner, "backlog", "success");
       }
     } catch (error) {
       if (controller.signal.aborted || generation !== screenOwnerGeneration.current) return;
+      recordReviewPresentationRead(owner, "backlog",
+        error instanceof ReviewPresentationSnapshotChangedError ? "snapshot_changed"
+          : error instanceof ReviewPresentationValidationError ? "validation"
+            : readPhase === "cache" ? "cache"
+              : isMobileTransportFailure(error) ? "offline" : "server");
       if (error instanceof AuthRequiredError) {
         router.replace("/");
         return;
@@ -445,12 +457,6 @@ export default function ReviewScreen() {
             "Review changed while more items were loading. Pull to refresh the list."
           );
         }
-      } else {
-        setReviewAvailabilityMessage(
-          connectivityRef.current.isOffline
-            ? "Connect to load more Review items."
-            : "Couldn’t load more Review items. Try again."
-        );
       }
     } finally {
       if (reviewBacklogRead.current?.controller === controller) {

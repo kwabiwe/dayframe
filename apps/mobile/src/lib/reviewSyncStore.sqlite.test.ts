@@ -7,6 +7,7 @@ import { syntheticId, syntheticReviewBootstrap } from "../../../../scripts/fixtu
 
 const mocks = vi.hoisted(() => ({ open: vi.fn(), fetch: vi.fn(), session: vi.fn(), current: vi.fn(), failItem: "" }));
 vi.mock("expo-sqlite", () => ({ openDatabaseAsync: mocks.open }));
+vi.mock("./backendIdentity", () => ({ DAYFRAME_BACKEND_ID: "dayframe-staging" }));
 vi.mock("./secure-session", () => ({ readOwnedAuthenticatedSessionSnapshot: mocks.session, invalidateMobileSessionIfCurrent: vi.fn(), isAuthenticatedSessionSnapshotCurrent: mocks.current }));
 vi.mock("./config", () => ({ DAYFRAME_API_BASE: "https://local-fixture.invalid" }));
 vi.mock("./mobile-network", () => ({ mobileJsonRequest: async (...args: unknown[]) => { const response = await mocks.fetch(...args); return {response,body:await response.json()}; }, MobileRequestTimeoutError: class extends Error {}, StaleMobileSessionResponseError: class extends Error {}, isMobileTransportFailure: (error: unknown) => error instanceof TypeError }));
@@ -52,6 +53,27 @@ beforeEach(async () => {
 afterEach(() => { db.close(); rmSync(directory, { recursive: true, force: true }); });
 
 describe("Review real SQLite transactions", () => {
+  it("exposes only bounded safe presentation diagnostics for the active account and backend", async () => {
+    const data = bootstrap();
+    const owner = { backendId: "dayframe-staging", workspaceId: data.workspace.id, userId: data.user.id };
+    store.recordReviewPresentationRead(owner, "today", "offline");
+    store.recordReviewPresentationRead(owner, "backlog", "cache");
+    let diagnostics = await store.getReviewSyncDiagnostics();
+    expect(diagnostics.presentationReads).toEqual([
+      { surface: "today", status: "offline", checkedAt: expect.any(String) },
+      { surface: "backlog", status: "cache", checkedAt: expect.any(String) }
+    ]);
+    store.recordReviewPresentationRead(owner, "today", "raw private payload" as never);
+    expect((await store.getReviewSyncDiagnostics()).presentationReads).toEqual(diagnostics.presentationReads);
+    store.recordReviewPresentationRead(owner, "today", "success");
+    store.recordReviewPresentationRead({ ...owner, backendId: "other" }, "backlog", "server");
+    diagnostics = await store.getReviewSyncDiagnostics();
+    expect(diagnostics.presentationReads).toEqual([{ surface: "today", status: "success", checkedAt: expect.any(String) }]);
+    store.recordReviewPresentationRead({ ...owner, userId: syntheticId(999) }, "today", "server");
+    expect((await store.getReviewSyncDiagnostics()).presentationReads).toEqual([]);
+    expect(diagnostics.waitingCount).toBe(0);
+    expect(count("review_mutation_outbox")).toBe(0);
+  });
   it("selects the latest failure by timestamp rather than alphabetic error text", async () => {
     const data=bootstrap();
     for(let n=0;n<2;n++) await store.enqueueReviewMutation({bootstrap:data,item:data.reviewItems[n],clientMutationId:syntheticId(94+n),mutation:{action:"accept"}});

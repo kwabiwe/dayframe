@@ -276,6 +276,30 @@ performed.
 
 ## Motion contract
 
+### 2026-09-13 owner correction: quiet presentation failures
+
+Following `0a7c70f710cdb16d1c37b935099486e87ee537b8`, the owner decided that
+routine Today/Review read failures must not add diagnostic banners. Today now
+omits an unavailable failed summary and keeps any verified cached summary
+without error text. Genuine partial-coverage copy remains. Review keeps its
+previous page during refresh and failure, retains Load more, and reserves
+visible snapshot-change guidance for the case requiring a user refresh.
+
+The existing Review store retains at most one process-lifetime read result per
+surface, filtered by active account and backend. Only whitelisted status and
+generated timestamp reach Settings > Sync & diagnostics; SQLite failure does
+not prevent this in-memory diagnostic. Logout clears it. No raw errors,
+responses or content are retained. Recording does not notify mutation
+subscribers or affect connectivity/queue counts.
+
+Motion contract: routine failed reads leave cached geometry, row identity and
+focus unchanged, without entering a notice. Existing successful presentation
+and native navigation owners continue to handle recovery and interruption;
+Reduce Motion preserves the same quiet failure behavior. Automated renderer,
+SQLite, hook and connectivity regressions provide local evidence only. Device
+motion/physical retest remains NOT RUN; no iPhone build or deployment is part
+of this correction.
+
 - Trigger: a complete Today presentation generation arrives, or a Review
   source crosses needs-review → locally-saved → explicitly-linked canonical.
 - Owner: the Today presentation layer; durable Review delivery remains owned

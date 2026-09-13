@@ -17,6 +17,7 @@ import {
   type ReviewMutationEnvelope
 } from "@dayframe/shared";
 import { DAYFRAME_API_BASE } from "./config";
+import { DAYFRAME_BACKEND_ID } from "./backendIdentity";
 import {
   MobileRequestTimeoutError,
   mobileJsonRequest,
@@ -63,6 +64,7 @@ export type ReviewItemSyncState = {
 };
 
 export type ReviewSyncDiagnostics = {
+  presentationReads?: PresentationReadDiagnostic[];
   pendingCount: number;
   retryWaitCount: number;
   authenticationRequiredCount: number;
@@ -199,6 +201,26 @@ export type ReviewPresentationOwner = {
   userId: string;
   backendId: string;
 };
+
+const PRESENTATION_READ_STATUSES = ["success", "offline", "server", "validation", "cache", "snapshot_changed"] as const;
+export type PresentationReadStatus = typeof PRESENTATION_READ_STATUSES[number];
+type PresentationReadDiagnostic = {
+  surface: "today" | "backlog";
+  status: PresentationReadStatus;
+  checkedAt: string;
+};
+// Like the existing cache counters, these are process-lifetime diagnostics.
+// Keep just the latest result per surface, including when SQLite is unavailable.
+const presentationReads = new Map<string, { owner: ReviewPresentationOwner; diagnostic: PresentationReadDiagnostic }>();
+export function recordReviewPresentationRead(owner: ReviewPresentationOwner, surface: "today" | "backlog", status: PresentationReadStatus) {
+  if (!PRESENTATION_READ_STATUSES.includes(status) || !["today", "backlog"].includes(surface)) return;
+  presentationReads.set(surface, {
+    owner: { backendId: owner.backendId, workspaceId: owner.workspaceId, userId: owner.userId },
+    diagnostic: { surface, status, checkedAt: new Date().toISOString() }
+  });
+  // Do not emit a Review mutation notification: read diagnostics must not
+  // schedule delivery, refresh presentation, or affect connectivity counts.
+}
 
 export type ReviewPresentationStoreEffect = {
   reviewItemId: string;
@@ -2098,6 +2120,9 @@ export async function getReviewSyncDiagnostics(): Promise<ReviewSyncDiagnostics>
   const evidenceCache = await getLocationReviewEvidenceCacheDiagnostics();
   return {
     pendingCount,
+    presentationReads: [...presentationReads.values()]
+      .filter(({ owner }) => accountKey(owner) === account.account_key && owner.backendId === DAYFRAME_BACKEND_ID)
+      .map(({ diagnostic }) => ({ ...diagnostic })),
     retryWaitCount,
     authenticationRequiredCount,
     needsAttentionCount: Number(diagnostics.needs_attention_count) || 0,
@@ -2239,6 +2264,7 @@ export async function discardReviewSyncIssue(clientMutationId: string) {
 }
 
 export async function clearActiveReviewAccountData() {
+  presentationReads.clear();
   const db = await database();
   await serialiseReviewMutation(() =>
     db.withExclusiveTransactionAsync(async (transaction) => {

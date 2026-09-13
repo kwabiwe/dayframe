@@ -18,6 +18,7 @@ const mocks = vi.hoisted(() => ({
   lookup: vi.fn(),
   readSnapshot: vi.fn(),
   state: null as any,
+  recordRead: vi.fn(),
   subscribe: null as null | (() => void)
 }));
 
@@ -29,6 +30,7 @@ vi.mock("react-native", () => ({
 }));
 vi.mock("@/lib/backendIdentity", () => ({ DAYFRAME_BACKEND_ID: "dayframe-staging" }));
 vi.mock("@/lib/reviewSyncStore", () => ({
+  recordReviewPresentationRead: mocks.recordRead,
   cacheReviewPresentation: mocks.cache,
   readAcknowledgedReviewHandoverLookup: mocks.lookup,
   readReviewPresentationSnapshot: mocks.readSnapshot,
@@ -110,6 +112,7 @@ describe("useTodayReviewPresentation", () => {
       await vi.waitFor(() => expect(mocks.fetch).toHaveBeenCalledOnce());
     });
     await vi.waitFor(() => expect(mocks.state).toMatchObject({ errorKind: "offline", isLoading: false }));
+    expect(mocks.recordRead).toHaveBeenCalledWith(expect.objectContaining({ backendId: "dayframe-staging" }), "today", "offline");
 
     act(() => {
       tree.update(<Probe refreshGeneration={1} />);
@@ -122,6 +125,7 @@ describe("useTodayReviewPresentation", () => {
     expect(bootstrap.reviewItems).toHaveLength(0);
     expect(mocks.fetch.mock.calls[1]?.[0].request).toMatchObject({ mode: "window", limit: 200 });
     expect(mocks.state).toMatchObject({ error: null, errorKind: null });
+    expect(mocks.recordRead).toHaveBeenLastCalledWith(expect.anything(), "today", "success");
     act(() => tree.unmount());
   });
 
