@@ -9,7 +9,7 @@ vi.mock("react", async () => {
 let fontScale = 1;
 const animation = vi.hoisted(() => ({
   completions: [] as Array<(finished: boolean) => void>,
-  timings: [] as Array<{ value: unknown; duration: number | undefined }>,
+  timings: [] as Array<{ value: unknown; duration: number | undefined; easing?: unknown }>,
 }));
 
 vi.mock("react-native", () => ({
@@ -24,6 +24,7 @@ vi.mock("react-native-reanimated", async () => {
   const React = await import("../../../../../node_modules/react/index.js");
   return {
     default: { View: "View" },
+    Easing: { cubic: "cubic", out: (curve: string) => `out:${curve}` },
     useAnimatedStyle: (factory: () => unknown) => factory(),
     createAnimatedComponent: () => "AnimatedPath",
     useAnimatedProps: (factory: () => unknown) => factory(),
@@ -37,6 +38,7 @@ vi.mock("react-native-reanimated", async () => {
       animation.timings.push({
         value,
         duration: (_config as { duration?: number } | undefined)?.duration,
+        easing: (_config as { easing?: unknown } | undefined)?.easing,
       });
       if (completion) animation.completions.push(completion);
       return value;
@@ -72,6 +74,14 @@ const segments = [
 ];
 
 describe("DonutChart", () => {
+  it.each([false, true])("uses the Today ease-out entrance unless Reduce Motion settles it (%s)", (reduceMotion) => {
+    animation.timings = [];
+    let tree!: ReturnType<typeof create>;
+    act(() => { tree = create(<DonutChart animateEntrance entranceDuration={360} centerLabel="Total logged" centerValue="1h" segments={segments} reduceMotion={reduceMotion} theme={theme} />); });
+    if (reduceMotion) expect(animation.timings.every((timing) => timing.duration === 0)).toBe(true);
+    else expect(animation.timings).toContainEqual(expect.objectContaining({ duration: 360, easing: "out:cubic" }));
+    act(() => tree.unmount());
+  });
   it("runs a real first-visible entrance after an eagerly settled hidden mount", () => {
     animation.timings = [];
     let tree!: ReturnType<typeof create>;

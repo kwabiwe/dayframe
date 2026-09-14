@@ -120,10 +120,18 @@ describe("TodayReviewSummary", () => {
     act(() => {
       tree = create(<TodayReviewSummary isFocused />);
     });
-    expect(tree.root.findByProps({ testID: "today-review-summary-status" })
-      .findByType("Text" as never).children.join(""))
-      .toContain("Today's summary is still loading.");
-    expect(mocks.donutProps).toBeNull();
+    const container = tree.root.findByProps({ testID: "today-review-summary" });
+    const style = container.props.style;
+    expect(mocks.donutProps).toMatchObject({ completedLoggedMs: null, segments: [] });
+    expect(JSON.stringify(tree.toJSON())).not.toContain("still loading");
+    mocks.context = { ...mocks.context, isSummaryAvailable: true, presentation: {
+      dayKey: "2026-09-12", daySections: [], coverage: "complete", completedLoggedMs: 0,
+      donutSegments: [], globalReviewCount: { value: 0, exact: true }, todayReviewCount: { value: 0, exact: true }
+    } };
+    act(() => tree.update(<TodayReviewSummary isFocused />));
+    expect(tree.root.findByProps({ testID: "today-review-summary" })).toBe(container);
+    expect(container.props.style).toBe(style);
+    expect(mocks.donutProps.completedLoggedMs).toBe(0);
   });
 
   it("keeps unavailable diagnostic failures out of Today", () => {
@@ -144,7 +152,8 @@ describe("TodayReviewSummary", () => {
     };
 
     for (const kind of ["offline", "server", "validation", "cache", "snapshot_changed"]) {
-      expect(unavailable(kind)).toBeNull();
+      expect(JSON.stringify(unavailable(kind))).not.toContain("Safe diagnostic copy");
+      expect(mocks.donutProps).toMatchObject({ completedLoggedMs: null, segments: [] });
     }
   });
 

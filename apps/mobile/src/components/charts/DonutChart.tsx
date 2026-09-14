@@ -7,6 +7,7 @@ import {
   type LayoutChangeEvent,
 } from "react-native";
 import Animated, {
+  Easing,
   createAnimatedComponent,
   runOnJS,
   useAnimatedProps,
@@ -41,6 +42,7 @@ export type DonutChartSegment = {
 };
 
 export function DonutChart({
+  entranceDuration,
   animateEntrance,
   centerLabel,
   centerValue,
@@ -52,6 +54,8 @@ export function DonutChart({
   settleImmediately,
   theme,
 }: {
+  /** Today-only entrance refinement; other charts retain their timing. */
+  entranceDuration?: 360;
   animateEntrance: boolean;
   accessibilityLabel?: string;
   centerLabel: string;
@@ -181,6 +185,7 @@ export function DonutChart({
                 id={segment.id}
                 generation={transitionGeneration}
                 animateEntrance={animateEntrance}
+                entranceDuration={entranceDuration}
                 color={
                   segment.isUncategorized && !segment.provisional
                     ? `url(#${patternId})`
@@ -242,6 +247,7 @@ export function DonutChart({
 }
 
 function AnimatedDonutSlice({
+  entranceDuration,
   id,
   hatchFill,
   generation,
@@ -255,6 +261,7 @@ function AnimatedDonutSlice({
   onExitComplete,
   onPress,
 }: {
+  entranceDuration?: 360;
   animateEntrance: boolean;
   color: string;
   hatchFill?: string;
@@ -296,10 +303,11 @@ function AnimatedDonutSlice({
       reduceMotion || settleImmediately
         ? 0
         : enterNow
-          ? 260
+          ? entranceDuration ?? 260
           : MOBILE_MOTION.layout;
-    animatedStart.value = withTiming(startAngle, { duration });
-    animatedEnd.value = withTiming(endAngle, { duration }, (finished) => {
+    const timing = { duration, ...(enterNow && entranceDuration ? { easing: Easing.out(Easing.cubic) } : {}) };
+    animatedStart.value = withTiming(startAngle, timing);
+    animatedEnd.value = withTiming(endAngle, timing, (finished) => {
       if (finished && !selected) runOnJS(onExitComplete)(id, generation);
     });
     if (enterNow) opacity.value = 0;
@@ -307,6 +315,7 @@ function AnimatedDonutSlice({
       duration: reduceMotion || settleImmediately ? 0 : MOBILE_MOTION.control,
     });
   }, [
+    entranceDuration,
     animateEntrance,
     animatedEnd,
     animatedStart,

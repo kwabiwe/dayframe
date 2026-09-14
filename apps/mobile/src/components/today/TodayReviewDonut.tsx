@@ -26,7 +26,7 @@ export function TodayReviewDonut({
   isFocused: boolean;
   onOpenActivity: (activity: TodayActivity) => void;
   segments: readonly TodayDonutSegment[];
-  completedLoggedMs: number;
+  completedLoggedMs: number | null;
   reduceMotion: boolean;
   theme: MobileTheme;
 }) {
@@ -89,11 +89,12 @@ export function TodayReviewDonut({
       <View style={[styles.canvas, { height: CHART_SIZE }]}>
         <View style={styles.chartLayer}>
           <DonutChart
-            accessibilityLabel={`Today completed activity. Total logged ${spokenDuration(completedLoggedMs)}. ${segments.filter((segment) => segment.provisional).length} pending Review ${segments.filter((segment) => segment.provisional).length === 1 ? "item" : "items"}.`}
+            accessibilityLabel={completedLoggedMs === null ? "Today. Total logged unavailable." : `Today completed activity. Total logged ${spokenDuration(completedLoggedMs)}. ${segments.filter((segment) => segment.provisional).length} pending Review ${segments.filter((segment) => segment.provisional).length === 1 ? "item" : "items"}.`}
             animateEntrance={animateEntrance && chartSegments.length > 0}
+            entranceDuration={360}
             centerLabel="Total logged"
-            centerValue={formatDuration(completedLoggedMs)}
-            spokenValue={spokenDuration(completedLoggedMs)}
+            centerValue={completedLoggedMs === null ? "—" : formatDuration(completedLoggedMs)}
+            spokenValue={completedLoggedMs === null ? "Unavailable" : spokenDuration(completedLoggedMs)}
             onPressSegment={(segment) => {
               const activity = activityBySegmentId.get(segment.id);
               if (activity) onOpenActivity(activity);

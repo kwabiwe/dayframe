@@ -36,6 +36,21 @@ const theme = {
 } as never;
 
 describe("TodayReviewDonut", () => {
+  it("keeps the chart mounted at its final height from unknown placeholder to real slices", () => {
+    let tree!: ReturnType<typeof create>;
+    const render = (ready: boolean) => <TodayReviewDonut activities={[]} animateEntrance completedLoggedMs={ready ? 3_600_000 : null} isFocused onOpenActivity={vi.fn()} reduceMotion={false} segments={ready ? segments() : []} theme={theme} />;
+    act(() => { tree = create(render(false)); });
+    const chart = tree.root.findByProps({ testID: "today-donut-chart" });
+    const canvas = tree.root.findAllByType("View" as never).find((node) => Array.isArray(node.props.style) && node.props.style.some((style: { height?: number }) => style?.height === 184))!;
+    expect(canvas.props.style).toContainEqual({ height: 184 });
+    expect(chart.props).toMatchObject({ centerLabel: "Total logged", centerValue: "—", segments: [], animateEntrance: false });
+    expect(tree.root.findAllByType("Path" as never)).toHaveLength(0);
+    const canvasStyle = canvas.props.style;
+    act(() => tree.update(render(true)));
+    expect(tree.root.findByProps({ testID: "today-donut-chart" })).toBe(chart);
+    expect(canvas.props.style).toEqual(canvasStyle);
+    expect(chart.props).toMatchObject({ centerValue: "1h", animateEntrance: true, entranceDuration: 360 });
+  });
   it("keeps a mixed-hour duration together on the second line", () => {
     let tree!: ReturnType<typeof create>;
     act(() => { tree = create(<TodayReviewDonut activities={[]} animateEntrance={false} completedLoggedMs={26_460_000} isFocused onOpenActivity={vi.fn()} reduceMotion segments={[{ ...segments()[0], title: "Sleep", valueMs: 26_460_000 }]} theme={theme} />); });

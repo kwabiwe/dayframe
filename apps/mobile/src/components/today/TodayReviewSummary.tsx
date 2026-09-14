@@ -10,48 +10,39 @@ export function TodayReviewSummary({ isFocused }: { isFocused: boolean }) {
   const { styles, theme } = useMobileTheme();
   const { reduceMotion } = useResolvedReduceMotionPreference();
   if (!context) return null;
-  if (!context.isSummaryAvailable || !context.presentation) {
-    if (!context.owner || context.error) return null;
-    return (
-      <View testID="today-review-summary-status" style={styles.todayReviewSummary}>
-        <Text {...mobileTextProps("metadata")} style={styles.todayReviewSaved}>
-          Today's summary is still loading.
-        </Text>
-      </View>
-    );
-  }
-  const presentation = context.presentation;
-  const activities = presentation.daySections.flatMap((section) => section.activities);
-  const outstanding = presentation.globalReviewCount;
-  const today = presentation.todayReviewCount;
-  const hideOpenReview = presentation.coverage === "complete" && outstanding.exact && outstanding.value === 0;
+  const presentation = context.isSummaryAvailable ? context.presentation : null;
+  if (!presentation && !context.owner) return null;
+  const activities = presentation?.daySections.flatMap((section) => section.activities) ?? [];
+  const outstanding = presentation?.globalReviewCount ?? { value: null, exact: false };
+  const today = presentation?.todayReviewCount ?? { value: null, exact: false };
+  const hideOpenReview = !presentation || (presentation.coverage === "complete" && outstanding.exact && outstanding.value === 0);
 
   return (
     <View testID="today-review-summary" style={styles.todayReviewSummary}>
       <TodayReviewDonut
-        key={`${context.owner?.backendId ?? "none"}:${context.owner?.workspaceId ?? "none"}:${context.owner?.userId ?? "none"}:${presentation.dayKey}`}
+        key={`${context.owner?.backendId ?? "none"}:${context.owner?.workspaceId ?? "none"}:${context.owner?.userId ?? "none"}`}
         activities={activities}
         animateEntrance={isFocused}
-        completedLoggedMs={presentation.completedLoggedMs}
+        completedLoggedMs={presentation?.completedLoggedMs ?? null}
         isFocused={isFocused}
         onOpenActivity={context.openActivity}
         reduceMotion={reduceMotion}
-        segments={presentation.donutSegments}
+        segments={presentation?.donutSegments ?? []}
         theme={theme}
       />
-      {presentation.coverage !== "complete" ? (
+      {presentation && presentation.coverage !== "complete" ? (
         <Text {...mobileTextProps("metadata")} style={styles.todayReviewSaved}>
           {presentation.coverage === "partial"
             ? "Today's summary is partial. Open Review for more items."
             : "Showing Review data saved on this iPhone."}
         </Text>
       ) : null}
-      {presentation.awaitingReviewMs > 0 ? (
+      {presentation && presentation.awaitingReviewMs > 0 ? (
         <Text {...mobileTextProps("numeric")} style={styles.todayReviewAwaiting}>
           + {formatDuration(presentation.awaitingReviewMs)} awaiting review
         </Text>
       ) : null}
-      {presentation.savedConfirmationCount > 0 ? (
+      {presentation && presentation.savedConfirmationCount > 0 ? (
         <Text {...mobileTextProps("metadata")} accessibilityLiveRegion="polite" style={styles.todayReviewSaved}>
           {presentation.savedConfirmationCount} {presentation.savedConfirmationCount === 1 ? "confirmation" : "confirmations"} syncing
         </Text>

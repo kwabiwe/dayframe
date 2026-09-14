@@ -276,6 +276,24 @@ performed.
 
 ## Motion contract
 
+### 2026-09-14 quiet donut loading and horizontal pointers
+
+From `c44e593c75b133c7b0322a0318e37279aec1263e`, Today labels retain prepared
+arc midpoint ownership but use eight-point horizontal pointers, starting six
+points outside the perimeter at the label height. Larger slices claim their
+preferred slots; smaller same-side collisions are omitted without removing
+any slice or source data. Selection has no absolute-duration cutoff.
+
+The existing chart stays mounted in its 184-point canvas during loading,
+ordinary no-cache failure and hydration. Unknown totals use an em dash and
+the neutral track, without technical/loading sentences. Existing product-state
+details still appear when known. DonutChart owns an opt-in Today entrance of
+360 ms with cubic ease-out; other chart/global timings are unchanged. Reduce
+Motion and background settlement suppress the sweep, and existing generation
+guards own interrupted updates. Auth and all data owners are unchanged.
+Focused component/geometry and mobile-wide tests are local evidence;
+physical visual/motion acceptance and an iPhone build remain NOT RUN.
+
 ### 2026-09-13 owner screenshot: label association and row hierarchy
 
 Starting from `6ca7954469f638aa04a093eea50f9730b83ed174`, the supplied staging
