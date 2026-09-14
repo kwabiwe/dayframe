@@ -37,6 +37,7 @@ import {
 import { pressable, useMobileTheme } from "@/lib/mobileTheme";
 import { scheduleLocationEvidenceLoadingFeedback } from "@/lib/review";
 import {
+  cacheReviewPresentation,
   createReviewClientMutationId,
   enqueueReviewMutation,
   getActiveReviewAccountIdentity,
@@ -44,6 +45,8 @@ import {
   loadCachedReviewBootstrap,
   synchroniseReviewMutations
 } from "@/lib/reviewSyncStore";
+import { DAYFRAME_BACKEND_ID } from "@/lib/backendIdentity";
+import { fetchReviewPresentationSnapshot } from "@/lib/reviewPresentationClient";
 
 type EvidenceScreenState =
   | { status: "hydrating" }
@@ -222,7 +225,47 @@ export default function LocationReviewDetailScreen() {
   }
 
   async function refreshContext(generation: number, signal: AbortSignal) {
-    const bootstrap = await fetchBootstrap();
+    let bootstrap = await fetchBootstrap({ signal });
+    if (!isCurrent(generation, signal)) return null;
+    // Bootstrap is intentionally capped. A location detail route may point to
+    // an older exact source, so hydrate that one source through the bounded
+    // presentation lookup and merge it into the existing Review owner/cache.
+    // It never guesses a neighbour or creates a separate location queue.
+    if (id && !bootstrap.reviewItems.some((item) => item.id === id) && DAYFRAME_BACKEND_ID) {
+      try {
+        const response = await fetchReviewPresentationSnapshot({
+          owner: {
+            backendId: DAYFRAME_BACKEND_ID,
+            workspaceId: bootstrap.workspace.id,
+            userId: bootstrap.user.id
+          },
+          request: {
+            version: 1,
+            mode: "lookup",
+            timeZone: currentPresentationTimeZone(),
+            reviewItemIds: [id],
+            limit: 100
+          },
+          signal
+        });
+        if (!isCurrent(generation, signal)) return null;
+        const owner = {
+          backendId: DAYFRAME_BACKEND_ID,
+          workspaceId: bootstrap.workspace.id,
+          userId: bootstrap.user.id
+        };
+        const wrote = await cacheReviewPresentation({ owner, response });
+        if (!wrote || !isCurrent(generation, signal)) return null;
+        const cached = await loadCachedReviewBootstrap();
+        const target = cached?.bootstrap.reviewItems.find((item) => item.id === id) ?? null;
+        if (target) bootstrap = mergeFocusedLocationReviewContext(bootstrap, target);
+      } catch (error) {
+        if (error instanceof AuthRequiredError) throw error;
+        // The normal capped bootstrap remains usable. Evidence still supplies
+        // the privacy-preserving unavailable state if this exact source cannot
+        // be read at the moment.
+      }
+    }
     if (!isCurrent(generation, signal)) return null;
     setData(bootstrap);
     return bootstrap;
@@ -472,4 +515,21 @@ function adjacentLocationReview(
       return gap <= maximumAdjacentGapMs ? [{ item, gap }] : [];
     })
     .sort((a, b) => a.gap - b.gap || a.item.id.localeCompare(b.item.id))[0]?.item;
+}
+
+function mergeFocusedLocationReviewContext(
+  bootstrap: MobileBootstrap,
+  target: MobileReviewItem
+): MobileBootstrap {
+  const existing = bootstrap.reviewItems.find((item) => item.id === target.id);
+  return {
+    ...bootstrap,
+    reviewItems: existing
+      ? bootstrap.reviewItems.map((item) => item.id === target.id ? target : item)
+      : [target, ...bootstrap.reviewItems]
+  };
+}
+
+function currentPresentationTimeZone() {
+  return Intl.DateTimeFormat().resolvedOptions().timeZone || "Etc/UTC";
 }

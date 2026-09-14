@@ -110,3 +110,23 @@ reduced motion; a source contract or still frame is not physical gesture evidenc
 ## Location Review status and durable actions
 
 Optional detail status enters below the stable activity/time summary with the existing local presence/layout primitives; absence reserves no empty height. The native stack exclusively owns Back and post-commit dismissal. One SQLite commit accepts a resolving/structural action; its one/two source effects drive the existing card exit/reflow. Failed commit preserves the draft; permanent conflict restores only proven-open sources at surviving anchors. Cancel presentation-only prefetch and stale callbacks at Back/closing transition, without cancelling durable intent. Verify entrance/update/exit, rapid repeat, cancelled swipe, status replacement, rollback, keyboard focus and Reduce Motion (no travel, unchanged semantic result). No global spacing or navigation rewrite follows from removing this local gap.
+
+## Today integrated Review donut and rows
+
+The Today summary uses one local Reanimated/arc owner; native navigation owns
+exact Review and Location pushes. On the first focused populated context, the
+donut may make one restrained entrance. A hidden eager mount, timer tick,
+minor bootstrap refresh, or cached hydration settles without replay. Source
+keys own arc/row identity: a local Quick Confirm changes the same row to
+saved-local while its provisional arc exits and adjacent rows reflow; it never
+waits for HTTP or replays the whole chart. Explicit canonical materialisation
+updates the solid category geometry once; a reused canonical entry wins rather
+than producing a duplicate row/arc. Rejection restores only the explicitly
+open source, and stale exit callbacks cannot remove a restored/newer key.
+
+Reduce Motion settles geometry immediately while preserving the same summary
+copy, exact-item routes and VoiceOver feedback. Focus stays on the transformed
+row or advances once to the next logical row/Open Review; background receipts
+never steal focus. Validate first-visible entrance, accept/materialise/restore,
+rapid repeat, account/day replacement, measured-label reflow and the
+Reduce-Motion path on the actual component.

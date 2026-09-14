@@ -14,7 +14,19 @@ describe("bounded sync ownership", () => {
     await withSyncTransaction("test", async ({ client }) => { await client.query("insert receipt"); }, { databasePool: pool });
     expect(client.release).toHaveBeenCalledExactlyOnceWith(false);
     const calls = client.query.mock.calls as unknown as string[][];
+    expect(calls[0]?.[0]).toMatch(/^begin;/i);
     expect(calls.findIndex(([sql]) => sql === "insert receipt")).toBeLessThan(calls.findIndex(([sql]) => sql === "commit"));
+  });
+  it("applies the typed repeatable-read option at BEGIN before configuration queries", async () => {
+    const { client, pool } = lease();
+    await withSyncTransaction("snapshot", async () => undefined, {
+      databasePool: pool,
+      isolationLevel: "repeatable read",
+      readOnly: true
+    });
+    const calls = client.query.mock.calls as unknown as string[][];
+    expect(calls[0]?.[0]).toMatch(/^begin isolation level repeatable read read only;/i);
+    expect(calls.slice(1).some(([sql]) => sql.includes("set_config('application_name'"))).toBe(true);
   });
   it("destroys a lease when rollback fails without masking the original SQLSTATE", async () => {
     const failure = Object.assign(new Error("private detail"), { code: "57014" });

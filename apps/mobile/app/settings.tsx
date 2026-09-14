@@ -1983,6 +1983,11 @@ export default function SettingsScreen() {
                   Last error {reviewSyncDiagnostics.lastError}
                 </Text>
               ) : null}
+              {reviewSyncDiagnostics?.presentationReads?.map((read) => (
+                <Text key={read.surface} {...mobileTextProps("body")} style={styles.accountMeta}>
+                  {read.surface === "today" ? "Today" : "Review backlog"} presentation: {read.status} · {formatQueueTime(read.checkedAt)}
+                </Text>
+              ))}
               {reviewSyncIssues.map((issue) => (
                 <Reanimated.View key={issue.clientMutationId} style={styles.accountRow}
                   entering={localPresenceEntering(reduceMotion)} exiting={localPresenceExiting(reduceMotion)} layout={localLayoutTransition(reduceMotion)}>

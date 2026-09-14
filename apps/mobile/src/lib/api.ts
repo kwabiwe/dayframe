@@ -137,6 +137,8 @@ export type MobileTimeEntry = {
 export type MobileReviewItem = {
   id: string;
   type?: string;
+  /** Server-verified presentation discriminator for a cached targeted read. */
+  presentationSourceKind?: "location_v2";
   title: string;
   eventSource: string | null;
   eventType: string | null;

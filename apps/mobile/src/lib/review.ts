@@ -431,8 +431,9 @@ export function isLocationReviewItem(
 }
 
 export function hasV2LocationEvidence(item: MobileReviewItem) {
-  return isLocationReviewItem(item) &&
+  return (item.presentationSourceKind === "location_v2" || isLocationReviewItem(item)) &&
     (
+      item.presentationSourceKind === "location_v2" ||
       item.rawPayload?.algorithmVersion === "location-v2.0" ||
       typeof item.rawPayload?.clientSegmentId === "string"
     );

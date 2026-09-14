@@ -68,6 +68,27 @@ Use this when implementing visual UI.
 - Use one animation owner. Keep native navigation and tabs native, use a UI-thread transition for local React Native presence/layout, and reserve Swift/SwiftUI for targeted interactions that genuinely require native ownership.
 - Reduce Motion may remove nonessential travel, scale, and springs, but it must preserve state, focus, feedback, and accessibility announcements.
 
+## Today integrated Review
+
+- The Today Review summary is a compact continuation of the existing timer and
+  history surface: one bounded donut, understated awaiting/saved status copy,
+  and one fill-led Open Review control. Do not add a second dashboard card,
+  category legend, filter controls, or a Reports-style control cluster.
+- Solid completed slices use existing category treatment. Each finite pending
+  source retains its own category-colour slice with a distinct diagonal hatch
+  and Review cue; confirmed Uncategorized treatment must remain visually
+  distinct. External labels use actual intrinsic measurements, short neutral
+  leaders and a bounded maximum; at narrow widths reduce labels rather than
+  shrinking text, overlapping the centre, or merging activities into Other.
+- The centre says `Total logged` and completed duration only. Pending duration,
+  saved-local acceptance, partial coverage and a running timer never masquerade
+  as a completed total. Use neutral semantic status copy for saved/partial
+  states rather than a spinner or success-green claim.
+- Pending rows follow the established divider/list geometry and use the
+  scoped text roles. Preserve full time/detection, duration, category/place,
+  Review state and accessible Open/check labels through stacking; keep the
+  check target at least 44 points and visually separate from the primary row.
+
 ## Review Checklist
 
 - [ ] The UI is usable as the first screen, not just a marketing shell.

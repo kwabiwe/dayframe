@@ -9,7 +9,7 @@ vi.mock("react", async () => {
 let fontScale = 1;
 const animation = vi.hoisted(() => ({
   completions: [] as Array<(finished: boolean) => void>,
-  timings: [] as Array<{ value: unknown; duration: number | undefined }>,
+  timings: [] as Array<{ value: unknown; duration: number | undefined; easing?: unknown }>,
 }));
 
 vi.mock("react-native", () => ({
@@ -24,6 +24,7 @@ vi.mock("react-native-reanimated", async () => {
   const React = await import("../../../../../node_modules/react/index.js");
   return {
     default: { View: "View" },
+    Easing: { cubic: "cubic", out: (curve: string) => `out:${curve}` },
     useAnimatedStyle: (factory: () => unknown) => factory(),
     createAnimatedComponent: () => "AnimatedPath",
     useAnimatedProps: (factory: () => unknown) => factory(),
@@ -37,6 +38,7 @@ vi.mock("react-native-reanimated", async () => {
       animation.timings.push({
         value,
         duration: (_config as { duration?: number } | undefined)?.duration,
+        easing: (_config as { easing?: unknown } | undefined)?.easing,
       });
       if (completion) animation.completions.push(completion);
       return value;
@@ -61,6 +63,7 @@ vi.mock("@/lib/motion", () => ({
 import { DonutChart } from "./DonutChart";
 
 const theme = {
+  borderStrong: "border",
   chartTrack: "track",
   mode: "dark",
   surfaceRaised: "raised",
@@ -72,6 +75,14 @@ const segments = [
 ];
 
 describe("DonutChart", () => {
+  it.each([false, true])("uses the Today ease-out entrance unless Reduce Motion settles it (%s)", (reduceMotion) => {
+    animation.timings = [];
+    let tree!: ReturnType<typeof create>;
+    act(() => { tree = create(<DonutChart animateEntrance entranceDuration={360} centerLabel="Total logged" centerValue="1h" segments={segments} reduceMotion={reduceMotion} theme={theme} />); });
+    if (reduceMotion) expect(animation.timings.every((timing) => timing.duration === 0)).toBe(true);
+    else expect(animation.timings).toContainEqual(expect.objectContaining({ duration: 360, easing: "out:cubic" }));
+    act(() => tree.unmount());
+  });
   it("runs a real first-visible entrance after an eagerly settled hidden mount", () => {
     animation.timings = [];
     let tree!: ReturnType<typeof create>;
@@ -321,5 +332,36 @@ describe("DonutChart", () => {
       .findAllByType("Pattern" as never)
       .map((node) => node.props.id);
     expect(new Set(patternIds).size).toBe(2);
+  });
+
+  it("keeps Reports-compatible arcs inert while an opt-in provisional slice is hatched and exact", () => {
+    const onPressSegment = vi.fn();
+    let tree!: ReturnType<typeof create>;
+    act(() => {
+      tree = create(
+        <DonutChart
+          animateEntrance={false}
+          centerLabel="Total logged"
+          centerValue="1h 30m"
+          onPressSegment={onPressSegment}
+          reduceMotion
+          segments={[
+            { id: "confirmed", value: 3_600_000, color: "blue", selected: true, interactive: false },
+            { id: "pending", value: 1_800_000, color: "coral", selected: true, provisional: true, interactive: true },
+          ]}
+          theme={theme}
+        />,
+      );
+    });
+    const paths = tree.root.findAllByType("AnimatedPath" as never);
+    expect(paths.find((path) => path.props.fill === "blue")?.props.onPress).toBeUndefined();
+    const pending = paths.find((path) => path.props.fill === "coral");
+    expect(pending?.props.onPress).toBeTypeOf("function");
+    expect(paths.some((path) => String(path.props.fill).startsWith("url(#provisional-"))).toBe(true);
+    const hatch = paths.find((path) => String(path.props.fill).startsWith("url(#provisional-"))!;
+    expect(hatch.props).toMatchObject({ stroke: "border", strokeWidth: 1, strokeDasharray: "3 2", pointerEvents: "none" });
+    expect(paths.filter((path) => path.props.strokeDasharray)).toHaveLength(1);
+    act(() => pending!.props.onPress());
+    expect(onPressSegment).toHaveBeenCalledWith(expect.objectContaining({ id: "pending", provisional: true }));
   });
 });

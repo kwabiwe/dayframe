@@ -36,3 +36,37 @@ export const REVIEW_RECOVERY_V6_SQL = `
   alter table review_mutation_outbox add column resolution_status text;
   alter table review_mutation_outbox add column acknowledgement_json text;
 `;
+
+// Additive v6→v7 presentation evidence. This is intentionally separate from
+// the Review outbox/effects tables: contexts are bounded display coverage, not
+// a second mutation queue or a replacement canonical-entry store.
+export const REVIEW_PRESENTATION_V7_SQL = `
+  create table if not exists review_presentation_context (
+    account_key text not null,
+    scope_key text not null,
+    backend_id text not null,
+    contract_version integer not null,
+    snapshot_token text not null,
+    captured_at text not null,
+    cached_at text not null,
+    complete integer not null default 0,
+    context_json text not null,
+    primary key(account_key, scope_key),
+    foreign key(account_key) references review_account_context(account_key) on delete cascade,
+    check(complete in (0, 1))
+  );
+  create index if not exists review_presentation_context_recent_idx
+    on review_presentation_context(account_key, cached_at desc);
+  create table if not exists review_presentation_terminal_source (
+    account_key text not null,
+    review_item_id text not null,
+    scope_key text not null,
+    backend_id text not null,
+    snapshot_token text not null,
+    status text not null,
+    captured_at text not null,
+    primary key(account_key, review_item_id),
+    foreign key(account_key) references review_account_context(account_key) on delete cascade,
+    check(status in ('accepted', 'ignored', 'missing'))
+  );
+`;

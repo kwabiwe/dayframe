@@ -101,6 +101,10 @@ zero-size hidden probes never affect scrolling, focus or touch targets.
 
 ## State And Forms
 
+- Today donut labels use the midpoint of the existing prepared slice geometry and remain on that side. Horizontal leaders begin 6 pt outside the ring and extend to 4 pt before the text block. Provisional sources claim preferred positions before confirmed sources, then larger slices win within each state; competing labels are omitted rather than displaced. Keep hatch plus a restrained dashed outline on provisional slices, exact-item pressable labels without enlarged overlapping hit areas, and the Open Review count/action fallback. Today targets a 200 pt chart, 208 pt with wider label space, and 184 pt on narrow or larger-text layouts; Reports sizing is unchanged. Titles ellipsise on line one; complete measured durations occupy line two. Loading and ordinary no-cache failures retain the same chart-sized neutral track with Total logged / —. DonutChart owns the Today-only 360 ms cubic ease-out entrance; Reduce Motion settles immediately. Today/history entries use at most description, time, and one category/tag metadata line; place remains available to editing/accessibility. These rows do not present overlap visually or in VoiceOver; interval analysis and other surfaces retain their overlap behavior.
+
+- Routine Today/Review presentation-read failures stay out of the main UI. The shared connectivity icon owns connectivity state; the existing Review diagnostics in Settings > Sync & diagnostics exposes only safe read classifications and timestamps. Keep verified cached content and explicit refresh/load-more usable. Preserve genuine partial-coverage copy and actionable Review snapshot-integrity guidance.
+
 - Prefer controlled form state only where it adds clarity.
 - On web, use the shared field/control classes before adding route-local geometry. Inputs with nested reveal, clear, tag or search actions must use one compound wrapper focus owner; do not stack wrapper and input perimeters.
 - In editable web Description controls, a selected tag is a normal-weight plain-text remove action with no default fill and a thin visible `X`. Keep its button target 44px high while a separate 22–24px visual wrapper owns the hover/focus fill, darker accent text and compact `6px` radius; the hidden width measure must mirror that label-plus-X wrapper. Clicking the text or `X` removes the tag. Keep this shared between the persistent timer and `TimeEntryQuickEditor` instead of styling each surface separately; `+N` overflow stays quieter and neutral.
@@ -148,6 +152,28 @@ zero-size hidden probes never affect scrolling, focus or touch targets.
 - The provisional block belongs to the observable Swift model and root renderer, never `modelJSON`, `presentation.entries`, totals, overlap allocation, networking, persistence, or the active timer. Render it above canonical entries with the shared 8pt radius, one-point boundary/gap and continuation corners plus a restrained accent-derived temporary treatment. It is hit-test/accessibility hidden and has no category, tags, Play, warning marker, or resize handles. Normal same-day presentation updates preserve it; token-scoped cleanup prevents stale sessions from clearing a newer preview.
 - Before `.began`, normal vertical scroll, horizontal swipe, pinch, refresh, second touch, hour-axis and semantic entry-hit rejection remain authoritative. After `.began`, creation owns the finger until end/cancel; only its one retained coordinator display link may edge-autoscroll the vertical timeline. Restore every normal gesture immediately on exit.
 - After release, React creates the DST-safe blank/Uncategorized/tag-free 30-minute draft, presents the existing `ActiveTimerEditSheet` in Add mode, saves through `createManualTimeEntry`, and refreshes bootstrap. Do not change the Plus route, prefill from timer/recent/place metadata, or stop/replace an active timer.
+
+## Today integrated Review
+
+- `DayframeDashboard` remains the only authenticated bootstrap/timer owner. Its
+  foreground Today presentation adapter may read the bounded Review
+  presentation cache/service and subscribe to `reviewSyncStore`, but it never
+  owns mutation delivery, a timer, Health/Location processing, or another
+  persistent store.
+- Render provisional Review/saved rows as typed siblings of existing confirmed
+  history grouping. Never cast one to a `MobileTimeEntry`, pass it to replay or
+  Delete, or add it to a confirmed group aggregate. Generic Review, V2
+  Location, legacy entry, saved-sync issue, and canonical entry use their
+  existing exact route/action boundaries.
+- A pending row's Open and 44-point Quick Confirm controls are sibling
+  Pressables. Quick Confirm gates only its own local SQLite commit; it must not
+  bubble into Open, await HTTP, or show a normal spinner. Saved/unknown rows
+  retain their typed status rather than gaining invented edit/delete/replay
+  actions.
+- Today owns one completed-only donut and one global Open Review control. Its
+  pending slices are exact-item activations; confirmed category slices remain
+  inert. Cached/partial/no-snapshot states use honest inline copy and leave
+  the timer/history usable. Reports keeps its informational donut contract.
 
 ## Review Checklist
 

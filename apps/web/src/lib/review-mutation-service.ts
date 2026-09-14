@@ -22,6 +22,7 @@ import {
 import {
   resolveLocationReviewActionWithClient
 } from "./location/location-review-service";
+import { reviewProposalHash } from "./review-proposal-hash";
 import type { RequestSession } from "./session";
 import { syncTimeEntryTags } from "./tag-service";
 
@@ -47,6 +48,7 @@ type GenericReviewRow = {
   rawPayload: unknown;
   locationSegmentId: string | null;
   resolvedTimeEntryId?: string | null;
+  semanticRevision?: Date | string | null;
 };
 
 export const REVIEW_MUTATION_STATEMENT_TIMEOUT_MS = 8_000;
@@ -101,9 +103,10 @@ export async function resolveIdempotentReviewMutation(
       phase("canonical_read");
       const locationItem = await isLocationReview(client, reviewItemId, session);
       phase("review_lock");
-      const result = locationItem
+      const applied = locationItem
         ? await resolveLocationMutation(client, reviewItemId, envelope.mutation, session)
         : await resolveGenericMutation(client, reviewItemId, envelope.mutation, session);
+      const result = guardedAcknowledgementResult(applied, reviewItemId, envelope.mutation, envelope.clientMutationId);
       phase("receipt_write");
       await client.query(
         `insert into review_mutation_receipts (
@@ -356,11 +359,18 @@ async function resolveLocationMutation(
       }
     );
   }
+  const expectedProposalHash = mutation.action === "confirm"
+    ? mutation.expectedProposalHash
+    : undefined;
+  const action = mutation.action === "confirm"
+    ? { action: "confirm" as const }
+    : mutation;
   return resolveLocationReviewActionWithClient(
     client,
     reviewItemId,
-    mutation,
-    session
+    action,
+    session,
+    { expectedProposalHash }
   );
 }
 
@@ -390,6 +400,9 @@ async function resolveGenericMutation(
   const item = await lockGenericReview(client, reviewItemId, session);
   if (item.status !== "open") {
     return resolveClosedGenericReview(client, item, mutation, session);
+  }
+  if (mutation.action === "accept" && mutation.expectedProposalHash) {
+    assertExpectedGenericProposal(item, mutation.expectedProposalHash);
   }
   if (mutation.action === "ignore_once") {
     await resolveGenericReviewAndEvent(client, item, session, "ignored");
@@ -430,7 +443,8 @@ async function lockGenericReview(
             ae.event_type as "eventType",
             ae.raw_payload as "rawPayload",
             ae.resolved_time_entry_id as "resolvedTimeEntryId",
-            ri.location_segment_id as "locationSegmentId"
+            ri.location_segment_id as "locationSegmentId",
+            coalesce(ri.resolved_at, ri.created_at) as "semanticRevision"
      from review_items ri
      left join activity_events ae
        on ae.id = ri.event_id
@@ -854,6 +868,56 @@ function resolutionConflict(reviewItemId: string, canonicalStatus: string) {
       }
     }
   );
+}
+
+function assertExpectedGenericProposal(item: GenericReviewRow, expectedProposalHash: string) {
+  const actual = reviewProposalHash({
+    reviewItemId: item.id,
+    eventId: item.eventId,
+    locationSegmentId: null,
+    sourceKind: "generic",
+    title: item.title,
+    categoryId: item.suggestedCategoryId,
+    placeId: item.suggestedPlaceId,
+    startedAt: item.suggestedStartedAt,
+    stoppedAt: item.suggestedStoppedAt,
+    confidence: item.confidence,
+    eventSource: item.eventSource,
+    eventType: item.eventType,
+    semanticRevision: item.semanticRevision ?? null
+  });
+  if (actual === expectedProposalHash) return;
+  throw new ReviewResolutionError(
+    "proposal_changed",
+    "This Review proposal changed before it could be confirmed. Refresh it before trying again.",
+    {
+      status: 409,
+      details: {
+        reviewItemId: item.id,
+        canonicalStatus: "open",
+        canonicalReviewStatuses: { [item.id]: "open" },
+        proposalHash: actual
+      }
+    }
+  );
+}
+
+function guardedAcknowledgementResult(
+  result: unknown,
+  reviewItemId: string,
+  mutation: ReviewMutation,
+  clientMutationId: string
+) {
+  const expectedProposalHash = mutation.action === "accept" || mutation.action === "confirm"
+    ? mutation.expectedProposalHash
+    : undefined;
+  if (!expectedProposalHash || !result || typeof result !== "object" || Array.isArray(result)) return result;
+  return {
+    ...(result as Record<string, unknown>),
+    clientMutationId,
+    reviewItemId,
+    expectedProposalHash
+  };
 }
 
 function validWindow(

@@ -46,7 +46,6 @@ import {
 import { DayframeCalendarView } from "../../modules/dayframe-calendar";
 import { ActiveTimerEditSheet } from "@/components/ActiveTimerEditSheet";
 import { ConnectivityStatusIndicator } from "@/components/ConnectivityStatusStrip";
-import { TagMetadata } from "@/components/TagMetadata";
 import { useIntrinsicTextMeasure } from "@/components/accessibility/IntrinsicTextMeasure";
 import { TodayDateHeading } from "@/components/accessibility/TodayDateHeading";
 import { TodayLoggedSummary } from "@/components/accessibility/TodayLoggedSummary";
@@ -60,6 +59,9 @@ import {
   PlusGlyph
 } from "@/components/PrimaryTimerAction";
 import { TodayTimerSurface } from "@/components/accessibility/TodayTimerSurface";
+import { TodayReviewPresentationProvider, useTodayReviewPresentationContext } from "./today/TodayReviewPresentationContext";
+import { TodayReviewRow } from "./today/TodayReviewRow";
+import { TodayReviewSummary } from "./today/TodayReviewSummary";
 import {
   AuthRequiredError,
   createManualTimeEntry,
@@ -164,8 +166,10 @@ import {
   buildHistoryDaySections,
   groupHistoryDayEntries,
   historyDayLabel,
-  type HistoryDaySection
+  type HistoryDaySection,
+  type HistoryEntryGroup
 } from "@/lib/historyPresentation";
+import type { TodayActivity } from "@/lib/todayReviewPresentation";
 import {
   pressable,
   useMobileTheme,
@@ -292,6 +296,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
   const connectivity = useConnectivity();
   const [data, setData] = useState<MobileBootstrap | null>(null);
   const [refreshing, setRefreshing] = useState(false);
+  const [todayPresentationRefreshGeneration, setTodayPresentationRefreshGeneration] = useState(0);
   const [authSubmitting, setAuthSubmitting] = useState(false);
   const [authState, setAuthState] = useState<AuthState>("checking");
   const [selectedDayKey, setSelectedDayKey] = useState(() => formatDateKey(new Date()));
@@ -832,6 +837,14 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
     }
   }, [transitionToSignedOut]);
   loadRef.current = load;
+
+  const refreshTodayPresentation = useCallback(() => {
+    // An explicit Today pull-to-refresh is also an explicit foreground retry
+    // for the read-only presentation. It uses the existing owner and lets the
+    // hook coalesce with an in-flight read; it does not start a poll or queue.
+    setTodayPresentationRefreshGeneration((current) => current + 1);
+    void load({ visibleRefresh: true });
+  }, [load]);
 
   function updateDashboardData(
     update: (current: MobileBootstrap | null) => MobileBootstrap | null
@@ -2307,6 +2320,14 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
   function renderTodayTab(isFocused: boolean) {
     const currentDate = new Date(now);
     return (
+      <TodayReviewPresentationProvider
+        bootstrap={data}
+        dashboardEntries={historySourceEntries}
+        manualProjectedEntries={historySourceEntries.filter((entry) => !isReviewNeededEntry(entry))}
+        isFocused={isFocused}
+        nowMs={now}
+        refreshGeneration={todayPresentationRefreshGeneration}
+      >
       <SafeAreaView collapsable={false} edges={["top", "left", "right"]} style={styles.safeArea}>
         <Reanimated.FlatList
           contentContainerStyle={[styles.container, styles.todayListContent]}
@@ -2316,7 +2337,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
           refreshControl={
             <RefreshControl
               refreshing={isFocused && refreshing}
-              onRefresh={() => load({ visibleRefresh: true })}
+              onRefresh={refreshTodayPresentation}
               tintColor={theme.accent}
               colors={[theme.accent]}
             />
@@ -2359,6 +2380,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
                 styles={styles}
                 theme={theme}
               />
+              <TodayReviewSummary isFocused={isFocused} />
             </Animated.View>
           )}
           renderItem={({ item }) => (
@@ -2391,6 +2413,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
           showsVerticalScrollIndicator={false}
         />
       </SafeAreaView>
+      </TodayReviewPresentationProvider>
     );
   }
 
@@ -2813,6 +2836,24 @@ export function HistoryDayCard({
   const [expandedGroups, setExpandedGroups] = useState<Set<string>>(() => new Set());
   const [availableRowWidth, setAvailableRowWidth] = useState(0);
   const entryGroups = useMemo(() => groupHistoryDayEntries(section.entries), [section.entries]);
+  const todayReview = useTodayReviewPresentationContext();
+  const reviewTodayActivities = useMemo(() => {
+    if (!section.isToday || !todayReview?.isSummaryAvailable || !todayReview.presentation) return [];
+    // Confirmed entries stay in the existing grouped History owner. This
+    // insertion path is only for typed Review/saved sources, so a completed
+    // entry from the presentation read cannot duplicate a normal row or lose
+    // its established edit/replay/delete actions.
+    return (todayReview.presentation.daySections.find((candidate) => candidate.title === "Today")?.activities ?? [])
+      .filter((activity) => activity.source.kind !== "entry");
+  }, [section.isToday, todayReview?.isSummaryAvailable, todayReview?.presentation]);
+  const incompleteReviewActivities = useMemo(() => {
+    if (!section.isToday || !todayReview?.isSummaryAvailable || !todayReview.presentation) return [];
+    return todayReview.presentation.daySections.find((candidate) => candidate.title === "Incomplete time")?.activities ?? [];
+  }, [section.isToday, todayReview?.isSummaryAvailable, todayReview?.presentation]);
+  const displayRows = useMemo(
+    () => mergeHistoryRows(entryGroups, reviewTodayActivities),
+    [entryGroups, reviewTodayActivities]
+  );
   const longestDuration = useMemo(
     () => formatDuration(Math.max(0, ...entryGroups.map((group) => group.totalSeconds))),
     [entryGroups]
@@ -2845,10 +2886,6 @@ export function HistoryDayCard({
       { range: { start: rangeStart, end: rangeEnd }, now }
     );
   }, [now, section.date, section.entries]);
-  const historyOverlapById = useMemo(
-    () => new Map(historyAnalysis.entries.map((entry) => [entry.id, entry])),
-    [historyAnalysis.entries]
-  );
   const noticeLabel = `${reviewCount} ${reviewCount === 1 ? "item needs" : "items need"} review`;
   const noticeMeasure = useIntrinsicTextMeasure(
     [noticeLabel, "Open Review"],
@@ -2891,14 +2928,38 @@ export function HistoryDayCard({
       >
         {durationMeasure.probe}
         {groupCountMeasure.probe}
-        {section.entries.length === 0 ? (
+        {displayRows.length === 0 ? (
           <Reanimated.View
             entering={localPresenceEntering(reduceMotion)}
             layout={localLayoutTransition(reduceMotion)}
           >
             <Text {...mobileTextProps("body")} style={styles.todayEmptyText}>No tracked time for this day.</Text>
           </Reanimated.View>
-        ) : entryGroups.map((group, index) => {
+        ) : displayRows.map((displayRow, index) => {
+          if (displayRow.kind === "review") {
+            const activity = displayRow.activity;
+            return (
+              <Reanimated.View
+                key={activity.presentationKey}
+                entering={localPresenceEntering(reduceMotion)}
+                exiting={localPresenceExiting(reduceMotion)}
+                layout={localLayoutTransition(reduceMotion)}
+                style={index > 0 ? styles.todayEntryDivider : null}
+              >
+                <TodayReviewRow
+                  activity={activity}
+                  committing={activity.source.kind === "review" && todayReview ? todayReview.isCommitting(activity.source.reviewItemId) : false}
+                  message={activity.source.kind === "review" && todayReview ? todayReview.messageFor(activity.source.reviewItemId) : null}
+                  nowMs={now}
+                  onOpen={() => todayReview?.openActivity(activity)}
+                  onQuickConfirm={() => todayReview?.quickConfirm(activity)}
+                  styles={styles}
+                  theme={theme}
+                />
+              </Reanimated.View>
+            );
+          }
+          const group = displayRow.group;
           const { entry } = group.representative;
           const probeId = group.entries[0].entry.id;
           const grouped = group.entries.length > 1;
@@ -2922,14 +2983,10 @@ export function HistoryDayCard({
           const timeRange = grouped
             ? `${formatEntryTimeRange(entry, now)} · ${group.entries.length} entries`
             : formatEntryTimeRange(entry, now);
-          const hasOverlap = group.entries.some(({ entry: groupedEntry }) =>
-            (historyOverlapById.get(groupedEntry.id)?.overlapCount ?? 0) > 0
-          );
           const detailContext = [
             timeRange,
             categoryPlace,
             tagNames.length ? `Tags: ${tagNames.join(", ")}` : null,
-            hasOverlap ? "Overlaps other tracked time" : null,
             duration
           ].filter(Boolean).join(". ");
           return (
@@ -2999,30 +3056,13 @@ export function HistoryDayCard({
                   ) : null}
                   <View style={[styles.todayEntryDot, { backgroundColor: entryCategoryColor(entry, theme.mode) }]} />
                   <View style={styles.todayEntryText}>
-                    <Text {...mobileTextProps("itemTitle")} style={styles.todayEntryTitle} numberOfLines={rowLayout === "stacked" ? 2 : 1} onLayout={(event) => recordMobileLayout(diagnostic, `history.title.${probeId}.frame`, event)} onTextLayout={(event) => recordMobileTextLayout(diagnostic, `history.title.${probeId}`, event, "itemTitle", styles.todayEntryTitle)}>{title}</Text>
-                    <Text {...mobileTextProps("metadata")} style={styles.todayEntryMeta} onLayout={(event) => recordMobileLayout(diagnostic, `history.time.${probeId}.frame`, event)} onTextLayout={(event) => recordMobileTextLayout(diagnostic, `history.time.${probeId}`, event, "metadata", styles.todayEntryMeta)}>
+                    <Text {...mobileTextProps("itemTitle")} style={styles.todayEntryTitle} numberOfLines={1} onLayout={(event) => recordMobileLayout(diagnostic, `history.title.${probeId}.frame`, event)} onTextLayout={(event) => recordMobileTextLayout(diagnostic, `history.title.${probeId}`, event, "itemTitle", styles.todayEntryTitle)}>{title}</Text>
+                    <Text {...mobileTextProps("metadata")} style={styles.todayEntryMeta} numberOfLines={1} onLayout={(event) => recordMobileLayout(diagnostic, `history.time.${probeId}.frame`, event)} onTextLayout={(event) => recordMobileTextLayout(diagnostic, `history.time.${probeId}`, event, "metadata", styles.todayEntryMeta)}>
                       {timeRange}
                     </Text>
-                    {categoryPlace ? (
-                      <Text {...mobileTextProps("metadata")} style={styles.todayEntryOptionalMeta} numberOfLines={rowLayout === "stacked" ? 2 : 1}>
-                        {categoryPlace}
-                      </Text>
-                    ) : null}
-                    <TagMetadata
-                      accessibilityHidden
-                      diagnostic={diagnostic}
-                      diagnosticPrefix={`history.tags.${probeId}`}
-                      styles={styles}
-                      tagNames={entry.tagNames ?? entry.tags?.map((tag) => tag.name) ?? []}
-                      theme={theme}
-                    />
-                    {hasOverlap ? (
-                      <Text
-                        {...mobileTextProps("metadata")}
-                        accessibilityLabel="Overlap"
-                        style={[styles.reviewMetaLine, { color: theme.warningText }]}
-                      >
-                        Overlap
+                    {entry.categoryName || tagNames.length ? (
+                      <Text {...mobileTextProps("metadata")} testID="history-entry-metadata" style={styles.todayEntryOptionalMeta} numberOfLines={1} ellipsizeMode="tail">
+                        {[entry.categoryName, ...tagNames].filter(Boolean).join(" · ")}
                       </Text>
                     ) : null}
                   </View>
@@ -3089,7 +3129,7 @@ export function HistoryDayCard({
                       >
                         <View style={[styles.historyGroupChildDetails, childIndex > 0 ? styles.historyGroupChildDivider : null]}>
                         <Pressable
-                          accessibilityLabel={`Edit ${displayEntryTitle(childEntry)}. ${formatEntryTimeRange(childEntry, now)}. ${formatDuration(overlapSeconds)}.${(childEntry.tagNames ?? childEntry.tags?.map((tag) => tag.name) ?? []).length ? ` Tags: ${(childEntry.tagNames ?? childEntry.tags?.map((tag) => tag.name) ?? []).join(", ")}.` : ""}${(historyOverlapById.get(childEntry.id)?.overlapCount ?? 0) > 0 ? " Overlaps other tracked time." : ""}`}
+                          accessibilityLabel={`Edit ${displayEntryTitle(childEntry)}. ${childEntry.placeName ? `Place: ${childEntry.placeName}.` : ""} ${formatEntryTimeRange(childEntry, now)}. ${formatDuration(overlapSeconds)}.${(childEntry.tagNames ?? childEntry.tags?.map((tag) => tag.name) ?? []).length ? ` Tags: ${(childEntry.tagNames ?? childEntry.tags?.map((tag) => tag.name) ?? []).join(", ")}.` : ""}`}
                           accessibilityRole="button"
                           accessibilityActions={Boolean(childEntry.stoppedAt)
                             ? [{ name: "delete", label: `Delete ${displayEntryTitle(childEntry)}` }]
@@ -3105,9 +3145,10 @@ export function HistoryDayCard({
                             pressed ? styles.buttonPressed : null
                           ]}
                         >
+                          <Text {...mobileTextProps("itemTitle")} style={styles.todayEntryTitle} numberOfLines={1} ellipsizeMode="tail">{displayEntryTitle(childEntry)}</Text>
                           <View style={styles.historyGroupChildMain}>
                             <View style={[styles.todayEntryDot, { backgroundColor: entryCategoryColor(childEntry, theme.mode) }]} />
-                            <Text {...mobileTextProps("metadata")} style={styles.historyGroupChildTime} onLayout={(event) => recordMobileLayout(diagnostic, `history.child-time.${probeId}.${childIndex}.frame`, event)} onTextLayout={(event) => recordMobileTextLayout(diagnostic, `history.child-time.${probeId}.${childIndex}`, event, "metadata", styles.historyGroupChildTime)}>
+                            <Text {...mobileTextProps("metadata")} style={styles.historyGroupChildTime} numberOfLines={1} onLayout={(event) => recordMobileLayout(diagnostic, `history.child-time.${probeId}.${childIndex}.frame`, event)} onTextLayout={(event) => recordMobileTextLayout(diagnostic, `history.child-time.${probeId}.${childIndex}`, event, "metadata", styles.historyGroupChildTime)}>
                               {formatEntryTimeRange(childEntry, now)}
                             </Text>
                             <Text
@@ -3120,25 +3161,9 @@ export function HistoryDayCard({
                             </Text>
                           </View>
                         </Pressable>
-                        <TagMetadata
-                          accessibilityHidden
-                          diagnostic={diagnostic}
-                          diagnosticPrefix={`history.child-tags.${probeId}.${childIndex}`}
-                          styles={styles}
-                          tagNames={childEntry.tagNames ?? childEntry.tags?.map((tag) => tag.name) ?? []}
-                          theme={theme}
-                        />
-                          {(historyOverlapById.get(childEntry.id)?.overlapCount ?? 0) > 0 ? (
-                            <Text
-                              {...mobileTextProps("metadata")}
-                              accessibilityLabel={`Overlap: ${formatDuration(
-                                historyOverlapById.get(childEntry.id)?.uniqueOverlapSeconds ?? 0
-                              )} shared with other entries`}
-                              style={[styles.reviewMetaLine, { color: theme.warningText }]}
-                            >
-                              Overlap
-                            </Text>
-                          ) : null}
+                        <Text {...mobileTextProps("metadata")} testID="history-entry-metadata" style={styles.todayEntryOptionalMeta} numberOfLines={1} ellipsizeMode="tail">
+                          {[childEntry.categoryName, ...(childEntry.tagNames ?? childEntry.tags?.map((tag) => tag.name) ?? [])].filter(Boolean).join(" · ")}
+                        </Text>
                         </View>
                       </SwipeableHistoryEntry>
                     </Reanimated.View>
@@ -3149,7 +3174,34 @@ export function HistoryDayCard({
           );
         })}
       </View>
-      {reviewCount > 0 ? (
+      {incompleteReviewActivities.length > 0 ? (
+        <View style={styles.todaySummaryBlock}>
+          <Text {...mobileTextProps("sectionHeading")} style={styles.historyDayTitle}>Incomplete time</Text>
+          <View style={styles.todayEntryCard}>
+            {incompleteReviewActivities.map((activity, index) => (
+              <Reanimated.View
+                key={activity.presentationKey}
+                entering={localPresenceEntering(reduceMotion)}
+                exiting={localPresenceExiting(reduceMotion)}
+                layout={localLayoutTransition(reduceMotion)}
+                style={index > 0 ? styles.todayEntryDivider : null}
+              >
+                <TodayReviewRow
+                  activity={activity}
+                  committing={activity.source.kind === "review" && todayReview ? todayReview.isCommitting(activity.source.reviewItemId) : false}
+                  message={activity.source.kind === "review" && todayReview ? todayReview.messageFor(activity.source.reviewItemId) : null}
+                  nowMs={now}
+                  onOpen={() => todayReview?.openActivity(activity)}
+                  onQuickConfirm={() => todayReview?.quickConfirm(activity)}
+                  styles={styles}
+                  theme={theme}
+                />
+              </Reanimated.View>
+            ))}
+          </View>
+        </View>
+      ) : null}
+      {reviewCount > 0 && !(section.isToday && todayReview?.isSummaryAvailable) ? (
         <View onLayout={(event) => {
           recordMobileLayout(diagnostic, "review-notice.container", event);
           const width = event?.nativeEvent?.layout?.width;
@@ -3189,6 +3241,32 @@ export function HistoryDayCard({
       />
     </View>
   );
+}
+
+type HistoryCardDisplayRow =
+  | { kind: "entry_group"; group: HistoryEntryGroup }
+  | { kind: "review"; activity: TodayActivity };
+
+/** Keeps ordinary grouping untouched while inserting typed Review rows by time. */
+function mergeHistoryRows(
+  groups: readonly HistoryEntryGroup[],
+  reviewActivities: readonly TodayActivity[]
+): HistoryCardDisplayRow[] {
+  return [
+    ...groups.map((group) => ({ kind: "entry_group" as const, group })),
+    ...reviewActivities.map((activity) => ({ kind: "review" as const, activity }))
+  ].sort((left, right) => {
+    const leftAt = left.kind === "entry_group"
+      ? Date.parse(left.group.representative.entry.startedAt)
+      : left.activity.interval?.startMs ?? left.activity.detectedAtMs ?? Number.NEGATIVE_INFINITY;
+    const rightAt = right.kind === "entry_group"
+      ? Date.parse(right.group.representative.entry.startedAt)
+      : right.activity.interval?.startMs ?? right.activity.detectedAtMs ?? Number.NEGATIVE_INFINITY;
+    if (leftAt !== rightAt) return rightAt - leftAt;
+    const leftKey = left.kind === "entry_group" ? `entry:${left.group.key}` : left.activity.presentationKey;
+    const rightKey = right.kind === "entry_group" ? `entry:${right.group.key}` : right.activity.presentationKey;
+    return leftKey.localeCompare(rightKey);
+  });
 }
 
 function dedupeEntriesById(entries: TimeEntry[]) {

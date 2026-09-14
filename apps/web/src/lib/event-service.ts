@@ -112,6 +112,7 @@ export type ReviewResolutionCode =
   | "already_resolved"
   | "mutation_id_conflict"
   | "resolution_conflict"
+  | "proposal_changed"
   | "invalid_action"
   | "invalid_category"
   | "invalid_time_window"

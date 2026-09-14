@@ -7,6 +7,7 @@ import {
   type LayoutChangeEvent,
 } from "react-native";
 import Animated, {
+  Easing,
   createAnimatedComponent,
   runOnJS,
   useAnimatedProps,
@@ -34,21 +35,34 @@ export type DonutChartSegment = {
   color: string;
   selected: boolean;
   isUncategorized?: boolean;
+  /** Opt-in Today treatment. Reports leaves this undefined. */
+  provisional?: boolean;
+  /** Opt-in source activation. Informational category arcs stay inert. */
+  interactive?: boolean;
 };
 
 export function DonutChart({
+  preferredSize = DEFAULT_SIZE,
+  entranceDuration,
   animateEntrance,
   centerLabel,
   centerValue,
+  accessibilityLabel,
+  onPressSegment,
   spokenValue,
   reduceMotion,
   segments,
   settleImmediately,
   theme,
 }: {
+  preferredSize?: number;
+  /** Today-only entrance refinement; other charts retain their timing. */
+  entranceDuration?: 360;
   animateEntrance: boolean;
+  accessibilityLabel?: string;
   centerLabel: string;
   centerValue: string;
+  onPressSegment?: (segment: DonutChartSegment) => void;
   spokenValue?: string;
   reduceMotion: boolean;
   segments: readonly DonutChartSegment[];
@@ -56,9 +70,10 @@ export function DonutChart({
   theme: MobileTheme;
 }) {
   const patternId = `uncategorized-${useId().replace(/[^a-zA-Z0-9_-]/g, "")}`;
+  const provisionalPatternId = `provisional-${useId().replace(/[^a-zA-Z0-9_-]/g, "")}`;
   const { fontScale } = useWindowDimensions();
   const [availableWidth, setAvailableWidth] = useState(DEFAULT_SIZE);
-  const size = Math.min(availableWidth, DEFAULT_SIZE);
+  const size = Math.min(availableWidth, preferredSize);
   const centerWidth = DEFAULT_CENTER_WIDTH * (size / DEFAULT_SIZE);
   const [visuals, setVisuals] = useState(() =>
     segments.map((segment, i) => ({
@@ -70,6 +85,7 @@ export function DonutChart({
   const desiredIds = useRef(segments.map((segment) => segment.id));
   desiredIds.current = segments.map((segment) => segment.id);
   const targetKey = JSON.stringify(segments);
+  const hasProvisional = segments.some((segment) => segment.provisional);
   const generationKey = useRef(targetKey);
   if (generationKey.current !== targetKey) {
     generationKey.current = targetKey;
@@ -120,7 +136,7 @@ export function DonutChart({
     <View
       accessible
       // Fabric assigns this exact label passively on iOS; no live announcement.
-      accessibilityLabel={`Category breakdown. ${centerLabel} ${spokenValue ?? centerValue}. ${segments.length} categories. Category information follows the chart.`}
+      accessibilityLabel={accessibilityLabel ?? `Category breakdown. ${centerLabel} ${spokenValue ?? centerValue}. ${segments.length} categories. Category information follows the chart.`}
       accessibilityRole="image"
       onLayout={measureAvailableWidth}
       style={styles.measurementBox}
@@ -147,6 +163,20 @@ export function DonutChart({
                 strokeWidth={1.4}
               />
             </Pattern>
+            {hasProvisional ? (
+              <Pattern
+                id={provisionalPatternId}
+                patternUnits="userSpaceOnUse"
+                width={8}
+                height={8}
+              >
+                <Path
+                  d="M-2 8 8 -2M2 10 10 2"
+                  stroke={provisionalStripe(theme)}
+                  strokeWidth={1.5}
+                />
+              </Pattern>
+            ) : null}
           </Defs>
           <Circle cx={92} cy={92} r={84} fill={theme.chartTrack} />
           {drawing.map((segment) => {
@@ -157,14 +187,22 @@ export function DonutChart({
                 id={segment.id}
                 generation={transitionGeneration}
                 animateEntrance={animateEntrance}
+                entranceDuration={entranceDuration}
                 color={
-                  segment.isUncategorized ? `url(#${patternId})` : segment.color
+                  segment.isUncategorized && !segment.provisional
+                    ? `url(#${patternId})`
+                    : segment.color
                 }
                 endAngle={segment.endAngle}
                 startAngle={segment.startAngle}
                 reduceMotion={reduceMotion}
                 selected={active}
                 settleImmediately={settleImmediately}
+                hatchFill={segment.provisional ? `url(#${provisionalPatternId})` : undefined}
+                hatchStroke={provisionalStripe(theme)}
+                onPress={active && segment.interactive && onPressSegment
+                  ? () => onPressSegment(segment)
+                  : undefined}
                 onExitComplete={completeExit}
               />
             );
@@ -212,7 +250,10 @@ export function DonutChart({
 }
 
 function AnimatedDonutSlice({
+  entranceDuration,
   id,
+  hatchFill,
+  hatchStroke,
   generation,
   animateEntrance,
   color,
@@ -222,9 +263,13 @@ function AnimatedDonutSlice({
   settleImmediately = false,
   startAngle,
   onExitComplete,
+  onPress,
 }: {
+  entranceDuration?: 360;
   animateEntrance: boolean;
   color: string;
+  hatchFill?: string;
+  hatchStroke?: string;
   endAngle: number;
   reduceMotion: boolean;
   selected: boolean;
@@ -233,6 +278,7 @@ function AnimatedDonutSlice({
   id: string;
   generation: number;
   onExitComplete: (id: string, generation: number) => void;
+  onPress?: () => void;
 }) {
   const entranceConsumed = useRef(false);
   const animatedStart = useSharedValue(startAngle);
@@ -262,10 +308,11 @@ function AnimatedDonutSlice({
       reduceMotion || settleImmediately
         ? 0
         : enterNow
-          ? 260
+          ? entranceDuration ?? 260
           : MOBILE_MOTION.layout;
-    animatedStart.value = withTiming(startAngle, { duration });
-    animatedEnd.value = withTiming(endAngle, { duration }, (finished) => {
+    const timing = { duration, ...(enterNow && entranceDuration ? { easing: Easing.out(Easing.cubic) } : {}) };
+    animatedStart.value = withTiming(startAngle, timing);
+    animatedEnd.value = withTiming(endAngle, timing, (finished) => {
       if (finished && !selected) runOnJS(onExitComplete)(id, generation);
     });
     if (enterNow) opacity.value = 0;
@@ -273,6 +320,7 @@ function AnimatedDonutSlice({
       duration: reduceMotion || settleImmediately ? 0 : MOBILE_MOTION.control,
     });
   }, [
+    entranceDuration,
     animateEntrance,
     animatedEnd,
     animatedStart,
@@ -292,7 +340,21 @@ function AnimatedDonutSlice({
     fillOpacity: opacity.value,
   }));
 
-  return <AnimatedPath animatedProps={animatedProps} fill={color} />;
+  return (
+    <>
+      <AnimatedPath animatedProps={animatedProps} fill={color} onPress={onPress} />
+      {hatchFill ? (
+        <AnimatedPath
+          animatedProps={animatedProps}
+          fill={hatchFill}
+          stroke={hatchStroke}
+          strokeWidth={1}
+          strokeDasharray="3 2"
+          pointerEvents="none"
+        />
+      ) : null}
+    </>
+  );
 }
 
 function uncategorizedFill(theme: MobileTheme) {
@@ -301,6 +363,10 @@ function uncategorizedFill(theme: MobileTheme) {
 
 function uncategorizedStripe(theme: MobileTheme) {
   return theme.mode === "dark" ? "#8792A3" : "#98A4B3";
+}
+
+function provisionalStripe(theme: MobileTheme) {
+  return theme.borderStrong;
 }
 
 const styles = StyleSheet.create({

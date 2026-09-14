@@ -1,6 +1,6 @@
 import { z } from "zod";
 import {
-  ReviewEntryEditSchema, ConfirmLocationReviewSchema, IgnoreLocationReviewSchema,
+  ReviewEntryEditSchema, IgnoreLocationReviewSchema,
   ChangePlaceAndConfirmSchema, RecordOnceLocationReviewSchema, RecordPoiOnceLocationReviewSchema,
   SavePlaceAndConfirmSchema, SplitLocationReviewSchema, MergeLocationReviewSchema
 } from "./location/schemas";
@@ -21,14 +21,22 @@ export const ReviewMutationEditSchema = ReviewEntryEditSchema.extend({
 const completeEditMutationSchema = z.object({
   action: z.literal("edit_and_confirm"), edit: ReviewMutationEditSchema
 }).strict();
-const acceptMutationSchema = z.object({ action: z.literal("accept") }).strict();
+export const ExpectedProposalHashSchema = z.string().regex(/^[a-f0-9]{64}$/);
+const acceptMutationSchema = z.object({
+  action: z.literal("accept"),
+  expectedProposalHash: ExpectedProposalHashSchema.optional()
+}).strict();
+const durableConfirmMutationSchema = z.object({
+  action: z.literal("confirm"),
+  expectedProposalHash: ExpectedProposalHashSchema.optional()
+}).strict();
 const ignoreMutationSchema = z.object({ action: z.literal("ignore_once") }).strict();
 
 export const GenericReviewMutationSchema = z.discriminatedUnion("action", [
   acceptMutationSchema, ignoreMutationSchema, completeEditMutationSchema
 ]);
 export const DurableLocationReviewMutationSchema = z.discriminatedUnion("action", [
-  ConfirmLocationReviewSchema, IgnoreLocationReviewSchema, completeEditMutationSchema,
+  durableConfirmMutationSchema, IgnoreLocationReviewSchema, completeEditMutationSchema,
   ChangePlaceAndConfirmSchema, RecordOnceLocationReviewSchema, RecordPoiOnceLocationReviewSchema,
   SavePlaceAndConfirmSchema, SplitLocationReviewSchema, MergeLocationReviewSchema
 ]);
@@ -55,8 +63,19 @@ export function validReviewAcknowledgement(body: unknown, envelope: ReviewMutati
   if (!body || typeof body !== "object" || Array.isArray(body)) return false;
   const value = body as Record<string, unknown>;
   if (value.ok !== true || value.action !== envelope.mutation.action) return false;
-  if (value.clientMutationId !== undefined && value.clientMutationId !== envelope.clientMutationId) return false;
-  if (value.reviewItemId !== undefined && value.reviewItemId !== reviewItemId) return false;
+  const expectedProposalHash = "expectedProposalHash" in envelope.mutation
+    ? envelope.mutation.expectedProposalHash
+    : undefined;
+  if (expectedProposalHash) {
+    if (
+      value.clientMutationId !== envelope.clientMutationId ||
+      value.reviewItemId !== reviewItemId ||
+      value.expectedProposalHash !== expectedProposalHash
+    ) return false;
+  } else {
+    if (value.clientMutationId !== undefined && value.clientMutationId !== envelope.clientMutationId) return false;
+    if (value.reviewItemId !== undefined && value.reviewItemId !== reviewItemId) return false;
+  }
   if (value.partial === true) return false;
   const ignore = ["ignore_once", "ignore_once_location"].includes(envelope.mutation.action);
   if (["split", "split_and_confirm"].includes(envelope.mutation.action)) {
