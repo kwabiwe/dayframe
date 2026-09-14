@@ -152,3 +152,13 @@ Manual continuity and the existing materialised/terminal-without-open-Review
 predicate exclude protected rows from writes while retaining their ID maps and
 lineage protection. Mutable conflict updates retain the original column list.
 All chunks remain in the same advisory-locked transaction and operation budget.
+
+In `v2_review`, semantic emission uses a dedicated bounded set-based path after
+the same finalisation/cutover filter. It preloads workspace saved-place and
+user-owned learned-place display/trust context, locks source events, resolves
+the shared automatic Commute category once, and writes events, missing/open
+Review items and segment event links in chunks of at most 250 rows. Existing
+terminal sources and Review decisions stay terminal; only the original refresh
+fields change. This path reads no time-entry overlaps and creates no entries.
+`v2_enabled` retains its existing per-segment automatic-policy emitter. Both
+paths use the same replay transaction, owner lock and deadlines.

@@ -328,3 +328,104 @@ Correction files: `apps/web/src/lib/location/location-replay-service.ts`,
 `docs/feature-fix-tracker.md`, and this investigation. Documentation impact is
 runtime persistence plus current investigation/tracker state; no product or
 rollout/cutover contract changed. The existing draft PR remains the handoff target.
+
+## PR #197 focused correction — v2_review semantic emission
+
+Continues approved head `787d03a63c671065162fa5143cc8c1bd9ff5a395` on the existing
+branch/PR. Owner-supplied exact-head staging evidence reports evidence upload
+HTTP 201, phase `commit`, **2,430 ms**; replay HTTP 503, `operation_timeout`, phase
+`effect`, stage **semantics**, **7,002 ms and 7,001 ms**. The owner confirms segment
+persistence now completes, rollout remains `v2_review`, semantic cutover is
+unchanged, and replay left no partial Review/output. This is supplied evidence,
+not a new hosted replay or deployment by Codex.
+
+The correction introduces a dedicated `v2_review` emitter. The existing finalised
+and post-cutover filter, persisted-ID check, minimum unknown-stay dwell and
+trusted logging suppression remain. Workspace saved places and owner-scoped
+learned links/display names are preloaded with the original trust predicates.
+Existing semantic events are locked by owner and deterministic client ID. The
+existing automatic Commute category helper/lock runs once if needed. Parameterised
+`jsonb_to_recordset` writes use deterministic chunks of at most 250 rows: source
+event upserts, missing Review inserts, open-only Review updates, and stay/commute
+event links. Conflict/update column lists and terminal preservation are unchanged.
+No Review type/status is rewritten on refresh. Segment updates touch only the
+original event-link/status/timestamp fields; manual business fields stay intact.
+
+`locationSemanticDisposition` and the `v2_enabled` emitter remain unchanged. The
+review path retains the same pure overlap assessment with an empty input, including
+its invalid-window result, and performs no overlap reads or entry writes. All
+work remains in the existing advisory-locked atomic replay transaction, with
+unchanged operation/statement/lock deadlines, retries, rollout/cutover, engine,
+lineage and capture. No schema or native/UI change.
+
+Focused PostGIS regressions cover multiple Review semantics, exact refresh and
+terminal preservation (including a terminal source without Review), saved/learned
+trust and fallback titles, logging-disabled suppression, short unknown/unpersisted
+suppression, category creation/reuse under one lock, actual segment/event links,
+workspace/user isolation, manual fields, 251-row chunk boundaries and full replay
+rollback after semantic writes and segment links for both new and existing output.
+The existing 860-observation golden semantic and lineage fingerprints are retained.
+An initial SQL recordset confidence type was corrected from numeric to the schema's
+text confidence before the passing focused run; synthetic setup columns/FKs were
+aligned with the actual schema. These were local development failures, not hosted
+evidence or changes to the data model.
+
+Final measurements and the single final validation ledger follow below.
+
+### Final semantic measurements
+
+Same disposable PostgreSQL 17.11 / PostGIS 3.6, synthetic 860-observation fixture
+and seven-second operation budget. Before values are retained final measurements
+at approved head `787d03a`; after values are the single final validation run for
+this correction. Driver counts include timeout configuration and the successful
+commit in the last observed stage. No separate before rerun was necessary.
+
+| Profile | Before total ms / calls | Before semantics ms / calls | After total ms / calls | After semantics ms / calls | Result |
+| --- | --- | --- | --- | --- | --- |
+| Normal first replay | 164 / 541 | 54 / 505 | 123 / 53 | 11 / 17 | PASS |
+| 20 ms/call repeat | 7,001 / 304 | 5,997 / 268 (incomplete) | 1,323 / 51 | 352 / 15 | PASS |
+| 40 ms/call repeat | 7,002 / 159 | 5,241 / 123 (incomplete) | 2,380 / 51 | 660 / 15 | PASS |
+
+First replay includes creating the Commute category; repeat reuses it and saves
+two guarded driver calls. The normal reduction is **488 semantic/total driver
+calls**. Segment persistence remains 14 calls and lineage remains 10. At 40 ms
+per driver call the measured replay retains 4,620 ms inside the unchanged budget.
+These are finite synthetic measurements, not p95 or hosted latency claims.
+**No remaining failure stage was observed.** No other stage was optimised.
+
+Upload stayed separate and unchanged: 100 observations passed in 9 ms / 13 calls,
+and the 20/40 ms-per-call upload profiles passed in 305/574 ms / 13 calls.
+
+The normal fixture remains **56 stays, 28 commutes, 28 Review items, zero entries,
+840 lineage links**. Its stored-field/semantic fingerprint remains
+`79008808b7458bde476a813ec5ba3419e2c692dd01121351dca894c27ca5a1e3`, and lineage
+remains `2cac2993956118d7cd548ca2abc765fecad04eca289a13e26e8b69d84bf4c899`.
+
+### Final semantic validation ledger
+
+Development used focused semantic/Postgres checks. The single final pass completed:
+
+| Check | Result |
+| --- | --- |
+| Affected Location/web tests | PASS: 10 files, 59 tests |
+| `npm run validate:location-v2-db` | PASS, including unchanged trusted-place/commute automatic policy, overlaps, cutover and terminal decisions |
+| `npm run validate:sync-transactions` | PASS |
+| `npm run validate:location-reliability` | PASS: all normal/latency profiles and correctness regressions |
+| One broad `npm run test` | PASS: web 1,234; mobile 921; shared 259; 3 existing skips |
+| Web/shared typechecks | PASS |
+| Docs check and `git diff --check` | PASS, including final documentation edits |
+
+**NOT RUN**: CI/Vercel observation, hosted replay, deployment/promotion, build,
+iOS installation, Claude, merge, mobile typecheck (the prior `expo-symbols` TS2307
+baseline remains separate). The owned local disposable database was stopped after
+validation. No user data was replayed. Hosted repair at the correction head remains
+**NOT VERIFIED** until a later explicitly authorised exact-head staging replay.
+The missing return-capture problem is not fixed by this change.
+
+Correction files: `apps/web/src/lib/location/location-ingest-service.ts`,
+`apps/web/src/lib/location/location-review-semantic-batch.ts`,
+`scripts/fixtures/location-review-semantics.ts`,
+`scripts/validate-location-reliability.ts`, `docs/architecture.md`,
+`docs/feature-fix-tracker.md`, and this investigation. Documentation impact is
+runtime persistence and current evidence/delivery state; no product, schema,
+rollout or native/UI contract changed. Existing draft PR #197 is the handoff.

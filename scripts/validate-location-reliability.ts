@@ -1,3 +1,4 @@
+import { verifyReviewSemantics } from "./fixtures/location-review-semantics";
 import { segmentPersistenceFingerprint, verifySegmentPersistence } from "./fixtures/location-segment-persistence";
 import { verifyReliabilityCorrectness, verifyLineageRollback } from "./fixtures/location-reliability-correctness";
 /** Opt-in, finite, synthetic PostgreSQL/PostGIS reliability measurements. No hosted credentials. */
@@ -117,6 +118,7 @@ async function run() {
     await ingestLocationEvidence(batch(history.slice(0,30)),peer,RELIABILITY_CLOCK);
     await replayRetainedLocationEvidence(replayRequest,peer,RELIABILITY_CLOCK);
   }
+  await verifyReviewSemantics(database,owner);
   await verifySegmentPersistence(database,retained,peers);
   // The focused protection fixture changes Review ownership intentionally; the existing independent lineage check follows.
   await verifyLineageRollback(database,retained,()=>lineage(retained),replayRequest);

@@ -1,3 +1,4 @@
+import { emitReviewSemanticSegments } from "./location-review-semantic-batch";
 import { observeLocationStage, type LocationObservation } from "./location-sync-diagnostics";
 import {
   AUTOMATIC_LOCATION_POLICY_VERSION,
@@ -252,18 +253,18 @@ async function replayAndEmitLocationSemantics(
   const finalisedSegments = replay.segments.filter((segment) => segment.status === "finalised");
   let semanticSegmentCount = 0;
   if (options.rollout.emitV2ReviewItems && options.rollout.semanticCutoverAt) {
-    for (const segment of finalisedSegments.filter((item) =>
+    const eligible = finalisedSegments.filter((item) =>
       segmentStartedAfterSemanticCutover(item.startedAt, options.rollout.semanticCutoverAt!)
-    )) {
-      const emitted = await emitSemanticSegment(
-        client,
-        session,
-        options.rollout.effectiveMode,
-        segment,
-        replay.stayIds,
-        replay.commuteIds
-      );
-      if (emitted) semanticSegmentCount += 1;
+    );
+    if (options.rollout.effectiveMode === "v2_review") {
+      semanticSegmentCount = await emitReviewSemanticSegments(client, session, eligible, replay.stayIds, replay.commuteIds);
+    } else {
+      for (const segment of eligible) {
+        const emitted = await emitSemanticSegment(
+          client, session, options.rollout.effectiveMode, segment, replay.stayIds, replay.commuteIds
+        );
+        if (emitted) semanticSegmentCount += 1;
+      }
     }
   }
   return {
