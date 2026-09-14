@@ -16,7 +16,7 @@ export type ReviewPresentationHandoverResult = {
 };
 
 /**
- * Cancellable display-proof work for one already acknowledged Review intent.
+ * Cancellable display-proof work for a bounded batch of acknowledged intents.
  * This neither delivers a mutation nor changes outbox ownership. It asks the
  * server for explicit terminal sources first, then follows only explicit
  * source-to-entry links in the same bounded lookup before the existing store

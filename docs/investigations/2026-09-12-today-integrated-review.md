@@ -1,5 +1,21 @@
 # Today + Integrated Review — Stage B evidence
 
+## 2026-09-14 bounded acknowledged handover progress
+
+Starting head: `e7e081cf3f2ffa944132b3ff1a9a3ed9d6707919`. The oldest-only
+handover selection masked newer acknowledged sources, and a Dashboard-cache
+membership requirement prevented exact out-of-window results from retiring.
+Selection now batches whole mutations deterministically within the existing
+source/result ID bounds; the hook signature covers the batch. Each mutation
+still requires all terminal sources and explicit completed/missing result proof.
+Legacy needs-review entries are not completed proof. No canonical entries are
+injected into bootstrap and no delivery owner, polling or queue is introduced.
+
+Focused SQLite, handover, hook and accounting regressions: PASS (56 tests).
+One mobile-wide pass: PASS (140 files, 1,220 tests). Docs and diff checks: PASS.
+Mobile typecheck: only the known `expo-symbols` TS2307 baseline failure.
+Physical acceptance is NOT RUN; no staging promotion or iPhone build.
+
 ## 2026-09-14 Review-first labels and modest sizing
 
 Starting head: `aefbc695f4fadd6707b20dfa53571f8b305614cc`. Horizontal leaders

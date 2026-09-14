@@ -1223,9 +1223,9 @@ export async function cacheReviewPresentation(input: {
 }
 
 /**
- * Select one whole acknowledged mutation for a terminal presentation read.
+ * Select a bounded batch of whole acknowledged mutations for a terminal read.
  * A structural action never has its affected sources split between requests;
- * subsequent foreground reads take the next acknowledged mutation. Old or
+ * one unmaterialised result cannot mask other sources in the batch. Old or
  * malformed envelopes are deliberately retained instead of being inferred as
  * resolved.
  */
@@ -1258,6 +1258,9 @@ export async function readAcknowledgedReviewHandoverLookup(input: {
     REVIEW_PRESENTATION_MAX_IDS
   );
 
+  const batch: AcknowledgedReviewHandoverLookup[] = [];
+  const sourceIds = new Set<string>();
+  const resultIds = new Set<string>();
   for (const row of rows) {
     const envelope = parseReviewMutationEnvelope(row.request_json);
     const acknowledgement = parseAcknowledgement(row.acknowledgement_json);
@@ -1283,7 +1286,12 @@ export async function readAcknowledgedReviewHandoverLookup(input: {
       // reconciliation path.
       continue;
     }
-    return {
+    const nextSources = new Set([...sourceIds, ...reviewItemIds]);
+    const nextResults = new Set([...resultIds, ...entryIds]);
+    if (nextSources.size > REVIEW_PRESENTATION_MAX_IDS || nextResults.size > REVIEW_PRESENTATION_MAX_IDS) continue;
+    reviewItemIds.forEach((id) => sourceIds.add(id));
+    entryIds.forEach((id) => resultIds.add(id));
+    batch.push({
       clientMutationId: row.client_mutation_id,
       reviewItemIds,
       entryIds,
@@ -1292,9 +1300,15 @@ export async function readAcknowledgedReviewHandoverLookup(input: {
         reviewItemIds,
         entryIds
       })
-    };
+    });
   }
-  return null;
+  if (!batch.length) return null;
+  return {
+    clientMutationId: batch[0].clientMutationId,
+    reviewItemIds: [...sourceIds].sort(),
+    entryIds: [...resultIds].sort(),
+    signature: canonicalJson(batch.map((item) => item.signature))
+  };
 }
 
 /** Reads a stable, owner- and backend-bound display snapshot without exposing
@@ -1539,7 +1553,6 @@ async function materialiseAcknowledgedReviewHandover(
   const terminalById = terminalStatusesFromPresentation(response);
   const lookupEntries = entryLookupFromPresentation(response);
   const linksByReviewId = new Map(response.links.map((link) => [link.reviewItemId, link]));
-  const dashboardEntries = await cachedDashboardEntryIds(transaction, accountKeyValue);
   for (const row of rows) {
     const envelope = parseReviewMutationEnvelope(row.request_json);
     const acknowledgement = parseAcknowledgement(row.acknowledgement_json);
@@ -1575,7 +1588,7 @@ async function materialiseAcknowledgedReviewHandover(
     const resultEntryIds = [...new Set([...acknowledgementIds, ...linkedEntryIds])];
     const materialised = resultEntryIds.every((entryId) => {
       const status = lookupEntries.get(entryId);
-      return status === "missing" || (status === "present" && dashboardEntries.has(entryId));
+      return status === "missing" || status === "present";
     });
     if (!materialised) continue;
     for (const effect of effects) {
@@ -1615,26 +1628,6 @@ function entryLookupFromPresentation(response: ReviewPresentationSnapshot) {
     if (record.kind === "missing_entry") statuses.set(record.entryId, "missing");
   }
   return statuses;
-}
-
-async function cachedDashboardEntryIds(transaction: SQLite.SQLiteDatabase, accountKeyValue: string) {
-  const row = await transaction.getFirstAsync<CachedDashboardRow>(
-    `select snapshot_json, cached_at from dashboard_snapshot_cache where account_key = ?`,
-    accountKeyValue
-  );
-  if (!row) return new Set<string>();
-  try {
-    const bootstrap = JSON.parse(row.snapshot_json) as MobileBootstrap;
-    const entries = [
-      ...bootstrap.entries,
-      ...(bootstrap.historyEntries ?? []),
-      ...(bootstrap.dayEntries ?? []),
-      ...(bootstrap.weekEntries ?? [])
-    ];
-    return new Set(entries.map((entry) => entry.id));
-  } catch {
-    return new Set<string>();
-  }
 }
 
 function parseAcknowledgement(value: string | null) {

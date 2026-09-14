@@ -141,7 +141,8 @@ export function useTodayReviewPresentation(input: Input): TodayReviewPresentatio
         }
         if (acknowledgedHandoverSignature.current === handover.signature) return;
         acknowledgedHandoverSignature.current = handover.signature;
-        // An acknowledgement is a local durable-state change, not a network
+        // The signature covers the whole bounded batch, so an older unresolved
+        // result cannot mask a newer acknowledgement. This is a local state change, not a network
         // delivery trigger. Queue one cancellable foreground read so its
         // explicit terminal/result proof can be materialised by the existing
         // store without polling or a second sync owner.

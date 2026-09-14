@@ -335,7 +335,7 @@ describe("Review real SQLite transactions", () => {
       entryIds: []
     });
   });
-  it("only retires an accepted source after a current result is in the Dashboard cache", async () => {
+  it("retires an accepted source with exact result proof outside the Dashboard cache", async () => {
     const data = bootstrap();
     const item = data.reviewItems[0];
     const entryId = syntheticId(996);
@@ -344,8 +344,21 @@ describe("Review real SQLite transactions", () => {
     await store.synchroniseReviewMutations();
     const owner = { workspaceId: data.workspace.id, userId: data.user.id, backendId: "staging-fixture" };
     const result = terminalPresentation(data, [item.id], entryId);
-    await store.cacheReviewPresentation({ owner, response: result });
+    const canonicalProof = result.lookup.entries[0];
+    const { source: _source, ...legacyFields } = canonicalProof;
+    await store.cacheReviewPresentation({ owner, response: {
+      ...result,
+      lookup: { ...result.lookup, entries: [{
+        kind: "legacy_review_entry", entryId, eventId: null, title: legacyFields.title,
+        category: legacyFields.category, place: legacyFields.place, interval: legacyFields.interval,
+        confidence: "low", status: "needs_review", updatedAt: result.capturedAt, linkedReviewItemId: item.id,
+        editor: { projectId: null, projectName: null, projectColor: null, clientName: null, placeKind: null,
+          source: "manual_app", description: null, durationSeconds: 1800, tagNames: [] }
+      }] }
+    } });
     expect(count("review_mutation_outbox")).toBe(1);
+    await store.cacheReviewPresentation({ owner, response: result });
+    expect(count("review_mutation_outbox")).toBe(0);
     const canonical = {
       ...data.entries[1],
       id: entryId,
@@ -356,6 +369,26 @@ describe("Review real SQLite transactions", () => {
     await store.cacheReviewPresentation({ owner, response: result });
     expect(count("review_mutation_outbox")).toBe(0);
     expect((await store.loadCachedReviewBootstrap())!.bootstrap.reviewItems.map((candidate) => candidate.id)).not.toContain(item.id);
+  });
+  it("batches past an unmaterialised acknowledgement so a newer exact result can clear", async () => {
+    const data = bootstrap();
+    const owner = { workspaceId: data.workspace.id, userId: data.user.id, backendId: "staging-fixture" };
+    for (let n = 0; n < 2; n++) {
+      await store.enqueueReviewMutation({ bootstrap: data, item: data.reviewItems[n], clientMutationId: syntheticId(980 + n), mutation: { action: "accept" } });
+      mocks.fetch.mockResolvedValue({ status: 200, json: async () => ({ ok: true, action: "accept", status: "accepted", entryId: syntheticId(990 + n) }) });
+      await store.synchroniseReviewMutations();
+    }
+    const batch = await store.readAcknowledgedReviewHandoverLookup({ owner });
+    expect(batch?.reviewItemIds).toEqual(data.reviewItems.slice(0, 2).map((item) => item.id).sort());
+    expect(batch?.entryIds).toEqual([syntheticId(990), syntheticId(991)]);
+    await store.cacheReviewPresentation({ owner, response: terminalPresentation(data, [data.reviewItems[1].id], syntheticId(991)) });
+    expect(db.prepare("select client_mutation_id from review_mutation_outbox").all()).toEqual([{ client_mutation_id: syntheticId(980) }]);
+    expect((await store.readAcknowledgedReviewHandoverLookup({ owner }))?.reviewItemIds).toEqual([data.reviewItems[0].id]);
+    expect((await store.loadCachedReviewBootstrap())!.bootstrap.reviewItems.map((item) => item.id)).not.toContain(data.reviewItems[1].id);
+    // Replaying the same proof neither recreates intent nor injects an entry into bootstrap.
+    await store.cacheReviewPresentation({ owner, response: terminalPresentation(data, [data.reviewItems[1].id], syntheticId(991)) });
+    expect(count("review_mutation_outbox")).toBe(1);
+    expect((await store.loadCachedReviewBootstrap())!.bootstrap.entries.filter((entry) => entry.id === syntheticId(991))).toHaveLength(0);
   });
   it("follows an explicit source link before retiring an equivalent acknowledgement without an entry receipt", async () => {
     const data = bootstrap();
