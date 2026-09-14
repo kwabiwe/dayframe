@@ -13,7 +13,8 @@ describe("layoutTodayDonutLabels", () => {
       expect(label.side).toBe(label.anchor.x < 195 ? "left" : "right");
       const points = label.connector.match(/-?\d+(?:\.\d+)?/g)!.map(Number);
       expect(points[1]).toBe(points[3]);
-      expect(Math.abs(points[2] - points[0])).toBeCloseTo(8);
+      expect(Math.abs(points[2] - points[0])).toBeGreaterThan(0);
+      expect(Math.abs(points[2] - (label.side === "left" ? label.x + label.width : label.x))).toBeCloseTo(4);
       expect(Math.hypot(points[0] - 195, points[1] - 92)).toBeGreaterThan(84);
       expect(label.y).toBeGreaterThanOrEqual(0);
       expect(label.y + label.height).toBeLessThanOrEqual(184);
@@ -24,6 +25,34 @@ describe("layoutTodayDonutLabels", () => {
     }
     expect(labels.length).toBeLessThan(candidates.length);
     expect(labels.some((label) => label.id === "3")).toBe(true);
+  });
+
+  it("extends horizontal leaders to text with geometry-dependent lengths", () => {
+    const labels = layoutTodayDonutLabels({ availableWidth: 390, chartSize: 200, measuredWidths: {},
+      candidates: [1, 2, 3].map((valueMs, i) => ({ id: String(i), title: "Title", valueMs, provisional: false })) });
+    const lengths = labels.map((label) => {
+      const [x1, y1, x2, y2] = label.connector.match(/-?\d+(?:\.\d+)?/g)!.map(Number);
+      expect(y1).toBe(y2);
+      const radius = 200 * 84 / 184;
+      const perimeter = Math.sqrt(radius ** 2 - (y1 - 100) ** 2);
+      expect(Math.abs(x1 - 195) - perimeter).toBeCloseTo(6);
+      expect(Math.abs(x2 - (label.side === "left" ? label.x + label.width : label.x))).toBeCloseTo(4);
+      return Math.abs(x2 - x1);
+    });
+    expect(new Set(lengths).size).toBeGreaterThan(1);
+  });
+
+  it("prioritises a tiny Review label over larger confirmed sources at capacity and collision", () => {
+    const candidates = [
+      { id: "tiny", title: "Review", valueMs: 1, provisional: true },
+      { id: "competing", title: "Confirmed", valueMs: 2, provisional: false },
+      { id: "large", title: "Confirmed", valueMs: 97, provisional: false }
+    ];
+    const input = { availableWidth: 390, chartSize: 200, candidates, measuredWidths: {} };
+    expect(layoutTodayDonutLabels({ ...input, maxLabels: 1 }).map((label) => label.id)).toEqual(["tiny"]);
+    const labels = layoutTodayDonutLabels(input);
+    expect(labels.map((label) => label.id)).toContain("tiny");
+    expect(labels.map((label) => label.id)).not.toContain("competing");
   });
 
   it("omits a label whose measured complete duration cannot fit rather than clipping it", () => {

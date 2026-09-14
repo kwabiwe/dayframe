@@ -9,7 +9,10 @@ import { layoutTodayDonutLabels } from "../../lib/todayDonutLabels";
 import type { MobileTheme } from "../../lib/mobileTheme";
 import { mobileTextProps } from "../../lib/mobileTypography";
 
-const CHART_SIZE = 184;
+export function todayDonutSize(width: number, fontScale: number) {
+  if (fontScale > 1.15 || width < 340) return 184;
+  return width >= 420 ? 208 : 200;
+}
 
 export function TodayReviewDonut({
   animateEntrance,
@@ -32,6 +35,7 @@ export function TodayReviewDonut({
 }) {
   const { fontScale } = useWindowDimensions();
   const [availableWidth, setAvailableWidth] = useState(0);
+  const chartSize = todayDonutSize(availableWidth, fontScale);
   const activityBySegmentId = useMemo(() => new Map(segments.flatMap((segment) => {
     const activity = activityForSegment(segment, activities);
     return activity ? [[segment.id, activity] as const] : [];
@@ -63,7 +67,7 @@ export function TodayReviewDonut({
     if (!availableWidth || segments.length === 0) return [];
     return layoutTodayDonutLabels({
       availableWidth,
-      chartSize: CHART_SIZE,
+      chartSize,
       candidates: segments.map((segment) => ({
         id: segment.id,
         title: labelText(segment),
@@ -74,7 +78,7 @@ export function TodayReviewDonut({
       durationWidths: Object.fromEntries(segments.map((segment) => [segment.id, labelMeasure.widths[formatDuration(segment.valueMs)] ?? Infinity])),
       rowHeight: Math.max(44, 28 * Math.min(fontScale, 1.3) + 4)
     });
-  }, [availableWidth, measuredWidths, segments, labelMeasure.widths, fontScale]);
+  }, [availableWidth, chartSize, measuredWidths, segments, labelMeasure.widths, fontScale]);
 
   return (
     <View
@@ -86,9 +90,10 @@ export function TodayReviewDonut({
       style={styles.root}
     >
       {labelMeasure.probe}
-      <View style={[styles.canvas, { height: CHART_SIZE }]}>
+      <View style={[styles.canvas, { height: chartSize }]}>
         <View style={styles.chartLayer}>
           <DonutChart
+            preferredSize={chartSize}
             accessibilityLabel={completedLoggedMs === null ? "Today. Total logged unavailable." : `Today completed activity. Total logged ${spokenDuration(completedLoggedMs)}. ${segments.filter((segment) => segment.provisional).length} pending Review ${segments.filter((segment) => segment.provisional).length === 1 ? "item" : "items"}.`}
             animateEntrance={animateEntrance && chartSegments.length > 0}
             entranceDuration={360}
@@ -105,7 +110,7 @@ export function TodayReviewDonut({
             theme={theme}
           />
         </View>
-        <Svg pointerEvents="none" accessible={false} accessibilityElementsHidden width={availableWidth} height={CHART_SIZE} style={StyleSheet.absoluteFill}>
+        <Svg pointerEvents="none" accessible={false} accessibilityElementsHidden width={availableWidth} height={chartSize} style={StyleSheet.absoluteFill}>
           {labels.map((label) => <Path key={label.id} d={label.connector} stroke={theme.borderStrong} strokeWidth={1} fill="none" />)}
         </Svg>
         {labels.map((label) => {

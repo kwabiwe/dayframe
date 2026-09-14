@@ -26,7 +26,7 @@ vi.mock("../charts/DonutChart", () => ({
   DonutChart: (props: object) => createElement("View", { testID: "today-donut-chart", ...props })
 }));
 
-import { TodayReviewDonut } from "./TodayReviewDonut";
+import { TodayReviewDonut, todayDonutSize } from "./TodayReviewDonut";
 
 const theme = {
   borderStrong: "border",
@@ -36,13 +36,21 @@ const theme = {
 } as never;
 
 describe("TodayReviewDonut", () => {
+  it("modestly grows only when width and Dynamic Type leave label room", () => {
+    expect(todayDonutSize(350, 1)).toBe(200);
+    expect(todayDonutSize(440, 1)).toBe(208);
+    expect(todayDonutSize(320, 1)).toBe(184);
+    expect(todayDonutSize(440, 1.3)).toBe(184);
+  });
   it("keeps the chart mounted at its final height from unknown placeholder to real slices", () => {
     let tree!: ReturnType<typeof create>;
     const render = (ready: boolean) => <TodayReviewDonut activities={[]} animateEntrance completedLoggedMs={ready ? 3_600_000 : null} isFocused onOpenActivity={vi.fn()} reduceMotion={false} segments={ready ? segments() : []} theme={theme} />;
     act(() => { tree = create(render(false)); });
+    act(() => tree.root.findByProps({ testID: "today-review-donut" }).props.onLayout({ nativeEvent: { layout: { width: 390 } } }));
     const chart = tree.root.findByProps({ testID: "today-donut-chart" });
-    const canvas = tree.root.findAllByType("View" as never).find((node) => Array.isArray(node.props.style) && node.props.style.some((style: { height?: number }) => style?.height === 184))!;
-    expect(canvas.props.style).toContainEqual({ height: 184 });
+    const canvas = tree.root.findAllByType("View" as never).find((node) => Array.isArray(node.props.style) && node.props.style.some((style: { height?: number }) => style?.height === 200))!;
+    expect(canvas.props.style).toContainEqual({ height: 200 });
+    expect(chart.props.preferredSize).toBe(200);
     expect(chart.props).toMatchObject({ centerLabel: "Total logged", centerValue: "—", segments: [], animateEntrance: false });
     expect(tree.root.findAllByType("Path" as never)).toHaveLength(0);
     const canvasStyle = canvas.props.style;
@@ -102,6 +110,8 @@ describe("TodayReviewDonut", () => {
     expect(labels).toHaveLength(1);
     act(() => labels[0].props.onPress());
     expect(onOpenActivity).toHaveBeenCalledTimes(2);
+    expect(onOpenActivity).toHaveBeenLastCalledWith(activity());
+    expect(labels[0].props.hitSlop).toBeUndefined();
   });
 });
 

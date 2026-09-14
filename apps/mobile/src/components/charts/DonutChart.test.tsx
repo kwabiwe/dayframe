@@ -63,6 +63,7 @@ vi.mock("@/lib/motion", () => ({
 import { DonutChart } from "./DonutChart";
 
 const theme = {
+  borderStrong: "border",
   chartTrack: "track",
   mode: "dark",
   surfaceRaised: "raised",
@@ -357,6 +358,9 @@ describe("DonutChart", () => {
     const pending = paths.find((path) => path.props.fill === "coral");
     expect(pending?.props.onPress).toBeTypeOf("function");
     expect(paths.some((path) => String(path.props.fill).startsWith("url(#provisional-"))).toBe(true);
+    const hatch = paths.find((path) => String(path.props.fill).startsWith("url(#provisional-"))!;
+    expect(hatch.props).toMatchObject({ stroke: "border", strokeWidth: 1, strokeDasharray: "3 2", pointerEvents: "none" });
+    expect(paths.filter((path) => path.props.strokeDasharray)).toHaveLength(1);
     act(() => pending!.props.onPress());
     expect(onPressSegment).toHaveBeenCalledWith(expect.objectContaining({ id: "pending", provisional: true }));
   });

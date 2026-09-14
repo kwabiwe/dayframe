@@ -42,6 +42,7 @@ export type DonutChartSegment = {
 };
 
 export function DonutChart({
+  preferredSize = DEFAULT_SIZE,
   entranceDuration,
   animateEntrance,
   centerLabel,
@@ -54,6 +55,7 @@ export function DonutChart({
   settleImmediately,
   theme,
 }: {
+  preferredSize?: number;
   /** Today-only entrance refinement; other charts retain their timing. */
   entranceDuration?: 360;
   animateEntrance: boolean;
@@ -71,7 +73,7 @@ export function DonutChart({
   const provisionalPatternId = `provisional-${useId().replace(/[^a-zA-Z0-9_-]/g, "")}`;
   const { fontScale } = useWindowDimensions();
   const [availableWidth, setAvailableWidth] = useState(DEFAULT_SIZE);
-  const size = Math.min(availableWidth, DEFAULT_SIZE);
+  const size = Math.min(availableWidth, preferredSize);
   const centerWidth = DEFAULT_CENTER_WIDTH * (size / DEFAULT_SIZE);
   const [visuals, setVisuals] = useState(() =>
     segments.map((segment, i) => ({
@@ -197,6 +199,7 @@ export function DonutChart({
                 selected={active}
                 settleImmediately={settleImmediately}
                 hatchFill={segment.provisional ? `url(#${provisionalPatternId})` : undefined}
+                hatchStroke={provisionalStripe(theme)}
                 onPress={active && segment.interactive && onPressSegment
                   ? () => onPressSegment(segment)
                   : undefined}
@@ -250,6 +253,7 @@ function AnimatedDonutSlice({
   entranceDuration,
   id,
   hatchFill,
+  hatchStroke,
   generation,
   animateEntrance,
   color,
@@ -265,6 +269,7 @@ function AnimatedDonutSlice({
   animateEntrance: boolean;
   color: string;
   hatchFill?: string;
+  hatchStroke?: string;
   endAngle: number;
   reduceMotion: boolean;
   selected: boolean;
@@ -342,6 +347,9 @@ function AnimatedDonutSlice({
         <AnimatedPath
           animatedProps={animatedProps}
           fill={hatchFill}
+          stroke={hatchStroke}
+          strokeWidth={1}
+          strokeDasharray="3 2"
           pointerEvents="none"
         />
       ) : null}

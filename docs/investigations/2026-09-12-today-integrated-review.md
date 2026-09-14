@@ -1,5 +1,25 @@
 # Today + Integrated Review — Stage B evidence
 
+## 2026-09-14 Review-first labels and modest sizing
+
+Starting head: `aefbc695f4fadd6707b20dfa53571f8b305614cc`. Horizontal leaders
+now span from a 6 pt perimeter gap to a 4 pt text-block gap. Review labels
+claim collision-free slots before confirmed labels, with duration ordering
+within each state. Provisional slices retain hatching and add a neutral dashed
+outline. Exact-item label/slice actions and the Open Review count remain under
+their existing owners, without enlarged hit areas or accounting changes.
+
+Today uses 200 pt at ordinary measured widths, 208 pt at widths of at least
+420 pt, and 184 pt below 340 pt or above 1.15 font scale. This sizing is independent
+of loading/data state; the neutral placeholder and populated chart share it.
+DonutChart retains the existing entrance/update/exit and interruption owner,
+360 ms Today entrance and immediate Reduce Motion settling. No async mutation,
+rollback, navigation or focus changes are introduced.
+
+Automated evidence: PASS 29 focused tests; PASS one mobile-wide pass (140 files,
+1,219 tests); mobile typecheck reports only the existing `expo-symbols` TS2307.
+Physical visual/motion/VoiceOver acceptance is NOT RUN; no iPhone build or install.
+
 This is an implementation evidence trail for Stage B. Delivery status belongs
 in the [feature tracker](../feature-fix-tracker.md); product and runtime
 contracts remain owned by the PRD, architecture and canonical references.

@@ -73,6 +73,7 @@ describe("TodayReviewSummary", () => {
     });
     expect(text).toContain("+ 30m awaiting review");
     expect(text).toContain("1 confirmation syncing");
+    expect(text).toContain("2 items to review · 1 today");
     const actions = tree.root.findAllByType("Pressable" as never);
     expect(actions).toHaveLength(1);
     act(() => actions[0].props.onPress());
