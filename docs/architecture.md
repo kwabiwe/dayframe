@@ -144,3 +144,11 @@ result, each retaining its last success. Reads/exports revalidate ownership;
 logout/replacement invalidates diagnostics. Diagnostic writes cannot change
 acknowledgements or retry scheduling. Settings alone exposes these safe details.
 No queue, native owner, rollout policy, retention window or deadline changes.
+
+Replay segment persistence locks matching stays, then commutes after resolving
+actual persisted stay IDs. Each kind uses owner/user/device-scoped `FOR UPDATE`
+reads and parameterised writes in deterministic chunks of at most 250 rows.
+Manual continuity and the existing materialised/terminal-without-open-Review
+predicate exclude protected rows from writes while retaining their ID maps and
+lineage protection. Mutable conflict updates retain the original column list.
+All chunks remain in the same advisory-locked transaction and operation budget.

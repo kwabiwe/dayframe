@@ -1,3 +1,4 @@
+import { segmentPersistenceFingerprint, verifySegmentPersistence } from "./fixtures/location-segment-persistence";
 import { verifyReliabilityCorrectness, verifyLineageRollback } from "./fixtures/location-reliability-correctness";
 /** Opt-in, finite, synthetic PostgreSQL/PostGIS reliability measurements. No hosted credentials. */
 import assert from "node:assert/strict";
@@ -61,7 +62,7 @@ async function measure(label:string, session:RequestSession, evidence:LocationEv
   const report={label,baseline,delayMs,observations:evidence?.length??860,outcome:error?"FAIL":"PASS",
     elapsedMs:Math.round(performance.now()-began),queries,evidenceInserts:inserts,lineageInserts,
     stages:Object.fromEntries(Object.entries(stages).map(([name,v])=>[name,{queries:v.queries,ms:Math.round(v.ms)}])),
-    ...(error?{failure:syncFailureMetadata(error)}:{})};
+    ...(error?{failure:{...syncFailureMetadata(error),locationStage:stage}}:{})};
   console.log(JSON.stringify(report));
   if(!error&&evidence)assert.equal(inserts,baseline?evidence.length:1);
   if(!delayMs)assert.ifError(error);
@@ -99,13 +100,25 @@ async function run() {
     (select count(*)::int from commute_segments where workspace_id=$1) commutes,
     (select count(*)::int from review_items where workspace_id=$1) reviews,
     (select count(*)::int from time_entries where workspace_id=$1) entries`,[retained.workspaceId])).rows[0];
-  assert(counts.stays>=28&&counts.commutes>=20&&counts.reviews>=20,"Fixture must produce substantial unknown-endpoint Review output");
+  assert.deepEqual(counts,{stays:56,commutes:28,reviews:28,entries:0});
   assert.equal(counts.entries,0);assert(links.length>500);assert(local.result);
   console.log(JSON.stringify({fixture:"seven-day-860",...counts,lineage:links.length,lineageHash:createHash("sha256").update(JSON.stringify(links)).digest("hex")}));
+  const segmentAndSemanticHash = await segmentPersistenceFingerprint(database,retained);
+  assert.equal(segmentAndSemanticHash,"79008808b7458bde476a813ec5ba3419e2c692dd01121351dca894c27ca5a1e3","Stored fields/semantics differ from reviewed-head baseline");
+  assert.equal(createHash("sha256").update(JSON.stringify(links)).digest("hex"),"2cac2993956118d7cd548ca2abc765fecad04eca289a13e26e8b69d84bf4c899");
+  console.log(JSON.stringify({segmentAndSemanticHash}));
   for(const delay of correctnessOnly ? [] : [20,40]){
     await measure("replay-860",retained,null,delay);
     assert.deepEqual(await lineage(retained),links,"Failed replay must rollback; successful replay must preserve exact lineage");
   }
+  const isolationOwner=await owner();
+  const peers=[{...isolationOwner,workspaceId:retained.workspaceId},{...retained,workspaceId:isolationOwner.workspaceId}];
+  for (const peer of peers) {
+    await ingestLocationEvidence(batch(history.slice(0,30)),peer,RELIABILITY_CLOCK);
+    await replayRetainedLocationEvidence(replayRequest,peer,RELIABILITY_CLOCK);
+  }
+  await verifySegmentPersistence(database,retained,peers);
+  // The focused protection fixture changes Review ownership intentionally; the existing independent lineage check follows.
   await verifyLineageRollback(database,retained,()=>lineage(retained),replayRequest);
   await verifyReliabilityCorrectness({database,owner,batch});
   if(stressFailed){ console.log("FAIL: synthetic-latency replay budget remains blocked; stop for scope decision."); process.exitCode=1; }

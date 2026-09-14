@@ -214,3 +214,117 @@ schema application was disposable setup, not a hosted migration.
 - `scripts/fixtures/location-reliability-correctness.ts`
 - `scripts/fixtures/location-reliability.ts`
 - `scripts/validate-location-reliability.ts`
+
+## PR #197 focused correction — segment persistence
+
+This correction continues `codex/location-reliability` from reviewed head
+`b96aa11b2c1ac77bf860d5f366d7b0e67711fb98`. It does not reopen the initial plan's
+later jobs. The user explicitly authorises only set-based segment persistence
+and local validation, then a commit/push to this existing draft PR.
+
+### Supplied hosted evidence
+
+The owner reports the exact reviewed head was promoted to stable staging:
+
+- Upload HTTP 201 in **1,302 ms**, phase `commit`; **262 retained evidence records**
+  acknowledged and all **seven pending batches** cleared.
+- Replay HTTP 503, `location_processing_busy`, `operation_timeout`, phase `effect`,
+  stage **`segment_persistence`**, duration **7,001 ms**.
+- Rollout remains `v2_review`, semantic cutover is unchanged, and the failed
+  transaction produced no partial Review/output.
+
+This establishes the remaining hosted timeout stage and, together with the
+342-call local segment profile, supports targeting its per-segment round-trip
+amplification. These are owner-supplied hosted results, not a new hosted inspection
+by Codex. Hosted repair at the correction head is **NOT VERIFIED**; it requires a
+later explicitly authorised exact-head staging replay. Capture remains outside scope.
+
+### Exact correction and preservation
+
+Only production file `location-replay-service.ts` changes. For stays, sort engine
+client IDs deterministically, lock existing matches in chunks of at most 250 with
+workspace/user/device scope and `FOR UPDATE`, then retain IDs for rows whose
+continuity is `manual` or whose non-null `created_from_event_id` has no owner-scoped
+open Review. Those rows never enter the write batch. Parameterised VALUES upserts
+persist only mutable/new rows, returning both client and database IDs. The map
+includes protected and upserted stays. Commutes resolve their actual from/to stay
+IDs from this map, omit unresolved relationships as before, then follow the same
+lock/partition/upsert flow.
+
+The 250-row limit caps stays at 5,250 and commutes at 5,750 SQL parameters per write.
+No per-segment SQL remains. The conflict targets, insert mapping, update column
+lists, open-Review predicate and created-from-event semantics are unchanged. All
+locks/chunks share the original transaction, advisory lock and deadlines. Engine,
+semantic emission, lineage implementation, upload, diagnostics, capture, retries,
+rollout/cutover and native/mobile code are unchanged. No migration or new owner.
+
+### Regression and baseline evidence
+
+The new real-Postgres fixture first ran against the old persistence implementation
+and then the bulk implementation. It covers multiple/mutable/new stays/commutes,
+full protected row equivalence including `updated_at`, exact open-Review behavior,
+actual commute foreign keys and protected ID maps, owner/workspace/device isolation,
+idempotency, second-segment-write rollback of segments/lineage/Review/events, and
+unchanged protected lineage. A fixture-only wrong Review column name was corrected
+to the actual `event_id` before the passing baseline run.
+
+The 860-observation fixture asserts exactly **56 stays, 28 commutes, 28 Review items,
+0 entries**. Complete stored business fields plus semantic output, normalising
+only generated database identities/timestamps, match the pre-batching SHA-256:
+`79008808b7458bde476a813ec5ba3419e2c692dd01121351dca894c27ca5a1e3`.
+The 840-link lineage hash remains
+`2cac2993956118d7cd548ca2abc765fecad04eca289a13e26e8b69d84bf4c899`.
+
+Passing focused baseline: **212 ms / 869 total driver calls**, with segment
+persistence **55 ms / 342 calls**. Initial passing bulk profile: **165 ms / 541 calls**,
+with segment persistence **11 ms / 14 calls**. The 14 calls include the unchanged
+three supersession statements plus one lock and one write per segment kind, each
+with its timeout-configuration call. The 505 semantic/commit calls are unchanged.
+Final bounded measurements and validation are recorded below before handoff.
+### Final correction measurements and stop decision
+
+Disposable local PostgreSQL 17.11 / PostGIS 3.6 only; same synthetic 860-observation
+fixture and existing seven-second operation budget. Driver counts include timeout
+configuration calls. The normal before row is the passing pre-change focused run;
+synthetic before rows are retained reviewed-head measurements above. After rows are
+from the single final validation pass.
+
+| Profile | Before replay ms / calls | Before segment ms / calls | After replay ms / calls | After segment ms / calls | After outcome |
+| --- | --- | --- | --- | --- | --- |
+| Local, no delay | 212 / 869 | 55 / 342 | 164 / 541 | 11 / 14 | PASS |
+| 20 ms / driver call | 7,002 / 307 | 6,655 / 295 (incomplete) | 7,001 / 304 | 343 / 14 (complete) | FAIL: `semantics` |
+| 40 ms / driver call | 7,003 / 162 | 6,426 / 150 (incomplete) | 7,002 / 159 | 629 / 14 (complete) | FAIL: `semantics` |
+
+Both synthetic failures are `operation_timeout`, phase `effect`. Semantic emission
+consumed 5,997 ms / 268 calls at 20 ms and 5,241 ms / 123 calls at 40 ms before
+rollback. The failure moved to a different stage, triggering the user's stop
+condition: **no semantic optimisation was attempted**. Segment persistence loses
+328 driver calls; total successful replay loses the same 328 calls. Local success
+is not evidence of hosted repair or a missing return-capture fix.
+
+Upload was measured separately by the unchanged runner: 1 / 25 / 100 observations
+completed in 8 / 6 / 9 ms; the delayed upload profiles completed in 304 ms (20 ms)
+and 572 ms (40 ms). All passed. Upload production code is unchanged in this correction.
+
+### Final validation ledger
+
+- **PASS** focused affected web/Location tests: 10 files, 59 tests.
+- **PASS** `npm run validate:location-v2-db` against disposable PostGIS.
+- **PASS** `npm run validate:sync-transactions` against disposable PostGIS.
+- **FAIL** `npm run validate:location-reliability` overall: both synthetic replay
+  profiles time out at `semantics`; normal replay, upload, exact fingerprints,
+  segment preservation/isolation/idempotency/rollback, lineage rollback and the
+  remaining correctness checks pass.
+- **PASS** one broad `npm run test`: web 1,234; mobile 921 (3 skipped); shared 259.
+- **PASS** web and shared typechecks.
+- **PASS** docs check and `git diff --check`, also checked after final documentation edits.
+- **NOT RUN** hosted replay, CI/Vercel inspection, deployment/promotion, native/iOS
+  build/install, Claude or merge. Mobile typecheck was not rerun; the previously
+  recorded `expo-symbols` TS2307 baseline remains separate.
+
+Correction files: `apps/web/src/lib/location/location-replay-service.ts`,
+`scripts/fixtures/location-segment-persistence.ts`,
+`scripts/validate-location-reliability.ts`, `docs/architecture.md`,
+`docs/feature-fix-tracker.md`, and this investigation. Documentation impact is
+runtime persistence plus current investigation/tracker state; no product or
+rollout/cutover contract changed. The existing draft PR remains the handoff target.
