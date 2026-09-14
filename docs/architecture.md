@@ -124,3 +124,23 @@ When changing a boundary above:
 3. Add a focused executable regression for the changed boundary.
 4. Select commands and hands-on evidence from `.codex/reference/validation-matrix.md`.
 5. Run `npm run check:docs` before opening the PR.
+
+### Location reliability observations and bounded writes
+
+Evidence upload validates/classifies the complete batch before the existing
+workspace/user lock, bounded retention cleanup and coordinate-free event summary.
+One parameterised evidence insert writes up to 100 observations in that same
+transaction. First occurrence, conflict acknowledgement and original expiry are
+preserved. Upload does not emit journey semantics; retained-evidence replay does.
+Replay replaces only unprotected lineage in bounded 250-row inserts under the
+same lock, client and commit. Manual/terminal links remain untouched.
+
+Location POST routes issue independent random request IDs and one allowlisted
+completion record. Success JSON stays unchanged; headers carry correlation and
+server duration. Failure phase describes the transaction owner, while a substage
+is included only when applicable to service work. Mobile's existing Location
+metadata owner stores one backend/account-bound upload result and one processing
+result, each retaining its last success. Reads/exports revalidate ownership;
+logout/replacement invalidates diagnostics. Diagnostic writes cannot change
+acknowledgements or retry scheduling. Settings alone exposes these safe details.
+No queue, native owner, rollout policy, retention window or deadline changes.

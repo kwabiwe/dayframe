@@ -30,7 +30,8 @@
     "validate:integration-token-security": "tsx scripts/validate-integration-token-security.ts",
     "testflight:preflight": "node scripts/dayframe-testflight-preflight.mjs",
     "validate:sync-transactions": "tsx scripts/validate-sync-transactions.ts",
-    "validate:health-sync-units": "tsx scripts/validate-health-sync-units.ts"
+    "validate:health-sync-units": "tsx scripts/validate-health-sync-units.ts",
+    "validate:location-reliability": "tsx scripts/validate-location-reliability.ts"
   },
   "devDependencies": {
     "@types/node": "^26.0.0",

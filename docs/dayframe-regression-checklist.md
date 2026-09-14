@@ -386,3 +386,24 @@ Before merging implementation PRs, ask KB to test the exact Ready Preview promot
 - [ ] A matching committed receipt wins after request timeout; reused IDs with different payloads conflict; logical Sleep equivalence requires explicit provenance and preserves metadata/user edits.
 - [ ] One slow Health reprocess unit does not hold later candidate rows or discard committed siblings; cursor continuation reaches later work and returns truthful partial/remaining results.
 - [ ] The named production Review, missing Sleep and missing commute have separate source-to-visible-state evidence. Empty queues, accepted status alone and green tests are insufficient incident closure.
+
+## Location reliability
+
+- [ ] Maximum evidence batch uses one insert, preserves every mapped field and
+  first duplicate, acknowledges conflicts/rejections only after atomic commit,
+  and never refreshes retained expiry on retry.
+- [ ] Real PostGIS replay produces qualifying unknown-endpoint Review without
+  automatic entries; missing return evidence does not invent a commute.
+- [ ] Lineage chunks retain original ordering/roles and protected manual/terminal
+  links; a failed later chunk restores the entire prior transaction.
+- [ ] Upload/replay completion and driver-query timings are measured separately;
+  contention, acquisition, statement and total deadlines retain honest phases.
+- [ ] Settings/export show safe separate upload/processing results and last success,
+  including replay failure with an empty queue. Success clears only its endpoint.
+- [ ] Hostile bodies/headers never leak into diagnostics; auth/session/backend
+  replacement and logout invalidate old results, and optional diagnostic failures
+  cannot trigger redelivery or poison the serial queue.
+- [ ] Seven/305 pending observations drain in finite existing maximum-five passes,
+  retaining immutable IDs, backoff, cutover and journal ownership.
+- [ ] Existing Settings disclosure, wrapping/selectable text, VoiceOver and Reduce
+  Motion work at large Dynamic Type on the separately approved staging build.

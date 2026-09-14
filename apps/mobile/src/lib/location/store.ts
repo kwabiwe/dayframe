@@ -3,6 +3,11 @@ import {MobileHttpResponseError, isMobileTransportFailure} from "../mobile-netwo
 import type {SyncLaneOutcome} from "../syncLane";
 import * as SQLite from "expo-sqlite";
 import {
+  parseLocationSyncAttempt,
+  parseLocationSyncDiagnostics,
+  type LocationSyncAttempt,
+  type LocationSyncEndpoint,
+  type LocationSyncDiagnostics,
   LOCATION_ENGINE_V2_CONFIG,
   LocationEvidenceBatchRequestSchema,
   LocationEvidenceSchema,
@@ -29,7 +34,7 @@ import {
   type MobileAccountOwner
 } from "../mobileAccount";
 import { createSerialMutationQueue } from "./mutationQueue";
-import { fetchLocationSync } from "./network";
+import { fetchLocationSync, locationResponseDiagnostics, LocationHttpResponseError } from "./network";
 import {
   executeOwnedLocationRequest,
   prepareOwnedLocationBatch
@@ -62,6 +67,8 @@ export type LocationAccountContext = {
 };
 
 export type LocationStoreDiagnostics = {
+  uploadAttempt?: LocationSyncAttempt | null;
+  replayAttempt?: LocationSyncAttempt | null;
   engineVersion: string;
   rolloutMode: LocationRolloutMode;
   accountConfigured: boolean;
@@ -200,12 +207,60 @@ async function setMetadata(key: string, value: string, transaction?: SQLite.SQLi
   );
 }
 
+type OwnedDiagnosticMetadata = Partial<LocationStoreDiagnostics> & {
+  diagnosticBinding?: { version: 1; backend: string; account: string };
+};
+function parseOwnedDiagnosticMetadata(raw: string | null | undefined): OwnedDiagnosticMetadata {
+  try {
+    const value: unknown = JSON.parse(raw ?? "{}");
+    return value && typeof value === "object" && !Array.isArray(value) ? value as OwnedDiagnosticMetadata : {};
+  } catch { return {}; }
+}
+function diagnosticsBelongTo(value: OwnedDiagnosticMetadata, key: string) {
+  return value.diagnosticBinding?.version === 1 && value.diagnosticBinding.backend === DAYFRAME_API_BASE &&
+    value.diagnosticBinding.account === key;
+}
 async function updateOwnedDiagnostics(key: string, patch: Partial<LocationStoreDiagnostics>, transaction: SQLite.SQLiteDatabase) {
-  const metadataKey = `sync_diagnostics:${key}`;
-  const row = await transaction.getFirstAsync<MetadataRow>("select value from location_store_metadata where key=?", metadataKey);
-  let previous: Partial<LocationStoreDiagnostics> = {};
-  try { previous = JSON.parse(row?.value ?? "{}"); } catch { /* Retain journals if diagnostic metadata is damaged. */ }
-  await setMetadata(metadataKey, JSON.stringify({...previous,...patch}), transaction);
+  // Diagnostic failure cannot rollback an acknowledgement or change a retry decision.
+  try {
+    const metadataKey = `sync_diagnostics:${key}`;
+    const row = await transaction.getFirstAsync<MetadataRow>("select value from location_store_metadata where key=?", metadataKey);
+    const previous = parseOwnedDiagnosticMetadata(row?.value);
+    const compatible = diagnosticsBelongTo(previous, key);
+    const mergeAttempt = (endpoint: LocationSyncEndpoint, next: LocationSyncAttempt | null | undefined, prior: unknown) => {
+      const previousAttempt = compatible ? parseLocationSyncAttempt(prior, endpoint) : null;
+      return next ? parseLocationSyncAttempt({...next, lastSuccessAt: next.outcome === "success" ? next.completedAt : previousAttempt?.lastSuccessAt}, endpoint) : previousAttempt;
+    };
+    await setMetadata(metadataKey, JSON.stringify({...previous,
+      ...patch,
+      uploadAttempt: mergeAttempt("evidence", patch.uploadAttempt, previous.uploadAttempt),
+      replayAttempt: mergeAttempt("replay", patch.replayAttempt, previous.replayAttempt),
+      diagnosticBinding: {version:1, backend:DAYFRAME_API_BASE, account:key}}), transaction);
+  } catch { /* Keep the original operation result; no logging of metadata. */ }
+}
+async function recordLocationAttempt(owner: MobileAccountOwner, session: AuthenticatedSessionSnapshot,
+  endpoint: LocationSyncEndpoint, startedAt: number, outcome: LocationSyncAttempt["outcome"],
+  details: LocationSyncDiagnostics | undefined, signal?: AbortSignal) {
+  if (!details || signal?.aborted) return;
+  const completed = Math.max(startedAt, Date.now());
+  const attempt = parseLocationSyncAttempt({outcome, attemptedAt:new Date(startedAt).toISOString(),
+    completedAt:new Date(completed).toISOString(), clientElapsedMs:completed-startedAt, details}, endpoint);
+  if (!attempt) return;
+  try {
+    await serialiseOwnedLocationMutation(owner, session, async () => {
+      const db = await database();
+      await db.withExclusiveTransactionAsync(async transaction => {
+        if (signal?.aborted || !await isLocationSyncOwnershipCurrent(owner, session)) return;
+        await updateOwnedDiagnostics(accountKey(owner), endpoint === "evidence" ? {uploadAttempt:attempt} : {replayAttempt:attempt}, transaction);
+      });
+    });
+  } catch { /* Optional observation never triggers network redelivery. */ }
+}
+function locationErrorDiagnostics(error: unknown, endpoint: LocationSyncEndpoint) {
+  return error instanceof LocationHttpResponseError ? error.diagnostics : parseLocationSyncDiagnostics({
+    reason: error instanceof Error && error.name === "MobileRequestTimeoutError" ? "operation_timeout"
+      : isMobileTransportFailure(error) ? "transport_failure" : "response_unavailable"
+  }, endpoint, error instanceof MobileHttpResponseError ? error.statusCode : null);
 }
 
 function locationFailureSummary(error: unknown) {
@@ -236,6 +291,7 @@ async function configureLocationAccountUnsafe(
 ) {
   const db = await database();
   const key = accountKey(context);
+  const previousKey = await metadata(ACTIVE_ACCOUNT_KEY);
   const previousMode = await getLocationRolloutMode();
   const existingSemanticAcknowledgement = await metadata(SEMANTIC_MODE_ACKNOWLEDGED_AT_KEY);
   const semanticModeAcknowledgedAt = isSemanticMode(rolloutMode)
@@ -251,6 +307,9 @@ async function configureLocationAccountUnsafe(
       JSON.stringify(context),
       new Date().toISOString()
     );
+    if (previousKey !== key) {
+      await transaction.runAsync("delete from location_store_metadata where key in (?, ?)", `sync_diagnostics:${previousKey}`, `sync_diagnostics:${key}`);
+    }
     await setMetadata(ACTIVE_ACCOUNT_KEY, key, transaction);
     await setMetadata(ACTIVE_DEVICE_KEY, context.deviceId, transaction);
     await setMetadata(ACTIVE_TIME_ZONE_KEY, context.timeZone, transaction);
@@ -733,6 +792,9 @@ async function uploadLocationEvidenceBatch(
   ) {
     return { status: "stopped", reason: "session_changed" };
   }
+  const attemptStartedAt = Date.now();
+  let attemptDetails: LocationSyncDiagnostics | undefined;
+  let attemptOutcome: LocationSyncAttempt["outcome"] = "failed";
   try {
     const request = await executeOwnedLocationRequest({
       isCurrent: () => isLocationSyncOwnershipCurrent(owner, session),
@@ -753,6 +815,7 @@ async function uploadLocationEvidenceBatch(
       await invalidateMobileSessionIfCurrent(session.token);
       return {status:"stopped",reason:"authentication_required",outcome:"authentication_required"};
     }
+    attemptDetails = locationResponseDiagnostics("evidence", response, body);
     const disposition = locationUploadDisposition(response.status);
     if (disposition === "shrink") {
       const parsed = LocationEvidenceBatchRequestSchema.parse(JSON.parse(batch.body_json));
@@ -796,7 +859,7 @@ async function uploadLocationEvidenceBatch(
       if (applied === null) return { status: "stopped", reason: "session_changed" };
       return { status: "rejected" };
     }
-    if (!response.ok) throw new MobileHttpResponseError(response.status,`Location evidence sync failed with status ${response.status}.`);
+    if (!response.ok) throw new LocationHttpResponseError(attemptDetails);
     const payload = body as {
       acknowledgedEvidenceIds?: string[];
       replayVersion?: string;
@@ -852,12 +915,14 @@ async function uploadLocationEvidenceBatch(
       });
     });
     if (applied === null) return { status: "stopped", reason: "session_changed" };
+    attemptOutcome = partition.retryIds.length ? "partial" : "success";
     return { status: "success", acknowledgedCount: acknowledged.length,warnings:payload.warnings };
   } catch (error) {
     if(options.signal?.aborted||error instanceof Error&&error.name==="AbortError")return {status:"stopped",reason:"cancelled",outcome:"cancelled"};
     if (!await isLocationSyncOwnershipCurrent(owner, session)) {
       return { status: "stopped", reason: "session_changed" };
     }
+    attemptDetails = locationErrorDiagnostics(error, "evidence");
     const message = locationFailureSummary(error);
     const exponentialDelay = Math.min(3_600_000, 30_000 * 2 ** Math.min(batch.attempt_count, 7));
     const jitteredDelay = Math.round(exponentialDelay * (0.8 + Math.random() * 0.4));
@@ -878,6 +943,8 @@ async function uploadLocationEvidenceBatch(
     );
     if (applied === null) return { status: "stopped", reason: "session_changed" };
     return { status: "stopped", reason: "request_failed", message,outcome:isMobileTransportFailure(error)?"transport_failure":"server_busy" };
+  } finally {
+    await recordLocationAttempt(owner, session, "evidence", attemptStartedAt, attemptOutcome, attemptDetails, options.signal);
   }
 }
 
@@ -902,6 +969,9 @@ async function requestServerLocationReplay(
       message: "Location account changed before replay."
     };
   }
+  const attemptStartedAt = Date.now();
+  let attemptDetails: LocationSyncDiagnostics | undefined;
+  let attemptOutcome: LocationSyncAttempt["outcome"] = "failed";
   try {
     const request = await executeOwnedLocationRequest({
       isCurrent: () => isLocationSyncOwnershipCurrent(owner, session),
@@ -934,7 +1004,8 @@ async function requestServerLocationReplay(
       await invalidateMobileSessionIfCurrent(session.token);
       return {ok:false as const,reason:"authentication_required" as const,outcome:"authentication_required" as const,message:"Location requires a new login."};
     }
-    if (!response.ok) throw new MobileHttpResponseError(response.status,`Location replay failed with status ${response.status}.`);
+    attemptDetails = locationResponseDiagnostics("replay", response, body);
+    if (!response.ok) throw new LocationHttpResponseError(attemptDetails);
     const payload = LocationReplayResponseSchema.parse(body);
     const completedAt = new Date().toISOString();
     const applied = await serialiseOwnedLocationMutation(owner, session, async () => {
@@ -972,6 +1043,7 @@ async function requestServerLocationReplay(
         message: "Location account changed before replay was accepted."
       };
     }
+    attemptOutcome = "success";
     return {
       ok: true as const,
       finalisedSegmentCount: payload.finalisedSegmentCount,
@@ -986,6 +1058,7 @@ async function requestServerLocationReplay(
         message: "Location account changed while replay was running."
       };
     }
+    attemptDetails = locationErrorDiagnostics(error, "replay");
     const message = locationFailureSummary(error);
     const applied = await serialiseOwnedLocationMutation(owner, session, async () => {
       const replayDb = await database();
@@ -1003,6 +1076,8 @@ async function requestServerLocationReplay(
       };
     }
     return { ok: false as const, message,outcome:(isMobileTransportFailure(error)?"transport_failure":"server_busy") as SyncLaneOutcome };
+  } finally {
+    await recordLocationAttempt(owner, session, "replay", attemptStartedAt, attemptOutcome, attemptDetails, options.signal);
   }
 }
 
@@ -1048,6 +1123,7 @@ async function clearActiveLocationAccountDataUnsafe() {
     await transaction.runAsync("delete from location_segment_snapshot where account_key = ?", key);
     await transaction.runAsync("delete from location_upload_outbox where account_key = ?", key);
     await transaction.runAsync("delete from location_account_context where account_key = ?", key);
+    await transaction.runAsync("delete from location_store_metadata where key = ?", `sync_diagnostics:${key}`);
     await transaction.runAsync(
       "delete from location_store_metadata where key in (?, ?, ?, ?, ?)",
       ACTIVE_ACCOUNT_KEY,
@@ -1082,6 +1158,7 @@ async function deleteRetainedLocationEvidenceUnsafe() {
 
 export async function getLocationStoreDiagnostics(): Promise<LocationStoreDiagnostics> {
   const current = await currentContext();
+  const diagnosticSession = current ? await readOwnedAuthenticatedSessionSnapshot(current.context) : null;
   const db = await database();
   const counts = current
     ? await db.getFirstAsync<{
@@ -1115,11 +1192,10 @@ export async function getLocationStoreDiagnostics(): Promise<LocationStoreDiagno
     (select count(*) from location_evidence_journal where account_key=? and upload_state='pending')+
     (select count(*) from location_upload_outbox where account_key=? and state='pending' and next_attempt_at is null) as ready`,current.key,current.key,current.key):null;
   const warningText=current?await metadata(`last_replay_warnings:${current.key}`):null;
-  let owned:Partial<LocationStoreDiagnostics>={};
-  try {owned=JSON.parse(current?await metadata(`sync_diagnostics:${current.key}`)??"{}":"{}");} catch {}
+  const owned = parseOwnedDiagnosticMetadata(current ? await metadata(`sync_diagnostics:${current.key}`) : null);
   let semanticWarnings:string[]=[];
   for(const raw of [warningText,current?await metadata(`last_upload_warnings:${current.key}`):null]) {try {const parsed=JSON.parse(raw??"[]");if(Array.isArray(parsed))semanticWarnings.push(...parsed.filter(value=>typeof value==="string"));} catch {}}
-  return {
+  const result: LocationStoreDiagnostics = {
     nextRetryAt:retry?.ready?null:retry?.nextRetryAt??null,semanticWarnings,
     engineVersion: LOCATION_ENGINE_V2_CONFIG.algorithmVersion,
     rolloutMode: await getLocationRolloutMode(),
@@ -1148,6 +1224,12 @@ export async function getLocationStoreDiagnostics(): Promise<LocationStoreDiagno
     retentionCleanupDeletedCount: Number(await metadata("retention_cleanup_deleted_count") ?? 0),
     retentionCleanupAt: await metadata("retention_cleanup_at")
   };
+  const canReadAttempts = current && diagnosticsBelongTo(owned, current.key) &&
+    diagnosticSession?.status === "authenticated" && await isLocationSyncOwnershipCurrent(current.context, diagnosticSession.snapshot);
+  return {...result,
+    uploadAttempt: canReadAttempts ? parseLocationSyncAttempt(owned.uploadAttempt, "evidence") : null,
+    replayAttempt: canReadAttempts ? parseLocationSyncAttempt(owned.replayAttempt, "replay") : null};
+
 }
 
 function parseReplayStatus(value: string | null): LocationStoreDiagnostics["lastServerReplayStatus"] {

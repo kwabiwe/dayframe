@@ -1,3 +1,4 @@
+import { observeLocationStage, type LocationObservation } from "./location-sync-diagnostics";
 import {
   EMPTY_LOCATION_ENGINE_STATE,
   LOCATION_ENGINE_V2_CONFIG,
@@ -65,8 +66,9 @@ function iso(value: Date | string | null) {
 export async function replayLocationEvidence(
   client: pg.PoolClient,
   session: RequestSession,
-  options: { deviceId: string; algorithmVersion: string; processingAt: string }
+  options: { deviceId: string; algorithmVersion: string; processingAt: string } & LocationObservation
 ): Promise<LocationReplayResult> {
+  observeLocationStage(options, "evidence_read");
   const evidenceResult = await client.query<EvidenceRow>(
     `select id,
             client_evidence_id as "clientEvidenceId",
@@ -99,6 +101,7 @@ export async function replayLocationEvidence(
       options.processingAt
     ]
   );
+  observeLocationStage(options, "catalogue_read");
   const placesResult = await client.query<PlaceRow>(
     `select id, name, latitude, longitude,
             radius_meters as "radiusMeters", priority,
@@ -134,6 +137,7 @@ export async function replayLocationEvidence(
     isSimulated: row.isSimulated,
     metadata: row.metadata
   }));
+  observeLocationStage(options, "engine");
   const output = runLocationEngine({
     priorState: { ...EMPTY_LOCATION_ENGINE_STATE, algorithmVersion: options.algorithmVersion },
     evidence,
@@ -143,6 +147,7 @@ export async function replayLocationEvidence(
     processingAt: options.processingAt
   });
 
+  observeLocationStage(options, "segment_persistence");
   const nextStayClientIds = output.segmentUpserts
     .filter((segment): segment is StaySegment => segment.kind === "stay")
     .map((segment) => segment.clientSegmentId);
@@ -168,6 +173,7 @@ export async function replayLocationEvidence(
     commuteIds.set(segment.clientSegmentId, result.id);
     if (result.preservesManualCorrection) protectedSegmentIds.add(result.id);
   }
+  observeLocationStage(options, "lineage");
   await replaceEvidenceLinks(
     client,
     session,
@@ -454,6 +460,8 @@ async function upsertCommute(
   return { id: result.rows[0].id, preservesManualCorrection: false };
 }
 
+export const LOCATION_LINEAGE_INSERT_CHUNK_SIZE = 250;
+
 async function replaceEvidenceLinks(
   client: pg.PoolClient,
   session: RequestSession,
@@ -474,6 +482,18 @@ async function replaceEvidenceLinks(
       [session.workspaceId, session.userId, allIds]
     );
   }
+  // Measured lineage dominated driver calls. Bound memory and retain one transaction.
+  const parameters: unknown[] = [];
+  const rows: string[] = [];
+  const flush = async () => {
+    if (!rows.length) return;
+    await client.query(
+      `insert into location_segment_evidence (
+         workspace_id, user_id, evidence_id, stay_segment_id, commute_segment_id, sequence_index, role
+       ) values ${rows.join(", ")} on conflict do nothing`, parameters);
+    parameters.length = 0;
+    rows.length = 0;
+  };
   for (const segment of segments) {
     const segmentId = segment.kind === "stay"
       ? stayIds.get(segment.clientSegmentId)
@@ -482,12 +502,8 @@ async function replaceEvidenceLinks(
     for (const [index, clientEvidenceId] of segment.evidenceIds.entries()) {
       const evidenceId = evidenceIds.get(clientEvidenceId);
       if (!evidenceId) continue;
-      await client.query(
-        `insert into location_segment_evidence (
-           workspace_id, user_id, evidence_id, stay_segment_id, commute_segment_id, sequence_index, role
-         ) values ($1, $2, $3, $4, $5, $6, $7)
-         on conflict do nothing`,
-        [
+      rows.push(`(${Array.from({length:7}, (_, column) => `$${parameters.length + column + 1}`).join(", ")})`);
+      parameters.push(...[
           session.workspaceId,
           session.userId,
           evidenceId,
@@ -495,8 +511,9 @@ async function replaceEvidenceLinks(
           segment.kind === "commute" ? segmentId : null,
           index,
           segment.kind === "stay" ? "inside" : "route"
-        ]
-      );
+        ]);
+      if (rows.length === LOCATION_LINEAGE_INSERT_CHUNK_SIZE) await flush();
     }
   }
+  await flush();
 }

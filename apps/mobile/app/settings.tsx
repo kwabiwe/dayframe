@@ -1,3 +1,4 @@
+import { readOwnedAuthenticatedSessionSnapshot, isAuthenticatedSessionSnapshotCurrent } from "@/lib/secure-session";
 import { mobileBuildDiagnostics } from "@/lib/mobileBuildDiagnostics";
 import { supportQueueDiagnostics } from "@/lib/supportSyncDiagnostics";
 import { readActiveMobileAccount, mobileAccountOwnersEqual } from "@/lib/mobileAccount";
@@ -1063,10 +1064,14 @@ export default function SettingsScreen() {
 
   async function refreshLocationV2Diagnostics() {
     try {
+      const owner = await readActiveMobileAccount();
+      const session = owner ? await readOwnedAuthenticatedSessionSnapshot(owner) : null;
       const [local, native] = await Promise.all([
         getLocationStoreDiagnostics(),
         getNativeLocationIntelligenceStatus().catch(() => null)
       ]);
+      if (!mobileAccountOwnersEqual(owner, await readActiveMobileAccount())) return;
+      if (session?.status === "authenticated" && !isAuthenticatedSessionSnapshotCurrent(session.snapshot)) return;
       setLocationV2Diagnostics(local);
       setNativeLocationStatus(native);
     } catch (error) {
@@ -1107,7 +1112,12 @@ export default function SettingsScreen() {
   }
 
   async function shareLocationDiagnostics() {
+    const owner = await readActiveMobileAccount();
+    if (!owner) return;
+    const session = await readOwnedAuthenticatedSessionSnapshot(owner);
+    if (session.status !== "authenticated") return;
     const [local, native] = await Promise.all([getLocationStoreDiagnostics(), getNativeLocationIntelligenceStatus().catch(() => null)]);
+    if (!mobileAccountOwnersEqual(owner, await readActiveMobileAccount()) || !isAuthenticatedSessionSnapshotCurrent(session.snapshot)) return;
     await Share.share({
       title: "Dayframe location diagnostics",
       message: JSON.stringify({
@@ -1127,6 +1137,8 @@ export default function SettingsScreen() {
         activeProvisionalSegmentKind: local.activeProvisionalSegmentKind,
         lastGapDurationSeconds: local.lastGapDurationSeconds,
         rejectedEvidenceCounts: local.rejectedEvidenceCounts,
+        uploadAttempt: local.uploadAttempt,
+        replayAttempt: local.replayAttempt,
         lastUploadAt: local.lastUploadAt,
         lastServerReplayVersion: local.lastServerReplayVersion,
         lastServerReplayAt: local.lastServerReplayAt,
@@ -2109,14 +2121,23 @@ export default function SettingsScreen() {
                 <Text {...mobileTextProps("body")} style={styles.muted}>
                   Exact map evidence is private and deleted after seven days. Confirmed entries and saved places remain until you delete them.
                 </Text>
-                {locationV2Diagnostics?.lastUploadAt ? (
-                  <Text {...mobileTextProps("body")} style={styles.muted}>Last evidence sync {formatQueueTime(locationV2Diagnostics.lastUploadAt)}</Text>
-                ) : null}
-                {locationV2Diagnostics?.lastServerReplayAt ? (
-                  <Text {...mobileTextProps("body")} style={styles.muted}>
-                    Last location review check {formatQueueTime(locationV2Diagnostics.lastServerReplayAt)} · {locationV2Diagnostics.lastServerReplayFinalisedCount} finalised
-                  </Text>
-                ) : null}
+                {([['Evidence upload', locationV2Diagnostics?.uploadAttempt],
+                  ['Location processing', locationV2Diagnostics?.replayAttempt]] as const).map(([label, attempt]) => (
+                  <View key={label}>
+                    <Text {...mobileTextProps("body")} style={styles.muted}>
+                      {label}: {attempt?.outcome === "success" ? "Succeeded" : attempt?.outcome === "partial" ? "Partly acknowledged" : attempt ? "Failed" : "No recent result"}
+                      {"\n"}Last attempt: {attempt ? formatQueueTime(attempt.attemptedAt) : "Not recorded"}
+                      {"\n"}Last success: {attempt?.lastSuccessAt ? formatQueueTime(attempt.lastSuccessAt) : "Not recorded"}
+                    </Text>
+                    {attempt ? <Text selectable {...mobileTextProps("body")} style={styles.muted}>
+                      HTTP: {attempt.details.httpStatus ?? "Unknown"} · Phase: {attempt.details.phase}
+                      {"\n"}Stage: {attempt.details.locationStage ?? "Unknown"} · Reason: {attempt.outcome === "success" ? "None" : attempt.details.reason}
+                      {"\n"}Server duration: {attempt.details.durationMs === undefined ? "Not provided" : `${attempt.details.durationMs} ms`}
+                      {"\n"}Client elapsed: {attempt.clientElapsedMs} ms
+                      {"\n"}Request ID: {attempt.details.requestId ?? "Not provided"}
+                    </Text> : null}
+                  </View>
+                ))}
                 <Text {...mobileTextProps("body")} style={styles.muted}>
                   Foreground access: {formatPermissionStatus(locationDiagnostics?.foregroundPermission ?? "unknown")} · Background access: {backgroundAccessSummary}
                 </Text>

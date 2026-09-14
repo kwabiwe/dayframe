@@ -103,3 +103,17 @@ When changing `/api/time-entries`, `/api/events`, session handling, or mobile sy
 ## Durable Location Review
 
 `POST /api/review/:id` accepts every resolving/structural Location action through the strict shared `{ clientMutationId, mutation }` envelope. Reject malformed envelopes rather than falling back to a direct action. Complete `edit_and_confirm` requires both valid timestamps; optional edits on other structural actions preserve the existing server validation. Receipt replay returns exact stored IDs/results. Complex actions share the Location replay owner lock and one transaction for all side effects. On permanent conflict, scoped canonical statuses identify each source independently after rollback; mobile must not infer the adjacent merge item's status from the primary. See `offline-review-mutations.md` for the SQLite/account contract.
+
+## Safe Location request diagnostics
+
+Both Location POST routes return `X-Dayframe-Request-Id` (new server UUID v4) and
+`X-Dayframe-Duration-Ms`, including private auth and validation responses. Success
+JSON remains compatible with the strict replay schema. Failure JSON retains safe
+classification/status and adds allowlisted endpoint, phase, optional service
+stage, SQLSTATE, request ID and bounded server duration/retry hint. Unknown or
+malformed values are dropped or reduced to fixed classifications. Never echo an
+unchecked inbound request ID or return/log SQL details or raw payloads. One
+completion log correlates each request; auth rejection is distinct from processing
+failure. Transaction acquisition/lock/commit phases take precedence over stale
+service stages. Observation failures cannot change committed outcomes. Mobile
+reads the already-consumed response once and treats retry hints as diagnostic only.

@@ -523,3 +523,26 @@ For staging, apply the additive Sleep resolution-link migration before the Previ
 ## Sync recovery CI gates
 
 The base and ordered disposable PostGIS jobs run Review transaction lifetime/abandoned-connection validation (`scripts/validate-sync-transactions.ts`), bounded Health logical-unit isolation/continuation (`scripts/validate-health-sync-units.ts`) and Health ingest deadlines/same-ID recovery (`scripts/validate-health-ingest-bounds.ts`), in addition to Review mutation receipts and structural actions. These are fail-on-error CI steps using synthetic local fixtures, with no hosted credentials.
+
+## Location reliability V1
+
+Run `npm run validate:location-reliability` with an explicit disposable loopback
+PostgreSQL 17/PostGIS `_test` DATABASE_URL and the local ordered schema. It creates
+unique synthetic owners, counts actual driver calls including timeout guards,
+measures upload and substantial seven-day replay separately, and cleans its own
+fixtures. `-- --correctness-only` omits artificial latency during focused work.
+The finite 20/40 ms per-call stress profiles report unresolved budget failures;
+do not increase deadlines or iterate into replay redesign. Preserve the evidence
+and request a scope decision. Run the broad and specialist matrix once at handoff,
+then only checks invalidated by subsequent edits.
+
+Require bulk field/duplicate/rejection/expiry equivalence, commit/cancellation/FK
+rollback, second-lineage-chunk rollback, exact manual/terminal link protection,
+unknown-endpoint Review-only output, absent-return non-fabrication, owner contention
+and finite seven-batch recovery. Mobile real SQLite tests cover safe endpoint
+results, empty-queue replay recovery, auth/backend/session isolation, redaction and
+non-fatal diagnostic persistence. Validate Settings text wrapping, selection/share,
+VoiceOver and the existing normal/Reduce Motion disclosure on the separately
+approved locally signed Xcode staging app. Expo/EAS login is not required for that
+later job; native build/install and hosted acceptance are not implementation-session
+checks for this plan.

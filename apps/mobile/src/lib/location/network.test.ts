@@ -49,3 +49,23 @@ describe("location sync network boundary", () => {
     expect(vi.getTimerCount()).toBe(0);
   });
 });
+
+describe("Location error-body extraction",()=>{
+  afterEach(()=>vi.unstubAllGlobals());
+  it("consumes a 503 JSON body once and extracts only safe data",async()=>{
+    const response=new Response(JSON.stringify({code:"location_processing_busy",phase:"effect",locationStage:"evidence_read",raw:"secret"}),{status:503});
+    const json=vi.spyOn(response,"json");vi.stubGlobal("fetch",vi.fn(async()=>response));
+    const {body}=await fetchLocationSync("https://dayframe.test/api/location/replay",{});
+    const {locationResponseDiagnostics,LocationHttpResponseError}=await import("./network");
+    const {MobileHttpResponseError}=await import("../mobile-network");
+    const details=locationResponseDiagnostics("replay",response,body);
+    expect(json).toHaveBeenCalledTimes(1);expect(JSON.stringify(details)).not.toContain("secret");
+    expect(new LocationHttpResponseError(details)).toBeInstanceOf(MobileHttpResponseError);
+  });
+  it.each(["", "<html>private</html>"])("retains status from malformed 503 bodies",async(body)=>{
+    vi.stubGlobal("fetch",vi.fn(async()=>new Response(body,{status:503})));
+    const result=await fetchLocationSync("https://dayframe.test/api/location/evidence",{});
+    const {locationResponseDiagnostics}=await import("./network");
+    expect(locationResponseDiagnostics("evidence",result.response,result.body)).toMatchObject({httpStatus:503,code:"location_sync_failed"});
+  });
+});

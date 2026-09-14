@@ -5,7 +5,7 @@ const mocks=vi.hoisted(()=>({open:vi.fn(),fetch:vi.fn(),current:vi.fn(()=>true)}
 vi.mock("expo-sqlite",()=>({openDatabaseAsync:mocks.open}));
 vi.mock("../config",()=>({DAYFRAME_API_BASE:"https://fixture.invalid"}));
 vi.mock("../secure-session",()=>({SecureSessionUnavailableError:class extends Error{},invalidateMobileSessionIfCurrent:vi.fn(),isAuthenticatedSessionSnapshotCurrent:mocks.current,readOwnedAuthenticatedSessionSnapshot:async()=>({status:"authenticated",snapshot:{token:"synthetic"}})}));
-vi.mock("../mobileAccount",()=>({mobileAccountOwnersEqual:(a:unknown,b:unknown)=>JSON.stringify(a)===JSON.stringify(b)}));
+vi.mock("../mobileAccount",()=>({mobileAccountOwnersEqual:(a:any,b:any)=>a?.userId===b?.userId&&a?.workspaceId===b?.workspaceId}));
 
 const owner={userId:"91000000-0000-4000-8000-000000000001",workspaceId:"91000000-0000-4000-8000-000000000002"};
 let db:DatabaseSync,store:typeof import("./store");
@@ -44,5 +44,86 @@ describe("Location real SQLite drain results",()=>{
   expect(mocks.fetch.mock.calls.filter(([url])=>url.endsWith("/evidence"))).toHaveLength(1);
   expect(result).toMatchObject({synced:false,remainingPendingEvidence:1});
   expect(db.prepare("select count(*) as n from location_evidence_journal where upload_state='acknowledged'").get()!.n).toBe(1);
+ });
+});
+
+describe("Location reliability diagnostics on real SQLite",()=>{
+ const failure=()=>new Response(JSON.stringify({code:"location_processing_busy",reason:"operation_timeout",phase:"effect",locationStage:"lineage",sqlState:"57014",retryAfterMs:5000,rawPayload:{latitude:51,token:"secret"}}),{status:503,headers:{"X-Dayframe-Request-Id":"01234567-89ab-4cde-8123-456789abcdef","X-Dayframe-Duration-Ms":"7000"}});
+ it("keeps replay failure visible with an empty upload queue; upload success only clears upload",async()=>{
+  await seed();mocks.fetch.mockResolvedValue(failure());await store.syncLocationEvidence({forceReplay:true});
+  let diagnostics=await store.getLocationStoreDiagnostics();
+  expect(diagnostics.uploadAttempt).toMatchObject({outcome:"failed",details:{httpStatus:503,locationStage:"lineage",durationMs:7000}});
+  mocks.fetch.mockImplementation(async(url:string,init:RequestInit)=>url.endsWith("/replay")?failure():new Response(JSON.stringify({ok:true,acknowledgedEvidenceIds:JSON.parse(init.body as string).evidence.map((e:{clientEvidenceId:string})=>e.clientEvidenceId)})));
+  await store.syncLocationEvidence({forceUploadRetry:true,forceReplay:true});
+  diagnostics=await store.getLocationStoreDiagnostics();
+  expect(diagnostics).toMatchObject({pendingEvidenceCount:0,uploadAttempt:{outcome:"success"},replayAttempt:{outcome:"failed",details:{endpoint:"replay",httpStatus:503,requestId:"01234567-89ab-4cde-8123-456789abcdef"}}});
+  expect(JSON.stringify(diagnostics)).not.toContain("secret");
+  mocks.fetch.mockResolvedValue(new Response(JSON.stringify(replay())));
+  await store.syncLocationEvidence({forceReplay:true});
+  expect(await store.getLocationStoreDiagnostics()).toMatchObject({uploadAttempt:{outcome:"success"},replayAttempt:{outcome:"success"},lastServerReplayError:null});
+ });
+ it("does not persist auth, cancellation or stale responses as endpoint failures",async()=>{
+  await seed();mocks.fetch.mockResolvedValue(new Response("{}",{status:401}));
+  await store.syncLocationEvidence({forceReplay:true});
+  expect((await store.getLocationStoreDiagnostics()).uploadAttempt).toBeNull();
+  mocks.fetch.mockImplementation(async()=>{mocks.current.mockReturnValue(false);return failure();});
+  await store.syncLocationEvidence({forceUploadRetry:true});mocks.current.mockReturnValue(true);
+  expect((await store.getLocationStoreDiagnostics()).uploadAttempt).toBeNull();
+  const abort=new AbortController();mocks.fetch.mockImplementation(async()=>{abort.abort();return failure();});
+  await store.syncLocationEvidence({forceUploadRetry:true,signal:abort.signal});
+  expect((await store.getLocationStoreDiagnostics()).uploadAttempt).toBeNull();
+ });
+ it("ignores another backend's or legacy diagnostics and clears records at logout",async()=>{
+  await seed();mocks.fetch.mockResolvedValue(failure());await store.syncLocationEvidence();
+  const key=`sync_diagnostics:${owner.workspaceId}:${owner.userId}`;
+  const value=JSON.parse(db.prepare("select value from location_store_metadata where key=?").get(key)!.value as string);
+  value.diagnosticBinding.backend="https://another.invalid";
+  db.prepare("update location_store_metadata set value=? where key=?").run(JSON.stringify(value),key);
+  expect((await store.getLocationStoreDiagnostics()).uploadAttempt).toBeNull();
+  await store.clearActiveLocationAccountData();
+  expect(db.prepare("select value from location_store_metadata where key=?").get(key)).toBeUndefined();
+ });
+ it("diagnostic persistence failure does not redeliver acknowledged evidence or poison the queue",async()=>{
+  await seed();db.exec(`create trigger fail_diagnostics before insert on location_store_metadata when NEW.key like 'sync_diagnostics:%' begin select raise(FAIL,'synthetic diagnostic failure'); end`);
+  const first=await store.syncLocationEvidence({forceReplay:true});
+  expect(first.remainingPendingEvidence).toBe(0);
+  db.exec("drop trigger fail_diagnostics");await store.syncLocationEvidence({forceReplay:true});
+  expect(mocks.fetch.mock.calls.filter(([url])=>url.endsWith("/evidence"))).toHaveLength(1);
+  expect((await store.getLocationStoreDiagnostics()).replayAttempt?.outcome).toBe("success");
+ });
+ it.each(["null", "[]", "\"legacy text\"", "{bad"])("ignores malformed diagnostic metadata (%s)",async(raw)=>{
+  const key=`sync_diagnostics:${owner.workspaceId}:${owner.userId}`;
+  db.prepare("insert into location_store_metadata(key,value,updated_at) values(?,?,?)").run(key,raw,new Date().toISOString());
+  expect((await store.getLocationStoreDiagnostics()).uploadAttempt).toBeNull();
+  await store.syncLocationEvidence({forceReplay:true});
+  expect((await store.getLocationStoreDiagnostics()).replayAttempt?.outcome).toBe("success");
+ });
+ it("retains last success across an endpoint failure and clears it on owner replacement",async()=>{
+  await store.syncLocationEvidence({forceReplay:true});
+  const success=(await store.getLocationStoreDiagnostics()).replayAttempt!;
+  expect(success.lastSuccessAt).toBe(success.completedAt);
+  mocks.fetch.mockResolvedValue(failure());await store.syncLocationEvidence({forceReplay:true});
+  expect((await store.getLocationStoreDiagnostics()).replayAttempt).toMatchObject({outcome:"failed",lastSuccessAt:success.completedAt});
+  await store.configureLocationAccount({...owner,userId:"another-owner",deviceId:"ios-synthetic",timeZone:"Europe/London",savedPlaces:[],acceptedLearnedPlaces:[]});
+  expect((await store.getLocationStoreDiagnostics()).replayAttempt).toBeNull();
+ });
+ it("preserves request identity and the existing backoff despite a shorter diagnostic retry hint",async()=>{
+  await seed();const before=db.prepare("select client_batch_id,body_json from location_upload_outbox").get();
+  mocks.fetch.mockResolvedValue(failure());await store.syncLocationEvidence();
+  const after=db.prepare("select client_batch_id,body_json,next_attempt_at from location_upload_outbox").get()!;
+  expect(after).toMatchObject(before!);expect(Date.parse(after.next_attempt_at as string)-Date.now()).toBeGreaterThan(20_000);
+ });
+ it("seven batches settle across finite maximum-five passes without changing IDs",async()=>{
+  for(let i=0;i<7;i++){
+   const count=i===6?41:44;
+   await store.persistLocationEvidence(Array.from({length:count},(_,j)=>({clientEvidenceId:`backlog-${i}-${j}`,deviceId:"ios-synthetic",algorithmVersion:LOCATION_ENGINE_V2_CONFIG.algorithmVersion,kind:"provider_status" as const,occurredAt:new Date().toISOString(),receivedAt:new Date().toISOString(),timeZone:"Europe/London",metadata:{}})));
+   await store.prepareLocationUploadBatch(owner, {excludeBatchIds: db.prepare("select client_batch_id from location_upload_outbox").all().map(row=>row.client_batch_id as string)});
+  }
+  const identities=db.prepare("select client_batch_id,body_json from location_upload_outbox order by client_batch_id").all();
+  const first=await store.syncLocationEvidence({forceReplay:true});expect(first.remainingPendingEvidence).toBeGreaterThan(0);
+  expect(mocks.fetch.mock.calls.filter(([url])=>url.endsWith("/evidence"))).toHaveLength(5);
+  const second=await store.syncLocationEvidence({forceReplay:true});expect(second.remainingPendingEvidence).toBe(0);
+  expect(db.prepare("select client_batch_id,body_json from location_upload_outbox order by client_batch_id").all()).toEqual(identities);
+  expect((await store.getLocationStoreDiagnostics()).acknowledgedEvidenceCount).toBe(305);
  });
 });
