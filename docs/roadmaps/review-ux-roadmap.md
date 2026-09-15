@@ -244,10 +244,10 @@ After each stage merges, reconcile the remaining sequence and add only significa
 
 When all stages finish, promote enduring requirements and guardrails to their canonical documents, then remove this temporary roadmap and its navigation links or replace it with a short dated historical completion note. Preserve useful decisions in Git history; do not leave a stale active roadmap behind.
 
-**Next action:** the owner-approved Location Reliability interlude, then entry-sheet
-accessibility as a separate task. The Stage B malformed 100-row handover scan
-case remains deferred. Do not reopen or stack PR #196, begin Calendar/web, or
-infer a production release from its merge. Location's later device validation
-uses an ordinary locally signed Xcode staging app and requires no Expo/EAS login;
-it is outside the initial implementation session. See the tracker and
-[Location Reliability V1 plan](../plans/location-reliability-v1.md).
+**Next action:** Location Reliability is completed/merged in PR #197; see the
+[canonical tracker](../feature-fix-tracker.md) for acceptance and remaining watches.
+The owner's sequence is saved-place detection-quality PR next, parked Today
+Activity UX later, and a `v2_enabled` trial only after saved-place detection quality
+is fixed and physically accepted. This reconciliation does not start planning or
+implementation of those tasks. The Stage B malformed 100-row handover scan remains
+deferred; Calendar/web and production release are not authorised by this update.

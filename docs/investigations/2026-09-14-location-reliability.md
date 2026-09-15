@@ -503,3 +503,23 @@ Changed files: `apps/web/src/lib/review-proposal-hash.ts`, its `.test.ts`,
 `scripts/fixtures/location-quick-confirm.ts`, `scripts/validate-review-mutation-db.ts`,
 `.codex/reference/api.md`, and this investigation. Only the shared helper changes
 production behaviour; presentation/mutation consumers remain unchanged.
+
+## Post-merge reconciliation — PR #197
+
+PR #197 merged at `a48abcc4ca55de68009b33a401f36743e4577cd6` from final approved
+head `9ea67111ad4e8af63ca56f21e86ff6253d294d9a`. The owner reports functional
+exact-head staging replay success and consecutive Quick Confirm **PASS**: three
+fresh Location commute Reviews canonicalised exactly once, with no duplicate
+entries or new `proposal_changed` failures. One temporary `review_item_locked`
+recovered through the normal retry path. The merged hash correction excludes
+Location `semanticRevision` bookkeeping timestamps while retaining effective
+proposal fields and unchanged generic fingerprints. This supplied acceptance
+supersedes the earlier pending hosted/physical retest notes for that correction;
+it does not retrospectively prove the original device request sequence.
+
+Residual items remain separate: saved-place short-dwell false visit, same-place
+geofence-exit/continuity fragmentation, missing-return capture investigation, and
+replay latency watch. Staging remains `v2_review`. This record does not establish
+`v2_enabled` activation, production/TestFlight release, production Location
+acceptance or resolution of saved-place dwell/continuity defects. Current delivery
+state and sequencing remain in the canonical tracker and existing roadmap.
