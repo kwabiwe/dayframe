@@ -1,3 +1,4 @@
+import { validateLocationQuickConfirm } from "./fixtures/location-quick-confirm";
 import assert from "node:assert/strict";
 import { pool } from "../apps/web/src/lib/db";
 import { resolveIdempotentReviewMutation } from "../apps/web/src/lib/review-mutation-service";
@@ -566,6 +567,7 @@ async function run() {
   await validateLogicalSleepReceipts();
 
   await validateComplexReviewMutations(session, CATEGORY_ID);
+  await validateLocationQuickConfirm(session, otherSession);
 
   console.log(
     "Review mutation database validation passed: atomic generic edit-and-confirm, tags, receipt/result commit, lost-response retry, equivalent/conflicting resolution, concurrent same/different mutations, deliberate advisory/row contention, bounded statement-timeout rollback, retry after contention, duplicate prevention, payload conflict, and workspace/user scoping."

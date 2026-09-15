@@ -429,3 +429,77 @@ Correction files: `apps/web/src/lib/location/location-ingest-service.ts`,
 `docs/feature-fix-tracker.md`, and this investigation. Documentation impact is
 runtime persistence and current evidence/delivery state; no product, schema,
 rollout or native/UI contract changed. Existing draft PR #197 is the handoff.
+
+## 2026-09-15 — targeted Location Quick Confirm fingerprint correction
+
+Owner-reported physical staging symptom: one commute Quick Confirm succeeded;
+a second a few seconds later returned HTTP 409 `proposal_changed` and became
+Needs attention. The exact device request sequence has not been traced. This
+entry does not present replay between those device requests as established history.
+
+Verified clean existing branch at `2da87a885a051fde3cf10298a619c693c550770b`;
+fetched main remains `a83bfc976f03b14ffc48712681707ecdc27b2601`. No rebase/reset.
+Before changing production code, the focused timestamp-only regression failed
+(1 failed, 15 passed): the previous helper changed the Location hash when only
+`semanticRevision` changed. The correction normalises that value to null solely
+for `location_v2` inside the existing shared server helper. Every other hash field,
+normalisation and version remains unchanged. Generic fingerprints retain revision
+protection and match a frozen pre-correction SHA-256 exactly.
+
+Quick Confirm's inserted entry uses the retained suggested category/place,
+interval, confidence and event identity; stay description uses the retained title,
+commute description is a fixed null default, source/status are fixed action values,
+and empty edit tags are fixed. Commute's existing absent-category fallback uses
+its established category owner. Segment kind is tied to the retained segment ID.
+No additional proposal value requiring timestamp protection was found. Presentation
+and locked mutation reads continue calling the same helper, and response/cache
+revision metadata remains intact. No replay batching, timestamp write, schema,
+mobile runtime, outbox, request hashing, receipt, lock or transaction code changes.
+
+Real disposable PostgreSQL/PostGIS coverage read two independent commute proposals,
+confirmed one, committed unchanged-evidence replay after a real clock gap, proved
+that the second revision changed but its effective proposal and hash did not, and
+confirmed it using the original captured hash. Both receipts replayed exactly once.
+A changed stop time rejected with `proposal_changed` and no entry. Tests also cover
+owner isolation, ignored terminal decisions, pending old-format hash rejection,
+and a constructed pre-deployment successful receipt with its original timestamp-
+bearing hash/result. Receipt replay preserves a later user edit, creates no entry,
+and rejects substitution of a new hash under the old mutation ID.
+
+Compatibility: old cached/queued uncommitted Location hashes may require refresh,
+review of the current proposal, and a new explicit user decision. Successful
+immutable requests continue resolving through their original receipts. Existing
+Needs-attention records were not touched. No envelopes, receipts or caches were
+rewritten or cleared. Refresh is not permission to silently reconfirm.
+
+Documentation impact: shared confirmation/API contract and investigation evidence;
+`.codex/reference/api.md` documents content-based Location fingerprints and unchanged
+generic behaviour. Hosted and physical retest remain outstanding; this correction
+does not establish that the observed phone incident is fully resolved.
+
+Validation results follow below.
+
+### Quick Confirm validation and handoff
+
+- **FAIL before fix (expected regression):** hash suite, 1 timestamp-only failure;
+  the other 15 cases passed on the approved helper.
+- **PASS after fix:** affected hash/presentation/mutation tests, 33 tests.
+- **PASS:** `npm run validate:review-mutation-db`, run once after the correction
+  settled against the existing disposable PostgreSQL 17/PostGIS cluster. Includes
+  new real replay/Quick Confirm cases and existing receipt/transaction regressions.
+- **PASS:** one final web-wide lint/typecheck/test/build pass. Web tests: 936 passed,
+  3 existing skips. Lint: zero errors, two existing unused `_values` warnings in
+  `event-service.test.ts`. Build used the explicit disposable local database.
+- **PASS:** documentation check and `git diff --check`, including final docs edits.
+- **NOT RUN:** CI/Vercel, hosted/physical retest, deployment/promotion, mobile,
+  SQLite, native/simulator, synthetic latency suites, Claude/OpenClaw or merge.
+
+The disposable cluster is stopped after validation. The Needs-attention records
+remain untouched; retrying the unchanged old envelope may continue to reject.
+A fresh explicit decision after reviewing the current proposal is required when
+its cached hash no longer matches. No claim of physical incident closure is made.
+
+Changed files: `apps/web/src/lib/review-proposal-hash.ts`, its `.test.ts`,
+`scripts/fixtures/location-quick-confirm.ts`, `scripts/validate-review-mutation-db.ts`,
+`.codex/reference/api.md`, and this investigation. Only the shared helper changes
+production behaviour; presentation/mutation consumers remain unchanged.

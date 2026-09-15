@@ -50,6 +50,21 @@ canonical-open evidence and writes no entry. Historical envelopes without the
 field, and receipt-first replay of their original request hashes, remain
 compatible.
 
+Location (`sourceKind = location_v2`) confirmation fingerprints track effective
+proposal content: Review/event/segment identity, source kind, title, category,
+place, start/stop instants, confidence, event source and event type. The shared
+server hash helper normalises only Location `semanticRevision` to null in the
+hash input, so harmless replay timestamp updates cannot invalidate confirmation.
+Presentation and locked mutation validation use the same helper. Revision fields
+remain in responses and cache metadata. Generic fingerprints retain their original
+version, normalisation and revision participation unchanged.
+
+Previously committed immutable requests still replay their original receipts.
+An uncommitted old-format Location hash can fail with `proposal_changed`; the user
+must refresh/review the current proposal and make a new explicit decision through
+the existing recovery flow. Never rewrite the queued envelope or substitute a new
+hash automatically, discard receipts, or infer permission to reconfirm from refresh.
+
 ## Request Handling
 
 - Validate all external input.
