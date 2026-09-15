@@ -1,3 +1,5 @@
+import { emitReviewSemanticSegments } from "./location-review-semantic-batch";
+import { observeLocationStage, type LocationObservation } from "./location-sync-diagnostics";
 import {
   AUTOMATIC_LOCATION_POLICY_VERSION,
   assessAutomaticOverlap,
@@ -58,8 +60,9 @@ export async function ingestLocationEvidence(
   input: unknown,
   session: RequestSession,
   processingAt = new Date().toISOString(),
-  options: SyncTransactionOptions = {}
+  options: SyncTransactionOptions & LocationObservation = {}
 ): Promise<LocationEvidenceIngestResult> {
+  observeLocationStage(options, "validation");
   const batch = LocationEvidenceBatchRequestSchema.parse(input);
   const rollout = decideLocationRollout(
     getServerLocationRolloutMode(),
@@ -76,6 +79,7 @@ export async function ingestLocationEvidence(
       [session.workspaceId, session.userId]
     );
     phase("effect");
+    observeLocationStage(options, "evidence_cleanup");
     await client.query(
       `delete from location_evidence evidence
        using (
@@ -87,6 +91,7 @@ export async function ingestLocationEvidence(
        where evidence.id = expired.id`,
       [session.workspaceId, session.userId, processingAt]
     );
+    observeLocationStage(options, "summary_write");
     const summary = evidenceBatchSummary(batch, rollout.effectiveMode);
     const eventResult = await client.query<{ id: string; inserted: boolean }>(
       `insert into activity_events (
@@ -106,24 +111,18 @@ export async function ingestLocationEvidence(
     );
     const duplicateBatch = eventResult.rows[0]?.inserted === false;
     const expiresAt = new Date(Date.parse(processingAt) + LOCATION_ENGINE_V2_CONFIG.rawEvidenceRetentionDays * 86_400_000).toISOString();
+    observeLocationStage(options, "bulk_evidence_write");
+    const parameters: unknown[] = [];
+    const rows: string[] = [];
+    const seen = new Set<string>();
     for (const evidence of batch.evidence) {
+      // Preserve the original loop's first persisted row and classifier decisions.
+      if (seen.has(evidence.clientEvidenceId)) continue;
+      seen.add(evidence.clientEvidenceId);
       const rejectionReason = rejected.get(evidence.clientEvidenceId) ?? null;
       const retainCoordinate = !rejectionReason;
-      await client.query(
-        `insert into location_evidence (
-           workspace_id, user_id, device_id, client_evidence_id, client_batch_id,
-           evidence_type, occurred_at, ended_at, coordinate, horizontal_accuracy_m,
-           altitude_m, speed_mps, course_degrees, saved_place_id, geofence_identifier,
-           accepted, rejection_reason, algorithm_version, time_zone, is_simulated,
-           metadata, received_at, expires_at
-         ) values (
-           $1, $2, $3, $4, $5, $6, $7, $8,
-           case when $9::double precision is null or $10::double precision is null then null
-                else ST_SetSRID(ST_MakePoint($10, $9), 4326)::geography end,
-           $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22::jsonb, $23, $24
-         )
-         on conflict (workspace_id, user_id, device_id, client_evidence_id) do nothing`,
-        [
+      const placeholders = Array.from({ length: 24 }, (_, index) => `$${parameters.length + index + 1}`);
+      parameters.push(...[
           session.workspaceId,
           session.userId,
           batch.deviceId,
@@ -152,9 +151,23 @@ export async function ingestLocationEvidence(
           JSON.stringify(evidence.metadata ?? {}),
           evidence.receivedAt,
           expiresAt
-        ]
-      );
+        ]);
+      rows.push(`(${placeholders.slice(0, 8).join(", ")},
+        case when ${placeholders[8]}::double precision is null or ${placeholders[9]}::double precision is null then null
+          else ST_SetSRID(ST_MakePoint(${placeholders[9]}, ${placeholders[8]}), 4326)::geography end,
+        ${placeholders.slice(10, 21).join(", ")}, ${placeholders[21]}::jsonb, ${placeholders[22]}, ${placeholders[23]})`);
     }
+    await client.query(
+      `insert into location_evidence (
+           workspace_id, user_id, device_id, client_evidence_id, client_batch_id,
+           evidence_type, occurred_at, ended_at, coordinate, horizontal_accuracy_m,
+           altitude_m, speed_mps, course_degrees, saved_place_id, geofence_identifier,
+           accepted, rejection_reason, algorithm_version, time_zone, is_simulated,
+           metadata, received_at, expires_at
+         ) values ${rows.join(", ")}
+       on conflict (workspace_id, user_id, device_id, client_evidence_id) do nothing`,
+      parameters
+    );
 
     const warnings = [
       ...(classification.rejectedEvidence.length > 0
@@ -189,7 +202,7 @@ export async function replayRetainedLocationEvidence(
   input: unknown,
   session: RequestSession,
   processingAt = new Date().toISOString(),
-  options: SyncTransactionOptions = {}
+  options: SyncTransactionOptions & LocationObservation = {}
 ): Promise<LocationReplayResponse> {
   const request = LocationReplayRequestSchema.parse(input);
   validateSemanticAcknowledgementTime(request.semanticModeAcknowledgedAt, processingAt);
@@ -209,7 +222,8 @@ export async function replayRetainedLocationEvidence(
       deviceId: request.deviceId,
       algorithmVersion: request.algorithmVersion,
       processingAt,
-      rollout
+      rollout,
+      onLocationStage: options.onLocationStage
     });
     return {
       ok: true,
@@ -231,24 +245,26 @@ async function replayAndEmitLocationSemantics(
     algorithmVersion: string;
     processingAt: string;
     rollout: ReturnType<typeof decideLocationRollout>;
+    onLocationStage?: LocationObservation["onLocationStage"];
   }
 ) {
   const replay = await replayLocationEvidence(client, session, options);
+  observeLocationStage(options, "semantics");
   const finalisedSegments = replay.segments.filter((segment) => segment.status === "finalised");
   let semanticSegmentCount = 0;
   if (options.rollout.emitV2ReviewItems && options.rollout.semanticCutoverAt) {
-    for (const segment of finalisedSegments.filter((item) =>
+    const eligible = finalisedSegments.filter((item) =>
       segmentStartedAfterSemanticCutover(item.startedAt, options.rollout.semanticCutoverAt!)
-    )) {
-      const emitted = await emitSemanticSegment(
-        client,
-        session,
-        options.rollout.effectiveMode,
-        segment,
-        replay.stayIds,
-        replay.commuteIds
-      );
-      if (emitted) semanticSegmentCount += 1;
+    );
+    if (options.rollout.effectiveMode === "v2_review") {
+      semanticSegmentCount = await emitReviewSemanticSegments(client, session, eligible, replay.stayIds, replay.commuteIds);
+    } else {
+      for (const segment of eligible) {
+        const emitted = await emitSemanticSegment(
+          client, session, options.rollout.effectiveMode, segment, replay.stayIds, replay.commuteIds
+        );
+        if (emitted) semanticSegmentCount += 1;
+      }
     }
   }
   return {

@@ -1,3 +1,4 @@
+import { locationRequestDiagnostics } from "@/lib/location/location-sync-diagnostics";
 import { SyncOperationError, syncFailureMetadata } from "@/lib/sync-transaction";
 import { NextResponse } from "next/server";
 import { ZodError } from "zod";
@@ -23,52 +24,49 @@ export const maxDuration = 15;
 
 export async function POST(request: Request) {
   const startedAt = Date.now();
+  const diagnostics = locationRequestDiagnostics("evidence", startedAt);
+  const respond = (body: Record<string, unknown>, status = 200, error?: unknown) =>
+    diagnostics.finish(privateJson(body, status), error, status >= 400 ? body : undefined);
   try {
     const contentLength = Number(request.headers.get("content-length") ?? 0);
     if (contentLength > LOCATION_EVIDENCE_BODY_LIMIT_BYTES) {
-      return privateJson({ error: "Location evidence batch is too large." }, 413);
+      return respond({ error: "Location evidence batch is too large." }, 413);
     }
     const session = await resolveRequestSession(request);
     const text = await request.text();
     if (new TextEncoder().encode(text).byteLength > LOCATION_EVIDENCE_BODY_LIMIT_BYTES) {
-      return privateJson({ error: "Location evidence batch is too large." }, 413);
+      return respond({ error: "Location evidence batch is too large." }, 413);
     }
     let body: unknown;
     try {
       body = JSON.parse(text);
     } catch {
-      return privateJson({ error: "Location evidence body must be valid JSON." }, 400);
+      return respond({ error: "Location evidence body must be valid JSON." }, 400);
     }
-    const result = await ingestLocationEvidence(body, session, undefined, {signal: request.signal, deadlineAt: startedAt + 8_000});
-    return privateJson(result, result.duplicateBatch ? 200 : 201);
+    const result = await ingestLocationEvidence(body, session, undefined, {signal: request.signal, deadlineAt: startedAt + 8_000, onLocationStage: diagnostics.onLocationStage});
+    return respond(result, result.duplicateBatch ? 200 : 201);
   } catch (error) {
     const authResponse = authErrorResponse(error);
     if (authResponse) {
       for (const [key, value] of Object.entries(PRIVATE_LOCATION_HEADERS)) authResponse.headers.set(key, value);
-      return authResponse;
+      return diagnostics.finish(authResponse, error);
     }
     if (error instanceof LocationIngestError) {
-      return privateJson({ error: error.message, code: error.code }, error.status);
+      return respond({ error: error.message, code: error.code }, error.status, error);
     }
     if (error instanceof ZodError) {
-      return privateJson({ error: "Invalid location evidence batch.", issues: error.issues }, 400);
+      return respond({ error: "Invalid location evidence batch." }, 400);
     }
     if (isLockNotAvailableError(error) || isStatementTimeoutError(error) || error instanceof SyncOperationError) {
-      return privateJson({
+      return respond({
         error: "Location processing is busy. The saved evidence will retry automatically.",
         code: "location_processing_busy",
         ...syncFailureMetadata(error),
         ...(isLockNotAvailableError(error) ? { reason: "lock_unavailable" } : {}),
         retryAfterMs: 5_000
-      }, 503);
+      }, 503, error);
     }
-    console.error("Location evidence sync failed without coordinate payloads", {
-      name: error instanceof Error ? error.name : "UnknownError",
-      code: typeof (error as { code?: unknown } | null)?.code === "string"
-        ? (error as { code: string }).code
-        : null
-    });
-    return privateJson({ error: "Unable to sync location evidence." }, 500);
+    return respond({ error: "Unable to sync location evidence." }, 500, error);
   }
 }
 

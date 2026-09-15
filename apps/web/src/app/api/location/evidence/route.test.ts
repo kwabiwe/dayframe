@@ -76,6 +76,24 @@ describe("POST /api/location/evidence", () => {
     await expect(response.json()).resolves.toMatchObject({ code: "location_processing_busy" });
   });
 
+  it("correlates a private failure without trusting inbound IDs or database text", async () => {
+    const log = vi.spyOn(console, "info").mockImplementation(() => {});
+    mocks.ingestLocationEvidence.mockImplementationOnce(async (_body, _session, _at, options) => {
+      options.onLocationStage?.("bulk_evidence_write");
+      throw { code: "55P03", syncPhase: "owner_lock", message: "private coordinates", detail: "private SQL" };
+    });
+    const response = await POST(new Request("https://dayframe.test/api/location/evidence", {
+      method: "POST", body: "{}", headers: { "X-Dayframe-Request-Id": "private-client-value" }
+    }));
+    const body = await response.json();
+    expect(response.headers.get("X-Dayframe-Request-Id")).toMatch(/^[0-9a-f-]{36}$/);
+    expect(body).toMatchObject({ code: "location_processing_busy", phase: "owner_lock", sqlState: "55P03" });
+    expect(body.locationStage).toBeUndefined();
+    expect(log).toHaveBeenCalledTimes(1);
+    expect(JSON.stringify(log.mock.calls)).not.toMatch(/private-client-value|private coordinates|private SQL/);
+    log.mockRestore();
+  });
+
   it("deletes only the authenticated owner's evidence with private response headers", async () => {
     mocks.query.mockResolvedValue({ rowCount: 3, rows: [] });
     const response = await DELETE(new Request("https://dayframe.test/api/location/evidence", { method: "DELETE" }));
@@ -87,4 +105,16 @@ describe("POST /api/location/evidence", () => {
       [session.workspaceId, session.userId]
     );
   });
+});
+
+describe("Location private early response correlation",()=>{
+ it("adds private correlation headers to rejected authentication",async()=>{
+  const {AuthError}=await import("@/lib/session");
+  const log=vi.spyOn(console,"info").mockImplementation(()=>{});
+  mocks.resolveRequestSession.mockRejectedValueOnce(new AuthError("Login required",401,"session_expired"));
+  const response=await POST(new Request("https://dayframe.test/api/location/evidence",{method:"POST",body:"{}"}));
+  expect(response.status).toBe(401);expect(response.headers.get("X-Dayframe-Request-Id")).toMatch(/^[0-9a-f-]{36}$/);
+  expect(response.headers.get("Cache-Control")).toContain("private, no-store");
+  expect(log).toHaveBeenCalledWith("location_sync",expect.objectContaining({outcome:"authentication_rejected"}));log.mockRestore();
+ });
 });

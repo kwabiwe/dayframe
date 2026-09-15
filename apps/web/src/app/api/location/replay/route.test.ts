@@ -85,7 +85,7 @@ describe("POST /api/location/replay", () => {
 
   it("keeps unexpected failures coordinate-free", async () => {
     mocks.replayRetainedLocationEvidence.mockRejectedValueOnce(new Error("database unavailable"));
-    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const errorSpy = vi.spyOn(console, "info").mockImplementation(() => undefined);
     const response = await POST(new Request("https://dayframe.test/api/location/replay", {
       method: "POST",
       body: JSON.stringify({ deviceId: "ios-device" })
@@ -93,8 +93,8 @@ describe("POST /api/location/replay", () => {
 
     expect(response.status).toBe(500);
     expect(errorSpy).toHaveBeenCalledWith(
-      "Location replay failed without coordinate payloads",
-      { name: "Error", code: null }
+      "location_sync",
+      expect.objectContaining({endpoint:"replay", httpStatus:500, outcome:"failed"})
     );
     errorSpy.mockRestore();
   });

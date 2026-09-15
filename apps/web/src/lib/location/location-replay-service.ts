@@ -1,3 +1,4 @@
+import { observeLocationStage, type LocationObservation } from "./location-sync-diagnostics";
 import {
   EMPTY_LOCATION_ENGINE_STATE,
   LOCATION_ENGINE_V2_CONFIG,
@@ -53,8 +54,10 @@ export type LocationReplayResult = {
   diagnostics: ReturnType<typeof runLocationEngine>["diagnostics"];
 };
 
-type PersistedSegment = {
+type ExistingSegment = {
   id: string;
+  clientSegmentId: string;
+  continuityStatus: string;
   preservesManualCorrection: boolean;
 };
 
@@ -65,8 +68,9 @@ function iso(value: Date | string | null) {
 export async function replayLocationEvidence(
   client: pg.PoolClient,
   session: RequestSession,
-  options: { deviceId: string; algorithmVersion: string; processingAt: string }
+  options: { deviceId: string; algorithmVersion: string; processingAt: string } & LocationObservation
 ): Promise<LocationReplayResult> {
+  observeLocationStage(options, "evidence_read");
   const evidenceResult = await client.query<EvidenceRow>(
     `select id,
             client_evidence_id as "clientEvidenceId",
@@ -99,6 +103,7 @@ export async function replayLocationEvidence(
       options.processingAt
     ]
   );
+  observeLocationStage(options, "catalogue_read");
   const placesResult = await client.query<PlaceRow>(
     `select id, name, latitude, longitude,
             radius_meters as "radiusMeters", priority,
@@ -134,6 +139,7 @@ export async function replayLocationEvidence(
     isSimulated: row.isSimulated,
     metadata: row.metadata
   }));
+  observeLocationStage(options, "engine");
   const output = runLocationEngine({
     priorState: { ...EMPTY_LOCATION_ENGINE_STATE, algorithmVersion: options.algorithmVersion },
     evidence,
@@ -143,6 +149,7 @@ export async function replayLocationEvidence(
     processingAt: options.processingAt
   });
 
+  observeLocationStage(options, "segment_persistence");
   const nextStayClientIds = output.segmentUpserts
     .filter((segment): segment is StaySegment => segment.kind === "stay")
     .map((segment) => segment.clientSegmentId);
@@ -152,22 +159,18 @@ export async function replayLocationEvidence(
   await supersedeMissingSegments(client, session, options, nextStayClientIds, nextCommuteClientIds);
 
   const evidenceIds = new Map(evidenceResult.rows.map((row) => [row.clientEvidenceId, row.id]));
-  const stayIds = new Map<string, string>();
   const protectedSegmentIds = new Set<string>();
-  for (const segment of output.segmentUpserts.filter((item): item is StaySegment => item.kind === "stay")) {
-    const result = await upsertStay(client, session, options.deviceId, segment);
-    stayIds.set(segment.clientSegmentId, result.id);
-    if (result.preservesManualCorrection) protectedSegmentIds.add(result.id);
-  }
-  const commuteIds = new Map<string, string>();
-  for (const segment of output.segmentUpserts.filter((item): item is CommuteSegment => item.kind === "commute")) {
-    const fromStayId = stayIds.get(segment.fromStaySegmentId);
-    const toStayId = stayIds.get(segment.toStaySegmentId);
-    if (!fromStayId || !toStayId) continue;
-    const result = await upsertCommute(client, session, options.deviceId, segment, fromStayId, toStayId);
-    commuteIds.set(segment.clientSegmentId, result.id);
-    if (result.preservesManualCorrection) protectedSegmentIds.add(result.id);
-  }
+  const stayIds = await persistStays(client, session, options.deviceId,
+    output.segmentUpserts.filter((segment): segment is StaySegment => segment.kind === "stay"), protectedSegmentIds);
+  const resolvedCommutes = output.segmentUpserts
+    .filter((segment): segment is CommuteSegment => segment.kind === "commute")
+    .flatMap(segment => {
+      const fromStayId = stayIds.get(segment.fromStaySegmentId);
+      const toStayId = stayIds.get(segment.toStaySegmentId);
+      return fromStayId && toStayId ? [{...segment, fromStayId, toStayId}] : [];
+    });
+  const commuteIds = await persistCommutes(client, session, options.deviceId, resolvedCommutes, protectedSegmentIds);
+  observeLocationStage(options, "lineage");
   await replaceEvidenceLinks(
     client,
     session,
@@ -272,67 +275,55 @@ async function retireOpenReviewsForMissingSegments(
   );
 }
 
-async function upsertStay(
+// At most 5,750 parameters per write and 250 IDs per locking read. Every chunk
+// remains under the original advisory lock, checked-out client and deadline.
+export const LOCATION_SEGMENT_PERSIST_CHUNK_SIZE = 250;
+function* segmentChunks<T>(items: T[]) {
+  for (let offset = 0; offset < items.length; offset += LOCATION_SEGMENT_PERSIST_CHUNK_SIZE) {
+    yield items.slice(offset, offset + LOCATION_SEGMENT_PERSIST_CHUNK_SIZE);
+  }
+}
+async function lockAndPartitionSegments<T extends {clientSegmentId: string}>(
+  client: pg.PoolClient, session: RequestSession, deviceId: string,
+  table: "stay_segments" | "commute_segments", segments: T[], protectedSegmentIds: Set<string>
+) {
+  const ordered = [...segments].sort((a, b) => a.clientSegmentId < b.clientSegmentId ? -1 : a.clientSegmentId > b.clientSegmentId ? 1 : 0);
+  const ids = new Map<string, string>();
+  // Lock all matching existing rows before writing this segment kind. The table
+  // identifier is a local closed union, never supplied by a request.
+  for (const chunk of segmentChunks(ordered)) {
+    const existing = await client.query<ExistingSegment>(
+      `select id, client_segment_id as "clientSegmentId", continuity_status as "continuityStatus",
+              created_from_event_id is not null and not exists (
+                select 1 from review_items
+                where workspace_id = $1 and user_id = $2
+                  and location_segment_id = ${table}.id and status = 'open'
+              ) as "preservesManualCorrection"
+       from ${table}
+       where workspace_id = $1 and user_id = $2 and device_id = $3 and client_segment_id = any($4::text[])
+       order by client_segment_id
+       for update`,
+      [session.workspaceId, session.userId, deviceId, chunk.map(segment => segment.clientSegmentId)]);
+    for (const row of existing.rows) {
+      if (row.continuityStatus === "manual" || row.preservesManualCorrection) {
+        ids.set(row.clientSegmentId, row.id);
+        protectedSegmentIds.add(row.id);
+      }
+    }
+  }
+  return {ids, mutable: ordered.filter(segment => !ids.has(segment.clientSegmentId))};
+}
+
+async function persistStays(
   client: pg.PoolClient,
   session: RequestSession,
   deviceId: string,
-  segment: StaySegment
-): Promise<PersistedSegment> {
-  const existing = await client.query<{
-    id: string;
-    continuityStatus: string;
-    preservesManualCorrection: boolean;
-  }>(
-    `select id, continuity_status as "continuityStatus",
-            created_from_event_id is not null and not exists (
-              select 1 from review_items
-              where workspace_id = $1 and user_id = $2
-                and location_segment_id = stay_segments.id and status = 'open'
-            ) as "preservesManualCorrection"
-     from stay_segments
-     where workspace_id = $1 and user_id = $2 and device_id = $3 and client_segment_id = $4
-     for update`,
-    [session.workspaceId, session.userId, deviceId, segment.clientSegmentId]
-  );
-  if (existing.rows[0]?.continuityStatus === "manual" || existing.rows[0]?.preservesManualCorrection) {
-    return { id: existing.rows[0].id, preservesManualCorrection: true };
-  }
-  const result = await client.query<{ id: string }>(
-    `insert into stay_segments (
-       workspace_id, user_id, device_id, client_segment_id, algorithm_version,
-       status, source, place_id, learned_place_id, started_at, stopped_at,
-       start_lower_bound_at, start_upper_bound_at, stop_lower_bound_at, stop_upper_bound_at,
-       centre, radius_m, sample_count, continuity_status, confidence, raw_sample_count,
-       review_status, arrival_confidence, departure_confidence, metadata, updated_at
-     ) values (
-       $1, $2, $3, $4, $5, $6, 'location_v2', $7, $8, $9, $10,
-       $11, $12, $13, $14,
-       case when $15::double precision is null or $16::double precision is null then null
-            else ST_SetSRID(ST_MakePoint($16, $15), 4326)::geography end,
-       $17, $18, $19, $20, $18, 'needs_review', $20, $20, $21::jsonb, now()
-     )
-     on conflict (workspace_id, user_id, device_id, client_segment_id)
-       where device_id is not null and client_segment_id is not null
-     do update set
-       status = excluded.status,
-       place_id = excluded.place_id,
-       learned_place_id = excluded.learned_place_id,
-       started_at = excluded.started_at,
-       stopped_at = excluded.stopped_at,
-       start_lower_bound_at = excluded.start_lower_bound_at,
-       start_upper_bound_at = excluded.start_upper_bound_at,
-       stop_lower_bound_at = excluded.stop_lower_bound_at,
-       stop_upper_bound_at = excluded.stop_upper_bound_at,
-       centre = excluded.centre,
-       radius_m = excluded.radius_m,
-       sample_count = excluded.sample_count,
-       raw_sample_count = excluded.raw_sample_count,
-       continuity_status = excluded.continuity_status,
-       confidence = excluded.confidence,
-       metadata = excluded.metadata,
-       updated_at = now()
-     returning id`,
-    [
+  segments: StaySegment[],
+  protectedSegmentIds: Set<string>
+): Promise<Map<string, string>> {
+  const {ids, mutable} = await lockAndPartitionSegments(client, session, deviceId, "stay_segments", segments, protectedSegmentIds);
+  for (const chunk of segmentChunks(mutable)) {
+    const parameters = chunk.flatMap(segment => [
       session.workspaceId,
       session.userId,
       deviceId,
@@ -357,50 +348,99 @@ async function upsertStay(
         placeMatchKind: segment.placeMatchKind,
         candidatePlaceIds: segment.candidatePlaceIds
       })
-    ]
-  );
-  return { id: result.rows[0].id, preservesManualCorrection: false };
+    ]);
+    // Trusted SQL template; only parameter positions vary with the bounded row index.
+    const values = chunk.map((_, index) => `(
+       $1, $2, $3, $4, $5, $6, 'location_v2', $7, $8, $9, $10,
+       $11, $12, $13, $14,
+       case when $15::double precision is null or $16::double precision is null then null
+            else ST_SetSRID(ST_MakePoint($16, $15), 4326)::geography end,
+       $17, $18, $19, $20, $18, 'needs_review', $20, $20, $21::jsonb, now()
+     )`.replace(/\$(\d+)/g, (_, position) => `$${index * 21 + Number(position)}`));
+    const result = await client.query<{id: string; clientSegmentId: string}>(
+      `insert into stay_segments (
+       workspace_id, user_id, device_id, client_segment_id, algorithm_version,
+       status, source, place_id, learned_place_id, started_at, stopped_at,
+       start_lower_bound_at, start_upper_bound_at, stop_lower_bound_at, stop_upper_bound_at,
+       centre, radius_m, sample_count, continuity_status, confidence, raw_sample_count,
+       review_status, arrival_confidence, departure_confidence, metadata, updated_at
+     ) values ${values.join(", ")}
+     on conflict (workspace_id, user_id, device_id, client_segment_id)
+       where device_id is not null and client_segment_id is not null
+     do update set
+       status = excluded.status,
+       place_id = excluded.place_id,
+       learned_place_id = excluded.learned_place_id,
+       started_at = excluded.started_at,
+       stopped_at = excluded.stopped_at,
+       start_lower_bound_at = excluded.start_lower_bound_at,
+       start_upper_bound_at = excluded.start_upper_bound_at,
+       stop_lower_bound_at = excluded.stop_lower_bound_at,
+       stop_upper_bound_at = excluded.stop_upper_bound_at,
+       centre = excluded.centre,
+       radius_m = excluded.radius_m,
+       sample_count = excluded.sample_count,
+       raw_sample_count = excluded.raw_sample_count,
+       continuity_status = excluded.continuity_status,
+       confidence = excluded.confidence,
+       metadata = excluded.metadata,
+       updated_at = now()
+     returning id, client_segment_id as "clientSegmentId"`, parameters);
+    for (const row of result.rows) ids.set(row.clientSegmentId, row.id);
+  }
+  return ids;
 }
 
-async function upsertCommute(
+async function persistCommutes(
   client: pg.PoolClient,
   session: RequestSession,
   deviceId: string,
-  segment: CommuteSegment,
-  fromStayId: string,
-  toStayId: string
-): Promise<PersistedSegment> {
-  const existing = await client.query<{
-    id: string;
-    continuityStatus: string;
-    preservesManualCorrection: boolean;
-  }>(
-    `select id, continuity_status as "continuityStatus",
-            created_from_event_id is not null and not exists (
-              select 1 from review_items
-              where workspace_id = $1 and user_id = $2
-                and location_segment_id = commute_segments.id and status = 'open'
-            ) as "preservesManualCorrection"
-     from commute_segments
-     where workspace_id = $1 and user_id = $2 and device_id = $3 and client_segment_id = $4
-     for update`,
-    [session.workspaceId, session.userId, deviceId, segment.clientSegmentId]
-  );
-  if (existing.rows[0]?.continuityStatus === "manual" || existing.rows[0]?.preservesManualCorrection) {
-    return { id: existing.rows[0].id, preservesManualCorrection: true };
-  }
-  const result = await client.query<{ id: string }>(
-    `insert into commute_segments (
+  segments: (CommuteSegment & { fromStayId: string; toStayId: string })[],
+  protectedSegmentIds: Set<string>
+): Promise<Map<string, string>> {
+  const {ids, mutable} = await lockAndPartitionSegments(client, session, deviceId, "commute_segments", segments, protectedSegmentIds);
+  for (const chunk of segmentChunks(mutable)) {
+    const parameters = chunk.flatMap(segment => [
+      session.workspaceId,
+      session.userId,
+      deviceId,
+      segment.clientSegmentId,
+      segment.algorithmVersion,
+      segment.status,
+      segment.startedAt,
+      segment.stoppedAt,
+      segment.startLowerBoundAt ?? null,
+      segment.startUpperBoundAt ?? null,
+      segment.stopLowerBoundAt ?? null,
+      segment.stopUpperBoundAt ?? null,
+      segment.fromStayId,
+      segment.toStayId,
+      segment.fromPlaceId ?? null,
+      segment.toPlaceId ?? null,
+      segment.routeDistanceMeters ?? null,
+      segment.straightLineDistanceMeters ?? null,
+      segment.routeSampleCount,
+      segment.maximumObservationGapSeconds,
+      segment.continuityStatus,
+      segment.confidence,
+      JSON.stringify({
+        qualificationReason: segment.qualificationReason ?? null
+      })
+    ]);
+    // Trusted SQL template; only parameter positions vary with the bounded row index.
+    const values = chunk.map((_, index) => `(
+       $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16,
+       $17, $18, $19, $20, $21, $22, $23::jsonb, now()
+     )`.replace(/\$(\d+)/g, (_, position) => `$${index * 23 + Number(position)}`));
+    const result = await client.query<{id: string; clientSegmentId: string}>(
+      `insert into commute_segments (
        workspace_id, user_id, device_id, client_segment_id, algorithm_version, status,
        started_at, stopped_at,
        start_lower_bound_at, start_upper_bound_at, stop_lower_bound_at, stop_upper_bound_at,
        from_stay_segment_id, to_stay_segment_id,
        from_place_id, to_place_id, route_distance_m, straight_line_distance_m,
        route_sample_count, max_gap_seconds, continuity_status, confidence, metadata, updated_at
-     ) values (
-       $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16,
-       $17, $18, $19, $20, $21, $22, $23::jsonb, now()
-     )
+     ) values ${values.join(", ")}
      on conflict (workspace_id, user_id, device_id, client_segment_id)
      do update set
        status = excluded.status,
@@ -422,37 +462,13 @@ async function upsertCommute(
        confidence = excluded.confidence,
        metadata = excluded.metadata,
        updated_at = now()
-     returning id`,
-    [
-      session.workspaceId,
-      session.userId,
-      deviceId,
-      segment.clientSegmentId,
-      segment.algorithmVersion,
-      segment.status,
-      segment.startedAt,
-      segment.stoppedAt,
-      segment.startLowerBoundAt ?? null,
-      segment.startUpperBoundAt ?? null,
-      segment.stopLowerBoundAt ?? null,
-      segment.stopUpperBoundAt ?? null,
-      fromStayId,
-      toStayId,
-      segment.fromPlaceId ?? null,
-      segment.toPlaceId ?? null,
-      segment.routeDistanceMeters ?? null,
-      segment.straightLineDistanceMeters ?? null,
-      segment.routeSampleCount,
-      segment.maximumObservationGapSeconds,
-      segment.continuityStatus,
-      segment.confidence,
-      JSON.stringify({
-        qualificationReason: segment.qualificationReason ?? null
-      })
-    ]
-  );
-  return { id: result.rows[0].id, preservesManualCorrection: false };
+     returning id, client_segment_id as "clientSegmentId"`, parameters);
+    for (const row of result.rows) ids.set(row.clientSegmentId, row.id);
+  }
+  return ids;
 }
+
+export const LOCATION_LINEAGE_INSERT_CHUNK_SIZE = 250;
 
 async function replaceEvidenceLinks(
   client: pg.PoolClient,
@@ -474,6 +490,18 @@ async function replaceEvidenceLinks(
       [session.workspaceId, session.userId, allIds]
     );
   }
+  // Measured lineage dominated driver calls. Bound memory and retain one transaction.
+  const parameters: unknown[] = [];
+  const rows: string[] = [];
+  const flush = async () => {
+    if (!rows.length) return;
+    await client.query(
+      `insert into location_segment_evidence (
+         workspace_id, user_id, evidence_id, stay_segment_id, commute_segment_id, sequence_index, role
+       ) values ${rows.join(", ")} on conflict do nothing`, parameters);
+    parameters.length = 0;
+    rows.length = 0;
+  };
   for (const segment of segments) {
     const segmentId = segment.kind === "stay"
       ? stayIds.get(segment.clientSegmentId)
@@ -482,12 +510,8 @@ async function replaceEvidenceLinks(
     for (const [index, clientEvidenceId] of segment.evidenceIds.entries()) {
       const evidenceId = evidenceIds.get(clientEvidenceId);
       if (!evidenceId) continue;
-      await client.query(
-        `insert into location_segment_evidence (
-           workspace_id, user_id, evidence_id, stay_segment_id, commute_segment_id, sequence_index, role
-         ) values ($1, $2, $3, $4, $5, $6, $7)
-         on conflict do nothing`,
-        [
+      rows.push(`(${Array.from({length:7}, (_, column) => `$${parameters.length + column + 1}`).join(", ")})`);
+      parameters.push(...[
           session.workspaceId,
           session.userId,
           evidenceId,
@@ -495,8 +519,9 @@ async function replaceEvidenceLinks(
           segment.kind === "commute" ? segmentId : null,
           index,
           segment.kind === "stay" ? "inside" : "route"
-        ]
-      );
+        ]);
+      if (rows.length === LOCATION_LINEAGE_INSERT_CHUNK_SIZE) await flush();
     }
   }
+  await flush();
 }

@@ -123,3 +123,23 @@ The normal mobile Review and Location Evidence presentation must translate this 
 Stay evidence correction separates `Where were you?`, `What did you do?`, and `When?`; commute evidence omits Where and keeps What/When because the route is not a visit place. An unmatched stay does not present absence as a large answer card. On open, every stay including a saved match makes one cancellable native `MKLocalPointsOfInterestRequest` within 750 metres and displays at most three results under `Nearby places`. When at least two distinct nearby names share a distinctive non-locality token, the same native owner may make one additional region-required `MKLocalSearch` for that context. Hard-filter the merged set to 750 metres, prefer the first matching contextual venue, then dining/activity diversity before another same-site retail tenant, and demote parking, transport, toilets, ATMs, petrol, and similar utilities to fallback positions. Preserve Apple order within a semantic group, using distance and name only as deterministic tie-breakers. Apple exposes no public popularity or containing-venue score, so call results nearby, never popular, likely, or inferred. Context/category/address/ranking data stays transient and must not cross the persistence boundary. A two-character typed query replaces that list through the existing MapKit completion search; clearing restores the already loaded nearby results. Do not fetch proactive POIs for commutes. Keep the baseline saved match first and selected, followed by other saved choices and nearby Apple choices. Deduplicate a normalised name at the same immediate point (25 m presentation-only tolerance); preserve other same-name venues. Cancel stale work on route/account departure; Apple never participates in automatic matching.
 
 Selecting a POI updates only the transient visible proposal and defaults `Save for future visits` off. `Use once and record` sends `record_poi_once` with the trimmed name and optional entry edits; the derived `time_entries.place_label` stores that name only and must be mutually exclusive with `place_id`. Never persist Apple identifiers, addresses, POI coordinates, or raw result payloads for a one-time location. `Save place and record` retains the existing atomic saved-place transaction and bounded learning feedback. Ordinary description/category/time edits preserve `place_label`; explicit saved-place selection clears it. Read models expose `placeName` and `placeKind`, and reports group one-time labels by case-insensitive whitespace-normalized name. Offline/failure keeps typed search, map pin, and unknown-place recording available. Saved-place correction plus entry edits still commit through one transaction. Commute endpoint correction is not inferred from stay-place semantics. Review uses only existing categories and display-only glyphs until a shared persisted icon contract is approved.
+
+## Upload and replay reliability
+
+Diagnose capture, evidence upload and retained-evidence replay separately. An
+empty upload queue does not prove processing succeeded. The existing metadata
+owner retains bounded backend/account-bound endpoint results, safe request IDs,
+transaction phase/substage and separate server/client durations. Never retain
+arbitrary exception text, SQL, bodies, coordinates, places or source IDs in these
+records. Success clears only its endpoint's failure; observation cannot cause
+redelivery. Auth/stale/cancelled responses cannot update replacement-owner state.
+
+Upload uses one parameterised multi-row insert after the coordinate-free summary;
+acknowledge conflict-skipped and policy-rejected IDs only after commit. Preserve
+first-input persistence, classification and expiry. Measured replay lineage uses
+250-row chunks, retaining protected/manual/terminal links and one atomic delete
+plus replacement. Do not broaden replay scope or increase timeouts when another
+stage exceeds the budget. Use the guarded `validate:location-reliability` runner
+for substantial synthetic seven-day output and finite 555 + seven/305 backlog
+passes. Synthetic latency is not hosted evidence. Missing return observations
+remain a separate capture investigation; successful upload cannot reconstruct them.

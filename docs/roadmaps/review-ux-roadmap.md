@@ -109,10 +109,10 @@ separately as PASS/FAIL/NOT RUN.
 
 ## 6. Stage B: Today and integrated Review decisions
 
-PR #195 is merged at `e9ca2652542619cd83b91bb7778a608a13e1d01e`; Stage B is
-the active, Today-only implementation lane. Its detailed plan owns exact
-delivery/test evidence. Calendar (C) and web (D) remain future work and are not
-implicitly authorised by this section.
+Stage B is merged as PR #196 at `a83bfc976f03b14ffc48712681707ecdc27b2601`.
+KB supplied physical approval; exact deployment/build and production/TestFlight
+attestations are not inferred. The canonical tracker owns current delivery state.
+Calendar (C) and web (D) remain future work and are not authorised now.
 
 ### Today arrangement
 
@@ -244,11 +244,10 @@ After each stage merges, reconcile the remaining sequence and add only significa
 
 When all stages finish, promote enduring requirements and guardrails to their canonical documents, then remove this temporary roadmap and its navigation links or replace it with a short dated historical completion note. Preserve useful decisions in Git history; do not leave a stale active roadmap behind.
 
-**Next action:** independently re-review the corrected Stage B head after the
-read-only review of `b724de278f9cd862e19d85ae6593c6b2ddd0c983`, then complete
-the exact-head Ready Preview, ordinary signed staging build and owner
-physical-iPhone acceptance before considering merge. A Preview from an earlier
-head and its anonymous smoke do not replace authenticated or device evidence.
-The mobile accessibility prerequisite is already merged as PR #195; do not
-reopen PR #194 or #195. Calendar (C) and web (D) remain future work. Current
-delivery evidence belongs in the tracker and the Stage B investigation note.
+**Next action:** the owner-approved Location Reliability interlude, then entry-sheet
+accessibility as a separate task. The Stage B malformed 100-row handover scan
+case remains deferred. Do not reopen or stack PR #196, begin Calendar/web, or
+infer a production release from its merge. Location's later device validation
+uses an ordinary locally signed Xcode staging app and requires no Expo/EAS login;
+it is outside the initial implementation session. See the tracker and
+[Location Reliability V1 plan](../plans/location-reliability-v1.md).

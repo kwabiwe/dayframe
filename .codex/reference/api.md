@@ -50,6 +50,21 @@ canonical-open evidence and writes no entry. Historical envelopes without the
 field, and receipt-first replay of their original request hashes, remain
 compatible.
 
+Location (`sourceKind = location_v2`) confirmation fingerprints track effective
+proposal content: Review/event/segment identity, source kind, title, category,
+place, start/stop instants, confidence, event source and event type. The shared
+server hash helper normalises only Location `semanticRevision` to null in the
+hash input, so harmless replay timestamp updates cannot invalidate confirmation.
+Presentation and locked mutation validation use the same helper. Revision fields
+remain in responses and cache metadata. Generic fingerprints retain their original
+version, normalisation and revision participation unchanged.
+
+Previously committed immutable requests still replay their original receipts.
+An uncommitted old-format Location hash can fail with `proposal_changed`; the user
+must refresh/review the current proposal and make a new explicit decision through
+the existing recovery flow. Never rewrite the queued envelope or substitute a new
+hash automatically, discard receipts, or infer permission to reconfirm from refresh.
+
 ## Request Handling
 
 - Validate all external input.
@@ -103,3 +118,17 @@ When changing `/api/time-entries`, `/api/events`, session handling, or mobile sy
 ## Durable Location Review
 
 `POST /api/review/:id` accepts every resolving/structural Location action through the strict shared `{ clientMutationId, mutation }` envelope. Reject malformed envelopes rather than falling back to a direct action. Complete `edit_and_confirm` requires both valid timestamps; optional edits on other structural actions preserve the existing server validation. Receipt replay returns exact stored IDs/results. Complex actions share the Location replay owner lock and one transaction for all side effects. On permanent conflict, scoped canonical statuses identify each source independently after rollback; mobile must not infer the adjacent merge item's status from the primary. See `offline-review-mutations.md` for the SQLite/account contract.
+
+## Safe Location request diagnostics
+
+Both Location POST routes return `X-Dayframe-Request-Id` (new server UUID v4) and
+`X-Dayframe-Duration-Ms`, including private auth and validation responses. Success
+JSON remains compatible with the strict replay schema. Failure JSON retains safe
+classification/status and adds allowlisted endpoint, phase, optional service
+stage, SQLSTATE, request ID and bounded server duration/retry hint. Unknown or
+malformed values are dropped or reduced to fixed classifications. Never echo an
+unchecked inbound request ID or return/log SQL details or raw payloads. One
+completion log correlates each request; auth rejection is distinct from processing
+failure. Transaction acquisition/lock/commit phases take precedence over stale
+service stages. Observation failures cannot change committed outcomes. Mobile
+reads the already-consumed response once and treats retry hints as diagnostic only.

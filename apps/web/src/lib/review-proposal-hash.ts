@@ -38,7 +38,8 @@ export function reviewProposalHash(input: EffectiveReviewProposal) {
       confidence: input.confidence,
       eventSource: input.eventSource,
       eventType: input.eventType,
-      semanticRevision: isoOrNull(input.semanticRevision)
+      // Location replay timestamps are bookkeeping; the retained fields describe the confirmation.
+      semanticRevision: input.sourceKind === "location_v2" ? null : isoOrNull(input.semanticRevision)
     }))
     .digest("hex");
 }
