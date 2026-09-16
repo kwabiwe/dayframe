@@ -5,7 +5,7 @@
 - Base and fresh main: `5c5df4b5b3a2c7b6c4e2fe21df7579bc8909511a`; no intervening commits on the authorised resume.
 - Existing isolated worktree/branch: `dayframe-saved-place-quality`, `fix/saved-place-detection-quality`. The three previously preserved files were verified before resuming.
 - Sections 1–11 of [the supplied plan](../plans/saved-place-detection-quality-v1.md) only. Section 12 remains later work.
-- Documentation impact: product behavior, existing replay/snapshot ownership and a missing protection guardrail. PRD, architecture, Location guidance, regression checklist and tracker are updated. The roadmap's sequencing is still accurate and was not changed.
+- Documentation impact: product behavior, existing replay/snapshot ownership and a missing protection guardrail. PRD, architecture, Location guidance, regression checklist and tracker were updated for PR #199. This post-merge reconciliation updates the tracker, investigation and stale roadmap status without starting Stage C or Today UX work.
 
 ## Synthetic baseline reproduction
 
@@ -112,6 +112,12 @@ The baseline attribution was checked on this checkout: `ConnectivityStatusStrip.
 - `docs/plans/saved-place-detection-quality-v1.md`
 - `docs/investigations/2026-09-15-saved-place-detection-quality.md`
 
+## Post-merge reconciliation
+
+PR #199 merged at `9f9c421a6d3f7e2d9ff2bb54c4e354da2e7174d1` from final approved head `28de5e9a700a44c8d8f6f0194cac91cf764425e7`. Independent review was **APPROVE**: Claude Opus 5 at low reasoning approved the exact final head. GitHub Review/Location validation and Documentation alignment passed. The exact-head signed staging build/install/launch passed. Current owner-reported physical acceptance so far passed ordinary Location commute behaviour, quick Location entries, Quick Confirm, and general staging use.
+
+The remaining multi-day saved-place soak is a post-merge Watch observation: sub-five-minute saved-place crossing, sustained PureGym-style visit, parking-boundary chatter, and later A→B→A return behaviour. These cases are not claimed as passed. Replay latency remains Watch, and missing-return capture remains a separate follow-up. Production provenance remains the previously established source `5c5df4b5b3a2c7b6c4e2fe21df7579bc8909511a` with effective mode `v2_shadow`; production `v2_review` is an explicit operational follow-up and is not claimed active. No production `v2_enabled` rollout is claimed.
+
 ## Not run and later acceptance
 
-Hosted deployment, CI/Vercel polling, real-account replay, native/Simulator build, phone installation/physical acceptance, production access, rollout changes, hosted automatic-mode activation, Claude review and merge are NOT RUN. No migration, dependency update or infrastructure repair is part of this PR. A later signed mobile build is required because the shared engine changes. A draft PR is not physical acceptance or release approval.
+CI/Vercel polling, real-account replay, production access, rollout changes, hosted automatic-mode activation, and native/Simulator build are NOT RUN. No migration, dependency update or infrastructure repair is part of this PR. The exact-head signed staging build/install/launch and current owner physical acceptance above do not cover the remaining multi-day soak. A draft PR is not physical acceptance or release approval.

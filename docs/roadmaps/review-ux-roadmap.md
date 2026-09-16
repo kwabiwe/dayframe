@@ -244,10 +244,11 @@ After each stage merges, reconcile the remaining sequence and add only significa
 
 When all stages finish, promote enduring requirements and guardrails to their canonical documents, then remove this temporary roadmap and its navigation links or replace it with a short dated historical completion note. Preserve useful decisions in Git history; do not leave a stale active roadmap behind.
 
-**Next action:** Location Reliability is completed/merged in PR #197; see the
+**Next action:** Location Reliability is completed/merged in PR #197 and
+saved-place detection quality is completed/merged in PR #199; see the
 [canonical tracker](../feature-fix-tracker.md) for acceptance and remaining watches.
-The owner's sequence is saved-place detection-quality PR next, parked Today
-Activity UX later, and a `v2_enabled` trial only after saved-place detection quality
-is fixed and physically accepted. This reconciliation does not start planning or
-implementation of those tasks. The Stage B malformed 100-row handover scan remains
-deferred; Calendar/web and production release are not authorised by this update.
+The owner's sequence keeps Today Activity UX parked. A `v2_enabled` trial remains
+gated on saved-place detection quality, physical acceptance and separate
+operational approval. This reconciliation does not start Stage C planning or
+implementation. The Stage B malformed 100-row handover scan remains deferred;
+Calendar/web and production release are not authorised by this update.
