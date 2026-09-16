@@ -1,3 +1,4 @@
+import { validateSavedPlaceQuality } from "./fixtures/location-saved-place-quality";
 import assert from "node:assert/strict";
 import {
   LOCATION_ACCEPTANCE_PLACES,
@@ -1090,6 +1091,11 @@ async function validateFinalisationWithoutNewEvidence() {
 
 async function main() {
   try {
+    if (process.argv.includes("--saved-place-quality-only")) {
+      await validateSavedPlaceQuality();
+      return;
+    }
+    await validateSavedPlaceQuality();
     await seedOwner();
     await validateCommuteCategoryConcurrency();
     await validateOutOfOrderAndIdempotency();

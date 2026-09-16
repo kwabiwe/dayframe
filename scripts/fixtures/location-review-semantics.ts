@@ -28,6 +28,8 @@ export async function verifyReviewSemantics(db: pg.Pool, owner: () => Promise<Re
     makeStay("saved", {placeMatchKind:"saved",placeId:place}),
     makeStay("learned", {placeMatchKind:"learned",learnedPlaceId:learned}),
     makeStay("unknown"), makeStay("short", {stoppedAt:new Date(Date.parse(stay.startedAt)+60_000).toISOString()}),
+    makeStay("short-saved", {placeMatchKind:"saved",placeId:place,stoppedAt:new Date(Date.parse(stay.startedAt)+299_999).toISOString()}),
+    makeStay("short-learned", {placeMatchKind:"learned",learnedPlaceId:learned,stoppedAt:new Date(Date.parse(stay.startedAt)+299_999).toISOString()}),
     makeStay("disabled", {placeMatchKind:"saved",placeId:disabled}),
     makeStay("unpersisted"), makeStay("accepted"), makeStay("ignored"), makeStay("confirmed"),
     makeStay("terminal-review"), makeStay("manual", {continuityStatus:"manual"}),
@@ -86,7 +88,7 @@ export async function verifyReviewSemantics(db: pg.Pool, owner: () => Promise<Re
   assert.equal(eventFor("learned").event_type,"learned_place_visit");assert.equal(eventFor("saved").event_type,"geofence_exit");
   assert.equal(reviewFor("foreign-learned").title,"Visit at an unknown place");assert.equal(reviewFor("foreign-learned").suggested_place_id,null);
   assert.equal(reviewFor("unknown").title,"Visit at an unknown place");
-  for(const name of ["short","disabled","unpersisted"]) assert.equal(eventFor(name),undefined);
+  for(const name of ["short","short-saved","short-learned","disabled","unpersisted"]) assert.equal(eventFor(name),undefined);
   for(const name of ["commute-a","commute-b"]) {
     assert.equal(reviewFor(name).title,"Commute");assert.equal(reviewFor(name).location_segment_id,commuteIds.get(name));
     assert.equal(reviewFor(name).suggested_place_id,null);

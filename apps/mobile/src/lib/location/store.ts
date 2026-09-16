@@ -463,6 +463,9 @@ async function processPendingLocationEvidenceUnsafe(processingAt = new Date().to
       JSON.stringify(output.nextState),
       processingAt
     );
+    // Only a successful complete account-journal replay may replace current derived snapshots.
+    // Failure rolls back state and snapshots together; evidence and upload work are untouched.
+    await transaction.runAsync("delete from location_segment_snapshot where account_key = ?", current.key);
     for (const segment of output.segmentUpserts) {
       await transaction.runAsync(
         `insert into location_segment_snapshot (account_key, client_segment_id, segment_json, updated_at)

@@ -407,3 +407,13 @@ Before merging implementation PRs, ask KB to test the exact Ready Preview promot
   retaining immutable IDs, backoff, cutover and journal ownership.
 - [ ] Existing Settings disclosure, wrapping/selectable text, VoiceOver and Reduce
   Motion work at large Dynamic Type on the separately approved staging build.
+
+## Saved-place detection quality
+
+- [ ] Exact five-minute saved/accepted-learned effective dwell; no completed-Visit waiver or wall-clock-only attendance.
+- [ ] Lone exit chatter cancels with supported re-entry; unsupported grace expiry has bounded medium uncertainty and stable no-new-evidence finalisation.
+- [ ] Compatible finite Visit and at-most-thirty-minute strong saved-place silence preserve continuity; long unsupported gaps, real nearby-place transitions and vehicle excursions stay separate.
+- [ ] Native exact departure remains exact when compatible; earlier contradictory movement clips it without invented precision or commutes.
+- [ ] Corrected open fragments converge atomically, while changed-ID accepted/ignored/manual history, adjacent confirmed journeys, receipts and lineage remain untouched.
+- [ ] Complete local replay replaces stale/empty snapshots account-locally, with rollback and durable journal/upload preservation.
+- [ ] Consecutive content-hash Quick Confirms survive unchanged replay; genuine proposal changes fail closed. Review batching and normal/20/40ms synthetic performance gates remain bounded.

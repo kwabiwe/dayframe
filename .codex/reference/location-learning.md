@@ -55,6 +55,18 @@ Temporal invariants:
   site identity.
 - All local-day keys use the user's IANA zone, never UTC string slicing.
 
+## Saved-place dwell and continuity
+
+The `location-v2.0` evidence format is unchanged; this is a code-versioned correction consumed by both mobile and server. A later signed mobile build is required to ship the shared-engine change. Replay requires one device journal per invocation.
+
+- Apply the exact `300_000ms` saved/accepted-learned floor to the effective supported window, including clipped completed Visits. Open candidates cannot accumulate attendance from the processing clock; midpoint uncertainty cannot create dwell from an isolated fix.
+- Keep a same-place exit ephemeral and pending for up to `savedPlaceExitReentryGraceMs = 300_000`. Strong inside evidence takes precedence over an uncorroborated callback. Coordinate-free re-entry requires compatible finite Visit support. Real other-place/outside corroboration still closes the episode; repeated exits are not independent outside points.
+- An unsupported pending exit resolves on ordinary processing after grace using last-inside/exit bounds, capped at medium confidence. Finalisation remains ten minutes; there is no new timer or queue.
+- Finite same-device compatible Visit support survives cancelled chatter. After a genuine departure, reuse is clipped to a later independently supported episode; a future Visit end is never an earlier GPS fix.
+- Strong same-saved-ID coordinate endpoints can bridge at most `savedPlaceQuietGapMaxMs = 1_800_000` without Visit support, only without an unresolved exit or intervening credible outside/other-place evidence. This inferred continuity stays `uncertain_gap` and at most medium. The ordinary twelve-minute route gap, unknown sixty-minute/large-site rules, learned-place gap policy and matching radii are unchanged.
+- Server replay uses bounded exact lineage reads and occupied interval portions to hold ambiguous changed-ID replacements of terminal/manual sources. A shared long Visit or boundary alone must not suppress a separate later episode. Obsolete open proposals become superseded snapshots atomically; expired evidence is not disappearance proof. Manual open corrections are protected too.
+- A successful complete account-journal replay replaces local derived snapshots, including empty output, in the state transaction. It must not prune from an upload batch or mutate journals, uploads, Review work, receipts or another account.
+
 ## Storage, privacy, and rollout
 
 Mobile uses `dayframe-location-v2.db` with WAL, foreign keys, a 5s busy timeout, and evidence/outbox/account/state/segment tables. All mutations run through one rejection-safe serial queue. Seven-day cleanup expires local raw evidence intentionally, including unsent evidence, to enforce the privacy boundary; row-count cleanup may remove only acknowledged or permanently rejected rows and must never evict pending uploads. Logout and account changes clear native signals plus the previous account's journal, outbox, state, and context before another account is bound. Mobile API traffic must use the SecureStore bearer as its only session carrier and explicitly omit shared cookies; otherwise an expired background bearer can be hidden by a valid React Native cookie while evidence silently accumulates locally. HTTP `401/403` clears the rejected bearer, its matching native shortcut context, and publishes the signed-out transition only if that bearer still owns the current session; delayed responses from a replaced login must become retryable stale-session failures instead. `413` shrinks/requeues a batch, `400/422` rejects only the permanently invalid items, and retryable failures use bounded exponential backoff with jitter.

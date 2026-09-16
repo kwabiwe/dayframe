@@ -1,3 +1,4 @@
+import { LOCATION_ENGINE_V2_CONFIG } from "./config";
 import { deriveCommutes } from "./commute";
 import { accuracyWeightedCentre, distanceMeters, midpointTimeIso, stableLocationId } from "./geo";
 import { matchLocationToPlaces } from "./placeMatcher";
@@ -41,6 +42,9 @@ type WorkingStay = {
   outside: ClassifiedEvidence[];
   supportedByVisit: boolean;
   visitSupportUntilAt: string | null;
+  pendingExit?: ClassifiedEvidence;
+  inferredContinuity?: boolean;
+  lastStrongInside?: ClassifiedEvidence;
 };
 
 function pointFor(evidence: LocationEvidence) {
@@ -50,7 +54,7 @@ function pointFor(evidence: LocationEvidence) {
 }
 
 function matchKey(match: PlaceMatch | null, evidence: LocationEvidence) {
-  if (evidence.savedPlaceId) return `saved:${evidence.savedPlaceId}`;
+  if (evidence.savedPlaceId && !pointFor(evidence)) return `saved:${evidence.savedPlaceId}`;
   if (!match || match.kind === "unknown") return "unknown";
   if (match.kind === "ambiguous") {
     return `ambiguous:${match.candidates.map((candidate) => candidate.id).sort().join(",")}`;
@@ -117,6 +121,7 @@ function hasPairedGeofenceEnter(
   return items.some(({ evidence }) =>
     evidence.kind === "geofence_enter" &&
     evidence.savedPlaceId === exit.savedPlaceId &&
+    evidence.deviceId === exit.deviceId &&
     Math.abs(Date.parse(evidence.occurredAt) - exitAt) <= toleranceMs
   );
 }
@@ -127,10 +132,7 @@ function closeAtTransition(
   continuityStatus: ContinuityStatus,
   exact = false
 ) {
-  const lastEvidence = active.evidence.at(-1)?.evidence;
-  const lastAt = lastEvidence?.endedAt && Date.parse(lastEvidence.endedAt) <= Date.parse(nextAt)
-    ? lastEvidence.endedAt
-    : lastEvidence?.occurredAt ?? active.startedAt;
+  const lastAt = lastInsideAt(active, nextAt);
   // A completed Visit supplies the departure itself, even when a later GPS
   // sample was received within that Visit. Use it only while the transition
   // and latest inside observation do not contradict that boundary.
@@ -151,6 +153,64 @@ function closeAtTransition(
   active.continuityStatus = continuityStatus;
 }
 
+/** Shared defensive guard for automated saved/learned windows, never manual entries. */
+export function hasMeaningfulKnownPlaceWindow(startedAt: string, stoppedAt: string | null | undefined,
+  minimumMs = LOCATION_ENGINE_V2_CONFIG.savedPlaceMinimumDwellMs) {
+  if (!stoppedAt) return false;
+  const duration = Date.parse(stoppedAt) - Date.parse(startedAt);
+  return Number.isFinite(duration) && duration >= minimumMs;
+}
+
+function lastInsideAt(active: WorkingStay, before: string) {
+  return active.evidence.reduce((latest, { evidence }) => {
+    if (evidence.kind.startsWith("geofence_")) return latest;
+    // A reused Visit may start before this episode. Never use its future end as a point.
+    const at = evidence.endedAt && Date.parse(evidence.endedAt) <= Date.parse(before)
+      ? evidence.endedAt : evidence.occurredAt;
+    return Date.parse(at) > Date.parse(latest) ? at : latest;
+  }, active.startedAt);
+}
+
+function accurateCoordinate(item: ClassifiedEvidence, input: LocationEngineInput) {
+  return pointFor(item.evidence) != null && item.evidence.horizontalAccuracyMeters != null &&
+    item.evidence.horizontalAccuracyMeters <= input.config.highQualityHorizontalAccuracyMeters;
+}
+
+function strongSavedPoint(item: ClassifiedEvidence, placeId: string | null, input: LocationEngineInput) {
+  return item.evidence.kind !== "visit" && !item.evidence.kind.startsWith("geofence_") &&
+    accurateCoordinate(item, input) && item.match?.kind === "saved" && item.match.placeId === placeId &&
+    item.match.candidates.some(candidate => candidate.id === placeId && candidate.matchClass === "strong");
+}
+
+function resolveUnsupportedExit(active: WorkingStay) {
+  const exit = active.pendingExit!;
+  closeAtTransition(active, exit.evidence.occurredAt, "uncertain_gap");
+  active.evidence.push(exit);
+  active.pendingExit = undefined;
+  active.inferredContinuity = true;
+}
+
+function closeAtCorroboratedDeparture(active: WorkingStay, nextAt: string) {
+  const exit = active.pendingExit;
+  const exactVisitDeparture = active.visitSupportUntilAt && Date.parse(active.visitSupportUntilAt) <= Date.parse(nextAt);
+  const exitAt = exit?.evidence.occurredAt;
+  const boundary = !exactVisitDeparture && exitAt && Date.parse(exitAt) >= Date.parse(lastInsideAt(active, nextAt))
+    ? exitAt : nextAt;
+  closeAtTransition(active, boundary, "broken_by_other_place");
+  if (exit) active.evidence.push(exit);
+  active.pendingExit = undefined;
+}
+
+function supportedKnownPlaceEnd(working: WorkingStay, processingAt: string) {
+  const latestPoint = working.evidence.reduce((latest, { evidence }) =>
+    evidence.kind.startsWith("geofence_") ? latest : Math.max(latest, Date.parse(evidence.occurredAt)),
+  Date.parse(working.startedAt));
+  const intervalEnd = working.visitSupportUntilAt ? Date.parse(working.visitSupportUntilAt) : latestPoint;
+  // Clip actual support to the resolved window. A short/contradicted old Visit cannot
+  // promote the unsupported midpoint between a passing fix and a distant later point.
+  return new Date(Math.min(Date.parse(working.stoppedAt ?? processingAt), Math.max(latestPoint, intervalEnd))).toISOString();
+}
+
 function stayFromWorking(
   working: WorkingStay,
   processingAt: string,
@@ -164,7 +224,9 @@ function stayFromWorking(
     ({ evidence }) => evidence.kind === "visit" && evidence.endedAt && Date.parse(evidence.endedAt) > Date.parse(evidence.occurredAt)
   );
   const promotable = knownPlace
-    ? duration >= input.config.savedPlaceMinimumDwellMs || completedVisit
+    ? hasMeaningfulKnownPlaceWindow(working.startedAt,
+        supportedKnownPlaceEnd(working, processingAt),
+        input.config.savedPlaceMinimumDwellMs)
     : duration >= input.config.unknownStayCandidateDwellMs &&
       (coordinateEvidence.length >= input.config.minimumGpsSamplesForUnanchoredStay || completedVisit);
   if (!promotable || (endedAt && Date.parse(endedAt) <= Date.parse(working.startedAt))) return null;
@@ -181,6 +243,8 @@ function stayFromWorking(
   ).length;
   const confidence = simulated
     ? "low"
+    : working.inferredContinuity
+      ? "medium"
     : working.supportedByVisit || knownPlace
       ? highQualityCount > 0
         ? "medium_high"
@@ -285,6 +349,9 @@ function preprocess(input: LocationEngineInput) {
     }
     const normalisedEvidence = {
       ...evidence,
+      endedAt: evidence.kind === "visit" && evidence.endedAt &&
+        Number.isFinite(Date.parse(evidence.endedAt)) && Date.parse(evidence.endedAt) > occurredAtMs &&
+        Date.parse(evidence.endedAt) <= Date.parse(input.processingAt) ? evidence.endedAt : null,
       speedMetersPerSecond:
         evidence.speedMetersPerSecond != null && evidence.speedMetersPerSecond >= 0
           ? evidence.speedMetersPerSecond
@@ -520,6 +587,9 @@ export function coalesceCompatibleUnknownStays(
 }
 
 export function runLocationEngine(input: LocationEngineInput): LocationEngineOutput {
+  if (new Set(input.evidence.map(evidence => evidence.deviceId)).size > 1) {
+    throw new Error("Location engine replay requires evidence from one device.");
+  }
   if (input.config.algorithmVersion !== input.priorState.algorithmVersion && input.priorState.processedEvidenceIds.length > 0) {
     throw new Error("Location engine state version does not match the requested configuration.");
   }
@@ -528,6 +598,25 @@ export function runLocationEngine(input: LocationEngineInput): LocationEngineOut
   const { accepted, rejectedEvidence } = preprocess(input);
   const completed: WorkingStay[] = [];
   let active: WorkingStay | null = null;
+  // Occurrence-ordered, owner/device-local interval support; never a second durable store.
+  const visits = new Map<string, ClassifiedEvidence>();
+  const startStay = (item: ClassifiedEvidence) => {
+    const stay = makeWorkingStay(item);
+    if (strongSavedPoint(item, stay.placeId, input)) {
+      stay.lastStrongInside = item;
+      const visit = visits.get(`${item.evidence.deviceId}:${stay.key}`);
+      if (visit?.evidence.endedAt && Date.parse(visit.evidence.endedAt) >= Date.parse(stay.startedAt)) {
+        stay.evidence.push(visit);
+        stay.supportedByVisit = true;
+        stay.visitSupportUntilAt = visit.evidence.endedAt;
+        stay.stoppedAt = visit.evidence.endedAt;
+        stay.stopLowerBoundAt = visit.evidence.endedAt;
+        stay.stopUpperBoundAt = visit.evidence.endedAt;
+        stay.continuityStatus = "supported_by_visit";
+      }
+    }
+    return stay;
+  };
 
   for (const item of accepted) {
     const evidence = item.evidence;
@@ -535,10 +624,37 @@ export function runLocationEngine(input: LocationEngineInput): LocationEngineOut
     if (!point && !evidence.savedPlaceId && evidence.kind !== "visit") continue;
     const itemKey = matchKey(item.match, evidence);
     const atMs = Date.parse(evidence.occurredAt);
+    if (evidence.kind === "visit" && evidence.endedAt && item.match?.kind === "saved" && accurateCoordinate(item, input)) {
+      const key = `${evidence.deviceId}:${itemKey}`;
+      const previous = visits.get(key);
+      if (!previous?.evidence.endedAt || Date.parse(evidence.endedAt) > Date.parse(previous.evidence.endedAt)) visits.set(key, item);
+    }
+    // Registration/overlapping-region context must not split a quiet saved stay before
+    // its next actual observation can resolve continuity. It remains in the raw journal.
+    if (active?.placeMatchKind === "saved" && evidence.kind.startsWith("geofence_") &&
+        (evidence.kind === "geofence_state" || itemKey !== active.key)) continue;
+    // Do not promote broad points to place/departure evidence. Keep them in accepted raw evidence.
+    if (point && (active?.placeMatchKind === "saved" || item.match?.kind === "saved" || item.match?.kind === "learned") &&
+        !evidence.kind.startsWith("geofence_") && !accurateCoordinate(item, input)) continue;
+
+    if (active?.pendingExit) {
+      const elapsed = atMs - Date.parse(active.pendingExit.evidence.occurredAt);
+      const sameSaved = active.placeMatchKind === "saved" && itemKey === active.key;
+      const intervalSupports = active.visitSupportUntilAt != null && atMs <= Date.parse(active.visitSupportUntilAt);
+      if (sameSaved && active.outside.length < input.config.outsideConfirmationCount &&
+          ((elapsed <= input.config.savedPlaceExitReentryGraceMs && strongSavedPoint(item, active.placeId, input)) ||
+           (intervalSupports && (strongSavedPoint(item, active.placeId, input) || evidence.kind === "geofence_enter")))) {
+        active.evidence.push(active.pendingExit);
+        active.pendingExit = undefined;
+      } else if (sameSaved && elapsed > input.config.savedPlaceExitReentryGraceMs && !intervalSupports) {
+        resolveUnsupportedExit(active);
+        completed.push(active);
+        active = null;
+      }
+    }
 
     if (active) {
-      const lastEvidence = active.evidence.at(-1)!.evidence;
-      const observedAt = lastEvidence.endedAt ?? lastEvidence.occurredAt;
+      const observedAt = lastInsideAt(active, evidence.occurredAt);
       const lastAt = active.visitSupportUntilAt && Date.parse(active.visitSupportUntilAt) > Date.parse(observedAt)
         ? active.visitSupportUntilAt
         : observedAt;
@@ -548,12 +664,18 @@ export function runLocationEngine(input: LocationEngineInput): LocationEngineOut
         itemKey === "unknown" &&
         sameUnknownCluster(active, item, input.config.sparseUnknownContinuityMaximumDistanceMeters) &&
         observationGapMs <= input.config.sparseUnknownContinuityMaximumGapMs;
-      if (observationGapMs > input.config.maxContinuityGapMs && !boundedSparseSameUnknown) {
+      const previousPoint = active.lastStrongInside;
+      const boundedSavedGap = active.placeMatchKind === "saved" && !active.pendingExit && active.outside.length === 0 &&
+        previousPoint != null && previousPoint.evidence.clientEvidenceId !== evidence.clientEvidenceId &&
+        strongSavedPoint(item, active.placeId, input) &&
+        atMs - Date.parse(previousPoint.evidence.occurredAt) <= input.config.savedPlaceQuietGapMaxMs;
+      if (observationGapMs > input.config.maxContinuityGapMs && !boundedSparseSameUnknown && !boundedSavedGap) {
         closeAtTransition(active, evidence.occurredAt, "uncertain_gap", true);
         completed.push(active);
         active = null;
       } else if (observationGapMs > input.config.maxContinuityGapMs) {
         active.continuityStatus = "uncertain_gap";
+        if (boundedSavedGap) active.inferredContinuity = true;
       }
     }
 
@@ -564,7 +686,7 @@ export function runLocationEngine(input: LocationEngineInput): LocationEngineOut
       const moving =
         (evidence.speedMetersPerSecond ?? item.impliedSpeedMetersPerSecond ?? 0) >= input.config.movementSpeedThresholdMps;
       if (itemKey === "unknown" && moving && evidence.kind !== "visit") continue;
-      active = makeWorkingStay(item);
+      active = startStay(item);
       continue;
     }
 
@@ -576,16 +698,7 @@ export function runLocationEngine(input: LocationEngineInput): LocationEngineOut
       // Core Location can emit a same-place exit/enter pair while monitored
       // regions are being restored. That is a state snapshot, not a departure.
       if (hasPairedGeofenceEnter(accepted, evidence)) continue;
-      const lastInsideAt = active.evidence.at(-1)?.evidence.endedAt ??
-        active.evidence.at(-1)?.evidence.occurredAt ??
-        active.startedAt;
-      active.evidence.push(item);
-      active.stoppedAt = midpointTimeIso(lastInsideAt, evidence.occurredAt);
-      active.stopLowerBoundAt = lastInsideAt;
-      active.stopUpperBoundAt = evidence.occurredAt;
-      active.continuityStatus = "uncertain_gap";
-      completed.push(active);
-      active = null;
+      active.pendingExit ??= item;
       continue;
     }
 
@@ -598,7 +711,8 @@ export function runLocationEngine(input: LocationEngineInput): LocationEngineOut
     const sameUnknown = itemKey === "unknown" && active.key === "unknown" && sameUnknownCluster(active, item, input.config.unknownStayBaseRadiusMeters);
     if (sameKnownPlace || sameUnknown) {
       active.evidence.push(item);
-      active.outside = [];
+      if (!active.pendingExit) active.outside = [];
+      if (strongSavedPoint(item, active.placeId, input)) active.lastStrongInside = item;
       if (evidence.kind === "visit") {
         active.supportedByVisit = true;
         if (
@@ -622,9 +736,9 @@ export function runLocationEngine(input: LocationEngineInput): LocationEngineOut
     const credibleOtherPlace = itemKey !== "unknown" && !itemKey.startsWith("ambiguous:");
     const sustainedUnknownCluster = active.key === "unknown" && itemKey === "unknown" && !sameUnknown;
     if (credibleOtherPlace || sustainedUnknownCluster) {
-      closeAtTransition(active, evidence.occurredAt, "broken_by_other_place");
+      closeAtCorroboratedDeparture(active, evidence.occurredAt);
       completed.push(active);
-      active = makeWorkingStay(item);
+      active = startStay(item);
       continue;
     }
 
@@ -636,7 +750,7 @@ export function runLocationEngine(input: LocationEngineInput): LocationEngineOut
     const moving =
       (evidence.speedMetersPerSecond ?? item.impliedSpeedMetersPerSecond ?? 0) >= input.config.movementSpeedThresholdMps;
     if (active.outside.length >= input.config.outsideConfirmationCount && (displaced || moving || itemKey === "unknown")) {
-      closeAtTransition(active, active.outside[0].evidence.occurredAt, "broken_by_other_place");
+      closeAtCorroboratedDeparture(active, active.outside[0].evidence.occurredAt);
       completed.push(active);
       const outside = active.outside;
       active = null;
@@ -656,6 +770,11 @@ export function runLocationEngine(input: LocationEngineInput): LocationEngineOut
     }
   }
 
+  if (active?.pendingExit && (!active.visitSupportUntilAt ||
+      Date.parse(active.visitSupportUntilAt) < Date.parse(active.pendingExit.evidence.occurredAt)) &&
+      Date.parse(input.processingAt) - Date.parse(active.pendingExit.evidence.occurredAt) >= input.config.savedPlaceExitReentryGraceMs) {
+    resolveUnsupportedExit(active);
+  }
   if (active) completed.push(active);
   const rawStays = completed
     .map((working) => stayFromWorking(working, input.processingAt, input))

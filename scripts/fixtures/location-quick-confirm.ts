@@ -45,6 +45,12 @@ export async function validateLocationQuickConfirm(session: RequestSession, othe
     const first=await read(ids[0]),second=await read(ids[1]);
     const one=envelope(first.proposalHash!),two=envelope(second.proposalHash!);
     const firstResult=await resolveIdempotentReviewMutation(ids[0],one,session);
+    // A code-version segmentation correction can change client identity. Preserve a resolved journey.
+    await pool.query("update commute_segments set client_segment_id='historical-' || client_segment_id where id=$1",[first.locationSegmentId]);
+    await pool.query("update activity_events set client_event_id='historical-' || client_event_id where id=$1",[first.eventId]);
+    const protectedCommute=(await pool.query("select * from commute_segments where id=$1",[first.locationSegmentId])).rows;
+    const protectedLinks=(await pool.query("select * from location_segment_evidence where commute_segment_id=$1 order by id",[first.locationSegmentId])).rows;
+
     // Separate committed transactions and a real clock gap: updated_at must actually advance.
     await pool.query("select pg_sleep(0.01)");await replay();
     const refreshed=await read(ids[1]);assert.notEqual(refreshed.semanticRevision,second.semanticRevision);
@@ -52,6 +58,8 @@ export async function validateLocationQuickConfirm(session: RequestSession, othe
     assert.equal(refreshed.proposalHash,second.proposalHash);
     const content=({semanticRevision: _revision,updatedAt: _updated,...row}:ReviewProposalPresentation)=>row;
     assert.deepEqual(content(refreshed),content(second));
+    assert.deepEqual((await pool.query("select * from commute_segments where id=$1",[first.locationSegmentId])).rows,protectedCommute);
+    assert.deepEqual((await pool.query("select * from location_segment_evidence where commute_segment_id=$1 order by id",[first.locationSegmentId])).rows,protectedLinks);
     const secondResult=await resolveIdempotentReviewMutation(ids[1],two,session);
     assert.deepEqual(await resolveIdempotentReviewMutation(ids[0],one,session),firstResult);
     assert.deepEqual(await resolveIdempotentReviewMutation(ids[1],two,session),secondResult);
