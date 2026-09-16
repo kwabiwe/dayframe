@@ -16,6 +16,7 @@ import {
   type LocationSegment,
   type StaySegment
 } from "@dayframe/shared";
+import { hasMeaningfulKnownPlaceWindow } from "@dayframe/shared";
 import { withSyncTransaction, type SyncTransactionOptions } from "../sync-transaction";
 import type { RequestSession } from "../session";
 import { ensureCommuteCategoryId } from "../automatic-category-service";
@@ -376,6 +377,8 @@ async function emitSemanticSegment(
   stayIds: Map<string, string>,
   commuteIds: Map<string, string>
 ) {
+  if (segment.kind === "stay" && (segment.placeMatchKind === "saved" || segment.placeMatchKind === "learned") &&
+      !hasMeaningfulKnownPlaceWindow(segment.startedAt, segment.stoppedAt)) return false;
   const databaseSegmentId = segment.kind === "stay"
     ? stayIds.get(segment.clientSegmentId)
     : commuteIds.get(segment.clientSegmentId);

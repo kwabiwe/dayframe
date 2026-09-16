@@ -127,3 +127,40 @@ describe("Location reliability diagnostics on real SQLite",()=>{
   expect((await store.getLocationStoreDiagnostics()).acknowledgedEvidenceCount).toBe(305);
  });
 });
+
+describe("complete saved-place snapshot replay", () => {
+ it("replaces obsolete account snapshots with identical shared output, including empty output", async () => {
+  const { incident, place } = await import("../../../../../packages/shared/src/location/savedPlaceQualityFixture");
+  const { runLocationEngine } = await import("@dayframe/shared");
+  const fixture = incident();
+  await store.configureLocationAccount({ ...owner, deviceId: fixture.evidence[0].deviceId, timeZone: "Europe/London", savedPlaces: [place], acceptedLearnedPlaces: [] }, "v2_shadow");
+  await store.persistLocationEvidence(fixture.evidence);
+  const key = db.prepare("select account_key from location_account_context").get()!.account_key as string;
+  db.prepare("insert into location_segment_snapshot values(?,?,?,?)").run(key,"obsolete","{}",fixture.processingAt);
+  db.prepare("insert into location_segment_snapshot values(?,?,?,?)").run("other-account","other","{}",fixture.processingAt);
+  const journal = db.prepare("select * from location_evidence_journal order by client_evidence_id").all();
+  const uploads = db.prepare("select * from location_upload_outbox order by client_batch_id").all();
+  await store.processPendingLocationEvidence(fixture.processingAt);
+  const current = db.prepare("select segment_json from location_segment_snapshot where account_key=?").all(key).map(r=>JSON.parse(r.segment_json as string));
+  expect(current).toEqual(runLocationEngine(fixture).segmentUpserts);
+  expect(db.prepare("select * from location_evidence_journal order by client_evidence_id").all()).toEqual(journal);
+  expect(db.prepare("select * from location_upload_outbox order by client_batch_id").all()).toEqual(uploads);
+  expect(db.prepare("select count(*) n from location_segment_snapshot where account_key='other-account'").get()!.n).toBe(1);
+  // A synthetic empty complete journal is different from a partial upload response.
+  db.prepare("delete from location_evidence_journal where account_key=?").run(key);
+  await store.processPendingLocationEvidence(fixture.processingAt);
+  expect(db.prepare("select count(*) n from location_segment_snapshot where account_key=?").get(key)!.n).toBe(0);
+  expect(db.prepare("select count(*) n from location_segment_snapshot where account_key='other-account'").get()!.n).toBe(1);
+ });
+ it("rolls back pruning and state when replacement fails", async () => {
+  await seed();
+  const key = db.prepare("select account_key from location_account_context").get()!.account_key as string;
+  db.prepare("insert into location_segment_snapshot values(?,?,?,?)").run(key,"obsolete","{}",new Date().toISOString());
+  const before = db.prepare("select * from location_segment_snapshot").all();
+  const state = db.prepare("select * from location_engine_state").all();
+  db.exec("create trigger fail_replay before insert on location_store_metadata when NEW.key = 'last_engine_state' begin select raise(FAIL,'synthetic replay failure'); end");
+  await expect(store.processPendingLocationEvidence()).rejects.toThrow();
+  expect(db.prepare("select * from location_segment_snapshot").all()).toEqual(before);
+  expect(db.prepare("select * from location_engine_state").all()).toEqual(state);
+ });
+});

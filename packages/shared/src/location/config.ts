@@ -12,6 +12,8 @@ export type LocationEngineConfig = {
   maxContinuityGapMs: number;
   segmentFinalisationLagMs: number;
   savedPlaceMinimumDwellMs: number;
+  savedPlaceExitReentryGraceMs: number;
+  savedPlaceQuietGapMaxMs: number;
   unknownStayCandidateDwellMs: number;
   unknownStayReviewDwellMs: number;
   minimumGpsSamplesForUnanchoredStay: number;
@@ -60,6 +62,8 @@ export const LOCATION_ENGINE_V2_CONFIG: LocationEngineConfig = {
   maxContinuityGapMs: 720_000,
   segmentFinalisationLagMs: 600_000,
   savedPlaceMinimumDwellMs: 300_000,
+  savedPlaceExitReentryGraceMs: 300_000,
+  savedPlaceQuietGapMaxMs: 1_800_000,
   unknownStayCandidateDwellMs: 600_000,
   unknownStayReviewDwellMs: 1_200_000,
   minimumGpsSamplesForUnanchoredStay: 3,

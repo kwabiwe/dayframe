@@ -146,6 +146,14 @@ Key patterns:
 - Mobile offline queue: mobile writes local queued events, then syncs to API when available.
 - Hybrid iOS boundary: React Native owns authenticated data, API mutations, route state, and shared sheets. A native SwiftUI surface receives a serializable presentation model and emits semantic actions back to React Native; it does not create a parallel API, session, timer, or persistence layer.
 
+### Saved-place detection quality
+
+Automated saved and accepted learned visits need at least five minutes of evidence-supported effective dwell, measured in milliseconds after departure resolution. A completed native Visit cannot waive that floor for a clipped fragment; elapsed processing time alone cannot turn a passing fix into attendance. Raw capture evidence remains retained under the existing privacy policy.
+
+A same-place exit callback is a departure candidate. Strong same-place re-entry within five minutes can cancel an uncorroborated callback; genuine different-place or corroborated outside evidence still separates visits. Compatible finite native Visit intervals can support silence. Without interval support, distinct strong saved-place endpoints may bridge at most thirty minutes, with uncertain continuity and confidence capped at medium. Unsupported longer gaps remain separate. Estimated boundaries remain bounded; approximate native Visits do not establish precise building-door times.
+
+This improves suggestion quality without activating automatic logging. Existing rollout, cutover, commute qualification and unknown-place thresholds remain unchanged. Replay may replace obsolete open suggestions, but must preserve explicit accepted, ignored and manual decisions even when corrected segmentation changes client IDs.
+
 ### Automatic logging decisions
 
 Normal automatic confidence is `medium_high` or `high`. Location additionally requires a finalised segment, server `v2_enabled`, same-mode client acknowledgement/cutover and no earlier Review or terminal decision. Start and stop bounds are independently complete, finite, ordered, contain the unchanged detected estimate, and each span at most five minutes. Missing or invalid bounds fail closed; never round or move detected times to pass a guard.

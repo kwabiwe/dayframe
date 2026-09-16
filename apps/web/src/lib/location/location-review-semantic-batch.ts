@@ -3,6 +3,7 @@ import {
   AUTOMATIC_LOCATION_POLICY_VERSION, LOCATION_ENGINE_V2_CONFIG, assessAutomaticOverlap,
   type LocationSegment, type StaySegment
 } from "@dayframe/shared";
+import { hasMeaningfulKnownPlaceWindow } from "@dayframe/shared";
 import type { RequestSession } from "../session";
 import { ensureCommuteCategoryId } from "../automatic-category-service";
 import { locationSemanticDisposition } from "./location-semantic-policy";
@@ -66,6 +67,8 @@ export async function emitReviewSemanticSegments(
   stayIds: Map<string, string>, commuteIds: Map<string, string>
 ): Promise<number> {
   const candidates = segments.flatMap(segment => {
+    if (segment.kind === "stay" && (segment.placeMatchKind === "saved" || segment.placeMatchKind === "learned") &&
+        !hasMeaningfulKnownPlaceWindow(segment.startedAt, segment.stoppedAt)) return [];
     const segmentId = (segment.kind === "stay" ? stayIds : commuteIds).get(segment.clientSegmentId);
     if (!segmentId) return [];
     if (segment.kind === "stay" && segment.placeMatchKind === "unknown" &&

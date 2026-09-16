@@ -308,7 +308,9 @@ describe("Location Intelligence V2", () => {
       }),
       evidence("contradiction-b-1", 25, TEST_PLACE_B),
       evidence("contradiction-b-2", 35, TEST_PLACE_B),
-      evidence("return-a", 70, TEST_PLACE_A)
+      evidence("return-a", 70, TEST_PLACE_A),
+      // A return needs observed dwell; elapsed processing time alone is not attendance.
+      evidence("return-a-support", 75, TEST_PLACE_A)
     ]));
     const stays = result.segmentUpserts.filter((segment): segment is StaySegment => segment.kind === "stay");
     expect(stays.map((stay) => stay.placeId)).toEqual([TEST_PLACE_A.id, TEST_PLACE_B.id, TEST_PLACE_A.id]);
@@ -811,8 +813,9 @@ describe("Location Intelligence V2", () => {
     const stays = result.segmentUpserts.filter((segment): segment is StaySegment => segment.kind === "stay");
     const commutes = result.segmentUpserts.filter((segment) => segment.kind === "commute");
 
-    expect(stays).toHaveLength(3);
-    expect(stays[1].stoppedAt).toBe(evidence("expected-return-support", 94, TEST_PLACE_A).occurredAt);
+    // The 19-minute same-place interval now survives, while the real excursion still splits.
+    expect(stays).toHaveLength(4);
+    expect(stays[2].stoppedAt).toBe(evidence("expected-return-support", 94, TEST_PLACE_A).occurredAt);
     expect(commutes).toHaveLength(1);
     expect(commutes[0]).toMatchObject({
       startedAt: evidence("expected-start", 77.01, TEST_PLACE_A).occurredAt,

@@ -150,10 +150,11 @@ export async function replayLocationEvidence(
   });
 
   observeLocationStage(options, "segment_persistence");
-  const nextStayClientIds = output.segmentUpserts
+  const segments = await excludeProtectedReplacements(client, session, options, output.segmentUpserts);
+  const nextStayClientIds = segments
     .filter((segment): segment is StaySegment => segment.kind === "stay")
     .map((segment) => segment.clientSegmentId);
-  const nextCommuteClientIds = output.segmentUpserts
+  const nextCommuteClientIds = segments
     .filter((segment): segment is CommuteSegment => segment.kind === "commute")
     .map((segment) => segment.clientSegmentId);
   await supersedeMissingSegments(client, session, options, nextStayClientIds, nextCommuteClientIds);
@@ -161,8 +162,8 @@ export async function replayLocationEvidence(
   const evidenceIds = new Map(evidenceResult.rows.map((row) => [row.clientEvidenceId, row.id]));
   const protectedSegmentIds = new Set<string>();
   const stayIds = await persistStays(client, session, options.deviceId,
-    output.segmentUpserts.filter((segment): segment is StaySegment => segment.kind === "stay"), protectedSegmentIds);
-  const resolvedCommutes = output.segmentUpserts
+    segments.filter((segment): segment is StaySegment => segment.kind === "stay"), protectedSegmentIds);
+  const resolvedCommutes = segments
     .filter((segment): segment is CommuteSegment => segment.kind === "commute")
     .flatMap(segment => {
       const fromStayId = stayIds.get(segment.fromStaySegmentId);
@@ -174,19 +175,80 @@ export async function replayLocationEvidence(
   await replaceEvidenceLinks(
     client,
     session,
-    output.segmentUpserts,
+    segments,
     evidenceIds,
     stayIds,
     commuteIds,
     protectedSegmentIds
   );
-  return { segments: output.segmentUpserts, stayIds, commuteIds, evidenceIds, diagnostics: output.diagnostics };
+  return { segments, stayIds, commuteIds, evidenceIds, diagnostics: output.diagnostics };
+}
+
+type ProtectedSourceLink = {
+  clientSegmentId: string; clientEvidenceId: string; kind: string;
+  occurredAt: Date | string; startedAt: Date | string; stoppedAt: Date | string | null;
+};
+
+/** Exact provenance plus the occupied portion, never name/time proximity alone. */
+function sharesProtectedPortion(segment: LocationSegment, link: ProtectedSourceLink) {
+  if (segment.clientSegmentId === link.clientSegmentId) return false;
+  const start = Date.parse(iso(link.startedAt)!);
+  const stop = link.stoppedAt ? Date.parse(iso(link.stoppedAt)!) : NaN;
+  const nextStart = Date.parse(segment.startedAt);
+  const nextStop = segment.stoppedAt ? Date.parse(segment.stoppedAt) : NaN;
+  if (!(Math.min(stop, nextStop) > Math.max(start, nextStart))) return false;
+  // A long Visit reused after departure cannot claim the later episode.
+  if (link.kind === "visit") return start === nextStart;
+  if (!["standard_location", "significant_change"].includes(link.kind)) return false;
+  const at = Date.parse(iso(link.occurredAt)!);
+  // A single shared endpoint belongs to neither interval's interior.
+  return at > start && at < stop && at > nextStart && at < nextStop;
+}
+
+async function excludeProtectedReplacements(
+  client: pg.PoolClient, session: RequestSession,
+  options: { deviceId: string; algorithmVersion: string }, segments: LocationSegment[]
+) {
+  const byEvidence = new Map<string, LocationSegment[]>();
+  for (const segment of segments) for (const id of segment.evidenceIds) {
+    const candidates = byEvidence.get(id) ?? [];
+    candidates.push(segment);
+    byEvidence.set(id, candidates);
+  }
+  const held = new Set<string>();
+  // Bounded provenance reads under the existing owner transaction/lock. No per-segment SQL.
+  for (const ids of segmentChunks([...byEvidence.keys()].sort())) {
+    for (const table of ["stay_segments", "commute_segments"] as const) {
+      const column = table === "stay_segments" ? "stay_segment_id" : "commute_segment_id";
+      const links = await client.query<ProtectedSourceLink>(
+        `select s.client_segment_id as "clientSegmentId", le.client_evidence_id as "clientEvidenceId",
+                le.evidence_type as kind, le.occurred_at as "occurredAt",
+                s.started_at as "startedAt", s.stopped_at as "stoppedAt"
+         from ${table} s
+         join location_segment_evidence lse on lse.${column} = s.id
+           and lse.workspace_id = s.workspace_id and lse.user_id = s.user_id
+         join location_evidence le on le.id = lse.evidence_id
+           and le.workspace_id = s.workspace_id and le.user_id = s.user_id
+         where s.workspace_id = $1 and s.user_id = $2 and s.device_id = $3 and s.algorithm_version = $4
+           and le.device_id = $3 and le.algorithm_version = $4 and le.client_evidence_id = any($5::text[])
+           and (s.continuity_status = 'manual' or (s.status <> 'superseded' and s.created_from_event_id is not null
+             and not exists (select 1 from review_items ri where ri.workspace_id = s.workspace_id
+               and ri.user_id = s.user_id and ri.location_segment_id = s.id and ri.status = 'open')))
+         order by s.id, le.client_evidence_id for update of s`,
+        [session.workspaceId, session.userId, options.deviceId, options.algorithmVersion, ids]);
+      for (const link of links.rows) for (const candidate of byEvidence.get(link.clientEvidenceId) ?? []) {
+        if (sharesProtectedPortion(candidate, link)) held.add(candidate.clientSegmentId);
+      }
+    }
+  }
+  return segments.filter(segment => !held.has(segment.clientSegmentId) && (segment.kind !== "commute" ||
+    (!held.has(segment.fromStaySegmentId) && !held.has(segment.toStaySegmentId))));
 }
 
 async function supersedeMissingSegments(
   client: pg.PoolClient,
   session: RequestSession,
-  options: { deviceId: string; algorithmVersion: string },
+  options: { deviceId: string; algorithmVersion: string; processingAt: string },
   stayClientIds: string[],
   commuteClientIds: string[]
 ) {
@@ -200,14 +262,16 @@ async function supersedeMissingSegments(
   await client.query(
     `update stay_segments set status = 'superseded', updated_at = now()
      where workspace_id = $1 and user_id = $2 and device_id = $3 and algorithm_version = $4
-       and created_from_event_id is null and status in ('candidate', 'open', 'closed', 'finalised')
+       and created_from_event_id is null and continuity_status <> 'manual'
+       and status in ('candidate', 'open', 'closed', 'finalised')
        and not (client_segment_id = any($5::text[]))`,
     [session.workspaceId, session.userId, options.deviceId, options.algorithmVersion, stayClientIds]
   );
   await client.query(
     `update commute_segments set status = 'superseded', updated_at = now()
      where workspace_id = $1 and user_id = $2 and device_id = $3 and algorithm_version = $4
-       and created_from_event_id is null and status in ('candidate', 'open', 'closed', 'finalised')
+       and created_from_event_id is null and continuity_status <> 'manual'
+       and status in ('candidate', 'open', 'closed', 'finalised')
        and not (client_segment_id = any($5::text[]))`,
     [session.workspaceId, session.userId, options.deviceId, options.algorithmVersion, commuteClientIds]
   );
@@ -216,7 +280,7 @@ async function supersedeMissingSegments(
 async function retireOpenReviewsForMissingSegments(
   client: pg.PoolClient,
   session: RequestSession,
-  options: { deviceId: string; algorithmVersion: string },
+  options: { deviceId: string; algorithmVersion: string; processingAt: string },
   stayClientIds: string[],
   commuteClientIds: string[]
 ) {
@@ -230,6 +294,8 @@ async function retireOpenReviewsForMissingSegments(
        on cs.id = ri.location_segment_id
       and cs.workspace_id = ri.workspace_id and cs.user_id = ri.user_id
      where ri.workspace_id = $1 and ri.user_id = $2 and ri.status = 'open'
+       and coalesce(st.continuity_status, cs.continuity_status) <> 'manual'
+       and coalesce(st.started_at, cs.started_at) >= $7::timestamptz - ($8::int * interval '1 day')
        and coalesce(st.device_id, cs.device_id) = $3
        and coalesce(st.algorithm_version, cs.algorithm_version) = $4
        and (
@@ -245,7 +311,8 @@ async function retireOpenReviewsForMissingSegments(
           and le.workspace_id = lse.workspace_id and le.user_id = lse.user_id
          where lse.workspace_id = ri.workspace_id and lse.user_id = ri.user_id
            and (lse.stay_segment_id = st.id or lse.commute_segment_id = cs.id)
-           and le.expires_at > now()
+           and le.accepted = true and le.device_id = $3 and le.algorithm_version = $4
+           and le.expires_at > $7::timestamptz
        )
      for update of ri`,
     [
@@ -254,12 +321,21 @@ async function retireOpenReviewsForMissingSegments(
       options.deviceId,
       options.algorithmVersion,
       stayClientIds,
-      commuteClientIds
+      commuteClientIds,
+      options.processingAt,
+      LOCATION_ENGINE_V2_CONFIG.rawEvidenceRetentionDays
     ]
   );
   if (stale.rows.length === 0) return;
   const reviewIds = stale.rows.map((row) => row.reviewId);
   const eventIds = stale.rows.map((row) => row.eventId);
+  // Only rows just identified as obsolete *open* proposals are retired here.
+  // Explicitly mark derived snapshots superseded so their retirement is not a user decision.
+  for (const table of ["stay_segments", "commute_segments"] as const) {
+    await client.query(`update ${table} set status = 'superseded', updated_at = now()
+      where workspace_id = $1 and user_id = $2 and created_from_event_id = any($3::uuid[])
+        and continuity_status <> 'manual'`, [session.workspaceId, session.userId, eventIds]);
+  }
   await client.query(
     `update review_items
      set status = 'ignored', resolved_at = now(),
