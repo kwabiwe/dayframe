@@ -115,6 +115,7 @@ describe("Location private early response correlation",()=>{
   const response=await POST(new Request("https://dayframe.test/api/location/evidence",{method:"POST",body:"{}"}));
   expect(response.status).toBe(401);expect(response.headers.get("X-Dayframe-Request-Id")).toMatch(/^[0-9a-f-]{36}$/);
   expect(response.headers.get("Cache-Control")).toContain("private, no-store");
-  expect(log).toHaveBeenCalledWith("location_sync",expect.objectContaining({outcome:"authentication_rejected"}));log.mockRestore();
+  expect(log).toHaveBeenCalledWith("location_sync",expect.any(String));
+  expect(JSON.parse(log.mock.calls[0]![1] as string)).toMatchObject({outcome:"authentication_rejected"});log.mockRestore();
  });
 });

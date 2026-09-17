@@ -17,6 +17,40 @@ describe("bounded sync ownership", () => {
     expect(calls[0]?.[0]).toMatch(/^begin;/i);
     expect(calls.findIndex(([sql]) => sql === "insert receipt")).toBeLessThan(calls.findIndex(([sql]) => sql === "commit"));
   });
+  it("observes transaction boundaries without changing the SQL sequence", async () => {
+    const baseline = lease();
+    await withSyncTransaction("baseline", async ({client}) => { await client.query("effect"); }, {databasePool:baseline.pool});
+    const observed = lease(); const events: string[] = [];
+    await withSyncTransaction("observed", async ({client}) => { await client.query("effect"); }, {
+      databasePool: observed.pool,
+      onSyncTiming: event => events.push(`${event.stage}:${event.state}`)
+    });
+    const observedSql = observed.client.query.mock.calls as unknown as string[][];
+    const baselineSql = baseline.client.query.mock.calls as unknown as string[][];
+    expect(observedSql.map(call=>call[0])).toEqual(baselineSql.map(call=>call[0]));
+    expect(events).toEqual([
+      "connection_acquisition:started","connection_acquisition:completed",
+      "transaction_configuration:started","transaction_configuration:completed",
+      "transaction_commit:started","transaction_commit:completed"
+    ]);
+  });
+  it("ignores timing observer failures", async () => {
+    const {client,pool}=lease();
+    await expect(withSyncTransaction("test",async ({client})=>{await client.query("effect");},{
+      databasePool:pool,onSyncTiming:()=>{throw new Error("observer failed");}
+    })).resolves.toBeUndefined();
+    expect(client.release).toHaveBeenCalledExactlyOnceWith(false);
+  });
+  it("preserves the original transaction failure when timing observation also fails", async () => {
+    const failure = Object.assign(new Error("query failed"), {code:"57014"});
+    const {pool}=lease(vi.fn(async (sql:string)=>{
+      if(sql==="effect") throw failure;
+      return {rows:[]};
+    }) as never);
+    await expect(withSyncTransaction("test",async ({client})=>{await client.query("effect");},{
+      databasePool:pool,onSyncTiming:()=>{throw new Error("observer failed");}
+    })).rejects.toBe(failure);
+  });
   it("applies the typed repeatable-read option at BEGIN before configuration queries", async () => {
     const { client, pool } = lease();
     await withSyncTransaction("snapshot", async () => undefined, {

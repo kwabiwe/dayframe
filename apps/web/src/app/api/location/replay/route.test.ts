@@ -57,10 +57,14 @@ describe("POST /api/location/replay", () => {
     expect(response.headers.get("cache-control")).toBe("private, no-store, max-age=0");
     expect(response.headers.get("vary")).toBe("Authorization, Cookie");
     expect(mocks.resolveRequestSession).toHaveBeenCalledOnce();
-    expect(mocks.replayRetainedLocationEvidence).toHaveBeenCalledWith(body, session, undefined, expect.objectContaining({ signal: expect.any(AbortSignal), deadlineAt: expect.any(Number) }));
+    expect(mocks.replayRetainedLocationEvidence).toHaveBeenCalledWith(body, session, undefined, expect.objectContaining({
+      signal: expect.any(AbortSignal), deadlineAt: expect.any(Number),
+      onLocationTiming: expect.any(Function), onLocationCount: expect.any(Function), onSyncTiming: expect.any(Function)
+    }));
   });
 
   it("rejects malformed JSON without calling the replay service", async () => {
+    const log = vi.spyOn(console, "info").mockImplementation(() => undefined);
     const response = await POST(new Request("https://dayframe.test/api/location/replay", {
       method: "POST",
       body: "{"
@@ -69,6 +73,24 @@ describe("POST /api/location/replay", () => {
     expect(response.status).toBe(400);
     expect(mocks.resolveRequestSession).toHaveBeenCalledOnce();
     expect(mocks.replayRetainedLocationEvidence).not.toHaveBeenCalled();
+    const payload = JSON.parse(log.mock.calls[0]![1] as string);
+    expect(payload.timing.stages.request_body).toMatchObject({ completed: true });
+    log.mockRestore();
+  });
+
+  it("completes request-body timing when the parsed body exceeds the limit", async () => {
+    const log = vi.spyOn(console, "info").mockImplementation(() => undefined);
+    const response = await POST(new Request("https://dayframe.test/api/location/replay", {
+      method: "POST",
+      body: JSON.stringify({ payload: "x".repeat(512 * 1024) })
+    }));
+
+    expect(response.status).toBe(413);
+    expect(mocks.resolveRequestSession).toHaveBeenCalledOnce();
+    expect(mocks.replayRetainedLocationEvidence).not.toHaveBeenCalled();
+    const payload = JSON.parse(log.mock.calls[0]![1] as string);
+    expect(payload.timing.stages.request_body).toMatchObject({ completed: true });
+    log.mockRestore();
   });
 
   it("rejects an oversized body before authentication", async () => {
@@ -92,10 +114,8 @@ describe("POST /api/location/replay", () => {
     }));
 
     expect(response.status).toBe(500);
-    expect(errorSpy).toHaveBeenCalledWith(
-      "location_sync",
-      expect.objectContaining({endpoint:"replay", httpStatus:500, outcome:"failed"})
-    );
+    expect(errorSpy).toHaveBeenCalledWith("location_sync", expect.any(String));
+    expect(JSON.parse(errorSpy.mock.calls[0]![1] as string)).toMatchObject({endpoint:"replay", httpStatus:500, outcome:"failed"});
     errorSpy.mockRestore();
   });
 
