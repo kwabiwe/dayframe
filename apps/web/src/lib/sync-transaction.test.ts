@@ -6,6 +6,9 @@ function lease(query = vi.fn(async () => ({ rows: [] }))) {
   const pool = { connect: vi.fn().mockResolvedValue(client) };
   return { client, pool: pool as unknown as import("pg").Pool };
 }
+type QueryCall = [statement: string, params?: unknown[]];
+const queryCalls = (client: ReturnType<typeof lease>["client"]) =>
+  client.query.mock.calls as unknown as QueryCall[];
 afterEach(() => vi.useRealTimers());
 
 describe("bounded sync ownership", () => {
@@ -61,6 +64,70 @@ describe("bounded sync ownership", () => {
     const calls = client.query.mock.calls as unknown as string[][];
     expect(calls[0]?.[0]).toMatch(/^begin isolation level repeatable read read only;/i);
     expect(calls.slice(1).some(([sql]) => sql.includes("set_config('application_name'"))).toBe(true);
+  });
+  it("keeps per-query timeout configuration for callers without the replay opt-in", async () => {
+    const { client, pool } = lease();
+    await withSyncTransaction("default", async ({ client }) => {
+      await client.query("select first_effect");
+      await client.query("select second_effect");
+    }, { databasePool: pool });
+
+    const configurationCalls = queryCalls(client).filter(([sql]) =>
+      String(sql).includes("set_config('statement_timeout'"));
+    expect(configurationCalls).toHaveLength(2);
+  });
+  it("reuses only the known full-cap timeout pair for the explicit replay opt-in", async () => {
+    const { client, pool } = lease();
+    await withSyncTransaction("replay", async ({ client }) => {
+      await client.query("select first_effect");
+      await client.query("select second_effect");
+    }, { databasePool: pool, reuseFullCapTimeoutPair: true });
+
+    const sql = queryCalls(client).map(([statement]) => String(statement));
+    expect(sql[0]).toMatch(/set local statement_timeout = '3000ms'; set local lock_timeout = '1500ms'/i);
+    expect(sql).toContain("select first_effect");
+    expect(sql).toContain("select second_effect");
+    expect(sql.indexOf("select first_effect")).toBeLessThan(sql.indexOf("select second_effect"));
+    expect(sql.filter(statement => statement.includes("set_config('statement_timeout'"))).toHaveLength(0);
+  });
+  it("falls back to the existing configuration calls when the budget is finite and near its deadline", async () => {
+    vi.useFakeTimers();
+    const query = vi.fn(async () => {
+      vi.advanceTimersByTime(5);
+      return { rows: [] };
+    });
+    const { client, pool } = lease(query as never);
+    await withSyncTransaction("finite", async ({ client }) => {
+      await client.query("select first_effect");
+      await client.query("select second_effect");
+    }, {
+      databasePool: pool,
+      deadlineAt: Date.now() + 85,
+      cleanupReserveMs: 0,
+      reuseFullCapTimeoutPair: true
+    });
+
+    const configurationCalls = queryCalls(client).filter(([sql]) =>
+      String(sql).includes("set_config('statement_timeout'"));
+    expect(configurationCalls).toHaveLength(2);
+    expect(configurationCalls.every(([, params]) => String((params as string[])[0]).endsWith("ms"))).toBe(true);
+  });
+  it("invalidates the replay cache after savepoint recovery and timeout-setting SQL", async () => {
+    const savepoint = lease();
+    await withSyncTransaction("savepoint", async ({ client }) => {
+      await client.query("savepoint nested");
+      await client.query("select after_savepoint");
+    }, { databasePool: savepoint.pool, reuseFullCapTimeoutPair: true });
+    expect(queryCalls(savepoint.client).filter(([sql]) =>
+      String(sql).includes("set_config('statement_timeout'"))).toHaveLength(1);
+
+    const setting = lease();
+    await withSyncTransaction("setting", async ({ client }) => {
+      await client.query("select set_config($1, $2, true)", ["statement_timeout", "3000ms"]);
+      await client.query("select after_setting");
+    }, { databasePool: setting.pool, reuseFullCapTimeoutPair: true });
+    expect(queryCalls(setting.client).filter(([sql]) =>
+      String(sql).includes("set_config('statement_timeout', $1"))).toHaveLength(1);
   });
   it("destroys a lease when rollback fails without masking the original SQLSTATE", async () => {
     const failure = Object.assign(new Error("private detail"), { code: "57014" });

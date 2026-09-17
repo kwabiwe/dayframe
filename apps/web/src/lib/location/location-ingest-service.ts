@@ -212,6 +212,12 @@ export async function replayRetainedLocationEvidence(
     request.rolloutMode,
     request.semanticModeAcknowledgedAt
   );
+  const transactionOptions = {
+    ...options,
+    // Only the server-effective Review replay has the bounded query path that
+    // is proven not to alter the transaction-local timeout settings.
+    reuseFullCapTimeoutPair: rollout.effectiveMode === "v2_review"
+  };
   return withSyncTransaction("location_evidence", async ({ client, phase, remainingMs }) => {
     phase("owner_lock");
     const replayObservation = { ...options, remainingOperationMs: remainingMs };
@@ -241,7 +247,7 @@ export async function replayRetainedLocationEvidence(
       semanticSegmentCount: semanticReplay.semanticSegmentCount,
       warnings: locationReplayWarnings(rollout, semanticReplay.replay.diagnostics.warningCodes)
     };
-  }, options);
+  }, transactionOptions);
 }
 
 async function replayAndEmitLocationSemantics(

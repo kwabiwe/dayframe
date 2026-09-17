@@ -155,3 +155,8 @@ stage exceeds the budget. Use the guarded `validate:location-reliability` runner
 for substantial synthetic seven-day output and finite 555 + seven/305 backlog
 passes. Synthetic latency is not hosted evidence. Missing return observations
 remain a separate capture investigation; successful upload cannot reconstruct them.
+The transaction owner may skip only a known identical 3,000 ms/1,500 ms full-cap
+guard pair for server-effective `v2_review` retained replay. A lower remaining
+budget, savepoint recovery, timeout-setting SQL or any uncertain state falls back
+to the existing guard query; ingest, `v2_shadow`, `v2_enabled` and non-Location
+callers remain unchanged.

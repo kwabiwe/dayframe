@@ -33,6 +33,12 @@ export type SyncTransactionOptions = {
   databasePool?: Pick<pg.Pool, "connect">;
   /** Redacted, best-effort timing observation. It must never own control flow. */
   onSyncTiming?: (event: SyncTimingEvent) => void;
+  /**
+   * Reuse only the timeout pair installed by BEGIN while both values are still
+   * at their full caps. Callers must opt in only when they own a replay path
+   * that cannot change these settings outside this transaction owner.
+   */
+  reuseFullCapTimeoutPair?: boolean;
 };
 
 export type SyncTimingEvent = {
@@ -49,6 +55,28 @@ export type SyncTransaction = {
 const phases = new WeakMap<pg.PoolClient, (phase: SyncPhase) => void>();
 export function setSyncPhase(client: pg.PoolClient, phase: SyncPhase) {
   phases.get(client)?.(phase);
+}
+
+function boundedTimeoutMs(capMs: number, remainingMs: number) {
+  return Math.max(1, Math.min(capMs, remainingMs));
+}
+
+function isFullCapTimeoutPair(statementMs: number, lockMs: number) {
+  return statementMs === SYNC_STATEMENT_MS && lockMs === SYNC_LOCK_MS;
+}
+
+function isSavepointRecoveryQuery(sql: string) {
+  return /^\s*(rollback to|release savepoint)/i.test(sql);
+}
+
+/**
+ * A replay query normally cannot alter these transaction-local settings. Keep
+ * the opt-in cache fail-safe if a caller sends a setting/savepoint query or a
+ * query whose text makes the setting state unknowable.
+ */
+function mayChangeTimeoutConfiguration(sql: string) {
+  return /\b(?:statement_timeout|lock_timeout|set_config)\b/i.test(sql) ||
+    /^\s*(?:set|reset|savepoint|rollback|release\s+savepoint)\b/i.test(sql);
 }
 
 /** Narrow owner for Review/Health/Location transactions. No SQL parameters are logged.
@@ -128,7 +156,9 @@ export async function withSyncTransaction<T>(
       began = true;
       observeTiming("transaction_configuration", "started");
       // A single protocol message installs the idle guard immediately after BEGIN.
-      await queryRaw(`begin${options.isolationLevel === "repeatable read" ? " isolation level repeatable read" : ""}${options.readOnly ? " read only" : ""}; set local idle_in_transaction_session_timeout = '${SYNC_IDLE_MS}ms'; set local statement_timeout = '${Math.max(1, Math.min(SYNC_STATEMENT_MS, remainingMs()))}ms'; set local lock_timeout = '${Math.max(1, Math.min(SYNC_LOCK_MS, remainingMs()))}ms'`);
+      const initialStatementTimeoutMs = boundedTimeoutMs(SYNC_STATEMENT_MS, remainingMs());
+      const initialLockTimeoutMs = boundedTimeoutMs(SYNC_LOCK_MS, remainingMs());
+      await queryRaw(`begin${options.isolationLevel === "repeatable read" ? " isolation level repeatable read" : ""}${options.readOnly ? " read only" : ""}; set local idle_in_transaction_session_timeout = '${SYNC_IDLE_MS}ms'; set local statement_timeout = '${initialStatementTimeoutMs}ms'; set local lock_timeout = '${initialLockTimeoutMs}ms'`);
       check();
       phase = "configure";
       await queryRaw("select set_config('application_name', $1, true)", [`dayframe.sync.${operation}`]);
@@ -139,19 +169,32 @@ export async function withSyncTransaction<T>(
       observeTiming("transaction_configuration", "completed");
       // Every nested service query stays on the checked-out client and consumes
       // the SAME operation budget. Savepoint recovery must run in an aborted tx.
+      let fullCapTimeoutPairKnown = options.reuseFullCapTimeoutPair === true &&
+        isFullCapTimeoutPair(initialStatementTimeoutMs, initialLockTimeoutMs);
       const client = new Proxy(raw!, {
         get(target, property) {
           if (property === "release") return () => { throw new Error("Sync transaction owns release"); };
           if (property === "query") return async (sql: string, params?: unknown[]) => {
             check();
-            if (!/^\s*(rollback to|release savepoint)/i.test(sql)) {
+            const isRecoveryQuery = isSavepointRecoveryQuery(sql);
+            const statementTimeoutMs = boundedTimeoutMs(SYNC_STATEMENT_MS, remainingMs());
+            const lockTimeoutMs = boundedTimeoutMs(SYNC_LOCK_MS, remainingMs());
+            const canReuseFullCapPair = options.reuseFullCapTimeoutPair === true &&
+              fullCapTimeoutPairKnown && isFullCapTimeoutPair(statementTimeoutMs, lockTimeoutMs);
+            if (!isRecoveryQuery && !canReuseFullCapPair) {
               await queryRaw("select set_config('statement_timeout', $1, true), set_config('lock_timeout', $2, true)", [
-                `${Math.max(1, Math.min(SYNC_STATEMENT_MS, remainingMs()))}ms`,
-                `${Math.max(1, Math.min(SYNC_LOCK_MS, remainingMs()))}ms`
+                `${statementTimeoutMs}ms`,
+                `${lockTimeoutMs}ms`
               ]);
+              fullCapTimeoutPairKnown = options.reuseFullCapTimeoutPair === true &&
+                isFullCapTimeoutPair(statementTimeoutMs, lockTimeoutMs);
               check();
             }
-            return queryRaw(sql, params);
+            const result = await queryRaw(sql, params);
+            if (options.reuseFullCapTimeoutPair === true && mayChangeTimeoutConfiguration(sql)) {
+              fullCapTimeoutPairKnown = false;
+            }
+            return result;
           };
           const value = Reflect.get(target, property);
           return typeof value === "function" ? value.bind(target) : value;
