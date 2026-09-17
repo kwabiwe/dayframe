@@ -41,12 +41,14 @@ export async function POST(request: Request) {
     diagnostics.onLocationTiming({ stage: "request_body", state: "started" });
     const requestText = await request.text();
     if (new TextEncoder().encode(requestText).byteLength > LOCATION_EVIDENCE_BODY_LIMIT_BYTES) {
+      diagnostics.onLocationTiming({ stage: "request_body", state: "completed" });
       return respond({ error: "Location replay request is too large." }, 413);
     }
     let body: unknown;
     try {
       body = JSON.parse(requestText);
     } catch {
+      diagnostics.onLocationTiming({ stage: "request_body", state: "completed" });
       return respond({ error: "Location replay body must be valid JSON." }, 400);
     }
     diagnostics.onLocationTiming({ stage: "request_body", state: "completed" });

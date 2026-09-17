@@ -24,11 +24,13 @@ describe("request-local Location observation",()=>{
   const log=vi.spyOn(console,"info").mockImplementation(()=>{});
   const observer=locationRequestDiagnostics("replay",Date.now());
   observer.finish(new Response(null,{status:401}),{code:"session_expired"});
-  expect(log).toHaveBeenCalledWith("location_sync",expect.objectContaining({outcome:"authentication_rejected",code:"session_expired",reason:"authentication_required"}));
+  expect(log).toHaveBeenCalledWith("location_sync",expect.any(String));
+  expect(JSON.parse(log.mock.calls[0]![1] as string)).toMatchObject({outcome:"authentication_rejected",code:"session_expired",reason:"authentication_required"});
   const acquisition=locationRequestDiagnostics("evidence",Date.now());
   acquisition.finish(new Response(null,{status:503}),new SyncOperationError("connection_unavailable","acquire","location_evidence"),{error:"Busy"});
-  expect(log.mock.calls[1][1]).toMatchObject({phase:"acquire"});
-  expect(log.mock.calls[1][1]).not.toHaveProperty("locationStage");
+  const acquisitionRecord=JSON.parse(log.mock.calls[1]![1] as string);
+  expect(acquisitionRecord).toMatchObject({phase:"acquire"});
+  expect(acquisitionRecord).not.toHaveProperty("locationStage");
  });
  it("records bounded completed and active timings without sensitive fields",()=>{
   vi.useFakeTimers(); vi.setSystemTime(new Date("2026-09-17T10:00:00.000Z"));
@@ -45,7 +47,9 @@ describe("request-local Location observation",()=>{
   (observer.onLocationCount as (name:string,value:number)=>void)("workspaceId",42);
   vi.advanceTimersByTime(20);
   observer.finish(new Response(null,{status:503}),new SyncOperationError("operation_deadline","effect","location_evidence"),{error:"Busy"});
-  const record=log.mock.calls[0]![1] as {timing:{stages:Record<string,unknown>;counts:Record<string,number>}};
+  const retainedPayload=log.mock.calls[0]![1] as string;
+  expect(retainedPayload).not.toContain("[Object]");
+  const record=JSON.parse(retainedPayload) as {timing:{stages:Record<string,unknown>;counts:Record<string,number>}};
   expect(record.timing).toEqual({
    stages:{
     request_auth:{elapsedMs:12,completed:true,remainingMsAtStart:7000,remainingMsAfter:6988},
@@ -62,7 +66,7 @@ describe("request-local Location observation",()=>{
   observer.onLocationTiming({stage:"lineage_insertion",state:"started",remainingMs:100});
   observer.finish(new Response(null,{status:503}),new SyncOperationError("operation_deadline","effect","location_evidence"),{error:"Busy"});
   observer.onLocationTiming({stage:"lineage_insertion",state:"completed",remainingMs:0});
-  const record=log.mock.calls[0]![1] as {timing:{stages:{lineage_insertion:{completed:boolean}}}};
+  const record=JSON.parse(log.mock.calls[0]![1] as string) as {timing:{stages:{lineage_insertion:{completed:boolean}}}};
   expect(record.timing.stages.lineage_insertion.completed).toBe(false);
  });
 });

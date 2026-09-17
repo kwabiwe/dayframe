@@ -113,7 +113,13 @@ export function locationRequestDiagnostics(endpoint: LocationSyncEndpoint, start
           }])),
           counts: Object.fromEntries(counts)
         };
-        try { console.info("location_sync", { outcome: authRejected ? "authentication_rejected" : response.ok ? "success" : "failed", ...details, timing }); }
+        try {
+          console.info("location_sync", JSON.stringify({
+            outcome: authRejected ? "authentication_rejected" : response.ok ? "success" : "failed",
+            ...details,
+            timing
+          }));
+        }
         catch { /* A committed operation must never become a retry because logging failed. */ }
       }
       return result;
