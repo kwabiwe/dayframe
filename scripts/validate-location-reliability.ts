@@ -33,8 +33,18 @@ async function owner() {
   await database.query("insert into workspace_members(workspace_id,user_id,role) values($1,$2,'owner')",[session.workspaceId,session.userId]);
   return session;
 }
-async function measure(label:string, session:RequestSession, evidence:LocationEvidence[]|null, delayMs=0) {
-  let stage="transaction",queries=0,inserts=0,lineageInserts=0;
+const timeoutConfigurationPattern = /\b(?:statement_timeout|lock_timeout)\b/i;
+const transactionScaffoldingPattern = /^\s*(?:begin|commit|rollback)\b|set_config\('\s*application_name|current_setting\('\s*transaction_timeout|set_config\('\s*transaction_timeout/i;
+
+async function measure(
+  label:string,
+  session:RequestSession,
+  evidence:LocationEvidence[]|null,
+  delayMs=0,
+  deadlineMs?: number
+) {
+  let stage="transaction",queries=0,inserts=0,lineageInserts=0,timeoutConfigurationCalls=0;
+  const businessStatements:string[]=[];
   const stages:Record<string,{queries:number;ms:number}>={};
   const began=performance.now();let last=began;
   const checkpoint=()=>{ const now=performance.now();(stages[stage]??={queries:0,ms:0}).ms+=now-last;last=now; };
@@ -44,7 +54,11 @@ async function measure(label:string, session:RequestSession, evidence:LocationEv
       if(key==="query")return async(sql:string,params?:unknown[])=>{
         if(delayMs)await new Promise(resolve=>setTimeout(resolve,delayMs));
         if(released)throw new Error("Synthetic connection released");
-        queries++;(stages[stage]??={queries:0,ms:0}).queries++;
+        queries++;
+        const statement=String(sql);
+        (stages[stage]??={queries:0,ms:0}).queries++;
+        if(timeoutConfigurationPattern.test(statement)) timeoutConfigurationCalls++;
+        else if(!transactionScaffoldingPattern.test(statement)) businessStatements.push(statement.replace(/\s+/g," ").trim());
         if(/^\s*insert into location_evidence\s/i.test(sql))inserts++;
         if(/^\s*insert into location_segment_evidence\s/i.test(sql))lineageInserts++;
         return params?client.query(sql,params):client.query(sql);
@@ -55,18 +69,24 @@ async function measure(label:string, session:RequestSession, evidence:LocationEv
   }} as Pick<pg.Pool,"connect">;
   let result:unknown,error:unknown;
   try {
-    const options={databasePool,onLocationStage:(next:string)=>{checkpoint();stage=next;}};
+    const options={
+      databasePool,
+      ...(deadlineMs == null ? {} : { deadlineAt: Date.now() + deadlineMs, cleanupReserveMs: 0 }),
+      onLocationStage:(next:string)=>{checkpoint();stage=next;}
+    };
     result=evidence?await ingestLocationEvidence(batch(evidence),session,RELIABILITY_CLOCK,options)
       :await replayRetainedLocationEvidence(replayRequest,session,RELIABILITY_CLOCK,options);
   }catch(e){error=e;}
   checkpoint();
-  const report={label,baseline,delayMs,observations:evidence?.length??860,outcome:error?"FAIL":"PASS",
-    elapsedMs:Math.round(performance.now()-began),queries,evidenceInserts:inserts,lineageInserts,
+  const report={label,baseline,delayMs,deadlineMs:deadlineMs??null,observations:evidence?.length??860,outcome:error?"FAIL":"PASS",
+    elapsedMs:Math.round(performance.now()-began),queries,timeoutConfigurationCalls,
+    businessQueryHash:createHash("sha256").update(JSON.stringify(businessStatements)).digest("hex"),
+    evidenceInserts:inserts,lineageInserts,
     stages:Object.fromEntries(Object.entries(stages).map(([name,v])=>[name,{queries:v.queries,ms:Math.round(v.ms)}])),
     ...(error?{failure:{...syncFailureMetadata(error),locationStage:stage}}:{})};
   console.log(JSON.stringify(report));
   if(!error&&evidence)assert.equal(inserts,baseline?evidence.length:1);
-  if(!delayMs)assert.ifError(error);
+  if(!delayMs&&deadlineMs == null)assert.ifError(error);
   if(delayMs && error)stressFailed = true;
   return {result,error,report};
 }
@@ -108,6 +128,8 @@ async function run() {
   assert.equal(segmentAndSemanticHash,"79008808b7458bde476a813ec5ba3419e2c692dd01121351dca894c27ca5a1e3","Stored fields/semantics differ from reviewed-head baseline");
   assert.equal(createHash("sha256").update(JSON.stringify(links)).digest("hex"),"2cac2993956118d7cd548ca2abc765fecad04eca289a13e26e8b69d84bf4c899");
   console.log(JSON.stringify({segmentAndSemanticHash}));
+  await measure("replay-860-finite-85ms",retained,null,0,85);
+  assert.deepEqual(await lineage(retained),links,"Finite-deadline replay changed lineage despite its bounded rollback");
   for(const delay of correctnessOnly ? [] : [20,40]){
     await measure("replay-860",retained,null,delay);
     assert.deepEqual(await lineage(retained),links,"Failed replay must rollback; successful replay must preserve exact lineage");

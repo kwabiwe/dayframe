@@ -398,6 +398,9 @@ Before merging implementation PRs, ask KB to test the exact Ready Preview promot
   links; a failed later chunk restores the entire prior transaction.
 - [ ] Upload/replay completion and driver-query timings are measured separately;
   contention, acquisition, statement and total deadlines retain honest phases.
+- [ ] Server-effective `v2_review` retained replay reuses only a known full-cap
+  timeout pair; near-deadline, savepoint/uncertain state and all other callers
+  retain the existing per-query configuration and business-query order.
 - [ ] Settings/export show safe separate upload/processing results and last success,
   including replay failure with an empty queue. Success clears only its endpoint.
 - [ ] Hostile bodies/headers never leak into diagnostics; auth/session/backend
