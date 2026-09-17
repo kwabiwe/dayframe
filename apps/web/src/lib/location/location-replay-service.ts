@@ -1,4 +1,4 @@
-import { observeLocationStage, type LocationObservation } from "./location-sync-diagnostics";
+import { observeLocationCount, observeLocationStage, observeLocationTiming, type LocationObservation } from "./location-sync-diagnostics";
 import {
   EMPTY_LOCATION_ENGINE_STATE,
   LOCATION_ENGINE_V2_CONFIG,
@@ -71,6 +71,7 @@ export async function replayLocationEvidence(
   options: { deviceId: string; algorithmVersion: string; processingAt: string } & LocationObservation
 ): Promise<LocationReplayResult> {
   observeLocationStage(options, "evidence_read");
+  observeLocationTiming(options, "evidence_read", "started");
   const evidenceResult = await client.query<EvidenceRow>(
     `select id,
             client_evidence_id as "clientEvidenceId",
@@ -103,7 +104,10 @@ export async function replayLocationEvidence(
       options.processingAt
     ]
   );
+  observeLocationTiming(options, "evidence_read", "completed");
+  observeLocationCount(options, "evidenceRows", evidenceResult.rows.length);
   observeLocationStage(options, "catalogue_read");
+  observeLocationTiming(options, "catalogue_read", "started");
   const placesResult = await client.query<PlaceRow>(
     `select id, name, latitude, longitude,
             radius_meters as "radiusMeters", priority,
@@ -119,6 +123,9 @@ export async function replayLocationEvidence(
      where workspace_id = $1 and user_id = $2 and status = 'accepted'`,
     [session.workspaceId, session.userId]
   );
+  observeLocationTiming(options, "catalogue_read", "completed");
+  observeLocationStage(options, "engine");
+  observeLocationTiming(options, "engine_computation", "started");
   const evidence = evidenceResult.rows.map((row) => LocationEvidenceSchema.parse({
     clientEvidenceId: row.clientEvidenceId,
     deviceId: row.deviceId,
@@ -139,7 +146,6 @@ export async function replayLocationEvidence(
     isSimulated: row.isSimulated,
     metadata: row.metadata
   }));
-  observeLocationStage(options, "engine");
   const output = runLocationEngine({
     priorState: { ...EMPTY_LOCATION_ENGINE_STATE, algorithmVersion: options.algorithmVersion },
     evidence,
@@ -148,21 +154,33 @@ export async function replayLocationEvidence(
     config: { ...LOCATION_ENGINE_V2_CONFIG, algorithmVersion: options.algorithmVersion },
     processingAt: options.processingAt
   });
+  observeLocationTiming(options, "engine_computation", "completed");
 
   observeLocationStage(options, "segment_persistence");
-  const segments = await excludeProtectedReplacements(client, session, options, output.segmentUpserts);
+  observeLocationCount(options, "staySegments", output.segmentUpserts.filter(segment => segment.kind === "stay").length);
+  observeLocationCount(options, "commuteSegments", output.segmentUpserts.filter(segment => segment.kind === "commute").length);
+  observeLocationTiming(options, "protected_replacement_checks", "started");
+  const protectedReplacement = await excludeProtectedReplacements(client, session, options, output.segmentUpserts);
+  const segments = protectedReplacement.segments;
+  observeLocationTiming(options, "protected_replacement_checks", "completed");
+  observeLocationCount(options, "protectedSegments", protectedReplacement.count);
   const nextStayClientIds = segments
     .filter((segment): segment is StaySegment => segment.kind === "stay")
     .map((segment) => segment.clientSegmentId);
   const nextCommuteClientIds = segments
     .filter((segment): segment is CommuteSegment => segment.kind === "commute")
     .map((segment) => segment.clientSegmentId);
+  observeLocationTiming(options, "obsolete_segment_handling", "started");
   await supersedeMissingSegments(client, session, options, nextStayClientIds, nextCommuteClientIds);
+  observeLocationTiming(options, "obsolete_segment_handling", "completed");
 
   const evidenceIds = new Map(evidenceResult.rows.map((row) => [row.clientEvidenceId, row.id]));
   const protectedSegmentIds = new Set<string>();
+  observeLocationTiming(options, "stay_persistence", "started");
   const stayIds = await persistStays(client, session, options.deviceId,
     segments.filter((segment): segment is StaySegment => segment.kind === "stay"), protectedSegmentIds);
+  observeLocationTiming(options, "stay_persistence", "completed");
+  observeLocationTiming(options, "commute_persistence", "started");
   const resolvedCommutes = segments
     .filter((segment): segment is CommuteSegment => segment.kind === "commute")
     .flatMap(segment => {
@@ -171,6 +189,8 @@ export async function replayLocationEvidence(
       return fromStayId && toStayId ? [{...segment, fromStayId, toStayId}] : [];
     });
   const commuteIds = await persistCommutes(client, session, options.deviceId, resolvedCommutes, protectedSegmentIds);
+  observeLocationTiming(options, "commute_persistence", "completed");
+  observeLocationCount(options, "protectedSegments", protectedReplacement.count + protectedSegmentIds.size);
   observeLocationStage(options, "lineage");
   await replaceEvidenceLinks(
     client,
@@ -179,7 +199,8 @@ export async function replayLocationEvidence(
     evidenceIds,
     stayIds,
     commuteIds,
-    protectedSegmentIds
+    protectedSegmentIds,
+    options
   );
   return { segments, stayIds, commuteIds, evidenceIds, diagnostics: output.diagnostics };
 }
@@ -241,8 +262,11 @@ async function excludeProtectedReplacements(
       }
     }
   }
-  return segments.filter(segment => !held.has(segment.clientSegmentId) && (segment.kind !== "commute" ||
-    (!held.has(segment.fromStaySegmentId) && !held.has(segment.toStaySegmentId))));
+  return {
+    count: held.size,
+    segments: segments.filter(segment => !held.has(segment.clientSegmentId) && (segment.kind !== "commute" ||
+      (!held.has(segment.fromStaySegmentId) && !held.has(segment.toStaySegmentId))))
+  };
 }
 
 async function supersedeMissingSegments(
@@ -553,28 +577,45 @@ async function replaceEvidenceLinks(
   evidenceIds: Map<string, string>,
   stayIds: Map<string, string>,
   commuteIds: Map<string, string>,
-  protectedSegmentIds: Set<string>
+  protectedSegmentIds: Set<string>,
+  observation: LocationObservation
 ) {
   const allIds = [...stayIds.values(), ...commuteIds.values()].filter(
     (segmentId) => !protectedSegmentIds.has(segmentId)
   );
   if (allIds.length > 0) {
+    observeLocationTiming(observation, "lineage_deletion", "started");
     await client.query(
       `delete from location_segment_evidence
        where workspace_id = $1 and user_id = $2
          and (stay_segment_id = any($3::uuid[]) or commute_segment_id = any($3::uuid[]))`,
       [session.workspaceId, session.userId, allIds]
     );
+    observeLocationTiming(observation, "lineage_deletion", "completed");
+  } else {
+    observeLocationTiming(observation, "lineage_deletion", "started");
+    observeLocationTiming(observation, "lineage_deletion", "completed");
   }
   // Measured lineage dominated driver calls. Bound memory and retain one transaction.
   const parameters: unknown[] = [];
   const rows: string[] = [];
+  let lineageLinksPrepared = 0;
+  let lineageChunksStarted = 0;
+  let lineageChunksCompleted = 0;
+  observeLocationTiming(observation, "lineage_insertion", "started");
   const flush = async () => {
     if (!rows.length) return;
+    const chunkLinks = rows.length;
+    lineageLinksPrepared += chunkLinks;
+    lineageChunksStarted += 1;
+    observeLocationCount(observation, "lineageLinksPrepared", lineageLinksPrepared);
+    observeLocationCount(observation, "lineageChunksStarted", lineageChunksStarted);
     await client.query(
       `insert into location_segment_evidence (
          workspace_id, user_id, evidence_id, stay_segment_id, commute_segment_id, sequence_index, role
-       ) values ${rows.join(", ")} on conflict do nothing`, parameters);
+      ) values ${rows.join(", ")} on conflict do nothing`, parameters);
+    lineageChunksCompleted += 1;
+    observeLocationCount(observation, "lineageChunksCompleted", lineageChunksCompleted);
     parameters.length = 0;
     rows.length = 0;
   };
@@ -600,4 +641,5 @@ async function replaceEvidenceLinks(
     }
   }
   await flush();
+  observeLocationTiming(observation, "lineage_insertion", "completed");
 }

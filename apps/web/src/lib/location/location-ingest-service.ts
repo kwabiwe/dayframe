@@ -1,5 +1,5 @@
 import { emitReviewSemanticSegments } from "./location-review-semantic-batch";
-import { observeLocationStage, type LocationObservation } from "./location-sync-diagnostics";
+import { observeLocationStage, observeLocationTiming, type LocationObservation } from "./location-sync-diagnostics";
 import {
   AUTOMATIC_LOCATION_POLICY_VERSION,
   assessAutomaticOverlap,
@@ -212,19 +212,25 @@ export async function replayRetainedLocationEvidence(
     request.rolloutMode,
     request.semanticModeAcknowledgedAt
   );
-  return withSyncTransaction("location_evidence", async ({ client, phase }) => {
+  return withSyncTransaction("location_evidence", async ({ client, phase, remainingMs }) => {
     phase("owner_lock");
+    const replayObservation = { ...options, remainingOperationMs: remainingMs };
+    observeLocationTiming(replayObservation, "owner_lock", "started");
     await client.query(
       "select pg_advisory_xact_lock(hashtext($1), hashtext($2))",
       [session.workspaceId, session.userId]
     );
+    observeLocationTiming(replayObservation, "owner_lock", "completed");
     phase("effect");
     const semanticReplay = await replayAndEmitLocationSemantics(client, session, {
       deviceId: request.deviceId,
       algorithmVersion: request.algorithmVersion,
       processingAt,
       rollout,
-      onLocationStage: options.onLocationStage
+      onLocationStage: options.onLocationStage,
+      onLocationTiming: options.onLocationTiming,
+      onLocationCount: options.onLocationCount,
+      remainingOperationMs: remainingMs
     });
     return {
       ok: true,
@@ -247,10 +253,14 @@ async function replayAndEmitLocationSemantics(
     processingAt: string;
     rollout: ReturnType<typeof decideLocationRollout>;
     onLocationStage?: LocationObservation["onLocationStage"];
+    onLocationTiming?: LocationObservation["onLocationTiming"];
+    onLocationCount?: LocationObservation["onLocationCount"];
+    remainingOperationMs?: LocationObservation["remainingOperationMs"];
   }
 ) {
   const replay = await replayLocationEvidence(client, session, options);
   observeLocationStage(options, "semantics");
+  observeLocationTiming(options, "semantic_review_persistence", "started");
   const finalisedSegments = replay.segments.filter((segment) => segment.status === "finalised");
   let semanticSegmentCount = 0;
   if (options.rollout.emitV2ReviewItems && options.rollout.semanticCutoverAt) {
@@ -268,6 +278,7 @@ async function replayAndEmitLocationSemantics(
       }
     }
   }
+  observeLocationTiming(options, "semantic_review_persistence", "completed");
   return {
     replay,
     finalisedSegmentCount: finalisedSegments.length,

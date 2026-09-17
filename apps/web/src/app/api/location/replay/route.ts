@@ -28,11 +28,17 @@ export async function POST(request: Request) {
   const respond = (body: Record<string, unknown>, status = 200, error?: unknown) =>
     diagnostics.finish(privateJson(body, status), error, status >= 400 ? body : undefined);
   try {
+    diagnostics.onLocationTiming({ stage: "request_setup", state: "started" });
     const contentLength = Number(request.headers.get("content-length") ?? 0);
     if (contentLength > LOCATION_EVIDENCE_BODY_LIMIT_BYTES) {
+      diagnostics.onLocationTiming({ stage: "request_setup", state: "completed" });
       return respond({ error: "Location replay request is too large." }, 413);
     }
+    diagnostics.onLocationTiming({ stage: "request_setup", state: "completed" });
+    diagnostics.onLocationTiming({ stage: "request_auth", state: "started" });
     const session = await resolveRequestSession(request);
+    diagnostics.onLocationTiming({ stage: "request_auth", state: "completed" });
+    diagnostics.onLocationTiming({ stage: "request_body", state: "started" });
     const requestText = await request.text();
     if (new TextEncoder().encode(requestText).byteLength > LOCATION_EVIDENCE_BODY_LIMIT_BYTES) {
       return respond({ error: "Location replay request is too large." }, 413);
@@ -43,7 +49,15 @@ export async function POST(request: Request) {
     } catch {
       return respond({ error: "Location replay body must be valid JSON." }, 400);
     }
-    const result = await replayRetainedLocationEvidence(body, session, undefined, {signal: request.signal, deadlineAt: startedAt + 8_000, onLocationStage: diagnostics.onLocationStage});
+    diagnostics.onLocationTiming({ stage: "request_body", state: "completed" });
+    const result = await replayRetainedLocationEvidence(body, session, undefined, {
+      signal: request.signal,
+      deadlineAt: startedAt + 8_000,
+      onLocationStage: diagnostics.onLocationStage,
+      onLocationTiming: diagnostics.onLocationTiming,
+      onLocationCount: diagnostics.onLocationCount,
+      onSyncTiming: diagnostics.onSyncTiming
+    });
     return respond(result);
   } catch (error) {
     const authResponse = authErrorResponse(error);

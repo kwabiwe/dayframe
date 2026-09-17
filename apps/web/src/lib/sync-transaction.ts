@@ -31,6 +31,14 @@ export type SyncTransactionOptions = {
   /** Applied as part of BEGIN, before transaction-local configuration reads. */
   isolationLevel?: "repeatable read";
   databasePool?: Pick<pg.Pool, "connect">;
+  /** Redacted, best-effort timing observation. It must never own control flow. */
+  onSyncTiming?: (event: SyncTimingEvent) => void;
+};
+
+export type SyncTimingEvent = {
+  stage: "connection_acquisition" | "transaction_configuration" | "transaction_commit";
+  state: "started" | "completed";
+  remainingMs: number;
 };
 
 export type SyncTransaction = {
@@ -66,6 +74,10 @@ export async function withSyncTransaction<T>(
   let guard: ReturnType<typeof setTimeout> | undefined;
   let rejectGuard: (error: Error) => void = () => {};
   const remainingMs = () => Math.max(0, workDeadline - Date.now());
+  const observeTiming = (stage: SyncTimingEvent["stage"], state: SyncTimingEvent["state"]) => {
+    try { options.onSyncTiming?.({ stage, state, remainingMs: remainingMs() }); }
+    catch { /* Diagnostics cannot alter transaction semantics. */ }
+  };
   const errorFor = (reason: SyncOperationError["reason"]) => new SyncOperationError(reason, phase, operation);
   const release = (destroy: boolean) => {
     if (!raw || released) return;
@@ -95,6 +107,7 @@ export async function withSyncTransaction<T>(
     check();
     guard = setTimeout(() => expire("operation_deadline"), remainingMs());
     options.signal?.addEventListener("abort", onAbort, { once: true });
+    observeTiming("connection_acquisition", "started");
     const acquire = (options.databasePool ?? pool).connect().then((client) => {
       if (expired) { client.release(true); throw errorFor("operation_deadline"); }
       raw = client;
@@ -103,6 +116,7 @@ export async function withSyncTransaction<T>(
       return client;
     });
     raw = await Promise.race([acquire, guardPromise]);
+    observeTiming("connection_acquisition", "completed");
     check();
     const queryRaw = async (sql: string, params?: unknown[]) => {
       queryInFlight = true;
@@ -112,6 +126,7 @@ export async function withSyncTransaction<T>(
     const run = async () => {
       phase = "begin";
       began = true;
+      observeTiming("transaction_configuration", "started");
       // A single protocol message installs the idle guard immediately after BEGIN.
       await queryRaw(`begin${options.isolationLevel === "repeatable read" ? " isolation level repeatable read" : ""}${options.readOnly ? " read only" : ""}; set local idle_in_transaction_session_timeout = '${SYNC_IDLE_MS}ms'; set local statement_timeout = '${Math.max(1, Math.min(SYNC_STATEMENT_MS, remainingMs()))}ms'; set local lock_timeout = '${Math.max(1, Math.min(SYNC_LOCK_MS, remainingMs()))}ms'`);
       check();
@@ -121,6 +136,7 @@ export async function withSyncTransaction<T>(
       if (support.rows[0]?.transaction_timeout != null) {
         await queryRaw("select set_config('transaction_timeout', $1, true)", [`${Math.max(1, remainingMs())}ms`]);
       }
+      observeTiming("transaction_configuration", "completed");
       // Every nested service query stays on the checked-out client and consumes
       // the SAME operation budget. Savepoint recovery must run in an aborted tx.
       const client = new Proxy(raw!, {
@@ -146,8 +162,10 @@ export async function withSyncTransaction<T>(
       const result = await work({ client, phase: (value) => { phase = value; }, remainingMs });
       check();
       phase = "commit";
+      observeTiming("transaction_commit", "started");
       await queryRaw("commit");
       committed = true;
+      observeTiming("transaction_commit", "completed");
       return result;
     };
     return await Promise.race([run(), guardPromise]);

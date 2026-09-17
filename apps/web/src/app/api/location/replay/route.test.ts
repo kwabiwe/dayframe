@@ -57,7 +57,10 @@ describe("POST /api/location/replay", () => {
     expect(response.headers.get("cache-control")).toBe("private, no-store, max-age=0");
     expect(response.headers.get("vary")).toBe("Authorization, Cookie");
     expect(mocks.resolveRequestSession).toHaveBeenCalledOnce();
-    expect(mocks.replayRetainedLocationEvidence).toHaveBeenCalledWith(body, session, undefined, expect.objectContaining({ signal: expect.any(AbortSignal), deadlineAt: expect.any(Number) }));
+    expect(mocks.replayRetainedLocationEvidence).toHaveBeenCalledWith(body, session, undefined, expect.objectContaining({
+      signal: expect.any(AbortSignal), deadlineAt: expect.any(Number),
+      onLocationTiming: expect.any(Function), onLocationCount: expect.any(Function), onSyncTiming: expect.any(Function)
+    }));
   });
 
   it("rejects malformed JSON without calling the replay service", async () => {
