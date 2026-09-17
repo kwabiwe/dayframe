@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { assessAutomaticLocation, runLocationEngine } from "../src/location";
 import { LOCATION_ENGINE_V2_CONFIG } from "../src/location/config";
+import { deriveCommutes } from "../src/location/commute";
 import { analyseSavedPlaceArrivalEvidence } from "../src/location/savedPlaceArrivalSupport";
 import type { CommuteSegment, LocationEvidence, StaySegment } from "../src/location/types";
 import {
@@ -84,6 +85,27 @@ describe("saved-place arrival boundary V1 synthetic contract", () => {
     expect(gymStays[0].startedAt).toBe("2026-09-17T12:21:00.000Z");
     expect(inbound).toEqual([]);
     expect(returnCommute).toBeDefined();
+  });
+
+  it("still suppresses an unsupported destination arrival when only the origin is inferred", () => {
+    const fixture = savedPlaceArrivalBoundaryFixture({ includeVisit: false });
+    const result = runLocationEngine(fixture);
+    const stays = result.segmentUpserts.filter((segment): segment is StaySegment => segment.kind === "stay");
+    const { witnesses } = analyseSavedPlaceArrivalEvidence(result.acceptedEvidence, fixture);
+    const options = { arrivalWitnesses: witnesses, savedPlaces: fixture.savedPlaces };
+    const derive = (inferredBoundaryStayIds: Set<string>, arrivalWitnesses = witnesses) =>
+      deriveCommutes(stays, result.acceptedEvidence, fixture.config, fixture.processingAt, {
+        ...options, arrivalWitnesses, inferredBoundaryStayIds
+      });
+    const ordinary = derive(new Set(), []);
+    expect(ordinary.some((segment) => segment.toPlaceId === ARRIVAL_BOUNDARY_PLACE.id)).toBe(true);
+    const originInferred = new Set([stays[0].clientSegmentId]);
+    const suppressed = derive(originInferred);
+    expect(suppressed.some((segment) => segment.toPlaceId === ARRIVAL_BOUNDARY_PLACE.id)).toBe(false);
+    expect(suppressed).toEqual(derive(new Set()));
+    expect(suppressed).toEqual(ordinary.filter((segment) => segment.fromPlaceId === ARRIVAL_BOUNDARY_PLACE.id));
+    expect(suppressed).toHaveLength(1);
+    expect(derive(originInferred, []).find((segment) => segment.toPlaceId === ARRIVAL_BOUNDARY_PLACE.id)?.confidence).toBe("low");
   });
 
   it("does not treat a single callback as a stay or arrival conflict", () => {

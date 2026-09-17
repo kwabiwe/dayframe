@@ -275,9 +275,10 @@ export function deriveCommutes(
     const startedAtMs = latestFromSupport
       ? Date.parse(latestFromSupport.evidence.occurredAt)
       : originalStartedAtMs;
-    const inferredBoundary = options.inferredBoundaryStayIds?.has(from.clientSegmentId) === true ||
-      options.inferredBoundaryStayIds?.has(to.clientSegmentId) === true;
-    const hasUnsupportedArrivalConflict = !inferredBoundary &&
+    const fromHasInferredBoundary = options.inferredBoundaryStayIds?.has(from.clientSegmentId) === true;
+    const toHasInferredBoundary = options.inferredBoundaryStayIds?.has(to.clientSegmentId) === true;
+    const anyEndpointHasInferredBoundary = fromHasInferredBoundary || toHasInferredBoundary;
+    const hasUnsupportedArrivalConflict = !toHasInferredBoundary &&
       (options.arrivalWitnesses ?? []).some((witness) =>
         options.savedPlaces && crossesUnsupportedSavedPlaceArrivalWitness({
           witness,
@@ -344,7 +345,7 @@ export function deriveCommutes(
       gapDurationSeconds: Math.round(duration / 1_000),
       maximumObservationGapSeconds: summary.maximumObservationGapSeconds,
       continuityStatus: uncertainBoundary ? "uncertain_gap" : "continuous",
-      confidence: inferredBoundary
+      confidence: anyEndpointHasInferredBoundary
         ? "low"
         : uncertainBoundary && qualification.confidence === "medium_high"
           ? "medium"
