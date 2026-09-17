@@ -420,3 +420,8 @@ Before merging implementation PRs, ask KB to test the exact Ready Preview promot
 - [ ] Corrected open fragments converge atomically, while changed-ID accepted/ignored/manual history, adjacent confirmed journeys, receipts and lineage remain untouched.
 - [ ] Complete local replay replaces stale/empty snapshots account-locally, with rollback and durable journal/upload preservation.
 - [ ] Consecutive content-hash Quick Confirms survive unchanged replay; genuine proposal changes fail closed. Review batching and normal/20/40ms synthetic performance gates remain bounded.
+- [ ] An accepted finite less-precise Visit is corrected only with two distinct early strong saved-place points plus a later independent strong cluster; its interval bounds, actual lineage and medium/uncertain output are preserved.
+- [ ] Without full Visit support, the narrow early-arrival witness suppresses only the conflicting spanning commute, keeps the later stay and genuine return, and does not create a hidden stay or weaken long-travel qualification.
+- [ ] Negative cases cover the exact accuracy ceiling, dwell floor, future/invalid endpoints, ambiguity, competing places, movement/outside evidence, unresolved exits, simulated evidence, missing geofence, and A-to-B-to-A separation.
+- [ ] New inferred stays/affected commutes remain Review candidates under `v2_review` and `v2_enabled`, while unchanged eligible strong commutes keep their prior automatic-policy result.
+- [ ] Shared-engine output matches mobile complete SQLite replay and real local Postgres replay; rollback, account isolation, old confirmed/manual state, Quick Confirm hashes, receipts and lineage remain protected.

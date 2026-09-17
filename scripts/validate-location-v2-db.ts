@@ -1,4 +1,5 @@
 import { validateSavedPlaceQuality } from "./fixtures/location-saved-place-quality";
+import { validateSavedPlaceArrivalBoundaries } from "./fixtures/location-saved-place-arrival-boundaries";
 import assert from "node:assert/strict";
 import {
   LOCATION_ACCEPTANCE_PLACES,
@@ -1093,9 +1094,11 @@ async function main() {
   try {
     if (process.argv.includes("--saved-place-quality-only")) {
       await validateSavedPlaceQuality();
+      await validateSavedPlaceArrivalBoundaries();
       return;
     }
     await validateSavedPlaceQuality();
+    await validateSavedPlaceArrivalBoundaries();
     await seedOwner();
     await validateCommuteCategoryConcurrency();
     await validateOutOfOrderAndIdempotency();

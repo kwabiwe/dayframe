@@ -129,6 +129,40 @@ describe("Location reliability diagnostics on real SQLite",()=>{
 });
 
 describe("complete saved-place snapshot replay", () => {
+ it.each([
+  ["corroborated Visit", {}],
+  ["arrival-conflict fallback", { includeVisit: false }]
+ ] as const)("keeps the %s local replay in parity with the shared engine", async (_label, options) => {
+  const { runLocationEngine } = await import("@dayframe/shared");
+  const { savedPlaceArrivalBoundaryFixture } = await import("../../../../../packages/shared/src/location/savedPlaceArrivalBoundaryFixture");
+  const fixture = savedPlaceArrivalBoundaryFixture(options);
+  await store.configureLocationAccount({
+   ...owner,
+   deviceId: fixture.evidence[0].deviceId,
+   timeZone: "Europe/London",
+   savedPlaces: fixture.savedPlaces,
+   acceptedLearnedPlaces: []
+  }, "v2_review");
+  await store.persistLocationEvidence(fixture.evidence);
+  await store.prepareLocationUploadBatch(owner);
+  const journal = db.prepare("select * from location_evidence_journal order by client_evidence_id").all();
+  const uploads = db.prepare("select * from location_upload_outbox order by client_batch_id").all();
+
+  await store.processPendingLocationEvidence(fixture.processingAt);
+
+  const current = db
+   .prepare("select segment_json from location_segment_snapshot where account_key=(select account_key from location_account_context)")
+   .all()
+   .map((row) => JSON.parse(row.segment_json as string));
+  current.sort((left, right) =>
+   Date.parse(left.startedAt) - Date.parse(right.startedAt) || left.kind.localeCompare(right.kind)
+  );
+  expect(current).toEqual(runLocationEngine(fixture).segmentUpserts);
+  expect(db.prepare("select * from location_evidence_journal order by client_evidence_id").all()).toEqual(journal);
+  expect(db.prepare("select * from location_upload_outbox order by client_batch_id").all()).toEqual(uploads);
+  expect(db.prepare("select count(*) as n from location_segment_snapshot where account_key='other-account'").get()!.n).toBe(0);
+ });
+
  it("replaces obsolete account snapshots with identical shared output, including empty output", async () => {
   const { incident, place } = await import("../../../../../packages/shared/src/location/savedPlaceQualityFixture");
   const { runLocationEngine } = await import("@dayframe/shared");

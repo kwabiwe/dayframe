@@ -14,6 +14,9 @@ export type LocationEngineConfig = {
   savedPlaceMinimumDwellMs: number;
   savedPlaceExitReentryGraceMs: number;
   savedPlaceQuietGapMaxMs: number;
+  savedPlaceArrivalCorroborationWindowMs: number;
+  savedPlaceArrivalMinimumStrongPointCount: number;
+  savedArrivalWitnessMinimumSpanMs: number;
   unknownStayCandidateDwellMs: number;
   unknownStayReviewDwellMs: number;
   minimumGpsSamplesForUnanchoredStay: number;
@@ -64,6 +67,9 @@ export const LOCATION_ENGINE_V2_CONFIG: LocationEngineConfig = {
   savedPlaceMinimumDwellMs: 300_000,
   savedPlaceExitReentryGraceMs: 300_000,
   savedPlaceQuietGapMaxMs: 1_800_000,
+  savedPlaceArrivalCorroborationWindowMs: 300_000,
+  savedPlaceArrivalMinimumStrongPointCount: 2,
+  savedArrivalWitnessMinimumSpanMs: 120_000,
   unknownStayCandidateDwellMs: 600_000,
   unknownStayReviewDwellMs: 1_200_000,
   minimumGpsSamplesForUnanchoredStay: 3,

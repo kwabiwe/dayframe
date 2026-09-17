@@ -2,6 +2,7 @@ import { LOCATION_ENGINE_V2_CONFIG } from "./config";
 import { deriveCommutes } from "./commute";
 import { accuracyWeightedCentre, distanceMeters, midpointTimeIso, stableLocationId } from "./geo";
 import { matchLocationToPlaces } from "./placeMatcher";
+import { analyseSavedPlaceArrivalEvidence } from "./savedPlaceArrivalSupport";
 import type {
   ClassifiedEvidence,
   ContinuityStatus,
@@ -44,6 +45,7 @@ type WorkingStay = {
   visitSupportUntilAt: string | null;
   pendingExit?: ClassifiedEvidence;
   inferredContinuity?: boolean;
+  inferredBoundary?: boolean;
   lastStrongInside?: ClassifiedEvidence;
 };
 
@@ -133,6 +135,21 @@ function closeAtTransition(
   exact = false
 ) {
   const lastAt = lastInsideAt(active, nextAt);
+  if (
+    active.inferredBoundary &&
+    active.visitSupportUntilAt &&
+    Date.parse(active.visitSupportUntilAt) <= Date.parse(nextAt) &&
+    Date.parse(active.visitSupportUntilAt) >= Date.parse(lastAt)
+  ) {
+    const lowerBound = active.stopLowerBoundAt && Date.parse(active.stopLowerBoundAt) >= Date.parse(lastAt)
+      ? active.stopLowerBoundAt
+      : lastAt;
+    active.stoppedAt = active.visitSupportUntilAt;
+    active.stopLowerBoundAt = lowerBound;
+    active.stopUpperBoundAt = active.visitSupportUntilAt;
+    active.continuityStatus = active.inferredBoundary ? "uncertain_gap" : continuityStatus;
+    return;
+  }
   // A completed Visit supplies the departure itself, even when a later GPS
   // sample was received within that Visit. Use it only while the transition
   // and latest inside observation do not contradict that boundary.
@@ -165,7 +182,7 @@ function lastInsideAt(active: WorkingStay, before: string) {
   return active.evidence.reduce((latest, { evidence }) => {
     if (evidence.kind.startsWith("geofence_")) return latest;
     // A reused Visit may start before this episode. Never use its future end as a point.
-    const at = evidence.endedAt && Date.parse(evidence.endedAt) <= Date.parse(before)
+    const at = evidence.endedAt && !active.inferredBoundary && Date.parse(evidence.endedAt) <= Date.parse(before)
       ? evidence.endedAt : evidence.occurredAt;
     return Date.parse(at) > Date.parse(latest) ? at : latest;
   }, active.startedAt);
@@ -218,7 +235,9 @@ function stayFromWorking(
 ): StaySegment | null {
   const endedAt = working.stoppedAt;
   const duration = Date.parse(endedAt ?? processingAt) - Date.parse(working.startedAt);
-  const coordinateEvidence = working.evidence.filter(({ evidence }) => pointFor(evidence));
+  const coordinateEvidence = working.evidence.filter(({ evidence }) =>
+    pointFor(evidence) && (!working.inferredBoundary || evidence.kind !== "visit")
+  );
   const knownPlace = working.placeMatchKind === "saved" || working.placeMatchKind === "learned";
   const completedVisit = working.evidence.some(
     ({ evidence }) => evidence.kind === "visit" && evidence.endedAt && Date.parse(evidence.endedAt) > Date.parse(evidence.occurredAt)
@@ -231,7 +250,11 @@ function stayFromWorking(
       (coordinateEvidence.length >= input.config.minimumGpsSamplesForUnanchoredStay || completedVisit);
   if (!promotable || (endedAt && Date.parse(endedAt) <= Date.parse(working.startedAt))) return null;
 
-  const centre = evidenceCentre(working.evidence);
+  const centre = evidenceCentre(
+    working.inferredBoundary
+      ? working.evidence.filter(({ evidence }) => evidence.kind !== "visit")
+      : working.evidence
+  );
   const evidenceIds = working.evidence.map(({ evidence }) => evidence.clientEvidenceId);
   const firstEvidenceId = evidenceIds[0];
   const lastEvidenceId = evidenceIds.at(-1)!;
@@ -243,6 +266,8 @@ function stayFromWorking(
   ).length;
   const confidence = simulated
     ? "low"
+    : working.inferredBoundary
+      ? "medium"
     : working.inferredContinuity
       ? "medium"
     : working.supportedByVisit || knownPlace
@@ -596,13 +621,27 @@ export function runLocationEngine(input: LocationEngineInput): LocationEngineOut
   if (!Number.isFinite(Date.parse(input.processingAt))) throw new Error("processingAt must be a valid instant.");
 
   const { accepted, rejectedEvidence } = preprocess(input);
+  const arrivalAnalysis = analyseSavedPlaceArrivalEvidence(accepted, input);
   const completed: WorkingStay[] = [];
   let active: WorkingStay | null = null;
   // Occurrence-ordered, owner/device-local interval support; never a second durable store.
   const visits = new Map<string, ClassifiedEvidence>();
   const startStay = (item: ClassifiedEvidence) => {
     const stay = makeWorkingStay(item);
-    if (strongSavedPoint(item, stay.placeId, input)) {
+    const corroboratedSupport = arrivalAnalysis.corroboratedVisits.get(item.evidence.clientEvidenceId);
+    if (corroboratedSupport) {
+      stay.inferredBoundary = true;
+      stay.inferredContinuity = true;
+      stay.supportedByVisit = true;
+      stay.visitSupportUntilAt = corroboratedSupport.departedAt;
+      stay.startedAt = corroboratedSupport.arrivedAt;
+      stay.startLowerBoundAt = corroboratedSupport.arrivedAt;
+      stay.startUpperBoundAt = corroboratedSupport.arrivalUpperBoundAt;
+      stay.stoppedAt = corroboratedSupport.departedAt;
+      stay.stopLowerBoundAt = corroboratedSupport.departureLowerBoundAt;
+      stay.stopUpperBoundAt = corroboratedSupport.departedAt;
+      stay.continuityStatus = "uncertain_gap";
+    } else if (strongSavedPoint(item, stay.placeId, input)) {
       stay.lastStrongInside = item;
       const visit = visits.get(`${item.evidence.deviceId}:${stay.key}`);
       if (visit?.evidence.endedAt && Date.parse(visit.evidence.endedAt) >= Date.parse(stay.startedAt)) {
@@ -634,8 +673,16 @@ export function runLocationEngine(input: LocationEngineInput): LocationEngineOut
     if (active?.placeMatchKind === "saved" && evidence.kind.startsWith("geofence_") &&
         (evidence.kind === "geofence_state" || itemKey !== active.key)) continue;
     // Do not promote broad points to place/departure evidence. Keep them in accepted raw evidence.
+    const corroboratedSupport = arrivalAnalysis.corroboratedVisits.get(evidence.clientEvidenceId);
+    const sameSavedActiveEpisode = corroboratedSupport != null && active?.placeMatchKind === "saved" &&
+      active.placeId === corroboratedSupport.savedPlaceId;
+    // A later Visit cannot move the start of an already-running same-place episode
+    // backwards or turn an earlier episode into one inferred interval.
+    const canApplyCorroboratedSupport = corroboratedSupport != null &&
+      (active == null || !sameSavedActiveEpisode ||
+        Date.parse(active.startedAt) >= Date.parse(corroboratedSupport.arrivedAt));
     if (point && (active?.placeMatchKind === "saved" || item.match?.kind === "saved" || item.match?.kind === "learned") &&
-        !evidence.kind.startsWith("geofence_") && !accurateCoordinate(item, input)) continue;
+        !evidence.kind.startsWith("geofence_") && !accurateCoordinate(item, input) && !canApplyCorroboratedSupport) continue;
 
     if (active?.pendingExit) {
       const elapsed = atMs - Date.parse(active.pendingExit.evidence.occurredAt);
@@ -713,21 +760,32 @@ export function runLocationEngine(input: LocationEngineInput): LocationEngineOut
       active.evidence.push(item);
       if (!active.pendingExit) active.outside = [];
       if (strongSavedPoint(item, active.placeId, input)) active.lastStrongInside = item;
-      if (evidence.kind === "visit") {
+      if (canApplyCorroboratedSupport) {
+        active.inferredBoundary = true;
+        active.inferredContinuity = true;
+        active.supportedByVisit = true;
+        active.visitSupportUntilAt = corroboratedSupport.departedAt;
+        active.startLowerBoundAt = corroboratedSupport.arrivedAt;
+        active.startUpperBoundAt = corroboratedSupport.arrivalUpperBoundAt;
+        active.stopLowerBoundAt = corroboratedSupport.departureLowerBoundAt;
+        active.stopUpperBoundAt = corroboratedSupport.departedAt;
+        active.stoppedAt = corroboratedSupport.departedAt;
+        active.continuityStatus = "uncertain_gap";
+      } else if (evidence.kind === "visit") {
         active.supportedByVisit = true;
         if (
           evidence.endedAt &&
           (!active.visitSupportUntilAt || Date.parse(evidence.endedAt) > Date.parse(active.visitSupportUntilAt))
         ) active.visitSupportUntilAt = evidence.endedAt;
       }
-      if (evidence.kind === "visit" && evidence.endedAt) {
+      if (evidence.kind === "visit" && evidence.endedAt && !canApplyCorroboratedSupport) {
         active.stoppedAt = evidence.endedAt;
         active.stopLowerBoundAt = evidence.endedAt;
         active.stopUpperBoundAt = evidence.endedAt;
         active.continuityStatus = "supported_by_visit";
       } else if (active.visitSupportUntilAt && atMs > Date.parse(active.visitSupportUntilAt)) {
         active.stoppedAt = null;
-        active.stopLowerBoundAt = active.visitSupportUntilAt;
+        if (!active.inferredBoundary) active.stopLowerBoundAt = active.visitSupportUntilAt;
         active.stopUpperBoundAt = evidence.occurredAt;
       }
       continue;
@@ -776,12 +834,21 @@ export function runLocationEngine(input: LocationEngineInput): LocationEngineOut
     resolveUnsupportedExit(active);
   }
   if (active) completed.push(active);
-  const rawStays = completed
-    .map((working) => stayFromWorking(working, input.processingAt, input))
-    .filter((segment): segment is StaySegment => Boolean(segment))
+  const rawStayRecords = completed
+    .map((working) => ({ working, segment: stayFromWorking(working, input.processingAt, input) }))
+    .filter((record): record is { working: WorkingStay; segment: StaySegment } => Boolean(record.segment));
+  const rawStays = rawStayRecords
+    .map(({ segment }) => segment)
     .sort((a, b) => Date.parse(a.startedAt) - Date.parse(b.startedAt));
   const stays = coalesceCompatibleUnknownStays(rawStays, accepted, input);
-  const commutes = deriveCommutes(stays, accepted, input.config, input.processingAt);
+  const inferredBoundaryStayIds = new Set(
+    rawStayRecords.filter(({ working }) => working.inferredBoundary).map(({ segment }) => segment!.clientSegmentId)
+  );
+  const commutes = deriveCommutes(stays, accepted, input.config, input.processingAt, {
+    inferredBoundaryStayIds,
+    arrivalWitnesses: arrivalAnalysis.witnesses,
+    savedPlaces: input.savedPlaces
+  });
   const segments = [...stays, ...commutes].sort((a, b) => Date.parse(a.startedAt) - Date.parse(b.startedAt) || a.kind.localeCompare(b.kind));
   const finalisedSegments = segments.filter((segment) => segment.status === "finalised");
   const processedEvidenceIds = [...new Set([
