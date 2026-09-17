@@ -106,13 +106,13 @@ validate:location-v2-db: PASS.
 
 Final broad pass:
 
-- npm run lint: PASS; documentation/iOS-config checks passed, with two existing
+- `npm run lint` — PASS; documentation/iOS-config checks passed, with two existing
   unused-variable warnings in event-service.test.ts.
-- npm run typecheck: FAIL only at the baseline mobile
+- `npm run typecheck` — FAIL only at the baseline mobile
   ConnectivityStatusStrip.tsx expo-symbols TS2307; web and shared passed. The
   source/package comparison against origin/main is unchanged.
-- npm run test: PASS; mobile 1,236, web 951 passed with 3 skipped, shared 285.
-- npm run build: PASS; web production build completed.
+- `npm run test` — PASS; mobile 1,236, web 951 passed with 3 skipped, shared 285.
+- `npm run build` — PASS; web production build completed.
 - git diff --check: PASS.
 
 CI/Vercel polling, hosted replay, staging promotion, production access, iOS or
