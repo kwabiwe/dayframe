@@ -122,3 +122,27 @@ merge and automatic-mode activation: NOT RUN BY CODEX.
 The attached Downloads document was a different saved-place-detection-quality
 plan. This implementation follows the explicit PR #202 Location Replay
 Performance request and records that distinction in the handoff.
+
+## Post-merge reconciliation
+
+PR #202 was approved at exact head
+`51fafed06ca66cfede8d01972c97e9e3b0152bd7` and merged to main as
+`c72cba498805bf80ba683239610a7b50a7109825`. Claude approved the exact head;
+GitHub Documentation alignment, Review/Location validation and Vercel checks
+passed. The exact Preview deployment
+`dpl_73JkSMeVZLS4WBVTp4ubpGVg7dzb` was promoted to staging, which remained
+`v2_review`.
+
+The hosted staging observation recorded five HTTP 200 replays with materially
+improved headroom. A fresh controlled same-input replay also completed in
+5,049 ms with 1,954 ms remaining at commit. The authoritative before/after
+comparison passed: no unexpected time entries, receipts or events were created,
+and no unexplained Review or segment loss was observed. One eligible evidence
+row expired naturally during the check. Four later Location-derived time
+entries were traced to explicit user Quick Confirm actions, not automatic
+logging.
+
+The historical 17-item Review comparison remains unreconstructed. This evidence
+does not establish production deployment or production performance, and does
+not claim that missing-return capture or the saved-place/PureGym arrival and
+boundary issue is fixed.
