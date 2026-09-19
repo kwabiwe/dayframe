@@ -1,11 +1,16 @@
 import { distanceMeters, stableLocationId } from "./geo";
 import type { LocationEngineConfig } from "./config";
+import {
+  crossesUnsupportedSavedPlaceArrivalWitness,
+  type SavedPlaceArrivalWitness
+} from "./savedPlaceArrivalSupport";
 import type {
   ClassifiedEvidence,
   CommuteEvidenceSummary,
   CommuteQualification,
   CommuteSegment,
-  StaySegment
+  StaySegment,
+  SavedPlaceForMatching
 } from "./types";
 
 type Point = { latitude: number; longitude: number };
@@ -240,11 +245,18 @@ export function qualifyCommuteCandidate(
   return { qualifies: false, reason: "insufficient_displacement" };
 }
 
+export type CommuteDerivationOptions = {
+  inferredBoundaryStayIds?: ReadonlySet<string>;
+  arrivalWitnesses?: readonly SavedPlaceArrivalWitness[];
+  savedPlaces?: readonly SavedPlaceForMatching[];
+};
+
 export function deriveCommutes(
   stays: StaySegment[],
   acceptedEvidence: ClassifiedEvidence[],
   config: LocationEngineConfig,
-  processingAt: string
+  processingAt: string,
+  options: CommuteDerivationOptions = {}
 ) {
   const commutes: CommuteSegment[] = [];
   for (let index = 1; index < stays.length; index += 1) {
@@ -263,6 +275,21 @@ export function deriveCommutes(
     const startedAtMs = latestFromSupport
       ? Date.parse(latestFromSupport.evidence.occurredAt)
       : originalStartedAtMs;
+    const fromHasInferredBoundary = options.inferredBoundaryStayIds?.has(from.clientSegmentId) === true;
+    const toHasInferredBoundary = options.inferredBoundaryStayIds?.has(to.clientSegmentId) === true;
+    const anyEndpointHasInferredBoundary = fromHasInferredBoundary || toHasInferredBoundary;
+    const hasUnsupportedArrivalConflict = !toHasInferredBoundary &&
+      (options.arrivalWitnesses ?? []).some((witness) =>
+        options.savedPlaces && crossesUnsupportedSavedPlaceArrivalWitness({
+          witness,
+          from,
+          to,
+          acceptedEvidence,
+          config,
+          savedPlaces: options.savedPlaces
+        })
+      );
+    if (hasUnsupportedArrivalConflict) continue;
     const duration = stoppedAtMs - startedAtMs;
     if (duration < config.commuteMinimumDurationMs || duration > config.commuteMaximumDurationMs) {
       continue;
@@ -318,9 +345,11 @@ export function deriveCommutes(
       gapDurationSeconds: Math.round(duration / 1_000),
       maximumObservationGapSeconds: summary.maximumObservationGapSeconds,
       continuityStatus: uncertainBoundary ? "uncertain_gap" : "continuous",
-      confidence: uncertainBoundary && qualification.confidence === "medium_high"
-        ? "medium"
-        : qualification.confidence,
+      confidence: anyEndpointHasInferredBoundary
+        ? "low"
+        : uncertainBoundary && qualification.confidence === "medium_high"
+          ? "medium"
+          : qualification.confidence,
       qualificationReason: qualification.reason,
       evidenceIds
     });
