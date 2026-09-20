@@ -1,5 +1,207 @@
 # Location retained-replay production scalability V1
 
+## Targeted performance follow-up from `321dc7a59b85d6be29f60a7ebd17ac997866f395`
+
+This section supersedes the historical failing handoff below. Exact planning/base
+remains `791e57ea3d806c1474407b7b3546d05a42bd0153`; the same existing PR #206 and
+`fix/location-replay-production-scale` worktree are used. Documentation impact:
+server persistence/performance and local validation, not product policy.
+
+### Validator-first evidence and measured decision
+
+Every S1 measurement now independently asserts commit, duration <=5,500 ms and
+post-commit work budget >=1,500 ms. The three first-success 100 ms samples must
+also have median <=5,000 ms. A replay that commits but fails either budget bound
+is reported FAIL, not PASS. Request timing stops after the transaction settles,
+before validation snapshot reads. Local-only stage capture records elapsed time,
+completion, starting/ending budget and raw driver calls; unreached stages are
+explicitly incomplete. No production logging was expanded.
+
+The once-only pre-optimization S1 run failed: first-success 100 ms median 5,402;
+stable 100 ms 6,371/629 remaining; changed-input 40 ms 6,189/811 remaining;
+changed-input 100 ms 7,004/no commit. The prior 5,460 ms median also **FAILS**
+the <=5,000 ms criterion. Successful individual requests never implied plan
+acceptance.
+
+The measured dominant avoidable database costs were protected provenance
+(stable 0 ms: 836 ms, six driver calls, 818 ms driver execution) and obsolete
+handling (changed-input 0 ms: 1,817 ms, seven calls, 1,808 ms driver execution).
+These costs grow only after lineage/Review history exists. PostgreSQL's
+one-row owner estimates selected nested loops repeatedly scanning thousands of
+owner evidence rows for each lineage row. At 100 ms latency the later unchanged
+semantic work also incurred additional #202 near-budget timeout settings.
+
+An intermediate SQL shape was rejected and its evidence retained: combining
+protected requests helped first-success (median 4,799 ms), but stable still took
+6,032 ms and splitting the obsolete existence test doubled its bad evidence
+join, causing unchanged 3s statement-cap failures. One initial SQL syntax
+attempt failed before measurements (`0A000`); this was not a performance sample.
+Focused EXPLAIN probes, not repeated acceptance sampling, then isolated the
+join problem. No statistics refresh, index, migration or infrastructure repair
+was performed.
+
+### Exact correction
+
+- Protected queries share each bounded ID parameter across two locking
+  subqueries in one request. Both keep their exact joins, manual/non-superseded/
+  source-event/no-open-Review predicate, scope, ordered `FOR UPDATE OF s`, and
+  occupied-portion filtering. A lateral unique-ID lookup with `OFFSET 0` as an
+  optimization boundary prevents repeated owner-evidence scans; it is not a
+  result limit. There are three S1 requests instead of six.
+- Obsolete selection materializes eligible lineage once using the identical
+  owner/device/algorithm/accepted/expiry predicates, then applies the original
+  stay-or-commute provenance existence test. No Review/segment write is combined,
+  omitted or moved outside the transaction.
+- Both changes are selected only by the existing server-effective `v2_review`
+  internal profile. Legacy query behavior, the shared engine, semantic emitter,
+  lineage identity/order/bounds, #202 reuse and 8s/1s deadline contract are intact.
+
+Final focused EXPLAIN execution: three protected requests 13.608/8.200/7.360 ms,
+with one-row primary-key evidence lookups, and obsolete selection 40.960 ms.
+The rejected shape's corresponding protected total was 858.770 ms and obsolete
+selection 3,582.230 ms. These are local query probes, not whole-request claims.
+
+### Stage-level before/after evidence
+
+Each cell is **elapsed ms / raw calls / remaining budget start→after (ms)**.
+These are the failing pre-change cases and their final matching scenarios.
+All final S1 stages completed. The [machine-readable ledger](2026-09-20-location-replay-production-scalability-measurements.json)
+preserves every S1/S3 measurement, all stage fields, fingerprints and rejected attempts.
+
+| Stage | Stable 100 ms before | Stable 100 ms after | Changed 100 ms before | Changed 100 ms after |
+| --- | --- | --- | --- | --- |
+| connection acquisition | 0 / 0 / 6497→6497 | 0 / 0 / 6498→6498 | 0 / 0 / 6498→6498 | 0 / 0 / 6497→6497 |
+| transaction configuration | 409 / 4 / 6497→6088 | 408 / 4 / 6498→6090 | 406 / 4 / 6498→6092 | 409 / 4 / 6497→6088 |
+| owner lock | 103 / 1 / 6088→5985 | 102 / 1 / 6090→5988 | 102 / 1 / 6092→5989 | 102 / 1 / 6088→5986 |
+| evidence read | 132 / 1 / 5985→5854 | 141 / 1 / 5988→5847 | 130 / 1 / 5989→5859 | 133 / 1 / 5986→5853 |
+| catalogue read | 203 / 2 / 5853→5650 | 205 / 2 / 5847→5641 | 203 / 2 / 5859→5657 | 203 / 2 / 5853→5649 |
+| engine computation | 291 / 0 / 5650→5359 | 273 / 0 / 5641→5368 | 276 / 0 / 5657→5381 | 268 / 0 / 5649→5381 |
+| protected replacement checks | 1424 / 6 / 5359→3936 | 343 / 3 / 5368→5025 | 1503 / 6 / 5381→3878 | 359 / 3 / 5381→5022 |
+| obsolete segment handling | 317 / 3 / 3936→3619 | 311 / 3 / 5025→4714 | 3166 / 13 / 3878→711 | 768 / 7 / 5022→4255 |
+| stay persistence | 227 / 2 / 3617→3390 | 219 / 2 / 4713→4494 | 447 / 4 / 709→261 | 229 / 2 / 4253→4024 |
+| commute persistence | 223 / 2 / 3390→3167 | 219 / 2 / 4494→4275 | 265 / 3 / 261→— (incomplete) | 218 / 2 / 4024→3806 |
+| lineage deletion | 107 / 1 / 3167→3060 | 104 / 1 / 4275→4171 | not reached | 108 / 1 / 3806→3698 |
+| lineage insertion | 436 / 3 / 3060→2624 | 312 / 2 / 4171→3859 | not reached | 327 / 2 / 3698→3371 |
+| semantic review persistence | 1894 / 18 / 2624→731 | 957 / 9 / 3859→2902 | not reached | 1478 / 14 / 3371→1893 |
+| transaction commit | 102 / 1 / 731→629 | 103 / 1 / 2902→2799 | not reached | 103 / 1 / 1893→1790 |
+
+### Final base-adapter comparison
+
+The baseline adapter is explicitly not an exact-base checkout or a candidate
+profile claim. It retains legacy persistence SQL and the existing Review emitter
+and #202 transaction owner. Its 13 measurements completed; nine requests failed
+and their pre/post logical state was unchanged. Adapter-run PASS means the
+measurement run finished, not that legacy performance passed S1 acceptance.
+
+| Base adapter case | Delay ms | Duration ms | Calls | Commit / remaining ms |
+| --- | ---: | ---: | ---: | --- |
+| S1 first-success | 0 | 1138 | 81 | yes / 5863 |
+| S1 first-success | 40 | 5046 | 92 | yes / 1954 |
+| S1 first-success | 100 | 7004 | 61 | no / — |
+| S1 stable | 0 | 6916 | 132 | yes / 84 |
+| S1 stable | 40 | 7002 | 45 | no / — |
+| S1 stable | 100 | 7003 | 30 | no / — |
+| S1 changed-input | 0 | 7002 | 66 | no / — |
+| S1 changed-input | 40 | 7002 | 110 | no / — |
+| S1 changed-input | 100 | 7002 | 30 | no / — |
+| S1 first-success | 100 | 7001 | 61 | no / — |
+| S1 first-success | 100 | 7002 | 61 | no / — |
+| S3 first-success | 0 | 2034 | 136 | yes / 4966 |
+| S3 first-success | 100 | 7000 | 53 | no / — |
+
+### Final candidate acceptance
+
+All 11 mandatory S1 measurements PASS, complete semantic persistence and commit.
+S1 retains 4,256 observations, 112 stays/56 commutes and 148 Reviews at first
+success; stable/changed fixtures retain 16 deliberately manual/protected sources.
+
+| S1 case | 0 ms: duration / remaining / calls | 40 ms: duration / remaining / calls | 100 ms: duration / remaining / calls |
+| --- | --- | --- | --- |
+| First-success | 1,034 / 5,966 / 33 | 2,449 / 4,551 / 33 | 4,623 / 2,377 / 35 |
+| Stable | 1,030 / 5,970 / 31 | 2,400 / 4,600 / 31 | 4,201 / 2,799 / 31 |
+| Changed-input | 1,053 / 5,947 / 35 | 2,580 / 4,420 / 35 | 5,209 / 1,790 / 40 |
+
+First-success 100 ms additional samples: 4,626/2,374 remaining and 4,631/2,369
+remaining, both 35 driver calls. Median **4,626 ms — PASS**. Worst S1 duration
+**5,209 ms — PASS**; minimum post-commit budget **1,790 ms — PASS**.
+S3 0 ms commits in 1,859 ms, 41 calls, 5,141 ms remaining. S3 100 ms fails safely
+at 7,005 ms/50 attempted calls during semantics: no commit, exact pre/post logical
+fingerprint and row counts preserved. This remains a permitted capacity limit.
+
+S1 protected requests: three, <=2,048 IDs, max 61,179 bytes; S3: five, max
+62,085 bytes. Lineage: S1 first-success 4,256 intended=prepared, three requests;
+stable 3,862–3,864 and changed-input 3,863 intended=prepared, two requests.
+S3 8,512 intended=prepared, five requests (including the later rolled-back
+adverse-latency request). Every batch <=2,048 items; max S1 JSON 385,435 bytes,
+max S3 385,438 bytes. Production byte/item constants are imported and asserted.
+S1 timeout-configuration calls: three at 0/40 ms; at 100 ms, five first-success,
+three stable, eight changed-input. No timeout configuration was suppressed.
+
+Same-input profile comparisons use an untimed owner-locked/savepoint semantic
+oracle, not a relaxed performance deadline. Both profiles start from identical
+input/category/protection state; all three logical fingerprints match:
+
+- First-success: `d11520558b3e9e13408b507145973d3bc42df14ca6a14a56a2a8fa1b28663682`.
+- Stable: `bd0e7c422f135fe220b19668e3739152f9723efc1e91e03dc277b99fe42ff106`.
+- Changed-input: `2477d463c611832dfab836003fb04ccd0d513f57ba76f74f753431bc2b7113fe`.
+
+The S3 second-lineage-batch fault again proves deletion, first batch success,
+exactly two insertion attempts, second batch failure and full rollback before
+semantics/commit: 8,489 intended links, 4,096 prepared at the fault, exact
+pre/post counts and fingerprint including protected state/receipts. Performance
+samples remain separate from the existing **85 ms TOTAL-deadline** test.
+
+Hosted recovery and production repair are not established by these local results.
+The unchanged schema fingerprint is
+`cf931925bbe1a65e3140de651c734d9cd044794dabf6216fab54d6ae17914eb9`.
+
+### Follow-up validation and limitations
+
+- PASS — candidate acceptance: all 11 S1 cases and S3 standard, real PostgreSQL
+  ownership triggers, imported batch bounds, intended/prepared equality,
+  same-input logical fingerprints and reached second-batch rollback. S3 100 ms
+  request FAIL is a permitted capacity limitation with rollback verified.
+- PASS — base-adapter runner completed all 13 cases; nine legacy request FAILs
+  are retained, not candidate acceptance claims. This is the existing adapter,
+  not an independently executed checkout of planning main.
+- PASS — `npm run validate:location-reliability`, `npm run validate:location-v2-db`,
+  `npm run validate:review-mutation-db`, `npm run validate:sync-transactions`.
+  These exercise protected/manual/terminal rows and link UUIDs, receipts and
+  Quick Confirm, changed-ID protection, workspace/user/device isolation,
+  ownership/constraint failures, real contention, cancellation and rollback.
+  The 85 ms total-deadline case timed out at 87 ms with unchanged lineage.
+- PASS — S0 lineage hash
+  `2cac2993956118d7cd548ca2abc765fecad04eca289a13e26e8b69d84bf4c899`
+  and segment/semantic hash
+  `79008808b7458bde476a813ec5ba3419e2c692dd01121351dca894c27ca5a1e3`
+  retain their existing assertions.
+- PASS — final focused replay/batching tests: two files, eight tests; focused
+  lint on changed replay files. The SQL regression checks both locking arms,
+  scope/protection predicates, bounded parameter sharing, unique evidence
+  lookup and unchanged expiry/provenance conditions. Real-DB profile equivalence
+  covers first-success, stable and changed-input state.
+- PASS — one broad `npm run lint`, `npm run typecheck`, `npm run build`,
+  `npm run check:docs`, and `git diff --check`. No mobile TS2307 occurred.
+  Broad lint had two existing event-service test warnings plus two new unused
+  mock argument warnings; the latter were removed by a test-only signature
+  cleanup and checked with focused lint/tests afterward.
+- FAIL — one broad `npm run test`: mobile 1,238 passed; shared 305 passed;
+  web 957 passed, three skipped, one failed. The category-picker DOM test at
+  line 151 could not find its Create new category dialog after Escape.
+  Its component/test and web dependency/lockfile state are unchanged from base.
+  The single permitted isolated retry **PASS** (six tests); the broad result
+  remains FAIL. No unrelated UI or dependency repair was made.
+- NOT RUN — CI/Vercel polling, independent review, hosted/staging/production
+  acceptance, deployment, merge, regions/schema changes and iOS/TestFlight.
+
+The semantic oracle uses the existing logical projection with client identity
+keys; it is not a raw-UUID equality claim for newly inserted rows on rolled-back
+savepoint branches. Protected physical rows/links and real durable receipts have
+separate specialist assertions. Synthetic driver delay and the fixed 500 ms
+request/auth allowance are a local request model, not measured hosted topology.
+The three existing Important fixes remain intact; no further stage, rollout or
+timeout changes were made after S1 passed.
+
 ## Scope and source verification
 
 - Plan title: `Dayframe — Production retained-replay scalability V1`.
@@ -45,7 +247,7 @@ Base uses the test-only legacy adapter; candidate forces process-local server-ef
 | S3 first-success 0 ms | 2,131 / 136 / yes / 4,909 | 1,890 / 46 / yes / 5,144 | 8,512=8,512 |
 | S3 first-success 100 ms | 7,145 / 54 / no | 7,032 / 50 / no | 8,512 prepared before semantic timeout |
 
-Candidate S1 first-success 100 ms repeated median was `5,460 ms` (range `5,448–5,461 ms`), satisfying the duration/headroom gate for that profile. The full S1 gate still **FAILS**: stable 100 ms committed with only 577 ms remaining, changed-input 40 ms committed with 1,101 ms remaining and 5,942 ms duration, and changed-input 100 ms safely timed out before commit. S3 standard **PASS**; S3 adverse latency safely timed out before commit and is a capacity limitation. No timeout, target, fixture, protected row or semantic stage was changed to improve these results.
+Candidate S1 first-success 100 ms repeated median was `5,460 ms` (range `5,448–5,461 ms`), which **FAILS** the <=5,000 ms median criterion. Individual request success is not equivalent to plan acceptance. The full S1 gate also **FAILS**: stable 100 ms committed with only 577 ms remaining, changed-input 40 ms committed with 1,101 ms remaining and 5,942 ms duration, and changed-input 100 ms safely timed out before commit. S3 standard **PASS**; S3 adverse latency safely timed out before commit and is a capacity limitation. No timeout, target, fixture, protected row or semantic stage was changed to improve these results.
 
 Candidate batch evidence stayed within production constants in every captured request: S1 protected batches `6`, max `2,048` IDs and `61,179` bytes; S3 protected batches `10`, max `2,048` IDs and `62,085` bytes; S1 lineage requests `3` first-success/`2` stable or changed-input, max `2,048` rows and `385,435` bytes; S3 lineage requests `5`, max `2,048` rows and `385,438` bytes. Base used 250-row legacy protected probes (S1 `36` batches, max `7,469` bytes; S3 `70`, max `7,719`) and 250-row legacy lineage inserts (S1 `18`/`16` requests for first/stable, S3 `35`). Candidate diagnostics asserted intended/prepared equality on every successful measured replay; the counter was never inferred from row counts.
 

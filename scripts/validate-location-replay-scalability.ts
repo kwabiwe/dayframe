@@ -32,6 +32,8 @@ import type { RequestSession } from "../apps/web/src/lib/session";
 const LOCAL_LOOPBACK = new Set(["127.0.0.1", "localhost"]);
 const REQUEST_DEADLINE_MS = 8_000;
 const AUTH_COST_MS = 500;
+const S1_ONLY = process.argv.includes("--s1-only");
+const QUERY_PLAN_ONLY = process.argv.includes("--query-plan-only");
 const SOURCE = process.argv.find((value) => value.startsWith("--source="))?.split("=", 2)[1] ?? "candidate";
 assert(SOURCE === "base" || SOURCE === "candidate", "Use --source=base or --source=candidate.");
 
@@ -93,6 +95,8 @@ type AttemptOptions = {
 };
 
 type DriverCapture = {
+  timing: Record<string, { startedAt: number; elapsedMs: number | null; completed: boolean; remainingMsAtStart: number | null; remainingMsAfter: number | null; calls: number; driverMs: number }>;
+  activeTimingStage: string | null;
   calls: number;
   timeoutConfigurationCalls: number;
   protectionQueryBatches: number;
@@ -152,6 +156,8 @@ function isLineageDeleteStatement(sql: string) {
 function createCapture(): DriverCapture {
   const now = performance.now();
   return {
+    timing: {},
+    activeTimingStage: null,
     calls: 0,
     timeoutConfigurationCalls: 0,
     protectionQueryBatches: 0,
@@ -172,6 +178,47 @@ function createCapture(): DriverCapture {
     currentStage: "request_setup",
     lastStageAt: now
   };
+}
+
+function captureTiming(capture: DriverCapture, event: LocationTimingEvent) {
+  const now = performance.now();
+  if (event.state === "started") {
+    capture.activeTimingStage = event.stage;
+    capture.timing[event.stage] = {
+      startedAt: now, elapsedMs: null, completed: false,
+      remainingMsAtStart: event.remainingMs ?? null, remainingMsAfter: null,
+      calls: 0, driverMs: 0
+    };
+  } else {
+    const stage = capture.timing[event.stage];
+    if (stage) {
+      stage.elapsedMs = now - stage.startedAt;
+      stage.completed = true;
+      stage.remainingMsAfter = event.remainingMs ?? null;
+    }
+    capture.activeTimingStage = null;
+  }
+}
+
+function timingSnapshot(capture: DriverCapture) {
+  const now = performance.now();
+  const stages = ["connection_acquisition", "transaction_configuration", "owner_lock", "evidence_read",
+    "catalogue_read", "engine_computation", "protected_replacement_checks", "obsolete_segment_handling",
+    "stay_persistence", "commute_persistence", "lineage_deletion", "lineage_insertion",
+    "semantic_review_persistence", "transaction_commit"];
+  return Object.fromEntries(stages.map(name => {
+    const stage = capture.timing[name];
+    if (!stage) return [name, { elapsedMs: null, completed: false, remainingMsAtStart: null,
+      remainingMsAfter: null, calls: 0, driverMs: 0 }];
+    return [name, {
+      elapsedMs: Math.round(stage.elapsedMs ?? now - stage.startedAt),
+      completed: stage.completed,
+      remainingMsAtStart: stage.remainingMsAtStart,
+      remainingMsAfter: stage.remainingMsAfter,
+      calls: stage.calls,
+      driverMs: Math.round(stage.driverMs)
+    }];
+  }));
 }
 
 function setCaptureStage(capture: DriverCapture, stage: string) {
@@ -203,11 +250,13 @@ function createMeasuredPool(
               const params = values ?? (sqlOrConfig as { values?: unknown[] })?.values ?? [];
               const statement = normalizedSql(sql);
               capture.calls += 1;
+              const detailedStage = capture.activeTimingStage ? capture.timing[capture.activeTimingStage] : undefined;
+              if (detailedStage) detailedStage.calls += 1;
               const stage = capture.stages[capture.currentStage] ?? { calls: 0, ms: 0 };
               stage.calls += 1;
               capture.stages[capture.currentStage] = stage;
               if (isTimeoutConfiguration(statement)) capture.timeoutConfigurationCalls += 1;
-              if (/^select .*for update of s/i.test(statement)) {
+              if (statement.includes("for update of s")) {
                 capture.protectionQueryBatches += 1;
                 const ids = params[4];
                 if (Array.isArray(ids)) {
@@ -242,7 +291,13 @@ function createMeasuredPool(
               if (released) throw new Error("Measured client was released before query dispatch.");
               hooks.onBeforeDispatch?.(statement, params);
               const query = client.query.bind(client) as (query: unknown, values?: unknown[]) => Promise<pg.QueryResult>;
-              const result = values === undefined ? await query(sqlOrConfig) : await query(sqlOrConfig, values);
+              const driverStartedAt = performance.now();
+              let result: pg.QueryResult;
+              try {
+                result = values === undefined ? await query(sqlOrConfig) : await query(sqlOrConfig, values);
+              } finally {
+                if (detailedStage) detailedStage.driverMs += performance.now() - driverStartedAt;
+              }
               hooks.onAfterDispatch?.(statement, params);
               if (/^commit\b/i.test(statement)) {
                 capture.commitReached = true;
@@ -445,16 +500,16 @@ async function runReplay(
   return replayRetainedLocationEvidence(requestFor(), owner.session, processingAt, attempt);
 }
 
-async function logicalFingerprint(owner: OwnerFixture) {
-  const [stays, commutes, links, reviews, entries, receipts] = await Promise.all([
-    database.query(
+async function logicalFingerprint(owner: OwnerFixture, reader: Pick<pg.PoolClient, "query"> = database) {
+  const [stays, commutes, links, reviews, entries, receipts] = [
+    await reader.query(
       `select client_segment_id,status,started_at,stopped_at,start_lower_bound_at,start_upper_bound_at,
               stop_lower_bound_at,stop_upper_bound_at,place_id,learned_place_id,centre::text,radius_m,
               sample_count,continuity_status,confidence,metadata
        from stay_segments where workspace_id = $1 and user_id = $2 order by client_segment_id`,
       [owner.session.workspaceId, owner.session.userId]
     ),
-    database.query(
+    await reader.query(
       `select c.client_segment_id,c.status,c.started_at,c.stopped_at,c.start_lower_bound_at,c.start_upper_bound_at,
               c.stop_lower_bound_at,c.stop_upper_bound_at,f.client_segment_id as from_client_segment_id,
               t.client_segment_id as to_client_segment_id,c.from_place_id,c.to_place_id,c.route_distance_m,
@@ -465,7 +520,7 @@ async function logicalFingerprint(owner: OwnerFixture) {
        where c.workspace_id = $1 and c.user_id = $2 order by c.client_segment_id`,
       [owner.session.workspaceId, owner.session.userId]
     ),
-    database.query(
+    await reader.query(
       `select e.client_evidence_id,coalesce(s.client_segment_id,c.client_segment_id) as client_segment_id,
               l.sequence_index,l.role
        from location_segment_evidence l
@@ -476,7 +531,7 @@ async function logicalFingerprint(owner: OwnerFixture) {
        order by client_segment_id,l.sequence_index,l.role,e.client_evidence_id`,
       [owner.session.workspaceId, owner.session.userId]
     ),
-    database.query(
+    await reader.query(
       `select ae.client_event_id,ae.event_type,ae.review_status,ri.status,ri.title,
               ri.suggested_started_at,ri.suggested_stopped_at,ri.suggested_category_id,ri.suggested_place_id
        from activity_events ae left join review_items ri on ri.event_id = ae.id
@@ -484,7 +539,7 @@ async function logicalFingerprint(owner: OwnerFixture) {
        order by ae.client_event_id,ri.id`,
       [owner.session.workspaceId, owner.session.userId]
     ),
-    database.query(
+    await reader.query(
       `select te.source,te.description,te.started_at,te.stopped_at,te.review_status,
               ae.client_event_id
        from time_entries te left join activity_events ae on ae.id = te.created_from_event_id
@@ -492,14 +547,14 @@ async function logicalFingerprint(owner: OwnerFixture) {
        order by te.started_at,te.id`,
       [owner.session.workspaceId, owner.session.userId]
     ),
-    database.query(
+    await reader.query(
       `select client_mutation_id,review_item_id,action_key,request_hash,result_json,created_at
        from review_mutation_receipts
        where workspace_id = $1 and user_id = $2
        order by client_mutation_id,created_at`,
       [owner.session.workspaceId, owner.session.userId]
     )
-  ]);
+  ];
   return createHash("sha256").update(JSON.stringify({
     stays: stays.rows,
     commutes: commutes.rows,
@@ -532,6 +587,7 @@ async function measure(
   processingAt: string,
   delayMs: number
 ) {
+  const before = { counts: await counts(owner), fingerprint: await logicalFingerprint(owner) };
   const capture = createCapture();
   const startedAt = performance.now();
   const deadlineAt = Date.now() + REQUEST_DEADLINE_MS;
@@ -546,6 +602,7 @@ async function measure(
       cleanupReserveMs: 1_000,
       onLocationStage: (stage) => setCaptureStage(capture, stage),
       onLocationTiming: (event) => {
+        captureTiming(capture, event);
         if (event.stage === "transaction_commit" && event.state === "completed") {
           capture.remainingWorkBudgetAfterCommit = event.remainingMs ?? null;
         }
@@ -554,6 +611,7 @@ async function measure(
         capture.counts[name] = value;
       },
       onSyncTiming: (event) => {
+        captureTiming(capture, event);
         if (event.stage === "transaction_commit" && event.state === "completed") {
           capture.remainingWorkBudgetAfterCommit = event.remainingMs;
         }
@@ -564,12 +622,18 @@ async function measure(
     error = caught;
   }
   setCaptureStage(capture, "complete");
+  const requestModelDurationMs = Math.round(performance.now() - startedAt);
+  const detailedStages = timingSnapshot(capture);
   if (source === "candidate") {
     assertCandidateBatchBounds(capture, `${workload}/${scenario}/${delayMs}ms`);
     if (!error) assertCandidateCompleteLineage(capture, `${workload}/${scenario}/${delayMs}ms`);
   }
   const snapshot = await counts(owner);
   const fingerprint = await logicalFingerprint(owner);
+  if (error) {
+    assert.deepEqual(snapshot, before.counts, `${workload}/${scenario}/${delayMs}ms: failure changed row counts.`);
+    assert.equal(fingerprint, before.fingerprint, `${workload}/${scenario}/${delayMs}ms: failure changed logical state.`);
+  }
   const businessQueryHash = createHash("sha256").update(JSON.stringify(capture.businessStatements)).digest("hex");
   const report = {
     source,
@@ -578,7 +642,7 @@ async function measure(
     delayMs,
     authCostMs: AUTH_COST_MS,
     deadlineMs: REQUEST_DEADLINE_MS,
-    requestModelDurationMs: Math.round(performance.now() - startedAt),
+    requestModelDurationMs,
     driverCalls: capture.calls,
     timeoutConfigurationCalls: capture.timeoutConfigurationCalls,
     protectionQueryBatches: capture.counts.protectionQueryBatches ?? capture.protectionQueryBatches,
@@ -597,8 +661,10 @@ async function measure(
     maxParameterCount: capture.maxParameterCount,
     maxParameterBytes: capture.maxParameterBytes,
     commitReached: capture.commitReached,
+    rollbackUnchanged: error ? fingerprint === before.fingerprint : null,
     remainingWorkBudgetAfterCommit: capture.remainingWorkBudgetAfterCommit,
     businessQueryHash,
+    detailedStages,
     stages: Object.fromEntries(Object.entries(capture.stages).map(([name, value]) => [name, { calls: value.calls, ms: Math.round(value.ms) }])),
     snapshot: {
       ...snapshot,
@@ -607,6 +673,21 @@ async function measure(
     outcome: error ? "FAIL" : "PASS",
     ...(error ? { failure: safeFailure(error) } : {})
   };
+  const acceptanceFailures: string[] = [];
+  if (source === "candidate" && workload === "S1") {
+    for (const [passed, message] of [
+      [!error && capture.commitReached, "S1 must commit successfully"],
+      [requestModelDurationMs <= 5_500, "S1 request duration exceeds 5,500 ms"],
+      [capture.remainingWorkBudgetAfterCommit != null && capture.remainingWorkBudgetAfterCommit >= 1_500, "S1 post-commit work budget is below 1,500 ms"]
+    ] as const) {
+      try { assert(passed, message); } catch { acceptanceFailures.push(message); }
+    }
+  }
+  Object.assign(report, {
+    replayOutcome: report.outcome,
+    outcome: error || acceptanceFailures.length ? "FAIL" : "PASS",
+    acceptanceFailures
+  });
   console.log(JSON.stringify(report));
   return { report, error };
 }
@@ -838,6 +919,54 @@ async function secondLineageBatchRollback() {
   }
 }
 
+/** Untimed semantic oracle, not a request/performance sample. Savepoints give
+ * both persistence profiles identical IDs, retained inputs and protected rows.
+ * Every timed request below still uses the unchanged 8s/1s deadline contract.
+ */
+async function sameOwnerProfileEquivalence() {
+  const { replayLocationEvidence } = await import("../apps/web/src/lib/location/location-replay-service");
+  const { emitReviewSemanticSegments } = await import("../apps/web/src/lib/location/location-review-semantic-batch");
+  const { ensureCommuteCategoryId } = await import("../apps/web/src/lib/automatic-category-service");
+  const { LOCATION_REPLAY_SCALABILITY_PROFILE } = await import("../apps/web/src/lib/location/location-replay-batching");
+  const owner = await createOwner();
+  const client = await database.connect();
+  try {
+    await uploadEvidence(owner, replayScalabilityHistory(owner.placeIds,
+      REPLAY_SCALABILITY_S1_DAYS, REPLAY_SCALABILITY_TRIPS_PER_DAY), REPLAY_SCALABILITY_CLOCK, "equivalence");
+    await ensureCommuteCategoryId(client, owner.session);
+    for (const scenario of ["first-success", "stable", "changed-input"] as const) {
+      if (scenario === "stable") await markProtectedHistory(owner);
+      if (scenario === "changed-input") await uploadEvidence(owner,
+        [changedReplayEvidence(owner.placeIds).at(-1)!], REPLAY_SCALABILITY_CLOCK, "equivalence-changed");
+      await client.query("begin");
+      await client.query("select pg_advisory_xact_lock(hashtext($1), hashtext($2))",
+        [owner.session.workspaceId, owner.session.userId]);
+      await client.query("savepoint identical_input");
+      const fingerprints: string[] = [];
+      for (const profile of [undefined, LOCATION_REPLAY_SCALABILITY_PROFILE]) {
+        const replay = await replayLocationEvidence(client, owner.session, {
+          deviceId: REPLAY_SCALABILITY_DEVICE, algorithmVersion: LOCATION_ENGINE_V2_CONFIG.algorithmVersion,
+          processingAt: REPLAY_SCALABILITY_CLOCK, persistenceProfile: profile
+        });
+        await emitReviewSemanticSegments(client, owner.session, replay.segments
+          .filter(segment => segment.status === "finalised")
+          .filter(segment => segmentStartedAfterSemanticCutover(segment.startedAt, REPLAY_SCALABILITY_CUTOVER)),
+        replay.stayIds, replay.commuteIds);
+        fingerprints.push(await logicalFingerprint(owner, client));
+        if (!profile) await client.query("rollback to savepoint identical_input");
+      }
+      assert.equal(fingerprints[1], fingerprints[0], `${scenario}: base/candidate logical state differs.`);
+      await client.query("commit");
+      console.log(JSON.stringify({ profileEquivalence: { scenario, outcome: "PASS",
+        baseFingerprint: fingerprints[0], candidateFingerprint: fingerprints[1] } }));
+    }
+  } finally {
+    await client.query("rollback");
+    client.release();
+    await cleanupOwner(owner);
+  }
+}
+
 async function runMatrix(source: Source) {
   const measurements: Array<{ report: Record<string, unknown>; error: unknown }> = [];
   const run = async (workload: "S1" | "S3", scenario: Scenario, delayMs: number, sample = "") => {
@@ -877,7 +1006,7 @@ async function runMatrix(source: Source) {
     for (const delayMs of [0, 40, 100]) await run("S1", scenario, delayMs);
   }
   for (const sample of ["sample-2", "sample-3"]) await run("S1", "first-success", 100, sample);
-  for (const delayMs of [0, 100]) await run("S3", "first-success", delayMs);
+  if (!S1_ONLY) for (const delayMs of [0, 100]) await run("S3", "first-success", delayMs);
   return measurements;
 }
 
@@ -903,11 +1032,41 @@ async function main() {
       onLocationCount: (name, value) => { seedCapture.counts[name] = value; },
       onSyncTiming: (event) => setCaptureStage(seedCapture, event.stage)
     });
-    await queryPlanEvidence(owner);
+    if (QUERY_PLAN_ONLY) {
+      await markProtectedHistory(owner);
+      await uploadEvidence(owner, [changedReplayEvidence(owner.placeIds).at(-1)!], REPLAY_SCALABILITY_CLOCK, "plan-changed");
+      const { replayLocationEvidence } = await import("../apps/web/src/lib/location/location-replay-service");
+      const { LOCATION_REPLAY_SCALABILITY_PROFILE } = await import("../apps/web/src/lib/location/location-replay-batching");
+      const client = await database.connect();
+      try {
+        await client.query("begin");
+        await client.query("select pg_advisory_xact_lock(hashtext($1), hashtext($2))", [owner.session.workspaceId, owner.session.userId]);
+        const proxy = new Proxy(client, { get(raw, property) {
+          if (property === "query") return async (sql: string, params: unknown[]) => {
+            if (sql.includes("for update of s") || sql.includes('ri.id as "reviewId"')) {
+              const plan = await raw.query(`explain (analyze, buffers, format json) ${sql}`, params);
+              console.log(JSON.stringify({ measuredQueryPlan: plan.rows[0] }));
+            }
+            return raw.query(sql, params);
+          };
+          return Reflect.get(raw, property);
+        } });
+        await replayLocationEvidence(proxy, owner.session, { deviceId: REPLAY_SCALABILITY_DEVICE,
+          algorithmVersion: LOCATION_ENGINE_V2_CONFIG.algorithmVersion, processingAt: REPLAY_SCALABILITY_CLOCK,
+          persistenceProfile: SOURCE === "candidate" ? LOCATION_REPLAY_SCALABILITY_PROFILE : undefined });
+      } finally {
+        await client.query("rollback");
+        client.release();
+      }
+    } else await queryPlanEvidence(owner);
   } finally {
     await cleanupOwner(owner);
   }
-  if (SOURCE === "candidate") await secondLineageBatchRollback();
+  if (QUERY_PLAN_ONLY) return;
+  if (SOURCE === "candidate" && !S1_ONLY) {
+    await sameOwnerProfileEquivalence();
+    await secondLineageBatchRollback();
+  }
   const measurements = await runMatrix(SOURCE as Source);
   const candidateS1 = measurements.filter(({ report }) => report.source === "candidate" && report.workload === "S1");
   let gateFailure: unknown;
@@ -932,9 +1091,10 @@ async function main() {
       const durations = first100.map(({ report }) => report.requestModelDurationMs as number).sort((a, b) => a - b);
       const median = durations[Math.floor(durations.length / 2)];
       assert(median <= 5_000, `Candidate S1 first-success 100 ms median exceeded 5,000 ms (${median} ms).`);
-      assert(first100.every(({ report }) => (report.requestModelDurationMs as number) <= 5_500 &&
+      assert.equal(first100.length, 3, "Three first-success 100 ms samples are required.");
+      assert(candidateS1.every(({ report }) => (report.requestModelDurationMs as number) <= 5_500 &&
         (report.remainingWorkBudgetAfterCommit as number | null) != null &&
-        (report.remainingWorkBudgetAfterCommit as number) >= 1_500), "Candidate S1 first-success 100 ms gate failed.");
+      (report.remainingWorkBudgetAfterCommit as number) >= 1_500), "Candidate S1 per-request gate failed.");
     } catch (error) {
       gateFailure = error;
     }
@@ -945,7 +1105,9 @@ async function main() {
     outcome: gateFailure ? "FAIL" : "PASS",
     schemaFingerprint: schema.schemaFingerprint,
     principalMeasurements: measurements.length,
-    expectedPrincipalMeasurements: 13,
+    expectedPrincipalMeasurements: S1_ONLY ? 11 : 13,
+    firstSuccess100msMedian: candidateS1.filter(({ report }) => report.scenario === "first-success" && report.delayMs === 100)
+      .map(({ report }) => report.requestModelDurationMs as number).sort((a, b) => a - b)[1] ?? null,
     matrixFailures: measurements.filter(({ report }) => report.outcome === "FAIL").length,
     ...(gateFailure ? { failure: safeFailure(gateFailure) } : {}),
     note: SOURCE === "base"

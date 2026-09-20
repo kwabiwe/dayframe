@@ -259,7 +259,10 @@ async function excludeProtectedReplacements(
   let protectionQueryBatches = 0;
   if (scalabilityProfile) observeLocationCount(options, "protectionEvidenceIds", candidateEvidenceIds.length);
   // Bounded provenance reads under the existing owner transaction/lock. No per-segment SQL.
-  for (const table of ["stay_segments", "commute_segments"] as const) {
+  const tableGroups: ReadonlyArray<ReadonlyArray<"stay_segments" | "commute_segments">> = scalabilityProfile
+    ? [["stay_segments", "commute_segments"]]
+    : [["stay_segments"], ["commute_segments"]];
+  for (const tables of tableGroups) {
     const batches = scalabilityProfile
       ? candidateEvidenceIds.length === 0
         ? [candidateEvidenceIds]
@@ -274,22 +277,37 @@ async function excludeProtectedReplacements(
         protectionQueryBatches += 1;
         observeLocationCount(options, "protectionQueryBatches", protectionQueryBatches);
       }
-      const column = table === "stay_segments" ? "stay_segment_id" : "commute_segment_id";
-      const links = await client.query<ProtectedSourceLink>(
-        `select s.client_segment_id as "clientSegmentId", le.client_evidence_id as "clientEvidenceId",
+      // Each arm retains its own ordered FOR UPDATE OF s. UNION ALL only
+      // shares the bounded ID request, never a row predicate or a lock target.
+      const reads = tables.map(table => {
+        const column = table === "stay_segments" ? "stay_segment_id" : "commute_segment_id";
+        return `select s.client_segment_id as "clientSegmentId", le.client_evidence_id as "clientEvidenceId",
                 le.evidence_type as kind, le.occurred_at as "occurredAt",
                 s.started_at as "startedAt", s.stopped_at as "stoppedAt"
          from ${table} s
          join location_segment_evidence lse on lse.${column} = s.id
            and lse.workspace_id = s.workspace_id and lse.user_id = s.user_id
-         join location_evidence le on le.id = lse.evidence_id
+         join ${scalabilityProfile ? `lateral (
+           select id, workspace_id, user_id, device_id, algorithm_version,
+                  client_evidence_id, evidence_type, occurred_at
+           from location_evidence where id = lse.evidence_id offset 0
+         )` : "location_evidence"} le on le.id = lse.evidence_id
            and le.workspace_id = s.workspace_id and le.user_id = s.user_id
          where s.workspace_id = $1 and s.user_id = $2 and s.device_id = $3 and s.algorithm_version = $4
            and le.device_id = $3 and le.algorithm_version = $4 and le.client_evidence_id = any($5::text[])
            and (s.continuity_status = 'manual' or (s.status <> 'superseded' and s.created_from_event_id is not null
-             and not exists (select 1 from review_items ri where ri.workspace_id = s.workspace_id
-               and ri.user_id = s.user_id and ri.location_segment_id = s.id and ri.status = 'open')))
-         order by s.id, le.client_evidence_id for update of s`,
+             and not exists (select 1 from review_items ri where ${scalabilityProfile
+               ? "ri.workspace_id = $1 and ri.user_id = $2"
+               : "ri.workspace_id = s.workspace_id and ri.user_id = s.user_id"}
+               and ri.location_segment_id = s.id and ri.status = 'open')))
+         order by s.id, le.client_evidence_id for update of s`;
+      });
+      // OFFSET 0 is an optimization boundary, not a result cap: look up the
+      // unique evidence ID before applying the unchanged scope/candidate
+      // predicates. Bad owner-cardinality estimates must not turn each lookup
+      // into a rescan of all evidence for the owner.
+      const links = await client.query<ProtectedSourceLink>(
+        reads.length === 1 ? reads[0] : reads.map(sql => `select * from (${sql}) protected_sources`).join(" union all "),
         [session.workspaceId, session.userId, options.deviceId, options.algorithmVersion, ids]);
       for (const link of links.rows) for (const candidate of byEvidence.get(link.clientEvidenceId) ?? []) {
         if (sharesProtectedPortion(candidate, link)) held.add(candidate.clientSegmentId);
@@ -306,7 +324,7 @@ async function excludeProtectedReplacements(
 async function supersedeMissingSegments(
   client: pg.PoolClient,
   session: RequestSession,
-  options: { deviceId: string; algorithmVersion: string; processingAt: string },
+  options: Pick<LocationReplayOptions, "deviceId" | "algorithmVersion" | "processingAt" | "persistenceProfile">,
   stayClientIds: string[],
   commuteClientIds: string[]
 ) {
@@ -338,12 +356,43 @@ async function supersedeMissingSegments(
 async function retireOpenReviewsForMissingSegments(
   client: pg.PoolClient,
   session: RequestSession,
-  options: { deviceId: string; algorithmVersion: string; processingAt: string },
+  options: Pick<LocationReplayOptions, "deviceId" | "algorithmVersion" | "processingAt" | "persistenceProfile">,
   stayClientIds: string[],
   commuteClientIds: string[]
 ) {
+  // Preserve the OR provenance test, but evaluate eligible evidence once on
+  // the selected path. The array InitPlan avoids a badly estimated nested
+  // loop that repeatedly scans all owner evidence for each lineage row.
+  const scalabilityProfile = options.persistenceProfile === LOCATION_REPLAY_SCALABILITY_PROFILE;
+  const eligibleLineage = scalabilityProfile ? `with eligible_lineage as materialized (
+    select lse.stay_segment_id, lse.commute_segment_id
+    from location_segment_evidence lse
+    where lse.workspace_id = $1 and lse.user_id = $2
+      and lse.evidence_id = any(array(
+        select le.id from location_evidence le
+        where le.workspace_id = $1 and le.user_id = $2
+          and le.accepted = true and le.device_id = $3 and le.algorithm_version = $4
+          and le.expires_at > $7::timestamptz
+      ))
+  ) ` : "";
+  const eligibleProvenance = (predicate: string, owner: string) => `exists (
+         select 1
+         from location_segment_evidence lse
+         join location_evidence le
+           on le.id = lse.evidence_id
+          and le.workspace_id = lse.workspace_id and le.user_id = lse.user_id
+         where ${owner}
+           and (${predicate})
+           and le.accepted = true and le.device_id = $3 and le.algorithm_version = $4
+           and le.expires_at > $7::timestamptz
+       )`;
+  const provenancePredicate = scalabilityProfile
+    ? `exists (select 1 from eligible_lineage lse
+        where lse.stay_segment_id = st.id or lse.commute_segment_id = cs.id)`
+    : eligibleProvenance("lse.stay_segment_id = st.id or lse.commute_segment_id = cs.id",
+        "lse.workspace_id = ri.workspace_id and lse.user_id = ri.user_id");
   const stale = await client.query<{ reviewId: string; eventId: string }>(
-    `select ri.id as "reviewId", ri.event_id as "eventId"
+    `${eligibleLineage}select ri.id as "reviewId", ri.event_id as "eventId"
      from review_items ri
      left join stay_segments st
        on st.id = ri.location_segment_id
@@ -361,17 +410,7 @@ async function retireOpenReviewsForMissingSegments(
          or
          (cs.id is not null and not (cs.client_segment_id = any($6::text[])))
        )
-       and exists (
-         select 1
-         from location_segment_evidence lse
-         join location_evidence le
-           on le.id = lse.evidence_id
-          and le.workspace_id = lse.workspace_id and le.user_id = lse.user_id
-         where lse.workspace_id = ri.workspace_id and lse.user_id = ri.user_id
-           and (lse.stay_segment_id = st.id or lse.commute_segment_id = cs.id)
-           and le.accepted = true and le.device_id = $3 and le.algorithm_version = $4
-           and le.expires_at > $7::timestamptz
-       )
+       and ${provenancePredicate}
      for update of ri`,
     [
       session.workspaceId,

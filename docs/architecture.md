@@ -144,7 +144,13 @@ most 2,048 links and 1 MiB of UTF-8 JSON. Deletion remains a separate awaited
 statement, and the exact owner predicates, source ordering, row locks,
 conflict semantics and ownership triggers remain unchanged. Segment
 lock/upsert and semantic/Review batches remain bounded at 250. Manual/terminal
-links remain untouched.
+links remain untouched. Each protected ID batch uses one request with separate
+stay/commute locking subqueries; each retains its ordered `FOR UPDATE OF s` and
+exact candidate/protection filters. The selected profile looks up evidence by
+its unique ID before applying those filters, avoiding repeated owner-evidence
+scans. Obsolete Review selection materializes eligible lineage once inside the
+same statement using the unchanged owner/device/algorithm/accepted/expiry
+predicates. Review retirement and semantic writes remain separate statements.
 
 Location POST routes issue independent random request IDs and one allowlisted
 completion record. Success JSON stays unchanged; headers carry correlation and
