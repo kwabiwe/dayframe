@@ -1,5 +1,14 @@
 import { observeLocationCount, observeLocationStage, observeLocationTiming, type LocationObservation } from "./location-sync-diagnostics";
 import {
+  boundedJsonBatches,
+  LOCATION_LINEAGE_INSERT_BATCH_SIZE,
+  LOCATION_LINEAGE_INSERT_PAYLOAD_MAX_BYTES,
+  LOCATION_PROTECTED_EVIDENCE_ID_BATCH_SIZE,
+  LOCATION_PROTECTED_EVIDENCE_ID_PAYLOAD_MAX_BYTES,
+  LOCATION_REPLAY_SCALABILITY_PROFILE,
+  type LocationReplayPersistenceProfile
+} from "./location-replay-batching";
+import {
   EMPTY_LOCATION_ENGINE_STATE,
   LOCATION_ENGINE_V2_CONFIG,
   LocationEvidenceSchema,
@@ -61,6 +70,13 @@ type ExistingSegment = {
   preservesManualCorrection: boolean;
 };
 
+type LocationReplayOptions = {
+  deviceId: string;
+  algorithmVersion: string;
+  processingAt: string;
+  persistenceProfile?: LocationReplayPersistenceProfile;
+} & LocationObservation;
+
 function iso(value: Date | string | null) {
   return value == null ? null : new Date(value).toISOString();
 }
@@ -68,7 +84,7 @@ function iso(value: Date | string | null) {
 export async function replayLocationEvidence(
   client: pg.PoolClient,
   session: RequestSession,
-  options: { deviceId: string; algorithmVersion: string; processingAt: string } & LocationObservation
+  options: LocationReplayOptions
 ): Promise<LocationReplayResult> {
   observeLocationStage(options, "evidence_read");
   observeLocationTiming(options, "evidence_read", "started");
@@ -228,7 +244,8 @@ function sharesProtectedPortion(segment: LocationSegment, link: ProtectedSourceL
 
 async function excludeProtectedReplacements(
   client: pg.PoolClient, session: RequestSession,
-  options: { deviceId: string; algorithmVersion: string }, segments: LocationSegment[]
+  options: Pick<LocationReplayOptions, "deviceId" | "algorithmVersion" | "persistenceProfile" | "onLocationCount">,
+  segments: LocationSegment[]
 ) {
   const byEvidence = new Map<string, LocationSegment[]>();
   for (const segment of segments) for (const id of segment.evidenceIds) {
@@ -237,9 +254,26 @@ async function excludeProtectedReplacements(
     byEvidence.set(id, candidates);
   }
   const held = new Set<string>();
+  const candidateEvidenceIds = [...byEvidence.keys()].sort();
+  const scalabilityProfile = options.persistenceProfile === LOCATION_REPLAY_SCALABILITY_PROFILE;
+  let protectionQueryBatches = 0;
+  if (scalabilityProfile) observeLocationCount(options, "protectionEvidenceIds", candidateEvidenceIds.length);
   // Bounded provenance reads under the existing owner transaction/lock. No per-segment SQL.
-  for (const ids of segmentChunks([...byEvidence.keys()].sort())) {
-    for (const table of ["stay_segments", "commute_segments"] as const) {
+  for (const table of ["stay_segments", "commute_segments"] as const) {
+    const batches = scalabilityProfile
+      ? candidateEvidenceIds.length === 0
+        ? [candidateEvidenceIds]
+        : boundedJsonBatches(candidateEvidenceIds, {
+            operation: "protected_evidence_ids",
+            maxItems: LOCATION_PROTECTED_EVIDENCE_ID_BATCH_SIZE,
+            maxBytes: LOCATION_PROTECTED_EVIDENCE_ID_PAYLOAD_MAX_BYTES
+          })
+      : segmentChunks(candidateEvidenceIds);
+    for (const ids of batches) {
+      if (scalabilityProfile) {
+        protectionQueryBatches += 1;
+        observeLocationCount(options, "protectionQueryBatches", protectionQueryBatches);
+      }
       const column = table === "stay_segments" ? "stay_segment_id" : "commute_segment_id";
       const links = await client.query<ProtectedSourceLink>(
         `select s.client_segment_id as "clientSegmentId", le.client_evidence_id as "clientEvidenceId",
@@ -570,6 +604,43 @@ async function persistCommutes(
 
 export const LOCATION_LINEAGE_INSERT_CHUNK_SIZE = 250;
 
+type LineageInsertRow = {
+  evidence_id: string;
+  stay_segment_id: string | null;
+  commute_segment_id: string | null;
+  sequence_index: number;
+  role: "inside" | "route";
+  ordinal: number;
+};
+
+function* intendedLineageRows(
+  segments: LocationSegment[],
+  evidenceIds: Map<string, string>,
+  stayIds: Map<string, string>,
+  commuteIds: Map<string, string>,
+  protectedSegmentIds: Set<string>
+): Generator<LineageInsertRow> {
+  let ordinal = 0;
+  for (const segment of segments) {
+    const segmentId = segment.kind === "stay"
+      ? stayIds.get(segment.clientSegmentId)
+      : commuteIds.get(segment.clientSegmentId);
+    if (!segmentId || protectedSegmentIds.has(segmentId)) continue;
+    for (const [index, clientEvidenceId] of segment.evidenceIds.entries()) {
+      const evidenceId = evidenceIds.get(clientEvidenceId);
+      if (!evidenceId) continue;
+      yield {
+        evidence_id: evidenceId,
+        stay_segment_id: segment.kind === "stay" ? segmentId : null,
+        commute_segment_id: segment.kind === "commute" ? segmentId : null,
+        sequence_index: index,
+        role: segment.kind === "stay" ? "inside" : "route",
+        ordinal: ordinal++
+      };
+    }
+  }
+}
+
 async function replaceEvidenceLinks(
   client: pg.PoolClient,
   session: RequestSession,
@@ -578,7 +649,7 @@ async function replaceEvidenceLinks(
   stayIds: Map<string, string>,
   commuteIds: Map<string, string>,
   protectedSegmentIds: Set<string>,
-  observation: LocationObservation
+  observation: LocationReplayOptions
 ) {
   const allIds = [...stayIds.values(), ...commuteIds.values()].filter(
     (segmentId) => !protectedSegmentIds.has(segmentId)
@@ -596,13 +667,32 @@ async function replaceEvidenceLinks(
     observeLocationTiming(observation, "lineage_deletion", "started");
     observeLocationTiming(observation, "lineage_deletion", "completed");
   }
+  observeLocationTiming(observation, "lineage_insertion", "started");
+  if (observation.persistenceProfile === LOCATION_REPLAY_SCALABILITY_PROFILE) {
+    let lineageLinksIntended = 0;
+    for (const row of intendedLineageRows(segments, evidenceIds, stayIds, commuteIds, protectedSegmentIds)) {
+      if (row) lineageLinksIntended += 1;
+    }
+    observeLocationCount(observation, "lineageLinksIntended", lineageLinksIntended);
+    await insertBoundedLineageLinks(
+      client,
+      session,
+      segments,
+      evidenceIds,
+      stayIds,
+      commuteIds,
+      protectedSegmentIds,
+      observation
+    );
+    observeLocationTiming(observation, "lineage_insertion", "completed");
+    return;
+  }
   // Measured lineage dominated driver calls. Bound memory and retain one transaction.
   const parameters: unknown[] = [];
   const rows: string[] = [];
   let lineageLinksPrepared = 0;
   let lineageChunksStarted = 0;
   let lineageChunksCompleted = 0;
-  observeLocationTiming(observation, "lineage_insertion", "started");
   const flush = async () => {
     if (!rows.length) return;
     const chunkLinks = rows.length;
@@ -642,4 +732,52 @@ async function replaceEvidenceLinks(
   }
   await flush();
   observeLocationTiming(observation, "lineage_insertion", "completed");
+}
+
+async function insertBoundedLineageLinks(
+  client: pg.PoolClient,
+  session: RequestSession,
+  segments: LocationSegment[],
+  evidenceIds: Map<string, string>,
+  stayIds: Map<string, string>,
+  commuteIds: Map<string, string>,
+  protectedSegmentIds: Set<string>,
+  observation: LocationReplayOptions
+) {
+  let lineageChunksStarted = 0;
+  let lineageChunksCompleted = 0;
+  let lineageLinksPrepared = 0;
+  for (const batch of boundedJsonBatches(
+    intendedLineageRows(segments, evidenceIds, stayIds, commuteIds, protectedSegmentIds),
+    {
+      operation: "lineage_links",
+      maxItems: LOCATION_LINEAGE_INSERT_BATCH_SIZE,
+      maxBytes: LOCATION_LINEAGE_INSERT_PAYLOAD_MAX_BYTES
+    }
+  )) {
+    lineageLinksPrepared += batch.length;
+    observeLocationCount(observation, "lineageLinksPrepared", lineageLinksPrepared);
+    lineageChunksStarted += 1;
+    observeLocationCount(observation, "lineageChunksStarted", lineageChunksStarted);
+    await client.query(
+      `insert into location_segment_evidence (
+         workspace_id, user_id, evidence_id, stay_segment_id, commute_segment_id, sequence_index, role
+       )
+       select $1::uuid, $2::uuid, r.evidence_id, r.stay_segment_id, r.commute_segment_id,
+              r.sequence_index, r.role
+       from jsonb_to_recordset($3::jsonb) as r(
+         evidence_id uuid,
+         stay_segment_id uuid,
+         commute_segment_id uuid,
+         sequence_index integer,
+         role text,
+         ordinal integer
+       )
+       order by r.ordinal
+       on conflict do nothing`,
+      [session.workspaceId, session.userId, JSON.stringify(batch)]
+    );
+    lineageChunksCompleted += 1;
+    observeLocationCount(observation, "lineageChunksCompleted", lineageChunksCompleted);
+  }
 }

@@ -27,6 +27,7 @@ import {
   segmentStartedAfterSemanticCutover
 } from "./location-rollout";
 import { locationSemanticDisposition } from "./location-semantic-policy";
+import { LOCATION_REPLAY_SCALABILITY_PROFILE } from "./location-replay-batching";
 
 export const LOCATION_EVIDENCE_BODY_LIMIT_BYTES = 512 * 1024;
 export const LOCATION_INGEST_LOCK_TIMEOUT_MS = 1_500;
@@ -264,7 +265,14 @@ async function replayAndEmitLocationSemantics(
     remainingOperationMs?: LocationObservation["remainingOperationMs"];
   }
 ) {
-  const replay = await replayLocationEvidence(client, session, options);
+  const replay = await replayLocationEvidence(client, session, {
+    ...options,
+    // This is deliberately derived from the server decision, never from the
+    // requested rollout mode or a request-visible profile field.
+    persistenceProfile: options.rollout.effectiveMode === "v2_review"
+      ? LOCATION_REPLAY_SCALABILITY_PROFILE
+      : undefined
+  });
   observeLocationStage(options, "semantics");
   observeLocationTiming(options, "semantic_review_persistence", "started");
   const finalisedSegments = replay.segments.filter((segment) => segment.status === "finalised");

@@ -50,6 +50,8 @@ describe("Location replay timeout configuration routing", () => {
 
     const options = withSyncTransaction.mock.calls[0]?.[2] as { reuseFullCapTimeoutPair?: boolean };
     expect(options.reuseFullCapTimeoutPair).toBe(expected);
+    const replayOptions = replayLocationEvidence.mock.calls[0]?.[2] as { persistenceProfile?: string };
+    expect(replayOptions.persistenceProfile).toBe(expected ? "review_scalability_v1" : undefined);
   });
 
   it("uses the server-effective mode rather than a client mode request", async () => {

@@ -125,12 +125,28 @@ export async function verifyReliabilityCorrectness({database,owner,batch}:Fixtur
 }
 
 export async function verifyLineageRollback(database:pg.Pool,session:RequestSession,read:()=>Promise<unknown[]>,replayRequest:unknown) {
-  const before=await read();let chunks=0;
-  const databasePool=interceptedPool(database,async(sql,raw)=>{
-    if(/^\s*insert into location_segment_evidence/i.test(sql)&&++chunks===2)await raw.query("select 1/0");
-  });
+  const before=await read();let lineageWrites=0;let executedWrite=false;
+  const databasePool={connect:async()=>{
+    const raw=await database.connect();
+    return new Proxy(raw,{get(client,key){
+      if(key==="query")return async(sql:string,params?:unknown[])=>{
+        if(/^\s*insert into location_segment_evidence/i.test(sql)){
+          lineageWrites += 1;
+          if (params) await client.query(sql,params); else await client.query(sql);
+          executedWrite = true;
+          // The 840-link S0 fixture is intentionally below the new 2,048-row
+          // cap. Fail only after the single batch has really executed so the
+          // rollback proof cannot pass without reaching the injection seam.
+          throw new Error("Synthetic lineage failure after executed write");
+        }
+        return params ? client.query(sql,params) : client.query(sql);
+      };
+      const value=Reflect.get(client,key);return typeof value==="function"?value.bind(client):value;
+    }});
+  }} as Pick<pg.Pool,"connect">;
   await assert.rejects(replayRetainedLocationEvidence(replayRequest,session,RELIABILITY_CLOCK,{databasePool}));
-  assert.equal(chunks,2);assert.deepEqual(await read(),before,"Second chunk failure must restore deleted links");
+  assert.equal(lineageWrites,1);assert(executedWrite,"Lineage fault did not execute its write before failing.");
+  assert.deepEqual(await read(),before,"Executed lineage write must restore deleted links on rollback");
   // Exact link protection for both manual correction and terminal Review decisions.
   await database.query("update stay_segments set continuity_status='manual' where workspace_id=$1",[session.workspaceId]);
   await database.query("update review_items set status='ignored' where workspace_id=$1",[session.workspaceId]);
@@ -141,5 +157,5 @@ export async function verifyLineageRollback(database:pg.Pool,session:RequestSess
   await replayRetainedLocationEvidence(replayRequest,session,RELIABILITY_CLOCK);
   assert.deepEqual(await read(),protectedLinks);
   assert.equal((await database.query("select count(*)::int n from review_items where workspace_id=$1 and status='open'",[session.workspaceId])).rows[0].n,0);
-  console.log("PASS: second-chunk rollback and exact protected/manual/terminal lineage with no resurrected Review.");
+  console.log("PASS: executed-batch rollback and exact protected/manual/terminal lineage with no resurrected Review.");
 }

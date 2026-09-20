@@ -8,7 +8,8 @@ export type LocationTimingStage = SyncTimingEvent["stage"] |
   "stay_persistence" | "commute_persistence" | "lineage_deletion" | "lineage_insertion" |
   "semantic_review_persistence";
 export type LocationTimingCount = "evidenceRows" | "staySegments" | "commuteSegments" |
-  "lineageLinksPrepared" | "lineageChunksStarted" | "lineageChunksCompleted" | "protectedSegments";
+  "lineageLinksPrepared" | "lineageChunksStarted" | "lineageChunksCompleted" | "protectedSegments" |
+  "protectionEvidenceIds" | "protectionQueryBatches" | "lineageLinksIntended";
 export type LocationTimingEvent = {
   stage: LocationTimingStage;
   state: "started" | "completed";
@@ -22,7 +23,8 @@ const LOCATION_TIMING_STAGES = new Set<LocationTimingStage>([
 ]);
 const LOCATION_TIMING_COUNTS = new Set<LocationTimingCount>([
   "evidenceRows", "staySegments", "commuteSegments", "lineageLinksPrepared",
-  "lineageChunksStarted", "lineageChunksCompleted", "protectedSegments"
+  "lineageChunksStarted", "lineageChunksCompleted", "protectedSegments",
+  "protectionEvidenceIds", "protectionQueryBatches", "lineageLinksIntended"
 ]);
 export type LocationObservation = {
   onLocationStage?: (stage: LocationSyncStage) => void;

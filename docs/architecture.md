@@ -134,8 +134,17 @@ workspace/user lock, bounded retention cleanup and coordinate-free event summary
 One parameterised evidence insert writes up to 100 observations in that same
 transaction. First occurrence, conflict acknowledgement and original expiry are
 preserved. Upload does not emit journey semantics; retained-evidence replay does.
-Replay replaces only unprotected lineage in bounded 250-row inserts under the
-same lock, client and commit. Manual/terminal links remain untouched.
+Replay replaces only unprotected lineage under the same lock, client and
+commit. The unspecified/default path keeps bounded 250-row lineage inserts.
+Only the server-effective `v2_review` retained-replay path may select the
+internal `review_scalability_v1` persistence profile: protected provenance
+candidate IDs are sent in dedicated ordered batches of at most 2,048 IDs and
+512 KiB of encoded IDs, while mutable lineage uses typed JSONB recordsets of at
+most 2,048 links and 1 MiB of UTF-8 JSON. Deletion remains a separate awaited
+statement, and the exact owner predicates, source ordering, row locks,
+conflict semantics and ownership triggers remain unchanged. Segment
+lock/upsert and semantic/Review batches remain bounded at 250. Manual/terminal
+links remain untouched.
 
 Location POST routes issue independent random request IDs and one allowlisted
 completion record. Success JSON stays unchanged; headers carry correlation and
