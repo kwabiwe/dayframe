@@ -146,3 +146,24 @@ The historical 17-item Review comparison remains unreconstructed. This evidence
 does not establish production deployment or production performance, and does
 not claim that missing-return capture or the saved-place/PureGym arrival and
 boundary issue is fixed.
+
+## Post-production evidence
+
+After PR #204 merged, owner/OpenClaw-supplied production evidence observed
+merged-main source/deployment, effective `v2_review`, and a successful evidence
+upload. The retained 19 September production runtime-log window contains 29
+replay attempts: zero successes and 29 HTTP 503 `operation_timeout` responses
+around 7,000 ms. Logs omit owner/device identifiers, so this aggregate is
+production-project scoped rather than an independently owner-filtered count.
+
+The representative failed request processed 4,029 evidence rows. It spent
+1,808 ms in protected-replacement checks and reached lineage insertion after
+approximately 6.1 seconds had already elapsed; lineage then exhausted the
+remaining budget. Other retained attempts reached semantic persistence before
+timing out. These safe aggregates do not establish a root SQL correction.
+
+This does not invalidate the staging result: PR #202 remains staging-validated,
+including the 5,049 ms controlled replay with 1,954 ms remaining, but that
+workload does not scale to the observed production retained journal. Detailed
+serialized runtime records remain outside the repository. Production replay
+performance is not validated, and no production fix is claimed.
