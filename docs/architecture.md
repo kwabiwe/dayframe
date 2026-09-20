@@ -151,6 +151,16 @@ its unique ID before applying those filters, avoiding repeated owner-evidence
 scans. Obsolete Review selection materializes eligible lineage once inside the
 same statement using the unchanged owner/device/algorithm/accepted/expiry
 predicates. Review retirement and semantic writes remain separate statements.
+The selected-profile combined `UNION ALL`/`LATERAL` protected lookup and
+materialised eligible-lineage read are governed by the narrow
+[C20 addendum](plans/location-replay-production-scalability-a1-c20.md).
+It supersedes separate-table request sequencing only for that profile; it does
+not change the one-client owner-locked transaction, locking predicates or
+default/legacy paths. Receipt-backed Review takes the mutation advisory lock,
+then the nonblocking owner lock before Review/event and segment row locks;
+replay takes that same owner lock with blocking acquisition before its reads.
+Concurrent verification must observe real database blocking and both supported
+decision orders, not infer lock safety from textual arm order or SQL mocks.
 
 Location POST routes issue independent random request IDs and one allowlisted
 completion record. Success JSON stays unchanged; headers carry correlation and

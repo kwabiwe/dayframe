@@ -1,0 +1,2767 @@
+{
+  "addendum": "DF-PROD-REPLAY-SCALABILITY-A1-C20",
+  "productionHead": "19950c8c5078aa2eed80d770735cc29b487421fd",
+  "note": "One final candidate performance run; unchanged production source, fixture, adapter and measurement definitions. Prior base-adapter performance reused, not an exact-base race oracle.",
+  "rows": [
+    {
+      "target": {
+        "host": "127.0.0.1",
+        "port": 54323,
+        "database": "dayframe_saved_place_test"
+      },
+      "postgres": 170011,
+      "postgis": "POSTGIS=\"3.6.4 0\" [EXTENSION] PGSQL=\"170\" GEOS=\"3.15.0-CAPI-1.21.0\" (compiled against GEOS 3.14.1) PROJ=\"9.8.1 NETWORK_ENABLED=OFF URL_ENDPOINT=https://cdn.proj.org USER_WRITABLE_DIRECTORY=/Users/major/Library/Application Support/proj DATABASE_PATH=/opt/homebrew/Cellar/proj/9.8.1/share/proj/proj.db\" (compiled against PROJ 9.8.1) LIBXML=\"2.15.3\" LIBJSON=\"0.19\" LIBPROTOBUF=\"1.5.2\" WAGYU=\"0.5.0 (Internal)\"",
+      "triggerNames": [
+        "dayframe_commute_owner_links",
+        "dayframe_location_evidence_owner_links",
+        "dayframe_review_owner",
+        "dayframe_segment_evidence_owner_links",
+        "dayframe_stay_owner_links"
+      ],
+      "indexCount": 17,
+      "schemaFingerprint": "cf931925bbe1a65e3140de651c734d9cd044794dabf6216fab54d6ae17914eb9"
+    },
+    {
+      "queryPlans": {
+        "protectedProvenanceFingerprint": "c7d2fb9dd6187f5f7baa701bcd334a21cde383172e4816e380cfae7e8018e1bb",
+        "lineageInsertFingerprint": "5f6915e918d5d6ed6fa633b01e834b447d67b9f49f4aa7cce1f219003d4148a0"
+      }
+    },
+    {
+      "profileEquivalence": {
+        "scenario": "first-success",
+        "outcome": "PASS",
+        "baseFingerprint": "b6a5fc156bb7106aa1ec1679364dbedb6ea12dc0be25cb6c96561cbf4913be5b",
+        "candidateFingerprint": "b6a5fc156bb7106aa1ec1679364dbedb6ea12dc0be25cb6c96561cbf4913be5b"
+      }
+    },
+    {
+      "profileEquivalence": {
+        "scenario": "stable",
+        "outcome": "PASS",
+        "baseFingerprint": "793490795392b88f742bbbf7546f37554c3c3b45f8901318014bc869df0285c7",
+        "candidateFingerprint": "793490795392b88f742bbbf7546f37554c3c3b45f8901318014bc869df0285c7"
+      }
+    },
+    {
+      "profileEquivalence": {
+        "scenario": "changed-input",
+        "outcome": "PASS",
+        "baseFingerprint": "8d68d143a60860886c846dac4bc388df634598e3226cd32bc413566fbdd4c5f4",
+        "candidateFingerprint": "8d68d143a60860886c846dac4bc388df634598e3226cd32bc413566fbdd4c5f4"
+      }
+    },
+    {
+      "planId": "DF-PROD-REPLAY-SCALABILITY-V1",
+      "source": "candidate",
+      "rollbackProof": {
+        "outcome": "PASS",
+        "workload": "S3",
+        "intendedLineageLinks": 8489,
+        "preparedLineageLinks": 4096,
+        "lineageAttempts": 2,
+        "firstLineageBatchExecuted": true,
+        "secondLineageBatchReached": true,
+        "lineageDeletionDispatched": true,
+        "semanticPersistenceReached": false,
+        "commitReached": false,
+        "lineageBatchCount": 2,
+        "maxLineageBatchItems": 2048,
+        "maxLineagePayloadBytes": 385435,
+        "failure": {
+          "name": "Error",
+          "phase": "effect"
+        }
+      }
+    },
+    {
+      "source": "candidate",
+      "workload": "S1",
+      "scenario": "first-success",
+      "delayMs": 0,
+      "authCostMs": 500,
+      "deadlineMs": 8000,
+      "requestModelDurationMs": 1029,
+      "driverCalls": 33,
+      "timeoutConfigurationCalls": 3,
+      "protectionQueryBatches": 3,
+      "protectionEvidenceIds": 4256,
+      "protectedEvidenceBatchCount": 3,
+      "maxProtectedEvidenceBatchItems": 2048,
+      "maxProtectedEvidencePayloadBytes": 61173,
+      "lineageRequests": 3,
+      "lineageBatchCount": 3,
+      "maxLineageBatchItems": 2048,
+      "lineageLinksIntended": 4256,
+      "lineageLinksPrepared": 4256,
+      "lineageChunksStarted": 3,
+      "lineageChunksCompleted": 3,
+      "maxLineagePayloadBytes": 385435,
+      "maxParameterCount": 2352,
+      "maxParameterBytes": 422381,
+      "commitReached": true,
+      "rollbackUnchanged": null,
+      "remainingWorkBudgetAfterCommit": 5971,
+      "businessQueryHash": "e7cf955e77c8dd4d5d2043f77c789893e582af11512fe0344d5969ed97203e6e",
+      "detailedStages": {
+        "connection_acquisition": {
+          "elapsedMs": 0,
+          "completed": true,
+          "remainingMsAtStart": 6500,
+          "remainingMsAfter": 6500,
+          "calls": 0,
+          "driverMs": 0
+        },
+        "transaction_configuration": {
+          "elapsedMs": 8,
+          "completed": true,
+          "remainingMsAtStart": 6500,
+          "remainingMsAfter": 6492,
+          "calls": 4,
+          "driverMs": 3
+        },
+        "owner_lock": {
+          "elapsedMs": 2,
+          "completed": true,
+          "remainingMsAtStart": 6492,
+          "remainingMsAfter": 6490,
+          "calls": 1,
+          "driverMs": 0
+        },
+        "evidence_read": {
+          "elapsedMs": 32,
+          "completed": true,
+          "remainingMsAtStart": 6490,
+          "remainingMsAfter": 6459,
+          "calls": 1,
+          "driverMs": 30
+        },
+        "catalogue_read": {
+          "elapsedMs": 3,
+          "completed": true,
+          "remainingMsAtStart": 6459,
+          "remainingMsAfter": 6456,
+          "calls": 2,
+          "driverMs": 1
+        },
+        "engine_computation": {
+          "elapsedMs": 263,
+          "completed": true,
+          "remainingMsAtStart": 6456,
+          "remainingMsAfter": 6193,
+          "calls": 0,
+          "driverMs": 0
+        },
+        "protected_replacement_checks": {
+          "elapsedMs": 15,
+          "completed": true,
+          "remainingMsAtStart": 6193,
+          "remainingMsAfter": 6178,
+          "calls": 3,
+          "driverMs": 11
+        },
+        "obsolete_segment_handling": {
+          "elapsedMs": 6,
+          "completed": true,
+          "remainingMsAtStart": 6178,
+          "remainingMsAfter": 6171,
+          "calls": 3,
+          "driverMs": 3
+        },
+        "stay_persistence": {
+          "elapsedMs": 21,
+          "completed": true,
+          "remainingMsAtStart": 6171,
+          "remainingMsAfter": 6150,
+          "calls": 2,
+          "driverMs": 18
+        },
+        "commute_persistence": {
+          "elapsedMs": 8,
+          "completed": true,
+          "remainingMsAtStart": 6150,
+          "remainingMsAfter": 6142,
+          "calls": 2,
+          "driverMs": 5
+        },
+        "lineage_deletion": {
+          "elapsedMs": 2,
+          "completed": true,
+          "remainingMsAtStart": 6142,
+          "remainingMsAfter": 6139,
+          "calls": 1,
+          "driverMs": 1
+        },
+        "lineage_insertion": {
+          "elapsedMs": 123,
+          "completed": true,
+          "remainingMsAtStart": 6139,
+          "remainingMsAfter": 6016,
+          "calls": 3,
+          "driverMs": 109
+        },
+        "semantic_review_persistence": {
+          "elapsedMs": 42,
+          "completed": true,
+          "remainingMsAtStart": 6016,
+          "remainingMsAfter": 5974,
+          "calls": 10,
+          "driverMs": 27
+        },
+        "transaction_commit": {
+          "elapsedMs": 3,
+          "completed": true,
+          "remainingMsAtStart": 5974,
+          "remainingMsAfter": 5971,
+          "calls": 1,
+          "driverMs": 2
+        }
+      },
+      "stages": {
+        "request_setup": {
+          "calls": 0,
+          "ms": 0
+        },
+        "request_auth": {
+          "calls": 0,
+          "ms": 500
+        },
+        "effect": {
+          "calls": 0,
+          "ms": 1
+        },
+        "connection_acquisition": {
+          "calls": 0,
+          "ms": 0
+        },
+        "transaction_configuration": {
+          "calls": 5,
+          "ms": 9
+        },
+        "evidence_read": {
+          "calls": 1,
+          "ms": 32
+        },
+        "catalogue_read": {
+          "calls": 2,
+          "ms": 3
+        },
+        "engine": {
+          "calls": 0,
+          "ms": 263
+        },
+        "segment_persistence": {
+          "calls": 10,
+          "ms": 51
+        },
+        "lineage": {
+          "calls": 4,
+          "ms": 125
+        },
+        "semantics": {
+          "calls": 10,
+          "ms": 42
+        },
+        "transaction_commit": {
+          "calls": 1,
+          "ms": 3
+        }
+      },
+      "snapshot": {
+        "evidence": 4256,
+        "stays": 112,
+        "commutes": 56,
+        "reviews": 148,
+        "entries": 0,
+        "lineage": 4256,
+        "logicalFingerprint": "a8805a6ca7cf8b6c14c2ffc5006af59db168e3200b2c8edffd3de75fe9b41be3"
+      },
+      "outcome": "PASS",
+      "replayOutcome": "PASS",
+      "acceptanceFailures": []
+    },
+    {
+      "source": "candidate",
+      "workload": "S1",
+      "scenario": "first-success",
+      "delayMs": 40,
+      "authCostMs": 500,
+      "deadlineMs": 8000,
+      "requestModelDurationMs": 2452,
+      "driverCalls": 33,
+      "timeoutConfigurationCalls": 3,
+      "protectionQueryBatches": 3,
+      "protectionEvidenceIds": 4256,
+      "protectedEvidenceBatchCount": 3,
+      "maxProtectedEvidenceBatchItems": 2048,
+      "maxProtectedEvidencePayloadBytes": 61173,
+      "lineageRequests": 3,
+      "lineageBatchCount": 3,
+      "maxLineageBatchItems": 2048,
+      "lineageLinksIntended": 4256,
+      "lineageLinksPrepared": 4256,
+      "lineageChunksStarted": 3,
+      "lineageChunksCompleted": 3,
+      "maxLineagePayloadBytes": 385435,
+      "maxParameterCount": 2352,
+      "maxParameterBytes": 422381,
+      "commitReached": true,
+      "rollbackUnchanged": null,
+      "remainingWorkBudgetAfterCommit": 4548,
+      "businessQueryHash": "e7cf955e77c8dd4d5d2043f77c789893e582af11512fe0344d5969ed97203e6e",
+      "detailedStages": {
+        "connection_acquisition": {
+          "elapsedMs": 0,
+          "completed": true,
+          "remainingMsAtStart": 6498,
+          "remainingMsAfter": 6498,
+          "calls": 0,
+          "driverMs": 0
+        },
+        "transaction_configuration": {
+          "elapsedMs": 170,
+          "completed": true,
+          "remainingMsAtStart": 6498,
+          "remainingMsAfter": 6328,
+          "calls": 4,
+          "driverMs": 7
+        },
+        "owner_lock": {
+          "elapsedMs": 42,
+          "completed": true,
+          "remainingMsAtStart": 6328,
+          "remainingMsAfter": 6286,
+          "calls": 1,
+          "driverMs": 0
+        },
+        "evidence_read": {
+          "elapsedMs": 70,
+          "completed": true,
+          "remainingMsAtStart": 6286,
+          "remainingMsAfter": 6216,
+          "calls": 1,
+          "driverMs": 29
+        },
+        "catalogue_read": {
+          "elapsedMs": 83,
+          "completed": true,
+          "remainingMsAtStart": 6216,
+          "remainingMsAfter": 6133,
+          "calls": 2,
+          "driverMs": 1
+        },
+        "engine_computation": {
+          "elapsedMs": 281,
+          "completed": true,
+          "remainingMsAtStart": 6133,
+          "remainingMsAfter": 5852,
+          "calls": 0,
+          "driverMs": 0
+        },
+        "protected_replacement_checks": {
+          "elapsedMs": 135,
+          "completed": true,
+          "remainingMsAtStart": 5852,
+          "remainingMsAfter": 5716,
+          "calls": 3,
+          "driverMs": 10
+        },
+        "obsolete_segment_handling": {
+          "elapsedMs": 127,
+          "completed": true,
+          "remainingMsAtStart": 5716,
+          "remainingMsAfter": 5590,
+          "calls": 3,
+          "driverMs": 4
+        },
+        "stay_persistence": {
+          "elapsedMs": 101,
+          "completed": true,
+          "remainingMsAtStart": 5588,
+          "remainingMsAfter": 5487,
+          "calls": 2,
+          "driverMs": 17
+        },
+        "commute_persistence": {
+          "elapsedMs": 104,
+          "completed": true,
+          "remainingMsAtStart": 5487,
+          "remainingMsAfter": 5384,
+          "calls": 2,
+          "driverMs": 21
+        },
+        "lineage_deletion": {
+          "elapsedMs": 42,
+          "completed": true,
+          "remainingMsAtStart": 5384,
+          "remainingMsAfter": 5342,
+          "calls": 1,
+          "driverMs": 2
+        },
+        "lineage_insertion": {
+          "elapsedMs": 268,
+          "completed": true,
+          "remainingMsAtStart": 5342,
+          "remainingMsAfter": 5074,
+          "calls": 3,
+          "driverMs": 120
+        },
+        "semantic_review_persistence": {
+          "elapsedMs": 484,
+          "completed": true,
+          "remainingMsAtStart": 5074,
+          "remainingMsAfter": 4590,
+          "calls": 10,
+          "driverMs": 65
+        },
+        "transaction_commit": {
+          "elapsedMs": 42,
+          "completed": true,
+          "remainingMsAtStart": 4590,
+          "remainingMsAfter": 4548,
+          "calls": 1,
+          "driverMs": 1
+        }
+      },
+      "stages": {
+        "request_setup": {
+          "calls": 0,
+          "ms": 0
+        },
+        "request_auth": {
+          "calls": 0,
+          "ms": 501
+        },
+        "effect": {
+          "calls": 0,
+          "ms": 1
+        },
+        "connection_acquisition": {
+          "calls": 0,
+          "ms": 0
+        },
+        "transaction_configuration": {
+          "calls": 5,
+          "ms": 212
+        },
+        "evidence_read": {
+          "calls": 1,
+          "ms": 70
+        },
+        "catalogue_read": {
+          "calls": 2,
+          "ms": 83
+        },
+        "engine": {
+          "calls": 0,
+          "ms": 281
+        },
+        "segment_persistence": {
+          "calls": 10,
+          "ms": 468
+        },
+        "lineage": {
+          "calls": 4,
+          "ms": 310
+        },
+        "semantics": {
+          "calls": 10,
+          "ms": 484
+        },
+        "transaction_commit": {
+          "calls": 1,
+          "ms": 42
+        }
+      },
+      "snapshot": {
+        "evidence": 4256,
+        "stays": 112,
+        "commutes": 56,
+        "reviews": 148,
+        "entries": 0,
+        "lineage": 4256,
+        "logicalFingerprint": "33b6f730cc89cba677d40f4da40f768d38cc88f01b28d536b997a28931b94be2"
+      },
+      "outcome": "PASS",
+      "replayOutcome": "PASS",
+      "acceptanceFailures": []
+    },
+    {
+      "source": "candidate",
+      "workload": "S1",
+      "scenario": "first-success",
+      "delayMs": 100,
+      "authCostMs": 500,
+      "deadlineMs": 8000,
+      "requestModelDurationMs": 4604,
+      "driverCalls": 35,
+      "timeoutConfigurationCalls": 5,
+      "protectionQueryBatches": 3,
+      "protectionEvidenceIds": 4256,
+      "protectedEvidenceBatchCount": 3,
+      "maxProtectedEvidenceBatchItems": 2048,
+      "maxProtectedEvidencePayloadBytes": 61173,
+      "lineageRequests": 3,
+      "lineageBatchCount": 3,
+      "maxLineageBatchItems": 2048,
+      "lineageLinksIntended": 4256,
+      "lineageLinksPrepared": 4256,
+      "lineageChunksStarted": 3,
+      "lineageChunksCompleted": 3,
+      "maxLineagePayloadBytes": 385435,
+      "maxParameterCount": 2352,
+      "maxParameterBytes": 422381,
+      "commitReached": true,
+      "rollbackUnchanged": null,
+      "remainingWorkBudgetAfterCommit": 2396,
+      "businessQueryHash": "e7cf955e77c8dd4d5d2043f77c789893e582af11512fe0344d5969ed97203e6e",
+      "detailedStages": {
+        "connection_acquisition": {
+          "elapsedMs": 0,
+          "completed": true,
+          "remainingMsAtStart": 6498,
+          "remainingMsAfter": 6498,
+          "calls": 0,
+          "driverMs": 0
+        },
+        "transaction_configuration": {
+          "elapsedMs": 408,
+          "completed": true,
+          "remainingMsAtStart": 6498,
+          "remainingMsAfter": 6090,
+          "calls": 4,
+          "driverMs": 3
+        },
+        "owner_lock": {
+          "elapsedMs": 102,
+          "completed": true,
+          "remainingMsAtStart": 6090,
+          "remainingMsAfter": 5988,
+          "calls": 1,
+          "driverMs": 1
+        },
+        "evidence_read": {
+          "elapsedMs": 143,
+          "completed": true,
+          "remainingMsAtStart": 5988,
+          "remainingMsAfter": 5846,
+          "calls": 1,
+          "driverMs": 41
+        },
+        "catalogue_read": {
+          "elapsedMs": 204,
+          "completed": true,
+          "remainingMsAtStart": 5846,
+          "remainingMsAfter": 5642,
+          "calls": 2,
+          "driverMs": 2
+        },
+        "engine_computation": {
+          "elapsedMs": 290,
+          "completed": true,
+          "remainingMsAtStart": 5642,
+          "remainingMsAfter": 5352,
+          "calls": 0,
+          "driverMs": 0
+        },
+        "protected_replacement_checks": {
+          "elapsedMs": 318,
+          "completed": true,
+          "remainingMsAtStart": 5352,
+          "remainingMsAfter": 5034,
+          "calls": 3,
+          "driverMs": 11
+        },
+        "obsolete_segment_handling": {
+          "elapsedMs": 312,
+          "completed": true,
+          "remainingMsAtStart": 5034,
+          "remainingMsAfter": 4723,
+          "calls": 3,
+          "driverMs": 8
+        },
+        "stay_persistence": {
+          "elapsedMs": 212,
+          "completed": true,
+          "remainingMsAtStart": 4721,
+          "remainingMsAfter": 4508,
+          "calls": 2,
+          "driverMs": 8
+        },
+        "commute_persistence": {
+          "elapsedMs": 209,
+          "completed": true,
+          "remainingMsAtStart": 4508,
+          "remainingMsAfter": 4299,
+          "calls": 2,
+          "driverMs": 5
+        },
+        "lineage_deletion": {
+          "elapsedMs": 103,
+          "completed": true,
+          "remainingMsAtStart": 4299,
+          "remainingMsAfter": 4196,
+          "calls": 1,
+          "driverMs": 1
+        },
+        "lineage_insertion": {
+          "elapsedMs": 435,
+          "completed": true,
+          "remainingMsAtStart": 4196,
+          "remainingMsAfter": 3761,
+          "calls": 3,
+          "driverMs": 104
+        },
+        "semantic_review_persistence": {
+          "elapsedMs": 1263,
+          "completed": true,
+          "remainingMsAtStart": 3761,
+          "remainingMsAfter": 2498,
+          "calls": 12,
+          "driverMs": 36
+        },
+        "transaction_commit": {
+          "elapsedMs": 102,
+          "completed": true,
+          "remainingMsAtStart": 2498,
+          "remainingMsAfter": 2396,
+          "calls": 1,
+          "driverMs": 1
+        }
+      },
+      "stages": {
+        "request_setup": {
+          "calls": 0,
+          "ms": 0
+        },
+        "request_auth": {
+          "calls": 0,
+          "ms": 500
+        },
+        "effect": {
+          "calls": 0,
+          "ms": 1
+        },
+        "connection_acquisition": {
+          "calls": 0,
+          "ms": 0
+        },
+        "transaction_configuration": {
+          "calls": 5,
+          "ms": 510
+        },
+        "evidence_read": {
+          "calls": 1,
+          "ms": 143
+        },
+        "catalogue_read": {
+          "calls": 2,
+          "ms": 204
+        },
+        "engine": {
+          "calls": 0,
+          "ms": 290
+        },
+        "segment_persistence": {
+          "calls": 10,
+          "ms": 1053
+        },
+        "lineage": {
+          "calls": 4,
+          "ms": 538
+        },
+        "semantics": {
+          "calls": 12,
+          "ms": 1263
+        },
+        "transaction_commit": {
+          "calls": 1,
+          "ms": 103
+        }
+      },
+      "snapshot": {
+        "evidence": 4256,
+        "stays": 112,
+        "commutes": 56,
+        "reviews": 148,
+        "entries": 0,
+        "lineage": 4256,
+        "logicalFingerprint": "f2f7bfb7f0ef4142d033b2aca7286140e3293b3e647643202a99597be81c8608"
+      },
+      "outcome": "PASS",
+      "replayOutcome": "PASS",
+      "acceptanceFailures": []
+    },
+    {
+      "source": "candidate",
+      "workload": "S1",
+      "scenario": "stable",
+      "delayMs": 0,
+      "authCostMs": 500,
+      "deadlineMs": 8000,
+      "requestModelDurationMs": 1054,
+      "driverCalls": 31,
+      "timeoutConfigurationCalls": 3,
+      "protectionQueryBatches": 3,
+      "protectionEvidenceIds": 4256,
+      "protectedEvidenceBatchCount": 3,
+      "maxProtectedEvidenceBatchItems": 2048,
+      "maxProtectedEvidencePayloadBytes": 61173,
+      "lineageRequests": 2,
+      "lineageBatchCount": 2,
+      "maxLineageBatchItems": 2048,
+      "lineageLinksIntended": 3862,
+      "lineageLinksPrepared": 3862,
+      "lineageChunksStarted": 2,
+      "lineageChunksCompleted": 2,
+      "maxLineagePayloadBytes": 384323,
+      "maxParameterCount": 2100,
+      "maxParameterBytes": 421269,
+      "commitReached": true,
+      "rollbackUnchanged": null,
+      "remainingWorkBudgetAfterCommit": 5946,
+      "businessQueryHash": "857523434d8c5230c7cb980fb47c764a01d16e12a5bbcfe1e5cca91f64f1a741",
+      "detailedStages": {
+        "connection_acquisition": {
+          "elapsedMs": 0,
+          "completed": true,
+          "remainingMsAtStart": 6498,
+          "remainingMsAfter": 6498,
+          "calls": 0,
+          "driverMs": 0
+        },
+        "transaction_configuration": {
+          "elapsedMs": 8,
+          "completed": true,
+          "remainingMsAtStart": 6498,
+          "remainingMsAfter": 6490,
+          "calls": 4,
+          "driverMs": 3
+        },
+        "owner_lock": {
+          "elapsedMs": 2,
+          "completed": true,
+          "remainingMsAtStart": 6490,
+          "remainingMsAfter": 6488,
+          "calls": 1,
+          "driverMs": 1
+        },
+        "evidence_read": {
+          "elapsedMs": 35,
+          "completed": true,
+          "remainingMsAtStart": 6488,
+          "remainingMsAfter": 6453,
+          "calls": 1,
+          "driverMs": 33
+        },
+        "catalogue_read": {
+          "elapsedMs": 3,
+          "completed": true,
+          "remainingMsAtStart": 6453,
+          "remainingMsAfter": 6450,
+          "calls": 2,
+          "driverMs": 1
+        },
+        "engine_computation": {
+          "elapsedMs": 275,
+          "completed": true,
+          "remainingMsAtStart": 6450,
+          "remainingMsAfter": 6175,
+          "calls": 0,
+          "driverMs": 0
+        },
+        "protected_replacement_checks": {
+          "elapsedMs": 52,
+          "completed": true,
+          "remainingMsAtStart": 6175,
+          "remainingMsAfter": 6123,
+          "calls": 3,
+          "driverMs": 47
+        },
+        "obsolete_segment_handling": {
+          "elapsedMs": 14,
+          "completed": true,
+          "remainingMsAtStart": 6123,
+          "remainingMsAfter": 6110,
+          "calls": 3,
+          "driverMs": 10
+        },
+        "stay_persistence": {
+          "elapsedMs": 16,
+          "completed": true,
+          "remainingMsAtStart": 6109,
+          "remainingMsAfter": 6093,
+          "calls": 2,
+          "driverMs": 13
+        },
+        "commute_persistence": {
+          "elapsedMs": 9,
+          "completed": true,
+          "remainingMsAtStart": 6093,
+          "remainingMsAfter": 6083,
+          "calls": 2,
+          "driverMs": 7
+        },
+        "lineage_deletion": {
+          "elapsedMs": 3,
+          "completed": true,
+          "remainingMsAtStart": 6083,
+          "remainingMsAfter": 6080,
+          "calls": 1,
+          "driverMs": 2
+        },
+        "lineage_insertion": {
+          "elapsedMs": 99,
+          "completed": true,
+          "remainingMsAtStart": 6080,
+          "remainingMsAfter": 5981,
+          "calls": 2,
+          "driverMs": 89
+        },
+        "semantic_review_persistence": {
+          "elapsedMs": 29,
+          "completed": true,
+          "remainingMsAtStart": 5981,
+          "remainingMsAfter": 5951,
+          "calls": 9,
+          "driverMs": 15
+        },
+        "transaction_commit": {
+          "elapsedMs": 6,
+          "completed": true,
+          "remainingMsAtStart": 5951,
+          "remainingMsAfter": 5946,
+          "calls": 1,
+          "driverMs": 4
+        }
+      },
+      "stages": {
+        "request_setup": {
+          "calls": 0,
+          "ms": 0
+        },
+        "request_auth": {
+          "calls": 0,
+          "ms": 501
+        },
+        "effect": {
+          "calls": 0,
+          "ms": 1
+        },
+        "connection_acquisition": {
+          "calls": 0,
+          "ms": 0
+        },
+        "transaction_configuration": {
+          "calls": 5,
+          "ms": 10
+        },
+        "evidence_read": {
+          "calls": 1,
+          "ms": 35
+        },
+        "catalogue_read": {
+          "calls": 2,
+          "ms": 3
+        },
+        "engine": {
+          "calls": 0,
+          "ms": 275
+        },
+        "segment_persistence": {
+          "calls": 10,
+          "ms": 92
+        },
+        "lineage": {
+          "calls": 3,
+          "ms": 102
+        },
+        "semantics": {
+          "calls": 9,
+          "ms": 29
+        },
+        "transaction_commit": {
+          "calls": 1,
+          "ms": 6
+        }
+      },
+      "snapshot": {
+        "evidence": 4256,
+        "stays": 112,
+        "commutes": 56,
+        "reviews": 148,
+        "entries": 0,
+        "lineage": 4256,
+        "logicalFingerprint": "856e59b76cb485d2b91989d380290949a3f766f6bfbf4c9856244ccdbbd94fb2"
+      },
+      "outcome": "PASS",
+      "replayOutcome": "PASS",
+      "acceptanceFailures": []
+    },
+    {
+      "source": "candidate",
+      "workload": "S1",
+      "scenario": "stable",
+      "delayMs": 40,
+      "authCostMs": 500,
+      "deadlineMs": 8000,
+      "requestModelDurationMs": 2472,
+      "driverCalls": 31,
+      "timeoutConfigurationCalls": 3,
+      "protectionQueryBatches": 3,
+      "protectionEvidenceIds": 4256,
+      "protectedEvidenceBatchCount": 3,
+      "maxProtectedEvidenceBatchItems": 2048,
+      "maxProtectedEvidencePayloadBytes": 61173,
+      "lineageRequests": 2,
+      "lineageBatchCount": 2,
+      "maxLineageBatchItems": 2048,
+      "lineageLinksIntended": 3862,
+      "lineageLinksPrepared": 3862,
+      "lineageChunksStarted": 2,
+      "lineageChunksCompleted": 2,
+      "maxLineagePayloadBytes": 384323,
+      "maxParameterCount": 2100,
+      "maxParameterBytes": 421269,
+      "commitReached": true,
+      "rollbackUnchanged": null,
+      "remainingWorkBudgetAfterCommit": 4529,
+      "businessQueryHash": "857523434d8c5230c7cb980fb47c764a01d16e12a5bbcfe1e5cca91f64f1a741",
+      "detailedStages": {
+        "connection_acquisition": {
+          "elapsedMs": 0,
+          "completed": true,
+          "remainingMsAtStart": 6498,
+          "remainingMsAfter": 6498,
+          "calls": 0,
+          "driverMs": 0
+        },
+        "transaction_configuration": {
+          "elapsedMs": 167,
+          "completed": true,
+          "remainingMsAtStart": 6498,
+          "remainingMsAfter": 6331,
+          "calls": 4,
+          "driverMs": 3
+        },
+        "owner_lock": {
+          "elapsedMs": 42,
+          "completed": true,
+          "remainingMsAtStart": 6331,
+          "remainingMsAfter": 6289,
+          "calls": 1,
+          "driverMs": 1
+        },
+        "evidence_read": {
+          "elapsedMs": 82,
+          "completed": true,
+          "remainingMsAtStart": 6289,
+          "remainingMsAfter": 6207,
+          "calls": 1,
+          "driverMs": 41
+        },
+        "catalogue_read": {
+          "elapsedMs": 84,
+          "completed": true,
+          "remainingMsAtStart": 6207,
+          "remainingMsAfter": 6123,
+          "calls": 2,
+          "driverMs": 2
+        },
+        "engine_computation": {
+          "elapsedMs": 277,
+          "completed": true,
+          "remainingMsAtStart": 6123,
+          "remainingMsAfter": 5846,
+          "calls": 0,
+          "driverMs": 0
+        },
+        "protected_replacement_checks": {
+          "elapsedMs": 193,
+          "completed": true,
+          "remainingMsAtStart": 5846,
+          "remainingMsAfter": 5654,
+          "calls": 3,
+          "driverMs": 68
+        },
+        "obsolete_segment_handling": {
+          "elapsedMs": 139,
+          "completed": true,
+          "remainingMsAtStart": 5654,
+          "remainingMsAfter": 5514,
+          "calls": 3,
+          "driverMs": 16
+        },
+        "stay_persistence": {
+          "elapsedMs": 125,
+          "completed": true,
+          "remainingMsAtStart": 5513,
+          "remainingMsAfter": 5388,
+          "calls": 2,
+          "driverMs": 39
+        },
+        "commute_persistence": {
+          "elapsedMs": 101,
+          "completed": true,
+          "remainingMsAtStart": 5387,
+          "remainingMsAfter": 5286,
+          "calls": 2,
+          "driverMs": 18
+        },
+        "lineage_deletion": {
+          "elapsedMs": 49,
+          "completed": true,
+          "remainingMsAtStart": 5286,
+          "remainingMsAfter": 5237,
+          "calls": 1,
+          "driverMs": 6
+        },
+        "lineage_insertion": {
+          "elapsedMs": 235,
+          "completed": true,
+          "remainingMsAtStart": 5237,
+          "remainingMsAfter": 5002,
+          "calls": 2,
+          "driverMs": 131
+        },
+        "semantic_review_persistence": {
+          "elapsedMs": 431,
+          "completed": true,
+          "remainingMsAtStart": 5002,
+          "remainingMsAfter": 4570,
+          "calls": 9,
+          "driverMs": 52
+        },
+        "transaction_commit": {
+          "elapsedMs": 42,
+          "completed": true,
+          "remainingMsAtStart": 4570,
+          "remainingMsAfter": 4529,
+          "calls": 1,
+          "driverMs": 1
+        }
+      },
+      "stages": {
+        "request_setup": {
+          "calls": 0,
+          "ms": 0
+        },
+        "request_auth": {
+          "calls": 0,
+          "ms": 501
+        },
+        "effect": {
+          "calls": 0,
+          "ms": 1
+        },
+        "connection_acquisition": {
+          "calls": 0,
+          "ms": 0
+        },
+        "transaction_configuration": {
+          "calls": 5,
+          "ms": 209
+        },
+        "evidence_read": {
+          "calls": 1,
+          "ms": 82
+        },
+        "catalogue_read": {
+          "calls": 2,
+          "ms": 84
+        },
+        "engine": {
+          "calls": 0,
+          "ms": 277
+        },
+        "segment_persistence": {
+          "calls": 10,
+          "ms": 560
+        },
+        "lineage": {
+          "calls": 3,
+          "ms": 284
+        },
+        "semantics": {
+          "calls": 9,
+          "ms": 431
+        },
+        "transaction_commit": {
+          "calls": 1,
+          "ms": 42
+        }
+      },
+      "snapshot": {
+        "evidence": 4256,
+        "stays": 112,
+        "commutes": 56,
+        "reviews": 148,
+        "entries": 0,
+        "lineage": 4256,
+        "logicalFingerprint": "988b22173fc4b1c1f57cba73fff8a53c5a68a665c670aa623795c52938232910"
+      },
+      "outcome": "PASS",
+      "replayOutcome": "PASS",
+      "acceptanceFailures": []
+    },
+    {
+      "source": "candidate",
+      "workload": "S1",
+      "scenario": "stable",
+      "delayMs": 100,
+      "authCostMs": 500,
+      "deadlineMs": 8000,
+      "requestModelDurationMs": 4426,
+      "driverCalls": 32,
+      "timeoutConfigurationCalls": 4,
+      "protectionQueryBatches": 3,
+      "protectionEvidenceIds": 4256,
+      "protectedEvidenceBatchCount": 3,
+      "maxProtectedEvidenceBatchItems": 2048,
+      "maxProtectedEvidencePayloadBytes": 61173,
+      "lineageRequests": 2,
+      "lineageBatchCount": 2,
+      "maxLineageBatchItems": 2048,
+      "lineageLinksIntended": 3860,
+      "lineageLinksPrepared": 3860,
+      "lineageChunksStarted": 2,
+      "lineageChunksCompleted": 2,
+      "maxLineagePayloadBytes": 384295,
+      "maxParameterCount": 2100,
+      "maxParameterBytes": 421241,
+      "commitReached": true,
+      "rollbackUnchanged": null,
+      "remainingWorkBudgetAfterCommit": 2574,
+      "businessQueryHash": "857523434d8c5230c7cb980fb47c764a01d16e12a5bbcfe1e5cca91f64f1a741",
+      "detailedStages": {
+        "connection_acquisition": {
+          "elapsedMs": 0,
+          "completed": true,
+          "remainingMsAtStart": 6498,
+          "remainingMsAfter": 6498,
+          "calls": 0,
+          "driverMs": 0
+        },
+        "transaction_configuration": {
+          "elapsedMs": 404,
+          "completed": true,
+          "remainingMsAtStart": 6498,
+          "remainingMsAfter": 6094,
+          "calls": 4,
+          "driverMs": 2
+        },
+        "owner_lock": {
+          "elapsedMs": 101,
+          "completed": true,
+          "remainingMsAtStart": 6094,
+          "remainingMsAfter": 5992,
+          "calls": 1,
+          "driverMs": 1
+        },
+        "evidence_read": {
+          "elapsedMs": 133,
+          "completed": true,
+          "remainingMsAtStart": 5992,
+          "remainingMsAfter": 5860,
+          "calls": 1,
+          "driverMs": 31
+        },
+        "catalogue_read": {
+          "elapsedMs": 204,
+          "completed": true,
+          "remainingMsAtStart": 5860,
+          "remainingMsAfter": 5656,
+          "calls": 2,
+          "driverMs": 2
+        },
+        "engine_computation": {
+          "elapsedMs": 287,
+          "completed": true,
+          "remainingMsAtStart": 5656,
+          "remainingMsAfter": 5369,
+          "calls": 0,
+          "driverMs": 0
+        },
+        "protected_replacement_checks": {
+          "elapsedMs": 400,
+          "completed": true,
+          "remainingMsAtStart": 5369,
+          "remainingMsAfter": 4969,
+          "calls": 3,
+          "driverMs": 96
+        },
+        "obsolete_segment_handling": {
+          "elapsedMs": 319,
+          "completed": true,
+          "remainingMsAtStart": 4969,
+          "remainingMsAfter": 4650,
+          "calls": 3,
+          "driverMs": 16
+        },
+        "stay_persistence": {
+          "elapsedMs": 217,
+          "completed": true,
+          "remainingMsAtStart": 4648,
+          "remainingMsAfter": 4431,
+          "calls": 2,
+          "driverMs": 12
+        },
+        "commute_persistence": {
+          "elapsedMs": 215,
+          "completed": true,
+          "remainingMsAtStart": 4431,
+          "remainingMsAfter": 4216,
+          "calls": 2,
+          "driverMs": 12
+        },
+        "lineage_deletion": {
+          "elapsedMs": 106,
+          "completed": true,
+          "remainingMsAtStart": 4216,
+          "remainingMsAfter": 4110,
+          "calls": 1,
+          "driverMs": 5
+        },
+        "lineage_insertion": {
+          "elapsedMs": 358,
+          "completed": true,
+          "remainingMsAtStart": 4110,
+          "remainingMsAfter": 3752,
+          "calls": 2,
+          "driverMs": 137
+        },
+        "semantic_review_persistence": {
+          "elapsedMs": 1076,
+          "completed": true,
+          "remainingMsAtStart": 3752,
+          "remainingMsAfter": 2676,
+          "calls": 10,
+          "driverMs": 58
+        },
+        "transaction_commit": {
+          "elapsedMs": 102,
+          "completed": true,
+          "remainingMsAtStart": 2676,
+          "remainingMsAfter": 2574,
+          "calls": 1,
+          "driverMs": 1
+        }
+      },
+      "stages": {
+        "request_setup": {
+          "calls": 0,
+          "ms": 0
+        },
+        "request_auth": {
+          "calls": 0,
+          "ms": 501
+        },
+        "effect": {
+          "calls": 0,
+          "ms": 0
+        },
+        "connection_acquisition": {
+          "calls": 0,
+          "ms": 0
+        },
+        "transaction_configuration": {
+          "calls": 5,
+          "ms": 506
+        },
+        "evidence_read": {
+          "calls": 1,
+          "ms": 133
+        },
+        "catalogue_read": {
+          "calls": 2,
+          "ms": 204
+        },
+        "engine": {
+          "calls": 0,
+          "ms": 287
+        },
+        "segment_persistence": {
+          "calls": 10,
+          "ms": 1152
+        },
+        "lineage": {
+          "calls": 3,
+          "ms": 465
+        },
+        "semantics": {
+          "calls": 10,
+          "ms": 1076
+        },
+        "transaction_commit": {
+          "calls": 1,
+          "ms": 102
+        }
+      },
+      "snapshot": {
+        "evidence": 4256,
+        "stays": 112,
+        "commutes": 56,
+        "reviews": 148,
+        "entries": 0,
+        "lineage": 4256,
+        "logicalFingerprint": "f15c929b298bc2728dd4f587e4014a936f6977fdad1150c1441f8ff1ef772543"
+      },
+      "outcome": "PASS",
+      "replayOutcome": "PASS",
+      "acceptanceFailures": []
+    },
+    {
+      "source": "candidate",
+      "workload": "S1",
+      "scenario": "changed-input",
+      "delayMs": 0,
+      "authCostMs": 500,
+      "deadlineMs": 8000,
+      "requestModelDurationMs": 1103,
+      "driverCalls": 35,
+      "timeoutConfigurationCalls": 3,
+      "protectionQueryBatches": 3,
+      "protectionEvidenceIds": 4257,
+      "protectedEvidenceBatchCount": 3,
+      "maxProtectedEvidenceBatchItems": 2048,
+      "maxProtectedEvidencePayloadBytes": 61179,
+      "lineageRequests": 2,
+      "lineageBatchCount": 2,
+      "maxLineageBatchItems": 2048,
+      "lineageLinksIntended": 3863,
+      "lineageLinksPrepared": 3863,
+      "lineageChunksStarted": 2,
+      "lineageChunksCompleted": 2,
+      "maxLineagePayloadBytes": 384283,
+      "maxParameterCount": 2100,
+      "maxParameterBytes": 421229,
+      "commitReached": true,
+      "rollbackUnchanged": null,
+      "remainingWorkBudgetAfterCommit": 5896,
+      "businessQueryHash": "7bc8b844c956f2956be9e78b158e55fa9b0f4c96ac240297d348f7c8ca0d9638",
+      "detailedStages": {
+        "connection_acquisition": {
+          "elapsedMs": 0,
+          "completed": true,
+          "remainingMsAtStart": 6498,
+          "remainingMsAfter": 6498,
+          "calls": 0,
+          "driverMs": 0
+        },
+        "transaction_configuration": {
+          "elapsedMs": 8,
+          "completed": true,
+          "remainingMsAtStart": 6498,
+          "remainingMsAfter": 6490,
+          "calls": 4,
+          "driverMs": 2
+        },
+        "owner_lock": {
+          "elapsedMs": 3,
+          "completed": true,
+          "remainingMsAtStart": 6490,
+          "remainingMsAfter": 6487,
+          "calls": 1,
+          "driverMs": 1
+        },
+        "evidence_read": {
+          "elapsedMs": 43,
+          "completed": true,
+          "remainingMsAtStart": 6487,
+          "remainingMsAfter": 6444,
+          "calls": 1,
+          "driverMs": 43
+        },
+        "catalogue_read": {
+          "elapsedMs": 4,
+          "completed": true,
+          "remainingMsAtStart": 6444,
+          "remainingMsAfter": 6440,
+          "calls": 2,
+          "driverMs": 2
+        },
+        "engine_computation": {
+          "elapsedMs": 268,
+          "completed": true,
+          "remainingMsAtStart": 6440,
+          "remainingMsAfter": 6172,
+          "calls": 0,
+          "driverMs": 0
+        },
+        "protected_replacement_checks": {
+          "elapsedMs": 69,
+          "completed": true,
+          "remainingMsAtStart": 6172,
+          "remainingMsAfter": 6103,
+          "calls": 3,
+          "driverMs": 62
+        },
+        "obsolete_segment_handling": {
+          "elapsedMs": 51,
+          "completed": true,
+          "remainingMsAtStart": 6103,
+          "remainingMsAfter": 6052,
+          "calls": 7,
+          "driverMs": 43
+        },
+        "stay_persistence": {
+          "elapsedMs": 13,
+          "completed": true,
+          "remainingMsAtStart": 6051,
+          "remainingMsAfter": 6038,
+          "calls": 2,
+          "driverMs": 9
+        },
+        "commute_persistence": {
+          "elapsedMs": 8,
+          "completed": true,
+          "remainingMsAtStart": 6038,
+          "remainingMsAfter": 6031,
+          "calls": 2,
+          "driverMs": 5
+        },
+        "lineage_deletion": {
+          "elapsedMs": 3,
+          "completed": true,
+          "remainingMsAtStart": 6031,
+          "remainingMsAfter": 6028,
+          "calls": 1,
+          "driverMs": 2
+        },
+        "lineage_insertion": {
+          "elapsedMs": 101,
+          "completed": true,
+          "remainingMsAtStart": 6028,
+          "remainingMsAfter": 5927,
+          "calls": 2,
+          "driverMs": 88
+        },
+        "semantic_review_persistence": {
+          "elapsedMs": 29,
+          "completed": true,
+          "remainingMsAtStart": 5927,
+          "remainingMsAfter": 5898,
+          "calls": 9,
+          "driverMs": 16
+        },
+        "transaction_commit": {
+          "elapsedMs": 2,
+          "completed": true,
+          "remainingMsAtStart": 5898,
+          "remainingMsAfter": 5896,
+          "calls": 1,
+          "driverMs": 1
+        }
+      },
+      "stages": {
+        "request_setup": {
+          "calls": 0,
+          "ms": 0
+        },
+        "request_auth": {
+          "calls": 0,
+          "ms": 501
+        },
+        "effect": {
+          "calls": 0,
+          "ms": 1
+        },
+        "connection_acquisition": {
+          "calls": 0,
+          "ms": 0
+        },
+        "transaction_configuration": {
+          "calls": 5,
+          "ms": 11
+        },
+        "evidence_read": {
+          "calls": 1,
+          "ms": 43
+        },
+        "catalogue_read": {
+          "calls": 2,
+          "ms": 4
+        },
+        "engine": {
+          "calls": 0,
+          "ms": 268
+        },
+        "segment_persistence": {
+          "calls": 14,
+          "ms": 141
+        },
+        "lineage": {
+          "calls": 3,
+          "ms": 104
+        },
+        "semantics": {
+          "calls": 9,
+          "ms": 29
+        },
+        "transaction_commit": {
+          "calls": 1,
+          "ms": 2
+        }
+      },
+      "snapshot": {
+        "evidence": 4257,
+        "stays": 113,
+        "commutes": 57,
+        "reviews": 149,
+        "entries": 0,
+        "lineage": 4310,
+        "logicalFingerprint": "b23b16c2361d76c0dc7568c0fc38b6352e9c3375fcf8eeba88f373d21e1a77d3"
+      },
+      "outcome": "PASS",
+      "replayOutcome": "PASS",
+      "acceptanceFailures": []
+    },
+    {
+      "source": "candidate",
+      "workload": "S1",
+      "scenario": "changed-input",
+      "delayMs": 40,
+      "authCostMs": 500,
+      "deadlineMs": 8000,
+      "requestModelDurationMs": 2606,
+      "driverCalls": 35,
+      "timeoutConfigurationCalls": 3,
+      "protectionQueryBatches": 3,
+      "protectionEvidenceIds": 4257,
+      "protectedEvidenceBatchCount": 3,
+      "maxProtectedEvidenceBatchItems": 2048,
+      "maxProtectedEvidencePayloadBytes": 61179,
+      "lineageRequests": 2,
+      "lineageBatchCount": 2,
+      "maxLineageBatchItems": 2048,
+      "lineageLinksIntended": 3863,
+      "lineageLinksPrepared": 3863,
+      "lineageChunksStarted": 2,
+      "lineageChunksCompleted": 2,
+      "maxLineagePayloadBytes": 384308,
+      "maxParameterCount": 2100,
+      "maxParameterBytes": 421254,
+      "commitReached": true,
+      "rollbackUnchanged": null,
+      "remainingWorkBudgetAfterCommit": 4394,
+      "businessQueryHash": "7bc8b844c956f2956be9e78b158e55fa9b0f4c96ac240297d348f7c8ca0d9638",
+      "detailedStages": {
+        "connection_acquisition": {
+          "elapsedMs": 0,
+          "completed": true,
+          "remainingMsAtStart": 6498,
+          "remainingMsAfter": 6498,
+          "calls": 0,
+          "driverMs": 0
+        },
+        "transaction_configuration": {
+          "elapsedMs": 166,
+          "completed": true,
+          "remainingMsAtStart": 6498,
+          "remainingMsAfter": 6331,
+          "calls": 4,
+          "driverMs": 2
+        },
+        "owner_lock": {
+          "elapsedMs": 42,
+          "completed": true,
+          "remainingMsAtStart": 6331,
+          "remainingMsAfter": 6290,
+          "calls": 1,
+          "driverMs": 1
+        },
+        "evidence_read": {
+          "elapsedMs": 72,
+          "completed": true,
+          "remainingMsAtStart": 6290,
+          "remainingMsAfter": 6218,
+          "calls": 1,
+          "driverMs": 30
+        },
+        "catalogue_read": {
+          "elapsedMs": 83,
+          "completed": true,
+          "remainingMsAtStart": 6218,
+          "remainingMsAfter": 6134,
+          "calls": 2,
+          "driverMs": 1
+        },
+        "engine_computation": {
+          "elapsedMs": 273,
+          "completed": true,
+          "remainingMsAtStart": 6134,
+          "remainingMsAfter": 5862,
+          "calls": 0,
+          "driverMs": 0
+        },
+        "protected_replacement_checks": {
+          "elapsedMs": 199,
+          "completed": true,
+          "remainingMsAtStart": 5862,
+          "remainingMsAfter": 5662,
+          "calls": 3,
+          "driverMs": 75
+        },
+        "obsolete_segment_handling": {
+          "elapsedMs": 345,
+          "completed": true,
+          "remainingMsAtStart": 5662,
+          "remainingMsAfter": 5317,
+          "calls": 7,
+          "driverMs": 56
+        },
+        "stay_persistence": {
+          "elapsedMs": 109,
+          "completed": true,
+          "remainingMsAtStart": 5315,
+          "remainingMsAfter": 5206,
+          "calls": 2,
+          "driverMs": 25
+        },
+        "commute_persistence": {
+          "elapsedMs": 96,
+          "completed": true,
+          "remainingMsAtStart": 5206,
+          "remainingMsAfter": 5111,
+          "calls": 2,
+          "driverMs": 12
+        },
+        "lineage_deletion": {
+          "elapsedMs": 46,
+          "completed": true,
+          "remainingMsAtStart": 5111,
+          "remainingMsAfter": 5065,
+          "calls": 1,
+          "driverMs": 5
+        },
+        "lineage_insertion": {
+          "elapsedMs": 214,
+          "completed": true,
+          "remainingMsAtStart": 5065,
+          "remainingMsAfter": 4851,
+          "calls": 2,
+          "driverMs": 115
+        },
+        "semantic_review_persistence": {
+          "elapsedMs": 414,
+          "completed": true,
+          "remainingMsAtStart": 4851,
+          "remainingMsAfter": 4436,
+          "calls": 9,
+          "driverMs": 37
+        },
+        "transaction_commit": {
+          "elapsedMs": 42,
+          "completed": true,
+          "remainingMsAtStart": 4436,
+          "remainingMsAfter": 4394,
+          "calls": 1,
+          "driverMs": 1
+        }
+      },
+      "stages": {
+        "request_setup": {
+          "calls": 0,
+          "ms": 0
+        },
+        "request_auth": {
+          "calls": 0,
+          "ms": 501
+        },
+        "effect": {
+          "calls": 0,
+          "ms": 1
+        },
+        "connection_acquisition": {
+          "calls": 0,
+          "ms": 0
+        },
+        "transaction_configuration": {
+          "calls": 5,
+          "ms": 208
+        },
+        "evidence_read": {
+          "calls": 1,
+          "ms": 72
+        },
+        "catalogue_read": {
+          "calls": 2,
+          "ms": 84
+        },
+        "engine": {
+          "calls": 0,
+          "ms": 273
+        },
+        "segment_persistence": {
+          "calls": 14,
+          "ms": 751
+        },
+        "lineage": {
+          "calls": 3,
+          "ms": 260
+        },
+        "semantics": {
+          "calls": 9,
+          "ms": 415
+        },
+        "transaction_commit": {
+          "calls": 1,
+          "ms": 42
+        }
+      },
+      "snapshot": {
+        "evidence": 4257,
+        "stays": 113,
+        "commutes": 57,
+        "reviews": 149,
+        "entries": 0,
+        "lineage": 4310,
+        "logicalFingerprint": "d8f220465600fd52bec9a091ea127ab3553385e81814194f6964171657327f61"
+      },
+      "outcome": "PASS",
+      "replayOutcome": "PASS",
+      "acceptanceFailures": []
+    },
+    {
+      "source": "candidate",
+      "workload": "S1",
+      "scenario": "changed-input",
+      "delayMs": 100,
+      "authCostMs": 500,
+      "deadlineMs": 8000,
+      "requestModelDurationMs": 5387,
+      "driverCalls": 41,
+      "timeoutConfigurationCalls": 9,
+      "protectionQueryBatches": 3,
+      "protectionEvidenceIds": 4257,
+      "protectedEvidenceBatchCount": 3,
+      "maxProtectedEvidenceBatchItems": 2048,
+      "maxProtectedEvidencePayloadBytes": 61179,
+      "lineageRequests": 2,
+      "lineageBatchCount": 2,
+      "maxLineageBatchItems": 2048,
+      "lineageLinksIntended": 3863,
+      "lineageLinksPrepared": 3863,
+      "lineageChunksStarted": 2,
+      "lineageChunksCompleted": 2,
+      "maxLineagePayloadBytes": 384306,
+      "maxParameterCount": 2100,
+      "maxParameterBytes": 421252,
+      "commitReached": true,
+      "rollbackUnchanged": null,
+      "remainingWorkBudgetAfterCommit": 1613,
+      "businessQueryHash": "7bc8b844c956f2956be9e78b158e55fa9b0f4c96ac240297d348f7c8ca0d9638",
+      "detailedStages": {
+        "connection_acquisition": {
+          "elapsedMs": 0,
+          "completed": true,
+          "remainingMsAtStart": 6498,
+          "remainingMsAfter": 6498,
+          "calls": 0,
+          "driverMs": 0
+        },
+        "transaction_configuration": {
+          "elapsedMs": 409,
+          "completed": true,
+          "remainingMsAtStart": 6498,
+          "remainingMsAfter": 6089,
+          "calls": 4,
+          "driverMs": 2
+        },
+        "owner_lock": {
+          "elapsedMs": 102,
+          "completed": true,
+          "remainingMsAtStart": 6089,
+          "remainingMsAfter": 5988,
+          "calls": 1,
+          "driverMs": 1
+        },
+        "evidence_read": {
+          "elapsedMs": 133,
+          "completed": true,
+          "remainingMsAtStart": 5987,
+          "remainingMsAfter": 5855,
+          "calls": 1,
+          "driverMs": 31
+        },
+        "catalogue_read": {
+          "elapsedMs": 204,
+          "completed": true,
+          "remainingMsAtStart": 5855,
+          "remainingMsAfter": 5651,
+          "calls": 2,
+          "driverMs": 1
+        },
+        "engine_computation": {
+          "elapsedMs": 265,
+          "completed": true,
+          "remainingMsAtStart": 5651,
+          "remainingMsAfter": 5387,
+          "calls": 0,
+          "driverMs": 0
+        },
+        "protected_replacement_checks": {
+          "elapsedMs": 392,
+          "completed": true,
+          "remainingMsAtStart": 5387,
+          "remainingMsAfter": 4994,
+          "calls": 3,
+          "driverMs": 88
+        },
+        "obsolete_segment_handling": {
+          "elapsedMs": 780,
+          "completed": true,
+          "remainingMsAtStart": 4994,
+          "remainingMsAfter": 4214,
+          "calls": 7,
+          "driverMs": 73
+        },
+        "stay_persistence": {
+          "elapsedMs": 233,
+          "completed": true,
+          "remainingMsAtStart": 4211,
+          "remainingMsAfter": 3978,
+          "calls": 2,
+          "driverMs": 28
+        },
+        "commute_persistence": {
+          "elapsedMs": 221,
+          "completed": true,
+          "remainingMsAtStart": 3978,
+          "remainingMsAfter": 3757,
+          "calls": 2,
+          "driverMs": 16
+        },
+        "lineage_deletion": {
+          "elapsedMs": 107,
+          "completed": true,
+          "remainingMsAtStart": 3757,
+          "remainingMsAfter": 3650,
+          "calls": 1,
+          "driverMs": 6
+        },
+        "lineage_insertion": {
+          "elapsedMs": 352,
+          "completed": true,
+          "remainingMsAtStart": 3650,
+          "remainingMsAfter": 3298,
+          "calls": 2,
+          "driverMs": 133
+        },
+        "semantic_review_persistence": {
+          "elapsedMs": 1582,
+          "completed": true,
+          "remainingMsAtStart": 3298,
+          "remainingMsAfter": 1716,
+          "calls": 15,
+          "driverMs": 58
+        },
+        "transaction_commit": {
+          "elapsedMs": 103,
+          "completed": true,
+          "remainingMsAtStart": 1716,
+          "remainingMsAfter": 1613,
+          "calls": 1,
+          "driverMs": 1
+        }
+      },
+      "stages": {
+        "request_setup": {
+          "calls": 0,
+          "ms": 0
+        },
+        "request_auth": {
+          "calls": 0,
+          "ms": 502
+        },
+        "effect": {
+          "calls": 0,
+          "ms": 0
+        },
+        "connection_acquisition": {
+          "calls": 0,
+          "ms": 0
+        },
+        "transaction_configuration": {
+          "calls": 5,
+          "ms": 511
+        },
+        "evidence_read": {
+          "calls": 1,
+          "ms": 133
+        },
+        "catalogue_read": {
+          "calls": 2,
+          "ms": 204
+        },
+        "engine": {
+          "calls": 0,
+          "ms": 265
+        },
+        "segment_persistence": {
+          "calls": 14,
+          "ms": 1630
+        },
+        "lineage": {
+          "calls": 3,
+          "ms": 459
+        },
+        "semantics": {
+          "calls": 15,
+          "ms": 1582
+        },
+        "transaction_commit": {
+          "calls": 1,
+          "ms": 103
+        }
+      },
+      "snapshot": {
+        "evidence": 4257,
+        "stays": 113,
+        "commutes": 57,
+        "reviews": 149,
+        "entries": 0,
+        "lineage": 4310,
+        "logicalFingerprint": "69ca60180715fc3dba58d1e66dffdc237bb4c8e35f3681c213ea13a0601742fb"
+      },
+      "outcome": "PASS",
+      "replayOutcome": "PASS",
+      "acceptanceFailures": []
+    },
+    {
+      "source": "candidate",
+      "workload": "S1",
+      "scenario": "first-success",
+      "delayMs": 100,
+      "authCostMs": 500,
+      "deadlineMs": 8000,
+      "requestModelDurationMs": 4794,
+      "driverCalls": 36,
+      "timeoutConfigurationCalls": 6,
+      "protectionQueryBatches": 3,
+      "protectionEvidenceIds": 4256,
+      "protectedEvidenceBatchCount": 3,
+      "maxProtectedEvidenceBatchItems": 2048,
+      "maxProtectedEvidencePayloadBytes": 61173,
+      "lineageRequests": 3,
+      "lineageBatchCount": 3,
+      "maxLineageBatchItems": 2048,
+      "lineageLinksIntended": 4256,
+      "lineageLinksPrepared": 4256,
+      "lineageChunksStarted": 3,
+      "lineageChunksCompleted": 3,
+      "maxLineagePayloadBytes": 385435,
+      "maxParameterCount": 2352,
+      "maxParameterBytes": 422381,
+      "commitReached": true,
+      "rollbackUnchanged": null,
+      "remainingWorkBudgetAfterCommit": 2206,
+      "businessQueryHash": "e7cf955e77c8dd4d5d2043f77c789893e582af11512fe0344d5969ed97203e6e",
+      "detailedStages": {
+        "connection_acquisition": {
+          "elapsedMs": 0,
+          "completed": true,
+          "remainingMsAtStart": 6499,
+          "remainingMsAfter": 6499,
+          "calls": 0,
+          "driverMs": 0
+        },
+        "transaction_configuration": {
+          "elapsedMs": 403,
+          "completed": true,
+          "remainingMsAtStart": 6499,
+          "remainingMsAfter": 6096,
+          "calls": 4,
+          "driverMs": 2
+        },
+        "owner_lock": {
+          "elapsedMs": 104,
+          "completed": true,
+          "remainingMsAtStart": 6096,
+          "remainingMsAfter": 5992,
+          "calls": 1,
+          "driverMs": 3
+        },
+        "evidence_read": {
+          "elapsedMs": 143,
+          "completed": true,
+          "remainingMsAtStart": 5992,
+          "remainingMsAfter": 5848,
+          "calls": 1,
+          "driverMs": 42
+        },
+        "catalogue_read": {
+          "elapsedMs": 204,
+          "completed": true,
+          "remainingMsAtStart": 5848,
+          "remainingMsAfter": 5644,
+          "calls": 2,
+          "driverMs": 2
+        },
+        "engine_computation": {
+          "elapsedMs": 285,
+          "completed": true,
+          "remainingMsAtStart": 5644,
+          "remainingMsAfter": 5359,
+          "calls": 0,
+          "driverMs": 0
+        },
+        "protected_replacement_checks": {
+          "elapsedMs": 320,
+          "completed": true,
+          "remainingMsAtStart": 5359,
+          "remainingMsAfter": 5039,
+          "calls": 3,
+          "driverMs": 12
+        },
+        "obsolete_segment_handling": {
+          "elapsedMs": 308,
+          "completed": true,
+          "remainingMsAtStart": 5039,
+          "remainingMsAfter": 4731,
+          "calls": 3,
+          "driverMs": 4
+        },
+        "stay_persistence": {
+          "elapsedMs": 225,
+          "completed": true,
+          "remainingMsAtStart": 4729,
+          "remainingMsAfter": 4504,
+          "calls": 2,
+          "driverMs": 21
+        },
+        "commute_persistence": {
+          "elapsedMs": 217,
+          "completed": true,
+          "remainingMsAtStart": 4504,
+          "remainingMsAfter": 4287,
+          "calls": 2,
+          "driverMs": 14
+        },
+        "lineage_deletion": {
+          "elapsedMs": 104,
+          "completed": true,
+          "remainingMsAtStart": 4287,
+          "remainingMsAfter": 4182,
+          "calls": 1,
+          "driverMs": 3
+        },
+        "lineage_insertion": {
+          "elapsedMs": 466,
+          "completed": true,
+          "remainingMsAtStart": 4182,
+          "remainingMsAfter": 3716,
+          "calls": 3,
+          "driverMs": 145
+        },
+        "semantic_review_persistence": {
+          "elapsedMs": 1408,
+          "completed": true,
+          "remainingMsAtStart": 3716,
+          "remainingMsAfter": 2308,
+          "calls": 13,
+          "driverMs": 80
+        },
+        "transaction_commit": {
+          "elapsedMs": 102,
+          "completed": true,
+          "remainingMsAtStart": 2308,
+          "remainingMsAfter": 2206,
+          "calls": 1,
+          "driverMs": 1
+        }
+      },
+      "stages": {
+        "request_setup": {
+          "calls": 0,
+          "ms": 0
+        },
+        "request_auth": {
+          "calls": 0,
+          "ms": 500
+        },
+        "effect": {
+          "calls": 0,
+          "ms": 0
+        },
+        "connection_acquisition": {
+          "calls": 0,
+          "ms": 0
+        },
+        "transaction_configuration": {
+          "calls": 5,
+          "ms": 508
+        },
+        "evidence_read": {
+          "calls": 1,
+          "ms": 143
+        },
+        "catalogue_read": {
+          "calls": 2,
+          "ms": 204
+        },
+        "engine": {
+          "calls": 0,
+          "ms": 285
+        },
+        "segment_persistence": {
+          "calls": 10,
+          "ms": 1072
+        },
+        "lineage": {
+          "calls": 4,
+          "ms": 571
+        },
+        "semantics": {
+          "calls": 13,
+          "ms": 1408
+        },
+        "transaction_commit": {
+          "calls": 1,
+          "ms": 102
+        }
+      },
+      "snapshot": {
+        "evidence": 4256,
+        "stays": 112,
+        "commutes": 56,
+        "reviews": 148,
+        "entries": 0,
+        "lineage": 4256,
+        "logicalFingerprint": "358b0cebfc8b12dc51c996ea40acaa9b75b76b4e1c9958bb7588891324628bb9"
+      },
+      "outcome": "PASS",
+      "replayOutcome": "PASS",
+      "acceptanceFailures": []
+    },
+    {
+      "source": "candidate",
+      "workload": "S1",
+      "scenario": "first-success",
+      "delayMs": 100,
+      "authCostMs": 500,
+      "deadlineMs": 8000,
+      "requestModelDurationMs": 4601,
+      "driverCalls": 35,
+      "timeoutConfigurationCalls": 5,
+      "protectionQueryBatches": 3,
+      "protectionEvidenceIds": 4256,
+      "protectedEvidenceBatchCount": 3,
+      "maxProtectedEvidenceBatchItems": 2048,
+      "maxProtectedEvidencePayloadBytes": 61173,
+      "lineageRequests": 3,
+      "lineageBatchCount": 3,
+      "maxLineageBatchItems": 2048,
+      "lineageLinksIntended": 4256,
+      "lineageLinksPrepared": 4256,
+      "lineageChunksStarted": 3,
+      "lineageChunksCompleted": 3,
+      "maxLineagePayloadBytes": 385435,
+      "maxParameterCount": 2352,
+      "maxParameterBytes": 422381,
+      "commitReached": true,
+      "rollbackUnchanged": null,
+      "remainingWorkBudgetAfterCommit": 2399,
+      "businessQueryHash": "e7cf955e77c8dd4d5d2043f77c789893e582af11512fe0344d5969ed97203e6e",
+      "detailedStages": {
+        "connection_acquisition": {
+          "elapsedMs": 0,
+          "completed": true,
+          "remainingMsAtStart": 6500,
+          "remainingMsAfter": 6500,
+          "calls": 0,
+          "driverMs": 0
+        },
+        "transaction_configuration": {
+          "elapsedMs": 405,
+          "completed": true,
+          "remainingMsAtStart": 6500,
+          "remainingMsAfter": 6094,
+          "calls": 4,
+          "driverMs": 2
+        },
+        "owner_lock": {
+          "elapsedMs": 102,
+          "completed": true,
+          "remainingMsAtStart": 6094,
+          "remainingMsAfter": 5992,
+          "calls": 1,
+          "driverMs": 1
+        },
+        "evidence_read": {
+          "elapsedMs": 148,
+          "completed": true,
+          "remainingMsAtStart": 5992,
+          "remainingMsAfter": 5844,
+          "calls": 1,
+          "driverMs": 47
+        },
+        "catalogue_read": {
+          "elapsedMs": 210,
+          "completed": true,
+          "remainingMsAtStart": 5844,
+          "remainingMsAfter": 5634,
+          "calls": 2,
+          "driverMs": 8
+        },
+        "engine_computation": {
+          "elapsedMs": 286,
+          "completed": true,
+          "remainingMsAtStart": 5634,
+          "remainingMsAfter": 5348,
+          "calls": 0,
+          "driverMs": 0
+        },
+        "protected_replacement_checks": {
+          "elapsedMs": 319,
+          "completed": true,
+          "remainingMsAtStart": 5348,
+          "remainingMsAfter": 5029,
+          "calls": 3,
+          "driverMs": 14
+        },
+        "obsolete_segment_handling": {
+          "elapsedMs": 305,
+          "completed": true,
+          "remainingMsAtStart": 5029,
+          "remainingMsAfter": 4725,
+          "calls": 3,
+          "driverMs": 2
+        },
+        "stay_persistence": {
+          "elapsedMs": 211,
+          "completed": true,
+          "remainingMsAtStart": 4719,
+          "remainingMsAfter": 4508,
+          "calls": 2,
+          "driverMs": 7
+        },
+        "commute_persistence": {
+          "elapsedMs": 211,
+          "completed": true,
+          "remainingMsAtStart": 4508,
+          "remainingMsAfter": 4297,
+          "calls": 2,
+          "driverMs": 5
+        },
+        "lineage_deletion": {
+          "elapsedMs": 103,
+          "completed": true,
+          "remainingMsAtStart": 4297,
+          "remainingMsAfter": 4194,
+          "calls": 1,
+          "driverMs": 1
+        },
+        "lineage_insertion": {
+          "elapsedMs": 424,
+          "completed": true,
+          "remainingMsAtStart": 4194,
+          "remainingMsAfter": 3770,
+          "calls": 3,
+          "driverMs": 104
+        },
+        "semantic_review_persistence": {
+          "elapsedMs": 1269,
+          "completed": true,
+          "remainingMsAtStart": 3770,
+          "remainingMsAfter": 2501,
+          "calls": 12,
+          "driverMs": 54
+        },
+        "transaction_commit": {
+          "elapsedMs": 102,
+          "completed": true,
+          "remainingMsAtStart": 2501,
+          "remainingMsAfter": 2399,
+          "calls": 1,
+          "driverMs": 0
+        }
+      },
+      "stages": {
+        "request_setup": {
+          "calls": 0,
+          "ms": 0
+        },
+        "request_auth": {
+          "calls": 0,
+          "ms": 500
+        },
+        "effect": {
+          "calls": 0,
+          "ms": 0
+        },
+        "connection_acquisition": {
+          "calls": 0,
+          "ms": 0
+        },
+        "transaction_configuration": {
+          "calls": 5,
+          "ms": 507
+        },
+        "evidence_read": {
+          "calls": 1,
+          "ms": 148
+        },
+        "catalogue_read": {
+          "calls": 2,
+          "ms": 210
+        },
+        "engine": {
+          "calls": 0,
+          "ms": 286
+        },
+        "segment_persistence": {
+          "calls": 10,
+          "ms": 1051
+        },
+        "lineage": {
+          "calls": 4,
+          "ms": 527
+        },
+        "semantics": {
+          "calls": 12,
+          "ms": 1269
+        },
+        "transaction_commit": {
+          "calls": 1,
+          "ms": 102
+        }
+      },
+      "snapshot": {
+        "evidence": 4256,
+        "stays": 112,
+        "commutes": 56,
+        "reviews": 148,
+        "entries": 0,
+        "lineage": 4256,
+        "logicalFingerprint": "334056d6153259d442c2d9f43db2c48b4418da6b09ec672a8aec7a776fe62862"
+      },
+      "outcome": "PASS",
+      "replayOutcome": "PASS",
+      "acceptanceFailures": []
+    },
+    {
+      "source": "candidate",
+      "workload": "S3",
+      "scenario": "first-success",
+      "delayMs": 0,
+      "authCostMs": 500,
+      "deadlineMs": 8000,
+      "requestModelDurationMs": 1814,
+      "driverCalls": 41,
+      "timeoutConfigurationCalls": 3,
+      "protectionQueryBatches": 5,
+      "protectionEvidenceIds": 8512,
+      "protectedEvidenceBatchCount": 5,
+      "maxProtectedEvidenceBatchItems": 2048,
+      "maxProtectedEvidencePayloadBytes": 62085,
+      "lineageRequests": 5,
+      "lineageBatchCount": 5,
+      "maxLineageBatchItems": 2048,
+      "lineageLinksIntended": 8512,
+      "lineageLinksPrepared": 8512,
+      "lineageChunksStarted": 5,
+      "lineageChunksCompleted": 5,
+      "maxLineagePayloadBytes": 385438,
+      "maxParameterCount": 4704,
+      "maxParameterBytes": 422384,
+      "commitReached": true,
+      "rollbackUnchanged": null,
+      "remainingWorkBudgetAfterCommit": 5186,
+      "businessQueryHash": "97bb7e918e49dc47d86387faea4232e690691e3f31faaa54d06b86014a53f1d4",
+      "detailedStages": {
+        "connection_acquisition": {
+          "elapsedMs": 0,
+          "completed": true,
+          "remainingMsAtStart": 6498,
+          "remainingMsAfter": 6498,
+          "calls": 0,
+          "driverMs": 0
+        },
+        "transaction_configuration": {
+          "elapsedMs": 6,
+          "completed": true,
+          "remainingMsAtStart": 6498,
+          "remainingMsAfter": 6492,
+          "calls": 4,
+          "driverMs": 1
+        },
+        "owner_lock": {
+          "elapsedMs": 1,
+          "completed": true,
+          "remainingMsAtStart": 6492,
+          "remainingMsAfter": 6490,
+          "calls": 1,
+          "driverMs": 0
+        },
+        "evidence_read": {
+          "elapsedMs": 60,
+          "completed": true,
+          "remainingMsAtStart": 6490,
+          "remainingMsAfter": 6430,
+          "calls": 1,
+          "driverMs": 58
+        },
+        "catalogue_read": {
+          "elapsedMs": 3,
+          "completed": true,
+          "remainingMsAtStart": 6430,
+          "remainingMsAfter": 6427,
+          "calls": 2,
+          "driverMs": 1
+        },
+        "engine_computation": {
+          "elapsedMs": 871,
+          "completed": true,
+          "remainingMsAtStart": 6427,
+          "remainingMsAfter": 5556,
+          "calls": 0,
+          "driverMs": 0
+        },
+        "protected_replacement_checks": {
+          "elapsedMs": 25,
+          "completed": true,
+          "remainingMsAtStart": 5556,
+          "remainingMsAfter": 5531,
+          "calls": 5,
+          "driverMs": 16
+        },
+        "obsolete_segment_handling": {
+          "elapsedMs": 5,
+          "completed": true,
+          "remainingMsAtStart": 5531,
+          "remainingMsAfter": 5526,
+          "calls": 3,
+          "driverMs": 1
+        },
+        "stay_persistence": {
+          "elapsedMs": 25,
+          "completed": true,
+          "remainingMsAtStart": 5525,
+          "remainingMsAfter": 5501,
+          "calls": 2,
+          "driverMs": 21
+        },
+        "commute_persistence": {
+          "elapsedMs": 14,
+          "completed": true,
+          "remainingMsAtStart": 5501,
+          "remainingMsAfter": 5487,
+          "calls": 2,
+          "driverMs": 10
+        },
+        "lineage_deletion": {
+          "elapsedMs": 3,
+          "completed": true,
+          "remainingMsAtStart": 5487,
+          "remainingMsAfter": 5484,
+          "calls": 1,
+          "driverMs": 1
+        },
+        "lineage_insertion": {
+          "elapsedMs": 225,
+          "completed": true,
+          "remainingMsAtStart": 5484,
+          "remainingMsAfter": 5259,
+          "calls": 5,
+          "driverMs": 198
+        },
+        "semantic_review_persistence": {
+          "elapsedMs": 70,
+          "completed": true,
+          "remainingMsAtStart": 5259,
+          "remainingMsAfter": 5189,
+          "calls": 14,
+          "driverMs": 36
+        },
+        "transaction_commit": {
+          "elapsedMs": 3,
+          "completed": true,
+          "remainingMsAtStart": 5188,
+          "remainingMsAfter": 5186,
+          "calls": 1,
+          "driverMs": 1
+        }
+      },
+      "stages": {
+        "request_setup": {
+          "calls": 0,
+          "ms": 0
+        },
+        "request_auth": {
+          "calls": 0,
+          "ms": 501
+        },
+        "effect": {
+          "calls": 0,
+          "ms": 1
+        },
+        "connection_acquisition": {
+          "calls": 0,
+          "ms": 0
+        },
+        "transaction_configuration": {
+          "calls": 5,
+          "ms": 8
+        },
+        "evidence_read": {
+          "calls": 1,
+          "ms": 60
+        },
+        "catalogue_read": {
+          "calls": 2,
+          "ms": 3
+        },
+        "engine": {
+          "calls": 0,
+          "ms": 871
+        },
+        "segment_persistence": {
+          "calls": 12,
+          "ms": 69
+        },
+        "lineage": {
+          "calls": 6,
+          "ms": 228
+        },
+        "semantics": {
+          "calls": 14,
+          "ms": 70
+        },
+        "transaction_commit": {
+          "calls": 1,
+          "ms": 3
+        }
+      },
+      "snapshot": {
+        "evidence": 8512,
+        "stays": 224,
+        "commutes": 112,
+        "reviews": 261,
+        "entries": 0,
+        "lineage": 8512,
+        "logicalFingerprint": "c1999a4f888119209f6f180dae6912d990b2a0a6ff3cd3f60a8fa9d0daa94ecb"
+      },
+      "outcome": "PASS",
+      "replayOutcome": "PASS",
+      "acceptanceFailures": []
+    },
+    {
+      "source": "candidate",
+      "workload": "S3",
+      "scenario": "first-success",
+      "delayMs": 100,
+      "authCostMs": 500,
+      "deadlineMs": 8000,
+      "requestModelDurationMs": 7004,
+      "driverCalls": 50,
+      "timeoutConfigurationCalls": 17,
+      "protectionQueryBatches": 5,
+      "protectionEvidenceIds": 8512,
+      "protectedEvidenceBatchCount": 5,
+      "maxProtectedEvidenceBatchItems": 2048,
+      "maxProtectedEvidencePayloadBytes": 62085,
+      "lineageRequests": 5,
+      "lineageBatchCount": 5,
+      "maxLineageBatchItems": 2048,
+      "lineageLinksIntended": 8512,
+      "lineageLinksPrepared": 8512,
+      "lineageChunksStarted": 5,
+      "lineageChunksCompleted": 5,
+      "maxLineagePayloadBytes": 385438,
+      "maxParameterCount": 4704,
+      "maxParameterBytes": 422384,
+      "commitReached": false,
+      "rollbackUnchanged": true,
+      "remainingWorkBudgetAfterCommit": null,
+      "businessQueryHash": "295dff401805ae49a28594cd501ec04c5c64be9209277c7a3f7094e400954d21",
+      "detailedStages": {
+        "connection_acquisition": {
+          "elapsedMs": 0,
+          "completed": true,
+          "remainingMsAtStart": 6497,
+          "remainingMsAfter": 6497,
+          "calls": 0,
+          "driverMs": 0
+        },
+        "transaction_configuration": {
+          "elapsedMs": 411,
+          "completed": true,
+          "remainingMsAtStart": 6497,
+          "remainingMsAfter": 6085,
+          "calls": 4,
+          "driverMs": 3
+        },
+        "owner_lock": {
+          "elapsedMs": 102,
+          "completed": true,
+          "remainingMsAtStart": 6085,
+          "remainingMsAfter": 5983,
+          "calls": 1,
+          "driverMs": 0
+        },
+        "evidence_read": {
+          "elapsedMs": 140,
+          "completed": true,
+          "remainingMsAtStart": 5983,
+          "remainingMsAfter": 5843,
+          "calls": 1,
+          "driverMs": 39
+        },
+        "catalogue_read": {
+          "elapsedMs": 204,
+          "completed": true,
+          "remainingMsAtStart": 5843,
+          "remainingMsAfter": 5638,
+          "calls": 2,
+          "driverMs": 1
+        },
+        "engine_computation": {
+          "elapsedMs": 924,
+          "completed": true,
+          "remainingMsAtStart": 5638,
+          "remainingMsAfter": 4715,
+          "calls": 0,
+          "driverMs": 0
+        },
+        "protected_replacement_checks": {
+          "elapsedMs": 536,
+          "completed": true,
+          "remainingMsAtStart": 4715,
+          "remainingMsAfter": 4179,
+          "calls": 5,
+          "driverMs": 17
+        },
+        "obsolete_segment_handling": {
+          "elapsedMs": 312,
+          "completed": true,
+          "remainingMsAtStart": 4179,
+          "remainingMsAfter": 3867,
+          "calls": 3,
+          "driverMs": 6
+        },
+        "stay_persistence": {
+          "elapsedMs": 246,
+          "completed": true,
+          "remainingMsAtStart": 3862,
+          "remainingMsAfter": 3616,
+          "calls": 2,
+          "driverMs": 35
+        },
+        "commute_persistence": {
+          "elapsedMs": 227,
+          "completed": true,
+          "remainingMsAtStart": 3616,
+          "remainingMsAfter": 3389,
+          "calls": 2,
+          "driverMs": 21
+        },
+        "lineage_deletion": {
+          "elapsedMs": 105,
+          "completed": true,
+          "remainingMsAtStart": 3389,
+          "remainingMsAfter": 3284,
+          "calls": 1,
+          "driverMs": 5
+        },
+        "lineage_insertion": {
+          "elapsedMs": 1147,
+          "completed": true,
+          "remainingMsAtStart": 3284,
+          "remainingMsAfter": 2137,
+          "calls": 8,
+          "driverMs": 293
+        },
+        "semantic_review_persistence": {
+          "elapsedMs": 2141,
+          "completed": false,
+          "remainingMsAtStart": 2137,
+          "remainingMsAfter": null,
+          "calls": 21,
+          "driverMs": 73
+        },
+        "transaction_commit": {
+          "elapsedMs": null,
+          "completed": false,
+          "remainingMsAtStart": null,
+          "remainingMsAfter": null,
+          "calls": 0,
+          "driverMs": 0
+        }
+      },
+      "stages": {
+        "request_setup": {
+          "calls": 0,
+          "ms": 0
+        },
+        "request_auth": {
+          "calls": 0,
+          "ms": 503
+        },
+        "effect": {
+          "calls": 0,
+          "ms": 1
+        },
+        "connection_acquisition": {
+          "calls": 0,
+          "ms": 0
+        },
+        "transaction_configuration": {
+          "calls": 5,
+          "ms": 514
+        },
+        "evidence_read": {
+          "calls": 1,
+          "ms": 140
+        },
+        "catalogue_read": {
+          "calls": 2,
+          "ms": 204
+        },
+        "engine": {
+          "calls": 0,
+          "ms": 924
+        },
+        "segment_persistence": {
+          "calls": 12,
+          "ms": 1325
+        },
+        "lineage": {
+          "calls": 9,
+          "ms": 1252
+        },
+        "semantics": {
+          "calls": 21,
+          "ms": 2141
+        }
+      },
+      "snapshot": {
+        "evidence": 8512,
+        "stays": 0,
+        "commutes": 0,
+        "reviews": 0,
+        "entries": 0,
+        "lineage": 0,
+        "logicalFingerprint": "de062ea4ae65553cf56aac36294ecd0632f2209ad96c507800e0e361674901f5"
+      },
+      "outcome": "FAIL",
+      "failure": {
+        "name": "SyncOperationError",
+        "phase": "effect"
+      },
+      "replayOutcome": "FAIL",
+      "acceptanceFailures": []
+    },
+    {
+      "planId": "DF-PROD-REPLAY-SCALABILITY-V1",
+      "source": "candidate",
+      "outcome": "PASS",
+      "schemaFingerprint": "cf931925bbe1a65e3140de651c734d9cd044794dabf6216fab54d6ae17914eb9",
+      "principalMeasurements": 13,
+      "expectedPrincipalMeasurements": 13,
+      "firstSuccess100msMedian": 4604,
+      "matrixFailures": 1,
+      "note": "Candidate measurements use server-effective v2_review and review_scalability_v1."
+    }
+  ]
+}

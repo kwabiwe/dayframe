@@ -1,6 +1,24 @@
 # Location retained-replay production scalability V1
 
-## Targeted performance follow-up from `321dc7a59b85d6be29f60a7ebd17ac997866f395`
+## Authorised C20 addendum follow-up
+
+The owner's current request explicitly authorises
+`DF-PROD-REPLAY-SCALABILITY-A1-C20` at starting head
+`19950c8c5078aa2eed80d770735cc29b487421fd`. See the
+[unaltered addendum copy](../plans/location-replay-production-scalability-a1-c20.md)
+and [C20 evidence ledger](2026-09-20-location-replay-c20.md).
+This is new, conditional scope authorisation for the selected profile's combined
+protected lookup and materialised eligible-lineage read, **not retrospective
+approval** of their earlier deviation or a waiver of C20. The original parent
+plan remains byte-identical; read it together with the addendum.
+
+Run/head key: the performance follow-up below shipped in `19950c8`; its broad
+test **FAIL** and separate focused retry **PASS** remain historical facts.
+The older review-fix checks under `321dc7a` legitimately passed their broad test
+run; they are not the latest broad result. The linked C20 ledger records this
+job's new validation separately. No earlier PASS is silently transferred.
+
+## Historical performance follow-up: `321dc7a` → `19950c8`
 
 This section supersedes the historical failing handoff below. Exact planning/base
 remains `791e57ea3d806c1474407b7b3546d05a42bd0153`; the same existing PR #206 and
@@ -155,7 +173,7 @@ Hosted recovery and production repair are not established by these local results
 The unchanged schema fingerprint is
 `cf931925bbe1a65e3140de651c734d9cd044794dabf6216fab54d6ae17914eb9`.
 
-### Follow-up validation and limitations
+### Checks for the follow-up committed as `19950c8` (historical run)
 
 - PASS — candidate acceptance: all 11 S1 cases and S3 standard, real PostgreSQL
   ownership triggers, imported batch bounds, intended/prepared equality,
@@ -202,7 +220,13 @@ request/auth allowance are a local request model, not measured hosted topology.
 The three existing Important fixes remain intact; no further stage, rollout or
 timeout changes were made after S1 passed.
 
-## Scope and source verification
+## Historical initial implementation / review-fix evidence (`168f622` / `321dc7a`)
+
+The following scope verification originated with `168f622`; the measurements
+and checks below were completed in the review-fix pass committed as `321dc7a`.
+They do not describe the newer `19950c8` or addendum validation runs.
+
+### Scope and source verification
 
 - Plan title: `Dayframe — Production retained-replay scalability V1`.
 - Plan ID: `DF-PROD-REPLAY-SCALABILITY-V1`.
@@ -255,7 +279,7 @@ The candidate second-batch rollback proof used S3: intended `8,489` links was as
 
 The per-measurement logical fingerprints were emitted for both independently seeded owners. Their raw hashes are intentionally source/run-scoped because physical workspace/user/place/category IDs and volatile timestamps differ between independent copies; row counts, client segment/evidence identity, sequence/role maps, Review fields, entries and receipts were included in each hash. The rollback comparison is same-owner exact and passed. No hosted semantic equivalence or production outcome is claimed.
 
-## Checks run
+## Checks run for review-fix head `321dc7a59b85d6be29f60a7ebd17ac997866f395`
 
 - PASS — attachment title/ID verification, fresh-main advancement check and isolated feature worktree creation.
 - PASS — focused web replay/batching/diagnostic suite: 4 files, 14 tests, including exact ASCII boundary, UTF-8, caps, flush and actual JSON-byte checks.
