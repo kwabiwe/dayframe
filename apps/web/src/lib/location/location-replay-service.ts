@@ -747,6 +747,7 @@ async function insertBoundedLineageLinks(
   let lineageChunksStarted = 0;
   let lineageChunksCompleted = 0;
   let lineageLinksPrepared = 0;
+  observeLocationCount(observation, "lineageLinksPrepared", lineageLinksPrepared);
   for (const batch of boundedJsonBatches(
     intendedLineageRows(segments, evidenceIds, stayIds, commuteIds, protectedSegmentIds),
     {

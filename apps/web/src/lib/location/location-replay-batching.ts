@@ -29,6 +29,17 @@ export function jsonParameterBytes(value: unknown) {
 }
 
 /**
+ * Encodes one value using the same JSON-array rules as JSON.stringify(batch).
+ * The brackets are removed from the one-item representation so the caller can
+ * add separators and array brackets without serialising the growing batch.
+ */
+function jsonArrayItemBytes(value: unknown) {
+  const encoded = JSON.stringify([value]);
+  if (encoded === undefined) throw new TypeError("Replay batch value is not JSON serializable.");
+  return Buffer.byteLength(encoded, "utf8") - 2;
+}
+
+/**
  * Yields ordered JSON batches without retaining the complete input or payload.
  * The single-row check happens before an earlier batch can be emitted.
  */
@@ -48,17 +59,19 @@ export function* boundedJsonBatches<T>(
   }
 
   const batch: T[] = [];
+  let arrayBytes = 2;
   for (const item of items) {
-    if (jsonParameterBytes([item]) > options.maxBytes) {
+    const itemBytes = jsonArrayItemBytes(item);
+    if (itemBytes + 2 > options.maxBytes) {
       throw new LocationReplayBatchError(options.operation, options.maxItems, options.maxBytes);
     }
-    if (batch.length >= options.maxItems) yield batch.splice(0, batch.length);
-    batch.push(item);
-    if (jsonParameterBytes(batch) > options.maxBytes) {
-      batch.pop();
+    if (batch.length >= options.maxItems ||
+        arrayBytes + itemBytes + (batch.length > 0 ? 1 : 0) > options.maxBytes) {
       yield batch.splice(0, batch.length);
-      batch.push(item);
+      arrayBytes = 2;
     }
+    batch.push(item);
+    arrayBytes += itemBytes + (batch.length > 1 ? 1 : 0);
   }
   if (batch.length > 0) yield batch.splice(0, batch.length);
 }

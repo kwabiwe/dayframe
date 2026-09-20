@@ -57,15 +57,27 @@ try {
 let database!: pg.Pool;
 
 type LocationDiagnosticsModule = typeof import("../apps/web/src/lib/location/location-sync-diagnostics");
+type LocationBatchingModule = typeof import("../apps/web/src/lib/location/location-replay-batching");
 let observeLocationStage!: LocationDiagnosticsModule["observeLocationStage"];
 let observeLocationTiming!: LocationDiagnosticsModule["observeLocationTiming"];
 let segmentStartedAfterSemanticCutover!: typeof import("../apps/web/src/lib/location/location-rollout")["segmentStartedAfterSemanticCutover"];
+let jsonParameterBytes!: LocationBatchingModule["jsonParameterBytes"];
+let locationProtectedEvidenceIdBatchSize!: LocationBatchingModule["LOCATION_PROTECTED_EVIDENCE_ID_BATCH_SIZE"];
+let locationProtectedEvidenceIdPayloadMaxBytes!: LocationBatchingModule["LOCATION_PROTECTED_EVIDENCE_ID_PAYLOAD_MAX_BYTES"];
+let locationLineageInsertBatchSize!: LocationBatchingModule["LOCATION_LINEAGE_INSERT_BATCH_SIZE"];
+let locationLineageInsertPayloadMaxBytes!: LocationBatchingModule["LOCATION_LINEAGE_INSERT_PAYLOAD_MAX_BYTES"];
 
 async function loadApplicationRuntime() {
   const diagnostics = await import("../apps/web/src/lib/location/location-sync-diagnostics");
+  const batching = await import("../apps/web/src/lib/location/location-replay-batching");
   observeLocationStage = diagnostics.observeLocationStage;
   observeLocationTiming = diagnostics.observeLocationTiming;
   ({ segmentStartedAfterSemanticCutover } = await import("../apps/web/src/lib/location/location-rollout"));
+  jsonParameterBytes = batching.jsonParameterBytes;
+  locationProtectedEvidenceIdBatchSize = batching.LOCATION_PROTECTED_EVIDENCE_ID_BATCH_SIZE;
+  locationProtectedEvidenceIdPayloadMaxBytes = batching.LOCATION_PROTECTED_EVIDENCE_ID_PAYLOAD_MAX_BYTES;
+  locationLineageInsertBatchSize = batching.LOCATION_LINEAGE_INSERT_BATCH_SIZE;
+  locationLineageInsertPayloadMaxBytes = batching.LOCATION_LINEAGE_INSERT_PAYLOAD_MAX_BYTES;
 }
 
 type Source = "base" | "candidate";
@@ -85,7 +97,11 @@ type DriverCapture = {
   timeoutConfigurationCalls: number;
   protectionQueryBatches: number;
   protectionEvidenceIds: number;
+  protectedEvidenceBatchSizes: number[];
+  protectedEvidenceBatchBytes: number[];
   lineageRequests: number;
+  lineageBatchSizes: number[];
+  lineageBatchBytes: number[];
   maxLineagePayloadBytes: number;
   maxParameterCount: number;
   maxParameterBytes: number;
@@ -96,6 +112,11 @@ type DriverCapture = {
   stages: Record<string, { calls: number; ms: number }>;
   currentStage: string;
   lastStageAt: number;
+};
+
+type MeasuredPoolHooks = {
+  onBeforeDispatch?: (statement: string, params: unknown[]) => void;
+  onAfterDispatch?: (statement: string, params: unknown[]) => void;
 };
 
 type OwnerFixture = {
@@ -120,6 +141,14 @@ function isTransactionScaffolding(sql: string) {
     /current_setting\('\s*transaction_timeout|set_config\('\s*application_name/i.test(sql);
 }
 
+function isLineageInsertStatement(sql: string) {
+  return /^insert into location_segment_evidence/i.test(sql) && sql.includes("jsonb_to_recordset");
+}
+
+function isLineageDeleteStatement(sql: string) {
+  return /^delete from location_segment_evidence/i.test(sql);
+}
+
 function createCapture(): DriverCapture {
   const now = performance.now();
   return {
@@ -127,7 +156,11 @@ function createCapture(): DriverCapture {
     timeoutConfigurationCalls: 0,
     protectionQueryBatches: 0,
     protectionEvidenceIds: 0,
+    protectedEvidenceBatchSizes: [],
+    protectedEvidenceBatchBytes: [],
     lineageRequests: 0,
+    lineageBatchSizes: [],
+    lineageBatchBytes: [],
     maxLineagePayloadBytes: 0,
     maxParameterCount: 0,
     maxParameterBytes: 0,
@@ -153,7 +186,8 @@ function setCaptureStage(capture: DriverCapture, stage: string) {
 
 function createMeasuredPool(
   delayMs: number,
-  capture: DriverCapture
+  capture: DriverCapture,
+  hooks: MeasuredPoolHooks = {}
 ): Pick<pg.Pool, "connect"> {
   return {
     connect: async () => {
@@ -176,7 +210,11 @@ function createMeasuredPool(
               if (/^select .*for update of s/i.test(statement)) {
                 capture.protectionQueryBatches += 1;
                 const ids = params[4];
-                if (Array.isArray(ids)) capture.protectionEvidenceIds += ids.length;
+                if (Array.isArray(ids)) {
+                  capture.protectionEvidenceIds += ids.length;
+                  capture.protectedEvidenceBatchSizes.push(ids.length);
+                  capture.protectedEvidenceBatchBytes.push(jsonParameterBytes(ids));
+                }
               }
               if (/^insert into location_segment_evidence/i.test(statement)) {
                 capture.lineageRequests += 1;
@@ -185,6 +223,15 @@ function createMeasuredPool(
                   capture.maxLineagePayloadBytes,
                   Buffer.byteLength(payload, "utf8")
                 );
+                if (typeof payload === "string") {
+                  capture.lineageBatchBytes.push(Buffer.byteLength(payload, "utf8"));
+                  try {
+                    const rows = JSON.parse(payload);
+                    capture.lineageBatchSizes.push(Array.isArray(rows) ? rows.length : -1);
+                  } catch {
+                    capture.lineageBatchSizes.push(-1);
+                  }
+                }
               }
               capture.maxParameterCount = Math.max(capture.maxParameterCount, params.length);
               capture.maxParameterBytes = Math.max(capture.maxParameterBytes, Buffer.byteLength(JSON.stringify(params), "utf8"));
@@ -193,8 +240,10 @@ function createMeasuredPool(
               }
               await sleep(delayMs);
               if (released) throw new Error("Measured client was released before query dispatch.");
+              hooks.onBeforeDispatch?.(statement, params);
               const query = client.query.bind(client) as (query: unknown, values?: unknown[]) => Promise<pg.QueryResult>;
               const result = values === undefined ? await query(sqlOrConfig) : await query(sqlOrConfig, values);
+              hooks.onAfterDispatch?.(statement, params);
               if (/^commit\b/i.test(statement)) {
                 capture.commitReached = true;
               }
@@ -215,13 +264,46 @@ function createMeasuredPool(
   };
 }
 
+function maxBatchValue(values: number[]) {
+  return values.length === 0 ? 0 : Math.max(...values);
+}
+
+function assertCandidateBatchBounds(capture: DriverCapture, context: string) {
+  assert(
+    capture.protectedEvidenceBatchSizes.every((size) => Number.isSafeInteger(size) && size >= 0 && size <= locationProtectedEvidenceIdBatchSize),
+    `${context}: protected provenance item cap exceeded`
+  );
+  assert(
+    capture.protectedEvidenceBatchBytes.every((bytes) => Number.isSafeInteger(bytes) && bytes <= locationProtectedEvidenceIdPayloadMaxBytes),
+    `${context}: protected provenance payload cap exceeded`
+  );
+  assert(
+    capture.lineageBatchSizes.every((size) => Number.isSafeInteger(size) && size >= 0 && size <= locationLineageInsertBatchSize),
+    `${context}: lineage item cap exceeded`
+  );
+  assert(
+    capture.lineageBatchBytes.every((bytes) => Number.isSafeInteger(bytes) && bytes <= locationLineageInsertPayloadMaxBytes),
+    `${context}: lineage payload cap exceeded`
+  );
+}
+
+function assertCandidateCompleteLineage(capture: DriverCapture, context: string) {
+  const intended = capture.counts.lineageLinksIntended;
+  const prepared = capture.counts.lineageLinksPrepared;
+  assert(Number.isSafeInteger(intended) && intended >= 0, `${context}: missing intended lineage counter`);
+  assert(Number.isSafeInteger(prepared) && prepared >= 0, `${context}: missing prepared lineage counter`);
+  assert.equal(prepared, intended, `${context}: intended/prepared lineage mismatch`);
+  assert(capture.commitReached, `${context}: transaction commit was not reached`);
+}
+
 function safeFailure(error: unknown) {
   const value = error as { code?: string; sqlState?: string; syncPhase?: string; phase?: string } | null;
   const sqlState = value?.sqlState ?? (/^[0-9A-Z]{5}$/.test(value?.code ?? "") ? value?.code : undefined);
   return {
     name: error instanceof Error ? error.name : "unknown",
     phase: value?.syncPhase ?? value?.phase ?? "unknown",
-    ...(sqlState ? { sqlState } : {})
+    ...(sqlState ? { sqlState } : {}),
+    ...(error instanceof Error && error.name === "AssertionError" ? { message: error.message } : {})
   };
 }
 
@@ -299,6 +381,18 @@ async function markProtectedHistory(owner: OwnerFixture) {
   );
 }
 
+async function markMinimalProtectedHistory(owner: OwnerFixture) {
+  await database.query(
+    `update stay_segments set continuity_status = 'manual'
+     where id = (
+       select id from stay_segments
+       where workspace_id = $1 and user_id = $2
+       order by client_segment_id limit 1
+     )`,
+    [owner.session.workspaceId, owner.session.userId]
+  );
+}
+
 async function legacyReplayForBaseline(
   owner: OwnerFixture,
   processingAt: string,
@@ -352,7 +446,7 @@ async function runReplay(
 }
 
 async function logicalFingerprint(owner: OwnerFixture) {
-  const [stays, commutes, links, reviews, entries] = await Promise.all([
+  const [stays, commutes, links, reviews, entries, receipts] = await Promise.all([
     database.query(
       `select client_segment_id,status,started_at,stopped_at,start_lower_bound_at,start_upper_bound_at,
               stop_lower_bound_at,stop_upper_bound_at,place_id,learned_place_id,centre::text,radius_m,
@@ -397,6 +491,13 @@ async function logicalFingerprint(owner: OwnerFixture) {
        where te.workspace_id = $1 and te.user_id = $2
        order by te.started_at,te.id`,
       [owner.session.workspaceId, owner.session.userId]
+    ),
+    database.query(
+      `select client_mutation_id,review_item_id,action_key,request_hash,result_json,created_at
+       from review_mutation_receipts
+       where workspace_id = $1 and user_id = $2
+       order by client_mutation_id,created_at`,
+      [owner.session.workspaceId, owner.session.userId]
     )
   ]);
   return createHash("sha256").update(JSON.stringify({
@@ -404,7 +505,8 @@ async function logicalFingerprint(owner: OwnerFixture) {
     commutes: commutes.rows,
     links: links.rows,
     reviews: reviews.rows,
-    entries: entries.rows
+    entries: entries.rows,
+    receipts: receipts.rows
   })).digest("hex");
 }
 
@@ -462,6 +564,10 @@ async function measure(
     error = caught;
   }
   setCaptureStage(capture, "complete");
+  if (source === "candidate") {
+    assertCandidateBatchBounds(capture, `${workload}/${scenario}/${delayMs}ms`);
+    if (!error) assertCandidateCompleteLineage(capture, `${workload}/${scenario}/${delayMs}ms`);
+  }
   const snapshot = await counts(owner);
   const fingerprint = await logicalFingerprint(owner);
   const businessQueryHash = createHash("sha256").update(JSON.stringify(capture.businessStatements)).digest("hex");
@@ -477,7 +583,12 @@ async function measure(
     timeoutConfigurationCalls: capture.timeoutConfigurationCalls,
     protectionQueryBatches: capture.counts.protectionQueryBatches ?? capture.protectionQueryBatches,
     protectionEvidenceIds: capture.counts.protectionEvidenceIds ?? capture.protectionEvidenceIds,
+    protectedEvidenceBatchCount: capture.protectedEvidenceBatchSizes.length,
+    maxProtectedEvidenceBatchItems: maxBatchValue(capture.protectedEvidenceBatchSizes),
+    maxProtectedEvidencePayloadBytes: maxBatchValue(capture.protectedEvidenceBatchBytes),
     lineageRequests: capture.lineageRequests,
+    lineageBatchCount: capture.lineageBatchSizes.length,
+    maxLineageBatchItems: maxBatchValue(capture.lineageBatchSizes),
     lineageLinksIntended: capture.counts.lineageLinksIntended ?? null,
     lineageLinksPrepared: capture.counts.lineageLinksPrepared ?? null,
     lineageChunksStarted: capture.counts.lineageChunksStarted ?? null,
@@ -612,6 +723,121 @@ async function queryPlanEvidence(owner: OwnerFixture) {
   }
 }
 
+async function secondLineageBatchRollback() {
+  const owner = await createOwner();
+  try {
+    const history = replayScalabilityHistory(
+      owner.placeIds,
+      REPLAY_SCALABILITY_S3_DAYS,
+      REPLAY_SCALABILITY_TRIPS_PER_DAY * 2
+    );
+    assert(history.length >= 8_400, "Second-batch rollback fixture must contain at least 8,400 eligible observations.");
+    await uploadEvidence(owner, history, REPLAY_SCALABILITY_CLOCK, "second-lineage-rollback-seed");
+    const seedCapture = createCapture();
+    await runReplay(SOURCE as Source, owner, REPLAY_SCALABILITY_CLOCK, {
+      databasePool: createMeasuredPool(0, seedCapture),
+      deadlineAt: Date.now() + REQUEST_DEADLINE_MS,
+      cleanupReserveMs: 1_000,
+      onLocationStage: (stage) => setCaptureStage(seedCapture, stage),
+      onLocationTiming: () => undefined,
+      onLocationCount: (name, value) => { seedCapture.counts[name] = value; },
+      onSyncTiming: (event) => setCaptureStage(seedCapture, event.stage)
+    });
+    await markMinimalProtectedHistory(owner);
+    const before = {
+      counts: await counts(owner),
+      logicalFingerprint: await logicalFingerprint(owner)
+    };
+
+    const capture = createCapture();
+    let lineageAttempts = 0;
+    let firstLineageBatchExecuted = false;
+    let secondLineageBatchReached = false;
+    let lineageDeletionDispatched = false;
+    let semanticPersistenceReached = false;
+    let failure: unknown;
+    try {
+      await runReplay("candidate", owner, REPLAY_SCALABILITY_CLOCK, {
+        databasePool: createMeasuredPool(0, capture, {
+          onBeforeDispatch: (statement) => {
+            if (isLineageInsertStatement(statement)) {
+              lineageAttempts += 1;
+              if (lineageAttempts === 1) {
+                const intended = capture.counts.lineageLinksIntended;
+                assert(
+                  Number.isSafeInteger(intended) && intended > locationLineageInsertBatchSize,
+                  `Second-batch rollback requires intended lineage links above ${locationLineageInsertBatchSize}.`
+                );
+              } else if (lineageAttempts === 2) {
+                secondLineageBatchReached = true;
+                throw new Error("synthetic second lineage insert failure");
+              }
+            }
+          },
+          onAfterDispatch: (statement) => {
+            if (isLineageDeleteStatement(statement)) lineageDeletionDispatched = true;
+            if (isLineageInsertStatement(statement) && lineageAttempts === 1) firstLineageBatchExecuted = true;
+          }
+        }),
+        deadlineAt: Date.now() + REQUEST_DEADLINE_MS,
+        cleanupReserveMs: 1_000,
+        onLocationStage: (stage) => {
+          if (stage === "semantics") semanticPersistenceReached = true;
+          setCaptureStage(capture, stage);
+        },
+        onLocationTiming: () => undefined,
+        onLocationCount: (name, value) => { capture.counts[name] = value; },
+        onSyncTiming: (event) => setCaptureStage(capture, event.stage)
+      });
+    } catch (caught) {
+      failure = caught;
+    }
+    setCaptureStage(capture, "complete");
+    assert(
+      failure,
+      `Second-lineage-batch rollback did not fail at the injected seam (lineageAttempts=${lineageAttempts}, intended=${capture.counts.lineageLinksIntended ?? "missing"}, prepared=${capture.counts.lineageLinksPrepared ?? "missing"}, deletion=${lineageDeletionDispatched}, semantic=${semanticPersistenceReached}, commit=${capture.commitReached}).`
+    );
+    assert.equal(lineageAttempts, 2, "The second-lineage-batch seam was not reached exactly twice.");
+    assert(lineageDeletionDispatched, "Lineage deletion did not dispatch before the injected failure.");
+    assert(firstLineageBatchExecuted, "The first lineage batch did not execute successfully.");
+    assert(secondLineageBatchReached, "The second lineage batch was not reached.");
+    assert.equal(capture.commitReached, false, "The injected rollback unexpectedly committed.");
+    assert.equal(semanticPersistenceReached, false, "Semantic persistence began before the second-batch failure.");
+    assertCandidateBatchBounds(capture, "second-lineage-batch-rollback");
+    assert(Number.isSafeInteger(capture.counts.lineageLinksIntended));
+    assert(capture.counts.lineageLinksIntended > locationLineageInsertBatchSize);
+    assert.equal(capture.lineageRequests, 2, "The rollback proof did not reach exactly two lineage insert attempts.");
+    assert.deepEqual(await counts(owner), before.counts, "Rollback changed owner row counts.");
+    assert.equal(
+      await logicalFingerprint(owner),
+      before.logicalFingerprint,
+      "Rollback did not restore lineage, protected history, semantic state and receipts exactly."
+    );
+    console.log(JSON.stringify({
+      planId: "DF-PROD-REPLAY-SCALABILITY-V1",
+      source: "candidate",
+      rollbackProof: {
+        outcome: "PASS",
+        workload: "S3",
+        intendedLineageLinks: capture.counts.lineageLinksIntended,
+        preparedLineageLinks: capture.counts.lineageLinksPrepared ?? null,
+        lineageAttempts,
+        firstLineageBatchExecuted,
+        secondLineageBatchReached,
+        lineageDeletionDispatched,
+        semanticPersistenceReached,
+        commitReached: capture.commitReached,
+        lineageBatchCount: capture.lineageBatchSizes.length,
+        maxLineageBatchItems: maxBatchValue(capture.lineageBatchSizes),
+        maxLineagePayloadBytes: maxBatchValue(capture.lineageBatchBytes),
+        failure: safeFailure(failure)
+      }
+    }));
+  } finally {
+    await cleanupOwner(owner);
+  }
+}
+
 async function runMatrix(source: Source) {
   const measurements: Array<{ report: Record<string, unknown>; error: unknown }> = [];
   const run = async (workload: "S1" | "S3", scenario: Scenario, delayMs: number, sample = "") => {
@@ -657,6 +883,11 @@ async function runMatrix(source: Source) {
 
 async function main() {
   await loadApplicationRuntime();
+  if (SOURCE === "candidate") {
+    // The candidate claim is specifically the server-effective v2_review path.
+    // This is process-local validator setup, never a hosted or production change.
+    process.env.DAYFRAME_LOCATION_ROLLOUT_MODE = "v2_review";
+  }
   const schema = await schemaEvidence();
   const owner = await createOwner();
   try {
@@ -676,28 +907,52 @@ async function main() {
   } finally {
     await cleanupOwner(owner);
   }
+  if (SOURCE === "candidate") await secondLineageBatchRollback();
   const measurements = await runMatrix(SOURCE as Source);
   const candidateS1 = measurements.filter(({ report }) => report.source === "candidate" && report.workload === "S1");
+  let gateFailure: unknown;
   if (SOURCE === "candidate") {
-    assert(candidateS1.every(({ report }) => report.outcome === "PASS" && report.commitReached === true), "Candidate S1 must reach semantic persistence and commit for every required case.");
-    const first100 = candidateS1.filter(({ report }) => report.scenario === "first-success" && report.delayMs === 100);
-    const durations = first100.map(({ report }) => report.requestModelDurationMs as number).sort((a, b) => a - b);
-    const median = durations[Math.floor(durations.length / 2)];
-    assert(median <= 5_000, `Candidate S1 first-success 100 ms median exceeded 5,000 ms (${median} ms).`);
-    assert(first100.every(({ report }) => (report.requestModelDurationMs as number) <= 5_500 &&
-      (report.remainingWorkBudgetAfterCommit as number | null) != null &&
-      (report.remainingWorkBudgetAfterCommit as number) >= 1_500), "Candidate S1 first-success 100 ms gate failed.");
+    try {
+      const requiredCandidate = measurements.filter(({ report }) =>
+        report.source === "candidate" &&
+        (report.workload === "S1" || (report.workload === "S3" && report.delayMs === 0))
+      );
+      assert(requiredCandidate.every(({ report }) =>
+        report.outcome === "PASS" &&
+        report.commitReached === true &&
+        report.lineageLinksIntended === report.lineageLinksPrepared
+      ), "Candidate S1 and S3 standard cases must prepare all intended lineage links and reach commit.");
+      const candidateS3Adverse = measurements.filter(({ report }) =>
+        report.source === "candidate" && report.workload === "S3" && report.delayMs === 100
+      );
+      assert(candidateS3Adverse.every(({ report }) => report.outcome === "PASS" || report.commitReached === false),
+        "Candidate S3 adverse-latency failures must terminate before commit.");
+      assert(candidateS1.every(({ report }) => report.outcome === "PASS" && report.commitReached === true), "Candidate S1 must reach semantic persistence and commit for every required case.");
+      const first100 = candidateS1.filter(({ report }) => report.scenario === "first-success" && report.delayMs === 100);
+      const durations = first100.map(({ report }) => report.requestModelDurationMs as number).sort((a, b) => a - b);
+      const median = durations[Math.floor(durations.length / 2)];
+      assert(median <= 5_000, `Candidate S1 first-success 100 ms median exceeded 5,000 ms (${median} ms).`);
+      assert(first100.every(({ report }) => (report.requestModelDurationMs as number) <= 5_500 &&
+        (report.remainingWorkBudgetAfterCommit as number | null) != null &&
+        (report.remainingWorkBudgetAfterCommit as number) >= 1_500), "Candidate S1 first-success 100 ms gate failed.");
+    } catch (error) {
+      gateFailure = error;
+    }
   }
   console.log(JSON.stringify({
     planId: "DF-PROD-REPLAY-SCALABILITY-V1",
     source: SOURCE,
+    outcome: gateFailure ? "FAIL" : "PASS",
     schemaFingerprint: schema.schemaFingerprint,
     principalMeasurements: measurements.length,
     expectedPrincipalMeasurements: 13,
+    matrixFailures: measurements.filter(({ report }) => report.outcome === "FAIL").length,
+    ...(gateFailure ? { failure: safeFailure(gateFailure) } : {}),
     note: SOURCE === "base"
       ? "Base measurements use the test-only legacy persistence adapter with the unchanged Review emitter and #202 timeout reuse."
       : "Candidate measurements use server-effective v2_review and review_scalability_v1."
   }));
+  if (gateFailure) process.exitCode = 1;
 }
 
 if (targetError) {
