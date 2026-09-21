@@ -853,7 +853,11 @@ async function statementDiagnostics(owner: OwnerFixture) {
   } finally {
     const { profile } = await profiler.post("Profiler.stop");
     profiler.disconnect();
-    console.log(JSON.stringify({ statementDiagnostics: { counts: capture.counts, stages: timingSnapshot(capture), statements, profile,
+    const stages = Object.fromEntries(Object.entries(timingSnapshot(capture)).map(([name, stage]) => {
+      assert(stage && typeof stage === "object");
+      return [name, { ...stage, calls: null, driverMs: null }];
+    }));
+    console.log(JSON.stringify({ statementDiagnostics: { counts: capture.counts, stages, statements, profile,
       note: "Local rollback-contained EXPLAIN and CPU profile; not acceptance timing or hosted attribution." } }));
   }
 }
