@@ -119,3 +119,22 @@ export function changedReplayEvidence(placeIds: ReplayScalabilityPlaceIds) {
     }
   ];
 }
+
+/** Additional diagnostic shape, not a replacement for S1: many more episodes
+ * at a similar observation count. Synthetic only, not reconstructed hosted data. */
+export function highSegmentReplayEvidence(placeIds: ReplayScalabilityPlaceIds) {
+  const points = new Set([0, 2, 4, 6, 8, 10, 12, 14, 16, 18, 20, 24, 28, 32, 36,
+    40, 44, 48, 52, 55, 56, 58, 60, 62, 64, 66, 68, 70, 72, 75]);
+  const start = Date.parse(REPLAY_SCALABILITY_CUTOVER);
+  const rows = replayScalabilityHistory(placeIds, 7, 20).flatMap((row, index) => {
+    const point = index % 76, trip = Math.floor(index / 76) % 20, day = Math.floor(index / (76 * 20));
+    if (!points.has(point) && !(point === 74 && trip % 2 === 0)) return [];
+    const oldStart = start + day * 86_400_000 + trip * 90 * 60_000;
+    const newStart = start + day * 86_400_000 + trip * 70 * 60_000;
+    const move = (value: string) => new Date(newStart + (Date.parse(value) - oldStart) * 0.7).toISOString();
+    return [{ ...row, occurredAt: move(row.occurredAt), endedAt: row.endedAt ? move(row.endedAt) : row.endedAt }];
+  });
+  const last = rows.at(-1)!;
+  return [...rows, { ...last, clientEvidenceId: "high-segment-last-witness",
+    occurredAt: new Date(Date.parse(last.occurredAt) + 30_000).toISOString() }];
+}

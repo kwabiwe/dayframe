@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { Buffer } from "node:buffer";
 import { createHash, randomUUID } from "node:crypto";
 import pg from "pg";
+import { Session as InspectorSession } from "node:inspector/promises";
 import { LOCATION_ENGINE_V2_CONFIG, type LocationEvidence } from "@dayframe/shared";
 import type {
   LocationObservation,
@@ -10,6 +11,7 @@ import type {
 } from "../apps/web/src/lib/location/location-sync-diagnostics";
 import {
   changedReplayEvidence,
+  highSegmentReplayEvidence,
   REPLAY_SCALABILITY_CLOCK,
   REPLAY_SCALABILITY_CUTOVER,
   REPLAY_SCALABILITY_DEVICE,
@@ -34,6 +36,7 @@ const REQUEST_DEADLINE_MS = 8_000;
 const AUTH_COST_MS = 500;
 const S1_ONLY = process.argv.includes("--s1-only");
 const QUERY_PLAN_ONLY = process.argv.includes("--query-plan-only");
+const STATEMENT_DIAGNOSTICS = process.argv.includes("--diagnose-statements");
 const SOURCE = process.argv.find((value) => value.startsWith("--source="))?.split("=", 2)[1] ?? "candidate";
 assert(SOURCE === "base" || SOURCE === "candidate", "Use --source=base or --source=candidate.");
 
@@ -804,6 +807,57 @@ async function queryPlanEvidence(owner: OwnerFixture) {
   }
 }
 
+/** Local diagnostic only: EXPLAIN executes in a rolled-back savepoint before
+ * each actual statement. Its extra work is not an acceptance timing sample. */
+async function statementDiagnostics(owner: OwnerFixture) {
+  const capture = createCapture();
+  const statements: Record<string, unknown>[] = [];
+  const profiler = new InspectorSession();
+  profiler.connect();
+  await profiler.post("Profiler.enable");
+  await profiler.post("Profiler.start");
+  try {
+    await runReplay("candidate", owner, REPLAY_SCALABILITY_CLOCK, {
+      databasePool: { connect: async () => {
+        const raw = await database.connect();
+        return new Proxy(raw, { get(client, key) {
+          if (key === "query") return async (sql: string, params?: unknown[]) => {
+            const stage = capture.activeTimingStage;
+            const relevant = stage && ["evidence_read", "protected_replacement_checks", "obsolete_segment_handling",
+              "stay_persistence", "commute_persistence", "lineage_deletion", "lineage_insertion"].includes(stage)
+              && !sql.includes("set_config") && !sql.includes("pg_advisory");
+            if (relevant) {
+              await client.query("savepoint diagnostic_plan");
+              try {
+                const plan = await client.query(`explain (analyze, buffers, format json) ${sql}`, params);
+                statements.push({ stage, parameterBytes: Buffer.byteLength(JSON.stringify(params ?? [])),
+                  parameterCount: params?.length ?? 0, plan: plan.rows[0]["QUERY PLAN"] });
+              } finally {
+                await client.query("rollback to savepoint diagnostic_plan");
+                await client.query("release savepoint diagnostic_plan");
+              }
+            }
+            return client.query(sql, params);
+          };
+          const value = Reflect.get(client, key);
+          return typeof value === "function" ? value.bind(client) : value;
+        } });
+      } } as Pick<pg.Pool, "connect">,
+      deadlineAt: Date.now() + REQUEST_DEADLINE_MS,
+      cleanupReserveMs: 1_000,
+      onLocationStage: stage => setCaptureStage(capture, stage),
+      onLocationTiming: event => captureTiming(capture, event),
+      onLocationCount: (name, value) => { capture.counts[name] = value; },
+      onSyncTiming: event => captureTiming(capture, event)
+    });
+  } finally {
+    const { profile } = await profiler.post("Profiler.stop");
+    profiler.disconnect();
+    console.log(JSON.stringify({ statementDiagnostics: { counts: capture.counts, stages: timingSnapshot(capture), statements, profile,
+      note: "Local rollback-contained EXPLAIN and CPU profile; not acceptance timing or hosted attribution." } }));
+  }
+}
+
 async function secondLineageBatchRollback() {
   const owner = await createOwner();
   try {
@@ -1020,8 +1074,11 @@ async function main() {
   const schema = await schemaEvidence();
   const owner = await createOwner();
   try {
-    const history = replayScalabilityHistory(owner.placeIds, REPLAY_SCALABILITY_S1_DAYS, REPLAY_SCALABILITY_TRIPS_PER_DAY);
+    const history = STATEMENT_DIAGNOSTICS && process.argv.includes("--high-segment")
+      ? highSegmentReplayEvidence(owner.placeIds)
+      : replayScalabilityHistory(owner.placeIds, REPLAY_SCALABILITY_S1_DAYS, REPLAY_SCALABILITY_TRIPS_PER_DAY);
     await uploadEvidence(owner, history, REPLAY_SCALABILITY_CLOCK, "plans");
+    if (STATEMENT_DIAGNOSTICS) { await statementDiagnostics(owner); return; }
     const seedCapture = createCapture();
     await runReplay(SOURCE as Source, owner, REPLAY_SCALABILITY_CLOCK, {
       databasePool: createMeasuredPool(0, seedCapture),
