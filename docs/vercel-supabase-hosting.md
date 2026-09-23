@@ -12,6 +12,10 @@ is intentionally kept in Europe, close to both databases, to avoid unnecessary
 application-to-database latency. Production and Preview/staging remain separate
 Supabase environments.
 
+The project Function Region setting applies to newly created deployments.
+Existing deployments retain the region they were built with until replaced by
+a new deployment.
+
 The stable staging hostname is deliberately pointed to one explicitly selected
 Vercel Preview deployment at a time. Ordinary branch Preview URLs use the same
 Preview-scoped staging credentials. Production remains
@@ -56,13 +60,13 @@ Do not paste the Supabase service-role key into chat unless an admin-only backen
 
 Never copy production database or Supabase credentials into Vercel Preview. Preview must use the staging project; Production must use production. Set `NEXT_PUBLIC_DAYFRAME_DEPLOYMENT_ENV=staging` for Preview so signed-in web surfaces show the staging badge. Keep the variable absent in Production.
 
-After changing Preview variables, create a new Preview deployment; existing deployments retain their original environment snapshot. Promote the selected deployment with:
+After changing Preview variables, create a new Preview deployment; existing deployments retain their original environment snapshot. Point the stable staging hostname at the selected Preview with:
 
 ```bash
 vercel alias set <preview-deployment-url> dayframe-staging.vercel.app
 ```
 
-Before promotion, confirm the deployment is a Preview, its schema is current, and login reaches the staging account. The alias is a deliberate single-PR test lane, not an automatic alias for every branch.
+Before changing the staging alias, confirm the deployment is a Preview, its schema is current, and login reaches the staging account. `vercel alias set ... dayframe-staging.vercel.app` is the staging operation. Do not use `vercel promote`, which assigns a Production deployment. The alias is a deliberate single-PR test lane, not an automatic alias for every branch.
 
 Vercel Authentication is disabled for this project because it intercepted the stable `.vercel.app` staging alias and native iOS cannot complete Vercel's interactive SSO flow. Dayframe's own provider authentication remains the application boundary: anonymous API requests fail closed, signups remain controlled by the configured allowlist/switch, and no database credentials are exposed to clients.
 

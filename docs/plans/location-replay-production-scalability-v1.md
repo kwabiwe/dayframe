@@ -24,11 +24,11 @@ The proposed first implementation removes excessive client/database round trips 
 | Implementation | Codex Luna Max | Isolated branch, local synthetic fixtures, focused correction, local tests, one broad validation pass, draft PR | Push draft PR, report exact SHAs and results, STOP |
 | Independent review | OpenClaw coordinating Claude | Complete exact-base/head diff; read-only evidence and relevant docs | Verdict and substantiated findings, STOP |
 | Review fixes | Codex, separately requested | Only substantiated corrections, affected tests and one suitable final pass | Push new head, STOP |
-| Staging validation | OpenClaw + KB, separately requested | Exact Preview verification/promotion, explicitly authorised staging tests | PASS / FAIL / INCONCLUSIVE, STOP |
+| Staging validation | OpenClaw + KB, separately requested | Exact Preview verification/alias assignment, explicitly authorised staging tests | PASS / FAIL / INCONCLUSIVE, STOP |
 | Merge | KB | Manual merge after gates | No implicit production-release authority |
 | Production deployment/acceptance | OpenClaw + KB, separately authorised | Verify/deploy the approved merged source, observe ordinary production processing | Evidence-based outcome, STOP; no automatic repair campaign |
 
-No job owns the entire lifecycle. Do not poll GitHub or Vercel from the implementation job. Do not automatically invoke another model, start EAS/Xcode/TestFlight, promote an alias, merge or deploy production.
+No job owns the entire lifecycle. Do not poll GitHub or Vercel from the implementation job. Do not automatically invoke another model, start EAS/Xcode/TestFlight, assign a staging alias, merge or deploy production.
 
 ## 1. Evidence baseline: facts, limits and corrected assumptions
 
@@ -603,7 +603,7 @@ Report in a compact ledger:
 - any scope decision needed and why;
 - explicit statement: hosted recovery and production repair are not established by local results.
 
-After push/open/update of the draft PR, **STOP**. No CI/Vercel waiting, model invocation, alias promotion, hosted replay, physical acceptance, release or merge.
+After push/open/update of the draft PR, **STOP**. No CI/Vercel waiting, model invocation, staging alias assignment, hosted replay, physical acceptance, release or merge.
 
 ---
 
@@ -625,7 +625,13 @@ A new material code head requires re-review. Do not change status wording before
 
 Check current PR head equals the approved head, required checks pass and its exact Preview is Ready. Perform a single observation; if pending, report and stop rather than polling in a loop.
 
-Verify Preview backend is staging, mode `v2_review`, and the intended profile exists in the attested source. Promote only that exact Preview to `https://dayframe-staging.vercel.app`. Do not point it at production configuration/data. No new iOS build is required; verify the ordinary signed staging app's existing identity/API binding.
+Verify Preview backend is staging, mode `v2_review`, and the intended profile exists in the attested source. Point `dayframe-staging.vercel.app` only at that exact Preview using a Vercel alias assignment:
+
+```bash
+vercel alias set <preview-deployment-url> dayframe-staging.vercel.app
+```
+
+Never use `vercel promote` for the staging alias; `vercel promote` targets Production. Do not point it at production configuration/data. No new iOS build is required; verify the ordinary signed staging app's existing identity/API binding.
 
 No migration should be required. If one appears necessary, STOP. Record actual function and staging database region so performance comparisons are not presented as identical topology when they are not.
 
