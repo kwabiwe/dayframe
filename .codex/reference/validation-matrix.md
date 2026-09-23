@@ -235,6 +235,7 @@ Location Intelligence V2 adds these mandatory checks:
 - Run native Swift tests and `npx pod-install`; verify the local Expo module and AppDelegate subscriber autolink; build the checked-in iOS workspace without destructive prebuild cleanup.
 - Apply `202607200001_location_intelligence_v2.sql` to a disposable PostGIS database and run it twice where safe. Inspect checks, GiST/time/idempotency indexes, owner trigger, user-only RLS policies, two-user same-workspace denial, bounded cleanup, cascading raw-lineage deletion, and preservation of derived segments/reviews.
 - Run web/server tests for schema/body bounds, idempotent insert/replay/review creation, coordinate-free activity summaries, owner filters, private/no-store headers, expired evidence, GeoJSON `[longitude, latitude]`, `ST_DWithin`, atomic edit/split/merge/save, rollback, correction feedback, lock conflict, and legacy Accept/Ignore.
+- For `DF-PROD-REPLAY-SCALABILITY-V1`, use only an explicit task-owned loopback PostgreSQL 17/PostGIS `_test` database on `127.0.0.1:54323`. Reproduce S0 with the existing 860-row fixture and S1/S3 with real owner triggers and production-shaped eligible observations; compare base/`review_scalability_v1` first-success, stable and changed-input replay through semantic persistence and commit. Record protected-ID probes, lineage request count/UTF-8 bytes, timeout-configuration calls, total/stage timing, commit headroom, logical fingerprints and schema/trigger fingerprints. Keep the existing 85 ms total-deadline cancellation test separate from 0/40/100 ms per-call simulation, and mark the finite matrix `NOT RUN` when the verified target is absent rather than using default port 54322, hosted data or infrastructure repair.
 - Browser-check Review at desktop and phone widths in light/dark mode: observed-route, endpoint-estimate, no-coordinate, loading, provider-error and expired states; split preview; saved-place selection; failed mutation retaining the card; 44px targets; focus; no horizontal overflow; no console/runtime overlay; and MapLibre cleanup/client-only behavior. With `GEOAPIFY_API_KEY`, verify the authenticated same-origin style/tile path, private browser caching, coordinate-free auth diagnostics, bounded/cancelled chunked provider bodies, no key leakage, and visible Geoapify/OpenMapTiles/OpenStreetMap attribution. Without it, verify the explicit tile-free canvas. If `NEXT_PUBLIC_DAYFRAME_MAP_STYLE_URL` overrides the default, verify its authorised assets, CSP hosts, and attribution separately.
 - Run `npm run validate:location-v2-sqlite`. Run `DATABASE_URL=..._test npm run validate:location-v2-db` against both a fresh base schema and the all-migrations-in-order schema; the validator must refuse a non-local host or a database name without the `_test` suffix.
 - Apply the V2 migration to fresh, representative upgraded, and complete ordered disposable databases; apply it twice where intended. Test user-only RLS with two ordinary non-superusers in one workspace, not a superuser or service role. Separately verify the service-only retention grant, seven-day deletion, raw-lineage cascade, and preservation of derived/confirmed history.
@@ -546,3 +547,15 @@ VoiceOver and the existing normal/Reduce Motion disclosure on the separately
 approved locally signed Xcode staging app. Expo/EAS login is not required for that
 later job; native build/install and hosted acceptance are not implementation-session
 checks for this plan.
+
+For the retained-replay scalability correction, also run
+`npm run validate:location-replay-scalability` once with the same explicit
+task-owned `127.0.0.1:54323` `_test` target. Its finite 26-measurement matrix
+includes 500 ms request/auth cost, 0/40/100 ms raw-driver delay, S1
+first-success/stable/changed-input states, two extra first-success samples and
+S3 growth characterization. It must reach semantic persistence and commit for
+the candidate gate, prove actual ownership triggers and rollback/fault seams,
+and preserve complete base/candidate logical fingerprints. The runner refuses
+missing, hosted, default-port or non-`_test` targets before creating its pool;
+do not increase deadlines, weaken caps, omit old evidence or treat a capacity
+failure as a pass.

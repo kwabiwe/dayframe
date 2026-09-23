@@ -1,0 +1,4091 @@
+{
+  "note": "Initial runs preserved: locks/conflicts passed, but stay change-place action selected the original place. Superseded for genuine correction coverage by the one permitted harness-correction retry. Full snapshots/plans remain in the original local logs.",
+  "rawLogs": [
+    "/private/tmp/df206-c20-base-final.log",
+    "/private/tmp/df206-c20-candidate-final.log"
+  ],
+  "runs": [
+    {
+      "source": "base",
+      "cases": [
+        {
+          "source": "base",
+          "head": "791e57ea3d806c1474407b7b3546d05a42bd0153",
+          "kind": "stay",
+          "schedule": "row-lock",
+          "outcome": "PASS",
+          "trace": [
+            {
+              "actor": "holder",
+              "pid": 97008,
+              "event": "segment_row_lock",
+              "table": "stay_segments",
+              "ownerAdvisory": false
+            },
+            {
+              "actor": "replay",
+              "event": "connect",
+              "pid": 97012
+            },
+            {
+              "actor": "replay",
+              "pid": 97012,
+              "event": "dispatch",
+              "family": "owner_lock"
+            },
+            {
+              "actor": "replay",
+              "pid": 97012,
+              "event": "completed",
+              "family": "owner_lock"
+            },
+            {
+              "actor": "replay",
+              "pid": 97012,
+              "event": "dispatch",
+              "family": "protected_lookup"
+            },
+            {
+              "event": "database_blocking_observed",
+              "pid": 97012,
+              "wait_event_type": "Lock",
+              "wait_event": "transactionid",
+              "blockers": [
+                97008
+              ],
+              "expectedBlocker": 97008
+            },
+            {
+              "actor": "replay",
+              "pid": 97012,
+              "event": "completed",
+              "family": "protected_lookup"
+            },
+            {
+              "event": "actual_query_plan",
+              "family": "protected_lookup",
+              "plan": [
+                {
+                  "Node Type": "LockRows",
+                  "Actual Total Time": 0.189,
+                  "Actual Rows": 23,
+                  "Actual Loops": 1
+                },
+                {
+                  "Node Type": "Sort",
+                  "Parent Relationship": "Outer",
+                  "Actual Total Time": 0.185,
+                  "Actual Rows": 23,
+                  "Actual Loops": 1
+                },
+                {
+                  "Node Type": "Nested Loop",
+                  "Parent Relationship": "Outer",
+                  "Actual Total Time": 0.161,
+                  "Actual Rows": 23,
+                  "Actual Loops": 1
+                },
+                {
+                  "Node Type": "Nested Loop",
+                  "Parent Relationship": "Outer",
+                  "Actual Total Time": 0.046,
+                  "Actual Rows": 23,
+                  "Actual Loops": 1
+                },
+                {
+                  "Node Type": "Index Scan",
+                  "Parent Relationship": "Outer",
+                  "Index Name": "idx_stay_segments_user_time",
+                  "Relation Name": "stay_segments",
+                  "Alias": "s",
+                  "Actual Total Time": 0.015,
+                  "Actual Rows": 1,
+                  "Actual Loops": 1
+                },
+                {
+                  "Node Type": "Seq Scan",
+                  "Parent Relationship": "SubPlan",
+                  "Subplan Name": "SubPlan 2",
+                  "Relation Name": "review_items",
+                  "Alias": "ri",
+                  "Actual Total Time": 0.003,
+                  "Actual Rows": 7,
+                  "Actual Loops": 1
+                },
+                {
+                  "Node Type": "Seq Scan",
+                  "Parent Relationship": "Inner",
+                  "Relation Name": "location_segment_evidence",
+                  "Alias": "lse",
+                  "Actual Total Time": 0.021,
+                  "Actual Rows": 228,
+                  "Actual Loops": 1
+                },
+                {
+                  "Node Type": "Index Scan",
+                  "Parent Relationship": "Inner",
+                  "Index Name": "idx_location_evidence_batch",
+                  "Relation Name": "location_evidence",
+                  "Alias": "le",
+                  "Actual Total Time": 0.005,
+                  "Actual Rows": 12,
+                  "Actual Loops": 23
+                }
+              ]
+            },
+            {
+              "actor": "replay",
+              "pid": 97012,
+              "event": "dispatch",
+              "family": "protected_lookup"
+            },
+            {
+              "actor": "replay",
+              "pid": 97012,
+              "event": "completed",
+              "family": "protected_lookup"
+            },
+            {
+              "event": "actual_query_plan",
+              "family": "protected_lookup",
+              "plan": [
+                {
+                  "Node Type": "LockRows",
+                  "Actual Total Time": 0.012,
+                  "Actual Rows": 0,
+                  "Actual Loops": 1
+                },
+                {
+                  "Node Type": "Sort",
+                  "Parent Relationship": "Outer",
+                  "Actual Total Time": 0.012,
+                  "Actual Rows": 0,
+                  "Actual Loops": 1
+                },
+                {
+                  "Node Type": "Nested Loop",
+                  "Parent Relationship": "Outer",
+                  "Actual Total Time": 0.011,
+                  "Actual Rows": 0,
+                  "Actual Loops": 1
+                },
+                {
+                  "Node Type": "Nested Loop",
+                  "Parent Relationship": "Outer",
+                  "Actual Total Time": 0.011,
+                  "Actual Rows": 0,
+                  "Actual Loops": 1
+                },
+                {
+                  "Node Type": "Seq Scan",
+                  "Parent Relationship": "Outer",
+                  "Relation Name": "commute_segments",
+                  "Alias": "s",
+                  "Actual Total Time": 0.011,
+                  "Actual Rows": 0,
+                  "Actual Loops": 1
+                },
+                {
+                  "Node Type": "Seq Scan",
+                  "Parent Relationship": "SubPlan",
+                  "Subplan Name": "SubPlan 2",
+                  "Relation Name": "review_items",
+                  "Alias": "ri",
+                  "Actual Total Time": 0.003,
+                  "Actual Rows": 7,
+                  "Actual Loops": 1
+                },
+                {
+                  "Node Type": "Seq Scan",
+                  "Parent Relationship": "Inner",
+                  "Relation Name": "location_segment_evidence",
+                  "Alias": "lse",
+                  "Actual Total Time": 0,
+                  "Actual Rows": 0,
+                  "Actual Loops": 0
+                },
+                {
+                  "Node Type": "Index Scan",
+                  "Parent Relationship": "Inner",
+                  "Index Name": "idx_location_evidence_batch",
+                  "Relation Name": "location_evidence",
+                  "Alias": "le",
+                  "Actual Total Time": 0,
+                  "Actual Rows": 0,
+                  "Actual Loops": 0
+                }
+              ]
+            },
+            {
+              "actor": "replay",
+              "pid": 97012,
+              "event": "dispatch",
+              "family": "obsolete_selection"
+            },
+            {
+              "actor": "replay",
+              "pid": 97012,
+              "event": "completed",
+              "family": "obsolete_selection"
+            },
+            {
+              "actor": "replay",
+              "pid": 97012,
+              "event": "dispatch",
+              "family": "owner_lock"
+            },
+            {
+              "actor": "replay",
+              "pid": 97012,
+              "event": "completed",
+              "family": "owner_lock"
+            },
+            {
+              "actor": "replay",
+              "pid": 97012,
+              "event": "dispatch",
+              "family": "commit"
+            },
+            {
+              "actor": "replay",
+              "pid": 97012,
+              "event": "completed",
+              "family": "commit"
+            }
+          ],
+          "before": {
+            "sha256": "85af321a5b824fbde265dd63cf95aa715abaa4911c5bc91a32253413134131d1",
+            "target": {
+              "id": "ec7c5b50-c786-4f7e-92b2-b1f82948df9d",
+              "workspace_id": "a75e9008-3ceb-4f40-baf1-308fd705fdc2",
+              "user_id": "933bd674-d3dc-4437-9bd6-9467e002901d",
+              "place_id": "3377531c-d876-4fb1-a618-24e852b85452",
+              "client_segment_id": "stay_1t70sj0",
+              "status": "finalised",
+              "started_at": "2026-09-07T03:00:00.000Z",
+              "stopped_at": "2026-09-07T03:19:22.500Z",
+              "continuity_status": "broken_by_other_place",
+              "review_status": "needs_review",
+              "created_from_event_id": "43663f68-d94b-4fd2-afaa-e3dfa2c3a48a"
+            }
+          },
+          "protectedState": {
+            "sha256": "9a24182b0b12fd037cfb6fcfa7095efc7571e3a51bd204380838b9d799a97de8"
+          },
+          "after": {
+            "sha256": "9a24182b0b12fd037cfb6fcfa7095efc7571e3a51bd204380838b9d799a97de8",
+            "target": {
+              "id": "ec7c5b50-c786-4f7e-92b2-b1f82948df9d",
+              "workspace_id": "a75e9008-3ceb-4f40-baf1-308fd705fdc2",
+              "user_id": "933bd674-d3dc-4437-9bd6-9467e002901d",
+              "place_id": "3377531c-d876-4fb1-a618-24e852b85452",
+              "client_segment_id": "stay_1t70sj0",
+              "status": "finalised",
+              "started_at": "2026-09-07T03:00:00.000Z",
+              "stopped_at": "2026-09-07T03:19:22.500Z",
+              "continuity_status": "manual",
+              "review_status": "needs_review",
+              "created_from_event_id": "43663f68-d94b-4fd2-afaa-e3dfa2c3a48a"
+            }
+          },
+          "beforeHash": "85af321a5b824fbde265dd63cf95aa715abaa4911c5bc91a32253413134131d1",
+          "afterHash": "9a24182b0b12fd037cfb6fcfa7095efc7571e3a51bd204380838b9d799a97de8",
+          "changedClientIdentity": "stay_1t70sj0",
+          "proposedClientIdentities": [
+            "stay_6h9qqe",
+            "commute_z37d0j",
+            "stay_ck92jn",
+            "stay_1j9q8mb",
+            "commute_jcwzsv",
+            "stay_1xa1aef",
+            "stay_1jgmcj8",
+            "commute_11ywaw9",
+            "stay_dtkl0z"
+          ]
+        },
+        {
+          "source": "base",
+          "head": "791e57ea3d806c1474407b7b3546d05a42bd0153",
+          "kind": "stay",
+          "schedule": "review-first",
+          "outcome": "PASS",
+          "trace": [
+            {
+              "actor": "review",
+              "event": "connect",
+              "pid": 97012
+            },
+            {
+              "actor": "review",
+              "pid": 97012,
+              "event": "dispatch",
+              "family": "try_advisory"
+            },
+            {
+              "actor": "review",
+              "pid": 97012,
+              "event": "completed",
+              "family": "try_advisory",
+              "acquired": true
+            },
+            {
+              "actor": "review",
+              "pid": 97012,
+              "event": "dispatch",
+              "family": "try_advisory"
+            },
+            {
+              "actor": "review",
+              "pid": 97012,
+              "event": "completed",
+              "family": "try_advisory",
+              "acquired": true
+            },
+            {
+              "actor": "review",
+              "pid": 97012,
+              "event": "dispatch",
+              "family": "receipt_write"
+            },
+            {
+              "actor": "review",
+              "pid": 97012,
+              "event": "completed",
+              "family": "receipt_write"
+            },
+            {
+              "actor": "review",
+              "pid": 97012,
+              "event": "dispatch",
+              "family": "commit"
+            },
+            {
+              "actor": "replay",
+              "event": "connect",
+              "pid": 97008
+            },
+            {
+              "actor": "replay",
+              "pid": 97008,
+              "event": "dispatch",
+              "family": "owner_lock"
+            },
+            {
+              "event": "database_blocking_observed",
+              "pid": 97008,
+              "wait_event_type": "Lock",
+              "wait_event": "advisory",
+              "blockers": [
+                97012
+              ],
+              "expectedBlocker": 97012
+            },
+            {
+              "actor": "review",
+              "pid": 97012,
+              "event": "completed",
+              "family": "commit"
+            },
+            {
+              "actor": "replay",
+              "pid": 97008,
+              "event": "completed",
+              "family": "owner_lock"
+            },
+            {
+              "actor": "replay",
+              "pid": 97008,
+              "event": "dispatch",
+              "family": "protected_lookup"
+            },
+            {
+              "actor": "replay",
+              "pid": 97008,
+              "event": "completed",
+              "family": "protected_lookup"
+            },
+            {
+              "actor": "replay",
+              "pid": 97008,
+              "event": "dispatch",
+              "family": "protected_lookup"
+            },
+            {
+              "actor": "replay",
+              "pid": 97008,
+              "event": "completed",
+              "family": "protected_lookup"
+            },
+            {
+              "actor": "replay",
+              "pid": 97008,
+              "event": "dispatch",
+              "family": "obsolete_selection"
+            },
+            {
+              "actor": "replay",
+              "pid": 97008,
+              "event": "completed",
+              "family": "obsolete_selection"
+            },
+            {
+              "event": "committed_decision_excluded_from_obsolete_selection"
+            },
+            {
+              "actor": "replay",
+              "pid": 97008,
+              "event": "dispatch",
+              "family": "owner_lock"
+            },
+            {
+              "actor": "replay",
+              "pid": 97008,
+              "event": "completed",
+              "family": "owner_lock"
+            },
+            {
+              "actor": "replay",
+              "pid": 97008,
+              "event": "dispatch",
+              "family": "commit"
+            },
+            {
+              "actor": "replay",
+              "pid": 97008,
+              "event": "completed",
+              "family": "commit"
+            },
+            {
+              "event": "committed_decision_survived_changed_id_replay"
+            }
+          ],
+          "before": {
+            "sha256": "b6407c047113e934da6a6a1052cdfa1062fbc4124d4e6c6b72882b276a9bf1c6",
+            "target": {
+              "id": "fc45eaf6-db70-49d1-8aa3-15b96b5dd7c3",
+              "workspace_id": "e9987e63-0769-4246-9523-044a8ff5c33e",
+              "user_id": "e3778df3-e828-428c-8982-b098991d7a7f",
+              "place_id": "1b1bcca2-f69a-48f4-a6e5-cc4dc6a820b1",
+              "client_segment_id": "stay_6spdh5",
+              "status": "finalised",
+              "started_at": "2026-09-07T03:00:00.000Z",
+              "stopped_at": "2026-09-07T03:19:22.500Z",
+              "continuity_status": "broken_by_other_place",
+              "review_status": "needs_review",
+              "created_from_event_id": "575fcc7c-04d6-4899-bc7f-0b9fbfa26c62"
+            }
+          },
+          "protectedState": {
+            "sha256": "e607f98d3d0129da44b36e5cd09a1de24abd2c21239f2eea73c68853e0f30958"
+          },
+          "after": {
+            "sha256": "e607f98d3d0129da44b36e5cd09a1de24abd2c21239f2eea73c68853e0f30958",
+            "target": {
+              "id": "fc45eaf6-db70-49d1-8aa3-15b96b5dd7c3",
+              "workspace_id": "e9987e63-0769-4246-9523-044a8ff5c33e",
+              "user_id": "e3778df3-e828-428c-8982-b098991d7a7f",
+              "place_id": "1b1bcca2-f69a-48f4-a6e5-cc4dc6a820b1",
+              "client_segment_id": "stay_6spdh5",
+              "status": "finalised",
+              "started_at": "2026-09-07T03:00:00.000Z",
+              "stopped_at": "2026-09-07T03:19:22.500Z",
+              "continuity_status": "manual",
+              "review_status": "needs_review",
+              "created_from_event_id": "575fcc7c-04d6-4899-bc7f-0b9fbfa26c62"
+            }
+          },
+          "beforeHash": "b6407c047113e934da6a6a1052cdfa1062fbc4124d4e6c6b72882b276a9bf1c6",
+          "afterHash": "e607f98d3d0129da44b36e5cd09a1de24abd2c21239f2eea73c68853e0f30958",
+          "changedClientIdentity": "stay_6spdh5",
+          "proposedClientIdentities": [
+            "stay_6dvfl7",
+            "commute_1blr18w",
+            "stay_r19f21",
+            "stay_1j9q8mb",
+            "commute_jcwzsv",
+            "stay_1xa1aef",
+            "stay_1u2ivyp",
+            "commute_fyruix",
+            "stay_1yh3mkp"
+          ]
+        },
+        {
+          "source": "base",
+          "head": "791e57ea3d806c1474407b7b3546d05a42bd0153",
+          "kind": "stay",
+          "schedule": "replay-first-protection",
+          "outcome": "PASS",
+          "trace": [
+            {
+              "actor": "replay",
+              "event": "connect",
+              "pid": 97008
+            },
+            {
+              "actor": "replay",
+              "pid": 97008,
+              "event": "dispatch",
+              "family": "owner_lock"
+            },
+            {
+              "actor": "replay",
+              "pid": 97008,
+              "event": "completed",
+              "family": "owner_lock"
+            },
+            {
+              "actor": "replay",
+              "pid": 97008,
+              "event": "dispatch",
+              "family": "protected_lookup"
+            },
+            {
+              "actor": "replay",
+              "pid": 97008,
+              "event": "completed",
+              "family": "protected_lookup"
+            },
+            {
+              "event": "barrier_reached",
+              "family": "protected_lookup",
+              "targetSelected": false
+            },
+            {
+              "actor": "review",
+              "event": "connect",
+              "pid": 97012
+            },
+            {
+              "actor": "review",
+              "pid": 97012,
+              "event": "dispatch",
+              "family": "try_advisory"
+            },
+            {
+              "actor": "review",
+              "pid": 97012,
+              "event": "completed",
+              "family": "try_advisory",
+              "acquired": true
+            },
+            {
+              "actor": "review",
+              "pid": 97012,
+              "event": "dispatch",
+              "family": "try_advisory"
+            },
+            {
+              "actor": "review",
+              "pid": 97012,
+              "event": "completed",
+              "family": "try_advisory",
+              "acquired": false
+            },
+            {
+              "actor": "review",
+              "event": "connect",
+              "pid": 97013
+            },
+            {
+              "actor": "review",
+              "pid": 97013,
+              "event": "dispatch",
+              "family": "commit"
+            },
+            {
+              "actor": "review",
+              "pid": 97013,
+              "event": "completed",
+              "family": "commit"
+            },
+            {
+              "event": "nonblocking_owner_conflict_observed",
+              "replayPid": 97008,
+              "reviewPid": 97012,
+              "locks": [
+                {
+                  "pid": 97008,
+                  "locktype": "advisory",
+                  "mode": "ExclusiveLock",
+                  "granted": true
+                }
+              ],
+              "code": "review_item_locked",
+              "reason": "owner_busy",
+              "waitExpected": false
+            },
+            {
+              "actor": "replay",
+              "pid": 97008,
+              "event": "dispatch",
+              "family": "protected_lookup"
+            },
+            {
+              "actor": "replay",
+              "pid": 97008,
+              "event": "completed",
+              "family": "protected_lookup"
+            },
+            {
+              "actor": "replay",
+              "pid": 97008,
+              "event": "dispatch",
+              "family": "obsolete_selection"
+            },
+            {
+              "actor": "replay",
+              "pid": 97008,
+              "event": "completed",
+              "family": "obsolete_selection"
+            },
+            {
+              "actor": "replay",
+              "pid": 97008,
+              "event": "dispatch",
+              "family": "owner_lock"
+            },
+            {
+              "actor": "replay",
+              "pid": 97008,
+              "event": "completed",
+              "family": "owner_lock"
+            },
+            {
+              "actor": "replay",
+              "pid": 97008,
+              "event": "dispatch",
+              "family": "commit"
+            },
+            {
+              "actor": "replay",
+              "pid": 97008,
+              "event": "completed",
+              "family": "commit"
+            },
+            {
+              "event": "stale_decision_retry",
+              "code": "resolution_conflict",
+              "receiptCount": 0
+            }
+          ],
+          "before": {
+            "sha256": "832fcca71377ec71e2e983190f3ab293d7d16cf438f642f1fdb8334950601fcb",
+            "target": {
+              "id": "366b20b5-71da-468d-a5bb-6fa72326410b",
+              "workspace_id": "e264bd8f-3895-4fe4-82f7-5a26a63a8879",
+              "user_id": "af77f863-e668-4a7e-803d-8c2dfc9a5275",
+              "place_id": "f12c1b54-2ac9-49fc-93f6-6244614a5414",
+              "client_segment_id": "stay_qqlcfv",
+              "status": "finalised",
+              "started_at": "2026-09-07T03:00:00.000Z",
+              "stopped_at": "2026-09-07T03:19:22.500Z",
+              "continuity_status": "broken_by_other_place",
+              "review_status": "needs_review",
+              "created_from_event_id": "a4a32f64-17c5-4901-b1bf-d6f1f4933db3"
+            }
+          },
+          "after": {
+            "sha256": "b408085e61b6799b54db6933a0b0d6fe9381e5fd24785c50be8f1d12a4091c02",
+            "target": {
+              "id": "366b20b5-71da-468d-a5bb-6fa72326410b",
+              "workspace_id": "e264bd8f-3895-4fe4-82f7-5a26a63a8879",
+              "user_id": "af77f863-e668-4a7e-803d-8c2dfc9a5275",
+              "place_id": "f12c1b54-2ac9-49fc-93f6-6244614a5414",
+              "client_segment_id": "stay_qqlcfv",
+              "status": "superseded",
+              "started_at": "2026-09-07T03:00:00.000Z",
+              "stopped_at": "2026-09-07T03:19:22.500Z",
+              "continuity_status": "broken_by_other_place",
+              "review_status": "needs_review",
+              "created_from_event_id": "a4a32f64-17c5-4901-b1bf-d6f1f4933db3"
+            }
+          },
+          "beforeHash": "832fcca71377ec71e2e983190f3ab293d7d16cf438f642f1fdb8334950601fcb",
+          "afterHash": "b408085e61b6799b54db6933a0b0d6fe9381e5fd24785c50be8f1d12a4091c02",
+          "changedClientIdentity": "stay_qqlcfv",
+          "proposedClientIdentities": [
+            "stay_6a6ibd",
+            "commute_1ktfz1g",
+            "stay_2jh0h6",
+            "stay_1j9q8mb",
+            "commute_jcwzsv",
+            "stay_1xa1aef",
+            "stay_1lccxlf",
+            "commute_1bcyhdq",
+            "stay_1qm5vtm"
+          ],
+          "protectedState": null
+        },
+        {
+          "source": "base",
+          "head": "791e57ea3d806c1474407b7b3546d05a42bd0153",
+          "kind": "stay",
+          "schedule": "replay-first-obsolete",
+          "outcome": "PASS",
+          "trace": [
+            {
+              "actor": "replay",
+              "event": "connect",
+              "pid": 97008
+            },
+            {
+              "actor": "replay",
+              "pid": 97008,
+              "event": "dispatch",
+              "family": "owner_lock"
+            },
+            {
+              "actor": "replay",
+              "pid": 97008,
+              "event": "completed",
+              "family": "owner_lock"
+            },
+            {
+              "actor": "replay",
+              "pid": 97008,
+              "event": "dispatch",
+              "family": "protected_lookup"
+            },
+            {
+              "actor": "replay",
+              "pid": 97008,
+              "event": "completed",
+              "family": "protected_lookup"
+            },
+            {
+              "actor": "replay",
+              "pid": 97008,
+              "event": "dispatch",
+              "family": "protected_lookup"
+            },
+            {
+              "actor": "replay",
+              "pid": 97008,
+              "event": "completed",
+              "family": "protected_lookup"
+            },
+            {
+              "actor": "replay",
+              "pid": 97008,
+              "event": "dispatch",
+              "family": "obsolete_selection"
+            },
+            {
+              "event": "actual_retirement_predicate_check",
+              "filter": "expiry",
+              "excludedTarget": true
+            },
+            {
+              "event": "actual_retirement_predicate_check",
+              "filter": "device",
+              "excludedTarget": true
+            },
+            {
+              "event": "actual_retirement_predicate_check",
+              "filter": "algorithm",
+              "excludedTarget": true
+            },
+            {
+              "event": "actual_retirement_predicate_check",
+              "filter": "accepted",
+              "excludedTarget": true
+            },
+            {
+              "event": "actual_retirement_predicate_check",
+              "filter": "provenance",
+              "excludedTarget": true
+            },
+            {
+              "event": "actual_retirement_predicate_check",
+              "filter": "owner",
+              "excludedTarget": true
+            },
+            {
+              "event": "actual_query_plan",
+              "family": "obsolete_selection",
+              "plan": [
+                {
+                  "Node Type": "LockRows",
+                  "Actual Total Time": 0.16,
+                  "Actual Rows": 2,
+                  "Actual Loops": 1
+                },
+                {
+                  "Node Type": "Nested Loop",
+                  "Parent Relationship": "Outer",
+                  "Actual Total Time": 0.159,
+                  "Actual Rows": 2,
+                  "Actual Loops": 1
+                },
+                {
+                  "Node Type": "Nested Loop",
+                  "Parent Relationship": "Outer",
+                  "Actual Total Time": 0.033,
+                  "Actual Rows": 2,
+                  "Actual Loops": 1
+                },
+                {
+                  "Node Type": "Nested Loop",
+                  "Parent Relationship": "Outer",
+                  "Actual Total Time": 0.02,
+                  "Actual Rows": 7,
+                  "Actual Loops": 1
+                },
+                {
+                  "Node Type": "Seq Scan",
+                  "Parent Relationship": "Outer",
+                  "Relation Name": "review_items",
+                  "Alias": "ri",
+                  "Actual Total Time": 0.004,
+                  "Actual Rows": 7,
+                  "Actual Loops": 1
+                },
+                {
+                  "Node Type": "Seq Scan",
+                  "Parent Relationship": "Inner",
+                  "Relation Name": "stay_segments",
+                  "Alias": "st",
+                  "Actual Total Time": 0.002,
+                  "Actual Rows": 5,
+                  "Actual Loops": 7
+                },
+                {
+                  "Node Type": "Seq Scan",
+                  "Parent Relationship": "Inner",
+                  "Relation Name": "commute_segments",
+                  "Alias": "cs",
+                  "Actual Total Time": 0.001,
+                  "Actual Rows": 3,
+                  "Actual Loops": 7
+                },
+                {
+                  "Node Type": "Nested Loop",
+                  "Parent Relationship": "Inner",
+                  "Actual Total Time": 0.062,
+                  "Actual Rows": 12,
+                  "Actual Loops": 2
+                },
+                {
+                  "Node Type": "Seq Scan",
+                  "Parent Relationship": "Outer",
+                  "Relation Name": "location_segment_evidence",
+                  "Alias": "lse",
+                  "Actual Total Time": 0.005,
+                  "Actual Rows": 12,
+                  "Actual Loops": 2
+                },
+                {
+                  "Node Type": "Index Scan",
+                  "Parent Relationship": "Inner",
+                  "Index Name": "idx_location_evidence_batch",
+                  "Relation Name": "location_evidence",
+                  "Alias": "le",
+                  "Actual Total Time": 0.003,
+                  "Actual Rows": 12,
+                  "Actual Loops": 25
+                }
+              ]
+            },
+            {
+              "actor": "replay",
+              "pid": 97008,
+              "event": "completed",
+              "family": "obsolete_selection"
+            },
+            {
+              "event": "barrier_reached",
+              "family": "obsolete_selection",
+              "targetSelected": true
+            },
+            {
+              "actor": "review",
+              "event": "connect",
+              "pid": 97013
+            },
+            {
+              "actor": "review",
+              "pid": 97013,
+              "event": "dispatch",
+              "family": "try_advisory"
+            },
+            {
+              "actor": "review",
+              "pid": 97013,
+              "event": "completed",
+              "family": "try_advisory",
+              "acquired": true
+            },
+            {
+              "actor": "review",
+              "pid": 97013,
+              "event": "dispatch",
+              "family": "try_advisory"
+            },
+            {
+              "actor": "review",
+              "pid": 97013,
+              "event": "completed",
+              "family": "try_advisory",
+              "acquired": false
+            },
+            {
+              "actor": "review",
+              "event": "connect",
+              "pid": 97017
+            },
+            {
+              "actor": "review",
+              "pid": 97017,
+              "event": "dispatch",
+              "family": "commit"
+            },
+            {
+              "actor": "review",
+              "pid": 97017,
+              "event": "completed",
+              "family": "commit"
+            },
+            {
+              "event": "nonblocking_owner_conflict_observed",
+              "replayPid": 97008,
+              "reviewPid": 97013,
+              "locks": [
+                {
+                  "pid": 97008,
+                  "locktype": "advisory",
+                  "mode": "ExclusiveLock",
+                  "granted": true
+                }
+              ],
+              "code": "review_item_locked",
+              "reason": "owner_busy",
+              "waitExpected": false
+            },
+            {
+              "actor": "replay",
+              "pid": 97008,
+              "event": "dispatch",
+              "family": "owner_lock"
+            },
+            {
+              "actor": "replay",
+              "pid": 97008,
+              "event": "completed",
+              "family": "owner_lock"
+            },
+            {
+              "actor": "replay",
+              "pid": 97008,
+              "event": "dispatch",
+              "family": "commit"
+            },
+            {
+              "actor": "replay",
+              "pid": 97008,
+              "event": "completed",
+              "family": "commit"
+            },
+            {
+              "event": "stale_decision_retry",
+              "code": "resolution_conflict",
+              "receiptCount": 0
+            }
+          ],
+          "before": {
+            "sha256": "07d5b1982a028fcdb3614f083934ec162604cf3f67521a10399f5a50aa546fbf",
+            "target": {
+              "id": "c88ee77a-e1dc-4f7f-aa01-0f036b629240",
+              "workspace_id": "acdb3ec5-47ab-47ca-aaa5-5a9ee0770e22",
+              "user_id": "18354f8a-1ad7-4d2d-a402-640afebc6cbb",
+              "place_id": "a2a07deb-0317-4fdd-a741-a83e9ed40435",
+              "client_segment_id": "stay_einl17",
+              "status": "finalised",
+              "started_at": "2026-09-07T03:00:00.000Z",
+              "stopped_at": "2026-09-07T03:19:22.500Z",
+              "continuity_status": "broken_by_other_place",
+              "review_status": "needs_review",
+              "created_from_event_id": "3aac57d5-0908-44ed-898b-3f2288a2c453"
+            }
+          },
+          "after": {
+            "sha256": "2862d88b123133ff6bdc20b9d6062e2ee47f6a024e3c68313716a46fbab03dde",
+            "target": {
+              "id": "c88ee77a-e1dc-4f7f-aa01-0f036b629240",
+              "workspace_id": "acdb3ec5-47ab-47ca-aaa5-5a9ee0770e22",
+              "user_id": "18354f8a-1ad7-4d2d-a402-640afebc6cbb",
+              "place_id": "a2a07deb-0317-4fdd-a741-a83e9ed40435",
+              "client_segment_id": "stay_einl17",
+              "status": "superseded",
+              "started_at": "2026-09-07T03:00:00.000Z",
+              "stopped_at": "2026-09-07T03:19:22.500Z",
+              "continuity_status": "broken_by_other_place",
+              "review_status": "needs_review",
+              "created_from_event_id": "3aac57d5-0908-44ed-898b-3f2288a2c453"
+            }
+          },
+          "beforeHash": "07d5b1982a028fcdb3614f083934ec162604cf3f67521a10399f5a50aa546fbf",
+          "afterHash": "2862d88b123133ff6bdc20b9d6062e2ee47f6a024e3c68313716a46fbab03dde",
+          "changedClientIdentity": "stay_einl17",
+          "proposedClientIdentities": [
+            "stay_1h5kpyd",
+            "commute_1r5jqir",
+            "stay_sn5zqh",
+            "stay_1j9q8mb",
+            "commute_jcwzsv",
+            "stay_1xa1aef",
+            "stay_1y6figz",
+            "commute_1x4pejr",
+            "stay_1eqozqx"
+          ],
+          "protectedState": null
+        },
+        {
+          "source": "base",
+          "head": "791e57ea3d806c1474407b7b3546d05a42bd0153",
+          "kind": "commute",
+          "schedule": "row-lock",
+          "outcome": "PASS",
+          "trace": [
+            {
+              "actor": "holder",
+              "pid": 97008,
+              "event": "segment_row_lock",
+              "table": "commute_segments",
+              "ownerAdvisory": false
+            },
+            {
+              "actor": "replay",
+              "event": "connect",
+              "pid": 97017
+            },
+            {
+              "actor": "replay",
+              "pid": 97017,
+              "event": "dispatch",
+              "family": "owner_lock"
+            },
+            {
+              "actor": "replay",
+              "pid": 97017,
+              "event": "completed",
+              "family": "owner_lock"
+            },
+            {
+              "actor": "replay",
+              "pid": 97017,
+              "event": "dispatch",
+              "family": "protected_lookup"
+            },
+            {
+              "actor": "replay",
+              "pid": 97017,
+              "event": "completed",
+              "family": "protected_lookup"
+            },
+            {
+              "event": "actual_query_plan",
+              "family": "protected_lookup",
+              "plan": [
+                {
+                  "Node Type": "LockRows",
+                  "Actual Total Time": 0.018,
+                  "Actual Rows": 0,
+                  "Actual Loops": 1
+                },
+                {
+                  "Node Type": "Sort",
+                  "Parent Relationship": "Outer",
+                  "Actual Total Time": 0.018,
+                  "Actual Rows": 0,
+                  "Actual Loops": 1
+                },
+                {
+                  "Node Type": "Nested Loop",
+                  "Parent Relationship": "Outer",
+                  "Actual Total Time": 0.016,
+                  "Actual Rows": 0,
+                  "Actual Loops": 1
+                },
+                {
+                  "Node Type": "Nested Loop",
+                  "Parent Relationship": "Outer",
+                  "Actual Total Time": 0.016,
+                  "Actual Rows": 0,
+                  "Actual Loops": 1
+                },
+                {
+                  "Node Type": "Index Scan",
+                  "Parent Relationship": "Outer",
+                  "Index Name": "idx_stay_segments_user_time",
+                  "Relation Name": "stay_segments",
+                  "Alias": "s",
+                  "Actual Total Time": 0.016,
+                  "Actual Rows": 0,
+                  "Actual Loops": 1
+                },
+                {
+                  "Node Type": "Seq Scan",
+                  "Parent Relationship": "SubPlan",
+                  "Subplan Name": "SubPlan 2",
+                  "Relation Name": "review_items",
+                  "Alias": "ri",
+                  "Actual Total Time": 0.005,
+                  "Actual Rows": 7,
+                  "Actual Loops": 1
+                },
+                {
+                  "Node Type": "Seq Scan",
+                  "Parent Relationship": "Inner",
+                  "Relation Name": "location_segment_evidence",
+                  "Alias": "lse",
+                  "Actual Total Time": 0,
+                  "Actual Rows": 0,
+                  "Actual Loops": 0
+                },
+                {
+                  "Node Type": "Index Scan",
+                  "Parent Relationship": "Inner",
+                  "Index Name": "idx_location_evidence_batch",
+                  "Relation Name": "location_evidence",
+                  "Alias": "le",
+                  "Actual Total Time": 0,
+                  "Actual Rows": 0,
+                  "Actual Loops": 0
+                }
+              ]
+            },
+            {
+              "actor": "replay",
+              "pid": 97017,
+              "event": "dispatch",
+              "family": "protected_lookup"
+            },
+            {
+              "event": "database_blocking_observed",
+              "pid": 97017,
+              "wait_event_type": "Lock",
+              "wait_event": "transactionid",
+              "blockers": [
+                97008
+              ],
+              "expectedBlocker": 97008
+            },
+            {
+              "actor": "replay",
+              "pid": 97017,
+              "event": "completed",
+              "family": "protected_lookup"
+            },
+            {
+              "event": "actual_query_plan",
+              "family": "protected_lookup",
+              "plan": [
+                {
+                  "Node Type": "LockRows",
+                  "Actual Total Time": 1.08,
+                  "Actual Rows": 30,
+                  "Actual Loops": 1
+                },
+                {
+                  "Node Type": "Sort",
+                  "Parent Relationship": "Outer",
+                  "Actual Total Time": 1.075,
+                  "Actual Rows": 30,
+                  "Actual Loops": 1
+                },
+                {
+                  "Node Type": "Nested Loop",
+                  "Parent Relationship": "Outer",
+                  "Actual Total Time": 1.063,
+                  "Actual Rows": 30,
+                  "Actual Loops": 1
+                },
+                {
+                  "Node Type": "Nested Loop",
+                  "Parent Relationship": "Outer",
+                  "Actual Total Time": 0.052,
+                  "Actual Rows": 30,
+                  "Actual Loops": 1
+                },
+                {
+                  "Node Type": "Seq Scan",
+                  "Parent Relationship": "Outer",
+                  "Relation Name": "commute_segments",
+                  "Alias": "s",
+                  "Actual Total Time": 0.013,
+                  "Actual Rows": 1,
+                  "Actual Loops": 1
+                },
+                {
+                  "Node Type": "Seq Scan",
+                  "Parent Relationship": "SubPlan",
+                  "Subplan Name": "SubPlan 2",
+                  "Relation Name": "review_items",
+                  "Alias": "ri",
+                  "Actual Total Time": 0.004,
+                  "Actual Rows": 7,
+                  "Actual Loops": 1
+                },
+                {
+                  "Node Type": "Seq Scan",
+                  "Parent Relationship": "Inner",
+                  "Relation Name": "location_segment_evidence",
+                  "Alias": "lse",
+                  "Actual Total Time": 0.031,
+                  "Actual Rows": 228,
+                  "Actual Loops": 1
+                },
+                {
+                  "Node Type": "Index Scan",
+                  "Parent Relationship": "Inner",
+                  "Index Name": "idx_location_evidence_batch",
+                  "Relation Name": "location_evidence",
+                  "Alias": "le",
+                  "Actual Total Time": 0.03,
+                  "Actual Rows": 140,
+                  "Actual Loops": 30
+                }
+              ]
+            },
+            {
+              "actor": "replay",
+              "pid": 97017,
+              "event": "dispatch",
+              "family": "obsolete_selection"
+            },
+            {
+              "actor": "replay",
+              "pid": 97017,
+              "event": "completed",
+              "family": "obsolete_selection"
+            },
+            {
+              "actor": "replay",
+              "pid": 97017,
+              "event": "dispatch",
+              "family": "owner_lock"
+            },
+            {
+              "actor": "replay",
+              "pid": 97017,
+              "event": "completed",
+              "family": "owner_lock"
+            },
+            {
+              "actor": "replay",
+              "pid": 97017,
+              "event": "dispatch",
+              "family": "commit"
+            },
+            {
+              "actor": "replay",
+              "pid": 97017,
+              "event": "completed",
+              "family": "commit"
+            }
+          ],
+          "before": {
+            "sha256": "d9083048adc730b58aa8bc7463aeaf05daf8a073a5a0d6d65a93e6507b954e80",
+            "target": {
+              "id": "4a290d82-c1a4-4525-8d3f-beaebc9e22db",
+              "workspace_id": "c471bcf4-6ae4-4b83-ad6d-dba6bdac7e5f",
+              "user_id": "01e99792-81c6-4408-ad46-5cb67a358df1",
+              "client_segment_id": "commute_5khq3t",
+              "status": "finalised",
+              "started_at": "2026-09-07T03:19:22.500Z",
+              "stopped_at": "2026-09-07T04:12:45.000Z",
+              "continuity_status": "uncertain_gap",
+              "created_from_event_id": "79fb7cf9-0043-49af-84d4-a1692fdc89df"
+            }
+          },
+          "protectedState": {
+            "sha256": "029bf89c0c9df9ef3e8cedd77e77df0fff0ee44f068bc4c1d326fccaf45d46a8"
+          },
+          "after": {
+            "sha256": "029bf89c0c9df9ef3e8cedd77e77df0fff0ee44f068bc4c1d326fccaf45d46a8",
+            "target": {
+              "id": "4a290d82-c1a4-4525-8d3f-beaebc9e22db",
+              "workspace_id": "c471bcf4-6ae4-4b83-ad6d-dba6bdac7e5f",
+              "user_id": "01e99792-81c6-4408-ad46-5cb67a358df1",
+              "client_segment_id": "commute_5khq3t",
+              "status": "finalised",
+              "started_at": "2026-09-07T03:19:22.500Z",
+              "stopped_at": "2026-09-07T04:12:45.000Z",
+              "continuity_status": "manual",
+              "created_from_event_id": "79fb7cf9-0043-49af-84d4-a1692fdc89df"
+            }
+          },
+          "beforeHash": "d9083048adc730b58aa8bc7463aeaf05daf8a073a5a0d6d65a93e6507b954e80",
+          "afterHash": "029bf89c0c9df9ef3e8cedd77e77df0fff0ee44f068bc4c1d326fccaf45d46a8",
+          "changedClientIdentity": "commute_5khq3t",
+          "proposedClientIdentities": [
+            "stay_79b31y",
+            "commute_r4ns39",
+            "stay_pybzdi",
+            "stay_1j9q8mb",
+            "commute_jcwzsv",
+            "stay_1xa1aef",
+            "stay_1qthw6g",
+            "commute_mezugd",
+            "stay_1obngue"
+          ]
+        },
+        {
+          "source": "base",
+          "head": "791e57ea3d806c1474407b7b3546d05a42bd0153",
+          "kind": "commute",
+          "schedule": "review-first",
+          "outcome": "PASS",
+          "trace": [
+            {
+              "actor": "review",
+              "event": "connect",
+              "pid": 97017
+            },
+            {
+              "actor": "review",
+              "pid": 97017,
+              "event": "dispatch",
+              "family": "try_advisory"
+            },
+            {
+              "actor": "review",
+              "pid": 97017,
+              "event": "completed",
+              "family": "try_advisory",
+              "acquired": true
+            },
+            {
+              "actor": "review",
+              "pid": 97017,
+              "event": "dispatch",
+              "family": "try_advisory"
+            },
+            {
+              "actor": "review",
+              "pid": 97017,
+              "event": "completed",
+              "family": "try_advisory",
+              "acquired": true
+            },
+            {
+              "actor": "review",
+              "pid": 97017,
+              "event": "dispatch",
+              "family": "receipt_write"
+            },
+            {
+              "actor": "review",
+              "pid": 97017,
+              "event": "completed",
+              "family": "receipt_write"
+            },
+            {
+              "actor": "review",
+              "pid": 97017,
+              "event": "dispatch",
+              "family": "commit"
+            },
+            {
+              "actor": "replay",
+              "event": "connect",
+              "pid": 97008
+            },
+            {
+              "actor": "replay",
+              "pid": 97008,
+              "event": "dispatch",
+              "family": "owner_lock"
+            },
+            {
+              "event": "database_blocking_observed",
+              "pid": 97008,
+              "wait_event_type": "Lock",
+              "wait_event": "advisory",
+              "blockers": [
+                97017
+              ],
+              "expectedBlocker": 97017
+            },
+            {
+              "actor": "review",
+              "pid": 97017,
+              "event": "completed",
+              "family": "commit"
+            },
+            {
+              "actor": "replay",
+              "pid": 97008,
+              "event": "completed",
+              "family": "owner_lock"
+            },
+            {
+              "actor": "replay",
+              "pid": 97008,
+              "event": "dispatch",
+              "family": "protected_lookup"
+            },
+            {
+              "actor": "replay",
+              "pid": 97008,
+              "event": "completed",
+              "family": "protected_lookup"
+            },
+            {
+              "actor": "replay",
+              "pid": 97008,
+              "event": "dispatch",
+              "family": "protected_lookup"
+            },
+            {
+              "actor": "replay",
+              "pid": 97008,
+              "event": "completed",
+              "family": "protected_lookup"
+            },
+            {
+              "actor": "replay",
+              "pid": 97008,
+              "event": "dispatch",
+              "family": "obsolete_selection"
+            },
+            {
+              "actor": "replay",
+              "pid": 97008,
+              "event": "completed",
+              "family": "obsolete_selection"
+            },
+            {
+              "event": "committed_decision_excluded_from_obsolete_selection"
+            },
+            {
+              "actor": "replay",
+              "pid": 97008,
+              "event": "dispatch",
+              "family": "owner_lock"
+            },
+            {
+              "actor": "replay",
+              "pid": 97008,
+              "event": "completed",
+              "family": "owner_lock"
+            },
+            {
+              "actor": "replay",
+              "pid": 97008,
+              "event": "dispatch",
+              "family": "commit"
+            },
+            {
+              "actor": "replay",
+              "pid": 97008,
+              "event": "completed",
+              "family": "commit"
+            },
+            {
+              "event": "committed_decision_survived_changed_id_replay"
+            }
+          ],
+          "before": {
+            "sha256": "8aad5c8769a5b5a43b845fcc9369c00d172adcc7c978f0c401097eaf76c0da46",
+            "target": {
+              "id": "408cac3a-cf3c-4c24-b49f-86834c090ab2",
+              "workspace_id": "a4cc3cf9-039e-4994-91ec-7b5e6e7dc13b",
+              "user_id": "6b61598c-99e3-40ad-8205-15010ecdd35f",
+              "client_segment_id": "commute_5qsp5r",
+              "status": "finalised",
+              "started_at": "2026-09-07T03:19:22.500Z",
+              "stopped_at": "2026-09-07T04:12:45.000Z",
+              "continuity_status": "uncertain_gap",
+              "created_from_event_id": "7186db6e-4198-4c2f-b917-261d1d99b4e6"
+            }
+          },
+          "protectedState": {
+            "sha256": "4fc5e339048c390312e376268e4cf41a1bc087064c1e1927ec5cb1a54eccbefc"
+          },
+          "after": {
+            "sha256": "4fc5e339048c390312e376268e4cf41a1bc087064c1e1927ec5cb1a54eccbefc",
+            "target": {
+              "id": "408cac3a-cf3c-4c24-b49f-86834c090ab2",
+              "workspace_id": "a4cc3cf9-039e-4994-91ec-7b5e6e7dc13b",
+              "user_id": "6b61598c-99e3-40ad-8205-15010ecdd35f",
+              "client_segment_id": "commute_5qsp5r",
+              "status": "finalised",
+              "started_at": "2026-09-07T03:19:22.500Z",
+              "stopped_at": "2026-09-07T04:12:45.000Z",
+              "continuity_status": "manual",
+              "created_from_event_id": "7186db6e-4198-4c2f-b917-261d1d99b4e6"
+            }
+          },
+          "beforeHash": "8aad5c8769a5b5a43b845fcc9369c00d172adcc7c978f0c401097eaf76c0da46",
+          "afterHash": "4fc5e339048c390312e376268e4cf41a1bc087064c1e1927ec5cb1a54eccbefc",
+          "changedClientIdentity": "commute_5qsp5r",
+          "proposedClientIdentities": [
+            "stay_bs3pr8",
+            "commute_5o5mqb",
+            "stay_co55i4",
+            "stay_1j9q8mb",
+            "commute_jcwzsv",
+            "stay_1xa1aef",
+            "stay_gzhci",
+            "commute_1fjtfot",
+            "stay_1uc5erw"
+          ]
+        },
+        {
+          "source": "base",
+          "head": "791e57ea3d806c1474407b7b3546d05a42bd0153",
+          "kind": "commute",
+          "schedule": "replay-first-protection",
+          "outcome": "PASS",
+          "trace": [
+            {
+              "actor": "replay",
+              "event": "connect",
+              "pid": 97008
+            },
+            {
+              "actor": "replay",
+              "pid": 97008,
+              "event": "dispatch",
+              "family": "owner_lock"
+            },
+            {
+              "actor": "replay",
+              "pid": 97008,
+              "event": "completed",
+              "family": "owner_lock"
+            },
+            {
+              "actor": "replay",
+              "pid": 97008,
+              "event": "dispatch",
+              "family": "protected_lookup"
+            },
+            {
+              "actor": "replay",
+              "pid": 97008,
+              "event": "completed",
+              "family": "protected_lookup"
+            },
+            {
+              "event": "barrier_reached",
+              "family": "protected_lookup",
+              "targetSelected": false
+            },
+            {
+              "actor": "review",
+              "event": "connect",
+              "pid": 97017
+            },
+            {
+              "actor": "review",
+              "pid": 97017,
+              "event": "dispatch",
+              "family": "try_advisory"
+            },
+            {
+              "actor": "review",
+              "pid": 97017,
+              "event": "completed",
+              "family": "try_advisory",
+              "acquired": true
+            },
+            {
+              "actor": "review",
+              "pid": 97017,
+              "event": "dispatch",
+              "family": "try_advisory"
+            },
+            {
+              "actor": "review",
+              "pid": 97017,
+              "event": "completed",
+              "family": "try_advisory",
+              "acquired": false
+            },
+            {
+              "actor": "review",
+              "event": "connect",
+              "pid": 97019
+            },
+            {
+              "actor": "review",
+              "pid": 97019,
+              "event": "dispatch",
+              "family": "commit"
+            },
+            {
+              "actor": "review",
+              "pid": 97019,
+              "event": "completed",
+              "family": "commit"
+            },
+            {
+              "event": "nonblocking_owner_conflict_observed",
+              "replayPid": 97008,
+              "reviewPid": 97017,
+              "locks": [
+                {
+                  "pid": 97008,
+                  "locktype": "advisory",
+                  "mode": "ExclusiveLock",
+                  "granted": true
+                }
+              ],
+              "code": "review_item_locked",
+              "reason": "owner_busy",
+              "waitExpected": false
+            },
+            {
+              "actor": "replay",
+              "pid": 97008,
+              "event": "dispatch",
+              "family": "protected_lookup"
+            },
+            {
+              "actor": "replay",
+              "pid": 97008,
+              "event": "completed",
+              "family": "protected_lookup"
+            },
+            {
+              "actor": "replay",
+              "pid": 97008,
+              "event": "dispatch",
+              "family": "obsolete_selection"
+            },
+            {
+              "actor": "replay",
+              "pid": 97008,
+              "event": "completed",
+              "family": "obsolete_selection"
+            },
+            {
+              "actor": "replay",
+              "pid": 97008,
+              "event": "dispatch",
+              "family": "owner_lock"
+            },
+            {
+              "actor": "replay",
+              "pid": 97008,
+              "event": "completed",
+              "family": "owner_lock"
+            },
+            {
+              "actor": "replay",
+              "pid": 97008,
+              "event": "dispatch",
+              "family": "commit"
+            },
+            {
+              "actor": "replay",
+              "pid": 97008,
+              "event": "completed",
+              "family": "commit"
+            },
+            {
+              "event": "stale_decision_retry",
+              "code": "resolution_conflict",
+              "receiptCount": 0
+            }
+          ],
+          "before": {
+            "sha256": "3e95b9f00a4f74fb8b187290c72b4807e89f7fbe62f74f1010493dac6a74c5d3",
+            "target": {
+              "id": "05068886-1e11-46b9-86f8-8a8de43ab85a",
+              "workspace_id": "3ba3a4de-2b9f-4eea-a762-0285f8650177",
+              "user_id": "9dfb75a4-0c2b-450e-9d31-f1eac57ea93a",
+              "client_segment_id": "commute_16k22a9",
+              "status": "finalised",
+              "started_at": "2026-09-07T03:19:22.500Z",
+              "stopped_at": "2026-09-07T04:12:45.000Z",
+              "continuity_status": "uncertain_gap",
+              "created_from_event_id": "7c5be809-d81e-487d-bfc7-d99f6b833bff"
+            }
+          },
+          "after": {
+            "sha256": "a8e7b26b437b485a43a0ee43c419c832d5bd3033ee08551b7c186e7885fcb751",
+            "target": {
+              "id": "05068886-1e11-46b9-86f8-8a8de43ab85a",
+              "workspace_id": "3ba3a4de-2b9f-4eea-a762-0285f8650177",
+              "user_id": "9dfb75a4-0c2b-450e-9d31-f1eac57ea93a",
+              "client_segment_id": "commute_16k22a9",
+              "status": "superseded",
+              "started_at": "2026-09-07T03:19:22.500Z",
+              "stopped_at": "2026-09-07T04:12:45.000Z",
+              "continuity_status": "uncertain_gap",
+              "created_from_event_id": "7c5be809-d81e-487d-bfc7-d99f6b833bff"
+            }
+          },
+          "beforeHash": "3e95b9f00a4f74fb8b187290c72b4807e89f7fbe62f74f1010493dac6a74c5d3",
+          "afterHash": "a8e7b26b437b485a43a0ee43c419c832d5bd3033ee08551b7c186e7885fcb751",
+          "changedClientIdentity": "commute_16k22a9",
+          "proposedClientIdentities": [
+            "stay_1gf6wjd",
+            "commute_1vq44x2",
+            "stay_1j71vpj",
+            "stay_1j9q8mb",
+            "commute_jcwzsv",
+            "stay_1xa1aef",
+            "stay_stzbb",
+            "commute_e1cuni",
+            "stay_2bq1h3"
+          ],
+          "protectedState": null
+        },
+        {
+          "source": "base",
+          "head": "791e57ea3d806c1474407b7b3546d05a42bd0153",
+          "kind": "commute",
+          "schedule": "replay-first-obsolete",
+          "outcome": "PASS",
+          "trace": [
+            {
+              "actor": "replay",
+              "event": "connect",
+              "pid": 97008
+            },
+            {
+              "actor": "replay",
+              "pid": 97008,
+              "event": "dispatch",
+              "family": "owner_lock"
+            },
+            {
+              "actor": "replay",
+              "pid": 97008,
+              "event": "completed",
+              "family": "owner_lock"
+            },
+            {
+              "actor": "replay",
+              "pid": 97008,
+              "event": "dispatch",
+              "family": "protected_lookup"
+            },
+            {
+              "actor": "replay",
+              "pid": 97008,
+              "event": "completed",
+              "family": "protected_lookup"
+            },
+            {
+              "actor": "replay",
+              "pid": 97008,
+              "event": "dispatch",
+              "family": "protected_lookup"
+            },
+            {
+              "actor": "replay",
+              "pid": 97008,
+              "event": "completed",
+              "family": "protected_lookup"
+            },
+            {
+              "actor": "replay",
+              "pid": 97008,
+              "event": "dispatch",
+              "family": "obsolete_selection"
+            },
+            {
+              "event": "actual_retirement_predicate_check",
+              "filter": "expiry",
+              "excludedTarget": true
+            },
+            {
+              "event": "actual_retirement_predicate_check",
+              "filter": "device",
+              "excludedTarget": true
+            },
+            {
+              "event": "actual_retirement_predicate_check",
+              "filter": "algorithm",
+              "excludedTarget": true
+            },
+            {
+              "event": "actual_retirement_predicate_check",
+              "filter": "accepted",
+              "excludedTarget": true
+            },
+            {
+              "event": "actual_retirement_predicate_check",
+              "filter": "provenance",
+              "excludedTarget": true
+            },
+            {
+              "event": "actual_retirement_predicate_check",
+              "filter": "owner",
+              "excludedTarget": true
+            },
+            {
+              "event": "actual_query_plan",
+              "family": "obsolete_selection",
+              "plan": [
+                {
+                  "Node Type": "LockRows",
+                  "Actual Total Time": 0.716,
+                  "Actual Rows": 2,
+                  "Actual Loops": 1
+                },
+                {
+                  "Node Type": "Nested Loop",
+                  "Parent Relationship": "Outer",
+                  "Actual Total Time": 0.715,
+                  "Actual Rows": 2,
+                  "Actual Loops": 1
+                },
+                {
+                  "Node Type": "Nested Loop",
+                  "Parent Relationship": "Outer",
+                  "Actual Total Time": 0.041,
+                  "Actual Rows": 2,
+                  "Actual Loops": 1
+                },
+                {
+                  "Node Type": "Nested Loop",
+                  "Parent Relationship": "Outer",
+                  "Actual Total Time": 0.026,
+                  "Actual Rows": 7,
+                  "Actual Loops": 1
+                },
+                {
+                  "Node Type": "Seq Scan",
+                  "Parent Relationship": "Outer",
+                  "Relation Name": "review_items",
+                  "Alias": "ri",
+                  "Actual Total Time": 0.006,
+                  "Actual Rows": 7,
+                  "Actual Loops": 1
+                },
+                {
+                  "Node Type": "Seq Scan",
+                  "Parent Relationship": "Inner",
+                  "Relation Name": "stay_segments",
+                  "Alias": "st",
+                  "Actual Total Time": 0.002,
+                  "Actual Rows": 5,
+                  "Actual Loops": 7
+                },
+                {
+                  "Node Type": "Seq Scan",
+                  "Parent Relationship": "Inner",
+                  "Relation Name": "commute_segments",
+                  "Alias": "cs",
+                  "Actual Total Time": 0.001,
+                  "Actual Rows": 3,
+                  "Actual Loops": 7
+                },
+                {
+                  "Node Type": "Nested Loop",
+                  "Parent Relationship": "Inner",
+                  "Actual Total Time": 0.335,
+                  "Actual Rows": 12,
+                  "Actual Loops": 2
+                },
+                {
+                  "Node Type": "Seq Scan",
+                  "Parent Relationship": "Outer",
+                  "Relation Name": "location_segment_evidence",
+                  "Alias": "lse",
+                  "Actual Total Time": 0.011,
+                  "Actual Rows": 12,
+                  "Actual Loops": 2
+                },
+                {
+                  "Node Type": "Index Scan",
+                  "Parent Relationship": "Inner",
+                  "Index Name": "idx_location_evidence_batch",
+                  "Relation Name": "location_evidence",
+                  "Alias": "le",
+                  "Actual Total Time": 0.022,
+                  "Actual Rows": 112,
+                  "Actual Loops": 25
+                }
+              ]
+            },
+            {
+              "actor": "replay",
+              "pid": 97008,
+              "event": "completed",
+              "family": "obsolete_selection"
+            },
+            {
+              "event": "barrier_reached",
+              "family": "obsolete_selection",
+              "targetSelected": true
+            },
+            {
+              "actor": "review",
+              "event": "connect",
+              "pid": 97019
+            },
+            {
+              "actor": "review",
+              "pid": 97019,
+              "event": "dispatch",
+              "family": "try_advisory"
+            },
+            {
+              "actor": "review",
+              "pid": 97019,
+              "event": "completed",
+              "family": "try_advisory",
+              "acquired": true
+            },
+            {
+              "actor": "review",
+              "pid": 97019,
+              "event": "dispatch",
+              "family": "try_advisory"
+            },
+            {
+              "actor": "review",
+              "pid": 97019,
+              "event": "completed",
+              "family": "try_advisory",
+              "acquired": false
+            },
+            {
+              "actor": "review",
+              "event": "connect",
+              "pid": 97021
+            },
+            {
+              "actor": "review",
+              "pid": 97021,
+              "event": "dispatch",
+              "family": "commit"
+            },
+            {
+              "actor": "review",
+              "pid": 97021,
+              "event": "completed",
+              "family": "commit"
+            },
+            {
+              "event": "nonblocking_owner_conflict_observed",
+              "replayPid": 97008,
+              "reviewPid": 97019,
+              "locks": [
+                {
+                  "pid": 97008,
+                  "locktype": "advisory",
+                  "mode": "ExclusiveLock",
+                  "granted": true
+                }
+              ],
+              "code": "review_item_locked",
+              "reason": "owner_busy",
+              "waitExpected": false
+            },
+            {
+              "actor": "replay",
+              "pid": 97008,
+              "event": "dispatch",
+              "family": "owner_lock"
+            },
+            {
+              "actor": "replay",
+              "pid": 97008,
+              "event": "completed",
+              "family": "owner_lock"
+            },
+            {
+              "actor": "replay",
+              "pid": 97008,
+              "event": "dispatch",
+              "family": "commit"
+            },
+            {
+              "actor": "replay",
+              "pid": 97008,
+              "event": "completed",
+              "family": "commit"
+            },
+            {
+              "event": "stale_decision_retry",
+              "code": "resolution_conflict",
+              "receiptCount": 0
+            }
+          ],
+          "before": {
+            "sha256": "a4b74c80fc871235e86f095b65e2f83523206d8124fa686367e86fe99a48bc40",
+            "target": {
+              "id": "ccee3516-f28c-4630-a78d-c2159f17a5f6",
+              "workspace_id": "5f0875aa-0640-44ac-9269-304f292d7add",
+              "user_id": "379566eb-67ed-4a9d-a029-4667d6d384c0",
+              "client_segment_id": "commute_3re9hw",
+              "status": "finalised",
+              "started_at": "2026-09-07T03:19:22.500Z",
+              "stopped_at": "2026-09-07T04:12:45.000Z",
+              "continuity_status": "uncertain_gap",
+              "created_from_event_id": "4e299e52-e57e-4e5e-9d09-ba175e5640d7"
+            }
+          },
+          "after": {
+            "sha256": "01e2c62133032524923a3f5b1a9b57a1a6262e9b4384c678fcf8777e7aeb469f",
+            "target": {
+              "id": "ccee3516-f28c-4630-a78d-c2159f17a5f6",
+              "workspace_id": "5f0875aa-0640-44ac-9269-304f292d7add",
+              "user_id": "379566eb-67ed-4a9d-a029-4667d6d384c0",
+              "client_segment_id": "commute_3re9hw",
+              "status": "superseded",
+              "started_at": "2026-09-07T03:19:22.500Z",
+              "stopped_at": "2026-09-07T04:12:45.000Z",
+              "continuity_status": "uncertain_gap",
+              "created_from_event_id": "4e299e52-e57e-4e5e-9d09-ba175e5640d7"
+            }
+          },
+          "beforeHash": "a4b74c80fc871235e86f095b65e2f83523206d8124fa686367e86fe99a48bc40",
+          "afterHash": "01e2c62133032524923a3f5b1a9b57a1a6262e9b4384c678fcf8777e7aeb469f",
+          "changedClientIdentity": "commute_3re9hw",
+          "proposedClientIdentities": [
+            "stay_1k8j86t",
+            "commute_4gnl93",
+            "stay_1gfjsce",
+            "stay_1j9q8mb",
+            "commute_jcwzsv",
+            "stay_1xa1aef",
+            "stay_iinkgz",
+            "commute_bq139",
+            "stay_ayuqvi"
+          ],
+          "protectedState": null
+        }
+      ]
+    },
+    {
+      "source": "candidate",
+      "cases": [
+        {
+          "source": "candidate",
+          "head": "19950c8c5078aa2eed80d770735cc29b487421fd",
+          "kind": "stay",
+          "schedule": "row-lock",
+          "outcome": "PASS",
+          "trace": [
+            {
+              "actor": "holder",
+              "pid": 97101,
+              "event": "segment_row_lock",
+              "table": "stay_segments",
+              "ownerAdvisory": false
+            },
+            {
+              "actor": "replay",
+              "event": "connect",
+              "pid": 97113
+            },
+            {
+              "actor": "replay",
+              "pid": 97113,
+              "event": "dispatch",
+              "family": "owner_lock"
+            },
+            {
+              "actor": "replay",
+              "pid": 97113,
+              "event": "completed",
+              "family": "owner_lock"
+            },
+            {
+              "actor": "replay",
+              "pid": 97113,
+              "event": "dispatch",
+              "family": "protected_lookup"
+            },
+            {
+              "event": "database_blocking_observed",
+              "pid": 97113,
+              "wait_event_type": "Lock",
+              "wait_event": "transactionid",
+              "blockers": [
+                97101
+              ],
+              "expectedBlocker": 97101
+            },
+            {
+              "actor": "replay",
+              "pid": 97113,
+              "event": "completed",
+              "family": "protected_lookup"
+            },
+            {
+              "event": "actual_query_plan",
+              "family": "protected_lookup",
+              "plan": [
+                {
+                  "Node Type": "Append",
+                  "Actual Total Time": 0.489,
+                  "Actual Rows": 23,
+                  "Actual Loops": 1
+                },
+                {
+                  "Node Type": "Subquery Scan",
+                  "Parent Relationship": "Member",
+                  "Alias": "protected_sources",
+                  "Actual Total Time": 0.381,
+                  "Actual Rows": 23,
+                  "Actual Loops": 1
+                },
+                {
+                  "Node Type": "LockRows",
+                  "Parent Relationship": "Subquery",
+                  "Actual Total Time": 0.38,
+                  "Actual Rows": 23,
+                  "Actual Loops": 1
+                },
+                {
+                  "Node Type": "Sort",
+                  "Parent Relationship": "Outer",
+                  "Actual Total Time": 0.376,
+                  "Actual Rows": 23,
+                  "Actual Loops": 1
+                },
+                {
+                  "Node Type": "Nested Loop",
+                  "Parent Relationship": "Outer",
+                  "Actual Total Time": 0.356,
+                  "Actual Rows": 23,
+                  "Actual Loops": 1
+                },
+                {
+                  "Node Type": "Seq Scan",
+                  "Parent Relationship": "Outer",
+                  "Relation Name": "location_segment_evidence",
+                  "Alias": "lse",
+                  "Actual Total Time": 0.022,
+                  "Actual Rows": 228,
+                  "Actual Loops": 1
+                },
+                {
+                  "Node Type": "Nested Loop",
+                  "Parent Relationship": "Inner",
+                  "Actual Total Time": 0.001,
+                  "Actual Rows": 0,
+                  "Actual Loops": 228
+                },
+                {
+                  "Node Type": "Index Scan",
+                  "Parent Relationship": "Outer",
+                  "Index Name": "stay_segments_pkey",
+                  "Relation Name": "stay_segments",
+                  "Alias": "s",
+                  "Actual Total Time": 0,
+                  "Actual Rows": 0,
+                  "Actual Loops": 228
+                },
+                {
+                  "Node Type": "Seq Scan",
+                  "Parent Relationship": "SubPlan",
+                  "Subplan Name": "SubPlan 2",
+                  "Relation Name": "review_items",
+                  "Alias": "ri",
+                  "Actual Total Time": 0.003,
+                  "Actual Rows": 6,
+                  "Actual Loops": 1
+                },
+                {
+                  "Node Type": "Subquery Scan",
+                  "Parent Relationship": "Inner",
+                  "Alias": "le",
+                  "Actual Total Time": 0.009,
+                  "Actual Rows": 1,
+                  "Actual Loops": 23
+                },
+                {
+                  "Node Type": "Seq Scan",
+                  "Parent Relationship": "Subquery",
+                  "Relation Name": "location_evidence",
+                  "Alias": "location_evidence",
+                  "Actual Total Time": 0.008,
+                  "Actual Rows": 1,
+                  "Actual Loops": 23
+                },
+                {
+                  "Node Type": "Subquery Scan",
+                  "Parent Relationship": "Member",
+                  "Alias": "protected_sources_1",
+                  "Actual Total Time": 0.107,
+                  "Actual Rows": 0,
+                  "Actual Loops": 1
+                },
+                {
+                  "Node Type": "LockRows",
+                  "Parent Relationship": "Subquery",
+                  "Actual Total Time": 0.106,
+                  "Actual Rows": 0,
+                  "Actual Loops": 1
+                },
+                {
+                  "Node Type": "Sort",
+                  "Parent Relationship": "Outer",
+                  "Actual Total Time": 0.106,
+                  "Actual Rows": 0,
+                  "Actual Loops": 1
+                },
+                {
+                  "Node Type": "Nested Loop",
+                  "Parent Relationship": "Outer",
+                  "Actual Total Time": 0.106,
+                  "Actual Rows": 0,
+                  "Actual Loops": 1
+                },
+                {
+                  "Node Type": "Seq Scan",
+                  "Parent Relationship": "Outer",
+                  "Relation Name": "location_segment_evidence",
+                  "Alias": "lse_1",
+                  "Actual Total Time": 0.018,
+                  "Actual Rows": 228,
+                  "Actual Loops": 1
+                },
+                {
+                  "Node Type": "Nested Loop",
+                  "Parent Relationship": "Inner",
+                  "Actual Total Time": 0,
+                  "Actual Rows": 0,
+                  "Actual Loops": 228
+                },
+                {
+                  "Node Type": "Index Scan",
+                  "Parent Relationship": "Outer",
+                  "Index Name": "commute_segments_pkey",
+                  "Relation Name": "commute_segments",
+                  "Alias": "s_1",
+                  "Actual Total Time": 0,
+                  "Actual Rows": 0,
+                  "Actual Loops": 228
+                },
+                {
+                  "Node Type": "Seq Scan",
+                  "Parent Relationship": "SubPlan",
+                  "Subplan Name": "SubPlan 4",
+                  "Relation Name": "review_items",
+                  "Alias": "ri_1",
+                  "Actual Total Time": 0.003,
+                  "Actual Rows": 6,
+                  "Actual Loops": 1
+                },
+                {
+                  "Node Type": "Subquery Scan",
+                  "Parent Relationship": "Inner",
+                  "Alias": "le_1",
+                  "Actual Total Time": 0,
+                  "Actual Rows": 0,
+                  "Actual Loops": 0
+                },
+                {
+                  "Node Type": "Seq Scan",
+                  "Parent Relationship": "Subquery",
+                  "Relation Name": "location_evidence",
+                  "Alias": "location_evidence_1",
+                  "Actual Total Time": 0,
+                  "Actual Rows": 0,
+                  "Actual Loops": 0
+                }
+              ]
+            },
+            {
+              "actor": "replay",
+              "pid": 97113,
+              "event": "dispatch",
+              "family": "obsolete_selection"
+            },
+            {
+              "actor": "replay",
+              "pid": 97113,
+              "event": "completed",
+              "family": "obsolete_selection"
+            },
+            {
+              "actor": "replay",
+              "pid": 97113,
+              "event": "dispatch",
+              "family": "owner_lock"
+            },
+            {
+              "actor": "replay",
+              "pid": 97113,
+              "event": "completed",
+              "family": "owner_lock"
+            },
+            {
+              "actor": "replay",
+              "pid": 97113,
+              "event": "dispatch",
+              "family": "commit"
+            },
+            {
+              "actor": "replay",
+              "pid": 97113,
+              "event": "completed",
+              "family": "commit"
+            }
+          ],
+          "before": {
+            "sha256": "cc29af1cd1891aefabe952927599384c9c6c78d16db9c9c56415a29486176ef6",
+            "target": {
+              "id": "192a4450-ac70-4f29-9b4d-158a7342e73c",
+              "workspace_id": "b091843e-0cca-4279-aa59-fa4266648c92",
+              "user_id": "bc61749a-a0c5-42e1-9b84-4f09c9cb7f31",
+              "place_id": "69536760-7b10-4004-a706-1178cadcfdf0",
+              "client_segment_id": "stay_tqymr8",
+              "status": "finalised",
+              "started_at": "2026-09-07T03:00:00.000Z",
+              "stopped_at": "2026-09-07T03:19:22.500Z",
+              "continuity_status": "broken_by_other_place",
+              "review_status": "needs_review",
+              "created_from_event_id": "b7a9bb06-2e1f-4944-a988-96d196bfc44b"
+            }
+          },
+          "protectedState": {
+            "sha256": "9f99e777bc3afdc651c2cc17643e00219957833dc0403355b96d8f06b64c0fb4"
+          },
+          "after": {
+            "sha256": "9f99e777bc3afdc651c2cc17643e00219957833dc0403355b96d8f06b64c0fb4",
+            "target": {
+              "id": "192a4450-ac70-4f29-9b4d-158a7342e73c",
+              "workspace_id": "b091843e-0cca-4279-aa59-fa4266648c92",
+              "user_id": "bc61749a-a0c5-42e1-9b84-4f09c9cb7f31",
+              "place_id": "69536760-7b10-4004-a706-1178cadcfdf0",
+              "client_segment_id": "stay_tqymr8",
+              "status": "finalised",
+              "started_at": "2026-09-07T03:00:00.000Z",
+              "stopped_at": "2026-09-07T03:19:22.500Z",
+              "continuity_status": "manual",
+              "review_status": "needs_review",
+              "created_from_event_id": "b7a9bb06-2e1f-4944-a988-96d196bfc44b"
+            }
+          },
+          "beforeHash": "cc29af1cd1891aefabe952927599384c9c6c78d16db9c9c56415a29486176ef6",
+          "afterHash": "9f99e777bc3afdc651c2cc17643e00219957833dc0403355b96d8f06b64c0fb4",
+          "changedClientIdentity": "stay_tqymr8",
+          "proposedClientIdentities": [
+            "stay_k7sipm",
+            "commute_1gk8std",
+            "stay_1d9k0a8",
+            "stay_1j9q8mb",
+            "commute_jcwzsv",
+            "stay_1xa1aef",
+            "stay_9ok8fw",
+            "commute_bx3wyo",
+            "stay_4fc0dc"
+          ]
+        },
+        {
+          "source": "candidate",
+          "head": "19950c8c5078aa2eed80d770735cc29b487421fd",
+          "kind": "stay",
+          "schedule": "review-first",
+          "outcome": "PASS",
+          "trace": [
+            {
+              "actor": "review",
+              "event": "connect",
+              "pid": 97113
+            },
+            {
+              "actor": "review",
+              "pid": 97113,
+              "event": "dispatch",
+              "family": "try_advisory"
+            },
+            {
+              "actor": "review",
+              "pid": 97113,
+              "event": "completed",
+              "family": "try_advisory",
+              "acquired": true
+            },
+            {
+              "actor": "review",
+              "pid": 97113,
+              "event": "dispatch",
+              "family": "try_advisory"
+            },
+            {
+              "actor": "review",
+              "pid": 97113,
+              "event": "completed",
+              "family": "try_advisory",
+              "acquired": true
+            },
+            {
+              "actor": "review",
+              "pid": 97113,
+              "event": "dispatch",
+              "family": "receipt_write"
+            },
+            {
+              "actor": "review",
+              "pid": 97113,
+              "event": "completed",
+              "family": "receipt_write"
+            },
+            {
+              "actor": "review",
+              "pid": 97113,
+              "event": "dispatch",
+              "family": "commit"
+            },
+            {
+              "actor": "replay",
+              "event": "connect",
+              "pid": 97101
+            },
+            {
+              "actor": "replay",
+              "pid": 97101,
+              "event": "dispatch",
+              "family": "owner_lock"
+            },
+            {
+              "event": "database_blocking_observed",
+              "pid": 97101,
+              "wait_event_type": "Lock",
+              "wait_event": "advisory",
+              "blockers": [
+                97113
+              ],
+              "expectedBlocker": 97113
+            },
+            {
+              "actor": "review",
+              "pid": 97113,
+              "event": "completed",
+              "family": "commit"
+            },
+            {
+              "actor": "replay",
+              "pid": 97101,
+              "event": "completed",
+              "family": "owner_lock"
+            },
+            {
+              "actor": "replay",
+              "pid": 97101,
+              "event": "dispatch",
+              "family": "protected_lookup"
+            },
+            {
+              "actor": "replay",
+              "pid": 97101,
+              "event": "completed",
+              "family": "protected_lookup"
+            },
+            {
+              "actor": "replay",
+              "pid": 97101,
+              "event": "dispatch",
+              "family": "obsolete_selection"
+            },
+            {
+              "actor": "replay",
+              "pid": 97101,
+              "event": "completed",
+              "family": "obsolete_selection"
+            },
+            {
+              "event": "committed_decision_excluded_from_obsolete_selection"
+            },
+            {
+              "actor": "replay",
+              "pid": 97101,
+              "event": "dispatch",
+              "family": "owner_lock"
+            },
+            {
+              "actor": "replay",
+              "pid": 97101,
+              "event": "completed",
+              "family": "owner_lock"
+            },
+            {
+              "actor": "replay",
+              "pid": 97101,
+              "event": "dispatch",
+              "family": "commit"
+            },
+            {
+              "actor": "replay",
+              "pid": 97101,
+              "event": "completed",
+              "family": "commit"
+            },
+            {
+              "event": "committed_decision_survived_changed_id_replay"
+            }
+          ],
+          "before": {
+            "sha256": "03bcdb7146bef288798d73ef1345526f6e4ca7ee9348a519c177cb7a7fcca750",
+            "target": {
+              "id": "41b060a8-9748-4615-98c8-74ba4a8a1c0e",
+              "workspace_id": "058dd9fe-3518-418a-946b-8b9b58d9ba2f",
+              "user_id": "7afed39c-4d61-4383-b71c-f1998b6d3706",
+              "place_id": "2a6a4f92-eb4c-46e6-95f8-75f785860417",
+              "client_segment_id": "stay_a1nhvi",
+              "status": "finalised",
+              "started_at": "2026-09-07T03:00:00.000Z",
+              "stopped_at": "2026-09-07T03:19:22.500Z",
+              "continuity_status": "broken_by_other_place",
+              "review_status": "needs_review",
+              "created_from_event_id": "346915f4-00ad-4785-9264-b3e5428e0eb1"
+            }
+          },
+          "protectedState": {
+            "sha256": "cc5a5b3b0452f6e6fd2e71adb766f6c56dc64e82b2e3f6f0b91219c431e208be"
+          },
+          "after": {
+            "sha256": "cc5a5b3b0452f6e6fd2e71adb766f6c56dc64e82b2e3f6f0b91219c431e208be",
+            "target": {
+              "id": "41b060a8-9748-4615-98c8-74ba4a8a1c0e",
+              "workspace_id": "058dd9fe-3518-418a-946b-8b9b58d9ba2f",
+              "user_id": "7afed39c-4d61-4383-b71c-f1998b6d3706",
+              "place_id": "2a6a4f92-eb4c-46e6-95f8-75f785860417",
+              "client_segment_id": "stay_a1nhvi",
+              "status": "finalised",
+              "started_at": "2026-09-07T03:00:00.000Z",
+              "stopped_at": "2026-09-07T03:19:22.500Z",
+              "continuity_status": "manual",
+              "review_status": "needs_review",
+              "created_from_event_id": "346915f4-00ad-4785-9264-b3e5428e0eb1"
+            }
+          },
+          "beforeHash": "03bcdb7146bef288798d73ef1345526f6e4ca7ee9348a519c177cb7a7fcca750",
+          "afterHash": "cc5a5b3b0452f6e6fd2e71adb766f6c56dc64e82b2e3f6f0b91219c431e208be",
+          "changedClientIdentity": "stay_a1nhvi",
+          "proposedClientIdentities": [
+            "stay_j5psvo",
+            "commute_g1cvl1",
+            "stay_hcurq3",
+            "stay_1j9q8mb",
+            "commute_jcwzsv",
+            "stay_1xa1aef",
+            "stay_s5laja",
+            "commute_1ov9s9q",
+            "stay_ju71t7"
+          ]
+        },
+        {
+          "source": "candidate",
+          "head": "19950c8c5078aa2eed80d770735cc29b487421fd",
+          "kind": "stay",
+          "schedule": "replay-first-protection",
+          "outcome": "PASS",
+          "trace": [
+            {
+              "actor": "replay",
+              "event": "connect",
+              "pid": 97101
+            },
+            {
+              "actor": "replay",
+              "pid": 97101,
+              "event": "dispatch",
+              "family": "owner_lock"
+            },
+            {
+              "actor": "replay",
+              "pid": 97101,
+              "event": "completed",
+              "family": "owner_lock"
+            },
+            {
+              "actor": "replay",
+              "pid": 97101,
+              "event": "dispatch",
+              "family": "protected_lookup"
+            },
+            {
+              "actor": "replay",
+              "pid": 97101,
+              "event": "completed",
+              "family": "protected_lookup"
+            },
+            {
+              "event": "barrier_reached",
+              "family": "protected_lookup",
+              "targetSelected": false
+            },
+            {
+              "actor": "review",
+              "event": "connect",
+              "pid": 97113
+            },
+            {
+              "actor": "review",
+              "pid": 97113,
+              "event": "dispatch",
+              "family": "try_advisory"
+            },
+            {
+              "actor": "review",
+              "pid": 97113,
+              "event": "completed",
+              "family": "try_advisory",
+              "acquired": true
+            },
+            {
+              "actor": "review",
+              "pid": 97113,
+              "event": "dispatch",
+              "family": "try_advisory"
+            },
+            {
+              "actor": "review",
+              "pid": 97113,
+              "event": "completed",
+              "family": "try_advisory",
+              "acquired": false
+            },
+            {
+              "actor": "review",
+              "event": "connect",
+              "pid": 97114
+            },
+            {
+              "actor": "review",
+              "pid": 97114,
+              "event": "dispatch",
+              "family": "commit"
+            },
+            {
+              "actor": "review",
+              "pid": 97114,
+              "event": "completed",
+              "family": "commit"
+            },
+            {
+              "event": "nonblocking_owner_conflict_observed",
+              "replayPid": 97101,
+              "reviewPid": 97113,
+              "locks": [
+                {
+                  "pid": 97101,
+                  "locktype": "advisory",
+                  "mode": "ExclusiveLock",
+                  "granted": true
+                }
+              ],
+              "code": "review_item_locked",
+              "reason": "owner_busy",
+              "waitExpected": false
+            },
+            {
+              "actor": "replay",
+              "pid": 97101,
+              "event": "dispatch",
+              "family": "obsolete_selection"
+            },
+            {
+              "actor": "replay",
+              "pid": 97101,
+              "event": "completed",
+              "family": "obsolete_selection"
+            },
+            {
+              "actor": "replay",
+              "pid": 97101,
+              "event": "dispatch",
+              "family": "owner_lock"
+            },
+            {
+              "actor": "replay",
+              "pid": 97101,
+              "event": "completed",
+              "family": "owner_lock"
+            },
+            {
+              "actor": "replay",
+              "pid": 97101,
+              "event": "dispatch",
+              "family": "commit"
+            },
+            {
+              "actor": "replay",
+              "pid": 97101,
+              "event": "completed",
+              "family": "commit"
+            },
+            {
+              "event": "stale_decision_retry",
+              "code": "resolution_conflict",
+              "receiptCount": 0
+            }
+          ],
+          "before": {
+            "sha256": "f18df962109d71f432ebdc60bfc7097a79ae6cffb949f9e7227472a847693fe7",
+            "target": {
+              "id": "c472c834-3150-4a20-a0c2-f310971b8e79",
+              "workspace_id": "f7857228-6390-4c8f-8759-29bc1ce7b000",
+              "user_id": "66cb88f3-9fb0-4982-a858-b857831c944c",
+              "place_id": "561bc9af-ffb1-4b88-86fd-83ab59eb5f67",
+              "client_segment_id": "stay_hzcndf",
+              "status": "finalised",
+              "started_at": "2026-09-07T03:00:00.000Z",
+              "stopped_at": "2026-09-07T03:19:22.500Z",
+              "continuity_status": "broken_by_other_place",
+              "review_status": "needs_review",
+              "created_from_event_id": "697e89a6-275c-4acd-bfb9-332a0ac8ae2a"
+            }
+          },
+          "after": {
+            "sha256": "81db1cae457b4f04cccd70be6968f7b4d396de6c93105b46c39fa6122d7ea1e1",
+            "target": {
+              "id": "c472c834-3150-4a20-a0c2-f310971b8e79",
+              "workspace_id": "f7857228-6390-4c8f-8759-29bc1ce7b000",
+              "user_id": "66cb88f3-9fb0-4982-a858-b857831c944c",
+              "place_id": "561bc9af-ffb1-4b88-86fd-83ab59eb5f67",
+              "client_segment_id": "stay_hzcndf",
+              "status": "superseded",
+              "started_at": "2026-09-07T03:00:00.000Z",
+              "stopped_at": "2026-09-07T03:19:22.500Z",
+              "continuity_status": "broken_by_other_place",
+              "review_status": "needs_review",
+              "created_from_event_id": "697e89a6-275c-4acd-bfb9-332a0ac8ae2a"
+            }
+          },
+          "beforeHash": "f18df962109d71f432ebdc60bfc7097a79ae6cffb949f9e7227472a847693fe7",
+          "afterHash": "81db1cae457b4f04cccd70be6968f7b4d396de6c93105b46c39fa6122d7ea1e1",
+          "changedClientIdentity": "stay_hzcndf",
+          "proposedClientIdentities": [
+            "stay_vfuwqx",
+            "commute_wwjgv4",
+            "stay_1nwu4ko",
+            "stay_1j9q8mb",
+            "commute_jcwzsv",
+            "stay_1xa1aef",
+            "stay_1ey6kwr",
+            "commute_n9masu",
+            "stay_10ooh88"
+          ],
+          "protectedState": null
+        },
+        {
+          "source": "candidate",
+          "head": "19950c8c5078aa2eed80d770735cc29b487421fd",
+          "kind": "stay",
+          "schedule": "replay-first-obsolete",
+          "outcome": "PASS",
+          "trace": [
+            {
+              "actor": "replay",
+              "event": "connect",
+              "pid": 97101
+            },
+            {
+              "actor": "replay",
+              "pid": 97101,
+              "event": "dispatch",
+              "family": "owner_lock"
+            },
+            {
+              "actor": "replay",
+              "pid": 97101,
+              "event": "completed",
+              "family": "owner_lock"
+            },
+            {
+              "actor": "replay",
+              "pid": 97101,
+              "event": "dispatch",
+              "family": "protected_lookup"
+            },
+            {
+              "actor": "replay",
+              "pid": 97101,
+              "event": "completed",
+              "family": "protected_lookup"
+            },
+            {
+              "actor": "replay",
+              "pid": 97101,
+              "event": "dispatch",
+              "family": "obsolete_selection"
+            },
+            {
+              "event": "actual_retirement_predicate_check",
+              "filter": "expiry",
+              "excludedTarget": true
+            },
+            {
+              "event": "actual_retirement_predicate_check",
+              "filter": "device",
+              "excludedTarget": true
+            },
+            {
+              "event": "actual_retirement_predicate_check",
+              "filter": "algorithm",
+              "excludedTarget": true
+            },
+            {
+              "event": "actual_retirement_predicate_check",
+              "filter": "accepted",
+              "excludedTarget": true
+            },
+            {
+              "event": "actual_retirement_predicate_check",
+              "filter": "provenance",
+              "excludedTarget": true
+            },
+            {
+              "event": "actual_retirement_predicate_check",
+              "filter": "owner",
+              "excludedTarget": true
+            },
+            {
+              "event": "actual_query_plan",
+              "family": "obsolete_selection",
+              "plan": [
+                {
+                  "Node Type": "LockRows",
+                  "Actual Total Time": 0.114,
+                  "Actual Rows": 2,
+                  "Actual Loops": 1
+                },
+                {
+                  "Node Type": "Seq Scan",
+                  "Parent Relationship": "InitPlan",
+                  "Subplan Name": "CTE eligible_lineage",
+                  "Relation Name": "location_segment_evidence",
+                  "Alias": "lse_1",
+                  "Actual Total Time": 0.074,
+                  "Actual Rows": 24,
+                  "Actual Loops": 1
+                },
+                {
+                  "Node Type": "Index Scan",
+                  "Parent Relationship": "InitPlan",
+                  "Subplan Name": "InitPlan 1",
+                  "Index Name": "idx_location_evidence_batch",
+                  "Relation Name": "location_evidence",
+                  "Alias": "le",
+                  "Actual Total Time": 0.049,
+                  "Actual Rows": 229,
+                  "Actual Loops": 1
+                },
+                {
+                  "Node Type": "Nested Loop",
+                  "Parent Relationship": "Outer",
+                  "Actual Total Time": 0.113,
+                  "Actual Rows": 2,
+                  "Actual Loops": 1
+                },
+                {
+                  "Node Type": "Nested Loop",
+                  "Parent Relationship": "Outer",
+                  "Actual Total Time": 0.032,
+                  "Actual Rows": 2,
+                  "Actual Loops": 1
+                },
+                {
+                  "Node Type": "Nested Loop",
+                  "Parent Relationship": "Outer",
+                  "Actual Total Time": 0.018,
+                  "Actual Rows": 7,
+                  "Actual Loops": 1
+                },
+                {
+                  "Node Type": "Seq Scan",
+                  "Parent Relationship": "Outer",
+                  "Relation Name": "review_items",
+                  "Alias": "ri",
+                  "Actual Total Time": 0.004,
+                  "Actual Rows": 7,
+                  "Actual Loops": 1
+                },
+                {
+                  "Node Type": "Seq Scan",
+                  "Parent Relationship": "Inner",
+                  "Relation Name": "stay_segments",
+                  "Alias": "st",
+                  "Actual Total Time": 0.001,
+                  "Actual Rows": 5,
+                  "Actual Loops": 7
+                },
+                {
+                  "Node Type": "Seq Scan",
+                  "Parent Relationship": "Inner",
+                  "Relation Name": "commute_segments",
+                  "Alias": "cs",
+                  "Actual Total Time": 0.001,
+                  "Actual Rows": 3,
+                  "Actual Loops": 7
+                },
+                {
+                  "Node Type": "CTE Scan",
+                  "Parent Relationship": "Inner",
+                  "CTE Name": "eligible_lineage",
+                  "Alias": "lse",
+                  "Actual Total Time": 0.039,
+                  "Actual Rows": 12,
+                  "Actual Loops": 2
+                }
+              ]
+            },
+            {
+              "actor": "replay",
+              "pid": 97101,
+              "event": "completed",
+              "family": "obsolete_selection"
+            },
+            {
+              "event": "barrier_reached",
+              "family": "obsolete_selection",
+              "targetSelected": true
+            },
+            {
+              "actor": "review",
+              "event": "connect",
+              "pid": 97114
+            },
+            {
+              "actor": "review",
+              "pid": 97114,
+              "event": "dispatch",
+              "family": "try_advisory"
+            },
+            {
+              "actor": "review",
+              "pid": 97114,
+              "event": "completed",
+              "family": "try_advisory",
+              "acquired": true
+            },
+            {
+              "actor": "review",
+              "pid": 97114,
+              "event": "dispatch",
+              "family": "try_advisory"
+            },
+            {
+              "actor": "review",
+              "pid": 97114,
+              "event": "completed",
+              "family": "try_advisory",
+              "acquired": false
+            },
+            {
+              "actor": "review",
+              "event": "connect",
+              "pid": 97116
+            },
+            {
+              "actor": "review",
+              "pid": 97116,
+              "event": "dispatch",
+              "family": "commit"
+            },
+            {
+              "actor": "review",
+              "pid": 97116,
+              "event": "completed",
+              "family": "commit"
+            },
+            {
+              "event": "nonblocking_owner_conflict_observed",
+              "replayPid": 97101,
+              "reviewPid": 97114,
+              "locks": [
+                {
+                  "pid": 97101,
+                  "locktype": "advisory",
+                  "mode": "ExclusiveLock",
+                  "granted": true
+                }
+              ],
+              "code": "review_item_locked",
+              "reason": "owner_busy",
+              "waitExpected": false
+            },
+            {
+              "actor": "replay",
+              "pid": 97101,
+              "event": "dispatch",
+              "family": "owner_lock"
+            },
+            {
+              "actor": "replay",
+              "pid": 97101,
+              "event": "completed",
+              "family": "owner_lock"
+            },
+            {
+              "actor": "replay",
+              "pid": 97101,
+              "event": "dispatch",
+              "family": "commit"
+            },
+            {
+              "actor": "replay",
+              "pid": 97101,
+              "event": "completed",
+              "family": "commit"
+            },
+            {
+              "event": "stale_decision_retry",
+              "code": "resolution_conflict",
+              "receiptCount": 0
+            }
+          ],
+          "before": {
+            "sha256": "c9d38dee483d92a46503bb0e9ab53671c1c5d4fee6f71e0b59b8b84f22076624",
+            "target": {
+              "id": "f3bcdb9a-a5ca-4aaf-b73b-4e5d7dc66edd",
+              "workspace_id": "c7360248-2c6f-40dc-9016-a514a6aacc63",
+              "user_id": "83ef79c9-679b-493f-9cb8-0aef729d7a2b",
+              "place_id": "918b2002-3efb-4243-818c-2c8d4e0595aa",
+              "client_segment_id": "stay_gqhefc",
+              "status": "finalised",
+              "started_at": "2026-09-07T03:00:00.000Z",
+              "stopped_at": "2026-09-07T03:19:22.500Z",
+              "continuity_status": "broken_by_other_place",
+              "review_status": "needs_review",
+              "created_from_event_id": "48ef603c-85d8-4246-a584-e0294115bfc6"
+            }
+          },
+          "after": {
+            "sha256": "1d1aad39d9703da97df6b984682f0303c8820d2da18d488701331e19330b5b97",
+            "target": {
+              "id": "f3bcdb9a-a5ca-4aaf-b73b-4e5d7dc66edd",
+              "workspace_id": "c7360248-2c6f-40dc-9016-a514a6aacc63",
+              "user_id": "83ef79c9-679b-493f-9cb8-0aef729d7a2b",
+              "place_id": "918b2002-3efb-4243-818c-2c8d4e0595aa",
+              "client_segment_id": "stay_gqhefc",
+              "status": "superseded",
+              "started_at": "2026-09-07T03:00:00.000Z",
+              "stopped_at": "2026-09-07T03:19:22.500Z",
+              "continuity_status": "broken_by_other_place",
+              "review_status": "needs_review",
+              "created_from_event_id": "48ef603c-85d8-4246-a584-e0294115bfc6"
+            }
+          },
+          "beforeHash": "c9d38dee483d92a46503bb0e9ab53671c1c5d4fee6f71e0b59b8b84f22076624",
+          "afterHash": "1d1aad39d9703da97df6b984682f0303c8820d2da18d488701331e19330b5b97",
+          "changedClientIdentity": "stay_gqhefc",
+          "proposedClientIdentities": [
+            "stay_11qkgd6",
+            "commute_148z0yy",
+            "stay_1ev3n4v",
+            "stay_1j9q8mb",
+            "commute_jcwzsv",
+            "stay_1xa1aef",
+            "stay_ru3gsw",
+            "commute_du4u4o",
+            "stay_15dnevj"
+          ],
+          "protectedState": null
+        },
+        {
+          "source": "candidate",
+          "head": "19950c8c5078aa2eed80d770735cc29b487421fd",
+          "kind": "commute",
+          "schedule": "row-lock",
+          "outcome": "PASS",
+          "trace": [
+            {
+              "actor": "holder",
+              "pid": 97101,
+              "event": "segment_row_lock",
+              "table": "commute_segments",
+              "ownerAdvisory": false
+            },
+            {
+              "actor": "replay",
+              "event": "connect",
+              "pid": 97116
+            },
+            {
+              "actor": "replay",
+              "pid": 97116,
+              "event": "dispatch",
+              "family": "owner_lock"
+            },
+            {
+              "actor": "replay",
+              "pid": 97116,
+              "event": "completed",
+              "family": "owner_lock"
+            },
+            {
+              "actor": "replay",
+              "pid": 97116,
+              "event": "dispatch",
+              "family": "protected_lookup"
+            },
+            {
+              "event": "database_blocking_observed",
+              "pid": 97116,
+              "wait_event_type": "Lock",
+              "wait_event": "transactionid",
+              "blockers": [
+                97101
+              ],
+              "expectedBlocker": 97101
+            },
+            {
+              "actor": "replay",
+              "pid": 97116,
+              "event": "completed",
+              "family": "protected_lookup"
+            },
+            {
+              "event": "actual_query_plan",
+              "family": "protected_lookup",
+              "plan": [
+                {
+                  "Node Type": "Append",
+                  "Actual Total Time": 0.125,
+                  "Actual Rows": 30,
+                  "Actual Loops": 1
+                },
+                {
+                  "Node Type": "Subquery Scan",
+                  "Parent Relationship": "Member",
+                  "Alias": "protected_sources",
+                  "Actual Total Time": 0.017,
+                  "Actual Rows": 0,
+                  "Actual Loops": 1
+                },
+                {
+                  "Node Type": "LockRows",
+                  "Parent Relationship": "Subquery",
+                  "Actual Total Time": 0.017,
+                  "Actual Rows": 0,
+                  "Actual Loops": 1
+                },
+                {
+                  "Node Type": "Sort",
+                  "Parent Relationship": "Outer",
+                  "Actual Total Time": 0.017,
+                  "Actual Rows": 0,
+                  "Actual Loops": 1
+                },
+                {
+                  "Node Type": "Nested Loop",
+                  "Parent Relationship": "Outer",
+                  "Actual Total Time": 0.015,
+                  "Actual Rows": 0,
+                  "Actual Loops": 1
+                },
+                {
+                  "Node Type": "Nested Loop",
+                  "Parent Relationship": "Outer",
+                  "Actual Total Time": 0.015,
+                  "Actual Rows": 0,
+                  "Actual Loops": 1
+                },
+                {
+                  "Node Type": "Index Scan",
+                  "Parent Relationship": "Outer",
+                  "Index Name": "idx_stay_segments_user_time",
+                  "Relation Name": "stay_segments",
+                  "Alias": "s",
+                  "Actual Total Time": 0.014,
+                  "Actual Rows": 0,
+                  "Actual Loops": 1
+                },
+                {
+                  "Node Type": "Seq Scan",
+                  "Parent Relationship": "SubPlan",
+                  "Subplan Name": "SubPlan 2",
+                  "Relation Name": "review_items",
+                  "Alias": "ri",
+                  "Actual Total Time": 0.005,
+                  "Actual Rows": 6,
+                  "Actual Loops": 1
+                },
+                {
+                  "Node Type": "Seq Scan",
+                  "Parent Relationship": "Inner",
+                  "Relation Name": "location_segment_evidence",
+                  "Alias": "lse",
+                  "Actual Total Time": 0,
+                  "Actual Rows": 0,
+                  "Actual Loops": 0
+                },
+                {
+                  "Node Type": "Subquery Scan",
+                  "Parent Relationship": "Inner",
+                  "Alias": "le",
+                  "Actual Total Time": 0,
+                  "Actual Rows": 0,
+                  "Actual Loops": 0
+                },
+                {
+                  "Node Type": "Index Scan",
+                  "Parent Relationship": "Subquery",
+                  "Index Name": "location_evidence_pkey",
+                  "Relation Name": "location_evidence",
+                  "Alias": "location_evidence",
+                  "Actual Total Time": 0,
+                  "Actual Rows": 0,
+                  "Actual Loops": 0
+                },
+                {
+                  "Node Type": "Subquery Scan",
+                  "Parent Relationship": "Member",
+                  "Alias": "protected_sources_1",
+                  "Actual Total Time": 0.107,
+                  "Actual Rows": 30,
+                  "Actual Loops": 1
+                },
+                {
+                  "Node Type": "LockRows",
+                  "Parent Relationship": "Subquery",
+                  "Actual Total Time": 0.105,
+                  "Actual Rows": 30,
+                  "Actual Loops": 1
+                },
+                {
+                  "Node Type": "Sort",
+                  "Parent Relationship": "Outer",
+                  "Actual Total Time": 0.101,
+                  "Actual Rows": 30,
+                  "Actual Loops": 1
+                },
+                {
+                  "Node Type": "Nested Loop",
+                  "Parent Relationship": "Outer",
+                  "Actual Total Time": 0.087,
+                  "Actual Rows": 30,
+                  "Actual Loops": 1
+                },
+                {
+                  "Node Type": "Nested Loop",
+                  "Parent Relationship": "Outer",
+                  "Actual Total Time": 0.043,
+                  "Actual Rows": 30,
+                  "Actual Loops": 1
+                },
+                {
+                  "Node Type": "Index Scan",
+                  "Parent Relationship": "Outer",
+                  "Index Name": "commute_segments_workspace_id_user_id_device_id_client_segm_key",
+                  "Relation Name": "commute_segments",
+                  "Alias": "s_1",
+                  "Actual Total Time": 0.011,
+                  "Actual Rows": 1,
+                  "Actual Loops": 1
+                },
+                {
+                  "Node Type": "Seq Scan",
+                  "Parent Relationship": "SubPlan",
+                  "Subplan Name": "SubPlan 4",
+                  "Relation Name": "review_items",
+                  "Alias": "ri_1",
+                  "Actual Total Time": 0.003,
+                  "Actual Rows": 6,
+                  "Actual Loops": 1
+                },
+                {
+                  "Node Type": "Seq Scan",
+                  "Parent Relationship": "Inner",
+                  "Relation Name": "location_segment_evidence",
+                  "Alias": "lse_1",
+                  "Actual Total Time": 0.025,
+                  "Actual Rows": 228,
+                  "Actual Loops": 1
+                },
+                {
+                  "Node Type": "Subquery Scan",
+                  "Parent Relationship": "Inner",
+                  "Alias": "le_1",
+                  "Actual Total Time": 0.001,
+                  "Actual Rows": 1,
+                  "Actual Loops": 30
+                },
+                {
+                  "Node Type": "Index Scan",
+                  "Parent Relationship": "Subquery",
+                  "Index Name": "location_evidence_pkey",
+                  "Relation Name": "location_evidence",
+                  "Alias": "location_evidence_1",
+                  "Actual Total Time": 0.001,
+                  "Actual Rows": 1,
+                  "Actual Loops": 30
+                }
+              ]
+            },
+            {
+              "actor": "replay",
+              "pid": 97116,
+              "event": "dispatch",
+              "family": "obsolete_selection"
+            },
+            {
+              "actor": "replay",
+              "pid": 97116,
+              "event": "completed",
+              "family": "obsolete_selection"
+            },
+            {
+              "actor": "replay",
+              "pid": 97116,
+              "event": "dispatch",
+              "family": "owner_lock"
+            },
+            {
+              "actor": "replay",
+              "pid": 97116,
+              "event": "completed",
+              "family": "owner_lock"
+            },
+            {
+              "actor": "replay",
+              "pid": 97116,
+              "event": "dispatch",
+              "family": "commit"
+            },
+            {
+              "actor": "replay",
+              "pid": 97116,
+              "event": "completed",
+              "family": "commit"
+            }
+          ],
+          "before": {
+            "sha256": "749a3826979da4dd80752f9a13213ff2de165e2962fb2be573348f6196f982c6",
+            "target": {
+              "id": "ee1d6de9-6d81-4f5f-9998-0eeeb52a2729",
+              "workspace_id": "25c469c1-0e3f-43d8-a7dc-1b74c36d3108",
+              "user_id": "159c315f-1936-4ccc-aa2b-2368c1d1ead6",
+              "client_segment_id": "commute_acao7i",
+              "status": "finalised",
+              "started_at": "2026-09-07T03:19:22.500Z",
+              "stopped_at": "2026-09-07T04:12:45.000Z",
+              "continuity_status": "uncertain_gap",
+              "created_from_event_id": "185e77dc-dc79-4403-b11e-081ab78bc507"
+            }
+          },
+          "protectedState": {
+            "sha256": "2f5a3d79e66fc386884458abc6880f5418f6dda5a1577a44b7afb95af26b3d70"
+          },
+          "after": {
+            "sha256": "2f5a3d79e66fc386884458abc6880f5418f6dda5a1577a44b7afb95af26b3d70",
+            "target": {
+              "id": "ee1d6de9-6d81-4f5f-9998-0eeeb52a2729",
+              "workspace_id": "25c469c1-0e3f-43d8-a7dc-1b74c36d3108",
+              "user_id": "159c315f-1936-4ccc-aa2b-2368c1d1ead6",
+              "client_segment_id": "commute_acao7i",
+              "status": "finalised",
+              "started_at": "2026-09-07T03:19:22.500Z",
+              "stopped_at": "2026-09-07T04:12:45.000Z",
+              "continuity_status": "manual",
+              "created_from_event_id": "185e77dc-dc79-4403-b11e-081ab78bc507"
+            }
+          },
+          "beforeHash": "749a3826979da4dd80752f9a13213ff2de165e2962fb2be573348f6196f982c6",
+          "afterHash": "2f5a3d79e66fc386884458abc6880f5418f6dda5a1577a44b7afb95af26b3d70",
+          "changedClientIdentity": "commute_acao7i",
+          "proposedClientIdentities": [
+            "stay_vbqcyt",
+            "commute_1sct2p3",
+            "stay_11wiwk4",
+            "stay_1j9q8mb",
+            "commute_jcwzsv",
+            "stay_1xa1aef",
+            "stay_1m01cjz",
+            "commute_w86it3",
+            "stay_1q6rthg"
+          ]
+        },
+        {
+          "source": "candidate",
+          "head": "19950c8c5078aa2eed80d770735cc29b487421fd",
+          "kind": "commute",
+          "schedule": "review-first",
+          "outcome": "PASS",
+          "trace": [
+            {
+              "actor": "review",
+              "event": "connect",
+              "pid": 97116
+            },
+            {
+              "actor": "review",
+              "pid": 97116,
+              "event": "dispatch",
+              "family": "try_advisory"
+            },
+            {
+              "actor": "review",
+              "pid": 97116,
+              "event": "completed",
+              "family": "try_advisory",
+              "acquired": true
+            },
+            {
+              "actor": "review",
+              "pid": 97116,
+              "event": "dispatch",
+              "family": "try_advisory"
+            },
+            {
+              "actor": "review",
+              "pid": 97116,
+              "event": "completed",
+              "family": "try_advisory",
+              "acquired": true
+            },
+            {
+              "actor": "review",
+              "pid": 97116,
+              "event": "dispatch",
+              "family": "receipt_write"
+            },
+            {
+              "actor": "review",
+              "pid": 97116,
+              "event": "completed",
+              "family": "receipt_write"
+            },
+            {
+              "actor": "review",
+              "pid": 97116,
+              "event": "dispatch",
+              "family": "commit"
+            },
+            {
+              "actor": "replay",
+              "event": "connect",
+              "pid": 97101
+            },
+            {
+              "actor": "replay",
+              "pid": 97101,
+              "event": "dispatch",
+              "family": "owner_lock"
+            },
+            {
+              "event": "database_blocking_observed",
+              "pid": 97101,
+              "wait_event_type": "Lock",
+              "wait_event": "advisory",
+              "blockers": [
+                97116
+              ],
+              "expectedBlocker": 97116
+            },
+            {
+              "actor": "review",
+              "pid": 97116,
+              "event": "completed",
+              "family": "commit"
+            },
+            {
+              "actor": "replay",
+              "pid": 97101,
+              "event": "completed",
+              "family": "owner_lock"
+            },
+            {
+              "actor": "replay",
+              "pid": 97101,
+              "event": "dispatch",
+              "family": "protected_lookup"
+            },
+            {
+              "actor": "replay",
+              "pid": 97101,
+              "event": "completed",
+              "family": "protected_lookup"
+            },
+            {
+              "actor": "replay",
+              "pid": 97101,
+              "event": "dispatch",
+              "family": "obsolete_selection"
+            },
+            {
+              "actor": "replay",
+              "pid": 97101,
+              "event": "completed",
+              "family": "obsolete_selection"
+            },
+            {
+              "event": "committed_decision_excluded_from_obsolete_selection"
+            },
+            {
+              "actor": "replay",
+              "pid": 97101,
+              "event": "dispatch",
+              "family": "owner_lock"
+            },
+            {
+              "actor": "replay",
+              "pid": 97101,
+              "event": "completed",
+              "family": "owner_lock"
+            },
+            {
+              "actor": "replay",
+              "pid": 97101,
+              "event": "dispatch",
+              "family": "commit"
+            },
+            {
+              "actor": "replay",
+              "pid": 97101,
+              "event": "completed",
+              "family": "commit"
+            },
+            {
+              "event": "committed_decision_survived_changed_id_replay"
+            }
+          ],
+          "before": {
+            "sha256": "5dd7cb42cae195c1ce5c7e50b21c30c60d72627769959a408b330fa1fb2e8204",
+            "target": {
+              "id": "e8b699ca-0db5-48f4-a9a4-f964e84014be",
+              "workspace_id": "b4f06e4c-9620-4d0e-b0bd-f28d63e3ce3f",
+              "user_id": "79259a1b-db41-4123-bd18-de41e3f1d019",
+              "client_segment_id": "commute_uqcw6u",
+              "status": "finalised",
+              "started_at": "2026-09-07T03:19:22.500Z",
+              "stopped_at": "2026-09-07T04:12:45.000Z",
+              "continuity_status": "uncertain_gap",
+              "created_from_event_id": "00d546bf-fd91-49c2-a0e2-cb48652e05df"
+            }
+          },
+          "protectedState": {
+            "sha256": "8340c9ec4a5ee91734bd6326ebece68886c56151a91ddfaddae2231295a12653"
+          },
+          "after": {
+            "sha256": "8340c9ec4a5ee91734bd6326ebece68886c56151a91ddfaddae2231295a12653",
+            "target": {
+              "id": "e8b699ca-0db5-48f4-a9a4-f964e84014be",
+              "workspace_id": "b4f06e4c-9620-4d0e-b0bd-f28d63e3ce3f",
+              "user_id": "79259a1b-db41-4123-bd18-de41e3f1d019",
+              "client_segment_id": "commute_uqcw6u",
+              "status": "finalised",
+              "started_at": "2026-09-07T03:19:22.500Z",
+              "stopped_at": "2026-09-07T04:12:45.000Z",
+              "continuity_status": "manual",
+              "created_from_event_id": "00d546bf-fd91-49c2-a0e2-cb48652e05df"
+            }
+          },
+          "beforeHash": "5dd7cb42cae195c1ce5c7e50b21c30c60d72627769959a408b330fa1fb2e8204",
+          "afterHash": "8340c9ec4a5ee91734bd6326ebece68886c56151a91ddfaddae2231295a12653",
+          "changedClientIdentity": "commute_uqcw6u",
+          "proposedClientIdentities": [
+            "stay_10vbw4a",
+            "commute_u3xkbb",
+            "stay_n8g96l",
+            "stay_1j9q8mb",
+            "commute_jcwzsv",
+            "stay_1xa1aef",
+            "stay_1c93i40",
+            "commute_inuou",
+            "stay_x2v0kt"
+          ]
+        },
+        {
+          "source": "candidate",
+          "head": "19950c8c5078aa2eed80d770735cc29b487421fd",
+          "kind": "commute",
+          "schedule": "replay-first-protection",
+          "outcome": "PASS",
+          "trace": [
+            {
+              "actor": "replay",
+              "event": "connect",
+              "pid": 97101
+            },
+            {
+              "actor": "replay",
+              "pid": 97101,
+              "event": "dispatch",
+              "family": "owner_lock"
+            },
+            {
+              "actor": "replay",
+              "pid": 97101,
+              "event": "completed",
+              "family": "owner_lock"
+            },
+            {
+              "actor": "replay",
+              "pid": 97101,
+              "event": "dispatch",
+              "family": "protected_lookup"
+            },
+            {
+              "actor": "replay",
+              "pid": 97101,
+              "event": "completed",
+              "family": "protected_lookup"
+            },
+            {
+              "event": "barrier_reached",
+              "family": "protected_lookup",
+              "targetSelected": false
+            },
+            {
+              "actor": "review",
+              "event": "connect",
+              "pid": 97116
+            },
+            {
+              "actor": "review",
+              "pid": 97116,
+              "event": "dispatch",
+              "family": "try_advisory"
+            },
+            {
+              "actor": "review",
+              "pid": 97116,
+              "event": "completed",
+              "family": "try_advisory",
+              "acquired": true
+            },
+            {
+              "actor": "review",
+              "pid": 97116,
+              "event": "dispatch",
+              "family": "try_advisory"
+            },
+            {
+              "actor": "review",
+              "pid": 97116,
+              "event": "completed",
+              "family": "try_advisory",
+              "acquired": false
+            },
+            {
+              "actor": "review",
+              "event": "connect",
+              "pid": 97119
+            },
+            {
+              "actor": "review",
+              "pid": 97119,
+              "event": "dispatch",
+              "family": "commit"
+            },
+            {
+              "actor": "review",
+              "pid": 97119,
+              "event": "completed",
+              "family": "commit"
+            },
+            {
+              "event": "nonblocking_owner_conflict_observed",
+              "replayPid": 97101,
+              "reviewPid": 97116,
+              "locks": [
+                {
+                  "pid": 97101,
+                  "locktype": "advisory",
+                  "mode": "ExclusiveLock",
+                  "granted": true
+                }
+              ],
+              "code": "review_item_locked",
+              "reason": "owner_busy",
+              "waitExpected": false
+            },
+            {
+              "actor": "replay",
+              "pid": 97101,
+              "event": "dispatch",
+              "family": "obsolete_selection"
+            },
+            {
+              "actor": "replay",
+              "pid": 97101,
+              "event": "completed",
+              "family": "obsolete_selection"
+            },
+            {
+              "actor": "replay",
+              "pid": 97101,
+              "event": "dispatch",
+              "family": "owner_lock"
+            },
+            {
+              "actor": "replay",
+              "pid": 97101,
+              "event": "completed",
+              "family": "owner_lock"
+            },
+            {
+              "actor": "replay",
+              "pid": 97101,
+              "event": "dispatch",
+              "family": "commit"
+            },
+            {
+              "actor": "replay",
+              "pid": 97101,
+              "event": "completed",
+              "family": "commit"
+            },
+            {
+              "event": "stale_decision_retry",
+              "code": "resolution_conflict",
+              "receiptCount": 0
+            }
+          ],
+          "before": {
+            "sha256": "98264115a22317fd35ca3583b4454c02fa8c8f404a883f4af5a7d6e3f8bfadd2",
+            "target": {
+              "id": "6b1c61b4-1679-43ee-b59b-1e691ec507cc",
+              "workspace_id": "f437a738-17f9-4a3c-8e4e-049b79f61f93",
+              "user_id": "3c148e5f-af41-4193-b5a8-76e0a47ba5ad",
+              "client_segment_id": "commute_1brhfxs",
+              "status": "finalised",
+              "started_at": "2026-09-07T03:19:22.500Z",
+              "stopped_at": "2026-09-07T04:12:45.000Z",
+              "continuity_status": "uncertain_gap",
+              "created_from_event_id": "317f6669-96fc-4247-9278-68b0809caa2a"
+            }
+          },
+          "after": {
+            "sha256": "3ffe76bada1135fd5d159c40ff934075433e03b65c7fe750f610767bf1bf5165",
+            "target": {
+              "id": "6b1c61b4-1679-43ee-b59b-1e691ec507cc",
+              "workspace_id": "f437a738-17f9-4a3c-8e4e-049b79f61f93",
+              "user_id": "3c148e5f-af41-4193-b5a8-76e0a47ba5ad",
+              "client_segment_id": "commute_1brhfxs",
+              "status": "superseded",
+              "started_at": "2026-09-07T03:19:22.500Z",
+              "stopped_at": "2026-09-07T04:12:45.000Z",
+              "continuity_status": "uncertain_gap",
+              "created_from_event_id": "317f6669-96fc-4247-9278-68b0809caa2a"
+            }
+          },
+          "beforeHash": "98264115a22317fd35ca3583b4454c02fa8c8f404a883f4af5a7d6e3f8bfadd2",
+          "afterHash": "3ffe76bada1135fd5d159c40ff934075433e03b65c7fe750f610767bf1bf5165",
+          "changedClientIdentity": "commute_1brhfxs",
+          "proposedClientIdentities": [
+            "stay_10mfylc",
+            "commute_szgtfz",
+            "stay_1ailket",
+            "stay_1j9q8mb",
+            "commute_jcwzsv",
+            "stay_1xa1aef",
+            "stay_1rv3gji",
+            "commute_vhuys0",
+            "stay_99i8ud"
+          ],
+          "protectedState": null
+        },
+        {
+          "source": "candidate",
+          "head": "19950c8c5078aa2eed80d770735cc29b487421fd",
+          "kind": "commute",
+          "schedule": "replay-first-obsolete",
+          "outcome": "PASS",
+          "trace": [
+            {
+              "actor": "replay",
+              "event": "connect",
+              "pid": 97101
+            },
+            {
+              "actor": "replay",
+              "pid": 97101,
+              "event": "dispatch",
+              "family": "owner_lock"
+            },
+            {
+              "actor": "replay",
+              "pid": 97101,
+              "event": "completed",
+              "family": "owner_lock"
+            },
+            {
+              "actor": "replay",
+              "pid": 97101,
+              "event": "dispatch",
+              "family": "protected_lookup"
+            },
+            {
+              "actor": "replay",
+              "pid": 97101,
+              "event": "completed",
+              "family": "protected_lookup"
+            },
+            {
+              "actor": "replay",
+              "pid": 97101,
+              "event": "dispatch",
+              "family": "obsolete_selection"
+            },
+            {
+              "event": "actual_retirement_predicate_check",
+              "filter": "expiry",
+              "excludedTarget": true
+            },
+            {
+              "event": "actual_retirement_predicate_check",
+              "filter": "device",
+              "excludedTarget": true
+            },
+            {
+              "event": "actual_retirement_predicate_check",
+              "filter": "algorithm",
+              "excludedTarget": true
+            },
+            {
+              "event": "actual_retirement_predicate_check",
+              "filter": "accepted",
+              "excludedTarget": true
+            },
+            {
+              "event": "actual_retirement_predicate_check",
+              "filter": "provenance",
+              "excludedTarget": true
+            },
+            {
+              "event": "actual_retirement_predicate_check",
+              "filter": "owner",
+              "excludedTarget": true
+            },
+            {
+              "event": "actual_query_plan",
+              "family": "obsolete_selection",
+              "plan": [
+                {
+                  "Node Type": "LockRows",
+                  "Actual Total Time": 0.11,
+                  "Actual Rows": 2,
+                  "Actual Loops": 1
+                },
+                {
+                  "Node Type": "Seq Scan",
+                  "Parent Relationship": "InitPlan",
+                  "Subplan Name": "CTE eligible_lineage",
+                  "Relation Name": "location_segment_evidence",
+                  "Alias": "lse_1",
+                  "Actual Total Time": 0.07,
+                  "Actual Rows": 24,
+                  "Actual Loops": 1
+                },
+                {
+                  "Node Type": "Index Scan",
+                  "Parent Relationship": "InitPlan",
+                  "Subplan Name": "InitPlan 1",
+                  "Index Name": "idx_location_evidence_batch",
+                  "Relation Name": "location_evidence",
+                  "Alias": "le",
+                  "Actual Total Time": 0.047,
+                  "Actual Rows": 229,
+                  "Actual Loops": 1
+                },
+                {
+                  "Node Type": "Nested Loop",
+                  "Parent Relationship": "Outer",
+                  "Actual Total Time": 0.11,
+                  "Actual Rows": 2,
+                  "Actual Loops": 1
+                },
+                {
+                  "Node Type": "Nested Loop",
+                  "Parent Relationship": "Outer",
+                  "Actual Total Time": 0.033,
+                  "Actual Rows": 2,
+                  "Actual Loops": 1
+                },
+                {
+                  "Node Type": "Nested Loop",
+                  "Parent Relationship": "Outer",
+                  "Actual Total Time": 0.019,
+                  "Actual Rows": 7,
+                  "Actual Loops": 1
+                },
+                {
+                  "Node Type": "Seq Scan",
+                  "Parent Relationship": "Outer",
+                  "Relation Name": "review_items",
+                  "Alias": "ri",
+                  "Actual Total Time": 0.004,
+                  "Actual Rows": 7,
+                  "Actual Loops": 1
+                },
+                {
+                  "Node Type": "Seq Scan",
+                  "Parent Relationship": "Inner",
+                  "Relation Name": "stay_segments",
+                  "Alias": "st",
+                  "Actual Total Time": 0.001,
+                  "Actual Rows": 5,
+                  "Actual Loops": 7
+                },
+                {
+                  "Node Type": "Seq Scan",
+                  "Parent Relationship": "Inner",
+                  "Relation Name": "commute_segments",
+                  "Alias": "cs",
+                  "Actual Total Time": 0.001,
+                  "Actual Rows": 3,
+                  "Actual Loops": 7
+                },
+                {
+                  "Node Type": "CTE Scan",
+                  "Parent Relationship": "Inner",
+                  "CTE Name": "eligible_lineage",
+                  "Alias": "lse",
+                  "Actual Total Time": 0.037,
+                  "Actual Rows": 12,
+                  "Actual Loops": 2
+                }
+              ]
+            },
+            {
+              "actor": "replay",
+              "pid": 97101,
+              "event": "completed",
+              "family": "obsolete_selection"
+            },
+            {
+              "event": "barrier_reached",
+              "family": "obsolete_selection",
+              "targetSelected": true
+            },
+            {
+              "actor": "review",
+              "event": "connect",
+              "pid": 97119
+            },
+            {
+              "actor": "review",
+              "pid": 97119,
+              "event": "dispatch",
+              "family": "try_advisory"
+            },
+            {
+              "actor": "review",
+              "pid": 97119,
+              "event": "completed",
+              "family": "try_advisory",
+              "acquired": true
+            },
+            {
+              "actor": "review",
+              "pid": 97119,
+              "event": "dispatch",
+              "family": "try_advisory"
+            },
+            {
+              "actor": "review",
+              "pid": 97119,
+              "event": "completed",
+              "family": "try_advisory",
+              "acquired": false
+            },
+            {
+              "actor": "review",
+              "event": "connect",
+              "pid": 97121
+            },
+            {
+              "actor": "review",
+              "pid": 97121,
+              "event": "dispatch",
+              "family": "commit"
+            },
+            {
+              "actor": "review",
+              "pid": 97121,
+              "event": "completed",
+              "family": "commit"
+            },
+            {
+              "event": "nonblocking_owner_conflict_observed",
+              "replayPid": 97101,
+              "reviewPid": 97119,
+              "locks": [
+                {
+                  "pid": 97101,
+                  "locktype": "advisory",
+                  "mode": "ExclusiveLock",
+                  "granted": true
+                }
+              ],
+              "code": "review_item_locked",
+              "reason": "owner_busy",
+              "waitExpected": false
+            },
+            {
+              "actor": "replay",
+              "pid": 97101,
+              "event": "dispatch",
+              "family": "owner_lock"
+            },
+            {
+              "actor": "replay",
+              "pid": 97101,
+              "event": "completed",
+              "family": "owner_lock"
+            },
+            {
+              "actor": "replay",
+              "pid": 97101,
+              "event": "dispatch",
+              "family": "commit"
+            },
+            {
+              "actor": "replay",
+              "pid": 97101,
+              "event": "completed",
+              "family": "commit"
+            },
+            {
+              "event": "stale_decision_retry",
+              "code": "resolution_conflict",
+              "receiptCount": 0
+            }
+          ],
+          "before": {
+            "sha256": "af2255bcc209ce8481b182375c67310850d9e962c69be990f07150c7d06bfee8",
+            "target": {
+              "id": "a17f9fdc-e7e5-4225-a110-d2f5a9d6a809",
+              "workspace_id": "66f7f74b-0108-447e-ada8-eef0baba6b8b",
+              "user_id": "58a48448-c8ac-44be-81e7-d9e2babb12c1",
+              "client_segment_id": "commute_a5qe3g",
+              "status": "finalised",
+              "started_at": "2026-09-07T03:19:22.500Z",
+              "stopped_at": "2026-09-07T04:12:45.000Z",
+              "continuity_status": "uncertain_gap",
+              "created_from_event_id": "f0c4123e-e5c7-436f-b3d3-cbd6e86e55fc"
+            }
+          },
+          "after": {
+            "sha256": "1a735a2861a09f8b8c3f02b96532d0ff6d97433b192dbe7e8599eee464b16691",
+            "target": {
+              "id": "a17f9fdc-e7e5-4225-a110-d2f5a9d6a809",
+              "workspace_id": "66f7f74b-0108-447e-ada8-eef0baba6b8b",
+              "user_id": "58a48448-c8ac-44be-81e7-d9e2babb12c1",
+              "client_segment_id": "commute_a5qe3g",
+              "status": "superseded",
+              "started_at": "2026-09-07T03:19:22.500Z",
+              "stopped_at": "2026-09-07T04:12:45.000Z",
+              "continuity_status": "uncertain_gap",
+              "created_from_event_id": "f0c4123e-e5c7-436f-b3d3-cbd6e86e55fc"
+            }
+          },
+          "beforeHash": "af2255bcc209ce8481b182375c67310850d9e962c69be990f07150c7d06bfee8",
+          "afterHash": "1a735a2861a09f8b8c3f02b96532d0ff6d97433b192dbe7e8599eee464b16691",
+          "changedClientIdentity": "commute_a5qe3g",
+          "proposedClientIdentities": [
+            "stay_9ps5us",
+            "commute_bi7kbz",
+            "stay_jpmfxq",
+            "stay_1j9q8mb",
+            "commute_jcwzsv",
+            "stay_1xa1aef",
+            "stay_kxk0za",
+            "commute_1lvppqs",
+            "stay_d6qtmm"
+          ],
+          "protectedState": null
+        }
+      ]
+    }
+  ]
+}

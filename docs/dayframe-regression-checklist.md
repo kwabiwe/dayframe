@@ -401,6 +401,16 @@ Before merging implementation PRs, ask KB to test the exact Ready Preview promot
 - [ ] Server-effective `v2_review` retained replay reuses only a known full-cap
   timeout pair; near-deadline, savepoint/uncertain state and all other callers
   retain the existing per-query configuration and business-query order.
+- [ ] The retained-replay scalability profile is selected only from the
+  server-effective `v2_review` decision. On the verified local PostgreSQL
+  owner-trigger target, S1 first-success/stable/changed-input replay reaches
+  semantic persistence and commit with complete logical fingerprints; protected
+  candidate IDs and mutable lineage respect the 2,048-row/512 KiB and
+  2,048-row/1 MiB bounds, while segment and semantic batches remain 250.
+- [ ] Replay fault injection proves an executed lineage write rolls back the
+  separate deletion and preserves manual/terminal history, ordering, roles,
+  conflicts, receipts and Review outcomes. The existing 85 ms total-deadline
+  cancellation case remains distinct from per-call latency simulation.
 - [ ] Settings/export show safe separate upload/processing results and last success,
   including replay failure with an empty queue. Success clears only its endpoint.
 - [ ] Hostile bodies/headers never leak into diagnostics; auth/session/backend

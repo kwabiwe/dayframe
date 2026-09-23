@@ -44,6 +44,10 @@ describe("request-local Location observation",()=>{
   observer.onLocationCount("lineageLinksPrepared",250);
   observer.onLocationCount("lineageChunksStarted",1);
   observer.onLocationCount("lineageChunksCompleted",0);
+  observer.onLocationCount("protectionEvidenceIds",2048);
+  observer.onLocationCount("protectionQueryBatches",2);
+  observer.onLocationCount("lineageLinksIntended",2048);
+  observer.onLocationCount("lineageLinksIntended",-1);
   (observer.onLocationCount as (name:string,value:number)=>void)("workspaceId",42);
   vi.advanceTimersByTime(20);
   observer.finish(new Response(null,{status:503}),new SyncOperationError("operation_deadline","effect","location_evidence"),{error:"Busy"});
@@ -55,7 +59,8 @@ describe("request-local Location observation",()=>{
     request_auth:{elapsedMs:12,completed:true,remainingMsAtStart:7000,remainingMsAfter:6988},
     lineage_insertion:{elapsedMs:20,completed:false,remainingMsAtStart:500}
    },
-   counts:{evidenceRows:1033,lineageLinksPrepared:250,lineageChunksStarted:1,lineageChunksCompleted:0}
+   counts:{evidenceRows:1033,lineageLinksPrepared:250,lineageChunksStarted:1,lineageChunksCompleted:0,
+    protectionEvidenceIds:2048,protectionQueryBatches:2,lineageLinksIntended:0}
   });
   expect(JSON.stringify(record)).not.toMatch(/workspace|user|coordinate|secret/i);
   vi.useRealTimers();

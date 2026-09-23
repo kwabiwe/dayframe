@@ -259,14 +259,18 @@ export function deriveCommutes(
   options: CommuteDerivationOptions = {}
 ) {
   const commutes: CommuteSegment[] = [];
+  // This invocation's evidence is immutable. Both per-pair scans below need
+  // the same timestamps; parse once rather than twice per evidence/stay pair.
+  // Keep the original array/filter order and strict endpoint comparisons.
+  const occurredAtMs = acceptedEvidence.map(({ evidence }) => Date.parse(evidence.occurredAt));
   for (let index = 1; index < stays.length; index += 1) {
     const from = stays[index - 1];
     const to = stays[index];
     if (!from.stoppedAt) continue;
     const originalStartedAtMs = Date.parse(from.stoppedAt);
     const stoppedAtMs = Date.parse(to.startedAt);
-    const boundaryEvidence = acceptedEvidence.filter(({ evidence }) => {
-      const at = Date.parse(evidence.occurredAt);
+    const boundaryEvidence = acceptedEvidence.filter((_item, evidenceIndex) => {
+      const at = occurredAtMs[evidenceIndex];
       return at > originalStartedAtMs && at < stoppedAtMs;
     });
     const latestFromSupport = boundaryEvidence
@@ -295,9 +299,8 @@ export function deriveCommutes(
       continue;
     }
 
-    const routeEvidence = acceptedEvidence.filter((item) => {
-      const { evidence } = item;
-      const at = Date.parse(evidence.occurredAt);
+    const routeEvidence = acceptedEvidence.filter((item, evidenceIndex) => {
+      const at = occurredAtMs[evidenceIndex];
       if (at <= startedAtMs || at >= stoppedAtMs || evidencePoint(item) == null) return false;
       return !evidenceMatchesStay(item, from) && !evidenceMatchesStay(item, to);
     });
