@@ -2,10 +2,20 @@
 
 Dayframe uses separate hosted lanes:
 
-- production: `https://dayframe-web.vercel.app` with production Supabase;
-- staging: `https://dayframe-staging.vercel.app` with the `dayframe-staging` Supabase project.
+- production: `https://dayframe-web.vercel.app` with production Supabase in
+  Frankfurt (`eu-central-1`);
+- staging: `https://dayframe-staging.vercel.app` with the `dayframe-staging`
+  Supabase project in Paris (`eu-west-3`).
 
-The stable staging alias is deliberately promoted to one selected Vercel Preview deployment at a time. Ordinary branch Preview URLs use the same Preview-scoped staging credentials.
+The Vercel project Function Region is `fra1` (Frankfurt). Application compute
+is intentionally kept in Europe, close to both databases, to avoid unnecessary
+application-to-database latency. Production and Preview/staging remain separate
+Supabase environments.
+
+The stable staging hostname is deliberately pointed to one explicitly selected
+Vercel Preview deployment at a time. Ordinary branch Preview URLs use the same
+Preview-scoped staging credentials. Production remains
+`https://dayframe-web.vercel.app`.
 
 ## Credentials Needed
 
