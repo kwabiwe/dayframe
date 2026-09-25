@@ -16,9 +16,11 @@ type MatchInput = {
   savedPlaceIdHint?: string | null;
 };
 
+const MATCH_BOUNDARY_TOLERANCE_METERS = 25;
+
 function matchClass(distance: number, radius: number, allowance: number): LocationMatchClass {
-  if (distance <= radius || distance + allowance <= radius + 25) return "strong";
-  if (distance - allowance <= radius + 25) return "plausible";
+  if (distance <= radius || distance + allowance <= radius + MATCH_BOUNDARY_TOLERANCE_METERS) return "strong";
+  if (distance - allowance <= radius + MATCH_BOUNDARY_TOLERANCE_METERS) return "plausible";
   return "outside";
 }
 
@@ -73,6 +75,34 @@ export function matchLocationToPlaces(
   if (plausible.length === 0) return { kind: "unknown", placeId: null, candidates };
 
   const top = plausible[0];
+
+  // A learned centre within the matcher's existing 25 m boundary tolerance can
+  // describe the same site as a saved place. Keep the user's saved identity
+  // only when both candidates independently match strongly. A merely plausible
+  // pair has no evidence for choosing either identity.
+  if (plausible.length === 2 && plausible.some((candidate) => candidate.source === "saved") &&
+      plausible.some((candidate) => candidate.source === "learned")) {
+    const saved = plausible.find((candidate) => candidate.source === "saved")!;
+    const learned = plausible.find((candidate) => candidate.source === "learned")!;
+    const savedPlace = savedPlaces.find((place) => place.id === saved.id)!;
+    const learnedPlace = learnedPlaces.find((place) => place.id === learned.id)!;
+    if (distanceMeters(savedPlace, learnedPlace) <= MATCH_BOUNDARY_TOLERANCE_METERS) {
+      const weakAccuracy = input.horizontalAccuracyMeters == null ||
+        input.horizontalAccuracyMeters > config.highQualityHorizontalAccuracyMeters;
+      if (saved.matchClass === "strong" && learned.matchClass === "strong" && weakAccuracy &&
+          !input.savedPlaceIdHint && !input.activePlaceId) {
+        return { kind: "ambiguous", placeId: null, candidates: plausible };
+      }
+      if (saved.matchClass === "strong" && learned.matchClass === "strong" &&
+          input.activePlaceId !== learned.id && saved.priority >= learned.priority) {
+        return { kind: "saved", placeId: saved.id, candidates: plausible };
+      }
+      if (saved.matchClass === "plausible" && learned.matchClass === "plausible" &&
+          !input.savedPlaceIdHint && !input.activePlaceId) {
+        return { kind: "ambiguous", placeId: null, candidates: plausible };
+      }
+    }
+  }
 
   return {
     kind: top.source,

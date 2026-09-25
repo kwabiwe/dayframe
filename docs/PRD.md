@@ -172,6 +172,8 @@ Thresholded overlap is the maximum intersection with any single confirmed/accept
 
 Overlapping saved radii select one deterministic best existing saved match using the established hint, continuity, distance and priority rules plus stable ID tie-breaks. Retain bounded alternatives; do not enlarge radii or call Apple POI search from matching/replay.
 
+When an accepted learned centre is effectively coincident with one saved place and both independently match strongly, the saved place retains its canonical identity unless stronger existing continuity or correction priority selects the learned place. A low-accuracy Visit at the same site remains ambiguous on its own; it may support the saved episode only with independent strong observations near both ends and no contradictory movement or place evidence. Other weak coincident matches remain ambiguous; distinct nearby places remain separate candidates. A learned-only catalogue keeps its normal matching behavior.
+
 ## 7. Tools / Features
 
 Manual timer:

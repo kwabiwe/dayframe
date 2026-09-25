@@ -412,6 +412,41 @@ function preprocess(input: LocationEngineInput) {
   return { accepted, rejectedEvidence };
 }
 
+function resolveCorroboratedCoincidentVisits(accepted: ClassifiedEvidence[], input: LocationEngineInput) {
+  const minimumCount = input.config.savedPlaceArrivalMinimumStrongPointCount;
+  const windowMs = input.config.savedPlaceArrivalCorroborationWindowMs;
+  for (const item of accepted) {
+    const { evidence, match } = item;
+    if (evidence.kind !== "visit" || !evidence.endedAt || evidence.isSimulated ||
+        match?.kind !== "ambiguous" || match.candidates.length !== 2) continue;
+    const saved = match.candidates.find((candidate) => candidate.source === "saved" && candidate.matchClass === "strong");
+    const learned = match.candidates.find((candidate) => candidate.source === "learned" && candidate.matchClass === "strong");
+    if (!saved || !learned) continue;
+    const startedAtMs = Date.parse(evidence.occurredAt);
+    const stoppedAtMs = Date.parse(evidence.endedAt);
+    if (!Number.isFinite(stoppedAtMs) || stoppedAtMs - startedAtMs < input.config.savedPlaceMinimumDwellMs) continue;
+    const independent = accepted.filter((candidate) => {
+      const at = Date.parse(candidate.evidence.occurredAt);
+      return at >= startedAtMs && at <= stoppedAtMs &&
+        (candidate.evidence.kind === "standard_location" || candidate.evidence.kind === "significant_change") &&
+        !candidate.evidence.isSimulated && accurateCoordinate(candidate, input);
+    });
+    if (independent.some((candidate) =>
+      !strongSavedPoint(candidate, saved.id, input) ||
+      (candidate.evidence.speedMetersPerSecond ?? 0) >= input.config.movementSpeedThresholdMps
+    )) continue;
+    const early = independent.filter((candidate) =>
+      Date.parse(candidate.evidence.occurredAt) <= startedAtMs + windowMs
+    );
+    const late = independent.filter((candidate) =>
+      Date.parse(candidate.evidence.occurredAt) >= stoppedAtMs - windowMs
+    );
+    if (new Set(early.map((candidate) => candidate.evidence.occurredAt)).size < minimumCount ||
+        new Set(late.map((candidate) => candidate.evidence.occurredAt)).size < minimumCount) continue;
+    item.match = { ...match, kind: "saved", placeId: saved.id };
+  }
+}
+
 function minimumConfidence(
   left: StaySegment["confidence"],
   right: StaySegment["confidence"]
@@ -621,6 +656,7 @@ export function runLocationEngine(input: LocationEngineInput): LocationEngineOut
   if (!Number.isFinite(Date.parse(input.processingAt))) throw new Error("processingAt must be a valid instant.");
 
   const { accepted, rejectedEvidence } = preprocess(input);
+  resolveCorroboratedCoincidentVisits(accepted, input);
   const arrivalAnalysis = analyseSavedPlaceArrivalEvidence(accepted, input);
   const completed: WorkingStay[] = [];
   let active: WorkingStay | null = null;
