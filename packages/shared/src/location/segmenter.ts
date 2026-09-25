@@ -447,6 +447,51 @@ function resolveCorroboratedCoincidentVisits(accepted: ClassifiedEvidence[], inp
   }
 }
 
+function resolveCorroboratedCoincidentArrivals(accepted: ClassifiedEvidence[], input: LocationEngineInput) {
+  // Preserve a weak approach observation as the saved episode's boundary only
+  // after later independent saved points prove that continuation. An isolated
+  // plausible overlap keeps its ambiguous match.
+  const minimumCount = input.config.savedPlaceArrivalMinimumStrongPointCount;
+  const arrivalWindowMs = input.config.savedPlaceArrivalCorroborationWindowMs;
+  const continuityWindowMs = input.config.maxContinuityGapMs;
+  for (let index = 0; index < accepted.length; index += 1) {
+    const item = accepted[index];
+    const { evidence, match } = item;
+    if ((evidence.kind !== "standard_location" && evidence.kind !== "significant_change") ||
+        evidence.isSimulated || match?.kind !== "ambiguous" || match.candidates.length !== 2 ||
+        !accurateCoordinate(item, input)) continue;
+    const saved = match.candidates.find((candidate) => candidate.source === "saved" && candidate.matchClass === "plausible");
+    const learned = match.candidates.find((candidate) => candidate.source === "learned" && candidate.matchClass === "plausible");
+    if (!saved || !learned) continue;
+    const atMs = Date.parse(evidence.occurredAt);
+    const strongTimes = new Set<number>();
+    let contradicted = false;
+    for (let nextIndex = index + 1; nextIndex < accepted.length; nextIndex += 1) {
+      const next = accepted[nextIndex];
+      const nextAtMs = Date.parse(next.evidence.occurredAt);
+      if (nextAtMs > atMs + continuityWindowMs) break;
+      if (next.evidence.kind === "geofence_exit" && next.evidence.savedPlaceId === saved.id) {
+        contradicted = true;
+        break;
+      }
+      if (!accurateCoordinate(next, input) || next.evidence.isSimulated) continue;
+      if ((next.evidence.kind !== "standard_location" && next.evidence.kind !== "significant_change") ||
+          !strongSavedPoint(next, saved.id, input) ||
+          Math.max(next.evidence.speedMetersPerSecond ?? 0, next.impliedSpeedMetersPerSecond ?? 0) >=
+            input.config.movementSpeedThresholdMps) {
+        contradicted = true;
+        break;
+      }
+      if (strongTimes.size === 0 && nextAtMs > atMs + arrivalWindowMs) break;
+      strongTimes.add(nextAtMs);
+      if (strongTimes.size >= minimumCount) break;
+    }
+    if (!contradicted && strongTimes.size >= minimumCount) {
+      item.match = { ...match, kind: "saved", placeId: saved.id };
+    }
+  }
+}
+
 function minimumConfidence(
   left: StaySegment["confidence"],
   right: StaySegment["confidence"]
@@ -657,6 +702,7 @@ export function runLocationEngine(input: LocationEngineInput): LocationEngineOut
 
   const { accepted, rejectedEvidence } = preprocess(input);
   resolveCorroboratedCoincidentVisits(accepted, input);
+  resolveCorroboratedCoincidentArrivals(accepted, input);
   const arrivalAnalysis = analyseSavedPlaceArrivalEvidence(accepted, input);
   const completed: WorkingStay[] = [];
   let active: WorkingStay | null = null;
