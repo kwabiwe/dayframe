@@ -439,7 +439,7 @@ Before merging implementation PRs, ask KB to test the exact Ready Preview promot
 ## Strong-evidence short journeys
 
 - [ ] Preserve original A boundaries (84.496s and 81s), endpoint linkage, confidence and deterministic IDs; unknown endpoint can remain below its visit-Review floor.
-- [ ] Reject zero/negative/invalid/overlong windows, co-located/same-place short trips, weak displacement, fewer than three independent accurate faster points, simulated/unknown-provenance and implausible samples; IDs, deliveries and source mirrors cannot manufacture proof.
+- [ ] Reject zero/negative/invalid/overlong windows, co-located/same-place short trips, weak displacement, fewer than three independent accurate faster points, explicit `isSimulated: true`, omitted simulation status and implausible samples; IDs, deliveries and source mirrors cannot manufacture proof. An iOS Expo `false` is normalised from an absent platform indicator and does not verify physical origin.
 - [ ] Preserve ordinary >=180s output and automatic policy, traffic pauses and supported intermediate stays. B stop handling and C saved-area matching are separate known failures, not fixes in this exception.
 - [ ] Verify `v2_review` and `v2_enabled` saved/saved (including logging-enabled) and saved/unknown sources persist one Review/event each, exact stored lineage, no automatic short-trip entries, stable retries, and silent shadow/pre-cutover semantics.
 - [ ] Verify terminal confirmations, explicit ignores, manual corrections, exact receipts and changed-identity replacement protection in a disposable local database. System supersession is not a user ignore.
