@@ -559,3 +559,9 @@ and preserve complete base/candidate logical fingerprints. The runner refuses
 missing, hosted, default-port or non-`_test` targets before creating its pool;
 do not increase deadlines, weaken caps, omit old evidence or treat a capacity
 failure as a pass.
+
+## Strong-evidence short journeys
+
+Run shared `test/short-journeys.test.ts`, ordinary commute/automatic-policy tests and mobile reason-copy tests. With an explicit disposable loopback `_test` `DATABASE_URL`, run `npx tsx scripts/validate-location-short-journeys.ts` plus the existing Location V2 DB validator. The short-trip validator joins actual persisted evidence/segment/event/Review rows, exercises logging-enabled saved endpoints and unknown endpoints, mode/cutover silence, terminal decisions and changed-ID protection. It excludes only the existing enabled-mode commute relink's maintenance `updated_at` from terminal equality; entries, receipts, lineage and decision fields remain exact.
+
+Archive exact base `packages/shared/src` outside the worktree and run `npx tsx scripts/benchmark-location-short-journeys.ts --base-root=/path/to/base-archive`. It compares complete ordinary/B/C outputs and measures the 4,256-observation retained journal plus 112 newly examined short pairs. Use the existing scalability database validator for transaction timing; C20 remains a concurrency/locking validator, not a CPU benchmark. Hosted budget and signed-device acceptance remain separate.

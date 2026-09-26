@@ -6,6 +6,10 @@ Last repository audit: 2026-09-20 against fresh `origin/main` at `791e57ea3d806c
 
 PR #197 reconciliation: current main verified at `a48abcc4ca55de68009b33a401f36743e4577cd6`; staging/physical acceptance below is owner-reported and does not attest production/TestFlight release.
 
+## EVENING-A implementation — pending acceptance
+
+Independent A-only strong-evidence short-journey correction from freshly verified main `d641e5daf5402087d280cc6de19adca57b91691c`: implementation and local checks are recorded in [the evidence note](investigations/2026-09-26-evening-a-short-journeys.md). Pending independent review and exact-head staging/signed-device acceptance; not shipped. New short proposals remain Review-only even under `v2_enabled`. B stop handling, C school matching and the afternoon Review-retirement issue remain separate. PR #208's approved `8c581220b5db2d9af0a507298b0f649f0291275e` head and partial physical acceptance are unchanged; PR #207's closeout is not duplicated.
+
 ## Evidence snapshot
 
 - PR #206's owner-authorised [C20 addendum](plans/location-replay-production-scalability-a1-c20.md) conditionally permits the selected-profile SQL shapes. Historical [C20 evidence](investigations/2026-09-20-location-replay-c20.md) remains unchanged. The [21 September hosted-budget follow-up](investigations/2026-09-21-location-replay-hosted-budget.md) records a staging timeout at `4544a33` with only 503 ms remaining at lineage insertion, a measured commute-engine CPU correction, eight passing candidate C20 schedules and all mandatory local S1 gates (4,567 ms median, 5,058 ms worst, 1,942 ms minimum remaining budget). Local PASS does not establish a hosted fix; exact-head review and separate hosted acceptance remain outstanding. Finite race tests are not universal deadlock proof or retrospective scope approval.

@@ -57,7 +57,7 @@ export type LocationAutomaticLoggingReason =
   | "review_mode" | "segment_not_finalised" | "untrusted_place" | "untrusted_commute_endpoints"
   | "insufficient_confidence" | "insufficient_route_evidence" | "internal_route_gap"
   | "boundary_uncertainty_exceeded" | "boundary_bounds_missing" | "boundary_bounds_invalid"
-  | "uncertain_boundary";
+  | "uncertain_boundary" | "short_journey_review_only";
 
 export type CommuteRouteAssessment = {
   eligible: boolean;
@@ -76,6 +76,10 @@ export function assessAutomaticCommuteRoute(segment: CommuteSegment): CommuteRou
     eligible: false, tier: "ineligible", reason
   });
   if (segment.status !== "finalised") return reject("segment_not_finalised");
+  const duration = Date.parse(segment.stoppedAt) - Date.parse(segment.startedAt);
+  if (Number.isFinite(duration) && duration > 0 && duration < LOCATION_ENGINE_V2_CONFIG.commuteMinimumDurationMs) {
+    return reject("short_journey_review_only");
+  }
   if (!segment.fromPlaceId || !segment.toPlaceId) return reject("untrusted_commute_endpoints");
   const standard = hasAutomaticConfidence(segment.confidence);
   if (!standard && segment.confidence !== "medium") return reject("insufficient_confidence");

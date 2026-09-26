@@ -168,3 +168,13 @@ guard pair for server-effective `v2_review` retained replay. A lower remaining
 budget, savepoint recovery, timeout-setting SQL or any uncertain state falls back
 to the existing guard query; ingest, `v2_shadow`, `v2_enabled` and non-Location
 callers remain unchanged.
+
+## Strong-evidence short-journey exception
+
+`commute.ts` retains the ordinary three-minute rule except for positive shorter intervals between existing, distinct eligible stays at least `commuteMinimumEndpointDistanceMeters` apart. Three independent route observations must meet existing 65m/2.8m/s thresholds. Only GPS point kinds with explicit `isSimulated: false` qualify. Unknown simulation provenance fails closed; the native significant-change bridge currently omits that field, so those callbacks alone cannot establish this new exception. Neither Visit/callback anchors nor broad or invalid samples count.
+
+Preprocessing deduplicates `(deviceId, clientEvidenceId)` and normalises negative native speed to absent; its implied-speed >120m/s rejection applies only to standard points. The exception additionally rejects implausible supplied or implied speed for every source. Implied speed requires the actual preceding coordinate observation to be an accurate non-simulated GPS point on the same device. A supplied speed cannot mask implausible implied movement.
+
+Exception proof uses existing device/ID and parsed source-time fields, plus conservative exact device/coordinate deduplication across sources. The latter prevents native second-resolution mirrors of Expo millisecond samples from adding proof without introducing time buckets or rewriting source IDs. Repeated identical coordinates do not add independent proof even at different times. Source and occurrence times must lie strictly inside the candidate window. Original route lineage and summary remain intact; proof counting does not mutate evidence, confidence, boundaries or stable endpoint-based identities. Timestamp precomputation remains invocation-local and proof analysis is lazy and reused.
+
+Shared `automaticPolicy.ts` checks actual start/stop instants, not rounded duration seconds, and reports `short_journey_review_only` below three minutes. Mobile translates that reason explicitly. Ordinary automatic eligibility is unchanged. Mode/cutover, finalisation, arrival witnesses, retention and persistence protection owners are unchanged. Newly eligible retained evidence after cutover can produce a proposal on an ordinary later replay; this does not authorise live replay or historical repair.
