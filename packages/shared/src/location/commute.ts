@@ -245,6 +245,71 @@ export function qualifyCommuteCandidate(
   return { qualifies: false, reason: "insufficient_displacement" };
 }
 
+// Exception-only proof. Do not change ordinary route summaries/confidence or
+// rewrite journal identity. Native mirrored callbacks can lose subsecond time;
+// repeated exact device/coordinate points therefore never add independent proof.
+function shortJourneyProof(
+  evidence: ClassifiedEvidence[],
+  config: LocationEngineConfig,
+  occurredAtMs: readonly number[]
+) {
+  const eligible = new Set<ClassifiedEvidence>();
+  let previousPoint: ClassifiedEvidence | undefined;
+  const accuratePoint = (item: ClassifiedEvidence) => {
+    const e = item.evidence;
+    return (e.kind === "standard_location" || e.kind === "significant_change") &&
+      e.isSimulated === false &&
+      e.latitude != null && Number.isFinite(e.latitude) && Math.abs(e.latitude) <= 90 &&
+      e.longitude != null && Number.isFinite(e.longitude) && Math.abs(e.longitude) <= 180 &&
+      e.horizontalAccuracyMeters != null && Number.isFinite(e.horizontalAccuracyMeters) &&
+      e.horizontalAccuracyMeters >= 0 &&
+      e.horizontalAccuracyMeters <= config.commuteMaximumSpeedAccuracyMeters;
+  };
+  for (const [index, item] of evidence.entries()) {
+    const e = item.evidence;
+    const nativeSpeed = e.speedMetersPerSecond;
+    const impliedSpeed = item.impliedSpeedMetersPerSecond;
+    const speed = nativeSpeed ?? impliedSpeed;
+    // Preprocessing's 120m/s rejection applies only to standard_location.
+    // Fail closed for either speed on every source in this new exception.
+    const plausible = [nativeSpeed, impliedSpeed].every(value =>
+      value == null || Number.isFinite(value) && value >= 0 && value <= 120);
+    const supportedSpeed = nativeSpeed != null || previousPoint != null &&
+      previousPoint.evidence.deviceId === e.deviceId && accuratePoint(previousPoint);
+    if (Number.isFinite(occurredAtMs[index]) && accuratePoint(item) && plausible && supportedSpeed && speed != null &&
+      speed >= config.commuteFasterMovementThresholdMps) eligible.add(item);
+    // Match preprocessing's previous-coordinate owner, including non-GPS
+    // anchors: those may not supply implied-speed proof for this exception.
+    if (e.latitude != null && e.longitude != null) previousPoint = item;
+  }
+  return eligible;
+}
+
+function hasIndependentShortJourneyProof(
+  route: ClassifiedEvidence[],
+  eligible: ReadonlySet<ClassifiedEvidence>,
+  start: number,
+  stop: number,
+  config: LocationEngineConfig
+) {
+  const ids = new Set<string>();
+  const times = new Set<string>();
+  const points = new Set<string>();
+  let count = 0;
+  for (const item of route) {
+    const e = item.evidence;
+    const sourceTime = Date.parse(e.sourceTimestamp ?? e.occurredAt);
+    if (!eligible.has(item) || !Number.isFinite(sourceTime) || sourceTime <= start || sourceTime >= stop) continue;
+    const id = JSON.stringify([e.deviceId, e.clientEvidenceId]);
+    const time = JSON.stringify([e.deviceId, sourceTime]);
+    const point = JSON.stringify([e.deviceId, e.latitude, e.longitude]);
+    const duplicate = ids.has(id) || times.has(time) || points.has(point);
+    ids.add(id); times.add(time); points.add(point);
+    if (!duplicate) count += 1;
+  }
+  return count >= config.commuteMinimumReliableSpeedSamples;
+}
+
 export type CommuteDerivationOptions = {
   inferredBoundaryStayIds?: ReadonlySet<string>;
   arrivalWitnesses?: readonly SavedPlaceArrivalWitness[];
@@ -262,6 +327,7 @@ export function deriveCommutes(
   // This invocation's evidence is immutable. Both per-pair scans below need
   // the same timestamps; parse once rather than twice per evidence/stay pair.
   // Keep the original array/filter order and strict endpoint comparisons.
+  let shortProof: ReadonlySet<ClassifiedEvidence> | undefined;
   const occurredAtMs = acceptedEvidence.map(({ evidence }) => Date.parse(evidence.occurredAt));
   for (let index = 1; index < stays.length; index += 1) {
     const from = stays[index - 1];
@@ -295,7 +361,7 @@ export function deriveCommutes(
       );
     if (hasUnsupportedArrivalConflict) continue;
     const duration = stoppedAtMs - startedAtMs;
-    if (duration < config.commuteMinimumDurationMs || duration > config.commuteMaximumDurationMs) {
+    if (!Number.isFinite(duration) || duration <= 0 || duration > config.commuteMaximumDurationMs) {
       continue;
     }
 
@@ -312,6 +378,12 @@ export function deriveCommutes(
       stoppedAtMs,
       to
     });
+    if (duration < config.commuteMinimumDurationMs) {
+      if (summary.sameKnownPlace || summary.straightLineDistanceMeters == null ||
+        summary.straightLineDistanceMeters < config.commuteMinimumEndpointDistanceMeters) continue;
+      shortProof ??= shortJourneyProof(acceptedEvidence, config, occurredAtMs);
+      if (!hasIndependentShortJourneyProof(routeEvidence, shortProof, startedAtMs, stoppedAtMs, config)) continue;
+    }
     const qualification = qualifyCommuteCandidate(summary, config);
     if (!qualification.qualifies) continue;
     const evidenceIds = routeEvidence.map(({ evidence }) => evidence.clientEvidenceId);
