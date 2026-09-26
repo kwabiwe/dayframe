@@ -172,6 +172,8 @@ Thresholded overlap is the maximum intersection with any single confirmed/accept
 
 Overlapping saved radii select one deterministic best existing saved match using the established hint, continuity, distance and priority rules plus stable ID tie-breaks. Retain bounded alternatives; do not enlarge radii or call Apple POI search from matching/replay.
 
+For exactly one saved and one accepted learned candidate with near-coincident centres, two high-quality strong matches retain the saved identity when no learned active-place input is supplied and the saved candidate's computed priority is at least the learned candidate's. Otherwise the existing deterministic order applies. An isolated low-accuracy Visit or plausible overlap is ambiguous in this pair. The Visit may join a saved episode with independent high-quality observations near both ends. A plausible approach observation may join the saved arrival when two later strong saved observations support it within the existing arrival and continuity windows, without an intervening contradictory high-quality point or saved-place exit. Distinct nearby candidates and learned-only matching keep their existing deterministic behavior.
+
 ## 7. Tools / Features
 
 Manual timer:

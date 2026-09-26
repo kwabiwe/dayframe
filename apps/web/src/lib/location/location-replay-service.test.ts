@@ -1,8 +1,120 @@
 import { describe, expect, it, vi } from "vitest";
 import { replayLocationEvidence } from "./location-replay-service";
 import { LOCATION_REPLAY_SCALABILITY_PROFILE } from "./location-replay-batching";
+import { journeyIdentityFixture, runLocationEngine } from "@dayframe/shared";
+
+function journeyReplayQuery(
+  fixture: ReturnType<typeof journeyIdentityFixture>,
+  protectedRows: Array<Record<string, unknown>> = [],
+  existingRows: Array<Record<string, unknown>> = []
+) {
+  return vi.fn(async (...args: [sql: string, params?: unknown[]]) => {
+    const [sql] = args;
+    if (sql.includes("from location_evidence\n")) return { rows: fixture.evidence.map((item, index) => ({
+      id: `row-${index}`,
+      clientEvidenceId: item.clientEvidenceId,
+      deviceId: item.deviceId,
+      evidenceType: item.kind,
+      occurredAt: item.occurredAt,
+      endedAt: item.endedAt ?? null,
+      latitude: item.latitude ?? null,
+      longitude: item.longitude ?? null,
+      horizontalAccuracyMeters: item.horizontalAccuracyMeters ?? null,
+      altitudeMeters: item.altitudeMeters ?? null,
+      speedMetersPerSecond: item.speedMetersPerSecond ?? null,
+      courseDegrees: item.courseDegrees ?? null,
+      savedPlaceId: item.savedPlaceId ?? null,
+      geofenceIdentifier: item.geofenceIdentifier ?? null,
+      algorithmVersion: item.algorithmVersion,
+      timeZone: item.timeZone,
+      isSimulated: item.isSimulated ?? null,
+      metadata: item.metadata ?? {},
+      receivedAt: item.receivedAt
+    })) };
+    if (sql.includes("from places\n")) return { rows: fixture.savedPlaces };
+    if (sql.includes("from learned_places\n")) return { rows: fixture.acceptedLearnedPlaces };
+    if (sql.includes("for update of s")) return { rows: protectedRows };
+    if (sql.includes("from stay_segments") && sql.includes("for update")) return { rows: existingRows };
+    return { rows: [] };
+  });
+}
 
 describe("Location replay timing observation", () => {
+  it("uses the same sanitised Journey-1 output as the shared engine", async () => {
+    const fixture = journeyIdentityFixture();
+    const local = runLocationEngine(fixture);
+    const query = journeyReplayQuery(fixture);
+    const server = await replayLocationEvidence({ query } as never, {
+      workspaceId: "workspace-private", userId: "user-private", authMode: "provider", scopes: []
+    }, {
+      deviceId: fixture.evidence[0].deviceId,
+      algorithmVersion: fixture.config.algorithmVersion,
+      processingAt: fixture.processingAt
+    });
+    expect(server.segments).toEqual(local.segmentUpserts);
+    expect(server.diagnostics).toEqual(local.diagnostics);
+  });
+
+  it("holds a changed-ID replacement that overlaps protected accepted or ignored evidence", async () => {
+    const fixture = journeyIdentityFixture();
+    const local = runLocationEngine(fixture);
+    const intermediate = local.segmentUpserts.find((segment) =>
+      segment.kind === "stay" && segment.placeId === fixture.savedPlaces[1].id && segment.stoppedAt
+    )!;
+    const query = journeyReplayQuery(fixture, [{
+      clientSegmentId: "previous-decided-home-segment",
+      clientEvidenceId: "home-late-1",
+      kind: "standard_location",
+      occurredAt: "2026-09-23T17:11:00.000Z",
+      startedAt: "2026-09-23T16:55:00.000Z",
+      stoppedAt: "2026-09-23T17:14:00.000Z"
+    }]);
+    const server = await replayLocationEvidence({ query } as never, {
+      workspaceId: "workspace-private", userId: "user-private", authMode: "provider", scopes: []
+    }, {
+      deviceId: fixture.evidence[0].deviceId,
+      algorithmVersion: fixture.config.algorithmVersion,
+      processingAt: fixture.processingAt
+    });
+    expect(server.segments.some((segment) => segment.clientSegmentId === intermediate.clientSegmentId)).toBe(false);
+    expect(server.segments.some((segment) => segment.kind === "commute" &&
+      (segment.fromStaySegmentId === intermediate.clientSegmentId || segment.toStaySegmentId === intermediate.clientSegmentId))).toBe(false);
+    const protectedRead = query.mock.calls.find(([sql]) => sql.includes("for update of s"))![0];
+    expect(protectedRead).toContain("s.created_from_event_id is not null");
+    expect(protectedRead).toContain("s.continuity_status = 'manual'");
+    expect(protectedRead).toContain("ri.status = 'open'");
+  });
+
+  it.each([
+    ["manual", false],
+    ["terminal accepted or ignored", true]
+  ])("preserves an existing %s segment with the same ID", async (_label, preservesManualCorrection) => {
+    const fixture = journeyIdentityFixture();
+    const intermediate = runLocationEngine(fixture).segmentUpserts.find((segment) =>
+      segment.kind === "stay" && segment.placeId === fixture.savedPlaces[1].id && segment.stoppedAt
+    )!;
+    const query = journeyReplayQuery(fixture, [], [{
+      id: "existing-protected-row",
+      clientSegmentId: intermediate.clientSegmentId,
+      continuityStatus: preservesManualCorrection ? "continuous" : "manual",
+      preservesManualCorrection
+    }]);
+    const server = await replayLocationEvidence({ query } as never, {
+      workspaceId: "workspace-private", userId: "user-private", authMode: "provider", scopes: []
+    }, {
+      deviceId: fixture.evidence[0].deviceId,
+      algorithmVersion: fixture.config.algorithmVersion,
+      processingAt: fixture.processingAt
+    });
+    expect(server.stayIds.get(intermediate.clientSegmentId)).toBe("existing-protected-row");
+    const writes = query.mock.calls.filter(([sql]) => sql.includes("insert into stay_segments"));
+    expect(writes.every(([, params]) => !params?.includes(intermediate.clientSegmentId))).toBe(true);
+    const lock = query.mock.calls.find(([sql]) => sql.includes("from stay_segments") && sql.includes("for update") &&
+      !sql.includes("for update of s"))![0];
+    expect(lock).toContain("created_from_event_id is not null");
+    expect(lock).toContain("status = 'open'");
+  });
+
   it("keeps both protected locking arms and owner predicates in one bounded profile request", async () => {
     const query = vi.fn<(sql: string, params?: unknown[]) => Promise<{ rows: never[] }>>(async () => ({ rows: [] }));
     await replayLocationEvidence({ query } as never, {
