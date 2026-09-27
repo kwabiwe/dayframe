@@ -115,6 +115,28 @@ describe("LocationReviewPanel", () => {
     expect(mocks.clientFetch).toHaveBeenCalledTimes(2);
     expect(onClose).not.toHaveBeenCalled();
   });
+
+  it("calls a widened unknown Visit arrival approximate without claiming confirmed dwell", async () => {
+    const visit = evidence();
+    visit.segment.kind = "stay";
+    visit.segment.startUncertainty = {
+      lower: "2026-08-14T08:59:40.000Z",
+      upper: "2026-08-14T09:24:00.000Z"
+    };
+    visit.display.title = "Visit at an unknown place";
+    mocks.clientFetch.mockResolvedValueOnce(jsonResponse(visit));
+    render(
+      <LocationReviewPanel
+        reviewItemId="10000000-0000-4000-8000-000000000001"
+        categories={categories}
+        entries={[]}
+        initialCategoryId={null}
+        onClose={vi.fn()}
+      />
+    );
+    expect((await screen.findByText(/Approximate arrival/)).textContent).toContain("Approximate arrival");
+    expect(screen.getByText(/not confirmed stationary time/)).not.toBeNull();
+  });
 });
 
 function evidence(): LocationReviewEvidenceDto {

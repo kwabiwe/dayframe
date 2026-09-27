@@ -90,3 +90,9 @@ export const LocationReviewEvidenceDtoSchema = z.object({
 });
 
 export type LocationReviewEvidenceDto = z.infer<typeof LocationReviewEvidenceDtoSchema>;
+
+export function hasApproximateStayArrival(evidence: LocationReviewEvidenceDto) {
+  const bounds = evidence.segment.startUncertainty;
+  return evidence.segment.kind === "stay" && bounds?.lower != null &&
+    (bounds.upper == null || bounds.lower !== bounds.upper);
+}

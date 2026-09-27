@@ -205,6 +205,7 @@ export async function replayLocationEvidence(
       return fromStayId && toStayId ? [{...segment, fromStayId, toStayId}] : [];
     });
   const commuteIds = await persistCommutes(client, session, options.deviceId, resolvedCommutes, protectedSegmentIds);
+  await retireIneligibleOpenUnknownReviews(client, session, options, segments);
   observeLocationTiming(options, "commute_persistence", "completed");
   observeLocationCount(options, "protectedSegments", protectedReplacement.count + protectedSegmentIds.size);
   observeLocationStage(options, "lineage");
@@ -446,6 +447,53 @@ async function retireOpenReviewsForMissingSegments(
        and review_status = 'needs_review'`,
     [session.workspaceId, session.userId, eventIds]
   );
+}
+
+async function retireIneligibleOpenUnknownReviews(
+  client: pg.PoolClient,
+  session: RequestSession,
+  options: Pick<LocationReplayOptions, "deviceId" | "algorithmVersion">,
+  segments: LocationSegment[]
+) {
+  const ineligibleIds = segments.flatMap((segment) =>
+    segment.kind === "stay" && segment.placeMatchKind === "unknown" &&
+      Date.parse(segment.stoppedAt ?? segment.startedAt) - Date.parse(segment.startedAt) <
+        LOCATION_ENGINE_V2_CONFIG.unknownStayReviewDwellMs
+      ? [segment.clientSegmentId] : []);
+  if (ineligibleIds.length === 0) return;
+  // Segment identity may stay the same when a retained Visit interval is
+  // corrected. The missing-ID path cannot retire that now-ineligible proposal.
+  const stale = await client.query<{ reviewId: string; eventId: string; segmentId: string }>(
+    `select ri.id as "reviewId", ri.event_id as "eventId", st.id as "segmentId"
+     from review_items ri
+     join stay_segments st on st.id = ri.location_segment_id
+       and st.workspace_id = ri.workspace_id and st.user_id = ri.user_id
+     where ri.workspace_id = $1 and ri.user_id = $2 and ri.status = 'open'
+       and st.device_id = $3 and st.algorithm_version = $4
+       and st.client_segment_id = any($5::text[])
+       and st.created_from_event_id = ri.event_id and st.continuity_status <> 'manual'
+     for update of ri`,
+    [session.workspaceId, session.userId, options.deviceId, options.algorithmVersion, ineligibleIds]
+  );
+  if (stale.rows.length === 0) return;
+  const reviewIds = stale.rows.map((row) => row.reviewId);
+  const eventIds = stale.rows.map((row) => row.eventId);
+  const segmentIds = stale.rows.map((row) => row.segmentId);
+  // Keep the below-threshold candidate mutable on future replay. Its obsolete
+  // open proposal remains in history, but no longer owns the segment snapshot.
+  await client.query(`update stay_segments set created_from_event_id = null,
+      review_status = 'ignored', updated_at = now()
+    where workspace_id = $1 and user_id = $2 and id = any($3::uuid[])
+      and continuity_status <> 'manual'`,
+  [session.workspaceId, session.userId, segmentIds]);
+  await client.query(`update review_items set status = 'ignored', resolved_at = now(),
+      notes = concat_ws(' ', nullif(notes, ''), 'Superseded by corrected location evidence replay.')
+    where workspace_id = $1 and user_id = $2 and id = any($3::uuid[]) and status = 'open'`,
+  [session.workspaceId, session.userId, reviewIds]);
+  await client.query(`update activity_events set review_status = 'ignored'
+    where workspace_id = $1 and user_id = $2 and id = any($3::uuid[])
+      and review_status = 'needs_review'`,
+  [session.workspaceId, session.userId, eventIds]);
 }
 
 // At most 5,750 parameters per write and 250 IDs per locking read. Every chunk

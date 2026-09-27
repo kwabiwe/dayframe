@@ -14,7 +14,8 @@ describe("automatic Location Evidence time editor", () => {
     expect(source).not.toContain("Edit end date");
     expect(source).toContain('accessibilityLabel="Start time"');
     expect(source).toContain('accessibilityLabel="End time"');
-    expect(source).toContain("accessibilityLabel={`Duration ${editableDuration}`}");
+    expect(source).toContain('const durationLabel = approximateArrival ? "Estimated duration" : "Duration"');
+    expect(source).toContain("accessibilityLabel={`${durationLabel} ${editableDuration}`}");
     expect(source).toContain("startDateText: formatLocationReviewDateInput(startAt)");
     expect(source).toContain("stopDateText: formatLocationReviewDateInput(stopAt)");
   });
