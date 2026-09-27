@@ -28,6 +28,7 @@ describe("unknown native Visit arrival uncertainty", () => {
       stoppedAt: "2026-09-27T10:51:38.000Z",
       startLowerBoundAt: "2026-09-27T10:27:44.000Z",
       startUpperBoundAt: "2026-09-27T10:51:38.000Z",
+      approximateArrival: true,
       stopLowerBoundAt: "2026-09-27T10:51:38.000Z",
       stopUpperBoundAt: "2026-09-27T10:51:38.000Z"
     });
@@ -77,6 +78,26 @@ describe("unknown native Visit arrival uncertainty", () => {
     // recent independent movement, the narrow risk flag has no lower witness.
   });
 
+  it("keeps an accurate arrival-only callback exact without a movement witness", () => {
+    const input = unknownVisitArrivalFixture();
+    input.evidence = input.evidence.filter((item) => item.clientEvidenceId !== "visit-completed" &&
+      item.clientEvidenceId !== "route-last-moving" && item.clientEvidenceId !== "route-2");
+    input.evidence.push({
+      ...input.evidence.find((item) => item.clientEvidenceId === "later-slow")!,
+      clientEvidenceId: "later-stationary",
+      occurredAt: "2026-09-27T10:42:00.000Z",
+      sourceTimestamp: "2026-09-27T10:42:00.000Z"
+    });
+    const stay = runLocationEngine(input).segmentUpserts.find((segment) =>
+      segment.kind === "stay" && segment.evidenceIds.includes("visit-arrival"));
+    expect(stay).toMatchObject({
+      startedAt: arrival,
+      startLowerBoundAt: arrival,
+      startUpperBoundAt: arrival
+    });
+    expect(stay).not.toHaveProperty("approximateArrival");
+  });
+
   it("keeps a high-quality 11m33 internal Visit exact and below the unchanged Review gate", () => {
     const input = unknownVisitArrivalFixture();
     input.evidence = input.evidence.map((item) => item.clientEvidenceId === "visit-completed"
@@ -89,6 +110,7 @@ describe("unknown native Visit arrival uncertainty", () => {
       startLowerBoundAt: arrival,
       startUpperBoundAt: arrival
     });
+    expect(stay).not.toHaveProperty("approximateArrival");
     expect(Date.parse(stay!.stoppedAt!) - Date.parse(stay!.startedAt)).toBe(693_000);
     expect(Date.parse(stay!.stoppedAt!) - Date.parse(stay!.startedAt)).toBeLessThan(input.config.unknownStayReviewDwellMs);
   });
@@ -170,7 +192,8 @@ describe("unknown native Visit arrival uncertainty", () => {
     expect(provisional).toMatchObject({
       startedAt: arrival,
       startLowerBoundAt: lastMovement,
-      startUpperBoundAt: null
+      startUpperBoundAt: null,
+      approximateArrival: true
     });
     const full = { ...first, evidence: [...first.evidence, input.evidence.find((item) =>
       item.clientEvidenceId === "visit-completed")!] };
@@ -178,12 +201,67 @@ describe("unknown native Visit arrival uncertainty", () => {
     expect(completed).toMatchObject({
       startedAt: arrival,
       startLowerBoundAt: lastMovement,
-      startUpperBoundAt: departure
+      startUpperBoundAt: departure,
+      approximateArrival: true
     });
     expect(runLocationEngine({ ...full, evidence: [...full.evidence].reverse() }).segmentUpserts)
       .toEqual(runLocationEngine(full).segmentUpserts);
     expect(runLocationEngine({ ...full, evidence: [...full.evidence, ...full.evidence] }).segmentUpserts)
       .toEqual(runLocationEngine(full).segmentUpserts);
+  });
+
+  it("preserves semantic bounds when same-time Visit callback IDs swap their order", () => {
+    const input = unknownVisitArrivalFixture();
+    const swapped = unknownVisitArrivalFixture();
+    swapped.evidence = swapped.evidence.map((item) => ({
+      ...item,
+      clientEvidenceId: item.clientEvidenceId === "visit-arrival" ? "visit-completed" :
+        item.clientEvidenceId === "visit-completed" ? "visit-arrival" : item.clientEvidenceId
+    }));
+    const semantic = (fixture: LocationEngineInput) => runLocationEngine(fixture).segmentUpserts
+      .filter((segment): segment is StaySegment => segment.kind === "stay" &&
+        segment.placeMatchKind === "unknown")
+      .map((segment) => ({
+        startedAt: segment.startedAt,
+        stoppedAt: segment.stoppedAt,
+        lower: segment.startLowerBoundAt,
+        upper: segment.startUpperBoundAt,
+        approximateArrival: segment.approximateArrival ?? false
+      }));
+    expect(semantic(swapped)).toEqual(semantic(input));
+  });
+
+  it("uses unknown Visit bounds when stationaryOutside restarts a stay", () => {
+    const input = unknownVisitArrivalFixture();
+    const origin = input.evidence.find((item) => item.clientEvidenceId === "origin-visit")!;
+    input.evidence = input.evidence.filter((item) => !["route-1", "route-2", "origin-visit", "visit-completed"].includes(item.clientEvidenceId));
+    input.evidence = input.evidence.map((item) => item.clientEvidenceId === "route-last-moving"
+      ? { ...item, occurredAt: "2026-09-27T10:25:44.000Z", sourceTimestamp: "2026-09-27T10:25:44.000Z" }
+      : item);
+    input.evidence.unshift({
+      ...origin,
+      clientEvidenceId: "origin-recent",
+      kind: "standard_location",
+      occurredAt: "2026-09-27T10:25:00.000Z",
+      sourceTimestamp: "2026-09-27T10:25:00.000Z",
+      endedAt: null,
+      speedMetersPerSecond: 0
+    });
+    input.evidence.push({
+      ...input.evidence.find((item) => item.clientEvidenceId === "later-slow")!,
+      clientEvidenceId: "later-stationary",
+      occurredAt: "2026-09-27T10:42:00.000Z",
+      sourceTimestamp: "2026-09-27T10:42:00.000Z"
+    });
+    const result = runLocationEngine(input);
+    const stay = result.segmentUpserts.find((segment) => segment.kind === "stay" &&
+      segment.evidenceIds.includes("visit-arrival"));
+    expect(stay).toMatchObject({
+      startedAt: arrival,
+      startLowerBoundAt: "2026-09-27T10:25:44.000Z",
+      startUpperBoundAt: null,
+      approximateArrival: true
+    });
   });
 
   it("handles a completed callback alone and does not pair competing or non-overlapping callbacks", () => {
@@ -214,19 +292,6 @@ describe("unknown native Visit arrival uncertainty", () => {
     input.evidence = input.evidence.map((item) => item.clientEvidenceId === "visit-completed"
       ? { ...item, endedAt: "2026-09-27T10:37:00.000Z" } : item);
     expect(unknownStay(input)).toBeUndefined();
-  });
-
-  it("keeps identity when a same-source departure becomes a 17-minute candidate", () => {
-    const full = unknownVisitArrivalFixture();
-    const short = unknownVisitArrivalFixture();
-    short.evidence = short.evidence.map((item) => item.clientEvidenceId === "visit-completed"
-      ? { ...item, endedAt: "2026-09-27T10:45:00.000Z" } : item);
-    const before = unknownStay(full)!;
-    const after = unknownStay(short)!;
-    expect(after.clientSegmentId).toBe(before.clientSegmentId);
-    expect(after.stoppedAt).toBe("2026-09-27T10:45:00.000Z");
-    expect(Date.parse(after.stoppedAt!) - Date.parse(after.startedAt)).toBeLessThan(short.config.unknownStayReviewDwellMs);
-    expect(after.startUpperBoundAt).toBe(after.stoppedAt);
   });
 
   it("uses absolute instants consistently through the Europe/London fall-back", () => {

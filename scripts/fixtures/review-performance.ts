@@ -59,7 +59,7 @@ export function syntheticReviewEvidence(data: MobileBootstrap): LocationReviewEv
     return LocationReviewEvidenceDtoSchema.parse({
       reviewItemId: item.id, eventId: syntheticId(index + 2_000),
       segment: { id: `synthetic-segment-${index}`, kind: item.eventType === "commute_detected" ? "commute" : "stay",
-        status: "finalised", startedAt, stoppedAt, confidence: item.confidence,
+        status: "finalised", startedAt, stoppedAt, approximateArrival: false, confidence: item.confidence,
         continuityStatus: "continuous", algorithmVersion: "location-v2.0", evidenceCount: count, rejectedEvidenceCount: 0 },
       display: { title: item.title, subtitle: "Synthetic cache fixture", placeId: item.suggestedPlaceId,
         placeName: item.placeName, addressSummary: null },

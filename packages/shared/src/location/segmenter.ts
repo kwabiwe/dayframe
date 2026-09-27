@@ -42,6 +42,7 @@ type WorkingStay = {
   continuityStatus: ContinuityStatus;
   outside: ClassifiedEvidence[];
   supportedByVisit: boolean;
+  approximateArrival: boolean;
   visitSupportUntilAt: string | null;
   pendingExit?: ClassifiedEvidence;
   inferredContinuity?: boolean;
@@ -94,6 +95,7 @@ function makeWorkingStay(item: ClassifiedEvidence): WorkingStay {
     continuityStatus: evidence.kind === "visit" ? "supported_by_visit" : "continuous",
     outside: [],
     supportedByVisit: evidence.kind === "visit",
+    approximateArrival: false,
     visitSupportUntilAt: evidence.kind === "visit" ? evidence.endedAt ?? null : null
   };
 }
@@ -267,9 +269,9 @@ function unknownVisitArrivalBounds(accepted: ClassifiedEvidence[], input: Locati
           lower: movementAt,
           upper: current.endedAt
         });
-      } else if (!current.endedAt) {
+      } else if (!current.endedAt && movementAt) {
         bounds.set(current.clientEvidenceId, {
-          lower: movementAt ?? current.occurredAt,
+          lower: movementAt,
           upper: null
         });
       }
@@ -406,6 +408,7 @@ function stayFromWorking(
     sampleCount: coordinateEvidence.length,
     continuityStatus: working.continuityStatus,
     confidence,
+    ...(working.approximateArrival ? { approximateArrival: true as const } : {}),
     evidenceIds
   };
 }
@@ -802,13 +805,17 @@ export function runLocationEngine(input: LocationEngineInput): LocationEngineOut
   let active: WorkingStay | null = null;
   // Occurrence-ordered, owner/device-local interval support; never a second durable store.
   const visits = new Map<string, ClassifiedEvidence>();
-  const startStay = (item: ClassifiedEvidence) => {
-    const stay = makeWorkingStay(item);
+  const applyUnknownVisitArrivalBound = (stay: WorkingStay, item: ClassifiedEvidence) => {
     const unknownBound = unknownArrivalBounds.get(item.evidence.clientEvidenceId);
     if (stay.key === "unknown" && unknownBound) {
       stay.startLowerBoundAt = unknownBound.lower;
       stay.startUpperBoundAt = unknownBound.upper;
+      stay.approximateArrival = unknownBound.lower !== stay.startedAt;
     }
+  };
+  const startStay = (item: ClassifiedEvidence) => {
+    const stay = makeWorkingStay(item);
+    applyUnknownVisitArrivalBound(stay, item);
     const corroboratedSupport = arrivalAnalysis.corroboratedVisits.get(item.evidence.clientEvidenceId);
     if (corroboratedSupport) {
       stay.inferredBoundary = true;
@@ -962,6 +969,7 @@ export function runLocationEngine(input: LocationEngineInput): LocationEngineOut
             unknownArrivalBounds.get(active.evidence[0].evidence.clientEvidenceId) === bound) {
           active.startLowerBoundAt = bound.lower;
           active.startUpperBoundAt = bound.upper;
+          active.approximateArrival = bound.lower !== active.startedAt;
         }
         if (
           evidence.endedAt &&
@@ -1009,6 +1017,7 @@ export function runLocationEngine(input: LocationEngineInput): LocationEngineOut
       );
       if (stationaryOutside.length > 0) {
         active = makeWorkingStay(stationaryOutside[0]);
+        applyUnknownVisitArrivalBound(active, stationaryOutside[0]);
         for (const candidate of stationaryOutside.slice(1)) {
           if (sameUnknownCluster(active, candidate, input.config.unknownStayBaseRadiusMeters)) {
             active.evidence.push(candidate);

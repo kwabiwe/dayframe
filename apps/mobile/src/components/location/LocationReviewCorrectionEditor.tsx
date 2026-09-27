@@ -15,7 +15,6 @@ import {
 import Reanimated from "react-native-reanimated";
 import Svg, { Circle as SvgCircle, Path, Rect } from "react-native-svg";
 import {
-  hasApproximateStayArrival,
   paletteColorFor,
   type LocationReviewAction,
   type LocationReviewEvidenceDto
@@ -119,7 +118,7 @@ export function LocationReviewCorrectionEditor({
     () => evidence.segment.stoppedAt ? new Date(evidence.segment.stoppedAt) : null,
     [evidence.segment.stoppedAt]
   );
-  const approximateArrival = hasApproximateStayArrival(evidence);
+  const approximateArrival = evidence.segment.approximateArrival;
   const durationLabel = approximateArrival ? "Estimated duration" : "Duration";
   const baselinePlaceId = evidence.display.placeId ?? reviewItem?.suggestedPlaceId ?? null;
   const baselineCategoryId = reviewItem?.suggestedCategoryId ?? null;
@@ -1152,7 +1151,7 @@ function formatEvidenceTimeRange(evidence: LocationReviewEvidenceDto) {
   const durationMinutes = stoppedAt
     ? Math.max(0, Math.round((stoppedAt.getTime() - startedAt.getTime()) / 60_000))
     : null;
-  const approximateArrival = hasApproximateStayArrival(evidence);
+  const approximateArrival = evidence.segment.approximateArrival;
   const prefix = approximateArrival ? "Approximate arrival · " : "";
   const duration = durationMinutes === null ? "" : ` · ${durationMinutes}m${approximateArrival ? " estimated" : ""}`;
   return `${prefix}${date} · ${start}–${stop}${duration}`;

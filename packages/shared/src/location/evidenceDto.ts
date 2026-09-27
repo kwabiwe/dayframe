@@ -19,6 +19,7 @@ export const LocationReviewEvidenceDtoSchema = z.object({
     status: z.string(),
     startedAt: z.string(),
     stoppedAt: z.string().nullable(),
+    approximateArrival: z.boolean().default(false),
     startUncertainty: z.object({ lower: z.string().nullable(), upper: z.string().nullable() }).optional(),
     stopUncertainty: z.object({ lower: z.string().nullable(), upper: z.string().nullable() }).optional(),
     confidence: z.string(),
@@ -90,9 +91,3 @@ export const LocationReviewEvidenceDtoSchema = z.object({
 });
 
 export type LocationReviewEvidenceDto = z.infer<typeof LocationReviewEvidenceDtoSchema>;
-
-export function hasApproximateStayArrival(evidence: LocationReviewEvidenceDto) {
-  const bounds = evidence.segment.startUncertainty;
-  return evidence.segment.kind === "stay" && bounds?.lower != null &&
-    (bounds.upper == null || bounds.lower !== bounds.upper);
-}

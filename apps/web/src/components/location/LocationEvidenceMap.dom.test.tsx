@@ -136,6 +136,7 @@ function evidence(overrides: Partial<LocationReviewEvidenceDto> = {}): LocationR
       status: "open",
       startedAt: "2026-08-14T09:00:00.000Z",
       stoppedAt: "2026-08-14T10:00:00.000Z",
+      approximateArrival: false,
       confidence: "medium",
       continuityStatus: "continuous",
       algorithmVersion: "location-v2.0",

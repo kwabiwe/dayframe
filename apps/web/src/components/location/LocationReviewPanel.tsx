@@ -4,7 +4,7 @@ import { useEffect, useState, useTransition } from "react";
 import { Check, GitMerge, MapPin, RotateCw, Scissors, X } from "lucide-react";
 import dynamic from "next/dynamic";
 import { useRouter } from "next/navigation";
-import { hasApproximateStayArrival, type LocationReviewAction, type LocationReviewEvidenceDto } from "@dayframe/shared";
+import type { LocationReviewAction, LocationReviewEvidenceDto } from "@dayframe/shared";
 import { clientFetch } from "@/lib/client-auth-fetch";
 import { CategoryPicker } from "@/components/CategoryPicker";
 import { OverlapNotice } from "@/components/OverlapNotice";
@@ -146,11 +146,11 @@ export function LocationReviewPanel({
           <section className="rounded-2xl bg-[var(--surface)] p-4">
             <h5 className="font-semibold">Time and uncertainty</h5>
             <p className="mt-1 text-sm text-[var(--muted)]">
-              {hasApproximateStayArrival(evidence) ? "Approximate arrival · " : ""}
+              {evidence.segment.approximateArrival ? "Approximate arrival · " : ""}
               {formatDateTime(evidence.segment.startedAt)}–{evidence.segment.stoppedAt ? formatDateTime(evidence.segment.stoppedAt) : "ongoing"}
             </p>
             <p className="mt-2 text-sm leading-6 text-[var(--muted)]">
-              {hasApproximateStayArrival(evidence)
+              {evidence.segment.approximateArrival
                 ? "The arrival is estimated from location evidence. Its displayed duration is a suggestion, not confirmed stationary time."
                 : evidence.segment.continuityStatus === "uncertain_gap"
                 ? "A gap limits precision, so Dayframe kept supported bounds instead of inventing an exact transition."

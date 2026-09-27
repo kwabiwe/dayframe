@@ -320,6 +320,7 @@ function evidenceFixture(): LocationReviewEvidenceDto {
       status: "finalised",
       startedAt: "2026-08-20T08:00:00.000Z",
       stoppedAt: "2026-08-20T08:30:00.000Z",
+      approximateArrival: false,
       confidence: "high",
       continuityStatus: "continuous",
       algorithmVersion: "location-v2.0",

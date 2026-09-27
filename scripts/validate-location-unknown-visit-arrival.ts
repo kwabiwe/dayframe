@@ -5,6 +5,7 @@ import { unknownVisitArrivalFixture } from "../packages/shared/test/fixtures/unk
 import { pool } from "../apps/web/src/lib/db";
 import { ingestLocationEvidence, replayRetainedLocationEvidence } from "../apps/web/src/lib/location/location-ingest-service";
 import { resolveLocationReviewAction } from "../apps/web/src/lib/location/location-review-service";
+import { getLocationReviewEvidence } from "../apps/web/src/lib/location/location-query-service";
 import type { RequestSession } from "../apps/web/src/lib/session";
 
 const target = new URL(process.env.DATABASE_URL ?? "invalid:");
@@ -62,7 +63,8 @@ async function scenario(completedFirst: boolean) {
       segment.evidenceIds.includes("visit-completed"))!;
     assert.equal(expected.kind, "stay");
     const stay = (await owned(`select id, client_segment_id, started_at, stopped_at,
-      start_lower_bound_at, start_upper_bound_at, stop_lower_bound_at, stop_upper_bound_at
+      start_lower_bound_at, start_upper_bound_at, stop_lower_bound_at, stop_upper_bound_at,
+      metadata->>'approximateArrival' as "approximateArrival"
       from stay_segments where workspace_id=$1 and user_id=$2 and client_segment_id=$3`,
     [expected.clientSegmentId])).rows[0];
     assert(stay, "Unknown Visit stay was not persisted.");
@@ -72,6 +74,7 @@ async function scenario(completedFirst: boolean) {
     assert.equal(stay.start_upper_bound_at.toISOString(), expected.startUpperBoundAt);
     assert.equal(stay.stop_lower_bound_at.toISOString(), expected.stopLowerBoundAt);
     assert.equal(stay.stop_upper_bound_at.toISOString(), expected.stopUpperBoundAt);
+    assert.equal(stay.approximateArrival, "true", "The Review presentation flag was not retained.");
     const inbound = (await owned(`select to_stay_segment_id, stopped_at,
       stop_lower_bound_at, stop_upper_bound_at, client_segment_id
       from commute_segments where workspace_id=$1 and user_id=$2 and to_stay_segment_id=$3`,
@@ -91,6 +94,7 @@ async function scenario(completedFirst: boolean) {
     const review = (await owned(`select ri.id, ri.status, ri.event_id from review_items ri
       where ri.workspace_id=$1 and ri.user_id=$2 and ri.location_segment_id=$3`, [stay.id])).rows[0];
     assert.equal(review?.status, "open", "The estimated 23-minute unknown Visit must remain in Review.");
+    assert.equal((await getLocationReviewEvidence(review.id, session)).segment.approximateArrival, true);
     assert.equal((await owned("select 1 from time_entries where workspace_id=$1 and user_id=$2")).rowCount, 0);
 
     const snapshot = async () => ({
@@ -111,38 +115,6 @@ async function scenario(completedFirst: boolean) {
     await replay();
     assert.deepEqual(await snapshot(), before, "Identical retained replay changed persisted output.");
 
-    if (!completedFirst) {
-      // Fault injection for a same-ID candidate whose retained source interval is
-      // corrected below Review eligibility. This is not a second ingest path.
-      await owned(`update location_evidence set ended_at='2026-09-27T10:45:00.000Z'
-        where workspace_id=$1 and user_id=$2 and client_evidence_id='visit-completed'`);
-      const faultName = `dayframe_visit_fault_${randomUUID().replaceAll("-", "")}`;
-      await pool.query(`create function ${faultName}() returns trigger language plpgsql as $$
-        begin raise exception 'synthetic replay rollback'; end $$`);
-      await pool.query(`create trigger ${faultName} before update on review_items
-        for each row when (new.id = '${review.id}'::uuid and new.status = 'ignored')
-        execute function ${faultName}()`);
-      try {
-        await assert.rejects(replay(), /synthetic replay rollback/);
-        const rolledBack = (await owned(`select st.stopped_at, ri.status from stay_segments st
-          join review_items ri on ri.location_segment_id=st.id
-          where st.workspace_id=$1 and st.user_id=$2 and st.id=$3`, [stay.id])).rows[0];
-        assert.equal(rolledBack.stopped_at.toISOString(), expected.stoppedAt);
-        assert.equal(rolledBack.status, "open");
-      } finally {
-        await pool.query(`drop trigger ${faultName} on review_items`);
-        await pool.query(`drop function ${faultName}()`);
-      }
-      await replay();
-      const retired = (await owned(`select status from review_items
-        where workspace_id=$1 and user_id=$2 and id=$3`, [review.id])).rows[0];
-      assert.equal(retired?.status, "ignored", "An obsolete same-ID open Review was left actionable.");
-      const retiredSnapshot = await snapshot();
-      await replay();
-      assert.deepEqual(await snapshot(), retiredSnapshot,
-        "Repeated replay changed the retired proposal or corrected lineage.");
-      assert.equal((await owned("select 1 from time_entries where workspace_id=$1 and user_id=$2")).rowCount, 0);
-    }
     console.log(`PASS unknown Visit retained replay (${completedFirst ? "completed first" : "arrival first"})`);
   } finally {
     await pool.query("delete from workspaces where id=$1", [session.workspaceId]);

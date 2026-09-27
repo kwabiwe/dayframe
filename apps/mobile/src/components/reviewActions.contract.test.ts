@@ -75,6 +75,7 @@ describe("mobile Review action contracts", () => {
     expect(evidenceEditorSource).toContain('accessibilityLabel="Start time"');
     expect(evidenceEditorSource).toContain('accessibilityLabel="End time"');
     expect(evidenceEditorSource).toContain('const durationLabel = approximateArrival ? "Estimated duration" : "Duration"');
+    expect(evidenceEditorSource).toContain("const approximateArrival = evidence.segment.approximateArrival");
     expect(evidenceEditorSource).toContain("accessibilityLabel={`${durationLabel} ${editableDuration}`}");
     expect(evidenceEditorSource).toContain("Commute automatically");
     expect(evidenceEditorSource).not.toContain("createCategory");

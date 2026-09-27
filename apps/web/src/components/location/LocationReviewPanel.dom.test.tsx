@@ -119,6 +119,7 @@ describe("LocationReviewPanel", () => {
   it("calls a widened unknown Visit arrival approximate without claiming confirmed dwell", async () => {
     const visit = evidence();
     visit.segment.kind = "stay";
+    visit.segment.approximateArrival = true;
     visit.segment.startUncertainty = {
       lower: "2026-08-14T08:59:40.000Z",
       upper: "2026-08-14T09:24:00.000Z"
@@ -137,6 +138,28 @@ describe("LocationReviewPanel", () => {
     expect((await screen.findByText(/Approximate arrival/)).textContent).toContain("Approximate arrival");
     expect(screen.getByText(/not confirmed stationary time/)).not.toBeNull();
   });
+
+  it("preserves saved-place gap copy when existing bounds are widened", async () => {
+    const saved = evidence();
+    saved.segment.kind = "stay";
+    saved.segment.continuityStatus = "uncertain_gap";
+    saved.segment.startUncertainty = {
+      lower: "2026-08-14T08:59:40.000Z",
+      upper: "2026-08-14T09:24:00.000Z"
+    };
+    mocks.clientFetch.mockResolvedValueOnce(jsonResponse(saved));
+    render(
+      <LocationReviewPanel
+        reviewItemId="10000000-0000-4000-8000-000000000001"
+        categories={categories}
+        entries={[]}
+        initialCategoryId={null}
+        onClose={vi.fn()}
+      />
+    );
+    expect(await screen.findByText(/A gap limits precision/)).not.toBeNull();
+    expect(screen.queryByText(/Approximate arrival/)).toBeNull();
+  });
 });
 
 function evidence(): LocationReviewEvidenceDto {
@@ -149,6 +172,7 @@ function evidence(): LocationReviewEvidenceDto {
       status: "open",
       startedAt: "2026-08-14T09:00:00.000Z",
       stoppedAt: "2026-08-14T10:00:00.000Z",
+      approximateArrival: false,
       confidence: "medium",
       continuityStatus: "continuous",
       algorithmVersion: "location-v2.0",
