@@ -256,6 +256,10 @@ describe("mobile review helpers", () => {
     );
     expect(locationReviewReasonCopy({
       ...commute,
+      rawPayload: { semanticReason: "short_journey_review_only" }
+    })).toBe("Needs review · short journeys aren’t added automatically");
+    expect(locationReviewReasonCopy({
+      ...commute,
       rawPayload: { semanticReason: "insufficient_route_evidence" }
     })).toBe("Needs review · route evidence is limited");
     expect(locationReviewReasonCopy({
