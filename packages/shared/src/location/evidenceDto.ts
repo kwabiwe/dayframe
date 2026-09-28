@@ -19,6 +19,7 @@ export const LocationReviewEvidenceDtoSchema = z.object({
     status: z.string(),
     startedAt: z.string(),
     stoppedAt: z.string().nullable(),
+    approximateArrival: z.boolean().default(false),
     startUncertainty: z.object({ lower: z.string().nullable(), upper: z.string().nullable() }).optional(),
     stopUncertainty: z.object({ lower: z.string().nullable(), upper: z.string().nullable() }).optional(),
     confidence: z.string(),

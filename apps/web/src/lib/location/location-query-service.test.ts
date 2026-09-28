@@ -44,6 +44,33 @@ describe("Location Review evidence query", () => {
       }
     });
   });
+
+  it.each([
+    ["unknown Visit with movement-backed bounds after raw expiry", "unknown", "2026-08-20T07:59:40.000Z", "2026-08-20T08:30:00.000Z", true, true, true],
+    ["saved-place corroborated gap", "saved", "2026-08-20T07:59:40.000Z", "2026-08-20T08:30:00.000Z", true, true, false],
+    ["learned-place gap", "learned", "2026-08-20T07:59:40.000Z", "2026-08-20T08:30:00.000Z", true, true, false],
+    ["ordinary exact unknown stay", "unknown", "2026-08-20T08:00:00.000Z", "2026-08-20T08:00:00.000Z", true, false, false],
+    ["unknown GPS gap without Visit", "unknown", "2026-08-20T07:59:40.000Z", "2026-08-20T08:30:00.000Z", true, false, false],
+    ["commute", "unknown", "2026-08-20T07:59:40.000Z", "2026-08-20T08:30:00.000Z", false, true, false]
+  ] as const)("sets explicit approximate-arrival presentation only for %s", async (
+    _case, placeMatchKind, lower, upper, stay, persistedFlag, expected
+  ) => {
+    const review = {
+      ...reviewRow(),
+      placeMatchKind,
+      approximateArrival: persistedFlag,
+      startLowerBoundAt: lower,
+      startUpperBoundAt: upper,
+      stayId: stay ? reviewRow().stayId : null,
+      commuteId: stay ? null : "60000000-0000-4000-8000-000000000001"
+    };
+    query.mockImplementation((sql: string) => {
+      if (sql.includes("from review_items ri")) return Promise.resolve({ rows: [review] });
+      return Promise.resolve({ rows: [] });
+    });
+    const dto = await getLocationReviewEvidence(review.reviewItemId, session);
+    expect(dto.segment.approximateArrival).toBe(expected);
+  });
 });
 
 function reviewRow() {
@@ -58,6 +85,8 @@ function reviewRow() {
     deviceId: "device-1",
     stayId: "50000000-0000-4000-8000-000000000001",
     commuteId: null,
+    placeMatchKind: "unknown",
+    approximateArrival: false,
     status: "review",
     startedAt: "2026-08-20T08:00:00.000Z",
     stoppedAt: "2026-08-20T08:30:00.000Z",

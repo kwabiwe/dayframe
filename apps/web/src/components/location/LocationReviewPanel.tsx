@@ -146,10 +146,13 @@ export function LocationReviewPanel({
           <section className="rounded-2xl bg-[var(--surface)] p-4">
             <h5 className="font-semibold">Time and uncertainty</h5>
             <p className="mt-1 text-sm text-[var(--muted)]">
+              {evidence.segment.approximateArrival ? "Approximate arrival · " : ""}
               {formatDateTime(evidence.segment.startedAt)}–{evidence.segment.stoppedAt ? formatDateTime(evidence.segment.stoppedAt) : "ongoing"}
             </p>
             <p className="mt-2 text-sm leading-6 text-[var(--muted)]">
-              {evidence.segment.continuityStatus === "uncertain_gap"
+              {evidence.segment.approximateArrival
+                ? "The arrival is estimated from location evidence. Its displayed duration is a suggestion, not confirmed stationary time."
+                : evidence.segment.continuityStatus === "uncertain_gap"
                 ? "A gap limits precision, so Dayframe kept supported bounds instead of inventing an exact transition."
                 : "The nearest arrival and departure evidence supports these boundaries."}
             </p>

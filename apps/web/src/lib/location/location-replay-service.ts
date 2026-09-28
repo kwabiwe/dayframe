@@ -519,7 +519,8 @@ async function persistStays(
       segment.confidence,
       JSON.stringify({
         placeMatchKind: segment.placeMatchKind,
-        candidatePlaceIds: segment.candidatePlaceIds
+        candidatePlaceIds: segment.candidatePlaceIds,
+        ...(segment.approximateArrival ? { approximateArrival: true } : {})
       })
     ]);
     // Trusted SQL template; only parameter positions vary with the bounded row index.

@@ -17,6 +17,8 @@ type ReviewSegmentRow = {
   deviceId: string | null;
   stayId: string | null;
   commuteId: string | null;
+  placeMatchKind: string | null;
+  approximateArrival: boolean;
   status: string;
   startedAt: Date | string;
   stoppedAt: Date | string | null;
@@ -128,6 +130,8 @@ async function buildLocationReviewEvidence(
             coalesce(st.device_id, cs.device_id) as "deviceId",
             st.id as "stayId",
             cs.id as "commuteId",
+            st.metadata->>'placeMatchKind' as "placeMatchKind",
+            coalesce((st.metadata->>'approximateArrival')::boolean, false) as "approximateArrival",
             coalesce(st.status, cs.status) as status,
             coalesce(st.started_at, cs.started_at) as "startedAt",
             coalesce(st.stopped_at, cs.stopped_at) as "stoppedAt",
@@ -223,6 +227,8 @@ async function buildLocationReviewEvidence(
   ]);
   const retained = downsampleEvidence(evidenceResult.rows, 160);
   const assemblyStartedAt = Date.now();
+  const approximateArrival = kind === "stay" && review.placeMatchKind === "unknown" &&
+    review.approximateArrival === true;
   const coordinateRows = retained.filter(
     (row): row is EvidenceMapRow & { longitude: number; latitude: number } =>
       row.longitude != null && row.latitude != null
@@ -267,6 +273,7 @@ async function buildLocationReviewEvidence(
       status: review.status,
       startedAt: iso(review.startedAt)!,
       stoppedAt: iso(review.stoppedAt),
+      approximateArrival,
       startUncertainty: { lower: iso(review.startLowerBoundAt), upper: iso(review.startUpperBoundAt) },
       stopUncertainty: { lower: iso(review.stopLowerBoundAt), upper: iso(review.stopUpperBoundAt) },
       confidence: review.confidence,

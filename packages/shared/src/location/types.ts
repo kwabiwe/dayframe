@@ -104,6 +104,7 @@ export type StaySegment = {
   placeId?: string | null;
   learnedPlaceId?: string | null;
   placeMatchKind: "saved" | "learned" | "unknown" | "ambiguous";
+  approximateArrival?: true;
   candidatePlaceIds: string[];
   centreLatitude?: number | null;
   centreLongitude?: number | null;

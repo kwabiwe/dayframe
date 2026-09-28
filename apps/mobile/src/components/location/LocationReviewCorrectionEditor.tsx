@@ -118,6 +118,8 @@ export function LocationReviewCorrectionEditor({
     () => evidence.segment.stoppedAt ? new Date(evidence.segment.stoppedAt) : null,
     [evidence.segment.stoppedAt]
   );
+  const approximateArrival = evidence.segment.approximateArrival;
+  const durationLabel = approximateArrival ? "Estimated duration" : "Duration";
   const baselinePlaceId = evidence.display.placeId ?? reviewItem?.suggestedPlaceId ?? null;
   const baselineCategoryId = reviewItem?.suggestedCategoryId ?? null;
   const [description, setDescription] = useState(() => initialLocationReviewDescription({
@@ -806,10 +808,12 @@ export function LocationReviewCorrectionEditor({
                   )}
                 </View>
                 <View style={editorStyles.timeGroup}>
-                  <Text {...mobileTextProps("metadata")} style={editorStyles.fieldLabel}>Duration</Text>
+                  <Text {...mobileTextProps("metadata")} style={editorStyles.fieldLabel}>
+                    {durationLabel}
+                  </Text>
                   <View
                     accessible
-                    accessibilityLabel={`Duration ${editableDuration}`}
+                    accessibilityLabel={`${durationLabel} ${editableDuration}`}
                     style={editorStyles.timeField}
                   >
                     <Text {...mobileTextProps("numeric")} style={editorStyles.durationValue}>{editableDuration}</Text>
@@ -1147,7 +1151,10 @@ function formatEvidenceTimeRange(evidence: LocationReviewEvidenceDto) {
   const durationMinutes = stoppedAt
     ? Math.max(0, Math.round((stoppedAt.getTime() - startedAt.getTime()) / 60_000))
     : null;
-  return `${date} · ${start}–${stop}${durationMinutes === null ? "" : ` · ${durationMinutes}m`}`;
+  const approximateArrival = evidence.segment.approximateArrival;
+  const prefix = approximateArrival ? "Approximate arrival · " : "";
+  const duration = durationMinutes === null ? "" : ` · ${durationMinutes}m${approximateArrival ? " estimated" : ""}`;
+  return `${prefix}${date} · ${start}–${stop}${duration}`;
 }
 
 function formatTime(value: string) {

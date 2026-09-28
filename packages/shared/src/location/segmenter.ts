@@ -42,6 +42,7 @@ type WorkingStay = {
   continuityStatus: ContinuityStatus;
   outside: ClassifiedEvidence[];
   supportedByVisit: boolean;
+  approximateArrival: boolean;
   visitSupportUntilAt: string | null;
   pendingExit?: ClassifiedEvidence;
   inferredContinuity?: boolean;
@@ -94,6 +95,7 @@ function makeWorkingStay(item: ClassifiedEvidence): WorkingStay {
     continuityStatus: evidence.kind === "visit" ? "supported_by_visit" : "continuous",
     outside: [],
     supportedByVisit: evidence.kind === "visit",
+    approximateArrival: false,
     visitSupportUntilAt: evidence.kind === "visit" ? evidence.endedAt ?? null : null
   };
 }
@@ -191,6 +193,106 @@ function lastInsideAt(active: WorkingStay, before: string) {
 function accurateCoordinate(item: ClassifiedEvidence, input: LocationEngineInput) {
   return pointFor(item.evidence) != null && item.evidence.horizontalAccuracyMeters != null &&
     item.evidence.horizontalAccuracyMeters <= input.config.highQualityHorizontalAccuracyMeters;
+}
+
+type UnknownVisitArrivalBound = {
+  lower: string;
+  upper: string | null;
+};
+
+function lastDisplacedMovementBeforeVisit(
+  accepted: ClassifiedEvidence[],
+  visit: ClassifiedEvidence,
+  input: LocationEngineInput,
+  reference: ClassifiedEvidence = visit
+) {
+  const point = pointFor(reference.evidence)!;
+  const at = Date.parse(visit.evidence.occurredAt);
+  for (let index = accepted.length - 1; index >= 0; index -= 1) {
+    const candidate = accepted[index];
+    const e = candidate.evidence;
+    const time = Date.parse(e.occurredAt);
+    if (time >= at) continue;
+    if (at - time > input.config.savedPlaceArrivalCorroborationWindowMs) break;
+    const candidatePoint = pointFor(e);
+    if ((e.kind === "standard_location" || e.kind === "significant_change") &&
+        e.deviceId === visit.evidence.deviceId && e.isSimulated === false &&
+        candidatePoint && accurateCoordinate(candidate, input) &&
+        e.speedMetersPerSecond != null && Number.isFinite(e.speedMetersPerSecond) &&
+        e.speedMetersPerSecond >= input.config.movementSpeedThresholdMps &&
+        e.speedMetersPerSecond <= 120 &&
+        distanceMeters(candidatePoint, point) >= input.config.movementDisplacementThresholdMeters) {
+      return e.occurredAt;
+    }
+  }
+  return null;
+}
+
+/** A native Visit supplies an estimate, not a timestamped stationary observation. */
+function unknownVisitArrivalBounds(accepted: ClassifiedEvidence[], input: LocationEngineInput) {
+  const bounds = new Map<string, UnknownVisitArrivalBound>();
+  const visits = accepted.filter((item) => item.evidence.kind === "visit" &&
+    item.match?.kind === "unknown" && pointFor(item.evidence));
+  const groups = new Map<string, ClassifiedEvidence[]>();
+  for (const item of visits) {
+    const key = `${item.evidence.deviceId}:${item.evidence.occurredAt}`;
+    groups.set(key, [...(groups.get(key) ?? []), item]);
+  }
+  for (const group of groups.values()) {
+    const completed = group.filter(({ evidence }) => evidence.endedAt);
+    const open = group.filter(({ evidence }) => !evidence.endedAt);
+    // Two callbacks can share one episode only when the existing source fields
+    // identify exactly one pair. A coordinate overlap is compatibility, not a
+    // new episode ID or independent arrival confirmation.
+    const complete = completed.length === 1 ? completed[0] : null;
+    const arrival = complete && open.length === 1 && group.length === 2 ? open[0] : null;
+    const completePoint = complete && pointFor(complete.evidence);
+    const arrivalPoint = arrival && pointFor(arrival.evidence);
+    const overlapping = complete && arrival && completePoint && arrivalPoint &&
+      complete.evidence.horizontalAccuracyMeters != null &&
+      arrival.evidence.horizontalAccuracyMeters != null &&
+      distanceMeters(completePoint, arrivalPoint) <=
+        complete.evidence.horizontalAccuracyMeters + arrival.evidence.horizontalAccuracyMeters;
+    const competingVisit = complete && accepted.some(({ evidence }) =>
+      evidence.kind === "visit" && evidence.deviceId === complete.evidence.deviceId &&
+      evidence.clientEvidenceId !== complete.evidence.clientEvidenceId &&
+      evidence.clientEvidenceId !== arrival?.evidence.clientEvidenceId &&
+      Date.parse(evidence.occurredAt) < Date.parse(complete.evidence.endedAt!) &&
+      Date.parse(evidence.occurredAt) >= Date.parse(complete.evidence.occurredAt)
+    );
+    const paired = Boolean(overlapping && !competingVisit);
+    if (paired && arrival && complete) {
+      // Spatial accuracy chooses a single reference centre, not a more exact
+      // arrival time. Equal accuracy favours the arrival callback by role.
+      const reference = arrival.evidence.horizontalAccuracyMeters! <=
+        complete.evidence.horizontalAccuracyMeters! ? arrival : complete;
+      const movementAt = lastDisplacedMovementBeforeVisit(accepted, complete, input, reference);
+      const completedBound = complete.evidence.horizontalAccuracyMeters! >
+        input.config.highQualityHorizontalAccuracyMeters && movementAt
+        ? { lower: movementAt, upper: complete.evidence.endedAt! }
+        : { lower: complete.evidence.occurredAt, upper: complete.evidence.occurredAt };
+      bounds.set(complete.evidence.clientEvidenceId, completedBound);
+      bounds.set(arrival.evidence.clientEvidenceId, completedBound);
+      continue;
+    }
+    for (const item of group) {
+      const current = item.evidence;
+      const movementAt = lastDisplacedMovementBeforeVisit(accepted, item, input);
+      if (current.endedAt && current.horizontalAccuracyMeters != null &&
+          current.horizontalAccuracyMeters > input.config.highQualityHorizontalAccuracyMeters && movementAt) {
+        bounds.set(current.clientEvidenceId, {
+          lower: movementAt,
+          upper: current.endedAt
+        });
+      } else if (!current.endedAt && movementAt) {
+        bounds.set(current.clientEvidenceId, {
+          lower: movementAt,
+          upper: null
+        });
+      }
+    }
+  }
+  return bounds;
 }
 
 function strongSavedPoint(item: ClassifiedEvidence, placeId: string | null, input: LocationEngineInput) {
@@ -313,6 +415,7 @@ function stayFromWorking(
     sampleCount: coordinateEvidence.length,
     continuityStatus: working.continuityStatus,
     confidence,
+    ...(working.approximateArrival ? { approximateArrival: true as const } : {}),
     evidenceIds
   };
 }
@@ -704,12 +807,22 @@ export function runLocationEngine(input: LocationEngineInput): LocationEngineOut
   resolveCorroboratedCoincidentVisits(accepted, input);
   resolveCorroboratedCoincidentArrivals(accepted, input);
   const arrivalAnalysis = analyseSavedPlaceArrivalEvidence(accepted, input);
+  const unknownArrivalBounds = unknownVisitArrivalBounds(accepted, input);
   const completed: WorkingStay[] = [];
   let active: WorkingStay | null = null;
   // Occurrence-ordered, owner/device-local interval support; never a second durable store.
   const visits = new Map<string, ClassifiedEvidence>();
+  const applyUnknownVisitArrivalBound = (stay: WorkingStay, item: ClassifiedEvidence) => {
+    const unknownBound = unknownArrivalBounds.get(item.evidence.clientEvidenceId);
+    if (stay.key === "unknown" && unknownBound) {
+      stay.startLowerBoundAt = unknownBound.lower;
+      stay.startUpperBoundAt = unknownBound.upper;
+      stay.approximateArrival = unknownBound.lower !== stay.startedAt;
+    }
+  };
   const startStay = (item: ClassifiedEvidence) => {
     const stay = makeWorkingStay(item);
+    applyUnknownVisitArrivalBound(stay, item);
     const corroboratedSupport = arrivalAnalysis.corroboratedVisits.get(item.evidence.clientEvidenceId);
     if (corroboratedSupport) {
       stay.inferredBoundary = true;
@@ -855,6 +968,16 @@ export function runLocationEngine(input: LocationEngineInput): LocationEngineOut
         active.continuityStatus = "uncertain_gap";
       } else if (evidence.kind === "visit") {
         active.supportedByVisit = true;
+        const bound = unknownArrivalBounds.get(evidence.clientEvidenceId);
+        if (bound && active.key === "unknown" &&
+            active.startedAt === evidence.occurredAt &&
+            active.evidence[0].evidence.clientEvidenceId !== evidence.clientEvidenceId &&
+            active.evidence[0].evidence.kind === "visit" &&
+            unknownArrivalBounds.get(active.evidence[0].evidence.clientEvidenceId) === bound) {
+          active.startLowerBoundAt = bound.lower;
+          active.startUpperBoundAt = bound.upper;
+          active.approximateArrival = bound.lower !== active.startedAt;
+        }
         if (
           evidence.endedAt &&
           (!active.visitSupportUntilAt || Date.parse(evidence.endedAt) > Date.parse(active.visitSupportUntilAt))
@@ -901,6 +1024,7 @@ export function runLocationEngine(input: LocationEngineInput): LocationEngineOut
       );
       if (stationaryOutside.length > 0) {
         active = makeWorkingStay(stationaryOutside[0]);
+        applyUnknownVisitArrivalBound(active, stationaryOutside[0]);
         for (const candidate of stationaryOutside.slice(1)) {
           if (sameUnknownCluster(active, candidate, input.config.unknownStayBaseRadiusMeters)) {
             active.evidence.push(candidate);
