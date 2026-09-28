@@ -203,9 +203,10 @@ type UnknownVisitArrivalBound = {
 function lastDisplacedMovementBeforeVisit(
   accepted: ClassifiedEvidence[],
   visit: ClassifiedEvidence,
-  input: LocationEngineInput
+  input: LocationEngineInput,
+  reference: ClassifiedEvidence = visit
 ) {
-  const point = pointFor(visit.evidence)!;
+  const point = pointFor(reference.evidence)!;
   const at = Date.parse(visit.evidence.occurredAt);
   for (let index = accepted.length - 1; index >= 0; index -= 1) {
     const candidate = accepted[index];
@@ -260,6 +261,20 @@ function unknownVisitArrivalBounds(accepted: ClassifiedEvidence[], input: Locati
       Date.parse(evidence.occurredAt) >= Date.parse(complete.evidence.occurredAt)
     );
     const paired = Boolean(overlapping && !competingVisit);
+    if (paired && arrival && complete) {
+      // Spatial accuracy chooses a single reference centre, not a more exact
+      // arrival time. Equal accuracy favours the arrival callback by role.
+      const reference = arrival.evidence.horizontalAccuracyMeters! <=
+        complete.evidence.horizontalAccuracyMeters! ? arrival : complete;
+      const movementAt = lastDisplacedMovementBeforeVisit(accepted, complete, input, reference);
+      const completedBound = complete.evidence.horizontalAccuracyMeters! >
+        input.config.highQualityHorizontalAccuracyMeters && movementAt
+        ? { lower: movementAt, upper: complete.evidence.endedAt! }
+        : { lower: complete.evidence.occurredAt, upper: complete.evidence.occurredAt };
+      bounds.set(complete.evidence.clientEvidenceId, completedBound);
+      bounds.set(arrival.evidence.clientEvidenceId, completedBound);
+      continue;
+    }
     for (const item of group) {
       const current = item.evidence;
       const movementAt = lastDisplacedMovementBeforeVisit(accepted, item, input);
@@ -275,14 +290,6 @@ function unknownVisitArrivalBounds(accepted: ClassifiedEvidence[], input: Locati
           upper: null
         });
       }
-    }
-    if (paired && arrival && complete) {
-      const completedBound = bounds.get(complete.evidence.clientEvidenceId) ?? {
-        lower: complete.evidence.occurredAt,
-        upper: complete.evidence.occurredAt
-      };
-      bounds.set(complete.evidence.clientEvidenceId, completedBound);
-      bounds.set(arrival.evidence.clientEvidenceId, completedBound);
     }
   }
   return bounds;

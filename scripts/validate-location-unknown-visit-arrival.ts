@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { runLocationEngine } from "@dayframe/shared";
-import { unknownVisitArrivalFixture } from "../packages/shared/test/fixtures/unknownVisitArrival";
+import { shiftedCompletedUnknownVisitFixture, unknownVisitArrivalFixture } from "../packages/shared/test/fixtures/unknownVisitArrival";
 import { pool } from "../apps/web/src/lib/db";
 import { ingestLocationEvidence, replayRetainedLocationEvidence } from "../apps/web/src/lib/location/location-ingest-service";
 import { resolveLocationReviewAction } from "../apps/web/src/lib/location/location-review-service";
@@ -18,7 +18,7 @@ const processingAt = "2026-09-27T12:00:00.000Z";
 const acknowledgedAt = "2026-09-27T09:00:00.000Z";
 
 async function scenario(completedFirst: boolean) {
-  const fixture = unknownVisitArrivalFixture();
+  const fixture = shiftedCompletedUnknownVisitFixture();
   const session: RequestSession = {
     workspaceId: randomUUID(), userId: randomUUID(), authMode: "token",
     scopes: ["app:read", "app:write", "events:write"]

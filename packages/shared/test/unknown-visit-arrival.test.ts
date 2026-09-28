@@ -4,7 +4,7 @@ import { localDateKey, stableLocationId } from "../src/location/geo";
 import { assessAutomaticLocation } from "../src/location/automaticPolicy";
 import type { LocationEngineInput, StaySegment } from "../src/location/types";
 import { shortAt, shortJourneysFixture } from "./fixtures/shortJourneys";
-import { unknownVisitArrivalFixture } from "./fixtures/unknownVisitArrival";
+import { shiftedCompletedUnknownVisitFixture, unknownVisitArrivalFixture } from "./fixtures/unknownVisitArrival";
 
 const arrival = "2026-09-27T10:28:03.000Z";
 const departure = "2026-09-27T10:51:38.000Z";
@@ -74,6 +74,7 @@ describe("unknown native Visit arrival uncertainty", () => {
       startUpperBoundAt: arrival,
       stoppedAt: departure
     });
+    expect(stay).not.toHaveProperty("approximateArrival");
     // A broad coordinate is not by itself a clock-error measurement. With no
     // recent independent movement, the narrow risk flag has no lower witness.
   });
@@ -210,9 +211,42 @@ describe("unknown native Visit arrival uncertainty", () => {
       .toEqual(runLocationEngine(full).segmentUpserts);
   });
 
-  it("preserves semantic bounds when same-time Visit callback IDs swap their order", () => {
-    const input = unknownVisitArrivalFixture();
-    const swapped = unknownVisitArrivalFixture();
+  it("keeps a witnessed arrival approximate when its paired broad completion shifts toward movement", () => {
+    const full = shiftedCompletedUnknownVisitFixture();
+    const arrivalOnly = structuredClone(full);
+    arrivalOnly.evidence = arrivalOnly.evidence.filter((item) => item.clientEvidenceId !== "visit-completed");
+    for (const [index, time] of ["10:36:00.000", "10:40:00.000"].entries()) {
+      arrivalOnly.evidence.push({
+        ...arrivalOnly.evidence.find((item) => item.clientEvidenceId === "later-slow")!,
+        clientEvidenceId: `shifted-stationary-${index}`,
+        occurredAt: `2026-09-27T${time}Z`,
+        sourceTimestamp: `2026-09-27T${time}Z`
+      });
+    }
+    const provisional = runLocationEngine(arrivalOnly).segmentUpserts.find((segment) =>
+      segment.kind === "stay" && segment.evidenceIds.includes("visit-arrival"));
+    expect(provisional).toMatchObject({
+      startedAt: arrival,
+      startLowerBoundAt: lastMovement,
+      startUpperBoundAt: null,
+      approximateArrival: true
+    });
+    const retained = { ...arrivalOnly, evidence: [
+      ...arrivalOnly.evidence,
+      full.evidence.find((item) => item.clientEvidenceId === "visit-completed")!
+    ] };
+    expect(unknownStay(retained)).toMatchObject({
+      startedAt: arrival,
+      stoppedAt: departure,
+      startLowerBoundAt: lastMovement,
+      startUpperBoundAt: departure,
+      approximateArrival: true
+    });
+  });
+
+  it("preserves shifted-pair semantics across input order and callback IDs", () => {
+    const input = shiftedCompletedUnknownVisitFixture();
+    const swapped = shiftedCompletedUnknownVisitFixture();
     swapped.evidence = swapped.evidence.map((item) => ({
       ...item,
       clientEvidenceId: item.clientEvidenceId === "visit-arrival" ? "visit-completed" :
@@ -228,7 +262,60 @@ describe("unknown native Visit arrival uncertainty", () => {
         upper: segment.startUpperBoundAt,
         approximateArrival: segment.approximateArrival ?? false
       }));
+    expect(semantic({ ...input, evidence: [...input.evidence].reverse() })).toEqual(semantic(input));
     expect(semantic(swapped)).toEqual(semantic(input));
+    expect(semantic({ ...swapped, evidence: [...swapped.evidence].reverse() })).toEqual(semantic(input));
+  });
+
+  it("uses the arrival callback as the deterministic equal-accuracy reference", () => {
+    const input = shiftedCompletedUnknownVisitFixture();
+    input.evidence = input.evidence.map((item) =>
+      item.clientEvidenceId === "visit-arrival"
+        ? { ...item, horizontalAccuracyMeters: 70.4 }
+        : item);
+    expect(unknownStay(input)).toMatchObject({
+      startedAt: arrival,
+      startLowerBoundAt: lastMovement,
+      startUpperBoundAt: departure,
+      approximateArrival: true
+    });
+    expect(unknownStay({ ...input, evidence: [...input.evidence].reverse() })?.startLowerBoundAt)
+      .toBe(lastMovement);
+    const swapped = { ...input, evidence: input.evidence.map((item) => ({
+      ...item,
+      clientEvidenceId: item.clientEvidenceId === "visit-arrival" ? "visit-completed" :
+        item.clientEvidenceId === "visit-completed" ? "visit-arrival" : item.clientEvidenceId
+    })) };
+    expect(unknownStay(swapped)?.startLowerBoundAt).toBe(lastMovement);
+  });
+
+  it("uses a more accurate completed callback centre while retaining its broad quality gate", () => {
+    const shifted = shiftedCompletedUnknownVisitFixture();
+    shifted.evidence = shifted.evidence.map((item) =>
+      item.clientEvidenceId === "visit-arrival"
+        ? { ...item, horizontalAccuracyMeters: 90 }
+        : item);
+    const exact = unknownStay(shifted);
+    expect(exact).toMatchObject({
+      startedAt: arrival,
+      stoppedAt: departure,
+      startLowerBoundAt: arrival,
+      startUpperBoundAt: arrival
+    });
+    expect(exact).not.toHaveProperty("approximateArrival");
+
+    const fartherCompletion = structuredClone(shifted);
+    fartherCompletion.evidence = fartherCompletion.evidence.map((item) =>
+      item.clientEvidenceId === "visit-arrival"
+        ? { ...item, latitude: 51.5094 }
+        : item.clientEvidenceId === "visit-completed"
+          ? { ...item, latitude: 51.51 }
+          : item);
+    expect(unknownStay(fartherCompletion)).toMatchObject({
+      startLowerBoundAt: lastMovement,
+      startUpperBoundAt: departure,
+      approximateArrival: true
+    });
   });
 
   it("uses unknown Visit bounds when stationaryOutside restarts a stay", () => {

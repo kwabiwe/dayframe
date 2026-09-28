@@ -65,3 +65,12 @@ export function unknownVisitArrivalFixture(): LocationEngineInput {
     ]
   };
 }
+
+/** Same synthetic episode with a compatible broad completion shifted toward the moving fix. */
+export function shiftedCompletedUnknownVisitFixture(): LocationEngineInput {
+  const input = unknownVisitArrivalFixture();
+  input.evidence = input.evidence.map((item) => item.clientEvidenceId === "visit-completed"
+    ? { ...item, latitude: 51.5094 }
+    : item);
+  return input;
+}
