@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { LocationReviewEvidenceDto } from "@dayframe/shared";
@@ -116,6 +116,19 @@ describe("LocationReviewPanel", () => {
     expect(onClose).not.toHaveBeenCalled();
   });
 
+  it.each(["Confirm edits", "Record once"])("keeps generic failure copy for %s", async (actionName) => {
+    mocks.clientFetch.mockResolvedValueOnce(jsonResponse(evidence()))
+      .mockResolvedValueOnce(jsonResponse({}, 503));
+    const onClose = vi.fn();
+    render(<LocationReviewPanel reviewItemId={evidence().reviewItemId} categories={categories}
+      entries={[]} initialCategoryId={null} onClose={onClose} />);
+
+    await userEvent.setup().click(await screen.findByRole("button", { name: actionName }));
+    expect((await screen.findByRole("alert")).textContent).toBe("Unable to update this location review.");
+    expect(screen.queryByText(/Retry with the same stop times/)).toBeNull();
+    expect(onClose).not.toHaveBeenCalled();
+  });
+
   it("calls a widened unknown Visit arrival approximate without claiming confirmed dwell", async () => {
     const visit = evidence();
     visit.segment.kind = "stay";
@@ -179,9 +192,18 @@ describe("LocationReviewPanel", () => {
     fireEvent.change(screen.getByLabelText("Stop began"), { target: { value: localInput("2026-08-14T09:20:00.000Z") } });
     fireEvent.change(screen.getByLabelText("Journey resumed"), { target: { value: localInput("2026-08-14T09:35:00.000Z") } });
     expect(submit.disabled).toBe(false);
-    expect(screen.getByLabelText("Interruption preview").textContent).toContain("Journey 1");
-    expect(screen.getByLabelText("Interruption preview").textContent).toContain("Unassigned stop");
-    expect(screen.getByLabelText("Interruption preview").textContent).toContain("Journey 2");
+    const preview = screen.getByRole("group", { name: "Interruption preview" });
+    const dateTime = (value: string) => new Intl.DateTimeFormat(undefined, {
+      day: "numeric", month: "short", hour: "2-digit", minute: "2-digit"
+    }).format(new Date(value));
+    for (const [label, start, end] of [
+      ["Journey 1", commute.segment.startedAt, "2026-08-14T09:20:00.000Z"],
+      ["Unassigned stop", "2026-08-14T09:20:00.000Z", "2026-08-14T09:35:00.000Z"],
+      ["Journey 2", "2026-08-14T09:35:00.000Z", commute.segment.stoppedAt!]
+    ]) {
+      expect(within(preview).getByText(label).parentElement?.textContent)
+        .toBe(`${label}${dateTime(start)}–${dateTime(end)}`);
+    }
     await userEvent.setup().click(submit);
     await waitFor(() => expect(onClose).toHaveBeenCalledOnce());
     const [url, request] = mocks.clientFetch.mock.calls[1] as [string, RequestInit];
@@ -192,6 +214,27 @@ describe("LocationReviewPanel", () => {
       mutation: { action: "interrupt_commute", stopStartedAt: "2026-08-14T09:20:00.000Z",
         stopEndedAt: "2026-08-14T09:35:00.000Z" }
     });
+  });
+
+  it.each([503, 200])("limits same-stop retry copy to interruption failures (%s)", async (status) => {
+    const commute = evidence();
+    commute.segment.status = "finalised";
+    mocks.clientFetch.mockResolvedValueOnce(jsonResponse(commute))
+      .mockResolvedValueOnce(jsonResponse({}, status));
+    const onClose = vi.fn();
+    render(<LocationReviewPanel reviewItemId={commute.reviewItemId} categories={categories}
+      entries={[]} initialCategoryId={null} onClose={onClose} />);
+    fireEvent.change(await screen.findByLabelText("Stop began"), {
+      target: { value: localInput("2026-08-14T09:20:00.000Z") }
+    });
+    fireEvent.change(screen.getByLabelText("Journey resumed"), {
+      target: { value: localInput("2026-08-14T09:35:00.000Z") }
+    });
+    await userEvent.setup().click(screen.getByRole("button", { name: "Save interruption and review both legs" }));
+    expect((await screen.findByRole("alert")).textContent).toBe(
+      "Unable to verify this location review correction. Retry with the same stop times."
+    );
+    expect(onClose).not.toHaveBeenCalled();
   });
 
   it("keeps expired interruption evidence explanatory and never offers submission", async () => {

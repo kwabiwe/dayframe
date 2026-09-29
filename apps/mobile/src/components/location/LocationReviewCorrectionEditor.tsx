@@ -56,6 +56,7 @@ import {
   useReduceMotionPreference
 } from "@/lib/motion";
 import { LocationEvidenceMap } from "./LocationEvidenceMap";
+import { CommuteInterruptionPreview } from "./CommuteInterruptionPreview";
 
 type Category = MobileBootstrap["categories"][number];
 type Place = MobileBootstrap["places"][number];
@@ -153,6 +154,14 @@ export function LocationReviewCorrectionEditor({
   const [startTimeText, setStartTimeText] = useState(() => formatLocationReviewTimeInput(startAt));
   const [stopTimeText, setStopTimeText] = useState(() => stopAt ? formatLocationReviewTimeInput(stopAt) : "");
   const [validationError, setValidationError] = useState<string | null>(null);
+  const parsedInterruption = parseLocationReviewWindow({
+    baselineStartedAt: evidence.segment.startedAt,
+    baselineStoppedAt: evidence.segment.stoppedAt ?? "",
+    startDateText: stopStartDateText,
+    startTimeText: stopStartTimeText,
+    stopDateText: stopEndDateText,
+    stopTimeText: stopEndTimeText
+  });
 
   const revealFocusedControl = useCallback((control = activeRevealControlRef.current) => {
     const keyboardTop = keyboardTopRef.current;
@@ -957,19 +966,18 @@ export function LocationReviewCorrectionEditor({
                         placeholder="HH:MM" placeholderTextColor={theme.textSecondary}
                         style={[styles.textInput, editorStyles.interruptClockInput, fontScale >= 1.45 ? editorStyles.interruptStackedInput : null]} value={stopEndTimeText} />
                     </View>
+                    <CommuteInterruptionPreview
+                      startedAt={evidence.segment.startedAt}
+                      stoppedAt={evidence.segment.stoppedAt!}
+                      stopWindow={parsedInterruption.value}
+                      styles={editorStyles}
+                    />
                     {interruptError ? (
                       <Text {...mobileTextProps("body")} accessibilityLiveRegion="assertive" style={editorStyles.errorText}>{interruptError}</Text>
                     ) : null}
                     <Pressable accessibilityRole="button" disabled={saving}
                       onPress={() => {
-                        const parsed = parseLocationReviewWindow({
-                          baselineStartedAt: evidence.segment.startedAt,
-                          baselineStoppedAt: evidence.segment.stoppedAt!,
-                          startDateText: stopStartDateText,
-                          startTimeText: stopStartTimeText,
-                          stopDateText: stopEndDateText,
-                          stopTimeText: stopEndTimeText
-                        });
+                        const parsed = parsedInterruption;
                         if (!parsed.value) {
                           setInterruptError(parsed.error ?? "Enter both stop times.");
                           return;

@@ -101,7 +101,9 @@ export function LocationReviewPanel({
       });
       const body = await response.json().catch(() => ({})) as { message?: string; error?: string };
       if (!response.ok || envelope && !validReviewAcknowledgement(body, envelope, reviewItemId)) {
-        setError(body.message ?? body.error ?? "Unable to verify this location review correction. Retry with the same stop times.");
+        setError(body.message ?? body.error ?? (action.action === "interrupt_commute"
+          ? "Unable to verify this location review correction. Retry with the same stop times."
+          : "Unable to update this location review."));
         return;
       }
       startTransition(() => router.refresh());
@@ -268,7 +270,7 @@ export function LocationReviewPanel({
                         onChange={(event) => { setStopEndedAt(event.target.value); interruptMutationId.current = null; }} />
                     </label>
                   </div>
-                  <div className="mt-3 grid gap-2 text-sm sm:grid-cols-3" aria-label="Interruption preview">
+                  <div className="mt-3 grid gap-2 text-sm sm:grid-cols-3" role="group" aria-label="Interruption preview">
                     <p className="rounded-xl bg-[var(--surface-inset)] p-3"><strong className="block">Journey 1</strong>{validInterruption && stopStartedIso
                       ? `${formatDateTime(evidence.segment.startedAt)}–${formatDateTime(stopStartedIso)}` : "Set both stop times"}</p>
                     <p className="rounded-xl bg-[var(--surface-inset)] p-3"><strong className="block">Unassigned stop</strong>{validInterruption && stopStartedIso && stopEndedIso
