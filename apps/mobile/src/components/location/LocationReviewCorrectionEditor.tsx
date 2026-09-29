@@ -907,7 +907,19 @@ export function LocationReviewCorrectionEditor({
                   </View>
                 ) : null}
 
-                {evidence.segment.kind === "commute" && evidence.segment.continuityStatus !== "manual" && stopAt ? (
+                {evidence.segment.kind === "commute" && evidence.segment.status === "finalised" &&
+                  evidence.segment.continuityStatus !== "manual" && stopAt ?
+                  evidence.evidenceExpired || !evidence.map.acceptedSamples.some((sample) => sample.role === "route") ? (
+                  <View style={editorStyles.advancedGroup}>
+                    <Text {...mobileTextProps("metadata")} style={editorStyles.fieldLabel}>Interrupted this commute?</Text>
+                    <Text {...mobileTextProps("body")} style={editorStyles.helperText}>
+                      {evidence.evidenceExpired
+                        ? "The retained route evidence has expired, so Dayframe cannot support two separate journeys from this commute."
+                        : "No unexpired route observations are available to support two separate journeys from this commute."}
+                      {" "}This correction is unavailable; you can still use the other Review actions.
+                    </Text>
+                  </View>
+                ) : (
                   <View style={editorStyles.advancedGroup}>
                     <Text {...mobileTextProps("metadata")} style={editorStyles.fieldLabel}>Interrupted this commute?</Text>
                     <Text {...mobileTextProps("body")} style={editorStyles.helperText}>

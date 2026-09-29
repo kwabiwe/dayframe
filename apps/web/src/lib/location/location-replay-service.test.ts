@@ -111,6 +111,33 @@ describe("Location replay timing observation", () => {
     expect(replay.segments.some((segment) => segment.clientSegmentId === composite.clientSegmentId)).toBe(false);
   });
 
+  it("holds a changed-ID composite that reuses the interrupted parent's route provenance", async () => {
+    const fixture = userConfirmedCompositeFixture();
+    const composite = runLocationEngine(fixture).segmentUpserts.find((segment) => segment.kind === "commute");
+    if (!composite || composite.kind !== "commute") throw new Error("Missing fixture commute");
+    const retainedRoute = composite.evidenceIds[1];
+    const query = journeyReplayQuery(fixture, [{
+      clientSegmentId: "historical-composite-identity",
+      clientEvidenceId: retainedRoute,
+      status: "superseded",
+      continuityStatus: "manual",
+      kind: "standard_location",
+      occurredAt: fixture.evidence.find((item) => item.clientEvidenceId === retainedRoute)!.occurredAt,
+      startedAt: composite.startedAt,
+      stoppedAt: composite.stoppedAt
+    }]);
+    const replay = await replayLocationEvidence({ query } as never, {
+      workspaceId: "workspace-private", userId: "user-private", authMode: "provider", scopes: []
+    }, {
+      deviceId: fixture.evidence[0].deviceId,
+      algorithmVersion: fixture.config.algorithmVersion,
+      processingAt: fixture.processingAt
+    });
+    expect(replay.segments.some((segment) => segment.kind === "commute" &&
+      segment.clientSegmentId === composite.clientSegmentId)).toBe(false);
+    expect(query.mock.calls.some(([sql]) => sql.includes("for update of s"))).toBe(true);
+  });
+
   it("uses the same sanitised Journey-1 output as the shared engine", async () => {
     const fixture = journeyIdentityFixture();
     const local = runLocationEngine(fixture);

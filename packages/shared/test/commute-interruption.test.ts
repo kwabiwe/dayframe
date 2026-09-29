@@ -69,10 +69,18 @@ describe("user-confirmed commute interruption", () => {
     ["geofence restoration", [positive[0], positive[1], route("geofence", 10, 0.018, { kind: "geofence_state" }), ...positive.slice(3)]],
     ["poor accuracy", [route("poor-1", 3, 0.004, { accuracyMeters: 180 }), route("poor-2", 6, 0.018, { accuracyMeters: 180 }), ...positive.slice(3)]],
     ["simulated route", [route("sim-1", 3, 0.004, { isSimulated: true }), route("sim-2", 6, 0.018, { isSimulated: true }), ...positive.slice(3)]],
-    ["unknown simulation flag", [positive[0], route("unknown", 6, 0.010, { isSimulated: null }), positive[2], ...positive.slice(3)]],
-    ["unlinked middle activity", [...positive.slice(0, 3), route("middle", 20, 0.02), positive[3]]]
+    ["unknown simulation flag", [positive[0], route("unknown", 6, 0.010, { isSimulated: null }), positive[2], ...positive.slice(3)]]
   ])("rejects %s when a leg lacks retained route proof", (_name, points) => {
     expect(qualify(points).qualifies).toBe(false);
+  });
+
+  it("keeps both valid legs while excluding an unlinked middle observation", () => {
+    const result = qualify([...positive.slice(0, 3), route("middle", 20, 0.02), ...positive.slice(3)]);
+    expect(result.qualifies).toBe(true);
+    if (!result.qualifies) return;
+    expect(result.inbound.evidenceIds).toEqual(["in-1", "in-2", "in-3"]);
+    expect(result.outbound.evidenceIds).toEqual(["out-1", "out-2", "out-3"]);
+    expect([...result.inbound.evidenceIds, ...result.outbound.evidenceIds]).not.toContain("middle");
   });
 
   it("rejects a long quiet gap inside either proposed leg", () => {

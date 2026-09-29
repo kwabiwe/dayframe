@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { LocationReviewEvidenceDto } from "@dayframe/shared";
@@ -160,6 +160,98 @@ describe("LocationReviewPanel", () => {
     expect(await screen.findByText(/A gap limits precision/)).not.toBeNull();
     expect(screen.queryByText(/Approximate arrival/)).toBeNull();
   });
+
+  it("previews both journeys and sends one canonical Review mutation with the entered stop times", async () => {
+    const commute = evidence();
+    commute.segment.status = "finalised";
+    mocks.clientFetch.mockResolvedValueOnce(jsonResponse(commute)).mockImplementationOnce(async (_url, request: RequestInit) => {
+      const envelope = JSON.parse(String(request.body));
+      return jsonResponse({ ok: true, action: "interrupt_commute", status: "accepted",
+        clientMutationId: envelope.clientMutationId, reviewItemId: commute.reviewItemId,
+        childSegmentIds: ["child-1", "child-2"], childReviewItemIds: ["review-1", "review-2"] });
+    });
+    const onClose = vi.fn();
+    render(<LocationReviewPanel reviewItemId={commute.reviewItemId} categories={categories}
+      entries={[]} initialCategoryId={null} onClose={onClose} />);
+    expect(await screen.findByText("Interrupted this commute?")).not.toBeNull();
+    const submit = screen.getByRole("button", { name: "Save interruption and review both legs" }) as HTMLButtonElement;
+    expect(submit.disabled).toBe(true);
+    fireEvent.change(screen.getByLabelText("Stop began"), { target: { value: localInput("2026-08-14T09:20:00.000Z") } });
+    fireEvent.change(screen.getByLabelText("Journey resumed"), { target: { value: localInput("2026-08-14T09:35:00.000Z") } });
+    expect(submit.disabled).toBe(false);
+    expect(screen.getByLabelText("Interruption preview").textContent).toContain("Journey 1");
+    expect(screen.getByLabelText("Interruption preview").textContent).toContain("Unassigned stop");
+    expect(screen.getByLabelText("Interruption preview").textContent).toContain("Journey 2");
+    await userEvent.setup().click(submit);
+    await waitFor(() => expect(onClose).toHaveBeenCalledOnce());
+    const [url, request] = mocks.clientFetch.mock.calls[1] as [string, RequestInit];
+    expect(url).toBe(`/api/review/${commute.reviewItemId}`);
+    expect(request.method).toBe("POST");
+    expect(JSON.parse(String(request.body))).toMatchObject({
+      clientMutationId: expect.any(String),
+      mutation: { action: "interrupt_commute", stopStartedAt: "2026-08-14T09:20:00.000Z",
+        stopEndedAt: "2026-08-14T09:35:00.000Z" }
+    });
+  });
+
+  it("keeps expired interruption evidence explanatory and never offers submission", async () => {
+    const commute = evidence();
+    commute.segment.status = "finalised";
+    commute.evidenceExpired = true;
+    mocks.clientFetch.mockResolvedValueOnce(jsonResponse(commute));
+    render(<LocationReviewPanel reviewItemId={commute.reviewItemId} categories={categories}
+      entries={[]} initialCategoryId={null} onClose={vi.fn()} />);
+    expect(await screen.findByText(/retained route evidence has expired/)).not.toBeNull();
+    expect(screen.queryByRole("button", { name: "Save interruption and review both legs" })).toBeNull();
+    expect(screen.queryByLabelText("Stop began")).toBeNull();
+    expect(mocks.clientFetch).toHaveBeenCalledTimes(1);
+  });
+
+  it("withholds interruption when no unexpired route observation remains", async () => {
+    const commute = evidence();
+    commute.segment.status = "finalised";
+    commute.map.acceptedSamples = [];
+    commute.rawEvidenceAvailable = false;
+    mocks.clientFetch.mockResolvedValueOnce(jsonResponse(commute));
+    render(<LocationReviewPanel reviewItemId={commute.reviewItemId} categories={categories}
+      entries={[]} initialCategoryId={null} onClose={vi.fn()} />);
+    expect(await screen.findByText(/No unexpired route observations are available/)).not.toBeNull();
+    expect(screen.queryByRole("button", { name: "Save interruption and review both legs" })).toBeNull();
+  });
+
+  it("rejects out-of-bounds stop times and retries an uncertain delivery with the same mutation ID", async () => {
+    const commute = evidence();
+    commute.segment.status = "finalised";
+    mocks.clientFetch.mockResolvedValueOnce(jsonResponse(commute))
+      .mockResolvedValueOnce(jsonResponse({ message: "The result is still unknown." }, 503))
+      .mockImplementationOnce(async (_url, request: RequestInit) => {
+        const envelope = JSON.parse(String(request.body));
+        return jsonResponse({ ok: true, action: "interrupt_commute", status: "accepted",
+          clientMutationId: envelope.clientMutationId, reviewItemId: commute.reviewItemId,
+          childSegmentIds: ["child-1", "child-2"], childReviewItemIds: ["review-1", "review-2"] });
+      });
+    const onClose = vi.fn();
+    render(<LocationReviewPanel reviewItemId={commute.reviewItemId} categories={categories}
+      entries={[]} initialCategoryId={null} onClose={onClose} />);
+    const start = await screen.findByLabelText("Stop began");
+    const end = screen.getByLabelText("Journey resumed");
+    const submit = screen.getByRole("button", { name: "Save interruption and review both legs" }) as HTMLButtonElement;
+    fireEvent.change(start, { target: { value: localInput("2026-08-14T09:00:00.000Z") } });
+    fireEvent.change(end, { target: { value: localInput("2026-08-14T09:35:00.000Z") } });
+    expect(submit.disabled).toBe(true);
+    fireEvent.change(start, { target: { value: localInput("2026-08-14T09:20:00.000Z") } });
+    expect(submit.disabled).toBe(false);
+    const user = userEvent.setup();
+    await user.click(submit);
+    expect((await screen.findByRole("alert")).textContent).toContain("The result is still unknown");
+    expect(onClose).not.toHaveBeenCalled();
+    await user.click(submit);
+    await waitFor(() => expect(onClose).toHaveBeenCalledOnce());
+    const first = JSON.parse(String((mocks.clientFetch.mock.calls[1]?.[1] as RequestInit).body));
+    const second = JSON.parse(String((mocks.clientFetch.mock.calls[2]?.[1] as RequestInit).body));
+    expect(second.clientMutationId).toBe(first.clientMutationId);
+    expect(second.mutation).toEqual(first.mutation);
+  });
 });
 
 function evidence(): LocationReviewEvidenceDto {
@@ -194,7 +286,9 @@ function evidence(): LocationReviewEvidenceDto {
         type: "LineString",
         coordinates: [[0.1, 51.5], [0.2, 51.6]]
       },
-      acceptedSamples: [],
+      acceptedSamples: [{ id: "route-1", point: { type: "Point", coordinates: [-0.1, 51.5] },
+        occurredAt: "2026-08-14T09:20:00.000Z", accuracyMeters: 12,
+        kind: "standard_location", role: "route" }],
       rejectedSamples: [],
       anchors: [],
       gaps: [],
@@ -203,7 +297,7 @@ function evidence(): LocationReviewEvidenceDto {
     suggestedSplitPoints: [],
     evidenceExpiresAt: null,
     evidenceExpired: false,
-    rawEvidenceAvailable: false,
+    rawEvidenceAvailable: true,
     textualSummary: "Only journey endpoints are available."
   };
 }
@@ -213,4 +307,9 @@ function jsonResponse(body: unknown, status = 200) {
     status,
     headers: { "Content-Type": "application/json" }
   });
+}
+
+function localInput(iso: string) {
+  const date = new Date(iso);
+  return new Date(date.getTime() - date.getTimezoneOffset() * 60_000).toISOString().slice(0, 16);
 }

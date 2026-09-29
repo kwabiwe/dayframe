@@ -1,10 +1,10 @@
 "use client";
 
-import { useEffect, useState, useTransition } from "react";
+import { useEffect, useRef, useState, useTransition } from "react";
 import { Check, GitMerge, MapPin, RotateCw, Scissors, X } from "lucide-react";
 import dynamic from "next/dynamic";
 import { useRouter } from "next/navigation";
-import type { LocationReviewAction, LocationReviewEvidenceDto } from "@dayframe/shared";
+import { validReviewAcknowledgement, type LocationReviewAction, type LocationReviewEvidenceDto } from "@dayframe/shared";
 import { clientFetch } from "@/lib/client-auth-fetch";
 import { CategoryPicker } from "@/components/CategoryPicker";
 import { OverlapNotice } from "@/components/OverlapNotice";
@@ -52,6 +52,9 @@ export function LocationReviewPanel({
   const [categoryId, setCategoryId] = useState(initialCategoryId ?? "");
   const [startedAt, setStartedAt] = useState("");
   const [stoppedAt, setStoppedAt] = useState("");
+  const [stopStartedAt, setStopStartedAt] = useState("");
+  const [stopEndedAt, setStopEndedAt] = useState("");
+  const interruptMutationId = useRef<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -69,6 +72,9 @@ export function LocationReviewPanel({
         setDescription(next.display.title);
         setStartedAt(toLocalDateTimeInput(next.segment.startedAt));
         setStoppedAt(next.segment.stoppedAt ? toLocalDateTimeInput(next.segment.stoppedAt) : "");
+        setStopStartedAt("");
+        setStopEndedAt("");
+        interruptMutationId.current = null;
         if (next.map.centre) {
           setSelectedPoint({ longitude: next.map.centre.coordinates[0], latitude: next.map.centre.coordinates[1] });
         }
@@ -85,24 +91,40 @@ export function LocationReviewPanel({
     setError(null);
     setIsSubmitting(true);
     try {
+      const envelope = action.action === "interrupt_commute"
+        ? { clientMutationId: interruptMutationId.current ??= crypto.randomUUID(), mutation: action }
+        : null;
       const response = await clientFetch(`/api/review/${reviewItemId}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(action)
+        body: JSON.stringify(envelope ?? action)
       });
-      if (!response.ok) {
-        const body = await response.json().catch(() => ({})) as { message?: string; error?: string };
-        setError(body.message ?? body.error ?? "Unable to update this location review.");
+      const body = await response.json().catch(() => ({})) as { message?: string; error?: string };
+      if (!response.ok || envelope && !validReviewAcknowledgement(body, envelope, reviewItemId)) {
+        setError(body.message ?? body.error ?? "Unable to verify this location review correction. Retry with the same stop times.");
         return;
       }
       startTransition(() => router.refresh());
       onClose();
+    } catch (actionError) {
+      setError(actionError instanceof Error ? actionError.message : "Unable to update this location review.");
     } finally {
       setIsSubmitting(false);
     }
   }
 
   const actionsDisabled = isPending || isSubmitting;
+  const canOfferInterruption = evidence?.segment.kind === "commute" && evidence.segment.status === "finalised" &&
+    evidence.segment.continuityStatus !== "manual" && Boolean(evidence.segment.stoppedAt);
+  const interruptionEvidenceUnavailable = evidence?.evidenceExpired || !evidence?.map.acceptedSamples.some(
+    (sample) => sample.role === "route"
+  );
+  const stopStartedIso = dateTimeLocalInputToIso(stopStartedAt);
+  const stopEndedIso = dateTimeLocalInputToIso(stopEndedAt);
+  const validInterruption = Boolean(canOfferInterruption && stopStartedIso && stopEndedIso &&
+    Date.parse(stopStartedIso) > Date.parse(evidence!.segment.startedAt) &&
+    Date.parse(stopStartedIso) < Date.parse(stopEndedIso) &&
+    Date.parse(stopEndedIso) < Date.parse(evidence!.segment.stoppedAt!));
 
   return (
     <div className="location-review-panel mt-4 max-h-[min(78vh,760px)] overflow-y-auto rounded-2xl bg-[var(--surface-muted)] p-3 sm:p-4">
@@ -210,6 +232,65 @@ export function LocationReviewPanel({
                   Save place and confirm
                 </button>
               </div>
+            </section>
+          ) : null}
+
+          {canOfferInterruption ? (
+            <section className="rounded-2xl bg-[var(--surface)] p-4">
+              <h5 className="font-semibold">Interrupted this commute?</h5>
+              {interruptionEvidenceUnavailable ? (
+                <p className="mt-2 text-sm leading-6 text-[var(--muted)]">
+                  {evidence.evidenceExpired
+                    ? "The retained route evidence has expired, so Dayframe cannot support two separate journeys from this commute."
+                    : "No unexpired route observations are available to support two separate journeys from this commute."}
+                  {" "}This correction is unavailable; you can still use the other Review actions.
+                </p>
+              ) : (
+                <>
+                  <p className="mt-1 text-sm leading-6 text-[var(--muted)]">
+                    Enter when you stopped and resumed. The interval between remains unassigned. Each journey needs its own retained route evidence and stays in Review.
+                  </p>
+                  <div className="mt-3 grid gap-3 sm:grid-cols-2">
+                    <label className="location-resolve-field" htmlFor={`location-stop-start-${reviewItemId}`}>
+                      <span>Stop began</span>
+                      <input id={`location-stop-start-${reviewItemId}`} className="location-resolve-control tabular"
+                        type="datetime-local" value={stopStartedAt} disabled={actionsDisabled}
+                        min={toLocalDateTimeInput(evidence.segment.startedAt)}
+                        max={toLocalDateTimeInput(evidence.segment.stoppedAt!)}
+                        onChange={(event) => { setStopStartedAt(event.target.value); interruptMutationId.current = null; }} />
+                    </label>
+                    <label className="location-resolve-field" htmlFor={`location-stop-end-${reviewItemId}`}>
+                      <span>Journey resumed</span>
+                      <input id={`location-stop-end-${reviewItemId}`} className="location-resolve-control tabular"
+                        type="datetime-local" value={stopEndedAt} disabled={actionsDisabled}
+                        min={toLocalDateTimeInput(evidence.segment.startedAt)}
+                        max={toLocalDateTimeInput(evidence.segment.stoppedAt!)}
+                        onChange={(event) => { setStopEndedAt(event.target.value); interruptMutationId.current = null; }} />
+                    </label>
+                  </div>
+                  <div className="mt-3 grid gap-2 text-sm sm:grid-cols-3" aria-label="Interruption preview">
+                    <p className="rounded-xl bg-[var(--surface-inset)] p-3"><strong className="block">Journey 1</strong>{validInterruption && stopStartedIso
+                      ? `${formatDateTime(evidence.segment.startedAt)}–${formatDateTime(stopStartedIso)}` : "Set both stop times"}</p>
+                    <p className="rounded-xl bg-[var(--surface-inset)] p-3"><strong className="block">Unassigned stop</strong>{validInterruption && stopStartedIso && stopEndedIso
+                      ? `${formatDateTime(stopStartedIso)}–${formatDateTime(stopEndedIso)}` : "No time assigned"}</p>
+                    <p className="rounded-xl bg-[var(--surface-inset)] p-3"><strong className="block">Journey 2</strong>{validInterruption && stopEndedIso
+                      ? `${formatDateTime(stopEndedIso)}–${formatDateTime(evidence.segment.stoppedAt!)}` : "Set both stop times"}</p>
+                  </div>
+                  <p className="mt-3 min-h-5 text-sm text-[var(--muted)]" aria-live="polite">
+                    {stopStartedAt || stopEndedAt ? validInterruption ? "Both stop times are inside this commute."
+                      : "Enter two stop times strictly inside this commute, with Stop began before Journey resumed." : ""}
+                  </p>
+                  <button className="industrial-button-primary focus-ring mt-3 min-h-11 px-4 text-sm"
+                    disabled={actionsDisabled || !validInterruption} type="button"
+                    onClick={() => {
+                      if (stopStartedIso && stopEndedIso && validInterruption) void act({
+                        action: "interrupt_commute", stopStartedAt: stopStartedIso, stopEndedAt: stopEndedIso
+                      });
+                    }}>
+                    Save interruption and review both legs
+                  </button>
+                </>
+              )}
             </section>
           ) : null}
 

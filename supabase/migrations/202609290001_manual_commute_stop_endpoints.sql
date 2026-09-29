@@ -20,6 +20,21 @@ alter table public.commute_segments
   add column if not exists from_manual_stop_endpoint_id uuid references public.location_manual_stop_endpoints(id) on delete cascade,
   add column if not exists to_manual_stop_endpoint_id uuid references public.location_manual_stop_endpoints(id) on delete cascade;
 
+-- A confirmed interruption's children and manual endpoints depend on its
+-- parent. SET NULL would update a child while its manual endpoint still
+-- requires that parent; delete the dependent commute graph instead.
+do $$
+begin
+  if not exists (select 1 from pg_constraint
+    where conrelid = 'public.commute_segments'::regclass
+      and conname = 'commute_segments_parent_segment_id_fkey' and confdeltype = 'c') then
+    alter table public.commute_segments drop constraint if exists commute_segments_parent_segment_id_fkey;
+    alter table public.commute_segments add constraint commute_segments_parent_segment_id_fkey
+      foreign key (parent_segment_id) references public.commute_segments(id) on delete cascade;
+  end if;
+end;
+$$;
+
 do $$
 begin
   if not exists (select 1 from pg_constraint

@@ -194,6 +194,7 @@ async function buildLocationReviewEvidence(
      where lse.workspace_id = $1 and lse.user_id = $2
        and (($3::uuid is not null and lse.stay_segment_id = $3)
          or ($4::uuid is not null and lse.commute_segment_id = $4))
+       and le.expires_at > now()
      order by le.occurred_at, lse.sequence_index, le.client_evidence_id`,
       [session.workspaceId, session.userId, review.stayId, review.commuteId]
     )),

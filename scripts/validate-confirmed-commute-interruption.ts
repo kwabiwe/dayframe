@@ -5,6 +5,7 @@ import {
   validReviewAcknowledgement, type CommuteSegment, type LocationEvidence, type StaySegment
 } from "@dayframe/shared";
 import { pool } from "../apps/web/src/lib/db";
+import { replayRetainedLocationEvidence } from "../apps/web/src/lib/location/location-ingest-service";
 import { replayLocationEvidence } from "../apps/web/src/lib/location/location-replay-service";
 import { getLocationReviewEvidence } from "../apps/web/src/lib/location/location-query-service";
 import { resolveLocationReviewActionWithClient } from "../apps/web/src/lib/location/location-review-service";
@@ -263,6 +264,44 @@ async function main() {
   assert.equal(await count("time_entries", session), 0);
   assert.equal(await count("location_manual_stop_endpoints", session), 2);
 
+  // Simulate a changed historical engine identity on both segment and event.
+  // A failed provenance guard could otherwise create a fresh composite Review.
+  await pool.query("update commute_segments set client_segment_id=$1 where id=$2",
+    [`historical-interrupted:${randomUUID()}`, parentId]);
+  await pool.query("update activity_events set client_event_id=$1 where id=$2",
+    [`historical-interrupted-event:${randomUUID()}`, parentEvent.rows[0].id]);
+  const previousRolloutMode = process.env.DAYFRAME_LOCATION_ROLLOUT_MODE;
+  process.env.DAYFRAME_LOCATION_ROLLOUT_MODE = "v2_review";
+  try {
+    for (let repeat = 0; repeat < 2; repeat += 1) {
+      const semanticReplay = await replayRetainedLocationEvidence({
+        deviceId, algorithmVersion: LOCATION_ENGINE_V2_CONFIG.algorithmVersion,
+        rolloutMode: "v2_review", semanticModeAcknowledgedAt: "2026-09-24T00:00:00.000Z"
+      }, session, processingAt);
+      assert.equal(semanticReplay.rolloutMode, "v2_review");
+    }
+  } finally {
+    if (previousRolloutMode === undefined) delete process.env.DAYFRAME_LOCATION_ROLLOUT_MODE;
+    else process.env.DAYFRAME_LOCATION_ROLLOUT_MODE = previousRolloutMode;
+  }
+  const protectedCommutes = await pool.query<{ id: string; status: string; routeLinks: number }>(
+    `select cs.id,cs.status,count(lse.id)::int as "routeLinks"
+     from commute_segments cs left join location_segment_evidence lse on lse.commute_segment_id=cs.id
+     where cs.workspace_id=$1 and cs.user_id=$2 and (cs.id=$3 or cs.parent_segment_id=$3)
+     group by cs.id,cs.status`, [session.workspaceId, session.userId, parentId]
+  );
+  assert.deepEqual(new Map(protectedCommutes.rows.map((row) => [row.id, row.routeLinks])),
+    new Map([[parentId, 6], [children.rows[0].id, 3], [children.rows[1].id, 3]]),
+    "Changed-ID replay rewrote the protected parent or child lineage.");
+  assert.equal(await count("commute_segments", session), 3,
+    "Changed-ID replay inserted another composite commute.");
+  const commuteReviews = await pool.query<{ n: number }>(
+    `select count(*)::int as n from review_items ri join commute_segments cs on cs.id=ri.location_segment_id
+     where ri.workspace_id=$1 and ri.user_id=$2`, [session.workspaceId, session.userId]
+  );
+  assert.equal(commuteReviews.rows[0].n, 3,
+    "Changed-ID replay inserted a duplicate composite Review.");
+
   const insufficientEvent = await pool.query<{ id: string }>(
     `insert into activity_events (workspace_id,user_id,source,event_type,occurred_at,
        confidence,raw_payload,review_status)
@@ -366,7 +405,52 @@ async function main() {
     "update location_manual_stop_endpoints set occurred_at=$1 where id=$2",
     [at(31), children.rows[0].toManualStopEndpointId]
   ));
-  console.log("Confirmed commute interruption: migration, B-shaped composite, two route-proven Review legs, full parent lineage, unassigned middle, one-leg rejection, durable receipt, rollback, replay and endpoint constraints passed.");
+
+  const deletionScenarios = [
+    { name: "interrupted parent", sql: "delete from commute_segments where id=$1", id: parentId, cascade: true },
+    { name: "origin stay", sql: "delete from stay_segments where id=$1", id: stayIdByClient.get(parent.fromStaySegmentId)!, cascade: true },
+    { name: "destination stay", sql: "delete from stay_segments where id=$1", id: stayIdByClient.get(parent.toStaySegmentId)!, cascade: true },
+    { name: "user", sql: "delete from users where id=$1", id: session.userId, cascade: true },
+    { name: "workspace", sql: "delete from workspaces where id=$1", id: session.workspaceId, cascade: true },
+    { name: "ordinary commute", sql: "delete from commute_segments where id=$1", id: insufficientSegment.rows[0].id, cascade: false }
+  ];
+  for (const scenario of deletionScenarios) {
+    const client = await pool.connect();
+    try {
+      await client.query("begin");
+      const deleted = await client.query(scenario.sql, [scenario.id]);
+      assert.equal(deleted.rowCount, 1, `${scenario.name} was not deleted.`);
+      const graph = await client.query<{ commutes: number; endpoints: number; links: number }>(
+        `select
+           (select count(*)::int from commute_segments where id=$1 or parent_segment_id=$1) as commutes,
+           (select count(*)::int from location_manual_stop_endpoints where parent_commute_segment_id=$1) as endpoints,
+           (select count(*)::int from location_segment_evidence where commute_segment_id=any($2::uuid[])) as links`,
+        [parentId, [parentId, ...children.rows.map((child) => child.id)]]
+      );
+      assert.deepEqual(graph.rows[0], scenario.cascade
+        ? { commutes: 0, endpoints: 0, links: 0 }
+        : { commutes: 3, endpoints: 2, links: 12 },
+        `${scenario.name} left an invalid interruption graph.`);
+      await client.query("rollback");
+    } catch (error) {
+      await client.query("rollback");
+      throw new Error(`Deletion lifecycle failed for ${scenario.name}.`, { cause: error });
+    } finally {
+      client.release();
+    }
+  }
+  assert.equal(await count("commute_segments", session), 4,
+    "Lifecycle validation must leave the synthetic owner intact after rollbacks.");
+  await pool.query(
+    `update location_evidence set expires_at=now()-interval '1 minute'
+     where workspace_id=$1 and user_id=$2 and id in
+       (select evidence_id from location_segment_evidence where commute_segment_id=$3)`,
+    [session.workspaceId, session.userId, insufficientSegment.rows[0].id]
+  );
+  const expiredRead = await getLocationReviewEvidence(insufficientReview.rows[0].id, session);
+  assert.equal(expiredRead.map.acceptedSamples.length, 0,
+    "Expired but not yet purged route rows must not be presented as retained evidence.");
+  console.log("Confirmed commute interruption: B-shaped route proof, durable receipt, parent/child lineage, same- and changed-ID semantic replay, no duplicate composite Review, expired-row read filtering, endpoint integrity and all six deletion lifecycles passed.");
 }
 
 main().catch((error) => {
