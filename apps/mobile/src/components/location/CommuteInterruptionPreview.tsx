@@ -1,26 +1,24 @@
 import { Text, View, type TextStyle, type ViewStyle } from "react-native";
-import type { ParsedLocationReviewWindow } from "../../lib/locationReviewDraft";
+import type { CommuteInterruptionDraftResult } from "../../lib/commuteInterruptionDraft";
 import { mobileTextProps } from "../../lib/mobileTypography";
 
 export function CommuteInterruptionPreview({
   startedAt,
   stoppedAt,
-  stopWindow,
+  interruption,
   styles
 }: {
   startedAt: string;
   stoppedAt: string;
-  stopWindow: ParsedLocationReviewWindow | null;
+  interruption: CommuteInterruptionDraftResult;
   styles: { splitSummary: ViewStyle; fieldLabel: TextStyle; helperText: TextStyle };
 }) {
-  const valid = stopWindow &&
-    Date.parse(startedAt) < Date.parse(stopWindow.startedAt) &&
-    Date.parse(stopWindow.startedAt) < Date.parse(stopWindow.stoppedAt) &&
-    Date.parse(stopWindow.stoppedAt) < Date.parse(stoppedAt);
+  const mutation = interruption.mutation;
+  const guidance = interruption.status === "invalid" ? interruption.error : "Set both stop times";
   const parts = [
-    { label: "Journey 1", range: valid ? formatRange(startedAt, stopWindow.startedAt) : "Set both stop times" },
-    { label: "Unassigned stop", range: valid ? formatRange(stopWindow.startedAt, stopWindow.stoppedAt) : "No time assigned" },
-    { label: "Journey 2", range: valid ? formatRange(stopWindow.stoppedAt, stoppedAt) : "Set both stop times" }
+    { label: "Journey 1", range: mutation ? formatRange(startedAt, mutation.stopStartedAt) : guidance },
+    { label: "Unassigned stop", range: mutation ? formatRange(mutation.stopStartedAt, mutation.stopEndedAt) : "No time assigned" },
+    { label: "Journey 2", range: mutation ? formatRange(mutation.stopEndedAt, stoppedAt) : guidance }
   ];
 
   return (

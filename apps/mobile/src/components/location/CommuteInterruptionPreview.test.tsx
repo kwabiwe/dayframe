@@ -1,6 +1,6 @@
 import { act, create } from "react-test-renderer";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { parseLocationReviewWindow } from "../../lib/locationReviewDraft";
+import { parseCommuteInterruptionDraft } from "../../lib/commuteInterruptionDraft";
 
 vi.mock("react", async () => {
   // @ts-expect-error Renderer peer lives at the repository root.
@@ -25,9 +25,9 @@ const styles = { splitSummary: { gap: 7 }, fieldLabel: {}, helperText: {} };
 let tree: ReturnType<typeof create>;
 afterEach(() => { if (tree) act(() => tree.unmount()); });
 
-function preview(stopWindow = parseLocationReviewWindow(draft).value) {
+function preview(interruption = parseCommuteInterruptionDraft(draft)) {
   return <CommuteInterruptionPreview startedAt={startedAt} stoppedAt={stoppedAt}
-    stopWindow={stopWindow} styles={styles} />;
+    interruption={interruption} styles={styles} />;
 }
 
 function spokenRanges() {
@@ -48,12 +48,13 @@ function fullTime(value: string) {
 
 describe("commute interruption preview presentation and accessibility", () => {
   it("exposes all three ordered parts with complete dates and times across midnight", () => {
-    const stopWindow = parseLocationReviewWindow(draft).value!;
-    act(() => { tree = create(preview(stopWindow)); });
+    const interruption = parseCommuteInterruptionDraft(draft);
+    const mutation = interruption.mutation!;
+    act(() => { tree = create(preview(interruption)); });
     const ranges = [
-      `${fullTime(startedAt)} to ${fullTime(stopWindow.startedAt)}`,
-      `${fullTime(stopWindow.startedAt)} to ${fullTime(stopWindow.stoppedAt)}`,
-      `${fullTime(stopWindow.stoppedAt)} to ${fullTime(stoppedAt)}`
+      `${fullTime(startedAt)} to ${fullTime(mutation.stopStartedAt)}`,
+      `${fullTime(mutation.stopStartedAt)} to ${fullTime(mutation.stopEndedAt)}`,
+      `${fullTime(mutation.stopEndedAt)} to ${fullTime(stoppedAt)}`
     ];
     expect(spokenRanges()).toEqual([
       `Journey 1. ${ranges[0]}`,
@@ -67,26 +68,35 @@ describe("commute interruption preview presentation and accessibility", () => {
 
   it("updates the mounted preview from revised stop times while retaining parent bounds", () => {
     act(() => { tree = create(preview()); });
-    const updated = parseLocationReviewWindow({ ...draft, startTimeText: "23:25", stopTimeText: "00:10" }).value!;
+    const updated = parseCommuteInterruptionDraft({ ...draft, startTimeText: "23:25", stopTimeText: "00:10" });
     act(() => tree.update(preview(updated)));
     expect(spokenRanges()).toEqual([
-      `Journey 1. ${fullTime(startedAt)} to ${fullTime(updated.startedAt)}`,
-      `Unassigned stop. ${fullTime(updated.startedAt)} to ${fullTime(updated.stoppedAt)}`,
-      `Journey 2. ${fullTime(updated.stoppedAt)} to ${fullTime(stoppedAt)}`
+      `Journey 1. ${fullTime(startedAt)} to ${fullTime(updated.mutation!.stopStartedAt)}`,
+      `Unassigned stop. ${fullTime(updated.mutation!.stopStartedAt)} to ${fullTime(updated.mutation!.stopEndedAt)}`,
+      `Journey 2. ${fullTime(updated.mutation!.stopEndedAt)} to ${fullTime(stoppedAt)}`
     ]);
   });
 
   it.each([
-    { startTimeText: "" },
-    { startTimeText: "invalid" },
-    { startTimeText: "23:00" },
-    { stopTimeText: "00:40" },
-    { stopDateText: "2026-09-29", stopTimeText: "23:15" }
-  ])("keeps explanatory slots for incomplete, invalid or outside-parent drafts: %j", (changes) => {
-    act(() => { tree = create(preview(parseLocationReviewWindow({ ...draft, ...changes }).value)); });
+    { startTimeText: "" }, { stopTimeText: "" }, { stopDateText: "" }
+  ])("keeps completion guidance for incomplete fields: %j", (changes) => {
+    act(() => { tree = create(preview(parseCommuteInterruptionDraft({ ...draft, ...changes }))); });
     expect(spokenRanges()).toEqual([
       "Journey 1. Set both stop times", "Unassigned stop. No time assigned", "Journey 2. Set both stop times"
     ]);
+  });
+
+  it.each([
+    [{ startTimeText: "invalid" }, "Enter the time as HH:mm."],
+    [{ startTimeText: "23:00" }, "Both stop times must be inside this commute."],
+    [{ stopTimeText: "00:40" }, "Both stop times must be inside this commute."],
+    [{ stopDateText: "2026-09-29", stopTimeText: "23:15" }, "The stop must begin before the journey resumes."]
+  ])("shows the parser reason instead of completion guidance for populated invalid fields: %j", (changes, reason) => {
+    act(() => { tree = create(preview(parseCommuteInterruptionDraft({ ...draft, ...changes }))); });
+    expect(spokenRanges()).toEqual([
+      `Journey 1. ${reason}`, "Unassigned stop. No time assigned", `Journey 2. ${reason}`
+    ]);
+    expect(tree.root.findAllByType("Text" as never).some((node) => node.children.join("") === "Set both stop times")).toBe(false);
   });
 
   it("keeps text scalable, wrapping and fully spoken without adding touch controls", () => {

@@ -49,6 +49,7 @@ import {
 } from "@/lib/placeSearch";
 import { pressable, useMobileTheme, type MobileTheme } from "@/lib/mobileTheme";
 import { mobileTextProps } from "@/lib/mobileTypography";
+import { parseCommuteInterruptionDraft } from "@/lib/commuteInterruptionDraft";
 import {
   localLayoutTransition,
   localPresenceEntering,
@@ -154,7 +155,7 @@ export function LocationReviewCorrectionEditor({
   const [startTimeText, setStartTimeText] = useState(() => formatLocationReviewTimeInput(startAt));
   const [stopTimeText, setStopTimeText] = useState(() => stopAt ? formatLocationReviewTimeInput(stopAt) : "");
   const [validationError, setValidationError] = useState<string | null>(null);
-  const parsedInterruption = parseLocationReviewWindow({
+  const parsedInterruption = parseCommuteInterruptionDraft({
     baselineStartedAt: evidence.segment.startedAt,
     baselineStoppedAt: evidence.segment.stoppedAt ?? "",
     startDateText: stopStartDateText,
@@ -969,7 +970,7 @@ export function LocationReviewCorrectionEditor({
                     <CommuteInterruptionPreview
                       startedAt={evidence.segment.startedAt}
                       stoppedAt={evidence.segment.stoppedAt!}
-                      stopWindow={parsedInterruption.value}
+                      interruption={parsedInterruption}
                       styles={editorStyles}
                     />
                     {interruptError ? (
@@ -978,18 +979,11 @@ export function LocationReviewCorrectionEditor({
                     <Pressable accessibilityRole="button" disabled={saving}
                       onPress={() => {
                         const parsed = parsedInterruption;
-                        if (!parsed.value) {
-                          setInterruptError(parsed.error ?? "Enter both stop times.");
+                        if (!parsed.mutation) {
+                          setInterruptError(parsed.error);
                           return;
                         }
-                        if (Date.parse(parsed.value.startedAt) <= Date.parse(evidence.segment.startedAt) ||
-                            Date.parse(parsed.value.stoppedAt) >= Date.parse(evidence.segment.stoppedAt!)) {
-                          setInterruptError("Both stop times must be inside this commute.");
-                          return;
-                        }
-                        void onResolve({ action: "interrupt_commute",
-                          stopStartedAt: parsed.value.startedAt,
-                          stopEndedAt: parsed.value.stoppedAt },
+                        void onResolve(parsed.mutation,
                           "The interruption was saved. Both journey legs are in Review.");
                       }}
                       style={pressable(editorStyles.secondaryAction, styles.buttonPressed)}>
