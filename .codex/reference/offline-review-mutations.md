@@ -6,11 +6,11 @@ Use this for mobile Review resolving and structural actions. Signal capture stay
 
 `reviewSyncStore.ts` exclusively owns downloaded Review presentation, durable intent, retry state and account lifecycle. React projects that owner; Postgres owns canonical Review, entries, places and corrections.
 
-All resolving/structural Location actions use the strict shared envelope: `confirm`, `ignore_once_location`, complete `edit_and_confirm`, `change_place_and_confirm`, `record_once`, `record_poi_once`, `save_place_and_confirm`, `split`, `split_and_confirm`, `merge`, `merge_and_confirm`. Generic accept/ignore remain supported. Pure `change_place` remains a direct compatibility action, not the normal confirmation flow.
+All resolving/structural Location actions use the strict shared envelope: `confirm`, `ignore_once_location`, complete `edit_and_confirm`, `change_place_and_confirm`, `record_once`, `record_poi_once`, `save_place_and_confirm`, `split`, `split_and_confirm`, `merge`, `merge_and_confirm`, and `interrupt_commute` with explicit stop start/end times. Generic accept/ignore remain supported. Pure `change_place` remains a direct compatibility action, not the normal confirmation flow.
 
 Generate one UUID and validate the full canonical request. In one exclusive SQLite transaction, verify the active account, every affected source's open cached state and complete time window, absence of conflicting outbox ownership, and then write one request plus all source effects. Merge reserves two distinct source IDs with independent snapshots, positions and preceding/following anchors. Missing adjacent data fails visibly; never hide only the current source.
 
-Only successful local commit permits card removal or native detail dismissal. Duplicate taps are gated during commit. Do not await HTTP or show normal mutation spinners. SQLite failure preserves every source and the exact draft. Split/merge children come from canonical refresh, not fabricated optimistic entries. Save-place catalogue refresh uses the existing coordinator/final bootstrap.
+Only successful local commit permits card removal or native detail dismissal. Duplicate taps are gated during commit. Do not await HTTP or show normal mutation spinners. SQLite failure preserves every source and the exact draft. Split/merge/interrupted-commute children come from canonical refresh, not fabricated optimistic entries. Save-place catalogue refresh uses the existing coordinator/final bootstrap.
 
 ## SQLite v5
 

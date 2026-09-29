@@ -224,11 +224,19 @@ export async function replayLocationEvidence(
 type ProtectedSourceLink = {
   clientSegmentId: string; clientEvidenceId: string; kind: string;
   occurredAt: Date | string; startedAt: Date | string; stoppedAt: Date | string | null;
+  status: string; continuityStatus: string;
 };
 
 /** Exact provenance plus the occupied portion, never name/time proximity alone. */
 function sharesProtectedPortion(segment: LocationSegment, link: ProtectedSourceLink) {
-  if (segment.clientSegmentId === link.clientSegmentId) return false;
+  if (segment.clientSegmentId === link.clientSegmentId) {
+    // A user-confirmed interruption keeps the original commute as a manual,
+    // superseded correction anchor. Replaying that same engine ID must not
+    // regenerate the composite suggestion. Other same-ID protected history is
+    // still handled by the existing persistence/semantic guards below.
+    return segment.kind === "commute" && link.status === "superseded" &&
+      link.continuityStatus === "manual";
+  }
   const start = Date.parse(iso(link.startedAt)!);
   const stop = link.stoppedAt ? Date.parse(iso(link.stoppedAt)!) : NaN;
   const nextStart = Date.parse(segment.startedAt);
@@ -281,7 +289,8 @@ async function excludeProtectedReplacements(
       // shares the bounded ID request, never a row predicate or a lock target.
       const reads = tables.map(table => {
         const column = table === "stay_segments" ? "stay_segment_id" : "commute_segment_id";
-        return `select s.client_segment_id as "clientSegmentId", le.client_evidence_id as "clientEvidenceId",
+        return `select s.client_segment_id as "clientSegmentId", s.status,
+                s.continuity_status as "continuityStatus", le.client_evidence_id as "clientEvidenceId",
                 le.evidence_type as kind, le.occurred_at as "occurredAt",
                 s.started_at as "startedAt", s.stopped_at as "stoppedAt"
          from ${table} s

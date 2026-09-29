@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
   ReviewMutationEnvelopeSchema,
-  ReviewMutationSchema
+  ReviewMutationSchema,
+  validReviewAcknowledgement
 } from "../src/reviewMutations";
 
 describe("Review mutation schemas", () => {
@@ -40,7 +41,8 @@ describe("durable structural Location envelopes", () => {
     { action: "save_place_and_confirm", name: "Synthetic place", latitude: 51.5, longitude: -0.1 },
     { action: "split", splitAt: "2026-08-28T08:30:00Z" },
     { action: "split_and_confirm", splitAt: "2026-08-28T08:30:00Z" },
-    { action: "merge", adjacentReviewItemId: id }, { action: "merge_and_confirm", adjacentReviewItemId: id }
+    { action: "merge", adjacentReviewItemId: id }, { action: "merge_and_confirm", adjacentReviewItemId: id },
+    { action: "interrupt_commute", stopStartedAt: "2026-09-25T08:30:00Z", stopEndedAt: "2026-09-25T08:42:00Z" }
   ];
   it.each(actions)("accepts strict $action and rejects extra provider payload", (mutation) => {
     expect(ReviewMutationEnvelopeSchema.safeParse({ clientMutationId: id, mutation }).success).toBe(true);
@@ -49,5 +51,16 @@ describe("durable structural Location envelopes", () => {
   it("does not silently accept a pure place edit or invalid save coordinates", () => {
     expect(ReviewMutationSchema.safeParse({ action: "change_place", placeId: id }).success).toBe(false);
     expect(ReviewMutationSchema.safeParse({ action:"save_place_and_confirm", name:"X", latitude:91,longitude:0 }).success).toBe(false);
+  });
+  it("acknowledges a user interruption only with two Review children and no time entry", () => {
+    const envelope = ReviewMutationEnvelopeSchema.parse({ clientMutationId: id,
+      mutation: { action: "interrupt_commute", stopStartedAt: "2026-09-25T08:30:00Z",
+        stopEndedAt: "2026-09-25T08:42:00Z" } });
+    const result = { ok: true, action: "interrupt_commute", status: "accepted",
+      childSegmentIds: [id, "18600000-0000-4000-8000-000000000002"],
+      childReviewItemIds: ["18600000-0000-4000-8000-000000000003", "18600000-0000-4000-8000-000000000004"] };
+    expect(validReviewAcknowledgement(result, envelope, id)).toBe(true);
+    expect(validReviewAcknowledgement({ ...result, childReviewItemIds: [] }, envelope, id)).toBe(false);
+    expect(validReviewAcknowledgement({ ...result, entryId: id }, envelope, id)).toBe(false);
   });
 });

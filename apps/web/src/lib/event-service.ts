@@ -116,6 +116,7 @@ export type ReviewResolutionCode =
   | "invalid_action"
   | "invalid_category"
   | "invalid_time_window"
+  | "insufficient_route_provenance"
   | "overlap"
   | "duplicate_entry"
   | "database_constraint"

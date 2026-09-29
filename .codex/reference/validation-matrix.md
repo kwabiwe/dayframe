@@ -67,6 +67,8 @@ Required when changing text roles, row composition, settings presentation, Revie
 
 ## Health And Review
 
+For user-confirmed commute interruption, run the shared route-provenance matrix, Review action/acknowledgement tests, real SQLite outbox reconciliation, and disposable PostgreSQL 17/PostGIS local plus hosted-migration SQL checks. The positive sanitised B-shaped Home loop must split into two independently evidenced Review legs with no middle activity or entry. Missing either leg must roll back the entire correction. Verify full parent lineage, scoped endpoint constraints, exact receipt replay, same-input replay suppression and child Review-only policy under `v2_enabled`. On a physical iPhone in a later approved staging lane, check date/time entry, keyboard and large text, saved-local dismissal, conflict restoration, rapid repeat, VoiceOver and Reduce Motion; repository tests do not establish device behavior.
+
 Required checks when touching Health import, Review, Confirm/Dismiss, or reprocess:
 
 - Mobile Health unit tests.

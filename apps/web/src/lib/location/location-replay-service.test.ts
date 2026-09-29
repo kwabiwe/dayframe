@@ -1,7 +1,51 @@
 import { describe, expect, it, vi } from "vitest";
 import { replayLocationEvidence } from "./location-replay-service";
 import { LOCATION_REPLAY_SCALABILITY_PROFILE } from "./location-replay-batching";
-import { journeyIdentityFixture, runLocationEngine } from "@dayframe/shared";
+import { EMPTY_LOCATION_ENGINE_STATE, LOCATION_ENGINE_V2_CONFIG, journeyIdentityFixture, runLocationEngine,
+  type LocationEngineInput, type LocationEvidence } from "@dayframe/shared";
+
+function userConfirmedCompositeFixture(): LocationEngineInput {
+  const base = Date.parse("2026-09-25T08:00:00.000Z");
+  const at = (minutes: number) => new Date(base + minutes * 60_000).toISOString();
+  const observed = (id: string, minutes: number, latitude: number, speedMetersPerSecond: number): LocationEvidence => ({
+    clientEvidenceId: id,
+    deviceId: "20000000-0000-4000-8000-000000000251",
+    algorithmVersion: LOCATION_ENGINE_V2_CONFIG.algorithmVersion,
+    kind: "standard_location",
+    occurredAt: at(minutes),
+    receivedAt: at(120),
+    timeZone: "Europe/London",
+    latitude,
+    longitude: -0.1,
+    horizontalAccuracyMeters: 20,
+    speedMetersPerSecond: speedMetersPerSecond,
+    isSimulated: false
+  });
+  return {
+    priorState: EMPTY_LOCATION_ENGINE_STATE,
+    evidence: [
+      observed("home-before-1", 0, 51.5, 0),
+      observed("home-before-2", 8, 51.5, 0),
+      observed("home-before-3", 16, 51.5, 0),
+      observed("route-out-1", 20, 51.504, 8),
+      observed("route-out-2", 24, 51.51, 8),
+      observed("route-back-1", 28, 51.506, 8),
+      observed("home-after-1", 36, 51.5, 0),
+      observed("home-after-2", 44, 51.5, 0),
+      observed("home-after-3", 52, 51.5, 0)
+    ],
+    savedPlaces: [{
+      id: "10000000-0000-4000-8000-000000000251",
+      name: "Synthetic Home",
+      latitude: 51.5,
+      longitude: -0.1,
+      radiusMeters: 90
+    }],
+    acceptedLearnedPlaces: [],
+    config: LOCATION_ENGINE_V2_CONFIG,
+    processingAt: at(120)
+  };
+}
 
 function journeyReplayQuery(
   fixture: ReturnType<typeof journeyIdentityFixture>,
@@ -40,6 +84,33 @@ function journeyReplayQuery(
 }
 
 describe("Location replay timing observation", () => {
+  it("holds a regenerated same-ID composite after a user interruption supersedes its parent", async () => {
+    const fixture = userConfirmedCompositeFixture();
+    const original = runLocationEngine(fixture);
+    const composite = original.segmentUpserts.find((segment) => segment.kind === "commute");
+    expect(composite).toMatchObject({ qualificationReason: "same_place_meaningful_round_trip" });
+    if (!composite || composite.kind !== "commute") throw new Error("Missing fixture commute");
+    const middleRoute = composite.evidenceIds[1];
+    const query = journeyReplayQuery(fixture, [{
+      clientSegmentId: composite.clientSegmentId,
+      clientEvidenceId: middleRoute,
+      status: "superseded",
+      continuityStatus: "manual",
+      kind: "standard_location",
+      occurredAt: fixture.evidence.find((item) => item.clientEvidenceId === middleRoute)!.occurredAt,
+      startedAt: composite.startedAt,
+      stoppedAt: composite.stoppedAt
+    }]);
+    const replay = await replayLocationEvidence({ query } as never, {
+      workspaceId: "workspace-private", userId: "user-private", authMode: "provider", scopes: []
+    }, {
+      deviceId: fixture.evidence[0].deviceId,
+      algorithmVersion: fixture.config.algorithmVersion,
+      processingAt: fixture.processingAt
+    });
+    expect(replay.segments.some((segment) => segment.clientSegmentId === composite.clientSegmentId)).toBe(false);
+  });
+
   it("uses the same sanitised Journey-1 output as the shared engine", async () => {
     const fixture = journeyIdentityFixture();
     const local = runLocationEngine(fixture);

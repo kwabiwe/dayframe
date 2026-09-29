@@ -1,7 +1,9 @@
 import {
   LocationReviewActionSchema,
+  qualifyConfirmedCommuteInterruption,
   stableLocationId,
   type LocationReviewAction,
+  type RetainedCommuteRoutePoint,
   type ReviewEntryEdit
 } from "@dayframe/shared";
 import type pg from "pg";
@@ -480,9 +482,191 @@ async function performAction(
     case "merge":
     case "merge_and_confirm":
       return mergeReviews(client, item, action, session);
+    case "interrupt_commute":
+      return interruptCommuteReview(client, item, action, session);
     default:
       throw new ReviewResolutionError("invalid_action", "Use the standard review action for this operation.", { status: 400 });
   }
+}
+
+async function interruptCommuteReview(
+  client: pg.PoolClient,
+  item: LockedReview,
+  action: Extract<LocationReviewAction, { action: "interrupt_commute" }>,
+  session: RequestSession
+) {
+  if (item.segmentKind !== "commute" || item.segmentStatus !== "finalised") {
+    throw new ReviewResolutionError("invalid_action", "Only an open commute can be interrupted.", { status: 422 });
+  }
+  const parentResult = await client.query<{
+    clientSegmentId: string;
+    deviceId: string;
+    algorithmVersion: string;
+    startedAt: Date | string;
+    stoppedAt: Date | string;
+    fromStaySegmentId: string;
+    toStaySegmentId: string;
+    fromPlaceId: string | null;
+    toPlaceId: string | null;
+    fromLatitude: number | null;
+    fromLongitude: number | null;
+    toLatitude: number | null;
+    toLongitude: number | null;
+  }>(
+    `select cs.client_segment_id as "clientSegmentId", cs.device_id as "deviceId",
+            cs.algorithm_version as "algorithmVersion", cs.started_at as "startedAt",
+            cs.stopped_at as "stoppedAt", cs.from_stay_segment_id as "fromStaySegmentId",
+            cs.to_stay_segment_id as "toStaySegmentId", cs.from_place_id as "fromPlaceId",
+            cs.to_place_id as "toPlaceId",
+            case when f.centre is null then null else ST_Y(f.centre::geometry) end as "fromLatitude",
+            case when f.centre is null then null else ST_X(f.centre::geometry) end as "fromLongitude",
+            case when t.centre is null then null else ST_Y(t.centre::geometry) end as "toLatitude",
+            case when t.centre is null then null else ST_X(t.centre::geometry) end as "toLongitude"
+     from commute_segments cs
+     join stay_segments f on f.id = cs.from_stay_segment_id and f.workspace_id = cs.workspace_id and f.user_id = cs.user_id
+     join stay_segments t on t.id = cs.to_stay_segment_id and t.workspace_id = cs.workspace_id and t.user_id = cs.user_id
+     where cs.id = $1 and cs.workspace_id = $2 and cs.user_id = $3`,
+    [item.segmentId, session.workspaceId, session.userId]
+  );
+  const parent = parentResult.rows[0];
+  if (!parent) throw new ReviewResolutionError("invalid_action", "This commute does not have two original stay endpoints.", { status: 422 });
+  const routeResult = await client.query<RetainedCommuteRoutePoint>(
+    `select le.id as "evidenceId", le.occurred_at as "occurredAt",
+            ST_Y(le.coordinate::geometry) as latitude, ST_X(le.coordinate::geometry) as longitude,
+            le.horizontal_accuracy_m as "accuracyMeters", le.evidence_type as kind,
+            lse.role, le.is_simulated as "isSimulated"
+     from location_segment_evidence lse
+     join location_evidence le on le.id = lse.evidence_id
+       and le.workspace_id = lse.workspace_id and le.user_id = lse.user_id
+     where lse.workspace_id = $1 and lse.user_id = $2 and lse.commute_segment_id = $3
+       and le.device_id = $4 and le.algorithm_version = $5
+       and le.accepted = true and le.expires_at > now() and le.coordinate is not null
+     order by le.occurred_at, le.id`,
+    [session.workspaceId, session.userId, item.segmentId, parent.deviceId, parent.algorithmVersion]
+  );
+  const stopStartedAt = new Date(action.stopStartedAt).toISOString();
+  const stopEndedAt = new Date(action.stopEndedAt).toISOString();
+  const qualification = qualifyConfirmedCommuteInterruption({
+    startedAt: new Date(parent.startedAt).toISOString(),
+    stoppedAt: new Date(parent.stoppedAt).toISOString(),
+    stopStartedAt,
+    stopEndedAt,
+    fromStayPoint: parent.fromLatitude == null || parent.fromLongitude == null
+      ? null : { latitude: parent.fromLatitude, longitude: parent.fromLongitude },
+    toStayPoint: parent.toLatitude == null || parent.toLongitude == null
+      ? null : { latitude: parent.toLatitude, longitude: parent.toLongitude },
+    routePoints: routeResult.rows.map((row) => ({ ...row, occurredAt: new Date(row.occurredAt).toISOString() }))
+  });
+  if (!qualification.qualifies) {
+    throw new ReviewResolutionError(
+      qualification.reason === "invalid_window" ? "invalid_time_window" : "insufficient_route_provenance",
+      qualification.reason === "invalid_window"
+        ? "The interruption must fall strictly within the commute."
+        : "Both commute legs need retained, independent route evidence before this correction can be saved.",
+      { status: 422, details: { reason: qualification.reason } }
+    );
+  }
+  const endpointIds: string[] = [];
+  for (const boundary of [
+    { kind: "stop_started", at: stopStartedAt },
+    { kind: "stop_ended", at: stopEndedAt }
+  ]) {
+    const result = await client.query<{ id: string }>(
+      `insert into location_manual_stop_endpoints
+         (workspace_id, user_id, parent_commute_segment_id, boundary_kind, occurred_at)
+       values ($1, $2, $3, $4, $5) returning id`,
+      [session.workspaceId, session.userId, item.segmentId, boundary.kind, boundary.at]
+    );
+    endpointIds.push(result.rows[0].id);
+  }
+  const childSegmentIds: string[] = [];
+  const childReviewItemIds: string[] = [];
+  for (const [index, leg] of [qualification.inbound, qualification.outbound].entries()) {
+    const inbound = index === 0;
+    const clientSegmentId = stableLocationId("commute", [
+      parent.clientSegmentId, "user-confirmed-interruption", stopStartedAt, stopEndedAt,
+      inbound ? "inbound" : "outbound"
+    ]);
+    const child = await client.query<{ id: string }>(
+      `insert into commute_segments (
+         workspace_id, user_id, device_id, client_segment_id, algorithm_version, status,
+         started_at, stopped_at, start_lower_bound_at, start_upper_bound_at,
+         stop_lower_bound_at, stop_upper_bound_at,
+         from_stay_segment_id, to_stay_segment_id,
+         from_manual_stop_endpoint_id, to_manual_stop_endpoint_id,
+         from_place_id, to_place_id, route_sample_count, max_gap_seconds,
+         continuity_status, confidence, parent_segment_id, metadata
+       ) values (
+         $1, $2, $3, $4, $5, 'finalised', $6, $7,
+         $8, $8, $9, $9, $10, $11, $12, $13, $14, $15, $16, $17,
+         'manual', 'low', $18, $19::jsonb
+       ) returning id`,
+      [
+        session.workspaceId, session.userId, parent.deviceId, clientSegmentId,
+        parent.algorithmVersion, leg.startedAt, leg.stoppedAt,
+        leg.startedAt, leg.stoppedAt,
+        inbound ? parent.fromStaySegmentId : null,
+        inbound ? null : parent.toStaySegmentId,
+        inbound ? null : endpointIds[1],
+        inbound ? endpointIds[0] : null,
+        inbound ? parent.fromPlaceId : null,
+        inbound ? null : parent.toPlaceId,
+        leg.routeSampleCount, leg.maximumObservationGapSeconds,
+        item.segmentId,
+        JSON.stringify({ correction: "user_confirmed_interruption", reviewOnly: true })
+      ]
+    );
+    const childId = child.rows[0].id;
+    childSegmentIds.push(childId);
+    await client.query(
+      `insert into location_segment_evidence
+         (workspace_id, user_id, evidence_id, commute_segment_id, sequence_index, role)
+       select workspace_id, user_id, evidence_id, $1, sequence_index, role
+       from location_segment_evidence
+       where workspace_id = $2 and user_id = $3 and commute_segment_id = $4
+         and evidence_id = any($5::uuid[]) and role = 'route'
+       on conflict do nothing`,
+      [childId, session.workspaceId, session.userId, item.segmentId, leg.evidenceIds]
+    );
+    const event = await client.query<{ id: string }>(
+      `insert into activity_events (
+         workspace_id, user_id, client_event_id, source, event_type, occurred_at,
+         confidence, raw_payload, suggested_category_id, review_status
+       ) values ($1, $2, $3, 'location_learning', 'commute_detected', $4,
+         'low', $5::jsonb, $6, 'needs_review') returning id`,
+      [session.workspaceId, session.userId, `location-correction:${childId}`.slice(0, 160),
+        leg.startedAt, JSON.stringify({ correction: "user_confirmed_interruption", parentSegmentId: item.segmentId,
+          startedAt: leg.startedAt, stoppedAt: leg.stoppedAt }), item.suggestedCategoryId]
+    );
+    await client.query(
+      `update commute_segments set created_from_event_id = $1 where id = $2 and workspace_id = $3 and user_id = $4`,
+      [event.rows[0].id, childId, session.workspaceId, session.userId]
+    );
+    const review = await client.query<{ id: string }>(
+      `insert into review_items (
+         workspace_id, user_id, event_id, location_segment_id, type, title,
+         suggested_category_id, suggested_started_at, suggested_stopped_at,
+         confidence, status, notes
+       ) values ($1, $2, $3, $4, 'location_manual_correction', 'Commute',
+         $5, $6, $7, 'low', 'open', 'Review this user-confirmed commute leg.')
+       returning id`,
+      [session.workspaceId, session.userId, event.rows[0].id, childId,
+        item.suggestedCategoryId, leg.startedAt, leg.stoppedAt]
+    );
+    childReviewItemIds.push(review.rows[0].id);
+  }
+  await client.query(
+    `update commute_segments set status = 'superseded', continuity_status = 'manual',
+       superseded_by_segment_id = $1, updated_at = now()
+     where id = $2 and workspace_id = $3 and user_id = $4`,
+    [childSegmentIds[0], item.segmentId, session.workspaceId, session.userId]
+  );
+  await resolveReviewAndEvent(client, item, session, "accepted");
+  await auditCorrection(client, session, "interrupt_commute", item.segmentId, {
+    stopStartedAt, stopEndedAt, endpointIds, childSegmentIds, childReviewItemIds
+  });
+  return { ok: true, action: "interrupt_commute" as const, status: "accepted" as const,
+    childSegmentIds, childReviewItemIds };
 }
 
 async function ignoreLocationReview(

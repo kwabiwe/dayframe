@@ -166,6 +166,29 @@ describe("Review real SQLite transactions", () => {
     expect((await store.loadCachedReviewBootstrap())?.bootstrap.reviewItems.map(x => x.id)).toEqual(bootstrap().reviewItems.slice(0, 2).map(x => x.id));
     expect((await store.getReviewItemSyncStates()).size).toBe(2);
   });
+  it("keeps a confirmed commute interruption in the durable outbox until terminal source proof", async () => {
+    const data = bootstrap();
+    const item = data.reviewItems[1];
+    const clientMutationId = syntheticId(700);
+    const mutation = { action: "interrupt_commute" as const,
+      stopStartedAt: "2026-08-28T16:05:00.000Z", stopEndedAt: "2026-08-28T16:15:00.000Z" };
+    await store.enqueueReviewMutation({ bootstrap: data, item, clientMutationId, mutation });
+    expect(count("review_mutation_outbox")).toBe(1);
+    expect(count("review_mutation_effects")).toBe(1);
+    expect((await store.loadCachedReviewBootstrap())?.bootstrap.reviewItems.map((row) => row.id)).not.toContain(item.id);
+    await reopen();
+    const acknowledgement = { ok: true, action: "interrupt_commute", status: "accepted",
+      childSegmentIds: [syntheticId(701), syntheticId(702)],
+      childReviewItemIds: [syntheticId(703), syntheticId(704)] };
+    mocks.fetch.mockResolvedValue({ status: 200, json: async () => acknowledgement });
+    await store.synchroniseReviewMutations();
+    expect(db.prepare("select state from review_mutation_outbox").get()!.state).toBe("acknowledged");
+    expect(count("review_mutation_outbox")).toBe(1);
+    await store.cacheReviewPresentation({ owner: { backendId: "dayframe-staging",
+      workspaceId: data.workspace.id, userId: data.user.id },
+      response: terminalPresentation(data, [item.id]) });
+    expect(count("review_mutation_outbox")).toBe(0);
+  });
   it("rolls back the whole merge when the second effect fails", async () => {
     mocks.failItem = mergeInput().affectedItems[1].id;
     await expect(store.enqueueReviewMutation(mergeInput())).rejects.toThrow("disk failure");

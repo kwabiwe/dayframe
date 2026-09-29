@@ -29,6 +29,8 @@ export async function buildWorkspaceExport(session: RequestSession) {
     healthSleepSegments,
     staySegments,
     commuteSegments,
+    manualStopEndpoints,
+    locationSegmentEvidence,
     locationEvidence,
     placeMatchFeedback,
     importRuns
@@ -45,6 +47,8 @@ export async function buildWorkspaceExport(session: RequestSession) {
     table("health_sleep_segments", session),
     table("stay_segments", session),
     table("commute_segments", session),
+    table("location_manual_stop_endpoints", session),
+    table("location_segment_evidence", session),
     locationEvidenceTable(session),
     table("place_match_feedback", session),
     table("import_runs", session)
@@ -65,6 +69,8 @@ export async function buildWorkspaceExport(session: RequestSession) {
     healthSleepSegments,
     staySegments,
     commuteSegments,
+    manualStopEndpoints,
+    locationSegmentEvidence,
     locationEvidence,
     placeMatchFeedback,
     importRuns
@@ -126,6 +132,8 @@ async function table(tableName: string, session: RequestSession) {
     "health_sleep_segments",
     "stay_segments",
     "commute_segments",
+    "location_manual_stop_endpoints",
+    "location_segment_evidence",
     "location_evidence",
     "place_match_feedback"
   ]);

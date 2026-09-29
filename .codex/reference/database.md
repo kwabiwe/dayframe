@@ -48,6 +48,10 @@ Before declaring hosted auth/timer/event changes ready, verify:
 - Keep legacy nullable fields until data migration is explicitly approved.
 - Do not drop historical data or integration tables without an export/safety decision.
 
+### Manual commute interruption endpoints
+
+`packages/db/migrations/007_manual_commute_stop_endpoints.sql` and `supabase/migrations/202609290001_manual_commute_stop_endpoints.sql` add owner-scoped, non-semantic manual-stop boundaries. Each commute side must reference exactly one stay or manual endpoint. The commute trigger checks both owner and the endpoint's parent/kind/time; hosted endpoint rows have user/workspace RLS. Existing stay-backed rows retain both stay FKs without rewriting data. The correction parent keeps every route link; each child copies only its qualified leg's retained links. Export and deletion must include endpoint/lineage data. Apply the hosted migration before deploying server code that selects or inserts these columns; local/disposable validation is not staging application.
+
 ## Review automation storage
 
 SQLite v5 adds account-owned per-source mutation effects and backfills v4 outbox rows transactionally; v6 adds contention, reconciliation, resolution, and validated-acknowledgement metadata without replacing immutable envelopes or effect anchors. Neither migration removes queued intent or compatibility columns. Two-source merge intent must reserve both IDs atomically. Postgres already has the boundary fields, `commute_segments.max_gap_seconds` and Review mutation receipts; changing these policies needs no new Postgres migration. The max-gap column means maximum internal observation gap (ceil to integral seconds), not total commute duration. Verify existing columns, receipt uniqueness and indexes in staging before smoke tests; do not fabricate bounds for old rows. Keep same-source Sleep lookup plus insertion under its existing user lock, and preserve `user_edited_at` protection.

@@ -107,6 +107,10 @@ export function LocationReviewCorrectionEditor({
   const scrollViewRef = useRef<ScrollView>(null);
   const searchInputRef = useRef<TextInput>(null);
   const activityInputRef = useRef<TextInput>(null);
+  const stopStartDateInputRef = useRef<TextInput>(null);
+  const stopStartTimeInputRef = useRef<TextInput>(null);
+  const stopEndDateInputRef = useRef<TextInput>(null);
+  const stopEndTimeInputRef = useRef<TextInput>(null);
   const activeRevealControlRef = useRef<TextInput | null>(null);
   const scrollOffsetRef = useRef(0);
   const keyboardTopRef = useRef<number | null>(null);
@@ -141,6 +145,11 @@ export function LocationReviewCorrectionEditor({
   const [resolvingSuggestion, setResolvingSuggestion] = useState(false);
   const [advancedExpanded, setAdvancedExpanded] = useState(false);
   const [selectedSplitAt, setSelectedSplitAt] = useState<string | null>(null);
+  const [stopStartDateText, setStopStartDateText] = useState(() => formatLocationReviewDateInput(startAt));
+  const [stopStartTimeText, setStopStartTimeText] = useState("");
+  const [stopEndDateText, setStopEndDateText] = useState(() => stopAt ? formatLocationReviewDateInput(stopAt) : "");
+  const [stopEndTimeText, setStopEndTimeText] = useState("");
+  const [interruptError, setInterruptError] = useState<string | null>(null);
   const [startTimeText, setStartTimeText] = useState(() => formatLocationReviewTimeInput(startAt));
   const [stopTimeText, setStopTimeText] = useState(() => stopAt ? formatLocationReviewTimeInput(stopAt) : "");
   const [validationError, setValidationError] = useState<string | null>(null);
@@ -898,7 +907,78 @@ export function LocationReviewCorrectionEditor({
                   </View>
                 ) : null}
 
-                {evidence.suggestedSplitPoints.length > 0 ? (
+                {evidence.segment.kind === "commute" && evidence.segment.continuityStatus !== "manual" && stopAt ? (
+                  <View style={editorStyles.advancedGroup}>
+                    <Text {...mobileTextProps("metadata")} style={editorStyles.fieldLabel}>Interrupted this commute?</Text>
+                    <Text {...mobileTextProps("body")} style={editorStyles.helperText}>
+                      Enter when you stopped and when you resumed. The time between stays unassigned. Both journeys will need their own retained route evidence and remain in Review.
+                    </Text>
+                    <Text {...mobileTextProps("metadata")} style={editorStyles.fieldLabel}>Stop began</Text>
+                    <View style={[editorStyles.interruptTimeRow, fontScale >= 1.45 ? editorStyles.interruptTimeRowStacked : null]}>
+                      <TextInput ref={stopStartDateInputRef} {...mobileTextProps("input")} accessibilityLabel="Stop began date"
+                        editable={!saving} maxLength={10} onBlur={() => blurRevealControl(stopStartDateInputRef.current)}
+                        onFocus={() => focusRevealControl(stopStartDateInputRef.current)}
+                        onChangeText={(value) => { setStopStartDateText(value); setInterruptError(null); }}
+                        placeholder="YYYY-MM-DD" placeholderTextColor={theme.textSecondary}
+                        style={[styles.textInput, editorStyles.interruptDateInput, fontScale >= 1.45 ? editorStyles.interruptStackedInput : null]} value={stopStartDateText} />
+                      <TextInput ref={stopStartTimeInputRef} {...mobileTextProps("input")} accessibilityLabel="Stop began time"
+                        editable={!saving} keyboardType="number-pad" maxLength={5}
+                        onBlur={() => blurRevealControl(stopStartTimeInputRef.current)}
+                        onFocus={() => focusRevealControl(stopStartTimeInputRef.current)}
+                        onChangeText={(value) => { setStopStartTimeText(formatLocationReviewEditableTime(value)); setInterruptError(null); }}
+                        placeholder="HH:MM" placeholderTextColor={theme.textSecondary}
+                        style={[styles.textInput, editorStyles.interruptClockInput, fontScale >= 1.45 ? editorStyles.interruptStackedInput : null]} value={stopStartTimeText} />
+                    </View>
+                    <Text {...mobileTextProps("metadata")} style={editorStyles.fieldLabel}>Journey resumed</Text>
+                    <View style={[editorStyles.interruptTimeRow, fontScale >= 1.45 ? editorStyles.interruptTimeRowStacked : null]}>
+                      <TextInput ref={stopEndDateInputRef} {...mobileTextProps("input")} accessibilityLabel="Journey resumed date"
+                        editable={!saving} maxLength={10} onBlur={() => blurRevealControl(stopEndDateInputRef.current)}
+                        onFocus={() => focusRevealControl(stopEndDateInputRef.current)}
+                        onChangeText={(value) => { setStopEndDateText(value); setInterruptError(null); }}
+                        placeholder="YYYY-MM-DD" placeholderTextColor={theme.textSecondary}
+                        style={[styles.textInput, editorStyles.interruptDateInput, fontScale >= 1.45 ? editorStyles.interruptStackedInput : null]} value={stopEndDateText} />
+                      <TextInput ref={stopEndTimeInputRef} {...mobileTextProps("input")} accessibilityLabel="Journey resumed time"
+                        editable={!saving} keyboardType="number-pad" maxLength={5}
+                        onBlur={() => blurRevealControl(stopEndTimeInputRef.current)}
+                        onFocus={() => focusRevealControl(stopEndTimeInputRef.current)}
+                        onChangeText={(value) => { setStopEndTimeText(formatLocationReviewEditableTime(value)); setInterruptError(null); }}
+                        placeholder="HH:MM" placeholderTextColor={theme.textSecondary}
+                        style={[styles.textInput, editorStyles.interruptClockInput, fontScale >= 1.45 ? editorStyles.interruptStackedInput : null]} value={stopEndTimeText} />
+                    </View>
+                    {interruptError ? (
+                      <Text {...mobileTextProps("body")} accessibilityLiveRegion="assertive" style={editorStyles.errorText}>{interruptError}</Text>
+                    ) : null}
+                    <Pressable accessibilityRole="button" disabled={saving}
+                      onPress={() => {
+                        const parsed = parseLocationReviewWindow({
+                          baselineStartedAt: evidence.segment.startedAt,
+                          baselineStoppedAt: evidence.segment.stoppedAt!,
+                          startDateText: stopStartDateText,
+                          startTimeText: stopStartTimeText,
+                          stopDateText: stopEndDateText,
+                          stopTimeText: stopEndTimeText
+                        });
+                        if (!parsed.value) {
+                          setInterruptError(parsed.error ?? "Enter both stop times.");
+                          return;
+                        }
+                        if (Date.parse(parsed.value.startedAt) <= Date.parse(evidence.segment.startedAt) ||
+                            Date.parse(parsed.value.stoppedAt) >= Date.parse(evidence.segment.stoppedAt!)) {
+                          setInterruptError("Both stop times must be inside this commute.");
+                          return;
+                        }
+                        void onResolve({ action: "interrupt_commute",
+                          stopStartedAt: parsed.value.startedAt,
+                          stopEndedAt: parsed.value.stoppedAt },
+                          "The interruption was saved. Both journey legs are in Review.");
+                      }}
+                      style={pressable(editorStyles.secondaryAction, styles.buttonPressed)}>
+                      <Text {...mobileTextProps("control")} style={editorStyles.secondaryActionText}>Save interruption and review both legs</Text>
+                    </Pressable>
+                  </View>
+                ) : null}
+
+                {evidence.segment.kind === "stay" && evidence.suggestedSplitPoints.length > 0 ? (
                   <View style={editorStyles.advancedGroup}>
                     <Text {...mobileTextProps("metadata")} style={editorStyles.fieldLabel}>Split detected time</Text>
                     {evidence.suggestedSplitPoints.map((split) => (
@@ -1287,6 +1367,11 @@ function createEditorStyles(theme: MobileTheme) {
     disclosureText: { color: theme.textPrimary, fontSize: 15, fontWeight: "700" },
     advancedContent: { gap: 9, paddingTop: 4 },
     advancedGroup: { gap: 8 },
+    interruptTimeRow: { flexDirection: "row", gap: 8 },
+    interruptTimeRowStacked: { flexDirection: "column" },
+    interruptDateInput: { flex: 2, minWidth: 0 },
+    interruptClockInput: { flex: 1, minWidth: 0 },
+    interruptStackedInput: { flex: 0, alignSelf: "stretch" },
     secondaryAction: {
       minHeight: 44,
       borderRadius: 14,

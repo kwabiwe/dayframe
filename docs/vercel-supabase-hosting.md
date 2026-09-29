@@ -161,3 +161,7 @@ See `docs/ios-hosted-supabase-runbook.md` for the iOS/EAS setup and physical-dev
 ### Sync recovery schema prerequisite
 
 The bounded sync server requires `supabase/migrations/202609040001_health_sleep_resolution_link.sql` before its Preview or production deployment. It adds nullable, owner-scoped lookup provenance for logical Sleep resolution without backfilling existing events. Validate against the existing staging schema and clean ordered local setup (`packages/db/migrations/006_health_sleep_resolution_link.sql`). An exact Review receipt remains authoritative and replays without rewriting the canonical entry. Production application of this migration remains part of the separately approved release; staging validation is not production authorization.
+
+### User-confirmed commute interruption schema prerequisite
+
+The `interrupt_commute` server requires `supabase/migrations/202609290001_manual_commute_stop_endpoints.sql` before a Preview using this code receives Review mutations. Apply it after the earlier hosted migrations and verify the two manual endpoint columns, exactly-one-per-side constraints, owner trigger and endpoint RLS in the target staging schema. `packages/db/migrations/007_manual_commute_stop_endpoints.sql` is the corresponding local migration. Both are additive to ordinary stay-backed commutes; neither creates a stay or a time entry. This branch validates only disposable local PostgreSQL, so staging and production application remain separate release actions.

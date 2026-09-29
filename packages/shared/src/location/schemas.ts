@@ -188,6 +188,11 @@ export const MergeLocationReviewSchema = z.object({
   action: z.enum(["merge", "merge_and_confirm"]), adjacentReviewItemId: z.string().uuid(),
   acknowledgeContradictoryEvidence: z.boolean().default(false), edit: ReviewEntryEditSchema.optional()
 }).strict();
+export const InterruptCommuteLocationReviewSchema = z.object({
+  action: z.literal("interrupt_commute"),
+  stopStartedAt: z.string().datetime({ offset: true }),
+  stopEndedAt: z.string().datetime({ offset: true })
+}).strict();
 
 export const LocationReviewActionSchema = z.discriminatedUnion("action", [
   legacyReviewActionSchema, ConfirmLocationReviewSchema, IgnoreLocationReviewSchema, EditLocationReviewSchema,
@@ -196,7 +201,8 @@ export const LocationReviewActionSchema = z.discriminatedUnion("action", [
     learnedPlaceId: z.string().uuid().nullable().optional()
   }).strict(),
   ChangePlaceAndConfirmSchema, RecordOnceLocationReviewSchema, RecordPoiOnceLocationReviewSchema,
-  SavePlaceAndConfirmSchema, SplitLocationReviewSchema, MergeLocationReviewSchema
+  SavePlaceAndConfirmSchema, SplitLocationReviewSchema, MergeLocationReviewSchema,
+  InterruptCommuteLocationReviewSchema
 ]);
 
 export type LocationEvidenceBatchRequest = z.output<typeof LocationEvidenceBatchRequestSchema>;

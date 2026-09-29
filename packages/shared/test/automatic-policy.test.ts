@@ -73,6 +73,11 @@ describe("automatic confidence and route policy", () => {
   it.each(["medium_high", "high"] as const)("accepts standard %s commute", (confidence) => {
     expect(assessAutomaticLocation("v2_enabled", { ...commute, confidence })).toMatchObject({ action: "auto_confirm", confidenceTier: "standard" });
   });
+  it("keeps a manually corrected commute in Review even with otherwise trusted endpoints and v2_enabled", () => {
+    expect(assessAutomaticLocation("v2_enabled", {
+      ...commute, continuityStatus: "manual", confidence: "high", routeSampleCount: 6
+    })).toMatchObject({ action: "review", reason: "uncertain_boundary" });
+  });
   it.each(["significant_endpoint_displacement", "significant_route_distance"] as const)("accepts medium saved route %s", (qualificationReason) => {
     expect(assessAutomaticLocation("v2_enabled", { ...commute, confidence: "medium", qualificationReason, continuityStatus: "uncertain_gap" })).toMatchObject({ action: "auto_confirm", confidenceTier: "medium_saved_route" });
   });

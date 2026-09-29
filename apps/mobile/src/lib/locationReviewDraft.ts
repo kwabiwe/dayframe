@@ -179,6 +179,9 @@ export function assertLocationReviewActionCompatible(
   if ((mutation.action === "merge" || mutation.action === "merge_and_confirm") && isCommute) {
     throw new LocationReviewDraftError("Only adjacent detected visits can be merged.");
   }
+  if (mutation.action === "interrupt_commute" && !isCommute) {
+    throw new LocationReviewDraftError("Only a detected commute can have a confirmed interruption.");
+  }
   if (
     (mutation.action === "record_poi_once" ||
       mutation.action === "save_place_and_confirm") &&
@@ -208,7 +211,8 @@ export function buildDurableLocationReviewCommand(
   });
   return {
     mutation, affectedReviewItemIds: [...ids].sort(), affectedItems,
-    completion: merge ? "resolve_current_and_adjacent" : mutation.action === "split" ? "replace_current" : "resolve_current",
+    completion: merge ? "resolve_current_and_adjacent" :
+      mutation.action === "split" || mutation.action === "interrupt_commute" ? "replace_current" : "resolve_current",
     catalogueRefreshRequired: mutation.action === "save_place_and_confirm"
   };
 }

@@ -436,6 +436,13 @@ Before merging implementation PRs, ask KB to test the exact Ready Preview promot
 - [ ] New inferred stays/affected commutes remain Review candidates under `v2_review` and `v2_enabled`, while unchanged eligible strong commutes keep their prior automatic-policy result.
 - [ ] Shared-engine output matches mobile complete SQLite replay and real local Postgres replay; rollback, account isolation, old confirmed/manual state, Quick Confirm hashes, receipts and lineage remain protected.
 
+## User-confirmed commute interruption
+
+- [ ] A user enters both stop boundaries on an open commute in Review. The existing outbox persists one immutable `interrupt_commute` envelope before dismissal, reconciles an interrupted delivery by receipt, and restores the source on a canonical rejection. Rapid repeat does not create duplicate children. More options enter, update and exit under the existing local layout owner; keyboard scroll and Reduce Motion remain usable at phone widths and large text.
+- [ ] The reported 25 September B-shaped Home loop has one original composite before correction. With retained route support on both sides, one transaction retains the superseded parent and all original evidence, creates exactly two child commute Reviews with their own leg-only route links, and leaves the middle unassigned. No Gym Visit, saved place, POI, inferred activity or mode, or time entry appears.
+- [ ] A one-point, inaccurate, duplicated, simulated, stationary, sparse or one-leg-only route rejects atomically. Manual stop times must sit strictly inside the parent. Existing #208 identity, #209 short Review-only trips, #210 approximate unknown Visit, Morrisons and PureGym behavior remain unchanged.
+- [ ] The additive migration keeps ordinary stay-to-stay commutes valid, enforces exactly one endpoint source per side and owner/parent/kind/time integrity, and applies hosted RLS. Endpoint-backed children remain Review-only with `v2_enabled`. Same-input replay cannot resurrect the corrected composite; terminal/ignored/manual history remains protected.
+
 ## Strong-evidence short journeys
 
 - [ ] Preserve original A boundaries (84.496s and 81s), endpoint linkage, confidence and deterministic IDs; unknown endpoint can remain below its visit-Review floor.

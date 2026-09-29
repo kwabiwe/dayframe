@@ -228,4 +228,20 @@ describe("Location Review editor draft", () => {
       learnedPlaceId: null
     }, commute, data)).not.toThrow();
   });
+
+  it("routes confirmed commute interruptions through the durable replacement owner", () => {
+    const data = syntheticReviewBootstrap(4);
+    const commute = data.reviewItems.find((item) => item.eventType === "commute_detected")!;
+    const stay = data.reviewItems.find((item) => item.eventType !== "commute_detected")!;
+    const action = { action: "interrupt_commute" as const,
+      stopStartedAt: "2026-09-25T08:30:00.000Z", stopEndedAt: "2026-09-25T08:42:00.000Z" };
+    expect(buildDurableLocationReviewCommand(action, commute, data)).toMatchObject({
+      mutation: action,
+      affectedReviewItemIds: [commute.id],
+      completion: "replace_current",
+      catalogueRefreshRequired: false
+    });
+    expect(() => buildDurableLocationReviewCommand(action, stay, data)).toThrow();
+    expect(locationReviewActionRequiresConnection(action)).toBe(false);
+  });
 });
