@@ -12,11 +12,12 @@ import {
 } from "@dayframe/shared";
 import { enqueueEvent } from "./api";
 import { reverseGeocodeLocation } from "./locationGeocoding";
-import { DAYFRAME_API_BASE } from "./config";
+import { LOCATION_LEARNING_ENABLED_KEY, locationAccountStorageKey as accountStorageKey,
+  readLocationCaptureConsent, writeLocationCaptureConsent } from "./location/captureConsent";
 import { getActiveMobileAccountSnapshot, mobileAccountKey, mobileAccountOwnersEqual, readActiveMobileAccount,
   subscribeActiveMobileAccount, type MobileAccountOwner } from "./mobileAccount";
 import { subscribeMobileSignedOut } from "./mobileSessionTransition";
-import { captureLocationOwnership, configureLocationAccount, getLocationRolloutMode, hasLegacyLocationOwner, isLocationCaptureSnapshotCurrent,
+import { captureLocationOwnership, updateLocationCaptureCatalogue, getLocationRolloutMode, hasLegacyLocationOwner, isLocationCaptureSnapshotCurrent,
   locationCaptureRevision, recordLocationCaptureDiscard, type LocationCaptureSnapshot } from "./location/store";
 import { bindLocationCaptureOwner, enableLocationCaptureOwnership, endLocationCaptureOwnership, locationCaptureAccountChanged,
   locationCaptureSessionSignedOut, stopUnownedLocationCapture, withLocationCaptureLifecycle } from "./location/runtime";
@@ -165,7 +166,6 @@ const GEOFENCE_REGISTRATION_KEY = "dayframe.location.geofenceRegistration.v1";
 const OPEN_VISITS_KEY = "dayframe.location.openVisits.v1";
 const SEEN_VISIT_IDS_KEY = "dayframe.location.seenVisits.v1";
 const LOCATION_DIAGNOSTICS_KEY = "dayframe.location.diagnostics.v1";
-const LOCATION_LEARNING_ENABLED_KEY = "dayframe.location.learning.enabled.v1";
 const LEARNED_PLACE_CLUSTERS_KEY = "dayframe.location.learning.clusters.v1";
 const LAST_COMPLETED_VISIT_KEY = "dayframe.location.lastCompletedVisit.v1";
 const MAX_SEEN_VISIT_IDS = 500;
@@ -194,7 +194,7 @@ const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-
 TaskManager.defineTask(DAYFRAME_GEOFENCE_TASK, async ({ data, error }) => {
   const captured = captureLocationOwnership();
   const capture = await hydrateLegacyCapture(await captured);
-  if (!isLocationCaptureSnapshotCurrent(capture)) {
+  if (!isLocationCaptureSnapshotCurrent(capture) || !await getLocationLearningEnabled() || !isLocationCaptureSnapshotCurrent(capture)) {
     await recordLocationCaptureDiscard(capture.revision !== locationCaptureRevision() ? "stale_epoch" : !capture.binding || !capture.context ? "no_owner" : "opted_out", 1);
     await stopUnownedLocationCapture(capture);
     return;
@@ -333,16 +333,12 @@ export async function getLocationLearningEnabled() {
   const owner = await readActiveMobileAccount();
   if (!owner) return false;
   await migrateLegacyLocationOptIn(owner);
-  const value = await AsyncStorage.getItem(accountStorageKey(LOCATION_LEARNING_ENABLED_KEY, mobileAccountKey(owner)));
-  return mobileAccountOwnersEqual(getActiveMobileAccountSnapshot(), owner) && value === "true";
-}
-
-function accountStorageKey(key: string, ownerKey: string) {
-  return `${key}:account:${encodeURIComponent(DAYFRAME_API_BASE)}:${ownerKey}`;
+  const enabled = await readLocationCaptureConsent(owner);
+  return mobileAccountOwnersEqual(getActiveMobileAccountSnapshot(), owner) && enabled;
 }
 
 export function writeLocationLearningPreference(owner: MobileAccountOwner, enabled: boolean) {
-  return AsyncStorage.setItem(accountStorageKey(LOCATION_LEARNING_ENABLED_KEY, mobileAccountKey(owner)), String(enabled));
+  return writeLocationCaptureConsent(owner, enabled);
 }
 
 export async function migrateLegacyLocationOptIn(owner: MobileAccountOwner) {
@@ -461,14 +457,15 @@ export function refreshGeofencesForPlaces(places: Parameters<typeof refreshGeofe
 async function refreshCaptureCatalogue(places: Parameters<typeof startGeofencesUnsafe>[0], owner?: MobileAccountOwner,
   initial?: LocationCaptureSnapshot) {
   const capture = initial ?? await captureLocationOwnership();
-  if (!capture.context || !capture.binding || capture.revision !== locationCaptureRevision() ||
+  if (!isLocationCaptureSnapshotCurrent(capture) || !capture.context ||
     (owner && !mobileAccountOwnersEqual(owner, capture.context)) ||
     !mobileAccountOwnersEqual(getActiveMobileAccountSnapshot(), capture.context)) return { ...capture, context: null };
-  await configureLocationAccount({ ...capture.context, savedPlaces: places.flatMap(place =>
+  const updated = await updateLocationCaptureCatalogue(places.flatMap(place =>
     typeof place.latitude !== "number" || typeof place.longitude !== "number" ? [] : [{
       id: place.id, name: place.name, latitude: place.latitude, longitude: place.longitude,
       radiusMeters: place.radiusMeters, priority: place.priority, loggingEnabled: place.loggingEnabled
-    }]) }, await getLocationRolloutMode(), capture.binding.enabled, capture.revision);
+    }]), capture);
+  if (!updated) return { ...capture, context: null };
   return { ...await captureLocationOwnership(), revision: capture.revision };
 }
 
@@ -487,7 +484,7 @@ async function startGeofencesUnsafe(
   }>,
   capture: LocationCaptureSnapshot
 ) {
-  if (!isLocationCaptureSnapshotCurrent(capture)) return 0;
+  if (!isLocationCaptureSnapshotCurrent(capture) || !await getLocationLearningEnabled() || !isLocationCaptureSnapshotCurrent(capture)) return 0;
   const monitorablePlaces = places
     .filter((place) => capture.context!.savedPlaces.some(saved => saved.id === place.id) && typeof place.latitude === "number" && typeof place.longitude === "number")
     .sort((left, right) => {

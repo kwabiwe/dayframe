@@ -19,6 +19,7 @@ import {
   getLocationRolloutMode,
   invalidateLocationCaptureOwnership,
   isLocationCaptureSnapshotCurrent,
+  isLocationCaptureAdmissionSuspended,
   locationCaptureRevision,
   persistLocationEvidence,
   processPendingLocationEvidence,
@@ -39,6 +40,17 @@ const DEVICE_ID_KEY = "dayframe.location.deviceId.v2";
 // All OS start/stop/clear operations (including drains) share this runtime lane.
 // SQLite admission remains on the store's existing mutation queue.
 export const withLocationCaptureLifecycle = createSerialMutationQueue();
+// This fence consults the captured secure-session authority supplied by logout.
+// It lasts through the whole API logout, including its network await. It is not
+// an independent session owner; a newer session makes its predicate false.
+let logoutFence: { owner: MobileAccountOwner | null; isCurrent: () => boolean } | null = null;
+let accountPublicationSeen = false;
+export function beginLocationLogout(owner: MobileAccountOwner | null, isCurrent: () => boolean) {
+  const fence = { owner, isCurrent };
+  logoutFence = fence;
+  invalidateLocationCaptureOwnership();
+  return () => { if (logoutFence === fence) logoutFence = null; };
+}
 
 async function locationDeviceId() {
   const existing = await SecureStore.getItemAsync(DEVICE_ID_KEY);
@@ -49,19 +61,25 @@ async function locationDeviceId() {
 }
 
 function ownerIsCurrent(owner: MobileAccountOwner, revision: number) {
-  return revision === locationCaptureRevision() && mobileAccountOwnersEqual(getActiveMobileAccountSnapshot(), owner);
+  return revision === locationCaptureRevision() && mobileAccountOwnersEqual(getActiveMobileAccountSnapshot(), owner) &&
+    !(logoutFence && mobileAccountOwnersEqual(logoutFence.owner, owner) && logoutFence.isCurrent());
 }
 
-async function stopCaptureUnsafe(binding: LocationCaptureBinding | null, reason: string) {
+async function stopCaptureUnsafe(binding: LocationCaptureBinding | null, reason: string,
+  options: { owner?: MobileAccountOwner; isCurrent?: () => boolean; revision?: number } = {}) {
   const current = await readLocationCaptureBinding();
   if (current?.id !== binding?.id) return false;
   // End admission before any fallible OS cleanup; retain accepted rows except
   // for deliberate explicit logout. Each cleanup failure is coordinate-free.
-  await endLocationOwnership(binding, reason === "logout");
+  if (!await endLocationOwnership(binding, reason === "logout", options)) return false;
+  return stopCaptureSourcesUnsafe(options.owner ? `${options.owner.workspaceId}:${options.owner.userId}` : binding?.accountKey);
+}
+
+async function stopCaptureSourcesUnsafe(ownerKey?: string) {
   const geofence = await import("../geofence");
   let cleared = true;
   for (const operation of [geofence.stopLocationLearningIfStarted, geofence.stopGeofencesIfStarted,
-    stopNativeLocationIntelligence, clearNativeLocationSignals, () => geofence.clearLocationCaptureCaches(binding?.accountKey)]) {
+    stopNativeLocationIntelligence, clearNativeLocationSignals, () => geofence.clearLocationCaptureCaches(ownerKey)]) {
     try { await operation(); }
     catch { cleared = false; await recordLocationCaptureCleanupFailure(); }
   }
@@ -78,10 +96,8 @@ async function bindOwnerUnsafe(owner: MobileAccountOwner, revision: number) {
   if (previous?.accountKey === key) {
     const capture = await captureLocationOwnership();
     const enabled = await geofence.getLocationLearningEnabled();
-    if (capture.context && previous.enabled !== enabled) {
-      await configureLocationAccount(capture.context, await getLocationRolloutMode(), enabled, revision);
-    }
-    return ownerIsCurrent(owner, revision);
+    if (!capture.context || !ownerIsCurrent(owner, revision)) return false;
+    return Boolean(await configureLocationAccount(capture.context, undefined, enabled, revision, isLocationCaptureAdmissionSuspended()));
   }
   if (!await stopCaptureUnsafe(previous, "replacement")) return false;
   if (!ownerIsCurrent(owner, revision)) return false;
@@ -92,7 +108,7 @@ async function bindOwnerUnsafe(owner: MobileAccountOwner, revision: number) {
   if (!timeZone || !ownerIsCurrent(owner, revision)) return false;
   return Boolean(await configureLocationAccount({ ...owner, deviceId, timeZone,
     savedPlaces: retained?.savedPlaces ?? [], acceptedLearnedPlaces: retained?.acceptedLearnedPlaces ?? [] },
-    "v2_shadow", enabled, revision));
+    undefined, enabled, revision));
 }
 
 export function bindLocationCaptureOwner(owner: MobileAccountOwner, revision = locationCaptureRevision()) {
@@ -113,6 +129,8 @@ export function stopUnownedLocationCapture(capture: LocationCaptureSnapshot) {
     if (capture.revision !== locationCaptureRevision() || isLocationCaptureSnapshotCurrent(capture)) return;
     const current = await readLocationCaptureBinding();
     if (current?.id !== capture.binding?.id || capture.revision !== locationCaptureRevision()) return;
+    // An opted-out owner retains its context and accepted work for sync.
+    if (current && capture.context && mobileAccountOwnersEqual(getActiveMobileAccountSnapshot(), capture.context) && !current.enabled) return;
     invalidateLocationCaptureOwnership();
     await stopCaptureUnsafe(current, "no_owner");
   });
@@ -120,11 +138,17 @@ export function stopUnownedLocationCapture(capture: LocationCaptureSnapshot) {
 
 // Called synchronously by the existing account listener, including A -> B -> A.
 export function locationCaptureAccountChanged(owner: MobileAccountOwner | null) {
-  const revision = invalidateLocationCaptureOwnership();
+  // A first cold activation may publish before mobileAccount hydrates its cache.
+  // Preserve an already attributable same-owner binding in that case. Later
+  // publications invalidate synchronously, including A -> B -> A.
+  const coldActivation = !accountPublicationSeen && owner && locationCaptureRevision() === 0;
+  accountPublicationSeen = true;
+  const revision = coldActivation ? 0 : invalidateLocationCaptureOwnership();
   return withLocationCaptureLifecycle(async () => {
+    if (revision !== locationCaptureRevision()) return;
+    if (owner) { if (ownerIsCurrent(owner, revision)) await bindOwnerUnsafe(owner, revision); return; }
     const binding = await readLocationCaptureBinding();
     if (!await stopCaptureUnsafe(binding, "account_change")) return;
-    if (owner && ownerIsCurrent(owner, revision)) await bindOwnerUnsafe(owner, revision);
   });
 }
 
@@ -134,19 +158,45 @@ export function endLocationCaptureOwnership(reason: "logout" | "signed_out" | "o
   if (owner && getActiveMobileAccountSnapshot() && !mobileAccountOwnersEqual(getActiveMobileAccountSnapshot(), owner)) {
     return Promise.resolve();
   }
+  if (reason === "opt_out" && owner && logoutFence && mobileAccountOwnersEqual(logoutFence.owner, owner) && logoutFence.isCurrent()) {
+    // Honour the preference without superseding the logout's deletion revision
+    // or creating a disabled context during its network/cleanup window.
+    return withLocationCaptureLifecycle(async () => {
+      if (isCurrent() && mobileAccountOwnersEqual(getActiveMobileAccountSnapshot(), owner)) {
+        await import("../geofence").then(g => g.writeLocationLearningPreference(owner, false));
+      }
+    });
+  }
   const previous = readLocationCaptureBinding();
   const revision = invalidateLocationCaptureOwnership();
   return withLocationCaptureLifecycle(async () => {
     const binding = await previous;
     if (!isCurrent()) return;
-    if (owner && binding && binding.accountKey !== `${owner.workspaceId}:${owner.userId}`) return;
-    // A queued no-owner self-heal must never stop a subsequently bound owner.
-    if (!binding && revision !== locationCaptureRevision()) return;
+    if (revision !== locationCaptureRevision()) {
+      if (reason === "logout") throw new Error("Location changed during local cleanup. Try signing out again.");
+      return;
+    }
+    if (owner && binding && binding.accountKey !== `${owner.workspaceId}:${owner.userId}`) {
+      if (reason === "logout") throw new Error("Local Location account changed. Try signing out again.");
+      return;
+    }
     if (reason === "opt_out" && owner) {
       const geofence = await import("../geofence");
       await geofence.writeLocationLearningPreference(owner, false);
+      const context = await readOwnedLocationAccountContext(owner);
+      if (context && ownerIsCurrent(owner, revision)) {
+        if (!await configureLocationAccount(context, undefined, false, revision)) return;
+      }
+      if (revision !== locationCaptureRevision() || !isCurrent()) return;
+      if (!await stopCaptureSourcesUnsafe(`${owner.workspaceId}:${owner.userId}`)) {
+        throw new Error("Location is paused, but some local capture cleanup failed. Try again before signing out.");
+      }
+      return;
     }
-    await stopCaptureUnsafe(binding, reason);
+    const cleared = await stopCaptureUnsafe(binding, reason, { owner, isCurrent, revision });
+    if (!cleared && reason === "logout" && isCurrent()) {
+      throw new Error("Local Location cleanup failed. Try signing out again to remove this account's saved Location data.");
+    }
   });
 }
 
@@ -202,7 +252,8 @@ export async function syncLocationIntelligenceOnForeground(options: LocationSync
 // Call only inside withLocationCaptureLifecycle; all callers are in geofence.ts.
 export async function startNativeLocationIntelligence() {
   const capture = await captureLocationOwnership();
-  if (!isLocationCaptureSnapshotCurrent(capture) || await getLocationRolloutMode() === "v1") return null;
+  if (!isLocationCaptureSnapshotCurrent(capture) || !await import("../geofence").then(g => g.getLocationLearningEnabled()) ||
+    !isLocationCaptureSnapshotCurrent(capture) || await getLocationRolloutMode() === "v1") return null;
   const native = await import("../../../modules/dayframe-location-visits");
   if (!isLocationCaptureSnapshotCurrent(capture)) return null;
   return native.startMonitoring();

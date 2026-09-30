@@ -3,6 +3,7 @@
 // Exercises the real Expo task bodies (geofence.ts), native drain (runtime.ts) and SQLite store.
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { DatabaseSync } from "node:sqlite";
+import { decideLocationRollout, segmentStartedAfterSemanticCutover } from "../../../../../apps/web/src/lib/location/location-rollout";
 
 const h = vi.hoisted(() => ({
   open: vi.fn(),
@@ -119,6 +120,7 @@ beforeEach(async () => {
   store = await import("./store");
   runtime = await import("./runtime");
 });
+
 afterEach(async () => { await settle(); await new Promise(r => setTimeout(r, 0)); db.close(); vi.useRealTimers(); vi.unstubAllGlobals(); });
 
 const place = { id: A_PLACE, name: "Synthetic A place", latitude: 51.5, longitude: -0.1, radiusMeters: 100 };
@@ -510,4 +512,259 @@ describe("Location capture ownership — real SQLite and lifecycle", () => {
     vi.mocked(secure.getItemAsync).mockReset().mockImplementation(async k=>h.secure.get(k)??null);
   });
 
+});
+
+describe("PR 213 consent and semantic cutover regressions", () => {
+  it("configure-then-refresh cannot restart capture when Settings opts out during the actual native drain (P1b)", async () => {
+    await signIn(A, [place]);
+    const entered = deferred(), blocked = deferred();
+    h.drain.mockImplementationOnce(async () => { entered.resolve(); await blocked.promise; return []; });
+    const dashboard = (async () => {
+      await runtime.configureLocationIntelligence(bootstrap(A, [place]));
+      return geofence.refreshGeofencesForPlaces([place], A);
+    })();
+    await entered.promise;
+    const revision = store.locationCaptureRevision();
+    const optOut = geofence.setLocationLearningEnabled(false, [place], A);
+    for (let i = 0; i < 200 && store.locationCaptureRevision() === revision; i++) await Promise.resolve();
+    expect(store.locationCaptureRevision()).toBeGreaterThan(revision);
+    h.nativeCalls.length = 0;
+    blocked.resolve();
+    await dashboard; await optOut; await settle();
+    const binding = (await store.readLocationCaptureBinding())!;
+    expect(binding.enabled).toBe(false);
+    expect(await geofence.getLocationLearningEnabled()).toBe(false);
+    expect(h.nativeCalls.filter(c => c.startsWith("expo:start") || c === "startMonitoring")).toEqual([]);
+    await geofenceTask()({ data: { eventType: 1, region: { identifier: `${binding.id}:${A_PLACE}` } }, error: null });
+    await learningTask()({ data: { locations: [fix(T0 + 1_000)] }, error: null });
+    h.nativeSignals.push(visit("opted-out", T0 + 1_000, T0 + 30_000));
+    await runtime.drainNativeLocationSignalsInBatches();
+    await runtime.configureLocationIntelligence(bootstrap(A, [place]));
+    expect((await store.readLocationCaptureBinding())!.enabled).toBe(false);
+    expect(rows()).toEqual([]);
+    vi.setSystemTime(T0 + 60_000);
+    await geofence.setLocationLearningEnabled(true, [place], A);
+    await learningTask()({ data: { locations: [fix(T0 + 61_000)] }, error: null });
+    expect(rows()).toHaveLength(1);
+  });
+
+  it("an already queued enabled catalogue snapshot cannot recreate a disabled binding (P1)", async () => {
+    await signIn(A, [place]);
+    const blocked = deferred(), entered = deferred();
+    const lane = runtime.withLocationCaptureLifecycle(async () => { entered.resolve(); await blocked.promise; });
+    await entered.promise;
+    const optOut = geofence.setLocationLearningEnabled(false, [place], A);
+    for (let i = 0; i < 100; i++) await Promise.resolve();
+    const refresh = geofence.refreshGeofencesForPlaces([place], A);
+    h.nativeCalls.length = 0;
+    blocked.resolve(); await lane; await optOut; await refresh;
+    expect((await store.readLocationCaptureBinding())!.enabled).toBe(false);
+    expect(h.nativeCalls.filter(c => c.startsWith("expo:start") || c === "startMonitoring")).toEqual([]);
+  });
+
+  it("local scoped consent is required at task/start and SQLite commit boundaries even with an enabled snapshot", async () => {
+    await signIn(A, [place]);
+    const capture = await store.captureLocationOwnership();
+    const evidence = store.evidenceFromExpoLocation(fix(T0 + 1_000), capture.context!);
+    await geofence.writeLocationLearningPreference(A, false);
+    h.nativeCalls.length = 0;
+    await geofenceTask()({ data: { eventType: 1, region: { identifier: `${capture.binding!.id}:${A_PLACE}` } }, error: null });
+    await geofence.startGeofences([place], A);
+    await geofence.startLocationLearning([place]);
+    await runtime.withLocationCaptureLifecycle(() => runtime.startNativeLocationIntelligence());
+    expect(await store.persistLocationEvidence([evidence], capture)).toMatchObject({ insertedCount: 0, rejectedCount: 1 });
+    expect(rows()).toEqual([]);
+    expect(h.nativeCalls.filter(c => c.startsWith("expo:start") || c === "startMonitoring")).toEqual([]);
+    await geofence.writeLocationLearningPreference(A, true);
+    h.beforeInsert = () => geofence.writeLocationLearningPreference(A, false);
+    expect(await store.persistLocationEvidence([evidence], capture)).toMatchObject({ insertedCount: 0, rejectedCount: 1 });
+    h.beforeInsert = null;
+    expect(rows()).toEqual([]); // consent loss inside the real transaction rolls it back
+  });
+
+  it("opt-out leaves accepted work observable/uploadable without a bootstrap (P20)", async () => {
+    await signIn();
+    await learningTask()({ data: { locations: [fix(T0 + 1_000)] }, error: null });
+    const accepted = rows()[0].id;
+    await geofence.setLocationLearningEnabled(false);
+    expect((await store.getLocationStoreDiagnostics()).pendingEvidenceCount).toBe(1);
+    expect(await pendingIds(A)).toEqual([accepted]);
+    expect((await store.readLocationCaptureBinding())!.enabled).toBe(false);
+  });
+
+  it("activation before cold account hydration preserves the persisted same-owner binding and native journal (N1)", async () => {
+    await signIn(A, [place]);
+    const before = await store.readLocationCaptureBinding();
+    h.nativeSignals.push(visit("retained-native", T0 + 1_000, T0 + 30_000));
+    vi.setSystemTime(T0 + 60_000); vi.resetModules(); h.tasks.clear();
+    geofence = await import("../geofence"); account = await import("../mobileAccount");
+    store = await import("./store"); runtime = await import("./runtime");
+    h.nativeCalls.length = 0;
+    await account.activateMobileAccount(A); // deliberately before readActiveMobileAccount
+    await settle();
+    expect(await store.readLocationCaptureBinding()).toEqual(before);
+    expect(h.nativeSignals).toHaveLength(1);
+    expect(h.nativeCalls).not.toContain("clearAllSignals");
+    await runtime.drainNativeLocationSignalsInBatches();
+    expect(rows()).toHaveLength(1);
+  });
+
+  it("a cancelled old A logout cannot leave the newer same-owner capture suspended (P6)", async () => {
+    await signIn();
+    const before = await store.captureLocationOwnership();
+    const blocked = deferred(), entered = deferred();
+    const lane = runtime.withLocationCaptureLifecycle(async () => { entered.resolve(); await blocked.promise; });
+    await entered.promise;
+    let current = true;
+    const end = runtime.endLocationCaptureOwnership("logout", A, () => current);
+    current = false;
+    blocked.resolve(); await lane; await end;
+    vi.setSystemTime(T0 + 60_000);
+    await account.activateMobileAccount(A);
+    expect(await runtime.bindLocationCaptureOwner(A)).toBe(true);
+    const after = await store.captureLocationOwnership();
+    expect(after.binding!.id).not.toBe(before.binding!.id);
+    expect(store.isLocationCaptureSnapshotCurrent(after)).toBe(true);
+    expect(await store.persistLocationEvidence([store.evidenceFromExpoLocation(fix(T0 + 1_000), before.context!)], before)).toMatchObject({ insertedCount: 0 });
+    await learningTask()({ data: { locations: [fix(T0 + 61_000)] }, error: null });
+    expect(rows()).toHaveLength(1);
+  });
+
+  async function semanticBacklog() {
+    const otherPlace = { ...place, id: "a0000000-0000-4000-8000-00000000a2ce", name: "Synthetic second place", longitude: -0.12 };
+    await signIn(A, [place, otherPlace]);
+    vi.setSystemTime(T0 + 600_000);
+    h.nativeSignals.push(visit("shadow-visit", T0 + 1_000, T0 + 540_000));
+    await runtime.drainNativeLocationSignalsInBatches();
+    vi.setSystemTime(T0 + 1_200_000);
+    await runtime.configureLocationIntelligence({ ...bootstrap(A, [place, otherPlace]), locationRolloutMode: "v2_review" });
+    const ack = new Date(T0 + 1_200_000).toISOString();
+    vi.setSystemTime(T0 + 1_800_000);
+    h.nativeSignals.push({ ...visit("review-visit", T0 + 1_260_000, T0 + 1_740_000), longitude: otherPlace.longitude });
+    await runtime.drainNativeLocationSignalsInBatches();
+    await store.processPendingLocationEvidence(new Date(T0 + 2_350_000).toISOString());
+    const segments = await store.readLocationSegments();
+    const shadow = segments.find(s => s.evidenceIds.includes("shadow-visit"))!;
+    const eligible = segments.find(s => s.evidenceIds.includes("review-visit"))!;
+    expect(shadow).toBeDefined(); expect(eligible).toBeDefined();
+    expect(eligible.status).toBe("finalised");
+    expect(eligible.startedAt).toBe(new Date(T0 + 1_260_000).toISOString());
+    return { ack, shadow, eligible };
+  }
+  it.each(["invalidation", "opt-out", "legacy upgrade"] as const)("generated upload values preserve semantic eligibility across %s, without reopening capture (P4/P4b/P23)", async transition => {
+    const { ack, shadow, eligible } = await semanticBacklog();
+    const before = await store.captureLocationOwnership();
+    vi.setSystemTime(T0 + 2_400_000);
+    if (transition === "invalidation") {
+      await signOut();
+      await account.activateMobileAccount(A);
+      await runtime.bindLocationCaptureOwner(A);
+    } else if (transition === "opt-out") {
+      await geofence.setLocationLearningEnabled(false, [place], A);
+      await geofence.setLocationLearningEnabled(true, [place], A);
+    } else {
+      db.exec("delete from location_store_metadata where key='capture_binding_v1' or key like 'semantic_eligibility:%'");
+      vi.resetModules(); h.tasks.clear();
+      geofence = await import("../geofence"); account = await import("../mobileAccount");
+      store = await import("./store"); runtime = await import("./runtime");
+      await runtime.bindLocationCaptureOwner((await account.readActiveMobileAccount())!);
+    }
+    await runtime.configureLocationIntelligence({ ...bootstrap(A, [place]), locationRolloutMode: "v2_review" });
+    const after = await store.captureLocationOwnership();
+    expect(after.binding!.id).not.toBe(before.binding!.id);
+    expect(Date.parse(after.binding!.boundAt)).toBe(T0 + 2_400_000);
+    await learningTask()({ data: { locations: [fix(T0 + 2_000_000)] }, error: null });
+    expect(rows().some(r => r.t === new Date(T0 + 2_000_000).toISOString())).toBe(false);
+    const batch = await store.prepareLocationUploadBatch(A);
+    const body = JSON.parse(batch!.body_json);
+    expect(body.semanticModeAcknowledgedAt).toBe(ack);
+    expect(body.evidence.map((e: { clientEvidenceId: string }) => e.clientEvidenceId)).toContain("review-visit");
+    const decision = decideLocationRollout("v2_review", body.rolloutMode, body.semanticModeAcknowledgedAt);
+    expect(decision.emitV2ReviewItems).toBe(true);
+    expect(segmentStartedAfterSemanticCutover(eligible.startedAt, decision.semanticCutoverAt!)).toBe(true);
+    expect(segmentStartedAfterSemanticCutover(shadow.startedAt, decision.semanticCutoverAt!)).toBe(false);
+    expect(decideLocationRollout("v2_shadow", body.rolloutMode, body.semanticModeAcknowledgedAt).emitV2ReviewItems).toBe(false);
+  });
+
+  async function generatedBody(owner: typeof A, occurredAt: number) {
+    await learningTask()({ data: { locations: [fix(occurredAt)] }, error: null });
+    const batch = await store.prepareLocationUploadBatch(owner);
+    return JSON.parse(batch!.body_json);
+  }
+
+  it("semantic acknowledgements isolate A/B and explicit logout resets A's cutover", async () => {
+    const { ack, eligible } = await semanticBacklog();
+    vi.setSystemTime(T0 + 2_400_000);
+    await account.activateMobileAccount(B); await runtime.bindLocationCaptureOwner(B);
+    await runtime.configureLocationIntelligence({ ...bootstrap(B), locationRolloutMode: "v2_review" });
+    await geofence.setLocationLearningEnabled(true);
+    const b = await generatedBody(B, T0 + 2_401_000);
+    expect(b.semanticModeAcknowledgedAt).toBe(new Date(T0 + 2_400_000).toISOString());
+    expect(b.semanticModeAcknowledgedAt).not.toBe(ack);
+    await signOut("logout");
+    vi.setSystemTime(T0 + 3_000_000);
+    await account.activateMobileAccount(A); await runtime.bindLocationCaptureOwner(A);
+    await runtime.configureLocationIntelligence({ ...bootstrap(A, [place]), locationRolloutMode: "v2_review" });
+    expect((await generatedBody(A, T0 + 3_001_000)).semanticModeAcknowledgedAt).toBe(ack);
+    await signOut("logout");
+    vi.setSystemTime(T0 + 3_600_000);
+    await account.activateMobileAccount(A); await runtime.bindLocationCaptureOwner(A);
+    await runtime.configureLocationIntelligence({ ...bootstrap(A, [place]), locationRolloutMode: "v2_review" });
+    const fresh = await generatedBody(A, T0 + 3_601_000);
+    expect(fresh.semanticModeAcknowledgedAt).toBe(new Date(T0 + 3_600_000).toISOString());
+    expect(fresh.evidence.map((e: { clientEvidenceId: string }) => e.clientEvidenceId)).not.toContain("review-visit");
+    const decision = decideLocationRollout("v2_review", fresh.rolloutMode, fresh.semanticModeAcknowledgedAt);
+    expect(segmentStartedAfterSemanticCutover(eligible.startedAt, decision.semanticCutoverAt!)).toBe(false);
+  });
+
+  it("real bootstrap mode transitions preserve semantic-to-semantic acknowledgement and reset after shadow", async () => {
+    const { ack, eligible } = await semanticBacklog();
+    vi.setSystemTime(T0 + 2_400_000);
+    await runtime.configureLocationIntelligence({ ...bootstrap(A, [place]), locationRolloutMode: "v2_enabled" });
+    const enabled = await generatedBody(A, T0 + 2_401_000);
+    expect(enabled.rolloutMode).toBe("v2_enabled");
+    expect(enabled.semanticModeAcknowledgedAt).toBe(ack);
+    expect(decideLocationRollout("v2_review", enabled.rolloutMode, enabled.semanticModeAcknowledgedAt).emitV2ReviewItems).toBe(false);
+    expect(decideLocationRollout("v2_enabled", enabled.rolloutMode, enabled.semanticModeAcknowledgedAt).emitV2ReviewItems).toBe(true);
+    vi.setSystemTime(T0 + 3_000_000);
+    await runtime.configureLocationIntelligence(bootstrap(A, [place]));
+    const shadowCapture = await store.captureLocationOwnership();
+    await store.persistLocationEvidence([store.evidenceFromExpoLocation(fix(T0 + 3_001_000), shadowCapture.context!)], shadowCapture);
+    const shadowBatch = await store.prepareLocationUploadBatch(A, { excludeBatchIds: [enabled.clientBatchId] });
+    const shadow = JSON.parse(shadowBatch!.body_json);
+    expect(shadow.rolloutMode).toBe("v2_shadow"); expect(shadow.semanticModeAcknowledgedAt).toBeUndefined();
+    expect(decideLocationRollout("v2_review", shadow.rolloutMode, shadow.semanticModeAcknowledgedAt).emitV2ReviewItems).toBe(false);
+    vi.setSystemTime(T0 + 3_600_000);
+    await runtime.configureLocationIntelligence({ ...bootstrap(A, [place]), locationRolloutMode: "v2_review" });
+    const capture = await store.captureLocationOwnership();
+    await store.persistLocationEvidence([store.evidenceFromExpoLocation(fix(T0 + 3_601_000), capture.context!)], capture);
+    const batch = await store.prepareLocationUploadBatch(A, { excludeBatchIds: [enabled.clientBatchId, shadow.clientBatchId] });
+    const review = JSON.parse(batch!.body_json);
+    expect(review.semanticModeAcknowledgedAt).toBe(new Date(T0 + 3_600_000).toISOString());
+    const decision = decideLocationRollout("v2_review", review.rolloutMode, review.semanticModeAcknowledgedAt);
+    expect(segmentStartedAfterSemanticCutover(eligible.startedAt, decision.semanticCutoverAt!)).toBe(false);
+  });
+
+  it.each(["foreign backend", "different legacy owner"])("does not restore an acknowledgement with %s attribution", async ambiguity => {
+    const { ack } = await semanticBacklog();
+    db.exec("delete from location_store_metadata where key like 'semantic_eligibility:%'");
+    if (ambiguity === "foreign backend") {
+      const binding = (await store.readLocationCaptureBinding())!;
+      db.prepare("update location_store_metadata set value=? where key='capture_binding_v1'").run(JSON.stringify({ ...binding, backend: "https://foreign.invalid" }));
+    } else {
+      db.exec("delete from location_store_metadata where key='capture_binding_v1'");
+      db.prepare("update location_store_metadata set value=? where key='active_account'").run(key(B));
+    }
+    vi.setSystemTime(T0 + 2_400_000); vi.resetModules(); h.tasks.clear();
+    geofence = await import("../geofence"); account = await import("../mobileAccount");
+    store = await import("./store"); runtime = await import("./runtime");
+    await runtime.bindLocationCaptureOwner((await account.readActiveMobileAccount())!);
+    const body = await generatedBody(A, T0 + 2_401_000);
+    expect(body.rolloutMode).toBe("v2_shadow"); expect(body.semanticModeAcknowledgedAt).toBeUndefined();
+    expect(decideLocationRollout("v2_review", body.rolloutMode, body.semanticModeAcknowledgedAt).emitV2ReviewItems).toBe(false);
+    await runtime.configureLocationIntelligence({ ...bootstrap(A, [place]), locationRolloutMode: "v2_review" });
+    const value = db.prepare("select value from location_store_metadata where key='semantic_mode_acknowledged_at'").get()!.value;
+    expect(value).not.toBe(ack);
+    expect(value).toBe(new Date(T0 + 2_400_000).toISOString());
+  });
 });

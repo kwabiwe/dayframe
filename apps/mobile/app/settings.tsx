@@ -1011,7 +1011,7 @@ export default function SettingsScreen() {
   async function enableLocation() {
     if (locationMonitoringAllowed && data) {
       await startGeofences(data.places, { userId: data.user.id, workspaceId: data.workspace.id });
-      await refreshLocationDiagnostics("Place monitoring is enabled.");
+      await refreshLocationDiagnostics();
       return;
     }
 
@@ -1020,7 +1020,7 @@ export default function SettingsScreen() {
     setLocationStatus(status);
     if (status.startsWith("Always allowed") && data) {
       await startGeofences(data.places, { userId: data.user.id, workspaceId: data.workspace.id });
-      await refreshLocationDiagnostics("Place monitoring is enabled.");
+      await refreshLocationDiagnostics();
     } else {
       await refreshLocationDiagnostics(status);
     }
@@ -1082,7 +1082,7 @@ export default function SettingsScreen() {
   function confirmDeleteLocationEvidence() {
     Alert.alert(
       "Delete recent location evidence",
-      "Delete recent exact map evidence from this device and the server? Confirmed entries and saved places will remain.",
+      "Delete recent location samples and their local upload copies from this iPhone, and recent evidence from the server? Confirmed entries, saved and cached places, and summaries will remain.",
       [
         { text: "Cancel", style: "cancel" },
         {
@@ -2110,7 +2110,7 @@ export default function SettingsScreen() {
                 style={styles.healthPreferenceRow}
               >
                 <Text {...mobileTextProps("body")} style={styles.muted}>
-                  Exact map evidence is private and deleted after seven days. Confirmed entries and saved places remain until you delete them.
+                  Location data is private. Local journal samples expire after seven days. Upload copies, cached places and summaries can stay on this iPhone longer, even after upload or signing back in. Signing out clears this account’s local Location data; synced entries and saved places stay in your account.
                 </Text>
                 {([['Evidence upload', locationV2Diagnostics?.uploadAttempt],
                   ['Location processing', locationV2Diagnostics?.replayAttempt]] as const).map(([label, attempt]) => (
@@ -2408,7 +2408,7 @@ function LocationInformationSheet({
                   Dayframe uses background location to suggest visits and journeys. Suggestions go to Review before becoming time entries.
                 </Text>
                 <Text {...mobileTextProps("body")} style={styles.muted}>
-                  Exact map evidence is private and deleted after seven days. Confirmed entries and saved places remain until you delete them.
+                  Location data is private. Local journal samples expire after seven days. Upload copies, cached places and summaries can stay on this iPhone longer, even after upload or signing back in. Signing out clears this account’s local Location data; synced entries and saved places stay in your account.
                 </Text>
                 <Text {...mobileTextProps("body")} style={styles.muted}>
                   iOS can pause or limit background updates, so Dayframe may not capture every movement.
@@ -2743,7 +2743,9 @@ function nextCategoryColor(categories: Category[]): DayframePaletteKey {
 function locationStatusText(diagnostics: LocationVisitDiagnostics) {
   if (diagnostics.foregroundPermission !== "granted") return "Location permission is not enabled.";
   if (diagnostics.backgroundPermission !== "granted") return "Enable Always access to monitor saved places.";
-  return "Place monitoring is enabled.";
+  if (!diagnostics.locationLearningEnabled) return "Location access is allowed. Turn on commute and regular-place learning to capture.";
+  if (diagnostics.geofencingActive && diagnostics.activeMonitorCount > 0) return "Place monitoring is enabled.";
+  return "Location learning is enabled. No saved-place monitors are active.";
 }
 
 function locationMonitorCountText(diagnostics: LocationVisitDiagnostics) {

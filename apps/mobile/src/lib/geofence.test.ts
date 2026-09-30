@@ -93,7 +93,7 @@ vi.mock("./location/runtime", () => runtimeMocks);
 vi.mock("./location/store", () => ({
   captureLocationOwnership: async () => ({ revision: 0, binding: {id:"capture-test", enabled:true, boundAt:"2020-01-01T00:00:00Z"},
     context: {userId:"user-geofence",workspaceId:"workspace-geofence",savedPlaces:{some:()=>true}} }),
-  configureLocationAccount: async () => "workspace-geofence:user-geofence",
+  updateLocationCaptureCatalogue: async () => true,
   getLocationRolloutMode: async () => "v1",
   hasLegacyLocationOwner: async () => true,
   isLocationCaptureSnapshotCurrent: () => true,
@@ -163,6 +163,7 @@ describe("mobile geofence visit candidates", () => {
     vi.clearAllMocks();
     __resetMobileAccountForTests();
     await activateMobileAccount({ userId: "user-geofence", workspaceId: "workspace-geofence" });
+    asyncStore.set("dayframe.location.learning.enabled.v1:account:https%3A%2F%2Fdayframe.test:workspace-geofence:user-geofence", "true");
   });
 
   it("rehydrates unchanged region state without repeatedly re-registering iOS geofences", async () => {
@@ -409,6 +410,7 @@ describe("mobile geofence visit candidates", () => {
 
   it("does not queue commute candidates until commute learning is enabled", async () => {
     await startGeofences([homePlace, place]);
+    asyncStore.set("dayframe.location.learning.enabled.v1:account:https%3A%2F%2Fdayframe.test:workspace-geofence:user-geofence", "false");
     await recordGeofenceTransition("enter", homeRegion, new Date("2026-07-06T07:45:00.000Z"));
     await recordGeofenceTransition("exit", homeRegion, new Date("2026-07-06T08:00:00.000Z"));
     await recordGeofenceTransition("enter", region, new Date("2026-07-06T08:25:00.000Z"));

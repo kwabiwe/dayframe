@@ -3,6 +3,7 @@ import {DatabaseSync} from "node:sqlite";
 import {LOCATION_ENGINE_V2_CONFIG} from "@dayframe/shared";
 const mocks=vi.hoisted(()=>({open:vi.fn(),fetch:vi.fn(),current:vi.fn(()=>true),owner:{userId:"91000000-0000-4000-8000-000000000001",workspaceId:"91000000-0000-4000-8000-000000000002"}}));
 vi.mock("expo-sqlite",()=>({openDatabaseAsync:mocks.open}));
+vi.mock("./captureConsent",()=>({readLocationCaptureConsent:async()=>true}));
 vi.mock("../config",()=>({DAYFRAME_API_BASE:"https://fixture.invalid"}));
 vi.mock("../secure-session",()=>({SecureSessionUnavailableError:class extends Error{},invalidateMobileSessionIfCurrent:vi.fn(),isAuthenticatedSessionSnapshotCurrent:mocks.current,readOwnedAuthenticatedSessionSnapshot:async()=>({status:"authenticated",snapshot:{token:"synthetic"}})}));
 vi.mock("../mobileAccount",()=>({readActiveMobileAccount:async()=>mocks.owner,getActiveMobileAccountSnapshot:()=>mocks.owner,mobileAccountOwnersEqual:(a:any,b:any)=>a?.userId===b?.userId&&a?.workspaceId===b?.workspaceId}));
@@ -20,6 +21,42 @@ afterEach(()=>{db.close();vi.useRealTimers();vi.unstubAllGlobals();});
 async function persistEvidence(items: Parameters<typeof store.persistLocationEvidence>[0]) { return store.persistLocationEvidence(items, await store.captureLocationOwnership()); }
 async function seed(n=1){await persistEvidence(Array.from({length:n},(_,i)=>({clientEvidenceId:`evidence-${i}`,deviceId:"ios-synthetic",algorithmVersion:LOCATION_ENGINE_V2_CONFIG.algorithmVersion,kind:"significant_change" as const,occurredAt:new Date(Date.now()-60_000+i*1000).toISOString(),receivedAt:new Date().toISOString(),timeZone:"Europe/London",latitude:51.5,longitude:-0.1,horizontalAccuracyMeters:10,metadata:{}})));await store.prepareLocationUploadBatch(owner);}
 describe("Location real SQLite drain results",()=>{
+ it.each(["upload", "replay"])("real %s responses retain compatible cutover and acknowledge actual mode transitions",async endpoint=>{
+  vi.useFakeTimers({toFake:["Date"]});const start=Date.parse("2026-09-30T08:00:00Z");vi.setSystemTime(start);
+  let mode:"v2_review"|"v2_enabled"|"v2_shadow"="v2_review",sequence=0;
+  mocks.fetch.mockImplementation(async(url:string,init:RequestInit)=>{
+   if(url.endsWith("/replay"))return endpoint==="upload"?new Response("{}",{status:503}):new Response(JSON.stringify({...replay(),rolloutMode:mode}));
+   const body=JSON.parse(String(init.body));return new Response(JSON.stringify({ok:true,acknowledgedEvidenceIds:body.evidence.map((e:{clientEvidenceId:string})=>e.clientEvidenceId),rolloutMode:mode,warnings:[]}));
+  });
+  const pass=async()=>{
+   if(endpoint==="upload")await persistEvidence([{clientEvidenceId:`mode-${sequence++}`,deviceId:"ios-synthetic",algorithmVersion:LOCATION_ENGINE_V2_CONFIG.algorithmVersion,
+    kind:"significant_change",occurredAt:new Date(Date.now()).toISOString(),receivedAt:new Date().toISOString(),timeZone:"Europe/London",latitude:51.5,longitude:-0.1,horizontalAccuracyMeters:10,metadata:{}}]);
+   await store.syncLocationEvidence({forceReplay:true,forceUploadRetry:true});
+   expect(await store.getLocationRolloutMode()).toBe(mode);
+   return db.prepare("select value from location_store_metadata where key='semantic_mode_acknowledged_at'").get()!.value;
+  };
+  const first=await pass();expect(first).toBe(new Date(start).toISOString());
+  vi.setSystemTime(start+60_000);mode="v2_enabled";expect(await pass()).toBe(first);
+  vi.setSystemTime(start+120_000);mode="v2_shadow";expect(await pass()).toBe("");
+  vi.setSystemTime(start+180_000);mode="v2_review";const fresh=await pass();expect(fresh).toBe(new Date(start+180_000).toISOString());
+  await store.endLocationOwnership(await store.readLocationCaptureBinding());
+  await store.configureLocationAccount({...owner,deviceId:"ios-synthetic",timeZone:"Europe/London",savedPlaces:[],acceptedLearnedPlaces:[]},undefined,true);
+  expect(await store.getLocationRolloutMode()).toBe("v2_review");
+  expect(db.prepare("select value from location_store_metadata where key='semantic_mode_acknowledged_at'").get()!.value).toBe(fresh);
+ });
+ it.each(["pending", "acknowledged"])("journal expiry does not expire %s upload bodies or retained context (P3/P3b)",async state=>{
+  await seed();
+  if(state==="acknowledged")await store.syncLocationEvidence();
+  const body=db.prepare("select body_json from location_upload_outbox limit 1").get()!.body_json;
+  expect(String(body)).toContain('"latitude":51.5');
+  if(state==="acknowledged")expect(db.prepare("select state from location_upload_outbox limit 1").get()!.state).toBe("acknowledged");
+  vi.useFakeTimers({toFake:["Date"]});vi.setSystemTime(Date.now()+40*86_400_000);
+  await store.applyLocationRetention();
+  expect(db.prepare("select count(*) n from location_evidence_journal").get()!.n).toBe(0);
+  expect(db.prepare("select body_json from location_upload_outbox limit 1").get()!.body_json).toBe(body);
+  expect(db.prepare("select count(*) n from location_account_context").get()!.n).toBe(1);
+  expect(db.prepare("select count(*) n from location_engine_state").get()!.n).toBe(1);
+ });
  it("does not attribute legacy unscoped replay errors to the active owner",async()=>{
   db.exec("insert into location_store_metadata(key,value,updated_at) values('last_server_replay_error','old account failure','2026-08-01'),('last_upload_error','older failure','2026-08-01')");
   expect(await store.getLocationStoreDiagnostics()).toMatchObject({lastServerReplayError:null,lastUploadError:null});

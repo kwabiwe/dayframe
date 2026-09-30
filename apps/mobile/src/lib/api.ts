@@ -600,16 +600,27 @@ export async function logout() {
   const unsubscribe = subscribeAuthenticatedSession(() => { sessionChanged = true; });
   const sessionRead = readAuthenticatedSessionSnapshot();
   const ownerRead = readActiveMobileAccount();
+  let finishLocationLogout: (() => void) | undefined;
+  let logoutSucceeded = false;
+  let logoutSessionIsCurrent = () => false;
   try {
     const session = await sessionRead;
     const activeOwner = await ownerRead;
-    const isCurrent = () => session.status === "authenticated"
+    const logoutOwner = session.status === "authenticated" ? session.snapshot.owner ?? activeOwner : activeOwner;
+    if (activeOwner && logoutOwner && !mobileAccountOwnersEqual(activeOwner, logoutOwner)) throw new StaleMobileSessionResponseError();
+    let accountDeactivated = false;
+    const isCurrent = () => (session.status === "authenticated"
       ? isAuthenticatedSessionSnapshotCurrent(session.snapshot)
-      : session.status === "signed_out" && !sessionChanged && mobileAccountOwnersEqual(getActiveMobileAccountSnapshot(), activeOwner);
+      : session.status === "signed_out" && !sessionChanged) &&
+      mobileAccountOwnersEqual(getActiveMobileAccountSnapshot(), accountDeactivated ? null : activeOwner);
+    logoutSessionIsCurrent = isCurrent;
     const requireCurrent = () => { if (!isCurrent()) throw new StaleMobileSessionResponseError(); };
     requireCurrent();
-    await import("./location/runtime").then(({ endLocationCaptureOwnership }) =>
-      endLocationCaptureOwnership("logout", activeOwner ?? undefined, isCurrent));
+    await import("./location/runtime").then(({ beginLocationLogout, endLocationCaptureOwnership }) => {
+      requireCurrent();
+      finishLocationLogout = beginLocationLogout(logoutOwner, isCurrent);
+      return endLocationCaptureOwnership("logout", logoutOwner ?? undefined, isCurrent);
+    });
     requireCurrent();
     const token = session.status === "authenticated" ? session.snapshot.token : null;
     await mobileFetch(`${DAYFRAME_API_BASE}/api/auth/logout`, {
@@ -628,9 +639,16 @@ export async function logout() {
       clearShortcutCatalog();
     }).catch(() => undefined);
     requireCurrent();
-    await clearSessionToken();
     if (activeOwner) await deactivateMobileAccount(activeOwner);
-  } finally { unsubscribe(); }
+    accountDeactivated = true;
+    requireCurrent();
+    await clearSessionToken();
+    logoutSucceeded = true;
+  } finally {
+    unsubscribe();
+    // A failed local cleanup stays fenced until retry or a newer session.
+    if (logoutSucceeded || !logoutSessionIsCurrent()) finishLocationLogout?.();
+  }
 }
 
 export { clearSessionToken, getSessionToken };

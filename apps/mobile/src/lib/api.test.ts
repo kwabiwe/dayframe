@@ -8,7 +8,7 @@ import {
 import { createDeletionCoordinator } from "./historyDeletion";
 
 const locationLifecycle = vi.hoisted(() => ({bind:vi.fn(async()=>true),end:vi.fn(async()=>undefined)}));
-vi.mock("./location/runtime",()=>({bindLocationCaptureOwner:locationLifecycle.bind,endLocationCaptureOwnership:locationLifecycle.end}));
+vi.mock("./location/runtime",()=>({bindLocationCaptureOwner:locationLifecycle.bind,endLocationCaptureOwnership:locationLifecycle.end,beginLocationLogout:()=>()=>undefined}));
 
 const TIMER_STOP_OWNER = { userId: "user-a", workspaceId: "workspace-a" };
 const ACCOUNT_B_OWNER = { userId: "user-b", workspaceId: "workspace-b" };

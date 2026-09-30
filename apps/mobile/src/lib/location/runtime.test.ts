@@ -47,6 +47,7 @@ vi.mock("./store", () => ({
   invalidateLocationCaptureOwnership: () => ++state.revision,
   locationCaptureRevision: () => state.revision,
   isLocationCaptureSnapshotCurrent: () => Boolean(state.binding?.enabled && state.context),
+  isLocationCaptureAdmissionSuspended: () => false,
   getLocationRolloutMode: async () => state.mode,
   persistLocationEvidence: async (items: unknown[]) => ({ insertedCount: items.length }),
   processPendingLocationEvidence: mocks.processPendingLocationEvidence,
