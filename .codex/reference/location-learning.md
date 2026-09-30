@@ -12,6 +12,8 @@ Evidence sources are Expo standard locations and geofences plus the local `dayfr
 
 Bootstrap must consult the existing logout/session fence before mobile-account activation, including during final account-removal I/O. Keep explicit consent intent separate from obsolete capture work: an authorised owner-scoped off write survives logout/401 in the lifecycle lane, and a later authorised on write wins. A disabled binding cannot be enabled by bootstrap after failed preference persistence. Durable off must attempt OS teardown even when a subsequent SQLite step fails; off/disabled callbacks and bootstrap reconcile monitoring without deleting accepted work or semantic eligibility. Serialise those stops before replacement starts and count/report OS failures. Immediate OS removal after process termination or OS failure remains unverified.
 
+Failed logout recovery separates active API request gating from unresolved Location cleanup: only fresh still-current bootstraps recover after failure; earlier invalidated responses stay stale and capture stays closed. Filling a legacy owner without replacing the token/generation cannot release cleanup. Stored consent and effective capture are separate Settings diagnostics. Inactive activation exposes explicit Retry capture via the existing enable path; bootstrap cannot repair it by granting capture from stored true. Recheck capture/consent after source-start awaits before reporting on, and refresh effective state after failure.
+
 Initial capture profile:
 
 - `distanceInterval: 75m`; this is a movement filter, never a dwell timer.

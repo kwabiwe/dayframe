@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const asyncStore = vi.hoisted(() => new Map<string, string>());
 const secureStore = vi.hoisted(() => new Map<string, string>());
 const runtimeMocks = vi.hoisted(() => ({
+  isLocationLogoutCurrent: () => false,
   enableLocationCaptureOwnership: vi.fn(async () => {
     asyncStore.set("dayframe.location.learning.enabled.v1:account:https%3A%2F%2Fdayframe.test:workspace-geofence:user-geofence", "true");
     return true;

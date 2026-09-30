@@ -122,6 +122,7 @@ async function signInThroughApi(owner: typeof A, places: unknown[] = [], enable 
 }
 
 beforeEach(async () => {
+  vi.mocked((await import("expo-location")).hasStartedLocationUpdatesAsync).mockResolvedValue(true);
   h.beforeRun = null; h.cleanupFailure = false; h.onRemove = null; h.onSet = null;
   vi.resetModules(); h.tasks.clear(); h.asyncStore.clear(); h.secure.clear(); h.nativeSignals = []; h.nativeCalls.length = 0; h.dbs.clear(); calls.length = 0;
   vi.useFakeTimers({ toFake: ["Date"] }); vi.setSystemTime(T0);
@@ -718,5 +719,199 @@ describe("opt-out OS lane reconciliation controls", () => {
     expect(osState()).toEqual(stopped);
     expect((await store.readLocationCaptureBinding())?.enabled).toBe(false);
     expect(h.asyncStore.get(consentKey())).toBe("false");
+  });
+});
+
+// Claude's O-1/O-2 observations become recovery contracts, using the same real
+// API/session/account/runtime/SQLite path as Dashboard and Settings.
+describe("failed Location operation recovery", () => {
+  const responseFor = (owner = A) => json({ ...(bootstrap(owner, [place]) as object), entries: [], categories: [], reviewItems: [] });
+  beforeEach(async () => {
+    // Realistic start/stop projection for the recovery assertions. Legacy
+    // fixtures elsewhere clear the call log and intentionally report started.
+    vi.mocked((await import("expo-location")).hasStartedLocationUpdatesAsync).mockImplementation(async () => osState().learning);
+  });
+
+  it.each([["sqlite", false], ["native", false], ["sqlite", true], ["native", true]] as const)(
+    "failed logout permits fresh screen reads but keeps capture closed (%s, legacy token: %s)", async (failure, legacy) => {
+      vi.stubEnv("VITEST", ""); // include the real Review bootstrap projection
+      await signInThroughApi(A, [place]);
+      if (legacy) await session.setSessionToken("legacy-ownerless-token");
+      await learningTask()({ data: { locations: [fix(T0 + 1_000)] }, error: null });
+      if (failure === "sqlite") h.beforeRun = async sql => { if (sql.startsWith("delete from location_upload_outbox")) throw new Error("Synthetic SQLite failure"); };
+      else h.cleanupFailure = true;
+      await expect(api.logout()).rejects.toThrow(failure === "sqlite" ? "Synthetic SQLite failure" : "Local Location cleanup failed");
+      h.beforeRun = null; h.cleanupFailure = false;
+      const binding = await store.readLocationCaptureBinding(), retained = rows();
+      const from = h.nativeCalls.length;
+      routes["/api/bootstrap"] = () => responseFor();
+      await dashboardBootstrap();
+      await dashboardBootstrap(); // a subsequent Settings/Dashboard refresh also works
+      expect(await store.readLocationCaptureBinding()).toEqual(binding);
+      expect(await geofence.getLocationVisitDiagnostics()).toMatchObject({ locationLearningActive: false, locationLearningCaptureState: "logout_cleanup" });
+      await learningTask()({ data: { locations: [fix(T0 + 5_000)] }, error: null });
+      await settle();
+      expect(await session.getSessionToken()).not.toBeNull();
+      expect(rows()).toEqual(retained);
+      expect(h.nativeCalls.slice(from).filter(c => c.startsWith("expo:start") || c === "startMonitoring")).toEqual([]);
+      // Fresh reads must not release the unresolved capture cleanup fence,
+      // including legacy owner binding during the refresh.
+      expect(await geofence.setLocationLearningEnabled(true, [place], A)).toBe("Location account changed.");
+      await api.logout(); await settle();
+      expect(counts()).toEqual([0, 0, 0, 0, 0]);
+      expect(await session.getSessionToken()).toBeNull();
+    }
+  );
+
+  it("failed logout never revives responses begun before or during its active request", async () => {
+    await signInThroughApi(A, [place]);
+    const response = deferred(), fetched = deferred(), cleanup = deferred(), entered = deferred();
+    routes["/api/bootstrap"] = async () => { fetched.resolve(); await response.promise; return responseFor(); };
+    const before = api.fetchBootstrap().then(() => "applied", (e: Error) => e.name);
+    await fetched.promise;
+    h.beforeRun = async sql => { if (sql.startsWith("delete from location_upload_outbox")) { entered.resolve(); await cleanup.promise; throw new Error("Synthetic SQLite failure"); } };
+    const logout = api.logout().catch((e: Error) => e.message);
+    await entered.promise;
+    const during = api.fetchBootstrap().then(() => "applied", (e: Error) => e.name);
+    cleanup.resolve();
+    expect(await logout).toContain("Synthetic SQLite failure"); h.beforeRun = null;
+    response.resolve();
+    expect(await before).toBe("StaleMobileSessionResponseError");
+    expect(await during).toBe("StaleMobileSessionResponseError");
+    routes["/api/bootstrap"] = () => responseFor();
+    await dashboardBootstrap();
+    expect(await session.getSessionToken()).not.toBeNull();
+  });
+
+  it.each([B, A])("failed old logout cannot gate a genuinely newer $userId session", async next => {
+    await signInThroughApi(A, [place]);
+    h.cleanupFailure = true;
+    await expect(api.logout()).rejects.toThrow("Local Location cleanup failed");
+    h.cleanupFailure = false;
+    vi.setSystemTime(T0 + 60_000); await signInThroughApi(next, [place]);
+    routes["/api/bootstrap"] = () => responseFor(next);
+    await dashboardBootstrap();
+    await learningTask()({ data: { locations: [fix(T0 + 61_000)] }, error: null });
+    expect(await account.readActiveMobileAccount()).toEqual(next);
+    expect(osState()).toEqual(running);
+    expect(rows()).toEqual([expect.objectContaining({ k: key(next) })]);
+  });
+
+  it.each([false, true])("interrupted opt-in stays honestly inactive through bootstrap and one explicit retry works (restart: %s)", async restart => {
+    await signInThroughApi(A, [place], false);
+    h.beforeRun = async sql => { if (sql.includes("insert into location_account_context")) throw new Error("Synthetic activation failure"); };
+    await expect(geofence.setLocationLearningEnabled(true, [place], A)).rejects.toThrow("Synthetic activation failure");
+    h.beforeRun = null;
+    expect(h.asyncStore.get(consentKey())).toBe("true");
+    expect((await store.readLocationCaptureBinding())?.enabled).toBe(false);
+    if (restart) {
+      vi.resetModules(); h.tasks.clear();
+      geofence = await import("./geofence"); account = await import("./mobileAccount"); session = await import("./secure-session");
+      store = await import("./location/store"); runtime = await import("./location/runtime"); api = await import("./api");
+    }
+    routes["/api/bootstrap"] = () => responseFor();
+    await dashboardBootstrap();
+    await learningTask()({ data: { locations: [fix(T0 + 1_000)] }, error: null });
+    const inactive = await geofence.getLocationVisitDiagnostics();
+    expect(inactive).toMatchObject({ locationLearningEnabled: true, locationLearningActive: false, locationLearningCaptureState: "inactive" });
+    expect(osState()).toEqual(stopped);
+    expect(rows()).toEqual([]);
+    expect(h.asyncStore.get(consentKey())).toBe("true");
+    // This is the existing Settings retry path; no artificial off/on cycle.
+    expect(await geofence.setLocationLearningEnabled(true, [place], A)).toContain("is on");
+    expect(await geofence.getLocationVisitDiagnostics()).toMatchObject({ locationLearningEnabled: true, locationLearningActive: true, locationLearningCaptureState: "active" });
+    await learningTask()({ data: { locations: [fix(T0 + 5_000)] }, error: null });
+    expect(rows()).toHaveLength(1);
+    expect(osState()).toEqual(running);
+  });
+
+  it("an opt-in whose OS start failed is inactive and can be explicitly retried", async () => {
+    await signInThroughApi(A, [place], false);
+    const location = await import("expo-location");
+    vi.mocked(location.startLocationUpdatesAsync).mockRejectedValueOnce(new Error("Synthetic OS start failure"));
+    await expect(geofence.setLocationLearningEnabled(true, [place], A)).rejects.toThrow("Synthetic OS start failure");
+    expect(await geofence.getLocationVisitDiagnostics()).toMatchObject({ locationLearningEnabled: true, locationLearningActive: false, locationLearningCaptureState: "inactive" });
+    expect(await geofence.setLocationLearningEnabled(true, [place], A)).toContain("is on");
+    expect(await geofence.getLocationVisitDiagnostics()).toMatchObject({ locationLearningActive: true, locationLearningCaptureState: "active" });
+  });
+
+  it("a later authorised off cancels an interrupted on without losing the off decision", async () => {
+    await signInThroughApi(A, [place], false);
+    const blocked = deferred(), entered = deferred();
+    h.onSet = async (k, v) => { if (k === consentKey() && v === "true") { entered.resolve(); await blocked.promise; } };
+    const on = geofence.setLocationLearningEnabled(true, [place], A);
+    await entered.promise;
+    const off = geofence.setLocationLearningEnabled(false, [place], A);
+    // Acceptance invalidates capture synchronously, before queued persistence.
+    const revision = store.locationCaptureRevision();
+    for (let i = 0; i < 100 && revision === store.locationCaptureRevision(); i++) await Promise.resolve();
+    expect(store.locationCaptureRevision()).not.toBe(revision);
+    blocked.resolve();
+    expect(await on).toBe("Location account changed.");
+    expect(await off).toContain("paused"); h.onSet = null;
+    expect(h.asyncStore.get(consentKey())).toBe("false");
+    expect(await geofence.getLocationVisitDiagnostics()).toMatchObject({ locationLearningEnabled: false, locationLearningActive: false, locationLearningCaptureState: "off" });
+    expect(osState()).toEqual(stopped);
+  });
+
+  it("an opt-in overtaken during its OS await cannot report working capture after off", async () => {
+    await signInThroughApi(A, [place], false);
+    const blocked = deferred(), entered = deferred();
+    const location = await import("expo-location");
+    vi.mocked(location.startLocationUpdatesAsync).mockImplementationOnce(async () => { entered.resolve(); await blocked.promise; h.nativeCalls.push("expo:startLocationUpdates"); });
+    const on = geofence.setLocationLearningEnabled(true, [place], A);
+    await entered.promise;
+    const revision = store.locationCaptureRevision();
+    const off = geofence.setLocationLearningEnabled(false, [place], A);
+    for (let i = 0; i < 100 && revision === store.locationCaptureRevision(); i++) await Promise.resolve();
+    expect(store.locationCaptureRevision()).not.toBe(revision);
+    blocked.resolve();
+    expect(await on).toBe("Location account changed.");
+    expect(await off).toContain("paused");
+    expect(await geofence.getLocationVisitDiagnostics()).toMatchObject({ locationLearningEnabled: false, locationLearningActive: false, locationLearningCaptureState: "off" });
+    expect(osState()).toEqual(stopped);
+  });
+
+  it.each(["logout", "401", "B", "newer A"])("an old opt-in cannot claim success or affect the lifetime after %s", async event => {
+    await signInThroughApi(A, [place], false);
+    const blocked = deferred(), entered = deferred();
+    const location = await import("expo-location");
+    vi.mocked(location.startLocationUpdatesAsync).mockImplementationOnce(async () => { entered.resolve(); await blocked.promise; h.nativeCalls.push("expo:startLocationUpdates"); });
+    const on = geofence.setLocationLearningEnabled(true, [place], A);
+    await entered.promise;
+    const revision = store.locationCaptureRevision();
+    const logout = event === "logout" ? api.logout() : null;
+    if (event === "401" || event === "newer A") {
+      routes["/api/timer-state"] = () => json({ error: "unauthorized" }, 401);
+      await expect(api.fetchTimerState()).rejects.toMatchObject({ name: "AuthRequiredError" });
+    }
+    const next = event === "B" ? B : A;
+    let login: Promise<unknown> | null = null;
+    if (event === "B" || event === "newer A") {
+      const published = deferred();
+      const unsubscribe = session.subscribeAuthenticatedSession(() => { published.resolve(); });
+      vi.setSystemTime(T0 + 60_000);
+      routes["/api/auth/login"] = () => json({ token: "replacement-token", user: { id: next.userId }, workspace: { id: next.workspaceId } });
+      login = api.login("x@example.test", "synthetic");
+      await published.promise; unsubscribe();
+    }
+    for (let i = 0; i < 100 && revision === store.locationCaptureRevision(); i++) await Promise.resolve();
+    expect(store.locationCaptureRevision()).not.toBe(revision);
+    blocked.resolve();
+    expect(await on).toBe("Location account changed.");
+    if (logout) await logout;
+    if (login) {
+      await login;
+      await runtime.configureLocationIntelligence(bootstrap(next, [place]));
+      expect(await geofence.setLocationLearningEnabled(true, [place], next)).toContain("is on");
+      await learningTask()({ data: { locations: [fix(T0 + 61_000)] }, error: null });
+      expect(rows()).toEqual([expect.objectContaining({ k: key(next) })]);
+      expect(osState()).toEqual(running);
+    } else {
+      await settle();
+      expect(await session.getSessionToken()).toBeNull();
+      expect(osState()).toEqual(stopped);
+      expect(rows()).toEqual([]);
+    }
   });
 });

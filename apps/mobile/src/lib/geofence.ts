@@ -20,7 +20,7 @@ import { subscribeMobileSignedOut } from "./mobileSessionTransition";
 import { captureLocationOwnership, updateLocationCaptureCatalogue, getLocationRolloutMode, hasLegacyLocationOwner, isLocationCaptureSnapshotCurrent,
   locationCaptureRevision, recordLocationCaptureDiscard, type LocationCaptureSnapshot } from "./location/store";
 import { bindLocationCaptureOwner, enableLocationCaptureOwnership, endLocationCaptureOwnership, locationCaptureAccountChanged,
-  locationCaptureSessionSignedOut, stopUnownedLocationCapture, withLocationCaptureLifecycle } from "./location/runtime";
+  isLocationLogoutCurrent, locationCaptureSessionSignedOut, stopUnownedLocationCapture, withLocationCaptureLifecycle } from "./location/runtime";
 
 export const DAYFRAME_GEOFENCE_TASK = "DAYFRAME_GEOFENCE_TASK";
 export const DAYFRAME_LOCATION_LEARNING_TASK = "DAYFRAME_LOCATION_LEARNING_TASK";
@@ -66,6 +66,8 @@ export type LocationVisitDiagnostics = {
   };
   locationLearningEnabled?: boolean;
   locationLearningActive?: boolean;
+  // Stored consent is not proof that the current binding/OS start completed.
+  locationLearningCaptureState?: "off" | "inactive" | "active" | "logout_cleanup";
   lastLearningSampleAt?: string;
   lastLearnedPlaceCandidate?: {
     candidateName: string;
@@ -428,13 +430,16 @@ export async function setLocationLearningEnabled(
   if (revision !== locationCaptureRevision() || !mobileAccountOwnersEqual(getActiveMobileAccountSnapshot(), owner)) return "Location account changed.";
   const capture = await refreshCaptureCatalogue(places, owner);
   if (capture.revision !== revision || !mobileAccountOwnersEqual(capture.context, owner)) return "Location account changed.";
-  await withLocationCaptureLifecycle(async () => {
-    await startLocationLearningUnsafe(places, capture);
+  const started = await withLocationCaptureLifecycle(async () => {
+    if (!await startLocationLearningUnsafe(places, capture)) return false;
     await startGeofencesUnsafe(places, capture);
     if (isLocationCaptureSnapshotCurrent(capture)) {
       await import("./location/runtime").then(({ startNativeLocationIntelligence }) => startNativeLocationIntelligence());
     }
+    return isLocationCaptureSnapshotCurrent(capture) && await getLocationLearningEnabled() &&
+      isLocationCaptureSnapshotCurrent(capture);
   });
+  if (!started || !isLocationCaptureSnapshotCurrent(capture)) return "Location account changed.";
   return "Commute and regular-place learning is on. Suggestions stay in Review.";
 }
 
@@ -938,6 +943,8 @@ export async function recordGeofenceTransition(
 }
 
 export async function getLocationVisitDiagnostics(): Promise<LocationVisitDiagnostics> {
+  const owner = await readActiveMobileAccount();
+  const captured = captureLocationOwnership();
   const [stored, foreground, background, geofencingActive, learningEnabled, learningActive] = await Promise.all([
     readLocationDiagnostics(),
     Location.getForegroundPermissionsAsync().catch(() => null),
@@ -948,6 +955,12 @@ export async function getLocationVisitDiagnostics(): Promise<LocationVisitDiagno
   ]);
   const foregroundPermission = permissionLabel(foreground?.status);
   const backgroundPermission = permissionLabel(background?.status);
+  const capture = await captured;
+  const consent = learningEnabled && owner && await readLocationCaptureConsent(owner);
+  const consentCurrent = Boolean(consent && mobileAccountOwnersEqual(getActiveMobileAccountSnapshot(), owner));
+  const cleanupPending = Boolean(owner && isLocationLogoutCurrent(owner));
+  const captureActive = consentCurrent && !cleanupPending && isLocationCaptureSnapshotCurrent(capture) && learningActive &&
+    foregroundPermission === "granted" && backgroundPermission === "granted";
 
   return {
     foregroundPermission: foregroundPermission === "unknown" ? stored.foregroundPermission : foregroundPermission,
@@ -965,8 +978,9 @@ export async function getLocationVisitDiagnostics(): Promise<LocationVisitDiagno
     lastTransitionEvidence: stored.lastTransitionEvidence,
     transitionEvidenceHistory: stored.transitionEvidenceHistory,
     lastQueuedVisitCandidate: stored.lastQueuedVisitCandidate,
-    locationLearningEnabled: learningEnabled,
-    locationLearningActive: learningEnabled && learningActive,
+    locationLearningEnabled: consentCurrent,
+    locationLearningActive: captureActive,
+    locationLearningCaptureState: cleanupPending ? "logout_cleanup" : !consentCurrent ? "off" : captureActive ? "active" : "inactive",
     lastLearningSampleAt: stored.lastLearningSampleAt,
     lastLearnedPlaceCandidate: stored.lastLearnedPlaceCandidate,
     lastCommuteCandidate: stored.lastCommuteCandidate,
