@@ -245,6 +245,12 @@ Physical iPhone/TestFlight results must be recorded individually as `PASS`, `FAI
 
 For the synthetic journey specifically verify two sports stays, Home not nearby school, the intermediate stop, two separated journeys, `MUM_HOME -> CHURCH -> MUM_HOME`, visible uncertainty, and identical canonical mobile/web segments. Battery evidence must list device, iOS, build, start/end battery, duration, approximate movement, foreground/background mix, and comparison baseline if one exists.
 
+### Location capture ownership checks
+
+For a JS-only ownership change, run focused `ownership.sqlite.test.ts`, `runtime.test.ts`, `store.sqlite.test.ts`, geofence/API, account/session, upload-ownership, Review and Health lifecycle coverage, plus `npm run validate:location-v2-sqlite`. Require S1–S6, upgrade idempotency, A→B→A, mixed source times, pre-binding/straddling Visits, opt-out, native-drain/SQLite/teardown interleavings, stale screen catalogue refresh and same-owner cold/headless control. Reproduce the saved defect probe against the pinned base before implementation.
+
+A final broad pass covers lint, workspace typechecks/tests, docs and `git diff --check`; report reused dependencies distinctly from a clean install and report the existing mobile `expo-symbols` resolution limitation if applicable. User scope may prohibit builds, hosted access and CI polling; record them as NOT RUN rather than widening this client fix to server/DB/scalability matrices. Native changes require separate escalation. Physical acceptance remains a later authorised signed-staging job with two synthetic accounts, verified identities and count/timestamp evidence only. Verify explicit logout loss warning, 401, signed-out interval, B consent/cache isolation, offline A, restart, late callbacks and Reduce Motion/native Alert accessibility; mocks cannot satisfy this gate.
+
 ## Calendar And Review UI
 
 Required checks:

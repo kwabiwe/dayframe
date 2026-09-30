@@ -3,6 +3,15 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const asyncStore = vi.hoisted(() => new Map<string, string>());
 const secureStore = vi.hoisted(() => new Map<string, string>());
 const runtimeMocks = vi.hoisted(() => ({
+  enableLocationCaptureOwnership: vi.fn(async () => {
+    asyncStore.set("dayframe.location.learning.enabled.v1:account:https%3A%2F%2Fdayframe.test:workspace-geofence:user-geofence", "true");
+    return true;
+  }),
+  stopUnownedLocationCapture: vi.fn(async () => undefined),
+  endLocationCaptureOwnership: vi.fn(async () => undefined),
+  locationCaptureAccountChanged: vi.fn(async () => undefined),
+  locationCaptureSessionSignedOut: vi.fn(async () => undefined),
+  withLocationCaptureLifecycle: (operation: () => Promise<unknown>) => operation(),
   startNativeLocationIntelligence: vi.fn(() => Promise.resolve({ enabled: true })),
   stopNativeLocationIntelligence: vi.fn(() => Promise.resolve({ enabled: false }))
 }));
@@ -32,6 +41,7 @@ const locationMocks = vi.hoisted(() => ({
 vi.mock("@react-native-async-storage/async-storage", () => ({
   default: {
     getItem: vi.fn((key: string) => Promise.resolve(asyncStore.get(key) ?? null)),
+    removeItem: vi.fn(async (key: string) => { asyncStore.delete(key); }),
     setItem: vi.fn((key: string, value: string) => {
       asyncStore.set(key, value);
       return Promise.resolve();
@@ -78,6 +88,17 @@ vi.mock("./config", () => ({
 }));
 
 vi.mock("./location/runtime", () => runtimeMocks);
+// These legacy classifier fixtures intentionally isolate the capture owner;
+// real account/task/SQLite admission is exercised in ownership.sqlite.test.ts.
+vi.mock("./location/store", () => ({
+  captureLocationOwnership: async () => ({ revision: 0, binding: {id:"capture-test", enabled:true, boundAt:"2020-01-01T00:00:00Z"},
+    context: {userId:"user-geofence",workspaceId:"workspace-geofence",savedPlaces:{some:()=>true}} }),
+  configureLocationAccount: async () => "workspace-geofence:user-geofence",
+  getLocationRolloutMode: async () => "v1",
+  hasLegacyLocationOwner: async () => true,
+  isLocationCaptureSnapshotCurrent: () => true,
+  locationCaptureRevision: () => 0
+}));
 
 const {
   LOCATION_VISIT_DWELL_THRESHOLD_MINUTES,
@@ -151,7 +172,7 @@ describe("mobile geofence visit candidates", () => {
     expect(locationMocks.startGeofencingAsync).toHaveBeenCalledOnce();
     expect(locationMocks.startGeofencingAsync).toHaveBeenCalledWith(
       "DAYFRAME_GEOFENCE_TASK",
-      [expect.objectContaining({ identifier: place.id, radius: place.radiusMeters })]
+      [expect.objectContaining({ identifier: `capture-test:${place.id}`, radius: place.radiusMeters })]
     );
   });
 

@@ -36,11 +36,13 @@ import {
   isAuthenticatedSessionSnapshotCurrent,
   readAuthenticatedSessionSnapshot,
   readOwnedAuthenticatedSessionSnapshot,
-  setSessionToken
+  setSessionToken,
+  subscribeAuthenticatedSession
 } from "./secure-session";
 import {
   activateMobileAccount,
   deactivateMobileAccount,
+  getActiveMobileAccountSnapshot,
   mobileAccountKey,
   mobileAccountOwnersEqual,
   readActiveMobileAccount,
@@ -591,38 +593,44 @@ export async function signup(email: string, password: string, name?: string, wor
 }
 
 export async function logout() {
-  // Abort request signals before the first awaited logout operation. Native
-  // task cleanup continues asynchronously, but queued mutations remain owned
-  // by the account until the normal durable-work cleanup boundary runs.
   void endAllTimerBackgroundExecution("logout");
-  const activeOwner = await readActiveMobileAccount();
-  const token = await getSessionToken();
-  await mobileFetch(`${DAYFRAME_API_BASE}/api/auth/logout`, {
-    method: "POST",
-    headers: token ? { Authorization: `Bearer ${token}` } : {}
-  }).catch(() => undefined);
-  await import("./location/runtime")
-    .then(async ({ clearNativeLocationSignals, stopNativeLocationIntelligence }) => {
-      await stopNativeLocationIntelligence();
-      await clearNativeLocationSignals();
-    })
-    .catch(() => undefined);
-  await import("./location/store")
-    .then(({ clearActiveLocationAccountData }) => clearActiveLocationAccountData())
-    .catch(() => undefined);
-  await import("./reviewSyncStore")
-    .then(({ clearActiveReviewAccountData }) => clearActiveReviewAccountData())
-    .catch(() => undefined);
-  await import("./shortcuts")
-    .then(async ({ clearActiveOwnerNativeShortcutQueue, clearShortcutCatalog }) => {
-      if (activeOwner) {
-        await clearActiveOwnerNativeShortcutQueue(activeOwner).catch(() => 0);
-      }
+  // Capture the existing session authority before any await. A delayed logout
+  // must not stop capture or clear a replacement login (including A -> B -> A).
+  let sessionChanged = false;
+  const unsubscribe = subscribeAuthenticatedSession(() => { sessionChanged = true; });
+  const sessionRead = readAuthenticatedSessionSnapshot();
+  const ownerRead = readActiveMobileAccount();
+  try {
+    const session = await sessionRead;
+    const activeOwner = await ownerRead;
+    const isCurrent = () => session.status === "authenticated"
+      ? isAuthenticatedSessionSnapshotCurrent(session.snapshot)
+      : session.status === "signed_out" && !sessionChanged && mobileAccountOwnersEqual(getActiveMobileAccountSnapshot(), activeOwner);
+    const requireCurrent = () => { if (!isCurrent()) throw new StaleMobileSessionResponseError(); };
+    requireCurrent();
+    await import("./location/runtime").then(({ endLocationCaptureOwnership }) =>
+      endLocationCaptureOwnership("logout", activeOwner ?? undefined, isCurrent));
+    requireCurrent();
+    const token = session.status === "authenticated" ? session.snapshot.token : null;
+    await mobileFetch(`${DAYFRAME_API_BASE}/api/auth/logout`, {
+      method: "POST", headers: token ? { Authorization: `Bearer ${token}` } : {}
+    }).catch(() => undefined);
+    requireCurrent();
+    await import("./reviewSyncStore").then(({ clearActiveReviewAccountData }) => {
+      requireCurrent();
+      return clearActiveReviewAccountData();
+    }).catch(() => undefined);
+    requireCurrent();
+    await import("./shortcuts").then(async ({ clearActiveOwnerNativeShortcutQueue, clearShortcutCatalog }) => {
+      requireCurrent();
+      if (activeOwner) await clearActiveOwnerNativeShortcutQueue(activeOwner).catch(() => 0);
+      requireCurrent();
       clearShortcutCatalog();
-    })
-    .catch(() => undefined);
-  await clearSessionToken();
-  await deactivateMobileAccount();
+    }).catch(() => undefined);
+    requireCurrent();
+    await clearSessionToken();
+    if (activeOwner) await deactivateMobileAccount(activeOwner);
+  } finally { unsubscribe(); }
 }
 
 export { clearSessionToken, getSessionToken };
@@ -2225,6 +2233,8 @@ async function authenticate(path: string, body: Record<string, unknown>): Promis
   };
   await setSessionToken(payload.token, owner);
   await activateMobileAccount(owner);
+  await import("./location/runtime")
+    .then(({ bindLocationCaptureOwner }) => bindLocationCaptureOwner(owner));
   const reviewStore = await reviewSyncStore();
   if (reviewStore) {
     await reviewStore.activateReviewAccount({

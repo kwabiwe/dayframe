@@ -1,11 +1,11 @@
 import {afterEach,beforeEach,describe,expect,it,vi} from "vitest";
 import {DatabaseSync} from "node:sqlite";
 import {LOCATION_ENGINE_V2_CONFIG} from "@dayframe/shared";
-const mocks=vi.hoisted(()=>({open:vi.fn(),fetch:vi.fn(),current:vi.fn(()=>true)}));
+const mocks=vi.hoisted(()=>({open:vi.fn(),fetch:vi.fn(),current:vi.fn(()=>true),owner:{userId:"91000000-0000-4000-8000-000000000001",workspaceId:"91000000-0000-4000-8000-000000000002"}}));
 vi.mock("expo-sqlite",()=>({openDatabaseAsync:mocks.open}));
 vi.mock("../config",()=>({DAYFRAME_API_BASE:"https://fixture.invalid"}));
 vi.mock("../secure-session",()=>({SecureSessionUnavailableError:class extends Error{},invalidateMobileSessionIfCurrent:vi.fn(),isAuthenticatedSessionSnapshotCurrent:mocks.current,readOwnedAuthenticatedSessionSnapshot:async()=>({status:"authenticated",snapshot:{token:"synthetic"}})}));
-vi.mock("../mobileAccount",()=>({mobileAccountOwnersEqual:(a:any,b:any)=>a?.userId===b?.userId&&a?.workspaceId===b?.workspaceId}));
+vi.mock("../mobileAccount",()=>({readActiveMobileAccount:async()=>mocks.owner,getActiveMobileAccountSnapshot:()=>mocks.owner,mobileAccountOwnersEqual:(a:any,b:any)=>a?.userId===b?.userId&&a?.workspaceId===b?.workspaceId}));
 
 const owner={userId:"91000000-0000-4000-8000-000000000001",workspaceId:"91000000-0000-4000-8000-000000000002"};
 let db:DatabaseSync,store:typeof import("./store");
@@ -13,11 +13,12 @@ function adapter(){const value={execAsync:async(sql:string)=>{db.exec(sql);},get
 const replay=()=>({ok:true,clientAcknowledgedMode:false,replayVersion:LOCATION_ENGINE_V2_CONFIG.algorithmVersion,rolloutMode:"v2_shadow",finalisedSegmentCount:0,semanticSegmentCount:0,warnings:[]});
 beforeEach(async()=>{
  vi.resetModules();vi.clearAllMocks();vi.stubGlobal("fetch",mocks.fetch);mocks.current.mockReturnValue(true);db=new DatabaseSync(":memory:");mocks.open.mockResolvedValue(adapter());
- store=await import("./store");await store.configureLocationAccount({...owner,deviceId:"ios-synthetic",timeZone:"Europe/London",savedPlaces:[],acceptedLearnedPlaces:[]},"v2_shadow");
+ mocks.owner={...owner};vi.useFakeTimers({toFake:["Date"]});vi.setSystemTime(new Date("2026-01-01T00:00:00Z"));store=await import("./store");await store.configureLocationAccount({...owner,deviceId:"ios-synthetic",timeZone:"Europe/London",savedPlaces:[],acceptedLearnedPlaces:[]},"v2_shadow",true);vi.useRealTimers();
  mocks.fetch.mockImplementation(async(url:string,init:RequestInit)=>{const batch=JSON.parse(init.body as string);return {ok:true,status:200,json:async()=>url.endsWith("/replay")?replay():{ok:true,acknowledgedEvidenceIds:batch.evidence.map((e:{clientEvidenceId:string})=>e.clientEvidenceId),replayVersion:LOCATION_ENGINE_V2_CONFIG.algorithmVersion,rolloutMode:"v2_shadow",warnings:[]}};});
 });
-afterEach(()=>{db.close();vi.unstubAllGlobals();});
-async function seed(n=1){await store.persistLocationEvidence(Array.from({length:n},(_,i)=>({clientEvidenceId:`evidence-${i}`,deviceId:"ios-synthetic",algorithmVersion:LOCATION_ENGINE_V2_CONFIG.algorithmVersion,kind:"significant_change" as const,occurredAt:new Date(Date.now()-60_000+i*1000).toISOString(),receivedAt:new Date().toISOString(),timeZone:"Europe/London",latitude:51.5,longitude:-0.1,horizontalAccuracyMeters:10,metadata:{}})));await store.prepareLocationUploadBatch(owner);}
+afterEach(()=>{db.close();vi.useRealTimers();vi.unstubAllGlobals();});
+async function persistEvidence(items: Parameters<typeof store.persistLocationEvidence>[0]) { return store.persistLocationEvidence(items, await store.captureLocationOwnership()); }
+async function seed(n=1){await persistEvidence(Array.from({length:n},(_,i)=>({clientEvidenceId:`evidence-${i}`,deviceId:"ios-synthetic",algorithmVersion:LOCATION_ENGINE_V2_CONFIG.algorithmVersion,kind:"significant_change" as const,occurredAt:new Date(Date.now()-60_000+i*1000).toISOString(),receivedAt:new Date().toISOString(),timeZone:"Europe/London",latitude:51.5,longitude:-0.1,horizontalAccuracyMeters:10,metadata:{}})));await store.prepareLocationUploadBatch(owner);}
 describe("Location real SQLite drain results",()=>{
  it("does not attribute legacy unscoped replay errors to the active owner",async()=>{
   db.exec("insert into location_store_metadata(key,value,updated_at) values('last_server_replay_error','old account failure','2026-08-01'),('last_upload_error','older failure','2026-08-01')");
@@ -104,6 +105,7 @@ describe("Location reliability diagnostics on real SQLite",()=>{
   expect(success.lastSuccessAt).toBe(success.completedAt);
   mocks.fetch.mockResolvedValue(failure());await store.syncLocationEvidence({forceReplay:true});
   expect((await store.getLocationStoreDiagnostics()).replayAttempt).toMatchObject({outcome:"failed",lastSuccessAt:success.completedAt});
+  mocks.owner={...owner,userId:"another-owner"};
   await store.configureLocationAccount({...owner,userId:"another-owner",deviceId:"ios-synthetic",timeZone:"Europe/London",savedPlaces:[],acceptedLearnedPlaces:[]});
   expect((await store.getLocationStoreDiagnostics()).replayAttempt).toBeNull();
  });
@@ -116,7 +118,7 @@ describe("Location reliability diagnostics on real SQLite",()=>{
  it("seven batches settle across finite maximum-five passes without changing IDs",async()=>{
   for(let i=0;i<7;i++){
    const count=i===6?41:44;
-   await store.persistLocationEvidence(Array.from({length:count},(_,j)=>({clientEvidenceId:`backlog-${i}-${j}`,deviceId:"ios-synthetic",algorithmVersion:LOCATION_ENGINE_V2_CONFIG.algorithmVersion,kind:"provider_status" as const,occurredAt:new Date().toISOString(),receivedAt:new Date().toISOString(),timeZone:"Europe/London",metadata:{}})));
+   await persistEvidence(Array.from({length:count},(_,j)=>({clientEvidenceId:`backlog-${i}-${j}`,deviceId:"ios-synthetic",algorithmVersion:LOCATION_ENGINE_V2_CONFIG.algorithmVersion,kind:"provider_status" as const,occurredAt:new Date().toISOString(),receivedAt:new Date().toISOString(),timeZone:"Europe/London",metadata:{}})));
    await store.prepareLocationUploadBatch(owner, {excludeBatchIds: db.prepare("select client_batch_id from location_upload_outbox").all().map(row=>row.client_batch_id as string)});
   }
   const identities=db.prepare("select client_batch_id,body_json from location_upload_outbox order by client_batch_id").all();
@@ -142,8 +144,8 @@ describe("complete saved-place snapshot replay", () => {
    timeZone: "Europe/London",
    savedPlaces: fixture.savedPlaces,
    acceptedLearnedPlaces: []
-  }, "v2_review");
-  await store.persistLocationEvidence(fixture.evidence);
+  }, "v2_review", true);
+  await persistEvidence(fixture.evidence);
   await store.prepareLocationUploadBatch(owner);
   const journal = db.prepare("select * from location_evidence_journal order by client_evidence_id").all();
   const uploads = db.prepare("select * from location_upload_outbox order by client_batch_id").all();
@@ -167,8 +169,8 @@ describe("complete saved-place snapshot replay", () => {
   const { incident, place } = await import("../../../../../packages/shared/src/location/savedPlaceQualityFixture");
   const { runLocationEngine } = await import("@dayframe/shared");
   const fixture = incident();
-  await store.configureLocationAccount({ ...owner, deviceId: fixture.evidence[0].deviceId, timeZone: "Europe/London", savedPlaces: [place], acceptedLearnedPlaces: [] }, "v2_shadow");
-  await store.persistLocationEvidence(fixture.evidence);
+  await store.configureLocationAccount({ ...owner, deviceId: fixture.evidence[0].deviceId, timeZone: "Europe/London", savedPlaces: [place], acceptedLearnedPlaces: [] }, "v2_shadow", true);
+  await persistEvidence(fixture.evidence);
   const key = db.prepare("select account_key from location_account_context").get()!.account_key as string;
   db.prepare("insert into location_segment_snapshot values(?,?,?,?)").run(key,"obsolete","{}",fixture.processingAt);
   db.prepare("insert into location_segment_snapshot values(?,?,?,?)").run("other-account","other","{}",fixture.processingAt);

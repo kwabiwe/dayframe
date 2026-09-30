@@ -533,7 +533,7 @@ export default function SettingsScreen() {
       void refreshLocationDiagnostics();
       return;
     }
-    refreshGeofencesForPlaces(data.places)
+    refreshGeofencesForPlaces(data.places, { userId: data.user.id, workspaceId: data.workspace.id })
       .then((count) => {
         void refreshLocationDiagnostics(count > 0 ? `Monitoring ${count} saved ${count === 1 ? "place" : "places"}.` : undefined);
       })
@@ -1010,7 +1010,7 @@ export default function SettingsScreen() {
 
   async function enableLocation() {
     if (locationMonitoringAllowed && data) {
-      await startGeofences(data.places);
+      await startGeofences(data.places, { userId: data.user.id, workspaceId: data.workspace.id });
       await refreshLocationDiagnostics("Place monitoring is enabled.");
       return;
     }
@@ -1019,7 +1019,7 @@ export default function SettingsScreen() {
     updateSettingsSnapshot({ locationStatus: status });
     setLocationStatus(status);
     if (status.startsWith("Always allowed") && data) {
-      await startGeofences(data.places);
+      await startGeofences(data.places, { userId: data.user.id, workspaceId: data.workspace.id });
       await refreshLocationDiagnostics("Place monitoring is enabled.");
     } else {
       await refreshLocationDiagnostics(status);
@@ -1039,7 +1039,7 @@ export default function SettingsScreen() {
 
     try {
       if (enabled) await ensureAutomaticLoggingCategories(["commute"]);
-      const status = await setLocationLearningEnabled(enabled, data?.places ?? []);
+      const status = await setLocationLearningEnabled(enabled, data?.places ?? [], data ? { userId: data.user.id, workspaceId: data.workspace.id } : undefined);
       await refreshLocationDiagnostics(status);
       if (enabled) await load({ silent: true });
     } catch (error) {
@@ -1287,26 +1287,17 @@ export default function SettingsScreen() {
     const diagnostics = await getReviewSyncDiagnostics();
     const unsynchronisedCount =
       diagnostics.waitingCount + diagnostics.needsAttentionCount;
-    if (unsynchronisedCount > 0) {
-      Alert.alert(
-        "Log out and remove saved changes?",
-        `${unsynchronisedCount} unsynchronised Review ${
-          unsynchronisedCount === 1 ? "change" : "changes"
-        } will be removed from this iPhone.`,
-        [
-          { text: "Cancel", style: "cancel" },
-          {
-            text: "Log out",
-            style: "destructive",
-            onPress: () => {
-              void completeSignOut();
-            }
-          }
-        ]
-      );
-      return;
-    }
-    await completeSignOut();
+    const reviewWarning = unsynchronisedCount > 0
+      ? `${unsynchronisedCount} unsynchronised Review ${unsynchronisedCount === 1 ? "change" : "changes"} will be removed from this iPhone. `
+      : "";
+    Alert.alert(
+      "Log out and remove saved changes?",
+      `${reviewWarning}Unsynchronised Location evidence will be removed from this iPhone. Synced history stays in your account.`,
+      [
+        { text: "Cancel", style: "cancel" },
+        { text: "Log out", style: "destructive", onPress: () => { void completeSignOut(); } }
+      ]
+    );
   }
 
   async function completeSignOut() {

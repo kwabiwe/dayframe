@@ -30,7 +30,9 @@ import {
   type AuthenticatedSessionSnapshot
 } from "../secure-session";
 import {
+  getActiveMobileAccountSnapshot,
   mobileAccountOwnersEqual,
+  readActiveMobileAccount,
   type MobileAccountOwner
 } from "../mobileAccount";
 import { createSerialMutationQueue } from "./mutationQueue";
@@ -54,6 +56,30 @@ const ACTIVE_DEVICE_KEY = "active_device";
 const ACTIVE_TIME_ZONE_KEY = "active_time_zone";
 const ROLLOUT_MODE_KEY = "rollout_mode";
 const SEMANTIC_MODE_ACKNOWLEDGED_AT_KEY = "semantic_mode_acknowledged_at";
+const CAPTURE_BINDING_KEY = "capture_binding_v1";
+
+export type LocationCaptureBinding = {
+  id: string;
+  accountKey: string;
+  backend: string;
+  boundAt: string;
+  enabled: boolean;
+};
+export type LocationCaptureSnapshot = {
+  revision: number;
+  binding: LocationCaptureBinding | null;
+  context: LocationAccountContext | null;
+};
+
+// Synchronous invalidation fences work already awaiting SQLite/OS operations.
+// Authentication still belongs exclusively to mobileAccount/secure-session.
+let captureRevision = 0;
+let captureAdmissionSuspended = false;
+export function invalidateLocationCaptureOwnership() {
+  captureAdmissionSuspended = true;
+  return ++captureRevision;
+}
+export function locationCaptureRevision() { return captureRevision; }
 
 export type { LocationRolloutMode } from "@dayframe/shared";
 
@@ -84,6 +110,9 @@ export type LocationStoreDiagnostics = {
   activeProvisionalSegmentKind: string | null;
   lastGapDurationSeconds: number | null;
   rejectedEvidenceCounts: Record<string, number>;
+  captureRejectedEvidenceCounts: Record<string, number>;
+  legacyUnboundDeletedCount: number;
+  captureCleanupFailureCount: number;
   lastUploadAt: string | null;
   lastServerReplayVersion: string | null;
   lastServerReplayAt: string | null;
@@ -183,6 +212,16 @@ async function database() {
         await transaction.execAsync(`PRAGMA user_version = ${DATABASE_VERSION}`);
       });
     }
+    // Upgrade privacy cleanup is idempotent and uses the existing bounded journal.
+    // Ambiguous evidence is deleted locally, never adopted by another account.
+    await db.withExclusiveTransactionAsync(async (transaction) => {
+      const result = await transaction.runAsync("delete from location_evidence_journal where account_key = 'unbound'");
+      for (const table of ["location_upload_outbox", "location_engine_state", "location_segment_snapshot", "location_account_context"]) {
+        await transaction.runAsync(`delete from ${table} where account_key = 'unbound'`);
+      }
+      const prior = await transaction.getFirstAsync<MetadataRow>("select value from location_store_metadata where key = 'legacy_unbound_deleted_count'");
+      await setMetadata("legacy_unbound_deleted_count", String(Number(prior?.value ?? 0) + result.changes), transaction);
+    });
     return db;
   });
   return databasePromise;
@@ -280,15 +319,21 @@ function generatedId(prefix: string) {
 
 export async function configureLocationAccount(
   context: LocationAccountContext,
-  rolloutMode: LocationRolloutMode = "v2_shadow"
+  rolloutMode: LocationRolloutMode = "v2_shadow",
+  enabled = false,
+  revision = captureRevision
 ) {
-  return serialiseLocationMutation(() => configureLocationAccountUnsafe(context, rolloutMode));
+  return serialiseLocationMutation(() => configureLocationAccountUnsafe(context, rolloutMode, enabled, revision));
 }
 
 async function configureLocationAccountUnsafe(
   context: LocationAccountContext,
-  rolloutMode: LocationRolloutMode
+  rolloutMode: LocationRolloutMode,
+  enabled: boolean,
+  revision: number
 ) {
+  const owner = await readActiveMobileAccount();
+  if (revision !== captureRevision || !mobileAccountOwnersEqual(owner, context)) return null;
   const db = await database();
   const key = accountKey(context);
   const previousKey = await metadata(ACTIVE_ACCOUNT_KEY);
@@ -299,7 +344,13 @@ async function configureLocationAccountUnsafe(
       ? existingSemanticAcknowledgement
       : new Date().toISOString()
     : "";
+  let configured = false;
   await db.withExclusiveTransactionAsync(async (transaction) => {
+    if (revision !== captureRevision || !mobileAccountOwnersEqual(getActiveMobileAccountSnapshot(), context)) return;
+    const previousBinding = await readCaptureBinding(transaction);
+    const binding = previousBinding?.accountKey === key && previousBinding.enabled === enabled
+      ? previousBinding
+      : { id: generatedId("capture"), accountKey: key, backend: DAYFRAME_API_BASE, boundAt: new Date().toISOString(), enabled };
     await transaction.runAsync(
       `insert into location_account_context (account_key, context_json, updated_at) values (?, ?, ?)
        on conflict (account_key) do update set context_json = excluded.context_json, updated_at = excluded.updated_at`,
@@ -315,9 +366,16 @@ async function configureLocationAccountUnsafe(
     await setMetadata(ACTIVE_TIME_ZONE_KEY, context.timeZone, transaction);
     await setMetadata(ROLLOUT_MODE_KEY, rolloutMode, transaction);
     await setMetadata(SEMANTIC_MODE_ACKNOWLEDGED_AT_KEY, semanticModeAcknowledgedAt, transaction);
+    await setMetadata(CAPTURE_BINDING_KEY, JSON.stringify(binding), transaction);
+    if (revision !== captureRevision || !mobileAccountOwnersEqual(getActiveMobileAccountSnapshot(), context)) {
+      throw new StaleLocationCaptureError();
+    }
+    configured = true;
   });
-  await rebindUnownedEvidence(key, context);
-  return key;
+  if (configured && revision === captureRevision && mobileAccountOwnersEqual(getActiveMobileAccountSnapshot(), context)) {
+    captureAdmissionSuspended = false;
+  }
+  return configured ? key : null;
 }
 
 function isSemanticMode(mode: LocationRolloutMode) {
@@ -332,14 +390,15 @@ export async function getLocationRolloutMode(): Promise<LocationRolloutMode> {
 }
 
 async function currentContext() {
+  const owner = await readActiveMobileAccount();
   const key = await metadata(ACTIVE_ACCOUNT_KEY);
-  if (!key) return null;
+  if (!owner || key !== accountKey(owner)) return null;
   const db = await database();
   const row = await db.getFirstAsync<{ context_json: string }>(
     "select context_json from location_account_context where account_key = ?",
     key
   );
-  if (!row) return null;
+  if (!row || !mobileAccountOwnersEqual(getActiveMobileAccountSnapshot(), owner)) return null;
   return { key, context: JSON.parse(row.context_json) as LocationAccountContext };
 }
 
@@ -358,23 +417,63 @@ export async function getActiveLocationAccountIdentity() {
     : null;
 }
 
-async function rebindUnownedEvidence(key: string, context: LocationAccountContext) {
-  const db = await database();
-  await db.withExclusiveTransactionAsync(async (transaction) => {
-    const rows = await transaction.getAllAsync<EvidenceRow>(
-      "select evidence_json from location_evidence_journal where account_key = 'unbound' order by occurred_at"
-    );
-    for (const row of rows) {
-      const evidence = LocationEvidenceSchema.parse(JSON.parse(row.evidence_json));
-      const rebound = { ...evidence, deviceId: context.deviceId, timeZone: context.timeZone };
-      await transaction.runAsync(
-        "update location_evidence_journal set account_key = ?, evidence_json = ? where client_evidence_id = ?",
-        key,
-        JSON.stringify(rebound),
-        evidence.clientEvidenceId
-      );
-    }
+async function readCaptureBinding(transaction?: SQLite.SQLiteDatabase): Promise<LocationCaptureBinding | null> {
+  const db = transaction ?? await database();
+  const row = await db.getFirstAsync<MetadataRow>("select value from location_store_metadata where key = ?", CAPTURE_BINDING_KEY);
+  try {
+    const value = JSON.parse(row?.value ?? "null");
+    return value && typeof value.id === "string" && typeof value.accountKey === "string" &&
+      value.backend === DAYFRAME_API_BASE && Number.isFinite(Date.parse(value.boundAt)) &&
+      typeof value.enabled === "boolean" ? value : null;
+  } catch { return null; }
+}
+
+export function readLocationCaptureBinding() {
+  return locationMutationQueue(() => readCaptureBinding());
+}
+
+// Call before a callback's first await. Cold/headless launch hydrates the same
+// persisted mobile owner; an initially empty memory cache is not a sign-out.
+export function captureLocationOwnership(): Promise<LocationCaptureSnapshot> {
+  const revision = captureRevision;
+  return locationMutationQueue(async () => {
+    const context = await currentContext();
+    const binding = await readCaptureBinding();
+    return { revision, binding, context: context?.context ?? null };
   });
+}
+
+export function isLocationCaptureSnapshotCurrent(snapshot: LocationCaptureSnapshot) {
+  const owner = getActiveMobileAccountSnapshot();
+  return !captureAdmissionSuspended && snapshot.revision === captureRevision && Boolean(owner && snapshot.binding?.enabled &&
+    snapshot.binding.accountKey === accountKey(owner) && mobileAccountOwnersEqual(owner, snapshot.context));
+}
+
+export async function hasLegacyLocationOwner(owner: MobileAccountOwner) {
+  const rawBinding = await metadata(CAPTURE_BINDING_KEY);
+  return await metadata(ACTIVE_ACCOUNT_KEY) === accountKey(owner) && (!rawBinding || Boolean(await readCaptureBinding()));
+}
+
+export async function readOwnedLocationAccountContext(owner: MobileAccountOwner) {
+  if (!mobileAccountOwnersEqual(await readActiveMobileAccount(), owner)) return null;
+  const db = await database();
+  const row = await db.getFirstAsync<{ context_json: string }>(
+    "select context_json from location_account_context where account_key = ?", accountKey(owner));
+  return row && mobileAccountOwnersEqual(getActiveMobileAccountSnapshot(), owner)
+    ? JSON.parse(row.context_json) as LocationAccountContext : null;
+}
+
+class StaleLocationCaptureError extends Error {}
+
+async function recordCaptureRejections(counts: Record<string, number>, transaction: SQLite.SQLiteDatabase) {
+  const row = await transaction.getFirstAsync<MetadataRow>("select value from location_store_metadata where key = 'capture_rejections'");
+  const previous = parseDiagnosticCounts(row?.value ?? null);
+  for (const [reason, count] of Object.entries(counts)) previous[reason] = (previous[reason] ?? 0) + count;
+  await setMetadata("capture_rejections", JSON.stringify(previous), transaction);
+}
+
+export function recordLocationCaptureDiscard(reason: "invalid_timestamp" | "invalid_evidence" | "stale_epoch" | "foreign_place" | "no_owner" | "opted_out", count: number) {
+  return serialiseLocationMutation(async () => recordCaptureRejections({ [reason]: count }, await database()));
 }
 
 function sanitiseEvidence(input: LocationEvidence) {
@@ -388,20 +487,38 @@ function sanitiseEvidence(input: LocationEvidence) {
   return parsed;
 }
 
-export async function persistLocationEvidence(items: LocationEvidence[]) {
-  return serialiseLocationMutation(() => persistLocationEvidenceUnsafe(items));
+export async function persistLocationEvidence(items: LocationEvidence[], snapshot: LocationCaptureSnapshot) {
+  return serialiseLocationMutation(() => persistLocationEvidenceUnsafe(items, snapshot));
 }
 
-async function persistLocationEvidenceUnsafe(items: LocationEvidence[]) {
-  if (items.length === 0) return { insertedCount: 0, duplicateCount: 0 };
-  const current = await currentContext();
-  const key = current?.key ?? "unbound";
+async function persistLocationEvidenceUnsafe(items: LocationEvidence[], snapshot: LocationCaptureSnapshot) {
+  if (items.length === 0) return { insertedCount: 0, duplicateCount: 0, rejectedCount: 0 };
   const now = new Date().toISOString();
   const expiresAt = new Date(Date.parse(now) + LOCATION_ENGINE_V2_CONFIG.rawEvidenceRetentionDays * 86_400_000).toISOString();
   const db = await database();
   let insertedCount = 0;
-  await db.withExclusiveTransactionAsync(async (transaction) => {
+  let rejectedCount = 0;
+  const rejections: Record<string, number> = {};
+  const reject = (reason: string, count = 1) => { rejections[reason] = (rejections[reason] ?? 0) + count; rejectedCount += count; };
+  try { await db.withExclusiveTransactionAsync(async (transaction) => {
+    const binding = await readCaptureBinding(transaction);
+    const owner = await readActiveMobileAccount();
+    const reason = captureAdmissionSuspended || snapshot.revision !== captureRevision || snapshot.binding?.id !== binding?.id ? "stale_epoch"
+      : !owner || !binding || !snapshot.context ? "no_owner"
+      : binding.accountKey !== accountKey(owner) ? "owner_mismatch"
+      : !binding.enabled ? "opted_out" : null;
+    if (reason) { reject(reason, items.length); await recordCaptureRejections(rejections, transaction); return; }
+    const key = binding!.accountKey;
+    const row = await transaction.getFirstAsync<{ context_json: string }>(
+      "select context_json from location_account_context where account_key = ?", key);
+    const context = row ? JSON.parse(row.context_json) as LocationAccountContext : snapshot.context!;
     for (const item of items) {
+      if (!isLocationCaptureSnapshotCurrent(snapshot)) throw new StaleLocationCaptureError();
+      if (!Number.isFinite(Date.parse(item.occurredAt))) { reject("invalid_timestamp"); continue; }
+      if (Date.parse(item.occurredAt) < Date.parse(binding!.boundAt)) { reject("before_binding"); continue; }
+      if (item.deviceId !== context.deviceId || item.timeZone !== context.timeZone) { reject("source_mismatch"); continue; }
+      if ((item.savedPlaceId || item.kind === "geofence_enter" || item.kind === "geofence_exit") &&
+        !context.savedPlaces.some(place => place.id === item.savedPlaceId)) { reject("foreign_place"); continue; }
       const evidence = sanitiseEvidence(item);
       const result = await transaction.runAsync(
         `insert or ignore into location_evidence_journal
@@ -416,10 +533,17 @@ async function persistLocationEvidenceUnsafe(items: LocationEvidence[]) {
       );
       insertedCount += result.changes;
     }
-  });
+    await recordCaptureRejections(rejections, transaction);
+    if (!isLocationCaptureSnapshotCurrent(snapshot)) throw new StaleLocationCaptureError();
+  }); } catch (error) {
+    if (!(error instanceof StaleLocationCaptureError)) throw error;
+    insertedCount = 0;
+    rejectedCount = items.length;
+    await recordCaptureRejections({ stale_epoch: items.length }, db);
+  }
   await applyLocationRetentionUnsafe();
-  if (current) await processPendingLocationEvidenceUnsafe();
-  return { insertedCount, duplicateCount: items.length - insertedCount };
+  if (insertedCount && isLocationCaptureSnapshotCurrent(snapshot)) await processPendingLocationEvidenceUnsafe();
+  return { insertedCount, duplicateCount: items.length - insertedCount - rejectedCount, rejectedCount };
 }
 
 export async function processPendingLocationEvidence(processingAt = new Date().toISOString()) {
@@ -1113,28 +1237,35 @@ async function applyLocationRetentionUnsafe() {
 }
 
 export async function clearActiveLocationAccountData() {
-  return serialiseLocationMutation(clearActiveLocationAccountDataUnsafe);
+  const binding = await readLocationCaptureBinding();
+  return endLocationOwnership(binding, true);
 }
 
-async function clearActiveLocationAccountDataUnsafe() {
-  const key = await metadata(ACTIVE_ACCOUNT_KEY);
-  if (!key) return;
-  const db = await database();
-  await db.withExclusiveTransactionAsync(async (transaction) => {
-    await transaction.runAsync("delete from location_evidence_journal where account_key = ?", key);
-    await transaction.runAsync("delete from location_engine_state where account_key = ?", key);
-    await transaction.runAsync("delete from location_segment_snapshot where account_key = ?", key);
-    await transaction.runAsync("delete from location_upload_outbox where account_key = ?", key);
-    await transaction.runAsync("delete from location_account_context where account_key = ?", key);
-    await transaction.runAsync("delete from location_store_metadata where key = ?", `sync_diagnostics:${key}`);
-    await transaction.runAsync(
-      "delete from location_store_metadata where key in (?, ?, ?, ?, ?)",
-      ACTIVE_ACCOUNT_KEY,
-      ACTIVE_DEVICE_KEY,
-      ACTIVE_TIME_ZONE_KEY,
-      ROLLOUT_MODE_KEY,
-      SEMANTIC_MODE_ACKNOWLEDGED_AT_KEY
-    );
+export function endLocationOwnership(expected: LocationCaptureBinding | null, deleteOwnedData = false) {
+  return serialiseLocationMutation(async () => {
+    const db = await database();
+    const binding = await readCaptureBinding();
+    if (binding?.id !== expected?.id) return false;
+    const key = expected?.accountKey ?? await metadata(ACTIVE_ACCOUNT_KEY);
+    await db.withExclusiveTransactionAsync(async (transaction) => {
+      if (key && deleteOwnedData) {
+        for (const table of ["location_evidence_journal", "location_engine_state", "location_segment_snapshot", "location_upload_outbox", "location_account_context"]) {
+          await transaction.runAsync(`delete from ${table} where account_key = ?`, key);
+        }
+      }
+      if (key) await transaction.runAsync("delete from location_store_metadata where key = ?", `sync_diagnostics:${key}`);
+      await transaction.runAsync("delete from location_store_metadata where key in (?, ?, ?, ?, ?, ?)",
+        ACTIVE_ACCOUNT_KEY, ACTIVE_DEVICE_KEY, ACTIVE_TIME_ZONE_KEY, ROLLOUT_MODE_KEY,
+        SEMANTIC_MODE_ACKNOWLEDGED_AT_KEY, CAPTURE_BINDING_KEY);
+    });
+    return true;
+  });
+}
+
+export function recordLocationCaptureCleanupFailure() {
+  return serialiseLocationMutation(async () => {
+    const count = Number(await metadata("capture_cleanup_failure_count") ?? 0);
+    await setMetadata("capture_cleanup_failure_count", String(count + 1));
   });
 }
 
@@ -1215,6 +1346,9 @@ export async function getLocationStoreDiagnostics(): Promise<LocationStoreDiagno
     activeProvisionalSegmentKind: owned.activeProvisionalSegmentKind ?? null,
     lastGapDurationSeconds: owned.lastGapDurationSeconds ?? null,
     rejectedEvidenceCounts: owned.rejectedEvidenceCounts ?? {},
+    captureRejectedEvidenceCounts: parseDiagnosticCounts(await metadata("capture_rejections")),
+    legacyUnboundDeletedCount: Number(await metadata("legacy_unbound_deleted_count") ?? 0),
+    captureCleanupFailureCount: Number(await metadata("capture_cleanup_failure_count") ?? 0),
     lastUploadAt: owned.lastUploadAt ?? null,
     lastServerReplayVersion: owned.lastServerReplayVersion ?? null,
     lastServerReplayAt: owned.lastServerReplayAt ?? null,
@@ -1288,11 +1422,4 @@ export function evidenceFromExpoLocation(input: {
     timeZone: context.timeZone,
     isSimulated: input.mocked ?? false
   });
-}
-
-export async function activeLocationCaptureContext() {
-  return {
-    deviceId: await metadata(ACTIVE_DEVICE_KEY),
-    timeZone: await metadata(ACTIVE_TIME_ZONE_KEY)
-  };
 }

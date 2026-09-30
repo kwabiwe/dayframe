@@ -2623,7 +2623,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
 async function refreshLocationServices(bootstrap: MobileBootstrap) {
   try {
     await configureLocationIntelligence(bootstrap);
-    await refreshGeofencesForPlaces(bootstrap.places);
+    await refreshGeofencesForPlaces(bootstrap.places, { userId: bootstrap.user.id, workspaceId: bootstrap.workspace.id });
   } catch (error) {
     await recordLocationStoreError(error);
   }

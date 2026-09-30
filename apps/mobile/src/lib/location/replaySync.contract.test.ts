@@ -16,14 +16,14 @@ describe("location finalisation replay contracts", () => {
   it("reprocesses local evidence and forces one replay on foreground", () => {
     expect(runtimeSource).toContain("syncLocationIntelligenceOnForeground");
     expect(runtimeSource).toContain("await processPendingLocationEvidence()");
-    expect(runtimeSource).toContain("syncLocationEvidence({ forceReplay: true,...options })");
+    expect(runtimeSource).toMatch(/syncLocationEvidence\(\{ forceReplay: true,\s*\.\.\.options \}\)/);
     expect(recoveryOwnerSource).toContain("await syncLocationIntelligenceOnForeground({forceReplay:!context?.dueOnly})");
     expect(dashboardSource).not.toContain("syncLocationIntelligenceOnForeground");
   });
 
   it("bounds native drain and upload work", () => {
     expect(runtimeSource).toContain("MAX_LOCATION_NATIVE_DRAIN_PASSES");
-    expect(runtimeSource).toContain("drainNativeLocationSignals(100)");
+    expect(runtimeSource).toContain("drainNativeLocationSignalsUnsafe(100, captured)");
     expect(storeSource).toContain("MAX_LOCATION_UPLOAD_BATCHES_PER_SYNC");
     expect(storeSource).toContain("fetchLocationSync");
     expect(storeSource).toContain("/api/location/replay");
@@ -32,7 +32,7 @@ describe("location finalisation replay contracts", () => {
   it("does not hold geofence refresh behind remote reconciliation", () => {
     expect(runtimeSource).toContain("void syncLocationEvidence().catch(recordLocationStoreError)");
     expect(dashboardSource).toContain("await configureLocationIntelligence(bootstrap)");
-    expect(dashboardSource).toContain("await refreshGeofencesForPlaces(bootstrap.places)");
+    expect(dashboardSource).toContain("await refreshGeofencesForPlaces(bootstrap.places, { userId: bootstrap.user.id, workspaceId: bootstrap.workspace.id })");
   });
 
   it("keeps shared capture active while allowing legacy semantics only in explicit v1 mode", () => {

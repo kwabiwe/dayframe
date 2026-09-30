@@ -254,7 +254,7 @@ export default function PlacesScreen() {
       const bootstrap = await fetchBootstrap();
       const reconciled = reconcileBootstrapPlaces(bootstrap, options);
       setData(reconciled);
-      const monitoredCount = await refreshGeofencesForPlaces(reconciled.places).catch(() => 0);
+      const monitoredCount = await refreshGeofencesForPlaces(reconciled.places, { userId: reconciled.user.id, workspaceId: reconciled.workspace.id }).catch(() => 0);
       const bootstrapHasPlace =
         !options.upsertPlace || bootstrap.places.some((place) => place.id === options.upsertPlace?.id);
       const refreshNote = bootstrapHasPlace ? "" : " Saved locally while the server list catches up.";

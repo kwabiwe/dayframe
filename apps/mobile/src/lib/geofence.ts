@@ -12,6 +12,14 @@ import {
 } from "@dayframe/shared";
 import { enqueueEvent } from "./api";
 import { reverseGeocodeLocation } from "./locationGeocoding";
+import { DAYFRAME_API_BASE } from "./config";
+import { getActiveMobileAccountSnapshot, mobileAccountKey, mobileAccountOwnersEqual, readActiveMobileAccount,
+  subscribeActiveMobileAccount, type MobileAccountOwner } from "./mobileAccount";
+import { subscribeMobileSignedOut } from "./mobileSessionTransition";
+import { captureLocationOwnership, configureLocationAccount, getLocationRolloutMode, hasLegacyLocationOwner, isLocationCaptureSnapshotCurrent,
+  locationCaptureRevision, recordLocationCaptureDiscard, type LocationCaptureSnapshot } from "./location/store";
+import { bindLocationCaptureOwner, enableLocationCaptureOwnership, endLocationCaptureOwnership, locationCaptureAccountChanged,
+  locationCaptureSessionSignedOut, stopUnownedLocationCapture, withLocationCaptureLifecycle } from "./location/runtime";
 
 export const DAYFRAME_GEOFENCE_TASK = "DAYFRAME_GEOFENCE_TASK";
 export const DAYFRAME_LOCATION_LEARNING_TASK = "DAYFRAME_LOCATION_LEARNING_TASK";
@@ -184,11 +192,18 @@ const SAVED_PLACE_LEARNING_SUPPRESSION_METERS = 150;
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 TaskManager.defineTask(DAYFRAME_GEOFENCE_TASK, async ({ data, error }) => {
+  const captured = captureLocationOwnership();
+  const capture = await hydrateLegacyCapture(await captured);
+  if (!isLocationCaptureSnapshotCurrent(capture)) {
+    await recordLocationCaptureDiscard(capture.revision !== locationCaptureRevision() ? "stale_epoch" : !capture.binding || !capture.context ? "no_owner" : "opted_out", 1);
+    await stopUnownedLocationCapture(capture);
+    return;
+  }
   if (error) {
     await updateLocationDiagnostics({
       lastStatus: "Location monitor reported an error.",
       lastEventAt: new Date().toISOString()
-    });
+    }, capture);
     return;
   }
   const payload = data as {
@@ -203,8 +218,8 @@ TaskManager.defineTask(DAYFRAME_GEOFENCE_TASK, async ({ data, error }) => {
         : null;
   if (!transition) return;
 
-  const persisted = await persistV2GeofenceEvidence(transition, payload.region).catch(async (persistError) => {
-    await recordV2LocationFailure(persistError);
+  const persisted = await persistV2GeofenceEvidence(transition, payload.region, capture).catch(async (persistError) => {
+    await recordV2LocationFailure(persistError, capture);
     return null;
   });
   if (!persisted) return;
@@ -213,34 +228,72 @@ TaskManager.defineTask(DAYFRAME_GEOFENCE_TASK, async ({ data, error }) => {
   // never run as a semantic fallback (including in shadow mode).
   if (persisted.rolloutMode !== "v1") return;
 
-  await recordGeofenceTransition(transition, payload.region);
+  if (!isLocationCaptureSnapshotCurrent(capture)) return;
+  const identifier = payload.region.identifier?.split(":").at(-1);
+  await withLocationCaptureLifecycle(async () => {
+    if (isLocationCaptureSnapshotCurrent(capture)) await recordGeofenceTransition(transition, { ...payload.region, identifier }, new Date(), capture);
+  });
 });
 
 TaskManager.defineTask(DAYFRAME_LOCATION_LEARNING_TASK, async ({ data, error }) => {
+  const captured = captureLocationOwnership();
+  const capture = await hydrateLegacyCapture(await captured);
+  if (!isLocationCaptureSnapshotCurrent(capture)) {
+    const count = (data as {locations?: unknown[]} | undefined)?.locations?.length ?? 0;
+    if (count) await recordLocationCaptureDiscard(capture.revision !== locationCaptureRevision() ? "stale_epoch" : !capture.binding || !capture.context ? "no_owner" : "opted_out", count);
+    await stopUnownedLocationCapture(capture);
+    return;
+  }
   if (error) {
     await updateLocationDiagnostics({
       lastStatus: "Location learning reported an error.",
       lastEventAt: new Date().toISOString()
-    });
+    }, capture);
     return;
   }
   const enabled = await getLocationLearningEnabled();
   if (!enabled) return;
   const payload = data as { locations?: Location.LocationObject[] };
   const locations = [...(payload.locations ?? [])].sort((left, right) => left.timestamp - right.timestamp);
-  const persisted = await persistV2LocationBatch(locations).catch(async (persistError) => {
-    await recordV2LocationFailure(persistError);
+  const persisted = await persistV2LocationBatch(locations, capture).catch(async (persistError) => {
+    await recordV2LocationFailure(persistError, capture);
     return null;
   });
   if (!persisted) return;
   // The continuous Expo task feeds both pipelines, but V1 classification is
   // permitted only in the explicit V1 mode.
   if (persisted.rolloutMode !== "v1") return;
-  const places = await readSavedPlaceCatalogue();
-  for (const location of locations) {
-    await recordLocationLearningSample(location, Object.values(places));
-  }
+  await withLocationCaptureLifecycle(async () => {
+    const places = await readSavedPlaceCatalogue();
+    for (const location of locations) {
+      if (!isLocationCaptureSnapshotCurrent(capture) || location.timestamp < Date.parse(capture.binding!.boundAt)) continue;
+      await recordLocationLearningSample(location, Object.values(places), capture);
+    }
+  });
 });
+
+// These listeners also exist in Expo headless launches; Dashboard is not the
+// authority for Location teardown. Rejections are handled without raw payloads.
+subscribeActiveMobileAccount(() => {
+  void locationCaptureAccountChanged(getActiveMobileAccountSnapshot()).catch(() => undefined);
+});
+subscribeMobileSignedOut(() => {
+  void locationCaptureSessionSignedOut().catch(() => undefined);
+});
+
+async function hydrateLegacyCapture(capture: LocationCaptureSnapshot) {
+  if (capture.binding || !capture.context || capture.revision !== locationCaptureRevision() ||
+    !await hasLegacyLocationOwner(capture.context)) return capture;
+  // A headless upgrade must migrate demonstrably owned consent before cleanup
+  // removes the legacy binding. Reuse its stored device/context, not Keychain.
+  await bindLocationCaptureOwner(capture.context, capture.revision);
+  const updated = await captureLocationOwnership();
+  const originalLifetime = { ...updated, revision: capture.revision };
+  if (isLocationCaptureSnapshotCurrent(originalLifetime)) {
+    await refreshGeofencesForPlaces(originalLifetime.context!.savedPlaces, originalLifetime.context!);
+  }
+  return originalLifetime;
+}
 
 export async function requestLocationAccess() {
   const foreground = await Location.requestForegroundPermissionsAsync();
@@ -277,7 +330,52 @@ export async function requestLocationAccess() {
 }
 
 export async function getLocationLearningEnabled() {
-  return AsyncStorage.getItem(LOCATION_LEARNING_ENABLED_KEY).then((value) => value === "true");
+  const owner = await readActiveMobileAccount();
+  if (!owner) return false;
+  await migrateLegacyLocationOptIn(owner);
+  const value = await AsyncStorage.getItem(accountStorageKey(LOCATION_LEARNING_ENABLED_KEY, mobileAccountKey(owner)));
+  return mobileAccountOwnersEqual(getActiveMobileAccountSnapshot(), owner) && value === "true";
+}
+
+function accountStorageKey(key: string, ownerKey: string) {
+  return `${key}:account:${encodeURIComponent(DAYFRAME_API_BASE)}:${ownerKey}`;
+}
+
+export function writeLocationLearningPreference(owner: MobileAccountOwner, enabled: boolean) {
+  return AsyncStorage.setItem(accountStorageKey(LOCATION_LEARNING_ENABLED_KEY, mobileAccountKey(owner)), String(enabled));
+}
+
+export async function migrateLegacyLocationOptIn(owner: MobileAccountOwner) {
+  const legacy = await AsyncStorage.getItem(LOCATION_LEARNING_ENABLED_KEY);
+  if (legacy === null) return;
+  const scopedKey = accountStorageKey(LOCATION_LEARNING_ENABLED_KEY, mobileAccountKey(owner));
+  if (await hasLegacyLocationOwner(owner) && mobileAccountOwnersEqual(getActiveMobileAccountSnapshot(), owner) &&
+    await AsyncStorage.getItem(scopedKey) === null) {
+    await AsyncStorage.setItem(scopedKey, legacy === "true" ? "true" : "false");
+  }
+  await AsyncStorage.removeItem(LOCATION_LEARNING_ENABLED_KEY);
+}
+
+export async function clearLocationCaptureCaches(ownerKey?: string) {
+  for (const key of [MONITORED_PLACES_KEY, SAVED_PLACE_CATALOGUE_KEY, GEOFENCE_REGISTRATION_KEY,
+    OPEN_VISITS_KEY, SEEN_VISIT_IDS_KEY, LOCATION_DIAGNOSTICS_KEY, LEARNED_PLACE_CLUSTERS_KEY, LAST_COMPLETED_VISIT_KEY]) {
+    await AsyncStorage.removeItem(key);
+    if (ownerKey) await AsyncStorage.removeItem(accountStorageKey(key, ownerKey));
+  }
+}
+
+async function readLocationCache(key: string, captured?: LocationCaptureSnapshot) {
+  const capture = captured ?? await captureLocationOwnership();
+  if (!capture.context || !capture.binding || capture.revision !== locationCaptureRevision()) return null;
+  const value = await AsyncStorage.getItem(accountStorageKey(key, mobileAccountKey(capture.context)));
+  return capture.revision === locationCaptureRevision() && mobileAccountOwnersEqual(getActiveMobileAccountSnapshot(), capture.context) ? value : null;
+}
+async function writeLocationCache(key: string, value: string, captured?: LocationCaptureSnapshot) {
+  const capture = captured ?? await captureLocationOwnership();
+  if (capture.context && capture.binding && capture.revision === locationCaptureRevision() &&
+    mobileAccountOwnersEqual(getActiveMobileAccountSnapshot(), capture.context)) {
+    await AsyncStorage.setItem(accountStorageKey(key, mobileAccountKey(capture.context)), value);
+  }
 }
 
 export async function setLocationLearningEnabled(
@@ -290,14 +388,19 @@ export async function setLocationLearningEnabled(
     radiusMeters: number;
     priority?: number;
     loggingEnabled?: boolean;
-  }> = []
+  }> = [],
+  expectedOwner?: MobileAccountOwner
 ) {
+  const revision = locationCaptureRevision();
+  const owner = await readActiveMobileAccount();
+  if (!owner) return "Sign in before enabling Location learning.";
+  if (expectedOwner && !mobileAccountOwnersEqual(expectedOwner, owner)) return "Location account changed.";
   if (!enabled) {
-    await AsyncStorage.setItem(LOCATION_LEARNING_ENABLED_KEY, "false");
-    await stopLocationLearningIfStarted();
-    await import("./location/runtime").then(({ stopNativeLocationIntelligence }) =>
-      stopNativeLocationIntelligence()
-    ).catch(recordV2LocationFailure);
+    if (revision !== locationCaptureRevision() || !mobileAccountOwnersEqual(getActiveMobileAccountSnapshot(), owner)) return "Location account changed.";
+    const end = endLocationCaptureOwnership("opt_out", owner);
+    const endedRevision = locationCaptureRevision();
+    await end;
+    if (endedRevision !== locationCaptureRevision() || !mobileAccountOwnersEqual(getActiveMobileAccountSnapshot(), owner)) return "Location account changed.";
     await updateLocationDiagnostics({
       locationLearningEnabled: false,
       locationLearningActive: false,
@@ -309,8 +412,8 @@ export async function setLocationLearningEnabled(
 
   const foreground = await Location.getForegroundPermissionsAsync();
   const background = await Location.getBackgroundPermissionsAsync();
+  if (revision !== locationCaptureRevision() || !mobileAccountOwnersEqual(getActiveMobileAccountSnapshot(), owner)) return "Location account changed.";
   if (foreground.status !== "granted" || background.status !== "granted") {
-    await AsyncStorage.setItem(LOCATION_LEARNING_ENABLED_KEY, "false");
     await updateLocationDiagnostics({
       foregroundPermission: permissionLabel(foreground.status),
       backgroundPermission: permissionLabel(background.status),
@@ -322,15 +425,54 @@ export async function setLocationLearningEnabled(
     return "Enable Always location access before turning on commute and regular-place learning.";
   }
 
-  await AsyncStorage.setItem(LOCATION_LEARNING_ENABLED_KEY, "true");
-  await startLocationLearning(places);
-  await import("./location/runtime").then(({ startNativeLocationIntelligence }) =>
-    startNativeLocationIntelligence()
-  ).catch(recordV2LocationFailure);
+  if (!await enableLocationCaptureOwnership(owner, revision)) return "Location account changed.";
+  if (revision !== locationCaptureRevision() || !mobileAccountOwnersEqual(getActiveMobileAccountSnapshot(), owner)) return "Location account changed.";
+  const capture = await refreshCaptureCatalogue(places, owner);
+  if (capture.revision !== revision || !mobileAccountOwnersEqual(capture.context, owner)) return "Location account changed.";
+  await withLocationCaptureLifecycle(async () => {
+    await startLocationLearningUnsafe(places, capture);
+    await startGeofencesUnsafe(places, capture);
+    if (isLocationCaptureSnapshotCurrent(capture)) {
+      await import("./location/runtime").then(({ startNativeLocationIntelligence }) => startNativeLocationIntelligence());
+    }
+  });
   return "Commute and regular-place learning is on. Suggestions stay in Review.";
 }
 
-export async function startGeofences(
+export function startGeofences(places: Parameters<typeof startGeofencesUnsafe>[0], owner?: MobileAccountOwner) {
+  const captured = captureLocationOwnership();
+  return withLocationCaptureLifecycle(async () => {
+    const capture = await refreshCaptureCatalogue(places, owner, await captured);
+    return startGeofencesUnsafe(places, capture);
+  });
+}
+export function startLocationLearning(places: Parameters<typeof startLocationLearningUnsafe>[0] = []) {
+  const captured = captureLocationOwnership();
+  return withLocationCaptureLifecycle(async () => startLocationLearningUnsafe(places, await captured));
+}
+export function refreshGeofencesForPlaces(places: Parameters<typeof refreshGeofencesForPlacesUnsafe>[0], owner?: MobileAccountOwner) {
+  const captured = captureLocationOwnership();
+  return withLocationCaptureLifecycle(async () => {
+    const capture = await refreshCaptureCatalogue(places, owner, await captured);
+    return refreshGeofencesForPlacesUnsafe(places, capture);
+  });
+}
+
+async function refreshCaptureCatalogue(places: Parameters<typeof startGeofencesUnsafe>[0], owner?: MobileAccountOwner,
+  initial?: LocationCaptureSnapshot) {
+  const capture = initial ?? await captureLocationOwnership();
+  if (!capture.context || !capture.binding || capture.revision !== locationCaptureRevision() ||
+    (owner && !mobileAccountOwnersEqual(owner, capture.context)) ||
+    !mobileAccountOwnersEqual(getActiveMobileAccountSnapshot(), capture.context)) return { ...capture, context: null };
+  await configureLocationAccount({ ...capture.context, savedPlaces: places.flatMap(place =>
+    typeof place.latitude !== "number" || typeof place.longitude !== "number" ? [] : [{
+      id: place.id, name: place.name, latitude: place.latitude, longitude: place.longitude,
+      radiusMeters: place.radiusMeters, priority: place.priority, loggingEnabled: place.loggingEnabled
+    }]) }, await getLocationRolloutMode(), capture.binding.enabled, capture.revision);
+  return { ...await captureLocationOwnership(), revision: capture.revision };
+}
+
+async function startGeofencesUnsafe(
   places: Array<{
     id: string;
     name: string;
@@ -342,10 +484,12 @@ export async function startGeofences(
     defaultCategoryName?: string | null;
     defaultActivityDescription?: string | null;
     loggingEnabled?: boolean;
-  }>
+  }>,
+  capture: LocationCaptureSnapshot
 ) {
+  if (!isLocationCaptureSnapshotCurrent(capture)) return 0;
   const monitorablePlaces = places
-    .filter((place) => typeof place.latitude === "number" && typeof place.longitude === "number")
+    .filter((place) => capture.context!.savedPlaces.some(saved => saved.id === place.id) && typeof place.latitude === "number" && typeof place.longitude === "number")
     .sort((left, right) => {
       const priorityDelta = (right.priority ?? 0) - (left.priority ?? 0);
       if (priorityDelta !== 0) return priorityDelta;
@@ -357,7 +501,7 @@ export async function startGeofences(
   const excludedPlaces = monitorablePlaces.slice(IOS_GEOFENCE_LIMIT);
   const regions = registeredPlaces
     .map((place) => ({
-      identifier: place.id,
+      identifier: `${capture.binding!.id}:${place.id}`,
       latitude: place.latitude as number,
       longitude: place.longitude as number,
       radius: normalizedGeofenceRadius(place.radiusMeters),
@@ -369,7 +513,7 @@ export async function startGeofences(
 
   if (regions.length === 0) {
     await stopGeofencesIfStarted();
-    await AsyncStorage.setItem(GEOFENCE_REGISTRATION_KEY, "");
+    await writeLocationCache(GEOFENCE_REGISTRATION_KEY, "");
     await updateLocationDiagnostics({
       activeMonitorCount: 0,
       configuredMonitorCount: 0,
@@ -385,12 +529,13 @@ export async function startGeofences(
 
   const registrationFingerprint = JSON.stringify(regions);
   const [storedFingerprint, alreadyStarted] = await Promise.all([
-    AsyncStorage.getItem(GEOFENCE_REGISTRATION_KEY),
+    readLocationCache(GEOFENCE_REGISTRATION_KEY),
     Location.hasStartedGeofencingAsync(DAYFRAME_GEOFENCE_TASK).catch(() => false)
   ]);
+  if (!isLocationCaptureSnapshotCurrent(capture)) return 0;
   if (!alreadyStarted || storedFingerprint !== registrationFingerprint) {
     await Location.startGeofencingAsync(DAYFRAME_GEOFENCE_TASK, regions);
-    await AsyncStorage.setItem(GEOFENCE_REGISTRATION_KEY, registrationFingerprint);
+    await writeLocationCache(GEOFENCE_REGISTRATION_KEY, registrationFingerprint);
   }
   const limitNote = excludedPlaces.length > 0
     ? ` ${excludedPlaces.length} lower-priority ${excludedPlaces.length === 1 ? "place is" : "places are"} outside the iOS ${IOS_GEOFENCE_LIMIT}-region limit.`
@@ -408,7 +553,7 @@ export async function startGeofences(
   return regions.length;
 }
 
-export async function startLocationLearning(
+async function startLocationLearningUnsafe(
   places: Array<{
     id: string;
     name: string;
@@ -416,8 +561,10 @@ export async function startLocationLearning(
     longitude?: number | null;
     radiusMeters: number;
     loggingEnabled?: boolean;
-  }> = []
+  }> = [],
+  capture: LocationCaptureSnapshot
 ) {
+  if (!isLocationCaptureSnapshotCurrent(capture)) return false;
   const enabled = await getLocationLearningEnabled();
   if (!enabled) {
     await updateLocationDiagnostics({ locationLearningEnabled: false, locationLearningActive: false });
@@ -425,6 +572,7 @@ export async function startLocationLearning(
   }
 
   if (places.length > 0) await writeSavedPlaceCatalogue(places.map(monitoredPlaceFromInput));
+  if (!isLocationCaptureSnapshotCurrent(capture)) return false;
   await Location.startLocationUpdatesAsync(DAYFRAME_LOCATION_LEARNING_TASK, {
     accuracy: Location.Accuracy.High ?? Location.Accuracy.Balanced,
     distanceInterval: LOCATION_ENGINE_V2_CONFIG.distanceIntervalMeters,
@@ -444,7 +592,7 @@ export async function startLocationLearning(
   return true;
 }
 
-export async function refreshGeofencesForPlaces(
+async function refreshGeofencesForPlacesUnsafe(
   places: Array<{
     id: string;
     name: string;
@@ -456,10 +604,13 @@ export async function refreshGeofencesForPlaces(
     defaultCategoryName?: string | null;
     defaultActivityDescription?: string | null;
     loggingEnabled?: boolean;
-  }>
+  }>,
+  capture: LocationCaptureSnapshot
 ) {
+  if (!isLocationCaptureSnapshotCurrent(capture)) return 0;
   const foreground = await Location.getForegroundPermissionsAsync();
   const background = await Location.getBackgroundPermissionsAsync();
+  if (!isLocationCaptureSnapshotCurrent(capture)) return 0;
   const foregroundPermission = permissionLabel(foreground.status);
   const backgroundPermission = permissionLabel(background.status);
   if (foreground.status !== "granted" || background.status !== "granted") {
@@ -475,12 +626,12 @@ export async function refreshGeofencesForPlaces(
   }
   await updateLocationDiagnostics({ foregroundPermission, backgroundPermission });
   if (await getLocationLearningEnabled()) {
-    await startLocationLearning(places);
+    await startLocationLearningUnsafe(places, capture);
     await import("./location/runtime").then(({ startNativeLocationIntelligence }) =>
       startNativeLocationIntelligence()
-    ).catch(recordV2LocationFailure);
+    ).catch(error => recordV2LocationFailure(error, capture));
   }
-  return startGeofences(places);
+  return startGeofencesUnsafe(places, capture);
 }
 
 export async function createUnknownStayCandidate(
@@ -501,8 +652,12 @@ export async function createUnknownStayCandidate(
 
 export async function recordLocationLearningSample(
   location: Location.LocationObject,
-  savedPlaces: MonitoredPlace[] = []
+  savedPlaces: MonitoredPlace[] = [],
+  captured?: LocationCaptureSnapshot
 ) {
+  const capture = captured ?? await captureLocationOwnership();
+  if (!isLocationCaptureSnapshotCurrent(capture) || !Number.isFinite(new Date(location.timestamp).getTime()) ||
+    location.timestamp < Date.parse(capture.binding!.boundAt)) return {status:"stale_capture" as const, queued:false};
   if (!await getLocationLearningEnabled()) return { status: "disabled" as const, queued: false };
 
   const latitude = location.coords.latitude;
@@ -536,7 +691,7 @@ export async function recordLocationLearningSample(
     return { status: "near_saved_place" as const, queued: false };
   }
 
-  const sampledAt = new Date(location.timestamp || Date.now()).toISOString();
+  const sampledAt = new Date(location.timestamp).toISOString();
   const sampledDayKey = dateKey(sampledAt);
   const clusters = await readLearnedPlaceClusters();
   const existingIndex = clusters.findIndex((cluster) =>
@@ -660,7 +815,7 @@ export async function recordLocationLearningSample(
       latitude: nextCluster.latitude,
       longitude: nextCluster.longitude,
       clusterKey: learnedPlaceClusterKey(nextCluster.latitude, nextCluster.longitude)
-    }).catch(() => false);
+    }, capture).catch(() => false);
     if (queued) {
       nextCluster.lastCommuteQueuedAt = new Date().toISOString();
       await writeLearnedPlaceClusters(
@@ -682,7 +837,7 @@ export async function recordLocationLearningSample(
       lastSeenAt: nextCluster.lastSeenAt,
       clusterId: nextCluster.id,
       evidence
-    });
+    }, capture);
     const queuedAt = new Date().toISOString();
     await writeLearnedPlaceClusters(
       nextClusters.map((cluster) => cluster.id === nextCluster.id
@@ -725,7 +880,7 @@ export async function recordLocationLearningSample(
     clusterFirstSeenAt: nextCluster.firstSeenAt,
     clusterId: nextCluster.id,
     evidence
-  });
+  }, capture);
   const queuedAt = new Date().toISOString();
   await writeLearnedPlaceClusters(
     nextClusters.map((cluster) => cluster.id === nextCluster.id ? { ...cluster, lastQueuedAt: queuedAt } : cluster)
@@ -742,8 +897,11 @@ export async function recordLocationLearningSample(
 export async function recordGeofenceTransition(
   transition: GeofenceTransition,
   region: DayframeRegion,
-  occurredAt = new Date()
+  occurredAt = new Date(),
+  captured?: LocationCaptureSnapshot
 ) {
+  const capture = captured ?? await captureLocationOwnership();
+  if (!isLocationCaptureSnapshotCurrent(capture) || occurredAt.getTime() < Date.parse(capture.binding!.boundAt)) return {status:"stale_capture" as const,queued:false};
   const placeId = typeof region.identifier === "string" ? region.identifier : "";
   const places = await readMonitoredPlaces();
   const place = places[placeId];
@@ -773,10 +931,10 @@ export async function recordGeofenceTransition(
   }
 
   if (transition === "enter") {
-    return recordPlaceEnter(place, region, occurredAt);
+    return recordPlaceEnter(place, region, occurredAt, capture);
   }
 
-  return recordPlaceExit(place, region, occurredAt);
+  return recordPlaceExit(place, region, occurredAt, capture);
 }
 
 export async function getLocationVisitDiagnostics(): Promise<LocationVisitDiagnostics> {
@@ -817,7 +975,7 @@ export async function getLocationVisitDiagnostics(): Promise<LocationVisitDiagno
   };
 }
 
-async function recordPlaceEnter(place: MonitoredPlace, region: DayframeRegion, occurredAt: Date) {
+async function recordPlaceEnter(place: MonitoredPlace, region: DayframeRegion, occurredAt: Date, capture: LocationCaptureSnapshot) {
   const openVisits = await readOpenVisits();
   if (openVisits[place.id]) {
     await updateLocationDiagnostics({
@@ -860,7 +1018,9 @@ async function recordPlaceEnter(place: MonitoredPlace, region: DayframeRegion, o
     return { status: "logging_disabled_enter" as const, queued: false };
   }
 
+  if (!isLocationCaptureSnapshotCurrent(capture)) return {status:"stale_capture" as const,queued:false};
   await enqueueEvent({
+    owner: capture.context!,
     localId: geofenceEvidenceLocalId("enter", place.id, occurredAt),
     source,
     type: "geofence_enter",
@@ -894,7 +1054,7 @@ async function recordPlaceEnter(place: MonitoredPlace, region: DayframeRegion, o
   return { status: "entered" as const, queued: true };
 }
 
-async function recordPlaceExit(place: MonitoredPlace, region: DayframeRegion, occurredAt: Date) {
+async function recordPlaceExit(place: MonitoredPlace, region: DayframeRegion, occurredAt: Date, capture: LocationCaptureSnapshot) {
   const openVisits = await readOpenVisits();
   const openVisit = openVisits[place.id];
   if (!openVisit) {
@@ -978,7 +1138,7 @@ async function recordPlaceExit(place: MonitoredPlace, region: DayframeRegion, oc
 
   if (place.loggingEnabled === false || openVisit.loggingEnabled === false) {
     if (await getLocationLearningEnabled()) {
-      await queueCommuteCandidate(currentVisit).catch(() => undefined);
+      await queueCommuteCandidate(currentVisit, capture).catch(() => undefined);
     }
     await writeLastCompletedVisit(currentVisit);
     await writeSeenVisitIds([localId, ...seenVisitIds.filter((id) => id !== localId)].slice(0, MAX_SEEN_VISIT_IDS));
@@ -995,7 +1155,9 @@ async function recordPlaceExit(place: MonitoredPlace, region: DayframeRegion, oc
     return { status: "logging_disabled_visit" as const, queued: false, durationSeconds, localId };
   }
 
+  if (!isLocationCaptureSnapshotCurrent(capture)) return {status:"stale_capture" as const,queued:false};
   await enqueueEvent({
+    owner: capture.context!,
     localId,
     source,
     type: "geofence_exit",
@@ -1028,7 +1190,7 @@ async function recordPlaceExit(place: MonitoredPlace, region: DayframeRegion, oc
     }
   });
   if (await getLocationLearningEnabled()) {
-    await queueCommuteCandidate(currentVisit).catch(() => undefined);
+    await queueCommuteCandidate(currentVisit, capture).catch(() => undefined);
   }
   await writeLastCompletedVisit(currentVisit);
   await writeSeenVisitIds([localId, ...seenVisitIds.filter((id) => id !== localId)].slice(0, MAX_SEEN_VISIT_IDS));
@@ -1172,12 +1334,12 @@ function normalizedGeofenceRadius(value: number) {
   return Math.max(25, Math.min(2000, Math.round(value)));
 }
 
-async function stopGeofencesIfStarted() {
+export async function stopGeofencesIfStarted() {
   const started = await Location.hasStartedGeofencingAsync(DAYFRAME_GEOFENCE_TASK).catch(() => false);
   if (started) await Location.stopGeofencingAsync(DAYFRAME_GEOFENCE_TASK);
 }
 
-async function stopLocationLearningIfStarted() {
+export async function stopLocationLearningIfStarted() {
   const started = await Location.hasStartedLocationUpdatesAsync(DAYFRAME_LOCATION_LEARNING_TASK).catch(() => false);
   if (started) await Location.stopLocationUpdatesAsync(DAYFRAME_LOCATION_LEARNING_TASK);
 }
@@ -1199,7 +1361,7 @@ function visitLocalId(visit: Pick<OpenVisit, "placeId" | "enteredAt">) {
   return `location-visit-${visit.placeId}-${new Date(visit.enteredAt).getTime()}`;
 }
 
-async function queueCommuteCandidate(currentVisit: CompletedVisit) {
+async function queueCommuteCandidate(currentVisit: CompletedVisit, capture: LocationCaptureSnapshot) {
   const previousVisit = await readLastCompletedVisit();
   if (!previousVisit || sameVisitEndpoint(previousVisit, currentVisit)) return false;
 
@@ -1215,7 +1377,9 @@ async function queueCommuteCandidate(currentVisit: CompletedVisit) {
   const fromKey = visitEndpointKey(previousVisit);
   const toKey = visitEndpointKey(currentVisit);
   const localId = `location-commute-${fromKey}-${toKey}-${startedAt.getTime()}`;
+  if (!isLocationCaptureSnapshotCurrent(capture)) return false;
   await enqueueEvent({
+    owner: capture.context!,
     localId,
     source: "location_learning",
     type: "commute_detected",
@@ -1271,7 +1435,7 @@ async function queueLearnedPlaceVisit(input: {
   clusterFirstSeenAt?: string;
   clusterId?: string;
   evidence: LocationLearningEvidence;
-}) {
+}, capture: LocationCaptureSnapshot) {
   const latitude = roundedCoordinate(input.latitude);
   const longitude = roundedCoordinate(input.longitude);
   const startedAt = new Date(input.firstSeenAt);
@@ -1281,7 +1445,9 @@ async function queueLearnedPlaceVisit(input: {
   const localId = `location-learned-${input.clusterId ?? clusterKey}-${stoppedAt.getTime()}`;
   const address = await reverseGeocodeLocation(latitude, longitude);
   const candidateName = readableLocationNameFromParts({ address, latitude, longitude });
+  if (!isLocationCaptureSnapshotCurrent(capture)) return;
   await enqueueEvent({
+    owner: capture.context!,
     localId,
     source: "location_learning",
     type: "learned_place_visit",
@@ -1341,7 +1507,7 @@ async function queueOneOffLocationActivity(input: {
   lastSeenAt: string;
   clusterId: string;
   evidence: LocationLearningEvidence;
-}) {
+}, capture: LocationCaptureSnapshot) {
   const latitude = roundedCoordinate(input.latitude);
   const longitude = roundedCoordinate(input.longitude);
   const startedAt = new Date(input.firstSeenAt);
@@ -1350,7 +1516,9 @@ async function queueOneOffLocationActivity(input: {
   const clusterKey = learnedPlaceClusterKey(latitude, longitude);
   const address = await reverseGeocodeLocation(latitude, longitude);
   const candidateName = readableLocationNameFromParts({ address, latitude, longitude });
+  if (!isLocationCaptureSnapshotCurrent(capture)) return;
   await enqueueEvent({
+    owner: capture.context!,
     localId: `location-one-off-${input.clusterId}-${startedAt.getTime()}`,
     source: "location_learning",
     type: "unknown_stay",
@@ -1506,7 +1674,7 @@ function degreesToRadians(value: number) {
 }
 
 async function readMonitoredPlaces() {
-  const raw = await AsyncStorage.getItem(MONITORED_PLACES_KEY);
+  const raw = await readLocationCache(MONITORED_PLACES_KEY);
   const places = parseJson<MonitoredPlace[]>(raw, []);
   return places.reduce<Record<string, MonitoredPlace>>((map, place) => {
     if (place.id) map[place.id] = place;
@@ -1515,11 +1683,11 @@ async function readMonitoredPlaces() {
 }
 
 async function writeMonitoredPlaces(places: MonitoredPlace[]) {
-  await AsyncStorage.setItem(MONITORED_PLACES_KEY, JSON.stringify(places));
+  await writeLocationCache(MONITORED_PLACES_KEY, JSON.stringify(places));
 }
 
 async function readSavedPlaceCatalogue() {
-  const raw = await AsyncStorage.getItem(SAVED_PLACE_CATALOGUE_KEY);
+  const raw = await readLocationCache(SAVED_PLACE_CATALOGUE_KEY);
   const places = parseJson<MonitoredPlace[]>(raw, []);
   return places.reduce<Record<string, MonitoredPlace>>((map, place) => {
     if (place.id) map[place.id] = place;
@@ -1528,103 +1696,117 @@ async function readSavedPlaceCatalogue() {
 }
 
 async function writeSavedPlaceCatalogue(places: MonitoredPlace[]) {
-  await AsyncStorage.setItem(SAVED_PLACE_CATALOGUE_KEY, JSON.stringify(places));
+  await writeLocationCache(SAVED_PLACE_CATALOGUE_KEY, JSON.stringify(places));
 }
 
-async function persistV2LocationBatch(locations: Location.LocationObject[]) {
+async function persistV2LocationBatch(locations: Location.LocationObject[], capture: LocationCaptureSnapshot) {
   const store = await import("./location/store");
   const rolloutMode = await store.getLocationRolloutMode();
+  if (!capture.context || !isLocationCaptureSnapshotCurrent(capture)) return null;
+  const evidence = locations.flatMap(location => {
+    if (!Number.isFinite(new Date(location.timestamp).getTime())) return [];
+    try { return [store.evidenceFromExpoLocation(location, capture.context!)]; }
+    catch { return []; }
+  });
+  if (evidence.length !== locations.length) await store.recordLocationCaptureDiscard("invalid_timestamp", locations.length - evidence.length);
   if (rolloutMode === "v1") return { rolloutMode };
-  const context = await store.activeLocationCaptureContext();
-  const captureContext = {
-    deviceId: context.deviceId ?? "unbound-device",
-    timeZone: context.timeZone ?? "Europe/London"
-  };
-  const evidence = locations.map((location) => store.evidenceFromExpoLocation(location, captureContext));
-  await store.persistLocationEvidence(evidence);
-  void store.syncLocationEvidence().catch(recordV2LocationFailure);
+  await store.persistLocationEvidence(evidence, capture);
+  if (isLocationCaptureSnapshotCurrent(capture)) void store.syncLocationEvidence().catch(error => recordV2LocationFailure(error, capture));
   return { rolloutMode };
 }
 
-async function persistV2GeofenceEvidence(transition: GeofenceTransition, region: DayframeRegion) {
+async function persistV2GeofenceEvidence(transition: GeofenceTransition, region: DayframeRegion, capture: LocationCaptureSnapshot) {
   const store = await import("./location/store");
   const rolloutMode = await store.getLocationRolloutMode();
+  if (!capture.context || !isLocationCaptureSnapshotCurrent(capture)) return null;
+  const identifier = region.identifier?.slice(0, 160) ?? "";
+  const placeId = identifier.split(":").at(-1) ?? "";
+  if (!capture.context.savedPlaces.some(place => place.id === placeId)) {
+    await store.recordLocationCaptureDiscard("foreign_place", 1);
+    return null;
+  }
+  // Expo gives no source timestamp for region events. Bind the registration
+  // itself to the capture generation, including opt-out/re-enable and A/B/A.
+  if (identifier !== `${capture.binding!.id}:${placeId}`) {
+    await store.recordLocationCaptureDiscard("stale_epoch", 1);
+    return null;
+  }
   if (rolloutMode === "v1") return { rolloutMode };
-  const context = await store.activeLocationCaptureContext();
   const occurredAt = new Date().toISOString();
-  const identifier = region.identifier?.slice(0, 160) || "unknown-region";
   const evidence = LocationEvidenceSchema.parse({
     clientEvidenceId: `geofence-${transition}-${identifier}-${Date.parse(occurredAt)}`,
-    deviceId: context.deviceId ?? "unbound-device",
+    deviceId: capture.context.deviceId,
     algorithmVersion: LOCATION_ENGINE_V2_CONFIG.algorithmVersion,
     kind: transition === "enter" ? "geofence_enter" : "geofence_exit",
     occurredAt,
-    savedPlaceId: UUID_RE.test(identifier) ? identifier : null,
+    savedPlaceId: UUID_RE.test(placeId) ? placeId : null,
     geofenceIdentifier: identifier,
     receivedAt: occurredAt,
-    timeZone: context.timeZone ?? "Europe/London",
+    timeZone: capture.context.timeZone,
     metadata: {}
   } satisfies LocationEvidence);
-  await store.persistLocationEvidence([evidence]);
-  void store.syncLocationEvidence().catch(recordV2LocationFailure);
+  await store.persistLocationEvidence([evidence], capture);
+  if (isLocationCaptureSnapshotCurrent(capture)) void store.syncLocationEvidence().catch(error => recordV2LocationFailure(error, capture));
   return { rolloutMode };
 }
 
-async function recordV2LocationFailure(error: unknown) {
+async function recordV2LocationFailure(error: unknown, capture: LocationCaptureSnapshot) {
+  if (!isLocationCaptureSnapshotCurrent(capture)) return;
   const message = error instanceof Error ? error.message : "Location Intelligence V2 could not persist evidence.";
   await updateLocationDiagnostics({
     lastStatus: message.slice(0, 180),
     lastEventAt: new Date().toISOString()
-  });
+  }, capture);
   await import("./location/store")
-    .then(({ recordLocationStoreError }) => recordLocationStoreError(error))
+    .then(({ recordLocationStoreError }) => isLocationCaptureSnapshotCurrent(capture) ? recordLocationStoreError(error) : undefined)
     .catch(() => undefined);
 }
 
 async function readOpenVisits() {
-  return parseJson<Record<string, OpenVisit>>(await AsyncStorage.getItem(OPEN_VISITS_KEY), {});
+  return parseJson<Record<string, OpenVisit>>(await readLocationCache(OPEN_VISITS_KEY), {});
 }
 
 async function writeOpenVisits(visits: Record<string, OpenVisit>) {
-  await AsyncStorage.setItem(OPEN_VISITS_KEY, JSON.stringify(visits));
+  await writeLocationCache(OPEN_VISITS_KEY, JSON.stringify(visits));
 }
 
 async function readSeenVisitIds() {
-  return parseJson<string[]>(await AsyncStorage.getItem(SEEN_VISIT_IDS_KEY), []);
+  return parseJson<string[]>(await readLocationCache(SEEN_VISIT_IDS_KEY), []);
 }
 
 async function writeSeenVisitIds(ids: string[]) {
-  await AsyncStorage.setItem(SEEN_VISIT_IDS_KEY, JSON.stringify(ids));
+  await writeLocationCache(SEEN_VISIT_IDS_KEY, JSON.stringify(ids));
 }
 
 async function readLastCompletedVisit() {
-  return parseJson<CompletedVisit | null>(await AsyncStorage.getItem(LAST_COMPLETED_VISIT_KEY), null);
+  return parseJson<CompletedVisit | null>(await readLocationCache(LAST_COMPLETED_VISIT_KEY), null);
 }
 
 async function writeLastCompletedVisit(visit: CompletedVisit) {
-  await AsyncStorage.setItem(LAST_COMPLETED_VISIT_KEY, JSON.stringify(visit));
+  await writeLocationCache(LAST_COMPLETED_VISIT_KEY, JSON.stringify(visit));
 }
 
 async function readLearnedPlaceClusters() {
-  return parseJson<LearnedPlaceCluster[]>(await AsyncStorage.getItem(LEARNED_PLACE_CLUSTERS_KEY), []);
+  return parseJson<LearnedPlaceCluster[]>(await readLocationCache(LEARNED_PLACE_CLUSTERS_KEY), []);
 }
 
 async function writeLearnedPlaceClusters(clusters: LearnedPlaceCluster[]) {
-  await AsyncStorage.setItem(LEARNED_PLACE_CLUSTERS_KEY, JSON.stringify(clusters));
+  await writeLocationCache(LEARNED_PLACE_CLUSTERS_KEY, JSON.stringify(clusters));
 }
 
-async function readLocationDiagnostics(): Promise<LocationVisitDiagnostics> {
+async function readLocationDiagnostics(capture?: LocationCaptureSnapshot): Promise<LocationVisitDiagnostics> {
   return {
     foregroundPermission: "unknown",
     backgroundPermission: "unknown",
     activeMonitorCount: 0,
-    ...parseJson<Partial<LocationVisitDiagnostics>>(await AsyncStorage.getItem(LOCATION_DIAGNOSTICS_KEY), {})
+    ...parseJson<Partial<LocationVisitDiagnostics>>(await readLocationCache(LOCATION_DIAGNOSTICS_KEY, capture), {})
   };
 }
 
-async function updateLocationDiagnostics(patch: Partial<LocationVisitDiagnostics>) {
-  const current = await readLocationDiagnostics();
-  await AsyncStorage.setItem(LOCATION_DIAGNOSTICS_KEY, JSON.stringify({ ...current, ...patch }));
+async function updateLocationDiagnostics(patch: Partial<LocationVisitDiagnostics>, captured?: LocationCaptureSnapshot) {
+  const capture = captured ?? await captureLocationOwnership();
+  const current = await readLocationDiagnostics(capture);
+  await writeLocationCache(LOCATION_DIAGNOSTICS_KEY, JSON.stringify({ ...current, ...patch }), capture);
 }
 
 function permissionLabel(status?: string): LocationPermissionLabel {

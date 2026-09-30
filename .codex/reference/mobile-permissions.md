@@ -36,6 +36,12 @@ Recommended product states:
 
 Request foreground location first. Explain background/Always access before requesting it. If `canAskAgain` is false, provide an Open Settings action.
 
+## Account consent and capture lifetime
+
+OS Location permission and Dayframe account consent are separate. Consent is keyed by backend/workspace/user; a new account defaults off. Existing device-wide consent migrates only when the persisted Location binding matches the hydrated active account. Otherwise discard it and request explicit opt-in. Settings and diagnostics expose only the active owner's places and consent.
+
+Explicit logout warns about deleting local unsynchronised Location evidence. A definitive 401/revocation stops capture and ends admission but retains accepted evidence for its original owner under existing retention. Network failure, Keychain unavailability, suspension and same-owner refresh are not sign-out. Cold/headless capture hydrates the persisted owner before deciding there is no owner. Opt-out invalidates in-flight observations and region registrations; re-enable creates a fresh lifetime. Validate stale A cleanup, delayed native/Expo callbacks, A→B→A and per-account cache/consent isolation in addition to OS permission states.
+
 ## Geofence Runtime Guardrails
 
 - Keep the geofence task definition at module top level and keep `location` in the iOS background modes.

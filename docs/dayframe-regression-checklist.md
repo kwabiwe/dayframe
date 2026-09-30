@@ -387,6 +387,14 @@ Before merging implementation PRs, ask KB to test the exact Ready Preview promot
 - [ ] One slow Health reprocess unit does not hold later candidate rows or discard committed siblings; cursor continuation reaches later work and returns truthful partial/remaining results.
 - [ ] The named production Review, missing Sleep and missing commute have separate source-to-visible-state evidence. Empty queues, accepted status alone and green tests are insufficient incident closure.
 
+## Location capture ownership
+
+- Explicit logout stops Expo locations, geofences and native monitoring; removes only the signing-out owner's local Location data after a clear warning; and leaves no unbound bucket. Signed-out callbacks cannot enter the next account's upload.
+- Headless authoritative 401 sign-out stops admission without Dashboard. Accepted A-owned unsent rows survive under retention; B cannot read/upload/relabel them; returning A can resume them despite a new admission cutoff.
+- A→B, A→B→A, mixed-time Expo batches, completed and straddling Visits, old region registrations and switches during native drain/SQLite insertion/OS teardown reject stale evidence. Native clears and late A cleanup cannot touch B's authorised capture, consent, catalogue or journal.
+- B starts off with no A place names; A restores its own consent. Legacy unbound cleanup is idempotent and ambiguous device consent never migrates to the next login. Opt-out invalidates callbacks and re-enable uses a new generation.
+- Offline, locked-Keychain and cold/headless same-owner capture remain durable; ordinary bootstrap and token refresh preserve the enabled generation and cutoff. Synthetic SQLite/task results are not physical-iPhone evidence.
+
 ## Location reliability
 
 - [ ] Maximum evidence batch uses one insert, preserves every mapped field and

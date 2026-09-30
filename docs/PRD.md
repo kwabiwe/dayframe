@@ -293,6 +293,8 @@ Authorization:
 - Data is scoped by `workspace_id` and `user_id`.
 - Supabase RLS policies mirror workspace membership as defense-in-depth.
 - Integration tokens are separate from user sessions.
+- Location consent is specific to the authenticated backend/workspace/user. Signed-out, stale-generation and pre-binding observations cannot become the next account's history; a Visit starting before binding is discarded without clipping or replacing its arrival.
+- Explicit logout warns that local unsynchronised Location evidence is removed. Definitive involuntary authentication invalidation stops new capture but retains previously accepted evidence for its original owner under the existing seven-day retention; offline operation and same-owner refresh do not sign the user out.
 
 Required hosted environment variables:
 

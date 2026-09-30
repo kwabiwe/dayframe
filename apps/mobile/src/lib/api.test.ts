@@ -7,6 +7,9 @@ import {
 } from "./timerPresentation";
 import { createDeletionCoordinator } from "./historyDeletion";
 
+const locationLifecycle = vi.hoisted(() => ({bind:vi.fn(async()=>true),end:vi.fn(async()=>undefined)}));
+vi.mock("./location/runtime",()=>({bindLocationCaptureOwner:locationLifecycle.bind,endLocationCaptureOwnership:locationLifecycle.end}));
+
 const TIMER_STOP_OWNER = { userId: "user-a", workspaceId: "workspace-a" };
 const ACCOUNT_B_OWNER = { userId: "user-b", workspaceId: "workspace-b" };
 const TIMER_TARGET_A = "80000000-0000-4000-8000-000000000001";
@@ -94,6 +97,7 @@ const {
   ignoreLearnedPlace,
   isNetworkTimerError,
   login,
+  logout,
   normaliseLocationReviewRequestError,
   readQueue,
   readTimerEntryIdCorrelations,
@@ -210,6 +214,29 @@ describe("mobile API client", () => {
     expect(queue[0]).toMatchObject({localId:input.localId,failureCount:21,queuedAt:"2026-07-01T00:01:00Z",healthOwner});
   });
 
+  it("ends explicit Location ownership with the captured owner before logout completes", async () => {
+    storeBoundSession("session-token");
+    locationLifecycle.end.mockClear();
+    vi.stubGlobal("fetch", vi.fn(async () => jsonResponse({ok:true})));
+    await logout();
+    expect(locationLifecycle.end).toHaveBeenCalledWith("logout", TIMER_STOP_OWNER, expect.any(Function));
+    expect(await getSessionToken()).toBeNull();
+    expect(await readOwnedAuthenticatedSessionSnapshot(TIMER_STOP_OWNER)).toMatchObject({status:"signed_out"});
+  });
+
+  it.each([ACCOUNT_B_OWNER,TIMER_STOP_OWNER])("fences delayed explicit logout against a replacement login (%j)",async(nextOwner)=>{
+    await setSessionToken("old-session",TIMER_STOP_OWNER);
+    let release!: (response:Response)=>void;
+    vi.stubGlobal("fetch",vi.fn(()=>new Promise<Response>(resolve=>{release=resolve;})));
+    const pending=logout();
+    const rejected=expect(pending).rejects.toBeInstanceOf(StaleMobileSessionResponseError);
+    await vi.waitFor(()=>expect(release).toBeDefined());
+    await setSessionToken("replacement-session",nextOwner);await activateMobileAccount(nextOwner);
+    release(jsonResponse({ok:true}));await rejected;
+    expect(await getSessionToken()).toBe("replacement-session");
+    expect(await readOwnedAuthenticatedSessionSnapshot(nextOwner)).toMatchObject({status:"authenticated"});
+  });
+
   it("stores the Dayframe app session token after login", async () => {
     vi.stubGlobal(
       "fetch",
@@ -227,6 +254,7 @@ describe("mobile API client", () => {
 
     const result = await login("user@example.com", "password");
 
+    expect(locationLifecycle.bind).toHaveBeenCalledWith({userId:"user-1",workspaceId:"workspace-1"});
     expect("token" in result ? result.token : null).toBe("dayframe-token");
     await expect(getSessionToken()).resolves.toBe("dayframe-token");
   });
