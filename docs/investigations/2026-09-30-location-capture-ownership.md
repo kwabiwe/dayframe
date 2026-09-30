@@ -2,7 +2,7 @@
 
 Status: focused draft implementation on `codex/location-capture-ownership`. No release or physical acceptance is claimed. Paused PR #212 is separate and untouched.
 
-The initial-head implementation/checks below are historical. The subsequent correction of Claude’s I-1–I-4 findings on existing PR #213 is recorded in [review fixes](2026-09-30-location-capture-ownership-review-fixes.md), including actual material filenames, real API/SQLite probes, distinct capture/semantic cutovers and the retained upload/context expiry gap. That note carries the current correction evidence.
+The initial-head implementation/checks below are historical. The subsequent correction of Claude’s I-1–I-4 findings on existing PR #213 is recorded in [review fixes](2026-09-30-location-capture-ownership-review-fixes.md), including actual material filenames, real API/SQLite probes, distinct capture/semantic cutovers and the retained upload/context expiry gap. The later R-1–R-3 follow-up from `046d840` is recorded in [residual lifecycle corrections](2026-09-30-location-capture-ownership-residual-lifecycle.md); each note preserves its historical checks.
 
 ## Actual materials read
 

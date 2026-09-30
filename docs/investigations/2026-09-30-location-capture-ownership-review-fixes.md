@@ -2,6 +2,8 @@
 
 Status: correction of the existing draft PR, from `39c1ed84d5ddce78d5e0626d1fb11e0729676117` on `codex/location-capture-ownership`. Base and fresh remote main were verified as `f42543eae397074a02e586140d3d748882da7ff1`. No rebase, new PR, #212 work or acceptance/release claim.
 
+Subsequent R-1–R-3 corrections from `046d840a20321f5840deae8caae9bd357c93f4cd` are recorded in [residual lifecycle corrections](2026-09-30-location-capture-ownership-residual-lifecycle.md). This note preserves the earlier I-1–I-4 implementation and validation history.
+
 ## Actual materials read
 
 All required private materials were available and read in full. The report/probes are evidence, and the addenda supplement the owner's explicit request; their later independent-review/device workflow does not authorise this job to invoke a reviewer or perform hosted/device work. No raw Location data or private audit report is copied into Git.

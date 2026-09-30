@@ -252,7 +252,10 @@ TaskManager.defineTask(DAYFRAME_LOCATION_LEARNING_TASK, async ({ data, error }) 
     return;
   }
   const enabled = await getLocationLearningEnabled();
-  if (!enabled) return;
+  if (!enabled) {
+    await stopUnownedLocationCapture(capture);
+    return;
+  }
   const payload = data as { locations?: Location.LocationObject[] };
   const locations = [...(payload.locations ?? [])].sort((left, right) => left.timestamp - right.timestamp);
   const persisted = await persistV2LocationBatch(locations, capture).catch(async (persistError) => {

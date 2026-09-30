@@ -15,7 +15,9 @@ const h = vi.hoisted(() => ({
   nativeCalls: [] as string[],
   appState: { currentState: "active" },
   beforeRun: null as ((sql: string) => Promise<void>) | null,
-  cleanupFailure: false
+  cleanupFailure: false,
+  onRemove: null as ((key: string) => Promise<void>) | null,
+  onSet: null as ((key: string, value: string) => Promise<void>) | null
 }));
 vi.mock("expo-sqlite", () => ({ openDatabaseAsync: h.open }));
 vi.mock("./config", () => ({ DAYFRAME_API_BASE: "https://fixture.invalid" }));
@@ -37,8 +39,8 @@ vi.mock("expo-secure-store", () => ({
 vi.mock("@react-native-async-storage/async-storage", () => ({
   default: {
     getItem: vi.fn(async (k: string) => h.asyncStore.get(k) ?? null),
-    setItem: vi.fn(async (k: string, v: string) => { h.asyncStore.set(k, v); }),
-    removeItem: vi.fn(async (k: string) => { h.asyncStore.delete(k); })
+    setItem: vi.fn(async (k: string, v: string) => { if (h.onSet) await h.onSet(k, v); h.asyncStore.set(k, v); }),
+    removeItem: vi.fn(async (k: string) => { if (h.onRemove) await h.onRemove(k); h.asyncStore.delete(k); })
   }
 }));
 vi.mock("expo-task-manager", () => ({
@@ -120,7 +122,7 @@ async function signInThroughApi(owner: typeof A, places: unknown[] = [], enable 
 }
 
 beforeEach(async () => {
-  h.beforeRun = null; h.cleanupFailure = false;
+  h.beforeRun = null; h.cleanupFailure = false; h.onRemove = null; h.onSet = null;
   vi.resetModules(); h.tasks.clear(); h.asyncStore.clear(); h.secure.clear(); h.nativeSignals = []; h.nativeCalls.length = 0; h.dbs.clear(); calls.length = 0;
   vi.useFakeTimers({ toFake: ["Date"] }); vi.setSystemTime(T0);
   db = new DatabaseSync(":memory:");
@@ -146,7 +148,7 @@ beforeEach(async () => {
 afterEach(async () => {
   await settle(); db.close();
   for (const database of h.dbs.values()) database.close();
-  vi.useRealTimers(); vi.unstubAllGlobals();
+  vi.useRealTimers(); vi.unstubAllGlobals(); vi.unstubAllEnvs();
 });
 
 function deferred() { let resolve!: () => void; const promise = new Promise<void>(r => { resolve = r; }); return { promise, resolve }; }
@@ -395,5 +397,326 @@ describe("Location logout and authentication — real API and SQLite", () => {
     expect(segmentStartedAfterSemanticCutover(new Date(T0 + 180_000).toISOString(), decision.semanticCutoverAt!)).toBe(true);
     expect(segmentStartedAfterSemanticCutover(new Date(T0 + 1_000).toISOString(), decision.semanticCutoverAt!)).toBe(false);
     expect(decideLocationRollout("v2_shadow", replay.rolloutMode, replay.semanticModeAcknowledgedAt).emitV2ReviewItems).toBe(false);
+  });
+});
+
+// Claude's R-1 B4/B4b, R-2 B11 and R-3 A4/A4b observations are contracts here.
+// Gates force the actual storage/queue window; no session/account/store doubles.
+const consentKey = (owner = A) => `dayframe.location.learning.enabled.v1:account:https%3A%2F%2Ffixture.invalid:${key(owner)}`;
+function osState() {
+  const state = { learning: false, geofencing: false, native: false };
+  for (const call of h.nativeCalls) {
+    if (call === "expo:startLocationUpdates") state.learning = true;
+    if (call === "expo:stopLocationUpdates") state.learning = false;
+    if (call === "expo:startGeofencing") state.geofencing = true;
+    if (call === "expo:stopGeofencing") state.geofencing = false;
+    if (call === "startMonitoring") state.native = true;
+    if (call === "stopMonitoring") state.native = false;
+  }
+  return state;
+}
+const stopped = { learning: false, geofencing: false, native: false };
+const running = { learning: true, geofencing: true, native: true };
+async function dashboardBootstrap() {
+  const result = await api.fetchBootstrap();
+  await runtime.configureLocationIntelligence(result);
+  await geofence.refreshGeofencesForPlaces(result.places, { userId: result.user.id, workspaceId: result.workspace.id });
+}
+
+describe("PR 213 residual lifecycle regressions", () => {
+  it.each([[true, false], [false, false], [true, true]])("R-1 refuses the departing bootstrap inside final account removal (screen applies: %s, legacy token: %s)", async (apply, legacy) => {
+    vi.stubEnv("VITEST", ""); // exercise the real Review projection as well
+    await signInThroughApi(A, [place]);
+    if (legacy) await session.setSessionToken("legacy-ownerless-token");
+    await learningTask()({ data: { locations: [fix(T0 + 1_000)] }, error: null });
+    const response = deferred(), activationAttempted = deferred();
+    routes["/api/bootstrap"] = async () => {
+      await response.promise;
+      return json({ ...(bootstrap(A, [place]) as object), entries: [], categories: [], reviewItems: [] });
+    };
+    const activate = account.activateMobileAccount;
+    const spy = vi.spyOn(account, "activateMobileAccount").mockImplementation(owner => {
+      activationAttempted.resolve();
+      return activate(owner);
+    });
+    const caller = (apply ? dashboardBootstrap() : api.fetchBootstrap()).then(() => "applied", (error: Error) => error.name);
+    let used = false;
+    h.onRemove = async k => {
+      if (used || k !== "dayframe.activeMobileAccount.v1") return;
+      used = true;
+      response.resolve();
+      // Old code queues activation behind this remove; fixed code rejects it.
+      await Promise.race([activationAttempted.promise, caller]);
+    };
+    await api.logout();
+    await caller; await settle();
+    spy.mockRestore();
+    expect(used).toBe(true);
+    expect(await caller).toBe("StaleMobileSessionResponseError");
+    expect(await session.getSessionToken()).toBeNull();
+    expect(await account.readActiveMobileAccount()).toBeNull();
+    expect(await store.readLocationCaptureBinding()).toBeNull();
+    await learningTask()({ data: { locations: [fix(T0 + 4_000)] }, error: null });
+    (await import("./mobileSessionTransition")).publishMobileSignedOut();
+    await settle();
+    expect(counts()).toEqual([0, 0, 0, 0, 0]);
+    expect(osState()).toEqual(stopped);
+    const reviewDb = h.dbs.get("dayframe-review-sync.db");
+    expect(reviewDb).toBeDefined();
+    for (const table of ["review_account_context", "review_item_cache"]) {
+      expect((reviewDb!.prepare(`select count(*) n from ${table}`).get() as { n: number }).n).toBe(0);
+    }
+  });
+
+  it.each(["logout", "401"] as const)("R-2 stores a queued authorised opt-out overtaken by %s; A returns off", async event => {
+    await signInThroughApi(A, [place]);
+    await learningTask()({ data: { locations: [fix(T0 + 1_000)] }, error: null });
+    const accepted = rows()[0].id;
+    const blocked = deferred(), entered = deferred();
+    const lane = runtime.withLocationCaptureLifecycle(async () => { entered.resolve(); await blocked.promise; });
+    await entered.promise;
+    const revision = store.locationCaptureRevision();
+    const off = geofence.setLocationLearningEnabled(false, [place], A);
+    await vi.waitFor(() => expect(store.locationCaptureRevision()).toBeGreaterThan(revision));
+    let departing: Promise<unknown>;
+    if (event === "logout") {
+      departing = api.logout();
+      await vi.waitFor(() => expect(store.locationCaptureRevision()).toBeGreaterThan(revision + 1));
+    } else {
+      routes["/api/timer-state"] = () => json({ error: "unauthorized" }, 401);
+      departing = api.fetchTimerState().catch((error: Error) => error.name);
+      await vi.waitFor(async () => expect(await session.getSessionToken()).toBeNull());
+    }
+    blocked.resolve(); await lane; await departing; await off; await settle();
+    expect(h.asyncStore.get(consentKey())).toBe("false");
+    expect(rows().some(row => row.id === accepted)).toBe(event === "401");
+    vi.setSystemTime(T0 + 60_000);
+    await signInThroughApi(A, [place], false);
+    expect(await geofence.getLocationLearningEnabled()).toBe(false);
+    expect((await store.readLocationCaptureBinding())?.enabled).toBe(false);
+    expect(osState()).toEqual(stopped);
+    await learningTask()({ data: { locations: [fix(T0 + 61_000)] }, error: null });
+    expect(rows().some(row => row.t === new Date(T0 + 61_000).toISOString())).toBe(false);
+  });
+
+  it.each([false, true])("R-3 reconciles durable off after interrupted opt-out (headless restart: %s)", async restart => {
+    await signInThroughApi(A, [place], true, "v2_review");
+    await learningTask()({ data: { locations: [fix(T0 + 1_000)] }, error: null });
+    const accepted = rows()[0].id;
+    const eligibility = db.prepare("select value from location_store_metadata where key=?").get(`semantic_eligibility:${key(A)}`);
+    await geofence.writeLocationLearningPreference(A, false); // process stopped before binding/OS steps
+    if (restart) {
+      vi.resetModules(); h.tasks.clear();
+      geofence = await import("./geofence"); account = await import("./mobileAccount"); session = await import("./secure-session");
+      store = await import("./location/store"); runtime = await import("./location/runtime"); api = await import("./api");
+    }
+    // Learning alone must reconcile, without a geofence callback or mounted UI.
+    await learningTask()({ data: { locations: [fix(T0 + 2_000)] }, error: null });
+    await settle();
+    expect(osState()).toEqual(stopped);
+    expect(rows().map(row => row.id)).toEqual([accepted]);
+    await runtime.configureLocationIntelligence(bootstrap(A, [place], "v2_review"));
+    await geofence.refreshGeofencesForPlaces([place], A);
+    expect((await store.readLocationCaptureBinding())?.enabled).toBe(false);
+    expect(osState()).toEqual(stopped);
+    expect(db.prepare("select value from location_store_metadata where key=?").get(`semantic_eligibility:${key(A)}`)).toEqual(eligibility);
+    expect((await store.prepareLocationUploadBatch(A, { forceUploadRetry: true }))?.body_json).toContain(accepted);
+  });
+});
+
+// Related failure/replacement controls for the same three residuals.
+describe("residual lifecycle ordering and failure controls", () => {
+  it.each([B, A])("R-1 genuine replacement $userId during account-removal I/O keeps its session and bootstrap", async next => {
+    await signInThroughApi(A, [place]);
+    const blocked = deferred(), entered = deferred();
+    let used = false;
+    h.onRemove = async k => {
+      if (used || k !== "dayframe.activeMobileAccount.v1") return;
+      used = true; entered.resolve(); await blocked.promise;
+    };
+    const logout = api.logout().catch((error: Error) => error.name);
+    await entered.promise;
+    vi.setSystemTime(T0 + 60_000);
+    routes["/api/auth/login"] = () => json({ token: "new-session", user: { id: next.userId }, workspace: { id: next.workspaceId } });
+    const login = api.login("x@example.test", "synthetic");
+    await vi.waitFor(async () => expect(await session.getSessionToken()).toBe("new-session"));
+    blocked.resolve(); await login;
+    expect(await logout).toBe("StaleMobileSessionResponseError");
+    routes["/api/bootstrap"] = () => json({ ...(bootstrap(next, [place]) as object), entries: [], categories: [], reviewItems: [] });
+    await dashboardBootstrap();
+    await geofence.setLocationLearningEnabled(true, [place], next);
+    const binding = await store.readLocationCaptureBinding();
+    await settle();
+    expect(await session.getSessionToken()).toBe("new-session");
+    expect(await account.readActiveMobileAccount()).toEqual(next);
+    expect(binding).toMatchObject({ accountKey: key(next), enabled: true });
+    expect(osState()).toEqual(running);
+    await learningTask()({ data: { locations: [fix(T0 + 61_000)] }, error: null });
+    expect(rows()).toEqual([expect.objectContaining({ k: key(next) })]);
+  });
+
+  it("R-1 blocks departing bootstrap activation when logout starts without a Location binding", async () => {
+    await signInThroughApi(A, [place]);
+    await runtime.endLocationCaptureOwnership("no_owner", A);
+    expect(await store.readLocationCaptureBinding()).toBeNull();
+    const entered = deferred(), blocked = deferred();
+    routes["/api/auth/logout"] = async () => { entered.resolve(); await blocked.promise; return json({ ok: true }); };
+    const logout = api.logout();
+    await entered.promise;
+    routes["/api/bootstrap"] = () => json({ ...(bootstrap(A, [place]) as object), entries: [], categories: [], reviewItems: [] });
+    await expect(dashboardBootstrap()).rejects.toMatchObject({ name: "StaleMobileSessionResponseError" });
+    blocked.resolve(); await logout; await settle();
+    expect(counts()).toEqual([0, 0, 0, 0, 0]);
+    expect(await account.readActiveMobileAccount()).toBeNull();
+  });
+
+  it.each([B, A])("R-2 pending A off cannot overwrite a newer authorised opt-in or affect $userId", async next => {
+    await signInThroughApi(A, [place]);
+    const oldCapture = await store.captureLocationOwnership();
+    await geofence.writeLocationLearningPreference(B, true); // previously authorised B consent
+    const blocked = deferred(), entered = deferred();
+    const lane = runtime.withLocationCaptureLifecycle(async () => { entered.resolve(); await blocked.promise; });
+    await entered.promise;
+    const revision = store.locationCaptureRevision();
+    const off = geofence.setLocationLearningEnabled(false, [place], A);
+    await vi.waitFor(() => expect(store.locationCaptureRevision()).toBeGreaterThan(revision));
+    vi.setSystemTime(T0 + 60_000);
+    routes["/api/auth/login"] = () => json({ token: "new-session", user: { id: next.userId }, workspace: { id: next.workspaceId } });
+    const login = api.login("x@example.test", "synthetic");
+    await vi.waitFor(async () => {
+      expect(await session.getSessionToken()).toBe("new-session");
+      expect(await account.readActiveMobileAccount()).toEqual(next);
+    });
+    const on = geofence.setLocationLearningEnabled(true, [place], next);
+    blocked.resolve(); await lane; await off; await login; await on;
+    await runtime.configureLocationIntelligence(bootstrap(next, [place]));
+    await settle();
+    expect(h.asyncStore.get(consentKey(A))).toBe(next === A ? "true" : "false");
+    expect(h.asyncStore.get(consentKey(B))).toBe("true");
+    expect((await store.readLocationCaptureBinding())?.enabled).toBe(true);
+    expect(osState()).toEqual(running);
+    const callsBefore = h.nativeCalls.length;
+    await runtime.stopUnownedLocationCapture(oldCapture);
+    if (next === B) await geofence.setLocationLearningEnabled(false, [place], A); // stale screen
+    await settle();
+    expect(h.nativeCalls.slice(callsBefore).filter(c => c.includes("stop") || c === "clearAllSignals")).toEqual([]);
+    expect(osState()).toEqual(running);
+  });
+
+  it("R-2 preference failure rejects the toggle, keeps admission closed through bootstrap, and permits explicit retry", async () => {
+    await signInThroughApi(A, [place]);
+    h.onSet = async (k, value) => { if (k === consentKey() && value === "false") throw new Error("Synthetic consent storage failure"); };
+    await expect(geofence.setLocationLearningEnabled(false, [place], A)).rejects.toThrow("Synthetic consent storage failure");
+    h.onSet = null;
+    expect(h.asyncStore.get(consentKey())).toBe("true"); // no false durable-success claim
+    expect((await store.readLocationCaptureBinding())?.enabled).toBe(false);
+    expect(osState()).toEqual(stopped);
+    await runtime.configureLocationIntelligence(bootstrap(A, [place]));
+    await geofence.refreshGeofencesForPlaces([place], A);
+    await learningTask()({ data: { locations: [fix(T0 + 1_000)] }, error: null });
+    expect(rows()).toEqual([]);
+    expect(osState()).toEqual(stopped);
+    expect((await store.readLocationCaptureBinding())?.enabled).toBe(false);
+    vi.setSystemTime(T0 + 60_000);
+    await geofence.setLocationLearningEnabled(true, [place], A);
+    expect((await store.readLocationCaptureBinding())?.enabled).toBe(true);
+    expect(osState()).toEqual(running);
+  });
+
+  it("R-3 SQLite failure after durable off still attempts every OS stop and recovers without losing accepted data", async () => {
+    await signInThroughApi(A, [place]);
+    await learningTask()({ data: { locations: [fix(T0 + 1_000)] }, error: null });
+    const accepted = rows()[0].id;
+    h.beforeRun = async sql => { if (sql.includes("insert into location_account_context")) throw new Error("Synthetic post-consent SQLite failure"); };
+    h.nativeCalls.length = 0;
+    await expect(geofence.setLocationLearningEnabled(false, [place], A)).rejects.toThrow("Synthetic post-consent SQLite failure");
+    h.beforeRun = null;
+    expect(h.asyncStore.get(consentKey())).toBe("false");
+    expect(h.nativeCalls).toEqual(expect.arrayContaining(["expo:stopLocationUpdates", "expo:stopGeofencing", "stopMonitoring", "clearAllSignals"]));
+    await learningTask()({ data: { locations: [fix(T0 + 2_000)] }, error: null });
+    await runtime.configureLocationIntelligence(bootstrap(A, [place]));
+    expect(rows().map(row => row.id)).toEqual([accepted]);
+    expect((await store.readLocationCaptureBinding())?.enabled).toBe(false);
+    expect(osState()).toEqual(stopped);
+  });
+
+  it("R-3 a real 401 after off is persisted cancels capture work but still reconciles OS teardown", async () => {
+    await signInThroughApi(A, [place]);
+    await learningTask()({ data: { locations: [fix(T0 + 1_000)] }, error: null });
+    const accepted = rows()[0].id;
+    let used = false;
+    h.onSet = async (k, value) => {
+      if (used || k !== consentKey() || value !== "false") return;
+      used = true; h.asyncStore.set(k, value); // durable edge before invalidation
+      routes["/api/timer-state"] = () => json({ error: "unauthorized" }, 401);
+      await api.fetchTimerState().catch(() => undefined);
+    };
+    await geofence.setLocationLearningEnabled(false, [place], A); await settle();
+    h.onSet = null;
+    expect(used).toBe(true);
+    expect(h.asyncStore.get(consentKey())).toBe("false");
+    expect(await session.getSessionToken()).toBeNull();
+    expect(await account.readActiveMobileAccount()).toBeNull();
+    expect(osState()).toEqual(stopped);
+    expect(rows().map(row => row.id)).toEqual([accepted]);
+  });
+
+  it("R-3 OS failure reports incomplete cleanup and a later disabled callback retries it", async () => {
+    await signInThroughApi(A, [place]);
+    const location = await import("expo-location");
+    vi.mocked(location.stopLocationUpdatesAsync).mockRejectedValueOnce(new Error("Synthetic OS stop failure"));
+    await expect(geofence.setLocationLearningEnabled(false, [place], A)).rejects.toThrow("some local capture cleanup failed");
+    expect(h.asyncStore.get(consentKey())).toBe("false");
+    expect((await store.readLocationCaptureBinding())?.enabled).toBe(false);
+    expect(osState()).toEqual({ learning: true, geofencing: false, native: false });
+    expect((await store.getLocationStoreDiagnostics()).captureCleanupFailureCount).toBeGreaterThan(0);
+    await learningTask()({ data: { locations: [fix(T0 + 1_000)] }, error: null });
+    await settle();
+    expect(osState()).toEqual(stopped);
+    expect(rows()).toEqual([]);
+  });
+});
+
+describe("opt-out OS lane reconciliation controls", () => {
+  it.each([B, A])("R-3 in-flight A stop finishes before authorised replacement $userId starts", async next => {
+    await signInThroughApi(A, [place]);
+    const blocked = deferred(), entered = deferred();
+    const location = await import("expo-location");
+    vi.mocked(location.stopLocationUpdatesAsync).mockImplementationOnce(async () => {
+      entered.resolve(); await blocked.promise; h.nativeCalls.push("expo:stopLocationUpdates");
+    });
+    const off = geofence.setLocationLearningEnabled(false, [place], A);
+    await entered.promise;
+    expect(h.asyncStore.get(consentKey())).toBe("false");
+    vi.setSystemTime(T0 + 60_000);
+    routes["/api/auth/login"] = () => json({ token: "new-session", user: { id: next.userId }, workspace: { id: next.workspaceId } });
+    const login = api.login("x@example.test", "synthetic");
+    await vi.waitFor(async () => {
+      expect(await session.getSessionToken()).toBe("new-session");
+      expect(await account.readActiveMobileAccount()).toEqual(next);
+    });
+    const on = geofence.setLocationLearningEnabled(true, [place], next);
+    blocked.resolve(); await off; await login; await on; await settle();
+    const binding = await store.readLocationCaptureBinding();
+    expect(binding).toMatchObject({ accountKey: key(next), enabled: true });
+    expect(osState()).toEqual(running);
+    const finalStop = h.nativeCalls.findLastIndex(c => c.includes("stop") || c === "clearAllSignals");
+    const finalStart = h.nativeCalls.findLastIndex(c => c === "startMonitoring");
+    expect(finalStop).toBeLessThan(finalStart);
+    const before = h.nativeCalls.length;
+    await learningTask()({ data: { locations: [fix(T0 + 61_000)] }, error: null }); await settle();
+    expect(h.nativeCalls.slice(before).filter(c => c.includes("stop") || c === "clearAllSignals")).toEqual([]);
+    expect(rows()).toEqual([expect.objectContaining({ k: key(next) })]);
+  });
+
+  it("R-3 foreground bootstrap alone reconciles interrupted durable off without waiting for a callback", async () => {
+    await signInThroughApi(A, [place]);
+    await geofence.writeLocationLearningPreference(A, false);
+    expect(osState()).toEqual(running);
+    await runtime.configureLocationIntelligence(bootstrap(A, [place]));
+    await geofence.refreshGeofencesForPlaces([place], A);
+    expect(osState()).toEqual(stopped);
+    expect((await store.readLocationCaptureBinding())?.enabled).toBe(false);
+    expect(h.asyncStore.get(consentKey())).toBe("false");
   });
 });

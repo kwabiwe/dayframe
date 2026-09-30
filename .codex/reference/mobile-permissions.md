@@ -44,6 +44,8 @@ Explicit logout warns about deleting local unsynchronised Location evidence and 
 
 Network failure, Keychain unavailability, suspension and same-owner refresh are not sign-out. Cold/headless capture hydrates the persisted owner before deciding there is no owner. Opt-out invalidates callbacks/registrations and retains a disabled context for accepted work; re-enable creates a fresh capture lifetime without resetting a valid same-owner/backend semantic cutover. Catalogue refresh never grants consent; tasks/starts/SQLite commits require the current scoped preference. Settings status must distinguish OS access, account consent and active monitors. Validate the real configure-then-refresh/opt-out race, no-binding logout, newer A reauthentication, delayed native/Expo callbacks, A→B→A and cold activation before hydration.
 
+Persist an already authorised owner's off decision in the lifecycle lane even if logout/401 supersedes its capture work. A later authorised on decision in that lane wins. Failed persistence rejects the toggle and keeps capture disabled through bootstrap until explicit retry; do not claim off was saved. Once off is durable, local-step failure must still attempt monitoring teardown, and disabled/off callbacks or bootstrap reconcile it. OS failures remain reported/counted; neither a process kill nor failed OS call proves immediate monitoring removal. Fence the real bootstrap activation caller through final logout account-removal I/O, including legacy tokens, while allowing a genuine newer A or B session.
+
 ## Geofence Runtime Guardrails
 
 - Keep the geofence task definition at module top level and keep `location` in the iOS background modes.

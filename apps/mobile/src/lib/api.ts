@@ -528,6 +528,10 @@ export async function fetchBootstrap(options: { date?: string; signal?: AbortSig
       userId: bootstrap.user.id,
       workspaceId: bootstrap.workspace.id
     };
+    const { isLocationLogoutCurrent } = await import("./location/runtime");
+    // Refuse the departing response before even binding a legacy token's owner.
+    if (isLocationLogoutCurrent(owner) || (sessionRead.status === "authenticated" &&
+      !isAuthenticatedSessionSnapshotCurrent(sessionRead.snapshot))) throw new StaleMobileSessionResponseError();
     if (sessionRead.status === "authenticated") {
       if (
         sessionRead.snapshot.owner &&
@@ -539,7 +543,16 @@ export async function fetchBootstrap(options: { date?: string; signal?: AbortSig
         throw new StaleMobileSessionResponseError();
       }
     }
+    const requireBootstrapCurrent = () => {
+      // Owner binding may have filled in a legacy ownerless token above. Its
+      // original generation/token still identify this response's lifetime.
+      if ((sessionRead.status === "authenticated" &&
+        !isAuthenticatedSessionSnapshotCurrent({ ...sessionRead.snapshot, owner })) ||
+        isLocationLogoutCurrent(owner)) throw new StaleMobileSessionResponseError();
+    };
+    requireBootstrapCurrent();
     await activateMobileAccount(owner);
+    requireBootstrapCurrent();
   }
   const reviewStore = await reviewSyncStore();
   if (!reviewStore) return bootstrap;
@@ -609,16 +622,19 @@ export async function logout() {
     const logoutOwner = session.status === "authenticated" ? session.snapshot.owner ?? activeOwner : activeOwner;
     if (activeOwner && logoutOwner && !mobileAccountOwnersEqual(activeOwner, logoutOwner)) throw new StaleMobileSessionResponseError();
     let accountDeactivated = false;
-    const isCurrent = () => (session.status === "authenticated"
+    const isSessionCurrent = () => session.status === "authenticated"
       ? isAuthenticatedSessionSnapshotCurrent(session.snapshot)
-      : session.status === "signed_out" && !sessionChanged) &&
+      : session.status === "signed_out" && !sessionChanged;
+    const isCurrent = () => isSessionCurrent() &&
       mobileAccountOwnersEqual(getActiveMobileAccountSnapshot(), accountDeactivated ? null : activeOwner);
     logoutSessionIsCurrent = isCurrent;
     const requireCurrent = () => { if (!isCurrent()) throw new StaleMobileSessionResponseError(); };
     requireCurrent();
     await import("./location/runtime").then(({ beginLocationLogout, endLocationCaptureOwnership }) => {
       requireCurrent();
-      finishLocationLogout = beginLocationLogout(logoutOwner, isCurrent);
+      // Account removal is not a new authenticated lifetime. The bootstrap
+      // fence remains valid through that I/O until this session is cleared.
+      finishLocationLogout = beginLocationLogout(logoutOwner, isSessionCurrent);
       return endLocationCaptureOwnership("logout", logoutOwner ?? undefined, isCurrent);
     });
     requireCurrent();
