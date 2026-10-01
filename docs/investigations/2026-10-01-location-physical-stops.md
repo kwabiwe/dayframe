@@ -1,0 +1,42 @@
+# Location physical stops and trips with stops — 1 October 2026
+
+Evidence record for the physical-stop PR. Canonical behaviour lives in [PRD](../PRD.md) and [Location learning guardrails](../../.codex/reference/location-learning.md); delivery state lives in the [tracker](../feature-fix-tracker.md). Private traces, phone copies and probes stay outside Git.
+
+## Problem
+
+Stop existence was decided by the same gates that decide whether a stop is worth showing: saved/learned stays needed five minutes of timestamped support and unknown stays ten minutes. Working stays were also formed per place identity. A genuine stop that was short, or that straddled a saved-place edge or mixed accuracy classes, was erased before journey formation, and the journeys either side merged into one same-place round trip that counted stop time as travel.
+
+## Evidence (retained staging traces, offline replay at `f5a967a`)
+
+- 29 Sep pickup: completed native Visit 550 s, slow accurate fixes spread over 92 s within about 34 m, movement either side. The working stay was dropped at the 600 s unknown gate. Output: one 710 s Home round trip.
+- 25 Sep car-park and local walking: every coordinate from about 18:19 to 18:42 UTC stayed within about 86 m of a 25-minute broad Visit, with 11–13 m/s movement either side. Identity transitions split it into fragments of at most 398 s, each dropped. Removing the nearby saved place did not change the result, so a duration-only exception would not fix it. Output: one 2,393 s Home round trip.
+- Owner labels for three further Visits on 28–29 Sep: kerbside drop-offs or pickups of about 30–60 seconds. iOS reported 297 s, 372 s and 430 s. One case had two slow fixes one second apart. **A native Visit's duration therefore cannot establish a stop**, and slow fixes must be spread over time.
+- Google Timeline on the same phone (comparison, not ground truth) merged those brief stops into drives and showed the 8–12 minute stops as uncertain visits. Dayframe boundaries matched it within about one minute.
+
+## Owner decisions
+
+- A short stop between journeys is recorded as **one trip containing the stop** (option A), not separate drive/stop/drive items. Longer stops that qualify as their own visit still split journeys.
+- A brief stop at a saved place should later influence the trip's name; brief stops at unknown places should not. Naming is follow-up work.
+
+## Change
+
+- `physicalStops.ts` detects stops independently of identity: accurate (≤65 m) independent slow fixes clustered within 100 m. Movement must be observed on both sides. Corroboration requires either a completed Visit plus at least two slow fixes spread at least 60 s, or three slow fixes spread at least 180 s. Stop times come from observed movement; a Visit estimate is only clamped inside those bounds. Stops shorter than 180 s are ignored.
+- Uncovered corroborated stops become ordinary unknown stays with `formation: "physical_stop"` and nearby saved places as candidates only.
+- Legs meeting at an unknown stay below the 20-minute visit Review threshold are assembled into one trip with coordinate-free `stops`. The trip keeps the endpoint-based identity of the former round trip. Trips with stops are never automatically logged (`journey_contains_stop`).
+- No migration: stops and formation use existing segment `metadata`. `algorithmVersion` is unchanged because it keys evidence and segment rows.
+
+## Offline corpus result (private, times only)
+
+Comparing `main` with the change over the retained 25–29 Sep trace and the 25 Sep staging snapshot:
+
+- The 29 Sep pickup is now a physical stop (about 501 s) inside the same Home trip ID.
+- The 29 Sep morning and 27 Sep stops of 11–12 minutes now sit inside one trip each, instead of two short journeys.
+- The 25 Sep local stop (about 24.5 minutes) now separates two journeys of about 7–8 minutes, with the stop as an unknown visit listing the nearby saved place as a candidate.
+- The three labelled brief stops are unchanged. No other segment changed.
+- Engine time on a laptop: 409 rows 3.7 → 4.4 ms; a synthetic 7-day replication of 2,863 rows 57 → 68 ms. This is not device or hosted evidence.
+
+## Not established
+
+- The thresholds are hypotheses checked against a small labelled set. Long stationary traffic queues in which iOS reports a Visit are not represented. A false split would show as two journeys; a commute merge action does not exist yet.
+- No hosted, staging, device or production validation is claimed here.
+- Output timeliness (quiet arrivals promoted only after departure, foreground-only native drain) and segment identity churn are unchanged and remain follow-ups.

@@ -520,7 +520,8 @@ async function persistStays(
       JSON.stringify({
         placeMatchKind: segment.placeMatchKind,
         candidatePlaceIds: segment.candidatePlaceIds,
-        ...(segment.approximateArrival ? { approximateArrival: true } : {})
+        ...(segment.approximateArrival ? { approximateArrival: true } : {}),
+        ...(segment.formation ? { formation: segment.formation } : {})
       })
     ]);
     // Trusted SQL template; only parameter positions vary with the bounded row index.
@@ -598,7 +599,9 @@ async function persistCommutes(
       segment.continuityStatus,
       segment.confidence,
       JSON.stringify({
-        qualificationReason: segment.qualificationReason ?? null
+        qualificationReason: segment.qualificationReason ?? null,
+        // Coordinate-free: times, bounds, the stop's own stay ID and candidate place IDs.
+        ...(segment.stops?.length ? { stops: segment.stops } : {})
       })
     ]);
     // Trusted SQL template; only parameter positions vary with the bounded row index.

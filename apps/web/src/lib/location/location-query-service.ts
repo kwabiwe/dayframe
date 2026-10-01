@@ -36,6 +36,7 @@ type ReviewSegmentRow = {
   fromLatitude: number | null;
   toLongitude: number | null;
   toLatitude: number | null;
+  tripStops: unknown;
 };
 
 type RejectedEvidenceRow = {
@@ -148,7 +149,8 @@ async function buildLocationReviewEvidence(
             case when from_stay.centre is null then null else ST_X(from_stay.centre::geometry) end as "fromLongitude",
             case when from_stay.centre is null then null else ST_Y(from_stay.centre::geometry) end as "fromLatitude",
             case when to_stay.centre is null then null else ST_X(to_stay.centre::geometry) end as "toLongitude",
-            case when to_stay.centre is null then null else ST_Y(to_stay.centre::geometry) end as "toLatitude"
+            case when to_stay.centre is null then null else ST_Y(to_stay.centre::geometry) end as "toLatitude",
+            cs.metadata->'stops' as "tripStops"
      from review_items ri
      join activity_events ae
        on ae.id = ri.event_id and ae.workspace_id = ri.workspace_id and ae.user_id = ri.user_id
@@ -259,6 +261,7 @@ async function buildLocationReviewEvidence(
   const evidenceExpired = expiryRows.length === 0 &&
     Date.now() - Date.parse(iso(review.stoppedAt) ?? iso(review.startedAt)!) >
       LOCATION_ENGINE_V2_CONFIG.rawEvidenceRetentionDays * 86_400_000;
+  const stops = tripStops(review.tripStops);
   const suggestedSplitPoints = gaps.map((gap) => ({
     at: new Date((Date.parse(gap.startedAt) + Date.parse(gap.stoppedAt)) / 2).toISOString(),
     reason: "evidence_gap" as const,
@@ -324,6 +327,7 @@ async function buildLocationReviewEvidence(
       gaps,
       nearbySavedPlaces: nearbyPlaces
     },
+    stops,
     suggestedSplitPoints,
     evidenceExpiresAt: expiresAt,
     evidenceExpired,
@@ -338,7 +342,8 @@ async function buildLocationReviewEvidence(
       suggestedSplitPoints.length,
       evidenceExpired,
       expiryRows.length > 0,
-      review
+      review,
+      stops
     )
   };
   const parsed = LocationReviewEvidenceDtoSchema.parse(dto);
@@ -447,6 +452,27 @@ function anchorLabel(kind: string) {
   return "Significant location change";
 }
 
+type TripStopDto = { startedAt: string; stoppedAt: string; durationSeconds: number; approximate: boolean };
+
+/** Reads coordinate-free trip stops from commute metadata; malformed entries are ignored. */
+function tripStops(value: unknown): TripStopDto[] {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((stop) => {
+    if (!stop || typeof stop !== "object") return [];
+    const { startedAt, stoppedAt, startLowerBoundAt, startUpperBoundAt } = stop as Record<string, unknown>;
+    const start = typeof startedAt === "string" ? Date.parse(startedAt) : NaN;
+    const stopAt = typeof stoppedAt === "string" ? Date.parse(stoppedAt) : NaN;
+    if (!Number.isFinite(start) || !Number.isFinite(stopAt) || stopAt <= start) return [];
+    return [{
+      startedAt: new Date(start).toISOString(),
+      stoppedAt: new Date(stopAt).toISOString(),
+      durationSeconds: Math.round((stopAt - start) / 1_000),
+      approximate: typeof startLowerBoundAt === "string" && typeof startUpperBoundAt === "string" &&
+        startLowerBoundAt !== startUpperBoundAt
+    }];
+  }).sort((a, b) => a.startedAt.localeCompare(b.startedAt));
+}
+
 function textualEvidenceSummary(
   kind: "stay" | "commute",
   sampleCount: number,
@@ -457,7 +483,8 @@ function textualEvidenceSummary(
   splitCount: number,
   evidenceExpired: boolean,
   rawEvidenceAvailable: boolean,
-  review: ReviewSegmentRow
+  review: ReviewSegmentRow,
+  stops: TripStopDto[] = []
 ) {
   const subject = kind === "stay" ? "visit" : "journey";
   const place = review.placeName ? ` near ${review.placeName}` : "";
@@ -473,5 +500,10 @@ function textualEvidenceSummary(
   const rejected = rejectedSampleCount
     ? ` ${rejectedSampleCount} noisy or invalid sample${rejectedSampleCount === 1 ? " was" : "s were"} excluded.`
     : "";
-  return `Time window: ${window}. This ${subject}${place} has ${sampleCount} mapped sample${sampleCount === 1 ? "" : "s"} and ${anchorCount} arrival or departure anchor${anchorCount === 1 ? "" : "s"}.${rejected} Place candidates: ${candidates}. Largest evidence gap: ${largestGap} minutes. ${splitReason} ${retention}`;
+  const stopSummary = stops.map((stop) => {
+    const minutes = Math.max(1, Math.round(stop.durationSeconds / 60));
+    const article = /^8/.test(String(minutes)) || minutes === 11 || minutes === 18 ? "an" : "a";
+    return ` It includes ${article} ${minutes}-minute${stop.approximate ? " (approximate)" : ""} stop from ${stop.startedAt} to ${stop.stoppedAt}; the stop is part of this trip, not travel time.`;
+  }).join("");
+  return `Time window: ${window}.${stopSummary} This ${subject}${place} has ${sampleCount} mapped sample${sampleCount === 1 ? "" : "s"} and ${anchorCount} arrival or departure anchor${anchorCount === 1 ? "" : "s"}.${rejected} Place candidates: ${candidates}. Largest evidence gap: ${largestGap} minutes. ${splitReason} ${retention}`;
 }

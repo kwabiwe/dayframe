@@ -3,7 +3,7 @@ import { deriveCommutes, qualifyCommuteCandidate, summariseCommuteEvidence } fro
 import { runLocationEngine } from "../src/location/segmenter";
 import { assessAutomaticLocation } from "../src/location/automaticPolicy";
 import { LOCATION_ENGINE_V2_CONFIG as config } from "../src/location/config";
-import type { ClassifiedEvidence, StaySegment } from "../src/location/types";
+import type { ClassifiedEvidence, CommuteSegment, StaySegment } from "../src/location/types";
 import { baselineB, baselineC } from "./fixtures/eveningBaseline";
 import { shortAt, shortJourneysFixture } from "./fixtures/shortJourneys";
 
@@ -18,7 +18,8 @@ function pair(duration = 84_496) {
 const derive = (stays: StaySegment[], route: ClassifiedEvidence[]) => deriveCommutes(stays, route, config, shortAt(3_000_000));
 
 describe("strong-evidence short journeys", () => {
-  it.each([false,true])("retains A bounds, linkage, IDs and confidence (saved destination %s)", (saved) => {
+  it("retains A bounds, linkage, IDs and confidence for a saved destination", () => {
+    const saved = true;
     const input = shortJourneysFixture(saved);
     const result = runLocationEngine(input);
     const stays = result.segmentUpserts.filter(s=>s.kind==='stay');
@@ -41,10 +42,32 @@ describe("strong-evidence short journeys", () => {
       expect(assessAutomaticLocation('v2_review',c)).toMatchObject({action:'review',reason:'review_mode'});
       expect(assessAutomaticLocation('v2_enabled',c)).toMatchObject({action:'review',reason:'short_journey_review_only'});
     }
-    if (!saved) expect(commutes.map(s=>s.clientSegmentId)).toEqual(['commute_tjgxd3','commute_oil8sz']);
     expect(runLocationEngine(input)).toEqual(result);
     const duplicateInput={...input,evidence:[...input.evidence,...input.evidence]};
     expect(runLocationEngine(duplicateInput).segmentUpserts).toEqual(result.segmentUpserts);
+  });
+  it("records a short unknown stop inside one trip instead of two journeys (owner option A)", () => {
+    const input = shortJourneysFixture();
+    const result = runLocationEngine(input);
+    const stays = result.segmentUpserts.filter((s): s is StaySegment => s.kind==='stay');
+    const trips = result.segmentUpserts.filter((s): s is CommuteSegment => s.kind==='commute');
+    expect(stays).toHaveLength(3);
+    expect(trips).toHaveLength(1);
+    const [trip] = trips;
+    expect(trip).toMatchObject({
+      fromStaySegmentId: stays[0].clientSegmentId, toStaySegmentId: stays[2].clientSegmentId,
+      startedAt: stays[0].stoppedAt, stoppedAt: stays[2].startedAt,
+      qualificationReason: 'same_place_meaningful_round_trip'
+    });
+    expect(trip.stops).toEqual([expect.objectContaining({
+      staySegmentId: stays[1].clientSegmentId, startedAt: stays[1].startedAt, stoppedAt: stays[1].stoppedAt
+    })]);
+    expect(trip.evidenceIds).toEqual(["out-0","out-1","out-2","back-0","back-1","back-2"]);
+    expect(assessAutomaticLocation('v2_enabled',trip)).toMatchObject({action:'review',reason:'journey_contains_stop'});
+    expect(runLocationEngine(input)).toEqual(result);
+    // The underlying legs still pass the #209 short-journey proof.
+    const legs = deriveCommutes(stays, result.acceptedEvidence, config, input.processingAt);
+    expect(legs.map(s=>Date.parse(s.stoppedAt)-Date.parse(s.startedAt))).toEqual([84_496,81_000]);
   });
   it("records duration as the former first failure independently of displacement qualification",()=>{
     const {stays,route}=pair();
@@ -113,27 +136,37 @@ describe("strong-evidence short journeys", () => {
     expect(deriveCommutes(stays,route,config,shortAt(1_284_496))[0].status).toBe('finalised');
     expect(deriveCommutes(stays,route,config,shortAt(3_000_000),{inferredBoundaryStayIds:new Set([stays[0].clientSegmentId])})[0].confidence).toBe('low');
     const input=shortJourneysFixture();expect(input.savedPlaces[0].loggingEnabled).toBe(false);
-    expect(runLocationEngine(input).segmentUpserts.filter(s=>s.kind==='commute')).toHaveLength(2);
+    // Logging-disabled Home still bounds the trip; the unknown stop sits inside it.
+    expect(runLocationEngine(input).segmentUpserts.filter(s=>s.kind==='commute')).toHaveLength(1);
     expect(runLocationEngine(shortJourneysFixture(true)).segmentUpserts).not.toEqual(runLocationEngine(input).segmentUpserts);
   });
   it("does not join across a retained intermediate Home or infer a stop from traffic pauses",()=>{
     const input=shortJourneysFixture();
     const duplicate=input.evidence.map(e=>({...e,clientEvidenceId:`second-${e.clientEvidenceId}`,occurredAt:shortAt(Date.parse(e.occurredAt)-Date.parse(shortAt(0))+1_965_496),sourceTimestamp:shortAt(Date.parse(e.occurredAt)-Date.parse(shortAt(0))+1_965_496),endedAt:e.endedAt?shortAt(Date.parse(e.endedAt)-Date.parse(shortAt(0))+1_965_496):null}));
     input.evidence.push(...duplicate);input.processingAt=shortAt(6_000_000);
-    const result=runLocationEngine(input);expect(result.segmentUpserts.filter(s=>s.kind==='commute')).toHaveLength(4);
+    const result=runLocationEngine(input);
+    const trips=result.segmentUpserts.filter((s): s is CommuteSegment => s.kind==='commute');
+    // Two Home-to-Home trips; neither is joined across the retained intermediate Home.
+    expect(trips).toHaveLength(2);
+    expect(trips.map(t=>t.stops?.length)).toEqual([1,1]);
+    expect(trips[0].stoppedAt <= trips[1].startedAt).toBe(true);
     const {stays,route}=pair(180_000);route[1].evidence.speedMetersPerSecond=0;
     expect(derive(stays,route)).toHaveLength(1);
   });
 });
 
-// These are deliberately recorded failures, not acceptance of stop/matching behaviour.
-describe("separate B/C baseline failures remain outside A", () => {
-  it("B still omits the short remote stays and emits the long same-place journey", () => {
+describe("B/C evening baselines", () => {
+  it("B splits journeys at the physical local stop without claiming the nearby saved visit", () => {
     const output=runLocationEngine({...shortJourneysFixture(),...baselineB});
-    const commutes=output.segmentUpserts.filter(s=>s.kind==='commute');
-    expect(commutes).toHaveLength(1);
-    expect(commutes[0].qualificationReason).toBe('same_place_meaningful_round_trip');
-    expect(Date.parse(commutes[0].stoppedAt)-Date.parse(commutes[0].startedAt)).toBe(2_392_602);
+    const commutes=output.segmentUpserts.filter((s): s is CommuteSegment => s.kind==='commute');
+    const stop=output.segmentUpserts.find((s): s is StaySegment => s.kind==='stay'&&s.formation==='physical_stop')!;
+    // Formerly one 2,392.602 s Home-to-Home journey that counted the local stop as travel.
+    expect(commutes).toHaveLength(2);
+    expect(commutes.some(c=>c.qualificationReason==='same_place_meaningful_round_trip')).toBe(false);
+    expect(commutes[0].toStaySegmentId).toBe(stop.clientSegmentId);
+    expect(commutes[1].fromStaySegmentId).toBe(stop.clientSegmentId);
+    expect(stop).toMatchObject({placeMatchKind:'unknown',placeId:null,candidatePlaceIds:[baselineB.savedPlaces[1].id]});
+    expect(Date.parse(stop.stoppedAt!)-Date.parse(stop.startedAt)).toBeGreaterThanOrEqual(config.unknownStayReviewDwellMs);
     expect(output.segmentUpserts.some(s=>s.kind==='stay'&&s.placeId===baselineB.savedPlaces[1].id)).toBe(false);
   });
   it("C still chooses the single eligible saved area, not proof of venue attendance", () => {

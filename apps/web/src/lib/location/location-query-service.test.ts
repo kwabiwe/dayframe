@@ -71,6 +71,45 @@ describe("Location Review evidence query", () => {
     const dto = await getLocationReviewEvidence(review.reviewItemId, session);
     expect(dto.segment.approximateArrival).toBe(expected);
   });
+
+  it("presents trip stops from commute metadata and ignores malformed entries", async () => {
+    const review = {
+      ...reviewRow(),
+      stayId: null,
+      commuteId: "60000000-0000-4000-8000-000000000001",
+      startedAt: "2026-09-29T16:33:49.000Z",
+      stoppedAt: "2026-09-29T16:45:39.000Z",
+      tripStops: [
+        { staySegmentId: "stay_a", startedAt: "2026-09-29T16:35:49.000Z", stoppedAt: "2026-09-29T16:44:11.000Z",
+          startLowerBoundAt: "2026-09-29T16:35:49.000Z", startUpperBoundAt: "2026-09-29T16:38:11.000Z" },
+        { startedAt: "not a time", stoppedAt: "2026-09-29T16:44:11.000Z" },
+        { startedAt: "2026-09-29T16:44:11.000Z", stoppedAt: "2026-09-29T16:40:00.000Z" },
+        null
+      ]
+    };
+    query.mockImplementation((sql: string) => {
+      if (sql.includes("from review_items ri")) return Promise.resolve({ rows: [review] });
+      return Promise.resolve({ rows: [] });
+    });
+    const dto = await getLocationReviewEvidence(review.reviewItemId, session);
+    expect(dto.stops).toEqual([{
+      startedAt: "2026-09-29T16:35:49.000Z", stoppedAt: "2026-09-29T16:44:11.000Z",
+      durationSeconds: 502, approximate: true
+    }]);
+    expect(dto.textualSummary).toContain("includes an 8-minute (approximate) stop");
+    expect(dto.textualSummary).toContain("not travel time");
+    expect(query.mock.calls[0][0]).toContain("cs.metadata->'stops'");
+  });
+
+  it("returns no stops for a stay or a trip without stop metadata", async () => {
+    query.mockImplementation((sql: string) => {
+      if (sql.includes("from review_items ri")) return Promise.resolve({ rows: [{ ...reviewRow(), tripStops: null }] });
+      return Promise.resolve({ rows: [] });
+    });
+    const dto = await getLocationReviewEvidence(reviewRow().reviewItemId, session);
+    expect(dto.stops).toEqual([]);
+    expect(dto.textualSummary).not.toContain("stop from");
+  });
 });
 
 function reviewRow() {

@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { replayLocationEvidence } from "./location-replay-service";
 import { LOCATION_REPLAY_SCALABILITY_PROFILE } from "./location-replay-batching";
-import { journeyIdentityFixture, runLocationEngine } from "@dayframe/shared";
+import { journeyIdentityFixture, PHYSICAL_STOP_PICKUP, physicalStopFixture, runLocationEngine } from "@dayframe/shared";
 
 function journeyReplayQuery(
   fixture: ReturnType<typeof journeyIdentityFixture>,
@@ -175,5 +175,37 @@ describe("Location replay timing observation", () => {
     ]));
     expect(counts).toMatchObject({ evidenceRows: 0, staySegments: 0, commuteSegments: 0, protectedSegments: 0 });
     expect(JSON.stringify({events,counts})).not.toMatch(/workspace-private|user-private|device-private/);
+  });
+});
+
+describe("Location replay physical stops", () => {
+  it("persists trip stops and stop formation as coordinate-free metadata", async () => {
+    const fixture = physicalStopFixture(PHYSICAL_STOP_PICKUP);
+    const local = runLocationEngine(fixture);
+    const base = journeyReplayQuery(fixture as unknown as ReturnType<typeof journeyIdentityFixture>);
+    const stayRows = local.segmentUpserts.filter((segment) => segment.kind === "stay")
+      .map((segment) => ({ id: `db-${segment.clientSegmentId}`, clientSegmentId: segment.clientSegmentId }));
+    const query = vi.fn(async (sql: string, params?: unknown[]) =>
+      sql.includes("insert into stay_segments") ? { rows: stayRows } : base(sql, params));
+    const server = await replayLocationEvidence({ query } as never, {
+      workspaceId: "workspace-private", userId: "user-private", authMode: "provider", scopes: []
+    }, {
+      deviceId: fixture.evidence[0].deviceId,
+      algorithmVersion: fixture.config.algorithmVersion,
+      processingAt: fixture.processingAt
+    });
+    expect(server.segments).toEqual(local.segmentUpserts);
+    const metadataOf = (table: string) => query.mock.calls
+      .filter(([sql]) => sql.includes(`insert into ${table}`))
+      .flatMap(([, params]) => (params ?? []).filter((value): value is string =>
+        typeof value === "string" && value.startsWith("{")).map((value) => JSON.parse(value)));
+    const trip = metadataOf("commute_segments").find((metadata) => metadata.stops);
+    expect(trip.stops).toHaveLength(1);
+    expect(Object.keys(trip.stops[0]).sort()).toEqual([
+      "candidatePlaceIds", "startLowerBoundAt", "startUpperBoundAt", "startedAt",
+      "staySegmentId", "stopLowerBoundAt", "stopUpperBoundAt", "stoppedAt"
+    ]);
+    expect(JSON.stringify(trip)).not.toMatch(/latitude|longitude/i);
+    expect(metadataOf("stay_segments").filter((metadata) => metadata.formation === "physical_stop")).toHaveLength(1);
   });
 });

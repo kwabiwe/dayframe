@@ -105,6 +105,8 @@ export type StaySegment = {
   learnedPlaceId?: string | null;
   placeMatchKind: "saved" | "learned" | "unknown" | "ambiguous";
   approximateArrival?: true;
+  /** Set when the stay was formed from physical stop evidence rather than identity/dwell gates. */
+  formation?: "physical_stop";
   candidatePlaceIds: string[];
   centreLatitude?: number | null;
   centreLongitude?: number | null;
@@ -140,7 +142,20 @@ export type CommuteSegment = {
   continuityStatus: ContinuityStatus;
   confidence: "low" | "medium" | "medium_high" | "high";
   qualificationReason?: CommuteQualificationReason;
+  /** Short stops inside one trip. Coordinate-free; each refers to its own stay segment. */
+  stops?: CommuteStop[];
   evidenceIds: string[];
+};
+
+export type CommuteStop = {
+  staySegmentId: string;
+  startedAt: string;
+  stoppedAt: string;
+  startLowerBoundAt: string | null;
+  startUpperBoundAt: string | null;
+  stopLowerBoundAt: string | null;
+  stopUpperBoundAt: string | null;
+  candidatePlaceIds: string[];
 };
 
 export type CommuteQualificationReason =

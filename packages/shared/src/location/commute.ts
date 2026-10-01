@@ -9,6 +9,7 @@ import type {
   CommuteEvidenceSummary,
   CommuteQualification,
   CommuteSegment,
+  CommuteStop,
   StaySegment,
   SavedPlaceForMatching
 } from "./types";
@@ -430,4 +431,123 @@ export function deriveCommutes(
     });
   }
   return commutes;
+}
+
+function stopFromStay(stay: StaySegment): CommuteStop {
+  return {
+    staySegmentId: stay.clientSegmentId,
+    startedAt: stay.startedAt,
+    stoppedAt: stay.stoppedAt!,
+    startLowerBoundAt: stay.startLowerBoundAt ?? null,
+    startUpperBoundAt: stay.startUpperBoundAt ?? null,
+    stopLowerBoundAt: stay.stopLowerBoundAt ?? null,
+    stopUpperBoundAt: stay.stopUpperBoundAt ?? null,
+    candidatePlaceIds: stay.candidatePlaceIds
+  };
+}
+
+/**
+ * Time tracking records a short errand as one trip. When two qualified legs meet
+ * at an unknown stop below the visit Review threshold, they become one trip
+ * that carries the stop. The stop stay itself is kept, so stop time is never
+ * reported as movement, and longer or known-place stops still split journeys.
+ */
+export function assembleTripsThroughStops(
+  legs: CommuteSegment[],
+  stays: StaySegment[],
+  acceptedEvidence: ClassifiedEvidence[],
+  config: LocationEngineConfig,
+  options: { inferredBoundaryStayIds?: ReadonlySet<string> } = {}
+) {
+  const staysById = new Map(stays.map((stay) => [stay.clientSegmentId, stay]));
+  const evidenceById = new Map(acceptedEvidence.map((item) => [item.evidence.clientEvidenceId, item]));
+  const minorStop = (stay: StaySegment | undefined): stay is StaySegment => Boolean(
+    stay && stay.placeMatchKind === "unknown" && stay.stoppedAt &&
+    Date.parse(stay.stoppedAt) - Date.parse(stay.startedAt) < config.unknownStayReviewDwellMs
+  );
+  const trips: CommuteSegment[] = [];
+  for (const leg of [...legs].sort((a, b) => Date.parse(a.startedAt) - Date.parse(b.startedAt))) {
+    const previous = trips.at(-1);
+    const stop = staysById.get(leg.fromStaySegmentId);
+    const merged = previous && previous.toStaySegmentId === leg.fromStaySegmentId && minorStop(stop)
+      ? mergeTrip(previous, leg, stop, staysById, evidenceById, config, options)
+      : null;
+    if (merged) trips[trips.length - 1] = merged;
+    else trips.push(leg);
+  }
+  return trips;
+}
+
+function mergeTrip(
+  first: CommuteSegment,
+  second: CommuteSegment,
+  stop: StaySegment,
+  staysById: ReadonlyMap<string, StaySegment>,
+  evidenceById: ReadonlyMap<string, ClassifiedEvidence>,
+  config: LocationEngineConfig,
+  options: { inferredBoundaryStayIds?: ReadonlySet<string> }
+): CommuteSegment | null {
+  const from = staysById.get(first.fromStaySegmentId);
+  const to = staysById.get(second.toStaySegmentId);
+  if (!from || !to) return null;
+  const startedAtMs = Date.parse(first.startedAt);
+  const stoppedAtMs = Date.parse(second.stoppedAt);
+  const duration = stoppedAtMs - startedAtMs;
+  if (!Number.isFinite(duration) || duration <= 0 || duration > config.commuteMaximumDurationMs) return null;
+  const evidenceIds = [...first.evidenceIds, ...second.evidenceIds];
+  const routeEvidence = evidenceIds.flatMap((id) => evidenceById.get(id) ?? []);
+  // The stop is observed by its own stay, so its interval is not a route gap.
+  const maximumObservationGapSeconds = Math.max(first.maximumObservationGapSeconds, second.maximumObservationGapSeconds);
+  const span = summariseCommuteEvidence({ config, from, to, routeEvidence, startedAtMs, stoppedAtMs });
+  // The trip physically passes through the stop: each leg's route already runs
+  // to or from the stop centre, so the trip route is their sum, and the stop
+  // counts towards the excursion from the origin.
+  const routeDistanceMeters = first.routeDistanceMeters != null && second.routeDistanceMeters != null
+    ? first.routeDistanceMeters + second.routeDistanceMeters
+    : span.routeDistanceMeters;
+  const fromPoint = segmentPoint(from);
+  const stopPoint = segmentPoint(stop);
+  const stopExcursion = fromPoint && stopPoint ? distanceMeters(fromPoint, stopPoint) : null;
+  const summary: CommuteEvidenceSummary = {
+    ...span,
+    routeDistanceMeters,
+    routeEfficiency: routeDistanceMeters && span.straightLineDistanceMeters != null
+      ? span.straightLineDistanceMeters / routeDistanceMeters
+      : span.routeEfficiency,
+    maximumDisplacementFromOriginMeters: Math.max(span.maximumDisplacementFromOriginMeters ?? 0, stopExcursion ?? 0) ||
+      span.maximumDisplacementFromOriginMeters,
+    maximumObservationGapSeconds
+  };
+  const qualification = qualifyCommuteCandidate(summary, config);
+  if (!qualification.qualifies) return null;
+  const uncertain = first.continuityStatus === "uncertain_gap" || second.continuityStatus === "uncertain_gap" ||
+    maximumObservationGapSeconds * 1_000 > config.maxContinuityGapMs;
+  const inferredEndpoint = options.inferredBoundaryStayIds?.has(from.clientSegmentId) === true ||
+    options.inferredBoundaryStayIds?.has(to.clientSegmentId) === true;
+  const confidence: CommuteSegment["confidence"] = inferredEndpoint
+    ? "low"
+    : uncertain && qualification.confidence === "medium_high"
+      ? "medium"
+      : qualification.confidence;
+  return {
+    ...first,
+    clientSegmentId: stableLocationId("commute", [from.clientSegmentId, to.clientSegmentId]),
+    status: second.status,
+    stoppedAt: second.stoppedAt,
+    stopLowerBoundAt: second.stopLowerBoundAt,
+    stopUpperBoundAt: second.stopUpperBoundAt,
+    toStaySegmentId: second.toStaySegmentId,
+    toPlaceId: second.toPlaceId ?? null,
+    routeDistanceMeters: summary.routeDistanceMeters == null ? null : Math.round(summary.routeDistanceMeters),
+    straightLineDistanceMeters:
+      summary.straightLineDistanceMeters == null ? null : Math.round(summary.straightLineDistanceMeters),
+    routeSampleCount: summary.routeSampleCount,
+    gapDurationSeconds: Math.round(duration / 1_000),
+    maximumObservationGapSeconds,
+    continuityStatus: uncertain ? "uncertain_gap" : "continuous",
+    confidence,
+    qualificationReason: qualification.reason,
+    stops: [...(first.stops ?? []), stopFromStay(stop)],
+    evidenceIds
+  };
 }
