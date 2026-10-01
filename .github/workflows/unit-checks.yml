@@ -1,0 +1,32 @@
+name: Unit tests, typecheck and lint
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  unit-checks:
+    name: Workspace unit tests, typecheck and lint
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Typecheck (mobile, web, shared)
+        run: npm run typecheck
+      - name: Lint (docs alignment, iOS config, web ESLint)
+        if: ${{ !cancelled() }}
+        run: npm run lint
+      - name: Unit tests (mobile, web, shared)
+        if: ${{ !cancelled() }}
+        run: npm run test

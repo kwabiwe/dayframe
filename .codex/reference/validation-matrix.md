@@ -529,6 +529,10 @@ Use a disposable local PostgreSQL/PostGIS database whose name ends in `_test`. R
 
 For staging, apply the additive Sleep resolution-link migration before the Preview deployment, verify the alias's actual SHA/backend identity, then smoke-test exact receipt replay, bounded reconciliation and Health partial counts using synthetic owners. Preserve private raw evidence locally. Missing installed-build provenance or hands-on iPhone checks must remain explicit outstanding gates; tests or empty queues cannot close a reported missing-source incident.
 
+## Unit, typecheck and lint CI gate
+
+`.github/workflows/unit-checks.yml` runs `npm run typecheck`, `npm run lint` and `npm run test` across the mobile, web and shared workspaces on every pull request and on `main`. It needs no database or hosted credentials; DB-backed integration tests stay skipped there and run in the PostGIS jobs above. A green run is repository evidence only, not device, staging or production acceptance. Keep test limits above any inner waits so parallel CI load cannot turn a passing test into a timeout.
+
 ## Sync recovery CI gates
 
 The base and ordered disposable PostGIS jobs run Review transaction lifetime/abandoned-connection validation (`scripts/validate-sync-transactions.ts`), bounded Health logical-unit isolation/continuation (`scripts/validate-health-sync-units.ts`) and Health ingest deadlines/same-ID recovery (`scripts/validate-health-ingest-bounds.ts`), in addition to Review mutation receipts and structural actions. These are fail-on-error CI steps using synthetic local fixtures, with no hosted credentials.
