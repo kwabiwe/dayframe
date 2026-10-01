@@ -176,7 +176,8 @@ describe("Calendar click-to-create DOM interactions", () => {
       { timeout: 5_000 }
     )).not.toBeNull();
     expect((screen.getByLabelText("Start time") as HTMLInputElement).value).toBe("09:00");
-  });
+    // The inner wait alone may take 5s; the test limit must exceed it under parallel CI load.
+  }, 15_000);
 
   it("repositions with a same-duration moved anchor and keeps a real overlapping entry above it", async () => {
     renderCalendar([entryAt("2026-08-02T11:00:00.000Z", "2026-08-02T11:30:00.000Z")]);
