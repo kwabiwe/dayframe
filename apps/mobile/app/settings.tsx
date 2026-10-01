@@ -533,7 +533,7 @@ export default function SettingsScreen() {
       void refreshLocationDiagnostics();
       return;
     }
-    refreshGeofencesForPlaces(data.places)
+    refreshGeofencesForPlaces(data.places, { userId: data.user.id, workspaceId: data.workspace.id })
       .then((count) => {
         void refreshLocationDiagnostics(count > 0 ? `Monitoring ${count} saved ${count === 1 ? "place" : "places"}.` : undefined);
       })
@@ -589,7 +589,9 @@ export default function SettingsScreen() {
         } waiting`
       : eventSyncStatus);
   const locationMonitoringAllowed = locationDiagnostics?.backgroundPermission === "granted";
-  const locationActionLabel = locationMonitoringAllowed
+  const locationCaptureNeedsRetry = locationDiagnostics?.locationLearningEnabled === true &&
+    locationDiagnostics.locationLearningCaptureState === "inactive";
+  const locationActionLabel = locationCaptureNeedsRetry ? "Retry capture" : locationMonitoringAllowed
     ? "Refresh"
     : locationDiagnostics?.foregroundPermission === "denied"
       ? "Review access"
@@ -1009,9 +1011,13 @@ export default function SettingsScreen() {
   }
 
   async function enableLocation() {
+    if (locationCaptureNeedsRetry) {
+      await toggleLocationLearning(true);
+      return;
+    }
     if (locationMonitoringAllowed && data) {
-      await startGeofences(data.places);
-      await refreshLocationDiagnostics("Place monitoring is enabled.");
+      await startGeofences(data.places, { userId: data.user.id, workspaceId: data.workspace.id });
+      await refreshLocationDiagnostics();
       return;
     }
 
@@ -1019,8 +1025,8 @@ export default function SettingsScreen() {
     updateSettingsSnapshot({ locationStatus: status });
     setLocationStatus(status);
     if (status.startsWith("Always allowed") && data) {
-      await startGeofences(data.places);
-      await refreshLocationDiagnostics("Place monitoring is enabled.");
+      await startGeofences(data.places, { userId: data.user.id, workspaceId: data.workspace.id });
+      await refreshLocationDiagnostics();
     } else {
       await refreshLocationDiagnostics(status);
     }
@@ -1039,10 +1045,15 @@ export default function SettingsScreen() {
 
     try {
       if (enabled) await ensureAutomaticLoggingCategories(["commute"]);
-      const status = await setLocationLearningEnabled(enabled, data?.places ?? []);
-      await refreshLocationDiagnostics(status);
+      const status = await setLocationLearningEnabled(enabled, data?.places ?? [], data ? { userId: data.user.id, workspaceId: data.workspace.id } : undefined);
+      // An enable result can already have been overtaken by a later off. Show
+      // the current effective projection, rather than replaying its on copy.
+      await refreshLocationDiagnostics(enabled ? undefined : status);
       if (enabled) await load({ silent: true });
     } catch (error) {
+      // Activation may have saved consent without completing capture. Refresh
+      // the effective state even on failure so the retry remains reachable.
+      await refreshLocationDiagnostics().catch(() => undefined);
       Alert.alert(
         "Location suggestions",
         error instanceof Error ? error.message : "Unable to enable commute logging."
@@ -1082,7 +1093,7 @@ export default function SettingsScreen() {
   function confirmDeleteLocationEvidence() {
     Alert.alert(
       "Delete recent location evidence",
-      "Delete recent exact map evidence from this device and the server? Confirmed entries and saved places will remain.",
+      "Delete recent location samples and their local upload copies from this iPhone, and recent evidence from the server? Confirmed entries, saved and cached places, and summaries will remain.",
       [
         { text: "Cancel", style: "cancel" },
         {
@@ -1287,26 +1298,17 @@ export default function SettingsScreen() {
     const diagnostics = await getReviewSyncDiagnostics();
     const unsynchronisedCount =
       diagnostics.waitingCount + diagnostics.needsAttentionCount;
-    if (unsynchronisedCount > 0) {
-      Alert.alert(
-        "Log out and remove saved changes?",
-        `${unsynchronisedCount} unsynchronised Review ${
-          unsynchronisedCount === 1 ? "change" : "changes"
-        } will be removed from this iPhone.`,
-        [
-          { text: "Cancel", style: "cancel" },
-          {
-            text: "Log out",
-            style: "destructive",
-            onPress: () => {
-              void completeSignOut();
-            }
-          }
-        ]
-      );
-      return;
-    }
-    await completeSignOut();
+    const reviewWarning = unsynchronisedCount > 0
+      ? `${unsynchronisedCount} unsynchronised Review ${unsynchronisedCount === 1 ? "change" : "changes"} will be removed from this iPhone. `
+      : "";
+    Alert.alert(
+      "Log out and remove saved changes?",
+      `${reviewWarning}Unsynchronised Location evidence will be removed from this iPhone. Synced history stays in your account.`,
+      [
+        { text: "Cancel", style: "cancel" },
+        { text: "Log out", style: "destructive", onPress: () => { void completeSignOut(); } }
+      ]
+    );
   }
 
   async function completeSignOut() {
@@ -2077,7 +2079,11 @@ export default function SettingsScreen() {
                 <View style={styles.healthPreferenceText}>
                   <Text {...mobileTextProps("itemTitle")} style={styles.categoryName}>Suggest visits and journeys</Text>
                   <Text {...mobileTextProps("body")} style={styles.categoryMeta}>
-                    {locationDiagnostics?.locationLearningEnabled
+                    {locationDiagnostics?.locationLearningCaptureState === "logout_cleanup"
+                      ? "Capture is paused. Retry signing out to finish local cleanup."
+                      : locationDiagnostics?.locationLearningEnabled && !locationDiagnostics.locationLearningActive
+                      ? "Consent is saved. Capture is inactive; retry below."
+                      : locationDiagnostics?.locationLearningActive
                       ? "Background location can create suggestions in Review."
                       : "Location suggestions are off."}
                   </Text>
@@ -2085,6 +2091,7 @@ export default function SettingsScreen() {
                 <Switch
                   style={{ flexShrink: 0 }}
                   accessibilityLabel="Commute and regular-place learning"
+                  accessibilityHint="Saves consent for this account. Capture status is shown beside this switch."
                   value={locationDiagnostics?.locationLearningEnabled ?? false}
                   onValueChange={toggleLocationLearning}
                   trackColor={{ false: theme.borderStrong, true: theme.accent }}
@@ -2119,7 +2126,7 @@ export default function SettingsScreen() {
                 style={styles.healthPreferenceRow}
               >
                 <Text {...mobileTextProps("body")} style={styles.muted}>
-                  Exact map evidence is private and deleted after seven days. Confirmed entries and saved places remain until you delete them.
+                  Location data is private. Local journal samples expire after seven days. Upload copies, cached places and summaries can stay on this iPhone longer, even after upload or signing back in. Signing out clears this account’s local Location data; synced entries and saved places stay in your account.
                 </Text>
                 {([['Evidence upload', locationV2Diagnostics?.uploadAttempt],
                   ['Location processing', locationV2Diagnostics?.replayAttempt]] as const).map(([label, attempt]) => (
@@ -2417,7 +2424,7 @@ function LocationInformationSheet({
                   Dayframe uses background location to suggest visits and journeys. Suggestions go to Review before becoming time entries.
                 </Text>
                 <Text {...mobileTextProps("body")} style={styles.muted}>
-                  Exact map evidence is private and deleted after seven days. Confirmed entries and saved places remain until you delete them.
+                  Location data is private. Local journal samples expire after seven days. Upload copies, cached places and summaries can stay on this iPhone longer, even after upload or signing back in. Signing out clears this account’s local Location data; synced entries and saved places stay in your account.
                 </Text>
                 <Text {...mobileTextProps("body")} style={styles.muted}>
                   iOS can pause or limit background updates, so Dayframe may not capture every movement.
@@ -2750,9 +2757,13 @@ function nextCategoryColor(categories: Category[]): DayframePaletteKey {
 }
 
 function locationStatusText(diagnostics: LocationVisitDiagnostics) {
+  if (diagnostics.locationLearningCaptureState === "logout_cleanup") return "Location capture is paused. Retry signing out to finish local cleanup.";
   if (diagnostics.foregroundPermission !== "granted") return "Location permission is not enabled.";
   if (diagnostics.backgroundPermission !== "granted") return "Enable Always access to monitor saved places.";
-  return "Place monitoring is enabled.";
+  if (!diagnostics.locationLearningEnabled) return "Location access is allowed. Turn on commute and regular-place learning to capture.";
+  if (!diagnostics.locationLearningActive) return "Location consent is saved, but capture is inactive. Retry capture to start it.";
+  if (diagnostics.geofencingActive && diagnostics.activeMonitorCount > 0) return "Place monitoring is enabled.";
+  return "Location learning is enabled. No saved-place monitors are active.";
 }
 
 function locationMonitorCountText(diagnostics: LocationVisitDiagnostics) {

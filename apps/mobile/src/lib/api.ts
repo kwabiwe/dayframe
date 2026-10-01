@@ -36,11 +36,13 @@ import {
   isAuthenticatedSessionSnapshotCurrent,
   readAuthenticatedSessionSnapshot,
   readOwnedAuthenticatedSessionSnapshot,
-  setSessionToken
+  setSessionToken,
+  subscribeAuthenticatedSession
 } from "./secure-session";
 import {
   activateMobileAccount,
   deactivateMobileAccount,
+  getActiveMobileAccountSnapshot,
   mobileAccountKey,
   mobileAccountOwnersEqual,
   readActiveMobileAccount,
@@ -78,6 +80,28 @@ type ActiveActivityQueueSync = {
 };
 const activityQueueSyncInFlightByOwner = new Map<string, ActiveActivityQueueSync>();
 const activityQueueListeners = new Set<() => void>();
+
+// Request cancellation follows the existing captured session predicate. It is
+// separate from Location's longer-lived, fail-closed cleanup/admission fence.
+type BootstrapLogoutRequest = { revision: number; isSessionCurrent: () => boolean };
+let latestBootstrapLogoutRequest: BootstrapLogoutRequest | null = null;
+const activeBootstrapLogoutRequests = new Set<BootstrapLogoutRequest>();
+
+function captureBootstrapLogoutGuard() {
+  const revision = latestBootstrapLogoutRequest?.revision ?? 0;
+  return () => ![...activeBootstrapLogoutRequests].some(request => request.isSessionCurrent()) &&
+    (!latestBootstrapLogoutRequest || latestBootstrapLogoutRequest.revision === revision ||
+      !latestBootstrapLogoutRequest.isSessionCurrent());
+}
+
+function beginBootstrapLogoutRequest(isSessionCurrent: () => boolean) {
+  const request = { revision: (latestBootstrapLogoutRequest?.revision ?? 0) + 1, isSessionCurrent };
+  latestBootstrapLogoutRequest = request;
+  activeBootstrapLogoutRequests.add(request);
+  // Keep the revision after settlement: a response started before this logout
+  // cannot become current again just because the failed request has ended.
+  return () => { activeBootstrapLogoutRequests.delete(request); };
+}
 
 export type MobileDateRange = {
   selectedDate: string;
@@ -477,6 +501,9 @@ type ApiJsonRead<T> =
   | { ok: false; message: string };
 
 export async function fetchBootstrap(options: { date?: string; signal?: AbortSignal; deadlineAt?: number } = {}): Promise<MobileBootstrap> {
+  const logoutAllowsResponse = captureBootstrapLogoutGuard();
+  const requireLogoutAllowsResponse = () => { if (!logoutAllowsResponse()) throw new StaleMobileSessionResponseError(); };
+  requireLogoutAllowsResponse();
   const params = options.date ? `?date=${encodeURIComponent(options.date)}` : "";
   const sessionRead = await readAuthenticatedSessionSnapshot();
   if (sessionRead.status === "changed") {
@@ -492,7 +519,7 @@ export async function fetchBootstrap(options: { date?: string; signal?: AbortSig
     },
     {
       timeoutMilliseconds: Math.max(1, Math.min(MOBILE_OPENING_REQUEST_TIMEOUT_MS, (options.deadlineAt ?? Date.now() + MOBILE_OPENING_REQUEST_TIMEOUT_MS) - Date.now())),
-      isCurrent: () => sessionRead.status !== "authenticated" || isAuthenticatedSessionSnapshotCurrent(sessionRead.snapshot),
+      isCurrent: () => logoutAllowsResponse() && (sessionRead.status !== "authenticated" || isAuthenticatedSessionSnapshotCurrent(sessionRead.snapshot)),
       validate: (body, response) => {
         if (!response.ok) return null;
         const value = body as MobileBootstrap | null;
@@ -526,6 +553,9 @@ export async function fetchBootstrap(options: { date?: string; signal?: AbortSig
       userId: bootstrap.user.id,
       workspaceId: bootstrap.workspace.id
     };
+    // Refuse the departing response before even binding a legacy token's owner.
+    if (!logoutAllowsResponse() || (sessionRead.status === "authenticated" &&
+      !isAuthenticatedSessionSnapshotCurrent(sessionRead.snapshot))) throw new StaleMobileSessionResponseError();
     if (sessionRead.status === "authenticated") {
       if (
         sessionRead.snapshot.owner &&
@@ -537,11 +567,22 @@ export async function fetchBootstrap(options: { date?: string; signal?: AbortSig
         throw new StaleMobileSessionResponseError();
       }
     }
+    const requireBootstrapCurrent = () => {
+      // Owner binding may have filled in a legacy ownerless token above. Its
+      // original generation/token still identify this response's lifetime.
+      if ((sessionRead.status === "authenticated" &&
+        !isAuthenticatedSessionSnapshotCurrent({ ...sessionRead.snapshot, owner })) ||
+        !logoutAllowsResponse()) throw new StaleMobileSessionResponseError();
+    };
+    requireBootstrapCurrent();
     await activateMobileAccount(owner);
+    requireBootstrapCurrent();
   }
   const reviewStore = await reviewSyncStore();
+  requireLogoutAllowsResponse();
   if (!reviewStore) return bootstrap;
   const projected = await reviewStore.processReviewBootstrap(bootstrap);
+  requireLogoutAllowsResponse();
   void reviewStore.synchroniseReviewMutations().catch(() => undefined);
   return projected;
 }
@@ -591,38 +632,70 @@ export async function signup(email: string, password: string, name?: string, wor
 }
 
 export async function logout() {
-  // Abort request signals before the first awaited logout operation. Native
-  // task cleanup continues asynchronously, but queued mutations remain owned
-  // by the account until the normal durable-work cleanup boundary runs.
   void endAllTimerBackgroundExecution("logout");
-  const activeOwner = await readActiveMobileAccount();
-  const token = await getSessionToken();
-  await mobileFetch(`${DAYFRAME_API_BASE}/api/auth/logout`, {
-    method: "POST",
-    headers: token ? { Authorization: `Bearer ${token}` } : {}
-  }).catch(() => undefined);
-  await import("./location/runtime")
-    .then(async ({ clearNativeLocationSignals, stopNativeLocationIntelligence }) => {
-      await stopNativeLocationIntelligence();
-      await clearNativeLocationSignals();
-    })
-    .catch(() => undefined);
-  await import("./location/store")
-    .then(({ clearActiveLocationAccountData }) => clearActiveLocationAccountData())
-    .catch(() => undefined);
-  await import("./reviewSyncStore")
-    .then(({ clearActiveReviewAccountData }) => clearActiveReviewAccountData())
-    .catch(() => undefined);
-  await import("./shortcuts")
-    .then(async ({ clearActiveOwnerNativeShortcutQueue, clearShortcutCatalog }) => {
-      if (activeOwner) {
-        await clearActiveOwnerNativeShortcutQueue(activeOwner).catch(() => 0);
-      }
+  // Capture the existing session authority before any await. A delayed logout
+  // must not stop capture or clear a replacement login (including A -> B -> A).
+  let sessionChanged = false;
+  const unsubscribe = subscribeAuthenticatedSession(() => { sessionChanged = true; });
+  const sessionRead = readAuthenticatedSessionSnapshot();
+  const ownerRead = readActiveMobileAccount();
+  let finishLocationLogout: (() => void) | undefined;
+  let finishBootstrapLogoutRequest: (() => void) | undefined;
+  let logoutSucceeded = false;
+  let logoutSessionIsCurrent = () => false;
+  try {
+    const session = await sessionRead;
+    const activeOwner = await ownerRead;
+    const logoutOwner = session.status === "authenticated" ? session.snapshot.owner ?? activeOwner : activeOwner;
+    if (activeOwner && logoutOwner && !mobileAccountOwnersEqual(activeOwner, logoutOwner)) throw new StaleMobileSessionResponseError();
+    let accountDeactivated = false;
+    const isSessionCurrent = () => session.status === "authenticated"
+      ? isAuthenticatedSessionSnapshotCurrent(session.snapshot) ||
+        (!session.snapshot.owner && Boolean(logoutOwner) &&
+          isAuthenticatedSessionSnapshotCurrent({ ...session.snapshot, owner: logoutOwner }))
+      : session.status === "signed_out" && !sessionChanged;
+    const isCurrent = () => isSessionCurrent() &&
+      mobileAccountOwnersEqual(getActiveMobileAccountSnapshot(), accountDeactivated ? null : activeOwner);
+    logoutSessionIsCurrent = isCurrent;
+    const requireCurrent = () => { if (!isCurrent()) throw new StaleMobileSessionResponseError(); };
+    requireCurrent();
+    finishBootstrapLogoutRequest = beginBootstrapLogoutRequest(isSessionCurrent);
+    await import("./location/runtime").then(({ beginLocationLogout, endLocationCaptureOwnership }) => {
+      requireCurrent();
+      // Account removal is not a new authenticated lifetime. The bootstrap
+      // fence remains valid through that I/O until this session is cleared.
+      finishLocationLogout = beginLocationLogout(logoutOwner, isSessionCurrent);
+      return endLocationCaptureOwnership("logout", logoutOwner ?? undefined, isCurrent);
+    });
+    requireCurrent();
+    const token = session.status === "authenticated" ? session.snapshot.token : null;
+    await mobileFetch(`${DAYFRAME_API_BASE}/api/auth/logout`, {
+      method: "POST", headers: token ? { Authorization: `Bearer ${token}` } : {}
+    }).catch(() => undefined);
+    requireCurrent();
+    await import("./reviewSyncStore").then(({ clearActiveReviewAccountData }) => {
+      requireCurrent();
+      return clearActiveReviewAccountData();
+    }).catch(() => undefined);
+    requireCurrent();
+    await import("./shortcuts").then(async ({ clearActiveOwnerNativeShortcutQueue, clearShortcutCatalog }) => {
+      requireCurrent();
+      if (activeOwner) await clearActiveOwnerNativeShortcutQueue(activeOwner).catch(() => 0);
+      requireCurrent();
       clearShortcutCatalog();
-    })
-    .catch(() => undefined);
-  await clearSessionToken();
-  await deactivateMobileAccount();
+    }).catch(() => undefined);
+    requireCurrent();
+    if (activeOwner) await deactivateMobileAccount(activeOwner);
+    accountDeactivated = true;
+    requireCurrent();
+    await clearSessionToken();
+    logoutSucceeded = true;
+  } finally {
+    unsubscribe();
+    finishBootstrapLogoutRequest?.();
+    // A failed local cleanup stays fenced until retry or a newer session.
+    if (logoutSucceeded || !logoutSessionIsCurrent()) finishLocationLogout?.();
+  }
 }
 
 export { clearSessionToken, getSessionToken };
@@ -2225,6 +2298,8 @@ async function authenticate(path: string, body: Record<string, unknown>): Promis
   };
   await setSessionToken(payload.token, owner);
   await activateMobileAccount(owner);
+  await import("./location/runtime")
+    .then(({ bindLocationCaptureOwner }) => bindLocationCaptureOwner(owner));
   const reviewStore = await reviewSyncStore();
   if (reviewStore) {
     await reviewStore.activateReviewAccount({

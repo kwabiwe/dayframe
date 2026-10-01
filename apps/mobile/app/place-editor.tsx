@@ -316,7 +316,7 @@ export default function PlaceEditorScreen() {
         });
       }
       const refreshed = await fetchBootstrap();
-      await refreshGeofencesForPlaces(refreshed.places).catch(() => 0);
+      await refreshGeofencesForPlaces(refreshed.places, { userId: refreshed.user.id, workspaceId: refreshed.workspace.id }).catch(() => 0);
       router.back();
     } catch (error) {
       if (error instanceof AuthRequiredError) {

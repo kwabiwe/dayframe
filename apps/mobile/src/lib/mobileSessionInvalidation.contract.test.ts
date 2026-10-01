@@ -33,6 +33,15 @@ describe("background session invalidation contracts", () => {
     expect(apiSource).toContain("clearActiveOwnerNativeShortcutQueue(activeOwner)");
   });
 
+  it("registers Location account and authoritative sign-out listeners beside the headless tasks", () => {
+    const geofenceSource = source("./geofence.ts");
+    expect(geofenceSource).toContain("subscribeActiveMobileAccount(() =>");
+    expect(geofenceSource).toContain("subscribeMobileSignedOut(() =>");
+    expect(geofenceSource).toContain("locationCaptureSessionSignedOut()");
+    expect(locationStoreSource).not.toContain("rebindUnownedEvidence");
+    expect(geofenceSource).not.toContain("unbound-device");
+  });
+
   it("clears shortcut native context only when the rejected bearer still owns it", () => {
     expect(nativeStorageSource).toContain("static func clear(sessionToken: String) -> Bool");
     expect(nativeStorageSource).toContain("read(accessGroup: accessGroup)?.sessionToken == sessionToken");

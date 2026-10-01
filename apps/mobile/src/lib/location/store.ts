@@ -12,6 +12,7 @@ import {
   LocationEvidenceBatchRequestSchema,
   LocationEvidenceSchema,
   LocationReplayResponseSchema,
+  LocationReplayRequestSchema,
   LocationRolloutModeSchema,
   runLocationEngine,
   type LearnedPlaceForMatching,
@@ -30,10 +31,13 @@ import {
   type AuthenticatedSessionSnapshot
 } from "../secure-session";
 import {
+  getActiveMobileAccountSnapshot,
   mobileAccountOwnersEqual,
+  readActiveMobileAccount,
   type MobileAccountOwner
 } from "../mobileAccount";
 import { createSerialMutationQueue } from "./mutationQueue";
+import { readLocationCaptureConsent } from "./captureConsent";
 import { fetchLocationSync, locationResponseDiagnostics, LocationHttpResponseError } from "./network";
 import {
   executeOwnedLocationRequest,
@@ -54,6 +58,32 @@ const ACTIVE_DEVICE_KEY = "active_device";
 const ACTIVE_TIME_ZONE_KEY = "active_time_zone";
 const ROLLOUT_MODE_KEY = "rollout_mode";
 const SEMANTIC_MODE_ACKNOWLEDGED_AT_KEY = "semantic_mode_acknowledged_at";
+const CAPTURE_BINDING_KEY = "capture_binding_v1";
+const SEMANTIC_ELIGIBILITY_PREFIX = "semantic_eligibility:";
+
+export type LocationCaptureBinding = {
+  id: string;
+  accountKey: string;
+  backend: string;
+  boundAt: string;
+  enabled: boolean;
+};
+export type LocationCaptureSnapshot = {
+  revision: number;
+  binding: LocationCaptureBinding | null;
+  context: LocationAccountContext | null;
+};
+
+// Synchronous invalidation fences work already awaiting SQLite/OS operations.
+// Authentication still belongs exclusively to mobileAccount/secure-session.
+let captureRevision = 0;
+let captureAdmissionSuspended = false;
+export function invalidateLocationCaptureOwnership() {
+  captureAdmissionSuspended = true;
+  return ++captureRevision;
+}
+export function locationCaptureRevision() { return captureRevision; }
+export function isLocationCaptureAdmissionSuspended() { return captureAdmissionSuspended; }
 
 export type { LocationRolloutMode } from "@dayframe/shared";
 
@@ -84,6 +114,9 @@ export type LocationStoreDiagnostics = {
   activeProvisionalSegmentKind: string | null;
   lastGapDurationSeconds: number | null;
   rejectedEvidenceCounts: Record<string, number>;
+  captureRejectedEvidenceCounts: Record<string, number>;
+  legacyUnboundDeletedCount: number;
+  captureCleanupFailureCount: number;
   lastUploadAt: string | null;
   lastServerReplayVersion: string | null;
   lastServerReplayAt: string | null;
@@ -183,6 +216,16 @@ async function database() {
         await transaction.execAsync(`PRAGMA user_version = ${DATABASE_VERSION}`);
       });
     }
+    // Upgrade privacy cleanup is idempotent and uses the existing bounded journal.
+    // Ambiguous evidence is deleted locally, never adopted by another account.
+    await db.withExclusiveTransactionAsync(async (transaction) => {
+      const result = await transaction.runAsync("delete from location_evidence_journal where account_key = 'unbound'");
+      for (const table of ["location_upload_outbox", "location_engine_state", "location_segment_snapshot", "location_account_context"]) {
+        await transaction.runAsync(`delete from ${table} where account_key = 'unbound'`);
+      }
+      const prior = await transaction.getFirstAsync<MetadataRow>("select value from location_store_metadata where key = 'legacy_unbound_deleted_count'");
+      await setMetadata("legacy_unbound_deleted_count", String(Number(prior?.value ?? 0) + result.changes), transaction);
+    });
     return db;
   });
   return databasePromise;
@@ -280,26 +323,43 @@ function generatedId(prefix: string) {
 
 export async function configureLocationAccount(
   context: LocationAccountContext,
-  rolloutMode: LocationRolloutMode = "v2_shadow"
+  rolloutMode: LocationRolloutMode | undefined = undefined,
+  enabled = false,
+  revision = captureRevision,
+  renewBinding = false
 ) {
-  return serialiseLocationMutation(() => configureLocationAccountUnsafe(context, rolloutMode));
+  return serialiseLocationMutation(() => configureLocationAccountUnsafe(context, rolloutMode, enabled, revision, renewBinding));
 }
 
 async function configureLocationAccountUnsafe(
   context: LocationAccountContext,
-  rolloutMode: LocationRolloutMode
+  rolloutMode: LocationRolloutMode | undefined,
+  enabled: boolean,
+  revision: number,
+  renewBinding: boolean
 ) {
+  const owner = await readActiveMobileAccount();
+  if (revision !== captureRevision || !mobileAccountOwnersEqual(owner, context)) return null;
+  if (enabled && !await readLocationCaptureConsent(context)) return null;
   const db = await database();
   const key = accountKey(context);
   const previousKey = await metadata(ACTIVE_ACCOUNT_KEY);
-  const previousMode = await getLocationRolloutMode();
-  const existingSemanticAcknowledgement = await metadata(SEMANTIC_MODE_ACKNOWLEDGED_AT_KEY);
-  const semanticModeAcknowledgedAt = isSemanticMode(rolloutMode)
-    ? isSemanticMode(previousMode) && existingSemanticAcknowledgement
-      ? existingSemanticAcknowledgement
-      : new Date().toISOString()
+  const eligibility = await readSemanticEligibility(key);
+  const mode = rolloutMode ?? eligibility?.mode ?? "v2_shadow";
+  // A capture rebind restores an attributable acknowledgement; only an actual
+  // mode acknowledgement may establish a new semantic cutover.
+  const semanticModeAcknowledgedAt = isSemanticMode(mode)
+    ? eligibility && isSemanticMode(eligibility.mode) && eligibility.acknowledgedAt
+      ? eligibility.acknowledgedAt
+      : rolloutMode ? new Date().toISOString() : ""
     : "";
-  await db.withExclusiveTransactionAsync(async (transaction) => {
+  let configured = false;
+  try { await db.withExclusiveTransactionAsync(async (transaction) => {
+    if (revision !== captureRevision || !mobileAccountOwnersEqual(getActiveMobileAccountSnapshot(), context)) return;
+    const previousBinding = await readCaptureBinding(transaction);
+    const binding = !renewBinding && previousBinding?.accountKey === key && previousBinding.enabled === enabled
+      ? previousBinding
+      : { id: generatedId("capture"), accountKey: key, backend: DAYFRAME_API_BASE, boundAt: new Date().toISOString(), enabled };
     await transaction.runAsync(
       `insert into location_account_context (account_key, context_json, updated_at) values (?, ?, ?)
        on conflict (account_key) do update set context_json = excluded.context_json, updated_at = excluded.updated_at`,
@@ -313,15 +373,63 @@ async function configureLocationAccountUnsafe(
     await setMetadata(ACTIVE_ACCOUNT_KEY, key, transaction);
     await setMetadata(ACTIVE_DEVICE_KEY, context.deviceId, transaction);
     await setMetadata(ACTIVE_TIME_ZONE_KEY, context.timeZone, transaction);
-    await setMetadata(ROLLOUT_MODE_KEY, rolloutMode, transaction);
-    await setMetadata(SEMANTIC_MODE_ACKNOWLEDGED_AT_KEY, semanticModeAcknowledgedAt, transaction);
-  });
-  await rebindUnownedEvidence(key, context);
-  return key;
+    await setSemanticEligibility(key, mode, semanticModeAcknowledgedAt, transaction);
+    await setMetadata(CAPTURE_BINDING_KEY, JSON.stringify(binding), transaction);
+    if (enabled && !await readLocationCaptureConsent(context) || revision !== captureRevision ||
+      !mobileAccountOwnersEqual(getActiveMobileAccountSnapshot(), context)) {
+      throw new StaleLocationCaptureError();
+    }
+    configured = true;
+  }); } catch (error) {
+    if (!(error instanceof StaleLocationCaptureError)) throw error;
+    return null;
+  }
+  if (configured && revision === captureRevision && mobileAccountOwnersEqual(getActiveMobileAccountSnapshot(), context)) {
+    captureAdmissionSuspended = false;
+  }
+  return configured ? key : null;
 }
 
 function isSemanticMode(mode: LocationRolloutMode) {
   return mode === "v2_review" || mode === "v2_enabled";
+}
+
+type SemanticEligibility = { backend: string; accountKey: string; mode: LocationRolloutMode; acknowledgedAt: string };
+function validSemanticAcknowledgement(value: unknown): value is string {
+  return typeof value === "string" && LocationReplayRequestSchema.shape.semanticModeAcknowledgedAt.safeParse(value).success;
+}
+async function readSemanticEligibility(key: string): Promise<SemanticEligibility | null> {
+  const raw = await metadata(`${SEMANTIC_ELIGIBILITY_PREFIX}${key}`);
+  if (raw) {
+    try {
+      const value = JSON.parse(raw) as SemanticEligibility;
+      if (value.backend === DAYFRAME_API_BASE && value.accountKey === key && LocationRolloutModeSchema.safeParse(value.mode).success &&
+        (value.acknowledgedAt === "" || validSemanticAcknowledgement(value.acknowledgedAt))) return value;
+    } catch { /* Unattributable state cannot become a cutover. */ }
+    return null;
+  }
+  // Upgrade only from the active, demonstrably owned legacy context. An invalid
+  // or foreign-backend binding is not proof of attribution.
+  if (await metadata(ACTIVE_ACCOUNT_KEY) !== key || !await hasLegacyLocationOwnerKey(key)) return null;
+  const mode = await getLocationRolloutMode();
+  const acknowledgedAt = await metadata(SEMANTIC_MODE_ACKNOWLEDGED_AT_KEY) ?? "";
+  return { backend: DAYFRAME_API_BASE, accountKey: key, mode,
+    acknowledgedAt: isSemanticMode(mode) && validSemanticAcknowledgement(acknowledgedAt) ? acknowledgedAt : "" };
+}
+
+async function hasLegacyLocationOwnerKey(key: string) {
+  const rawBinding = await metadata(CAPTURE_BINDING_KEY);
+  const binding = await readCaptureBinding();
+  const row = await (await database()).getFirstAsync<{ context_json: string }>(
+    "select context_json from location_account_context where account_key = ?", key);
+  if (!row || rawBinding && binding?.accountKey !== key) return false;
+  try { return accountKey(JSON.parse(row.context_json)) === key; } catch { return false; }
+}
+
+async function setSemanticEligibility(key: string, mode: LocationRolloutMode, acknowledgedAt: string, transaction: SQLite.SQLiteDatabase) {
+  await setMetadata(`${SEMANTIC_ELIGIBILITY_PREFIX}${key}`, JSON.stringify({ backend: DAYFRAME_API_BASE, accountKey: key, mode, acknowledgedAt }), transaction);
+  await setMetadata(ROLLOUT_MODE_KEY, mode, transaction);
+  await setMetadata(SEMANTIC_MODE_ACKNOWLEDGED_AT_KEY, acknowledgedAt, transaction);
 }
 
 export async function getLocationRolloutMode(): Promise<LocationRolloutMode> {
@@ -332,14 +440,15 @@ export async function getLocationRolloutMode(): Promise<LocationRolloutMode> {
 }
 
 async function currentContext() {
+  const owner = await readActiveMobileAccount();
   const key = await metadata(ACTIVE_ACCOUNT_KEY);
-  if (!key) return null;
+  if (!owner || key !== accountKey(owner)) return null;
   const db = await database();
   const row = await db.getFirstAsync<{ context_json: string }>(
     "select context_json from location_account_context where account_key = ?",
     key
   );
-  if (!row) return null;
+  if (!row || !mobileAccountOwnersEqual(getActiveMobileAccountSnapshot(), owner)) return null;
   return { key, context: JSON.parse(row.context_json) as LocationAccountContext };
 }
 
@@ -358,23 +467,89 @@ export async function getActiveLocationAccountIdentity() {
     : null;
 }
 
-async function rebindUnownedEvidence(key: string, context: LocationAccountContext) {
+async function readCaptureBinding(transaction?: SQLite.SQLiteDatabase): Promise<LocationCaptureBinding | null> {
+  const db = transaction ?? await database();
+  const row = await db.getFirstAsync<MetadataRow>("select value from location_store_metadata where key = ?", CAPTURE_BINDING_KEY);
+  try {
+    const value = JSON.parse(row?.value ?? "null");
+    return value && typeof value.id === "string" && typeof value.accountKey === "string" &&
+      value.backend === DAYFRAME_API_BASE && Number.isFinite(Date.parse(value.boundAt)) &&
+      typeof value.enabled === "boolean" ? value : null;
+  } catch { return null; }
+}
+
+export function readLocationCaptureBinding() {
+  return locationMutationQueue(() => readCaptureBinding());
+}
+
+// Call before a callback's first await. Cold/headless launch hydrates the same
+// persisted mobile owner; an initially empty memory cache is not a sign-out.
+export function captureLocationOwnership(): Promise<LocationCaptureSnapshot> {
+  const revision = captureRevision;
+  return locationMutationQueue(async () => {
+    const context = await currentContext();
+    const binding = await readCaptureBinding();
+    return { revision, binding, context: context?.context ?? null };
+  });
+}
+
+export function isLocationCaptureSnapshotCurrent(snapshot: LocationCaptureSnapshot) {
+  const owner = getActiveMobileAccountSnapshot();
+  return !captureAdmissionSuspended && snapshot.revision === captureRevision && Boolean(owner && snapshot.binding?.enabled &&
+    snapshot.binding.accountKey === accountKey(owner) && mobileAccountOwnersEqual(owner, snapshot.context));
+}
+
+export async function hasLegacyLocationOwner(owner: MobileAccountOwner) {
+  return await metadata(ACTIVE_ACCOUNT_KEY) === accountKey(owner) && await hasLegacyLocationOwnerKey(accountKey(owner));
+}
+
+export async function readOwnedLocationAccountContext(owner: MobileAccountOwner) {
+  if (!mobileAccountOwnersEqual(await readActiveMobileAccount(), owner)) return null;
   const db = await database();
-  await db.withExclusiveTransactionAsync(async (transaction) => {
-    const rows = await transaction.getAllAsync<EvidenceRow>(
-      "select evidence_json from location_evidence_journal where account_key = 'unbound' order by occurred_at"
-    );
-    for (const row of rows) {
-      const evidence = LocationEvidenceSchema.parse(JSON.parse(row.evidence_json));
-      const rebound = { ...evidence, deviceId: context.deviceId, timeZone: context.timeZone };
-      await transaction.runAsync(
-        "update location_evidence_journal set account_key = ?, evidence_json = ? where client_evidence_id = ?",
-        key,
-        JSON.stringify(rebound),
-        evidence.clientEvidenceId
-      );
+  const row = await db.getFirstAsync<{ context_json: string }>(
+    "select context_json from location_account_context where account_key = ?", accountKey(owner));
+  return row && mobileAccountOwnersEqual(getActiveMobileAccountSnapshot(), owner)
+    ? JSON.parse(row.context_json) as LocationAccountContext : null;
+}
+
+class StaleLocationCaptureError extends Error {
+  constructor() { super("Location capture changed before the local operation completed."); }
+}
+
+// Catalogue refresh can update only the exact live binding. It cannot create a
+// binding, change consent, acknowledge a mode, or lift suspended admission.
+export function updateLocationCaptureCatalogue(savedPlaces: SavedPlaceForMatching[], snapshot: LocationCaptureSnapshot) {
+  return serialiseLocationMutation(async () => {
+    if (!snapshot.context || !isLocationCaptureSnapshotCurrent(snapshot) || !await readLocationCaptureConsent(snapshot.context)) return false;
+    const db = await database();
+    try {
+      await db.withExclusiveTransactionAsync(async transaction => {
+        const binding = await readCaptureBinding(transaction);
+        if (binding?.id !== snapshot.binding?.id || !isLocationCaptureSnapshotCurrent(snapshot)) throw new StaleLocationCaptureError();
+        const row = await transaction.getFirstAsync<{ context_json: string }>(
+          "select context_json from location_account_context where account_key = ?", binding!.accountKey);
+        if (!row) throw new StaleLocationCaptureError();
+        await transaction.runAsync("update location_account_context set context_json = ?, updated_at = ? where account_key = ?",
+          JSON.stringify({ ...JSON.parse(row.context_json), savedPlaces }), new Date().toISOString(), binding!.accountKey);
+        if (!await readLocationCaptureConsent(snapshot.context!) || !isLocationCaptureSnapshotCurrent(snapshot)) throw new StaleLocationCaptureError();
+      });
+      return true;
+    } catch (error) {
+      if (!(error instanceof StaleLocationCaptureError)) throw error;
+      return false;
     }
   });
+}
+
+async function recordCaptureRejections(counts: Record<string, number>, transaction: SQLite.SQLiteDatabase) {
+  const row = await transaction.getFirstAsync<MetadataRow>("select value from location_store_metadata where key = 'capture_rejections'");
+  const previous = parseDiagnosticCounts(row?.value ?? null);
+  for (const [reason, count] of Object.entries(counts)) previous[reason] = (previous[reason] ?? 0) + count;
+  await setMetadata("capture_rejections", JSON.stringify(previous), transaction);
+}
+
+export function recordLocationCaptureDiscard(reason: "invalid_timestamp" | "invalid_evidence" | "stale_epoch" | "foreign_place" | "no_owner" | "opted_out", count: number) {
+  return serialiseLocationMutation(async () => recordCaptureRejections({ [reason]: count }, await database()));
 }
 
 function sanitiseEvidence(input: LocationEvidence) {
@@ -388,20 +563,38 @@ function sanitiseEvidence(input: LocationEvidence) {
   return parsed;
 }
 
-export async function persistLocationEvidence(items: LocationEvidence[]) {
-  return serialiseLocationMutation(() => persistLocationEvidenceUnsafe(items));
+export async function persistLocationEvidence(items: LocationEvidence[], snapshot: LocationCaptureSnapshot) {
+  return serialiseLocationMutation(() => persistLocationEvidenceUnsafe(items, snapshot));
 }
 
-async function persistLocationEvidenceUnsafe(items: LocationEvidence[]) {
-  if (items.length === 0) return { insertedCount: 0, duplicateCount: 0 };
-  const current = await currentContext();
-  const key = current?.key ?? "unbound";
+async function persistLocationEvidenceUnsafe(items: LocationEvidence[], snapshot: LocationCaptureSnapshot) {
+  if (items.length === 0) return { insertedCount: 0, duplicateCount: 0, rejectedCount: 0 };
   const now = new Date().toISOString();
   const expiresAt = new Date(Date.parse(now) + LOCATION_ENGINE_V2_CONFIG.rawEvidenceRetentionDays * 86_400_000).toISOString();
   const db = await database();
   let insertedCount = 0;
-  await db.withExclusiveTransactionAsync(async (transaction) => {
+  let rejectedCount = 0;
+  const rejections: Record<string, number> = {};
+  const reject = (reason: string, count = 1) => { rejections[reason] = (rejections[reason] ?? 0) + count; rejectedCount += count; };
+  try { await db.withExclusiveTransactionAsync(async (transaction) => {
+    const binding = await readCaptureBinding(transaction);
+    const owner = await readActiveMobileAccount();
+    const reason = captureAdmissionSuspended || snapshot.revision !== captureRevision || snapshot.binding?.id !== binding?.id ? "stale_epoch"
+      : !owner || !binding || !snapshot.context ? "no_owner"
+      : binding.accountKey !== accountKey(owner) ? "owner_mismatch"
+      : !binding.enabled || !await readLocationCaptureConsent(owner) ? "opted_out" : null;
+    if (reason) { reject(reason, items.length); await recordCaptureRejections(rejections, transaction); return; }
+    const key = binding!.accountKey;
+    const row = await transaction.getFirstAsync<{ context_json: string }>(
+      "select context_json from location_account_context where account_key = ?", key);
+    const context = row ? JSON.parse(row.context_json) as LocationAccountContext : snapshot.context!;
     for (const item of items) {
+      if (!isLocationCaptureSnapshotCurrent(snapshot)) throw new StaleLocationCaptureError();
+      if (!Number.isFinite(Date.parse(item.occurredAt))) { reject("invalid_timestamp"); continue; }
+      if (Date.parse(item.occurredAt) < Date.parse(binding!.boundAt)) { reject("before_binding"); continue; }
+      if (item.deviceId !== context.deviceId || item.timeZone !== context.timeZone) { reject("source_mismatch"); continue; }
+      if ((item.savedPlaceId || item.kind === "geofence_enter" || item.kind === "geofence_exit") &&
+        !context.savedPlaces.some(place => place.id === item.savedPlaceId)) { reject("foreign_place"); continue; }
       const evidence = sanitiseEvidence(item);
       const result = await transaction.runAsync(
         `insert or ignore into location_evidence_journal
@@ -416,10 +609,17 @@ async function persistLocationEvidenceUnsafe(items: LocationEvidence[]) {
       );
       insertedCount += result.changes;
     }
-  });
+    await recordCaptureRejections(rejections, transaction);
+    if (!await readLocationCaptureConsent(owner!) || !isLocationCaptureSnapshotCurrent(snapshot)) throw new StaleLocationCaptureError();
+  }); } catch (error) {
+    if (!(error instanceof StaleLocationCaptureError)) throw error;
+    insertedCount = 0;
+    rejectedCount = items.length;
+    await recordCaptureRejections({ stale_epoch: items.length }, db);
+  }
   await applyLocationRetentionUnsafe();
-  if (current) await processPendingLocationEvidenceUnsafe();
-  return { insertedCount, duplicateCount: items.length - insertedCount };
+  if (insertedCount && isLocationCaptureSnapshotCurrent(snapshot)) await processPendingLocationEvidenceUnsafe();
+  return { insertedCount, duplicateCount: items.length - insertedCount - rejectedCount, rejectedCount };
 }
 
 export async function processPendingLocationEvidence(processingAt = new Date().toISOString()) {
@@ -877,9 +1077,8 @@ async function uploadLocationEvidenceBatch(
     const acknowledged = partition.acknowledgedIds;
     const serverMode = LocationRolloutModeSchema.safeParse(payload.rolloutMode);
     const applied = await serialiseOwnedLocationMutation(owner, session, async () => {
-      const existingSemanticAcknowledgement = serverMode.success && isSemanticMode(serverMode.data)
-        ? await metadata(SEMANTIC_MODE_ACKNOWLEDGED_AT_KEY)
-        : null;
+      const eligibility = await readSemanticEligibility(accountKey(owner));
+      const existingSemanticAcknowledgement = eligibility && isSemanticMode(eligibility.mode) ? eligibility.acknowledgedAt : null;
       return db.withExclusiveTransactionAsync(async (transaction) => {
         for (const id of acknowledged) {
           await transaction.runAsync(
@@ -902,15 +1101,10 @@ async function uploadLocationEvidenceBatch(
         await setMetadata("last_upload_at", new Date().toISOString(), transaction);
         await setMetadata("last_server_replay_version", payload.replayVersion ?? LOCATION_ENGINE_V2_CONFIG.algorithmVersion, transaction);
         if (serverMode.success) {
-          await setMetadata(ROLLOUT_MODE_KEY, serverMode.data, transaction);
-          if (isSemanticMode(serverMode.data)) {
-            const acknowledgement = isSemanticMode(parsedBatch.rolloutMode) && existingSemanticAcknowledgement
-              ? existingSemanticAcknowledgement
-              : new Date().toISOString();
-            await setMetadata(SEMANTIC_MODE_ACKNOWLEDGED_AT_KEY, acknowledgement, transaction);
-          } else {
-            await setMetadata(SEMANTIC_MODE_ACKNOWLEDGED_AT_KEY, "", transaction);
-          }
+          const acknowledgement = isSemanticMode(serverMode.data)
+            ? existingSemanticAcknowledgement || new Date().toISOString()
+            : "";
+          await setSemanticEligibility(accountKey(owner), serverMode.data, acknowledgement, transaction);
         }
         await setMetadata("last_upload_error", partition.retryIds.length?"partial_acknowledgement":"", transaction);
         await setMetadata(`last_upload_warnings:${accountKey(owner)}`,JSON.stringify(payload.warnings??[]),transaction);
@@ -1012,9 +1206,8 @@ async function requestServerLocationReplay(
     const payload = LocationReplayResponseSchema.parse(body);
     const completedAt = new Date().toISOString();
     const applied = await serialiseOwnedLocationMutation(owner, session, async () => {
-      const existingSemanticAcknowledgement = isSemanticMode(payload.rolloutMode)
-        ? await metadata(SEMANTIC_MODE_ACKNOWLEDGED_AT_KEY)
-        : null;
+      const eligibility = await readSemanticEligibility(accountKey(owner));
+      const existingSemanticAcknowledgement = eligibility && isSemanticMode(eligibility.mode) ? eligibility.acknowledgedAt : null;
       const replayDb = await database();
       await replayDb.withExclusiveTransactionAsync(async (transaction) => {
         await setMetadata("last_server_replay_at", completedAt, transaction);
@@ -1027,16 +1220,10 @@ async function requestServerLocationReplay(
         await updateOwnedDiagnostics(accountKey(owner), {lastServerReplayAt:completedAt,lastServerReplayStatus:"success",
           lastServerReplayVersion:payload.replayVersion,lastServerReplayFinalisedCount:payload.finalisedSegmentCount,
           lastServerReplaySemanticCount:payload.semanticSegmentCount,lastServerReplayError:null},transaction);
-        await setMetadata(ROLLOUT_MODE_KEY, payload.rolloutMode, transaction);
-        if (isSemanticMode(payload.rolloutMode)) {
-          const acknowledgement =
-            isSemanticMode(prepared.requestedMode) && existingSemanticAcknowledgement
-              ? existingSemanticAcknowledgement
-              : completedAt;
-          await setMetadata(SEMANTIC_MODE_ACKNOWLEDGED_AT_KEY, acknowledgement, transaction);
-        } else {
-          await setMetadata(SEMANTIC_MODE_ACKNOWLEDGED_AT_KEY, "", transaction);
-        }
+        const acknowledgement = isSemanticMode(payload.rolloutMode)
+          ? existingSemanticAcknowledgement || completedAt
+          : "";
+        await setSemanticEligibility(accountKey(owner), payload.rolloutMode, acknowledgement, transaction);
       });
     });
     if (applied === null) {
@@ -1113,28 +1300,48 @@ async function applyLocationRetentionUnsafe() {
 }
 
 export async function clearActiveLocationAccountData() {
-  return serialiseLocationMutation(clearActiveLocationAccountDataUnsafe);
+  const binding = await readLocationCaptureBinding();
+  return endLocationOwnership(binding, true);
 }
 
-async function clearActiveLocationAccountDataUnsafe() {
-  const key = await metadata(ACTIVE_ACCOUNT_KEY);
-  if (!key) return;
-  const db = await database();
-  await db.withExclusiveTransactionAsync(async (transaction) => {
-    await transaction.runAsync("delete from location_evidence_journal where account_key = ?", key);
-    await transaction.runAsync("delete from location_engine_state where account_key = ?", key);
-    await transaction.runAsync("delete from location_segment_snapshot where account_key = ?", key);
-    await transaction.runAsync("delete from location_upload_outbox where account_key = ?", key);
-    await transaction.runAsync("delete from location_account_context where account_key = ?", key);
-    await transaction.runAsync("delete from location_store_metadata where key = ?", `sync_diagnostics:${key}`);
-    await transaction.runAsync(
-      "delete from location_store_metadata where key in (?, ?, ?, ?, ?)",
-      ACTIVE_ACCOUNT_KEY,
-      ACTIVE_DEVICE_KEY,
-      ACTIVE_TIME_ZONE_KEY,
-      ROLLOUT_MODE_KEY,
-      SEMANTIC_MODE_ACKNOWLEDGED_AT_KEY
-    );
+export function endLocationOwnership(expected: LocationCaptureBinding | null, deleteOwnedData = false,
+  options: { owner?: MobileAccountOwner; isCurrent?: () => boolean; revision?: number } = {}) {
+  const revision = options.revision ?? captureRevision;
+  const isCurrent = () => revision === captureRevision && (options.isCurrent?.() ?? true);
+  return serialiseLocationMutation(async () => {
+    const db = await database();
+    const binding = await readCaptureBinding();
+    if (!isCurrent() || binding?.id !== expected?.id) return false;
+    const key = options.owner ? accountKey(options.owner) : expected?.accountKey ?? await metadata(ACTIVE_ACCOUNT_KEY);
+    if (binding && binding.accountKey !== key) return false;
+    const eligibility = key && !deleteOwnedData ? await readSemanticEligibility(key) : null;
+    try { await db.withExclusiveTransactionAsync(async (transaction) => {
+      if (!isCurrent()) throw new StaleLocationCaptureError();
+      if (key && deleteOwnedData) {
+        for (const table of ["location_evidence_journal", "location_engine_state", "location_segment_snapshot", "location_upload_outbox", "location_account_context"]) {
+          await transaction.runAsync(`delete from ${table} where account_key = ?`, key);
+        }
+        await transaction.runAsync("delete from location_store_metadata where key = ?", `${SEMANTIC_ELIGIBILITY_PREFIX}${key}`);
+      } else if (key && eligibility) {
+        await setMetadata(`${SEMANTIC_ELIGIBILITY_PREFIX}${key}`, JSON.stringify(eligibility), transaction);
+      }
+      if (key) await transaction.runAsync("delete from location_store_metadata where key = ?", `sync_diagnostics:${key}`);
+      await transaction.runAsync("delete from location_store_metadata where key in (?, ?, ?, ?, ?, ?)",
+        ACTIVE_ACCOUNT_KEY, ACTIVE_DEVICE_KEY, ACTIVE_TIME_ZONE_KEY, ROLLOUT_MODE_KEY,
+        SEMANTIC_MODE_ACKNOWLEDGED_AT_KEY, CAPTURE_BINDING_KEY);
+      if (!isCurrent()) throw new StaleLocationCaptureError();
+    }); } catch (error) {
+      if (!(error instanceof StaleLocationCaptureError)) throw error;
+      return false;
+    }
+    return true;
+  });
+}
+
+export function recordLocationCaptureCleanupFailure() {
+  return serialiseLocationMutation(async () => {
+    const count = Number(await metadata("capture_cleanup_failure_count") ?? 0);
+    await setMetadata("capture_cleanup_failure_count", String(count + 1));
   });
 }
 
@@ -1215,6 +1422,9 @@ export async function getLocationStoreDiagnostics(): Promise<LocationStoreDiagno
     activeProvisionalSegmentKind: owned.activeProvisionalSegmentKind ?? null,
     lastGapDurationSeconds: owned.lastGapDurationSeconds ?? null,
     rejectedEvidenceCounts: owned.rejectedEvidenceCounts ?? {},
+    captureRejectedEvidenceCounts: parseDiagnosticCounts(await metadata("capture_rejections")),
+    legacyUnboundDeletedCount: Number(await metadata("legacy_unbound_deleted_count") ?? 0),
+    captureCleanupFailureCount: Number(await metadata("capture_cleanup_failure_count") ?? 0),
     lastUploadAt: owned.lastUploadAt ?? null,
     lastServerReplayVersion: owned.lastServerReplayVersion ?? null,
     lastServerReplayAt: owned.lastServerReplayAt ?? null,
@@ -1288,11 +1498,4 @@ export function evidenceFromExpoLocation(input: {
     timeZone: context.timeZone,
     isSimulated: input.mocked ?? false
   });
-}
-
-export async function activeLocationCaptureContext() {
-  return {
-    deviceId: await metadata(ACTIVE_DEVICE_KEY),
-    timeZone: await metadata(ACTIVE_TIME_ZONE_KEY)
-  };
 }
