@@ -44,6 +44,8 @@ A review of the stacked arrival PR at `acbda42` found two more issues in this PR
 - A trip could absorb a stop when one side of it had no movement evidence, claiming unobserved time as travel. Every portion of a trip now needs an accurate movement sample; otherwise the legs are kept.
 - A decided or manual row could keep an interior stop's ID while late evidence moved the engine's boundaries, and replay still wrote the enclosing trip. Replay now blocks such trips. A further review found that the aligned fallback legs kept stale route evidence and metrics, so they are now re-derived inside the decided stop's persisted boundaries and omitted if they no longer qualify (both persistence profiles).
 
+A later re-review (`bd8c9e5`) found that stop clustering ignored an accurate Visit elsewhere, so slow fixes either side of a Visit 1.5 km away formed one stop. A credible Visit elsewhere now splits the cluster and bounds the stop, without counting as a slow fix.
+
 Each has a regression test that failed before its fix. The offline corpus result below is unchanged by these fixes.
 
 ## Offline corpus result (private, times only)
