@@ -39,6 +39,11 @@ A re-review at `e0bf5f6` found two more issues:
 
 A third review at `c51c3ba` found that replay checked only a trip's endpoint stays. If a late fix split an already-decided stay into short stops, the stops were correctly held but their enclosing trip could still persist across the decided time. Replay now also treats a trip as blocked when any interior stop is held, then applies the same leg fallback; legs touching the held stop are excluded.
 
+A review of the stacked arrival PR at `acbda42` found two more issues in this PR:
+
+- A trip could absorb a stop when one side of it had no movement evidence, claiming unobserved time as travel. Every portion of a trip now needs an accurate movement sample; otherwise the legs are kept.
+- A decided or manual row could keep an interior stop's ID while late evidence moved the engine's boundaries, and replay still wrote the enclosing trip. Replay now blocks such trips and aligns the fallback legs to the decided stop's persisted boundaries (both persistence profiles).
+
 Each has a regression test that failed before its fix. The offline corpus result below is unchanged by these fixes.
 
 ## Offline corpus result (private, times only)
