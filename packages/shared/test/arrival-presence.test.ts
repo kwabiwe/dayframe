@@ -108,6 +108,41 @@ describe("corroborated arrival presence at saved places", () => {
     expect(trips.some((trip) => trip.startedAt === at("07:26:56") && trip.stoppedAt === at("07:43:15"))).toBe(true);
   });
 
+  it("bounds presence at the earliest credible departure before judging dwell (re-review finding 1)", () => {
+    const input = schoolRunArrivalFixture("09:30:00", { exclude: ["home-later-0", "home-later-1", "home-later-2", "home-later-3", "home-later-4"] });
+    const workId = "10000000-0000-4000-8000-000000000033";
+    input.savedPlaces.push({ id: workId, name: "Work", latitude: 2_000 / 111_195, longitude: 0, radiusMeters: 100 });
+    extra(input, { clientEvidenceId: "away-moving", occurredAt: at("07:48:00"), latitude: 1_100 / 111_195, longitude: 0,
+      horizontalAccuracyMeters: 5, speedMetersPerSecond: 15 });
+    extra(input, { clientEvidenceId: "at-work", occurredAt: at("07:51:00"), latitude: 2_000 / 111_195, longitude: 0,
+      horizontalAccuracyMeters: 5, speedMetersPerSecond: 0 });
+    extra(input, { clientEvidenceId: "at-work-2", occurredAt: at("07:58:00"), latitude: 2_000 / 111_195, longitude: 0,
+      horizontalAccuracyMeters: 5, speedMetersPerSecond: 0 });
+    // Departure was evident at 07:48, so Home lasted under five minutes, as on main.
+    expect(homeStays(run(input).stays).some((stay) => stay.startedAt === at("07:43:15"))).toBe(false);
+  });
+
+  it("does not corroborate an arrival with evidence from a separate earlier episode (re-review finding 2)", () => {
+    const input = schoolRunArrivalFixture("09:30:00", { exclude: [] });
+    const workId = "10000000-0000-4000-8000-000000000034";
+    input.savedPlaces.push({ id: workId, name: "Work", latitude: 2_000 / 111_195, longitude: 0, radiusMeters: 100 });
+    const template = input.evidence.find((item) => item.clientEvidenceId === "home-visit-open")!;
+    const day = "2026-01-13";
+    const point = (id: string, time: string, metres: number) => ({ ...template, clientEvidenceId: id, kind: "standard_location" as const,
+      occurredAt: `${day}T${time}.000Z`, sourceTimestamp: `${day}T${time}.000Z`, receivedAt: `${day}T${time}.000Z`,
+      latitude: metres / 111_195, horizontalAccuracyMeters: 5, speedMetersPerSecond: 0, metadata: {} });
+    input.evidence = [
+      point("home-early", "00:00:00", 5),
+      point("work-1", "00:01:00", 2_000), point("work-2", "00:02:00", 2_000),
+      { ...point("home-visit-bare", "00:04:00", 19), kind: "visit" as const, speedMetersPerSecond: null,
+        horizontalAccuracyMeters: 15, metadata: { visitDepartureOpen: true } },
+      point("work-3", "00:09:00", 2_000), point("work-4", "00:09:30", 2_000), point("work-5", "00:20:00", 2_000)
+    ];
+    input.processingAt = `${day}T01:00:00.000Z`;
+    const stays = run(input).stays;
+    expect(homeStays(stays).some((stay) => stay.startedAt === `${day}T00:04:00.000Z`)).toBe(false);
+  });
+
   it("does not split a journey at a brief kerbside stop at a saved place", () => {
     // ~1 minute at a saved stop: arrival-only Visit and geofence entry, then driving on.
     const input = physicalStopFixture({ ...PHYSICAL_STOP_PICKUP, visit: null, slowAt: [700_000], departAt: 760_000, returnAt: 844_000 });

@@ -169,11 +169,17 @@ function closeAtTransition(
     active.continuityStatus = continuityStatus;
     return;
   }
-  // With arrival presence the stay lasted until the departure evidence; the
-  // silence before it is not an even split of unknown time.
-  active.stoppedAt = exact ? lastAt : active.arrivalPresence ? nextAt : midpointTimeIso(lastAt, nextAt);
+  // With arrival presence the stay lasted until the earliest credible departure
+  // evidence (a buffered outside reading, a pending exit or the closing item);
+  // the silence before it is not an even split of unknown time.
+  const departureAt = !exact && active.arrivalPresence
+    ? [nextAt, active.outside[0]?.evidence.occurredAt, active.pendingExit?.evidence.occurredAt]
+        .filter((at): at is string => at != null && Date.parse(at) >= Date.parse(lastAt))
+        .sort((a, b) => Date.parse(a) - Date.parse(b))[0] ?? nextAt
+    : null;
+  active.stoppedAt = exact ? lastAt : departureAt ?? midpointTimeIso(lastAt, nextAt);
   active.stopLowerBoundAt = lastAt;
-  active.stopUpperBoundAt = nextAt;
+  active.stopUpperBoundAt = departureAt ?? nextAt;
   active.continuityStatus = continuityStatus;
 }
 
@@ -317,6 +323,20 @@ function corroboratedOpenVisitArrivals(accepted: ClassifiedEvidence[], input: Lo
     .filter(({ evidence }) => evidence.kind === "visit" && evidence.endedAt)
     .map(({ evidence }) => `${evidence.deviceId}:${evidence.occurredAt}`));
   const windowMs = input.config.savedPlaceArrivalCorroborationWindowMs;
+  const order = new Map(accepted.map((item, index) => [item, index]));
+  // Corroboration must come from the same episode: nothing between the two may
+  // show the device leaving or being elsewhere.
+  const contradicts = (item: ClassifiedEvidence, placeId: string) => {
+    const e = item.evidence;
+    if (e.kind === "geofence_exit") return e.savedPlaceId === placeId;
+    return (e.kind === "standard_location" || e.kind === "significant_change") && accurateCoordinate(item, input) &&
+      !(item.match?.candidates.some((candidate) => candidate.id === placeId && candidate.matchClass !== "outside") ?? false);
+  };
+  const sameEpisode = (a: ClassifiedEvidence, b: ClassifiedEvidence, placeId: string) => {
+    const [low, high] = [order.get(a)!, order.get(b)!].sort((x, y) => x - y);
+    for (let index = low + 1; index < high; index += 1) if (contradicts(accepted[index], placeId)) return false;
+    return true;
+  };
   const corroborated = new Set<string>();
   for (const item of accepted) {
     const e = item.evidence;
@@ -328,7 +348,8 @@ function corroboratedOpenVisitArrivals(accepted: ClassifiedEvidence[], input: Lo
     if (accepted.some((other) => other !== item && other.evidence.deviceId === e.deviceId &&
       Math.abs(Date.parse(other.evidence.occurredAt) - arrivalMs) <= windowMs &&
       ((other.evidence.kind === "geofence_enter" && other.evidence.savedPlaceId === placeId) ||
-        strongSavedPoint(other, placeId, input)))) corroborated.add(e.clientEvidenceId);
+        strongSavedPoint(other, placeId, input)) &&
+      sameEpisode(item, other, placeId))) corroborated.add(e.clientEvidenceId);
   }
   return corroborated;
 }

@@ -27,6 +27,13 @@ Output was a 41-minute return journey (07:41:57–08:22:56), with Home starting 
 - A quiet departure (exit plus outside readings with no later Home reading) removed the recognised arrival, because presence only helped open stays. Presence now carries into closing stays: silence no longer closes a present stay, departure is judged by the ordinary rules, and the stay ends at the departure evidence.
 - Two findings in the base PR (absorbing stops without movement on both sides, and decided stop rows keeping their ID) are fixed there and merged in.
 
+A re-review at `b7f013d` found two more:
+
+- A present stay closed by another place could run to that later reading, ignoring an earlier buffered outside reading, and so pass the five-minute floor. It now ends at the earliest credible departure.
+- Corroboration could pair a bare Visit with a same-place reading from a separate earlier episode, across readings elsewhere. Corroboration must now come from the same episode.
+
+The base PR's fallback-leg rebuild (stale route evidence on reconciled legs) is fixed there and merged in.
+
 Each has a regression test that failed before its fix.
 
 ## Result
