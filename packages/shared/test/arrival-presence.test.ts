@@ -84,6 +84,30 @@ describe("corroborated arrival presence at saved places", () => {
     expect(homeStays(run(input).stays).some((stay) => stay.startedAt === at("07:43:15"))).toBe(false);
   });
 
+  it("suspends clock-based presence while an outside reading is unresolved (review finding 1)", () => {
+    const input = schoolRunArrivalFixture("09:30:00", { exclude: ["home-later-0", "home-later-1", "home-later-2", "home-later-3", "home-later-4"] });
+    extra(input, { clientEvidenceId: "away-once", occurredAt: at("07:50:00"), latitude: 1_100 / 111_195, longitude: 0,
+      horizontalAccuracyMeters: 5, speedMetersPerSecond: 15 });
+    const { stays, trips } = run(input);
+    expect(homeStays(stays).some((stay) => stay.startedAt === at("07:43:15"))).toBe(false);
+    expect(trips.some((trip) => trip.stoppedAt === at("07:43:15"))).toBe(false);
+  });
+
+  it("keeps a recognised arrival through a quiet departure, ending at the exit (review finding 2)", () => {
+    const input = schoolRunArrivalFixture("09:30:00", { exclude: ["home-later-0", "home-later-1", "home-later-2", "home-later-3", "home-later-4"] });
+    extra(input, { clientEvidenceId: "home-exit-later", kind: "geofence_exit", occurredAt: at("08:10:00"),
+      savedPlaceId: SCHOOL_RUN_HOME_ID, latitude: null, longitude: null, horizontalAccuracyMeters: null });
+    extra(input, { clientEvidenceId: "leave-0", occurredAt: at("08:10:20"), latitude: 1_000 / 111_195, longitude: 0,
+      horizontalAccuracyMeters: 5, speedMetersPerSecond: 12 });
+    extra(input, { clientEvidenceId: "leave-1", occurredAt: at("08:10:40"), latitude: 1_500 / 111_195, longitude: 0,
+      horizontalAccuracyMeters: 5, speedMetersPerSecond: 13 });
+    const { stays, trips } = run(input);
+    expect(homeStays(stays).find((stay) => stay.startedAt === at("07:43:15"))).toMatchObject({
+      stoppedAt: at("08:10:00"), stopLowerBoundAt: at("07:46:51"), stopUpperBoundAt: at("08:10:00")
+    });
+    expect(trips.some((trip) => trip.startedAt === at("07:26:56") && trip.stoppedAt === at("07:43:15"))).toBe(true);
+  });
+
   it("does not split a journey at a brief kerbside stop at a saved place", () => {
     // ~1 minute at a saved stop: arrival-only Visit and geofence entry, then driving on.
     const input = physicalStopFixture({ ...PHYSICAL_STOP_PICKUP, visit: null, slowAt: [700_000], departAt: 760_000, returnAt: 844_000 });
