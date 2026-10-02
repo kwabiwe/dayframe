@@ -344,6 +344,11 @@ export type CommuteDerivationOptions = {
   inferredBoundaryStayIds?: ReadonlySet<string>;
   /** Short stops between the given stays; their evidence is not route evidence. */
   interiorStops?: readonly StaySegment[];
+  /**
+   * Lowest confidence of a complete chain of already-qualified legs joining
+   * these stays through interior stops, or null when no such chain exists.
+   */
+  qualifiedLegChainConfidence?: (fromStayId: string, toStayId: string) => CommuteSegment["confidence"] | null;
   arrivalWitnesses?: readonly SavedPlaceArrivalWitness[];
   savedPlaces?: readonly SavedPlaceForMatching[];
 };
@@ -421,7 +426,20 @@ export function deriveCommutes(
       shortProof ??= shortJourneyProof(acceptedEvidence, config, occurredAtMs);
       if (!hasIndependentShortJourneyProof(routeEvidence, shortProof, startedAtMs, stoppedAtMs, config)) continue;
     }
-    const qualification = qualifyCommuteCandidate(summary, config);
+    let qualification = qualifyCommuteCandidate(summary, config);
+    // Each leg already proved a real journey to or from a recorded stop; the
+    // whole trip through those stops is therefore real even when the combined
+    // route is shorter than the same-place round-trip minimum.
+    const chainConfidence = !qualification.qualifies && stops.length
+      ? options.qualifiedLegChainConfidence?.(from.clientSegmentId, to.clientSegmentId) ?? null
+      : null;
+    if (chainConfidence) {
+      qualification = {
+        qualifies: true,
+        reason: summary.sameKnownPlace ? "same_place_meaningful_round_trip" : "significant_route_distance",
+        confidence: chainConfidence
+      };
+    }
     if (!qualification.qualifies) continue;
     const evidenceIds = routeEvidence.map(({ evidence }) => evidence.clientEvidenceId);
     const uncertainBoundary =
@@ -505,8 +523,24 @@ export function assembleTripsThroughStops(
   const interiorStops = stays.filter(minorStop);
   if (!interiorStops.length) return legs;
   const majors = stays.filter((stay) => !minorStop(stay));
-  const trips = deriveCommutes(majors, acceptedEvidence, config, processingAt, { ...options, interiorStops })
-    .filter((trip) => trip.stops?.length);
+  const interiorIds = new Set(interiorStops.map((stay) => stay.clientSegmentId));
+  const order: CommuteSegment["confidence"][] = ["low", "medium", "medium_high", "high"];
+  const qualifiedLegChainConfidence = (fromStayId: string, toStayId: string) => {
+    let current = fromStayId;
+    let confidence: CommuteSegment["confidence"] | null = null;
+    for (let hops = 0; hops <= interiorStops.length; hops += 1) {
+      const leg = legs.find((candidate) => candidate.fromStaySegmentId === current);
+      if (!leg) return null;
+      confidence = confidence == null || order.indexOf(leg.confidence) < order.indexOf(confidence) ? leg.confidence : confidence;
+      if (leg.toStaySegmentId === toStayId) return confidence;
+      if (!interiorIds.has(leg.toStaySegmentId)) return null;
+      current = leg.toStaySegmentId;
+    }
+    return null;
+  };
+  const trips = deriveCommutes(majors, acceptedEvidence, config, processingAt, {
+    ...options, interiorStops, qualifiedLegChainConfidence
+  }).filter((trip) => trip.stops?.length);
   const within = (leg: CommuteSegment, trip: CommuteSegment) =>
     Date.parse(leg.startedAt) >= Date.parse(trip.startedAt) && Date.parse(leg.stoppedAt) <= Date.parse(trip.stoppedAt);
   const result = [

@@ -8,6 +8,7 @@ export * from "./physicalStopFixture";
 export * from "./physicalStops";
 export * from "./placeMatcher";
 export * from "./schemas";
+export * from "./schoolRunArrivalFixture";
 export * from "./segmenter";
 export * from "./testFixtures";
 export * from "./types";

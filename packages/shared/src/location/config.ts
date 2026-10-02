@@ -14,6 +14,7 @@ export type LocationEngineConfig = {
   savedPlaceMinimumDwellMs: number;
   savedPlaceExitReentryGraceMs: number;
   savedPlaceQuietGapMaxMs: number;
+  savedPlaceOpenVisitPresenceMaximumMs: number;
   savedPlaceArrivalCorroborationWindowMs: number;
   savedPlaceArrivalMinimumStrongPointCount: number;
   savedArrivalWitnessMinimumSpanMs: number;
@@ -73,6 +74,12 @@ export const LOCATION_ENGINE_V2_CONFIG: LocationEngineConfig = {
   savedPlaceMinimumDwellMs: 300_000,
   savedPlaceExitReentryGraceMs: 300_000,
   savedPlaceQuietGapMaxMs: 1_800_000,
+  // A corroborated arrival-only Visit at a saved place means iOS saw the device
+  // arrive and has not reported departure. A still phone records nothing, so
+  // presence continues through silence to the next same-place observation (or
+  // to processing time for an open stay), but never past contradicting
+  // evidence and never longer than this cap.
+  savedPlaceOpenVisitPresenceMaximumMs: 64_800_000,
   savedPlaceArrivalCorroborationWindowMs: 300_000,
   savedPlaceArrivalMinimumStrongPointCount: 2,
   savedArrivalWitnessMinimumSpanMs: 120_000,
