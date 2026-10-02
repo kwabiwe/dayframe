@@ -317,8 +317,11 @@ async function excludeProtectedReplacements(
       }
     }
   }
+  // A trip also depends on its interior stops: it cannot span time whose stop
+  // replacement was held by protected history.
   const replaceable = (segment: LocationSegment) => !held.has(segment.clientSegmentId) && (segment.kind !== "commute" ||
-    (!held.has(segment.fromStaySegmentId) && !held.has(segment.toStaySegmentId)));
+    (!held.has(segment.fromStaySegmentId) && !held.has(segment.toStaySegmentId) &&
+      !(segment.stops ?? []).some((stop) => held.has(stop.staySegmentId))));
   return {
     count: held.size,
     segments: segments.flatMap((segment) => replaceable(segment)

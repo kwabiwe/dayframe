@@ -37,6 +37,8 @@ A re-review at `e0bf5f6` found two more issues:
 - The engine still counted a recorded stop's interval as a route observation gap, lowering confidence and continuity. Stop intervals are now subtracted from engine gaps too; real unobserved gaps beside a stop are still reported.
 - Two slow clusters about 140 m apart could form two stops with identical boundaries, because clusters split at 100 m while departure needs 150 m. Clusters now end only where departure is evident, and overlapping stops are rejected.
 
+A third review at `c51c3ba` found that replay checked only a trip's endpoint stays. If a late fix split an already-decided stay into short stops, the stops were correctly held but their enclosing trip could still persist across the decided time. Replay now also treats a trip as blocked when any interior stop is held, then applies the same leg fallback; legs touching the held stop are excluded.
+
 Each has a regression test that failed before its fix. The offline corpus result below is unchanged by these fixes.
 
 ## Offline corpus result (private, times only)

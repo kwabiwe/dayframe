@@ -244,3 +244,45 @@ describe("Location replay protected trip legs", () => {
     expect(retire[1]).toEqual(expect.arrayContaining([expect.arrayContaining([open.clientSegmentId])]));
   });
 });
+
+describe("Location replay protected interior stops", () => {
+  it.each([
+    ["default", undefined],
+    ["scalability", LOCATION_REPLAY_SCALABILITY_PROFILE]
+  ] as const)("does not persist a trip across a protected interior stop (%s profile; re-review finding)", async (_label, persistenceProfile) => {
+    const fixture = physicalStopFixture(PHYSICAL_STOP_PICKUP);
+    const local = runLocationEngine(fixture);
+    const trip = local.segmentUpserts.find((segment) => segment.kind === "commute" && segment.stops?.length);
+    if (trip?.kind !== "commute") throw new Error("fixture must produce a trip with a stop");
+    const stop = local.segmentUpserts.find((segment) => segment.clientSegmentId === trip.stops![0].staySegmentId)!;
+    const evidenceId = stop.evidenceIds.find((id) => id.startsWith("slow-"))!;
+    // An earlier, already-decided stay covering the same stationary time.
+    const protectedLink = {
+      clientSegmentId: "previously-confirmed-stay",
+      clientEvidenceId: evidenceId,
+      kind: "standard_location",
+      occurredAt: fixture.evidence.find((item) => item.clientEvidenceId === evidenceId)!.occurredAt,
+      startedAt: stop.startedAt,
+      stoppedAt: stop.stoppedAt
+    };
+    const base = journeyReplayQuery(fixture as unknown as ReturnType<typeof journeyIdentityFixture>, [protectedLink]);
+    const stayRows = local.segmentUpserts.filter((segment) => segment.kind === "stay")
+      .map((segment) => ({ id: `db-${segment.clientSegmentId}`, clientSegmentId: segment.clientSegmentId }));
+    const query = vi.fn(async (sql: string, params?: unknown[]) =>
+      sql.includes("insert into stay_segments") ? { rows: stayRows } : base(sql, params));
+    const server = await replayLocationEvidence({ query } as never, {
+      workspaceId: "workspace-private", userId: "user-private", authMode: "provider", scopes: []
+    }, {
+      deviceId: fixture.evidence[0].deviceId,
+      algorithmVersion: fixture.config.algorithmVersion,
+      processingAt: fixture.processingAt,
+      persistenceProfile
+    });
+    const ids = server.segments.map((segment) => segment.clientSegmentId);
+    expect(ids).not.toContain(stop.clientSegmentId);
+    expect(ids).not.toContain(trip.clientSegmentId);
+    // Legs ending or starting at the protected stop are not replacements either.
+    expect(server.segments.some((segment) => segment.kind === "commute" &&
+      (segment.fromStaySegmentId === stop.clientSegmentId || segment.toStaySegmentId === stop.clientSegmentId))).toBe(false);
+  });
+});
