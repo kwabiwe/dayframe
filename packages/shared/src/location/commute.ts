@@ -411,6 +411,9 @@ export function deriveCommutes(
       if (stopEvidenceIds.has(item.evidence.clientEvidenceId)) return false;
       return !evidenceMatchesStay(item, from) && !evidenceMatchesStay(item, to);
     });
+    // Every portion of a trip through stops needs its own movement evidence;
+    // otherwise unobserved time either side of a stop would be claimed as travel.
+    if (stops.length && !everyPortionShowsMovement(from, to, stops, routeEvidence, startedAtMs, stoppedAtMs, config)) continue;
     const summary = summariseCommuteEvidence({
       config,
       from,
@@ -486,6 +489,38 @@ export function deriveCommutes(
     });
   }
   return commutes;
+}
+
+function everyPortionShowsMovement(
+  from: StaySegment,
+  to: StaySegment,
+  stops: readonly StaySegment[],
+  routeEvidence: readonly ClassifiedEvidence[],
+  startedAtMs: number,
+  stoppedAtMs: number,
+  config: LocationEngineConfig
+) {
+  const ordered = [...stops].sort((a, b) => Date.parse(a.startedAt) - Date.parse(b.startedAt));
+  const anchors = [from, ...ordered, to];
+  const bounds = [startedAtMs, ...ordered.flatMap((stop) => [Date.parse(stop.startedAt), Date.parse(stop.stoppedAt!)]), stoppedAtMs];
+  for (let index = 0; index < anchors.length - 1; index += 1) {
+    const portionStart = bounds[index * 2];
+    const portionStop = bounds[index * 2 + 1];
+    const ends = [segmentPoint(anchors[index]), segmentPoint(anchors[index + 1])];
+    const moving = routeEvidence.some((item) => {
+      const at = Date.parse(item.evidence.occurredAt);
+      if (at < portionStart || at > portionStop) return false;
+      const accuracy = item.evidence.horizontalAccuracyMeters;
+      if (accuracy == null || accuracy > config.commuteMaximumSpeedAccuracyMeters) return false;
+      const speed = item.evidence.speedMetersPerSecond ?? item.impliedSpeedMetersPerSecond;
+      if (speed != null && speed >= config.movementSpeedThresholdMps) return true;
+      const point = evidencePoint(item);
+      return point != null && ends.every((end) => end != null &&
+        distanceMeters(end, point) >= config.movementDisplacementThresholdMeters);
+    });
+    if (!moving) return false;
+  }
+  return true;
 }
 
 function stopFromStay(stay: StaySegment): CommuteStop {

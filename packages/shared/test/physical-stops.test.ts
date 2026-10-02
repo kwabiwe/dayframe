@@ -176,6 +176,15 @@ describe("physical stops", () => {
     }
   });
 
+  it("does not absorb a stop when one side of it has no movement evidence (re-review finding 3)", () => {
+    // No readings between leaving Home and the stop; all movement is after the stop.
+    const input = physicalStopFixture(shape({ visit: [670_000, 1_390_000], slowAt: [860_000, 1_000_000, 1_200_000], departAt: 1_394_000, returnAt: 1_478_000 }));
+    input.evidence = input.evidence.filter((e) => !e.clientEvidenceId.startsWith("out-") && e.clientEvidenceId !== "parking");
+    const { trips } = run(input);
+    expect(trips.some((trip) => trip.stops?.length)).toBe(false);
+    expect(trips.some((trip) => trip.startedAt <= shortAt(670_000))).toBe(false);
+  });
+
   it("exposes only accurate, non-simulated position fixes to detection", () => {
     const input = physicalStopFixture(PICKUP);
     input.evidence.forEach((e) => { if (e.clientEvidenceId.startsWith("slow-")) e.isSimulated = true; });

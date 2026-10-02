@@ -317,17 +317,77 @@ async function excludeProtectedReplacements(
       }
     }
   }
+  // A decided or manual row can keep an interior stop's ID while late evidence
+  // moves the engine's boundaries. Its persisted boundaries stay canonical.
+  const interiorStopIds = [...new Set(segments.flatMap((segment) =>
+    segment.kind === "commute" ? (segment.stops ?? []).map((stop) => stop.staySegmentId) : []))].sort();
+  const decidedStops = await decidedInteriorStops(client, session, options, interiorStopIds);
   // A trip also depends on its interior stops: it cannot span time whose stop
-  // replacement was held by protected history.
+  // replacement was held by, or already belongs to, decided history.
   const replaceable = (segment: LocationSegment) => !held.has(segment.clientSegmentId) && (segment.kind !== "commute" ||
     (!held.has(segment.fromStaySegmentId) && !held.has(segment.toStaySegmentId) &&
-      !(segment.stops ?? []).some((stop) => held.has(stop.staySegmentId))));
+      !(segment.stops ?? []).some((stop) => held.has(stop.staySegmentId) || decidedStops.has(stop.staySegmentId))));
   return {
     count: held.size,
     segments: segments.flatMap((segment) => replaceable(segment)
       ? [segment]
-      : segment.kind === "commute" ? (segment.legs ?? []).filter(replaceable) : [])
+      : segment.kind === "commute"
+        ? (segment.legs ?? []).filter(replaceable).flatMap((leg) => reconcileLegToDecidedStops(leg, decidedStops))
+        : [])
   };
+}
+
+type DecidedStopBounds = {
+  clientSegmentId: string;
+  startedAt: Date | string; stoppedAt: Date | string | null;
+  startLowerBoundAt: Date | string | null; startUpperBoundAt: Date | string | null;
+  stopLowerBoundAt: Date | string | null; stopUpperBoundAt: Date | string | null;
+};
+
+/** Persisted boundaries of terminal/manual stays that keep an interior stop's client ID. */
+async function decidedInteriorStops(
+  client: pg.PoolClient, session: RequestSession,
+  options: Pick<LocationReplayOptions, "deviceId">,
+  clientSegmentIds: string[]
+) {
+  const decided = new Map<string, DecidedStopBounds>();
+  if (!clientSegmentIds.length) return decided;
+  // Same protection predicate as segment persistence.
+  const result = await client.query<DecidedStopBounds>(
+    `/* decided interior stops */ select s.client_segment_id as "clientSegmentId", s.started_at as "startedAt", s.stopped_at as "stoppedAt",
+            s.start_lower_bound_at as "startLowerBoundAt", s.start_upper_bound_at as "startUpperBoundAt",
+            s.stop_lower_bound_at as "stopLowerBoundAt", s.stop_upper_bound_at as "stopUpperBoundAt"
+     from stay_segments s
+     where s.workspace_id = $1 and s.user_id = $2 and s.device_id = $3 and s.client_segment_id = any($4::text[])
+       and (s.continuity_status = 'manual' or (s.created_from_event_id is not null and not exists (
+         select 1 from review_items ri
+         where ri.workspace_id = $1 and ri.user_id = $2 and ri.location_segment_id = s.id and ri.status = 'open')))
+     order by s.client_segment_id`,
+    [session.workspaceId, session.userId, options.deviceId, clientSegmentIds]
+  );
+  for (const row of result.rows) decided.set(row.clientSegmentId, row);
+  return decided;
+}
+
+/** Aligns a fallback leg with the persisted boundaries of a decided endpoint stop; drops it if they conflict. */
+function reconcileLegToDecidedStops(leg: CommuteSegment, decided: ReadonlyMap<string, DecidedStopBounds>): CommuteSegment[] {
+  let next = { ...leg };
+  const into = decided.get(leg.toStaySegmentId);
+  if (into) {
+    const startedAt = iso(into.startedAt)!;
+    next = { ...next, stoppedAt: startedAt,
+      stopLowerBoundAt: iso(into.startLowerBoundAt) ?? startedAt, stopUpperBoundAt: iso(into.startUpperBoundAt) ?? startedAt };
+  }
+  const outOf = decided.get(leg.fromStaySegmentId);
+  if (outOf) {
+    const stoppedAt = iso(outOf.stoppedAt);
+    if (!stoppedAt) return [];
+    next = { ...next, startedAt: stoppedAt,
+      startLowerBoundAt: iso(outOf.stopLowerBoundAt) ?? stoppedAt, startUpperBoundAt: iso(outOf.stopUpperBoundAt) ?? stoppedAt };
+  }
+  const duration = Date.parse(next.stoppedAt) - Date.parse(next.startedAt);
+  if (!Number.isFinite(duration) || duration <= 0) return [];
+  return [{ ...next, gapDurationSeconds: Math.round(duration / 1_000) }];
 }
 
 async function supersedeMissingSegments(

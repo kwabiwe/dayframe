@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { replayLocationEvidence } from "./location-replay-service";
 import { LOCATION_REPLAY_SCALABILITY_PROFILE } from "./location-replay-batching";
-import { journeyIdentityFixture, PHYSICAL_STOP_PICKUP, physicalStopFixture, runLocationEngine } from "@dayframe/shared";
+import { journeyIdentityFixture, PHYSICAL_STOP_PICKUP, physicalStopAt, physicalStopFixture, runLocationEngine } from "@dayframe/shared";
 
 function journeyReplayQuery(
   fixture: ReturnType<typeof journeyIdentityFixture>,
@@ -284,5 +284,53 @@ describe("Location replay protected interior stops", () => {
     // Legs ending or starting at the protected stop are not replacements either.
     expect(server.segments.some((segment) => segment.kind === "commute" &&
       (segment.fromStaySegmentId === stop.clientSegmentId || segment.toStaySegmentId === stop.clientSegmentId))).toBe(false);
+  });
+});
+
+describe("Location replay decided interior stops with unchanged IDs", () => {
+  it.each([
+    ["default", undefined],
+    ["scalability", LOCATION_REPLAY_SCALABILITY_PROFILE]
+  ] as const)("keeps the decided stop and reconciles fallback legs to its boundaries (%s profile; re-review finding 4)", async (_label, persistenceProfile) => {
+    const fixture = physicalStopFixture(PHYSICAL_STOP_PICKUP);
+    const local = runLocationEngine(fixture);
+    const trip = local.segmentUpserts.find((segment) => segment.kind === "commute" && segment.stops?.length);
+    if (trip?.kind !== "commute" || trip.legs?.length !== 2) throw new Error("fixture must produce a trip with two legs");
+    const stopId = trip.stops![0].staySegmentId;
+    // The decided row keeps its earlier, longer boundaries; late evidence shortened the engine's version.
+    const canonical = {
+      clientSegmentId: stopId,
+      startedAt: physicalStopAt(660_000), stoppedAt: physicalStopAt(1_230_000),
+      startLowerBoundAt: physicalStopAt(655_000), startUpperBoundAt: physicalStopAt(665_000),
+      stopLowerBoundAt: physicalStopAt(1_225_000), stopUpperBoundAt: physicalStopAt(1_235_000)
+    };
+    const base = journeyReplayQuery(fixture as unknown as ReturnType<typeof journeyIdentityFixture>, [], [{
+      id: "decided-stop-row", clientSegmentId: stopId, continuityStatus: "supported_by_visit", preservesManualCorrection: true
+    }]);
+    const stayRows = local.segmentUpserts.filter((segment) => segment.kind === "stay" && segment.clientSegmentId !== stopId)
+      .map((segment) => ({ id: `db-${segment.clientSegmentId}`, clientSegmentId: segment.clientSegmentId }));
+    const query = vi.fn(async (sql: string, params?: unknown[]) =>
+      sql.includes("decided interior stops") ? { rows: [canonical] }
+        : sql.includes("insert into stay_segments") ? { rows: stayRows } : base(sql, params));
+    const server = await replayLocationEvidence({ query } as never, {
+      workspaceId: "workspace-private", userId: "user-private", authMode: "provider", scopes: []
+    }, {
+      deviceId: fixture.evidence[0].deviceId,
+      algorithmVersion: fixture.config.algorithmVersion,
+      processingAt: fixture.processingAt,
+      persistenceProfile
+    });
+    const commutes = server.segments.filter((segment) => segment.kind === "commute");
+    expect(commutes.map((segment) => segment.clientSegmentId)).not.toContain(trip.clientSegmentId);
+    const [into, outOf] = trip.legs;
+    expect(commutes.find((segment) => segment.clientSegmentId === into.clientSegmentId)).toMatchObject({
+      startedAt: into.startedAt, stoppedAt: canonical.startedAt,
+      stopLowerBoundAt: canonical.startLowerBoundAt, stopUpperBoundAt: canonical.startUpperBoundAt
+    });
+    expect(commutes.find((segment) => segment.clientSegmentId === outOf.clientSegmentId)).toMatchObject({
+      startedAt: canonical.stoppedAt, stoppedAt: outOf.stoppedAt,
+      startLowerBoundAt: canonical.stopLowerBoundAt, startUpperBoundAt: canonical.stopUpperBoundAt
+    });
+    expect(server.stayIds.get(stopId)).toBe("decided-stop-row");
   });
 });
