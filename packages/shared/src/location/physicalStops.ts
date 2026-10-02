@@ -24,6 +24,8 @@ export type PhysicalStop = {
 // Native mirrors carry whole-second timestamps, so a copy can land in the next second.
 const MIRROR_WINDOW_MS = 5_000;
 
+type PlacedVisit = { point: Coordinate; accuracy: number; from: number; to: number };
+
 type Fix = { item: ClassifiedEvidence; at: number; point: Coordinate; speed: number | null; accuracy: number; accurate: boolean };
 
 function speedOf(item: ClassifiedEvidence) {
@@ -97,6 +99,20 @@ export function detectPhysicalStops(accepted: ClassifiedEvidence[], config: Loca
     distanceMeters(centre, fix.point) - (fix.accurate ? 0 : fix.accuracy) > metres;
   const completedVisits = accepted.filter(({ evidence }) => evidence.kind === "visit" && evidence.endedAt &&
     evidence.latitude != null && evidence.longitude != null && evidence.isSimulated !== true);
+  // A Visit is never a slow fix, but a credible Visit elsewhere shows the device
+  // was not at the stop during its interval: it splits clusters and bounds stops.
+  const placedVisits: PlacedVisit[] = accepted.flatMap(({ evidence }) =>
+    evidence.kind === "visit" && evidence.latitude != null && evidence.longitude != null &&
+      evidence.isSimulated !== true && evidence.horizontalAccuracyMeters != null
+      ? [{
+          point: { latitude: evidence.latitude, longitude: evidence.longitude },
+          accuracy: evidence.horizontalAccuracyMeters,
+          from: Date.parse(evidence.occurredAt),
+          to: Date.parse(evidence.endedAt ?? evidence.occurredAt)
+        }]
+      : []);
+  const elsewhere = (visit: PlacedVisit, centre: Coordinate) =>
+    distanceMeters(centre, visit.point) - visit.accuracy > config.movementDisplacementThresholdMeters;
   const order = new Map(accepted.map((item, index) => [item, index]));
   const stops: PhysicalStop[] = [];
 
@@ -113,6 +129,8 @@ export function detectPhysicalStops(accepted: ClassifiedEvidence[], config: Loca
     for (; next < fixes.length; next += 1) {
       const fix = fixes[next];
       if (fix.at - members[members.length - 1].at > config.sparseUnknownContinuityMaximumGapMs || vehicle(fix)) break;
+      const lastMemberAt = members[members.length - 1].at;
+      if (placedVisits.some((visit) => elsewhere(visit, centre) && visit.to >= lastMemberAt && visit.from <= fix.at)) break;
       // The cluster ends only where departure is evident, the same rule as its
       // boundaries; nearer fixes neither join nor split it, so one stop cannot
       // become overlapping clusters sharing one arrival and departure.
@@ -126,7 +144,8 @@ export function detectPhysicalStops(accepted: ClassifiedEvidence[], config: Loca
         })))!;
       }
     }
-    const stop = evaluateCluster(fixes, index, next, members, completedVisits, accepted, order, config, slow, vehicle, certainlyBeyond);
+    const stop = evaluateCluster(fixes, index, next, members, completedVisits, accepted, order, config, slow, vehicle, certainlyBeyond,
+      placedVisits, elsewhere);
     // Defensive: never emit overlapping stops.
     if (stop && (!stops.length || Date.parse(stop.startedAt) >= Date.parse(stops[stops.length - 1].stoppedAt))) stops.push(stop);
     index = next;
@@ -139,7 +158,8 @@ function evaluateCluster(
   completedVisits: ClassifiedEvidence[], accepted: ClassifiedEvidence[], order: ReadonlyMap<ClassifiedEvidence, number>,
   config: LocationEngineConfig,
   slow: (fix: Fix) => boolean, vehicle: (fix: Fix) => boolean,
-  certainlyBeyond: (fix: Fix, centre: Coordinate, metres: number) => boolean
+  certainlyBeyond: (fix: Fix, centre: Coordinate, metres: number) => boolean,
+  placedVisits: readonly PlacedVisit[], elsewhere: (visit: PlacedVisit, centre: Coordinate) => boolean
 ): PhysicalStop | null {
   const slowMembers = members.filter(slow);
   const centre = accuracyWeightedCentre(slowMembers.map(member => ({
@@ -152,26 +172,40 @@ function evaluateCluster(
 
   // Movement must be observed on both sides; an unbounded cluster may be a
   // capture gap, the start of the retained window, or an ongoing stay.
-  let arrival: Fix | null = null;
+  // A credible Visit elsewhere is also observed movement: before the stop it
+  // bounds arrival, after it bounds departure.
+  let arrivalAt: number | null = null;
   for (let index = firstIndex - 1; index >= 0; index -= 1) {
     if (firstSlowAt - fixes[index].at > config.physicalStopBoundaryWindowMs) break;
     if (departed(fixes[index])) {
-      arrival = fixes[index];
+      arrivalAt = fixes[index].at;
       break;
     }
   }
-  let departure: Fix | null = null;
+  for (const visit of placedVisits) {
+    if (elsewhere(visit, centre) && visit.to <= firstSlowAt && firstSlowAt - visit.to <= config.physicalStopBoundaryWindowMs) {
+      arrivalAt = Math.max(arrivalAt ?? visit.to, visit.to);
+    }
+  }
+  const lastMemberAt = members[members.length - 1].at;
+  const visitDepartureAt = placedVisits
+    .filter((visit) => elsewhere(visit, centre) && visit.from >= lastMemberAt)
+    .reduce<number | null>((earliest, visit) => earliest == null || visit.from < earliest ? visit.from : earliest, null);
+  let departureAt: number | null = null;
   let lastLocal = members[members.length - 1];
   for (let index = afterIndex; index < fixes.length; index += 1) {
     if (fixes[index].at - lastLocal.at > config.physicalStopBoundaryWindowMs) break;
+    if (visitDepartureAt != null && fixes[index].at >= visitDepartureAt) break;
     if (departed(fixes[index])) {
-      departure = fixes[index];
+      departureAt = fixes[index].at;
       break;
     }
     // Only accurate fixes can show the device was still at the stop.
     if (fixes[index].accurate) lastLocal = fixes[index];
   }
-  if (!arrival || !departure) return null;
+  if (visitDepartureAt != null && visitDepartureAt - lastLocal.at <= config.physicalStopBoundaryWindowMs &&
+    (departureAt == null || visitDepartureAt < departureAt)) departureAt = visitDepartureAt;
+  if (arrivalAt == null || departureAt == null) return null;
 
   const visits = completedVisits.filter(({ evidence }) => {
     const from = Date.parse(evidence.occurredAt);
@@ -189,10 +223,10 @@ function evaluateCluster(
 
   // Observed movement bounds the stop. A Visit estimate is used only inside
   // those bounds because iOS can overstate brief stops by several minutes.
-  const startLower = arrival.at;
+  const startLower = arrivalAt;
   const startUpper = firstSlowAt;
   const stopLower = lastLocal.at;
-  const stopUpper = departure.at;
+  const stopUpper = departureAt;
   const visitStart = visits.length ? Math.min(...visits.map(({ evidence }) => Date.parse(evidence.occurredAt))) : null;
   const visitStop = visits.length ? Math.max(...visits.map(({ evidence }) => Date.parse(evidence.endedAt!))) : null;
   const startedAt = visitStart != null

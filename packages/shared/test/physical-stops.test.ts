@@ -185,6 +185,27 @@ describe("physical stops", () => {
     expect(trips.some((trip) => trip.startedAt <= shortAt(670_000))).toBe(false);
   });
 
+  function visitElsewhereInput(intervening: "visit" | "fix" | "none") {
+    // Three slow fixes at the stop, possibly interrupted by evidence 1.5 km away.
+    const input = physicalStopFixture(shape({ visit: null, slowAt: [700_000, 880_000, 890_000] }));
+    const template = input.evidence.find((e) => e.clientEvidenceId === "slow-0")!;
+    const elsewhere = { ...template, latitude: (0.009 * 1_000 + 1_500) / 111_195, horizontalAccuracyMeters: 20, speedMetersPerSecond: null };
+    if (intervening === "visit") input.evidence.push({ ...elsewhere, clientEvidenceId: "work-visit", kind: "visit",
+      occurredAt: shortAt(760_000), sourceTimestamp: shortAt(760_000), endedAt: shortAt(800_000) });
+    if (intervening === "fix") input.evidence.push({ ...elsewhere, clientEvidenceId: "work-fix", kind: "standard_location",
+      occurredAt: shortAt(780_000), sourceTimestamp: shortAt(780_000) });
+    return input;
+  }
+
+  it("does not join a stop across an accurate Visit elsewhere (re-review finding)", () => {
+    expect(run(visitElsewhereInput("visit")).physical).toEqual([]);
+  });
+
+  it("detects the same slow fixes as a stop without contradicting evidence, and not across a fix elsewhere", () => {
+    expect(run(visitElsewhereInput("none")).physical).toHaveLength(1);
+    expect(run(visitElsewhereInput("fix")).physical).toEqual([]);
+  });
+
   it("exposes only accurate, non-simulated position fixes to detection", () => {
     const input = physicalStopFixture(PICKUP);
     input.evidence.forEach((e) => { if (e.clientEvidenceId.startsWith("slow-")) e.isSimulated = true; });
