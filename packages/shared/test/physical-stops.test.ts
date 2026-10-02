@@ -142,6 +142,40 @@ describe("physical stops", () => {
       Date.parse(stop.stoppedAt!) > Date.parse(shortAt(1_100_000)))).toBe(false);
   });
 
+  it("does not count an observed stop as a route observation gap (re-review finding 1)", () => {
+    // A 16-minute corroborated stop with dense movement either side.
+    const { trips } = run(physicalStopFixture(shape({
+      visit: [670_000, 1_630_000], slowAt: [860_000, 900_000, 1_500_000], departAt: 1_634_000, returnAt: 1_718_000
+    })));
+    expect(trips).toHaveLength(1);
+    expect(trips[0].stops).toHaveLength(1);
+    expect(trips[0].maximumObservationGapSeconds).toBeLessThan(200);
+    expect(trips[0]).toMatchObject({ continuityStatus: "continuous", confidence: "medium_high" });
+  });
+
+  it("reports a real unobserved route gap beside a stop", () => {
+    const input = physicalStopFixture(shape({
+      visit: [670_000, 1_630_000], slowAt: [860_000, 900_000, 1_500_000], departAt: 1_634_000, returnAt: 2_800_000
+    }));
+    const { trips } = run(input);
+    // Return leg: last route fix at departure + 36 s, home at 2,800 s, so about 19 minutes are unobserved.
+    expect(trips[0]?.maximumObservationGapSeconds ?? 0).toBeGreaterThan(config.maxContinuityGapMs / 1_000);
+  });
+
+  it("produces one stop, not overlapping duplicates, for nearby slow clusters (re-review finding 2)", () => {
+    const input = physicalStopFixture(shape({
+      extra: [1_000_000, 1_060_000, 1_120_000].map((at) => ({ at, speed: 0.5, latitudeOffset: 0.00126 }))
+    }));
+    const { physical, trips } = run(input);
+    expect(physical).toHaveLength(1);
+    expect(trips).toHaveLength(1);
+    expect(trips[0].stops).toHaveLength(1);
+    const stops = detectPhysicalStops(runLocationEngine(input).acceptedEvidence, config);
+    for (let i = 1; i < stops.length; i += 1) {
+      expect(Date.parse(stops[i].startedAt)).toBeGreaterThanOrEqual(Date.parse(stops[i - 1].stoppedAt));
+    }
+  });
+
   it("exposes only accurate, non-simulated position fixes to detection", () => {
     const input = physicalStopFixture(PICKUP);
     input.evidence.forEach((e) => { if (e.clientEvidenceId.startsWith("slow-")) e.isSimulated = true; });

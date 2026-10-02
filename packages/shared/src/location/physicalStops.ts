@@ -113,8 +113,11 @@ export function detectPhysicalStops(accepted: ClassifiedEvidence[], config: Loca
     for (; next < fixes.length; next += 1) {
       const fix = fixes[next];
       if (fix.at - members[members.length - 1].at > config.sparseUnknownContinuityMaximumGapMs || vehicle(fix)) break;
-      if (certainlyBeyond(fix, centre, config.physicalStopRadiusMeters)) break;
-      if (!fix.accurate) continue;
+      // The cluster ends only where departure is evident, the same rule as its
+      // boundaries; nearer fixes neither join nor split it, so one stop cannot
+      // become overlapping clusters sharing one arrival and departure.
+      if (certainlyBeyond(fix, centre, config.movementDisplacementThresholdMeters)) break;
+      if (!fix.accurate || distanceMeters(centre, fix.point) > config.physicalStopRadiusMeters) continue;
       members.push(fix);
       if (slow(fix)) {
         slowMembers.push(fix);
@@ -124,7 +127,8 @@ export function detectPhysicalStops(accepted: ClassifiedEvidence[], config: Loca
       }
     }
     const stop = evaluateCluster(fixes, index, next, members, completedVisits, accepted, order, config, slow, vehicle, certainlyBeyond);
-    if (stop) stops.push(stop);
+    // Defensive: never emit overlapping stops.
+    if (stop && (!stops.length || Date.parse(stop.startedAt) >= Date.parse(stops[stops.length - 1].stoppedAt))) stops.push(stop);
     index = next;
   }
   return stops;

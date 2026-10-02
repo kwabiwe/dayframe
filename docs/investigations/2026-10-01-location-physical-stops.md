@@ -32,6 +32,11 @@ Stop existence was decided by the same gates that decide whether a stop is worth
 - Replay could retire an open leg's Review when its decided partner blocked the merged trip. Replay now falls back to the trip's unaffected legs.
 - Review evidence reported a recorded stop as an evidence gap with a split suggestion. Stop intervals are now removed first.
 
+A re-review at `e0bf5f6` found two more issues:
+
+- The engine still counted a recorded stop's interval as a route observation gap, lowering confidence and continuity. Stop intervals are now subtracted from engine gaps too; real unobserved gaps beside a stop are still reported.
+- Two slow clusters about 140 m apart could form two stops with identical boundaries, because clusters split at 100 m while departure needs 150 m. Clusters now end only where departure is evident, and overlapping stops are rejected.
+
 Each has a regression test that failed before its fix. The offline corpus result below is unchanged by these fixes.
 
 ## Offline corpus result (private, times only)
@@ -42,7 +47,7 @@ Comparing `main` with the change over the retained 25–29 Sep trace and the 25 
 - The 29 Sep morning and 27 Sep stops of 11–12 minutes now sit inside one trip each, instead of two short journeys.
 - The 25 Sep local stop (about 24.5 minutes) now separates two journeys of about 7–8 minutes, with the stop as an unknown visit listing the nearby saved place as a candidate.
 - The three labelled brief stops are unchanged. No other segment changed.
-- Engine time on a laptop: 409 rows 3.7 → 4.8 ms; a synthetic 7-day replication of 2,863 rows 57 → 74 ms. This is not device or hosted evidence.
+- Engine time on a laptop: 409 rows 3.7 → 5.0 ms; a synthetic 7-day replication of 2,863 rows 59 → 78 ms. This is not device or hosted evidence.
 
 ## Not established
 

@@ -63,6 +63,18 @@ function routeDistance(points: Point[]) {
   return distance;
 }
 
+/** Longest part of [from, to] not covered by any observed stop interval. */
+export function longestUnobservedMs(from: number, to: number, observed: ReadonlyArray<readonly [number, number]>) {
+  let pieces: Array<[number, number]> = [[from, to]];
+  for (const [start, stop] of observed) {
+    pieces = pieces.flatMap(([pieceStart, pieceStop]): Array<[number, number]> => [
+      ...(start > pieceStart ? [[pieceStart, Math.min(pieceStop, start)] as [number, number]] : []),
+      ...(stop < pieceStop ? [[Math.max(pieceStart, stop), pieceStop] as [number, number]] : [])
+    ].filter(([a, b]) => b > a));
+  }
+  return pieces.reduce((longest, [a, b]) => Math.max(longest, b - a), 0);
+}
+
 export function summariseCommuteEvidence({
   config,
   from,
@@ -125,11 +137,17 @@ export function summariseCommuteEvidence({
     ...stops.flatMap((stop) => [Date.parse(stop.startedAt), Date.parse(stop.stoppedAt ?? stop.startedAt)]),
     stoppedAtMs
   ].filter(Number.isFinite).sort((a, b) => a - b);
+  // A recorded stop is observed by its own stay: its interval is not a route gap.
+  const stopIntervals = stops.flatMap((stop) => {
+    const from = Date.parse(stop.startedAt);
+    const to = Date.parse(stop.stoppedAt ?? stop.startedAt);
+    return Number.isFinite(from) && Number.isFinite(to) && to > from ? [[from, to] as const] : [];
+  });
   let maximumObservationGapMs = 0;
   for (let index = 1; index < observedTimes.length; index += 1) {
     maximumObservationGapMs = Math.max(
       maximumObservationGapMs,
-      observedTimes[index] - observedTimes[index - 1]
+      longestUnobservedMs(observedTimes[index - 1], observedTimes[index], stopIntervals)
     );
   }
   const maximumDisplacementFromOrigin = fromPoint && routePoints.length
