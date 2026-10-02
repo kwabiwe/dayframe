@@ -18,8 +18,13 @@ export type PhysicalStopShape = {
   slowAt: number[];
   slowAccuracy?: number;
   slowSpeed?: number;
-  /** Extra fixes at the stop with explicit speed, e.g. a vehicle moving within the radius. */
-  extra?: Array<{ at: number; speed: number; latitudeOffset?: number }>;
+  /** Extra fixes relative to the stop, e.g. a vehicle moving within the radius or broad fixes elsewhere. */
+  extra?: Array<{ at: number; speed: number | null; latitudeOffset?: number; accuracy?: number }>;
+  /** Stop latitude; defaults to about 1 km from Home. */
+  stopLatitude?: number;
+  /** Outbound and return route latitudes; default to straight lines between Home and the stop. */
+  outLatitudes?: [number, number, number];
+  backLatitudes?: [number, number, number];
   /** First observed movement away from the stop. Omit to end the trace at the stop. */
   departAt?: number;
   /** When the device is back home (start of the home Visit). */
@@ -27,6 +32,9 @@ export type PhysicalStopShape = {
 };
 
 export function physicalStopFixture(shape: PhysicalStopShape): LocationEngineInput {
+  const stopLatitude = shape.stopLatitude ?? PHYSICAL_STOP_LATITUDE;
+  const out = shape.outLatitudes ?? [0.0025, 0.005, 0.0075];
+  const back = shape.backLatitudes ?? [0.006, 0.004, 0.002];
   const home = { id: PHYSICAL_STOP_HOME_ID, name: "Home", latitude: 0, longitude: 0, radiusMeters: 60, loggingEnabled: false };
   const point = (id: string, ms: number, latitude: number, patch: Partial<LocationEvidence> = {}): LocationEvidence => ({
     clientEvidenceId: id, deviceId: "20000000-0000-4000-8000-000000000021", algorithmVersion: config.algorithmVersion,
@@ -37,22 +45,22 @@ export function physicalStopFixture(shape: PhysicalStopShape): LocationEngineInp
     point(id, start, latitude, { kind: "visit", endedAt: physicalStopAt(stop), horizontalAccuracyMeters: accuracy, speedMetersPerSecond: null });
   const evidence: LocationEvidence[] = [
     visit("home-visit", 0, 600_000, 0), point("home-a", 0, 0), point("home-b", 300_000, 0), point("home-c", 600_000, 0),
-    ...[20_000, 40_000, 60_000].map((offset, i) => point(`out-${i}`, 600_000 + offset, 0.0025 * (i + 1), { speedMetersPerSecond: 12 })),
+    ...[20_000, 40_000, 60_000].map((offset, i) => point(`out-${i}`, 600_000 + offset, out[i], { speedMetersPerSecond: 12 })),
     // Final approach: still moving within the stop radius before the car stops.
-    point("parking", 675_000, PHYSICAL_STOP_LATITUDE - 0.0001, { speedMetersPerSecond: 4 }),
-    ...(shape.visit ? [visit("stop-visit", shape.visit[0], shape.visit[1], PHYSICAL_STOP_LATITUDE, 70)] : []),
-    ...shape.slowAt.map((ms, i) => point(`slow-${i}`, ms, PHYSICAL_STOP_LATITUDE + 0.00001 * (i + 1), {
+    point("parking", 675_000, stopLatitude - 0.0001, { speedMetersPerSecond: 4 }),
+    ...(shape.visit ? [visit("stop-visit", shape.visit[0], shape.visit[1], stopLatitude, 70)] : []),
+    ...shape.slowAt.map((ms, i) => point(`slow-${i}`, ms, stopLatitude + 0.00001 * (i + 1), {
       speedMetersPerSecond: shape.slowSpeed ?? 0.6, horizontalAccuracyMeters: shape.slowAccuracy ?? 4
     })),
-    ...(shape.extra ?? []).map((item, i) => point(`extra-${i}`, item.at, PHYSICAL_STOP_LATITUDE + (item.latitudeOffset ?? 0), {
-      speedMetersPerSecond: item.speed
+    ...(shape.extra ?? []).map((item, i) => point(`extra-${i}`, item.at, stopLatitude + (item.latitudeOffset ?? 0), {
+      speedMetersPerSecond: item.speed, horizontalAccuracyMeters: item.accuracy ?? 5
     }))
   ];
   if (shape.departAt != null) {
     const depart = shape.departAt;
     evidence.push(
-      point("depart", depart, PHYSICAL_STOP_LATITUDE - 0.0005, { speedMetersPerSecond: 9.8 }),
-      ...[14_000, 17_000, 36_000].map((offset, i) => point(`back-${i}`, depart + offset, 0.006 - 0.002 * i, { speedMetersPerSecond: 12 }))
+      point("depart", depart, stopLatitude - 0.0005, { speedMetersPerSecond: 9.8 }),
+      ...[14_000, 17_000, 36_000].map((offset, i) => point(`back-${i}`, depart + offset, back[i], { speedMetersPerSecond: 12 }))
     );
   }
   if (shape.returnAt != null) {

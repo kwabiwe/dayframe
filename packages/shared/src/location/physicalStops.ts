@@ -24,7 +24,7 @@ export type PhysicalStop = {
 // Native mirrors carry whole-second timestamps, so a copy can land in the next second.
 const MIRROR_WINDOW_MS = 5_000;
 
-type Fix = { item: ClassifiedEvidence; at: number; point: Coordinate; speed: number | null };
+type Fix = { item: ClassifiedEvidence; at: number; point: Coordinate; speed: number | null; accuracy: number; accurate: boolean };
 
 function speedOf(item: ClassifiedEvidence) {
   const speed = item.evidence.speedMetersPerSecond ?? item.impliedSpeedMetersPerSecond;
@@ -32,17 +32,18 @@ function speedOf(item: ClassifiedEvidence) {
 }
 
 /**
- * Accurate, independent position fixes in occurrence order. Native SLC mirrors
+ * Independent accepted position fixes in occurrence order. Native SLC mirrors
  * repeat a standard fix at the same second, or at the same coordinate within a
- * few seconds; keep one, preferring the copy that carries a native speed.
+ * few seconds; keep one, preferring the copy that carries a native speed. Only
+ * accurate fixes can support a stop, but broad accepted fixes still count as
+ * contradicting movement when they are certainly elsewhere.
  */
 function independentFixes(accepted: ClassifiedEvidence[], config: LocationEngineConfig) {
   const bySecond = new Map<string, ClassifiedEvidence>();
   for (const item of accepted) {
     const e = item.evidence;
     if ((e.kind !== "standard_location" && e.kind !== "significant_change") || e.isSimulated === true ||
-      e.latitude == null || e.longitude == null || e.horizontalAccuracyMeters == null ||
-      e.horizontalAccuracyMeters > config.commuteMaximumSpeedAccuracyMeters) continue;
+      e.latitude == null || e.longitude == null || e.horizontalAccuracyMeters == null) continue;
     const at = Date.parse(e.occurredAt);
     if (!Number.isFinite(at)) continue;
     const key = `${e.deviceId}:${Math.floor(at / 1_000)}`;
@@ -59,7 +60,11 @@ function independentFixes(accepted: ClassifiedEvidence[], config: LocationEngine
     const previous = lastSeenAt.get(pointKey);
     if (previous != null && at - previous <= MIRROR_WINDOW_MS) continue;
     lastSeenAt.set(pointKey, at);
-    fixes.push({ item, at, point: { latitude: e.latitude!, longitude: e.longitude! }, speed: speedOf(item) });
+    const accuracy = e.horizontalAccuracyMeters!;
+    fixes.push({
+      item, at, point: { latitude: e.latitude!, longitude: e.longitude! }, speed: speedOf(item),
+      accuracy, accurate: accuracy <= config.commuteMaximumSpeedAccuracyMeters
+    });
   }
   return fixes;
 }
@@ -85,8 +90,11 @@ function clamp(value: number, lower: number, upper: number) {
 
 export function detectPhysicalStops(accepted: ClassifiedEvidence[], config: LocationEngineConfig): PhysicalStop[] {
   const fixes = independentFixes(accepted, config);
-  const slow = (fix: Fix) => fix.speed != null && fix.speed < config.movementSpeedThresholdMps;
-  const vehicle = (fix: Fix) => fix.speed != null && fix.speed >= config.commuteFasterMovementThresholdMps;
+  const slow = (fix: Fix) => fix.accurate && fix.speed != null && fix.speed < config.movementSpeedThresholdMps;
+  const vehicle = (fix: Fix) => fix.accurate && fix.speed != null && fix.speed >= config.commuteFasterMovementThresholdMps;
+  // Even a broad fix proves the device left when its whole accuracy disc lies outside the stop.
+  const certainlyBeyond = (fix: Fix, centre: Coordinate, metres: number) =>
+    distanceMeters(centre, fix.point) - (fix.accurate ? 0 : fix.accuracy) > metres;
   const completedVisits = accepted.filter(({ evidence }) => evidence.kind === "visit" && evidence.endedAt &&
     evidence.latitude != null && evidence.longitude != null && evidence.isSimulated !== true);
   const order = new Map(accepted.map((item, index) => [item, index]));
@@ -105,7 +113,8 @@ export function detectPhysicalStops(accepted: ClassifiedEvidence[], config: Loca
     for (; next < fixes.length; next += 1) {
       const fix = fixes[next];
       if (fix.at - members[members.length - 1].at > config.sparseUnknownContinuityMaximumGapMs || vehicle(fix)) break;
-      if (distanceMeters(centre, fix.point) > config.physicalStopRadiusMeters) break;
+      if (certainlyBeyond(fix, centre, config.physicalStopRadiusMeters)) break;
+      if (!fix.accurate) continue;
       members.push(fix);
       if (slow(fix)) {
         slowMembers.push(fix);
@@ -114,7 +123,7 @@ export function detectPhysicalStops(accepted: ClassifiedEvidence[], config: Loca
         })))!;
       }
     }
-    const stop = evaluateCluster(fixes, index, next, members, completedVisits, accepted, order, config, slow, vehicle);
+    const stop = evaluateCluster(fixes, index, next, members, completedVisits, accepted, order, config, slow, vehicle, certainlyBeyond);
     if (stop) stops.push(stop);
     index = next;
   }
@@ -125,14 +134,15 @@ function evaluateCluster(
   fixes: Fix[], firstIndex: number, afterIndex: number, members: Fix[],
   completedVisits: ClassifiedEvidence[], accepted: ClassifiedEvidence[], order: ReadonlyMap<ClassifiedEvidence, number>,
   config: LocationEngineConfig,
-  slow: (fix: Fix) => boolean, vehicle: (fix: Fix) => boolean
+  slow: (fix: Fix) => boolean, vehicle: (fix: Fix) => boolean,
+  certainlyBeyond: (fix: Fix, centre: Coordinate, metres: number) => boolean
 ): PhysicalStop | null {
   const slowMembers = members.filter(slow);
   const centre = accuracyWeightedCentre(slowMembers.map(member => ({
     ...member.point, accuracyMeters: member.item.evidence.horizontalAccuracyMeters
   })))!;
   const departed = (fix: Fix) => vehicle(fix) ||
-    distanceMeters(centre, fix.point) >= config.movementDisplacementThresholdMeters;
+    certainlyBeyond(fix, centre, config.movementDisplacementThresholdMeters - 1e-9);
   const firstSlowAt = slowMembers[0].at;
   const lastSlowAt = slowMembers[slowMembers.length - 1].at;
 
@@ -154,7 +164,8 @@ function evaluateCluster(
       departure = fixes[index];
       break;
     }
-    lastLocal = fixes[index];
+    // Only accurate fixes can show the device was still at the stop.
+    if (fixes[index].accurate) lastLocal = fixes[index];
   }
   if (!arrival || !departure) return null;
 

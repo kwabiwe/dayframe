@@ -209,3 +209,38 @@ describe("Location replay physical stops", () => {
     expect(metadataOf("stay_segments").filter((metadata) => metadata.formation === "physical_stop")).toHaveLength(1);
   });
 });
+
+describe("Location replay protected trip legs", () => {
+  it("keeps an unresolved leg when a decided leg blocks the merged trip (review finding 3)", async () => {
+    const fixture = physicalStopFixture(PHYSICAL_STOP_PICKUP);
+    const local = runLocationEngine(fixture);
+    const trip = local.segmentUpserts.find((segment) => segment.kind === "commute" && segment.stops?.length);
+    if (trip?.kind !== "commute" || trip.legs?.length !== 2) throw new Error("fixture must produce a trip with two legs");
+    const [decided, open] = trip.legs;
+    const protectedLink = {
+      clientSegmentId: decided.clientSegmentId,
+      clientEvidenceId: decided.evidenceIds[1],
+      kind: "standard_location",
+      occurredAt: fixture.evidence.find((item) => item.clientEvidenceId === decided.evidenceIds[1])!.occurredAt,
+      startedAt: decided.startedAt,
+      stoppedAt: decided.stoppedAt
+    };
+    const base = journeyReplayQuery(fixture as unknown as ReturnType<typeof journeyIdentityFixture>, [protectedLink]);
+    const stayRows = local.segmentUpserts.filter((segment) => segment.kind === "stay")
+      .map((segment) => ({ id: `db-${segment.clientSegmentId}`, clientSegmentId: segment.clientSegmentId }));
+    const query = vi.fn(async (sql: string, params?: unknown[]) =>
+      sql.includes("insert into stay_segments") ? { rows: stayRows } : base(sql, params));
+    const server = await replayLocationEvidence({ query } as never, {
+      workspaceId: "workspace-private", userId: "user-private", authMode: "provider", scopes: []
+    }, {
+      deviceId: fixture.evidence[0].deviceId,
+      algorithmVersion: fixture.config.algorithmVersion,
+      processingAt: fixture.processingAt
+    });
+    const commuteIds = server.segments.filter((segment) => segment.kind === "commute").map((segment) => segment.clientSegmentId);
+    expect(commuteIds).not.toContain(trip.clientSegmentId);
+    expect(commuteIds).toEqual(expect.arrayContaining([decided.clientSegmentId, open.clientSegmentId]));
+    const retire = query.mock.calls.find(([sql]) => sql.includes("from review_items ri") && sql.includes("for update of ri"))!;
+    expect(retire[1]).toEqual(expect.arrayContaining([expect.arrayContaining([open.clientSegmentId])]));
+  });
+});

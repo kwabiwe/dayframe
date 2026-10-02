@@ -144,6 +144,11 @@ export type CommuteSegment = {
   qualificationReason?: CommuteQualificationReason;
   /** Short stops inside one trip. Coordinate-free; each refers to its own stay segment. */
   stops?: CommuteStop[];
+  /**
+   * Qualified legs replaced by this trip. Never persisted; replay restores them
+   * only when protected history blocks the trip itself.
+   */
+  legs?: CommuteSegment[];
   evidenceIds: string[];
 };
 

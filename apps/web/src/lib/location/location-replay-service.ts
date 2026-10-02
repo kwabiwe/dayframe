@@ -247,8 +247,11 @@ async function excludeProtectedReplacements(
   options: Pick<LocationReplayOptions, "deviceId" | "algorithmVersion" | "persistenceProfile" | "onLocationCount">,
   segments: LocationSegment[]
 ) {
+  // A trip's legs are fallback candidates: if protected history holds the trip,
+  // its unaffected legs remain instead of their open Reviews being retired.
+  const fallbackLegs = segments.flatMap((segment) => segment.kind === "commute" ? segment.legs ?? [] : []);
   const byEvidence = new Map<string, LocationSegment[]>();
-  for (const segment of segments) for (const id of segment.evidenceIds) {
+  for (const segment of [...segments, ...fallbackLegs]) for (const id of segment.evidenceIds) {
     const candidates = byEvidence.get(id) ?? [];
     candidates.push(segment);
     byEvidence.set(id, candidates);
@@ -314,10 +317,13 @@ async function excludeProtectedReplacements(
       }
     }
   }
+  const replaceable = (segment: LocationSegment) => !held.has(segment.clientSegmentId) && (segment.kind !== "commute" ||
+    (!held.has(segment.fromStaySegmentId) && !held.has(segment.toStaySegmentId)));
   return {
     count: held.size,
-    segments: segments.filter(segment => !held.has(segment.clientSegmentId) && (segment.kind !== "commute" ||
-      (!held.has(segment.fromStaySegmentId) && !held.has(segment.toStaySegmentId))))
+    segments: segments.flatMap((segment) => replaceable(segment)
+      ? [segment]
+      : segment.kind === "commute" ? (segment.legs ?? []).filter(replaceable) : [])
   };
 }
 

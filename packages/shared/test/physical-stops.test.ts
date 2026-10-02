@@ -116,6 +116,32 @@ describe("physical stops", () => {
     });
   });
 
+  it("keeps a nearby round trip whose legs do not qualify on their own (review finding 1)", () => {
+    // Stop ~756 m from Home (below the 800 m leg displacement) reached via a ~945 m detour:
+    // neither leg qualifies alone, but the whole ~2.2 km Home round trip does.
+    const input = physicalStopFixture(shape({
+      stopLatitude: 0.0068, outLatitudes: [0.003, 0.006, 0.0085], backLatitudes: [0.0085, 0.006, 0.003]
+    }));
+    const { physical, trips } = run(input);
+    expect(physical).toHaveLength(1);
+    expect(trips).toHaveLength(1);
+    expect(trips[0]).toMatchObject({ startedAt: shortAt(600_000), stoppedAt: shortAt(1_308_000), qualificationReason: "same_place_meaningful_round_trip" });
+    expect(trips[0].stops?.map((stop) => stop.staySegmentId)).toEqual([physical[0].clientSegmentId]);
+  });
+
+  it("does not bridge accepted broad-accuracy movement into a stop (review finding 2)", () => {
+    // Accurate slow fixes at the same spot before and after a drive seen only by 70 m fixes ~2 km away.
+    const input = physicalStopFixture(shape({
+      visit: null, slowAt: [860_000, 900_000, 1_190_000],
+      extra: [1_000_000, 1_050_000, 1_100_000].map((at) => ({ at, speed: null, latitudeOffset: 0.018, accuracy: 70 }))
+    }));
+    const { physical } = run(input);
+    expect(physical.every((stop) => Date.parse(stop.stoppedAt!) <= Date.parse(shortAt(1_000_000)) ||
+      Date.parse(stop.startedAt) >= Date.parse(shortAt(1_100_000)))).toBe(true);
+    expect(physical.some((stop) => Date.parse(stop.startedAt) < Date.parse(shortAt(1_000_000)) &&
+      Date.parse(stop.stoppedAt!) > Date.parse(shortAt(1_100_000)))).toBe(false);
+  });
+
   it("exposes only accurate, non-simulated position fixes to detection", () => {
     const input = physicalStopFixture(PICKUP);
     input.evidence.forEach((e) => { if (e.clientEvidenceId.startsWith("slow-")) e.isSimulated = true; });

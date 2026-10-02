@@ -238,7 +238,8 @@ async function buildLocationReviewEvidence(
   const anchors = retained.filter((row) =>
     ["visit", "geofence_enter", "geofence_exit", "significant_change"].includes(row.kind)
   );
-  const gaps = evidenceGaps(coordinateRows);
+  const stops = kind === "commute" ? tripStops(review.tripStops) : [];
+  const gaps = evidenceGaps(coordinateRows, stops);
   const routeCoordinates = kind === "commute"
     ? coordinateRows.map((row) => [row.longitude, row.latitude] as [number, number])
     : [];
@@ -261,7 +262,6 @@ async function buildLocationReviewEvidence(
   const evidenceExpired = expiryRows.length === 0 &&
     Date.now() - Date.parse(iso(review.stoppedAt) ?? iso(review.startedAt)!) >
       LOCATION_ENGINE_V2_CONFIG.rawEvidenceRetentionDays * 86_400_000;
-  const stops = tripStops(review.tripStops);
   const suggestedSplitPoints = gaps.map((gap) => ({
     at: new Date((Date.parse(gap.startedAt) + Date.parse(gap.stoppedAt)) / 2).toISOString(),
     reason: "evidence_gap" as const,
@@ -397,14 +397,33 @@ function downsampleEvidence(rows: EvidenceMapRow[], limit: number) {
   return rows.filter((_, index) => anchorIndexes.has(index) || index % stride === 0).slice(0, limit);
 }
 
-function evidenceGaps(rows: Array<EvidenceMapRow & { longitude: number; latitude: number }>) {
+/**
+ * Unobserved intervals between route samples. A recorded trip stop is observed
+ * by its own stay, so its time is removed before measuring the gap; only the
+ * longest remaining unobserved piece can be reported and split.
+ */
+function evidenceGaps(rows: Array<EvidenceMapRow & { longitude: number; latitude: number }>, stops: TripStopDto[] = []) {
   return rows.slice(1).flatMap((row, index) => {
     const previous = rows[index];
-    const durationSeconds = (Date.parse(iso(row.occurredAt)!) - Date.parse(iso(previous.occurredAt)!)) / 1000;
+    const gapStart = Date.parse(iso(previous.occurredAt)!);
+    const gapStop = Date.parse(iso(row.occurredAt)!);
+    let pieces = [[gapStart, gapStop]];
+    for (const stop of stops) {
+      const stopStart = Date.parse(stop.startedAt);
+      const stopStop = Date.parse(stop.stoppedAt);
+      pieces = pieces.flatMap(([start, stopAt]) => [
+        ...(stopStart > start ? [[start, Math.min(stopAt, stopStart)]] : []),
+        ...(stopStop < stopAt ? [[Math.max(start, stopStop), stopAt]] : [])
+      ].filter(([from, to]) => to > from));
+    }
+    const longest = pieces.reduce<number[] | null>((best, piece) =>
+      !best || piece[1] - piece[0] > best[1] - best[0] ? piece : best, null);
+    if (!longest) return [];
+    const durationSeconds = (longest[1] - longest[0]) / 1000;
     if (durationSeconds <= LOCATION_ENGINE_V2_CONFIG.maxContinuityGapMs / 1000) return [];
     return [{
-      startedAt: iso(previous.occurredAt)!,
-      stoppedAt: iso(row.occurredAt)!,
+      startedAt: new Date(longest[0]).toISOString(),
+      stoppedAt: new Date(longest[1]).toISOString(),
       durationSeconds,
       fromPoint: point(previous.longitude, previous.latitude),
       toPoint: point(row.longitude, row.latitude)

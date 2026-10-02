@@ -25,6 +25,15 @@ Stop existence was decided by the same gates that decide whether a stop is worth
 - Legs meeting at an unknown stay below the 20-minute visit Review threshold are assembled into one trip with coordinate-free `stops`. The trip keeps the endpoint-based identity of the former round trip. Trips with stops are never automatically logged (`journey_contains_stop`).
 - No migration: stops and formation use existing segment `metadata`. `algorithmVersion` is unchanged because it keys evidence and segment rows.
 
+## Independent review fixes (Codex, at `929f813`)
+
+- Nearby round trips disappeared when neither leg qualified alone. Trips are now derived and qualified over the whole span with stops as waypoints.
+- Accepted broad (>65 m) fixes showing movement were ignored and bridged into a stop. They now break clusters and count as departure when certainly beyond the stop.
+- Replay could retire an open leg's Review when its decided partner blocked the merged trip. Replay now falls back to the trip's unaffected legs.
+- Review evidence reported a recorded stop as an evidence gap with a split suggestion. Stop intervals are now removed first.
+
+Each has a regression test that failed before its fix. The offline corpus result below is unchanged by these fixes.
+
 ## Offline corpus result (private, times only)
 
 Comparing `main` with the change over the retained 25–29 Sep trace and the 25 Sep staging snapshot:
@@ -33,7 +42,7 @@ Comparing `main` with the change over the retained 25–29 Sep trace and the 25 
 - The 29 Sep morning and 27 Sep stops of 11–12 minutes now sit inside one trip each, instead of two short journeys.
 - The 25 Sep local stop (about 24.5 minutes) now separates two journeys of about 7–8 minutes, with the stop as an unknown visit listing the nearby saved place as a candidate.
 - The three labelled brief stops are unchanged. No other segment changed.
-- Engine time on a laptop: 409 rows 3.7 → 4.4 ms; a synthetic 7-day replication of 2,863 rows 57 → 68 ms. This is not device or hosted evidence.
+- Engine time on a laptop: 409 rows 3.7 → 4.8 ms; a synthetic 7-day replication of 2,863 rows 57 → 74 ms. This is not device or hosted evidence.
 
 ## Not established
 
