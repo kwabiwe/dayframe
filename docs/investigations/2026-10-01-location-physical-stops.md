@@ -42,7 +42,7 @@ A third review at `c51c3ba` found that replay checked only a trip's endpoint sta
 A review of the stacked arrival PR at `acbda42` found two more issues in this PR:
 
 - A trip could absorb a stop when one side of it had no movement evidence, claiming unobserved time as travel. Every portion of a trip now needs an accurate movement sample; otherwise the legs are kept.
-- A decided or manual row could keep an interior stop's ID while late evidence moved the engine's boundaries, and replay still wrote the enclosing trip. Replay now blocks such trips and aligns the fallback legs to the decided stop's persisted boundaries (both persistence profiles).
+- A decided or manual row could keep an interior stop's ID while late evidence moved the engine's boundaries, and replay still wrote the enclosing trip. Replay now blocks such trips. A further review found that the aligned fallback legs kept stale route evidence and metrics, so they are now re-derived inside the decided stop's persisted boundaries and omitted if they no longer qualify (both persistence profiles).
 
 Each has a regression test that failed before its fix. The offline corpus result below is unchanged by these fixes.
 

@@ -300,8 +300,8 @@ describe("Location replay decided interior stops with unchanged IDs", () => {
     // The decided row keeps its earlier, longer boundaries; late evidence shortened the engine's version.
     const canonical = {
       clientSegmentId: stopId,
-      startedAt: physicalStopAt(660_000), stoppedAt: physicalStopAt(1_230_000),
-      startLowerBoundAt: physicalStopAt(655_000), startUpperBoundAt: physicalStopAt(665_000),
+      startedAt: physicalStopAt(670_000), stoppedAt: physicalStopAt(1_230_000),
+      startLowerBoundAt: physicalStopAt(665_000), startUpperBoundAt: physicalStopAt(672_000),
       stopLowerBoundAt: physicalStopAt(1_225_000), stopUpperBoundAt: physicalStopAt(1_235_000)
     };
     const base = journeyReplayQuery(fixture as unknown as ReturnType<typeof journeyIdentityFixture>, [], [{
@@ -323,14 +323,53 @@ describe("Location replay decided interior stops with unchanged IDs", () => {
     const commutes = server.segments.filter((segment) => segment.kind === "commute");
     expect(commutes.map((segment) => segment.clientSegmentId)).not.toContain(trip.clientSegmentId);
     const [into, outOf] = trip.legs;
+    // Rebuilt within the decided boundaries: only evidence inside them, re-qualified.
     expect(commutes.find((segment) => segment.clientSegmentId === into.clientSegmentId)).toMatchObject({
       startedAt: into.startedAt, stoppedAt: canonical.startedAt,
-      stopLowerBoundAt: canonical.startLowerBoundAt, stopUpperBoundAt: canonical.startUpperBoundAt
+      stopLowerBoundAt: canonical.startLowerBoundAt, stopUpperBoundAt: canonical.startUpperBoundAt,
+      evidenceIds: ["out-0", "out-1", "out-2"], routeSampleCount: 3
     });
     expect(commutes.find((segment) => segment.clientSegmentId === outOf.clientSegmentId)).toMatchObject({
       startedAt: canonical.stoppedAt, stoppedAt: outOf.stoppedAt,
-      startLowerBoundAt: canonical.stopLowerBoundAt, startUpperBoundAt: canonical.stopUpperBoundAt
+      startLowerBoundAt: canonical.stopLowerBoundAt, startUpperBoundAt: canonical.stopUpperBoundAt,
+      evidenceIds: ["back-0", "back-1", "back-2"], routeSampleCount: 3
     });
     expect(server.stayIds.get(stopId)).toBe("decided-stop-row");
+  });
+
+  it.each([
+    ["default", undefined],
+    ["scalability", LOCATION_REPLAY_SCALABILITY_PROFILE]
+  ] as const)("omits a fallback leg that no longer qualifies inside the decided boundaries (%s profile; re-review finding 3)", async (_label, persistenceProfile) => {
+    const fixture = physicalStopFixture(PHYSICAL_STOP_PICKUP);
+    const local = runLocationEngine(fixture);
+    const trip = local.segmentUpserts.find((segment) => segment.kind === "commute" && segment.stops?.length);
+    if (trip?.kind !== "commute" || trip.legs?.length !== 2) throw new Error("fixture must produce a trip with two legs");
+    const stopId = trip.stops![0].staySegmentId;
+    // The decided arrival leaves a 30-second inbound leg with a single route fix.
+    const canonical = {
+      clientSegmentId: stopId, startedAt: physicalStopAt(630_000), stoppedAt: physicalStopAt(1_230_000),
+      startLowerBoundAt: null, startUpperBoundAt: null, stopLowerBoundAt: null, stopUpperBoundAt: null
+    };
+    const base = journeyReplayQuery(fixture as unknown as ReturnType<typeof journeyIdentityFixture>, [], [{
+      id: "decided-stop-row", clientSegmentId: stopId, continuityStatus: "supported_by_visit", preservesManualCorrection: true
+    }]);
+    const stayRows = local.segmentUpserts.filter((segment) => segment.kind === "stay" && segment.clientSegmentId !== stopId)
+      .map((segment) => ({ id: `db-${segment.clientSegmentId}`, clientSegmentId: segment.clientSegmentId }));
+    const query = vi.fn(async (sql: string, params?: unknown[]) =>
+      sql.includes("decided interior stops") ? { rows: [canonical] }
+        : sql.includes("insert into stay_segments") ? { rows: stayRows } : base(sql, params));
+    const server = await replayLocationEvidence({ query } as never, {
+      workspaceId: "workspace-private", userId: "user-private", authMode: "provider", scopes: []
+    }, {
+      deviceId: fixture.evidence[0].deviceId,
+      algorithmVersion: fixture.config.algorithmVersion,
+      processingAt: fixture.processingAt,
+      persistenceProfile
+    });
+    const ids = server.segments.filter((segment) => segment.kind === "commute").map((segment) => segment.clientSegmentId);
+    expect(ids).not.toContain(trip.legs[0].clientSegmentId);
+    expect(ids).not.toContain(trip.clientSegmentId);
+    expect(ids).toContain(trip.legs[1].clientSegmentId);
   });
 });

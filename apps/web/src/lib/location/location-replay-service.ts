@@ -9,10 +9,12 @@ import {
   type LocationReplayPersistenceProfile
 } from "./location-replay-batching";
 import {
+  deriveCommutes,
   EMPTY_LOCATION_ENGINE_STATE,
   LOCATION_ENGINE_V2_CONFIG,
   LocationEvidenceSchema,
   runLocationEngine,
+  type ClassifiedEvidence,
   type CommuteSegment,
   type LocationEvidence,
   type LocationSegment,
@@ -176,7 +178,7 @@ export async function replayLocationEvidence(
   observeLocationCount(options, "staySegments", output.segmentUpserts.filter(segment => segment.kind === "stay").length);
   observeLocationCount(options, "commuteSegments", output.segmentUpserts.filter(segment => segment.kind === "commute").length);
   observeLocationTiming(options, "protected_replacement_checks", "started");
-  const protectedReplacement = await excludeProtectedReplacements(client, session, options, output.segmentUpserts);
+  const protectedReplacement = await excludeProtectedReplacements(client, session, options, output.segmentUpserts, output.acceptedEvidence);
   const segments = protectedReplacement.segments;
   observeLocationTiming(options, "protected_replacement_checks", "completed");
   observeLocationCount(options, "protectedSegments", protectedReplacement.count);
@@ -244,8 +246,9 @@ function sharesProtectedPortion(segment: LocationSegment, link: ProtectedSourceL
 
 async function excludeProtectedReplacements(
   client: pg.PoolClient, session: RequestSession,
-  options: Pick<LocationReplayOptions, "deviceId" | "algorithmVersion" | "persistenceProfile" | "onLocationCount">,
-  segments: LocationSegment[]
+  options: Pick<LocationReplayOptions, "deviceId" | "algorithmVersion" | "processingAt" | "persistenceProfile" | "onLocationCount">,
+  segments: LocationSegment[],
+  acceptedEvidence: ClassifiedEvidence[] = []
 ) {
   // A trip's legs are fallback candidates: if protected history holds the trip,
   // its unaffected legs remain instead of their open Reviews being retired.
@@ -332,7 +335,8 @@ async function excludeProtectedReplacements(
     segments: segments.flatMap((segment) => replaceable(segment)
       ? [segment]
       : segment.kind === "commute"
-        ? (segment.legs ?? []).filter(replaceable).flatMap((leg) => reconcileLegToDecidedStops(leg, decidedStops))
+        ? (segment.legs ?? []).filter(replaceable).flatMap((leg) =>
+            rebuildLegWithinDecidedStops(leg, decidedStops, segments, acceptedEvidence, options))
         : [])
   };
 }
@@ -369,25 +373,36 @@ async function decidedInteriorStops(
   return decided;
 }
 
-/** Aligns a fallback leg with the persisted boundaries of a decided endpoint stop; drops it if they conflict. */
-function reconcileLegToDecidedStops(leg: CommuteSegment, decided: ReadonlyMap<string, DecidedStopBounds>): CommuteSegment[] {
-  let next = { ...leg };
-  const into = decided.get(leg.toStaySegmentId);
-  if (into) {
-    const startedAt = iso(into.startedAt)!;
-    next = { ...next, stoppedAt: startedAt,
-      stopLowerBoundAt: iso(into.startLowerBoundAt) ?? startedAt, stopUpperBoundAt: iso(into.startUpperBoundAt) ?? startedAt };
-  }
-  const outOf = decided.get(leg.fromStaySegmentId);
-  if (outOf) {
-    const stoppedAt = iso(outOf.stoppedAt);
-    if (!stoppedAt) return [];
-    next = { ...next, startedAt: stoppedAt,
-      startLowerBoundAt: iso(outOf.stopLowerBoundAt) ?? stoppedAt, startUpperBoundAt: iso(outOf.stopUpperBoundAt) ?? stoppedAt };
-  }
-  const duration = Date.parse(next.stoppedAt) - Date.parse(next.startedAt);
-  if (!Number.isFinite(duration) || duration <= 0) return [];
-  return [{ ...next, gapDurationSeconds: Math.round(duration / 1_000) }];
+/**
+ * Re-derives a fallback leg between the persisted boundaries of a decided
+ * endpoint stop and its other endpoint, so route evidence, metrics and
+ * qualification (including short-journey proof) reflect only the time it now
+ * covers. A leg that no longer qualifies is omitted.
+ */
+function rebuildLegWithinDecidedStops(
+  leg: CommuteSegment,
+  decided: ReadonlyMap<string, DecidedStopBounds>,
+  segments: LocationSegment[],
+  acceptedEvidence: ClassifiedEvidence[],
+  options: Pick<LocationReplayOptions, "algorithmVersion" | "processingAt">
+): CommuteSegment[] {
+  if (!decided.has(leg.fromStaySegmentId) && !decided.has(leg.toStaySegmentId)) return [leg];
+  const stay = (id: string) => {
+    const engine = segments.find((segment): segment is StaySegment => segment.kind === "stay" && segment.clientSegmentId === id);
+    const row = decided.get(id);
+    if (!engine || !row) return engine ?? null;
+    const startedAt = iso(row.startedAt)!;
+    const stoppedAt = iso(row.stoppedAt);
+    return { ...engine, startedAt, stoppedAt,
+      startLowerBoundAt: iso(row.startLowerBoundAt) ?? startedAt, startUpperBoundAt: iso(row.startUpperBoundAt) ?? startedAt,
+      stopLowerBoundAt: iso(row.stopLowerBoundAt) ?? stoppedAt, stopUpperBoundAt: iso(row.stopUpperBoundAt) ?? stoppedAt };
+  };
+  const from = stay(leg.fromStaySegmentId);
+  const to = stay(leg.toStaySegmentId);
+  if (!from?.stoppedAt || !to) return [];
+  return deriveCommutes([from, to], acceptedEvidence,
+    { ...LOCATION_ENGINE_V2_CONFIG, algorithmVersion: options.algorithmVersion }, options.processingAt)
+    .filter((rebuilt) => rebuilt.clientSegmentId === leg.clientSegmentId);
 }
 
 async function supersedeMissingSegments(
