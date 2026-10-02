@@ -30,7 +30,7 @@ Output was a 41-minute return journey (07:41:57–08:22:56), with Home starting 
 A re-review at `b7f013d` found two more:
 
 - A present stay closed by another place could run to that later reading, ignoring an earlier buffered outside reading, and so pass the five-minute floor. It now ends at the earliest credible departure.
-- Corroboration could pair a bare Visit with a same-place reading from a separate earlier episode, across readings elsewhere. Corroboration must now come from the same episode.
+- Corroboration could pair a bare Visit with a same-place reading from a separate earlier episode, across readings elsewhere. Corroboration must now come from the same episode. A further re-review (`b8d94f8`) found that an accurate Visit at another place was not yet treated as a boundary; it now is, with a positive control for fresh corroboration after it.
 
 The base PR's fallback-leg rebuild (stale route evidence on reconciled legs) is fixed there and merged in.
 

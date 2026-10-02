@@ -143,6 +143,41 @@ describe("corroborated arrival presence at saved places", () => {
     expect(homeStays(stays).some((stay) => stay.startedAt === `${day}T00:04:00.000Z`)).toBe(false);
   });
 
+  function crossEpisodeInput(intervening: "visit" | "none", freshHome: boolean) {
+    const input = schoolRunArrivalFixture("09:30:00");
+    const workId = "10000000-0000-4000-8000-000000000035";
+    input.savedPlaces.push({ id: workId, name: "Work", latitude: 2_000 / 111_195, longitude: 0, radiusMeters: 100 });
+    const template = input.evidence.find((item) => item.clientEvidenceId === "home-visit-open")!;
+    const day = "2026-01-14";
+    const time = (value: string) => `${day}T${value}.000Z`;
+    const point = (id: string, value: string, metres: number) => ({ ...template, clientEvidenceId: id, kind: "standard_location" as const,
+      occurredAt: time(value), sourceTimestamp: time(value), receivedAt: time(value), endedAt: null,
+      latitude: metres / 111_195, horizontalAccuracyMeters: 5, speedMetersPerSecond: 0, metadata: {} });
+    input.evidence = [
+      point("home-a", "00:00:00", 5),
+      ...(intervening === "visit" ? [{ ...point("work-visit", "00:01:00", 2_000), kind: "visit" as const,
+        endedAt: time("00:03:00"), speedMetersPerSecond: null, horizontalAccuracyMeters: 20 }] : []),
+      { ...point("home-visit-bare", "00:04:00", 19), kind: "visit" as const, speedMetersPerSecond: null,
+        horizontalAccuracyMeters: 15, metadata: { visitDepartureOpen: true } },
+      ...(freshHome ? [point("home-fresh", "00:04:30", 8)] : []),
+      point("work-1", "00:09:00", 2_000), point("work-2", "00:09:30", 2_000), point("work-3", "00:20:00", 2_000)
+    ];
+    input.processingAt = time("01:00:00");
+    return { input, homeVisitAt: time("00:04:00") };
+  }
+
+  it("treats an accurate Visit at another place as an episode boundary (re-review finding)", () => {
+    const { input, homeVisitAt } = crossEpisodeInput("visit", false);
+    expect(homeStays(run(input).stays).some((stay) => stay.startedAt === homeVisitAt)).toBe(false);
+  });
+
+  it("still recognises the arrival when fresh Home evidence corroborates it after the other-place Visit", () => {
+    const { input, homeVisitAt } = crossEpisodeInput("visit", true);
+    expect(homeStays(run(input).stays).find((stay) => stay.startedAt === homeVisitAt)).toMatchObject({
+      stoppedAt: input.processingAt.replace("01:00:00", "00:09:00")
+    });
+  });
+
   it("does not split a journey at a brief kerbside stop at a saved place", () => {
     // ~1 minute at a saved stop: arrival-only Visit and geofence entry, then driving on.
     const input = physicalStopFixture({ ...PHYSICAL_STOP_PICKUP, visit: null, slowAt: [700_000], departAt: 760_000, returnAt: 844_000 });

@@ -329,7 +329,9 @@ function corroboratedOpenVisitArrivals(accepted: ClassifiedEvidence[], input: Lo
   const contradicts = (item: ClassifiedEvidence, placeId: string) => {
     const e = item.evidence;
     if (e.kind === "geofence_exit") return e.savedPlaceId === placeId;
-    return (e.kind === "standard_location" || e.kind === "significant_change") && accurateCoordinate(item, input) &&
+    // Accurate fixes and accurate Visits elsewhere are episode boundaries, as in ordinary segmentation.
+    return (e.kind === "standard_location" || e.kind === "significant_change" || e.kind === "visit") &&
+      accurateCoordinate(item, input) &&
       !(item.match?.candidates.some((candidate) => candidate.id === placeId && candidate.matchClass !== "outside") ?? false);
   };
   const sameEpisode = (a: ClassifiedEvidence, b: ClassifiedEvidence, placeId: string) => {
