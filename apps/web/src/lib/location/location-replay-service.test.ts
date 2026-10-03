@@ -466,4 +466,25 @@ describe("Location replay decided commute endpoints", () => {
     expect(commutes.find((segment) => segment.clientSegmentId === trip.legs![1].clientSegmentId)).toMatchObject({
       stoppedAt: canonical.startedAt, stopLowerBoundAt: canonical.startLowerBoundAt, stopUpperBoundAt: canonical.startUpperBoundAt });
   });
+
+  it.each([
+    ["default", undefined],
+    ["scalability", LOCATION_REPLAY_SCALABILITY_PROFILE]
+  ] as const)("never rewrites a stop-bearing trip without qualified legs as a stopless commute (%s profile; re-review finding)", async (_label, persistenceProfile) => {
+    // Thinned routes: the whole trip qualifies, but neither leg qualifies alone.
+    const fixture = physicalStopFixture(PHYSICAL_STOP_PICKUP);
+    fixture.evidence = fixture.evidence.filter((item) => !["out-1", "back-1", "back-2"].includes(item.clientEvidenceId));
+    const trip = runLocationEngine(fixture).segmentUpserts.find((segment) => segment.kind === "commute");
+    if (trip?.kind !== "commute" || !trip.stops?.length || trip.legs?.length) throw new Error("fixture must produce a trip with a stop and no qualified legs");
+    const home = runLocationEngine(fixture).segmentUpserts.find((segment) => segment.clientSegmentId === trip.fromStaySegmentId)!;
+    // The decided Home row ends five seconds after the engine's estimate.
+    const canonical = {
+      startedAt: home.startedAt, stoppedAt: physicalStopAt(605_000),
+      startLowerBoundAt: home.startLowerBoundAt, startUpperBoundAt: home.startUpperBoundAt,
+      stopLowerBoundAt: physicalStopAt(602_000), stopUpperBoundAt: physicalStopAt(608_000)
+    };
+    const { commutes } = await replayWithDecided(fixture, trip.fromStaySegmentId, canonical, persistenceProfile);
+    // Conservative: no trip across the moved endpoint, and never the aggregate without its stop.
+    expect(commutes).toEqual([]);
+  });
 });

@@ -331,15 +331,17 @@ async function excludeProtectedReplacements(
     boundariesMoved(commute.toStaySegmentId, "start", decidedStays, segments);
   // A trip also depends on its interior stops: it cannot span time whose stop
   // replacement was held by, or already belongs to, decided history. Nor can it
-  // keep an endpoint that decided history has moved; its legs are re-derived.
+  // keep an endpoint that decided history has moved: its qualified legs are
+  // re-derived, and a trip with none is omitted rather than rebuilt without
+  // its stops. Trips are identified by their stops, not by fallback legs.
   const replaceable = (segment: LocationSegment) => !held.has(segment.clientSegmentId) && (segment.kind !== "commute" ||
     (!held.has(segment.fromStaySegmentId) && !held.has(segment.toStaySegmentId) &&
       !(segment.stops ?? []).some((stop) => held.has(stop.staySegmentId) || decidedStays.has(stop.staySegmentId)) &&
-      !(segment.legs?.length && movesEndpoint(segment))));
+      !(segment.stops?.length && movesEndpoint(segment))));
   return {
     count: held.size,
     segments: segments.flatMap((segment) => replaceable(segment)
-      ? segment.kind === "commute" && !segment.legs?.length && movesEndpoint(segment)
+      ? segment.kind === "commute" && !segment.stops?.length && movesEndpoint(segment)
         ? rebuildLegWithinDecidedStops(segment, decidedStays, segments, acceptedEvidence, options)
         : [segment]
       : segment.kind === "commute"
