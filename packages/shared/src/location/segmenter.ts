@@ -1,4 +1,4 @@
-import { LOCATION_ENGINE_V2_CONFIG } from "./config";
+import { LOCATION_ENGINE_V2_CONFIG, type LocationEngineConfig } from "./config";
 import { assembleTripsThroughStops, deriveCommutes } from "./commute";
 import { detectPhysicalStops, type PhysicalStop } from "./physicalStops";
 import { accuracyWeightedCentre, distanceMeters, midpointTimeIso, stableLocationId } from "./geo";
@@ -137,6 +137,7 @@ function closeAtTransition(
   active: WorkingStay,
   nextAt: string,
   continuityStatus: ContinuityStatus,
+  config: LocationEngineConfig,
   exact = false
 ) {
   const lastAt = lastInsideAt(active, nextAt);
@@ -169,14 +170,21 @@ function closeAtTransition(
     active.continuityStatus = continuityStatus;
     return;
   }
-  // With arrival presence the stay lasted until the earliest credible departure
-  // evidence (a buffered outside reading, a pending exit or the closing item);
-  // the silence before it is not an even split of unknown time.
-  const departureAt = !exact && active.arrivalPresence
-    ? [nextAt, active.outside[0]?.evidence.occurredAt, active.pendingExit?.evidence.occurredAt]
-        .filter((at): at is string => at != null && Date.parse(at) >= Date.parse(lastAt))
-        .sort((a, b) => Date.parse(a) - Date.parse(b))[0] ?? nextAt
-    : null;
+  // The earliest credible departure evidence: a buffered outside reading, a
+  // pending exit or the closing item.
+  const earliestDepartureAt = [nextAt, active.outside[0]?.evidence.occurredAt, active.pendingExit?.evidence.occurredAt]
+    .filter((at): at is string => at != null && Date.parse(at) >= Date.parse(lastAt))
+    .sort((a, b) => Date.parse(a) - Date.parse(b))[0] ?? nextAt;
+  // iOS reports a Visit's departure a little after the device leaves. A completed
+  // saved-place Visit ending shortly after the departure evidence still says the
+  // device was present through the silence, as its arrival-only callback did. A
+  // Visit far outlasting that evidence is contradicted and keeps the midpoint.
+  const lateVisitDeparture = active.placeMatchKind === "saved" && active.visitSupportUntilAt != null &&
+    Date.parse(active.visitSupportUntilAt) > Date.parse(nextAt) &&
+    Date.parse(active.visitSupportUntilAt) - Date.parse(earliestDepartureAt) <= config.savedPlaceVisitDepartureLagMaximumMs;
+  // With presence the stay lasted until the earliest departure evidence; the
+  // silence before it is not an even split of unknown time.
+  const departureAt = !exact && (active.arrivalPresence || lateVisitDeparture) ? earliestDepartureAt : null;
   active.stoppedAt = exact ? lastAt : departureAt ?? midpointTimeIso(lastAt, nextAt);
   active.stopLowerBoundAt = lastAt;
   active.stopUpperBoundAt = departureAt ?? nextAt;
@@ -362,21 +370,21 @@ function latestObservationMs(working: WorkingStay) {
   Date.parse(working.startedAt));
 }
 
-function resolveUnsupportedExit(active: WorkingStay) {
+function resolveUnsupportedExit(active: WorkingStay, config: LocationEngineConfig) {
   const exit = active.pendingExit!;
-  closeAtTransition(active, exit.evidence.occurredAt, "uncertain_gap");
+  closeAtTransition(active, exit.evidence.occurredAt, "uncertain_gap", config);
   active.evidence.push(exit);
   active.pendingExit = undefined;
   active.inferredContinuity = true;
 }
 
-function closeAtCorroboratedDeparture(active: WorkingStay, nextAt: string) {
+function closeAtCorroboratedDeparture(active: WorkingStay, nextAt: string, config: LocationEngineConfig) {
   const exit = active.pendingExit;
   const exactVisitDeparture = active.visitSupportUntilAt && Date.parse(active.visitSupportUntilAt) <= Date.parse(nextAt);
   const exitAt = exit?.evidence.occurredAt;
   const boundary = !exactVisitDeparture && exitAt && Date.parse(exitAt) >= Date.parse(lastInsideAt(active, nextAt))
     ? exitAt : nextAt;
-  closeAtTransition(active, boundary, "broken_by_other_place");
+  closeAtTransition(active, boundary, "broken_by_other_place", config);
   if (exit) active.evidence.push(exit);
   active.pendingExit = undefined;
 }
@@ -1010,7 +1018,7 @@ export function runLocationEngine(input: LocationEngineInput): LocationEngineOut
         active.evidence.push(active.pendingExit);
         active.pendingExit = undefined;
       } else if (sameSaved && elapsed > input.config.savedPlaceExitReentryGraceMs && !intervalSupports) {
-        resolveUnsupportedExit(active);
+        resolveUnsupportedExit(active, input.config);
         completed.push(active);
         active = null;
       }
@@ -1039,7 +1047,7 @@ export function runLocationEngine(input: LocationEngineInput): LocationEngineOut
         active.arrivalPresence === true &&
         atMs - Date.parse(observedAt) <= input.config.savedPlaceOpenVisitPresenceMaximumMs;
       if (observationGapMs > input.config.maxContinuityGapMs && !boundedSparseSameUnknown && !boundedSavedGap && !openVisitPresence) {
-        closeAtTransition(active, evidence.occurredAt, "uncertain_gap", true);
+        closeAtTransition(active, evidence.occurredAt, "uncertain_gap", input.config, true);
         completed.push(active);
         active = null;
       } else if (observationGapMs > input.config.maxContinuityGapMs) {
@@ -1127,7 +1135,7 @@ export function runLocationEngine(input: LocationEngineInput): LocationEngineOut
     const credibleOtherPlace = itemKey !== "unknown" && !itemKey.startsWith("ambiguous:");
     const sustainedUnknownCluster = active.key === "unknown" && itemKey === "unknown" && !sameUnknown;
     if (credibleOtherPlace || sustainedUnknownCluster) {
-      closeAtCorroboratedDeparture(active, evidence.occurredAt);
+      closeAtCorroboratedDeparture(active, evidence.occurredAt, input.config);
       completed.push(active);
       active = startStay(item);
       continue;
@@ -1141,7 +1149,7 @@ export function runLocationEngine(input: LocationEngineInput): LocationEngineOut
     const moving =
       (evidence.speedMetersPerSecond ?? item.impliedSpeedMetersPerSecond ?? 0) >= input.config.movementSpeedThresholdMps;
     if (active.outside.length >= input.config.outsideConfirmationCount && (displaced || moving || itemKey === "unknown")) {
-      closeAtCorroboratedDeparture(active, active.outside[0].evidence.occurredAt);
+      closeAtCorroboratedDeparture(active, active.outside[0].evidence.occurredAt, input.config);
       completed.push(active);
       const outside = active.outside;
       active = null;
@@ -1165,7 +1173,7 @@ export function runLocationEngine(input: LocationEngineInput): LocationEngineOut
   if (active?.pendingExit && (!active.visitSupportUntilAt ||
       Date.parse(active.visitSupportUntilAt) < Date.parse(active.pendingExit.evidence.occurredAt)) &&
       Date.parse(input.processingAt) - Date.parse(active.pendingExit.evidence.occurredAt) >= input.config.savedPlaceExitReentryGraceMs) {
-    resolveUnsupportedExit(active);
+    resolveUnsupportedExit(active, input.config);
   }
   if (active) completed.push(active);
   const rawStayRecords = completed

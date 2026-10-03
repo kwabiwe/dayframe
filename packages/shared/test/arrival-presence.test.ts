@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { runLocationEngine } from "../src/location/segmenter";
 import { SCHOOL_RUN_HOME_ID, schoolRunArrivalFixture, schoolRunAt as at } from "../src/location/schoolRunArrivalFixture";
 import { PHYSICAL_STOP_LATITUDE, PHYSICAL_STOP_PICKUP, physicalStopFixture } from "../src/location/physicalStopFixture";
+import { GYM_VISIT_PLACE_ID, gymVisitAt, gymVisitDepartureFixture } from "../src/location/gymVisitDepartureFixture";
 import type { CommuteSegment, LocationEngineInput, LocationEvidence, StaySegment } from "../src/location/types";
 
 function run(input: LocationEngineInput) {
@@ -194,5 +195,27 @@ describe("corroborated arrival presence at saved places", () => {
     expect(stays.some((stay) => stay.placeId === stopId)).toBe(false);
     expect(trips).toHaveLength(1);
     expect(trips[0].stops).toBeUndefined();
+  });
+});
+
+describe("completed saved-place Visit ending after the departure evidence", () => {
+  const gymStay = (input: LocationEngineInput) => run(input).stays.find((stay) => stay.placeId === GYM_VISIT_PLACE_ID);
+
+  // Before this change the stay was correct until the completed Visit drained,
+  // then fell back to the midpoint of the silent hour (06:43:14) and retired the Review.
+  it.each(["07:20:00", "07:42:43", "07:43:44", "08:05:00", "09:00:00"])(
+    "keeps the gym stay at the first departure evidence before and after the Visit drains (at %s)", (processingTime) => {
+      expect(gymStay(gymVisitDepartureFixture(processingTime))).toMatchObject({
+        startedAt: gymVisitAt("06:07:48"), stoppedAt: gymVisitAt("07:14:08.435"),
+        stopLowerBoundAt: gymVisitAt("06:12:18"), stopUpperBoundAt: gymVisitAt("07:14:08.435")
+      });
+    });
+
+  it.each([[300_000, true], [300_001, false]])("bounds how late the Visit end may run (%i ms)", (lagMs, keepsPresence) => {
+    const visitEndedAt = new Date(Date.parse(gymVisitAt("07:14:08.435")) + lagMs).toISOString().slice(11, 23);
+    const stay = gymStay(gymVisitDepartureFixture("08:05:00", { visitEndedAt }));
+    expect(stay?.stopUpperBoundAt).toBe(keepsPresence ? gymVisitAt("07:14:08.435") : gymVisitAt("07:14:10.031"));
+    expect(stay?.stoppedAt === gymVisitAt("07:14:08.435")).toBe(keepsPresence);
+    if (!keepsPresence) expect(stay!.stoppedAt! < gymVisitAt("07:14:08")).toBe(true);
   });
 });

@@ -42,8 +42,26 @@ Each has a regression test that failed before its fix.
 - On the private 25–29 Sep corpus, one final-output change versus the physical-stops PR: the 29 Sep 18:10–18:26 BST outing that `main` lost entirely is now one Home round trip (18:10:02–18:25:45). The owner labelled its stop as a ~30-second station drop-off, and Google showed 18:09–18:26. A geofence registration pair no longer ends Home presence.
 - In minute-by-minute as-received replay, the median time from journey end to first output fell from 196 to 75 minutes. Journeys first appearing only after the user left the destination fell from 11 of 13 to 7 of 12.
 
+## Staging gym visit — 3 October (QA account, read-only SQL; times UTC)
+
+Staging served this branch at `593b253`, with the matching signed Staging app on the test iPhone.
+
+- 06:00–06:07: the drive to the gym matched Google. 06:07:48: arrival-only Visit, geofence entry and a still inside fix; then the phone was silent for 62 minutes.
+- 07:14:08–07:14:14: outside readings and the gym geofence exit. 07:15:51–07:30:55: an owner-confirmed 15-minute stop at a shop, recorded inside one trip home (07:15:21–07:39:30), as decided for the physical-stops PR.
+- The server first produced the correct gym stay, 06:07:48–07:14:08, and created its Review at 07:32:21.
+- At 07:43:43 the completed Visit drained, 06:07:48–07:15:12, ending about a minute after the exit. A completed callback switches the open-arrival presence off, and the existing departure rule rejects a Visit end later than the departure evidence. The stay fell back to the midpoint of the silence, 06:43:14; the correct Review was retired and a wrong one created.
+
+**Fix.** A completed saved-place Visit that ends after the departure evidence, by no more than `savedPlaceVisitDepartureLagMaximumMs` (five minutes), ends the stay at the earliest credible departure, as arrival presence does. The last inside observation is the lower bound and the departure evidence is the upper bound. A Visit running further past contradicting evidence keeps the midpoint, so the existing synthetic `A → B → A` tests, where the Visit overruns another place's evidence by 35 and 52 minutes, are unchanged.
+
+**Result.**
+- A shape-derived fixture (`gymVisitDepartureFixture.ts`: same times, accuracies, speeds and receipt times on one synthetic axis around the Gym) reproduces the staging failure on the unchanged engine. With the fix the gym stay is 06:07:48–07:14:08 at every processing time, before and after the completed Visit drains. Tests cover the five-minute bound on both sides.
+- On the private 25–29 Sep corpus, two saved-place stays change, both the same pattern. On 25 Sep the completed Visit ended 9 seconds after the exit, and the stay now ends at the exit, 3 minutes 11 seconds later than the midpoint. On 27 Sep it ended 3 minutes 11 seconds after the first outside reading, and the stay now ends at that reading, 64 seconds later. As-received timeliness is unchanged.
+- The stay's ID can still change when the completed callback sorts ahead of the arrival-only one (they share an occurrence time and tie-break on client ID). The re-issued Review then has the same, correct times. This is the existing identity follow-up.
+
+Still to drive on staging: a 30–60 second kerbside drop-off, a 20+ minute stop near a saved place, a school run then staying Home, and an ordinary drive with traffic.
+
 ## Not established
 
 - Remaining delay comes from foreground-only native Visit drain and deferred location delivery on the phone. These need a mobile change (follow-up).
 - Segment identity still changes as late evidence lands, so one Review can be replaced (follow-up).
-- No staging, device or production validation is claimed here.
+- Staging evidence so far is the 2 Oct school run and the 3 Oct gym visit; no device or production validation of the 3 Oct fix is claimed here.
