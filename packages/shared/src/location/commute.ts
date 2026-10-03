@@ -9,6 +9,7 @@ import type {
   CommuteEvidenceSummary,
   CommuteQualification,
   CommuteSegment,
+  CommuteStop,
   StaySegment,
   SavedPlaceForMatching
 } from "./types";
@@ -62,13 +63,26 @@ function routeDistance(points: Point[]) {
   return distance;
 }
 
+/** Longest part of [from, to] not covered by any observed stop interval. */
+export function longestUnobservedMs(from: number, to: number, observed: ReadonlyArray<readonly [number, number]>) {
+  let pieces: Array<[number, number]> = [[from, to]];
+  for (const [start, stop] of observed) {
+    pieces = pieces.flatMap(([pieceStart, pieceStop]): Array<[number, number]> => [
+      ...(start > pieceStart ? [[pieceStart, Math.min(pieceStop, start)] as [number, number]] : []),
+      ...(stop < pieceStop ? [[Math.max(pieceStart, stop), pieceStop] as [number, number]] : [])
+    ].filter(([a, b]) => b > a));
+  }
+  return pieces.reduce((longest, [a, b]) => Math.max(longest, b - a), 0);
+}
+
 export function summariseCommuteEvidence({
   config,
   from,
   routeEvidence,
   startedAtMs,
   stoppedAtMs,
-  to
+  to,
+  stops = []
 }: {
   config: LocationEngineConfig;
   from: StaySegment;
@@ -76,14 +90,23 @@ export function summariseCommuteEvidence({
   startedAtMs: number;
   stoppedAtMs: number;
   to: StaySegment;
+  /** Observed stops inside the trip: route waypoints whose interval is observed, not a gap. */
+  stops?: readonly StaySegment[];
 }): CommuteEvidenceSummary {
   const fromPoint = segmentPoint(from);
   const toPoint = segmentPoint(to);
-  const routePoints = routeEvidence.flatMap((item) => {
-    const point = evidencePoint(item);
-    return point ? [point] : [];
-  });
-  const routeWithEndpoints = routeEvidence.length >= 2
+  const timedPoints = [
+    ...routeEvidence.flatMap((item) => {
+      const point = evidencePoint(item);
+      return point ? [{ at: Date.parse(item.evidence.occurredAt), point }] : [];
+    }),
+    ...stops.flatMap((stop) => {
+      const point = segmentPoint(stop);
+      return point ? [{ at: Date.parse(stop.startedAt), point }] : [];
+    })
+  ].sort((a, b) => a.at - b.at);
+  const routePoints = timedPoints.map(({ point }) => point);
+  const routeWithEndpoints = routeEvidence.length + stops.length >= 2
     ? [
         ...(fromPoint ? [fromPoint] : []),
         ...routePoints,
@@ -111,13 +134,20 @@ export function summariseCommuteEvidence({
   const observedTimes = [
     startedAtMs,
     ...routeEvidence.map((item) => Date.parse(item.evidence.occurredAt)),
+    ...stops.flatMap((stop) => [Date.parse(stop.startedAt), Date.parse(stop.stoppedAt ?? stop.startedAt)]),
     stoppedAtMs
   ].filter(Number.isFinite).sort((a, b) => a - b);
+  // A recorded stop is observed by its own stay: its interval is not a route gap.
+  const stopIntervals = stops.flatMap((stop) => {
+    const from = Date.parse(stop.startedAt);
+    const to = Date.parse(stop.stoppedAt ?? stop.startedAt);
+    return Number.isFinite(from) && Number.isFinite(to) && to > from ? [[from, to] as const] : [];
+  });
   let maximumObservationGapMs = 0;
   for (let index = 1; index < observedTimes.length; index += 1) {
     maximumObservationGapMs = Math.max(
       maximumObservationGapMs,
-      observedTimes[index] - observedTimes[index - 1]
+      longestUnobservedMs(observedTimes[index - 1], observedTimes[index], stopIntervals)
     );
   }
   const maximumDisplacementFromOrigin = fromPoint && routePoints.length
@@ -312,6 +342,8 @@ function hasIndependentShortJourneyProof(
 
 export type CommuteDerivationOptions = {
   inferredBoundaryStayIds?: ReadonlySet<string>;
+  /** Short stops between the given stays; their evidence is not route evidence. */
+  interiorStops?: readonly StaySegment[];
   arrivalWitnesses?: readonly SavedPlaceArrivalWitness[];
   savedPlaces?: readonly SavedPlaceForMatching[];
 };
@@ -365,18 +397,26 @@ export function deriveCommutes(
       continue;
     }
 
+    const stops = (options.interiorStops ?? []).filter((stop) => stop.stoppedAt != null &&
+      Date.parse(stop.startedAt) >= startedAtMs && Date.parse(stop.stoppedAt) <= stoppedAtMs);
+    const stopEvidenceIds = new Set(stops.flatMap((stop) => stop.evidenceIds));
     const routeEvidence = acceptedEvidence.filter((item, evidenceIndex) => {
       const at = occurredAtMs[evidenceIndex];
       if (at <= startedAtMs || at >= stoppedAtMs || evidencePoint(item) == null) return false;
+      if (stopEvidenceIds.has(item.evidence.clientEvidenceId)) return false;
       return !evidenceMatchesStay(item, from) && !evidenceMatchesStay(item, to);
     });
+    // Every portion of a trip through stops needs its own movement evidence;
+    // otherwise unobserved time either side of a stop would be claimed as travel.
+    if (stops.length && !everyPortionShowsMovement(from, to, stops, routeEvidence, startedAtMs, stoppedAtMs, config)) continue;
     const summary = summariseCommuteEvidence({
       config,
       from,
       routeEvidence,
       startedAtMs,
       stoppedAtMs,
-      to
+      to,
+      stops
     });
     if (duration < config.commuteMinimumDurationMs) {
       if (summary.sameKnownPlace || summary.straightLineDistanceMeters == null ||
@@ -426,8 +466,90 @@ export function deriveCommutes(
           ? "medium"
           : qualification.confidence,
       qualificationReason: qualification.reason,
+      ...(stops.length ? { stops: stops.map(stopFromStay) } : {}),
       evidenceIds
     });
   }
   return commutes;
+}
+
+function everyPortionShowsMovement(
+  from: StaySegment,
+  to: StaySegment,
+  stops: readonly StaySegment[],
+  routeEvidence: readonly ClassifiedEvidence[],
+  startedAtMs: number,
+  stoppedAtMs: number,
+  config: LocationEngineConfig
+) {
+  const ordered = [...stops].sort((a, b) => Date.parse(a.startedAt) - Date.parse(b.startedAt));
+  const anchors = [from, ...ordered, to];
+  const bounds = [startedAtMs, ...ordered.flatMap((stop) => [Date.parse(stop.startedAt), Date.parse(stop.stoppedAt!)]), stoppedAtMs];
+  for (let index = 0; index < anchors.length - 1; index += 1) {
+    const portionStart = bounds[index * 2];
+    const portionStop = bounds[index * 2 + 1];
+    const ends = [segmentPoint(anchors[index]), segmentPoint(anchors[index + 1])];
+    const moving = routeEvidence.some((item) => {
+      const at = Date.parse(item.evidence.occurredAt);
+      if (at < portionStart || at > portionStop) return false;
+      const accuracy = item.evidence.horizontalAccuracyMeters;
+      if (accuracy == null || accuracy > config.commuteMaximumSpeedAccuracyMeters) return false;
+      const speed = item.evidence.speedMetersPerSecond ?? item.impliedSpeedMetersPerSecond;
+      if (speed != null && speed >= config.movementSpeedThresholdMps) return true;
+      const point = evidencePoint(item);
+      return point != null && ends.every((end) => end != null &&
+        distanceMeters(end, point) >= config.movementDisplacementThresholdMeters);
+    });
+    if (!moving) return false;
+  }
+  return true;
+}
+
+function stopFromStay(stay: StaySegment): CommuteStop {
+  return {
+    staySegmentId: stay.clientSegmentId,
+    startedAt: stay.startedAt,
+    stoppedAt: stay.stoppedAt!,
+    startLowerBoundAt: stay.startLowerBoundAt ?? null,
+    startUpperBoundAt: stay.startUpperBoundAt ?? null,
+    stopLowerBoundAt: stay.stopLowerBoundAt ?? null,
+    stopUpperBoundAt: stay.stopUpperBoundAt ?? null,
+    candidatePlaceIds: stay.candidatePlaceIds
+  };
+}
+
+/**
+ * Time tracking records a short errand as one trip. A trip is derived directly
+ * between the stays either side of unknown stops shorter than the visit Review
+ * threshold, with those stops as observed waypoints, so the whole trip
+ * qualifies even when its legs would not. Each trip keeps its qualified legs
+ * (never persisted) so replay can fall back to them when protected history
+ * blocks the trip. Pairs whose trip does not qualify keep their legs, and
+ * saved/learned or visit-length stops still split journeys.
+ */
+export function assembleTripsThroughStops(
+  legs: CommuteSegment[],
+  stays: StaySegment[],
+  acceptedEvidence: ClassifiedEvidence[],
+  config: LocationEngineConfig,
+  processingAt: string,
+  options: CommuteDerivationOptions = {}
+) {
+  const minorStop = (stay: StaySegment) => stay.placeMatchKind === "unknown" && stay.stoppedAt != null &&
+    Date.parse(stay.stoppedAt) - Date.parse(stay.startedAt) < config.unknownStayReviewDwellMs;
+  const interiorStops = stays.filter(minorStop);
+  if (!interiorStops.length) return legs;
+  const majors = stays.filter((stay) => !minorStop(stay));
+  const trips = deriveCommutes(majors, acceptedEvidence, config, processingAt, { ...options, interiorStops })
+    .filter((trip) => trip.stops?.length);
+  const within = (leg: CommuteSegment, trip: CommuteSegment) =>
+    Date.parse(leg.startedAt) >= Date.parse(trip.startedAt) && Date.parse(leg.stoppedAt) <= Date.parse(trip.stoppedAt);
+  const result = [
+    ...legs.filter((leg) => !trips.some((trip) => within(leg, trip))),
+    ...trips.map((trip) => {
+      const tripLegs = legs.filter((leg) => within(leg, trip));
+      return tripLegs.length ? { ...trip, legs: tripLegs } : trip;
+    })
+  ];
+  return result.sort((a, b) => Date.parse(a.startedAt) - Date.parse(b.startedAt));
 }

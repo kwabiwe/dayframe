@@ -79,6 +79,13 @@ export const LocationReviewEvidenceDtoSchema = z.object({
       distanceMeters: z.number()
     }))
   }),
+  // Stops inside one trip, coordinate-free. Stop time is part of the trip, not movement.
+  stops: z.array(z.object({
+    startedAt: z.string(),
+    stoppedAt: z.string(),
+    durationSeconds: z.number().nonnegative(),
+    approximate: z.boolean()
+  })).optional(),
   suggestedSplitPoints: z.array(z.object({
     at: z.string(),
     reason: z.enum(["place_transition", "evidence_gap", "movement", "manual"]),

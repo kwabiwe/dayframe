@@ -158,6 +158,8 @@ For an unknown-place native Visit, its reported arrival remains the estimated st
 
 This improves suggestion quality without activating automatic logging. Existing rollout, cutover, commute qualification and unknown-place thresholds remain unchanged. Replay may replace obsolete open suggestions, but must preserve explicit accepted, ignored and manual decisions even when corrected segmentation changes client IDs.
 
+Whether I stopped is decided from physical evidence, separately from naming the place or showing it as a Review. A stop needs accurate slow observations spread over time with movement observed on both sides; a native Visit can corroborate it but never sets its length, because iOS can report several minutes for a 30-second kerbside stop. Brief or uncorroborated pauses stay inside the journey. A corroborated stop shorter than the unknown-visit Review threshold is part of one trip: the trip carries the stop and its time is not described as travel. A stop long enough to be its own visit separates the journeys either side and is offered as a visit, with any nearby saved place as a candidate rather than proof of attendance. Trips containing a stop always need my review before logging.
+
 ### Automatic logging decisions
 
 Normal automatic confidence is `medium_high` or `high`. Location additionally requires a finalised segment, server `v2_enabled`, same-mode client acknowledgement/cutover and no earlier Review or terminal decision. Start and stop bounds are independently complete, finite, ordered, contain the unchanged detected estimate, and each span at most five minutes. Missing or invalid bounds fail closed; never round or move detected times to pass a guard.
@@ -168,7 +170,7 @@ Normal automatic confidence is `medium_high` or `high`. Location additionally re
 | Trusted stay | Logging-enabled saved place or accepted learned place linked to one; normal confidence; supported continuity including a bounded `uncertain_gap` | Manual/Health allowed; commute or a different location stay allowed only up to five minutes |
 | Standard commute | At least three minutes; normal confidence; two verified saved endpoints; at least two accepted route samples; significant endpoint displacement or meaningful same-place round trip; actual maximum internal observation gap at most twelve minutes | Every confirmed/accepted activity allowed only up to five minutes |
 | Medium commute exception | At least three minutes; `medium`; distinct verified saved endpoints; at least three accepted route samples; significant endpoint displacement or significant route distance; same gap/boundary guards | Same commute overlap rule |
-| Other signals | Unknown endpoints, weak/endpoint-only routes, missing linkage, disabled logging, invalid window or failed thresholds | Review |
+| Other signals | Unknown endpoints, weak/endpoint-only routes, trips containing a stop, missing linkage, disabled logging, invalid window or failed thresholds | Review |
 
 Strong-evidence short journeys are Review-only, including in `v2_enabled`. A positive sub-three-minute candidate must retain independently formed stays at distinct endpoints at least 800 metres apart and have at least three independent, accurate (at most 65 metres) faster GPS point observations (at least 2.8 m/s) with `isSimulated: false` within its actual window. On iOS, Expo Location does not supply Android's `mocked` indicator, and Dayframe normalises that absent signal to `false`; the value is not independent proof that an iOS sample was not simulated. Native callbacks that omit `isSimulated` still fail closed, but simulated iOS/GPX/Xcode input is not reliably rejected by this field. Duplicate deliveries, source mirrors, broad/invalid/implausible samples cannot supply proof. Unknown endpoints retain their existing dwell rules and need not create their own visit Review. No confidence, estimated bounds, same-place-round-trip, ordinary-duration or maximum-duration rule is relaxed.
 
@@ -480,7 +482,7 @@ Validation:
 - Walking/workout entries have correct duration.
 - Trusted place starts correctly.
 - Unknown/broad places do not create silent incorrect entries.
-- Two appearances at one venue separated by Home remain two stays; a 10–15 minute saved stop remains a journey endpoint; overlapping saved radii select one deterministic best saved place while retaining bounded alternatives; and Europe/London local-day grouping remains correct across BST/DST.
+- Two appearances at one venue separated by Home remain two stays; a 10–15 minute saved stop remains a journey endpoint; a corroborated short unknown stop stays inside one trip while a visit-length stop splits journeys; overlapping saved radii select one deterministic best saved place while retaining bounded alternatives; and Europe/London local-day grouping remains correct across BST/DST.
 
 ### Phase 4: Product Polish And Beta Hardening
 

@@ -4,6 +4,8 @@ export * from "./config";
 export * from "./evidenceDto";
 export * from "./geo";
 export * from "./journeyIdentityFixture";
+export * from "./physicalStopFixture";
+export * from "./physicalStops";
 export * from "./placeMatcher";
 export * from "./schemas";
 export * from "./segmenter";

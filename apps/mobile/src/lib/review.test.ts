@@ -260,6 +260,10 @@ describe("mobile review helpers", () => {
     })).toBe("Needs review · short journeys aren’t added automatically");
     expect(locationReviewReasonCopy({
       ...commute,
+      rawPayload: { semanticReason: "journey_contains_stop" }
+    })).toBe("Needs review · this trip includes a stop");
+    expect(locationReviewReasonCopy({
+      ...commute,
       rawPayload: { semanticReason: "insufficient_route_evidence" }
     })).toBe("Needs review · route evidence is limited");
     expect(locationReviewReasonCopy({

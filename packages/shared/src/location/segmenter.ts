@@ -1,5 +1,6 @@
 import { LOCATION_ENGINE_V2_CONFIG } from "./config";
-import { deriveCommutes } from "./commute";
+import { assembleTripsThroughStops, deriveCommutes } from "./commute";
+import { detectPhysicalStops, type PhysicalStop } from "./physicalStops";
 import { accuracyWeightedCentre, distanceMeters, midpointTimeIso, stableLocationId } from "./geo";
 import { matchLocationToPlaces } from "./placeMatcher";
 import { analyseSavedPlaceArrivalEvidence } from "./savedPlaceArrivalSupport";
@@ -417,6 +418,46 @@ function stayFromWorking(
     confidence,
     ...(working.approximateArrival ? { approximateArrival: true as const } : {}),
     evidenceIds
+  };
+}
+
+function stayFromPhysicalStop(stop: PhysicalStop, accepted: ClassifiedEvidence[], input: LocationEngineInput): StaySegment {
+  const deviceId = accepted.find(({ evidence }) => evidence.clientEvidenceId === stop.evidenceIds[0])?.evidence.deviceId ??
+    accepted[0].evidence.deviceId;
+  const approximate = stop.startLowerBoundAt !== stop.startUpperBoundAt;
+  return {
+    kind: "stay",
+    clientSegmentId: stableLocationId("stay", [
+      input.config.algorithmVersion,
+      deviceId,
+      stop.evidenceIds[0],
+      stop.evidenceIds[stop.evidenceIds.length - 1],
+      "physical_stop"
+    ]),
+    algorithmVersion: input.config.algorithmVersion,
+    status: Date.parse(input.processingAt) - Date.parse(stop.stoppedAt) >= input.config.segmentFinalisationLagMs
+      ? "finalised"
+      : "closed",
+    startedAt: stop.startedAt,
+    stoppedAt: stop.stoppedAt,
+    startLowerBoundAt: stop.startLowerBoundAt,
+    startUpperBoundAt: stop.startUpperBoundAt,
+    stopLowerBoundAt: stop.stopLowerBoundAt,
+    stopUpperBoundAt: stop.stopUpperBoundAt,
+    placeId: null,
+    learnedPlaceId: null,
+    // Identity stays unknown: proximity to a saved area is a candidate, not proof of attendance.
+    placeMatchKind: "unknown",
+    ...(approximate ? { approximateArrival: true as const } : {}),
+    formation: "physical_stop",
+    candidatePlaceIds: stop.candidatePlaceIds,
+    centreLatitude: stop.centre.latitude,
+    centreLongitude: stop.centre.longitude,
+    radiusMeters: input.config.unknownStayBaseRadiusMeters,
+    sampleCount: stop.slowSampleCount,
+    continuityStatus: stop.supportedByVisit ? "supported_by_visit" : "continuous",
+    confidence: "medium",
+    evidenceIds: stop.evidenceIds
   };
 }
 
@@ -1043,14 +1084,26 @@ export function runLocationEngine(input: LocationEngineInput): LocationEngineOut
   const rawStayRecords = completed
     .map((working) => ({ working, segment: stayFromWorking(working, input.processingAt, input) }))
     .filter((record): record is { working: WorkingStay; segment: StaySegment } => Boolean(record.segment));
-  const rawStays = rawStayRecords
-    .map(({ segment }) => segment)
+  const promotedStays = rawStayRecords.map(({ segment }) => segment);
+  // Physical stops exist even when identity fragments them or they are too
+  // short to name. Existing promoted stays keep precedence over the same time.
+  const physicalStays = detectPhysicalStops(accepted, input.config)
+    .filter((stop) => !promotedStays.some((stay) =>
+      Date.parse(stay.startedAt) < Date.parse(stop.stoppedAt) &&
+      Date.parse(stay.stoppedAt ?? input.processingAt) > Date.parse(stop.startedAt)))
+    .map((stop) => stayFromPhysicalStop(stop, accepted, input));
+  const rawStays = [...promotedStays, ...physicalStays]
     .sort((a, b) => Date.parse(a.startedAt) - Date.parse(b.startedAt));
   const stays = coalesceCompatibleUnknownStays(rawStays, accepted, input);
   const inferredBoundaryStayIds = new Set(
     rawStayRecords.filter(({ working }) => working.inferredBoundary).map(({ segment }) => segment!.clientSegmentId)
   );
-  const commutes = deriveCommutes(stays, accepted, input.config, input.processingAt, {
+  const legs = deriveCommutes(stays, accepted, input.config, input.processingAt, {
+    inferredBoundaryStayIds,
+    arrivalWitnesses: arrivalAnalysis.witnesses,
+    savedPlaces: input.savedPlaces
+  });
+  const commutes = assembleTripsThroughStops(legs, stays, accepted, input.config, input.processingAt, {
     inferredBoundaryStayIds,
     arrivalWitnesses: arrivalAnalysis.witnesses,
     savedPlaces: input.savedPlaces

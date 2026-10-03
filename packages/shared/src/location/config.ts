@@ -41,6 +41,12 @@ export type LocationEngineConfig = {
   visitContinuityPedestrianSpeedThresholdMps: number;
   sparseUnknownContinuityMaximumGapMs: number;
   sparseUnknownContinuityMaximumDistanceMeters: number;
+  physicalStopRadiusMeters: number;
+  physicalStopMinimumDurationMs: number;
+  physicalStopMinimumSlowSpreadMs: number;
+  physicalStopUnanchoredMinimumSlowSamples: number;
+  physicalStopUnanchoredMinimumSlowSpreadMs: number;
+  physicalStopBoundaryWindowMs: number;
   rawEvidenceRetentionDays: number;
   maxEvidenceItemsPerUpload: number;
 };
@@ -97,6 +103,16 @@ export const LOCATION_ENGINE_V2_CONFIG: LocationEngineConfig = {
   // when there is no contradictory route/place evidence between them.
   sparseUnknownContinuityMaximumGapMs: 3_600_000,
   sparseUnknownContinuityMaximumDistanceMeters: 120,
+  // Physical stops exist independently of place identity or Review eligibility.
+  // A stop needs accurate slow fixes spread over time plus observed movement on
+  // both sides. A native Visit can corroborate but never sets duration alone:
+  // iOS reported 5–7 minute Visits for owner-confirmed 30–60 second drop-offs.
+  physicalStopRadiusMeters: 100,
+  physicalStopMinimumDurationMs: 180_000,
+  physicalStopMinimumSlowSpreadMs: 60_000,
+  physicalStopUnanchoredMinimumSlowSamples: 3,
+  physicalStopUnanchoredMinimumSlowSpreadMs: 180_000,
+  physicalStopBoundaryWindowMs: 900_000,
   rawEvidenceRetentionDays: 7,
   maxEvidenceItemsPerUpload: 100
 };
