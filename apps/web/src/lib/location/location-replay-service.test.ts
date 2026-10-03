@@ -310,7 +310,7 @@ describe("Location replay decided interior stops with unchanged IDs", () => {
     const stayRows = local.segmentUpserts.filter((segment) => segment.kind === "stay" && segment.clientSegmentId !== stopId)
       .map((segment) => ({ id: `db-${segment.clientSegmentId}`, clientSegmentId: segment.clientSegmentId }));
     const query = vi.fn(async (sql: string, params?: unknown[]) =>
-      sql.includes("decided interior stops") ? { rows: [canonical] }
+      sql.includes("decided stay bounds") ? { rows: [canonical] }
         : sql.includes("insert into stay_segments") ? { rows: stayRows } : base(sql, params));
     const server = await replayLocationEvidence({ query } as never, {
       workspaceId: "workspace-private", userId: "user-private", authMode: "provider", scopes: []
@@ -357,7 +357,7 @@ describe("Location replay decided interior stops with unchanged IDs", () => {
     const stayRows = local.segmentUpserts.filter((segment) => segment.kind === "stay" && segment.clientSegmentId !== stopId)
       .map((segment) => ({ id: `db-${segment.clientSegmentId}`, clientSegmentId: segment.clientSegmentId }));
     const query = vi.fn(async (sql: string, params?: unknown[]) =>
-      sql.includes("decided interior stops") ? { rows: [canonical] }
+      sql.includes("decided stay bounds") ? { rows: [canonical] }
         : sql.includes("insert into stay_segments") ? { rows: stayRows } : base(sql, params));
     const server = await replayLocationEvidence({ query } as never, {
       workspaceId: "workspace-private", userId: "user-private", authMode: "provider", scopes: []
@@ -371,5 +371,99 @@ describe("Location replay decided interior stops with unchanged IDs", () => {
     expect(ids).not.toContain(trip.legs[0].clientSegmentId);
     expect(ids).not.toContain(trip.clientSegmentId);
     expect(ids).toContain(trip.legs[1].clientSegmentId);
+  });
+});
+
+describe("Location replay decided commute endpoints", () => {
+  // A visit-length stop is its own Review, so its journeys are standalone commutes.
+  const LONG_STOP = { visit: [670_000, 2_200_000] as [number, number],
+    slowAt: [700_000, 900_000, 1_300_000, 1_700_000, 2_100_000, 2_180_000], departAt: 2_200_000, returnAt: 2_288_000 };
+
+  async function replayWithDecided(fixture: ReturnType<typeof physicalStopFixture>, decidedId: string,
+    canonical: Record<string, string | null | undefined>, persistenceProfile?: typeof LOCATION_REPLAY_SCALABILITY_PROFILE) {
+    const local = runLocationEngine(fixture);
+    const base = journeyReplayQuery(fixture as unknown as ReturnType<typeof journeyIdentityFixture>, [], [{
+      id: "decided-row", clientSegmentId: decidedId, continuityStatus: "supported_by_visit", preservesManualCorrection: true
+    }]);
+    const stayRows = local.segmentUpserts.filter((segment) => segment.kind === "stay" && segment.clientSegmentId !== decidedId)
+      .map((segment) => ({ id: `db-${segment.clientSegmentId}`, clientSegmentId: segment.clientSegmentId }));
+    const query = vi.fn(async (sql: string, params?: unknown[]) =>
+      sql.includes("decided stay bounds") ? { rows: [{ clientSegmentId: decidedId, ...canonical }] }
+        : sql.includes("insert into stay_segments") ? { rows: stayRows } : base(sql, params));
+    const server = await replayLocationEvidence({ query } as never, {
+      workspaceId: "workspace-private", userId: "user-private", authMode: "provider", scopes: []
+    }, {
+      deviceId: fixture.evidence[0].deviceId,
+      algorithmVersion: fixture.config.algorithmVersion,
+      processingAt: fixture.processingAt,
+      persistenceProfile
+    });
+    return { local, server, commutes: server.segments.filter((segment) => segment.kind === "commute") };
+  }
+
+  it.each([
+    ["default", undefined],
+    ["scalability", LOCATION_REPLAY_SCALABILITY_PROFILE]
+  ] as const)("re-derives standalone commutes to a decided stop's persisted boundaries (%s profile; re-review finding)", async (_label, persistenceProfile) => {
+    const fixture = physicalStopFixture(LONG_STOP);
+    const engine = runLocationEngine(fixture).segmentUpserts;
+    const stop = engine.find((segment) => segment.kind === "stay" && segment.placeMatchKind === "unknown");
+    const legs = engine.filter((segment) => segment.kind === "commute");
+    if (!stop || legs.length !== 2 || legs.some((leg) => leg.kind === "commute" && leg.legs?.length)) {
+      throw new Error("fixture must produce a standalone stop between two standalone commutes");
+    }
+    // The decided row keeps its earlier, longer boundaries; late evidence shortened the engine's version.
+    const canonical = {
+      startedAt: physicalStopAt(665_000), stoppedAt: physicalStopAt(2_205_000),
+      startLowerBoundAt: physicalStopAt(660_000), startUpperBoundAt: physicalStopAt(668_000),
+      stopLowerBoundAt: physicalStopAt(2_202_000), stopUpperBoundAt: physicalStopAt(2_208_000)
+    };
+    const { server, commutes } = await replayWithDecided(fixture, stop.clientSegmentId, canonical, persistenceProfile);
+    const [into, onward] = legs;
+    expect(commutes.find((segment) => segment.clientSegmentId === into.clientSegmentId)).toMatchObject({
+      startedAt: into.startedAt, stoppedAt: canonical.startedAt,
+      stopLowerBoundAt: canonical.startLowerBoundAt, stopUpperBoundAt: canonical.startUpperBoundAt,
+      evidenceIds: ["out-0", "out-1", "out-2"]
+    });
+    expect(commutes.find((segment) => segment.clientSegmentId === onward.clientSegmentId)).toMatchObject({
+      startedAt: canonical.stoppedAt, stoppedAt: onward.stoppedAt,
+      startLowerBoundAt: canonical.stopLowerBoundAt, startUpperBoundAt: canonical.stopUpperBoundAt,
+      evidenceIds: ["back-0", "back-1", "back-2"]
+    });
+    expect(server.stayIds.get(stop.clientSegmentId)).toBe("decided-row");
+  });
+
+  it("leaves a commute unchanged when the decided endpoint's boundaries have not moved", async () => {
+    const fixture = physicalStopFixture(LONG_STOP);
+    const engine = runLocationEngine(fixture).segmentUpserts;
+    const stop = engine.find((segment) => segment.kind === "stay" && segment.placeMatchKind === "unknown")!;
+    const { commutes } = await replayWithDecided(fixture, stop.clientSegmentId, {
+      startedAt: stop.startedAt, stoppedAt: stop.stoppedAt,
+      startLowerBoundAt: stop.startLowerBoundAt, startUpperBoundAt: stop.startUpperBoundAt,
+      stopLowerBoundAt: stop.stopLowerBoundAt, stopUpperBoundAt: stop.stopUpperBoundAt
+    });
+    expect(commutes).toEqual(engine.filter((segment) => segment.kind === "commute"));
+  });
+
+  it.each([
+    ["default", undefined],
+    ["scalability", LOCATION_REPLAY_SCALABILITY_PROFILE]
+  ] as const)("falls back to re-derived legs when a trip's decided outer endpoint has moved (%s profile)", async (_label, persistenceProfile) => {
+    const fixture = physicalStopFixture(PHYSICAL_STOP_PICKUP);
+    const trip = runLocationEngine(fixture).segmentUpserts.find((segment) => segment.kind === "commute" && segment.stops?.length);
+    if (trip?.kind !== "commute" || trip.legs?.length !== 2) throw new Error("fixture must produce a trip with two legs");
+    // The decided Home row starts 18 s before the engine's estimate.
+    const canonical = {
+      startedAt: physicalStopAt(1_290_000), stoppedAt: physicalStopAt(1_908_000),
+      startLowerBoundAt: physicalStopAt(1_285_000), startUpperBoundAt: physicalStopAt(1_295_000),
+      stopLowerBoundAt: null, stopUpperBoundAt: null
+    };
+    const { commutes } = await replayWithDecided(fixture, trip.toStaySegmentId, canonical, persistenceProfile);
+    const ids = commutes.map((segment) => segment.clientSegmentId);
+    expect(ids).not.toContain(trip.clientSegmentId);
+    expect(commutes.find((segment) => segment.clientSegmentId === trip.legs![0].clientSegmentId)).toMatchObject({
+      startedAt: trip.legs[0].startedAt, stoppedAt: trip.legs[0].stoppedAt });
+    expect(commutes.find((segment) => segment.clientSegmentId === trip.legs![1].clientSegmentId)).toMatchObject({
+      stoppedAt: canonical.startedAt, stopLowerBoundAt: canonical.startLowerBoundAt, stopUpperBoundAt: canonical.startUpperBoundAt });
   });
 });
