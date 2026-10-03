@@ -60,6 +60,8 @@ Staging served this branch at `593b253`, with the matching signed Staging app on
 
 **Re-review (Codex, at `c18ad1c`).** The late-Visit rule could use Visit support reused from an earlier, contradicted episode. A Home Visit spanning accurate Work readings was attached to a later single Home fix, so the exit created a five-minute Home stay that `main`, the physical-stops PR and `593b253` all omit; with Home logging enabled it could be logged automatically. The rule now applies only to a Visit that arrived within the current stay. The regression and an observed-dwell control (which `c18ad1c` also stretched to the exit) fail on `c18ad1c`; a fresh Visit in the return episode still counts, on both. The corpus output is identical to `c18ad1c`.
 
+**Re-review (Codex, at `70a0e67`).** A fresh Visit in the return episode only replaced the reused support when it ended later, so an equal or earlier fresh end lost a valid stay that `c18ad1c` kept. The late-departure rule now reads a separate value: the latest end of a Visit that arrived within the current stay. Interval-support selection is back to its earlier behaviour, so silence bridging is unchanged; replacing the support instead would have created a new Home stay from the stale Visit when silence followed. Regressions for equal and earlier fresh ends (with a later-end control) fail on `70a0e67`; corpus output is identical.
+
 Still to drive on staging: a 30–60 second kerbside drop-off, a 20+ minute stop near a saved place, a school run then staying Home, and an ordinary drive with traffic.
 
 ## Not established

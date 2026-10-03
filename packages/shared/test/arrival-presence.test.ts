@@ -222,7 +222,7 @@ describe("completed saved-place Visit ending after the departure evidence", () =
 
   // Re-review of c18ad1c: a Home Visit spanning accurate Work fixes was reused by a
   // later single Home fix, so the late departure created a five-minute Home stay.
-  function returnEpisode(variant: "reused" | "fresh-visit" | "observed-dwell") {
+  function returnEpisode(variant: "reused" | "fresh-visit" | "observed-dwell" | "fresh-after-fix", freshEndedAt = "11:27:00.000") {
     const work = { ...qualityPlace, id: "10000000-0000-4000-8000-000000000092", name: "Work", latitude: 51.518 };
     const value = qualityInput([
       signal("home-visit", "11:00:00", { kind: "visit", endedAt: "2026-09-15T11:27:00.000Z" }),
@@ -230,6 +230,7 @@ describe("completed saved-place Visit ending after the departure evidence", () =
       ...(variant === "fresh-visit" ? [signal("home-visit-2", "11:20:30", { kind: "visit", endedAt: "2026-09-15T11:27:00.000Z" })] : []),
       ...(variant === "observed-dwell" ? [signal("home-0", "11:19:00")] : []),
       signal("home-1", "11:21:00"),
+      ...(variant === "fresh-after-fix" ? [signal("home-visit-2", "11:21:05", { kind: "visit", endedAt: `2026-09-15T${freshEndedAt}Z` })] : []),
       ...(variant === "observed-dwell" ? [signal("home-2", "11:24:00")] : []),
       signal("home-exit", "11:26:00", { kind: "geofence_exit", savedPlaceId: qualityPlace.id, latitude: null, longitude: null, horizontalAccuracyMeters: null }),
       signal("work-3", "11:26:06", { latitude: work.latitude })
@@ -248,4 +249,12 @@ describe("completed saved-place Visit ending after the departure evidence", () =
     expect(returnEpisode("observed-dwell")).toEqual([expect.objectContaining({
       startedAt: "2026-09-15T11:19:00.000Z", stoppedAt: "2026-09-15T11:25:00.000Z", stopUpperBoundAt: "2026-09-15T11:26:00.000Z" })]);
   });
+
+  // Re-review of 70a0e67: a fresh Visit replaced inherited support only when it ended later.
+  it.each(["11:27:00.000", "11:26:30.000", "11:27:00.001"])(
+    "lets a fresh Visit after the return fix replace inherited support (fresh end %s)", (freshEndedAt) => {
+      expect(returnEpisode("fresh-after-fix", freshEndedAt)).toEqual([expect.objectContaining({
+        startedAt: "2026-09-15T11:21:00.000Z", stoppedAt: "2026-09-15T11:26:00.000Z",
+        stopLowerBoundAt: "2026-09-15T11:21:05.000Z", stopUpperBoundAt: "2026-09-15T11:26:00.000Z" })]);
+    });
 });
