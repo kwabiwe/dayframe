@@ -3,6 +3,7 @@ import { runLocationEngine } from "../src/location/segmenter";
 import { SCHOOL_RUN_HOME_ID, schoolRunArrivalFixture, schoolRunAt as at } from "../src/location/schoolRunArrivalFixture";
 import { PHYSICAL_STOP_LATITUDE, PHYSICAL_STOP_PICKUP, physicalStopFixture } from "../src/location/physicalStopFixture";
 import { GYM_VISIT_PLACE_ID, gymVisitAt, gymVisitDepartureFixture } from "../src/location/gymVisitDepartureFixture";
+import { input as qualityInput, place as qualityPlace, signal } from "../src/location/savedPlaceQualityFixture";
 import type { CommuteSegment, LocationEngineInput, LocationEvidence, StaySegment } from "../src/location/types";
 
 function run(input: LocationEngineInput) {
@@ -217,5 +218,34 @@ describe("completed saved-place Visit ending after the departure evidence", () =
     expect(stay?.stopUpperBoundAt).toBe(keepsPresence ? gymVisitAt("07:14:08.435") : gymVisitAt("07:14:10.031"));
     expect(stay?.stoppedAt === gymVisitAt("07:14:08.435")).toBe(keepsPresence);
     if (!keepsPresence) expect(stay!.stoppedAt! < gymVisitAt("07:14:08")).toBe(true);
+  });
+
+  // Re-review of c18ad1c: a Home Visit spanning accurate Work fixes was reused by a
+  // later single Home fix, so the late departure created a five-minute Home stay.
+  function returnEpisode(variant: "reused" | "fresh-visit" | "observed-dwell") {
+    const work = { ...qualityPlace, id: "10000000-0000-4000-8000-000000000092", name: "Work", latitude: 51.518 };
+    const value = qualityInput([
+      signal("home-visit", "11:00:00", { kind: "visit", endedAt: "2026-09-15T11:27:00.000Z" }),
+      signal("work-1", "11:05:00", { latitude: work.latitude }), signal("work-2", "11:10:00", { latitude: work.latitude }),
+      ...(variant === "fresh-visit" ? [signal("home-visit-2", "11:20:30", { kind: "visit", endedAt: "2026-09-15T11:27:00.000Z" })] : []),
+      ...(variant === "observed-dwell" ? [signal("home-0", "11:19:00")] : []),
+      signal("home-1", "11:21:00"),
+      ...(variant === "observed-dwell" ? [signal("home-2", "11:24:00")] : []),
+      signal("home-exit", "11:26:00", { kind: "geofence_exit", savedPlaceId: qualityPlace.id, latitude: null, longitude: null, horizontalAccuracyMeters: null }),
+      signal("work-3", "11:26:06", { latitude: work.latitude })
+    ]);
+    value.savedPlaces.push(work);
+    return run(value).stays.filter((stay) => stay.placeId === qualityPlace.id && stay.startedAt >= "2026-09-15T11:15:00.000Z");
+  }
+
+  it("does not let a Visit reused from an earlier, contradicted episode extend a later stay (re-review finding)", () => {
+    expect(returnEpisode("reused")).toEqual([]);
+  });
+
+  it("still uses a fresh Visit in the return episode, and observed dwell keeps the ordinary estimate", () => {
+    expect(returnEpisode("fresh-visit")).toEqual([expect.objectContaining({
+      startedAt: "2026-09-15T11:20:30.000Z", stoppedAt: "2026-09-15T11:26:00.000Z" })]);
+    expect(returnEpisode("observed-dwell")).toEqual([expect.objectContaining({
+      startedAt: "2026-09-15T11:19:00.000Z", stoppedAt: "2026-09-15T11:25:00.000Z", stopUpperBoundAt: "2026-09-15T11:26:00.000Z" })]);
   });
 });

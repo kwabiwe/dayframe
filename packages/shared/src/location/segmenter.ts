@@ -45,6 +45,8 @@ type WorkingStay = {
   supportedByVisit: boolean;
   approximateArrival: boolean;
   visitSupportUntilAt: string | null;
+  /** Arrival of the Visit supplying `visitSupportUntilAt`; earlier than `startedAt` when reused from an earlier episode. */
+  visitSupportFromAt: string | null;
   pendingExit?: ClassifiedEvidence;
   inferredContinuity?: boolean;
   inferredBoundary?: boolean;
@@ -99,7 +101,8 @@ function makeWorkingStay(item: ClassifiedEvidence): WorkingStay {
     outside: [],
     supportedByVisit: evidence.kind === "visit",
     approximateArrival: false,
-    visitSupportUntilAt: evidence.kind === "visit" ? evidence.endedAt ?? null : null
+    visitSupportUntilAt: evidence.kind === "visit" ? evidence.endedAt ?? null : null,
+    visitSupportFromAt: evidence.kind === "visit" && evidence.endedAt ? evidence.occurredAt : null
   };
 }
 
@@ -178,8 +181,10 @@ function closeAtTransition(
   // iOS reports a Visit's departure a little after the device leaves. A completed
   // saved-place Visit ending shortly after the departure evidence still says the
   // device was present through the silence, as its arrival-only callback did. A
-  // Visit far outlasting that evidence is contradicted and keeps the midpoint.
+  // Visit far outlasting that evidence is contradicted and keeps the midpoint, as
+  // does a Visit reused from an earlier episode: something already broke it.
   const lateVisitDeparture = active.placeMatchKind === "saved" && active.visitSupportUntilAt != null &&
+    active.visitSupportFromAt != null && Date.parse(active.visitSupportFromAt) >= Date.parse(active.startedAt) &&
     Date.parse(active.visitSupportUntilAt) > Date.parse(nextAt) &&
     Date.parse(active.visitSupportUntilAt) - Date.parse(earliestDepartureAt) <= config.savedPlaceVisitDepartureLagMaximumMs;
   // With presence the stay lasted until the earliest departure evidence; the
@@ -957,6 +962,7 @@ export function runLocationEngine(input: LocationEngineInput): LocationEngineOut
       stay.inferredContinuity = true;
       stay.supportedByVisit = true;
       stay.visitSupportUntilAt = corroboratedSupport.departedAt;
+      stay.visitSupportFromAt = corroboratedSupport.arrivedAt;
       stay.startedAt = corroboratedSupport.arrivedAt;
       stay.startLowerBoundAt = corroboratedSupport.arrivedAt;
       stay.startUpperBoundAt = corroboratedSupport.arrivalUpperBoundAt;
@@ -971,6 +977,7 @@ export function runLocationEngine(input: LocationEngineInput): LocationEngineOut
         stay.evidence.push(visit);
         stay.supportedByVisit = true;
         stay.visitSupportUntilAt = visit.evidence.endedAt;
+        stay.visitSupportFromAt = visit.evidence.occurredAt;
         stay.stoppedAt = visit.evidence.endedAt;
         stay.stopLowerBoundAt = visit.evidence.endedAt;
         stay.stopUpperBoundAt = visit.evidence.endedAt;
@@ -1096,6 +1103,7 @@ export function runLocationEngine(input: LocationEngineInput): LocationEngineOut
         active.inferredContinuity = true;
         active.supportedByVisit = true;
         active.visitSupportUntilAt = corroboratedSupport.departedAt;
+        active.visitSupportFromAt = corroboratedSupport.arrivedAt;
         active.startLowerBoundAt = corroboratedSupport.arrivedAt;
         active.startUpperBoundAt = corroboratedSupport.arrivalUpperBoundAt;
         active.stopLowerBoundAt = corroboratedSupport.departureLowerBoundAt;
@@ -1117,7 +1125,10 @@ export function runLocationEngine(input: LocationEngineInput): LocationEngineOut
         if (
           evidence.endedAt &&
           (!active.visitSupportUntilAt || Date.parse(evidence.endedAt) > Date.parse(active.visitSupportUntilAt))
-        ) active.visitSupportUntilAt = evidence.endedAt;
+        ) {
+          active.visitSupportUntilAt = evidence.endedAt;
+          active.visitSupportFromAt = evidence.occurredAt;
+        }
       }
       if (evidence.kind === "visit" && evidence.endedAt && !canApplyCorroboratedSupport) {
         active.stoppedAt = evidence.endedAt;

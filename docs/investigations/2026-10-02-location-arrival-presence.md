@@ -58,6 +58,8 @@ Staging served this branch at `593b253`, with the matching signed Staging app on
 - On the private 25–29 Sep corpus, two saved-place stays change, both the same pattern. On 25 Sep the completed Visit ended 9 seconds after the exit, and the stay now ends at the exit, 3 minutes 11 seconds later than the midpoint. On 27 Sep it ended 3 minutes 11 seconds after the first outside reading, and the stay now ends at that reading, 64 seconds later. As-received timeliness is unchanged.
 - The stay's ID can still change when the completed callback sorts ahead of the arrival-only one (they share an occurrence time and tie-break on client ID). The re-issued Review then has the same, correct times. This is the existing identity follow-up.
 
+**Re-review (Codex, at `c18ad1c`).** The late-Visit rule could use Visit support reused from an earlier, contradicted episode. A Home Visit spanning accurate Work readings was attached to a later single Home fix, so the exit created a five-minute Home stay that `main`, the physical-stops PR and `593b253` all omit; with Home logging enabled it could be logged automatically. The rule now applies only to a Visit that arrived within the current stay. The regression and an observed-dwell control (which `c18ad1c` also stretched to the exit) fail on `c18ad1c`; a fresh Visit in the return episode still counts, on both. The corpus output is identical to `c18ad1c`.
+
 Still to drive on staging: a 30–60 second kerbside drop-off, a 20+ minute stop near a saved place, a school run then staying Home, and an ordinary drive with traffic.
 
 ## Not established
