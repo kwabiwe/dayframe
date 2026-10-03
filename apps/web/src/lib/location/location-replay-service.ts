@@ -320,23 +320,31 @@ async function excludeProtectedReplacements(
       }
     }
   }
-  // A decided or manual row can keep an interior stop's ID while late evidence
-  // moves the engine's boundaries. Its persisted boundaries stay canonical.
-  const interiorStopIds = [...new Set(segments.flatMap((segment) =>
-    segment.kind === "commute" ? (segment.stops ?? []).map((stop) => stop.staySegmentId) : []))].sort();
-  const decidedStops = await decidedInteriorStops(client, session, options, interiorStopIds);
+  // A decided or manual row can keep a stay's ID while late evidence moves the
+  // engine's boundaries. Its persisted boundaries stay canonical for every
+  // commute that starts or ends there, and for a trip's interior stops.
+  const commutes = [...segments, ...fallbackLegs].filter((segment): segment is CommuteSegment => segment.kind === "commute");
+  const decidedStays = await decidedStayBounds(client, session, options, [...new Set(commutes.flatMap((commute) => [
+    commute.fromStaySegmentId, commute.toStaySegmentId, ...(commute.stops ?? []).map((stop) => stop.staySegmentId)]))].sort());
+  const movesEndpoint = (commute: CommuteSegment) =>
+    boundariesMoved(commute.fromStaySegmentId, "stop", decidedStays, segments) ||
+    boundariesMoved(commute.toStaySegmentId, "start", decidedStays, segments);
   // A trip also depends on its interior stops: it cannot span time whose stop
-  // replacement was held by, or already belongs to, decided history.
+  // replacement was held by, or already belongs to, decided history. Nor can it
+  // keep an endpoint that decided history has moved; its legs are re-derived.
   const replaceable = (segment: LocationSegment) => !held.has(segment.clientSegmentId) && (segment.kind !== "commute" ||
     (!held.has(segment.fromStaySegmentId) && !held.has(segment.toStaySegmentId) &&
-      !(segment.stops ?? []).some((stop) => held.has(stop.staySegmentId) || decidedStops.has(stop.staySegmentId))));
+      !(segment.stops ?? []).some((stop) => held.has(stop.staySegmentId) || decidedStays.has(stop.staySegmentId)) &&
+      !(segment.legs?.length && movesEndpoint(segment))));
   return {
     count: held.size,
     segments: segments.flatMap((segment) => replaceable(segment)
-      ? [segment]
+      ? segment.kind === "commute" && !segment.legs?.length && movesEndpoint(segment)
+        ? rebuildLegWithinDecidedStops(segment, decidedStays, segments, acceptedEvidence, options)
+        : [segment]
       : segment.kind === "commute"
         ? (segment.legs ?? []).filter(replaceable).flatMap((leg) =>
-            rebuildLegWithinDecidedStops(leg, decidedStops, segments, acceptedEvidence, options))
+            rebuildLegWithinDecidedStops(leg, decidedStays, segments, acceptedEvidence, options))
         : [])
   };
 }
@@ -348,8 +356,8 @@ type DecidedStopBounds = {
   stopLowerBoundAt: Date | string | null; stopUpperBoundAt: Date | string | null;
 };
 
-/** Persisted boundaries of terminal/manual stays that keep an interior stop's client ID. */
-async function decidedInteriorStops(
+/** Persisted boundaries of terminal/manual stays that keep a commute endpoint's or interior stop's client ID. */
+async function decidedStayBounds(
   client: pg.PoolClient, session: RequestSession,
   options: Pick<LocationReplayOptions, "deviceId">,
   clientSegmentIds: string[]
@@ -358,7 +366,7 @@ async function decidedInteriorStops(
   if (!clientSegmentIds.length) return decided;
   // Same protection predicate as segment persistence.
   const result = await client.query<DecidedStopBounds>(
-    `/* decided interior stops */ select s.client_segment_id as "clientSegmentId", s.started_at as "startedAt", s.stopped_at as "stoppedAt",
+    `/* decided stay bounds */ select s.client_segment_id as "clientSegmentId", s.started_at as "startedAt", s.stopped_at as "stoppedAt",
             s.start_lower_bound_at as "startLowerBoundAt", s.start_upper_bound_at as "startUpperBoundAt",
             s.stop_lower_bound_at as "stopLowerBoundAt", s.stop_upper_bound_at as "stopUpperBoundAt"
      from stay_segments s
@@ -373,9 +381,36 @@ async function decidedInteriorStops(
   return decided;
 }
 
+/** The engine's stay with a decided row's persisted boundaries, which stay canonical. */
+function stayWithDecidedBounds(id: string, decided: ReadonlyMap<string, DecidedStopBounds>, segments: LocationSegment[]) {
+  const engine = segments.find((segment): segment is StaySegment => segment.kind === "stay" && segment.clientSegmentId === id);
+  const row = decided.get(id);
+  if (!engine || !row) return engine ?? null;
+  const startedAt = iso(row.startedAt)!;
+  const stoppedAt = iso(row.stoppedAt);
+  return { ...engine, startedAt, stoppedAt,
+    startLowerBoundAt: iso(row.startLowerBoundAt) ?? startedAt, startUpperBoundAt: iso(row.startUpperBoundAt) ?? startedAt,
+    stopLowerBoundAt: iso(row.stopLowerBoundAt) ?? stoppedAt, stopUpperBoundAt: iso(row.stopUpperBoundAt) ?? stoppedAt };
+}
+
+/** Whether a decided row has moved the side of a stay that a commute attaches to. */
+function boundariesMoved(id: string, side: "start" | "stop", decided: ReadonlyMap<string, DecidedStopBounds>, segments: LocationSegment[]) {
+  if (!decided.has(id)) return false;
+  const engine = segments.find((segment): segment is StaySegment => segment.kind === "stay" && segment.clientSegmentId === id);
+  const canonical = stayWithDecidedBounds(id, decided, segments);
+  if (!engine || !canonical) return false;
+  const same = (a: string | null | undefined, b: string | null | undefined) =>
+    (a == null ? null : Date.parse(a)) === (b == null ? null : Date.parse(b));
+  return side === "start"
+    ? !same(engine.startedAt, canonical.startedAt) || !same(engine.startLowerBoundAt, canonical.startLowerBoundAt) ||
+      !same(engine.startUpperBoundAt, canonical.startUpperBoundAt)
+    : !same(engine.stoppedAt, canonical.stoppedAt) || !same(engine.stopLowerBoundAt, canonical.stopLowerBoundAt) ||
+      !same(engine.stopUpperBoundAt, canonical.stopUpperBoundAt);
+}
+
 /**
- * Re-derives a fallback leg between the persisted boundaries of a decided
- * endpoint stop and its other endpoint, so route evidence, metrics and
+ * Re-derives a commute or fallback leg between the persisted boundaries of a
+ * decided endpoint stay and its other endpoint, so route evidence, metrics and
  * qualification (including short-journey proof) reflect only the time it now
  * covers. A leg that no longer qualifies is omitted.
  */
@@ -387,18 +422,8 @@ function rebuildLegWithinDecidedStops(
   options: Pick<LocationReplayOptions, "algorithmVersion" | "processingAt">
 ): CommuteSegment[] {
   if (!decided.has(leg.fromStaySegmentId) && !decided.has(leg.toStaySegmentId)) return [leg];
-  const stay = (id: string) => {
-    const engine = segments.find((segment): segment is StaySegment => segment.kind === "stay" && segment.clientSegmentId === id);
-    const row = decided.get(id);
-    if (!engine || !row) return engine ?? null;
-    const startedAt = iso(row.startedAt)!;
-    const stoppedAt = iso(row.stoppedAt);
-    return { ...engine, startedAt, stoppedAt,
-      startLowerBoundAt: iso(row.startLowerBoundAt) ?? startedAt, startUpperBoundAt: iso(row.startUpperBoundAt) ?? startedAt,
-      stopLowerBoundAt: iso(row.stopLowerBoundAt) ?? stoppedAt, stopUpperBoundAt: iso(row.stopUpperBoundAt) ?? stoppedAt };
-  };
-  const from = stay(leg.fromStaySegmentId);
-  const to = stay(leg.toStaySegmentId);
+  const from = stayWithDecidedBounds(leg.fromStaySegmentId, decided, segments);
+  const to = stayWithDecidedBounds(leg.toStaySegmentId, decided, segments);
   if (!from?.stoppedAt || !to) return [];
   return deriveCommutes([from, to], acceptedEvidence,
     { ...LOCATION_ENGINE_V2_CONFIG, algorithmVersion: options.algorithmVersion }, options.processingAt)
