@@ -206,6 +206,24 @@ describe("physical stops", () => {
     expect(run(visitElsewhereInput("fix")).physical).toEqual([]);
   });
 
+  // 4 Oct staging: the stop's own completed Visit averaged 220 m away (64.5 m broad)
+  // and was treated as a Visit elsewhere, erasing a ~5-minute stop.
+  it("never treats a stop's own Visit as elsewhere because its completed callback averaged away", () => {
+    const withDisplacedCompletion = (arrivalAt: "stop" | "away") => {
+      // Slow fixes spread like the field stop's, so the stop stands without Visit support.
+      const input = physicalStopFixture(shape({ slowAt: [860_000, 920_000, 1_000_000, 1_100_000] }));
+      const completion = input.evidence.find((item) => item.clientEvidenceId === "stop-visit")!;
+      const away = completion.latitude! + 260 / 111_195;
+      input.evidence.push({ ...completion, clientEvidenceId: "stop-visit-arrival", endedAt: null, horizontalAccuracyMeters: 19,
+        latitude: arrivalAt === "stop" ? completion.latitude : away, metadata: { visitDepartureOpen: true } });
+      completion.latitude = away;
+      return input;
+    };
+    expect(run(withDisplacedCompletion("stop")).physical).toHaveLength(1);
+    // A Visit whose callbacks are all elsewhere still splits the stop.
+    expect(run(withDisplacedCompletion("away")).physical).toEqual([]);
+  });
+
   it("exposes only accurate, non-simulated position fixes to detection", () => {
     const input = physicalStopFixture(PICKUP);
     input.evidence.forEach((e) => { if (e.clientEvidenceId.startsWith("slow-")) e.isSimulated = true; });
