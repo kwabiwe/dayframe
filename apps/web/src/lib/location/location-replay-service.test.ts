@@ -137,7 +137,8 @@ describe("Location replay timing observation", () => {
       expect(arm).toContain("le.client_evidence_id = any($5::text[])");
       expect(arm).toContain("s.continuity_status = 'manual' or (s.status <> 'superseded' and s.created_from_event_id is not null");
       expect(arm).toContain("ri.workspace_id = $1 and ri.user_id = $2");
-      expect(arm).toContain("ri.location_segment_id = s.id and ri.status = 'open'");
+      // An open Review or replay's own retirement leaves the row to replay; any other Review is a decision.
+      expect(arm).toContain("ri.location_segment_id = s.id and (ri.status = 'open' or ri.status = 'ignored' and ri.ignored_scope = 'superseded')");
       expect(arm).toContain("order by s.id, le.client_evidence_id for update of s");
     }
     const obsolete = query.mock.calls.find(([sql]) => sql.includes('ri.id as "reviewId"'))![0];

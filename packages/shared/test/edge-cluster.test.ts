@@ -457,6 +457,17 @@ describe("identity proof at a saved place's edge (review round 2)", () => {
     expect(edgeStay([...parkedHalfHour, far, near])).toEqual([withFar]);
   });
 
+  // Review round 6.
+  it("bridges an edge cluster's silence only by the unknown-cluster rule, not the saved place's thirty minutes", () => {
+    const home = { ...school, name: "Home", loggingEnabled: false };
+    const evidence = [fix("a0", 0, 115), fix("a1", 300, 115), fix("a2", 900, 115), fix("b0", 2_100, -115), fix("b1", 2_400, -115),
+      fix("b2", 3_000, -115), fix("l0", 3_100, -600, 5, 10), fix("l1", 3_110, -700, 5, 10)];
+    const spansOf = (value: LocationEngineInput) => staysOf(value).map(({ startedAt, stoppedAt }) => [startedAt, stoppedAt]);
+    const without = spansOf(compact(evidence, { savedPlaces: [] }));
+    expect(without[0]).toEqual([t(0), t(900)]);
+    expect(spansOf(compact(evidence, { savedPlaces: [home] }))).toEqual(without);
+  });
+
   it("does not let a simulated fix inside the circle end edge continuity", () => {
     const evidence = [fix("p0", 0, 126), fix("p1", 300, 126), fix("p2", 600, 126), fix("p3", 1_800, 126), fix("p4", 2_100, 126),
       fix("p5", 2_700, 126), fix("l0", 3_100, 600, 5, 10), fix("l1", 3_110, 700, 5, 10)];

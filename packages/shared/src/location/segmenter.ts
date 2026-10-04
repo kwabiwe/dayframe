@@ -1378,7 +1378,10 @@ function runLocationEnginePass(input: LocationEngineInput): { output: LocationEn
         edgeOnly(active, input) &&
         nearEdgeCluster(active, item, input, input.config.sparseUnknownContinuityMaximumDistanceMeters);
       const previousPoint = active.lastStrongInside;
+      // Strong matches extend 25 m beyond the circle, so an edge cluster's silence
+      // is bridged only by its own (unknown-cluster) rule above.
       const boundedSavedGap = active.placeMatchKind === "saved" && !active.pendingExit && active.outside.length === 0 &&
+        !edgeOnly(active, input) &&
         previousPoint != null && previousPoint.evidence.clientEvidenceId !== evidence.clientEvidenceId &&
         strongSavedPoint(item, active.placeId, input) &&
         atMs - Date.parse(previousPoint.evidence.occurredAt) <= input.config.savedPlaceQuietGapMaxMs;

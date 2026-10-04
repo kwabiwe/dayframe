@@ -1106,6 +1106,51 @@ async function validateSupersededReviewReactivation() {
     assert.equal(decided.reviewStatus, "ignored", "A user's ignore was reopened.");
     assert.notEqual(decided.scope, "superseded", "A user's ignore was marked as a replay retirement.");
     assert.equal(decided.eventStatus, "ignored", "A user's ignore lost its event status.");
+
+    // A restored segment can come back with a different boundary or eligibility; neither its retired Review nor
+    // its retired boundary may act as a user decision. An earlier departure fix moves the stay's end (the midpoint
+    // to its departure) without changing its evidence, so it is the same segment.
+    const reviewOf = async (clientSegmentId: string) => (await pool.query<{ stoppedAt: Date; reviewStatus: string }>(
+      `select s.stopped_at as "stoppedAt", ri.status as "reviewStatus" from stay_segments s
+       join review_items ri on ri.location_segment_id = s.id
+       where s.workspace_id = $1 and s.user_id = $2 and s.client_segment_id = $3`,
+      [WORKSPACE_ID, USER_ID, clientSegmentId])).rows[0];
+    await clearDerivedLocationState();
+    await ingest("bounds-parked", [fix("q0", 0, 126), fix("q1", 600, 126), fix("q2", 1_200, 126), fix("q3", 1_500, 126),
+      fix("m0", 2_100, 600, 10), fix("m1", 2_110, 700, 10), fix("m2", 2_200, 2_000, 10),
+      fix("w0", 2_300, 3_000), fix("w1", 2_900, 3_000), fix("w2", 3_500, 3_000)]);
+    const [boundsBefore] = await currentStays();
+    assert.equal((await reviewOf(boundsBefore.clientSegmentId)).stoppedAt.getTime(), startMs + 1_800_000, "Unexpected first boundary.");
+    await ingest("bounds-enter", [callback("bounds-enter", 1_400, "geofence_enter")]);
+    await ingest("bounds-exit", [callback("bounds-exit", 1_450, "geofence_exit"), fix("o0", 1_560, 900, 10)]);
+    const [restored] = await currentStays();
+    assert.equal(restored.clientSegmentId, boundsBefore.clientSegmentId, "The earlier-departing stay did not keep its segment.");
+    const restoredReview = await reviewOf(restored.clientSegmentId);
+    assert.equal(restoredReview.stoppedAt.getTime(), startMs + 1_530_000, "The restored stay kept its retired boundary.");
+    assert.equal(restoredReview.reviewStatus, "open", "The restored, still eligible stay was not offered again.");
+    const commute = await pool.query<{ startedAt: Date }>(
+      `select started_at as "startedAt" from commute_segments
+       where workspace_id = $1 and user_id = $2 and status <> 'superseded' order by started_at limit 1`, [WORKSPACE_ID, USER_ID]);
+    assert.equal(commute.rows[0]?.startedAt.getTime(), startMs + 1_530_000,
+      "The commute after the restored stay did not start where that stay now ends.");
+
+    await clearDerivedLocationState();
+    await ingest("short-parked", [fix("r0", 0, 126), fix("r1", 300, 126), fix("r2", 600, 126), fix("r3", 900, 126),
+      fix("n0", 1_560, 600, 10), fix("n1", 1_570, 700, 10)]);
+    const [shortBefore] = await currentStays();
+    assert.equal((await reviewOf(shortBefore.clientSegmentId)).reviewStatus, "open", "The twenty-minute stop was not offered.");
+    await ingest("short-enter", [callback("short-enter", 400, "geofence_enter")]);
+    // Back as the same segment but under twenty minutes, so not offered: its Review stays retired by replay.
+    await ingest("short-exit", [callback("short-exit", 450, "geofence_exit"), fix("o1", 960, 900, 10)]);
+    const [short] = await currentStays();
+    assert.equal(short.clientSegmentId, shortBefore.clientSegmentId, "The shortened stay did not keep its segment.");
+    assert.deepEqual(await stayState(short.clientSegmentId),
+      { status: "finalised", reviewStatus: "ignored", scope: "superseded", eventStatus: "ignored" },
+      "A restored stay under the Review threshold changed its retired Review.");
+    // A later genuine entry must still make it the saved place: the retired Review is not a decision.
+    await ingest("short-enter-again", [callback("short-enter-again", 850, "geofence_enter")]);
+    assert((await currentStays()).some((stay) => stay.placeId === placeId),
+      "A restored stay with a retired Review blocked its saved-place replacement.");
   } finally {
     await clearDerivedLocationState();
     await pool.query("delete from places where id = $1 and workspace_id = $2", [placeId, WORKSPACE_ID]);

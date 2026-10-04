@@ -9,6 +9,15 @@ import type { RequestSession } from "../session";
 export const SUPERSEDED_REVIEW_SCOPE = "superseded";
 
 /**
+ * SQL condition, for a `review_items` alias, under which a Review leaves its
+ * segment row to replay: still open, or retired by replay itself. A segment
+ * whose Review is neither carries a user decision and is protected.
+ */
+export function reviewLeavesSegmentToReplay(alias: string) {
+  return `(${alias}.status = 'open' or ${alias}.status = 'ignored' and ${alias}.ignored_scope = '${SUPERSEDED_REVIEW_SCOPE}')`;
+}
+
+/**
  * Reopens Reviews that replay retired as superseded once their segment is back
  * in the output and offered again (for example when later evidence revokes the
  * iOS proof that briefly changed a stay's identity). User decisions are never
