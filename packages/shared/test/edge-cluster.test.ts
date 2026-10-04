@@ -77,15 +77,20 @@ describe("a stationary cluster at a saved place's edge (4 Oct evening stop)", ()
       clientEvidenceId: "visit-inside", kind: "visit", occurredAt: at("19:13:30"), endedAt: null,
       latitude: north(SCHOOL_METRES - 60), horizontalAccuracyMeters: 10, speedMetersPerSecond: null, metadata: { visitDepartureOpen: true }
     });
-    expect(parked(run(input).stays)).toEqual([expect.objectContaining({
-      startedAt: at("19:13:16"), stoppedAt: expect.stringMatching(/T19:36:41\./), placeMatchKind: "saved", placeId: SCHOOL_EDGE_SCHOOL_ID
-    })]);
+    const stays = parked(run(input).stays);
+    expect(stays).toEqual([expect.objectContaining({ startedAt: at("19:13:16"), placeMatchKind: "saved", placeId: SCHOOL_EDGE_SCHOOL_ID })]);
+    // The Visit's coordinate joins the cluster, so the drive away leaves it a few seconds later.
+    expect(Math.abs(Date.parse(stays[0].stoppedAt!) - Date.parse(at("19:36:41")))).toBeLessThanOrEqual(10_000);
   });
 
   it("does not let the drive away (moving fixes and a geofence entry) decide the identity", () => {
-    // The fixture's drive home crosses the circle at 86–91 m with a School geofence entry.
-    const [stay] = parked(run(schoolEdgeStopFixture("20:30:00")).stays);
-    expect(stay.evidenceIds).toEqual(expect.arrayContaining(["away-0", "school-enter-1936"]));
+    // The fixture's drive home crosses the circle at 86–91 m with a School geofence entry. Moving fixes in the
+    // cluster join it without making it ordinary, and its own place's entry is not cluster evidence.
+    const input = schoolEdgeStopFixture("20:30:00");
+    expect(input.evidence.some((item) => item.clientEvidenceId === "school-enter-1936")).toBe(true);
+    const [stay] = parked(run(input).stays);
+    expect(stay.evidenceIds).toContain("away-0");
+    expect(stay.evidenceIds).not.toContain("school-enter-1936");
     expect(stay.placeMatchKind).toBe("unknown");
   });
 
@@ -322,10 +327,75 @@ describe("identity proof at a saved place's edge (review round 2)", () => {
   });
 
   it("keeps ordered stop bounds when an exit is followed by readings in the band", () => {
-    const [stay] = staysOf(compact([fix("p0", 0, 126), fix("p1", 300, 126), fix("p2", 600, 126), cb("exit", 650, "geofence_exit"),
-      fix("p3", 700, 126), fix("p4", 750, 126)], { processingAt: t(2_000) }));
-    expect(stay.stopLowerBoundAt! <= stay.stopUpperBoundAt!).toBe(true);
-    expect(stay.stoppedAt! <= stay.stopUpperBoundAt!).toBe(true);
+    const evidence = [fix("p0", 0, 126), fix("p1", 300, 126), fix("p2", 600, 126), cb("exit", 650, "geofence_exit"),
+      fix("p3", 700, 126), fix("p4", 750, 126)];
+    // The exit is the edge cluster's own place's callback, so nothing has ended the stay yet (review round 4).
+    expect(staysOf(compact(evidence, { processingAt: t(2_000) }))).toEqual([expect.objectContaining({
+      status: "open", stoppedAt: null, stopLowerBoundAt: null, stopUpperBoundAt: null
+    })]);
+    const [stay] = staysOf(compact([...evidence, fix("l0", 800, 600, 5, 10), fix("l1", 810, 700, 5, 10)], { processingAt: t(2_000) }));
+    expect(stay.status).toBe("finalised");
+    expect([stay.stopLowerBoundAt, stay.stoppedAt, stay.stopUpperBoundAt].every((value) => value != null)).toBe(true);
+    expect(stay.stopLowerBoundAt! <= stay.stoppedAt! && stay.stoppedAt! <= stay.stopUpperBoundAt!).toBe(true);
+    expect(stay.stopLowerBoundAt! >= t(750) && stay.stopUpperBoundAt! <= t(800)).toBe(true);
+  });
+
+  // Review round 4.
+  const quiet = [fix("q0", 0, 126), fix("q1", 300, 126), fix("q2", 600, 126), fix("q3", 2_400, 126), fix("q4", 2_700, 126),
+    fix("q5", 3_000, 126), fix("l0", 3_100, 600, 5, 10), fix("l1", 3_110, 700, 5, 10)];
+  it.each([
+    ["exit", [cb("exit", 1_500, "geofence_exit")]],
+    ["registration snapshot", [cb("snapshot-exit", 1_500, "geofence_exit"), cb("snapshot-enter", 1_501, "geofence_enter")]]
+  ])("does not split a quiet edge cluster at its own place's %s during silence", (_label, extra) => {
+    const plain = staysOf(compact(quiet));
+    expect(plain).toEqual([expect.objectContaining({ startedAt: t(0), placeMatchKind: "unknown" })]);
+    expect(staysOf(compact([...quiet, ...extra])).map(({ clientSegmentId, startedAt, stoppedAt }) => [clientSegmentId, startedAt, stoppedAt]))
+      .toEqual(plain.map(({ clientSegmentId, startedAt, stoppedAt }) => [clientSegmentId, startedAt, stoppedAt]));
+  });
+
+  it.each([true, false])("keeps a stay whose own Visit completion matches a neighbouring saved place (completion sorts first: %s)", (completionFirst) => {
+    const coffee = { ...school, id: "10000000-0000-4000-8000-000000000072", name: "Coffee", latitude: north(320), radiusMeters: 40 };
+    const completion = visit(completionFirst ? "a-complete" : "z-complete", 600, 320, 20, 1_800);
+    const evidence = [fix("p0", 0, 126), fix("p1", 300, 126), fix("p2", 550, 126), visit(completionFirst ? "z-arrival" : "a-arrival", 600, 126),
+      completion, fix("p3", 900, 126), fix("p4", 1_200, 126), fix("p5", 1_800, 126), fix("l0", 1_900, 600, 5, 10), fix("l1", 1_910, 700, 5, 10)];
+    const summary = (value: LocationEngineInput) => staysOf(value).map(({ clientSegmentId, startedAt, stoppedAt }) => [clientSegmentId, startedAt, stoppedAt]);
+    const without = summary(compact(evidence.filter((item) => item !== completion), { savedPlaces: [school, coffee] }));
+    expect(without).toEqual([[expect.any(String), t(0), expect.any(String)]]);
+    expect(summary(compact(evidence, { savedPlaces: [school, coffee] }))).toEqual(without);
+  });
+
+  it("keeps two stops on opposite sides of the circle separate when the car drives through it", () => {
+    const evidence = [fix("a0", 0, 126), fix("a1", 600, 126), fix("a2", 1_200, 126),
+      fix("cross0", 1_260, 60, 5, 3), fix("cross1", 1_280, 0, 5, 3), fix("cross2", 1_300, -60, 5, 3), fix("cross3", 1_320, -115, 5, 3),
+      fix("b0", 1_400, -126), fix("b1", 1_700, -126), fix("b2", 2_000, -126), fix("b3", 2_600, -126),
+      fix("l0", 2_700, -400, 5, 10), fix("l1", 2_710, -600, 5, 10)];
+    const times = (stays: StaySegment[]) => stays.map(({ startedAt, stoppedAt }) => [startedAt, stoppedAt]);
+    const without = staysOf(compact(evidence, { savedPlaces: [] }));
+    expect(without).toHaveLength(2);
+    const saved = staysOf(compact(evidence));
+    expect(times(saved)).toEqual(times(without));
+    expect(saved.every((stay) => stay.placeMatchKind === "unknown" && automatic(stay) === "untrusted_place")).toBe(true);
+  });
+
+  it("gives a stay a new ID when a late iOS entry proves it was at the saved place, so replay retires its earlier Review", () => {
+    // Home is not logged, so an open "unknown place" proposal for the same segment would otherwise stay in Review.
+    const home = { ...school, name: "Home", loggingEnabled: false };
+    const evidence = [fix("p0", 0, 126), fix("p1", 600, 126), fix("p2", 1_200, 126), fix("l0", 1_300, 600, 5, 10), fix("l1", 1_310, 700, 5, 10)];
+    const [before] = staysOf(compact(evidence, { savedPlaces: [home], processingAt: t(2_000) }));
+    const lateEnter = { ...cb("late-enter", 1_100, "geofence_enter"), receivedAt: t(4_000) };
+    const [after] = staysOf(compact([...evidence, lateEnter], { savedPlaces: [home] }));
+    expect(before).toMatchObject({ placeMatchKind: "unknown", status: "finalised" });
+    expect(after).toMatchObject({ placeMatchKind: "saved", placeId: home.id, startedAt: before.startedAt, stoppedAt: before.stoppedAt });
+    expect(after.clientSegmentId).not.toBe(before.clientSegmentId);
+  });
+
+  it("does not let a simulated fix inside the circle end edge continuity", () => {
+    const evidence = [fix("p0", 0, 126), fix("p1", 300, 126), fix("p2", 600, 126), fix("p3", 1_800, 126), fix("p4", 2_100, 126),
+      fix("p5", 2_700, 126), fix("l0", 3_100, 600, 5, 10), fix("l1", 3_110, 700, 5, 10)];
+    const times = (stays: StaySegment[]) => stays.map(({ startedAt, stoppedAt, placeMatchKind }) => [startedAt, stoppedAt, placeMatchKind]);
+    const plain = staysOf(compact(evidence));
+    expect(plain).toHaveLength(1);
+    expect(times(staysOf(compact([...evidence, fix("simulated-inside", 660, 0, 5, 0, { isSimulated: true })])))).toEqual(times(plain));
   });
 
   it("control: bare geofence callbacks cannot make a stay", () => {
