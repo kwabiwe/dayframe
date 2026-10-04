@@ -24,7 +24,7 @@ export type PhysicalStop = {
 // Native mirrors carry whole-second timestamps, so a copy can land in the next second.
 const MIRROR_WINDOW_MS = 5_000;
 
-type PlacedVisit = { point: Coordinate; accuracy: number; from: number; to: number };
+type PlacedVisit = { point: Coordinate; accuracy: number; from: number; to: number; episode: string };
 
 type Fix = { item: ClassifiedEvidence; at: number; point: Coordinate; speed: number | null; accuracy: number; accurate: boolean };
 
@@ -108,11 +108,17 @@ export function detectPhysicalStops(accepted: ClassifiedEvidence[], config: Loca
           point: { latitude: evidence.latitude, longitude: evidence.longitude },
           accuracy: evidence.horizontalAccuracyMeters,
           from: Date.parse(evidence.occurredAt),
-          to: Date.parse(evidence.endedAt ?? evidence.occurredAt)
+          to: Date.parse(evidence.endedAt ?? evidence.occurredAt),
+          episode: `${evidence.deviceId}:${evidence.occurredAt}`
         }]
       : []);
-  const elsewhere = (visit: PlacedVisit, centre: Coordinate) =>
-    distanceMeters(centre, visit.point) - visit.accuracy > config.movementDisplacementThresholdMeters;
+  // iOS reports one Visit as an arrival callback and a completed callback with the
+  // same arrival time. The completion's coordinate averages the whole Visit, so
+  // the Visit is elsewhere only when every callback for it is.
+  const episodes = new Map<string, PlacedVisit[]>();
+  for (const visit of placedVisits) episodes.set(visit.episode, [...(episodes.get(visit.episode) ?? []), visit]);
+  const elsewhere = (visit: PlacedVisit, centre: Coordinate) => episodes.get(visit.episode)!.every((callback) =>
+    distanceMeters(centre, callback.point) - callback.accuracy > config.movementDisplacementThresholdMeters);
   const order = new Map(accepted.map((item, index) => [item, index]));
   const stops: PhysicalStop[] = [];
 
