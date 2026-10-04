@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { LOCATION_ENGINE_V2_CONFIG as config } from "../src/location/config";
+import { physicalStopAt, physicalStopFixture, PHYSICAL_STOP_PICKUP } from "../src/location/physicalStopFixture";
 import { runLocationEngine } from "../src/location/segmenter";
 import type { CommuteSegment, LocationEngineInput, LocationEvidence } from "../src/location/types";
 import { simulate, type Scenario, type SimPlace } from "./fixtures/captureSimulator";
@@ -57,7 +58,7 @@ function driver(evidence: LocationEvidence[], prefix: string, startMinutes: numb
 }
 
 /** Home, a 2 km drive out and straight back, and a return arrival Visit dated while still 400 m away. */
-function roundTrip(options: { returnVisit?: boolean } = {}): LocationEngineInput {
+function roundTrip(options: { returnVisit?: boolean; extra?: LocationEvidence[] } = {}): LocationEngineInput {
   const evidence: LocationEvidence[] = [e("home-0", 0, 0, { speedMetersPerSecond: 0 }), e("home-1", 10, 3, { speedMetersPerSecond: 0 }),
     e("home-2", 20, 0, { speedMetersPerSecond: 0 }), geofence("home-exit", 30.2, "geofence_exit")];
   let minutes = 30.3;
@@ -68,7 +69,7 @@ function roundTrip(options: { returnVisit?: boolean } = {}): LocationEngineInput
   if (options.returnVisit !== false) evidence.push({ ...homeVisit("return-visit", backAt - 0.6), receivedAt: at(backAt + 5) });
   evidence.push(e("arrive-0", backAt, 60, { speedMetersPerSecond: 6 }), geofence("home-enter", backAt + 0.05, "geofence_enter"),
     e("home-3", backAt + 1, 2, { speedMetersPerSecond: 0 }), e("home-4", backAt + 15, 0, { speedMetersPerSecond: 0 }),
-    e("home-5", backAt + 40, 3, { speedMetersPerSecond: 0 }));
+    e("home-5", backAt + 40, 3, { speedMetersPerSecond: 0 }), ...(options.extra ?? []));
   return input(evidence, backAt + 120);
 }
 
@@ -90,6 +91,24 @@ function shortReturn(extra: (stopAt: number) => LocationEvidence[] = () => []) {
   evidence.push(geofence("home-enter", drive.clock + 0.02, "geofence_enter"), e("home-3", drive.clock + 1, 0, { speedMetersPerSecond: 0 }),
     e("home-4", drive.clock + 11, 0, { speedMetersPerSecond: 0 }));
   return input(evidence);
+}
+
+/**
+ * A 2 km round trip whose return is seen only by Home's geofence entry (its
+ * arrival Visit is dated before the last fixes away), with the first accurate
+ * still fix at Home `stillAfterMinutes` later.
+ */
+function lateReturn(stillAfterMinutes: number) {
+  const evidence: LocationEvidence[] = [e("home-0", 0, 0, { speedMetersPerSecond: 0 }), e("home-1", 10, 0, { speedMetersPerSecond: 0 }),
+    e("home-2", 20, 0, { speedMetersPerSecond: 0 }), geofence("home-exit", 30.2, "geofence_exit")];
+  let minutes = 30.3;
+  for (let metres = 200; metres <= 2_000; metres += 75, minutes += 75 / 11 / 60) evidence.push(e(`out-${metres}`, minutes, metres));
+  for (let metres = 1_925; metres >= 200; metres -= 75, minutes += 75 / 11 / 60) evidence.push(e(`back-${metres}`, minutes, metres));
+  const backAt = minutes;
+  evidence.push({ ...homeVisit("early-visit", backAt - 2), receivedAt: at(backAt + 5) }, geofence("home-enter", backAt + 0.3, "geofence_enter"),
+    e("home-3", backAt + stillAfterMinutes, 0, { speedMetersPerSecond: 0 }), e("home-4", backAt + stillAfterMinutes + 10, 0, { speedMetersPerSecond: 0 }),
+    e("home-5", backAt + stillAfterMinutes + 20, 0, { speedMetersPerSecond: 0 }));
+  return { value: input(evidence, backAt + stillAfterMinutes + 120), backAt };
 }
 
 // Simulated capture: two short stops on one outing, each with a single still fix and a Visit.
@@ -114,6 +133,27 @@ describe("the start of a same-place round trip", () => {
     expect(times(commutes(roundTrip()))).toEqual(times(commutes(roundTrip({ returnVisit: false }))));
   });
 
+  it("ignores Home's exit re-reported while the car is 2 km away", () => {
+    // On 4 Oct the app re-registered its regions at an interior stop and iOS re-reported Home's exit, 900 m away.
+    const reReported = [geofence("re-reported-exit", 33.2, "geofence_exit"),
+      e("provider", 33.2, 0, { kind: "provider_status", latitude: null, longitude: null, horizontalAccuracyMeters: null, speedMetersPerSecond: null })];
+    const output = runLocationEngine(roundTrip({ returnVisit: false, extra: reReported }));
+    const [home] = output.segmentUpserts;
+    expect(output.segmentUpserts.filter((segment) => segment.kind === "commute")).toEqual([expect.objectContaining({ startedAt: home.stoppedAt })]);
+  });
+
+  it("still starts a drive at Home's exit after a stray fix just outside Home hours earlier", () => {
+    // Control: a fix 140 m out while at Home is not an excursion, so the exit that follows hours later still marks departure.
+    const evidence = [e("home-0", 0, 0, { speedMetersPerSecond: 0 }), e("home-1", 10, 0, { speedMetersPerSecond: 0 }),
+      e("home-2", 20, 0, { speedMetersPerSecond: 0 }), e("stray", 25, 140, { speedMetersPerSecond: 0 }), geofence("exit", 200, "geofence_exit")];
+    let minutes = 200.1;
+    for (let metres = 200; metres <= 2_000; metres += 75, minutes += 75 / 11 / 60) evidence.push(e(`out-${metres}`, minutes, metres));
+    for (let metres = 1_925; metres >= 200; metres -= 75, minutes += 75 / 11 / 60) evidence.push(e(`back-${metres}`, minutes, metres));
+    evidence.push(geofence("enter", minutes + 0.1, "geofence_enter"), e("home-3", minutes + 0.3, 0, { speedMetersPerSecond: 0 }),
+      e("home-4", minutes + 10, 0, { speedMetersPerSecond: 0 }), e("home-5", minutes + 20, 0, { speedMetersPerSecond: 0 }));
+    expect(commutes(input(evidence, minutes + 120))).toEqual([expect.objectContaining({ startedAt: at(200), qualificationReason: "same_place_meaningful_round_trip" })]);
+  });
+
   // Review findings: the trip's start must not depend on which reading happens to be farthest.
   it.each([
     ["an extra accurate still fix 0.5 m farther at the stop", (stopAt: number) =>
@@ -128,7 +168,9 @@ describe("the start of a same-place round trip", () => {
     expect(times(commutes(shortReturn(extra)))).toEqual(times(clean));
   });
 
-  it("covers both loops of an outing that passes Home without stopping", () => {
+  it("still restarts the trip at a moving pass-by at Home, as before this change", () => {
+    // Known limitation, kept deliberately: a pass-by and a brief return look alike (a still or speedless reading,
+    // an entry and exit), so the latest accurate evidence at Home still starts the trip and the first loop is uncovered.
     const evidence = [e("home-0", 0, 0, { speedMetersPerSecond: 0 }), e("home-1", 10, 0, { speedMetersPerSecond: 0 }),
       e("home-2", 20, 0, { speedMetersPerSecond: 0 }), geofence("first-exit", 30, "geofence_exit"),
       e("loop1-out", 30.5, 300), e("loop1-peak", 32, 1_200), e("loop1-back", 33.5, 650),
@@ -137,9 +179,52 @@ describe("the start of a same-place round trip", () => {
       geofence("last-enter", 41, "geofence_enter"), e("final-0", 41.5, 0, { speedMetersPerSecond: 0 }),
       e("final-1", 51.5, 0, { speedMetersPerSecond: 0 }), e("final-2", 61.5, 0, { speedMetersPerSecond: 0 })];
     const trips = commutes(input(evidence));
-    expect(trips).toHaveLength(1);
-    expect(trips[0].evidenceIds).toEqual(expect.arrayContaining(["loop1-peak", "loop2-peak"]));
-    expect(trips[0].startedAt <= at(30.5)).toBe(true);
+    expect(trips).toEqual([expect.objectContaining({ startedAt: at(34.9) })]);
+    expect(trips[0].evidenceIds).toContain("loop2-peak");
+  });
+
+  it("keeps a short out-and-back unchanged by a return Visit dated before its first far fix (review finding)", () => {
+    const evidence = [e("home-0", 0, 0, { speedMetersPerSecond: 0 }), e("home-1", 10, 0, { speedMetersPerSecond: 0 }),
+      e("home-2", 20, 0, { speedMetersPerSecond: 0 }), geofence("exit", 30, "geofence_exit")];
+    let minutes = 30;
+    for (let metres = 75; metres <= 975; metres += 75) evidence.push(e(`out-${metres}`, minutes += 75 / 11 / 60, metres));
+    minutes += 25 / 60;
+    for (let metres = 900; metres >= 0; metres -= 75) evidence.push(e(`back-${metres}`, minutes += 75 / 11 / 60, metres));
+    evidence.push(geofence("enter", minutes + 0.02, "geofence_enter"), e("parked", minutes + 0.05, 0, { speedMetersPerSecond: 0 }),
+      e("home-3", minutes + 10, 0, { speedMetersPerSecond: 0 }), e("home-4", minutes + 20, 0, { speedMetersPerSecond: 0 }));
+    const clean = commutes(input(evidence));
+    expect(clean).toEqual([expect.objectContaining({ qualificationReason: "same_place_meaningful_round_trip" })]);
+    expect(clean[0].startedAt <= at(30.2)).toBe(true);
+    expect(times(commutes(input([...evidence, homeVisit("early-return", minutes - 2.5)])))).toEqual(times(clean));
+  });
+
+  it("keeps a round trip seen back only by its entry when the Home stay begins soon after", () => {
+    const { value, backAt } = lateReturn(2);
+    const trips = commutes(value);
+    expect(trips).toEqual([expect.objectContaining({ startedAt: at(30.2), qualificationReason: "same_place_meaningful_round_trip" })]);
+    expect(Date.parse(trips[0].stoppedAt!)).toBeLessThanOrEqual(Date.parse(at(backAt + 2)));
+  });
+
+  it("claims no stationary Home time when the Home stay begins half an hour after the return (review finding)", () => {
+    const { value, backAt } = lateReturn(30);
+    const stays = runLocationEngine(value).segmentUpserts.filter((segment) => segment.kind === "stay");
+    // The Home stay does begin late here, so a trip to it would include 30 minutes at Home.
+    expect(stays.at(-1)!.startedAt >= at(backAt + 29)).toBe(true);
+    expect(commutes(value).filter((trip) => Date.parse(trip.stoppedAt!) > Date.parse(at(backAt + 2)))).toEqual([]);
+  });
+
+  it("leaves no overlapping legs when a trip through a stop reaches a Home stay that begins an hour late (review finding)", () => {
+    const value = physicalStopFixture(PHYSICAL_STOP_PICKUP);
+    const shift = (iso: string) => physicalStopAt(Date.parse(iso) - Date.parse(physicalStopAt(0)) + 3_600_000);
+    const template = value.evidence.find((item) => item.clientEvidenceId === "return-0")!;
+    value.evidence = value.evidence.map((item) => item.clientEvidenceId.startsWith("return-")
+      ? { ...item, occurredAt: shift(item.occurredAt), sourceTimestamp: shift(item.occurredAt), endedAt: item.endedAt ? shift(item.endedAt) : null }
+      : item);
+    value.evidence.push({ ...template, clientEvidenceId: "early-return", occurredAt: physicalStopAt(1_308_000),
+      sourceTimestamp: physicalStopAt(1_308_000), speedMetersPerSecond: 0 });
+    const trips = commutes(value).sort((a, b) => a.startedAt.localeCompare(b.startedAt));
+    expect(trips.length).toBeGreaterThan(0);
+    trips.slice(1).forEach((trip, index) => expect(trip.startedAt >= trips[index].stoppedAt!).toBe(true));
   });
 
   it.each(["standard_location", "visit"] as const)("starts at the real departure after an earlier broad %s far away", (kind) => {
@@ -168,9 +253,8 @@ describe("the start of a same-place round trip", () => {
     expect(drives[0].startedAt >= at(129)).toBe(true);
   });
 
-  // Seeds 29 (lost under the former latest-support rule), 187 and 642 (return observed long before the Home stay
-  // begins) pin the review findings; the rest guard the ordinary shape.
-  it.each([...Array.from({ length: 20 }, (_, index) => index + 1), 29, 187, 642])("keeps a simulated outing with short stops as one round trip (seed %i)", (seed) => {
+  // Seed 29 (lost under the latest-support rule) pins a review finding; the rest guard the ordinary shape.
+  it.each([...Array.from({ length: 20 }, (_, index) => index + 1), 29])("keeps a simulated outing with short stops as one round trip (seed %i)", (seed) => {
     const sim = simulate(outing, seed);
     const departure = sim.truth.stays[0].to;
     const returned = sim.truth.stays[3].from;
@@ -180,6 +264,16 @@ describe("the start of a same-place round trip", () => {
     expect(trips[0]).toMatchObject({ qualificationReason: "same_place_meaningful_round_trip", fromPlaceId: HOME_ID, toPlaceId: HOME_ID });
     expect(Math.abs(Date.parse(trips[0].startedAt) - departure)).toBeLessThanOrEqual(2 * 60_000);
     expect(Math.abs(Date.parse(trips[0].stoppedAt!) - returned)).toBeLessThanOrEqual(2 * 60_000);
+  });
+
+  // In seeds 187 and 642 the return Visit is dated before the last fixes away and the Home stay begins over half an
+  // hour after the car stops; no trip may claim that time (review finding).
+  it.each([187, 642])("claims no stationary Home time in a simulated outing whose Home stay begins late (seed %i)", (seed) => {
+    const sim = simulate(outing, seed);
+    const returned = sim.truth.stays[3].from;
+    const stays = runLocationEngine(sim.input()).segmentUpserts.filter((segment) => segment.kind === "stay");
+    expect(Date.parse(stays.at(-1)!.startedAt) - returned).toBeGreaterThan(30 * 60_000);
+    expect(commutes(sim.input()).filter((trip) => Date.parse(trip.stoppedAt!) > returned + 2 * 60_000)).toEqual([]);
   });
 });
 
@@ -208,6 +302,17 @@ describe("the capture simulator", () => {
     const legs: Scenario["legs"] = Array.from({ length: 20 }, () => ({ kind: "walk" as const, to: { x: 0, y: 0 }, via: square.slice(0, 3) }));
     const sim = simulate({ start: "2026-03-09T12:00:00Z", origin: { x: 0, y: 0 }, places: [], legs }, 1);
     expect(sim.input().evidence.filter((item) => item.kind === "standard_location")).toEqual([]);
+  });
+
+  it("gives a stay shorter than its settling delay no stationary fix after it ends (review finding)", () => {
+    for (let seed = 1; seed <= 50; seed += 1) {
+      const sim = simulate({ start: "2026-03-09T12:00:00Z", origin: { x: 0, y: 0 }, places: [], legs: [
+        { kind: "drive", to: { x: 0, y: 600 } }, { kind: "stay", minutes: 0.1, visit: false, driftFixes: false }, { kind: "drive", to: { x: 0, y: 1_200 } }
+      ] }, seed);
+      const [stay] = sim.truth.stays;
+      const still = sim.input().evidence.filter((item) => item.kind === "standard_location" && item.speedMetersPerSecond! < 1);
+      expect(still.every((item) => Date.parse(item.occurredAt) <= stay.to)).toBe(true);
+    }
   });
 
   it("is deterministic for a seed", () => {

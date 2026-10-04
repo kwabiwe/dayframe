@@ -167,7 +167,9 @@ export function simulate(scenario: Scenario, seed: number): Simulation {
       truthStays.push({ from: arrival, to: departure, at: { ...position } });
       // Fixes taken while still are held in the deferred batch until the device moves on.
       const heldUntil = () => departure + between(5_000, 60_000);
-      fix(arrival + between(5_000, 60_000), position, accuracy(), between(0, 0.4), random() < 0.5, heldUntil());
+      // A stay shorter than its settling delay gets no settling fix.
+      const settledAt = arrival + between(5_000, 60_000);
+      if (settledAt < departure) fix(settledAt, position, accuracy(), between(0, 0.4), random() < 0.5, heldUntil());
       if (leg.driftFixes !== false) {
         for (let t = arrival + between(4, 15) * 60_000; t < departure - 60_000; t += between(4, 15) * 60_000) {
           if (random() < 0.7) fix(t, position, accuracy(), between(0, 0.2), false, heldUntil());
