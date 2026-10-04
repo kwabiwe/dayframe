@@ -531,7 +531,7 @@ For staging, apply the additive Sleep resolution-link migration before the Previ
 
 ## Location physical stops
 
-Run `npm run test -w @dayframe/shared` (including `physical-stops.test.ts`, `arrival-presence.test.ts` and the updated short-journey expectations), then the Location DB validators against a disposable loopback `_test` database: `npm run validate:location-v2-db`, `npx tsx scripts/validate-location-short-journeys.ts` and `npx tsx scripts/validate-location-unknown-visit-arrival.ts`. Compare `main` and the change over any private retained corpus outside Git and report every changed segment, not only target cases; owner-labelled brief stops must stay unchanged. Staging acceptance needs fresh drives: brief kerbside stop, 5–15 minute stop, visit-length local stop and ordinary traffic.
+Run `npm run test -w @dayframe/shared` (including `round-trip-start.test.ts`, whose simulated outings use `test/fixtures/captureSimulator.ts`, `physical-stops.test.ts`, `arrival-presence.test.ts` and the updated short-journey expectations), then the Location DB validators against a disposable loopback `_test` database: `npm run validate:location-v2-db`, `npx tsx scripts/validate-location-short-journeys.ts` and `npx tsx scripts/validate-location-unknown-visit-arrival.ts`. Compare `main` and the change over any private retained corpus outside Git and report every changed segment, not only target cases; owner-labelled brief stops must stay unchanged. Staging acceptance needs fresh drives: brief kerbside stop, 5–15 minute stop, visit-length local stop and ordinary traffic.
 
 ## Unit, typecheck and lint CI gate
 

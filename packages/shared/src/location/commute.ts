@@ -48,6 +48,20 @@ function sameKnownEndpoint(from: StaySegment, to: StaySegment) {
   );
 }
 
+/** When a same-place round trip turned back: its farthest reading away from the place, if any. */
+function roundTripTurnaroundMs(stay: StaySegment, evidence: ClassifiedEvidence[]) {
+  const centre = segmentPoint(stay);
+  if (!centre) return null;
+  let farthest: { distance: number; at: number } | null = null;
+  for (const item of evidence) {
+    const point = evidencePoint(item);
+    if (!point || evidenceMatchesStay(item, stay)) continue;
+    const distance = distanceMeters(centre, point);
+    if (!farthest || distance > farthest.distance) farthest = { distance, at: Date.parse(item.evidence.occurredAt) };
+  }
+  return farthest?.at ?? null;
+}
+
 function percentile(values: number[], ratio: number) {
   if (values.length === 0) return null;
   const sorted = [...values].sort((a, b) => a - b);
@@ -376,8 +390,13 @@ export function deriveCommutes(
       const at = occurredAtMs[evidenceIndex];
       return at > originalStartedAtMs && at < stoppedAtMs;
     });
+    // In a round trip, evidence matching the place after the turnaround (the
+    // farthest reading from it) belongs to the return: iOS often dates the
+    // return's arrival Visit before the stay it starts.
+    const turnaroundMs = sameKnownEndpoint(from, to) ? roundTripTurnaroundMs(from, boundaryEvidence) : null;
     const latestFromSupport = boundaryEvidence
-      .filter((item) => evidenceMatchesStay(item, from))
+      .filter((item) => evidenceMatchesStay(item, from) &&
+        (turnaroundMs == null || Date.parse(item.evidence.occurredAt) < turnaroundMs))
       .at(-1);
     const startedAtMs = latestFromSupport
       ? Date.parse(latestFromSupport.evidence.occurredAt)

@@ -50,6 +50,15 @@ Temporal invariants:
   origin, and robust faster movement. This is the narrow exception to
   distinct endpoints established by PR #114; short same-site loops are not
   commutes. Route distance and straight-line distance remain separate.
+- A journey starts at the latest evidence still matching its origin stay. In a
+  same-place round trip, evidence matching the place after the turnaround (the
+  farthest reading from it) belongs to the return and never moves the start:
+  iOS dates a return's arrival Visit up to about a minute and a half before
+  the car stops, often while it is still several hundred metres out, and that
+  Visit used to shrink the whole round trip to seconds so it was discarded.
+  Found with the capture simulator (`test/fixtures/captureSimulator.ts`), where
+  17 of 20 simulated outings with short stops vanished; the private corpus and
+  staging week are unchanged.
 - Large-site continuity may coalesce only unknown-to-unknown stays with an
   actual visit signal, a credible later dwell, no more than `450m` endpoint
   separation, no more than `45m` transition time, no more than `1200m` local
