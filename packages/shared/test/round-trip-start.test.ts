@@ -222,6 +222,16 @@ describe("the start of a same-place round trip", () => {
     expect(commutes(value).filter((trip) => Date.parse(trip.stoppedAt!) > Date.parse(at(backAt + 2)))).toEqual([]);
   });
 
+  it("claims no stationary Home time when a far still outlier and its significant-change mirror follow the return (review finding)", () => {
+    // The mirror repeats the same observation at whole-second time; it is not a second fix confirming movement.
+    const { value, backAt } = lateReturn(30);
+    const stray = e("stray-after-return", backAt + 15, 660, { speedMetersPerSecond: 0 });
+    const mirror: LocationEvidence = { ...stray, clientEvidenceId: "stray-mirror", kind: "significant_change", speedMetersPerSecond: null, isSimulated: null,
+      occurredAt: new Date(Math.floor(Date.parse(stray.occurredAt) / 1_000) * 1_000).toISOString() };
+    expect(commutes({ ...value, evidence: [...value.evidence, stray, mirror] })
+      .filter((trip) => Date.parse(trip.stoppedAt!) > Date.parse(at(backAt + 2)))).toEqual([]);
+  });
+
   it("claims no stationary Home time when a stray fix near Home follows the return (review finding)", () => {
     const { value, backAt } = lateReturn(30);
     const evidence = [...value.evidence, e("stray-after-return", backAt + 15, 140, { speedMetersPerSecond: 0 })];
@@ -300,17 +310,19 @@ describe("the start of a same-place round trip", () => {
 
 describe("a later departure after an earlier excursion (review finding)", () => {
   // A 900 m walk whose return only Home's geofence entry saw, a quiet stretch at Home, then a real drive.
-  const walkThenDrive = (driveAt: number, to: "home" | "work" = "home") => {
+  const walkThenDrive = (driveAt: number, to: "home" | "work" = "home", routeAccuracy: number | null = 4) => {
     const evidence = [e("home-0", 0, 0, { speedMetersPerSecond: 0 }), e("home-1", 10, 0, { speedMetersPerSecond: 0 }),
       geofence("walk-exit", 20, "geofence_exit"), e("walk-out", 25, 500, { speedMetersPerSecond: 1.35 }),
       e("walk-far", 30, 900, { speedMetersPerSecond: 1.35 }), e("walk-back", 35, 400, { speedMetersPerSecond: 1.35 }),
       geofence("walk-enter", 39, "geofence_enter"), geofence("drive-exit", driveAt, "geofence_exit"),
-      e("drive-0", driveAt + 0.5, 300), e("drive-1", driveAt + 2, 1_000), e("drive-2", driveAt + 3.5, 1_800)];
+      ...[[0.5, 300], [2, 1_000], [3.5, 1_800]].map(([after, metres], index) =>
+        e(`drive-${index}`, driveAt + after, metres, { horizontalAccuracyMeters: routeAccuracy }))];
     if (to === "work") {
       evidence.push(e("work-0", driveAt + 4.2, 2_000, { speedMetersPerSecond: 0 }), e("work-1", driveAt + 14.2, 2_000, { speedMetersPerSecond: 0 }),
         e("work-2", driveAt + 24.2, 2_000, { speedMetersPerSecond: 0 }));
     } else {
-      evidence.push(e("drive-3", driveAt + 5, 1_000), e("drive-4", driveAt + 6.5, 300), geofence("drive-enter", driveAt + 7, "geofence_enter"),
+      evidence.push(e("drive-3", driveAt + 5, 1_000, { horizontalAccuracyMeters: routeAccuracy }),
+        e("drive-4", driveAt + 6.5, 300, { horizontalAccuracyMeters: routeAccuracy }), geofence("drive-enter", driveAt + 7, "geofence_enter"),
         e("home-2", driveAt + 7.5, 0, { speedMetersPerSecond: 0 }), e("home-3", driveAt + 20, 0, { speedMetersPerSecond: 0 }),
         e("home-4", driveAt + 40, 0, { speedMetersPerSecond: 0 }));
     }
@@ -321,6 +333,34 @@ describe("a later departure after an earlier excursion (review finding)", () => 
   it.each([[130, "home"], [330, "home"], [130, "work"]] as const)("starts a drive at %i minutes to %s at its own exit after a walk whose return only the entry saw", (driveAt, to) => {
     const drives = commutes(walkThenDrive(driveAt, to)).filter((trip) => trip.stoppedAt! > at(driveAt));
     expect(drives).toEqual([expect.objectContaining({ startedAt: at(driveAt) })]);
+  });
+
+  it("keeps that drive when its route fixes report no accuracy (review finding)", () => {
+    // The walk's return comes before the drive's departure, so it cannot veto the drive.
+    const drives = commutes(walkThenDrive(130, "home", null)).filter((trip) => trip.stoppedAt! > at(130));
+    expect(drives).toEqual([expect.objectContaining({ startedAt: at(130), stoppedAt: at(137) })]);
+  });
+
+  // A quiet Home, then an exit fired as the first fix after a capture gap is already far away (geofence times are
+  // receipt times), or just after it. A first exit is still the departure (review finding).
+  const gapThenExit = (exitAt: number, firstFixAt: number, to: "home" | "work" = "home") => {
+    const evidence = [e("home-0", 0, 0, { speedMetersPerSecond: 0 }), e("home-1", 10, 0, { speedMetersPerSecond: 0 }),
+      geofence("exit", exitAt, "geofence_exit"), e("far-1", firstFixAt, 900), e("far-2", 131, 1_600), e("far-3", 132, 2_100)];
+    if (to === "work") {
+      evidence.push(e("far-4", 133.5, 2_700), e("work-0", 135, 3_000, { speedMetersPerSecond: 0 }),
+        e("work-1", 145, 3_000, { speedMetersPerSecond: 0 }), e("work-2", 155, 3_000, { speedMetersPerSecond: 0 }));
+    } else {
+      evidence.push(e("back-1", 134, 1_500), e("back-2", 136, 500), geofence("enter", 138, "geofence_enter"),
+        e("home-2", 138.5, 0, { speedMetersPerSecond: 0 }), e("home-3", 150, 0, { speedMetersPerSecond: 0 }), e("home-4", 170, 0, { speedMetersPerSecond: 0 }));
+    }
+    const value = input(evidence, 350);
+    if (to === "work") value.savedPlaces.push({ id: "10000000-0000-4000-8000-0000000000f2", name: "Work", latitude: north(3_000), longitude: 0, radiusMeters: 100, loggingEnabled: true });
+    return value;
+  };
+  it.each([
+    ["coincides with", 130, 130, "home"], ["trails", 130.2, 130, "home"], ["trails, to Work,", 130.2, 130, "work"]
+  ] as const)("starts at the exit when it %s the first far fix after a capture gap", (_label, exitAt, firstFixAt, to) => {
+    expect(commutes(gapThenExit(exitAt, firstFixAt, to))).toEqual([expect.objectContaining({ startedAt: at(exitAt) })]);
   });
 
 
