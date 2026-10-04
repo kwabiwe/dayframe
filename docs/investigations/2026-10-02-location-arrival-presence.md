@@ -89,6 +89,12 @@ This is the same class as the 3 Oct gym bug: the completed callback replaced the
 - With two completions, the earlier bounded presence but the other still joined and extended the stay (00:10 became 00:30). Every companion is now resolved together: the earliest usable one is selected, and the rest are consumed unused, including for reuse.
 - Moving an accurate completion behind its arrival changed existing stay IDs once, and replay then orphaned a decided stay's neighbouring journeys. An accurate completion now keeps its earlier position, so no identity changes; only broad completions, never used before, follow the arrival.
 
+**Re-review (Codex, at `4e1fd5c`).** Two paths still saw unused companions:
+- Physical-stop detection received every accepted callback, so an unused companion could erase a trip's observed stop, and enabled mode could then log the whole journey as travel. The engine now runs again without unused companions, so nothing downstream sees them.
+- An unused companion could be the implied-speed predecessor of its own arrival's inside fix. The fix was rejected, the arrival lost its corroboration and was never recognised as a companion's arrival. A completed Visit's coordinate averages its whole interval, so it is no longer used as a speed predecessor at all.
+
+Both regressions fail on `4e1fd5c` in the reported orders. Neither change alters the corpus, the staging-week output or its rejections.
+
 Still to drive on staging: a 30–60 second kerbside drop-off, a 20+ minute stop near a saved place, a school run then staying Home, and an ordinary drive with traffic.
 
 ## Not established

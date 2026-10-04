@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { runLocationEngine } from "../src/location/segmenter";
 import { SCHOOL_RUN_HOME_ID, schoolRunArrivalFixture, schoolRunAt as at } from "../src/location/schoolRunArrivalFixture";
-import { PHYSICAL_STOP_LATITUDE, PHYSICAL_STOP_PICKUP, physicalStopFixture } from "../src/location/physicalStopFixture";
+import { PHYSICAL_STOP_LATITUDE, PHYSICAL_STOP_PICKUP, physicalStopAt, physicalStopFixture } from "../src/location/physicalStopFixture";
 import { GYM_VISIT_PLACE_ID, gymVisitAt, gymVisitDepartureFixture } from "../src/location/gymVisitDepartureFixture";
 import { input as qualityInput, place as qualityPlace, signal } from "../src/location/savedPlaceQualityFixture";
 import { SCHOOL_VISIT_HOME_ID, SCHOOL_VISIT_SCHOOL_ID, schoolVisitAt, schoolVisitFixture } from "../src/location/schoolVisitFixture";
@@ -371,4 +371,32 @@ describe("broad completed Visit after a corroborated arrival (4 Oct school drop-
       expect(stay.evidenceIds).toContain(earlyId);
       expect(stay.evidenceIds).not.toContain(lateId);
     });
+
+  // Re-review of 4e1fd5c: unused companions still reached physical-stop
+  // detection and speed-predecessor selection. They now change nothing at all.
+  it.each(["home-visit-a", "home-visit-z"])("keeps a trip's physical stop when an unused companion arrives (id %s)", (id) => {
+    const input = physicalStopFixture(PHYSICAL_STOP_PICKUP);
+    const homeVisit = input.evidence.find((item) => item.clientEvidenceId === "home-visit")!;
+    // A corroborated Home arrival whose earliest completion (home-visit) is selected.
+    input.evidence.push({ ...homeVisit, clientEvidenceId: "home-visit-0", endedAt: null, horizontalAccuracyMeters: 10,
+      metadata: { visitDepartureOpen: true } });
+    const before = run(input).output.segmentUpserts;
+    expect(before.some((segment) => segment.kind === "commute" && segment.stops?.length)).toBe(true);
+    input.evidence.push({ ...homeVisit, clientEvidenceId: id, endedAt: physicalStopAt(1_800_000) });
+    expect(run(input).output.segmentUpserts).toEqual(before);
+  });
+
+  it.each(["visit-arrival-z", "visit-arrival-0"])("never lets an unused companion reject its arrival's inside fix (arrival id %s)", (arrivalId) => {
+    const value = qualityInput([
+      signal(arrivalId, "11:00:00", { kind: "visit", horizontalAccuracyMeters: 10, metadata: { visitDepartureOpen: true } }),
+      signal("inside", "11:00:01"),
+      signal("exit", "11:25:00", { kind: "geofence_exit", savedPlaceId: qualityPlace.id, latitude: null, longitude: null, horizontalAccuracyMeters: null })
+    ]);
+    const before = run(value).stays;
+    expect(before).toEqual([expect.objectContaining({ startedAt: "2026-09-15T11:00:00.000Z", stoppedAt: "2026-09-15T11:25:00.000Z" })]);
+    // Incompatible (about 330 m away); sorts after the "visit-arrival-0" arrival and before the other.
+    value.evidence.push(signal("visit-arrival-m", "11:00:00", { kind: "visit", latitude: 51.503, horizontalAccuracyMeters: 20,
+      endedAt: "2026-09-15T11:26:00.000Z" }));
+    expect(run(value).stays).toEqual(before);
+  });
 });

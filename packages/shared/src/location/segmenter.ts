@@ -691,7 +691,9 @@ function preprocess(input: LocationEngineInput) {
         input.acceptedLearnedPlaces,
         input.config
       );
-      previousPoint = normalisedEvidence;
+      // A completed Visit's coordinate averages its whole interval, so it is
+      // never a position at its arrival time to judge the next fix's speed by.
+      if (!(normalisedEvidence.kind === "visit" && normalisedEvidence.endedAt)) previousPoint = normalisedEvidence;
     } else if (normalisedEvidence.savedPlaceId) {
       match = {
         kind: "saved",
@@ -992,6 +994,33 @@ export function runLocationEngine(input: LocationEngineInput): LocationEngineOut
   }
   if (!Number.isFinite(Date.parse(input.processingAt))) throw new Error("processingAt must be a valid instant.");
 
+  // A corroborated arrival's unused companion callbacks are the same Visit and
+  // carry nothing the arrival has not: segment as if they were never delivered,
+  // so none can act as a speed predecessor, contradiction, stop boundary or
+  // route evidence. Removal only grows, so this settles in a few passes. They
+  // stay in the raw journal and count as processed.
+  const excluded = new Set<string>();
+  for (;;) {
+    const pass = runLocationEnginePass(excluded.size === 0 ? input
+      : { ...input, evidence: input.evidence.filter((evidence) => !excluded.has(evidence.clientEvidenceId)) });
+    const fresh = pass.unusedCompanionIds.filter((id) => !excluded.has(id));
+    if (fresh.length === 0) {
+      const output = pass.output;
+      if (excluded.size === 0) return output;
+      return {
+        ...output,
+        nextState: {
+          ...output.nextState,
+          processedEvidenceIds: [...new Set([...output.nextState.processedEvidenceIds, ...excluded])].sort()
+        },
+        diagnostics: { ...output.diagnostics, inputCount: input.evidence.length }
+      };
+    }
+    for (const id of fresh) excluded.add(id);
+  }
+}
+
+function runLocationEnginePass(input: LocationEngineInput): { output: LocationEngineOutput; unusedCompanionIds: string[] } {
   const { accepted, rejectedEvidence } = preprocess(input);
   resolveCorroboratedCoincidentVisits(accepted, input);
   resolveCorroboratedCoincidentArrivals(accepted, input);
@@ -1001,6 +1030,8 @@ export function runLocationEngine(input: LocationEngineInput): LocationEngineOut
     corroboratedVisitArrivals(accepted, input, arrivalAnalysis.corroboratedVisits);
   const acceptedOrder = new Map(accepted.map((item, index) => [item, index]));
   const attachedCompletions = new Set([...corroboratedArrivals.values()].flatMap(({ completion }) => completion ? [completion] : []));
+  const unusedCompanionIds = accepted.filter((item) =>
+    consumedCompletionIds.has(item.evidence.clientEvidenceId) && !attachedCompletions.has(item)).map((item) => item.evidence.clientEvidenceId);
   const markArrivalPresence = (stay: WorkingStay, item: ClassifiedEvidence) => {
     const arrival = corroboratedArrivals.get(item.evidence.clientEvidenceId);
     if (!arrival || stay.placeMatchKind !== "saved" || item.match?.placeId !== stay.placeId) return;
@@ -1318,7 +1349,7 @@ export function runLocationEngine(input: LocationEngineInput): LocationEngineOut
   const activeStay = stays.find((stay) => stay.status === "open") ?? null;
   const hasUncertainGap = stays.some((stay) => stay.continuityStatus === "uncertain_gap");
 
-  return {
+  return { unusedCompanionIds, output: {
     nextState: {
       algorithmVersion: input.config.algorithmVersion,
       mode: activeStay
@@ -1348,5 +1379,5 @@ export function runLocationEngine(input: LocationEngineInput): LocationEngineOut
       ambiguousMatchCount: accepted.filter((item) => item.match?.kind === "ambiguous").length,
       warningCodes: stays.some((stay) => stay.continuityStatus === "uncertain_gap") ? ["evidence_gap"] : []
     }
-  };
+  } };
 }
