@@ -23,14 +23,15 @@ describe("automatic Location Evidence time editor", () => {
 });
 
 describe("trip stops in Location Evidence", () => {
-  it("lists a commute's recorded stops under its time range with spoken labels", () => {
+  it("lists a commute's recorded stops under its time range with positioned spoken labels and local motion", () => {
     expect(source).toContain('const stopsHeading = evidence.segment.kind === "commute" ? tripStopsHeading(evidence.stops) : null;');
-    expect(source).toContain("tripStopRows(evidence.stops, formatTime)");
-    expect(source).toContain("accessibilityLabel={row.accessibilityLabel}");
-    // Static content: the rows add no motion of their own.
+    expect(source).toContain("const stopRows = tripStopRows(evidence.stops, formatTime);");
+    expect(source).toContain("accessibilityLabel={`Stop ${index + 1} of ${stopRows.length}: ${row.accessibilityLabel}`}");
     const start = source.indexOf("{stopsHeading ? (");
     const block = source.slice(start, source.indexOf(") : null}", start));
-    expect(block).toContain("stopRows.map");
-    expect(block).not.toContain("Reanimated");
+    expect(block).toContain('accessibilityRole="header"');
+    expect(block.match(/entering=\{localPresenceEntering\(reduceMotion\)\}/g)).toHaveLength(2);
+    expect(block.match(/exiting=\{localPresenceExiting\(reduceMotion\)\}/g)).toHaveLength(2);
+    expect(block.match(/layout=\{localLayoutTransition\(reduceMotion\)\}/g)).toHaveLength(2);
   });
 });

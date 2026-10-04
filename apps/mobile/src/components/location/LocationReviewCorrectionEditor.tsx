@@ -118,7 +118,9 @@ export function LocationReviewCorrectionEditor({
   const startAt = useMemo(() => new Date(evidence.segment.startedAt), [evidence.segment.startedAt]);
   // Stops recorded inside a trip; their time is part of the trip, not travel.
   const stopsHeading = evidence.segment.kind === "commute" ? tripStopsHeading(evidence.stops) : null;
-  const stopRows = useMemo(() => tripStopRows(evidence.stops, formatTime), [evidence.stops]);
+  // Formatted on every render, like the trip's own time range, so a locale or
+  // time-zone change never leaves a stop outside its trip.
+  const stopRows = tripStopRows(evidence.stops, formatTime);
   const stopAt = useMemo(
     () => evidence.segment.stoppedAt ? new Date(evidence.segment.stoppedAt) : null,
     [evidence.segment.stoppedAt]
@@ -463,22 +465,40 @@ export function LocationReviewCorrectionEditor({
         contentContainerStyle={[styles.settingsScrollContent, editorStyles.scrollContent]}
       >
         <View style={styles.contentStack}>
-          <View style={styles.panel}>
+          <Reanimated.View layout={localLayoutTransition(reduceMotion)} style={styles.panel}>
             <Text {...mobileTextProps("counter")} style={styles.label}>Location evidence</Text>
             <Text {...mobileTextProps("sectionHeading")} style={styles.sectionTitle}>{locationActivityLabel(evidence)}</Text>
             <Text {...mobileTextProps("metadata")} style={styles.reviewMetaLine}>{formatEvidenceTimeRange(evidence)}</Text>
             {stopsHeading ? (
-              <View style={editorStyles.tripStops}>
-                <Text {...mobileTextProps("metadata")} style={editorStyles.fieldLabel}>{stopsHeading}</Text>
+              // Refreshed evidence can add or remove stops after the screen
+              // settles: they enter, leave and reflow with the screen's local motion.
+              <Reanimated.View
+                entering={localPresenceEntering(reduceMotion)}
+                exiting={localPresenceExiting(reduceMotion)}
+                layout={localLayoutTransition(reduceMotion)}
+                style={editorStyles.tripStops}
+              >
+                <Text {...mobileTextProps("metadata")} accessibilityRole="header" style={editorStyles.fieldLabel}>{stopsHeading}</Text>
                 {stopRows.map((row, index) => (
-                  <View key={row.key}>
+                  <Reanimated.View
+                    key={row.key}
+                    entering={localPresenceEntering(reduceMotion)}
+                    exiting={localPresenceExiting(reduceMotion)}
+                    layout={localLayoutTransition(reduceMotion)}
+                  >
                     {index > 0 ? <View style={editorStyles.tripStopDivider} /> : null}
-                    <Text {...mobileTextProps("body")} accessibilityLabel={row.accessibilityLabel} style={editorStyles.tripStopRow}>{row.label}</Text>
-                  </View>
+                    <Text
+                      {...mobileTextProps("body")}
+                      accessibilityLabel={`Stop ${index + 1} of ${stopRows.length}: ${row.accessibilityLabel}`}
+                      style={editorStyles.tripStopRow}
+                    >
+                      {row.label}
+                    </Text>
+                  </Reanimated.View>
                 ))}
-              </View>
+              </Reanimated.View>
             ) : null}
-          </View>
+          </Reanimated.View>
 
           {statusMessage ? (
             <Reanimated.View
