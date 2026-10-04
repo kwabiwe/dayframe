@@ -160,20 +160,25 @@ final class DayframeLocationSignalStore: @unchecked Sendable {
 /// Signal timestamps. Visits keep whole seconds (their two callbacks pair on the
 /// exact arrival text); significant-change fixes and callback times keep milliseconds.
 enum DayframeSignalTime {
+  // Reused because retention parses every journal record. ISO8601DateFormatter
+  // is thread-safe, and these are never mutated after creation.
+  nonisolated(unsafe) private static let wholeSeconds = ISO8601DateFormatter()
+  nonisolated(unsafe) private static let fractionalSeconds: ISO8601DateFormatter = {
+    let formatter = ISO8601DateFormatter()
+    formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+    return formatter
+  }()
+
   static func seconds(_ date: Date) -> String {
-    ISO8601DateFormatter().string(from: date)
+    wholeSeconds.string(from: date)
   }
 
   static func milliseconds(_ date: Date) -> String {
-    let formatter = ISO8601DateFormatter()
-    formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-    return formatter.string(from: date)
+    fractionalSeconds.string(from: date)
   }
 
   static func parse(_ text: String) -> Date? {
-    let fractional = ISO8601DateFormatter()
-    fractional.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-    return fractional.date(from: text) ?? ISO8601DateFormatter().date(from: text)
+    fractionalSeconds.date(from: text) ?? wholeSeconds.date(from: text)
   }
 }
 
