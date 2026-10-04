@@ -763,8 +763,11 @@ function stayAbsorbingFragments(stop: PhysicalStop, fragments: StaySegment[], ac
   delete shape.approximateArrival;
   return {
     ...shape,
+    // As for an edge stay, the identity is part of the ID, so a late iOS entry
+    // that proves the place makes replay retire the unknown segment's Review.
     clientSegmentId: stableLocationId("stay", [
-      input.config.algorithmVersion, items[0].evidence.deviceId, evidenceIds[0], evidenceIds[evidenceIds.length - 1], "physical_stop"
+      input.config.algorithmVersion, items[0].evidence.deviceId, evidenceIds[0], evidenceIds[evidenceIds.length - 1], "physical_stop",
+      ...(placeId ? ["saved"] : [])
     ]),
     status: Date.parse(input.processingAt) - Date.parse(stoppedAt) >= input.config.segmentFinalisationLagMs ? "finalised" : "closed",
     startedAt: earliest.startedAt,

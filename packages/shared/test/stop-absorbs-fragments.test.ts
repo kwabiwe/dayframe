@@ -77,6 +77,27 @@ describe("a physical stop that covers fragments of itself", () => {
     expect(kept[0].formation).toBeUndefined();
   });
 
+  it("gives the stop a new ID when a late iOS entry proves the saved place, so replay retires its earlier Review", () => {
+    // Two more still fixes make place logic's fragment promotable as unknown, so the stop absorbs it either way.
+    const parkedLonger = () => {
+      const input = edgeStop();
+      const template = input.evidence.find((item) => item.clientEvidenceId === "parked-1")!;
+      input.evidence.push(
+        { ...template, clientEvidenceId: "parked-2", occurredAt: at(76), sourceTimestamp: at(76), receivedAt: at(76), speedMetersPerSecond: 0.1 },
+        { ...template, clientEvidenceId: "parked-3", occurredAt: at(81), sourceTimestamp: at(81), receivedAt: at(81), speedMetersPerSecond: 0.05 });
+      return input;
+    };
+    const [unknown] = between(stays(parkedLonger()), 61, 80);
+    const input = parkedLonger();
+    input.evidence.push({ ...input.evidence.find((item) => item.clientEvidenceId === "school-enter")!, clientEvidenceId: "late-enter",
+      occurredAt: at(74), sourceTimestamp: at(74), receivedAt: at(150) });
+    const [saved] = between(stays(input), 61, 80);
+    expect(unknown).toMatchObject({ placeMatchKind: "unknown", formation: "physical_stop" });
+    expect(saved).toMatchObject({ placeMatchKind: "saved", placeId: SCHOOL_ID, formation: "physical_stop",
+      startedAt: unknown.startedAt, stoppedAt: unknown.stoppedAt, evidenceIds: unknown.evidenceIds });
+    expect(saved.clientSegmentId).not.toBe(unknown.clientSegmentId);
+  });
+
   // The thirty-minute silence limit is pinned by saved-place-arrival-boundaries.test.ts, whose
   // contract (no presence across 48 unsupported minutes) fails without it.
 });
