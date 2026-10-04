@@ -56,11 +56,11 @@ const observations: Observation[] = [
 ];
 
 /** Evidence as the server would hold it at `processingTime`, using recorded receipt times. */
-export function gymVisitDepartureFixture(processingTime = "08:05:00", options: { visitEndedAt?: string } = {}): LocationEngineInput {
+export function gymVisitDepartureFixture(processingTime = "08:05:00", options: { visitEndedAt?: string; exclude?: string[] } = {}): LocationEngineInput {
   const gym = { id: GYM_VISIT_PLACE_ID, name: "Gym", latitude: 0, longitude: 0, radiusMeters: 80, loggingEnabled: false };
   const processingAt = at(processingTime);
   const evidence = observations
-    .filter((item) => at(item.received) <= processingAt)
+    .filter((item) => !options.exclude?.includes(item.id) && at(item.received) <= processingAt)
     .map((item): LocationEvidence => ({
       clientEvidenceId: item.id,
       deviceId: "20000000-0000-4000-8000-000000000041",

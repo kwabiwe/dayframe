@@ -4,6 +4,8 @@ import { SCHOOL_RUN_HOME_ID, schoolRunArrivalFixture, schoolRunAt as at } from "
 import { PHYSICAL_STOP_LATITUDE, PHYSICAL_STOP_PICKUP, physicalStopFixture } from "../src/location/physicalStopFixture";
 import { GYM_VISIT_PLACE_ID, gymVisitAt, gymVisitDepartureFixture } from "../src/location/gymVisitDepartureFixture";
 import { input as qualityInput, place as qualityPlace, signal } from "../src/location/savedPlaceQualityFixture";
+import { SCHOOL_VISIT_HOME_ID, SCHOOL_VISIT_SCHOOL_ID, schoolVisitAt, schoolVisitFixture } from "../src/location/schoolVisitFixture";
+import { assessAutomaticLocation } from "../src/location/automaticPolicy";
 import type { CommuteSegment, LocationEngineInput, LocationEvidence, StaySegment } from "../src/location/types";
 
 function run(input: LocationEngineInput) {
@@ -212,12 +214,29 @@ describe("completed saved-place Visit ending after the departure evidence", () =
       });
     });
 
-  it.each([[300_000, true], [300_001, false]])("bounds how late the Visit end may run (%i ms)", (lagMs, keepsPresence) => {
+  // Without its arrival callback the completed Visit is the only support, so an
+  // end far past the departure evidence is contradicted and keeps the midpoint.
+  it.each([[300_000, true], [300_001, false]])("bounds how late a completion-only Visit end may run (%i ms)", (lagMs, keepsPresence) => {
     const visitEndedAt = new Date(Date.parse(gymVisitAt("07:14:08.435")) + lagMs).toISOString().slice(11, 23);
-    const stay = gymStay(gymVisitDepartureFixture("08:05:00", { visitEndedAt }));
+    const stay = gymStay(gymVisitDepartureFixture("08:05:00", { visitEndedAt, exclude: ["gym-visit-open"] }));
     expect(stay?.stopUpperBoundAt).toBe(keepsPresence ? gymVisitAt("07:14:08.435") : gymVisitAt("07:14:10.031"));
     expect(stay?.stoppedAt === gymVisitAt("07:14:08.435")).toBe(keepsPresence);
     if (!keepsPresence) expect(stay!.stoppedAt! < gymVisitAt("07:14:08")).toBe(true);
+  });
+
+  // A corroborated arrival already established presence to the departure
+  // evidence; its own completion may bound that, never shrink it.
+  it.each([300_001, 1_200_000])("never lets a corroborated arrival's late completion shrink the stay (%i ms)", (lagMs) => {
+    const visitEndedAt = new Date(Date.parse(gymVisitAt("07:14:08.435")) + lagMs).toISOString().slice(11, 23);
+    expect(gymStay(gymVisitDepartureFixture("08:05:00", { visitEndedAt }))).toMatchObject({
+      stoppedAt: gymVisitAt("07:14:08.435"), stopUpperBoundAt: gymVisitAt("07:14:08.435") });
+  });
+
+  it("keeps the stay's identity when the arrival's completed Visit drains", () => {
+    const before = gymStay(gymVisitDepartureFixture("07:42:43"))!;
+    const after = gymStay(gymVisitDepartureFixture("07:43:44"))!;
+    expect(after.clientSegmentId).toBe(before.clientSegmentId);
+    expect(after.evidenceIds.slice(0, 2)).toEqual(["gym-visit-open", "gym-visit"]);
   });
 
   // Re-review of c18ad1c: a Home Visit spanning accurate Work fixes was reused by a
@@ -257,4 +276,63 @@ describe("completed saved-place Visit ending after the departure evidence", () =
         startedAt: "2026-09-15T11:21:00.000Z", stoppedAt: "2026-09-15T11:26:00.000Z",
         stopLowerBoundAt: "2026-09-15T11:21:05.000Z", stopUpperBoundAt: "2026-09-15T11:26:00.000Z" })]);
     });
+});
+
+describe("broad completed Visit after a corroborated arrival (4 Oct school drop-off and stop)", () => {
+  const schoolStays = (input: LocationEngineInput) => run(input).stays.filter((stay) => stay.placeId === SCHOOL_VISIT_SCHOOL_ID);
+  const day = (input: LocationEngineInput) => run(input).output.segmentUpserts
+    .filter((segment) => segment.startedAt >= schoolVisitAt("06:40:00"))
+    .map((segment) => [segment.kind, segment.kind === "stay" ? segment.placeId : null, segment.startedAt, segment.stoppedAt]);
+
+  // Before this change the 94 m completion cancelled the arrival's presence and
+  // was itself too broad to use, so the 24-minute stop and both journeys vanished.
+  it.each(["07:48:30", "08:30:00"])("records the drive, the stop and the drive home once the Visits drain (at %s)", (processingTime) => {
+    expect(day(schoolVisitFixture(processingTime))).toEqual([
+      ["commute", null, schoolVisitAt("06:49:32.461"), schoolVisitAt("06:53:00")],
+      ["stay", SCHOOL_VISIT_SCHOOL_ID, schoolVisitAt("06:53:00"), schoolVisitAt("07:17:43")],
+      ["commute", null, schoolVisitAt("07:17:48.218"), schoolVisitAt("07:21:35")],
+      ["stay", SCHOOL_VISIT_HOME_ID, schoolVisitAt("07:21:35"), null]
+    ]);
+    // The one-minute drop-off at the School stays inside the outbound drive.
+    expect(schoolStays(schoolVisitFixture(processingTime))).toHaveLength(1);
+  });
+
+  it("keeps broad support inferred: medium confidence, never logged automatically", () => {
+    const [stay] = schoolStays(schoolVisitFixture());
+    expect(stay.confidence).toBe("medium");
+    expect(assessAutomaticLocation("v2_enabled", stay)).toMatchObject({ action: "review", reason: "insufficient_confidence" });
+  });
+
+  it("gives the same stay whichever callback is delivered first", () => {
+    const reordered = schoolVisitFixture();
+    // The field IDs sort the completion first; this one sorts it after the arrival.
+    reordered.evidence = reordered.evidence.map((item) =>
+      item.clientEvidenceId === "visit-0653-done" ? { ...item, clientEvidenceId: "visit-0653-zdone" } : item);
+    const [original] = schoolStays(schoolVisitFixture());
+    const [other] = schoolStays(reordered);
+    expect({ ...other, evidenceIds: [] }).toEqual({ ...original, evidenceIds: [] });
+    expect(other.evidenceIds[0]).toBe("visit-0653-open");
+  });
+
+  it("ends presence at the reported departure when the phone stays silent after leaving", () => {
+    const input = schoolVisitFixture("12:00:00", { exclude: ["back-0", "back-1", "back-2-slc", "back-3", "back-4", "back-5", "back-6",
+      "school-exit-0717", "gym-exit-0717", "home-exit-0717", "visit-0721-open", "arrive-0", "home-enter-0721", "arrive-1",
+      "arrive-2", "arrive-3-slc", "arrive-4"] });
+    extra(input, { clientEvidenceId: "home-much-later", occurredAt: schoolVisitAt("10:30:00"), latitude: 0, longitude: 0,
+      horizontalAccuracyMeters: 5, speedMetersPerSecond: 0 });
+    expect(schoolStays(input)).toEqual([expect.objectContaining({ startedAt: schoolVisitAt("06:53:00"), stoppedAt: schoolVisitAt("07:17:43") })]);
+  });
+
+  it("does not use a broad completion without a corroborated arrival", () => {
+    expect(schoolStays(schoolVisitFixture("08:30:00", { exclude: ["visit-0653-open"] }))).toEqual([]);
+    expect(schoolStays(schoolVisitFixture("08:30:00", { exclude: ["school-enter-0653", "stop-0", "stop-1-slc", "stop-2"] }))).toEqual([]);
+  });
+
+  it("ignores a completion that is not spatially compatible with the place, keeping arrival presence", () => {
+    const input = schoolVisitFixture();
+    input.evidence = input.evidence.map((item) =>
+      item.clientEvidenceId === "visit-0653-done" ? { ...item, latitude: 1_500 / 111_195 } : item);
+    // Presence continues to the departure evidence, exactly as before the completion was delivered.
+    expect(schoolStays(input)).toEqual([expect.objectContaining({ startedAt: schoolVisitAt("06:53:00"), stoppedAt: schoolVisitAt("07:17:47.589") })]);
+  });
 });

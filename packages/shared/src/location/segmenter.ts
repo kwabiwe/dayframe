@@ -53,6 +53,8 @@ type WorkingStay = {
   lastStrongInside?: ClassifiedEvidence;
   /** Set when a corroborated arrival-only Visit at this saved place joins the stay. */
   arrivalPresence?: boolean;
+  /** Departure iOS reported for that arrival's Visit, if completed; presence never runs past it. */
+  arrivalPresenceUntilAt?: string | null;
 };
 
 function pointFor(evidence: LocationEvidence) {
@@ -187,9 +189,13 @@ function closeAtTransition(
   const lateVisitDeparture = active.placeMatchKind === "saved" && active.episodeVisitUntilAt != null &&
     Date.parse(active.episodeVisitUntilAt) > Date.parse(nextAt) &&
     Date.parse(active.episodeVisitUntilAt) - Date.parse(earliestDepartureAt) <= config.savedPlaceVisitDepartureLagMaximumMs;
+  // Presence ends at the arrival's reported departure; observations after it are
+  // ordinary evidence, never presence.
+  const presence = active.arrivalPresence === true && (active.arrivalPresenceUntilAt == null ||
+    Date.parse(active.arrivalPresenceUntilAt) >= Date.parse(lastAt));
   // With presence the stay lasted until the earliest departure evidence; the
   // silence before it is not an even split of unknown time.
-  const departureAt = !exact && (active.arrivalPresence || lateVisitDeparture) ? earliestDepartureAt : null;
+  const departureAt = !exact && (presence || lateVisitDeparture) ? earliestDepartureAt : null;
   active.stoppedAt = exact ? lastAt : departureAt ?? midpointTimeIso(lastAt, nextAt);
   active.stopLowerBoundAt = lastAt;
   active.stopUpperBoundAt = departureAt ?? nextAt;
@@ -325,16 +331,37 @@ function strongSavedPoint(item: ClassifiedEvidence, placeId: string | null, inpu
     item.match.candidates.some(candidate => candidate.id === placeId && candidate.matchClass === "strong");
 }
 
+type CorroboratedArrival = {
+  /** Departure reported by the Visit's usable completed callback; presence ends there. */
+  departedAt: string | null;
+  /** That callback when it joins with the arrival; null when the corroborated broad-Visit path supports it instead. */
+  completion: ClassifiedEvidence | null;
+};
+
 /**
- * Arrival-only Visits at a saved place with no completed callback for the same
- * arrival yet, corroborated within the arrival window by that place's geofence
- * entry or an accurate strong inside fix. Such an arrival establishes presence
- * that continues through stationary silence. Computed once per run.
+ * Arrival-only Visits at a saved place, corroborated within the arrival window
+ * by that place's geofence entry or an accurate strong inside fix. Such an
+ * arrival establishes presence that continues through stationary silence.
+ *
+ * iOS later reports the same Visit again with its departure (same device and
+ * arrival time). Its coordinate is a broader average, often too broad to use on
+ * its own, so it never removes presence. When it is spatially compatible with
+ * the place and no other Visit starts inside it, it is the arrival's interval
+ * support: presence ends at its departure, and it joins the stay with the
+ * arrival (or through the corroborated broad-Visit path, which already handles
+ * it). Otherwise it is ignored for presence. Computed once per run.
  */
-function corroboratedOpenVisitArrivals(accepted: ClassifiedEvidence[], input: LocationEngineInput) {
-  const completedStarts = new Set(accepted
-    .filter(({ evidence }) => evidence.kind === "visit" && evidence.endedAt)
-    .map(({ evidence }) => `${evidence.deviceId}:${evidence.occurredAt}`));
+function corroboratedVisitArrivals(
+  accepted: ClassifiedEvidence[],
+  input: LocationEngineInput,
+  corroboratedVisits: ReadonlyMap<string, { savedPlaceId: string }>
+) {
+  const completions = new Map<string, ClassifiedEvidence[]>();
+  for (const item of accepted) {
+    if (item.evidence.kind !== "visit" || !item.evidence.endedAt) continue;
+    const key = `${item.evidence.deviceId}:${item.evidence.occurredAt}`;
+    completions.set(key, [...(completions.get(key) ?? []), item]);
+  }
   const windowMs = input.config.savedPlaceArrivalCorroborationWindowMs;
   const order = new Map(accepted.map((item, index) => [item, index]));
   // Corroboration must come from the same episode: nothing between the two may
@@ -352,21 +379,39 @@ function corroboratedOpenVisitArrivals(accepted: ClassifiedEvidence[], input: Lo
     for (let index = low + 1; index < high; index += 1) if (contradicts(accepted[index], placeId)) return false;
     return true;
   };
-  const corroborated = new Set<string>();
+  const arrivals = new Map<string, CorroboratedArrival>();
+  const attachedCompletionIds = new Set<string>();
   for (const item of accepted) {
     const e = item.evidence;
     const placeId = item.match?.kind === "saved" ? item.match.placeId : null;
-    if (e.kind !== "visit" || e.endedAt || e.isSimulated === true || !placeId ||
-      completedStarts.has(`${e.deviceId}:${e.occurredAt}`) || !accurateCoordinate(item, input) ||
+    if (e.kind !== "visit" || e.endedAt || e.isSimulated === true || !placeId || !accurateCoordinate(item, input) ||
       !item.match!.candidates.some((candidate) => candidate.id === placeId && candidate.matchClass === "strong")) continue;
     const arrivalMs = Date.parse(e.occurredAt);
-    if (accepted.some((other) => other !== item && other.evidence.deviceId === e.deviceId &&
+    if (!accepted.some((other) => other !== item && other.evidence.deviceId === e.deviceId &&
       Math.abs(Date.parse(other.evidence.occurredAt) - arrivalMs) <= windowMs &&
       ((other.evidence.kind === "geofence_enter" && other.evidence.savedPlaceId === placeId) ||
         strongSavedPoint(other, placeId, input)) &&
-      sameEpisode(item, other, placeId))) corroborated.add(e.clientEvidenceId);
+      sameEpisode(item, other, placeId))) continue;
+    // The earliest reported departure bounds presence; ties resolve by client ID.
+    const completion = [...(completions.get(`${e.deviceId}:${e.occurredAt}`) ?? [])].sort((a, b) =>
+      Date.parse(a.evidence.endedAt!) - Date.parse(b.evidence.endedAt!) ||
+      a.evidence.clientEvidenceId.localeCompare(b.evidence.clientEvidenceId))[0] ?? null;
+    const departedMs = completion ? Date.parse(completion.evidence.endedAt!) : null;
+    const competing = completion != null && accepted.some(({ evidence }) =>
+      evidence.kind === "visit" && evidence.deviceId === e.deviceId && evidence.occurredAt !== e.occurredAt &&
+      Date.parse(evidence.occurredAt) > arrivalMs && Date.parse(evidence.occurredAt) < departedMs!);
+    const inferred = completion ? corroboratedVisits.get(completion.evidence.clientEvidenceId) : undefined;
+    const usable = completion != null && completion.evidence.isSimulated !== true && !competing &&
+      (inferred ? inferred.savedPlaceId === placeId
+        : completion.match?.candidates.some((candidate) => candidate.id === placeId && candidate.matchClass !== "outside") ?? false);
+    const attached = usable && !inferred;
+    arrivals.set(e.clientEvidenceId, {
+      departedAt: usable ? completion!.evidence.endedAt ?? null : null,
+      completion: attached ? completion : null
+    });
+    if (attached) attachedCompletionIds.add(completion!.evidence.clientEvidenceId);
   }
-  return corroborated;
+  return { arrivals, attachedCompletionIds };
 }
 
 function latestObservationMs(working: WorkingStay) {
@@ -420,8 +465,10 @@ function stayFromWorking(
   );
   // After a corroborated arrival the device was present until departure
   // evidence, or until now for an open stay. Clock-based presence is suspended
-  // while an exit or outside reading is unresolved, and never exceeds the cap.
-  const presenceCapMs = latestObservationMs(working) + input.config.savedPlaceOpenVisitPresenceMaximumMs;
+  // while an exit or outside reading is unresolved, and never exceeds the cap
+  // or the departure iOS reported for that Visit.
+  const presenceCapMs = Math.min(latestObservationMs(working) + input.config.savedPlaceOpenVisitPresenceMaximumMs,
+    working.arrivalPresenceUntilAt ? Date.parse(working.arrivalPresenceUntilAt) : Number.POSITIVE_INFINITY);
   const presenceEndMs = !working.arrivalPresence
     ? null
     : endedAt
@@ -936,10 +983,29 @@ export function runLocationEngine(input: LocationEngineInput): LocationEngineOut
   resolveCorroboratedCoincidentArrivals(accepted, input);
   const arrivalAnalysis = analyseSavedPlaceArrivalEvidence(accepted, input);
   const unknownArrivalBounds = unknownVisitArrivalBounds(accepted, input);
-  const openArrivals = corroboratedOpenVisitArrivals(accepted, input);
+  const { arrivals: corroboratedArrivals, attachedCompletionIds } =
+    corroboratedVisitArrivals(accepted, input, arrivalAnalysis.corroboratedVisits);
   const markArrivalPresence = (stay: WorkingStay, item: ClassifiedEvidence) => {
-    if (openArrivals.has(item.evidence.clientEvidenceId) && stay.placeMatchKind === "saved" &&
-      item.match?.placeId === stay.placeId) stay.arrivalPresence = true;
+    const arrival = corroboratedArrivals.get(item.evidence.clientEvidenceId);
+    if (!arrival || stay.placeMatchKind !== "saved" || item.match?.placeId !== stay.placeId) return;
+    stay.arrivalPresence = true;
+    stay.arrivalPresenceUntilAt = arrival.departedAt;
+    const completion = arrival.completion;
+    if (!completion || stay.evidence.includes(completion)) return;
+    // The arrival's own completed callback joins here, whatever its delivery
+    // order, as the same Visit's interval support. Support resting on a broad
+    // callback stays inferred: medium confidence, never automatic.
+    const endedAt = completion.evidence.endedAt!;
+    stay.evidence.push(completion);
+    stay.supportedByVisit = true;
+    if (!stay.visitSupportUntilAt || Date.parse(endedAt) > Date.parse(stay.visitSupportUntilAt)) stay.visitSupportUntilAt = endedAt;
+    if (Date.parse(completion.evidence.occurredAt) >= Date.parse(stay.startedAt) &&
+      (!stay.episodeVisitUntilAt || Date.parse(endedAt) > Date.parse(stay.episodeVisitUntilAt))) stay.episodeVisitUntilAt = endedAt;
+    stay.stoppedAt = endedAt;
+    stay.stopLowerBoundAt = endedAt;
+    stay.stopUpperBoundAt = endedAt;
+    stay.continuityStatus = "supported_by_visit";
+    if (!accurateCoordinate(completion, input)) stay.inferredContinuity = true;
   };
   const completed: WorkingStay[] = [];
   let active: WorkingStay | null = null;
@@ -998,6 +1064,8 @@ export function runLocationEngine(input: LocationEngineInput): LocationEngineOut
       const previous = visits.get(key);
       if (!previous?.evidence.endedAt || Date.parse(evidence.endedAt) > Date.parse(previous.evidence.endedAt)) visits.set(key, item);
     }
+    // Joins with its corroborated arrival instead, in whichever order they were delivered.
+    if (attachedCompletionIds.has(evidence.clientEvidenceId)) continue;
     // Registration/overlapping-region context must not split a quiet saved stay before
     // its next actual observation can resolve continuity. It remains in the raw journal.
     if (active?.placeMatchKind === "saved" && evidence.kind.startsWith("geofence_") &&
@@ -1051,6 +1119,7 @@ export function runLocationEngine(input: LocationEngineInput): LocationEngineOut
       // outside confirmation, other place) within the presence cap.
       const openVisitPresence = observationGapMs > input.config.maxContinuityGapMs &&
         active.arrivalPresence === true &&
+        (active.arrivalPresenceUntilAt == null || atMs <= Date.parse(active.arrivalPresenceUntilAt)) &&
         atMs - Date.parse(observedAt) <= input.config.savedPlaceOpenVisitPresenceMaximumMs;
       if (observationGapMs > input.config.maxContinuityGapMs && !boundedSparseSameUnknown && !boundedSavedGap && !openVisitPresence) {
         closeAtTransition(active, evidence.occurredAt, "uncertain_gap", input.config, true);

@@ -62,10 +62,33 @@ Staging served this branch at `593b253`, with the matching signed Staging app on
 
 **Re-review (Codex, at `70a0e67`).** A fresh Visit in the return episode only replaced the reused support when it ended later, so an equal or earlier fresh end lost a valid stay that `c18ad1c` kept. The late-departure rule now reads a separate value: the latest end of a Visit that arrived within the current stay. Interval-support selection is back to its earlier behaviour, so silence bridging is unchanged; replacing the support instead would have created a new Home stay from the stale Visit when silence followed. Regressions for equal and earlier fresh ends (with a later-end control) fail on `70a0e67`; corpus output is identical.
 
+## Staging drive — 4 October (QA account, read-only SQL; times UTC)
+
+Staging served `bd08751`. The School had just been saved (100 m radius). Google showed: left Home 06:49, a one-minute drop-off at the School around 06:51, a stop 06:53–07:17 at a shop 67–81 m from the School pin, and home by 07:23. Dayframe showed Home ending 06:49 and a three-minute Home → Home round trip 07:17–07:21; the outbound drive and the 24-minute stop were missing.
+
+**Root cause** (confirmed with an instrumented replay, not inferred):
+- The stop's arrival-only Visit (06:53:00, 12 m) was corroborated by the School geofence entry 41 s later. The phone then went silent for 22 minutes.
+- iOS's completed callback for the same Visit (06:53:00–07:17:43) arrived 30 minutes after the departure with a 94 m accuracy. Any completed callback switched the arrival's presence off, but at 94 m this one was too broad to be used, so nothing replaced it.
+- The silence then closed the stay at its last fix after two minutes, below the five-minute floor, so the stop was dropped and the journeys either side with it.
+
+This is the same class as the 3 Oct gym bug: the completed callback replaced the arrival's presence without guaranteeing it could take over.
+
+**Research.** One iOS Visit yields up to two callbacks sharing the Visit's arrival time: an arrival with an open departure, then a departure callback whose coordinate is the Visit's averaged position and whose accuracy is only an estimate of the region's radius (times are generally within a minute or two). Across 42 staging Visits (26 Sep–4 Oct) the completion was less precise than its arrival in most pairs (for example 2 → 59 m, 12 → 94 m), beyond 65 m in four, and up to 348 m away from it at brief stops. The app maps both callbacks directly (arrival time → `occurredAt`, departure → `endedAt` unless open), so pairing by device and arrival time is reliable.
+
+**Rule.** A completed callback never removes a corroborated arrival's presence; it can only end it. When it is spatially compatible with the place and not contradicted by another Visit inside it, it is the arrival's interval support: presence ends at its reported departure, and it joins the stay with the arrival whatever the delivery order. Broad support stays at medium confidence, so it is never logged automatically. With presence, the stay ends at the earliest departure evidence however late the reported departure is. Completion-only stays keep the five-minute rule and the episode check from the re-reviews above.
+
+**Result.**
+- A shape-derived fixture (`schoolVisitFixture.ts`) reproduces the staging output on `bd08751`. With the fix, once the Visits drain: drive 06:49:32–06:53:00 (the drop-off stays inside it), School stay 06:53:00–07:17:43 at medium confidence, drive 07:17:48–07:21:35, then Home. That matches Google. Tests also cover delivery order, a silent phone after leaving (the stay ends at the reported departure, not hours later), and three controls: no arrival callback, no corroboration, and an incompatible completion.
+- The gym stay is unchanged at 06:07:48–07:14:08 at every processing time, and it now keeps its ID when the completion drains.
+- Retained staging week (26 Sep–4 Oct, replayed with today's places): two timing changes, both this pattern. One is 4 Oct. The other is the 29 Sep ~9-minute pickup, which becomes a School stay 16:35:01–16:44:11 (Google 16:35–16:43), consistent with four other school visits the engine already recorded when their completion happened to be precise. Without the School place: no timing changes. Finalised segments later retracted during as-received replay fall from 44 to 37 (40 without the School).
+- Private 25–29 Sep corpus: no timing changes.
+- **One-time ID change.** Stays whose completion used to sort before its arrival now start with the arrival, so their ID changes once on deploy (13 corpus segments, 17–20 in the staging week). Open Reviews for them are replaced once with identical times; decided ones stay protected.
+
 Still to drive on staging: a 30–60 second kerbside drop-off, a 20+ minute stop near a saved place, a school run then staying Home, and an ordinary drive with traffic.
 
 ## Not established
 
-- Remaining delay comes from foreground-only native Visit drain and deferred location delivery on the phone. These need a mobile change (follow-up).
-- Segment identity still changes as late evidence lands, so one Review can be replaced (follow-up).
-- Staging evidence so far is the 2 Oct school run and the 3 Oct gym visit; no device or production validation of the 3 Oct fix is claimed here.
+- Remaining delay comes from foreground-only native Visit drain and deferred location delivery on the phone. On 4 Oct nothing could appear until both Visit callbacks reached the server 30 minutes after the stop. These need a mobile change (follow-up).
+- A broad completion whose arrival callback lies just outside the saved place's radius is still unused. On 30 Sep a 29-minute visit near the School (arrival 126 m from the pin, completion 85 m broad) is hidden inside a 32-minute Home round trip on both engines (follow-up).
+- Segment identity still changes in other cases as late evidence lands (follow-up).
+- No device or production validation of the 3–4 Oct fixes is claimed here.

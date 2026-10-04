@@ -76,16 +76,17 @@ export const LOCATION_ENGINE_V2_CONFIG: LocationEngineConfig = {
   savedPlaceExitReentryGraceMs: 300_000,
   savedPlaceQuietGapMaxMs: 1_800_000,
   // A corroborated arrival-only Visit at a saved place means iOS saw the device
-  // arrive and has not reported departure. A still phone records nothing, so
-  // presence continues through silence to the next same-place observation (or
-  // to processing time for an open stay), but never past contradicting
-  // evidence and never longer than this cap.
+  // arrive. A still phone records nothing, so presence continues through silence
+  // to the next same-place observation (or to processing time for an open stay),
+  // but never past contradicting evidence, never past the departure iOS later
+  // reports for that Visit, and never longer than this cap.
   savedPlaceOpenVisitPresenceMaximumMs: 64_800_000,
   // iOS reports a Visit's departure shortly after the device leaves (about a
-  // minute after the geofence exit on 3 Oct). A completed saved-place Visit
-  // ending no later than this after the earliest departure evidence keeps
-  // presence through the silence up to that evidence. A longer overrun means
-  // the Visit is contradicted, and the ordinary midpoint estimate applies.
+  // minute after the geofence exit on 3 Oct). Without a corroborated arrival,
+  // whose presence already reaches the departure evidence, a completed
+  // saved-place Visit ending no later than this after the earliest departure
+  // evidence keeps presence up to that evidence. A longer overrun means the
+  // Visit is contradicted, and the ordinary midpoint estimate applies.
   savedPlaceVisitDepartureLagMaximumMs: 300_000,
   savedPlaceArrivalCorroborationWindowMs: 300_000,
   savedPlaceArrivalMinimumStrongPointCount: 2,
