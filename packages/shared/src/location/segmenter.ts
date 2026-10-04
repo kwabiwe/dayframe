@@ -1187,6 +1187,13 @@ function runLocationEnginePass(input: LocationEngineInput): { output: LocationEn
   };
   const completed: WorkingStay[] = [];
   let active: WorkingStay | null = null;
+  // Callbacks iOS sent for one Visit share the device and arrival time.
+  const visitEpisodes = new Map<string, ClassifiedEvidence[]>();
+  for (const item of accepted) {
+    if (item.evidence.kind !== "visit" || !pointFor(item.evidence)) continue;
+    const key = `${item.evidence.deviceId}:${item.evidence.occurredAt}`;
+    visitEpisodes.set(key, [...(visitEpisodes.get(key) ?? []), item]);
+  }
   // Occurrence-ordered, owner/device-local interval support; never a second durable store.
   const visits = new Map<string, ClassifiedEvidence>();
   const applyUnknownVisitArrivalBound = (stay: WorkingStay, item: ClassifiedEvidence) => {
@@ -1343,6 +1350,9 @@ function runLocationEnginePass(input: LocationEngineInput): { output: LocationEn
       // Core Location can emit a same-place exit/enter pair while monitored
       // regions are being restored. That is a state snapshot, not a departure.
       if (hasPairedGeofenceEnter(accepted, evidence)) continue;
+      // An edge cluster was never inside the circle: as for an unknown cluster,
+      // its readings, not the region callback, show when it left.
+      if (edgeOnly(active, input)) continue;
       active.pendingExit ??= item;
       continue;
     }
@@ -1352,13 +1362,17 @@ function runLocationEnginePass(input: LocationEngineInput): { output: LocationEn
     // registration and with reduced precision.
     if (evidence.kind === "geofence_exit") continue;
 
-    // A credible Visit elsewhere ends an edge cluster, as a different cluster
-    // would end an unknown one, before any admission can clear it. The stay's
-    // own Visit callbacks (same arrival time) are never elsewhere.
-    if (evidence.kind === "visit" && evidence.isSimulated !== true && accurateCoordinate(item, input) && edgeOnly(active, input) &&
-        !active.evidence.some(({ evidence: own }) => own.kind === "visit" && own.deviceId === evidence.deviceId &&
-          own.occurredAt === evidence.occurredAt) &&
-        !sameUnknownCluster(active, item, input.config.unknownStayBaseRadiusMeters)) {
+    // An edge cluster ends where an unknown cluster would, before any
+    // admission can clear the evidence: at a credible Visit elsewhere (every
+    // callback iOS sent for that visit, same arrival time, lies beyond the
+    // cluster, in whichever order they arrive), or at a still reading of the
+    // place's band beyond the cluster (another stop on the circle's far side).
+    const elsewhereVisit = evidence.kind === "visit" && evidence.isSimulated !== true && accurateCoordinate(item, input) &&
+      (visitEpisodes.get(`${evidence.deviceId}:${evidence.occurredAt}`) ?? [item])
+        .every((callback) => !sameUnknownCluster(active!, callback, input.config.unknownStayBaseRadiusMeters));
+    const elsewhereBandReading = evidence.kind !== "visit" && itemKey === active.key && stationaryFix(item, input) &&
+      !sameUnknownCluster(active, item, input.config.unknownStayBaseRadiusMeters);
+    if ((elsewhereVisit || elsewhereBandReading) && edgeOnly(active, input)) {
       closeAtCorroboratedDeparture(active, evidence.occurredAt, input.config);
       completed.push(active);
       active = startStay(item);

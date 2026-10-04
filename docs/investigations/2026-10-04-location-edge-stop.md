@@ -22,7 +22,7 @@ Dayframe showed a commute from 20:09 to 20:27, then a School stay from 20:27 to 
 
 The owner chose option 1: the cluster's centre decides. PR #222:
 
-- treats a saved stay with only plausible still fixes (an edge cluster) exactly as an unknown cluster for silence and membership;
+- treats a saved stay with still fixes and no accurate fix inside the circle (an edge cluster: tolerance-band and plausible matches only) as an unknown cluster for silence, membership and departure;
 - labels a stay as the saved place only when the centre of its still accurate fixes lies inside the circle, or when iOS placed the device inside during that visit before the last still fix: a genuine geofence entry not followed by an exit, or a Visit wholly inside the circle. Otherwise the stay is unknown, with the place as a candidate. (The first version also accepted a corroborated arrival and a Visit only strongly matched; both reviews below narrowed it.)
 
 The synthetic `schoolEdgeStopFixture` reproduces the server's output exactly on `main`. With the change, the same evidence gives one unknown stay from 19:13:16 to 19:36:41 UTC (20:13–20:36 BST), with the School as a candidate. Across the 25–29 Sep corpus and the 26 Sep–4 Oct staging week, output and identities are unchanged. In 47 saved stays there, the still centre never left its circle; the largest was 94 %, a gym visit corroborated by its geofence entry.
@@ -41,7 +41,7 @@ The first Codex review found four ways the rules could still mislabel or merge s
 Fixed:
 
 - Edge membership now waits for pending exits and outside evidence to resolve.
-- Edge stays are defined by their still-fix centre.
+- Edge stays are defined by having still fixes and no accurate fix inside the circle. A first definition by still-fix centre was rejected because it merged a real drop-off into the next stop.
 - iOS inside proof needs either a Visit wholly inside the circle or a latest genuine geofence transition that is an entry; simulated callbacks and snapshot pairs do not count.
 - Without a still fix, only that proof keeps the place.
 
@@ -54,7 +54,15 @@ A second review found four more gaps:
 - A Visit reused from an earlier episode could prove a later one. Reused Visits are marked and excluded.
 - An in-band return reading could still erase a Visit elsewhere. A credible Visit elsewhere now ends an edge cluster.
 
-The edge scan is now incremental: dense edge input costs about the same as with no place saved. Every case from both reviews is a regression test.
+The edge scan is now incremental: dense edge input costs about the same as with no place saved.
+
+A third review found three ways an edge cluster still differed from an unknown one:
+
+- A same-place reading on the far side of the circle joined the cluster, merging two stops into one saved visit. Now a still reading of the place's band beyond the cluster starts a new stay.
+- A displaced completed Visit processed before its own arrival callback ended its own stay. Now a Visit is elsewhere only when every callback for it is.
+- A geofence exit followed by readings in the band produced inverted bounds. Now same-place exits do not affect an edge cluster, which was never inside the circle; its readings show when it left.
+
+Every case from all three reviews is a regression test.
 
 ## Not established
 

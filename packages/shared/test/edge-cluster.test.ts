@@ -301,6 +301,33 @@ describe("identity proof at a saved place's edge (review round 2)", () => {
     expect(staysOf(build())[0].placeMatchKind).toBe(kind);
   });
 
+  // Review round 3.
+  it("keeps an edge cluster and a different stop on the circle's far side as two unknown stays", () => {
+    const evidence = [fix("a0", 0, 126), fix("a1", 600, 126), fix("a2", 1_200, 126), fix("x0", 1_260, 230), fix("x1", 1_560, 230), fix("x2", 1_860, 230),
+      fix("b0", 1_920, -126), fix("b1", 2_520, -126), fix("b2", 3_120, -126), fix("b3", 3_720, -126), fix("l0", 3_730, 600, 5, 10), fix("l1", 3_740, 700, 5, 10)];
+    expect(staysOf(compact(evidence, { savedPlaces: [] }))).toHaveLength(2);
+    const saved = staysOf(compact(evidence));
+    expect(saved).toHaveLength(2);
+    expect(saved.every((stay) => stay.placeMatchKind === "unknown")).toBe(true);
+  });
+
+  it("does not let a displaced completion shorten its own stay when it sorts before its arrival", () => {
+    const evidence = [fix("p0", 0, 126), fix("p1", 300, 126), visit("z-arrival", 600, 126, 5), visit("m-complete", 600, 320, 20, 1_800),
+      fix("p2", 900, 126), fix("p3", 1_200, 126), fix("p4", 1_800, 126), fix("l0", 1_900, 600, 5, 10), fix("l1", 1_910, 700, 5, 10)];
+    const [without] = staysOf(compact(evidence.filter((item) => item.clientEvidenceId !== "m-complete")));
+    const [stay] = staysOf(compact(evidence));
+    expect(without.startedAt).toBe(t(0));
+    expect(stay.startedAt).toBe(without.startedAt);
+    expect(stay.clientSegmentId).toBe(without.clientSegmentId);
+  });
+
+  it("keeps ordered stop bounds when an exit is followed by readings in the band", () => {
+    const [stay] = staysOf(compact([fix("p0", 0, 126), fix("p1", 300, 126), fix("p2", 600, 126), cb("exit", 650, "geofence_exit"),
+      fix("p3", 700, 126), fix("p4", 750, 126)], { processingAt: t(2_000) }));
+    expect(stay.stopLowerBoundAt! <= stay.stopUpperBoundAt!).toBe(true);
+    expect(stay.stoppedAt! <= stay.stopUpperBoundAt!).toBe(true);
+  });
+
   it("control: bare geofence callbacks cannot make a stay", () => {
     expect(staysOf(compact([cb("enter", 0, "geofence_enter"), cb("exit", 1_800, "geofence_exit")]))).toEqual([]);
   });
