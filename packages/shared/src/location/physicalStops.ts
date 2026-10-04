@@ -84,15 +84,23 @@ function firstIndexAtOrAfter(accepted: ClassifiedEvidence[], atMs: number) {
 
 // iOS can report a same-region exit and entry together while monitored regions are
 // restored. Such a pair is a state snapshot, not a crossing (as in the segmenter).
+// Pairs are disjoint: each callback excuses at most one opposite callback, so a
+// surplus enter or exit remains a crossing.
 const GEOFENCE_SNAPSHOT_PAIR_MS = 5_000;
 
-function isGeofenceCrossing(evidence: ClassifiedEvidence["evidence"], deviceId: string, accepted: ClassifiedEvidence[]) {
-  if ((evidence.kind !== "geofence_enter" && evidence.kind !== "geofence_exit") || evidence.deviceId !== deviceId) return false;
-  const opposite = evidence.kind === "geofence_enter" ? "geofence_exit" : "geofence_enter";
-  const at = Date.parse(evidence.occurredAt);
-  return !(evidence.savedPlaceId && accepted.some(({ evidence: other }) => other.kind === opposite &&
-    other.deviceId === deviceId && other.savedPlaceId === evidence.savedPlaceId &&
-    Math.abs(Date.parse(other.occurredAt) - at) <= GEOFENCE_SNAPSHOT_PAIR_MS));
+function geofenceCrossings(accepted: ClassifiedEvidence[]) {
+  const transitions = accepted.filter(({ evidence }) => evidence.kind === "geofence_enter" || evidence.kind === "geofence_exit");
+  const paired = new Set<ClassifiedEvidence>();
+  transitions.forEach((item, index) => {
+    if (paired.has(item) || !item.evidence.savedPlaceId) return;
+    const at = Date.parse(item.evidence.occurredAt);
+    const match = transitions.slice(index + 1).find((other) => !paired.has(other) &&
+      other.evidence.kind !== item.evidence.kind && other.evidence.deviceId === item.evidence.deviceId &&
+      other.evidence.savedPlaceId === item.evidence.savedPlaceId &&
+      Date.parse(other.evidence.occurredAt) - at <= GEOFENCE_SNAPSHOT_PAIR_MS);
+    if (match) paired.add(item).add(match);
+  });
+  return transitions.filter((item) => !paired.has(item));
 }
 
 function iso(ms: number) {
@@ -133,6 +141,7 @@ export function detectPhysicalStops(accepted: ClassifiedEvidence[], config: Loca
   const elsewhere = (visit: PlacedVisit, centre: Coordinate) => episodes.get(visit.episode)!.every((callback) =>
     distanceMeters(centre, callback.point) - callback.accuracy > config.movementDisplacementThresholdMeters);
   const order = new Map(accepted.map((item, index) => [item, index]));
+  const crossings = geofenceCrossings(accepted);
   const stops: PhysicalStop[] = [];
 
   let index = 0;
@@ -164,7 +173,7 @@ export function detectPhysicalStops(accepted: ClassifiedEvidence[], config: Loca
       }
     }
     const stop = evaluateCluster(fixes, index, next, members, completedVisits, accepted, order, config, slow, vehicle, certainlyBeyond,
-      placedVisits, elsewhere);
+      placedVisits, elsewhere, crossings);
     // Defensive: never emit overlapping stops.
     if (stop && (!stops.length || Date.parse(stop.startedAt) >= Date.parse(stops[stops.length - 1].stoppedAt))) stops.push(stop);
     index = next;
@@ -178,7 +187,8 @@ function evaluateCluster(
   config: LocationEngineConfig,
   slow: (fix: Fix) => boolean, vehicle: (fix: Fix) => boolean,
   certainlyBeyond: (fix: Fix, centre: Coordinate, metres: number) => boolean,
-  placedVisits: readonly PlacedVisit[], elsewhere: (visit: PlacedVisit, centre: Coordinate) => boolean
+  placedVisits: readonly PlacedVisit[], elsewhere: (visit: PlacedVisit, centre: Coordinate) => boolean,
+  crossings: readonly ClassifiedEvidence[]
 ): PhysicalStop | null {
   const slowMembers = members.filter(slow);
   const centre = accuracyWeightedCentre(slowMembers.map(member => ({
@@ -229,8 +239,11 @@ function evaluateCluster(
   const deviceId = members[0].item.evidence.deviceId;
   const carriedVisit = carriedUntil != null && carriedFrom != null &&
     carriedUntil - carriedFrom >= config.physicalStopVisitCarriedMinimumMs &&
-    !accepted.some(({ evidence }) => isGeofenceCrossing(evidence, deviceId, accepted) &&
-      Date.parse(evidence.occurredAt) > lastMemberAt && Date.parse(evidence.occurredAt) < carriedUntil);
+    !crossings.some(({ evidence }) => evidence.deviceId === deviceId &&
+      Date.parse(evidence.occurredAt) > lastMemberAt && Date.parse(evidence.occurredAt) < carriedUntil) &&
+    // A credible Visit elsewhere already in progress at the last fix contradicts
+    // the silence (one starting later is a departure bound instead).
+    !placedVisits.some((visit) => elsewhere(visit, centre) && visit.from <= lastMemberAt && visit.to > lastMemberAt);
   // Both departure sources search the same horizon.
   const horizonFrom = (lastLocalAt: number) => Math.max(lastLocalAt, carriedVisit ? carriedUntil! : Number.NEGATIVE_INFINITY);
   let departureAt: number | null = null;

@@ -326,4 +326,27 @@ describe("physical stops", () => {
     expect(physical).toHaveLength(1);
     expect(physical[0]).toMatchObject({ stoppedAt: shortAt(2_430_000), stopUpperBoundAt: shortAt(from) });
   });
+
+  const homeTransitions = (input: LocationEngineInput, transitions: Array<[number, "geofence_enter" | "geofence_exit"]>) => {
+    for (const [ms, kind] of transitions) geofenceAt(input, ms, kind);
+    input.evidence.filter((item) => item.clientEvidenceId.startsWith("geofence-")).forEach((item) => { item.savedPlaceId = PHYSICAL_STOP_HOME_ID; });
+    return input;
+  };
+
+  it("pairs snapshot callbacks disjointly so a surplus crossing still vetoes (re-review finding)", () => {
+    expect(run(homeTransitions(parkedInput(), [[1_500_000, "geofence_exit"], [1_501_000, "geofence_enter"], [1_502_000, "geofence_exit"]])).physical).toEqual([]);
+    expect(run(homeTransitions(parkedInput(), [[1_500_000, "geofence_enter"], [1_501_000, "geofence_exit"], [1_502_000, "geofence_enter"]])).physical).toEqual([]);
+    // A pair straddling the last fix is still one snapshot.
+    expect(run(homeTransitions(parkedInput(), [[788_000, "geofence_exit"], [791_000, "geofence_enter"]])).physical).toHaveLength(1);
+  });
+
+  it("does not carry through a credible Visit elsewhere already in progress at the last fix (re-review finding)", () => {
+    const input = parkedInput();
+    const anchor = input.evidence.find((item) => item.clientEvidenceId === "slow-0")!;
+    input.evidence.push({ ...anchor, clientEvidenceId: "visit-elsewhere-spanning", kind: "visit", occurredAt: shortAt(760_000), sourceTimestamp: shortAt(760_000),
+      endedAt: shortAt(1_100_000), latitude: anchor.latitude! - 279 / 111_195, horizontalAccuracyMeters: 5, speedMetersPerSecond: null });
+    const output = runLocationEngine(input);
+    expect(detectPhysicalStops(output.acceptedEvidence, config)).toEqual([]);
+    expect(run(input).physical).toEqual([]);
+  });
 });
