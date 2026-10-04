@@ -332,7 +332,7 @@ function strongSavedPoint(item: ClassifiedEvidence, placeId: string | null, inpu
 }
 
 type CorroboratedArrival = {
-  /** Departure reported by the Visit's usable completed callback; presence ends there. */
+  /** Departure reported by the Visit's selected completed callback; presence ends there. */
   departedAt: string | null;
   /** That callback when it joins with the arrival; null when the corroborated broad-Visit path supports it instead. */
   completion: ClassifiedEvidence | null;
@@ -345,11 +345,15 @@ type CorroboratedArrival = {
  *
  * iOS later reports the same Visit again with its departure (same device and
  * arrival time). Its coordinate is a broader average, often too broad to use on
- * its own, so it never removes presence. When it is spatially compatible with
- * the place and no other Visit starts inside it, it is the arrival's interval
- * support: presence ends at its departure, and it joins the stay with the
- * arrival (or through the corroborated broad-Visit path, which already handles
- * it). Otherwise it is ignored for presence. Computed once per run.
+ * its own, so these companion callbacks never remove presence and are paired
+ * before corroboration: they never contradict their own arrival. The earliest-
+ * ending companion that is spatially compatible with the place, with no other
+ * Visit starting inside it, is the arrival's interval support: presence ends at
+ * its departure, and it joins the stay with the arrival (or through the
+ * corroborated broad-Visit path, which already handles it). Every other
+ * companion is consumed unused, so none can move the departure, support or
+ * dwell. Without a usable companion, presence is as if none had arrived.
+ * Computed once per run.
  */
 function corroboratedVisitArrivals(
   accepted: ClassifiedEvidence[],
@@ -374,13 +378,19 @@ function corroboratedVisitArrivals(
       accurateCoordinate(item, input) &&
       !(item.match?.candidates.some((candidate) => candidate.id === placeId && candidate.matchClass !== "outside") ?? false);
   };
+  // The arrival's own companions are the same Visit, never a boundary; Visits
+  // with any other start still are.
+  const companionOf = (item: ClassifiedEvidence, arrival: ClassifiedEvidence) => item.evidence.kind === "visit" &&
+    item.evidence.deviceId === arrival.evidence.deviceId && item.evidence.occurredAt === arrival.evidence.occurredAt;
   const sameEpisode = (a: ClassifiedEvidence, b: ClassifiedEvidence, placeId: string) => {
     const [low, high] = [order.get(a)!, order.get(b)!].sort((x, y) => x - y);
-    for (let index = low + 1; index < high; index += 1) if (contradicts(accepted[index], placeId)) return false;
+    for (let index = low + 1; index < high; index += 1) {
+      if (!companionOf(accepted[index], a) && contradicts(accepted[index], placeId)) return false;
+    }
     return true;
   };
   const arrivals = new Map<string, CorroboratedArrival>();
-  const attachedCompletionIds = new Set<string>();
+  const consumedCompletionIds = new Set<string>();
   for (const item of accepted) {
     const e = item.evidence;
     const placeId = item.match?.kind === "saved" ? item.match.placeId : null;
@@ -392,26 +402,30 @@ function corroboratedVisitArrivals(
       ((other.evidence.kind === "geofence_enter" && other.evidence.savedPlaceId === placeId) ||
         strongSavedPoint(other, placeId, input)) &&
       sameEpisode(item, other, placeId))) continue;
-    // The earliest reported departure bounds presence; ties resolve by client ID.
-    const completion = [...(completions.get(`${e.deviceId}:${e.occurredAt}`) ?? [])].sort((a, b) =>
+    const companions = completions.get(`${e.deviceId}:${e.occurredAt}`) ?? [];
+    const usable = (completion: ClassifiedEvidence) => {
+      const departedMs = Date.parse(completion.evidence.endedAt!);
+      const inferred = corroboratedVisits.get(completion.evidence.clientEvidenceId);
+      return completion.evidence.isSimulated !== true &&
+        !accepted.some(({ evidence }) => evidence.kind === "visit" && evidence.deviceId === e.deviceId &&
+          evidence.occurredAt !== e.occurredAt &&
+          Date.parse(evidence.occurredAt) > arrivalMs && Date.parse(evidence.occurredAt) < departedMs) &&
+        (inferred ? inferred.savedPlaceId === placeId
+          : completion.match?.candidates.some((candidate) => candidate.id === placeId && candidate.matchClass !== "outside") ?? false);
+    };
+    // The earliest usable departure bounds presence; ties resolve by client ID.
+    const selected = companions.filter(usable).sort((a, b) =>
       Date.parse(a.evidence.endedAt!) - Date.parse(b.evidence.endedAt!) ||
       a.evidence.clientEvidenceId.localeCompare(b.evidence.clientEvidenceId))[0] ?? null;
-    const departedMs = completion ? Date.parse(completion.evidence.endedAt!) : null;
-    const competing = completion != null && accepted.some(({ evidence }) =>
-      evidence.kind === "visit" && evidence.deviceId === e.deviceId && evidence.occurredAt !== e.occurredAt &&
-      Date.parse(evidence.occurredAt) > arrivalMs && Date.parse(evidence.occurredAt) < departedMs!);
-    const inferred = completion ? corroboratedVisits.get(completion.evidence.clientEvidenceId) : undefined;
-    const usable = completion != null && completion.evidence.isSimulated !== true && !competing &&
-      (inferred ? inferred.savedPlaceId === placeId
-        : completion.match?.candidates.some((candidate) => candidate.id === placeId && candidate.matchClass !== "outside") ?? false);
-    const attached = usable && !inferred;
+    const inferred = selected != null && corroboratedVisits.has(selected.evidence.clientEvidenceId);
     arrivals.set(e.clientEvidenceId, {
-      departedAt: usable ? completion!.evidence.endedAt ?? null : null,
-      completion: attached ? completion : null
+      departedAt: selected?.evidence.endedAt ?? null,
+      completion: selected && !inferred ? selected : null
     });
-    if (attached) attachedCompletionIds.add(completion!.evidence.clientEvidenceId);
+    // Only a selected companion on the corroborated broad-Visit path is segmented as before.
+    for (const companion of companions) if (companion !== selected || !inferred) consumedCompletionIds.add(companion.evidence.clientEvidenceId);
   }
-  return { arrivals, attachedCompletionIds };
+  return { arrivals, consumedCompletionIds };
 }
 
 function latestObservationMs(working: WorkingStay) {
@@ -983,8 +997,10 @@ export function runLocationEngine(input: LocationEngineInput): LocationEngineOut
   resolveCorroboratedCoincidentArrivals(accepted, input);
   const arrivalAnalysis = analyseSavedPlaceArrivalEvidence(accepted, input);
   const unknownArrivalBounds = unknownVisitArrivalBounds(accepted, input);
-  const { arrivals: corroboratedArrivals, attachedCompletionIds } =
+  const { arrivals: corroboratedArrivals, consumedCompletionIds } =
     corroboratedVisitArrivals(accepted, input, arrivalAnalysis.corroboratedVisits);
+  const acceptedOrder = new Map(accepted.map((item, index) => [item, index]));
+  const attachedCompletions = new Set([...corroboratedArrivals.values()].flatMap(({ completion }) => completion ? [completion] : []));
   const markArrivalPresence = (stay: WorkingStay, item: ClassifiedEvidence) => {
     const arrival = corroboratedArrivals.get(item.evidence.clientEvidenceId);
     if (!arrival || stay.placeMatchKind !== "saved" || item.match?.placeId !== stay.placeId) return;
@@ -993,10 +1009,15 @@ export function runLocationEngine(input: LocationEngineInput): LocationEngineOut
     const completion = arrival.completion;
     if (!completion || stay.evidence.includes(completion)) return;
     // The arrival's own completed callback joins here, whatever its delivery
-    // order, as the same Visit's interval support. Support resting on a broad
-    // callback stays inferred: medium confidence, never automatic.
+    // order, as the same Visit's interval support. An accurate one keeps the
+    // position it always had beside the arrival, so stay identities do not
+    // change; a broad one, which was never used before, follows the arrival, so
+    // the stay keeps its identity when it is delivered. Support resting on a
+    // broad callback stays inferred: medium confidence, never automatic.
     const endedAt = completion.evidence.endedAt!;
-    stay.evidence.push(completion);
+    const arrivalIndex = stay.evidence.lastIndexOf(item);
+    const before = accurateCoordinate(completion, input) && acceptedOrder.get(completion)! < acceptedOrder.get(item)!;
+    stay.evidence.splice(before ? arrivalIndex : arrivalIndex + 1, 0, completion);
     stay.supportedByVisit = true;
     if (!stay.visitSupportUntilAt || Date.parse(endedAt) > Date.parse(stay.visitSupportUntilAt)) stay.visitSupportUntilAt = endedAt;
     if (Date.parse(completion.evidence.occurredAt) >= Date.parse(stay.startedAt) &&
@@ -1059,13 +1080,17 @@ export function runLocationEngine(input: LocationEngineInput): LocationEngineOut
     if (!point && !evidence.savedPlaceId && evidence.kind !== "visit") continue;
     const itemKey = matchKey(item.match, evidence);
     const atMs = Date.parse(evidence.occurredAt);
+    // A corroborated arrival's companions join with it, in whichever order they
+    // were delivered, or are consumed unused; neither is ordinary evidence, and
+    // an unused one is never reused as support either.
+    const consumed = consumedCompletionIds.has(evidence.clientEvidenceId);
+    if (consumed && !attachedCompletions.has(item)) continue;
     if (evidence.kind === "visit" && evidence.endedAt && item.match?.kind === "saved" && accurateCoordinate(item, input)) {
       const key = `${evidence.deviceId}:${itemKey}`;
       const previous = visits.get(key);
       if (!previous?.evidence.endedAt || Date.parse(evidence.endedAt) > Date.parse(previous.evidence.endedAt)) visits.set(key, item);
     }
-    // Joins with its corroborated arrival instead, in whichever order they were delivered.
-    if (attachedCompletionIds.has(evidence.clientEvidenceId)) continue;
+    if (consumed) continue;
     // Registration/overlapping-region context must not split a quiet saved stay before
     // its next actual observation can resolve continuity. It remains in the raw journal.
     if (active?.placeMatchKind === "saved" && evidence.kind.startsWith("geofence_") &&

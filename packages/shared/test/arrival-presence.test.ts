@@ -232,11 +232,10 @@ describe("completed saved-place Visit ending after the departure evidence", () =
       stoppedAt: gymVisitAt("07:14:08.435"), stopUpperBoundAt: gymVisitAt("07:14:08.435") });
   });
 
-  it("keeps the stay's identity when the arrival's completed Visit drains", () => {
-    const before = gymStay(gymVisitDepartureFixture("07:42:43"))!;
-    const after = gymStay(gymVisitDepartureFixture("07:43:44"))!;
-    expect(after.clientSegmentId).toBe(before.clientSegmentId);
-    expect(after.evidenceIds.slice(0, 2)).toEqual(["gym-visit-open", "gym-visit"]);
+  // An accurate completion keeps the position it always had (here it sorts
+  // first), so identities of existing stays do not change (re-review finding).
+  it("keeps an accurate completion where earlier engines placed it", () => {
+    expect(gymStay(gymVisitDepartureFixture("07:43:44"))!.evidenceIds.slice(0, 2)).toEqual(["gym-visit", "gym-visit-open"]);
   });
 
   // Re-review of c18ad1c: a Home Visit spanning accurate Work fixes was reused by a
@@ -314,6 +313,17 @@ describe("broad completed Visit after a corroborated arrival (4 Oct school drop-
     expect(other.evidenceIds[0]).toBe("visit-0653-open");
   });
 
+  // Re-review of 565f620: moving an accurate completion behind its arrival changed
+  // existing stay IDs once and orphaned decided stays' neighbouring journeys.
+  it("keeps an accurate completion's earlier position, so existing identities do not change", () => {
+    const input = schoolVisitFixture();
+    input.evidence = input.evidence.map((item) =>
+      item.clientEvidenceId === "visit-0653-done" ? { ...item, horizontalAccuracyMeters: 20 } : item);
+    expect(schoolStays(input)[0].evidenceIds.slice(0, 2)).toEqual(["visit-0653-done", "visit-0653-open"]);
+    // A broad completion was never used before, so it follows the arrival.
+    expect(schoolStays(schoolVisitFixture())[0].evidenceIds.slice(0, 2)).toEqual(["visit-0653-open", "visit-0653-done"]);
+  });
+
   it("ends presence at the reported departure when the phone stays silent after leaving", () => {
     const input = schoolVisitFixture("12:00:00", { exclude: ["back-0", "back-1", "back-2-slc", "back-3", "back-4", "back-5", "back-6",
       "school-exit-0717", "gym-exit-0717", "home-exit-0717", "visit-0721-open", "arrive-0", "home-enter-0721", "arrive-1",
@@ -335,4 +345,30 @@ describe("broad completed Visit after a corroborated arrival (4 Oct school drop-
     // Presence continues to the departure evidence, exactly as before the completion was delivered.
     expect(schoolStays(input)).toEqual([expect.objectContaining({ startedAt: schoolVisitAt("06:53:00"), stoppedAt: schoolVisitAt("07:17:47.589") })]);
   });
+
+  const companion = (input: LocationEngineInput, id: string, patch: Partial<LocationEvidence>) => {
+    const arrival = input.evidence.find((item) => item.clientEvidenceId === "visit-0653-open")!;
+    input.evidence.push({ ...arrival, clientEvidenceId: id, metadata: {}, ...patch });
+  };
+
+  // Re-review of 565f620: an ignored companion still contradicted its own
+  // arrival's corroboration (or became an outside reading) when it sorted after it.
+  it.each(["visit-0653-a", "visit-0653-z"])("never lets an incompatible companion remove presence (id %s)", (id) => {
+    const input = schoolVisitFixture("08:30:00", { exclude: ["visit-0653-done"] });
+    companion(input, id, { latitude: 1_500 / 111_195, horizontalAccuracyMeters: 20, endedAt: schoolVisitAt("07:18:00") });
+    expect(schoolStays(input)).toEqual([expect.objectContaining({ startedAt: schoolVisitAt("06:53:00"), stoppedAt: schoolVisitAt("07:17:47.589") })]);
+    expect(schoolStays(input)[0].evidenceIds).not.toContain(id);
+  });
+
+  // Re-review of 565f620: an unselected companion still joined and moved the departure.
+  it.each([["visit-0653-a", "visit-0653-z"], ["visit-0653-z", "visit-0653-a"]])(
+    "bounds presence at the earliest companion whatever their order (%s ends first)", (earlyId, lateId) => {
+      const input = schoolVisitFixture("08:30:00", { exclude: ["visit-0653-done"] });
+      companion(input, earlyId, { horizontalAccuracyMeters: 20, endedAt: schoolVisitAt("07:10:00") });
+      companion(input, lateId, { horizontalAccuracyMeters: 20, endedAt: schoolVisitAt("07:30:00") });
+      const [stay] = schoolStays(input);
+      expect(stay).toMatchObject({ startedAt: schoolVisitAt("06:53:00"), stoppedAt: schoolVisitAt("07:10:00") });
+      expect(stay.evidenceIds).toContain(earlyId);
+      expect(stay.evidenceIds).not.toContain(lateId);
+    });
 });

@@ -79,10 +79,15 @@ This is the same class as the 3 Oct gym bug: the completed callback replaced the
 
 **Result.**
 - A shape-derived fixture (`schoolVisitFixture.ts`) reproduces the staging output on `bd08751`. With the fix, once the Visits drain: drive 06:49:32–06:53:00 (the drop-off stays inside it), School stay 06:53:00–07:17:43 at medium confidence, drive 07:17:48–07:21:35, then Home. That matches Google. Tests also cover delivery order, a silent phone after leaving (the stay ends at the reported departure, not hours later), and three controls: no arrival callback, no corroboration, and an incompatible completion.
-- The gym stay is unchanged at 06:07:48–07:14:08 at every processing time, and it now keeps its ID when the completion drains.
-- Retained staging week (26 Sep–4 Oct, replayed with today's places): two timing changes, both this pattern. One is 4 Oct. The other is the 29 Sep ~9-minute pickup, which becomes a School stay 16:35:01–16:44:11 (Google 16:35–16:43), consistent with four other school visits the engine already recorded when their completion happened to be precise. Without the School place: no timing changes. Finalised segments later retracted during as-received replay fall from 44 to 37 (40 without the School).
+- The gym stay is unchanged at 06:07:48–07:14:08 at every processing time.
+- Retained staging week (26 Sep–4 Oct, replayed with today's places): two timing changes, both this pattern. One is 4 Oct. The other is the 29 Sep ~9-minute pickup, which becomes a School stay 16:35:01–16:44:11 (Google 16:35–16:43), consistent with four other school visits the engine already recorded when their completion happened to be precise. Without the School place: no changes at all. Finalised segments later retracted during as-received replay fall from 44 to 41 (unchanged without the School).
 - Private 25–29 Sep corpus: no timing changes.
-- **One-time ID change.** Stays whose completion used to sort before its arrival now start with the arrival, so their ID changes once on deploy (13 corpus segments, 17–20 in the staging week). Open Reviews for them are replaced once with identical times; decided ones stay protected.
+- Stay identities are unchanged wherever the previous engine already produced the stay (0 ID-only changes in the corpus and the staging week).
+
+**Re-review (Codex, at `565f620`).** Three findings, all fixed with regressions that fail on `565f620`:
+- An incompatible completion was ignored for presence but still segmented as ordinary evidence. When its ID sorted after the arrival it contradicted the arrival's corroboration and removed the stay. Companions are now paired before corroboration and never contradict their own arrival.
+- With two completions, the earlier bounded presence but the other still joined and extended the stay (00:10 became 00:30). Every companion is now resolved together: the earliest usable one is selected, and the rest are consumed unused, including for reuse.
+- Moving an accurate completion behind its arrival changed existing stay IDs once, and replay then orphaned a decided stay's neighbouring journeys. An accurate completion now keeps its earlier position, so no identity changes; only broad completions, never used before, follow the arrival.
 
 Still to drive on staging: a 30–60 second kerbside drop-off, a 20+ minute stop near a saved place, a school run then staying Home, and an ordinary drive with traffic.
 
