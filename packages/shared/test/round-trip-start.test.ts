@@ -151,10 +151,26 @@ describe("the start of a same-place round trip", () => {
       e("out-1", 82, 650), e("out-2", 84.5, 1_200), e("back", 87, 650),
       geofence("enter", 89, "geofence_enter"), e("home-late", 94, 0, { speedMetersPerSecond: 0 })];
     const trips = commutes(input(evidence));
+    expect(trips).toHaveLength(1);
     expect(trips.every((trip) => trip.startedAt >= at(77))).toBe(true);
   });
 
-  it.each(Array.from({ length: 20 }, (_, index) => index + 1))("keeps a simulated outing with short stops as one round trip (seed %i)", (seed) => {
+  it("starts a later drive at its own departure after an earlier walk and a quiet hour at Home (review finding)", () => {
+    // Away 900 m and back, Home for 90 minutes with no Visit or still fix after the return, then a real drive.
+    const evidence = [e("home-0", 0, 0, { speedMetersPerSecond: 0 }), e("home-1", 10, 0, { speedMetersPerSecond: 0 }),
+      geofence("walk-exit", 20, "geofence_exit"), e("walk-out", 25, 500, { speedMetersPerSecond: 3 }), e("walk-far", 30, 900, { speedMetersPerSecond: 3 }),
+      e("walk-back", 35, 400, { speedMetersPerSecond: 3 }), geofence("walk-enter", 39, "geofence_enter"), e("walk-home", 39.2, 40, { speedMetersPerSecond: 3 }),
+      geofence("drive-exit", 130, "geofence_exit"), e("drive-0", 130.5, 300), e("drive-1", 132, 1_000), e("drive-2", 133.5, 1_800),
+      e("drive-3", 135, 1_000), e("drive-4", 136.5, 300), geofence("drive-enter", 137, "geofence_enter"),
+      e("home-2", 137.5, 0, { speedMetersPerSecond: 0 }), e("home-3", 150, 0, { speedMetersPerSecond: 0 }), e("home-4", 170, 0, { speedMetersPerSecond: 0 })];
+    const drives = commutes(input(evidence, 300)).filter((trip) => trip.stoppedAt! > at(133));
+    expect(drives).toHaveLength(1);
+    expect(drives[0].startedAt >= at(129)).toBe(true);
+  });
+
+  // Seeds 29 (lost under the former latest-support rule), 187 and 642 (return observed long before the Home stay
+  // begins) pin the review findings; the rest guard the ordinary shape.
+  it.each([...Array.from({ length: 20 }, (_, index) => index + 1), 29, 187, 642])("keeps a simulated outing with short stops as one round trip (seed %i)", (seed) => {
     const sim = simulate(outing, seed);
     const departure = sim.truth.stays[0].to;
     const returned = sim.truth.stays[3].from;
@@ -164,6 +180,24 @@ describe("the start of a same-place round trip", () => {
     expect(trips[0]).toMatchObject({ qualificationReason: "same_place_meaningful_round_trip", fromPlaceId: HOME_ID, toPlaceId: HOME_ID });
     expect(Math.abs(Date.parse(trips[0].startedAt) - departure)).toBeLessThanOrEqual(2 * 60_000);
     expect(Math.abs(Date.parse(trips[0].stoppedAt!) - returned)).toBeLessThanOrEqual(2 * 60_000);
+  });
+});
+
+describe("a later departure after an earlier excursion (review finding)", () => {
+  const HOME_SIM: SimPlace = { id: HOME_ID, name: "Home", at: { x: 0, y: 0 }, radius: 100, loggingEnabled: false };
+  const quietHome = (homeMinutes: number): Scenario => ({ start: "2026-03-09T08:00:00Z", origin: HOME_SIM.at, places: [HOME_SIM], legs: [
+    { kind: "stay", minutes: 60 }, { kind: "walk", to: { x: 0, y: 900 } }, { kind: "walk", to: HOME_SIM.at },
+    { kind: "stay", minutes: homeMinutes, visit: false, driftFixes: false }, { kind: "drive", to: { x: 0, y: 1_800 } },
+    { kind: "drive", to: HOME_SIM.at }, { kind: "stay", minutes: 90 }
+  ] });
+  it.each([[2, 90], [3, 90], [20, 90], [2, 420]])("starts the drive at its own departure (seed %i, %i minutes at Home)", (seed, homeMinutes) => {
+    const sim = simulate(quietHome(homeMinutes), seed);
+    const departure = sim.truth.stays[1].to;
+    const returned = sim.truth.stays[2].from;
+    const drives = commutes(sim.input()).filter((trip) => Date.parse(trip.stoppedAt!) > departure);
+    expect(drives).toHaveLength(1);
+    expect(Math.abs(Date.parse(drives[0].startedAt) - departure)).toBeLessThanOrEqual(2 * 60_000);
+    expect(Math.abs(Date.parse(drives[0].stoppedAt!) - returned)).toBeLessThanOrEqual(2 * 60_000);
   });
 });
 

@@ -50,21 +50,27 @@ Temporal invariants:
   origin, and robust faster movement. This is the narrow exception to
   distinct endpoints established by PR #114; short same-site loops are not
   commutes. Route distance and straight-line distance remain separate.
-- A journey starts at the latest evidence still matching its origin stay. In a
-  same-place round trip it starts at the last evidence matching the place
-  before the trip had certainly left: its first accurate standard or
+- A journey starts at the latest evidence still matching its origin stay. A
+  round trip between stays at the same known place (saved or learned) runs
+  instead from its observed departure to its observed return
+  (`roundTripBounds`). An excursion starts at its first accurate standard or
   significant-change fix at least `commuteSamePlaceMinimumExcursionMeters`
-  from the stay's centre (the excursion every same-place round trip needs).
-  Later evidence matching the place belongs to a pass by it or to the return:
+  from the stay's centre; the trip starts at the last evidence at the place
+  before the final excursion. Genuine presence back at the place ends an
+  excursion, so a later departure starts a new one: a still accurate fix there,
+  or evidence there at least `savedPlaceMinimumDwellMs` apart with nothing away
+  in between. A moving pass-by, geofence callbacks and Visits do not, because
   iOS dates a return's arrival Visit up to about two and a half minutes before
-  the car stops, sometimes while it is still several hundred metres out or
-  still at an interior stop, and that Visit used to shrink the whole round
-  trip to seconds so it was discarded. Visits (backdated arrivals, averaged
-  completions) and broad fixes never set the point, so a jittered farther
-  reading, a broad outlier or a second loop cannot move it. Without such a fix
-  the rule is unchanged. Private corpus unchanged; in the staging week only the
-  4 Oct school run without its School pin changes, from a 4-minute fragment to
-  the whole 07:49–08:21 round trip. The capture simulator
+  the car stops, sometimes while it is still out or at an interior stop. The
+  trip ends at the first non-Visit evidence back at the place after its last
+  far fix, when that is before the next stay begins (a stay can start late).
+  Visits and broad fixes never set either point. Without a far fix the
+  ordinary rule applies; this includes trips assembled through stops whose
+  legs each qualify while staying within the excursion minimum. Previously the
+  return's early Visit could shrink the trip to seconds so it was discarded.
+  Private corpus unchanged; in the staging week only the 4 Oct school run
+  without its School pin changes, from a 4-minute fragment to the whole
+  07:49–08:21 round trip. The capture simulator
   (`test/fixtures/captureSimulator.ts`) found the bug.
 - Large-site continuity may coalesce only unknown-to-unknown stays with an
   actual visit signal, a credible later dwell, no more than `450m` endpoint

@@ -48,22 +48,80 @@ function sameKnownEndpoint(from: StaySegment, to: StaySegment) {
   );
 }
 
+type RoundTripBounds = {
+  /** The last evidence at the place before the final excursion left; null when none precedes it in the gap. */
+  departure: ClassifiedEvidence | null;
+  /** The first evidence back at the place after the excursion's last far fix (never a Visit), if observed. */
+  returnedAtMs: number | null;
+  /** The latest evidence away from the place before that return. */
+  lastAwayMs: number | null;
+};
+
 /**
- * When a same-place round trip had certainly left: its first accurate GPS fix
- * at least the round-trip excursion minimum from the place, if any. Visits
- * (backdated arrivals, averaged completions) and broad fixes never set it.
+ * A same-place round trip's observed departure and return. An excursion starts
+ * at its first accurate standard/significant fix at least the round-trip
+ * excursion minimum from the place; Visits (backdated arrivals, averaged
+ * completions) and broad fixes never set it. Genuine presence back at the
+ * place ends an excursion, so a later departure starts a new one: a still
+ * accurate fix there, or evidence there at least `savedPlaceMinimumDwellMs`
+ * apart with nothing away in between. A moving pass-by, geofence callbacks and
+ * Visits do not. Null when the gap has no far fix, which leaves the ordinary
+ * rule in place.
  */
-function roundTripLeftMs(stay: StaySegment, evidence: ClassifiedEvidence[], config: LocationEngineConfig) {
+function roundTripBounds(stay: StaySegment, evidence: ClassifiedEvidence[], config: LocationEngineConfig): RoundTripBounds | null {
   const centre = segmentPoint(stay);
   if (!centre) return null;
-  for (const item of evidence) {
+  const accurateFix = (item: ClassifiedEvidence) => {
     const { kind, horizontalAccuracyMeters } = item.evidence;
-    const point = evidencePoint(item);
-    if (!point || (kind !== "standard_location" && kind !== "significant_change") || horizontalAccuracyMeters == null ||
-      horizontalAccuracyMeters > config.highQualityHorizontalAccuracyMeters) continue;
-    if (distanceMeters(centre, point) >= config.commuteSamePlaceMinimumExcursionMeters) return Date.parse(item.evidence.occurredAt);
+    return evidencePoint(item) != null && (kind === "standard_location" || kind === "significant_change") &&
+      horizontalAccuracyMeters != null && horizontalAccuracyMeters <= config.highQualityHorizontalAccuracyMeters;
+  };
+  const still = (item: ClassifiedEvidence) => {
+    const speed = item.evidence.speedMetersPerSecond ?? item.impliedSpeedMetersPerSecond;
+    return accurateFix(item) && (speed == null || !Number.isFinite(speed) || speed < config.movementSpeedThresholdMps);
+  };
+  let support: ClassifiedEvidence | null = null;
+  let departure: ClassifiedEvidence | null | undefined;
+  let inExcursion = false;
+  let backSinceMs: number | null = null;
+  let lastFarMs: number | null = null;
+  for (const item of evidence) {
+    const atMs = Date.parse(item.evidence.occurredAt);
+    if (evidenceMatchesStay(item, stay)) {
+      if (!inExcursion) {
+        support = item;
+        continue;
+      }
+      if (item.evidence.kind === "visit") continue;
+      backSinceMs ??= atMs;
+      if (still(item) || atMs - backSinceMs >= config.savedPlaceMinimumDwellMs) {
+        inExcursion = false;
+        backSinceMs = null;
+        support = item;
+      }
+      continue;
+    }
+    if (!accurateFix(item)) continue;
+    backSinceMs = null;
+    if (distanceMeters(centre, evidencePoint(item)!) < config.commuteSamePlaceMinimumExcursionMeters) continue;
+    if (!inExcursion) {
+      inExcursion = true;
+      departure = support;
+    }
+    lastFarMs = atMs;
   }
-  return null;
+  if (lastFarMs == null) return null;
+  const farMs = lastFarMs;
+  const returned = evidence.find((item) => Date.parse(item.evidence.occurredAt) > farMs && item.evidence.kind !== "visit" &&
+    evidenceMatchesStay(item, stay));
+  const returnedAtMs = returned ? Date.parse(returned.evidence.occurredAt) : null;
+  const lastAway = returnedAtMs == null ? null : evidence.filter((item) => Date.parse(item.evidence.occurredAt) < returnedAtMs &&
+    evidencePoint(item) != null && !evidenceMatchesStay(item, stay)).at(-1);
+  return {
+    departure: departure ?? null,
+    returnedAtMs,
+    lastAwayMs: lastAway ? Date.parse(lastAway.evidence.occurredAt) : null
+  };
 }
 
 function percentile(values: number[], ratio: number) {
@@ -389,20 +447,21 @@ export function deriveCommutes(
     const to = stays[index];
     if (!from.stoppedAt) continue;
     const originalStartedAtMs = Date.parse(from.stoppedAt);
-    const stoppedAtMs = Date.parse(to.startedAt);
+    const gapEndMs = Date.parse(to.startedAt);
     const boundaryEvidence = acceptedEvidence.filter((_item, evidenceIndex) => {
       const at = occurredAtMs[evidenceIndex];
-      return at > originalStartedAtMs && at < stoppedAtMs;
+      return at > originalStartedAtMs && at < gapEndMs;
     });
-    // A round trip starts at the last evidence at the place before it had
-    // certainly left (its first accurate fix far away). Later evidence matching
-    // the place belongs to a pass by it or to the return: iOS often dates the
-    // return's arrival Visit before the stay it starts.
-    const leftMs = sameKnownEndpoint(from, to) ? roundTripLeftMs(from, boundaryEvidence, config) : null;
-    const latestFromSupport = boundaryEvidence
-      .filter((item) => evidenceMatchesStay(item, from) &&
-        (leftMs == null || Date.parse(item.evidence.occurredAt) < leftMs))
-      .at(-1);
+    // A round trip runs from its observed departure to its observed return
+    // (roundTripBounds). Evidence at the place after the departure belongs to
+    // a pass by it or to the return: iOS often dates the return's arrival
+    // Visit before the stay it starts, which the stay may begin later still.
+    const roundTrip = sameKnownEndpoint(from, to) ? roundTripBounds(from, boundaryEvidence, config) : null;
+    const latestFromSupport = roundTrip
+      ? roundTrip.departure ?? undefined
+      : boundaryEvidence.filter((item) => evidenceMatchesStay(item, from)).at(-1);
+    const returnedEarly = roundTrip?.returnedAtMs != null && roundTrip.returnedAtMs < gapEndMs;
+    const stoppedAtMs = returnedEarly ? roundTrip!.returnedAtMs! : gapEndMs;
     const startedAtMs = latestFromSupport
       ? Date.parse(latestFromSupport.evidence.occurredAt)
       : originalStartedAtMs;
@@ -483,11 +542,13 @@ export function deriveCommutes(
           ? "finalised"
           : "closed",
       startedAt: new Date(startedAtMs).toISOString(),
-      stoppedAt: to.startedAt,
+      stoppedAt: returnedEarly ? new Date(stoppedAtMs).toISOString() : to.startedAt,
       startLowerBoundAt: from.stopLowerBoundAt ?? from.stoppedAt,
       startUpperBoundAt: from.stopUpperBoundAt ?? routeEvidence[0]?.evidence.occurredAt ?? from.stoppedAt,
-      stopLowerBoundAt: to.startLowerBoundAt ?? to.startedAt,
-      stopUpperBoundAt: to.startUpperBoundAt ?? to.startedAt,
+      stopLowerBoundAt: returnedEarly
+        ? new Date(roundTrip!.lastAwayMs ?? stoppedAtMs).toISOString()
+        : to.startLowerBoundAt ?? to.startedAt,
+      stopUpperBoundAt: returnedEarly ? new Date(stoppedAtMs).toISOString() : to.startUpperBoundAt ?? to.startedAt,
       fromStaySegmentId: from.clientSegmentId,
       toStaySegmentId: to.clientSegmentId,
       fromPlaceId: from.placeId ?? null,
