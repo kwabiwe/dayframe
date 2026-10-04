@@ -41,7 +41,9 @@ export const LocationEvidenceMetadataSchema = z
       .optional(),
     accuracyAuthorization: z.enum(["full", "reduced", "unknown"]).optional(),
     errorCode: z.string().trim().max(80).optional(),
-    signalSequence: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER).optional()
+    signalSequence: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER).optional(),
+    // When the device's native callback ran (receivedAt is when JavaScript drained it).
+    nativeCallbackAt: z.string().datetime({ offset: true }).optional()
   })
   .strict();
 

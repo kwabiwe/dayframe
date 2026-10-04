@@ -19,7 +19,7 @@ import { getActiveMobileAccountSnapshot, mobileAccountKey, mobileAccountOwnersEq
 import { subscribeMobileSignedOut } from "./mobileSessionTransition";
 import { captureLocationOwnership, updateLocationCaptureCatalogue, getLocationRolloutMode, hasLegacyLocationOwner, isLocationCaptureSnapshotCurrent,
   locationCaptureRevision, recordLocationCaptureDiscard, type LocationCaptureSnapshot } from "./location/store";
-import { bindLocationCaptureOwner, enableLocationCaptureOwnership, endLocationCaptureOwnership, locationCaptureAccountChanged,
+import { bindLocationCaptureOwner, drainNativeLocationSignalsInBatches, enableLocationCaptureOwnership, endLocationCaptureOwnership, locationCaptureAccountChanged,
   isLocationLogoutCurrent, locationCaptureSessionSignedOut, stopUnownedLocationCapture, withLocationCaptureLifecycle } from "./location/runtime";
 
 export const DAYFRAME_GEOFENCE_TASK = "DAYFRAME_GEOFENCE_TASK";
@@ -1725,8 +1725,17 @@ async function persistV2LocationBatch(locations: Location.LocationObject[], capt
   if (evidence.length !== locations.length) await store.recordLocationCaptureDiscard("invalid_timestamp", locations.length - evidence.length);
   if (rolloutMode === "v1") return { rolloutMode };
   await store.persistLocationEvidence(evidence, capture);
+  await drainNativeSignalsOnWake(capture);
   if (isLocationCaptureSnapshotCurrent(capture)) void store.syncLocationEvidence().catch(error => recordV2LocationFailure(error, capture));
   return { rolloutMode };
+}
+
+// Native Visit and significant-change callbacks wait in the native journal until
+// JavaScript runs. Every background wake drains them through the owned lifecycle
+// lane, so they upload with this batch instead of at the next foreground.
+async function drainNativeSignalsOnWake(capture: LocationCaptureSnapshot) {
+  if (!isLocationCaptureSnapshotCurrent(capture)) return;
+  await drainNativeLocationSignalsInBatches().catch(error => recordV2LocationFailure(error, capture));
 }
 
 async function persistV2GeofenceEvidence(transition: GeofenceTransition, region: DayframeRegion, capture: LocationCaptureSnapshot) {
@@ -1760,6 +1769,7 @@ async function persistV2GeofenceEvidence(transition: GeofenceTransition, region:
     metadata: {}
   } satisfies LocationEvidence);
   await store.persistLocationEvidence([evidence], capture);
+  await drainNativeSignalsOnWake(capture);
   if (isLocationCaptureSnapshotCurrent(capture)) void store.syncLocationEvidence().catch(error => recordV2LocationFailure(error, capture));
   return { rolloutMode };
 }

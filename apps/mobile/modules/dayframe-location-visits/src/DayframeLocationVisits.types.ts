@@ -11,11 +11,15 @@ export type DayframeLocationNativeSignal = {
   latitude?: number | null;
   longitude?: number | null;
   horizontalAccuracyMeters?: number | null;
+  /** Significant-change fixes only; null when iOS reports no valid speed. */
+  speedMetersPerSecond?: number | null;
   metadata: {
     visitDepartureOpen?: string;
     authorizationStatus?: string;
     accuracyAuthorization?: string;
     errorCode?: string;
+    /** ISO time, with milliseconds, when the native callback ran. */
+    nativeCallbackAt?: string;
   };
 };
 

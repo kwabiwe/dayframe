@@ -768,3 +768,49 @@ describe("PR 213 consent and semantic cutover regressions", () => {
     expect(value).toBe(new Date(T0 + 2_400_000).toISOString());
   });
 });
+
+describe("native signal delivery on background wakes", () => {
+  it("a location-learning wake drains pending native Visits into the same owned journal", async () => {
+    await signIn();
+    vi.setSystemTime(T0 + 60_000);
+    h.nativeSignals.push(visit("wake-visit", T0 + 10_000, T0 + 50_000));
+    await learningTask()({ data: { locations: [fix(T0 + 55_000)] }, error: null });
+    expect(rows().map(r => [r.id, r.k])).toEqual(expect.arrayContaining([["wake-visit", key(A)]]));
+    expect(rows()).toHaveLength(2);
+    expect(h.nativeSignals).toEqual([]);
+  });
+
+  it("a geofence wake drains pending native Visits after persisting the transition", async () => {
+    await signIn(A, [place]);
+    const binding = (await store.readLocationCaptureBinding())!;
+    vi.setSystemTime(T0 + 60_000);
+    h.nativeSignals.push(visit("geofence-wake-visit", T0 + 10_000, T0 + 50_000));
+    await geofenceTask()({ data: { eventType: 1, region: { identifier: `${binding.id}:${A_PLACE}`, latitude: 51.5, longitude: -0.1, radius: 100 } }, error: null });
+    expect(rows().map(r => r.id)).toContain("geofence-wake-visit");
+    expect(rows()).toHaveLength(2);
+    expect(h.nativeSignals).toEqual([]);
+  });
+
+  it("a failed native drain keeps the Expo batch and leaves the native journal for the next drain", async () => {
+    await signIn();
+    vi.setSystemTime(T0 + 60_000);
+    h.nativeSignals.push(visit("retry-visit", T0 + 10_000, T0 + 50_000));
+    h.drain.mockRejectedValueOnce(new Error("synthetic native drain failure"));
+    await learningTask()({ data: { locations: [fix(T0 + 55_000)] }, error: null });
+    expect(rows().map(r => r.id)).not.toContain("retry-visit");
+    expect(rows()).toHaveLength(1);
+    expect(h.nativeSignals).toHaveLength(1);
+    await runtime.drainNativeLocationSignalsInBatches();
+    expect(rows().map(r => r.id)).toContain("retry-visit");
+  });
+
+  it("a stale wake after sign-out never drains signed-out native signals into the journal", async () => {
+    await signIn();
+    await signOut("logout");
+    h.drain.mockClear();
+    h.nativeSignals.push(visit("signed-out-wake", T0 + 10_000, T0 + 50_000));
+    await learningTask()({ data: { locations: [fix(T0 + 55_000)] }, error: null });
+    expect(rows()).toEqual([]);
+    expect(h.drain).not.toHaveBeenCalled();
+  });
+});

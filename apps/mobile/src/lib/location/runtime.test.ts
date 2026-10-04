@@ -19,7 +19,8 @@ const mocks = vi.hoisted(() => ({
   processPendingLocationEvidence: vi.fn(async () => []),
   recordLocationStoreError: vi.fn(async () => undefined),
   recordLocationCaptureCleanupFailure: vi.fn(async () => undefined),
-  syncLocationEvidence: vi.fn(async () => ({ synced: true, acknowledgedCount: 0 }))
+  syncLocationEvidence: vi.fn(async () => ({ synced: true, acknowledgedCount: 0 })),
+  persistLocationEvidence: vi.fn(async (items: unknown[]) => ({ insertedCount: items.length }))
 }));
 vi.mock("expo-secure-store", () => ({
   getItemAsync: async (key: string) => state.secure.get(key) ?? null,
@@ -49,7 +50,7 @@ vi.mock("./store", () => ({
   isLocationCaptureSnapshotCurrent: () => Boolean(state.binding?.enabled && state.context),
   isLocationCaptureAdmissionSuspended: () => false,
   getLocationRolloutMode: async () => state.mode,
-  persistLocationEvidence: async (items: unknown[]) => ({ insertedCount: items.length }),
+  persistLocationEvidence: mocks.persistLocationEvidence,
   processPendingLocationEvidence: mocks.processPendingLocationEvidence,
   recordLocationStoreError: mocks.recordLocationStoreError,
   recordLocationCaptureCleanupFailure: mocks.recordLocationCaptureCleanupFailure,
@@ -75,6 +76,7 @@ describe("location runtime binding and drain", () => {
     vi.clearAllMocks(); state.secure.clear(); state.binding = null; state.context = null; state.mode = "v2_shadow"; state.revision = 0;
     state.owner = { userId: "user-a", workspaceId: "workspace-a" };
     mocks.clearAllSignals.mockResolvedValue(0); mocks.drainSignals.mockResolvedValue([]);
+    mocks.persistLocationEvidence.mockImplementation(async (items: unknown[]) => ({ insertedCount: items.length }));
     mocks.configureLocationAccount.mockImplementation(async (context: LocationAccountContext, mode: string, enabled: boolean) => {
       state.context = context; state.mode = mode;
       state.binding ??= { id: "capture-test", accountKey: `${context.workspaceId}:${context.userId}`, backend: "https://fixture.invalid", boundAt: "2026-08-11T00:00:00Z", enabled };
@@ -121,6 +123,27 @@ describe("location runtime binding and drain", () => {
     mocks.drainSignals.mockResolvedValue(Array.from({ length: 100 }, (_, index) => ({ id: `signal-${index}`, kind: "provider_status", occurredAt: "2026-08-11T12:00:00.000Z", endedAt: null, latitude: null, longitude: null, horizontalAccuracyMeters: null, metadata: {} })));
     expect((await drainNativeLocationSignalsInBatches()).transferredCount).toBe(500);
     expect(mocks.drainSignals).toHaveBeenCalledTimes(5); expect(mocks.drainSignals).toHaveBeenCalledWith(100);
+  });
+  it("keeps significant-change speed and the native callback clock without replacing sample time", async () => {
+    await configureLocationIntelligence(bootstrap());
+    mocks.drainSignals.mockResolvedValueOnce([
+      { id: "slc-1", kind: "significant_change", occurredAt: "2026-08-11T12:00:00.250Z", endedAt: null, latitude: 51.5, longitude: -0.1,
+        horizontalAccuracyMeters: 40, speedMetersPerSecond: 12.5, metadata: { nativeCallbackAt: "2026-08-11T12:00:03.125Z" } },
+      { id: "slc-2", kind: "significant_change", occurredAt: "2026-08-11T12:05:00.000Z", endedAt: null, latitude: 51.5, longitude: -0.1,
+        horizontalAccuracyMeters: 40, speedMetersPerSecond: -1, metadata: { nativeCallbackAt: "not a time" } },
+      { id: "slc-legacy", kind: "significant_change", occurredAt: "2026-08-11T12:10:00Z", endedAt: null, latitude: 51.5, longitude: -0.1,
+        horizontalAccuracyMeters: 40, metadata: {} }
+    ]);
+    mocks.persistLocationEvidence.mockClear();
+    expect((await drainNativeLocationSignalsInBatches()).transferredCount).toBe(3);
+    const persisted = mocks.persistLocationEvidence.mock.calls.flatMap(([items]) => items as Array<Record<string, unknown> & { metadata: Record<string, unknown> }>);
+    const byId = new Map(persisted.map(item => [item.clientEvidenceId, item]));
+    expect(byId.get("slc-1")).toMatchObject({ occurredAt: "2026-08-11T12:00:00.250Z", speedMetersPerSecond: 12.5, metadata: { nativeCallbackAt: "2026-08-11T12:00:03.125Z" } });
+    expect(byId.get("slc-1")?.receivedAt).not.toBe("2026-08-11T12:00:03.125Z");
+    expect(byId.get("slc-2")).toMatchObject({ speedMetersPerSecond: null });
+    expect(byId.get("slc-2")?.metadata).not.toHaveProperty("nativeCallbackAt");
+    expect(byId.get("slc-legacy")).toMatchObject({ speedMetersPerSecond: null });
+    expect(byId.get("slc-legacy")?.metadata).not.toHaveProperty("nativeCallbackAt");
   });
   it("reprocesses current time and forces replay on foreground without new signals", async () => {
     await configureLocationIntelligence(bootstrap()); vi.clearAllMocks();

@@ -326,7 +326,10 @@ async function drainNativeLocationSignalsUnsafe(limit = 100,
       ...(signal.metadata.visitDepartureOpen === "true" ? { visitDepartureOpen: true } : {}),
       ...(signal.metadata.authorizationStatus ? { authorizationStatus: signal.metadata.authorizationStatus as LocationEvidenceMetadata["authorizationStatus"] } : {}),
       ...(signal.metadata.accuracyAuthorization ? { accuracyAuthorization: signal.metadata.accuracyAuthorization as LocationEvidenceMetadata["accuracyAuthorization"] } : {}),
-      ...(signal.metadata.errorCode ? { errorCode: signal.metadata.errorCode } : {})
+      ...(signal.metadata.errorCode ? { errorCode: signal.metadata.errorCode } : {}),
+      // When the native callback ran; receivedAt stays the drain time.
+      ...(signal.metadata.nativeCallbackAt && Number.isFinite(Date.parse(signal.metadata.nativeCallbackAt))
+        ? { nativeCallbackAt: signal.metadata.nativeCallbackAt } : {})
     };
     const parsed = LocationEvidenceSchema.safeParse({
       clientEvidenceId: signal.id, deviceId: context.deviceId,
@@ -334,6 +337,7 @@ async function drainNativeLocationSignalsUnsafe(limit = 100,
       occurredAt: signal.occurredAt, endedAt: signal.endedAt ?? null,
       latitude: signal.latitude ?? null, longitude: signal.longitude ?? null,
       horizontalAccuracyMeters: signal.horizontalAccuracyMeters ?? null,
+      speedMetersPerSecond: signal.speedMetersPerSecond != null && signal.speedMetersPerSecond >= 0 ? signal.speedMetersPerSecond : null,
       receivedAt, timeZone: context.timeZone, metadata
     });
     return parsed.success ? [parsed.data] : [];
