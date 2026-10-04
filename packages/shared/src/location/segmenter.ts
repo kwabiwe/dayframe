@@ -740,7 +740,8 @@ function stayFromPhysicalStop(stop: PhysicalStop, accepted: ClassifiedEvidence[]
  * decides when; a saved place applies only when every fragment was that place
  * and the stop's evidence places the device there (stillAtSavedPlace).
  */
-function stayAbsorbingFragments(stop: PhysicalStop, fragments: StaySegment[], accepted: ClassifiedEvidence[], input: LocationEngineInput): StaySegment {
+function stayAbsorbingFragments(stop: PhysicalStop, fragments: StaySegment[], accepted: ClassifiedEvidence[], input: LocationEngineInput,
+  reused: ReadonlySet<ClassifiedEvidence>): StaySegment {
   const base = stayFromPhysicalStop(stop, accepted, input);
   const order = new Map(accepted.map((item, index) => [item.evidence.clientEvidenceId, index]));
   const evidenceIds = [...new Set([...stop.evidenceIds, ...fragments.flatMap((stay) => stay.evidenceIds)])]
@@ -751,7 +752,7 @@ function stayAbsorbingFragments(stop: PhysicalStop, fragments: StaySegment[], ac
   const latest = [base, ...fragments].reduce((last, stay) => Date.parse(stay.stoppedAt!) > Date.parse(last.stoppedAt!) ? stay : last);
   const placeIds = [...new Set(fragments.map((stay) => stay.placeMatchKind === "saved" ? stay.placeId : null))];
   const placeId = placeIds.length === 1 && placeIds[0] &&
-    stillAtSavedPlace(placeIds[0], items, accepted, Date.parse(earliest.startedAt), input) ? placeIds[0] : null;
+    stillAtSavedPlace(placeIds[0], items, accepted, Date.parse(earliest.startedAt), input, reused) ? placeIds[0] : null;
   const circle = savedCircle(placeId, input);
   const stoppedAt = latest.stoppedAt!;
   const shape: StaySegment = { ...base };
@@ -1538,6 +1539,7 @@ function runLocationEnginePass(input: LocationEngineInput): { output: LocationEn
   const absorbed = new Set<StaySegment>();
   const physicalStays: StaySegment[] = [];
   const acceptedById = new Map(accepted.map((item) => [item.evidence.clientEvidenceId, item]));
+  const reusedBySegment = new Map(rawStayRecords.map(({ working, segment }) => [segment, working.reusedVisits]));
   for (const stop of detectPhysicalStops(accepted, input.config)) {
     const stopStartMs = Date.parse(stop.startedAt);
     const stopEndMs = Date.parse(stop.stoppedAt);
@@ -1561,7 +1563,9 @@ function runLocationEnginePass(input: LocationEngineInput): { output: LocationEn
     if (([[stopStartMs, fragmentsStartMs], [fragmentsEndMs, stopEndMs]] as const).some(([from, to]) =>
       to > from && longestSilenceMs(from, to, observedMs) > input.config.savedPlaceQuietGapMaxMs)) continue;
     for (const stay of overlapping) absorbed.add(stay);
-    physicalStays.push(stayAbsorbingFragments(stop, overlapping, accepted, input));
+    // Visits a fragment reused from an earlier episode stay interval support only.
+    const reused = new Set(overlapping.flatMap((stay) => [...(reusedBySegment.get(stay) ?? [])]));
+    physicalStays.push(stayAbsorbingFragments(stop, overlapping, accepted, input, reused));
   }
   const rawStays = [...promotedStays.filter((stay) => !absorbed.has(stay)), ...physicalStays]
     .sort((a, b) => Date.parse(a.startedAt) - Date.parse(b.startedAt));
