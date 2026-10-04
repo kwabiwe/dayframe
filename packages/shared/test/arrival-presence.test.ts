@@ -399,4 +399,53 @@ describe("broad completed Visit after a corroborated arrival (4 Oct school drop-
       endedAt: "2026-09-15T11:26:00.000Z" }));
     expect(run(value).stays).toEqual(before);
   });
+
+  // Codex nice-to-have at bd7639d: removing A's unused companion makes B
+  // corroborated, which exposes B's unused companion; that needs a third pass.
+  it("removes unused companions that only appear after earlier ones are removed", () => {
+    const work = { ...qualityPlace, id: "10000000-0000-4000-8000-000000000093", name: "Work", latitude: 51.503 };
+    const build = (withCompanions: boolean) => {
+      const value = qualityInput([
+        signal("b-arrival", "11:00:00", { kind: "visit", horizontalAccuracyMeters: 10, metadata: { visitDepartureOpen: true } }),
+        signal("a-arrival", "11:02:00", { kind: "visit", horizontalAccuracyMeters: 10, metadata: { visitDepartureOpen: true } }),
+        signal("inside", "11:04:00", { horizontalAccuracyMeters: 10 }),
+        signal("inside-2", "11:30:00", { horizontalAccuracyMeters: 10 }),
+        ...(withCompanions ? [
+          // Accurate completions at Work: incompatible with the arrivals' place, so unused.
+          signal("a-done", "11:02:00", { kind: "visit", latitude: work.latitude, horizontalAccuracyMeters: 20, endedAt: "2026-09-15T11:30:00.000Z" }),
+          signal("b-done", "11:00:00", { kind: "visit", latitude: work.latitude, horizontalAccuracyMeters: 20, endedAt: "2026-09-15T11:20:00.000Z" })
+        ] : [])
+      ]);
+      value.savedPlaces.push(work);
+      return value;
+    };
+    const output = runLocationEngine(build(true));
+    expect(output.segmentUpserts).toEqual(runLocationEngine(build(false)).segmentUpserts);
+    expect(output.segmentUpserts.some((segment) => segment.kind === "stay" && segment.placeId === qualityPlace.id)).toBe(true);
+    expect(output.nextState.processedEvidenceIds).toEqual(expect.arrayContaining(["a-done", "b-done"]));
+  });
+
+  // Codex nice-to-have at 213b92d: a corroborated Visit elsewhere whose
+  // incompatible completion sits at the stop must still split the stop.
+  it("keeps a corroborated Visit elsewhere as a stop boundary when its completion lies at the stop", () => {
+    const build = (withCompletion: boolean) => {
+      const input = physicalStopFixture({ ...PHYSICAL_STOP_PICKUP, visit: null, slowAt: [700_000, 880_000, 890_000] });
+      const stopFix = input.evidence.find((item) => item.clientEvidenceId === "slow-0")!;
+      const workLatitude = PHYSICAL_STOP_LATITUDE + 1_500 / 111_195;
+      const workId = "10000000-0000-4000-8000-000000000094";
+      input.savedPlaces.push({ id: workId, name: "Work", latitude: workLatitude, longitude: 0, radiusMeters: 100 });
+      const visit = { ...stopFix, kind: "visit" as const, occurredAt: physicalStopAt(760_000), sourceTimestamp: physicalStopAt(760_000),
+        speedMetersPerSecond: null, horizontalAccuracyMeters: 20 };
+      input.evidence.push(
+        { ...visit, clientEvidenceId: "work-arrival", latitude: workLatitude, endedAt: null, metadata: { visitDepartureOpen: true } },
+        { ...stopFix, clientEvidenceId: "work-enter", kind: "geofence_enter", savedPlaceId: workId, latitude: null, longitude: null,
+          horizontalAccuracyMeters: null, speedMetersPerSecond: null, occurredAt: physicalStopAt(770_000), sourceTimestamp: physicalStopAt(770_000) },
+        ...(withCompletion ? [{ ...visit, clientEvidenceId: "work-done", endedAt: physicalStopAt(800_000), metadata: {} }] : []));
+      return input;
+    };
+    const withCompletion = run(build(true)).output;
+    expect(withCompletion.segmentUpserts).toEqual(run(build(false)).output.segmentUpserts);
+    expect(withCompletion.segmentUpserts.filter((segment) => segment.kind === "stay" && segment.formation === "physical_stop")
+      .every((stop) => stop.stoppedAt! <= physicalStopAt(760_000) || stop.startedAt >= physicalStopAt(800_000))).toBe(true);
+  });
 });
