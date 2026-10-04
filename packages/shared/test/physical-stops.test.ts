@@ -360,4 +360,25 @@ describe("physical stops", () => {
     // The same crossing before the departure is still movement during the silence.
     expect(run(geofenceAt(leaving(), 2_390_000, "geofence_enter")).physical).toEqual([]);
   });
+
+  it("ends the silence at a Visit elsewhere that starts after the stop", () => {
+    // The departure is a Visit elsewhere at 2 400 s (no departure fix before it); a crossing after it does not veto.
+    const input = parkedInput({ departAt: 2_440_000, returnAt: 2_530_000 });
+    const anchor = input.evidence.find((item) => item.clientEvidenceId === "slow-0")!;
+    input.evidence.push({ ...anchor, clientEvidenceId: "visit-elsewhere", kind: "visit", occurredAt: shortAt(2_400_000), sourceTimestamp: shortAt(2_400_000),
+      endedAt: shortAt(2_420_000), latitude: 0.0065, horizontalAccuracyMeters: 5, speedMetersPerSecond: null });
+    expect(run(geofenceAt(input, 2_410_000, "geofence_enter")).physical).toEqual([expect.objectContaining({ stoppedAt: shortAt(2_400_000) })]);
+  });
+
+  it("ignores a registration snapshot pair that straddles the departure", () => {
+    const input = homeTransitions(parkedInput({ departAt: 2_400_000, returnAt: 2_490_000 }), [[2_399_000, "geofence_exit"], [2_401_000, "geofence_enter"]]);
+    expect(run(input).physical).toHaveLength(1);
+  });
+
+  it("carries only to the Visit's end when it ends before the departure", () => {
+    // iOS reports the Visit ending 60 s before the first departure fix; a crossing between them still vetoes.
+    const early = () => parkedInput({ visit: [670_000, 2_400_000], departAt: 2_460_000, returnAt: 2_550_000 });
+    expect(run(early()).physical).toEqual([expect.objectContaining({ stoppedAt: shortAt(2_400_000) })]);
+    expect(run(geofenceAt(early(), 2_390_000, "geofence_exit")).physical).toEqual([]);
+  });
 });
