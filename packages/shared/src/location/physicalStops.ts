@@ -237,10 +237,21 @@ function evaluateCluster(
   const carriedUntil = carrier ? Date.parse(carrier.evidence.endedAt!) : null;
   const carriedFrom = carrier ? Math.max(Date.parse(carrier.evidence.occurredAt), arrivalAt ?? Number.NEGATIVE_INFINITY) : null;
   const deviceId = members[0].item.evidence.deviceId;
-  const carriedVisit = carriedUntil != null && carriedFrom != null &&
+  // The silence ends at the first observed departure. iOS reports a Visit's
+  // end shortly after the device leaves, so a crossing on the drive away
+  // before that report is the departure itself, not movement while stopped.
+  let observedDepartureMs = visitDepartureAt ?? Number.POSITIVE_INFINITY;
+  for (let index = afterIndex; index < fixes.length; index += 1) {
+    if (departed(fixes[index])) {
+      observedDepartureMs = Math.min(observedDepartureMs, fixes[index].at);
+      break;
+    }
+  }
+  const silenceEndMs = carriedUntil == null ? null : Math.min(carriedUntil, observedDepartureMs);
+  const carriedVisit = carriedUntil != null && carriedFrom != null && silenceEndMs != null &&
     carriedUntil - carriedFrom >= config.physicalStopVisitCarriedMinimumMs &&
     !crossings.some(({ evidence }) => evidence.deviceId === deviceId &&
-      Date.parse(evidence.occurredAt) > lastMemberAt && Date.parse(evidence.occurredAt) < carriedUntil) &&
+      Date.parse(evidence.occurredAt) > lastMemberAt && Date.parse(evidence.occurredAt) < silenceEndMs) &&
     // A credible Visit elsewhere already in progress at the last fix contradicts
     // the silence (one starting later is a departure bound instead).
     !placedVisits.some((visit) => elsewhere(visit, centre) && visit.from <= lastMemberAt && visit.to > lastMemberAt);

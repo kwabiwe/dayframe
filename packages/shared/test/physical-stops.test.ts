@@ -349,4 +349,15 @@ describe("physical stops", () => {
     expect(detectPhysicalStops(output.acceptedEvidence, config)).toEqual([]);
     expect(run(input).physical).toEqual([]);
   });
+
+  it("does not treat a crossing on the drive away, before iOS reports the Visit's end, as movement while stopped", () => {
+    // Departure at 2 400 s; iOS reports the Visit ending 30 s later. The drive away crosses a region at 2 410 s.
+    const leaving = () => parkedInput({ departAt: 2_400_000, returnAt: 2_490_000 });
+    const afterDeparture = geofenceAt(leaving(), 2_410_000, "geofence_enter");
+    expect(run(afterDeparture).physical).toEqual([expect.objectContaining({
+      startedAt: shortAt(675_000), stoppedAt: shortAt(2_400_000)
+    })]);
+    // The same crossing before the departure is still movement during the silence.
+    expect(run(geofenceAt(leaving(), 2_390_000, "geofence_enter")).physical).toEqual([]);
+  });
 });
