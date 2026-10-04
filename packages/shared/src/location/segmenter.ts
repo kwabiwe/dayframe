@@ -340,51 +340,100 @@ function stationaryFix(item: ClassifiedEvidence, input: LocationEngineInput) {
   return speed == null || !Number.isFinite(speed) || speed < input.config.movementSpeedThresholdMps;
 }
 
-/** iOS itself places the device inside the saved place: its geofence entry, or an accurate Visit callback strongly inside. */
-function iosInsideSignal(item: ClassifiedEvidence, placeId: string | null, input: LocationEngineInput) {
-  const { evidence } = item;
-  if (evidence.kind === "geofence_enter") return placeId != null && evidence.savedPlaceId === placeId;
-  return evidence.kind === "visit" && evidence.isSimulated !== true && accurateCoordinate(item, input) &&
-    (item.match?.candidates.some((candidate) => candidate.id === placeId && candidate.matchClass === "strong") ?? false);
+/** A saved place's circle, with the matcher's 20 m floor. */
+function savedCircle(placeId: string | null, input: LocationEngineInput) {
+  const place = placeId ? input.savedPlaces.find((candidate) => candidate.id === placeId) : undefined;
+  return place ? { place, radius: Math.max(20, place.radiusMeters) } : null;
 }
 
 /**
- * A saved-place stay of still GPS fixes that are all merely plausible matches
- * near the place's edge, without a corroborated arrival. It is the same cluster
- * an unknown stay would be and keeps the same continuity and membership; the
- * saved place decides only its identity (stayIdentity). A stay with no still
- * fix (a lone Visit or geofence callback) is not a cluster.
+ * iOS itself placed the device inside the saved place's circle during a stay:
+ * a Visit callback lies wholly inside (its accuracy included), or the latest
+ * genuine geofence transition for the place, from shortly before the stay to
+ * `atMs`, is an entry. Simulated callbacks and same-place registration
+ * snapshot pairs (an exit and an entry within seconds) are not crossings, and
+ * an entry followed by an exit (a drive through the circle) is not presence.
+ * Matcher tolerance alone never proves presence: a reading in the tolerance
+ * band can lie wholly outside the circle.
+ */
+function iosPlacedInside(placeId: string, evidence: ClassifiedEvidence[], accepted: ClassifiedEvidence[],
+  fromMs: number, atMs: number, input: LocationEngineInput) {
+  const circle = savedCircle(placeId, input);
+  if (!circle) return false;
+  if (evidence.some(({ evidence: visit }) => {
+    const point = pointFor(visit);
+    return visit.kind === "visit" && visit.isSimulated !== true && point != null && visit.horizontalAccuracyMeters != null &&
+      Date.parse(visit.occurredAt) <= atMs && distanceMeters(point, circle.place) + visit.horizontalAccuracyMeters <= circle.radius;
+  })) return true;
+  const transitions = accepted.filter(({ evidence: callback }) =>
+    (callback.kind === "geofence_enter" || callback.kind === "geofence_exit") && callback.savedPlaceId === placeId &&
+    callback.isSimulated !== true && Date.parse(callback.occurredAt) >= fromMs && Date.parse(callback.occurredAt) <= atMs);
+  const genuine = transitions.filter((item) => !transitions.some((other) => other.evidence.kind !== item.evidence.kind &&
+    Math.abs(Date.parse(other.evidence.occurredAt) - Date.parse(item.evidence.occurredAt)) <= GEOFENCE_SNAPSHOT_PAIR_MS));
+  return genuine.at(-1)?.evidence.kind === "geofence_enter";
+}
+
+const GEOFENCE_SNAPSHOT_PAIR_MS = 5_000;
+
+/**
+ * A saved-place stay with still GPS fixes and no accurate fix inside the
+ * place's circle (only matches in the tolerance band or beyond), without a
+ * corroborated arrival: the cluster an unknown stay would be. It keeps an
+ * unknown cluster's continuity and membership; the saved place decides only
+ * its identity (stayIdentity). A stay with no still fix (a lone Visit or
+ * geofence callback) is not a cluster, and one fix inside the circle, even
+ * moving, makes the stay ordinary.
  */
 function edgeOnly(stay: WorkingStay, input: LocationEngineInput) {
-  return stay.placeMatchKind === "saved" && stay.lastStrongInside == null && !stay.arrivalPresence && !stay.inferredBoundary &&
-    stay.evidence.some((item) => stationaryFix(item, input));
+  if (stay.placeMatchKind !== "saved" || stay.arrivalPresence || stay.inferredBoundary) return false;
+  const circle = savedCircle(stay.placeId, input);
+  if (!circle) return false;
+  let still = false;
+  for (const item of stay.evidence) {
+    const { evidence } = item;
+    const point = pointFor(evidence);
+    if (!point || (evidence.kind !== "standard_location" && evidence.kind !== "significant_change") ||
+      !accurateCoordinate(item, input)) continue;
+    if (distanceMeters(point, circle.place) <= circle.radius) return false;
+    if (stationaryFix(item, input)) still = true;
+  }
+  return still;
+}
+
+/**
+ * Whether one still period's evidence places the device at the saved place:
+ * its still accurate fixes centre inside the circle, or, when they do not or
+ * there are none, iOS placed it inside by the last still fix.
+ */
+function stillAtSavedPlace(placeId: string, evidence: ClassifiedEvidence[], accepted: ClassifiedEvidence[],
+  startedAtMs: number, input: LocationEngineInput) {
+  const circle = savedCircle(placeId, input);
+  if (!circle) return true;
+  const stationary = evidence.filter((item) => stationaryFix(item, input));
+  const centre = evidenceCentre(stationary);
+  if (centre && distanceMeters(centre, circle.place) <= circle.radius) return true;
+  const lastMs = Math.max(...(stationary.length ? stationary : evidence).map(({ evidence: item }) => Date.parse(item.occurredAt)));
+  return iosPlacedInside(placeId, evidence, accepted, startedAtMs - input.config.savedPlaceArrivalCorroborationWindowMs, lastMs, input);
 }
 
 type StayIdentity = Pick<WorkingStay, "placeMatchKind" | "placeId" | "learnedPlaceId" | "candidatePlaceIds">;
 
 /**
- * A stay is at a saved place when its stationary readings centre inside the
- * place's circle. Readings near the edge match the place plausibly, but a phone
- * whose stationary readings centre outside the circle was beside the place:
- * the place is then only a candidate (owner decision, 4 Oct). Moving readings
- * (the drive away can cross the circle) and Visit callbacks (averaged, or dated
- * while still moving) never set the centre. iOS's own inside signals, before
- * the device left, keep the saved identity: a corroborated arrival, a geofence
- * entry or an accurate Visit callback strongly inside.
+ * A stay is at a saved place when its still readings centre inside the place's
+ * circle. Readings near the edge match the place plausibly, but a phone whose
+ * still readings centre outside the circle was beside the place: the place is
+ * then only a candidate (owner decision, 4 Oct). Moving readings (the drive
+ * away can cross the circle) never set the centre. iOS's own inside signals
+ * keep the saved identity (see iosPlacedInside), as does a corroborated arrival.
+ * Without any still fix, only those signals make a stay the saved place.
  */
-function stayIdentity(working: WorkingStay, input: LocationEngineInput): StayIdentity {
+function stayIdentity(working: WorkingStay, accepted: ClassifiedEvidence[], input: LocationEngineInput): StayIdentity {
   const own: StayIdentity = {
     placeMatchKind: working.placeMatchKind, placeId: working.placeId,
     learnedPlaceId: working.learnedPlaceId, candidatePlaceIds: working.candidatePlaceIds
   };
-  if (working.placeMatchKind !== "saved" || !working.placeId || working.arrivalPresence || working.inferredBoundary) return own;
-  const place = input.savedPlaces.find((candidate) => candidate.id === working.placeId);
-  const stationary = working.evidence.filter((item) => stationaryFix(item, input));
-  const centre = evidenceCentre(stationary);
-  if (!place || !centre || distanceMeters(centre, place) <= Math.max(20, place.radiusMeters)) return own;
-  const lastStationaryMs = Math.max(...stationary.map(({ evidence }) => Date.parse(evidence.occurredAt)));
-  if (working.evidence.some((item) => iosInsideSignal(item, working.placeId, input) &&
-    Date.parse(item.evidence.occurredAt) <= lastStationaryMs)) return own;
+  if (working.placeMatchKind !== "saved" || !working.placeId || working.arrivalPresence || working.inferredBoundary ||
+    stillAtSavedPlace(working.placeId, working.evidence, accepted, Date.parse(working.startedAt), input)) return own;
   return {
     placeMatchKind: "unknown", placeId: null, learnedPlaceId: null,
     candidatePlaceIds: [...new Set([working.placeId, ...working.candidatePlaceIds])]
@@ -526,7 +575,8 @@ function supportedKnownPlaceEnd(working: WorkingStay, processingAt: string) {
 function stayFromWorking(
   working: WorkingStay,
   processingAt: string,
-  input: LocationEngineInput
+  input: LocationEngineInput,
+  accepted: ClassifiedEvidence[]
 ): StaySegment | null {
   const endedAt = working.stoppedAt;
   const duration = Date.parse(endedAt ?? processingAt) - Date.parse(working.startedAt);
@@ -534,7 +584,7 @@ function stayFromWorking(
     pointFor(evidence) && (!working.inferredBoundary || evidence.kind !== "visit")
   );
   // Identity first: a stay beside a saved place is promoted and described as unknown.
-  const identity = stayIdentity(working, input);
+  const identity = stayIdentity(working, accepted, input);
   const knownPlace = identity.placeMatchKind === "saved" || identity.placeMatchKind === "learned";
   const completedVisit = working.evidence.some(
     ({ evidence }) => evidence.kind === "visit" && evidence.endedAt && Date.parse(evidence.endedAt) > Date.parse(evidence.occurredAt)
@@ -1292,6 +1342,7 @@ function runLocationEnginePass(input: LocationEngineInput): { output: LocationEn
     // A still reading just beyond the tolerance band belongs to an edge-only
     // stay exactly as it would to the unknown cluster that stay would be.
     const sameEdgeCluster = itemKey === "unknown" && active.placeMatchKind === "saved" && stationaryFix(item, input) &&
+      !active.pendingExit && active.outside.length === 0 &&
       edgeOnly(active, input) && sameUnknownCluster(active, item, input.config.unknownStayBaseRadiusMeters);
     if (sameKnownPlace || sameUnknown || sameEdgeCluster) {
       active.evidence.push(item);
@@ -1389,7 +1440,7 @@ function runLocationEnginePass(input: LocationEngineInput): { output: LocationEn
   }
   if (active) completed.push(active);
   const rawStayRecords = completed
-    .map((working) => ({ working, segment: stayFromWorking(working, input.processingAt, input) }))
+    .map((working) => ({ working, segment: stayFromWorking(working, input.processingAt, input, accepted) }))
     .filter((record): record is { working: WorkingStay; segment: StaySegment } => Boolean(record.segment));
   const promotedStays = rawStayRecords.map(({ segment }) => segment);
   // Physical stops exist even when identity fragments them or they are too

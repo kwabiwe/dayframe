@@ -27,6 +27,26 @@ The owner chose option 1: the cluster's centre decides. PR #222:
 
 The synthetic `schoolEdgeStopFixture` reproduces the server's output exactly on `main`. With the change, the same evidence gives one unknown stay from 19:13:16 to 19:36:41 UTC (20:13–20:36 BST), with the School as a candidate. Across the 25–29 Sep corpus and the 26 Sep–4 Oct staging week, output and identities are unchanged. In 47 saved stays there, the still centre never left its circle; the largest was 94 %, a gym visit corroborated by its geofence entry.
 
+## Review fixes
+
+The first Codex review found four ways the rules could still mislabel or merge stays, and the capture simulator added two more:
+
+- Readings could join an edge stay past a pending exit, giving invalid departure bounds.
+- A nearby reading could absorb a separate Visit elsewhere, merging two visits.
+- A lone Visit beside the circle, with no still reading, became the saved place.
+- A reading inside the matcher's 25 m tolerance band, but outside the circle, counted as iOS placing the device inside.
+- A drive through the circle before parking left a geofence entry, followed by its exit, that counted as presence.
+- A completed Visit's averaged coordinate could land inside the circle.
+
+Fixed:
+
+- Edge membership now waits for pending exits and outside evidence to resolve.
+- Edge stays are defined by their still-fix centre.
+- iOS inside proof needs either a Visit wholly inside the circle or a latest genuine geofence transition that is an entry; simulated callbacks and snapshot pairs do not count.
+- Without a still fix, only that proof keeps the place.
+
+Each fix has a regression, including comparisons of stays with and without the place saved.
+
 ## Not established
 
 - No staging or device validation yet.

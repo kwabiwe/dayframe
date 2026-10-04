@@ -22,7 +22,7 @@ function run(input: LocationEngineInput) {
 const parked = (stays: StaySegment[]) => stays.filter((stay) =>
   stay.startedAt > at("19:12:00") && stay.startedAt < at("19:30:00"));
 function add(input: LocationEngineInput, patch: Partial<LocationEvidence> & Pick<LocationEvidence, "clientEvidenceId" | "occurredAt">) {
-  const template = input.evidence.find((item) => item.clientEvidenceId === "parked-1")!;
+  const template = input.evidence.find((item) => item.clientEvidenceId === "drive-12")!;
   input.evidence.push({ ...template, sourceTimestamp: patch.occurredAt, receivedAt: patch.occurredAt, ...patch });
   return input;
 }
@@ -110,5 +110,119 @@ describe("a stationary cluster at a saved place's edge (4 Oct evening stop)", ()
     // Without its still fixes only the Visit callbacks and moving fixes remain near the School.
     const input = schoolEdgeStopFixture("20:30:00", { exclude: ["parked-0-slc", "parked-0", "parked-1", "parked-2"] });
     expect(run(input).stays.filter((stay) => stay.startedAt > at("19:10:00") && stay.startedAt < at("19:30:00"))).toEqual([]);
+  });
+
+  // Without the place saved: iOS reports no School geofence callbacks.
+  const withoutSchool = (input: LocationEngineInput): LocationEngineInput => ({
+    ...input,
+    savedPlaces: input.savedPlaces.filter((place) => place.id !== SCHOOL_EDGE_SCHOOL_ID),
+    evidence: input.evidence.filter((item) => item.savedPlaceId !== SCHOOL_EDGE_SCHOOL_ID)
+  });
+  // The same stays, neither split nor merged, at about the same times. Unknown
+  // clusters also admit moving readings (parking, the drive away), so their
+  // ends can differ by about a minute; an edge stay admits only still ones.
+  const minutes = (input: LocationEngineInput) => run(input).stays.map((stay) =>
+    [Date.parse(stay.startedAt), Date.parse(stay.stoppedAt ?? input.processingAt)].map((ms) => ms / 60_000));
+  const expectParity = (input: LocationEngineInput) => {
+    const saved = minutes(input);
+    const unsaved = minutes(withoutSchool(input));
+    expect(saved).toHaveLength(unsaved.length);
+    saved.forEach(([start, stop], index) => {
+      expect(Math.abs(start - unsaved[index][0])).toBeLessThanOrEqual(2);
+      expect(Math.abs(stop - unsaved[index][1])).toBeLessThanOrEqual(2);
+    });
+  };
+
+  it("has the same stay times as with no place saved there (tonight)", () => {
+    expectParity(schoolEdgeStopFixture("20:30:00"));
+  });
+
+  it("has the same stay times as with no place saved after a strong reading in the tolerance band (review finding)", () => {
+    // 115 m at ±3 m is a strong match by the 25 m tolerance, yet outside the 100 m circle.
+    const input = add(schoolEdgeStopFixture("20:30:00"), { clientEvidenceId: "band-strong", occurredAt: at("19:14:00"),
+      latitude: north(SCHOOL_METRES - 115), horizontalAccuracyMeters: 3, speedMetersPerSecond: 0 });
+    expectParity(input);
+    expect(parked(run(input).stays)).toEqual([expect.objectContaining({ placeMatchKind: "unknown", startedAt: at("19:13:16") })]);
+  });
+
+  it("does not let a nearby reading absorb a Visit elsewhere (review finding)", () => {
+    const input = add(schoolEdgeStopFixture("20:30:00"), { clientEvidenceId: "visit-elsewhere", kind: "visit", occurredAt: at("19:16:00"),
+      endedAt: at("19:21:00"), latitude: north(SCHOOL_METRES - 126 - 174), horizontalAccuracyMeters: 20, speedMetersPerSecond: null });
+    add(input, { clientEvidenceId: "back-near", occurredAt: at("19:22:00"), latitude: north(SCHOOL_METRES - 128), horizontalAccuracyMeters: 2, speedMetersPerSecond: 0 });
+    expectParity(input);
+  });
+
+  it("keeps valid bounds when nearby readings follow an exit (review finding)", () => {
+    // After the last parked fix, iOS reports leaving the School; still readings just beyond the band follow.
+    const input = add(schoolEdgeStopFixture("20:30:00"), { clientEvidenceId: "school-exit-1928", kind: "geofence_exit", occurredAt: at("19:28:00"),
+      savedPlaceId: SCHOOL_EDGE_SCHOOL_ID, latitude: null, longitude: null, horizontalAccuracyMeters: null, speedMetersPerSecond: null });
+    for (const [id, time, metres] of [["near-0", "19:29:00", 130], ["near-1", "19:30:00", 135], ["near-2", "19:34:00", 140]] as const) {
+      add(input, { clientEvidenceId: id, occurredAt: at(time), latitude: north(SCHOOL_METRES - metres), horizontalAccuracyMeters: 2, speedMetersPerSecond: 0 });
+    }
+    for (const stay of run(input).stays) {
+      if (stay.stopLowerBoundAt && stay.stopUpperBoundAt) expect(stay.stopLowerBoundAt <= stay.stopUpperBoundAt).toBe(true);
+      if (stay.stopLowerBoundAt && stay.stoppedAt) expect(stay.stopLowerBoundAt <= stay.stoppedAt).toBe(true);
+      if (stay.stopUpperBoundAt && stay.stoppedAt) expect(stay.stoppedAt <= stay.stopUpperBoundAt).toBe(true);
+    }
+  });
+
+  it("does not make a lone Visit beside the circle the saved place (review finding)", () => {
+    // A 25-minute completed Visit at 130 m ±10 m, with no still fix and no geofence entry.
+    const input = schoolEdgeStopFixture("20:30:00", { exclude: ["parked-0-slc", "parked-0", "parked-1", "parked-2", "visit-1910-open", "visit-1910-done", "parking"] });
+    add(input, { clientEvidenceId: "lone-visit", kind: "visit", occurredAt: at("19:12:00"), endedAt: at("19:37:00"),
+      latitude: north(SCHOOL_METRES - 130), horizontalAccuracyMeters: 10, speedMetersPerSecond: null });
+    expect(run(input).stays.some((stay) => stay.placeId === SCHOOL_EDGE_SCHOOL_ID)).toBe(false);
+  });
+
+  it.each([
+    ["a Visit in the tolerance band but outside the circle", { clientEvidenceId: "band-visit", kind: "visit" as const, occurredAt: at("19:14:00"), endedAt: null,
+      latitude: north(SCHOOL_METRES - 115), horizontalAccuracyMeters: 5, speedMetersPerSecond: null, metadata: { visitDepartureOpen: true } }],
+    ["a simulated geofence entry", { clientEvidenceId: "simulated-enter", kind: "geofence_enter" as const, occurredAt: at("19:13:20"),
+      savedPlaceId: SCHOOL_EDGE_SCHOOL_ID, latitude: null, longitude: null, horizontalAccuracyMeters: null, speedMetersPerSecond: null, isSimulated: true }]
+  ])("is not kept as the saved place by %s (review finding)", (_label, patch) => {
+    expect(parked(run(add(schoolEdgeStopFixture("20:30:00"), patch)).stays)).toEqual([expect.objectContaining({ placeMatchKind: "unknown" })]);
+  });
+
+  it.each([
+    ["a registration snapshot pair", [["snapshot-exit", "19:13:20", "geofence_exit"], ["snapshot-enter", "19:13:21", "geofence_enter"]]],
+    ["a drive through the circle before parking", [["through-enter", "19:11:00", "geofence_enter"], ["through-exit", "19:11:30", "geofence_exit"]]]
+  ] as const)("is not kept as the saved place by %s", (_label, callbacks) => {
+    const input = schoolEdgeStopFixture("20:30:00");
+    for (const [id, time, kind] of callbacks) add(input, { clientEvidenceId: id, kind, occurredAt: at(time), savedPlaceId: SCHOOL_EDGE_SCHOOL_ID,
+      latitude: null, longitude: null, horizontalAccuracyMeters: null, speedMetersPerSecond: null });
+    expect(parked(run(input).stays)).toEqual([expect.objectContaining({ placeMatchKind: "unknown" })]);
+  });
+
+  it("does not treat a drop-off inside the circle as an edge cluster that bridges to a later stop", () => {
+    // Shape of the 4 Oct morning, in two dimensions around a School pin: a moving drop-off inside the circle
+    // (no native speed), slow readings in the band about 50 m away while driving round, an exit, then a
+    // return to park inside. The drop-off stays part of the journey.
+    const school = { id: SCHOOL_EDGE_SCHOOL_ID, name: "School", latitude: 0, longitude: 0, radiusMeters: 100, loggingEnabled: true };
+    const t = (seconds: number) => new Date(Date.parse(at("19:00:00")) + seconds * 1_000).toISOString();
+    const reading = (id: string, seconds: number, x: number, y: number, accuracy: number, speed: number | null = null): LocationEvidence => ({
+      clientEvidenceId: id, deviceId: "20000000-0000-4000-8000-000000000061", algorithmVersion: "location-v2.0", kind: "standard_location",
+      occurredAt: t(seconds), sourceTimestamp: t(seconds), receivedAt: t(seconds), endedAt: null, timeZone: "UTC",
+      latitude: north(y), longitude: north(x), horizontalAccuracyMeters: accuracy, speedMetersPerSecond: speed, savedPlaceId: null, isSimulated: false, metadata: {}
+    });
+    const callback = (id: string, seconds: number, kind: "geofence_enter" | "geofence_exit"): LocationEvidence => ({
+      ...reading(id, seconds, 0, 0, 0), kind, latitude: null, longitude: null, horizontalAccuracyMeters: null, savedPlaceId: school.id
+    });
+    const evidence = [
+      reading("drive-0", 0, 0, -600, 5, 11), reading("drive-1", 30, 0, -270, 5, 11),
+      reading("dropoff-0", 60, 0, 74, 23), callback("enter-0", 61, "geofence_enter"), reading("dropoff-1", 70, 0, 97, 25),
+      reading("round-0", 113, 30, 140, 21), reading("round-1", 122, 32, 143, 23), reading("round-2", 127, 35, 150, 22),
+      callback("exit-0", 180, "geofence_exit"), reading("round-3", 180, 60, 235, 21),
+      { ...reading("return-visit", 187, 0, 67, 12), kind: "visit" as const, metadata: { visitDepartureOpen: true } },
+      reading("return-0", 228, 0, 76, 22), callback("enter-1", 229, "geofence_enter"),
+      reading("return-1", 316, 0, 67, 33), reading("return-2", 900, 0, 70, 20), reading("return-3", 1_500, 0, 68, 15),
+      reading("leave-0", 1_560, 0, -300, 5, 11), callback("exit-1", 1_561, "geofence_exit"), reading("leave-1", 1_590, 0, -650, 5, 11)
+    ];
+    const input: LocationEngineInput = {
+      priorState: { algorithmVersion: "location-v2.0", mode: "idle", activeSegmentId: null, processedEvidenceIds: [], lastProcessedAt: null },
+      config: schoolEdgeStopFixture().config, processingAt: t(5_000), savedPlaces: [school], acceptedLearnedPlaces: [], evidence
+    };
+    const stays = run(input).stays;
+    expect(stays.some((stay) => stay.startedAt <= t(70) && (stay.stoppedAt ?? input.processingAt) > t(187))).toBe(false);
+    expect(stays.some((stay) => stay.placeId === school.id && stay.startedAt >= t(187))).toBe(true);
   });
 });
