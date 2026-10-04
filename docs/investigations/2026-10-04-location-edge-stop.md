@@ -22,7 +22,7 @@ Dayframe showed a commute from 20:09 to 20:27, then a School stay from 20:27 to 
 
 The owner chose option 1: the cluster's centre decides. PR #222:
 
-- treats a saved stay with still fixes and no accurate fix inside the circle (an edge cluster: tolerance-band and plausible matches only) as an unknown cluster for silence, membership and departure;
+- treats a saved stay with still fixes, none of them inside the circle (an edge cluster, whose still readings match only through the tolerance band or not at all), as an unknown cluster for silence, membership and departure;
 - labels a stay as the saved place only when the centre of its still accurate fixes lies inside the circle, or when iOS placed the device inside during that visit before the last still fix: a genuine geofence entry not followed by an exit, or a Visit wholly inside the circle. Otherwise the stay is unknown, with the place as a candidate. (The first version also accepted a corroborated arrival and a Visit only strongly matched; both reviews below narrowed it.)
 
 The synthetic `schoolEdgeStopFixture` reproduces the server's output exactly on `main`. With the change, the same evidence gives one unknown stay from 19:13:16 to 19:36:41 UTC (20:13–20:36 BST), with the School as a candidate. Across the 25–29 Sep corpus and the 26 Sep–4 Oct staging week, output and identities are unchanged. In 47 saved stays there, the still centre never left its circle; the largest was 94 %, a gym visit corroborated by its geofence entry.
@@ -41,7 +41,7 @@ The first Codex review found four ways the rules could still mislabel or merge s
 Fixed:
 
 - Edge membership now waits for pending exits and outside evidence to resolve.
-- Edge stays are defined by having still fixes and no accurate fix inside the circle. A first definition by still-fix centre was rejected because it merged a real drop-off into the next stop.
+- Edge stays were defined by having still fixes and no accurate fix inside the circle (round 4 narrowed this to no still fix inside). A first definition by still-fix centre was rejected because it merged a real drop-off into the next stop.
 - iOS inside proof needs either a Visit wholly inside the circle or a latest genuine geofence transition that is an entry; simulated callbacks and snapshot pairs do not count.
 - Without a still fix, only that proof keeps the place.
 
@@ -63,6 +63,15 @@ A third review found three ways an edge cluster still differed from an unknown o
 - A geofence exit followed by readings in the band produced inverted bounds. Now same-place exits do not affect an edge cluster, which was never inside the circle; its readings show when it left.
 
 Every case from all three reviews is a regression test.
+
+A fourth review found four more gaps:
+
+- The place's own geofence exit, or a registration snapshot, during a long silence split an edge cluster, because gap handling ran before those callbacks were ignored. They are now skipped first, so they neither split nor extend the cluster.
+- A displaced Visit completion matching a neighbouring saved place (a café) ended its own stay. A Visit with any callback in the cluster is now the stay's own, and a displaced callback is skipped whichever place it matches.
+- Driving through the circle between two stops made the first stop ordinary at the first moving fix inside, so the far-side stop joined it as one saved visit (its centre fell inside the circle). Only still fixes inside now make a stay ordinary, and any accurate reading beyond the cluster ends it, as for an unknown cluster. The two stops now match the unsaved case exactly.
+- A late genuine entry turned an unknown stay into Home under the same ID, leaving its "unknown place" proposal open in Review. A stay described as unknown now carries that identity in its ID, so replay retires the earlier segment and its proposal.
+
+Simulated fixes no longer count as inside or end the cluster, and an open-stay bounds test now checks closed bounds too. Admitting moving readings beyond the tolerance band, as unknown clusters do, was tried and rejected: it merged the drop-off and moved this stop's times. Each case is a regression that fails on the third-review head, and the corpus and staging week are unchanged.
 
 ## Not established
 
