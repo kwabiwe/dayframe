@@ -21,3 +21,16 @@ describe("automatic Location Evidence time editor", () => {
     expect(source).toContain("stopDateText: formatLocationReviewDateInput(stopAt)");
   });
 });
+
+describe("trip stops in Location Evidence", () => {
+  it("lists a commute's recorded stops under its time range with spoken labels", () => {
+    expect(source).toContain('const stopsHeading = evidence.segment.kind === "commute" ? tripStopsHeading(evidence.stops) : null;');
+    expect(source).toContain("tripStopRows(evidence.stops, formatTime)");
+    expect(source).toContain("accessibilityLabel={row.accessibilityLabel}");
+    // Static content: the rows add no motion of their own.
+    const start = source.indexOf("{stopsHeading ? (");
+    const block = source.slice(start, source.indexOf(") : null}", start));
+    expect(block).toContain("stopRows.map");
+    expect(block).not.toContain("Reanimated");
+  });
+});

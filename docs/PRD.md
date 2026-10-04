@@ -482,7 +482,7 @@ Validation:
 - Walking/workout entries have correct duration.
 - Trusted place starts correctly.
 - Unknown/broad places do not create silent incorrect entries.
-- Two appearances at one venue separated by Home remain two stays; a 10–15 minute saved stop remains a journey endpoint; a corroborated short unknown stop stays inside one trip while a visit-length stop splits journeys; overlapping saved radii select one deterministic best saved place while retaining bounded alternatives; and Europe/London local-day grouping remains correct across BST/DST.
+- Two appearances at one venue separated by Home remain two stays; a 10–15 minute saved stop remains a journey endpoint; a corroborated short unknown stop stays inside one trip, and its Location Evidence lists it ("Stopped 13:22–13:28 · 6m", marked approximate when bounded by evidence), while a visit-length stop splits journeys; overlapping saved radii select one deterministic best saved place while retaining bounded alternatives; and Europe/London local-day grouping remains correct across BST/DST.
 
 ### Phase 4: Product Polish And Beta Hardening
 

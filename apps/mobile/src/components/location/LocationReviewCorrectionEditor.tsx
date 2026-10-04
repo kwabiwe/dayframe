@@ -16,6 +16,8 @@ import Reanimated from "react-native-reanimated";
 import Svg, { Circle as SvgCircle, Path, Rect } from "react-native-svg";
 import {
   paletteColorFor,
+  tripStopRows,
+  tripStopsHeading,
   type LocationReviewAction,
   type LocationReviewEvidenceDto
 } from "@dayframe/shared";
@@ -114,6 +116,9 @@ export function LocationReviewCorrectionEditor({
   const reduceMotionRef = useRef(reduceMotion);
   reduceMotionRef.current = reduceMotion;
   const startAt = useMemo(() => new Date(evidence.segment.startedAt), [evidence.segment.startedAt]);
+  // Stops recorded inside a trip; their time is part of the trip, not travel.
+  const stopsHeading = evidence.segment.kind === "commute" ? tripStopsHeading(evidence.stops) : null;
+  const stopRows = useMemo(() => tripStopRows(evidence.stops, formatTime), [evidence.stops]);
   const stopAt = useMemo(
     () => evidence.segment.stoppedAt ? new Date(evidence.segment.stoppedAt) : null,
     [evidence.segment.stoppedAt]
@@ -462,6 +467,17 @@ export function LocationReviewCorrectionEditor({
             <Text {...mobileTextProps("counter")} style={styles.label}>Location evidence</Text>
             <Text {...mobileTextProps("sectionHeading")} style={styles.sectionTitle}>{locationActivityLabel(evidence)}</Text>
             <Text {...mobileTextProps("metadata")} style={styles.reviewMetaLine}>{formatEvidenceTimeRange(evidence)}</Text>
+            {stopsHeading ? (
+              <View style={editorStyles.tripStops}>
+                <Text {...mobileTextProps("metadata")} style={editorStyles.fieldLabel}>{stopsHeading}</Text>
+                {stopRows.map((row, index) => (
+                  <View key={row.key}>
+                    {index > 0 ? <View style={editorStyles.tripStopDivider} /> : null}
+                    <Text {...mobileTextProps("body")} accessibilityLabel={row.accessibilityLabel} style={editorStyles.tripStopRow}>{row.label}</Text>
+                  </View>
+                ))}
+              </View>
+            ) : null}
           </View>
 
           {statusMessage ? (
@@ -1183,6 +1199,9 @@ function createEditorStyles(theme: MobileTheme) {
     },
     section: { padding: 16, gap: 12 },
     divider: { height: StyleSheet.hairlineWidth, backgroundColor: theme.border, marginHorizontal: 16 },
+    tripStops: { marginTop: 8, gap: 6 },
+    tripStopDivider: { height: StyleSheet.hairlineWidth, backgroundColor: theme.border, marginBottom: 6 },
+    tripStopRow: { color: theme.textPrimary, fontSize: 15, lineHeight: 20 },
     answerRow: {
       minHeight: 58,
       flexDirection: "row",
