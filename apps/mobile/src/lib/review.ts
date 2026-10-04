@@ -464,6 +464,8 @@ export function locationReviewReasonCopy(
       return "Needs review · place isn’t saved";
     case "short_journey_review_only":
       return "Needs review · short journeys aren’t added automatically";
+    case "journey_contains_stop":
+      return "Needs review · this trip includes a stop";
     case "insufficient_route_evidence":
       return "Needs review · route evidence is limited";
     case "boundary_uncertainty_exceeded":

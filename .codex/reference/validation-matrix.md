@@ -529,6 +529,10 @@ Use a disposable local PostgreSQL/PostGIS database whose name ends in `_test`. R
 
 For staging, apply the additive Sleep resolution-link migration before the Preview deployment, verify the alias's actual SHA/backend identity, then smoke-test exact receipt replay, bounded reconciliation and Health partial counts using synthetic owners. Preserve private raw evidence locally. Missing installed-build provenance or hands-on iPhone checks must remain explicit outstanding gates; tests or empty queues cannot close a reported missing-source incident.
 
+## Location physical stops
+
+Run `npm run test -w @dayframe/shared` (including `physical-stops.test.ts`, `arrival-presence.test.ts` and the updated short-journey expectations), then the Location DB validators against a disposable loopback `_test` database: `npm run validate:location-v2-db`, `npx tsx scripts/validate-location-short-journeys.ts` and `npx tsx scripts/validate-location-unknown-visit-arrival.ts`. Compare `main` and the change over any private retained corpus outside Git and report every changed segment, not only target cases; owner-labelled brief stops must stay unchanged. Staging acceptance needs fresh drives: brief kerbside stop, 5–15 minute stop, visit-length local stop and ordinary traffic.
+
 ## Unit, typecheck and lint CI gate
 
 `.github/workflows/unit-checks.yml` runs `npm run typecheck`, `npm run lint` and `npm run test` across the mobile, web and shared workspaces on every pull request and on `main`. It needs no database or hosted credentials; DB-backed integration tests stay skipped there and run in the PostGIS jobs above. A green run is repository evidence only, not device, staging or production acceptance. Keep test limits above any inner waits so parallel CI load cannot turn a passing test into a timeout.

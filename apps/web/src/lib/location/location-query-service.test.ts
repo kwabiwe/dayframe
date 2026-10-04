@@ -71,6 +71,92 @@ describe("Location Review evidence query", () => {
     const dto = await getLocationReviewEvidence(review.reviewItemId, session);
     expect(dto.segment.approximateArrival).toBe(expected);
   });
+
+  it("presents trip stops from commute metadata and ignores malformed entries", async () => {
+    const review = {
+      ...reviewRow(),
+      stayId: null,
+      commuteId: "60000000-0000-4000-8000-000000000001",
+      startedAt: "2026-09-29T16:33:49.000Z",
+      stoppedAt: "2026-09-29T16:45:39.000Z",
+      tripStops: [
+        { staySegmentId: "stay_a", startedAt: "2026-09-29T16:35:49.000Z", stoppedAt: "2026-09-29T16:44:11.000Z",
+          startLowerBoundAt: "2026-09-29T16:35:49.000Z", startUpperBoundAt: "2026-09-29T16:38:11.000Z" },
+        { startedAt: "not a time", stoppedAt: "2026-09-29T16:44:11.000Z" },
+        { startedAt: "2026-09-29T16:44:11.000Z", stoppedAt: "2026-09-29T16:40:00.000Z" },
+        null
+      ]
+    };
+    query.mockImplementation((sql: string) => {
+      if (sql.includes("from review_items ri")) return Promise.resolve({ rows: [review] });
+      return Promise.resolve({ rows: [] });
+    });
+    const dto = await getLocationReviewEvidence(review.reviewItemId, session);
+    expect(dto.stops).toEqual([{
+      startedAt: "2026-09-29T16:35:49.000Z", stoppedAt: "2026-09-29T16:44:11.000Z",
+      durationSeconds: 502, approximate: true
+    }]);
+    expect(dto.textualSummary).toContain("includes an 8-minute (approximate) stop");
+    expect(dto.textualSummary).toContain("not travel time");
+    expect(query.mock.calls[0][0]).toContain("cs.metadata->'stops'");
+  });
+
+  it("does not report a recorded stop as an evidence gap or split point (review finding 4)", async () => {
+    const at = (minute: number, second = 0) => new Date(Date.UTC(2026, 8, 29, 16, minute, second)).toISOString();
+    const review = {
+      ...reviewRow(), stayId: null, commuteId: "60000000-0000-4000-8000-000000000001",
+      startedAt: at(0), stoppedAt: at(20),
+      tripStops: [{ staySegmentId: "stay_a", startedAt: at(2), stoppedAt: at(18) }]
+    };
+    const route = [at(0, 10), at(0, 35), at(1, 0), at(1, 25), at(1, 50), at(18, 10), at(18, 35), at(19, 0), at(19, 25)]
+      .map((occurredAt, index) => ({
+        id: `e${index}`, clientEvidenceId: `route-${index}`, kind: "standard_location", occurredAt, endedAt: null,
+        longitude: -0.1, latitude: 51.5 + index * 0.001, accuracyMeters: 5, role: "route", expiresAt: at(59)
+      }));
+    query.mockImplementation((sql: string) => {
+      if (sql.includes("from review_items ri")) return Promise.resolve({ rows: [review] });
+      if (sql.includes("from location_segment_evidence lse")) return Promise.resolve({ rows: route });
+      return Promise.resolve({ rows: [] });
+    });
+    const dto = await getLocationReviewEvidence(review.reviewItemId, session);
+    expect(dto.map.gaps).toEqual([]);
+    expect(dto.suggestedSplitPoints).toEqual([]);
+    expect(dto.textualSummary).toContain("Largest evidence gap: 0 minutes");
+  });
+
+  it("still reports an unobserved gap outside a recorded stop", async () => {
+    const at = (minute: number, second = 0) => new Date(Date.UTC(2026, 8, 29, 16, minute, second)).toISOString();
+    const review = {
+      ...reviewRow(), stayId: null, commuteId: "60000000-0000-4000-8000-000000000001",
+      startedAt: at(0), stoppedAt: at(50),
+      tripStops: [{ staySegmentId: "stay_a", startedAt: at(2), stoppedAt: at(10) }]
+    };
+    const route = [at(0, 30), at(1, 30), at(30, 0), at(49, 0)].map((occurredAt, index) => ({
+      id: `e${index}`, clientEvidenceId: `route-${index}`, kind: "standard_location", occurredAt, endedAt: null,
+      longitude: -0.1, latitude: 51.5 + index * 0.001, accuracyMeters: 5, role: "route", expiresAt: at(59)
+    }));
+    query.mockImplementation((sql: string) => {
+      if (sql.includes("from review_items ri")) return Promise.resolve({ rows: [review] });
+      if (sql.includes("from location_segment_evidence lse")) return Promise.resolve({ rows: route });
+      return Promise.resolve({ rows: [] });
+    });
+    const dto = await getLocationReviewEvidence(review.reviewItemId, session);
+    // 01:30–30:00 minus the 02:00–10:00 stop leaves a 20-minute unobserved interval; 30:00–49:00 is 19 minutes.
+    expect(dto.map.gaps.map((gap) => [gap.startedAt, gap.stoppedAt, gap.durationSeconds])).toEqual([
+      [at(10), at(30), 1_200], [at(30), at(49), 1_140]
+    ]);
+    expect(dto.suggestedSplitPoints).toHaveLength(2);
+  });
+
+  it("returns no stops for a stay or a trip without stop metadata", async () => {
+    query.mockImplementation((sql: string) => {
+      if (sql.includes("from review_items ri")) return Promise.resolve({ rows: [{ ...reviewRow(), tripStops: null }] });
+      return Promise.resolve({ rows: [] });
+    });
+    const dto = await getLocationReviewEvidence(reviewRow().reviewItemId, session);
+    expect(dto.stops).toEqual([]);
+    expect(dto.textualSummary).not.toContain("stop from");
+  });
 });
 
 function reviewRow() {

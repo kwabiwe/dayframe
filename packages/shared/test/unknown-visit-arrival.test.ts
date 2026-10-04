@@ -1,4 +1,6 @@
 import { describe, expect, it } from "vitest";
+import { deriveCommutes } from "../src/location/commute";
+import { LOCATION_ENGINE_V2_CONFIG } from "../src/location/config";
 import { runLocationEngine } from "../src/location/segmenter";
 import { localDateKey, stableLocationId } from "../src/location/geo";
 import { assessAutomaticLocation } from "../src/location/automaticPolicy";
@@ -435,10 +437,18 @@ describe("unknown native Visit arrival uncertainty", () => {
         sourceTimestamp: item.sourceTimestamp ? shift(item.sourceTimestamp) : null
       };
     });
-    const commutes = runLocationEngine(input).segmentUpserts.filter((segment) => segment.kind === "commute");
-    expect(commutes).toHaveLength(2);
-    expect(Date.parse(commutes[0].stoppedAt) - Date.parse(commutes[0].startedAt)).toBe(76_140);
-    expect(assessAutomaticLocation("v2_enabled", commutes[0])).toMatchObject({
+    const output = runLocationEngine(input);
+    const stays = output.segmentUpserts.filter((segment): segment is StaySegment => segment.kind === "stay");
+    const trips = output.segmentUpserts.filter((segment) => segment.kind === "commute");
+    // The 76.140 s leg ends at a short unknown stop, so it is recorded inside one trip.
+    expect(trips).toHaveLength(1);
+    expect(Date.parse(trips[0].stops![0].startedAt) - Date.parse(trips[0].startedAt)).toBe(76_140);
+    expect(assessAutomaticLocation("v2_enabled", trips[0])).toMatchObject({
+      action: "review", reason: "journey_contains_stop"
+    });
+    const [leg] = deriveCommutes(stays, output.acceptedEvidence, LOCATION_ENGINE_V2_CONFIG, input.processingAt);
+    expect(Date.parse(leg.stoppedAt) - Date.parse(leg.startedAt)).toBe(76_140);
+    expect(assessAutomaticLocation("v2_enabled", leg)).toMatchObject({
       action: "review", reason: "short_journey_review_only"
     });
   });

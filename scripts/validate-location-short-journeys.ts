@@ -36,10 +36,14 @@ async function scenario(saved: boolean, mode: "v2_review" | "v2_enabled" | "v2_s
     await ingestLocationEvidence({...request,clientBatchId:randomUUID(),timeZone:"UTC",evidence:input.evidence},session,input.processingAt);
     await replay();
     const commutes = runLocationEngine(input).segmentUpserts.filter(s=>s.kind==='commute');
-    assert.equal(commutes.length,2);
-    const rows = await stored();assert.equal(rows.length,2);
+    // A ten-minute unknown destination is a short stop inside one trip (owner option A);
+    // a saved destination keeps two short journeys.
+    const tripCount = saved ? 2 : 1;
+    assert.equal(commutes.length,tripCount);
+    if(!saved) assert.equal(commutes[0].stops?.length,1);
+    const rows = await stored();assert.equal(rows.length,tripCount);
     const silent = mode==='v2_shadow' || cutover===shortAt(2_000_000);
-    for(let i=0;i<2;i++) {
+    for(let i=0;i<tripCount;i++) {
       const row=rows[i], expected=commutes[i];
       assert.equal(row.client_segment_id,expected.clientSegmentId);
       assert.equal(row.started_at.toISOString(),expected.startedAt);assert.equal(row.stopped_at.toISOString(),expected.stoppedAt);
@@ -51,7 +55,9 @@ async function scenario(saved: boolean, mode: "v2_review" | "v2_enabled" | "v2_s
       else {
         assert(row.event_id && row.review_id);assert.equal(row.review_status,'open');
         assert.equal(row.raw_payload.clientSegmentId,expected.clientSegmentId);
-        assert.equal(row.raw_payload.semanticReason,mode==='v2_enabled'?'short_journey_review_only':'review_mode');
+        assert.equal(row.raw_payload.semanticReason,mode==='v2_enabled'
+          ? saved ? 'short_journey_review_only' : 'journey_contains_stop'
+          : 'review_mode');
       }
     }
     assert.equal((await query("select te.* from time_entries te join activity_events e on e.id=te.created_from_event_id where te.workspace_id=$1 and te.user_id=$2 and e.event_type='commute_detected'")).rowCount,0);
@@ -59,19 +65,19 @@ async function scenario(saved: boolean, mode: "v2_review" | "v2_enabled" | "v2_s
     assert.equal((await query('select * from learned_places where workspace_id=$1 and user_id=$2')).rowCount,0);
     assert.equal((await query("select * from activity_events where workspace_id=$1 and user_id=$2 and event_type='unknown_stay'")).rowCount,0);
     await replay(); assert.deepEqual(await stored(),rows);
-    if(!silent) assert.equal((await query("select r.* from review_items r join activity_events e on e.id=r.event_id where r.workspace_id=$1 and r.user_id=$2 and e.event_type='commute_detected'")).rowCount,2);
+    if(!silent) assert.equal((await query("select r.* from review_items r join activity_events e on e.id=r.event_id where r.workspace_id=$1 and r.user_id=$2 and e.event_type='commute_detected'")).rowCount,tripCount);
     if(decision) {
       const envelopes=rows.map(row=>({clientMutationId:randomUUID(),mutation:decision==='edit_and_confirm'
         ? {action:decision,edit:{description:'Owner corrected synthetic trip',startedAt:row.started_at.toISOString(),stoppedAt:row.stopped_at.toISOString(),tags:[]}}
         : {action:decision}}));
       const results=[];
-      for(let i=0;i<2;i++) results.push(await resolveIdempotentReviewMutation(rows[i].review_id,envelopes[i],session));
+      for(let i=0;i<tripCount;i++) results.push(await resolveIdempotentReviewMutation(rows[i].review_id,envelopes[i],session));
       // Existing enabled-mode event relink refreshes commute updated_at even for terminal sources.
       // Exclude only that maintenance timestamp, never decision/entry/receipt/lineage fields.
       const snapshot=async()=>Object.fromEntries(await Promise.all(['activity_events','review_items','time_entries','review_mutation_receipts','commute_segments','location_segment_evidence'].map(async table=>[table,(await query(`select ${table==='commute_segments'?"to_jsonb(t) - 'updated_at' as row":'*'} from ${table} t where workspace_id=$1 and user_id=$2 ${table==='location_segment_evidence'?'and commute_segment_id is not null':''} order by id`)).rows])));
       const before=await snapshot();
       await replay();assert.deepEqual(await snapshot(),before,'Same-identity replay altered terminal decision/entry/receipt/lineage');
-      for(let i=0;i<2;i++) assert.deepEqual(await resolveIdempotentReviewMutation(rows[i].review_id,envelopes[i],session),results[i]);
+      for(let i=0;i<tripCount;i++) assert.deepEqual(await resolveIdempotentReviewMutation(rows[i].review_id,envelopes[i],session),results[i]);
       assert.deepEqual(await snapshot(),before,'Receipt retry altered protected source');
       // Deliberately new synthetic catalogue input changes endpoint/commute IDs.
       if(saved) {
@@ -83,9 +89,11 @@ async function scenario(saved: boolean, mode: "v2_review" | "v2_enabled" | "v2_s
         input.savedPlaces.push(p);
       }
       const changed=runLocationEngine(input).segmentUpserts.filter(s=>s.kind==='commute');
-      assert.equal(changed.length,2);assert(changed.every(s=>!commutes.some(old=>s.clientSegmentId===old.clientSegmentId)));
+      // Moving the saved destination away leaves a short unknown stop inside one trip;
+      // adding a saved endpoint at the former unknown stop splits it into two journeys.
+      assert.equal(changed.length,saved?1:2);assert(changed.every(s=>!commutes.some(old=>s.clientSegmentId===old.clientSegmentId)));
       await replay();assert.deepEqual(await snapshot(),before,'Changed-ID replacement altered protected source or created competing semantics');
-      assert.equal((await query('select * from time_entries where workspace_id=$1 and user_id=$2')).rowCount,decision==='ignore_once_location'?0:2);
+      assert.equal((await query('select * from time_entries where workspace_id=$1 and user_id=$2')).rowCount,decision==='ignore_once_location'?0:tripCount);
     }
     console.log(`PASS short trips: ${mode}, ${saved?'saved/saved':'saved/unknown'}, ${decision??(silent?'silent':'stable open')}, logging=${trusted}, persisted lineage and retry verified`);
   } finally {

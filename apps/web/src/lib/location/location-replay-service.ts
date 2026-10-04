@@ -9,10 +9,12 @@ import {
   type LocationReplayPersistenceProfile
 } from "./location-replay-batching";
 import {
+  deriveCommutes,
   EMPTY_LOCATION_ENGINE_STATE,
   LOCATION_ENGINE_V2_CONFIG,
   LocationEvidenceSchema,
   runLocationEngine,
+  type ClassifiedEvidence,
   type CommuteSegment,
   type LocationEvidence,
   type LocationSegment,
@@ -176,7 +178,7 @@ export async function replayLocationEvidence(
   observeLocationCount(options, "staySegments", output.segmentUpserts.filter(segment => segment.kind === "stay").length);
   observeLocationCount(options, "commuteSegments", output.segmentUpserts.filter(segment => segment.kind === "commute").length);
   observeLocationTiming(options, "protected_replacement_checks", "started");
-  const protectedReplacement = await excludeProtectedReplacements(client, session, options, output.segmentUpserts);
+  const protectedReplacement = await excludeProtectedReplacements(client, session, options, output.segmentUpserts, output.acceptedEvidence);
   const segments = protectedReplacement.segments;
   observeLocationTiming(options, "protected_replacement_checks", "completed");
   observeLocationCount(options, "protectedSegments", protectedReplacement.count);
@@ -244,11 +246,15 @@ function sharesProtectedPortion(segment: LocationSegment, link: ProtectedSourceL
 
 async function excludeProtectedReplacements(
   client: pg.PoolClient, session: RequestSession,
-  options: Pick<LocationReplayOptions, "deviceId" | "algorithmVersion" | "persistenceProfile" | "onLocationCount">,
-  segments: LocationSegment[]
+  options: Pick<LocationReplayOptions, "deviceId" | "algorithmVersion" | "processingAt" | "persistenceProfile" | "onLocationCount">,
+  segments: LocationSegment[],
+  acceptedEvidence: ClassifiedEvidence[] = []
 ) {
+  // A trip's legs are fallback candidates: if protected history holds the trip,
+  // its unaffected legs remain instead of their open Reviews being retired.
+  const fallbackLegs = segments.flatMap((segment) => segment.kind === "commute" ? segment.legs ?? [] : []);
   const byEvidence = new Map<string, LocationSegment[]>();
-  for (const segment of segments) for (const id of segment.evidenceIds) {
+  for (const segment of [...segments, ...fallbackLegs]) for (const id of segment.evidenceIds) {
     const candidates = byEvidence.get(id) ?? [];
     candidates.push(segment);
     byEvidence.set(id, candidates);
@@ -314,11 +320,116 @@ async function excludeProtectedReplacements(
       }
     }
   }
+  // A decided or manual row can keep a stay's ID while late evidence moves the
+  // engine's boundaries. Its persisted boundaries stay canonical for every
+  // commute that starts or ends there, and for a trip's interior stops.
+  const commutes = [...segments, ...fallbackLegs].filter((segment): segment is CommuteSegment => segment.kind === "commute");
+  const decidedStays = await decidedStayBounds(client, session, options, [...new Set(commutes.flatMap((commute) => [
+    commute.fromStaySegmentId, commute.toStaySegmentId, ...(commute.stops ?? []).map((stop) => stop.staySegmentId)]))].sort());
+  const movesEndpoint = (commute: CommuteSegment) =>
+    boundariesMoved(commute.fromStaySegmentId, "stop", decidedStays, segments) ||
+    boundariesMoved(commute.toStaySegmentId, "start", decidedStays, segments);
+  // A trip also depends on its interior stops: it cannot span time whose stop
+  // replacement was held by, or already belongs to, decided history. Nor can it
+  // keep an endpoint that decided history has moved: its qualified legs are
+  // re-derived, and a trip with none is omitted rather than rebuilt without
+  // its stops. Trips are identified by their stops, not by fallback legs.
+  const replaceable = (segment: LocationSegment) => !held.has(segment.clientSegmentId) && (segment.kind !== "commute" ||
+    (!held.has(segment.fromStaySegmentId) && !held.has(segment.toStaySegmentId) &&
+      !(segment.stops ?? []).some((stop) => held.has(stop.staySegmentId) || decidedStays.has(stop.staySegmentId)) &&
+      !(segment.stops?.length && movesEndpoint(segment))));
   return {
     count: held.size,
-    segments: segments.filter(segment => !held.has(segment.clientSegmentId) && (segment.kind !== "commute" ||
-      (!held.has(segment.fromStaySegmentId) && !held.has(segment.toStaySegmentId))))
+    segments: segments.flatMap((segment) => replaceable(segment)
+      ? segment.kind === "commute" && !segment.stops?.length && movesEndpoint(segment)
+        ? rebuildLegWithinDecidedStops(segment, decidedStays, segments, acceptedEvidence, options)
+        : [segment]
+      : segment.kind === "commute"
+        ? (segment.legs ?? []).filter(replaceable).flatMap((leg) =>
+            rebuildLegWithinDecidedStops(leg, decidedStays, segments, acceptedEvidence, options))
+        : [])
   };
+}
+
+type DecidedStopBounds = {
+  clientSegmentId: string;
+  startedAt: Date | string; stoppedAt: Date | string | null;
+  startLowerBoundAt: Date | string | null; startUpperBoundAt: Date | string | null;
+  stopLowerBoundAt: Date | string | null; stopUpperBoundAt: Date | string | null;
+};
+
+/** Persisted boundaries of terminal/manual stays that keep a commute endpoint's or interior stop's client ID. */
+async function decidedStayBounds(
+  client: pg.PoolClient, session: RequestSession,
+  options: Pick<LocationReplayOptions, "deviceId">,
+  clientSegmentIds: string[]
+) {
+  const decided = new Map<string, DecidedStopBounds>();
+  if (!clientSegmentIds.length) return decided;
+  // Same protection predicate as segment persistence.
+  const result = await client.query<DecidedStopBounds>(
+    `/* decided stay bounds */ select s.client_segment_id as "clientSegmentId", s.started_at as "startedAt", s.stopped_at as "stoppedAt",
+            s.start_lower_bound_at as "startLowerBoundAt", s.start_upper_bound_at as "startUpperBoundAt",
+            s.stop_lower_bound_at as "stopLowerBoundAt", s.stop_upper_bound_at as "stopUpperBoundAt"
+     from stay_segments s
+     where s.workspace_id = $1 and s.user_id = $2 and s.device_id = $3 and s.client_segment_id = any($4::text[])
+       and (s.continuity_status = 'manual' or (s.created_from_event_id is not null and not exists (
+         select 1 from review_items ri
+         where ri.workspace_id = $1 and ri.user_id = $2 and ri.location_segment_id = s.id and ri.status = 'open')))
+     order by s.client_segment_id`,
+    [session.workspaceId, session.userId, options.deviceId, clientSegmentIds]
+  );
+  for (const row of result.rows) decided.set(row.clientSegmentId, row);
+  return decided;
+}
+
+/** The engine's stay with a decided row's persisted boundaries, which stay canonical. */
+function stayWithDecidedBounds(id: string, decided: ReadonlyMap<string, DecidedStopBounds>, segments: LocationSegment[]) {
+  const engine = segments.find((segment): segment is StaySegment => segment.kind === "stay" && segment.clientSegmentId === id);
+  const row = decided.get(id);
+  if (!engine || !row) return engine ?? null;
+  const startedAt = iso(row.startedAt)!;
+  const stoppedAt = iso(row.stoppedAt);
+  return { ...engine, startedAt, stoppedAt,
+    startLowerBoundAt: iso(row.startLowerBoundAt) ?? startedAt, startUpperBoundAt: iso(row.startUpperBoundAt) ?? startedAt,
+    stopLowerBoundAt: iso(row.stopLowerBoundAt) ?? stoppedAt, stopUpperBoundAt: iso(row.stopUpperBoundAt) ?? stoppedAt };
+}
+
+/** Whether a decided row has moved the side of a stay that a commute attaches to. */
+function boundariesMoved(id: string, side: "start" | "stop", decided: ReadonlyMap<string, DecidedStopBounds>, segments: LocationSegment[]) {
+  if (!decided.has(id)) return false;
+  const engine = segments.find((segment): segment is StaySegment => segment.kind === "stay" && segment.clientSegmentId === id);
+  const canonical = stayWithDecidedBounds(id, decided, segments);
+  if (!engine || !canonical) return false;
+  const same = (a: string | null | undefined, b: string | null | undefined) =>
+    (a == null ? null : Date.parse(a)) === (b == null ? null : Date.parse(b));
+  return side === "start"
+    ? !same(engine.startedAt, canonical.startedAt) || !same(engine.startLowerBoundAt, canonical.startLowerBoundAt) ||
+      !same(engine.startUpperBoundAt, canonical.startUpperBoundAt)
+    : !same(engine.stoppedAt, canonical.stoppedAt) || !same(engine.stopLowerBoundAt, canonical.stopLowerBoundAt) ||
+      !same(engine.stopUpperBoundAt, canonical.stopUpperBoundAt);
+}
+
+/**
+ * Re-derives a commute or fallback leg between the persisted boundaries of a
+ * decided endpoint stay and its other endpoint, so route evidence, metrics and
+ * qualification (including short-journey proof) reflect only the time it now
+ * covers. A leg that no longer qualifies is omitted.
+ */
+function rebuildLegWithinDecidedStops(
+  leg: CommuteSegment,
+  decided: ReadonlyMap<string, DecidedStopBounds>,
+  segments: LocationSegment[],
+  acceptedEvidence: ClassifiedEvidence[],
+  options: Pick<LocationReplayOptions, "algorithmVersion" | "processingAt">
+): CommuteSegment[] {
+  if (!decided.has(leg.fromStaySegmentId) && !decided.has(leg.toStaySegmentId)) return [leg];
+  const from = stayWithDecidedBounds(leg.fromStaySegmentId, decided, segments);
+  const to = stayWithDecidedBounds(leg.toStaySegmentId, decided, segments);
+  if (!from?.stoppedAt || !to) return [];
+  return deriveCommutes([from, to], acceptedEvidence,
+    { ...LOCATION_ENGINE_V2_CONFIG, algorithmVersion: options.algorithmVersion }, options.processingAt)
+    .filter((rebuilt) => rebuilt.clientSegmentId === leg.clientSegmentId);
 }
 
 async function supersedeMissingSegments(
@@ -520,7 +631,8 @@ async function persistStays(
       JSON.stringify({
         placeMatchKind: segment.placeMatchKind,
         candidatePlaceIds: segment.candidatePlaceIds,
-        ...(segment.approximateArrival ? { approximateArrival: true } : {})
+        ...(segment.approximateArrival ? { approximateArrival: true } : {}),
+        ...(segment.formation ? { formation: segment.formation } : {})
       })
     ]);
     // Trusted SQL template; only parameter positions vary with the bounded row index.
@@ -598,7 +710,9 @@ async function persistCommutes(
       segment.continuityStatus,
       segment.confidence,
       JSON.stringify({
-        qualificationReason: segment.qualificationReason ?? null
+        qualificationReason: segment.qualificationReason ?? null,
+        // Coordinate-free: times, bounds, the stop's own stay ID and candidate place IDs.
+        ...(segment.stops?.length ? { stops: segment.stops } : {})
       })
     ]);
     // Trusted SQL template; only parameter positions vary with the bounded row index.
