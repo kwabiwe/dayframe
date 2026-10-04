@@ -43,44 +43,90 @@ function accurateFix(item: ClassifiedEvidence, config: LocationEngineConfig) {
     horizontalAccuracyMeters != null && horizontalAccuracyMeters <= config.highQualityHorizontalAccuracyMeters;
 }
 
+/** How recent an accurate fix must be to show where the device was when a geofence callback fired. */
+const CALLBACK_POSITION_WINDOW_MS = 120_000;
+
+/**
+ * Whether the device had already been observed far from a place when a
+ * callback fired: the latest accurate fix at or before that instant, within
+ * `CALLBACK_POSITION_WINDOW_MS`, lies at least the round-trip excursion
+ * minimum from it. Later fixes say nothing about a prompt callback followed by
+ * a capture gap.
+ */
+function positionIndex(acceptedEvidence: ClassifiedEvidence[], occurredAtMs: number[], config: LocationEngineConfig) {
+  const indexes = acceptedEvidence.flatMap((item, index) => accurateFix(item, config) ? [index] : []);
+  const fixes = indexes.map((index) => acceptedEvidence[index]);
+  const times = indexes.map((index) => occurredAtMs[index]);
+  return (centre: Point | null, atMs: number) => {
+    if (!centre) return false;
+    let low = 0;
+    let high = times.length;
+    while (low < high) {
+      const middle = (low + high) >> 1;
+      if (times[middle] <= atMs) low = middle + 1;
+      else high = middle;
+    }
+    const latest = low - 1;
+    return latest >= 0 && atMs - times[latest] <= CALLBACK_POSITION_WINDOW_MS &&
+      distanceMeters(centre, evidencePoint(fixes[latest])!) >= config.commuteSamePlaceMinimumExcursionMeters;
+  };
+}
+
 /**
  * The latest evidence of being at a journey's origin: an accurate fix there,
- * or the origin's geofence exit unless an accurate fix at least the round-trip
- * excursion minimum away came first. iOS re-reports exits when the app
- * re-registers its regions (on 4 Oct, 900 m from Home), so such an exit is not
- * evidence of leaving. Visits (dated before an arrival), entries, state
- * snapshots and broad fixes never are.
+ * or the origin's geofence exit unless the device had already been observed
+ * far from the origin when it fired. iOS re-reports exits when the app
+ * re-registers its regions (on 4 Oct, 900 m from Home, a second after a fix
+ * there), so such an exit is not evidence of leaving; a genuine exit fires as
+ * the device leaves. Visits (dated before an arrival), entries, state snapshots
+ * and broad fixes never are.
  */
-function latestDepartureSupport(stay: StaySegment, evidence: ClassifiedEvidence[], config: LocationEngineConfig) {
+function latestDepartureSupport(stay: StaySegment, evidence: ClassifiedEvidence[], config: LocationEngineConfig,
+  farFrom: ReturnType<typeof positionIndex>) {
   const centre = segmentPoint(stay);
   let latest: ClassifiedEvidence | undefined;
-  let seenFar = false;
   for (const item of evidence) {
-    if (accurateFix(item, config)) {
-      if (evidenceMatchesStay(item, stay)) {
-        latest = item;
-        seenFar = false;
-      } else if (centre && distanceMeters(centre, evidencePoint(item)!) >= config.commuteSamePlaceMinimumExcursionMeters) {
-        seenFar = true;
-      }
-    } else if (item.evidence.kind === "geofence_exit" && !seenFar && evidenceMatchesStay(item, stay)) {
-      latest = item;
-    }
+    if (!evidenceMatchesStay(item, stay)) continue;
+    if (accurateFix(item, config) ||
+      item.evidence.kind === "geofence_exit" && !farFrom(centre, Date.parse(item.evidence.occurredAt))) latest = item;
   }
   return latest;
 }
 
 /**
  * When a round trip was first observed back at its place: the earliest
- * evidence of any kind matching the place after the trip's last accurate fix
- * away from it. That is the evidence the latest-support rule used to start the
- * trip from, collapsing it.
+ * evidence of any kind matching the place once the trip was observed away
+ * (any reading not matching it). Evidence before that is the departure. Only
+ * renewed movement undoes a return: accurate fixes away, at least
+ * `outsideConfirmationCount` of them, one moving or the round-trip excursion
+ * minimum from the place; a stray still fix nearby does not.
  */
 function observedReturnMs(stay: StaySegment, evidence: ClassifiedEvidence[], config: LocationEngineConfig) {
+  const centre = segmentPoint(stay);
+  let away = false;
   let returnedMs: number | null = null;
+  let awayFixes = 0;
+  let moved = false;
   for (const item of evidence) {
-    if (evidenceMatchesStay(item, stay)) returnedMs ??= Date.parse(item.evidence.occurredAt);
-    else if (accurateFix(item, config)) returnedMs = null;
+    if (evidenceMatchesStay(item, stay)) {
+      if (away) returnedMs ??= Date.parse(item.evidence.occurredAt);
+      awayFixes = 0;
+      moved = false;
+      continue;
+    }
+    const point = evidencePoint(item);
+    if (!point) continue;
+    away = true;
+    if (returnedMs == null || !accurateFix(item, config)) continue;
+    const speed = item.evidence.speedMetersPerSecond ?? item.impliedSpeedMetersPerSecond;
+    awayFixes += 1;
+    moved ||= speed != null && Number.isFinite(speed) && speed >= config.movementSpeedThresholdMps ||
+      centre != null && distanceMeters(centre, point) >= config.commuteSamePlaceMinimumExcursionMeters;
+    if (awayFixes >= config.outsideConfirmationCount && moved) {
+      returnedMs = null;
+      awayFixes = 0;
+      moved = false;
+    }
   }
   return returnedMs;
 }
@@ -414,6 +460,7 @@ export function deriveCommutes(
   // Keep the original array/filter order and strict endpoint comparisons.
   let shortProof: ReadonlySet<ClassifiedEvidence> | undefined;
   const occurredAtMs = acceptedEvidence.map(({ evidence }) => Date.parse(evidence.occurredAt));
+  const farFrom = positionIndex(acceptedEvidence, occurredAtMs, config);
   for (let index = 1; index < stays.length; index += 1) {
     const from = stays[index - 1];
     const to = stays[index];
@@ -428,11 +475,11 @@ export function deriveCommutes(
     // same-place round trip, a return's early-dated arrival Visit or a
     // re-reported exit used to become the "departure", shrinking the trip to
     // seconds so it was discarded.
-    const latestFromSupport = latestDepartureSupport(from, boundaryEvidence, config);
+    const latestFromSupport = latestDepartureSupport(from, boundaryEvidence, config, farFrom);
     // A journey ends where its destination stay begins. When a round trip was
     // seen back at its place well before that stay begins, a trip to it would
     // include stationary time there, so none is claimed (the latest-support
-    // rule never claimed one either: it started the trip at that return).
+    // rule started such a trip at that return, so it never qualified).
     if (sameKnownEndpoint(from, to)) {
       const returnedMs = observedReturnMs(to, boundaryEvidence, config);
       if (returnedMs != null && stoppedAtMs - returnedMs > config.savedPlaceMinimumDwellMs) continue;

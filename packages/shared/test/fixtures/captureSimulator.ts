@@ -19,10 +19,24 @@ import type { LocationEngineInput, LocationEvidence } from "../../src/location/t
  */
 export type Xy = { x: number; y: number };
 
+type Travel = {
+  to: Xy; via?: Xy[]; speed?: number;
+  /** Reported accuracy range of the leg's fixes, metres (default accurate). */
+  accuracy?: [number, number];
+  /** False: a capture gap, no standard fixes along the leg (geofences still fire). */
+  recorded?: boolean;
+};
+
 export type Leg =
-  | { kind: "stay"; at?: Xy; minutes: number; indoor?: boolean; visit?: boolean; driftFixes?: boolean }
-  | { kind: "drive"; to: Xy; via?: Xy[]; speed?: number }
-  | { kind: "walk"; to: Xy; via?: Xy[]; speed?: number }
+  | {
+    kind: "stay"; at?: Xy; minutes: number; indoor?: boolean; visit?: boolean; driftFixes?: boolean;
+    /** False: no settling fix after arrival (the phone stays silent from the start). */
+    settle?: boolean;
+    /** One accurate still fix this far from the stay, this long after arrival (an isolated outlier). */
+    stray?: { afterMinutes: number; metres: number };
+  }
+  | ({ kind: "drive" } & Travel)
+  | ({ kind: "walk" } & Travel)
   /** Still on the road (traffic, a kerbside drop-off): no Visit, at most a settling fix. */
   | { kind: "hold"; seconds: number }
   /** The phone records nothing while staying where it is. */
@@ -124,7 +138,7 @@ export function simulate(scenario: Scenario, seed: number): Simulation {
     }
     inside = next;
   };
-  const travel = (to: Xy, via: Xy[] = [], speed: number, accuracy: () => number) => {
+  const travel = (to: Xy, via: Xy[] = [], speed: number, accuracy: () => number, recorded = true) => {
     let sinceMirror = 0;
     for (const waypoint of [...via, to]) {
       const length = Math.hypot(waypoint.x - position.x, waypoint.y - position.y);
@@ -140,7 +154,7 @@ export function simulate(scenario: Scenario, seed: number): Simulation {
         position = at;
         geofences(now, at);
         // The distance filter compares displacement from the last fix, not path length.
-        if (Math.hypot(at.x - lastFix.x, at.y - lastFix.y) >= DISTANCE_FILTER_METRES) {
+        if (recorded && Math.hypot(at.x - lastFix.x, at.y - lastFix.y) >= DISTANCE_FILTER_METRES) {
           const mirror = sinceMirror >= 500 && random() < 0.6;
           fix(now, at, accuracy(), stepSpeed, mirror);
           if (mirror) sinceMirror = 0;
@@ -150,8 +164,10 @@ export function simulate(scenario: Scenario, seed: number): Simulation {
   };
 
   for (const leg of scenario.legs) {
-    if (leg.kind === "drive") travel(leg.to, leg.via, leg.speed ?? 11, () => between(2, 5));
-    else if (leg.kind === "walk") travel(leg.to, leg.via, leg.speed ?? 1.35, () => between(4, 12));
+    if (leg.kind === "drive" || leg.kind === "walk") {
+      const [low, high] = leg.accuracy ?? (leg.kind === "drive" ? [2, 5] : [4, 12]);
+      travel(leg.to, leg.via, leg.speed ?? (leg.kind === "drive" ? 11 : 1.35), () => between(low, high), leg.recorded !== false);
+    }
     else if (leg.kind === "silence") now += leg.minutes * 60_000;
     else if (leg.kind === "hold") {
       if (leg.seconds >= 45 && random() < 0.5) fix(now + between(5_000, Math.min(40_000, leg.seconds * 1_000)), position, between(3, 8), between(0, 0.3));
@@ -169,7 +185,13 @@ export function simulate(scenario: Scenario, seed: number): Simulation {
       const heldUntil = () => departure + between(5_000, 60_000);
       // A stay shorter than its settling delay gets no settling fix.
       const settledAt = arrival + between(5_000, 60_000);
-      if (settledAt < departure) fix(settledAt, position, accuracy(), between(0, 0.4), random() < 0.5, heldUntil());
+      if (settledAt < departure && leg.settle !== false) fix(settledAt, position, accuracy(), between(0, 0.4), random() < 0.5, heldUntil());
+      if (leg.stray && leg.stray.afterMinutes * 60_000 < leg.minutes * 60_000) {
+        const angle = between(0, 2 * Math.PI);
+        fix(arrival + leg.stray.afterMinutes * 60_000,
+          { x: position.x + leg.stray.metres * Math.cos(angle), y: position.y + leg.stray.metres * Math.sin(angle) }, between(3, 6), 0, false, heldUntil());
+        lastFix = { ...position };
+      }
       if (leg.driftFixes !== false) {
         for (let t = arrival + between(4, 15) * 60_000; t < departure - 60_000; t += between(4, 15) * 60_000) {
           if (random() < 0.7) fix(t, position, accuracy(), between(0, 0.2), false, heldUntil());

@@ -142,6 +142,15 @@ describe("the start of a same-place round trip", () => {
     expect(output.segmentUpserts.filter((segment) => segment.kind === "commute")).toEqual([expect.objectContaining({ startedAt: home.stoppedAt })]);
   });
 
+  it("still starts a drive at Home's exit when a capture gap means the next fix is already 1.5 km away", () => {
+    // Only fixes before an exit can show it was re-reported: this exit fired as the car left a quiet Home.
+    const evidence = [e("home-0", 0, 0, { speedMetersPerSecond: 0 }), e("home-1", 10, 0, { speedMetersPerSecond: 0 }),
+      geofence("exit", 200, "geofence_exit"), e("far-0", 202, 1_500), e("far-1", 203, 2_000), e("back-0", 205, 1_000),
+      e("back-1", 206.5, 300), geofence("enter", 207, "geofence_enter"), e("home-2", 207.3, 0, { speedMetersPerSecond: 0 }),
+      e("home-3", 220, 0, { speedMetersPerSecond: 0 }), e("home-4", 240, 0, { speedMetersPerSecond: 0 })];
+    expect(commutes(input(evidence, 400))).toEqual([expect.objectContaining({ startedAt: at(200), qualificationReason: "same_place_meaningful_round_trip" })]);
+  });
+
   it("still starts a drive at Home's exit after a stray fix just outside Home hours earlier", () => {
     // Control: a fix 140 m out while at Home is not an excursion, so the exit that follows hours later still marks departure.
     const evidence = [e("home-0", 0, 0, { speedMetersPerSecond: 0 }), e("home-1", 10, 0, { speedMetersPerSecond: 0 }),
@@ -213,6 +222,18 @@ describe("the start of a same-place round trip", () => {
     expect(commutes(value).filter((trip) => Date.parse(trip.stoppedAt!) > Date.parse(at(backAt + 2)))).toEqual([]);
   });
 
+  it("claims no stationary Home time when a stray fix near Home follows the return (review finding)", () => {
+    const { value, backAt } = lateReturn(30);
+    const evidence = [...value.evidence, e("stray-after-return", backAt + 15, 140, { speedMetersPerSecond: 0 })];
+    expect(commutes({ ...value, evidence }).filter((trip) => Date.parse(trip.stoppedAt!) > Date.parse(at(backAt + 2)))).toEqual([]);
+  });
+
+  it("keeps a round trip whose route fixes report no accuracy (review finding)", () => {
+    const value = roundTrip({ returnVisit: false });
+    const evidence = value.evidence.map((item) => /^(out|back)-/.test(item.clientEvidenceId) ? { ...item, horizontalAccuracyMeters: null } : item);
+    expect(commutes({ ...value, evidence })).toEqual([expect.objectContaining({ startedAt: at(30.2), qualificationReason: "same_place_meaningful_round_trip" })]);
+  });
+
   it("leaves no overlapping legs when a trip through a stop reaches a Home stay that begins an hour late (review finding)", () => {
     const value = physicalStopFixture(PHYSICAL_STOP_PICKUP);
     const shift = (iso: string) => physicalStopAt(Date.parse(iso) - Date.parse(physicalStopAt(0)) + 3_600_000);
@@ -278,12 +299,56 @@ describe("the start of a same-place round trip", () => {
 });
 
 describe("a later departure after an earlier excursion (review finding)", () => {
+  // A 900 m walk whose return only Home's geofence entry saw, a quiet stretch at Home, then a real drive.
+  const walkThenDrive = (driveAt: number, to: "home" | "work" = "home") => {
+    const evidence = [e("home-0", 0, 0, { speedMetersPerSecond: 0 }), e("home-1", 10, 0, { speedMetersPerSecond: 0 }),
+      geofence("walk-exit", 20, "geofence_exit"), e("walk-out", 25, 500, { speedMetersPerSecond: 1.35 }),
+      e("walk-far", 30, 900, { speedMetersPerSecond: 1.35 }), e("walk-back", 35, 400, { speedMetersPerSecond: 1.35 }),
+      geofence("walk-enter", 39, "geofence_enter"), geofence("drive-exit", driveAt, "geofence_exit"),
+      e("drive-0", driveAt + 0.5, 300), e("drive-1", driveAt + 2, 1_000), e("drive-2", driveAt + 3.5, 1_800)];
+    if (to === "work") {
+      evidence.push(e("work-0", driveAt + 4.2, 2_000, { speedMetersPerSecond: 0 }), e("work-1", driveAt + 14.2, 2_000, { speedMetersPerSecond: 0 }),
+        e("work-2", driveAt + 24.2, 2_000, { speedMetersPerSecond: 0 }));
+    } else {
+      evidence.push(e("drive-3", driveAt + 5, 1_000), e("drive-4", driveAt + 6.5, 300), geofence("drive-enter", driveAt + 7, "geofence_enter"),
+        e("home-2", driveAt + 7.5, 0, { speedMetersPerSecond: 0 }), e("home-3", driveAt + 20, 0, { speedMetersPerSecond: 0 }),
+        e("home-4", driveAt + 40, 0, { speedMetersPerSecond: 0 }));
+    }
+    const value = input(evidence, driveAt + 200);
+    if (to === "work") value.savedPlaces.push({ id: "10000000-0000-4000-8000-0000000000f2", name: "Work", latitude: north(2_000), longitude: 0, radiusMeters: 100, loggingEnabled: true });
+    return value;
+  };
+  it.each([[130, "home"], [330, "home"], [130, "work"]] as const)("starts a drive at %i minutes to %s at its own exit after a walk whose return only the entry saw", (driveAt, to) => {
+    const drives = commutes(walkThenDrive(driveAt, to)).filter((trip) => trip.stoppedAt! > at(driveAt));
+    expect(drives).toEqual([expect.objectContaining({ startedAt: at(driveAt) })]);
+  });
+
+
   const HOME_SIM: SimPlace = { id: HOME_ID, name: "Home", at: { x: 0, y: 0 }, radius: 100, loggingEnabled: false };
   const quietHome = (homeMinutes: number): Scenario => ({ start: "2026-03-09T08:00:00Z", origin: HOME_SIM.at, places: [HOME_SIM], legs: [
     { kind: "stay", minutes: 60 }, { kind: "walk", to: { x: 0, y: 900 } }, { kind: "walk", to: HOME_SIM.at },
     { kind: "stay", minutes: homeMinutes, visit: false, driftFixes: false }, { kind: "drive", to: { x: 0, y: 1_800 } },
     { kind: "drive", to: HOME_SIM.at }, { kind: "stay", minutes: 90 }
   ] });
+  // Variant where only Home's entry sees the walk return (no fix within 400 m of Home), the phone records
+  // nothing at Home, and a capture gap hides the drive's first 400 m (review finding).
+  const quietGap = (homeMinutes: number): Scenario => ({ start: "2026-03-09T08:00:00Z", origin: HOME_SIM.at, places: [HOME_SIM], legs: [
+    { kind: "stay", minutes: 60 }, { kind: "walk", to: { x: 0, y: 900 } }, { kind: "walk", to: { x: 0, y: 400 } },
+    { kind: "walk", to: HOME_SIM.at, recorded: false },
+    { kind: "stay", minutes: homeMinutes, visit: false, driftFixes: false, settle: false },
+    { kind: "drive", to: { x: 0, y: 400 }, recorded: false }, { kind: "drive", to: { x: 0, y: 2_400 } },
+    { kind: "drive", to: HOME_SIM.at }, { kind: "stay", minutes: 90 }
+  ] });
+  it.each([[2, 90], [3, 90], [2, 420], [4, 420]])("starts the drive at its own departure without fixes at Home or as it leaves (seed %i, %i minutes)", (seed, homeMinutes) => {
+    const sim = simulate(quietGap(homeMinutes), seed);
+    const departure = sim.truth.stays[1].to;
+    const returned = sim.truth.stays[2].from;
+    const drives = commutes(sim.input()).filter((trip) => Date.parse(trip.stoppedAt!) > departure);
+    expect(drives).toHaveLength(1);
+    expect(Math.abs(Date.parse(drives[0].startedAt) - departure)).toBeLessThanOrEqual(2 * 60_000);
+    expect(Math.abs(Date.parse(drives[0].stoppedAt!) - returned)).toBeLessThanOrEqual(2 * 60_000);
+  });
+
   it.each([[2, 90], [3, 90], [20, 90], [2, 420]])("starts the drive at its own departure (seed %i, %i minutes at Home)", (seed, homeMinutes) => {
     const sim = simulate(quietHome(homeMinutes), seed);
     const departure = sim.truth.stays[1].to;
@@ -313,6 +378,24 @@ describe("the capture simulator", () => {
       const still = sim.input().evidence.filter((item) => item.kind === "standard_location" && item.speedMetersPerSecond! < 1);
       expect(still.every((item) => Date.parse(item.occurredAt) <= stay.to)).toBe(true);
     }
+  });
+
+  it("can leave out a stay's settling fix, a leg's fixes, or report broad accuracy, and add a stray fix", () => {
+    const base: Scenario = { start: "2026-03-09T12:00:00Z", origin: { x: 0, y: 0 }, places: [], legs: [
+      { kind: "stay", minutes: 30, visit: false, driftFixes: false, settle: false }, { kind: "drive", to: { x: 0, y: 1_000 }, recorded: false },
+      { kind: "drive", to: { x: 0, y: 2_000 }, accuracy: [100, 150] },
+      { kind: "stay", minutes: 30, visit: false, driftFixes: false, stray: { afterMinutes: 10, metres: 140 } }
+    ] };
+    const sim = simulate(base, 3);
+    const fixes = sim.input().evidence.filter((item) => item.kind === "standard_location");
+    const [first, second] = sim.truth.stays;
+    expect(fixes.filter((item) => Date.parse(item.occurredAt) <= first.to)).toEqual([]);
+    // Only the broad leg records fixes: the first kilometre (at most 12.65 m/s) is a capture gap.
+    const route = fixes.filter((item) => Date.parse(item.occurredAt) > first.to && Date.parse(item.occurredAt) < second.from);
+    expect(route.length).toBeGreaterThan(0);
+    expect(route.every((item) => item.horizontalAccuracyMeters! >= 100)).toBe(true);
+    expect(Date.parse(route[0].occurredAt) - first.to).toBeGreaterThanOrEqual(1_000 / 12.65 * 1_000);
+    expect(fixes.filter((item) => item.occurredAt === new Date(second.from + 10 * 60_000).toISOString())).toHaveLength(1);
   });
 
   it("is deterministic for a seed", () => {
