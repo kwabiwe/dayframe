@@ -22,6 +22,7 @@ import {
 } from "@dayframe/shared";
 import type pg from "pg";
 import type { RequestSession } from "../session";
+import { SUPERSEDED_REVIEW_SCOPE } from "./location-review-supersession";
 
 type EvidenceRow = {
   id: string;
@@ -544,9 +545,12 @@ async function retireOpenReviewsForMissingSegments(
       where workspace_id = $1 and user_id = $2 and created_from_event_id = any($3::uuid[])
         and continuity_status <> 'manual'`, [session.workspaceId, session.userId, eventIds]);
   }
+  // `ignored_scope = 'superseded'` marks replay's own retirement, never a user
+  // decision (users ignore 'once' or by 'source'): if the segment returns, its
+  // row stays mutable and emission reopens this Review (reopenSupersededReviews).
   await client.query(
     `update review_items
-     set status = 'ignored', resolved_at = now(),
+     set status = 'ignored', resolved_at = now(), ignored_scope = '${SUPERSEDED_REVIEW_SCOPE}',
          notes = concat_ws(' ', nullif(notes, ''), 'Superseded by corrected location evidence replay.')
      where workspace_id = $1 and user_id = $2 and id = any($3::uuid[]) and status = 'open'`,
     [session.workspaceId, session.userId, reviewIds]
@@ -581,7 +585,8 @@ async function lockAndPartitionSegments<T extends {clientSegmentId: string}>(
               created_from_event_id is not null and not exists (
                 select 1 from review_items
                 where workspace_id = $1 and user_id = $2
-                  and location_segment_id = ${table}.id and status = 'open'
+                  and location_segment_id = ${table}.id
+                  and (status = 'open' or status = 'ignored' and ignored_scope = '${SUPERSEDED_REVIEW_SCOPE}')
               ) as "preservesManualCorrection"
        from ${table}
        where workspace_id = $1 and user_id = $2 and device_id = $3 and client_segment_id = any($4::text[])

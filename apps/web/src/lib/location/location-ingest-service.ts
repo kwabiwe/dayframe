@@ -1,4 +1,5 @@
 import { emitReviewSemanticSegments } from "./location-review-semantic-batch";
+import { reopenSupersededReviews } from "./location-review-supersession";
 import { observeLocationStage, observeLocationTiming, type LocationObservation } from "./location-sync-diagnostics";
 import {
   AUTOMATIC_LOCATION_POLICY_VERSION,
@@ -409,14 +410,14 @@ async function emitSemanticSegment(
     : commuteIds.get(segment.clientSegmentId);
   if (!databaseSegmentId) return false;
   const clientEventId = segmentEventClientId(segment);
-  const existingSemanticEvent = await client.query<{ reviewStatus: string }>(
-    `select review_status as "reviewStatus"
+  const existingSemanticEvent = await client.query<{ id: string; reviewStatus: string }>(
+    `select id, review_status as "reviewStatus"
      from activity_events
      where workspace_id = $1 and user_id = $2 and client_event_id = $3
      for update`,
     [session.workspaceId, session.userId, clientEventId]
   );
-  const existingReviewStatus = existingSemanticEvent.rows[0]?.reviewStatus ?? null;
+  let existingReviewStatus = existingSemanticEvent.rows[0]?.reviewStatus ?? null;
   const eventType = segment.kind === "commute"
     ? "commute_detected"
     : segment.placeMatchKind === "learned"
@@ -436,6 +437,11 @@ async function emitSemanticSegment(
     if (duration < LOCATION_ENGINE_V2_CONFIG.unknownStayReviewDwellMs) return false;
   }
   if (trustedPlace && !trustedPlace.loggingEnabled) return false;
+  // A segment back in the output after replay retired it is offered again.
+  if (existingReviewStatus === "ignored" &&
+      (await reopenSupersededReviews(client, session, [existingSemanticEvent.rows[0].id])).size > 0) {
+    existingReviewStatus = "needs_review";
+  }
   let disposition = locationSemanticDisposition(rolloutMode, segment);
   if (disposition.action === "auto_confirm" && !trustedPlace) {
     if (segment.kind === "stay") {

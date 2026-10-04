@@ -127,6 +127,30 @@ function sameUnknownCluster(active: WorkingStay, item: ClassifiedEvidence, radiu
   return Boolean(centre && point && distanceMeters(centre, point) <= radius);
 }
 
+/**
+ * Where the cluster an edge stay would be begins: its first Visit or
+ * non-moving reading, as an unknown cluster starts (moving readings never
+ * start one). Readings before it (a drive through the circle before parking
+ * beside it) are route evidence, not the cluster.
+ */
+function edgeClusterStart(stay: WorkingStay, input: LocationEngineInput) {
+  const index = stay.evidence.findIndex((item) => {
+    const { evidence } = item;
+    if (evidence.kind === "visit") return !stay.reusedVisits?.has(item) && pointFor(evidence) != null;
+    if (evidence.kind !== "standard_location" && evidence.kind !== "significant_change" || !pointFor(evidence)) return false;
+    const speed = evidence.speedMetersPerSecond ?? item.impliedSpeedMetersPerSecond;
+    return speed == null || !Number.isFinite(speed) || speed < input.config.movementSpeedThresholdMps;
+  });
+  return index < 0 ? 0 : index;
+}
+
+/** Within `radius` of the centre of an edge stay's cluster (edgeClusterStart onwards), as for an unknown cluster. */
+function nearEdgeCluster(active: WorkingStay, item: ClassifiedEvidence, input: LocationEngineInput, radius: number) {
+  const centre = evidenceCentre(active.evidence.slice(edgeClusterStart(active, input)));
+  const point = pointFor(item.evidence);
+  return Boolean(centre && point && distanceMeters(centre, point) <= radius);
+}
+
 function hasPairedGeofenceEnter(
   items: ClassifiedEvidence[],
   exit: LocationEvidence,
@@ -392,7 +416,8 @@ const GEOFENCE_SNAPSHOT_PAIR_MS = 5_000;
  * separately (stayIdentity). A stay with no still fix (a lone Visit or geofence
  * callback) is not a cluster. One still fix inside the circle makes the stay
  * ordinary; moving fixes (a drive through the circle) and simulated fixes do
- * not. The scan is incremental because evidence only grows.
+ * not. Membership and departure are measured from the still fixes
+ * (nearEdgeCluster). The scan is incremental because evidence only grows.
  */
 function edgeOnly(stay: WorkingStay, input: LocationEngineInput) {
   if (stay.placeMatchKind !== "saved" || stay.arrivalPresence || stay.inferredBoundary) return false;
@@ -586,12 +611,26 @@ function supportedKnownPlaceEnd(working: WorkingStay, processingAt: string) {
   return new Date(Math.min(Date.parse(working.stoppedAt ?? processingAt), Math.max(latestPoint, intervalEnd))).toISOString();
 }
 
+/**
+ * An edge stay as the cluster it would be: from its first Visit or non-moving
+ * reading (edgeClusterStart). Movement before that (a drive through the circle
+ * before parking beside it) stays route evidence and does not lengthen it.
+ */
+function edgeStayFromClusterStart(working: WorkingStay, input: LocationEngineInput): WorkingStay {
+  const start = edgeOnly(working, input) ? edgeClusterStart(working, input) : 0;
+  if (start === 0) return working;
+  const evidence = working.evidence.slice(start);
+  const startedAt = evidence[0].evidence.occurredAt;
+  return { ...working, evidence, startedAt, startLowerBoundAt: startedAt, startUpperBoundAt: startedAt, edgeScan: undefined };
+}
+
 function stayFromWorking(
-  working: WorkingStay,
+  original: WorkingStay,
   processingAt: string,
   input: LocationEngineInput,
   accepted: ClassifiedEvidence[]
 ): StaySegment | null {
+  const working = edgeStayFromClusterStart(original, input);
   const endedAt = working.stoppedAt;
   const duration = Date.parse(endedAt ?? processingAt) - Date.parse(working.startedAt);
   const coordinateEvidence = working.evidence.filter(({ evidence }) =>
@@ -619,11 +658,15 @@ function stayFromWorking(
   const knownPlaceEnd = presenceEndMs != null
     ? new Date(Math.max(Date.parse(supportedKnownPlaceEnd(working, processingAt)), presenceEndMs)).toISOString()
     : supportedKnownPlaceEnd(working, processingAt);
+  // A saved stay described as unknown with no still fix and no Visit is
+  // movement through the circle, which no unknown cluster would start.
+  const movementOnly = working.placeMatchKind === "saved" && !knownPlace &&
+    !working.evidence.some((item) => item.evidence.kind === "visit" || stationaryFix(item, input));
   const promotable = knownPlace
     ? hasMeaningfulKnownPlaceWindow(working.startedAt,
         knownPlaceEnd,
         input.config.savedPlaceMinimumDwellMs)
-    : duration >= input.config.unknownStayCandidateDwellMs &&
+    : !movementOnly && duration >= input.config.unknownStayCandidateDwellMs &&
       (coordinateEvidence.length >= input.config.minimumGpsSamplesForUnanchoredStay || completedVisit);
   if (!promotable || (endedAt && Date.parse(endedAt) <= Date.parse(working.startedAt))) return null;
 
@@ -1198,6 +1241,18 @@ function runLocationEnginePass(input: LocationEngineInput): { output: LocationEn
     const key = `${item.evidence.deviceId}:${item.evidence.occurredAt}`;
     visitEpisodes.set(key, [...(visitEpisodes.get(key) ?? []), item]);
   }
+  // iOS sends a Visit's arrival and completion with one arrival time. When an
+  // accurate, genuine one lies in an edge cluster, the Visit is that stay's own,
+  // so a callback beyond the cluster is displaced (an averaged completion,
+  // possibly matching a neighbouring saved place), in whichever order they
+  // arrive. A broad or simulated callback in the cluster does not make it own.
+  const ownVisitDisplaced = (stay: WorkingStay, item: ClassifiedEvidence) => {
+    const radius = input.config.unknownStayBaseRadiusMeters;
+    if (nearEdgeCluster(stay, item, input, radius)) return false;
+    return (visitEpisodes.get(`${item.evidence.deviceId}:${item.evidence.occurredAt}`) ?? []).some((callback) =>
+      callback !== item && callback.evidence.isSimulated !== true && accurateCoordinate(callback, input) &&
+      nearEdgeCluster(stay, callback, input, radius));
+  };
   // Occurrence-ordered, owner/device-local interval support; never a second durable store.
   const visits = new Map<string, ClassifiedEvidence>();
   const applyUnknownVisitArrivalBound = (stay: WorkingStay, item: ClassifiedEvidence) => {
@@ -1264,11 +1319,15 @@ function runLocationEnginePass(input: LocationEngineInput): { output: LocationEn
     // its next actual observation can resolve continuity. It remains in the raw journal.
     if (active?.placeMatchKind === "saved" && evidence.kind.startsWith("geofence_") &&
         (evidence.kind === "geofence_state" || itemKey !== active.key)) continue;
-    // An edge cluster was never inside the circle: as for the unknown cluster it
-    // would be, its own place's region callbacks (entries, exits, registration
-    // snapshots) neither split nor extend it. Identity proof reads them from the
-    // journal (iosPlacedInside).
-    if (active && evidence.kind.startsWith("geofence_") && itemKey === active.key && edgeOnly(active, input)) continue;
+    // Evidence that cannot move the cluster an edge stay would be is set aside
+    // before gap and exit handling: its own place's region callbacks (entries,
+    // exits, registration snapshots; the cluster was never inside the circle,
+    // and identity proof reads them from the journal), simulated evidence, and
+    // a displaced callback of the cluster's own Visit.
+    if (active && edgeOnly(active, input) && (
+      evidence.kind.startsWith("geofence_") && itemKey === active.key ||
+      evidence.isSimulated === true ||
+      evidence.kind === "visit" && ownVisitDisplaced(active, item))) continue;
     // Do not promote broad points to place/departure evidence. Keep them in accepted raw evidence.
     const corroboratedSupport = arrivalAnalysis.corroboratedVisits.get(evidence.clientEvidenceId);
     const sameSavedActiveEpisode = corroboratedSupport != null && active?.placeMatchKind === "saved" &&
@@ -1317,7 +1376,7 @@ function runLocationEnginePass(input: LocationEngineInput): { output: LocationEn
         (itemKey === active.key || (itemKey === "unknown" && stationaryFix(item, input))) &&
         observationGapMs <= input.config.sparseUnknownContinuityMaximumGapMs &&
         edgeOnly(active, input) &&
-        sameUnknownCluster(active, item, input.config.sparseUnknownContinuityMaximumDistanceMeters);
+        nearEdgeCluster(active, item, input, input.config.sparseUnknownContinuityMaximumDistanceMeters);
       const previousPoint = active.lastStrongInside;
       const boundedSavedGap = active.placeMatchKind === "saved" && !active.pendingExit && active.outside.length === 0 &&
         previousPoint != null && previousPoint.evidence.clientEvidenceId !== evidence.clientEvidenceId &&
@@ -1369,31 +1428,16 @@ function runLocationEnginePass(input: LocationEngineInput): { output: LocationEn
     if (evidence.kind === "geofence_exit") continue;
 
     // An edge cluster ends where an unknown cluster would, before any admission
-    // can clear the evidence: at an accurate reading beyond the cluster, whatever
-    // place it matches or however fast it moves (another stop on the circle's
-    // far side, a drive through the circle), or at a credible Visit elsewhere.
-    // Simulated readings never end it, as they never prove presence.
-    // iOS sends a Visit's arrival and completion with one arrival time; when any
-    // of them lies in the cluster the Visit is this stay's own, so a displaced
-    // callback (an averaged completion, possibly matching a neighbouring saved
-    // place) is skipped rather than ending it, in whichever order they arrive.
-    if (edgeOnly(active, input)) {
-      const radius = input.config.unknownStayBaseRadiusMeters;
-      let elsewhere = false;
-      if (evidence.kind === "visit") {
-        const episode = visitEpisodes.get(`${evidence.deviceId}:${evidence.occurredAt}`) ?? [item];
-        const own = episode.some((callback) => sameUnknownCluster(active!, callback, radius));
-        if (own && !sameUnknownCluster(active, item, radius)) continue;
-        elsewhere = !own && evidence.isSimulated !== true && accurateCoordinate(item, input);
-      } else {
-        elsewhere = evidence.isSimulated !== true && accurateCoordinate(item, input) && !sameUnknownCluster(active, item, radius);
-      }
-      if (elsewhere) {
-        closeAtCorroboratedDeparture(active, evidence.occurredAt, input.config);
-        completed.push(active);
-        active = startStay(item);
-        continue;
-      }
+    // can clear the evidence: at an accurate reading beyond its stationary core,
+    // whatever place it matches or however fast it moves (another stop on the
+    // circle's far side, a drive through the circle), or a credible Visit
+    // elsewhere (its own Visit's displaced callbacks were set aside above).
+    if (edgeOnly(active, input) && evidence.isSimulated !== true && accurateCoordinate(item, input) &&
+      !nearEdgeCluster(active, item, input, input.config.unknownStayBaseRadiusMeters)) {
+      closeAtCorroboratedDeparture(active, evidence.occurredAt, input.config);
+      completed.push(active);
+      active = startStay(item);
+      continue;
     }
 
     const sameKnownPlace = itemKey !== "unknown" && (itemKey === active.key || matchingActive(item.match, active));
@@ -1402,7 +1446,7 @@ function runLocationEnginePass(input: LocationEngineInput): { output: LocationEn
     // stay exactly as it would to the unknown cluster that stay would be.
     const sameEdgeCluster = itemKey === "unknown" && active.placeMatchKind === "saved" && stationaryFix(item, input) &&
       !active.pendingExit && active.outside.length === 0 &&
-      edgeOnly(active, input) && sameUnknownCluster(active, item, input.config.unknownStayBaseRadiusMeters);
+      edgeOnly(active, input) && nearEdgeCluster(active, item, input, input.config.unknownStayBaseRadiusMeters);
     if (sameKnownPlace || sameUnknown || sameEdgeCluster) {
       active.evidence.push(item);
       markArrivalPresence(active, item);
