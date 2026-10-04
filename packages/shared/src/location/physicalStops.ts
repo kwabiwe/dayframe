@@ -82,6 +82,19 @@ function firstIndexAtOrAfter(accepted: ClassifiedEvidence[], atMs: number) {
   return low;
 }
 
+// iOS can report a same-region exit and entry together while monitored regions are
+// restored. Such a pair is a state snapshot, not a crossing (as in the segmenter).
+const GEOFENCE_SNAPSHOT_PAIR_MS = 5_000;
+
+function isGeofenceCrossing(evidence: ClassifiedEvidence["evidence"], deviceId: string, accepted: ClassifiedEvidence[]) {
+  if ((evidence.kind !== "geofence_enter" && evidence.kind !== "geofence_exit") || evidence.deviceId !== deviceId) return false;
+  const opposite = evidence.kind === "geofence_enter" ? "geofence_exit" : "geofence_enter";
+  const at = Date.parse(evidence.occurredAt);
+  return !(evidence.savedPlaceId && accepted.some(({ evidence: other }) => other.kind === opposite &&
+    other.deviceId === deviceId && other.savedPlaceId === evidence.savedPlaceId &&
+    Math.abs(Date.parse(other.occurredAt) - at) <= GEOFENCE_SNAPSHOT_PAIR_MS));
+}
+
 function iso(ms: number) {
   return new Date(ms).toISOString();
 }
@@ -205,19 +218,25 @@ function evaluateCluster(
       slowMembers.some(member => member.at >= from && member.at <= to);
   });
   // A long compatible Visit carries the stop through silence after its last
-  // fix, unless a geofence crossing in that silence shows the device moved.
+  // fix. It speaks only for the time since movement was last observed: a Visit
+  // that began before that movement is measured from it, so stale support cannot
+  // pass the overstatement allowance. A geofence crossing in the silence shows
+  // the device moved; registration snapshot pairs do not.
   const visitStop = visits.length ? Math.max(...visits.map(({ evidence }) => Date.parse(evidence.endedAt!))) : null;
   const carrier = visits.find(({ evidence }) => Date.parse(evidence.endedAt!) === visitStop);
   const carriedUntil = carrier ? Date.parse(carrier.evidence.endedAt!) : null;
-  const carriedVisit = carrier != null && carriedUntil != null &&
-    carriedUntil - Date.parse(carrier.evidence.occurredAt) >= config.physicalStopVisitCarriedMinimumMs &&
-    !accepted.some(({ evidence }) => (evidence.kind === "geofence_enter" || evidence.kind === "geofence_exit") &&
-      evidence.deviceId === members[0].item.evidence.deviceId &&
+  const carriedFrom = carrier ? Math.max(Date.parse(carrier.evidence.occurredAt), arrivalAt ?? Number.NEGATIVE_INFINITY) : null;
+  const deviceId = members[0].item.evidence.deviceId;
+  const carriedVisit = carriedUntil != null && carriedFrom != null &&
+    carriedUntil - carriedFrom >= config.physicalStopVisitCarriedMinimumMs &&
+    !accepted.some(({ evidence }) => isGeofenceCrossing(evidence, deviceId, accepted) &&
       Date.parse(evidence.occurredAt) > lastMemberAt && Date.parse(evidence.occurredAt) < carriedUntil);
+  // Both departure sources search the same horizon.
+  const horizonFrom = (lastLocalAt: number) => Math.max(lastLocalAt, carriedVisit ? carriedUntil! : Number.NEGATIVE_INFINITY);
   let departureAt: number | null = null;
   let lastLocal = members[members.length - 1];
   for (let index = afterIndex; index < fixes.length; index += 1) {
-    if (fixes[index].at - Math.max(lastLocal.at, carriedVisit ? carriedUntil! : 0) > config.physicalStopBoundaryWindowMs) break;
+    if (fixes[index].at - horizonFrom(lastLocal.at) > config.physicalStopBoundaryWindowMs) break;
     if (visitDepartureAt != null && fixes[index].at >= visitDepartureAt) break;
     if (departed(fixes[index])) {
       departureAt = fixes[index].at;
@@ -226,7 +245,7 @@ function evaluateCluster(
     // Only accurate fixes can show the device was still at the stop.
     if (fixes[index].accurate) lastLocal = fixes[index];
   }
-  if (visitDepartureAt != null && visitDepartureAt - lastLocal.at <= config.physicalStopBoundaryWindowMs &&
+  if (visitDepartureAt != null && visitDepartureAt - horizonFrom(lastLocal.at) <= config.physicalStopBoundaryWindowMs &&
     (departureAt == null || visitDepartureAt < departureAt)) departureAt = visitDepartureAt;
   if (arrivalAt == null || departureAt == null) return null;
 

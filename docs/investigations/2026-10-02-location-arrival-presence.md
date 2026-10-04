@@ -100,6 +100,10 @@ Still to drive on staging: a 30–60 second kerbside drop-off, a 20+ minute stop
 ## Not established
 
 - Remaining delay comes from foreground-only native Visit drain and deferred location delivery on the phone. On 4 Oct nothing could appear until both Visit callbacks reached the server 30 minutes after the stop. These need a mobile change (follow-up).
-- A broad completion whose arrival callback lies just outside the saved place's radius is still unused. On 30 Sep a 29-minute visit near the School (arrival 126 m from the pin, completion 85 m broad) is hidden inside a 32-minute Home round trip on both engines (follow-up; addressed by PR #221, which lets a long Visit carry a parked stop through silence).
+- A broad completion whose arrival callback lies just outside the saved place's radius is still unused. On 30 Sep a 29-minute visit near the School (arrival 126 m from the pin, completion 85 m broad) is hidden inside a 32-minute Home round trip on both engines (follow-up).
 - Segment identity still changes in other cases as late evidence lands (follow-up).
 - No device or production validation of the 3–4 Oct fixes is claimed here.
+
+## Follow-up: 30 Sep parked stop (PR #221, 4 Oct)
+
+The 30 Sep stop was not a near-radius matching problem. The phone parked 141 m from the School pin, recorded one stationary fix and its mirror, then nothing for 28 minutes. The completed Visit spanned that silence, and the drive home began 55 seconds after its reported departure. The accurate arrival callback was taken while still moving, 265 m from where the car parked, so the segmenter split the Visit. Physical-stop detection then failed on both its 15-minute departure window and its two-fix corroboration. PR #221 lets a long compatible Visit carry such a stop. On the private evidence, 30 Sep now shows an unknown stay from 14:59:58 to 15:29:17 BST. The 25–29 Sep corpus is unchanged, and the staging week changes only the intended stops, with 0 identity-only changes. Rejected variants: without the geofence rule, 28 Sep showed a four-hour unknown stop while the phone was at Home; without the 10-minute minimum, a 5½-minute stop appeared near Home. No staging or device validation is claimed here.
