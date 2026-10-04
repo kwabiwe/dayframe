@@ -51,14 +51,21 @@ Temporal invariants:
   distinct endpoints established by PR #114; short same-site loops are not
   commutes. Route distance and straight-line distance remain separate.
 - A journey starts at the latest evidence still matching its origin stay. In a
-  same-place round trip, evidence matching the place after the turnaround (the
-  farthest reading from it) belongs to the return and never moves the start:
-  iOS dates a return's arrival Visit up to about a minute and a half before
-  the car stops, often while it is still several hundred metres out, and that
-  Visit used to shrink the whole round trip to seconds so it was discarded.
-  Found with the capture simulator (`test/fixtures/captureSimulator.ts`), where
-  17 of 20 simulated outings with short stops vanished; the private corpus and
-  staging week are unchanged.
+  same-place round trip it starts at the last evidence matching the place
+  before the trip had certainly left: its first accurate standard or
+  significant-change fix at least `commuteSamePlaceMinimumExcursionMeters`
+  from the stay's centre (the excursion every same-place round trip needs).
+  Later evidence matching the place belongs to a pass by it or to the return:
+  iOS dates a return's arrival Visit up to about two and a half minutes before
+  the car stops, sometimes while it is still several hundred metres out or
+  still at an interior stop, and that Visit used to shrink the whole round
+  trip to seconds so it was discarded. Visits (backdated arrivals, averaged
+  completions) and broad fixes never set the point, so a jittered farther
+  reading, a broad outlier or a second loop cannot move it. Without such a fix
+  the rule is unchanged. Private corpus unchanged; in the staging week only the
+  4 Oct school run without its School pin changes, from a 4-minute fragment to
+  the whole 07:49–08:21 round trip. The capture simulator
+  (`test/fixtures/captureSimulator.ts`) found the bug.
 - Large-site continuity may coalesce only unknown-to-unknown stays with an
   actual visit signal, a credible later dwell, no more than `450m` endpoint
   separation, no more than `45m` transition time, no more than `1200m` local

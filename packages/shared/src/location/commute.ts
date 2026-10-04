@@ -48,18 +48,22 @@ function sameKnownEndpoint(from: StaySegment, to: StaySegment) {
   );
 }
 
-/** When a same-place round trip turned back: its farthest reading away from the place, if any. */
-function roundTripTurnaroundMs(stay: StaySegment, evidence: ClassifiedEvidence[]) {
+/**
+ * When a same-place round trip had certainly left: its first accurate GPS fix
+ * at least the round-trip excursion minimum from the place, if any. Visits
+ * (backdated arrivals, averaged completions) and broad fixes never set it.
+ */
+function roundTripLeftMs(stay: StaySegment, evidence: ClassifiedEvidence[], config: LocationEngineConfig) {
   const centre = segmentPoint(stay);
   if (!centre) return null;
-  let farthest: { distance: number; at: number } | null = null;
   for (const item of evidence) {
+    const { kind, horizontalAccuracyMeters } = item.evidence;
     const point = evidencePoint(item);
-    if (!point || evidenceMatchesStay(item, stay)) continue;
-    const distance = distanceMeters(centre, point);
-    if (!farthest || distance > farthest.distance) farthest = { distance, at: Date.parse(item.evidence.occurredAt) };
+    if (!point || (kind !== "standard_location" && kind !== "significant_change") || horizontalAccuracyMeters == null ||
+      horizontalAccuracyMeters > config.highQualityHorizontalAccuracyMeters) continue;
+    if (distanceMeters(centre, point) >= config.commuteSamePlaceMinimumExcursionMeters) return Date.parse(item.evidence.occurredAt);
   }
-  return farthest?.at ?? null;
+  return null;
 }
 
 function percentile(values: number[], ratio: number) {
@@ -390,13 +394,14 @@ export function deriveCommutes(
       const at = occurredAtMs[evidenceIndex];
       return at > originalStartedAtMs && at < stoppedAtMs;
     });
-    // In a round trip, evidence matching the place after the turnaround (the
-    // farthest reading from it) belongs to the return: iOS often dates the
+    // A round trip starts at the last evidence at the place before it had
+    // certainly left (its first accurate fix far away). Later evidence matching
+    // the place belongs to a pass by it or to the return: iOS often dates the
     // return's arrival Visit before the stay it starts.
-    const turnaroundMs = sameKnownEndpoint(from, to) ? roundTripTurnaroundMs(from, boundaryEvidence) : null;
+    const leftMs = sameKnownEndpoint(from, to) ? roundTripLeftMs(from, boundaryEvidence, config) : null;
     const latestFromSupport = boundaryEvidence
       .filter((item) => evidenceMatchesStay(item, from) &&
-        (turnaroundMs == null || Date.parse(item.evidence.occurredAt) < turnaroundMs))
+        (leftMs == null || Date.parse(item.evidence.occurredAt) < leftMs))
       .at(-1);
     const startedAtMs = latestFromSupport
       ? Date.parse(latestFromSupport.evidence.occurredAt)

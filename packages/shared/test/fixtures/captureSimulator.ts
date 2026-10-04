@@ -6,13 +6,14 @@ import type { LocationEngineInput, LocationEvidence } from "../../src/location/t
  * from them. Positions are metres east/north of an arbitrary origin; no real
  * coordinates. Behaviour modelled:
  * - Expo standard locations obey the 75 m distance filter: a fix each time the
- *   device has moved that far, and silence while still apart from a settling
- *   fix and occasional drift fixes;
+ *   device is that far from the previous fix, and silence while still apart
+ *   from a settling fix and occasional drift fixes;
  * - native significant-change callbacks mirror some fixes at the same second
  *   without speed;
  * - each still period of four minutes or more yields an arrival-only Visit
- *   (sometimes dated before the device stopped) and a broad, displaced completed
- *   callback ending shortly after departure;
+ *   (usually dated within seconds of arrival, about one in ten up to 150 s
+ *   early) and a broad, displaced completed callback ending shortly after
+ *   departure;
  * - saved-place geofences report crossings a few seconds late;
  * - standard fixes reach the server in deferred batches, native callbacks later.
  */
@@ -124,7 +125,6 @@ export function simulate(scenario: Scenario, seed: number): Simulation {
     inside = next;
   };
   const travel = (to: Xy, via: Xy[] = [], speed: number, accuracy: () => number) => {
-    let sinceFix = Math.hypot(position.x - lastFix.x, position.y - lastFix.y);
     let sinceMirror = 0;
     for (const waypoint of [...via, to]) {
       const length = Math.hypot(waypoint.x - position.x, waypoint.y - position.y);
@@ -136,15 +136,14 @@ export function simulate(scenario: Scenario, seed: number): Simulation {
         const moved = length / steps;
         const stepSpeed = speed * between(0.85, 1.15);
         now += (moved / stepSpeed) * 1_000;
-        sinceFix += moved;
         sinceMirror += moved;
         position = at;
         geofences(now, at);
-        if (sinceFix >= DISTANCE_FILTER_METRES) {
+        // The distance filter compares displacement from the last fix, not path length.
+        if (Math.hypot(at.x - lastFix.x, at.y - lastFix.y) >= DISTANCE_FILTER_METRES) {
           const mirror = sinceMirror >= 500 && random() < 0.6;
           fix(now, at, accuracy(), stepSpeed, mirror);
           if (mirror) sinceMirror = 0;
-          sinceFix = 0;
         }
       }
     }
@@ -175,7 +174,10 @@ export function simulate(scenario: Scenario, seed: number): Simulation {
         }
       }
       if (leg.visit !== false && leg.minutes >= 4) {
-        const visitArrival = Math.floor((arrival - between(0, 90_000)) / 1_000) * 1_000;
+        // In a staging week 2 of 39 arrival callbacks were dated before the device
+        // stopped (one by 157 s); the rest within seconds of arrival.
+        const backdated = random() < 0.1 ? between(30_000, 150_000) : between(-10_000, 10_000);
+        const visitArrival = Math.floor((arrival - backdated) / 1_000) * 1_000;
         const arrivalPoint = jitter(position, 6);
         push({ kind: "visit", occurredAt: new Date(visitArrival).toISOString(),
           receivedAt: new Date(arrival + between(120_000, 1_200_000)).toISOString(),
