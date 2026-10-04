@@ -65,5 +65,5 @@ Comparing `main` with the change over the retained 25–29 Sep trace and the 25 
 ## Not established
 
 - The thresholds are hypotheses checked against a small labelled set. Long stationary traffic queues in which iOS reports a Visit are not represented. A false split would show as two journeys; a commute merge action does not exist yet.
-- No hosted, staging, device or production validation is claimed here.
+- Staging acceptance passed on 3–4 Oct (see the [arrival presence investigation](2026-10-02-location-arrival-presence.md)), and the change merged through PR #217 at `b1a44eb`. Production behaviour on real days has not yet been observed.
 - Output timeliness (quiet arrivals promoted only after departure, foreground-only native drain) and segment identity churn are unchanged and remain follow-ups.
