@@ -23,7 +23,7 @@ Dayframe showed a commute from 20:09 to 20:27, then a School stay from 20:27 to 
 The owner chose option 1: the cluster's centre decides. PR #222:
 
 - treats a saved stay with only plausible still fixes (an edge cluster) exactly as an unknown cluster for silence and membership;
-- labels a stay as the saved place only when the centre of its still accurate fixes lies inside the circle, or when iOS placed the device inside before the last still fix (a corroborated arrival, a geofence entry, or an accurate Visit strongly inside). Otherwise the stay is unknown, with the place as a candidate.
+- labels a stay as the saved place only when the centre of its still accurate fixes lies inside the circle, or when iOS placed the device inside during that visit before the last still fix: a genuine geofence entry not followed by an exit, or a Visit wholly inside the circle. Otherwise the stay is unknown, with the place as a candidate. (The first version also accepted a corroborated arrival and a Visit only strongly matched; both reviews below narrowed it.)
 
 The synthetic `schoolEdgeStopFixture` reproduces the server's output exactly on `main`. With the change, the same evidence gives one unknown stay from 19:13:16 to 19:36:41 UTC (20:13–20:36 BST), with the School as a candidate. Across the 25–29 Sep corpus and the 26 Sep–4 Oct staging week, output and identities are unchanged. In 47 saved stays there, the still centre never left its circle; the largest was 94 %, a gym visit corroborated by its geofence entry.
 
@@ -46,6 +46,15 @@ Fixed:
 - Without a still fix, only that proof keeps the place.
 
 Each fix has a regression, including comparisons of stays with and without the place saved.
+
+A second review found four more gaps:
+
+- Corroborated arrivals and broad-Visit support kept the saved identity although their corroboration rests on tolerance-band matches. They now shape timing only, and identity always needs the still centre or this episode's iOS proof.
+- Snapshot pairs straddling the proof window were not recognised. They are now paired across the whole journal.
+- A Visit reused from an earlier episode could prove a later one. Reused Visits are marked and excluded.
+- An in-band return reading could still erase a Visit elsewhere. A credible Visit elsewhere now ends an edge cluster.
+
+The edge scan is now incremental: dense edge input costs about the same as with no place saved. Every case from both reviews is a regression test.
 
 ## Not established
 

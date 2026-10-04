@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { assessAutomaticLocation } from "../src/location/automaticPolicy";
 import { runLocationEngine } from "../src/location/segmenter";
 import {
   SCHOOL_EDGE_HOME_ID,
@@ -224,5 +225,110 @@ describe("a stationary cluster at a saved place's edge (4 Oct evening stop)", ()
     const stays = run(input).stays;
     expect(stays.some((stay) => stay.startedAt <= t(70) && (stay.stoppedAt ?? input.processingAt) > t(187))).toBe(false);
     expect(stays.some((stay) => stay.placeId === school.id && stay.startedAt >= t(187))).toBe(true);
+  });
+});
+
+// Review round 2: compact evidence around a School pin at the origin (seconds from 19:00, metres north).
+describe("identity proof at a saved place's edge (review round 2)", () => {
+  const school = { id: SCHOOL_EDGE_SCHOOL_ID, name: "School", latitude: 0, longitude: 0, radiusMeters: 100, loggingEnabled: true };
+  const t = (seconds: number) => new Date(Date.parse("2026-01-31T19:00:00Z") + seconds * 1_000).toISOString();
+  const fix = (id: string, seconds: number, metres: number, accuracy = 5, speed: number | null = 0, patch: Partial<LocationEvidence> = {}): LocationEvidence => ({
+    clientEvidenceId: id, deviceId: "20000000-0000-4000-8000-000000000061", algorithmVersion: "location-v2.0", kind: "standard_location",
+    occurredAt: t(seconds), sourceTimestamp: t(seconds), receivedAt: t(seconds), endedAt: null, latitude: north(metres), longitude: 0,
+    horizontalAccuracyMeters: accuracy, speedMetersPerSecond: speed, savedPlaceId: null, isSimulated: false, timeZone: "UTC", metadata: {}, ...patch
+  });
+  const cb = (id: string, seconds: number, kind: "geofence_enter" | "geofence_exit", patch: Partial<LocationEvidence> = {}) =>
+    fix(id, seconds, 0, 0, null, { kind, savedPlaceId: school.id, latitude: null, longitude: null, horizontalAccuracyMeters: null, ...patch });
+  const visit = (id: string, seconds: number, metres: number, accuracy = 5, end: number | null = null) =>
+    fix(id, seconds, metres, accuracy, null, { kind: "visit", endedAt: end == null ? null : t(end), metadata: end == null ? { visitDepartureOpen: true } : {} });
+  const compact = (evidence: LocationEvidence[], patch: Partial<LocationEngineInput> = {}): LocationEngineInput => ({
+    priorState: { algorithmVersion: "location-v2.0", mode: "idle", activeSegmentId: null, processedEvidenceIds: [], lastProcessedAt: null },
+    config: schoolEdgeStopFixture().config, processingAt: t(5_000), savedPlaces: [school], acceptedLearnedPlaces: [], evidence, ...patch
+  });
+  const staysOf = (value: LocationEngineInput) => run(value).stays;
+  const base = [fix("still-0", 0, 126), fix("still-1", 300, 126), fix("still-2", 900, 126), fix("leave-0", 1_000, 300, 5, 10), fix("leave-1", 1_010, 400, 5, 10)];
+  const automatic = (stay: StaySegment) => assessAutomaticLocation("v2_enabled", stay).reason;
+
+  it.each([
+    ["an outside-circle Visit corroborated by a tolerance-band fix", [visit("band-visit", 10, 115), fix("strong-band", 20, 115)]],
+    ["an outside-circle Visit corroborated by a simulated entry", [visit("band-visit", 10, 115), cb("simulated-enter", 11, "geofence_enter", { isSimulated: true })]],
+    ["an outside-circle Visit corroborated by a snapshot pair", [cb("snapshot-exit", 1, "geofence_exit"), cb("snapshot-enter", 2, "geofence_enter"), visit("band-visit", 3, 115)]],
+    ["a snapshot pair straddling the last still fix", [cb("snapshot-enter", 899, "geofence_enter"), cb("snapshot-exit", 901, "geofence_exit")]]
+  ])("stays unknown and never automatic with %s", (_label, extra) => {
+    const [stay] = staysOf(compact([...base, ...extra]));
+    expect(stay.placeMatchKind).toBe("unknown");
+    expect(automatic(stay)).toBe("untrusted_place");
+  });
+
+  it("does not let a Visit reused after leaving and returning prove identity", () => {
+    const value = compact([visit("old-inside", 0, 60, 10, 2_400), cb("exit", 600, "geofence_exit"), fix("elsewhere-0", 610, 1_000, 5, 10),
+      fix("elsewhere-1", 620, 1_200, 5, 10), fix("elsewhere-2", 1_000, 1_200), fix("edge-0", 1_200, 115), fix("edge-1", 1_500, 115),
+      fix("edge-2", 1_800, 115), fix("leave-0", 1_900, 300, 5, 10), fix("leave-1", 1_910, 400, 5, 10)]);
+    const stay = staysOf(value).find((candidate) => candidate.startedAt === t(1_200))!;
+    expect(stay).toBeDefined();
+    expect(stay.placeMatchKind).toBe("unknown");
+    expect(automatic(stay)).toBe("untrusted_place");
+  });
+
+  it("separates a Visit elsewhere even when the return reading is in the band", () => {
+    const value = schoolEdgeStopFixture("20:30:00");
+    add(value, { clientEvidenceId: "visit-elsewhere", kind: "visit", occurredAt: at("19:16:00"), endedAt: at("19:21:00"),
+      latitude: north(SCHOOL_METRES - 300), horizontalAccuracyMeters: 20, speedMetersPerSecond: null });
+    add(value, { clientEvidenceId: "back-in-band", occurredAt: at("19:22:00"), latitude: north(SCHOOL_METRES - 126), horizontalAccuracyMeters: 2, speedMetersPerSecond: 0 });
+    expect(run(value).stays.some((stay) => stay.startedAt > at("19:12:00") && stay.startedAt < at("19:16:00") &&
+      (stay.stoppedAt ?? value.processingAt) > at("19:21:00"))).toBe(false);
+  });
+
+  it("broad-Visit corroboration shapes timing, not identity", () => {
+    const value = compact([visit("broad-visit", 0, 115, 70, 3_600), fix("early-0", 30, 115), fix("early-1", 160, 115), fix("late-0", 2_800, 115),
+      fix("late-1", 3_100, 115), fix("late-2", 3_400, 115), fix("leave-0", 3_601, 300, 5, 10), fix("leave-1", 3_610, 400, 5, 10)]);
+    expect(staysOf(value)[0].placeMatchKind).toBe("unknown");
+  });
+
+  it.each([
+    ["an ordinary edge cluster is unknown", () => compact(base), "unknown"],
+    ["a snapshot pair wholly before the last still fix leaves it unknown",
+      () => compact([...base, cb("snapshot-enter", 890, "geofence_enter"), cb("snapshot-exit", 892, "geofence_exit")]), "unknown"],
+    ["a genuine entry before the last still fix keeps the place", () => compact([...base, cb("real-enter", 800, "geofence_enter")]), "saved"],
+    ["a Visit wholly inside with no GPS keeps the place", () => compact([visit("inside-visit", 0, 60, 10, 1_800)]), "saved"],
+    ["a Visit not wholly inside with no GPS is unknown", () => compact([visit("edge-visit", 0, 95, 10, 1_800)]), "unknown"],
+    ["Home edge readings centred inside stay Home",
+      () => compact([fix("h0", 0, 99), fix("h1", 300, 101), fix("h2", 600, 99), fix("h3", 900, 99), ...base.slice(-2)],
+        { savedPlaces: [{ ...school, name: "Home", loggingEnabled: false }] }), "saved"],
+    ["a gym-sized circle with readings centred at 75 m stays the gym",
+      () => compact([fix("g0", 0, 74), fix("g1", 300, 75), fix("g2", 900, 76), ...base.slice(-2)], { savedPlaces: [{ ...school, name: "Gym", radiusMeters: 80 }] }), "saved"]
+  ] as const)("control: %s", (_label, build, kind) => {
+    expect(staysOf(build())[0].placeMatchKind).toBe(kind);
+  });
+
+  it("control: bare geofence callbacks cannot make a stay", () => {
+    expect(staysOf(compact([cb("enter", 0, "geofence_enter"), cb("exit", 1_800, "geofence_exit")]))).toEqual([]);
+  });
+
+  it("control: strong fixes still bridge exactly thirty minutes", () => {
+    const before = [fix("p0", 0, 60), fix("p1", 300, 60)];
+    expect(staysOf(compact([...before, fix("p2", 2_100, 60), fix("p3", 2_400, 60)]))).toHaveLength(1);
+    expect(staysOf(compact([...before, fix("p2", 2_101, 60), fix("p3", 2_401, 60)]))).toHaveLength(2);
+  });
+
+  it("control: a learned place keeps the twelve-minute gap", () => {
+    const value = compact([fix("p0", 0, 60), fix("p1", 300, 60), fix("p2", 1_080, 60), fix("p3", 1_380, 60)],
+      { savedPlaces: [], acceptedLearnedPlaces: [{ ...school, accepted: true } as never] });
+    expect(staysOf(value)).toHaveLength(2);
+  });
+
+  it("control: shuffled evidence and saved-place order give the same output", () => {
+    const value = schoolEdgeStopFixture();
+    const expected = runLocationEngine(value).segmentUpserts;
+    for (let seed = 1; seed <= 20; seed += 1) {
+      const evidence = [...value.evidence];
+      let state = seed;
+      for (let index = evidence.length - 1; index > 0; index -= 1) {
+        state = (Math.imul(state, 1_664_525) + 1_013_904_223) >>> 0;
+        const other = state % (index + 1);
+        [evidence[index], evidence[other]] = [evidence[other], evidence[index]];
+      }
+      expect(runLocationEngine({ ...value, evidence, savedPlaces: [...value.savedPlaces].reverse() }).segmentUpserts).toEqual(expected);
+    }
   });
 });
