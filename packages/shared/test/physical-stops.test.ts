@@ -229,4 +229,68 @@ describe("physical stops", () => {
     input.evidence.forEach((e) => { if (e.clientEvidenceId.startsWith("slow-")) e.isSimulated = true; });
     expect(detectPhysicalStops(runLocationEngine(input).acceptedEvidence, config)).toEqual([]);
   });
+
+  // 30 Sep: a parked phone left one stationary fix and then nothing for 28 minutes.
+  // The completed Visit spanned it and the drive resumed 55 s after its reported
+  // departure; the accurate arrival callback was taken while still moving.
+  const parked = (patch: Partial<StopShape> = {}) => shape({
+    visit: [670_000, 2_430_000], slowAt: [790_000], slowSpeed: 0, departAt: 2_485_000, returnAt: 2_570_000, ...patch
+  });
+  const withMovingArrivalCallback = (input: LocationEngineInput) => {
+    // The first fix after the silence is already well clear of the stop.
+    const depart = input.evidence.find((item) => item.clientEvidenceId === "depart");
+    if (depart) depart.latitude = 0.0065;
+    const completion = input.evidence.find((item) => item.clientEvidenceId === "stop-visit");
+    if (!completion) return input;
+    input.evidence.push({ ...completion, clientEvidenceId: "stop-visit-arrival", endedAt: null, horizontalAccuracyMeters: 5,
+      latitude: completion.latitude! - 265 / 111_195, metadata: { visitDepartureOpen: true } });
+    return input;
+  };
+  const parkedInput = (patch: Partial<StopShape> = {}) => withMovingArrivalCallback(physicalStopFixture(parked(patch)));
+  const geofenceAt = (input: LocationEngineInput, ms: number, kind: "geofence_enter" | "geofence_exit") => {
+    const anchor = input.evidence.find((item) => item.clientEvidenceId === "slow-0")!;
+    input.evidence.push({ ...anchor, clientEvidenceId: `geofence-${ms}`, kind, occurredAt: shortAt(ms), sourceTimestamp: shortAt(ms),
+      latitude: null, longitude: null, horizontalAccuracyMeters: null, speedMetersPerSecond: null, savedPlaceId: anchor.savedPlaceId ?? null });
+    return input;
+  };
+
+  it("carries a parked stop through silence on a long Visit confirmed by the departure", () => {
+    {
+      const { physical, trips, stays } = run(parkedInput());
+      expect(physical).toHaveLength(1);
+      expect(physical[0]).toMatchObject({
+        startedAt: shortAt(675_000), stoppedAt: shortAt(2_430_000),
+        stopLowerBoundAt: shortAt(790_000), stopUpperBoundAt: shortAt(2_485_000),
+        placeMatchKind: "unknown", continuityStatus: "supported_by_visit"
+      });
+      // Long enough to be its own visit: the round trip splits around it.
+      expect(trips).toHaveLength(2);
+      expect(trips.every((trip) => !trip.stops)).toBe(true);
+      expect(stays.filter((stay) => stay.placeMatchKind === "unknown")).toEqual(physical);
+    }
+  });
+
+  it.each([
+    ["a geofence entry inside the silence", geofenceAt(parkedInput(), 1_500_000, "geofence_enter")],
+    ["a geofence exit inside the silence", geofenceAt(parkedInput(), 1_500_000, "geofence_exit")],
+    ["a Visit shorter than iOS's overstatement allowance", parkedInput(({
+      visit: [670_000, 670_000 + config.physicalStopVisitCarriedMinimumMs - 1_000], departAt: 670_000 + config.physicalStopVisitCarriedMinimumMs + 3_000,
+      returnAt: 670_000 + config.physicalStopVisitCarriedMinimumMs + 90_000 }))],
+    ["a departure long after the Visit ended", parkedInput(({ departAt: 2_430_000 + config.physicalStopVisitDepartureLagMaximumMs + 1_000,
+      returnAt: 2_430_000 + config.physicalStopVisitDepartureLagMaximumMs + 90_000 }))],
+    ["a departure long before the Visit ended", parkedInput(({ departAt: 2_430_000 - config.physicalStopVisitDepartureLagMaximumMs - 1_000,
+      returnAt: 2_430_000 - config.physicalStopVisitDepartureLagMaximumMs + 90_000 }))],
+    ["no Visit", parkedInput({ visit: null })]
+  ])("does not carry one fix through silence with %s", (_label, input) => {
+    const { physical, stays } = run(input);
+    expect(physical).toEqual([]);
+    expect(stays.filter((stay) => stay.placeMatchKind === "unknown")).toEqual([]);
+  });
+
+  it("carries a Visit of exactly the allowance whose departure is confirmed", () => {
+    const end = 670_000 + config.physicalStopVisitCarriedMinimumMs;
+    const { physical } = run(parkedInput({ visit: [670_000, end], departAt: end + 3_000, returnAt: end + 90_000 }));
+    expect(physical).toHaveLength(1);
+    expect(physical[0].stoppedAt).toBe(shortAt(end));
+  });
 });

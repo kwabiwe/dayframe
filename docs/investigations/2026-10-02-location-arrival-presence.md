@@ -100,6 +100,6 @@ Still to drive on staging: a 30–60 second kerbside drop-off, a 20+ minute stop
 ## Not established
 
 - Remaining delay comes from foreground-only native Visit drain and deferred location delivery on the phone. On 4 Oct nothing could appear until both Visit callbacks reached the server 30 minutes after the stop. These need a mobile change (follow-up).
-- A broad completion whose arrival callback lies just outside the saved place's radius is still unused. On 30 Sep a 29-minute visit near the School (arrival 126 m from the pin, completion 85 m broad) is hidden inside a 32-minute Home round trip on both engines (follow-up).
+- A broad completion whose arrival callback lies just outside the saved place's radius is still unused. On 30 Sep a 29-minute visit near the School (arrival 126 m from the pin, completion 85 m broad) is hidden inside a 32-minute Home round trip on both engines (follow-up; addressed by PR #221, which lets a long Visit carry a parked stop through silence).
 - Segment identity still changes in other cases as late evidence lands (follow-up).
 - No device or production validation of the 3–4 Oct fixes is claimed here.

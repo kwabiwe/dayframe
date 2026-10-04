@@ -197,10 +197,27 @@ function evaluateCluster(
   const visitDepartureAt = placedVisits
     .filter((visit) => elsewhere(visit, centre) && visit.from >= lastMemberAt)
     .reduce<number | null>((earliest, visit) => earliest == null || visit.from < earliest ? visit.from : earliest, null);
+  const visits = completedVisits.filter(({ evidence }) => {
+    const from = Date.parse(evidence.occurredAt);
+    const to = Date.parse(evidence.endedAt!);
+    return distanceMeters(centre, { latitude: evidence.latitude!, longitude: evidence.longitude! }) <=
+        config.physicalStopRadiusMeters + (evidence.horizontalAccuracyMeters ?? 0) &&
+      slowMembers.some(member => member.at >= from && member.at <= to);
+  });
+  // A long compatible Visit carries the stop through silence after its last
+  // fix, unless a geofence crossing in that silence shows the device moved.
+  const visitStop = visits.length ? Math.max(...visits.map(({ evidence }) => Date.parse(evidence.endedAt!))) : null;
+  const carrier = visits.find(({ evidence }) => Date.parse(evidence.endedAt!) === visitStop);
+  const carriedUntil = carrier ? Date.parse(carrier.evidence.endedAt!) : null;
+  const carriedVisit = carrier != null && carriedUntil != null &&
+    carriedUntil - Date.parse(carrier.evidence.occurredAt) >= config.physicalStopVisitCarriedMinimumMs &&
+    !accepted.some(({ evidence }) => (evidence.kind === "geofence_enter" || evidence.kind === "geofence_exit") &&
+      evidence.deviceId === members[0].item.evidence.deviceId &&
+      Date.parse(evidence.occurredAt) > lastMemberAt && Date.parse(evidence.occurredAt) < carriedUntil);
   let departureAt: number | null = null;
   let lastLocal = members[members.length - 1];
   for (let index = afterIndex; index < fixes.length; index += 1) {
-    if (fixes[index].at - lastLocal.at > config.physicalStopBoundaryWindowMs) break;
+    if (fixes[index].at - Math.max(lastLocal.at, carriedVisit ? carriedUntil! : 0) > config.physicalStopBoundaryWindowMs) break;
     if (visitDepartureAt != null && fixes[index].at >= visitDepartureAt) break;
     if (departed(fixes[index])) {
       departureAt = fixes[index].at;
@@ -213,16 +230,10 @@ function evaluateCluster(
     (departureAt == null || visitDepartureAt < departureAt)) departureAt = visitDepartureAt;
   if (arrivalAt == null || departureAt == null) return null;
 
-  const visits = completedVisits.filter(({ evidence }) => {
-    const from = Date.parse(evidence.occurredAt);
-    const to = Date.parse(evidence.endedAt!);
-    return distanceMeters(centre, { latitude: evidence.latitude!, longitude: evidence.longitude! }) <=
-        config.physicalStopRadiusMeters + (evidence.horizontalAccuracyMeters ?? 0) &&
-      slowMembers.some(member => member.at >= from && member.at <= to);
-  });
   const spread = lastSlowAt - firstSlowAt;
   const corroborated = visits.length > 0
-    ? slowMembers.length >= 2 && spread >= config.physicalStopMinimumSlowSpreadMs
+    ? slowMembers.length >= 2 && spread >= config.physicalStopMinimumSlowSpreadMs ||
+      carriedVisit && Math.abs(departureAt - carriedUntil!) <= config.physicalStopVisitDepartureLagMaximumMs
     : slowMembers.length >= config.physicalStopUnanchoredMinimumSlowSamples &&
       spread >= config.physicalStopUnanchoredMinimumSlowSpreadMs;
   if (!corroborated) return null;
@@ -234,7 +245,6 @@ function evaluateCluster(
   const stopLower = lastLocal.at;
   const stopUpper = departureAt;
   const visitStart = visits.length ? Math.min(...visits.map(({ evidence }) => Date.parse(evidence.occurredAt))) : null;
-  const visitStop = visits.length ? Math.max(...visits.map(({ evidence }) => Date.parse(evidence.endedAt!))) : null;
   const startedAt = visitStart != null
     ? iso(clamp(visitStart, startLower, startUpper))
     : midpointTimeIso(iso(startLower), iso(startUpper));
