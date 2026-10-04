@@ -331,6 +331,66 @@ function strongSavedPoint(item: ClassifiedEvidence, placeId: string | null, inpu
     item.match.candidates.some(candidate => candidate.id === placeId && candidate.matchClass === "strong");
 }
 
+/** An accurate GPS fix taken while still: native speed, else the implied speed, below the movement threshold. */
+function stationaryFix(item: ClassifiedEvidence, input: LocationEngineInput) {
+  const { evidence } = item;
+  if ((evidence.kind !== "standard_location" && evidence.kind !== "significant_change") || evidence.isSimulated === true ||
+    !accurateCoordinate(item, input)) return false;
+  const speed = evidence.speedMetersPerSecond ?? item.impliedSpeedMetersPerSecond;
+  return speed == null || !Number.isFinite(speed) || speed < input.config.movementSpeedThresholdMps;
+}
+
+/** iOS itself places the device inside the saved place: its geofence entry, or an accurate Visit callback strongly inside. */
+function iosInsideSignal(item: ClassifiedEvidence, placeId: string | null, input: LocationEngineInput) {
+  const { evidence } = item;
+  if (evidence.kind === "geofence_enter") return placeId != null && evidence.savedPlaceId === placeId;
+  return evidence.kind === "visit" && evidence.isSimulated !== true && accurateCoordinate(item, input) &&
+    (item.match?.candidates.some((candidate) => candidate.id === placeId && candidate.matchClass === "strong") ?? false);
+}
+
+/**
+ * A saved-place stay of still GPS fixes that are all merely plausible matches
+ * near the place's edge, without a corroborated arrival. It is the same cluster
+ * an unknown stay would be and keeps the same continuity and membership; the
+ * saved place decides only its identity (stayIdentity). A stay with no still
+ * fix (a lone Visit or geofence callback) is not a cluster.
+ */
+function edgeOnly(stay: WorkingStay, input: LocationEngineInput) {
+  return stay.placeMatchKind === "saved" && stay.lastStrongInside == null && !stay.arrivalPresence && !stay.inferredBoundary &&
+    stay.evidence.some((item) => stationaryFix(item, input));
+}
+
+type StayIdentity = Pick<WorkingStay, "placeMatchKind" | "placeId" | "learnedPlaceId" | "candidatePlaceIds">;
+
+/**
+ * A stay is at a saved place when its stationary readings centre inside the
+ * place's circle. Readings near the edge match the place plausibly, but a phone
+ * whose stationary readings centre outside the circle was beside the place:
+ * the place is then only a candidate (owner decision, 4 Oct). Moving readings
+ * (the drive away can cross the circle) and Visit callbacks (averaged, or dated
+ * while still moving) never set the centre. iOS's own inside signals, before
+ * the device left, keep the saved identity: a corroborated arrival, a geofence
+ * entry or an accurate Visit callback strongly inside.
+ */
+function stayIdentity(working: WorkingStay, input: LocationEngineInput): StayIdentity {
+  const own: StayIdentity = {
+    placeMatchKind: working.placeMatchKind, placeId: working.placeId,
+    learnedPlaceId: working.learnedPlaceId, candidatePlaceIds: working.candidatePlaceIds
+  };
+  if (working.placeMatchKind !== "saved" || !working.placeId || working.arrivalPresence || working.inferredBoundary) return own;
+  const place = input.savedPlaces.find((candidate) => candidate.id === working.placeId);
+  const stationary = working.evidence.filter((item) => stationaryFix(item, input));
+  const centre = evidenceCentre(stationary);
+  if (!place || !centre || distanceMeters(centre, place) <= Math.max(20, place.radiusMeters)) return own;
+  const lastStationaryMs = Math.max(...stationary.map(({ evidence }) => Date.parse(evidence.occurredAt)));
+  if (working.evidence.some((item) => iosInsideSignal(item, working.placeId, input) &&
+    Date.parse(item.evidence.occurredAt) <= lastStationaryMs)) return own;
+  return {
+    placeMatchKind: "unknown", placeId: null, learnedPlaceId: null,
+    candidatePlaceIds: [...new Set([working.placeId, ...working.candidatePlaceIds])]
+  };
+}
+
 type CorroboratedArrival = {
   /** Departure reported by the Visit's selected completed callback; presence ends there. */
   departedAt: string | null;
@@ -473,7 +533,9 @@ function stayFromWorking(
   const coordinateEvidence = working.evidence.filter(({ evidence }) =>
     pointFor(evidence) && (!working.inferredBoundary || evidence.kind !== "visit")
   );
-  const knownPlace = working.placeMatchKind === "saved" || working.placeMatchKind === "learned";
+  // Identity first: a stay beside a saved place is promoted and described as unknown.
+  const identity = stayIdentity(working, input);
+  const knownPlace = identity.placeMatchKind === "saved" || identity.placeMatchKind === "learned";
   const completedVisit = working.evidence.some(
     ({ evidence }) => evidence.kind === "visit" && evidence.endedAt && Date.parse(evidence.endedAt) > Date.parse(evidence.occurredAt)
   );
@@ -551,14 +613,14 @@ function stayFromWorking(
     startUpperBoundAt: working.startUpperBoundAt,
     stopLowerBoundAt: working.stopLowerBoundAt,
     stopUpperBoundAt: working.stopUpperBoundAt,
-    placeId: working.placeId,
-    learnedPlaceId: working.learnedPlaceId,
-    placeMatchKind: working.placeMatchKind,
-    candidatePlaceIds: working.candidatePlaceIds,
+    placeId: identity.placeId,
+    learnedPlaceId: identity.learnedPlaceId,
+    placeMatchKind: identity.placeMatchKind,
+    candidatePlaceIds: identity.candidatePlaceIds,
     centreLatitude: centre?.latitude ?? null,
     centreLongitude: centre?.longitude ?? null,
     radiusMeters: knownPlace
-      ? working.evidence[0].match?.candidates.find((candidate) => candidate.id === (working.placeId ?? working.learnedPlaceId))
+      ? working.evidence[0].match?.candidates.find((candidate) => candidate.id === (identity.placeId ?? identity.learnedPlaceId))
           ?.radiusMeters ?? null
       : input.config.unknownStayBaseRadiusMeters,
     sampleCount: coordinateEvidence.length,
@@ -1165,6 +1227,16 @@ function runLocationEnginePass(input: LocationEngineInput): { output: LocationEn
         itemKey === "unknown" &&
         sameUnknownCluster(active, item, input.config.sparseUnknownContinuityMaximumDistanceMeters) &&
         observationGapMs <= input.config.sparseUnknownContinuityMaximumGapMs;
+      // Without the saved place, a tight unknown cluster bridges sparse silence.
+      // A parked phone just outside a saved place's circle forms the same
+      // cluster from merely plausible matches; the place must not make
+      // continuity stricter than it would be without it.
+      const boundedSparseEdge = observationGapMs > input.config.maxContinuityGapMs &&
+        !active.pendingExit && active.outside.length === 0 &&
+        (itemKey === active.key || (itemKey === "unknown" && stationaryFix(item, input))) &&
+        observationGapMs <= input.config.sparseUnknownContinuityMaximumGapMs &&
+        edgeOnly(active, input) &&
+        sameUnknownCluster(active, item, input.config.sparseUnknownContinuityMaximumDistanceMeters);
       const previousPoint = active.lastStrongInside;
       const boundedSavedGap = active.placeMatchKind === "saved" && !active.pendingExit && active.outside.length === 0 &&
         previousPoint != null && previousPoint.evidence.clientEvidenceId !== evidence.clientEvidenceId &&
@@ -1177,7 +1249,7 @@ function runLocationEnginePass(input: LocationEngineInput): { output: LocationEn
         active.arrivalPresence === true &&
         (active.arrivalPresenceUntilAt == null || atMs <= Date.parse(active.arrivalPresenceUntilAt)) &&
         atMs - Date.parse(observedAt) <= input.config.savedPlaceOpenVisitPresenceMaximumMs;
-      if (observationGapMs > input.config.maxContinuityGapMs && !boundedSparseSameUnknown && !boundedSavedGap && !openVisitPresence) {
+      if (observationGapMs > input.config.maxContinuityGapMs && !boundedSparseSameUnknown && !boundedSparseEdge && !boundedSavedGap && !openVisitPresence) {
         closeAtTransition(active, evidence.occurredAt, "uncertain_gap", input.config, true);
         completed.push(active);
         active = null;
@@ -1217,7 +1289,11 @@ function runLocationEnginePass(input: LocationEngineInput): { output: LocationEn
 
     const sameKnownPlace = itemKey !== "unknown" && (itemKey === active.key || matchingActive(item.match, active));
     const sameUnknown = itemKey === "unknown" && active.key === "unknown" && sameUnknownCluster(active, item, input.config.unknownStayBaseRadiusMeters);
-    if (sameKnownPlace || sameUnknown) {
+    // A still reading just beyond the tolerance band belongs to an edge-only
+    // stay exactly as it would to the unknown cluster that stay would be.
+    const sameEdgeCluster = itemKey === "unknown" && active.placeMatchKind === "saved" && stationaryFix(item, input) &&
+      edgeOnly(active, input) && sameUnknownCluster(active, item, input.config.unknownStayBaseRadiusMeters);
+    if (sameKnownPlace || sameUnknown || sameEdgeCluster) {
       active.evidence.push(item);
       markArrivalPresence(active, item);
       if (!active.pendingExit) active.outside = [];
