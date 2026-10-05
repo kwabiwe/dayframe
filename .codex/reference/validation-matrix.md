@@ -2,6 +2,8 @@
 
 Use this to select the right checks. Run the narrowest checks for small changes and broader checks for shared contracts or user-facing flows.
 
+For a surface migrated to Dayframe Blocks, run the Blocks surface checks in `docs/dayframe-regression-checklist.md`. Where an earlier visual check conflicts with them, it applies only to surfaces not yet migrated (see the adoption rule in `docs/brand-style-guide.md`).
+
 ## Baseline Commands
 
 General repo:

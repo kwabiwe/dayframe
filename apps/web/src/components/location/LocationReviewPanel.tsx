@@ -4,7 +4,7 @@ import { useEffect, useState, useTransition } from "react";
 import { Check, GitMerge, MapPin, RotateCw, Scissors, X } from "lucide-react";
 import dynamic from "next/dynamic";
 import { useRouter } from "next/navigation";
-import type { LocationReviewAction, LocationReviewEvidenceDto } from "@dayframe/shared";
+import { tripStopRows, tripStopsHeading, type LocationReviewAction, type LocationReviewEvidenceDto } from "@dayframe/shared";
 import { clientFetch } from "@/lib/client-auth-fetch";
 import { CategoryPicker } from "@/components/CategoryPicker";
 import { OverlapNotice } from "@/components/OverlapNotice";
@@ -156,6 +156,16 @@ export function LocationReviewPanel({
                 ? "A gap limits precision, so Dayframe kept supported bounds instead of inventing an exact transition."
                 : "The nearest arrival and departure evidence supports these boundaries."}
             </p>
+            {evidence.segment.kind === "commute" && tripStopsHeading(evidence.stops) ? (
+              <div className="location-trip-stops mt-3">
+                <p className="text-sm font-semibold">{tripStopsHeading(evidence.stops)}</p>
+                <ul className="mt-1 divide-y divide-[var(--border)]">
+                  {tripStopRows(evidence.stops, formatTime).map((row) => (
+                    <li key={row.key} className="py-1.5 text-sm" aria-label={row.accessibilityLabel}>{row.label}</li>
+                  ))}
+                </ul>
+              </div>
+            ) : null}
             {evidence.map.gaps.map((gap) => (
               <p key={`${gap.startedAt}-${gap.stoppedAt}`} className="mt-2 text-sm text-[var(--warning)]">
                 Evidence gap · {Math.round(gap.durationSeconds / 60)} minutes
