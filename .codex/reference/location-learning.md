@@ -50,6 +50,93 @@ Temporal invariants:
   origin, and robust faster movement. This is the narrow exception to
   distinct endpoints established by PR #114; short same-site loops are not
   commutes. Route distance and straight-line distance remain separate.
+- A journey starts at the latest evidence of being at its origin in the gap
+  after the origin stay: an accurate standard or significant-change fix
+  matching it, or its geofence exit. iOS re-reports exits when the app
+  re-registers its regions (on 4 Oct, 900 m from Home, a second after a fix
+  there): a second exit during one excursion, fired when the latest accurate
+  fix in the two minutes before it was at least
+  `commuteSamePlaceMinimumExcursionMeters` from the stay's centre, is that
+  re-report and not a departure. An excursion starts at an exit (also one
+  inside the origin stay, read in time order) and ends with evidence of being
+  back (an accurate fix there that is not moving, an entry there, or a Visit
+  in the origin stay or one that marks departure as below; an early-dated
+  return Visit does not) or after more than `savedPlaceQuietGapMaxMs`
+  unobserved (only positions,
+  crossings and Visits are observations; provider status and registration
+  snapshots are not); registration
+  snapshot pairs (an exit and entry within five seconds) are neither. A first
+  exit always counts, even when its receipt time trails the first fix away
+  after a capture gap. iOS also dates a return's arrival Visit before the car
+  stops, so a Visit, entry or broad fix at the origin marks departure only
+  before the device was seen leaving (a reading away that is moving, by
+  native speed from whichever copy of the observation reports it, a copy
+  being on the same device in the same or an adjacent whole second or at the
+  same coordinate within five seconds either way, or else an accurate fix's
+  implied speed; or a reading at least
+  `commuteSamePlaceMinimumExcursionMeters` from the origin, or a Visit
+  elsewhere; one still stray fix just outside is not leaving; on a journey to
+  a different place, arriving there also shows it had left), or when it
+  stayed there at least `savedPlaceMinimumDwellMs` before it was next seen
+  leaving (an early-dated return Visit is followed by approach fixes within
+  three minutes), or when it was then seen away and it was observed there as
+  it happened (an entry, or a fix that is not moving). A Visit (its arrival is
+  dated) or a moving broad fix (a coarse reading can match the place while the
+  car is still approaching) then seen away counts when it is not back at the
+  place within three minutes (a later sign of being there, or the destination
+  stay when the trip returns there), or
+  when it had arrived first (nothing accurate away in the three minutes before
+  it, or the last two independent accurate observations away approached) and
+  then moved away: the accurate readings after it get at least 100 m farther,
+  or the first one after it is at least 100 m farther than the last one before
+  it (a loop whose outbound leg went uncaptured). Three minutes is a
+  heuristic: iOS has dated arrival Visits up to 157 s before the car stopped,
+  with the approach continuing after them; one dated amid a short outing's
+  outbound leg has not arrived first. A larger early estimate is treated as
+  presence. Registration snapshot pairs and state snapshots are never signs
+  of being at, leaving or returning to the place. Any
+  of these, or an accurate fix at the origin that is not moving, ends the
+  excursion (for re-reported exits too), so later presence
+  there marks departure again; otherwise it can be the return, and state
+  snapshots never count. In a same-place round trip a return Visit or a
+  re-reported exit used to become the "departure", shrinking the trip to
+  seconds so the whole outing was discarded. A round trip between stays at
+  the same known place (saved or learned) starts no earlier than the last time,
+  after its departure, the device was observed away and then seen back there
+  (any evidence matching the place) more than `savedPlaceMinimumDwellMs` before
+  the next stay begins: from that return a trip that would only add stationary
+  time does not qualify (the latest-support rule started such a trip at that
+  return too), while a later outing before the stay began is judged on its own
+  route. The place's own Visit's displaced callback (sharing its arrival time)
+  is never being away or leaving. A trip through stops that only partly covers
+  one of its legs (its start moved to such a return) is not assembled; the legs
+  stand, so commutes never overlap. Only renewed movement undoes an observed
+  return: at least `outsideConfirmationCount` independent accurate
+  observations away (a fix and its significant-change mirror are one: it moved
+  when a copy's native speed says so, whatever that copy's accuracy, or, when
+  no copy reports native speed, a copy's implied speed does, so a speedless
+  mirror never overrides reported stillness), one moving or the excursion
+  minimum away; a stray still fix does not. Unchanged and known limitations: a moving
+  pass-by at the origin still restarts the journey, because a pass-by and a
+  brief return look alike; departure bounds still come from the origin stay;
+  with no departure evidence after a long quiet spell the start stays at the
+  last evidence of the origin, as on main; more than thirty minutes
+  unobserved during an outing lets a later re-reported exit count; and when
+  the segmenter misses a stop at the far end (no stay detected there, as with
+  a silent park), the outing becomes one Review-only round trip that includes
+  that stop, where main showed nothing. Kept as a known limitation by owner
+  decision after review round 17, and worse than main: a Home Visit or moving
+  broad fix followed by a short loop whose readings never get at least 100 m
+  farther from Home than the walk's or outing's last reading before it, back
+  within three minutes, reads as that earlier outing's early-dated arrival.
+  The loop then joins the earlier outing, is dropped when that makes it longer
+  than six hours, or, under three minutes, becomes a commute it should not
+  be; main starts it at the Visit. Private
+  corpus unchanged; in the staging week only the 4 Oct school run without its
+  School pin changes, from a 4-minute fragment to the whole 07:49–08:21 round
+  trip. The capture simulator (`test/fixtures/captureSimulator.ts`), which can
+  also omit settling fixes, leave capture gaps, report broad accuracy and add
+  stray fixes, found the bug.
 - Large-site continuity may coalesce only unknown-to-unknown stays with an
   actual visit signal, a credible later dwell, no more than `450m` endpoint
   separation, no more than `45m` transition time, no more than `1200m` local
