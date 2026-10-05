@@ -566,10 +566,34 @@ describe("real Core Motion: brief unknown spells around changes of activity", ()
     expect(minutes(commute.stoppedAt)).toBe(79.8);
   });
 
-  it("does not look past a longer unknown spell", () => {
+  it("does not observe a departure without a minute of confident stillness in the four minutes before it", () => {
     const evidence = [...schoolRun(), ...motion([
-      [0, "stationary"], [64, "unknown"], [67, "automotive"], [79.8, "stationary"]
+      [0, "stationary"], [62.5, "unknown"], [67, "automotive"], [79.8, "stationary"]
     ], 125)];
     expect(minutes(staysOf(evidence)[0].stoppedAt)).toBe(60);
+  });
+});
+
+describe("review round 4", () => {
+  const gap = () => [
+    ...[0, 15, 30, 45, 60].map((m, i) => fix(`home-${i}`, m, i % 2 * 3)),
+    ...[90, 95, 100, 105, 110].map((m, i) => fix(`shop-${i}`, m, i % 2 * 4, { longitude: east(2_000) }))
+  ];
+  const gapCommutes = (steps: Array<[number, MotionActivity, MotionConfidence?]>) =>
+    commutesOf([...gap(), ...motion(steps, 125)]).filter((commute) => minutes(commute.stoppedAt) < 100);
+
+  it("never takes a moment of stillness followed by unknown activity for a stop", () => {
+    expect(gapCommutes([[0, "stationary"], [70, "automotive"], [78, "stationary"], [78.1, "unknown"]])).toEqual([]);
+  });
+
+  it("never qualifies a gap from movement that only touches it", () => {
+    expect(gapCommutes([[0, "stationary"], [58, "automotive"], [60, "stationary"]])).toEqual([]);
+  });
+
+  it("still finds the drive when stillness is broken by brief unknown spells, as on a real iPhone", () => {
+    const [drive] = gapCommutes([[0, "stationary"], [68.5, "unknown"], [69, "stationary"], [69.6, "unknown"], [70, "automotive"],
+      [78, "unknown"], [78.4, "stationary"], [79, "unknown"], [79.3, "stationary"], [80.5, "unknown"], [80.8, "stationary"]]);
+    expect(drive).toMatchObject({ motionSupported: true, confidence: "low" });
+    expect(minutes(drive.startedAt)).toBe(70);
   });
 });

@@ -126,37 +126,34 @@ export function buildMotionTimeline(
     previousRun = run;
   }
   // Only confident stillness observes a boundary. iOS reports brief `unknown`
-  // spells (seconds to a minute or so) around most changes of activity, so up
-  // to `motionStillBridgeMs` of indeterminate activity next to the boundary is
-  // looked past; the first determinate interval beyond it must be stillness.
-  const indeterminate = (interval: MotionInterval) => interval.activity === "unknown" || interval.confidence === "low";
+  // spells around most changes of activity and every few minutes while still,
+  // so a boundary is observed when the `motionStillWindowMs` beside it is fully
+  // covered, holds no movement, and holds at least `motionMinimumStillMs` of
+  // medium- or high-confidence stillness.
   const stillBeside = (boundaryMs: number, direction: -1 | 1) => {
-    let index = direction < 0
-      ? intervals.findIndex((interval) => interval.toMs === boundaryMs)
-      : intervals.findIndex((interval) => interval.fromMs === boundaryMs);
-    let skippedMs = 0;
-    while (index >= 0 && index < intervals.length) {
-      const interval = intervals[index];
-      if (!indeterminate(interval)) return interval.activity === "stationary";
-      skippedMs += interval.toMs - interval.fromMs;
-      if (skippedMs > bridge) return false;
-      const next = index + direction;
-      if (next < 0 || next >= intervals.length ||
-        (direction < 0 ? intervals[next].toMs !== interval.fromMs : intervals[next].fromMs !== interval.toMs)) return false;
-      index = next;
+    const [fromMs, toMs] = direction < 0
+      ? [boundaryMs - config.motionStillWindowMs, boundaryMs] : [boundaryMs, boundaryMs + config.motionStillWindowMs];
+    if (fromMs < coverageFromMs || toMs > coverageToMs) return false;
+    let stillMs = 0;
+    for (const interval of intervals) {
+      const overlap = Math.min(interval.toMs, toMs) - Math.max(interval.fromMs, fromMs);
+      if (overlap <= 0) continue;
+      if (travelMode(interval)) return false;
+      if (interval.activity === "stationary" && interval.confidence !== "low") stillMs += overlap;
     }
-    return false;
+    return stillMs >= config.motionMinimumStillMs;
   };
   const blocks = raw.filter((block) => block.movingMs >= config.motionMinimumBlockMovingMs).map((block) => ({
     ...block,
-    onsetObserved: stillBeside(block.startMs, -1) && block.startMs - coverageFromMs > bridge,
-    stopObserved: stillBeside(block.endMs, 1) && coverageToMs - block.endMs > bridge
+    onsetObserved: stillBeside(block.startMs, -1),
+    stopObserved: stillBeside(block.endMs, 1)
   }));
   return { intervals, coverageFromMs, coverageToMs, blocks };
 }
 
+/** Blocks with movement inside the window; one that only touches it does not count. */
 function overlapping(timeline: MotionTimeline, lowerMs: number, upperMs: number) {
-  return timeline.blocks.filter((block) => block.startMs <= upperMs && block.endMs >= lowerMs);
+  return timeline.blocks.filter((block) => block.startMs < upperMs && block.endMs > lowerMs);
 }
 
 /**

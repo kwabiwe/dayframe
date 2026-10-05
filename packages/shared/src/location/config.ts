@@ -59,6 +59,8 @@ export type LocationEngineConfig = {
   motionMinimumBlockMovingMs: number;
   motionBoundaryToleranceMs: number;
   motionMinimumModeMs: number;
+  motionStillWindowMs: number;
+  motionMinimumStillMs: number;
   motionTravelModeMinimumShare: number;
   motionTravelModeMinimumCoverage: number;
   motionMaximumWalkingSpeedMps: number;
@@ -185,6 +187,12 @@ export const LOCATION_ENGINE_V2_CONFIG: LocationEngineConfig = {
   // mode's distance: on a short hop the walks to and from the car can outlast
   // the drive.
   motionMinimumModeMs: 30_000,
+  // A journey's start or end is observed only when, in this window before or
+  // after it, Core Motion reported no movement and at least this much
+  // confident stillness: iOS breaks stillness with brief unknown spells, but a
+  // moment of stillness followed by unknown is not a stop.
+  motionStillWindowMs: 240_000,
+  motionMinimumStillMs: 60_000,
   // A journey's travel mode is the fastest mode sustained for
   // `motionMinimumModeMs` and at least this share of its movement (a short
   // drive is mostly the walks to and from the car), when movement covers at

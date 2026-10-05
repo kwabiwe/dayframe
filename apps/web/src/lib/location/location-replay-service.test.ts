@@ -472,6 +472,37 @@ describe("Location replay decided commute endpoints", () => {
     expect(server.stayIds.get(stop.clientSegmentId)).toBe("decided-row");
   });
 
+  it("holds a journey that re-derivation stretches over a decided motion-only journey (review round 4)", async () => {
+    const fixture = physicalStopFixture(LONG_STOP);
+    const engine = runLocationEngine(fixture).segmentUpserts;
+    const stop = engine.find((segment) => segment.kind === "stay" && segment.placeMatchKind === "unknown");
+    const [into] = engine.filter((segment) => segment.kind === "commute");
+    if (!stop || !into) throw new Error("fixture must produce a stop and the journey into it");
+    // The decided stop starts later than the engine's, so the journey into it is re-derived to end there,
+    // over a journey only Motion & Fitness showed that the user already ignored.
+    const canonical = {
+      startedAt: physicalStopAt(900_000), stoppedAt: physicalStopAt(2_205_000),
+      startLowerBoundAt: physicalStopAt(895_000), startUpperBoundAt: physicalStopAt(905_000),
+      stopLowerBoundAt: physicalStopAt(2_202_000), stopUpperBoundAt: physicalStopAt(2_208_000)
+    };
+    expect(Date.parse(into.stoppedAt)).toBeLessThan(Date.parse(physicalStopAt(800_000)));
+    const local = runLocationEngine(fixture);
+    const base = journeyReplayQuery(fixture as unknown as ReturnType<typeof journeyIdentityFixture>, [], [{
+      id: "decided-row", clientSegmentId: stop.clientSegmentId, continuityStatus: "supported_by_visit", preservesManualCorrection: true
+    }]);
+    const stayRows = local.segmentUpserts.filter((segment) => segment.kind === "stay" && segment.clientSegmentId !== stop.clientSegmentId)
+      .map((segment) => ({ id: `db-${segment.clientSegmentId}`, clientSegmentId: segment.clientSegmentId }));
+    const query = vi.fn(async (sql: string, params?: unknown[]) =>
+      sql.includes("decided stay bounds") ? { rows: [{ clientSegmentId: stop.clientSegmentId, ...canonical }] }
+        : sql.includes("decided motion-only journeys")
+          ? { rows: [{ clientSegmentId: "ignored-motion-journey", startedAt: physicalStopAt(800_000), stoppedAt: physicalStopAt(850_000) }] }
+          : sql.includes("insert into stay_segments") ? { rows: stayRows } : base(sql, params));
+    const server = await replayLocationEvidence({ query } as never, {
+      workspaceId: "workspace-private", userId: "user-private", authMode: "provider", scopes: []
+    }, { deviceId: fixture.evidence[0].deviceId, algorithmVersion: fixture.config.algorithmVersion, processingAt: fixture.processingAt });
+    expect(server.segments.find((segment) => segment.clientSegmentId === into.clientSegmentId)).toBeUndefined();
+  });
+
   it("leaves a commute unchanged when the decided endpoint's boundaries have not moved", async () => {
     const fixture = physicalStopFixture(LONG_STOP);
     const engine = runLocationEngine(fixture).segmentUpserts;

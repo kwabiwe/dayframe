@@ -324,29 +324,27 @@ async function excludeProtectedReplacements(
   // A journey only Motion & Fitness showed has no lineage, so the reads above
   // cannot protect a decision about it. When its endpoints' IDs change, the
   // engine proposes it again under a new ID, possibly now qualified by a late
-  // route fix: a decided or manual motion-only journey on this device holds any
-  // candidate journey overlapping it.
-  const motionCandidates = [...segments, ...fallbackLegs].filter((segment): segment is CommuteSegment =>
-    segment.kind === "commute");
-  if (motionCandidates.length) {
-    const decided = await client.query<{ clientSegmentId: string; startedAt: Date | string; stoppedAt: Date | string }>(
-      `/* decided motion-only journeys */ select s.client_segment_id as "clientSegmentId", s.started_at as "startedAt", s.stopped_at as "stoppedAt"
-       from commute_segments s
-       where s.workspace_id = $1 and s.user_id = $2 and s.device_id = $3 and s.algorithm_version = $4
-         and s.metadata ? 'motionSupported' and s.status <> 'superseded'
-         and s.started_at < $6::timestamptz and s.stopped_at > $5::timestamptz
-         and (s.continuity_status = 'manual' or (s.created_from_event_id is not null and not exists (
-           select 1 from review_items ri
-           where ri.workspace_id = $1 and ri.user_id = $2 and ri.location_segment_id = s.id and ${reviewLeavesSegmentToReplay("ri")})))
-       order by s.client_segment_id`,
-      [session.workspaceId, session.userId, options.deviceId, options.algorithmVersion,
-        new Date(Math.min(...motionCandidates.map((segment) => Date.parse(segment.startedAt)))).toISOString(),
-        new Date(Math.max(...motionCandidates.map((segment) => Date.parse(segment.stoppedAt)))).toISOString()]);
-    for (const candidate of motionCandidates) {
-      if (decided.rows.some((row) => row.clientSegmentId !== candidate.clientSegmentId &&
-        Date.parse(iso(row.startedAt)!) < Date.parse(candidate.stoppedAt) &&
-        Date.parse(iso(row.stoppedAt)!) > Date.parse(candidate.startedAt))) held.add(candidate.clientSegmentId);
-    }
+  // route fix, and a decided endpoint can stretch a re-derived journey over it:
+  // a decided or manual motion-only journey on this device holds any candidate
+  // journey overlapping it, before and after re-derivation. Every such row
+  // within retention is read, since re-derivation can move boundaries.
+  const decidedMotionJourneys = (await client.query<{ clientSegmentId: string; startedAt: Date | string; stoppedAt: Date | string }>(
+    `/* decided motion-only journeys */ select s.client_segment_id as "clientSegmentId", s.started_at as "startedAt", s.stopped_at as "stoppedAt"
+     from commute_segments s
+     where s.workspace_id = $1 and s.user_id = $2 and s.device_id = $3 and s.algorithm_version = $4
+       and s.metadata ? 'motionSupported' and s.status <> 'superseded'
+       and s.stopped_at > $5::timestamptz - ($6::int * interval '1 day')
+       and (s.continuity_status = 'manual' or (s.created_from_event_id is not null and not exists (
+         select 1 from review_items ri
+         where ri.workspace_id = $1 and ri.user_id = $2 and ri.location_segment_id = s.id and ${reviewLeavesSegmentToReplay("ri")})))
+     order by s.client_segment_id`,
+    [session.workspaceId, session.userId, options.deviceId, options.algorithmVersion, options.processingAt,
+      LOCATION_ENGINE_V2_CONFIG.rawEvidenceRetentionDays + 1])).rows;
+  const overlapsDecidedMotionJourney = (segment: LocationSegment) => segment.kind === "commute" &&
+    decidedMotionJourneys.some((row) => row.clientSegmentId !== segment.clientSegmentId &&
+      Date.parse(iso(row.startedAt)!) < Date.parse(segment.stoppedAt) && Date.parse(iso(row.stoppedAt)!) > Date.parse(segment.startedAt));
+  for (const candidate of [...segments, ...fallbackLegs]) {
+    if (overlapsDecidedMotionJourney(candidate)) held.add(candidate.clientSegmentId);
   }
   // A decided or manual row can keep a stay's ID while late evidence moves the
   // engine's boundaries. Its persisted boundaries stay canonical for every
@@ -375,7 +373,7 @@ async function excludeProtectedReplacements(
       : segment.kind === "commute"
         ? (segment.legs ?? []).filter(replaceable).flatMap((leg) =>
             rebuildLegWithinDecidedStops(leg, decidedStays, segments, acceptedEvidence, options))
-        : [])
+        : []).filter((segment) => !overlapsDecidedMotionJourney(segment))
   };
 }
 
