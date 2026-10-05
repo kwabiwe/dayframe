@@ -67,12 +67,13 @@ Temporal invariants:
   stops, so a Visit, entry or broad fix at the origin marks departure only
   before the device was seen leaving (a reading away that is moving or at
   least `commuteSamePlaceMinimumExcursionMeters` from the origin, or a Visit
-  elsewhere; one still stray fix just outside is not leaving), or when more
-  than `savedPlaceQuietGapMaxMs` passed before it was next seen leaving (it
-  stayed home in between). Either that long stay or an accurate fix at the
-  origin that is not moving ends the excursion (for re-reported exits too), so later presence there marks
-  departure again; otherwise it can be the return, and state snapshots never
-  count. In a same-place round trip a return Visit or a
+  elsewhere; one still stray fix just outside is not leaving), or when it
+  stayed there at least `savedPlaceMinimumDwellMs` before it was next seen
+  leaving (an early-dated return Visit is followed by approach fixes within
+  three minutes). Either that stay or an accurate fix at the origin that is
+  not moving ends the excursion (for re-reported exits too), so later presence
+  there marks departure again; otherwise it can be the return, and state
+  snapshots never count. In a same-place round trip a return Visit or a
   re-reported exit used to become the "departure", shrinking the trip to
   seconds so the whole outing was discarded. A round trip between stays at
   the same known place (saved or learned) starts no earlier than the last time,
@@ -82,7 +83,9 @@ Temporal invariants:
   time does not qualify (the latest-support rule started such a trip at that
   return too), while a later outing before the stay began is judged on its own
   route. The place's own Visit's displaced callback (sharing its arrival time)
-  is never being away or leaving. Only renewed movement undoes an observed return: at least
+  is never being away or leaving. A trip through stops that only partly covers
+  one of its legs (its start moved to such a return) is not assembled; the legs
+  stand, so commutes never overlap. Only renewed movement undoes an observed return: at least
   `outsideConfirmationCount` independent accurate fixes away (a
   significant-change mirror of a fix is the same observation, though its
   native speed still counts as movement), one moving or the excursion minimum

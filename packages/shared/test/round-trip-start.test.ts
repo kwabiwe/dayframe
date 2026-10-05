@@ -563,10 +563,10 @@ describe("departures after a finished walk (review round 9)", () => {
   };
   const walk = (farthest = 900) => [still("home-0", 0, 0), still("home-1", 10, 0), geofence("walk-exit", 20, "geofence_exit"),
     e("walk-0", 25, 500, { speedMetersPerSecond: 1.35 }), e("walk-1", 30, farthest, { speedMetersPerSecond: 1.35 }), e("walk-2", 35, 400, { speedMetersPerSecond: 1.35 })];
-  const drive = (departure: number, work: boolean) => {
+  const drive = (departure: number, work: boolean, accuracy: number | null = 4) => {
     const route = work ? [[0.5, 300], [2, 1_000], [3.5, 1_800], [5, 2_700]] : [[0.5, 300], [2, 1_000], [3.5, 1_800], [5, 1_000], [6.5, 300]];
     const end = work ? 3_000 : 0;
-    return [...route.map(([minutes, metres], index) => e(`drive-${index}`, departure + minutes, metres)),
+    return [...route.map(([minutes, metres], index) => e(`drive-${index}`, departure + minutes, metres, { horizontalAccuracyMeters: accuracy })),
       ...(work ? [] : [geofence("end-enter", departure + 7, "geofence_enter")]),
       still("end-0", departure + 7.5, end), still("end-1", departure + 17.5, end), still("end-2", departure + 27.5, end)];
   };
@@ -612,6 +612,28 @@ describe("departures after a finished walk (review round 9)", () => {
   ])("keeps the departure at %s after a slow walk under 650 m", (_label, presence) => {
     expect(commutes(withWork([...walk(600), presence, ...drive(39.5, true)], true)))
       .toEqual([expect.objectContaining({ startedAt: at(39), stoppedAt: at(47) })]);
+  });
+
+  // Review round 10: ten minutes back home after the walk is a stay of its own, so the drive starts at its last sign.
+  it.each([[false, 4], [true, 4], [false, null], [true, null]] as const)("starts the next drive at Home after a short stay there (to Work: %s, route accuracy %s)", (work, accuracy) => {
+    const evidence = [...walk(), still("walk-return", 39, 0, { horizontalAccuracyMeters: 100 }), still("last-home", 49, 0, { horizontalAccuracyMeters: 100 }),
+      ...drive(49.5, work, accuracy)];
+    expect(commutes(withWork(evidence, work))).toEqual([expect.objectContaining({ startedAt: at(49) })]);
+  });
+
+  it("never leaves a leg overlapping a trip through a stop whose start moved to an observed return", () => {
+    const evidence = [...walk(), geofence("walk-return", 39, "geofence_enter"), still("last-home", 49, 0, { horizontalAccuracyMeters: 100 }),
+      e("out-a", 49.1, 200, { horizontalAccuracyMeters: null }), still("out-accurate", 49.2, 400), still("out-accurate-2", 49.3, 500),
+      e("out-b", 49.5, 750, { horizontalAccuracyMeters: null }), e("out-c", 49.8, 1_000, { horizontalAccuracyMeters: null }),
+      visit("stop-visit", 50, 1_000, { endedAt: at(60), metadata: {} }),
+      e("back-a", 60.2, 900, { horizontalAccuracyMeters: null }), e("back-b", 60.5, 600, { horizontalAccuracyMeters: null }),
+      still("back-accurate", 60.7, 400), e("back-c", 60.9, 200, { horizontalAccuracyMeters: null }),
+      geofence("last-return", 61.2, "geofence_enter"), still("final-a", 61.5, 0), still("final-b", 71.5, 0), still("final-c", 81.5, 0)];
+    const trips = commutes(withWork(evidence, false)).sort((a, b) => a.startedAt.localeCompare(b.startedAt));
+    expect(trips.length).toBeGreaterThan(0);
+    for (let index = 1; index < trips.length; index += 1) {
+      expect(Date.parse(trips[index].startedAt)).toBeGreaterThanOrEqual(Date.parse(trips[index - 1].stoppedAt!));
+    }
   });
 });
 

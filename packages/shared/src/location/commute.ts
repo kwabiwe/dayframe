@@ -161,12 +161,12 @@ function latestDepartureSupport(stay: StaySegment, stayEvidence: ClassifiedEvide
       if (speed == null || !Number.isFinite(speed) || speed < config.movementSpeedThresholdMps) excursion = seenAway = false;
     } else if (kind === "geofence_enter" || kind === "visit" || evidencePoint(item) != null) {
       // A Visit, entry or broad fix at the place is where the device was before
-      // leaving when it had not been seen leaving yet, or when it stayed
-      // unobserved there for longer than `savedPlaceQuietGapMaxMs` before it was
-      // next seen leaving (which also ends that excursion). Otherwise it is the
-      // return (iOS dates an arrival Visit before the car stops, approach fixes
-      // then follow within seconds).
-      const stayedBefore = nextAwayMs.get(item)! - atMs > config.savedPlaceQuietGapMaxMs &&
+      // leaving when it had not been seen leaving yet, or when it stayed there
+      // at least `savedPlaceMinimumDwellMs` before it was next seen leaving
+      // (which also ends that excursion). Otherwise it is the return: iOS dates
+      // an arrival Visit before the car stops (by at most three minutes), and
+      // approach fixes then follow within seconds.
+      const stayedBefore = nextAwayMs.get(item)! - atMs >= config.savedPlaceMinimumDwellMs &&
         Number.isFinite(nextAwayMs.get(item)!);
       if (inGap && (!seenAway || stayedBefore)) latest = item;
       if (stayedBefore) excursion = seenAway = false;
@@ -794,11 +794,16 @@ export function assembleTripsThroughStops(
     }
     return null;
   };
-  const trips = deriveCommutes(majors, acceptedEvidence, config, processingAt, {
+  const assembled = deriveCommutes(majors, acceptedEvidence, config, processingAt, {
     ...options, interiorStops, qualifiedLegChainConfidence
   }).filter((trip) => trip.stops?.length);
   const within = (leg: CommuteSegment, trip: CommuteSegment) =>
     Date.parse(leg.startedAt) >= Date.parse(trip.startedAt) && Date.parse(leg.stoppedAt) <= Date.parse(trip.stoppedAt);
+  const overlapping = (leg: CommuteSegment, trip: CommuteSegment) =>
+    Date.parse(leg.startedAt) < Date.parse(trip.stoppedAt) && Date.parse(leg.stoppedAt) > Date.parse(trip.startedAt);
+  // A trip that only partly covers a leg (its start moved to an observed
+  // return home) would duplicate that leg's route, so the legs stand instead.
+  const trips = assembled.filter((trip) => legs.every((leg) => within(leg, trip) || !overlapping(leg, trip)));
   const result = [
     ...legs.filter((leg) => !trips.some((trip) => within(leg, trip))),
     ...trips.map((trip) => {
