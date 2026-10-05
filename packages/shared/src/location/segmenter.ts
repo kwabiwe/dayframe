@@ -57,6 +57,8 @@ type WorkingStay = {
   arrivalPresence?: boolean;
   /** Departure iOS reported for that arrival's Visit, if completed; presence never runs past it. */
   arrivalPresenceUntilAt?: string | null;
+  /** Arrival time of the Visit whose corroborated arrival owns `arrivalPresence`. */
+  arrivalPresenceFromAt?: string;
 };
 
 function pointFor(evidence: LocationEvidence) {
@@ -1077,6 +1079,7 @@ function runLocationEnginePass(input: LocationEngineInput): { output: LocationEn
     if (!arrival || stay.placeMatchKind !== "saved" || item.match?.placeId !== stay.placeId) return;
     stay.arrivalPresence = true;
     stay.arrivalPresenceUntilAt = arrival.departedAt;
+    stay.arrivalPresenceFromAt = item.evidence.occurredAt;
     const completion = arrival.completion;
     if (!completion || stay.evidence.includes(completion)) return;
     // The arrival's own completed callback joins here, whatever its delivery
@@ -1108,9 +1111,21 @@ function runLocationEnginePass(input: LocationEngineInput): { output: LocationEn
   const pendingEarlyArrivals = accepted.flatMap((item) => {
     const anchor = corroboratedArrivals.get(item.evidence.clientEvidenceId)?.observedArrival;
     return item.evidence.kind === "visit" && anchor && item.match?.placeId
-      ? [{ visit: item, placeId: item.match.placeId, anchorMs: Date.parse(anchor.evidence.occurredAt) }] : [];
+      ? [{ visit: item, placeId: item.match.placeId, anchor, anchorMs: Date.parse(anchor.evidence.occurredAt) }] : [];
   });
   const earlyArrivals = new Set(pendingEarlyArrivals.map(({ visit }) => visit));
+  // Whether the device left or was elsewhere between two items, in accepted
+  // order: the place's exit, or an accurate fix or Visit not matching it.
+  const brokenBetween = (from: ClassifiedEvidence, to: ClassifiedEvidence, placeId: string) => {
+    for (let index = acceptedOrder.get(from)! + 1; index < acceptedOrder.get(to)!; index += 1) {
+      const between = accepted[index].evidence;
+      if (between.kind === "geofence_exit" && between.savedPlaceId === placeId) return true;
+      if ((between.kind === "standard_location" || between.kind === "significant_change" || between.kind === "visit") &&
+        accurateCoordinate(accepted[index], input) &&
+        !(accepted[index].match?.candidates.some((candidate) => candidate.id === placeId && candidate.matchClass !== "outside") ?? false)) return true;
+    }
+    return false;
+  };
   const attachEarlyArrival = (stay: WorkingStay, item: ClassifiedEvidence) => {
     if (stay.placeMatchKind !== "saved" || pendingEarlyArrivals.length === 0) return;
     const atMs = Date.parse(item.evidence.occurredAt);
@@ -1119,6 +1134,13 @@ function runLocationEnginePass(input: LocationEngineInput): { output: LocationEn
       if (pending.placeId !== stay.placeId || atMs < pending.anchorMs ||
         atMs - pending.anchorMs > input.config.savedPlaceArrivalCorroborationWindowMs) continue;
       pendingEarlyArrivals.splice(index--, 1);
+      // Never across an episode boundary or past the Visit's own departure, and
+      // never over presence a newer arrival already owns.
+      const departedAt = corroboratedArrivals.get(pending.visit.evidence.clientEvidenceId)?.departedAt;
+      if (departedAt && Date.parse(departedAt) <= atMs) continue;
+      if (item !== pending.anchor && brokenBetween(pending.anchor, item, pending.placeId)) continue;
+      if (stay.arrivalPresence && stay.arrivalPresenceFromAt &&
+        Date.parse(stay.arrivalPresenceFromAt) > Date.parse(pending.visit.evidence.occurredAt)) continue;
       stay.evidence.push(pending.visit);
       markArrivalPresence(stay, pending.visit);
       const completion = corroboratedArrivals.get(pending.visit.evidence.clientEvidenceId)?.completion;

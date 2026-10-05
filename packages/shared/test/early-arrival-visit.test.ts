@@ -125,4 +125,39 @@ describe("an arrival Visit iOS dates before the car arrives", () => {
     expect(stays).toEqual([expect.objectContaining({ startedAt: at(130), status: "open", stoppedAt: null })]);
     expect(stays[0].evidenceIds).toContain("arrival");
   });
+
+  // Review round 2: attachment never crosses an episode, outlives the Visit's departure or overrides newer presence.
+  const neighbour = { id: "10000000-0000-4000-8000-0000000000e2", name: "Neighbour", latitude: north(420), longitude: 0, radiusMeters: 300, loggingEnabled: true };
+  const exit = (id: string, seconds: number) => reading(id, seconds, null, { kind: "geofence_exit", savedPlaceId: HOME_ID });
+  const beside = () => [still("n0", -900, 420), still("n1", -600, 420), visit("arrival", 0)];
+  const approach = () => [away("approach-0", 20, 260), away("approach-1", 60, 200)];
+  const withNeighbour = (evidence: LocationEvidence[]) => compact(evidence, { savedPlaces: [...homecoming().value.savedPlaces, neighbour] });
+  const disabled = (value: LocationEngineInput): LocationEngineInput => ({ ...value, config: { ...value.config, savedPlaceVisitEarlyArrivalMaximumMs: -1 } });
+
+  it("keeps a valid later Home visit when the deferred Visit's own departure came before it", () => {
+    const value = withNeighbour([...beside(), visit("completion", 0, { endedAt: at(150) }), ...approach(), enter("anchor", 100),
+      visit("real-return", 220, { endedAt: at(4_000) }), still("home-0", 240)]);
+    const expected = [expect.objectContaining({ startedAt: at(220), stoppedAt: at(4_000) })];
+    expect(homeStays(disabled(value))).toEqual(expected);
+    expect(homeStays(value)).toEqual(expected);
+  });
+
+  it("does not attach an early arrival across Home's exit after its anchor was set aside", () => {
+    const value = withNeighbour([...beside(), ...approach(), enter("anchor", 100), exit("departure", 160), still("home-0", 300)]);
+    expect(homeStays(disabled(value))).toEqual([]);
+    expect(homeStays(value)).toEqual([]);
+  });
+
+  it.each([
+    ["after a set-aside anchor", () => withNeighbour([...beside(), ...approach(), enter("anchor", 100), visit("new-arrival", 220),
+      visit("new-completion", 220, { endedAt: at(900) }), still("home-0", 240), still("home-late-0", 3_600), still("home-late-1", 4_000)])],
+    ["sharing the anchor's time", () => compact([visit("old-arrival", 0), away("approach", 20), visit("new-arrival", 120),
+      visit("new-completion", 120, { endedAt: at(900) }), still("anchor", 120), still("home-late-0", 3_600), still("home-late-1", 4_000)])]
+  ])("never lets an older early arrival lift a newer arrival's departure (%s)", (_label, build) => {
+    const value = build();
+    expect(homeStays(disabled(value))).toHaveLength(2);
+    const stays = homeStays(value);
+    expect(stays).toHaveLength(2);
+    expect(stays[0].stoppedAt).toBe(at(900));
+  });
 });
