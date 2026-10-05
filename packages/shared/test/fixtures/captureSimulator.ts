@@ -291,8 +291,19 @@ function simulatedMotion(
       record(atMs + settle, "stationary");
       addSpells(atMs + settle + 60_000, next - 60_000, "walking", 0.5, 10_000, 90_000);
       addSpells(atMs + settle + 60_000, next - 60_000, "unknown", 0.15, 20_000, 120_000);
+      for (let t = atMs + settle + between(60_000, 300_000); t < next - 60_000; t += between(120_000, 600_000)) {
+        spells.push({ atMs: t, lengthMs: between(5_000, 60_000), activity: "unknown" });
+      }
     }
   });
+  base.sort((a, b) => a.startMs - b.startMs);
+  // As on a real iPhone (5 Oct staging data): a brief unknown spell before most
+  // changes of activity, and stillness broken by unknown spells every few minutes.
+  const blips: MotionRecord[] = base.flatMap((item, index) => index > 0 && random() < 0.8
+    ? [{ startMs: Math.round(item.startMs - Math.min(between(3_000, 100_000), 0.8 * (item.startMs - base[index - 1].startMs))),
+      activity: "unknown" as MotionActivity, confidence: "high" as MotionConfidence }]
+    : []);
+  base.push(...blips.filter((blip) => !base.some((item) => item.startMs === blip.startMs)));
   base.sort((a, b) => a.startMs - b.startMs);
   const baseAt = (atMs: number) => [...base].reverse().find((item) => item.startMs <= atMs);
   // A spell interrupts what was going on, which then resumes.

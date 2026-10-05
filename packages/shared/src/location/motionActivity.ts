@@ -101,15 +101,20 @@ export function buildMotionTimeline(
       runs.push({ startMs: interval.fromMs, endMs: interval.toMs, movingMs: duration, byMode: { [mode]: duration } });
     }
   }
-  // Brief stillness joins two substantial runs (waiting to cross, an unknown
-  // spell mid-drive). A brief burst (crossing a room just before leaving) is
-  // never joined to a journey: it would move the journey's start or end.
+  // Movement interrupted only by indeterminate activity (iOS's brief unknown
+  // spells, as between walking to the car and driving) is one run. Brief
+  // confident stillness joins two substantial runs (waiting to cross); a brief
+  // burst beside stillness (crossing a room just before leaving) is never
+  // joined to a journey: it would move the journey's start or end.
+  const stillBetween = (fromMs: number, toMs: number) => intervals.some((interval) =>
+    interval.fromMs < toMs && interval.toMs > fromMs && interval.activity === "stationary" && interval.confidence !== "low");
   const raw: Run[] = [];
   let previousRun: Run | null = null;
   for (const run of runs) {
     const current = raw.at(-1);
-    if (current && previousRun && run.startMs - current.endMs <= bridge &&
-      previousRun.movingMs >= config.motionMinimumBlockMovingMs && run.movingMs >= config.motionMinimumBlockMovingMs) {
+    const gapMs = current ? run.startMs - current.endMs : Infinity;
+    if (current && previousRun && gapMs <= bridge && (!stillBetween(current.endMs, run.startMs) ||
+      previousRun.movingMs >= config.motionMinimumBlockMovingMs && run.movingMs >= config.motionMinimumBlockMovingMs)) {
       current.endMs = run.endMs;
       current.movingMs += run.movingMs;
       for (const [mode, ms] of Object.entries(run.byMode) as Array<[MotionTravelMode, number]>) {
@@ -120,17 +125,33 @@ export function buildMotionTimeline(
     }
     previousRun = run;
   }
-  const blocks = raw.filter((block) => block.movingMs >= config.motionMinimumBlockMovingMs).map((block) => {
-    const before = intervals.find((interval) => interval.toMs === block.startMs);
-    const after = intervals.find((interval) => interval.fromMs === block.endMs);
-    // Only confident stillness observes a boundary.
-    const still = (interval: MotionInterval | undefined) => interval?.activity === "stationary" && interval.confidence !== "low";
-    return {
-      ...block,
-      onsetObserved: still(before) && block.startMs - coverageFromMs > bridge,
-      stopObserved: still(after) && coverageToMs - block.endMs > bridge
-    };
-  });
+  // Only confident stillness observes a boundary. iOS reports brief `unknown`
+  // spells (seconds to a minute or so) around most changes of activity, so up
+  // to `motionStillBridgeMs` of indeterminate activity next to the boundary is
+  // looked past; the first determinate interval beyond it must be stillness.
+  const indeterminate = (interval: MotionInterval) => interval.activity === "unknown" || interval.confidence === "low";
+  const stillBeside = (boundaryMs: number, direction: -1 | 1) => {
+    let index = direction < 0
+      ? intervals.findIndex((interval) => interval.toMs === boundaryMs)
+      : intervals.findIndex((interval) => interval.fromMs === boundaryMs);
+    let skippedMs = 0;
+    while (index >= 0 && index < intervals.length) {
+      const interval = intervals[index];
+      if (!indeterminate(interval)) return interval.activity === "stationary";
+      skippedMs += interval.toMs - interval.fromMs;
+      if (skippedMs > bridge) return false;
+      const next = index + direction;
+      if (next < 0 || next >= intervals.length ||
+        (direction < 0 ? intervals[next].toMs !== interval.fromMs : intervals[next].fromMs !== interval.toMs)) return false;
+      index = next;
+    }
+    return false;
+  };
+  const blocks = raw.filter((block) => block.movingMs >= config.motionMinimumBlockMovingMs).map((block) => ({
+    ...block,
+    onsetObserved: stillBeside(block.startMs, -1) && block.startMs - coverageFromMs > bridge,
+    stopObserved: stillBeside(block.endMs, 1) && coverageToMs - block.endMs > bridge
+  }));
   return { intervals, coverageFromMs, coverageToMs, blocks };
 }
 

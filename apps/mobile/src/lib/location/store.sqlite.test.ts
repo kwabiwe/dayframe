@@ -258,3 +258,16 @@ describe("Motion & Fitness upload batches",()=>{
   expect(states).toEqual({"fix-0":"acknowledged","fix-2":"acknowledged","fix-4":"acknowledged","motion-1":"rejected","motion-3":"rejected","motion-5":"rejected"});
  });
 });
+describe("Motion & Fitness local retention",()=>{
+ it("never lets frequent motion records displace uploaded location evidence",async()=>{
+  const key=`${owner.workspaceId}:${owner.userId}`;
+  const insert=db.prepare("insert into location_evidence_journal (client_evidence_id, account_key, occurred_at, expires_at, evidence_json, upload_state, inserted_at) values (?, ?, ?, ?, ?, 'acknowledged', ?)");
+  const now=Date.now(),expires=new Date(now+86_400_000).toISOString();
+  for(let i=0;i<4_900;i+=1)insert.run(`fix-${i}`,key,new Date(now-3_600_000+i).toISOString(),expires,JSON.stringify({kind:"significant_change"}),new Date(now).toISOString());
+  for(let i=0;i<600;i+=1)insert.run(`motion-${i}`,key,new Date(now-7_200_000+i).toISOString(),expires,JSON.stringify({kind:"motion_activity"}),new Date(now).toISOString());
+  await store.applyLocationRetention();
+  const count=(kind:string)=>Number(db.prepare(`select count(*) n from location_evidence_journal where json_extract(evidence_json,'$.kind') = ?`).get(kind)!.n);
+  expect(count("significant_change")).toBe(4_900);
+  expect(count("motion_activity")).toBe(600);
+ });
+});

@@ -55,6 +55,10 @@ import {
 const DATABASE_NAME = "dayframe-location-v2.db";
 const DATABASE_VERSION = 1;
 const MAX_LOCAL_EVIDENCE_ITEMS = 5_000;
+// Core Motion records arrive far more often than location (about 900 a day on
+// an iPhone left overnight), so they have their own cap and never displace
+// location evidence. Seven-day expiry normally bounds them first.
+const MAX_LOCAL_MOTION_ITEMS = 10_000;
 const ACTIVE_ACCOUNT_KEY = "active_account";
 const ACTIVE_DEVICE_KEY = "active_device";
 const ACTIVE_TIME_ZONE_KEY = "active_time_zone";
@@ -1332,13 +1336,15 @@ async function applyLocationRetentionUnsafe() {
   const db = await database();
   const now = new Date().toISOString();
   const expired = await db.runAsync("delete from location_evidence_journal where expires_at < ?", now);
-  const count = await db.getFirstAsync<{ count: number }>("select count(*) as count from location_evidence_journal");
-  const overflow = (count?.count ?? 0) - MAX_LOCAL_EVIDENCE_ITEMS;
-  if (overflow > 0) {
+  for (const [motion, cap] of [[false, MAX_LOCAL_EVIDENCE_ITEMS], [true, MAX_LOCAL_MOTION_ITEMS]] as const) {
+    const kind = `(json_extract(evidence_json, '$.kind') = 'motion_activity') = ${motion ? 1 : 0}`;
+    const count = await db.getFirstAsync<{ count: number }>(`select count(*) as count from location_evidence_journal where ${kind}`);
+    const overflow = (count?.count ?? 0) - cap;
+    if (overflow <= 0) continue;
     const result = await db.runAsync(
       `delete from location_evidence_journal where client_evidence_id in (
          select client_evidence_id from location_evidence_journal
-         where upload_state in ('acknowledged', 'rejected')
+         where upload_state in ('acknowledged', 'rejected') and ${kind}
          order by case upload_state when 'acknowledged' then 0 else 1 end, occurred_at
          limit ?
        )`,

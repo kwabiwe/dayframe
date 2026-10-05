@@ -553,3 +553,23 @@ describe("review round 3", () => {
     expect(motionQueryStartMs(caughtUp.cursor, t0)).toBe(Math.max(t0, t0 + 750 - 15 * 60_000));
   });
 });
+
+describe("real Core Motion: brief unknown spells around changes of activity", () => {
+  it("still times departure and arrival when iOS reports unknown for under two minutes beside them", () => {
+    const evidence = [...schoolRun(), ...motion([
+      [0, "stationary"], [66.3, "unknown"], [67, "automotive"], [70.5, "automotive"], [74, "automotive"],
+      [79.8, "unknown"], [80.3, "stationary"], [81.5, "unknown"], [81.6, "stationary"]
+    ], 125)];
+    const [commute] = commutesOf(evidence);
+    expect(minutes(staysOf(evidence)[0].stoppedAt)).toBe(67);
+    expect(minutes(commute.startedAt)).toBe(67);
+    expect(minutes(commute.stoppedAt)).toBe(79.8);
+  });
+
+  it("does not look past a longer unknown spell", () => {
+    const evidence = [...schoolRun(), ...motion([
+      [0, "stationary"], [64, "unknown"], [67, "automotive"], [79.8, "stationary"]
+    ], 125)];
+    expect(minutes(staysOf(evidence)[0].stoppedAt)).toBe(60);
+  });
+});
