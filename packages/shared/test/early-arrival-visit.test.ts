@@ -76,4 +76,53 @@ describe("an arrival Visit iOS dates before the car arrives", () => {
     expect(home).toMatchObject({ status: "open", stoppedAt: null });
     expect(home.startedAt <= at(arrival + 2)).toBe(true);
   });
+
+  // Review round 1.
+  const visit = (id: string, seconds: number, patch: Partial<LocationEvidence> = {}) =>
+    reading(id, seconds, 6, { kind: "visit", horizontalAccuracyMeters: 8, speedMetersPerSecond: null, metadata: { visitDepartureOpen: true }, ...patch });
+  const enter = (id: string, seconds: number) => reading(id, seconds, null, { kind: "geofence_enter", savedPlaceId: HOME_ID });
+  const away = (id: string, seconds: number, metres = 300) => reading(id, seconds, metres, { speedMetersPerSecond: 10 });
+  const still = (id: string, seconds: number, metres = 6) => reading(id, seconds, metres, { speedMetersPerSecond: 0 });
+  const compact = (evidence: LocationEvidence[], patch: Partial<LocationEngineInput> = {}): LocationEngineInput => ({
+    ...homecoming().value, processingAt: at(7_200), evidence, ...patch
+  });
+
+  it("defers every early Visit that shares an anchor, never giving one presence at its own time", () => {
+    const stays = homeStays(compact([visit("arrival-1", 0), visit("arrival-2", 10), away("approach", 20), enter("anchor", 120)]));
+    expect(stays.length).toBeGreaterThan(0);
+    expect(stays.every((stay) => stay.startedAt >= at(120))).toBe(true);
+  });
+
+  it("does not defer a Visit whose own departure came before the anchor onto a later arrival", () => {
+    const stays = homeStays(compact([visit("arrival-1", 0), visit("completion-1", 0, { endedAt: at(60) }), away("approach", 20),
+      visit("arrival-2", 110), still("anchor", 120)]));
+    expect(stays.some((stay) => stay.evidenceIds.includes("arrival-2"))).toBe(true);
+  });
+
+  it("keeps a stay's ID when an early arrival's broad completion is delivered later", () => {
+    const evidence = [still("inside-old-first", -800), still("inside-old-last", -400), visit("arrival", 0), away("approach", 20), enter("anchor", 120)];
+    const [before] = homeStays(compact(evidence));
+    const [after] = homeStays(compact([...evidence, visit("completion", 0, { endedAt: at(3_600), horizontalAccuracyMeters: 94, latitude: north(140) })]));
+    expect(after.clientSegmentId).toBe(before.clientSegmentId);
+  });
+
+  it("leaves an episode the broad-Visit path already supports as it was", () => {
+    const evidence = [visit("arrival", 0), visit("completion", 0, { endedAt: at(4_200), horizontalAccuracyMeters: 94 }),
+      still("slow-away", 20, 150), still("anchor", 170, 8), still("early-2", 230, 8), still("late-1", 3_600, 8), still("late-2", 3_900, 8)];
+    const engine = runLocationEngine(compact(evidence));
+    const [home] = engine.segmentUpserts.filter((segment): segment is StaySegment => segment.kind === "stay" && segment.placeId === HOME_ID);
+    expect(home.evidenceIds[0]).toBe("arrival");
+  });
+
+  it("attaches at the next evidence at Home when another saved stay sets the entry aside", () => {
+    // A neighbouring saved place's stay is still open when Home's entry arrives, so the entry is skipped; the
+    // first inside fix closes it and the early Visit joins the Home stay there.
+    const neighbour = { id: "10000000-0000-4000-8000-0000000000e2", name: "Neighbour", latitude: north(420), longitude: 0, radiusMeters: 300, loggingEnabled: true };
+    const evidence = [still("n0", -900, 420), still("n1", -600, 420), visit("arrival", 0), away("approach-0", 20, 260), away("approach-1", 60, 200),
+      enter("anchor", 100), still("home-0", 130, 8)];
+    const stays = runLocationEngine(compact(evidence, { savedPlaces: [...homecoming().value.savedPlaces, neighbour] })).segmentUpserts
+      .filter((segment): segment is StaySegment => segment.kind === "stay" && segment.placeId === HOME_ID);
+    expect(stays).toEqual([expect.objectContaining({ startedAt: at(130), status: "open", stoppedAt: null })]);
+    expect(stays[0].evidenceIds).toContain("arrival");
+  });
 });
