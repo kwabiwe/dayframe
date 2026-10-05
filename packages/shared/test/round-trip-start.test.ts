@@ -96,17 +96,19 @@ function shortReturn(extra: (stopAt: number) => LocationEvidence[] = () => []) {
 
 /**
  * A 2 km round trip whose return is seen only by Home's geofence entry (its
- * arrival Visit is dated before the last fixes away), with the first accurate
- * still fix at Home `stillAfterMinutes` later.
+ * arrival Visit is dated `visitLeadMinutes` before the last fixes away), with
+ * the first accurate still fix at Home `stillAfterMinutes` later. A Visit
+ * dated up to about two minutes early is attached at the entry, so the Home
+ * stay begins on time; one dated earlier stays contradicted.
  */
-function lateReturn(stillAfterMinutes: number) {
+function lateReturn(stillAfterMinutes: number, visitLeadMinutes = 2) {
   const evidence: LocationEvidence[] = [e("home-0", 0, 0, { speedMetersPerSecond: 0 }), e("home-1", 10, 0, { speedMetersPerSecond: 0 }),
     e("home-2", 20, 0, { speedMetersPerSecond: 0 }), geofence("home-exit", 30.2, "geofence_exit")];
   let minutes = 30.3;
   for (let metres = 200; metres <= 2_000; metres += 75, minutes += 75 / 11 / 60) evidence.push(e(`out-${metres}`, minutes, metres));
   for (let metres = 1_925; metres >= 200; metres -= 75, minutes += 75 / 11 / 60) evidence.push(e(`back-${metres}`, minutes, metres));
   const backAt = minutes;
-  evidence.push({ ...homeVisit("early-visit", backAt - 2), receivedAt: at(backAt + 5) }, geofence("home-enter", backAt + 0.3, "geofence_enter"),
+  evidence.push({ ...homeVisit("early-visit", backAt - visitLeadMinutes), receivedAt: at(backAt + 5) }, geofence("home-enter", backAt + 0.3, "geofence_enter"),
     e("home-3", backAt + stillAfterMinutes, 0, { speedMetersPerSecond: 0 }), e("home-4", backAt + stillAfterMinutes + 10, 0, { speedMetersPerSecond: 0 }),
     e("home-5", backAt + stillAfterMinutes + 20, 0, { speedMetersPerSecond: 0 }));
   return { value: input(evidence, backAt + stillAfterMinutes + 120), backAt };
@@ -224,8 +226,15 @@ describe("the start of a same-place round trip", () => {
     expect(Date.parse(trips[0].stoppedAt!)).toBeLessThanOrEqual(Date.parse(at(backAt + 2)));
   });
 
-  it("claims no stationary Home time when the Home stay begins half an hour after the return (review finding)", () => {
+  it("starts the Home stay at the entry and keeps the whole round trip when the return Visit is dated just before the last fixes away", () => {
     const { value, backAt } = lateReturn(30);
+    const stays = runLocationEngine(value).segmentUpserts.filter((segment) => segment.kind === "stay");
+    expect(stays.at(-1)!.startedAt).toBe(at(backAt + 0.3));
+    expect(times(commutes(value))).toEqual([[at(30.2), at(backAt + 0.3), 0]]);
+  });
+
+  it("claims no stationary Home time when the Home stay begins half an hour after the return (review finding)", () => {
+    const { value, backAt } = lateReturn(30, 5);
     const stays = runLocationEngine(value).segmentUpserts.filter((segment) => segment.kind === "stay");
     // The Home stay does begin late here, so a trip to it would include 30 minutes at Home.
     expect(stays.at(-1)!.startedAt >= at(backAt + 29)).toBe(true);
@@ -234,7 +243,7 @@ describe("the start of a same-place round trip", () => {
 
   it("claims no stationary Home time when a far still outlier and its significant-change mirror follow the return (review finding)", () => {
     // The mirror repeats the same observation at whole-second time; it is not a second fix confirming movement.
-    const { value, backAt } = lateReturn(30);
+    const { value, backAt } = lateReturn(30, 5);
     const stray = e("stray-after-return", backAt + 15, 660, { speedMetersPerSecond: 0 });
     const mirror: LocationEvidence = { ...stray, clientEvidenceId: "stray-mirror", kind: "significant_change", speedMetersPerSecond: null, isSimulated: null,
       occurredAt: new Date(Math.floor(Date.parse(stray.occurredAt) / 1_000) * 1_000).toISOString() };
@@ -243,7 +252,7 @@ describe("the start of a same-place round trip", () => {
   });
 
   it("claims no stationary Home time when a stray fix near Home follows the return (review finding)", () => {
-    const { value, backAt } = lateReturn(30);
+    const { value, backAt } = lateReturn(30, 5);
     const evidence = [...value.evidence, e("stray-after-return", backAt + 15, 140, { speedMetersPerSecond: 0 })];
     expect(commutes({ ...value, evidence }).filter((trip) => Date.parse(trip.stoppedAt!) > Date.parse(at(backAt + 2)))).toEqual([]);
   });
@@ -310,14 +319,18 @@ describe("the start of a same-place round trip", () => {
     expect(Math.abs(Date.parse(trips[0].stoppedAt!) - returned)).toBeLessThanOrEqual(2 * 60_000);
   });
 
-  // In seeds 187 and 642 the return Visit is dated before the last fixes away and the Home stay begins over half an
-  // hour after the car stops; no trip may claim that time (review finding).
-  it.each([187, 642])("claims no stationary Home time in a simulated outing whose Home stay begins late (seed %i)", (seed) => {
+  // In seeds 187 and 642 the return Visit is dated before the last fixes away. It is attached at the arrival, so the
+  // Home stay begins when the car stops and the outing is one whole round trip (review finding).
+  it.each([187, 642])("keeps the whole outing when its return Visit is dated before the last fixes away (seed %i)", (seed) => {
     const sim = simulate(outing, seed);
+    const departure = sim.truth.stays[0].to;
     const returned = sim.truth.stays[3].from;
     const stays = runLocationEngine(sim.input()).segmentUpserts.filter((segment) => segment.kind === "stay");
-    expect(Date.parse(stays.at(-1)!.startedAt) - returned).toBeGreaterThan(30 * 60_000);
-    expect(commutes(sim.input()).filter((trip) => Date.parse(trip.stoppedAt!) > returned + 2 * 60_000)).toEqual([]);
+    expect(Math.abs(Date.parse(stays.at(-1)!.startedAt) - returned)).toBeLessThanOrEqual(2 * 60_000);
+    const trips = commutes(sim.input()).filter((trip) => Date.parse(trip.stoppedAt!) > departure);
+    expect(trips).toHaveLength(1);
+    expect(Math.abs(Date.parse(trips[0].startedAt) - departure)).toBeLessThanOrEqual(2 * 60_000);
+    expect(Math.abs(Date.parse(trips[0].stoppedAt!) - returned)).toBeLessThanOrEqual(2 * 60_000);
   });
 });
 
@@ -797,13 +810,20 @@ describe("departures after a finished walk (review round 9)", () => {
     expect(bounds(value)).toEqual([[at(449), at(452.5)]]);
   });
 
-  it.each(["entry", "visit", "broad"] as const)("starts a three-minute loop at Home presence, also seven hours later (%s)", (kind) => {
+  it.each(["entry", "broad"] as const)("starts a three-minute loop at Home presence, also seven hours later (%s)", (kind) => {
     expect(bounds(loop(kind, 3))).toEqual([[at(39), at(42)]]);
     expect(bounds(later(loop(kind, 3), 35, 400))).toEqual([[at(439), at(442)]]);
   });
 
-  it.each(["entry", "visit", "broad"] as const)("claims no commute for a loop under three minutes after Home presence (%s)", (kind) => {
+  it.each(["entry", "broad"] as const)("claims no commute for a loop under three minutes after Home presence (%s)", (kind) => {
     expect(bounds(loop(kind, 2.8))).toEqual([]);
+  });
+
+  // With #225: iOS reports no Visit for seconds at Home, so a Visit followed at once by a loop back within three
+  // minutes is that loop's early-dated arrival, attached at its end; nothing shows the walk ended at Home, so the
+  // walk and the loop are one excursion.
+  it.each([3, 2.8])("treats a Visit followed at once by a %s-minute loop as the loop's early-dated arrival", (minutes) => {
+    expect(bounds(loop("visit", minutes))).toEqual([[at(20), at(39 + minutes)]]);
   });
 
   // Review round 15: a loop whose outbound leg went uncaptured, and state snapshots, after a walk that approached Home.
@@ -820,9 +840,15 @@ describe("departures after a finished walk (review round 9)", () => {
   };
 
   it.each([
-    ["entry", 3], ["entry", 2.8], ["visit", 3], ["visit", 2.8], ["broad", 3], ["broad", 2.8]
+    ["entry", 3], ["entry", 2.8], ["broad", 3], ["broad", 2.8]
   ] as const)("starts an inbound-only loop at Home presence, never at the earlier walk (%s, %s minutes)", (kind, minutes) => {
     expect(bounds(inboundLoop(kind, minutes))).toEqual(minutes < 3 ? [] : [[at(39), at(42)]]);
+  });
+
+  // With #225, as for the loop above: a Visit followed at once by an approach and an entry within three minutes is
+  // that return's early-dated arrival, so nothing shows the walk ended at Home and the walk and the loop are one excursion.
+  it.each([3, 2.8])("treats a Visit followed at once by an inbound-only %s-minute loop as its early-dated arrival", (minutes) => {
+    expect(bounds(inboundLoop("visit", minutes))).toEqual([[at(20), at(39 + minutes)]]);
   });
 
   it.each([3, 2.8])("starts it there when Home is a learned place too (%s minutes)", (minutes) => {
@@ -899,10 +925,17 @@ describe("departures after a finished walk (review round 9)", () => {
     expect(bounds(coarseRoute(kind, silence, true))).toEqual([[at(49), at(52.5 + silence)]]);
   });
 
+  // With #225, as for the loops above: the Home Visit followed at once by a 168-second loop back is that loop's
+  // early-dated arrival, so the loop joins the silence before it. A mirror either side of the stray's still copy changes
+  // nothing but the silence's midpoint, by half its offset.
   it.each([-5, -4, -2, -1, 1, 2, 5])("does not let a speedless mirror %i s from a still fix's copy fake movement", (offset) => {
-    // Without the mirror the Home Visit starts a 168-second loop, which claims no commute.
-    expect(bounds(mirroredStray(null))).toEqual([]);
-    expect(bounds(mirroredStray(offset))).toEqual([]);
+    const [base, ...others] = commutes(mirroredStray(null));
+    expect(others).toEqual([]);
+    expect(base.stoppedAt).toBe(at(23.9));
+    const trips = commutes(mirroredStray(offset));
+    expect(trips).toHaveLength(1);
+    expect(trips[0].stoppedAt).toBe(base.stoppedAt);
+    expect(Math.abs(Date.parse(trips[0].startedAt) - Date.parse(base.startedAt))).toBeLessThanOrEqual(2_500);
   });
 
   it.each([[false, false], [true, false], [false, true], [true, true]])(

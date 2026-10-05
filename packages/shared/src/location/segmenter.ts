@@ -28,6 +28,8 @@ const SOURCE_PRECEDENCE: Record<LocationEvidence["kind"], number> = {
 };
 
 type WorkingStay = {
+  /** Evidence attached as support that never defines the stay's ID (early-dated arrivals and their completions). */
+  identityExcluded?: Set<ClassifiedEvidence>;
   key: string;
   placeMatchKind: StaySegment["placeMatchKind"];
   placeId: string | null;
@@ -59,6 +61,10 @@ type WorkingStay = {
   arrivalPresence?: boolean;
   /** Departure iOS reported for that arrival's Visit, if completed; presence never runs past it. */
   arrivalPresenceUntilAt?: string | null;
+  /** Arrival time of the Visit whose corroborated arrival owns `arrivalPresence`. */
+  arrivalPresenceFromAt?: string;
+  /** Set while that Visit is an early arrival attached at its observed arrival. */
+  arrivalPresenceDeferred?: boolean;
 };
 
 function pointFor(evidence: LocationEvidence) {
@@ -484,6 +490,12 @@ type CorroboratedArrival = {
   departedAt: string | null;
   /** That callback when it joins with the arrival; null when the corroborated broad-Visit path supports it instead. */
   completion: ClassifiedEvidence | null;
+  /**
+   * For an early-dated arrival, the first evidence at the place after the
+   * approach (its entry or a strong inside fix). The Visit joins the stay there
+   * instead of at its own time, which precedes the device's arrival.
+   */
+  observedArrival?: ClassifiedEvidence;
 };
 
 /**
@@ -537,6 +549,29 @@ function corroboratedVisitArrivals(
     }
     return true;
   };
+  // An arrival Visit dated before the device arrived: every contradiction after
+  // it is an accurate fix away within `savedPlaceVisitEarlyArrivalMaximumMs`
+  // (the approach; never the place's exit), and the place's entry or a strong
+  // inside fix follows the last of them within that time. That evidence is
+  // where the device was observed to arrive. Null when the Visit is not one.
+  const earlyArrivalAnchor = (visit: ClassifiedEvidence, placeId: string, corroborates: (other: ClassifiedEvidence) => boolean) => {
+    const arrivalMs = Date.parse(visit.evidence.occurredAt);
+    const limitMs = arrivalMs + input.config.savedPlaceVisitEarlyArrivalMaximumMs;
+    let approached = false;
+    for (let index = order.get(visit)! + 1; index < accepted.length; index += 1) {
+      const other = accepted[index];
+      if (Date.parse(other.evidence.occurredAt) > limitMs) break;
+      if (other.evidence.deviceId !== visit.evidence.deviceId || companionOf(other, visit)) continue;
+      if (other.evidence.kind === "geofence_exit" && other.evidence.savedPlaceId === placeId) return null;
+      if (contradicts(other, placeId)) {
+        if (other.evidence.kind === "visit") return null;
+        approached = true;
+        continue;
+      }
+      if (approached && corroborates(other)) return other;
+    }
+    return null;
+  };
   const arrivals = new Map<string, CorroboratedArrival>();
   const consumedCompletionIds = new Set<string>();
   for (const item of accepted) {
@@ -545,11 +580,13 @@ function corroboratedVisitArrivals(
     if (e.kind !== "visit" || e.endedAt || e.isSimulated === true || !placeId || !accurateCoordinate(item, input) ||
       !item.match!.candidates.some((candidate) => candidate.id === placeId && candidate.matchClass === "strong")) continue;
     const arrivalMs = Date.parse(e.occurredAt);
-    if (!accepted.some((other) => other !== item && other.evidence.deviceId === e.deviceId &&
-      Math.abs(Date.parse(other.evidence.occurredAt) - arrivalMs) <= windowMs &&
-      ((other.evidence.kind === "geofence_enter" && other.evidence.savedPlaceId === placeId) ||
-        strongSavedPoint(other, placeId, input)) &&
-      sameEpisode(item, other, placeId))) continue;
+    const corroborates = (other: ClassifiedEvidence) => other !== item && other.evidence.deviceId === e.deviceId &&
+      ((other.evidence.kind === "geofence_enter" && other.evidence.savedPlaceId === placeId) || strongSavedPoint(other, placeId, input));
+    const observedArrival = accepted.some((other) => corroborates(other) &&
+      Math.abs(Date.parse(other.evidence.occurredAt) - arrivalMs) <= windowMs && sameEpisode(item, other, placeId))
+      ? undefined
+      : earlyArrivalAnchor(item, placeId, corroborates);
+    if (observedArrival === null) continue;
     const companions = completions.get(`${e.deviceId}:${e.occurredAt}`) ?? [];
     const usable = (completion: ClassifiedEvidence) => {
       const departedMs = Date.parse(completion.evidence.endedAt!);
@@ -566,9 +603,14 @@ function corroboratedVisitArrivals(
       Date.parse(a.evidence.endedAt!) - Date.parse(b.evidence.endedAt!) ||
       a.evidence.clientEvidenceId.localeCompare(b.evidence.clientEvidenceId))[0] ?? null;
     const inferred = selected != null && corroboratedVisits.has(selected.evidence.clientEvidenceId);
+    // An early-dated arrival must still be under way at its observed arrival (a Visit already departed is an
+    // earlier visit), and an episode the broad-Visit path already supports keeps that path.
+    if (observedArrival && (companions.some((companion) => corroboratedVisits.has(companion.evidence.clientEvidenceId)) ||
+      selected != null && Date.parse(selected.evidence.endedAt!) <= Date.parse(observedArrival.evidence.occurredAt))) continue;
     arrivals.set(e.clientEvidenceId, {
       departedAt: selected?.evidence.endedAt ?? null,
-      completion: selected && !inferred ? selected : null
+      completion: selected && !inferred ? selected : null,
+      ...(observedArrival ? { observedArrival } : {})
     });
     // Only a selected companion on the corroborated broad-Visit path is segmented as before.
     for (const companion of companions) if (companion !== selected || !inferred) consumedCompletionIds.add(companion.evidence.clientEvidenceId);
@@ -676,8 +718,10 @@ function stayFromWorking(
       : working.evidence
   );
   const evidenceIds = working.evidence.map(({ evidence }) => evidence.clientEvidenceId);
-  const firstEvidenceId = evidenceIds[0];
-  const lastEvidenceId = evidenceIds.at(-1)!;
+  const identityEvidence = working.identityExcluded
+    ? working.evidence.filter((item) => !working.identityExcluded!.has(item)) : working.evidence;
+  const firstEvidenceId = (identityEvidence[0] ?? working.evidence[0]).evidence.clientEvidenceId;
+  const lastEvidenceId = (identityEvidence.at(-1) ?? working.evidence.at(-1)!).evidence.clientEvidenceId;
   const simulated = working.evidence.some(({ evidence }) => evidence.isSimulated);
   const highQualityCount = working.evidence.filter(
     ({ evidence }) =>
@@ -1299,6 +1343,8 @@ function runLocationEnginePass(input: LocationEngineInput): { output: LocationEn
     if (!arrival || stay.placeMatchKind !== "saved" || item.match?.placeId !== stay.placeId) return;
     stay.arrivalPresence = true;
     stay.arrivalPresenceUntilAt = arrival.departedAt;
+    stay.arrivalPresenceFromAt = item.evidence.occurredAt;
+    stay.arrivalPresenceDeferred = false;
     const completion = arrival.completion;
     if (!completion || stay.evidence.includes(completion)) return;
     // The arrival's own completed callback joins here, whatever its delivery
@@ -1320,6 +1366,75 @@ function runLocationEnginePass(input: LocationEngineInput): { output: LocationEn
     stay.stopUpperBoundAt = endedAt;
     stay.continuityStatus = "supported_by_visit";
     if (!accurateCoordinate(completion, input)) stay.inferredContinuity = true;
+  };
+  // Early-dated arrivals join a stay of their place at the evidence that showed
+  // the device arriving (their anchor), never at their own earlier time. If
+  // another branch set the anchor aside (another saved stay was active), the
+  // next evidence there within the corroboration window takes its place. They
+  // and their completions never define the stay's identity, so its ID does not
+  // change when the completion is delivered later.
+  const pendingEarlyArrivals = accepted.flatMap((item) => {
+    const anchor = corroboratedArrivals.get(item.evidence.clientEvidenceId)?.observedArrival;
+    return item.evidence.kind === "visit" && anchor && item.match?.placeId
+      ? [{ visit: item, placeId: item.match.placeId, anchor, anchorMs: Date.parse(anchor.evidence.occurredAt) }] : [];
+  });
+  const earlyArrivals = new Set(pendingEarlyArrivals.map(({ visit }) => visit));
+  // Whether the device left or was elsewhere between two items, in accepted
+  // order: the place's exit, or an accurate fix or Visit not matching it.
+  const brokenBetween = (from: ClassifiedEvidence, to: ClassifiedEvidence, placeId: string) => {
+    for (let index = acceptedOrder.get(from)! + 1; index < acceptedOrder.get(to)!; index += 1) {
+      const between = accepted[index].evidence;
+      if (between.kind === "geofence_exit" && between.savedPlaceId === placeId) return true;
+      if ((between.kind === "standard_location" || between.kind === "significant_change" || between.kind === "visit") &&
+        accurateCoordinate(accepted[index], input) &&
+        !(accepted[index].match?.candidates.some((candidate) => candidate.id === placeId && candidate.matchClass !== "outside") ?? false)) return true;
+    }
+    return false;
+  };
+  const attachEarlyArrival = (stay: WorkingStay, item: ClassifiedEvidence) => {
+    if (stay.placeMatchKind !== "saved" || pendingEarlyArrivals.length === 0) return;
+    const atMs = Date.parse(item.evidence.occurredAt);
+    for (let index = 0; index < pendingEarlyArrivals.length; index += 1) {
+      const pending = pendingEarlyArrivals[index];
+      if (pending.placeId !== stay.placeId || atMs < pending.anchorMs ||
+        atMs - pending.anchorMs > input.config.savedPlaceArrivalCorroborationWindowMs) continue;
+      pendingEarlyArrivals.splice(index--, 1);
+      // Never across an episode boundary or past the Visit's own departure, and
+      // never over presence a newer arrival already owns.
+      const departedAt = corroboratedArrivals.get(pending.visit.evidence.clientEvidenceId)?.departedAt;
+      if (departedAt && Date.parse(departedAt) <= atMs) continue;
+      if (item !== pending.anchor && brokenBetween(pending.anchor, item, pending.placeId)) continue;
+      // A newer Visit already in the stay, completed or arrival-only, owns its
+      // episode, as does a newer Visit there seen since the early one (one
+      // corroborated for the place, or an accurate one matching it, such as
+      // another deferred arrival), even if it could not join (broad) or came
+      // before the stay began.
+      const pendingMs = Date.parse(pending.visit.evidence.occurredAt);
+      if (stay.evidence.some((joined) => joined.evidence.kind === "visit" && Date.parse(joined.evidence.occurredAt) > pendingMs)) continue;
+      if (accepted.slice(acceptedOrder.get(pending.visit)! + 1, acceptedOrder.get(item)! + 1).some((seen) =>
+        seen.evidence.kind === "visit" && Date.parse(seen.evidence.occurredAt) > pendingMs &&
+        (arrivalAnalysis.corroboratedVisits.get(seen.evidence.clientEvidenceId)?.savedPlaceId === pending.placeId ||
+          accurateCoordinate(seen, input) &&
+          (seen.match?.candidates.some((candidate) => candidate.id === pending.placeId && candidate.matchClass !== "outside") ?? false)))) continue;
+      if (stay.arrivalPresence && stay.arrivalPresenceFromAt && Date.parse(stay.arrivalPresenceFromAt) > pendingMs) continue;
+      stay.evidence.push(pending.visit);
+      markArrivalPresence(stay, pending.visit);
+      if (stay.arrivalPresenceFromAt === pending.visit.evidence.occurredAt) stay.arrivalPresenceDeferred = true;
+      const completion = corroboratedArrivals.get(pending.visit.evidence.clientEvidenceId)?.completion;
+      stay.identityExcluded ??= new Set();
+      stay.identityExcluded.add(pending.visit);
+      if (completion) stay.identityExcluded.add(completion);
+    }
+  };
+  // iOS reports one Visit at a time, so presence an older early arrival lent the
+  // stay ends by the departure of a newer Visit that joins it later.
+  const capDeferredPresence = (stay: WorkingStay, item: ClassifiedEvidence) => {
+    if (!stay.arrivalPresenceDeferred || item.evidence.kind !== "visit" || !stay.arrivalPresenceFromAt ||
+      Date.parse(item.evidence.occurredAt) <= Date.parse(stay.arrivalPresenceFromAt)) return;
+    const departedAt = item.evidence.endedAt ?? arrivalAnalysis.corroboratedVisits.get(item.evidence.clientEvidenceId)?.departedAt;
+    if (departedAt && (stay.arrivalPresenceUntilAt == null || Date.parse(departedAt) < Date.parse(stay.arrivalPresenceUntilAt))) {
+      stay.arrivalPresenceUntilAt = departedAt;
+    }
   };
   const completed: WorkingStay[] = [];
   let active: WorkingStay | null = null;
@@ -1404,6 +1519,7 @@ function runLocationEnginePass(input: LocationEngineInput): { output: LocationEn
       if (!previous?.evidence.endedAt || Date.parse(evidence.endedAt) > Date.parse(previous.evidence.endedAt)) visits.set(key, item);
     }
     if (consumed) continue;
+    if (earlyArrivals.has(item)) continue;
     // Registration/overlapping-region context must not split a quiet saved stay before
     // its next actual observation can resolve continuity. It remains in the raw journal.
     if (active?.placeMatchKind === "saved" && evidence.kind.startsWith("geofence_") &&
@@ -1426,6 +1542,10 @@ function runLocationEnginePass(input: LocationEngineInput): { output: LocationEn
     const canApplyCorroboratedSupport = corroboratedSupport != null &&
       (active == null || !sameSavedActiveEpisode ||
         Date.parse(active.startedAt) >= Date.parse(corroboratedSupport.arrivedAt));
+    // A newer corroborated Visit there still bounds presence an early arrival
+    // lent the running stay, even when it cannot join it (broad, and arriving
+    // after the stay began); the stay's arrival is unchanged.
+    if (active && sameSavedActiveEpisode) capDeferredPresence(active, item);
     if (point && (active?.placeMatchKind === "saved" || item.match?.kind === "saved" || item.match?.kind === "learned") &&
         !evidence.kind.startsWith("geofence_") && !accurateCoordinate(item, input) && !canApplyCorroboratedSupport) continue;
 
@@ -1499,6 +1619,7 @@ function runLocationEnginePass(input: LocationEngineInput): { output: LocationEn
         (evidence.speedMetersPerSecond ?? item.impliedSpeedMetersPerSecond ?? 0) >= input.config.movementSpeedThresholdMps;
       if (itemKey === "unknown" && moving && evidence.kind !== "visit") continue;
       active = startStay(item);
+      attachEarlyArrival(active, item);
       continue;
     }
 
@@ -1542,6 +1663,8 @@ function runLocationEnginePass(input: LocationEngineInput): { output: LocationEn
     if (sameKnownPlace || sameUnknown || sameEdgeCluster) {
       active.evidence.push(item);
       markArrivalPresence(active, item);
+      capDeferredPresence(active, item);
+      attachEarlyArrival(active, item);
       if (!active.pendingExit) active.outside = [];
       if (strongSavedPoint(item, active.placeId, input)) active.lastStrongInside = item;
       if (canApplyCorroboratedSupport) {
@@ -1596,6 +1719,7 @@ function runLocationEnginePass(input: LocationEngineInput): { output: LocationEn
       closeAtCorroboratedDeparture(active, evidence.occurredAt, input.config);
       completed.push(active);
       active = startStay(item);
+      attachEarlyArrival(active, item);
       continue;
     }
 

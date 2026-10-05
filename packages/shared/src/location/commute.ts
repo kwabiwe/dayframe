@@ -736,12 +736,16 @@ export function deriveCommutes(
     // A journey starts at the latest evidence of being at its origin. In a
     // same-place round trip, a return's early-dated arrival Visit or a
     // re-reported exit used to become the "departure", shrinking the trip to
-    // seconds so it was discarded.
+    // seconds so it was discarded. Evidence the destination stay owns (an
+    // arrival Visit iOS dated before the car stopped, attached at the observed
+    // arrival) is never origin presence, nor the round trip's return.
+    const ownedByDestination = new Set(to.evidenceIds);
+    const gapEvidence = boundaryEvidence.filter((item) => !ownedByDestination.has(item.evidence.clientEvidenceId));
     const fromEvidence = from.evidenceIds.flatMap((id) => {
       const item = evidenceById.get(id);
       return item && Date.parse(item.evidence.occurredAt) <= originalStartedAtMs ? [item] : [];
     }).sort((a, b) => Date.parse(a.evidence.occurredAt) - Date.parse(b.evidence.occurredAt));
-    const latestFromSupport = latestDepartureSupport(from, fromEvidence, boundaryEvidence, config, farFrom, snapshots,
+    const latestFromSupport = latestDepartureSupport(from, fromEvidence, gapEvidence, config, farFrom, snapshots,
       stoppedAtMs, sameKnownEndpoint(from, to));
     let startedAtMs = latestFromSupport
       ? Date.parse(latestFromSupport.evidence.occurredAt)
@@ -753,9 +757,9 @@ export function deriveCommutes(
     // (another outing before the stay began) is judged on its own route.
     if (sameKnownEndpoint(from, to)) {
       for (
-        let returnedMs = observedReturnMs(to, boundaryEvidence, config, latestFromSupport ? startedAtMs : Number.NEGATIVE_INFINITY, snapshots);
+        let returnedMs = observedReturnMs(to, gapEvidence, config, latestFromSupport ? startedAtMs : Number.NEGATIVE_INFINITY, snapshots);
         returnedMs != null && stoppedAtMs - returnedMs > config.savedPlaceMinimumDwellMs;
-        returnedMs = observedReturnMs(to, boundaryEvidence, config, returnedMs, snapshots)
+        returnedMs = observedReturnMs(to, gapEvidence, config, returnedMs, snapshots)
       ) startedAtMs = returnedMs;
     }
     const fromHasInferredBoundary = options.inferredBoundaryStayIds?.has(from.clientSegmentId) === true;

@@ -17,6 +17,7 @@ export type LocationEngineConfig = {
   savedPlaceOpenVisitPresenceMaximumMs: number;
   savedPlaceVisitDepartureLagMaximumMs: number;
   savedPlaceArrivalCorroborationWindowMs: number;
+  savedPlaceVisitEarlyArrivalMaximumMs: number;
   savedPlaceArrivalMinimumStrongPointCount: number;
   savedArrivalWitnessMinimumSpanMs: number;
   unknownStayCandidateDwellMs: number;
@@ -93,6 +94,12 @@ export const LOCATION_ENGINE_V2_CONFIG: LocationEngineConfig = {
   // Visit is contradicted, and the ordinary midpoint estimate applies.
   savedPlaceVisitDepartureLagMaximumMs: 300_000,
   savedPlaceArrivalCorroborationWindowMs: 300_000,
+  // iOS can date an arrival Visit before the car stops (by up to 157 s in a
+  // staging week; 2 of 39 arrivals). Accurate approach fixes within this long
+  // after its arrival time, followed by the place's entry or a strong inside
+  // fix, mark it early-dated rather than contradicted: it is corroborated from
+  // that observed arrival instead.
+  savedPlaceVisitEarlyArrivalMaximumMs: 180_000,
   savedPlaceArrivalMinimumStrongPointCount: 2,
   savedArrivalWitnessMinimumSpanMs: 120_000,
   unknownStayCandidateDwellMs: 600_000,
