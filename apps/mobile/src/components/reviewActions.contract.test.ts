@@ -90,7 +90,7 @@ describe("mobile Review action contracts", () => {
     expect(evidenceEditorSource).toContain('automaticallyAdjustKeyboardInsets={Platform.OS === "ios"}');
     expect(evidenceEditorSource).toContain("keyboardRevealScrollOffset");
     expect(evidenceEditorSource).toContain("revealGenerationRef");
-    expect(evidenceEditorSource).toContain('placeholder={evidence.segment.kind === "commute" ? "Add commute details (optional)" : "Add activity (optional)"}');
+    expect(evidenceEditorSource).toContain('placeholder={journeyCopy?.placeholder ?? "Add activity (optional)"}');
     expect(evidenceEditorSource).toContain("initialLocationReviewDescription");
     expect(evidenceEditorSource).toMatch(/touch:\s*\{\s*minHeight:\s*44/);
     expect(evidenceEditorSource).toMatch(/visual:\s*\{\s*minHeight:\s*32/);

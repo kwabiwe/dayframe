@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { syntheticId, syntheticReviewBootstrap } from "../../../../scripts/fixtures/review-performance";
 import {
+  locationReviewJourneyCopy,
   buildLocationReviewEdit,
   buildLocationReviewResolutionAction,
   buildDurableLocationReviewCommand,
@@ -227,5 +228,15 @@ describe("Location Review editor draft", () => {
       placeId: syntheticId(4),
       learnedPlaceId: null
     }, commute, data)).not.toThrow();
+  });
+});
+
+describe("Location Review journey copy", () => {
+  it("never offers Commute automatically or commute wording for time away (review finding 5)", () => {
+    expect(locationReviewJourneyCopy({ kind: "commute", timeAway: true })).toMatchObject({
+      journey: false, primaryLabel: "Record time away", recorded: "The time away was recorded."
+    });
+    expect(locationReviewJourneyCopy({ kind: "commute" })).toMatchObject({ journey: true, primaryLabel: "Record commute" });
+    expect(locationReviewJourneyCopy({ kind: "stay" })).toBeNull();
   });
 });

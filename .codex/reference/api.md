@@ -42,6 +42,14 @@ a bounded repeatable-read snapshot; a stale cursor returns typed
 `snapshot_changed`, not mixed generations. This route is never a mutation
 receipt and does not acquire timer/user advisory locks or Review row locks.
 
+Clients parse records strictly, so a new optional record field is sent only to
+clients that list it in the `x-dayframe-review-features` request header
+(comma-separated). Older phones send no header and receive exactly the version 1
+shape; a new phone talking to an older server simply receives no field. The
+`time-away` feature adds `timeAway: { stopCount }` to Location Review records
+for time away from a saved place, so cached and backlog items keep their
+"Time away" labels and never fall back to the Commute category.
+
 `accept` and Location `confirm` may carry the optional 64-lower-hex
 `expectedProposalHash`. New Today Quick Confirm envelopes require it and the
 server checks it under the existing mutation lock immediately before applying

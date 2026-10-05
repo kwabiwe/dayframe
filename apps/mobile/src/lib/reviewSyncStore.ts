@@ -1420,7 +1420,7 @@ function presentationReviewItems(response: ReviewPresentationSnapshot) {
   return [...byId.values()];
 }
 
-function mobileReviewItemFromPresentation(record: ReviewProposalPresentation): MobileReviewItem {
+export function mobileReviewItemFromPresentation(record: ReviewProposalPresentation): MobileReviewItem {
   return {
     id: record.reviewItemId,
     type: record.sourceKind === "location_v2" ? "location" : "review",
@@ -1440,7 +1440,8 @@ function mobileReviewItemFromPresentation(record: ReviewProposalPresentation): M
     confidence: record.confidence,
     status: record.status,
     notes: null,
-    rawPayload: null,
+    // Coordinate-free subtype only, so time away keeps its labels and no Commute fallback.
+    rawPayload: record.timeAway ? { qualificationReason: "same_place_outing", stopCount: record.timeAway.stopCount } : null,
     createdAt: record.createdAt
   };
 }
@@ -2340,7 +2341,9 @@ function sanitiseRawPayload(rawPayload: Record<string, unknown> | null) {
     "workoutType",
     "workoutLabel",
     "activityType",
-    "durationSeconds"
+    "durationSeconds",
+    "qualificationReason",
+    "stopCount"
   ];
   return Object.fromEntries(
     allowedKeys.flatMap((key) =>

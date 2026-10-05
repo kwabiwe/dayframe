@@ -1,7 +1,7 @@
 import type pg from "pg";
 import {
   AUTOMATIC_LOCATION_POLICY_VERSION, LOCATION_ENGINE_V2_CONFIG, assessAutomaticOverlap,
-  type LocationSegment, type StaySegment
+  type CommuteSegment, type LocationSegment, type StaySegment
 } from "@dayframe/shared";
 import { hasMeaningfulKnownPlaceWindow, isTimeAway, timeAwayTitle } from "@dayframe/shared";
 import type { RequestSession } from "../session";
@@ -22,13 +22,41 @@ type Place = {
 };
 type LearnedPlace = { id: string; name: string; saved: Place | null };
 
-async function displayContext(client: pg.PoolClient, session: RequestSession, segments: LocationSegment[]) {
+/**
+ * Name of the place time away was from: its saved place, else the accepted
+ * learned place its persisted origin stay matched (learned endpoints have no
+ * place ID on the commute).
+ */
+export async function timeAwayPlaceName(
+  client: Pick<pg.PoolClient, "query">, session: RequestSession, segment: CommuteSegment, stayIds: ReadonlyMap<string, string>
+) {
+  if (segment.fromPlaceId) {
+    const saved = await client.query<{ name: string }>("select name from places where id = $1 and workspace_id = $2",
+      [segment.fromPlaceId, session.workspaceId]);
+    return saved.rows[0]?.name ?? null;
+  }
+  const originId = stayIds.get(segment.fromStaySegmentId);
+  if (!originId) return null;
+  const learned = await client.query<{ name: string }>(`select lp.name from stay_segments ss
+    join learned_places lp on lp.id = ss.learned_place_id and lp.workspace_id = ss.workspace_id and lp.user_id = ss.user_id
+    where ss.id = $1 and ss.workspace_id = $2 and ss.user_id = $3`, [originId, session.workspaceId, session.userId]);
+  return learned.rows[0]?.name ?? null;
+}
+
+async function displayContext(
+  client: pg.PoolClient, session: RequestSession, segments: LocationSegment[], stayIds: ReadonlyMap<string, string>
+) {
   const stays = segments.filter((segment): segment is StaySegment => segment.kind === "stay");
   const places = new Map<string, Place>();
   const learned = new Map<string, LearnedPlace>();
   // Time away is named after the place it was away from.
-  const placeIds = [...new Set([...stays.flatMap(s => s.placeId ? [s.placeId] : []),
-    ...segments.flatMap(s => isTimeAway(s) && s.kind === "commute" && s.fromPlaceId ? [s.fromPlaceId] : [])])].sort();
+  const timeAwayNames = new Map<string, string | null>();
+  for (const segment of segments) {
+    if (segment.kind === "commute" && isTimeAway(segment)) {
+      timeAwayNames.set(segment.clientSegmentId, await timeAwayPlaceName(client, session, segment, stayIds));
+    }
+  }
+  const placeIds = [...new Set(stays.flatMap(s => s.placeId ? [s.placeId] : []))].sort();
   const learnedIds = [...new Set(stays.flatMap(s => s.learnedPlaceId ? [s.learnedPlaceId] : []))].sort();
   // Saved places belong to a workspace; learned places additionally belong to a user.
   for (const ids of chunks(placeIds)) {
@@ -50,7 +78,7 @@ async function displayContext(client: pg.PoolClient, session: RequestSession, se
   }
   return (segment: LocationSegment) => {
     if (segment.kind === "commute") return { trusted: null, title: isTimeAway(segment)
-      ? timeAwayTitle(segment.fromPlaceId ? places.get(segment.fromPlaceId)?.name : null) : "Commute" };
+      ? timeAwayTitle(timeAwayNames.get(segment.clientSegmentId)) : "Commute" };
     const trusted = segment.placeMatchKind === "saved" && segment.placeId
       ? places.get(segment.placeId) ?? null
       : segment.placeMatchKind === "learned" && segment.learnedPlaceId
@@ -80,7 +108,7 @@ export async function emitReviewSemanticSegments(
     return [{ segment, segmentId, clientEventId: `location-segment:${segment.clientSegmentId}`.slice(0, 160) }];
   }).sort((a, b) => a.clientEventId < b.clientEventId ? -1 : a.clientEventId > b.clientEventId ? 1 : 0);
   if (!candidates.length) return 0;
-  const context = await displayContext(client, session, candidates.map(row => row.segment));
+  const context = await displayContext(client, session, candidates.map(row => row.segment), stayIds);
   const eligible = candidates.filter(row => context(row.segment).trusted?.loggingEnabled !== false);
   const existing = new Map<string, { id: string; reviewStatus: string }>();
   for (const batch of chunks(eligible)) {

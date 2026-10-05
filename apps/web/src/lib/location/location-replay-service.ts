@@ -10,11 +10,13 @@ import {
 } from "./location-replay-batching";
 import {
   deriveCommutes,
+  isTimeAway,
   EMPTY_LOCATION_ENGINE_STATE,
   LOCATION_ENGINE_V2_CONFIG,
   LocationEvidenceSchema,
   runLocationEngine,
   type ClassifiedEvidence,
+  type CommuteDerivationOptions,
   type CommuteSegment,
   type LocationEvidence,
   type LocationSegment,
@@ -165,11 +167,15 @@ export async function replayLocationEvidence(
     isSimulated: row.isSimulated,
     metadata: row.metadata
   }));
+  const places = {
+    savedPlaces: placesResult.rows,
+    learnedPlaces: learnedResult.rows.map((place) => ({ ...place, accepted: true as const }))
+  };
   const output = runLocationEngine({
     priorState: { ...EMPTY_LOCATION_ENGINE_STATE, algorithmVersion: options.algorithmVersion },
     evidence,
-    savedPlaces: placesResult.rows,
-    acceptedLearnedPlaces: learnedResult.rows.map((place) => ({ ...place, accepted: true as const })),
+    savedPlaces: places.savedPlaces,
+    acceptedLearnedPlaces: places.learnedPlaces,
     config: { ...LOCATION_ENGINE_V2_CONFIG, algorithmVersion: options.algorithmVersion },
     processingAt: options.processingAt
   });
@@ -179,7 +185,7 @@ export async function replayLocationEvidence(
   observeLocationCount(options, "staySegments", output.segmentUpserts.filter(segment => segment.kind === "stay").length);
   observeLocationCount(options, "commuteSegments", output.segmentUpserts.filter(segment => segment.kind === "commute").length);
   observeLocationTiming(options, "protected_replacement_checks", "started");
-  const protectedReplacement = await excludeProtectedReplacements(client, session, options, output.segmentUpserts, output.acceptedEvidence);
+  const protectedReplacement = await excludeProtectedReplacements(client, session, options, output.segmentUpserts, output.acceptedEvidence, places);
   const segments = protectedReplacement.segments;
   observeLocationTiming(options, "protected_replacement_checks", "completed");
   observeLocationCount(options, "protectedSegments", protectedReplacement.count);
@@ -249,7 +255,8 @@ async function excludeProtectedReplacements(
   client: pg.PoolClient, session: RequestSession,
   options: Pick<LocationReplayOptions, "deviceId" | "algorithmVersion" | "processingAt" | "persistenceProfile" | "onLocationCount">,
   segments: LocationSegment[],
-  acceptedEvidence: ClassifiedEvidence[] = []
+  acceptedEvidence: ClassifiedEvidence[] = [],
+  places: Pick<CommuteDerivationOptions, "savedPlaces" | "learnedPlaces"> = {}
 ) {
   // A trip's legs are fallback candidates: if protected history holds the trip,
   // its unaffected legs remain instead of their open Reviews being retired.
@@ -339,16 +346,21 @@ async function excludeProtectedReplacements(
     (!held.has(segment.fromStaySegmentId) && !held.has(segment.toStaySegmentId) &&
       !(segment.stops ?? []).some((stop) => held.has(stop.staySegmentId) || decidedStays.has(stop.staySegmentId)) &&
       !(segment.stops?.length && movesEndpoint(segment))));
+  const kept = segments.flatMap((segment) => replaceable(segment)
+    ? segment.kind === "commute" && !segment.stops?.length && movesEndpoint(segment)
+      ? rebuildLegWithinDecidedStops(segment, decidedStays, segments, acceptedEvidence, options, places)
+      : [segment]
+    : segment.kind === "commute"
+      ? (segment.legs ?? []).filter(replaceable).flatMap((leg) =>
+          rebuildLegWithinDecidedStops(leg, decidedStays, segments, acceptedEvidence, options, places))
+      : []);
+  // Time away is offered only when no journey qualifies: a rebuilt endpoint
+  // must never stretch it over a journey that replay keeps.
+  const journeys = kept.filter((segment): segment is CommuteSegment => segment.kind === "commute" && !isTimeAway(segment));
   return {
     count: held.size,
-    segments: segments.flatMap((segment) => replaceable(segment)
-      ? segment.kind === "commute" && !segment.stops?.length && movesEndpoint(segment)
-        ? rebuildLegWithinDecidedStops(segment, decidedStays, segments, acceptedEvidence, options)
-        : [segment]
-      : segment.kind === "commute"
-        ? (segment.legs ?? []).filter(replaceable).flatMap((leg) =>
-            rebuildLegWithinDecidedStops(leg, decidedStays, segments, acceptedEvidence, options))
-        : [])
+    segments: kept.filter((segment) => !isTimeAway(segment) || !journeys.some((journey) =>
+      Date.parse(journey.startedAt) < Date.parse(segment.stoppedAt!) && Date.parse(journey.stoppedAt) > Date.parse(segment.startedAt)))
   };
 }
 
@@ -422,14 +434,15 @@ function rebuildLegWithinDecidedStops(
   decided: ReadonlyMap<string, DecidedStopBounds>,
   segments: LocationSegment[],
   acceptedEvidence: ClassifiedEvidence[],
-  options: Pick<LocationReplayOptions, "algorithmVersion" | "processingAt">
+  options: Pick<LocationReplayOptions, "algorithmVersion" | "processingAt">,
+  places: Pick<CommuteDerivationOptions, "savedPlaces" | "learnedPlaces"> = {}
 ): CommuteSegment[] {
   if (!decided.has(leg.fromStaySegmentId) && !decided.has(leg.toStaySegmentId)) return [leg];
   const from = stayWithDecidedBounds(leg.fromStaySegmentId, decided, segments);
   const to = stayWithDecidedBounds(leg.toStaySegmentId, decided, segments);
   if (!from?.stoppedAt || !to) return [];
   return deriveCommutes([from, to], acceptedEvidence,
-    { ...LOCATION_ENGINE_V2_CONFIG, algorithmVersion: options.algorithmVersion }, options.processingAt)
+    { ...LOCATION_ENGINE_V2_CONFIG, algorithmVersion: options.algorithmVersion }, options.processingAt, places)
     .filter((rebuilt) => rebuilt.clientSegmentId === leg.clientSegmentId);
 }
 

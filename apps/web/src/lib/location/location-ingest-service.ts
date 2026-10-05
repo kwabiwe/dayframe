@@ -1,4 +1,4 @@
-import { emitReviewSemanticSegments } from "./location-review-semantic-batch";
+import { emitReviewSemanticSegments, timeAwayPlaceName } from "./location-review-semantic-batch";
 import { reopenSupersededReviews } from "./location-review-supersession";
 import { observeLocationStage, observeLocationTiming, type LocationObservation } from "./location-sync-diagnostics";
 import {
@@ -553,7 +553,7 @@ async function emitSemanticSegment(
       autoConfirm ? "confirmed" : "needs_review"
     ]
   );
-  const title = trustedPlace?.description ?? await segmentTitle(client, session, segment);
+  const title = trustedPlace?.description ?? await segmentTitle(client, session, segment, stayIds);
   if (autoConfirm) {
     const automaticEntry = segment.kind === "commute"
       ? {
@@ -787,13 +787,11 @@ function segmentEventClientId(segment: LocationSegment) {
 async function segmentTitle(
   client: import("pg").PoolClient,
   session: RequestSession,
-  segment: StaySegment | CommuteSegment
+  segment: StaySegment | CommuteSegment,
+  stayIds: ReadonlyMap<string, string>
 ) {
   if (segment.kind === "commute") {
-    if (!isTimeAway(segment)) return "Commute";
-    const place = segment.fromPlaceId ? await client.query<{ name: string }>(
-      "select name from places where id = $1 and workspace_id = $2", [segment.fromPlaceId, session.workspaceId]) : null;
-    return timeAwayTitle(place?.rows[0]?.name);
+    return isTimeAway(segment) ? timeAwayTitle(await timeAwayPlaceName(client, session, segment, stayIds)) : "Commute";
   }
   if (segment.learnedPlaceId) {
     const learned = await client.query<{ name: string }>(

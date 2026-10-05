@@ -25,8 +25,7 @@ describe("V2 location review quality contracts", () => {
 
   it("does not use a generated commute title as a confirmed description", () => {
     // A journey is titled Commute; time away from a place is named after it.
-    expect(ingestSource).toContain('if (!isTimeAway(segment)) return "Commute";');
-    expect(ingestSource).toContain("return timeAwayTitle(");
+    expect(ingestSource).toContain('return isTimeAway(segment) ? timeAwayTitle(await timeAwayPlaceName(client, session, segment, stayIds)) : "Commute";');
     expect(ingestSource).not.toContain('return "Possible journey"');
     expect(reviewSource).toContain("confirmedLocationDescription");
     expect(reviewSource).not.toContain("edit?.description?.trim() || item.title");

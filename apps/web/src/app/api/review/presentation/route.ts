@@ -1,5 +1,9 @@
 import { NextResponse } from "next/server";
-import { ReviewPresentationRequestSchema } from "@dayframe/shared";
+import {
+  REVIEW_PRESENTATION_FEATURES_HEADER,
+  REVIEW_PRESENTATION_TIME_AWAY_FEATURE,
+  ReviewPresentationRequestSchema
+} from "@dayframe/shared";
 import { authErrorResponse, databaseReadinessResponse } from "@/lib/api-errors";
 import { resolveRequestSession } from "@/lib/ingest-auth";
 import {
@@ -36,10 +40,11 @@ export async function POST(request: Request) {
         issues: parsed.error.issues
       }, 400);
     }
+    const features = (request.headers.get(REVIEW_PRESENTATION_FEATURES_HEADER) ?? "").split(",").map((value) => value.trim());
     const presentation = await getReviewPresentation(session, parsed.data, {
       signal: request.signal,
       deadlineAt: startedAt + 8_000
-    });
+    }, { timeAway: features.includes(REVIEW_PRESENTATION_TIME_AWAY_FEATURE) });
     return privateJson(presentation);
   } catch (error) {
     const readiness = databaseReadinessResponse(error);

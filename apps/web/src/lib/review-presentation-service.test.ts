@@ -51,6 +51,28 @@ describe("getReviewPresentation", () => {
       })
     });
   });
+  it("marks time away only for clients that ask for it (review finding 3)", async () => {
+    const raw = { ...reviewRow(reviewId), locationSegmentId: "70000000-0000-4000-8000-000000000001", title: "Time away from Home",
+      eventType: "commute_detected", timeAwayStopCount: 1 };
+    const query = vi.fn(async (sql: string) => {
+      if (sql.includes("current_setting")) return { rows: [{ transaction_timeout: null }] };
+      if (sql.includes("with open_reviews")) return { rows: [{ globalCount: 1, todayCount: 1, openReviewItemIds: [reviewId] }] };
+      if (sql.includes("from time_entries te")) return { rows: [] };
+      if (sql.includes("from review_items ri")) {
+        expect(sql).toContain(`cs.metadata ->> 'qualificationReason' = 'same_place_outing'`);
+        return { rows: [raw] };
+      }
+      return { rows: [] };
+    });
+    mocks.connect.mockResolvedValue({ query, release: vi.fn() });
+    const request = { version: 1 as const, mode: "backlog" as const, timeZone: "Etc/UTC", limit: 100 };
+    const asked = await getReviewPresentation(session, request, {}, { timeAway: true });
+    expect(asked.records[0]).toMatchObject({ title: "Time away from Home", timeAway: { stopCount: 1 } });
+    // Older phones parse records strictly and never receive the field.
+    const older = await getReviewPresentation(session, request);
+    expect(older.records[0]).not.toHaveProperty("timeAway");
+    expect(older.records[0]).toMatchObject({ title: "Time away from Home" });
+  });
   it("uses one bounded read-only snapshot, scoped lookup IDs, and no mutation locks", async () => {
     const query = vi.fn(async (statement: string, values?: unknown[]) => {
       void values;

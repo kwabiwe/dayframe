@@ -709,7 +709,18 @@ export type CommuteDerivationOptions = {
   qualifiedLegChainConfidence?: (fromStayId: string, toStayId: string) => CommuteSegment["confidence"] | null;
   arrivalWitnesses?: readonly SavedPlaceArrivalWitness[];
   savedPlaces?: readonly SavedPlaceForMatching[];
+  /** Accepted learned places, so time away is measured from a learned place's own centre. */
+  learnedPlaces?: readonly SavedPlaceForMatching[];
 };
+
+/** The catalogue place a known stay matched, or null when it is unknown or absent. */
+function knownPlaceOf(stay: StaySegment, options: CommuteDerivationOptions) {
+  if (stay.placeMatchKind === "saved" && stay.placeId) return options.savedPlaces?.find((place) => place.id === stay.placeId) ?? null;
+  if (stay.placeMatchKind === "learned" && stay.learnedPlaceId) {
+    return options.learnedPlaces?.find((place) => place.id === stay.learnedPlaceId) ?? null;
+  }
+  return null;
+}
 
 export function deriveCommutes(
   stays: StaySegment[],
@@ -810,9 +821,11 @@ export function deriveCommutes(
       const awayMs = stoppedAtMs - startedAtMs;
       if (awayMs < config.placeOutingMinimumMs || awayMs > config.commuteMaximumDurationMs) return false;
       if (stops.length) return true;
-      const centre = segmentPoint(from);
-      if (!centre) return false;
-      const distance = Math.max(config.placeOutingMinimumDistanceMeters, from.radiusMeters ?? 0);
+      // Measured from the place itself: a stay's observed centre can sit well inside its circle.
+      const place = knownPlaceOf(from, options);
+      if (!place) return false;
+      const centre = { latitude: place.latitude, longitude: place.longitude };
+      const distance = Math.max(config.placeOutingMinimumDistanceMeters, place.radiusMeters);
       const away = new Set(routeEvidence.flatMap((item) => {
         const point = evidencePoint(item);
         return point && accurateFix(item, config) &&

@@ -84,6 +84,20 @@ describe("fetchReviewPresentationPage", () => {
     })).rejects.toBeInstanceOf(ReviewPresentationSnapshotChangedError);
   });
 
+  it("asks for time away, which only this client understands", async () => {
+    vi.mocked(readOwnedAuthenticatedSessionSnapshot).mockResolvedValue({
+      status: "authenticated",
+      snapshot: { token: "fixture-token", owner: { workspaceId: "10000000-0000-4000-8000-000000000001", userId: "20000000-0000-4000-8000-000000000001" } }
+    } as never);
+    vi.mocked(isAuthenticatedSessionSnapshotCurrent).mockReturnValue(true);
+    vi.mocked(mobileJsonRequest).mockResolvedValue({ response: { ok: false, status: 409 } as Response, body: { code: "snapshot_changed" } } as never);
+    await fetchReviewPresentationPage({
+      owner: { backendId: "staging-fixture", workspaceId: "10000000-0000-4000-8000-000000000001", userId: "20000000-0000-4000-8000-000000000001" },
+      request: { version: 1, mode: "backlog", timeZone: "Etc/UTC", limit: 100 }
+    }).catch(() => undefined);
+    expect(vi.mocked(mobileJsonRequest).mock.lastCall?.[1]?.headers).toMatchObject({ "x-dayframe-review-features": "time-away" });
+  });
+
   it("classifies a malformed successful response without exposing its body", async () => {
     vi.mocked(readOwnedAuthenticatedSessionSnapshot).mockResolvedValue({
       status: "authenticated",

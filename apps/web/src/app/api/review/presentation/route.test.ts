@@ -50,8 +50,18 @@ describe("POST /api/review/presentation", () => {
     expect(mocks.getReviewPresentation).toHaveBeenCalledWith(
       session,
       expect.objectContaining({ mode: "lookup", limit: 100 }),
-      expect.objectContaining({ signal: expect.any(AbortSignal), deadlineAt: expect.any(Number) })
+      expect.objectContaining({ signal: expect.any(AbortSignal), deadlineAt: expect.any(Number) }),
+      { timeAway: false }
     );
+  });
+
+  it("passes the time-away feature only when the client asks for it", async () => {
+    const body = { version: 1, mode: "backlog", timeZone: "Etc/UTC", limit: 100 };
+    await POST(new Request("https://dayframe.test/api/review/presentation", {
+      method: "POST", headers: { "Content-Type": "application/json", "x-dayframe-review-features": "other, time-away" },
+      body: JSON.stringify(body)
+    }));
+    expect(mocks.getReviewPresentation).toHaveBeenLastCalledWith(session, expect.anything(), expect.anything(), { timeAway: true });
   });
 
   it("rejects a chunked body larger than the fixed 64 KiB bound", async () => {

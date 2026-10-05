@@ -29,6 +29,17 @@ export type ParsedLocationReviewWindow = {
   stoppedAt: string;
 };
 
+/**
+ * Journey-only editor copy. Time away is a commute row but never a journey:
+ * no "Commute automatically" category, and its own action and result wording.
+ */
+export function locationReviewJourneyCopy(segment: { kind: "stay" | "commute"; timeAway?: boolean }) {
+  if (segment.kind !== "commute") return null;
+  return segment.timeAway
+    ? { journey: false, primaryLabel: "Record time away", recorded: "The time away was recorded.", placeholder: "Add activity (optional)" }
+    : { journey: true, primaryLabel: "Record commute", recorded: "The commute was recorded.", placeholder: "Add commute details (optional)" };
+}
+
 export function initialLocationReviewDescription({
   placeName,
   segmentKind,

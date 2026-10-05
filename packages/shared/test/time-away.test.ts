@@ -84,6 +84,24 @@ describe("time away from a saved place", () => {
     expect(outings(input(evidence))).toEqual([]);
   });
 
+  it("measures the 150 m from the place itself, not from where the stay was observed (review finding 2)", () => {
+    // Home stay observed 60 m south of the pin; readings 140–145 m north of it are under 150 m from Home.
+    const south = (prefix: string, from: number, to: number) => homeFixes(prefix, from, to).map((item) => ({ ...item, latitude: north(-60) }));
+    const evidence = [...south("am", 0, 60), crossing("exit", 60.5, "geofence_exit"),
+      fix("near-0", 62, 140), fix("near-1", 65, 145), crossing("enter", 70, "geofence_enter"), ...south("pm", 71, 150)];
+    expect(outings(input(evidence))).toEqual([]);
+  });
+
+  it("offers time away from an accepted learned place, measured from its centre", () => {
+    const awayFixes = [fix("away-0", 62, 300, { speedMetersPerSecond: 10 }), fix("away-1", 64, 320), fix("away-2", 66, 310),
+      fix("away-3", 68, 200, { speedMetersPerSecond: 10 })];
+    const evidence = [...homeFixes("am", 0, 60), ...awayFixes, ...homeFixes("pm", 70, 150)];
+    const learned = { ...home, id: "10000000-0000-4000-8000-0000000000c9", accepted: true as const };
+    const away = outings({ ...input(evidence), savedPlaces: [], acceptedLearnedPlaces: [learned] });
+    expect(away).toHaveLength(1);
+    expect(away[0]).toMatchObject({ fromPlaceId: null, qualificationReason: "same_place_outing" });
+  });
+
   it("offers nothing for an absence under five minutes", () => {
     const evidence = [...homeFixes("am", 0, 60), crossing("exit", 60.5, "geofence_exit"),
       fix("away-0", 61.5, 300, { speedMetersPerSecond: 10 }), fix("away-1", 62.5, 320), fix("away-2", 63.5, 280, { speedMetersPerSecond: 10 }),
