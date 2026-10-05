@@ -463,7 +463,24 @@ function rebuildLegWithinDecidedStops(
   if (!from?.stoppedAt || !to) return [];
   return deriveCommutes([from, to], acceptedEvidence,
     { ...LOCATION_ENGINE_V2_CONFIG, algorithmVersion: options.algorithmVersion }, options.processingAt)
-    .filter((rebuilt) => rebuilt.clientSegmentId === leg.clientSegmentId);
+    .filter((rebuilt) => rebuilt.clientSegmentId === leg.clientSegmentId)
+    .map((rebuilt) => withinEngineEligibility(rebuilt, leg));
+}
+
+/**
+ * Re-derivation lacks the engine's whole-run context (inferred boundaries, the
+ * location-only timing it saw), so a re-derived journey is never more
+ * confident than the engine judged it and keeps its Motion & Fitness flags:
+ * moving a decided boundary can never make a journey more eligible.
+ */
+export function withinEngineEligibility(rebuilt: CommuteSegment, engine: CommuteSegment): CommuteSegment {
+  const order: CommuteSegment["confidence"][] = ["low", "medium", "medium_high", "high"];
+  return {
+    ...rebuilt,
+    confidence: order.indexOf(rebuilt.confidence) <= order.indexOf(engine.confidence) ? rebuilt.confidence : engine.confidence,
+    ...(rebuilt.motionSupported || engine.motionSupported ? { motionSupported: true as const } : {}),
+    ...(rebuilt.motionTimed || engine.motionTimed ? { motionTimed: true as const } : {})
+  };
 }
 
 async function supersedeMissingSegments(

@@ -108,23 +108,30 @@ export function buildMotionTimeline(
   // joined to a journey: it would move the journey's start or end.
   const stillBetween = (fromMs: number, toMs: number) => intervals.some((interval) =>
     interval.fromMs < toMs && interval.toMs > fromMs && interval.activity === "stationary" && interval.confidence !== "low");
-  const raw: Run[] = [];
-  let previousRun: Run | null = null;
-  for (const run of runs) {
-    const current = raw.at(-1);
-    const gapMs = current ? run.startMs - current.endMs : Infinity;
-    if (current && previousRun && gapMs <= bridge && (!stillBetween(current.endMs, run.startMs) ||
-      previousRun.movingMs >= config.motionMinimumBlockMovingMs && run.movingMs >= config.motionMinimumBlockMovingMs)) {
-      current.endMs = run.endMs;
-      current.movingMs += run.movingMs;
-      for (const [mode, ms] of Object.entries(run.byMode) as Array<[MotionTravelMode, number]>) {
-        current.byMode[mode] = (current.byMode[mode] ?? 0) + ms;
+  // Two passes, so the movement on each side of stillness is judged whole:
+  // first join interruptions of indeterminate activity alone, then bridge
+  // brief stillness between two substantial joined pieces.
+  const join = (pieces: Run[], canJoin: (left: Run, right: Run) => boolean) => {
+    const joined: Run[] = [];
+    let previous: Run | null = null;
+    for (const piece of pieces) {
+      const current = joined.at(-1);
+      if (current && previous && piece.startMs - current.endMs <= bridge && canJoin(previous, piece)) {
+        current.endMs = piece.endMs;
+        current.movingMs += piece.movingMs;
+        for (const [mode, ms] of Object.entries(piece.byMode) as Array<[MotionTravelMode, number]>) {
+          current.byMode[mode] = (current.byMode[mode] ?? 0) + ms;
+        }
+      } else {
+        joined.push({ ...piece, byMode: { ...piece.byMode } });
       }
-    } else {
-      raw.push({ ...run, byMode: { ...run.byMode } });
+      previous = piece;
     }
-    previousRun = run;
-  }
+    return joined;
+  };
+  const pieces = join(runs, (left, right) => !stillBetween(left.endMs, right.startMs));
+  const raw = join(pieces, (left, right) =>
+    left.movingMs >= config.motionMinimumBlockMovingMs && right.movingMs >= config.motionMinimumBlockMovingMs);
   // Only confident stillness observes a boundary. iOS reports brief `unknown`
   // spells around most changes of activity and every few minutes while still,
   // so a boundary is observed when the `motionStillWindowMs` beside it is fully

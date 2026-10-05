@@ -16,6 +16,8 @@ export type MotionTransition = MotionRecord & { continuation?: true };
  */
 export type MotionCaptureCursor = {
   lastRecordStartMs: number | null;
+  /** The latest time recorded evidence says the history covers (a new record's or a continuation's). */
+  coveredToMs?: number | null;
   /** Set after a truncated page: the next query resumes exactly here, with no lookback, until it catches up. */
   resumeFromMs?: number | null;
   last: { atMs: number; activity: MotionActivity; confidence: MotionConfidence; confirmed: boolean } | null;
@@ -67,10 +69,12 @@ const ACTIVITY_ORDER: Record<MotionActivity, number> = {
  * single read of the whole history would. Re-reading the lookback repeats
  * records with the same IDs, so nothing doubles. Records sharing an instant
  * resolve as the engine does (most confident, then driving first).
- * Once per activity run, the first query more than `motionStillBridgeMs` after
- * it began adds a continuation at `coveredToMs`, so the engine knows the history
- * covered that long (a stop is confirmed only by stillness that lasted). A
- * continuation is coverage, not a transition.
+ * When a query brings no new record yet extends coverage more than
+ * `motionStillBridgeMs` past the latest coverage already recorded, it adds a
+ * continuation at `coveredToMs`, so the engine knows the history covered that
+ * long (a stop is confirmed only by stillness that lasted). A continuation is
+ * coverage, not a transition; re-read records keep their first delivery's
+ * coverage in the journal, so they never advance it.
  */
 export function motionTransitionsFromRecords(
   records: readonly MotionRecord[],
@@ -85,25 +89,21 @@ export function motionTransitionsFromRecords(
       ACTIVITY_ORDER[a.activity] - ACTIVITY_ORDER[b.activity])
     .filter((record, index, all) => index === 0 || record.startMs !== all[index - 1].startMs);
   const transitions: MotionTransition[] = ordered.filter((record) => record.startMs >= floorMs);
-  // The run in progress: where the trailing records' activity and confidence began.
-  let runStartMs: number | null = null;
-  ordered.forEach((record, index) => {
-    const previous = ordered[index - 1];
-    if (!previous || previous.activity !== record.activity || previous.confidence !== record.confidence) runStartMs = record.startMs;
-  });
   const latest = ordered.at(-1);
+  const fresh = transitions.some((record) => cursor.lastRecordStartMs == null || record.startMs > cursor.lastRecordStartMs);
   let last = cursor.last;
-  if (latest && runStartMs != null && runStartMs >= floorMs) {
-    const sameRun = last?.atMs === runStartMs && last.activity === latest.activity && last.confidence === latest.confidence;
-    last = sameRun ? last : { atMs: runStartMs, activity: latest.activity, confidence: latest.confidence, confirmed: false };
+  if (latest && latest.startMs >= floorMs) {
+    last = { atMs: latest.startMs, activity: latest.activity, confidence: latest.confidence, confirmed: false };
   }
-  if (last && !last.confirmed && coveredToMs - last.atMs > config.motionStillBridgeMs) {
+  let recordedCoverageMs = fresh ? coveredToMs : cursor.coveredToMs ?? null;
+  if (!fresh && last && coveredToMs - Math.max(recordedCoverageMs ?? -Infinity, last.atMs) > config.motionStillBridgeMs) {
     transitions.push({ startMs: coveredToMs, activity: last.activity, confidence: last.confidence, continuation: true });
-    last = { ...last, confirmed: true };
+    recordedCoverageMs = coveredToMs;
   }
   const lastRecordStartMs = latest && (cursor.lastRecordStartMs == null || latest.startMs > cursor.lastRecordStartMs)
     ? latest.startMs : cursor.lastRecordStartMs;
-  return { transitions, cursor: { lastRecordStartMs, resumeFromMs: truncated && latest ? latest.startMs : null, last } };
+  return { transitions, cursor: { lastRecordStartMs, coveredToMs: recordedCoverageMs,
+    resumeFromMs: truncated && latest ? latest.startMs : null, last } };
 }
 
 /** Stable per device: the same transition delivered twice is one piece of evidence. */

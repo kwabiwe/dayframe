@@ -26,9 +26,16 @@ describe("Motion & Fitness records as evidence", () => {
     expect(timeline.blocks[0]?.stopObserved).toBe(false);
   });
 
-  it("covers the query time for a complete page", () => {
+  it("covers the query time for a complete page through its new records", () => {
     const { evidence } = motionEvidenceFromRecords([record(0, "stationary"), record(10, "automotive"), record(20, "stationary")],
       state, T0 + 60 * 60_000, T0, context);
-    expect(evidence.at(-1)).toMatchObject({ occurredAt: new Date(T0 + 60 * 60_000).toISOString(), metadata: { motionContinuation: true } });
+    expect(evidence.map((item) => item.receivedAt)).toEqual(Array(3).fill(new Date(T0 + 60 * 60_000).toISOString()));
+    expect(evidence.some((item) => item.metadata?.motionContinuation)).toBe(false);
+  });
+
+  it("adds a continuation when a later query brings no new record but extends coverage", () => {
+    const first = motionEvidenceFromRecords([record(0, "stationary"), record(20, "stationary")], state, T0 + 25 * 60_000, T0, context);
+    const { evidence } = motionEvidenceFromRecords([record(20, "stationary")], first.next, T0 + 40 * 60_000, T0, context);
+    expect(evidence.at(-1)).toMatchObject({ occurredAt: new Date(T0 + 40 * 60_000).toISOString(), metadata: { motionContinuation: true } });
   });
 });

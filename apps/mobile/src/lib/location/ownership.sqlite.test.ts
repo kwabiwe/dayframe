@@ -853,12 +853,12 @@ describe("Motion & Fitness capture", () => {
     expect(motionRows().map((row) => [row.t, row.a, row.k, row.lat])).toEqual([
       [iso(T0 + 60_000), "walking", key(A), null],
       [iso(T0 + 120_000), "automotive", key(A), null],
-      [iso(T0 + 600_000), "stationary", key(A), null],
-      [iso(T0 + 900_000), "stationary", key(A), null]
+      [iso(T0 + 600_000), "stationary", key(A), null]
     ]);
     vi.setSystemTime(T0 + 1_000_000);
     await runtime.drainNativeLocationSignalsInBatches();
-    expect(motionRows()).toHaveLength(4);
+    // Nothing new, and coverage moved under two minutes: no continuation yet.
+    expect(motionRows()).toHaveLength(3);
     // It re-reads fifteen minutes before the latest record seen (never before the binding).
     expect(h.queryActivities).toHaveBeenLastCalledWith(T0, T0 + 1_000_000, 2_000);
     expect(await pendingIds(A)).toEqual(expect.arrayContaining(motionRows().map((row) => row.id)));

@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { replayLocationEvidence } from "./location-replay-service";
+import { replayLocationEvidence, withinEngineEligibility } from "./location-replay-service";
 import { LOCATION_REPLAY_SCALABILITY_PROFILE } from "./location-replay-batching";
 import {
   journeyIdentityFixture, LOCATION_ENGINE_V2_CONFIG, PHYSICAL_STOP_PICKUP, physicalStopAt, physicalStopFixture, runLocationEngine,
@@ -556,5 +556,17 @@ describe("Location replay decided commute endpoints", () => {
     const { commutes } = await replayWithDecided(fixture, trip.fromStaySegmentId, canonical, persistenceProfile);
     // Conservative: no trip across the moved endpoint, and never the aggregate without its stop.
     expect(commutes).toEqual([]);
+  });
+});
+
+describe("Location replay re-derivation never increases eligibility (review round 5)", () => {
+  it("keeps the engine's confidence and Motion & Fitness flags on a re-derived journey", () => {
+    const engine = runLocationEngine(journeyIdentityFixture()).segmentUpserts
+      .find((segment) => segment.kind === "commute");
+    if (!engine || engine.kind !== "commute") throw new Error("fixture must produce a commute");
+    const judged = { ...engine, confidence: "low" as const, motionTimed: true as const };
+    const rebuilt = { ...engine, confidence: "medium" as const };
+    expect(withinEngineEligibility(rebuilt, judged)).toMatchObject({ confidence: "low", motionTimed: true });
+    expect(withinEngineEligibility({ ...engine, confidence: "low" }, { ...engine, confidence: "high" }).confidence).toBe("low");
   });
 });

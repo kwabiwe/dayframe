@@ -177,11 +177,10 @@ describe("location runtime binding and drain", () => {
       expect(evidence.map((item) => [item.kind, item.occurredAt, item.latitude, item.metadata.motionActivity])).toEqual([
         ["motion_activity", new Date(at(0)).toISOString(), null, "stationary"],
         ["motion_activity", new Date(at(5)).toISOString(), null, "automotive"],
-        ["motion_activity", new Date(at(20)).toISOString(), null, "stationary"],
-        // Still at the query, an hour later: coverage, not a change.
-        ["motion_activity", new Date(Date.now()).toISOString(), null, "stationary"]
+        ["motion_activity", new Date(at(20)).toISOString(), null, "stationary"]
       ]);
-      expect(evidence.at(-1)?.metadata.motionContinuation).toBe(true);
+      // New records carry the query time as the history's coverage.
+      expect(new Set(evidence.map((item) => (item as unknown as { receivedAt: string }).receivedAt))).toEqual(new Set([new Date(Date.now()).toISOString()]));
       expect(options.motionCapture.next.cursor.lastRecordStartMs).toBe(at(20));
       expect(options.motionCapture.readFloorMs).toBe(Date.parse("2026-08-11T00:00:00Z"));
     } finally { vi.useRealTimers(); }

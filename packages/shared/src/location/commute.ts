@@ -836,6 +836,7 @@ export function deriveCommutes(
     // observation away from it. An unknown origin has no place identity, so
     // accurate fixes and Visits within its radius are presence, not route.
     let firstAwayMs = stoppedAtMs;
+    const originPresenceMs: number[] = [];
     if (motion) {
       const origin = segmentPoint(from);
       const radius = from.radiusMeters ?? config.unknownStayBaseRadiusMeters;
@@ -850,8 +851,11 @@ export function deriveCommutes(
         const at = occurredAtMs[evidenceIndex];
         if (!(at > presentUntilMs && at < stoppedAtMs) || snapshots.has(item) ||
           item.evidence.kind === "geofence_exit" || item.evidence.kind === "geofence_state") continue;
-        if (atOrigin(item)) presentUntilMs = at;
-        else if (evidencePoint(item) != null) { firstAwayMs = at; break; }
+        if (ownedByDestination.has(item.evidence.clientEvidenceId)) continue;
+        if (atOrigin(item)) {
+          originPresenceMs.push(at);
+          if (firstAwayMs === stoppedAtMs) presentUntilMs = at;
+        } else if (evidencePoint(item) != null && firstAwayMs === stoppedAtMs) firstAwayMs = at;
       }
     }
     const firstRouteMs = Math.min(firstAwayMs, ...routeTimes.filter((at) => at > presentUntilMs));
@@ -908,8 +912,11 @@ export function deriveCommutes(
     // first observation, ends it. It never starts before its origin stay ends.
     // Evidence summaries and qualification keep the observed window.
     const departedMs = motionDepartureMs(motion, presentUntilMs, firstRouteMs, config);
+    // A later sign of the origin before the last route observation contradicts the onset.
+    const lastRouteMs = routeTimes.length ? Math.max(...routeTimes) : stoppedAtMs;
     const departureUsable = departedMs != null && departedMs < firstRouteMs &&
-      (!exitStart || startedAtMs - departedMs <= config.motionBoundaryToleranceMs);
+      (!exitStart || startedAtMs - departedMs <= config.motionBoundaryToleranceMs) &&
+      !originPresenceMs.some((at) => at > departedMs && at < lastRouteMs);
     let beganMs = Math.max(departureUsable ? departedMs! : startedAtMs, Date.parse(from.stoppedAt));
     const arrivedMs = motionArrivalMs(motion, routeTimes.length ? Math.max(...routeTimes) : beganMs, stoppedAtMs, config);
     let endedMs = arrivedMs != null && arrivedMs > beganMs ? arrivedMs : stoppedAtMs;

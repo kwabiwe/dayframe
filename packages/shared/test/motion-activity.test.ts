@@ -597,3 +597,53 @@ describe("review round 4", () => {
     expect(minutes(drive.startedAt)).toBe(70);
   });
 });
+
+describe("review round 5", () => {
+  const toEvidence = (items: LocationEvidence[]) => items.map((evidence) => ({ evidence, match: null, impliedSpeedMetersPerSecond: null }));
+  const record = (minute: number, activity: MotionActivity) => ({ startMs: t0 + minute * 60_000, activity, confidence: "high" as const });
+
+  it("keeps extending coverage while a stop goes on, so it becomes observable on later reads", () => {
+    const journal = new Map<string, LocationEvidence>();
+    let cursor = EMPTY_MOTION_CAPTURE_CURSOR;
+    const query = (records: ReturnType<typeof record>[], atMinute: number) => {
+      const step = motionTransitionsFromRecords(records, cursor, t0 + atMinute * 60_000, t0, config);
+      cursor = step.cursor;
+      for (const transition of step.transitions) {
+        const id = motionEvidenceId(transition);
+        if (journal.has(id)) continue;
+        journal.set(id, { ...motion([[(transition.startMs - t0) / 60_000, transition.activity, transition.confidence]], atMinute)[0],
+          clientEvidenceId: id, metadata: { motionActivity: transition.activity, motionConfidence: transition.confidence,
+            ...(transition.continuation ? { motionContinuation: true as const } : {}) } });
+      }
+    };
+    const history = [record(0, "stationary"), record(10, "automotive"), record(20, "stationary")];
+    query(history, 22.5);
+    query(history, 30);
+    const timeline = buildMotionTimeline(toEvidence([...journal.values()]), config, Date.parse(at(240)))!;
+    expect(timeline.coverageToMs).toBe(t0 + 30 * 60_000);
+    expect(timeline.blocks[0].stopObserved).toBe(true);
+  });
+
+  it("judges the movement on each side of a brief stop whole, across an unknown spell", () => {
+    const timeline = buildMotionTimeline(toEvidence(motion([
+      [0, "stationary"], [10, "automotive"], [14, "unknown"], [14.5, "automotive"], [15, "stationary"], [16, "automotive"], [20, "stationary"]
+    ], 40)), config, Date.parse(at(240)))!;
+    expect(timeline.blocks.map((block) => [(block.startMs - t0) / 60_000, (block.endMs - t0) / 60_000])).toEqual([[10, 20]]);
+  });
+
+  it("never starts a re-derived journey at an onset a later fix at the origin contradicts", () => {
+    const shopEast = (id: string, minute: number, metres = 5_000) => fix(id, minute, 0, { longitude: east(metres) });
+    const evidence = [
+      ...[0, 15, 30, 45, 60].map((m, i) => shopEast(`origin-${i}`, m)),
+      shopEast("nearby", 62, 5_200), shopEast("origin-late", 68),
+      ...[72, 74, 76].map((m, i) => fix(`route-${i}`, m, 0, { longitude: east(5_000 - 800 * (i + 1)), speedMetersPerSecond: 12 })),
+      ...[80, 90, 100].map((m, i) => fix(`dest-${i}`, m, 3_000 + i % 2 * 4, { longitude: east(1_000) })),
+      ...motion([[0, "stationary"], [61, "automotive"], [79, "stationary"]], 120)
+    ];
+    const output = runLocationEngine({ ...input(evidence), savedPlaces: [] });
+    const stays = output.segmentUpserts.filter((segment): segment is StaySegment => segment.kind === "stay");
+    const decided = { ...stays[0], stoppedAt: at(60), stopLowerBoundAt: at(60), stopUpperBoundAt: at(60), locationOnlyStoppedAt: undefined };
+    const rebuilt = deriveCommutes([decided, stays.at(-1)!], output.acceptedEvidence, config, at(240));
+    for (const leg of rebuilt) expect(minutes(leg.startedAt)).not.toBe(61);
+  });
+});
