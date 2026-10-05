@@ -173,7 +173,7 @@ describe("location runtime binding and drain", () => {
       ]);
       await drainNativeLocationSignalsInBatches();
       const [evidence, , options] = mocks.persistLocationEvidence.mock.calls.at(-1) as unknown as
-        [Array<{ kind: string; occurredAt: string; latitude: null; metadata: Record<string, unknown> }>, unknown, { motionCapture: { cursor: { lastRecordStartMs: number } } }];
+        [Array<{ kind: string; occurredAt: string; latitude: null; metadata: Record<string, unknown> }>, unknown, { motionCapture: { next: { cursor: { lastRecordStartMs: number } }; readFloorMs: number } }];
       expect(evidence.map((item) => [item.kind, item.occurredAt, item.latitude, item.metadata.motionActivity])).toEqual([
         ["motion_activity", new Date(at(0)).toISOString(), null, "stationary"],
         ["motion_activity", new Date(at(5)).toISOString(), null, "automotive"],
@@ -182,7 +182,8 @@ describe("location runtime binding and drain", () => {
         ["motion_activity", new Date(Date.now()).toISOString(), null, "stationary"]
       ]);
       expect(evidence.at(-1)?.metadata.motionContinuation).toBe(true);
-      expect(options.motionCapture.cursor.lastRecordStartMs).toBe(at(20));
+      expect(options.motionCapture.next.cursor.lastRecordStartMs).toBe(at(20));
+      expect(options.motionCapture.readFloorMs).toBe(Date.parse("2026-08-11T00:00:00Z"));
     } finally { vi.useRealTimers(); }
   });
 

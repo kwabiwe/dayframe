@@ -1291,6 +1291,60 @@ async function validateMotionActivityEvidence() {
   ), /location_evidence_motion_coordinate_free/, "A positioned motion row was accepted.");
 }
 
+async function validateMotionOnlyReviewRetirement() {
+  await clearDerivedLocationState();
+  process.env.DAYFRAME_LOCATION_ROLLOUT_MODE = "v2_review";
+  const home = LOCATION_ACCEPTANCE_PLACES[0];
+  const point = (id: string, time: string, eastMetres: number): LocationEvidence => ({
+    clientEvidenceId: id, deviceId: DEVICE_ID, algorithmVersion: LOCATION_ENGINE_V2_CONFIG.algorithmVersion,
+    kind: "standard_location", occurredAt: `2026-07-20T${time}.000Z`, receivedAt: "2026-07-20T12:00:00.000Z",
+    timeZone: "Europe/London", latitude: home.latitude,
+    longitude: home.longitude + eastMetres / (111_320 * Math.cos(home.latitude * Math.PI / 180)),
+    horizontalAccuracyMeters: 10, speedMetersPerSecond: 0
+  });
+  const motion = (time: string, activity: "stationary" | "walking" | "automotive"): LocationEvidence => ({
+    clientEvidenceId: `motion-only-${time}-${activity}`, deviceId: DEVICE_ID, algorithmVersion: LOCATION_ENGINE_V2_CONFIG.algorithmVersion,
+    kind: "motion_activity", occurredAt: `2026-07-20T${time}.000Z`, receivedAt: "2026-07-20T12:00:00.000Z",
+    timeZone: "Europe/London", metadata: { motionActivity: activity, motionConfidence: "high" }
+  });
+  // Home, then nothing until a stop 2 km east: GPS never saw the drive.
+  const location = [
+    ...["08:00:00", "08:15:00", "08:30:00", "08:45:00", "09:00:00"].map((time, index) => point(`motion-only-home-${index}`, time, 0)),
+    ...["09:30:00", "09:35:00", "09:40:00", "09:45:00", "09:50:00", "09:55:00"].map((time, index) => point(`motion-only-shop-${index}`, time, 2_000)),
+    ...["10:20:00", "10:35:00", "10:50:00", "11:05:00"].map((time, index) => point(`motion-only-home-pm-${index}`, time, 0))
+  ];
+  const acknowledged = "2026-06-01T07:00:00.000Z";
+  await ingestLocationEvidence(batch("db-motion-only-a", [...location, motion("08:00:00", "stationary"),
+    motion("09:10:00", "walking"), motion("09:11:00", "automotive"), motion("09:17:00", "walking"), motion("09:18:00", "stationary")],
+    "v2_review", acknowledged), session);
+  const proposals = () => pool.query<{ status: string; ignoredScope: string | null }>(
+    `select ri.status, ri.ignored_scope as "ignoredScope" from review_items ri
+     join commute_segments cs on cs.id = ri.location_segment_id
+     where ri.workspace_id = $1 and ri.user_id = $2 and cs.metadata ? 'motionSupported'`,
+    [WORKSPACE_ID, USER_ID]);
+  assert.deepEqual((await proposals()).rows, [{ status: "open", ignoredScope: null }], "A drive only motion showed did not reach Review.");
+  // Later history shows two separate movements: a stop may lie between them, so the journey is withdrawn.
+  await ingestLocationEvidence(batch("db-motion-only-b", [motion("09:13:00", "stationary"), motion("09:16:00", "automotive")],
+    "v2_review", acknowledged), session);
+  assert.deepEqual((await proposals()).rows, [{ status: "ignored", ignoredScope: "superseded" }],
+    "An obsolete motion-only proposal stayed open without lineage.");
+
+  // In v2_enabled the individual emitter carries the same motion fields and still needs Review.
+  await clearDerivedLocationState();
+  process.env.DAYFRAME_LOCATION_ROLLOUT_MODE = "v2_enabled";
+  await ingestLocationEvidence(batch("db-motion-only-enabled", [...location, motion("08:00:00", "stationary"),
+    motion("09:10:00", "walking"), motion("09:11:00", "automotive"), motion("09:17:00", "walking"), motion("09:18:00", "stationary")],
+    "v2_enabled", acknowledged), session);
+  const enabled = await pool.query<{ reviewStatus: string; travelMode: string | null; motionSupported: boolean | null }>(
+    `select review_status as "reviewStatus", raw_payload->>'travelMode' as "travelMode",
+            (raw_payload->>'motionSupported')::boolean as "motionSupported"
+     from activity_events where workspace_id = $1 and user_id = $2 and event_type = 'commute_detected'
+       and occurred_at < '2026-07-20T09:30:00Z'`,
+    [WORKSPACE_ID, USER_ID]);
+  assert.deepEqual(enabled.rows, [{ reviewStatus: "needs_review", travelMode: "automotive", motionSupported: true }],
+    "An enabled-mode motion-only drive lost its motion fields or was logged automatically.");
+}
+
 async function main() {
   try {
     if (process.argv.includes("--saved-place-quality-only")) {
@@ -1304,6 +1358,7 @@ async function main() {
     await validateCommuteCategoryConcurrency();
     await validateOutOfOrderAndIdempotency();
     await validateMotionActivityEvidence();
+    await validateMotionOnlyReviewRetirement();
     await validateShadowToReviewCutover();
     await validateSemanticIdempotencyAndRollback();
     await validateCommuteReviewCategoryAndDescription();

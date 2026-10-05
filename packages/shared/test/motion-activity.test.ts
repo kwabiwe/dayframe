@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
 import { assessAutomaticLocation } from "../src/location/automaticPolicy";
 import { LOCATION_ENGINE_V2_CONFIG as config } from "../src/location/config";
+import { deriveCommutes } from "../src/location/commute";
 import { buildMotionTimeline, motionArrivalMs, motionDepartureMs } from "../src/location/motionActivity";
+import { EMPTY_MOTION_CAPTURE_CURSOR, motionQueryStartMs, motionTransitionsFromRecords } from "../src/location/motionCapture";
 import { LocationEvidenceSchema } from "../src/location/schemas";
 import { runLocationEngine } from "../src/location/segmenter";
 import type {
@@ -125,8 +127,8 @@ describe("Motion & Fitness activity times journeys", () => {
       [0, "stationary"], [62, "walking"], [63.5, "stationary"], [67, "walking"], [68, "automotive"], [79, "walking"], [80, "stationary"]
     ], 125)];
     expect(minutes(staysOf(evidence)[0].stoppedAt)).toBe(60);
-    // The movement that reached Home's exit callback still began at 08:07.
-    expect(minutes(commutesOf(evidence)[0].startedAt)).toBe(67);
+    // Two separate movements before the first route fix: the location-only start stands.
+    expect(minutes(commutesOf(evidence)[0].startedAt)).toBe(69.5);
   });
 
   it("never takes a walk around the place during a long silence for the departure", () => {
@@ -315,5 +317,130 @@ describe("motion activity evidence", () => {
     expect(output.acceptedEvidence.filter((item) => motionIds.has(item.evidence.clientEvidenceId))).toHaveLength(motionIds.size);
     expect(output.nextState.processedEvidenceIds).toEqual(expect.arrayContaining([...motionIds]));
     expect(output.segmentUpserts.flatMap((segment) => segment.evidenceIds).filter((id) => motionIds.has(id))).toEqual([]);
+  });
+});
+
+describe("review round 1: motion never makes a journey more eligible or revokes one", () => {
+  const NEAR_SCHOOL = { ...school, latitude: north(1_000) };
+  const nearInput = (evidence: LocationEvidence[]) => ({ ...input(evidence), savedPlaces: [home, NEAR_SCHOOL] });
+  const nearCommutes = (evidence: LocationEvidence[]) => runLocationEngine(nearInput(evidence)).segmentUpserts
+    .filter((segment): segment is CommuteSegment => segment.kind === "commute");
+  // Saved endpoints 1 km apart; Home's exit at 08:05, three fast fixes, School observed at 08:07:48.
+  const shortSchoolRun = () => [
+    ...[0, 15, 30, 45, 60].map((m, i) => fix(`home-${i}`, m, i % 2 * 3)),
+    crossing("home-exit", 65, "geofence_exit", HOME_ID),
+    fix("route-0", 65.5, 300, { speedMetersPerSecond: 12 }), fix("route-1", 66.3, 600, { speedMetersPerSecond: 12 }),
+    fix("route-2", 67, 850, { speedMetersPerSecond: 12 }),
+    crossing("school-enter", 67.8, "geofence_enter", SCHOOL_ID),
+    ...[67.8, 75, 85, 95].map((m, i) => fix(`school-${i}`, m, 1_000 + i % 2 * 4))
+  ];
+
+  it("keeps a short GPS journey Review-only when motion lengthens it past three minutes", () => {
+    const [gpsOnly] = nearCommutes(shortSchoolRun());
+    expect(assessAutomaticLocation("v2_enabled", { ...gpsOnly, status: "finalised" }).reason).toBe("short_journey_review_only");
+    const [timed] = nearCommutes([...shortSchoolRun(), ...motion([[0, "stationary"], [63, "automotive"], [67.5, "stationary"]], 120)]);
+    expect(Date.parse(timed.stoppedAt) - Date.parse(timed.startedAt)).toBeGreaterThanOrEqual(config.commuteMinimumDurationMs);
+    expect(timed.motionTimed).toBe(true);
+    expect(assessAutomaticLocation("v2_enabled", { ...timed, status: "finalised" })).toMatchObject({ action: "review", reason: "motion_review_only" });
+  });
+
+  it("never revokes a journey location evidence qualified, even when motion has not yet confirmed its stop", () => {
+    const evidence = [
+      ...[0, 15, 30, 45, 60].map((m, i) => fix(`home-${i}`, m, i % 2 * 3)),
+      fix("route", 69, 1_500, { speedMetersPerSecond: 12 }),
+      ...[70, 80, 90, 100].map((m, i) => fix(`school-${i}`, m, 3_000 + i % 2 * 4))
+    ];
+    expect(commutesOf(evidence)).toHaveLength(1);
+    const withMotion = commutesOf([...evidence, ...motion([[0, "stationary"], [68.5, "automotive"], [69.9, "stationary"]], 71)]);
+    expect(withMotion).toHaveLength(1);
+    expect(minutes(withMotion[0].stoppedAt)).toBe(70);
+  });
+
+  it("never starts the departure before a later sign of being at the origin in the gap", () => {
+    const evidence = [
+      ...[0, 15, 30, 45, 60].map((m, i) => fix(`home-${i}`, m, i % 2 * 3)),
+      fix("home-again", 100, 2),
+      crossing("home-exit-late", 101, "geofence_exit", HOME_ID),
+      ...[0, 1, 2, 3, 4, 5].map((i) => fix(`drive-${i}`, 102 + i, 600 + i * 400, { speedMetersPerSecond: 12 })),
+      ...[110, 120, 130].map((m, i) => fix(`school-${i}`, m, 3_000 + i % 2 * 4)),
+      ...motion([[0, "stationary"], [99.5, "automotive"], [109.5, "stationary"]], 140)
+    ];
+    const output = run(evidence);
+    const [commute] = output.segmentUpserts.filter((segment): segment is CommuteSegment => segment.kind === "commute");
+    expect(Date.parse(commute.startedAt)).toBeGreaterThanOrEqual(Date.parse(at(100)));
+    // The same holds when the server re-derives the journey from a decided Home stay ending at 08:00.
+    const stays = output.segmentUpserts.filter((segment): segment is StaySegment => segment.kind === "stay");
+    const rebuilt = deriveCommutes([{ ...stays[0], stoppedAt: at(60), stopLowerBoundAt: at(60), stopUpperBoundAt: at(60) }, stays[1]],
+      output.acceptedEvidence, config, at(240));
+    expect(rebuilt.every((leg) => Date.parse(leg.startedAt) >= Date.parse(at(100)))).toBe(true);
+  });
+
+  it("caps a motion-qualified short drive at low confidence with an explicit Review reason", () => {
+    const evidence = [
+      ...[0, 15, 30, 45, 60, 65].map((m, i) => fix(`home-${i}`, m, i % 2 * 3)),
+      fix("slow-0", 65.6, 400), fix("slow-1", 66.4, 700),
+      ...[67.8, 75, 85, 95].map((m, i) => fix(`school-${i}`, m, 1_000 + i % 2 * 4))
+    ];
+    // Native speed reports zero: no fast-fix proof for this 2.5-minute journey.
+    expect(nearCommutes(evidence)).toEqual([]);
+    const [hop] = nearCommutes([...evidence, ...motion([[0, "stationary"], [65.2, "automotive"], [67.6, "stationary"]], 120)]);
+    expect(hop).toMatchObject({ motionSupported: true, confidence: "low" });
+    expect(assessAutomaticLocation("v2_enabled", { ...hop, status: "finalised", stoppedAt: at(80) }))
+      .toMatchObject({ action: "review", reason: "motion_review_only" });
+  });
+
+  it("never qualifies a round trip through a stop from motion-only legs", () => {
+    // Home → a stop 835 m east → Home, 1,675 m of route: a same-place round trip too short to qualify.
+    const east835 = (id: string, minute: number, metres: number, patch: Partial<LocationEvidence> = {}) =>
+      fix(id, minute, 0, { longitude: east(metres), ...patch });
+    const evidence = [
+      ...[0, 15, 30, 45, 60].map((m, i) => fix(`home-${i}`, m, i % 2 * 3)),
+      east835("out", 61, 400, { speedMetersPerSecond: 11 }),
+      ...[62, 64, 66, 68, 70].map((m, i) => east835(`stop-${i}`, m, 835 + i % 2 * 3)),
+      east835("back-0", 70.6, 600, { speedMetersPerSecond: 11 }), east835("back-1", 71.1, 300, { speedMetersPerSecond: 11 }),
+      ...[72, 80, 90, 100].map((m, i) => fix(`home-pm-${i}`, m, i % 2 * 3)),
+      ...motion([[0, "stationary"], [60.5, "automotive"], [61.8, "stationary"], [70.3, "automotive"], [71.8, "stationary"]], 120)
+    ];
+    const trips = commutesOf(evidence).filter((commute) => commute.stops?.length);
+    expect(trips).toEqual([]);
+  });
+
+  it("never observes a boundary from low-confidence stillness", () => {
+    const gap = [
+      ...[0, 15, 30, 45, 60].map((m, i) => fix(`home-${i}`, m, i % 2 * 3)),
+      ...[90, 95, 100, 105, 110].map((m, i) => fix(`shop-${i}`, m, i % 2 * 4, { longitude: east(2_000) }))
+    ];
+    const evidence = [...gap, ...motion([[0, "stationary", "low"], [70, "automotive"], [80, "stationary", "low"]], 125)];
+    expect(commutesOf(evidence).filter((commute) => minutes(commute.stoppedAt) < 120)).toEqual([]);
+  });
+});
+
+describe("review round 1: capture records history deterministically and completely", () => {
+  const record = (minute: number, activity: MotionActivity, confidence: MotionConfidence = "high") =>
+    ({ startMs: t0 + minute * 60_000, activity, confidence });
+
+  it("resolves records sharing an instant the same way whatever their order", () => {
+    const records = [record(0, "stationary"), record(10, "automotive", "low"), record(10, "automotive", "high"), record(20, "stationary")];
+    const forward = motionTransitionsFromRecords(records, EMPTY_MOTION_CAPTURE_CURSOR, t0 + 30 * 60_000, t0, config);
+    const reversed = motionTransitionsFromRecords([...records].reverse(), EMPTY_MOTION_CAPTURE_CURSOR, t0 + 30 * 60_000, t0, config);
+    expect(reversed).toEqual(forward);
+    expect(forward.transitions.find((transition) => transition.startMs === t0 + 10 * 60_000)?.confidence).toBe("high");
+  });
+
+  it("records a record iOS filed late when the next query re-reads the lookback", () => {
+    const first = motionTransitionsFromRecords([record(0, "stationary"), record(20, "walking")],
+      EMPTY_MOTION_CAPTURE_CURSOR, t0 + 25 * 60_000, t0, config);
+    const fromMs = motionQueryStartMs(first.cursor, t0);
+    expect(fromMs).toBeLessThanOrEqual(t0 + 10 * 60_000);
+    const second = motionTransitionsFromRecords([record(0, "stationary"), record(10, "automotive"), record(20, "walking"), record(30, "stationary")],
+      first.cursor, t0 + 40 * 60_000, t0, config);
+    expect(second.transitions.map((transition) => transition.startMs)).toContain(t0 + 10 * 60_000);
+  });
+
+  it("never records activity before the floor, even when re-reading", () => {
+    const result = motionTransitionsFromRecords([record(0, "walking"), record(10, "automotive"), record(20, "stationary")],
+      EMPTY_MOTION_CAPTURE_CURSOR, t0 + 30 * 60_000, t0 + 15 * 60_000, config);
+    expect(result.transitions.filter((transition) => !transition.continuation).map((transition) => transition.startMs))
+      .toEqual([t0 + 20 * 60_000]);
   });
 });

@@ -859,7 +859,8 @@ describe("Motion & Fitness capture", () => {
     vi.setSystemTime(T0 + 1_000_000);
     await runtime.drainNativeLocationSignalsInBatches();
     expect(motionRows()).toHaveLength(4);
-    expect(h.queryActivities).toHaveBeenLastCalledWith(T0 + 600_000, T0 + 1_000_000, 2_000);
+    // It re-reads fifteen minutes before the latest record seen (never before the binding).
+    expect(h.queryActivities).toHaveBeenLastCalledWith(T0, T0 + 1_000_000, 2_000);
     expect(await pendingIds(A)).toEqual(expect.arrayContaining(motionRows().map((row) => row.id)));
   });
 
@@ -881,6 +882,28 @@ describe("Motion & Fitness capture", () => {
     vi.setSystemTime(T0 + 850_000);
     await runtime.drainNativeLocationSignalsInBatches();
     expect(motionRows().map((row) => row.t)).toEqual([iso(T0 + 800_000)]);
+  });
+
+  it("a query in flight across Delete recent evidence admits nothing and keeps the newer floor", async () => {
+    h.motionRecords = [
+      { startMs: T0 + 60_000, activity: "walking", confidence: "high" },
+      { startMs: T0 + 300_000, activity: "stationary", confidence: "high" }
+    ];
+    await signIn();
+    vi.setSystemTime(T0 + 600_000);
+    const query = h.queryActivities.getMockImplementation()!;
+    h.queryActivities.mockImplementationOnce(async (...args: [number, number]) => {
+      const records = await query(...args);
+      await store.deleteRetainedLocationEvidence(); // commits while the history read is in flight
+      return records;
+    });
+    await runtime.drainNativeLocationSignalsInBatches();
+    expect(motionRows()).toEqual([]);
+    const stored = db.prepare("select value from location_store_metadata where key like 'motion_capture:%'").get() as { value: string };
+    expect(JSON.parse(stored.value).floorMs).toBe(T0 + 600_000);
+    vi.setSystemTime(T0 + 700_000);
+    await runtime.drainNativeLocationSignalsInBatches();
+    expect(motionRows()).toEqual([]);
   });
 
   it("explicit logout removes the cursor and the next owner starts from its own binding", async () => {

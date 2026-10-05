@@ -165,6 +165,8 @@ export type CommuteSegment = {
    * this journey (a short drive or a drive during a GPS gap). Such journeys are Review-only.
    */
   motionSupported?: true;
+  /** Set when Motion & Fitness moved the journey's start or end. Such journeys are Review-only. */
+  motionTimed?: true;
   /**
    * Qualified legs replaced by this trip. Never persisted; replay restores them
    * only when protected history blocks the trip itself.

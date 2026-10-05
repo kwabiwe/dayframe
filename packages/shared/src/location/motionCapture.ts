@@ -11,8 +11,8 @@ export type MotionTransition = MotionRecord & { continuation?: true };
 
 /**
  * What the app remembers between Core Motion history queries, per capture owner.
- * `lastRecordStartMs` is where the next query resumes; `last` is the activity
- * most recently recorded as evidence and whether a later query confirmed it.
+ * `lastRecordStartMs` is the latest record seen; `last` is the activity run in
+ * progress at the last query and whether a continuation has confirmed it.
  */
 export type MotionCaptureCursor = {
   lastRecordStartMs: number | null;
@@ -20,6 +20,17 @@ export type MotionCaptureCursor = {
 };
 
 export const EMPTY_MOTION_CAPTURE_CURSOR: MotionCaptureCursor = { lastRecordStartMs: null, last: null };
+
+/**
+ * Each query re-reads this much history before the latest record it saw, so a
+ * record iOS files late is still recorded; evidence IDs make re-reads idempotent.
+ */
+export const MOTION_CAPTURE_LOOKBACK_MS = 15 * 60_000;
+
+/** Where the next history query starts: the lookback before the latest record seen, never before the floor. */
+export function motionQueryStartMs(cursor: MotionCaptureCursor, floorMs: number) {
+  return Math.max(floorMs, (cursor.lastRecordStartMs ?? floorMs) - MOTION_CAPTURE_LOOKBACK_MS);
+}
 
 /** Core Motion reports several flags at once; one activity describes the record. In a car at a light, it is driving. */
 export function dominantMotionActivity(flags: {
@@ -33,40 +44,55 @@ export function dominantMotionActivity(flags: {
   return "unknown";
 }
 
+const CONFIDENCE_ORDER: Record<MotionConfidence, number> = { high: 0, medium: 1, low: 2 };
+const ACTIVITY_ORDER: Record<MotionActivity, number> = {
+  automotive: 0, cycling: 1, running: 2, walking: 3, stationary: 4, unknown: 5
+};
+
 /**
- * Turns the records one history query returned into evidence transitions: one
- * per change of activity or confidence, never before `floorMs` (capture
- * binding, seven-day history or a deletion) and never repeating records an
- * earlier query covered. Once per activity, the first query at least
- * `motionStillBridgeMs` after it began adds a continuation at the query time,
- * so the engine knows the history covered that long (a stop is confirmed only
- * by stillness that lasted). A continuation is coverage, not a transition:
- * iOS can file a record that began before the query only later.
+ * Turns the records one history query returned (from `motionQueryStartMs`)
+ * into evidence transitions: each record that differs in activity or
+ * confidence from the record before it, never before `floorMs` (capture
+ * binding, seven-day history or a deletion); a record in progress at the floor
+ * is dropped, not clipped. Re-reading the lookback repeats earlier transitions
+ * with the same IDs, so a late-filed record is recorded and nothing doubles.
+ * Records sharing an instant resolve as the engine does: most confident first.
+ * Once per activity run, the first query more than `motionStillBridgeMs` after
+ * it began adds a continuation at `coveredToMs`, so the engine knows the history
+ * covered that long (a stop is confirmed only by stillness that lasted). A
+ * continuation is coverage, not a transition.
  */
 export function motionTransitionsFromRecords(
   records: readonly MotionRecord[],
   cursor: MotionCaptureCursor,
-  queriedAtMs: number,
+  coveredToMs: number,
   floorMs: number,
   config: Pick<LocationEngineConfig, "motionStillBridgeMs">
 ): { transitions: MotionTransition[]; cursor: MotionCaptureCursor } {
+  const ordered = records.filter((record) => Number.isFinite(record.startMs) && record.startMs <= coveredToMs)
+    .sort((a, b) => a.startMs - b.startMs || CONFIDENCE_ORDER[a.confidence] - CONFIDENCE_ORDER[b.confidence] ||
+      ACTIVITY_ORDER[a.activity] - ACTIVITY_ORDER[b.activity])
+    .filter((record, index, all) => index === 0 || record.startMs !== all[index - 1].startMs);
   const transitions: MotionTransition[] = [];
-  let { lastRecordStartMs, last } = cursor;
-  const ordered = [...records].filter((record) => Number.isFinite(record.startMs) && record.startMs <= queriedAtMs)
-    .sort((a, b) => a.startMs - b.startMs);
-  for (const record of ordered) {
-    if (lastRecordStartMs != null && record.startMs <= lastRecordStartMs) continue;
-    lastRecordStartMs = record.startMs;
-    // A record in progress at the floor began before it; its start is not ours to record.
-    if (record.startMs < floorMs) continue;
-    if (last && last.activity === record.activity && last.confidence === record.confidence) continue;
-    transitions.push(record);
-    last = { atMs: record.startMs, activity: record.activity, confidence: record.confidence, confirmed: false };
+  let runStartMs: number | null = null;
+  ordered.forEach((record, index) => {
+    const previous = ordered[index - 1];
+    if (previous && previous.activity === record.activity && previous.confidence === record.confidence) return;
+    runStartMs = record.startMs;
+    if (record.startMs >= floorMs) transitions.push(record);
+  });
+  const latest = ordered.at(-1);
+  let last = cursor.last;
+  if (latest && runStartMs != null && runStartMs >= floorMs) {
+    const sameRun = last?.atMs === runStartMs && last.activity === latest.activity && last.confidence === latest.confidence;
+    last = sameRun ? last : { atMs: runStartMs, activity: latest.activity, confidence: latest.confidence, confirmed: false };
   }
-  if (last && !last.confirmed && queriedAtMs - last.atMs > config.motionStillBridgeMs) {
-    transitions.push({ startMs: queriedAtMs, activity: last.activity, confidence: last.confidence, continuation: true });
+  if (last && !last.confirmed && coveredToMs - last.atMs > config.motionStillBridgeMs) {
+    transitions.push({ startMs: coveredToMs, activity: last.activity, confidence: last.confidence, continuation: true });
     last = { ...last, confirmed: true };
   }
+  const lastRecordStartMs = latest && (cursor.lastRecordStartMs == null || latest.startMs > cursor.lastRecordStartMs)
+    ? latest.startMs : cursor.lastRecordStartMs;
   return { transitions, cursor: { lastRecordStartMs, last } };
 }
 

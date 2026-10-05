@@ -23,9 +23,9 @@ export type MotionBlock = {
   endMs: number;
   movingMs: number;
   byMode: Partial<Record<MotionTravelMode, number>>;
-  /** Core Motion reported stillness right before the block, with coverage before that. */
+  /** Core Motion reported confident stillness right before the block, with coverage before that. */
   onsetObserved: boolean;
-  /** Core Motion reported stillness right after the block, covered long enough that movement did not resume. */
+  /** Core Motion reported confident stillness right after the block, covered long enough that movement did not resume. */
   stopObserved: boolean;
 };
 
@@ -123,10 +123,12 @@ export function buildMotionTimeline(
   const blocks = raw.filter((block) => block.movingMs >= config.motionMinimumBlockMovingMs).map((block) => {
     const before = intervals.find((interval) => interval.toMs === block.startMs);
     const after = intervals.find((interval) => interval.fromMs === block.endMs);
+    // Only confident stillness observes a boundary.
+    const still = (interval: MotionInterval | undefined) => interval?.activity === "stationary" && interval.confidence !== "low";
     return {
       ...block,
-      onsetObserved: before?.activity === "stationary" && block.startMs - coverageFromMs > bridge,
-      stopObserved: after?.activity === "stationary" && coverageToMs - block.endMs > bridge
+      onsetObserved: still(before) && block.startMs - coverageFromMs > bridge,
+      stopObserved: still(after) && coverageToMs - block.endMs > bridge
     };
   });
   return { intervals, coverageFromMs, coverageToMs, blocks };
@@ -165,18 +167,6 @@ export function motionArrivalMs(timeline: MotionTimeline | null, lowerMs: number
   if (blocks.length !== 1) return null;
   const [block] = blocks;
   return block.stopObserved && block.endMs >= lowerMs && block.endMs <= upperMs ? block.endMs : null;
-}
-
-/**
- * The observed start of the moving block in progress at `atMs`, when that
- * block began from stillness no earlier than `notBeforeMs` and no more than
- * `motionBoundaryToleranceMs` before `atMs`. A geofence exit fires some way
- * from the place, part-way through the departure it reports.
- */
-export function motionDepartureBefore(timeline: MotionTimeline | null, atMs: number, notBeforeMs: number, config: LocationEngineConfig) {
-  const block = timeline?.blocks.find((candidate) => candidate.startMs <= atMs && candidate.endMs >= atMs);
-  return block?.onsetObserved && block.startMs >= notBeforeMs && block.startMs < atMs &&
-    atMs - block.startMs <= config.motionBoundaryToleranceMs ? block.startMs : null;
 }
 
 /** The fastest mode a block was travelled in for at least `motionMinimumModeMs`, fastest first. */
@@ -235,6 +225,15 @@ export function motionTravelMode(timeline: MotionTimeline | null, startMs: numbe
     (byMode.get(mode) ?? 0) >= config.motionTravelModeMinimumShare * moving) ?? null;
 }
 
+// A stay refined below keeps its location-only end here, so journeys between
+// stays still qualify on location evidence alone (motion never revokes them).
+const locationOnlyStayEnds = new WeakMap<StaySegment, string>();
+
+/** The stay's end from location evidence alone, before any motion refinement. */
+export function locationOnlyStayEnd(stay: StaySegment) {
+  return locationOnlyStayEnds.get(stay) ?? stay.stoppedAt ?? null;
+}
+
 /**
  * Ends stays when Core Motion saw the device start moving, within the stay's
  * existing departure bounds (last observation there to first evidence away).
@@ -258,6 +257,8 @@ export function refineStayDeparturesWithMotion(
     const before = Date.parse(stay.stoppedAt) - startedMs;
     const after = departedMs - startedMs;
     if (thresholds.some((threshold) => before >= threshold && after < threshold)) return stay;
-    return { ...stay, stoppedAt: new Date(departedMs).toISOString() };
+    const refined = { ...stay, stoppedAt: new Date(departedMs).toISOString() };
+    locationOnlyStayEnds.set(refined, stay.stoppedAt);
+    return refined;
   });
 }

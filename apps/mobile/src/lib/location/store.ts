@@ -579,25 +579,33 @@ function sanitiseEvidence(input: LocationEvidence) {
   return parsed;
 }
 
+/** A motion history read: the cursor it produced and the floor it was read under. */
+export type MotionCaptureCommit = { next: MotionCaptureState; readFloorMs: number };
+
 export async function persistLocationEvidence(items: LocationEvidence[], snapshot: LocationCaptureSnapshot,
-  options: { motionCapture?: MotionCaptureState } = {}) {
+  options: { motionCapture?: MotionCaptureCommit } = {}) {
   return serialiseLocationMutation(() => persistLocationEvidenceUnsafe(items, snapshot, options));
 }
 
 /** The motion cursor for the snapshot's binding: its own, or a fresh one from the binding. */
 export async function readMotionCaptureState(snapshot: LocationCaptureSnapshot): Promise<MotionCaptureState | null> {
-  const binding = snapshot.binding;
-  if (!binding) return null;
+  return snapshot.binding ? motionCaptureStateFor(snapshot.binding) : null;
+}
+
+async function motionCaptureStateFor(binding: LocationCaptureBinding, transaction?: SQLite.SQLiteDatabase): Promise<MotionCaptureState> {
   const fresh: MotionCaptureState = { version: 1, bindingId: binding.id, floorMs: Date.parse(binding.boundAt), cursor: EMPTY_MOTION_CAPTURE_CURSOR };
   try {
-    const stored = JSON.parse(await metadata(`${MOTION_CAPTURE_PREFIX}${binding.accountKey}`) ?? "null") as MotionCaptureState | null;
+    const db = transaction ?? await database();
+    const row = await db.getFirstAsync<MetadataRow>("select value from location_store_metadata where key = ?",
+      `${MOTION_CAPTURE_PREFIX}${binding.accountKey}`);
+    const stored = JSON.parse(row?.value ?? "null") as MotionCaptureState | null;
     return stored?.version === 1 && stored.bindingId === binding.id && Number.isFinite(stored.floorMs) && stored.cursor
       ? { ...stored, floorMs: Math.max(stored.floorMs, fresh.floorMs) } : fresh;
   } catch { return fresh; }
 }
 
 async function persistLocationEvidenceUnsafe(items: LocationEvidence[], snapshot: LocationCaptureSnapshot,
-  options: { motionCapture?: MotionCaptureState } = {}) {
+  options: { motionCapture?: MotionCaptureCommit } = {}) {
   if (items.length === 0 && !options.motionCapture) return { insertedCount: 0, duplicateCount: 0, rejectedCount: 0 };
   const now = new Date().toISOString();
   const expiresAt = new Date(Date.parse(now) + LOCATION_ENGINE_V2_CONFIG.rawEvidenceRetentionDays * 86_400_000).toISOString();
@@ -615,6 +623,12 @@ async function persistLocationEvidenceUnsafe(items: LocationEvidence[], snapshot
       : !binding.enabled || !await readLocationCaptureConsent(owner) ? "opted_out" : null;
     if (reason) { reject(reason, items.length); await recordCaptureRejections(rejections, transaction); return; }
     const key = binding!.accountKey;
+    // A motion read under an older floor (a deletion committed while it ran)
+    // is stale: none of it is admitted and the newer floor stays.
+    if (options.motionCapture && (options.motionCapture.next.bindingId !== binding!.id ||
+      (await motionCaptureStateFor(binding!, transaction)).floorMs !== options.motionCapture.readFloorMs)) {
+      reject("stale_epoch", items.length); await recordCaptureRejections(rejections, transaction); return;
+    }
     const row = await transaction.getFirstAsync<{ context_json: string }>(
       "select context_json from location_account_context where account_key = ?", key);
     const context = row ? JSON.parse(row.context_json) as LocationAccountContext : snapshot.context!;
@@ -640,8 +654,8 @@ async function persistLocationEvidenceUnsafe(items: LocationEvidence[], snapshot
       insertedCount += result.changes;
     }
     // The motion cursor advances only with the evidence it produced.
-    if (options.motionCapture?.bindingId === binding!.id) {
-      await setMetadata(`${MOTION_CAPTURE_PREFIX}${key}`, JSON.stringify(options.motionCapture), transaction);
+    if (options.motionCapture) {
+      await setMetadata(`${MOTION_CAPTURE_PREFIX}${key}`, JSON.stringify(options.motionCapture.next), transaction);
     }
     await recordCaptureRejections(rejections, transaction);
     if (!await readLocationCaptureConsent(owner!) || !isLocationCaptureSnapshotCurrent(snapshot)) throw new StaleLocationCaptureError();

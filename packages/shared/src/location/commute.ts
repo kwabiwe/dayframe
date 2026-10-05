@@ -3,8 +3,8 @@ import type { LocationEngineConfig } from "./config";
 import {
   buildMotionTimeline,
   isMotionEvidence,
+  locationOnlyStayEnd,
   motionArrivalMs,
-  motionDepartureBefore,
   motionDepartureMs,
   motionJourneyBlock,
   motionTravelMode
@@ -749,7 +749,9 @@ export function deriveCommutes(
     const from = stays[index - 1];
     const to = stays[index];
     if (!from.stoppedAt) continue;
-    const originalStartedAtMs = Date.parse(from.stoppedAt);
+    // Qualification, route evidence and departure support use location
+    // evidence alone; motion only times the journey afterwards.
+    const originalStartedAtMs = Date.parse(locationOnlyStayEnd(from) ?? from.stoppedAt);
     const stoppedAtMs = Date.parse(to.startedAt);
     const boundaryEvidence = acceptedEvidence.filter((_item, evidenceIndex) => {
       const at = occurredAtMs[evidenceIndex];
@@ -772,11 +774,6 @@ export function deriveCommutes(
     let startedAtMs = latestFromSupport
       ? Date.parse(latestFromSupport.evidence.occurredAt)
       : originalStartedAtMs;
-    // An exit callback fires during the departure it reports: when Core Motion
-    // saw that movement begin after the stay ended, the journey begins there.
-    if (latestFromSupport?.evidence.kind === "geofence_exit") {
-      startedAtMs = motionDepartureBefore(motion, startedAtMs, originalStartedAtMs, config) ?? startedAtMs;
-    }
     // A journey ends where its destination stay begins. When a round trip was
     // seen back at its place well before that stay begins, the device was
     // there then, so any journey to that stay starts at that return: one that
@@ -789,6 +786,10 @@ export function deriveCommutes(
         returnedMs = observedReturnMs(to, gapEvidence, config, returnedMs, snapshots)
       ) startedAtMs = returnedMs;
     }
+    // The latest sign the device was still at its origin: Core Motion's
+    // departure can never precede it. An exit is departure evidence, not presence.
+    const exitStart = latestFromSupport?.evidence.kind === "geofence_exit" && startedAtMs === Date.parse(latestFromSupport.evidence.occurredAt);
+    let presentUntilMs = Math.max(Date.parse(from.stopLowerBoundAt ?? locationOnlyStayEnd(from) ?? from.stoppedAt), exitStart ? -Infinity : startedAtMs);
     const fromHasInferredBoundary = options.inferredBoundaryStayIds?.has(from.clientSegmentId) === true;
     const toHasInferredBoundary = options.inferredBoundaryStayIds?.has(to.clientSegmentId) === true;
     const anyEndpointHasInferredBoundary = fromHasInferredBoundary || toHasInferredBoundary;
@@ -830,10 +831,26 @@ export function deriveCommutes(
       to,
       stops
     });
-    // The one journey Core Motion saw between these stays, if it saw exactly one.
+    const routeTimes = routeEvidence.map(({ evidence }) => Date.parse(evidence.occurredAt));
+    const firstRouteMs = routeTimes.length ? Math.min(...routeTimes) : stoppedAtMs;
+    if (motion) {
+      const origin = segmentPoint(from);
+      const radius = from.radiusMeters ?? config.unknownStayBaseRadiusMeters;
+      for (const [evidenceIndex, item] of acceptedEvidence.entries()) {
+        const at = occurredAtMs[evidenceIndex];
+        if (!(at > presentUntilMs && at < firstRouteMs) || snapshots.has(item) ||
+          item.evidence.kind === "geofence_exit" || item.evidence.kind === "geofence_state") continue;
+        const point = evidencePoint(item);
+        const atOrigin = evidenceMatchesStay(item, from) ||
+          (origin != null && point != null && accurateFix(item, config) && distanceMeters(origin, point) <= radius);
+        if (atOrigin) presentUntilMs = at;
+      }
+    }
+    // The one journey Core Motion saw between the last sign of the origin and
+    // the destination, if it saw exactly one.
     const motionJourney = () => summary.straightLineDistanceMeters == null || summary.sameKnownPlace || stops.length
       ? null
-      : motionJourneyBlock(motion, startedAtMs, stoppedAtMs, summary.straightLineDistanceMeters, config);
+      : motionJourneyBlock(motion, presentUntilMs, stoppedAtMs, summary.straightLineDistanceMeters, config);
     let motionSupported = false;
     if (duration < config.commuteMinimumDurationMs) {
       if (summary.sameKnownPlace || summary.straightLineDistanceMeters == null ||
@@ -874,16 +891,22 @@ export function deriveCommutes(
     }
     if (!qualification.qualifies) continue;
     const evidenceIds = routeEvidence.map(({ evidence }) => evidence.clientEvidenceId);
-    // Core Motion times the journey inside the observed window: movement that
-    // began after the stay's end and before the first route observation starts
-    // it, and stillness after the last route observation, before the
-    // destination's first observation, ends it. The stays keep their own
-    // boundaries, and evidence summaries keep the observed window.
-    const routeTimes = routeEvidence.map(({ evidence }) => Date.parse(evidence.occurredAt));
-    const departedMs = motionDepartureMs(motion, startedAtMs, routeTimes.length ? Math.min(...routeTimes) : stoppedAtMs, config);
-    const beganMs = departedMs != null && departedMs > startedAtMs ? departedMs : startedAtMs;
+    // Core Motion times the qualified journey: movement that began after the
+    // last sign of the origin and before the first route observation starts it
+    // (an exit callback fires part-way through the departure it reports, so the
+    // onset may precede it by at most `motionBoundaryToleranceMs`), and
+    // stillness after the last route observation, before the destination's
+    // first observation, ends it. It never starts before its origin stay ends.
+    // Evidence summaries and qualification keep the observed window.
+    const departedMs = motionDepartureMs(motion, presentUntilMs, firstRouteMs, config);
+    const departureUsable = departedMs != null && departedMs < firstRouteMs &&
+      (!exitStart || startedAtMs - departedMs <= config.motionBoundaryToleranceMs);
+    const beganMs = Math.max(departureUsable ? departedMs! : startedAtMs, Date.parse(from.stoppedAt));
     const arrivedMs = motionArrivalMs(motion, routeTimes.length ? Math.max(...routeTimes) : beganMs, stoppedAtMs, config);
     const endedMs = arrivedMs != null && arrivedMs > beganMs ? arrivedMs : stoppedAtMs;
+    // Motion never makes a journey more eligible for automatic logging: one it
+    // timed or qualified always needs Review.
+    const motionTimed = beganMs !== startedAtMs || endedMs !== stoppedAtMs;
     const stopLowerBoundAt = to.startLowerBoundAt ?? to.startedAt;
     const startUpperBoundAt = from.stopUpperBoundAt ?? routeEvidence[0]?.evidence.occurredAt ?? from.stoppedAt;
     const travelMode = motionTravelMode(motion, beganMs, endedMs, config);
@@ -921,7 +944,7 @@ export function deriveCommutes(
       gapDurationSeconds: Math.round((endedMs - beganMs) / 1_000),
       maximumObservationGapSeconds: summary.maximumObservationGapSeconds,
       continuityStatus: uncertainBoundary ? "uncertain_gap" : "continuous",
-      confidence: anyEndpointHasInferredBoundary
+      confidence: anyEndpointHasInferredBoundary || motionSupported
         ? "low"
         : uncertainBoundary && qualification.confidence === "medium_high"
           ? "medium"
@@ -930,6 +953,7 @@ export function deriveCommutes(
       ...(stops.length ? { stops: stops.map(stopFromStay) } : {}),
       ...(travelMode ? { travelMode } : {}),
       ...(motionSupported ? { motionSupported: true as const } : {}),
+      ...(motionTimed ? { motionTimed: true as const } : {}),
       evidenceIds
     });
   }
@@ -1010,7 +1034,8 @@ export function assembleTripsThroughStops(
     let confidence: CommuteSegment["confidence"] | null = null;
     for (let hops = 0; hops <= interiorStops.length; hops += 1) {
       const leg = legs.find((candidate) => candidate.fromStaySegmentId === current);
-      if (!leg) return null;
+      // A leg only Motion & Fitness qualified cannot make a trip real.
+      if (!leg || leg.motionSupported) return null;
       confidence = confidence == null || order.indexOf(leg.confidence) < order.indexOf(confidence) ? leg.confidence : confidence;
       if (leg.toStaySegmentId === toStayId) return confidence;
       if (!interiorIds.has(leg.toStaySegmentId)) return null;

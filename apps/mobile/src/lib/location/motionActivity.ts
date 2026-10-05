@@ -3,6 +3,7 @@ import {
   LocationEvidenceSchema,
   dominantMotionActivity,
   motionEvidenceId,
+  motionQueryStartMs,
   motionTransitionsFromRecords,
   type LocationEvidence
 } from "@dayframe/shared";
@@ -40,7 +41,9 @@ export function motionEvidenceFromRecords(
     : []);
   const coveredToMs = truncated && mapped.length ? Math.max(...mapped.map((record) => record.startMs)) : queriedAtMs;
   const { transitions, cursor } = motionTransitionsFromRecords(mapped, state.cursor, coveredToMs, floorMs, LOCATION_ENGINE_V2_CONFIG);
-  const receivedAt = new Date(queriedAtMs).toISOString();
+  // For motion, receipt is the time the history is known to cover: the engine
+  // reads it as coverage, so a truncated page never claims more than it returned.
+  const receivedAt = new Date(coveredToMs).toISOString();
   const evidence = transitions.flatMap((transition) => {
     const parsed = LocationEvidenceSchema.safeParse({
       clientEvidenceId: motionEvidenceId(transition), deviceId: context.deviceId,
@@ -71,13 +74,14 @@ export async function captureMotionActivityUnsafe(capture: LocationCaptureSnapsh
   if (!state || !isLocationCaptureSnapshotCurrent(capture)) return { status: "no_owner" as const, recordedCount: 0 };
   const nowMs = Date.now();
   const floorMs = Math.max(state.floorMs, nowMs - MOTION_HISTORY_MS);
-  const fromMs = Math.max(floorMs, state.cursor.lastRecordStartMs ?? floorMs);
+  const fromMs = motionQueryStartMs(state.cursor, floorMs);
   if (!(fromMs < nowMs)) return { status, recordedCount: 0 };
   const records = await native.queryActivities(fromMs, nowMs, native.MAX_MOTION_RECORDS_PER_QUERY);
   if (!isLocationCaptureSnapshotCurrent(capture)) return { status: "no_owner" as const, recordedCount: 0 };
   const { evidence, next } = motionEvidenceFromRecords(records, state, nowMs, floorMs, capture.context,
     records.length >= native.MAX_MOTION_RECORDS_PER_QUERY);
-  const result = await persistLocationEvidence(evidence, capture, { motionCapture: next });
+  // Admission rejects the result if "Delete recent evidence" moved the floor while it was read.
+  const result = await persistLocationEvidence(evidence, capture, { motionCapture: { next, readFloorMs: state.floorMs } });
   return { status, recordedCount: result.insertedCount };
 }
 

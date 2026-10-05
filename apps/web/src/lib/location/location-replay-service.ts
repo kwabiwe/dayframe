@@ -506,11 +506,18 @@ async function retireOpenReviewsForMissingSegments(
            and le.accepted = true and le.device_id = $3 and le.algorithm_version = $4
            and le.expires_at > $7::timestamptz
        )`;
-  const provenancePredicate = scalabilityProfile
+  const lineageOwner = "lse.workspace_id = ri.workspace_id and lse.user_id = ri.user_id";
+  const segmentProvenance = scalabilityProfile
     ? `exists (select 1 from eligible_lineage lse
         where lse.stay_segment_id = st.id or lse.commute_segment_id = cs.id)`
-    : eligibleProvenance("lse.stay_segment_id = st.id or lse.commute_segment_id = cs.id",
-        "lse.workspace_id = ri.workspace_id and lse.user_id = ri.user_id");
+    : eligibleProvenance("lse.stay_segment_id = st.id or lse.commute_segment_id = cs.id", lineageOwner);
+  // A journey only Motion & Fitness showed has no lineage (motion never joins
+  // it): its retained provenance is its two endpoint stays' evidence.
+  const endpointProvenance = (column: "from_stay_segment_id" | "to_stay_segment_id") => scalabilityProfile
+    ? `exists (select 1 from eligible_lineage lse where lse.stay_segment_id = cs.${column})`
+    : eligibleProvenance(`lse.stay_segment_id = cs.${column}`, lineageOwner);
+  const provenancePredicate = `(${segmentProvenance} or (cs.id is not null and cs.metadata ? 'motionSupported'
+    and ${endpointProvenance("from_stay_segment_id")} and ${endpointProvenance("to_stay_segment_id")}))`;
   const stale = await client.query<{ reviewId: string; eventId: string }>(
     `${eligibleLineage}select ri.id as "reviewId", ri.event_id as "eventId"
      from review_items ri

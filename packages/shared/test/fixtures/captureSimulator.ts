@@ -1,6 +1,6 @@
 import { LOCATION_ENGINE_V2_CONFIG as config } from "../../src/location/config";
 import {
-  EMPTY_MOTION_CAPTURE_CURSOR, motionEvidenceId, motionTransitionsFromRecords, type MotionRecord
+  EMPTY_MOTION_CAPTURE_CURSOR, motionEvidenceId, motionQueryStartMs, motionTransitionsFromRecords, type MotionRecord
 } from "../../src/location/motionCapture";
 import type { LocationEngineInput, LocationEvidence, MotionActivity, MotionConfidence } from "../../src/location/types";
 
@@ -306,10 +306,16 @@ function simulatedMotion(
     .filter(Number.isFinite).sort((a, b) => a - b);
   let cursor = EMPTY_MOTION_CAPTURE_CURSOR;
   const floorMs = truth[0]?.atMs ?? 0;
+  const seen = new Set<string>();
   return queries.flatMap((queriedAtMs) => {
-    const step = motionTransitionsFromRecords(records.filter((item) => item.startMs <= queriedAtMs), cursor, queriedAtMs, floorMs, config);
+    // Core Motion returns the history from the query start, with the record in progress there.
+    const fromMs = motionQueryStartMs(cursor, floorMs);
+    const step = motionTransitionsFromRecords(records.filter((item, index) => item.startMs <= queriedAtMs &&
+      (records[index + 1]?.startMs ?? Infinity) > fromMs), cursor, queriedAtMs, floorMs, config);
     cursor = step.cursor;
-    return step.transitions.map((transition): LocationEvidence => ({
+    // The journal keeps the first delivery of each evidence ID.
+    return step.transitions.filter((transition) => !seen.has(motionEvidenceId(transition)) &&
+      Boolean(seen.add(motionEvidenceId(transition)))).map((transition): LocationEvidence => ({
       clientEvidenceId: motionEvidenceId(transition), deviceId: DEVICE, algorithmVersion: config.algorithmVersion,
       kind: "motion_activity", occurredAt: new Date(transition.startMs).toISOString(), sourceTimestamp: null, endedAt: null,
       latitude: null, longitude: null, horizontalAccuracyMeters: null, speedMetersPerSecond: null, savedPlaceId: null,
