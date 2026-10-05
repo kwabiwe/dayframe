@@ -236,27 +236,36 @@ export function locationOnlyStayEnd(stay: StaySegment) {
 
 /**
  * Ends stays when Core Motion saw the device start moving, within the stay's
- * existing departure bounds (last observation there to first evidence away).
- * Bounds never change, so automatic eligibility cannot; a stay is never
- * shortened below a dwell threshold it met, and stay IDs do not depend on times.
+ * existing departure bounds (last observation there to first evidence away)
+ * and strictly before the first location evidence the stay does not own, so a
+ * journey after it always keeps a positive window before its route. Bounds
+ * never change, so automatic eligibility cannot; a stay never crosses a dwell
+ * threshold (saved floor, candidate, Review) in either direction, and stay IDs
+ * do not depend on times.
  */
 export function refineStayDeparturesWithMotion(
   stays: StaySegment[],
   timeline: MotionTimeline | null,
-  config: LocationEngineConfig
+  config: LocationEngineConfig,
+  locationEvidence: readonly ClassifiedEvidence[] = []
 ): StaySegment[] {
   if (!timeline) return stays;
   const thresholds = [config.savedPlaceMinimumDwellMs, config.unknownStayCandidateDwellMs, config.unknownStayReviewDwellMs];
+  const times = locationEvidence.map(({ evidence }) => Date.parse(evidence.occurredAt));
   return stays.map((stay, index) => {
     if (!stay.stoppedAt || !stay.stopLowerBoundAt || !stay.stopUpperBoundAt) return stay;
-    const departedMs = motionDepartureMs(timeline, Date.parse(stay.stopLowerBoundAt), Date.parse(stay.stopUpperBoundAt), config);
+    const lowerMs = Date.parse(stay.stopLowerBoundAt);
+    const departedMs = motionDepartureMs(timeline, lowerMs, Date.parse(stay.stopUpperBoundAt), config);
     const startedMs = Date.parse(stay.startedAt);
     const nextStartedMs = index + 1 < stays.length ? Date.parse(stays[index + 1].startedAt) : Number.POSITIVE_INFINITY;
-    if (departedMs == null || departedMs <= startedMs || departedMs > nextStartedMs ||
+    const own = new Set(stay.evidenceIds);
+    const firstAwayMs = Math.min(nextStartedMs, ...locationEvidence.flatMap((item, at) =>
+      times[at] > lowerMs && !own.has(item.evidence.clientEvidenceId) && item.evidence.kind !== "geofence_state" ? [times[at]] : []));
+    if (departedMs == null || departedMs <= startedMs || departedMs >= firstAwayMs ||
       departedMs === Date.parse(stay.stoppedAt)) return stay;
     const before = Date.parse(stay.stoppedAt) - startedMs;
     const after = departedMs - startedMs;
-    if (thresholds.some((threshold) => before >= threshold && after < threshold)) return stay;
+    if (thresholds.some((threshold) => (before >= threshold) !== (after >= threshold))) return stay;
     const refined = { ...stay, stoppedAt: new Date(departedMs).toISOString() };
     locationOnlyStayEnds.set(refined, stay.stoppedAt);
     return refined;

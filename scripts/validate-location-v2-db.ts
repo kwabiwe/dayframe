@@ -1329,6 +1329,28 @@ async function validateMotionOnlyReviewRetirement() {
   assert.deepEqual((await proposals()).rows, [{ status: "ignored", ignoredScope: "superseded" }],
     "An obsolete motion-only proposal stayed open without lineage.");
 
+  // A decision about a motion-only journey survives a change of its endpoint
+  // stays' IDs (here a late origin Visit): it has no lineage, so its interval
+  // protects it and no duplicate proposal appears.
+  await clearDerivedLocationState();
+  await ingestLocationEvidence(batch("db-motion-only-decided", [...location, motion("08:00:00", "stationary"),
+    motion("09:10:00", "walking"), motion("09:11:00", "automotive"), motion("09:17:00", "walking"), motion("09:18:00", "stationary")],
+    "v2_review", acknowledged), session);
+  const open = await pool.query<{ id: string }>(
+    `select ri.id from review_items ri join commute_segments cs on cs.id = ri.location_segment_id
+     where ri.workspace_id = $1 and ri.user_id = $2 and ri.status = 'open' and cs.metadata ? 'motionSupported'`,
+    [WORKSPACE_ID, USER_ID]);
+  assert.equal(open.rows.length, 1, "The motion-only drive was not proposed.");
+  await resolveLocationReviewAction(open.rows[0].id, { action: "ignore_once_location" }, session);
+  const lateVisit: LocationEvidence = { ...point("motion-only-late-visit", "07:58:00", 0), kind: "visit",
+    endedAt: "2026-07-20T09:00:00.000Z", horizontalAccuracyMeters: 20, speedMetersPerSecond: null };
+  await ingestLocationEvidence(batch("db-motion-only-late-visit", [lateVisit], "v2_review", acknowledged), session);
+  const after = await pool.query<{ status: string }>(
+    `select ri.status from review_items ri join commute_segments cs on cs.id = ri.location_segment_id
+     where ri.workspace_id = $1 and ri.user_id = $2 and cs.metadata ? 'motionSupported' order by ri.created_at`,
+    [WORKSPACE_ID, USER_ID]);
+  assert.deepEqual(after.rows.map((row) => row.status), ["ignored"], "A decided motion-only journey was proposed again under a new ID.");
+
   // In v2_enabled the individual emitter carries the same motion fields and still needs Review.
   await clearDerivedLocationState();
   process.env.DAYFRAME_LOCATION_ROLLOUT_MODE = "v2_enabled";

@@ -1846,7 +1846,7 @@ function runLocationEnginePass(input: LocationEngineInput): { output: LocationEn
   const stays = refineStayDeparturesWithMotion(coalesceCompatibleUnknownStays(rawStays, accepted, input),
     acceptedWithMotion.length === accepted.length ? null
       : buildMotionTimeline(acceptedWithMotion, input.config, Date.parse(input.processingAt)),
-    input.config);
+    input.config, accepted);
   // A stay inherits an inferred boundary from every promoted stay it absorbed
   // or coalesced (whose evidence it contains), so commutes ending there stay
   // low-confidence whatever its own ID.

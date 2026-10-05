@@ -832,20 +832,29 @@ export function deriveCommutes(
       stops
     });
     const routeTimes = routeEvidence.map(({ evidence }) => Date.parse(evidence.occurredAt));
-    const firstRouteMs = routeTimes.length ? Math.min(...routeTimes) : stoppedAtMs;
+    // Motion timing works between the last sign of the origin and the first
+    // observation away from it. An unknown origin has no place identity, so
+    // accurate fixes and Visits within its radius are presence, not route.
+    let firstAwayMs = stoppedAtMs;
     if (motion) {
       const origin = segmentPoint(from);
       const radius = from.radiusMeters ?? config.unknownStayBaseRadiusMeters;
+      const atOrigin = (item: ClassifiedEvidence) => {
+        if (evidenceMatchesStay(item, from)) return true;
+        const point = evidencePoint(item);
+        const accurate = accurateFix(item, config) || item.evidence.kind === "visit" &&
+          item.evidence.horizontalAccuracyMeters != null && item.evidence.horizontalAccuracyMeters <= config.highQualityHorizontalAccuracyMeters;
+        return origin != null && point != null && accurate && distanceMeters(origin, point) <= radius;
+      };
       for (const [evidenceIndex, item] of acceptedEvidence.entries()) {
         const at = occurredAtMs[evidenceIndex];
-        if (!(at > presentUntilMs && at < firstRouteMs) || snapshots.has(item) ||
+        if (!(at > presentUntilMs && at < stoppedAtMs) || snapshots.has(item) ||
           item.evidence.kind === "geofence_exit" || item.evidence.kind === "geofence_state") continue;
-        const point = evidencePoint(item);
-        const atOrigin = evidenceMatchesStay(item, from) ||
-          (origin != null && point != null && accurateFix(item, config) && distanceMeters(origin, point) <= radius);
-        if (atOrigin) presentUntilMs = at;
+        if (atOrigin(item)) presentUntilMs = at;
+        else if (evidencePoint(item) != null) { firstAwayMs = at; break; }
       }
     }
+    const firstRouteMs = Math.min(firstAwayMs, ...routeTimes.filter((at) => at > presentUntilMs));
     // The one journey Core Motion saw between the last sign of the origin and
     // the destination, if it saw exactly one.
     const motionJourney = () => summary.straightLineDistanceMeters == null || summary.sameKnownPlace || stops.length
@@ -901,9 +910,16 @@ export function deriveCommutes(
     const departedMs = motionDepartureMs(motion, presentUntilMs, firstRouteMs, config);
     const departureUsable = departedMs != null && departedMs < firstRouteMs &&
       (!exitStart || startedAtMs - departedMs <= config.motionBoundaryToleranceMs);
-    const beganMs = Math.max(departureUsable ? departedMs! : startedAtMs, Date.parse(from.stoppedAt));
+    let beganMs = Math.max(departureUsable ? departedMs! : startedAtMs, Date.parse(from.stoppedAt));
     const arrivedMs = motionArrivalMs(motion, routeTimes.length ? Math.max(...routeTimes) : beganMs, stoppedAtMs, config);
-    const endedMs = arrivedMs != null && arrivedMs > beganMs ? arrivedMs : stoppedAtMs;
+    let endedMs = arrivedMs != null && arrivedMs > beganMs ? arrivedMs : stoppedAtMs;
+    // A journey always has a positive window that starts no later than its route;
+    // if motion cannot give one, the location-only times stand.
+    if (!(endedMs > beganMs) || beganMs > (routeTimes.length ? Math.min(...routeTimes) : stoppedAtMs)) {
+      beganMs = Math.max(startedAtMs, Date.parse(locationOnlyStayEnd(from) ?? from.stoppedAt));
+      endedMs = stoppedAtMs;
+      if (!(endedMs > beganMs)) continue;
+    }
     // Motion never makes a journey more eligible for automatic logging: one it
     // timed or qualified always needs Review.
     const motionTimed = beganMs !== startedAtMs || endedMs !== stoppedAtMs;
@@ -1022,8 +1038,9 @@ export function assembleTripsThroughStops(
   processingAt: string,
   options: CommuteDerivationOptions = {}
 ) {
+  // Membership uses location evidence alone: motion never turns a stop into a visit or back.
   const minorStop = (stay: StaySegment) => stay.placeMatchKind === "unknown" && stay.stoppedAt != null &&
-    Date.parse(stay.stoppedAt) - Date.parse(stay.startedAt) < config.unknownStayReviewDwellMs;
+    Date.parse(locationOnlyStayEnd(stay) ?? stay.stoppedAt) - Date.parse(stay.startedAt) < config.unknownStayReviewDwellMs;
   const interiorStops = stays.filter(minorStop);
   if (!interiorStops.length) return legs;
   const majors = stays.filter((stay) => !minorStop(stay));

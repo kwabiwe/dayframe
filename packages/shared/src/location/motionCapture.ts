@@ -51,12 +51,14 @@ const ACTIVITY_ORDER: Record<MotionActivity, number> = {
 
 /**
  * Turns the records one history query returned (from `motionQueryStartMs`)
- * into evidence transitions: each record that differs in activity or
- * confidence from the record before it, never before `floorMs` (capture
+ * into evidence transitions: every record, never before `floorMs` (capture
  * binding, seven-day history or a deletion); a record in progress at the floor
- * is dropped, not clipped. Re-reading the lookback repeats earlier transitions
- * with the same IDs, so a late-filed record is recorded and nothing doubles.
- * Records sharing an instant resolve as the engine does: most confident first.
+ * is dropped, not clipped. Records are never compressed against their
+ * neighbours: a record filed late can change which record wins an instant or
+ * what precedes another, so only the complete set lets the engine see what a
+ * single read of the whole history would. Re-reading the lookback repeats
+ * records with the same IDs, so nothing doubles. Records sharing an instant
+ * resolve as the engine does (most confident, then driving first).
  * Once per activity run, the first query more than `motionStillBridgeMs` after
  * it began adds a continuation at `coveredToMs`, so the engine knows the history
  * covered that long (a stop is confirmed only by stillness that lasted). A
@@ -73,13 +75,12 @@ export function motionTransitionsFromRecords(
     .sort((a, b) => a.startMs - b.startMs || CONFIDENCE_ORDER[a.confidence] - CONFIDENCE_ORDER[b.confidence] ||
       ACTIVITY_ORDER[a.activity] - ACTIVITY_ORDER[b.activity])
     .filter((record, index, all) => index === 0 || record.startMs !== all[index - 1].startMs);
-  const transitions: MotionTransition[] = [];
+  const transitions: MotionTransition[] = ordered.filter((record) => record.startMs >= floorMs);
+  // The run in progress: where the trailing records' activity and confidence began.
   let runStartMs: number | null = null;
   ordered.forEach((record, index) => {
     const previous = ordered[index - 1];
-    if (previous && previous.activity === record.activity && previous.confidence === record.confidence) return;
-    runStartMs = record.startMs;
-    if (record.startMs >= floorMs) transitions.push(record);
+    if (!previous || previous.activity !== record.activity || previous.confidence !== record.confidence) runStartMs = record.startMs;
   });
   const latest = ordered.at(-1);
   let last = cursor.last;
