@@ -37,6 +37,7 @@ type ReviewSegmentRow = {
   toLongitude: number | null;
   toLatitude: number | null;
   tripStops: unknown;
+  timeAway: boolean;
 };
 
 type RejectedEvidenceRow = {
@@ -150,7 +151,8 @@ async function buildLocationReviewEvidence(
             case when from_stay.centre is null then null else ST_Y(from_stay.centre::geometry) end as "fromLatitude",
             case when to_stay.centre is null then null else ST_X(to_stay.centre::geometry) end as "toLongitude",
             case when to_stay.centre is null then null else ST_Y(to_stay.centre::geometry) end as "toLatitude",
-            cs.metadata->'stops' as "tripStops"
+            cs.metadata->'stops' as "tripStops",
+            coalesce(cs.metadata->>'qualificationReason' = 'same_place_outing', false) as "timeAway"
      from review_items ri
      join activity_events ae
        on ae.id = ri.event_id and ae.workspace_id = ri.workspace_id and ae.user_id = ri.user_id
@@ -283,7 +285,8 @@ async function buildLocationReviewEvidence(
       continuityStatus: review.continuityStatus,
       algorithmVersion: review.algorithmVersion,
       evidenceCount: evidenceResult.rows.length,
-      rejectedEvidenceCount: rejectedResult.rows.length
+      rejectedEvidenceCount: rejectedResult.rows.length,
+      ...(kind === "commute" && review.timeAway ? { timeAway: true } : {})
     },
     display: {
       title: review.title,

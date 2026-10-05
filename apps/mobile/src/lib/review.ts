@@ -211,7 +211,13 @@ function fallbackHealthCategory(item: MobileReviewItem, categories: MobileCatego
     ?? categories.find((candidate) => candidate.name.trim().toLowerCase() === "health");
 }
 
+/** Time away from a saved or learned place: Review-only, never a journey or the Commute category. */
+export function isTimeAwayReviewItem(item: Pick<MobileReviewItem, "eventType"> & { rawPayload?: MobileReviewItem["rawPayload"] }) {
+  return item.eventType === "commute_detected" && item.rawPayload?.qualificationReason === "same_place_outing";
+}
+
 function fallbackSemanticCategory(item: MobileReviewItem, categories: MobileCategory[]) {
+  if (isTimeAwayReviewItem(item)) return undefined;
   if (item.eventType === "commute_detected") {
     return categories.find(
       (candidate) => candidate.name.trim().toLowerCase() === "commute"
@@ -221,18 +227,20 @@ function fallbackSemanticCategory(item: MobileReviewItem, categories: MobileCate
 }
 
 export function reviewItemCategoryLabel(
-  item: Pick<MobileReviewItem, "categoryName" | "eventSource" | "eventType">
+  item: Pick<MobileReviewItem, "categoryName" | "eventSource" | "eventType"> & { rawPayload?: MobileReviewItem["rawPayload"] }
 ) {
   const explicit = item.categoryName?.trim();
   if (explicit) return explicit;
+  if (isTimeAwayReviewItem(item)) return "No category";
   if (item.eventType === "commute_detected") return "Commute";
   if (isHealthReviewItem(item)) return "Health";
   return "No category";
 }
 
 export function reviewConfirmLabel(
-  item: Pick<MobileReviewItem, "eventSource" | "eventType">
+  item: Pick<MobileReviewItem, "eventSource" | "eventType"> & { rawPayload?: MobileReviewItem["rawPayload"] }
 ) {
+  if (isTimeAwayReviewItem(item)) return "Confirm time away";
   if (item.eventType === "commute_detected") return "Confirm commute";
   if (isLocationReviewItem(item)) return "Confirm visit";
   return "Confirm activity";
@@ -466,6 +474,8 @@ export function locationReviewReasonCopy(
       return "Needs review · short journeys aren’t added automatically";
     case "journey_contains_stop":
       return "Needs review · this trip includes a stop";
+    case "time_away_review_only":
+      return "Needs review · time away isn’t added automatically";
     case "insufficient_route_evidence":
       return "Needs review · route evidence is limited";
     case "boundary_uncertainty_exceeded":
@@ -496,7 +506,7 @@ export function locationReviewReasonCopy(
   if (item.rawPayload?.continuityStatus === "uncertain_gap") {
     return "Needs review · time range is uncertain";
   }
-  if (item.eventType === "commute_detected" && item.suggestedPlaceId == null) {
+  if (item.eventType === "commute_detected" && !isTimeAwayReviewItem(item) && item.suggestedPlaceId == null) {
     return "Needs review · start or end place isn’t saved";
   }
   if (item.eventType === "unknown_stay" && item.suggestedPlaceId == null) {

@@ -57,7 +57,7 @@ export type LocationAutomaticLoggingReason =
   | "review_mode" | "segment_not_finalised" | "untrusted_place" | "untrusted_commute_endpoints"
   | "insufficient_confidence" | "insufficient_route_evidence" | "internal_route_gap"
   | "boundary_uncertainty_exceeded" | "boundary_bounds_missing" | "boundary_bounds_invalid"
-  | "uncertain_boundary" | "short_journey_review_only" | "journey_contains_stop";
+  | "uncertain_boundary" | "short_journey_review_only" | "journey_contains_stop" | "time_away_review_only";
 
 export type CommuteRouteAssessment = {
   eligible: boolean;
@@ -77,6 +77,8 @@ export function assessAutomaticCommuteRoute(segment: CommuteSegment): CommuteRou
   });
   if (segment.status !== "finalised") return reject("segment_not_finalised");
   // A trip with a stop needs its purpose confirmed before it can be logged.
+  // Time away from a place is offered for Review, never logged automatically.
+  if (segment.qualificationReason === "same_place_outing") return reject("time_away_review_only");
   if (segment.stops?.length) return reject("journey_contains_stop");
   const duration = Date.parse(segment.stoppedAt) - Date.parse(segment.startedAt);
   if (Number.isFinite(duration) && duration > 0 && duration < LOCATION_ENGINE_V2_CONFIG.commuteMinimumDurationMs) {

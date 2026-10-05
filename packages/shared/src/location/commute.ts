@@ -800,7 +800,29 @@ export function deriveCommutes(
     });
     // Every portion of a trip through stops needs its own movement evidence;
     // otherwise unobserved time either side of a stop would be claimed as travel.
-    if (stops.length && !everyPortionShowsMovement(from, to, stops, routeEvidence, startedAtMs, stoppedAtMs, config)) continue;
+    const portionsShowMovement = !stops.length ||
+      everyPortionShowsMovement(from, to, stops, routeEvidence, startedAtMs, stoppedAtMs, config);
+    // Time away from a saved or learned place: the phone clearly left it and
+    // came back, but no journey qualifies (a short drive or walk to a shop).
+    // It claims only the absence, never travel, so it needs no route.
+    const timeAway = () => {
+      if (!sameKnownEndpoint(from, to)) return false;
+      const awayMs = stoppedAtMs - startedAtMs;
+      if (awayMs < config.placeOutingMinimumMs || awayMs > config.commuteMaximumDurationMs) return false;
+      if (stops.length) return true;
+      const centre = segmentPoint(from);
+      if (!centre) return false;
+      const distance = Math.max(config.placeOutingMinimumDistanceMeters, from.radiusMeters ?? 0);
+      const away = new Set(routeEvidence.flatMap((item) => {
+        const point = evidencePoint(item);
+        return point && accurateFix(item, config) &&
+          distanceMeters(centre, point) - (item.evidence.horizontalAccuracyMeters ?? 0) >= distance
+          ? [`${item.evidence.latitude},${item.evidence.longitude}`] : [];
+      }));
+      return away.size >= config.outsideConfirmationCount;
+    };
+    const outing: CommuteQualification = { qualifies: true, reason: "same_place_outing", confidence: "low" };
+    if (!portionsShowMovement && !timeAway()) continue;
     const summary = summariseCommuteEvidence({
       config,
       from,
@@ -810,7 +832,7 @@ export function deriveCommutes(
       to,
       stops
     });
-    if (duration < config.commuteMinimumDurationMs) {
+    if (portionsShowMovement && duration < config.commuteMinimumDurationMs) {
       if (summary.sameKnownPlace || summary.straightLineDistanceMeters == null ||
         summary.straightLineDistanceMeters < config.commuteMinimumEndpointDistanceMeters) continue;
       shortProof ??= shortJourneyProof(acceptedEvidence, config, occurredAtMs);
@@ -819,7 +841,7 @@ export function deriveCommutes(
         : config.commuteMinimumReliableSpeedSamples;
       if (!hasIndependentShortJourneyProof(routeEvidence, shortProof, startedAtMs, stoppedAtMs, required)) continue;
     }
-    let qualification = qualifyCommuteCandidate(summary, config);
+    let qualification = portionsShowMovement ? qualifyCommuteCandidate(summary, config) : outing;
     // Each leg already proved a real journey to or from a recorded stop; the
     // whole trip through those stops is therefore real even when the combined
     // route is shorter than the same-place round-trip minimum.
@@ -833,6 +855,7 @@ export function deriveCommutes(
         confidence: chainConfidence
       };
     }
+    if (!qualification.qualifies && timeAway()) qualification = outing;
     if (!qualification.qualifies) continue;
     const evidenceIds = routeEvidence.map(({ evidence }) => evidence.clientEvidenceId);
     const uncertainBoundary =
@@ -972,7 +995,9 @@ export function assembleTripsThroughStops(
     Date.parse(leg.startedAt) < Date.parse(trip.stoppedAt) && Date.parse(leg.stoppedAt) > Date.parse(trip.startedAt);
   // A trip that only partly covers a leg (its start moved to an observed
   // return home) would duplicate that leg's route, so the legs stand instead.
-  const trips = assembled.filter((trip) => legs.every((leg) => within(leg, trip) || !overlapping(leg, trip)));
+  // Time away is offered only when no journey qualifies, so it never absorbs a leg.
+  const trips = assembled.filter((trip) => legs.every((leg) => within(leg, trip) || !overlapping(leg, trip)) &&
+    !(trip.qualificationReason === "same_place_outing" && legs.some((leg) => overlapping(leg, trip))));
   const result = [
     ...legs.filter((leg) => !trips.some((trip) => within(leg, trip))),
     ...trips.map((trip) => {

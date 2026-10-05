@@ -20,6 +20,7 @@ import {
   restoreReviewItemOptimistically,
   reviewActionOrder,
   reviewConfidencePresentation,
+  isTimeAwayReviewItem,
   reviewConfirmLabel,
   reviewItemCategoryLabel,
   reviewItemDurationSeconds,
@@ -223,6 +224,12 @@ describe("mobile review helpers", () => {
     expect(reviewItemCategoryLabel(commute)).toBe("Commute");
     expect(reviewConfirmLabel(commute)).toBe("Confirm commute");
     expect(reviewConfirmLabel(visit)).toBe("Confirm visit");
+    // Time away from a place is not a journey: no Commute category or wording.
+    const away = { ...commute, rawPayload: { qualificationReason: "same_place_outing" } };
+    expect(isTimeAwayReviewItem(away)).toBe(true);
+    expect(isTimeAwayReviewItem(commute)).toBe(false);
+    expect(reviewItemCategoryLabel(away)).toBe("No category");
+    expect(reviewConfirmLabel(away)).toBe("Confirm time away");
     expect(reviewConfirmLabel(reviewItem())).toBe("Confirm activity");
   });
 
@@ -262,6 +269,10 @@ describe("mobile review helpers", () => {
       ...commute,
       rawPayload: { semanticReason: "journey_contains_stop" }
     })).toBe("Needs review · this trip includes a stop");
+    expect(locationReviewReasonCopy({
+      ...commute,
+      rawPayload: { semanticReason: "time_away_review_only", qualificationReason: "same_place_outing" }
+    })).toBe("Needs review · time away isn’t added automatically");
     expect(locationReviewReasonCopy({
       ...commute,
       rawPayload: { semanticReason: "insufficient_route_evidence" }

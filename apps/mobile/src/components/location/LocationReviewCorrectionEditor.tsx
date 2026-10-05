@@ -1175,6 +1175,7 @@ function placeForSelection(
 }
 
 function locationActivityLabel(evidence: LocationReviewEvidenceDto) {
+  if (evidence.segment.kind === "commute" && evidence.segment.timeAway) return evidence.display.title || "Time away";
   return evidence.segment.kind === "commute" ? "Commute" : evidence.display.title;
 }
 

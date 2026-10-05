@@ -3,7 +3,7 @@ import {
   AUTOMATIC_LOCATION_POLICY_VERSION, LOCATION_ENGINE_V2_CONFIG, assessAutomaticOverlap,
   type LocationSegment, type StaySegment
 } from "@dayframe/shared";
-import { hasMeaningfulKnownPlaceWindow } from "@dayframe/shared";
+import { hasMeaningfulKnownPlaceWindow, isTimeAway, timeAwayTitle } from "@dayframe/shared";
 import type { RequestSession } from "../session";
 import { ensureCommuteCategoryId } from "../automatic-category-service";
 import { locationSemanticDisposition } from "./location-semantic-policy";
@@ -26,7 +26,9 @@ async function displayContext(client: pg.PoolClient, session: RequestSession, se
   const stays = segments.filter((segment): segment is StaySegment => segment.kind === "stay");
   const places = new Map<string, Place>();
   const learned = new Map<string, LearnedPlace>();
-  const placeIds = [...new Set(stays.flatMap(s => s.placeId ? [s.placeId] : []))].sort();
+  // Time away is named after the place it was away from.
+  const placeIds = [...new Set([...stays.flatMap(s => s.placeId ? [s.placeId] : []),
+    ...segments.flatMap(s => isTimeAway(s) && s.kind === "commute" && s.fromPlaceId ? [s.fromPlaceId] : [])])].sort();
   const learnedIds = [...new Set(stays.flatMap(s => s.learnedPlaceId ? [s.learnedPlaceId] : []))].sort();
   // Saved places belong to a workspace; learned places additionally belong to a user.
   for (const ids of chunks(placeIds)) {
@@ -47,7 +49,8 @@ async function displayContext(client: pg.PoolClient, session: RequestSession, se
     for (const row of result.rows) learned.set(row.id, row);
   }
   return (segment: LocationSegment) => {
-    if (segment.kind === "commute") return { trusted: null, title: "Commute" };
+    if (segment.kind === "commute") return { trusted: null, title: isTimeAway(segment)
+      ? timeAwayTitle(segment.fromPlaceId ? places.get(segment.fromPlaceId)?.name : null) : "Commute" };
     const trusted = segment.placeMatchKind === "saved" && segment.placeId
       ? places.get(segment.placeId) ?? null
       : segment.placeMatchKind === "learned" && segment.learnedPlaceId
@@ -93,11 +96,12 @@ export async function emitReviewSemanticSegments(
     const reopened = await reopenSupersededReviews(client, session, batch.map((row) => row.id));
     for (const row of batch) if (reopened.has(row.id)) row.reviewStatus = "needs_review";
   }
-  const commuteCategoryId = eligible.some(row => row.segment.kind === "commute")
+  const commuteCategoryId = eligible.some(row => row.segment.kind === "commute" && !isTimeAway(row.segment))
     ? await ensureCommuteCategoryId(client, session) : null;
   const rows = eligible.map(({ segment, segmentId, clientEventId }) => {
     const { trusted, title } = context(segment);
-    const categoryId = segment.kind === "commute" ? commuteCategoryId : trusted?.categoryId ?? null;
+    // Time away suggests no category: the user chooses what it was.
+    const categoryId = isTimeAway(segment) ? null : segment.kind === "commute" ? commuteCategoryId : trusted?.categoryId ?? null;
     const placeId = trusted?.id ?? (segment.kind === "stay" ? segment.placeId ?? null : null);
     const disposition = locationSemanticDisposition("v2_review", segment);
     // Same pure overlap result as the original review path; never read time entries here.
@@ -136,6 +140,8 @@ export async function emitReviewSemanticSegments(
           toStaySegmentId: segment.toStaySegmentId,
           routeSampleCount: segment.routeSampleCount,
           qualificationReason: segment.qualificationReason ?? null,
+          // Time away only: how many unnamed stops it included.
+          ...(isTimeAway(segment) && segment.stops?.length ? { stopCount: segment.stops.length } : {}),
           continuityStatus: segment.continuityStatus,
           startedAt: segment.startedAt,
           stoppedAt: segment.stoppedAt,

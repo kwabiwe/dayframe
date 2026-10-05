@@ -17,7 +17,7 @@ import {
   type LocationSegment,
   type StaySegment
 } from "@dayframe/shared";
-import { hasMeaningfulKnownPlaceWindow } from "@dayframe/shared";
+import { hasMeaningfulKnownPlaceWindow, isTimeAway, timeAwayTitle } from "@dayframe/shared";
 import { withSyncTransaction, type SyncTransactionOptions } from "../sync-transaction";
 import type { RequestSession } from "../session";
 import { ensureCommuteCategoryId } from "../automatic-category-service";
@@ -428,7 +428,7 @@ async function emitSemanticSegment(
   const trustedPlace = segment.kind === "stay"
     ? await trustedPlaceContext(client, session, segment)
     : null;
-  const suggestedCategoryId = segment.kind === "commute"
+  const suggestedCategoryId = isTimeAway(segment) ? null : segment.kind === "commute"
     ? await ensureCommuteCategoryId(client, session)
     : trustedPlace?.categoryId ?? null;
   const placeId = trustedPlace?.placeId ?? (segment.kind === "stay" ? segment.placeId ?? null : null);
@@ -504,6 +504,8 @@ async function emitSemanticSegment(
         toStaySegmentId: segment.toStaySegmentId,
         routeSampleCount: segment.routeSampleCount,
         qualificationReason: segment.qualificationReason ?? null,
+        // Time away only: how many unnamed stops it included.
+        ...(isTimeAway(segment) && segment.stops?.length ? { stopCount: segment.stops.length } : {}),
         continuityStatus: segment.continuityStatus,
         startedAt: segment.startedAt,
         stoppedAt: segment.stoppedAt,
@@ -787,7 +789,12 @@ async function segmentTitle(
   session: RequestSession,
   segment: StaySegment | CommuteSegment
 ) {
-  if (segment.kind === "commute") return "Commute";
+  if (segment.kind === "commute") {
+    if (!isTimeAway(segment)) return "Commute";
+    const place = segment.fromPlaceId ? await client.query<{ name: string }>(
+      "select name from places where id = $1 and workspace_id = $2", [segment.fromPlaceId, session.workspaceId]) : null;
+    return timeAwayTitle(place?.rows[0]?.name);
+  }
   if (segment.learnedPlaceId) {
     const learned = await client.query<{ name: string }>(
       "select name from learned_places where id = $1 and workspace_id = $2 and user_id = $3",

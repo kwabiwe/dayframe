@@ -26,7 +26,9 @@ export const LocationReviewEvidenceDtoSchema = z.object({
     continuityStatus: z.string(),
     algorithmVersion: z.string(),
     evidenceCount: z.number().int().nonnegative(),
-    rejectedEvidenceCount: z.number().int().nonnegative()
+    rejectedEvidenceCount: z.number().int().nonnegative(),
+    /** Commutes only: time away from a saved or learned place rather than a journey. */
+    timeAway: z.boolean().optional()
   }),
   display: z.object({
     title: z.string(),

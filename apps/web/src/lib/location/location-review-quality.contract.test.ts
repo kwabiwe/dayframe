@@ -13,7 +13,7 @@ const eventSource = source("../event-service.ts");
 describe("V2 location review quality contracts", () => {
   it("ensures a Commute category before V2 commute semantic emission", () => {
     expect(ingestSource).toMatch(
-      /const suggestedCategoryId = segment\.kind === "commute"[\s\S]*?ensureCommuteCategoryId/
+      /const suggestedCategoryId = isTimeAway\(segment\) \? null : segment\.kind === "commute"[\s\S]*?ensureCommuteCategoryId/
     );
     expect(ingestSource.match(/suggestedCategoryId/g)?.length).toBeGreaterThanOrEqual(4);
   });
@@ -24,7 +24,9 @@ describe("V2 location review quality contracts", () => {
   });
 
   it("does not use a generated commute title as a confirmed description", () => {
-    expect(ingestSource).toContain('if (segment.kind === "commute") return "Commute"');
+    // A journey is titled Commute; time away from a place is named after it.
+    expect(ingestSource).toContain('if (!isTimeAway(segment)) return "Commute";');
+    expect(ingestSource).toContain("return timeAwayTitle(");
     expect(ingestSource).not.toContain('return "Possible journey"');
     expect(reviewSource).toContain("confirmedLocationDescription");
     expect(reviewSource).not.toContain("edit?.description?.trim() || item.title");

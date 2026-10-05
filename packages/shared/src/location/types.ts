@@ -167,7 +167,9 @@ export type CommuteQualificationReason =
   | "significant_endpoint_displacement"
   | "significant_route_distance"
   | "endpoint_only_significant_distance"
-  | "same_place_meaningful_round_trip";
+  | "same_place_meaningful_round_trip"
+  /** Time away from a saved or learned place with no qualifying journey: always Review-only. */
+  | "same_place_outing";
 
 export type CommuteRejectionReason =
   | "local_pedestrian_movement"

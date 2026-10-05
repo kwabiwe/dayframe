@@ -50,3 +50,14 @@ export function tripStopRows(
       };
     });
 }
+
+/** Time away from a saved or learned place: a Review-only absence, not a journey. */
+export function isTimeAway(segment: { kind: string; qualificationReason?: string | null }) {
+  return segment.kind === "commute" && segment.qualificationReason === "same_place_outing";
+}
+
+/** Review title for time away from a place, named when the place is known. */
+export function timeAwayTitle(placeName: string | null | undefined) {
+  const name = placeName?.trim();
+  return name ? `Time away from ${name}` : "Time away";
+}

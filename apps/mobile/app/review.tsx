@@ -51,6 +51,7 @@ import {
 } from "@/lib/motion";
 import {
   REVIEW_COPY,
+  isTimeAwayReviewItem,
   CLOSED_REVIEW_MENU_STATE,
   buildReviewItemDraftEntry,
   canRunReviewMenuAction,
@@ -1752,6 +1753,7 @@ function currentPresentationTimeZone() {
 }
 
 function reviewItemTitle(item: MobileReviewItem) {
+  if (isTimeAwayReviewItem(item)) return item.title || "Time away";
   if (item.eventType === "commute_detected") return "Commute detected";
   if (isLocationReviewItem(item)) {
     return readableLocationNameFromParts({
@@ -1774,6 +1776,7 @@ function formatReviewItemMeta(item: MobileReviewItem, durationSeconds: number) {
 }
 
 function reviewItemKindLabel(item: MobileReviewItem) {
+  if (isTimeAwayReviewItem(item)) return "Time away";
   if (item.eventType === "commute_detected") return "Commute";
   if (isOneOffLocationReviewItem(item)) return "One-off activity";
   if (isLocationReviewItem(item)) return REVIEW_COPY.detectedVisit;
@@ -1782,6 +1785,11 @@ function reviewItemKindLabel(item: MobileReviewItem) {
 }
 
 function reviewItemSummary(item: MobileReviewItem) {
+  if (isTimeAwayReviewItem(item)) {
+    return typeof item.rawPayload?.stopCount === "number" && item.rawPayload.stopCount > 0
+      ? "You were away from this place, with an unnamed stop nearby."
+      : "You were away from this place.";
+  }
   if (item.eventType === "commute_detected") {
     return item.rawPayload?.continuityStatus === "uncertain_gap"
       ? "Travel was detected, but part of the time range is uncertain."
@@ -1818,7 +1826,7 @@ function reviewItemCategoryColor(
     item.categoryColor ||
     item.suggestedCategoryId ||
     isHealthReviewItem(item) ||
-    item.eventType === "commute_detected"
+    (item.eventType === "commute_detected" && !isTimeAwayReviewItem(item))
   ) {
     return paletteColorFor(
       item.categoryColor ??

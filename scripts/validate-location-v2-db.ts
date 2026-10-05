@@ -1239,6 +1239,42 @@ async function validateFinalisationWithoutNewEvidence() {
   );
 }
 
+async function validateTimeAwayReview() {
+  await clearDerivedLocationState();
+  process.env.DAYFRAME_LOCATION_ROLLOUT_MODE = "v2_review";
+  const home = LOCATION_ACCEPTANCE_PLACES[0];
+  const point = (id: string, time: string, eastMetres: number, speed = 0): LocationEvidence => ({
+    clientEvidenceId: id, deviceId: DEVICE_ID, algorithmVersion: LOCATION_ENGINE_V2_CONFIG.algorithmVersion,
+    kind: "standard_location", occurredAt: `2026-07-20T${time}.000Z`, receivedAt: "2026-07-20T12:00:00.000Z",
+    timeZone: "Europe/London", latitude: home.latitude,
+    longitude: home.longitude + eastMetres / (111_320 * Math.cos(home.latitude * Math.PI / 180)),
+    horizontalAccuracyMeters: 5, speedMetersPerSecond: speed
+  });
+  // Home, a quick drive 300 m to a shop and back, Home again: no journey qualifies.
+  const evidence = [
+    ...["08:00:00", "08:15:00", "08:30:00", "08:45:00", "09:00:00"].map((time, index) => point(`away-home-${index}`, time, 0)),
+    point("away-out-0", "09:00:20", 150, 10), point("away-out-1", "09:00:30", 230, 10), point("away-shop", "09:01:00", 300),
+    point("away-back-0", "09:07:30", 230, 10), point("away-back-1", "09:07:40", 150, 10),
+    ...["09:08:00", "09:20:00", "09:35:00", "09:50:00"].map((time, index) => point(`away-home-pm-${index}`, time, 0))
+  ];
+  await ingestLocationEvidence(batch("db-time-away", evidence, "v2_review", "2026-06-01T07:00:00.000Z"), session);
+  const reviews = await pool.query<{ id: string; title: string; suggestedCategoryId: string | null; reason: string | null }>(
+    `select ri.id, ri.title, ri.suggested_category_id as "suggestedCategoryId", ae.raw_payload->>'qualificationReason' as reason
+     from review_items ri join activity_events ae on ae.id = ri.event_id
+     join commute_segments cs on cs.id = ri.location_segment_id
+     where ri.workspace_id = $1 and ri.user_id = $2 and ri.status = 'open'`,
+    [WORKSPACE_ID, USER_ID]);
+  assert.deepEqual(reviews.rows.map(({ title, suggestedCategoryId, reason }) => ({ title, suggestedCategoryId, reason })),
+    [{ title: `Time away from ${home.name}`, suggestedCategoryId: null, reason: "same_place_outing" }],
+    "A short drive to a shop and back was not offered as time away from Home.");
+  await resolveLocationReviewAction(reviews.rows[0].id, { action: "confirm" }, session);
+  const entry = await pool.query<{ categoryId: string | null; description: string | null }>(
+    `select category_id as "categoryId", description from time_entries where workspace_id = $1 and user_id = $2`,
+    [WORKSPACE_ID, USER_ID]);
+  assert.deepEqual(entry.rows, [{ categoryId: null, description: `Time away from ${home.name}` }],
+    "Confirmed time away became a Commute entry.");
+}
+
 async function main() {
   try {
     if (process.argv.includes("--saved-place-quality-only")) {
@@ -1251,6 +1287,7 @@ async function main() {
     await seedOwner();
     await validateCommuteCategoryConcurrency();
     await validateOutOfOrderAndIdempotency();
+    await validateTimeAwayReview();
     await validateShadowToReviewCutover();
     await validateSemanticIdempotencyAndRollback();
     await validateCommuteReviewCategoryAndDescription();
@@ -1259,7 +1296,7 @@ async function main() {
     await validateFinalisationWithoutNewEvidence();
     await validateSupersededReviewReactivation();
     await validateV1Compatibility();
-    console.log("Location V2 database validation passed: ordered replay, duplicate ingest, shadow cutover, no-new-evidence finalisation, semantic idempotency, Commute category concurrency/emission/replay/confirmation, uncertainty bounds, description semantics, isolation, trusted-place and trusted-commute automation, deliberate advisory/Review-row/exact-segment contention bounds, overlap fallback, terminal-decision preservation, superseded-Review reactivation, automatic-entry deletion safety, automatic-entry idempotency, atomic rollback, concurrent retry, split, merge, incompatible-merge rejection, and V1 compatibility.");
+    console.log("Location V2 database validation passed: ordered replay, duplicate ingest, time away from a saved place, shadow cutover, no-new-evidence finalisation, semantic idempotency, Commute category concurrency/emission/replay/confirmation, uncertainty bounds, description semantics, isolation, trusted-place and trusted-commute automation, deliberate advisory/Review-row/exact-segment contention bounds, overlap fallback, terminal-decision preservation, superseded-Review reactivation, automatic-entry deletion safety, automatic-entry idempotency, atomic rollback, concurrent retry, split, merge, incompatible-merge rejection, and V1 compatibility.");
   } finally {
     if (process.env.KEEP_LOCATION_V2_DB_FIXTURE !== "1") {
       await pool.query("delete from workspaces where id = $1", [WORKSPACE_ID]).catch(() => undefined);
