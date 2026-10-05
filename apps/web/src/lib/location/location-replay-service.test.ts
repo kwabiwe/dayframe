@@ -1,7 +1,10 @@
 import { describe, expect, it, vi } from "vitest";
 import { replayLocationEvidence } from "./location-replay-service";
 import { LOCATION_REPLAY_SCALABILITY_PROFILE } from "./location-replay-batching";
-import { journeyIdentityFixture, PHYSICAL_STOP_PICKUP, physicalStopAt, physicalStopFixture, runLocationEngine } from "@dayframe/shared";
+import {
+  journeyIdentityFixture, LOCATION_ENGINE_V2_CONFIG, PHYSICAL_STOP_PICKUP, physicalStopAt, physicalStopFixture, runLocationEngine,
+  type LocationEngineInput, type LocationEvidence
+} from "@dayframe/shared";
 
 function journeyReplayQuery(
   fixture: ReturnType<typeof journeyIdentityFixture>,
@@ -134,7 +137,8 @@ describe("Location replay timing observation", () => {
       expect(arm).toContain("le.client_evidence_id = any($5::text[])");
       expect(arm).toContain("s.continuity_status = 'manual' or (s.status <> 'superseded' and s.created_from_event_id is not null");
       expect(arm).toContain("ri.workspace_id = $1 and ri.user_id = $2");
-      expect(arm).toContain("ri.location_segment_id = s.id and ri.status = 'open'");
+      // An open Review or replay's own retirement leaves the row to replay; any other Review is a decision.
+      expect(arm).toContain("ri.location_segment_id = s.id and (ri.status = 'open' or ri.status = 'ignored' and ri.ignored_scope = 'superseded')");
       expect(arm).toContain("order by s.id, le.client_evidence_id for update of s");
     }
     const obsolete = query.mock.calls.find(([sql]) => sql.includes('ri.id as "reviewId"'))![0];
@@ -175,6 +179,41 @@ describe("Location replay timing observation", () => {
     ]));
     expect(counts).toMatchObject({ evidenceRows: 0, staySegments: 0, commuteSegments: 0, protectedSegments: 0 });
     expect(JSON.stringify({events,counts})).not.toMatch(/workspace-private|user-private|device-private/);
+  });
+});
+
+describe("Location replay identity changes", () => {
+  it("retires a stay's earlier segment when a late iOS entry makes it the saved place (review finding)", async () => {
+    // A stop parked 126 m from a Home pin is described as unknown and can reach Review. A late, genuine Home entry
+    // then places the device inside; Home is not logged, so the earlier segment and its open proposal must retire.
+    const t = (seconds: number) => new Date(Date.parse("2026-01-31T19:00:00Z") + seconds * 1_000).toISOString();
+    const home = { id: "10000000-0000-4000-8000-000000000062", name: "Home", latitude: 0, longitude: 0, radiusMeters: 100, loggingEnabled: false };
+    const fix = (id: string, seconds: number, metres: number, speed: number | null = 0): LocationEvidence => ({
+      clientEvidenceId: id, deviceId: "20000000-0000-4000-8000-000000000061", algorithmVersion: LOCATION_ENGINE_V2_CONFIG.algorithmVersion,
+      kind: "standard_location", occurredAt: t(seconds), sourceTimestamp: t(seconds), receivedAt: t(seconds), endedAt: null,
+      latitude: metres / 111_195, longitude: 0, horizontalAccuracyMeters: 5, speedMetersPerSecond: speed, savedPlaceId: null,
+      isSimulated: false, timeZone: "UTC", metadata: {}
+    });
+    const make = (evidence: LocationEvidence[], processingAt: string): LocationEngineInput => ({
+      priorState: { algorithmVersion: LOCATION_ENGINE_V2_CONFIG.algorithmVersion, mode: "idle", activeSegmentId: null, processedEvidenceIds: [], lastProcessedAt: null },
+      config: LOCATION_ENGINE_V2_CONFIG, processingAt, savedPlaces: [home], acceptedLearnedPlaces: [], evidence
+    });
+    const parked = [fix("p0", 0, 126), fix("p1", 600, 126), fix("p2", 1_200, 126), fix("l0", 1_300, 600, 10), fix("l1", 1_310, 700, 10)];
+    const before = runLocationEngine(make(parked, t(2_000))).segmentUpserts.find((segment) => segment.kind === "stay")!;
+    expect(before).toMatchObject({ placeMatchKind: "unknown", status: "finalised" });
+    const lateEnter: LocationEvidence = { ...fix("late-enter", 1_100, 0, null), kind: "geofence_enter", receivedAt: t(4_000),
+      savedPlaceId: home.id, latitude: null, longitude: null, horizontalAccuracyMeters: null };
+    const fixture = make([...parked, lateEnter], t(5_000));
+    const query = journeyReplayQuery(fixture as unknown as ReturnType<typeof journeyIdentityFixture>);
+    const server = await replayLocationEvidence({ query } as never, {
+      workspaceId: "workspace-private", userId: "user-private", authMode: "provider", scopes: []
+    }, { deviceId: parked[0].deviceId, algorithmVersion: LOCATION_ENGINE_V2_CONFIG.algorithmVersion, processingAt: fixture.processingAt });
+    const stays = server.segments.filter((segment) => segment.kind === "stay");
+    expect(stays).toEqual([expect.objectContaining({ placeMatchKind: "saved", placeId: home.id, startedAt: before.startedAt })]);
+    const retire = query.mock.calls.find(([sql]) => sql.includes("from review_items ri") && sql.includes("for update of ri"))!;
+    // The retirement query keeps only current segment IDs; the earlier segment is no longer among them.
+    expect(retire[1]![4]).toEqual([stays[0].clientSegmentId]);
+    expect(retire[1]![4]).not.toContain(before.clientSegmentId);
   });
 });
 

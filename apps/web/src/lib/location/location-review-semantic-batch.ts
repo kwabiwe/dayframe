@@ -7,6 +7,7 @@ import { hasMeaningfulKnownPlaceWindow } from "@dayframe/shared";
 import type { RequestSession } from "../session";
 import { ensureCommuteCategoryId } from "../automatic-category-service";
 import { locationSemanticDisposition } from "./location-semantic-policy";
+import { reopenSupersededReviews } from "./location-review-supersession";
 
 // Bounded row sets, including reads. All work uses the caller's owner-locked transaction.
 const SEMANTIC_CHUNK_SIZE = 250;
@@ -85,6 +86,12 @@ export async function emitReviewSemanticSegments(
        where workspace_id = $1 and user_id = $2 and client_event_id = any($3::text[])
        order by client_event_id for update`, [session.workspaceId, session.userId, batch.map(row => row.clientEventId)]);
     for (const row of result.rows) existing.set(row.clientEventId, row);
+  }
+  // A segment back in the output after replay retired it is offered again.
+  const ignored = [...existing.values()].filter((row) => row.reviewStatus === "ignored");
+  for (const batch of chunks(ignored)) {
+    const reopened = await reopenSupersededReviews(client, session, batch.map((row) => row.id));
+    for (const row of batch) if (reopened.has(row.id)) row.reviewStatus = "needs_review";
   }
   const commuteCategoryId = eligible.some(row => row.segment.kind === "commute")
     ? await ensureCommuteCategoryId(client, session) : null;

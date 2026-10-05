@@ -139,6 +139,44 @@ describe("LocationReviewPanel", () => {
     expect(screen.getByText(/not confirmed stationary time/)).not.toBeNull();
   });
 
+  it("lists the stops recorded inside a trip, and none for a trip without stops", async () => {
+    const trip = evidence();
+    trip.stops = [
+      { startedAt: "2026-08-14T09:22:17.000Z", stoppedAt: "2026-08-14T09:28:15.000Z", durationSeconds: 358, approximate: false },
+      { startedAt: "2026-08-14T09:40:00.000Z", stoppedAt: "2026-08-14T09:46:00.000Z", durationSeconds: 360, approximate: true }
+    ];
+    mocks.clientFetch.mockResolvedValueOnce(jsonResponse(trip));
+    const { unmount } = render(
+      <LocationReviewPanel
+        reviewItemId="10000000-0000-4000-8000-000000000001"
+        categories={categories}
+        entries={[]}
+        initialCategoryId={null}
+        onClose={vi.fn()}
+      />
+    );
+    expect(await screen.findByText("2 stops on this trip")).not.toBeNull();
+    const rows = screen.getAllByRole("listitem");
+    expect(rows).toHaveLength(2);
+    expect(rows[0].textContent).toMatch(/^Stopped .+ · 6m$/);
+    expect(rows[1].textContent).toMatch(/^Stopped about .+ · 6m$/);
+    expect(rows[1].getAttribute("aria-label")).toMatch(/approximate$/);
+    unmount();
+
+    mocks.clientFetch.mockResolvedValueOnce(jsonResponse(evidence()));
+    render(
+      <LocationReviewPanel
+        reviewItemId="10000000-0000-4000-8000-000000000001"
+        categories={categories}
+        entries={[]}
+        initialCategoryId={null}
+        onClose={vi.fn()}
+      />
+    );
+    expect(await screen.findByTestId("location-evidence-map")).not.toBeNull();
+    expect(screen.queryByText(/on this trip/)).toBeNull();
+  });
+
   it("preserves saved-place gap copy when existing bounds are widened", async () => {
     const saved = evidence();
     saved.segment.kind = "stay";
