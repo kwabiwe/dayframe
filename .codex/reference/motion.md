@@ -67,8 +67,9 @@ Haptics:
 | Scrub a time, or spin the duration dial | Selection tick per minute or entry |
 | Log or skip a Review item | Success, or a light impact |
 | Delete | Warning |
+| Undo that restores an entry | Light impact |
 
-- Haptics confirm a committed action. They never fire for a background refresh, a reconciliation or a rejected gesture.
+- Haptics confirm a committed action. They never fire for a background refresh, a reconciliation, an automatic failure rollback or a rejected gesture.
 - Rapid repeats fire one haptic, or one composite sequence, per committed action.
 - A Settings switch turns haptics off. The system haptics setting always wins.
 - Haptics are never the only feedback: the visible state change, Undo and VoiceOver announcement still happen.
@@ -123,8 +124,9 @@ Normal motion couples the sheet's slide and scrim; Reduce Motion keeps the share
 restrained opacity path. Only the centred handle owns the pan, leaving calendar,
 search and list scrolling independent. Done/Apply or a discard route claims one
 terminal result for one presentation ID, makes outgoing controls inert, and keeps
-the host mounted until the shared exit callback. Cancel, backdrop, escape and a
-successful swipe all discard; rejected swipes retain the draft. Delayed callbacks
+the host mounted until the shared exit callback. The backdrop, escape (including
+the accessibility escape gesture) and a successful swipe all discard; there is no
+visible Cancel; rejected swipes retain the draft. Delayed callbacks
 cannot release a newer presentation, and opener focus returns only after the
 current exit. Test rapid Apply/swipe, double actions, interrupted entrance,
 keyboard-open handle drag, rejected/accepted drags and reopen in normal and

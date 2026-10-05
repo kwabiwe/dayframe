@@ -338,7 +338,7 @@ Check these on every surface migrated to Blocks. Where an earlier check in this 
 - Text on every activity block passes the measured contrast check (4.5:1 normal, 3:1 large) for every palette entry in Midnight and Daylight.
 - Coral appears only on live recording and the single primary action (browser text selection keeps its coral highlight). Selected navigation, durations, totals, chart marks and map pins do not use it.
 - Bricolage Grotesque appears only in display roles, is bundled with the app, scales with Dynamic Type, and falls back to the system font. The timer never shifts width as digits change.
-- Start, stop, log, restore and delete land with the shared spring and the documented haptic. Rapid repeats fire one haptic (Stop: one composite sequence) per committed action. The Settings switch and the system setting turn haptics off.
+- Start, stop, log, Undo-restore and delete land with the shared spring and the documented haptic; automatic rollback and reconciliation fire none. Rapid repeats fire one haptic (Stop: one composite sequence) per committed action. The Settings switch and the system setting turn haptics off.
 - Only the live block breathes. Reduce Motion replaces springs and the ring with opacity and keeps states, haptics, Undo and announcements.
 - The surface says "activity" in every label and VoiceOver string; stored data, API fields and exports still say `category`.
 
