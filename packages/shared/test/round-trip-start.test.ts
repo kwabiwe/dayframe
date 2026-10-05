@@ -672,6 +672,45 @@ describe("departures after a finished walk (review round 9)", () => {
     expect(commutes(withWork(evidence, false))).toEqual([expect.objectContaining({ startedAt: at(39), stoppedAt: at(52), stops: [expect.anything()] })]);
   });
 
+  // Review round 12: a mirror of the last approach fix or a broad reading must not hide the approach.
+  it.each([
+    ["an entry", "a mirror"], ["an entry", "a broad reading"], ["a Visit", "a mirror"], ["a Visit", "a broad reading"],
+    ["a broad fix", "a mirror"], ["a broad fix", "a broad reading"]
+  ])("starts a short drive at %s after an approach despite %s", (presenceKind, noise) => {
+    const approach = [still("home-0", 0, 0), still("home-1", 10, 0), still("home-2", 18, 0), geofence("walk-exit", 20, "geofence_exit"),
+      e("walk-0", 25, 700, { speedMetersPerSecond: 1.35 }), e("walk-1", 30, 1_000, { speedMetersPerSecond: 1.35 }), e("walk-2", 38, 200, { speedMetersPerSecond: 2.5 })];
+    const extra: LocationEvidence = noise === "a mirror"
+      ? { ...approach.at(-1)!, clientEvidenceId: "walk-mirror", kind: "significant_change", speedMetersPerSecond: null, isSimulated: null }
+      : e("broad-approach", 38.2, 250, { horizontalAccuracyMeters: 200, speedMetersPerSecond: 1.35 });
+    const presence = presenceKind === "an entry" ? geofence("return", 39, "geofence_enter")
+      : presenceKind === "a Visit" ? visit("return", 39) : still("return", 39, 0, { horizontalAccuracyMeters: 100 });
+    const value = withWork([...approach, presence, extra, e("drive-0", 39.8, 300), e("drive-1", 40.4, 700), e("drive-2", 41, 1_100),
+      still("work-0", 41.6, 1_500), still("work-1", 51.6, 1_500), still("work-2", 61.6, 1_500)], true);
+    value.savedPlaces[1] = { ...value.savedPlaces[1], latitude: north(1_500) };
+    const trips = commutes(value);
+    expect(trips).toEqual([expect.objectContaining({ startedAt: at(39) })]);
+    expect(assessAutomaticCommuteRoute(trips[0])).toMatchObject({ eligible: false, reason: "short_journey_review_only" });
+  });
+
+  // Review round 12: provider status and registration snapshots are not observations of where the device was.
+  it.each([false, true])("keeps a delayed exit after callback chatter through the quiet spell (six hours later: %s)", (late) => {
+    const shift = late ? 320 : 0;
+    const noPoint = (id: string, minutes: number, kind: LocationEvidence["kind"]) =>
+      e(id, minutes, 0, { kind, latitude: null, longitude: null, horizontalAccuracyMeters: null, speedMetersPerSecond: null });
+    const base = [still("home-0", 0, 0), still("home-1", 10, 0), geofence("old-exit", 20, "geofence_exit"),
+      e("walk-out", 25, 700, { speedMetersPerSecond: 1.35 }), e("walk-peak", 30, 1_000, { speedMetersPerSecond: 1.35 }), e("walk-back", 35, 400, { speedMetersPerSecond: 1.35 }),
+      e("drive-0", 130.5 + shift, 900), geofence("drive-exit", 130.6 + shift, "geofence_exit"), e("drive-1", 132 + shift, 1_800), e("drive-2", 134 + shift, 2_600),
+      still("work-0", 136 + shift, 3_000), still("work-1", 146 + shift, 3_000), still("work-2", 156 + shift, 3_000)];
+    const times = Array.from({ length: late ? 27 : 6 }, (_, index) => 45 + index * 15);
+    const providers = times.map((minutes) => noPoint(`provider-${minutes}`, minutes, "provider_status"));
+    const pairs = times.flatMap((minutes) => [geofence(`snapshot-enter-${minutes}`, minutes, "geofence_enter"), geofence(`snapshot-exit-${minutes}`, minutes + 0.02, "geofence_exit")]);
+    for (const chatter of [[], providers, pairs]) {
+      const value = withWork([...base, ...chatter], true);
+      value.processingAt = at(450 + shift);
+      expect(commutes(value)).toEqual([expect.objectContaining({ startedAt: at(130.6 + shift) })]);
+    }
+  });
+
   it("does not let speedless mirrors turn two still stray fixes into renewed movement", () => {
     // Each stray's significant-change mirror sorts first at the same time and carries the implied speed from the route.
     const evidence = [still("home-0", 0, 0), still("home-1", 10, 0), geofence("exit", 20, "geofence_exit"), e("out-0", 21, 500), e("out-1", 22, 1_000),

@@ -60,7 +60,9 @@ Temporal invariants:
   re-report and not a departure. An excursion starts at an exit (also one
   inside the origin stay, read in time order) and ends with evidence of being
   back (an accurate fix there that is not moving, an entry or a Visit there)
-  or after more than `savedPlaceQuietGapMaxMs` unobserved; registration
+  or after more than `savedPlaceQuietGapMaxMs` unobserved (only positions,
+  crossings and Visits are observations; provider status and registration
+  snapshots are not); registration
   snapshot pairs (an exit and entry within five seconds) are neither. A first
   exit always counts, even when its receipt time trails the first fix away
   after a capture gap. iOS also dates a return's arrival Visit before the car
@@ -71,7 +73,9 @@ Temporal invariants:
   stayed there at least `savedPlaceMinimumDwellMs` before it was next seen
   leaving (an early-dated return Visit is followed by approach fixes within
   three minutes), or when it had arrived first (nothing away in the three
-  minutes before it, or the readings before it approached) and the readings
+  minutes before it, or the last two independent accurate observations away
+  before it approached; a mirror is the same observation and broad readings
+  are too noisy) and the readings
   after it move at least 100 m farther away (a departure; after an early-dated
   return Visit they approach instead). Any of these, or an accurate fix at the
   origin that is not moving, ends the excursion (for re-reported exits too), so later presence

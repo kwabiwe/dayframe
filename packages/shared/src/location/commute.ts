@@ -168,24 +168,35 @@ function latestDepartureSupport(stay: StaySegment, stayEvidence: ClassifiedEvide
     firstAheadMetres = distanceMeters(centre, point);
     farthestAheadMetres = Math.max(farthestAheadMetres, firstAheadMetres);
   }
-  // The last two readings away since the last sign of being at the place.
-  let lastAway: { atMs: number; metres: number } | null = null;
-  let priorAway: { atMs: number; metres: number } | null = null;
+  // The last two independent accurate observations away since the last sign
+  // of being at the place (a fix and its mirror are one; broad readings are
+  // too noisy to show an approach).
+  type Away = { atMs: number; latitude: number; longitude: number; metres: number };
+  let lastAway: Away | null = null;
+  let priorAway: Away | null = null;
   const step = (item: ClassifiedEvidence, inGap: boolean) => {
     const atMs = Date.parse(item.evidence.occurredAt);
-    if (previousMs != null && atMs - previousMs > config.savedPlaceQuietGapMaxMs) excursion = false;
-    previousMs = atMs;
     if (snapshots.has(item)) return;
+    // Only observations of where the device was (positions, crossings, Visits)
+    // show it unobserved for long; provider status and state snapshots do not.
+    const { kind } = item.evidence;
+    if (evidencePoint(item) != null || kind === "geofence_enter" || kind === "geofence_exit" || kind === "visit") {
+      if (previousMs != null && atMs - previousMs > config.savedPlaceQuietGapMaxMs) excursion = false;
+      previousMs = atMs;
+    }
     if (!evidenceMatchesStay(item, stay)) {
       if (inGap && leftPlace(item)) seenAway = true;
       const point = evidencePoint(item);
-      if (point && centre && !(item.evidence.kind === "visit" && ownVisits.has(`${item.evidence.deviceId}:${item.evidence.occurredAt}`))) {
-        priorAway = lastAway;
-        lastAway = { atMs, metres: distanceMeters(centre, point) };
+      if (point && centre && accurateFix(item, config)) {
+        const mirror = lastAway != null && (Math.floor(atMs / 1_000) === Math.floor(lastAway.atMs / 1_000) ||
+          point.latitude === lastAway.latitude && point.longitude === lastAway.longitude && atMs - lastAway.atMs <= MIRROR_WINDOW_MS);
+        if (!mirror) {
+          priorAway = lastAway;
+          lastAway = { atMs, ...point, metres: distanceMeters(centre, point) };
+        }
       }
       return;
     }
-    const { kind } = item.evidence;
     // Readings away before this sign of the place no longer describe the approach.
     const arrival = { lastAway, priorAway };
     if (kind !== "geofence_exit") lastAway = priorAway = null;
