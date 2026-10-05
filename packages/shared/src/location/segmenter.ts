@@ -847,21 +847,19 @@ function stayAbsorbingFragments(stop: PhysicalStop, fragments: StaySegment[], id
 }
 
 /**
- * The longest unobserved stretch of [from, to] that no fragment already
- * covers: time an absorbing stay would newly claim through a silence (before
- * or after the fragments, or in a hole between them).
+ * The longest silence in [from, to] (between observations, or an end and the
+ * nearest one) that reaches time no fragment covers, counted in full: a
+ * fragment's own end can be an estimate, never an observation. A silence a
+ * Visit's interval spans is supported.
  */
-function longestNewSilenceMs(from: number, to: number, observedMs: number[], covered: Array<[number, number]>) {
+function longestNewSilenceMs(from: number, to: number, observedMs: number[], covered: Array<[number, number]>,
+  visitSpans: Array<[number, number]>) {
   let longest = 0;
   let previous = from;
   for (const at of [...observedMs.filter((time) => time > from && time < to).sort((a, b) => a - b), to]) {
-    // The parts of this silence outside every fragment, longest first.
-    let cursor = previous;
-    for (const [start, end] of covered.filter(([start, end]) => end > previous && start < at).sort((a, b) => a[0] - b[0])) {
-      longest = Math.max(longest, Math.max(previous, start) - cursor);
-      cursor = Math.max(cursor, Math.min(at, end));
-    }
-    longest = Math.max(longest, at - cursor);
+    const withinFragment = covered.some(([start, end]) => start <= previous && end >= at);
+    const supported = visitSpans.some(([start, end]) => start <= previous && end >= at);
+    if (!withinFragment && !supported) longest = Math.max(longest, at - previous);
     previous = at;
   }
   return longest;
@@ -1664,20 +1662,29 @@ function runLocationEnginePass(input: LocationEngineInput): { output: LocationEn
     const fragmentsEndMs = Math.max(...overlapping.map((stay) => Date.parse(stay.stoppedAt!)));
     // Only accurate, genuine fixes are observations: geofence callbacks, broad
     // and simulated readings never show the device stayed through a silence.
-    const observedMs = identity.items
-      .filter((item) => (item.evidence.kind === "standard_location" || item.evidence.kind === "significant_change") &&
-        item.evidence.isSimulated !== true && accurateCoordinate(item, input))
-      .map(({ evidence }) => Date.parse(evidence.occurredAt));
-    // A saved replacement never starts before an observation: the stop's start
-    // can be an estimate between the last fix away and the first one there,
-    // and saved attendance never begins before its observed arrival.
-    const startMs = identity.placeId
-      ? Math.min(fragmentsStartMs, ...observedMs.filter((time) => time >= Math.min(stopStartMs, fragmentsStartMs)))
+    const observation = (item: ClassifiedEvidence) =>
+      (item.evidence.kind === "standard_location" || item.evidence.kind === "significant_change") &&
+      item.evidence.isSimulated !== true && accurateCoordinate(item, input);
+    const observedMs = identity.items.filter(observation).map(({ evidence }) => Date.parse(evidence.occurredAt));
+    // Interval support from this episode's own Visits (never reused ones).
+    const visitSpans = identity.items.filter((item) => item.evidence.kind === "visit" && item.evidence.endedAt != null && !reused.has(item))
+      .map(({ evidence }): [number, number] => [Date.parse(evidence.occurredAt), Date.parse(evidence.endedAt!)]);
+    // A saved replacement never starts before an observation at the place (in
+    // its circle or tolerance band): the stop's start can be an estimate
+    // between the last fix away and the first one there, and readings beyond
+    // the band are not attendance. Saved attendance never begins before its
+    // observed arrival; a fragment's own supported arrival stands.
+    const placeId = identity.placeId;
+    const atPlaceMs = placeId ? identity.items.filter((item) => observation(item) &&
+      (item.match?.candidates.some((candidate) => candidate.id === placeId && candidate.matchClass !== "outside") ?? false))
+      .map(({ evidence }) => Date.parse(evidence.occurredAt)) : [];
+    const startMs = placeId
+      ? Math.min(fragmentsStartMs, ...atPlaceMs.filter((time) => time >= Math.min(stopStartMs, fragmentsStartMs)))
       : Math.min(stopStartMs, fragmentsStartMs);
     const endMs = Math.max(stopEndMs, fragmentsEndMs);
     if (Math.max(fragmentsStartMs - startMs, endMs - fragmentsEndMs) < input.config.physicalStopAbsorbExtensionMs) continue;
     const fragmentSpans = overlapping.map((stay): [number, number] => [Date.parse(stay.startedAt), Date.parse(stay.stoppedAt!)]);
-    if (longestNewSilenceMs(startMs, endMs, observedMs, fragmentSpans) > input.config.savedPlaceQuietGapMaxMs) continue;
+    if (longestNewSilenceMs(startMs, endMs, observedMs, fragmentSpans, visitSpans) > input.config.savedPlaceQuietGapMaxMs) continue;
     for (const stay of overlapping) absorbed.add(stay);
     physicalStays.push(stayAbsorbingFragments(stop, overlapping, identity, startMs, accepted, input));
   }

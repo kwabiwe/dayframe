@@ -192,4 +192,25 @@ describe("what an absorbing stop may claim (review round 1)", () => {
     const commute = runLocationEngine(input).segmentUpserts.find((segment) => segment.kind === "commute")!;
     expect(assessAutomaticLocation("v2_enabled", commute).action).toBe("review");
   });
+
+  // Review round 2.
+  it("never starts saved attendance at readings beyond the place's band", () => {
+    // Fixes 80 m from a 30 m Venue are certainly outside it, though they are the same physical stop.
+    const input = compact([point("approach", 0, -1_000, 10), point("outside-1", 5, 80), point("outside-2", 7, 80), point("outside-3", 9, 80),
+      callback("entry", 12, "geofence_enter"), point("inside-1", 12), point("inside-2", 15), point("inside-3", 20), point("inside-4", 25),
+      callback("exit", 26, "geofence_exit"), point("leave-1", 36, 1_000, 10), point("leave-2", 37, 1_100, 10)], [{ ...venue, radiusMeters: 30 }]);
+    expect(stays(withoutAbsorption(input)).find((stay) => stay.placeId === VENUE_ID)?.startedAt).toBe(at(12));
+    const venueStays = stays(input).filter((stay) => stay.placeId === VENUE_ID);
+    expect(venueStays.length).toBeGreaterThan(0);
+    expect(venueStays.every((stay) => stay.startedAt >= at(12))).toBe(true);
+  });
+
+  it("never bridges a silence with a fragment's estimated end", () => {
+    // The first fragment ends midway to its exit (26), but nothing was observed between 20 and 56.
+    const input = compact([point("approach", 0, -1_000, 10), point("inside-1", 10), point("inside-2", 15), point("inside-3", 20),
+      callback("exit-a", 32, "geofence_exit"), point("inside-4", 56), point("inside-5", 59), point("inside-6", 62),
+      callback("exit-b", 62.5, "geofence_exit"), point("leave-1", 75, 1_000, 10), point("leave-2", 76, 1_100, 10)]);
+    expect(stays(withoutAbsorption(input)).map(({ startedAt, stoppedAt }) => [startedAt, stoppedAt])).toEqual([[at(10), at(26)], [at(56), at(62)]]);
+    expect(stays(input).some((stay) => stay.startedAt <= at(20) && (stay.stoppedAt ?? at(200)) >= at(56))).toBe(false);
+  });
 });
