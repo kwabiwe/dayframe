@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { assessAutomaticLocation } from "../src/location/automaticPolicy";
 import { LOCATION_ENGINE_V2_CONFIG as config } from "../src/location/config";
+import { deriveCommutes } from "../src/location/commute";
 import { runLocationEngine } from "../src/location/segmenter";
 import type { LocationEngineInput, LocationEvidence, StaySegment } from "../src/location/types";
 
@@ -249,6 +250,29 @@ describe("what an absorbing stop may claim (review round 1)", () => {
     const absorbed = stays(input);
     expect(absorbed).toEqual([expect.objectContaining({ formation: "physical_stop", placeId: VENUE_ID })]);
     expect(bridges(input)).toBe(true);
+  });
+
+  // Review round 7: a saved replacement inherits the inferred boundary of the fragment it absorbed.
+  it("keeps a commute into a saved replacement with an inferred boundary for Review", () => {
+    const ORIGIN_ID = "10000000-0000-4000-8000-0000000000d5";
+    const evidence = [point("origin-1", -22, -2_000), point("origin-2", -17, -2_000), point("origin-3", -12, -2_000),
+      point("route-1", -11, -1_600, 10), point("route-2", -5, -1_200, 10), point("route-3", 0, -800, 10),
+      point("early", 5, 50), point("broad", 10, 0, 0, { kind: "visit", horizontalAccuracyMeters: 120, endedAt: at(61) }),
+      callback("entry", 10.2, "geofence_enter"), point("a-1", 10.5), point("a-2", 12.5), point("s-1", 50), point("s-2", 55), point("s-3", 60),
+      point("leave-1", 62, 1_000, 10), point("leave-2", 63, 1_100, 10), ...[1, 2, 3, 4, 5, 6].map((k) => point(`extra-${k}`, 5 + k * 0.5, 50))];
+    const input = compact(evidence, [{ ...venue, radiusMeters: 30 }, { ...venue, id: OTHER_ID, name: "Other", longitude: east(50), radiusMeters: 20 },
+      { id: ORIGIN_ID, name: "Origin", latitude: LAT0, longitude: east(-2_000), radiusMeters: 100, loggingEnabled: true }]);
+    const output = runLocationEngine(input);
+    const replacement = output.segmentUpserts.find((segment): segment is StaySegment =>
+      segment.kind === "stay" && segment.formation === "physical_stop" && segment.placeId === VENUE_ID)!;
+    expect(replacement).toMatchObject({ startedAt: at(5), placeMatchKind: "saved" });
+    const inbound = output.segmentUpserts.find((segment) => segment.kind === "commute" && segment.toPlaceId === VENUE_ID)!;
+    expect(inbound).toMatchObject({ stoppedAt: replacement.startedAt, confidence: "low" });
+    expect(assessAutomaticLocation("v2_enabled", inbound).action).toBe("review");
+    // Without the inherited boundary, the same commute would be confirmed automatically.
+    const unprotected = deriveCommutes(output.segmentUpserts.filter((segment): segment is StaySegment => segment.kind === "stay"),
+      output.acceptedEvidence, config, input.processingAt).find((segment) => segment.toPlaceId === VENUE_ID)!;
+    expect(assessAutomaticLocation("v2_enabled", unprotected).action).toBe("auto_confirm");
   });
 
   // Review round 5: two saved places 80 m apart, one physical stop across both, with a Visit spanning it.
