@@ -56,7 +56,7 @@ export type Scenario = {
 export type TruthStay = { from: number; to: number; at: Xy };
 export type Simulation = {
   input: (processingAtMs?: number) => LocationEngineInput;
-  /** `stays`: the scenario's stay legs, in order. `stationary`: every still period, silences included. */
+  /** `stays`: the scenario's stay legs, in order. `stationary`: every still period, holds and silences included. */
   truth: { stays: TruthStay[]; stationary: TruthStay[]; endMs: number };
   /** Milliseconds from the scenario start. */
   at: (minutes: number) => string;
@@ -176,6 +176,7 @@ export function simulate(scenario: Scenario, seed: number): Simulation {
     }
     else if (leg.kind === "hold") {
       if (leg.seconds >= 45 && random() < 0.5) fix(now + between(5_000, Math.min(40_000, leg.seconds * 1_000)), position, between(3, 8), between(0, 0.3));
+      stationary.push({ from: now, to: now + leg.seconds * 1_000, at: { ...position } });
       now += leg.seconds * 1_000;
     } else {
       if (leg.at) {

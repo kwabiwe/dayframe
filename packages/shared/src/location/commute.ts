@@ -101,29 +101,54 @@ function snapshotCallbacks(acceptedEvidence: ClassifiedEvidence[]) {
  * evidence of being back (an accurate fix there that is not moving, an entry or
  * a Visit there) or with more than `savedPlaceQuietGapMaxMs` unobserved. Registration snapshot
  * pairs are neither. A first exit always counts, even when its receipt time
- * trails the first fix away after a capture gap. Visits (dated before an
- * arrival), entries, state snapshots and broad fixes are never departure
- * evidence themselves.
+ * trails the first fix away after a capture gap. A Visit, entry or broad fix
+ * at the origin marks departure before the trip was seen away (any reading not
+ * matching the origin), or when more than `savedPlaceQuietGapMaxMs` passed
+ * before the device was next seen away; otherwise it can be the return, as iOS
+ * dates an arrival Visit before the car stops. State snapshots never do.
  */
 function latestDepartureSupport(stay: StaySegment, stayEvidence: ClassifiedEvidence[], evidence: ClassifiedEvidence[],
   config: LocationEngineConfig, farFrom: ReturnType<typeof positionIndex>, snapshots: ReadonlySet<ClassifiedEvidence>) {
   const centre = segmentPoint(stay);
   let latest: ClassifiedEvidence | undefined;
   let excursion = false;
+  let seenAway = false;
   let previousMs: number | null = null;
+  // When the device is next observed away after each gap item (lookahead).
+  const nextAwayMs = new Map<ClassifiedEvidence, number>();
+  let upcomingAwayMs = Number.POSITIVE_INFINITY;
+  for (let index = evidence.length - 1; index >= 0; index -= 1) {
+    const item = evidence[index];
+    nextAwayMs.set(item, upcomingAwayMs);
+    if (!snapshots.has(item) && !evidenceMatchesStay(item, stay) && evidencePoint(item) != null) {
+      upcomingAwayMs = Date.parse(item.evidence.occurredAt);
+    }
+  }
   const step = (item: ClassifiedEvidence, inGap: boolean) => {
     const atMs = Date.parse(item.evidence.occurredAt);
     if (previousMs != null && atMs - previousMs > config.savedPlaceQuietGapMaxMs) excursion = false;
     previousMs = atMs;
-    if (!evidenceMatchesStay(item, stay) || snapshots.has(item)) return;
+    if (snapshots.has(item)) return;
+    if (!evidenceMatchesStay(item, stay)) {
+      if (inGap && evidencePoint(item) != null) seenAway = true;
+      return;
+    }
     const { kind } = item.evidence;
     if (accurateFix(item, config)) {
       if (inGap) latest = item;
       // A fix moving through the place's band as the car leaves is not being back.
       const speed = item.evidence.speedMetersPerSecond ?? item.impliedSpeedMetersPerSecond;
       if (speed == null || !Number.isFinite(speed) || speed < config.movementSpeedThresholdMps) excursion = false;
-    } else if (kind === "geofence_enter" || kind === "visit") {
-      excursion = false;
+    } else if (kind === "geofence_enter" || kind === "visit" || evidencePoint(item) != null) {
+      // A Visit, entry or broad fix at the place is where the device was before
+      // leaving when the trip had not been seen away yet, or when it stayed
+      // unobserved there for longer than `savedPlaceQuietGapMaxMs` before it was
+      // next seen away. Otherwise it is the return (iOS dates an arrival Visit
+      // before the car stops, approach fixes then follow within seconds).
+      const stayedBefore = nextAwayMs.get(item)! - atMs > config.savedPlaceQuietGapMaxMs &&
+        Number.isFinite(nextAwayMs.get(item)!);
+      if (inGap && (!seenAway || stayedBefore)) latest = item;
+      if (kind === "geofence_enter" || kind === "visit") excursion = false;
     } else if (kind === "geofence_exit") {
       if (excursion && inGap && farFrom(centre, atMs)) return;
       if (inGap) latest = item;
@@ -172,11 +197,13 @@ function observedReturnMs(stay: StaySegment, evidence: ClassifiedEvidence[], con
     moved ||= item.evidence.speedMetersPerSecond != null && item.evidence.speedMetersPerSecond >= config.movementSpeedThresholdMps;
     const mirror = previous != null && (Math.floor(atMs / 1_000) === Math.floor(previous.atMs / 1_000) ||
       point.latitude === previous.latitude && point.longitude === previous.longitude && atMs - previous.atMs <= MIRROR_WINDOW_MS);
-    if (mirror) continue;
-    previous = { atMs, ...point };
-    awayFixes += 1;
-    moved ||= speed != null && Number.isFinite(speed) && speed >= config.movementSpeedThresholdMps ||
-      centre != null && distanceMeters(centre, point) >= config.commuteSamePlaceMinimumExcursionMeters;
+    // A mirror is the same observation: it adds no count, but its copy's native speed still counts as movement.
+    if (!mirror) {
+      previous = { atMs, ...point };
+      awayFixes += 1;
+      moved ||= speed != null && Number.isFinite(speed) && speed >= config.movementSpeedThresholdMps ||
+        centre != null && distanceMeters(centre, point) >= config.commuteSamePlaceMinimumExcursionMeters;
+    }
     if (awayFixes >= config.outsideConfirmationCount && moved) {
       returnedMs = null;
       awayFixes = 0;

@@ -63,26 +63,34 @@ Temporal invariants:
   or after more than `savedPlaceQuietGapMaxMs` unobserved; registration
   snapshot pairs (an exit and entry within five seconds) are neither. A first
   exit always counts, even when its receipt time trails the first fix away
-  after a capture gap. iOS also dates a return's arrival Visit before the car stops, so
-  Visits, entries, state snapshots and broad fixes are never departure
-  evidence. In a same-place round trip either used to become the "departure",
-  shrinking the trip to seconds so the whole outing was discarded. A round
-  trip between stays at the same known place (saved or learned) is not
-  claimed when, after its departure, the device was observed away and then
-  seen back there (any evidence matching the place) more than
-  `savedPlaceMinimumDwellMs` before the next stay begins: the trip would
-  include stationary time, and the latest-support rule started such a trip at
-  that return, so it never qualified. Only renewed movement undoes an observed
-  return: at least `outsideConfirmationCount` independent accurate fixes away
-  (a significant-change mirror of a fix is the same observation), one moving or
-  the excursion minimum away; a stray still fix does not. Unchanged and known
-  limitations: a moving pass-by at the origin still restarts the journey,
-  because a pass-by and a brief return look alike, and departure bounds still
-  come from the origin stay. Private corpus unchanged; in the staging week only
-  the 4 Oct school run without its School pin changes, from a 4-minute
-  fragment to the whole 07:49–08:21 round trip. The capture simulator
-  (`test/fixtures/captureSimulator.ts`), which can also omit settling fixes,
-  leave capture gaps, report broad accuracy and add stray fixes, found the bug.
+  after a capture gap. iOS also dates a return's arrival Visit before the car
+  stops, so a Visit, entry or broad fix at the origin marks departure only
+  before the trip was seen away (any reading not matching the origin), or
+  when more than `savedPlaceQuietGapMaxMs` passed before the device was next
+  seen away (it stayed home in between); otherwise it can be the return, and
+  state snapshots never count. In a same-place round trip a return Visit or a
+  re-reported exit used to become the "departure", shrinking the trip to
+  seconds so the whole outing was discarded. A round trip between stays at
+  the same known place (saved or learned) is not claimed when, after its
+  departure, the device was observed away and then seen back there (any
+  evidence matching the place) more than `savedPlaceMinimumDwellMs` before the
+  next stay begins: the trip would include stationary time, and the
+  latest-support rule started such a trip at that return, so it never
+  qualified. Only renewed movement undoes an observed return: at least
+  `outsideConfirmationCount` independent accurate fixes away (a
+  significant-change mirror of a fix is the same observation, though its
+  native speed still counts as movement), one moving or the excursion minimum
+  away; a stray still fix does not. Unchanged and known limitations: a moving
+  pass-by at the origin still restarts the journey, because a pass-by and a
+  brief return look alike; departure bounds still come from the origin stay;
+  with no departure evidence after a long quiet spell the start stays at the
+  last evidence of the origin, as on main; and more than thirty minutes
+  unobserved during an outing lets a later re-reported exit count. Private
+  corpus unchanged; in the staging week only the 4 Oct school run without its
+  School pin changes, from a 4-minute fragment to the whole 07:49–08:21 round
+  trip. The capture simulator (`test/fixtures/captureSimulator.ts`), which can
+  also omit settling fixes, leave capture gaps, report broad accuracy and add
+  stray fixes, found the bug.
 - Large-site continuity may coalesce only unknown-to-unknown stays with an
   actual visit signal, a credible later dwell, no more than `450m` endpoint
   separation, no more than `45m` transition time, no more than `1200m` local
