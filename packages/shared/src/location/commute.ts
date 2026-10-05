@@ -376,8 +376,11 @@ export function deriveCommutes(
       const at = occurredAtMs[evidenceIndex];
       return at > originalStartedAtMs && at < stoppedAtMs;
     });
+    // Evidence the destination stay owns (an arrival Visit iOS dated before the
+    // car stopped, attached at the observed arrival) is never origin presence.
+    const ownedByDestination = new Set(to.evidenceIds);
     const latestFromSupport = boundaryEvidence
-      .filter((item) => evidenceMatchesStay(item, from))
+      .filter((item) => evidenceMatchesStay(item, from) && !ownedByDestination.has(item.evidence.clientEvidenceId))
       .at(-1);
     const startedAtMs = latestFromSupport
       ? Date.parse(latestFromSupport.evidence.occurredAt)

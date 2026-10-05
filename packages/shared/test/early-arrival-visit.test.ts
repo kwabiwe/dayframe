@@ -193,4 +193,29 @@ describe("an arrival Visit iOS dates before the car arrives", () => {
     expect(stays[0].startedAt).toBe(at(100));
     expect(stays.at(-1)).toMatchObject({ startedAt: at(7_200), stoppedAt: null });
   });
+
+  // Review round 5.
+  it("keeps a Home round trip whose return Visit iOS dated early", () => {
+    // The return Visit lies before the Home stay's observed start; it is the return, never presence before leaving.
+    const value = compact([visit("origin-visit", -900, { endedAt: at(0) }), still("origin-0", -500), still("origin-1", 0),
+      away("out-0", 20, 300), away("out-1", 80, 800), away("out-2", 160, 1_400), away("turn", 400, 2_200),
+      away("back-0", 600, 1_500), away("back-1", 800, 700), visit("return-arrival", 850), away("approach-last", 900, 300),
+      enter("return-enter", 1_000), still("return-inside-0", 1_100), still("return-inside-1", 1_400)], { processingAt: at(9_000) });
+    const commutes = (input: LocationEngineInput) => runLocationEngine(input).segmentUpserts.filter((segment) => segment.kind === "commute");
+    expect(commutes(disabled(value))).toHaveLength(1);
+    const trips = commutes(value);
+    expect(trips).toHaveLength(1);
+    expect(trips[0].startedAt <= at(20)).toBe(true);
+    expect(trips[0].stoppedAt).toBe(at(1_000));
+  });
+
+  it.each([50, 60])("does not attach an early arrival after a newer corroborated broad Visit already seen (at %i s)", (seconds) => {
+    // The newer Visit comes before (or with) the anchor, so it is set aside before the early arrival would attach.
+    const value = compact([still("inside-old-first", -800), still("inside-old-last", -400), visit("old-arrival", 0), away("approach", 20),
+      visit("new-completion", seconds, { endedAt: at(4_000), horizontalAccuracyMeters: 94 }), still("anchor", 60), still("early-1", 100),
+      still("late-0", 3_600), still("late-1", 3_900), still("next-0", 7_200), still("next-1", 7_600)], { processingAt: at(9_000) });
+    expect(analyseSavedPlaceArrivalEvidence(runLocationEngine(value).acceptedEvidence, value).corroboratedVisits.has("new-completion")).toBe(true);
+    expect(homeStays(disabled(value)).at(-1)).toMatchObject({ startedAt: at(7_200) });
+    expect(homeStays(value).at(-1)).toMatchObject({ startedAt: at(7_200) });
+  });
 });
