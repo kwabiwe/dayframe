@@ -7,11 +7,14 @@ import type { ClassifiedEvidence, CommuteSegment, StaySegment } from "../src/loc
 import { baselineB, baselineC } from "./fixtures/eveningBaseline";
 import { shortAt, shortJourneysFixture } from "./fixtures/shortJourneys";
 
-function pair(duration = 84_496) {
+// Both ends are saved places. With `knownDestination` false the destination is an unknown stay, which keeps the
+// general three-observation rule; two different saved or learned places need two.
+function pair(duration = 84_496, knownDestination = true) {
   const input = shortJourneysFixture(true);
   const output = runLocationEngine(input);
   const stays = output.segmentUpserts.filter((s): s is StaySegment => s.kind === "stay").slice(0,2);
-  stays[1] = {...stays[1], startedAt: shortAt(600_000+duration)};
+  stays[1] = {...stays[1], startedAt: shortAt(600_000+duration),
+    ...(knownDestination ? {} : {placeMatchKind: "unknown" as const, placeId: null, learnedPlaceId: null})};
   const route = output.acceptedEvidence.filter(e=>e.evidence.clientEvidenceId.startsWith("out-"));
   return {stays,route};
 }
@@ -80,21 +83,24 @@ describe("strong-evidence short journeys", () => {
     expect(derive(stays,route)).toEqual([]);
   });
   it.each([179_999,180_000,180_001,config.commuteMaximumDurationMs])("preserves duration path %s",duration=>{
-    const {stays,route}=pair(duration);
+    const {stays,route}=pair(duration,false);
     expect(derive(stays,route)).toHaveLength(1);
     expect(derive(stays,route.slice(0,2))).toHaveLength(duration<180_000?0:1);
+    const known=pair(duration);
+    expect(derive(known.stays,known.route.slice(0,2))).toHaveLength(1);
+    expect(derive(known.stays,known.route.slice(0,1))).toHaveLength(duration<180_000?0:1);
   });
   it.each([65,65.001,null,NaN,-1])("enforces accuracy %s",accuracy=>{
-    const {stays,route}=pair();route[2].evidence.horizontalAccuracyMeters=accuracy;
+    const {stays,route}=pair(undefined,false);route[2].evidence.horizontalAccuracyMeters=accuracy;
     expect(derive(stays,route)).toHaveLength(accuracy===65?1:0);
   });
   it.each([2.799,2.8,120,120.001,NaN,Infinity])("enforces supplied speed %s",speed=>{
-    const {stays,route}=pair();route[2].evidence.speedMetersPerSecond=speed;
+    const {stays,route}=pair(undefined,false);route[2].evidence.speedMetersPerSecond=speed;
     expect(derive(stays,route)).toHaveLength(speed>=2.8&&speed<=120?1:0);
   });
   it("requires three independent observations, not duplicate identities, receipts, mirrors or jitter",()=>{
     for(const variant of ['id','time','point','mirror'] as const){
-      const {stays,route}=pair();const copy=structuredClone(route[1]);copy.evidence.clientEvidenceId='copy';
+      const {stays,route}=pair(undefined,false);const copy=structuredClone(route[1]);copy.evidence.clientEvidenceId='copy';
       copy.evidence.receivedAt=shortAt(4_000_000);
       if(variant==='id')copy.evidence.clientEvidenceId=route[1].evidence.clientEvidenceId;
       if(variant==='time')copy.evidence.latitude=0.006;
@@ -107,10 +113,10 @@ describe("strong-evidence short journeys", () => {
     const patches=[{isSimulated:true},{isSimulated:null},{isSimulated:undefined},{latitude:NaN},{longitude:181},
       {horizontalAccuracyMeters:100},{kind:'visit' as const},{kind:'geofence_enter' as const},
       {occurredAt:'invalid'},{sourceTimestamp:'invalid'},{sourceTimestamp:shortAt(600_000)},{sourceTimestamp:shortAt(684_496)}];
-    for(const patch of patches){const {stays,route}=pair();Object.assign(route[2].evidence,patch);expect(derive(stays,route),JSON.stringify(patch)).toEqual([]);}
+    for(const patch of patches){const {stays,route}=pair(undefined,false);Object.assign(route[2].evidence,patch);expect(derive(stays,route),JSON.stringify(patch)).toEqual([]);}
   });
   it("vetoes implausible implied speed even with plausible supplied speed and significant-change kind",()=>{
-    const {stays,route}=pair();route[2].evidence.kind='significant_change';route[2].impliedSpeedMetersPerSecond=121;
+    const {stays,route}=pair(undefined,false);route[2].evidence.kind='significant_change';route[2].impliedSpeedMetersPerSecond=121;
     expect(derive(stays,route)).toEqual([]);
   });
   it("uses implied speed only with an accurate non-simulated same-device predecessor",()=>{
@@ -119,6 +125,35 @@ describe("strong-evidence short journeys", () => {
     expect(runLocationEngine(input).segmentUpserts.filter(s=>s.kind==='commute')).toHaveLength(2);
     input.evidence.find(e=>e.clientEvidenceId==='out-0')!.isSimulated=true;
     expect(runLocationEngine(input).segmentUpserts.filter(s=>s.kind==='commute')).toHaveLength(1);
+  });
+  // Between two different known places two observations suffice, but each must still be independent and eligible.
+  it.each([
+    ["accuracy", {horizontalAccuracyMeters:65.001}], ["speed", {speedMetersPerSecond:2.799}], ["simulated", {isSimulated:true}],
+    ["broad", {horizontalAccuracyMeters:100}], ["non-point", {kind:"visit" as const}], ["implausible", {speedMetersPerSecond:120.001}]
+  ])("needs both of two known-place observations to be eligible (%s)",(_label,patch)=>{
+    const {stays,route}=pair();
+    expect(derive(stays,route.slice(0,2))).toHaveLength(1);
+    Object.assign(route[1].evidence,patch);
+    expect(derive(stays,route.slice(0,2))).toEqual([]);
+  });
+  it.each(["id","time","point"] as const)("does not count a duplicate as the second known-place observation (%s)",variant=>{
+    const {stays,route}=pair();const copy=structuredClone(route[0]);copy.evidence.clientEvidenceId="copy";
+    if(variant==="id")copy.evidence.clientEvidenceId=route[0].evidence.clientEvidenceId;
+    if(variant==="time")copy.evidence.latitude=0.004;
+    if(variant==="point"){copy.evidence.occurredAt=shortAt(625_000);copy.evidence.sourceTimestamp=shortAt(625_000);}
+    expect(derive(stays,[route[0],copy])).toEqual([]);
+  });
+  it.each([
+    ["ambiguous destination", {placeMatchKind:"ambiguous" as const}], ["saved without an identity", {placeId:null}],
+    ["the same known place", {placeId:"10000000-0000-4000-8000-000000000011"}]
+  ])("keeps three observations for %s",(_label,patch)=>{
+    const {stays,route}=pair();Object.assign(stays[1],patch);
+    expect(derive(stays,route.slice(0,2))).toEqual([]);
+  });
+  it("allows two observations from a saved place to a learned one",()=>{
+    const {stays,route}=pair();
+    stays[1]={...stays[1],placeMatchKind:"learned",placeId:null,learnedPlaceId:"10000000-0000-4000-8000-0000000000l1"};
+    expect(derive(stays,route.slice(0,2))).toHaveLength(1);
   });
   it.each([799.99,800,800.01])("keeps displacement threshold %s",metres=>{
     const {stays,route}=pair();stays[1].centreLatitude=(metres/6_371_008.8)*180/Math.PI;

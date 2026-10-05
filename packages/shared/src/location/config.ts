@@ -34,6 +34,7 @@ export type LocationEngineConfig = {
   commuteMinimumRouteEfficiency: number;
   commuteFasterMovementThresholdMps: number;
   commuteMinimumReliableSpeedSamples: number;
+  commuteKnownPlacesShortJourneySpeedSamples: number;
   commuteMaximumSpeedAccuracyMeters: number;
   commuteSamePlaceMinimumRouteDistanceMeters: number;
   commuteSamePlaceMinimumExcursionMeters: number;
@@ -116,6 +117,12 @@ export const LOCATION_ENGINE_V2_CONFIG: LocationEngineConfig = {
   commuteMinimumRouteEfficiency: 0.25,
   commuteFasterMovementThresholdMps: 2.8,
   commuteMinimumReliableSpeedSamples: 3,
+  // A journey under the minimum duration between two different saved or
+  // learned places at least `commuteMinimumEndpointDistanceMeters` apart needs
+  // this many independent fast observations instead: both stays already show
+  // the device was at each place, so the route only has to show movement. On
+  // 5 Oct iOS delivered just two readings on a 100-second drive between them.
+  commuteKnownPlacesShortJourneySpeedSamples: 2,
   commuteMaximumSpeedAccuracyMeters: 65,
   commuteSamePlaceMinimumRouteDistanceMeters: 1_800,
   commuteSamePlaceMinimumExcursionMeters: 650,

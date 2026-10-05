@@ -671,7 +671,7 @@ function hasIndependentShortJourneyProof(
   eligible: ReadonlySet<ClassifiedEvidence>,
   start: number,
   stop: number,
-  config: LocationEngineConfig
+  required: number
 ) {
   const ids = new Set<string>();
   const times = new Set<string>();
@@ -688,7 +688,14 @@ function hasIndependentShortJourneyProof(
     ids.add(id); times.add(time); points.add(point);
     if (!duplicate) count += 1;
   }
-  return count >= config.commuteMinimumReliableSpeedSamples;
+  return count >= required;
+}
+
+/** Two different saved or learned places, each identified as itself rather than an ambiguous match. */
+function distinctKnownPlaces(from: StaySegment, to: StaySegment) {
+  const known = (stay: StaySegment) => stay.placeMatchKind === "saved" && Boolean(stay.placeId) ||
+    stay.placeMatchKind === "learned" && Boolean(stay.learnedPlaceId);
+  return known(from) && known(to) && !sameKnownEndpoint(from, to);
 }
 
 export type CommuteDerivationOptions = {
@@ -807,7 +814,10 @@ export function deriveCommutes(
       if (summary.sameKnownPlace || summary.straightLineDistanceMeters == null ||
         summary.straightLineDistanceMeters < config.commuteMinimumEndpointDistanceMeters) continue;
       shortProof ??= shortJourneyProof(acceptedEvidence, config, occurredAtMs);
-      if (!hasIndependentShortJourneyProof(routeEvidence, shortProof, startedAtMs, stoppedAtMs, config)) continue;
+      const required = distinctKnownPlaces(from, to)
+        ? config.commuteKnownPlacesShortJourneySpeedSamples
+        : config.commuteMinimumReliableSpeedSamples;
+      if (!hasIndependentShortJourneyProof(routeEvidence, shortProof, startedAtMs, stoppedAtMs, required)) continue;
     }
     let qualification = qualifyCommuteCandidate(summary, config);
     // Each leg already proved a real journey to or from a recorded stop; the
