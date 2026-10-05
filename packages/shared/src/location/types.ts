@@ -119,6 +119,12 @@ export type StaySegment = {
   learnedPlaceId?: string | null;
   placeMatchKind: "saved" | "learned" | "unknown" | "ambiguous";
   approximateArrival?: true;
+  /**
+   * The stay's end from location evidence alone, when Motion & Fitness moved
+   * `stoppedAt`. Persisted, so journeys re-derived from a decided stay still
+   * qualify on location evidence and stay Review-only when motion timed them.
+   */
+  locationOnlyStoppedAt?: string;
   /** Set when the stay was formed from physical stop evidence rather than identity/dwell gates. */
   formation?: "physical_stop";
   candidatePlaceIds: string[];

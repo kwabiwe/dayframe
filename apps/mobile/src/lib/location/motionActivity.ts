@@ -40,7 +40,8 @@ export function motionEvidenceFromRecords(
     ? [{ startMs: record.startMs, activity: dominantMotionActivity(record), confidence: record.confidence }]
     : []);
   const coveredToMs = truncated && mapped.length ? Math.max(...mapped.map((record) => record.startMs)) : queriedAtMs;
-  const { transitions, cursor } = motionTransitionsFromRecords(mapped, state.cursor, coveredToMs, floorMs, LOCATION_ENGINE_V2_CONFIG);
+  const { transitions, cursor } = motionTransitionsFromRecords(mapped, state.cursor, coveredToMs, floorMs, LOCATION_ENGINE_V2_CONFIG,
+    truncated && mapped.length > 0);
   // For motion, receipt is the time the history is known to cover: the engine
   // reads it as coverage, so a truncated page never claims more than it returned.
   const receivedAt = new Date(coveredToMs).toISOString();

@@ -15,8 +15,10 @@ const record = (minute: number, activity: MotionActivity) => ({
 describe("Motion & Fitness records as evidence", () => {
   it("never claims coverage beyond a truncated page", () => {
     // The page ends with stillness from 08:20 although the query ran at 09:00.
-    const { evidence } = motionEvidenceFromRecords([record(0, "stationary"), record(10, "automotive"), record(20, "stationary")],
+    const { evidence, next } = motionEvidenceFromRecords([record(0, "stationary"), record(10, "automotive"), record(20, "stationary")],
       state, T0 + 60 * 60_000, T0, context, true);
+    // The next query pages forward from the end of this page.
+    expect(next.cursor.resumeFromMs).toBe(T0 + 20 * 60_000);
     expect(new Set(evidence.map((item) => item.receivedAt))).toEqual(new Set([new Date(T0 + 20 * 60_000).toISOString()]));
     const timeline = buildMotionTimeline(evidence.map((item) => ({ evidence: item, match: null, impliedSpeedMetersPerSecond: null })),
       LOCATION_ENGINE_V2_CONFIG, T0 + 120 * 60_000)!;

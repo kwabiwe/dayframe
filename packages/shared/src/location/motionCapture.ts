@@ -16,6 +16,8 @@ export type MotionTransition = MotionRecord & { continuation?: true };
  */
 export type MotionCaptureCursor = {
   lastRecordStartMs: number | null;
+  /** Set after a truncated page: the next query resumes exactly here, with no lookback, until it catches up. */
+  resumeFromMs?: number | null;
   last: { atMs: number; activity: MotionActivity; confidence: MotionConfidence; confirmed: boolean } | null;
 };
 
@@ -27,8 +29,14 @@ export const EMPTY_MOTION_CAPTURE_CURSOR: MotionCaptureCursor = { lastRecordStar
  */
 export const MOTION_CAPTURE_LOOKBACK_MS = 15 * 60_000;
 
-/** Where the next history query starts: the lookback before the latest record seen, never before the floor. */
+/**
+ * Where the next history query starts: after a truncated page, exactly where
+ * that page ended (paging forward always progresses; the boundary record is
+ * read again and deduplicated by ID); otherwise the lookback before the latest
+ * record seen. Never before the floor.
+ */
 export function motionQueryStartMs(cursor: MotionCaptureCursor, floorMs: number) {
+  if (cursor.resumeFromMs != null) return Math.max(floorMs, cursor.resumeFromMs);
   return Math.max(floorMs, (cursor.lastRecordStartMs ?? floorMs) - MOTION_CAPTURE_LOOKBACK_MS);
 }
 
@@ -69,7 +77,8 @@ export function motionTransitionsFromRecords(
   cursor: MotionCaptureCursor,
   coveredToMs: number,
   floorMs: number,
-  config: Pick<LocationEngineConfig, "motionStillBridgeMs">
+  config: Pick<LocationEngineConfig, "motionStillBridgeMs">,
+  truncated = false
 ): { transitions: MotionTransition[]; cursor: MotionCaptureCursor } {
   const ordered = records.filter((record) => Number.isFinite(record.startMs) && record.startMs <= coveredToMs)
     .sort((a, b) => a.startMs - b.startMs || CONFIDENCE_ORDER[a.confidence] - CONFIDENCE_ORDER[b.confidence] ||
@@ -94,7 +103,7 @@ export function motionTransitionsFromRecords(
   }
   const lastRecordStartMs = latest && (cursor.lastRecordStartMs == null || latest.startMs > cursor.lastRecordStartMs)
     ? latest.startMs : cursor.lastRecordStartMs;
-  return { transitions, cursor: { lastRecordStartMs, last } };
+  return { transitions, cursor: { lastRecordStartMs, resumeFromMs: truncated && latest ? latest.startMs : null, last } };
 }
 
 /** Stable per device: the same transition delivered twice is one piece of evidence. */

@@ -1276,6 +1276,11 @@ async function validateMotionActivityEvidence() {
     [WORKSPACE_ID, USER_ID]
   );
   assert.deepEqual(modes.rows, [{ travelMode: "automotive" }], "The driven commute did not persist its travel mode.");
+  const refinedStays = await pool.query<{ count: number }>(
+    `select count(*)::integer as count from stay_segments
+     where workspace_id = $1 and user_id = $2 and status <> 'superseded' and metadata ? 'locationOnlyStoppedAt'`,
+    [WORKSPACE_ID, USER_ID]);
+  assert.equal(refinedStays.rows[0].count, 1, "A motion-refined stay did not persist its location-only end.");
   const summary = await pool.query<{ motionCount: number }>(
     `select (raw_payload->'evidenceKinds'->>'motion_activity')::integer as "motionCount" from activity_events
      where workspace_id = $1 and user_id = $2 and client_event_id like 'location-batch:%db-motion-activity'`,
@@ -1344,12 +1349,20 @@ async function validateMotionOnlyReviewRetirement() {
   await resolveLocationReviewAction(open.rows[0].id, { action: "ignore_once_location" }, session);
   const lateVisit: LocationEvidence = { ...point("motion-only-late-visit", "07:58:00", 0), kind: "visit",
     endedAt: "2026-07-20T09:00:00.000Z", horizontalAccuracyMeters: 20, speedMetersPerSecond: null };
-  await ingestLocationEvidence(batch("db-motion-only-late-visit", [lateVisit], "v2_review", acknowledged), session);
+  // A late route fix now qualifies the replacement on location evidence alone; the decision still holds.
+  const lateRoute: LocationEvidence = { ...point("motion-only-late-route", "09:14:00", 1_000), speedMetersPerSecond: 12, horizontalAccuracyMeters: 5 };
+  await ingestLocationEvidence(batch("db-motion-only-late-visit", [lateVisit, lateRoute], "v2_review", acknowledged), session);
   const after = await pool.query<{ status: string }>(
     `select ri.status from review_items ri join commute_segments cs on cs.id = ri.location_segment_id
      where ri.workspace_id = $1 and ri.user_id = $2 and cs.metadata ? 'motionSupported' order by ri.created_at`,
     [WORKSPACE_ID, USER_ID]);
   assert.deepEqual(after.rows.map((row) => row.status), ["ignored"], "A decided motion-only journey was proposed again under a new ID.");
+  const reproposed = await pool.query<{ count: number }>(
+    `select count(*)::integer as count from review_items ri join commute_segments cs on cs.id = ri.location_segment_id
+     where ri.workspace_id = $1 and ri.user_id = $2 and ri.status = 'open'
+       and cs.started_at < '2026-07-20T09:20:00Z' and cs.stopped_at > '2026-07-20T09:10:00Z'`,
+    [WORKSPACE_ID, USER_ID]);
+  assert.equal(reproposed.rows[0].count, 0, "A location-qualified replacement re-proposed a decided motion-only journey.");
 
   // In v2_enabled the individual emitter carries the same motion fields and still needs Review.
   await clearDerivedLocationState();

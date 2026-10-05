@@ -922,7 +922,8 @@ export function deriveCommutes(
     }
     // Motion never makes a journey more eligible for automatic logging: one it
     // timed or qualified always needs Review.
-    const motionTimed = beganMs !== startedAtMs || endedMs !== stoppedAtMs;
+    const motionTimed = beganMs !== startedAtMs || endedMs !== stoppedAtMs ||
+      (from.locationOnlyStoppedAt != null && from.locationOnlyStoppedAt !== from.stoppedAt && beganMs === Date.parse(from.stoppedAt));
     const stopLowerBoundAt = to.startLowerBoundAt ?? to.startedAt;
     const startUpperBoundAt = from.stopUpperBoundAt ?? routeEvidence[0]?.evidence.occurredAt ?? from.stoppedAt;
     const travelMode = motionTravelMode(motion, beganMs, endedMs, config);

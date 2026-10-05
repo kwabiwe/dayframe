@@ -323,10 +323,11 @@ async function excludeProtectedReplacements(
   }
   // A journey only Motion & Fitness showed has no lineage, so the reads above
   // cannot protect a decision about it. When its endpoints' IDs change, the
-  // engine proposes it again under a new ID: a decided or manual motion-only
-  // journey on this device holds any motion-only candidate overlapping it.
+  // engine proposes it again under a new ID, possibly now qualified by a late
+  // route fix: a decided or manual motion-only journey on this device holds any
+  // candidate journey overlapping it.
   const motionCandidates = [...segments, ...fallbackLegs].filter((segment): segment is CommuteSegment =>
-    segment.kind === "commute" && segment.motionSupported === true);
+    segment.kind === "commute");
   if (motionCandidates.length) {
     const decided = await client.query<{ clientSegmentId: string; startedAt: Date | string; stoppedAt: Date | string }>(
       `/* decided motion-only journeys */ select s.client_segment_id as "clientSegmentId", s.started_at as "startedAt", s.stopped_at as "stoppedAt"
@@ -380,6 +381,7 @@ async function excludeProtectedReplacements(
 
 type DecidedStopBounds = {
   clientSegmentId: string;
+  locationOnlyStoppedAt: string | null;
   startedAt: Date | string; stoppedAt: Date | string | null;
   startLowerBoundAt: Date | string | null; startUpperBoundAt: Date | string | null;
   stopLowerBoundAt: Date | string | null; stopUpperBoundAt: Date | string | null;
@@ -397,7 +399,8 @@ async function decidedStayBounds(
   const result = await client.query<DecidedStopBounds>(
     `/* decided stay bounds */ select s.client_segment_id as "clientSegmentId", s.started_at as "startedAt", s.stopped_at as "stoppedAt",
             s.start_lower_bound_at as "startLowerBoundAt", s.start_upper_bound_at as "startUpperBoundAt",
-            s.stop_lower_bound_at as "stopLowerBoundAt", s.stop_upper_bound_at as "stopUpperBoundAt"
+            s.stop_lower_bound_at as "stopLowerBoundAt", s.stop_upper_bound_at as "stopUpperBoundAt",
+            case when s.continuity_status = 'manual' then null else s.metadata->>'locationOnlyStoppedAt' end as "locationOnlyStoppedAt"
      from stay_segments s
      where s.workspace_id = $1 and s.user_id = $2 and s.device_id = $3 and s.client_segment_id = any($4::text[])
        and (s.continuity_status = 'manual' or (s.created_from_event_id is not null and not exists (
@@ -417,7 +420,13 @@ function stayWithDecidedBounds(id: string, decided: ReadonlyMap<string, DecidedS
   if (!engine || !row) return engine ?? null;
   const startedAt = iso(row.startedAt)!;
   const stoppedAt = iso(row.stoppedAt);
-  return { ...engine, startedAt, stoppedAt,
+  // A decided end Motion & Fitness set keeps its location-only end, so a journey
+  // rebuilt from it still qualifies on location evidence and stays Review-only.
+  // The engine's own provenance never carries over to a different persisted end.
+  const { locationOnlyStoppedAt: _engineLocationOnly, ...rest } = engine;
+  return { ...rest, startedAt, stoppedAt,
+    ...(row.locationOnlyStoppedAt && iso(row.locationOnlyStoppedAt) !== stoppedAt
+      ? { locationOnlyStoppedAt: iso(row.locationOnlyStoppedAt)! } : {}),
     startLowerBoundAt: iso(row.startLowerBoundAt) ?? startedAt, startUpperBoundAt: iso(row.startUpperBoundAt) ?? startedAt,
     stopLowerBoundAt: iso(row.stopLowerBoundAt) ?? stoppedAt, stopUpperBoundAt: iso(row.stopUpperBoundAt) ?? stoppedAt };
 }
@@ -677,7 +686,9 @@ async function persistStays(
         placeMatchKind: segment.placeMatchKind,
         candidatePlaceIds: segment.candidatePlaceIds,
         ...(segment.approximateArrival ? { approximateArrival: true } : {}),
-        ...(segment.formation ? { formation: segment.formation } : {})
+        ...(segment.formation ? { formation: segment.formation } : {}),
+        // Motion & Fitness moved the end: keep the location-only end for rebuilds.
+        ...(segment.locationOnlyStoppedAt ? { locationOnlyStoppedAt: segment.locationOnlyStoppedAt } : {})
       })
     ]);
     // Trusted SQL template; only parameter positions vary with the bounded row index.

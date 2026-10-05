@@ -225,13 +225,12 @@ export function motionTravelMode(timeline: MotionTimeline | null, startMs: numbe
     (byMode.get(mode) ?? 0) >= config.motionTravelModeMinimumShare * moving) ?? null;
 }
 
-// A stay refined below keeps its location-only end here, so journeys between
-// stays still qualify on location evidence alone (motion never revokes them).
-const locationOnlyStayEnds = new WeakMap<StaySegment, string>();
-
-/** The stay's end from location evidence alone, before any motion refinement. */
+/**
+ * The stay's end from location evidence alone, before any motion refinement:
+ * journeys between stays qualify on it, so motion never revokes them.
+ */
 export function locationOnlyStayEnd(stay: StaySegment) {
-  return locationOnlyStayEnds.get(stay) ?? stay.stoppedAt ?? null;
+  return stay.locationOnlyStoppedAt ?? stay.stoppedAt ?? null;
 }
 
 /**
@@ -266,8 +265,6 @@ export function refineStayDeparturesWithMotion(
     const before = Date.parse(stay.stoppedAt) - startedMs;
     const after = departedMs - startedMs;
     if (thresholds.some((threshold) => (before >= threshold) !== (after >= threshold))) return stay;
-    const refined = { ...stay, stoppedAt: new Date(departedMs).toISOString() };
-    locationOnlyStayEnds.set(refined, stay.stoppedAt);
-    return refined;
+    return { ...stay, stoppedAt: new Date(departedMs).toISOString(), locationOnlyStoppedAt: stay.stoppedAt };
   });
 }

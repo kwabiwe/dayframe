@@ -520,3 +520,36 @@ describe("review round 2", () => {
     expect(blocks(complete)).toHaveLength(1);
   });
 });
+
+describe("review round 3", () => {
+  const NEAR_SCHOOL = { ...school, latitude: north(1_000) };
+  // Home until 08:04, three fast fixes from 08:06:48, School from 08:08:12: a 2.8-minute journey on location alone.
+  const shortRun = () => [
+    ...[0, 15, 30, 45, 60, 64].map((m, i) => fix(`home-${i}`, m, i % 2 * 3)),
+    fix("route-0", 66.8, 300, { speedMetersPerSecond: 12 }), fix("route-1", 67.2, 600, { speedMetersPerSecond: 12 }),
+    fix("route-2", 67.6, 850, { speedMetersPerSecond: 12 }),
+    crossing("school-enter", 68.2, "geofence_enter", SCHOOL_ID),
+    ...[68.2, 75, 85, 95].map((m, i) => fix(`school-${i}`, m, 1_000 + i % 2 * 4))
+  ];
+
+  it("keeps a journey rebuilt from a persisted, motion-refined stay to its location-only eligibility", () => {
+    const evidence = [...shortRun(), ...motion([[0, "stationary"], [64.5, "automotive"], [68, "stationary"]], 120)];
+    const output = runLocationEngine({ ...input(evidence), savedPlaces: [home, NEAR_SCHOOL] });
+    const stays = output.segmentUpserts.filter((segment): segment is StaySegment => segment.kind === "stay");
+    expect(stays[0].locationOnlyStoppedAt).toBeDefined();
+    // Persisted and read back as a decided row; the motion evidence has since expired.
+    const persisted = JSON.parse(JSON.stringify(stays)) as StaySegment[];
+    const located = output.acceptedEvidence.filter((item) => item.evidence.kind !== "motion_activity");
+    const [rebuilt] = deriveCommutes(persisted, located, config, at(240));
+    expect(assessAutomaticLocation("v2_enabled", { ...rebuilt, status: "finalised" }).action).toBe("review");
+  });
+
+  it("pages forward after a truncated history query instead of re-reading the same page", () => {
+    const records = Array.from({ length: 4 }, (_, index) => ({ startMs: t0 + index * 250, activity: "walking" as const,
+      confidence: index % 2 ? "high" as const : "medium" as const }));
+    const page = motionTransitionsFromRecords(records, EMPTY_MOTION_CAPTURE_CURSOR, t0 + 750, t0, config, true);
+    expect(motionQueryStartMs(page.cursor, t0)).toBe(t0 + 750);
+    const caughtUp = motionTransitionsFromRecords([records[3]], page.cursor, t0 + 60 * 60_000, t0, config);
+    expect(motionQueryStartMs(caughtUp.cursor, t0)).toBe(Math.max(t0, t0 + 750 - 15 * 60_000));
+  });
+});
