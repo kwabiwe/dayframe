@@ -550,6 +550,71 @@ describe("presence at Home after a stray fix outside or a finished walk (review 
   });
 });
 
+describe("departures after a finished walk (review round 9)", () => {
+  const WORK = { id: "10000000-0000-4000-8000-0000000000f2", name: "Work", latitude: north(3_000), longitude: 0, radiusMeters: 100, loggingEnabled: true };
+  const still = (id: string, minutes: number, metres: number, patch: Partial<LocationEvidence> = {}) =>
+    e(id, minutes, metres, { speedMetersPerSecond: 0, ...patch });
+  const visit = (id: string, minutes: number, metres = 0, patch: Partial<LocationEvidence> = {}) =>
+    e(id, minutes, metres, { kind: "visit", speedMetersPerSecond: null, horizontalAccuracyMeters: 10, metadata: { visitDepartureOpen: true }, ...patch });
+  const withWork = (evidence: LocationEvidence[], work: boolean, homeRadius = 100) => {
+    const value = input(evidence, 1_000);
+    value.savedPlaces = [{ ...value.savedPlaces[0], radiusMeters: homeRadius }, ...(work ? [WORK] : [])];
+    return value;
+  };
+  const walk = (farthest = 900) => [still("home-0", 0, 0), still("home-1", 10, 0), geofence("walk-exit", 20, "geofence_exit"),
+    e("walk-0", 25, 500, { speedMetersPerSecond: 1.35 }), e("walk-1", 30, farthest, { speedMetersPerSecond: 1.35 }), e("walk-2", 35, 400, { speedMetersPerSecond: 1.35 })];
+  const drive = (departure: number, work: boolean) => {
+    const route = work ? [[0.5, 300], [2, 1_000], [3.5, 1_800], [5, 2_700]] : [[0.5, 300], [2, 1_000], [3.5, 1_800], [5, 1_000], [6.5, 300]];
+    const end = work ? 3_000 : 0;
+    return [...route.map(([minutes, metres], index) => e(`drive-${index}`, departure + minutes, metres)),
+      ...(work ? [] : [geofence("end-enter", departure + 7, "geofence_enter")]),
+      still("end-0", departure + 7.5, end), still("end-1", departure + 17.5, end), still("end-2", departure + 27.5, end)];
+  };
+
+  it.each([false, true])("ends the walk's excursion after a long stay seen only by broad fixes (to Work: %s)", (work) => {
+    // An exit fired with the drive just after a far fix is a new excursion's first exit, not a re-report.
+    const evidence = [...walk(), still("walk-return", 39, 0, { horizontalAccuracyMeters: 100 }),
+      ...[59, 79, 99, 119].map((minutes) => still(`home-broad-${minutes}`, minutes, 0, { horizontalAccuracyMeters: 100 })),
+      geofence("drive-exit", 130.6, "geofence_exit"), ...drive(130, work)];
+    evidence.find((item) => item.clientEvidenceId === "drive-0")!.latitude = north(900);
+    expect(commutes(withWork(evidence, work))).toEqual([expect.objectContaining({ startedAt: at(130.6) })]);
+  });
+
+  it.each([100, 50])("does not treat the displaced completion of Home's own Visit as leaving (Home radius %i m)", (radius) => {
+    const base = [...walk(), visit("arrival", 39), still("last-home", 130, 0, { horizontalAccuracyMeters: 100 }),
+      e("drive-0", 131, 300), e("drive-1", 132, 1_000), e("drive-2", 133, 2_000), e("drive-3", 134, 2_700),
+      still("work-0", 136, 3_000), still("work-1", 146, 3_000), still("work-2", 156, 3_000)];
+    const completion = visit("completion", 39, radius === 100 ? 220 : 140, { horizontalAccuracyMeters: 70, endedAt: at(129), receivedAt: at(130), metadata: {} });
+    const clean = commutes(withWork(base, true, radius));
+    expect(clean).toEqual([expect.objectContaining({ startedAt: at(130), stoppedAt: at(136) })]);
+    expect(commutes(withWork([...base, completion], true, radius))).toEqual(clean);
+    // Whichever callback sorts first at the shared arrival time.
+    const renamed = { ...completion, clientEvidenceId: "a-completion" };
+    expect(commutes(withWork([...base, renamed], true, radius)).map(({ startedAt, stoppedAt }) => [startedAt, stoppedAt]))
+      .toEqual(clean.map(({ startedAt, stoppedAt }) => [startedAt, stoppedAt]));
+  });
+
+  it.each(["a mirrored accurate fix", "a Visit on the way"])("keeps a later round trip after the walk's return with %s and accuracy-less route fixes", (extra) => {
+    const route = [[40, 300], [41, 1_000], [42, 1_800], [44, 1_000], [46, 300]].map(([minutes, metres], index) =>
+      e(`drive-${index}`, minutes, metres, { horizontalAccuracyMeters: index === 0 ? 4 : null }));
+    const second: LocationEvidence = extra === "a mirrored accurate fix"
+      ? { ...route[0], clientEvidenceId: "drive-mirror", kind: "significant_change", speedMetersPerSecond: null, isSimulated: null }
+      : visit("route-visit", 40.3, 500, { endedAt: at(40.5), metadata: {} });
+    const evidence = [...walk(), geofence("walk-enter", 39, "geofence_enter"), ...route, second,
+      geofence("end-enter", 47, "geofence_enter"), still("end-0", 47.5, 0), still("end-1", 57.5, 0), still("end-2", 67.5, 0)];
+    expect(commutes(withWork(evidence, false))).toEqual([expect.objectContaining({ startedAt: at(39), stoppedAt: at(47) })]);
+  });
+
+  it.each([
+    ["a broad fix", still("last-home", 39, 0, { horizontalAccuracyMeters: 100 })],
+    ["a Visit", visit("last-home", 39)],
+    ["an entry", geofence("last-home", 39, "geofence_enter")]
+  ])("keeps the departure at %s after a slow walk under 650 m", (_label, presence) => {
+    expect(commutes(withWork([...walk(600), presence, ...drive(39.5, true)], true)))
+      .toEqual([expect.objectContaining({ startedAt: at(39), stoppedAt: at(47) })]);
+  });
+});
+
 describe("the capture simulator", () => {
   it("applies the distance filter to displacement, not path length", () => {
     // Twenty laps of a 20 m square never put the device 75 m from where it started.
