@@ -110,12 +110,13 @@ Temporal invariants:
   route. The place's own Visit's displaced callback (sharing its arrival time)
   is never being away or leaving. A trip through stops that only partly covers
   one of its legs (its start moved to such a return) is not assembled; the legs
-  stand, so commutes never overlap. Only renewed movement undoes an observed return: at least
-  `outsideConfirmationCount` independent accurate observations away (a fix
-  and its significant-change mirror are one: it moved when a copy's native
-  speed says so, or, when no copy reports native speed, a copy's implied speed
-  does, so a speedless mirror never overrides reported stillness), one moving
-  or the excursion minimum away; a stray still fix does not. Unchanged and known limitations: a moving
+  stand, so commutes never overlap. Only renewed movement undoes an observed
+  return: at least `outsideConfirmationCount` independent accurate
+  observations away (a fix and its significant-change mirror are one: it moved
+  when a copy's native speed says so, whatever that copy's accuracy, or, when
+  no copy reports native speed, a copy's implied speed does, so a speedless
+  mirror never overrides reported stillness), one moving or the excursion
+  minimum away; a stray still fix does not. Unchanged and known limitations: a moving
   pass-by at the origin still restarts the journey, because a pass-by and a
   brief return look alike; departure bounds still come from the origin stay;
   with no departure evidence after a long quiet spell the start stays at the
@@ -123,7 +124,14 @@ Temporal invariants:
   unobserved during an outing lets a later re-reported exit count; and when
   the segmenter misses a stop at the far end (no stay detected there, as with
   a silent park), the outing becomes one Review-only round trip that includes
-  that stop, where main showed nothing. Private
+  that stop, where main showed nothing. Kept as a known limitation by owner
+  decision after review round 17, and worse than main: a Home Visit or moving
+  broad fix followed by a short loop whose readings never get at least 100 m
+  farther from Home than the walk's or outing's last reading before it, back
+  within three minutes, reads as that earlier outing's early-dated arrival.
+  The loop then joins the earlier outing, is dropped when that makes it longer
+  than six hours, or, under three minutes, becomes a commute it should not
+  be; main starts it at the Visit. Private
   corpus unchanged; in the staging week only the 4 Oct school run without its
   School pin changes, from a 4-minute fragment to the whole 07:49–08:21 round
   trip. The capture simulator (`test/fixtures/captureSimulator.ts`), which can

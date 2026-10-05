@@ -102,6 +102,41 @@ function ownVisitArrivals(items: ClassifiedEvidence[], stay: StaySegment) {
 }
 
 /**
+ * Native speed for a reading from whichever copy of its observation reports
+ * one, whatever that copy's accuracy. A copy is on the same device in the same
+ * or an adjacent whole second (a whole-second timestamp can land either side),
+ * or at the same coordinate within `MIRROR_WINDOW_MS` either way; the nearest
+ * copy in time wins.
+ */
+function nativeSpeedResolver(items: ClassifiedEvidence[]) {
+  type Native = { atMs: number; speed: number };
+  const bySecond = new Map<string, Native[]>();
+  const byPoint = new Map<string, Native[]>();
+  const add = (index: Map<string, Native[]>, key: string, native: Native) => index.set(key, [...(index.get(key) ?? []), native]);
+  for (const item of items) {
+    const speed = item.evidence.speedMetersPerSecond;
+    const point = evidencePoint(item);
+    if (speed == null || !Number.isFinite(speed) || point == null) continue;
+    const native = { atMs: Date.parse(item.evidence.occurredAt), speed };
+    add(bySecond, `${item.evidence.deviceId}:${Math.floor(native.atMs / 1_000)}`, native);
+    add(byPoint, `${item.evidence.deviceId}:${point.latitude}:${point.longitude}`, native);
+  }
+  return (item: ClassifiedEvidence) => {
+    const own = item.evidence.speedMetersPerSecond;
+    if (own != null && Number.isFinite(own)) return own;
+    const atMs = Date.parse(item.evidence.occurredAt);
+    const point = evidencePoint(item);
+    const second = Math.floor(atMs / 1_000);
+    const copies = [-1, 0, 1].flatMap((offset) => bySecond.get(`${item.evidence.deviceId}:${second + offset}`) ?? [])
+      .concat(point ? (byPoint.get(`${item.evidence.deviceId}:${point.latitude}:${point.longitude}`) ?? [])
+        .filter((copy) => Math.abs(copy.atMs - atMs) <= MIRROR_WINDOW_MS) : []);
+    let nearest: Native | null = null;
+    for (const copy of copies) if (nearest == null || Math.abs(copy.atMs - atMs) < Math.abs(nearest.atMs - atMs)) nearest = copy;
+    return nearest?.speed ?? null;
+  };
+}
+
+/**
  * The latest evidence of being at a journey's origin: an accurate fix there,
  * or the origin's geofence exit. iOS re-reports exits when the app
  * re-registers its regions (on 4 Oct, 900 m from Home, a second after a fix
@@ -137,35 +172,8 @@ function latestDepartureSupport(stay: StaySegment, stayEvidence: ClassifiedEvide
   const ownVisits = ownVisitArrivals([...stayEvidence, ...evidence], stay);
   // Whether a reading shows movement: native speed from whichever copy of the
   // observation reports it, else an accurate fix's implied speed; a speedless
-  // mirror never overrides a copy that reports stillness. A copy is on the same
-  // device in the same or an adjacent whole second (a whole-second timestamp
-  // can land either side), or at the same coordinate within
-  // `MIRROR_WINDOW_MS` either way; the nearest copy in time wins.
-  type Native = { atMs: number; speed: number };
-  const nativeBySecond = new Map<string, Native[]>();
-  const nativeByPoint = new Map<string, Native[]>();
-  const add = (index: Map<string, Native[]>, key: string, native: Native) => index.set(key, [...(index.get(key) ?? []), native]);
-  for (const item of [...stayEvidence, ...evidence]) {
-    const speed = item.evidence.speedMetersPerSecond;
-    const point = evidencePoint(item);
-    if (speed == null || !Number.isFinite(speed) || point == null) continue;
-    const native = { atMs: Date.parse(item.evidence.occurredAt), speed };
-    add(nativeBySecond, `${item.evidence.deviceId}:${Math.floor(native.atMs / 1_000)}`, native);
-    add(nativeByPoint, `${item.evidence.deviceId}:${point.latitude}:${point.longitude}`, native);
-  }
-  const nativeSpeed = (item: ClassifiedEvidence) => {
-    const own = item.evidence.speedMetersPerSecond;
-    if (own != null && Number.isFinite(own)) return own;
-    const atMs = Date.parse(item.evidence.occurredAt);
-    const point = evidencePoint(item);
-    const second = Math.floor(atMs / 1_000);
-    const copies = [-1, 0, 1].flatMap((offset) => nativeBySecond.get(`${item.evidence.deviceId}:${second + offset}`) ?? [])
-      .concat(point ? (nativeByPoint.get(`${item.evidence.deviceId}:${point.latitude}:${point.longitude}`) ?? [])
-        .filter((copy) => Math.abs(copy.atMs - atMs) <= MIRROR_WINDOW_MS) : []);
-    let nearest: Native | null = null;
-    for (const copy of copies) if (nearest == null || Math.abs(copy.atMs - atMs) < Math.abs(nearest.atMs - atMs)) nearest = copy;
-    return nearest?.speed ?? null;
-  };
+  // mirror never overrides a copy that reports stillness.
+  const nativeSpeed = nativeSpeedResolver([...stayEvidence, ...evidence]);
   const moving = (item: ClassifiedEvidence) => {
     const native = nativeSpeed(item);
     if (native != null) return native >= config.movementSpeedThresholdMps;
@@ -316,14 +324,16 @@ const EARLY_DATED_VISIT_MAXIMUM_MS = 180_000;
  * undoes a return: at least `outsideConfirmationCount` independent accurate
  * observations away (a fix and its significant-change mirror are one), one
  * moving or the round-trip excursion minimum from the place; a stray still fix
- * nearby does not. An observation moved when a copy's native speed says so, or,
- * when no copy reports native speed, a copy's implied speed does: a speedless
- * mirror never overrides a copy that reports stillness.
+ * nearby does not. An observation moved when a copy's native speed says so (any
+ * copy, even one too coarse to count as an observation itself), or, when no
+ * copy reports native speed, a copy's implied speed does: a speedless mirror
+ * never overrides a copy that reports stillness.
  */
 function observedReturnMs(stay: StaySegment, evidence: ClassifiedEvidence[], config: LocationEngineConfig, departedMs: number,
   snapshots: ReadonlySet<ClassifiedEvidence>) {
   const centre = segmentPoint(stay);
   const ownVisits = ownVisitArrivals(evidence, stay);
+  const nativeSpeed = nativeSpeedResolver(evidence);
   let away = false;
   let returnedMs: number | null = null;
   let awayFixes = 0;
@@ -365,8 +375,8 @@ function observedReturnMs(stay: StaySegment, evidence: ClassifiedEvidence[], con
       awayFixes += 1;
     }
     const current = observation!;
-    const native = item.evidence.speedMetersPerSecond;
-    if (native != null && Number.isFinite(native)) {
+    const native = nativeSpeed(item);
+    if (native != null) {
       current.native = true;
       current.nativeMoving ||= native >= config.movementSpeedThresholdMps;
     } else {

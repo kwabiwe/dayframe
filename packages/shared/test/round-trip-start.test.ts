@@ -910,6 +910,31 @@ describe("departures after a finished walk (review round 9)", () => {
       expect(bounds(bothCallbacks(visitEarly, reReport))).toEqual([[at(20), at(32)]]);
     });
 
+  // Review round 17. The return guard takes native speed from any copy of an observation, even one too coarse to count.
+  it.each([-4, -1, 0, 1, 4])("keeps native stillness from a copy too coarse to count, with an accurate mirror %i s away", (offset) => {
+    const evidence = [still("home-0", 0, 0), still("home-1", 10, 0), geofence("exit", 20, "geofence_exit"), e("out-0", 21, 500), e("out-1", 22, 1_000),
+      e("out-2", 23, 2_000), e("back-0", 25, 1_000), e("back-1", 26, 600), geofence("return-entry", 27, "geofence_enter")];
+    for (const [id, minutes, metres] of [["stray-a", 29, 200], ["stray-b", 31, 210]] as const) {
+      const native = still(id, minutes, metres, { horizontalAccuracyMeters: config.highQualityHorizontalAccuracyMeters + 0.1 });
+      const mirrorAt = new Date(Date.parse(native.occurredAt) + offset * 1_000).toISOString();
+      evidence.push(native, { ...native, clientEvidenceId: `${id}-mirror`, kind: "significant_change", speedMetersPerSecond: null, isSimulated: null,
+        horizontalAccuracyMeters: config.highQualityHorizontalAccuracyMeters - 0.1, occurredAt: mirrorAt, sourceTimestamp: mirrorAt });
+    }
+    evidence.push(still("home-2", 57, 0), still("home-3", 67, 0), still("home-4", 77, 0));
+    expect(commutes(withWork(evidence, false))).toEqual([]);
+  });
+
+  // Known limitation, kept by owner decision after review round 17 (5 Oct): a Home Visit followed by a loop that never
+  // gets farther from Home than the walk's last reading, back exactly three minutes later, reads as the walk's own
+  // early-dated arrival, so the loop joins the walk. Main starts it at the Visit.
+  it("joins a constant-distance three-minute loop straight after a walk to that walk (known limitation)", () => {
+    const value = withWork([...walkThere(), visit("home-return", 45),
+      e("loop-n", 45.4, 700, { speedMetersPerSecond: 30 }), e("loop-e", 46.05, 0, { longitude: north(700), speedMetersPerSecond: 30 }),
+      e("loop-s", 46.7, -700, { speedMetersPerSecond: 30 }), e("loop-w", 47.35, 0, { longitude: north(-700), speedMetersPerSecond: 30 }),
+      geofence("loop-end", 48, "geofence_enter"), still("final-0", 48.5, 0), still("final-1", 58.5, 0), still("final-2", 68.5, 0)], false);
+    expect(bounds(value)).toEqual([[at(20), at(48)]]);
+  });
+
   it("does not let speedless mirrors turn two still stray fixes into renewed movement", () => {
     // Each stray's significant-change mirror sorts first at the same time and carries the implied speed from the route.
     const evidence = [still("home-0", 0, 0), still("home-1", 10, 0), geofence("exit", 20, "geofence_exit"), e("out-0", 21, 500), e("out-1", 22, 1_000),
