@@ -806,6 +806,55 @@ describe("departures after a finished walk (review round 9)", () => {
     expect(bounds(loop(kind, 2.8))).toEqual([]);
   });
 
+  // Review round 15: a loop whose outbound leg went uncaptured, and state snapshots, after a walk that approached Home.
+  const approachedHome = () => [still("home-0", 0, 0), still("home-1", 10, 0), still("home-2", 18, 0), geofence("walk-exit", 20, "geofence_exit"),
+    e("walk-a", 25, 500, { speedMetersPerSecond: 1.35 }), e("walk-b", 30, 900, { speedMetersPerSecond: 1.35 }), e("walk-c", 38.5, 300, { speedMetersPerSecond: 1.35 })];
+  const presenceAt = (kind: "entry" | "visit" | "broad", minutes: number) => kind === "entry" ? geofence("home-return", minutes, "geofence_enter")
+    : kind === "visit" ? visit("home-return", minutes) : still("home-return", minutes, 0, { horizontalAccuracyMeters: 100 });
+  const inboundLoop = (kind: "entry" | "visit" | "broad", minutes: number, learned = false) => {
+    const value = withWork([...approachedHome(), presenceAt(kind, 39),
+      ...[[1.5, 1_000], [1.75, 800], [2, 650], [2.3, 450], [2.6, 200]].map(([after, metres], index) => e(`in-${index}`, 39 + after, metres, { speedMetersPerSecond: 12 })),
+      learned ? visit("end-visit", 39 + minutes) : geofence("loop-return", 39 + minutes, "geofence_enter"),
+      still("final-0", 39.5 + minutes, 0), still("final-1", 49.5 + minutes, 0), still("final-2", 59.5 + minutes, 0)], false);
+    return learned ? learnedHome(value) : value;
+  };
+
+  it.each([
+    ["entry", 3], ["entry", 2.8], ["visit", 3], ["visit", 2.8], ["broad", 3], ["broad", 2.8]
+  ] as const)("starts an inbound-only loop at Home presence, never at the earlier walk (%s, %s minutes)", (kind, minutes) => {
+    expect(bounds(inboundLoop(kind, minutes))).toEqual(minutes < 3 ? [] : [[at(39), at(42)]]);
+  });
+
+  it.each([3, 2.8])("starts it there when Home is a learned place too (%s minutes)", (minutes) => {
+    expect(bounds(inboundLoop("broad", minutes, true))).toEqual(minutes < 3 ? [] : [[at(39), at(42)]]);
+  });
+
+  it.each([[0, false], [0, true], [400, false], [400, true]] as const)("ignores a state snapshot after the last sign of Home (+%s min, to Work: %s)", (shift, work) => {
+    const state = e("state", 49.1 + shift, 0, { kind: "geofence_state", savedPlaceId: HOME_ID, latitude: null, longitude: null,
+      horizontalAccuracyMeters: null, speedMetersPerSecond: null, metadata: { geofenceState: "inside" } });
+    const evidence = [...approachedHome(), presenceAt("broad", 49 + shift), state,
+      ...[[49.3, 200], [49.8, 550], [50.5, 1_000], [51.5, 1_700]].map(([minutes, metres], index) => e(`route-${index}`, minutes + shift, metres)),
+      ...(work ? [e("route-last", 53 + shift, 2_700), still("final-0", 54 + shift, 3_000), still("final-1", 64 + shift, 3_000), still("final-2", 74 + shift, 3_000)]
+        : [e("back-a", 53 + shift, 1_300), e("back-b", 54 + shift, 700), e("back-c", 55 + shift, 300), geofence("return", 56 + shift, "geofence_enter"),
+          still("final-0", 56.5 + shift, 0), still("final-1", 66.5 + shift, 0), still("final-2", 76.5 + shift, 0)])];
+    const trips = commutes(withWork(evidence, work));
+    expect(trips).toHaveLength(1);
+    expect(Math.abs(Date.parse(trips[0].startedAt) - Date.parse(at(49 + shift)))).toBeLessThanOrEqual(10_000);
+  });
+
+  it.each([false, true])("does not take a moving broad fix that matches Home on the way back as the departure (learned Home: %s)", (learned) => {
+    // A coarse reading placed at Home while the car is still about a kilometre out; the accurate approach continues after it.
+    const value = withWork([still("home-0", 0, 0), still("home-1", 10, 0), still("home-2", 18, 0), geofence("exit", 20, "geofence_exit"),
+      ...[[20.5, 300], [22, 1_000], [23.5, 1_800], [25, 2_500], [28, 1_800], [29.5, 1_000]].map(([minutes, metres], index) => e(`drive-${index}`, minutes, metres)),
+      e("coarse", 30, 0, { horizontalAccuracyMeters: 100 }),
+      ...[[30.5, 650], [31, 400], [31.5, 200]].map(([minutes, metres], index) => e(`approach-${index}`, minutes, metres)),
+      geofence("return", 32, "geofence_enter"), still("home-3", 32.5, 0), still("home-4", 42.5, 0), still("home-5", 52.5, 0)], false);
+    const [trip, ...rest] = bounds(learned ? learnedHome(value) : value);
+    expect(rest).toEqual([]);
+    expect(trip).toEqual([expect.any(String), at(learned ? 32.5 : 32)]);
+    expect(Date.parse(trip[0])).toBeLessThanOrEqual(Date.parse(at(20)));
+  });
+
   it("does not let speedless mirrors turn two still stray fixes into renewed movement", () => {
     // Each stray's significant-change mirror sorts first at the same time and carries the implied speed from the route.
     const evidence = [still("home-0", 0, 0), still("home-1", 10, 0), geofence("exit", 20, "geofence_exit"), e("out-0", 21, 500), e("out-1", 22, 1_000),

@@ -74,15 +74,22 @@ Temporal invariants:
   elsewhere; one still stray fix just outside is not leaving), or when it
   stayed there at least `savedPlaceMinimumDwellMs` before it was next seen
   leaving (an early-dated return Visit is followed by approach fixes within
-  three minutes), or when it was then seen away and either not back at the place within three
-  minutes (a later sign of being there, or the destination stay when the trip
-  returns there), or it had arrived first (nothing accurate away in the three
-  minutes before it, or the last two independent accurate observations away
-  approached) and the accurate readings after it moved at least 100 m farther
-  away (a short loop from home). Three minutes is a heuristic: iOS has dated
-  arrival Visits up to 157 s before the car stopped, with the approach after
-  them; one dated amid a short outing's outbound leg neither arrived first nor
-  stays unreturned that long. A larger early estimate is treated as presence. Any
+  three minutes), or when it was then seen away and it was observed there as
+  it happened (an entry, or a fix that is not moving). A Visit (its arrival is
+  dated) or a moving broad fix (a coarse reading can match the place while the
+  car is still approaching) then seen away counts when it is not back at the
+  place within three minutes (a later sign of being there, or the destination
+  stay when the trip returns there), or
+  when it had arrived first (nothing accurate away in the three minutes before
+  it, or the last two independent accurate observations away approached) and
+  then moved away: the accurate readings after it get at least 100 m farther,
+  or the first one after it is at least 100 m farther than the last one before
+  it (a loop whose outbound leg went uncaptured). Three minutes is a
+  heuristic: iOS has dated arrival Visits up to 157 s before the car stopped,
+  with the approach continuing after them; one dated amid a short outing's
+  outbound leg has not arrived first. A larger early estimate is treated as
+  presence. Registration snapshot pairs and state snapshots are never signs
+  of being at, leaving or returning to the place. Any
   of these, or an accurate fix at the origin that is not moving, ends the
   excursion (for re-reported exits too), so later presence
   there marks departure again; otherwise it can be the return, and state
@@ -107,8 +114,11 @@ Temporal invariants:
   pass-by at the origin still restarts the journey, because a pass-by and a
   brief return look alike; departure bounds still come from the origin stay;
   with no departure evidence after a long quiet spell the start stays at the
-  last evidence of the origin, as on main; and more than thirty minutes
-  unobserved during an outing lets a later re-reported exit count. Private
+  last evidence of the origin, as on main; more than thirty minutes
+  unobserved during an outing lets a later re-reported exit count; and when
+  the segmenter misses a stop at the far end (no stay detected there, as with
+  a silent park), the outing becomes one Review-only round trip that includes
+  that stop, where main showed nothing. Private
   corpus unchanged; in the staging week only the 4 Oct school run without its
   School pin changes, from a 4-minute fragment to the whole 07:49–08:21 round
   trip. The capture simulator (`test/fixtures/captureSimulator.ts`), which can
