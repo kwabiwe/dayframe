@@ -51,6 +51,8 @@ export type LocationEngineConfig = {
   physicalStopBoundaryWindowMs: number;
   physicalStopVisitCarriedMinimumMs: number;
   physicalStopVisitDepartureLagMaximumMs: number;
+  physicalStopAbsorbExtensionMs: number;
+  physicalStopAbsorbToleranceMs: number;
   rawEvidenceRetentionDays: number;
   maxEvidenceItemsPerUpload: number;
 };
@@ -139,6 +141,12 @@ export const LOCATION_ENGINE_V2_CONFIG: LocationEngineConfig = {
   // silence is not carried.
   physicalStopVisitCarriedMinimumMs: 600_000,
   physicalStopVisitDepartureLagMaximumMs: 300_000,
+  // A physical stop that covers promoted stays (within the tolerance) and
+  // extends them by at least this much replaces them: place logic split or
+  // shortened one stop at a silence, an exit or edge matches. Across retained
+  // traces, stops and promoted stays otherwise agree within about three minutes.
+  physicalStopAbsorbExtensionMs: 300_000,
+  physicalStopAbsorbToleranceMs: 120_000,
   rawEvidenceRetentionDays: 7,
   maxEvidenceItemsPerUpload: 100
 };

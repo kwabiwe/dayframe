@@ -782,6 +782,95 @@ function stayFromPhysicalStop(stop: PhysicalStop, accepted: ClassifiedEvidence[]
   };
 }
 
+/**
+ * The evidence and identity of one stay over a physical stop and the promoted
+ * fragments of it it covers: a saved place applies only when every fragment was
+ * that place and the merged evidence places the device there (stillAtSavedPlace).
+ */
+function absorbedIdentity(stop: PhysicalStop, fragments: StaySegment[], accepted: ClassifiedEvidence[], input: LocationEngineInput,
+  reused: ReadonlySet<ClassifiedEvidence>) {
+  const order = new Map(accepted.map((item, index) => [item.evidence.clientEvidenceId, index]));
+  const evidenceIds = [...new Set([...stop.evidenceIds, ...fragments.flatMap((stay) => stay.evidenceIds)])]
+    .filter((id) => order.has(id))
+    .sort((left, right) => order.get(left)! - order.get(right)!);
+  const items = evidenceIds.map((id) => accepted[order.get(id)!]);
+  const startMs = Math.min(Date.parse(stop.startedAt), ...fragments.map((stay) => Date.parse(stay.startedAt)));
+  // A Visit that arrived before this episode began (one a fragment reused, or
+  // an earlier visit's carried in with the stop's evidence) is interval
+  // support of that earlier episode only: never identity proof here.
+  const earlier = new Set([...reused, ...items.filter((item) =>
+    item.evidence.kind === "visit" && Date.parse(item.evidence.occurredAt) < startMs)]);
+  const placeIds = [...new Set(fragments.map((stay) => stay.placeMatchKind === "saved" ? stay.placeId : null))];
+  const placeId = placeIds.length === 1 && placeIds[0] &&
+    stillAtSavedPlace(placeIds[0], items, accepted, startMs, input, earlier) ? placeIds[0] : null;
+  return { evidenceIds, items, placeId, startMs, earlier };
+}
+
+/**
+ * One stay over a physical stop that covers promoted fragments of it, starting
+ * at `startMs` (see the absorption loop) and ending where the stop or its last
+ * fragment does.
+ */
+function stayAbsorbingFragments(stop: PhysicalStop, fragments: StaySegment[], identity: ReturnType<typeof absorbedIdentity>,
+  startMs: number, accepted: ClassifiedEvidence[], input: LocationEngineInput): StaySegment {
+  const base = stayFromPhysicalStop(stop, accepted, input);
+  const { evidenceIds, items, placeId } = identity;
+  // A fragment's own (possibly corroborated) arrival bounds win a tie with the stop's estimate.
+  const startingStay = [...fragments, base].find((stay) => Date.parse(stay.startedAt) === startMs);
+  const observedStart = new Date(startMs).toISOString();
+  const earliest = startingStay ?? { startedAt: observedStart, startLowerBoundAt: observedStart, startUpperBoundAt: observedStart };
+  const latest = [base, ...fragments].reduce((last, stay) => Date.parse(stay.stoppedAt!) > Date.parse(last.stoppedAt!) ? stay : last);
+  const circle = savedCircle(placeId, input);
+  const stoppedAt = latest.stoppedAt!;
+  const shape: StaySegment = { ...base };
+  delete shape.approximateArrival;
+  return {
+    ...shape,
+    // As for an edge stay, the identity is part of the ID, so a late iOS entry
+    // that proves the place makes replay retire the unknown segment's Review.
+    clientSegmentId: stableLocationId("stay", [
+      input.config.algorithmVersion, items[0].evidence.deviceId, evidenceIds[0], evidenceIds[evidenceIds.length - 1], "physical_stop",
+      ...(placeId ? ["saved", placeId] : [])
+    ]),
+    status: Date.parse(input.processingAt) - Date.parse(stoppedAt) >= input.config.segmentFinalisationLagMs ? "finalised" : "closed",
+    startedAt: earliest.startedAt,
+    startLowerBoundAt: earliest.startLowerBoundAt,
+    startUpperBoundAt: earliest.startUpperBoundAt,
+    stoppedAt,
+    stopLowerBoundAt: latest.stopLowerBoundAt,
+    stopUpperBoundAt: latest.stopUpperBoundAt,
+    placeId,
+    placeMatchKind: placeId ? "saved" : "unknown",
+    ...(startingStay?.approximateArrival ? { approximateArrival: true as const } : {}),
+    candidatePlaceIds: [...new Set([
+      ...fragments.flatMap((stay) => stay.placeId ? [stay.placeId] : []),
+      ...fragments.flatMap((stay) => stay.candidatePlaceIds ?? []),
+      ...stop.candidatePlaceIds
+    ])].sort(),
+    radiusMeters: circle ? circle.radius : input.config.unknownStayBaseRadiusMeters,
+    evidenceIds
+  };
+}
+
+/**
+ * The longest silence in [from, to] (between observations, or an end and the
+ * nearest one) that reaches time no fragment covers, counted in full: a
+ * fragment's own end can be an estimate, never an observation. A silence a
+ * Visit's interval spans is supported.
+ */
+function longestNewSilenceMs(from: number, to: number, observedMs: number[], covered: Array<[number, number]>,
+  visitSpans: Array<[number, number]>) {
+  let longest = 0;
+  let previous = from;
+  for (const at of [...observedMs.filter((time) => time > from && time < to).sort((a, b) => a - b), to]) {
+    const withinFragment = covered.some(([start, end]) => start <= previous && end >= at);
+    const supported = visitSpans.some(([start, end]) => start <= previous && end >= at);
+    if (!withinFragment && !supported) longest = Math.max(longest, at - previous);
+    previous = at;
+  }
+  return longest;
+}
+
 function preprocess(input: LocationEngineInput) {
   const rejectedEvidence: RejectedEvidence[] = [];
   const seen = new Set<string>();
@@ -1550,18 +1639,91 @@ function runLocationEnginePass(input: LocationEngineInput): { output: LocationEn
     .filter((record): record is { working: WorkingStay; segment: StaySegment } => Boolean(record.segment));
   const promotedStays = rawStayRecords.map(({ segment }) => segment);
   // Physical stops exist even when identity fragments them or they are too
-  // short to name. Existing promoted stays keep precedence over the same time.
-  const physicalStays = detectPhysicalStops(accepted, input.config)
-    .filter((stop) => !promotedStays.some((stay) =>
-      Date.parse(stay.startedAt) < Date.parse(stop.stoppedAt) &&
-      Date.parse(stay.stoppedAt ?? input.processingAt) > Date.parse(stop.startedAt)))
-    .map((stop) => stayFromPhysicalStop(stop, accepted, input));
-  const rawStays = [...promotedStays, ...physicalStays]
+  // short to name. Physical evidence decides whether and when the device
+  // stopped: a stop that covers promoted stays and extends them by at least
+  // physicalStopAbsorbExtensionMs shows place logic split or shortened one
+  // stop (at a silence, an exit or edge matches), so the stop replaces them.
+  // It may only claim silences the saved-place rules would bridge. Otherwise
+  // promoted stays keep precedence over the same time.
+  const absorbed = new Set<StaySegment>();
+  const physicalStays: StaySegment[] = [];
+  const reusedBySegment = new Map(rawStayRecords.map(({ working, segment }) => [segment, working.reusedVisits]));
+  for (const stop of detectPhysicalStops(accepted, input.config)) {
+    const stopStartMs = Date.parse(stop.startedAt);
+    const stopEndMs = Date.parse(stop.stoppedAt);
+    const overlapping = promotedStays.filter((stay) =>
+      Date.parse(stay.startedAt) < stopEndMs && Date.parse(stay.stoppedAt ?? input.processingAt) > stopStartMs);
+    if (!overlapping.length) {
+      physicalStays.push(stayFromPhysicalStop(stop, accepted, input));
+      continue;
+    }
+    const tolerance = input.config.physicalStopAbsorbToleranceMs;
+    const covered = overlapping.every((stay) => stay.stoppedAt != null && !absorbed.has(stay) &&
+      Date.parse(stay.startedAt) >= stopStartMs - tolerance && Date.parse(stay.stoppedAt) <= stopEndMs + tolerance);
+    if (!covered) continue;
+    // Visits a fragment reused from an earlier episode stay interval support only.
+    const reused = new Set(overlapping.flatMap((stay) => [...(reusedBySegment.get(stay) ?? [])]));
+    const identity = absorbedIdentity(stop, overlapping, accepted, input, reused);
+    const fragmentsStartMs = Math.min(...overlapping.map((stay) => Date.parse(stay.startedAt)));
+    const fragmentsEndMs = Math.max(...overlapping.map((stay) => Date.parse(stay.stoppedAt!)));
+    // Only accurate, genuine fixes are observations: geofence callbacks, broad
+    // and simulated readings never show the device stayed through a silence.
+    const observation = (item: ClassifiedEvidence) =>
+      (item.evidence.kind === "standard_location" || item.evidence.kind === "significant_change") &&
+      item.evidence.isSimulated !== true && accurateCoordinate(item, input);
+    const observedMs = identity.items.filter(observation).map(({ evidence }) => Date.parse(evidence.occurredAt));
+    // Interval support from this episode's own qualified Visits: a genuine one
+    // that arrived within it (never simulated, nor an earlier episode's: see
+    // absorbedIdentity), and that the saved-place rules corroborated for the
+    // replacement's place, over its corroborated interval, or an accurate
+    // completed Visit at that place (for an unknown replacement, within its
+    // radius of the stop).
+    const visitSpans = identity.items.flatMap((item): Array<[number, number]> => {
+      const { evidence } = item;
+      if (evidence.kind !== "visit" || evidence.isSimulated === true || identity.earlier.has(item)) return [];
+      const corroborated = arrivalAnalysis.corroboratedVisits.get(evidence.clientEvidenceId);
+      if (corroborated && identity.placeId && corroborated.savedPlaceId === identity.placeId) {
+        return Date.parse(corroborated.arrivedAt) < identity.startMs ? []
+          : [[Date.parse(corroborated.arrivedAt), Date.parse(corroborated.departedAt)]];
+      }
+      const point = pointFor(evidence);
+      if (!evidence.endedAt || !point || !accurateCoordinate(item, input)) return [];
+      const compatible = identity.placeId
+        ? item.match?.candidates.some((candidate) => candidate.id === identity.placeId && candidate.matchClass !== "outside") ?? false
+        : distanceMeters(stop.centre, point) <= input.config.unknownStayBaseRadiusMeters;
+      return compatible ? [[Date.parse(evidence.occurredAt), Date.parse(evidence.endedAt)]] : [];
+    });
+    // A saved replacement never starts before an observation at the place (in
+    // its circle or tolerance band): the stop's start can be an estimate
+    // between the last fix away and the first one there, and readings beyond
+    // the band are not attendance. Saved attendance never begins before its
+    // observed arrival; a fragment's own supported arrival stands.
+    const placeId = identity.placeId;
+    const atPlaceMs = placeId ? identity.items.filter((item) => observation(item) &&
+      (item.match?.candidates.some((candidate) => candidate.id === placeId && candidate.matchClass !== "outside") ?? false))
+      .map(({ evidence }) => Date.parse(evidence.occurredAt)) : [];
+    const startMs = placeId
+      ? Math.min(fragmentsStartMs, ...atPlaceMs.filter((time) => time >= Math.min(stopStartMs, fragmentsStartMs)))
+      : Math.min(stopStartMs, fragmentsStartMs);
+    const endMs = Math.max(stopEndMs, fragmentsEndMs);
+    if (Math.max(fragmentsStartMs - startMs, endMs - fragmentsEndMs) < input.config.physicalStopAbsorbExtensionMs) continue;
+    const fragmentSpans = overlapping.map((stay): [number, number] => [Date.parse(stay.startedAt), Date.parse(stay.stoppedAt!)]);
+    if (longestNewSilenceMs(startMs, endMs, observedMs, fragmentSpans, visitSpans) > input.config.savedPlaceQuietGapMaxMs) continue;
+    for (const stay of overlapping) absorbed.add(stay);
+    physicalStays.push(stayAbsorbingFragments(stop, overlapping, identity, startMs, accepted, input));
+  }
+  const rawStays = [...promotedStays.filter((stay) => !absorbed.has(stay)), ...physicalStays]
     .sort((a, b) => Date.parse(a.startedAt) - Date.parse(b.startedAt));
   const stays = coalesceCompatibleUnknownStays(rawStays, accepted, input);
-  const inferredBoundaryStayIds = new Set(
-    rawStayRecords.filter(({ working }) => working.inferredBoundary).map(({ segment }) => segment!.clientSegmentId)
-  );
+  // A stay inherits an inferred boundary from every promoted stay it absorbed
+  // or coalesced (whose evidence it contains), so commutes ending there stay
+  // low-confidence whatever its own ID.
+  const inferredStays = rawStayRecords.filter(({ working }) => working.inferredBoundary).map(({ segment }) => segment);
+  const inferredBoundaryStayIds = new Set(stays.filter((stay) => {
+    const evidenceIds = new Set(stay.evidenceIds);
+    return inferredStays.some((inferred) => inferred.clientSegmentId === stay.clientSegmentId ||
+      inferred.evidenceIds.every((id) => evidenceIds.has(id)));
+  }).map((stay) => stay.clientSegmentId));
   const legs = deriveCommutes(stays, accepted, input.config, input.processingAt, {
     inferredBoundaryStayIds,
     arrivalWitnesses: arrivalAnalysis.witnesses,
