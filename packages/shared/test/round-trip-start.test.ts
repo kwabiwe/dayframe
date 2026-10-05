@@ -754,6 +754,58 @@ describe("departures after a finished walk (review round 9)", () => {
     expect(commutes(value)).toEqual([expect.objectContaining({ startedAt: at(439) })]);
   });
 
+  // Review round 14: speedless route fixes still show leaving, and a short loop from home starts at home.
+  const walkThere = () => [still("home-0", 0, 0), still("home-1", 10, 0), still("home-2", 18, 0), geofence("walk-exit", 20, "geofence_exit"),
+    e("walk-a", 25, 500, { speedMetersPerSecond: 1.35 }), e("walk-b", 30, 900, { speedMetersPerSecond: 1.35 }), e("walk-c", 35, 800, { speedMetersPerSecond: 1.35 })];
+  const later = (value: LocationEngineInput, fromMinute: number, by: number) => ({ ...value, evidence: value.evidence.map((item) => {
+    const minutes = (Date.parse(item.occurredAt) - Date.parse(at(0))) / 60_000;
+    return minutes >= fromMinute ? { ...item, occurredAt: at(minutes + by), sourceTimestamp: at(minutes + by), receivedAt: at(minutes + by + 1) } : item;
+  }) });
+  const learnedHome = (value: LocationEngineInput) => {
+    const home = value.savedPlaces[0];
+    return { ...value, savedPlaces: value.savedPlaces.slice(1), acceptedLearnedPlaces: [{ ...home, accepted: true as const }],
+      evidence: value.evidence.filter((item) => !item.kind.startsWith("geofence_")) };
+  };
+  const speedless = (kind: "standard_location" | "significant_change" = "standard_location") => {
+    const route = (id: string, minutes: number, northMetres: number, eastMetres: number) =>
+      e(id, minutes, northMetres, { longitude: north(eastMetres), speedMetersPerSecond: null, kind, ...(kind === "significant_change" ? { isSimulated: null } : {}) });
+    const value = withWork([...walkThere(), still("last-home", 49, 0, { horizontalAccuracyMeters: 100 }),
+      route("route-a", 49.2, 0, 200), route("route-b", 49.7, 0, 600), route("route-c", 50.2, 300, 500), route("route-d", 50.7, 550, 200),
+      still("work-0", 52.5, 600), still("work-1", 62.5, 600), still("work-2", 72.5, 600)], true);
+    value.savedPlaces[1] = { ...value.savedPlaces[1], latitude: north(600) };
+    return value;
+  };
+  const loop = (kind: "entry" | "visit" | "broad", minutes: number) => withWork([...walkThere(),
+    kind === "entry" ? geofence("home-return", 39, "geofence_enter") : kind === "visit" ? visit("home-return", 39) : still("home-return", 39, 0, { horizontalAccuracyMeters: 100 }),
+    ...[[0.15, 200], [0.55, 800], [1.1, 1_800], [1.7, 1_200], [2.4, 300]].map(([offset, metres], index) => e(`loop-${index}`, 39 + offset * minutes / 2.8, metres)),
+    geofence("loop-end", 39 + minutes, "geofence_enter"), still("final-0", 39.5 + minutes, 0), still("final-1", 49.5 + minutes, 0), still("final-2", 59.5 + minutes, 0)], false);
+  const bounds = (value: LocationEngineInput) => commutes(value).map(({ startedAt, stoppedAt }) => [startedAt, stoppedAt]);
+
+  it.each([
+    ["saved Home, standard fixes", () => speedless()], ["learned Home, standard fixes", () => learnedHome(speedless())],
+    ["saved Home, significant changes", () => speedless("significant_change")], ["learned Home, significant changes", () => learnedHome(speedless("significant_change"))]
+  ])("starts a drive with speedless route fixes at the last sign of Home (%s)", (_label, build) => {
+    expect(bounds(build())).toEqual([[at(49), at(52.5)]]);
+  });
+
+  it.each([false, true])("keeps such a drive to a nearby endpoint seven hours after the walk (learned Home: %s)", (learned) => {
+    let value = speedless();
+    value.savedPlaces[1] = { ...value.savedPlaces[1], latitude: 0, longitude: north(1_000) };
+    value.evidence = value.evidence.map((item) => item.clientEvidenceId.startsWith("work-") ? { ...item, latitude: 0, longitude: north(1_000) } : item);
+    value = later(value, 35, 400);
+    if (learned) value = learnedHome(value);
+    expect(bounds(value)).toEqual([[at(449), at(452.5)]]);
+  });
+
+  it.each(["entry", "visit", "broad"] as const)("starts a three-minute loop at Home presence, also seven hours later (%s)", (kind) => {
+    expect(bounds(loop(kind, 3))).toEqual([[at(39), at(42)]]);
+    expect(bounds(later(loop(kind, 3), 35, 400))).toEqual([[at(439), at(442)]]);
+  });
+
+  it.each(["entry", "visit", "broad"] as const)("claims no commute for a loop under three minutes after Home presence (%s)", (kind) => {
+    expect(bounds(loop(kind, 2.8))).toEqual([]);
+  });
+
   it("does not let speedless mirrors turn two still stray fixes into renewed movement", () => {
     // Each stray's significant-change mirror sorts first at the same time and carries the implied speed from the route.
     const evidence = [still("home-0", 0, 0), still("home-1", 10, 0), geofence("exit", 20, "geofence_exit"), e("out-0", 21, 500), e("out-1", 22, 1_000),

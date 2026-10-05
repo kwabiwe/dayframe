@@ -67,16 +67,22 @@ Temporal invariants:
   exit always counts, even when its receipt time trails the first fix away
   after a capture gap. iOS also dates a return's arrival Visit before the car
   stops, so a Visit, entry or broad fix at the origin marks departure only
-  before the device was seen leaving (a reading away that is moving or at
-  least `commuteSamePlaceMinimumExcursionMeters` from the origin, or a Visit
+  before the device was seen leaving (a reading away that is moving, by
+  native speed from whichever copy of the observation reports it or else an
+  accurate fix's implied speed, or at least
+  `commuteSamePlaceMinimumExcursionMeters` from the origin, or a Visit
   elsewhere; one still stray fix just outside is not leaving), or when it
   stayed there at least `savedPlaceMinimumDwellMs` before it was next seen
   leaving (an early-dated return Visit is followed by approach fixes within
-  three minutes), or when it was then seen away and not back at the place within three
+  three minutes), or when it was then seen away and either not back at the place within three
   minutes (a later sign of being there, or the destination stay when the trip
-  returns there): iOS dates an arrival Visit at most that early, so an
-  early-dated return Visit is always followed by the arrival, while presence
-  before a departure is not, even when the outbound leg went uncaptured. Any
+  returns there), or it had arrived first (nothing accurate away in the three
+  minutes before it, or the last two independent accurate observations away
+  approached) and the accurate readings after it moved at least 100 m farther
+  away (a short loop from home). Three minutes is a heuristic: iOS has dated
+  arrival Visits up to 157 s before the car stopped, with the approach after
+  them; one dated amid a short outing's outbound leg neither arrived first nor
+  stays unreturned that long. A larger early estimate is treated as presence. Any
   of these, or an accurate fix at the origin that is not moving, ends the
   excursion (for re-reported exits too), so later presence
   there marks departure again; otherwise it can be the return, and state
