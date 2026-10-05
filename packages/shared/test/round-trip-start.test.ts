@@ -151,6 +151,15 @@ describe("the start of a same-place round trip", () => {
     expect(commutes(input(evidence, 400))).toEqual([expect.objectContaining({ startedAt: at(200), qualificationReason: "same_place_meaningful_round_trip" })]);
   });
 
+  it("does not let a registration snapshot pair make a re-reported exit a departure", () => {
+    // An entry and exit within seconds are a snapshot, not a return: the later re-report stays ignored.
+    const snapshot = [geofence("snapshot-enter", 31.5, "geofence_enter"), geofence("snapshot-exit", 31.55, "geofence_exit")];
+    const reReported = geofence("re-reported-exit", 33.2, "geofence_exit");
+    const output = runLocationEngine(roundTrip({ returnVisit: false, extra: [...snapshot, reReported] }));
+    const [home] = output.segmentUpserts;
+    expect(output.segmentUpserts.filter((segment) => segment.kind === "commute")).toEqual([expect.objectContaining({ startedAt: home.stoppedAt })]);
+  });
+
   it("still starts a drive at Home's exit after a stray fix just outside Home hours earlier", () => {
     // Control: a fix 140 m out while at Home is not an excursion, so the exit that follows hours later still marks departure.
     const evidence = [e("home-0", 0, 0, { speedMetersPerSecond: 0 }), e("home-1", 10, 0, { speedMetersPerSecond: 0 }),
@@ -335,6 +344,17 @@ describe("a later departure after an earlier excursion (review finding)", () => 
     expect(drives).toEqual([expect.objectContaining({ startedAt: at(driveAt) })]);
   });
 
+  it("starts a later drive at its own delayed exit when only a Home Visit saw the walk return (review finding)", () => {
+    // The entry callback was missed; the Visit at Home ends the walk's excursion, so the drive's exit is not a re-report.
+    const value = walkThenDrive(130);
+    value.evidence = value.evidence.filter((item) => item.clientEvidenceId !== "walk-enter").map((item) =>
+      item.clientEvidenceId === "drive-exit" ? { ...item, occurredAt: at(130.6), sourceTimestamp: at(130.6) }
+        : item.clientEvidenceId === "drive-0" ? { ...item, latitude: north(900) } : item);
+    value.evidence.push(homeVisit("walk-return", 39));
+    const drives = commutes(value).filter((trip) => trip.stoppedAt! > at(130));
+    expect(drives).toEqual([expect.objectContaining({ startedAt: at(130.6), stoppedAt: at(137) })]);
+  });
+
   it("keeps that drive when its route fixes report no accuracy (review finding)", () => {
     // The walk's return comes before the drive's departure, so it cannot veto the drive.
     const drives = commutes(walkThenDrive(130, "home", null)).filter((trip) => trip.stoppedAt! > at(130));
@@ -362,6 +382,14 @@ describe("a later departure after an earlier excursion (review finding)", () => 
   ] as const)("starts at the exit when it %s the first far fix after a capture gap", (_label, exitAt, firstFixAt, to) => {
     expect(commutes(gapThenExit(exitAt, firstFixAt, to))).toEqual([expect.objectContaining({ startedAt: at(exitAt) })]);
   });
+
+  it.each(["home", "work"] as const)("honours the first genuine exit after an exit Home's own fixes cancelled (to %s, review finding)", (to) => {
+    // An exit at minute 5, then still fixes at Home: the device never left, so the later exit is the departure.
+    const value = gapThenExit(130.2, 130, to);
+    value.evidence.push(geofence("cancelled-exit", 5, "geofence_exit"), e("cancel-inside", 6, 0, { speedMetersPerSecond: 0 }));
+    expect(commutes(value)).toEqual([expect.objectContaining({ startedAt: at(130.2) })]);
+  });
+
 
 
   const HOME_SIM: SimPlace = { id: HOME_ID, name: "Home", at: { x: 0, y: 0 }, radius: 100, loggingEnabled: false };
@@ -436,6 +464,15 @@ describe("the capture simulator", () => {
     expect(route.every((item) => item.horizontalAccuracyMeters! >= 100)).toBe(true);
     expect(Date.parse(route[0].occurredAt) - first.to).toBeGreaterThanOrEqual(1_000 / 12.65 * 1_000);
     expect(fixes.filter((item) => item.occurredAt === new Date(second.from + 10 * 60_000).toISOString())).toHaveLength(1);
+  });
+
+  it("records a silence as stationary truth without changing the stay legs' indices", () => {
+    const sim = simulate({ start: "2026-03-09T12:00:00Z", origin: { x: 0, y: 0 }, places: [], legs: [
+      { kind: "stay", minutes: 10 }, { kind: "silence", minutes: 60 }, { kind: "drive", to: { x: 0, y: 1_000 } }, { kind: "stay", minutes: 10 }
+    ] }, 1);
+    expect(sim.truth.stays).toHaveLength(2);
+    expect(sim.truth.stationary).toHaveLength(3);
+    expect(sim.truth.stationary[1].to - sim.truth.stationary[1].from).toBe(60 * 60_000);
   });
 
   it("is deterministic for a seed", () => {

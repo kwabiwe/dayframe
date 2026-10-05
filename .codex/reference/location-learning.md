@@ -54,12 +54,16 @@ Temporal invariants:
   after the origin stay: an accurate standard or significant-change fix
   matching it, or its geofence exit. iOS re-reports exits when the app
   re-registers its regions (on 4 Oct, 900 m from Home, a second after a fix
-  there): a second exit with no return since the first (no accurate fix at the
-  origin, no entry), fired when the latest accurate fix in the two minutes
-  before it was at least `commuteSamePlaceMinimumExcursionMeters` from the
-  stay's centre, is that re-report and not a departure. A first exit always
-  counts, even when its receipt time trails the first fix away after a capture
-  gap. iOS also dates a return's arrival Visit before the car stops, so
+  there): a second exit during one excursion, fired when the latest accurate
+  fix in the two minutes before it was at least
+  `commuteSamePlaceMinimumExcursionMeters` from the stay's centre, is that
+  re-report and not a departure. An excursion starts at an exit (also one
+  inside the origin stay, read in time order) and ends with evidence of being
+  back (an accurate fix there that is not moving, an entry or a Visit there)
+  or after more than `savedPlaceQuietGapMaxMs` unobserved; registration
+  snapshot pairs (an exit and entry within five seconds) are neither. A first
+  exit always counts, even when its receipt time trails the first fix away
+  after a capture gap. iOS also dates a return's arrival Visit before the car stops, so
   Visits, entries, state snapshots and broad fixes are never departure
   evidence. In a same-place round trip either used to become the "departure",
   shrinking the trip to seconds so the whole outing was discarded. A round

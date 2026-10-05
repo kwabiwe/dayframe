@@ -72,34 +72,66 @@ function positionIndex(acceptedEvidence: ClassifiedEvidence[], occurredAtMs: num
   };
 }
 
+/** A same-place exit and entry within this long are a region registration snapshot, not a crossing. */
+const GEOFENCE_SNAPSHOT_PAIR_MS = 5_000;
+
+/** Geofence callbacks that belong to a registration snapshot pair (an exit and entry for one place within seconds). */
+function snapshotCallbacks(acceptedEvidence: ClassifiedEvidence[]) {
+  const callbacks = acceptedEvidence.filter(({ evidence }) =>
+    (evidence.kind === "geofence_enter" || evidence.kind === "geofence_exit") && evidence.savedPlaceId);
+  const paired = new Set<ClassifiedEvidence>();
+  for (const item of callbacks) {
+    const atMs = Date.parse(item.evidence.occurredAt);
+    for (const other of callbacks) {
+      if (other.evidence.kind !== item.evidence.kind && other.evidence.savedPlaceId === item.evidence.savedPlaceId &&
+        other.evidence.deviceId === item.evidence.deviceId &&
+        Math.abs(Date.parse(other.evidence.occurredAt) - atMs) <= GEOFENCE_SNAPSHOT_PAIR_MS) paired.add(item);
+    }
+  }
+  return paired;
+}
+
 /**
  * The latest evidence of being at a journey's origin: an accurate fix there,
  * or the origin's geofence exit. iOS re-reports exits when the app
  * re-registers its regions (on 4 Oct, 900 m from Home, a second after a fix
- * there): a second exit with no return since the first (no accurate fix at the
- * origin, no entry), fired when the device had already been observed far away,
- * is that re-report and not a departure. A first exit always counts, even when
- * delayed past the first fix away. Visits (dated before an arrival), entries,
- * state snapshots and broad fixes are never departure evidence.
+ * there): a second exit during one excursion, fired when the device had
+ * already been observed far away, is that re-report and not a departure. An
+ * excursion starts at an exit (also one inside the origin stay) and ends with
+ * evidence of being back (an accurate fix there that is not moving, an entry or
+ * a Visit there) or with more than `savedPlaceQuietGapMaxMs` unobserved. Registration snapshot
+ * pairs are neither. A first exit always counts, even when its receipt time
+ * trails the first fix away after a capture gap. Visits (dated before an
+ * arrival), entries, state snapshots and broad fixes are never departure
+ * evidence themselves.
  */
-function latestDepartureSupport(stay: StaySegment, evidence: ClassifiedEvidence[], config: LocationEngineConfig,
-  farFrom: ReturnType<typeof positionIndex>, leftByExit: boolean) {
+function latestDepartureSupport(stay: StaySegment, stayEvidence: ClassifiedEvidence[], evidence: ClassifiedEvidence[],
+  config: LocationEngineConfig, farFrom: ReturnType<typeof positionIndex>, snapshots: ReadonlySet<ClassifiedEvidence>) {
   const centre = segmentPoint(stay);
   let latest: ClassifiedEvidence | undefined;
-  let exited = leftByExit;
-  for (const item of evidence) {
-    if (!evidenceMatchesStay(item, stay)) continue;
+  let excursion = false;
+  let previousMs: number | null = null;
+  const step = (item: ClassifiedEvidence, inGap: boolean) => {
+    const atMs = Date.parse(item.evidence.occurredAt);
+    if (previousMs != null && atMs - previousMs > config.savedPlaceQuietGapMaxMs) excursion = false;
+    previousMs = atMs;
+    if (!evidenceMatchesStay(item, stay) || snapshots.has(item)) return;
     const { kind } = item.evidence;
     if (accurateFix(item, config)) {
-      latest = item;
-      exited = false;
-    } else if (kind === "geofence_enter") {
-      exited = false;
-    } else if (kind === "geofence_exit" && !(exited && farFrom(centre, Date.parse(item.evidence.occurredAt)))) {
-      latest = item;
-      exited = true;
+      if (inGap) latest = item;
+      // A fix moving through the place's band as the car leaves is not being back.
+      const speed = item.evidence.speedMetersPerSecond ?? item.impliedSpeedMetersPerSecond;
+      if (speed == null || !Number.isFinite(speed) || speed < config.movementSpeedThresholdMps) excursion = false;
+    } else if (kind === "geofence_enter" || kind === "visit") {
+      excursion = false;
+    } else if (kind === "geofence_exit") {
+      if (excursion && inGap && farFrom(centre, atMs)) return;
+      if (inGap) latest = item;
+      excursion = true;
     }
-  }
+  };
+  for (const item of stayEvidence) step(item, false);
+  for (const item of evidence) step(item, true);
   return latest;
 }
 
@@ -486,6 +518,7 @@ export function deriveCommutes(
   const occurredAtMs = acceptedEvidence.map(({ evidence }) => Date.parse(evidence.occurredAt));
   const farFrom = positionIndex(acceptedEvidence, occurredAtMs, config);
   const evidenceById = new Map(acceptedEvidence.map((item) => [item.evidence.clientEvidenceId, item]));
+  const snapshots = snapshotCallbacks(acceptedEvidence);
   for (let index = 1; index < stays.length; index += 1) {
     const from = stays[index - 1];
     const to = stays[index];
@@ -500,8 +533,11 @@ export function deriveCommutes(
     // same-place round trip, a return's early-dated arrival Visit or a
     // re-reported exit used to become the "departure", shrinking the trip to
     // seconds so it was discarded.
-    const latestFromSupport = latestDepartureSupport(from, boundaryEvidence, config, farFrom,
-      from.evidenceIds.some((id) => evidenceById.get(id)?.evidence.kind === "geofence_exit"));
+    const fromEvidence = from.evidenceIds.flatMap((id) => {
+      const item = evidenceById.get(id);
+      return item && Date.parse(item.evidence.occurredAt) <= originalStartedAtMs ? [item] : [];
+    }).sort((a, b) => Date.parse(a.evidence.occurredAt) - Date.parse(b.evidence.occurredAt));
+    const latestFromSupport = latestDepartureSupport(from, fromEvidence, boundaryEvidence, config, farFrom, snapshots);
     // A journey ends where its destination stay begins. When a round trip was
     // seen back at its place well before that stay begins, a trip to it would
     // include stationary time there, so none is claimed (the latest-support

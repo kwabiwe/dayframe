@@ -56,7 +56,8 @@ export type Scenario = {
 export type TruthStay = { from: number; to: number; at: Xy };
 export type Simulation = {
   input: (processingAtMs?: number) => LocationEngineInput;
-  truth: { stays: TruthStay[]; endMs: number };
+  /** `stays`: the scenario's stay legs, in order. `stationary`: every still period, silences included. */
+  truth: { stays: TruthStay[]; stationary: TruthStay[]; endMs: number };
   /** Milliseconds from the scenario start. */
   at: (minutes: number) => string;
 };
@@ -87,6 +88,7 @@ export function simulate(scenario: Scenario, seed: number): Simulation {
   const startMs = Date.parse(scenario.start);
   const evidence: LocationEvidence[] = [];
   const truthStays: TruthStay[] = [];
+  const stationary: TruthStay[] = [];
   let sequence = 0;
   let position = { ...scenario.origin };
   let now = startMs;
@@ -168,7 +170,10 @@ export function simulate(scenario: Scenario, seed: number): Simulation {
       const [low, high] = leg.accuracy ?? (leg.kind === "drive" ? [2, 5] : [4, 12]);
       travel(leg.to, leg.via, leg.speed ?? (leg.kind === "drive" ? 11 : 1.35), () => between(low, high), leg.recorded !== false);
     }
-    else if (leg.kind === "silence") now += leg.minutes * 60_000;
+    else if (leg.kind === "silence") {
+      stationary.push({ from: now, to: now + leg.minutes * 60_000, at: { ...position } });
+      now += leg.minutes * 60_000;
+    }
     else if (leg.kind === "hold") {
       if (leg.seconds >= 45 && random() < 0.5) fix(now + between(5_000, Math.min(40_000, leg.seconds * 1_000)), position, between(3, 8), between(0, 0.3));
       now += leg.seconds * 1_000;
@@ -181,6 +186,7 @@ export function simulate(scenario: Scenario, seed: number): Simulation {
       const departure = arrival + leg.minutes * 60_000;
       const accuracy = () => leg.indoor ? between(12, 60) : between(3, 9);
       truthStays.push({ from: arrival, to: departure, at: { ...position } });
+      stationary.push({ from: arrival, to: departure, at: { ...position } });
       // Fixes taken while still are held in the deferred batch until the device moves on.
       const heldUntil = () => departure + between(5_000, 60_000);
       // A stay shorter than its settling delay gets no settling fix.
@@ -225,7 +231,7 @@ export function simulate(scenario: Scenario, seed: number): Simulation {
     radiusMeters: place.radius, loggingEnabled: place.loggingEnabled ?? true
   }));
   return {
-    truth: { stays: truthStays, endMs },
+    truth: { stays: truthStays, stationary, endMs },
     at: (minutes: number) => new Date(startMs + minutes * 60_000).toISOString(),
     input: (processingAtMs = endMs + 7_200_000) => ({
       priorState: { algorithmVersion: config.algorithmVersion, mode: "idle", activeSegmentId: null, processedEvidenceIds: [], lastProcessedAt: null },
