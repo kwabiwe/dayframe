@@ -23,9 +23,9 @@ function minutesLabel(durationSeconds: number) {
 }
 
 /** Heading for a trip's stop list, or null when the trip has none. */
-export function tripStopsHeading(stops: readonly TripStopForPresentation[] | undefined) {
+export function tripStopsHeading(stops: readonly TripStopForPresentation[] | undefined, timeAway = false) {
   const count = stops?.length ?? 0;
-  return count === 0 ? null : `${count} stop${count === 1 ? "" : "s"} on this trip`;
+  return count === 0 ? null : `${count} stop${count === 1 ? "" : "s"} ${timeAway ? "while you were away" : "on this trip"}`;
 }
 
 /**

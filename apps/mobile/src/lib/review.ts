@@ -410,6 +410,8 @@ export function hideTombstonedReviewItems(
 }
 
 function reviewItemDraftDescription(item: MobileReviewItem) {
+  // Time away has no category to show, so its title names it (as on confirm).
+  if (isTimeAwayReviewItem(item)) return item.title.trim() || null;
   if (
     item.eventType === "commute_detected" ||
     item.eventType === "learned_place_visit" ||

@@ -118,7 +118,7 @@ export function LocationReviewCorrectionEditor({
   reduceMotionRef.current = reduceMotion;
   const startAt = useMemo(() => new Date(evidence.segment.startedAt), [evidence.segment.startedAt]);
   // Stops recorded inside a trip; their time is part of the trip, not travel.
-  const stopsHeading = evidence.segment.kind === "commute" ? tripStopsHeading(evidence.stops) : null;
+  const stopsHeading = evidence.segment.kind === "commute" ? tripStopsHeading(evidence.stops, evidence.segment.timeAway) : null;
   // Formatted on every render, like the trip's own time range, so a locale or
   // time-zone change never leaves a stop outside its trip.
   const stopRows = tripStopRows(evidence.stops, formatTime);
@@ -246,7 +246,8 @@ export function LocationReviewCorrectionEditor({
   const activityGlyph = locationActivityGlyphName({
     categoryName: selectedCategory?.name ?? reviewItem?.categoryName ?? null,
     description,
-    segmentKind: evidence.segment.kind
+    segmentKind: evidence.segment.kind,
+    timeAway: evidence.segment.timeAway === true
   });
   const selectedPlace = placeForSelection(
     selectedSavedPlaceId,

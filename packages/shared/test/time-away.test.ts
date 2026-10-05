@@ -3,7 +3,7 @@ import { assessAutomaticLocation } from "../src/location/automaticPolicy";
 import { deriveCommutes } from "../src/location/commute";
 import { LOCATION_ENGINE_V2_CONFIG as config } from "../src/location/config";
 import { runLocationEngine } from "../src/location/segmenter";
-import { isTimeAway, timeAwayTitle } from "../src/location/tripStopPresentation";
+import { isTimeAway, timeAwayTitle, tripStopsHeading } from "../src/location/tripStopPresentation";
 import type { ClassifiedEvidence, CommuteSegment, LocationEngineInput, LocationEvidence, StaySegment } from "../src/location/types";
 import { simulate, type Scenario, type SimPlace } from "./fixtures/captureSimulator";
 
@@ -183,5 +183,8 @@ describe("time away presentation", () => {
     expect(isTimeAway({ kind: "commute", qualificationReason: "same_place_outing" })).toBe(true);
     expect(isTimeAway({ kind: "commute", qualificationReason: "same_place_meaningful_round_trip" })).toBe(false);
     expect(isTimeAway({ kind: "stay" })).toBe(false);
+    const stop = { startedAt: "2026-03-10T12:03:00.000Z", stoppedAt: "2026-03-10T12:09:00.000Z", durationSeconds: 360, approximate: false };
+    expect(tripStopsHeading([stop], true)).toBe("1 stop while you were away");
+    expect(tripStopsHeading([stop])).toBe("1 stop on this trip");
   });
 });

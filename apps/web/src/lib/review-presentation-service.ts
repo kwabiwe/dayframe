@@ -603,7 +603,8 @@ function toReviewRecord(row: ReviewRow): InternalRecord {
 /** Older clients parse records strictly: optional fields go only to clients that asked for them. */
 function forClient<T>(record: T, features: ReviewPresentationFeatures): T {
   if (features.timeAway || !record || typeof record !== "object" || !("timeAway" in record)) return record;
-  const { timeAway: _timeAway, ...rest } = record as T & { timeAway?: unknown };
+  const rest = { ...record } as T & { timeAway?: unknown };
+  delete rest.timeAway;
   return rest as T;
 }
 

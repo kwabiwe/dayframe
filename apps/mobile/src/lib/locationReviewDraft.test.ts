@@ -232,6 +232,11 @@ describe("Location Review editor draft", () => {
 });
 
 describe("Location Review journey copy", () => {
+  it("never shows the commute glyph for time away (Fable round 4)", () => {
+    expect(locationActivityGlyphName({ categoryName: null, description: "", segmentKind: "commute", timeAway: true })).toBe("place");
+    expect(locationActivityGlyphName({ categoryName: null, description: "", segmentKind: "commute" })).toBe("commute");
+  });
+
   it("never offers Commute automatically or commute wording for time away (review finding 5)", () => {
     expect(locationReviewJourneyCopy({ kind: "commute", timeAway: true })).toMatchObject({
       journey: false, primaryLabel: "Record time away", recorded: "The time away was recorded."
