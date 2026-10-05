@@ -1242,6 +1242,10 @@ function runLocationEnginePass(input: LocationEngineInput): { output: LocationEn
     const canApplyCorroboratedSupport = corroboratedSupport != null &&
       (active == null || !sameSavedActiveEpisode ||
         Date.parse(active.startedAt) >= Date.parse(corroboratedSupport.arrivedAt));
+    // A newer corroborated Visit there still bounds presence an early arrival
+    // lent the running stay, even when it cannot join it (broad, and arriving
+    // after the stay began); the stay's arrival is unchanged.
+    if (active && sameSavedActiveEpisode) capDeferredPresence(active, item);
     if (point && (active?.placeMatchKind === "saved" || item.match?.kind === "saved" || item.match?.kind === "learned") &&
         !evidence.kind.startsWith("geofence_") && !accurateCoordinate(item, input) && !canApplyCorroboratedSupport) continue;
 

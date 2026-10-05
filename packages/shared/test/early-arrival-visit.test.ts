@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { LOCATION_ENGINE_V2_CONFIG as config } from "../src/location/config";
+import { analyseSavedPlaceArrivalEvidence } from "../src/location/savedPlaceArrivalSupport";
 import { runLocationEngine } from "../src/location/segmenter";
 import type { LocationEngineInput, LocationEvidence, StaySegment } from "../src/location/types";
 
@@ -176,5 +177,20 @@ describe("an arrival Visit iOS dates before the car arrives", () => {
     // Without early arrivals the newer Visit's departure already ends the first stay.
     expect(bounds(disabled(value)).map(([, stoppedAt]) => stoppedAt)).toEqual([at(900), null]);
     expect(bounds(value)).toEqual([[at(start), at(900)], [at(3_600), null]]);
+  });
+
+  // Review round 4: a newer corroborated Visit that cannot join (broad, arriving after the stay began) still
+  // bounds the presence the early arrival lent; the stay keeps its arrival.
+  it("ends an early arrival's presence at a newer corroborated broad Visit's departure", () => {
+    const value = compact([visit("old-arrival", 0), away("approach", 20), still("anchor", 100),
+      visit("new-completion", 220, { endedAt: at(4_000), horizontalAccuracyMeters: 94 }),
+      still("early-0", 250), still("early-1", 300), still("late-0", 3_600), still("late-1", 3_900),
+      still("next-0", 7_200), still("next-1", 7_600)], { processingAt: at(9_000) });
+    const output = runLocationEngine(value);
+    expect(analyseSavedPlaceArrivalEvidence(output.acceptedEvidence, value).corroboratedVisits.has("new-completion")).toBe(true);
+    expect(homeStays(disabled(value)).at(-1)).toMatchObject({ startedAt: at(7_200), stoppedAt: null });
+    const stays = homeStays(value);
+    expect(stays[0].startedAt).toBe(at(100));
+    expect(stays.at(-1)).toMatchObject({ startedAt: at(7_200), stoppedAt: null });
   });
 });
