@@ -243,6 +243,22 @@ describe("what an absorbing stop may claim (review round 1)", () => {
     expect(bridges(input)).toBe(true);
   });
 
+  // Review round 5: two saved places 80 m apart, one physical stop across both, with a Visit spanning it.
+  const dual = (simulated: boolean) => compact([point("approach", 0, -1_000, 10), { ...visitAt("visit", 4, 80, -40), isSimulated: simulated },
+    point("a-1", 10, -40), point("a-2", 15, -40), point("a-3", 20, -40), point("b-1", 65, 40), point("b-2", 68, 40), point("b-3", 71, 40),
+    point("exit", 71.5, 0, 0, { kind: "geofence_exit", savedPlaceId: OTHER_ID, latitude: null, longitude: null, horizontalAccuracyMeters: null, speedMetersPerSecond: null }),
+    point("leave-1", 83, 1_000, 10), point("leave-2", 84, 1_100, 10)],
+  [{ ...venue, longitude: east(-40), radiusMeters: 20 }, { ...venue, id: OTHER_ID, name: "Other", longitude: east(40), radiusMeters: 20 }]);
+
+  it("never lets a simulated Visit support the stop's silences", () => {
+    expect(stays(dual(true))).toEqual(stays(withoutAbsorption(dual(true))));
+  });
+
+  it("lets a genuine Visit support an unknown replacement across two places", () => {
+    expect(stays(dual(false))).toEqual([expect.objectContaining({ formation: "physical_stop", placeMatchKind: "unknown", placeId: null,
+      candidatePlaceIds: [VENUE_ID, OTHER_ID], startedAt: at(4), stoppedAt: at(80) })]);
+  });
+
   it("never lets an earlier episode's Visit support the stop's silences", () => {
     // Visited Other from 09:30, then left (the approach at 10:00): that Visit's end says nothing about the Venue hole.
     expect(bridges(withoutAbsorption(beside([visitAt("earlier", -30, 80, 100)])))).toBe(false);

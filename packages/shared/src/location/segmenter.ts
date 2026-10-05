@@ -1667,16 +1667,17 @@ function runLocationEnginePass(input: LocationEngineInput): { output: LocationEn
       (item.evidence.kind === "standard_location" || item.evidence.kind === "significant_change") &&
       item.evidence.isSimulated !== true && accurateCoordinate(item, input);
     const observedMs = identity.items.filter(observation).map(({ evidence }) => Date.parse(evidence.occurredAt));
-    // Interval support from this episode's own qualified Visits: one that
-    // arrived within this physical stop (never an earlier episode's, nor one a
-    // fragment reused) and that the saved-place rules corroborated for the
+    // Interval support from this episode's own qualified Visits: a genuine one
+    // that arrived within this physical stop (never simulated, an earlier
+    // episode's, nor one a fragment reused) and that the saved-place rules corroborated for the
     // replacement's place, over its corroborated interval, or an accurate
     // completed Visit at that place (for an unknown replacement, within its
     // radius of the stop).
     const episodeStartMs = Math.min(stopStartMs, fragmentsStartMs) - tolerance;
     const visitSpans = identity.items.flatMap((item): Array<[number, number]> => {
       const { evidence } = item;
-      if (evidence.kind !== "visit" || reused.has(item) || Date.parse(evidence.occurredAt) < episodeStartMs) return [];
+      if (evidence.kind !== "visit" || evidence.isSimulated === true || reused.has(item) ||
+        Date.parse(evidence.occurredAt) < episodeStartMs) return [];
       const corroborated = arrivalAnalysis.corroboratedVisits.get(evidence.clientEvidenceId);
       if (corroborated && identity.placeId && corroborated.savedPlaceId === identity.placeId) {
         return Date.parse(corroborated.arrivedAt) < episodeStartMs ? []
