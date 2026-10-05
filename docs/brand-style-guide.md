@@ -1,12 +1,33 @@
 # Dayframe Brand and Style Guide
 
-This guide defines the Midnight Core visual system for Dayframe across web and iOS. It governs brand artwork, semantic colour, typography, spacing, component states, charts, motion and accessibility. Product behaviour remains defined by `docs/PRD.md`.
+This guide defines the Midnight Core visual system for Dayframe across web and iOS, and the approved Dayframe Blocks direction that surfaces adopt as they are redesigned. It governs brand artwork, semantic colour, typography, spacing, component states, charts, motion and accessibility. Product behaviour remains defined by `docs/PRD.md`.
 
 ## Brand character
 
 Dayframe should feel dark, calm, premium and useful. Dark mode begins with a near-black midnight navy rather than flat black. Light mode is a deliberately designed companion. Both modes stay compact enough for dense time data, use restrained elevation and make the next action easy to find.
 
-The signature treatment is a vivid, unchanged six-colour symbol paired with a single-colour outlined wordmark on quiet navy or neutral surfaces. Coral identifies primary action and active state; it does not replace category colours or semantic success, warning and danger colours.
+The signature treatment is a vivid, unchanged six-colour symbol paired with a single-colour outlined wordmark on quiet navy or neutral surfaces. Coral identifies the primary action and live recording; it does not replace category colours or semantic success, warning and danger colours.
+
+## Dayframe Blocks
+
+The owner approved the Dayframe Blocks direction on 5 October 2026. Read the logo as a calendar: three columns, six blocks of different lengths, each its own colour. Blocks makes that the visual system. Entries become solid colour blocks with readable text on them, neutral midnight chrome steps back, and every action lands with the same motion and haptic.
+
+Blocks keeps the product, data, storage keys, API contracts and the trust and privacy rules unchanged. It changes how time looks and how it feels to move it around.
+
+Surfaces adopt Blocks one redesign phase at a time. A surface that has not been migrated keeps its current contract in `.codex/reference/components.md` until the PR that migrates it updates that contract. Do not mix the two treatments inside one surface.
+
+Six decisions depart from the earlier Midnight Core rules:
+
+| Decision | Rule | Where it is defined |
+| --- | --- | --- |
+| Coral means live | Coral marks recording and the single primary action on a screen. Selected navigation uses a neutral fill; durations, totals, chart marks and map pins never use coral. | Colour system |
+| Colour is the data | Entries render as solid category blocks with measured text on them, using per-theme display values for the same stored keys. | Category and chart palette |
+| One display face | Bricolage Grotesque for headlines and large numerals only; the system font for everything people read or type. | Typography |
+| Every action lands | Start, stop, log and delete share one landing spring with one small overshoot, one haptic each and an Undo. The live block carries one slow breathing ring. Reduce Motion keeps opacity only. | Motion; `.codex/reference/motion.md` |
+| Activities | The interface says "activity" and "activities" where it said "category". Database columns, API fields, code identifiers and tests keep `category`. | `.codex/reference/product-model.md` |
+| New layouts | Today gets a quick-start mosaic of pinned activities. Activities, Tags and Places merge into one Library page on web and Settings › Activities on iPhone. A press-and-hold Play orb with an activity menu is approved in principle, but must pass a physical-iPhone prototype test, including a VoiceOver path, before it is built. | The redesign phase PR for each surface |
+
+The interactive prototypes, review and phased plan live on the `agent/dayframe-redesign-concept` branch under `design/blocks/`. They are reference material, not production code.
 
 ## Brand assets
 
@@ -104,7 +125,7 @@ Eight-digit HEX values below include alpha as the last two digits. RGB entries f
 | `textPrimary` | `#F7F8FB` | `247, 248, 251` | Main text and values; 18.73:1 on `background`. |
 | `textSecondary` | `#8993A7` | `137, 147, 167` | Supporting copy; 6.44:1 on `background`. |
 | `textMuted` | `#707B91` | `112, 123, 145` | Tertiary copy; 4.67:1 on `background` but only 4.05:1 on `surface`, so do not use it for small body text on cards. |
-| `accent` | `#FF6248` | `255, 98, 72` | Primary action, active timer and selected navigation. Do not substitute it for danger. |
+| `accent` | `#FF6248` | `255, 98, 72` | Primary action and live recording. Blocks surfaces use a neutral fill for selected navigation. Do not substitute it for danger. |
 | `accentText` | `#FF6248` | `255, 98, 72` | Contrast-safe accent foreground on dark surfaces. |
 | `accentStrong` | `#FF6248` | `255, 98, 72` | Compatibility alias for existing consumers; new UI should use `accent`. |
 | `accentHover` | `#FF745D` | `255, 116, 93` | Pointer hover only; retain focus treatment independently. |
@@ -139,7 +160,7 @@ Eight-digit HEX values below include alpha as the last two digits. RGB entries f
 | `textPrimary` | `#111827` | `17, 24, 39` | Main text and values; 16.39:1 on `background`. |
 | `textSecondary` | `#667085` | `102, 112, 133` | Supporting text; 4.97:1 on white `surface`. |
 | `textMuted` | `#667085` | `102, 112, 133` | Tertiary text; use state/opacity separately rather than a paler inaccessible grey. |
-| `accent` | `#F45D43` | `244, 93, 67` | Primary action, active timer and selected navigation. |
+| `accent` | `#F45D43` | `244, 93, 67` | Primary action and live recording. Blocks surfaces use a neutral fill for selected navigation. |
 | `accentText` | `#B73A26` | `183, 58, 38` | Small accent foreground; 5.76:1 on white and 4.87:1 on `accentSoft`. |
 | `accentStrong` | `#F45D43` | `244, 93, 67` | Compatibility alias for existing consumers; new UI should use `accent`. |
 | `accentHover` | `#E85038` | `232, 80, 56` | Pointer hover state. |
@@ -175,11 +196,28 @@ Changing the picker must preserve all of these independently:
 - legacy key/HEX normalization without rewriting stored category assignments;
 - identical shared values on web and iOS.
 
-Category colour should normally appear as a dot, border, fill, hatch, or chart mark beside semantic text. Do not assume a palette colour is accessible body text or place white/black text over a bright swatch without measuring contrast. Colour remains supplementary to labels, values, state text, and non-colour markers.
+On surfaces not yet migrated to Blocks, category colour appears as a dot, border, soft fill, hatch, or chart mark beside semantic text.
+
+On Blocks surfaces, an entry is a solid block filled with its category colour, with its text on the block:
+
+- Each palette entry carries a display value per theme (`lightHex` and `darkHex` in `palette.ts`). Blocks may make these more vivid than the stored identity value. Stored keys never change, so no data migration follows.
+- On-block text is white or a deep ink, whichever measures higher contrast. It must reach 4.5:1 for normal text and 3:1 for large text in both themes. A shared helper used by web and iOS makes this choice, and a shared test checks every palette entry in both themes. A display value that fails both options is adjusted; it is never shipped with failing text.
+- Never place text over a palette colour without that measured choice, and never assume a palette colour is accessible body text on another surface.
+
+Colour remains supplementary: blocks still carry the activity name, duration and state as text.
 
 ## Typography
 
-The product UI uses system fonts. On iOS use San Francisco through React Native’s `System` family and favour its lighter regular/semi-bold hierarchy instead of uniformly heavy text. On web use the existing system-first stack: `-apple-system`, `BlinkMacSystemFont`, `"SF Pro Text"`, `"Segoe UI"`, sans-serif. Do not add Sofia Pro or another font dependency: the Dayframe wordmark is outline geometry and needs no font file.
+Everything people read or type uses system fonts. On iOS use San Francisco through React Native’s `System` family and favour its lighter regular/semi-bold hierarchy instead of uniformly heavy text. On web use the existing system-first stack: `-apple-system`, `BlinkMacSystemFont`, `"SF Pro Text"`, `"Segoe UI"`, sans-serif.
+
+Blocks adds one display face, Bricolage Grotesque (SIL Open Font License). It is used only for screen titles, report headlines, the timer and large totals:
+
+- Bundle the font files with each app (Expo font assets on iOS, self-hosted at build time on web). The apps must not request fonts from a third-party server at runtime.
+- Body text, labels, buttons, inputs and lists stay on the system font.
+- Display text still follows the Dynamic Type role caps below. Its fallback is the system font.
+- Numerals that update in place, such as the timer, use tabular figures or fixed-width digit cells so they never shift.
+
+Do not add Sofia Pro or any other font. The Dayframe wordmark is outline geometry and needs no font file.
 
 | Role | Size | Weight | Line height | Letter spacing |
 | --- | ---: | ---: | ---: | ---: |
@@ -301,7 +339,9 @@ Use the shared palette, `chartTrack`, stable segment ordering and exact value la
 
 ### Motion
 
-Motion is short, purposeful, and consistent across a complete interaction: approximately 120–220 ms for control feedback and 180–300 ms for panels or chart reveals. Use standard ease-out timing, avoid decorative looping motion, and provide a reduced-motion path that removes nonessential transitions without hiding state changes.
+Motion is short, purposeful, and consistent across a complete interaction: approximately 120–220 ms for control feedback and 180–300 ms for panels or chart reveals. Use standard ease-out timing and provide a reduced-motion path that removes nonessential transitions without hiding state changes.
+
+Blocks adds two deliberate exceptions, defined in `.codex/reference/motion.md`. When an entry is started, stopped, logged or deleted, its block lands with one small spring overshoot and a matching haptic. The one live block carries a slow breathing ring. No other decorative loop, glow or bounce is allowed. Reduce Motion keeps opacity only and the same states, haptics and Undo.
 
 Every new feature with visible movement must define the trigger, one animation owner, entrance/update/exit behaviour, surrounding layout response, interruption, async success/Undo/failure states, and Reduce Motion path before implementation. A transition is not complete when the initiating gesture is smooth but the resulting content, feedback, dismissal, or rollback jumps. Use the canonical implementation and validation rules in `.codex/reference/motion.md`.
 
@@ -321,5 +361,5 @@ Web may remain denser and uses hover, keyboard focus and responsive dialogs, whi
 - Favicon and app icon use the symbol only; the iOS icon is opaque.
 - System, Light and Dark appearances are checked without a wrong-tone flash.
 - Web SVGs load at desktop and phone widths; iOS bundles exact SVG components.
-- Typography remains system-first and no unlicensed font files are present.
+- Typography remains system-first: only bundled, openly licensed Bricolage Grotesque files are present, used for display roles only and never fetched from a third-party server at runtime.
 - Focus, contrast, Dynamic Type, VoiceOver, Reduce Motion and Reduce Transparency are checked.

@@ -39,16 +39,47 @@ Do not introduce Swift solely to make an otherwise ordinary React Native entranc
 
 - Reuse `MOBILE_MOTION` on iOS: approximately 140 ms for control feedback, 220 ms for local layout, 260 ms for sheets, and 280 ms for screen transitions.
 - Follow the brand guide's 120–220 ms control and 180–300 ms panel ranges on other surfaces. Prefer standard ease-out timing; exits may be shorter while staying in the same curve family.
-- Keep movement restrained. Use opacity plus a small translation when it clarifies origin; avoid theatrical scale, bounce, or decorative loops.
+- Keep movement restrained. Use opacity plus a small translation when it clarifies origin; avoid theatrical scale, bounce, or decorative loops. The only exceptions are the Dayframe Blocks landing spring and live ring below.
 - Direct manipulation must track the finger continuously and must not hand off to a separately rebuilt layout with a release-time snap.
 - Animate both presence and consequence: the control or notice entering is not sufficient if the affected row, surrounding list, timeout dismissal, Undo restoration, or failure rollback still jumps.
 - Preserve geometry during async work. Avoid loading UI that moves content when optimistic feedback is the established product contract.
 - A second rapid action must either replace, queue, or merge with the current transition deterministically. Give timeout/Undo feedback a monotonically increasing token or equivalent stable identity, clear the superseded timer, and verify that stale timers, exits, or completion callbacks cannot dismiss or restore newer state.
 
+## Dayframe Blocks Springs And Haptics
+
+The owner approved these on 5 October 2026 (see `docs/brand-style-guide.md`, Dayframe Blocks). They apply to surfaces migrated to Blocks.
+
+Springs:
+
+- **Landing.** When an entry is started, stopped, logged, restored or deleted, its block lands with one small overshoot. Starting values from the prototype are stiffness 320 and damping 21; tune them on a physical iPhone.
+- **Controls, sheets and panels.** These settle without visible overshoot. Starting values: controls and thumbs at stiffness 560 and damping 38; sheets and panels at 340 and 34.
+- **Live block.** Only the single live block carries a breathing ring: an opacity-only cycle of about 2.4 s on its inner edge. Nothing else loops.
+- **No other bounces.** There is no scale pop, glow or celebratory bounce elsewhere.
+
+One owner rule still applies: the spring belongs to the same single animation owner as the state change, and never stacks with another layer's transition.
+
+Haptics:
+
+| Moment | Haptic |
+| --- | --- |
+| Start | Medium impact |
+| Stop | Success, then a soft impact as the block lands |
+| Scrub a time, or spin the duration dial | Selection tick per minute or entry |
+| Log or skip a Review item | Success, or a light impact |
+| Delete | Warning |
+
+- Haptics confirm a committed action. They never fire for a background refresh, a reconciliation or a rejected gesture.
+- Rapid repeats fire one haptic per committed action.
+- A Settings switch turns haptics off. The system haptics setting always wins.
+- Haptics are never the only feedback: the visible state change, Undo and VoiceOver announcement still happen.
+- Web has no haptics; the same moments use the landing motion only.
+
+Reduce Motion replaces the springs and the breathing ring with an opacity change. It keeps the same states, haptics, Undo and announcements.
+
 ## Reduce Motion And Accessibility
 
 - Read the system Reduce Motion preference through the existing app helpers or the animation library's system mode.
-- Remove nonessential translation, scale, parallax, and spring effects when Reduce Motion is enabled. Use an immediate state change or restrained opacity only when needed to preserve context.
+- Remove nonessential translation, scale, parallax, spring effects and the Blocks breathing ring when Reduce Motion is enabled. Use an immediate state change or restrained opacity only when needed to preserve context.
 - Never suppress the state change, Undo opportunity, error, focus move, or VoiceOver announcement merely because motion is reduced.
 - Do not use animation as the only explanation of what changed.
 - Check that Dynamic Type does not change measured geometry in a way that clips or snaps during a transition.
