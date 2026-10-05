@@ -855,6 +855,61 @@ describe("departures after a finished walk (review round 9)", () => {
     expect(Date.parse(trip[0])).toBeLessThanOrEqual(Date.parse(at(20)));
   });
 
+  // Review round 16: a coarse, speedless route after a walk; a mirror that lands before its copy; an early-dated return
+  // Visit followed by a re-reported exit.
+  const coarseRoute = (kind: "entry" | "visit" | "broad", silence = 0, learned = false) => {
+    const route = (id: string, minutes: number, northMetres: number, eastMetres: number) =>
+      e(id, minutes + silence, northMetres, { longitude: north(eastMetres), speedMetersPerSecond: null, horizontalAccuracyMeters: 100 });
+    const value = withWork([...walkThere(), presenceAt(kind, 49),
+      route("route-a", 49.2, 0, 200), route("route-b", 49.7, 0, 600), route("route-c", 50.2, 300, 500), route("route-d", 50.7, 550, 200),
+      still("work-0", 52.5 + silence, 600), still("work-1", 62.5 + silence, 600), still("work-2", 72.5 + silence, 600)], true);
+    value.savedPlaces[1] = { ...value.savedPlaces[1], latitude: north(600) };
+    return learned ? learnedHome(value) : value;
+  };
+  const mirroredStray = (offsetSeconds: number | null) => {
+    const stray = still("stray", 20.6, 140);
+    const evidence = [still("home-0", 0, 0), still("home-1", 10, 0), still("home-2", 20, 0), stray,
+      ...(offsetSeconds == null ? [] : [{ ...stray, clientEvidenceId: "stray-mirror", kind: "significant_change" as const, speedMetersPerSecond: null,
+        isSimulated: null, occurredAt: new Date(Date.parse(stray.occurredAt) + offsetSeconds * 1_000).toISOString(),
+        sourceTimestamp: new Date(Date.parse(stray.occurredAt) + offsetSeconds * 1_000).toISOString() }]),
+      visit("home-visit", 21.1),
+      ...[[21.25, 300], [21.6, 900], [22.2, 1_800], [22.9, 1_000], [23.5, 300]].map(([minutes, metres], index) => e(`loop-${index}`, minutes, metres)),
+      geofence("loop-end", 23.9, "geofence_enter"), still("final-0", 24.4, 0), still("final-1", 34.4, 0), still("final-2", 44.4, 0)];
+    return withWork(evidence, false);
+  };
+  const bothCallbacks = (visitEarly: boolean, reReport: boolean) => withWork([still("home-0", 0, 0), still("home-1", 10, 0), still("home-2", 18, 0),
+    geofence("exit", 20, "geofence_exit"),
+    ...[[20.5, 300], [22, 1_000], [23.5, 1_800], [25, 2_500], [27, 1_900], [28.5, 1_300]].map(([minutes, metres], index) => e(`drive-${index}`, minutes, metres)),
+    ...(visitEarly ? [{ ...visit("early-visit", 29), receivedAt: at(33) }] : []),
+    ...(reReport ? [e("far-fix", 29.4, 900), geofence("re-exit", 29.5, "geofence_exit")] : [e("far-fix", 29.4, 900)]),
+    ...[[30.5, 600], [31, 350], [31.5, 200]].map(([minutes, metres], index) => e(`approach-${index}`, minutes, metres)),
+    geofence("return", 32, "geofence_enter"), still("home-3", 32.5, 0), still("home-4", 42.5, 0), still("home-5", 52.5, 0)], false);
+
+  it.each([
+    ["entry", 0], ["visit", 0], ["broad", 0], ["entry", 40], ["visit", 40], ["broad", 40]
+  ] as const)("starts a drive to a nearby place with a coarse, speedless route at Home presence (%s, %s minutes quiet first)", (kind, silence) => {
+    // Arriving at a different place shows the device had left even when no reading on the way does. After a quiet
+    // spell the start stays at that last sign of Home, as on main.
+    expect(bounds(coarseRoute(kind, silence))).toEqual([[at(49), at(52.5 + silence)]]);
+  });
+
+  it.each([
+    ["visit", 0], ["broad", 0], ["visit", 40], ["broad", 40]
+  ] as const)("starts it there when Home is a learned place too (%s, %s minutes quiet first)", (kind, silence) => {
+    expect(bounds(coarseRoute(kind, silence, true))).toEqual([[at(49), at(52.5 + silence)]]);
+  });
+
+  it.each([-5, -4, -2, -1, 1, 2, 5])("does not let a speedless mirror %i s from a still fix's copy fake movement", (offset) => {
+    // Without the mirror the Home Visit starts a 168-second loop, which claims no commute.
+    expect(bounds(mirroredStray(null))).toEqual([]);
+    expect(bounds(mirroredStray(offset))).toEqual([]);
+  });
+
+  it.each([[false, false], [true, false], [false, true], [true, true]])(
+    "keeps the whole outing with an early-dated return Visit (%s) and a re-reported exit after it (%s)", (visitEarly, reReport) => {
+      expect(bounds(bothCallbacks(visitEarly, reReport))).toEqual([[at(20), at(32)]]);
+    });
+
   it("does not let speedless mirrors turn two still stray fixes into renewed movement", () => {
     // Each stray's significant-change mirror sorts first at the same time and carries the implied speed from the route.
     const evidence = [still("home-0", 0, 0), still("home-1", 10, 0), geofence("exit", 20, "geofence_exit"), e("out-0", 21, 500), e("out-1", 22, 1_000),

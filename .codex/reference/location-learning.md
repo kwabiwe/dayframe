@@ -59,8 +59,10 @@ Temporal invariants:
   `commuteSamePlaceMinimumExcursionMeters` from the stay's centre, is that
   re-report and not a departure. An excursion starts at an exit (also one
   inside the origin stay, read in time order) and ends with evidence of being
-  back (an accurate fix there that is not moving, an entry or a Visit there)
-  or after more than `savedPlaceQuietGapMaxMs` unobserved (only positions,
+  back (an accurate fix there that is not moving, an entry there, or a Visit
+  in the origin stay or one that marks departure as below; an early-dated
+  return Visit does not) or after more than `savedPlaceQuietGapMaxMs`
+  unobserved (only positions,
   crossings and Visits are observations; provider status and registration
   snapshots are not); registration
   snapshot pairs (an exit and entry within five seconds) are neither. A first
@@ -68,10 +70,13 @@ Temporal invariants:
   after a capture gap. iOS also dates a return's arrival Visit before the car
   stops, so a Visit, entry or broad fix at the origin marks departure only
   before the device was seen leaving (a reading away that is moving, by
-  native speed from whichever copy of the observation reports it or else an
-  accurate fix's implied speed, or at least
+  native speed from whichever copy of the observation reports it, a copy
+  being on the same device in the same or an adjacent whole second or at the
+  same coordinate within five seconds either way, or else an accurate fix's
+  implied speed; or a reading at least
   `commuteSamePlaceMinimumExcursionMeters` from the origin, or a Visit
-  elsewhere; one still stray fix just outside is not leaving), or when it
+  elsewhere; one still stray fix just outside is not leaving; on a journey to
+  a different place, arriving there also shows it had left), or when it
   stayed there at least `savedPlaceMinimumDwellMs` before it was next seen
   leaving (an early-dated return Visit is followed by approach fixes within
   three minutes), or when it was then seen away and it was observed there as
