@@ -82,6 +82,27 @@ function firstIndexAtOrAfter(accepted: ClassifiedEvidence[], atMs: number) {
   return low;
 }
 
+// iOS can report a same-region exit and entry together while monitored regions are
+// restored. Such a pair is a state snapshot, not a crossing (as in the segmenter).
+// Pairs are disjoint: each callback excuses at most one opposite callback, so a
+// surplus enter or exit remains a crossing.
+const GEOFENCE_SNAPSHOT_PAIR_MS = 5_000;
+
+function geofenceCrossings(accepted: ClassifiedEvidence[]) {
+  const transitions = accepted.filter(({ evidence }) => evidence.kind === "geofence_enter" || evidence.kind === "geofence_exit");
+  const paired = new Set<ClassifiedEvidence>();
+  transitions.forEach((item, index) => {
+    if (paired.has(item) || !item.evidence.savedPlaceId) return;
+    const at = Date.parse(item.evidence.occurredAt);
+    const match = transitions.slice(index + 1).find((other) => !paired.has(other) &&
+      other.evidence.kind !== item.evidence.kind && other.evidence.deviceId === item.evidence.deviceId &&
+      other.evidence.savedPlaceId === item.evidence.savedPlaceId &&
+      Date.parse(other.evidence.occurredAt) - at <= GEOFENCE_SNAPSHOT_PAIR_MS);
+    if (match) paired.add(item).add(match);
+  });
+  return transitions.filter((item) => !paired.has(item));
+}
+
 function iso(ms: number) {
   return new Date(ms).toISOString();
 }
@@ -120,6 +141,7 @@ export function detectPhysicalStops(accepted: ClassifiedEvidence[], config: Loca
   const elsewhere = (visit: PlacedVisit, centre: Coordinate) => episodes.get(visit.episode)!.every((callback) =>
     distanceMeters(centre, callback.point) - callback.accuracy > config.movementDisplacementThresholdMeters);
   const order = new Map(accepted.map((item, index) => [item, index]));
+  const crossings = geofenceCrossings(accepted);
   const stops: PhysicalStop[] = [];
 
   let index = 0;
@@ -151,7 +173,7 @@ export function detectPhysicalStops(accepted: ClassifiedEvidence[], config: Loca
       }
     }
     const stop = evaluateCluster(fixes, index, next, members, completedVisits, accepted, order, config, slow, vehicle, certainlyBeyond,
-      placedVisits, elsewhere);
+      placedVisits, elsewhere, crossings);
     // Defensive: never emit overlapping stops.
     if (stop && (!stops.length || Date.parse(stop.startedAt) >= Date.parse(stops[stops.length - 1].stoppedAt))) stops.push(stop);
     index = next;
@@ -165,7 +187,8 @@ function evaluateCluster(
   config: LocationEngineConfig,
   slow: (fix: Fix) => boolean, vehicle: (fix: Fix) => boolean,
   certainlyBeyond: (fix: Fix, centre: Coordinate, metres: number) => boolean,
-  placedVisits: readonly PlacedVisit[], elsewhere: (visit: PlacedVisit, centre: Coordinate) => boolean
+  placedVisits: readonly PlacedVisit[], elsewhere: (visit: PlacedVisit, centre: Coordinate) => boolean,
+  crossings: readonly ClassifiedEvidence[]
 ): PhysicalStop | null {
   const slowMembers = members.filter(slow);
   const centre = accuracyWeightedCentre(slowMembers.map(member => ({
@@ -197,10 +220,47 @@ function evaluateCluster(
   const visitDepartureAt = placedVisits
     .filter((visit) => elsewhere(visit, centre) && visit.from >= lastMemberAt)
     .reduce<number | null>((earliest, visit) => earliest == null || visit.from < earliest ? visit.from : earliest, null);
+  const visits = completedVisits.filter(({ evidence }) => {
+    const from = Date.parse(evidence.occurredAt);
+    const to = Date.parse(evidence.endedAt!);
+    return distanceMeters(centre, { latitude: evidence.latitude!, longitude: evidence.longitude! }) <=
+        config.physicalStopRadiusMeters + (evidence.horizontalAccuracyMeters ?? 0) &&
+      slowMembers.some(member => member.at >= from && member.at <= to);
+  });
+  // A long compatible Visit carries the stop through silence after its last
+  // fix. It speaks only for the time since movement was last observed: a Visit
+  // that began before that movement is measured from it, so stale support cannot
+  // pass the overstatement allowance. A geofence crossing in the silence shows
+  // the device moved; registration snapshot pairs do not.
+  const visitStop = visits.length ? Math.max(...visits.map(({ evidence }) => Date.parse(evidence.endedAt!))) : null;
+  const carrier = visits.find(({ evidence }) => Date.parse(evidence.endedAt!) === visitStop);
+  const carriedUntil = carrier ? Date.parse(carrier.evidence.endedAt!) : null;
+  const carriedFrom = carrier ? Math.max(Date.parse(carrier.evidence.occurredAt), arrivalAt ?? Number.NEGATIVE_INFINITY) : null;
+  const deviceId = members[0].item.evidence.deviceId;
+  // The silence ends at the first observed departure. iOS reports a Visit's
+  // end shortly after the device leaves, so a crossing on the drive away
+  // before that report is the departure itself, not movement while stopped.
+  let observedDepartureMs = visitDepartureAt ?? Number.POSITIVE_INFINITY;
+  for (let index = afterIndex; index < fixes.length; index += 1) {
+    if (departed(fixes[index])) {
+      observedDepartureMs = Math.min(observedDepartureMs, fixes[index].at);
+      break;
+    }
+  }
+  const silenceEndMs = carriedUntil == null ? null : Math.min(carriedUntil, observedDepartureMs);
+  const carriedVisit = carriedUntil != null && carriedFrom != null && silenceEndMs != null &&
+    carriedUntil - carriedFrom >= config.physicalStopVisitCarriedMinimumMs &&
+    !crossings.some(({ evidence }) => evidence.deviceId === deviceId &&
+      Date.parse(evidence.occurredAt) > lastMemberAt && Date.parse(evidence.occurredAt) < silenceEndMs) &&
+    // A credible Visit elsewhere already in progress at the last fix contradicts
+    // the silence (one starting later is a departure bound instead).
+    !placedVisits.some((visit) => elsewhere(visit, centre) && visit.from <= lastMemberAt && visit.to > lastMemberAt);
+  // Both departure sources search the same horizon.
+  const horizonFrom = (lastLocalAt: number) => Math.max(lastLocalAt, carriedVisit ? carriedUntil! : Number.NEGATIVE_INFINITY);
   let departureAt: number | null = null;
   let lastLocal = members[members.length - 1];
   for (let index = afterIndex; index < fixes.length; index += 1) {
-    if (fixes[index].at - lastLocal.at > config.physicalStopBoundaryWindowMs) break;
+    if (fixes[index].at - horizonFrom(lastLocal.at) > config.physicalStopBoundaryWindowMs) break;
     if (visitDepartureAt != null && fixes[index].at >= visitDepartureAt) break;
     if (departed(fixes[index])) {
       departureAt = fixes[index].at;
@@ -209,20 +269,14 @@ function evaluateCluster(
     // Only accurate fixes can show the device was still at the stop.
     if (fixes[index].accurate) lastLocal = fixes[index];
   }
-  if (visitDepartureAt != null && visitDepartureAt - lastLocal.at <= config.physicalStopBoundaryWindowMs &&
+  if (visitDepartureAt != null && visitDepartureAt - horizonFrom(lastLocal.at) <= config.physicalStopBoundaryWindowMs &&
     (departureAt == null || visitDepartureAt < departureAt)) departureAt = visitDepartureAt;
   if (arrivalAt == null || departureAt == null) return null;
 
-  const visits = completedVisits.filter(({ evidence }) => {
-    const from = Date.parse(evidence.occurredAt);
-    const to = Date.parse(evidence.endedAt!);
-    return distanceMeters(centre, { latitude: evidence.latitude!, longitude: evidence.longitude! }) <=
-        config.physicalStopRadiusMeters + (evidence.horizontalAccuracyMeters ?? 0) &&
-      slowMembers.some(member => member.at >= from && member.at <= to);
-  });
   const spread = lastSlowAt - firstSlowAt;
   const corroborated = visits.length > 0
-    ? slowMembers.length >= 2 && spread >= config.physicalStopMinimumSlowSpreadMs
+    ? slowMembers.length >= 2 && spread >= config.physicalStopMinimumSlowSpreadMs ||
+      carriedVisit && Math.abs(departureAt - carriedUntil!) <= config.physicalStopVisitDepartureLagMaximumMs
     : slowMembers.length >= config.physicalStopUnanchoredMinimumSlowSamples &&
       spread >= config.physicalStopUnanchoredMinimumSlowSpreadMs;
   if (!corroborated) return null;
@@ -234,7 +288,6 @@ function evaluateCluster(
   const stopLower = lastLocal.at;
   const stopUpper = departureAt;
   const visitStart = visits.length ? Math.min(...visits.map(({ evidence }) => Date.parse(evidence.occurredAt))) : null;
-  const visitStop = visits.length ? Math.max(...visits.map(({ evidence }) => Date.parse(evidence.endedAt!))) : null;
   const startedAt = visitStart != null
     ? iso(clamp(visitStart, startLower, startUpper))
     : midpointTimeIso(iso(startLower), iso(startUpper));

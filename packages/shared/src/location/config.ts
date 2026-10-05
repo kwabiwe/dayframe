@@ -49,6 +49,8 @@ export type LocationEngineConfig = {
   physicalStopUnanchoredMinimumSlowSamples: number;
   physicalStopUnanchoredMinimumSlowSpreadMs: number;
   physicalStopBoundaryWindowMs: number;
+  physicalStopVisitCarriedMinimumMs: number;
+  physicalStopVisitDepartureLagMaximumMs: number;
   rawEvidenceRetentionDays: number;
   maxEvidenceItemsPerUpload: number;
 };
@@ -128,6 +130,15 @@ export const LOCATION_ENGINE_V2_CONFIG: LocationEngineConfig = {
   physicalStopUnanchoredMinimumSlowSamples: 3,
   physicalStopUnanchoredMinimumSlowSpreadMs: 180_000,
   physicalStopBoundaryWindowMs: 900_000,
+  // A parked phone records one fix and then nothing until it moves. A compatible
+  // completed Visit spanning that fix can carry the stop through the silence
+  // when the observed departure falls within this lag of the Visit's reported
+  // departure, and the Visit lasted long enough that iOS's overstatement of
+  // brief stops (5–7 minutes for owner-labelled drop-offs) cannot explain it.
+  // A geofence crossing inside the silence means the device moved, so the
+  // silence is not carried.
+  physicalStopVisitCarriedMinimumMs: 600_000,
+  physicalStopVisitDepartureLagMaximumMs: 300_000,
   rawEvidenceRetentionDays: 7,
   maxEvidenceItemsPerUpload: 100
 };

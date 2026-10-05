@@ -2,6 +2,8 @@
 
 Use this when implementing visual UI.
 
+Where a rule here conflicts with the approved Dayframe Blocks direction, it governs only surfaces not yet migrated to Blocks; see the adoption rule in `docs/brand-style-guide.md`.
+
 ## Product Feel
 
 - Match the product domain rather than applying a generic landing-page aesthetic.
@@ -10,7 +12,7 @@ Use this when implementing visual UI.
 - Avoid one-note palettes and decorative clutter.
 - Dayframe should feel like a compact personal time tool, not a project-management or billing app.
 - Mobile first screen should match the simple dashboard sketch: logo, active timer, start task, Today summary.
-- Use Midnight Core consistently: near-black midnight navy, layered neutral surfaces, compact controls, restrained elevation and coral primary/active states.
+- Use Midnight Core consistently: near-black midnight navy, layered neutral surfaces, compact controls, restrained elevation and coral for the primary action and live recording. Surfaces migrated to Dayframe Blocks follow the brand guide's Blocks section: solid activity blocks, one display face, and neutral selected navigation.
 - Treat light mode as a designed neutral companion. Preserve the same hierarchy and semantic roles rather than mechanically inverting dark mode.
 - Keep native navigation containers, Expo root views and screen content on the resolved theme canvas. During push, pop and swipe-back transitions, no default white window, rounded-card vignette or mismatched scene background should be visible.
 - Keep system-first typography. Use tabular numerals for timers and report figures; do not reintroduce all-monospace UI typography.
@@ -34,8 +36,8 @@ Use this when implementing visual UI.
 
 - Consume semantic theme tokens from `packages/shared`; do not scatter raw Midnight Core HEX values through route components.
 - Preserve the 30 shared palette keys, exact HEX values, deterministic fallback order, separate five-column picker order, and legacy normalization in `packages/shared/src/palette.ts`.
-- Use coral for primary action and active state, `danger` for destructive action and category colours for data identity.
-- Pair category colours with labels, dots, rails or borders. Never rely on colour alone or assume a palette colour is accessible body text.
+- Use coral for the primary action and live recording, `danger` for destructive action and category colours for data identity. On Blocks surfaces, selected navigation uses a neutral fill, and durations, totals, chart marks and map pins never use coral.
+- Pair category colours with labels, dots, rails or borders, or on Blocks surfaces with text on a solid block whose ink is chosen by measured contrast. Never rely on colour alone or assume a palette colour is accessible body text.
 - Use a 44 px/pt minimum interactive target and visible focus/selected states. Both platforms should prefer fill, spacing, and hairline dividers over default outlines; retain lines for focus, validation, essential control boundaries, calendar grids and semantic data structure.
 - Web keyboard focus is always neutral grey through the shared `focus`/`control-border` treatment. Apply it to fields, buttons, links, compound controls, options, menus, disclosures, Calendar blocks and icon actions; never use blue `info` or accent colour as a focus indicator. Selected/active accent remains a separate state, and invalid focused fields retain a separate danger cue.
 - On web, field-like controls reserve one stable 2 px perimeter and change its colour in place for `:focus-visible`; standalone actions keep one external 2 px focus ring. A field must never show both.

@@ -11,4 +11,5 @@ export * from "./schemas";
 export * from "./schoolRunArrivalFixture";
 export * from "./segmenter";
 export * from "./testFixtures";
+export * from "./tripStopPresentation";
 export * from "./types";
