@@ -304,7 +304,7 @@ Review this checklist before and after changes that touch Dayframe UI, timer beh
 
 ## Visual System
 
-- Midnight Core is used consistently: midnight-navy dark canvas, designed neutral light canvas, layered surfaces and coral primary/active states.
+- Midnight Core is used consistently: midnight-navy dark canvas, designed neutral light canvas, layered surfaces, and coral for the primary action and live recording.
 - Every web keyboard focus indicator uses the shared neutral grey `focus`/`control-border` treatment, including fields, standalone buttons, links, Calendar blocks, icon actions, options, menus and compound controls. Blue `info`/accent focus is prohibited; selected/active accent remains independent.
 - Browser text selection uses the global contrast-safe Dayframe coral selection colour with its paired on-accent text in both themes; it never falls back to browser blue or an indistinguishable low-contrast tint.
 - Compound web fields with nested actions have one wrapper focus owner via `focus-within`. The nested text input has no competing border/outline, while the nested action remains independently keyboard-visible.
@@ -316,7 +316,7 @@ Review this checklist before and after changes that touch Dayframe UI, timer beh
 - Stable palette keys, deterministic fallback order and legacy HEX compatibility are preserved while all 30 category shade choices remain available. Web and iOS pickers use the same five-column hue-family order, light-to-dark within each family, without changing stored category assignments.
 - Light and dark themes apply across backgrounds, text, borders, controls, icons, panels, and time blocks.
 - Outer and inner panels, popovers, tables, color swatches, and floating dialogs have consistent rounded corners.
-- Typography uses the current modern system font stack and stays compact in dense productivity surfaces.
+- Typography uses the system font stack for everything people read or type and stays compact in dense productivity surfaces. Blocks surfaces add Bricolage Grotesque in display roles only.
 - Controls look restrained and functional; decorative visual changes must not reduce timer or review usability.
 - iOS surfaces use the current fill-led hierarchy: canvas/surface/inset contrast, compact divider-based lists, circular icon-only actions, and pill text actions instead of outline-heavy rounded-rectangle clutter.
 - Idle and running iOS timer cards share a 136-point baseline height, exact horizontal/vertical insets, 44-point action boxes, action-column width, and spacing tokens. Play/Stop and both Plus actions keep identical card-relative centres; each Plus bottom edge aligns with the visible 32-point Quick Actions pill bottom, with 14-point visible bottom padding matching the top inset. Pills retain a 44-point effective target through 6-point vertical hit expansion, remain horizontally scrollable, and do not clip or translate the action column at supported widths or larger Dynamic Type.
@@ -330,6 +330,17 @@ Review this checklist before and after changes that touch Dayframe UI, timer beh
 - Reduce Motion removes route and layout motion without hiding navigation state changes or loading feedback.
 - Native SwiftUI surfaces use the same semantic Midnight Core roles, system typography, Dynamic Type, VoiceOver labels, Reduce Motion, and Reduce Transparency behaviour as the surrounding React Native app.
 - Every feature that introduces movement follows `.codex/reference/motion.md`: it has one animation owner and consistent entrance, update/reflow, exit, interruption, timeout/Undo/failure, and Reduce Motion behaviour where those states apply.
+
+### Dayframe Blocks surfaces
+
+Check these on every surface migrated to Blocks. Where an earlier check in this section conflicts with them, the earlier check applies only to surfaces not yet migrated:
+
+- Text on every activity block passes the measured contrast check (4.5:1 normal, 3:1 large) for every palette entry in Midnight and Daylight.
+- Coral appears only on live recording and the single primary action (browser text selection keeps its coral highlight). Selected navigation, durations, totals, chart marks and map pins do not use it.
+- Bricolage Grotesque appears only in display roles, is bundled with the app, scales with Dynamic Type, and falls back to the system font. The timer never shifts width as digits change.
+- Start, stop, log, Undo-restore and delete land with the shared spring and the documented haptic; automatic rollback and reconciliation fire none. Rapid repeats fire one haptic (Stop: one composite sequence) per committed action. The Settings switch and the system setting turn haptics off.
+- Only the live block breathes. Reduce Motion replaces springs and the ring with opacity and keeps states, haptics, Undo and announcements.
+- The surface says "activity" in every label and VoiceOver string; stored data, API fields and exports still say `category`.
 
 ## Validation Commands
 

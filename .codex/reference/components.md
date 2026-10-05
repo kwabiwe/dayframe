@@ -2,6 +2,8 @@
 
 Use this when working on frontend components.
 
+The contracts below describe the shipped components. The approved Dayframe Blocks direction (see `docs/brand-style-guide.md`) replaces some of them, for example circular category markers and soft calendar fills. Each surface changes only in the redesign PR that migrates it, and that PR updates the matching contract here.
+
 ## Component Structure
 
 - Keep components focused on one responsibility.
