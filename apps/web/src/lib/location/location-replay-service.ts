@@ -724,7 +724,10 @@ async function persistCommutes(
       JSON.stringify({
         qualificationReason: segment.qualificationReason ?? null,
         // Coordinate-free: times, bounds, the stop's own stay ID and candidate place IDs.
-        ...(segment.stops?.length ? { stops: segment.stops } : {})
+        ...(segment.stops?.length ? { stops: segment.stops } : {}),
+        // From Motion & Fitness: how it was travelled, and whether motion alone showed the movement.
+        ...(segment.travelMode ? { travelMode: segment.travelMode } : {}),
+        ...(segment.motionSupported ? { motionSupported: true } : {})
       })
     ]);
     // Trusted SQL template; only parameter positions vary with the bounded row index.

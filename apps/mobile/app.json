@@ -28,7 +28,8 @@
         "NSLocationWhenInUseUsageDescription": "Dayframe uses precise location to distinguish nearby saved places and show reviewable visit evidence.",
         "NSLocationAlwaysAndWhenInUseUsageDescription": "Dayframe records visits and significant location changes in the background so journeys become private, reviewable activity suggestions before they become time entries.",
         "NSHealthShareUsageDescription": "Dayframe reads sleep and workout summaries from Apple Health so they become reviewable activity events.",
-        "NSHealthUpdateUsageDescription": "Dayframe does not write health data, but iOS requires this description when health data access is enabled."
+        "NSHealthUpdateUsageDescription": "Dayframe does not write health data, but iOS requires this description when health data access is enabled.",
+        "NSMotionUsageDescription": "Dayframe reads Motion & Fitness activity (still, walking or driving) to time your journeys and find short drives that location missed. It stays with your private location evidence and never logs time by itself."
       }
     },
     "plugins": [

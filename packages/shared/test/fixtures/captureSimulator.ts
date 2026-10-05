@@ -1,5 +1,8 @@
 import { LOCATION_ENGINE_V2_CONFIG as config } from "../../src/location/config";
-import type { LocationEngineInput, LocationEvidence } from "../../src/location/types";
+import {
+  EMPTY_MOTION_CAPTURE_CURSOR, motionEvidenceId, motionTransitionsFromRecords, type MotionRecord
+} from "../../src/location/motionCapture";
+import type { LocationEngineInput, LocationEvidence, MotionActivity, MotionConfidence } from "../../src/location/types";
 
 /**
  * Synthetic iOS capture, shaped by retained staging traces rather than copied
@@ -15,7 +18,12 @@ import type { LocationEngineInput, LocationEvidence } from "../../src/location/t
  *   early) and a broad, displaced completed callback ending shortly after
  *   departure;
  * - saved-place geofences report crossings a few seconds late;
- * - standard fixes reach the server in deferred batches, native callbacks later.
+ * - standard fixes reach the server in deferred batches, native callbacks later;
+ * - optionally (`motion`), Core Motion activity: walking to and from the car
+ *   around each drive, onsets a few seconds off, mostly high confidence, brief
+ *   walks and unknown spells during stays and drives, queried at every wake
+ *   through the app's own record-to-evidence step. Motion uses its own random
+ *   stream, so the location evidence is identical with and without it.
  */
 export type Xy = { x: number; y: number };
 
@@ -79,8 +87,10 @@ function prng(seed: number) {
   };
 }
 
-export function simulate(scenario: Scenario, seed: number): Simulation {
+export function simulate(scenario: Scenario, seed: number, options: { motion?: boolean } = {}): Simulation {
   const random = prng(seed);
+  // Ground-truth activity, from each leg's start.
+  const truthActivity: Array<{ atMs: number; activity: "stationary" | "walking" | "automotive" }> = [];
   const between = (low: number, high: number) => low + (high - low) * random();
   const gaussian = () => Math.sqrt(-2 * Math.log(1 - random())) * Math.cos(2 * Math.PI * random());
   // A fix's error is roughly its reported accuracy at one standard deviation per axis / 1.5.
@@ -166,6 +176,8 @@ export function simulate(scenario: Scenario, seed: number): Simulation {
   };
 
   for (const leg of scenario.legs) {
+    const activity = leg.kind === "drive" || leg.kind === "hold" ? "automotive" : leg.kind === "walk" ? "walking" : "stationary";
+    if (truthActivity.at(-1)?.activity !== activity) truthActivity.push({ atMs: now, activity });
     if (leg.kind === "drive" || leg.kind === "walk") {
       const [low, high] = leg.accuracy ?? (leg.kind === "drive" ? [2, 5] : [4, 12]);
       travel(leg.to, leg.via, leg.speed ?? (leg.kind === "drive" ? 11 : 1.35), () => between(low, high), leg.recorded !== false);
@@ -227,6 +239,7 @@ export function simulate(scenario: Scenario, seed: number): Simulation {
     }
   }
   const endMs = now;
+  if (options.motion) evidence.push(...simulatedMotion(truthActivity, endMs, evidence, seed));
   const savedPlaces = scenario.places.map((place) => ({
     id: place.id, name: place.name, latitude: toLatitude(place.at.y), longitude: toLongitude(place.at.x),
     radiusMeters: place.radius, loggingEnabled: place.loggingEnabled ?? true
@@ -240,4 +253,69 @@ export function simulate(scenario: Scenario, seed: number): Simulation {
       evidence: evidence.filter((item) => Date.parse(item.receivedAt) <= processingAtMs)
     })
   };
+}
+
+/** Core Motion as the app records it, from the ground-truth activity. */
+function simulatedMotion(
+  truth: ReadonlyArray<{ atMs: number; activity: "stationary" | "walking" | "automotive" }>,
+  endMs: number,
+  locationEvidence: readonly LocationEvidence[],
+  seed: number
+): LocationEvidence[] {
+  const random = prng(seed ^ 0x5bd1e995);
+  const between = (low: number, high: number) => low + (high - low) * random();
+  const confidence = (): MotionConfidence => { const r = random(); return r < 0.75 ? "high" : r < 0.95 ? "medium" : "low"; };
+  const base: MotionRecord[] = [];
+  const spells: Array<{ atMs: number; lengthMs: number; activity: MotionActivity }> = [];
+  const record = (atMs: number, activity: MotionActivity) => base.push({ startMs: Math.round(atMs), activity, confidence: confidence() });
+  const addSpells = (from: number, to: number, activity: MotionActivity, perHalfHour: number, low: number, high: number) => {
+    for (let t = from + between(0, 1_800_000); t < to; t += 1_800_000) {
+      const lengthMs = between(low, high);
+      if (random() < perHalfHour && t + lengthMs < to) spells.push({ atMs: t, lengthMs, activity });
+    }
+  };
+  truth.forEach(({ atMs, activity }, index) => {
+    const next = truth[index + 1]?.atMs ?? endMs + 7_200_000;
+    const previous = truth[index - 1]?.activity;
+    if (activity === "automotive") {
+      // Walking to the car, then driving; an unknown spell on some drives.
+      record(atMs + between(-10_000, 20_000), "walking");
+      record(atMs + between(20_000, 75_000), "automotive");
+      addSpells(atMs + 90_000, next - 60_000, "unknown", 0.3, 20_000, 60_000);
+    } else if (activity === "walking") {
+      record(atMs + between(-10_000, 30_000), "walking");
+    } else {
+      // Walking in from the car, then still; brief walks and unknown spells while staying.
+      const settle = previous === "automotive" ? between(15_000, 60_000) : between(5_000, 40_000);
+      if (previous === "automotive") record(atMs + between(-5_000, 15_000), "walking");
+      record(atMs + settle, "stationary");
+      addSpells(atMs + settle + 60_000, next - 60_000, "walking", 0.5, 10_000, 90_000);
+      addSpells(atMs + settle + 60_000, next - 60_000, "unknown", 0.15, 20_000, 120_000);
+    }
+  });
+  base.sort((a, b) => a.startMs - b.startMs);
+  const baseAt = (atMs: number) => [...base].reverse().find((item) => item.startMs <= atMs);
+  // A spell interrupts what was going on, which then resumes.
+  const records = [...base, ...spells.flatMap(({ atMs, lengthMs, activity }) => {
+    const resumed = baseAt(atMs + lengthMs);
+    return resumed ? [{ startMs: Math.round(atMs), activity, confidence: confidence() },
+      { ...resumed, startMs: Math.round(atMs + lengthMs) }] : [];
+  })].sort((a, b) => a.startMs - b.startMs);
+  // The app queries the history at every wake: whenever other evidence was received.
+  const queries = [...new Set([...locationEvidence.map((item) => Date.parse(item.receivedAt)), endMs + 3_600_000])]
+    .filter(Number.isFinite).sort((a, b) => a - b);
+  let cursor = EMPTY_MOTION_CAPTURE_CURSOR;
+  const floorMs = truth[0]?.atMs ?? 0;
+  return queries.flatMap((queriedAtMs) => {
+    const step = motionTransitionsFromRecords(records.filter((item) => item.startMs <= queriedAtMs), cursor, queriedAtMs, floorMs, config);
+    cursor = step.cursor;
+    return step.transitions.map((transition): LocationEvidence => ({
+      clientEvidenceId: motionEvidenceId(transition), deviceId: DEVICE, algorithmVersion: config.algorithmVersion,
+      kind: "motion_activity", occurredAt: new Date(transition.startMs).toISOString(), sourceTimestamp: null, endedAt: null,
+      latitude: null, longitude: null, horizontalAccuracyMeters: null, speedMetersPerSecond: null, savedPlaceId: null,
+      receivedAt: new Date(queriedAtMs).toISOString(), timeZone: "Europe/London", isSimulated: null,
+      metadata: { motionActivity: transition.activity, motionConfidence: transition.confidence,
+        ...(transition.continuation ? { motionContinuation: true } : {}) }
+    }));
+  });
 }

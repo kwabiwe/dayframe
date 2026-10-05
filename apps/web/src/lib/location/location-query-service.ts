@@ -1,6 +1,7 @@
 import {
   LOCATION_ENGINE_V2_CONFIG,
   LocationReviewEvidenceDtoSchema,
+  MotionTravelModeSchema,
   type LocationReviewEvidenceDto
 } from "@dayframe/shared";
 import { query } from "../db";
@@ -37,6 +38,7 @@ type ReviewSegmentRow = {
   toLongitude: number | null;
   toLatitude: number | null;
   tripStops: unknown;
+  travelMode: string | null;
 };
 
 type RejectedEvidenceRow = {
@@ -150,7 +152,8 @@ async function buildLocationReviewEvidence(
             case when from_stay.centre is null then null else ST_Y(from_stay.centre::geometry) end as "fromLatitude",
             case when to_stay.centre is null then null else ST_X(to_stay.centre::geometry) end as "toLongitude",
             case when to_stay.centre is null then null else ST_Y(to_stay.centre::geometry) end as "toLatitude",
-            cs.metadata->'stops' as "tripStops"
+            cs.metadata->'stops' as "tripStops",
+            cs.metadata->>'travelMode' as "travelMode"
      from review_items ri
      join activity_events ae
        on ae.id = ri.event_id and ae.workspace_id = ri.workspace_id and ae.user_id = ri.user_id
@@ -283,7 +286,8 @@ async function buildLocationReviewEvidence(
       continuityStatus: review.continuityStatus,
       algorithmVersion: review.algorithmVersion,
       evidenceCount: evidenceResult.rows.length,
-      rejectedEvidenceCount: rejectedResult.rows.length
+      rejectedEvidenceCount: rejectedResult.rows.length,
+      ...(kind === "commute" ? { travelMode: MotionTravelModeSchema.safeParse(review.travelMode).data ?? null } : {})
     },
     display: {
       title: review.title,

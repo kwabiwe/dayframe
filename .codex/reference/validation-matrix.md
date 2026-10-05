@@ -247,6 +247,15 @@ Physical iPhone/TestFlight results must be recorded individually as `PASS`, `FAI
 
 For the synthetic journey specifically verify two sports stays, Home not nearby school, the intermediate stop, two separated journeys, `MUM_HOME -> CHURCH -> MUM_HOME`, visible uncertainty, and identical canonical mobile/web segments. Battery evidence must list device, iOS, build, start/end battery, duration, approximate movement, foreground/background mix, and comparison baseline if one exists.
 
+### Motion & Fitness evidence checks
+
+- Shared: `packages/shared/test/motion-activity.test.ts` (timing inside bounds, no change from stationary/unknown/low-confidence or ambiguous motion, GPS-gap and short-drive qualification always low confidence and Review-only, travel mode, schema) and `travelModePresentation.test.ts`; the full shared suite must stay unchanged without motion data.
+- Capture simulator sweep with motion (`sweep-motion.mts` in the private tools): HEAD without motion must equal main in every shape; report worse/better, missing journeys and start/end error against ground truth.
+- Mobile: `runtime.test.ts` (query after the native drain, no query without permission, a failed query never fails the drain), `ownership.sqlite.test.ts` "Motion & Fitness capture" (binding floor, once-only cursor, Delete recent evidence, logout, signed-out wake), `motionPermission.test.ts` and `motionFitness.contract.test.ts`; `swift test --package-path apps/mobile/modules/dayframe-motion-activity`.
+- Database: `validate:location-v2-db` stores motion rows accepted and coordinate-free, never as lineage, counts them in the batch summary, persists a driven commute's travel mode, and rejects a positioned motion row; run it against base and ordered schemas.
+- Native: pod install adds only `DayframeMotionActivity` to `Podfile.lock`; unsigned simulator build. The simulator has no Core Motion, so it shows "Not available" only.
+- Physical iPhone (signed staging): `PASS`/`FAIL`/`NOT RUN` for the system prompt from Settings, Open iOS Settings after a refusal, status refresh on return, history recorded after a background drive and a walk, travel-mode labels in Review, a drive GPS missed offered for Review, Delete recent evidence not re-reading history, and logout clearing it.
+
 ### Location capture ownership checks
 
 For a JS-only ownership change, run focused `ownership.sqlite.test.ts`, `runtime.test.ts`, `store.sqlite.test.ts`, geofence/API, account/session, upload-ownership, Review and Health lifecycle coverage, plus `npm run validate:location-v2-sqlite`. Require S1–S6, upgrade idempotency, A→B→A, mixed source times, pre-binding/straddling Visits, opt-out, native-drain/SQLite/teardown interleavings, stale screen catalogue refresh and same-owner cold/headless control. Reproduce the saved defect probe against the pinned base before implementation.

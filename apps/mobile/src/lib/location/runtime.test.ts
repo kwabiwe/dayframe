@@ -20,7 +20,10 @@ const mocks = vi.hoisted(() => ({
   recordLocationStoreError: vi.fn(async () => undefined),
   recordLocationCaptureCleanupFailure: vi.fn(async () => undefined),
   syncLocationEvidence: vi.fn(async () => ({ synced: true, acknowledgedCount: 0 })),
-  persistLocationEvidence: vi.fn(async (items: unknown[]) => ({ insertedCount: items.length }))
+  persistLocationEvidence: vi.fn(async (items: unknown[]) => ({ insertedCount: items.length })),
+  motionStatus: vi.fn(() => "authorized"),
+  queryActivities: vi.fn(async () => [] as unknown[]),
+  recordMotionCaptureFailure: vi.fn(async () => undefined)
 }));
 vi.mock("expo-secure-store", () => ({
   getItemAsync: async (key: string) => state.secure.get(key) ?? null,
@@ -55,7 +58,16 @@ vi.mock("./store", () => ({
   recordLocationStoreError: mocks.recordLocationStoreError,
   recordLocationCaptureCleanupFailure: mocks.recordLocationCaptureCleanupFailure,
   recordLocationCaptureDiscard: async () => undefined,
-  syncLocationEvidence: mocks.syncLocationEvidence
+  syncLocationEvidence: mocks.syncLocationEvidence,
+  readMotionCaptureState: async () => state.binding ? {
+    version: 1, bindingId: state.binding.id, floorMs: Date.parse(state.binding.boundAt), cursor: { lastRecordStartMs: null, last: null }
+  } : null,
+  recordMotionCaptureFailure: mocks.recordMotionCaptureFailure
+}));
+vi.mock("../../../modules/dayframe-motion-activity", () => ({
+  MAX_MOTION_RECORDS_PER_QUERY: 2_000,
+  getAuthorizationStatus: mocks.motionStatus,
+  queryActivities: mocks.queryActivities
 }));
 vi.mock("../../../modules/dayframe-location-visits", () => ({
   clearAllSignals: mocks.clearAllSignals,
@@ -76,6 +88,7 @@ describe("location runtime binding and drain", () => {
     vi.clearAllMocks(); state.secure.clear(); state.binding = null; state.context = null; state.mode = "v2_shadow"; state.revision = 0;
     state.owner = { userId: "user-a", workspaceId: "workspace-a" };
     mocks.clearAllSignals.mockResolvedValue(0); mocks.drainSignals.mockResolvedValue([]);
+    mocks.motionStatus.mockReturnValue("authorized"); mocks.queryActivities.mockResolvedValue([]);
     mocks.persistLocationEvidence.mockImplementation(async (items: unknown[]) => ({ insertedCount: items.length }));
     mocks.configureLocationAccount.mockImplementation(async (context: LocationAccountContext, mode: string, enabled: boolean) => {
       state.context = context; state.mode = mode;
@@ -145,6 +158,49 @@ describe("location runtime binding and drain", () => {
     expect(byId.get("slc-legacy")).toMatchObject({ speedMetersPerSecond: null });
     expect(byId.get("slc-legacy")?.metadata).not.toHaveProperty("nativeCallbackAt");
   });
+  it("records Motion & Fitness history after the native drain, from the binding's cursor", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] }); vi.setSystemTime(Date.parse("2026-08-11T09:00:00Z"));
+    try {
+      await configureLocationIntelligence(bootstrap());
+      const boundAt = Date.parse("2026-08-11T00:00:00Z");
+      expect(mocks.queryActivities).toHaveBeenCalledWith(boundAt, Date.now(), 2_000);
+      mocks.queryActivities.mockClear(); mocks.persistLocationEvidence.mockClear();
+      const at = (minute: number) => Date.parse("2026-08-11T08:00:00Z") + minute * 60_000;
+      mocks.queryActivities.mockResolvedValue([
+        { startMs: at(0), stationary: true, walking: false, running: false, cycling: false, automotive: false, unknown: false, confidence: "high" },
+        { startMs: at(5), stationary: true, walking: false, running: false, cycling: false, automotive: true, unknown: false, confidence: "high" },
+        { startMs: at(20), stationary: true, walking: false, running: false, cycling: false, automotive: false, unknown: false, confidence: "medium" }
+      ]);
+      await drainNativeLocationSignalsInBatches();
+      const [evidence, , options] = mocks.persistLocationEvidence.mock.calls.at(-1) as unknown as
+        [Array<{ kind: string; occurredAt: string; latitude: null; metadata: Record<string, unknown> }>, unknown, { motionCapture: { cursor: { lastRecordStartMs: number } } }];
+      expect(evidence.map((item) => [item.kind, item.occurredAt, item.latitude, item.metadata.motionActivity])).toEqual([
+        ["motion_activity", new Date(at(0)).toISOString(), null, "stationary"],
+        ["motion_activity", new Date(at(5)).toISOString(), null, "automotive"],
+        ["motion_activity", new Date(at(20)).toISOString(), null, "stationary"],
+        // Still at the query, an hour later: coverage, not a change.
+        ["motion_activity", new Date(Date.now()).toISOString(), null, "stationary"]
+      ]);
+      expect(evidence.at(-1)?.metadata.motionContinuation).toBe(true);
+      expect(options.motionCapture.cursor.lastRecordStartMs).toBe(at(20));
+    } finally { vi.useRealTimers(); }
+  });
+
+  it("does not query Motion & Fitness history without permission", async () => {
+    mocks.motionStatus.mockReturnValue("denied");
+    await configureLocationIntelligence(bootstrap());
+    await drainNativeLocationSignalsInBatches();
+    expect(mocks.queryActivities).not.toHaveBeenCalled();
+  });
+
+  it("never fails a drain when the Motion & Fitness query fails", async () => {
+    await configureLocationIntelligence(bootstrap());
+    mocks.queryActivities.mockRejectedValue(new Error("ERR_MOTION_QUERY_FAILED"));
+    mocks.drainSignals.mockResolvedValueOnce([{ id: "signal-1", kind: "provider_status", occurredAt: "2026-08-11T12:00:00.000Z", endedAt: null, latitude: null, longitude: null, horizontalAccuracyMeters: null, metadata: {} }]);
+    await expect(drainNativeLocationSignalsInBatches()).resolves.toMatchObject({ transferredCount: 1 });
+    expect(mocks.recordMotionCaptureFailure).toHaveBeenCalledOnce();
+  });
+
   it("reprocesses current time and forces replay on foreground without new signals", async () => {
     await configureLocationIntelligence(bootstrap()); vi.clearAllMocks();
     await syncLocationIntelligenceOnForeground();

@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { MotionTravelModeSchema } from "./schemas";
 
 const GeoJsonPointSchema = z.object({
   type: z.literal("Point"),
@@ -26,7 +27,9 @@ export const LocationReviewEvidenceDtoSchema = z.object({
     continuityStatus: z.string(),
     algorithmVersion: z.string(),
     evidenceCount: z.number().int().nonnegative(),
-    rejectedEvidenceCount: z.number().int().nonnegative()
+    rejectedEvidenceCount: z.number().int().nonnegative(),
+    /** Commutes only: how the journey was travelled, from Motion & Fitness. */
+    travelMode: MotionTravelModeSchema.nullable().optional()
   }),
   display: z.object({
     title: z.string(),

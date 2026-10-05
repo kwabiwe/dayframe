@@ -1,0 +1,7 @@
+{
+  "platforms": ["apple"],
+  "apple": {
+    "modules": ["DayframeMotionActivityModule"],
+    "podspecPath": "./ios/DayframeMotionActivity.podspec"
+  }
+}

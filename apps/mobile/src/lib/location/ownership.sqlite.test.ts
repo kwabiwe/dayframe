@@ -16,7 +16,10 @@ const h = vi.hoisted(() => ({
   drain: vi.fn(),
   clearAll: vi.fn(),
   stopExpo: vi.fn(),
-  beforeInsert: null as (() => Promise<void>) | null
+  beforeInsert: null as (() => Promise<void>) | null,
+  motionStatus: "authorized",
+  motionRecords: [] as Array<{ startMs: number; activity: "stationary" | "walking" | "automotive"; confidence: "high" }>,
+  queryActivities: vi.fn()
 }));
 vi.mock("expo-sqlite", () => ({ openDatabaseAsync: h.open }));
 vi.mock("../config", () => ({ DAYFRAME_API_BASE: "https://fixture.invalid" }));
@@ -68,6 +71,13 @@ vi.mock("../../../modules/dayframe-location-visits", () => ({
   getStatus: vi.fn(async () => ({}))
 }));
 
+// Core Motion's history: each record lasts until the next; a query also returns the one in progress at its start.
+vi.mock("../../../modules/dayframe-motion-activity", () => ({
+  MAX_MOTION_RECORDS_PER_QUERY: 2_000,
+  getAuthorizationStatus: () => h.motionStatus,
+  queryActivities: h.queryActivities
+}));
+
 const A = { userId: "a0000000-0000-4000-8000-00000000000a", workspaceId: "a0000000-0000-4000-8000-0000000000aa" };
 const B = { userId: "b0000000-0000-4000-8000-00000000000b", workspaceId: "b0000000-0000-4000-8000-0000000000bb" };
 const A_PLACE = "a0000000-0000-4000-8000-00000000a1ce";
@@ -113,6 +123,14 @@ beforeEach(async () => {
   db = new DatabaseSync(":memory:"); h.open.mockResolvedValue(adapter());
   h.beforeInsert = null;
   h.drain.mockImplementation(async (limit: number) => h.nativeSignals.slice(0, limit));
+  h.motionStatus = "authorized"; h.motionRecords = [];
+  h.queryActivities.mockReset();
+  h.queryActivities.mockImplementation(async (fromMs: number, toMs: number) => {
+    const sorted = [...h.motionRecords].sort((a, b) => a.startMs - b.startMs);
+    return sorted.filter((record, index) => record.startMs <= toMs && (sorted[index + 1]?.startMs ?? Infinity) > fromMs)
+      .map((record) => ({ startMs: record.startMs, stationary: record.activity === "stationary", walking: record.activity === "walking",
+        running: false, cycling: false, automotive: record.activity === "automotive", unknown: false, confidence: record.confidence }));
+  });
   h.clearAll.mockImplementation(async () => { h.nativeCalls.push("clearAllSignals"); const n = h.nativeSignals.length; h.nativeSignals = []; return n; });
   h.stopExpo.mockImplementation(async () => { h.nativeCalls.push("expo:stopLocationUpdates"); });
   geofence = await import("../geofence"); // real task bodies and headless lifecycle listeners
@@ -812,5 +830,87 @@ describe("native signal delivery on background wakes", () => {
     await learningTask()({ data: { locations: [fix(T0 + 55_000)] }, error: null });
     expect(rows()).toEqual([]);
     expect(h.drain).not.toHaveBeenCalled();
+  });
+});
+
+describe("Motion & Fitness capture", () => {
+  const motionRows = () => db.prepare(
+    "select client_evidence_id id, account_key k, occurred_at t, json_extract(evidence_json,'$.metadata.motionActivity') a, json_extract(evidence_json,'$.latitude') lat from location_evidence_journal where json_extract(evidence_json,'$.kind') = 'motion_activity' order by occurred_at, client_evidence_id"
+  ).all() as Array<{ id: string; k: string; t: string; a: string; lat: number | null }>;
+  const iso = (ms: number) => new Date(ms).toISOString();
+
+  it("a wake records activity since the binding once, as coordinate-free evidence of the owner", async () => {
+    h.motionRecords = [
+      { startMs: T0 - 3_600_000, activity: "stationary", confidence: "high" },
+      { startMs: T0 + 60_000, activity: "walking", confidence: "high" },
+      { startMs: T0 + 120_000, activity: "automotive", confidence: "high" },
+      { startMs: T0 + 600_000, activity: "stationary", confidence: "high" }
+    ];
+    await signIn();
+    vi.setSystemTime(T0 + 900_000);
+    await learningTask()({ data: { locations: [fix(T0 + 890_000)] }, error: null });
+    // Activity in progress at the binding began before it and is never recorded.
+    expect(motionRows().map((row) => [row.t, row.a, row.k, row.lat])).toEqual([
+      [iso(T0 + 60_000), "walking", key(A), null],
+      [iso(T0 + 120_000), "automotive", key(A), null],
+      [iso(T0 + 600_000), "stationary", key(A), null],
+      [iso(T0 + 900_000), "stationary", key(A), null]
+    ]);
+    vi.setSystemTime(T0 + 1_000_000);
+    await runtime.drainNativeLocationSignalsInBatches();
+    expect(motionRows()).toHaveLength(4);
+    expect(h.queryActivities).toHaveBeenLastCalledWith(T0 + 600_000, T0 + 1_000_000, 2_000);
+    expect(await pendingIds(A)).toEqual(expect.arrayContaining(motionRows().map((row) => row.id)));
+  });
+
+  it("Delete recent evidence never reads the deleted activity back from iOS", async () => {
+    h.motionRecords = [
+      { startMs: T0 + 60_000, activity: "walking", confidence: "high" },
+      { startMs: T0 + 300_000, activity: "stationary", confidence: "high" }
+    ];
+    await signIn();
+    vi.setSystemTime(T0 + 600_000);
+    await runtime.drainNativeLocationSignalsInBatches();
+    expect(motionRows().length).toBeGreaterThan(0);
+    await store.deleteRetainedLocationEvidence();
+    expect(motionRows()).toEqual([]);
+    vi.setSystemTime(T0 + 700_000);
+    await runtime.drainNativeLocationSignalsInBatches();
+    expect(motionRows()).toEqual([]);
+    h.motionRecords.push({ startMs: T0 + 800_000, activity: "walking", confidence: "high" });
+    vi.setSystemTime(T0 + 850_000);
+    await runtime.drainNativeLocationSignalsInBatches();
+    expect(motionRows().map((row) => row.t)).toEqual([iso(T0 + 800_000)]);
+  });
+
+  it("explicit logout removes the cursor and the next owner starts from its own binding", async () => {
+    h.motionRecords = [{ startMs: T0 + 60_000, activity: "walking", confidence: "high" }];
+    await signIn();
+    vi.setSystemTime(T0 + 120_000);
+    await runtime.drainNativeLocationSignalsInBatches();
+    expect(motionRows()).toHaveLength(1);
+    await signOut("logout");
+    expect(db.prepare("select key from location_store_metadata where key like 'motion_capture:%'").all()).toEqual([]);
+    expect(motionRows()).toEqual([]);
+    vi.setSystemTime(T0 + 300_000);
+    h.motionRecords.push({ startMs: T0 + 400_000, activity: "automotive", confidence: "high" });
+    await signIn(B);
+    vi.setSystemTime(T0 + 450_000);
+    await runtime.drainNativeLocationSignalsInBatches();
+    expect(motionRows().map((row) => [row.t, row.k])).toEqual([[iso(T0 + 400_000), key(B)]]);
+  });
+
+  it("queries nothing without Motion & Fitness permission and nothing for a signed-out wake", async () => {
+    h.motionStatus = "denied";
+    h.motionRecords = [{ startMs: T0 + 60_000, activity: "walking", confidence: "high" }];
+    await signIn();
+    vi.setSystemTime(T0 + 120_000);
+    await runtime.drainNativeLocationSignalsInBatches();
+    expect(h.queryActivities).not.toHaveBeenCalled();
+    h.motionStatus = "authorized";
+    await signOut("logout");
+    await learningTask()({ data: { locations: [fix(T0 + 130_000)] }, error: null });
+    expect(h.queryActivities).not.toHaveBeenCalled();
+    expect(motionRows()).toEqual([]);
   });
 });

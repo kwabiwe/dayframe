@@ -158,6 +158,10 @@ See `docs/ios-hosted-supabase-runbook.md` for the iOS/EAS setup and physical-dev
 - iOS-only mobile app.
 - Health and location data stay in Dayframe-owned tables and should be exportable/deletable before a broader beta.
 
+### Motion & Fitness schema prerequisite
+
+The server that accepts Motion & Fitness evidence requires `supabase/migrations/202610050001_location_motion_activity.sql` (local `packages/db/migrations/007_location_motion_activity.sql`) before its Preview or production deployment, and production must have it before any phone build that sends `motion_activity` is installed. It only widens the `location_evidence` kind check and adds a coordinate-free check for motion rows. Staging validation is not production authorization.
+
 ### Sync recovery schema prerequisite
 
 The bounded sync server requires `supabase/migrations/202609040001_health_sleep_resolution_link.sql` before its Preview or production deployment. It adds nullable, owner-scoped lookup provenance for logical Sleep resolution without backfilling existing events. Validate against the existing staging schema and clean ordered local setup (`packages/db/migrations/006_health_sleep_resolution_link.sql`). An exact Review receipt remains authoritative and replays without rewriting the canonical entry. Production application of this migration remains part of the separately approved release; staging validation is not production authorization.

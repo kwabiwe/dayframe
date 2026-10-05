@@ -55,6 +55,16 @@ export type LocationEngineConfig = {
   physicalStopVisitDepartureLagMaximumMs: number;
   physicalStopAbsorbExtensionMs: number;
   physicalStopAbsorbToleranceMs: number;
+  motionStillBridgeMs: number;
+  motionMinimumBlockMovingMs: number;
+  motionBoundaryToleranceMs: number;
+  motionMinimumModeMs: number;
+  motionTravelModeMinimumShare: number;
+  motionTravelModeMinimumCoverage: number;
+  motionMaximumWalkingSpeedMps: number;
+  motionMaximumRunningSpeedMps: number;
+  motionMaximumCyclingSpeedMps: number;
+  motionMaximumAutomotiveSpeedMps: number;
   rawEvidenceRetentionDays: number;
   maxEvidenceItemsPerUpload: number;
 };
@@ -161,6 +171,31 @@ export const LOCATION_ENGINE_V2_CONFIG: LocationEngineConfig = {
   // traces, stops and promoted stays otherwise agree within about three minutes.
   physicalStopAbsorbExtensionMs: 300_000,
   physicalStopAbsorbToleranceMs: 120_000,
+  // Motion & Fitness activity (Core Motion) times journeys; it never places the
+  // device. Movement separated by no more than this much stillness (a crossing,
+  // a red light on foot) is one moving block; longer stillness separates blocks.
+  motionStillBridgeMs: 120_000,
+  // A block with less movement than this (crossing a room) is not a journey.
+  motionMinimumBlockMovingMs: 60_000,
+  // A journey's moving block may begin or end this long beyond the stays' own
+  // boundaries: iOS dates Visits within a few minutes, and the walk to the car
+  // can begin before the departure it reports.
+  motionBoundaryToleranceMs: 180_000,
+  // A block travelled at least this long in a mode could have covered that
+  // mode's distance: on a short hop the walks to and from the car can outlast
+  // the drive.
+  motionMinimumModeMs: 30_000,
+  // A journey's travel mode is the fastest mode sustained for
+  // `motionMinimumModeMs` and at least this share of its movement (a short
+  // drive is mostly the walks to and from the car), when movement covers at
+  // least `motionTravelModeMinimumCoverage` of the journey.
+  motionTravelModeMinimumShare: 0.25,
+  motionTravelModeMinimumCoverage: 0.5,
+  // A moving block can only explain endpoints this far apart per second of it.
+  motionMaximumWalkingSpeedMps: 3,
+  motionMaximumRunningSpeedMps: 7,
+  motionMaximumCyclingSpeedMps: 15,
+  motionMaximumAutomotiveSpeedMps: 70,
   rawEvidenceRetentionDays: 7,
   maxEvidenceItemsPerUpload: 100
 };

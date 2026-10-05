@@ -33,6 +33,7 @@ import {
   type LocationCaptureSnapshot,
   type LocationSyncOptions
 } from "./store";
+import { captureMotionActivitySafelyUnsafe } from "./motionActivity";
 import { createSerialMutationQueue } from "./mutationQueue";
 import { MAX_LOCATION_NATIVE_DRAIN_PASSES } from "./uploadPolicy";
 
@@ -354,6 +355,13 @@ export function drainNativeLocationSignalsInBatches() {
   return withLocationCaptureLifecycle(() => drainNativeLocationSignalsInBatchesUnsafe(capture));
 }
 async function drainNativeLocationSignalsInBatchesUnsafe(captured = captureLocationOwnership()) {
+  const result = await drainNativeSignalPassesUnsafe(captured);
+  // Motion & Fitness history joins the same wake, after native signals; a
+  // failure there never fails the drain.
+  if (!result.pendingAccount) await captureMotionActivitySafelyUnsafe(await captured);
+  return result;
+}
+async function drainNativeSignalPassesUnsafe(captured: Promise<LocationCaptureSnapshot>) {
   let transferredCount = 0;
   for (let pass = 0; pass < MAX_LOCATION_NATIVE_DRAIN_PASSES; pass += 1) {
     const result = await drainNativeLocationSignalsUnsafe(100, captured);

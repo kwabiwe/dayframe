@@ -20,7 +20,9 @@ import {
   type LocationEvidence,
   type LocationRolloutMode,
   type LocationSegment,
-  type SavedPlaceForMatching
+  type SavedPlaceForMatching,
+  EMPTY_MOTION_CAPTURE_CURSOR,
+  type MotionCaptureCursor
 } from "@dayframe/shared";
 import { DAYFRAME_API_BASE } from "../config";
 import {
@@ -60,6 +62,19 @@ const ROLLOUT_MODE_KEY = "rollout_mode";
 const SEMANTIC_MODE_ACKNOWLEDGED_AT_KEY = "semantic_mode_acknowledged_at";
 const CAPTURE_BINDING_KEY = "capture_binding_v1";
 const SEMANTIC_ELIGIBILITY_PREFIX = "semantic_eligibility:";
+const MOTION_CAPTURE_PREFIX = "motion_capture:";
+
+/**
+ * Where the next Core Motion history query resumes for one capture binding.
+ * `floorMs` is the earliest activity it may record: the binding, or a later
+ * "Delete recent evidence", so deleted activity is never read back from iOS.
+ */
+export type MotionCaptureState = {
+  version: 1;
+  bindingId: string;
+  floorMs: number;
+  cursor: MotionCaptureCursor;
+};
 
 export type LocationCaptureBinding = {
   id: string;
@@ -117,6 +132,7 @@ export type LocationStoreDiagnostics = {
   captureRejectedEvidenceCounts: Record<string, number>;
   legacyUnboundDeletedCount: number;
   captureCleanupFailureCount: number;
+  motionCaptureFailureCount: number;
   lastUploadAt: string | null;
   lastServerReplayVersion: string | null;
   lastServerReplayAt: string | null;
@@ -563,12 +579,26 @@ function sanitiseEvidence(input: LocationEvidence) {
   return parsed;
 }
 
-export async function persistLocationEvidence(items: LocationEvidence[], snapshot: LocationCaptureSnapshot) {
-  return serialiseLocationMutation(() => persistLocationEvidenceUnsafe(items, snapshot));
+export async function persistLocationEvidence(items: LocationEvidence[], snapshot: LocationCaptureSnapshot,
+  options: { motionCapture?: MotionCaptureState } = {}) {
+  return serialiseLocationMutation(() => persistLocationEvidenceUnsafe(items, snapshot, options));
 }
 
-async function persistLocationEvidenceUnsafe(items: LocationEvidence[], snapshot: LocationCaptureSnapshot) {
-  if (items.length === 0) return { insertedCount: 0, duplicateCount: 0, rejectedCount: 0 };
+/** The motion cursor for the snapshot's binding: its own, or a fresh one from the binding. */
+export async function readMotionCaptureState(snapshot: LocationCaptureSnapshot): Promise<MotionCaptureState | null> {
+  const binding = snapshot.binding;
+  if (!binding) return null;
+  const fresh: MotionCaptureState = { version: 1, bindingId: binding.id, floorMs: Date.parse(binding.boundAt), cursor: EMPTY_MOTION_CAPTURE_CURSOR };
+  try {
+    const stored = JSON.parse(await metadata(`${MOTION_CAPTURE_PREFIX}${binding.accountKey}`) ?? "null") as MotionCaptureState | null;
+    return stored?.version === 1 && stored.bindingId === binding.id && Number.isFinite(stored.floorMs) && stored.cursor
+      ? { ...stored, floorMs: Math.max(stored.floorMs, fresh.floorMs) } : fresh;
+  } catch { return fresh; }
+}
+
+async function persistLocationEvidenceUnsafe(items: LocationEvidence[], snapshot: LocationCaptureSnapshot,
+  options: { motionCapture?: MotionCaptureState } = {}) {
+  if (items.length === 0 && !options.motionCapture) return { insertedCount: 0, duplicateCount: 0, rejectedCount: 0 };
   const now = new Date().toISOString();
   const expiresAt = new Date(Date.parse(now) + LOCATION_ENGINE_V2_CONFIG.rawEvidenceRetentionDays * 86_400_000).toISOString();
   const db = await database();
@@ -608,6 +638,10 @@ async function persistLocationEvidenceUnsafe(items: LocationEvidence[], snapshot
         now
       );
       insertedCount += result.changes;
+    }
+    // The motion cursor advances only with the evidence it produced.
+    if (options.motionCapture?.bindingId === binding!.id) {
+      await setMetadata(`${MOTION_CAPTURE_PREFIX}${key}`, JSON.stringify(options.motionCapture), transaction);
     }
     await recordCaptureRejections(rejections, transaction);
     if (!await readLocationCaptureConsent(owner!) || !isLocationCaptureSnapshotCurrent(snapshot)) throw new StaleLocationCaptureError();
@@ -754,7 +788,12 @@ async function prepareLocationUploadBatchUnsafe(owner?: MobileAccountOwner, sele
   );
   if (rows.length === 0) return null;
   const clientBatchId = generatedId("location-batch");
-  const evidence = rows.map((row) => LocationEvidenceSchema.parse(JSON.parse(row.evidence_json)));
+  const parsed = rows.map((row) => LocationEvidenceSchema.parse(JSON.parse(row.evidence_json)));
+  // Motion & Fitness evidence travels in batches of its own: a server without
+  // the motion schema refuses such a batch whole, and must never take location
+  // readings with it.
+  const motionBatch = parsed[0].kind === "motion_activity";
+  const evidence = parsed.filter((item) => (item.kind === "motion_activity") === motionBatch);
   const body = LocationEvidenceBatchRequestSchema.parse({
     clientBatchId,
     deviceId: current.context.deviceId,
@@ -1321,7 +1360,8 @@ export function endLocationOwnership(expected: LocationCaptureBinding | null, de
         for (const table of ["location_evidence_journal", "location_engine_state", "location_segment_snapshot", "location_upload_outbox", "location_account_context"]) {
           await transaction.runAsync(`delete from ${table} where account_key = ?`, key);
         }
-        await transaction.runAsync("delete from location_store_metadata where key = ?", `${SEMANTIC_ELIGIBILITY_PREFIX}${key}`);
+        await transaction.runAsync("delete from location_store_metadata where key in (?, ?)",
+          `${SEMANTIC_ELIGIBILITY_PREFIX}${key}`, `${MOTION_CAPTURE_PREFIX}${key}`);
       } else if (key && eligibility) {
         await setMetadata(`${SEMANTIC_ELIGIBILITY_PREFIX}${key}`, JSON.stringify(eligibility), transaction);
       }
@@ -1335,6 +1375,14 @@ export function endLocationOwnership(expected: LocationCaptureBinding | null, de
       return false;
     }
     return true;
+  });
+}
+
+/** Coordinate-free: a Motion & Fitness history query or its admission failed and will be retried. */
+export function recordMotionCaptureFailure() {
+  return serialiseLocationMutation(async () => {
+    const count = Number(await metadata("motion_capture_failure_count") ?? 0);
+    await setMetadata("motion_capture_failure_count", String(count + 1));
   });
 }
 
@@ -1362,6 +1410,13 @@ async function deleteRetainedLocationEvidenceUnsafe() {
     deletedCount = result.changes;
     await transaction.runAsync("delete from location_upload_outbox where account_key = ?", current.key);
     await transaction.runAsync("delete from location_engine_state where account_key = ?", current.key);
+    // iOS keeps a week of Motion & Fitness history: never read the deleted part back.
+    const binding = await readCaptureBinding(transaction);
+    if (binding?.accountKey === current.key) {
+      await setMetadata(`${MOTION_CAPTURE_PREFIX}${current.key}`, JSON.stringify({
+        version: 1, bindingId: binding.id, floorMs: Date.now(), cursor: EMPTY_MOTION_CAPTURE_CURSOR
+      } satisfies MotionCaptureState), transaction);
+    }
   });
   return { deletedCount };
 }
@@ -1425,6 +1480,7 @@ export async function getLocationStoreDiagnostics(): Promise<LocationStoreDiagno
     captureRejectedEvidenceCounts: parseDiagnosticCounts(await metadata("capture_rejections")),
     legacyUnboundDeletedCount: Number(await metadata("legacy_unbound_deleted_count") ?? 0),
     captureCleanupFailureCount: Number(await metadata("capture_cleanup_failure_count") ?? 0),
+    motionCaptureFailureCount: Number(await metadata("motion_capture_failure_count") ?? 0),
     lastUploadAt: owned.lastUploadAt ?? null,
     lastServerReplayVersion: owned.lastServerReplayVersion ?? null,
     lastServerReplayAt: owned.lastServerReplayAt ?? null,

@@ -136,6 +136,9 @@ export async function emitReviewSemanticSegments(
           toStaySegmentId: segment.toStaySegmentId,
           routeSampleCount: segment.routeSampleCount,
           qualificationReason: segment.qualificationReason ?? null,
+          // Only when Motion & Fitness supplied them, so other proposals' payloads do not change.
+          ...(segment.travelMode ? { travelMode: segment.travelMode } : {}),
+          ...(segment.motionSupported ? { motionSupported: true } : {}),
           continuityStatus: segment.continuityStatus,
           startedAt: segment.startedAt,
           stoppedAt: segment.stoppedAt,

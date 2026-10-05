@@ -1239,6 +1239,58 @@ async function validateFinalisationWithoutNewEvidence() {
   );
 }
 
+async function validateMotionActivityEvidence() {
+  await clearDerivedLocationState();
+  process.env.DAYFRAME_LOCATION_ROLLOUT_MODE = "v2_shadow";
+  const evidence = locationAcceptanceFixture().evidence;
+  // Driving from the fixture's last Home reading to its short stop.
+  const motion = (time: string, activity: "stationary" | "walking" | "automotive"): LocationEvidence => ({
+    clientEvidenceId: `motion-${Date.parse(`2026-07-20T${time}.000Z`)}-${activity}-high`, deviceId: DEVICE_ID,
+    algorithmVersion: LOCATION_ENGINE_V2_CONFIG.algorithmVersion, kind: "motion_activity",
+    occurredAt: `2026-07-20T${time}.000Z`, endedAt: null, latitude: null, longitude: null,
+    receivedAt: "2026-07-20T19:00:00.000Z", timeZone: "Europe/London",
+    metadata: { motionActivity: activity, motionConfidence: "high" }
+  });
+  const motionEvidence = [motion("10:30:00", "stationary"), motion("10:39:20", "walking"), motion("10:39:40", "automotive"),
+    motion("11:10:00", "stationary")];
+  await ingestLocationEvidence(batch("db-motion-activity", [...evidence, ...motionEvidence], "v2_shadow"), session);
+  const stored = await pool.query<{ accepted: boolean; coordinate: string | null; activity: string; confidence: string }>(
+    `select accepted, coordinate::text as coordinate, metadata->>'motionActivity' as activity, metadata->>'motionConfidence' as confidence
+     from location_evidence where workspace_id = $1 and user_id = $2 and evidence_type = 'motion_activity'
+     order by occurred_at`,
+    [WORKSPACE_ID, USER_ID]
+  );
+  assert.deepEqual(stored.rows.map((row) => [row.accepted, row.coordinate, row.activity, row.confidence]),
+    motionEvidence.map((item) => [true, null, item.metadata!.motionActivity, "high"]),
+    "Motion activity was not stored as accepted, coordinate-free evidence with its classification.");
+  const linked = await pool.query<{ count: number }>(
+    `select count(*)::integer as count from location_segment_evidence lse
+     join location_evidence le on le.id = lse.evidence_id
+     where le.workspace_id = $1 and le.user_id = $2 and le.evidence_type = 'motion_activity'`,
+    [WORKSPACE_ID, USER_ID]
+  );
+  assert.equal(linked.rows[0].count, 0, "Motion activity became segment lineage.");
+  const modes = await pool.query<{ travelMode: string | null }>(
+    `select metadata->>'travelMode' as "travelMode" from commute_segments
+     where workspace_id = $1 and user_id = $2 and status <> 'superseded' and metadata ? 'travelMode'`,
+    [WORKSPACE_ID, USER_ID]
+  );
+  assert.deepEqual(modes.rows, [{ travelMode: "automotive" }], "The driven commute did not persist its travel mode.");
+  const summary = await pool.query<{ motionCount: number }>(
+    `select (raw_payload->'evidenceKinds'->>'motion_activity')::integer as "motionCount" from activity_events
+     where workspace_id = $1 and user_id = $2 and client_event_id like 'location-batch:%db-motion-activity'`,
+    [WORKSPACE_ID, USER_ID]
+  );
+  assert.equal(summary.rows[0]?.motionCount, motionEvidence.length, "The coordinate-free batch summary did not count motion activity.");
+  await assert.rejects(pool.query(
+    `insert into location_evidence (workspace_id, user_id, device_id, client_evidence_id, client_batch_id, evidence_type,
+       occurred_at, coordinate, algorithm_version, time_zone, expires_at)
+     values ($1, $2, $3, 'motion-with-position', 'db-motion-position', 'motion_activity', now(),
+       ST_GeogFromText('SRID=4326;POINT(0 0)'), $4, 'Europe/London', now() + interval '1 day')`,
+    [WORKSPACE_ID, USER_ID, DEVICE_ID, LOCATION_ENGINE_V2_CONFIG.algorithmVersion]
+  ), /location_evidence_motion_coordinate_free/, "A positioned motion row was accepted.");
+}
+
 async function main() {
   try {
     if (process.argv.includes("--saved-place-quality-only")) {
@@ -1251,6 +1303,7 @@ async function main() {
     await seedOwner();
     await validateCommuteCategoryConcurrency();
     await validateOutOfOrderAndIdempotency();
+    await validateMotionActivityEvidence();
     await validateShadowToReviewCutover();
     await validateSemanticIdempotencyAndRollback();
     await validateCommuteReviewCategoryAndDescription();
@@ -1259,7 +1312,7 @@ async function main() {
     await validateFinalisationWithoutNewEvidence();
     await validateSupersededReviewReactivation();
     await validateV1Compatibility();
-    console.log("Location V2 database validation passed: ordered replay, duplicate ingest, shadow cutover, no-new-evidence finalisation, semantic idempotency, Commute category concurrency/emission/replay/confirmation, uncertainty bounds, description semantics, isolation, trusted-place and trusted-commute automation, deliberate advisory/Review-row/exact-segment contention bounds, overlap fallback, terminal-decision preservation, superseded-Review reactivation, automatic-entry deletion safety, automatic-entry idempotency, atomic rollback, concurrent retry, split, merge, incompatible-merge rejection, and V1 compatibility.");
+    console.log("Location V2 database validation passed: ordered replay, duplicate ingest, coordinate-free Motion & Fitness evidence, shadow cutover, no-new-evidence finalisation, semantic idempotency, Commute category concurrency/emission/replay/confirmation, uncertainty bounds, description semantics, isolation, trusted-place and trusted-commute automation, deliberate advisory/Review-row/exact-segment contention bounds, overlap fallback, terminal-decision preservation, superseded-Review reactivation, automatic-entry deletion safety, automatic-entry idempotency, atomic rollback, concurrent retry, split, merge, incompatible-merge rejection, and V1 compatibility.");
   } finally {
     if (process.env.KEEP_LOCATION_V2_DB_FIXTURE !== "1") {
       await pool.query("delete from workspaces where id = $1", [WORKSPACE_ID]).catch(() => undefined);

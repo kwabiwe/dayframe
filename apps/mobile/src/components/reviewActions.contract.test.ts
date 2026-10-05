@@ -54,7 +54,9 @@ describe("mobile Review action contracts", () => {
     expect(evidenceSource).toContain("<LocationReviewCorrectionEditor");
     expect(evidenceEditorSource).toContain("formatEvidenceTimeRange(evidence)");
     expect(evidenceEditorSource).toContain("showDetails={false}");
-    expect(evidenceEditorSource).toContain('evidence.segment.kind === "commute" ? "Commute"');
+    // A commute is always named Commute; Motion & Fitness may add how it was travelled.
+    expect(evidenceEditorSource).toContain('if (evidence.segment.kind !== "commute") return evidence.display.title;');
+    expect(evidenceEditorSource).toContain('return mode ? `Commute · ${mode}` : "Commute";');
     expect(evidenceEditorSource).toContain('action: "split"');
     expect(evidenceEditorSource).toContain('action: "merge"');
     expect(evidenceEditorSource).toContain('action: "record_once"');
