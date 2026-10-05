@@ -12,6 +12,8 @@ struct DayframeLocationSignal: Codable {
   let longitude: Double?
   let horizontalAccuracyMeters: Double?
   let metadata: [String: String]
+  /// Significant-change fixes only. Optional so earlier queued records still decode.
+  var speedMetersPerSecond: Double? = nil
 
   var dictionary: [String: Any] {
     var result: [String: Any] = [
@@ -24,6 +26,7 @@ struct DayframeLocationSignal: Codable {
     result["latitude"] = latitude ?? NSNull()
     result["longitude"] = longitude ?? NSNull()
     result["horizontalAccuracyMeters"] = horizontalAccuracyMeters ?? NSNull()
+    result["speedMetersPerSecond"] = speedMetersPerSecond ?? NSNull()
     return result
   }
 }
@@ -147,10 +150,35 @@ final class DayframeLocationSignalStore: @unchecked Sendable {
   private func prune(_ signals: [DayframeLocationSignal]) -> [DayframeLocationSignal] {
     let cutoff = now().addingTimeInterval(-retentionSeconds)
     let retained = signals.filter {
-      ISO8601DateFormatter().date(from: $0.occurredAt).map { $0 >= cutoff } ?? false
+      DayframeSignalTime.parse($0.occurredAt).map { $0 >= cutoff } ?? false
     }
     guard let maximumCount else { return retained }
     return Array(retained.suffix(maximumCount))
+  }
+}
+
+/// Signal timestamps. Visits keep whole seconds (their two callbacks pair on the
+/// exact arrival text); significant-change fixes and callback times keep milliseconds.
+enum DayframeSignalTime {
+  // Reused because retention parses every journal record. ISO8601DateFormatter
+  // is thread-safe, and these are never mutated after creation.
+  nonisolated(unsafe) private static let wholeSeconds = ISO8601DateFormatter()
+  nonisolated(unsafe) private static let fractionalSeconds: ISO8601DateFormatter = {
+    let formatter = ISO8601DateFormatter()
+    formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+    return formatter
+  }()
+
+  static func seconds(_ date: Date) -> String {
+    wholeSeconds.string(from: date)
+  }
+
+  static func milliseconds(_ date: Date) -> String {
+    fractionalSeconds.string(from: date)
+  }
+
+  static func parse(_ text: String) -> Date? {
+    fractionalSeconds.date(from: text) ?? wholeSeconds.date(from: text)
   }
 }
 
@@ -233,6 +261,8 @@ public final class DayframeLocationVisitService: NSObject, @preconcurrency CLLoc
         occurredAt: location.timestamp,
         coordinate: location.coordinate,
         horizontalAccuracy: location.horizontalAccuracy,
+        speed: location.speed >= 0 ? location.speed : nil,
+        millisecondPrecision: true,
         metadata: [:]
       )
     }
@@ -268,27 +298,47 @@ public final class DayframeLocationVisitService: NSObject, @preconcurrency CLLoc
     endedAt: Date? = nil,
     coordinate: CLLocationCoordinate2D? = nil,
     horizontalAccuracy: Double? = nil,
+    speed: Double? = nil,
+    millisecondPrecision: Bool = false,
     metadata: [String: String]
   ) {
-    let occurredAtText = ISO8601DateFormatter().string(from: occurredAt)
-    let endedAtText = endedAt.map { ISO8601DateFormatter().string(from: $0) }
-    let id = Self.stableSignalId(
-      kind: kind,
-      occurredAt: occurredAtText,
-      endedAt: endedAtText,
-      latitude: coordinate?.latitude,
-      longitude: coordinate?.longitude
-    )
-    DayframeLocationSignalStore.shared.append(DayframeLocationSignal(
-      id: id,
-      kind: kind,
-      occurredAt: occurredAtText,
-      endedAt: endedAtText,
-      latitude: coordinate?.latitude,
-      longitude: coordinate?.longitude,
-      horizontalAccuracyMeters: horizontalAccuracy,
-      metadata: metadata
+    DayframeLocationSignalStore.shared.append(Self.makeSignal(
+      kind: kind, occurredAt: occurredAt, endedAt: endedAt,
+      latitude: coordinate?.latitude, longitude: coordinate?.longitude,
+      horizontalAccuracy: horizontalAccuracy, speed: speed,
+      millisecondPrecision: millisecondPrecision, metadata: metadata, callbackAt: Date()
     ))
+  }
+
+  /// Builds the queued record. The callback clock is metadata, so duplicate
+  /// callbacks for the same event keep one stable id.
+  static func makeSignal(
+    kind: String,
+    occurredAt: Date,
+    endedAt: Date?,
+    latitude: Double?,
+    longitude: Double?,
+    horizontalAccuracy: Double?,
+    speed: Double?,
+    millisecondPrecision: Bool,
+    metadata: [String: String],
+    callbackAt: Date
+  ) -> DayframeLocationSignal {
+    let occurredAtText = millisecondPrecision ? DayframeSignalTime.milliseconds(occurredAt) : DayframeSignalTime.seconds(occurredAt)
+    let endedAtText = endedAt.map { DayframeSignalTime.seconds($0) }
+    var stamped = metadata
+    stamped["nativeCallbackAt"] = DayframeSignalTime.milliseconds(callbackAt)
+    return DayframeLocationSignal(
+      id: stableSignalId(kind: kind, occurredAt: occurredAtText, endedAt: endedAtText, latitude: latitude, longitude: longitude),
+      kind: kind,
+      occurredAt: occurredAtText,
+      endedAt: endedAtText,
+      latitude: latitude,
+      longitude: longitude,
+      horizontalAccuracyMeters: horizontalAccuracy,
+      metadata: stamped,
+      speedMetersPerSecond: speed
+    )
   }
 
   static func stableSignalId(

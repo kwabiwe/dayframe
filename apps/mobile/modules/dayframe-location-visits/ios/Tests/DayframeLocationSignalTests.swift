@@ -23,7 +23,9 @@ final class DayframeLocationSignalTests: XCTestCase {
     DayframeLocationSignal(
       id: id,
       kind: kind,
-      occurredAt: "2026-07-20T09:37:00Z",
+      // Relative to now: stores created without an injected clock prune records
+      // older than seven days, so a fixed date eventually expires (it did in Oct 2026).
+      occurredAt: DayframeSignalTime.seconds(Date().addingTimeInterval(-60)),
       endedAt: endedAt,
       latitude: 51.5,
       longitude: -0.12,
@@ -157,5 +159,55 @@ final class DayframeLocationSignalTests: XCTestCase {
   func testRelaunchRestorationOnlyRunsWhenMonitoringWasEnabled() {
     XCTAssertTrue(DayframeLocationVisitService.shouldRestoreMonitoring(enabled: true))
     XCTAssertFalse(DayframeLocationVisitService.shouldRestoreMonitoring(enabled: false))
+  }
+
+  func testSignificantChangeKeepsMillisecondsSpeedAndCallbackClock() throws {
+    let occurredAt = Date(timeIntervalSince1970: 1_800_000_000.123)
+    let callbackAt = Date(timeIntervalSince1970: 1_800_000_030.456)
+    let made = DayframeLocationVisitService.makeSignal(
+      kind: "significant_change", occurredAt: occurredAt, endedAt: nil, latitude: 51.5, longitude: -0.12,
+      horizontalAccuracy: 12, speed: 13.4, millisecondPrecision: true, metadata: [:], callbackAt: callbackAt
+    )
+    XCTAssertEqual(made.occurredAt, "2027-01-15T08:00:00.123Z")
+    XCTAssertEqual(made.speedMetersPerSecond, 13.4)
+    XCTAssertEqual(made.metadata["nativeCallbackAt"], "2027-01-15T08:00:30.456Z")
+    let decoded = try JSONDecoder().decode(DayframeLocationSignal.self, from: JSONEncoder().encode(made))
+    XCTAssertEqual(decoded.speedMetersPerSecond, 13.4)
+    XCTAssertEqual(made.dictionary["speedMetersPerSecond"] as? Double, 13.4)
+  }
+
+  func testVisitKeepsWholeSecondsAndCallbackClockNeverChangesItsId() {
+    let arrival = Date(timeIntervalSince1970: 1_800_000_000.789)
+    let first = DayframeLocationVisitService.makeSignal(
+      kind: "visit", occurredAt: arrival, endedAt: nil, latitude: 51.5, longitude: -0.12, horizontalAccuracy: 20,
+      speed: nil, millisecondPrecision: false, metadata: ["visitDepartureOpen": "true"], callbackAt: Date(timeIntervalSince1970: 1_800_000_100)
+    )
+    let repeated = DayframeLocationVisitService.makeSignal(
+      kind: "visit", occurredAt: arrival, endedAt: nil, latitude: 51.5, longitude: -0.12, horizontalAccuracy: 20,
+      speed: nil, millisecondPrecision: false, metadata: ["visitDepartureOpen": "true"], callbackAt: Date(timeIntervalSince1970: 1_800_000_200)
+    )
+    XCTAssertEqual(first.occurredAt, "2027-01-15T08:00:00Z")
+    XCTAssertEqual(first.id, repeated.id)
+    XCTAssertNotEqual(first.metadata["nativeCallbackAt"], repeated.metadata["nativeCallbackAt"])
+    XCTAssertNil(first.speedMetersPerSecond)
+  }
+
+  func testRecordsQueuedBeforeSpeedExistedStillDecode() throws {
+    let legacy = #"{"id":"old","kind":"significant_change","occurredAt":"2026-07-20T09:37:00Z","latitude":51.5,"longitude":-0.12,"horizontalAccuracyMeters":45,"metadata":{}}"#
+    let decoded = try JSONDecoder().decode(DayframeLocationSignal.self, from: Data(legacy.utf8))
+    XCTAssertNil(decoded.speedMetersPerSecond)
+    XCTAssertEqual(decoded.occurredAt, "2026-07-20T09:37:00Z")
+  }
+
+  func testRetentionKeepsMillisecondTimestamps() {
+    let now = Date(timeIntervalSince1970: 1_800_000_000)
+    let store = DayframeLocationSignalStore(fileURL: signalFile, retentionSeconds: 60, now: { now })
+    let recent = DayframeLocationSignal(
+      id: "recent-ms", kind: "significant_change",
+      occurredAt: DayframeSignalTime.milliseconds(now.addingTimeInterval(-30.5)),
+      endedAt: nil, latitude: nil, longitude: nil, horizontalAccuracyMeters: nil, metadata: [:]
+    )
+    store.append(recent)
+    XCTAssertEqual(store.read(limit: 100).map(\.id), ["recent-ms"])
   }
 }
