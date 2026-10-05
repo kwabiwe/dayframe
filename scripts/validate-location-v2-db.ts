@@ -1147,10 +1147,31 @@ async function validateSupersededReviewReactivation() {
     assert.deepEqual(await stayState(short.clientSegmentId),
       { status: "finalised", reviewStatus: "ignored", scope: "superseded", eventStatus: "ignored" },
       "A restored stay under the Review threshold changed its retired Review.");
-    // A later genuine entry must still make it the saved place: the retired Review is not a decision.
+    // A later genuine entry must still make it the saved place: the retired Review is not a decision. The restored
+    // unknown segment is gone from current output, so it must not linger as a second current stay.
     await ingest("short-enter-again", [callback("short-enter-again", 850, "geofence_enter")]);
-    assert((await currentStays()).some((stay) => stay.placeId === placeId),
-      "A restored stay with a retired Review blocked its saved-place replacement.");
+    const afterReplacement = await currentStays();
+    assert.equal(afterReplacement.length, 1, "A replay-retired restored stay lingered beside its replacement.");
+    assert.equal(afterReplacement[0].placeId, placeId, "A restored stay with a retired Review blocked its saved-place replacement.");
+
+    // An Ignore the user queued offline can arrive after replay retired the proposal. It is acknowledged and
+    // recorded as the user's decision, so the proposal stays ignored when its segment returns.
+    await clearDerivedLocationState();
+    await ingest("queued-parked", [fix("u0", 0, 126), fix("u1", 600, 126), fix("u2", 1_200, 126),
+      fix("v0", 1_300, 600, 10), fix("v1", 1_310, 700, 10)]);
+    const [queued] = await currentStays();
+    const queuedReview = await pool.query<{ id: string }>(
+      `select ri.id from review_items ri join stay_segments s on s.id = ri.location_segment_id
+       where s.workspace_id = $1 and s.user_id = $2 and s.client_segment_id = $3`, [WORKSPACE_ID, USER_ID, queued.clientSegmentId]);
+    await ingest("queued-enter", [callback("queued-enter", 1_100, "geofence_enter")]);
+    assert.equal((await stayState(queued.clientSegmentId)).scope, "superseded", "Replay did not retire the queued proposal.");
+    const acknowledged = await resolveLocationReviewAction(queuedReview.rows[0].id, { action: "ignore_once_location" }, session);
+    assert.equal(acknowledged.ok, true, "A queued Ignore of a retired proposal was not acknowledged.");
+    await ingest("queued-exit", [callback("queued-exit", 1_150, "geofence_exit")]);
+    const queuedAfter = await stayState(queued.clientSegmentId);
+    assert.equal(queuedAfter.reviewStatus, "ignored", "A queued Ignore was reopened when its segment returned.");
+    assert.equal(queuedAfter.scope, "once", "A queued Ignore was not recorded as the user's decision.");
+    assert.equal(queuedAfter.eventStatus, "ignored", "A queued Ignore lost its event status.");
   } finally {
     await clearDerivedLocationState();
     await pool.query("delete from places where id = $1 and workspace_id = $2", [placeId, WORKSPACE_ID]);

@@ -450,17 +450,25 @@ async function supersedeMissingSegments(
   await client.query(
     `update stay_segments set status = 'superseded', updated_at = now()
      where workspace_id = $1 and user_id = $2 and device_id = $3 and algorithm_version = $4
-       and created_from_event_id is null and continuity_status <> 'manual'
+       and continuity_status <> 'manual'
        and status in ('candidate', 'open', 'closed', 'finalised')
-       and not (client_segment_id = any($5::text[]))`,
+       and not (client_segment_id = any($5::text[]))
+       and (created_from_event_id is null or exists (
+         select 1 from review_items ri
+         where ri.workspace_id = $1 and ri.user_id = $2 and ri.location_segment_id = stay_segments.id
+           and ri.status = 'ignored' and ri.ignored_scope = '${SUPERSEDED_REVIEW_SCOPE}'))`,
     [session.workspaceId, session.userId, options.deviceId, options.algorithmVersion, stayClientIds]
   );
   await client.query(
     `update commute_segments set status = 'superseded', updated_at = now()
      where workspace_id = $1 and user_id = $2 and device_id = $3 and algorithm_version = $4
-       and created_from_event_id is null and continuity_status <> 'manual'
+       and continuity_status <> 'manual'
        and status in ('candidate', 'open', 'closed', 'finalised')
-       and not (client_segment_id = any($5::text[]))`,
+       and not (client_segment_id = any($5::text[]))
+       and (created_from_event_id is null or exists (
+         select 1 from review_items ri
+         where ri.workspace_id = $1 and ri.user_id = $2 and ri.location_segment_id = commute_segments.id
+           and ri.status = 'ignored' and ri.ignored_scope = '${SUPERSEDED_REVIEW_SCOPE}'))`,
     [session.workspaceId, session.userId, options.deviceId, options.algorithmVersion, commuteClientIds]
   );
 }
