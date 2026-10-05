@@ -228,8 +228,30 @@ describe("what an absorbing stop may claim (review round 1)", () => {
     expect(bridges(input)).toBe(false);
   });
 
-  it("still lets an accurate Visit at the place support the silence", () => {
-    expect(bridges(compact([...gap(), spanning(0, 5)]))).toBe(true);
+  // Review round 4: only a Visit that arrived within this physical stop supports its silences.
+  const OTHER_ID = "10000000-0000-4000-8000-0000000000d6";
+  const visitAt = (id: string, from: number, to: number | null, x: number) =>
+    point(id, from, x, 0, { kind: "visit", endedAt: to == null ? null : at(to), horizontalAccuracyMeters: 5, speedMetersPerSecond: null });
+  const beside = (evidence: LocationEvidence[], other = true) => compact([...evidence, ...gap()],
+    [{ ...venue, radiusMeters: 80 }, ...(other ? [{ ...venue, id: OTHER_ID, name: "Other", longitude: east(110), radiusMeters: 20 }] : [])]);
+
+  it("lets an accurate Visit arriving within the stop support a silence the stop newly claims", () => {
+    const input = beside([visitAt("visit", 5, 80, 100)]);
+    expect(bridges(withoutAbsorption(input))).toBe(false);
+    const absorbed = stays(input);
+    expect(absorbed).toEqual([expect.objectContaining({ formation: "physical_stop", placeId: VENUE_ID })]);
+    expect(bridges(input)).toBe(true);
+  });
+
+  it("never lets an earlier episode's Visit support the stop's silences", () => {
+    // Visited Other from 09:30, then left (the approach at 10:00): that Visit's end says nothing about the Venue hole.
+    expect(bridges(withoutAbsorption(beside([visitAt("earlier", -30, 80, 100)])))).toBe(false);
+    expect(bridges(beside([visitAt("earlier", -30, 80, 100)]))).toBe(false);
+    const pair = beside([visitAt("earlier-open", -30, null, 100), visitAt("earlier-done", -30, 80, 100),
+      point("earlier-entry", -29.8, 0, 0, { kind: "geofence_enter", savedPlaceId: OTHER_ID, latitude: null, longitude: null,
+        horizontalAccuracyMeters: null, speedMetersPerSecond: null })]);
+    expect(bridges(withoutAbsorption(pair))).toBe(false);
+    expect(bridges(pair)).toBe(false);
   });
 
   it("keeps a fragment's corroborated arrival bounds when the stop's estimate ties its start", () => {
