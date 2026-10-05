@@ -22,6 +22,7 @@ import {
 } from "@dayframe/shared";
 import type pg from "pg";
 import type { RequestSession } from "../session";
+import { reviewLeavesSegmentToReplay, SUPERSEDED_REVIEW_SCOPE } from "./location-review-supersession";
 
 type EvidenceRow = {
   id: string;
@@ -305,7 +306,7 @@ async function excludeProtectedReplacements(
              and not exists (select 1 from review_items ri where ${scalabilityProfile
                ? "ri.workspace_id = $1 and ri.user_id = $2"
                : "ri.workspace_id = s.workspace_id and ri.user_id = s.user_id"}
-               and ri.location_segment_id = s.id and ri.status = 'open')))
+               and ri.location_segment_id = s.id and ${reviewLeavesSegmentToReplay("ri")})))
          order by s.id, le.client_evidence_id for update of s`;
       });
       // OFFSET 0 is an optimization boundary, not a result cap: look up the
@@ -375,7 +376,7 @@ async function decidedStayBounds(
      where s.workspace_id = $1 and s.user_id = $2 and s.device_id = $3 and s.client_segment_id = any($4::text[])
        and (s.continuity_status = 'manual' or (s.created_from_event_id is not null and not exists (
          select 1 from review_items ri
-         where ri.workspace_id = $1 and ri.user_id = $2 and ri.location_segment_id = s.id and ri.status = 'open')))
+         where ri.workspace_id = $1 and ri.user_id = $2 and ri.location_segment_id = s.id and ${reviewLeavesSegmentToReplay("ri")})))
      order by s.client_segment_id`,
     [session.workspaceId, session.userId, options.deviceId, clientSegmentIds]
   );
@@ -449,17 +450,25 @@ async function supersedeMissingSegments(
   await client.query(
     `update stay_segments set status = 'superseded', updated_at = now()
      where workspace_id = $1 and user_id = $2 and device_id = $3 and algorithm_version = $4
-       and created_from_event_id is null and continuity_status <> 'manual'
+       and continuity_status <> 'manual'
        and status in ('candidate', 'open', 'closed', 'finalised')
-       and not (client_segment_id = any($5::text[]))`,
+       and not (client_segment_id = any($5::text[]))
+       and (created_from_event_id is null or exists (
+         select 1 from review_items ri
+         where ri.workspace_id = $1 and ri.user_id = $2 and ri.location_segment_id = stay_segments.id
+           and ri.status = 'ignored' and ri.ignored_scope = '${SUPERSEDED_REVIEW_SCOPE}'))`,
     [session.workspaceId, session.userId, options.deviceId, options.algorithmVersion, stayClientIds]
   );
   await client.query(
     `update commute_segments set status = 'superseded', updated_at = now()
      where workspace_id = $1 and user_id = $2 and device_id = $3 and algorithm_version = $4
-       and created_from_event_id is null and continuity_status <> 'manual'
+       and continuity_status <> 'manual'
        and status in ('candidate', 'open', 'closed', 'finalised')
-       and not (client_segment_id = any($5::text[]))`,
+       and not (client_segment_id = any($5::text[]))
+       and (created_from_event_id is null or exists (
+         select 1 from review_items ri
+         where ri.workspace_id = $1 and ri.user_id = $2 and ri.location_segment_id = commute_segments.id
+           and ri.status = 'ignored' and ri.ignored_scope = '${SUPERSEDED_REVIEW_SCOPE}'))`,
     [session.workspaceId, session.userId, options.deviceId, options.algorithmVersion, commuteClientIds]
   );
 }
@@ -544,9 +553,12 @@ async function retireOpenReviewsForMissingSegments(
       where workspace_id = $1 and user_id = $2 and created_from_event_id = any($3::uuid[])
         and continuity_status <> 'manual'`, [session.workspaceId, session.userId, eventIds]);
   }
+  // `ignored_scope = 'superseded'` marks replay's own retirement, never a user
+  // decision (users ignore 'once' or by 'source'): if the segment returns, its
+  // row stays mutable and emission reopens this Review (reopenSupersededReviews).
   await client.query(
     `update review_items
-     set status = 'ignored', resolved_at = now(),
+     set status = 'ignored', resolved_at = now(), ignored_scope = '${SUPERSEDED_REVIEW_SCOPE}',
          notes = concat_ws(' ', nullif(notes, ''), 'Superseded by corrected location evidence replay.')
      where workspace_id = $1 and user_id = $2 and id = any($3::uuid[]) and status = 'open'`,
     [session.workspaceId, session.userId, reviewIds]
@@ -581,7 +593,7 @@ async function lockAndPartitionSegments<T extends {clientSegmentId: string}>(
               created_from_event_id is not null and not exists (
                 select 1 from review_items
                 where workspace_id = $1 and user_id = $2
-                  and location_segment_id = ${table}.id and status = 'open'
+                  and location_segment_id = ${table}.id and ${reviewLeavesSegmentToReplay("review_items")}
               ) as "preservesManualCorrection"
        from ${table}
        where workspace_id = $1 and user_id = $2 and device_id = $3 and client_segment_id = any($4::text[])
