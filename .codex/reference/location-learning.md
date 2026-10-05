@@ -72,13 +72,13 @@ Temporal invariants:
   elsewhere; one still stray fix just outside is not leaving), or when it
   stayed there at least `savedPlaceMinimumDwellMs` before it was next seen
   leaving (an early-dated return Visit is followed by approach fixes within
-  three minutes), or when it had arrived first (nothing away in the three
-  minutes before it, or the last two independent accurate observations away
-  before it approached; a mirror is the same observation and broad readings
-  are too noisy) and the readings
-  after it move at least 100 m farther away (a departure; after an early-dated
-  return Visit they approach instead). Any of these, or an accurate fix at the
-  origin that is not moving, ends the excursion (for re-reported exits too), so later presence
+  three minutes), or when it was then seen away and not back at the place within three
+  minutes (a later sign of being there, or the destination stay when the trip
+  returns there): iOS dates an arrival Visit at most that early, so an
+  early-dated return Visit is always followed by the arrival, while presence
+  before a departure is not, even when the outbound leg went uncaptured. Any
+  of these, or an accurate fix at the origin that is not moving, ends the
+  excursion (for re-reported exits too), so later presence
   there marks departure again; otherwise it can be the return, and state
   snapshots never count. In a same-place round trip a return Visit or a
   re-reported exit used to become the "departure", shrinking the trip to

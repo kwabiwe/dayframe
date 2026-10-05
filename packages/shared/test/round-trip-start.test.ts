@@ -711,6 +711,49 @@ describe("departures after a finished walk (review round 9)", () => {
     }
   });
 
+  // Review round 13: Home presence followed by a drive whose outbound leg went uncaptured is a departure.
+  const brief = (work: boolean, kind: "entry" | "visit" | "broad") => withWork([still("home-0", 0, 0), still("home-1", 10, 0), still("home-2", 18, 0),
+    geofence("walk-exit", 20, "geofence_exit"), e("walk-a", 25, 500, { speedMetersPerSecond: 1.35 }), e("walk-b", 30, 900, { speedMetersPerSecond: 1.35 }),
+    e("walk-c", 35, 800, { speedMetersPerSecond: 1.35 }),
+    kind === "entry" ? geofence("home-return", 39, "geofence_enter") : kind === "visit" ? visit("home-return", 39) : still("home-return", 39, 0, { horizontalAccuracyMeters: 100 }),
+    ...(work ? [e("drive-a", 41, 1_600), e("drive-b", 42, 2_100), e("drive-c", 43, 2_600), still("work-0", 44, 3_000), still("work-1", 54, 3_000), still("work-2", 64, 3_000)]
+      : [e("drive-a", 42, 1_800), e("drive-b", 43, 1_500), e("drive-c", 44, 700), e("drive-d", 45, 300), geofence("drive-return", 46, "geofence_enter"),
+        still("home-3", 46.5, 0), still("home-4", 56.5, 0), still("home-5", 66.5, 0)])], work);
+
+  it.each(["entry", "visit", "broad"] as const)("starts a round trip at Home presence before a drive with no outbound capture (%s)", (kind) => {
+    expect(commutes(brief(false, kind))).toEqual([expect.objectContaining({ startedAt: at(39) })]);
+  });
+
+  it.each(["visit", "broad"] as const)("starts it there when Home is a learned place too (%s)", (kind) => {
+    const value = brief(false, kind);
+    const home = value.savedPlaces.shift()!;
+    value.acceptedLearnedPlaces = [{ ...home, accepted: true }];
+    value.evidence = value.evidence.filter((item) => !item.kind.startsWith("geofence_"));
+    expect(commutes(value)).toEqual([expect.objectContaining({ startedAt: at(39) })]);
+  });
+
+  it("keeps a two-minute drive with no outbound capture Review-only", () => {
+    const value = withWork([still("home-0", 0, 0), still("home-1", 10, 0), still("home-2", 18, 0), geofence("walk-exit", 20, "geofence_exit"),
+      e("walk-a", 25, 500, { speedMetersPerSecond: 1.35 }), e("walk-b", 30, 900, { speedMetersPerSecond: 1.35 }), e("walk-c", 35, 800, { speedMetersPerSecond: 1.35 }),
+      geofence("home-return", 39, "geofence_enter"), e("drive-a", 40.4, 1_900), e("drive-b", 40.55, 1_810), e("drive-c", 40.7, 1_730),
+      still("work-0", 41, 1_500), still("work-1", 51, 1_500), still("work-2", 61, 1_500)], true);
+    value.savedPlaces[1] = { ...value.savedPlaces[1], latitude: north(1_500) };
+    const trips = commutes(value);
+    expect(trips).toEqual([expect.objectContaining({ startedAt: at(39) })]);
+    expect(assessAutomaticCommuteRoute(trips[0])).toMatchObject({ eligible: false, reason: "short_journey_review_only" });
+  });
+
+  it("keeps such a drive when the walk began over six hours earlier", () => {
+    const value = brief(false, "entry");
+    value.processingAt = at(1_000);
+    value.evidence = value.evidence.map((item) => {
+      const minutes = (Date.parse(item.occurredAt) - Date.parse(at(0))) / 60_000;
+      const shifted = minutes >= 35 ? minutes + 400 : minutes;
+      return { ...item, occurredAt: at(shifted), sourceTimestamp: at(shifted), receivedAt: at(shifted + 1) };
+    });
+    expect(commutes(value)).toEqual([expect.objectContaining({ startedAt: at(439) })]);
+  });
+
   it("does not let speedless mirrors turn two still stray fixes into renewed movement", () => {
     // Each stray's significant-change mirror sorts first at the same time and carries the implied speed from the route.
     const evidence = [still("home-0", 0, 0), still("home-1", 10, 0), geofence("exit", 20, "geofence_exit"), e("out-0", 21, 500), e("out-1", 22, 1_000),
