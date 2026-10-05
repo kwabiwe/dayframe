@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { assessAutomaticCommuteRoute } from "../src/location/automaticPolicy";
 import { LOCATION_ENGINE_V2_CONFIG as config } from "../src/location/config";
 import { physicalStopAt, physicalStopFixture, PHYSICAL_STOP_PICKUP } from "../src/location/physicalStopFixture";
 import { runLocationEngine } from "../src/location/segmenter";
@@ -494,6 +495,58 @@ describe("presence at Home just before leaving after a quiet spell (review round
       e("home-2", 74.3, 0, { speedMetersPerSecond: 0 }), e("home-3", 85, 0, { speedMetersPerSecond: 0 }), e("home-4", 95, 0, { speedMetersPerSecond: 0 })];
     const trips = commutes(input(evidence, 300));
     expect(trips.some((trip) => trip.startedAt <= at(21) && trip.stoppedAt! >= at(73))).toBe(false);
+  });
+});
+
+describe("presence at Home after a stray fix outside or a finished walk (review round 8)", () => {
+  const WORK = { id: "10000000-0000-4000-8000-0000000000f2", name: "Work", latitude: north(3_000), longitude: 0, radiusMeters: 100, loggingEnabled: true };
+  const still = (id: string, minutes: number, metres: number, patch: Partial<LocationEvidence> = {}) =>
+    e(id, minutes, metres, { speedMetersPerSecond: 0, ...patch });
+
+  // One still fix 140 m out shortly before the last sign of Home is a stray, not the device leaving.
+  it.each([
+    ["a broad fix", still("last-home", 130, 0, { horizontalAccuracyMeters: 100 })],
+    ["a Visit", homeVisit("last-home", 130)],
+    ["an entry", geofence("last-home", 130, "geofence_enter")]
+  ])("starts a drive to Work at %s at Home after a stray fix outside", (_label, last) => {
+    const value = input([still("home-0", 0, 0), still("home-1", 10, 0), still("stray-before-leaving", 120, 140), last,
+      e("route-0", 131, 300), e("route-1", 132, 1_000), e("route-2", 133, 2_000), e("route-3", 134, 2_700),
+      still("work-0", 136, 3_000), still("work-1", 146, 3_000), still("work-2", 156, 3_000)], 300);
+    value.savedPlaces.push(WORK);
+    expect(commutes(value)).toEqual([expect.objectContaining({ startedAt: at(130), stoppedAt: at(136) })]);
+  });
+
+  it.each(["Home", "Work"] as const)("keeps a drive to %s after seven quiet hours and a stray fix", (destination) => {
+    const departure = 430;
+    const route = destination === "Home" ? [[1, 300], [2, 1_000], [3, 2_000], [5, 1_600], [7, 1_000], [9, 300]] : [[1, 300], [2, 1_000], [3, 2_000], [4, 2_700]];
+    const end = destination === "Home" ? 0 : 3_000;
+    const value = input([still("home-0", 0, 0), still("home-1", 10, 0), still("still-outlier", departure - 10, 140),
+      still("last-home", departure, 0, { horizontalAccuracyMeters: 100 }),
+      ...route.map(([minutes, metres], index) => e(`route-${index}`, departure + minutes, metres)),
+      still("end-0", departure + 11, end), still("end-1", departure + 21, end), still("end-2", departure + 31, end)], departure + 200);
+    if (destination === "Work") value.savedPlaces.push(WORK);
+    expect(commutes(value)).toEqual([expect.objectContaining({ startedAt: at(departure), stoppedAt: at(departure + 11) })]);
+  });
+
+  it.each([4, null])("starts a drive at the last sign of Home after a finished walk and a quiet spell (route accuracy %s)", (accuracy) => {
+    // The walk home is seen by a broad fix and followed by an hour and a half at Home: that excursion is over.
+    const value = input([still("home-0", 0, 0), still("home-1", 10, 0), geofence("walk-exit", 20, "geofence_exit"),
+      e("walk-0", 25, 500, { speedMetersPerSecond: 1.35 }), e("walk-1", 30, 900, { speedMetersPerSecond: 1.35 }), e("walk-2", 35, 400, { speedMetersPerSecond: 1.35 }),
+      still("walk-return", 39, 0, { horizontalAccuracyMeters: 100 }), still("last-home", 129, 0, { horizontalAccuracyMeters: 100 }),
+      ...[[1, 300], [2, 1_000], [3, 2_000], [4.5, 1_600], [6, 1_000], [8, 300]].map(([minutes, metres], index) =>
+        e(`drive-${index}`, 129 + minutes, metres, { horizontalAccuracyMeters: accuracy })),
+      still("return-0", 139, 0), still("return-1", 149, 0), still("return-2", 159, 0)]);
+    expect(commutes(value)).toEqual([expect.objectContaining({ startedAt: at(129), stoppedAt: at(139) })]);
+  });
+
+  it("keeps a short drive after a stray fix short enough to stay Review-only", () => {
+    const value = input([still("home-0", 0, 0), still("home-1", 10, 0), still("still-jitter", 11, 140), still("last-home", 14, 0, { horizontalAccuracyMeters: 100 }),
+      e("route-0", 14.5, 300), e("route-1", 15.1, 700), e("route-2", 15.7, 1_100),
+      still("work-0", 16.3, 1_500), still("work-1", 26.3, 1_500), still("work-2", 36.3, 1_500)]);
+    value.savedPlaces.push({ ...WORK, latitude: north(1_500) });
+    const trips = commutes(value);
+    expect(trips).toEqual([expect.objectContaining({ startedAt: at(14), stoppedAt: at(16.3) })]);
+    expect(assessAutomaticCommuteRoute(trips[0])).toMatchObject({ eligible: false, reason: "short_journey_review_only" });
   });
 });
 

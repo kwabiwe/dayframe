@@ -65,10 +65,14 @@ Temporal invariants:
   exit always counts, even when its receipt time trails the first fix away
   after a capture gap. iOS also dates a return's arrival Visit before the car
   stops, so a Visit, entry or broad fix at the origin marks departure only
-  before the trip was seen away (any reading not matching the origin), or
-  when more than `savedPlaceQuietGapMaxMs` passed before the device was next
-  seen away (it stayed home in between); otherwise it can be the return, and
-  state snapshots never count. In a same-place round trip a return Visit or a
+  before the device was seen leaving (a reading away that is moving or at
+  least `commuteSamePlaceMinimumExcursionMeters` from the origin, or a Visit
+  elsewhere; one still stray fix just outside is not leaving), or when more
+  than `savedPlaceQuietGapMaxMs` passed before it was next seen leaving (it
+  stayed home in between). Either that long stay or an accurate fix at the
+  origin that is not moving ends the excursion, so later presence there marks
+  departure again; otherwise it can be the return, and state snapshots never
+  count. In a same-place round trip a return Visit or a
   re-reported exit used to become the "departure", shrinking the trip to
   seconds so the whole outing was discarded. A round trip between stays at
   the same known place (saved or learned) is not claimed when, after its

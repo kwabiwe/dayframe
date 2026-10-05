@@ -114,15 +114,23 @@ function latestDepartureSupport(stay: StaySegment, stayEvidence: ClassifiedEvide
   let excursion = false;
   let seenAway = false;
   let previousMs: number | null = null;
-  // When the device is next observed away after each gap item (lookahead).
+  // Evidence that the device left: a reading away that is moving or far from the
+  // place, or a Visit elsewhere. One still reading just outside (a stray fix) is not.
+  const leftPlace = (item: ClassifiedEvidence) => {
+    const point = evidencePoint(item);
+    if (snapshots.has(item) || evidenceMatchesStay(item, stay) || point == null) return false;
+    const speed = item.evidence.speedMetersPerSecond;
+    return item.evidence.kind === "visit" ||
+      speed != null && Number.isFinite(speed) && speed >= config.movementSpeedThresholdMps ||
+      centre != null && distanceMeters(centre, point) >= config.commuteSamePlaceMinimumExcursionMeters;
+  };
+  // When the device is next seen leaving after each gap item (lookahead).
   const nextAwayMs = new Map<ClassifiedEvidence, number>();
   let upcomingAwayMs = Number.POSITIVE_INFINITY;
   for (let index = evidence.length - 1; index >= 0; index -= 1) {
     const item = evidence[index];
     nextAwayMs.set(item, upcomingAwayMs);
-    if (!snapshots.has(item) && !evidenceMatchesStay(item, stay) && evidencePoint(item) != null) {
-      upcomingAwayMs = Date.parse(item.evidence.occurredAt);
-    }
+    if (leftPlace(item)) upcomingAwayMs = Date.parse(item.evidence.occurredAt);
   }
   const step = (item: ClassifiedEvidence, inGap: boolean) => {
     const atMs = Date.parse(item.evidence.occurredAt);
@@ -130,7 +138,7 @@ function latestDepartureSupport(stay: StaySegment, stayEvidence: ClassifiedEvide
     previousMs = atMs;
     if (snapshots.has(item)) return;
     if (!evidenceMatchesStay(item, stay)) {
-      if (inGap && evidencePoint(item) != null) seenAway = true;
+      if (inGap && leftPlace(item)) seenAway = true;
       return;
     }
     const { kind } = item.evidence;
@@ -138,16 +146,18 @@ function latestDepartureSupport(stay: StaySegment, stayEvidence: ClassifiedEvide
       if (inGap) latest = item;
       // A fix moving through the place's band as the car leaves is not being back.
       const speed = item.evidence.speedMetersPerSecond ?? item.impliedSpeedMetersPerSecond;
-      if (speed == null || !Number.isFinite(speed) || speed < config.movementSpeedThresholdMps) excursion = false;
+      if (speed == null || !Number.isFinite(speed) || speed < config.movementSpeedThresholdMps) excursion = seenAway = false;
     } else if (kind === "geofence_enter" || kind === "visit" || evidencePoint(item) != null) {
       // A Visit, entry or broad fix at the place is where the device was before
-      // leaving when the trip had not been seen away yet, or when it stayed
+      // leaving when it had not been seen leaving yet, or when it stayed
       // unobserved there for longer than `savedPlaceQuietGapMaxMs` before it was
-      // next seen away. Otherwise it is the return (iOS dates an arrival Visit
-      // before the car stops, approach fixes then follow within seconds).
+      // next seen leaving (which also ends that excursion). Otherwise it is the
+      // return (iOS dates an arrival Visit before the car stops, approach fixes
+      // then follow within seconds).
       const stayedBefore = nextAwayMs.get(item)! - atMs > config.savedPlaceQuietGapMaxMs &&
         Number.isFinite(nextAwayMs.get(item)!);
       if (inGap && (!seenAway || stayedBefore)) latest = item;
+      if (stayedBefore) seenAway = false;
       if (kind === "geofence_enter" || kind === "visit") excursion = false;
     } else if (kind === "geofence_exit") {
       if (excursion && inGap && farFrom(centre, atMs)) return;
