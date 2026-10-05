@@ -4,7 +4,7 @@ import { LOCATION_ENGINE_V2_CONFIG as config } from "../src/location/config";
 import { detectPhysicalStops } from "../src/location/physicalStops";
 import { runLocationEngine } from "../src/location/segmenter";
 import type { CommuteSegment, LocationEngineInput, StaySegment } from "../src/location/types";
-import { PHYSICAL_STOP_PICKUP as PICKUP, physicalStopFixture, type PhysicalStopShape as StopShape } from "../src/location/physicalStopFixture";
+import { PHYSICAL_STOP_HOME_ID, PHYSICAL_STOP_PICKUP as PICKUP, physicalStopFixture, type PhysicalStopShape as StopShape } from "../src/location/physicalStopFixture";
 import { shortAt, shortJourneysFixture } from "./fixtures/shortJourneys";
 
 function run(input: LocationEngineInput) {
@@ -228,5 +228,157 @@ describe("physical stops", () => {
     const input = physicalStopFixture(PICKUP);
     input.evidence.forEach((e) => { if (e.clientEvidenceId.startsWith("slow-")) e.isSimulated = true; });
     expect(detectPhysicalStops(runLocationEngine(input).acceptedEvidence, config)).toEqual([]);
+  });
+
+  // 30 Sep: a parked phone left one stationary fix and then nothing for 28 minutes.
+  // The completed Visit spanned it and the drive resumed 55 s after its reported
+  // departure; the accurate arrival callback was taken while still moving.
+  const parked = (patch: Partial<StopShape> = {}) => shape({
+    visit: [670_000, 2_430_000], slowAt: [790_000], slowSpeed: 0, departAt: 2_485_000, returnAt: 2_570_000, ...patch
+  });
+  const withMovingArrivalCallback = (input: LocationEngineInput) => {
+    // The first fix after the silence is already well clear of the stop.
+    const depart = input.evidence.find((item) => item.clientEvidenceId === "depart");
+    if (depart) depart.latitude = 0.0065;
+    const completion = input.evidence.find((item) => item.clientEvidenceId === "stop-visit");
+    if (!completion) return input;
+    input.evidence.push({ ...completion, clientEvidenceId: "stop-visit-arrival", endedAt: null, horizontalAccuracyMeters: 5,
+      latitude: completion.latitude! - 265 / 111_195, metadata: { visitDepartureOpen: true } });
+    return input;
+  };
+  const parkedInput = (patch: Partial<StopShape> = {}) => withMovingArrivalCallback(physicalStopFixture(parked(patch)));
+  const geofenceAt = (input: LocationEngineInput, ms: number, kind: "geofence_enter" | "geofence_exit") => {
+    const anchor = input.evidence.find((item) => item.clientEvidenceId === "slow-0")!;
+    input.evidence.push({ ...anchor, clientEvidenceId: `geofence-${ms}`, kind, occurredAt: shortAt(ms), sourceTimestamp: shortAt(ms),
+      latitude: null, longitude: null, horizontalAccuracyMeters: null, speedMetersPerSecond: null, savedPlaceId: anchor.savedPlaceId ?? null });
+    return input;
+  };
+
+  it("carries a parked stop through silence on a long Visit confirmed by the departure", () => {
+    {
+      const { physical, trips, stays } = run(parkedInput());
+      expect(physical).toHaveLength(1);
+      expect(physical[0]).toMatchObject({
+        startedAt: shortAt(675_000), stoppedAt: shortAt(2_430_000),
+        stopLowerBoundAt: shortAt(790_000), stopUpperBoundAt: shortAt(2_485_000),
+        placeMatchKind: "unknown", continuityStatus: "supported_by_visit"
+      });
+      // Long enough to be its own visit: the round trip splits around it.
+      expect(trips).toHaveLength(2);
+      expect(trips.every((trip) => !trip.stops)).toBe(true);
+      expect(stays.filter((stay) => stay.placeMatchKind === "unknown")).toEqual(physical);
+    }
+  });
+
+  it.each([
+    ["a geofence entry inside the silence", geofenceAt(parkedInput(), 1_500_000, "geofence_enter")],
+    ["a geofence exit inside the silence", geofenceAt(parkedInput(), 1_500_000, "geofence_exit")],
+    // Measured from the last observed movement (the 675 s parking fix), not the Visit start.
+    ["a Visit shorter than iOS's overstatement allowance", parkedInput(({
+      visit: [670_000, 675_000 + config.physicalStopVisitCarriedMinimumMs - 1_000], departAt: 675_000 + config.physicalStopVisitCarriedMinimumMs + 3_000,
+      returnAt: 675_000 + config.physicalStopVisitCarriedMinimumMs + 90_000 }))],
+    // Review finding: a Visit that began during the Home stay, before the outbound drive.
+    ["a stale Visit that began before the drive (one fix)", parkedInput({ visit: [100_000, 967_000], slowAt: [760_000], departAt: 971_000, returnAt: 1_055_000 })],
+    ["a stale Visit that began before the drive (fixes one second apart)",
+      parkedInput({ visit: [100_000, 1_042_000], slowAt: [900_000, 901_000], departAt: 1_046_000, returnAt: 1_130_000 })],
+    ["a departure long after the Visit ended", parkedInput(({ departAt: 2_430_000 + config.physicalStopVisitDepartureLagMaximumMs + 1_000,
+      returnAt: 2_430_000 + config.physicalStopVisitDepartureLagMaximumMs + 90_000 }))],
+    ["a departure long before the Visit ended", parkedInput(({ departAt: 2_430_000 - config.physicalStopVisitDepartureLagMaximumMs - 1_000,
+      returnAt: 2_430_000 - config.physicalStopVisitDepartureLagMaximumMs + 90_000 }))],
+    ["no Visit", parkedInput({ visit: null })]
+  ])("does not carry one fix through silence with %s", (_label, input) => {
+    const { physical, stays } = run(input);
+    expect(physical).toEqual([]);
+    expect(stays.filter((stay) => stay.placeMatchKind === "unknown")).toEqual([]);
+  });
+
+  it("carries a Visit of exactly the allowance after the last observed movement", () => {
+    const end = 675_000 + config.physicalStopVisitCarriedMinimumMs;
+    const { physical } = run(parkedInput({ visit: [670_000, end], departAt: end + 3_000, returnAt: end + 90_000 }));
+    expect(physical).toHaveLength(1);
+    expect(physical[0].stoppedAt).toBe(shortAt(end));
+  });
+
+  it("ignores a same-region registration snapshot pair inside the silence (review finding)", () => {
+    const snapshot = geofenceAt(geofenceAt(parkedInput(), 1_500_000, "geofence_exit"), 1_501_000, "geofence_enter");
+    snapshot.evidence.filter((item) => item.clientEvidenceId.startsWith("geofence-")).forEach((item) => { item.savedPlaceId = PHYSICAL_STOP_HOME_ID; });
+    expect(run(snapshot).physical).toHaveLength(1);
+    // Unpaired, or paired across different regions, each callback is still a crossing.
+    const crossing = geofenceAt(parkedInput(), 1_500_000, "geofence_enter");
+    crossing.evidence.filter((item) => item.clientEvidenceId.startsWith("geofence-")).forEach((item) => { item.savedPlaceId = PHYSICAL_STOP_HOME_ID; });
+    expect(run(crossing).physical).toEqual([]);
+    const otherRegion = geofenceAt(geofenceAt(parkedInput(), 1_500_000, "geofence_exit"), 1_501_000, "geofence_enter");
+    const [exit, enter] = otherRegion.evidence.filter((item) => item.clientEvidenceId.startsWith("geofence-"));
+    exit.savedPlaceId = PHYSICAL_STOP_HOME_ID;
+    enter.savedPlaceId = "10000000-0000-4000-8000-000000000099";
+    expect(run(otherRegion).physical).toEqual([]);
+  });
+
+  it.each([
+    ["replaces the departure fix", 2_475_000, 2_480_000],
+    ["precedes the departure fix by seconds", 2_480_000, 2_484_000]
+  ])("bounds a carried stop by a Visit elsewhere that %s (review finding)", (_label, from, to) => {
+    const input = parkedInput();
+    const anchor = input.evidence.find((item) => item.clientEvidenceId === "slow-0")!;
+    input.evidence.push({ ...anchor, clientEvidenceId: "visit-elsewhere", kind: "visit", occurredAt: shortAt(from), sourceTimestamp: shortAt(from),
+      endedAt: shortAt(to), latitude: 0.0065, horizontalAccuracyMeters: 5, speedMetersPerSecond: null });
+    const { physical } = run(input);
+    expect(physical).toHaveLength(1);
+    expect(physical[0]).toMatchObject({ stoppedAt: shortAt(2_430_000), stopUpperBoundAt: shortAt(from) });
+  });
+
+  const homeTransitions = (input: LocationEngineInput, transitions: Array<[number, "geofence_enter" | "geofence_exit"]>) => {
+    for (const [ms, kind] of transitions) geofenceAt(input, ms, kind);
+    input.evidence.filter((item) => item.clientEvidenceId.startsWith("geofence-")).forEach((item) => { item.savedPlaceId = PHYSICAL_STOP_HOME_ID; });
+    return input;
+  };
+
+  it("pairs snapshot callbacks disjointly so a surplus crossing still vetoes (re-review finding)", () => {
+    expect(run(homeTransitions(parkedInput(), [[1_500_000, "geofence_exit"], [1_501_000, "geofence_enter"], [1_502_000, "geofence_exit"]])).physical).toEqual([]);
+    expect(run(homeTransitions(parkedInput(), [[1_500_000, "geofence_enter"], [1_501_000, "geofence_exit"], [1_502_000, "geofence_enter"]])).physical).toEqual([]);
+    // A pair straddling the last fix is still one snapshot.
+    expect(run(homeTransitions(parkedInput(), [[788_000, "geofence_exit"], [791_000, "geofence_enter"]])).physical).toHaveLength(1);
+  });
+
+  it("does not carry through a credible Visit elsewhere already in progress at the last fix (re-review finding)", () => {
+    const input = parkedInput();
+    const anchor = input.evidence.find((item) => item.clientEvidenceId === "slow-0")!;
+    input.evidence.push({ ...anchor, clientEvidenceId: "visit-elsewhere-spanning", kind: "visit", occurredAt: shortAt(760_000), sourceTimestamp: shortAt(760_000),
+      endedAt: shortAt(1_100_000), latitude: anchor.latitude! - 279 / 111_195, horizontalAccuracyMeters: 5, speedMetersPerSecond: null });
+    const output = runLocationEngine(input);
+    expect(detectPhysicalStops(output.acceptedEvidence, config)).toEqual([]);
+    expect(run(input).physical).toEqual([]);
+  });
+
+  it("does not treat a crossing on the drive away, before iOS reports the Visit's end, as movement while stopped", () => {
+    // Departure at 2 400 s; iOS reports the Visit ending 30 s later. The drive away crosses a region at 2 410 s.
+    const leaving = () => parkedInput({ departAt: 2_400_000, returnAt: 2_490_000 });
+    const afterDeparture = geofenceAt(leaving(), 2_410_000, "geofence_enter");
+    expect(run(afterDeparture).physical).toEqual([expect.objectContaining({
+      startedAt: shortAt(675_000), stoppedAt: shortAt(2_400_000)
+    })]);
+    // The same crossing before the departure is still movement during the silence.
+    expect(run(geofenceAt(leaving(), 2_390_000, "geofence_enter")).physical).toEqual([]);
+  });
+
+  it("ends the silence at a Visit elsewhere that starts after the stop", () => {
+    // The departure is a Visit elsewhere at 2 400 s (no departure fix before it); a crossing after it does not veto.
+    const input = parkedInput({ departAt: 2_440_000, returnAt: 2_530_000 });
+    const anchor = input.evidence.find((item) => item.clientEvidenceId === "slow-0")!;
+    input.evidence.push({ ...anchor, clientEvidenceId: "visit-elsewhere", kind: "visit", occurredAt: shortAt(2_400_000), sourceTimestamp: shortAt(2_400_000),
+      endedAt: shortAt(2_420_000), latitude: 0.0065, horizontalAccuracyMeters: 5, speedMetersPerSecond: null });
+    expect(run(geofenceAt(input, 2_410_000, "geofence_enter")).physical).toEqual([expect.objectContaining({ stoppedAt: shortAt(2_400_000) })]);
+  });
+
+  it("ignores a registration snapshot pair that straddles the departure", () => {
+    const input = homeTransitions(parkedInput({ departAt: 2_400_000, returnAt: 2_490_000 }), [[2_399_000, "geofence_exit"], [2_401_000, "geofence_enter"]]);
+    expect(run(input).physical).toHaveLength(1);
+  });
+
+  it("carries only to the Visit's end when it ends before the departure", () => {
+    // iOS reports the Visit ending 60 s before the first departure fix; a crossing between them still vetoes.
+    const early = () => parkedInput({ visit: [670_000, 2_400_000], departAt: 2_460_000, returnAt: 2_550_000 });
+    expect(run(early()).physical).toEqual([expect.objectContaining({ stoppedAt: shortAt(2_400_000) })]);
+    expect(run(geofenceAt(early(), 2_390_000, "geofence_exit")).physical).toEqual([]);
   });
 });

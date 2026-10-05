@@ -16,6 +16,8 @@ import Reanimated from "react-native-reanimated";
 import Svg, { Circle as SvgCircle, Path, Rect } from "react-native-svg";
 import {
   paletteColorFor,
+  tripStopRows,
+  tripStopsHeading,
   type LocationReviewAction,
   type LocationReviewEvidenceDto
 } from "@dayframe/shared";
@@ -114,6 +116,11 @@ export function LocationReviewCorrectionEditor({
   const reduceMotionRef = useRef(reduceMotion);
   reduceMotionRef.current = reduceMotion;
   const startAt = useMemo(() => new Date(evidence.segment.startedAt), [evidence.segment.startedAt]);
+  // Stops recorded inside a trip; their time is part of the trip, not travel.
+  const stopsHeading = evidence.segment.kind === "commute" ? tripStopsHeading(evidence.stops) : null;
+  // Formatted on every render, like the trip's own time range, so a locale or
+  // time-zone change never leaves a stop outside its trip.
+  const stopRows = tripStopRows(evidence.stops, formatTime);
   const stopAt = useMemo(
     () => evidence.segment.stoppedAt ? new Date(evidence.segment.stoppedAt) : null,
     [evidence.segment.stoppedAt]
@@ -458,11 +465,40 @@ export function LocationReviewCorrectionEditor({
         contentContainerStyle={[styles.settingsScrollContent, editorStyles.scrollContent]}
       >
         <View style={styles.contentStack}>
-          <View style={styles.panel}>
+          <Reanimated.View layout={localLayoutTransition(reduceMotion)} style={styles.panel}>
             <Text {...mobileTextProps("counter")} style={styles.label}>Location evidence</Text>
             <Text {...mobileTextProps("sectionHeading")} style={styles.sectionTitle}>{locationActivityLabel(evidence)}</Text>
             <Text {...mobileTextProps("metadata")} style={styles.reviewMetaLine}>{formatEvidenceTimeRange(evidence)}</Text>
-          </View>
+            {stopsHeading ? (
+              // Refreshed evidence can add or remove stops after the screen
+              // settles: they enter, leave and reflow with the screen's local motion.
+              <Reanimated.View
+                entering={localPresenceEntering(reduceMotion)}
+                exiting={localPresenceExiting(reduceMotion)}
+                layout={localLayoutTransition(reduceMotion)}
+                style={editorStyles.tripStops}
+              >
+                <Text {...mobileTextProps("metadata")} accessibilityRole="header" style={editorStyles.fieldLabel}>{stopsHeading}</Text>
+                {stopRows.map((row, index) => (
+                  <Reanimated.View
+                    key={row.key}
+                    entering={localPresenceEntering(reduceMotion)}
+                    exiting={localPresenceExiting(reduceMotion)}
+                    layout={localLayoutTransition(reduceMotion)}
+                  >
+                    {index > 0 ? <View style={editorStyles.tripStopDivider} /> : null}
+                    <Text
+                      {...mobileTextProps("body")}
+                      accessibilityLabel={`Stop ${index + 1} of ${stopRows.length}: ${row.accessibilityLabel}`}
+                      style={editorStyles.tripStopRow}
+                    >
+                      {row.label}
+                    </Text>
+                  </Reanimated.View>
+                ))}
+              </Reanimated.View>
+            ) : null}
+          </Reanimated.View>
 
           {statusMessage ? (
             <Reanimated.View
@@ -1183,6 +1219,9 @@ function createEditorStyles(theme: MobileTheme) {
     },
     section: { padding: 16, gap: 12 },
     divider: { height: StyleSheet.hairlineWidth, backgroundColor: theme.border, marginHorizontal: 16 },
+    tripStops: { marginTop: 8, gap: 6 },
+    tripStopDivider: { height: StyleSheet.hairlineWidth, backgroundColor: theme.border, marginBottom: 6 },
+    tripStopRow: { color: theme.textPrimary, fontSize: 15, lineHeight: 20 },
     answerRow: {
       minHeight: 58,
       flexDirection: "row",

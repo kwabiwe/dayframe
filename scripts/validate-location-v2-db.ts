@@ -1029,6 +1029,155 @@ async function validateEnabledTrustedCommuteAutomation() {
   );
 }
 
+async function validateSupersededReviewReactivation() {
+  // A stop 126 m from a logging-disabled place is an unknown visit in Review. A late genuine entry makes it the
+  // place (a different segment, so replay retires the proposal); a later exit revokes that proof and the original
+  // segment returns, so its proposal must reopen. A user's own ignore is never reopened.
+  await clearDerivedLocationState();
+  process.env.DAYFRAME_LOCATION_ROLLOUT_MODE = "v2_review";
+  const placeId = "30000000-0000-4000-8000-0000000000e1";
+  const pin = { latitude: 51.61, longitude: -0.21 };
+  await pool.query(
+    `insert into places (id, workspace_id, name, latitude, longitude, radius_meters, priority, logging_enabled)
+     values ($1, $2, 'Edge Home', $3, $4, 100, 0, false)`,
+    [placeId, WORKSPACE_ID, pin.latitude, pin.longitude]
+  );
+  const startMs = Date.parse("2026-07-20T10:00:00.000Z");
+  const cutoverAt = "2026-07-20T09:00:00.000Z";
+  const reading = (id: string, seconds: number, patch: Partial<LocationEvidence>): LocationEvidence => ({
+    clientEvidenceId: `flip-${id}`, deviceId: DEVICE_ID, algorithmVersion: LOCATION_ENGINE_V2_CONFIG.algorithmVersion,
+    kind: "standard_location", occurredAt: new Date(startMs + seconds * 1_000).toISOString(), endedAt: null,
+    latitude: null, longitude: null, horizontalAccuracyMeters: null, speedMetersPerSecond: null,
+    receivedAt: PROCESSING_AT, timeZone: "Europe/London", ...patch
+  });
+  const fix = (id: string, seconds: number, metres: number, speed = 0) => reading(id, seconds, {
+    latitude: pin.latitude + metres / 111_195, longitude: pin.longitude, horizontalAccuracyMeters: 5, speedMetersPerSecond: speed
+  });
+  const callback = (id: string, seconds: number, kind: "geofence_enter" | "geofence_exit") =>
+    reading(id, seconds, { kind, savedPlaceId: placeId });
+  const ingest = (id: string, evidence: LocationEvidence[]) =>
+    ingestLocationEvidence(batch(`db-flip-${id}`, evidence, "v2_review", cutoverAt), session, PROCESSING_AT);
+  const stayState = async (clientSegmentId: string) => (await pool.query<{
+    status: string; reviewStatus: string | null; scope: string | null; eventStatus: string | null;
+  }>(
+    `select s.status, ri.status as "reviewStatus", ri.ignored_scope as scope, ae.review_status as "eventStatus"
+     from stay_segments s
+     left join review_items ri on ri.location_segment_id = s.id and ri.workspace_id = s.workspace_id
+     left join activity_events ae on ae.id = ri.event_id
+     where s.workspace_id = $1 and s.user_id = $2 and s.client_segment_id = $3`,
+    [WORKSPACE_ID, USER_ID, clientSegmentId]
+  )).rows[0];
+  const currentStays = async () => (await pool.query<{ clientSegmentId: string; placeId: string | null }>(
+    `select client_segment_id as "clientSegmentId", place_id as "placeId" from stay_segments
+     where workspace_id = $1 and user_id = $2 and status <> 'superseded' and client_segment_id is not null
+     order by started_at`,
+    [WORKSPACE_ID, USER_ID]
+  )).rows;
+  try {
+    await ingest("parked", [fix("p0", 0, 126), fix("p1", 600, 126), fix("p2", 1_200, 126), fix("l0", 1_300, 600, 10), fix("l1", 1_310, 700, 10)]);
+    const [unknown] = await currentStays();
+    assert.equal(unknown?.placeId, null, "The edge stop was not an unknown stay.");
+    assert.deepEqual(await stayState(unknown.clientSegmentId),
+      { status: "finalised", reviewStatus: "open", scope: null, eventStatus: "needs_review" }, "The edge stop was not offered in Review.");
+
+    await ingest("enter", [callback("enter", 1_100, "geofence_enter")]);
+    const [saved] = await currentStays();
+    assert.equal(saved?.placeId, placeId, "A genuine entry did not make the stop the saved place.");
+    assert.notEqual(saved.clientSegmentId, unknown.clientSegmentId, "The saved-place stay kept the unknown segment's ID.");
+    assert.deepEqual(await stayState(unknown.clientSegmentId),
+      { status: "superseded", reviewStatus: "ignored", scope: "superseded", eventStatus: "ignored" }, "Replay did not retire the unknown proposal.");
+
+    await ingest("exit", [callback("exit", 1_150, "geofence_exit")]);
+    const [returned] = await currentStays();
+    assert.equal(returned?.clientSegmentId, unknown.clientSegmentId, "Revoking the entry did not restore the unknown segment.");
+    assert.deepEqual(await stayState(unknown.clientSegmentId),
+      { status: "finalised", reviewStatus: "open", scope: null, eventStatus: "needs_review" }, "The restored segment's proposal did not reopen.");
+
+    // Control: the user ignores it; flipping away and back must leave that decision alone.
+    const review = await pool.query<{ id: string }>(
+      `select ri.id from review_items ri join stay_segments s on s.id = ri.location_segment_id
+       where s.workspace_id = $1 and s.user_id = $2 and s.client_segment_id = $3`,
+      [WORKSPACE_ID, USER_ID, unknown.clientSegmentId]
+    );
+    await resolveLocationReviewAction(review.rows[0].id, { action: "ignore_once_location" }, session);
+    await ingest("enter-again", [callback("enter-again", 1_170, "geofence_enter")]);
+    await ingest("exit-again", [callback("exit-again", 1_180, "geofence_exit")]);
+    const decided = await stayState(unknown.clientSegmentId);
+    assert.equal(decided.reviewStatus, "ignored", "A user's ignore was reopened.");
+    assert.notEqual(decided.scope, "superseded", "A user's ignore was marked as a replay retirement.");
+    assert.equal(decided.eventStatus, "ignored", "A user's ignore lost its event status.");
+
+    // A restored segment can come back with a different boundary or eligibility; neither its retired Review nor
+    // its retired boundary may act as a user decision. An earlier departure fix moves the stay's end (the midpoint
+    // to its departure) without changing its evidence, so it is the same segment.
+    const reviewOf = async (clientSegmentId: string) => (await pool.query<{ stoppedAt: Date; reviewStatus: string }>(
+      `select s.stopped_at as "stoppedAt", ri.status as "reviewStatus" from stay_segments s
+       join review_items ri on ri.location_segment_id = s.id
+       where s.workspace_id = $1 and s.user_id = $2 and s.client_segment_id = $3`,
+      [WORKSPACE_ID, USER_ID, clientSegmentId])).rows[0];
+    await clearDerivedLocationState();
+    await ingest("bounds-parked", [fix("q0", 0, 126), fix("q1", 600, 126), fix("q2", 1_200, 126), fix("q3", 1_500, 126),
+      fix("m0", 2_100, 600, 10), fix("m1", 2_110, 700, 10), fix("m2", 2_200, 2_000, 10),
+      fix("w0", 2_300, 3_000), fix("w1", 2_900, 3_000), fix("w2", 3_500, 3_000)]);
+    const [boundsBefore] = await currentStays();
+    assert.equal((await reviewOf(boundsBefore.clientSegmentId)).stoppedAt.getTime(), startMs + 1_800_000, "Unexpected first boundary.");
+    await ingest("bounds-enter", [callback("bounds-enter", 1_400, "geofence_enter")]);
+    await ingest("bounds-exit", [callback("bounds-exit", 1_450, "geofence_exit"), fix("o0", 1_560, 900, 10)]);
+    const [restored] = await currentStays();
+    assert.equal(restored.clientSegmentId, boundsBefore.clientSegmentId, "The earlier-departing stay did not keep its segment.");
+    const restoredReview = await reviewOf(restored.clientSegmentId);
+    assert.equal(restoredReview.stoppedAt.getTime(), startMs + 1_530_000, "The restored stay kept its retired boundary.");
+    assert.equal(restoredReview.reviewStatus, "open", "The restored, still eligible stay was not offered again.");
+    const commute = await pool.query<{ startedAt: Date }>(
+      `select started_at as "startedAt" from commute_segments
+       where workspace_id = $1 and user_id = $2 and status <> 'superseded' order by started_at limit 1`, [WORKSPACE_ID, USER_ID]);
+    assert.equal(commute.rows[0]?.startedAt.getTime(), startMs + 1_530_000,
+      "The commute after the restored stay did not start where that stay now ends.");
+
+    await clearDerivedLocationState();
+    await ingest("short-parked", [fix("r0", 0, 126), fix("r1", 300, 126), fix("r2", 600, 126), fix("r3", 900, 126),
+      fix("n0", 1_560, 600, 10), fix("n1", 1_570, 700, 10)]);
+    const [shortBefore] = await currentStays();
+    assert.equal((await reviewOf(shortBefore.clientSegmentId)).reviewStatus, "open", "The twenty-minute stop was not offered.");
+    await ingest("short-enter", [callback("short-enter", 400, "geofence_enter")]);
+    // Back as the same segment but under twenty minutes, so not offered: its Review stays retired by replay.
+    await ingest("short-exit", [callback("short-exit", 450, "geofence_exit"), fix("o1", 960, 900, 10)]);
+    const [short] = await currentStays();
+    assert.equal(short.clientSegmentId, shortBefore.clientSegmentId, "The shortened stay did not keep its segment.");
+    assert.deepEqual(await stayState(short.clientSegmentId),
+      { status: "finalised", reviewStatus: "ignored", scope: "superseded", eventStatus: "ignored" },
+      "A restored stay under the Review threshold changed its retired Review.");
+    // A later genuine entry must still make it the saved place: the retired Review is not a decision. The restored
+    // unknown segment is gone from current output, so it must not linger as a second current stay.
+    await ingest("short-enter-again", [callback("short-enter-again", 850, "geofence_enter")]);
+    const afterReplacement = await currentStays();
+    assert.equal(afterReplacement.length, 1, "A replay-retired restored stay lingered beside its replacement.");
+    assert.equal(afterReplacement[0].placeId, placeId, "A restored stay with a retired Review blocked its saved-place replacement.");
+
+    // An Ignore the user queued offline can arrive after replay retired the proposal. It is acknowledged and
+    // recorded as the user's decision, so the proposal stays ignored when its segment returns.
+    await clearDerivedLocationState();
+    await ingest("queued-parked", [fix("u0", 0, 126), fix("u1", 600, 126), fix("u2", 1_200, 126),
+      fix("v0", 1_300, 600, 10), fix("v1", 1_310, 700, 10)]);
+    const [queued] = await currentStays();
+    const queuedReview = await pool.query<{ id: string }>(
+      `select ri.id from review_items ri join stay_segments s on s.id = ri.location_segment_id
+       where s.workspace_id = $1 and s.user_id = $2 and s.client_segment_id = $3`, [WORKSPACE_ID, USER_ID, queued.clientSegmentId]);
+    await ingest("queued-enter", [callback("queued-enter", 1_100, "geofence_enter")]);
+    assert.equal((await stayState(queued.clientSegmentId)).scope, "superseded", "Replay did not retire the queued proposal.");
+    const acknowledged = await resolveLocationReviewAction(queuedReview.rows[0].id, { action: "ignore_once_location" }, session);
+    assert.equal(acknowledged.ok, true, "A queued Ignore of a retired proposal was not acknowledged.");
+    await ingest("queued-exit", [callback("queued-exit", 1_150, "geofence_exit")]);
+    const queuedAfter = await stayState(queued.clientSegmentId);
+    assert.equal(queuedAfter.reviewStatus, "ignored", "A queued Ignore was reopened when its segment returned.");
+    assert.equal(queuedAfter.scope, "once", "A queued Ignore was not recorded as the user's decision.");
+    assert.equal(queuedAfter.eventStatus, "ignored", "A queued Ignore lost its event status.");
+  } finally {
+    await clearDerivedLocationState();
+    await pool.query("delete from places where id = $1 and workspace_id = $2", [placeId, WORKSPACE_ID]);
+  }
+}
+
 async function validateV1Compatibility() {
   process.env.DAYFRAME_LOCATION_ROLLOUT_MODE = "v2_shadow";
   const placeId = LOCATION_ACCEPTANCE_PLACES[0].id;
@@ -1108,8 +1257,9 @@ async function main() {
     await validateEnabledTrustedPlaceAutomation();
     await validateEnabledTrustedCommuteAutomation();
     await validateFinalisationWithoutNewEvidence();
+    await validateSupersededReviewReactivation();
     await validateV1Compatibility();
-    console.log("Location V2 database validation passed: ordered replay, duplicate ingest, shadow cutover, no-new-evidence finalisation, semantic idempotency, Commute category concurrency/emission/replay/confirmation, uncertainty bounds, description semantics, isolation, trusted-place and trusted-commute automation, deliberate advisory/Review-row/exact-segment contention bounds, overlap fallback, terminal-decision preservation, automatic-entry deletion safety, automatic-entry idempotency, atomic rollback, concurrent retry, split, merge, incompatible-merge rejection, and V1 compatibility.");
+    console.log("Location V2 database validation passed: ordered replay, duplicate ingest, shadow cutover, no-new-evidence finalisation, semantic idempotency, Commute category concurrency/emission/replay/confirmation, uncertainty bounds, description semantics, isolation, trusted-place and trusted-commute automation, deliberate advisory/Review-row/exact-segment contention bounds, overlap fallback, terminal-decision preservation, superseded-Review reactivation, automatic-entry deletion safety, automatic-entry idempotency, atomic rollback, concurrent retry, split, merge, incompatible-merge rejection, and V1 compatibility.");
   } finally {
     if (process.env.KEEP_LOCATION_V2_DB_FIXTURE !== "1") {
       await pool.query("delete from workspaces where id = $1", [WORKSPACE_ID]).catch(() => undefined);
