@@ -160,4 +160,21 @@ describe("an arrival Visit iOS dates before the car arrives", () => {
     expect(stays).toHaveLength(2);
     expect(stays[0].stoppedAt).toBe(at(900));
   });
+
+  // Review round 3: a newer completed Visit owns its episode and departure even without an arrival-only callback,
+  // whether it joins before the early arrival would attach (also when sharing the anchor's time) or after.
+  it.each([
+    ["after a set-aside anchor", 220, () => withNeighbour([...beside(), ...approach(), enter("anchor", 100),
+      visit("new-completion-only", 220, { endedAt: at(900) }), still("home-0", 240), still("home-late-0", 3_600), still("home-late-1", 4_000)])],
+    ["sharing the anchor's time", 120, () => compact([visit("old-arrival", 0), away("approach", 20),
+      visit("new-completion-only", 120, { endedAt: at(900) }), still("anchor", 120), still("home-late-0", 3_600), still("home-late-1", 4_000)])],
+    ["joining after the early arrival attached", 100, () => compact([visit("old-arrival", 0), away("approach", 20), still("anchor", 100),
+      visit("new-completion-only", 220, { endedAt: at(900) }), still("home-0", 240), still("home-late-0", 3_600), still("home-late-1", 4_000)])]
+  ] as const)("never lets an older early arrival lift a newer completed Visit's departure (%s)", (_label, start, build) => {
+    const value = build();
+    const bounds = (input: LocationEngineInput) => homeStays(input).map(({ startedAt, stoppedAt }) => [startedAt, stoppedAt]);
+    // Without early arrivals the newer Visit's departure already ends the first stay.
+    expect(bounds(disabled(value)).map(([, stoppedAt]) => stoppedAt)).toEqual([at(900), null]);
+    expect(bounds(value)).toEqual([[at(start), at(900)], [at(3_600), null]]);
+  });
 });

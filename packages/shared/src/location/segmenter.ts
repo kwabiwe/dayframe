@@ -59,6 +59,8 @@ type WorkingStay = {
   arrivalPresenceUntilAt?: string | null;
   /** Arrival time of the Visit whose corroborated arrival owns `arrivalPresence`. */
   arrivalPresenceFromAt?: string;
+  /** Set while that Visit is an early arrival attached at its observed arrival. */
+  arrivalPresenceDeferred?: boolean;
 };
 
 function pointFor(evidence: LocationEvidence) {
@@ -1080,6 +1082,7 @@ function runLocationEnginePass(input: LocationEngineInput): { output: LocationEn
     stay.arrivalPresence = true;
     stay.arrivalPresenceUntilAt = arrival.departedAt;
     stay.arrivalPresenceFromAt = item.evidence.occurredAt;
+    stay.arrivalPresenceDeferred = false;
     const completion = arrival.completion;
     if (!completion || stay.evidence.includes(completion)) return;
     // The arrival's own completed callback joins here, whatever its delivery
@@ -1139,14 +1142,27 @@ function runLocationEnginePass(input: LocationEngineInput): { output: LocationEn
       const departedAt = corroboratedArrivals.get(pending.visit.evidence.clientEvidenceId)?.departedAt;
       if (departedAt && Date.parse(departedAt) <= atMs) continue;
       if (item !== pending.anchor && brokenBetween(pending.anchor, item, pending.placeId)) continue;
-      if (stay.arrivalPresence && stay.arrivalPresenceFromAt &&
-        Date.parse(stay.arrivalPresenceFromAt) > Date.parse(pending.visit.evidence.occurredAt)) continue;
+      // A newer Visit already in the stay, completed or arrival-only, owns its episode.
+      const pendingMs = Date.parse(pending.visit.evidence.occurredAt);
+      if (stay.evidence.some((joined) => joined.evidence.kind === "visit" && Date.parse(joined.evidence.occurredAt) > pendingMs)) continue;
+      if (stay.arrivalPresence && stay.arrivalPresenceFromAt && Date.parse(stay.arrivalPresenceFromAt) > pendingMs) continue;
       stay.evidence.push(pending.visit);
       markArrivalPresence(stay, pending.visit);
+      if (stay.arrivalPresenceFromAt === pending.visit.evidence.occurredAt) stay.arrivalPresenceDeferred = true;
       const completion = corroboratedArrivals.get(pending.visit.evidence.clientEvidenceId)?.completion;
       stay.identityExcluded ??= new Set();
       stay.identityExcluded.add(pending.visit);
       if (completion) stay.identityExcluded.add(completion);
+    }
+  };
+  // iOS reports one Visit at a time, so presence an older early arrival lent the
+  // stay ends by the departure of a newer Visit that joins it later.
+  const capDeferredPresence = (stay: WorkingStay, item: ClassifiedEvidence) => {
+    if (!stay.arrivalPresenceDeferred || item.evidence.kind !== "visit" || !stay.arrivalPresenceFromAt ||
+      Date.parse(item.evidence.occurredAt) <= Date.parse(stay.arrivalPresenceFromAt)) return;
+    const departedAt = item.evidence.endedAt ?? arrivalAnalysis.corroboratedVisits.get(item.evidence.clientEvidenceId)?.departedAt;
+    if (departedAt && (stay.arrivalPresenceUntilAt == null || Date.parse(departedAt) < Date.parse(stay.arrivalPresenceUntilAt))) {
+      stay.arrivalPresenceUntilAt = departedAt;
     }
   };
   const completed: WorkingStay[] = [];
@@ -1312,6 +1328,7 @@ function runLocationEnginePass(input: LocationEngineInput): { output: LocationEn
     if (sameKnownPlace || sameUnknown) {
       active.evidence.push(item);
       markArrivalPresence(active, item);
+      capDeferredPresence(active, item);
       attachEarlyArrival(active, item);
       if (!active.pendingExit) active.outside = [];
       if (strongSavedPoint(item, active.placeId, input)) active.lastStrongInside = item;
