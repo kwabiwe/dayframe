@@ -1143,13 +1143,17 @@ function runLocationEnginePass(input: LocationEngineInput): { output: LocationEn
       if (departedAt && Date.parse(departedAt) <= atMs) continue;
       if (item !== pending.anchor && brokenBetween(pending.anchor, item, pending.placeId)) continue;
       // A newer Visit already in the stay, completed or arrival-only, owns its
-      // episode, as does a newer corroborated Visit there seen since the early
-      // one, even if it could not join (broad) or came before the stay began.
+      // episode, as does a newer Visit there seen since the early one (one
+      // corroborated for the place, or an accurate one matching it, such as
+      // another deferred arrival), even if it could not join (broad) or came
+      // before the stay began.
       const pendingMs = Date.parse(pending.visit.evidence.occurredAt);
       if (stay.evidence.some((joined) => joined.evidence.kind === "visit" && Date.parse(joined.evidence.occurredAt) > pendingMs)) continue;
       if (accepted.slice(acceptedOrder.get(pending.visit)! + 1, acceptedOrder.get(item)! + 1).some((seen) =>
         seen.evidence.kind === "visit" && Date.parse(seen.evidence.occurredAt) > pendingMs &&
-        arrivalAnalysis.corroboratedVisits.get(seen.evidence.clientEvidenceId)?.savedPlaceId === pending.placeId)) continue;
+        (arrivalAnalysis.corroboratedVisits.get(seen.evidence.clientEvidenceId)?.savedPlaceId === pending.placeId ||
+          accurateCoordinate(seen, input) &&
+          (seen.match?.candidates.some((candidate) => candidate.id === pending.placeId && candidate.matchClass !== "outside") ?? false)))) continue;
       if (stay.arrivalPresence && stay.arrivalPresenceFromAt && Date.parse(stay.arrivalPresenceFromAt) > pendingMs) continue;
       stay.evidence.push(pending.visit);
       markArrivalPresence(stay, pending.visit);

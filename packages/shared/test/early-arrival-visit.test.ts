@@ -218,4 +218,18 @@ describe("an arrival Visit iOS dates before the car arrives", () => {
     expect(homeStays(disabled(value)).at(-1)).toMatchObject({ startedAt: at(7_200) });
     expect(homeStays(value).at(-1)).toMatchObject({ startedAt: at(7_200) });
   });
+
+  // Review round 6: a newer Visit there owns its episode however it arrives (deferred too, or completion-only).
+  it.each([
+    ["a newer deferred Visit", true], ["a newer completion-only Visit", false]
+  ] as const)("does not lend older presence past %s's departure", (_label, withArrival) => {
+    for (const departure of [50, 100, 150]) {
+      const value = withNeighbour([still("n0", -900, 420), still("n1", -600, 420), visit("old-early", 0),
+        ...(withArrival ? [visit("new-early", 10)] : []), visit("new-completion", 10, { endedAt: at(departure) }),
+        ...approach(), enter("shared-anchor", 100), still("home-later", 240)]);
+      expect(homeStays(disabled(value))).toEqual([]);
+      expect(homeStays({ ...value, evidence: value.evidence.filter((item) => item.clientEvidenceId !== "old-early") })).toEqual([]);
+      expect(homeStays(value)).toEqual([]);
+    }
+  });
 });
