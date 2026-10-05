@@ -71,7 +71,19 @@ A fourth review found four more gaps:
 - Driving through the circle between two stops made the first stop ordinary at the first moving fix inside, so the far-side stop joined it as one saved visit (its centre fell inside the circle). Only still fixes inside now make a stay ordinary, and any accurate reading beyond the cluster ends it, as for an unknown cluster. The two stops now match the unsaved case exactly.
 - A late genuine entry turned an unknown stay into Home under the same ID, leaving its "unknown place" proposal open in Review. A stay described as unknown now carries that identity in its ID, so replay retires the earlier segment and its proposal.
 
-Simulated fixes no longer count as inside or end the cluster, and an open-stay bounds test now checks closed bounds too. Admitting moving readings beyond the tolerance band, as unknown clusters do, was tried and rejected: it merged the drop-off and moved this stop's times. Each case is a regression that fails on the third-review head, and the corpus and staging week are unchanged.
+Simulated fixes no longer count as inside or end the cluster, and an open-stay bounds test now checks closed bounds too.
+
+A fifth review found four more gaps:
+
+- A displaced completion still split a quiet cluster when gap handling reached it first. Displaced callbacks of the cluster's own Visit, simulated evidence and the place's callbacks are now all set aside before gap and exit handling.
+- Movement before parking (a drive through the circle, or ten minutes of moving readings at Home) skewed the cluster's centre and made the stay start too early, which could change whether it reached Review. The cluster now begins at its first Visit or non-moving reading, as an unknown cluster does, and is measured from there; the movement stays route evidence, and movement alone is no stay. Splitting the stay at that point was tried and rejected: it discarded a real arrival Visit and created a saved visit in two older evening fixtures.
+- Simulated readings still reached gap and other-place handling. They are now ignored by an edge cluster, and a simulated or broad callback in the cluster does not make a Visit elsewhere its own.
+- An identity flip and its reversal (a late entry, then a later exit) left the original segment superseded and its proposal ignored, as if the user had decided. Replay now marks its own retirements, keeps those rows mutable, and reopens the proposal when the segment returns; the location database validator covers the flip and a user-ignore control.
+
+A sixth review found two more gaps, both fixed:
+
+- Two other replay protection checks (protected replacements and decided boundaries) still treated a retired Review as a decision, so a restored segment could keep its retired boundary or block its own saved-place replacement. All three checks now share one condition, and the database validator covers a restored stay with an earlier end and one that falls below the Review threshold.
+- The saved place's thirty-minute rule for strong points still bridged an edge cluster's silence, because strong matches extend 25 m beyond the circle; a stop on the far side then extended the first one by ten minutes. Edge clusters now use only the unknown-cluster rule. Admitting moving readings beyond the tolerance band, as unknown clusters do, was tried and rejected: it merged the drop-off and moved this stop's times. Each case is a regression that fails on the third-review head, and the corpus and staging week are unchanged.
 
 ## Not established
 

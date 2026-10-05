@@ -369,11 +369,17 @@ describe("identity proof at a saved place's edge (review round 2)", () => {
       fix("cross0", 1_260, 60, 5, 3), fix("cross1", 1_280, 0, 5, 3), fix("cross2", 1_300, -60, 5, 3), fix("cross3", 1_320, -115, 5, 3),
       fix("b0", 1_400, -126), fix("b1", 1_700, -126), fix("b2", 2_000, -126), fix("b3", 2_600, -126),
       fix("l0", 2_700, -400, 5, 10), fix("l1", 2_710, -600, 5, 10)];
-    const times = (stays: StaySegment[]) => stays.map(({ startedAt, stoppedAt }) => [startedAt, stoppedAt]);
     const without = staysOf(compact(evidence, { savedPlaces: [] }));
     expect(without).toHaveLength(2);
     const saved = staysOf(compact(evidence));
-    expect(times(saved)).toEqual(times(without));
+    expect(saved).toHaveLength(2);
+    // Each within two minutes of the unsaved stays; the far-side stop starts at its first still fix (b0), where the
+    // unsaved cluster restarted at a moving fix through the circle.
+    saved.forEach((stay, index) => {
+      expect(Math.abs(Date.parse(stay.startedAt) - Date.parse(without[index].startedAt))).toBeLessThanOrEqual(120_000);
+      expect(Math.abs(Date.parse(stay.stoppedAt!) - Date.parse(without[index].stoppedAt!))).toBeLessThanOrEqual(120_000);
+    });
+    expect(saved[1].startedAt).toBe(t(1_400));
     expect(saved.every((stay) => stay.placeMatchKind === "unknown" && automatic(stay) === "untrusted_place")).toBe(true);
   });
 
@@ -387,6 +393,79 @@ describe("identity proof at a saved place's edge (review round 2)", () => {
     expect(before).toMatchObject({ placeMatchKind: "unknown", status: "finalised" });
     expect(after).toMatchObject({ placeMatchKind: "saved", placeId: home.id, startedAt: before.startedAt, stoppedAt: before.stoppedAt });
     expect(after.clientSegmentId).not.toBe(before.clientSegmentId);
+  });
+
+  // Review round 5.
+  const coffee400 = { ...school, id: "10000000-0000-4000-8000-000000000072", name: "Coffee", latitude: north(400), radiusMeters: 40 };
+  const parkedHalfHour = [fix("p0", 0, 126), fix("p1", 300, 126), fix("p2", 600, 126), fix("p3", 1_200, 126), fix("p4", 1_800, 126),
+    fix("l0", 1_900, 600, 5, 10), fix("l1", 1_910, 700, 5, 10)];
+  const spans = (stays: StaySegment[]) => stays.map(({ startedAt, stoppedAt }) => [startedAt, stoppedAt]);
+
+  it("skips its own Visit's displaced completion before a quiet gap can split the cluster", () => {
+    const completion = visit("a-completion", 2_400, 400, 20, 3_600);
+    const evidence = [fix("p0", 0, 126), fix("p1", 300, 126), fix("p2", 600, 126), visit("z-arrival", 2_400, 126), completion,
+      fix("p3", 2_700, 126), fix("p4", 3_000, 126), fix("p5", 3_600, 126), fix("l0", 3_700, 600, 5, 10), fix("l1", 3_710, 700, 5, 10)];
+    const without = staysOf(compact(evidence.filter((item) => item !== completion), { savedPlaces: [school, coffee400] }));
+    expect(without).toHaveLength(1);
+    expect(staysOf(compact(evidence, { savedPlaces: [school, coffee400] }))).toEqual(without);
+  });
+
+  it("starts an edge stay at its cluster, not at the drive through the circle before it", () => {
+    const evidence = [fix("m0", 0, -80, 5, 4), fix("m1", 20, -60, 5, 4), fix("m2", 40, 0, 5, 4), fix("p0", 60, 126), fix("p1", 360, 126),
+      fix("p2", 960, 140), fix("p3", 1_260, 140), fix("l0", 1_360, 600, 5, 10), fix("l1", 1_370, 700, 5, 10)];
+    const [without] = staysOf(compact(evidence, { savedPlaces: [] }));
+    const saved = staysOf(compact(evidence));
+    expect(without.startedAt).toBe(t(60));
+    expect(spans(saved)).toEqual(spans([without]));
+    expect(saved[0].evidenceIds).not.toContain("m2");
+  });
+
+  it("does not turn ten minutes of moving readings at Home into a twenty-minute visit beside it", () => {
+    const home = { ...school, name: "Home", loggingEnabled: false };
+    const evidence = [fix("d0", 0, 60, 5, 3), fix("d1", 300, 0, 5, 3), fix("d2", 600, 60, 5, 3), fix("p0", 660, 126), fix("p1", 960, 126),
+      fix("p2", 1_260, 126), fix("l0", 1_300, 600, 5, 10), fix("l1", 1_310, 700, 5, 10)];
+    const [without] = staysOf(compact(evidence, { savedPlaces: [] }));
+    const saved = staysOf(compact(evidence, { savedPlaces: [home] }));
+    expect(without.startedAt).toBe(t(660));
+    expect(spans(saved)).toEqual(spans([without]));
+    // Under the twenty minutes an unknown stay needs for Review either way; the movement alone is no stay.
+    expect(Date.parse(saved[0].stoppedAt!) - Date.parse(saved[0].startedAt)).toBeLessThan(20 * 60_000);
+  });
+
+  it.each([
+    ["an inside fix during silence", [fix("q0", 0, 126), fix("q1", 300, 126), fix("q2", 600, 126), fix("q3", 2_400, 126), fix("q4", 2_700, 126),
+      fix("q5", 3_000, 126), fix("l0", 3_100, 600, 5, 10), fix("l1", 3_110, 700, 5, 10)], [fix("sim", 1_800, 0, 5, 0, { isSimulated: true })]],
+    ["a fix at a neighbouring saved place", parkedHalfHour, [fix("sim", 650, 400, 5, 0, { isSimulated: true })]],
+    ["two moving fixes far away", parkedHalfHour, [fix("sim-0", 650, 600, 5, 10, { isSimulated: true }), fix("sim-1", 660, 700, 5, 10, { isSimulated: true })]]
+  ])("is never ended or split by simulated evidence: %s", (_label, evidence, simulated) => {
+    const plain = staysOf(compact(evidence, { savedPlaces: [school, coffee400] }));
+    expect(plain).toHaveLength(1);
+    expect(spans(staysOf(compact([...evidence, ...simulated], { savedPlaces: [school, coffee400] })))).toEqual(spans(plain));
+  });
+
+  it.each([
+    ["broad", { horizontalAccuracyMeters: 150 }],
+    ["simulated", { isSimulated: true }]
+  ])("does not let a %s callback in the cluster make a genuine Visit elsewhere its own", (_label, patch) => {
+    const far = visit("a-completion", 650, 400, 5, 1_100);
+    const near = { ...visit("z-arrival", 650, 126), ...patch };
+    // The genuine completion at the café still ends the edge stay, as it does with no callback in the cluster.
+    const edgeStay = (evidence: LocationEvidence[]) => staysOf(compact(evidence, { savedPlaces: [school, coffee400] }))
+      .filter((stay) => stay.startedAt === t(0));
+    const [withFar] = edgeStay([...parkedHalfHour, far]);
+    expect(withFar.stoppedAt! <= t(650)).toBe(true);
+    expect(edgeStay([...parkedHalfHour, far, near])).toEqual([withFar]);
+  });
+
+  // Review round 6.
+  it("bridges an edge cluster's silence only by the unknown-cluster rule, not the saved place's thirty minutes", () => {
+    const home = { ...school, name: "Home", loggingEnabled: false };
+    const evidence = [fix("a0", 0, 115), fix("a1", 300, 115), fix("a2", 900, 115), fix("b0", 2_100, -115), fix("b1", 2_400, -115),
+      fix("b2", 3_000, -115), fix("l0", 3_100, -600, 5, 10), fix("l1", 3_110, -700, 5, 10)];
+    const spansOf = (value: LocationEngineInput) => staysOf(value).map(({ startedAt, stoppedAt }) => [startedAt, stoppedAt]);
+    const without = spansOf(compact(evidence, { savedPlaces: [] }));
+    expect(without[0]).toEqual([t(0), t(900)]);
+    expect(spansOf(compact(evidence, { savedPlaces: [home] }))).toEqual(without);
   });
 
   it("does not let a simulated fix inside the circle end edge continuity", () => {

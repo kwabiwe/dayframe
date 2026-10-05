@@ -172,6 +172,9 @@ its unique ID before applying those filters, avoiding repeated owner-evidence
 scans. Obsolete Review selection materializes eligible lineage once inside the
 same statement using the unchanged owner/device/algorithm/accepted/expiry
 predicates. Review retirement and semantic writes remain separate statements.
+Replay's own retirement of an open Review sets `ignored_scope = 'superseded'`;
+such a row is not a manual correction, and emission reopens it when its segment
+returns. User ignores ('once', 'source') and other decisions are never reopened.
 The selected-profile combined `UNION ALL`/`LATERAL` protected lookup and
 materialised eligible-lineage read are governed by the narrow
 [C20 addendum](plans/location-replay-production-scalability-a1-c20.md).
