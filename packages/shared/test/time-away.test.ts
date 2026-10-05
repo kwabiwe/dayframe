@@ -127,6 +127,12 @@ describe("time away from a saved place", () => {
     expect(run(60)).toHaveLength(1);
   });
 
+  it("counts two distinct readings from the same source seconds apart (round 3 finding 1)", () => {
+    const run = (seconds: number) => outings(input([...homeFixes("am", 0, 60), crossing("exit", 60.5, "geofence_exit"),
+      fix("a", 63, 300), fix("b", 63 + seconds / 60, 375), crossing("enter", 70, "geofence_enter"), ...homeFixes("pm", 71, 150)]));
+    expect(run(4)).toHaveLength(1);
+  });
+
   it("offers nothing for an absence under five minutes", () => {
     const evidence = [...homeFixes("am", 0, 60), crossing("exit", 60.5, "geofence_exit"),
       fix("away-0", 61.5, 300, { speedMetersPerSecond: 10 }), fix("away-1", 62.5, 320), fix("away-2", 63.5, 280, { speedMetersPerSecond: 10 }),

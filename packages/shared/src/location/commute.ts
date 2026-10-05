@@ -833,7 +833,7 @@ export function deriveCommutes(
       const distance = Math.max(config.placeOutingMinimumDistanceMeters, place.radiusMeters);
       // Independent observations only: a repeated coordinate, or a mirrored
       // copy from another source within a few seconds, counts once.
-      const seenAt = new Map<string, number>();
+      const counted: Array<{ deviceId: string; kind: string; atMs: number }> = [];
       const coordinates = new Set<string>();
       let observations = 0;
       for (const item of routeEvidence) {
@@ -842,10 +842,11 @@ export function deriveCommutes(
           distanceMeters(centre, point) - (item.evidence.horizontalAccuracyMeters ?? 0) < distance) continue;
         const coordinate = `${item.evidence.latitude},${item.evidence.longitude}`;
         const atMs = Date.parse(item.evidence.occurredAt);
-        const lastMs = seenAt.get(item.evidence.deviceId);
-        if (coordinates.has(coordinate) || lastMs != null && Math.abs(atMs - lastMs) <= PLACE_OUTING_MIRROR_WINDOW_MS) continue;
+        const mirror = counted.some((other) => other.deviceId === item.evidence.deviceId && other.kind !== item.evidence.kind &&
+          Math.abs(atMs - other.atMs) <= PLACE_OUTING_MIRROR_WINDOW_MS);
+        if (coordinates.has(coordinate) || mirror) continue;
         coordinates.add(coordinate);
-        seenAt.set(item.evidence.deviceId, atMs);
+        counted.push({ deviceId: item.evidence.deviceId, kind: item.evidence.kind, atMs });
         observations += 1;
       }
       return observations >= config.outsideConfirmationCount;

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   dateTimeLocalInputToIso,
+  formatActivityEventLabel,
   durationInputValue,
   formatCompactHoursMinutes,
   parseDurationInput
@@ -57,5 +58,12 @@ describe("formatCompactHoursMinutes", () => {
     [360_060, "100:01"]
   ])("formats %i seconds as %s", (seconds, expected) => {
     expect(formatCompactHoursMinutes(seconds)).toBe(expected);
+  });
+});
+
+describe("activity event labels", () => {
+  it("labels time away as itself, never as a detected commute (round 3 finding 3)", () => {
+    expect(formatActivityEventLabel({ eventType: "commute_detected", timeAway: true })).toBe("Time away");
+    expect(formatActivityEventLabel({ eventType: "commute_detected", timeAway: false })).toBe("Commute detected");
   });
 });
