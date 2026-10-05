@@ -181,15 +181,23 @@ describe("what an absorbing stop may claim (review round 1)", () => {
     expect(other.clientSegmentId).not.toBe(school.clientSegmentId);
   });
 
-  it("keeps a commute into an absorbed stay with an inferred boundary for Review", () => {
+  it.each([false, true])("keeps a commute into a stay with an inferred boundary for Review (replaced by the stop: %s)", (absorbed) => {
+    // The Venue fragment's arrival rests on a broad corroborated Visit (an inferred boundary). In the replaced
+    // variant, slow readings just outside before it make the physical stop replace it as an unknown stay; that
+    // replacement's commute stays Review-only. (A saved replacement inheriting the boundary is covered by the
+    // lineage rule; a natural fixture for it is a follow-up.)
     const ORIGIN_ID = "10000000-0000-4000-8000-0000000000d5";
-    const input = compact([point("origin-1", -22, -2_000), point("origin-2", -17, -2_000), point("origin-3", -12, -2_000),
+    const evidence = [point("origin-1", -22, -2_000), point("origin-2", -17, -2_000), point("origin-3", -12, -2_000),
       point("route-1", -11, -1_600, 10), point("route-2", -5, -1_200, 10), point("route-3", 0, -800, 10),
       point("early-slow", 5, 100, 0), point("broad-visit", 10, 0, 0, { kind: "visit", horizontalAccuracyMeters: 120, endedAt: at(61) }),
-      callback("entry", 10.2, "geofence_enter"), point("arrive-1", 10.5), point("arrive-2", 12.5),
-      point("still-1", 50), point("still-2", 55), point("still-3", 60), point("leave-1", 62, 1_000, 10), point("leave-2", 63, 1_100, 10)],
+      { ...callback("entry", 10.2, "geofence_enter"), isSimulated: absorbed }, point("arrive-1", 10.5), point("arrive-2", 12.5),
+      point("still-1", 50), point("still-2", 55), point("still-3", 60), point("leave-1", 62, 1_000, 10), point("leave-2", 63, 1_100, 10),
+      ...(absorbed ? [1, 2, 3, 4, 5, 6].map((index) => point(`extra-early-${index}`, 5 + index * 0.5, 100, 0)) : [])];
+    const input = compact(evidence,
       [{ ...venue, radiusMeters: 30 }, { id: ORIGIN_ID, name: "Origin", latitude: LAT0, longitude: east(-2_000), radiusMeters: 100, loggingEnabled: true }]);
-    const commute = runLocationEngine(input).segmentUpserts.find((segment) => segment.kind === "commute")!;
+    const output = runLocationEngine(input);
+    expect(output.segmentUpserts.some((segment) => segment.kind === "stay" && segment.formation === "physical_stop")).toBe(absorbed);
+    const commute = output.segmentUpserts.find((segment) => segment.kind === "commute")!;
     expect(assessAutomaticLocation("v2_enabled", commute).action).toBe("review");
   });
 
@@ -257,6 +265,32 @@ describe("what an absorbing stop may claim (review round 1)", () => {
   it("lets a genuine Visit support an unknown replacement across two places", () => {
     expect(stays(dual(false))).toEqual([expect.objectContaining({ formation: "physical_stop", placeMatchKind: "unknown", placeId: null,
       candidatePlaceIds: [VENUE_ID, OTHER_ID], startedAt: at(4), stoppedAt: at(80) })]);
+  });
+
+  // Review round 6: a Visit that arrived before the device left (two fixes far away, then a fresh entry) belongs
+  // to that earlier visit: it neither supports the new episode's silences nor proves its identity.
+  const crossing = (id: string, minutes: number, kind: "geofence_enter" | "geofence_exit", placeId: string) =>
+    point(id, minutes, 0, 0, { kind, savedPlaceId: placeId, latitude: null, longitude: null, horizontalAccuracyMeters: null, speedMetersPerSecond: null });
+  const departedFirst = () => [visitAt("earlier-visit", 0, 80, -40), point("away-1", 1, -1_000, 10), point("away-2", 2, -900, 10)];
+  const nearVenue = { ...venue, longitude: east(-40), radiusMeters: 20 };
+
+  it("never lets a Visit from before the device left support the next episode's silences", () => {
+    const input = compact([...departedFirst(), crossing("fresh-entry", 9, "geofence_enter", VENUE_ID),
+      point("a-1", 10, -40), point("a-2", 15, -40), point("a-3", 20, -40), point("b-1", 65, 40), point("b-2", 68, 40), point("b-3", 71, 40),
+      crossing("exit", 71.5, "geofence_exit", OTHER_ID), point("leave-1", 83, 1_000, 10), point("leave-2", 84, 1_100, 10)],
+    [nearVenue, { ...venue, id: OTHER_ID, name: "Other", longitude: east(40), radiusMeters: 20 }]);
+    expect(stays(input)).toEqual(stays(withoutAbsorption(input)));
+  });
+
+  it("never lets a Visit from before the device left prove the next episode's place", () => {
+    const later = [point("outside-1", 5, 40), point("outside-2", 6, 40), point("outside-3", 7, 40), point("outside-4", 8, 40),
+      crossing("fresh-entry", 9, "geofence_enter", VENUE_ID), crossing("entry-revoked", 9.5, "geofence_exit", VENUE_ID),
+      point("a-1", 10, -40), point("a-2", 15, -40), point("a-3", 20, -40), crossing("exit", 21, "geofence_exit", VENUE_ID),
+      point("leave-1", 34, 1_000, 10), point("leave-2", 35, 1_100, 10)];
+    const replacement = (evidence: LocationEvidence[]) => stays(compact(evidence, [nearVenue])).find((stay) => stay.formation === "physical_stop");
+    const without = replacement([point("away-1", 1, -1_000, 10), point("away-2", 2, -900, 10), ...later]);
+    expect(without?.placeMatchKind).toBe("unknown");
+    expect(replacement([...departedFirst(), ...later])?.placeMatchKind).toBe("unknown");
   });
 
   it("never lets an earlier episode's Visit support the stop's silences", () => {

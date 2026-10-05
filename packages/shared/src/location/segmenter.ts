@@ -795,10 +795,15 @@ function absorbedIdentity(stop: PhysicalStop, fragments: StaySegment[], accepted
     .sort((left, right) => order.get(left)! - order.get(right)!);
   const items = evidenceIds.map((id) => accepted[order.get(id)!]);
   const startMs = Math.min(Date.parse(stop.startedAt), ...fragments.map((stay) => Date.parse(stay.startedAt)));
+  // A Visit that arrived before this episode began (one a fragment reused, or
+  // an earlier visit's carried in with the stop's evidence) is interval
+  // support of that earlier episode only: never identity proof here.
+  const earlier = new Set([...reused, ...items.filter((item) =>
+    item.evidence.kind === "visit" && Date.parse(item.evidence.occurredAt) < startMs)]);
   const placeIds = [...new Set(fragments.map((stay) => stay.placeMatchKind === "saved" ? stay.placeId : null))];
   const placeId = placeIds.length === 1 && placeIds[0] &&
-    stillAtSavedPlace(placeIds[0], items, accepted, startMs, input, reused) ? placeIds[0] : null;
-  return { evidenceIds, items, placeId };
+    stillAtSavedPlace(placeIds[0], items, accepted, startMs, input, earlier) ? placeIds[0] : null;
+  return { evidenceIds, items, placeId, startMs, earlier };
 }
 
 /**
@@ -1668,19 +1673,17 @@ function runLocationEnginePass(input: LocationEngineInput): { output: LocationEn
       item.evidence.isSimulated !== true && accurateCoordinate(item, input);
     const observedMs = identity.items.filter(observation).map(({ evidence }) => Date.parse(evidence.occurredAt));
     // Interval support from this episode's own qualified Visits: a genuine one
-    // that arrived within this physical stop (never simulated, an earlier
-    // episode's, nor one a fragment reused) and that the saved-place rules corroborated for the
+    // that arrived within it (never simulated, nor an earlier episode's: see
+    // absorbedIdentity), and that the saved-place rules corroborated for the
     // replacement's place, over its corroborated interval, or an accurate
     // completed Visit at that place (for an unknown replacement, within its
     // radius of the stop).
-    const episodeStartMs = Math.min(stopStartMs, fragmentsStartMs) - tolerance;
     const visitSpans = identity.items.flatMap((item): Array<[number, number]> => {
       const { evidence } = item;
-      if (evidence.kind !== "visit" || evidence.isSimulated === true || reused.has(item) ||
-        Date.parse(evidence.occurredAt) < episodeStartMs) return [];
+      if (evidence.kind !== "visit" || evidence.isSimulated === true || identity.earlier.has(item)) return [];
       const corroborated = arrivalAnalysis.corroboratedVisits.get(evidence.clientEvidenceId);
       if (corroborated && identity.placeId && corroborated.savedPlaceId === identity.placeId) {
-        return Date.parse(corroborated.arrivedAt) < episodeStartMs ? []
+        return Date.parse(corroborated.arrivedAt) < identity.startMs ? []
           : [[Date.parse(corroborated.arrivedAt), Date.parse(corroborated.departedAt)]];
       }
       const point = pointFor(evidence);
