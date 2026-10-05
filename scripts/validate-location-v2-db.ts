@@ -1364,6 +1364,29 @@ async function validateMotionOnlyReviewRetirement() {
     [WORKSPACE_ID, USER_ID]);
   assert.equal(reproposed.rows[0].count, 0, "A location-qualified replacement re-proposed a decided motion-only journey.");
 
+  // The same holds for a journey location evidence qualified (a route fix) and
+  // motion only timed: its decision survives an endpoint ID change.
+  await clearDerivedLocationState();
+  // Motion ends the drive at 09:14, the time of its only route fix, so that fix is not interior lineage.
+  await ingestLocationEvidence(batch("db-motion-timed", [...location, lateRoute, motion("08:00:00", "stationary"),
+    motion("09:10:00", "walking"), motion("09:11:00", "automotive"), motion("09:14:00", "stationary")],
+    "v2_review", acknowledged), session);
+  const timed = await pool.query<{ id: string }>(
+    `select ri.id from review_items ri join commute_segments cs on cs.id = ri.location_segment_id
+     where ri.workspace_id = $1 and ri.user_id = $2 and ri.status = 'open' and cs.metadata ? 'motionTimed'
+       and not cs.metadata ? 'motionSupported'`,
+    [WORKSPACE_ID, USER_ID]);
+  assert.equal(timed.rows.length, 1, "A location-qualified, motion-timed drive was not proposed.");
+  await resolveLocationReviewAction(timed.rows[0].id, { action: "ignore_once_location" }, session);
+  await ingestLocationEvidence(batch("db-motion-timed-late-visit", [{ ...lateVisit, clientEvidenceId: "motion-timed-late-visit" }],
+    "v2_review", acknowledged), session);
+  const timedAfter = await pool.query<{ count: number }>(
+    `select count(*)::integer as count from review_items ri join commute_segments cs on cs.id = ri.location_segment_id
+     where ri.workspace_id = $1 and ri.user_id = $2 and ri.status = 'open'
+       and cs.started_at < '2026-07-20T09:20:00Z' and cs.stopped_at > '2026-07-20T09:10:00Z'`,
+    [WORKSPACE_ID, USER_ID]);
+  assert.equal(timedAfter.rows[0].count, 0, "A decided motion-timed journey was proposed again under a new ID.");
+
   // In v2_enabled the individual emitter carries the same motion fields and still needs Review.
   await clearDerivedLocationState();
   process.env.DAYFRAME_LOCATION_ROLLOUT_MODE = "v2_enabled";

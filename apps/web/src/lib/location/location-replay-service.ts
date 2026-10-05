@@ -321,8 +321,9 @@ async function excludeProtectedReplacements(
       }
     }
   }
-  // A journey only Motion & Fitness showed has no lineage, so the reads above
-  // cannot protect a decision about it. When its endpoints' IDs change, the
+  // A journey only Motion & Fitness showed has no lineage, and one it timed can
+  // hold its only route observation at an adjusted boundary, so the reads above
+  // cannot protect a decision about either. When its endpoints' IDs change, the
   // engine proposes it again under a new ID, possibly now qualified by a late
   // route fix, and a decided endpoint can stretch a re-derived journey over it:
   // a decided or manual motion-only journey on this device holds any candidate
@@ -332,7 +333,7 @@ async function excludeProtectedReplacements(
     `/* decided motion-only journeys */ select s.client_segment_id as "clientSegmentId", s.started_at as "startedAt", s.stopped_at as "stoppedAt"
      from commute_segments s
      where s.workspace_id = $1 and s.user_id = $2 and s.device_id = $3 and s.algorithm_version = $4
-       and s.metadata ? 'motionSupported' and s.status <> 'superseded'
+       and (s.metadata ? 'motionSupported' or s.metadata ? 'motionTimed') and s.status <> 'superseded'
        and s.stopped_at > $5::timestamptz - ($6::int * interval '1 day')
        and (s.continuity_status = 'manual' or (s.created_from_event_id is not null and not exists (
          select 1 from review_items ri
@@ -786,7 +787,8 @@ async function persistCommutes(
         ...(segment.stops?.length ? { stops: segment.stops } : {}),
         // From Motion & Fitness: how it was travelled, and whether motion alone showed the movement.
         ...(segment.travelMode ? { travelMode: segment.travelMode } : {}),
-        ...(segment.motionSupported ? { motionSupported: true } : {})
+        ...(segment.motionSupported ? { motionSupported: true } : {}),
+        ...(segment.motionTimed ? { motionTimed: true } : {})
       })
     ]);
     // Trusted SQL template; only parameter positions vary with the bounded row index.

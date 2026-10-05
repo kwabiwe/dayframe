@@ -158,9 +158,15 @@ export function buildMotionTimeline(
   return { intervals, coverageFromMs, coverageToMs, blocks };
 }
 
-/** Blocks with movement inside the window; one that only touches it does not count. */
+/**
+ * Blocks with movement inside the window: one that only touches it, or whose
+ * bridged stillness alone spans it, does not count.
+ */
 function overlapping(timeline: MotionTimeline, lowerMs: number, upperMs: number) {
-  return timeline.blocks.filter((block) => block.startMs < upperMs && block.endMs > lowerMs);
+  return timeline.blocks.filter((block) => block.startMs < upperMs && block.endMs > lowerMs &&
+    timeline.intervals.some((interval) => travelMode(interval) != null &&
+      interval.fromMs >= block.startMs && interval.toMs <= block.endMs &&
+      interval.fromMs < upperMs && interval.toMs > lowerMs));
 }
 
 /**
@@ -271,7 +277,8 @@ export function refineStayDeparturesWithMotion(
   stays: StaySegment[],
   timeline: MotionTimeline | null,
   config: LocationEngineConfig,
-  locationEvidence: readonly ClassifiedEvidence[] = []
+  locationEvidence: readonly ClassifiedEvidence[] = [],
+  processingAt?: string
 ): StaySegment[] {
   if (!timeline) return stays;
   const thresholds = [config.savedPlaceMinimumDwellMs, config.unknownStayCandidateDwellMs, config.unknownStayReviewDwellMs];
@@ -290,6 +297,10 @@ export function refineStayDeparturesWithMotion(
     const before = Date.parse(stay.stoppedAt) - startedMs;
     const after = departedMs - startedMs;
     if (thresholds.some((threshold) => (before >= threshold) !== (after >= threshold))) return stay;
-    return { ...stay, stoppedAt: new Date(departedMs).toISOString(), locationOnlyStoppedAt: stay.stoppedAt };
+    // Finalisation waits the full lag after both ends: a later end never finalises sooner.
+    const premature = stay.status === "finalised" && processingAt != null &&
+      Date.parse(processingAt) - departedMs < config.segmentFinalisationLagMs;
+    return { ...stay, stoppedAt: new Date(departedMs).toISOString(), locationOnlyStoppedAt: stay.stoppedAt,
+      ...(premature ? { status: "closed" as const } : {}) };
   });
 }

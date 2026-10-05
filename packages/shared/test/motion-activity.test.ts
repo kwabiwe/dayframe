@@ -647,3 +647,49 @@ describe("review round 5", () => {
     for (const leg of rebuilt) expect(minutes(leg.startedAt)).not.toBe(61);
   });
 });
+
+describe("review round 6", () => {
+  const toEvidence = (items: LocationEvidence[]) => items.map((evidence) => ({ evidence, match: null, impliedSpeedMetersPerSecond: null }));
+
+  it("never finalises a stay sooner because motion moved its end later", () => {
+    const stay: StaySegment = {
+      kind: "stay", clientSegmentId: "home", algorithmVersion: config.algorithmVersion, status: "finalised",
+      startedAt: at(0), stoppedAt: at(63), startLowerBoundAt: at(0), startUpperBoundAt: at(0),
+      stopLowerBoundAt: at(61), stopUpperBoundAt: at(65), placeId: HOME_ID, placeMatchKind: "saved", candidatePlaceIds: [],
+      sampleCount: 5, continuityStatus: "continuous", confidence: "high", evidenceIds: []
+    };
+    const timeline = buildMotionTimeline(toEvidence(motion([[0, "stationary"], [64.5, "automotive"], [70, "stationary"]], 80)), config, Date.parse(at(240)));
+    const [early] = refineStayDeparturesWithMotion([stay], timeline, config, [], at(74));
+    expect(early).toMatchObject({ stoppedAt: at(64.5), status: "closed" });
+    expect(assessAutomaticLocation("v2_enabled", early).action).toBe("review");
+    expect(refineStayDeparturesWithMotion([stay], timeline, config, [], at(80))[0].status).toBe("finalised");
+  });
+
+  it("never explains a gap that falls within bridged stillness", () => {
+    const NEAR_SCHOOL = { ...school, latitude: north(1_000) };
+    const evidence = [
+      ...[0, 15, 30, 45, 60, 71.5].map((m, i) => fix(`home-${i}`, m, i % 2 * 3)),
+      ...[72.5, 80, 90, 100].map((m, i) => fix(`school-${i}`, m, 1_000 + i % 2 * 4)),
+      ...motion([[0, "stationary"], [70, "automotive"], [71, "stationary"], [73, "automotive"], [74, "stationary"]], 120)
+    ];
+    const commutes = runLocationEngine({ ...input(evidence), savedPlaces: [home, NEAR_SCHOOL] }).segmentUpserts
+      .filter((segment): segment is CommuteSegment => segment.kind === "commute");
+    expect(commutes.filter((commute) => commute.motionSupported)).toEqual([]);
+  });
+
+  it("rejects an onset when the origin is seen again at the last route timestamp", () => {
+    const shopEast = (id: string, minute: number, metres = 5_000) => fix(id, minute, 0, { longitude: east(metres) });
+    const evidence = [
+      ...[0, 15, 30, 45, 60].map((m, i) => shopEast(`origin-${i}`, m)),
+      ...[70, 72, 74].map((m, i) => fix(`route-${i}`, m, 0, { longitude: east(5_000 - 800 * (i + 1)), speedMetersPerSecond: 12 })),
+      shopEast("origin-late", 78),
+      ...[80, 90, 100].map((m, i) => fix(`dest-${i}`, m, 3_000 + i % 2 * 4, { longitude: east(1_000) })),
+      ...motion([[0, "stationary"], [61, "automotive"], [79, "stationary"]], 120)
+    ];
+    const output = runLocationEngine({ ...input(evidence), savedPlaces: [] });
+    const stays = output.segmentUpserts.filter((segment): segment is StaySegment => segment.kind === "stay");
+    const decided = { ...stays[0], stoppedAt: at(60), stopLowerBoundAt: at(60), stopUpperBoundAt: at(60), locationOnlyStoppedAt: undefined };
+    const rebuilt = deriveCommutes([decided, stays.at(-1)!], output.acceptedEvidence, config, at(240));
+    for (const leg of rebuilt) expect(minutes(leg.startedAt)).not.toBe(61);
+  });
+});

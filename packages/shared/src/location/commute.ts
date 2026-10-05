@@ -916,7 +916,7 @@ export function deriveCommutes(
     const lastRouteMs = routeTimes.length ? Math.max(...routeTimes) : stoppedAtMs;
     const departureUsable = departedMs != null && departedMs < firstRouteMs &&
       (!exitStart || startedAtMs - departedMs <= config.motionBoundaryToleranceMs) &&
-      !originPresenceMs.some((at) => at > departedMs && at < lastRouteMs);
+      !originPresenceMs.some((at) => at > departedMs && at <= lastRouteMs);
     let beganMs = Math.max(departureUsable ? departedMs! : startedAtMs, Date.parse(from.stoppedAt));
     const arrivedMs = motionArrivalMs(motion, routeTimes.length ? Math.max(...routeTimes) : beganMs, stoppedAtMs, config);
     let endedMs = arrivedMs != null && arrivedMs > beganMs ? arrivedMs : stoppedAtMs;
