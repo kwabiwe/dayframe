@@ -2,6 +2,8 @@
 
 Use this when implementing visual UI.
 
+Where a rule here conflicts with the approved Dayframe Blocks direction, it governs only surfaces not yet migrated to Blocks; see the adoption rule in `docs/brand-style-guide.md`.
+
 ## Product Feel
 
 - Match the product domain rather than applying a generic landing-page aesthetic.

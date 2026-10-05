@@ -63,13 +63,13 @@ Haptics:
 | Moment | Haptic |
 | --- | --- |
 | Start | Medium impact |
-| Stop | Success, then a soft impact as the block lands |
+| Stop | One composite haptic, scheduled once: success, then a soft impact as the block lands |
 | Scrub a time, or spin the duration dial | Selection tick per minute or entry |
 | Log or skip a Review item | Success, or a light impact |
 | Delete | Warning |
 
 - Haptics confirm a committed action. They never fire for a background refresh, a reconciliation or a rejected gesture.
-- Rapid repeats fire one haptic per committed action.
+- Rapid repeats fire one haptic, or one composite sequence, per committed action.
 - A Settings switch turns haptics off. The system haptics setting always wins.
 - Haptics are never the only feedback: the visible state change, Undo and VoiceOver announcement still happen.
 - Web has no haptics; the same moments use the landing motion only.

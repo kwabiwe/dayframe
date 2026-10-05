@@ -14,13 +14,13 @@ The owner approved the Dayframe Blocks direction on 5 October 2026. Read the log
 
 Blocks keeps the product, data, storage keys, API contracts and the trust and privacy rules unchanged. It changes how time looks and how it feels to move it around.
 
-Surfaces adopt Blocks one redesign phase at a time. A surface that has not been migrated keeps its current contract in `.codex/reference/components.md` until the PR that migrates it updates that contract. Do not mix the two treatments inside one surface.
+Surfaces adopt Blocks one redesign phase at a time. Wherever an earlier visual rule or check conflicts with a Blocks rule (in this guide, `.codex/reference/style.md`, `.codex/reference/components.md`, `.codex/reference/motion.md`, `docs/dayframe-regression-checklist.md` or `.codex/reference/validation-matrix.md`), the earlier rule governs surfaces that have not been migrated and the Blocks rule governs migrated ones. The PR that migrates a surface updates that surface's contracts and checks. Do not mix the two treatments inside one surface.
 
 Six decisions depart from the earlier Midnight Core rules:
 
 | Decision | Rule | Where it is defined |
 | --- | --- | --- |
-| Coral means live | Coral marks recording and the single primary action on a screen. Selected navigation uses a neutral fill; durations, totals, chart marks and map pins never use coral. | Colour system |
+| Coral means live | Coral marks recording and the single primary action on a screen. Selected navigation uses a neutral fill; durations, totals, chart marks and map pins never use coral. Browser text selection keeps its contrast-safe coral highlight, because it is a system affordance rather than an interface state. | Colour system |
 | Colour is the data | Entries render as solid category blocks with measured text on them, using per-theme display values for the same stored keys. | Category and chart palette |
 | One display face | Bricolage Grotesque for headlines and large numerals only; the system font for everything people read or type. | Typography |
 | Every action lands | Start, stop, log and delete share one landing spring with one small overshoot, one haptic each and an Undo. The live block carries one slow breathing ring. Reduce Motion keeps opacity only. | Motion; `.codex/reference/motion.md` |
@@ -275,8 +275,9 @@ Place these informational rows in a zero-gap divider list and target a measured
 the 44-point targets of actual controls. Sort exact duration descending with
 stable-key ties and preserve that order in the donut. Reports' full-width date
 sheet centres the shared 349-point calendar-content cap and uses four equal
-44-point preset targets with approximately 34-point visible fills. Keep Cancel;
-there is no Clear or dismiss-to-Today treatment.
+44-point preset targets with approximately 34-point visible fills. Done commits
+the draft range; the handle swipe, backdrop, escape and lifecycle invalidation
+discard it. There is no visible Cancel, Clear or dismiss-to-Today treatment.
 
 ## Interface consistency
 
