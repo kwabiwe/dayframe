@@ -70,8 +70,11 @@ Temporal invariants:
   elsewhere; one still stray fix just outside is not leaving), or when it
   stayed there at least `savedPlaceMinimumDwellMs` before it was next seen
   leaving (an early-dated return Visit is followed by approach fixes within
-  three minutes). Either that stay or an accurate fix at the origin that is
-  not moving ends the excursion (for re-reported exits too), so later presence
+  three minutes), or when it had arrived first (nothing away in the three
+  minutes before it, or the readings before it approached) and the readings
+  after it move at least 100 m farther away (a departure; after an early-dated
+  return Visit they approach instead). Any of these, or an accurate fix at the
+  origin that is not moving, ends the excursion (for re-reported exits too), so later presence
   there marks departure again; otherwise it can be the return, and state
   snapshots never count. In a same-place round trip a return Visit or a
   re-reported exit used to become the "departure", shrinking the trip to
@@ -86,10 +89,11 @@ Temporal invariants:
   is never being away or leaving. A trip through stops that only partly covers
   one of its legs (its start moved to such a return) is not assembled; the legs
   stand, so commutes never overlap. Only renewed movement undoes an observed return: at least
-  `outsideConfirmationCount` independent accurate fixes away (a
-  significant-change mirror of a fix is the same observation, though its
-  native speed still counts as movement), one moving or the excursion minimum
-  away; a stray still fix does not. Unchanged and known limitations: a moving
+  `outsideConfirmationCount` independent accurate observations away (a fix
+  and its significant-change mirror are one: it moved when a copy's native
+  speed says so, or, when no copy reports native speed, a copy's implied speed
+  does, so a speedless mirror never overrides reported stillness), one moving
+  or the excursion minimum away; a stray still fix does not. Unchanged and known limitations: a moving
   pass-by at the origin still restarts the journey, because a pass-by and a
   brief return look alike; departure bounds still come from the origin stay;
   with no departure evidence after a long quiet spell the start stays at the

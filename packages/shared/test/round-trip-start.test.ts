@@ -635,6 +635,53 @@ describe("departures after a finished walk (review round 9)", () => {
       expect(Date.parse(trips[index].startedAt)).toBeGreaterThanOrEqual(Date.parse(trips[index - 1].stoppedAt!));
     }
   });
+
+  // Review round 11: presence at Home followed by moving away is a departure even when the walk's return went unrecorded.
+  it.each([false, true])("starts the drive at the last broad Home fix after a walk whose return went unrecorded (to Work: %s)", (work) => {
+    expect(commutes(withWork([...walk(), still("last-home", 49, 0, { horizontalAccuracyMeters: 100 }), ...drive(49.5, work)], work)))
+      .toEqual([expect.objectContaining({ startedAt: at(49) })]);
+  });
+
+  it("keeps a short drive after an entry-only return Review-only", () => {
+    const value = withWork([still("home-0", 0, 0), still("home-1", 10, 0), still("home-2", 18, 0), geofence("walk-exit", 20, "geofence_exit"),
+      e("walk-0", 25, 500, { speedMetersPerSecond: 1.35 }), e("walk-1", 30, 900, { speedMetersPerSecond: 1.35 }), e("walk-2", 35, 400, { speedMetersPerSecond: 1.35 }),
+      geofence("brief-return", 39, "geofence_enter"), e("drive-0", 39.5, 300), e("drive-1", 40.1, 700), e("drive-2", 40.7, 1_100),
+      still("work-0", 41.3, 1_500), still("work-1", 51.3, 1_500), still("work-2", 61.3, 1_500)], true);
+    value.savedPlaces[1] = { ...value.savedPlaces[1], latitude: north(1_500) };
+    const trips = commutes(value);
+    expect(trips).toEqual([expect.objectContaining({ startedAt: at(39) })]);
+    expect(assessAutomaticCommuteRoute(trips[0])).toMatchObject({ eligible: false, reason: "short_journey_review_only" });
+  });
+
+  it("starts the drive at the last broad Home fix when Home is a learned place", () => {
+    const value = withWork([...walk(), still("last-home", 49, 0, { horizontalAccuracyMeters: 100 }), ...drive(49.5, true)], true);
+    const home = value.savedPlaces.shift()!;
+    value.acceptedLearnedPlaces = [{ ...home, accepted: true }];
+    value.evidence = value.evidence.filter((item) => !item.kind.startsWith("geofence_"));
+    expect(commutes(value)).toEqual([expect.objectContaining({ startedAt: at(49) })]);
+  });
+
+  it("keeps a trip through a stop after the walk's return whole, with consistent leg and trip starts", () => {
+    const evidence = [...walk(), geofence("walk-return", 39, "geofence_enter"),
+      e("out-a", 39.6, 200, { horizontalAccuracyMeters: null }), still("out-accurate", 39.7, 400), still("out-accurate-2", 39.8, 500),
+      e("out-b", 40, 750, { horizontalAccuracyMeters: null }), e("out-c", 40.3, 1_000, { horizontalAccuracyMeters: null }),
+      e("stop-visit", 40.5, 1_000, { kind: "visit", horizontalAccuracyMeters: 10, speedMetersPerSecond: null, endedAt: at(50.5), metadata: {} }),
+      e("back-a", 51, 900, { horizontalAccuracyMeters: null }), e("back-b", 51.2, 600, { horizontalAccuracyMeters: null }),
+      still("back-accurate", 51.4, 400), e("back-c", 51.6, 200, { horizontalAccuracyMeters: null }),
+      geofence("last-return", 52, "geofence_enter"), still("final-a", 52.5, 0), still("final-b", 62.5, 0), still("final-c", 72.5, 0)];
+    expect(commutes(withWork(evidence, false))).toEqual([expect.objectContaining({ startedAt: at(39), stoppedAt: at(52), stops: [expect.anything()] })]);
+  });
+
+  it("does not let speedless mirrors turn two still stray fixes into renewed movement", () => {
+    // Each stray's significant-change mirror sorts first at the same time and carries the implied speed from the route.
+    const evidence = [still("home-0", 0, 0), still("home-1", 10, 0), geofence("exit", 20, "geofence_exit"), e("out-0", 21, 500), e("out-1", 22, 1_000),
+      e("out-2", 23, 2_000), e("back-0", 25, 1_000), e("back-1", 26, 600), geofence("return-entry", 27, "geofence_enter"),
+      still("stray-a", 29, 140), still("stray-b", 31, 150), still("home-2", 57, 0), still("home-3", 67, 0), still("home-4", 77, 0)];
+    const mirrors: LocationEvidence[] = evidence.filter((item) => item.clientEvidenceId.startsWith("stray-"))
+      .map((item) => ({ ...item, clientEvidenceId: `${item.clientEvidenceId}-mirror`, kind: "significant_change", speedMetersPerSecond: null, isSimulated: null }));
+    expect(commutes(withWork(evidence, false))).toEqual([]);
+    expect(commutes(withWork([...evidence, ...mirrors], false))).toEqual([]);
+  });
 });
 
 describe("the capture simulator", () => {
