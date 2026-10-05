@@ -83,10 +83,13 @@ A fifth review found four more gaps:
 A sixth review found two more gaps, both fixed:
 
 - Two other replay protection checks (protected replacements and decided boundaries) still treated a retired Review as a decision, so a restored segment could keep its retired boundary or block its own saved-place replacement. All three checks now share one condition, and the database validator covers a restored stay with an earlier end and one that falls below the Review threshold.
-- The saved place's thirty-minute rule for strong points still bridged an edge cluster's silence, because strong matches extend 25 m beyond the circle; a stop on the far side then extended the first one by ten minutes. Edge clusters now use only the unknown-cluster rule. Admitting moving readings beyond the tolerance band, as unknown clusters do, was tried and rejected: it merged the drop-off and moved this stop's times. Each case is a regression that fails on the third-review head, and the corpus and staging week are unchanged.
+- The saved place's thirty-minute rule for strong points still bridged an edge cluster's silence, because strong matches extend 25 m beyond the circle; a stop on the far side then extended the first one by ten minutes. Edge clusters now use only the unknown-cluster rule.
+
+A seventh review found one more gap, now fixed: an Ignore the user queued offline, delivered after replay retired the proposal, was acknowledged but left marked as replay's retirement, so the proposal reopened when its segment returned. It is now recorded as the user's decision. A replay-retired row whose segment disappears again is superseded instead of lingering as a second current stay. The database validator covers both. Admitting moving readings beyond the tolerance band, as unknown clusters do, was tried and rejected: it merged the drop-off and moved this stop's times. Each case is a regression that fails on the third-review head, and the corpus and staging week are unchanged.
 
 ## Not established
 
 - No staging or device validation yet.
 - A stay that begins with a reading just beyond the tolerance band and then moves into it starts at its first in-band reading. Merging the earlier reading could fold a neighbouring shop visit into the place, so it is not done.
 - A genuine visit whose readings centre just outside a small circle and that iOS never confirms becomes a candidate rather than the place. Enlarging that place's radius resolves it.
+- A geofence entry up to five minutes before a stay counts as iOS proof even if a departure lies between them (as for any saved-place match on `main`); limiting proof to one episode is a follow-up.

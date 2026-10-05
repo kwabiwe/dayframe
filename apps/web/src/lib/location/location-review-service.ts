@@ -15,11 +15,13 @@ import type { RequestSession } from "../session";
 import { syncTimeEntryTags } from "../tag-service";
 import { ensureCommuteCategoryId } from "../automatic-category-service";
 import { reviewProposalHash } from "../review-proposal-hash";
+import { SUPERSEDED_REVIEW_SCOPE } from "./location-review-supersession";
 
 type LockedReview = {
   id: string;
   eventId: string;
   status: string;
+  ignoredScope: string | null;
   title: string;
   confidence: string;
   suggestedCategoryId: string | null;
@@ -204,6 +206,7 @@ async function lockLocationReviews(
     `select ri.id,
             ri.event_id as "eventId",
             ri.status,
+            ri.ignored_scope as "ignoredScope",
             ri.title,
             ri.confidence,
             ri.suggested_category_id as "suggestedCategoryId",
@@ -325,6 +328,17 @@ async function resolveClosedLocationReview(
   action: LocationReviewAction,
   session: RequestSession
 ) {
+  // An Ignore queued before replay retired this proposal is still the user's
+  // decision. Record it as theirs, so the proposal is never reopened if its
+  // segment returns, before acknowledging it as already resolved.
+  if (action.action === "ignore_once_location" && item.status === "ignored" && item.ignoredScope === SUPERSEDED_REVIEW_SCOPE) {
+    await client.query(
+      `update review_items set ignored_scope = 'once', resolved_at = now()
+       where id = $1 and workspace_id = $2 and user_id = $3 and ignored_scope = $4`,
+      [item.id, session.workspaceId, session.userId, SUPERSEDED_REVIEW_SCOPE]
+    );
+    await auditCorrection(client, session, "ignore_once", item.segmentId, {});
+  }
   const equivalent =
     (action.action === "ignore_once_location" && item.status === "ignored") ||
     (
