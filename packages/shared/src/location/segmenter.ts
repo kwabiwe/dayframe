@@ -810,7 +810,8 @@ function stayAbsorbingFragments(stop: PhysicalStop, fragments: StaySegment[], id
   startMs: number, accepted: ClassifiedEvidence[], input: LocationEngineInput): StaySegment {
   const base = stayFromPhysicalStop(stop, accepted, input);
   const { evidenceIds, items, placeId } = identity;
-  const startingStay = [base, ...fragments].find((stay) => Date.parse(stay.startedAt) === startMs);
+  // A fragment's own (possibly corroborated) arrival bounds win a tie with the stop's estimate.
+  const startingStay = [...fragments, base].find((stay) => Date.parse(stay.startedAt) === startMs);
   const observedStart = new Date(startMs).toISOString();
   const earliest = startingStay ?? { startedAt: observedStart, startLowerBoundAt: observedStart, startUpperBoundAt: observedStart };
   const latest = [base, ...fragments].reduce((last, stay) => Date.parse(stay.stoppedAt!) > Date.parse(last.stoppedAt!) ? stay : last);
@@ -1666,9 +1667,24 @@ function runLocationEnginePass(input: LocationEngineInput): { output: LocationEn
       (item.evidence.kind === "standard_location" || item.evidence.kind === "significant_change") &&
       item.evidence.isSimulated !== true && accurateCoordinate(item, input);
     const observedMs = identity.items.filter(observation).map(({ evidence }) => Date.parse(evidence.occurredAt));
-    // Interval support from this episode's own Visits (never reused ones).
-    const visitSpans = identity.items.filter((item) => item.evidence.kind === "visit" && item.evidence.endedAt != null && !reused.has(item))
-      .map(({ evidence }): [number, number] => [Date.parse(evidence.occurredAt), Date.parse(evidence.endedAt!)]);
+    // Interval support from this episode's own qualified Visits (never reused
+    // ones): one the saved-place rules corroborated for the replacement's
+    // place, over its corroborated interval, or an accurate completed Visit at
+    // that place (for an unknown replacement, within its radius of the stop).
+    const visitSpans = identity.items.flatMap((item): Array<[number, number]> => {
+      const { evidence } = item;
+      if (evidence.kind !== "visit" || reused.has(item)) return [];
+      const corroborated = arrivalAnalysis.corroboratedVisits.get(evidence.clientEvidenceId);
+      if (corroborated && identity.placeId && corroborated.savedPlaceId === identity.placeId) {
+        return [[Date.parse(corroborated.arrivedAt), Date.parse(corroborated.departedAt)]];
+      }
+      const point = pointFor(evidence);
+      if (!evidence.endedAt || !point || !accurateCoordinate(item, input)) return [];
+      const compatible = identity.placeId
+        ? item.match?.candidates.some((candidate) => candidate.id === identity.placeId && candidate.matchClass !== "outside") ?? false
+        : distanceMeters(stop.centre, point) <= input.config.unknownStayBaseRadiusMeters;
+      return compatible ? [[Date.parse(evidence.occurredAt), Date.parse(evidence.endedAt)]] : [];
+    });
     // A saved replacement never starts before an observation at the place (in
     // its circle or tolerance band): the stop's start can be an estimate
     // between the last fix away and the first one there, and readings beyond

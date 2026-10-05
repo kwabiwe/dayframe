@@ -213,4 +213,32 @@ describe("what an absorbing stop may claim (review round 1)", () => {
     expect(stays(withoutAbsorption(input)).map(({ startedAt, stoppedAt }) => [startedAt, stoppedAt])).toEqual([[at(10), at(26)], [at(56), at(62)]]);
     expect(stays(input).some((stay) => stay.startedAt <= at(20) && (stay.stoppedAt ?? at(200)) >= at(56))).toBe(false);
   });
+
+  // Review round 3.
+  const gap = () => [point("arriving", 0, -1_000, 10), point("inside-1", 10), point("inside-2", 15), point("inside-3", 20),
+    point("inside-4", 65), point("inside-5", 68), point("inside-6", 71), callback("exit", 71.5, "geofence_exit"),
+    point("departing-1", 83, 1_000, 10), point("departing-2", 84, 1_100, 10)];
+  const spanning = (x: number, accuracy: number) => point("visit", 5, x, 0,
+    { kind: "visit", endedAt: at(80), horizontalAccuracyMeters: accuracy, speedMetersPerSecond: null });
+  const bridges = (input: LocationEngineInput) => stays(input).some((stay) => stay.startedAt <= at(20) && (stay.stoppedAt ?? at(200)) >= at(65));
+
+  it.each([0, 200])("never bridges a silence with an unqualified Visit (broad, centred %i m away)", (x) => {
+    const input = compact([...gap(), spanning(x, 120)]);
+    expect(stays(withoutAbsorption(input)).map(({ startedAt, stoppedAt }) => [startedAt, stoppedAt])).toEqual([[at(10), at(20)], [at(65), at(71)]]);
+    expect(bridges(input)).toBe(false);
+  });
+
+  it("still lets an accurate Visit at the place support the silence", () => {
+    expect(bridges(compact([...gap(), spanning(0, 5)]))).toBe(true);
+  });
+
+  it("keeps a fragment's corroborated arrival bounds when the stop's estimate ties its start", () => {
+    const input = compact([point("approach", 0, -1_000, 10), point("arrival", 5, 0, 0, { kind: "visit", horizontalAccuracyMeters: 5, speedMetersPerSecond: null }),
+      callback("entry", 5.2, "geofence_enter"), point("a-1", 10), point("a-2", 15), point("a-3", 20), point("a-4", 25),
+      callback("exit", 26, "geofence_exit"), point("leave-1", 39, 1_000, 10), point("leave-2", 40, 1_100, 10)]);
+    expect(stays(withoutAbsorption(input))[0]).toMatchObject({ startLowerBoundAt: at(5), startUpperBoundAt: at(5) });
+    const [stay] = stays(input);
+    expect(stay).toMatchObject({ startedAt: at(5), startLowerBoundAt: at(5), startUpperBoundAt: at(5) });
+    expect(stay.approximateArrival).toBeUndefined();
+  });
 });
