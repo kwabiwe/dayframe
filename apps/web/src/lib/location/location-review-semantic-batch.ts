@@ -30,17 +30,37 @@ type LearnedPlace = { id: string; name: string; saved: Place | null };
 export async function timeAwayPlaceName(
   client: Pick<pg.PoolClient, "query">, session: RequestSession, segment: CommuteSegment, stayIds: ReadonlyMap<string, string>
 ) {
-  if (segment.fromPlaceId) {
-    const saved = await client.query<{ name: string }>("select name from places where id = $1 and workspace_id = $2",
-      [segment.fromPlaceId, session.workspaceId]);
-    return saved.rows[0]?.name ?? null;
+  return (await timeAwayPlaceNames(client, session, [segment], stayIds)).get(segment.clientSegmentId) ?? null;
+}
+
+/** Batched `timeAwayPlaceName` for every time-away commute among the segments, keyed by client segment ID. */
+async function timeAwayPlaceNames(
+  client: Pick<pg.PoolClient, "query">, session: RequestSession, segments: LocationSegment[], stayIds: ReadonlyMap<string, string>
+) {
+  const timeAway = segments.filter((segment): segment is CommuteSegment => segment.kind === "commute" && isTimeAway(segment));
+  const savedNames = new Map<string, string>();
+  const originNames = new Map<string, string>();
+  const placeIds = [...new Set(timeAway.flatMap((segment) => segment.fromPlaceId ? [segment.fromPlaceId] : []))].sort();
+  const originIds = [...new Set(timeAway.flatMap((segment) => {
+    const originId = segment.fromPlaceId ? undefined : stayIds.get(segment.fromStaySegmentId);
+    return originId ? [originId] : [];
+  }))].sort();
+  for (const ids of chunks(placeIds)) {
+    const result = await client.query<{ id: string; name: string }>(
+      "select id, name from places where workspace_id = $1 and id = any($2::uuid[])", [session.workspaceId, ids]);
+    for (const row of result.rows) savedNames.set(row.id, row.name);
   }
-  const originId = stayIds.get(segment.fromStaySegmentId);
-  if (!originId) return null;
-  const learned = await client.query<{ name: string }>(`select lp.name from stay_segments ss
-    join learned_places lp on lp.id = ss.learned_place_id and lp.workspace_id = ss.workspace_id and lp.user_id = ss.user_id
-    where ss.id = $1 and ss.workspace_id = $2 and ss.user_id = $3`, [originId, session.workspaceId, session.userId]);
-  return learned.rows[0]?.name ?? null;
+  for (const ids of chunks(originIds)) {
+    const result = await client.query<{ id: string; name: string }>(`select ss.id, lp.name from stay_segments ss
+      join learned_places lp on lp.id = ss.learned_place_id and lp.workspace_id = ss.workspace_id and lp.user_id = ss.user_id
+      where ss.workspace_id = $1 and ss.user_id = $2 and ss.id = any($3::uuid[])`, [session.workspaceId, session.userId, ids]);
+    for (const row of result.rows) originNames.set(row.id, row.name);
+  }
+  return new Map(timeAway.map((segment) => {
+    const originId = stayIds.get(segment.fromStaySegmentId);
+    const name = segment.fromPlaceId ? savedNames.get(segment.fromPlaceId) : originId ? originNames.get(originId) : undefined;
+    return [segment.clientSegmentId, name ?? null] as const;
+  }));
 }
 
 async function displayContext(
@@ -50,12 +70,7 @@ async function displayContext(
   const places = new Map<string, Place>();
   const learned = new Map<string, LearnedPlace>();
   // Time away is named after the place it was away from.
-  const timeAwayNames = new Map<string, string | null>();
-  for (const segment of segments) {
-    if (segment.kind === "commute" && isTimeAway(segment)) {
-      timeAwayNames.set(segment.clientSegmentId, await timeAwayPlaceName(client, session, segment, stayIds));
-    }
-  }
+  const timeAwayNames = await timeAwayPlaceNames(client, session, segments, stayIds);
   const placeIds = [...new Set(stays.flatMap(s => s.placeId ? [s.placeId] : []))].sort();
   const learnedIds = [...new Set(stays.flatMap(s => s.learnedPlaceId ? [s.learnedPlaceId] : []))].sort();
   // Saved places belong to a workspace; learned places additionally belong to a user.

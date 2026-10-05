@@ -81,7 +81,9 @@ export function LocationEvidenceMap({
       <MapView
         accessibilityLabel={showDetails
           ? `Location evidence map. ${evidence.textualSummary}`
-          : evidence.segment.kind === "commute"
+          : evidence.segment.timeAway
+            ? "Map of readings while you were away."
+            : evidence.segment.kind === "commute"
             ? `Approximate commute map with Start and End markers${usesApproximateFallback ? ". Detailed path unavailable" : ""}.`
             : "Map showing the detected visit location."}
         initialRegion={{ ...centre, latitudeDelta, longitudeDelta }}

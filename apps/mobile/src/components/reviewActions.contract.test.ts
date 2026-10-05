@@ -120,6 +120,8 @@ describe("mobile Review action contracts", () => {
     expect(evidenceMapSource).toContain('title="Start"');
     expect(evidenceMapSource).toContain('title="End"');
     expect(evidenceMapSource).toContain("Approximate route · detailed path unavailable");
+    // Time away is an absence: no commute map wording (the server sends no route line for it).
+    expect(evidenceMapSource).toContain('? "Map of readings while you were away."');
     expect(evidenceMapSource).toContain("showDetails ? evidence.map.anchors.map");
     expect(evidenceEditorSource).toContain('selectedPoint={evidence.segment.kind === "stay"');
     expect(evidenceEditorSource).not.toContain('|| "No saved place"');

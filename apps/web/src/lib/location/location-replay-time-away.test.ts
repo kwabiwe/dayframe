@@ -39,14 +39,13 @@ const commute = (id: string, from: StaySegment, to: StaySegment, reason: Commute
   continuityStatus: "continuous", confidence: reason === "same_place_outing" ? "low" : "medium", qualificationReason: reason, evidenceIds: []
 });
 
-describe("Location replay time away", () => {
-  it("never lets a rebuilt time-away item span a qualified journey (review finding 1)", async () => {
+async function replayWithDecidedReturn(protectedLinks: Array<Record<string, unknown>> = []) {
     const before = stay("stay-home-am", at(12, 0), at(13, 1), home.map((item) => item.clientEvidenceId), HOME);
     const after = stay("stay-home-pm", at(13, 8), at(14, 40), back.map((item) => item.clientEvidenceId), HOME);
     const first = stay("stay-a", at(13, 30), at(14, 1), [], null);
     const second = stay("stay-b", at(14, 10), at(14, 15), [], null);
     const segments = [before, commute(stableLocationId("commute", [before.clientSegmentId, after.clientSegmentId]), before, after, "same_place_outing"), after, first,
-      commute("commute-journey", first, second, "significant_endpoint_displacement"), second];
+      { ...commute("commute-journey", first, second, "significant_endpoint_displacement"), evidenceIds: ["away-12"] }, second];
     engine.output = {
       nextState: { algorithmVersion: version, mode: "idle", activeSegmentId: null, processedEvidenceIds: [], lastProcessedAt: null },
       acceptedEvidence: evidence.map((item): ClassifiedEvidence => ({ evidence: item, match: null, impliedSpeedMetersPerSecond: null })),
@@ -59,6 +58,7 @@ describe("Location replay time away", () => {
       .map((segment) => ({ id: `db-${segment.clientSegmentId}`, clientSegmentId: segment.clientSegmentId }));
     const query = vi.fn(async (sql: string) => {
       if (sql.includes("decided stay bounds")) return { rows: [canonical] };
+      if (sql.includes("for update of s")) return { rows: sql.includes("from commute_segments s") ? protectedLinks : [] };
       if (sql.includes("insert into stay_segments")) return { rows: stayRows };
       if (sql.includes("from places\n")) return { rows: [{ id: HOME, name: "Home", latitude: 0, longitude: 0, radiusMeters: 100 }] };
       if (sql.includes("from stay_segments") && sql.includes("for update")) return { rows: [{
@@ -69,9 +69,23 @@ describe("Location replay time away", () => {
       workspaceId: "workspace-private", userId: "user-private", authMode: "provider", scopes: []
     }, { deviceId: DEVICE, algorithmVersion: version, processingAt: at(18, 0) });
     const commutes = server.segments.filter((segment): segment is CommuteSegment => segment.kind === "commute");
-    expect(commutes.map((segment) => segment.clientSegmentId)).toContain("commute-journey");
     const overlapping = commutes.filter((segment) => segment.qualificationReason === "same_place_outing" &&
       Date.parse(segment.startedAt) < Date.parse(at(14, 10)) && Date.parse(segment.stoppedAt) > Date.parse(at(14, 1)));
+    return { commutes, overlapping };
+}
+
+describe("Location replay time away", () => {
+  it("never lets a rebuilt time-away item span a qualified journey (review finding 1)", async () => {
+    const { commutes, overlapping } = await replayWithDecidedReturn();
+    expect(commutes.map((segment) => segment.clientSegmentId)).toContain("commute-journey");
+    expect(overlapping).toEqual([]);
+  });
+
+  it("never lets a rebuilt time-away item claim a decided journey's evidence (round 2 finding 1)", async () => {
+    // The decided journey row keeps its own ID; its changed-ID replacement is held, so no kept journey remains.
+    const { commutes, overlapping } = await replayWithDecidedReturn([{ clientSegmentId: "decided-journey",
+      clientEvidenceId: "away-12", kind: "standard_location", occurredAt: at(14, 3), startedAt: at(14, 1), stoppedAt: at(14, 10) }]);
+    expect(commutes.map((segment) => segment.clientSegmentId)).not.toContain("commute-journey");
     expect(overlapping).toEqual([]);
   });
 });

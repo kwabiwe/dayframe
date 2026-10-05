@@ -10,7 +10,8 @@ export type LocationEvidenceMapMode =
 export function locationEvidenceMapMode(evidence: LocationReviewEvidenceDto): LocationEvidenceMapMode {
   if (evidence.map.route?.coordinates.length) return "observed_route";
   if (evidence.map.straightLineFallback?.coordinates.length) return "endpoint_estimate";
-  if (evidence.map.centre) return "detected_area";
+  // Time away is an absence: its readings are evidence to inspect, not a detected stay area.
+  if (evidence.map.centre && !evidence.segment.timeAway) return "detected_area";
   if (
     evidence.map.acceptedSamples.length ||
     evidence.map.rejectedSamples.some((sample) => sample.point) ||

@@ -1,9 +1,10 @@
 import { describe, expect, it } from "vitest";
 import { assessAutomaticLocation } from "../src/location/automaticPolicy";
+import { deriveCommutes } from "../src/location/commute";
 import { LOCATION_ENGINE_V2_CONFIG as config } from "../src/location/config";
 import { runLocationEngine } from "../src/location/segmenter";
 import { isTimeAway, timeAwayTitle } from "../src/location/tripStopPresentation";
-import type { CommuteSegment, LocationEngineInput, LocationEvidence } from "../src/location/types";
+import type { ClassifiedEvidence, CommuteSegment, LocationEngineInput, LocationEvidence, StaySegment } from "../src/location/types";
 import { simulate, type Scenario, type SimPlace } from "./fixtures/captureSimulator";
 
 // Synthetic geometry only: Home at the origin; positions in metres east/north.
@@ -100,6 +101,30 @@ describe("time away from a saved place", () => {
     const away = outings({ ...input(evidence), savedPlaces: [], acceptedLearnedPlaces: [learned] });
     expect(away).toHaveLength(1);
     expect(away[0]).toMatchObject({ fromPlaceId: null, qualificationReason: "same_place_outing" });
+  });
+
+  it("offers nothing around a stop when neither stay was identified as the place (Fable review)", () => {
+    const stay = (id: string, from: number, to: number, kind: StaySegment["placeMatchKind"]): StaySegment => ({
+      kind: "stay", clientSegmentId: id, algorithmVersion: config.algorithmVersion, status: "finalised", startedAt: at(from), stoppedAt: at(to),
+      placeId: kind === "unknown" ? null : HOME_ID, placeMatchKind: kind, candidatePlaceIds: [], centreLatitude: 0, centreLongitude: 0,
+      radiusMeters: 100, sampleCount: 3, continuityStatus: "continuous", confidence: "medium", evidenceIds: []
+    });
+    const route = [fix("r-0", 61, 400, { speedMetersPerSecond: 3 }), fix("r-1", 69, 380, { speedMetersPerSecond: 3 })]
+      .map((evidence): ClassifiedEvidence => ({ evidence, match: null, impliedSpeedMetersPerSecond: null }));
+    const derive = (kind: StaySegment["placeMatchKind"]) => deriveCommutes([stay("a", 0, 60, kind), stay("b", 70, 150, kind)], route,
+      config, at(600), { interiorStops: [stay("stop", 63, 67, "unknown")], savedPlaces: [home] })
+      .filter((commute) => commute.qualificationReason === "same_place_outing");
+    expect(derive("saved")).toHaveLength(1);
+    expect(derive("ambiguous")).toEqual([]);
+  });
+
+  it("counts a reading and its mirrored copy as one observation (round 2 finding 2)", () => {
+    const mirrored = (seconds: number) => [fix("std", 63, 300), fix("sig", 63 + seconds / 60, 301, { kind: "significant_change" })];
+    const run = (seconds: number) => outings(input([...homeFixes("am", 0, 60), crossing("exit", 60.5, "geofence_exit"),
+      ...mirrored(seconds), crossing("enter", 70, "geofence_enter"), ...homeFixes("pm", 71, 150)]));
+    expect(run(0)).toEqual([]);
+    expect(run(4)).toEqual([]);
+    expect(run(60)).toHaveLength(1);
   });
 
   it("offers nothing for an absence under five minutes", () => {

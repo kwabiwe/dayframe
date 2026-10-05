@@ -698,6 +698,9 @@ function distinctKnownPlaces(from: StaySegment, to: StaySegment) {
   return known(from) && known(to) && !sameKnownEndpoint(from, to);
 }
 
+/** Native mirrors of one reading arrive within seconds of each other from another source. */
+const PLACE_OUTING_MIRROR_WINDOW_MS = 5_000;
+
 export type CommuteDerivationOptions = {
   inferredBoundaryStayIds?: ReadonlySet<string>;
   /** Short stops between the given stays; their evidence is not route evidence. */
@@ -817,7 +820,9 @@ export function deriveCommutes(
     // came back, but no journey qualifies (a short drive or walk to a shop).
     // It claims only the absence, never travel, so it needs no route.
     const timeAway = () => {
-      if (!sameKnownEndpoint(from, to)) return false;
+      // Both stays identified as the place itself, never an ambiguous match.
+      const identified = (stay: StaySegment) => stay.placeMatchKind === "saved" || stay.placeMatchKind === "learned";
+      if (!sameKnownEndpoint(from, to) || !identified(from) || !identified(to)) return false;
       const awayMs = stoppedAtMs - startedAtMs;
       if (awayMs < config.placeOutingMinimumMs || awayMs > config.commuteMaximumDurationMs) return false;
       if (stops.length) return true;
@@ -826,13 +831,24 @@ export function deriveCommutes(
       if (!place) return false;
       const centre = { latitude: place.latitude, longitude: place.longitude };
       const distance = Math.max(config.placeOutingMinimumDistanceMeters, place.radiusMeters);
-      const away = new Set(routeEvidence.flatMap((item) => {
+      // Independent observations only: a repeated coordinate, or a mirrored
+      // copy from another source within a few seconds, counts once.
+      const seenAt = new Map<string, number>();
+      const coordinates = new Set<string>();
+      let observations = 0;
+      for (const item of routeEvidence) {
         const point = evidencePoint(item);
-        return point && accurateFix(item, config) &&
-          distanceMeters(centre, point) - (item.evidence.horizontalAccuracyMeters ?? 0) >= distance
-          ? [`${item.evidence.latitude},${item.evidence.longitude}`] : [];
-      }));
-      return away.size >= config.outsideConfirmationCount;
+        if (!point || !accurateFix(item, config) ||
+          distanceMeters(centre, point) - (item.evidence.horizontalAccuracyMeters ?? 0) < distance) continue;
+        const coordinate = `${item.evidence.latitude},${item.evidence.longitude}`;
+        const atMs = Date.parse(item.evidence.occurredAt);
+        const lastMs = seenAt.get(item.evidence.deviceId);
+        if (coordinates.has(coordinate) || lastMs != null && Math.abs(atMs - lastMs) <= PLACE_OUTING_MIRROR_WINDOW_MS) continue;
+        coordinates.add(coordinate);
+        seenAt.set(item.evidence.deviceId, atMs);
+        observations += 1;
+      }
+      return observations >= config.outsideConfirmationCount;
     };
     const outing: CommuteQualification = { qualifies: true, reason: "same_place_outing", confidence: "low" };
     if (!portionsShowMovement && !timeAway()) continue;
