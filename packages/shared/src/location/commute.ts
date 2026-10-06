@@ -1,6 +1,15 @@
 import { distanceMeters, stableLocationId } from "./geo";
 import type { LocationEngineConfig } from "./config";
 import {
+  buildMotionTimeline,
+  isMotionEvidence,
+  locationOnlyStayEnd,
+  motionArrivalMs,
+  motionDepartureMs,
+  motionJourneyBlock,
+  motionTravelMode
+} from "./motionActivity";
+import {
   crossesUnsupportedSavedPlaceArrivalWitness,
   type SavedPlaceArrivalWitness
 } from "./savedPlaceArrivalSupport";
@@ -713,12 +722,18 @@ export type CommuteDerivationOptions = {
 
 export function deriveCommutes(
   stays: StaySegment[],
-  acceptedEvidence: ClassifiedEvidence[],
+  evidenceWithMotion: ClassifiedEvidence[],
   config: LocationEngineConfig,
   processingAt: string,
   options: CommuteDerivationOptions = {}
 ) {
   const commutes: CommuteSegment[] = [];
+  // Motion & Fitness activity times journeys and shows movement where GPS was
+  // silent; it is never a position, route sample or observation of a place.
+  const motion = buildMotionTimeline(evidenceWithMotion, config, Date.parse(processingAt));
+  const acceptedEvidence = motion
+    ? evidenceWithMotion.filter((item) => !isMotionEvidence(item.evidence))
+    : evidenceWithMotion;
   // This invocation's evidence is immutable. Both per-pair scans below need
   // the same timestamps; parse once rather than twice per evidence/stay pair.
   // Keep the original array/filter order and strict endpoint comparisons.
@@ -734,7 +749,9 @@ export function deriveCommutes(
     const from = stays[index - 1];
     const to = stays[index];
     if (!from.stoppedAt) continue;
-    const originalStartedAtMs = Date.parse(from.stoppedAt);
+    // Qualification, route evidence and departure support use location
+    // evidence alone; motion only times the journey afterwards.
+    const originalStartedAtMs = Date.parse(locationOnlyStayEnd(from) ?? from.stoppedAt);
     const stoppedAtMs = Date.parse(to.startedAt);
     const boundaryEvidence = acceptedEvidence.filter((_item, evidenceIndex) => {
       const at = occurredAtMs[evidenceIndex];
@@ -769,6 +786,10 @@ export function deriveCommutes(
         returnedMs = observedReturnMs(to, gapEvidence, config, returnedMs, snapshots)
       ) startedAtMs = returnedMs;
     }
+    // The latest sign the device was still at its origin: Core Motion's
+    // departure can never precede it. An exit is departure evidence, not presence.
+    const exitStart = latestFromSupport?.evidence.kind === "geofence_exit" && startedAtMs === Date.parse(latestFromSupport.evidence.occurredAt);
+    let presentUntilMs = Math.max(Date.parse(from.stopLowerBoundAt ?? locationOnlyStayEnd(from) ?? from.stoppedAt), exitStart ? -Infinity : startedAtMs);
     const fromHasInferredBoundary = options.inferredBoundaryStayIds?.has(from.clientSegmentId) === true;
     const toHasInferredBoundary = options.inferredBoundaryStayIds?.has(to.clientSegmentId) === true;
     const anyEndpointHasInferredBoundary = fromHasInferredBoundary || toHasInferredBoundary;
@@ -810,6 +831,40 @@ export function deriveCommutes(
       to,
       stops
     });
+    const routeTimes = routeEvidence.map(({ evidence }) => Date.parse(evidence.occurredAt));
+    // Motion timing works between the last sign of the origin and the first
+    // observation away from it. An unknown origin has no place identity, so
+    // accurate fixes and Visits within its radius are presence, not route.
+    let firstAwayMs = stoppedAtMs;
+    const originPresenceMs: number[] = [];
+    if (motion) {
+      const origin = segmentPoint(from);
+      const radius = from.radiusMeters ?? config.unknownStayBaseRadiusMeters;
+      const atOrigin = (item: ClassifiedEvidence) => {
+        if (evidenceMatchesStay(item, from)) return true;
+        const point = evidencePoint(item);
+        const accurate = accurateFix(item, config) || item.evidence.kind === "visit" &&
+          item.evidence.horizontalAccuracyMeters != null && item.evidence.horizontalAccuracyMeters <= config.highQualityHorizontalAccuracyMeters;
+        return origin != null && point != null && accurate && distanceMeters(origin, point) <= radius;
+      };
+      for (const [evidenceIndex, item] of acceptedEvidence.entries()) {
+        const at = occurredAtMs[evidenceIndex];
+        if (!(at > presentUntilMs && at < stoppedAtMs) || snapshots.has(item) ||
+          item.evidence.kind === "geofence_exit" || item.evidence.kind === "geofence_state") continue;
+        if (ownedByDestination.has(item.evidence.clientEvidenceId)) continue;
+        if (atOrigin(item)) {
+          originPresenceMs.push(at);
+          if (firstAwayMs === stoppedAtMs) presentUntilMs = at;
+        } else if (evidencePoint(item) != null && firstAwayMs === stoppedAtMs) firstAwayMs = at;
+      }
+    }
+    const firstRouteMs = Math.min(firstAwayMs, ...routeTimes.filter((at) => at > presentUntilMs));
+    // The one journey Core Motion saw between the last sign of the origin and
+    // the destination, if it saw exactly one.
+    const motionJourney = () => summary.straightLineDistanceMeters == null || summary.sameKnownPlace || stops.length
+      ? null
+      : motionJourneyBlock(motion, presentUntilMs, stoppedAtMs, summary.straightLineDistanceMeters, config);
+    let motionSupported = false;
     if (duration < config.commuteMinimumDurationMs) {
       if (summary.sameKnownPlace || summary.straightLineDistanceMeters == null ||
         summary.straightLineDistanceMeters < config.commuteMinimumEndpointDistanceMeters) continue;
@@ -817,9 +872,23 @@ export function deriveCommutes(
       const required = distinctKnownPlaces(from, to)
         ? config.commuteKnownPlacesShortJourneySpeedSamples
         : config.commuteMinimumReliableSpeedSamples;
-      if (!hasIndependentShortJourneyProof(routeEvidence, shortProof, startedAtMs, stoppedAtMs, required)) continue;
+      if (!hasIndependentShortJourneyProof(routeEvidence, shortProof, startedAtMs, stoppedAtMs, required)) {
+        // Too few fast fixes, but Core Motion saw one drive or ride between the places.
+        const journey = motionJourney();
+        if (!journey || (journey.mode !== "automotive" && journey.mode !== "cycling")) continue;
+        motionSupported = true;
+      }
     }
     let qualification = qualifyCommuteCandidate(summary, config);
+    // Distant endpoints with no route observation: GPS was silent for the whole
+    // journey. One moving block bounded by stillness shows it happened; it is
+    // never more than low confidence, so it always needs Review.
+    if (!qualification.qualifies && qualification.reason === "insufficient_evidence" && summary.routeSampleCount === 0 &&
+      summary.straightLineDistanceMeters != null &&
+      summary.straightLineDistanceMeters >= config.commuteMinimumEndpointDistanceMeters && motionJourney()) {
+      qualification = { qualifies: true, reason: "significant_endpoint_displacement", confidence: "low" };
+      motionSupported = true;
+    }
     // Each leg already proved a real journey to or from a recorded stop; the
     // whole trip through those stops is therefore real even when the combined
     // route is shorter than the same-place round-trip minimum.
@@ -835,6 +904,36 @@ export function deriveCommutes(
     }
     if (!qualification.qualifies) continue;
     const evidenceIds = routeEvidence.map(({ evidence }) => evidence.clientEvidenceId);
+    // Core Motion times the qualified journey: movement that began after the
+    // last sign of the origin and before the first route observation starts it
+    // (an exit callback fires part-way through the departure it reports, so the
+    // onset may precede it by at most `motionBoundaryToleranceMs`), and
+    // stillness after the last route observation, before the destination's
+    // first observation, ends it. It never starts before its origin stay ends.
+    // Evidence summaries and qualification keep the observed window.
+    const departedMs = motionDepartureMs(motion, presentUntilMs, firstRouteMs, config);
+    // A later sign of the origin before the last route observation contradicts the onset.
+    const lastRouteMs = routeTimes.length ? Math.max(...routeTimes) : stoppedAtMs;
+    const departureUsable = departedMs != null && departedMs < firstRouteMs &&
+      (!exitStart || startedAtMs - departedMs <= config.motionBoundaryToleranceMs) &&
+      !originPresenceMs.some((at) => at > departedMs && at <= lastRouteMs);
+    let beganMs = Math.max(departureUsable ? departedMs! : startedAtMs, Date.parse(from.stoppedAt));
+    const arrivedMs = motionArrivalMs(motion, routeTimes.length ? Math.max(...routeTimes) : beganMs, stoppedAtMs, config);
+    let endedMs = arrivedMs != null && arrivedMs > beganMs ? arrivedMs : stoppedAtMs;
+    // A journey always has a positive window that starts no later than its route;
+    // if motion cannot give one, the location-only times stand.
+    if (!(endedMs > beganMs) || beganMs > (routeTimes.length ? Math.min(...routeTimes) : stoppedAtMs)) {
+      beganMs = Math.max(startedAtMs, Date.parse(locationOnlyStayEnd(from) ?? from.stoppedAt));
+      endedMs = stoppedAtMs;
+      if (!(endedMs > beganMs)) continue;
+    }
+    // Motion never makes a journey more eligible for automatic logging: one it
+    // timed or qualified always needs Review.
+    const motionTimed = beganMs !== startedAtMs || endedMs !== stoppedAtMs ||
+      (from.locationOnlyStoppedAt != null && from.locationOnlyStoppedAt !== from.stoppedAt && beganMs === Date.parse(from.stoppedAt));
+    const stopLowerBoundAt = to.startLowerBoundAt ?? to.startedAt;
+    const startUpperBoundAt = from.stopUpperBoundAt ?? routeEvidence[0]?.evidence.occurredAt ?? from.stoppedAt;
+    const travelMode = motionTravelMode(motion, beganMs, endedMs, config);
     const uncertainBoundary =
       summary.routeSampleCount < 2 ||
       summary.maximumObservationGapSeconds * 1_000 > config.maxContinuityGapMs ||
@@ -848,11 +947,12 @@ export function deriveCommutes(
         Date.parse(processingAt) - stoppedAtMs >= config.segmentFinalisationLagMs
           ? "finalised"
           : "closed",
-      startedAt: new Date(startedAtMs).toISOString(),
-      stoppedAt: to.startedAt,
+      startedAt: new Date(beganMs).toISOString(),
+      stoppedAt: endedMs === stoppedAtMs ? to.startedAt : new Date(endedMs).toISOString(),
       startLowerBoundAt: from.stopLowerBoundAt ?? from.stoppedAt,
-      startUpperBoundAt: from.stopUpperBoundAt ?? routeEvidence[0]?.evidence.occurredAt ?? from.stoppedAt,
-      stopLowerBoundAt: to.startLowerBoundAt ?? to.startedAt,
+      // The estimate always lies within its bounds; motion only ever widens them.
+      startUpperBoundAt: beganMs > Date.parse(startUpperBoundAt) ? new Date(beganMs).toISOString() : startUpperBoundAt,
+      stopLowerBoundAt: endedMs < Date.parse(stopLowerBoundAt) ? new Date(endedMs).toISOString() : stopLowerBoundAt,
       stopUpperBoundAt: to.startUpperBoundAt ?? to.startedAt,
       fromStaySegmentId: from.clientSegmentId,
       toStaySegmentId: to.clientSegmentId,
@@ -865,16 +965,19 @@ export function deriveCommutes(
           ? null
           : Math.round(summary.straightLineDistanceMeters),
       routeSampleCount: summary.routeSampleCount,
-      gapDurationSeconds: Math.round(duration / 1_000),
+      gapDurationSeconds: Math.round((endedMs - beganMs) / 1_000),
       maximumObservationGapSeconds: summary.maximumObservationGapSeconds,
       continuityStatus: uncertainBoundary ? "uncertain_gap" : "continuous",
-      confidence: anyEndpointHasInferredBoundary
+      confidence: anyEndpointHasInferredBoundary || motionSupported
         ? "low"
         : uncertainBoundary && qualification.confidence === "medium_high"
           ? "medium"
           : qualification.confidence,
       qualificationReason: qualification.reason,
       ...(stops.length ? { stops: stops.map(stopFromStay) } : {}),
+      ...(travelMode ? { travelMode } : {}),
+      ...(motionSupported ? { motionSupported: true as const } : {}),
+      ...(motionTimed ? { motionTimed: true as const } : {}),
       evidenceIds
     });
   }
@@ -943,8 +1046,9 @@ export function assembleTripsThroughStops(
   processingAt: string,
   options: CommuteDerivationOptions = {}
 ) {
+  // Membership uses location evidence alone: motion never turns a stop into a visit or back.
   const minorStop = (stay: StaySegment) => stay.placeMatchKind === "unknown" && stay.stoppedAt != null &&
-    Date.parse(stay.stoppedAt) - Date.parse(stay.startedAt) < config.unknownStayReviewDwellMs;
+    Date.parse(locationOnlyStayEnd(stay) ?? stay.stoppedAt) - Date.parse(stay.startedAt) < config.unknownStayReviewDwellMs;
   const interiorStops = stays.filter(minorStop);
   if (!interiorStops.length) return legs;
   const majors = stays.filter((stay) => !minorStop(stay));
@@ -955,7 +1059,8 @@ export function assembleTripsThroughStops(
     let confidence: CommuteSegment["confidence"] | null = null;
     for (let hops = 0; hops <= interiorStops.length; hops += 1) {
       const leg = legs.find((candidate) => candidate.fromStaySegmentId === current);
-      if (!leg) return null;
+      // A leg only Motion & Fitness qualified cannot make a trip real.
+      if (!leg || leg.motionSupported) return null;
       confidence = confidence == null || order.indexOf(leg.confidence) < order.indexOf(confidence) ? leg.confidence : confidence;
       if (leg.toStaySegmentId === toStayId) return confidence;
       if (!interiorIds.has(leg.toStaySegmentId)) return null;

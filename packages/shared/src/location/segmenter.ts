@@ -3,6 +3,7 @@ import { assembleTripsThroughStops, deriveCommutes } from "./commute";
 import { detectPhysicalStops, type PhysicalStop } from "./physicalStops";
 import { accuracyWeightedCentre, distanceMeters, midpointTimeIso, stableLocationId } from "./geo";
 import { matchLocationToPlaces } from "./placeMatcher";
+import { buildMotionTimeline, isMotionEvidence, refineStayDeparturesWithMotion } from "./motionActivity";
 import { analyseSavedPlaceArrivalEvidence } from "./savedPlaceArrivalSupport";
 import type {
   ClassifiedEvidence,
@@ -24,7 +25,8 @@ const SOURCE_PRECEDENCE: Record<LocationEvidence["kind"], number> = {
   standard_location: 5,
   location_resumed: 6,
   location_paused: 7,
-  provider_status: 8
+  provider_status: 8,
+  motion_activity: 9
 };
 
 type WorkingStay = {
@@ -1327,7 +1329,10 @@ export function runLocationEngine(input: LocationEngineInput): LocationEngineOut
 }
 
 function runLocationEnginePass(input: LocationEngineInput): { output: LocationEngineOutput; unusedCompanionIds: string[] } {
-  const { accepted, rejectedEvidence } = preprocess(input);
+  const { accepted: acceptedWithMotion, rejectedEvidence } = preprocess(input);
+  // Motion & Fitness activity is not a location observation: stays, physical
+  // stops and continuity never see it. Only journey timing uses it, below.
+  const accepted = acceptedWithMotion.filter((item) => !isMotionEvidence(item.evidence));
   resolveCorroboratedCoincidentVisits(accepted, input);
   resolveCorroboratedCoincidentArrivals(accepted, input);
   const arrivalAnalysis = analyseSavedPlaceArrivalEvidence(accepted, input);
@@ -1838,7 +1843,10 @@ function runLocationEnginePass(input: LocationEngineInput): { output: LocationEn
   }
   const rawStays = [...promotedStays.filter((stay) => !absorbed.has(stay)), ...physicalStays]
     .sort((a, b) => Date.parse(a.startedAt) - Date.parse(b.startedAt));
-  const stays = coalesceCompatibleUnknownStays(rawStays, accepted, input);
+  const stays = refineStayDeparturesWithMotion(coalesceCompatibleUnknownStays(rawStays, accepted, input),
+    acceptedWithMotion.length === accepted.length ? null
+      : buildMotionTimeline(acceptedWithMotion, input.config, Date.parse(input.processingAt)),
+    input.config, accepted, input.processingAt);
   // A stay inherits an inferred boundary from every promoted stay it absorbed
   // or coalesced (whose evidence it contains), so commutes ending there stay
   // low-confidence whatever its own ID.
@@ -1848,12 +1856,12 @@ function runLocationEnginePass(input: LocationEngineInput): { output: LocationEn
     return inferredStays.some((inferred) => inferred.clientSegmentId === stay.clientSegmentId ||
       inferred.evidenceIds.every((id) => evidenceIds.has(id)));
   }).map((stay) => stay.clientSegmentId));
-  const legs = deriveCommutes(stays, accepted, input.config, input.processingAt, {
+  const legs = deriveCommutes(stays, acceptedWithMotion, input.config, input.processingAt, {
     inferredBoundaryStayIds,
     arrivalWitnesses: arrivalAnalysis.witnesses,
     savedPlaces: input.savedPlaces
   });
-  const commutes = assembleTripsThroughStops(legs, stays, accepted, input.config, input.processingAt, {
+  const commutes = assembleTripsThroughStops(legs, stays, acceptedWithMotion, input.config, input.processingAt, {
     inferredBoundaryStayIds,
     arrivalWitnesses: arrivalAnalysis.witnesses,
     savedPlaces: input.savedPlaces
@@ -1862,7 +1870,7 @@ function runLocationEnginePass(input: LocationEngineInput): { output: LocationEn
   const finalisedSegments = segments.filter((segment) => segment.status === "finalised");
   const processedEvidenceIds = [...new Set([
     ...input.priorState.processedEvidenceIds,
-    ...accepted.map(({ evidence }) => evidence.clientEvidenceId),
+    ...acceptedWithMotion.map(({ evidence }) => evidence.clientEvidenceId),
     ...rejectedEvidence.map((evidence) => evidence.clientEvidenceId)
   ])].sort();
   const activeStay = stays.find((stay) => stay.status === "open") ?? null;
@@ -1884,13 +1892,13 @@ function runLocationEnginePass(input: LocationEngineInput): { output: LocationEn
       processedEvidenceIds,
       lastProcessedAt: accepted.at(-1)?.evidence.occurredAt ?? input.priorState.lastProcessedAt
     },
-    acceptedEvidence: accepted,
+    acceptedEvidence: acceptedWithMotion,
     rejectedEvidence,
     segmentUpserts: segments,
     finalisedSegments,
     diagnostics: {
       inputCount: input.evidence.length,
-      acceptedCount: accepted.length,
+      acceptedCount: acceptedWithMotion.length,
       rejectedCount: rejectedEvidence.length,
       duplicateCount: rejectedEvidence.filter((item) => item.reason === "duplicate").length,
       stayCount: stays.length,

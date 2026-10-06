@@ -9,7 +9,14 @@ export type LocationEvidenceKind =
   | "geofence_state"
   | "location_paused"
   | "location_resumed"
-  | "provider_status";
+  | "provider_status"
+  | "motion_activity";
+
+/** Core Motion's activity classification. Never a position: motion evidence carries no coordinates. */
+export type MotionActivity = "stationary" | "walking" | "running" | "cycling" | "automotive" | "unknown";
+export type MotionConfidence = "low" | "medium" | "high";
+/** How a journey was travelled, from medium- or high-confidence motion activity. */
+export type MotionTravelMode = "walking" | "running" | "cycling" | "automotive";
 
 export type LocationEvidenceMetadata = {
   visitDepartureOpen?: boolean;
@@ -19,6 +26,13 @@ export type LocationEvidenceMetadata = {
   accuracyAuthorization?: "full" | "reduced" | "unknown";
   errorCode?: string;
   signalSequence?: number;
+  nativeCallbackAt?: string;
+  /** motion_activity only: the activity that began at `occurredAt`. */
+  motionActivity?: MotionActivity;
+  /** motion_activity only: Core Motion's confidence in that activity. */
+  motionConfidence?: MotionConfidence;
+  /** motion_activity only: the history query at `occurredAt` still reported this activity (coverage, not a change). */
+  motionContinuation?: boolean;
 };
 
 export type LocationEvidence = {
@@ -105,6 +119,12 @@ export type StaySegment = {
   learnedPlaceId?: string | null;
   placeMatchKind: "saved" | "learned" | "unknown" | "ambiguous";
   approximateArrival?: true;
+  /**
+   * The stay's end from location evidence alone, when Motion & Fitness moved
+   * `stoppedAt`. Persisted, so journeys re-derived from a decided stay still
+   * qualify on location evidence and stay Review-only when motion timed them.
+   */
+  locationOnlyStoppedAt?: string;
   /** Set when the stay was formed from physical stop evidence rather than identity/dwell gates. */
   formation?: "physical_stop";
   candidatePlaceIds: string[];
@@ -144,6 +164,15 @@ export type CommuteSegment = {
   qualificationReason?: CommuteQualificationReason;
   /** Short stops inside one trip. Coordinate-free; each refers to its own stay segment. */
   stops?: CommuteStop[];
+  /** How the journey was travelled, when Motion & Fitness activity shows one mode for most of its movement. */
+  travelMode?: MotionTravelMode;
+  /**
+   * Set when Motion & Fitness activity, not GPS, showed the movement that qualified
+   * this journey (a short drive or a drive during a GPS gap). Such journeys are Review-only.
+   */
+  motionSupported?: true;
+  /** Set when Motion & Fitness moved the journey's start or end. Such journeys are Review-only. */
+  motionTimed?: true;
   /**
    * Qualified legs replaced by this trip. Never persisted; replay restores them
    * only when protected history blocks the trip itself.

@@ -264,6 +264,10 @@ describe("mobile review helpers", () => {
     })).toBe("Needs review · this trip includes a stop");
     expect(locationReviewReasonCopy({
       ...commute,
+      rawPayload: { semanticReason: "motion_review_only" }
+    })).toBe("Needs review · timed from Motion & Fitness");
+    expect(locationReviewReasonCopy({
+      ...commute,
       rawPayload: { semanticReason: "insufficient_route_evidence" }
     })).toBe("Needs review · route evidence is limited");
     expect(locationReviewReasonCopy({

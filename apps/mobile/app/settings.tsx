@@ -9,8 +9,10 @@ import { subscribeRecoveredDashboardBootstrap } from "@/lib/dashboardBootstrapCh
 import { useCallback, useEffect, useRef, useState, type ReactNode, type SetStateAction } from "react";
 import {
   Alert,
+  AppState,
   findNodeHandle,
   Keyboard,
+  Linking,
   Modal,
   Platform,
   Pressable,
@@ -117,6 +119,8 @@ import {
   type LocationStoreDiagnostics
 } from "@/lib/location/store";
 import { getLocationReviewEvidencePrefetchDiagnostics } from "@/lib/locationReviewEvidenceCache";
+import { motionFitnessPresentation, readMotionFitnessStatus, requestMotionFitness } from "@/lib/location/motionPermission";
+import type { DayframeMotionAuthorizationStatus } from "../modules/dayframe-motion-activity";
 import {
   discardReviewSyncIssue,
   getReviewSyncDiagnostics,
@@ -266,6 +270,7 @@ export default function SettingsScreen() {
   const [locationDiagnostics, setLocationDiagnostics] = useState<LocationVisitDiagnostics | null>(
     cachedSnapshot?.locationDiagnostics ?? null
   );
+  const [motionFitnessStatus, setMotionFitnessStatus] = useState<DayframeMotionAuthorizationStatus | null>(null);
   const [locationV2Diagnostics, setLocationV2Diagnostics] = useState<LocationStoreDiagnostics | null>(null);
   const [nativeLocationStatus, setNativeLocationStatus] = useState<{
     authorizationStatus: string;
@@ -497,6 +502,14 @@ export default function SettingsScreen() {
     });
   }, [refreshTimerStopDiagnostics]);
 
+  // Motion & Fitness is changed in iOS Settings: re-read it whenever the app returns.
+  useEffect(() => {
+    const refreshMotion = () => void readMotionFitnessStatus().then(setMotionFitnessStatus);
+    refreshMotion();
+    const subscription = AppState.addEventListener("change", (state) => { if (state === "active") refreshMotion(); });
+    return () => subscription.remove();
+  }, []);
+
   useFocusEffect(
     useCallback(() => {
       void reloadThemePreference();
@@ -597,6 +610,9 @@ export default function SettingsScreen() {
       ? "Review access"
       : "Enable";
   const backgroundAccessSummary = locationMonitoringAllowed ? "On" : "Needs attention";
+  const motionFitness = motionFitnessStatus
+    ? motionFitnessPresentation(motionFitnessStatus, locationDiagnostics?.locationLearningEnabled === true)
+    : null;
   const settingsTitle = settingsSectionTitle(settingsSection);
   const categoryCount = data?.categories.length ?? 0;
   const workspaceLabel = data?.workspace?.name ?? "Default workspace";
@@ -1029,6 +1045,14 @@ export default function SettingsScreen() {
       await refreshLocationDiagnostics();
     } else {
       await refreshLocationDiagnostics(status);
+    }
+  }
+
+  async function handleMotionFitnessAction() {
+    if (motionFitness?.action?.kind === "request") {
+      setMotionFitnessStatus(await requestMotionFitness());
+    } else if (motionFitness?.action?.kind === "open_settings") {
+      await Linking.openSettings();
     }
   }
 
@@ -2106,6 +2130,29 @@ export default function SettingsScreen() {
                 <Text {...mobileTextProps("control")} style={styles.secondaryButtonText}>{locationActionLabel}</Text>
               </Pressable>
             </View>
+            <Reanimated.View layout={localLayoutTransition(reduceMotion)} style={styles.healthPreferenceRow}>
+              <View style={styles.healthPreferenceText}>
+                <Text {...mobileTextProps("itemTitle")} style={styles.categoryName}>Motion & Fitness</Text>
+                <Text {...mobileTextProps("body")} style={styles.categoryMeta}>
+                  {motionFitness ? `${motionFitness.label} · ${motionFitness.detail}` : "Checking…"}
+                </Text>
+              </View>
+              {motionFitness?.action ? (
+                <Reanimated.View
+                  entering={localPresenceEntering(reduceMotion)}
+                  exiting={localPresenceExiting(reduceMotion)}
+                  style={styles.buttonRow}
+                >
+                  <Pressable
+                    accessibilityRole="button"
+                    style={pressable(styles.secondaryButton, styles.buttonPressed)}
+                    onPress={() => void handleMotionFitnessAction()}
+                  >
+                    <Text {...mobileTextProps("control")} style={styles.secondaryButtonText}>{motionFitness.action.label}</Text>
+                  </Pressable>
+                </Reanimated.View>
+              ) : null}
+            </Reanimated.View>
             <Pressable
               accessibilityRole="button"
               accessibilityState={{ expanded: showLocationTroubleshooting }}
@@ -2126,7 +2173,7 @@ export default function SettingsScreen() {
                 style={styles.healthPreferenceRow}
               >
                 <Text {...mobileTextProps("body")} style={styles.muted}>
-                  Location data is private. Local journal samples expire after seven days. Upload copies, cached places and summaries can stay on this iPhone longer, even after upload or signing back in. Signing out clears this account’s local Location data; synced entries and saved places stay in your account.
+                  Location data is private. Motion & Fitness activity (still, walking, driving) is kept with it and never leaves Dayframe. Local journal samples expire after seven days. Upload copies, cached places and summaries can stay on this iPhone longer, even after upload or signing back in. Signing out clears this account’s local Location data; synced entries and saved places stay in your account.
                 </Text>
                 {([['Evidence upload', locationV2Diagnostics?.uploadAttempt],
                   ['Location processing', locationV2Diagnostics?.replayAttempt]] as const).map(([label, attempt]) => (
@@ -2424,7 +2471,7 @@ function LocationInformationSheet({
                   Dayframe uses background location to suggest visits and journeys. Suggestions go to Review before becoming time entries.
                 </Text>
                 <Text {...mobileTextProps("body")} style={styles.muted}>
-                  Location data is private. Local journal samples expire after seven days. Upload copies, cached places and summaries can stay on this iPhone longer, even after upload or signing back in. Signing out clears this account’s local Location data; synced entries and saved places stay in your account.
+                  Location data is private. Motion & Fitness activity (still, walking, driving) is kept with it and never leaves Dayframe. Local journal samples expire after seven days. Upload copies, cached places and summaries can stay on this iPhone longer, even after upload or signing back in. Signing out clears this account’s local Location data; synced entries and saved places stay in your account.
                 </Text>
                 <Text {...mobileTextProps("body")} style={styles.muted}>
                   iOS can pause or limit background updates, so Dayframe may not capture every movement.

@@ -321,6 +321,32 @@ async function excludeProtectedReplacements(
       }
     }
   }
+  // A journey only Motion & Fitness showed has no lineage, and one it timed can
+  // hold its only route observation at an adjusted boundary, so the reads above
+  // cannot protect a decision about either. When its endpoints' IDs change, the
+  // engine proposes it again under a new ID, possibly now qualified by a late
+  // route fix, and a decided endpoint can stretch a re-derived journey over it:
+  // a decided or manual motion-only journey on this device holds any candidate
+  // journey overlapping it, before and after re-derivation. Every such row
+  // within retention is read, since re-derivation can move boundaries.
+  const decidedMotionJourneys = (await client.query<{ clientSegmentId: string; startedAt: Date | string; stoppedAt: Date | string }>(
+    `/* decided motion-only journeys */ select s.client_segment_id as "clientSegmentId", s.started_at as "startedAt", s.stopped_at as "stoppedAt"
+     from commute_segments s
+     where s.workspace_id = $1 and s.user_id = $2 and s.device_id = $3 and s.algorithm_version = $4
+       and (s.metadata ? 'motionSupported' or s.metadata ? 'motionTimed') and s.status <> 'superseded'
+       and s.stopped_at > $5::timestamptz - ($6::int * interval '1 day')
+       and (s.continuity_status = 'manual' or (s.created_from_event_id is not null and not exists (
+         select 1 from review_items ri
+         where ri.workspace_id = $1 and ri.user_id = $2 and ri.location_segment_id = s.id and ${reviewLeavesSegmentToReplay("ri")})))
+     order by s.client_segment_id`,
+    [session.workspaceId, session.userId, options.deviceId, options.algorithmVersion, options.processingAt,
+      LOCATION_ENGINE_V2_CONFIG.rawEvidenceRetentionDays + 1])).rows;
+  const overlapsDecidedMotionJourney = (segment: LocationSegment) => segment.kind === "commute" &&
+    decidedMotionJourneys.some((row) => row.clientSegmentId !== segment.clientSegmentId &&
+      Date.parse(iso(row.startedAt)!) < Date.parse(segment.stoppedAt) && Date.parse(iso(row.stoppedAt)!) > Date.parse(segment.startedAt));
+  for (const candidate of [...segments, ...fallbackLegs]) {
+    if (overlapsDecidedMotionJourney(candidate)) held.add(candidate.clientSegmentId);
+  }
   // A decided or manual row can keep a stay's ID while late evidence moves the
   // engine's boundaries. Its persisted boundaries stay canonical for every
   // commute that starts or ends there, and for a trip's interior stops.
@@ -348,12 +374,13 @@ async function excludeProtectedReplacements(
       : segment.kind === "commute"
         ? (segment.legs ?? []).filter(replaceable).flatMap((leg) =>
             rebuildLegWithinDecidedStops(leg, decidedStays, segments, acceptedEvidence, options))
-        : [])
+        : []).filter((segment) => !overlapsDecidedMotionJourney(segment))
   };
 }
 
 type DecidedStopBounds = {
   clientSegmentId: string;
+  locationOnlyStoppedAt: string | null;
   startedAt: Date | string; stoppedAt: Date | string | null;
   startLowerBoundAt: Date | string | null; startUpperBoundAt: Date | string | null;
   stopLowerBoundAt: Date | string | null; stopUpperBoundAt: Date | string | null;
@@ -371,7 +398,8 @@ async function decidedStayBounds(
   const result = await client.query<DecidedStopBounds>(
     `/* decided stay bounds */ select s.client_segment_id as "clientSegmentId", s.started_at as "startedAt", s.stopped_at as "stoppedAt",
             s.start_lower_bound_at as "startLowerBoundAt", s.start_upper_bound_at as "startUpperBoundAt",
-            s.stop_lower_bound_at as "stopLowerBoundAt", s.stop_upper_bound_at as "stopUpperBoundAt"
+            s.stop_lower_bound_at as "stopLowerBoundAt", s.stop_upper_bound_at as "stopUpperBoundAt",
+            case when s.continuity_status = 'manual' then null else s.metadata->>'locationOnlyStoppedAt' end as "locationOnlyStoppedAt"
      from stay_segments s
      where s.workspace_id = $1 and s.user_id = $2 and s.device_id = $3 and s.client_segment_id = any($4::text[])
        and (s.continuity_status = 'manual' or (s.created_from_event_id is not null and not exists (
@@ -391,7 +419,13 @@ function stayWithDecidedBounds(id: string, decided: ReadonlyMap<string, DecidedS
   if (!engine || !row) return engine ?? null;
   const startedAt = iso(row.startedAt)!;
   const stoppedAt = iso(row.stoppedAt);
-  return { ...engine, startedAt, stoppedAt,
+  // A decided end Motion & Fitness set keeps its location-only end, so a journey
+  // rebuilt from it still qualifies on location evidence and stays Review-only.
+  // The engine's own provenance never carries over to a different persisted end.
+  const { locationOnlyStoppedAt: _engineLocationOnly, ...rest } = engine;
+  return { ...rest, startedAt, stoppedAt,
+    ...(row.locationOnlyStoppedAt && iso(row.locationOnlyStoppedAt) !== stoppedAt
+      ? { locationOnlyStoppedAt: iso(row.locationOnlyStoppedAt)! } : {}),
     startLowerBoundAt: iso(row.startLowerBoundAt) ?? startedAt, startUpperBoundAt: iso(row.startUpperBoundAt) ?? startedAt,
     stopLowerBoundAt: iso(row.stopLowerBoundAt) ?? stoppedAt, stopUpperBoundAt: iso(row.stopUpperBoundAt) ?? stoppedAt };
 }
@@ -430,7 +464,24 @@ function rebuildLegWithinDecidedStops(
   if (!from?.stoppedAt || !to) return [];
   return deriveCommutes([from, to], acceptedEvidence,
     { ...LOCATION_ENGINE_V2_CONFIG, algorithmVersion: options.algorithmVersion }, options.processingAt)
-    .filter((rebuilt) => rebuilt.clientSegmentId === leg.clientSegmentId);
+    .filter((rebuilt) => rebuilt.clientSegmentId === leg.clientSegmentId)
+    .map((rebuilt) => withinEngineEligibility(rebuilt, leg));
+}
+
+/**
+ * Re-derivation lacks the engine's whole-run context (inferred boundaries, the
+ * location-only timing it saw), so a re-derived journey is never more
+ * confident than the engine judged it and keeps its Motion & Fitness flags:
+ * moving a decided boundary can never make a journey more eligible.
+ */
+export function withinEngineEligibility(rebuilt: CommuteSegment, engine: CommuteSegment): CommuteSegment {
+  const order: CommuteSegment["confidence"][] = ["low", "medium", "medium_high", "high"];
+  return {
+    ...rebuilt,
+    confidence: order.indexOf(rebuilt.confidence) <= order.indexOf(engine.confidence) ? rebuilt.confidence : engine.confidence,
+    ...(rebuilt.motionSupported || engine.motionSupported ? { motionSupported: true as const } : {}),
+    ...(rebuilt.motionTimed || engine.motionTimed ? { motionTimed: true as const } : {})
+  };
 }
 
 async function supersedeMissingSegments(
@@ -506,11 +557,18 @@ async function retireOpenReviewsForMissingSegments(
            and le.accepted = true and le.device_id = $3 and le.algorithm_version = $4
            and le.expires_at > $7::timestamptz
        )`;
-  const provenancePredicate = scalabilityProfile
+  const lineageOwner = "lse.workspace_id = ri.workspace_id and lse.user_id = ri.user_id";
+  const segmentProvenance = scalabilityProfile
     ? `exists (select 1 from eligible_lineage lse
         where lse.stay_segment_id = st.id or lse.commute_segment_id = cs.id)`
-    : eligibleProvenance("lse.stay_segment_id = st.id or lse.commute_segment_id = cs.id",
-        "lse.workspace_id = ri.workspace_id and lse.user_id = ri.user_id");
+    : eligibleProvenance("lse.stay_segment_id = st.id or lse.commute_segment_id = cs.id", lineageOwner);
+  // A journey only Motion & Fitness showed has no lineage (motion never joins
+  // it): its retained provenance is its two endpoint stays' evidence.
+  const endpointProvenance = (column: "from_stay_segment_id" | "to_stay_segment_id") => scalabilityProfile
+    ? `exists (select 1 from eligible_lineage lse where lse.stay_segment_id = cs.${column})`
+    : eligibleProvenance(`lse.stay_segment_id = cs.${column}`, lineageOwner);
+  const provenancePredicate = `(${segmentProvenance} or (cs.id is not null and cs.metadata ? 'motionSupported'
+    and ${endpointProvenance("from_stay_segment_id")} and ${endpointProvenance("to_stay_segment_id")}))`;
   const stale = await client.query<{ reviewId: string; eventId: string }>(
     `${eligibleLineage}select ri.id as "reviewId", ri.event_id as "eventId"
      from review_items ri
@@ -644,7 +702,9 @@ async function persistStays(
         placeMatchKind: segment.placeMatchKind,
         candidatePlaceIds: segment.candidatePlaceIds,
         ...(segment.approximateArrival ? { approximateArrival: true } : {}),
-        ...(segment.formation ? { formation: segment.formation } : {})
+        ...(segment.formation ? { formation: segment.formation } : {}),
+        // Motion & Fitness moved the end: keep the location-only end for rebuilds.
+        ...(segment.locationOnlyStoppedAt ? { locationOnlyStoppedAt: segment.locationOnlyStoppedAt } : {})
       })
     ]);
     // Trusted SQL template; only parameter positions vary with the bounded row index.
@@ -724,7 +784,11 @@ async function persistCommutes(
       JSON.stringify({
         qualificationReason: segment.qualificationReason ?? null,
         // Coordinate-free: times, bounds, the stop's own stay ID and candidate place IDs.
-        ...(segment.stops?.length ? { stops: segment.stops } : {})
+        ...(segment.stops?.length ? { stops: segment.stops } : {}),
+        // From Motion & Fitness: how it was travelled, and whether motion alone showed the movement.
+        ...(segment.travelMode ? { travelMode: segment.travelMode } : {}),
+        ...(segment.motionSupported ? { motionSupported: true } : {}),
+        ...(segment.motionTimed ? { motionTimed: true } : {})
       })
     ]);
     // Trusted SQL template; only parameter positions vary with the bounded row index.

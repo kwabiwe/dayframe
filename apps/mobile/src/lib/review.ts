@@ -466,6 +466,8 @@ export function locationReviewReasonCopy(
       return "Needs review · short journeys aren’t added automatically";
     case "journey_contains_stop":
       return "Needs review · this trip includes a stop";
+    case "motion_review_only":
+      return "Needs review · timed from Motion & Fitness";
     case "insufficient_route_evidence":
       return "Needs review · route evidence is limited";
     case "boundary_uncertainty_exceeded":

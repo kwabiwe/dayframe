@@ -62,7 +62,7 @@
 	<key>NSLocationWhenInUseUsageDescription</key>
 	<string>Dayframe uses precise location to distinguish nearby saved places and show reviewable visit evidence.</string>
 	<key>NSMotionUsageDescription</key>
-	<string>Allow $(PRODUCT_NAME) to detect your current motion activity</string>
+	<string>Dayframe reads Motion &amp; Fitness activity (still, walking or driving) to time your journeys and find short drives that location missed. It stays with your private location evidence and never logs time by itself.</string>
 	<key>NSUserActivityTypes</key>
 	<array>
 		<string>$(PRODUCT_BUNDLE_IDENTIFIER).expo.index_route</string>
