@@ -819,6 +819,9 @@ export function deriveCommutes(
       const radius = awayPlace?.radiusMeters ?? 0;
       let backSinceMs: number | null = null;
       let sustainedReturn = false;
+      // When the phone stayed back there and then left again, only the later
+      // outing can be time away, from the corroborated leaving that ended it.
+      let leftAgainMs: number | null = null;
       for (const item of gapEvidence) {
         const atMs = Date.parse(item.evidence.occurredAt);
         if (atMs <= firstAwayMs || atMs >= stoppedAtMs || snapshots.has(item)) continue;
@@ -831,17 +834,25 @@ export function deriveCommutes(
           fix != null && fix > radius && (item.evidence.speedMetersPerSecond ?? 0) >= config.movementSpeedThresholdMps)) {
           // Only corroborated leaving ends a stretch back there: an exit, a clear
           // reading away, or movement outside; one still reading just outside does not.
-          if (atMs - backSinceMs > config.savedPlaceMinimumDwellMs) sustainedReturn = true;
+          if (atMs - backSinceMs > config.savedPlaceMinimumDwellMs) {
+            sustainedReturn = true;
+            leftAgainMs = atMs;
+          }
           backSinceMs = null;
         }
       }
-      if (backSinceMs != null && stoppedAtMs - backSinceMs > config.savedPlaceMinimumDwellMs) sustainedReturn = true;
-      absenceStartMs = sustainedReturn ? null : Math.max(originalStartedAtMs, ...there);
+      const backUntilNextStay = backSinceMs != null && stoppedAtMs - backSinceMs > config.savedPlaceMinimumDwellMs;
+      absenceStartMs = backUntilNextStay ? null : sustainedReturn ? leftAgainMs : Math.max(originalStartedAtMs, ...there);
     }
+    // With an absence window, time away is judged only over that window: the
+    // journey attempt yields a journey or nothing, so the latest departure
+    // support (a pass-by, or the last sign before an unseen stretch at home)
+    // never shapes the item.
+    const absenceKnown = firstAway != null && awayCentre != null;
     const journeyStartedAtMs = startedAtMs;
-    const attempts: Array<"journey" | "absence"> =
-      absenceStartMs != null && absenceStartMs < journeyStartedAtMs ? ["journey", "absence"] : ["journey"];
+    const attempts: Array<"journey" | "absence"> = absenceKnown ? ["journey", "absence"] : ["journey"];
     for (const attempt of attempts) {
+      if (attempt === "absence" && absenceStartMs == null) continue;
       startedAtMs = attempt === "absence" ? absenceStartMs! : journeyStartedAtMs;
       const fromHasInferredBoundary = options.inferredBoundaryStayIds?.has(from.clientSegmentId) === true;
       const toHasInferredBoundary = options.inferredBoundaryStayIds?.has(to.clientSegmentId) === true;
@@ -880,6 +891,7 @@ export function deriveCommutes(
       // came back, but no journey qualifies (a short drive or walk to a shop).
       // It claims only the absence, never travel, so it needs no route.
       const timeAway = () => {
+        if (attempt === "journey" && absenceKnown) return false;
         if (!sameKnownEndpoint(from, to) || !identified(from) || !identified(to)) return false;
         const awayMs = stoppedAtMs - startedAtMs;
         if (awayMs < config.placeOutingMinimumMs || awayMs > config.commuteMaximumDurationMs) return false;

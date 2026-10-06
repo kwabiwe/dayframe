@@ -104,6 +104,33 @@ describe("time away from a saved place", () => {
     expect(stray.some((item) => minutes(item.startedAt) < 62 && minutes(item.stoppedAt) > 75)).toBe(false);
   });
 
+  // Fable round 7: a pass-by well before parking, with and without a stop earlier in the absence.
+  const passBy = (withStop: boolean) => {
+    const moving = (id: string, minute: number, metres: number) => fix(id, minute, metres, { speedMetersPerSecond: 9 });
+    const stop = withStop ? [62.5, 63.5, 64.5, 65.5, 66.5, 67.5, 68.5, 69.5].map((m, i) => fix(`stop-${i}`, m, 400 + i % 2 * 3)) : [];
+    return [...homeFixes("am", 0, 60), crossing("exit-0", 60.25, "geofence_exit"), moving("out-0", 61, 300), moving("out-1", 62, 350), ...stop,
+      fix("by-0", 70, 60, { horizontalAccuracyMeters: 10 }), crossing("by-enter", 70.05, "geofence_enter"), crossing("by-exit", 70.42, "geofence_exit"),
+      ...[71, 72, 73, 74, 75, 76, 77, 78].map((m, i) => moving(`back-${i}`, m, 300 + i * 7)), crossing("enter", 79.3, "geofence_enter"),
+      ...homeFixes("pm", 79.5, 150)];
+  };
+  it.each([false, true])("never shortens the absence at a pass-by long before parking (stop earlier: %s)", (withStop) => {
+    const away = outings(input(passBy(withStop)));
+    expect(away).toHaveLength(1);
+    expect(minutes(away[0].startedAt)).toBeLessThan(61);
+    expect(away[0].stops?.length ?? 0).toBe(withStop ? 1 : 0);
+  });
+
+  it("never claims silent time at home after a return when iOS sends no exit (Fable round 7)", () => {
+    const moving = (id: string, minute: number, metres: number) => fix(id, minute, metres, { speedMetersPerSecond: 9 });
+    const evidence = [...homeFixes("am", 0, 60), crossing("exit-0", 60.5, "geofence_exit"),
+      ...[61, 62, 63, 64].map((m, i) => moving(`out-${i}`, m, 300 + i * 10)), crossing("enter-0", 69.5, "geofence_enter"),
+      fix("home-a", 70, 10), fix("home-b", 72, 12),
+      ...[102, 103, 104, 105, 106].map((m, i) => moving(`out2-${i}`, m, 300 + i * 10)), crossing("enter-1", 110, "geofence_enter"),
+      ...homeFixes("pm", 110.5, 200)];
+    const away = outings(input(evidence));
+    expect(away.some((item) => minutes(item.startedAt) < 100 && minutes(item.stoppedAt) > 105)).toBe(false);
+  });
+
   it("offers nothing from geofence callbacks alone, without readings away", () => {
     const evidence = [...homeFixes("am", 0, 60), crossing("exit", 61, "geofence_exit"), crossing("enter", 71, "geofence_enter"),
       ...homeFixes("pm", 72, 150)];
