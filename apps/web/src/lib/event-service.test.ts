@@ -90,7 +90,7 @@ describe("category persistence", () => {
     expect(category).toMatchObject({ name: "Writing", isPinned: false });
     expect(typeof category.color).toBe("string");
     expect(client.query).toHaveBeenCalledWith(
-      "select id from workspaces where id = $1 for update",
+      "select id from workspaces where id = $1 for no key update",
       [session.workspaceId]
     );
     expect(client.query).toHaveBeenCalledWith(

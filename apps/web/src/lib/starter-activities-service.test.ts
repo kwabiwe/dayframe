@@ -123,6 +123,9 @@ describe("starter activities service", () => {
     const firstRead = db.statements.findIndex((statement) => statement.sql.startsWith("select id, name, starter_key"));
     const lastLock = db.statements.map((statement) => statement.sql).lastIndexOf("select pg_advisory_xact_lock(hashtextextended($1, 0))");
     expect(lastLock).toBeLessThan(firstRead);
+    // A key-share holder (location replay) must never block this call while it holds those locks.
+    expect(db.statements.map((statement) => statement.sql)).toContain("select id from workspaces where id = $1 for no key update");
+    expect(db.statements.some((statement) => /workspaces where id = \$1 for update/.test(statement.sql))).toBe(false);
   });
 
   it("does nothing when every starter is already present", async () => {

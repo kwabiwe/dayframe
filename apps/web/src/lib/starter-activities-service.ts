@@ -49,7 +49,10 @@ export async function addMissingStarterActivities(session: RequestSession) {
         automaticCategoryLockKey(session.workspaceId, name)
       ]);
     }
-    await client.query("select id from workspaces where id = $1 for update", [session.workspaceId]);
+    // NO KEY UPDATE still serialises with other starters/create calls but, unlike FOR UPDATE, does
+    // not wait on transactions that merely reference the workspace (location replay inserts),
+    // which may later want the Commute lock this call already holds.
+    await client.query("select id from workspaces where id = $1 for no key update", [session.workspaceId]);
     const existing = await client.query<{ id: string; name: string; starterKey: string | null }>(
       `select id, name, starter_key as "starterKey"
        from categories

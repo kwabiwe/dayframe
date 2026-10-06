@@ -1231,7 +1231,7 @@ export async function createCategory(
   try {
     await client.query("begin");
     await client.query(
-      "select id from workspaces where id = $1 for update",
+      "select id from workspaces where id = $1 for no key update",
       [session.workspaceId]
     );
     const duplicate = await client.query<{ id: string }>(

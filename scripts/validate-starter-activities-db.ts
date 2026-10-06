@@ -131,6 +131,35 @@ async function validateRaceWithAutomaticCommute() {
   assert.equal(all.length, DAYFRAME_STARTER_ACTIVITIES.length, "every starter exists once");
 }
 
+// Location replay writes FK rows (key-share on the workspace) and only then asks for the
+// Commute category. The starters route must not wait on that key-share while holding the
+// Commute lock, or Postgres aborts one of them as a deadlock.
+async function validateReplayThenCommuteOrdering() {
+  await pool.query("delete from categories where workspace_id = $1", [RACE_WORKSPACE]);
+  const replay = await pool.connect();
+  try {
+    await replay.query("begin");
+    await replay.query("insert into clients (workspace_id, name, color) values ($1, 'Replay holds key share', 'steel')", [RACE_WORKSPACE]);
+    const starters = addMissingStarterActivities(session(RACE_WORKSPACE));
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    const commute = ensureCommuteCategoryId(replay, session(RACE_WORKSPACE));
+    const [startersResult, commuteId] = await Promise.all([starters, commute.then(async (id) => {
+      await replay.query("commit");
+      return id;
+    })]);
+    assert.ok(startersResult && commuteId, "both the replay and the starters call complete");
+  } catch (error) {
+    await replay.query("rollback").catch(() => undefined);
+    throw error;
+  } finally {
+    replay.release();
+  }
+  const active = (await categories(RACE_WORKSPACE)).filter((row) => !row.isArchived);
+  assert.equal(active.filter((row) => row.starterKey === "commute").length, 1, "one Commute after replay then starters");
+  assert.equal(active.length, DAYFRAME_STARTER_ACTIVITIES.length, "every starter exists once after replay then starters");
+  await pool.query("delete from clients where workspace_id = $1", [RACE_WORKSPACE]);
+}
+
 async function validateConstraints() {
   await assert.rejects(
     pool.query("insert into categories (workspace_id, name, color, starter_key) values ($1, 'Second Sleep', 'steel', 'sleep')", [NEW_WORKSPACE]),
@@ -147,10 +176,11 @@ async function run() {
   await validateNewWorkspaceSeeding();
   await validateExistingWorkspace();
   await validateRaceWithAutomaticCommute();
+  await validateReplayThenCommuteOrdering();
   await validateConstraints();
   await pool.query("delete from workspaces where id = any($1::uuid[])", [[NEW_WORKSPACE, EXISTING_WORKSPACE, RACE_WORKSPACE]]);
   await pool.query("delete from users where id = $1", [USER_ID]);
-  console.log("Starter activity validation passed: seeding, add/link without duplicates, archived keys, oldest link, idempotence, automatic race, constraints.");
+  console.log("Starter activity validation passed: seeding, add/link without duplicates, archived keys, oldest link, idempotence, automatic race, replay-then-Commute ordering, constraints.");
 }
 
 run()

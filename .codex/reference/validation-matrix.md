@@ -50,7 +50,7 @@ Do not claim a command passed if it was not run. If a command is skipped, state 
 When changing category/activity storage, starter activities, activity icons or automatic Sleep/Commute categories:
 
 - Run the shared icon and starter tests plus the web category, starter and automatic-category tests.
-- Run `npm run validate:starter-activities-db` against a disposable local `*_test` database prepared with `npx tsx scripts/setup-validation-db.ts ordered`. It covers new-workspace seeding, adding and linking starters without duplicate names, archived starter keys, the oldest same-named link, idempotence, a race with automatic Commute creation and the column constraints.
+- Run `npm run validate:starter-activities-db` against a disposable local `*_test` database prepared with `npx tsx scripts/setup-validation-db.ts ordered`. It covers new-workspace seeding, adding and linking starters without duplicate names, archived starter keys, the oldest same-named link, idempotence, a race with automatic Commute creation, a location replay that holds a workspace key-share before asking for Commute (must not deadlock with the starters route) and the column constraints. Workspace-serialising category writes lock the workspace row `for no key update`, never `for update`.
 - Apply `supabase/migrations/202610060001_category_icon_and_starter_key.sql` to staging before the Preview that reads the new columns, with owner approval.
 
 ## Interaction Motion
