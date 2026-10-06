@@ -62,14 +62,20 @@ describe("Dayframe icon set", () => {
     ["Emails", "email"], ["Spin class", "gym"], ["Boxing class", "gym"], ["Golf", "gym"], ["Football", "gym"],
     ["Tennis", "gym"], ["Sleep cycle", "sleep"], ["Car pool", "commute"], ["Life coach", "personal"],
     ["Release date", null], ["Date night", "partner"], ["Work out", "gym"], ["Birthday party", "events"],
-    ["Courses", "study"], ["Exercises", "gym"], ["Naps", "sleep"], ["Runs", "gym"], ["Hikes", "hiking"]
+    ["Courses", "study"], ["Exercises", "gym"], ["Naps", "sleep"], ["Runs", "gym"], ["Hikes", "hiking"],
+    ["Conference call", "calls"], ["Video conference", "meeting"], ["Taxi ride", "journey"], ["Uber ride", "journey"],
+    ["Car ride", "journey"], ["Bus ride", "bus"], ["Bike ride", "cycling"], ["Web development", "code"],
+    ["App development", "code"], ["Professional development", "personal"], ["School-run", "childcare"],
+    ["Car-pool", "commute"], ["Work-out", "gym"], ["Me-time", "personal"], ["Date-night", "partner"],
+    ["Laundry cycle", "laundry"], ["Menstrual cycle", "health"], ["Cafés", "coffee"], ["Bedtime", "sleep"],
+    ["Spinning", "gym"], ["Dance class", "gym"]
   ] as Array<[string, string | null]>)("suggests an icon for %s", (name, key) => {
     expect(activityIconKeyForName(name)).toBe(key);
   });
 
   it("carries the Lucide and Feather licence notices with the copied glyphs", () => {
     const registry = readFileSync(new URL("./iconGlyphs.ts", import.meta.url), "utf8");
-    expect(registry).toContain("Copyright (c) 2026 Lucide Icons and Contributors");
+    expect(registry).toMatch(/Copyright \(c\) \d{4} Lucide Icons and Contributors/);
     expect(registry).toContain("copyright notice and this permission notice appear in all copies");
     expect(registry).toContain("Copyright (c) 2013-present Cole Bemis");
     expect(registry).toContain("The above copyright notice and this permission notice shall be included in");

@@ -130,7 +130,8 @@ export function isActivityIconKey(value: unknown): value is DayframeActivityIcon
 
 // First match wins, so specific phrases come before broad words ("School run" and "Running
 // errands" before "run", "Car pool" before "pool", "Sleep cycle" before "cycle", "Work out"
-// before "work"). Names are matched without accents, so "Café" and "Cafe" behave the same.
+// before "work", "Taxi ride" before "ride"). Names are matched without accents and with hyphens
+// as spaces, so "Café"/"Cafe" and "School-run"/"School run" behave the same.
 const NAME_RULES: ReadonlyArray<readonly [RegExp, DayframeActivityIconKey]> = [
   [/\b(dogs?|cats?|pets?|vet)\b/, "pets"],
   [/\b(school run|kids?|child\w*|baby|babies|nursery)\b/, "childcare"],
@@ -138,30 +139,33 @@ const NAME_RULES: ReadonlyArray<readonly [RegExp, DayframeActivityIconKey]> = [
   [/\b(errands?|shopping|shops?)\b/, "errands"],
   [/\b(deep work|focus)\b/, "focus"],
   [/\b(clients?|office)\b/, "office"],
-  [/\b(code|coding|programming|software|developer|dev)\b/, "code"],
+  [/\b(personal|professional|self|career) development\b/, "personal"],
+  [/\b(code|coding|programming|software|developers?|dev|develop\w*)\b/, "code"],
+  [/\b(conference|video|phone) calls?\b/, "calls"],
+  [/\b(video conferenc\w*|zoom|teams meeting)\b/, "meeting"],
   [/\b(commut\w*|car ?pool\w*)\b/, "commute"],
-  [/\b(gym|workouts?|work out|exercis\w*|training|lifting|runs?|running|jog\w*|yoga|pilates|sports?|fitness|spin|boxing|golf|football|soccer|tennis|squash|badminton|basketball|netball|rugby|cricket)\b/, "gym"],
+  [/\b(gym|workouts?|work out|exercis\w*|training|lifting|runs?|running|jog\w*|yoga|pilates|sports?|fitness|spin|spinning|dance|dancing|boxing|golf|football|soccer|tennis|squash|badminton|basketball|netball|rugby|cricket)\b/, "gym"],
   [/\b(trains?|rail|tube|metro|subway)\b/, "train"],
-  [/\b(sleep\w*|naps?|bed)\b/, "sleep"],
+  [/\b(sleep\w*|naps?|bed|bedtime)\b/, "sleep"],
   [/\b(walks?|walking|steps|stroll\w*)\b/, "walk"],
   [/\b(swim\w*|pool)\b/, "swimming"],
-  [/\b(cycl\w*|bikes?|biking|rides?)\b/, "cycling"],
+  [/\b(bus|buses)\b/, "bus"],
+  [/\b(drive|driving|journeys?|taxi|cab|uber|car rides?)\b/, "journey"],
+  [/\b(laundry|ironing)\b/, "laundry"],
+  [/\b(health|therapy|menstrual)\b/, "health"],
+  [/\b(cycling|cycle rides?|bikes?|biking|bike rides?)\b/, "cycling"],
   [/\b(hikes?|hiking|climb\w*)\b/, "hiking"],
   [/\b(meditat\w*|mindful\w*|breath\w*)\b/, "mindfulness"],
   [/\b(doctors?|dentist|gp|hospital|clinic|physio\w*)\b/, "doctor"],
   [/\b(medication|meds|pills?)\b/, "medication"],
-  [/\b(health|therapy)\b/, "health"],
-  [/\b(bus|buses)\b/, "bus"],
   [/\b(flights?|travel\w*|trips?|holidays?|vacation)\b/, "travel"],
   [/\b(ferry|boat|sailing)\b/, "boat"],
-  [/\b(drive|driving|journeys?|taxi|cab|uber)\b/, "journey"],
   [/\b(cook\w*|baking|bake)\b/, "cooking"],
   [/\b(events?|wedding|birthday\w*|conference|concerts?)\b/, "events"],
   [/\b(friends?|social\w*|party|parties|pub|drinks)\b/, "social"],
   [/\b(meals?|lunch|dinner|breakfast|brunch|eating)\b/, "meals"],
-  [/\b(coffee|cafe)\b/, "coffee"],
+  [/\b(coffee|cafes?)\b/, "coffee"],
   [/\b(chores?|cleaning|tidy\w*|housework)\b/, "chores"],
-  [/\b(laundry|ironing)\b/, "laundry"],
   [/\b(garden\w*)\b/, "garden"],
   [/\b(repairs?|diy|fix\w*)\b/, "repairs"],
   [/\b(budget\w*|financ\w*|banking|bank|tax|taxes)\b/, "finances"],
@@ -175,7 +179,7 @@ const NAME_RULES: ReadonlyArray<readonly [RegExp, DayframeActivityIconKey]> = [
   [/\b(family|parents?|mum|mom|dad)\b/, "family"],
   [/\b(partner|date night|dating)\b/, "partner"],
   [/\b(volunteer\w*|charity)\b/, "volunteering"],
-  [/\b(meetings?|stand-?ups?|1:1)\b/, "meeting"],
+  [/\b(meetings?|stand ?ups?|1:1)\b/, "meeting"],
   [/\b(calls?|phone)\b/, "calls"],
   [/\b(emails?|inbox)\b/, "email"],
   [/\b(admin|paperwork)\b/, "admin"],
@@ -185,12 +189,12 @@ const NAME_RULES: ReadonlyArray<readonly [RegExp, DayframeActivityIconKey]> = [
   [/\b(learn\w*|reading|read|books?|lessons?)\b/, "learning"],
   [/\b(computer|laptop)\b/, "computer"],
   [/\b(work|job)\b/, "work"],
-  [/\b(personal|me time|coach\w*|self[- ]care)\b/, "personal"]
+  [/\b(personal|me time|coach\w*|self ?care)\b/, "personal"]
 ];
 
 /** The icon an activity gets from its name when nobody has picked one, or null. */
 export function activityIconKeyForName(name: string): DayframeActivityIconKey | null {
-  const normalized = name.normalize("NFD").replace(/\p{M}/gu, "").trim().toLowerCase();
+  const normalized = name.normalize("NFD").replace(/\p{M}/gu, "").replace(/[-\u2010-\u2014_]+/g, " ").trim().toLowerCase();
   if (!normalized) return null;
   for (const [pattern, key] of NAME_RULES) if (pattern.test(normalized)) return key;
   return null;
