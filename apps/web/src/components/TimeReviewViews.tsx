@@ -82,6 +82,7 @@ import {
   type CalendarCreatePointerSequence,
   type CalendarCreateTargetKind
 } from "@/lib/calendar-click-create";
+import { calendarInitialScrollHour } from "@/lib/calendar-initial-scroll";
 
 type CalendarHoursMode = "fullDay";
 
@@ -188,8 +189,9 @@ export function TimeReviewViews({
   const capturedNow = useMemo(() => new Date(presentationNow), [presentationNow]);
   const calendarHoursMode: CalendarHoursMode = "fullDay";
   const preferenceRef = useRef<TimelinePreference | null>(initialPreference);
-  const scrollPositionsRef = useRef<Record<TimelineView, TimelineScrollPosition>>({
-    calendar: { left: 0, top: 0 },
+  // Calendar starts unset so CalendarReview can open near now; later visits restore where it was left.
+  const scrollPositionsRef = useRef<Record<TimelineView, TimelineScrollPosition | null>>({
+    calendar: null,
     list: { left: 0, top: 0 },
     timesheet: { left: 0, top: 0 }
   });
@@ -233,6 +235,7 @@ export function TimeReviewViews({
     const container = activeScrollContainerRef.current;
     if (!container) return;
     const position = scrollPositionsRef.current[state.view];
+    if (!position) return;
     container.scrollLeft = position.left;
     container.scrollTop = position.top;
   }, [state.date, state.scope, state.view]);
@@ -637,10 +640,22 @@ export function CalendarReview({
   const selectedEntry = visibleSelectedTarget?.kind === "entry"
     ? entries.find((entry) => entry.id === visibleSelectedTarget.entryId) ?? null
     : null;
+  const calendarScrollerRef = useRef<HTMLDivElement | null>(null);
   const registerCalendarScroller = useCallback((element: HTMLDivElement | null) => {
+    calendarScrollerRef.current = element;
     setCalendarScroller(element);
     scrollContainerRef(element);
   }, [scrollContainerRef]);
+
+  // Open near now (or the first entry) once per mount; TimeReviewViews restores later positions.
+  const initialScrollAppliedRef = useRef(false);
+  useLayoutEffect(() => {
+    const scroller = calendarScrollerRef.current;
+    if (!calendarScroller || !scroller || initialScrollAppliedRef.current) return;
+    initialScrollAppliedRef.current = true;
+    const hour = calendarInitialScrollHour({ entries, now: capturedNow, visibleDays });
+    scroller.scrollTop = Math.max(0, (hour - calendarHours.startHour) * rowHeight);
+  }, [calendarHours.startHour, calendarScroller, capturedNow, entries, rowHeight, visibleDays]);
 
   useEffect(() => {
     const clearConsumedPointer = (event: PointerEvent) => {

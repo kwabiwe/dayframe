@@ -24,15 +24,22 @@ import { formatActivityEventLabel, formatDuration, formatSourceLabel, formatTime
 import type { BootstrapData } from "@/lib/queries";
 import { useRuntimePageData } from "@/components/AppShellRuntime";
 import { SegmentedControl } from "@/components/ui/Primitives";
+import { useHydrationSafeNow } from "@/components/useHydrationSafeNow";
 
 const donutCenter = 60;
 const donutRadius = 42;
 const donutCircumference = 2 * Math.PI * donutRadius;
 
-export function DashboardRealtime({ initialData }: { initialData: BootstrapData }) {
+export function DashboardRealtime({
+  initialData,
+  renderedAt
+}: {
+  initialData: BootstrapData;
+  renderedAt: string;
+}) {
   const data = useRuntimePageData(initialData);
   const [mode, setMode] = useState<DashboardMode>("day");
-  const now = new Date();
+  const now = useHydrationSafeNow(renderedAt);
   const period = useMemo(
     () => buildDashboardPeriod(data.dateRange.selectedDate, mode),
     [data.dateRange.selectedDate, mode]

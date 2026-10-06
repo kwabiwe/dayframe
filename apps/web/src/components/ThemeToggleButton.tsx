@@ -25,7 +25,9 @@ export function ThemeToggleButton() {
       title={label}
       type="button"
     >
-      {nextTheme === "dark" ? <Moon size={19} aria-hidden="true" /> : <Sun size={19} aria-hidden="true" />}
+      {/* Both icons render on the server; CSS shows the one for the theme already painted, so it never flips on load. */}
+      <Moon className="swiss-theme-toggle-to-dark" size={19} aria-hidden="true" />
+      <Sun className="swiss-theme-toggle-to-light" size={19} aria-hidden="true" />
     </button>
   );
 }

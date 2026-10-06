@@ -1994,6 +1994,30 @@ dialog.ui-popover-panel.bottom-left {
   font-weight: 800;
 }
 
+.swiss-mobile-account-button > span.swiss-profile-placeholder-avatar,
+.swiss-profile-button > span.swiss-profile-placeholder-avatar {
+  background: var(--surface-muted);
+}
+
+.swiss-profile-button > span.swiss-profile-placeholder {
+  display: grid;
+  flex: 1 1 auto;
+  gap: 7px;
+}
+
+.swiss-profile-placeholder > span {
+  display: block;
+  width: 96px;
+  max-width: 100%;
+  height: 10px;
+  border-radius: 999px;
+  background: var(--surface-muted);
+}
+
+.swiss-profile-placeholder > span + span {
+  width: 64px;
+}
+
 .swiss-dashboard {
   padding: 24px 32px 32px;
 }
@@ -6847,6 +6871,28 @@ kbd {
 .swiss-theme-toggle:hover {
   background: var(--surface-muted);
   color: var(--foreground);
+}
+
+.swiss-theme-toggle-to-light {
+  display: none;
+}
+
+:root[data-theme="dark"] .swiss-theme-toggle-to-dark {
+  display: none;
+}
+
+:root[data-theme="dark"] .swiss-theme-toggle-to-light {
+  display: block;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .swiss-theme-toggle-to-dark {
+    display: none;
+  }
+
+  :root:not([data-theme="light"]) .swiss-theme-toggle-to-light {
+    display: block;
+  }
 }
 
 .swiss-help-link {

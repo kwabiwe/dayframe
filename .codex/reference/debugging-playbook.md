@@ -52,6 +52,8 @@ Do not stop at the first plausible explanation if another layer could still be b
 - Local simulator passes but physical iPhone HealthKit data has a different shape.
 - JavaScript contains a native-view fix but the installed iOS binary predates the Swift/module change, or CocoaPods/autolinking did not include the updated module.
 - A hybrid Calendar bug appears visual but is actually a stale prop/event contract, a recreated hosting controller, or competing React Native and native scroll/gesture owners.
+- A web style looks dropped but the local Next dev server is still serving the stylesheet compiled before a `globals.css` edit (same chunk URL and size). Restart the dev server and compare the rule against a fresh `npm run build` before diagnosing a bundling defect.
+- A server-rendered client component reads the clock (`new Date()`, `Date.now()`) during render, so a running timer's derived values differ between the server HTML and hydration. Render from the server's `renderedAt` until hydrated (`useHydrationSafeNow`) and cover it with a hydrate-later DOM test.
 
 ## Before A Fix Branch
 
