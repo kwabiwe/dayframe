@@ -46,7 +46,8 @@ export function timeEntryCategoryColor(entry: TimeEntryDisplayFields) {
 
 export function categoryDisplay(name?: string | null, color?: string | null) {
   const label = cleanLabel(name) ?? "No activity";
-  const isUncategorized = !cleanLabel(name) || label.toLocaleLowerCase() === "uncategorized";
+  // The server names the no-activity bucket "No activity" (older data: "Uncategorized").
+  const isUncategorized = !cleanLabel(name) || ["uncategorized", "no activity"].includes(label.toLocaleLowerCase());
   return {
     label,
     color: isUncategorized ? "var(--uncategorized-color)" : paletteCssColorFor(color, label),

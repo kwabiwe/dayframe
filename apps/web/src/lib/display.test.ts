@@ -58,4 +58,10 @@ describe("time entry display helpers", () => {
       })
     ).toBe("light-dark(#0FBF95, #16D2A6)");
   });
+
+  it("treats the server's No activity bucket as uncategorized for colour and hatch", () => {
+    expect(categoryDisplay("No activity", null).isUncategorized).toBe(true);
+    expect(categoryDisplay("No activity", null).color).toBe("var(--uncategorized-color)");
+    expect(categoryDisplay("Work", "blue").isUncategorized).toBe(false);
+  });
 });

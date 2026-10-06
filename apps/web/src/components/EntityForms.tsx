@@ -273,7 +273,7 @@ function PlaceEditForm({
           />
           <TextInput
             name="defaultActivityDescription"
-            label="Default activity description"
+            label="Default task description"
             defaultValue={place.defaultActivityDescription ?? ""}
             placeholder="School drop-off/pickup"
           />
@@ -526,7 +526,7 @@ function CreatePlaceForm({
           <SelectInput name="categoryId" label="Default activity" options={categories} />
           <TextInput
             name="defaultActivityDescription"
-            label="Default activity description"
+            label="Default task description"
             placeholder="School drop-off/pickup"
           />
         </>
@@ -731,7 +731,7 @@ function RuleDraftPreview({
           <span className="text-[var(--muted)]">Mode:</span> {formatDraftMode(draft.outcome.mode)}
         </p>
         <p>
-          <span className="text-[var(--muted)]">Activity:</span> {draft.outcome.description}
+          <span className="text-[var(--muted)]">Task:</span> {draft.outcome.description}
         </p>
         <p>
           <span className="text-[var(--muted)]">Activity:</span> {draft.outcome.categoryName ?? "Not set"}

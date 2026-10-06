@@ -18,7 +18,7 @@ Use this when changing timer flows, dashboards, reports, entity management, onbo
 - Stopping a timer must close the authenticated user's active timer in the current workspace.
 - Active timer state must refresh correctly on web and mobile.
 - Manual completed entries should support category-only or uncategorized entries.
-- User-facing labels should say task, category, time entry, place, or source. Avoid project/client wording unless working on a compatibility or migration surface.
+- User-facing labels should say task, activity, entry, place, or source. Avoid project/client wording unless working on a compatibility or migration surface.
 - The interface says "activity" and "activities" everywhere on web and iPhone (owner-confirmed 6 Oct 2026; shipped app-wide rather than surface by surface). Database columns, API fields, code identifiers, tests and the report CSV export keep `category`, so nothing stored changes. `apps/web/src/app/activityWording.contract.test.ts` fails if interface text says "category" or "uncategorized".
 - Terms: an *activity* is what you start or file time under (Work, Sleep, Errands); an *entry* is a recorded stretch of time (a *time block* on Calendar); Apple Health records stay *workouts* or *sleep*; time with no activity reads "No activity". Title the list "Activities", never "Activity" alone, so it is not confused with Apple's Fitness "Activity". Library groups (Work and study, Body and mind…) may be called *life areas*.
 

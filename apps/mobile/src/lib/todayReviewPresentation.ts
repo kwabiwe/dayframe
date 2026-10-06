@@ -339,7 +339,7 @@ function mobileEntry(entry: MobileTimeEntry): CanonicalEntry {
   const endMs = entry.stoppedAt ? Date.parse(entry.stoppedAt) : Number.NaN;
   return {
     id: entry.id,
-    title: entry.description?.trim() || entry.categoryName || "Untitled activity",
+    title: entry.description?.trim() || entry.categoryName || "Untitled entry",
     category: { id: entry.categoryId, name: entry.categoryName, color: entry.categoryColor ?? null },
     placeLabel: entry.placeName,
     startMs,

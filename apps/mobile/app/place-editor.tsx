@@ -669,9 +669,9 @@ export default function PlaceEditorScreen() {
                       />
                     ))}
                   </ScrollView>
-                  <Text style={styles.label}>Default activity description</Text>
+                  <Text style={styles.label}>Default task description</Text>
                   <TextInput
-                    accessibilityLabel="Default activity description"
+                    accessibilityLabel="Default task description"
                     onChangeText={setDefaultActivityDescription}
                     placeholder="School drop-off/pickup"
                     placeholderTextColor={theme.textSecondary}

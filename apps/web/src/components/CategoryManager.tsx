@@ -82,7 +82,7 @@ export function CategoryManager({ categories }: { categories: CategoryRow[] }) {
       setCategoryPendingDelete(null);
       refresh();
     } catch (error) {
-      setDeleteError(error instanceof Error ? error.message : "Unable to delete this category.");
+      setDeleteError(error instanceof Error ? error.message : "Unable to delete this activity.");
     } finally {
       setIsDeleting(false);
     }
@@ -154,7 +154,7 @@ export function CategoryManager({ categories }: { categories: CategoryRow[] }) {
           isBusy={isDeleting || isPending}
           onCancel={() => setCategoryPendingDelete(null)}
           onConfirm={() => void archiveCategory(categoryPendingDelete)}
-          title="Delete category?"
+          title="Delete activity?"
         />
       ) : null}
     </div>

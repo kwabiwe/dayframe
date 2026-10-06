@@ -379,7 +379,7 @@ export function PlaceEditor({
             />
             <TextField
               id="place-default-activity"
-              label="Default activity description"
+              label="Default task description"
               maxLength={240}
               placeholder="School drop-off/pickup"
               value={defaultActivityDescription}

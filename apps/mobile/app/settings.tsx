@@ -764,13 +764,13 @@ export default function SettingsScreen() {
         finishSignedOutNavigation();
         return;
       }
-      Alert.alert("Activities", error instanceof Error ? error.message : "Unable to update category.");
+      Alert.alert("Activities", error instanceof Error ? error.message : "Unable to update activity.");
     }
   }
 
   function confirmDeleteCategory(category: Category) {
     Alert.alert(
-      "Delete category",
+      "Delete activity",
       `Delete ${category.name}? Existing time entries keep their history.`,
       [
         { text: "Cancel", style: "cancel" },
@@ -795,7 +795,7 @@ export default function SettingsScreen() {
         finishSignedOutNavigation();
         return;
       }
-      Alert.alert("Activities", error instanceof Error ? error.message : "Unable to delete category.");
+      Alert.alert("Activities", error instanceof Error ? error.message : "Unable to delete activity.");
     }
   }
 

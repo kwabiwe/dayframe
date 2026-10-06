@@ -1404,12 +1404,12 @@ export function automationRuleInputFromDraft(input: {
   if (draft.outcome.categoryName && category) {
     categoryId = category.id;
   } else if (draft.outcome.categoryName && !category) {
-    blockers.push(`Add "${draft.outcome.categoryName}" as a category before saving this rule.`);
+    blockers.push(`Add "${draft.outcome.categoryName}" as an activity before saving this rule.`);
   } else {
     categoryId = place?.defaultCategoryId ?? null;
   }
   if (!draft.outcome.categoryName && !categoryId) {
-    blockers.push("Choose a category before saving this rule.");
+    blockers.push("Choose an activity before saving this rule.");
   }
 
   if (draft.outcome.mode === "auto_log_when_matched") {
@@ -1543,7 +1543,7 @@ export function draftAutomationRuleFromText(input: {
       simulationChecks: [
         "Compare the school visit against the same-day calendar.",
         "Classify breakfast club and after-school club as child-attendance context.",
-        "Show the inferred time window and category before confirmation."
+        "Show the inferred time window and activity before confirmation."
       ],
       unsupported: [
         "Dayframe does not yet combine calendar evidence with place-visit rules in the automation UI."

@@ -365,7 +365,7 @@ async function loadLegacyRows(client: pg.PoolClient, session: RequestSession, in
     `select te.id, te.created_from_event_id as "eventId",
             p.id as "projectId", p.name as "projectName", p.color as "projectColor",
             cl.name as "clientName",
-            coalesce(nullif(te.description, ''), c.name, 'Untitled activity') as title,
+            coalesce(nullif(te.description, ''), c.name, 'Untitled entry') as title,
             c.id as "categoryId", c.name as "categoryName", c.color as "categoryColor",
             pl.id as "placeId", coalesce(pl.name, te.place_label) as "placeLabel",
             case
@@ -411,7 +411,7 @@ async function loadLegacyRows(client: pg.PoolClient, session: RequestSession, in
 async function loadCompletedTodayRows(client: pg.PoolClient, session: RequestSession, input: ReviewPresentationRequest) {
   const result = await client.query<EntryRow>(
     `select te.id, te.created_from_event_id as "eventId",
-            coalesce(nullif(te.description, ''), c.name, 'Untitled activity') as title,
+            coalesce(nullif(te.description, ''), c.name, 'Untitled entry') as title,
             c.id as "categoryId", c.name as "categoryName", c.color as "categoryColor",
             pl.id as "placeId", coalesce(pl.name, te.place_label) as "placeLabel",
             te.started_at as "startedAt", te.stopped_at as "stoppedAt", te.confidence,
@@ -500,7 +500,7 @@ async function loadReviewRowsByIds(client: pg.PoolClient, session: RequestSessio
 async function loadCompletedEntriesByIds(client: pg.PoolClient, session: RequestSession, ids: string[]) {
   const result = await client.query<EntryRow>(
     `select te.id, te.created_from_event_id as "eventId",
-            coalesce(nullif(te.description, ''), c.name, 'Untitled activity') as title,
+            coalesce(nullif(te.description, ''), c.name, 'Untitled entry') as title,
             c.id as "categoryId", c.name as "categoryName", c.color as "categoryColor",
             pl.id as "placeId", coalesce(pl.name, te.place_label) as "placeLabel",
             te.started_at as "startedAt", te.stopped_at as "stoppedAt", te.confidence,
@@ -521,7 +521,7 @@ async function loadLegacyRowsByIds(client: pg.PoolClient, session: RequestSessio
     `select te.id, te.created_from_event_id as "eventId",
             p.id as "projectId", p.name as "projectName", p.color as "projectColor",
             cl.name as "clientName",
-            coalesce(nullif(te.description, ''), c.name, 'Untitled activity') as title,
+            coalesce(nullif(te.description, ''), c.name, 'Untitled entry') as title,
             c.id as "categoryId", c.name as "categoryName", c.color as "categoryColor",
             pl.id as "placeId", coalesce(pl.name, te.place_label) as "placeLabel",
             case
