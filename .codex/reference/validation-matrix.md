@@ -45,6 +45,14 @@ npm run test -w @dayframe/shared
 
 Do not claim a command passed if it was not run. If a command is skipped, state why.
 
+## Activities, icons and starters
+
+When changing category/activity storage, starter activities, activity icons or automatic Sleep/Commute categories:
+
+- Run the shared icon and starter tests plus the web category, starter and automatic-category tests.
+- Run `npm run validate:starter-activities-db` against a disposable local `*_test` database prepared with `npx tsx scripts/setup-validation-db.ts ordered`. It covers new-workspace seeding, adding and linking starters without duplicate names, archived starter keys, the oldest same-named link, idempotence, a race with automatic Commute creation and the column constraints.
+- Apply `supabase/migrations/202610060001_category_icon_and_starter_key.sql` to staging before the Preview that reads the new columns, with owner approval.
+
 ## Interaction Motion
 
 Required whenever a feature adds or changes navigation, presentation, gestures, list insertion/removal/reordering, expanding content, status feedback, Undo, or other visible movement:

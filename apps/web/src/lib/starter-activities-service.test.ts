@@ -87,6 +87,44 @@ describe("starter activities service", () => {
     expect(db.statements.map((statement) => statement.sql)).toEqual(expect.arrayContaining(["begin", "commit"]));
   });
 
+  it("never adds a starter whose name an active activity already uses under another key", async () => {
+    // Exercise was archived, then Walk was renamed to "Exercise": the starter must not come back as a duplicate name.
+    db.existing = DAYFRAME_STARTER_ACTIVITIES
+      .filter((starter) => starter.starterKey !== "exercise")
+      .map((starter) => ({ id: starter.starterKey, name: starter.starterKey === "walk" ? "Exercise" : starter.name, starterKey: starter.starterKey }));
+
+    const result = await addMissingStarterActivities(session);
+
+    expect(result).toEqual({ added: [], linked: [] });
+    expect(db.statements.some((statement) => statement.sql.includes("insert into categories"))).toBe(false);
+  });
+
+  it("links the oldest of two same-named activities and reads them oldest first", async () => {
+    db.existing = [
+      { id: "older-sleep", name: "Sleep", starterKey: null },
+      { id: "newer-sleep", name: "sleep", starterKey: null }
+    ];
+
+    const result = await addMissingStarterActivities(session);
+
+    expect(result.linked).toEqual([{ id: "older-sleep", starterKey: "sleep" }]);
+    const read = db.statements.find((statement) => statement.sql.startsWith("select id, name, starter_key"));
+    expect(read?.sql).toContain("order by created_at asc");
+  });
+
+  it("takes the automatic Sleep and Commute locks before reading, like automatic category creation", async () => {
+    await addMissingStarterActivities(session);
+
+    const locks = db.statements.filter((statement) => statement.sql.includes("pg_advisory_xact_lock")).map((statement) => statement.params[0]);
+    expect(locks).toEqual([
+      `dayframe:auto-category:${session.workspaceId}:commute`,
+      `dayframe:auto-category:${session.workspaceId}:sleep`
+    ]);
+    const firstRead = db.statements.findIndex((statement) => statement.sql.startsWith("select id, name, starter_key"));
+    const lastLock = db.statements.map((statement) => statement.sql).lastIndexOf("select pg_advisory_xact_lock(hashtextextended($1, 0))");
+    expect(lastLock).toBeLessThan(firstRead);
+  });
+
   it("does nothing when every starter is already present", async () => {
     db.existing = DAYFRAME_STARTER_ACTIVITIES.map((starter) => ({ id: starter.starterKey, name: starter.name, starterKey: starter.starterKey }));
 

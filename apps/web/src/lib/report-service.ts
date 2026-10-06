@@ -245,7 +245,7 @@ export async function getReportExportRows(session: RequestSession, input: Report
 export async function getReportFilterOptions(session: RequestSession): Promise<ReportFilterOptions> {
   const [categories, tags, places] = await Promise.all([
     query<CategoryRow>(
-      `select id, name, color, is_pinned as "isPinned"
+      `select id, name, color, is_pinned as "isPinned", icon, starter_key as "starterKey"
        from categories
        where workspace_id = $1 and is_archived = false
        order by is_pinned desc, name`,

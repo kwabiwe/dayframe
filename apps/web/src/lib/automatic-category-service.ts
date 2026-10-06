@@ -36,6 +36,14 @@ export function automaticLoggingCategorySpec(
   return commuteCategorySpec();
 }
 
+export function automaticCategoryLockKey(workspaceId: string, name: string) {
+  return `dayframe:auto-category:${workspaceId}:${name.toLowerCase()}`;
+}
+
+// Starter categories that automatic logging can create. Callers that take more than one of
+// these locks take them in this (alphabetical) order.
+export const AUTOMATIC_STARTER_LOCK_NAMES = ["Commute", "Sleep"] as const;
+
 export async function ensureAutomaticCategoryId(
   client: pg.PoolClient,
   session: RequestSession,
@@ -43,7 +51,7 @@ export async function ensureAutomaticCategoryId(
 ) {
   await client.query(
     "select pg_advisory_xact_lock(hashtextextended($1, 0))",
-    [`dayframe:auto-category:${session.workspaceId}:${spec.name.toLowerCase()}`]
+    [automaticCategoryLockKey(session.workspaceId, spec.name)]
   );
   if (spec.starterKey) {
     const starter = await client.query<{ id: string }>(

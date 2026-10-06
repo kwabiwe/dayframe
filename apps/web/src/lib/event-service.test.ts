@@ -437,6 +437,12 @@ describe("category persistence", () => {
         String(statement).includes("insert into categories")
       )
     ).toHaveLength(2);
+    // Locks are taken alphabetically whatever order the caller asked, matching the starters route.
+    expect(
+      client.query.mock.calls
+        .filter(([statement]) => String(statement).includes("pg_advisory_xact_lock"))
+        .map(([, values]) => String((values as unknown[])[0]).split(":").pop())
+    ).toEqual(["commute", "health", "sleep"]);
     expect(client.query).toHaveBeenCalledWith("commit");
     expect(client.release).toHaveBeenCalled();
   });

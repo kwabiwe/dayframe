@@ -1277,12 +1277,15 @@ export async function ensureAutomaticLoggingCategories(
   const client = await pool.connect();
   try {
     await client.query("begin");
-    const categories = [];
-    for (const kind of uniqueKinds) {
+    // Lock (and create) in alphabetical order so this never deadlocks with the starters route;
+    // answer in the order the caller asked.
+    const byKind = new Map<AutomaticLoggingCategoryKind, { id: string } & ReturnType<typeof automaticLoggingCategorySpec>>();
+    for (const kind of [...uniqueKinds].sort()) {
       const spec = automaticLoggingCategorySpec(kind);
       const id = await ensureAutomaticCategoryId(client, session, spec);
-      categories.push({ id, ...spec });
+      byKind.set(kind, { id, ...spec });
     }
+    const categories = uniqueKinds.map((kind) => byKind.get(kind)!);
     await client.query("commit");
     return categories;
   } catch (error) {
