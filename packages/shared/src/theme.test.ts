@@ -90,9 +90,10 @@ describe("Midnight Core theme", () => {
   });
 
   it("resolves mode-aware display colours without changing stored keys", () => {
-    expect(paletteColorFor("red", "", "dark")).toBe("#F87168");
-    expect(paletteColorFor("red", "", "light")).toBe("#F87168");
-    expect(paletteCssColorFor("red")).toBe("light-dark(#F87168, #F87168)");
+    expect(paletteColorFor("red", "", "dark")).toBe("#FF6A5E");
+    expect(paletteColorFor("red", "", "light")).toBe("#EE5446");
+    expect(paletteCssColorFor("red")).toBe("light-dark(#EE5446, #FF6A5E)");
+    expect(paletteKeyFor("#F87168")).toBe("red");
   });
 
   it("round-trips every light and dark display colour to its stable key", () => {

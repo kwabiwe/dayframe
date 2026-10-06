@@ -200,8 +200,8 @@ On surfaces not yet migrated to Blocks, category colour appears as a dot, border
 
 On Blocks surfaces, an entry is a solid block filled with its category colour, with its text on the block:
 
-- Each palette entry carries a display value per theme (`lightHex` and `darkHex` in `palette.ts`). Blocks may make these more vivid than the stored identity value. Stored keys never change, so no data migration follows.
-- On-block text is white or a deep ink, whichever measures higher contrast. It must reach 4.5:1 for normal text and 3:1 for large text in both themes. A shared helper used by web and iOS makes this choice, and a shared test checks every palette entry in both themes. A display value that fails both options is adjusted; it is never shipped with failing text.
+- Each palette entry carries a display value per theme (`lightHex` and `darkHex` in `palette.ts`), more vivid than the stored identity `hex`. Every surface, migrated or not, uses the display value for the current theme, so an activity is the same colour everywhere. Live Activities and Shortcuts use the Midnight value. Stored keys and `hex` never change, so no data migration follows.
+- On-block text is white or a deep ink, whichever measures higher contrast. It must reach 4.5:1 for normal text and 3:1 for large text in both themes. `onBlockTextColor` and `blockColorsFor` in `packages/shared/src/blocks.ts` make this choice for web and iOS, and `blocks.test.ts` checks every palette entry in both themes. `DAYFRAME_BLOCKS` there also holds the on-block white and ink and the radius scale (chip 8, block 10, card 20, sheet 28, pill). A display value that fails both options is adjusted; it is never shipped with failing text.
 - Never place text over a palette colour without that measured choice, and never assume a palette colour is accessible body text on another surface.
 
 Colour remains supplementary: blocks still carry the activity name, duration and state as text.

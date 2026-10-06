@@ -44,7 +44,7 @@ describe("time entry display helpers", () => {
   it("keeps named categories on the shared palette", () => {
     expect(categoryDisplay("Work", "lime")).toEqual({
       label: "Work",
-      color: "light-dark(#4BCE97, #4BCE97)",
+      color: "light-dark(#0FBF95, #16D2A6)",
       isUncategorized: false
     });
   });
@@ -56,6 +56,6 @@ describe("time entry display helpers", () => {
         categoryColor: "lime",
         categoryName: "Work"
       })
-    ).toBe("light-dark(#4BCE97, #4BCE97)");
+    ).toBe("light-dark(#0FBF95, #16D2A6)");
   });
 });
