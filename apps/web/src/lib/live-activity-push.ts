@@ -705,7 +705,7 @@ function contentState(active: ActiveTimerRow, isRunning: boolean) {
   const description = active.description?.trim();
   const categoryName = active.categoryName?.trim() || null;
   return {
-    title: description || categoryName || "Uncategorized",
+    title: description || categoryName || "No activity",
     categoryName,
     categoryColor: categoryName
       ? paletteColorFor(active.categoryColor ?? categoryName, categoryName, "dark")
@@ -720,7 +720,7 @@ function contentState(active: ActiveTimerRow, isRunning: boolean) {
 
 function stoppedContentState() {
   return {
-    title: "Uncategorized",
+    title: "No activity",
     categoryName: null,
     categoryColor: null,
     startedAt: null,

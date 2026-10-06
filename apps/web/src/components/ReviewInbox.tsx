@@ -236,7 +236,7 @@ export function reviewItemDisplay(item: ReviewItemRow) {
       ? "Commute suggestion"
       : item.title;
   const meta = [
-    item.categoryName ?? "Needs category",
+    item.categoryName ?? "Needs an activity",
     item.placeName ?? "No place",
     reviewTimeWindow(item),
     kind

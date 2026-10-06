@@ -12,7 +12,7 @@ describe("Review inbox display", () => {
     const display = reviewItemDisplay({ ...base, rawPayload: { qualificationReason: "same_place_outing", stopCount: 1 } } as never);
     expect(display.kind).toBe("Time away");
     expect(display.title).toBe("Time away from Home");
-    expect(display.meta).toContain("Needs category");
+    expect(display.meta).toContain("Needs an activity");
   });
 
   it("keeps ordinary commutes as commute suggestions", () => {

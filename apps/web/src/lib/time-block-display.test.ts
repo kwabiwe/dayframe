@@ -154,7 +154,7 @@ describe("time block display helpers", () => {
       hiddenTagCount: 2
     });
     expect(calendarBlockPrimaryLine({ ...entry, description: "", categoryName: null })).toBe(
-      "Uncategorized · #Family duties +2"
+      "No activity · #Family duties +2"
     );
     expect(calendarBlockSecondaryLine(entry, new Date("2026-08-02T12:00:00.000Z"))).toMatch(
       /^1h 15m \(.+ – .+\)$/

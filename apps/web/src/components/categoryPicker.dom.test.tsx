@@ -28,17 +28,17 @@ describe("CategoryPicker", () => {
     const create = vi.fn<(name: string, color?: DayframePaletteKey) => Promise<CreateCategoryOutcome>>();
     render(<PickerHarness create={create} />);
     const user = userEvent.setup();
-    const trigger = screen.getByRole("button", { name: /Uncategorized/ });
+    const trigger = screen.getByRole("button", { name: /No activity/ });
 
     await user.click(trigger);
-    await user.click(screen.getByRole("option", { name: "Create new category" }));
-    const dialog = screen.getByRole("dialog", { name: "Create new category" });
+    await user.click(screen.getByRole("option", { name: "Create new activity" }));
+    const dialog = screen.getByRole("dialog", { name: "Create new activity" });
     const input = within(dialog).getByRole("textbox", { name: "Name" });
-    const colorTrigger = within(dialog).getByRole("button", { name: /Choose category colour/ });
+    const colorTrigger = within(dialog).getByRole("button", { name: /Choose activity colour/ });
     expect(input.closest(".category-picker-create-name-control")?.contains(colorTrigger)).toBe(true);
     expect(within(dialog).queryByText("Colour")).toBeNull();
     await user.click(within(dialog).getByRole("button", { name: "Create" }));
-    expect((await within(dialog).findByRole("alert")).textContent).toContain("Enter a category name.");
+    expect((await within(dialog).findByRole("alert")).textContent).toContain("Enter an activity name.");
     expect(create).not.toHaveBeenCalled();
 
     await user.type(input, "work");
@@ -47,18 +47,18 @@ describe("CategoryPicker", () => {
     expect(create).not.toHaveBeenCalled();
 
     await user.keyboard("{Escape}");
-    await waitFor(() => expect(document.activeElement).toBe(screen.getByRole("option", { name: "Create new category" })));
+    await waitFor(() => expect(document.activeElement).toBe(screen.getByRole("option", { name: "Create new activity" })));
     expect(trigger.getAttribute("aria-expanded")).toBe("true");
 
-    await user.click(screen.getByRole("option", { name: "Create new category" }));
-    const reopenedDialog = screen.getByRole("dialog", { name: "Create new category" });
+    await user.click(screen.getByRole("option", { name: "Create new activity" }));
+    const reopenedDialog = screen.getByRole("dialog", { name: "Create new activity" });
     await waitFor(() => expect(document.activeElement).toBe(within(reopenedDialog).getByRole("textbox", { name: "Name" })));
     await user.tab();
-    expect(document.activeElement).toBe(within(reopenedDialog).getByRole("button", { name: /Choose category colour/ }));
+    expect(document.activeElement).toBe(within(reopenedDialog).getByRole("button", { name: /Choose activity colour/ }));
     await user.tab();
     expect(document.activeElement).toBe(within(reopenedDialog).getByRole("button", { name: "Cancel" }));
     await user.keyboard("{Escape}");
-    await waitFor(() => expect(document.activeElement).toBe(screen.getByRole("option", { name: "Create new category" })));
+    await waitFor(() => expect(document.activeElement).toBe(screen.getByRole("option", { name: "Create new activity" })));
 
     await user.keyboard("{Escape}");
     await waitFor(() => expect(trigger.getAttribute("aria-expanded")).toBe("false"));
@@ -85,7 +85,7 @@ describe("CategoryPicker", () => {
 
     const firstTrigger = screen.getByTestId("first-picker").querySelector("button") as HTMLButtonElement;
     await user.click(firstTrigger);
-    await user.click(screen.getByRole("option", { name: "Create new category" }));
+    await user.click(screen.getByRole("option", { name: "Create new activity" }));
     const input = screen.getByRole("textbox", { name: "Name" }) as HTMLInputElement;
     await user.type(input, "  Writing  ");
     await user.keyboard("{Enter}");
@@ -119,17 +119,17 @@ describe("CategoryPicker", () => {
       });
     render(<PickerHarness create={create} portal />);
     const user = userEvent.setup();
-    const trigger = screen.getByRole("button", { name: /Uncategorized/ });
+    const trigger = screen.getByRole("button", { name: /No activity/ });
 
     await user.click(trigger);
-    await user.click(screen.getByRole("option", { name: "Create new category" }));
-    const dialog = screen.getByRole("dialog", { name: "Create new category" });
+    await user.click(screen.getByRole("option", { name: "Create new activity" }));
+    const dialog = screen.getByRole("dialog", { name: "Create new activity" });
     const input = within(dialog).getByRole("textbox", { name: "Name" });
     await user.type(input, "Deep Work");
-    const colorTrigger = within(dialog).getByRole("button", { name: /Choose category colour/ });
+    const colorTrigger = within(dialog).getByRole("button", { name: /Choose activity colour/ });
     await user.click(colorTrigger);
 
-    const colorMenu = screen.getByRole("listbox", { name: "Category colour" });
+    const colorMenu = screen.getByRole("listbox", { name: "Activity colour" });
     expect(colorMenu.parentElement).toBe(document.body);
     expect(within(colorMenu).getAllByRole("option")).toHaveLength(30);
     const blue = colorMenu.querySelector<HTMLButtonElement>('[data-color="blue"]');
@@ -146,19 +146,19 @@ describe("CategoryPicker", () => {
 
     await user.click(colorTrigger);
     await user.keyboard("{Escape}");
-    await waitFor(() => expect(screen.queryByRole("listbox", { name: "Category colour" })).toBeNull());
+    await waitFor(() => expect(screen.queryByRole("listbox", { name: "Activity colour" })).toBeNull());
     expect(trigger.getAttribute("aria-expanded")).toBe("true");
-    expect(screen.getByRole("dialog", { name: "Create new category" })).not.toBeNull();
+    expect(screen.getByRole("dialog", { name: "Create new activity" })).not.toBeNull();
     await waitFor(() => expect(document.activeElement).toBe(colorTrigger));
 
     await user.keyboard("{Escape}");
-    await waitFor(() => expect(document.activeElement).toBe(screen.getByRole("option", { name: "Create new category" })));
+    await waitFor(() => expect(document.activeElement).toBe(screen.getByRole("option", { name: "Create new activity" })));
     expect(trigger.getAttribute("aria-expanded")).toBe("true");
     await user.keyboard("{Escape}");
     await waitFor(() => expect(trigger.getAttribute("aria-expanded")).toBe("false"));
   });
 
-  it("renders the selected category colour as a real dot in compact picker triggers", () => {
+  it("renders the selected activity colour as a real dot in compact picker triggers", () => {
     render(<PickerHarness create={vi.fn()} initialSecondSelectedId={workCategory.id} secondPicker />);
     const trigger = screen.getByTestId("second-picker").querySelector<HTMLButtonElement>('button[aria-haspopup]');
     const value = trigger?.querySelector(".category-picker-trigger-value");
@@ -173,7 +173,7 @@ describe("CategoryPicker", () => {
   it("portals the menu to the body without losing panel-aware focus and outside-click handling", async () => {
     render(<PickerHarness create={vi.fn()} portal />);
     const user = userEvent.setup();
-    const trigger = screen.getByRole("button", { name: /Uncategorized/ });
+    const trigger = screen.getByRole("button", { name: /No activity/ });
     const field = screen.getByTestId("first-picker");
 
     await user.click(trigger);
@@ -183,9 +183,9 @@ describe("CategoryPicker", () => {
     expect(menu?.classList.contains("time-entry-quick-editor-nested-surface")).toBe(true);
 
     await user.tab();
-    expect(document.activeElement).toBe(screen.getByRole("option", { name: "Uncategorized" }));
+    expect(document.activeElement).toBe(screen.getByRole("option", { name: "No activity" }));
     await user.keyboard("{End}");
-    expect(document.activeElement).toBe(screen.getByRole("option", { name: "Create new category" }));
+    expect(document.activeElement).toBe(screen.getByRole("option", { name: "Create new activity" }));
     await user.tab();
     expect(document.activeElement).toBe(screen.getByRole("button", { name: "After picker" }));
     expect(trigger.getAttribute("aria-expanded")).toBe("false");
@@ -207,16 +207,16 @@ describe("CategoryPicker", () => {
     render(<PickerHarness create={vi.fn()} nativeDialog onOuterKeyDown={onOuterKeyDown} portal />);
     const user = userEvent.setup();
     const outerDialog = screen.getByRole("dialog", { name: "Add Time" });
-    const trigger = screen.getByRole("button", { name: /Uncategorized/ });
+    const trigger = screen.getByRole("button", { name: /No activity/ });
 
     await user.click(trigger);
     const menu = document.getElementById("first-category-menu");
     expect(menu?.parentElement).toBe(outerDialog);
     expect(screen.getByTestId("first-picker").contains(menu)).toBe(false);
 
-    await user.click(screen.getByRole("option", { name: "Create new category" }));
+    await user.click(screen.getByRole("option", { name: "Create new activity" }));
     await user.keyboard("{Escape}");
-    await waitFor(() => expect(document.activeElement).toBe(screen.getByRole("option", { name: "Create new category" })));
+    await waitFor(() => expect(document.activeElement).toBe(screen.getByRole("option", { name: "Create new activity" })));
     expect(trigger.getAttribute("aria-expanded")).toBe("true");
     expect(onOuterKeyDown).not.toHaveBeenCalled();
 

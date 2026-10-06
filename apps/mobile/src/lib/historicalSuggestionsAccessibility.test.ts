@@ -11,7 +11,7 @@ describe("historical suggestion accessibility announcements", () => {
       description: "Bauhaus references",
       tagNames: ["design", "reading"]
     })).toBe(
-      "Applied suggestion: Bauhaus references. category Research; tags design, reading."
+      "Applied suggestion: Bauhaus references. activity Research; tags design, reading."
     );
   });
 

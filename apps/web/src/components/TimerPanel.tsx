@@ -201,13 +201,13 @@ export function TimerPanel({
         </label>
 
         <label className="border-b border-[var(--line)] p-4 lg:border-b-0 lg:border-r">
-          <span className="industrial-field-label">Category</span>
+          <span className="industrial-field-label">Activity</span>
           <select
             className="focus-ring industrial-field"
             value={categoryId}
             onChange={(event) => updateDraft({ categoryId: event.target.value })}
           >
-            <option value="">Uncategorized</option>
+            <option value="">No activity</option>
             {categories.map((category) => (
               <option key={category.id} value={category.id}>
                 {category.name}

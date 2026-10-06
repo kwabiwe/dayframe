@@ -86,7 +86,7 @@ export function DashboardRealtime({
         <SummaryMetric label="Logged" value={formatDuration(coverage.loggedSeconds)} />
         <SummaryMetric label="Covered" value={formatDuration(coverage.coveredSeconds)} />
         <SummaryMetric label="Entries" value={`${entryCount}`} />
-        <SummaryMetric label="Categories" value={`${allocation.categories.length}`} />
+        <SummaryMetric label="Activities" value={`${allocation.categories.length}`} />
       </section>
 
       <section className="swiss-panel dashboard-allocation" aria-labelledby="dashboard-allocation-title">
@@ -110,7 +110,7 @@ export function DashboardRealtime({
         {allocation.totalSeconds > 0 ? (
           <div className="dashboard-allocation-layout">
             <AllocationDonut allocation={allocation} mode={mode} period={period} />
-            <div className="dashboard-allocation-legend" aria-label="Category allocation legend">
+            <div className="dashboard-allocation-legend" aria-label="Time by activity legend">
               {allocation.visibleCategories.map((category) => (
                 <AllocationLink
                   key={category.id}
@@ -270,10 +270,10 @@ function AllocationTable({ allocation }: { allocation: ReturnType<typeof calcula
   return (
     <div className="sr-only">
       <table>
-        <caption>Accessible category allocation for the selected dashboard period</caption>
+        <caption>Accessible time by activity for the selected dashboard period</caption>
         <thead>
           <tr>
-            <th scope="col">Category</th>
+            <th scope="col">Activity</th>
             <th scope="col">Duration</th>
             <th scope="col">Share</th>
           </tr>
@@ -384,7 +384,7 @@ function TopCategoryCard({
 }) {
   return (
     <section className="swiss-panel dashboard-insight-card">
-      <div className="dashboard-insight-heading"><span>Top category</span></div>
+      <div className="dashboard-insight-heading"><span>Top activity</span></div>
       {category ? (
         <>
           <Link className="dashboard-top-category" href={buildDashboardReportsUrl(mode, period, category)}>

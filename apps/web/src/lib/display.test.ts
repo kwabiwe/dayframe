@@ -29,13 +29,13 @@ describe("time entry display helpers", () => {
   });
 
   it("names a blank uncategorized entry explicitly", () => {
-    expect(timeEntryTitle({ description: " ", categoryName: null })).toBe("Uncategorized");
+    expect(timeEntryTitle({ description: " ", categoryName: null })).toBe("No activity");
   });
 
   it("keeps uncategorized wording quiet for category columns", () => {
-    expect(timeEntryCategoryLabel({ categoryName: null })).toBe("Uncategorized");
+    expect(timeEntryCategoryLabel({ categoryName: null })).toBe("No activity");
     expect(categoryDisplay(null, null)).toEqual({
-      label: "Uncategorized",
+      label: "No activity",
       color: "var(--uncategorized-color)",
       isUncategorized: true
     });
@@ -49,7 +49,7 @@ describe("time entry display helpers", () => {
     });
   });
 
-  it("falls back to the category colour when no project colour exists", () => {
+  it("falls back to the activity colour when no project colour exists", () => {
     expect(
       timeEntryAccentColor({
         projectColor: null,

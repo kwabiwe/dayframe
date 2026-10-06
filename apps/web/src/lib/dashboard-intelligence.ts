@@ -85,7 +85,7 @@ export function calculateCategoryAllocation(
     grouped.set(id, {
       id,
       categoryIds: [id],
-      name: entry.categoryName?.trim() || "Uncategorized",
+      name: entry.categoryName?.trim() || "No activity",
       color: entry.categoryColor,
       seconds,
       isUncategorized: entry.categoryId === null
@@ -195,7 +195,7 @@ export function buildCategoryAllocationSummary(
   const details = allocation.categories
     .map((category) => `${category.name} ${formatSeconds(category.seconds)}, ${category.percentage}%`)
     .join("; ");
-  return `Category allocation totals ${formatSeconds(allocation.totalSeconds)}. ${details}.`;
+  return `Time by activity totals ${formatSeconds(allocation.totalSeconds)}. ${details}.`;
 }
 
 function compareCategoryAllocation(

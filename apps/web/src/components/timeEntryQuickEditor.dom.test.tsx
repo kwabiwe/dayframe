@@ -268,7 +268,7 @@ describe("TimeEntryQuickEditorModal", () => {
     expect(description.disabled).toBe(true);
     expect((screen.getByRole("button", { name: "Remove tag Planning" }) as HTMLButtonElement).disabled).toBe(true);
     expect((screen.getByRole("button", { name: "Add or filter tags" }) as HTMLButtonElement).disabled).toBe(true);
-    expect((screen.getByRole("button", { name: /Uncategorized/ }) as HTMLButtonElement).disabled).toBe(true);
+    expect((screen.getByRole("button", { name: /No activity/ }) as HTMLButtonElement).disabled).toBe(true);
     expect((screen.getByLabelText("Start time") as HTMLInputElement).disabled).toBe(true);
     expect((screen.getByLabelText("Finish time") as HTMLInputElement).disabled).toBe(true);
     expect((screen.getByLabelText("Duration in hours and minutes") as HTMLInputElement).disabled).toBe(true);

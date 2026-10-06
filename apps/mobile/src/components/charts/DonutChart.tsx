@@ -136,7 +136,7 @@ export function DonutChart({
     <View
       accessible
       // Fabric assigns this exact label passively on iOS; no live announcement.
-      accessibilityLabel={accessibilityLabel ?? `Category breakdown. ${centerLabel} ${spokenValue ?? centerValue}. ${segments.length} categories. Category information follows the chart.`}
+      accessibilityLabel={accessibilityLabel ?? `Activity breakdown. ${centerLabel} ${spokenValue ?? centerValue}. ${segments.length} ${segments.length === 1 ? "activity" : "activities"}. Activity details follow the chart.`}
       accessibilityRole="image"
       onLayout={measureAvailableWidth}
       style={styles.measurementBox}

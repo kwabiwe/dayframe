@@ -4,13 +4,13 @@ import Foundation
 @available(iOS 16.4, *)
 struct StartTrackingIntent: AppIntent {
   static var title: LocalizedStringResource = "Start tracking"
-  static var description = IntentDescription("Start a Dayframe timer with an optional description, category, and workspace.")
+  static var description = IntentDescription("Start a Dayframe timer with an optional description, activity, and workspace.")
   static var openAppWhenRun: Bool = false
 
   @Parameter(title: "Description")
   var taskDescription: String?
 
-  @Parameter(title: "Category", optionsProvider: DayframeCategoryOptionsProvider())
+  @Parameter(title: "Activity", optionsProvider: DayframeCategoryOptionsProvider())
   var category: String?
 
   @Parameter(title: "Workspace", optionsProvider: DayframeWorkspaceOptionsProvider())
@@ -164,7 +164,7 @@ private enum DayframeShortcutPerformer {
       _ = await DayframeLiveActivityController.start(
         entryId: nil,
         apiBase: nil,
-        title: event.description ?? category?.name ?? "Uncategorized",
+        title: event.description ?? category?.name ?? "No activity",
         categoryName: category?.name ?? dayframeCleanText(categoryName),
         categoryColor: category?.color,
         startedAt: event.occurredAt

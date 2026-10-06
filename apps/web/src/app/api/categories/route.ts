@@ -20,7 +20,7 @@ const activityIconSchema = z
   .optional();
 
 const createCategorySchema = z.object({
-  name: z.string().trim().min(1, "Category name is required."),
+  name: z.string().trim().min(1, "Activity name is required."),
   color: z.string().trim().optional(),
   isPinned: z.boolean().optional(),
   icon: activityIconSchema
@@ -63,7 +63,7 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: error.message }, { status: error.status });
     }
     if (error instanceof ZodError) {
-      return NextResponse.json({ error: error.issues[0]?.message ?? "Invalid category." }, { status: 400 });
+      return NextResponse.json({ error: error.issues[0]?.message ?? "Invalid activity." }, { status: 400 });
     }
     throw error;
   }
@@ -74,7 +74,7 @@ export async function PATCH(request: Request) {
     const session = await resolveRequestSession(request);
     const body = updateCategorySchema.parse(await request.json());
     const category = await updateCategory(body.id, body, session);
-    if (!category) return NextResponse.json({ error: "Category not found." }, { status: 404 });
+    if (!category) return NextResponse.json({ error: "Activity not found." }, { status: 404 });
     return NextResponse.json({ ok: true, category });
   } catch (error) {
     const response = authErrorResponse(error);

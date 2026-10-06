@@ -2576,7 +2576,7 @@ export function ActiveTimerEditSheet({
                   layoutDensity === "compact" ? styles.activeEditSectionCompact : null,
                   layoutDensity === "condensed" ? styles.activeEditSectionCondensed : null
                 ]}>
-                  <Text {...mobileTextProps("metadata")} style={styles.activeEditSectionLabel}>Category</Text>
+                  <Text {...mobileTextProps("metadata")} style={styles.activeEditSectionLabel}>Activity</Text>
                   <View style={styles.activeEditCategoryViewport}>
                     <ScrollView
                       alwaysBounceVertical={false}
@@ -2923,14 +2923,14 @@ function CategoryChip({
   styles: MobileStyles;
   theme: MobileTheme;
 }) {
-  const label = category?.name ?? "No category";
+  const label = category?.name ?? "No activity";
   const color = category
     ? paletteColorFor(category.color, category.name, theme.mode)
     : theme.textSecondary;
 
   return (
     <Pressable
-      accessibilityLabel={category ? `Set category to ${category.name}` : "Clear category"}
+      accessibilityLabel={category ? `Set activity to ${category.name}` : "Clear activity"}
       accessibilityRole="button"
       accessibilityState={{ selected }}
       hitSlop={{ top: 6, bottom: 6 }}

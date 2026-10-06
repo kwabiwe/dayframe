@@ -63,7 +63,7 @@ export async function searchDayframe(
      candidates as (
        select 'entry:' || me.id::text as id,
               'entry'::text as kind,
-              coalesce(nullif(btrim(me.description), ''), me.category_name, 'Uncategorized') as label,
+              coalesce(nullif(btrim(me.description), ''), me.category_name, 'No activity') as label,
               concat_ws(' · ', me.category_name, me.place_name) as detail,
               me.started_at as occurred_at,
               me.id as entry_id,
@@ -85,7 +85,7 @@ export async function searchDayframe(
        union all
        select 'activity:' || latest.id::text,
               'activity',
-              coalesce(nullif(btrim(latest.description), ''), latest.category_name, 'Uncategorized'),
+              coalesce(nullif(btrim(latest.description), ''), latest.category_name, 'No activity'),
               concat_ws(' · ', 'Start again', latest.category_name),
               latest.started_at,
               latest.id,
@@ -118,7 +118,7 @@ export async function searchDayframe(
                   me.started_at desc
        ) latest
        union all
-       select 'category:' || c.id::text, 'category', c.name, 'Category', null, null,
+       select 'category:' || c.id::text, 'category', c.name, 'Activity', null, null,
               c.id, c.name, c.color, null, null, array[]::text[], null, null, null,
               case when lower(c.name) = lower($3) then 110 when c.name ilike $3 || '%' then 90 else 60 end
        from categories c

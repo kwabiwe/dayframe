@@ -756,7 +756,7 @@ async function validateEditReferences(
     if (!category.rows[0]) {
       throw new ReviewResolutionError(
         "invalid_category",
-        "The selected category is no longer available.",
+        "The selected activity is no longer available.",
         {
           status: 422,
           details: {

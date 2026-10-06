@@ -119,7 +119,7 @@ describe("Live Activity sync", () => {
     });
 
     expect(mocks.start).toHaveBeenCalledWith(
-      "Uncategorized",
+      "No activity",
       null,
       "https://dayframe-staging.vercel.app",
       null,

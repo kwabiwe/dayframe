@@ -110,8 +110,8 @@ export function buildReportsPresentation(input: {
       key,
       categoryId: entry.categoryId ?? null,
       name: entry.categoryId
-        ? entry.categoryName || "Unknown category"
-        : "Uncategorized",
+        ? entry.categoryName || "Unknown activity"
+        : "No activity",
       color: entry.categoryColor ?? null,
       seconds: 0,
     });
@@ -156,8 +156,8 @@ export function buildReportsPresentation(input: {
       });
   filterOptions.set("uncategorized", {
     key: "uncategorized",
-    name: "Uncategorized",
-    color: paletteColorFor("uncategorized", "Uncategorized", themeMode),
+    name: "No activity",
+    color: paletteColorFor("uncategorized", "No activity", themeMode),
     isUncategorized: true,
     isUnavailable: false,
   });
@@ -166,7 +166,7 @@ export function buildReportsPresentation(input: {
       if (!filterOptions.has(key))
         filterOptions.set(key, {
           key,
-          name: "Unavailable category",
+          name: "Unavailable activity",
           color: paletteColorFor(key, key, themeMode),
           isUncategorized: false,
           isUnavailable: true,

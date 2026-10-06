@@ -174,8 +174,8 @@ function CategoryAllocation({
     <section className="fill-group-surface report-allocation" aria-labelledby="report-allocation-title">
       <header className="report-section-header">
         <div>
-          <h2 id="report-allocation-title">Category allocation</h2>
-          <p>Category totals divide Total logged. Overlapping entries count in each activity.</p>
+          <h2 id="report-allocation-title">Time by activity</h2>
+          <p>Activity totals divide Total logged. Overlapping entries count in each activity.</p>
         </div>
       </header>
 
@@ -183,7 +183,7 @@ function CategoryAllocation({
         <div className="report-allocation-layout">
           <figure className="report-donut-figure">
             <svg viewBox="0 0 120 120" className="report-donut" role="img" aria-labelledby="report-donut-title report-donut-desc">
-              <title id="report-donut-title">Category allocation</title>
+              <title id="report-donut-title">Time by activity</title>
               <desc id="report-donut-desc">{buildAllocationSummary(report.byCategory, report.totalSeconds)}</desc>
               <circle className="report-donut-track" cx="60" cy="60" r={donutRadius} />
               {slices.map((slice) => (
@@ -206,7 +206,7 @@ function CategoryAllocation({
             </figcaption>
           </figure>
 
-          <div className="report-allocation-legend" aria-label="Category allocation actions">
+          <div className="report-allocation-legend" aria-label="Time by activity actions">
             {slices.map((slice) => (
               <Link key={slice.id} href={slice.href} className="report-allocation-row">
                 <span
@@ -223,10 +223,10 @@ function CategoryAllocation({
           </div>
         </div>
       ) : (
-        <EmptyAnalysis title="No category time" body="Change the filters or track time to build an allocation." />
+        <EmptyAnalysis title="No activity time" body="Change the filters or track time to build an allocation." />
       )}
 
-      <AccessibleBreakdownTable caption="Exact category allocation" rows={report.byCategory} totalSeconds={report.totalSeconds} />
+      <AccessibleBreakdownTable caption="Exact time by activity" rows={report.byCategory} totalSeconds={report.totalSeconds} />
     </section>
   );
 }
@@ -371,6 +371,6 @@ function buildTrendSummary(points: Array<{ label: string; seconds: number }>) {
 }
 
 function buildAllocationSummary(rows: ReportBreakdownRow[], totalSeconds: number) {
-  if (totalSeconds <= 0) return "No tracked category time.";
-  return `Category allocation totals ${formatDuration(totalSeconds)}. ${rows.map((row) => `${row.name} ${formatDuration(row.seconds)}, ${percentageOf(row.seconds, totalSeconds)}%`).join("; ")}.`;
+  if (totalSeconds <= 0) return "No tracked activity time.";
+  return `Time by activity totals ${formatDuration(totalSeconds)}. ${rows.map((row) => `${row.name} ${formatDuration(row.seconds)}, ${percentageOf(row.seconds, totalSeconds)}%`).join("; ")}.`;
 }

@@ -271,7 +271,7 @@ function serializeCalendarEntry(
   const isUncategorized = !entry.categoryId && !entry.categoryName;
   const categoryColor = isUncategorized
     ? uncategorizedFillColor(theme.mode)
-    : paletteColorFor(entry.categoryColor ?? entry.categoryId, entry.categoryName ?? "Uncategorized", theme.mode);
+    : paletteColorFor(entry.categoryColor ?? entry.categoryId, entry.categoryName ?? "No activity", theme.mode);
   const color = reviewNeeded ? theme.textSecondary : categoryColor;
   const tagText = entry.tags?.map((tag) => tag.name).join(" · ")
     || entry.tagNames?.join(" · ")
@@ -394,7 +394,7 @@ function calendarBlockMeta(
 }
 
 function displayEntryTitle(entry: MobileTimeEntry) {
-  return displayTimerDescription(entry) ?? entry.categoryName ?? "Uncategorized";
+  return displayTimerDescription(entry) ?? entry.categoryName ?? "No activity";
 }
 
 function isCalendarReviewNeeded(entry: NativeCalendarEntry) {

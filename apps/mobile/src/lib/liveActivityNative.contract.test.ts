@@ -8,7 +8,7 @@ describe("native Live Activity presentation contract", () => {
   it("keeps uncategorized shortcut starts consistent with app starts", () => {
     const shortcuts = readFileSync(`${mobileRoot}ios/Dayframe/DayframeShortcuts.swift`, "utf8");
 
-    expect(shortcuts).toContain('event.description ?? category?.name ?? "Uncategorized"');
+    expect(shortcuts).toContain('event.description ?? category?.name ?? "No activity"');
     expect(shortcuts).not.toContain('event.description ?? "Tracking"');
   });
 

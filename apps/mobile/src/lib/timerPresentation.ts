@@ -252,7 +252,7 @@ export function activeTimerPresentation(entry: ActiveTimerEntry) {
 
   const description = displayTimerDescription(entry);
   return {
-    categoryLabel: entry.categoryName ?? "Uncategorized",
+    categoryLabel: entry.categoryName ?? "No activity",
     title: description ?? "Add a task description"
   };
 }

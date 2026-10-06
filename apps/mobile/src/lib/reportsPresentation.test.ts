@@ -188,7 +188,7 @@ describe("Revision 2 Reports projection", () => {
       { key: "sleep", categoryId: "sleep", name: "Sleep", color: null, seconds: 21600 },
       { key: "general", categoryId: "general", name: "General", color: null, seconds: 7200 },
       { key: "test-z", categoryId: "test-z", name: "Test Z", color: null, seconds: 1800 },
-      { key: "uncategorized", categoryId: null, name: "Uncategorized", color: null, seconds: 2700 },
+      { key: "uncategorized", categoryId: null, name: "No activity", color: null, seconds: 2700 },
       { key: "test-a", categoryId: "test-a", name: "Test A", color: null, seconds: 1800 },
     ];
     snap.buckets[0].byCategory = snap.categories.map((category) => ({

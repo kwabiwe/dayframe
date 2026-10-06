@@ -1555,7 +1555,7 @@ function TimesheetView({
                   {timeEntryCategoryLabel(row)}
                 </span>
                 <span className="mt-1 block text-xs text-[var(--muted)]">
-                  {row.categoryName ? "Category total" : "Uncategorized time"}
+                  {row.categoryName ? "Activity total" : "Time with no activity"}
                 </span>
               </td>
               {row.days.map((seconds, index) => (

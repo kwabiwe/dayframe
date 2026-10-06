@@ -134,7 +134,7 @@ function entry(id: string, startedAt: Date, stoppedAt: Date | null): MobileTimeE
   return {
     categoryColor: "blue",
     categoryId: "category",
-    categoryName: "Category",
+    categoryName: "Activity",
     clientName: null,
     confidence: "manual",
     description: id,

@@ -35,7 +35,7 @@ describe("dashboard category allocation", () => {
     expect(result.categories).toEqual([
       expect.objectContaining({
         id: "uncategorized",
-        name: "Uncategorized",
+        name: "No activity",
         isUncategorized: true,
         seconds: 3600,
         percentage: 100
@@ -102,7 +102,7 @@ describe("dashboard category allocation", () => {
       entry("admin", "admin", "Admin", 10, 10.5)
     ], day, { now });
     expect(buildCategoryAllocationSummary(result, shortDuration)).toBe(
-      "Category allocation totals 1h 30m. Work 1h, 67%; Admin 30m, 33%."
+      "Time by activity totals 1h 30m. Work 1h, 67%; Admin 30m, 33%."
     );
   });
 

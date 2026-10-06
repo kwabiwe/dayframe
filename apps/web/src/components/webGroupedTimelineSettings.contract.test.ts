@@ -22,7 +22,7 @@ describe("grouped Timeline and Settings follow-up contracts", () => {
     expect(entries).toContain("timeline-entry-highlight");
     expect(entries).toContain(">Task<");
     expect(entries.indexOf(">Task<")).toBeLessThan(entries.indexOf(">Time<"));
-    expect(entries).not.toContain(">Category<");
+    expect(entries).not.toContain(">Activity<");
     expect(entries).toContain("timeline-task-category-dot");
     expect(entries).toContain("{timeEntryTitle(entry)}");
     expect(entries).toContain("{timeEntryCategoryLabel(entry)}");

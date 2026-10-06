@@ -295,14 +295,14 @@ describe("Reports sheet interactions", () => {
           reduceMotion
         />,
       );
-      expect(button("All categories").props.accessibilityState.checked).toBe(
+      expect(button("All activities").props.accessibilityState.checked).toBe(
         mode === "all" ? true : mode === "none" ? false : "mixed",
       );
       expect(button("Apply").props.disabled).toBe(false);
       press("Apply");
       press("Apply");
       expect(onApply).toHaveBeenCalledOnce();
-      press("All categories");
+      press("All activities");
       expect(onChange.mock.calls[0][0].mode).toBe(
         mode === "all" ? "none" : "all",
       );
@@ -313,8 +313,8 @@ describe("Reports sheet interactions", () => {
       );
       expect(button("Work")).toBeUndefined();
       expect(button("Rest")).toBeDefined();
-      expect(button("All categories")).toBeDefined();
-      expect(button("Cancel Categories")).toBeUndefined();
+      expect(button("All activities")).toBeDefined();
+      expect(button("Cancel Activities")).toBeUndefined();
       const scroll = tree.root.findByProps({
         testID: "report-filter-options-scroll",
       });
@@ -338,7 +338,7 @@ describe("Reports sheet interactions", () => {
         width: 160,
         maxWidth: "60%",
       });
-      press("Close Categories");
+      press("Close Activities");
       expect(onDismissed).toHaveBeenCalledWith(1);
       expect(onApply).toHaveBeenCalledOnce();
       expect(tree.root.findByType("Modal" as never).props.animationType).toBe(
@@ -369,10 +369,10 @@ describe("Reports sheet interactions", () => {
     expect(
       tree.root
         .findAllByType("Text" as never)
-        .some((node) => node.props.children === "Categories"),
+        .some((node) => node.props.children === "Activities"),
     ).toBe(false);
-    press("Close Categories");
-    press("Close Categories");
+    press("Close Activities");
+    press("Close Activities");
     expect(onApply).not.toHaveBeenCalled();
     expect(onDismissed).toHaveBeenCalledOnce();
     expect(onDismissed).toHaveBeenCalledWith(7);

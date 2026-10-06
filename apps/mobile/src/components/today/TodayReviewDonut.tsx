@@ -145,7 +145,7 @@ function segmentColor(segment: TodayDonutSegment, theme: MobileTheme) {
   if (!category || (!category.id && !category.name)) return theme.textSecondary;
   return paletteColorFor(
     category.color ?? category.id,
-    category.name ?? "Uncategorized",
+    category.name ?? "No activity",
     theme.mode
   );
 }

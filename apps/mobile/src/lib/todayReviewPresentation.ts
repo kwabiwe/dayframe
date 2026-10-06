@@ -150,7 +150,7 @@ export function projectTodayReviewPresentation(input: TodayReviewProjectionInput
         kind: "completed",
         valueMs: clipped.endMs - clipped.startMs,
         category: entry.category,
-        title: entry.category?.name ?? "Uncategorized",
+        title: entry.category?.name ?? "No activity",
         source: null,
         provisional: false
       });

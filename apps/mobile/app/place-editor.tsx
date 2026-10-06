@@ -641,7 +641,7 @@ export default function PlaceEditorScreen() {
                   layout={localLayoutTransition(reduceMotion)}
                   style={editorStyles.suggestionPreferences}
                 >
-                  <Text style={styles.label}>Default category</Text>
+                  <Text style={styles.label}>Default activity</Text>
                   <ScrollView
                     alwaysBounceVertical={false}
                     bounces={false}

@@ -345,7 +345,7 @@ Check these on every surface migrated to Blocks. Where an earlier check in this 
 - Bricolage Grotesque appears only in display roles, is bundled with the app, scales with Dynamic Type, and falls back to the system font. The timer never shifts width as digits change.
 - Start, stop, log, Undo-restore and delete land with the shared spring and the documented haptic; automatic rollback and reconciliation fire none. Rapid repeats fire one haptic (Stop: one composite sequence) per committed action. The Settings switch and the system setting turn haptics off.
 - Only the live block breathes. Reduce Motion replaces springs and the ring with opacity and keeps states, haptics, Undo and announcements.
-- The surface says "activity" in every label and VoiceOver string; stored data, API fields and exports still say `category`.
+- Every web and iPhone surface (including VoiceOver strings, the Live Activity and the Shortcuts action) says "activity"/"activities" and "No activity"; stored data, API fields, exports and the report CSV still say `category`.
 
 ## Validation Commands
 

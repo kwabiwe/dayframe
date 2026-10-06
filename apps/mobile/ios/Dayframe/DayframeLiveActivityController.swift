@@ -256,7 +256,7 @@ enum DayframeLiveActivityController {
 
   private static func cleanTitle(_ value: String) -> String {
     let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
-    return trimmed.isEmpty ? "Uncategorized" : String(trimmed.prefix(80))
+    return trimmed.isEmpty ? "No activity" : String(trimmed.prefix(80))
   }
 
   private static func cleanText(_ value: String?) -> String? {

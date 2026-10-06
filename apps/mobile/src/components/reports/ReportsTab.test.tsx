@@ -288,7 +288,7 @@ describe("Revision 3 Reports owner", () => {
     await act(async () =>
       tree.root
         .findByProps({
-          accessibilityLabel: "Filter categories, all categories selected",
+          accessibilityLabel: "Filter activities, all activities selected",
         })
         .props.onPress(),
     );
@@ -310,12 +310,12 @@ describe("Revision 3 Reports owner", () => {
     expect(chart().props.centerValue).toBe("00:00:00");
     expect(chart().props.segments).toHaveLength(0);
     expect(JSON.stringify(tree.toJSON())).toContain(
-      "No logged time for the selected categories.",
+      "No logged time for the selected activities.",
     );
     await act(async () =>
       tree.root
         .findByProps({
-          accessibilityLabel: "Filter categories, 1 categories selected",
+          accessibilityLabel: "Filter activities, 1 activity selected",
         })
         .props.onPress(),
     );
@@ -327,7 +327,7 @@ describe("Revision 3 Reports owner", () => {
     sheet = tree.root.findByType("ReportFiltersSheet" as never);
     await act(async () => sheet.props.onApply());
     await act(async () => sheet.props.onDismissed(sheet.props.presentationId));
-    expect(JSON.stringify(tree.toJSON())).toContain("No categories selected");
+    expect(JSON.stringify(tree.toJSON())).toContain("No activities selected");
     expect(
       tree.root
         .findByType("ReportActivityChart" as never)
@@ -358,7 +358,7 @@ describe("Revision 3 Reports owner", () => {
     await act(async () =>
       tree.root
         .findByProps({
-          accessibilityLabel: "Filter categories, all categories selected",
+          accessibilityLabel: "Filter activities, all activities selected",
         })
         .props.onPress(),
     );
@@ -409,7 +409,7 @@ describe("Revision 3 Reports owner", () => {
     await act(async () =>
       tree.root
         .findByProps({
-          accessibilityLabel: "Filter categories, all categories selected",
+          accessibilityLabel: "Filter activities, all activities selected",
         })
         .props.onPress(),
     );
@@ -465,7 +465,7 @@ describe("Revision 3 Reports owner", () => {
     await act(async () =>
       tree.root
         .findByProps({
-          accessibilityLabel: "Filter categories, all categories selected",
+          accessibilityLabel: "Filter activities, all activities selected",
         })
         .props.onPress(),
     );

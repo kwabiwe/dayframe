@@ -265,7 +265,7 @@ export function PersistentTimerBar({ workspaceMode = false }: { workspaceMode?: 
           Task description
         </label>
         <span className="swiss-timer-field-label swiss-timer-category-label" id="persistent-timer-category-label">
-          Category
+          Activity
         </span>
 
         <div className="swiss-work-input swiss-timer-description-control" ref={suggestionsRef}>
@@ -756,7 +756,7 @@ function ManualEntryDialog({
         <CategoryPicker
           categories={data.categories}
           className="manual-entry-category"
-          label="Category"
+          label="Activity"
           menuId="manual-entry-category-menu"
           onBeforeOpen={() => setSuggestionsOpen(false)}
           onCreateCategory={onCreateCategory}

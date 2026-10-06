@@ -530,7 +530,7 @@ export function useTimeEntryQuickEditor(props: TimeEntryQuickEditorProps) {
 
   const title = entry
     ? entry.description?.trim() || entry.categoryName?.trim() || "Untitled entry"
-    : draft.description.trim() || selectedCategory?.name || "Uncategorized";
+    : draft.description.trim() || selectedCategory?.name || "No activity";
   const previewError = activeTemporalOwner ? null : preview.error;
   const displayError = error ?? previewError;
   const startIsInvalid = Boolean(displayError && (/^Start\b/i.test(displayError) || /valid start/i.test(displayError)));
@@ -791,7 +791,7 @@ export function TimeEntryQuickEditorPanel({
         <CategoryPicker
           categories={props.categories}
           disabled={controlsDisabled}
-          label="Category"
+          label="Activity"
           menuId="time-entry-quick-category-menu"
           onBeforeOpen={() => controller.setSuggestionsOpen(false)}
           onCreateCategory={props.onCreateCategory}

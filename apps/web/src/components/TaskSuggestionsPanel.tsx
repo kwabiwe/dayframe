@@ -126,8 +126,8 @@ export function TaskSuggestionsPanel({
             <span>
               <b>{suggestion.description}</b>
               <small>
-                <i style={{ backgroundColor: paletteCssColorFor(suggestion.categoryColor ?? "steel", suggestion.categoryName ?? "Category") }} />
-                {suggestion.categoryName ?? "Uncategorized"}
+                <i style={{ backgroundColor: paletteCssColorFor(suggestion.categoryColor ?? "steel", suggestion.categoryName ?? "Activity") }} />
+                {suggestion.categoryName ?? "No activity"}
                 {suggestion.tagNames.length ? ` · ${suggestion.tagNames.map((tag) => `#${tag}`).join(" ")}` : ""}
               </small>
             </span>

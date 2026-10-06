@@ -1640,7 +1640,7 @@ function ReviewNeededEntryCard({
   styles: ReturnType<typeof useMobileTheme>["styles"];
   theme: ReturnType<typeof useMobileTheme>["theme"];
 }) {
-  const categoryName = entry.categoryName ?? (isHealthSource(entry.source) ? "Health" : "No category");
+  const categoryName = entry.categoryName ?? (isHealthSource(entry.source) ? "Health" : "No activity");
   const categoryColor = paletteColorFor(
     entry.categoryColor ?? (isHealthSource(entry.source) ? "moss" : entry.categoryId),
     categoryName,

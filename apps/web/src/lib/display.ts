@@ -24,11 +24,11 @@ export function timeEntryContextLabel(entry: TimeEntryDisplayFields) {
   if (description && category) return category;
   if (place) return place;
   if (entry.source) return formatSourceLabel(entry.source);
-  return "Uncategorized";
+  return "No activity";
 }
 
 export function timeEntryCategoryLabel(entry: TimeEntryDisplayFields) {
-  return cleanLabel(entry.categoryName) ?? "Uncategorized";
+  return cleanLabel(entry.categoryName) ?? "No activity";
 }
 
 export function timeEntryAccentColor(entry: TimeEntryDisplayFields) {
@@ -40,12 +40,12 @@ export function timeEntryAccentColor(entry: TimeEntryDisplayFields) {
 
 export function timeEntryCategoryColor(entry: TimeEntryDisplayFields) {
   return entry.categoryName?.trim()
-    ? paletteCssColorFor(entry.categoryColor, entry.categoryName ?? entry.id ?? "Category")
+    ? paletteCssColorFor(entry.categoryColor, entry.categoryName ?? entry.id ?? "Activity")
     : "var(--uncategorized-color)";
 }
 
 export function categoryDisplay(name?: string | null, color?: string | null) {
-  const label = cleanLabel(name) ?? "Uncategorized";
+  const label = cleanLabel(name) ?? "No activity";
   const isUncategorized = !cleanLabel(name) || label.toLocaleLowerCase() === "uncategorized";
   return {
     label,

@@ -292,7 +292,7 @@ export function entryContinuationDecision(
   if (!entry.categoryId && !description) {
     return {
       ok: false,
-      error: "This entry does not have a task or category to start."
+      error: "This entry does not have a task or activity to start."
     };
   }
 

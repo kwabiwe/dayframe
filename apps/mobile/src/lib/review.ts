@@ -231,10 +231,10 @@ export function reviewItemCategoryLabel(
 ) {
   const explicit = item.categoryName?.trim();
   if (explicit) return explicit;
-  if (isTimeAwayReviewItem(item)) return "No category";
+  if (isTimeAwayReviewItem(item)) return "No activity";
   if (item.eventType === "commute_detected") return "Commute";
   if (isHealthReviewItem(item)) return "Health";
-  return "No category";
+  return "No activity";
 }
 
 export function reviewConfirmLabel(

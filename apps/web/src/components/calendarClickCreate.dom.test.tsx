@@ -111,7 +111,7 @@ describe("Calendar click-to-create DOM interactions", () => {
     await openCreateAt(8 * 60);
     const description = screen.getByLabelText("Description");
     const tags = screen.getByRole("button", { name: "Add or filter tags" });
-    const category = screen.getByRole("button", { name: /Uncategorized/ });
+    const category = screen.getByRole("button", { name: /No activity/ });
     await waitFor(() => expect(document.activeElement).toBe(description));
 
     await userEvent.tab();
