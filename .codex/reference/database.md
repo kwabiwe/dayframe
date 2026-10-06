@@ -16,6 +16,7 @@ Before declaring hosted auth/timer/event changes ready, verify:
 - `activity_events.client_event_id` exists when mobile event idempotency is deployed.
 - indexes required by the deployed code exist.
 - any new health audit columns exist before HealthKit imports are tested.
+- `categories.icon` and `categories.starter_key` (with the partial unique index `categories_workspace_starter_key_idx`) exist before a server that reads activity icons or seeds starter activities is deployed.
 - RLS policies still allow expected workspace-member reads/writes.
 - `DATABASE_URL` matches the Supabase pooler string that works in Vercel.
 

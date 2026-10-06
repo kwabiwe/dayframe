@@ -158,6 +158,10 @@ See `docs/ios-hosted-supabase-runbook.md` for the iOS/EAS setup and physical-dev
 - iOS-only mobile app.
 - Health and location data stay in Dayframe-owned tables and should be exportable/deletable before a broader beta.
 
+### Activity icon and starter schema prerequisite
+
+The server that reads activity icons, seeds starter activities for new workspaces and serves `POST /api/categories/starters` requires `supabase/migrations/202610060001_category_icon_and_starter_key.sql` (local `packages/db/migrations/008_category_icon_and_starter_key.sql`) before its Preview or production deployment. It adds two nullable `categories` columns with format checks and a partial unique index on active `(workspace_id, starter_key)`; no existing row changes. Without it, category reads fail with an error naming this migration. Staging validation is not production authorization.
+
 ### Motion & Fitness schema prerequisite
 
 The server that accepts Motion & Fitness evidence requires `supabase/migrations/202610050001_location_motion_activity.sql` (local `packages/db/migrations/007_location_motion_activity.sql`) before its Preview or production deployment, and production must have it before any phone build that sends `motion_activity` is installed. It only widens the `location_evidence` kind check and adds a coordinate-free check for motion rows. Staging validation is not production authorization.

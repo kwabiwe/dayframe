@@ -33,6 +33,10 @@ export type CategoryRow = {
   name: string;
   color: string;
   isPinned: boolean;
+  /** Key from the shared activity icon set; null derives the icon from the name. */
+  icon?: string | null;
+  /** Starter activity key; set by Dayframe, never by clients. */
+  starterKey?: string | null;
 };
 
 export type ProjectRow = {
@@ -370,7 +374,8 @@ export async function getNormalizationContext(
       id: category.id,
       name: category.name,
       color: category.color,
-      isPinned: category.isPinned
+      isPinned: category.isPinned,
+      starterKey: category.starterKey ?? null
     })),
     places: places.map<PlaceSummary>((place) => ({
       id: place.id,
@@ -442,7 +447,7 @@ async function getClients(session: RequestSession) {
 async function getCategories(session: RequestSession, execute: typeof query = query) {
   try {
     const result = await execute<CategoryRow>(
-      `select id, name, color, is_pinned as "isPinned"
+      `select id, name, color, is_pinned as "isPinned", icon, starter_key as "starterKey"
        from categories
        where workspace_id = $1 and is_archived = false
        order by is_pinned desc, name`,
@@ -457,6 +462,16 @@ async function getCategories(session: RequestSession, execute: typeof query = qu
         "supabase/migrations/202607040001_category_pins_and_project_backfill.sql",
         error
       );
+    }
+    for (const column of ["icon", "starter_key"]) {
+      if (isUndefinedColumnError(error, column)) {
+        throw missingRequiredColumnError(
+          "categories",
+          column,
+          "supabase/migrations/202610060001_category_icon_and_starter_key.sql",
+          error
+        );
+      }
     }
     throw error;
   }

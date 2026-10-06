@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { ZodError, z } from "zod";
+import { isActivityIconKey } from "@dayframe/shared";
 import {
   archiveCategory,
   CategoryConflictError,
@@ -11,17 +12,26 @@ import { isMissingRequiredColumnError } from "@/lib/db";
 import { resolveRequestSession } from "@/lib/ingest-auth";
 import { getBootstrapData } from "@/lib/queries";
 
+// An activity icon is a key from the shared set; null clears it so the name decides.
+const activityIconSchema = z
+  .string()
+  .refine(isActivityIconKey, "Choose an icon from the Dayframe set.")
+  .nullable()
+  .optional();
+
 const createCategorySchema = z.object({
   name: z.string().trim().min(1, "Category name is required."),
   color: z.string().trim().optional(),
-  isPinned: z.boolean().optional()
+  isPinned: z.boolean().optional(),
+  icon: activityIconSchema
 });
 
 const updateCategorySchema = z.object({
   id: z.string().uuid(),
   name: z.string().trim().min(1).optional(),
   color: z.string().trim().optional(),
-  isPinned: z.boolean().optional()
+  isPinned: z.boolean().optional(),
+  icon: activityIconSchema
 });
 
 export async function GET(request: Request) {

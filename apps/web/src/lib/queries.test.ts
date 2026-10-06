@@ -31,6 +31,23 @@ describe("query normalization context", () => {
     vi.resetAllMocks();
   });
 
+  it("reads category icons and starter keys into the normalization context", async () => {
+    mocks.query.mockImplementation(async (statement: string) => {
+      if (statement.includes("from categories")) {
+        expect(statement).toContain("icon");
+        expect(statement).toContain('starter_key as "starterKey"');
+        return { rows: [{ id: "category-1", name: "Bedtime", color: "blue-bold", isPinned: false, icon: "sleep", starterKey: "sleep" }] };
+      }
+      return { rows: [] };
+    });
+
+    const context = await getNormalizationContext(session);
+
+    expect(context.categories).toEqual([
+      { id: "category-1", name: "Bedtime", color: "blue-bold", isPinned: false, starterKey: "sleep" }
+    ]);
+  });
+
   it("reads automation rule references from workspace-joined rows", async () => {
     mocks.query.mockImplementation(async (statement: string) => {
       if (statement.includes("from projects p")) return { rows: [] };

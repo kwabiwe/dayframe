@@ -29,6 +29,9 @@ Use this when changing timer flows, dashboards, reports, entity management, onbo
 
 ## Data Compatibility
 
+- Activities (stored as `categories`) may carry `icon`, a key from the shared activity icon set (`packages/shared/src/icons.ts`); null means the icon is derived from the name, then the neutral dot. Clients can set or clear `icon`; they never set `starter_key`.
+- New workspaces start with the 16 starter activities in `packages/shared/src/starterActivities.ts` (Errands included; Work, Admin, Learning, Exercise and Personal pinned). `starter_key` lets Health and Location find Sleep and Commute after a rename (key first, then the original name). `POST /api/categories/starters` adds missing starters to an existing workspace unpinned, links an active activity with the same name instead of duplicating it, and never renames, recolours, re-icons or re-pins anything.
+
 - Keep nullable legacy columns such as `time_entries.project_id` until a deliberate migration removes them.
 - Do not delete existing project/client data without an approved migration and export/safety plan.
 - Reports should prioritize category and source/place breakdowns. Legacy project/client reports should be hidden or demoted unless explicitly requested.

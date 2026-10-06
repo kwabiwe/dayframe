@@ -48,6 +48,38 @@ describe("/api/categories", () => {
     mocks.archiveCategory.mockResolvedValue(undefined);
   });
 
+  it("creates and updates an activity icon from the shared set", async () => {
+    const created = await POST(new Request("https://dayframe.test/api/categories", {
+      method: "POST",
+      body: JSON.stringify({ name: "Garden", color: "moss", icon: "garden" })
+    }));
+    expect(created.status).toBe(201);
+    expect(mocks.createCategory).toHaveBeenCalledWith(expect.objectContaining({ name: "Garden", icon: "garden" }), session);
+
+    const cleared = await PATCH(new Request("https://dayframe.test/api/categories", {
+      method: "PATCH",
+      body: JSON.stringify({ id: categoryId(), icon: null })
+    }));
+    expect(cleared.status).toBe(200);
+    expect(mocks.updateCategory).toHaveBeenCalledWith(categoryId(), expect.objectContaining({ icon: null }), session);
+  });
+
+  it("rejects icons outside the shared set and starter keys from clients", async () => {
+    const badIcon = await POST(new Request("https://dayframe.test/api/categories", {
+      method: "POST",
+      body: JSON.stringify({ name: "Garden", icon: "shopping-bag" })
+    }));
+    expect(badIcon.status).toBe(400);
+
+    const starter = await PATCH(new Request("https://dayframe.test/api/categories", {
+      method: "PATCH",
+      body: JSON.stringify({ id: categoryId(), starterKey: "sleep" })
+    }));
+    expect(mocks.updateCategory).not.toHaveBeenCalledWith(categoryId(), expect.objectContaining({ starterKey: "sleep" }), session);
+    expect([200, 400]).toContain(starter.status);
+    expect(mocks.createCategory).not.toHaveBeenCalled();
+  });
+
   it("lists categories for the active workspace", async () => {
     const response = await GET(new Request("https://dayframe.test/api/categories"));
     const payload = await response.json();

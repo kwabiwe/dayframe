@@ -341,6 +341,43 @@ describe("category persistence", () => {
     expect(client.query).toHaveBeenCalledWith("commit");
   });
 
+  it("stores a chosen activity icon when creating a category and ignores unknown keys", async () => {
+    const inserts: unknown[][] = [];
+    const client = {
+      query: vi.fn(async (statement: string, values?: unknown[]) => {
+        if (statement.includes("from categories")) return { rows: [] };
+        if (statement.includes("insert into categories")) {
+          inserts.push(values ?? []);
+          return { rows: [{ id: categoryId(), name: values?.[1], color: values?.[2], isPinned: values?.[3], icon: values?.[4], starterKey: null }] };
+        }
+        return { rows: [] };
+      }),
+      release: vi.fn()
+    };
+    mocks.pool.connect.mockResolvedValue(client);
+
+    const garden = await createCategory({ name: "Garden", icon: "garden" }, session);
+    await createCategory({ name: "Mystery", icon: "not-an-icon" }, session);
+
+    expect(garden).toMatchObject({ icon: "garden", starterKey: null });
+    expect(inserts[0][4]).toBe("garden");
+    expect(inserts[1][4]).toBeNull();
+    expect(String(client.query.mock.calls.find(([statement]) => String(statement).includes("insert into categories"))?.[0]))
+      .toContain('returning id, name, color, is_pinned as "isPinned", icon, starter_key as "starterKey"');
+  });
+
+  it("updates or clears an activity icon without touching other fields", async () => {
+    mocks.query.mockResolvedValue({ rows: [{ id: categoryId(), name: "Focus", color: "lime", isPinned: true, icon: "focus", starterKey: null }] });
+
+    await updateCategory(categoryId(), { icon: "focus" }, session);
+    await updateCategory(categoryId(), { icon: null }, session);
+
+    const [first, second] = mocks.query.mock.calls;
+    expect(String(first[0])).toContain("icon = case when $9 then $10 else icon end");
+    expect(first[1]).toEqual([categoryId(), session.workspaceId, false, null, false, null, false, false, true, "focus"]);
+    expect(second[1]).toEqual([categoryId(), session.workspaceId, false, null, false, null, false, false, true, null]);
+  });
+
   it("persists pin state to the categories.is_pinned column", async () => {
     mocks.query.mockResolvedValueOnce({
       rows: [{ id: categoryId(), name: "Focus", color: "lime", isPinned: true }]
@@ -359,7 +396,9 @@ describe("category persistence", () => {
         false,
         null,
         true,
-        true
+        true,
+        false,
+        null
       ]
     );
   });
@@ -389,9 +428,9 @@ describe("category persistence", () => {
     );
 
     expect(categories).toEqual([
-      { id: sleepCategoryId(), name: "Sleep", color: "lime" },
-      { id: healthCategoryId(), name: "Health", color: "moss" },
-      { id: commuteCategoryId(), name: "Commute", color: "sky" }
+      { id: sleepCategoryId(), name: "Sleep", color: "blue-bold", icon: "sleep", starterKey: "sleep" },
+      { id: healthCategoryId(), name: "Health", color: "moss", icon: "health", starterKey: null },
+      { id: commuteCategoryId(), name: "Commute", color: "graphite", icon: "commute", starterKey: "commute" }
     ]);
     expect(
       client.query.mock.calls.filter(([statement]) =>
@@ -420,7 +459,9 @@ describe("category persistence", () => {
         false,
         null,
         true,
-        false
+        false,
+        false,
+        null
       ]
     );
   });
@@ -1596,7 +1637,7 @@ describe("health event persistence", () => {
     );
     expect(client.query).toHaveBeenCalledWith(
       expect.stringContaining("insert into categories"),
-      [session.workspaceId, "Health", "moss"]
+      [session.workspaceId, "Health", "moss", "health", null]
     );
     const activityInsert = client.query.mock.calls.find(([statement]) =>
       String(statement).includes("insert into activity_events")
@@ -3495,7 +3536,7 @@ function reprocessClient(reviewRows: Array<Record<string, unknown>>) {
         return { rows: reviewRows };
       }
       if (statement.includes("from categories")) {
-        return { rows: [{ id: values?.[1] === "Sleep" ? sleepCategoryId() : healthCategoryId() }] };
+        return { rows: [{ id: values?.[1] === "Sleep" || values?.[1] === "sleep" ? sleepCategoryId() : healthCategoryId() }] };
       }
       if (statement.includes("created_from_event_id = $3")) return { rows: [] };
       if (statement.includes("health_covering_entry")) return { rows: [] };

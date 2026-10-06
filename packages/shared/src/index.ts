@@ -58,6 +58,13 @@ export {
 } from "./icons";
 export { type DayframeGlyphElement, type DayframeGlyphNode } from "./iconGlyphs";
 export {
+  DAYFRAME_STARTER_ACTIVITIES,
+  isStarterActivityKey,
+  starterActivityByKey,
+  type DayframeStarterActivity,
+  type DayframeStarterActivityKey
+} from "./starterActivities";
+export {
   DAYFRAME_BLOCKS,
   blockColorsFor,
   contrastRatio,
@@ -685,6 +692,8 @@ export type CategorySummary = {
   name: string;
   color?: string | null;
   isPinned?: boolean;
+  /** Set on starter activities; survives renames (see starterActivities.ts). */
+  starterKey?: string | null;
 };
 
 export type RecentActivityEntry = {
@@ -1869,7 +1878,8 @@ export function normalizeActivityEvent(
   if (event.type === "commute_detected") {
     const fromName = stringFromPayload(event.rawPayload.fromPlaceName) ?? "previous place";
     const toName = stringFromPayload(event.rawPayload.toPlaceName) ?? stringFromPayload(event.rawPayload.placeName) ?? "next place";
-    const commuteCategory = findCategoryByName(context.categories, "Commute") ?? findCategoryByName(context.categories, "Travel");
+    const commuteCategory = findStarterCategory(context.categories, "commute", "Commute")
+      ?? findStarterCategory(context.categories, "travel", "Travel");
     const fromPlaceId = stringFromPayload(event.rawPayload.fromPlaceId);
     const toPlaceId = stringFromPayload(event.rawPayload.toPlaceId);
     const fromSavedPlace = fromPlaceId ? context.places.find((candidate) => candidate.id === fromPlaceId) : undefined;
@@ -1960,7 +1970,7 @@ export function normalizeActivityEvent(
       confidence: "high",
       reviewStatus: autoConfirm ? "confirmed" : "needs_review",
       projectId: event.projectId,
-      categoryId: event.categoryId ?? findCategoryByName(context.categories, "Sleep")?.id,
+      categoryId: event.categoryId ?? findStarterCategory(context.categories, "sleep", "Sleep")?.id,
       title: event.description ?? "Sleep",
       reason: autoConfirm
         ? "High-confidence Health sleep can become completed time automatically."
@@ -2108,6 +2118,11 @@ function findMatchingRule(
 function findPlaceByName(places: PlaceSummary[], value: unknown) {
   if (typeof value !== "string") return undefined;
   return places.find((place) => place.name.toLowerCase() === value.toLowerCase());
+}
+
+// A starter activity is found by its key even after a rename, then by its original name.
+function findStarterCategory(categories: CategorySummary[], starterKey: string, name: string) {
+  return categories.find((category) => category.starterKey === starterKey) ?? findCategoryByName(categories, name);
 }
 
 function findCategoryByName(categories: CategorySummary[], value: string) {
