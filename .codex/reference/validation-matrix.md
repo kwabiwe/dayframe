@@ -422,6 +422,7 @@ Required checks when changing the mobile root navigator or tab bar:
 
 - Run the mobile typecheck and full mobile unit suite.
 - Run an iOS native build; a web or Expo Go render does not validate the native tab controller.
+- Tab icons are generated: change glyphs in `packages/shared/src/icons.ts` / `scripts/generate-icons.mjs`, run `npm run generate:icons`, and commit the registry and `apps/mobile/assets/tab-icons` together; `npm run check:icons` must pass.
 - Verify Today, Calendar and Reports use real routes and retain their state when switching tabs.
 - Verify the system owns tab material and safe-area insets; do not add a second `GlassView`, manual tab height or bottom spacer.
 - On iOS 26, check native Liquid Glass, system tab spacing and scroll-down minimisation in both light and dark appearance.

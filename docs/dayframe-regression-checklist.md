@@ -328,7 +328,7 @@ Review this checklist before and after changes that touch Dayframe UI, timer beh
 - The supplied colour symbol is unchanged; dark surfaces use the light wordmark artwork and light surfaces use the dark wordmark artwork.
 - Symbol and wordmark remain separate reusable elements with one accessible brand name or fully decorative semantics.
 - Primary application branding no longer uses the legacy PNG banner, CSS filters or a visible white image rectangle.
-- The first mobile tab visibly reads “Today”, uses a day-overview icon and retains the internal timer behaviour.
+- The first mobile tab visibly reads “Today”, uses the Dayframe sun icon and retains the internal timer behaviour. Today, Calendar and Reports tab icons are Dayframe template images inside the system Liquid Glass tab bar: tinted by the system, highlighted when selected, readable in Light, Dark, Reduce Transparency and Increase Contrast, and minimised on scroll like system icons.
 - Favicon and app icon use the symbol alone; the iOS icon is opaque and legible at home-screen size.
 - Charts use shared palette/track tokens, exact textual values and non-colour cues without changing calculations.
 - In System, Light and Dark, push, pop and interactive swipe-back transitions between Settings, Review and Places keep the whole viewport on the resolved theme canvas with no white corner leaks, rounded-card vignette or overlapping scene chrome.
