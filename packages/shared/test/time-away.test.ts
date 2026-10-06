@@ -162,6 +162,47 @@ describe("time away from a saved place", () => {
     expect(outings(input(evidence))).toEqual([]);
   });
 
+  // Fable round 9: a return home before the first clear reading away; bounds; a stale leaving sign; simulated presence.
+  it("never folds a return home before the first clear reading into the absence", () => {
+    const evidence = [...homeFixes("am", 0, 60), crossing("x0", 61.9, "geofence_exit"),
+      ...[62.5, 63.5, 64.5, 65.5, 66.5, 67.5, 68.5, 69.5].map((m, i) => fix(`near-${i}`, m, 140 + i % 2 * 2)),
+      crossing("e1", 70, "geofence_enter"), fix("in", 70.5, 10), crossing("x1", 76, "geofence_exit"),
+      ...[76.5, 77.5, 78.5, 79.5].map((m, i) => mv(`far-${i}`, m, 300 + i * 10)), crossing("e2", 86, "geofence_enter"), ...homeFixes("pm", 86.5, 150)];
+    const away = outings(input(evidence));
+    expect(away.some((item) => minutes(item.startedAt) < 75.9)).toBe(false);
+    for (const item of away) {
+      expect(Date.parse(item.startLowerBoundAt!)).toBeLessThanOrEqual(Date.parse(item.startedAt));
+      expect(Date.parse(item.startUpperBoundAt!)).toBeGreaterThanOrEqual(Date.parse(item.startedAt));
+    }
+  });
+
+  it("keeps an item's start inside its bounds when a stop shows the leaving", () => {
+    const stopAt = (prefix: string, from: number) => [0, 1, 2, 3, 4, 5, 6, 7].map((i) => fix(`${prefix}-${i}`, from + i, 140 + i % 2 * 2));
+    const evidence = [...homeFixes("am", 0, 60), crossing("x0", 61.9, "geofence_exit"), ...stopAt("s1", 62.5),
+      crossing("e1", 70, "geofence_enter"), fix("in", 70.5, 10), crossing("x1", 76, "geofence_exit"), mv("m", 76.5, 140), ...stopAt("s2", 77),
+      crossing("e2", 85.5, "geofence_enter"), ...homeFixes("pm", 86, 150)];
+    for (const item of outings(input(evidence))) {
+      expect(Date.parse(item.startLowerBoundAt!)).toBeLessThanOrEqual(Date.parse(item.startedAt));
+      expect(Date.parse(item.startUpperBoundAt!)).toBeGreaterThanOrEqual(Date.parse(item.startedAt));
+    }
+  });
+
+  it("never confirms a leaving sign with a clear reading long after it", () => {
+    const evidence = [...homeFixes("am", 0, 60), crossing("x0", 60.5, "geofence_exit"), ...[61, 62, 63, 64].map((m, i) => mv(`o${i}`, m, 300 + i * 10)),
+      crossing("e1", 66, "geofence_enter"), fix("in", 66.5, 10), crossing("x1", 68, "geofence_exit"),
+      ...[81, 82, 83, 84].map((m, i) => mv(`p${i}`, m, 300 + i * 10)), crossing("e2", 86, "geofence_enter"), ...homeFixes("pm", 86.5, 150)];
+    const away = outings(input(evidence));
+    expect(away.some((item) => minutes(item.startedAt) < 65 && minutes(item.stoppedAt) > 80)).toBe(false);
+  });
+
+  it("never treats a simulated reading as being back at the place", () => {
+    const evidence = [...homeFixes("am", 0, 60), crossing("x0", 60.5, "geofence_exit"), ...[61, 62, 63, 64].map((m, i) => mv(`o${i}`, m, 300 + i * 10)),
+      fix("sim-in", 66, 20, { isSimulated: true }), ...[67, 68, 69, 70].map((m, i) => mv(`p${i}`, m, 320 + i * 10)),
+      crossing("e2", 80, "geofence_enter"), ...homeFixes("pm", 80.5, 150)];
+    const away = outings(input(evidence));
+    expect(away.some((item) => minutes(item.startedAt) < 62 && minutes(item.stoppedAt) >= 79)).toBe(true);
+  });
+
   it("offers nothing from geofence callbacks alone, without readings away", () => {
     const evidence = [...homeFixes("am", 0, 60), crossing("exit", 61, "geofence_exit"), crossing("enter", 71, "geofence_enter"),
       ...homeFixes("pm", 72, 150)];
