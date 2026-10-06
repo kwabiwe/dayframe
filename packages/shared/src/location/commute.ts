@@ -792,7 +792,7 @@ export function deriveCommutes(
     const awayDistance = Math.max(config.placeOutingMinimumDistanceMeters, awayPlace?.radiusMeters ?? 0);
     const clearlyAway = (item: ClassifiedEvidence) => {
       const point = evidencePoint(item);
-      return awayCentre != null && point != null && accurateFix(item, config) &&
+      return awayCentre != null && point != null && accurateFix(item, config) && item.evidence.isSimulated !== true &&
         distanceMeters(awayCentre, point) - (item.evidence.horizontalAccuracyMeters ?? 0) >= awayDistance;
     };
     // The absence runs from the last sign of being at the place before the
@@ -801,6 +801,7 @@ export function deriveCommutes(
     // shortens the absence the way the latest departure shortens a journey;
     // a sustained return offers nothing here.
     let absenceStartMs: number | null = null;
+    let leftAgainStart = false;
     const firstAway = awayCentre ? gapEvidence.find((item) =>
       !evidenceMatchesStay(item, from) && !evidenceMatchesStay(item, to) && clearlyAway(item)) : undefined;
     if (firstAway && awayCentre) {
@@ -818,31 +819,45 @@ export function deriveCommutes(
       // time at home between them are never one absence.
       const radius = awayPlace?.radiusMeters ?? 0;
       let backSinceMs: number | null = null;
+      // The latest sign of leaving since being back there (an exit, or movement
+      // just outside). It counts only once a clear reading away follows: an
+      // exit and re-entry while at home does not end the stretch.
+      let leavingMs: number | null = null;
       let sustainedReturn = false;
       // When the phone stayed back there and then left again, only the later
-      // outing can be time away, from the corroborated leaving that ended it.
+      // outing can be time away, from the leaving that ended the stretch.
       let leftAgainMs: number | null = null;
       for (const item of gapEvidence) {
         const atMs = Date.parse(item.evidence.occurredAt);
         if (atMs <= firstAwayMs || atMs >= stoppedAtMs || snapshots.has(item)) continue;
         const point = evidencePoint(item);
-        const fix = point != null && accurateFix(item, config) ? distanceMeters(awayCentre, point) : null;
+        const fix = point != null && accurateFix(item, config) && item.evidence.isSimulated !== true
+          ? distanceMeters(awayCentre, point) : null;
         const ownCallback = evidenceMatchesStay(item, from) || evidenceMatchesStay(item, to);
         if (ownCallback && item.evidence.kind !== "geofence_exit" || fix != null && fix <= radius) {
           backSinceMs ??= atMs;
-        } else if (backSinceMs != null && (ownCallback || clearlyAway(item) ||
-          fix != null && fix > radius && (item.evidence.speedMetersPerSecond ?? 0) >= config.movementSpeedThresholdMps)) {
-          // Only corroborated leaving ends a stretch back there: an exit, a clear
-          // reading away, or movement outside; one still reading just outside does not.
-          if (atMs - backSinceMs > config.savedPlaceMinimumDwellMs) {
+          leavingMs = null;
+        } else if (backSinceMs != null && clearlyAway(item)) {
+          const leftMs = leavingMs ?? atMs;
+          if (leftMs - backSinceMs > config.savedPlaceMinimumDwellMs) {
             sustainedReturn = true;
-            leftAgainMs = atMs;
+            leftAgainMs = leftMs;
           }
           backSinceMs = null;
+          leavingMs = null;
+        } else if (backSinceMs != null && (ownCallback ||
+          fix != null && fix > radius && (item.evidence.speedMetersPerSecond ?? 0) >= config.movementSpeedThresholdMps)) {
+          // One still reading just outside is not a sign of leaving.
+          leavingMs = atMs;
         }
       }
-      const backUntilNextStay = backSinceMs != null && stoppedAtMs - backSinceMs > config.savedPlaceMinimumDwellMs;
+      if (backSinceMs != null && (leavingMs ?? stoppedAtMs) - backSinceMs > config.savedPlaceMinimumDwellMs) {
+        sustainedReturn = true;
+        leftAgainMs = leavingMs;
+      }
+      const backUntilNextStay = sustainedReturn && leftAgainMs == null;
       absenceStartMs = backUntilNextStay ? null : sustainedReturn ? leftAgainMs : Math.max(originalStartedAtMs, ...there);
+      leftAgainStart = sustainedReturn && !backUntilNextStay;
     }
     // With an absence window, time away is judged only over that window: the
     // journey attempt yields a journey or nothing, so the latest departure
@@ -967,8 +982,14 @@ export function deriveCommutes(
             : "closed",
         startedAt: new Date(startedAtMs).toISOString(),
         stoppedAt: to.startedAt,
-        startLowerBoundAt: from.stopLowerBoundAt ?? from.stoppedAt,
-        startUpperBoundAt: from.stopUpperBoundAt ?? routeEvidence[0]?.evidence.occurredAt ?? from.stoppedAt,
+        // An absence's start lies within its own bounds: the leaving that began
+        // a later outing, or the origin stay's departure widened to contain it.
+        startLowerBoundAt: attempt === "absence"
+          ? new Date(Math.min(startedAtMs, leftAgainStart ? startedAtMs : Date.parse(from.stopLowerBoundAt ?? from.stoppedAt))).toISOString()
+          : from.stopLowerBoundAt ?? from.stoppedAt,
+        startUpperBoundAt: attempt === "absence"
+          ? new Date(Math.max(startedAtMs, leftAgainStart ? startedAtMs : Date.parse(from.stopUpperBoundAt ?? from.stoppedAt))).toISOString()
+          : from.stopUpperBoundAt ?? routeEvidence[0]?.evidence.occurredAt ?? from.stoppedAt,
         stopLowerBoundAt: to.startLowerBoundAt ?? to.startedAt,
         stopUpperBoundAt: to.startUpperBoundAt ?? to.startedAt,
         fromStaySegmentId: from.clientSegmentId,
@@ -1082,9 +1103,20 @@ export function assembleTripsThroughStops(
     }
     return null;
   };
+  // Time away after a return can have no stop of its own while an earlier
+  // outing's stop lies between the same two stays; the legs pass never pairs
+  // those stays, so this result is the only offer for that absence.
+  const stayById = new Map(stays.map((stay) => [stay.clientSegmentId, stay]));
+  const isTimeAwayAcrossStop = (trip: CommuteSegment) => {
+    const from = stayById.get(trip.fromStaySegmentId);
+    const to = stayById.get(trip.toStaySegmentId);
+    return trip.qualificationReason === "same_place_outing" && from?.stoppedAt != null && to != null &&
+      interiorStops.some((stop) => Date.parse(stop.startedAt) >= Date.parse(from.stoppedAt!) &&
+        Date.parse(stop.stoppedAt!) <= Date.parse(to.startedAt));
+  };
   const assembled = deriveCommutes(majors, acceptedEvidence, config, processingAt, {
     ...options, interiorStops, qualifiedLegChainConfidence
-  }).filter((trip) => trip.stops?.length);
+  }).filter((trip) => trip.stops?.length || isTimeAwayAcrossStop(trip));
   const within = (leg: CommuteSegment, trip: CommuteSegment) =>
     Date.parse(leg.startedAt) >= Date.parse(trip.startedAt) && Date.parse(leg.stoppedAt) <= Date.parse(trip.stoppedAt);
   const overlapping = (leg: CommuteSegment, trip: CommuteSegment) =>

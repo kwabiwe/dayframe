@@ -131,6 +131,37 @@ describe("time away from a saved place", () => {
     expect(away.some((item) => minutes(item.startedAt) < 100 && minutes(item.stoppedAt) > 105)).toBe(false);
   });
 
+  // Fable round 8.
+  const mv = (id: string, minute: number, metres: number) => fix(id, minute, metres, { speedMetersPerSecond: 9 });
+  it("never folds a return split by an exit and re-entry into one absence", () => {
+    const evidence = [...homeFixes("am", 0, 60), crossing("x0", 60.5, "geofence_exit"), ...[61, 62, 63, 64].map((m, i) => mv(`o${i}`, m, 300 + i * 10)),
+      crossing("e1", 66, "geofence_enter"), fix("in", 66.5, 20), crossing("x1", 70.5, "geofence_exit"), crossing("e2", 71, "geofence_enter"),
+      crossing("x2", 74.5, "geofence_exit"), ...[75, 76, 77, 78].map((m, i) => mv(`p${i}`, m, 300 + i * 10)),
+      crossing("e3", 80, "geofence_enter"), ...homeFixes("pm", 80.5, 150)];
+    const away = outings(input(evidence));
+    expect(away.some((item) => minutes(item.startedAt) < 65 && minutes(item.stoppedAt) > 75)).toBe(false);
+    // The later outing starts when the phone left again, with its own start bounds.
+    const later = away.find((item) => minutes(item.startedAt) >= 70);
+    expect(later && minutes(later.startLowerBoundAt!)).toBeGreaterThanOrEqual(66);
+  });
+
+  it("still offers the later outing after a return when the earlier outing had a stop", () => {
+    const evidence = [...homeFixes("am", 0, 60), crossing("x0", 60.5, "geofence_exit"), mv("o0", 61, 300), mv("o1", 62, 350),
+      ...[62.5, 63.5, 64.5, 65.5, 66.5, 67.5, 68.5, 69.5].map((m, i) => fix(`s${i}`, m, 400 + i % 2 * 3)), mv("b0", 70.5, 300), mv("b1", 71.5, 200),
+      crossing("e1", 72, "geofence_enter"), fix("in", 72.5, 10), crossing("x1", 80, "geofence_exit"),
+      ...[81, 82, 83, 84].map((m, i) => mv(`p${i}`, m, 300 + i * 10)), crossing("e2", 86, "geofence_enter"), ...homeFixes("pm", 86.5, 150)];
+    const away = outings(input(evidence));
+    expect(away.some((item) => minutes(item.startedAt) >= 79 && minutes(item.stoppedAt) <= 86.5)).toBe(true);
+    expect(away.some((item) => minutes(item.startedAt) < 72 && minutes(item.stoppedAt) > 80)).toBe(false);
+  });
+
+  it("never treats simulated readings as leaving the place", () => {
+    const evidence = [...homeFixes("am", 0, 60), crossing("x0", 60.5, "geofence_exit"),
+      ...[61, 62, 63, 64].map((m, i) => fix(`sim${i}`, m, 300 + i * 10, { speedMetersPerSecond: 9, isSimulated: true })),
+      crossing("e1", 72, "geofence_enter"), ...homeFixes("pm", 72.5, 150)];
+    expect(outings(input(evidence))).toEqual([]);
+  });
+
   it("offers nothing from geofence callbacks alone, without readings away", () => {
     const evidence = [...homeFixes("am", 0, 60), crossing("exit", 61, "geofence_exit"), crossing("enter", 71, "geofence_enter"),
       ...homeFixes("pm", 72, 150)];
