@@ -799,7 +799,7 @@ export function deriveCommutes(
     // first clear reading away. A pass back inside the circle on the way home
     // (a drive-by of a minute before parking) is not a return, so it never
     // shortens the absence the way the latest departure shortens a journey;
-    // a sustained return long before the next stay offers nothing here.
+    // a sustained return offers nothing here.
     let absenceStartMs: number | null = null;
     const firstAway = awayCentre ? gapEvidence.find((item) =>
       !evidenceMatchesStay(item, from) && !evidenceMatchesStay(item, to) && clearlyAway(item)) : undefined;
@@ -812,10 +812,28 @@ export function deriveCommutes(
         const inside = point != null && accurateFix(item, config) && distanceMeters(awayCentre, point) <= (awayPlace?.radiusMeters ?? 0);
         return evidenceMatchesStay(item, from) || inside ? [atMs] : [];
       });
-      const sustainedReturnMs = observedReturnMs(to, gapEvidence, config, firstAwayMs, snapshots);
-      absenceStartMs = sustainedReturnMs != null && stoppedAtMs - sustainedReturnMs > config.savedPlaceMinimumDwellMs
-        ? null
-        : Math.max(originalStartedAtMs, ...there);
+      // Any stretch back at the place longer than the dwell minimum (from the
+      // first sign of being there to the next sign of leaving, or to the next
+      // stay) is a return, even when the phone left again: two outings with
+      // time at home between them are never one absence.
+      const radius = awayPlace?.radiusMeters ?? 0;
+      let backSinceMs: number | null = null;
+      let sustainedReturn = false;
+      for (const item of gapEvidence) {
+        const atMs = Date.parse(item.evidence.occurredAt);
+        if (atMs <= firstAwayMs || atMs >= stoppedAtMs || snapshots.has(item)) continue;
+        const point = evidencePoint(item);
+        const fix = point != null && accurateFix(item, config) ? distanceMeters(awayCentre, point) : null;
+        const ownCallback = evidenceMatchesStay(item, from) || evidenceMatchesStay(item, to);
+        if (ownCallback && item.evidence.kind !== "geofence_exit" || fix != null && fix <= radius) {
+          backSinceMs ??= atMs;
+        } else if (backSinceMs != null && (ownCallback || fix != null && fix > radius || clearlyAway(item))) {
+          if (atMs - backSinceMs > config.savedPlaceMinimumDwellMs) sustainedReturn = true;
+          backSinceMs = null;
+        }
+      }
+      if (backSinceMs != null && stoppedAtMs - backSinceMs > config.savedPlaceMinimumDwellMs) sustainedReturn = true;
+      absenceStartMs = sustainedReturn ? null : Math.max(originalStartedAtMs, ...there);
     }
     const journeyStartedAtMs = startedAtMs;
     const attempts: Array<"journey" | "absence"> =

@@ -90,6 +90,17 @@ describe("time away from a saved place", () => {
     expect(minutes(away[0].stoppedAt)).toBeGreaterThan(68);
   });
 
+  it("never folds ten minutes back at the place into one absence (Codex review of the drive-by fix)", () => {
+    // Out 300–350 m at 61–62, back home 63–73 (entry, a still fix inside), out again 74–75, home at 76.
+    const moving = (id: string, minute: number, metres: number) => fix(id, minute, metres, { speedMetersPerSecond: 9 });
+    const evidence = [...homeFixes("am", 0, 60), crossing("exit-0", 60.5, "geofence_exit"),
+      moving("out-0", 61, 300), moving("out-1", 62, 350), crossing("enter-0", 63, "geofence_enter"), fix("home-mid", 63.5, 20),
+      crossing("exit-1", 73, "geofence_exit"), moving("out-2", 74, 300), moving("out-3", 75, 350),
+      crossing("enter-1", 76, "geofence_enter"), ...homeFixes("pm", 76.5, 150)];
+    const away = outings(input(evidence));
+    expect(away.some((item) => minutes(item.startedAt) < 62 && minutes(item.stoppedAt) > 75)).toBe(false);
+  });
+
   it("offers nothing from geofence callbacks alone, without readings away", () => {
     const evidence = [...homeFixes("am", 0, 60), crossing("exit", 61, "geofence_exit"), crossing("enter", 71, "geofence_enter"),
       ...homeFixes("pm", 72, 150)];
