@@ -68,7 +68,9 @@ describe("Dayframe icon set", () => {
     ["App development", "code"], ["Professional development", "personal"], ["School-run", "childcare"],
     ["Car-pool", "commute"], ["Work-out", "gym"], ["Me-time", "personal"], ["Date-night", "partner"],
     ["Laundry cycle", "laundry"], ["Menstrual cycle", "health"], ["Cafés", "coffee"], ["Bedtime", "sleep"],
-    ["Spinning", "gym"], ["Dance class", "gym"]
+    ["Spinning", "gym"], ["Dance class", "gym"], ["Cycle", "cycling"], ["Cycle to work", "cycling"], ["Cycle home", "cycling"],
+    ["School – run", "childcare"], ["School  run", "childcare"], ["Babysitting", "childcare"], ["E-mail", "email"],
+    ["Business development", "work"], ["Zoom workout", "gym"], ["Zoom call", "calls"]
   ] as Array<[string, string | null]>)("suggests an icon for %s", (name, key) => {
     expect(activityIconKeyForName(name)).toBe(key);
   });

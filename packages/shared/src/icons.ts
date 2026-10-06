@@ -134,17 +134,18 @@ export function isActivityIconKey(value: unknown): value is DayframeActivityIcon
 // as spaces, so "Café"/"Cafe" and "School-run"/"School run" behave the same.
 const NAME_RULES: ReadonlyArray<readonly [RegExp, DayframeActivityIconKey]> = [
   [/\b(dogs?|cats?|pets?|vet)\b/, "pets"],
-  [/\b(school run|kids?|child\w*|baby|babies|nursery)\b/, "childcare"],
+  [/\b(school run|kids?|child\w*|baby\w*|babies|nursery)\b/, "childcare"],
   [/\b(grocer\w*|supermarket)\b/, "groceries"],
   [/\b(errands?|shopping|shops?)\b/, "errands"],
   [/\b(deep work|focus)\b/, "focus"],
   [/\b(clients?|office)\b/, "office"],
   [/\b(personal|professional|self|career) development\b/, "personal"],
+  [/\b(business|staff|team|leadership) development\b/, "work"],
   [/\b(code|coding|programming|software|developers?|dev|develop\w*)\b/, "code"],
-  [/\b(conference|video|phone) calls?\b/, "calls"],
-  [/\b(video conferenc\w*|zoom|teams meeting)\b/, "meeting"],
   [/\b(commut\w*|car ?pool\w*)\b/, "commute"],
   [/\b(gym|workouts?|work out|exercis\w*|training|lifting|runs?|running|jog\w*|yoga|pilates|sports?|fitness|spin|spinning|dance|dancing|boxing|golf|football|soccer|tennis|squash|badminton|basketball|netball|rugby|cricket)\b/, "gym"],
+  [/\b(conference|video|phone|zoom) calls?\b/, "calls"],
+  [/\b(video conferenc\w*|zoom|teams meeting)\b/, "meeting"],
   [/\b(trains?|rail|tube|metro|subway)\b/, "train"],
   [/\b(sleep\w*|naps?|bed|bedtime)\b/, "sleep"],
   [/\b(walks?|walking|steps|stroll\w*)\b/, "walk"],
@@ -153,7 +154,7 @@ const NAME_RULES: ReadonlyArray<readonly [RegExp, DayframeActivityIconKey]> = [
   [/\b(drive|driving|journeys?|taxi|cab|uber|car rides?)\b/, "journey"],
   [/\b(laundry|ironing)\b/, "laundry"],
   [/\b(health|therapy|menstrual)\b/, "health"],
-  [/\b(cycling|cycle rides?|bikes?|biking|bike rides?)\b/, "cycling"],
+  [/\b(cycling|cycles?|cycle rides?|bikes?|biking|bike rides?)\b/, "cycling"],
   [/\b(hikes?|hiking|climb\w*)\b/, "hiking"],
   [/\b(meditat\w*|mindful\w*|breath\w*)\b/, "mindfulness"],
   [/\b(doctors?|dentist|gp|hospital|clinic|physio\w*)\b/, "doctor"],
@@ -181,7 +182,7 @@ const NAME_RULES: ReadonlyArray<readonly [RegExp, DayframeActivityIconKey]> = [
   [/\b(volunteer\w*|charity)\b/, "volunteering"],
   [/\b(meetings?|stand ?ups?|1:1)\b/, "meeting"],
   [/\b(calls?|phone)\b/, "calls"],
-  [/\b(emails?|inbox)\b/, "email"],
+  [/\b(e ?mails?|inbox)\b/, "email"],
   [/\b(admin|paperwork)\b/, "admin"],
   [/\b(writ\w*|blog\w*|journal\w*)\b/, "writing"],
   [/\b(spanish|french|german|italian|language\w*)\b/, "languages"],
@@ -194,7 +195,7 @@ const NAME_RULES: ReadonlyArray<readonly [RegExp, DayframeActivityIconKey]> = [
 
 /** The icon an activity gets from its name when nobody has picked one, or null. */
 export function activityIconKeyForName(name: string): DayframeActivityIconKey | null {
-  const normalized = name.normalize("NFD").replace(/\p{M}/gu, "").replace(/[-\u2010-\u2014_]+/g, " ").trim().toLowerCase();
+  const normalized = name.normalize("NFD").replace(/\p{M}/gu, "").replace(/[-\u2010-\u2014_]+/g, " ").replace(/\s+/g, " ").trim().toLowerCase();
   if (!normalized) return null;
   for (const [pattern, key] of NAME_RULES) if (pattern.test(normalized)) return key;
   return null;
