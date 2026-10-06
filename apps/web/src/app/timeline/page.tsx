@@ -34,7 +34,7 @@ export default async function TimelinePage({
   return (
     <div className="timeline-page">
       <h1 className="sr-only">Timeline</h1>
-      <TimeReviewViews initialData={data} initialPreference={preference} />
+      <TimeReviewViews initialData={data} initialPreference={preference} renderedAt={new Date().toISOString()} />
     </div>
   );
 }

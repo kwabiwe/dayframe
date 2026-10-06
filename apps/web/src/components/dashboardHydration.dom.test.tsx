@@ -49,6 +49,7 @@ describe("DashboardRealtime hydration", () => {
       root = hydrateRoot(container, tree, { onRecoverableError: (error) => recoverable.push(error) });
     });
 
+    // React 19 reports hydration mismatches through onRecoverableError; the console check is a backstop.
     const logged = consoleError.mock.calls.flat().map(String).join("\n");
     expect(logged).not.toMatch(/hydrat/i);
     expect(recoverable).toEqual([]);

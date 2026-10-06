@@ -10,9 +10,10 @@ export function ShellProfileInitials({ identity }: { identity: ShellIdentity | n
 export function ShellProfileIdentity({ identity }: { identity: ShellIdentity | null }) {
   if (!identity) {
     return (
-      <span aria-busy="true" aria-label="Loading profile" className="swiss-profile-placeholder">
-        <span />
-        <span />
+      <span aria-busy="true" className="swiss-profile-placeholder">
+        <span aria-hidden="true" />
+        <span aria-hidden="true" />
+        <span className="sr-only">Loading profile</span>
       </span>
     );
   }

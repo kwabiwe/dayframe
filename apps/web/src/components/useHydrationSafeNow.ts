@@ -12,6 +12,10 @@ const subscribe = () => () => undefined;
  * exactly. After hydration every render reads the real clock again.
  */
 export function useHydrationSafeNow(renderedAt: string): Date {
-  const hydrated = useSyncExternalStore(subscribe, () => true, () => false);
-  return hydrated ? new Date() : new Date(renderedAt);
+  return useIsHydrated() ? new Date() : new Date(renderedAt);
+}
+
+/** False during the server render and the browser's hydration pass, true afterwards. */
+export function useIsHydrated(): boolean {
+  return useSyncExternalStore(subscribe, () => true, () => false);
 }

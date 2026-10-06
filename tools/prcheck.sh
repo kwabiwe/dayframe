@@ -8,11 +8,13 @@ run() {
   "$@"
 }
 
+# Whitespace errors in the branch's commits and in uncommitted changes.
+base="$(git merge-base origin/main HEAD 2>/dev/null || git rev-parse HEAD)"
+
 run npm run typecheck
-run npm run lint
+run npm run lint   # includes check:docs and check:ios-config
 run npm run test
-run npm run check:docs
-run git diff --check
+run git diff --check "$base"
 if [[ "${1:-}" == "--build" ]]; then
   run npm run build
 fi

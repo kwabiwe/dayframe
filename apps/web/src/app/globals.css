@@ -2005,7 +2005,7 @@ dialog.ui-popover-panel.bottom-left {
   gap: 7px;
 }
 
-.swiss-profile-placeholder > span {
+.swiss-profile-placeholder > span[aria-hidden="true"] {
   display: block;
   width: 96px;
   max-width: 100%;
@@ -2014,7 +2014,7 @@ dialog.ui-popover-panel.bottom-left {
   background: var(--surface-muted);
 }
 
-.swiss-profile-placeholder > span + span {
+.swiss-profile-placeholder > span[aria-hidden="true"] + span[aria-hidden="true"] {
   width: 64px;
 }
 

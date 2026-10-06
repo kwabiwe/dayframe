@@ -23,6 +23,8 @@ describe("App shell identity before data arrives", () => {
     const text = document.body.textContent ?? "";
     expect(text).not.toMatch(/Local User|Workspace|Dayframe User|\bDU\b|\bDF\b/);
     expect(document.querySelector("[aria-busy='true']")).not.toBeNull();
+    expect(screen.getByText("Loading profile").className).toBe("sr-only");
+    expect(document.querySelector("[aria-label='Loading profile']")).toBeNull();
   });
 
   it("is what the app shell uses for the sidebar and phone account button", () => {
@@ -64,6 +66,16 @@ describe("Theme toggle on first paint", () => {
     expect(serverIcons).toEqual(expect.arrayContaining([expect.stringContaining("lucide-moon"), expect.stringContaining("lucide-sun")]));
     expect(container.querySelector("button")?.getAttribute("aria-label")).toBe("Switch to light mode");
     await act(async () => root?.unmount());
+  });
+});
+
+describe("Theme toggle stylesheet", () => {
+  it("shows one icon per resolved theme using the same conditions as the palette", () => {
+    const css = readFileSync(`${process.cwd()}/src/app/globals.css`, "utf8").replace(/\s+/g, " ");
+    expect(css).toContain(".swiss-theme-toggle-to-light { display: none; }");
+    expect(css).toContain(':root[data-theme="dark"] .swiss-theme-toggle-to-dark { display: none; }');
+    expect(css).toContain(':root[data-theme="dark"] .swiss-theme-toggle-to-light { display: block; }');
+    expect(css).toMatch(/@media \(prefers-color-scheme: dark\) \{ :root:not\(\[data-theme="light"\]\) \.swiss-theme-toggle-to-dark \{ display: none; \} :root:not\(\[data-theme="light"\]\) \.swiss-theme-toggle-to-light \{ display: block; \} \}/);
   });
 });
 

@@ -83,6 +83,7 @@ import {
   type CalendarCreateTargetKind
 } from "@/lib/calendar-click-create";
 import { calendarInitialScrollHour } from "@/lib/calendar-initial-scroll";
+import { useIsHydrated } from "@/components/useHydrationSafeNow";
 
 type CalendarHoursMode = "fullDay";
 
@@ -160,10 +161,12 @@ type CalendarEditorTarget = CalendarEntryEditorTarget | CalendarCreateEditorTarg
 
 export function TimeReviewViews({
   initialData,
-  initialPreference
+  initialPreference,
+  renderedAt
 }: {
   initialData: BootstrapData;
   initialPreference: TimelinePreference | null;
+  renderedAt: string;
 }) {
   const data = useRuntimePageData(initialData);
   const {
@@ -186,7 +189,12 @@ export function TimeReviewViews({
     data.weekEntries.some((entry) => entry.stoppedAt === null)
   );
   const [presentationNow, setPresentationNow] = useState(() => Date.now());
-  const capturedNow = useMemo(() => new Date(presentationNow), [presentationNow]);
+  // Server render and hydration share the server's render time so running durations match.
+  const hydrated = useIsHydrated();
+  const capturedNow = useMemo(
+    () => new Date(hydrated ? presentationNow : Date.parse(renderedAt)),
+    [hydrated, presentationNow, renderedAt]
+  );
   const calendarHoursMode: CalendarHoursMode = "fullDay";
   const preferenceRef = useRef<TimelinePreference | null>(initialPreference);
   // Calendar starts unset so CalendarReview can open near now; later visits restore where it was left.
@@ -207,6 +215,8 @@ export function TimeReviewViews({
   const registerScrollContainer = useCallback((element: HTMLDivElement | null) => {
     activeScrollContainerRef.current = element;
   }, []);
+
+  const hasRememberedCalendarScroll = useCallback(() => scrollPositionsRef.current.calendar !== null, []);
 
   const rememberScrollPosition = useCallback((view: TimelineView, event: UIEvent<HTMLDivElement>) => {
     scrollPositionsRef.current[view] = {
@@ -481,6 +491,7 @@ export function TimeReviewViews({
             entries={activeEntries}
             onDeleteEntries={requestTimelineDelete}
             onScroll={(event) => rememberScrollPosition("calendar", event)}
+            hasRememberedScroll={hasRememberedCalendarScroll}
             onSynced={refreshData}
             scrollContainerRef={registerScrollContainer}
             tags={data.tags}
@@ -568,6 +579,7 @@ export function CalendarReview({
   capturedNow,
   categories,
   entries,
+  hasRememberedScroll,
   onDeleteEntries,
   onScroll,
   onSynced,
@@ -579,6 +591,8 @@ export function CalendarReview({
   capturedNow: Date;
   categories: CategoryRow[];
   entries: TimeEntryRow[];
+  /** True once the user has a calendar position to return to; the opening position then defers to it. */
+  hasRememberedScroll?: () => boolean;
   onDeleteEntries: (entries: readonly TimeEntryRow[]) => void;
   onScroll: (event: UIEvent<HTMLDivElement>) => void;
   onSynced: () => Promise<void>;
@@ -647,15 +661,16 @@ export function CalendarReview({
     scrollContainerRef(element);
   }, [scrollContainerRef]);
 
-  // Open near now (or the first entry) once per mount; TimeReviewViews restores later positions.
+  // Open near now (or the first entry) once per mount unless TimeReviewViews has a position to restore.
   const initialScrollAppliedRef = useRef(false);
   useLayoutEffect(() => {
     const scroller = calendarScrollerRef.current;
     if (!calendarScroller || !scroller || initialScrollAppliedRef.current) return;
     initialScrollAppliedRef.current = true;
+    if (hasRememberedScroll?.()) return;
     const hour = calendarInitialScrollHour({ entries, now: capturedNow, visibleDays });
     scroller.scrollTop = Math.max(0, (hour - calendarHours.startHour) * rowHeight);
-  }, [calendarHours.startHour, calendarScroller, capturedNow, entries, rowHeight, visibleDays]);
+  }, [calendarHours.startHour, calendarScroller, capturedNow, entries, hasRememberedScroll, rowHeight, visibleDays]);
 
   useEffect(() => {
     const clearConsumedPointer = (event: PointerEvent) => {
