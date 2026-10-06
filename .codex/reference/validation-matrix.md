@@ -18,6 +18,8 @@ npm run check:brand-assets
 git diff --check
 ```
 
+`tools/prcheck.sh --build` runs the general set except the brand-asset check; see `.codex/reference/testing.md` for it and `tools/codex-review.sh`.
+
 Mobile:
 
 ```bash

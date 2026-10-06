@@ -29,6 +29,7 @@ import { DatePickerPopover } from "@/components/DatePickerPopover";
 import { DayframeBrand } from "@/components/brand/DayframeBrand";
 import { PersistentTimerBar } from "@/components/PersistentTimerBar";
 import { SignOutControl } from "@/components/SignOutControl";
+import { ShellProfileIdentity, ShellProfileInitials, initials } from "@/components/ShellProfileIdentity";
 import { ThemeToggleButton } from "@/components/ThemeToggleButton";
 import { IconButton, ModalDialog, PopoverPanel } from "@/components/ui/Primitives";
 import { clientFetch } from "@/lib/client-auth-fetch";
@@ -93,6 +94,7 @@ function AppShellContent({ children }: { children: ReactNode }) {
     startTimer,
     toggleTimer
   } = useAppShellRuntime();
+  const shellIdentity = data ? { userName: data.user.name, workspaceName: data.workspace.name } : null;
   const [overlay, setOverlay] = useState<Overlay>(null);
   const [query, setQuery] = useState("");
   const [remoteSearch, setRemoteSearch] = useState<{ query: string; results: GlobalSearchResult[] }>({
@@ -247,7 +249,7 @@ function AppShellContent({ children }: { children: ReactNode }) {
             <IconButton label="Search" onClick={() => setOverlay("search")}><Search size={19} /></IconButton>
             <IconButton label="Help and shortcuts" onClick={() => setOverlay("help")}><HelpCircle size={19} /></IconButton>
             <button type="button" aria-label="Profile and workspace" className="swiss-mobile-account-button" onClick={() => setOverlay("profile")}>
-              <span>{initials(data?.user.name ?? "Dayframe User")}</span>
+              <ShellProfileInitials identity={shellIdentity} />
             </button>
           </div>
         </div>
@@ -275,11 +277,8 @@ function AppShellContent({ children }: { children: ReactNode }) {
             Help & Shortcuts
           </button>
           <button type="button" className="swiss-profile-button" onClick={() => setOverlay("profile")}>
-            <span>{initials(data?.user.name ?? "Dayframe User")}</span>
-            <span>
-              <strong>{data?.user.name ?? "Local User"}</strong>
-              <small>{data?.workspace.name ?? "Workspace"}</small>
-            </span>
+            <ShellProfileInitials identity={shellIdentity} />
+            <ShellProfileIdentity identity={shellIdentity} />
             <ChevronDown size={15} />
           </button>
         </div>
@@ -616,13 +615,6 @@ function buildSearchResults(data: BootstrapData | null, query: string): SearchRe
   ];
   if (!needle) return results.slice(0, 8);
   return results.filter((result) => `${result.label} ${result.detail} ${result.group}`.toLowerCase().includes(needle)).slice(0, 12);
-}
-
-function initials(name: string) {
-  const parts = name.trim().split(/\s+/).filter(Boolean);
-  const first = parts[0]?.[0] ?? "D";
-  const second = parts[1]?.[0] ?? parts[0]?.[1] ?? "F";
-  return `${first}${second}`.toUpperCase();
 }
 
 function isTypingTarget(target: EventTarget | null) {

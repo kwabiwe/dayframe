@@ -71,6 +71,11 @@ For any app chrome, navigation, account, workspace, settings, or floating-surfac
 - No zooming or landscape rotation required.
 - Close/cancel actions are visible and tappable.
 
+## PR helper scripts
+
+- `tools/prcheck.sh` runs typecheck, lint (which includes the documentation and iOS config checks), tests and `git diff --check` against the merge base with `origin/main`; add `--build` for the web production build. It does not replace feature-specific validators, browser checks or device tests.
+- `tools/codex-review.sh <prompt-file> [scratch-dir]` exports the exact committed `HEAD` with `git archive`, links the installed `node_modules`, and runs a Codex review told not to change code. Codex's `workspace-write` sandbox can write the export and the system temp directories (where the default scratch and report live), not the real checkout; the `node_modules` links resolve into the checkout, so tests that write caches there may fail inside the sandbox. Uncommitted changes are not reviewed. Set `CODEX_BIN` to override the Codex CLI path.
+
 ## Review Checklist
 
 - [ ] Validation commands are listed in the feature plan before implementation.
