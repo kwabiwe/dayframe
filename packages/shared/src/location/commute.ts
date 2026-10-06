@@ -827,7 +827,10 @@ export function deriveCommutes(
         const ownCallback = evidenceMatchesStay(item, from) || evidenceMatchesStay(item, to);
         if (ownCallback && item.evidence.kind !== "geofence_exit" || fix != null && fix <= radius) {
           backSinceMs ??= atMs;
-        } else if (backSinceMs != null && (ownCallback || fix != null && fix > radius || clearlyAway(item))) {
+        } else if (backSinceMs != null && (ownCallback || clearlyAway(item) ||
+          fix != null && fix > radius && (item.evidence.speedMetersPerSecond ?? 0) >= config.movementSpeedThresholdMps)) {
+          // Only corroborated leaving ends a stretch back there: an exit, a clear
+          // reading away, or movement outside; one still reading just outside does not.
           if (atMs - backSinceMs > config.savedPlaceMinimumDwellMs) sustainedReturn = true;
           backSinceMs = null;
         }

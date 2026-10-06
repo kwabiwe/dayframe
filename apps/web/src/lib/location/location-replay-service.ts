@@ -369,9 +369,17 @@ async function excludeProtectedReplacements(
   const rebuiltLinks = [...links, ...(uncheckedIds.length ? await protectedLinks(uncheckedIds) : [])];
   const claimsDecided = (segment: LocationSegment) => rebuiltTimeAway.includes(segment) &&
     rebuiltLinks.some((link) => segment.evidenceIds.includes(link.clientEvidenceId) && sharesProtectedPortion(segment, link));
+  // A rebuild sees only its two endpoint stays, so it must never stretch time
+  // away across another visit replay keeps: a saved or learned place, or an
+  // unknown stay long enough to be its own Review (short stops stay allowed).
+  const visits = kept.filter((segment): segment is StaySegment => segment.kind === "stay" && (segment.placeMatchKind !== "unknown" ||
+    Date.parse(segment.stoppedAt ?? segment.startedAt) - Date.parse(segment.startedAt) >= LOCATION_ENGINE_V2_CONFIG.unknownStayReviewDwellMs));
+  const crossesVisit = (segment: LocationSegment) => segment.kind === "commute" && visits.some((visit) =>
+    visit.clientSegmentId !== segment.fromStaySegmentId && visit.clientSegmentId !== segment.toStaySegmentId &&
+    Date.parse(visit.startedAt) < Date.parse(segment.stoppedAt!) && Date.parse(visit.stoppedAt ?? visit.startedAt) > Date.parse(segment.startedAt));
   return {
     count: held.size,
-    segments: kept.filter((segment) => !isTimeAway(segment) || !claimsDecided(segment) && !journeys.some((journey) =>
+    segments: kept.filter((segment) => !isTimeAway(segment) || !claimsDecided(segment) && !crossesVisit(segment) && !journeys.some((journey) =>
       Date.parse(journey.startedAt) < Date.parse(segment.stoppedAt!) && Date.parse(journey.stoppedAt) > Date.parse(segment.startedAt)))
   };
 }

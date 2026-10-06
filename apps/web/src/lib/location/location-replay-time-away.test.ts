@@ -12,6 +12,7 @@ const { LOCATION_ENGINE_V2_CONFIG, stableLocationId } = await import("@dayframe/
 const { replayLocationEvidence } = await import("./location-replay-service");
 
 const HOME = "10000000-0000-4000-8000-0000000000d1";
+const SHOP = "10000000-0000-4000-8000-0000000000d2";
 const DEVICE = "20000000-0000-4000-8000-0000000000d1";
 const version = LOCATION_ENGINE_V2_CONFIG.algorithmVersion;
 const at = (hh: number, mm: number) => `2026-03-10T${String(hh).padStart(2, "0")}:${String(mm).padStart(2, "0")}:00.000Z`;
@@ -39,13 +40,14 @@ const commute = (id: string, from: StaySegment, to: StaySegment, reason: Commute
   continuityStatus: "continuous", confidence: reason === "same_place_outing" ? "low" : "medium", qualificationReason: reason, evidenceIds: []
 });
 
-async function replayWithDecidedReturn(protectedLinks: Array<Record<string, unknown>> = []) {
+async function replayWithDecidedReturn(protectedLinks: Array<Record<string, unknown>> = [], shopVisit = false) {
     const before = stay("stay-home-am", at(12, 0), at(13, 1), home.map((item) => item.clientEvidenceId), HOME);
     const after = stay("stay-home-pm", at(13, 8), at(14, 40), back.map((item) => item.clientEvidenceId), HOME);
     const first = stay("stay-a", at(13, 30), at(14, 1), [], null);
     const second = stay("stay-b", at(14, 10), at(14, 15), [], null);
-    const segments = [before, commute(stableLocationId("commute", [before.clientSegmentId, after.clientSegmentId]), before, after, "same_place_outing"), after, first,
-      { ...commute("commute-journey", first, second, "significant_endpoint_displacement"), evidenceIds: ["away-12"] }, second];
+    const shop = stay("stay-shop", at(13, 30), at(14, 1), [], SHOP);
+    const segments = [before, commute(stableLocationId("commute", [before.clientSegmentId, after.clientSegmentId]), before, after, "same_place_outing"), after,
+      ...shopVisit ? [shop] : [first, { ...commute("commute-journey", first, second, "significant_endpoint_displacement"), evidenceIds: ["away-12"] }, second]];
     engine.output = {
       nextState: { algorithmVersion: version, mode: "idle", activeSegmentId: null, processedEvidenceIds: [], lastProcessedAt: null },
       acceptedEvidence: evidence.map((item): ClassifiedEvidence => ({ evidence: item, match: null, impliedSpeedMetersPerSecond: null })),
@@ -69,8 +71,9 @@ async function replayWithDecidedReturn(protectedLinks: Array<Record<string, unkn
       workspaceId: "workspace-private", userId: "user-private", authMode: "provider", scopes: []
     }, { deviceId: DEVICE, algorithmVersion: version, processingAt: at(18, 0) });
     const commutes = server.segments.filter((segment): segment is CommuteSegment => segment.kind === "commute");
+    const [busyFrom, busyTo] = shopVisit ? [at(13, 30), at(14, 1)] : [at(14, 1), at(14, 10)];
     const overlapping = commutes.filter((segment) => segment.qualificationReason === "same_place_outing" &&
-      Date.parse(segment.startedAt) < Date.parse(at(14, 10)) && Date.parse(segment.stoppedAt) > Date.parse(at(14, 1)));
+      Date.parse(segment.startedAt) < Date.parse(busyTo) && Date.parse(segment.stoppedAt) > Date.parse(busyFrom));
     return { commutes, overlapping };
 }
 
@@ -86,6 +89,11 @@ describe("Location replay time away", () => {
     const { commutes, overlapping } = await replayWithDecidedReturn([{ clientSegmentId: "decided-journey",
       clientEvidenceId: "away-12", kind: "standard_location", occurredAt: at(14, 3), startedAt: at(14, 1), stoppedAt: at(14, 10) }]);
     expect(commutes.map((segment) => segment.clientSegmentId)).not.toContain("commute-journey");
+    expect(overlapping).toEqual([]);
+  });
+
+  it("never lets a rebuilt time-away item span a visit to another saved place (Codex round 6)", async () => {
+    const { overlapping } = await replayWithDecidedReturn([], true);
     expect(overlapping).toEqual([]);
   });
 });

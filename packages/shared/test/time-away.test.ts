@@ -99,6 +99,9 @@ describe("time away from a saved place", () => {
       crossing("enter-1", 76, "geofence_enter"), ...homeFixes("pm", 76.5, 150)];
     const away = outings(input(evidence));
     expect(away.some((item) => minutes(item.startedAt) < 62 && minutes(item.stoppedAt) > 75)).toBe(false);
+    // One still reading just outside the circle during the return does not end it (Codex round 6).
+    const stray = outings(input([...evidence, fix("stray", 66.5, 145)]));
+    expect(stray.some((item) => minutes(item.startedAt) < 62 && minutes(item.stoppedAt) > 75)).toBe(false);
   });
 
   it("offers nothing from geofence callbacks alone, without readings away", () => {
