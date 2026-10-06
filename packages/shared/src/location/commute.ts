@@ -783,153 +783,186 @@ export function deriveCommutes(
         returnedMs = observedReturnMs(to, gapEvidence, config, returnedMs, snapshots)
       ) startedAtMs = returnedMs;
     }
-    const fromHasInferredBoundary = options.inferredBoundaryStayIds?.has(from.clientSegmentId) === true;
-    const toHasInferredBoundary = options.inferredBoundaryStayIds?.has(to.clientSegmentId) === true;
-    const anyEndpointHasInferredBoundary = fromHasInferredBoundary || toHasInferredBoundary;
-    const hasUnsupportedArrivalConflict = !toHasInferredBoundary &&
-      (options.arrivalWitnesses ?? []).some((witness) =>
-        options.savedPlaces && crossesUnsupportedSavedPlaceArrivalWitness({
-          witness,
-          from,
-          to,
-          acceptedEvidence,
-          config,
-          savedPlaces: options.savedPlaces
-        })
-      );
-    if (hasUnsupportedArrivalConflict) continue;
-    const duration = stoppedAtMs - startedAtMs;
-    if (!Number.isFinite(duration) || duration <= 0 || duration > config.commuteMaximumDurationMs) {
-      continue;
-    }
-
-    const stops = (options.interiorStops ?? []).filter((stop) => stop.stoppedAt != null &&
-      Date.parse(stop.startedAt) >= startedAtMs && Date.parse(stop.stoppedAt) <= stoppedAtMs);
-    const stopEvidenceIds = new Set(stops.flatMap((stop) => stop.evidenceIds));
-    const routeEvidence = acceptedEvidence.filter((item, evidenceIndex) => {
-      const at = occurredAtMs[evidenceIndex];
-      if (at <= startedAtMs || at >= stoppedAtMs || evidencePoint(item) == null) return false;
-      if (stopEvidenceIds.has(item.evidence.clientEvidenceId)) return false;
-      return !evidenceMatchesStay(item, from) && !evidenceMatchesStay(item, to);
-    });
-    // Every portion of a trip through stops needs its own movement evidence;
-    // otherwise unobserved time either side of a stop would be claimed as travel.
-    const portionsShowMovement = !stops.length ||
-      everyPortionShowsMovement(from, to, stops, routeEvidence, startedAtMs, stoppedAtMs, config);
-    // Time away from a saved or learned place: the phone clearly left it and
-    // came back, but no journey qualifies (a short drive or walk to a shop).
-    // It claims only the absence, never travel, so it needs no route.
-    const timeAway = () => {
-      // Both stays identified as the place itself, never an ambiguous match.
-      const identified = (stay: StaySegment) => stay.placeMatchKind === "saved" || stay.placeMatchKind === "learned";
-      if (!sameKnownEndpoint(from, to) || !identified(from) || !identified(to)) return false;
-      const awayMs = stoppedAtMs - startedAtMs;
-      if (awayMs < config.placeOutingMinimumMs || awayMs > config.commuteMaximumDurationMs) return false;
-      if (stops.length) return true;
-      // Measured from the place itself: a stay's observed centre can sit well inside its circle.
-      const place = knownPlaceOf(from, options);
-      if (!place) return false;
-      const centre = { latitude: place.latitude, longitude: place.longitude };
-      const distance = Math.max(config.placeOutingMinimumDistanceMeters, place.radiusMeters);
-      // Independent observations only: a repeated coordinate, or a mirrored
-      // copy from another source within a few seconds, counts once.
-      const counted: Array<{ deviceId: string; kind: string; atMs: number }> = [];
-      const coordinates = new Set<string>();
-      let observations = 0;
-      for (const item of routeEvidence) {
-        const point = evidencePoint(item);
-        if (!point || !accurateFix(item, config) ||
-          distanceMeters(centre, point) - (item.evidence.horizontalAccuracyMeters ?? 0) < distance) continue;
-        const coordinate = `${item.evidence.latitude},${item.evidence.longitude}`;
-        const atMs = Date.parse(item.evidence.occurredAt);
-        const mirror = counted.some((other) => other.deviceId === item.evidence.deviceId && other.kind !== item.evidence.kind &&
-          Math.abs(atMs - other.atMs) <= PLACE_OUTING_MIRROR_WINDOW_MS);
-        if (coordinates.has(coordinate) || mirror) continue;
-        coordinates.add(coordinate);
-        counted.push({ deviceId: item.evidence.deviceId, kind: item.evidence.kind, atMs });
-        observations += 1;
-      }
-      return observations >= config.outsideConfirmationCount;
+    // Time away from a saved or learned place is measured from the place
+    // itself (a stay's observed centre can sit well inside its circle), and
+    // only between two stays both identified as it, never an ambiguous match.
+    const identified = (stay: StaySegment) => stay.placeMatchKind === "saved" || stay.placeMatchKind === "learned";
+    const awayPlace = sameKnownEndpoint(from, to) && identified(from) && identified(to) ? knownPlaceOf(from, options) : null;
+    const awayCentre = awayPlace ? { latitude: awayPlace.latitude, longitude: awayPlace.longitude } : null;
+    const awayDistance = Math.max(config.placeOutingMinimumDistanceMeters, awayPlace?.radiusMeters ?? 0);
+    const clearlyAway = (item: ClassifiedEvidence) => {
+      const point = evidencePoint(item);
+      return awayCentre != null && point != null && accurateFix(item, config) &&
+        distanceMeters(awayCentre, point) - (item.evidence.horizontalAccuracyMeters ?? 0) >= awayDistance;
     };
-    const outing: CommuteQualification = { qualifies: true, reason: "same_place_outing", confidence: "low" };
-    if (!portionsShowMovement && !timeAway()) continue;
-    const summary = summariseCommuteEvidence({
-      config,
-      from,
-      routeEvidence,
-      startedAtMs,
-      stoppedAtMs,
-      to,
-      stops
-    });
-    if (portionsShowMovement && duration < config.commuteMinimumDurationMs) {
-      if (summary.sameKnownPlace || summary.straightLineDistanceMeters == null ||
-        summary.straightLineDistanceMeters < config.commuteMinimumEndpointDistanceMeters) continue;
-      shortProof ??= shortJourneyProof(acceptedEvidence, config, occurredAtMs);
-      const required = distinctKnownPlaces(from, to)
-        ? config.commuteKnownPlacesShortJourneySpeedSamples
-        : config.commuteMinimumReliableSpeedSamples;
-      if (!hasIndependentShortJourneyProof(routeEvidence, shortProof, startedAtMs, stoppedAtMs, required)) continue;
+    // The absence runs from the last sign of being at the place before the
+    // first clear reading away. A pass back inside the circle on the way home
+    // (a drive-by of a minute before parking) is not a return, so it never
+    // shortens the absence the way the latest departure shortens a journey;
+    // a sustained return long before the next stay offers nothing here.
+    let absenceStartMs: number | null = null;
+    const firstAway = awayCentre ? gapEvidence.find((item) =>
+      !evidenceMatchesStay(item, from) && !evidenceMatchesStay(item, to) && clearlyAway(item)) : undefined;
+    if (firstAway && awayCentre) {
+      const firstAwayMs = Date.parse(firstAway.evidence.occurredAt);
+      const there = gapEvidence.flatMap((item) => {
+        const atMs = Date.parse(item.evidence.occurredAt);
+        if (atMs >= firstAwayMs || snapshots.has(item) || item.evidence.kind === "geofence_exit") return [];
+        const point = evidencePoint(item);
+        const inside = point != null && accurateFix(item, config) && distanceMeters(awayCentre, point) <= (awayPlace?.radiusMeters ?? 0);
+        return evidenceMatchesStay(item, from) || inside ? [atMs] : [];
+      });
+      const sustainedReturnMs = observedReturnMs(to, gapEvidence, config, firstAwayMs, snapshots);
+      absenceStartMs = sustainedReturnMs != null && stoppedAtMs - sustainedReturnMs > config.savedPlaceMinimumDwellMs
+        ? null
+        : Math.max(originalStartedAtMs, ...there);
     }
-    let qualification = portionsShowMovement ? qualifyCommuteCandidate(summary, config) : outing;
-    // Each leg already proved a real journey to or from a recorded stop; the
-    // whole trip through those stops is therefore real even when the combined
-    // route is shorter than the same-place round-trip minimum.
-    const chainConfidence = !qualification.qualifies && stops.length
-      ? options.qualifiedLegChainConfidence?.(from.clientSegmentId, to.clientSegmentId) ?? null
-      : null;
-    if (chainConfidence) {
-      qualification = {
-        qualifies: true,
-        reason: summary.sameKnownPlace ? "same_place_meaningful_round_trip" : "significant_route_distance",
-        confidence: chainConfidence
+    const journeyStartedAtMs = startedAtMs;
+    const attempts: Array<"journey" | "absence"> =
+      absenceStartMs != null && absenceStartMs < journeyStartedAtMs ? ["journey", "absence"] : ["journey"];
+    for (const attempt of attempts) {
+      startedAtMs = attempt === "absence" ? absenceStartMs! : journeyStartedAtMs;
+      const fromHasInferredBoundary = options.inferredBoundaryStayIds?.has(from.clientSegmentId) === true;
+      const toHasInferredBoundary = options.inferredBoundaryStayIds?.has(to.clientSegmentId) === true;
+      const anyEndpointHasInferredBoundary = fromHasInferredBoundary || toHasInferredBoundary;
+      const hasUnsupportedArrivalConflict = !toHasInferredBoundary &&
+        (options.arrivalWitnesses ?? []).some((witness) =>
+          options.savedPlaces && crossesUnsupportedSavedPlaceArrivalWitness({
+            witness,
+            from,
+            to,
+            acceptedEvidence,
+            config,
+            savedPlaces: options.savedPlaces
+          })
+        );
+      if (hasUnsupportedArrivalConflict) continue;
+      const duration = stoppedAtMs - startedAtMs;
+      if (!Number.isFinite(duration) || duration <= 0 || duration > config.commuteMaximumDurationMs) {
+        continue;
+      }
+
+      const stops = (options.interiorStops ?? []).filter((stop) => stop.stoppedAt != null &&
+        Date.parse(stop.startedAt) >= startedAtMs && Date.parse(stop.stoppedAt) <= stoppedAtMs);
+      const stopEvidenceIds = new Set(stops.flatMap((stop) => stop.evidenceIds));
+      const routeEvidence = acceptedEvidence.filter((item, evidenceIndex) => {
+        const at = occurredAtMs[evidenceIndex];
+        if (at <= startedAtMs || at >= stoppedAtMs || evidencePoint(item) == null) return false;
+        if (stopEvidenceIds.has(item.evidence.clientEvidenceId)) return false;
+        return !evidenceMatchesStay(item, from) && !evidenceMatchesStay(item, to);
+      });
+      // Every portion of a trip through stops needs its own movement evidence;
+      // otherwise unobserved time either side of a stop would be claimed as travel.
+      const portionsShowMovement = !stops.length ||
+        everyPortionShowsMovement(from, to, stops, routeEvidence, startedAtMs, stoppedAtMs, config);
+      // Time away from a saved or learned place: the phone clearly left it and
+      // came back, but no journey qualifies (a short drive or walk to a shop).
+      // It claims only the absence, never travel, so it needs no route.
+      const timeAway = () => {
+        if (!sameKnownEndpoint(from, to) || !identified(from) || !identified(to)) return false;
+        const awayMs = stoppedAtMs - startedAtMs;
+        if (awayMs < config.placeOutingMinimumMs || awayMs > config.commuteMaximumDurationMs) return false;
+        if (stops.length) return true;
+        if (!awayPlace) return false;
+        // Independent observations only: a repeated coordinate, or a mirrored
+        // copy from another source within a few seconds, counts once.
+        const counted: Array<{ deviceId: string; kind: string; atMs: number }> = [];
+        const coordinates = new Set<string>();
+        let observations = 0;
+        for (const item of routeEvidence) {
+          if (!clearlyAway(item)) continue;
+          const coordinate = `${item.evidence.latitude},${item.evidence.longitude}`;
+          const atMs = Date.parse(item.evidence.occurredAt);
+          const mirror = counted.some((other) => other.deviceId === item.evidence.deviceId && other.kind !== item.evidence.kind &&
+            Math.abs(atMs - other.atMs) <= PLACE_OUTING_MIRROR_WINDOW_MS);
+          if (coordinates.has(coordinate) || mirror) continue;
+          coordinates.add(coordinate);
+          counted.push({ deviceId: item.evidence.deviceId, kind: item.evidence.kind, atMs });
+          observations += 1;
+        }
+        return observations >= config.outsideConfirmationCount;
       };
+      const outing: CommuteQualification = { qualifies: true, reason: "same_place_outing", confidence: "low" };
+      if (attempt === "absence" ? !timeAway() : !portionsShowMovement && !timeAway()) continue;
+      const summary = summariseCommuteEvidence({
+        config,
+        from,
+        routeEvidence,
+        startedAtMs,
+        stoppedAtMs,
+        to,
+        stops
+      });
+      if (attempt === "journey" && portionsShowMovement && duration < config.commuteMinimumDurationMs) {
+        if (summary.sameKnownPlace || summary.straightLineDistanceMeters == null ||
+          summary.straightLineDistanceMeters < config.commuteMinimumEndpointDistanceMeters) continue;
+        shortProof ??= shortJourneyProof(acceptedEvidence, config, occurredAtMs);
+        const required = distinctKnownPlaces(from, to)
+          ? config.commuteKnownPlacesShortJourneySpeedSamples
+          : config.commuteMinimumReliableSpeedSamples;
+        if (!hasIndependentShortJourneyProof(routeEvidence, shortProof, startedAtMs, stoppedAtMs, required)) continue;
+      }
+      let qualification = attempt === "journey" && portionsShowMovement ? qualifyCommuteCandidate(summary, config) : outing;
+      // Each leg already proved a real journey to or from a recorded stop; the
+      // whole trip through those stops is therefore real even when the combined
+      // route is shorter than the same-place round-trip minimum.
+      const chainConfidence = !qualification.qualifies && stops.length
+        ? options.qualifiedLegChainConfidence?.(from.clientSegmentId, to.clientSegmentId) ?? null
+        : null;
+      if (chainConfidence) {
+        qualification = {
+          qualifies: true,
+          reason: summary.sameKnownPlace ? "same_place_meaningful_round_trip" : "significant_route_distance",
+          confidence: chainConfidence
+        };
+      }
+      if (!qualification.qualifies && timeAway()) qualification = outing;
+      if (!qualification.qualifies) continue;
+      const evidenceIds = routeEvidence.map(({ evidence }) => evidence.clientEvidenceId);
+      const uncertainBoundary =
+        summary.routeSampleCount < 2 ||
+        summary.maximumObservationGapSeconds * 1_000 > config.maxContinuityGapMs ||
+        from.continuityStatus === "uncertain_gap" ||
+        to.continuityStatus === "uncertain_gap";
+      commutes.push({
+        kind: "commute",
+        clientSegmentId: stableLocationId("commute", [from.clientSegmentId, to.clientSegmentId]),
+        algorithmVersion: config.algorithmVersion,
+        status:
+          Date.parse(processingAt) - stoppedAtMs >= config.segmentFinalisationLagMs
+            ? "finalised"
+            : "closed",
+        startedAt: new Date(startedAtMs).toISOString(),
+        stoppedAt: to.startedAt,
+        startLowerBoundAt: from.stopLowerBoundAt ?? from.stoppedAt,
+        startUpperBoundAt: from.stopUpperBoundAt ?? routeEvidence[0]?.evidence.occurredAt ?? from.stoppedAt,
+        stopLowerBoundAt: to.startLowerBoundAt ?? to.startedAt,
+        stopUpperBoundAt: to.startUpperBoundAt ?? to.startedAt,
+        fromStaySegmentId: from.clientSegmentId,
+        toStaySegmentId: to.clientSegmentId,
+        fromPlaceId: from.placeId ?? null,
+        toPlaceId: to.placeId ?? null,
+        routeDistanceMeters:
+          summary.routeDistanceMeters == null ? null : Math.round(summary.routeDistanceMeters),
+        straightLineDistanceMeters:
+          summary.straightLineDistanceMeters == null
+            ? null
+            : Math.round(summary.straightLineDistanceMeters),
+        routeSampleCount: summary.routeSampleCount,
+        gapDurationSeconds: Math.round(duration / 1_000),
+        maximumObservationGapSeconds: summary.maximumObservationGapSeconds,
+        continuityStatus: uncertainBoundary ? "uncertain_gap" : "continuous",
+        confidence: anyEndpointHasInferredBoundary
+          ? "low"
+          : uncertainBoundary && qualification.confidence === "medium_high"
+            ? "medium"
+            : qualification.confidence,
+        qualificationReason: qualification.reason,
+        ...(stops.length ? { stops: stops.map(stopFromStay) } : {}),
+        evidenceIds
+      });
+      break;
     }
-    if (!qualification.qualifies && timeAway()) qualification = outing;
-    if (!qualification.qualifies) continue;
-    const evidenceIds = routeEvidence.map(({ evidence }) => evidence.clientEvidenceId);
-    const uncertainBoundary =
-      summary.routeSampleCount < 2 ||
-      summary.maximumObservationGapSeconds * 1_000 > config.maxContinuityGapMs ||
-      from.continuityStatus === "uncertain_gap" ||
-      to.continuityStatus === "uncertain_gap";
-    commutes.push({
-      kind: "commute",
-      clientSegmentId: stableLocationId("commute", [from.clientSegmentId, to.clientSegmentId]),
-      algorithmVersion: config.algorithmVersion,
-      status:
-        Date.parse(processingAt) - stoppedAtMs >= config.segmentFinalisationLagMs
-          ? "finalised"
-          : "closed",
-      startedAt: new Date(startedAtMs).toISOString(),
-      stoppedAt: to.startedAt,
-      startLowerBoundAt: from.stopLowerBoundAt ?? from.stoppedAt,
-      startUpperBoundAt: from.stopUpperBoundAt ?? routeEvidence[0]?.evidence.occurredAt ?? from.stoppedAt,
-      stopLowerBoundAt: to.startLowerBoundAt ?? to.startedAt,
-      stopUpperBoundAt: to.startUpperBoundAt ?? to.startedAt,
-      fromStaySegmentId: from.clientSegmentId,
-      toStaySegmentId: to.clientSegmentId,
-      fromPlaceId: from.placeId ?? null,
-      toPlaceId: to.placeId ?? null,
-      routeDistanceMeters:
-        summary.routeDistanceMeters == null ? null : Math.round(summary.routeDistanceMeters),
-      straightLineDistanceMeters:
-        summary.straightLineDistanceMeters == null
-          ? null
-          : Math.round(summary.straightLineDistanceMeters),
-      routeSampleCount: summary.routeSampleCount,
-      gapDurationSeconds: Math.round(duration / 1_000),
-      maximumObservationGapSeconds: summary.maximumObservationGapSeconds,
-      continuityStatus: uncertainBoundary ? "uncertain_gap" : "continuous",
-      confidence: anyEndpointHasInferredBoundary
-        ? "low"
-        : uncertainBoundary && qualification.confidence === "medium_high"
-          ? "medium"
-          : qualification.confidence,
-      qualificationReason: qualification.reason,
-      ...(stops.length ? { stops: stops.map(stopFromStay) } : {}),
-      evidenceIds
-    });
   }
   return commutes;
 }

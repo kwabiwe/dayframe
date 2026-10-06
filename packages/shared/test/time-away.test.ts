@@ -72,6 +72,24 @@ describe("time away from a saved place", () => {
     expect(away[0].stops).toHaveLength(1);
   });
 
+  it("keeps the whole absence when the drive home passes inside the circle before parking (staging test 6 Oct)", () => {
+    // Out at 61 min, a stop about 195 m away, back at 68: a drive-by at 79 m (entry), out to 197 m (exit), then home.
+    const moving = (id: string, minute: number, metres: number, accuracy = 5) =>
+      fix(id, minute, metres, { speedMetersPerSecond: 9, horizontalAccuracyMeters: accuracy });
+    const evidence = [...homeFixes("am", 0, 60),
+      moving("out-0", 61, 150), moving("out-1", 61.2, 230), crossing("exit-0", 61.3, "geofence_exit"), moving("out-2", 61.5, 260),
+      fix("shop-0", 61.9, 192, { horizontalAccuracyMeters: 24 }), fix("shop-1", 63.1, 195, { horizontalAccuracyMeters: 15 }),
+      fix("shop-2", 63.6, 196, { horizontalAccuracyMeters: 3 }),
+      fix("by-0", 68.33, 79, { horizontalAccuracyMeters: 19 }), crossing("enter-0", 68.35, "geofence_enter"),
+      moving("by-1", 68.47, 77), moving("by-2", 68.65, 143), crossing("exit-1", 68.67, "geofence_exit"), moving("by-3", 68.8, 197),
+      moving("back-0", 69.55, 96, 2), crossing("enter-1", 69.57, "geofence_enter"), moving("back-1", 69.72, 25, 2),
+      ...homeFixes("pm", 72, 150)];
+    const away = outings(input(evidence));
+    expect(away).toHaveLength(1);
+    expect(minutes(away[0].startedAt)).toBeLessThan(61.5);
+    expect(minutes(away[0].stoppedAt)).toBeGreaterThan(68);
+  });
+
   it("offers nothing from geofence callbacks alone, without readings away", () => {
     const evidence = [...homeFixes("am", 0, 60), crossing("exit", 61, "geofence_exit"), crossing("enter", 71, "geofence_enter"),
       ...homeFixes("pm", 72, 150)];
