@@ -1,6 +1,7 @@
 import {
   LOCATION_ENGINE_V2_CONFIG,
   LocationReviewEvidenceDtoSchema,
+  MotionTravelModeSchema,
   type LocationReviewEvidenceDto
 } from "@dayframe/shared";
 import { query } from "../db";
@@ -37,6 +38,7 @@ type ReviewSegmentRow = {
   toLongitude: number | null;
   toLatitude: number | null;
   tripStops: unknown;
+  travelMode: string | null;
   timeAway: boolean;
 };
 
@@ -152,6 +154,7 @@ async function buildLocationReviewEvidence(
             case when to_stay.centre is null then null else ST_X(to_stay.centre::geometry) end as "toLongitude",
             case when to_stay.centre is null then null else ST_Y(to_stay.centre::geometry) end as "toLatitude",
             cs.metadata->'stops' as "tripStops",
+            cs.metadata->>'travelMode' as "travelMode",
             coalesce(cs.metadata->>'qualificationReason' = 'same_place_outing', false) as "timeAway"
      from review_items ri
      join activity_events ae
@@ -288,6 +291,7 @@ async function buildLocationReviewEvidence(
       algorithmVersion: review.algorithmVersion,
       evidenceCount: evidenceResult.rows.length,
       rejectedEvidenceCount: rejectedResult.rows.length,
+      ...(kind === "commute" ? { travelMode: MotionTravelModeSchema.safeParse(review.travelMode).data ?? null } : {}),
       ...(kind === "commute" && review.timeAway ? { timeAway: true } : {})
     },
     display: {

@@ -17,6 +17,7 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import {
   paletteColorFor,
   readableLocationNameFromParts,
+  travelModeLabel,
   type LegacyReviewEntryPresentation,
   type ReviewMutation
 } from "@dayframe/shared";
@@ -1771,6 +1772,9 @@ function formatReviewItemMeta(item: MobileReviewItem, durationSeconds: number) {
   const timeWindow = formatReviewItemTimeWindow(item);
   if (timeWindow) parts.push(timeWindow);
   if (durationSeconds > 0) parts.push(formatDuration(durationSeconds));
+  // Motion & Fitness: how a journey was travelled.
+  const travelMode = item.eventType === "commute_detected" ? travelModeLabel(item.rawPayload?.travelMode) : null;
+  if (travelMode) parts.push(travelMode);
   if (!parts.length) parts.push(reviewItemKindLabel(item));
   return parts.join(" · ");
 }

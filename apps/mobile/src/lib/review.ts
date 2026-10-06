@@ -476,6 +476,8 @@ export function locationReviewReasonCopy(
       return "Needs review · short journeys aren’t added automatically";
     case "journey_contains_stop":
       return "Needs review · this trip includes a stop";
+    case "motion_review_only":
+      return "Needs review · timed from Motion & Fitness";
     case "time_away_review_only":
       return "Needs review · time away isn’t added automatically";
     case "insufficient_route_evidence":

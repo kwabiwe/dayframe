@@ -10,8 +10,13 @@ export const LocationEvidenceKindSchema = z.enum([
   "geofence_state",
   "location_paused",
   "location_resumed",
-  "provider_status"
+  "provider_status",
+  "motion_activity"
 ]);
+
+export const MotionActivitySchema = z.enum(["stationary", "walking", "running", "cycling", "automotive", "unknown"]);
+export const MotionConfidenceSchema = z.enum(["low", "medium", "high"]);
+export const MotionTravelModeSchema = z.enum(["walking", "running", "cycling", "automotive"]);
 
 const boundedId = z.string().trim().min(1).max(160);
 const nullableFinite = z.number().finite().nullable().optional();
@@ -43,7 +48,11 @@ export const LocationEvidenceMetadataSchema = z
     errorCode: z.string().trim().max(80).optional(),
     signalSequence: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER).optional(),
     // When the device's native callback ran (receivedAt is when JavaScript drained it).
-    nativeCallbackAt: z.string().datetime({ offset: true }).optional()
+    nativeCallbackAt: z.string().datetime({ offset: true }).optional(),
+    // motion_activity only: Core Motion's activity from occurredAt, and its confidence.
+    motionActivity: MotionActivitySchema.optional(),
+    motionConfidence: MotionConfidenceSchema.optional(),
+    motionContinuation: z.literal(true).optional()
   })
   .strict();
 
@@ -70,9 +79,23 @@ const LocationEvidenceBaseSchema = z.object({
   }).strict();
 
 function validateEvidenceShape(
-  value: { latitude?: number | null; longitude?: number | null; occurredAt: string; endedAt?: string | null },
+  value: {
+    kind: z.infer<typeof LocationEvidenceKindSchema>;
+    latitude?: number | null; longitude?: number | null; occurredAt: string; endedAt?: string | null;
+    metadata?: z.infer<typeof LocationEvidenceMetadataSchema>;
+  },
   context: z.RefinementCtx
 ) {
+    // Motion activity is a sensitive classification, never a position or an interval.
+    const motion = value.kind === "motion_activity";
+    if (motion && (value.latitude != null || value.longitude != null || value.endedAt != null ||
+      !value.metadata?.motionActivity || !value.metadata.motionConfidence)) {
+      context.addIssue({ code: "custom", message: "Motion activity needs an activity and confidence, and no position or end." });
+    }
+    if (!motion && (value.metadata?.motionActivity != null || value.metadata?.motionConfidence != null ||
+      value.metadata?.motionContinuation != null)) {
+      context.addIssue({ code: "custom", path: ["metadata"], message: "Only motion activity carries motion metadata." });
+    }
     const hasLatitude = value.latitude != null;
     const hasLongitude = value.longitude != null;
     if (hasLatitude !== hasLongitude) {

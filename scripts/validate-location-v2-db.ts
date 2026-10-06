@@ -1239,6 +1239,170 @@ async function validateFinalisationWithoutNewEvidence() {
   );
 }
 
+async function validateMotionActivityEvidence() {
+  await clearDerivedLocationState();
+  process.env.DAYFRAME_LOCATION_ROLLOUT_MODE = "v2_shadow";
+  const evidence = locationAcceptanceFixture().evidence;
+  // Driving from the fixture's last Home reading to its short stop.
+  const motion = (time: string, activity: "stationary" | "walking" | "automotive"): LocationEvidence => ({
+    clientEvidenceId: `motion-${Date.parse(`2026-07-20T${time}.000Z`)}-${activity}-high`, deviceId: DEVICE_ID,
+    algorithmVersion: LOCATION_ENGINE_V2_CONFIG.algorithmVersion, kind: "motion_activity",
+    occurredAt: `2026-07-20T${time}.000Z`, endedAt: null, latitude: null, longitude: null,
+    receivedAt: "2026-07-20T19:00:00.000Z", timeZone: "Europe/London",
+    metadata: { motionActivity: activity, motionConfidence: "high" }
+  });
+  const motionEvidence = [motion("10:30:00", "stationary"), motion("10:39:20", "walking"), motion("10:39:40", "automotive"),
+    motion("11:10:00", "stationary")];
+  await ingestLocationEvidence(batch("db-motion-activity", [...evidence, ...motionEvidence], "v2_shadow"), session);
+  const stored = await pool.query<{ accepted: boolean; coordinate: string | null; activity: string; confidence: string }>(
+    `select accepted, coordinate::text as coordinate, metadata->>'motionActivity' as activity, metadata->>'motionConfidence' as confidence
+     from location_evidence where workspace_id = $1 and user_id = $2 and evidence_type = 'motion_activity'
+     order by occurred_at`,
+    [WORKSPACE_ID, USER_ID]
+  );
+  assert.deepEqual(stored.rows.map((row) => [row.accepted, row.coordinate, row.activity, row.confidence]),
+    motionEvidence.map((item) => [true, null, item.metadata!.motionActivity, "high"]),
+    "Motion activity was not stored as accepted, coordinate-free evidence with its classification.");
+  const linked = await pool.query<{ count: number }>(
+    `select count(*)::integer as count from location_segment_evidence lse
+     join location_evidence le on le.id = lse.evidence_id
+     where le.workspace_id = $1 and le.user_id = $2 and le.evidence_type = 'motion_activity'`,
+    [WORKSPACE_ID, USER_ID]
+  );
+  assert.equal(linked.rows[0].count, 0, "Motion activity became segment lineage.");
+  const modes = await pool.query<{ travelMode: string | null }>(
+    `select metadata->>'travelMode' as "travelMode" from commute_segments
+     where workspace_id = $1 and user_id = $2 and status <> 'superseded' and metadata ? 'travelMode'`,
+    [WORKSPACE_ID, USER_ID]
+  );
+  assert.deepEqual(modes.rows, [{ travelMode: "automotive" }], "The driven commute did not persist its travel mode.");
+  const refinedStays = await pool.query<{ count: number }>(
+    `select count(*)::integer as count from stay_segments
+     where workspace_id = $1 and user_id = $2 and status <> 'superseded' and metadata ? 'locationOnlyStoppedAt'`,
+    [WORKSPACE_ID, USER_ID]);
+  assert.equal(refinedStays.rows[0].count, 1, "A motion-refined stay did not persist its location-only end.");
+  const summary = await pool.query<{ motionCount: number }>(
+    `select (raw_payload->'evidenceKinds'->>'motion_activity')::integer as "motionCount" from activity_events
+     where workspace_id = $1 and user_id = $2 and client_event_id like 'location-batch:%db-motion-activity'`,
+    [WORKSPACE_ID, USER_ID]
+  );
+  assert.equal(summary.rows[0]?.motionCount, motionEvidence.length, "The coordinate-free batch summary did not count motion activity.");
+  await assert.rejects(pool.query(
+    `insert into location_evidence (workspace_id, user_id, device_id, client_evidence_id, client_batch_id, evidence_type,
+       occurred_at, coordinate, algorithm_version, time_zone, expires_at)
+     values ($1, $2, $3, 'motion-with-position', 'db-motion-position', 'motion_activity', now(),
+       ST_GeogFromText('SRID=4326;POINT(0 0)'), $4, 'Europe/London', now() + interval '1 day')`,
+    [WORKSPACE_ID, USER_ID, DEVICE_ID, LOCATION_ENGINE_V2_CONFIG.algorithmVersion]
+  ), /location_evidence_motion_coordinate_free/, "A positioned motion row was accepted.");
+}
+
+async function validateMotionOnlyReviewRetirement() {
+  await clearDerivedLocationState();
+  process.env.DAYFRAME_LOCATION_ROLLOUT_MODE = "v2_review";
+  const home = LOCATION_ACCEPTANCE_PLACES[0];
+  const point = (id: string, time: string, eastMetres: number): LocationEvidence => ({
+    clientEvidenceId: id, deviceId: DEVICE_ID, algorithmVersion: LOCATION_ENGINE_V2_CONFIG.algorithmVersion,
+    kind: "standard_location", occurredAt: `2026-07-20T${time}.000Z`, receivedAt: "2026-07-20T12:00:00.000Z",
+    timeZone: "Europe/London", latitude: home.latitude,
+    longitude: home.longitude + eastMetres / (111_320 * Math.cos(home.latitude * Math.PI / 180)),
+    horizontalAccuracyMeters: 10, speedMetersPerSecond: 0
+  });
+  const motion = (time: string, activity: "stationary" | "walking" | "automotive"): LocationEvidence => ({
+    clientEvidenceId: `motion-only-${time}-${activity}`, deviceId: DEVICE_ID, algorithmVersion: LOCATION_ENGINE_V2_CONFIG.algorithmVersion,
+    kind: "motion_activity", occurredAt: `2026-07-20T${time}.000Z`, receivedAt: "2026-07-20T12:00:00.000Z",
+    timeZone: "Europe/London", metadata: { motionActivity: activity, motionConfidence: "high" }
+  });
+  // Home, then nothing until a stop 2 km east: GPS never saw the drive.
+  const location = [
+    ...["08:00:00", "08:15:00", "08:30:00", "08:45:00", "09:00:00"].map((time, index) => point(`motion-only-home-${index}`, time, 0)),
+    ...["09:30:00", "09:35:00", "09:40:00", "09:45:00", "09:50:00", "09:55:00"].map((time, index) => point(`motion-only-shop-${index}`, time, 2_000)),
+    ...["10:20:00", "10:35:00", "10:50:00", "11:05:00"].map((time, index) => point(`motion-only-home-pm-${index}`, time, 0))
+  ];
+  const acknowledged = "2026-06-01T07:00:00.000Z";
+  await ingestLocationEvidence(batch("db-motion-only-a", [...location, motion("08:00:00", "stationary"),
+    motion("09:10:00", "walking"), motion("09:11:00", "automotive"), motion("09:17:00", "walking"), motion("09:18:00", "stationary")],
+    "v2_review", acknowledged), session);
+  const proposals = () => pool.query<{ status: string; ignoredScope: string | null }>(
+    `select ri.status, ri.ignored_scope as "ignoredScope" from review_items ri
+     join commute_segments cs on cs.id = ri.location_segment_id
+     where ri.workspace_id = $1 and ri.user_id = $2 and cs.metadata ? 'motionSupported'`,
+    [WORKSPACE_ID, USER_ID]);
+  assert.deepEqual((await proposals()).rows, [{ status: "open", ignoredScope: null }], "A drive only motion showed did not reach Review.");
+  // Later history shows two separate movements: a stop may lie between them, so the journey is withdrawn.
+  await ingestLocationEvidence(batch("db-motion-only-b", [motion("09:13:00", "stationary"), motion("09:16:00", "automotive")],
+    "v2_review", acknowledged), session);
+  assert.deepEqual((await proposals()).rows, [{ status: "ignored", ignoredScope: "superseded" }],
+    "An obsolete motion-only proposal stayed open without lineage.");
+
+  // A decision about a motion-only journey survives a change of its endpoint
+  // stays' IDs (here a late origin Visit): it has no lineage, so its interval
+  // protects it and no duplicate proposal appears.
+  await clearDerivedLocationState();
+  await ingestLocationEvidence(batch("db-motion-only-decided", [...location, motion("08:00:00", "stationary"),
+    motion("09:10:00", "walking"), motion("09:11:00", "automotive"), motion("09:17:00", "walking"), motion("09:18:00", "stationary")],
+    "v2_review", acknowledged), session);
+  const open = await pool.query<{ id: string }>(
+    `select ri.id from review_items ri join commute_segments cs on cs.id = ri.location_segment_id
+     where ri.workspace_id = $1 and ri.user_id = $2 and ri.status = 'open' and cs.metadata ? 'motionSupported'`,
+    [WORKSPACE_ID, USER_ID]);
+  assert.equal(open.rows.length, 1, "The motion-only drive was not proposed.");
+  await resolveLocationReviewAction(open.rows[0].id, { action: "ignore_once_location" }, session);
+  const lateVisit: LocationEvidence = { ...point("motion-only-late-visit", "07:58:00", 0), kind: "visit",
+    endedAt: "2026-07-20T09:00:00.000Z", horizontalAccuracyMeters: 20, speedMetersPerSecond: null };
+  // A late route fix now qualifies the replacement on location evidence alone; the decision still holds.
+  const lateRoute: LocationEvidence = { ...point("motion-only-late-route", "09:14:00", 1_000), speedMetersPerSecond: 12, horizontalAccuracyMeters: 5 };
+  await ingestLocationEvidence(batch("db-motion-only-late-visit", [lateVisit, lateRoute], "v2_review", acknowledged), session);
+  const after = await pool.query<{ status: string }>(
+    `select ri.status from review_items ri join commute_segments cs on cs.id = ri.location_segment_id
+     where ri.workspace_id = $1 and ri.user_id = $2 and cs.metadata ? 'motionSupported' order by ri.created_at`,
+    [WORKSPACE_ID, USER_ID]);
+  assert.deepEqual(after.rows.map((row) => row.status), ["ignored"], "A decided motion-only journey was proposed again under a new ID.");
+  const reproposed = await pool.query<{ count: number }>(
+    `select count(*)::integer as count from review_items ri join commute_segments cs on cs.id = ri.location_segment_id
+     where ri.workspace_id = $1 and ri.user_id = $2 and ri.status = 'open'
+       and cs.started_at < '2026-07-20T09:20:00Z' and cs.stopped_at > '2026-07-20T09:10:00Z'`,
+    [WORKSPACE_ID, USER_ID]);
+  assert.equal(reproposed.rows[0].count, 0, "A location-qualified replacement re-proposed a decided motion-only journey.");
+
+  // The same holds for a journey location evidence qualified (a route fix) and
+  // motion only timed: its decision survives an endpoint ID change.
+  await clearDerivedLocationState();
+  // Motion ends the drive at 09:14, the time of its only route fix, so that fix is not interior lineage.
+  await ingestLocationEvidence(batch("db-motion-timed", [...location, lateRoute, motion("08:00:00", "stationary"),
+    motion("09:10:00", "walking"), motion("09:11:00", "automotive"), motion("09:14:00", "stationary")],
+    "v2_review", acknowledged), session);
+  const timed = await pool.query<{ id: string }>(
+    `select ri.id from review_items ri join commute_segments cs on cs.id = ri.location_segment_id
+     where ri.workspace_id = $1 and ri.user_id = $2 and ri.status = 'open' and cs.metadata ? 'motionTimed'
+       and not cs.metadata ? 'motionSupported'`,
+    [WORKSPACE_ID, USER_ID]);
+  assert.equal(timed.rows.length, 1, "A location-qualified, motion-timed drive was not proposed.");
+  await resolveLocationReviewAction(timed.rows[0].id, { action: "ignore_once_location" }, session);
+  await ingestLocationEvidence(batch("db-motion-timed-late-visit", [{ ...lateVisit, clientEvidenceId: "motion-timed-late-visit" }],
+    "v2_review", acknowledged), session);
+  const timedAfter = await pool.query<{ count: number }>(
+    `select count(*)::integer as count from review_items ri join commute_segments cs on cs.id = ri.location_segment_id
+     where ri.workspace_id = $1 and ri.user_id = $2 and ri.status = 'open'
+       and cs.started_at < '2026-07-20T09:20:00Z' and cs.stopped_at > '2026-07-20T09:10:00Z'`,
+    [WORKSPACE_ID, USER_ID]);
+  assert.equal(timedAfter.rows[0].count, 0, "A decided motion-timed journey was proposed again under a new ID.");
+
+  // In v2_enabled the individual emitter carries the same motion fields and still needs Review.
+  await clearDerivedLocationState();
+  process.env.DAYFRAME_LOCATION_ROLLOUT_MODE = "v2_enabled";
+  await ingestLocationEvidence(batch("db-motion-only-enabled", [...location, motion("08:00:00", "stationary"),
+    motion("09:10:00", "walking"), motion("09:11:00", "automotive"), motion("09:17:00", "walking"), motion("09:18:00", "stationary")],
+    "v2_enabled", acknowledged), session);
+  const enabled = await pool.query<{ reviewStatus: string; travelMode: string | null; motionSupported: boolean | null }>(
+    `select review_status as "reviewStatus", raw_payload->>'travelMode' as "travelMode",
+            (raw_payload->>'motionSupported')::boolean as "motionSupported"
+     from activity_events where workspace_id = $1 and user_id = $2 and event_type = 'commute_detected'
+       and occurred_at < '2026-07-20T09:30:00Z'`,
+    [WORKSPACE_ID, USER_ID]);
+  assert.deepEqual(enabled.rows, [{ reviewStatus: "needs_review", travelMode: "automotive", motionSupported: true }],
+    "An enabled-mode motion-only drive lost its motion fields or was logged automatically.");
+}
+
 async function validateTimeAwayReview() {
   await clearDerivedLocationState();
   process.env.DAYFRAME_LOCATION_ROLLOUT_MODE = "v2_review";
@@ -1287,6 +1451,8 @@ async function main() {
     await seedOwner();
     await validateCommuteCategoryConcurrency();
     await validateOutOfOrderAndIdempotency();
+    await validateMotionActivityEvidence();
+    await validateMotionOnlyReviewRetirement();
     await validateTimeAwayReview();
     await validateShadowToReviewCutover();
     await validateSemanticIdempotencyAndRollback();
@@ -1296,7 +1462,7 @@ async function main() {
     await validateFinalisationWithoutNewEvidence();
     await validateSupersededReviewReactivation();
     await validateV1Compatibility();
-    console.log("Location V2 database validation passed: ordered replay, duplicate ingest, time away from a saved place, shadow cutover, no-new-evidence finalisation, semantic idempotency, Commute category concurrency/emission/replay/confirmation, uncertainty bounds, description semantics, isolation, trusted-place and trusted-commute automation, deliberate advisory/Review-row/exact-segment contention bounds, overlap fallback, terminal-decision preservation, superseded-Review reactivation, automatic-entry deletion safety, automatic-entry idempotency, atomic rollback, concurrent retry, split, merge, incompatible-merge rejection, and V1 compatibility.");
+    console.log("Location V2 database validation passed: ordered replay, duplicate ingest, coordinate-free Motion & Fitness evidence, time away from a saved place, shadow cutover, no-new-evidence finalisation, semantic idempotency, Commute category concurrency/emission/replay/confirmation, uncertainty bounds, description semantics, isolation, trusted-place and trusted-commute automation, deliberate advisory/Review-row/exact-segment contention bounds, overlap fallback, terminal-decision preservation, superseded-Review reactivation, automatic-entry deletion safety, automatic-entry idempotency, atomic rollback, concurrent retry, split, merge, incompatible-merge rejection, and V1 compatibility.");
   } finally {
     if (process.env.KEEP_LOCATION_V2_DB_FIXTURE !== "1") {
       await pool.query("delete from workspaces where id = $1", [WORKSPACE_ID]).catch(() => undefined);

@@ -504,6 +504,9 @@ async function emitSemanticSegment(
         toStaySegmentId: segment.toStaySegmentId,
         routeSampleCount: segment.routeSampleCount,
         qualificationReason: segment.qualificationReason ?? null,
+        // Only when Motion & Fitness supplied them, as in the Review batch emitter.
+        ...(segment.travelMode ? { travelMode: segment.travelMode } : {}),
+        ...(segment.motionSupported ? { motionSupported: true } : {}),
         // Time away only: how many unnamed stops it included.
         ...(isTimeAway(segment) && segment.stops?.length ? { stopCount: segment.stops.length } : {}),
         continuityStatus: segment.continuityStatus,

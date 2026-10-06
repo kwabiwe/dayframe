@@ -16,6 +16,7 @@ import Reanimated from "react-native-reanimated";
 import Svg, { Circle as SvgCircle, Path, Rect } from "react-native-svg";
 import {
   paletteColorFor,
+  travelModeLabel,
   tripStopRows,
   tripStopsHeading,
   type LocationReviewAction,
@@ -1179,8 +1180,10 @@ function placeForSelection(
 }
 
 function locationActivityLabel(evidence: LocationReviewEvidenceDto) {
-  if (evidence.segment.kind === "commute" && evidence.segment.timeAway) return evidence.display.title || "Time away";
-  return evidence.segment.kind === "commute" ? "Commute" : evidence.display.title;
+  if (evidence.segment.kind !== "commute") return evidence.display.title;
+  if (evidence.segment.timeAway) return evidence.display.title || "Time away";
+  const mode = travelModeLabel(evidence.segment.travelMode);
+  return mode ? `Commute · ${mode}` : "Commute";
 }
 
 function formatEvidenceTimeRange(evidence: LocationReviewEvidenceDto) {

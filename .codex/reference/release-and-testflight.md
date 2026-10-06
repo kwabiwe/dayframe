@@ -126,6 +126,8 @@ Run the preflight before spending time on a TestFlight archive/export:
 npm run testflight:preflight
 ```
 
+A build containing `dayframe-motion-activity` sends Motion & Fitness evidence once the user allows it: the target server environment must already have `202610050001_location_motion_activity.sql` (see the database reference). Check the archive's `Info.plist` carries Dayframe's `NSMotionUsageDescription`.
+
 When a PR adds or changes a local Expo native module, run CocoaPods installation/autolinking and a clean-enough full Xcode build before archive. Because Dayframe checks in and customizes its native iOS project, do not run `expo prebuild --clean` unless the PR explicitly audits and preserves every custom native target, entitlement, App Intent and Live Activity file.
 
 The preflight checks the failure points that have disrupted recent Dayframe releases:

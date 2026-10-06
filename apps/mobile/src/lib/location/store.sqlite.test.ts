@@ -237,3 +237,37 @@ describe("complete saved-place snapshot replay", () => {
   expect(db.prepare("select * from location_engine_state").all()).toEqual(state);
  });
 });
+describe("Motion & Fitness upload batches",()=>{
+ it("never shares a batch with location readings, so a server refusing motion cannot take them with it",async()=>{
+  const at=(i:number)=>new Date(Date.now()-600_000+i*10_000).toISOString();
+  await persistEvidence(Array.from({length:6},(_,i)=>i%2===0
+   ?{clientEvidenceId:`fix-${i}`,deviceId:"ios-synthetic",algorithmVersion:LOCATION_ENGINE_V2_CONFIG.algorithmVersion,kind:"significant_change" as const,occurredAt:at(i),receivedAt:new Date().toISOString(),timeZone:"Europe/London",latitude:51.5,longitude:-0.1,horizontalAccuracyMeters:10,metadata:{}}
+   :{clientEvidenceId:`motion-${i}`,deviceId:"ios-synthetic",algorithmVersion:LOCATION_ENGINE_V2_CONFIG.algorithmVersion,kind:"motion_activity" as const,occurredAt:at(i),receivedAt:new Date().toISOString(),timeZone:"Europe/London",latitude:null,longitude:null,metadata:{motionActivity:"walking" as const,motionConfidence:"high" as const}}));
+  // A server without the motion schema refuses any batch that contains it.
+  mocks.fetch.mockImplementation(async(url:string,init:RequestInit)=>{
+   if(url.endsWith("/replay"))return new Response(JSON.stringify(replay()));
+   const body=JSON.parse(String(init.body));
+   if(body.evidence.some((e:{kind:string})=>e.kind==="motion_activity"))return new Response(JSON.stringify({error:"Invalid location evidence batch."}),{status:400});
+   return new Response(JSON.stringify({ok:true,acknowledgedEvidenceIds:body.evidence.map((e:{clientEvidenceId:string})=>e.clientEvidenceId),rolloutMode:"v2_shadow",warnings:[]}));
+  });
+  for(let pass=0;pass<4;pass+=1)await store.syncLocationEvidence({forceUploadRetry:true});
+  const batches=db.prepare("select body_json from location_upload_outbox").all().map(row=>JSON.parse(String(row.body_json)).evidence.map((e:{kind:string})=>e.kind));
+  expect(batches.length).toBeGreaterThanOrEqual(2);
+  for(const kinds of batches)expect(new Set(kinds.map((kind:string)=>kind==="motion_activity")).size).toBe(1);
+  const states=Object.fromEntries(db.prepare("select client_evidence_id id, upload_state s from location_evidence_journal").all().map(row=>[row.id,row.s]));
+  expect(states).toEqual({"fix-0":"acknowledged","fix-2":"acknowledged","fix-4":"acknowledged","motion-1":"rejected","motion-3":"rejected","motion-5":"rejected"});
+ });
+});
+describe("Motion & Fitness local retention",()=>{
+ it("never lets frequent motion records displace uploaded location evidence",async()=>{
+  const key=`${owner.workspaceId}:${owner.userId}`;
+  const insert=db.prepare("insert into location_evidence_journal (client_evidence_id, account_key, occurred_at, expires_at, evidence_json, upload_state, inserted_at) values (?, ?, ?, ?, ?, 'acknowledged', ?)");
+  const now=Date.now(),expires=new Date(now+86_400_000).toISOString();
+  for(let i=0;i<4_900;i+=1)insert.run(`fix-${i}`,key,new Date(now-3_600_000+i).toISOString(),expires,JSON.stringify({kind:"significant_change"}),new Date(now).toISOString());
+  for(let i=0;i<600;i+=1)insert.run(`motion-${i}`,key,new Date(now-7_200_000+i).toISOString(),expires,JSON.stringify({kind:"motion_activity"}),new Date(now).toISOString());
+  await store.applyLocationRetention();
+  const count=(kind:string)=>Number(db.prepare(`select count(*) n from location_evidence_journal where json_extract(evidence_json,'$.kind') = ?`).get(kind)!.n);
+  expect(count("significant_change")).toBe(4_900);
+  expect(count("motion_activity")).toBe(600);
+ });
+});

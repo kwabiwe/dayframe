@@ -60,6 +60,10 @@ The Location switch represents saved account consent. Adjacent status separately
 - Treat a recent accurate location fix as corroborating evidence, not a requirement. Reject an enter only when the fix is clearly outside the saved radius plus the conservative boundary buffer; keep exit evidence so missed transitions remain diagnosable.
 - Persist privacy-safe transition evidence on device: place name, configured radius, distance/accuracy summary, outcome, and timestamp. Do not log raw coordinates or location payloads.
 
+## Motion & Fitness State
+
+Motion & Fitness (Core Motion) is offered in Settings > Places & Location under Location suggestions; onboarding will offer it later. Show iOS permission separately from Location consent: it is read only while Location suggestions are on, and capture needs both. States: not available (simulator, unsupported device), not requested (Allow Motion & Fitness, which shows the system prompt through a one-minute history query), allowed, off (Open iOS Settings), restricted (Open iOS Settings), and unknown. Re-read the status whenever the app returns to the foreground. Never show raw `CMAuthorizationStatus` values or native error codes. `NSMotionUsageDescription` is set in `app.json` and the checked-in `Info.plist` with Dayframe's own wording; real prompts and history need a physical iPhone.
+
 ## HealthKit State
 
 HealthKit requires a native iOS build and real-device validation. Expo Go and many simulator paths cannot fully exercise it.

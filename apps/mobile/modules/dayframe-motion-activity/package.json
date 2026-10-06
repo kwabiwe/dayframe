@@ -1,0 +1,12 @@
+{
+  "name": "dayframe-motion-activity",
+  "version": "0.1.0",
+  "description": "Dayframe's iOS Motion & Fitness activity history reader",
+  "main": "index.ts",
+  "private": true,
+  "peerDependencies": {
+    "expo": "*",
+    "react": "*",
+    "react-native": "*"
+  }
+}
