@@ -13,7 +13,8 @@ const exportFiles = new Set(["apps/web/src/lib/report-csv.ts"]);
 const literal = /"((?:[^"\\]|\\.)*)"|'((?:[^'\\]|\\.)*)'|`((?:[^`\\]|\\.)*)`|>([^<>{}]+)</g;
 // Only text shaped like SQL is skipped: placeholders, or a statement keyword with its clause.
 const sql = /\$\d|\b(select|delete)\b[\s\S]*\bfrom\b|\binsert\s+into\b|\bupdate\s+\w+\s+set\b|\bjoin\b|\breturning\b|\bcoalesce\(/i;
-const word = /(?<![\w\-:/.#])(categor(?:y|ies)|uncategori[sz]ed)(?![\w\-:])/i;
+// A colon exempts only identifier-style keys (\"category:${id}\"), not \"Category: ${name}\" labels.
+const word = /(?<![\w\-:/.#])(categor(?:y|ies)|uncategori[sz]ed)(?![\w\-]|:(?!\s))/i;
 
 function sourceFiles(directory: string, extension = /\.(ts|tsx)$/): string[] {
   return readdirSync(directory).flatMap((name) => {

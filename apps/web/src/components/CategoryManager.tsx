@@ -70,7 +70,7 @@ export function CategoryManager({ categories }: { categories: CategoryRow[] }) {
     try {
       const response = await clientFetch(`/api/categories?id=${category.id}`, { method: "DELETE" });
       if (!response.ok) {
-        let errorMessage = `Unable to delete category: ${response.status}`;
+        let errorMessage = `Unable to delete activity: ${response.status}`;
         try {
           const payload = (await response.json()) as { error?: string };
           errorMessage = payload.error ?? errorMessage;
