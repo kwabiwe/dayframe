@@ -8,6 +8,7 @@ import {
   HEALTH_SLEEP_SESSION_GAP_MS,
   HEALTH_IMPORT_PREFERENCE_OPTIONS,
   healthAutoLogMappingFor,
+  isActivityIconKey,
   matchHealthSleepSessionWindows,
   normalizeHealthWorkoutType,
   normalizeHealthAutoLogMappings,
@@ -75,7 +76,11 @@ type CategoryRowLike = {
   name: string;
   color: string;
   isPinned: boolean;
+  icon?: string | null;
+  starterKey?: string | null;
 };
+
+const CATEGORY_RETURNING = 'returning id, name, color, is_pinned as "isPinned", icon, starter_key as "starterKey"';
 
 type PlaceRowLike = {
   id: string;
@@ -1214,17 +1219,19 @@ export async function createCategory(
     name: string;
     color?: string | null;
     isPinned?: boolean;
+    icon?: string | null;
   },
   session: RequestSession = getDevSession()
 ) {
   const name = normalizeName(input.name, "New category");
   const color = normalizePaletteKey(input.color, name);
+  const icon = isActivityIconKey(input.icon) ? input.icon : null;
   const client = await pool.connect();
 
   try {
     await client.query("begin");
     await client.query(
-      "select id from workspaces where id = $1 for update",
+      "select id from workspaces where id = $1 for no key update",
       [session.workspaceId]
     );
     const duplicate = await client.query<{ id: string }>(
@@ -1238,20 +1245,16 @@ export async function createCategory(
     );
     if (duplicate.rows[0]) throw new CategoryConflictError();
 
-    const result = await client.query<{
-      id: string;
-      name: string;
-      color: string;
-      isPinned: boolean;
-    }>(
-      `insert into categories (workspace_id, name, color, is_pinned)
-       values ($1, $2, $3, $4)
-       returning id, name, color, is_pinned as "isPinned"`,
+    const result = await client.query<CategoryRowLike>(
+      `insert into categories (workspace_id, name, color, is_pinned, icon)
+       values ($1, $2, $3, $4, $5)
+       ${CATEGORY_RETURNING}`,
       [
         session.workspaceId,
         name,
         color,
-        Boolean(input.isPinned)
+        Boolean(input.isPinned),
+        icon
       ]
     );
 
@@ -1274,12 +1277,15 @@ export async function ensureAutomaticLoggingCategories(
   const client = await pool.connect();
   try {
     await client.query("begin");
-    const categories = [];
-    for (const kind of uniqueKinds) {
+    // Lock (and create) in alphabetical order so this never deadlocks with the starters route;
+    // answer in the order the caller asked.
+    const byKind = new Map<AutomaticLoggingCategoryKind, { id: string } & ReturnType<typeof automaticLoggingCategorySpec>>();
+    for (const kind of [...uniqueKinds].sort()) {
       const spec = automaticLoggingCategorySpec(kind);
       const id = await ensureAutomaticCategoryId(client, session, spec);
-      categories.push({ id, ...spec });
+      byKind.set(kind, { id, ...spec });
     }
+    const categories = uniqueKinds.map((kind) => byKind.get(kind)!);
     await client.query("commit");
     return categories;
   } catch (error) {
@@ -1296,9 +1302,11 @@ export async function updateCategory(
     name?: string | null;
     color?: string | null;
     isPinned?: boolean;
+    icon?: string | null;
   },
   session: RequestSession = getDevSession()
 ) {
+  const hasIcon = Object.prototype.hasOwnProperty.call(input, "icon");
   const hasName = Object.prototype.hasOwnProperty.call(input, "name");
   const hasColor = Object.prototype.hasOwnProperty.call(input, "color");
   const hasIsPinned = Object.prototype.hasOwnProperty.call(input, "isPinned");
@@ -1312,9 +1320,10 @@ export async function updateCategory(
       `update categories
        set name = case when $3 then $4 else name end,
            color = case when $5 then $6 else color end,
-           is_pinned = case when $7 then $8 else is_pinned end
+           is_pinned = case when $7 then $8 else is_pinned end,
+           icon = case when $9 then $10 else icon end
        where id = $1 and workspace_id = $2 and is_archived = false
-       returning id, name, color, is_pinned as "isPinned"`,
+       ${CATEGORY_RETURNING}`,
       [
         id,
         session.workspaceId,
@@ -1323,7 +1332,9 @@ export async function updateCategory(
         hasColor,
         normalizedColor,
         hasIsPinned,
-        Boolean(input.isPinned)
+        Boolean(input.isPinned),
+        hasIcon,
+        hasIcon && isActivityIconKey(input.icon) ? input.icon : null
       ]
     );
 

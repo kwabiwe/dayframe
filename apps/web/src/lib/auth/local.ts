@@ -3,7 +3,8 @@ import bcrypt from "bcryptjs";
 import type pg from "pg";
 import { z } from "zod";
 import { normalizePaletteKey } from "@dayframe/shared";
-import { hasTableColumn, pool, query } from "@/lib/db";
+import { pool, query } from "@/lib/db";
+import { insertStarterActivities } from "@/lib/starter-activities-service";
 import {
   AuthError,
   sessionAuthError,
@@ -340,24 +341,12 @@ export async function seedDefaultWorkspaceData(client: pg.PoolClient, workspaceI
      returning id`,
     [workspaceId, normalizePaletteKey("steel", "Personal")]
   );
-  const supportsPinnedCategories = await hasTableColumn(client, "categories", "is_pinned");
-  const categoryRow = supportsPinnedCategories
-    ? await client.query<{ id: string }>(
-        `insert into categories (workspace_id, name, color, is_pinned)
-         values ($1, 'General', $2, true)
-         returning id`,
-        [workspaceId, normalizePaletteKey("lime", "General")]
-      )
-    : await client.query<{ id: string }>(
-        `insert into categories (workspace_id, name, color)
-         values ($1, 'General', $2)
-         returning id`,
-        [workspaceId, normalizePaletteKey("lime", "General")]
-      );
+  // New workspaces start with the starter activities; legacy projects get no category.
+  await insertStarterActivities(client, workspaceId);
   await client.query(
     `insert into projects (workspace_id, client_id, category_id, name, color, billable)
      values ($1, $2, $3, 'General', $4, false)`,
-    [workspaceId, clientRow.rows[0].id, categoryRow.rows[0].id, normalizePaletteKey("lime", "General")]
+    [workspaceId, clientRow.rows[0].id, null, normalizePaletteKey("lime", "General")]
   );
   await client.query(
     `insert into event_sources (workspace_id, source, display_name)

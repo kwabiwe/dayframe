@@ -216,16 +216,17 @@ async function validateCommuteCategoryConcurrency() {
     ensureInTransaction()
   ]);
   assert.equal(new Set(categoryIds).size, 1, "Concurrent Commute ensures returned different categories.");
-  const categories = await pool.query<{ id: string; name: string; color: string }>(
-    `select id, name, color from categories
+  const categories = await pool.query<{ id: string; name: string; color: string; icon: string | null; starterKey: string | null }>(
+    `select id, name, color, icon, starter_key as "starterKey" from categories
      where workspace_id = $1 and lower(name) = 'commute' and coalesce(is_archived, false) = false`,
     [WORKSPACE_ID]
   );
   assert.equal(categories.rows.length, 1, "Concurrent Commute ensures created duplicates.");
+  // An automatic Commute is the Commute starter activity (colour, icon and starter key).
   assert.deepEqual(
     categories.rows[0],
-    { id: categoryIds[0], name: "Commute", color: "sky" },
-    "Commute automatic category used the wrong semantic palette."
+    { id: categoryIds[0], name: "Commute", color: "graphite", icon: "commute", starterKey: "commute" },
+    "Commute automatic category did not use the Commute starter activity."
   );
 }
 
@@ -513,7 +514,7 @@ async function validateCommuteReviewCategoryAndDescription() {
   );
   assert.deepEqual(
     categories.rows,
-    [{ id: commuteCategoryId, name: "cOmMuTe", color: "sky" }],
+    [{ id: commuteCategoryId, name: "cOmMuTe", color: "graphite" }],
     "Semantic emission did not reuse the existing Commute category case-insensitively."
   );
 

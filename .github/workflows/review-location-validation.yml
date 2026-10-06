@@ -51,6 +51,8 @@ jobs:
         run: npm run validate:integration-token-security
       - name: Location replay and corrections
         run: npm run validate:location-v2-db
+      - name: Starter activities and category icons
+        run: npm run validate:starter-activities-db
       - name: Review receipts and all structural actions
         if: ${{ !cancelled() }}
         run: npm run validate:review-mutation-db

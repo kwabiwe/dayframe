@@ -204,7 +204,7 @@ export type MobileBootstrap = {
     categoryName: string | null;
     clientName: string | null;
   }>;
-  categories: Array<{ id: string; name: string; color: string; isPinned: boolean }>;
+  categories: Array<{ id: string; name: string; color: string; isPinned: boolean; icon?: string | null; starterKey?: string | null }>;
   tags?: MobileTag[];
   entries: MobileTimeEntry[];
   historyEntries?: MobileTimeEntry[];
