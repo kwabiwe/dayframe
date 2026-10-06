@@ -38,6 +38,7 @@ End with a final line: APPROVE or REQUEST_CHANGES."
   -m gpt-6.1-sol \
   -c model_reasoning_effort=max \
   -s workspace-write \
+  --skip-git-repo-check \
   -C "$export_dir" \
   -o "$report" \
   "$prompt" < /dev/null
