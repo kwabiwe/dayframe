@@ -203,6 +203,21 @@ describe("time away from a saved place", () => {
     expect(away.some((item) => minutes(item.startedAt) < 62 && minutes(item.stoppedAt) >= 79)).toBe(true);
   });
 
+  // Fable round 10: a return home before the first clear reading with no leaving sign before it.
+  const nearThenHome = (tail: LocationEvidence[]) => [...homeFixes("am", 0, 60), crossing("x0", 61.9, "geofence_exit"),
+    ...[62.5, 63.5, 64.5, 65.5, 66.5, 67.5, 68.5, 69.5].map((m, i) => fix(`near-${i}`, m, 140 + i % 2 * 2)), ...tail];
+  it.each([
+    ["no exit", [crossing("e1", 70, "geofence_enter"), fix("in", 70.5, 10), ...[86, 87, 88, 89].map((m, i) => mv(`far-${i}`, m, 300 + i * 10)),
+      crossing("e2", 95, "geofence_enter"), ...homeFixes("pm", 95.5, 160)], 85.9],
+    ["exit just after the first clear reading", [crossing("e1", 70, "geofence_enter"), fix("in", 70.5, 10),
+      ...[86, 87, 88, 89].map((m, i) => mv(`far-${i}`, m, 300 + i * 10)), crossing("x1", 86.33, "geofence_exit"),
+      crossing("e2", 95, "geofence_enter"), ...homeFixes("pm", 95.5, 160)], 85.9],
+    ["an exit long before the first clear reading", [crossing("e1", 70, "geofence_enter"), fix("in", 70.5, 10), crossing("x1", 71, "geofence_exit"),
+      ...[90, 91, 92, 93].map((m, i) => mv(`far-${i}`, m, 300 + i * 10)), crossing("e2", 100, "geofence_enter"), ...homeFixes("pm", 100.5, 160)], 89.9]
+  ] as const)("never claims time back home before the outing that went clearly away (%s)", (_label, tail, earliest) => {
+    for (const item of outings(input(nearThenHome([...tail])))) expect(minutes(item.startedAt)).toBeGreaterThanOrEqual(earliest);
+  });
+
   it("offers nothing from geofence callbacks alone, without readings away", () => {
     const evidence = [...homeFixes("am", 0, 60), crossing("exit", 61, "geofence_exit"), crossing("enter", 71, "geofence_enter"),
       ...homeFixes("pm", 72, 150)];

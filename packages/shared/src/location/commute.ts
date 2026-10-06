@@ -814,6 +814,11 @@ export function deriveCommutes(
       const there: number[] = [];
       let backAfterStay = false;
       let thereIsLeaving = false;
+      // The first sign of being back after the origin stay ended, and the latest
+      // sign of leaving since the last presence: a stretch back there longer
+      // than the dwell minimum is a return, as in the stretch rule below.
+      let backFromMs: number | null = null;
+      let leavingSinceMs: number | null = null;
       for (const item of gapEvidence) {
         const atMs = Date.parse(item.evidence.occurredAt);
         if (atMs >= firstAwayMs || snapshots.has(item) || item.evidence.isSimulated === true) continue;
@@ -823,13 +828,24 @@ export function deriveCommutes(
         if (ownCallback && item.evidence.kind !== "geofence_exit" || fix != null && fix <= (awayPlace?.radiusMeters ?? 0)) {
           there.push(atMs);
           thereIsLeaving = false;
-          if (atMs > originalStartedAtMs) backAfterStay = true;
+          leavingSinceMs = null;
+          if (atMs > originalStartedAtMs) {
+            backAfterStay = true;
+            backFromMs ??= atMs;
+          }
         } else if (backAfterStay && (ownCallback || fix != null && fix > (awayPlace?.radiusMeters ?? 0) &&
           (item.evidence.speedMetersPerSecond ?? 0) >= config.movementSpeedThresholdMps)) {
           there.push(atMs);
           thereIsLeaving = true;
+          leavingSinceMs = atMs;
         }
       }
+      // Leaving is the latest sign of it when the first clear reading follows
+      // within the continuity limit; otherwise that reading is the first
+      // evidence of being gone.
+      const backLeftMs = leavingSinceMs != null && firstAwayMs - leavingSinceMs <= config.maxContinuityGapMs
+        ? leavingSinceMs : firstAwayMs;
+      const backBeforeAway = backFromMs != null && backLeftMs - backFromMs > config.savedPlaceMinimumDwellMs;
       // Any stretch back at the place longer than the dwell minimum (from the
       // first sign of being there to the next sign of leaving, or to the next
       // stay) is a return, even when the phone left again: two outings with
@@ -875,8 +891,9 @@ export function deriveCommutes(
         leftAgainMs = leavingMs;
       }
       const backUntilNextStay = sustainedReturn && leftAgainMs == null;
-      absenceStartMs = backUntilNextStay ? null : sustainedReturn ? leftAgainMs : Math.max(originalStartedAtMs, ...there);
-      leftAgainStart = sustainedReturn && !backUntilNextStay ||
+      absenceStartMs = backUntilNextStay ? null : sustainedReturn ? leftAgainMs
+        : backBeforeAway ? backLeftMs : Math.max(originalStartedAtMs, ...there);
+      leftAgainStart = sustainedReturn && !backUntilNextStay || !sustainedReturn && backBeforeAway ||
         !sustainedReturn && thereIsLeaving && absenceStartMs != null && absenceStartMs > originalStartedAtMs;
     }
     // With an absence window, time away is judged only over that window: the
