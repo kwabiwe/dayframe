@@ -92,7 +92,7 @@ describe("mobile Review action contracts", () => {
     expect(evidenceEditorSource).toContain('automaticallyAdjustKeyboardInsets={Platform.OS === "ios"}');
     expect(evidenceEditorSource).toContain("keyboardRevealScrollOffset");
     expect(evidenceEditorSource).toContain("revealGenerationRef");
-    expect(evidenceEditorSource).toContain('placeholder={evidence.segment.kind === "commute" ? "Add commute details (optional)" : "Add activity (optional)"}');
+    expect(evidenceEditorSource).toContain('placeholder={journeyCopy?.placeholder ?? "Add activity (optional)"}');
     expect(evidenceEditorSource).toContain("initialLocationReviewDescription");
     expect(evidenceEditorSource).toMatch(/touch:\s*\{\s*minHeight:\s*44/);
     expect(evidenceEditorSource).toMatch(/visual:\s*\{\s*minHeight:\s*32/);
@@ -122,6 +122,8 @@ describe("mobile Review action contracts", () => {
     expect(evidenceMapSource).toContain('title="Start"');
     expect(evidenceMapSource).toContain('title="End"');
     expect(evidenceMapSource).toContain("Approximate route · detailed path unavailable");
+    // Time away is an absence: no commute map wording (the server sends no route line for it).
+    expect(evidenceMapSource).toContain('? "Map of readings while you were away."');
     expect(evidenceMapSource).toContain("showDetails ? evidence.map.anchors.map");
     expect(evidenceEditorSource).toContain('selectedPoint={evidence.segment.kind === "stay"');
     expect(evidenceEditorSource).not.toContain('|| "No saved place"');

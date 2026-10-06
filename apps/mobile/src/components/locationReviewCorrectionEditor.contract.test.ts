@@ -24,7 +24,7 @@ describe("automatic Location Evidence time editor", () => {
 
 describe("trip stops in Location Evidence", () => {
   it("lists a commute's recorded stops under its time range with positioned spoken labels and local motion", () => {
-    expect(source).toContain('const stopsHeading = evidence.segment.kind === "commute" ? tripStopsHeading(evidence.stops) : null;');
+    expect(source).toContain('const stopsHeading = evidence.segment.kind === "commute" ? tripStopsHeading(evidence.stops, evidence.segment.timeAway) : null;');
     expect(source).toContain("const stopRows = tripStopRows(evidence.stops, formatTime);");
     expect(source).toContain("accessibilityLabel={`Stop ${index + 1} of ${stopRows.length}: ${row.accessibilityLabel}`}");
     const start = source.indexOf("{stopsHeading ? (");

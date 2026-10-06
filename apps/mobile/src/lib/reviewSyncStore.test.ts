@@ -17,6 +17,7 @@ vi.mock("./config", () => ({
 const {
   createReviewClientMutationId,
   locationReviewEvidenceExpiry,
+  mobileReviewItemFromPresentation,
   nextReviewRetryAt,
   projectReviewBootstrap,
   sanitiseDashboardBootstrapForCache,
@@ -25,6 +26,7 @@ const {
   sanitiseReviewItemForCache,
   utf8ByteSize
 } = await import("./reviewSyncStore");
+const { isTimeAwayReviewItem, reviewItemCategoryLabel } = await import("./review");
 
 describe("Review sync store contracts", () => {
   it("generates valid distinct stable mutation IDs before local enqueue", () => {
@@ -90,6 +92,31 @@ describe("Review sync store contracts", () => {
       clientSegmentId: "segment-1",
       continuityStatus: "uncertain_gap"
     });
+  });
+
+  it("keeps time away recognisable through the cache and backlog presentation (review finding 3)", () => {
+    const cached = sanitiseReviewItemForCache(reviewItem({
+      eventType: "commute_detected", categoryName: null,
+      rawPayload: { qualificationReason: "same_place_outing", stopCount: 1, latitude: 51.5 }
+    }));
+    expect(cached.rawPayload).toEqual({ qualificationReason: "same_place_outing", stopCount: 1 });
+    expect(isTimeAwayReviewItem(cached)).toBe(true);
+    expect(reviewItemCategoryLabel(cached)).toBe("No category");
+    const record = {
+      kind: "review" as const, reviewItemId: "30000000-0000-4000-8000-000000000001", eventId: null,
+      locationSegmentId: "70000000-0000-4000-8000-000000000001", sourceKind: "location_v2" as const,
+      eventSource: "location_v2", eventType: "commute_detected", title: "Time away from Home",
+      category: { id: null, name: null, color: null }, place: { id: null, label: null },
+      interval: { start: "2026-03-10T12:00:00.000Z", end: "2026-03-10T12:10:00.000Z" }, confidence: "low",
+      status: "open" as const, createdAt: "2026-03-10T12:20:00.000Z", updatedAt: "2026-03-10T12:20:00.000Z",
+      proposalHash: null, canonicalEntryIds: [], semanticRevision: null
+    };
+    const backlog = mobileReviewItemFromPresentation({ ...record, timeAway: { stopCount: 1 } });
+    expect(isTimeAwayReviewItem(backlog)).toBe(true);
+    expect(reviewItemCategoryLabel(backlog)).toBe("No category");
+    expect(isTimeAwayReviewItem(sanitiseReviewItemForCache(backlog))).toBe(true);
+    // A server without the feature: an ordinary commute as before.
+    expect(isTimeAwayReviewItem(mobileReviewItemFromPresentation(record))).toBe(false);
   });
 
   it("caches dashboard presentation without location coordinates or raw evidence", () => {

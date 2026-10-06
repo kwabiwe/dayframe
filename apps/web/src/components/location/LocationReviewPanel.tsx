@@ -156,9 +156,9 @@ export function LocationReviewPanel({
                 ? "A gap limits precision, so Dayframe kept supported bounds instead of inventing an exact transition."
                 : "The nearest arrival and departure evidence supports these boundaries."}
             </p>
-            {evidence.segment.kind === "commute" && tripStopsHeading(evidence.stops) ? (
+            {evidence.segment.kind === "commute" && tripStopsHeading(evidence.stops, evidence.segment.timeAway) ? (
               <div className="location-trip-stops mt-3">
-                <p className="text-sm font-semibold">{tripStopsHeading(evidence.stops)}</p>
+                <p className="text-sm font-semibold">{tripStopsHeading(evidence.stops, evidence.segment.timeAway)}</p>
                 <ul className="mt-1 divide-y divide-[var(--border)]">
                   {tripStopRows(evidence.stops, formatTime).map((row) => (
                     <li key={row.key} className="py-1.5 text-sm" aria-label={row.accessibilityLabel}>{row.label}</li>

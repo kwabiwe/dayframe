@@ -67,6 +67,8 @@ export type LocationEngineConfig = {
   motionMaximumRunningSpeedMps: number;
   motionMaximumCyclingSpeedMps: number;
   motionMaximumAutomotiveSpeedMps: number;
+  placeOutingMinimumMs: number;
+  placeOutingMinimumDistanceMeters: number;
   rawEvidenceRetentionDays: number;
   maxEvidenceItemsPerUpload: number;
 };
@@ -204,6 +206,13 @@ export const LOCATION_ENGINE_V2_CONFIG: LocationEngineConfig = {
   motionMaximumRunningSpeedMps: 7,
   motionMaximumCyclingSpeedMps: 15,
   motionMaximumAutomotiveSpeedMps: 70,
+  // Time away from a saved or learned place: two stays there with no journey
+  // that qualifies between them, an absence of at least this long (and at most
+  // `commuteMaximumDurationMs`), and the phone clearly away (a stop elsewhere,
+  // or `outsideConfirmationCount` accurate readings at least this far from
+  // the place, beyond its radius, accuracy included) become one Review-only item.
+  placeOutingMinimumMs: 300_000,
+  placeOutingMinimumDistanceMeters: 150,
   rawEvidenceRetentionDays: 7,
   maxEvidenceItemsPerUpload: 100
 };

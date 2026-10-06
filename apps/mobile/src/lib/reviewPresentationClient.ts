@@ -1,5 +1,7 @@
 import {
+  REVIEW_PRESENTATION_FEATURES_HEADER,
   REVIEW_PRESENTATION_MAX_SNAPSHOT_RECORDS,
+  REVIEW_PRESENTATION_TIME_AWAY_FEATURE,
   ReviewPresentationResponseSchema,
   ReviewPresentationSnapshotSchema,
   type ReviewPresentationRequest,
@@ -61,7 +63,8 @@ export async function fetchReviewPresentationPage(input: {
       signal: input.signal,
       headers: {
         "Content-Type": "application/json",
-        Authorization: `Bearer ${session.snapshot.token}`
+        Authorization: `Bearer ${session.snapshot.token}`,
+        [REVIEW_PRESENTATION_FEATURES_HEADER]: REVIEW_PRESENTATION_TIME_AWAY_FEATURE
       },
       body: JSON.stringify(input.request)
     },

@@ -5,6 +5,7 @@ const query = vi.hoisted(() => vi.fn());
 vi.mock("../db", () => ({ query }));
 
 const { getLocationReviewEvidence } = await import("./location-query-service");
+const { locationEvidenceCaption, locationEvidenceMapMode } = await import("./location-evidence-presentation");
 
 const session = {
   workspaceId: "10000000-0000-4000-8000-000000000001",
@@ -122,6 +123,32 @@ describe("Location Review evidence query", () => {
     expect(dto.map.gaps).toEqual([]);
     expect(dto.suggestedSplitPoints).toEqual([]);
     expect(dto.textualSummary).toContain("Largest evidence gap: 0 minutes");
+  });
+
+  it("presents time away as an absence, never a recorded route or journey (round 2 finding 3)", async () => {
+    const at = (minute: number) => new Date(Date.UTC(2026, 8, 29, 12, minute)).toISOString();
+    const review = {
+      ...reviewRow(), stayId: null, commuteId: "60000000-0000-4000-8000-000000000001", title: "Time away from Home", timeAway: true,
+      startedAt: at(0), stoppedAt: at(10), fromLongitude: -0.1, fromLatitude: 51.5, toLongitude: -0.1, toLatitude: 51.5
+    };
+    const readings = [at(3), at(6)].map((occurredAt, index) => ({
+      id: `e${index}`, clientEvidenceId: `away-${index}`, kind: "standard_location", occurredAt, endedAt: null,
+      longitude: -0.1, latitude: 51.5027 + index * 0.0002, accuracyMeters: 5, role: "route", expiresAt: at(59)
+    }));
+    query.mockImplementation((sql: string) => {
+      if (sql.includes("from review_items ri")) return Promise.resolve({ rows: [review] });
+      if (sql.includes("from location_segment_evidence lse")) return Promise.resolve({ rows: readings });
+      return Promise.resolve({ rows: [] });
+    });
+    const dto = await getLocationReviewEvidence(review.reviewItemId, session);
+    expect(dto.segment.timeAway).toBe(true);
+    expect(dto.map.route).toBeNull();
+    expect(dto.map.straightLineFallback).toBeNull();
+    expect(dto.map.acceptedSamples).toHaveLength(2);
+    expect(dto.textualSummary).toContain("This time away");
+    expect(dto.textualSummary).not.toContain("journey");
+    expect(locationEvidenceMapMode(dto)).toBe("mapped_evidence");
+    expect(locationEvidenceCaption(dto)).not.toContain("route");
   });
 
   it("still reports an unobserved gap outside a recorded stop", async () => {

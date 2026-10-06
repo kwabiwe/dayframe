@@ -40,6 +40,8 @@ type ReviewRow = {
   eventSource: string | null;
   eventType: string | null;
   canonicalEntryIds: string[] | null;
+  /** Stops on a time-away journey; null for every other Review item. */
+  timeAwayStopCount: number | null;
 };
 
 type LegacyRow = {
@@ -124,10 +126,14 @@ export class ReviewPresentationError extends Error {
  * not reuse bootstrap's capped arrays: the response carries the coverage and
  * identity evidence required to materialise a saved Review action honestly.
  */
+/** Optional presentation fields the requesting client understands. */
+export type ReviewPresentationFeatures = { timeAway?: boolean };
+
 export async function getReviewPresentation(
   session: RequestSession,
   input: ReviewPresentationRequest,
-  options: SyncTransactionOptions = {}
+  options: SyncTransactionOptions = {},
+  features: ReviewPresentationFeatures = {}
 ): Promise<ReviewPresentationResponse> {
   const capturedAt = new Date().toISOString();
   const deadlineAt = options.deadlineAt ?? Date.now() + 8_000;
@@ -213,10 +219,10 @@ export async function getReviewPresentation(
         todayCount: Number(counts.todayCount),
         openReviewItemIds: (counts.openReviewItemIds ?? []).slice(0, COLLECTION_LIMIT)
       },
-      records: page.records.map(({ record }) => record),
+      records: page.records.map(({ record }) => forClient(record, features)),
       links,
       lookup: {
-        reviewItems: lookupReviewsFor(input.reviewItemIds ?? [], lookup.reviews),
+        reviewItems: lookupReviewsFor(input.reviewItemIds ?? [], lookup.reviews).map((record) => forClient(record, features)),
         entries: lookupEntriesFor(input.entryIds ?? [], lookup.entries)
       }
     };
@@ -301,6 +307,9 @@ async function loadReviewRows(client: pg.PoolClient, session: RequestSession, in
             ri.confidence, ri.created_at as "createdAt",
             coalesce(st.updated_at, cs.updated_at, ri.resolved_at, ri.created_at) as "semanticRevision",
             ae.source as "eventSource", ae.event_type as "eventType",
+            case when cs.metadata ->> 'qualificationReason' = 'same_place_outing'
+              then jsonb_array_length(case when jsonb_typeof(cs.metadata -> 'stops') = 'array' then cs.metadata -> 'stops' else '[]'::jsonb end)
+            end as "timeAwayStopCount",
             links.entry_ids as "canonicalEntryIds"
      from review_items ri
      left join activity_events ae
@@ -449,6 +458,9 @@ async function loadReviewRowsByIds(client: pg.PoolClient, session: RequestSessio
             pl.id as "placeId", pl.name as "placeLabel", ri.suggested_started_at as "startedAt", ri.suggested_stopped_at as "stoppedAt",
             ri.confidence, ri.created_at as "createdAt", coalesce(st.updated_at, cs.updated_at, ri.resolved_at, ri.created_at) as "semanticRevision",
             ae.source as "eventSource", ae.event_type as "eventType",
+            case when cs.metadata ->> 'qualificationReason' = 'same_place_outing'
+              then jsonb_array_length(case when jsonb_typeof(cs.metadata -> 'stops') = 'array' then cs.metadata -> 'stops' else '[]'::jsonb end)
+            end as "timeAwayStopCount",
             links.entry_ids as "canonicalEntryIds"
      from review_items ri
      left join activity_events ae on ae.id = ri.event_id and ae.workspace_id = ri.workspace_id and ae.user_id = ri.user_id
@@ -577,7 +589,8 @@ function toReviewRecord(row: ReviewRow): InternalRecord {
         })
       : null,
     canonicalEntryIds: row.canonicalEntryIds ?? [],
-    semanticRevision: isoOrNull(row.semanticRevision)
+    semanticRevision: isoOrNull(row.semanticRevision),
+    ...(row.timeAwayStopCount == null ? {} : { timeAway: { stopCount: Number(row.timeAwayStopCount) } })
   };
   return {
     record,
@@ -585,6 +598,14 @@ function toReviewRecord(row: ReviewRow): InternalRecord {
     sortKind: "review",
     recordId: row.id
   };
+}
+
+/** Older clients parse records strictly: optional fields go only to clients that asked for them. */
+function forClient<T>(record: T, features: ReviewPresentationFeatures): T {
+  if (features.timeAway || !record || typeof record !== "object" || !("timeAway" in record)) return record;
+  const rest = { ...record } as T & { timeAway?: unknown };
+  delete rest.timeAway;
+  return rest as T;
 }
 
 function toLegacyRecord(row: LegacyRow): InternalRecord {

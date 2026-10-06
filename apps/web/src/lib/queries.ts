@@ -169,6 +169,8 @@ export type ActivityRow = {
   projectName: string | null;
   categoryName: string | null;
   placeName: string | null;
+  /** Time away from a saved place, which is never a commute. */
+  timeAway: boolean;
 };
 
 export type DashboardStats = {
@@ -983,7 +985,8 @@ async function getActivityEvents(session: RequestSession) {
             ae.review_status as "reviewStatus",
             p.name as "projectName",
             c.name as "categoryName",
-            pl.name as "placeName"
+            pl.name as "placeName",
+            coalesce(ae.event_type = 'commute_detected' and ae.raw_payload ->> 'qualificationReason' = 'same_place_outing', false) as "timeAway"
      from activity_events ae
      left join projects p on p.id = ae.suggested_project_id and p.workspace_id = ae.workspace_id
      left join categories c on c.id = ae.suggested_category_id and c.workspace_id = ae.workspace_id

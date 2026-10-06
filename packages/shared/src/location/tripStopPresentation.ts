@@ -23,9 +23,9 @@ function minutesLabel(durationSeconds: number) {
 }
 
 /** Heading for a trip's stop list, or null when the trip has none. */
-export function tripStopsHeading(stops: readonly TripStopForPresentation[] | undefined) {
+export function tripStopsHeading(stops: readonly TripStopForPresentation[] | undefined, timeAway = false) {
   const count = stops?.length ?? 0;
-  return count === 0 ? null : `${count} stop${count === 1 ? "" : "s"} on this trip`;
+  return count === 0 ? null : `${count} stop${count === 1 ? "" : "s"} ${timeAway ? "while you were away" : "on this trip"}`;
 }
 
 /**
@@ -49,4 +49,15 @@ export function tripStopRows(
         accessibilityLabel: `Stopped from ${about}${start} to ${stop_}, ${duration.spoken}${stop.approximate ? ", approximate" : ""}`
       };
     });
+}
+
+/** Time away from a saved or learned place: a Review-only absence, not a journey. */
+export function isTimeAway(segment: { kind: string; qualificationReason?: string | null }) {
+  return segment.kind === "commute" && segment.qualificationReason === "same_place_outing";
+}
+
+/** Review title for time away from a place, named when the place is known. */
+export function timeAwayTitle(placeName: string | null | undefined) {
+  const name = placeName?.trim();
+  return name ? `Time away from ${name}` : "Time away";
 }

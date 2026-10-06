@@ -35,6 +35,7 @@ import {
   initialLocationReviewDescription,
   keyboardRevealScrollOffset,
   locationActivityGlyphName,
+  locationReviewJourneyCopy,
   parseLocationReviewWindow,
   type LocationActivityGlyphName,
   type LocationReviewNewPlace
@@ -118,7 +119,7 @@ export function LocationReviewCorrectionEditor({
   reduceMotionRef.current = reduceMotion;
   const startAt = useMemo(() => new Date(evidence.segment.startedAt), [evidence.segment.startedAt]);
   // Stops recorded inside a trip; their time is part of the trip, not travel.
-  const stopsHeading = evidence.segment.kind === "commute" ? tripStopsHeading(evidence.stops) : null;
+  const stopsHeading = evidence.segment.kind === "commute" ? tripStopsHeading(evidence.stops, evidence.segment.timeAway) : null;
   // Formatted on every render, like the trip's own time range, so a locale or
   // time-zone change never leaves a stop outside its trip.
   const stopRows = tripStopRows(evidence.stops, formatTime);
@@ -130,6 +131,8 @@ export function LocationReviewCorrectionEditor({
   const durationLabel = approximateArrival ? "Estimated duration" : "Duration";
   const baselinePlaceId = evidence.display.placeId ?? reviewItem?.suggestedPlaceId ?? null;
   const baselineCategoryId = reviewItem?.suggestedCategoryId ?? null;
+  const journeyCopy = locationReviewJourneyCopy(evidence.segment);
+  const isJourney = journeyCopy?.journey === true;
   const [description, setDescription] = useState(() => initialLocationReviewDescription({
     placeName: evidence.display.placeName,
     segmentKind: evidence.segment.kind,
@@ -244,7 +247,8 @@ export function LocationReviewCorrectionEditor({
   const activityGlyph = locationActivityGlyphName({
     categoryName: selectedCategory?.name ?? reviewItem?.categoryName ?? null,
     description,
-    segmentKind: evidence.segment.kind
+    segmentKind: evidence.segment.kind,
+    timeAway: evidence.segment.timeAway === true
   });
   const selectedPlace = placeForSelection(
     selectedSavedPlaceId,
@@ -411,8 +415,8 @@ export function LocationReviewCorrectionEditor({
         });
     await onResolve(
       action,
-      evidence.segment.kind === "commute"
-        ? "The commute was recorded."
+      journeyCopy
+        ? journeyCopy.recorded
         : newPlace && saveForFuture
           ? "The place was saved and this visit was recorded."
           : newPlace
@@ -439,8 +443,8 @@ export function LocationReviewCorrectionEditor({
 
   const primaryLabel = saving
     ? "Saving…"
-    : evidence.segment.kind === "commute"
-      ? "Record commute"
+    : journeyCopy
+      ? journeyCopy.primaryLabel
       : newPlace
         ? saveForFuture ? "Save place and record" : "Use once and record"
         : selectedSavedPlaceId !== baselinePlaceId
@@ -737,7 +741,7 @@ export function LocationReviewCorrectionEditor({
                 onChangeText={setDescription}
                 onBlur={() => blurRevealControl(activityInputRef.current)}
                 onFocus={() => focusRevealControl(activityInputRef.current)}
-                placeholder={evidence.segment.kind === "commute" ? "Add commute details (optional)" : "Add activity (optional)"}
+                placeholder={journeyCopy?.placeholder ?? "Add activity (optional)"}
                 placeholderTextColor={theme.textSecondary}
                 style={styles.textInput}
                 value={description}
@@ -749,7 +753,7 @@ export function LocationReviewCorrectionEditor({
                 keyboardShouldPersistTaps="handled"
                 showsHorizontalScrollIndicator={false}
               >
-                {evidence.segment.kind === "commute" && baselineCategoryId === null ? (
+                {isJourney && baselineCategoryId === null ? (
                   <CategoryChoice
                     category={null}
                     label="Commute automatically"
@@ -768,7 +772,7 @@ export function LocationReviewCorrectionEditor({
                     setCategoryTouched(true);
                   }}
                   selected={selectedCategoryId === null && (
-                    categoryTouched || evidence.segment.kind !== "commute" || baselineCategoryId !== null
+                    categoryTouched || !isJourney || baselineCategoryId !== null
                   )}
                   theme={theme}
                 />
@@ -1177,6 +1181,7 @@ function placeForSelection(
 
 function locationActivityLabel(evidence: LocationReviewEvidenceDto) {
   if (evidence.segment.kind !== "commute") return evidence.display.title;
+  if (evidence.segment.timeAway) return evidence.display.title || "Time away";
   const mode = travelModeLabel(evidence.segment.travelMode);
   return mode ? `Commute · ${mode}` : "Commute";
 }

@@ -10,11 +10,13 @@ import {
 } from "./location-replay-batching";
 import {
   deriveCommutes,
+  isTimeAway,
   EMPTY_LOCATION_ENGINE_STATE,
   LOCATION_ENGINE_V2_CONFIG,
   LocationEvidenceSchema,
   runLocationEngine,
   type ClassifiedEvidence,
+  type CommuteDerivationOptions,
   type CommuteSegment,
   type LocationEvidence,
   type LocationSegment,
@@ -165,11 +167,15 @@ export async function replayLocationEvidence(
     isSimulated: row.isSimulated,
     metadata: row.metadata
   }));
+  const places = {
+    savedPlaces: placesResult.rows,
+    learnedPlaces: learnedResult.rows.map((place) => ({ ...place, accepted: true as const }))
+  };
   const output = runLocationEngine({
     priorState: { ...EMPTY_LOCATION_ENGINE_STATE, algorithmVersion: options.algorithmVersion },
     evidence,
-    savedPlaces: placesResult.rows,
-    acceptedLearnedPlaces: learnedResult.rows.map((place) => ({ ...place, accepted: true as const })),
+    savedPlaces: places.savedPlaces,
+    acceptedLearnedPlaces: places.learnedPlaces,
     config: { ...LOCATION_ENGINE_V2_CONFIG, algorithmVersion: options.algorithmVersion },
     processingAt: options.processingAt
   });
@@ -179,7 +185,7 @@ export async function replayLocationEvidence(
   observeLocationCount(options, "staySegments", output.segmentUpserts.filter(segment => segment.kind === "stay").length);
   observeLocationCount(options, "commuteSegments", output.segmentUpserts.filter(segment => segment.kind === "commute").length);
   observeLocationTiming(options, "protected_replacement_checks", "started");
-  const protectedReplacement = await excludeProtectedReplacements(client, session, options, output.segmentUpserts, output.acceptedEvidence);
+  const protectedReplacement = await excludeProtectedReplacements(client, session, options, output.segmentUpserts, output.acceptedEvidence, places);
   const segments = protectedReplacement.segments;
   observeLocationTiming(options, "protected_replacement_checks", "completed");
   observeLocationCount(options, "protectedSegments", protectedReplacement.count);
@@ -249,7 +255,8 @@ async function excludeProtectedReplacements(
   client: pg.PoolClient, session: RequestSession,
   options: Pick<LocationReplayOptions, "deviceId" | "algorithmVersion" | "processingAt" | "persistenceProfile" | "onLocationCount">,
   segments: LocationSegment[],
-  acceptedEvidence: ClassifiedEvidence[] = []
+  acceptedEvidence: ClassifiedEvidence[] = [],
+  places: Pick<CommuteDerivationOptions, "savedPlaces" | "learnedPlaces"> = {}
 ) {
   // A trip's legs are fallback candidates: if protected history holds the trip,
   // its unaffected legs remain instead of their open Reviews being retired.
@@ -269,57 +276,63 @@ async function excludeProtectedReplacements(
   const tableGroups: ReadonlyArray<ReadonlyArray<"stay_segments" | "commute_segments">> = scalabilityProfile
     ? [["stay_segments", "commute_segments"]]
     : [["stay_segments"], ["commute_segments"]];
-  for (const tables of tableGroups) {
-    const batches = scalabilityProfile
-      ? candidateEvidenceIds.length === 0
-        ? [candidateEvidenceIds]
-        : boundedJsonBatches(candidateEvidenceIds, {
-            operation: "protected_evidence_ids",
-            maxItems: LOCATION_PROTECTED_EVIDENCE_ID_BATCH_SIZE,
-            maxBytes: LOCATION_PROTECTED_EVIDENCE_ID_PAYLOAD_MAX_BYTES
-          })
-      : segmentChunks(candidateEvidenceIds);
-    for (const ids of batches) {
-      if (scalabilityProfile) {
-        protectionQueryBatches += 1;
-        observeLocationCount(options, "protectionQueryBatches", protectionQueryBatches);
-      }
-      // Each arm retains its own ordered FOR UPDATE OF s. UNION ALL only
-      // shares the bounded ID request, never a row predicate or a lock target.
-      const reads = tables.map(table => {
-        const column = table === "stay_segments" ? "stay_segment_id" : "commute_segment_id";
-        return `select s.client_segment_id as "clientSegmentId", le.client_evidence_id as "clientEvidenceId",
-                le.evidence_type as kind, le.occurred_at as "occurredAt",
-                s.started_at as "startedAt", s.stopped_at as "stoppedAt"
-         from ${table} s
-         join location_segment_evidence lse on lse.${column} = s.id
-           and lse.workspace_id = s.workspace_id and lse.user_id = s.user_id
-         join ${scalabilityProfile ? `lateral (
-           select id, workspace_id, user_id, device_id, algorithm_version,
-                  client_evidence_id, evidence_type, occurred_at
-           from location_evidence where id = lse.evidence_id offset 0
-         )` : "location_evidence"} le on le.id = lse.evidence_id
-           and le.workspace_id = s.workspace_id and le.user_id = s.user_id
-         where s.workspace_id = $1 and s.user_id = $2 and s.device_id = $3 and s.algorithm_version = $4
-           and le.device_id = $3 and le.algorithm_version = $4 and le.client_evidence_id = any($5::text[])
-           and (s.continuity_status = 'manual' or (s.status <> 'superseded' and s.created_from_event_id is not null
-             and not exists (select 1 from review_items ri where ${scalabilityProfile
-               ? "ri.workspace_id = $1 and ri.user_id = $2"
-               : "ri.workspace_id = s.workspace_id and ri.user_id = s.user_id"}
-               and ri.location_segment_id = s.id and ${reviewLeavesSegmentToReplay("ri")})))
-         order by s.id, le.client_evidence_id for update of s`;
-      });
-      // OFFSET 0 is an optimization boundary, not a result cap: look up the
-      // unique evidence ID before applying the unchanged scope/candidate
-      // predicates. Bad owner-cardinality estimates must not turn each lookup
-      // into a rescan of all evidence for the owner.
-      const links = await client.query<ProtectedSourceLink>(
-        reads.length === 1 ? reads[0] : reads.map(sql => `select * from (${sql}) protected_sources`).join(" union all "),
-        [session.workspaceId, session.userId, options.deviceId, options.algorithmVersion, ids]);
-      for (const link of links.rows) for (const candidate of byEvidence.get(link.clientEvidenceId) ?? []) {
-        if (sharesProtectedPortion(candidate, link)) held.add(candidate.clientSegmentId);
+  const protectedLinks = async (evidenceIds: string[]) => {
+    const found: ProtectedSourceLink[] = [];
+    for (const tables of tableGroups) {
+      const batches = scalabilityProfile
+        ? evidenceIds.length === 0
+          ? [evidenceIds]
+          : boundedJsonBatches(evidenceIds, {
+              operation: "protected_evidence_ids",
+              maxItems: LOCATION_PROTECTED_EVIDENCE_ID_BATCH_SIZE,
+              maxBytes: LOCATION_PROTECTED_EVIDENCE_ID_PAYLOAD_MAX_BYTES
+            })
+        : segmentChunks(evidenceIds);
+      for (const ids of batches) {
+        if (scalabilityProfile) {
+          protectionQueryBatches += 1;
+          observeLocationCount(options, "protectionQueryBatches", protectionQueryBatches);
+        }
+        // Each arm retains its own ordered FOR UPDATE OF s. UNION ALL only
+        // shares the bounded ID request, never a row predicate or a lock target.
+        const reads = tables.map(table => {
+          const column = table === "stay_segments" ? "stay_segment_id" : "commute_segment_id";
+          return `select s.client_segment_id as "clientSegmentId", le.client_evidence_id as "clientEvidenceId",
+                  le.evidence_type as kind, le.occurred_at as "occurredAt",
+                  s.started_at as "startedAt", s.stopped_at as "stoppedAt"
+           from ${table} s
+           join location_segment_evidence lse on lse.${column} = s.id
+             and lse.workspace_id = s.workspace_id and lse.user_id = s.user_id
+           join ${scalabilityProfile ? `lateral (
+             select id, workspace_id, user_id, device_id, algorithm_version,
+                    client_evidence_id, evidence_type, occurred_at
+             from location_evidence where id = lse.evidence_id offset 0
+           )` : "location_evidence"} le on le.id = lse.evidence_id
+             and le.workspace_id = s.workspace_id and le.user_id = s.user_id
+           where s.workspace_id = $1 and s.user_id = $2 and s.device_id = $3 and s.algorithm_version = $4
+             and le.device_id = $3 and le.algorithm_version = $4 and le.client_evidence_id = any($5::text[])
+             and (s.continuity_status = 'manual' or (s.status <> 'superseded' and s.created_from_event_id is not null
+               and not exists (select 1 from review_items ri where ${scalabilityProfile
+                 ? "ri.workspace_id = $1 and ri.user_id = $2"
+                 : "ri.workspace_id = s.workspace_id and ri.user_id = s.user_id"}
+                 and ri.location_segment_id = s.id and ${reviewLeavesSegmentToReplay("ri")})))
+           order by s.id, le.client_evidence_id for update of s`;
+        });
+        // OFFSET 0 is an optimization boundary, not a result cap: look up the
+        // unique evidence ID before applying the unchanged scope/candidate
+        // predicates. Bad owner-cardinality estimates must not turn each lookup
+        // into a rescan of all evidence for the owner.
+        const links = await client.query<ProtectedSourceLink>(
+          reads.length === 1 ? reads[0] : reads.map(sql => `select * from (${sql}) protected_sources`).join(" union all "),
+          [session.workspaceId, session.userId, options.deviceId, options.algorithmVersion, ids]);
+        found.push(...links.rows);
       }
     }
+    return found;
+  };
+  const links = await protectedLinks(candidateEvidenceIds);
+  for (const link of links) for (const candidate of byEvidence.get(link.clientEvidenceId) ?? []) {
+    if (sharesProtectedPortion(candidate, link)) held.add(candidate.clientSegmentId);
   }
   // A journey only Motion & Fitness showed has no lineage, and one it timed can
   // hold its only route observation at an adjusted boundary, so the reads above
@@ -365,16 +378,35 @@ async function excludeProtectedReplacements(
     (!held.has(segment.fromStaySegmentId) && !held.has(segment.toStaySegmentId) &&
       !(segment.stops ?? []).some((stop) => held.has(stop.staySegmentId) || decidedStays.has(stop.staySegmentId)) &&
       !(segment.stops?.length && movesEndpoint(segment))));
+  const kept = segments.flatMap((segment) => replaceable(segment)
+    ? segment.kind === "commute" && !segment.stops?.length && movesEndpoint(segment)
+      ? rebuildLegWithinDecidedStops(segment, decidedStays, segments, acceptedEvidence, options, places)
+      : [segment]
+    : segment.kind === "commute"
+      ? (segment.legs ?? []).filter(replaceable).flatMap((leg) =>
+          rebuildLegWithinDecidedStops(leg, decidedStays, segments, acceptedEvidence, options, places))
+      : []).filter((segment) => !overlapsDecidedMotionJourney(segment));
+  // Time away is offered only when no journey qualifies: a rebuilt endpoint
+  // must never stretch it over a journey that replay keeps, nor over evidence
+  // that decided history owns (a held journey's row remains decided).
+  const journeys = kept.filter((segment): segment is CommuteSegment => segment.kind === "commute" && !isTimeAway(segment));
+  const rebuiltTimeAway = kept.filter((segment) => isTimeAway(segment) && !segments.includes(segment));
+  const uncheckedIds = [...new Set(rebuiltTimeAway.flatMap((segment) => segment.evidenceIds))].filter((id) => !byEvidence.has(id)).sort();
+  const rebuiltLinks = [...links, ...(uncheckedIds.length ? await protectedLinks(uncheckedIds) : [])];
+  const claimsDecided = (segment: LocationSegment) => rebuiltTimeAway.includes(segment) &&
+    rebuiltLinks.some((link) => segment.evidenceIds.includes(link.clientEvidenceId) && sharesProtectedPortion(segment, link));
+  // A rebuild sees only its two endpoint stays, so it must never stretch time
+  // away across another visit replay keeps: a saved or learned place, or an
+  // unknown stay long enough to be its own Review (short stops stay allowed).
+  const visits = kept.filter((segment): segment is StaySegment => segment.kind === "stay" && (segment.placeMatchKind !== "unknown" ||
+    Date.parse(segment.stoppedAt ?? segment.startedAt) - Date.parse(segment.startedAt) >= LOCATION_ENGINE_V2_CONFIG.unknownStayReviewDwellMs));
+  const crossesVisit = (segment: LocationSegment) => segment.kind === "commute" && visits.some((visit) =>
+    visit.clientSegmentId !== segment.fromStaySegmentId && visit.clientSegmentId !== segment.toStaySegmentId &&
+    Date.parse(visit.startedAt) < Date.parse(segment.stoppedAt!) && Date.parse(visit.stoppedAt ?? visit.startedAt) > Date.parse(segment.startedAt));
   return {
     count: held.size,
-    segments: segments.flatMap((segment) => replaceable(segment)
-      ? segment.kind === "commute" && !segment.stops?.length && movesEndpoint(segment)
-        ? rebuildLegWithinDecidedStops(segment, decidedStays, segments, acceptedEvidence, options)
-        : [segment]
-      : segment.kind === "commute"
-        ? (segment.legs ?? []).filter(replaceable).flatMap((leg) =>
-            rebuildLegWithinDecidedStops(leg, decidedStays, segments, acceptedEvidence, options))
-        : []).filter((segment) => !overlapsDecidedMotionJourney(segment))
+    segments: kept.filter((segment) => !isTimeAway(segment) || !claimsDecided(segment) && !crossesVisit(segment) && !journeys.some((journey) =>
+      Date.parse(journey.startedAt) < Date.parse(segment.stoppedAt!) && Date.parse(journey.stoppedAt) > Date.parse(segment.startedAt)))
   };
 }
 
@@ -456,14 +488,15 @@ function rebuildLegWithinDecidedStops(
   decided: ReadonlyMap<string, DecidedStopBounds>,
   segments: LocationSegment[],
   acceptedEvidence: ClassifiedEvidence[],
-  options: Pick<LocationReplayOptions, "algorithmVersion" | "processingAt">
+  options: Pick<LocationReplayOptions, "algorithmVersion" | "processingAt">,
+  places: Pick<CommuteDerivationOptions, "savedPlaces" | "learnedPlaces"> = {}
 ): CommuteSegment[] {
   if (!decided.has(leg.fromStaySegmentId) && !decided.has(leg.toStaySegmentId)) return [leg];
   const from = stayWithDecidedBounds(leg.fromStaySegmentId, decided, segments);
   const to = stayWithDecidedBounds(leg.toStaySegmentId, decided, segments);
   if (!from?.stoppedAt || !to) return [];
   return deriveCommutes([from, to], acceptedEvidence,
-    { ...LOCATION_ENGINE_V2_CONFIG, algorithmVersion: options.algorithmVersion }, options.processingAt)
+    { ...LOCATION_ENGINE_V2_CONFIG, algorithmVersion: options.algorithmVersion }, options.processingAt, places)
     .filter((rebuilt) => rebuilt.clientSegmentId === leg.clientSegmentId)
     .map((rebuilt) => withinEngineEligibility(rebuilt, leg));
 }

@@ -30,8 +30,11 @@ const input = (evidence: LocationEvidence[], processingMinutes = 250): LocationE
   config, processingAt: at(processingMinutes), acceptedLearnedPlaces: [], evidence,
   savedPlaces: [{ id: HOME_ID, name: "Home", latitude: 0, longitude: 0, radiusMeters: 100, loggingEnabled: false }]
 });
-const commutes = (value: LocationEngineInput) =>
+// Journeys only: time away from Home (Review-only, PR #230) is asserted where it matters.
+const allCommutes = (value: LocationEngineInput) =>
   runLocationEngine(value).segmentUpserts.filter((segment): segment is CommuteSegment => segment.kind === "commute");
+const commutes = (value: LocationEngineInput) =>
+  allCommutes(value).filter((segment) => segment.qualificationReason !== "same_place_outing");
 const times = (trips: CommuteSegment[]) => trips.map(({ startedAt, stoppedAt, stops }) => [startedAt, stoppedAt, stops?.length ?? 0]);
 
 /** Drives in 75 m steps at 11 m/s from the current position, appending fixes. */
@@ -508,6 +511,9 @@ describe("presence at Home just before leaving after a quiet spell (review round
       e("home-2", 74.3, 0, { speedMetersPerSecond: 0 }), e("home-3", 85, 0, { speedMetersPerSecond: 0 }), e("home-4", 95, 0, { speedMetersPerSecond: 0 })];
     const trips = commutes(input(evidence, 300));
     expect(trips.some((trip) => trip.startedAt <= at(21) && trip.stoppedAt! >= at(73))).toBe(false);
+    // The absence is still offered for Review as time away from Home.
+    const away = allCommutes(input(evidence, 300)).filter((trip) => trip.qualificationReason === "same_place_outing");
+    expect(away.some((trip) => trip.startedAt <= at(21) && trip.stoppedAt! >= at(73))).toBe(true);
   });
 });
 

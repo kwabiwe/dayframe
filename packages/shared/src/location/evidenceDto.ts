@@ -29,7 +29,9 @@ export const LocationReviewEvidenceDtoSchema = z.object({
     evidenceCount: z.number().int().nonnegative(),
     rejectedEvidenceCount: z.number().int().nonnegative(),
     /** Commutes only: how the journey was travelled, from Motion & Fitness. */
-    travelMode: MotionTravelModeSchema.nullable().optional()
+    travelMode: MotionTravelModeSchema.nullable().optional(),
+    /** Commutes only: time away from a saved or learned place rather than a journey. */
+    timeAway: z.boolean().optional()
   }),
   display: z.object({
     title: z.string(),

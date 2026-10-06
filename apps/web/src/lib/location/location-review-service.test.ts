@@ -61,6 +61,17 @@ describe("location review confirmation semantics", () => {
     ).resolves.toBe("created-commute");
   });
 
+  it("confirms time away from a place with the user's category only, keeping its title", async () => {
+    const client = categoryClient();
+    await expect(confirmedLocationCategoryId(client, session, "time_away", null, undefined)).resolves.toBeNull();
+    await expect(confirmedLocationCategoryId(client, session, "time_away", null, {
+      categoryId: "30000000-0000-4000-8000-000000000002"
+    })).resolves.toBe("30000000-0000-4000-8000-000000000002");
+    expect(vi.mocked(client.query)).not.toHaveBeenCalled();
+    expect(confirmedLocationDescription("time_away", "Time away from Home", undefined)).toBe("Time away from Home");
+    expect(confirmedLocationDescription("time_away", "Time away from Home", { description: "Groceries" })).toBe("Groceries");
+  });
+
   it("preserves stored and explicitly edited categories", async () => {
     const client = categoryClient();
 

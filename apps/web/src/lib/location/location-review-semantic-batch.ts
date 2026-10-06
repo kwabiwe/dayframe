@@ -1,9 +1,9 @@
 import type pg from "pg";
 import {
   AUTOMATIC_LOCATION_POLICY_VERSION, LOCATION_ENGINE_V2_CONFIG, assessAutomaticOverlap,
-  type LocationSegment, type StaySegment
+  type CommuteSegment, type LocationSegment, type StaySegment
 } from "@dayframe/shared";
-import { hasMeaningfulKnownPlaceWindow } from "@dayframe/shared";
+import { hasMeaningfulKnownPlaceWindow, isTimeAway, timeAwayTitle } from "@dayframe/shared";
 import type { RequestSession } from "../session";
 import { ensureCommuteCategoryId } from "../automatic-category-service";
 import { locationSemanticDisposition } from "./location-semantic-policy";
@@ -22,10 +22,55 @@ type Place = {
 };
 type LearnedPlace = { id: string; name: string; saved: Place | null };
 
-async function displayContext(client: pg.PoolClient, session: RequestSession, segments: LocationSegment[]) {
+/**
+ * Name of the place time away was from: its saved place, else the accepted
+ * learned place its persisted origin stay matched (learned endpoints have no
+ * place ID on the commute).
+ */
+export async function timeAwayPlaceName(
+  client: Pick<pg.PoolClient, "query">, session: RequestSession, segment: CommuteSegment, stayIds: ReadonlyMap<string, string>
+) {
+  return (await timeAwayPlaceNames(client, session, [segment], stayIds)).get(segment.clientSegmentId) ?? null;
+}
+
+/** Batched `timeAwayPlaceName` for every time-away commute among the segments, keyed by client segment ID. */
+async function timeAwayPlaceNames(
+  client: Pick<pg.PoolClient, "query">, session: RequestSession, segments: LocationSegment[], stayIds: ReadonlyMap<string, string>
+) {
+  const timeAway = segments.filter((segment): segment is CommuteSegment => segment.kind === "commute" && isTimeAway(segment));
+  const savedNames = new Map<string, string>();
+  const originNames = new Map<string, string>();
+  const placeIds = [...new Set(timeAway.flatMap((segment) => segment.fromPlaceId ? [segment.fromPlaceId] : []))].sort();
+  const originIds = [...new Set(timeAway.flatMap((segment) => {
+    const originId = segment.fromPlaceId ? undefined : stayIds.get(segment.fromStaySegmentId);
+    return originId ? [originId] : [];
+  }))].sort();
+  for (const ids of chunks(placeIds)) {
+    const result = await client.query<{ id: string; name: string }>(
+      "select id, name from places where workspace_id = $1 and id = any($2::uuid[])", [session.workspaceId, ids]);
+    for (const row of result.rows) savedNames.set(row.id, row.name);
+  }
+  for (const ids of chunks(originIds)) {
+    const result = await client.query<{ id: string; name: string }>(`select ss.id, lp.name from stay_segments ss
+      join learned_places lp on lp.id = ss.learned_place_id and lp.workspace_id = ss.workspace_id and lp.user_id = ss.user_id
+      where ss.workspace_id = $1 and ss.user_id = $2 and ss.id = any($3::uuid[])`, [session.workspaceId, session.userId, ids]);
+    for (const row of result.rows) originNames.set(row.id, row.name);
+  }
+  return new Map(timeAway.map((segment) => {
+    const originId = stayIds.get(segment.fromStaySegmentId);
+    const name = segment.fromPlaceId ? savedNames.get(segment.fromPlaceId) : originId ? originNames.get(originId) : undefined;
+    return [segment.clientSegmentId, name ?? null] as const;
+  }));
+}
+
+async function displayContext(
+  client: pg.PoolClient, session: RequestSession, segments: LocationSegment[], stayIds: ReadonlyMap<string, string>
+) {
   const stays = segments.filter((segment): segment is StaySegment => segment.kind === "stay");
   const places = new Map<string, Place>();
   const learned = new Map<string, LearnedPlace>();
+  // Time away is named after the place it was away from.
+  const timeAwayNames = await timeAwayPlaceNames(client, session, segments, stayIds);
   const placeIds = [...new Set(stays.flatMap(s => s.placeId ? [s.placeId] : []))].sort();
   const learnedIds = [...new Set(stays.flatMap(s => s.learnedPlaceId ? [s.learnedPlaceId] : []))].sort();
   // Saved places belong to a workspace; learned places additionally belong to a user.
@@ -47,7 +92,8 @@ async function displayContext(client: pg.PoolClient, session: RequestSession, se
     for (const row of result.rows) learned.set(row.id, row);
   }
   return (segment: LocationSegment) => {
-    if (segment.kind === "commute") return { trusted: null, title: "Commute" };
+    if (segment.kind === "commute") return { trusted: null, title: isTimeAway(segment)
+      ? timeAwayTitle(timeAwayNames.get(segment.clientSegmentId)) : "Commute" };
     const trusted = segment.placeMatchKind === "saved" && segment.placeId
       ? places.get(segment.placeId) ?? null
       : segment.placeMatchKind === "learned" && segment.learnedPlaceId
@@ -77,7 +123,7 @@ export async function emitReviewSemanticSegments(
     return [{ segment, segmentId, clientEventId: `location-segment:${segment.clientSegmentId}`.slice(0, 160) }];
   }).sort((a, b) => a.clientEventId < b.clientEventId ? -1 : a.clientEventId > b.clientEventId ? 1 : 0);
   if (!candidates.length) return 0;
-  const context = await displayContext(client, session, candidates.map(row => row.segment));
+  const context = await displayContext(client, session, candidates.map(row => row.segment), stayIds);
   const eligible = candidates.filter(row => context(row.segment).trusted?.loggingEnabled !== false);
   const existing = new Map<string, { id: string; reviewStatus: string }>();
   for (const batch of chunks(eligible)) {
@@ -93,11 +139,12 @@ export async function emitReviewSemanticSegments(
     const reopened = await reopenSupersededReviews(client, session, batch.map((row) => row.id));
     for (const row of batch) if (reopened.has(row.id)) row.reviewStatus = "needs_review";
   }
-  const commuteCategoryId = eligible.some(row => row.segment.kind === "commute")
+  const commuteCategoryId = eligible.some(row => row.segment.kind === "commute" && !isTimeAway(row.segment))
     ? await ensureCommuteCategoryId(client, session) : null;
   const rows = eligible.map(({ segment, segmentId, clientEventId }) => {
     const { trusted, title } = context(segment);
-    const categoryId = segment.kind === "commute" ? commuteCategoryId : trusted?.categoryId ?? null;
+    // Time away suggests no category: the user chooses what it was.
+    const categoryId = isTimeAway(segment) ? null : segment.kind === "commute" ? commuteCategoryId : trusted?.categoryId ?? null;
     const placeId = trusted?.id ?? (segment.kind === "stay" ? segment.placeId ?? null : null);
     const disposition = locationSemanticDisposition("v2_review", segment);
     // Same pure overlap result as the original review path; never read time entries here.
@@ -139,6 +186,8 @@ export async function emitReviewSemanticSegments(
           // Only when Motion & Fitness supplied them, so other proposals' payloads do not change.
           ...(segment.travelMode ? { travelMode: segment.travelMode } : {}),
           ...(segment.motionSupported ? { motionSupported: true } : {}),
+          // Time away only: how many unnamed stops it included.
+          ...(isTimeAway(segment) && segment.stops?.length ? { stopCount: segment.stops.length } : {}),
           continuityStatus: segment.continuityStatus,
           startedAt: segment.startedAt,
           stoppedAt: segment.stoppedAt,

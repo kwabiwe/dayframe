@@ -219,6 +219,11 @@ export function formatEventLabel(value?: string | null) {
   return eventLabels[value] ?? formatMachineLabel(value);
 }
 
+/** Activity label; time away is a commute row but never a commute. */
+export function formatActivityEventLabel(event: { eventType?: string | null; timeAway?: boolean }) {
+  return event.timeAway ? "Time away" : formatEventLabel(event.eventType);
+}
+
 export function formatMachineLabel(value: string) {
   return value
     .split(/[_-]+/)

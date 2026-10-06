@@ -217,11 +217,15 @@ function adjacentV2StayReviewId(item: ReviewItemRow, candidates: ReviewItemRow[]
     .sort((a, b) => a.gap - b.gap || a.id.localeCompare(b.id))[0]?.id;
 }
 
-function reviewItemDisplay(item: ReviewItemRow) {
+export function reviewItemDisplay(item: ReviewItemRow) {
   const evidenceKind = typeof item.rawPayload?.evidenceKind === "string" ? item.rawPayload.evidenceKind : null;
   const eventType = item.eventType ?? item.type;
+  // Time away keeps its own title ("Time away from Home"): it is not a journey.
+  const timeAway = eventType === "commute_detected" && item.rawPayload?.qualificationReason === "same_place_outing";
   const kind =
-    eventType === "commute_detected"
+    timeAway
+      ? "Time away"
+      : eventType === "commute_detected"
       ? "Commute suggestion"
       : eventType === "learned_place_visit" || eventType === "geofence_exit" || evidenceKind === "learned_place"
         ? "Detected visit"

@@ -1,0 +1,336 @@
+import { describe, expect, it } from "vitest";
+import { assessAutomaticLocation } from "../src/location/automaticPolicy";
+import { deriveCommutes } from "../src/location/commute";
+import { LOCATION_ENGINE_V2_CONFIG as config } from "../src/location/config";
+import { runLocationEngine } from "../src/location/segmenter";
+import { isTimeAway, timeAwayTitle, tripStopsHeading } from "../src/location/tripStopPresentation";
+import type { ClassifiedEvidence, CommuteSegment, LocationEngineInput, LocationEvidence, StaySegment } from "../src/location/types";
+import { simulate, type Scenario, type SimPlace } from "./fixtures/captureSimulator";
+
+// Synthetic geometry only: Home at the origin; positions in metres east/north.
+const HOME_ID = "10000000-0000-4000-8000-0000000000c1";
+const WORK_ID = "10000000-0000-4000-8000-0000000000c2";
+const DEVICE = "20000000-0000-4000-8000-0000000000c1";
+const t0 = Date.parse("2026-03-10T12:00:00Z");
+const at = (minutes: number) => new Date(t0 + Math.round(minutes * 60_000)).toISOString();
+const minutes = (iso: string) => (Date.parse(iso) - t0) / 60_000;
+const north = (metres: number) => metres / 111_195;
+
+function fix(id: string, minute: number, northMetres: number, patch: Partial<LocationEvidence> = {}): LocationEvidence {
+  return {
+    clientEvidenceId: id, deviceId: DEVICE, algorithmVersion: config.algorithmVersion, kind: "standard_location",
+    occurredAt: at(minute), sourceTimestamp: at(minute), receivedAt: at(minute + 1), timeZone: "UTC", endedAt: null,
+    latitude: north(northMetres), longitude: 0, horizontalAccuracyMeters: 5, speedMetersPerSecond: 0, savedPlaceId: null,
+    isSimulated: false, metadata: {}, ...patch
+  };
+}
+const crossing = (id: string, minute: number, kind: "geofence_enter" | "geofence_exit") =>
+  fix(id, minute, 0, { kind, savedPlaceId: HOME_ID, latitude: null, longitude: null, horizontalAccuracyMeters: null, speedMetersPerSecond: null });
+const homeFixes = (prefix: string, from: number, to: number) =>
+  Array.from({ length: Math.floor((to - from) / 10) + 1 }, (_, i) => fix(`${prefix}-${i}`, from + i * 10, i % 2 * 3));
+
+const home = { id: HOME_ID, name: "Home", latitude: 0, longitude: 0, radiusMeters: 100, loggingEnabled: true };
+const work = { id: WORK_ID, name: "Work", latitude: north(3_000), longitude: 0, radiusMeters: 100, loggingEnabled: true };
+const input = (evidence: LocationEvidence[]): LocationEngineInput => ({
+  priorState: { algorithmVersion: config.algorithmVersion, mode: "idle", activeSegmentId: null, processedEvidenceIds: [], lastProcessedAt: null },
+  config, processingAt: at(600), evidence, savedPlaces: [home, work], acceptedLearnedPlaces: []
+});
+const commutesOf = (value: LocationEngineInput) =>
+  runLocationEngine(value).segmentUpserts.filter((segment): segment is CommuteSegment => segment.kind === "commute");
+const outings = (value: LocationEngineInput) => commutesOf(value).filter((commute) => commute.qualificationReason === "same_place_outing");
+
+const HOME_PLACE: SimPlace = { id: HOME_ID, name: "Home", at: { x: 0, y: 0 }, radius: 100, loggingEnabled: true };
+const shopRun = (kind: "drive" | "walk", metres = 300, stopMinutes = 6): Scenario => ({
+  start: "2026-03-10T12:00:00Z", origin: HOME_PLACE.at, places: [HOME_PLACE],
+  legs: [{ kind: "stay", minutes: 60 }, { kind, to: { x: metres, y: 0 } }, { kind: "stay", minutes: stopMinutes },
+    { kind, to: HOME_PLACE.at }, { kind: "stay", minutes: 90 }]
+});
+
+describe("time away from a saved place", () => {
+  it.each([1, 2, 3, 4, 5])("offers one Review item for a short drive to a shop and back (seed %s)", (seed) => {
+    const sim = simulate(shopRun("drive"), seed);
+    const all = commutesOf(sim.input());
+    const away = all.filter((commute) => commute.qualificationReason === "same_place_outing");
+    expect(away).toHaveLength(1);
+    expect(all).toHaveLength(1);
+    const [outing] = away;
+    expect(outing.fromPlaceId).toBe(HOME_ID);
+    expect(outing.toPlaceId).toBe(HOME_ID);
+    // The phone left a little after 13:00 and was back by about 13:07.
+    expect(minutes(outing.startedAt)).toBeGreaterThanOrEqual(59.5);
+    expect(minutes(outing.startedAt)).toBeLessThan(62);
+    expect(minutes(outing.stoppedAt)).toBeGreaterThan(65);
+    expect(minutes(outing.stoppedAt)).toBeLessThan(69);
+    expect(outing.confidence).toBe("low");
+    expect(assessAutomaticLocation("v2_enabled", { ...outing, status: "finalised" }))
+      .toMatchObject({ action: "review", reason: "time_away_review_only" });
+  });
+
+  it.each([1, 2, 3])("names the stop when the phone stopped somewhere on a walk out and back (seed %s)", (seed) => {
+    const away = outings(simulate(shopRun("walk"), seed).input());
+    expect(away).toHaveLength(1);
+    expect(away[0].stops).toHaveLength(1);
+  });
+
+  it("keeps the whole absence when the drive home passes inside the circle before parking (staging test 6 Oct)", () => {
+    // Out at 61 min, a stop about 195 m away, back at 68: a drive-by at 79 m (entry), out to 197 m (exit), then home.
+    const moving = (id: string, minute: number, metres: number, accuracy = 5) =>
+      fix(id, minute, metres, { speedMetersPerSecond: 9, horizontalAccuracyMeters: accuracy });
+    const evidence = [...homeFixes("am", 0, 60),
+      moving("out-0", 61, 150), moving("out-1", 61.2, 230), crossing("exit-0", 61.3, "geofence_exit"), moving("out-2", 61.5, 260),
+      fix("shop-0", 61.9, 192, { horizontalAccuracyMeters: 24 }), fix("shop-1", 63.1, 195, { horizontalAccuracyMeters: 15 }),
+      fix("shop-2", 63.6, 196, { horizontalAccuracyMeters: 3 }),
+      fix("by-0", 68.33, 79, { horizontalAccuracyMeters: 19 }), crossing("enter-0", 68.35, "geofence_enter"),
+      moving("by-1", 68.47, 77), moving("by-2", 68.65, 143), crossing("exit-1", 68.67, "geofence_exit"), moving("by-3", 68.8, 197),
+      moving("back-0", 69.55, 96, 2), crossing("enter-1", 69.57, "geofence_enter"), moving("back-1", 69.72, 25, 2),
+      ...homeFixes("pm", 72, 150)];
+    const away = outings(input(evidence));
+    expect(away).toHaveLength(1);
+    expect(minutes(away[0].startedAt)).toBeLessThan(61.5);
+    expect(minutes(away[0].stoppedAt)).toBeGreaterThan(68);
+  });
+
+  it("never folds ten minutes back at the place into one absence (Codex review of the drive-by fix)", () => {
+    // Out 300–350 m at 61–62, back home 63–73 (entry, a still fix inside), out again 74–75, home at 76.
+    const moving = (id: string, minute: number, metres: number) => fix(id, minute, metres, { speedMetersPerSecond: 9 });
+    const evidence = [...homeFixes("am", 0, 60), crossing("exit-0", 60.5, "geofence_exit"),
+      moving("out-0", 61, 300), moving("out-1", 62, 350), crossing("enter-0", 63, "geofence_enter"), fix("home-mid", 63.5, 20),
+      crossing("exit-1", 73, "geofence_exit"), moving("out-2", 74, 300), moving("out-3", 75, 350),
+      crossing("enter-1", 76, "geofence_enter"), ...homeFixes("pm", 76.5, 150)];
+    const away = outings(input(evidence));
+    expect(away.some((item) => minutes(item.startedAt) < 62 && minutes(item.stoppedAt) > 75)).toBe(false);
+    // One still reading just outside the circle during the return does not end it (Codex round 6).
+    const stray = outings(input([...evidence, fix("stray", 66.5, 145)]));
+    expect(stray.some((item) => minutes(item.startedAt) < 62 && minutes(item.stoppedAt) > 75)).toBe(false);
+  });
+
+  // Fable round 7: a pass-by well before parking, with and without a stop earlier in the absence.
+  const passBy = (withStop: boolean) => {
+    const moving = (id: string, minute: number, metres: number) => fix(id, minute, metres, { speedMetersPerSecond: 9 });
+    const stop = withStop ? [62.5, 63.5, 64.5, 65.5, 66.5, 67.5, 68.5, 69.5].map((m, i) => fix(`stop-${i}`, m, 400 + i % 2 * 3)) : [];
+    return [...homeFixes("am", 0, 60), crossing("exit-0", 60.25, "geofence_exit"), moving("out-0", 61, 300), moving("out-1", 62, 350), ...stop,
+      fix("by-0", 70, 60, { horizontalAccuracyMeters: 10 }), crossing("by-enter", 70.05, "geofence_enter"), crossing("by-exit", 70.42, "geofence_exit"),
+      ...[71, 72, 73, 74, 75, 76, 77, 78].map((m, i) => moving(`back-${i}`, m, 300 + i * 7)), crossing("enter", 79.3, "geofence_enter"),
+      ...homeFixes("pm", 79.5, 150)];
+  };
+  it.each([false, true])("never shortens the absence at a pass-by long before parking (stop earlier: %s)", (withStop) => {
+    const away = outings(input(passBy(withStop)));
+    expect(away).toHaveLength(1);
+    expect(minutes(away[0].startedAt)).toBeLessThan(61);
+    expect(away[0].stops?.length ?? 0).toBe(withStop ? 1 : 0);
+  });
+
+  it("never claims silent time at home after a return when iOS sends no exit (Fable round 7)", () => {
+    const moving = (id: string, minute: number, metres: number) => fix(id, minute, metres, { speedMetersPerSecond: 9 });
+    const evidence = [...homeFixes("am", 0, 60), crossing("exit-0", 60.5, "geofence_exit"),
+      ...[61, 62, 63, 64].map((m, i) => moving(`out-${i}`, m, 300 + i * 10)), crossing("enter-0", 69.5, "geofence_enter"),
+      fix("home-a", 70, 10), fix("home-b", 72, 12),
+      ...[102, 103, 104, 105, 106].map((m, i) => moving(`out2-${i}`, m, 300 + i * 10)), crossing("enter-1", 110, "geofence_enter"),
+      ...homeFixes("pm", 110.5, 200)];
+    const away = outings(input(evidence));
+    expect(away.some((item) => minutes(item.startedAt) < 100 && minutes(item.stoppedAt) > 105)).toBe(false);
+  });
+
+  // Fable round 8.
+  const mv = (id: string, minute: number, metres: number) => fix(id, minute, metres, { speedMetersPerSecond: 9 });
+  it("never folds a return split by an exit and re-entry into one absence", () => {
+    const evidence = [...homeFixes("am", 0, 60), crossing("x0", 60.5, "geofence_exit"), ...[61, 62, 63, 64].map((m, i) => mv(`o${i}`, m, 300 + i * 10)),
+      crossing("e1", 66, "geofence_enter"), fix("in", 66.5, 20), crossing("x1", 70.5, "geofence_exit"), crossing("e2", 71, "geofence_enter"),
+      crossing("x2", 74.5, "geofence_exit"), ...[75, 76, 77, 78].map((m, i) => mv(`p${i}`, m, 300 + i * 10)),
+      crossing("e3", 80, "geofence_enter"), ...homeFixes("pm", 80.5, 150)];
+    const away = outings(input(evidence));
+    expect(away.some((item) => minutes(item.startedAt) < 65 && minutes(item.stoppedAt) > 75)).toBe(false);
+    // The later outing starts when the phone left again, with its own start bounds.
+    const later = away.find((item) => minutes(item.startedAt) >= 70);
+    expect(later && minutes(later.startLowerBoundAt!)).toBeGreaterThanOrEqual(66);
+  });
+
+  it("still offers the later outing after a return when the earlier outing had a stop", () => {
+    const evidence = [...homeFixes("am", 0, 60), crossing("x0", 60.5, "geofence_exit"), mv("o0", 61, 300), mv("o1", 62, 350),
+      ...[62.5, 63.5, 64.5, 65.5, 66.5, 67.5, 68.5, 69.5].map((m, i) => fix(`s${i}`, m, 400 + i % 2 * 3)), mv("b0", 70.5, 300), mv("b1", 71.5, 200),
+      crossing("e1", 72, "geofence_enter"), fix("in", 72.5, 10), crossing("x1", 80, "geofence_exit"),
+      ...[81, 82, 83, 84].map((m, i) => mv(`p${i}`, m, 300 + i * 10)), crossing("e2", 86, "geofence_enter"), ...homeFixes("pm", 86.5, 150)];
+    const away = outings(input(evidence));
+    expect(away.some((item) => minutes(item.startedAt) >= 79 && minutes(item.stoppedAt) <= 86.5)).toBe(true);
+    expect(away.some((item) => minutes(item.startedAt) < 72 && minutes(item.stoppedAt) > 80)).toBe(false);
+  });
+
+  it("never treats simulated readings as leaving the place", () => {
+    const evidence = [...homeFixes("am", 0, 60), crossing("x0", 60.5, "geofence_exit"),
+      ...[61, 62, 63, 64].map((m, i) => fix(`sim${i}`, m, 300 + i * 10, { speedMetersPerSecond: 9, isSimulated: true })),
+      crossing("e1", 72, "geofence_enter"), ...homeFixes("pm", 72.5, 150)];
+    expect(outings(input(evidence))).toEqual([]);
+  });
+
+  // Fable round 9: a return home before the first clear reading away; bounds; a stale leaving sign; simulated presence.
+  it("never folds a return home before the first clear reading into the absence", () => {
+    const evidence = [...homeFixes("am", 0, 60), crossing("x0", 61.9, "geofence_exit"),
+      ...[62.5, 63.5, 64.5, 65.5, 66.5, 67.5, 68.5, 69.5].map((m, i) => fix(`near-${i}`, m, 140 + i % 2 * 2)),
+      crossing("e1", 70, "geofence_enter"), fix("in", 70.5, 10), crossing("x1", 76, "geofence_exit"),
+      ...[76.5, 77.5, 78.5, 79.5].map((m, i) => mv(`far-${i}`, m, 300 + i * 10)), crossing("e2", 86, "geofence_enter"), ...homeFixes("pm", 86.5, 150)];
+    const away = outings(input(evidence));
+    expect(away.some((item) => minutes(item.startedAt) < 75.9)).toBe(false);
+    for (const item of away) {
+      expect(Date.parse(item.startLowerBoundAt!)).toBeLessThanOrEqual(Date.parse(item.startedAt));
+      expect(Date.parse(item.startUpperBoundAt!)).toBeGreaterThanOrEqual(Date.parse(item.startedAt));
+    }
+  });
+
+  it("keeps an item's start inside its bounds when a stop shows the leaving", () => {
+    const stopAt = (prefix: string, from: number) => [0, 1, 2, 3, 4, 5, 6, 7].map((i) => fix(`${prefix}-${i}`, from + i, 140 + i % 2 * 2));
+    const evidence = [...homeFixes("am", 0, 60), crossing("x0", 61.9, "geofence_exit"), ...stopAt("s1", 62.5),
+      crossing("e1", 70, "geofence_enter"), fix("in", 70.5, 10), crossing("x1", 76, "geofence_exit"), mv("m", 76.5, 140), ...stopAt("s2", 77),
+      crossing("e2", 85.5, "geofence_enter"), ...homeFixes("pm", 86, 150)];
+    for (const item of outings(input(evidence))) {
+      expect(Date.parse(item.startLowerBoundAt!)).toBeLessThanOrEqual(Date.parse(item.startedAt));
+      expect(Date.parse(item.startUpperBoundAt!)).toBeGreaterThanOrEqual(Date.parse(item.startedAt));
+    }
+  });
+
+  it("never confirms a leaving sign with a clear reading long after it", () => {
+    const evidence = [...homeFixes("am", 0, 60), crossing("x0", 60.5, "geofence_exit"), ...[61, 62, 63, 64].map((m, i) => mv(`o${i}`, m, 300 + i * 10)),
+      crossing("e1", 66, "geofence_enter"), fix("in", 66.5, 10), crossing("x1", 68, "geofence_exit"),
+      ...[81, 82, 83, 84].map((m, i) => mv(`p${i}`, m, 300 + i * 10)), crossing("e2", 86, "geofence_enter"), ...homeFixes("pm", 86.5, 150)];
+    const away = outings(input(evidence));
+    expect(away.some((item) => minutes(item.startedAt) < 65 && minutes(item.stoppedAt) > 80)).toBe(false);
+  });
+
+  it("never treats a simulated reading as being back at the place", () => {
+    const evidence = [...homeFixes("am", 0, 60), crossing("x0", 60.5, "geofence_exit"), ...[61, 62, 63, 64].map((m, i) => mv(`o${i}`, m, 300 + i * 10)),
+      fix("sim-in", 66, 20, { isSimulated: true }), ...[67, 68, 69, 70].map((m, i) => mv(`p${i}`, m, 320 + i * 10)),
+      crossing("e2", 80, "geofence_enter"), ...homeFixes("pm", 80.5, 150)];
+    const away = outings(input(evidence));
+    expect(away.some((item) => minutes(item.startedAt) < 62 && minutes(item.stoppedAt) >= 79)).toBe(true);
+  });
+
+  // Fable round 10: a return home before the first clear reading with no leaving sign before it.
+  const nearThenHome = (tail: LocationEvidence[]) => [...homeFixes("am", 0, 60), crossing("x0", 61.9, "geofence_exit"),
+    ...[62.5, 63.5, 64.5, 65.5, 66.5, 67.5, 68.5, 69.5].map((m, i) => fix(`near-${i}`, m, 140 + i % 2 * 2)), ...tail];
+  it.each([
+    ["no exit", [crossing("e1", 70, "geofence_enter"), fix("in", 70.5, 10), ...[86, 87, 88, 89].map((m, i) => mv(`far-${i}`, m, 300 + i * 10)),
+      crossing("e2", 95, "geofence_enter"), ...homeFixes("pm", 95.5, 160)], 85.9],
+    ["exit just after the first clear reading", [crossing("e1", 70, "geofence_enter"), fix("in", 70.5, 10),
+      ...[86, 87, 88, 89].map((m, i) => mv(`far-${i}`, m, 300 + i * 10)), crossing("x1", 86.33, "geofence_exit"),
+      crossing("e2", 95, "geofence_enter"), ...homeFixes("pm", 95.5, 160)], 85.9],
+    ["an exit long before the first clear reading", [crossing("e1", 70, "geofence_enter"), fix("in", 70.5, 10), crossing("x1", 71, "geofence_exit"),
+      ...[90, 91, 92, 93].map((m, i) => mv(`far-${i}`, m, 300 + i * 10)), crossing("e2", 100, "geofence_enter"), ...homeFixes("pm", 100.5, 160)], 89.9]
+  ] as const)("never claims time back home before the outing that went clearly away (%s)", (_label, tail, earliest) => {
+    for (const item of outings(input(nearThenHome([...tail])))) expect(minutes(item.startedAt)).toBeGreaterThanOrEqual(earliest);
+  });
+
+  it("offers nothing from geofence callbacks alone, without readings away", () => {
+    const evidence = [...homeFixes("am", 0, 60), crossing("exit", 61, "geofence_exit"), crossing("enter", 71, "geofence_enter"),
+      ...homeFixes("pm", 72, 150)];
+    expect(outings(input(evidence))).toEqual([]);
+  });
+
+  it("offers nothing when the readings away stay within 150 m of the place", () => {
+    const evidence = [...homeFixes("am", 0, 60), crossing("exit", 60.5, "geofence_exit"),
+      fix("near-0", 62, 120), fix("near-1", 64, 130), fix("near-2", 66, 125), crossing("enter", 68, "geofence_enter"),
+      ...homeFixes("pm", 69, 150)];
+    expect(outings(input(evidence))).toEqual([]);
+  });
+
+  it("measures the 150 m from the place itself, not from where the stay was observed (review finding 2)", () => {
+    // Home stay observed 60 m south of the pin; readings 140–145 m north of it are under 150 m from Home.
+    const south = (prefix: string, from: number, to: number) => homeFixes(prefix, from, to).map((item) => ({ ...item, latitude: north(-60) }));
+    const evidence = [...south("am", 0, 60), crossing("exit", 60.5, "geofence_exit"),
+      fix("near-0", 62, 140), fix("near-1", 65, 145), crossing("enter", 70, "geofence_enter"), ...south("pm", 71, 150)];
+    expect(outings(input(evidence))).toEqual([]);
+  });
+
+  it("offers time away from an accepted learned place, measured from its centre", () => {
+    const awayFixes = [fix("away-0", 62, 300, { speedMetersPerSecond: 10 }), fix("away-1", 64, 320), fix("away-2", 66, 310),
+      fix("away-3", 68, 200, { speedMetersPerSecond: 10 })];
+    const evidence = [...homeFixes("am", 0, 60), ...awayFixes, ...homeFixes("pm", 70, 150)];
+    const learned = { ...home, id: "10000000-0000-4000-8000-0000000000c9", accepted: true as const };
+    const away = outings({ ...input(evidence), savedPlaces: [], acceptedLearnedPlaces: [learned] });
+    expect(away).toHaveLength(1);
+    expect(away[0]).toMatchObject({ fromPlaceId: null, qualificationReason: "same_place_outing" });
+  });
+
+  it("offers nothing around a stop when neither stay was identified as the place (Fable review)", () => {
+    const stay = (id: string, from: number, to: number, kind: StaySegment["placeMatchKind"]): StaySegment => ({
+      kind: "stay", clientSegmentId: id, algorithmVersion: config.algorithmVersion, status: "finalised", startedAt: at(from), stoppedAt: at(to),
+      placeId: kind === "unknown" ? null : HOME_ID, placeMatchKind: kind, candidatePlaceIds: [], centreLatitude: 0, centreLongitude: 0,
+      radiusMeters: 100, sampleCount: 3, continuityStatus: "continuous", confidence: "medium", evidenceIds: []
+    });
+    const route = [fix("r-0", 61, 400, { speedMetersPerSecond: 3 }), fix("r-1", 69, 380, { speedMetersPerSecond: 3 })]
+      .map((evidence): ClassifiedEvidence => ({ evidence, match: null, impliedSpeedMetersPerSecond: null }));
+    const derive = (kind: StaySegment["placeMatchKind"]) => deriveCommutes([stay("a", 0, 60, kind), stay("b", 70, 150, kind)], route,
+      config, at(600), { interiorStops: [stay("stop", 63, 67, "unknown")], savedPlaces: [home] })
+      .filter((commute) => commute.qualificationReason === "same_place_outing");
+    expect(derive("saved")).toHaveLength(1);
+    expect(derive("ambiguous")).toEqual([]);
+  });
+
+  it("counts a reading and its mirrored copy as one observation (round 2 finding 2)", () => {
+    const mirrored = (seconds: number) => [fix("std", 63, 300), fix("sig", 63 + seconds / 60, 301, { kind: "significant_change" })];
+    const run = (seconds: number) => outings(input([...homeFixes("am", 0, 60), crossing("exit", 60.5, "geofence_exit"),
+      ...mirrored(seconds), crossing("enter", 70, "geofence_enter"), ...homeFixes("pm", 71, 150)]));
+    expect(run(0)).toEqual([]);
+    expect(run(4)).toEqual([]);
+    expect(run(60)).toHaveLength(1);
+  });
+
+  it("counts two distinct readings from the same source seconds apart (round 3 finding 1)", () => {
+    const run = (seconds: number) => outings(input([...homeFixes("am", 0, 60), crossing("exit", 60.5, "geofence_exit"),
+      fix("a", 63, 300), fix("b", 63 + seconds / 60, 375), crossing("enter", 70, "geofence_enter"), ...homeFixes("pm", 71, 150)]));
+    expect(run(4)).toHaveLength(1);
+  });
+
+  it("offers nothing for an absence under five minutes", () => {
+    const evidence = [...homeFixes("am", 0, 60), crossing("exit", 60.5, "geofence_exit"),
+      fix("away-0", 61.5, 300, { speedMetersPerSecond: 10 }), fix("away-1", 62.5, 320), fix("away-2", 63.5, 280, { speedMetersPerSecond: 10 }),
+      crossing("enter", 64.5, "geofence_enter"), ...homeFixes("pm", 65, 150)];
+    expect(outings(input(evidence))).toEqual([]);
+  });
+
+  it("offers nothing for an absence over six hours", () => {
+    const evidence = [...homeFixes("am", 0, 60), crossing("exit", 60.5, "geofence_exit"),
+      fix("away-0", 62, 400, { speedMetersPerSecond: 10 }), fix("away-1", 64, 420), fix("away-2", 425, 410),
+      fix("away-3", 427, 200, { speedMetersPerSecond: 10 }), crossing("enter", 428, "geofence_enter"), ...homeFixes("pm", 429, 500)];
+    expect(outings(input(evidence))).toEqual([]);
+  });
+
+  it("leaves a qualifying round trip as a journey, not time away", () => {
+    const sim = simulate({ ...shopRun("drive", 2_000, 0), legs: [{ kind: "stay", minutes: 60 }, { kind: "drive", to: { x: 0, y: 1_800 } },
+      { kind: "drive", to: HOME_PLACE.at }, { kind: "stay", minutes: 90 }] }, 1);
+    const all = commutesOf(sim.input());
+    expect(all.filter((commute) => commute.qualificationReason === "same_place_meaningful_round_trip")).toHaveLength(1);
+    expect(all.filter((commute) => commute.qualificationReason === "same_place_outing")).toEqual([]);
+  });
+
+  // Broad-accuracy outing through two unsaved stops: on these seeds the first
+  // leg (Home to a stop) qualifies on its own; the rest does not.
+  const broadOuting: Scenario = { start: "2026-03-10T12:00:00Z", origin: HOME_PLACE.at, places: [HOME_PLACE], legs: [
+    { kind: "stay", minutes: 60 }, { kind: "drive", to: { x: 1_500, y: 300 }, accuracy: [100, 150] }, { kind: "stay", minutes: 6 },
+    { kind: "drive", to: { x: 1_900, y: 900 }, accuracy: [100, 150] }, { kind: "stay", minutes: 7 },
+    { kind: "drive", to: HOME_PLACE.at, via: [{ x: 900, y: 600 }], accuracy: [100, 150] }, { kind: "stay", minutes: 90 }] };
+  it.each([6, 24, 29])("never folds a journey that qualified into time away (seed %s)", (seed) => {
+    const all = commutesOf(simulate(broadOuting, seed).input());
+    expect(all.filter((commute) => commute.qualificationReason !== "same_place_outing")).toHaveLength(1);
+    expect(all.filter((commute) => commute.qualificationReason === "same_place_outing")).toEqual([]);
+  });
+
+  it("never offers time away between two different places", () => {
+    const evidence = [...homeFixes("am", 0, 60), crossing("exit", 60.5, "geofence_exit"),
+      ...[0, 1, 2, 3].map((i) => fix(`drive-${i}`, 61 + i, 600 + i * 600, { speedMetersPerSecond: 12 })),
+      ...[66, 76, 86].map((m, i) => fix(`work-${i}`, m, 3_000 + i % 2 * 3))];
+    expect(outings(input(evidence))).toEqual([]);
+  });
+});
+
+describe("time away presentation", () => {
+  it("names the place and recognises only time-away journeys", () => {
+    expect(timeAwayTitle("Home")).toBe("Time away from Home");
+    expect(timeAwayTitle("  ")).toBe("Time away");
+    expect(timeAwayTitle(null)).toBe("Time away");
+    expect(isTimeAway({ kind: "commute", qualificationReason: "same_place_outing" })).toBe(true);
+    expect(isTimeAway({ kind: "commute", qualificationReason: "same_place_meaningful_round_trip" })).toBe(false);
+    expect(isTimeAway({ kind: "stay" })).toBe(false);
+    const stop = { startedAt: "2026-03-10T12:03:00.000Z", stoppedAt: "2026-03-10T12:09:00.000Z", durationSeconds: 360, approximate: false };
+    expect(tripStopsHeading([stop], true)).toBe("1 stop while you were away");
+    expect(tripStopsHeading([stop])).toBe("1 stop on this trip");
+  });
+});

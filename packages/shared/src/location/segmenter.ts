@@ -1859,12 +1859,14 @@ function runLocationEnginePass(input: LocationEngineInput): { output: LocationEn
   const legs = deriveCommutes(stays, acceptedWithMotion, input.config, input.processingAt, {
     inferredBoundaryStayIds,
     arrivalWitnesses: arrivalAnalysis.witnesses,
-    savedPlaces: input.savedPlaces
+    savedPlaces: input.savedPlaces,
+    learnedPlaces: input.acceptedLearnedPlaces
   });
   const commutes = assembleTripsThroughStops(legs, stays, acceptedWithMotion, input.config, input.processingAt, {
     inferredBoundaryStayIds,
     arrivalWitnesses: arrivalAnalysis.witnesses,
-    savedPlaces: input.savedPlaces
+    savedPlaces: input.savedPlaces,
+    learnedPlaces: input.acceptedLearnedPlaces
   });
   const segments = [...stays, ...commutes].sort((a, b) => Date.parse(a.startedAt) - Date.parse(b.startedAt) || a.kind.localeCompare(b.kind));
   const finalisedSegments = segments.filter((segment) => segment.status === "finalised");

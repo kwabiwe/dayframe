@@ -31,6 +31,8 @@ export function LocationEvidenceMap({
 }: Props) {
   const samples = evidence.map.acceptedSamples;
   const shouldShowSavedPlaces = showDetails || evidence.segment.kind === "stay";
+  // Time away has no route line, so its readings are the evidence to inspect.
+  const shouldShowSamples = showDetails || evidence.segment.timeAway === true;
   const coordinates = [
     ...samples.map((sample) => ({
       latitude: sample.point.coordinates[1],
@@ -81,7 +83,9 @@ export function LocationEvidenceMap({
       <MapView
         accessibilityLabel={showDetails
           ? `Location evidence map. ${evidence.textualSummary}`
-          : evidence.segment.kind === "commute"
+          : evidence.segment.timeAway
+            ? "Map of readings while you were away."
+            : evidence.segment.kind === "commute"
             ? `Approximate commute map with Start and End markers${usesApproximateFallback ? ". Detailed path unavailable" : ""}.`
             : "Map showing the detected visit location."}
         initialRegion={{ ...centre, latitudeDelta, longitudeDelta }}
@@ -120,7 +124,7 @@ export function LocationEvidenceMap({
             strokeWidth={2}
           />
         ) : null}
-        {showDetails ? samples.map((sample) => (
+        {shouldShowSamples ? samples.map((sample) => (
           <Circle
             key={sample.id}
             center={{ latitude: sample.point.coordinates[1], longitude: sample.point.coordinates[0] }}

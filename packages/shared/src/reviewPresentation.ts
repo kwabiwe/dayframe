@@ -8,6 +8,13 @@ const instant = z.iso
 const uuid = z.string().uuid();
 
 export const REVIEW_PRESENTATION_VERSION = 1 as const;
+/**
+ * Request header listing optional presentation fields a client understands.
+ * Records are parsed strictly, so a field is only sent to clients that ask.
+ */
+export const REVIEW_PRESENTATION_FEATURES_HEADER = "x-dayframe-review-features";
+/** Feature: Location Review items for time away from a saved place carry `timeAway`. */
+export const REVIEW_PRESENTATION_TIME_AWAY_FEATURE = "time-away";
 export const REVIEW_PRESENTATION_DEFAULT_LIMIT = 100;
 export const REVIEW_PRESENTATION_MAX_LIMIT = 200;
 export const REVIEW_PRESENTATION_MAX_IDS = 100;
@@ -172,7 +179,9 @@ export const ReviewProposalPresentationSchema = z
     updatedAt: instant,
     proposalHash: z.string().regex(/^[a-f0-9]{64}$/).nullable(),
     canonicalEntryIds: z.array(uuid).max(25),
-    semanticRevision: z.string().max(100).nullable()
+    semanticRevision: z.string().max(100).nullable(),
+    /** Time away from a saved place (only for clients sending the time-away feature). */
+    timeAway: z.object({ stopCount: z.number().int().nonnegative().max(100) }).strict().optional()
   })
   .strict();
 

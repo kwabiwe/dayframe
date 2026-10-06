@@ -39,6 +39,7 @@ type ReviewSegmentRow = {
   toLatitude: number | null;
   tripStops: unknown;
   travelMode: string | null;
+  timeAway: boolean;
 };
 
 type RejectedEvidenceRow = {
@@ -153,7 +154,8 @@ async function buildLocationReviewEvidence(
             case when to_stay.centre is null then null else ST_X(to_stay.centre::geometry) end as "toLongitude",
             case when to_stay.centre is null then null else ST_Y(to_stay.centre::geometry) end as "toLatitude",
             cs.metadata->'stops' as "tripStops",
-            cs.metadata->>'travelMode' as "travelMode"
+            cs.metadata->>'travelMode' as "travelMode",
+            coalesce(cs.metadata->>'qualificationReason' = 'same_place_outing', false) as "timeAway"
      from review_items ri
      join activity_events ae
        on ae.id = ri.event_id and ae.workspace_id = ri.workspace_id and ae.user_id = ri.user_id
@@ -243,10 +245,12 @@ async function buildLocationReviewEvidence(
   );
   const stops = kind === "commute" ? tripStops(review.tripStops) : [];
   const gaps = evidenceGaps(coordinateRows, stops);
-  const routeCoordinates = kind === "commute"
+  // Time away claims only the absence: its readings stay inspectable, but it has no route or endpoint line.
+  const journey = kind === "commute" && !review.timeAway;
+  const routeCoordinates = journey
     ? coordinateRows.map((row) => [row.longitude, row.latitude] as [number, number])
     : [];
-  const straightLineCoordinates = kind === "commute" &&
+  const straightLineCoordinates = journey &&
     review.fromLongitude != null && review.fromLatitude != null &&
     review.toLongitude != null && review.toLatitude != null
     ? [[review.fromLongitude, review.fromLatitude], [review.toLongitude, review.toLatitude]] as [[number, number], [number, number]]
@@ -287,7 +291,8 @@ async function buildLocationReviewEvidence(
       algorithmVersion: review.algorithmVersion,
       evidenceCount: evidenceResult.rows.length,
       rejectedEvidenceCount: rejectedResult.rows.length,
-      ...(kind === "commute" ? { travelMode: MotionTravelModeSchema.safeParse(review.travelMode).data ?? null } : {})
+      ...(kind === "commute" ? { travelMode: MotionTravelModeSchema.safeParse(review.travelMode).data ?? null } : {}),
+      ...(kind === "commute" && review.timeAway ? { timeAway: true } : {})
     },
     display: {
       title: review.title,
@@ -509,7 +514,7 @@ function textualEvidenceSummary(
   review: ReviewSegmentRow,
   stops: TripStopDto[] = []
 ) {
-  const subject = kind === "stay" ? "visit" : "journey";
+  const subject = kind === "stay" ? "visit" : review.timeAway ? "time away" : "journey";
   const place = review.placeName ? ` near ${review.placeName}` : "";
   const window = `${iso(review.startedAt)} to ${iso(review.stoppedAt) ?? "ongoing"}`;
   const candidates = placeCandidates.length ? placeCandidates.join(", ") : "none within 500 metres";
@@ -526,7 +531,7 @@ function textualEvidenceSummary(
   const stopSummary = stops.map((stop) => {
     const minutes = Math.max(1, Math.round(stop.durationSeconds / 60));
     const article = /^8/.test(String(minutes)) || minutes === 11 || minutes === 18 ? "an" : "a";
-    return ` It includes ${article} ${minutes}-minute${stop.approximate ? " (approximate)" : ""} stop from ${stop.startedAt} to ${stop.stoppedAt}; the stop is part of this trip, not travel time.`;
+    return ` It includes ${article} ${minutes}-minute${stop.approximate ? " (approximate)" : ""} stop from ${stop.startedAt} to ${stop.stoppedAt}; the stop is part of this ${review.timeAway ? "time away" : "trip, not travel time"}.`;
   }).join("");
   return `Time window: ${window}.${stopSummary} This ${subject}${place} has ${sampleCount} mapped sample${sampleCount === 1 ? "" : "s"} and ${anchorCount} arrival or departure anchor${anchorCount === 1 ? "" : "s"}.${rejected} Place candidates: ${candidates}. Largest evidence gap: ${largestGap} minutes. ${splitReason} ${retention}`;
 }

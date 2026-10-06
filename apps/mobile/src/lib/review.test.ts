@@ -20,6 +20,7 @@ import {
   restoreReviewItemOptimistically,
   reviewActionOrder,
   reviewConfidencePresentation,
+  isTimeAwayReviewItem,
   reviewConfirmLabel,
   reviewItemCategoryLabel,
   reviewItemDurationSeconds,
@@ -223,6 +224,15 @@ describe("mobile review helpers", () => {
     expect(reviewItemCategoryLabel(commute)).toBe("Commute");
     expect(reviewConfirmLabel(commute)).toBe("Confirm commute");
     expect(reviewConfirmLabel(visit)).toBe("Confirm visit");
+    // Time away from a place is not a journey: no Commute category or wording.
+    const away = { ...commute, rawPayload: { qualificationReason: "same_place_outing" } };
+    expect(isTimeAwayReviewItem(away)).toBe(true);
+    expect(isTimeAwayReviewItem(commute)).toBe(false);
+    expect(reviewItemCategoryLabel(away)).toBe("No category");
+    expect(reviewConfirmLabel(away)).toBe("Confirm time away");
+    const draft = buildReviewItemDraftEntry({ ...away, title: "Time away from Home", suggestedCategoryId: null, categoryName: null,
+      suggestedStartedAt: "2026-03-10T12:00:00.000Z", suggestedStoppedAt: "2026-03-10T12:10:00.000Z" }, [], Date.now());
+    expect(draft).toMatchObject({ description: "Time away from Home", categoryId: null });
     expect(reviewConfirmLabel(reviewItem())).toBe("Confirm activity");
   });
 
@@ -266,6 +276,10 @@ describe("mobile review helpers", () => {
       ...commute,
       rawPayload: { semanticReason: "motion_review_only" }
     })).toBe("Needs review · timed from Motion & Fitness");
+    expect(locationReviewReasonCopy({
+      ...commute,
+      rawPayload: { semanticReason: "time_away_review_only", qualificationReason: "same_place_outing" }
+    })).toBe("Needs review · time away isn’t added automatically");
     expect(locationReviewReasonCopy({
       ...commute,
       rawPayload: { semanticReason: "insufficient_route_evidence" }

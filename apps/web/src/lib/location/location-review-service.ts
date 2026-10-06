@@ -30,6 +30,8 @@ type LockedReview = {
   suggestedStoppedAt: Date | string;
   segmentId: string;
   segmentKind: "stay" | "commute";
+  /** A commute row holding time away from a place (never a journey). */
+  timeAway: boolean;
   segmentStatus: string;
   deviceId: string | null;
   algorithmVersion: string | null;
@@ -215,6 +217,7 @@ async function lockLocationReviews(
             ri.suggested_stopped_at as "suggestedStoppedAt",
             ri.location_segment_id as "segmentId",
             case when st.id is not null then 'stay' else 'commute' end as "segmentKind",
+            coalesce(cs.metadata ->> 'qualificationReason' = 'same_place_outing', false) as "timeAway",
             coalesce(st.status, cs.status) as "segmentStatus",
             coalesce(st.device_id, cs.device_id) as "deviceId",
             coalesce(st.algorithm_version, cs.algorithm_version) as "algorithmVersion",
@@ -418,7 +421,7 @@ async function locationEditMatchesExisting(
   const expectedCategory = await confirmedLocationCategoryId(
     client,
     session,
-    item.segmentKind,
+    entryKind(item),
     item.suggestedCategoryId,
     edit
   );
@@ -432,7 +435,7 @@ async function locationEditMatchesExisting(
     entry.categoryId !== expectedCategory ||
     entry.placeId !== expectedPlace ||
     entry.placeLabel !== expectedPlaceLabel ||
-    (entry.description ?? "") !== (confirmedLocationDescription(item.segmentKind, item.title, edit) ?? "") ||
+    (entry.description ?? "") !== (confirmedLocationDescription(entryKind(item), item.title, edit) ?? "") ||
     new Date(entry.startedAt).toISOString() !== new Date(edit.startedAt ?? item.suggestedStartedAt).toISOString() ||
     new Date(entry.stoppedAt).toISOString() !== new Date(edit.stoppedAt ?? item.suggestedStoppedAt).toISOString()
   ) {
@@ -527,7 +530,7 @@ async function confirmReview(
   const categoryId = await confirmedLocationCategoryId(
     client,
     session,
-    item.segmentKind,
+    entryKind(item),
     item.suggestedCategoryId,
     edit
   );
@@ -552,7 +555,7 @@ async function confirmReview(
       placeId,
       placeLabel,
       item.confidence,
-      confirmedLocationDescription(item.segmentKind, item.title, edit),
+      confirmedLocationDescription(entryKind(item), item.title, edit),
       window.startedAt,
       window.stoppedAt,
       item.eventId
@@ -582,8 +585,14 @@ async function confirmReview(
   return { ok: true, action, status: "accepted", entryId };
 }
 
+/** What a confirmed Review becomes: a stay, a journey, or time away from a place. */
+type LocationEntryKind = LockedReview["segmentKind"] | "time_away";
+function entryKind(item: Pick<LockedReview, "segmentKind" | "timeAway">): LocationEntryKind {
+  return item.segmentKind === "commute" && item.timeAway ? "time_away" : item.segmentKind;
+}
+
 export function confirmedLocationDescription(
-  segmentKind: LockedReview["segmentKind"],
+  segmentKind: LocationEntryKind,
   title: string,
   edit: ReviewEntryEdit | undefined
 ) {
@@ -594,7 +603,7 @@ export function confirmedLocationDescription(
 export async function confirmedLocationCategoryId(
   client: pg.PoolClient,
   session: RequestSession,
-  segmentKind: LockedReview["segmentKind"],
+  segmentKind: LocationEntryKind,
   suggestedCategoryId: string | null,
   edit: ReviewEntryEdit | undefined
 ) {

@@ -20,7 +20,7 @@ import {
   type DashboardMode,
   type DashboardPeriod
 } from "@/lib/dashboard-intelligence";
-import { formatDuration, formatEventLabel, formatSourceLabel, formatTime } from "@/lib/format";
+import { formatActivityEventLabel, formatDuration, formatSourceLabel, formatTime } from "@/lib/format";
 import type { BootstrapData } from "@/lib/queries";
 import { useRuntimePageData } from "@/components/AppShellRuntime";
 import { SegmentedControl } from "@/components/ui/Primitives";
@@ -425,9 +425,9 @@ function RecentActivityPanel({ data }: { data: BootstrapData }) {
             <div key={event.id} className="dashboard-activity-row">
               <Icon size={18} aria-hidden="true" />
               <span>
-                <strong>{event.categoryName ?? event.placeName ?? formatEventLabel(event.eventType)}</strong>
+                <strong>{event.categoryName ?? event.placeName ?? formatActivityEventLabel(event)}</strong>
                 <small>
-                  {[formatEventLabel(event.eventType), event.placeName, formatSourceLabel(event.source)]
+                  {[formatActivityEventLabel(event), event.placeName, formatSourceLabel(event.source)]
                     .filter((part, index, parts) => part && parts.indexOf(part) === index)
                     .join(" · ")}
                 </small>
