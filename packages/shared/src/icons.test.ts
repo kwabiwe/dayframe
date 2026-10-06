@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import {
   DAYFRAME_ACTIVITY_ICONS,
@@ -55,9 +56,23 @@ describe("Dayframe icon set", () => {
     ["Errands", "errands"], ["Shopping", "errands"], ["Cooking dinner", "cooking"], ["Lunch", "meals"],
     ["Guitar practice", "instrument"], ["Reading", "learning"], ["Spanish lesson", "languages"],
     ["Client work", "office"], ["Deep work", "focus"], ["Work", "work"], ["Commute", "commute"],
-    ["Dog walk", "pets"], ["Brunch with friends", "social"], ["Admin", "admin"], ["Code review", "code"]
-  ])("suggests an icon for %s", (name, key) => {
+    ["Dog walk", "pets"], ["Brunch with friends", "social"], ["Admin", "admin"], ["Code review", "code"],
+    ["School run", "childcare"], ["Running errands", "errands"], ["Café", "coffee"], ["Cafe\u0301 visit", "coffee"],
+    ["Taxi", "journey"], ["Tax return", "finances"], ["Personal development", "personal"], ["Software development", "code"],
+    ["Emails", "email"], ["Spin class", "gym"], ["Boxing class", "gym"], ["Golf", "gym"], ["Football", "gym"],
+    ["Tennis", "gym"], ["Sleep cycle", "sleep"], ["Car pool", "commute"], ["Life coach", "personal"],
+    ["Release date", null], ["Date night", "partner"], ["Work out", "gym"], ["Birthday party", "events"],
+    ["Courses", "study"], ["Exercises", "gym"], ["Naps", "sleep"], ["Runs", "gym"], ["Hikes", "hiking"]
+  ] as Array<[string, string | null]>)("suggests an icon for %s", (name, key) => {
     expect(activityIconKeyForName(name)).toBe(key);
+  });
+
+  it("carries the Lucide and Feather licence notices with the copied glyphs", () => {
+    const registry = readFileSync(new URL("./iconGlyphs.ts", import.meta.url), "utf8");
+    expect(registry).toContain("Copyright (c) 2026 Lucide Icons and Contributors");
+    expect(registry).toContain("copyright notice and this permission notice appear in all copies");
+    expect(registry).toContain("Copyright (c) 2013-present Cole Bemis");
+    expect(registry).toContain("The above copyright notice and this permission notice shall be included in");
   });
 
   it("suggests nothing for names it cannot place", () => {

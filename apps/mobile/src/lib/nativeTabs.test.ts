@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
@@ -36,9 +37,25 @@ describe("native tab configuration", () => {
       expect(tabsLayout).toContain(`require("../../assets/tab-icons/${tab}.png")`);
       expect(tabsLayout).toContain(`<NativeTabs.Trigger.Icon src={DAYFRAME_TAB_ICON_IMAGES.${tab}} renderingMode="template" />`);
     }
+    // Blocks: selected navigation is neutral. Coral stays for recording and the primary action.
+    expect(tabsLayout).not.toContain("theme.accentText");
+    expect(tabsLayout.match(/theme\.textPrimary/g)?.length).toBe(3);
     // UIKit owns the glass material, so the layout must not set a background or blur of its own.
     expect(tabsLayout).not.toMatch(/backgroundColor=|blurEffect=|disableTransparentOnScrollEdge/);
     expect(DAYFRAME_NATIVE_TAB_MINIMIZE_BEHAVIOR).toBe("onScrollDown");
+  });
+
+  it("ships tab images at 26 pt for each scale with the bytes the manifest records", () => {
+    const manifest = JSON.parse(readFileSync(fileURLToPath(new URL("../../assets/tab-icons/manifest.json", import.meta.url)), "utf8")) as Record<string, { images: Record<string, string> }>;
+    for (const [tab, entry] of Object.entries(manifest)) {
+      for (const [scale, size] of [["", 26], ["@2x", 52], ["@3x", 78]] as const) {
+        const png = readFileSync(fileURLToPath(new URL(`../../assets/tab-icons/${tab}${scale}.png`, import.meta.url)));
+        expect(png.readUInt32BE(16), `${tab}${scale} width`).toBe(size);
+        expect(png.readUInt32BE(20), `${tab}${scale} height`).toBe(size);
+        expect(png[25], `${tab}${scale} colour type has alpha`).toBe(6);
+        expect(createHash("sha256").update(png).digest("hex"), `${tab}${scale}`).toBe(entry.images[`${tab}${scale}.png`]);
+      }
+    }
   });
 
   it("removes the native tab-bar gap while a Reports sheet owns the viewport", () => {

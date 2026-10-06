@@ -2,16 +2,31 @@
   "today": {
     "glyph": "sun",
     "points": 26,
-    "svgSha256": "0467a88c3608bf6623db3624abd919f58293d11a19ff85d8c3d5d95506a81fe6"
+    "svgSha256": "0467a88c3608bf6623db3624abd919f58293d11a19ff85d8c3d5d95506a81fe6",
+    "images": {
+      "today.png": "64bc37d5b88c425e0e09fc88741c6f2c016439f56a9beda8bb0250fba4c3e694",
+      "today@2x.png": "8201f132c4edf9ff0d8d74bffa14182acb1b5f3727919d2d596ebfbc630f17c2",
+      "today@3x.png": "adf99fe94860f0534b1799de68a65f9e0747fd1ff5cdeebf9f29fa2f5ee52776"
+    }
   },
   "calendar": {
     "glyph": "calendar-days",
     "points": 26,
-    "svgSha256": "1720155779244c66c6f4a1bed4e703486541591f94f8740e1cf1b915553ee6a4"
+    "svgSha256": "1720155779244c66c6f4a1bed4e703486541591f94f8740e1cf1b915553ee6a4",
+    "images": {
+      "calendar.png": "bcc62706f4ce5f7d64460cd5052e29d43f42827931dfcac9783c867c04b41458",
+      "calendar@2x.png": "ecf4bd402c7ff786ba22f9653e2e13bfabf079e5ed730d00589fa1d5c824d0c4",
+      "calendar@3x.png": "56bb2a60cbacebd9f5daa6d28452890500f188955118b91247e0ace24d0b3beb"
+    }
   },
   "reports": {
     "glyph": "chart-column",
     "points": 26,
-    "svgSha256": "a6efba8bab1e05050a1da208255a2bd15b04b76682b94f41e111966951881cbf"
+    "svgSha256": "a6efba8bab1e05050a1da208255a2bd15b04b76682b94f41e111966951881cbf",
+    "images": {
+      "reports.png": "b83f77605496ad2663fdad8d7b5aa09b9fc0f23b1a7bd271e417f2888d3eb867",
+      "reports@2x.png": "65f8cbe7feef85450e64494994298f8740f6735b95d57b2a4a712ef61eb25764",
+      "reports@3x.png": "a5805295c741c96d55f7e58f8608e64525ae058799f264ab708a29e17d1e03c7"
+    }
   }
 }
