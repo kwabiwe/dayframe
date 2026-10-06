@@ -1,0 +1,17 @@
+{
+  "today": {
+    "glyph": "sun",
+    "points": 26,
+    "svgSha256": "0467a88c3608bf6623db3624abd919f58293d11a19ff85d8c3d5d95506a81fe6"
+  },
+  "calendar": {
+    "glyph": "calendar-days",
+    "points": 26,
+    "svgSha256": "1720155779244c66c6f4a1bed4e703486541591f94f8740e1cf1b915553ee6a4"
+  },
+  "reports": {
+    "glyph": "chart-column",
+    "points": 26,
+    "svgSha256": "a6efba8bab1e05050a1da208255a2bd15b04b76682b94f41e111966951881cbf"
+  }
+}

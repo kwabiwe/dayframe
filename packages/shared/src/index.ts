@@ -44,6 +44,20 @@ export {
   type DayframeThemeMode
 } from "./theme";
 export {
+  DAYFRAME_ACTIVITY_ICONS,
+  DAYFRAME_ACTIVITY_ICON_FALLBACK_GLYPH,
+  DAYFRAME_ACTIVITY_ICON_GROUPS,
+  DAYFRAME_APP_ICONS,
+  DAYFRAME_GLYPHS,
+  activityIconKeyForName,
+  isActivityIconKey,
+  resolveActivityIcon,
+  type DayframeActivityIconGroup,
+  type DayframeActivityIconKey,
+  type DayframeGlyph
+} from "./icons";
+export { type DayframeGlyphElement, type DayframeGlyphNode } from "./iconGlyphs";
+export {
   DAYFRAME_BLOCKS,
   blockColorsFor,
   contrastRatio,

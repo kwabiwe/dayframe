@@ -5,6 +5,13 @@ import { ReportsSheetPortalContext } from "@/components/reports/ReportsSheetPort
 import { useMobileTheme } from "@/lib/mobileTheme";
 import { DAYFRAME_NATIVE_TABS, DAYFRAME_NATIVE_TAB_MINIMIZE_BEHAVIOR } from "@/lib/nativeTabs";
 
+// Generated from the shared glyphs by scripts/generate-icons.mjs (@2x/@3x picked by scale).
+const DAYFRAME_TAB_ICON_IMAGES = {
+  today: require("../../assets/tab-icons/today.png"),
+  calendar: require("../../assets/tab-icons/calendar.png"),
+  reports: require("../../assets/tab-icons/reports.png")
+};
+
 export default function DashboardTabsLayout() {
   const { theme } = useMobileTheme();
   const reportsSheetPortal = useContext(ReportsSheetPortalContext);
@@ -33,15 +40,15 @@ export default function DashboardTabsLayout() {
         tintColor={theme.accentText}
       >
         <NativeTabs.Trigger name={DAYFRAME_NATIVE_TABS.today.route}>
-          <NativeTabs.Trigger.Icon sf={DAYFRAME_NATIVE_TABS.today.symbol} />
+          <NativeTabs.Trigger.Icon src={DAYFRAME_TAB_ICON_IMAGES.today} renderingMode="template" />
           <NativeTabs.Trigger.Label>{DAYFRAME_NATIVE_TABS.today.label}</NativeTabs.Trigger.Label>
         </NativeTabs.Trigger>
         <NativeTabs.Trigger name={DAYFRAME_NATIVE_TABS.calendar.route}>
-          <NativeTabs.Trigger.Icon sf={DAYFRAME_NATIVE_TABS.calendar.symbol} />
+          <NativeTabs.Trigger.Icon src={DAYFRAME_TAB_ICON_IMAGES.calendar} renderingMode="template" />
           <NativeTabs.Trigger.Label>{DAYFRAME_NATIVE_TABS.calendar.label}</NativeTabs.Trigger.Label>
         </NativeTabs.Trigger>
         <NativeTabs.Trigger name={DAYFRAME_NATIVE_TABS.reports.route}>
-          <NativeTabs.Trigger.Icon sf={DAYFRAME_NATIVE_TABS.reports.symbol} />
+          <NativeTabs.Trigger.Icon src={DAYFRAME_TAB_ICON_IMAGES.reports} renderingMode="template" />
           <NativeTabs.Trigger.Label>{DAYFRAME_NATIVE_TABS.reports.label}</NativeTabs.Trigger.Label>
         </NativeTabs.Trigger>
       </NativeTabs>
