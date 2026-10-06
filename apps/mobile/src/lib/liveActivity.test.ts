@@ -367,7 +367,7 @@ describe("Live Activity sync", () => {
       entry.id,
       "https://dayframe-staging.vercel.app",
       "Health",
-      "#1F845A",
+      "#1E9C68",
       entry.startedAt
     );
   });

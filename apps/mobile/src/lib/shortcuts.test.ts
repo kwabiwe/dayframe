@@ -70,8 +70,8 @@ describe("native Shortcut bridge", () => {
       user: { id: "user-1" },
       workspace: { id: "workspace-1", name: "Personal" },
       categories: [
-        { color: "#F87168", id: "category-2", name: "Family" },
-        { color: "#4BCE97", id: "category-1", name: "Focus" }
+        { color: "#F2475E", id: "category-2", name: "Family" },
+        { color: "#16D2A6", id: "category-1", name: "Focus" }
       ]
     });
   });

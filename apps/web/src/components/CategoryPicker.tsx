@@ -625,7 +625,7 @@ export function CategoryPicker({
                   <span
                     aria-hidden="true"
                     className="category-picker-color-swatch"
-                    style={{ background: effectiveCreateColorOption.hex }}
+                    style={{ background: paletteCssColorFor(effectiveCreateColorOption.key) }}
                   />
                 </button>
               </div>
@@ -727,7 +727,7 @@ export function CategoryPicker({
               <span
                 aria-hidden="true"
                 className="category-picker-color-swatch"
-                style={{ background: color.hex }}
+                style={{ background: paletteCssColorFor(color.key) }}
               />
               {color.key === effectiveCreateColor ? <Check aria-hidden="true" size={14} /> : null}
             </button>

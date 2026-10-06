@@ -43,6 +43,13 @@ export {
   type DayframeTheme,
   type DayframeThemeMode
 } from "./theme";
+export {
+  DAYFRAME_BLOCKS,
+  blockColorsFor,
+  contrastRatio,
+  onBlockTextColor,
+  type DayframeOnBlockColor
+} from "./blocks";
 
 export * from "./location";
 export * from "./reviewMutations";
