@@ -164,7 +164,7 @@ The server that reads activity icons, seeds starter activities for new workspace
 
 ### Place role schema prerequisite
 
-The server that reads Home and Work place roles requires `supabase/migrations/202610070001_place_role.sql` (local `packages/db/migrations/009_place_role.sql`) before its Preview or production deployment. It adds a nullable `places.role` column with a `home`/`work` check and a partial unique index on `(workspace_id, role)`; no existing row changes and nothing is backfilled. Every place-name read selects the column, so without it bootstrap, entries, Review and Reports fail with an error naming this migration. Staging validation is not production authorization.
+The server that reads Home and Work place roles requires `supabase/migrations/202610070001_place_role.sql` (local `packages/db/migrations/009_place_role.sql`) before its Preview or production deployment. It adds a nullable `places.role` column with a `home`/`work` check and a partial unique index on `(workspace_id, role)`; no existing row changes and nothing is backfilled. Every place-name read selects the column, so without it bootstrap, entries, Review, Reports, search, exports and integrations fail: bootstrap and place writes name this migration, other reads fail with a Postgres undefined-column error. Staging validation is not production authorization.
 
 ### Motion & Fitness schema prerequisite
 

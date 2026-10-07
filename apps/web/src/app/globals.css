@@ -6157,6 +6157,13 @@ kbd {
   padding: 18px;
 }
 
+.place-role-note {
+  margin: -8px 0 0;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.45;
+}
+
 .place-role-new-link {
   display: inline-flex;
   min-height: 44px;

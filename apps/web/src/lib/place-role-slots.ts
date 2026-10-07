@@ -15,13 +15,21 @@ export type PlaceRoleSlot<T extends SlotPlace> = {
   place: T | null;
   /** The saved name shown under the label, often an address. */
   secondary: string | null;
+  /**
+   * The place that loses the role when it moves: the holder, or with no holder a place
+   * named exactly "Home"/"Work", which Dayframe treated as Home before roles existed.
+   */
+  previousHolder: T | null;
 };
 
 /** The Home and Work slots, in that order, each pointing at the place that holds the role. */
 export function placeRoleSlots<T extends SlotPlace>(places: T[]): PlaceRoleSlot<T>[] {
   return PLACE_ROLES.map((role) => {
+    const label = placeRoleLabel(role);
     const place = places.find((candidate) => candidate.role === role) ?? null;
-    return { role, label: placeRoleLabel(role), place, secondary: place ? placeSecondaryName(place) : null };
+    const namedLikeRole = places.find((candidate) => candidate.role === null
+      && candidate.name.trim().toLowerCase() === label.toLowerCase()) ?? null;
+    return { role, label, place, secondary: place ? placeSecondaryName(place) : null, previousHolder: place ?? namedLikeRole };
   });
 }
 

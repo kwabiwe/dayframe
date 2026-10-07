@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { Briefcase, House, Plus } from "lucide-react";
 import { useRef, useState } from "react";
-import type { PlaceRole } from "@dayframe/shared";
+import { placeRoleLabel, type PlaceRole } from "@dayframe/shared";
 import type { PlaceRow } from "@/lib/queries";
 import { clientFetch } from "@/lib/client-auth-fetch";
 import {
@@ -42,18 +42,21 @@ export function PlaceRoleSlots({
   const savingRef = useRef(false);
   const slots = placeRoleSlots(places);
   const editingSlot = editing ? slots.find((slot) => slot.role === editing.role) ?? null : null;
-  const holder = editingSlot?.place ?? null;
+  const holder = editingSlot?.previousHolder ?? null;
   const targetId = editing?.mode === "clear" ? null : editing?.targetId || null;
+  const chosenPlace = targetId ? places.find((place) => place.id === targetId) ?? null : null;
+  const chosenOtherRole = chosenPlace?.role && chosenPlace.role !== editing?.role ? chosenPlace.role : null;
   const roleLeavesHolder = Boolean(holder && (editing?.mode === "clear" || (targetId && targetId !== holder.id)));
 
   function open(role: PlaceRole, mode: Editing["mode"]) {
-    const current = slots.find((slot) => slot.role === role)?.place ?? null;
+    const slot = slots.find((candidate) => candidate.role === role);
+    const current = slot?.place ?? null;
     setError(null);
     setEditing({
       role,
       mode,
       targetId: mode === "clear" ? "" : current?.id ?? "",
-      previousPlaceName: initialPreviousPlaceName(role, current, mode === "clear" ? null : current),
+      previousPlaceName: initialPreviousPlaceName(role, slot?.previousHolder ?? null, mode === "clear" ? null : current),
       renameTouched: false
     });
   }
@@ -176,6 +179,11 @@ export function PlaceRoleSlots({
                     } : current);
                   }}
                 />
+                {chosenOtherRole ? (
+                  <p className="place-role-note" role="note">
+                    This place is your {placeRoleLabel(chosenOtherRole)}, so {placeRoleLabel(chosenOtherRole)} will be empty.
+                  </p>
+                ) : null}
                 <Link className="place-role-new-link" href={`/places/new?role=${editing.role}`}>
                   <Plus aria-hidden="true" size={16} />
                   Add a new place as {editingSlot.label}

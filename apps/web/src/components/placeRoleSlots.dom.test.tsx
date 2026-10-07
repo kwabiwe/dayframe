@@ -105,6 +105,34 @@ describe("PlaceRoleSlots", () => {
     expect((within(dialog).getByRole("textbox", { name: "Rename the old home" }) as HTMLInputElement).value).toBe("Old flat");
   });
 
+  it("offers to rename a place named Home when Home is first given to another place", async () => {
+    clientFetch.mockResolvedValue(new Response(JSON.stringify({ ok: true }), { status: 200 }));
+    const namedHome = place({ id: "30000000-0000-4000-8000-000000000009", name: "Home" });
+    render(<PlaceRoleSlots places={[namedHome, flat]} onChanged={vi.fn()} />);
+    const user = userEvent.setup();
+
+    await user.click(screen.getByRole("button", { name: "Set Home" }));
+    const dialog = screen.getByRole("dialog", { name: "Set Home" });
+    await user.selectOptions(within(dialog).getByRole("combobox", { name: "Home place" }), flat.id);
+    expect((within(dialog).getByRole("textbox", { name: "Rename the old home" }) as HTMLInputElement).value).toBe("Previous home");
+    await user.click(within(dialog).getByRole("button", { name: "Save" }));
+
+    await waitFor(() => expect(clientFetch).toHaveBeenCalledTimes(1));
+    expect(JSON.parse(clientFetch.mock.calls[0]![1].body)).toEqual({ role: "home", placeId: flat.id, previousPlaceName: "Previous home" });
+  });
+
+  it("says when choosing the Work place will empty Work", async () => {
+    const office = place({ id: "30000000-0000-4000-8000-000000000004", name: "Office tower", role: "work" });
+    render(<PlaceRoleSlots places={[home, office]} onChanged={vi.fn()} />);
+    const user = userEvent.setup();
+
+    await user.click(screen.getByRole("button", { name: "Change Home" }));
+    const dialog = screen.getByRole("dialog", { name: "Set Home" });
+    expect(within(dialog).queryByRole("note")).toBeNull();
+    await user.selectOptions(within(dialog).getByRole("combobox", { name: "Home place" }), office.id);
+    expect(within(dialog).getByRole("note").textContent).toBe("This place is your Work, so Work will be empty.");
+  });
+
   it("goes straight to adding a place when none are saved yet", () => {
     render(<PlaceRoleSlots places={[]} onChanged={vi.fn()} />);
 

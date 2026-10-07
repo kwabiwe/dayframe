@@ -1,5 +1,5 @@
 import type pg from "pg";
-import type { PlaceRole } from "@dayframe/shared";
+import { placeRoleLabel, type PlaceRole } from "@dayframe/shared";
 import { isUndefinedColumnError, isUniqueViolationError, missingRequiredColumnError, pool } from "./db";
 import type { RequestSession } from "./session";
 
@@ -39,18 +39,27 @@ export async function assignPlaceRoleWith(
     // Lock the current holder and the target together, in id order, so two moves that
     // swap Home and Work between the same places cannot deadlock. NO KEY UPDATE leaves
     // the key-share locks taken by entries and segments referencing these places alone.
-    const locked = await client.query<{ id: string; role: PlaceRole | null }>(
-      `select id, role
+    // Before roles existed, a place named exactly "Home" was Home; it is the implicit
+    // holder when no place holds the role, so it can be renamed in the same step.
+    const locked = await client.query<{ id: string; role: PlaceRole | null; name: string }>(
+      `select id, role, name
        from places
-       where workspace_id = $1 and (role = $2 or id = $3::uuid)
+       where workspace_id = $1
+         and (role = $2 or id = $3::uuid or (role is null and lower(btrim(name)) = lower($4)))
        order by id
        for no key update`,
-      [session.workspaceId, assignment.role, assignment.placeId]
+      [session.workspaceId, assignment.role, assignment.placeId, placeRoleLabel(assignment.role)]
     );
     const target = assignment.placeId ? locked.rows.find((row) => row.id === assignment.placeId) : null;
     if (assignment.placeId && !target) return { status: "place_not_found" };
 
-    const previous = locked.rows.find((row) => row.role === assignment.role && row.id !== assignment.placeId) ?? null;
+    const holder = locked.rows.find((row) => row.role === assignment.role && row.id !== assignment.placeId) ?? null;
+    const holderIsTarget = locked.rows.some((row) => row.role === assignment.role && row.id === assignment.placeId);
+    const implicit = holder || holderIsTarget
+      ? null
+      : locked.rows.find((row) => row.role === null && row.id !== assignment.placeId
+        && row.name.trim().toLowerCase() === placeRoleLabel(assignment.role).toLowerCase()) ?? null;
+    const previous = holder ?? (implicit && previousPlaceName ? implicit : null);
     if (previous) {
       await client.query(
         `update places
@@ -69,7 +78,7 @@ export async function assignPlaceRoleWith(
     }
     return { status: "assigned", placeId: target?.id ?? null, previousPlaceId: previous?.id ?? null };
   } catch (error) {
-    if (isUniqueViolationError(error)) throw new PlaceRoleConflictError(error);
+    if (isUniqueViolationError(error, "places_workspace_role_idx")) throw new PlaceRoleConflictError(error);
     if (isUndefinedColumnError(error, "role")) {
       throw missingRequiredColumnError("places", "role", "supabase/migrations/202610070001_place_role.sql", error);
     }

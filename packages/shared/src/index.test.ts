@@ -1116,6 +1116,25 @@ describe("place role normalization", () => {
     expect(enter).toEqual(expect.objectContaining({ confidence: "low", title: "Entered Home" }));
   });
 
+  it("names a visit Home when an older phone describes it by the saved address", () => {
+    const exit = normalizeActivityEvent(
+      {
+        source: "geofence_specific", type: "geofence_exit", occurredAt: new Date("2026-10-07T09:30:00.000Z"),
+        placeId: placeId("home"), description: "12 Example Street", rawPayload: {}
+      },
+      roleContext
+    );
+    expect(exit).toEqual(expect.objectContaining({ title: "Home" }));
+    const described = normalizeActivityEvent(
+      {
+        source: "geofence_specific", type: "geofence_exit", occurredAt: new Date("2026-10-07T09:30:00.000Z"),
+        placeId: placeId("home"), description: "School run", rawPayload: {}
+      },
+      roleContext
+    );
+    expect(described).toEqual(expect.objectContaining({ title: "School run" }));
+  });
+
   it("matches a payload place name of Home to the Home-role place before a place merely named Home", () => {
     const exit = normalizeActivityEvent(
       { source: "geofence_specific", type: "geofence_exit", occurredAt: new Date("2026-10-07T09:30:00.000Z"), rawPayload: { placeName: "Home" } },

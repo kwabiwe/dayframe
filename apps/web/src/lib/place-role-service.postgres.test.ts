@@ -1,5 +1,12 @@
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import pg from "pg";
+// The service's own pool (used by createPlace) must point at the disposable database too.
+vi.hoisted(() => {
+  if (process.env.DAYFRAME_PLACE_ROLE_TEST_DATABASE_URL) {
+    process.env.DATABASE_URL = process.env.DAYFRAME_PLACE_ROLE_TEST_DATABASE_URL;
+  }
+});
+
 import { placeDisplayNameSql } from "./place-display";
 import { PlaceRoleConflictError, assignPlaceRoleWith } from "./place-role-service";
 import type { RequestSession } from "./session";
@@ -14,6 +21,7 @@ const newHome = "62000000-0000-4000-8000-000000000102";
 const office = "62000000-0000-4000-8000-000000000103";
 const gym = "62000000-0000-4000-8000-000000000104";
 const foreign = "62000000-0000-4000-8000-000000000105";
+const namedHome = "62000000-0000-4000-8000-000000000106";
 const entryId = "62000000-0000-4000-8000-000000000201";
 const session: RequestSession = { workspaceId, userId, authMode: "dev", scopes: ["app:write"] };
 let database: pg.Pool | null = null;
@@ -109,6 +117,43 @@ describeWithDatabase("place roles on disposable PostgreSQL", () => {
     expect((await roles())[oldHome]?.role).toBe("home");
   });
 
+  it("renames a place named Home when Home first goes to another place, only if asked", async () => {
+    const db = database!;
+    await db.query("update places set role = null where id = $1", [oldHome]);
+    await db.query("insert into places (id, workspace_id, name) values ($1, $2, ' home ')", [namedHome, workspaceId]);
+
+    await inTransaction((client) => assignPlaceRoleWith(client, session, { role: "home", placeId: gym }));
+    expect((await roles())[namedHome]).toEqual({ name: " home ", role: null });
+
+    await inTransaction((client) => assignPlaceRoleWith(client, session, { role: "home", placeId: null }));
+    const result = await inTransaction((client) =>
+      assignPlaceRoleWith(client, session, { role: "home", placeId: newHome, previousPlaceName: "Previous home" }));
+    expect(result).toEqual({ status: "assigned", placeId: newHome, previousPlaceId: namedHome });
+    expect((await roles())[namedHome]).toEqual({ name: "Previous home", role: null });
+    expect((await roles())[newHome]?.role).toBe("home");
+  });
+
+  it("leaves no new place behind when adding a place into a slot loses a race", async () => {
+    const { createPlace } = await import("./event-service");
+    const holder = await database!.connect();
+    try {
+      await holder.query("begin");
+      await assignPlaceRoleWith(holder, session, { role: "home", placeId: newHome });
+      const racing = createPlace({ name: "Racing place", latitude: 51.5, longitude: -0.12 }, session, { role: "home" })
+        .then((value) => ({ value }), (error: unknown) => ({ error }));
+      await waitUntilBlockedOnLock();
+      await holder.query("commit");
+      const outcome = await racing;
+
+      expect("error" in outcome && outcome.error).toBeInstanceOf(PlaceRoleConflictError);
+      const leftovers = await database!.query("select id from places where workspace_id = $1 and name = 'Racing place'", [workspaceId]);
+      expect(leftovers.rowCount).toBe(0);
+      expect((await roles())[newHome]?.role).toBe("home");
+    } finally {
+      holder.release();
+    }
+  });
+
   it("enforces one Home per workspace in the database", async () => {
     await expect(database!.query("update places set role = 'home' where id = $1", [gym])).rejects.toMatchObject({ code: "23505" });
     await expect(database!.query("update places set role = 'gym' where id = $1", [gym])).rejects.toMatchObject({ code: "23514" });
@@ -123,7 +168,7 @@ describeWithDatabase("place roles on disposable PostgreSQL", () => {
       await assignPlaceRoleWith(first, session, { role: "home", placeId: newHome });
       const racing = assignPlaceRoleWith(second, session, { role: "home", placeId: gym }).then(
         (value) => ({ value }), (error: unknown) => ({ error }));
-      await new Promise((resolve) => setTimeout(resolve, 100));
+      await waitUntilBlockedOnLock();
       await first.query("commit");
       const outcome = await racing;
       await second.query("rollback");
@@ -166,6 +211,18 @@ describeWithDatabase("place roles on disposable PostgreSQL", () => {
     }
   });
 });
+
+// Wait until another connection is waiting on a row lock, so the race really overlaps.
+async function waitUntilBlockedOnLock() {
+  for (let attempt = 0; attempt < 100; attempt += 1) {
+    const result = await database!.query<{ waiting: number }>(
+      `select count(*)::int as waiting from pg_stat_activity
+       where datname = current_database() and wait_event_type = 'Lock'`);
+    if ((result.rows[0]?.waiting ?? 0) > 0) return;
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
+  throw new Error("The racing transaction never waited on the role lock.");
+}
 
 async function inTransaction<T>(work: (client: pg.PoolClient) => Promise<T>) {
   const client = await database!.connect();
