@@ -203,7 +203,6 @@ import {
   localLayoutTransition,
   localPresenceEntering,
   localPresenceExiting,
-  scheduleLayoutTransition,
   useReduceMotionPreference,
   useResolvedReduceMotionPreference,
   useReduceTransparencyPreference
@@ -1474,7 +1473,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
             description: null,
             startedAt: null
           },
-          { animateLayout: false, blankStartToken }
+          { blankStartToken }
         );
         const currentClaim = blankTimerStartGate.current.current();
         if (!accepted || currentClaim?.token !== blankStartToken) {
@@ -1612,7 +1611,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
     description?: string | null;
     startedAt?: string | null;
     tagNames?: string[];
-  }, options: { animateLayout?: boolean; blankStartToken?: number } = {}) {
+  }, options: { blankStartToken?: number } = {}) {
     if (!latestData.current) return false;
     commitPendingActiveDeletionBeforeTimerStart();
     const trimmedDescription = input.description?.trim() ?? "";
@@ -1671,7 +1670,6 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
     queuedTimerStartRecoveryRequested.current = true;
     nextTimerMutationVersion(optimisticId);
     updateDashboardData((current) => optimisticStartTimer(current, pendingEntry));
-    if (options.animateLayout !== false) scheduleLayoutTransition(reduceMotion);
     if (connectivityCurrent.current.isOnline) {
       void syncQueuedEventsAndReload();
     }
@@ -1902,7 +1900,6 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
       pendingStop
     ]);
     updateDashboardData((current) => optimisticStopActiveTimer(current, pendingStop.occurredAt));
-    scheduleLayoutTransition(reduceMotion);
 
     void (async () => {
       if (!stopBackgroundReservation) return;
@@ -1927,7 +1924,6 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
           activeEntry.id,
           optimisticTimerIds.current
         ));
-        scheduleLayoutTransition(reduceMotion);
       }
       if (summary.deliveredCount > 0 || summary.permanentRejectedCount > 0) {
         void loadRef.current({ silent: true });
@@ -1941,7 +1937,6 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
   async function deleteActiveTimer(entryId: string) {
     const presentationId = activeEditPresentationRef.current?.id;
     if (!presentationId) return false;
-    scheduleLayoutTransition(reduceMotion);
     return prepareSheetDeletion(
       entryId,
       presentedActiveEntry,

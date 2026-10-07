@@ -443,6 +443,7 @@ Required checks when changing the mobile root navigator or tab bar:
 - On iOS 26, check native Liquid Glass, system tab spacing and scroll-down minimisation in both light and dark appearance.
 - On the minimum supported iOS version, check the standard native tab fallback remains readable and reachable.
 - Re-test Settings/Review/Places push and swipe-back, Today timer start/stop/edit, Calendar scroll/swipe/pinch, pull-to-refresh, Reduce Motion and Reduce Transparency.
+- Selected tab: the coral (`accentText`) selected tab stays readable with bright activity blocks scrolled under the glass, in Light and Dark, with Reduce Transparency and Increase Contrast (`docs/dayframe-regression-checklist.md`, Dayframe Blocks surfaces).
 
 ## Brand, Theme, And Visual Reskins
 

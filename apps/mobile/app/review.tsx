@@ -47,7 +47,6 @@ import {
   localLayoutTransition,
   localPresenceEntering,
   localPresenceExiting,
-  scheduleLayoutTransition,
   useResolvedReduceMotionPreference
 } from "@/lib/motion";
 import {
@@ -434,7 +433,6 @@ export default function ReviewScreen() {
           return;
         }
         const nextBootstrap = mergeReviewBootstrapProjection(current, cached.bootstrap);
-        scheduleLayoutTransition(reduceMotion);
         commitData(nextBootstrap);
         commitReviewBacklog(nextBacklog);
         startEvidencePrefetch(nextBootstrap);
@@ -481,7 +479,6 @@ export default function ReviewScreen() {
   }, [
     commitData,
     commitReviewBacklog,
-    reduceMotion,
     startEvidencePrefetch
   ]);
 
@@ -1271,7 +1268,6 @@ export default function ReviewScreen() {
               accessibilityState={{ expanded: showReviewInfo }}
               style={pressable(styles.detailsToggle, styles.buttonPressed)}
               onPress={() => {
-                scheduleLayoutTransition(reduceMotion);
                 setShowReviewInfo((current) => !current);
               }}
             >

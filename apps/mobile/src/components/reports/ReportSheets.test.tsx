@@ -16,7 +16,6 @@ vi.mock("react-native", () => ({
   Keyboard: {
     addListener: () => ({ remove: vi.fn() }),
     dismiss: vi.fn(),
-    scheduleLayoutAnimation: vi.fn(),
   },
   Modal: "Modal",
   Platform: { OS: "ios" },

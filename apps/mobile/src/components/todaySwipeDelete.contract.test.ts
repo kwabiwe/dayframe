@@ -303,7 +303,6 @@ describe("Today history swipe-to-delete contract", () => {
   it("uses one local Reanimated owner for presence and surrounding reflow", () => {
     expect(dashboardSource).toContain("itemLayoutAnimation={localLayoutTransition(reduceMotion)}");
     expect(dashboardSource).toContain("exiting={localPresenceExiting(reduceMotion)}");
-    expect(dashboardSource).not.toContain("scheduleLayoutTransition(reduceMotion);\n    setExpandedGroups");
   });
 
   it("renders the undo notice as an inverse bean with a branded action", () => {

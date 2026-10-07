@@ -33,14 +33,14 @@ If one of these states does not apply, say so. Do not leave it implicit.
 | Drag, swipe, pinch, scroll, or other direct manipulation | One gesture and animation owner that updates continuously with the fingers |
 | Platform interaction that React Native cannot reproduce reliably | A targeted Swift/SwiftUI surface that preserves the documented React ownership boundary |
 
-`LayoutAnimation` (and `scheduleLayoutTransition` in `apps/mobile/src/lib/motion.ts`, which calls it) does nothing in this app: with React Native 0.85 on the New Architecture, Reanimated 4's legacy layout-animation proxy replaces the UIManager animation delegate, and its `uiManagerDidConfigureNextLayoutAnimation` is empty. Never name it as the owner of a transition; use Reanimated `layout`, `entering` and `exiting` (the `localLayoutTransition` and presence helpers) instead. Existing calls are inert and due for removal.
+`LayoutAnimation`, including `Keyboard.scheduleLayoutAnimation`, does nothing in this app: with React Native 0.85 on the New Architecture, Reanimated 4's legacy layout-animation proxy (the default while `ENABLE_SHARED_ELEMENT_TRANSITIONS` is off) replaces the UIManager animation delegate, and its `uiManagerDidConfigureNextLayoutAnimation` is empty. Enabling that flag would revive React Native's driver, so revisit this rule if it is ever turned on. The old `scheduleLayoutTransition` helper and every call were removed on 7 October 2026, and `layoutAnimationRemoval.contract.test.ts` keeps them out. Never name it as the owner of a transition; use Reanimated `layout`, `entering` and `exiting` (the `localLayoutTransition` and presence helpers) instead.
 
 Do not introduce Swift solely to make an otherwise ordinary React Native entrance, exit, or list reflow smooth. Do not animate the same state change from multiple layers.
 
 ## Timing And Behaviour
 
 - Animations run on the UI thread. RN `Animated` values always use `useNativeDriver: true` (opacity and transforms); anything that needs layout uses Reanimated. A JS-thread animation drops frames exactly when the JS thread is busy, such as during Stop's outbox write and re-render (investigation 2026-10-07; `framePacing.contract.test.ts` enforces it).
-- Do not rebuild per-minute data on the per-second clock. Today's history and the native Calendar model read `minuteClock(now)`; only the live elapsed time ticks every second.
+- Do not rebuild per-minute data on the per-second clock. Today's history, the day cards and the native Calendar model read `minuteClock(now, newestShownTimestamp(entries, now))`, which holds still within a minute but never falls behind a start or stop already shown; only the live elapsed time ticks every second.
 - Reuse `MOBILE_MOTION` on iOS: approximately 140 ms for control feedback, 220 ms for local layout, 260 ms for sheets, and 280 ms for screen transitions.
 - Follow the brand guide's 120–220 ms control and 180–300 ms panel ranges on other surfaces. Prefer standard ease-out timing; exits may be shorter while staying in the same curve family.
 - Keep movement restrained. Use opacity plus a small translation when it clarifies origin; avoid theatrical scale, bounce, or decorative loops. The only exceptions are the Dayframe Blocks landing spring and live ring below.

@@ -1,4 +1,4 @@
-import { AccessibilityInfo, LayoutAnimation } from "react-native";
+import { AccessibilityInfo } from "react-native";
 import { useEffect, useState } from "react";
 import {
   FadeIn,
@@ -121,22 +121,4 @@ export function useReduceTransparencyPreference() {
   }, []);
 
   return reduceTransparency;
-}
-
-export function scheduleLayoutTransition(reduceMotion: boolean) {
-  if (reduceMotion) return;
-  LayoutAnimation.configureNext({
-    duration: MOBILE_MOTION.layout,
-    create: {
-      type: LayoutAnimation.Types.easeOut,
-      property: LayoutAnimation.Properties.opacity
-    },
-    update: {
-      type: LayoutAnimation.Types.easeInEaseOut
-    },
-    delete: {
-      type: LayoutAnimation.Types.easeIn,
-      property: LayoutAnimation.Properties.opacity
-    }
-  });
 }

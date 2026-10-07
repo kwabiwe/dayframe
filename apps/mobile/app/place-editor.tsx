@@ -55,7 +55,6 @@ import {
   localLayoutTransition,
   localPresenceEntering,
   localPresenceExiting,
-  scheduleLayoutTransition,
   useReduceMotionPreference
 } from "@/lib/motion";
 
@@ -563,7 +562,6 @@ export default function PlaceEditorScreen() {
                 accessibilityRole="button"
                 accessibilityState={{ expanded: advancedExpanded }}
                 onPress={() => {
-                  scheduleLayoutTransition(reduceMotion);
                   setAdvancedExpanded((expanded) => !expanded);
                 }}
                 style={pressable(editorStyles.disclosureButton, styles.buttonPressed)}
