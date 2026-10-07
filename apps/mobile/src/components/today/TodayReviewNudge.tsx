@@ -13,45 +13,41 @@ const FOUND_TIME = "Dayframe found time you didn't track.";
 
 export type ReviewNudgeCopy = { title: string; detail: string; count: number | null };
 
+export type ReviewCount = { value: number | null; exact: boolean };
+
 /**
  * What the nudge says. An exact count names the moments; an inexact or unavailable one never shows a
- * number it cannot vouch for, and only an exact zero hides the card.
+ * number it cannot vouch for. Only an exact zero hides the card, and a cached zero never hides items
+ * the fresher bootstrap still reports.
  */
-export function reviewNudgeCopy(
-  outstanding: { value: number | null; exact: boolean } | null,
-  fallbackCount: number
-): ReviewNudgeCopy | null {
+export function reviewNudgeCopy(outstanding: ReviewCount | null, fallback: ReviewCount): ReviewNudgeCopy | null {
+  const fallbackOpen = (fallback.value ?? 0) > 0;
   if (outstanding && outstanding.exact) {
-    if (!outstanding.value) return null;
-    return {
-      count: outstanding.value,
-      detail: FOUND_TIME,
-      title: `${outstanding.value} ${outstanding.value === 1 ? "moment" : "moments"} to review`,
-    };
+    if (outstanding.value) return counted(outstanding.value);
+    return fallbackOpen ? UNCOUNTED : null;
   }
-  if (outstanding && outstanding.value) {
-    return { count: null, detail: "Open Review for the latest items.", title: "Moments to review" };
-  }
-  if (fallbackCount > 0) {
-    return {
-      count: fallbackCount,
-      detail: FOUND_TIME,
-      title: `${fallbackCount} ${fallbackCount === 1 ? "moment" : "moments"} to review`,
-    };
-  }
+  if (outstanding && outstanding.value) return UNCOUNTED;
+  if (fallbackOpen) return fallback.exact ? counted(fallback.value!) : UNCOUNTED;
   return null;
+}
+
+const UNCOUNTED: ReviewNudgeCopy = { count: null, detail: "Open Review for the latest items.", title: "Moments to review" };
+
+function counted(value: number): ReviewNudgeCopy {
+  return { count: value, detail: FOUND_TIME, title: `${value} ${value === 1 ? "moment" : "moments"} to review` };
 }
 
 /** "N moments to review" (Blocks prototype): one card that opens Review, replacing Today's donut and rows. */
 export function TodayReviewNudge({
   diagnostic,
-  fallbackCount,
+  fallback,
   onOpenReview,
   reduceMotion,
   theme,
 }: {
   diagnostic?: MobileAccessibilityDiagnostic;
-  fallbackCount: number;
+  /** The bootstrap's count; exact only when it is the server's total, not a capped list's length. */
+  fallback: ReviewCount;
   onOpenReview: () => void;
   reduceMotion: boolean;
   theme: MobileTheme;
@@ -66,7 +62,7 @@ export function TodayReviewNudge({
   const exiting = useMemo(() => localPresenceExiting(reduceMotion), [reduceMotion]);
   const context = useTodayReviewPresentationContext();
   const presentation = context?.isSummaryAvailable ? context.presentation : null;
-  const copy = reviewNudgeCopy(presentation?.globalReviewCount ?? null, fallbackCount);
+  const copy = reviewNudgeCopy(presentation?.globalReviewCount ?? null, fallback);
   if (!copy) return null;
   const colors = (presentation?.daySections ?? [])
     .flatMap((section) => section.activities)

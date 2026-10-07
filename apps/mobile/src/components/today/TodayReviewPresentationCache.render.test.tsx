@@ -162,11 +162,11 @@ describe("Today presentation cache rendering", () => {
     expect(presentation.completedLoggedMs).toBe(30 * 60_000);
     expect(presentation.globalReviewCount).toEqual({ value: 0, exact: true });
 
-    // The cached exact zero outranks a stale bootstrap count: nothing to review, so no nudge.
+    // An exact cached zero with nothing in the bootstrap either: no nudge.
     const theme = { mode: "dark", surface: "surface", surfaceMuted: "muted", textPrimary: "primary", textSecondary: "secondary" } as never;
     let tree!: ReturnType<typeof create>;
     act(() => {
-      tree = create(<TodayReviewNudge fallbackCount={3} onOpenReview={vi.fn()} reduceMotion={false} theme={theme} />);
+      tree = create(<TodayReviewNudge fallback={{ value: 0, exact: true }} onOpenReview={vi.fn()} reduceMotion={false} theme={theme} />);
     });
     expect(tree.toJSON()).toBeNull();
 
@@ -174,7 +174,7 @@ describe("Today presentation cache rendering", () => {
     mocks.context = { ...mocks.context, isSummaryAvailable: false };
     const onOpenReview = vi.fn();
     act(() => {
-      tree.update(<TodayReviewNudge fallbackCount={3} onOpenReview={onOpenReview} reduceMotion={false} theme={theme} />);
+      tree.update(<TodayReviewNudge fallback={{ value: 3, exact: true }} onOpenReview={onOpenReview} reduceMotion={false} theme={theme} />);
     });
     const nudge = tree.root.findByProps({ testID: "today-review-nudge" });
     expect(nudge.props.accessibilityLabel).toBe("3 moments to review. Dayframe found time you didn't track.");

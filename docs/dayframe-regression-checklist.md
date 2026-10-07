@@ -118,8 +118,10 @@ Review this checklist before and after changes that touch Dayframe UI, timer beh
   filled in time order, the percentage capped at 100 while the total keeps
   counting. The default goal is eight hours when the account has none.
 - The Review nudge says "N moments to review" with an exact count, "Moments to
-  review" when the count is inexact, and disappears only on an exact zero; it
-  opens Review. Today shows no Review rows, Quick Confirm, "Incomplete time",
+  review" when the count is inexact (including more than 100 open items before
+  the presentation loads, or a cached zero while the bootstrap reports items),
+  and disappears only on an exact zero; it opens Review. Goals that are not
+  whole hours (for example 6h 34m) must render without freezing. Today shows no Review rows, Quick Confirm, "Incomplete time",
   donut or logged/covered summary; earlier days keep their logged total.
 - Verify capped/partial/cache/offline states never claim zero or complete
   coverage. In Review, the accessible Load more action reaches the 101st

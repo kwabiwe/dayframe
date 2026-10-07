@@ -27,12 +27,15 @@ function activity(color: string | null, awaitingDecision = true) {
 }
 
 function render(fallbackCount: number, reduceMotion = false) {
+  const fallback = { value: fallbackCount, exact: true };
   let tree!: ReturnType<typeof create>;
   act(() => {
-    tree = create(<TodayReviewNudge fallbackCount={fallbackCount} onOpenReview={vi.fn()} reduceMotion={reduceMotion} theme={theme} />);
+    tree = create(<TodayReviewNudge fallback={fallback} onOpenReview={vi.fn()} reduceMotion={reduceMotion} theme={theme} />);
   });
   return tree;
 }
+
+const NONE = { value: 0, exact: true };
 
 beforeEach(() => {
   mocks.context = null;
@@ -40,19 +43,32 @@ beforeEach(() => {
 
 describe("reviewNudgeCopy", () => {
   it("names an exact count and hides only on an exact zero", () => {
-    expect(reviewNudgeCopy({ value: 1, exact: true }, 0)?.title).toBe("1 moment to review");
-    expect(reviewNudgeCopy({ value: 4, exact: true }, 0)?.title).toBe("4 moments to review");
-    expect(reviewNudgeCopy({ value: 0, exact: true }, 7)).toBeNull();
+    expect(reviewNudgeCopy({ value: 1, exact: true }, NONE)?.title).toBe("1 moment to review");
+    expect(reviewNudgeCopy({ value: 4, exact: true }, NONE)?.title).toBe("4 moments to review");
+    expect(reviewNudgeCopy({ value: 0, exact: true }, NONE)).toBeNull();
   });
 
-  it("never shows a number it cannot vouch for", () => {
-    expect(reviewNudgeCopy({ value: 12, exact: false }, 3)).toEqual({
+  it("does not let a cached zero hide items the bootstrap still reports", () => {
+    expect(reviewNudgeCopy({ value: 0, exact: true }, { value: 3, exact: true })).toEqual({
       count: null,
       detail: "Open Review for the latest items.",
       title: "Moments to review",
     });
-    expect(reviewNudgeCopy({ value: null, exact: false }, 2)?.title).toBe("2 moments to review");
-    expect(reviewNudgeCopy(null, 0)).toBeNull();
+  });
+
+  it("names the bootstrap count only when it is exact", () => {
+    expect(reviewNudgeCopy(null, { value: 140, exact: true })?.title).toBe("140 moments to review");
+    expect(reviewNudgeCopy(null, { value: 100, exact: false })).toMatchObject({ count: null, title: "Moments to review" });
+  });
+
+  it("never shows a number it cannot vouch for", () => {
+    expect(reviewNudgeCopy({ value: 12, exact: false }, { value: 3, exact: true })).toEqual({
+      count: null,
+      detail: "Open Review for the latest items.",
+      title: "Moments to review",
+    });
+    expect(reviewNudgeCopy({ value: null, exact: false }, { value: 2, exact: true })?.title).toBe("2 moments to review");
+    expect(reviewNudgeCopy(null, NONE)).toBeNull();
   });
 });
 
@@ -82,7 +98,7 @@ describe("TodayReviewNudge", () => {
   it("fades in only after first paint and always fades out", () => {
     const tree = render(0);
     expect(tree.toJSON()).toBeNull();
-    act(() => tree.update(<TodayReviewNudge fallbackCount={2} onOpenReview={vi.fn()} reduceMotion={false} theme={theme} />));
+    act(() => tree.update(<TodayReviewNudge fallback={{ value: 2, exact: true }} onOpenReview={vi.fn()} reduceMotion={false} theme={theme} />));
     const presence = tree.root.findByType("AnimatedView" as never);
     expect(presence.props).toMatchObject({ entering: "entering", exiting: "exiting" });
 

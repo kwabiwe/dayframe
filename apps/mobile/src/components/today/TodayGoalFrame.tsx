@@ -1,3 +1,4 @@
+import { memo } from "react";
 import { StyleSheet, Text, View } from "react-native";
 import { blockColorsFor } from "@dayframe/shared";
 import { recordMobileLayout, recordMobileTextLayout, type MobileAccessibilityDiagnostic } from "../accessibility/diagnostics";
@@ -18,7 +19,8 @@ function spokenGoal(hours: number) {
  * The top of Today (Blocks prototype): the date as an eyebrow, then the day's tracked total against
  * the daily goal with one cell per goal hour. Read by VoiceOver as one heading and one summary.
  */
-export function TodayGoalFrame({
+/** Memoised: its data changes once a minute, while the header around it re-renders every second. */
+export const TodayGoalFrame = memo(function TodayGoalFrame({
   cells,
   dateLabel,
   diagnostic,
@@ -99,7 +101,7 @@ export function TodayGoalFrame({
       </View>
     </View>
   );
-}
+});
 
 const styles = StyleSheet.create({
   section: { gap: 6 },

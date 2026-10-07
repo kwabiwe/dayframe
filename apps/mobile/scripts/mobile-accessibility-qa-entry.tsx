@@ -452,7 +452,7 @@ function Probe() {
             />
             <TodayReviewNudge
               diagnostic={diagnostic}
-              fallbackCount={reviewCount}
+              fallback={{ value: reviewCount, exact: true }}
               onOpenReview={() => setActionResult("Local Review navigation callback")}
               reduceMotion={reduceMotion}
               theme={theme}

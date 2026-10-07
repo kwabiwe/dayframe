@@ -1402,6 +1402,13 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
     () => (data?.reviewItems ?? []).filter(isOpenReviewItem).length,
     [data?.reviewItems]
   );
+  // The bootstrap's Review list is capped (100), so only the server's total counts as exact.
+  const todayReviewFallback = useMemo(
+    () => typeof data?.stats?.reviewCount === "number"
+      ? { value: data.stats.reviewCount, exact: true }
+      : { value: openReviewCount, exact: false },
+    [data?.stats?.reviewCount, openReviewCount]
+  );
   // Whole minutes only, so the goal frame reads the per-minute clock (investigation 2026-10-07).
   const todayGoalFrame = useMemo(
     () => buildTodayGoalFrame({
@@ -2480,7 +2487,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
               {/* Moves with the timer card and mosaic above it (Reanimated owns Today motion). */}
               <Reanimated.View layout={localLayoutTransition(reduceMotion)}>
                 <TodayReviewNudge
-                  fallbackCount={openReviewCount}
+                  fallback={todayReviewFallback}
                   onOpenReview={() => router.push("/review")}
                   reduceMotion={reduceMotion}
                   theme={theme}

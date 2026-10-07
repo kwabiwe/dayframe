@@ -75,6 +75,36 @@ describe("buildTodayGoalFrame", () => {
     expect(frame.cells.flat().some((slice) => slice.key.startsWith("call"))).toBe(false);
   });
 
+  it("terminates for goals whose hour cells are not whole milliseconds", () => {
+    // 394 min / 7 cells is fractional: a cursor on a cell edge once took a zero step forever.
+    for (const goalMinutes of [394, 645, 675]) {
+      const frame = buildTodayGoalFrame({ entries: [entry("long", at(0), at(12))], goalMinutes, nowMs: day + 13 * 3_600_000 });
+      expect(frame.percent).toBe(100);
+      const filled = frame.cells.map((cell) => cell.reduce((sum, slice) => sum + slice.fraction, 0));
+      expect(filled.every((fraction) => Math.abs(fraction - 1) < 1e-9)).toBe(true);
+    }
+  });
+
+  it("terminates for every goal up to a full day with a day-long entry", () => {
+    for (let goalMinutes = 1; goalMinutes <= 1440; goalMinutes += 1) {
+      const frame = buildTodayGoalFrame({ entries: [entry("day", at(0), at(23, 59))], goalMinutes, nowMs: day + 86_399_000 });
+      expect(frame.cells.flat().length).toBeLessThanOrEqual(frame.cells.length);
+    }
+  });
+
+  it("colours shared time by the entry that really started first, even before midnight", () => {
+    const frame = buildTodayGoalFrame({
+      entries: [
+        { ...entry("zz-sleep", new Date(day - 2 * 3_600_000).toISOString(), at(7), "blue") },
+        { ...entry("aa-reading", new Date(day - 30 * 60_000).toISOString(), at(0, 45), "lime") },
+      ],
+      goalMinutes: 480,
+      nowMs: day + 8 * 3_600_000,
+    });
+    expect(frame.cells[0]).toEqual([{ key: "zz-sleep:0", color: "blue", fraction: 1, live: false }]);
+    expect(frame.cells.flat().some((slice) => slice.key.startsWith("aa-reading"))).toBe(false);
+  });
+
   it("ignores future and zero-length entries", () => {
     const frame = buildTodayGoalFrame({
       entries: [entry("future", at(14), at(15)), entry("zero", at(8), at(8))],
