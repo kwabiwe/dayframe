@@ -21,8 +21,9 @@ export default function DashboardTabsLayout() {
       {/* Leave the bar material unconfigured so UITabBar owns Liquid Glass and its older-iOS fallback. */}
       <NativeTabs
         hidden={reportsSheetPortal?.isPresented ?? false}
-        // Blocks: selected navigation is neutral; coral stays for recording and the primary action.
-        iconColor={{ default: theme.textSecondary, selected: theme.textPrimary }}
+        // Owner decision 7 Oct: the selected tab is coral, because a neutral tint washes out over
+        // Liquid Glass when bright activity blocks scroll beneath it. Unselected tabs stay neutral.
+        iconColor={{ default: theme.textSecondary, selected: theme.accentText }}
         labelStyle={{
           default: {
             color: theme.textSecondary,
@@ -31,14 +32,14 @@ export default function DashboardTabsLayout() {
             fontWeight: "700"
           },
           selected: {
-            color: theme.textPrimary,
+            color: theme.accentText,
             fontFamily: "System",
             fontSize: 11,
             fontWeight: "700"
           }
         }}
         minimizeBehavior={DAYFRAME_NATIVE_TAB_MINIMIZE_BEHAVIOR}
-        tintColor={theme.textPrimary}
+        tintColor={theme.accentText}
       >
         <NativeTabs.Trigger name={DAYFRAME_NATIVE_TABS.today.route}>
           <NativeTabs.Trigger.Icon src={DAYFRAME_TAB_ICON_IMAGES.today} renderingMode="template" />
