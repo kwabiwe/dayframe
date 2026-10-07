@@ -42,6 +42,7 @@ describe("native tab configuration", () => {
     expect(tabsLayout).toContain("iconColor={{ default: theme.textSecondary, selected: theme.accentText }}");
     expect(tabsLayout).toContain("tintColor={theme.accentText}");
     expect(tabsLayout).toMatch(/selected: \{\s*color: theme\.accentText,/);
+    expect(tabsLayout).toMatch(/default: \{\s*color: theme\.textSecondary,/);
     expect(tabsLayout).not.toContain("theme.textPrimary");
     // UIKit owns the glass material, so the layout must not set a background or blur of its own.
     expect(tabsLayout).not.toMatch(/backgroundColor=|blurEffect=|disableTransparentOnScrollEdge/);
