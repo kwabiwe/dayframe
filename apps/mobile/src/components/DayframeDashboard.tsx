@@ -62,7 +62,7 @@ import {
 import { TodayTimerSurface } from "@/components/accessibility/TodayTimerSurface";
 import { ActivityBlockMark } from "./today/ActivityBlockMark";
 import type { LandingRequest } from "@/lib/blocksMotion";
-import { minuteClock } from "@/lib/frameClock";
+import { minuteClock, newestShownTimestamp } from "@/lib/frameClock";
 import { loadHapticsPreference, playHaptic } from "@/lib/haptics";
 import { layoutQuickStartMosaic, rankQuickStartActivities, weeklySecondsByActivity } from "@/lib/quickStartMosaic";
 import { TodayReviewPresentationProvider, useTodayReviewPresentationContext } from "./today/TodayReviewPresentationContext";
@@ -1346,7 +1346,6 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
     ? activeDurationSeconds
     : activeTimerElapsedSeconds(retainedActiveEntryForSheet, now);
   const todayKey = useMemo(() => formatDateKey(new Date(now)), [now]);
-  const minuteNow = minuteClock(now);
   const historySourceEntries = useMemo(() => {
     if (!data) return [];
     return mergeActiveEntry(
@@ -1359,6 +1358,13 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
       data.activeEntry
     );
   }, [data]);
+  // Whole-minute consumers (history, day cards, native Calendar) rebuild once a minute, but never
+  // fall behind a start or stop already shown, so a block from this minute is never clipped away.
+  const newestShownMs = useMemo(
+    () => newestShownTimestamp(historySourceEntries, Date.now()),
+    [historySourceEntries]
+  );
+  const minuteNow = minuteClock(now, newestShownMs);
   const historySections = useMemo(
     () => buildHistoryDaySections({
       entries: historySourceEntries.filter((entry) => !isReviewNeededEntry(entry)),

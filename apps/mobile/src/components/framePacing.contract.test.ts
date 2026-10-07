@@ -23,7 +23,7 @@ describe("mobile frame pacing", () => {
   });
 
   it("rebuilds Today's history and the native Calendar model once a minute, not every second", () => {
-    expect(dashboard).toContain("const minuteNow = minuteClock(now);");
+    expect(dashboard).toContain("const minuteNow = minuteClock(now, newestShownMs);");
     expect(dashboard).toMatch(/buildHistoryDaySections\(\{[\s\S]*?nowMs: minuteNow[\s\S]*?\}\),\s*\[historySourceEntries, minuteNow\]/);
     expect(dashboard).toMatch(/buildNativeCalendarBridgeState\(\{[\s\S]*?now: minuteNow,/);
     expect(dashboard).toMatch(/<HistoryDayCard[\s\S]*?now=\{minuteNow\}/);
