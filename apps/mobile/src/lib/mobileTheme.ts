@@ -488,23 +488,12 @@ function createStyles(theme: MobileTheme) {
       fontSize: 13,
       fontWeight: "600"
     },
-    todayHeading: {
-      gap: 2,
-      paddingHorizontal: 2,
-      paddingBottom: 2
-    },
     todayTitle: {
       color: theme.textPrimary,
       // Blocks display face for the Today title (docs/brand-style-guide.md, Typography).
       fontFamily: MOBILE_DISPLAY_FONT.extraBold,
       fontSize: 30,
       letterSpacing: -0.6
-    },
-    todaySubtitle: {
-      color: theme.textSecondary,
-      fontFamily: monoFont,
-      fontSize: 13,
-      fontWeight: "400"
     },
     iconButton: {
       width: 44,
@@ -1172,55 +1161,6 @@ function createStyles(theme: MobileTheme) {
       marginHorizontal: 18,
       backgroundColor: theme.border
     },
-    reviewNote: {
-      backgroundColor: theme.surfaceMuted,
-      borderRadius: 12,
-      paddingHorizontal: 10,
-      paddingVertical: 8,
-      color: theme.textSecondary,
-      fontFamily: monoFont,
-      fontSize: 12,
-      lineHeight: 17
-    },
-    reviewNoteButton: {
-      minHeight: 44,
-      backgroundColor: theme.surfaceMuted,
-      borderRadius: 999,
-      paddingHorizontal: 12,
-      paddingVertical: 10,
-      flexDirection: "row",
-      alignItems: "center",
-      justifyContent: "space-between",
-      gap: 10
-    },
-    reviewNoteButtonStacked: {
-      borderRadius: 16,
-      flexDirection: "column",
-      alignItems: "stretch",
-      justifyContent: "center",
-      gap: 6
-    },
-    reviewNoteText: {
-      flex: 1,
-      flexShrink: 1,
-      color: theme.textPrimary,
-      fontFamily: monoFont,
-      fontSize: 12,
-      fontWeight: "600",
-      lineHeight: 17
-    },
-    reviewNoteTextStacked: {
-      flex: 0,
-      width: "100%"
-    },
-    reviewNoteAction: {
-      // Blocks: coral is only for recording and the single primary action on Today.
-      color: theme.textPrimary,
-      fontFamily: monoFont,
-      fontSize: 12,
-      fontWeight: "600",
-      flexShrink: 0
-    },
     reportScreenTitle: {
       color: theme.textPrimary,
       fontFamily: monoFont,
@@ -1232,115 +1172,6 @@ function createStyles(theme: MobileTheme) {
     },
     todaySummaryBlock: {
       gap: 8
-    },
-    todayReviewSummary: {
-      backgroundColor: theme.surface,
-      borderRadius: 18,
-      paddingHorizontal: 14,
-      paddingVertical: 14,
-      gap: 10
-    },
-    todayReviewAwaiting: {
-      color: theme.textSecondary,
-      fontFamily: monoFont,
-      fontSize: 13,
-      fontWeight: "600",
-      textAlign: "center",
-      fontVariant: ["tabular-nums"]
-    },
-    todayReviewSaved: {
-      color: theme.textSecondary,
-      fontFamily: monoFont,
-      fontSize: 12,
-      lineHeight: 17,
-      textAlign: "center"
-    },
-    todayReviewOpenButton: {
-      minHeight: 44,
-      backgroundColor: theme.surfaceMuted,
-      borderRadius: 14,
-      paddingHorizontal: 12,
-      paddingVertical: 8,
-      justifyContent: "center",
-      gap: 2
-    },
-    todayReviewOpenTitle: {
-      color: theme.textPrimary,
-      fontFamily: monoFont,
-      fontSize: 13,
-      fontWeight: "700"
-    },
-    todayReviewOpenMeta: {
-      color: theme.textSecondary,
-      fontFamily: monoFont,
-      fontSize: 12,
-      lineHeight: 17,
-      fontVariant: ["tabular-nums"]
-    },
-    todayReviewRow: {
-      minHeight: 64,
-      flexDirection: "row",
-      alignItems: "stretch",
-      gap: 8,
-      paddingVertical: 8
-    },
-    todayReviewRowMain: {
-      flex: 1,
-      minWidth: 0,
-      justifyContent: "center",
-      gap: 2
-    },
-    todayReviewRowBody: {
-      // Matches confirmed rows (historyEntryMain + todayEntryText): block, then one text column.
-      flexDirection: "row",
-      alignItems: "center",
-      gap: 10
-    },
-    todayReviewRowHeader: {
-      flexDirection: "row",
-      alignItems: "center",
-      gap: 8
-    },
-    todayReviewStateBadge: {
-      borderRadius: 999,
-      backgroundColor: theme.accentSoft,
-      paddingHorizontal: 7,
-      paddingVertical: 3,
-      flexShrink: 0
-    },
-    todayReviewStateBadgeAttention: {
-      backgroundColor: theme.surfaceMuted
-    },
-    todayReviewStateBadgeText: {
-      color: theme.accentText,
-      fontFamily: monoFont,
-      fontSize: 10,
-      fontWeight: "700"
-    },
-    todayReviewStateBadgeAttentionText: {
-      color: theme.warningText
-    },
-    todayReviewCheck: {
-      width: 44,
-      minWidth: 44,
-      minHeight: 44,
-      borderRadius: 999,
-      backgroundColor: theme.accentSoft,
-      alignItems: "center",
-      justifyContent: "center",
-      alignSelf: "center"
-    },
-    todayReviewCheckText: {
-      color: theme.accentText,
-      fontFamily: monoFont,
-      fontSize: 19,
-      fontWeight: "800"
-    },
-    todayReviewInlineError: {
-      color: theme.dangerText,
-      fontFamily: monoFont,
-      fontSize: 11,
-      lineHeight: 16
     },
     reviewFocusHighlight: {
       borderColor: theme.borderStrong,

@@ -46,7 +46,7 @@ The contracts below describe the shipped components. The approved Dayframe Block
 - A running compact edit must use the shell-owned timer mutation gate and atomically project the same Description/Category/Start values into bootstrap collections and the persistent timer draft. Preserve hidden tags, place and compatibility metadata; issue one PATCH plus one forced refresh; apply authoritative `updatedAt`; cancel/gate stale debounced timer writes; and roll both snapshots back exactly on failure.
 - Calendar portal placement is fixed and measurement-driven: prefer 8px below, flip above, clamp at 12px, and use a full 12px-gutter bounded phone card. Observe the anchor, panel, Calendar scroller, viewport and visual viewport; recompute on scroll, resize and zoom; never animate `top`/`left`; close if the anchor is detached or no longer intersects the Calendar viewport.
 - Keep the iOS dashboard focused on logo/header, active timer, start task, the quick-start mosaic, and Today summary.
-- Today is a Dayframe Blocks surface (Phase 2). The idle card and the live block share one geometry contract (`apps/mobile/src/components/today/todayBlocksLayout.ts`): 184-point minimum height, 18-point padding, the card radius, and one bottom-right action track where the 56-point primary action (coral Play idle, on-block Stop live) and the 44-point Add past time keep the same card-relative centres, so Start becomes Stop in place; when the card's height changes (a two-line title, larger text) the mosaic and the Review summary below move with it under Reanimated layout transitions. Cards grow for larger text; the action track stays anchored to the bottom inset, and when the elapsed time is too wide to sit beside the actions the footer moves the reserved action space to its own line instead of clipping the time. The live block is a solid block in the activity's per-theme display colour with `blockColorsFor` text (never dimmed by opacity), the activity icon and name in a chip, `Recording`, the description, the elapsed time in Bricolage Grotesque with tabular figures, and the start time. An entry with no activity uses `surfaceRaised` and says `No activity`. The whole block is one `Edit running timer` button (activity, title and spoken elapsed as its value); Stop and Add past time stay separate buttons. Only the live block carries the breathing ring.
+- Today is a Dayframe Blocks surface (Phase 2). The idle card and the live block share one geometry contract (`apps/mobile/src/components/today/todayBlocksLayout.ts`): 184-point minimum height, 18-point padding, the card radius, and one bottom-right action track where the 56-point primary action (coral Play idle, on-block Stop live) and the 44-point Add past time keep the same card-relative centres, so Start becomes Stop in place; when the card's height changes (a two-line title, larger text) the mosaic and the Review nudge below move with it under Reanimated layout transitions. Cards grow for larger text; the action track stays anchored to the bottom inset, and when the elapsed time is too wide to sit beside the actions the footer moves the reserved action space to its own line instead of clipping the time. The live block is a solid block in the activity's per-theme display colour with `blockColorsFor` text (never dimmed by opacity), the activity icon and name in a chip, `Recording`, the description, the elapsed time in Bricolage Grotesque with tabular figures, and the start time. An entry with no activity uses `surfaceRaised` and says `No activity`. The whole block is one `Edit running timer` button (activity, title and spoken elapsed as its value); Stop and Add past time stay separate buttons. Only the live block carries the breathing ring.
 - The quick-start mosaic replaces the Quick Actions chips: up to six pinned activities (usage order) as solid blocks in at most three columns, ranked by whole minutes and sized by completed time over the last seven calendar days (`apps/mobile/src/lib/quickStartMosaic.ts`; the running entry is excluded so tiles never resize while the timer ticks, and sub-minute tracking never reorders them). Tiles are absolutely positioned and keyed by activity. Tiles below 78 points drop their duration; the header wraps at larger text sizes. Idle the heading is `Start an activity`; while running it is `Switch to`, other tiles switch, and the running activity's tile is marked `Recording` and opens the running timer rather than starting a duplicate. With nothing pinned the mosaic is hidden.
 - Today and history rows, including Today's Review rows, show the entry's activity as a 30-point solid block with its icon (`ActivityBlockMark`), hidden from VoiceOver because the row already names it; entries with no activity use a neutral block and the neutral dot.
 - Mobile connectivity status has one root state/announcement owner and one fixed 44-point visual slot immediately after the Dayframe wordmark in the shared primary-tab header. The slot remains reserved when settled so status transitions never move the wordmark, staging badge, Settings action or page content. Confirmed offline uses a neutral `textSecondary` cloud-slash and supersedes the other one-slot states. Confirmed online durable work waiting for connectivity, dependency, or retry is background-only and leaves the slot visually empty; only a live reconnect/recovery delivery attempt shows and rotates neutral circular arrows. A live account-owned pending-count transition from non-zero to zero uses a neutral cloud-check for about two seconds before the slot becomes visually empty. Permanent timer Stop or time-entry Edit/Delete rejection uses a persistent neutral cloud-X button that opens Settings > Sync & diagnostics whenever offline is not current. Rejected Stops restore server timer truth and appear in the existing diagnostics list with plain Retry Stop and Discard Stop actions. The root announces each distinct transition once; the focused tab's icon remains one manually revisitable labelled element without duplicate SVG traversal. Reduce Motion preserves short opacity changes but stops rotation. Never infer completion from reachability/pass outcome or use status to disable an offline-capable action.
@@ -158,27 +158,39 @@ zero-size hidden probes never affect scrolling, focus or touch targets.
 - Before `.began`, normal vertical scroll, horizontal swipe, pinch, refresh, second touch, hour-axis and semantic entry-hit rejection remain authoritative. After `.began`, creation owns the finger until end/cancel; only its one retained coordinator display link may edge-autoscroll the vertical timeline. Restore every normal gesture immediately on exit.
 - After release, React creates the DST-safe blank/Uncategorized/tag-free 30-minute draft, presents the existing `ActiveTimerEditSheet` in Add mode, saves through `createManualTimeEntry`, and refreshes bootstrap. Do not change the Plus route, prefill from timer/recent/place metadata, or stop/replace an active timer.
 
-## Today integrated Review
+## Today top and Review nudge (Blocks parity)
 
 - `DayframeDashboard` remains the only authenticated bootstrap/timer owner. Its
   foreground Today presentation adapter may read the bounded Review
   presentation cache/service and subscribe to `reviewSyncStore`, but it never
   owns mutation delivery, a timer, Health/Location processing, or another
-  persistent store.
-- Render provisional Review/saved rows as typed siblings of existing confirmed
-  history grouping. Never cast one to a `MobileTimeEntry`, pass it to replay or
-  Delete, or add it to a confirmed group aggregate. Generic Review, V2
-  Location, legacy entry, saved-sync issue, and canonical entry use their
-  existing exact route/action boundaries.
-- A pending row's Open and 44-point Quick Confirm controls are sibling
-  Pressables. Quick Confirm gates only its own local SQLite commit; it must not
-  bubble into Open, await HTTP, or show a normal spinner. Saved/unknown rows
-  retain their typed status rather than gaining invented edit/delete/replay
-  actions.
-- Today owns one completed-only donut and one global Open Review control. Its
-  pending slices are exact-item activations; confirmed category slices remain
-  inert. Cached/partial/no-snapshot states use honest inline copy and leave
-  the timer/history usable. Reports keeps its informational donut contract.
+  persistent store. Today reads that presentation only for the nudge's count
+  and colours.
+- The Today header is the brand lock-up and the account avatar
+  (`AccountAvatarButton`: initials from the account name, else the email's
+  first letter; "Account and settings"; 44 points) which opens Settings, where
+  account management and logout live.
+- `TodayGoalFrame` shows the date eyebrow (a VoiceOver header), the day's
+  covered total "framed of" the daily goal from the bootstrap's
+  `user.dailyGoalMinutes` (eight hours when unset), the percentage, and one
+  cell per goal hour filled with activity colours in the order the time
+  happened (`buildTodayGoalFrame`). It reads the per-minute clock; the running
+  entry's slice carries the recording edge. VoiceOver reads the frame as one
+  summary.
+- `TodayReviewNudge` ("N moments to review") opens Review. It names a count
+  only when it is exact (the cached presentation's global count, else the
+  bootstrap's `stats.reviewCount`; the bootstrap's Review list is capped at
+  100, so its length is never shown as a count), says "Moments to review"
+  without a number when the count is inexact, and hides on an exact zero (the
+  last decision, even while the bootstrap's count lags). Only when the
+  presentation read has failed while online does a positive bootstrap count keep an
+  uncounted card over a cached zero. It stacks up to three awaiting
+  activities' colours.
+- Today has no Review rows, Quick Confirm, "Incomplete time" list, donut or
+  logged/covered summary. Today's history card no longer shows the logged
+  total; earlier days keep it until they leave Today. The durable Quick
+  Confirm helper (`reviewQuickConfirm.ts`) and typed Review navigation stay
+  for the Review deck and the Today ribbon.
 
 ## Review Checklist
 

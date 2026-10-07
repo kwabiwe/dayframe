@@ -15,7 +15,6 @@ vi.mock("react", async () => {
 
 const mocks = vi.hoisted(() => ({
   context: null as any,
-  donutProps: null as any,
   open: vi.fn()
 }));
 
@@ -32,37 +31,21 @@ vi.mock("../../lib/mobile-network", () => ({
   isMobileTransportFailure: () => false,
   mobileJsonRequest: vi.fn()
 }));
-vi.mock("react-native", () => ({ Pressable: "Pressable", Text: "Text", View: "View" }));
-vi.mock("@/lib/mobileTypography", () => ({ mobileTextProps: () => ({}) }));
-vi.mock("@/lib/mobileTheme", () => ({
-  pressable: (base: unknown) => base,
-  useMobileTheme: () => ({
-    styles: {
-      buttonPressed: "pressed",
-      todayReviewAwaiting: "awaiting",
-      todayReviewOpenButton: "open",
-      todayReviewOpenMeta: "openMeta",
-      todayReviewOpenTitle: "openTitle",
-      todayReviewSaved: "saved",
-      todayReviewSummary: "summary"
-    },
-    theme: { textPrimary: "primary" }
-  })
+vi.mock("react-native", () => ({
+  Pressable: "Pressable",
+  StyleSheet: { create: <T,>(styles: T) => styles, flatten: (style: unknown) => style },
+  Text: "Text",
+  View: "View"
 }));
-vi.mock("@/lib/motion", () => ({
-  useResolvedReduceMotionPreference: () => ({ reduceMotion: false, resolved: true })
-}));
+vi.mock("../../lib/mobileTypography", () => ({ mobileTextProps: () => ({}) }));
+vi.mock("../icons/DayframeIcon", () => ({ DayframeIcon: () => null }));
+vi.mock("react-native-reanimated", () => ({ default: { View: "AnimatedView" } }));
+vi.mock("../../lib/motion", () => ({ localPresenceEntering: () => "entering", localPresenceExiting: () => "exiting" }));
 vi.mock("./TodayReviewPresentationContext", () => ({
   useTodayReviewPresentationContext: () => mocks.context
 }));
-vi.mock("./TodayReviewDonut", () => ({
-  TodayReviewDonut: (props: unknown) => {
-    mocks.donutProps = props;
-    return null;
-  }
-}));
 
-import { TodayReviewSummary } from "./TodayReviewSummary";
+import { TodayReviewNudge } from "./TodayReviewNudge";
 
 let db: DatabaseSync;
 let directory: string;
@@ -91,7 +74,6 @@ function adapter() {
 beforeEach(async () => {
   vi.resetAllMocks();
   mocks.context = null;
-  mocks.donutProps = null;
   directory = mkdtempSync(join(tmpdir(), "dayframe-today-presentation-test-"));
   db = new DatabaseSync(join(directory, "review.db"));
   mocks.open.mockImplementation(async () => adapter());
@@ -105,7 +87,7 @@ afterEach(() => {
 });
 
 describe("Today presentation cache rendering", () => {
-  it("caches an actual valid response through the mobile schema before rendering the Today summary", async () => {
+  it("caches an actual valid response through the mobile schema before rendering the Today nudge", async () => {
     const bootstrap = syntheticReviewBootstrap(1);
     const owner = {
       backendId: "dayframe-staging",
@@ -177,12 +159,26 @@ describe("Today presentation cache rendering", () => {
       presentation
     };
 
+    expect(presentation.completedLoggedMs).toBe(30 * 60_000);
+    expect(presentation.globalReviewCount).toEqual({ value: 0, exact: true });
+
+    // An exact cached zero with nothing in the bootstrap either: no nudge.
+    const theme = { mode: "dark", surface: "surface", surfaceMuted: "muted", textPrimary: "primary", textSecondary: "secondary" } as never;
     let tree!: ReturnType<typeof create>;
     act(() => {
-      tree = create(<TodayReviewSummary isFocused />);
+      tree = create(<TodayReviewNudge fallback={{ value: 0, exact: true }} onOpenReview={vi.fn()} reduceMotion={false} theme={theme} />);
     });
+    expect(tree.toJSON()).toBeNull();
 
-    expect(tree.root.findByProps({ testID: "today-review-summary" })).toBeTruthy();
-    expect(mocks.donutProps).toMatchObject({ completedLoggedMs: 30 * 60_000 });
+    // Without a usable presentation the bootstrap count still opens Review.
+    mocks.context = { ...mocks.context, isSummaryAvailable: false };
+    const onOpenReview = vi.fn();
+    act(() => {
+      tree.update(<TodayReviewNudge fallback={{ value: 3, exact: true }} onOpenReview={onOpenReview} reduceMotion={false} theme={theme} />);
+    });
+    const nudge = tree.root.findByProps({ testID: "today-review-nudge" });
+    expect(nudge.props.accessibilityLabel).toBe("3 moments to review. Dayframe found time you didn't track.");
+    act(() => nudge.props.onPress());
+    expect(onOpenReview).toHaveBeenCalledTimes(1);
   });
 });

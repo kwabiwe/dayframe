@@ -51,7 +51,8 @@ for time away from a saved place, so cached and backlog items keep their
 "Time away" labels and never fall back to the Commute category.
 
 `accept` and Location `confirm` may carry the optional 64-lower-hex
-`expectedProposalHash`. New Today Quick Confirm envelopes require it and the
+`expectedProposalHash`. New Quick Confirm envelopes (Today offered the shortcut until Blocks parity
+moved confirming to Review) require it and the
 server checks it under the existing mutation lock immediately before applying
 the existing action. A mismatch returns `proposal_changed` with scoped
 canonical-open evidence and writes no entry. Historical envelopes without the

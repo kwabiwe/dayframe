@@ -48,7 +48,6 @@ import { DayframeCalendarView } from "../../modules/dayframe-calendar";
 import { ActiveTimerEditSheet } from "@/components/ActiveTimerEditSheet";
 import { ConnectivityStatusIndicator } from "@/components/ConnectivityStatusStrip";
 import { useIntrinsicTextMeasure } from "@/components/accessibility/IntrinsicTextMeasure";
-import { TodayDateHeading } from "@/components/accessibility/TodayDateHeading";
 import { TodayLoggedSummary } from "@/components/accessibility/TodayLoggedSummary";
 import { recordMobileLayout, recordMobileTextLayout } from "@/components/accessibility/diagnostics";
 import type { MobileAccessibilityDiagnostic } from "@/components/accessibility/diagnostics";
@@ -65,9 +64,11 @@ import type { LandingRequest } from "@/lib/blocksMotion";
 import { minuteClock, newestShownTimestamp } from "@/lib/frameClock";
 import { loadHapticsPreference, playHaptic } from "@/lib/haptics";
 import { layoutQuickStartMosaic, rankQuickStartActivities, weeklySecondsByActivity } from "@/lib/quickStartMosaic";
-import { TodayReviewPresentationProvider, useTodayReviewPresentationContext } from "./today/TodayReviewPresentationContext";
-import { TodayReviewRow } from "./today/TodayReviewRow";
-import { TodayReviewSummary } from "./today/TodayReviewSummary";
+import { TodayReviewPresentationProvider } from "./today/TodayReviewPresentationContext";
+import { AccountAvatarButton } from "./today/AccountAvatarButton";
+import { TodayGoalFrame } from "./today/TodayGoalFrame";
+import { TodayReviewNudge } from "./today/TodayReviewNudge";
+import { buildTodayGoalFrame } from "@/lib/todayGoalFrame";
 import {
   AuthRequiredError,
   createManualTimeEntry,
@@ -175,7 +176,6 @@ import {
   type HistoryDaySection,
   type HistoryEntryGroup
 } from "@/lib/historyPresentation";
-import type { TodayActivity } from "@/lib/todayReviewPresentation";
 import {
   pressable,
   useMobileTheme,
@@ -1035,12 +1035,14 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
       return;
     }
     entrance.setValue(0);
+    // A native-driver fade leaves the JS value at 0, so a header that mounts after it (or whose
+    // view detached mid-flight) would stay invisible; settle the value at 1 whatever the outcome.
     Animated.timing(entrance, {
       toValue: 1,
       duration: 320,
       easing: Easing.out(Easing.cubic),
       useNativeDriver: true
-    }).start();
+    }).start(() => entrance.setValue(1));
   }, [entrance, reduceMotion]);
 
   useEffect(() => () => {
@@ -1399,6 +1401,22 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
   const openReviewCount = useMemo(
     () => (data?.reviewItems ?? []).filter(isOpenReviewItem).length,
     [data?.reviewItems]
+  );
+  // The bootstrap's Review list is capped (100), so only the server's total counts as exact.
+  const todayReviewFallback = useMemo(
+    () => typeof data?.stats?.reviewCount === "number"
+      ? { value: data.stats.reviewCount, exact: true }
+      : { value: openReviewCount, exact: false },
+    [data?.stats?.reviewCount, openReviewCount]
+  );
+  // Whole minutes only, so the goal frame reads the per-minute clock (investigation 2026-10-07).
+  const todayGoalFrame = useMemo(
+    () => buildTodayGoalFrame({
+      entries: historySourceEntries.filter((entry) => !isReviewNeededEntry(entry)),
+      goalMinutes: data?.user.dailyGoalMinutes,
+      nowMs: minuteNow,
+    }),
+    [data?.user.dailyGoalMinutes, historySourceEntries, minuteNow]
   );
   const activeCategoryColor = displayedActiveEntry?.categoryName
     ? paletteColorFor(
@@ -2427,17 +2445,15 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
             <Animated.View style={[styles.contentStack, enteringStyle, styles.todayListHeader]}>
               <View style={styles.header}>
                 <DashboardBrandLockup isFocused={isFocused} styles={styles} theme={theme} />
-                <Pressable
-                  accessibilityLabel="Open settings"
-                  accessibilityRole="button"
-                  style={pressable(styles.iconButton, styles.buttonPressed)}
+                <AccountAvatarButton
+                  email={data?.user.email}
+                  name={data?.user.name}
                   onPress={() => router.push("/settings")}
-                >
-                  <SettingsGlyph color={theme.textPrimary} />
-                </Pressable>
+                  theme={theme}
+                />
               </View>
 
-              <TodayDateHeading dateLabel={formatLongDay(currentDate)} styles={styles} />
+              <TodayGoalFrame dateLabel={formatEyebrowDay(currentDate)} theme={theme} {...todayGoalFrame} />
 
               <TodayTimerSurface
                 active={displayedActiveEntry ? {
@@ -2470,7 +2486,12 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
               />
               {/* Moves with the timer card and mosaic above it (Reanimated owns Today motion). */}
               <Reanimated.View layout={localLayoutTransition(reduceMotion)}>
-                <TodayReviewSummary isFocused={isFocused} />
+                <TodayReviewNudge
+                  fallback={todayReviewFallback}
+                  onOpenReview={() => router.push("/review")}
+                  reduceMotion={reduceMotion}
+                  theme={theme}
+                />
               </Reanimated.View>
             </Animated.View>
           )}
@@ -2486,7 +2507,6 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
                 }
                 presentCompletedEntry({ ...entry, isActive: false });
               }}
-              onOpenReview={() => router.push("/review")}
               onReplayEntry={(entry) => {
                 startFromToday(
                   entry.categoryId,
@@ -2496,7 +2516,6 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
               }}
               activityIconFor={(categoryId) => (categoryId ? categoryIconById.get(categoryId) ?? null : null)}
               rowLanding={rowLanding}
-              reviewCount={item.isToday ? openReviewCount : 0}
               section={item}
               styles={styles}
               theme={theme}
@@ -2903,9 +2922,7 @@ export function HistoryDayCard({
   now,
   onDeleteEntries,
   onOpenEntry,
-  onOpenReview,
   onReplayEntry,
-  reviewCount,
   rowLanding = null,
   section,
   styles,
@@ -2918,9 +2935,7 @@ export function HistoryDayCard({
   now: number;
   onDeleteEntries: (entries: TimeEntry[]) => void;
   onOpenEntry: (entry: TimeEntry) => void;
-  onOpenReview: () => void;
   onReplayEntry: (entry: TimeEntry) => void;
-  reviewCount: number;
   section: HistoryDaySection;
   styles: MobileStyles;
   theme: MobileTheme;
@@ -2930,24 +2945,6 @@ export function HistoryDayCard({
   const [expandedGroups, setExpandedGroups] = useState<Set<string>>(() => new Set());
   const [availableRowWidth, setAvailableRowWidth] = useState(0);
   const entryGroups = useMemo(() => groupHistoryDayEntries(section.entries), [section.entries]);
-  const todayReview = useTodayReviewPresentationContext();
-  const reviewTodayActivities = useMemo(() => {
-    if (!section.isToday || !todayReview?.isSummaryAvailable || !todayReview.presentation) return [];
-    // Confirmed entries stay in the existing grouped History owner. This
-    // insertion path is only for typed Review/saved sources, so a completed
-    // entry from the presentation read cannot duplicate a normal row or lose
-    // its established edit/replay/delete actions.
-    return (todayReview.presentation.daySections.find((candidate) => candidate.title === "Today")?.activities ?? [])
-      .filter((activity) => activity.source.kind !== "entry");
-  }, [section.isToday, todayReview?.isSummaryAvailable, todayReview?.presentation]);
-  const incompleteReviewActivities = useMemo(() => {
-    if (!section.isToday || !todayReview?.isSummaryAvailable || !todayReview.presentation) return [];
-    return todayReview.presentation.daySections.find((candidate) => candidate.title === "Incomplete time")?.activities ?? [];
-  }, [section.isToday, todayReview?.isSummaryAvailable, todayReview?.presentation]);
-  const displayRows = useMemo(
-    () => mergeHistoryRows(entryGroups, reviewTodayActivities),
-    [entryGroups, reviewTodayActivities]
-  );
   const longestDuration = useMemo(
     () => formatDuration(Math.max(0, ...entryGroups.map((group) => group.totalSeconds))),
     [entryGroups]
@@ -2980,22 +2977,6 @@ export function HistoryDayCard({
       { range: { start: rangeStart, end: rangeEnd }, now }
     );
   }, [now, section.date, section.entries]);
-  const noticeLabel = `${reviewCount} ${reviewCount === 1 ? "item needs" : "items need"} review`;
-  const noticeMeasure = useIntrinsicTextMeasure(
-    [noticeLabel, "Open Review"],
-    styles.reviewNoteText,
-    1.3,
-    "history-review-notice-measure"
-  );
-  const [noticeWidth, setNoticeWidth] = useState(0);
-  const noticeStacked = !noticeMeasure.widths[noticeLabel] || !noticeMeasure.widths["Open Review"] ||
-    summaryLayout({
-      availableWidth: noticeWidth,
-      labelWidth: noticeMeasure.widths[noticeLabel] ?? 0,
-      valueWidth: noticeMeasure.widths["Open Review"] ?? 0,
-      gap: 10,
-      padding: 24
-    }) === "stacked";
   const loggedValue = formatDuration(historyAnalysis.loggedSeconds);
 
   function toggleGroup(groupKey: string) {
@@ -3022,38 +3003,14 @@ export function HistoryDayCard({
       >
         {durationMeasure.probe}
         {groupCountMeasure.probe}
-        {displayRows.length === 0 ? (
+        {entryGroups.length === 0 ? (
           <Reanimated.View
             entering={localPresenceEntering(reduceMotion)}
             layout={localLayoutTransition(reduceMotion)}
           >
             <Text {...mobileTextProps("body")} style={styles.todayEmptyText}>No tracked time for this day.</Text>
           </Reanimated.View>
-        ) : displayRows.map((displayRow, index) => {
-          if (displayRow.kind === "review") {
-            const activity = displayRow.activity;
-            return (
-              <Reanimated.View
-                key={activity.presentationKey}
-                entering={localPresenceEntering(reduceMotion)}
-                exiting={localPresenceExiting(reduceMotion)}
-                layout={localLayoutTransition(reduceMotion)}
-                style={index > 0 ? styles.todayEntryDivider : null}
-              >
-                <TodayReviewRow
-                  activity={activity}
-                  committing={activity.source.kind === "review" && todayReview ? todayReview.isCommitting(activity.source.reviewItemId) : false}
-                  message={activity.source.kind === "review" && todayReview ? todayReview.messageFor(activity.source.reviewItemId) : null}
-                  nowMs={now}
-                  onOpen={() => todayReview?.openActivity(activity)}
-                  onQuickConfirm={() => todayReview?.quickConfirm(activity)}
-                  styles={styles}
-                  theme={theme}
-                />
-              </Reanimated.View>
-            );
-          }
-          const group = displayRow.group;
+        ) : entryGroups.map((group, index) => {
           const { entry } = group.representative;
           const probeId = group.entries[0].entry.id;
           const grouped = group.entries.length > 1;
@@ -3284,63 +3241,8 @@ export function HistoryDayCard({
           );
         })}
       </View>
-      {incompleteReviewActivities.length > 0 ? (
-        <View style={styles.todaySummaryBlock}>
-          <Text {...mobileTextProps("sectionHeading")} style={styles.historyDayTitle}>Incomplete time</Text>
-          <View style={styles.todayEntryCard}>
-            {incompleteReviewActivities.map((activity, index) => (
-              <Reanimated.View
-                key={activity.presentationKey}
-                entering={localPresenceEntering(reduceMotion)}
-                exiting={localPresenceExiting(reduceMotion)}
-                layout={localLayoutTransition(reduceMotion)}
-                style={index > 0 ? styles.todayEntryDivider : null}
-              >
-                <TodayReviewRow
-                  activity={activity}
-                  committing={activity.source.kind === "review" && todayReview ? todayReview.isCommitting(activity.source.reviewItemId) : false}
-                  message={activity.source.kind === "review" && todayReview ? todayReview.messageFor(activity.source.reviewItemId) : null}
-                  nowMs={now}
-                  onOpen={() => todayReview?.openActivity(activity)}
-                  onQuickConfirm={() => todayReview?.quickConfirm(activity)}
-                  styles={styles}
-                  theme={theme}
-                />
-              </Reanimated.View>
-            ))}
-          </View>
-        </View>
-      ) : null}
-      {reviewCount > 0 && !(section.isToday && todayReview?.isSummaryAvailable) ? (
-        <View onLayout={(event) => {
-          recordMobileLayout(diagnostic, "review-notice.container", event);
-          const width = event?.nativeEvent?.layout?.width;
-          if (width === undefined) return;
-          setNoticeWidth((current) => current === width ? current : width);
-        }}>
-        {noticeMeasure.probe}
-        <Pressable
-          accessibilityLabel={`${reviewCount} ${reviewCount === 1 ? "item needs" : "items need"} review. Open Review.`}
-          accessibilityRole="button"
-          onPress={onOpenReview}
-          style={({ pressed }) => [
-            styles.reviewNoteButton,
-            noticeStacked ? styles.reviewNoteButtonStacked : null,
-            pressed ? styles.buttonPressed : null
-          ]}
-        >
-            <Text
-            {...mobileTextProps("control")}
-            style={[styles.reviewNoteText, noticeStacked ? styles.reviewNoteTextStacked : null]}
-            onLayout={(event) => recordMobileLayout(diagnostic, "review-notice.count.frame", event)}
-            onTextLayout={(event) => recordMobileTextLayout(diagnostic, "review-notice.count", event, "control", styles.reviewNoteText)}
-          >
-            {noticeLabel}
-          </Text>
-          <Text {...mobileTextProps("control")} style={styles.reviewNoteAction} onLayout={(event) => recordMobileLayout(diagnostic, "review-notice.action.frame", event)} onTextLayout={(event) => recordMobileTextLayout(diagnostic, "review-notice.action", event, "control", styles.reviewNoteAction)}>Open Review</Text>
-        </Pressable>
-        </View>
-      ) : null}
+      {/* Today's total lives in the goal frame at the top (Blocks prototype); earlier days keep theirs. */}
+      {section.isToday ? null : (
       <TodayLoggedSummary
         value={loggedValue}
         coveredValue={historyAnalysis.additionalOverlapSeconds > 0
@@ -3349,34 +3251,9 @@ export function HistoryDayCard({
         styles={styles}
         diagnostic={diagnostic}
       />
+      )}
     </View>
   );
-}
-
-type HistoryCardDisplayRow =
-  | { kind: "entry_group"; group: HistoryEntryGroup }
-  | { kind: "review"; activity: TodayActivity };
-
-/** Keeps ordinary grouping untouched while inserting typed Review rows by time. */
-function mergeHistoryRows(
-  groups: readonly HistoryEntryGroup[],
-  reviewActivities: readonly TodayActivity[]
-): HistoryCardDisplayRow[] {
-  return [
-    ...groups.map((group) => ({ kind: "entry_group" as const, group })),
-    ...reviewActivities.map((activity) => ({ kind: "review" as const, activity }))
-  ].sort((left, right) => {
-    const leftAt = left.kind === "entry_group"
-      ? Date.parse(left.group.representative.entry.startedAt)
-      : left.activity.interval?.startMs ?? left.activity.detectedAtMs ?? Number.NEGATIVE_INFINITY;
-    const rightAt = right.kind === "entry_group"
-      ? Date.parse(right.group.representative.entry.startedAt)
-      : right.activity.interval?.startMs ?? right.activity.detectedAtMs ?? Number.NEGATIVE_INFINITY;
-    if (leftAt !== rightAt) return rightAt - leftAt;
-    const leftKey = left.kind === "entry_group" ? `entry:${left.group.key}` : left.activity.presentationKey;
-    const rightKey = right.kind === "entry_group" ? `entry:${right.group.key}` : right.activity.presentationKey;
-    return leftKey.localeCompare(rightKey);
-  });
 }
 
 function dedupeEntriesById(entries: TimeEntry[]) {
@@ -3475,12 +3352,12 @@ function formatEntryTimeRange(entry: TimeEntry, now: number) {
   return `${formatTimeOfDay(startedAt)}-${entry.stoppedAt ? formatTimeOfDay(stoppedAt) : "now"}`;
 }
 
-function formatLongDay(date: Date) {
+/** Today's eyebrow (Blocks prototype): weekday, day and month, without the year. */
+function formatEyebrowDay(date: Date) {
   return date.toLocaleDateString(undefined, {
     weekday: "long",
     month: "long",
-    day: "numeric",
-    year: "numeric"
+    day: "numeric"
   });
 }
 

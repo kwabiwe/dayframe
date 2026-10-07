@@ -70,26 +70,16 @@ Where a rule here conflicts with the approved Dayframe Blocks direction, it gove
 - Use one animation owner. Keep native navigation and tabs native, use a UI-thread transition for local React Native presence/layout, and reserve Swift/SwiftUI for targeted interactions that genuinely require native ownership.
 - Reduce Motion may remove nonessential travel, scale, and springs, but it must preserve state, focus, feedback, and accessibility announcements.
 
-## Today integrated Review
+## Today top and Review nudge (Blocks parity)
 
-- The Today Review summary is a compact continuation of the existing timer and
-  history surface: one bounded donut, understated awaiting/saved status copy,
-  and one fill-led Open Review control. Do not add a second dashboard card,
-  category legend, filter controls, or a Reports-style control cluster.
-- Solid completed slices use existing category treatment. Each finite pending
-  source retains its own category-colour slice with a distinct diagonal hatch
-  and Review cue; confirmed Uncategorized treatment must remain visually
-  distinct. External labels use actual intrinsic measurements, short neutral
-  leaders and a bounded maximum; at narrow widths reduce labels rather than
-  shrinking text, overlapping the centre, or merging activities into Other.
-- The centre says `Total logged` and completed duration only. Pending duration,
-  saved-local acceptance, partial coverage and a running timer never masquerade
-  as a completed total. Use neutral semantic status copy for saved/partial
-  states rather than a spinner or success-green claim.
-- Pending rows follow the established divider/list geometry and use the
-  scoped text roles. Preserve full time/detection, duration, category/place,
-  Review state and accessible Open/check labels through stacking; keep the
-  check target at least 44 points and visually separate from the primary row.
+- Follow the prototype (`design/blocks/ios.html`): uppercase 11-point date
+  eyebrow in the tertiary text colour; the goal total in the display face
+  (30 points) with "framed of 8h" and the percentage on one baseline; 18-point
+  hour cells on the inset surface with 4-point gaps and 5-point corners.
+- The nudge is one surface-filled card (22-point corners): a stack of up to
+  three tilted activity blocks, a 15-point bold title, one line of secondary
+  detail, and a tertiary chevron. It is the only Review element on Today; do
+  not add rows, a legend or a second Review control.
 
 ## Review Checklist
 

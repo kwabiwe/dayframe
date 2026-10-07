@@ -55,7 +55,6 @@ vi.mock("@/components/ActiveTimerEditSheet", () => ({ ActiveTimerEditSheet: () =
 vi.mock("@/components/ConnectivityStatusStrip", () => ({ ConnectivityStatusIndicator: () => null }));
 vi.mock("@/components/TagMetadata", () => ({ TagMetadata: () => null }));
 vi.mock("@/components/accessibility/IntrinsicTextMeasure", async () => import("./accessibility/IntrinsicTextMeasure"));
-vi.mock("@/components/accessibility/TodayDateHeading", () => ({ TodayDateHeading: () => null }));
 vi.mock("@/components/accessibility/TodayLoggedSummary", async () => import("./accessibility/TodayLoggedSummary"));
 vi.mock("@/components/accessibility/diagnostics", () => ({ recordMobileLayout: vi.fn(), recordMobileTextLayout: vi.fn() }));
 vi.mock("@/components/reports/ReportsTab", () => ({ ReportsTab: () => null }));
@@ -70,8 +69,10 @@ vi.mock("./today/TodayReviewPresentationContext", () => ({
   TodayReviewPresentationProvider: ({ children }: { children: unknown }) => children,
   useTodayReviewPresentationContext: () => null,
 }));
-vi.mock("./today/TodayReviewRow", () => ({ TodayReviewRow: () => null }));
-vi.mock("./today/TodayReviewSummary", () => ({ TodayReviewSummary: () => null }));
+vi.mock("./today/AccountAvatarButton", () => ({ AccountAvatarButton: () => null }));
+vi.mock("./today/TodayGoalFrame", () => ({ TodayGoalFrame: () => null }));
+vi.mock("./today/TodayReviewNudge", () => ({ TodayReviewNudge: () => null }));
+vi.mock("@/lib/todayGoalFrame", async () => import("../lib/todayGoalFrame"));
 vi.mock("./today/ActivityBlockMark", async () => {
   const ReactRuntime = await import("react");
   return {
@@ -204,7 +205,6 @@ function makeSection(entries: TimeEntry[]): HistoryDaySection {
 function renderCard(section: HistoryDaySection) {
   const onDeleteEntries = vi.fn();
   const onOpenEntry = vi.fn();
-  const onOpenReview = vi.fn();
   const onReplayEntry = vi.fn();
   let tree!: ReturnType<typeof create>;
   act(() => {
@@ -214,16 +214,14 @@ function renderCard(section: HistoryDaySection) {
         now={nowMs}
         onDeleteEntries={onDeleteEntries}
         onOpenEntry={onOpenEntry}
-        onOpenReview={onOpenReview}
         onReplayEntry={onReplayEntry}
-        reviewCount={0}
         section={section}
         styles={styles}
         theme={theme}
       />,
     );
   });
-  return { tree, onDeleteEntries, onOpenEntry, onOpenReview, onReplayEntry };
+  return { tree, onDeleteEntries, onOpenEntry, onReplayEntry };
 }
 
 function setCardWidth(tree: ReturnType<typeof create>, width: number) {
@@ -276,6 +274,14 @@ beforeEach(() => {
 });
 
 describe("rendered Today history card", () => {
+  it("leaves Today's total to the goal frame and keeps the logged total on earlier days", () => {
+    const entry = makeEntry({ id: "one", seconds: 600 });
+    const today = renderCard(makeSection([entry]));
+    expect(today.tree.root.findAllByProps({ style: "todayTrackedRow" })).toHaveLength(0);
+    expect(today.tree.root.findAllByType("Text" as never).some((node) => node.props.children === "Logged")).toBe(false);
+    const earlier = renderCard({ ...makeSection([entry]), isToday: false, key: "2026-09-11" });
+    expect(earlier.tree.root.findAllByType("Text" as never).some((node) => node.props.children === "Logged")).toBe(true);
+  });
   it("keeps expanded children bounded with inline metadata and no overlap announcement", () => {
     const first = { ...makeEntry({ id: "first", seconds: 600 }), categoryName: "Test", tagNames: ["tag"], placeName: "Place" };
     const rendered = renderCard(makeSection([first, { ...first, id: "second" }]));
@@ -349,8 +355,6 @@ describe("rendered Today history card", () => {
     expect(hasStyle(row(rendered.tree).props.style, "historyEntryStackedRow")).toBe(false);
     expect(visibleText(rendered.tree, "todayEntryMeta")).toContain("10:29-11:59");
     expect(visibleText(rendered.tree, "todayEntryDuration")).toContain("1h 30m");
-    expect(visibleText(rendered.tree, "todayTrackedLabel")).toContain("Logged");
-    expect(visibleText(rendered.tree, "todayTrackedValue")).toContain("1h 30m");
 
     setCardWidth(rendered.tree, 230);
     expect(hasStyle(row(rendered.tree).props.style, "historyEntryStackedRow")).toBe(true);
@@ -391,9 +395,7 @@ describe("rendered Today history card", () => {
         now={nowMs}
         onDeleteEntries={rendered.onDeleteEntries}
         onOpenEntry={rendered.onOpenEntry}
-        onOpenReview={rendered.onOpenReview}
         onReplayEntry={rendered.onReplayEntry}
-        reviewCount={0}
         section={makeSection([replacement])}
         styles={styles}
         theme={theme}

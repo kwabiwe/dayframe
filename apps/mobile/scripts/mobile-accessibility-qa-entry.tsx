@@ -20,10 +20,12 @@ import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { File, Paths } from "expo-file-system";
 import type { MobileReviewItem, MobileTimeEntry } from "../src/lib/api";
 import { HistoryDayCard } from "../src/components/DayframeDashboard";
-import { TodayDateHeading } from "../src/components/accessibility/TodayDateHeading";
 import { TodayLoggedSummary } from "../src/components/accessibility/TodayLoggedSummary";
 import { TodayTimerSurface } from "../src/components/accessibility/TodayTimerSurface";
+import { TodayGoalFrame } from "../src/components/today/TodayGoalFrame";
+import { TodayReviewNudge } from "../src/components/today/TodayReviewNudge";
 import { layoutQuickStartMosaic } from "../src/lib/quickStartMosaic";
+import { buildTodayGoalFrame } from "../src/lib/todayGoalFrame";
 import { ReviewItemCard } from "../app/review";
 import { SettingsMenuRow } from "../app/settings";
 import { MobileThemeProvider, useMobileTheme } from "../src/lib/mobileTheme";
@@ -151,7 +153,7 @@ function Probe() {
   const [showRunningTimer, setShowRunningTimer] = useState(false);
   const [actionResult, setActionResult] = useState("No probe action has run.");
   const reviewCount = reviewCounts[reviewCountIndex];
-  const reviewNoticeVisible = reviewCount > 0;
+  const reviewNudgeVisible = reviewCount > 0;
   const reportWriterRef = useRef<() => void>(() => {});
   const reportTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const scheduleReportWrite = () => {
@@ -161,7 +163,7 @@ function Probe() {
       reportWriterRef.current();
     }, 200);
   };
-  const previousVisibility = useRef({ reviewNoticeVisible, showRunningTimer });
+  const previousVisibility = useRef({ reviewNudgeVisible, showRunningTimer });
   if (previousVisibility.current.showRunningTimer !== showRunningTimer) {
     const hiddenTimerPrefix = showRunningTimer ? "today.timer.idle" : "today.timer.running";
     for (const key of Object.keys(frames)) {
@@ -169,12 +171,12 @@ function Probe() {
     }
     if (showRunningTimer) delete frames["today.timer.composer.frame"];
   }
-  if (previousVisibility.current.reviewNoticeVisible !== reviewNoticeVisible && !reviewNoticeVisible) {
+  if (previousVisibility.current.reviewNudgeVisible !== reviewNudgeVisible && !reviewNudgeVisible) {
     for (const key of Object.keys(frames)) {
-      if (key.startsWith("review-notice.")) delete frames[key];
+      if (key.startsWith("review-nudge.")) delete frames[key];
     }
   }
-  previousVisibility.current = { reviewNoticeVisible, showRunningTimer };
+  previousVisibility.current = { reviewNudgeVisible, showRunningTimer };
   useEffect(() => {
     void AccessibilityInfo.isBoldTextEnabled().then(setBoldText);
     void AccessibilityInfo.isReduceMotionEnabled().then(setReduceMotion);
@@ -206,11 +208,14 @@ function Probe() {
         "qa.viewport",
         "qa.scroll-viewport",
         "qa.host",
-        "today.heading",
-        "today.heading.title.frame",
-        "today.heading.title.text",
-        "today.heading.date.frame",
-        "today.heading.date.text",
+        "today.goal",
+        "today.goal.date.frame",
+        "today.goal.date.text",
+        "today.goal.total.frame",
+        "today.goal.total.text",
+        "today.goal.of.frame",
+        "today.goal.of.text",
+        "today.goal.cells",
         "history.card",
         "history.row.H01-cross-midnight",
         "history.title.H01-cross-midnight.frame",
@@ -222,11 +227,6 @@ function Probe() {
         "history.count-text.H03-count-12-1.text",
         "history.count-text.H03-count-123-1.frame",
         "history.count-text.H03-count-123-1.text",
-        "logged.row",
-        "logged.label.frame",
-        "logged.label.text",
-        "logged.value.frame",
-        "logged.value.text",
         "logged.stress.row",
         "logged.stress.label.frame",
         "logged.stress.label.text",
@@ -254,7 +254,7 @@ function Probe() {
         requiredMeasurements.push("today.timer.idle", "today.timer.composer.frame");
       }
       if (reviewCount > 0) {
-        requiredMeasurements.push("review-notice.container", "review-notice.count.frame", "review-notice.count.text", "review-notice.action.frame", "review-notice.action.text");
+        requiredMeasurements.push("review-nudge.card", "review-nudge.title.frame", "review-nudge.title.text", "review-nudge.detail.frame", "review-nudge.detail.text");
       }
       if (frames["history.child-time.H03-group-1.0.frame"]) {
         for (const childIndex of [0, 1]) {
@@ -319,7 +319,7 @@ function Probe() {
         reduceMotion,
         appearance: theme.mode,
         visibleState: {
-          reviewNotice: reviewCount > 0,
+          reviewNudge: reviewCount > 0,
           loggedStressFixture: `L01-${loggedStressIndex}`,
           timer: showRunningTimer ? "running" : "idle",
         },
@@ -330,8 +330,12 @@ function Probe() {
         ancestorRelationships: {
           "qa.host": "qa.scroll-viewport; synthetic component-width host",
           "qa.scroll-viewport": "qa.viewport; the only scroll owner for the diagnostic entry",
-          "today.heading.title.frame": "today.heading",
-          "today.heading.date.frame": "today.heading",
+          "today.goal.date.frame": "today.goal",
+          "today.goal.total.frame": "today.goal",
+          "today.goal.of.frame": "today.goal",
+          "today.goal.cells": "today.goal",
+          "review-nudge.title.frame": "review-nudge.card",
+          "review-nudge.detail.frame": "review-nudge.card",
           "today.timer.title.frame": "today.timer.running",
           "today.timer.elapsed.frame": "today.timer.running",
           "history.card": "qa.host; todayEntryCard uses overflow:hidden, so children must remain within the measured rounded-card bounds",
@@ -348,8 +352,8 @@ function Probe() {
           "review.card": "qa.host; review card has no fixed maximum height",
           "review.title.frame": "review.header",
           "review.reason.frame": "review.card",
-          "logged.row": "history.card sibling",
-          "logged.value.frame": "logged.row",
+          "logged.stress.row": "qa.host; earlier days keep the logged total, Today's total lives in the goal frame",
+          "logged.stress.value.frame": "logged.stress.row",
         },
         diagnosticComplete: missingMeasurementIds.length === 0,
         missingMeasurementIds,
@@ -412,7 +416,12 @@ function Probe() {
           contentContainerStyle={{ alignItems: "center", gap: 14, paddingBottom: 120 }}
         >
           <View style={{ width: hostWidth, gap: 14 }} onLayout={(event) => recordMobileLayout(diagnostic, "qa.host", event)}>
-            <TodayDateHeading dateLabel="Saturday, 12 September 2026" styles={styles} diagnostic={diagnostic} />
+            <TodayGoalFrame
+              dateLabel="Saturday 12 September"
+              diagnostic={diagnostic}
+              theme={theme}
+              {...buildTodayGoalFrame({ entries: fixtures.map((item) => item.entry), goalMinutes: 480, nowMs: now })}
+            />
             <TodayTimerSurface
               active={showRunningTimer ? {
                 categoryColor: "moss",
@@ -441,14 +450,19 @@ function Probe() {
               runningActivityId={showRunningTimer ? "qa-activity" : null}
               theme={theme}
             />
+            <TodayReviewNudge
+              diagnostic={diagnostic}
+              fallback={{ value: reviewCount, exact: true }}
+              onOpenReview={() => setActionResult("Local Review navigation callback")}
+              reduceMotion={reduceMotion}
+              theme={theme}
+            />
             <HistoryDayCard
               activeTimerRunning={false}
               now={now}
               onDeleteEntries={(deleted) => setActionResult(`Local delete callback: ${deleted.length} synthetic entries`)}
               onOpenEntry={(opened) => setActionResult(`Local edit callback: ${opened.id}`)}
-              onOpenReview={() => setActionResult("Local Review navigation callback")}
               onReplayEntry={(replayed) => setActionResult(`Local replay callback: ${replayed.id}`)}
-              reviewCount={reviewCount}
               section={{
                 date: new Date(2026, 8, 12),
                 entries: fixtures,
