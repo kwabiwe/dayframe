@@ -138,7 +138,8 @@ export function TodayBlockRows({
                 expanded={grouped ? isExpanded : undefined}
                 icon={activityIconFor(group.representative.entry.categoryId)}
                 meta={rowMeta(group, nowMs)}
-                spokenLabel={rowSpokenLabel(group, nowMs)}
+                // The Expand/Collapse prefix already says how many entries the group holds.
+                spokenLabel={rowSpokenLabel(group, nowMs, { omitCount: grouped })}
                 onDelete={() => onDeleteEntries(group.entries.map(({ entry }) => entry))}
                 onOpen={() => (grouped ? toggle(group.key) : onOpenEntry(group.representative.entry))}
                 onReplay={() => onReplayEntry(group.representative.entry)}
@@ -254,7 +255,14 @@ export const TodayBlockRow = memo(function TodayBlockRow({
         dx = Math.max(Math.min(dx, LIVE_RESISTANCE.limit), -LIVE_RESISTANCE.limit) * LIVE_RESISTANCE.factor;
       }
       offset.value = dx;
-      const next = dx > ROW_SWIPE_COMMIT ? 1 : dx < -ROW_SWIPE_COMMIT ? -1 : 0;
+      // Arming needs this gesture's own full travel, so a row re-grabbed while it springs home
+      // cannot commit again with a short nudge.
+      const travel = event.translationX;
+      const next = !live && replayable && travel > ROW_SWIPE_COMMIT
+        ? 1
+        : !live && deletable && travel < -ROW_SWIPE_COMMIT
+          ? -1
+          : 0;
       if (next !== armed.value) {
         armed.value = next;
         if (next !== 0) runOnJS(tick)();

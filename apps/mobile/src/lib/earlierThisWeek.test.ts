@@ -36,6 +36,12 @@ describe("earlier this week", () => {
     expect(days[0].totalSeconds + days[1].totalSeconds).toBe(8 * 3600);
   });
 
+  it("fills a timer still running since an earlier day to that day's midnight", () => {
+    const days = earlier([entry("forgot", at(1, 23), null)]);
+    expect(days[0].segments).toEqual([{ key: "forgot", color: "blue", left: 23 / 24, width: 1 / 24 }]);
+    expect(days[0].totalSeconds).toBe(3600);
+  });
+
   it("leaves out days older than a week", () => {
     expect(earlier([entry("old", at(8, 9), at(8, 10))]).every((day) => day.segments.length === 0)).toBe(true);
   });

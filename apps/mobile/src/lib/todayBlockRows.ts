@@ -46,13 +46,13 @@ export function rowMeta(group: HistoryEntryGroup, nowMs: number) {
  * What VoiceOver reads for a row: the visible title and meta, with times read "09:00 to 10:00" and
  * the place and tags that the row does not show, so rows that look alike still sound different.
  */
-export function rowSpokenLabel(group: HistoryEntryGroup, nowMs: number) {
+export function rowSpokenLabel(group: HistoryEntryGroup, nowMs: number, { omitCount = false } = {}) {
   const { entry } = group.representative;
   const tags = entry.tagNames ?? entry.tags?.map((tag) => tag.name) ?? [];
   return [
     rowTitle(entry),
     `${clock(entry.startedAt, nowMs)} to ${entry.stoppedAt ? clock(entry.stoppedAt, nowMs) : "now"}`,
-    group.entries.length > 1 ? `${group.entries.length} entries` : null,
+    group.entries.length > 1 && !omitCount ? `${group.entries.length} entries` : null,
     entry.categoryName ?? null,
     entry.placeName ? `at ${entry.placeName}` : null,
     tags.length ? `tags: ${tags.join(", ")}` : null,

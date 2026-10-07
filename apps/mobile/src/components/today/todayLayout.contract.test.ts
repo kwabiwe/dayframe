@@ -16,6 +16,8 @@ describe("Today layout", () => {
 
   it("builds a week of sections, not sixty days", () => {
     expect(dashboard).toMatch(/buildHistoryDaySections\(\{\s*days: EARLIER_DAYS \+ 1,/);
+    // Entries awaiting Review never count on Today's rows, ribbon or week rows.
+    expect(dashboard).toMatch(/days: EARLIER_DAYS \+ 1,\s*entries: historySourceEntries\.filter\(\(entry\) => !isReviewNeededEntry\(entry\)\)/);
   });
 
   it("opens an earlier day in the Calendar tab through the shared provider state", () => {
