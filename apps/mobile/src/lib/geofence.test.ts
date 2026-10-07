@@ -392,6 +392,7 @@ describe("mobile geofence visit candidates", () => {
     const visit = queue.find((item) => item.type === "geofence_exit");
     expect(visit?.description).toBe("Work");
     expect(visit?.rawPayload).toMatchObject({ placeName: "Work" });
+    expect((await getLocationVisitDiagnostics()).monitoredPlaceNames).toEqual(["Work"]);
   });
 
   it("dedupes repeated geofence events for the same visit", async () => {

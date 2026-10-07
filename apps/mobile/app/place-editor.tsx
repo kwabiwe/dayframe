@@ -16,15 +16,7 @@ import { router, useLocalSearchParams } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
 import Svg, { Circle as SvgCircle, Path } from "react-native-svg";
 import MapView, { Circle, Marker, type MapPressEvent } from "react-native-maps";
-import {
-  PlaceRoleSchema,
-  leavingRoleHolder,
-  paletteColorFor,
-  placeRoleLabel,
-  placeRoleRequest,
-  placeRoleSlots,
-  previousRolePlaceName
-} from "@dayframe/shared";
+import { paletteColorFor } from "@dayframe/shared";
 import {
   AuthRequiredError,
   createPlace,
@@ -41,7 +33,6 @@ import {
   locationAccuracyWarning,
   suggestedPlaceNameFromGeocode,
   validatePlaceForm,
-  withRole,
   DEFAULT_PLACE_RADIUS_METERS
 } from "@/lib/places";
 import {
@@ -83,16 +74,12 @@ export default function PlaceEditorScreen() {
     mode?: string;
     placeId?: string;
     learnedPlaceId?: string;
-    role?: string;
   }>();
   const mode: EditorMode = params.mode === "edit"
     ? "edit"
     : params.mode === "learned"
       ? "learned"
       : "create";
-  // Adding a new place straight into the Home or Work slot.
-  const parsedRole = PlaceRoleSchema.safeParse(params.role);
-  const newRole = mode !== "edit" && parsedRole.success ? parsedRole.data : null;
   const reduceMotion = useReduceMotionPreference();
   const { styles, theme } = useMobileTheme();
   const editorStyles = useMemo(() => createEditorStyles(theme), [theme]);
@@ -117,7 +104,6 @@ export default function PlaceEditorScreen() {
   const [locationAccuracy, setLocationAccuracy] = useState<number | null>(null);
   const [locationPrecise, setLocationPrecise] = useState(true);
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
-  const [previousPlaceName, setPreviousPlaceName] = useState("");
   const saveInFlight = useRef(false);
   const nameTouched = useRef(mode !== "create");
   const initialCoordinate = useRef<{ latitude: number; longitude: number } | null>(null);
@@ -139,11 +125,6 @@ export default function PlaceEditorScreen() {
     try {
       const bootstrap = await fetchBootstrap();
       setData(bootstrap);
-      if (newRole) {
-        const slot = placeRoleSlots(bootstrap.places.map(withRole)).find((candidate) => candidate.role === newRole);
-        const holder = slot ? leavingRoleHolder(slot, null) : null;
-        setPreviousPlaceName(holder ? previousRolePlaceName(newRole) : "");
-      }
       let existingCoordinate: { latitude: number; longitude: number } | null = null;
       if (mode === "edit") {
         const place = bootstrap.places.find((candidate) => candidate.id === params.placeId);
@@ -194,7 +175,7 @@ export default function PlaceEditorScreen() {
     } finally {
       setLoading(false);
     }
-  }, [mode, newRole, params.learnedPlaceId, params.placeId]);
+  }, [mode, params.learnedPlaceId, params.placeId]);
 
   useEffect(() => {
     void load();
@@ -211,12 +192,7 @@ export default function PlaceEditorScreen() {
     defaultCategoryId: loggingEnabled ? defaultCategoryId : "",
     defaultActivityDescription: loggingEnabled ? defaultActivityDescription : ""
   });
-  const roleSlot = newRole ? placeRoleSlots((data?.places ?? []).map(withRole)).find((slot) => slot.role === newRole) : undefined;
-  const roleHolder = roleSlot ? leavingRoleHolder(roleSlot, null) : null;
-  const shownRole = newRole ?? (mode === "edit" && loadedEntity && "role" in loadedEntity ? loadedEntity.role ?? null : null);
-  const title = newRole
-    ? `Add ${placeRoleLabel(newRole)}`
-    : mode === "edit" ? "Edit place" : mode === "learned" ? "Save learned place" : "New place";
+  const title = mode === "edit" ? "Edit place" : mode === "learned" ? "Save learned place" : "New place";
   const accuracyWarning = locationAccuracyWarning(locationAccuracy, locationPrecise);
 
   function changeSearchQuery(value: string) {
@@ -336,10 +312,7 @@ export default function PlaceEditorScreen() {
           loggingEnabled,
           defaultCategoryId: loggingEnabled ? validation.value.defaultCategoryId : null,
           defaultActivityDescription: loggingEnabled ? validation.value.defaultActivityDescription : null
-        }, newRole ? {
-          role: newRole,
-          previousPlaceName: placeRoleRequest({ role: newRole, targetId: null, holder: roleHolder, previousPlaceName }).previousPlaceName
-        } : undefined);
+        });
       }
       const refreshed = await fetchBootstrap();
       await refreshGeofencesForPlaces(refreshed.places, { userId: refreshed.user.id, workspaceId: refreshed.workspace.id }).catch(() => 0);
@@ -496,43 +469,19 @@ export default function PlaceEditorScreen() {
             </View>
 
             <View style={styles.panel}>
-              <Text style={styles.label}>{shownRole ? "Address or name" : "Name in Dayframe"}</Text>
+              <Text style={styles.label}>Name in Dayframe</Text>
               <TextInput
-                accessibilityHint={shownRole ? `Dayframe shows this place as ${placeRoleLabel(shownRole)}; this name appears under it.` : undefined}
-                accessibilityLabel={shownRole ? "Address or name" : "Name in Dayframe"}
+                accessibilityLabel="Name in Dayframe"
                 onChangeText={(value) => {
                   nameTouched.current = true;
                   setPlaceName(value);
                 }}
-                placeholder={shownRole ? "The street address" : "Home, Gym, Mum's house…"}
+                placeholder="Home, Gym, Mum's house…"
                 placeholderTextColor={theme.textSecondary}
                 returnKeyType="done"
                 style={styles.textInput}
                 value={placeName}
               />
-              {shownRole ? (
-                <Text style={styles.muted}>
-                  Dayframe shows this place as {placeRoleLabel(shownRole)}; this name appears under it.
-                </Text>
-              ) : null}
-              {newRole && roleHolder ? (
-                <>
-                  <Text style={styles.label}>Rename the old {placeRoleLabel(newRole).toLowerCase()}</Text>
-                  <TextInput
-                    accessibilityHint="Its past entries keep this name. Leave it blank to keep the current name."
-                    accessibilityLabel={`Rename the old ${placeRoleLabel(newRole).toLowerCase()}`}
-                    maxLength={120}
-                    onChangeText={setPreviousPlaceName}
-                    placeholderTextColor={theme.textSecondary}
-                    returnKeyType="done"
-                    style={styles.textInput}
-                    value={previousPlaceName}
-                  />
-                  <Text style={styles.muted}>
-                    Its past entries keep this name, so they don&apos;t read as an address. Leave it blank to keep the current name.
-                  </Text>
-                </>
-              ) : null}
 
               {formCoordinate ? (
                 <View style={editorStyles.mapSection}>

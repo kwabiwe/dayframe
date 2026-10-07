@@ -1141,6 +1141,15 @@ describe("place role normalization", () => {
       roleContext
     );
     expect(staleName).toEqual(expect.objectContaining({ title: "Home" }));
+    // Work moved elsewhere since the phone refreshed: the echoed "Work" is not kept.
+    const movedAway = normalizeActivityEvent(
+      {
+        source: "geofence_specific", type: "geofence_exit", occurredAt: new Date("2026-10-07T09:30:00.000Z"),
+        placeId: placeId("station"), description: "Work", rawPayload: { placeName: "Work" }
+      },
+      roleContext
+    );
+    expect(movedAway).toEqual(expect.objectContaining({ title: "Home" }));
   });
 
   it("matches a payload place name of Home to the Home-role place before a place merely named Home", () => {

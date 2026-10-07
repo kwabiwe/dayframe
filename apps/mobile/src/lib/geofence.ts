@@ -472,7 +472,7 @@ async function refreshCaptureCatalogue(places: Parameters<typeof startGeofencesU
     !mobileAccountOwnersEqual(getActiveMobileAccountSnapshot(), capture.context)) return { ...capture, context: null };
   const updated = await updateLocationCaptureCatalogue(places.flatMap(place =>
     typeof place.latitude !== "number" || typeof place.longitude !== "number" ? [] : [{
-      id: place.id, name: place.name, latitude: place.latitude, longitude: place.longitude,
+      id: place.id, name: place.name, role: place.role ?? null, latitude: place.latitude, longitude: place.longitude,
       radiusMeters: place.radiusMeters, priority: place.priority, loggingEnabled: place.loggingEnabled
     }]), capture);
   if (!updated) return { ...capture, context: null };
@@ -483,6 +483,7 @@ async function startGeofencesUnsafe(
   places: Array<{
     id: string;
     name: string;
+    role?: PlaceRole | null;
     latitude?: number | null;
     longitude?: number | null;
     radiusMeters: number;
@@ -551,11 +552,11 @@ async function startGeofencesUnsafe(
     activeMonitorCount: regions.length,
     configuredMonitorCount: monitorablePlaces.length,
     excludedMonitorCount: excludedPlaces.length,
-    excludedPlaceNames: excludedPlaces.map((place) => place.name),
+    excludedPlaceNames: excludedPlaces.map((place) => monitoredPlaceFromInput(place).name),
     geofencingActive: true,
     lastStatus: `Monitoring ${regions.length} saved ${regions.length === 1 ? "place" : "places"}.${limitNote}`,
     lastMonitorRefreshAt: new Date().toISOString(),
-    monitoredPlaceNames: registeredPlaces.map((place) => place.name)
+    monitoredPlaceNames: registeredPlaces.map((place) => monitoredPlaceFromInput(place).name)
   });
   return regions.length;
 }

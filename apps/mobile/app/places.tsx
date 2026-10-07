@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
-  ActionSheetIOS,
   Alert,
   Modal,
   Pressable,
@@ -14,14 +13,7 @@ import * as Clipboard from "expo-clipboard";
 import { router, useFocusEffect } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
 import Svg, { Path } from "react-native-svg";
-import {
-  placeDisplayName,
-  placeRoleSlots,
-  placeSecondaryName,
-  type PlaceRole,
-  type PlaceRoleSlot
-} from "@dayframe/shared";
-import { DayframeIcon } from "@/components/icons/DayframeIcon";
+import { placeDisplayName, placeSecondaryName } from "@dayframe/shared";
 import { SheetMutationProgress } from "@/components/SheetMutationProgress";
 import {
   SwipeDismissSheet,
@@ -33,7 +25,6 @@ import {
   fetchBootstrap,
   forgetLearnedPlace,
   ignoreLearnedPlace,
-  setPlaceRole,
   type MobileBootstrap,
   type MobileLearnedPlace,
   type MobilePlace
@@ -41,8 +32,6 @@ import {
 import { refreshGeofencesForPlaces } from "@/lib/geofence";
 import { backfillLearnedPlaceLocations } from "@/lib/locationGeocoding";
 import { applyAfterSuccessfulMutation } from "@/lib/localMutation";
-import { placeRoleChoice, type PlaceRoleFlowPrompts } from "@/lib/placeRoleFlow";
-import { placeRoleSheet } from "@/lib/placeRoleSheet";
 import { withRole } from "@/lib/places";
 import {
   copyLearnedPlaceDetail,
@@ -68,16 +57,12 @@ export default function PlacesScreen() {
   const [forgettingLearnedId, setForgettingLearnedId] = useState<string | null>(null);
   const [selectedLearnedPlace, setSelectedLearnedPlace] = useState<MobileLearnedPlace | null>(null);
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
-  const [savingRole, setSavingRole] = useState<PlaceRole | null>(null);
-  const [loadFailed, setLoadFailed] = useState(false);
-  const roleSaveInFlight = useRef(false);
 
   const load = useCallback(async (options?: { refresh?: boolean; silent?: boolean }) => {
     if (options?.refresh) setRefreshing(true);
     try {
       const bootstrap = await fetchBootstrap();
       setData(bootstrap);
-      setLoadFailed(false);
       void backfillLearnedPlaceLocations(bootstrap.learnedPlaces ?? []).then((resolved) => {
         if (resolved.length === 0) return;
         setData((current) => current ? mergeLearnedPlaceResolutions(current, resolved) : current);
@@ -87,7 +72,6 @@ export default function PlacesScreen() {
         router.replace("/");
         return;
       }
-      setLoadFailed(true);
       if (!options?.silent) {
         Alert.alert("Places", error instanceof Error ? error.message : "Unable to load places.");
       }
@@ -124,61 +108,10 @@ export default function PlacesScreen() {
     router.push({ pathname: "/place-editor", params: { mode: "edit", placeId: place.id } } as never);
   }
 
-  function chooseRolePlace(slot: PlaceRoleSlot<RolePlace>) {
-    if (roleSaveInFlight.current) return;
-    setStatusMessage(null);
-    const rolePlaces = places.map(withRole);
-    if (rolePlaces.length === 0) {
-      router.push({ pathname: "/place-editor", params: { mode: "create", role: slot.role } } as never);
-      return;
-    }
-    const sheet = placeRoleSheet(slot, rolePlaces);
-    ActionSheetIOS.showActionSheetWithOptions(
-      {
-        title: sheet.title,
-        options: sheet.options,
-        cancelButtonIndex: sheet.cancelButtonIndex,
-        destructiveButtonIndex: sheet.destructiveButtonIndex
-      },
-      (index) => {
-        const action = sheet.actions[index];
-        if (!action) return;
-        if (action.kind === "add") {
-          router.push({ pathname: "/place-editor", params: { mode: "create", role: slot.role } } as never);
-          return;
-        }
-        const target = action.kind === "clear" ? null : rolePlaces.find((place) => place.id === action.placeId) ?? null;
-        if (action.kind === "choose" && !target) return;
-        void placeRoleChoice(slot, target, nativePlaceRolePrompts).then((request) => {
-          if (request) void saveRole(slot.label, request);
-        });
-      }
-    );
-  }
-
-  async function saveRole(label: string, request: Parameters<typeof setPlaceRole>[0]) {
-    if (roleSaveInFlight.current) return;
-    roleSaveInFlight.current = true;
-    setSavingRole(request.role);
-    try {
-      await setPlaceRole(request);
-      await refreshAfterPlaceChange({ prefix: request.placeId ? `${label} updated.` : `${label} cleared.` });
-    } catch (error) {
-      if (error instanceof AuthRequiredError) {
-        router.replace("/");
-        return;
-      }
-      Alert.alert("Places", error instanceof Error ? error.message : `Unable to update ${label}.`);
-    } finally {
-      roleSaveInFlight.current = false;
-      setSavingRole(null);
-    }
-  }
-
   function confirmDeletePlace(place: MobilePlace) {
     Alert.alert(
       "Delete place",
-      `Delete ${placeDisplayName(withRole(place))}? ${place.role ? `That empties the ${placeDisplayName(withRole(place))} slot. ` : ""}Existing time entries keep their time data, but this place label will be removed.`,
+      `Delete ${placeDisplayName(withRole(place))}? Existing time entries keep their time data, but this place label will be removed.`,
       [
         { text: "Cancel", style: "cancel" },
         {
@@ -342,7 +275,6 @@ export default function PlacesScreen() {
   }
 
   const places = data?.places ?? [];
-  const roleSlots = placeRoleSlots(places.map(withRole));
   const learnedPlaces = (data?.learnedPlaces ?? []).filter(
     (learnedPlace) => learnedPlace.classification === "place_candidate"
   );
@@ -377,28 +309,7 @@ export default function PlacesScreen() {
         }
       >
         <View style={styles.contentStack}>
-          {/* Present from first paint (slots read "Loading…" until bootstrap arrives) so nothing
-              below jumps when the data lands; height changes reflow under one layout owner each. */}
-          <Reanimated.View layout={localLayoutTransition(reduceMotion)} style={styles.panel}>
-            <Text accessibilityRole="header" style={styles.sectionTitle}>Home and Work</Text>
-            <Text style={styles.muted}>Trips and time away are named after these.</Text>
-            <View style={styles.placeList}>
-              {roleSlots.map((slot) => (
-                <Reanimated.View key={slot.role} layout={localLayoutTransition(reduceMotion)}>
-                  <PlaceRoleSlotRow
-                    busy={savingRole !== null || !data}
-                    loading={!data ? (loadFailed ? "failed" : "loading") : null}
-                    saving={savingRole === slot.role}
-                    slot={slot}
-                    onPress={() => chooseRolePlace(slot)}
-                    styles={styles}
-                    theme={theme}
-                  />
-                </Reanimated.View>
-              ))}
-            </View>
-          </Reanimated.View>
-          <Reanimated.View layout={localLayoutTransition(reduceMotion)} style={styles.panel}>
+          <View style={styles.panel}>
             <Text style={styles.muted}>Save locations Dayframe should recognise.</Text>
             <View style={styles.buttonRow}>
               <Pressable
@@ -419,9 +330,9 @@ export default function PlacesScreen() {
                 <Text accessibilityLiveRegion="polite" style={styles.statusText}>{statusMessage}</Text>
               </Reanimated.View>
             ) : null}
-          </Reanimated.View>
+          </View>
 
-          <Reanimated.View layout={localLayoutTransition(reduceMotion)} style={styles.panel}>
+          <View style={styles.panel}>
             <Text style={styles.sectionTitle}>Your places</Text>
             <View style={styles.placeList}>
               {places.map((place) => (
@@ -476,7 +387,7 @@ export default function PlacesScreen() {
                 <Text style={styles.muted}>No learned candidates yet.</Text>
               </Reanimated.View>
             ) : null}
-          </Reanimated.View>
+          </View>
         </View>
       </ScrollView>
       <LearnedPlaceDetailSheet
@@ -493,74 +404,6 @@ export default function PlacesScreen() {
         theme={theme}
       />
     </SafeAreaView>
-  );
-}
-
-type RolePlace = MobilePlace & { role: PlaceRole | null };
-
-// The system alert and prompt own their own presentation and Reduce Motion behaviour.
-const nativePlaceRolePrompts: PlaceRoleFlowPrompts = {
-  confirm: (title, message, actionLabel, destructive) => new Promise((resolve) => {
-    Alert.alert(title, message, [
-      { text: "Cancel", style: "cancel", onPress: () => resolve(false) },
-      { text: actionLabel, style: destructive ? "destructive" : "default", onPress: () => resolve(true) }
-    ], { cancelable: true, onDismiss: () => resolve(false) });
-  }),
-  promptRename: (title, message, suggestion) => new Promise((resolve) => {
-    Alert.prompt(title, message, [
-      { text: "Cancel", style: "cancel", onPress: () => resolve({ kind: "cancel" }) },
-      { text: "Keep name", onPress: () => resolve({ kind: "keep" }) },
-      { text: "Rename", onPress: (value?: string) => resolve({ kind: "rename", name: value ?? "" }) }
-    ], "plain-text", suggestion);
-  })
-};
-
-function PlaceRoleSlotRow({
-  busy,
-  loading,
-  saving,
-  slot,
-  onPress,
-  styles,
-  theme
-}: {
-  busy: boolean;
-  /** Before the first bootstrap: still loading, or it failed (pull to refresh retries). */
-  loading: "loading" | "failed" | null;
-  saving: boolean;
-  slot: PlaceRoleSlot<RolePlace>;
-  onPress: () => void;
-  styles: MobileStyles;
-  theme: MobileTheme;
-}) {
-  const detail = loading === "loading"
-    ? "Loading…"
-    : loading === "failed"
-      ? "Couldn't load your places. Pull down to try again."
-      : slot.place ? slot.secondary ?? `${slot.place.radiusMeters}m radius` : "Not set";
-  return (
-    <Pressable
-      accessibilityHint={`Choose which saved place is ${slot.label}.`}
-      accessibilityLabel={`${slot.label}, ${detail}`}
-      accessibilityRole="button"
-      accessibilityState={{ busy: saving, disabled: busy }}
-      disabled={busy}
-      onPress={onPress}
-      style={({ pressed }) => [styles.placeRow, busy && !saving ? styles.buttonDisabled : null, pressed ? styles.buttonPressed : null]}
-    >
-      <DayframeIcon color={theme.accent} glyph={slot.role === "home" ? "house" : "briefcase"} />
-      <View style={styles.placeTextStack}>
-        <Text style={styles.placeName} numberOfLines={1}>{slot.label}</Text>
-        <Text style={styles.placeMeta} numberOfLines={2}>{detail}</Text>
-      </View>
-      {loading ? null : (
-        <View style={styles.placeActions}>
-          <View style={styles.learnedPlaceSaveButton}>
-            <Text style={styles.learnedPlaceSaveButtonText}>{saving ? "Saving…" : slot.place ? "Change" : "Set"}</Text>
-          </View>
-        </View>
-      )}
-    </Pressable>
   );
 }
 

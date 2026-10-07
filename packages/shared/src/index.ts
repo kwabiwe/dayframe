@@ -2310,12 +2310,12 @@ function visitActivityDescription(
   rule?: AutomationRuleSummary
 ) {
   const eventDescription = event.description?.trim();
-  // The phone describes a visit by the saved name it has cached (and sends that as
-  // `placeName`); for a role place that is often its address, so the role label wins,
-  // even when the name was edited since the phone last refreshed.
+  // The phone describes a visit by the place name it has cached (and sends that as
+  // `placeName`). That echo is not an activity: the place's current name or role label
+  // wins, so a renamed place or a Home/Work move since the phone last refreshed reads right.
   const cachedPlaceName = typeof event.rawPayload.placeName === "string" ? event.rawPayload.placeName.trim() : "";
   const describedName = eventDescription?.toLowerCase();
-  const describesSavedName = Boolean(place?.role && describedName
+  const describesSavedName = Boolean(place && describedName
     && (describedName === place.name.trim().toLowerCase() || describedName === cachedPlaceName.toLowerCase()));
   if (eventDescription && !describesSavedName) return eventDescription;
 
