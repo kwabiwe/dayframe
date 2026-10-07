@@ -1116,6 +1116,33 @@ describe("place role normalization", () => {
     expect(enter).toEqual(expect.objectContaining({ confidence: "low", title: "Entered Home" }));
   });
 
+  it("lets a place's own description win over a visit described only by the place name", () => {
+    const gym = {
+      id: placeId("town"), name: "Gym", role: null, radiusMeters: 100, priority: 5,
+      defaultProjectId: null, defaultCategoryId: null, defaultActivityDescription: null, autoStart: false
+    };
+    const homeWithDefault = { ...roleContext.places[0]!, defaultActivityDescription: "Chores" };
+    const context: NormalizationContext = {
+      ...roleContext,
+      places: [homeWithDefault, { ...gym, name: "Gym and pool" }],
+      automationRules: [{
+        id: "rule-gym", name: "Gym", triggerSource: "geofence_specific", triggerType: "geofence_exit",
+        placeId: gym.id, action: "create_review_item", projectId: null, categoryId: null,
+        activityDescription: "Gym session", enabled: true
+      }]
+    };
+    const exit = (placeIdValue: string, description: string, rawPayload: Record<string, unknown> = {}) => normalizeActivityEvent(
+      { source: "geofence_specific", type: "geofence_exit", occurredAt: new Date("2026-10-07T09:30:00.000Z"), placeId: placeIdValue, description, rawPayload },
+      context
+    );
+    // A rule's description beats the echoed name.
+    expect(exit(gym.id, "Gym and pool")).toEqual(expect.objectContaining({ title: "Gym session" }));
+    // Renamed on the server since the phone cached "Gym": still the rule's description, never the stale name.
+    expect(exit(gym.id, "Gym", { placeName: "Gym" })).toEqual(expect.objectContaining({ title: "Gym session" }));
+    // An event that echoes the role label ("Home") also gives way to the place's default description.
+    expect(exit(placeId("home"), "Home")).toEqual(expect.objectContaining({ title: "Chores" }));
+  });
+
   it("names a visit Home when an older phone describes it by the saved address", () => {
     const exit = normalizeActivityEvent(
       {
@@ -1141,6 +1168,15 @@ describe("place role normalization", () => {
       roleContext
     );
     expect(staleName).toEqual(expect.objectContaining({ title: "Home" }));
+    // Work moved elsewhere since the phone refreshed: the echoed "Work" is not kept.
+    const movedAway = normalizeActivityEvent(
+      {
+        source: "geofence_specific", type: "geofence_exit", occurredAt: new Date("2026-10-07T09:30:00.000Z"),
+        placeId: placeId("station"), description: "Work", rawPayload: { placeName: "Work" }
+      },
+      roleContext
+    );
+    expect(movedAway).toEqual(expect.objectContaining({ title: "Home" }));
   });
 
   it("matches a payload place name of Home to the Home-role place before a place merely named Home", () => {

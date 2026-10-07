@@ -6,9 +6,11 @@ import {
   LOCATION_ENGINE_V2_CONFIG,
   LOCATION_LEARNING_THRESHOLDS,
   LocationEvidenceSchema,
+  placeDisplayName,
   readableLocationNameFromParts,
   type LocationEvidence,
-  type LocationLearningEvidence
+  type LocationLearningEvidence,
+  type PlaceRole
 } from "@dayframe/shared";
 import { enqueueEvent } from "./api";
 import { reverseGeocodeLocation } from "./locationGeocoding";
@@ -470,7 +472,7 @@ async function refreshCaptureCatalogue(places: Parameters<typeof startGeofencesU
     !mobileAccountOwnersEqual(getActiveMobileAccountSnapshot(), capture.context)) return { ...capture, context: null };
   const updated = await updateLocationCaptureCatalogue(places.flatMap(place =>
     typeof place.latitude !== "number" || typeof place.longitude !== "number" ? [] : [{
-      id: place.id, name: place.name, latitude: place.latitude, longitude: place.longitude,
+      id: place.id, name: place.name, role: place.role ?? null, latitude: place.latitude, longitude: place.longitude,
       radiusMeters: place.radiusMeters, priority: place.priority, loggingEnabled: place.loggingEnabled
     }]), capture);
   if (!updated) return { ...capture, context: null };
@@ -481,6 +483,7 @@ async function startGeofencesUnsafe(
   places: Array<{
     id: string;
     name: string;
+    role?: PlaceRole | null;
     latitude?: number | null;
     longitude?: number | null;
     radiusMeters: number;
@@ -549,11 +552,11 @@ async function startGeofencesUnsafe(
     activeMonitorCount: regions.length,
     configuredMonitorCount: monitorablePlaces.length,
     excludedMonitorCount: excludedPlaces.length,
-    excludedPlaceNames: excludedPlaces.map((place) => place.name),
+    excludedPlaceNames: excludedPlaces.map((place) => monitoredPlaceFromInput(place).name),
     geofencingActive: true,
     lastStatus: `Monitoring ${regions.length} saved ${regions.length === 1 ? "place" : "places"}.${limitNote}`,
     lastMonitorRefreshAt: new Date().toISOString(),
-    monitoredPlaceNames: registeredPlaces.map((place) => place.name)
+    monitoredPlaceNames: registeredPlaces.map((place) => monitoredPlaceFromInput(place).name)
   });
   return regions.length;
 }
@@ -1233,6 +1236,7 @@ async function recordPlaceExit(place: MonitoredPlace, region: DayframeRegion, oc
 function monitoredPlaceFromInput(place: {
   id: string;
   name: string;
+  role?: PlaceRole | null;
   latitude?: number | null;
   longitude?: number | null;
   radiusMeters: number;
@@ -1244,7 +1248,8 @@ function monitoredPlaceFromInput(place: {
 }): MonitoredPlace {
   return {
     id: place.id,
-    name: place.name,
+    // A Home or Work place is described as "Home"/"Work" in the visits the phone records.
+    name: placeDisplayName({ name: place.name, role: place.role ?? null }),
     latitude: typeof place.latitude === "number" ? place.latitude : 0,
     longitude: typeof place.longitude === "number" ? place.longitude : 0,
     radiusMeters: place.radiusMeters,

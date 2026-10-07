@@ -4,11 +4,17 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { LocateFixed, MapPin } from "lucide-react";
 import { useCallback, useMemo, useRef, useState } from "react";
-import { placeRoleLabel, previousRolePlaceName, type PlaceRole } from "@dayframe/shared";
+import {
+  leavingRoleHolder,
+  placeRoleLabel,
+  placeRoleRequest,
+  placeRoleSlots,
+  previousRolePlaceName,
+  type PlaceRole
+} from "@dayframe/shared";
 import type { CategoryRow, LearnedPlaceRow, PlaceRow } from "@/lib/queries";
 import { clientFetch } from "@/lib/client-auth-fetch";
 import type { WebPlaceSuggestion } from "@/lib/place-search";
-import { placeRoleRequest, placeRoleSlots } from "@/lib/place-role-slots";
 import {
   applyWebPlaceSuggestion,
   DEFAULT_WEB_PLACE_RADIUS_METERS,
@@ -74,7 +80,8 @@ export function PlaceEditor({
   const [locating, setLocating] = useState(false);
   const [submitAttempted, setSubmitAttempted] = useState(false);
   const newRole = mode === "edit" ? null : role;
-  const roleHolder = newRole ? placeRoleSlots(places).find((slot) => slot.role === newRole)?.previousHolder ?? null : null;
+  const roleSlot = newRole ? placeRoleSlots(places).find((slot) => slot.role === newRole) ?? null : null;
+  const roleHolder = roleSlot ? leavingRoleHolder(roleSlot, null) : null;
   const [previousPlaceName, setPreviousPlaceName] = useState(newRole && roleHolder ? previousRolePlaceName(newRole) : "");
   const shownRole = newRole ?? place?.role ?? null;
   const saveInFlight = useRef(false);

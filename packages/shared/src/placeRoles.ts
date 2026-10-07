@@ -39,3 +39,78 @@ export function isHomePlace(place: NamedPlace | null | undefined) {
 export function previousRolePlaceName(role: PlaceRole) {
   return PREVIOUS_ROLE_NAMES[role];
 }
+
+// Home and Work slots for the Places screens on web and iPhone.
+
+type SlotPlace = { id: string; name: string; role: PlaceRole | null };
+
+export type PlaceRoleSlot<T extends SlotPlace> = {
+  role: PlaceRole;
+  label: string;
+  place: T | null;
+  /** The saved name shown under the label, often an address. */
+  secondary: string | null;
+  /**
+   * The place that loses the role when it moves: the holder, or with no holder a place
+   * named exactly "Home"/"Work", which Dayframe treated as Home before roles existed.
+   */
+  previousHolder: T | null;
+  /** Role-less places named exactly like the role; the server renames all of them with the holder. */
+  namedLikeRole: T[];
+};
+
+/** The Home and Work slots, in that order, each pointing at the place that holds the role. */
+export function placeRoleSlots<T extends SlotPlace>(places: T[]): PlaceRoleSlot<T>[] {
+  return PLACE_ROLES.map((role) => {
+    const label = placeRoleLabel(role);
+    const place = places.find((candidate) => candidate.role === role) ?? null;
+    const namedLikeRole = places.filter((candidate) => candidate.role === null
+      && candidate.name.trim().toLowerCase() === label.toLowerCase());
+    return {
+      role, label, place, namedLikeRole,
+      secondary: place ? placeSecondaryName(place) : null,
+      previousHolder: place ?? namedLikeRole[0] ?? null
+    };
+  });
+}
+
+/**
+ * The place that loses the role when it goes to `targetId` (null empties the slot, or the
+ * place is new): the holder, else a place named like the role other than the target.
+ */
+export function leavingRoleHolder<T extends SlotPlace>(slot: PlaceRoleSlot<T>, targetId: string | null) {
+  if (slot.place) return slot.place.id === targetId ? null : slot.place;
+  return slot.namedLikeRole.find((place) => place.id !== targetId) ?? null;
+}
+
+/** What the rename field suggests when the role leaves `holder` for `target` (null empties the slot). */
+export function initialPreviousPlaceName(role: PlaceRole, holder: SlotPlace | null, target: SlotPlace | null) {
+  if (!holder) return "";
+  const suggestion = previousRolePlaceName(role);
+  // Moving the role elsewhere: suggest "Previous home" so the old history doesn't read as an address,
+  // unless that is the name of the place Home is moving back to. Emptying the slot: keep the name.
+  if (!target || target.id === holder.id) return holder.name;
+  return target.name.trim().toLowerCase() === suggestion.toLowerCase() ? holder.name : suggestion;
+}
+
+/** Body for PUT /api/places/role. The rename only applies when the role really leaves a place. */
+export function placeRoleRequest(input: {
+  role: PlaceRole;
+  targetId: string | null;
+  holder: SlotPlace | null;
+  previousPlaceName: string;
+}) {
+  const leaving = input.holder && input.holder.id !== input.targetId ? input.holder : null;
+  const rename = input.previousPlaceName.trim().slice(0, 120);
+  return {
+    role: input.role,
+    placeId: input.targetId,
+    previousPlaceName: leaving && rename && rename !== leaving.name ? rename : null
+  };
+}
+
+/** Option label for choosing a place: its display name, plus the saved name when a role hides it. */
+export function placeChoiceLabel(place: SlotPlace) {
+  const secondary = placeSecondaryName(place);
+  return secondary ? `${placeDisplayName(place)} · ${secondary}` : placeDisplayName(place);
+}

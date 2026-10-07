@@ -16,6 +16,7 @@ import Reanimated from "react-native-reanimated";
 import Svg, { Circle as SvgCircle, Path, Rect } from "react-native-svg";
 import {
   paletteColorFor,
+  placeDisplayName,
   travelModeLabel,
   tripStopRows,
   tripStopsHeading,
@@ -1176,7 +1177,11 @@ function placeForSelection(
   places: Place[]
 ) {
   if (!id) return null;
-  return nearby.find((place) => place.id === id) ?? places.find((place) => place.id === id) ?? null;
+  const nearbyPlace = nearby.find((place) => place.id === id);
+  if (nearbyPlace) return nearbyPlace;
+  // Bootstrap places carry the saved name; show a Home or Work place by its role label.
+  const saved = places.find((place) => place.id === id);
+  return saved ? { ...saved, name: placeDisplayName({ name: saved.name, role: saved.role ?? null }) } : null;
 }
 
 function locationActivityLabel(evidence: LocationReviewEvidenceDto) {
