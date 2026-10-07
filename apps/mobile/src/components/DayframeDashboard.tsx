@@ -3,6 +3,7 @@ import {
   useCallback,
   useContext,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -59,6 +60,10 @@ import {
   PlusGlyph
 } from "@/components/PrimaryTimerAction";
 import { TodayTimerSurface } from "@/components/accessibility/TodayTimerSurface";
+import { ActivityBlockMark } from "./today/ActivityBlockMark";
+import type { LandingRequest } from "@/lib/blocksMotion";
+import { loadHapticsPreference, playHaptic } from "@/lib/haptics";
+import { layoutQuickStartMosaic, rankQuickStartActivities, weeklySecondsByActivity } from "@/lib/quickStartMosaic";
 import { TodayReviewPresentationProvider, useTodayReviewPresentationContext } from "./today/TodayReviewPresentationContext";
 import { TodayReviewRow } from "./today/TodayReviewRow";
 import { TodayReviewSummary } from "./today/TodayReviewSummary";
@@ -205,7 +210,6 @@ import {
 import {
   activeTimerElapsedSeconds,
   activeTimerPresentation,
-  buildMobileQuickActions,
   createBlankTimerStartGate,
   createGenerationScopedExitCoordinator,
   createOptimisticTimerStartReconciler,
@@ -374,6 +378,14 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
   const blankTimerStartGate = useRef(createBlankTimerStartGate());
   const entrance = useRef(new Animated.Value(0)).current;
   const activeTimerExpansion = useRef(new Animated.Value(0)).current;
+  // Blocks landings (motion.md): issued only by committed Start/Stop/Undo handlers, never by refresh.
+  const landingSequence = useRef(0);
+  const [liveLanding, setLiveLanding] = useState<LandingRequest | null>(null);
+  const [rowLanding, setRowLanding] = useState<LandingRequest | null>(null);
+
+  useEffect(() => {
+    void loadHapticsPreference();
+  }, []);
   const authNameRef = useRef<TextInput>(null);
   const authWorkspaceRef = useRef<TextInput>(null);
   const authEmailRef = useRef<TextInput>(null);
@@ -1248,7 +1260,6 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
     return () => subscription.remove();
   }, []);
 
-  const quickActions = useMemo(() => buildMobileQuickActions(data), [data]);
   const sortedCategories = useMemo(
     () => sortMobileCategoriesByUsage(data?.categories ?? [], data?.categoryUsage ?? []).map(({ category }) => category),
     [data?.categories, data?.categoryUsage]
@@ -1289,9 +1300,12 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
     return () => clearTimeout(timeout);
   }, [activeEditPresentation, activeEntryForDisplay, reduceMotion]);
 
-  useEffect(() => {
+  // A layout effect, so an instant value lands before the live block's first paint.
+  useLayoutEffect(() => {
     const toValue = hasLiveActiveTimer ? 1 : 0;
-    if (reduceMotion) {
+    // On Start the live block's own crossfade and landing own the entrance, so the details and
+    // actions appear at rest; this value only fades them out during the retained Stop exit.
+    if (reduceMotion || hasLiveActiveTimer) {
       activeTimerExpansion.setValue(toValue);
       return undefined;
     }
@@ -1349,6 +1363,23 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
     }),
     [historySourceEntries, now]
   );
+  const categoryIconById = useMemo(
+    () => new Map((data?.categories ?? []).map((category) => [category.id, category.icon ?? null])),
+    [data?.categories]
+  );
+  // Sized by the last seven calendar days of completed time; recomputed when entries or the day
+  // change, never on a timer tick.
+  const quickStartColumns = useMemo(() => {
+    const pinned = sortedCategories
+      .filter((category) => category.isPinned)
+      .map((category) => ({ color: category.color ?? null, icon: category.icon ?? null, id: category.id, name: category.name }));
+    const weekly = weeklySecondsByActivity(
+      historySourceEntries.filter((entry) => !isReviewNeededEntry(entry)),
+      Date.now()
+    );
+    return layoutQuickStartMosaic(rankQuickStartActivities(pinned, weekly));
+    // todayKey moves the seven-day window at midnight.
+  }, [historySourceEntries, sortedCategories, todayKey]);
   const openReviewCount = useMemo(
     () => (data?.reviewItems ?? []).filter(isOpenReviewItem).length,
     [data?.reviewItems]
@@ -1447,6 +1478,31 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
 
   function startBlankTask() {
     void startTask(null);
+  }
+
+  function nextLandingRequest(entryIds?: readonly string[]): LandingRequest {
+    landingSequence.current += 1;
+    return { entryIds, requestedAt: Date.now(), token: landingSequence.current };
+  }
+
+  // Today's Start/Stop: haptic and landing only after the local action is accepted (motion.md).
+  function startFromToday(categoryId: string | null, description = "", tagNames: string[] = []) {
+    void startTask(categoryId, description, tagNames).then((accepted) => {
+      if (!accepted) return;
+      playHaptic("start");
+      setLiveLanding(nextLandingRequest());
+    });
+  }
+
+  function stopFromToday() {
+    const entryId = latestData.current?.activeEntry?.id;
+    void stopActiveTimer().then((accepted) => {
+      if (!accepted || !entryId) return;
+      playHaptic("stop");
+      // A rolled-back Stop remounts the live block; it must not replay the Start landing.
+      setLiveLanding(null);
+      setRowLanding(nextLandingRequest([entryId]));
+    });
   }
 
   function openManualEntry() {
@@ -1999,7 +2055,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
         current,
         coordinator.pendingEntryIds()
       ));
-      coordinator.activate(prepared.token);
+      if (coordinator.activate(prepared.token)) playHaptic("delete");
       AccessibilityInfo.announceForAccessibility(
         entries.length > 1
           ? `${entries.length} time entries deleted. Undo available for five seconds.`
@@ -2013,6 +2069,8 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
   function undoDeletion() {
     if (!pendingDeletion || pendingDeletion.phase !== "active") return;
     if (getDeletionCoordinator().undo(pendingDeletion.token)) {
+      playHaptic("undoRestore");
+      setRowLanding(nextLandingRequest(pendingDeletion.entries.map((entry) => entry.id)));
       AccessibilityInfo.announceForAccessibility(
         pendingDeletion.entries.length > 1 ? "Time entries restored." : "Time entry restored."
       );
@@ -2059,6 +2117,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
     if (pendingSheetDeletion?.presentationId !== presentationId) return;
     tokenRef.current = null;
     if (!getDeletionCoordinator().activate(pendingSheetDeletion.token)) return;
+    playHaptic("delete");
     const active = getDeletionCoordinator().current();
     AccessibilityInfo.announceForAccessibility(
       active && active.entries.length > 1
@@ -2338,8 +2397,8 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
             <RefreshControl
               refreshing={isFocused && refreshing}
               onRefresh={refreshTodayPresentation}
-              tintColor={theme.accent}
-              colors={[theme.accent]}
+              tintColor={theme.textSecondary}
+              colors={[theme.textSecondary]}
             />
           }
           ListHeaderComponent={(
@@ -2352,7 +2411,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
                   style={pressable(styles.iconButton, styles.buttonPressed)}
                   onPress={() => router.push("/settings")}
                 >
-                  <SettingsGlyph color={theme.accent} />
+                  <SettingsGlyph color={theme.textPrimary} />
                 </Pressable>
               </View>
 
@@ -2360,27 +2419,37 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
 
               <TodayTimerSurface
                 active={displayedActiveEntry ? {
-                  categoryColor: activeCategoryColor,
-                  categoryLabel: activeCategoryLabel,
+                  categoryColor: displayedActiveEntry.categoryName
+                    ? displayedActiveEntry.categoryColor ?? displayedActiveEntry.categoryId ?? null
+                    : null,
+                  categoryIcon: displayedActiveEntry.categoryId
+                    ? categoryIconById.get(displayedActiveEntry.categoryId) ?? null
+                    : null,
+                  categoryLabel: displayedActiveEntry.categoryName ? activeCategoryLabel : null,
                   elapsedLabel: formatClockDuration(displayedActiveDurationSeconds),
+                  elapsedSeconds: displayedActiveDurationSeconds,
                   hasLiveActiveTimer,
+                  startedLabel: `Started ${formatTimeOfDay(new Date(displayedActiveEntry.startedAt))}`,
                   title: activeTitle,
                   titleIsPlaceholder: activeTitleIsPlaceholder,
                 } : null}
                 activeTimerActionsStyle={activeTimerActionsStyle}
                 activeTimerDetailsStyle={activeTimerDetailsStyle}
+                liveLanding={liveLanding}
                 onAddTime={openManualEntry}
                 onOpenActiveTimer={() => presentActiveEditor("existing_active_timer")}
-                onStartBlank={startBlankTask}
-                onStartQuickAction={(action) => {
-                  void startTask(action.id, action.description ?? "");
-                }}
-                onStop={() => { void stopActiveTimer(); }}
-                quickActions={quickActions}
-                styles={styles}
+                onStartActivity={(activityId) => startFromToday(activityId)}
+                onStartBlank={() => startFromToday(null)}
+                onStop={stopFromToday}
+                quickStartColumns={quickStartColumns}
+                reduceMotion={reduceMotion}
+                runningActivityId={displayedActiveEntry?.categoryId ?? null}
                 theme={theme}
               />
-              <TodayReviewSummary isFocused={isFocused} />
+              {/* Moves with the timer card and mosaic above it (Reanimated owns Today motion). */}
+              <Reanimated.View layout={localLayoutTransition(reduceMotion)}>
+                <TodayReviewSummary isFocused={isFocused} />
+              </Reanimated.View>
             </Animated.View>
           )}
           renderItem={({ item }) => (
@@ -2397,12 +2466,14 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
               }}
               onOpenReview={() => router.push("/review")}
               onReplayEntry={(entry) => {
-                void startTask(
+                startFromToday(
                   entry.categoryId,
                   entry.description ?? "",
                   entry.tagNames ?? entry.tags?.map((tag) => tag.name) ?? []
                 );
               }}
+              activityIconFor={(categoryId) => (categoryId ? categoryIconById.get(categoryId) ?? null : null)}
+              rowLanding={rowLanding}
               reviewCount={item.isToday ? openReviewCount : 0}
               section={item}
               styles={styles}
@@ -2809,18 +2880,22 @@ function SwipeableHistoryEntry({
 
 export function HistoryDayCard({
   activeTimerRunning,
+  activityIconFor,
   now,
   onDeleteEntries,
   onOpenEntry,
   onOpenReview,
   onReplayEntry,
   reviewCount,
+  rowLanding = null,
   section,
   styles,
   theme,
   diagnostic
 }: {
   activeTimerRunning: boolean;
+  activityIconFor?: (categoryId: string | null | undefined) => string | null;
+  rowLanding?: LandingRequest | null;
   now: number;
   onDeleteEntries: (entries: TimeEntry[]) => void;
   onOpenEntry: (entry: TimeEntry) => void;
@@ -3054,7 +3129,15 @@ export function HistoryDayCard({
                       </Text>
                     </View>
                   ) : null}
-                  <View style={[styles.todayEntryDot, { backgroundColor: entryCategoryColor(entry, theme.mode) }]} />
+                  <ActivityBlockMark
+                    categoryColor={entry.categoryColor ?? entry.categoryId ?? null}
+                    categoryIcon={activityIconFor?.(entry.categoryId) ?? null}
+                    categoryName={entry.categoryName ?? null}
+                    entryId={entry.id}
+                    landing={rowLanding}
+                    reduceMotion={reduceMotion}
+                    theme={theme}
+                  />
                   <View style={styles.todayEntryText}>
                     <Text {...mobileTextProps("itemTitle")} style={styles.todayEntryTitle} numberOfLines={1} onLayout={(event) => recordMobileLayout(diagnostic, `history.title.${probeId}.frame`, event)} onTextLayout={(event) => recordMobileTextLayout(diagnostic, `history.title.${probeId}`, event, "itemTitle", styles.todayEntryTitle)}>{title}</Text>
                     <Text {...mobileTextProps("metadata")} style={styles.todayEntryMeta} numberOfLines={1} onLayout={(event) => recordMobileLayout(diagnostic, `history.time.${probeId}.frame`, event)} onTextLayout={(event) => recordMobileTextLayout(diagnostic, `history.time.${probeId}`, event, "metadata", styles.todayEntryMeta)}>
@@ -3087,7 +3170,7 @@ export function HistoryDayCard({
                       ]}
                     >
                       <CompactReplayPlayGlyph
-                        color={canReplay ? theme.accentText : theme.textSecondary}
+                        color={canReplay ? theme.textPrimary : theme.textSecondary}
                       />
                     </Pressable>
                   </View>
@@ -3147,7 +3230,15 @@ export function HistoryDayCard({
                         >
                           <Text {...mobileTextProps("itemTitle")} style={styles.todayEntryTitle} numberOfLines={1} ellipsizeMode="tail">{displayEntryTitle(childEntry)}</Text>
                           <View style={styles.historyGroupChildMain}>
-                            <View style={[styles.todayEntryDot, { backgroundColor: entryCategoryColor(childEntry, theme.mode) }]} />
+                            <ActivityBlockMark
+                              categoryColor={childEntry.categoryColor ?? childEntry.categoryId ?? null}
+                              categoryIcon={activityIconFor?.(childEntry.categoryId) ?? null}
+                              categoryName={childEntry.categoryName ?? null}
+                              entryId={childEntry.id}
+                              landing={rowLanding}
+                              reduceMotion={reduceMotion}
+                              theme={theme}
+                            />
                             <Text {...mobileTextProps("metadata")} style={styles.historyGroupChildTime} numberOfLines={1} onLayout={(event) => recordMobileLayout(diagnostic, `history.child-time.${probeId}.${childIndex}.frame`, event)} onTextLayout={(event) => recordMobileTextLayout(diagnostic, `history.child-time.${probeId}.${childIndex}`, event, "metadata", styles.historyGroupChildTime)}>
                               {formatEntryTimeRange(childEntry, now)}
                             </Text>
@@ -3355,15 +3446,6 @@ function entryDurationSeconds(entry: TimeEntry, now: number) {
   return Math.max(entry.durationSeconds, Math.floor((now - startedAt) / 1000));
 }
 
-function entryCategoryColor(entry: TimeEntry, mode: MobileTheme["mode"]) {
-  if (!entry.categoryId && !entry.categoryName) return uncategorizedFillColor(mode);
-  return paletteColorFor(
-    entry.categoryColor ?? entry.categoryId,
-    entry.categoryName ?? "No activity",
-    mode
-  );
-}
-
 function displayEntryTitle(entry: TimeEntry) {
   return displayTimerDescription(entry) ?? entry.categoryName ?? "No activity";
 }
@@ -3417,10 +3499,6 @@ function addDaysToDate(date: Date, days: number) {
 
 function sameTimerStopOwner(left: TimerStopOwner, right: TimerStopOwner) {
   return left.userId === right.userId && left.workspaceId === right.workspaceId;
-}
-
-function uncategorizedFillColor(mode: MobileTheme["mode"]) {
-  return mode === "dark" ? "#323946" : "#EEF2F6";
 }
 
 function recentStoppedEntryTime(entries: TimeEntry[], activeEntry: MobileBootstrap["activeEntry"]) {

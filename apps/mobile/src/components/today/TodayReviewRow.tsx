@@ -1,8 +1,8 @@
 import { Pressable, Text, View } from "react-native";
-import { paletteColorFor } from "@dayframe/shared";
 import type { TodayActivity } from "@/lib/todayReviewPresentation";
 import type { MobileStyles, MobileTheme } from "@/lib/mobileTheme";
 import { mobileTextProps } from "@/lib/mobileTypography";
+import { ActivityBlockMark } from "./ActivityBlockMark";
 
 export function TodayReviewRow({
   activity,
@@ -25,9 +25,6 @@ export function TodayReviewRow({
 }) {
   const quickConfirm = activity.quickConfirm.eligible && activity.state === "needs_review";
   const badge = activityStateCopy(activity);
-  const color = activity.category
-    ? paletteColorFor(activity.category.color ?? activity.category.id, activity.category.name ?? "No activity", theme.mode)
-    : theme.textSecondary;
   const time = activity.interval
     ? `${formatTime(activity.interval.startMs)}-${formatTime(activity.interval.endMs)} · ${formatDuration(activity.interval.endMs - activity.interval.startMs)}`
     : activity.detectedAtMs
@@ -44,29 +41,42 @@ export function TodayReviewRow({
         onPress={onOpen}
         style={({ pressed }) => [styles.todayReviewRowMain, pressed ? styles.buttonPressed : null]}
       >
-        <View style={styles.todayReviewRowHeader}>
-          <View style={[styles.todayEntryDot, { backgroundColor: color }]} />
-          <Text {...mobileTextProps("itemTitle")} numberOfLines={2} style={[styles.todayEntryTitle, { flex: 1, minWidth: 0 }]}>
-            {activity.title}
-          </Text>
-          <View style={[
-            styles.todayReviewStateBadge,
-            activity.state === "needs_attention" ? styles.todayReviewStateBadgeAttention : null
-          ]}>
-            <Text
-              {...mobileTextProps("counter")}
-              style={[
-                styles.todayReviewStateBadgeText,
-                activity.state === "needs_attention" ? styles.todayReviewStateBadgeAttentionText : null
-              ]}
-            >
-              {badge}
-            </Text>
+        {/* Same column as confirmed Today rows: the activity block, then title, time and details. */}
+        <View style={styles.todayReviewRowBody}>
+          <ActivityBlockMark
+            categoryColor={activity.category?.color ?? activity.category?.id ?? null}
+            categoryIcon={null}
+            categoryName={activity.category?.name ?? null}
+            entryId={activity.presentationKey}
+            landing={null}
+            reduceMotion
+            theme={theme}
+          />
+          <View style={styles.todayEntryText}>
+            <View style={styles.todayReviewRowHeader}>
+              <Text {...mobileTextProps("itemTitle")} numberOfLines={2} style={[styles.todayEntryTitle, { flex: 1, minWidth: 0 }]}>
+                {activity.title}
+              </Text>
+              <View style={[
+                styles.todayReviewStateBadge,
+                activity.state === "needs_attention" ? styles.todayReviewStateBadgeAttention : null
+              ]}>
+                <Text
+                  {...mobileTextProps("counter")}
+                  style={[
+                    styles.todayReviewStateBadgeText,
+                    activity.state === "needs_attention" ? styles.todayReviewStateBadgeAttentionText : null
+                  ]}
+                >
+                  {badge}
+                </Text>
+              </View>
+            </View>
+            <Text {...mobileTextProps("metadata")} style={styles.todayEntryMeta}>{time}</Text>
+            {details ? <Text {...mobileTextProps("metadata")} numberOfLines={2} style={styles.todayEntryOptionalMeta}>{details}</Text> : null}
+            {message ? <Text {...mobileTextProps("metadata")} accessibilityLiveRegion="polite" style={styles.todayReviewInlineError}>{message}</Text> : null}
           </View>
         </View>
-        <Text {...mobileTextProps("metadata")} style={styles.todayEntryMeta}>{time}</Text>
-        {details ? <Text {...mobileTextProps("metadata")} numberOfLines={2} style={styles.todayEntryOptionalMeta}>{details}</Text> : null}
-        {message ? <Text {...mobileTextProps("metadata")} accessibilityLiveRegion="polite" style={styles.todayReviewInlineError}>{message}</Text> : null}
       </Pressable>
       {quickConfirm ? (
         <Pressable

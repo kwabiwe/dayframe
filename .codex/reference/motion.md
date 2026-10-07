@@ -33,6 +33,8 @@ If one of these states does not apply, say so. Do not leave it implicit.
 | Drag, swipe, pinch, scroll, or other direct manipulation | One gesture and animation owner that updates continuously with the fingers |
 | Platform interaction that React Native cannot reproduce reliably | A targeted Swift/SwiftUI surface that preserves the documented React ownership boundary |
 
+`LayoutAnimation` (and `scheduleLayoutTransition` in `apps/mobile/src/lib/motion.ts`, which calls it) does nothing in this app: with React Native 0.85 on the New Architecture, Reanimated 4's legacy layout-animation proxy replaces the UIManager animation delegate, and its `uiManagerDidConfigureNextLayoutAnimation` is empty. Never name it as the owner of a transition; use Reanimated `layout`, `entering` and `exiting` (the `localLayoutTransition` and presence helpers) instead. Existing calls are inert and due for removal.
+
 Do not introduce Swift solely to make an otherwise ordinary React Native entrance, exit, or list reflow smooth. Do not animate the same state change from multiple layers.
 
 ## Timing And Behaviour
@@ -98,6 +100,12 @@ Every PR that adds or changes movement must include:
 - an explicit note for any validation that could not be run; screenshots alone do not prove motion quality
 
 Tests should protect state ordering, timers, rollback, stable keys, and animation ownership where practical. Manual evidence remains required for continuity, gesture feel, and frame pacing.
+
+## Today live block, landings and quick start (Blocks Phase 2)
+
+Today on iPhone is the first migrated surface. `useBlockLanding` and `useBreathingRing` in `apps/mobile/src/lib/blocksMotion.ts` hold the springs and ring above. A committed Start (Play, a mosaic tile, a row's Start again) issues one tokenised landing request after the local start is accepted; the live block's content (chip, title, time) lands from 14 points below while the card, its ring and the Stop/Add past time track stay fixed. A committed Stop issues one request for the stopped entry and clears the live block's request (a rolled-back Stop must not replay the Start landing); that row's activity block lands 60 ms later, as the Stop composite's soft impact plays. Undo lands the restored rows. Requests expire after 1.2 s and are never issued by refresh, reconciliation, hydration or a rejected action, so remounts and cached bootstraps do not replay them; a second rapid action replaces the request.
+
+Reanimated owns the Blocks transitions on Today. The card slot, the quick-start section and the Review summary carry `localLayoutTransition`, so a card that grows (larger text, or a time that wraps the action reserve onto its own line on a narrow phone) and the content below it move rather than jump. Idle card and live block crossfade at the same geometry with the shared presence fades after first paint; with Reduce Motion they swap in place and the live content's 140 ms fade is the single opacity change. The landing animates only the translation of the block's inner content in normal motion (it starts at its offset on the first frame) and never the card, ring or action track. The existing RN `Animated` value `activeTimerExpansion` only fades the card's details and actions out during the retained Stop exit; on Start it is set to rest before the first paint, so it never stacks with the crossfade. Mosaic tiles are absolutely positioned, keyed by activity and each owns a `localLayoutTransition`, so whatever changes the totals (stop, switch, Add past time, edit, delete, Undo, Review, the midnight roll-over) the same tiles move and resize, and with Reduce Motion they settle at once; tiles have no entrance on first paint and fade in or out only when an activity is pinned or unpinned. Tile sizes come from the last seven calendar days and change only when entries change or the day rolls over, never on a timer tick. Haptics, Undo and announcements are unchanged under Reduce Motion.
 
 ## Anti-Patterns
 

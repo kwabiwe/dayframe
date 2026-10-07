@@ -39,6 +39,7 @@ import {
   scheduleLayoutTransition,
   useReduceMotionPreference
 } from "@/lib/motion";
+import { setHapticsEnabled, useHapticsPreference } from "@/lib/haptics";
 import {
   DAYFRAME_PALETTE,
   DAYFRAME_PALETTE_PICKER,
@@ -235,6 +236,7 @@ export default function SettingsScreen() {
     theme,
     themePreference
   } = useMobileTheme();
+  const hapticsEnabled = useHapticsPreference();
   const params = useLocalSearchParams<{ section?: string | string[] }>();
   const routeSettingsSection = normalizeSettingsSection(params.section);
   const settingsSection = routeSettingsSection;
@@ -1508,6 +1510,29 @@ export default function SettingsScreen() {
                       ? "Uses the designed light companion throughout Dayframe."
                       : "Uses Midnight Core throughout Dayframe."}
                 </Text>
+              </View>
+
+              <Text {...mobileTextProps("sectionHeading")} style={styles.appearanceSectionLabel}>Feedback</Text>
+              <View style={styles.healthPreferenceRow}>
+                <View style={styles.healthPreferenceHeader}>
+                  <View style={styles.healthPreferenceText}>
+                    <Text {...mobileTextProps("itemTitle")} style={styles.categoryName}>Haptics</Text>
+                    <Text {...mobileTextProps("body")} style={styles.categoryMeta}>
+                      A tap you can feel when you start, stop, delete or undo. Your iPhone's System Haptics setting still applies.
+                    </Text>
+                  </View>
+                  <Switch
+                    style={{ flexShrink: 0 }}
+                    accessibilityLabel="Haptics"
+                    value={hapticsEnabled}
+                    onValueChange={(enabled) => {
+                      void setHapticsEnabled(enabled).catch(() => undefined);
+                    }}
+                    trackColor={{ false: theme.borderStrong, true: theme.accent }}
+                    thumbColor={hapticsEnabled ? theme.onAccent : theme.surfaceRaised}
+                    ios_backgroundColor={theme.borderStrong}
+                  />
+                </View>
               </View>
 
               <Text {...mobileTextProps("sectionHeading")} style={styles.appearanceSectionLabel}>Preview</Text>

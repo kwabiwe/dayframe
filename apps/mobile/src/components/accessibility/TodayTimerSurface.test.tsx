@@ -1,112 +1,250 @@
-import { act, create } from "react-test-renderer";
+import { act, create, type ReactTestInstance } from "react-test-renderer";
 import type { ComponentProps } from "react";
 import { describe, expect, it, vi } from "vitest";
+import { blockColorsFor, DAYFRAME_THEME } from "@dayframe/shared";
 
+vi.mock("react", async () => {
+  // @ts-expect-error Renderer peer lives at the repository root.
+  return import("../../../../../node_modules/react/index.js");
+});
 vi.mock("react-native", () => ({
   Animated: { View: "AnimatedView" },
   Pressable: "Pressable",
-  ScrollView: "ScrollView",
   StyleSheet: { create: (styles: unknown) => styles },
   Text: "Text",
   View: "View",
 }));
 vi.mock("react-native-svg", () => ({
   Circle: "Circle",
+  Ellipse: "Ellipse",
+  Line: "Line",
   Path: "Path",
+  Polygon: "Polygon",
+  Polyline: "Polyline",
   Rect: "Rect",
   default: "Svg",
 }));
+vi.mock("react-native-reanimated", () => ({
+  default: { View: "ReanimatedView" },
+  Easing: { inOut: () => undefined, sin: undefined },
+  ReduceMotion: { Always: "always", Never: "never", System: "system" },
+  cancelAnimation: vi.fn(),
+  useAnimatedStyle: (factory: () => unknown) => factory(),
+  useSharedValue: (value: unknown) => ({ value }),
+  withDelay: (_delay: number, animation: unknown) => animation,
+  withRepeat: (animation: unknown) => animation,
+  withSequence: (...animations: unknown[]) => animations[0],
+  withSpring: (value: unknown) => value,
+  withTiming: (value: unknown) => value,
+}));
 vi.mock("../PrimaryTimerAction", async () => {
   const ReactRuntime = await import("react");
-  return {
-    PlusGlyph: () => ReactRuntime.createElement("PlusGlyph"),
-    PrimaryTimerAction: ({ accessibilityLabel, onPress }: { accessibilityLabel: string; onPress: (event: unknown) => void }) =>
-      ReactRuntime.createElement("Pressable", { accessibilityLabel, accessibilityRole: "button", onPress }),
-  };
+  return { PrimaryTimerGlyph: ({ mode }: { mode: string }) => ReactRuntime.createElement("PrimaryTimerGlyph", { mode }) };
 });
+vi.mock("../../lib/motion", () => ({
+  MOBILE_MOTION: { control: 140, layout: 220 },
+  localLayoutTransition: () => "layout",
+  localPresenceEntering: () => "entering",
+  localPresenceExiting: () => "exiting",
+}));
 
 import { TodayTimerSurface, type TodayActiveTimerPresentation } from "./TodayTimerSurface";
+import { layoutQuickStartMosaic, quickStartTileFrames } from "../../lib/quickStartMosaic";
 
-const styles = new Proxy({}, { get: (_target, key) => ({ testStyle: String(key) }) }) as never;
-const theme = {
-  accent: "coral",
-  accentText: "coralText",
-  mode: "dark",
-  onAccent: "white",
-} as never;
-const quickActions = [
-  {
-    color: "moss",
-    id: "category-1",
-    isUncategorized: false,
-    key: "category:1",
-    name: "A longer quick action name",
-    subtitle: null,
-  },
-];
+const darkTheme = { ...DAYFRAME_THEME.dark, mode: "dark", pressed: "pressed" } as never;
+const lightTheme = { ...DAYFRAME_THEME.light, mode: "light", pressed: "pressed" } as never;
+const columns = layoutQuickStartMosaic([
+  { color: "moss", icon: "work", id: "work", name: "Work", weekSeconds: 7200 },
+  { color: "blue", icon: null, id: "gym", name: "Gym", weekSeconds: 1800 },
+]);
+
+const running: TodayActiveTimerPresentation = {
+  categoryColor: "moss",
+  categoryIcon: "work",
+  categoryLabel: "Work",
+  elapsedLabel: "1:02:03",
+  elapsedSeconds: 3723,
+  hasLiveActiveTimer: true,
+  startedLabel: "Started 09:12",
+  title: "A long running timer title",
+  titleIsPlaceholder: false,
+};
 
 function props(overrides: Partial<ComponentProps<typeof TodayTimerSurface>> = {}) {
   return {
     active: null,
+    liveLanding: null,
     onAddTime: vi.fn(),
     onOpenActiveTimer: vi.fn(),
+    onStartActivity: vi.fn(),
     onStartBlank: vi.fn(),
-    onStartQuickAction: vi.fn(),
     onStop: vi.fn(),
-    quickActions,
-    styles,
-    theme,
+    quickStartColumns: columns,
+    reduceMotion: false,
+    runningActivityId: null,
+    theme: darkTheme,
     ...overrides,
   };
 }
 
-describe("TodayTimerSurface", () => {
-  it("renders the actual idle composer with scoped roles and keeps callbacks behind their actions", () => {
+function render(input: ComponentProps<typeof TodayTimerSurface>) {
+  let tree!: ReturnType<typeof create>;
+  act(() => {
+    tree = create(<TodayTimerSurface {...input} />);
+  });
+  // Tiles are absolutely positioned from the measured mosaic width.
+  const mosaic = tree.root.findAllByProps({ testID: "today-quick-start-mosaic" })[0];
+  if (mosaic) act(() => mosaic.props.onLayout({ nativeEvent: { layout: { height: 232, width: 343, x: 0, y: 0 } } }));
+  const text = (value: string) =>
+    tree.root.findAllByType("Text" as never).find((node) => node.children.join("") === value) as ReactTestInstance;
+  const byLabel = (label: string) => tree.root.findByProps({ accessibilityLabel: label });
+  return { byLabel, text, tree };
+}
+
+function flatStyle(style: unknown): Record<string, unknown> {
+  if (Array.isArray(style)) return Object.assign({}, ...style.map(flatStyle));
+  return (style && typeof style === "object" ? style : {}) as Record<string, unknown>;
+}
+
+describe("TodayTimerSurface (Blocks)", () => {
+  it("shows the idle card with coral Play and starts pinned activities from the mosaic", () => {
     const input = props();
-    let tree!: ReturnType<typeof create>;
-    act(() => { tree = create(<TodayTimerSurface {...input} />); });
-    const roleText = (value: string) => tree.root.findAllByType("Text" as never).find((node) => node.children.join("") === value)!;
-    expect(roleText("What are you working on?").props.maxFontSizeMultiplier).toBe(1.3);
-    expect(roleText("QUICK ACTIONS").props.maxFontSizeMultiplier).toBe(1.2);
-    expect(roleText("A longer quick action name").props.maxFontSizeMultiplier).toBe(1.3);
-    expect(roleText("A longer quick action name").props.allowFontScaling).toBe(true);
-    expect(input.onStartBlank).not.toHaveBeenCalled();
-    expect(input.onStartQuickAction).not.toHaveBeenCalled();
-    act(() => tree.root.findByProps({ accessibilityLabel: "Start timer and add details" }).props.onPress());
-    act(() => tree.root.findByProps({ accessibilityLabel: "Start A longer quick action name" }).props.onPress());
+    const { byLabel, text, tree } = render(input);
+    expect(text("What are you working on?").props.maxFontSizeMultiplier).toBe(1.35);
+    expect(text("Start an activity").props.accessibilityRole).toBe("header");
+    expect(flatStyle(byLabel("Start task").props.style({ pressed: false })).backgroundColor).toBe(DAYFRAME_THEME.dark.accent);
+
+    act(() => byLabel("Start timer and add details").props.onPress());
+    act(() => byLabel("Start Work, 2 hours in the last 7 days").props.onPress());
     expect(input.onStartBlank).toHaveBeenCalledOnce();
-    expect(input.onStartQuickAction).toHaveBeenCalledWith(quickActions[0]);
+    expect(input.onStartActivity).toHaveBeenCalledWith("work");
+    expect(text("2h").props.allowFontScaling).toBe(true);
     act(() => tree.unmount());
   });
 
-  it("keeps the running title, category, complete clock and separate Stop/Add callbacks", () => {
-    const active: TodayActiveTimerPresentation = {
-      categoryColor: "moss",
-      categoryLabel: "Research",
-      elapsedLabel: "12:34:56",
-      hasLiveActiveTimer: true,
-      title: "A long running timer title",
-      titleIsPlaceholder: false,
-    };
-    const input = props({ active });
-    let tree!: ReturnType<typeof create>;
-    act(() => { tree = create(<TodayTimerSurface {...input} />); });
-    const text = (value: string) => tree.root.findAllByType("Text" as never).find((node) => node.children.join("") === value)!;
-    expect(text(active.title).props.maxFontSizeMultiplier).toBe(1.35);
-    expect(text("Research").props.maxFontSizeMultiplier).toBe(1.3);
-    expect(text("12:34:56").props.maxFontSizeMultiplier).toBe(1.2);
-    expect(text("12:34:56").props.allowFontScaling).toBe(true);
-    expect(input.onStop).not.toHaveBeenCalled();
+  it("renders the running entry as one solid block with measured on-block text", () => {
+    for (const theme of [darkTheme, lightTheme]) {
+      const { text, tree } = render(props({ active: running, runningActivityId: "work", theme }));
+      const mode = (theme as { mode: "dark" | "light" }).mode;
+      const expected = blockColorsFor("moss", mode, "Work");
+      const block = tree.root.findByProps({ testID: "today-live-block" });
+      expect(flatStyle(block.props.style).backgroundColor).toBe(expected.fill);
+      for (const value of ["Work", running.title, running.elapsedLabel, "Started 09:12", "Recording"]) {
+        const style = flatStyle(text(value).props.style);
+        expect(style.color).toBe(expected.text);
+        expect(style.opacity).toBeUndefined();
+      }
+      act(() => tree.unmount());
+    }
+  });
 
+  it("uses the display face with tabular figures for the timer and keeps Dynamic Type caps", () => {
+    const { text, tree } = render(props({ active: running, runningActivityId: "work" }));
+    const elapsed = text("1:02:03");
+    expect(flatStyle(elapsed.props.style).fontFamily).toBe("BricolageGrotesque-ExtraBold");
+    expect(flatStyle(elapsed.props.style).fontVariant).toEqual(["tabular-nums"]);
+    expect(elapsed.props.maxFontSizeMultiplier).toBe(1.2);
+    expect(text(running.title).props.maxFontSizeMultiplier).toBe(1.35);
+    act(() => tree.unmount());
+  });
+
+  it("keeps Edit, Stop and Add past time as separate VoiceOver actions", () => {
+    const input = props({ active: running, runningActivityId: "work" });
+    const { byLabel, tree } = render(input);
+    expect(byLabel("Edit running timer").props.accessibilityValue).toEqual({
+      text: "Work. A long running timer title. 1 hour 2 minutes so far.",
+    });
     const stopEvent = { stopPropagation: vi.fn() };
-    act(() => tree.root.findByProps({ accessibilityLabel: "Stop current timer" }).props.onPress(stopEvent));
+    act(() => byLabel("Stop current timer").props.onPress(stopEvent));
     const addEvent = { stopPropagation: vi.fn() };
     act(() => tree.root.findByProps({ testID: "active-timer-add-past-time" }).props.onPress(addEvent));
+    act(() => byLabel("Edit running timer").props.onPress());
     expect(stopEvent.stopPropagation).toHaveBeenCalledOnce();
     expect(addEvent.stopPropagation).toHaveBeenCalledOnce();
     expect(input.onStop).toHaveBeenCalledOnce();
     expect(input.onAddTime).toHaveBeenCalledOnce();
-    expect(input.onOpenActiveTimer).not.toHaveBeenCalled();
+    expect(input.onOpenActiveTimer).toHaveBeenCalledOnce();
+    act(() => tree.unmount());
+  });
+
+  it("switches from the mosaic while running and never starts a duplicate of the running activity", () => {
+    const input = props({ active: running, runningActivityId: "work" });
+    const { byLabel, text, tree } = render(input);
+    expect(text("Switch to").props.accessibilityRole).toBe("header");
+    act(() => byLabel("Work, recording. Edit running timer").props.onPress());
+    act(() => byLabel("Switch to Gym, 30 minutes in the last 7 days").props.onPress());
+    expect(input.onOpenActiveTimer).toHaveBeenCalledOnce();
+    expect(input.onStartActivity).toHaveBeenCalledOnce();
+    expect(input.onStartActivity).toHaveBeenCalledWith("gym");
+    act(() => tree.unmount());
+  });
+
+  it("lands the block's content only: the card, ring and actions never move", () => {
+    const landing = { requestedAt: Date.now(), token: 1 };
+    const { tree } = render(props({ active: running, liveLanding: landing, runningActivityId: "work" }));
+    const card = flatStyle(tree.root.findByProps({ testID: "today-live-block" }).props.style);
+    const content = flatStyle(tree.root.findByProps({ testID: "today-live-content" }).props.style);
+    expect(card.transform).toBeUndefined();
+    // A due landing mounts the content at its 14-point offset; the spring then brings it to rest.
+    expect(content.transform).toEqual([{ translateY: 14 }]);
+    act(() => tree.unmount());
+  });
+
+  it("never clips the elapsed time: the footer wraps the reserved action space instead", () => {
+    const { text, tree } = render(props({ active: { ...running, elapsedLabel: "123:45:06" }, runningActivityId: "work" }));
+    expect(text("123:45:06").props.numberOfLines).toBeUndefined();
+    const reserve = tree.root.findByProps({ testID: "today-live-actions-reserve" });
+    expect(flatStyle(reserve.props.style)).toMatchObject({ height: 56, marginLeft: "auto", width: 110 });
+    expect(flatStyle(reserve.parent!.props.style)).toMatchObject({ flexDirection: "row", flexWrap: "wrap" });
+    act(() => tree.unmount());
+  });
+
+  it("positions mosaic tiles absolutely from the shared frame calculation", () => {
+    const { tree } = render(props());
+    const slots = tree.root.findAllByType("ReanimatedView" as never)
+      .map((node) => flatStyle(node.props.style))
+      .filter((style) => style.position === "absolute");
+    const expected = quickStartTileFrames(columns, 343);
+    expect(slots.map(({ left, top, width, height }) => ({ height, left, top, width }))).toEqual(
+      expected.map(({ height, x, y, width }) => ({ height, left: x, top: y, width }))
+    );
+    act(() => tree.unmount());
+  });
+
+  it("makes Reanimated the only owner: slots and tiles animate their own layout", () => {
+    const { tree } = render(props());
+    expect(tree.root.findByProps({ testID: "today-timer-slot" }).props.layout).toBe("layout");
+    expect(tree.root.findByProps({ testID: "today-quick-start-slot" }).props.layout).toBe("layout");
+    const tiles = tree.root.findAllByType("ReanimatedView" as never)
+      .filter((node) => flatStyle(node.props.style).position === "absolute");
+    expect(tiles.length).toBeGreaterThan(0);
+    for (const tile of tiles) expect(tile.props).toMatchObject({ exiting: "exiting", layout: "layout" });
+    act(() => tree.unmount());
+  });
+
+  it("crossfades idle and live cards after first paint, but swaps in place under Reduce Motion", () => {
+    const input = props();
+    const { tree } = render(input);
+    expect(tree.root.findByProps({ testID: "today-idle-slot" }).props.entering).toBeUndefined();
+    act(() => tree.update(<TodayTimerSurface {...input} active={running} runningActivityId="work" />));
+    expect(tree.root.findByProps({ testID: "today-live-slot" }).props).toMatchObject({ entering: "entering", exiting: "exiting" });
+    act(() => tree.update(<TodayTimerSurface {...input} active={null} reduceMotion />));
+    expect(tree.root.findByProps({ testID: "today-idle-slot" }).props.entering).toBeUndefined();
+    expect(tree.root.findByProps({ testID: "today-idle-slot" }).props.exiting).toBeUndefined();
+    act(() => tree.unmount());
+  });
+
+  it("shows an entry with no activity on a neutral surface", () => {
+    const { text, tree } = render(props({ active: { ...running, categoryColor: null, categoryIcon: null, categoryLabel: null } }));
+    const block = tree.root.findByProps({ testID: "today-live-block" });
+    expect(flatStyle(block.props.style).backgroundColor).toBe(DAYFRAME_THEME.dark.surfaceRaised);
+    expect(flatStyle(text("No activity").props.style).color).toBe(DAYFRAME_THEME.dark.textPrimary);
+    act(() => tree.unmount());
+  });
+
+  it("hides the mosaic when nothing is pinned", () => {
+    const { tree } = render(props({ quickStartColumns: [] }));
+    expect(tree.root.findAllByProps({ testID: "today-quick-start" })).toHaveLength(0);
     act(() => tree.unmount());
   });
 });

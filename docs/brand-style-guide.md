@@ -27,7 +27,7 @@ Six decisions depart from the earlier Midnight Core rules:
 | Activities | The interface says "activity" and "activities" where it said "category", on every surface (shipped app-wide 6 Oct 2026). Database columns, API fields, code identifiers, tests and the report CSV keep `category`. | `.codex/reference/product-model.md` |
 | New layouts | Today gets a quick-start mosaic of pinned activities. Activities, Tags and Places merge into one Library page on web and Settings › Activities on iPhone. A press-and-hold Play orb with an activity menu is approved in principle, but must pass a physical-iPhone prototype test, including a VoiceOver path, before it is built. | The redesign phase PR for each surface |
 
-The interactive prototypes, review and phased plan live on the `agent/dayframe-redesign-concept` branch under `design/blocks/`. They are reference material, not production code.
+Migrated surfaces so far: iPhone Today (Phase 2: live block, quick-start mosaic, row blocks, landings and haptics). The interactive prototypes, review and phased plan live on the `agent/dayframe-redesign-concept` branch under `design/blocks/`. They are reference material, not production code.
 
 ## Brand assets
 
@@ -212,7 +212,7 @@ Everything people read or type uses system fonts. On iOS use San Francisco throu
 
 Blocks adds one display face, Bricolage Grotesque (SIL Open Font License). It is used only for screen titles, report headlines, the timer and large totals:
 
-- Bundle the font files with each app (Expo font assets on iOS, self-hosted at build time on web). The apps must not request fonts from a third-party server at runtime.
+- Bundle the font files with each app (on iOS, Bold and ExtraBold in `apps/mobile/ios/Dayframe/Fonts` with their OFL licence, listed in `UIAppFonts` and named by PostScript name through `MOBILE_DISPLAY_FONT`; self-hosted at build time on web). The apps must not request fonts from a third-party server at runtime.
 - Body text, labels, buttons, inputs and lists stay on the system font.
 - Display text still follows the Dynamic Type role caps below. Its fallback is the system font.
 - Numerals that update in place, such as the timer, use tabular figures or fixed-width digit cells so they never shift.
@@ -323,7 +323,7 @@ Dayframe has one icon geometry on web and iOS: Lucide's 24-point grid with 2-poi
 
 - Activities store a Dayframe key such as `errands` in `categories.icon`, never a glyph name. With no stored key the icon comes from the name (`activityIconKeyForName`), and otherwise a neutral dot. Activity icons always sit beside the activity name and are hidden from assistive technology.
 - Sizes: 16 inline with text, 20 in lists, chips and blocks, 24 for navigation and icon buttons, 32 for empty states. Icon buttons keep 44-point targets.
-- Selected state is a neutral fill or tint, never a filled glyph. Play and Stop are the only solid glyphs, on the coral recording control.
+- Selected state is a neutral fill or tint, never a filled glyph. Play and Stop are the only solid glyphs: on the coral control where it is the screen's primary action, and on the live block's on-block Stop control (in the block's text colour) on Blocks surfaces.
 - The iOS tab bar uses Dayframe glyphs rendered as template images (`apps/mobile/assets/tab-icons`, generated with the registry) inside the system tab bar, so UIKit keeps Liquid Glass, tinting, the selection highlight and minimisation. Today is the sun, Calendar the calendar and Reports the column chart. The selected tab uses the neutral primary text colour, not coral.
 - Do not use SF Symbols, emoji or Unicode characters as icons, and do not add another icon package. Surfaces not yet migrated to Blocks may keep their existing `lucide-react` imports, mobile glyphs and SF Symbols (the iPhone connectivity slot via `expo-symbols`, the Live Activity, and the native Calendar and duration dial); a migrated surface draws from the registry.
 

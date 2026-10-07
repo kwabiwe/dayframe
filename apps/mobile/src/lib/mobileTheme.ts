@@ -9,6 +9,7 @@ import {
   type ReactNode
 } from "react";
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import { MOBILE_DISPLAY_FONT } from "./mobileTypography";
 import * as SystemUI from "expo-system-ui";
 import {
   StyleSheet,
@@ -494,10 +495,10 @@ function createStyles(theme: MobileTheme) {
     },
     todayTitle: {
       color: theme.textPrimary,
-      fontFamily: monoFont,
-      fontSize: 28,
-      fontWeight: "700",
-      letterSpacing: -0.35
+      // Blocks display face for the Today title (docs/brand-style-guide.md, Typography).
+      fontFamily: MOBILE_DISPLAY_FONT.extraBold,
+      fontSize: 30,
+      letterSpacing: -0.6
     },
     todaySubtitle: {
       color: theme.textSecondary,
@@ -1213,7 +1214,8 @@ function createStyles(theme: MobileTheme) {
       width: "100%"
     },
     reviewNoteAction: {
-      color: theme.accentText,
+      // Blocks: coral is only for recording and the single primary action on Today.
+      color: theme.textPrimary,
       fontFamily: monoFont,
       fontSize: 12,
       fontWeight: "600",
@@ -1287,6 +1289,12 @@ function createStyles(theme: MobileTheme) {
       minWidth: 0,
       justifyContent: "center",
       gap: 2
+    },
+    todayReviewRowBody: {
+      // Matches confirmed rows (historyEntryMain + todayEntryText): block, then one text column.
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 10
     },
     todayReviewRowHeader: {
       flexDirection: "row",
@@ -1366,11 +1374,6 @@ function createStyles(theme: MobileTheme) {
     todayEntryDivider: {
       borderTopWidth: 1,
       borderTopColor: theme.border
-    },
-    todayEntryDot: {
-      width: 9,
-      height: 9,
-      borderRadius: 999
     },
     todayEntryText: {
       flex: 1,

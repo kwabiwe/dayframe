@@ -10,12 +10,16 @@ vi.mock("react-native", () => ({ Pressable: "Pressable", Text: "Text", View: "Vi
 vi.mock("@/lib/mobileTypography", () => ({ mobileTextProps: () => ({}) }));
 vi.mock("@/lib/mobileTheme", () => ({ pressable: vi.fn() }));
 
+vi.mock("./ActivityBlockMark", async () => {
+  const ReactRuntime = await import("react");
+  return { ActivityBlockMark: (props: Record<string, unknown>) => ReactRuntime.createElement("ActivityBlockMark", props) };
+});
+
 import { TodayReviewRow } from "./TodayReviewRow";
 
 const styles = {
   buttonDisabled: "disabled",
   buttonPressed: "pressed",
-  todayEntryDot: "dot",
   todayEntryMeta: "meta",
   todayEntryOptionalMeta: "optional",
   todayEntryTitle: "title",
@@ -23,6 +27,8 @@ const styles = {
   todayReviewCheckText: "checkText",
   todayReviewInlineError: "error",
   todayReviewRow: "row",
+  todayReviewRowBody: "body",
+  todayEntryText: "text",
   todayReviewRowHeader: "header",
   todayReviewRowMain: "main",
   todayReviewStateBadge: "badge",
@@ -52,6 +58,9 @@ describe("TodayReviewRow", () => {
         />
       );
     });
+    // Blocks: Review rows use the same solid activity block as confirmed Today rows, not the old dot.
+    const block = tree.root.findByType("ActivityBlockMark" as never);
+    expect(block.props).toMatchObject({ categoryColor: "moss", categoryName: "Health", landing: null });
     const actions = tree.root.findAllByType("Pressable" as never);
     expect(actions).toHaveLength(2);
     expect(actions[0].props.accessibilityLabel).toContain("Needs review");
