@@ -41,7 +41,8 @@ export function TodayReviewRow({
         onPress={onOpen}
         style={({ pressed }) => [styles.todayReviewRowMain, pressed ? styles.buttonPressed : null]}
       >
-        <View style={styles.todayReviewRowHeader}>
+        {/* Same column as confirmed Today rows: the activity block, then title, time and details. */}
+        <View style={styles.todayReviewRowBody}>
           <ActivityBlockMark
             categoryColor={activity.category?.color ?? activity.category?.id ?? null}
             categoryIcon={null}
@@ -51,27 +52,31 @@ export function TodayReviewRow({
             reduceMotion
             theme={theme}
           />
-          <Text {...mobileTextProps("itemTitle")} numberOfLines={2} style={[styles.todayEntryTitle, { flex: 1, minWidth: 0 }]}>
-            {activity.title}
-          </Text>
-          <View style={[
-            styles.todayReviewStateBadge,
-            activity.state === "needs_attention" ? styles.todayReviewStateBadgeAttention : null
-          ]}>
-            <Text
-              {...mobileTextProps("counter")}
-              style={[
-                styles.todayReviewStateBadgeText,
-                activity.state === "needs_attention" ? styles.todayReviewStateBadgeAttentionText : null
-              ]}
-            >
-              {badge}
-            </Text>
+          <View style={styles.todayEntryText}>
+            <View style={styles.todayReviewRowHeader}>
+              <Text {...mobileTextProps("itemTitle")} numberOfLines={2} style={[styles.todayEntryTitle, { flex: 1, minWidth: 0 }]}>
+                {activity.title}
+              </Text>
+              <View style={[
+                styles.todayReviewStateBadge,
+                activity.state === "needs_attention" ? styles.todayReviewStateBadgeAttention : null
+              ]}>
+                <Text
+                  {...mobileTextProps("counter")}
+                  style={[
+                    styles.todayReviewStateBadgeText,
+                    activity.state === "needs_attention" ? styles.todayReviewStateBadgeAttentionText : null
+                  ]}
+                >
+                  {badge}
+                </Text>
+              </View>
+            </View>
+            <Text {...mobileTextProps("metadata")} style={styles.todayEntryMeta}>{time}</Text>
+            {details ? <Text {...mobileTextProps("metadata")} numberOfLines={2} style={styles.todayEntryOptionalMeta}>{details}</Text> : null}
+            {message ? <Text {...mobileTextProps("metadata")} accessibilityLiveRegion="polite" style={styles.todayReviewInlineError}>{message}</Text> : null}
           </View>
         </View>
-        <Text {...mobileTextProps("metadata")} style={styles.todayEntryMeta}>{time}</Text>
-        {details ? <Text {...mobileTextProps("metadata")} numberOfLines={2} style={styles.todayEntryOptionalMeta}>{details}</Text> : null}
-        {message ? <Text {...mobileTextProps("metadata")} accessibilityLiveRegion="polite" style={styles.todayReviewInlineError}>{message}</Text> : null}
       </Pressable>
       {quickConfirm ? (
         <Pressable

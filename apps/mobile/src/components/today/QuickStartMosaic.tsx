@@ -5,7 +5,7 @@ import { blockColorsFor, DAYFRAME_BLOCKS } from "@dayframe/shared";
 import { ActivityIcon } from "../icons/DayframeIcon";
 import type { MobileTheme } from "../../lib/mobileTheme";
 import { mobileTextProps } from "../../lib/mobileTypography";
-import { localPresenceEntering, localPresenceExiting } from "../../lib/motion";
+import { localLayoutTransition, localPresenceEntering, localPresenceExiting } from "../../lib/motion";
 import {
   QUICK_START_MOSAIC,
   quickStartTileFrames,
@@ -17,9 +17,9 @@ import { compactDuration, spokenDuration } from "./todayBlocksLayout";
 /**
  * Pinned activities as solid blocks sized by the last seven days. Tap starts one, or switches to it
  * while another runs; the running activity's tile opens the running timer instead of starting a
- * duplicate. Tiles are absolutely positioned and keyed by activity: when a stop changes the ranking,
- * the same tiles move and resize under the screen's existing layout transition (one owner), and with
- * Reduce Motion they settle at once.
+ * duplicate. Tiles are absolutely positioned and keyed by activity, and each owns its Reanimated layout
+ * transition: whatever changes the totals (stop, switch, Add past time, edit, delete, Undo, Review, the
+ * midnight roll-over), the same tiles move and resize, and with Reduce Motion they settle at once.
  */
 export function QuickStartMosaic({
   columns,
@@ -71,6 +71,7 @@ export function QuickStartMosaic({
             entering={painted.current ? localPresenceEntering(reduceMotion) : undefined}
             exiting={localPresenceExiting(reduceMotion)}
             key={tile.id}
+            layout={localLayoutTransition(reduceMotion)}
             style={[styles.slot, { height: tile.height, left: tile.x, top: tile.y, width: tile.width }]}
           >
             <QuickStartTileButton

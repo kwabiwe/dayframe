@@ -1290,11 +1290,16 @@ function createStyles(theme: MobileTheme) {
       justifyContent: "center",
       gap: 2
     },
+    todayReviewRowBody: {
+      // Matches confirmed rows (historyEntryMain + todayEntryText): block, then one text column.
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 10
+    },
     todayReviewRowHeader: {
       flexDirection: "row",
       alignItems: "center",
-      // Matches confirmed rows so titles beside the 30-point activity blocks line up.
-      gap: 10
+      gap: 8
     },
     todayReviewStateBadge: {
       borderRadius: 999,

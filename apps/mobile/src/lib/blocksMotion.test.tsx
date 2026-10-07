@@ -8,6 +8,7 @@ vi.mock("react", async () => {
 
 type Animation = { kind: string; to: unknown; config?: Record<string, unknown>; delay?: number };
 const assigned: Array<{ value: unknown }> = [];
+const initialValues: unknown[] = [];
 
 vi.mock("react-native-reanimated", () => ({
   Easing: { inOut: () => "ease", sin: "sin" },
@@ -15,6 +16,7 @@ vi.mock("react-native-reanimated", () => ({
   cancelAnimation: vi.fn(),
   useAnimatedStyle: (factory: () => unknown) => factory(),
   useSharedValue: (initial: unknown) => {
+    initialValues.push(initial);
     const shared = { value: initial };
     assigned.push(shared);
     return shared;
@@ -41,6 +43,7 @@ function Ring(props: Parameters<typeof useBreathingRing>[0]) {
 
 function mountLanding(props: Parameters<typeof useBlockLanding>[0]) {
   assigned.length = 0;
+  initialValues.length = 0;
   let tree!: ReturnType<typeof create>;
   act(() => {
     tree = create(<Landing {...props} />);
@@ -60,6 +63,18 @@ describe("useBlockLanding", () => {
     act(() => tree.update(<Landing distance={14} reduceMotion={false} request={request} />));
     expect(translateY.value).toBe(0);
     act(() => tree.unmount());
+  });
+
+  it("mounts already offset when its landing is due, so the first frame never paints at rest", () => {
+    const due = mountLanding({ distance: 14, reduceMotion: false, request: { ...now(), token: 7 } });
+    expect(initialValues.slice(0, 2)).toEqual([14, 1]);
+    act(() => due.tree.unmount());
+    const reduced = mountLanding({ distance: 14, reduceMotion: true, request: { ...now(), token: 8 } });
+    expect(initialValues.slice(0, 2)).toEqual([0, 0]);
+    act(() => reduced.tree.unmount());
+    const idle = mountLanding({ distance: 14, reduceMotion: false, request: null });
+    expect(initialValues.slice(0, 2)).toEqual([0, 1]);
+    act(() => idle.tree.unmount());
   });
 
   it("does not replay for a remount after the request has expired, or for another entry's row", () => {

@@ -31,10 +31,10 @@
 		DFA7200001BC49B8811A0002 /* SheetQAHarness.swift in Sources */ = {isa = PBXBuildFile; fileRef = DFA7200001BC49B8811A0014 /* SheetQAHarness.swift */; };
 		DFA9080001BC49B8811A0001 /* DayframeSharedStorageConfiguration.swift in Sources */ = {isa = PBXBuildFile; fileRef = DFA9080001BC49B8811A0003 /* DayframeSharedStorageConfiguration.swift */; };
 		DFA9080001BC49B8811A0002 /* DayframeSharedStorageConfiguration.swift in Sources */ = {isa = PBXBuildFile; fileRef = DFA9080001BC49B8811A0003 /* DayframeSharedStorageConfiguration.swift */; };
-		F11748422D0307B40044C1D9 /* AppDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = F11748412D0307B40044C1D9 /* AppDelegate.swift */; };
-		F8E5DEB5A642AF9128DE2E3F /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = 47826C218DF2CD53638292FB /* PrivacyInfo.xcprivacy */; };
 		DFB2000001BC49B8811A0002 /* BricolageGrotesque-Bold.ttf in Resources */ = {isa = PBXBuildFile; fileRef = DFB2000001BC49B8811A0001 /* BricolageGrotesque-Bold.ttf */; };
 		DFB2000001BC49B8811A0004 /* BricolageGrotesque-ExtraBold.ttf in Resources */ = {isa = PBXBuildFile; fileRef = DFB2000001BC49B8811A0003 /* BricolageGrotesque-ExtraBold.ttf */; };
+		F11748422D0307B40044C1D9 /* AppDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = F11748412D0307B40044C1D9 /* AppDelegate.swift */; };
+		F8E5DEB5A642AF9128DE2E3F /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = 47826C218DF2CD53638292FB /* PrivacyInfo.xcprivacy */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -95,12 +95,12 @@
 		DFA7200001BC49B8811A0013 /* DayframeSheetQATests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DayframeSheetQATests.swift; sourceTree = "<group>"; };
 		DFA7200001BC49B8811A0014 /* SheetQAHarness.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SheetQAHarness.swift; sourceTree = "<group>"; };
 		DFA9080001BC49B8811A0003 /* DayframeSharedStorageConfiguration.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = DayframeSharedStorageConfiguration.swift; path = Dayframe/DayframeSharedStorageConfiguration.swift; sourceTree = "<group>"; };
+		DFB2000001BC49B8811A0001 /* BricolageGrotesque-Bold.ttf */ = {isa = PBXFileReference; lastKnownFileType = file; name = "BricolageGrotesque-Bold.ttf"; path = "Dayframe/Fonts/BricolageGrotesque-Bold.ttf"; sourceTree = "<group>"; };
+		DFB2000001BC49B8811A0003 /* BricolageGrotesque-ExtraBold.ttf */ = {isa = PBXFileReference; lastKnownFileType = file; name = "BricolageGrotesque-ExtraBold.ttf"; path = "Dayframe/Fonts/BricolageGrotesque-ExtraBold.ttf"; sourceTree = "<group>"; };
 		ED297162215061F000B7C4FE /* JavaScriptCore.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = JavaScriptCore.framework; path = System/Library/Frameworks/JavaScriptCore.framework; sourceTree = SDKROOT; };
 		F11748412D0307B40044C1D9 /* AppDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = AppDelegate.swift; path = Dayframe/AppDelegate.swift; sourceTree = "<group>"; };
 		F11748442D0722820044C1D9 /* Dayframe-Bridging-Header.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; name = "Dayframe-Bridging-Header.h"; path = "Dayframe/Dayframe-Bridging-Header.h"; sourceTree = "<group>"; };
 		F6D2172E2E3CB5FA372F9746 /* ExpoModulesProvider.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = ExpoModulesProvider.swift; path = "Pods/Target Support Files/Pods-Dayframe/ExpoModulesProvider.swift"; sourceTree = "<group>"; };
-		DFB2000001BC49B8811A0001 /* BricolageGrotesque-Bold.ttf */ = {isa = PBXFileReference; lastKnownFileType = file; name = BricolageGrotesque-Bold.ttf; path = Dayframe/Fonts/BricolageGrotesque-Bold.ttf; sourceTree = "<group>"; };
-		DFB2000001BC49B8811A0003 /* BricolageGrotesque-ExtraBold.ttf */ = {isa = PBXFileReference; lastKnownFileType = file; name = BricolageGrotesque-ExtraBold.ttf; path = Dayframe/Fonts/BricolageGrotesque-ExtraBold.ttf; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */

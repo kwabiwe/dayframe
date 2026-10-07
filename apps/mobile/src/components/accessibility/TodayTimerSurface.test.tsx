@@ -185,7 +185,8 @@ describe("TodayTimerSurface (Blocks)", () => {
     const card = flatStyle(tree.root.findByProps({ testID: "today-live-block" }).props.style);
     const content = flatStyle(tree.root.findByProps({ testID: "today-live-content" }).props.style);
     expect(card.transform).toBeUndefined();
-    expect(content.transform).toEqual([{ translateY: 0 }]);
+    // A due landing mounts the content at its 14-point offset; the spring then brings it to rest.
+    expect(content.transform).toEqual([{ translateY: 14 }]);
     act(() => tree.unmount());
   });
 
@@ -207,6 +208,29 @@ describe("TodayTimerSurface (Blocks)", () => {
     expect(slots.map(({ left, top, width, height }) => ({ height, left, top, width }))).toEqual(
       expected.map(({ height, x, y, width }) => ({ height, left: x, top: y, width }))
     );
+    act(() => tree.unmount());
+  });
+
+  it("makes Reanimated the only owner: slots and tiles animate their own layout", () => {
+    const { tree } = render(props());
+    expect(tree.root.findByProps({ testID: "today-timer-slot" }).props.layout).toBe("layout");
+    expect(tree.root.findByProps({ testID: "today-quick-start-slot" }).props.layout).toBe("layout");
+    const tiles = tree.root.findAllByType("ReanimatedView" as never)
+      .filter((node) => flatStyle(node.props.style).position === "absolute");
+    expect(tiles.length).toBeGreaterThan(0);
+    for (const tile of tiles) expect(tile.props).toMatchObject({ exiting: "exiting", layout: "layout" });
+    act(() => tree.unmount());
+  });
+
+  it("crossfades idle and live cards after first paint, but swaps in place under Reduce Motion", () => {
+    const input = props();
+    const { tree } = render(input);
+    expect(tree.root.findByProps({ testID: "today-idle-slot" }).props.entering).toBeUndefined();
+    act(() => tree.update(<TodayTimerSurface {...input} active={running} runningActivityId="work" />));
+    expect(tree.root.findByProps({ testID: "today-live-slot" }).props).toMatchObject({ entering: "entering", exiting: "exiting" });
+    act(() => tree.update(<TodayTimerSurface {...input} active={null} reduceMotion />));
+    expect(tree.root.findByProps({ testID: "today-idle-slot" }).props.entering).toBeUndefined();
+    expect(tree.root.findByProps({ testID: "today-idle-slot" }).props.exiting).toBeUndefined();
     act(() => tree.unmount());
   });
 

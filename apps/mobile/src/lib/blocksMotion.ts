@@ -53,14 +53,16 @@ export function useBlockLanding({
   reduceMotion: boolean;
   request: LandingRequest | null;
 }) {
-  const translateY = useSharedValue(0);
-  const opacity = useSharedValue(1);
+  // A request that is already due when this node mounts starts from its offset on the very first
+  // frame, so the content never paints at rest and then jumps before the landing plays.
+  const dueAtMount = useRef(landingIsDue(request, entryId)).current;
+  const translateY = useSharedValue(dueAtMount && !reduceMotion ? distance : 0);
+  const opacity = useSharedValue(dueAtMount && reduceMotion ? 0 : 1);
   const playedToken = useRef<number | null>(null);
 
   useEffect(() => {
     if (!request || playedToken.current === request.token) return;
-    if (request.entryIds ? !entryId || !request.entryIds.includes(entryId) : entryId !== undefined) return;
-    if (Date.now() - request.requestedAt > LANDING_REQUEST_TTL_MS) return;
+    if (!landingIsDue(request, entryId)) return;
     playedToken.current = request.token;
     if (reduceMotion) {
       // Reduce Motion keeps the same state change with opacity only.
@@ -83,6 +85,12 @@ export function useBlockLanding({
     opacity: opacity.value,
     transform: [{ translateY: translateY.value }],
   }));
+}
+
+function landingIsDue(request: LandingRequest | null, entryId: string | undefined): request is LandingRequest {
+  if (!request) return false;
+  if (request.entryIds ? !entryId || !request.entryIds.includes(entryId) : entryId !== undefined) return false;
+  return Date.now() - request.requestedAt <= LANDING_REQUEST_TTL_MS;
 }
 
 /** Opacity-only breathing for the single live block; static under Reduce Motion or when not live. */

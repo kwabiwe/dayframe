@@ -27,6 +27,8 @@ const styles = {
   todayReviewCheckText: "checkText",
   todayReviewInlineError: "error",
   todayReviewRow: "row",
+  todayReviewRowBody: "body",
+  todayEntryText: "text",
   todayReviewRowHeader: "header",
   todayReviewRowMain: "main",
   todayReviewStateBadge: "badge",
