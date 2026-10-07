@@ -123,7 +123,7 @@ Review this checklist before and after changes that touch Dayframe UI, timer beh
   online while the bootstrap reports items). Logging the last item in Review
   and returning to Today removes the card at once, online or offline. It opens Review. Goals that are not
   whole hours (for example 6h 34m) must render without freezing. Today shows no Review rows, Quick Confirm, "Incomplete time",
-  donut or logged/covered summary; earlier days keep their logged total.
+  donut or logged/covered summary; earlier days show their total in "Earlier this week".
 - Verify capped/partial/cache/offline states never claim zero or complete
   coverage. In Review, the accessible Load more action reaches the 101st
   backlog source without mixing a changed snapshot into the prior page or

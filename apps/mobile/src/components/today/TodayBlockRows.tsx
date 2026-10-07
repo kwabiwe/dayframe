@@ -255,12 +255,12 @@ export const TodayBlockRow = memo(function TodayBlockRow({
         dx = Math.max(Math.min(dx, LIVE_RESISTANCE.limit), -LIVE_RESISTANCE.limit) * LIVE_RESISTANCE.factor;
       }
       offset.value = dx;
-      // Arming needs this gesture's own full travel, so a row re-grabbed while it springs home
-      // cannot commit again with a short nudge.
+      // Arming needs this gesture's own full travel and the row shown past the threshold, so a
+      // row re-grabbed while it springs home commits neither on a short nudge nor on a reversal.
       const travel = event.translationX;
-      const next = !live && replayable && travel > ROW_SWIPE_COMMIT
+      const next = !live && replayable && travel > ROW_SWIPE_COMMIT && dx > ROW_SWIPE_COMMIT
         ? 1
-        : !live && deletable && travel < -ROW_SWIPE_COMMIT
+        : !live && deletable && travel < -ROW_SWIPE_COMMIT && dx < -ROW_SWIPE_COMMIT
           ? -1
           : 0;
       if (next !== armed.value) {
