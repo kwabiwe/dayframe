@@ -41,9 +41,9 @@ Do not introduce Swift solely to make an otherwise ordinary React Native entranc
 
 - Animations run on the UI thread. RN `Animated` values always use `useNativeDriver: true` (opacity and transforms); anything that needs layout uses Reanimated. A JS-thread animation drops frames exactly when the JS thread is busy, such as during Stop's outbox write and re-render (investigation 2026-10-07; `framePacing.contract.test.ts` enforces it).
 - Do not rebuild per-minute data on the per-second clock. Today's history, the day cards and the native Calendar model read `minuteClock(now, newestShownTimestamp(entries, now))`, which holds still within a minute but never falls behind a start or stop already shown; only the live elapsed time ticks every second.
-- Reuse `MOBILE_MOTION` on iOS: approximately 140 ms for control feedback, 220 ms for local layout, 260 ms for sheets, and 280 ms for screen transitions.
-- Follow the brand guide's 120–220 ms control and 180–300 ms panel ranges on other surfaces. Prefer standard ease-out timing; exits may be shorter while staying in the same curve family.
-- Keep movement restrained. Use opacity plus a small translation when it clarifies origin; avoid theatrical scale, bounce, or decorative loops. The only exceptions are the Dayframe Blocks landing spring and live ring below.
+- On surfaces not yet migrated to Blocks, reuse `MOBILE_MOTION` on iOS: approximately 140 ms for control feedback, 220 ms for local layout, 260 ms for sheets, and 280 ms for screen transitions.
+- On other unmigrated surfaces, follow the brand guide's 120–220 ms control and 180–300 ms panel ranges. On migrated Blocks surfaces the named springs below replace these durations for the moves they list; `MOBILE_MOTION` still covers whatever the springs do not list (presence fades, layout reflow, rollback). Prefer standard ease-out timing; exits may be shorter while staying in the same curve family.
+- On surfaces not yet migrated to Blocks, keep movement restrained: opacity plus a small translation when it clarifies origin, with no theatrical scale, bounce or decorative loop. Migrated Blocks surfaces use the prototype motion vocabulary below.
 - Direct manipulation must track the finger continuously and must not hand off to a separately rebuilt layout with a release-time snap.
 - Animate both presence and consequence: the control or notice entering is not sufficient if the affected row, surrounding list, timeout dismissal, Undo restoration, or failure rollback still jumps.
 - Preserve geometry during async work. Avoid loading UI that moves content when optimistic feedback is the established product contract.
@@ -51,16 +51,32 @@ Do not introduce Swift solely to make an otherwise ordinary React Native entranc
 
 ## Dayframe Blocks Springs And Haptics
 
-The owner approved these on 5 October 2026 (see `docs/brand-style-guide.md`, Dayframe Blocks). They apply to surfaces migrated to Blocks.
+The owner approved the Blocks springs and haptics on 5 October 2026 and, on 7 October 2026, the full motion of the interactive prototype (`design/blocks/ios.html`, `web.html` and `onboarding.html` on the local `agent/dayframe-redesign-concept` branch; spring values in its `assets/blocks.js`). Migrated surfaces should move the way the prototype moves. That supersedes the earlier "landing spring and breathing ring only" limit. The per-surface sections further down (for example the Today Phase 2 contract) remain each surface's contract until the PR that rebuilds that surface to the prototype rewrites them. See `docs/brand-style-guide.md`, Dayframe Blocks.
 
-Springs:
+Springs (starting values from the prototype; tune on a physical iPhone):
 
-- **Landing.** When an entry is started, stopped, logged, restored or deleted, its block lands with one small overshoot. Starting values from the prototype are stiffness 320 and damping 21; tune them on a physical iPhone.
-- **Controls, sheets and panels.** These settle without visible overshoot. Starting values: controls and thumbs at stiffness 560 and damping 38; sheets and panels at 340 and 34.
-- **Live block.** Only the single live block carries a breathing ring: an opacity-only cycle of about 2.4 s on its inner edge. Nothing else loops.
-- **No other bounces.** There is no scale pop, glow or celebratory bounce elsewhere.
+| Spring | Stiffness / damping | Used for |
+| --- | --- | --- |
+| `snap` | 560 / 38 | Controls, thumbs, press-down on the Play orb |
+| `sheet` | 340 / 34 | Sheets, panels, pushed pages, and a sheet or page returning after a cancelled drag |
+| `land` | 320 / 21 | A block landing (start, stop, log, restore, delete), with one small overshoot; a row, live card or Review card returning after a cancelled swipe |
+| `pop` | 420 / 18 | Small celebratory pops: a row block or icon confirming a change, bloom tiles, the "All framed" heading |
+| `roll` | 260 / 26 | Odometer digits on the live timer |
 
-One owner rule still applies: the spring belongs to the same single animation owner as the state change, and never stacks with another layer's transition.
+Prototype moves allowed on migrated surfaces:
+
+- **Drop-in.** Tiles and blocks drop into place on first paint and when Review is finished ("All framed"), with a short stagger (the prototype uses about 35–90 ms per item).
+- **Pop.** A changed block or icon scales from about 0.6–1.5 back to rest with `pop`.
+- **Rolling digits.** The live timer's changing digits roll with `roll`; unchanged digits stay still.
+- **Stop flight.** On Stop the live block shrinks and flies into its row in Today's list (the prototype uses 620 ms, `cubic-bezier(.3,.7,.2,1)`), then the row block pops and the row briefly highlights.
+- **Swipes and throws.** Rows swipe (right: Start again; left: Delete) and Review cards throw off-screen with LOG IT / SKIP stamps, tracking the finger and rotating slightly; a released row or card that does not commit springs back with `land`.
+- **Bloom.** Holding the Play orb for about 360 ms opens the activity bloom; its tiles fly out from the orb with `pop`, staggered by about 18 ms.
+- **Breathing ring.** Only the single live block carries it: an opacity-only cycle of about 2.4 s on its inner edge.
+- **Block pull-to-refresh.** The refresh indicator is a row of six small blocks that pulse while a deliberate pull refreshes.
+
+Still not allowed: glows, confetti, parallax, motion that loops while nothing is happening (other than the live ring and an active pull-to-refresh), and any landing, pop, flight or other celebratory motion on a background refresh, reconciliation, hydration or rollback. Those still use the ordinary presence and layout transitions, so a rollback or Undo restoration never jumps.
+
+The ownership rules above still apply. Each spring belongs to the same single animation owner as the state change, runs on the UI thread (Reanimated, or a native surface where this reference already allows one), and never stacks with another layer's transition. Direct manipulation (swipes, card throws, the bloom, the duration dial, ribbon scrubbing) has one gesture owner that tracks the finger continuously.
 
 Haptics:
 
@@ -79,12 +95,12 @@ Haptics:
 - Haptics are never the only feedback: the visible state change, Undo and VoiceOver announcement still happen.
 - Web has no haptics; the same moments use the landing motion only.
 
-Reduce Motion replaces the springs and the breathing ring with an opacity change. It keeps the same states, haptics, Undo and announcements.
+Reduce Motion replaces every spring, drop-in, pop, rolling digit, flight, throw, bloom fly-out and the breathing ring with an opacity change or an immediate state change. It keeps the same states, haptics, Undo and announcements; swipe and bloom gestures still work and VoiceOver has an equivalent action for each.
 
 ## Reduce Motion And Accessibility
 
 - Read the system Reduce Motion preference through the existing app helpers or the animation library's system mode.
-- Remove nonessential translation, scale, parallax, spring effects and the Blocks breathing ring when Reduce Motion is enabled. Use an immediate state change or restrained opacity only when needed to preserve context.
+- Remove nonessential translation, scale, parallax, spring effects and the Blocks prototype moves (drop-ins, pops, rolling digits, flights, throws, the bloom fly-out and the breathing ring) when Reduce Motion is enabled. Use an immediate state change or restrained opacity only when needed to preserve context.
 - Never suppress the state change, Undo opportunity, error, focus move, or VoiceOver announcement merely because motion is reduced.
 - Do not use animation as the only explanation of what changed.
 - Check that Dynamic Type does not change measured geometry in a way that clips or snaps during a transition.
