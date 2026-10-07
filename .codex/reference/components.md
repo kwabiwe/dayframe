@@ -180,8 +180,10 @@ zero-size hidden probes never affect scrolling, focus or touch targets.
   only when it is exact (the cached presentation's global count, else the
   bootstrap's `stats.reviewCount`; the bootstrap's Review list is capped at
   100, so its length is never shown as a count), says "Moments to review"
-  without a number when the count is inexact, and hides only on an exact zero
-  that the bootstrap does not contradict. It stacks up to three awaiting
+  without a number when the count is inexact, and hides on an exact zero (the
+  last decision, even while the bootstrap's count lags). Only when the
+  presentation read has failed does a positive bootstrap count keep an
+  uncounted card over a cached zero. It stacks up to three awaiting
   activities' colours.
 - Today has no Review rows, Quick Confirm, "Incomplete time" list, donut or
   logged/covered summary. Today's history card no longer shows the logged

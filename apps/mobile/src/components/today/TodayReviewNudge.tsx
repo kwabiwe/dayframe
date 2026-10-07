@@ -17,14 +17,20 @@ export type ReviewCount = { value: number | null; exact: boolean };
 
 /**
  * What the nudge says. An exact count names the moments; an inexact or unavailable one never shows a
- * number it cannot vouch for. Only an exact zero hides the card, and a cached zero never hides items
- * the fresher bootstrap still reports.
+ * number it cannot vouch for. An exact zero hides the card: a Review decision zeroes the presentation
+ * at once while the bootstrap's count lags until its next refresh. Only when the presentation read
+ * has failed (so a newer bootstrap could not be read through) does a positive bootstrap count keep an
+ * uncounted card.
  */
-export function reviewNudgeCopy(outstanding: ReviewCount | null, fallback: ReviewCount): ReviewNudgeCopy | null {
+export function reviewNudgeCopy(
+  outstanding: ReviewCount | null,
+  fallback: ReviewCount,
+  presentationReadFailed = false
+): ReviewNudgeCopy | null {
   const fallbackOpen = (fallback.value ?? 0) > 0;
   if (outstanding && outstanding.exact) {
     if (outstanding.value) return counted(outstanding.value);
-    return fallbackOpen ? UNCOUNTED : null;
+    return presentationReadFailed && fallbackOpen ? UNCOUNTED : null;
   }
   if (outstanding && outstanding.value) return UNCOUNTED;
   if (fallbackOpen) return fallback.exact ? counted(fallback.value!) : UNCOUNTED;
@@ -62,7 +68,7 @@ export function TodayReviewNudge({
   const exiting = useMemo(() => localPresenceExiting(reduceMotion), [reduceMotion]);
   const context = useTodayReviewPresentationContext();
   const presentation = context?.isSummaryAvailable ? context.presentation : null;
-  const copy = reviewNudgeCopy(presentation?.globalReviewCount ?? null, fallback);
+  const copy = reviewNudgeCopy(presentation?.globalReviewCount ?? null, fallback, Boolean(context?.errorKind));
   if (!copy) return null;
   const colors = (presentation?.daySections ?? [])
     .flatMap((section) => section.activities)

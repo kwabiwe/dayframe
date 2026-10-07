@@ -48,8 +48,13 @@ describe("reviewNudgeCopy", () => {
     expect(reviewNudgeCopy({ value: 0, exact: true }, NONE)).toBeNull();
   });
 
-  it("does not let a cached zero hide items the bootstrap still reports", () => {
-    expect(reviewNudgeCopy({ value: 0, exact: true }, { value: 3, exact: true })).toEqual({
+  it("hides on the last decision even while the bootstrap count still lags", () => {
+    expect(reviewNudgeCopy({ value: 0, exact: true }, { value: 1, exact: true })).toBeNull();
+    expect(reviewNudgeCopy({ value: 0, exact: true }, { value: 1, exact: true }, false)).toBeNull();
+  });
+
+  it("keeps an uncounted card when a failed read leaves a cached zero against open bootstrap items", () => {
+    expect(reviewNudgeCopy({ value: 0, exact: true }, { value: 3, exact: true }, true)).toEqual({
       count: null,
       detail: "Open Review for the latest items.",
       title: "Moments to review",
