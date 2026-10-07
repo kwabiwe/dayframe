@@ -15,9 +15,7 @@ import { router, useFocusEffect } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
 import Svg, { Path } from "react-native-svg";
 import {
-  initialPreviousPlaceName,
   placeDisplayName,
-  placeRoleRequest,
   placeRoleSlots,
   placeSecondaryName,
   type PlaceRole,
@@ -43,6 +41,7 @@ import {
 import { refreshGeofencesForPlaces } from "@/lib/geofence";
 import { backfillLearnedPlaceLocations } from "@/lib/locationGeocoding";
 import { applyAfterSuccessfulMutation } from "@/lib/localMutation";
+import { placeRoleChoice, type PlaceRoleFlowPrompts } from "@/lib/placeRoleFlow";
 import { placeRoleSheet } from "@/lib/placeRoleSheet";
 import { withRole } from "@/lib/places";
 import {
@@ -145,75 +144,28 @@ export default function PlacesScreen() {
           router.push({ pathname: "/place-editor", params: { mode: "create", role: slot.role } } as never);
           return;
         }
-        if (action.kind === "clear") {
-          Alert.alert(
-            `Clear ${slot.label}?`,
-            `The place stays saved and keeps its entries; it just stops being ${slot.label}.`,
-            [
-              { text: "Cancel", style: "cancel" },
-              { text: "Clear", style: "destructive", onPress: () => void saveRole(slot, null, null) }
-            ]
-          );
-          return;
-        }
-        const target = rolePlaces.find((place) => place.id === action.placeId);
-        if (target) confirmRoleTarget(slot, target);
+        const target = action.kind === "clear" ? null : rolePlaces.find((place) => place.id === action.placeId) ?? null;
+        if (action.kind === "choose" && !target) return;
+        void placeRoleChoice(slot, target, nativePlaceRolePrompts).then((request) => {
+          if (request) void saveRole(slot.label, request);
+        });
       }
     );
   }
 
-  function confirmRoleTarget(slot: PlaceRoleSlot<RolePlace>, target: RolePlace) {
-    const continueWithRename = () => {
-      const holder = slot.previousHolder;
-      if (!holder || holder.id === target.id) {
-        void saveRole(slot, target.id, null);
-        return;
-      }
-      // Moving Home: offer to rename the old place so its entries don't read as an address.
-      Alert.prompt(
-        `Rename the old ${slot.label.toLowerCase()}?`,
-        "Its past entries stay there and keep this name.",
-        [
-          { text: "Keep name", style: "cancel", onPress: () => void saveRole(slot, target.id, null) },
-          { text: "Rename", onPress: (value?: string) => void saveRole(slot, target.id, value ?? null) }
-        ],
-        "plain-text",
-        initialPreviousPlaceName(slot.role, holder, target)
-      );
-    };
-    if (target.role && target.role !== slot.role) {
-      const otherLabel = target.role === "home" ? "Home" : "Work";
-      Alert.alert(
-        `Make this place ${slot.label}?`,
-        `This place is your ${otherLabel}, so ${otherLabel} will be empty.`,
-        [
-          { text: "Cancel", style: "cancel" },
-          { text: "Continue", onPress: continueWithRename }
-        ]
-      );
-      return;
-    }
-    continueWithRename();
-  }
-
-  async function saveRole(slot: PlaceRoleSlot<RolePlace>, targetId: string | null, previousPlaceName: string | null) {
+  async function saveRole(label: string, request: Parameters<typeof setPlaceRole>[0]) {
     if (roleSaveInFlight.current) return;
     roleSaveInFlight.current = true;
-    setSavingRole(slot.role);
+    setSavingRole(request.role);
     try {
-      await setPlaceRole(placeRoleRequest({
-        role: slot.role,
-        targetId,
-        holder: targetId ? slot.previousHolder : slot.place,
-        previousPlaceName: previousPlaceName ?? ""
-      }));
-      await refreshAfterPlaceChange({ prefix: targetId ? `${slot.label} updated.` : `${slot.label} cleared.` });
+      await setPlaceRole(request);
+      await refreshAfterPlaceChange({ prefix: request.placeId ? `${label} updated.` : `${label} cleared.` });
     } catch (error) {
       if (error instanceof AuthRequiredError) {
         router.replace("/");
         return;
       }
-      Alert.alert("Places", error instanceof Error ? error.message : `Unable to update ${slot.label}.`);
+      Alert.alert("Places", error instanceof Error ? error.message : `Unable to update ${label}.`);
     } finally {
       roleSaveInFlight.current = false;
       setSavingRole(null);
@@ -422,26 +374,28 @@ export default function PlacesScreen() {
         }
       >
         <View style={styles.contentStack}>
-          {data ? (
-            <View style={styles.panel}>
-              <Text accessibilityRole="header" style={styles.sectionTitle}>Home and Work</Text>
-              <Text style={styles.muted}>Trips and time away are named after these.</Text>
-              <View style={styles.placeList}>
-                {roleSlots.map((slot) => (
+          {/* Present from first paint (slots read "Loading…" until bootstrap arrives) so nothing
+              below jumps when the data lands; height changes reflow under one layout owner each. */}
+          <Reanimated.View layout={localLayoutTransition(reduceMotion)} style={styles.panel}>
+            <Text accessibilityRole="header" style={styles.sectionTitle}>Home and Work</Text>
+            <Text style={styles.muted}>Trips and time away are named after these.</Text>
+            <View style={styles.placeList}>
+              {roleSlots.map((slot) => (
+                <Reanimated.View key={slot.role} layout={localLayoutTransition(reduceMotion)}>
                   <PlaceRoleSlotRow
-                    key={slot.role}
-                    busy={savingRole !== null}
+                    busy={savingRole !== null || !data}
+                    loading={!data}
                     saving={savingRole === slot.role}
                     slot={slot}
                     onPress={() => chooseRolePlace(slot)}
                     styles={styles}
                     theme={theme}
                   />
-                ))}
-              </View>
+                </Reanimated.View>
+              ))}
             </View>
-          ) : null}
-          <View style={styles.panel}>
+          </Reanimated.View>
+          <Reanimated.View layout={localLayoutTransition(reduceMotion)} style={styles.panel}>
             <Text style={styles.muted}>Save locations Dayframe should recognise.</Text>
             <View style={styles.buttonRow}>
               <Pressable
@@ -462,9 +416,9 @@ export default function PlacesScreen() {
                 <Text accessibilityLiveRegion="polite" style={styles.statusText}>{statusMessage}</Text>
               </Reanimated.View>
             ) : null}
-          </View>
+          </Reanimated.View>
 
-          <View style={styles.panel}>
+          <Reanimated.View layout={localLayoutTransition(reduceMotion)} style={styles.panel}>
             <Text style={styles.sectionTitle}>Your places</Text>
             <View style={styles.placeList}>
               {places.map((place) => (
@@ -519,7 +473,7 @@ export default function PlacesScreen() {
                 <Text style={styles.muted}>No learned candidates yet.</Text>
               </Reanimated.View>
             ) : null}
-          </View>
+          </Reanimated.View>
         </View>
       </ScrollView>
       <LearnedPlaceDetailSheet
@@ -541,8 +495,26 @@ export default function PlacesScreen() {
 
 type RolePlace = MobilePlace & { role: PlaceRole | null };
 
+// The system alert and prompt own their own presentation and Reduce Motion behaviour.
+const nativePlaceRolePrompts: PlaceRoleFlowPrompts = {
+  confirm: (title, message, actionLabel, destructive) => new Promise((resolve) => {
+    Alert.alert(title, message, [
+      { text: "Cancel", style: "cancel", onPress: () => resolve(false) },
+      { text: actionLabel, style: destructive ? "destructive" : "default", onPress: () => resolve(true) }
+    ], { cancelable: true, onDismiss: () => resolve(false) });
+  }),
+  promptRename: (title, message, suggestion) => new Promise((resolve) => {
+    Alert.prompt(title, message, [
+      { text: "Cancel", style: "cancel", onPress: () => resolve({ kind: "cancel" }) },
+      { text: "Keep name", onPress: () => resolve({ kind: "keep" }) },
+      { text: "Rename", onPress: (value?: string) => resolve({ kind: "rename", name: value ?? "" }) }
+    ], "plain-text", suggestion);
+  })
+};
+
 function PlaceRoleSlotRow({
   busy,
+  loading,
   saving,
   slot,
   onPress,
@@ -550,13 +522,14 @@ function PlaceRoleSlotRow({
   theme
 }: {
   busy: boolean;
+  loading: boolean;
   saving: boolean;
   slot: PlaceRoleSlot<RolePlace>;
   onPress: () => void;
   styles: MobileStyles;
   theme: MobileTheme;
 }) {
-  const detail = slot.place ? slot.secondary ?? `${slot.place.radiusMeters}m radius` : "Not set";
+  const detail = loading ? "Loading…" : slot.place ? slot.secondary ?? `${slot.place.radiusMeters}m radius` : "Not set";
   return (
     <Pressable
       accessibilityHint={`Choose which saved place is ${slot.label}.`}
@@ -574,7 +547,7 @@ function PlaceRoleSlotRow({
       </View>
       <View style={styles.placeActions}>
         <View style={styles.learnedPlaceSaveButton}>
-          <Text style={styles.learnedPlaceSaveButtonText}>{saving ? "Saving…" : slot.place ? "Change" : "Set"}</Text>
+          <Text style={styles.learnedPlaceSaveButtonText}>{saving ? "Saving…" : slot.place || loading ? "Change" : "Set"}</Text>
         </View>
       </View>
     </Pressable>

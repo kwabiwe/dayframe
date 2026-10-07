@@ -55,6 +55,8 @@ export type PlaceRoleSlot<T extends SlotPlace> = {
    * named exactly "Home"/"Work", which Dayframe treated as Home before roles existed.
    */
   previousHolder: T | null;
+  /** Role-less places named exactly like the role; the server renames all of them with the holder. */
+  namedLikeRole: T[];
 };
 
 /** The Home and Work slots, in that order, each pointing at the place that holds the role. */
@@ -62,10 +64,23 @@ export function placeRoleSlots<T extends SlotPlace>(places: T[]): PlaceRoleSlot<
   return PLACE_ROLES.map((role) => {
     const label = placeRoleLabel(role);
     const place = places.find((candidate) => candidate.role === role) ?? null;
-    const namedLikeRole = places.find((candidate) => candidate.role === null
-      && candidate.name.trim().toLowerCase() === label.toLowerCase()) ?? null;
-    return { role, label, place, secondary: place ? placeSecondaryName(place) : null, previousHolder: place ?? namedLikeRole };
+    const namedLikeRole = places.filter((candidate) => candidate.role === null
+      && candidate.name.trim().toLowerCase() === label.toLowerCase());
+    return {
+      role, label, place, namedLikeRole,
+      secondary: place ? placeSecondaryName(place) : null,
+      previousHolder: place ?? namedLikeRole[0] ?? null
+    };
   });
+}
+
+/**
+ * The place that loses the role when it goes to `targetId` (null empties the slot, or the
+ * place is new): the holder, else a place named like the role other than the target.
+ */
+export function leavingRoleHolder<T extends SlotPlace>(slot: PlaceRoleSlot<T>, targetId: string | null) {
+  if (slot.place) return slot.place.id === targetId ? null : slot.place;
+  return slot.namedLikeRole.find((place) => place.id !== targetId) ?? null;
 }
 
 /** What the rename field suggests when the role leaves `holder` for `target` (null empties the slot). */

@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { LocateFixed, MapPin } from "lucide-react";
 import { useCallback, useMemo, useRef, useState } from "react";
 import {
+  leavingRoleHolder,
   placeRoleLabel,
   placeRoleRequest,
   placeRoleSlots,
@@ -79,7 +80,8 @@ export function PlaceEditor({
   const [locating, setLocating] = useState(false);
   const [submitAttempted, setSubmitAttempted] = useState(false);
   const newRole = mode === "edit" ? null : role;
-  const roleHolder = newRole ? placeRoleSlots(places).find((slot) => slot.role === newRole)?.previousHolder ?? null : null;
+  const roleSlot = newRole ? placeRoleSlots(places).find((slot) => slot.role === newRole) ?? null : null;
+  const roleHolder = roleSlot ? leavingRoleHolder(roleSlot, null) : null;
   const [previousPlaceName, setPreviousPlaceName] = useState(newRole && roleHolder ? previousRolePlaceName(newRole) : "");
   const shownRole = newRole ?? place?.role ?? null;
   const saveInFlight = useRef(false);

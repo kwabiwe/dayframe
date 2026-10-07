@@ -1771,8 +1771,9 @@ export async function createPlace(input: { name: string } & PlaceMutationInput, 
     if (response.status === 401) {
       throw new AuthRequiredError();
     }
-    if (!response.ok) throw new Error(await errorMessage(response, "Unable to save learned place"));
-    return readPlaceResponse(response, "Unable to save learned place");
+    const fallback = input.learnedPlaceId ? "Unable to save learned place" : "Unable to save place";
+    if (!response.ok) throw new Error(await errorMessage(response, fallback));
+    return readPlaceResponse(response, fallback);
   }
 
   const response = await mobileFetch(`${DAYFRAME_API_BASE}/api/entities`, {

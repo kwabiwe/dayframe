@@ -5,6 +5,7 @@ import { Briefcase, House, Plus } from "lucide-react";
 import { useRef, useState } from "react";
 import {
   initialPreviousPlaceName,
+  leavingRoleHolder,
   placeChoiceLabel,
   placeRoleLabel,
   placeRoleRequest,
@@ -43,8 +44,8 @@ export function PlaceRoleSlots({
   const savingRef = useRef(false);
   const slots = placeRoleSlots(places);
   const editingSlot = editing ? slots.find((slot) => slot.role === editing.role) ?? null : null;
-  const holder = editingSlot?.previousHolder ?? null;
   const targetId = editing?.mode === "clear" ? null : editing?.targetId || null;
+  const holder = !editingSlot ? null : editing?.mode === "clear" ? editingSlot.place : leavingRoleHolder(editingSlot, targetId);
   const chosenPlace = targetId ? places.find((place) => place.id === targetId) ?? null : null;
   const chosenOtherRole = chosenPlace?.role && chosenPlace.role !== editing?.role ? chosenPlace.role : null;
   const roleLeavesHolder = Boolean(holder && (editing?.mode === "clear" || (targetId && targetId !== holder.id)));
@@ -57,7 +58,9 @@ export function PlaceRoleSlots({
       role,
       mode,
       targetId: mode === "clear" ? "" : current?.id ?? "",
-      previousPlaceName: initialPreviousPlaceName(role, slot?.previousHolder ?? null, mode === "clear" ? null : current),
+      previousPlaceName: slot
+        ? initialPreviousPlaceName(role, mode === "clear" ? slot.place : leavingRoleHolder(slot, current?.id ?? null), mode === "clear" ? null : current)
+        : "",
       renameTouched: false
     });
   }
@@ -176,7 +179,7 @@ export function PlaceRoleSlots({
                       targetId: next,
                       previousPlaceName: current.renameTouched
                         ? current.previousPlaceName
-                        : initialPreviousPlaceName(current.role, holder, target)
+                        : initialPreviousPlaceName(current.role, editingSlot ? leavingRoleHolder(editingSlot, next || null) : null, target)
                     } : current);
                   }}
                 />

@@ -74,6 +74,7 @@ export {
   placeSecondaryName,
   previousRolePlaceName,
   initialPreviousPlaceName,
+  leavingRoleHolder,
   placeChoiceLabel,
   placeRoleRequest,
   placeRoleSlots,

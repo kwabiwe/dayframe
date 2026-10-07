@@ -18,6 +18,7 @@ import Svg, { Circle as SvgCircle, Path } from "react-native-svg";
 import MapView, { Circle, Marker, type MapPressEvent } from "react-native-maps";
 import {
   PlaceRoleSchema,
+  leavingRoleHolder,
   paletteColorFor,
   placeRoleLabel,
   placeRoleRequest,
@@ -139,7 +140,8 @@ export default function PlaceEditorScreen() {
       const bootstrap = await fetchBootstrap();
       setData(bootstrap);
       if (newRole) {
-        const holder = placeRoleSlots(bootstrap.places.map(withRole)).find((slot) => slot.role === newRole)?.previousHolder ?? null;
+        const slot = placeRoleSlots(bootstrap.places.map(withRole)).find((candidate) => candidate.role === newRole);
+        const holder = slot ? leavingRoleHolder(slot, null) : null;
         setPreviousPlaceName(holder ? previousRolePlaceName(newRole) : "");
       }
       let existingCoordinate: { latitude: number; longitude: number } | null = null;
@@ -209,9 +211,8 @@ export default function PlaceEditorScreen() {
     defaultCategoryId: loggingEnabled ? defaultCategoryId : "",
     defaultActivityDescription: loggingEnabled ? defaultActivityDescription : ""
   });
-  const roleHolder = newRole
-    ? placeRoleSlots((data?.places ?? []).map(withRole)).find((slot) => slot.role === newRole)?.previousHolder ?? null
-    : null;
+  const roleSlot = newRole ? placeRoleSlots((data?.places ?? []).map(withRole)).find((slot) => slot.role === newRole) : undefined;
+  const roleHolder = roleSlot ? leavingRoleHolder(roleSlot, null) : null;
   const shownRole = newRole ?? (mode === "edit" && loadedEntity && "role" in loadedEntity ? loadedEntity.role ?? null : null);
   const title = newRole
     ? `Add ${placeRoleLabel(newRole)}`

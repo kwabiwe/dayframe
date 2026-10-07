@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { initialPreviousPlaceName, placeChoiceLabel, placeRoleRequest, placeRoleSlots } from "./index";
+import { initialPreviousPlaceName, leavingRoleHolder, placeChoiceLabel, placeRoleRequest, placeRoleSlots } from "./index";
 
 const home = { id: "home", name: "12 Example Street", role: "home" as const };
 const flat = { id: "flat", name: "34 Sample Road", role: null };
@@ -8,8 +8,8 @@ const gym = { id: "gym", name: "Gym", role: null };
 describe("place role slots", () => {
   it("lists Home then Work, pointing at the place holding each role", () => {
     expect(placeRoleSlots([gym, home, flat])).toEqual([
-      { role: "home", label: "Home", place: home, secondary: "12 Example Street", previousHolder: home },
-      { role: "work", label: "Work", place: null, secondary: null, previousHolder: null }
+      { role: "home", label: "Home", place: home, secondary: "12 Example Street", previousHolder: home, namedLikeRole: [] },
+      { role: "work", label: "Work", place: null, secondary: null, previousHolder: null, namedLikeRole: [] }
     ]);
   });
 
@@ -26,6 +26,20 @@ describe("place role slots", () => {
     expect(initialPreviousPlaceName("home", home, flat)).toBe("Previous home");
     expect(initialPreviousPlaceName("home", home, null)).toBe("12 Example Street");
     expect(initialPreviousPlaceName("work", null, flat)).toBe("");
+  });
+
+  it("never treats the chosen place as the old Home", () => {
+    const first = { id: "a", name: "Home", role: null };
+    const second = { id: "b", name: "home", role: null };
+    const [slot] = placeRoleSlots([first, second, gym]);
+    expect(leavingRoleHolder(slot!, "a")).toBe(second);
+    expect(leavingRoleHolder(slot!, "b")).toBe(first);
+    expect(leavingRoleHolder(slot!, null)).toBe(first);
+    const [onlyOne] = placeRoleSlots([first, gym]);
+    expect(leavingRoleHolder(onlyOne!, "a")).toBeNull();
+    const [held] = placeRoleSlots([home, gym]);
+    expect(leavingRoleHolder(held!, home.id)).toBeNull();
+    expect(leavingRoleHolder(held!, gym.id)).toBe(home);
   });
 
   it("keeps the current name when Home moves back to the place already called Previous home", () => {
