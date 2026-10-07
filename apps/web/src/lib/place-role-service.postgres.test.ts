@@ -7,6 +7,7 @@ vi.hoisted(() => {
   }
 });
 
+import { pool as servicePool } from "./db";
 import { placeDisplayNameSql } from "./place-display";
 import { PlaceRoleConflictError, assignPlaceRoleWith } from "./place-role-service";
 import type { RequestSession } from "./session";
@@ -22,6 +23,7 @@ const office = "62000000-0000-4000-8000-000000000103";
 const gym = "62000000-0000-4000-8000-000000000104";
 const foreign = "62000000-0000-4000-8000-000000000105";
 const namedHome = "62000000-0000-4000-8000-000000000106";
+const secondNamedHome = "62000000-0000-4000-8000-000000000107";
 const entryId = "62000000-0000-4000-8000-000000000201";
 const session: RequestSession = { workspaceId, userId, authMode: "dev", scopes: ["app:write"] };
 let database: pg.Pool | null = null;
@@ -33,6 +35,11 @@ describeWithDatabase("place roles on disposable PostgreSQL", () => {
     const target = new URL(databaseUrl!);
     if (!["localhost", "127.0.0.1"].includes(target.hostname) || !target.pathname.endsWith("_test")) {
       throw new Error("Place role integration tests require a disposable local *_test database.");
+    }
+    // createPlace uses the app's shared pool; if another file in this worker created it first,
+    // it could point elsewhere. Refuse rather than write to it.
+    if (servicePool.options.connectionString !== databaseUrl) {
+      throw new Error("The app pool is not the disposable test database; run this file in its own worker.");
     }
     database = new pg.Pool({ connectionString: databaseUrl, max: 4 });
     await clearFixtures(database);
@@ -131,6 +138,23 @@ describeWithDatabase("place roles on disposable PostgreSQL", () => {
     expect(result).toEqual({ status: "assigned", placeId: newHome, previousPlaceId: namedHome });
     expect((await roles())[namedHome]).toEqual({ name: "Previous home", role: null });
     expect((await roles())[newHome]?.role).toBe("home");
+  });
+
+  it("renames every place named Home, so none keeps reading Home beside the new one", async () => {
+    const db = database!;
+    await db.query("update places set role = null where id = $1", [oldHome]);
+    await db.query(
+      "insert into places (id, workspace_id, name) values ($1, $3, 'Home'), ($2, $3, 'HOME')",
+      [namedHome, secondNamedHome, workspaceId]
+    );
+
+    await inTransaction((client) =>
+      assignPlaceRoleWith(client, session, { role: "home", placeId: newHome, previousPlaceName: "Previous home" }));
+
+    const after = await roles();
+    expect(after[namedHome]).toEqual({ name: "Previous home", role: null });
+    expect(after[secondNamedHome]).toEqual({ name: "Previous home", role: null });
+    expect(after[newHome]?.role).toBe("home");
   });
 
   it("leaves no new place behind when adding a place into a slot loses a race", async () => {

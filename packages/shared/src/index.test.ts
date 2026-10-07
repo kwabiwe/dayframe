@@ -1133,6 +1133,14 @@ describe("place role normalization", () => {
       roleContext
     );
     expect(described).toEqual(expect.objectContaining({ title: "School run" }));
+    const staleName = normalizeActivityEvent(
+      {
+        source: "geofence_specific", type: "geofence_exit", occurredAt: new Date("2026-10-07T09:30:00.000Z"),
+        placeId: placeId("home"), description: "12 Example St", rawPayload: { placeName: "12 Example St" }
+      },
+      roleContext
+    );
+    expect(staleName).toEqual(expect.objectContaining({ title: "Home" }));
   });
 
   it("matches a payload place name of Home to the Home-role place before a place merely named Home", () => {

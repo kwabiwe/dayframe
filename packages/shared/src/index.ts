@@ -2304,10 +2304,13 @@ function visitActivityDescription(
   rule?: AutomationRuleSummary
 ) {
   const eventDescription = event.description?.trim();
-  // Older phones describe a visit by the place's saved name; for a role place that is often
-  // its address, so the role label wins.
-  const describesSavedName = Boolean(place?.role && eventDescription
-    && eventDescription.toLowerCase() === place.name.trim().toLowerCase());
+  // The phone describes a visit by the saved name it has cached (and sends that as
+  // `placeName`); for a role place that is often its address, so the role label wins,
+  // even when the name was edited since the phone last refreshed.
+  const cachedPlaceName = typeof event.rawPayload.placeName === "string" ? event.rawPayload.placeName.trim() : "";
+  const describedName = eventDescription?.toLowerCase();
+  const describesSavedName = Boolean(place?.role && describedName
+    && (describedName === place.name.trim().toLowerCase() || describedName === cachedPlaceName.toLowerCase()));
   if (eventDescription && !describesSavedName) return eventDescription;
 
   const ruleDescription = rule?.activityDescription?.trim();

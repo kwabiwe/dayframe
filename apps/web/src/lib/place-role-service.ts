@@ -55,18 +55,20 @@ export async function assignPlaceRoleWith(
 
     const holder = locked.rows.find((row) => row.role === assignment.role && row.id !== assignment.placeId) ?? null;
     const holderIsTarget = locked.rows.some((row) => row.role === assignment.role && row.id === assignment.placeId);
+    // Every role-less place named like the role is an implicit holder, so none keeps reading
+    // "Home" beside the new Home once the person chose a new name for the old one.
     const implicit = holder || holderIsTarget
-      ? null
-      : locked.rows.find((row) => row.role === null && row.id !== assignment.placeId
-        && row.name.trim().toLowerCase() === placeRoleLabel(assignment.role).toLowerCase()) ?? null;
-    const previous = holder ?? (implicit && previousPlaceName ? implicit : null);
-    if (previous) {
+      ? []
+      : locked.rows.filter((row) => row.role === null && row.id !== assignment.placeId
+        && row.name.trim().toLowerCase() === placeRoleLabel(assignment.role).toLowerCase());
+    const previous = holder ? [holder] : previousPlaceName ? implicit : [];
+    if (previous.length > 0) {
       await client.query(
         `update places
          set role = null,
              name = coalesce($3::text, name)
-         where id = $1 and workspace_id = $2`,
-        [previous.id, session.workspaceId, previousPlaceName]
+         where id = any($1::uuid[]) and workspace_id = $2`,
+        [previous.map((row) => row.id), session.workspaceId, previousPlaceName]
       );
     }
     if (target && target.role !== assignment.role) {
@@ -76,7 +78,7 @@ export async function assignPlaceRoleWith(
         [target.id, session.workspaceId, assignment.role]
       );
     }
-    return { status: "assigned", placeId: target?.id ?? null, previousPlaceId: previous?.id ?? null };
+    return { status: "assigned", placeId: target?.id ?? null, previousPlaceId: previous[0]?.id ?? null };
   } catch (error) {
     if (isUniqueViolationError(error, "places_workspace_role_idx")) throw new PlaceRoleConflictError(error);
     if (isUndefinedColumnError(error, "role")) {
