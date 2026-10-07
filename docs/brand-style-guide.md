@@ -31,26 +31,7 @@ Migrated surfaces so far: iPhone Today (Phase 2: live block, quick-start mosaic,
 
 ### Prototype parity (owner decision 7 October 2026)
 
-Every screen on iPhone and web, Settings included, is rebuilt to look and behave like the interactive prototype (`design/blocks/ios.html`, `web.html` and `onboarding.html`), one PR per screen. Each PR keeps the data, sync and Review logic and the safety rules in `AGENTS.md`, and either keeps every current function reachable or records the owner's decision to drop it. Where the prototype is silent (offline and error states, the Places editor, notification settings, editing a finished block's start), the PR designs the gap in the same language.
-
-The owner settled these points where the prototype is ambiguous or drops a function:
-
-| # | Decision |
-| --- | --- |
-| D1 | Theme names are "Midnight · Daylight · System" on both platforms. |
-| D2 | At most six pinned quick-start activities on both platforms; keys 1–6 start them on web. |
-| D3 | "Week starts on" is a real stored preference that Calendar, Reports and weekly goals honour (the quick-start mosaic keeps its rolling seven days). |
-| D4 | The weekly goal shows in Reports (hero and streak). |
-| D5 | Notifications and Motion & Fitness get rows under Settings › Automatic tracking. |
-| D6 | Review keeps "Always ignore" and "Make rule" in a More menu on the card. |
-| D7 | Review's "Edit before logging" opens the existing evidence editor, restyled; the activity is chosen with the activity picker. |
-| D8 | A Blocks Places screen (list, editor, learned places, Home and Work) fills the prototype's gap. |
-| D9 | Reports uses Week · Month as the main control; Today, Year, custom ranges and the activity-over-time chart stay under a More range sheet. |
-| D10 | Activities are archived with Restore, never deleted, so history is kept. |
-| D11 | iPhone tags stay free text with autocomplete, shown as chips. |
-| D12 | iPhone shows the daily goal (ribbon and goal frame) from the existing goal settings, edited with steppers under "Your day". |
-
-Also kept: grouped repeat rows in history (styled as blocks), the Review evidence editor, the entry sheet's start/end times and rounding shortcuts, and Retry/Discard for rejected changes. The connectivity indicator is to show only offline and a brief "back online", with syncing silent; the PR that builds it also updates the connectivity rule in `AGENTS.md`, which governs until then. Product rules for these live in `docs/PRD.md` and delivery state in `docs/feature-fix-tracker.md`.
+Every screen on iPhone and web, Settings included, is rebuilt to look and behave like the interactive prototype (`design/blocks/ios.html`, `web.html` and `onboarding.html`), one PR per screen. Each PR keeps the data, sync and Review logic and the safety rules in `AGENTS.md`, and either keeps every current function reachable or records the owner's decision to drop it. Where the prototype is silent (offline and error states, the Places editor, notification settings, editing a finished block's start), the PR designs the gap in the same language. The owner's decisions where the prototype is ambiguous or drops a function (D1–D12) and the functions kept are recorded in `docs/PRD.md` (Blocks prototype parity); delivery state is in `docs/feature-fix-tracker.md`.
 
 ## Brand assets
 

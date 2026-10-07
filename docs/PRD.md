@@ -228,14 +228,26 @@ Mobile Today and integrated Review:
 Blocks prototype parity (owner decision 7 October 2026; built screen by screen):
 
 - Every iPhone and web screen, Settings included, is rebuilt to match the Blocks prototype (`docs/brand-style-guide.md`, Dayframe Blocks). The rules above stay in force for each screen until the PR that rebuilds it updates them.
-- Kept through the rebuild: grouped repeat rows in history; the Review Location evidence editor (behind "Edit before logging"); "Always ignore" and "Make rule" (a More menu on the Review card); the entry sheet's start/end date and time editing, historical description suggestions and rounding shortcuts; free-text tags with autocomplete; Retry/Discard for rejected changes; every export and delete path; logout on every width.
-- Changing: Quick Confirm and the Review donut leave iPhone Today, which gets a goal frame, a Today ribbon and a "moments to review" card that opens the Review card deck. The "covered" figure gives way to the goal frame.
-- New product settings: "Week starts on" (stored; Calendar, Reports and weekly goals honour it); the daily goal on iPhone, from the existing goal settings; the weekly goal shown in Reports; Notifications and Motion & Fitness rows under Settings › Automatic tracking.
-- Activities are archived with Restore instead of deleted, so their history is kept.
-- Reports: Week · Month is the main control; Today, Year, custom ranges and activity over time stay under a More range sheet.
-- At most six pinned quick-start activities on both platforms.
-- Connectivity: the indicator is to show only offline and a brief "back online"; syncing stays silent, and rejected changes surface through an attention badge that opens Sync help. `AGENTS.md` changes with that PR.
-- Stop gets Undo once the server supports un-stopping a timer (its own PR).
+- Kept through the rebuild: grouped repeat rows in history; the Review Location evidence editor; "Always ignore" and "Make rule"; the entry sheet's start/end date and time editing, historical description suggestions and rounding shortcuts; free-text tags with autocomplete; Retry/Discard for rejected changes; every export and delete path; logout on every width.
+- On iPhone Today the Review donut gives way to a "moments to review" card that opens Review, with pending time shown in a Today ribbon. Removing Quick Confirm from Today and dropping the "covered" figure in favour of the goal frame await owner confirmation (tracker decision register); until then the rules above stand.
+- Connectivity direction: the indicator should show only offline and a brief "back online", with syncing silent; rejected changes still need a visible way into Retry/Discard (an attention badge on the avatar is proposed). `AGENTS.md` governs until the PR that builds it.
+
+Decisions where the prototype is ambiguous or drops a function:
+
+| # | Decision |
+| --- | --- |
+| D1 | Theme names are "Midnight · Daylight · System" on both platforms. |
+| D2 | At most six pinned quick-start activities on both platforms; keys 1–6 start them on web. |
+| D3 | "Week starts on" is a real stored preference that Calendar, Reports and weekly goals honour (whether the quick-start mosaic moves from the last seven days to the current week awaits the owner). |
+| D4 | The weekly goal shows in Reports (hero and streak). |
+| D5 | Notifications and Motion & Fitness get rows under Settings › Automatic tracking. |
+| D6 | Review keeps "Always ignore" and "Make rule" in a More menu on the card. |
+| D7 | Review's "Edit before logging" opens the existing evidence editor, restyled; the activity is chosen with the activity picker. |
+| D8 | A Blocks Places screen (list, editor, learned places, Home and Work) fills the prototype's gap. |
+| D9 | Reports uses Week · Month as the main control; Today, Year, custom ranges and the activity-over-time chart stay under a More range sheet. |
+| D10 | Activities are archived with Restore, never deleted, so history is kept. |
+| D11 | iPhone tags stay free text with autocomplete, shown as chips. |
+| D12 | iPhone shows the daily goal (ribbon and goal frame) from the existing goal settings, edited with steppers under "Your day". |
 
 Mobile accessibility and Dynamic Type:
 

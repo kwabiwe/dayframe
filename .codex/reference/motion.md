@@ -41,8 +41,8 @@ Do not introduce Swift solely to make an otherwise ordinary React Native entranc
 
 - Animations run on the UI thread. RN `Animated` values always use `useNativeDriver: true` (opacity and transforms); anything that needs layout uses Reanimated. A JS-thread animation drops frames exactly when the JS thread is busy, such as during Stop's outbox write and re-render (investigation 2026-10-07; `framePacing.contract.test.ts` enforces it).
 - Do not rebuild per-minute data on the per-second clock. Today's history, the day cards and the native Calendar model read `minuteClock(now, newestShownTimestamp(entries, now))`, which holds still within a minute but never falls behind a start or stop already shown; only the live elapsed time ticks every second.
-- Reuse `MOBILE_MOTION` on iOS: approximately 140 ms for control feedback, 220 ms for local layout, 260 ms for sheets, and 280 ms for screen transitions.
-- Follow the brand guide's 120–220 ms control and 180–300 ms panel ranges on other surfaces. Prefer standard ease-out timing; exits may be shorter while staying in the same curve family.
+- On surfaces not yet migrated to Blocks, reuse `MOBILE_MOTION` on iOS: approximately 140 ms for control feedback, 220 ms for local layout, 260 ms for sheets, and 280 ms for screen transitions.
+- On other unmigrated surfaces, follow the brand guide's 120–220 ms control and 180–300 ms panel ranges. On migrated Blocks surfaces the named springs below replace these durations for the moves they list. Prefer standard ease-out timing; exits may be shorter while staying in the same curve family.
 - On surfaces not yet migrated to Blocks, keep movement restrained: opacity plus a small translation when it clarifies origin, with no theatrical scale, bounce or decorative loop. Migrated Blocks surfaces use the prototype motion vocabulary below.
 - Direct manipulation must track the finger continuously and must not hand off to a separately rebuilt layout with a release-time snap.
 - Animate both presence and consequence: the control or notice entering is not sufficient if the affected row, surrounding list, timeout dismissal, Undo restoration, or failure rollback still jumps.
@@ -51,30 +51,30 @@ Do not introduce Swift solely to make an otherwise ordinary React Native entranc
 
 ## Dayframe Blocks Springs And Haptics
 
-The owner approved the Blocks springs and haptics on 5 October 2026 and, on 7 October 2026, the full motion of the interactive prototype (`design/blocks/ios.html`, `web.html` and `onboarding.html` on the local `agent/dayframe-redesign-concept` branch; spring values in its `assets/blocks.js`). Migrated surfaces should move the way the prototype moves. That supersedes the earlier "landing spring and breathing ring only" limit. See `docs/brand-style-guide.md`, Dayframe Blocks.
+The owner approved the Blocks springs and haptics on 5 October 2026 and, on 7 October 2026, the full motion of the interactive prototype (`design/blocks/ios.html`, `web.html` and `onboarding.html` on the local `agent/dayframe-redesign-concept` branch; spring values in its `assets/blocks.js`). Migrated surfaces should move the way the prototype moves. That supersedes the earlier "landing spring and breathing ring only" limit. The per-surface sections further down (for example the Today Phase 2 contract) remain each surface's contract until the PR that rebuilds that surface to the prototype rewrites them. See `docs/brand-style-guide.md`, Dayframe Blocks.
 
 Springs (starting values from the prototype; tune on a physical iPhone):
 
 | Spring | Stiffness / damping | Used for |
 | --- | --- | --- |
 | `snap` | 560 / 38 | Controls, thumbs, press-down on the Play orb |
-| `sheet` | 340 / 34 | Sheets, panels, pushed pages, a card returning after a cancelled swipe |
-| `land` | 320 / 21 | A block landing (start, stop, log, restore, delete), with one small overshoot |
+| `sheet` | 340 / 34 | Sheets, panels, pushed pages, and a sheet or page returning after a cancelled drag |
+| `land` | 320 / 21 | A block landing (start, stop, log, restore, delete), with one small overshoot; a row, live card or Review card returning after a cancelled swipe |
 | `pop` | 420 / 18 | Small celebratory pops: a row block or icon confirming a change, bloom tiles, the "All framed" heading |
 | `roll` | 260 / 26 | Odometer digits on the live timer |
 
 Prototype moves allowed on migrated surfaces:
 
-- **Drop-in.** Tiles and blocks drop into place on first paint and when Review is finished ("All framed"), with a short stagger (the prototype uses 18–90 ms per item).
+- **Drop-in.** Tiles and blocks drop into place on first paint and when Review is finished ("All framed"), with a short stagger (the prototype uses about 35–90 ms per item).
 - **Pop.** A changed block or icon scales from about 0.6–1.5 back to rest with `pop`.
 - **Rolling digits.** The live timer's changing digits roll with `roll`; unchanged digits stay still.
 - **Stop flight.** On Stop the live block shrinks and flies into its row in Today's list (the prototype uses 620 ms, `cubic-bezier(.3,.7,.2,1)`), then the row block pops and the row briefly highlights.
-- **Swipes and throws.** Rows swipe (right: Start again; left: Delete) and Review cards throw off-screen with LOG IT / SKIP stamps, tracking the finger and rotating slightly; a released card that does not commit springs back with `land`.
-- **Bloom.** Holding the Play orb for about 360 ms opens the activity bloom; its tiles fly out from the orb with `pop`, staggered.
+- **Swipes and throws.** Rows swipe (right: Start again; left: Delete) and Review cards throw off-screen with LOG IT / SKIP stamps, tracking the finger and rotating slightly; a released row or card that does not commit springs back with `land`.
+- **Bloom.** Holding the Play orb for about 360 ms opens the activity bloom; its tiles fly out from the orb with `pop`, staggered by about 18 ms.
 - **Breathing ring.** Only the single live block carries it: an opacity-only cycle of about 2.4 s on its inner edge.
-- **Block pull-to-refresh.** The refresh indicator is three small blocks that pulse while a deliberate pull refreshes.
+- **Block pull-to-refresh.** The refresh indicator is a row of six small blocks that pulse while a deliberate pull refreshes.
 
-Still not allowed: glows, confetti, parallax, motion that loops while nothing is happening (other than the live ring and an active pull-to-refresh), and motion on a background refresh, reconciliation, hydration or rollback.
+Still not allowed: glows, confetti, parallax, motion that loops while nothing is happening (other than the live ring and an active pull-to-refresh), and any landing, pop, flight or other celebratory motion on a background refresh, reconciliation, hydration or rollback. Those still use the ordinary presence and layout transitions, so a rollback or Undo restoration never jumps.
 
 The ownership rules above still apply. Each spring belongs to the same single animation owner as the state change, runs on the UI thread (Reanimated, or a native surface where this reference already allows one), and never stacks with another layer's transition. Direct manipulation (swipes, card throws, the bloom, the duration dial, ribbon scrubbing) has one gesture owner that tracks the finger continuously.
 
