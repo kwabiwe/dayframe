@@ -1,6 +1,6 @@
 # Dropped frames on iPhone — 7 October 2026
 
-Status: Frame pacing merged (#239, `72ac93b`); inert LayoutAnimation removal in review (#240). Device evidence is pending: the owner's physical-iPhone check on a staging build.
+Status: Resolved. Frame pacing merged (#239, `72ac93b`); inert LayoutAnimation removal merged (#240, `65412c8`). The owner checked a staging build on a physical iPhone on 7 October 2026: the Stop animation and other animations look smooth and Calendar scrolling is smooth.
 
 ## What the owner saw
 
@@ -31,4 +31,4 @@ Static review of every animation driver and periodic update in `apps/mobile` (ap
 - Inert `scheduleLayoutTransition`/`Keyboard.scheduleLayoutAnimation` calls removed and the Sync disclosure given a Reanimated owner (#240).
 - Clock edge cases from review (rare): an entry stamped by another device's clock a few seconds ahead falls back to the floored minute until the boundary (`newestShownTimestamp` ignores future edges), and deleting the newest entry can step `minuteNow` back within the minute. Fix if seen: honour edges up to two minutes ahead, and keep `minuteNow` monotonic within a day.
 - The provider still re-renders all three tabs every second because the context value changes with `now`, and the visible day cards re-render with it (`HistoryDayCard` is not memoised and receives inline callbacks); only their inner computations are skipped. If the phone still shows stutter, memoise `HistoryDayCard` with stable callbacks and isolate the ticking clock into the live block.
-- Physical-iPhone check of Stop, Start, Calendar scroll and pinch on a staging build.
+- Done 7 Oct: owner's physical-iPhone check on a staging build passed.
