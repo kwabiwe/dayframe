@@ -1,4 +1,5 @@
 import { query } from "./db";
+import { placeDisplayNameSql } from "./place-display";
 import type { RequestSession } from "./session";
 
 export type GlobalSearchResult = {
@@ -41,7 +42,7 @@ export async function searchDayframe(
               cat.name as category_name,
               cat.color as category_color,
               pl.id as place_id,
-              coalesce(pl.name, te.place_label) as place_name,
+              coalesce(${placeDisplayNameSql("pl")}, te.place_label) as place_name,
               te.place_label,
               coalesce(array_agg(distinct tag.name) filter (where tag.id is not null), array[]::text[]) as tag_names,
               greatest(0, extract(epoch from (coalesce(te.stopped_at, now()) - te.started_at)))::int as duration_seconds
@@ -55,7 +56,8 @@ export async function searchDayframe(
          and (
            coalesce(te.description, '') ilike '%' || $3 || '%'
            or coalesce(cat.name, '') ilike '%' || $3 || '%'
-           or coalesce(pl.name, te.place_label, '') ilike '%' || $3 || '%'
+           or coalesce(${placeDisplayNameSql("pl")}, te.place_label, '') ilike '%' || $3 || '%'
+           or coalesce(pl.name, '') ilike '%' || $3 || '%'
            or coalesce(tag.name, '') ilike '%' || $3 || '%'
          )
        group by te.id, cat.id, cat.name, cat.color, pl.id, pl.name, te.place_label
@@ -124,13 +126,14 @@ export async function searchDayframe(
        from categories c
        where c.workspace_id = $1 and c.is_archived = false and c.name ilike '%' || $3 || '%'
        union all
-       select 'place:' || p.id::text, 'place', p.name, 'Place', null, null,
+       select 'place:' || p.id::text, 'place', ${placeDisplayNameSql("p")}, case when p.role is null then 'Place' else p.name end, null, null,
               p.default_category_id, c.name, c.color, p.id, p.default_activity_description,
               array[]::text[], null, null, null,
-              case when lower(p.name) = lower($3) then 110 when p.name ilike $3 || '%' then 90 else 60 end
+              case when lower(${placeDisplayNameSql("p")}) = lower($3) or lower(p.name) = lower($3) then 110
+                   when ${placeDisplayNameSql("p")} ilike $3 || '%' or p.name ilike $3 || '%' then 90 else 60 end
        from places p
        left join categories c on c.id = p.default_category_id and c.workspace_id = p.workspace_id
-       where p.workspace_id = $1 and p.name ilike '%' || $3 || '%'
+       where p.workspace_id = $1 and (${placeDisplayNameSql("p")} ilike '%' || $3 || '%' or p.name ilike '%' || $3 || '%')
        union all
        select 'tag:' || t.id::text, 'tag', t.name, 'Tag', null, null,
               null, null, null, null, null, array[t.name], null, null, null,

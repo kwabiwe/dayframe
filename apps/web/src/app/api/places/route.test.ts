@@ -80,7 +80,8 @@ describe("/api/places", () => {
         defaultActivityDescription: "School drop-off/pickup",
         autoStart: false
       },
-      session
+      session,
+      undefined
     );
   });
 
@@ -106,9 +107,47 @@ describe("/api/places", () => {
         priority: 5,
         autoStart: false
       },
-      session
+      session,
+      undefined
     );
     expect(mocks.createPlace).not.toHaveBeenCalled();
+  });
+
+  it("adds a place straight into the Home slot and passes the old Home's new name", async () => {
+    const response = await POST(
+      jsonRequest({ name: "12 Example Street", latitude: 51.5, longitude: -0.12, role: "home", previousPlaceName: " Previous home " })
+    );
+
+    expect(response.status).toBe(201);
+    expect(mocks.createPlace).toHaveBeenCalledWith(
+      { name: "12 Example Street", latitude: 51.5, longitude: -0.12, radiusMeters: 100, priority: 5, autoStart: false },
+      session,
+      { role: "home", previousPlaceName: "Previous home" }
+    );
+  });
+
+  it("rejects roles other than Home and Work", async () => {
+    const response = await POST(jsonRequest({ name: "Gym", role: "gym" }));
+
+    expect(response.status).toBe(400);
+    expect(mocks.createPlace).not.toHaveBeenCalled();
+  });
+
+  it("reports a concurrent role move as a retryable conflict", async () => {
+    const { PlaceRoleConflictError } = await import("@/lib/place-role-service");
+    mocks.createPlace.mockRejectedValue(new PlaceRoleConflictError(new Error("unique")));
+
+    const response = await POST(jsonRequest({ name: "Office", role: "work" }));
+
+    expect(response.status).toBe(409);
+    await expect(response.json()).resolves.toEqual(expect.objectContaining({ code: "place_role_conflict" }));
+  });
+
+  it("does not let an ordinary edit change a role", async () => {
+    const response = await PATCH(jsonRequest({ id: placeId(), name: "Gym", role: "home" }));
+
+    expect(response.status).toBe(200);
+    expect(mocks.updatePlace.mock.calls[0]?.[1]).not.toHaveProperty("role");
   });
 
   it("edits the mobile-supported place fields", async () => {

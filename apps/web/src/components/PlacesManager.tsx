@@ -4,8 +4,10 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Info, MapPin, Pencil, Plus, Trash2 } from "lucide-react";
 import { useState, useTransition } from "react";
+import { placeDisplayName, placeRoleLabel, placeSecondaryName } from "@dayframe/shared";
 import type { LearnedPlaceRow, PlaceRow } from "@/lib/queries";
 import { clientFetch } from "@/lib/client-auth-fetch";
+import { PlaceRoleSlots } from "./PlaceRoleSlots";
 import { Button, IconButton, ModalDialog } from "./ui/Primitives";
 
 export function PlacesManager({
@@ -85,6 +87,8 @@ export function PlacesManager({
     <div className="places-manager">
       {status ? <p className="places-manager-status" role="status">{status}</p> : null}
 
+      <PlaceRoleSlots places={places} onChanged={refresh} />
+
       <section className="places-list-section">
         <header>
           <div>
@@ -98,7 +102,8 @@ export function PlacesManager({
             <article className="place-list-row" id={`place-${place.id}`} key={place.id}>
               <span className="place-list-icon"><MapPin aria-hidden="true" size={19} /></span>
               <div className="place-list-copy">
-                <h3>{place.name}</h3>
+                <h3>{placeDisplayName(place)}</h3>
+                {placeSecondaryName(place) ? <p>{placeSecondaryName(place)}</p> : null}
                 <p>
                   {place.radiusMeters}m radius
                   {" · "}
@@ -115,7 +120,7 @@ export function PlacesManager({
               </div>
               <div className="place-list-actions">
                 <Link
-                  aria-label={`Edit ${place.name}`}
+                  aria-label={`Edit ${placeDisplayName(place)}`}
                   className="ui-button ui-button-secondary is-compact"
                   href={`/places/${encodeURIComponent(place.id)}/edit`}
                 >
@@ -123,7 +128,7 @@ export function PlacesManager({
                   Edit
                 </Link>
                 <IconButton
-                  label={`Delete ${place.name}`}
+                  label={`Delete ${placeDisplayName(place)}`}
                   variant="danger"
                   onClick={() => setDeletingPlace(place)}
                 >
@@ -199,7 +204,9 @@ export function PlacesManager({
       {deletingPlace ? (
         <ModalDialog
           busy={busyId === deletingPlace.id}
-          description="Existing time entries keep their time data, but this place label will be removed."
+          description={deletingPlace.role
+            ? `This is your ${placeRoleLabel(deletingPlace.role)}, so that slot will be empty. Existing time entries keep their time data, but this place label will be removed.`
+            : "Existing time entries keep their time data, but this place label will be removed."}
           footer={(
             <>
               <Button disabled={busyId === deletingPlace.id} onClick={() => setDeletingPlace(null)}>
@@ -216,7 +223,7 @@ export function PlacesManager({
           )}
           onClose={() => setDeletingPlace(null)}
           role="alertdialog"
-          title={`Delete ${deletingPlace.name}?`}
+          title={`Delete ${placeDisplayName(deletingPlace)}?`}
         >
           <p className="place-dialog-copy">This cannot be undone from the Places page.</p>
         </ModalDialog>

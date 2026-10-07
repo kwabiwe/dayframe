@@ -26,7 +26,8 @@ import {
   type CandidateActivity,
   type HealthAutoLogMappings,
   type HealthImportPreferenceKey,
-  type HealthImportPreferences
+  type HealthImportPreferences,
+  type PlaceRole
 } from "@dayframe/shared";
 import {
   databaseReadinessError,
@@ -59,6 +60,8 @@ import {
   type AutomaticLoggingCategoryKind
 } from "./automatic-category-service";
 import { getServerLocationRolloutMode } from "./location/location-rollout";
+import { placeDisplayNameSql } from "./place-display";
+import { assignPlaceRoleWith } from "./place-role-service";
 
 export type { AutomaticLoggingCategoryKind } from "./automatic-category-service";
 
@@ -85,6 +88,7 @@ const CATEGORY_RETURNING = 'returning id, name, color, is_pinned as "isPinned", 
 type PlaceRowLike = {
   id: string;
   name: string;
+  role: PlaceRole | null;
   latitude: number | null;
   longitude: number | null;
   radiusMeters: number;
@@ -1360,21 +1364,45 @@ export async function archiveCategory(id: string, session: RequestSession = getD
   }
 }
 
+export type NewPlaceRole = { role: PlaceRole; previousPlaceName?: string | null };
+
 export async function createPlace(
   input: PlaceMutationFields,
-  session: RequestSession = getDevSession()
+  session: RequestSession = getDevSession(),
+  newRole?: NewPlaceRole
 ) {
-  return insertPlaceRecord(
-    <T extends pg.QueryResultRow>(statement: string, values?: unknown[]) => query<T>(statement, values),
-    input,
-    session
-  );
+  if (!newRole) {
+    return insertPlaceRecord(
+      <T extends pg.QueryResultRow>(statement: string, values?: unknown[]) => query<T>(statement, values),
+      input,
+      session
+    );
+  }
+  // A place added straight into the Home or Work slot takes the role in the same transaction.
+  const client = await pool.connect();
+  try {
+    await client.query("begin");
+    const place = await insertPlaceRecord(
+      <T extends pg.QueryResultRow>(statement: string, values?: unknown[]) => client.query<T>(statement, values),
+      input,
+      session
+    );
+    await assignPlaceRoleWith(client, session, { ...newRole, placeId: place.id });
+    await client.query("commit");
+    return { ...place, role: newRole.role };
+  } catch (error) {
+    await client.query("rollback");
+    throw error;
+  } finally {
+    client.release();
+  }
 }
 
 export async function createPlaceFromLearnedPlace(
   learnedPlaceId: string,
   input: PlaceMutationFields,
-  session: RequestSession = getDevSession()
+  session: RequestSession = getDevSession(),
+  newRole?: NewPlaceRole
 ) {
   const client = await pool.connect();
   try {
@@ -1410,8 +1438,9 @@ export async function createPlaceFromLearnedPlace(
          and user_id = $3`,
       [learnedPlaceId, session.workspaceId, session.userId, place.id]
     );
+    if (newRole) await assignPlaceRoleWith(client, session, { ...newRole, placeId: place.id });
     await client.query("commit");
-    return place;
+    return newRole ? { ...place, role: newRole.role } : place;
   } catch (error) {
     await client.query("rollback");
     const readinessError = learnedPlacesReadinessError(error);
@@ -1579,6 +1608,7 @@ async function insertPlaceRecord(
          values ($1, $2, $3, $4, $5, $6, null, $7, $8, $9, $10)
          returning id,
                    name,
+                   role,
                    latitude,
                    longitude,
                    radius_meters,
@@ -1591,6 +1621,7 @@ async function insertPlaceRecord(
        )
        select inserted.id,
               inserted.name,
+              inserted.role,
               inserted.latitude,
               inserted.longitude,
               inserted.radius_meters as "radiusMeters",
@@ -1626,6 +1657,9 @@ async function insertPlaceRecord(
     }
     if (isUndefinedColumnError(error, "logging_enabled")) {
       throw missingPlaceLoggingEnabledColumnError(error);
+    }
+    if (isUndefinedColumnError(error, "role")) {
+      throw missingRequiredColumnError("places", "role", "supabase/migrations/202610070001_place_role.sql", error);
     }
     throw error;
   }
@@ -1672,6 +1706,7 @@ export async function updatePlace(
          where id = $1 and workspace_id = $2
          returning id,
                    name,
+                   role,
                    latitude,
                    longitude,
                    radius_meters,
@@ -1684,6 +1719,7 @@ export async function updatePlace(
        )
        select updated.id,
               updated.name,
+              updated.role,
               updated.latitude,
               updated.longitude,
               updated.radius_meters as "radiusMeters",
@@ -1729,6 +1765,9 @@ export async function updatePlace(
     }
     if (isUndefinedColumnError(error, "logging_enabled")) {
       throw missingPlaceLoggingEnabledColumnError(error);
+    }
+    if (isUndefinedColumnError(error, "role")) {
+      throw missingRequiredColumnError("places", "role", "supabase/migrations/202610070001_place_role.sql", error);
     }
     throw error;
   }
@@ -2106,6 +2145,7 @@ export async function resolveReviewItem(
                 when ae.event_type = 'geofence_exit'
                   and nullif(ri.title, '') is not null
                   and ri.title <> coalesce(pl.name, '')
+                  and ri.title <> coalesce(${placeDisplayNameSql("pl")}, '')
                 then ri.title
                 when ae.event_type = 'geofence_exit'
                   and nullif(pl.default_activity_description, '') is not null

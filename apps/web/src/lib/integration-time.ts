@@ -1,5 +1,6 @@
 import { query } from "./db";
 import type { RequestSession } from "./session";
+import { placeDisplayNameSql } from "./place-display";
 
 type IntegrationTimeEntryRow = {
   id: string;
@@ -109,7 +110,7 @@ export async function getIntegrationTimeCurrentSnapshot(
               cat.name as "categoryName",
               cat.color as "categoryColor",
               pl.id as "placeId",
-              coalesce(pl.name, te.place_label) as "placeName",
+              coalesce(${placeDisplayNameSql("pl")}, te.place_label) as "placeName",
               case
                 when pl.id is not null then 'saved'
                 when te.place_label is not null then 'one_time'
@@ -235,7 +236,7 @@ export async function getIntegrationTimeEntries(
             cat.name as "categoryName",
             cat.color as "categoryColor",
             pl.id as "placeId",
-            coalesce(pl.name, te.place_label) as "placeName",
+            coalesce(${placeDisplayNameSql("pl")}, te.place_label) as "placeName",
             case
               when pl.id is not null then 'saved'
               when te.place_label is not null then 'one_time'

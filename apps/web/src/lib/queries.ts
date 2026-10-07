@@ -3,6 +3,7 @@ import type {
   CategorySummary,
   CategoryUsageRank,
   NormalizationContext,
+  PlaceRole,
   PlaceSummary,
   ProjectSummary,
   RecentActivitySuggestion
@@ -19,6 +20,7 @@ import {
   missingRequiredColumnError,
   query
 } from "./db";
+import { placeDisplayNameSql } from "./place-display";
 import { getDevSession, type RequestSession } from "./session";
 import { entryOverlapSeconds } from "./time-entry-overlap";
 
@@ -60,6 +62,7 @@ export type TagRow = {
 export type PlaceRow = {
   id: string;
   name: string;
+  role: PlaceRole | null;
   latitude: number | null;
   longitude: number | null;
   radiusMeters: number;
@@ -380,6 +383,7 @@ export async function getNormalizationContext(
     places: places.map<PlaceSummary>((place) => ({
       id: place.id,
       name: place.name,
+      role: place.role ?? null,
       radiusMeters: place.radiusMeters,
       priority: place.priority,
       defaultProjectId: place.defaultProjectId,
@@ -519,6 +523,7 @@ async function getPlaces(session: RequestSession, execute: typeof query = query)
     const result = await execute<PlaceRow>(
       `select pl.id,
               pl.name,
+              pl.role,
               pl.latitude,
               pl.longitude,
               pl.radius_meters as "radiusMeters",
@@ -554,6 +559,9 @@ async function getPlaces(session: RequestSession, execute: typeof query = query)
         "supabase/migrations/202607140002_place_logging_enabled.sql",
         error
       );
+    }
+    if (isUndefinedColumnError(error, "role")) {
+      throw missingRequiredColumnError("places", "role", "supabase/migrations/202610070001_place_role.sql", error);
     }
     throw error;
   }
@@ -625,7 +633,7 @@ async function getAutomationRules(session: RequestSession, execute: typeof query
               ar.trigger_source as "triggerSource",
               ar.trigger_type as "triggerType",
               pl.id as "placeId",
-              pl.name as "placeName",
+              ${placeDisplayNameSql("pl")} as "placeName",
               ar.action,
               p.id as "projectId",
               p.name as "projectName",
@@ -651,7 +659,7 @@ async function getAutomationRules(session: RequestSession, execute: typeof query
                 ar.trigger_source as "triggerSource",
                 ar.trigger_type as "triggerType",
                 pl.id as "placeId",
-                pl.name as "placeName",
+                ${placeDisplayNameSql("pl")} as "placeName",
                 ar.action,
                 p.id as "projectId",
                 p.name as "projectName",
@@ -714,7 +722,7 @@ export function buildTimeEntriesQuery(
             cat.name as "categoryName",
             cat.color as "categoryColor",
             pl.id as "placeId",
-            coalesce(pl.name, te.place_label) as "placeName",
+            coalesce(${placeDisplayNameSql("pl")}, te.place_label) as "placeName",
             case
               when pl.id is not null then 'saved'
               when te.place_label is not null then 'one_time'
@@ -896,7 +904,7 @@ async function getActiveEntry(session: RequestSession) {
             cat.name as "categoryName",
             cat.color as "categoryColor",
             pl.id as "placeId",
-            coalesce(pl.name, te.place_label) as "placeName",
+            coalesce(${placeDisplayNameSql("pl")}, te.place_label) as "placeName",
             case
               when pl.id is not null then 'saved'
               when te.place_label is not null then 'one_time'
@@ -952,6 +960,7 @@ async function getReviewItems(session: RequestSession) {
               when ae.event_type = 'geofence_exit'
                 and nullif(ri.title, '') is not null
                 and ri.title <> coalesce(pl.name, '')
+                and ri.title <> coalesce(${placeDisplayNameSql("pl")}, '')
               then ri.title
               when ae.event_type = 'geofence_exit'
                 and nullif(pl.default_activity_description, '') is not null
@@ -963,7 +972,7 @@ async function getReviewItems(session: RequestSession) {
             p.name as "projectName",
             c.name as "categoryName",
             c.color as "categoryColor",
-            pl.name as "placeName",
+            ${placeDisplayNameSql("pl")} as "placeName",
             p.id as "suggestedProjectId",
             c.id as "suggestedCategoryId",
             pl.id as "suggestedPlaceId",
@@ -1000,7 +1009,7 @@ async function getActivityEvents(session: RequestSession) {
             ae.review_status as "reviewStatus",
             p.name as "projectName",
             c.name as "categoryName",
-            pl.name as "placeName",
+            ${placeDisplayNameSql("pl")} as "placeName",
             coalesce(ae.event_type = 'commute_detected' and ae.raw_payload ->> 'qualificationReason' = 'same_place_outing', false) as "timeAway"
      from activity_events ae
      left join projects p on p.id = ae.suggested_project_id and p.workspace_id = ae.workspace_id

@@ -1069,6 +1069,111 @@ describe("automation rule normalization", () => {
   });
 });
 
+describe("place role normalization", () => {
+  const roleContext: NormalizationContext = {
+    projects: [],
+    categories: [],
+    places: [
+      {
+        id: placeId("home"),
+        name: "12 Example Street",
+        role: "home",
+        radiusMeters: 100,
+        priority: 10,
+        defaultProjectId: null,
+        defaultCategoryId: null,
+        defaultActivityDescription: null,
+        autoStart: false
+      },
+      {
+        id: placeId("station"),
+        name: "Home",
+        role: null,
+        radiusMeters: 100,
+        priority: 5,
+        defaultProjectId: null,
+        defaultCategoryId: null,
+        defaultActivityDescription: null,
+        autoStart: false
+      }
+    ],
+    automationRules: []
+  };
+
+  it("treats the Home-role place as Home whatever it is named, and names it Home", () => {
+    const exit = normalizeActivityEvent(
+      { source: "geofence_specific", type: "geofence_exit", occurredAt: new Date("2026-10-07T09:30:00.000Z"), placeId: placeId("home"), rawPayload: {} },
+      roleContext
+    );
+    expect(exit).toEqual(expect.objectContaining({
+      action: "create_review_item", confidence: "low", title: "Home",
+      reason: "Home exits are ambiguous and stay review-first by default."
+    }));
+    const enter = normalizeActivityEvent(
+      { source: "geofence_specific", type: "geofence_enter", occurredAt: new Date("2026-10-07T18:30:00.000Z"), placeId: placeId("home"), rawPayload: {} },
+      roleContext
+    );
+    expect(enter).toEqual(expect.objectContaining({ confidence: "low", title: "Entered Home" }));
+  });
+
+  it("names a visit Home when an older phone describes it by the saved address", () => {
+    const exit = normalizeActivityEvent(
+      {
+        source: "geofence_specific", type: "geofence_exit", occurredAt: new Date("2026-10-07T09:30:00.000Z"),
+        placeId: placeId("home"), description: "12 Example Street", rawPayload: {}
+      },
+      roleContext
+    );
+    expect(exit).toEqual(expect.objectContaining({ title: "Home" }));
+    const described = normalizeActivityEvent(
+      {
+        source: "geofence_specific", type: "geofence_exit", occurredAt: new Date("2026-10-07T09:30:00.000Z"),
+        placeId: placeId("home"), description: "School run", rawPayload: {}
+      },
+      roleContext
+    );
+    expect(described).toEqual(expect.objectContaining({ title: "School run" }));
+    const staleName = normalizeActivityEvent(
+      {
+        source: "geofence_specific", type: "geofence_exit", occurredAt: new Date("2026-10-07T09:30:00.000Z"),
+        placeId: placeId("home"), description: "12 Example St", rawPayload: { placeName: "12 Example St" }
+      },
+      roleContext
+    );
+    expect(staleName).toEqual(expect.objectContaining({ title: "Home" }));
+  });
+
+  it("matches a payload place name of Home to the Home-role place before a place merely named Home", () => {
+    const exit = normalizeActivityEvent(
+      { source: "geofence_specific", type: "geofence_exit", occurredAt: new Date("2026-10-07T09:30:00.000Z"), rawPayload: { placeName: "Home" } },
+      roleContext
+    );
+    expect(exit).toEqual(expect.objectContaining({ placeId: placeId("home") }));
+  });
+
+  it("drafts rules from the role label as well as the saved name", () => {
+    const draft = draftAutomationRuleFromText({
+      text: "When I leave home, log errands.",
+      categories: [],
+      places: [{ id: placeId("home"), name: "12 Example Street", role: "home" }]
+    });
+    expect(draft.placeName).toBe("Home");
+    const supported = draftAutomationRuleFromText({
+      text: "If I drive to the rail station and come back home shortly after, log it as a pickup.",
+      places: []
+    });
+    const plan = automationRuleInputFromDraft({
+      draft: { ...supported, placeName: "Home" },
+      categories: [{ id: categoryId("family"), name: "Family" }],
+      places: [
+        { id: placeId("station"), name: "Home" },
+        { id: placeId("home"), name: "12 Example Street", role: "home" }
+      ]
+    });
+    expect(plan.values?.placeId).toBe(placeId("home"));
+  });
+});
+
 function categoryId(seed: string) {
   const suffix =
     seed === "focus"

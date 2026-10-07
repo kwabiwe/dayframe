@@ -54,6 +54,7 @@ Core Functionality:
 - ✅ Review inbox for ambiguous geofence/health/location suggestions.
 - ✅ Auto-start for trusted places only.
 - ✅ Conservative suggestions for broad/ambiguous places.
+- ⚠️ Home and Work place roles: two pinned slots (one Home, one Work) that name a saved place "Home" or "Work" everywhere, whatever it was saved as. The role belongs to the place, so moving house keeps past entries on the old place, which I can rename (for example "Previous home"). Set on web and iPhone Places and during onboarding (delivery state in the tracker).
 - ✅ HealthKit summaries for sleep and workouts/walks as automatic entries or reviewable high-confidence events, with real-device background behavior and mapping defaults still watched after TestFlight validation.
 - ✅ Mobile activity-event fallback and offline Review mutation queues include durable storage, bounded retry, diagnostics, and idempotency. Real-device background/reconnect/conflict behaviour remains under Watch.
 - ⚠️ Time-entry edit/delete/export paths exist, but full account/workspace deletion and stronger privacy controls for raw Health/location payloads remain future work.

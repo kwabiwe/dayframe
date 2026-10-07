@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { placeDisplayNameSql } from "./place-display";
 import { parseReportQueryInput } from "./report-filters";
 import {
   buildReportDataQuery,
@@ -88,7 +89,7 @@ describe("report query architecture", () => {
   it("groups one-time place labels case-insensitively", () => {
     const statement = buildReportDataQuery(session, input, input.filters, "2026-07-22T12:00:00.000Z");
     expect(statement.text).toContain("'one-time:' || lower(regexp_replace(btrim(fe.place_label)");
-    expect(statement.text).toContain("coalesce(pl.name, te.place_label) as place_name");
+    expect(statement.text).toContain(`coalesce(${placeDisplayNameSql("pl")}, te.place_label) as place_name`);
     expect(statement.text).toContain("when te.place_label is not null then 'one_time'");
   });
 
@@ -209,6 +210,7 @@ const options = {
   places: [{
     id: placeId,
     name: "Office",
+    role: null,
     latitude: null,
     longitude: null,
     radiusMeters: 100,

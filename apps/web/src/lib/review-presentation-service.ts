@@ -14,6 +14,7 @@ import type pg from "pg";
 import { withSyncTransaction, type SyncTransactionOptions } from "./sync-transaction";
 import { canonicalJson, isoOrNull, reviewProposalHash } from "./review-proposal-hash";
 import type { RequestSession } from "./session";
+import { placeDisplayNameSql } from "./place-display";
 
 const COLLECTION_LIMIT = 5_000;
 const SQL_COLLECTION_LIMIT = COLLECTION_LIMIT + 1;
@@ -302,7 +303,7 @@ async function loadReviewRows(client: pg.PoolClient, session: RequestSession, in
             ri.status,
             ri.suggested_category_id as "suggestedCategoryId", ri.suggested_place_id as "suggestedPlaceId",
             c.id as "categoryId", c.name as "categoryName", c.color as "categoryColor",
-            pl.id as "placeId", pl.name as "placeLabel",
+            pl.id as "placeId", ${placeDisplayNameSql("pl")} as "placeLabel",
             ri.suggested_started_at as "startedAt", ri.suggested_stopped_at as "stoppedAt",
             ri.confidence, ri.created_at as "createdAt",
             coalesce(st.updated_at, cs.updated_at, ri.resolved_at, ri.created_at) as "semanticRevision",
@@ -367,7 +368,7 @@ async function loadLegacyRows(client: pg.PoolClient, session: RequestSession, in
             cl.name as "clientName",
             coalesce(nullif(te.description, ''), c.name, 'Untitled entry') as title,
             c.id as "categoryId", c.name as "categoryName", c.color as "categoryColor",
-            pl.id as "placeId", coalesce(pl.name, te.place_label) as "placeLabel",
+            pl.id as "placeId", coalesce(${placeDisplayNameSql("pl")}, te.place_label) as "placeLabel",
             case
               when pl.id is not null then 'saved'
               when te.place_label is not null then 'one_time'
@@ -413,7 +414,7 @@ async function loadCompletedTodayRows(client: pg.PoolClient, session: RequestSes
     `select te.id, te.created_from_event_id as "eventId",
             coalesce(nullif(te.description, ''), c.name, 'Untitled entry') as title,
             c.id as "categoryId", c.name as "categoryName", c.color as "categoryColor",
-            pl.id as "placeId", coalesce(pl.name, te.place_label) as "placeLabel",
+            pl.id as "placeId", coalesce(${placeDisplayNameSql("pl")}, te.place_label) as "placeLabel",
             te.started_at as "startedAt", te.stopped_at as "stoppedAt", te.confidence,
             te.review_status as "reviewStatus", te.updated_at as "updatedAt", te.source
      from time_entries te
@@ -455,7 +456,7 @@ async function loadReviewRowsByIds(client: pg.PoolClient, session: RequestSessio
     `select ri.id, ri.event_id as "eventId", ri.location_segment_id as "locationSegmentId", ri.type, ri.title, ri.status,
             ri.suggested_category_id as "suggestedCategoryId", ri.suggested_place_id as "suggestedPlaceId",
             c.id as "categoryId", c.name as "categoryName", c.color as "categoryColor",
-            pl.id as "placeId", pl.name as "placeLabel", ri.suggested_started_at as "startedAt", ri.suggested_stopped_at as "stoppedAt",
+            pl.id as "placeId", ${placeDisplayNameSql("pl")} as "placeLabel", ri.suggested_started_at as "startedAt", ri.suggested_stopped_at as "stoppedAt",
             ri.confidence, ri.created_at as "createdAt", coalesce(st.updated_at, cs.updated_at, ri.resolved_at, ri.created_at) as "semanticRevision",
             ae.source as "eventSource", ae.event_type as "eventType",
             case when cs.metadata ->> 'qualificationReason' = 'same_place_outing'
@@ -502,7 +503,7 @@ async function loadCompletedEntriesByIds(client: pg.PoolClient, session: Request
     `select te.id, te.created_from_event_id as "eventId",
             coalesce(nullif(te.description, ''), c.name, 'Untitled entry') as title,
             c.id as "categoryId", c.name as "categoryName", c.color as "categoryColor",
-            pl.id as "placeId", coalesce(pl.name, te.place_label) as "placeLabel",
+            pl.id as "placeId", coalesce(${placeDisplayNameSql("pl")}, te.place_label) as "placeLabel",
             te.started_at as "startedAt", te.stopped_at as "stoppedAt", te.confidence,
             te.review_status as "reviewStatus", te.updated_at as "updatedAt", te.source
      from time_entries te
@@ -523,7 +524,7 @@ async function loadLegacyRowsByIds(client: pg.PoolClient, session: RequestSessio
             cl.name as "clientName",
             coalesce(nullif(te.description, ''), c.name, 'Untitled entry') as title,
             c.id as "categoryId", c.name as "categoryName", c.color as "categoryColor",
-            pl.id as "placeId", coalesce(pl.name, te.place_label) as "placeLabel",
+            pl.id as "placeId", coalesce(${placeDisplayNameSql("pl")}, te.place_label) as "placeLabel",
             case
               when pl.id is not null then 'saved'
               when te.place_label is not null then 'one_time'

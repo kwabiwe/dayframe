@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { paletteCssColorFor } from "@dayframe/shared";
+import { paletteCssColorFor, placeDisplayName } from "@dayframe/shared";
 import { Play, Square, Trash2 } from "lucide-react";
 import { DestructiveConfirmationDialog } from "@/components/DestructiveConfirmationDialog";
 import { clientFetch } from "@/lib/client-auth-fetch";
@@ -226,7 +226,7 @@ export function TimerPanel({
             <option value="">No place</option>
             {places.map((place) => (
               <option key={place.id} value={place.id}>
-                {place.name}
+                {placeDisplayName(place)}
               </option>
             ))}
           </select>

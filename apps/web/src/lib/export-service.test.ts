@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { placeDisplayNameSql } from "./place-display";
 
 const mocks = vi.hoisted(() => ({ query: vi.fn() }));
 vi.mock("./db", () => ({ query: mocks.query }));
@@ -19,7 +20,7 @@ describe("time-entry exports", () => {
     mocks.query.mockResolvedValue({ rows: [] });
     await buildTimeEntriesCsv(session);
     const sql = String(mocks.query.mock.calls[0]?.[0]);
-    expect(sql).toContain("coalesce(pl.name, te.place_label) as place");
+    expect(sql).toContain(`coalesce(${placeDisplayNameSql("pl")}, te.place_label) as place`);
     expect(sql).toContain("when te.place_label is not null then 'one_time'");
     expect(mocks.query.mock.calls[0]?.[1]).toEqual([session.workspaceId, session.userId]);
   });
@@ -28,7 +29,7 @@ describe("time-entry exports", () => {
     mocks.query.mockResolvedValue({ rows: [] });
     await buildJsonExport("time_entries_json", session);
     const sql = String(mocks.query.mock.calls[0]?.[0]);
-    expect(sql).toContain("coalesce(pl.name, te.place_label) as place_name");
+    expect(sql).toContain(`coalesce(${placeDisplayNameSql("pl")}, te.place_label) as place_name`);
     expect(sql).toContain("end as place_kind");
     expect(sql).toContain("te.workspace_id = $1 and te.user_id = $2");
   });
