@@ -72,6 +72,7 @@ vi.mock("./today/TodayReviewPresentationContext", () => ({
 vi.mock("./today/AccountAvatarButton", () => ({ AccountAvatarButton: () => null }));
 vi.mock("./today/TodayGoalFrame", () => ({ TodayGoalFrame: () => null }));
 vi.mock("./today/TodayReviewNudge", () => ({ TodayReviewNudge: () => null }));
+vi.mock("./today/TodayBlockRows", () => ({ TodayBlockRows: () => null }));
 vi.mock("@/lib/todayGoalFrame", async () => import("../lib/todayGoalFrame"));
 vi.mock("./today/ActivityBlockMark", async () => {
   const ReactRuntime = await import("react");

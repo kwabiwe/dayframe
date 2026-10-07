@@ -23,7 +23,9 @@ import { HistoryDayCard } from "../src/components/DayframeDashboard";
 import { TodayLoggedSummary } from "../src/components/accessibility/TodayLoggedSummary";
 import { TodayTimerSurface } from "../src/components/accessibility/TodayTimerSurface";
 import { TodayGoalFrame } from "../src/components/today/TodayGoalFrame";
+import { TodayBlockRows } from "../src/components/today/TodayBlockRows";
 import { TodayReviewNudge } from "../src/components/today/TodayReviewNudge";
+import { groupHistoryDayEntries } from "../src/lib/historyPresentation";
 import { layoutQuickStartMosaic } from "../src/lib/quickStartMosaic";
 import { buildTodayGoalFrame } from "../src/lib/todayGoalFrame";
 import { ReviewItemCard } from "../app/review";
@@ -455,6 +457,18 @@ function Probe() {
               fallback={{ value: reviewCount, exact: true }}
               onOpenReview={() => setActionResult("Local Review navigation callback")}
               reduceMotion={reduceMotion}
+              theme={theme}
+            />
+            <TodayBlockRows
+              activeTimerRunning={showRunningTimer}
+              activityIconFor={() => null}
+              groups={groupHistoryDayEntries(fixtures)}
+              nowMs={now}
+              onDeleteEntries={(deleted) => setActionResult(`Local delete callback: ${deleted.length} synthetic entries`)}
+              onOpenEntry={(opened) => setActionResult(`Local edit callback: ${opened.id}`)}
+              onReplayEntry={(replayed) => setActionResult(`Local replay callback: ${replayed.id}`)}
+              reduceMotion={reduceMotion}
+              rowLanding={null}
               theme={theme}
             />
             <HistoryDayCard

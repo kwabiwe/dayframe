@@ -59,7 +59,7 @@ export function QuickStartMosaic({
           accessibilityRole="header"
           style={[styles.heading, { color: theme.textPrimary }]}
         >
-          {timerRunning ? "Switch to" : "Start an activity"}
+          {timerRunning ? "Switch to" : "Start a block"}
         </Text>
         <Text {...mobileTextProps("metadata")} style={[styles.caption, { color: theme.textSecondary }]}>
           Sized by the last 7 days
