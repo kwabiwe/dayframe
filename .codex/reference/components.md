@@ -188,8 +188,7 @@ zero-size hidden probes never affect scrolling, focus or touch targets.
   uncounted card over a cached zero. It stacks up to three awaiting
   activities' colours.
 - Today has no Review rows, Quick Confirm, "Incomplete time" list, donut or
-  logged/covered summary. Today's history card no longer shows the logged
-  total; earlier days keep it until they leave Today. The durable Quick
+  logged/covered summary. Earlier days show only their week-row total. The durable Quick
   Confirm helper (`reviewQuickConfirm.ts`) and typed Review navigation stay
   for the Review deck and the Today ribbon.
 

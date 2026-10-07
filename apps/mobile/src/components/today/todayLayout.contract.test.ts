@@ -10,7 +10,7 @@ describe("Today layout", () => {
     expect(dashboard).toContain("const todaySections = useMemo(() => historySections.filter((section) => section.isToday), [historySections]);");
     expect(dashboard).toContain("data={todaySections}");
     expect(dashboard).toMatch(/renderItem=\{\(\{ item \}\) => \(\s*<TodayBlockRows/);
-    expect(dashboard).toMatch(/ListFooterComponent=\{\(\s*<View style=\{styles\.todayListFooter\}>\s*<EarlierThisWeek days=\{earlierDays\} onOpenDay=\{openCalendarDay\}/);
+    expect(dashboard).toMatch(/ListFooterComponent=\{\([\s\S]*?<Reanimated\.View layout=\{localLayoutTransition\(reduceMotion\)\} style=\{styles\.todayListFooter\}>\s*<EarlierThisWeek days=\{earlierDays\} onOpenDay=\{openCalendarDay\}/);
     expect(dashboard).not.toContain("HistoryDayCard");
   });
 

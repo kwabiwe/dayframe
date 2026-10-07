@@ -2505,9 +2505,11 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
             />
           )}
           ListFooterComponent={(
-            <View style={styles.todayListFooter}>
+            // The footer is not a FlatList cell, so it owns its own layout transition and moves
+            // with the rows above it rather than popping (motion.md).
+            <Reanimated.View layout={localLayoutTransition(reduceMotion)} style={styles.todayListFooter}>
               <EarlierThisWeek days={earlierDays} onOpenDay={openCalendarDay} theme={theme} />
-            </View>
+            </Reanimated.View>
           )}
           ItemSeparatorComponent={() => <View style={styles.historyDayGap} />}
           showsVerticalScrollIndicator={false}
