@@ -12,6 +12,7 @@ import {
   Platform,
   Pressable,
   ScrollView,
+  StyleSheet,
   Text,
   TextInput,
   useWindowDimensions,
@@ -28,6 +29,7 @@ import {
   insertHashtagStarter,
   normalizeNewTagName,
   normalizeTagName,
+  DAYFRAME_APP_ICONS,
   paletteColorFor,
   type RecentActivitySuggestion
 } from "@dayframe/shared";
@@ -37,6 +39,7 @@ import {
   type HistoricalSuggestionsOverlayRenderState
 } from "@/components/HistoricalSuggestionsOverlay";
 import { PrimaryTimerGlyph } from "@/components/PrimaryTimerAction";
+import { DayframeIcon } from "@/components/icons/DayframeIcon";
 import { TimeEntryDurationDial } from "@/components/TimeEntryDurationDial";
 import { pressable, type MobileStyles, type MobileTheme } from "@/lib/mobileTheme";
 import { mobileTextProps } from "@/lib/mobileTypography";
@@ -45,7 +48,6 @@ import {
   keyboardInsetFromScreenY
 } from "@/lib/editSheetKeyboard";
 import type { MobileBootstrap, MobileTag, MobileTimeEntry, TimeEntryUpdatePatch } from "@/lib/api";
-import { runningTimerSheetElapsedSeconds } from "@/lib/timerPresentation";
 import {
   HISTORICAL_SUGGESTION_ROLLBACK_ANNOUNCEMENT,
   historicalSuggestionAppliedAnnouncement
@@ -135,6 +137,8 @@ type ActiveTimerEditSheetProps = {
   onPresented?: (presentationId: number) => void;
   onApplySuggestion?: (entryId: string, suggestion: RecentActivitySuggestion) => Promise<boolean>;
   onSave?: (entryId: string, patch: TimeEntryUpdatePatch) => Promise<boolean>;
+  /** A stopped block's "Start again": called with the saved values once its edits are saved. */
+  onStartAgain?: (values: Pick<TimeEntryUpdatePatch, "categoryId" | "description" | "tagNames">) => void;
   onStop?: () => Promise<boolean>;
   presentation: TimeEntrySheetPresentation;
   reduceMotion: boolean;
@@ -164,6 +168,7 @@ export function ActiveTimerEditSheet({
   onPresented,
   onApplySuggestion,
   onSave,
+  onStartAgain,
   onStop,
   presentation,
   reduceMotion,
@@ -1322,15 +1327,6 @@ export function ActiveTimerEditSheet({
       }).timestampMs ?? draftStartMs)
     : parsedStart.date;
   const dialNowMs = Date.now();
-  const elapsedPreviewSeconds = hasStoppedTime && parsedStart.date && parsedStop.date
-      ? Math.max(0, Math.floor((parsedStop.date.getTime() - parsedStart.date.getTime()) / 1000))
-      : runningTimerSheetElapsedSeconds({
-          activeElapsedSeconds: elapsedSeconds,
-          nowMs: dialNowMs,
-          previewStartAt,
-          startTimeEdited
-        });
-
   const busy = saving || stopping || deleting || sheetState.mutationPhase !== "idle";
   const canStop = isRunningMode && Boolean(onStop);
   const canDelete = Boolean(onDelete);
@@ -1338,7 +1334,10 @@ export function ActiveTimerEditSheet({
   const cancelLabel = isRunningMode ? "Cancel editing timer" : isAddMode ? "Cancel adding time" : "Cancel editing entry";
   const saveLabel = isRunningMode ? "Save timer edits" : isAddMode ? "Create time entry" : "Save entry edits";
   const sheetTitle = isAddMode ? "Add time" : "Edit entry";
-  const elapsedText = formatClockDuration(elapsedPreviewSeconds);
+  // The prototype's sheet head: an eyebrow and a title above the form, Done on the right.
+  const headEyebrow = isRunningMode ? "RECORDING" : isAddMode ? "ADD PAST TIME" : formatSheetDay(parsedStart.date ?? new Date(draftStartMs));
+  const headTitle = isRunningMode ? "Running block" : isAddMode ? "New block" : "Edit block";
+  const canStartAgain = !isRunningMode && !isAddMode && Boolean(onStartAgain) && Boolean(onSave);
   const keyboardLayout = editSheetKeyboardLayout({
     bottomInset: insets.bottom,
     keyboardInset,
@@ -1653,7 +1652,7 @@ export function ActiveTimerEditSheet({
     requestUserDismiss();
   }
 
-  async function saveChanges() {
+  async function saveChanges(afterSave?: (patch: TimeEntryUpdatePatch) => void) {
     if (busy || !entry || !onSave) return;
     const parsed = datePickerOpen && datePickerTarget === "start" && pickerStartAt
       ? (() => {
@@ -1713,7 +1712,20 @@ export function ActiveTimerEditSheet({
     setValidationError(null);
     const ok = await resolveMutation(() => onSave(entry.id, patch));
     const accepted = finishMutation(token, ok ? "succeeded" : "failed");
-    if (accepted && ok) requestCoordinatedDismiss({ bypassDiscardConfirmation: true });
+    if (accepted && ok) {
+      requestCoordinatedDismiss({ bypassDiscardConfirmation: true });
+      afterSave?.(patch);
+    }
+  }
+
+  // Start again saves the block's edits first, then starts a new block with the saved values.
+  function startAgainFromSheet() {
+    if (!canStartAgain || !onStartAgain) return;
+    void saveChanges((patch) => onStartAgain({
+      categoryId: patch.categoryId,
+      description: patch.description,
+      tagNames: patch.tagNames
+    }));
   }
 
   async function stopFromSheet() {
@@ -2153,40 +2165,6 @@ export function ActiveTimerEditSheet({
     });
   }
 
-  const timeEntryHero = (
-    <Pressable
-      accessibilityHint="Dismisses the keyboard and Suggestions"
-      onPress={dismissTransientEditingSurfaces}
-      style={[
-        styles.activeEditHeroRow,
-        isRunningMode ? styles.activeEditPinnedHeroRow : null
-      ]}
-      testID="time-entry-sheet-hero"
-    >
-      <View style={styles.activeEditElapsedStack}>
-        <Text {...mobileTextProps("numeric")} style={styles.activeEditElapsed} testID="time-entry-sheet-elapsed">
-          {elapsedText}
-        </Text>
-      </View>
-      {canStop ? (
-        <Pressable
-          accessibilityLabel="Stop timer from edit sheet"
-          accessibilityRole="button"
-          disabled={busy}
-          onPress={stopFromSheet}
-          style={({ pressed }) => [
-            styles.activeEditStopButton,
-            pressed && !busy ? styles.buttonPressed : null,
-            busy ? styles.buttonDisabled : null
-          ]}
-          testID="time-entry-sheet-stop"
-        >
-          <PrimaryTimerGlyph color={theme.onAccent} mode="stop" />
-        </Pressable>
-      ) : null}
-    </Pressable>
-  );
-
   return (
     <>
       <Modal
@@ -2256,24 +2234,6 @@ export function ActiveTimerEditSheet({
               translateYOffset={0}
               visible={visible}
             >
-              {showDoneButton ? (
-                <View pointerEvents="box-none" style={styles.sheetTopActionLayer}>
-                  <Pressable
-                    accessibilityLabel={saveLabel}
-                    accessibilityRole="button"
-                    disabled={busy}
-                    onPress={saveChanges}
-                    style={({ pressed }) => [
-                      styles.sheetDoneButton,
-                      pressed && !busy ? styles.buttonPressed : null,
-                      busy ? styles.buttonDisabled : null
-                    ]}
-                    testID="time-entry-sheet-done"
-                  >
-                    <Text {...mobileTextProps("control")} style={styles.sheetDoneText}>Done</Text>
-                  </Pressable>
-                </View>
-              ) : null}
               <View
                 accessibilityElementsHidden={!presentationInteractionReady}
                 collapsable={false}
@@ -2295,11 +2255,47 @@ export function ActiveTimerEditSheet({
               <Pressable
                 accessible={false}
                 onPress={dismissTransientEditingSurfaces}
-                style={styles.sheetHeader}
+                style={sheetStyles.head}
                 testID="time-entry-sheet-upper-dismiss-area"
-              />
-
-              {isRunningMode ? timeEntryHero : null}
+              >
+                <View style={sheetStyles.headText} testID="time-entry-sheet-hero">
+                  <Text
+                    {...mobileTextProps("counter")}
+                    numberOfLines={1}
+                    style={[sheetStyles.headEyebrow, { color: theme.textMuted }]}
+                    testID="time-entry-sheet-elapsed"
+                  >
+                    {headEyebrow}
+                  </Text>
+                  <Text
+                    {...mobileTextProps("sectionHeading")}
+                    accessibilityRole="header"
+                    numberOfLines={1}
+                    style={[sheetStyles.headTitle, { color: theme.textPrimary }]}
+                  >
+                    {headTitle}
+                  </Text>
+                </View>
+                {showDoneButton ? (
+                  <Pressable
+                    accessibilityLabel={saveLabel}
+                    accessibilityRole="button"
+                    disabled={busy}
+                    onPress={() => {
+                      void saveChanges();
+                    }}
+                    style={({ pressed }) => [
+                      sheetStyles.donePill,
+                      { backgroundColor: theme.surfaceMuted },
+                      pressed && !busy ? styles.buttonPressed : null,
+                      busy ? styles.buttonDisabled : null
+                    ]}
+                    testID="time-entry-sheet-done"
+                  >
+                    <Text {...mobileTextProps("control")} style={[sheetStyles.donePillText, { color: theme.textPrimary }]}>Done</Text>
+                  </Pressable>
+                ) : null}
+              </Pressable>
 
               <Pressable
                 accessible={false}
@@ -2337,7 +2333,6 @@ export function ActiveTimerEditSheet({
                   descriptionSectionLayoutRef.current = { height, width, x, y };
                   scheduleGeometryMeasurement();
                 }}>
-                  <Text {...mobileTextProps("metadata")} style={styles.activeEditSectionLabel}>Description</Text>
                   <View
                     collapsable={false}
                     onLayout={(event) => {
@@ -2574,7 +2569,7 @@ export function ActiveTimerEditSheet({
                   layoutDensity === "compact" ? styles.activeEditSectionCompact : null,
                   layoutDensity === "condensed" ? styles.activeEditSectionCondensed : null
                 ]}>
-                  <Text {...mobileTextProps("metadata")} style={styles.activeEditSectionLabel}>Activity</Text>
+                  <Text {...mobileTextProps("counter")} style={[sheetStyles.sectionEyebrow, { color: theme.textMuted }]}>ACTIVITY</Text>
                   <View style={styles.activeEditCategoryViewport}>
                     <ScrollView
                       alwaysBounceVertical={false}
@@ -2752,24 +2747,70 @@ export function ActiveTimerEditSheet({
                   theme={theme}
                 />
 
-                {showDeleteButton ? (
-                  <Pressable
-                    accessibilityLabel="Delete entry"
-                    accessibilityRole="button"
-                    disabled={busy}
-                    onPress={() => {
-                      void deleteEntryFromSheet();
-                    }}
-                    onTouchStart={(event) => event.stopPropagation()}
-                    style={({ pressed }) => [
-                      styles.activeEditDeleteButton,
-                      pressed && !busy ? styles.buttonPressed : null,
-                      busy ? styles.buttonDisabled : null
-                    ]}
-                    testID="time-entry-sheet-delete"
-                  >
-                    <Text {...mobileTextProps("control")} style={styles.activeEditDeleteText}>Delete entry</Text>
-                  </Pressable>
+                {showDeleteButton || canStop || canStartAgain ? (
+                  <View style={sheetStyles.actions} testID="time-entry-sheet-actions">
+                    {showDeleteButton ? (
+                      <Pressable
+                        accessibilityLabel={isRunningMode ? "Discard timer" : isAddMode ? "Discard" : "Delete entry"}
+                        accessibilityRole="button"
+                        disabled={busy}
+                        onPress={() => {
+                          void deleteEntryFromSheet();
+                        }}
+                        onTouchStart={(event) => event.stopPropagation()}
+                        style={({ pressed }) => [
+                          sheetStyles.actionPill,
+                          { backgroundColor: colorWithAlpha(theme.danger, 0.16) },
+                          pressed && !busy ? styles.buttonPressed : null,
+                          busy ? styles.buttonDisabled : null
+                        ]}
+                        testID="time-entry-sheet-delete"
+                      >
+                        <DayframeIcon color={theme.dangerText} glyph={DAYFRAME_APP_ICONS.delete} size={18} />
+                        <Text {...mobileTextProps("control")} style={[sheetStyles.actionText, { color: theme.dangerText }]}>
+                          {isRunningMode || isAddMode ? "Discard" : "Delete"}
+                        </Text>
+                      </Pressable>
+                    ) : null}
+                    {canStop ? (
+                      <Pressable
+                        accessibilityLabel="Stop timer from edit sheet"
+                        accessibilityRole="button"
+                        disabled={busy}
+                        onPress={stopFromSheet}
+                        onTouchStart={(event) => event.stopPropagation()}
+                        style={({ pressed }) => [
+                          sheetStyles.actionPill,
+                          { backgroundColor: pressed && !busy ? theme.accentPressed : theme.accent },
+                          busy ? styles.buttonDisabled : null
+                        ]}
+                        testID="time-entry-sheet-stop"
+                      >
+                        <PrimaryTimerGlyph color={theme.onAccent} mode="stop" />
+                        <Text {...mobileTextProps("control")} style={[sheetStyles.actionText, { color: theme.onAccent }]}>Stop</Text>
+                      </Pressable>
+                    ) : null}
+                    {canStartAgain ? (
+                      <Pressable
+                        accessibilityHint="Saves your changes and starts this block again"
+                        accessibilityLabel="Start again"
+                        accessibilityRole="button"
+                        disabled={busy}
+                        onPress={startAgainFromSheet}
+                        onTouchStart={(event) => event.stopPropagation()}
+                        style={({ pressed }) => [
+                          sheetStyles.actionPill,
+                          { backgroundColor: theme.surfaceMuted },
+                          pressed && !busy ? styles.buttonPressed : null,
+                          busy ? styles.buttonDisabled : null
+                        ]}
+                        testID="time-entry-sheet-start-again"
+                      >
+                        <DayframeIcon color={theme.textPrimary} glyph={DAYFRAME_APP_ICONS.startAgain} size={18} />
+                        <Text {...mobileTextProps("control")} style={[sheetStyles.actionText, { color: theme.textPrimary }]}>Start again</Text>
+                      </Pressable>
+                    ) : null}
+                  </View>
                 ) : null}
                 </View>
                 </View>
@@ -3010,22 +3051,6 @@ function pad2(value: number) {
   return value.toString().padStart(2, "0");
 }
 
-function formatClockDuration(seconds: number) {
-  const safe = Math.max(0, Math.floor(seconds));
-  const hours = Math.floor(safe / 3600);
-  const minutes = Math.floor((safe % 3600) / 60);
-  const remainingSeconds = safe % 60;
-
-  if (hours === 0) {
-    return `${minutes.toString().padStart(2, "0")}:${remainingSeconds
-      .toString()
-      .padStart(2, "0")}`;
-  }
-
-  return `${hours}:${minutes.toString().padStart(2, "0")}:${remainingSeconds
-    .toString()
-    .padStart(2, "0")}`;
-}
 
 function colorWithAlpha(hex: string, alpha: number) {
   const match = /^#?([0-9a-f]{6})$/i.exec(hex);
@@ -3036,3 +3061,47 @@ function colorWithAlpha(hex: string, alpha: number) {
   const blue = Number.parseInt(value.slice(4, 6), 16);
   return `rgba(${red}, ${green}, ${blue}, ${alpha})`;
 }
+
+const SHEET_DAY_FORMAT = new Intl.DateTimeFormat("en-GB", { day: "numeric", month: "long", weekday: "long" });
+
+/** "WEDNESDAY 7 OCTOBER", the eyebrow of a stopped block's sheet. */
+function formatSheetDay(date: Date) {
+  return Number.isNaN(date.getTime()) ? "" : SHEET_DAY_FORMAT.format(date).replace(",", "").toUpperCase();
+}
+
+// The prototype's sheet head and action row (design/blocks/ios.html .sheet-head, .sheet-actions).
+const sheetStyles = StyleSheet.create({
+  head: {
+    alignItems: "center",
+    flexDirection: "row",
+    gap: 12,
+    justifyContent: "space-between",
+    minHeight: 52,
+    paddingTop: 4
+  },
+  headText: { flexShrink: 1, gap: 2, minWidth: 0 },
+  headEyebrow: { fontSize: 11, fontWeight: "600", letterSpacing: 0.9 },
+  headTitle: { fontSize: 17, fontWeight: "700" },
+  donePill: {
+    alignItems: "center",
+    borderRadius: 999,
+    justifyContent: "center",
+    minHeight: 44,
+    minWidth: 64,
+    paddingHorizontal: 16
+  },
+  donePillText: { fontSize: 14, fontWeight: "600" },
+  sectionEyebrow: { fontSize: 11, fontWeight: "600", letterSpacing: 0.9 },
+  actions: { flexDirection: "row", gap: 8, marginTop: 4 },
+  actionPill: {
+    alignItems: "center",
+    borderRadius: 999,
+    flex: 1,
+    flexDirection: "row",
+    gap: 8,
+    justifyContent: "center",
+    minHeight: 48,
+    paddingHorizontal: 16
+  },
+  actionText: { fontSize: 15, fontWeight: "700" }
+});

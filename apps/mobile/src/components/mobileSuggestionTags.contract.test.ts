@@ -17,12 +17,14 @@ describe("running timer suggestion metadata", () => {
     expect(overlay).toContain("tagLabel ? `with ${tagLabel}` : null");
   });
 
-  it("uses the same outer-edge Done action for every time-entry sheet", () => {
-    expect(theme).toContain("const TIME_ENTRY_SHEET_TOP_ACTION_INSET = 16;");
-    expect(theme).toContain("top: TIME_ENTRY_SHEET_TOP_ACTION_INSET");
-    expect(theme).toContain("right: TIME_ENTRY_SHEET_TOP_ACTION_INSET");
-    expect(theme).toContain("minWidth: TIME_ENTRY_SHEET_TOP_ACTION_MIN_TARGET");
-    expect(theme).toContain("minHeight: TIME_ENTRY_SHEET_TOP_ACTION_MIN_TARGET");
+  it("puts the same Done pill in the sheet head for every time-entry sheet", () => {
+    const sheet = readFileSync(new URL("./ActiveTimerEditSheet.tsx", import.meta.url), "utf8");
+    const head = sheet.indexOf('testID="time-entry-sheet-upper-dismiss-area"');
+    const done = sheet.indexOf('testID="time-entry-sheet-done"');
+    expect(head).toBeGreaterThan(-1);
+    expect(done).toBeGreaterThan(head);
+    expect(done).toBeLessThan(sheet.indexOf('testID="time-entry-sheet-form"'));
+    expect(sheet).toMatch(/donePill: \{[\s\S]*?minHeight: 44/);
     expect(theme).not.toContain("sheetHeaderRunning:");
     expect(theme).not.toContain("sheetDoneButtonRunning:");
   });

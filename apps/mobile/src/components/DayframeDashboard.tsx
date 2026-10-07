@@ -2937,6 +2937,11 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
         onCreateTag={createTimerSheetTag}
         onDelete={deleteCalendarEntry}
         onSave={saveCalendarEntryEdit}
+        onStartAgain={(values) => startFromToday(
+          values.categoryId ?? null,
+          values.description ?? "",
+          values.tagNames ?? []
+        )}
         presentation={calendarEditPresentation}
         reduceMotion={reduceMotion}
         deleting={false}

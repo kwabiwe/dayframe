@@ -1844,28 +1844,6 @@ function createStyles(theme: MobileTheme) {
       alignItems: "center",
       justifyContent: "center"
     },
-    sheetDoneButton: {
-      minWidth: TIME_ENTRY_SHEET_TOP_ACTION_MIN_TARGET,
-      minHeight: TIME_ENTRY_SHEET_TOP_ACTION_MIN_TARGET,
-      backgroundColor: theme.surfaceMuted,
-      borderRadius: 999,
-      paddingHorizontal: 16,
-      alignItems: "center",
-      justifyContent: "center"
-    },
-    sheetTopActionLayer: {
-      position: "absolute",
-      top: TIME_ENTRY_SHEET_TOP_ACTION_INSET,
-      right: TIME_ENTRY_SHEET_TOP_ACTION_INSET,
-      zIndex: 2,
-      elevation: 2
-    },
-    sheetDoneText: {
-      color: theme.accentText,
-      fontFamily: monoFont,
-      fontSize: 13,
-      fontWeight: "600"
-    },
     sheetProgressSlot: {
       height: 3,
       borderRadius: 999,
@@ -1998,27 +1976,6 @@ function createStyles(theme: MobileTheme) {
       fontFamily: monoFont,
       fontSize: 10,
       fontWeight: "600"
-    },
-    activeEditHeroRow: {
-      flexDirection: "row",
-      alignItems: "center",
-      justifyContent: "space-between",
-      gap: 12
-    },
-    activeEditPinnedHeroRow: {
-      flexShrink: 0
-    },
-    activeEditElapsedStack: {
-      flex: 1,
-      minWidth: 0,
-      alignItems: "flex-start"
-    },
-    activeEditElapsed: {
-      color: theme.accentText,
-      fontFamily: monoFont,
-      fontSize: 34,
-      fontWeight: "700",
-      fontVariant: ["tabular-nums"]
     },
     activeEditElapsedLabel: {
       color: theme.textSecondary,
@@ -2619,19 +2576,6 @@ function createStyles(theme: MobileTheme) {
       fontWeight: "600",
       textAlign: "center"
     },
-    activeEditStopButton: {
-      width: 44,
-      height: 44,
-      backgroundColor: theme.accent,
-      borderRadius: 999,
-      alignItems: "center",
-      justifyContent: "center",
-      shadowColor: theme.shadow,
-      shadowOpacity: 1,
-      shadowRadius: 9,
-      shadowOffset: { width: 0, height: 5 },
-      elevation: 3
-    },
     activeEditStartButton: {
       width: 52,
       height: 52,
@@ -2639,12 +2583,6 @@ function createStyles(theme: MobileTheme) {
       borderRadius: 999,
       alignItems: "center",
       justifyContent: "center"
-    },
-    activeEditStopButtonText: {
-      color: theme.onAccent,
-      fontFamily: monoFont,
-      fontSize: 15,
-      fontWeight: "600"
     },
     buttonPressed: {
       borderColor: theme.pressed,

@@ -40,7 +40,8 @@ describe("primary mobile timer action geometry", () => {
   it("keeps the primary controls and the working field on the 44-point track", () => {
     expect(primaryAction).toMatch(/height: PRIMARY_TIMER_ACTION_SIZE,[\s\S]*width: PRIMARY_TIMER_ACTION_SIZE/);
     expect(theme).toMatch(/startInput: \{[\s\S]*?minHeight: 44/);
-    expect(theme).toMatch(/activeEditStopButton: \{[\s\S]*?width: 44,[\s\S]*?height: 44/);
+    // The sheet's Stop is a full-width pill in the action row (Blocks prototype), at least 48 points tall.
+    expect(editSheet).toMatch(/actionPill: \{[\s\S]*?minHeight: 48/);
   });
 
   it("keeps the idle timer hierarchy task-first without a reserved sync-copy row", () => {
