@@ -211,4 +211,13 @@ export function resolveActivityIcon({ icon, name }: { icon?: string | null; name
   return { key, glyph: key ? ACTIVITY_ICON_BY_KEY.get(key)!.glyph : DAYFRAME_ACTIVITY_ICON_FALLBACK_GLYPH };
 }
 
+/**
+ * Which picker group an activity belongs to: its icon's group (stored key first, then a name
+ * match), or null for activities that are "your own" (no recognised icon).
+ */
+export function activityGroupFor({ icon, name }: { icon?: string | null; name?: string | null }): DayframeActivityIconGroup | null {
+  const { key } = resolveActivityIcon({ icon, name });
+  return key ? (ACTIVITY_ICON_BY_KEY.get(key)!.group as DayframeActivityIconGroup) : null;
+}
+
 export { DAYFRAME_GLYPHS, type DayframeGlyph };

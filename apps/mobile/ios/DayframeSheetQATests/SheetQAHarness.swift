@@ -14,7 +14,7 @@ enum SheetQAIdentifiers {
   static let elapsed = "time-entry-sheet-elapsed"
   static let hero = "time-entry-sheet-hero"
   static let description = "time-entry-description"
-  static let categoryClear = "time-entry-category-clear"
+  static let categoryAll = "time-entry-category-all"
   static let startDate = "time-entry-start-date"
   static let startTime = "time-entry-start-time"
   static let endDate = "time-entry-end-date"

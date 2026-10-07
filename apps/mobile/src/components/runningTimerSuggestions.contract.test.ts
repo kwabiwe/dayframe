@@ -90,7 +90,7 @@ describe("time-entry sheet historical Suggestions contract", () => {
     );
     expect(editSheetSource).toContain('testID="time-entry-sheet-obscured-form-content"');
     expect(editSheetSource).toContain('testID="time-entry-description-obscured-footer"');
-    expect(editSheetSource).toContain('"time-entry-category-clear"');
+    expect(editSheetSource).toContain('testID="time-entry-category-all"');
     expect(editSheetSource).toContain(
       "obscuredFormAccessibilityHidden: suggestionsObscureFormAccessibility"
     );

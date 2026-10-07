@@ -1662,9 +1662,10 @@ export async function createCategory(
       "Content-Type": "application/json",
       ...(await authHeaders())
     },
+    // Without a chosen colour the server picks the name's automatic palette colour (as on the web).
     body: JSON.stringify({
       name,
-      color: options.color ?? "lime",
+      ...(options.color ? { color: options.color } : {}),
       isPinned: Boolean(options.isPinned)
     })
   });

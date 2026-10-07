@@ -2052,7 +2052,6 @@ describe("mobile API client", () => {
         method: "POST",
         body: JSON.stringify({
           name: "DIY",
-          color: "lime",
           isPinned: true
         })
       })

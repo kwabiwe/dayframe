@@ -30,7 +30,7 @@ import {
   normalizeNewTagName,
   normalizeTagName,
   DAYFRAME_APP_ICONS,
-  paletteColorFor,
+  blockColorsFor,
   type RecentActivitySuggestion
 } from "@dayframe/shared";
 import { FloatingDatePicker } from "@/components/FloatingDatePicker";
@@ -39,7 +39,9 @@ import {
   type HistoricalSuggestionsOverlayRenderState
 } from "@/components/HistoricalSuggestionsOverlay";
 import { PrimaryTimerGlyph } from "@/components/PrimaryTimerAction";
-import { DayframeIcon } from "@/components/icons/DayframeIcon";
+import { ActivityIcon, DayframeIcon } from "@/components/icons/DayframeIcon";
+import { ActivityPickerSheet } from "@/components/ActivityPickerSheet";
+import { activityChips, recentActivityIds } from "@/lib/activityChoice";
 import { TimeEntryDurationDial } from "@/components/TimeEntryDurationDial";
 import { pressable, type MobileStyles, type MobileTheme } from "@/lib/mobileTheme";
 import { mobileTextProps } from "@/lib/mobileTypography";
@@ -133,6 +135,8 @@ type ActiveTimerEditSheetProps = {
   lastStoppedAt: string | null;
   onCancel: (presentationId: number) => void;
   onCreateTag: (name: string) => Promise<MobileTag | null>;
+  /** Creates an activity from the All-activities picker; resolves to its id, or null on failure. */
+  onCreateActivity?: (name: string) => Promise<string | null>;
   onDelete?: (entryId: string) => Promise<boolean>;
   onPresented?: (presentationId: number) => void;
   onApplySuggestion?: (entryId: string, suggestion: RecentActivitySuggestion) => Promise<boolean>;
@@ -164,6 +168,7 @@ export function ActiveTimerEditSheet({
   mode = "running",
   onCancel,
   onCreateTag,
+  onCreateActivity,
   onDelete,
   onPresented,
   onApplySuggestion,
@@ -184,6 +189,7 @@ export function ActiveTimerEditSheet({
   const windowDimensions = useWindowDimensions();
   const [description, setDescription] = useState("");
   const [selectedCategoryId, setSelectedCategoryId] = useState<string | null>(null);
+  const [activityPickerOpen, setActivityPickerOpen] = useState(false);
   const [dateText, setDateText] = useState("");
   const [timeText, setTimeText] = useState("");
   const [stoppedDateText, setStoppedDateText] = useState("");
@@ -669,6 +675,17 @@ export function ActiveTimerEditSheet({
       tagNames: candidate.tagNames ?? candidate.tags?.map((tag) => tag.name) ?? []
     })),
     [historicalEntries]
+  );
+  // Activity chips (Blocks prototype): the chosen one, pinned, then recently used; at most seven,
+  // fewer on short screens and large text so the sheet's bottom actions stay on screen.
+  const recentActivities = useMemo(() => recentActivityIds(historicalEntries), [historicalEntries]);
+  const chipLimit = ACTIVITY_CHIP_LIMIT_BY_DENSITY[timeEntrySheetLayoutDensity({
+    fontScale: windowDimensions.fontScale,
+    windowHeight: windowDimensions.height
+  })];
+  const chipActivities = useMemo(
+    () => activityChips(categories, selectedCategoryId, recentActivities, chipLimit),
+    [categories, chipLimit, recentActivities, selectedCategoryId]
   );
   const historicalSuggestions = useMemo(
     () => buildHistoricalEntrySuggestions(normalizedHistoricalEntries, {
@@ -2571,43 +2588,41 @@ export function ActiveTimerEditSheet({
                   layoutDensity === "condensed" ? styles.activeEditSectionCondensed : null
                 ]}>
                   <Text {...mobileTextProps("counter")} style={[sheetStyles.sectionEyebrow, { color: theme.textMuted }]}>ACTIVITY</Text>
-                  <View style={styles.activeEditCategoryViewport}>
-                    <ScrollView
-                      alwaysBounceVertical={false}
-                      bounces={false}
-                      contentContainerStyle={styles.activeEditCategoryScroller}
-                      directionalLockEnabled
-                      horizontal
-                      keyboardShouldPersistTaps="always"
-                      nestedScrollEnabled
-                      showsHorizontalScrollIndicator={false}
-                      showsVerticalScrollIndicator={false}
-                      style={styles.activeEditCategoryScroll}
-                    >
+                  <View style={sheetStyles.chipWrap} testID="time-entry-activity-chips">
+                    {chipActivities.map((category) => (
                       <CategoryChip
-                        category={null}
-                        selected={selectedCategoryId === null}
-                        styles={styles}
+                        key={category.id}
+                        category={category}
+                        selected={selectedCategoryId === category.id}
                         theme={theme}
                         onPress={() => {
                           dismissTransientEditingSurfaces();
-                          setSelectedCategoryId(null);
+                          // Tapping the chosen activity again clears it, as in the prototype.
+                          setSelectedCategoryId((current) => (current === category.id ? null : category.id));
                         }}
                       />
-                      {categories.map((category) => (
-                        <CategoryChip
-                          key={category.id}
-                          category={category}
-                          selected={selectedCategoryId === category.id}
-                          styles={styles}
-                          theme={theme}
-                          onPress={() => {
-                            dismissTransientEditingSurfaces();
-                            setSelectedCategoryId(category.id);
-                          }}
-                        />
-                      ))}
-                    </ScrollView>
+                    ))}
+                    <Pressable
+                      accessibilityHint="Search every activity, or create one"
+                      accessibilityLabel={`All activities, ${categories.length}`}
+                      accessibilityRole="button"
+                      hitSlop={{ top: 6, bottom: 6 }}
+                      onPress={() => {
+                        dismissTransientEditingSurfaces();
+                        setActivityPickerOpen(true);
+                      }}
+                      style={({ pressed }) => [
+                        sheetStyles.chip,
+                        sheetStyles.chipMore,
+                        { backgroundColor: theme.surfaceMuted },
+                        pressed ? styles.buttonPressed : null
+                      ]}
+                      testID="time-entry-category-all"
+                    >
+                      <DayframeIcon color={theme.textPrimary} glyph={DAYFRAME_APP_ICONS.search} size={16} />
+                      <Text {...mobileTextProps("control")} style={[sheetStyles.chipText, { color: theme.textPrimary }]}>All activities</Text>
+                      <Text {...mobileTextProps("counter")} style={[sheetStyles.chipCount, { color: theme.textMuted }]}>{categories.length}</Text>
+                    </Pressable>
                   </View>
                 </View>
 
@@ -2869,6 +2884,19 @@ export function ActiveTimerEditSheet({
             </SwipeDismissSheet>
           </SafeAreaView>
         </View>
+        {activityPickerOpen ? (
+          <ActivityPickerSheet
+            activities={categories}
+            onClose={() => setActivityPickerOpen(false)}
+            onCreate={onCreateActivity}
+            onPick={(activityId) => setSelectedCategoryId(activityId)}
+            recentIds={recentActivities}
+            reduceMotion={reduceMotion}
+            selectedId={selectedCategoryId}
+            styles={styles}
+            theme={theme}
+          />
+        ) : null}
         <FloatingDatePicker
           onClose={() => {
             closeDatePickerAfterTouch();
@@ -2950,47 +2978,41 @@ function HashtagSuggestionRow({
   );
 }
 
+/**
+ * One activity chip (Blocks prototype .chip): the activity's icon and name on a tint of its
+ * colour, solid in the activity colour with measured on-block text when chosen.
+ */
 function CategoryChip({
   category,
   onPress,
   selected,
-  styles,
   theme
 }: {
-  category: Category | null;
+  category: Category;
   onPress: () => void;
   selected: boolean;
-  styles: MobileStyles;
   theme: MobileTheme;
 }) {
-  const label = category?.name ?? "No activity";
-  const color = category
-    ? paletteColorFor(category.color, category.name, theme.mode)
-    : theme.textSecondary;
+  const colors = blockColorsFor(category.color ?? category.id, theme.mode, category.name);
+  const textColor = selected ? colors.text : theme.textPrimary;
 
   return (
     <Pressable
-      accessibilityLabel={category ? `Set activity to ${category.name}` : "Clear activity"}
+      accessibilityLabel={`Set activity to ${category.name}`}
       accessibilityRole="button"
       accessibilityState={{ selected }}
       hitSlop={{ top: 6, bottom: 6 }}
       onPress={onPress}
-      testID={category ? `time-entry-category-${category.id}` : "time-entry-category-clear"}
-      style={pressable(
-        [
-          styles.activeEditCategoryChip,
-          selected ? styles.activeEditCategoryChipSelected : null,
-          selected ? { backgroundColor: category ? colorWithAlpha(color, theme.mode === "dark" ? 0.22 : 0.15) : theme.accentSoft } : null
-        ],
-        styles.buttonPressed
-      )}
+      testID={`time-entry-category-${category.id}`}
+      style={({ pressed }) => [
+        sheetStyles.chip,
+        { backgroundColor: selected ? colors.fill : colorWithAlpha(colors.fill, theme.mode === "dark" ? 0.24 : 0.18) },
+        pressed ? { opacity: 0.82 } : null
+      ]}
     >
-      <View style={[styles.colorDot, { backgroundColor: category ? color : theme.textSecondary }]} />
-      <Text style={[
-        styles.activeEditCategoryChipText,
-        selected ? styles.activeEditCategoryChipTextSelected : null
-      ]} {...mobileTextProps("control")}>
-        {label}
+      <ActivityIcon color={textColor} icon={category.icon ?? null} name={category.name} size={16} />
+      <Text {...mobileTextProps("control")} numberOfLines={1} style={[sheetStyles.chipText, { color: textColor }]}>
+        {category.name}
       </Text>
     </Pressable>
   );
@@ -3063,6 +3085,9 @@ function colorWithAlpha(hex: string, alpha: number) {
   return `rgba(${red}, ${green}, ${blue}, ${alpha})`;
 }
 
+/** How many activity chips fit above the dial before the bottom actions would leave the screen. */
+const ACTIVITY_CHIP_LIMIT_BY_DENSITY = { regular: 7, compact: 5, condensed: 3 } as const;
+
 /** "WEDNESDAY 7 OCTOBER" (in the device's language and order), the eyebrow of a stopped block's sheet. */
 function formatSheetDay(date: Date) {
   if (Number.isNaN(date.getTime())) return "";
@@ -3092,6 +3117,20 @@ const sheetStyles = StyleSheet.create({
   },
   donePillText: { fontSize: 14, fontWeight: "600" },
   sectionEyebrow: { fontSize: 11, fontWeight: "600", letterSpacing: 0.9 },
+  chipWrap: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
+  chip: {
+    alignItems: "center",
+    borderRadius: 999,
+    flexDirection: "row",
+    gap: 6,
+    maxWidth: "100%",
+    minHeight: 38,
+    paddingLeft: 10,
+    paddingRight: 14
+  },
+  chipMore: { paddingLeft: 11 },
+  chipText: { flexShrink: 1, fontSize: 13.5, fontWeight: "600" },
+  chipCount: { fontSize: 12, fontWeight: "600" },
   actions: { flexDirection: "row", gap: 8, marginTop: 4 },
   actionPill: {
     alignItems: "center",

@@ -74,6 +74,7 @@ import { buildTodayGoalFrame } from "@/lib/todayGoalFrame";
 import {
   AuthRequiredError,
   createManualTimeEntry,
+  createCategory,
   createTag,
   enqueueEvent,
   fetchBootstrap,
@@ -1793,6 +1794,21 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
     }
   }
 
+  // The entry sheet's All-activities picker creates an activity (the server picks its colour) and
+  // adds it to the cached bootstrap so the sheet can select it at once.
+  async function createSheetActivity(name: string) {
+    try {
+      const response = await createCategory(name);
+      updateDashboardData((current) => current
+        ? { ...current, categories: [...current.categories.filter((category) => category.id !== response.category.id), response.category] }
+        : current);
+      return response.category.id;
+    } catch (error) {
+      if (error instanceof AuthRequiredError) transitionToSignedOut();
+      return null;
+    }
+  }
+
   async function createTimerSheetTag(name: string) {
     try {
       const response = await createTag(name);
@@ -2916,6 +2932,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
         lastStoppedAt={recentStoppedAt}
         mode="add"
         onCancel={completeManualEntryExit}
+        onCreateActivity={createSheetActivity}
         onCreateTag={createTimerSheetTag}
         onSave={saveManualEntry}
         presentation={manualEntryPresentation}
@@ -2936,6 +2953,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
         lastStoppedAt={recentStoppedAt}
         onApplySuggestion={applyRunningTimerSuggestion}
         onCancel={completeActiveEditorExit}
+        onCreateActivity={createSheetActivity}
         onCreateTag={createTimerSheetTag}
         onDelete={deleteActiveTimer}
         onPresented={completeActiveEditorPresentation}
@@ -2959,6 +2977,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
         lastStoppedAt={null}
         mode="entry"
         onCancel={completeCalendarEntryExit}
+        onCreateActivity={createSheetActivity}
         onCreateTag={createTimerSheetTag}
         onDelete={deleteCalendarEntry}
         onSave={saveCalendarEntryEdit}
