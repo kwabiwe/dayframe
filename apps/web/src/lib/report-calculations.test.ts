@@ -10,7 +10,7 @@ describe("report calculations", () => {
   it("keeps category totals as a partition and groups only the long tail as Other", () => {
     const categories = Array.from({ length: 7 }, (_, index) => ({
       id: index === 6 ? "uncategorized" : `20000000-0000-4000-8000-${`${index + 1}`.padStart(12, "0")}`,
-      name: index === 6 ? "Uncategorized" : `Category ${index + 1}`,
+      name: index === 6 ? "No activity" : `Category ${index + 1}`,
       color: index === 6 ? null : "blue",
       seconds: (7 - index) * 600,
       entryCount: 1

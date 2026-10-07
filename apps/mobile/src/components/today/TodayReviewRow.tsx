@@ -26,7 +26,7 @@ export function TodayReviewRow({
   const quickConfirm = activity.quickConfirm.eligible && activity.state === "needs_review";
   const badge = activityStateCopy(activity);
   const color = activity.category
-    ? paletteColorFor(activity.category.color ?? activity.category.id, activity.category.name ?? "Uncategorized", theme.mode)
+    ? paletteColorFor(activity.category.color ?? activity.category.id, activity.category.name ?? "No activity", theme.mode)
     : theme.textSecondary;
   const time = activity.interval
     ? `${formatTime(activity.interval.startMs)}-${formatTime(activity.interval.endMs)} · ${formatDuration(activity.interval.endMs - activity.interval.startMs)}`

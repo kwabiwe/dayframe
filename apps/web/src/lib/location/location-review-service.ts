@@ -991,7 +991,7 @@ async function validateReferences(
 ) {
   if (categoryId) {
     const category = await client.query("select 1 from categories where id = $1 and workspace_id = $2 and is_archived = false", [categoryId, session.workspaceId]);
-    if (!category.rows[0]) throw new ReviewResolutionError("invalid_action", "Category was not found.", { status: 422 });
+    if (!category.rows[0]) throw new ReviewResolutionError("invalid_action", "Activity was not found.", { status: 422 });
   }
   if (placeId) {
     const place = await client.query("select 1 from places where id = $1 and workspace_id = $2", [placeId, session.workspaceId]);

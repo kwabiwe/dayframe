@@ -26,7 +26,7 @@ export function ReportFiltersPanel({
   const moreRef = useRef<HTMLDivElement | null>(null);
   const moreTriggerRef = useRef<HTMLButtonElement | null>(null);
   const categories = useMemo<FilterOption[]>(() => [
-    { id: "uncategorized", name: "Uncategorized", color: null },
+    { id: "uncategorized", name: "No activity", color: null },
     ...options.categories
   ], [options.categories]);
   const places = useMemo<FilterOption[]>(() => [
@@ -71,7 +71,7 @@ export function ReportFiltersPanel({
       <div className="report-filter-heading">
         <div>
           <h2 id="report-filters-title">Filters</h2>
-          <p>Categories and tags match any selected option.</p>
+          <p>Activities and tags match any selected option.</p>
         </div>
         <Link className="ui-button ui-button-ghost" href={reportsHref(defaultReportFilters())} aria-label="Clear all report filters">
           Clear all
@@ -82,7 +82,7 @@ export function ReportFiltersPanel({
 
       <div className="report-primary-filters">
         <ReportMultiSelect
-          label="Categories"
+          label="Activities"
           options={categories}
           selected={filters.categories}
           onToggle={(id) => navigate({ categories: toggleValue(filters.categories, id) })}
@@ -270,7 +270,7 @@ function buildFilterChips(
     const option = categoryMap.get(id);
     if (!option) continue;
     const display = categoryDisplay(option.name, option.color ?? null);
-    chips.push({ id, kind: "categories", label: `Category: ${option.name}`, color: display.color, remaining: filters.categories.filter((value) => value !== id) });
+    chips.push({ id, kind: "categories", label: `Activity: ${option.name}`, color: display.color, remaining: filters.categories.filter((value) => value !== id) });
   }
   for (const id of filters.tags) {
     const option = tagMap.get(id);

@@ -439,7 +439,7 @@ function PlaceRow({
         ) : null}
         <Text style={styles.placeMeta} numberOfLines={2}>
           {visitLoggingEnabled
-            ? `${defaultCategoryName ?? "No default category"} · ${place.radiusMeters}m radius`
+            ? `${defaultCategoryName ?? "No default activity"} · ${place.radiusMeters}m radius`
             : `Visit logging off · ${place.radiusMeters}m radius`}
         </Text>
       </View>
@@ -671,7 +671,7 @@ function LearnedPlaceDetailSheet({
                 styles={styles}
               />
               <LearnedPlaceDetailRow label="Last seen" value={formatShortDateTime(learnedPlace.lastSeenAt)} styles={styles} />
-              <LearnedPlaceDetailRow label="Category/activity" value={associatedCategory} styles={styles} />
+              <LearnedPlaceDetailRow label="Activity" value={associatedCategory} styles={styles} />
               <LearnedPlaceDetailRow label="Status" value="Place suggestion · Not saved" styles={styles} />
             </View>
 

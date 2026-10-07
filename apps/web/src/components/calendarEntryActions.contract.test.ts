@@ -38,7 +38,7 @@ describe("shared web time-entry quick editor", () => {
     expect(quick).toContain("selectedTagNames={draft.tagNames}");
     expect(quick).toContain("<CategoryPicker");
     expect(categoryPicker).toContain('role="listbox"');
-    expect(categoryPicker).toContain('aria-label="Categories"');
+    expect(categoryPicker).toContain('aria-label="Activities"');
     expect(quick.match(/iconOnly/g)).toHaveLength(2);
     expect(quick).toContain("calendarEntryLocalDayOffset");
     expect(quick).toContain("calendar-compact-day-offset");

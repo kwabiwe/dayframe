@@ -979,7 +979,7 @@ describe("automation rule drafting", () => {
     });
 
     expect(savePlan.values).toBeUndefined();
-    expect(savePlan.blockers.join(" ")).toMatch(/Add "Family" as a category/);
+    expect(savePlan.blockers.join(" ")).toMatch(/Add "Family" as an activity/);
   });
 
   it("saves broad-place rules with a broad geofence source", () => {

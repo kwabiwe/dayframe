@@ -54,7 +54,7 @@ export function EntityForms({
               `${rule.triggerSource} / ${rule.triggerType}`,
               rule.placeName ?? "Any place",
               rule.action,
-              rule.categoryName ?? "Uncategorized",
+              rule.categoryName ?? "No activity",
               rule.activityDescription ?? "Default place label",
               rule.enabled ? "Enabled" : "Disabled"
             ]
@@ -173,7 +173,7 @@ function PlacesManager({
                   <p className="mt-1 text-xs text-[var(--muted)]">
                     {place.loggingEnabled === false
                       ? `${place.radiusMeters}m radius · Priority ${place.priority}`
-                      : `${place.defaultCategoryName ?? "No default category"} · ${place.radiusMeters}m radius · Priority ${place.priority}`}
+                      : `${place.defaultCategoryName ?? "No default activity"} · ${place.radiusMeters}m radius · Priority ${place.priority}`}
                   </p>
                 </div>
                 <button
@@ -267,13 +267,13 @@ function PlaceEditForm({
         <>
           <SelectInput
             name="defaultCategoryId"
-            label="Default category"
+            label="Default activity"
             options={categories}
             defaultValue={place.defaultCategoryId ?? ""}
           />
           <TextInput
             name="defaultActivityDescription"
-            label="Default activity description"
+            label="Default task description"
             defaultValue={place.defaultActivityDescription ?? ""}
             placeholder="School drop-off/pickup"
           />
@@ -523,10 +523,10 @@ function CreatePlaceForm({
       <PlaceLoggingToggle loggingEnabled={loggingEnabled} onChange={setLoggingEnabled} />
       {loggingEnabled ? (
         <>
-          <SelectInput name="categoryId" label="Default category" options={categories} />
+          <SelectInput name="categoryId" label="Default activity" options={categories} />
           <TextInput
             name="defaultActivityDescription"
-            label="Default activity description"
+            label="Default task description"
             placeholder="School drop-off/pickup"
           />
         </>
@@ -613,7 +613,7 @@ function CreateAutomationForm({
           { id: "ignore_source", name: "ignore_source" }
         ]}
       />
-      <SelectInput name="categoryId" label="Category" options={categories} />
+      <SelectInput name="categoryId" label="Activity" options={categories} />
     </EntityForm>
   );
 }
@@ -655,7 +655,7 @@ function RuleDraftAssistant({
       });
 
       if (!response.ok) {
-        setSaveError("Rule could not be saved. Check the saved place/category and try again.");
+        setSaveError("Rule could not be saved. Check the saved place and activity, then try again.");
         return;
       }
 
@@ -731,10 +731,10 @@ function RuleDraftPreview({
           <span className="text-[var(--muted)]">Mode:</span> {formatDraftMode(draft.outcome.mode)}
         </p>
         <p>
-          <span className="text-[var(--muted)]">Activity:</span> {draft.outcome.description}
+          <span className="text-[var(--muted)]">Task:</span> {draft.outcome.description}
         </p>
         <p>
-          <span className="text-[var(--muted)]">Category:</span> {draft.outcome.categoryName ?? "Not set"}
+          <span className="text-[var(--muted)]">Activity:</span> {draft.outcome.categoryName ?? "Not set"}
         </p>
       </div>
       <RuleDraftList title="Evidence checks" items={draft.conditions} />

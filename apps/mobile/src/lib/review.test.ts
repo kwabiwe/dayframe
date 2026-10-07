@@ -228,7 +228,7 @@ describe("mobile review helpers", () => {
     const away = { ...commute, rawPayload: { qualificationReason: "same_place_outing" } };
     expect(isTimeAwayReviewItem(away)).toBe(true);
     expect(isTimeAwayReviewItem(commute)).toBe(false);
-    expect(reviewItemCategoryLabel(away)).toBe("No category");
+    expect(reviewItemCategoryLabel(away)).toBe("No activity");
     expect(reviewConfirmLabel(away)).toBe("Confirm time away");
     const draft = buildReviewItemDraftEntry({ ...away, title: "Time away from Home", suggestedCategoryId: null, categoryName: null,
       suggestedStartedAt: "2026-03-10T12:00:00.000Z", suggestedStoppedAt: "2026-03-10T12:10:00.000Z" }, [], Date.now());

@@ -269,7 +269,7 @@ export function ReportsTab({
         })),
         {
           key: "uncategorized",
-          name: "Uncategorized",
+          name: "No activity",
           color: theme.textSecondary,
           isUncategorized: true,
           isUnavailable: false,
@@ -286,7 +286,7 @@ export function ReportsTab({
               )
               .map((key) => ({
                 key,
-                name: "Unavailable category",
+                name: "Unavailable activity",
                 color: theme.textSecondary,
                 isUncategorized: false,
                 isUnavailable: true,
@@ -482,8 +482,8 @@ export function ReportsTab({
             accessibilityRole="button"
             accessibilityLabel={
               filterCount === null
-                ? "Filter categories, all categories selected"
-                : `Filter categories, ${filterCount} categories selected`
+                ? "Filter activities, all activities selected"
+                : `Filter activities, ${filterCount} ${filterCount === 1 ? "activity" : "activities"} selected`
             }
             onPress={() => {
               setTooltipOutsidePress((value) => value + 1);
@@ -576,9 +576,9 @@ export function ReportsTab({
                 style={{ color: theme.textSecondary }}
               >
                 {selection.mode === "none"
-                  ? "No categories selected"
+                  ? "No activities selected"
                   : selection.mode === "include"
-                    ? "No logged time for the selected categories."
+                    ? "No logged time for the selected activities."
                     : "No tracked time yet."}
               </Text>
             ) : null}

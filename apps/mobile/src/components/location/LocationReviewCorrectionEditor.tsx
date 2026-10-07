@@ -746,7 +746,7 @@ export function LocationReviewCorrectionEditor({
                 style={styles.textInput}
                 value={description}
               />
-              <Text {...mobileTextProps("metadata")} style={editorStyles.fieldLabel}>Category</Text>
+              <Text {...mobileTextProps("metadata")} style={editorStyles.fieldLabel}>Activity</Text>
               <ScrollView
                 contentContainerStyle={editorStyles.categoryScroller}
                 horizontal
@@ -1085,13 +1085,13 @@ function CategoryChoice({
   selected: boolean;
   theme: MobileTheme;
 }) {
-  const label = labelOverride ?? category?.name ?? "Uncategorized";
+  const label = labelOverride ?? category?.name ?? "No activity";
   const color = category
     ? paletteColorFor(category.color, category.name, theme.mode)
     : theme.textSecondary;
   return (
     <Pressable
-      accessibilityLabel={`Category ${label}`}
+      accessibilityLabel={`Activity ${label}`}
       accessibilityRole="button"
       accessibilityState={{ selected }}
       onPress={onPress}

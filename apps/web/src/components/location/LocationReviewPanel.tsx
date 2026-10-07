@@ -240,7 +240,7 @@ export function LocationReviewPanel({
                 categories={categories}
                 className="location-resolve-category"
                 disabled={actionsDisabled}
-                label="Category"
+                label="Activity"
                 menuId={`location-category-${reviewItemId}-menu`}
                 onOpenChange={setIsCategoryOpen}
                 onSelect={setCategoryId}

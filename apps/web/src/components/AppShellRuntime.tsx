@@ -605,12 +605,12 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
       if (!response.ok) {
         return {
           ok: false,
-          error: await responseError(response, `Unable to create category: ${response.status}`)
+          error: await responseError(response, `Unable to create activity: ${response.status}`)
         };
       }
       const payload = (await response.json()) as { category?: CategoryRow };
       if (!payload.category) {
-        return { ok: false, error: "The category was created, but its details could not be loaded. Refresh and try again." };
+        return { ok: false, error: "The activity was created, but its details could not be loaded. Refresh and try again." };
       }
       const current = dataRef.current;
       if (current) {
@@ -621,7 +621,7 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
       }
       return { ok: true, category: payload.category };
     } catch {
-      return { ok: false, error: "Unable to create this category. Check your connection and try again." };
+      return { ok: false, error: "Unable to create this activity. Check your connection and try again." };
     }
   }, [commitData]);
 

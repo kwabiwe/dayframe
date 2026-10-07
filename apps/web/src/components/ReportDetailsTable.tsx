@@ -47,7 +47,7 @@ export function ReportDetailsTable({ report }: { report: ReportResult }) {
               <tr>
                 <th>Date and time</th>
                 <th>Task and tags</th>
-                <th>Category</th>
+                <th>Activity</th>
                 <th>Place</th>
                 <th>Duration</th>
                 <th>Actions</th>
@@ -74,7 +74,7 @@ export function ReportDetailsTable({ report }: { report: ReportResult }) {
                       </span>
                     ) : null}
                   </td>
-                  <td data-label="Category">
+                  <td data-label="Activity">
                     <span className="report-entry-category">
                       <i
                         className={entry.categoryId ? "" : "is-uncategorized"}

@@ -79,7 +79,7 @@ export function TagManager({ tags }: { tags: TagRow[] }) {
         <div className="border-b border-[var(--line)] px-4 py-3">
           <h2 className="text-lg font-semibold">Tags</h2>
           <p className="mt-1 text-sm text-[var(--muted)]">
-            Optional context for tracked tasks. Categories remain the primary classification.
+            Optional context for tracked tasks. Activities remain the primary classification.
           </p>
         </div>
         {tags.length === 0 ? (

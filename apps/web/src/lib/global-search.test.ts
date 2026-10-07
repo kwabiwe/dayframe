@@ -43,7 +43,7 @@ describe("historical global search", () => {
         id: "category:1",
         kind: "category",
         label: "Commute",
-        detail: "Category",
+        detail: "Activity",
         occurredAt: null,
         entryId: null,
         categoryId: "category-1",

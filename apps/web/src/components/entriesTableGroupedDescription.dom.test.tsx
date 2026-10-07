@@ -61,7 +61,7 @@ describe("EntriesTable grouped-description editing", () => {
       entries: [entry("entry-a"), entry("entry-b"), entry("entry-c", "Planning")],
       onChanged
     });
-    const input = sharedDescription("Uncategorized", 2);
+    const input = sharedDescription("No activity", 2);
 
     await userEvent.click(input);
     await userEvent.clear(input);
@@ -82,7 +82,7 @@ describe("EntriesTable grouped-description editing", () => {
 
   it("enters from F2, cancels with Escape, and saves the restored field on blur", async () => {
     renderTable({ entries: [entry("entry-a"), entry("entry-b")] });
-    const input = sharedDescription("Uncategorized", 2);
+    const input = sharedDescription("No activity", 2);
 
     input.focus();
     fireEvent.keyDown(input, { key: "F2" });
@@ -90,7 +90,7 @@ describe("EntriesTable grouped-description editing", () => {
     fireEvent.change(input, { target: { value: "Draft to cancel" } });
     fireEvent.keyDown(input, { key: "Escape" });
     expect(input.readOnly).toBe(true);
-    expect(input.value).toBe("Uncategorized");
+    expect(input.value).toBe("No activity");
     expect(mocks.clientFetch).not.toHaveBeenCalled();
 
     await userEvent.click(input);
@@ -110,7 +110,7 @@ describe("EntriesTable grouped-description editing", () => {
       .mockResolvedValueOnce(errorResponse("The grouped update was rejected."))
       .mockResolvedValueOnce(okResponse());
     renderTable({ entries: [entry("entry-a"), entry("entry-b")] });
-    const input = sharedDescription("Uncategorized", 2);
+    const input = sharedDescription("No activity", 2);
 
     await userEvent.dblClick(input);
     await userEvent.clear(input);

@@ -418,12 +418,12 @@ export function buildReportDataQuery(
       ),
       category_totals as (
         select coalesce(fe.category_id::text, 'uncategorized') as id,
-               coalesce(fe.category_name, 'Uncategorized') as name,
+               coalesce(fe.category_name, 'No activity') as name,
                fe.category_color as color,
                sum(fe.clipped_seconds)::int as seconds,
                count(*)::int as entry_count
         from filtered_entries fe
-        group by coalesce(fe.category_id::text, 'uncategorized'), coalesce(fe.category_name, 'Uncategorized'), fe.category_color
+        group by coalesce(fe.category_id::text, 'uncategorized'), coalesce(fe.category_name, 'No activity'), fe.category_color
       ),
       tag_totals as (
         select tag.id::text as id,

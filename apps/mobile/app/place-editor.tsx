@@ -641,7 +641,7 @@ export default function PlaceEditorScreen() {
                   layout={localLayoutTransition(reduceMotion)}
                   style={editorStyles.suggestionPreferences}
                 >
-                  <Text style={styles.label}>Default category</Text>
+                  <Text style={styles.label}>Default activity</Text>
                   <ScrollView
                     alwaysBounceVertical={false}
                     bounces={false}
@@ -669,9 +669,9 @@ export default function PlaceEditorScreen() {
                       />
                     ))}
                   </ScrollView>
-                  <Text style={styles.label}>Default activity description</Text>
+                  <Text style={styles.label}>Default task description</Text>
                   <TextInput
-                    accessibilityLabel="Default activity description"
+                    accessibilityLabel="Default task description"
                     onChangeText={setDefaultActivityDescription}
                     placeholder="School drop-off/pickup"
                     placeholderTextColor={theme.textSecondary}

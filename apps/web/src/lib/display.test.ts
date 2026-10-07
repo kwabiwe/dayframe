@@ -29,13 +29,13 @@ describe("time entry display helpers", () => {
   });
 
   it("names a blank uncategorized entry explicitly", () => {
-    expect(timeEntryTitle({ description: " ", categoryName: null })).toBe("Uncategorized");
+    expect(timeEntryTitle({ description: " ", categoryName: null })).toBe("No activity");
   });
 
   it("keeps uncategorized wording quiet for category columns", () => {
-    expect(timeEntryCategoryLabel({ categoryName: null })).toBe("Uncategorized");
+    expect(timeEntryCategoryLabel({ categoryName: null })).toBe("No activity");
     expect(categoryDisplay(null, null)).toEqual({
-      label: "Uncategorized",
+      label: "No activity",
       color: "var(--uncategorized-color)",
       isUncategorized: true
     });
@@ -49,7 +49,7 @@ describe("time entry display helpers", () => {
     });
   });
 
-  it("falls back to the category colour when no project colour exists", () => {
+  it("falls back to the activity colour when no project colour exists", () => {
     expect(
       timeEntryAccentColor({
         projectColor: null,
@@ -57,5 +57,11 @@ describe("time entry display helpers", () => {
         categoryName: "Work"
       })
     ).toBe("light-dark(#0FBF95, #16D2A6)");
+  });
+
+  it("treats the server's No activity bucket as uncategorized for colour and hatch", () => {
+    expect(categoryDisplay("No activity", null).isUncategorized).toBe(true);
+    expect(categoryDisplay("No activity", null).color).toBe("var(--uncategorized-color)");
+    expect(categoryDisplay("Work", "blue").isUncategorized).toBe(false);
   });
 });

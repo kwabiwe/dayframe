@@ -237,7 +237,7 @@ function displayLiveActivityTitle(entry: LiveActivityEntry) {
   if (description) return description;
   const categoryName = entry.categoryName?.trim();
   if (categoryName) return categoryName;
-  return "Uncategorized";
+  return "No activity";
 }
 
 function queueRemoteRegistration(

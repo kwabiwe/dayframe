@@ -150,7 +150,7 @@ export function projectTodayReviewPresentation(input: TodayReviewProjectionInput
         kind: "completed",
         valueMs: clipped.endMs - clipped.startMs,
         category: entry.category,
-        title: entry.category?.name ?? "Uncategorized",
+        title: entry.category?.name ?? "No activity",
         source: null,
         provisional: false
       });
@@ -339,7 +339,7 @@ function mobileEntry(entry: MobileTimeEntry): CanonicalEntry {
   const endMs = entry.stoppedAt ? Date.parse(entry.stoppedAt) : Number.NaN;
   return {
     id: entry.id,
-    title: entry.description?.trim() || entry.categoryName || "Untitled activity",
+    title: entry.description?.trim() || entry.categoryName || "Untitled entry",
     category: { id: entry.categoryId, name: entry.categoryName, color: entry.categoryColor ?? null },
     placeLabel: entry.placeName,
     startMs,

@@ -6,7 +6,7 @@ const productPoints = [
   {
     icon: Clock3,
     title: "Manual timers stay fast",
-    body: "Type what you are doing, choose a category, and keep the same timeline available on web and iPhone."
+    body: "Type what you are doing, choose an activity, and keep the same timeline available on web and iPhone."
   },
   {
     icon: MapPin,
@@ -54,7 +54,7 @@ export function LandingPage() {
           </div>
           <div className="landing-preview-block block-focus">
             <strong>Deep work</strong>
-            <span>Focus category</span>
+            <span>Focus activity</span>
           </div>
           <div className="landing-preview-block block-walk">
             <strong>Walk</strong>

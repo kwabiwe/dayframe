@@ -24,7 +24,7 @@ Six decisions depart from the earlier Midnight Core rules:
 | Colour is the data | Entries render as solid category blocks with measured text on them, using per-theme display values for the same stored keys. | Category and chart palette |
 | One display face | Bricolage Grotesque for headlines and large numerals only; the system font for everything people read or type. | Typography |
 | Every action lands | Start, stop, log and delete share one landing spring with one small overshoot, one haptic each and an Undo. The live block carries one slow breathing ring. Reduce Motion keeps opacity only. | Motion; `.codex/reference/motion.md` |
-| Activities | The interface says "activity" and "activities" where it said "category". Database columns, API fields, code identifiers and tests keep `category`. | `.codex/reference/product-model.md` |
+| Activities | The interface says "activity" and "activities" where it said "category", on every surface (shipped app-wide 6 Oct 2026). Database columns, API fields, code identifiers, tests and the report CSV keep `category`. | `.codex/reference/product-model.md` |
 | New layouts | Today gets a quick-start mosaic of pinned activities. Activities, Tags and Places merge into one Library page on web and Settings › Activities on iPhone. A press-and-hold Play orb with an activity menu is approved in principle, but must pass a physical-iPhone prototype test, including a VoiceOver path, before it is built. | The redesign phase PR for each surface |
 
 The interactive prototypes, review and phased plan live on the `agent/dayframe-redesign-concept` branch under `design/blocks/`. They are reference material, not production code.

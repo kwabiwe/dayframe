@@ -369,7 +369,7 @@ export function PlaceEditor({
           <div className="place-suggestion-defaults">
             <SelectField
               id="place-default-category"
-              label="Default category"
+              label="Default activity"
               options={[
                 { value: "", label: "No default" },
                 ...categories.map((category) => ({ value: category.id, label: category.name }))
@@ -379,7 +379,7 @@ export function PlaceEditor({
             />
             <TextField
               id="place-default-activity"
-              label="Default activity description"
+              label="Default task description"
               maxLength={240}
               placeholder="School drop-off/pickup"
               value={defaultActivityDescription}

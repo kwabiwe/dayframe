@@ -214,7 +214,7 @@ describe("DonutChart", () => {
     expect(chart().props.accessibilityLiveRegion).toBeUndefined();
     act(() => tree.update(render("01:00:01", "1 hour, 1 second")));
     expect(chart().props.accessibilityLabel).toContain(
-      "Total 1 hour, 1 second. 1 categories.",
+      "Total 1 hour, 1 second. 1 activity.",
     );
     expect(chart().props.accessibilityLiveRegion).toBeUndefined();
     act(() => tree.unmount());

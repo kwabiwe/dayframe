@@ -710,7 +710,7 @@ export default function SettingsScreen() {
         finishSignedOutNavigation();
         return;
       }
-      Alert.alert("Categories", error instanceof Error ? error.message : "Unable to create category.");
+      Alert.alert("Activities", error instanceof Error ? error.message : "Unable to create activity.");
     }
   }
 
@@ -730,7 +730,7 @@ export default function SettingsScreen() {
   async function saveCategoryEdit(category: Category) {
     const name = editingCategoryName.trim();
     if (!name) {
-      Alert.alert("Categories", "Category name is required.");
+      Alert.alert("Activities", "Activity name is required.");
       return;
     }
     try {
@@ -745,7 +745,7 @@ export default function SettingsScreen() {
         finishSignedOutNavigation();
         return;
       }
-      Alert.alert("Categories", error instanceof Error ? error.message : "Unable to save category.");
+      Alert.alert("Activities", error instanceof Error ? error.message : "Unable to save activity.");
     }
   }
 
@@ -755,7 +755,7 @@ export default function SettingsScreen() {
     try {
       const result = await updateCategory(category.id, { isPinned: nextPinned });
       if (result.category.isPinned !== nextPinned) {
-        throw new Error("Category pin state was not saved. Check that the Dayframe API has the category pin migration.");
+        throw new Error("The activity pin was not saved. Check that the Dayframe server is up to date, then try again.");
       }
       await load({ silent: true });
     } catch (error) {
@@ -764,13 +764,13 @@ export default function SettingsScreen() {
         finishSignedOutNavigation();
         return;
       }
-      Alert.alert("Categories", error instanceof Error ? error.message : "Unable to update category.");
+      Alert.alert("Activities", error instanceof Error ? error.message : "Unable to update activity.");
     }
   }
 
   function confirmDeleteCategory(category: Category) {
     Alert.alert(
-      "Delete category",
+      "Delete activity",
       `Delete ${category.name}? Existing time entries keep their history.`,
       [
         { text: "Cancel", style: "cancel" },
@@ -795,7 +795,7 @@ export default function SettingsScreen() {
         finishSignedOutNavigation();
         return;
       }
-      Alert.alert("Categories", error instanceof Error ? error.message : "Unable to delete category.");
+      Alert.alert("Activities", error instanceof Error ? error.message : "Unable to delete activity.");
     }
   }
 
@@ -1413,8 +1413,8 @@ export default function SettingsScreen() {
                 />
                 <SettingsMenuRow
                   icon="categories"
-                  label="Categories"
-                  value={`${categoryCount} ${categoryCount === 1 ? "category" : "categories"}`}
+                  label="Activities"
+                  value={`${categoryCount} ${categoryCount === 1 ? "activity" : "activities"}`}
                   styles={styles}
                   theme={theme}
                   onPress={() => openSettingsSection("categories")}
@@ -1556,12 +1556,12 @@ export default function SettingsScreen() {
                         />
                         <TextInput
                           ref={categoryEditRef}
-                          accessibilityLabel="Category name"
+                          accessibilityLabel="Activity name"
                           {...mobileTextProps("input")}
                           style={[styles.textInput, styles.categoryEditInput]}
                           value={editingCategoryName}
                           onChangeText={setEditingCategoryName}
-                          placeholder="Category name"
+                          placeholder="Activity name"
                           placeholderTextColor={theme.textSecondary}
                           returnKeyType="done"
                           onSubmitEditing={() => saveCategoryEdit(category)}
@@ -1661,21 +1661,21 @@ export default function SettingsScreen() {
                 ) : null}
                 <TextInput
                   ref={newCategoryInputRef}
-                  accessibilityLabel="New category name"
+                  accessibilityLabel="New activity name"
                   {...mobileTextProps("input")}
                   style={[styles.textInput, styles.categoryCreateInput]}
                   value={newCategoryName}
                   onChangeText={setNewCategoryName}
                   onFocus={beginCreateCategory}
                   onSubmitEditing={addCategory}
-                  placeholder="New category"
+                  placeholder="New activity"
                   placeholderTextColor={theme.textSecondary}
                   returnKeyType="done"
                 />
                 {!creatingCategory ? (
                   <>
                     <Pressable
-                      accessibilityLabel={pinNewCategory ? "Create as pinned category" : "Create as unpinned category"}
+                      accessibilityLabel={pinNewCategory ? "Create as pinned activity" : "Create as unpinned activity"}
                       accessibilityRole="button"
                       accessibilityState={{ selected: pinNewCategory }}
                       style={pressable(
@@ -1691,7 +1691,7 @@ export default function SettingsScreen() {
                       )}
                     </Pressable>
                     <Pressable
-                      accessibilityLabel="Create category"
+                      accessibilityLabel="Create activity"
                       accessibilityRole="button"
                       disabled={!newCategoryName.trim()}
                       style={({ pressed }) => [
@@ -1728,7 +1728,7 @@ export default function SettingsScreen() {
                       <Text {...mobileTextProps("control")} style={styles.secondaryButtonText}>Cancel</Text>
                     </Pressable>
                     <Pressable
-                      accessibilityLabel={pinNewCategory ? "New category pinned" : "New category unpinned"}
+                      accessibilityLabel={pinNewCategory ? "New activity pinned" : "New activity unpinned"}
                       accessibilityRole="button"
                       accessibilityState={{ selected: pinNewCategory }}
                       style={pressable(
@@ -2255,7 +2255,7 @@ export default function SettingsScreen() {
                     </View>
                     {enabled ? (
                       <View style={styles.healthMappingPanel}>
-                        <Text {...mobileTextProps("metadata")} style={styles.healthMappingLabel}>Category</Text>
+                        <Text {...mobileTextProps("metadata")} style={styles.healthMappingLabel}>Activity</Text>
                         <ScrollView
                           horizontal
                           showsHorizontalScrollIndicator={false}
@@ -2263,7 +2263,7 @@ export default function SettingsScreen() {
                         >
                           <Pressable
                             accessibilityRole="button"
-                            accessibilityLabel={`${option.label} default Health category`}
+                            accessibilityLabel={`${option.label} default Health activity`}
                             accessibilityState={{ selected: !mapping.categoryId }}
                             onPress={() => updateHealthAutoLogMapping(option.key, { categoryId: null })}
                             style={pressable(
@@ -2294,7 +2294,7 @@ export default function SettingsScreen() {
                               <Pressable
                                 key={`${option.key}:${category.id}`}
                                 accessibilityRole="button"
-                                accessibilityLabel={`${option.label} category ${category.name}`}
+                                accessibilityLabel={`${option.label} activity ${category.name}`}
                                 accessibilityState={{ selected }}
                                 onPress={() => updateHealthAutoLogMapping(option.key, { categoryId: category.id })}
                                 style={pressable(
@@ -2497,13 +2497,13 @@ function CategoryColorPicker({
   theme: MobileTheme;
 }) {
   return (
-    <View accessibilityLabel="Category colour" style={styles.paletteGrid}>
+    <View accessibilityLabel="Activity colour" style={styles.paletteGrid}>
       {DAYFRAME_PALETTE_PICKER.map((color) => {
         const selected = selectedColor === color.key;
         return (
           <Pressable
             key={color.key}
-            accessibilityLabel={`${color.label} category colour`}
+            accessibilityLabel={`${color.label} activity colour`}
             accessibilityRole="button"
             accessibilityState={{ selected }}
             style={pressable(
@@ -2718,7 +2718,7 @@ function settingsSectionTitle(section: SettingsSection) {
     case "profile":
       return "Profile";
     case "categories":
-      return "Categories";
+      return "Activities";
     case "automations":
       return "Places & Location";
     case "health":

@@ -413,12 +413,12 @@ export function CategoryPicker({
     if (!onCreateCategory || isCreateBusy) return;
     const name = createName.trim();
     if (!name) {
-      setCreateError("Enter a category name.");
+      setCreateError("Enter an activity name.");
       nameInputRef.current?.focus();
       return;
     }
     if (categories.some((category) => category.name.trim().toLocaleLowerCase() === name.toLocaleLowerCase())) {
-      setCreateError(`A category named “${name}” already exists.`);
+      setCreateError(`An activity named “${name}” already exists.`);
       nameInputRef.current?.focus();
       return;
     }
@@ -429,7 +429,7 @@ export function CategoryPicker({
     try {
       outcome = await onCreateCategory(name, createColor ?? undefined);
     } catch {
-      outcome = { ok: false, error: "Unable to create this category. Check your connection and try again." };
+      outcome = { ok: false, error: "Unable to create this activity. Check your connection and try again." };
     }
     if (!outcome.ok) {
       setIsCreateBusy(false);
@@ -559,7 +559,7 @@ export function CategoryPicker({
               : "calendar-compact-category-dot"}
             style={{ background: selectedColor ?? (variant === "timer" ? "transparent" : "var(--muted)") }}
           />
-          <span>{selectedCategory?.name ?? "Uncategorized"}</span>
+          <span>{selectedCategory?.name ?? "No activity"}</span>
         </span>
         <ChevronDown aria-hidden="true" size={variant === "timer" ? 16 : 15} />
       </button>
@@ -579,7 +579,7 @@ export function CategoryPicker({
       >
         {isCreating ? (
           <div
-            aria-label="Create new category"
+            aria-label="Create new activity"
             className="category-picker-create-form"
             onKeyDown={(event) => {
               if (event.key !== "Escape") return;
@@ -590,7 +590,7 @@ export function CategoryPicker({
             }}
             role="dialog"
           >
-            <strong>Create new category</strong>
+            <strong>Create new activity</strong>
             <div className="category-picker-create-name-field">
               <label htmlFor={`${menuId}-create-name`}>Name</label>
               <div className="category-picker-create-name-control">
@@ -605,14 +605,14 @@ export function CategoryPicker({
                     setCreateError(null);
                   }}
                   onKeyDown={createInputKeyDown}
-                  placeholder="Category name"
+                  placeholder="Activity name"
                   ref={nameInputRef}
                   value={createName}
                 />
                 <button
                   aria-expanded={isColorMenuOpen}
                   aria-haspopup="listbox"
-                  aria-label={`Choose category colour, currently ${effectiveCreateColorOption.label}`}
+                  aria-label={`Choose activity colour, currently ${effectiveCreateColorOption.label}`}
                   className="category-picker-color-trigger"
                   disabled={isCreateBusy}
                   onClick={() => {
@@ -653,7 +653,7 @@ export function CategoryPicker({
           </div>
         ) : (
           <div
-            aria-label="Categories"
+            aria-label="Activities"
             className="category-picker-options"
             onKeyDown={handleOptionsKeyDown}
             ref={optionsRef}
@@ -691,7 +691,7 @@ export function CategoryPicker({
                 type="button"
               >
                 <Plus aria-hidden="true" size={15} />
-                <span>Create new category</span>
+                <span>Create new activity</span>
               </button>
             ) : null}
           </div>
@@ -699,7 +699,7 @@ export function CategoryPicker({
       </div>)}
       {isColorMenuOpen && colorPortalTarget ? createPortal(
         <div
-          aria-label="Category colour"
+          aria-label="Activity colour"
           className="ui-floating-surface is-open category-picker-color-menu time-entry-quick-editor-nested-surface"
           onBlur={(event) => {
             if (!colorMenuContains(event.relatedTarget)) closeColorMenu(false);
@@ -773,7 +773,7 @@ function CategoryOption({
           : "calendar-compact-category-dot"}
         style={{ background: color ?? (variant === "timer" ? undefined : "var(--muted)") }}
       />
-      <span>{category?.name ?? "Uncategorized"}</span>
+      <span>{category?.name ?? "No activity"}</span>
       {selected
         ? variant === "timer"
           ? <CheckCircle2 aria-hidden="true" size={14} />

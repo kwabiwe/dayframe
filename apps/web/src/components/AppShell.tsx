@@ -50,7 +50,7 @@ type Overlay = "search" | "profile" | "help" | null;
 const navItems = [
   { href: "/", label: "Dashboard", icon: LayoutDashboard },
   { href: "/timeline", label: "Timeline", icon: CalendarRange },
-  { href: "/categories", label: "Categories", icon: FileText },
+  { href: "/categories", label: "Activities", icon: FileText },
   { href: "/tags", label: "Tags", icon: Tags },
   { href: "/reports", label: "Reports", icon: BarChart3 },
   { href: "/places", label: "Places", icon: MapPin },
@@ -461,7 +461,7 @@ function SearchPalette({
     <ModalDialog ariaLabel="Search Dayframe" onClose={onClose} showClose={false}>
       <div className="swiss-search-input">
         <Search size={21} />
-        <input autoFocus value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search categories, entries, places, review items" />
+        <input autoFocus value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search activities, entries, places, review items" />
         <kbd>Esc</kbd>
         <IconButton label="Close search" onClick={onClose}><X size={18} /></IconButton>
       </div>
@@ -549,10 +549,10 @@ function globalSearchResult(result: GlobalSearchResult): SearchResult {
     review: Inbox
   };
   const groupByKind: Record<GlobalSearchResult["kind"], string> = {
-    activity: "Activity",
+    activity: "Recent",
     entry: "Entry",
     place: "Place",
-    category: "Category",
+    category: "Activities",
     tag: "Tag",
     review: "Review"
   };
@@ -583,8 +583,8 @@ function buildSearchResults(data: BootstrapData | null, query: string): SearchRe
     ...data.categories.map((category) => ({
       id: `category:${category.id}`,
       label: category.name,
-      detail: category.isPinned ? "Pinned category" : "Category",
-      group: "Category",
+      detail: category.isPinned ? "Pinned activity" : "Activity",
+      group: "Activities",
       href: "/categories",
       icon: FileText
     })),

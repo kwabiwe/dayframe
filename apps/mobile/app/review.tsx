@@ -1640,12 +1640,15 @@ function ReviewNeededEntryCard({
   styles: ReturnType<typeof useMobileTheme>["styles"];
   theme: ReturnType<typeof useMobileTheme>["theme"];
 }) {
-  const categoryName = entry.categoryName ?? (isHealthSource(entry.source) ? "Health" : "No category");
-  const categoryColor = paletteColorFor(
-    entry.categoryColor ?? (isHealthSource(entry.source) ? "moss" : entry.categoryId),
-    categoryName,
-    theme.mode
-  );
+  const categoryName = entry.categoryName ?? (isHealthSource(entry.source) ? "Health" : "No activity");
+  // No activity stays neutral rather than taking a hashed palette colour.
+  const categoryColor = !entry.categoryId && !entry.categoryName && !isHealthSource(entry.source)
+    ? theme.textSecondary
+    : paletteColorFor(
+        entry.categoryColor ?? (isHealthSource(entry.source) ? "moss" : entry.categoryId),
+        categoryName,
+        theme.mode
+      );
 
   return (
     <View style={styles.reviewCard}>

@@ -1668,7 +1668,7 @@ export async function createCategory(
   if (response.status === 401) {
     throw new AuthRequiredError();
   }
-  if (!response.ok) throw new Error(await errorMessage(response, "Unable to create category"));
+  if (!response.ok) throw new Error(await errorMessage(response, "Unable to create activity"));
   return readJsonResponse(response);
 }
 
@@ -1703,7 +1703,7 @@ export async function ensureAutomaticLoggingCategories(
     throw new AuthRequiredError();
   }
   if (!response.ok) {
-    throw new Error(await errorMessage(response, "Unable to prepare automatic logging categories"));
+    throw new Error(await errorMessage(response, "Unable to prepare automatic logging activities"));
   }
   const payload = await readJsonResponse<{ categories: MobileCategoryResponse[] }>(response);
   return payload.categories;
@@ -1724,7 +1724,7 @@ export async function updateCategory(
   if (response.status === 401) {
     throw new AuthRequiredError();
   }
-  if (!response.ok) throw new Error(await errorMessage(response, "Unable to update category"));
+  if (!response.ok) throw new Error(await errorMessage(response, "Unable to update activity"));
   return readJsonResponse(response);
 }
 
@@ -1736,7 +1736,7 @@ export async function archiveCategory(id: string) {
   if (response.status === 401) {
     throw new AuthRequiredError();
   }
-  if (!response.ok) throw new Error(await errorMessage(response, "Unable to delete category"));
+  if (!response.ok) throw new Error(await errorMessage(response, "Unable to delete activity"));
   return readJsonResponse(response);
 }
 

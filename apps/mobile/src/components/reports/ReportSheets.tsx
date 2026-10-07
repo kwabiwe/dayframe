@@ -72,7 +72,7 @@ export function ReportFiltersSheet({
   return (
     <ReportSheet
       rootHosted={rootHosted}
-      title="Categories"
+      title="Activities"
       presentationId={presentationId}
       theme={theme}
       reduceMotion={reduceMotion}
@@ -83,10 +83,10 @@ export function ReportFiltersSheet({
         <TextInput
           testID="report-filter-search"
           maxFontSizeMultiplier={REPORT_TEXT_CAP.control}
-          accessibilityLabel="Search categories"
+          accessibilityLabel="Search activities"
           value={search}
           onChangeText={setSearch}
-          placeholder="Search categories"
+          placeholder="Search activities"
           placeholderTextColor={theme.textMuted}
           style={[
             s.search,
@@ -96,7 +96,7 @@ export function ReportFiltersSheet({
       }
     >
       <Option
-        label="All categories"
+        label="All activities"
         checked={
           draft.mode === "all" ? true : draft.mode === "none" ? false : "mixed"
         }

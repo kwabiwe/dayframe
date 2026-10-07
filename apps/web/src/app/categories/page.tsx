@@ -12,8 +12,8 @@ export default async function CategoriesPage() {
   return (
     <>
       <PageHeader
-        title="Categories"
-        description="Manage the categories used for timer starts, quick actions, review and reports."
+        title="Activities"
+        description="Manage the activities you start, pin for quick start, review and report on."
       />
       <div className="px-5 py-6 md:px-8">
         <CategoryManager categories={data.categories} />

@@ -70,7 +70,7 @@ export function CategoryManager({ categories }: { categories: CategoryRow[] }) {
     try {
       const response = await clientFetch(`/api/categories?id=${category.id}`, { method: "DELETE" });
       if (!response.ok) {
-        let errorMessage = `Unable to delete category: ${response.status}`;
+        let errorMessage = `Unable to delete activity: ${response.status}`;
         try {
           const payload = (await response.json()) as { error?: string };
           errorMessage = payload.error ?? errorMessage;
@@ -82,7 +82,7 @@ export function CategoryManager({ categories }: { categories: CategoryRow[] }) {
       setCategoryPendingDelete(null);
       refresh();
     } catch (error) {
-      setDeleteError(error instanceof Error ? error.message : "Unable to delete this category.");
+      setDeleteError(error instanceof Error ? error.message : "Unable to delete this activity.");
     } finally {
       setIsDeleting(false);
     }
@@ -92,14 +92,14 @@ export function CategoryManager({ categories }: { categories: CategoryRow[] }) {
     <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_360px]">
       <section className="industrial-panel overflow-hidden">
         <div className="border-b border-[var(--line)] px-4 py-3">
-          <h2 className="text-lg font-semibold">Categories</h2>
+          <h2 className="text-lg font-semibold">Activities</h2>
           <p className="mt-1 text-sm text-[var(--muted)]">
-            Pinned categories appear first in timer and mobile quick-start controls.
+            Pinned activities appear first in timer and mobile quick-start controls.
           </p>
         </div>
         <CategorySection
           title="Pinned"
-          empty="No pinned categories yet."
+          empty="No pinned activities yet."
           categories={pinned}
           editingId={editingId}
           isPending={isPending}
@@ -112,8 +112,8 @@ export function CategoryManager({ categories }: { categories: CategoryRow[] }) {
           onUpdate={updateCategory}
         />
         <CategorySection
-          title="All categories"
-          empty="Create your first category to start tracking."
+          title="All activities"
+          empty="Create your first activity to start tracking."
           categories={unpinned}
           editingId={editingId}
           isPending={isPending}
@@ -129,8 +129,8 @@ export function CategoryManager({ categories }: { categories: CategoryRow[] }) {
 
       <form action={createCategory} className="fill-inset-surface space-y-4 p-4">
         <div>
-          <h2 className="text-base font-semibold">New category</h2>
-          <p className="mt-1 text-sm text-[var(--muted)]">Use categories for the type of work or activity you want to track.</p>
+          <h2 className="text-base font-semibold">New activity</h2>
+          <p className="mt-1 text-sm text-[var(--muted)]">Activities are what you track time for, like Work, Exercise or Errands.</p>
         </div>
         <label className="block text-sm">
           <span className="industrial-field-label">Name</span>
@@ -143,18 +143,18 @@ export function CategoryManager({ categories }: { categories: CategoryRow[] }) {
         </label>
         <button className="industrial-button-primary focus-ring w-full text-sm" type="submit" disabled={isPending}>
           <Plus size={16} />
-          Create category
+          Create activity
         </button>
       </form>
       {categoryPendingDelete ? (
         <DestructiveConfirmationDialog
-          body="Existing time entries keep their category history."
+          body="Existing entries keep their activity history."
           dialogId="delete-category"
           error={deleteError}
           isBusy={isDeleting || isPending}
           onCancel={() => setCategoryPendingDelete(null)}
           onConfirm={() => void archiveCategory(categoryPendingDelete)}
-          title="Delete category?"
+          title="Delete activity?"
         />
       ) : null}
     </div>
@@ -228,7 +228,7 @@ function CategorySection({
                 />
                 <div className="min-w-0">
                   <h3 className="truncate text-sm font-semibold">{category.name}</h3>
-                  <p className="text-xs text-[var(--muted)]">{category.isPinned ? "Pinned quick action" : "Available category"}</p>
+                  <p className="text-xs text-[var(--muted)]">{category.isPinned ? "Pinned quick action" : "Unpinned activity"}</p>
                 </div>
               </div>
               <div className="flex flex-wrap gap-2">

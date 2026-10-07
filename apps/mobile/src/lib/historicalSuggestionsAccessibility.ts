@@ -11,7 +11,7 @@ export function historicalSuggestionAppliedAnnouncement(
 ) {
   const details = [
     suggestion.categoryName?.trim()
-      ? `category ${suggestion.categoryName.trim()}`
+      ? `activity ${suggestion.categoryName.trim()}`
       : null,
     suggestion.tagNames.length > 0
       ? `tags ${suggestion.tagNames.map((tag) => tag.trim()).filter(Boolean).join(", ")}`

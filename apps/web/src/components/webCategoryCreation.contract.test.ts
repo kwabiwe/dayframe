@@ -45,7 +45,7 @@ describe("web contextual category creation contract", () => {
   });
 
   it("keeps blank, duplicate, failure, keyboard, and retry handling inside the shared picker", () => {
-    expect(picker).toContain("Enter a category name.");
+    expect(picker).toContain("Enter an activity name.");
     expect(picker).toContain("already exists.");
     expect(picker).toContain("setCreateError(outcome.error)");
     expect(picker).toContain('event.key === "Enter"');

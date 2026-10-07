@@ -215,7 +215,7 @@ export function formatSourceLabel(value?: string | null) {
 }
 
 export function formatEventLabel(value?: string | null) {
-  if (!value) return "Activity";
+  if (!value) return "Event";
   return eventLabels[value] ?? formatMachineLabel(value);
 }
 

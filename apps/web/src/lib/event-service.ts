@@ -65,7 +65,7 @@ export type { AutomaticLoggingCategoryKind } from "./automatic-category-service"
 export class CategoryConflictError extends Error {
   status = 409;
 
-  constructor(message = "A category with that name already exists.") {
+  constructor(message = "An activity with that name already exists.") {
     super(message);
     this.name = "CategoryConflictError";
   }
@@ -1223,7 +1223,7 @@ export async function createCategory(
   },
   session: RequestSession = getDevSession()
 ) {
-  const name = normalizeName(input.name, "New category");
+  const name = normalizeName(input.name, "New activity");
   const color = normalizePaletteKey(input.color, name);
   const icon = isActivityIconKey(input.icon) ? input.icon : null;
   const client = await pool.connect();
@@ -1310,7 +1310,7 @@ export async function updateCategory(
   const hasName = Object.prototype.hasOwnProperty.call(input, "name");
   const hasColor = Object.prototype.hasOwnProperty.call(input, "color");
   const hasIsPinned = Object.prototype.hasOwnProperty.call(input, "isPinned");
-  const normalizedName = hasName ? normalizeName(input.name, "Category") : null;
+  const normalizedName = hasName ? normalizeName(input.name, "Activity") : null;
   const normalizedColor = hasColor
     ? normalizePaletteKey(input.color, normalizedName ?? id)
     : null;
@@ -3059,8 +3059,8 @@ export async function createEntity(
           "insert into categories (workspace_id, name, color, is_pinned) values ($1, $2, $3, $4)",
           [
             session.workspaceId,
-            String(input.name ?? "New category"),
-            normalizePaletteKey(input.color, String(input.name ?? "New category")),
+            String(input.name ?? "New activity"),
+            normalizePaletteKey(input.color, String(input.name ?? "New activity")),
             Boolean(input.isPinned)
           ]
         );
@@ -3070,8 +3070,8 @@ export async function createEntity(
           "insert into categories (workspace_id, name, color) values ($1, $2, $3)",
           [
             session.workspaceId,
-            String(input.name ?? "New category"),
-            normalizePaletteKey(input.color, String(input.name ?? "New category"))
+            String(input.name ?? "New activity"),
+            normalizePaletteKey(input.color, String(input.name ?? "New activity"))
           ]
         );
       }

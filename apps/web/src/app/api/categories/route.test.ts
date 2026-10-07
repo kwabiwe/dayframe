@@ -120,13 +120,13 @@ describe("/api/categories", () => {
   it("rejects blank and duplicate category names with actionable errors", async () => {
     const blank = await POST(jsonRequest({ name: "   " }));
     expect(blank.status).toBe(400);
-    await expect(blank.json()).resolves.toMatchObject({ error: "Category name is required." });
+    await expect(blank.json()).resolves.toMatchObject({ error: "Activity name is required." });
     expect(mocks.createCategory).not.toHaveBeenCalled();
 
-    mocks.createCategory.mockRejectedValueOnce(new CategoryConflictError("A category with that name already exists."));
+    mocks.createCategory.mockRejectedValueOnce(new CategoryConflictError("An activity with that name already exists."));
     const duplicate = await POST(jsonRequest({ name: "focus" }));
     expect(duplicate.status).toBe(409);
-    await expect(duplicate.json()).resolves.toMatchObject({ error: "A category with that name already exists." });
+    await expect(duplicate.json()).resolves.toMatchObject({ error: "An activity with that name already exists." });
   });
 
   it("edits category name, colour and pin state", async () => {

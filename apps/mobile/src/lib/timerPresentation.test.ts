@@ -59,7 +59,7 @@ describe("mobile timer presentation", () => {
         stoppedAt: null
       })
     ).toEqual({
-      categoryLabel: "Uncategorized",
+      categoryLabel: "No activity",
       title: "Add a task description"
     });
   });
@@ -1436,7 +1436,7 @@ function category(input: Partial<MobileBootstrap["categories"][number]>): Mobile
     color: "blue",
     id: "category-id",
     isPinned: false,
-    name: "Category",
+    name: "Activity",
     ...input
   };
 }

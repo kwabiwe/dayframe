@@ -58,7 +58,7 @@ describe("web Settings and running-timer follow-up", () => {
     expect(styles).toMatch(/\.settings-appearance-row \.ui-segmented-control button\[aria-pressed="true"\][\s\S]*color: var\(--on-accent\);/s);
   });
 
-  it("uses flat workspace rows and circular borderless category colours", () => {
+  it("uses flat workspace rows and circular borderless activity colours", () => {
     expect(styles).toMatch(/\.swiss-profile-section \.swiss-menu-list button \{[^}]*box-shadow: none;/s);
     expect(categories).toContain('className="h-8 w-8 shrink-0 rounded-full"');
     expect(categories).toContain('className="block h-8 w-8 rounded-full');

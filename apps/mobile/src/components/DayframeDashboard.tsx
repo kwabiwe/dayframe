@@ -3359,13 +3359,13 @@ function entryCategoryColor(entry: TimeEntry, mode: MobileTheme["mode"]) {
   if (!entry.categoryId && !entry.categoryName) return uncategorizedFillColor(mode);
   return paletteColorFor(
     entry.categoryColor ?? entry.categoryId,
-    entry.categoryName ?? "Uncategorized",
+    entry.categoryName ?? "No activity",
     mode
   );
 }
 
 function displayEntryTitle(entry: TimeEntry) {
-  return displayTimerDescription(entry) ?? entry.categoryName ?? "Uncategorized";
+  return displayTimerDescription(entry) ?? entry.categoryName ?? "No activity";
 }
 
 function formatEntryTimeRange(entry: TimeEntry, now: number) {

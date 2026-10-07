@@ -101,7 +101,7 @@ describe("Review sync store contracts", () => {
     }));
     expect(cached.rawPayload).toEqual({ qualificationReason: "same_place_outing", stopCount: 1 });
     expect(isTimeAwayReviewItem(cached)).toBe(true);
-    expect(reviewItemCategoryLabel(cached)).toBe("No category");
+    expect(reviewItemCategoryLabel(cached)).toBe("No activity");
     const record = {
       kind: "review" as const, reviewItemId: "30000000-0000-4000-8000-000000000001", eventId: null,
       locationSegmentId: "70000000-0000-4000-8000-000000000001", sourceKind: "location_v2" as const,
@@ -113,7 +113,7 @@ describe("Review sync store contracts", () => {
     };
     const backlog = mobileReviewItemFromPresentation({ ...record, timeAway: { stopCount: 1 } });
     expect(isTimeAwayReviewItem(backlog)).toBe(true);
-    expect(reviewItemCategoryLabel(backlog)).toBe("No category");
+    expect(reviewItemCategoryLabel(backlog)).toBe("No activity");
     expect(isTimeAwayReviewItem(sanitiseReviewItemForCache(backlog))).toBe(true);
     // A server without the feature: an ordinary commute as before.
     expect(isTimeAwayReviewItem(mobileReviewItemFromPresentation(record))).toBe(false);

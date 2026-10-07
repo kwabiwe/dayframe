@@ -21,7 +21,7 @@ describe("mobile Categories creation contract", () => {
     expect(settingsSource).toContain("settingsScrollRef.current?.scrollToEnd");
     expect(settingsSource).toContain("scrollResponderScrollNativeHandleToKeyboard");
     expect(settingsSource).toContain("CATEGORY_EDITOR_KEYBOARD_CLEARANCE = 360");
-    expect(settingsSource.match(/placeholder="New category"/g)).toHaveLength(1);
+    expect(settingsSource.match(/placeholder="New activity"/g)).toHaveLength(1);
   });
 
   it("offers the shared hue-grouped picker before creating a category", () => {
@@ -30,7 +30,7 @@ describe("mobile Categories creation contract", () => {
     expect(themeSource).toMatch(/paletteGrid: \{[^}]*flexWrap: "wrap",[^}]*gap: 8,[^}]*width: 252,/s);
     expect(settingsSource).toContain("selectedColor={newCategoryColor}");
     expect(settingsSource).toContain("color: newCategoryColor");
-    expect(settingsSource).toContain('accessibilityLabel="Category colour"');
+    expect(settingsSource).toContain('accessibilityLabel="Activity colour"');
   });
 
   it("uses one local owner for creator presence and surrounding layout", () => {
