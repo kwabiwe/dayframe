@@ -162,6 +162,10 @@ See `docs/ios-hosted-supabase-runbook.md` for the iOS/EAS setup and physical-dev
 
 The server that reads activity icons, seeds starter activities for new workspaces and serves `POST /api/categories/starters` requires `supabase/migrations/202610060001_category_icon_and_starter_key.sql` (local `packages/db/migrations/008_category_icon_and_starter_key.sql`) before its Preview or production deployment. It adds two nullable `categories` columns with format checks and a partial unique index on active `(workspace_id, starter_key)`; no existing row changes. Without it, category reads fail with an error naming this migration. Staging validation is not production authorization.
 
+### Place role schema prerequisite
+
+The server that reads Home and Work place roles requires `supabase/migrations/202610070001_place_role.sql` (local `packages/db/migrations/009_place_role.sql`) before its Preview or production deployment. It adds a nullable `places.role` column with a `home`/`work` check and a partial unique index on `(workspace_id, role)`; no existing row changes and nothing is backfilled. Every place-name read selects the column, so without it bootstrap, entries, Review, Reports, search, exports and integrations fail: bootstrap and place writes name this migration, other reads fail with a Postgres undefined-column error. Staging validation is not production authorization.
+
 ### Motion & Fitness schema prerequisite
 
 The server that accepts Motion & Fitness evidence requires `supabase/migrations/202610050001_location_motion_activity.sql` (local `packages/db/migrations/007_location_motion_activity.sql`) before its Preview or production deployment, and production must have it before any phone build that sends `motion_activity` is installed. It only widens the `location_evidence` kind check and adds a coordinate-free check for motion rows. Staging validation is not production authorization.

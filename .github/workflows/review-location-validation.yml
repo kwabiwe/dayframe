@@ -70,6 +70,11 @@ jobs:
         env:
           DAYFRAME_RUN_DB_INTEGRATION: "1"
         run: npm run test -w @dayframe/web -- src/lib/event-service.postgres.integration.test.ts
+      - name: Home and Work place roles
+        if: ${{ !cancelled() }}
+        env:
+          DAYFRAME_PLACE_ROLE_TEST_DATABASE_URL: postgres://dayframe:dayframe@localhost:5432/dayframe_ci_test
+        run: npm run test -w @dayframe/web -- src/lib/place-role-service.postgres.test.ts
 
   clean-ios-simulator:
     name: Clean iOS Simulator

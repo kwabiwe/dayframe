@@ -11,6 +11,7 @@ import {
 } from "@/lib/report-filters";
 import { calculatePreviousPeriodComparison } from "@/lib/dashboard-intelligence";
 import type { RequestSession } from "@/lib/session";
+import { placeDisplayNameSql } from "./place-display";
 
 export type ReportBreakdownRow = {
   id: string;
@@ -270,7 +271,8 @@ export async function getReportFilterOptions(session: RequestSession): Promise<R
     ),
     query<PlaceRow>(
       `select pl.id,
-              pl.name,
+              ${placeDisplayNameSql("pl")} as name,
+              pl.role,
               pl.latitude,
               pl.longitude,
               pl.radius_meters as "radiusMeters",
@@ -284,7 +286,7 @@ export async function getReportFilterOptions(session: RequestSession): Promise<R
               pl.logging_enabled as "loggingEnabled"
        from places pl
        where pl.workspace_id = $1
-       order by pl.priority desc, lower(pl.name), pl.id`,
+       order by pl.priority desc, lower(${placeDisplayNameSql("pl")}), pl.id`,
       [session.workspaceId]
     )
   ]);
@@ -771,7 +773,7 @@ class ReportSqlBuilder {
              cat.color as category_color,
              te.place_id,
              te.place_label,
-             coalesce(pl.name, te.place_label) as place_name,
+             coalesce(${placeDisplayNameSql("pl")}, te.place_label) as place_name,
              case
                when pl.id is not null then 'saved'
                when te.place_label is not null then 'one_time'

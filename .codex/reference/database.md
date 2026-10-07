@@ -17,6 +17,7 @@ Before declaring hosted auth/timer/event changes ready, verify:
 - indexes required by the deployed code exist.
 - any new health audit columns exist before HealthKit imports are tested.
 - `categories.icon` and `categories.starter_key` (with the partial unique index `categories_workspace_starter_key_idx`) exist before a server that reads activity icons or seeds starter activities is deployed.
+- `places.role` (check `home`/`work`, partial unique index `places_workspace_role_idx` on `(workspace_id, role)`) exists before a server that reads place roles is deployed: every place-name read path selects it.
 - RLS policies still allow expected workspace-member reads/writes.
 - `DATABASE_URL` matches the Supabase pooler string that works in Vercel.
 
@@ -31,6 +32,7 @@ Before declaring hosted auth/timer/event changes ready, verify:
 - For lock-strategy changes, retain a gated disposable-database test with two real Postgres connections: one holds the user's advisory lock while the other completes an exact entry-scoped Stop. Verify the hosted `activity_events.client_event_id` unique index before staging smoke tests.
 - User-created overlaps require no exclusion constraint or overlap-uniqueness index on `time_entries`. Technical uniqueness belongs to source identifiers such as client event IDs, external Health samples, location segments, and Review mutation receipts.
 - `time_entries.user_edited_at` is the protection boundary for automatic Health sleep reconciliation. Every explicit entry update must set it; automatic same-source sleep-window extension may update only rows where it is null and must preserve the stable entry id and metadata.
+- `places.role` moves only through `assignPlaceRoleWith` (`apps/web/src/lib/place-role-service.ts`): one transaction locks the current holder and the target in id order with `FOR NO KEY UPDATE` (so swapping Home and Work from both sides cannot deadlock, and entry/segment key-share locks are not blocked), clears and optionally renames the old holder, then sets the target. A racing move that hits the unique index returns a retryable `409 place_role_conflict`. `apps/web/src/lib/place-role-service.postgres.test.ts` covers this against a disposable database (`DAYFRAME_PLACE_ROLE_TEST_DATABASE_URL`, run in CI).
 - `time_entries.place_label` is the bounded one-time location name for a confirmed unknown visit. The database check permits `place_id` or a trimmed 1–120-character `place_label`, never both. Explicit saved-place edits clear `place_label`; ordinary time/category/description/tag edits preserve it. Deploy `supabase/migrations/202608120001_time_entry_place_label.sql` before code that selects or writes this column.
 - Deploy `supabase/migrations/202608010001_health_sleep_session_reconciliation.sql` before server code that queries `user_edited_at`. Its historical backfill intentionally protects all previously changed Health sleep rows. It does not merge or delete historical duplicates.
 - Reporting coverage must clip intervals to the requested range and use a gaps-and-islands union. Do not infer covered time by subtracting pairwise intersections.
