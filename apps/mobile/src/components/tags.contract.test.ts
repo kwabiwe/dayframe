@@ -88,7 +88,10 @@ describe("mobile tag interaction contract", () => {
     expect(metadata).toContain('fill={color}');
     expect(metadata).toContain('fillRule="evenodd"');
     expect(metadata).toContain('accessibilityLabel={`Remove tag ${tagName}`}');
-    expect(sheet).toContain("onPressTag={(tagName) => {");
+    // The sheet shows the prototype's "#tag ×" chips (draft-only removal), then "+ Tag".
+    expect(sheet).toContain("accessibilityLabel={`Remove tag ${tagName}`}");
+    expect(sheet).toContain("#{tagName} ×");
+    expect(sheet.indexOf("#{tagName} ×")).toBeLessThan(sheet.indexOf('accessibilityLabel="Add a tag"'));
     expect(sheet).toContain("tagNames: appliedTagNames");
   });
 

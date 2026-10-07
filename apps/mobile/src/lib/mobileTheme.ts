@@ -2200,20 +2200,7 @@ function createStyles(theme: MobileTheme) {
       flexDirection: "row",
       alignItems: "center",
       flexWrap: "wrap",
-      gap: 10
-    },
-    tagAddButton: {
-      minHeight: 28,
-      justifyContent: "center",
-      paddingHorizontal: 10,
-      borderRadius: 8,
-      backgroundColor: theme.surfaceMuted
-    },
-    tagAddButtonText: {
-      color: theme.textPrimary,
-      fontFamily: monoFont,
-      fontSize: 11,
-      fontWeight: "600"
+      gap: 6
     },
     tagMetadataRow: {
       minWidth: 0,
