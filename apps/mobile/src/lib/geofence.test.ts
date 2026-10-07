@@ -381,6 +381,19 @@ describe("mobile geofence visit candidates", () => {
     });
   });
 
+  it("describes a Work-role place as Work rather than its saved address", async () => {
+    const workPlace = { ...place, name: "1 Office Street", role: "work" as const, defaultActivityDescription: null };
+    await startGeofences([workPlace]);
+    await recordGeofenceTransition("enter", region, new Date("2026-07-06T09:30:00.000Z"));
+    await recordGeofenceTransition("exit", region, new Date("2026-07-06T09:40:00.000Z"));
+
+    const queue = await readQueue();
+    expect(queue.find((item) => item.type === "geofence_enter")?.description).toBe("Entered Work");
+    const visit = queue.find((item) => item.type === "geofence_exit");
+    expect(visit?.description).toBe("Work");
+    expect(visit?.rawPayload).toMatchObject({ placeName: "Work" });
+  });
+
   it("dedupes repeated geofence events for the same visit", async () => {
     await startGeofences([place]);
     await recordGeofenceTransition("enter", region, new Date("2026-07-06T10:00:00.000Z"));

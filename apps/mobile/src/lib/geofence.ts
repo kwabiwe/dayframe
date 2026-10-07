@@ -6,9 +6,11 @@ import {
   LOCATION_ENGINE_V2_CONFIG,
   LOCATION_LEARNING_THRESHOLDS,
   LocationEvidenceSchema,
+  placeDisplayName,
   readableLocationNameFromParts,
   type LocationEvidence,
-  type LocationLearningEvidence
+  type LocationLearningEvidence,
+  type PlaceRole
 } from "@dayframe/shared";
 import { enqueueEvent } from "./api";
 import { reverseGeocodeLocation } from "./locationGeocoding";
@@ -1233,6 +1235,7 @@ async function recordPlaceExit(place: MonitoredPlace, region: DayframeRegion, oc
 function monitoredPlaceFromInput(place: {
   id: string;
   name: string;
+  role?: PlaceRole | null;
   latitude?: number | null;
   longitude?: number | null;
   radiusMeters: number;
@@ -1244,7 +1247,8 @@ function monitoredPlaceFromInput(place: {
 }): MonitoredPlace {
   return {
     id: place.id,
-    name: place.name,
+    // A Home or Work place is described as "Home"/"Work" in the visits the phone records.
+    name: placeDisplayName({ name: place.name, role: place.role ?? null }),
     latitude: typeof place.latitude === "number" ? place.latitude : 0,
     longitude: typeof place.longitude === "number" ? place.longitude : 0,
     radiusMeters: place.radiusMeters,

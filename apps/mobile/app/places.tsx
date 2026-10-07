@@ -69,6 +69,7 @@ export default function PlacesScreen() {
   const [selectedLearnedPlace, setSelectedLearnedPlace] = useState<MobileLearnedPlace | null>(null);
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
   const [savingRole, setSavingRole] = useState<PlaceRole | null>(null);
+  const [loadFailed, setLoadFailed] = useState(false);
   const roleSaveInFlight = useRef(false);
 
   const load = useCallback(async (options?: { refresh?: boolean; silent?: boolean }) => {
@@ -76,6 +77,7 @@ export default function PlacesScreen() {
     try {
       const bootstrap = await fetchBootstrap();
       setData(bootstrap);
+      setLoadFailed(false);
       void backfillLearnedPlaceLocations(bootstrap.learnedPlaces ?? []).then((resolved) => {
         if (resolved.length === 0) return;
         setData((current) => current ? mergeLearnedPlaceResolutions(current, resolved) : current);
@@ -85,6 +87,7 @@ export default function PlacesScreen() {
         router.replace("/");
         return;
       }
+      setLoadFailed(true);
       if (!options?.silent) {
         Alert.alert("Places", error instanceof Error ? error.message : "Unable to load places.");
       }
@@ -384,7 +387,7 @@ export default function PlacesScreen() {
                 <Reanimated.View key={slot.role} layout={localLayoutTransition(reduceMotion)}>
                   <PlaceRoleSlotRow
                     busy={savingRole !== null || !data}
-                    loading={!data}
+                    loading={!data ? (loadFailed ? "failed" : "loading") : null}
                     saving={savingRole === slot.role}
                     slot={slot}
                     onPress={() => chooseRolePlace(slot)}
@@ -522,14 +525,19 @@ function PlaceRoleSlotRow({
   theme
 }: {
   busy: boolean;
-  loading: boolean;
+  /** Before the first bootstrap: still loading, or it failed (pull to refresh retries). */
+  loading: "loading" | "failed" | null;
   saving: boolean;
   slot: PlaceRoleSlot<RolePlace>;
   onPress: () => void;
   styles: MobileStyles;
   theme: MobileTheme;
 }) {
-  const detail = loading ? "Loading…" : slot.place ? slot.secondary ?? `${slot.place.radiusMeters}m radius` : "Not set";
+  const detail = loading === "loading"
+    ? "Loading…"
+    : loading === "failed"
+      ? "Couldn't load your places. Pull down to try again."
+      : slot.place ? slot.secondary ?? `${slot.place.radiusMeters}m radius` : "Not set";
   return (
     <Pressable
       accessibilityHint={`Choose which saved place is ${slot.label}.`}
@@ -545,11 +553,13 @@ function PlaceRoleSlotRow({
         <Text style={styles.placeName} numberOfLines={1}>{slot.label}</Text>
         <Text style={styles.placeMeta} numberOfLines={2}>{detail}</Text>
       </View>
-      <View style={styles.placeActions}>
-        <View style={styles.learnedPlaceSaveButton}>
-          <Text style={styles.learnedPlaceSaveButtonText}>{saving ? "Saving…" : slot.place || loading ? "Change" : "Set"}</Text>
+      {loading ? null : (
+        <View style={styles.placeActions}>
+          <View style={styles.learnedPlaceSaveButton}>
+            <Text style={styles.learnedPlaceSaveButtonText}>{saving ? "Saving…" : slot.place ? "Change" : "Set"}</Text>
+          </View>
         </View>
-      </View>
+      )}
     </Pressable>
   );
 }
