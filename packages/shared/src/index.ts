@@ -73,7 +73,12 @@ export {
   placeRoleLabel,
   placeSecondaryName,
   previousRolePlaceName,
-  type PlaceRole
+  initialPreviousPlaceName,
+  placeChoiceLabel,
+  placeRoleRequest,
+  placeRoleSlots,
+  type PlaceRole,
+  type PlaceRoleSlot
 } from "./placeRoles";
 export {
   DAYFRAME_BLOCKS,

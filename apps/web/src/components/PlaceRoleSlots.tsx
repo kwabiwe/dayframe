@@ -3,15 +3,16 @@
 import Link from "next/link";
 import { Briefcase, House, Plus } from "lucide-react";
 import { useRef, useState } from "react";
-import { placeRoleLabel, type PlaceRole } from "@dayframe/shared";
-import type { PlaceRow } from "@/lib/queries";
-import { clientFetch } from "@/lib/client-auth-fetch";
 import {
   initialPreviousPlaceName,
   placeChoiceLabel,
+  placeRoleLabel,
   placeRoleRequest,
-  placeRoleSlots
-} from "@/lib/place-role-slots";
+  placeRoleSlots,
+  type PlaceRole
+} from "@dayframe/shared";
+import type { PlaceRow } from "@/lib/queries";
+import { clientFetch } from "@/lib/client-auth-fetch";
 import { Button, ModalDialog, SelectField, TextField } from "./ui/Primitives";
 
 type Editing = {

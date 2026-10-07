@@ -1,3 +1,5 @@
+import type { PlaceRole } from "@dayframe/shared";
+
 export const DEFAULT_PLACE_RADIUS_METERS = 100;
 export const MIN_PLACE_RADIUS_METERS = 25;
 export const MAX_PLACE_RADIUS_METERS = 2000;
@@ -112,4 +114,9 @@ export function suggestedPlaceNameFromGeocode(result?: ReverseGeocodeResult | nu
     result?.region
   ];
   return candidates.find((value): value is string => typeof value === "string" && value.trim().length > 0)?.trim() ?? "";
+}
+
+/** Bootstrap places from an older server have no `role`; treat that as no role. */
+export function withRole<T extends { role?: PlaceRole | null }>(place: T): T & { role: PlaceRole | null } {
+  return { ...place, role: place.role ?? null };
 }

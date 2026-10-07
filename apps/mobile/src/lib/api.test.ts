@@ -114,6 +114,7 @@ const {
   syncQueue,
   updateCategory,
   updatePlace,
+  setPlaceRole,
   updateQueuedTimerStart,
   updateTimeEntry,
   archiveCategory
@@ -2247,6 +2248,44 @@ describe("mobile API client", () => {
         })
       })
     );
+  });
+
+  it("adds a place straight into the Home slot through the hosted places API", async () => {
+    storeBoundSession("session-token");
+    const savedPlace = { id: "30000000-0000-4000-8000-000000000002", name: "1 Test Street", role: "home", radiusMeters: 100, priority: 5 };
+    const fetchMock = vi.fn(() => Promise.resolve(jsonResponse({ ok: true, place: savedPlace }, 201)));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await createPlace(
+      { name: "1 Test Street", latitude: 51.5, longitude: -0.12, radiusMeters: 100, priority: 5 },
+      { role: "home", previousPlaceName: "Previous home" }
+    );
+
+    expect(result.place).toEqual(savedPlace);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock).toHaveBeenCalledWith("https://dayframe.test/api/places", expect.objectContaining({ method: "POST" }));
+    expect(JSON.parse((fetchMock.mock.calls[0] as unknown as [string, RequestInit])[1].body as string)).toEqual(expect.objectContaining({
+      name: "1 Test Street", role: "home", previousPlaceName: "Previous home", autoStart: false
+    }));
+  });
+
+  it("moves a place role through the hosted role API and surfaces conflicts", async () => {
+    storeBoundSession("session-token");
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(jsonResponse({ ok: true, role: "home", placeId: "place-2", previousPlaceId: "place-1" }, 200))
+      .mockResolvedValueOnce(jsonResponse({ error: "Another change to this place role happened at the same time. Try again.", code: "place_role_conflict" }, 409));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(setPlaceRole({ role: "home", placeId: "place-2", previousPlaceName: "Previous home" }))
+      .resolves.toEqual(expect.objectContaining({ placeId: "place-2", previousPlaceId: "place-1" }));
+    expect(fetchMock).toHaveBeenCalledWith(
+      "https://dayframe.test/api/places/role",
+      expect.objectContaining({
+        method: "PUT",
+        body: JSON.stringify({ role: "home", placeId: "place-2", previousPlaceName: "Previous home" })
+      })
+    );
+    await expect(setPlaceRole({ role: "home", placeId: "place-2", previousPlaceName: null })).rejects.toThrow(/Try again/);
   });
 
   it("ignores learned places through the hosted API", async () => {

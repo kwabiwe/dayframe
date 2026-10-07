@@ -4,11 +4,16 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { LocateFixed, MapPin } from "lucide-react";
 import { useCallback, useMemo, useRef, useState } from "react";
-import { placeRoleLabel, previousRolePlaceName, type PlaceRole } from "@dayframe/shared";
+import {
+  placeRoleLabel,
+  placeRoleRequest,
+  placeRoleSlots,
+  previousRolePlaceName,
+  type PlaceRole
+} from "@dayframe/shared";
 import type { CategoryRow, LearnedPlaceRow, PlaceRow } from "@/lib/queries";
 import { clientFetch } from "@/lib/client-auth-fetch";
 import type { WebPlaceSuggestion } from "@/lib/place-search";
-import { placeRoleRequest, placeRoleSlots } from "@/lib/place-role-slots";
 import {
   applyWebPlaceSuggestion,
   DEFAULT_WEB_PLACE_RADIUS_METERS,

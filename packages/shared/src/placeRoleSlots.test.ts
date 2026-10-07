@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { initialPreviousPlaceName, placeChoiceLabel, placeRoleRequest, placeRoleSlots } from "./place-role-slots";
+import { initialPreviousPlaceName, placeChoiceLabel, placeRoleRequest, placeRoleSlots } from "./index";
 
 const home = { id: "home", name: "12 Example Street", role: "home" as const };
 const flat = { id: "flat", name: "34 Sample Road", role: null };

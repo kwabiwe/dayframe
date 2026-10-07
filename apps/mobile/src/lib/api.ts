@@ -15,6 +15,7 @@ import {
   type LocationRolloutMode,
   type LocationReviewAction,
   type LocationReviewEvidenceDto,
+  type PlaceRole,
   type RecentActivitySuggestion,
   type TimerStateFingerprint
 } from "@dayframe/shared";
@@ -213,6 +214,8 @@ export type MobileBootstrap = {
   places: Array<{
     id: string;
     name: string;
+    /** Home or Work; older servers omit it. The interface shows the role label instead of the name. */
+    role?: PlaceRole | null;
     latitude?: number | null;
     longitude?: number | null;
     radiusMeters: number;
@@ -1740,8 +1743,10 @@ export async function archiveCategory(id: string) {
   return readJsonResponse(response);
 }
 
-export async function createPlace(input: { name: string } & PlaceMutationInput) {
-  if (input.learnedPlaceId) {
+export type NewPlaceRole = { role: PlaceRole; previousPlaceName?: string | null };
+
+export async function createPlace(input: { name: string } & PlaceMutationInput, newRole?: NewPlaceRole) {
+  if (input.learnedPlaceId || newRole) {
     const response = await mobileFetch(`${DAYFRAME_API_BASE}/api/places`, {
       method: "POST",
       headers: {
@@ -1758,7 +1763,9 @@ export async function createPlace(input: { name: string } & PlaceMutationInput) 
         defaultActivityDescription: input.loggingEnabled === false ? null : input.defaultActivityDescription?.trim() || null,
         autoStart: false,
         loggingEnabled: input.loggingEnabled !== false,
-        learnedPlaceId: input.learnedPlaceId
+        learnedPlaceId: input.learnedPlaceId,
+        // Added straight into the Home or Work slot, renaming the old holder if asked.
+        ...(newRole ? { role: newRole.role, previousPlaceName: newRole.previousPlaceName ?? null } : {})
       })
     });
     if (response.status === 401) {
@@ -1795,6 +1802,28 @@ export async function createPlace(input: { name: string } & PlaceMutationInput) 
     throw new Error("Place was saved, but the refreshed place list did not include it.");
   }
   return { ok: true, place };
+}
+
+/** Moves the Home or Work role to `placeId` (null empties the slot); past entries never move. */
+export async function setPlaceRole(input: { role: PlaceRole; placeId: string | null; previousPlaceName: string | null }) {
+  const response = await mobileFetch(`${DAYFRAME_API_BASE}/api/places/role`, {
+    method: "PUT",
+    headers: {
+      "Content-Type": "application/json",
+      ...(await authHeaders())
+    },
+    body: JSON.stringify(input)
+  });
+  if (response.status === 401) {
+    throw new AuthRequiredError();
+  }
+  if (!response.ok) throw new Error(await errorMessage(response, "Unable to update this place"));
+  const result = await readApiJson<{ role: PlaceRole; placeId: string | null; previousPlaceId: string | null }>(
+    response,
+    "Unable to update this place"
+  );
+  if (!result.ok) throw new Error(result.message);
+  return result.payload;
 }
 
 export async function ignoreLearnedPlace(id: string) {

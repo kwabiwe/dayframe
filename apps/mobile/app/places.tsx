@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
+  ActionSheetIOS,
   Alert,
   Modal,
   Pressable,
@@ -13,6 +14,16 @@ import * as Clipboard from "expo-clipboard";
 import { router, useFocusEffect } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
 import Svg, { Path } from "react-native-svg";
+import {
+  initialPreviousPlaceName,
+  placeDisplayName,
+  placeRoleRequest,
+  placeRoleSlots,
+  placeSecondaryName,
+  type PlaceRole,
+  type PlaceRoleSlot
+} from "@dayframe/shared";
+import { DayframeIcon } from "@/components/icons/DayframeIcon";
 import { SheetMutationProgress } from "@/components/SheetMutationProgress";
 import {
   SwipeDismissSheet,
@@ -24,6 +35,7 @@ import {
   fetchBootstrap,
   forgetLearnedPlace,
   ignoreLearnedPlace,
+  setPlaceRole,
   type MobileBootstrap,
   type MobileLearnedPlace,
   type MobilePlace
@@ -31,6 +43,8 @@ import {
 import { refreshGeofencesForPlaces } from "@/lib/geofence";
 import { backfillLearnedPlaceLocations } from "@/lib/locationGeocoding";
 import { applyAfterSuccessfulMutation } from "@/lib/localMutation";
+import { placeRoleSheet } from "@/lib/placeRoleSheet";
+import { withRole } from "@/lib/places";
 import {
   copyLearnedPlaceDetail,
   learnedPlaceDetailValues
@@ -55,6 +69,8 @@ export default function PlacesScreen() {
   const [forgettingLearnedId, setForgettingLearnedId] = useState<string | null>(null);
   const [selectedLearnedPlace, setSelectedLearnedPlace] = useState<MobileLearnedPlace | null>(null);
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
+  const [savingRole, setSavingRole] = useState<PlaceRole | null>(null);
+  const roleSaveInFlight = useRef(false);
 
   const load = useCallback(async (options?: { refresh?: boolean; silent?: boolean }) => {
     if (options?.refresh) setRefreshing(true);
@@ -106,10 +122,108 @@ export default function PlacesScreen() {
     router.push({ pathname: "/place-editor", params: { mode: "edit", placeId: place.id } } as never);
   }
 
+  function chooseRolePlace(slot: PlaceRoleSlot<RolePlace>) {
+    if (roleSaveInFlight.current) return;
+    setStatusMessage(null);
+    const rolePlaces = places.map(withRole);
+    if (rolePlaces.length === 0) {
+      router.push({ pathname: "/place-editor", params: { mode: "create", role: slot.role } } as never);
+      return;
+    }
+    const sheet = placeRoleSheet(slot, rolePlaces);
+    ActionSheetIOS.showActionSheetWithOptions(
+      {
+        title: sheet.title,
+        options: sheet.options,
+        cancelButtonIndex: sheet.cancelButtonIndex,
+        destructiveButtonIndex: sheet.destructiveButtonIndex
+      },
+      (index) => {
+        const action = sheet.actions[index];
+        if (!action) return;
+        if (action.kind === "add") {
+          router.push({ pathname: "/place-editor", params: { mode: "create", role: slot.role } } as never);
+          return;
+        }
+        if (action.kind === "clear") {
+          Alert.alert(
+            `Clear ${slot.label}?`,
+            `The place stays saved and keeps its entries; it just stops being ${slot.label}.`,
+            [
+              { text: "Cancel", style: "cancel" },
+              { text: "Clear", style: "destructive", onPress: () => void saveRole(slot, null, null) }
+            ]
+          );
+          return;
+        }
+        const target = rolePlaces.find((place) => place.id === action.placeId);
+        if (target) confirmRoleTarget(slot, target);
+      }
+    );
+  }
+
+  function confirmRoleTarget(slot: PlaceRoleSlot<RolePlace>, target: RolePlace) {
+    const continueWithRename = () => {
+      const holder = slot.previousHolder;
+      if (!holder || holder.id === target.id) {
+        void saveRole(slot, target.id, null);
+        return;
+      }
+      // Moving Home: offer to rename the old place so its entries don't read as an address.
+      Alert.prompt(
+        `Rename the old ${slot.label.toLowerCase()}?`,
+        "Its past entries stay there and keep this name.",
+        [
+          { text: "Keep name", style: "cancel", onPress: () => void saveRole(slot, target.id, null) },
+          { text: "Rename", onPress: (value?: string) => void saveRole(slot, target.id, value ?? null) }
+        ],
+        "plain-text",
+        initialPreviousPlaceName(slot.role, holder, target)
+      );
+    };
+    if (target.role && target.role !== slot.role) {
+      const otherLabel = target.role === "home" ? "Home" : "Work";
+      Alert.alert(
+        `Make this place ${slot.label}?`,
+        `This place is your ${otherLabel}, so ${otherLabel} will be empty.`,
+        [
+          { text: "Cancel", style: "cancel" },
+          { text: "Continue", onPress: continueWithRename }
+        ]
+      );
+      return;
+    }
+    continueWithRename();
+  }
+
+  async function saveRole(slot: PlaceRoleSlot<RolePlace>, targetId: string | null, previousPlaceName: string | null) {
+    if (roleSaveInFlight.current) return;
+    roleSaveInFlight.current = true;
+    setSavingRole(slot.role);
+    try {
+      await setPlaceRole(placeRoleRequest({
+        role: slot.role,
+        targetId,
+        holder: targetId ? slot.previousHolder : slot.place,
+        previousPlaceName: previousPlaceName ?? ""
+      }));
+      await refreshAfterPlaceChange({ prefix: targetId ? `${slot.label} updated.` : `${slot.label} cleared.` });
+    } catch (error) {
+      if (error instanceof AuthRequiredError) {
+        router.replace("/");
+        return;
+      }
+      Alert.alert("Places", error instanceof Error ? error.message : `Unable to update ${slot.label}.`);
+    } finally {
+      roleSaveInFlight.current = false;
+      setSavingRole(null);
+    }
+  }
+
   function confirmDeletePlace(place: MobilePlace) {
     Alert.alert(
       "Delete place",
-      `Delete ${place.name}? Existing time entries keep their time data, but this place label will be removed.`,
+      `Delete ${placeDisplayName(withRole(place))}? ${place.role ? `That empties the ${placeDisplayName(withRole(place))} slot. ` : ""}Existing time entries keep their time data, but this place label will be removed.`,
       [
         { text: "Cancel", style: "cancel" },
         {
@@ -273,6 +387,7 @@ export default function PlacesScreen() {
   }
 
   const places = data?.places ?? [];
+  const roleSlots = placeRoleSlots(places.map(withRole));
   const learnedPlaces = (data?.learnedPlaces ?? []).filter(
     (learnedPlace) => learnedPlace.classification === "place_candidate"
   );
@@ -307,6 +422,25 @@ export default function PlacesScreen() {
         }
       >
         <View style={styles.contentStack}>
+          {data ? (
+            <View style={styles.panel}>
+              <Text accessibilityRole="header" style={styles.sectionTitle}>Home and Work</Text>
+              <Text style={styles.muted}>Trips and time away are named after these.</Text>
+              <View style={styles.placeList}>
+                {roleSlots.map((slot) => (
+                  <PlaceRoleSlotRow
+                    key={slot.role}
+                    busy={savingRole !== null}
+                    saving={savingRole === slot.role}
+                    slot={slot}
+                    onPress={() => chooseRolePlace(slot)}
+                    styles={styles}
+                    theme={theme}
+                  />
+                ))}
+              </View>
+            </View>
+          ) : null}
           <View style={styles.panel}>
             <Text style={styles.muted}>Save locations Dayframe should recognise.</Text>
             <View style={styles.buttonRow}>
@@ -405,6 +539,48 @@ export default function PlacesScreen() {
   );
 }
 
+type RolePlace = MobilePlace & { role: PlaceRole | null };
+
+function PlaceRoleSlotRow({
+  busy,
+  saving,
+  slot,
+  onPress,
+  styles,
+  theme
+}: {
+  busy: boolean;
+  saving: boolean;
+  slot: PlaceRoleSlot<RolePlace>;
+  onPress: () => void;
+  styles: MobileStyles;
+  theme: MobileTheme;
+}) {
+  const detail = slot.place ? slot.secondary ?? `${slot.place.radiusMeters}m radius` : "Not set";
+  return (
+    <Pressable
+      accessibilityHint={`Choose which saved place is ${slot.label}.`}
+      accessibilityLabel={`${slot.label}, ${detail}`}
+      accessibilityRole="button"
+      accessibilityState={{ busy: saving, disabled: busy }}
+      disabled={busy}
+      onPress={onPress}
+      style={({ pressed }) => [styles.placeRow, busy && !saving ? styles.buttonDisabled : null, pressed ? styles.buttonPressed : null]}
+    >
+      <DayframeIcon color={theme.accent} glyph={slot.role === "home" ? "house" : "briefcase"} />
+      <View style={styles.placeTextStack}>
+        <Text style={styles.placeName} numberOfLines={1}>{slot.label}</Text>
+        <Text style={styles.placeMeta} numberOfLines={2}>{detail}</Text>
+      </View>
+      <View style={styles.placeActions}>
+        <View style={styles.learnedPlaceSaveButton}>
+          <Text style={styles.learnedPlaceSaveButtonText}>{saving ? "Saving…" : slot.place ? "Change" : "Set"}</Text>
+        </View>
+      </View>
+    </Pressable>
+  );
+}
+
 function PlaceRow({
   place,
   categories,
@@ -431,7 +607,10 @@ function PlaceRow({
     <View style={styles.placeRow}>
       <MapPinGlyph color={theme.accent} />
       <View style={styles.placeTextStack}>
-        <Text style={styles.placeName} numberOfLines={1}>{place.name}</Text>
+        <Text style={styles.placeName} numberOfLines={1}>{placeDisplayName(withRole(place))}</Text>
+        {placeSecondaryName(withRole(place)) ? (
+          <Text style={styles.placeMeta} numberOfLines={1}>{placeSecondaryName(withRole(place))}</Text>
+        ) : null}
         {visitLoggingEnabled && place.defaultActivityDescription ? (
           <Text style={styles.placeMeta} numberOfLines={2}>
             {place.defaultActivityDescription}
@@ -445,7 +624,7 @@ function PlaceRow({
       </View>
       <View style={styles.placeActions}>
         <Pressable
-          accessibilityLabel={`Edit ${place.name}`}
+          accessibilityLabel={`Edit ${placeDisplayName(withRole(place))}`}
           accessibilityRole="button"
           style={pressable(styles.categoryIconButton, styles.buttonPressed)}
           onPress={onEdit}
@@ -453,7 +632,7 @@ function PlaceRow({
           <PencilGlyph color={theme.accent} />
         </Pressable>
         <Pressable
-          accessibilityLabel={`Delete ${place.name}`}
+          accessibilityLabel={`Delete ${placeDisplayName(withRole(place))}`}
           accessibilityRole="button"
           disabled={deleting}
           style={({ pressed }) => [
