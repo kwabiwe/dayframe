@@ -51,6 +51,7 @@ import { TodayGoalFrame } from "./today/TodayGoalFrame";
 import { TodayReviewNudge } from "./today/TodayReviewNudge";
 import { TodayBlockRows } from "./today/TodayBlockRows";
 import { EarlierThisWeek } from "./today/EarlierThisWeek";
+import { TodayRibbonSection } from "./today/TodayRibbon";
 import { buildEarlierThisWeek, EARLIER_DAYS } from "@/lib/earlierThisWeek";
 import { buildTodayGoalFrame } from "@/lib/todayGoalFrame";
 import {
@@ -1346,17 +1347,27 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
     [historySourceEntries]
   );
   const minuteNow = minuteClock(now, newestShownMs);
+  // Logged entries only: Review-needed time never counts on Today. Memoised so the per-second
+  // render does not hand the Review presentation (and the ribbon behind it) a new array.
+  const loggedSourceEntries = useMemo(
+    () => historySourceEntries.filter((entry) => !isReviewNeededEntry(entry)),
+    [historySourceEntries]
+  );
   // Today shows today's blocks and the six days before it; Calendar holds everything older.
   const historySections = useMemo(
     () => buildHistoryDaySections({
       days: EARLIER_DAYS + 1,
-      entries: historySourceEntries.filter((entry) => !isReviewNeededEntry(entry)),
+      entries: loggedSourceEntries,
       nowMs: minuteNow
     }),
-    [historySourceEntries, minuteNow]
+    [loggedSourceEntries, minuteNow]
   );
   const todaySections = useMemo(() => historySections.filter((section) => section.isToday), [historySections]);
   const earlierDays = useMemo(() => buildEarlierThisWeek(historySections, minuteNow), [historySections, minuteNow]);
+  const todayRibbonEntries = useMemo(
+    () => (todaySections[0]?.entries ?? []).map(({ entry }) => entry),
+    [todaySections]
+  );
   const categoryIconById = useMemo(
     () => new Map((data?.categories ?? []).map((category) => [category.id, category.icon ?? null])),
     [data?.categories]
@@ -1388,11 +1399,11 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
   // Whole minutes only, so the goal frame reads the per-minute clock (investigation 2026-10-07).
   const todayGoalFrame = useMemo(
     () => buildTodayGoalFrame({
-      entries: historySourceEntries.filter((entry) => !isReviewNeededEntry(entry)),
+      entries: loggedSourceEntries,
       goalMinutes: data?.user.dailyGoalMinutes,
       nowMs: minuteNow,
     }),
-    [data?.user.dailyGoalMinutes, historySourceEntries, minuteNow]
+    [data?.user.dailyGoalMinutes, loggedSourceEntries, minuteNow]
   );
   const activeCategoryColor = displayedActiveEntry?.categoryName
     ? paletteColorFor(
@@ -1848,6 +1859,18 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
       return dayKey;
     });
   }, []);
+
+  // One stable handler for Today's rows and ribbon, so the per-second header render does not
+  // re-render the memoised ribbon. The latest editors are read through the ref.
+  const openTodayEntryRef = useRef<(entry: TimeEntry) => void>(() => undefined);
+  openTodayEntryRef.current = (entry: TimeEntry) => {
+    if (!entry.stoppedAt) {
+      presentActiveEditor("existing_active_timer");
+      return;
+    }
+    presentCompletedEntry({ ...entry, isActive: false });
+  };
+  const openTodayEntry = useCallback((entry: TimeEntry) => openTodayEntryRef.current(entry), []);
 
   // "Earlier this week" on Today opens that day in the Calendar tab (same provider state).
   const openCalendarDay = useCallback((dayKey: string) => {
@@ -2405,7 +2428,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
       <TodayReviewPresentationProvider
         bootstrap={data}
         dashboardEntries={historySourceEntries}
-        manualProjectedEntries={historySourceEntries.filter((entry) => !isReviewNeededEntry(entry))}
+        manualProjectedEntries={loggedSourceEntries}
         isFocused={isFocused}
         nowMs={now}
         refreshGeneration={todayPresentationRefreshGeneration}
@@ -2467,6 +2490,14 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
                 runningActivityId={displayedActiveEntry?.categoryId ?? null}
                 theme={theme}
               />
+              <Reanimated.View layout={localLayoutTransition(reduceMotion)}>
+                <TodayRibbonSection
+                  entries={todayRibbonEntries}
+                  nowMs={minuteNow}
+                  onOpenEntry={openTodayEntry}
+                  theme={theme}
+                />
+              </Reanimated.View>
               {/* Moves with the timer card and mosaic above it (Reanimated owns Today motion). */}
               <Reanimated.View layout={localLayoutTransition(reduceMotion)}>
                 <TodayReviewNudge
@@ -2485,13 +2516,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
               groups={groupHistoryDayEntries(item.entries)}
               nowMs={minuteNow}
               onDeleteEntries={scheduleHistoryDeletion}
-              onOpenEntry={(entry) => {
-                if (!entry.stoppedAt) {
-                  presentActiveEditor("existing_active_timer");
-                  return;
-                }
-                presentCompletedEntry({ ...entry, isActive: false });
-              }}
+              onOpenEntry={openTodayEntry}
               onReplayEntry={(entry) => {
                 startFromToday(
                   entry.categoryId,
