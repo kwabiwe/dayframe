@@ -68,6 +68,7 @@ import { TodayReviewPresentationProvider } from "./today/TodayReviewPresentation
 import { AccountAvatarButton } from "./today/AccountAvatarButton";
 import { TodayGoalFrame } from "./today/TodayGoalFrame";
 import { TodayReviewNudge } from "./today/TodayReviewNudge";
+import { TodayBlockRows } from "./today/TodayBlockRows";
 import { buildTodayGoalFrame } from "@/lib/todayGoalFrame";
 import {
   AuthRequiredError,
@@ -2495,32 +2496,53 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
               </Reanimated.View>
             </Animated.View>
           )}
-          renderItem={({ item }) => (
-            <HistoryDayCard
-              activeTimerRunning={Boolean(displayedActiveEntry)}
-              now={minuteNow}
-              onDeleteEntries={scheduleHistoryDeletion}
-              onOpenEntry={(entry) => {
-                if (!entry.stoppedAt) {
-                  presentActiveEditor("existing_active_timer");
-                  return;
-                }
-                presentCompletedEntry({ ...entry, isActive: false });
-              }}
-              onReplayEntry={(entry) => {
-                startFromToday(
-                  entry.categoryId,
-                  entry.description ?? "",
-                  entry.tagNames ?? entry.tags?.map((tag) => tag.name) ?? []
-                );
-              }}
-              activityIconFor={(categoryId) => (categoryId ? categoryIconById.get(categoryId) ?? null : null)}
-              rowLanding={rowLanding}
-              section={item}
-              styles={styles}
-              theme={theme}
-            />
-          )}
+          renderItem={({ item }) => {
+            const openEntry = (entry: TimeEntry) => {
+              if (!entry.stoppedAt) {
+                presentActiveEditor("existing_active_timer");
+                return;
+              }
+              presentCompletedEntry({ ...entry, isActive: false });
+            };
+            const replayEntry = (entry: TimeEntry) => {
+              startFromToday(
+                entry.categoryId,
+                entry.description ?? "",
+                entry.tagNames ?? entry.tags?.map((tag) => tag.name) ?? []
+              );
+            };
+            const iconFor = (categoryId: string | null | undefined) =>
+              (categoryId ? categoryIconById.get(categoryId) ?? null : null);
+            // Today's blocks follow the Blocks prototype; earlier days keep the history card until
+            // "Earlier this week" replaces them (parity step 2a-2b).
+            return item.isToday ? (
+              <TodayBlockRows
+                activeTimerRunning={Boolean(displayedActiveEntry)}
+                activityIconFor={iconFor}
+                groups={groupHistoryDayEntries(item.entries)}
+                nowMs={minuteNow}
+                onDeleteEntries={scheduleHistoryDeletion}
+                onOpenEntry={openEntry}
+                onReplayEntry={replayEntry}
+                reduceMotion={reduceMotion}
+                rowLanding={rowLanding}
+                theme={theme}
+              />
+            ) : (
+              <HistoryDayCard
+                activeTimerRunning={Boolean(displayedActiveEntry)}
+                now={minuteNow}
+                onDeleteEntries={scheduleHistoryDeletion}
+                onOpenEntry={openEntry}
+                onReplayEntry={replayEntry}
+                activityIconFor={iconFor}
+                rowLanding={rowLanding}
+                section={item}
+                styles={styles}
+                theme={theme}
+              />
+            );
+          }}
           ItemSeparatorComponent={() => <View style={styles.historyDayGap} />}
           showsVerticalScrollIndicator={false}
         />

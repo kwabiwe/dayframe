@@ -93,6 +93,7 @@ export const DAYFRAME_APP_ICONS = {
   places: "map-pin",
   account: "circle-user-round",
   start: "play",
+  startAgain: "rotate-ccw",
   stop: "square",
   add: "plus",
   edit: "pencil",

@@ -27,7 +27,7 @@ const GLYPHS = [
   "git-merge", "graduation-cap", "guitar", "hand-heart", "heart", "heart-pulse", "house", "inbox", "languages",
   "laptop", "library", "list-checks", "mail", "map-pin", "message-circle", "moon", "mountain", "music", "palette",
   "party-popper", "paw-print", "pen-line", "pencil", "person-standing", "phone", "pill", "pin", "plane", "play",
-  "plus", "presentation", "refresh-cw", "route", "scissors", "search", "settings", "ship", "shirt", "shopping-bag",
+  "plus", "presentation", "refresh-cw", "rotate-ccw", "route", "scissors", "search", "settings", "ship", "shirt", "shopping-bag",
   "shopping-cart", "sprout", "square", "stethoscope", "sun", "tag", "tent", "timer", "train-front", "trash-2", "tv",
   "undo-2", "user-round", "users", "utensils", "wallet", "wrench", "x"
 ];

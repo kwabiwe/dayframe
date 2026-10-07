@@ -111,7 +111,7 @@ describe("TodayTimerSurface (Blocks)", () => {
     const input = props();
     const { byLabel, text, tree } = render(input);
     expect(text("What are you working on?").props.maxFontSizeMultiplier).toBe(1.35);
-    expect(text("Start an activity").props.accessibilityRole).toBe("header");
+    expect(text("Start a block").props.accessibilityRole).toBe("header");
     expect(flatStyle(byLabel("Start task").props.style({ pressed: false })).backgroundColor).toBe(DAYFRAME_THEME.dark.accent);
 
     act(() => byLabel("Start timer and add details").props.onPress());

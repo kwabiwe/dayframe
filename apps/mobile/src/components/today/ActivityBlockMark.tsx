@@ -17,17 +17,22 @@ export function ActivityBlockMark({
   categoryIcon,
   categoryName,
   entryId,
+  height = ACTIVITY_BLOCK_MARK_SIZE,
   landing,
   reduceMotion,
   theme,
+  width = ACTIVITY_BLOCK_MARK_SIZE,
 }: {
   categoryColor: string | null;
   categoryIcon: string | null;
   categoryName: string | null;
   entryId: string;
+  /** Today's blocks size the block by duration; history rows keep the square mark. */
+  height?: number;
   landing: LandingRequest | null;
   reduceMotion: boolean;
   theme: MobileTheme;
+  width?: number;
 }) {
   const colors = useMemo(() => {
     if (!categoryName) return { fill: theme.surfaceMuted, text: theme.textSecondary };
@@ -44,7 +49,7 @@ export function ActivityBlockMark({
     <Reanimated.View
       accessibilityElementsHidden
       importantForAccessibility="no-hide-descendants"
-      style={[styles.mark, { backgroundColor: colors.fill }, landingStyle]}
+      style={[styles.mark, { backgroundColor: colors.fill, height, width }, landingStyle]}
       testID={`activity-block-${entryId}`}
     >
       <ActivityIcon color={colors.text} icon={categoryIcon} name={categoryName} size={16} />
