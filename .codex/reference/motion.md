@@ -33,7 +33,7 @@ If one of these states does not apply, say so. Do not leave it implicit.
 | Drag, swipe, pinch, scroll, or other direct manipulation | One gesture and animation owner that updates continuously with the fingers |
 | Platform interaction that React Native cannot reproduce reliably | A targeted Swift/SwiftUI surface that preserves the documented React ownership boundary |
 
-`LayoutAnimation` (and `scheduleLayoutTransition` in `apps/mobile/src/lib/motion.ts`, which calls it) does nothing in this app: with React Native 0.85 on the New Architecture, Reanimated 4's legacy layout-animation proxy replaces the UIManager animation delegate, and its `uiManagerDidConfigureNextLayoutAnimation` is empty. Never name it as the owner of a transition; use Reanimated `layout`, `entering` and `exiting` (the `localLayoutTransition` and presence helpers) instead. Existing calls are inert and due for removal.
+`LayoutAnimation`, including `Keyboard.scheduleLayoutAnimation`, does nothing in this app: with React Native 0.85 on the New Architecture, Reanimated 4's legacy layout-animation proxy replaces the UIManager animation delegate, and its `uiManagerDidConfigureNextLayoutAnimation` is empty. The old `scheduleLayoutTransition` helper and every call were removed on 7 October 2026, and `layoutAnimationRemoval.contract.test.ts` keeps them out. Never name it as the owner of a transition; use Reanimated `layout`, `entering` and `exiting` (the `localLayoutTransition` and presence helpers) instead.
 
 Do not introduce Swift solely to make an otherwise ordinary React Native entrance, exit, or list reflow smooth. Do not animate the same state change from multiple layers.
 

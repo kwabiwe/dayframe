@@ -383,7 +383,6 @@ function ReportSheet({
 
   useEffect(() => {
     const update = (event: KeyboardEvent) => {
-      Keyboard.scheduleLayoutAnimation(event);
       setKeyboardInset(
         keyboardInsetFromScreenY({
           keyboardScreenY: event.endCoordinates.screenY,
@@ -403,7 +402,6 @@ function ReportSheet({
     const hide = Keyboard.addListener(
       Platform.OS === "ios" ? "keyboardWillHide" : "keyboardDidHide",
       (event) => {
-        Keyboard.scheduleLayoutAnimation(event);
         setKeyboardInset(0);
       },
     );

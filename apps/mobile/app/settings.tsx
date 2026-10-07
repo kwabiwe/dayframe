@@ -36,7 +36,6 @@ import {
   localLayoutTransition,
   localPresenceEntering,
   localPresenceExiting,
-  scheduleLayoutTransition,
   useReduceMotionPreference
 } from "@/lib/motion";
 import { setHapticsEnabled, useHapticsPreference } from "@/lib/haptics";
@@ -1868,7 +1867,6 @@ export default function SettingsScreen() {
               accessibilityState={{ expanded: showQueueDetails }}
               style={pressable(styles.detailsToggle, styles.buttonPressed)}
               onPress={() => {
-                scheduleLayoutTransition(reduceMotion);
                 setShowQueueDetails((current) => !current);
               }}
             >
@@ -1876,7 +1874,12 @@ export default function SettingsScreen() {
               <DisclosureChevronGlyph color={theme.textSecondary} expanded={showQueueDetails} />
             </Pressable>
             {showQueueDetails ? (
-              <View style={styles.queueDiagnosticCard}>
+              <Reanimated.View
+                entering={localPresenceEntering(reduceMotion)}
+                exiting={localPresenceExiting(reduceMotion)}
+                layout={localLayoutTransition(reduceMotion)}
+                style={styles.queueDiagnosticCard}
+              >
                 <Text {...mobileTextProps("metadata")} style={styles.label}>Queue</Text>
                 <Text {...mobileTextProps("body")} style={styles.accountMeta}>
                   Queued {queueDiagnostics.queuedCount} · Last synced {lastSyncResult?.syncedCount ?? 0} · Failed{" "}
@@ -1912,7 +1915,7 @@ export default function SettingsScreen() {
                 ) : (
                   <Text {...mobileTextProps("body")} style={styles.accountMeta}>No failed queued events.</Text>
                 )}
-              </View>
+              </Reanimated.View>
             ) : null}
             <View style={styles.queueDiagnosticCard}>
               <Text {...mobileTextProps("metadata")} style={styles.label}>Timer Stops</Text>
@@ -2183,7 +2186,6 @@ export default function SettingsScreen() {
               accessibilityState={{ expanded: showLocationTroubleshooting }}
               style={pressable(styles.detailsToggle, styles.buttonPressed)}
               onPress={() => {
-                scheduleLayoutTransition(reduceMotion);
                 setShowLocationTroubleshooting((current) => !current);
               }}
             >

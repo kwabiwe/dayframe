@@ -955,7 +955,6 @@ export function ActiveTimerEditSheet({
     function updateKeyboardInset(event: KeyboardEvent) {
       const sessionToken = activeKeyboardSessionTokenRef.current;
       if (appActivityRef.current !== "active" || sessionToken === null) return;
-      Keyboard.scheduleLayoutAnimation(event);
       const windowHeight = Dimensions.get("window").height;
       const screenHeight = Dimensions.get("screen").height;
       const nextInset = keyboardInsetFromScreenY({
@@ -1014,7 +1013,6 @@ export function ActiveTimerEditSheet({
         if (suppressDescriptionBlurDispatchRef.current) return;
         const sessionToken = activeKeyboardSessionTokenRef.current;
         if (appActivityRef.current !== "active" || sessionToken === null) return;
-        Keyboard.scheduleLayoutAnimation(event);
         keyboardTopRef.current = null;
         keyboardFrameSequenceRef.current += 1;
         dispatchSheetEvent({
