@@ -19,7 +19,9 @@ describe("Play orb wiring (Blocks parity step 3)", () => {
     const trigger = layout.slice(layout.indexOf("<NativeTabs.Trigger\n"), layout.indexOf("</NativeTabs>"));
     expect(trigger).toContain('accessibilityLabel={timerRunning ? "Stop timer" : "Start a block"}');
     expect(trigger).toMatch(/\bdisabled\b/);
-    expect(trigger).toContain("hidden={!playOrbAvailable}");
+    // Fixed for the process: toggling it at runtime would re-key the tab view and remount every tab.
+    expect(trigger).toContain("hidden={!PLAY_ORB_SLOT}");
+    expect(layout).not.toContain("usePlayOrbAvailable");
     expect(trigger).toMatch(/listeners=\{\{\s*tabPress: \(\) => requestPlayOrbTap\(\)\s*\}\}/);
     expect(trigger).toContain('name={DAYFRAME_NATIVE_TABS.orb.route}');
     expect(trigger).toContain('role="search"');
@@ -40,7 +42,11 @@ describe("Play orb wiring (Blocks parity step 3)", () => {
   it("hides with the tab bar and keeps the native item's label in step with the timer", () => {
     expect(dashboard).toContain("hidden={!playOrbAvailable || (reportsSheetPortal?.isPresented ?? false)}");
     expect(dashboard).toContain('const playOrbAvailable = authState === "authenticated" && PLAY_ORB_SUPPORTED;');
-    expect(dashboard).toContain("setPlayOrbAvailable(playOrbAvailable);");
+    expect(dashboard).not.toContain("setPlayOrbAvailable");
+    // The memoised orb only ever gets stable callbacks that run the current render's actions.
+    expect(dashboard).toContain("onTap={onPlayOrbTapStable}");
+    expect(dashboard).toContain("onChoose={onPlayOrbChooseStable}");
+    expect(dashboard).toContain("const onPlayOrbTapStable = useCallback(() => tapPlayOrbRef.current(), []);");
     expect(dashboard).toContain("setPlayOrbRunning(hasLiveActiveTimer);");
     expect(dashboard).toContain("useEffect(() => onPlayOrbTap(() => tapPlayOrbRef.current()), []);");
   });

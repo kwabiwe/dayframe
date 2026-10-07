@@ -1,10 +1,12 @@
 import { useContext } from "react";
+import { Platform } from "react-native";
 import { NativeTabs } from "expo-router/unstable-native-tabs";
 import { DayframeDashboardProvider } from "@/components/DayframeDashboard";
 import { ReportsSheetPortalContext } from "@/components/reports/ReportsSheetPortal";
 import { useMobileTheme } from "@/lib/mobileTheme";
 import { DAYFRAME_NATIVE_TABS, DAYFRAME_NATIVE_TAB_MINIMIZE_BEHAVIOR } from "@/lib/nativeTabs";
-import { requestPlayOrbTap, usePlayOrbAvailable, usePlayOrbRunning } from "@/lib/playOrbBridge";
+import { playOrbSupported } from "@/lib/playOrb";
+import { requestPlayOrbTap, usePlayOrbRunning } from "@/lib/playOrbBridge";
 
 // Generated from the shared glyphs by scripts/generate-icons.mjs (@2x/@3x picked by scale).
 const DAYFRAME_TAB_ICON_IMAGES = {
@@ -14,11 +16,16 @@ const DAYFRAME_TAB_ICON_IMAGES = {
   orb: require("../../assets/tab-icons/orb.png")
 };
 
+const PLAY_ORB_SLOT = playOrbSupported({
+  OS: Platform.OS,
+  Version: Platform.Version,
+  isPad: Platform.OS === "ios" && Platform.isPad
+});
+
 export default function DashboardTabsLayout() {
   const { theme } = useMobileTheme();
   const reportsSheetPortal = useContext(ReportsSheetPortalContext);
   const timerRunning = usePlayOrbRunning();
-  const playOrbAvailable = usePlayOrbAvailable();
 
   return (
     <DayframeDashboardProvider>
@@ -65,8 +72,9 @@ export default function DashboardTabsLayout() {
           // A system "search" item keeps its own title, so VoiceOver needs the label set here.
           accessibilityLabel={timerRunning ? "Stop timer" : "Start a block"}
           disabled
-          // Signed out, on iPad or before iOS 26 there is no orb, so there is no slot either.
-          hidden={!playOrbAvailable}
+          // On iPad or before iOS 26 there is no orb, so there is no slot either. Fixed for the
+          // process: toggling a trigger's visibility re-keys the tab view and remounts every tab.
+          hidden={!PLAY_ORB_SLOT}
           listeners={{
             tabPress: () => requestPlayOrbTap()
           }}

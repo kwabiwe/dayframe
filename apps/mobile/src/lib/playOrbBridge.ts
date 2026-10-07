@@ -8,7 +8,6 @@ import { useSyncExternalStore } from "react";
 type Listener = () => void;
 
 let running = false;
-let available = false;
 const runningListeners = new Set<Listener>();
 const tapListeners = new Set<Listener>();
 
@@ -26,24 +25,6 @@ export function usePlayOrbRunning() {
     },
     () => running,
     () => running
-  );
-}
-
-/** Whether the orb is offered at all (signed in, on a phone running iOS 26 or later). */
-export function setPlayOrbAvailable(next: boolean) {
-  if (available === next) return;
-  available = next;
-  for (const listener of runningListeners) listener();
-}
-
-export function usePlayOrbAvailable() {
-  return useSyncExternalStore(
-    (listener) => {
-      runningListeners.add(listener);
-      return () => runningListeners.delete(listener);
-    },
-    () => available,
-    () => available
   );
 }
 

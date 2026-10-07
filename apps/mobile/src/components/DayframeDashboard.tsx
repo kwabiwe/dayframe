@@ -56,7 +56,7 @@ import { TodayPullBlocks } from "./today/TodayPullBlocks";
 import { PlayOrb } from "./today/PlayOrb";
 import { ReportsSheetPortalContext } from "./reports/ReportsSheetPortal";
 import { bloomActivities, playOrbSupported } from "../lib/playOrb";
-import { onPlayOrbTap, setPlayOrbAvailable, setPlayOrbRunning } from "../lib/playOrbBridge";
+import { onPlayOrbTap, setPlayOrbRunning } from "../lib/playOrbBridge";
 
 const PLAY_ORB_SUPPORTED = playOrbSupported({
   OS: Platform.OS,
@@ -1693,11 +1693,14 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
   useEffect(() => {
     setPlayOrbRunning(hasLiveActiveTimer);
   }, [hasLiveActiveTimer]);
-  // No orb (or slot) on the sign-in screen, on iPad or before iOS 26.
+  // The coral orb needs a session and the tab bar's trailing slot (iPhone, iOS 26 or later).
   const playOrbAvailable = authState === "authenticated" && PLAY_ORB_SUPPORTED;
-  useEffect(() => {
-    setPlayOrbAvailable(playOrbAvailable);
-  }, [playOrbAvailable]);
+  // Stable callbacks that always run this render's actions: the orb is memoised, so it must never
+  // hold an older render's closures (an old live presentation would reach the Stop flight).
+  const chooseFromPlayOrbRef = useRef(chooseFromPlayOrb);
+  chooseFromPlayOrbRef.current = chooseFromPlayOrb;
+  const onPlayOrbTapStable = useCallback(() => tapPlayOrbRef.current(), []);
+  const onPlayOrbChooseStable = useCallback((activityId: string) => chooseFromPlayOrbRef.current(activityId), []);
 
   // Stable, so the flight's ghost is not re-rendered by the Dashboard's 1 s tick handing it a new callback.
   const finishStopFlight = useCallback((token: number, landed: boolean, entryId: string) => {
@@ -2859,8 +2862,8 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
       <PlayOrb
         activities={bloomActivityList}
         hidden={!playOrbAvailable || (reportsSheetPortal?.isPresented ?? false)}
-        onChoose={chooseFromPlayOrb}
-        onTap={tapPlayOrb}
+        onChoose={onPlayOrbChooseStable}
+        onTap={onPlayOrbTapStable}
         reduceMotion={reduceMotion}
         running={hasLiveActiveTimer}
         theme={theme}
