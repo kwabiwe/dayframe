@@ -7,7 +7,7 @@ import {
   routeNativeCalendarOpenEvent,
   routeNativeCalendarRefresh
 } from "./nativeCalendarPresentation";
-import { minuteClock } from "./frameClock";
+import { minuteClock, newestShownTimestamp } from "./frameClock";
 
 describe("native Calendar presentation boundary", () => {
   it("serializes fixed 24-hour boundaries, week state, totals, and resolved theme roles", () => {
@@ -247,13 +247,28 @@ describe("native Calendar presentation boundary", () => {
 });
 
 describe("native Calendar update cadence", () => {
+  // The dashboard feeds the Calendar minuteClock(now, newestShownTimestamp(entries, now)).
+  function clock(entries: MobileTimeEntry[], nowMs: number) {
+    return minuteClock(nowMs, newestShownTimestamp(entries, nowMs));
+  }
+
   it("sends SwiftUI the same model for every second of a minute while a timer runs", () => {
-    const startedAt = localTime(2026, 7, 10, 9, 0);
-    const running = entry({ id: "running", startedAt: iso(startedAt), stoppedAt: null });
+    const running = entry({ id: "running", startedAt: iso(localTime(2026, 7, 10, 9, 0)), stoppedAt: null });
     const data = bootstrap([running], { activeEntry: running });
-    const at = (seconds: number) => JSON.stringify(build(minuteClock(localTime(2026, 7, 10, 10, 0) + seconds * 1000), data).model);
+    const at = (seconds: number) => JSON.stringify(build(clock([running], localTime(2026, 7, 10, 10, 0) + seconds * 1000), data).model);
     expect(at(1)).toBe(at(59));
     expect(at(61)).not.toBe(at(1));
+  });
+
+  it("shows a timer started earlier in the current minute at once, with a positive length", () => {
+    const startedAt = localTime(2026, 7, 10, 10, 0) + 30_000;
+    const running = entry({ id: "fresh", startedAt: iso(startedAt), stoppedAt: null });
+    const data = bootstrap([running], { activeEntry: running });
+    const state = build(clock([running], startedAt + 15_000), data);
+    expect(state.model.nowMs).toBeGreaterThan(startedAt);
+    expect(state.model.entries.some((item) => item.entryId === "fresh")).toBe(true);
+    const later = build(clock([running], startedAt + 25_000), data);
+    expect(JSON.stringify(later.model)).toBe(JSON.stringify(state.model));
   });
 });
 

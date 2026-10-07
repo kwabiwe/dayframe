@@ -17,8 +17,16 @@ function sources(directory: string): string[] {
 // Investigation 2026-10-07 (dropped frames): JS-thread animations and per-second rebuilds starve frames.
 describe("mobile frame pacing", () => {
   it("never drives an RN Animated value on the JS thread", () => {
-    const offenders = [...sources(join(mobileRoot, "app")), ...sources(join(mobileRoot, "src"))]
-      .filter((path) => readFileSync(path, "utf8").includes("useNativeDriver: false"));
+    const files = ["app", "src", "modules"].flatMap((folder) => sources(join(mobileRoot, folder)));
+    const offenders = files.flatMap((path) => {
+      const source = readFileSync(path, "utf8");
+      // Every timing/spring/decay call must opt into the native driver explicitly; RN falls back to
+      // the JS driver when the flag is missing or false.
+      return [...source.matchAll(/Animated\.(timing|spring|decay)\(/g)]
+        .map((match) => source.slice(match.index, source.indexOf("})", match.index) + 2))
+        .filter((call) => !/useNativeDriver: true/.test(call))
+        .map((call) => `${path}: ${call.slice(0, 60)}`);
+    });
     expect(offenders).toEqual([]);
   });
 
@@ -27,5 +35,7 @@ describe("mobile frame pacing", () => {
     expect(dashboard).toMatch(/buildHistoryDaySections\(\{[\s\S]*?nowMs: minuteNow[\s\S]*?\}\),\s*\[historySourceEntries, minuteNow\]/);
     expect(dashboard).toMatch(/buildNativeCalendarBridgeState\(\{[\s\S]*?now: minuteNow,/);
     expect(dashboard).toMatch(/<HistoryDayCard[\s\S]*?now=\{minuteNow\}/);
+    // The native Calendar receives a stable model object between real changes.
+    expect(dashboard).toContain("model={isFocused && refreshing ? nativeCalendarModelRefreshing : nativeCalendarModel}");
   });
 });

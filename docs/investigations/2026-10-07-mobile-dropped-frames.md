@@ -22,11 +22,12 @@ Static review of every animation driver and periodic update in `apps/mobile` (ap
 ## Changes (frame-pacing PR)
 
 - `activeTimerExpansion` uses the native driver, so the Stop fade runs on the UI thread whatever the JS thread is doing.
-- `minuteClock` (`apps/mobile/src/lib/frameClock.ts`): Today's history sections, the day cards and the native Calendar model read a per-minute clock, so they are rebuilt once a minute (or when data changes) instead of every second. The live block's elapsed time still ticks every second.
-- Guardrails: `framePacing.contract.test.ts` forbids `useNativeDriver: false` anywhere in the app and pins the per-minute inputs; a Calendar test proves the model is identical for every second of a minute while a timer runs.
+- `minuteClock` (`apps/mobile/src/lib/frameClock.ts`): Today's history sections, the day cards' computations and the native Calendar model read a per-minute clock, so they are rebuilt once a minute (or when data changes) instead of every second. The clock never falls behind the newest start or stop already shown (`newestShownTimestamp`), so a timer started or a short entry stopped earlier in the current minute appears at once, with a positive length, in Today and the Calendar. The Calendar receives a stable model object between real changes, so its JSON is not re-serialised every second. The live block's elapsed time still ticks every second.
+- The Stop fade skips the no-op animation when nothing changes (idle mount) and settles at its target if interrupted.
+- Guardrails: `framePacing.contract.test.ts` requires `useNativeDriver: true` on every RN `Animated` timing, spring and decay in app, src and modules, and pins the per-minute inputs; Calendar tests prove the model is identical for every second of a minute while a timer runs and that a timer started earlier in the minute appears at once.
 
 ## Still open
 
 - Replace the inert `scheduleLayoutTransition` calls with Reanimated owners or remove them (next PR).
-- The provider still re-renders all three tabs every second because the context value changes with `now`. With the expensive work moved to per-minute inputs this is cheaper; isolating the ticking clock into the live block is the next step if the phone still shows stutter.
+- The provider still re-renders all three tabs every second because the context value changes with `now`, and the visible day cards re-render with it (`HistoryDayCard` is not memoised and receives inline callbacks); only their inner computations are skipped. If the phone still shows stutter, memoise `HistoryDayCard` with stable callbacks and isolate the ticking clock into the live block.
 - Physical-iPhone check of Stop, Start, Calendar scroll and pinch on a staging build.
