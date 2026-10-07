@@ -191,4 +191,13 @@ Optional detail status enters below the stable activity/time summary with the ex
 
 "Earlier this week" (2a-2b) moves with the rows above it under the shared layout transition (it is the list footer, not a cell, so it owns that transition) and adds no other animation: a tap plays the selection haptic and hands off to the native tab switch; its rows rebuild on the per-minute clock, never the 1 s tick, and change in place.
 
-The prototype's later Today moves (the ribbon scrub, the odometer, drop-ins) arrive with steps 2a-3 and 2b and add their own contracts here.
+## Today ribbon (Blocks parity step 2a-3)
+
+- Trigger: a horizontal drag or a tap on the strip; VoiceOver adjust/activate; the per-minute clock and entry changes.
+- Owner: one `Gesture.Race(Pan, Tap)` on the strip. The pan activates after 4 points sideways and fails after 10 points vertically, so the list keeps vertical scrolling; it reports the finger to JS, which picks the block (`ribbonHitAt`), shows the tooltip and lifts the block. The tap opens the block under it. The strip is one SVG redrawn only when its model or the hit changes (memoised; never on the 1 s tick).
+- Entrance/update/exit: the tooltip and the lifted block appear with the finger and disappear when it lifts or the gesture is cancelled; no fades, as in the prototype. Entering a different block while scrubbing plays one `tick`.
+- Interruption: a cancelled pan clears the tooltip; a tap that moves more than 8 points is not a tap.
+- Async outcome: none; opening hands off to the existing editors and Review routes.
+- Accessibility: nothing moves under Reduce Motion beyond the finger-following tooltip; VoiceOver uses the adjustable element instead of scrubbing.
+
+The prototype's later Today moves (the odometer, drop-ins, the Play orb) arrive with step 2b and later and add their own contracts here.
