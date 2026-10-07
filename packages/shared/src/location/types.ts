@@ -60,6 +60,8 @@ export type LocationEvidence = {
 export type SavedPlaceForMatching = {
   id: string;
   name: string;
+  /** Home or Work; the phone describes a role place by its label. */
+  role?: "home" | "work" | null;
   latitude: number;
   longitude: number;
   radiusMeters: number;

@@ -12,6 +12,7 @@ export type PlaceRoleAssignment = {
 };
 
 export type PlaceRoleAssignmentResult =
+  /** `previousPlaceId` is the old holder, or the first of the places named like the role that were renamed. */
   | { status: "assigned"; placeId: string | null; previousPlaceId: string | null }
   | { status: "place_not_found" };
 

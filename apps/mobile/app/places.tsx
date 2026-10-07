@@ -13,6 +13,7 @@ import * as Clipboard from "expo-clipboard";
 import { router, useFocusEffect } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
 import Svg, { Path } from "react-native-svg";
+import { placeDisplayName, placeSecondaryName } from "@dayframe/shared";
 import { SheetMutationProgress } from "@/components/SheetMutationProgress";
 import {
   SwipeDismissSheet,
@@ -31,6 +32,7 @@ import {
 import { refreshGeofencesForPlaces } from "@/lib/geofence";
 import { backfillLearnedPlaceLocations } from "@/lib/locationGeocoding";
 import { applyAfterSuccessfulMutation } from "@/lib/localMutation";
+import { withRole } from "@/lib/places";
 import {
   copyLearnedPlaceDetail,
   learnedPlaceDetailValues
@@ -109,7 +111,7 @@ export default function PlacesScreen() {
   function confirmDeletePlace(place: MobilePlace) {
     Alert.alert(
       "Delete place",
-      `Delete ${place.name}? Existing time entries keep their time data, but this place label will be removed.`,
+      `Delete ${placeDisplayName(withRole(place))}? Existing time entries keep their time data, but this place label will be removed.`,
       [
         { text: "Cancel", style: "cancel" },
         {
@@ -431,7 +433,10 @@ function PlaceRow({
     <View style={styles.placeRow}>
       <MapPinGlyph color={theme.accent} />
       <View style={styles.placeTextStack}>
-        <Text style={styles.placeName} numberOfLines={1}>{place.name}</Text>
+        <Text style={styles.placeName} numberOfLines={1}>{placeDisplayName(withRole(place))}</Text>
+        {placeSecondaryName(withRole(place)) ? (
+          <Text style={styles.placeMeta} numberOfLines={1}>{placeSecondaryName(withRole(place))}</Text>
+        ) : null}
         {visitLoggingEnabled && place.defaultActivityDescription ? (
           <Text style={styles.placeMeta} numberOfLines={2}>
             {place.defaultActivityDescription}
@@ -445,7 +450,7 @@ function PlaceRow({
       </View>
       <View style={styles.placeActions}>
         <Pressable
-          accessibilityLabel={`Edit ${place.name}`}
+          accessibilityLabel={`Edit ${placeDisplayName(withRole(place))}`}
           accessibilityRole="button"
           style={pressable(styles.categoryIconButton, styles.buttonPressed)}
           onPress={onEdit}
@@ -453,7 +458,7 @@ function PlaceRow({
           <PencilGlyph color={theme.accent} />
         </Pressable>
         <Pressable
-          accessibilityLabel={`Delete ${place.name}`}
+          accessibilityLabel={`Delete ${placeDisplayName(withRole(place))}`}
           accessibilityRole="button"
           disabled={deleting}
           style={({ pressed }) => [

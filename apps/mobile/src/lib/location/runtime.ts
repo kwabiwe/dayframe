@@ -252,7 +252,7 @@ export async function configureLocationIntelligence(bootstrap: MobileBootstrap) 
     const rolloutMode = bootstrap.locationRolloutMode ?? "v2_shadow";
     await configureLocationAccount({ ...capture.context,
       savedPlaces: bootstrap.places.flatMap(place => place.latitude == null || place.longitude == null ? [] : [{
-        id: place.id, name: place.name, latitude: place.latitude, longitude: place.longitude,
+        id: place.id, name: place.name, role: place.role ?? null, latitude: place.latitude, longitude: place.longitude,
         radiusMeters: place.radiusMeters, priority: place.priority, loggingEnabled: place.loggingEnabled
       }]),
       acceptedLearnedPlaces: (bootstrap.learnedPlaces ?? []).flatMap(place => place.status !== "accepted" ? [] : [{
