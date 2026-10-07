@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { isHomePlace, placeDisplayName, type PlaceRole } from "./placeRoles";
 export { ReportSummaryRequestSchema, ReportSummarySchema, REPORT_MAX_RANGE_MS, type ReportSummaryRequest, type ReportSummary } from "./reportSummary";
 
 export {
@@ -64,6 +65,16 @@ export {
   type DayframeStarterActivity,
   type DayframeStarterActivityKey
 } from "./starterActivities";
+export {
+  PLACE_ROLES,
+  PlaceRoleSchema,
+  isHomePlace,
+  placeDisplayName,
+  placeRoleLabel,
+  placeSecondaryName,
+  previousRolePlaceName,
+  type PlaceRole
+} from "./placeRoles";
 export {
   DAYFRAME_BLOCKS,
   blockColorsFor,
@@ -1304,6 +1315,7 @@ function normalizeRecentActivityDescription(value: string | null | undefined) {
 export type PlaceSummary = {
   id: string;
   name: string;
+  role?: PlaceRole | null;
   radiusMeters: number;
   priority: number;
   defaultProjectId?: string | null;
@@ -1377,7 +1389,7 @@ export type AutomationRuleDraftSavePlan = {
 
 export function automationRuleInputFromDraft(input: {
   draft: AutomationRuleDraft;
-  places?: Array<Pick<PlaceSummary, "id" | "name"> & Partial<Pick<PlaceSummary, "radiusMeters" | "defaultProjectId" | "defaultCategoryId" | "defaultActivityDescription">>>;
+  places?: Array<Pick<PlaceSummary, "id" | "name"> & Partial<Pick<PlaceSummary, "role" | "radiusMeters" | "defaultProjectId" | "defaultCategoryId" | "defaultActivityDescription">>>;
   categories?: Array<Pick<CategorySummary, "id" | "name">>;
 }): AutomationRuleDraftSavePlan {
   const { draft } = input;
@@ -1390,7 +1402,7 @@ export function automationRuleInputFromDraft(input: {
     blockers.push("Enter a rule request before saving.");
   }
 
-  const place = draft.placeName ? findNamedDraftItem(places, draft.placeName) : undefined;
+  const place = draft.placeName ? findDraftPlace(places, draft.placeName) : undefined;
   if (!draft.placeName) {
     blockers.push("Name a saved place in the rule request.");
   } else if (!place) {
@@ -1426,7 +1438,7 @@ export function automationRuleInputFromDraft(input: {
   }
 
   notes.unshift(
-    `Saved v1 trigger: any exit from ${place.name}. It creates review items only; confirming the review creates the time entry.`
+    `Saved v1 trigger: any exit from ${placeDisplayName(place)}. It creates review items only; confirming the review creates the time entry.`
   );
 
   const activityDescription =
@@ -1454,7 +1466,7 @@ export function automationRuleInputFromDraft(input: {
 
 export function draftAutomationRuleFromText(input: {
   text: string;
-  places?: Array<Pick<PlaceSummary, "id" | "name">>;
+  places?: Array<Pick<PlaceSummary, "id" | "name"> & Partial<Pick<PlaceSummary, "role">>>;
   categories?: Array<Pick<CategorySummary, "id" | "name">>;
 }): AutomationRuleDraft {
   const text = input.text.trim();
@@ -1597,11 +1609,12 @@ function normalizeDraftText(value: string) {
   return value.trim().toLowerCase().replace(/\s+/g, " ");
 }
 
-function inferDraftPlaceName(normalizedText: string, places: Array<Pick<PlaceSummary, "name">>) {
+function inferDraftPlaceName(normalizedText: string, places: Array<Pick<PlaceSummary, "name" | "role">>) {
   const exact = places
-    .filter((place) => normalizedText.includes(place.name.toLowerCase()))
-    .sort((left, right) => right.name.length - left.name.length)[0];
-  if (exact) return exact.name;
+    .flatMap((place) => [...new Set([placeDisplayName(place), place.name])])
+    .filter((name) => normalizedText.includes(name.toLowerCase()))
+    .sort((left, right) => right.length - left.length)[0];
+  if (exact) return exact;
   if (normalizedText.includes("chelmsford") && normalizedText.includes("station")) return "Chelmsford Station";
   if (normalizedText.includes("rail station") || normalizedText.includes("train station")) return "Train station";
   if (normalizedText.includes("gym")) return "Gym";
@@ -1623,6 +1636,13 @@ function inferDraftCategoryName(normalizedText: string, categories: Array<Pick<C
     return category?.name ?? hint.category;
   }
   return null;
+}
+
+// A role label ("Home") finds the place holding that role before a place merely named it.
+function findDraftPlace<T extends Pick<PlaceSummary, "name"> & Partial<Pick<PlaceSummary, "role">>>(places: T[], name: string) {
+  const normalizedName = name.trim().toLowerCase();
+  return places.find((place) => place.role && placeDisplayName(place).toLowerCase() === normalizedName)
+    ?? findNamedDraftItem(places, name);
 }
 
 function findNamedDraftItem<T extends { name: string }>(items: T[], name: string) {
@@ -1773,7 +1793,7 @@ export function normalizeActivityEvent(
 
   if (event.type === "geofence_enter") {
     const broadPlace = event.source === "geofence_broad" || Boolean(event.rawPayload.isBroad);
-    const isHome = place?.name.toLowerCase() === "home";
+    const isHome = isHomePlace(place);
     const projectId = matchingRule?.projectId ?? place?.defaultProjectId ?? undefined;
     const categoryId = matchingRule?.categoryId ?? place?.defaultCategoryId ?? undefined;
 
@@ -1785,7 +1805,7 @@ export function normalizeActivityEvent(
         projectId,
         categoryId,
         placeId: place?.id,
-        title: `Entered ${place?.name ?? "place"}`,
+        title: `Entered ${place ? placeDisplayName(place) : "place"}`,
         reason: "Geofence arrivals are recorded as evidence only; completed visits are reviewed after a stay or exit is known.",
         shouldClosePrevious: false
       };
@@ -1798,7 +1818,7 @@ export function normalizeActivityEvent(
       projectId,
       categoryId,
       placeId: place?.id,
-      title: `Entered ${place?.name ?? "unknown place"}`,
+      title: `Entered ${place ? placeDisplayName(place) : "unknown place"}`,
       reason: isHome
         ? "Home arrivals are intentionally ambiguous and remain raw evidence."
         : broadPlace
@@ -1810,7 +1830,7 @@ export function normalizeActivityEvent(
 
   if (event.type === "geofence_exit") {
     const broadPlace = event.source === "geofence_broad" || event.source === "ha_geofence" || Boolean(event.rawPayload.isBroad);
-    const isHome = place?.name.toLowerCase() === "home";
+    const isHome = isHomePlace(place);
     const projectId = matchingRule?.projectId ?? place?.defaultProjectId ?? undefined;
     const categoryId = matchingRule?.categoryId ?? place?.defaultCategoryId ?? undefined;
     const title = visitActivityDescription(event, place, matchingRule);
@@ -2117,7 +2137,10 @@ function findMatchingRule(
 
 function findPlaceByName(places: PlaceSummary[], value: unknown) {
   if (typeof value !== "string") return undefined;
-  return places.find((place) => place.name.toLowerCase() === value.toLowerCase());
+  const wanted = value.trim().toLowerCase();
+  // A role label ("Home") finds the place holding that role before a place merely named it.
+  return places.find((place) => place.role && placeDisplayName(place).toLowerCase() === wanted)
+    ?? places.find((place) => place.name.toLowerCase() === wanted);
 }
 
 // A starter activity is found by its key even after a rename, then by its original name.
@@ -2300,7 +2323,7 @@ function visitActivityDescription(
       ? event.rawPayload.placeName.trim()
       : "";
 
-  return place?.name ?? (payloadPlaceName || "Place visit");
+  return place ? placeDisplayName(place) : (payloadPlaceName || "Place visit");
 }
 
 function toReviewCandidate(

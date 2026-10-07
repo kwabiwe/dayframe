@@ -6,6 +6,7 @@ import {
 } from "@dayframe/shared";
 import { query } from "../db";
 import type { RequestSession } from "../session";
+import { placeDisplayNameSql } from "../place-display";
 
 type ReviewSegmentRow = {
   reviewItemId: string;
@@ -129,7 +130,7 @@ async function buildLocationReviewEvidence(
             ri.title,
             ri.notes,
             coalesce(st.place_id, cs.from_place_id) as "placeId",
-            pl.name as "placeName",
+            ${placeDisplayNameSql("pl")} as "placeName",
             null::text as "addressSummary",
             coalesce(st.device_id, cs.device_id) as "deviceId",
             st.id as "stayId",
@@ -442,7 +443,7 @@ function evidenceGaps(rows: Array<EvidenceMapRow & { longitude: number; latitude
 
 async function nearbySavedPlaces(session: RequestSession, latitude: number, longitude: number) {
   const result = await query<NearbyPlaceRow>(
-    `select id, name, longitude, latitude, radius_meters as "radiusMeters",
+    `select id, ${placeDisplayNameSql("places")} as name, longitude, latitude, radius_meters as "radiusMeters",
             ST_Distance(
               ST_SetSRID(ST_MakePoint(longitude, latitude), 4326)::geography,
               ST_SetSRID(ST_MakePoint($2, $3), 4326)::geography

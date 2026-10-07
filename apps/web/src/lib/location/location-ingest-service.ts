@@ -22,6 +22,7 @@ import { withSyncTransaction, type SyncTransactionOptions } from "../sync-transa
 import type { RequestSession } from "../session";
 import { ensureCommuteCategoryId } from "../automatic-category-service";
 import { replayLocationEvidence } from "./location-replay-service";
+import { placeDisplayNameSql, placeRoleLabelSql } from "../place-display";
 import {
   decideLocationRollout,
   getServerLocationRolloutMode,
@@ -714,9 +715,9 @@ async function trustedPlaceContext(
       description: string | null;
       loggingEnabled: boolean;
     }>(
-      `select id as "placeId", name, default_category_id as "categoryId",
-              default_activity_description as description, logging_enabled as "loggingEnabled"
-       from places where id = $1 and workspace_id = $2`,
+      `select pl.id as "placeId", ${placeDisplayNameSql("pl")} as name, pl.default_category_id as "categoryId",
+              pl.default_activity_description as description, pl.logging_enabled as "loggingEnabled"
+       from places pl where pl.id = $1 and pl.workspace_id = $2`,
       [segment.placeId, session.workspaceId]
     );
     const place = result.rows[0];
@@ -735,7 +736,7 @@ async function trustedPlaceContext(
       description: string | null;
       loggingEnabled: boolean;
     }>(
-      `select p.id as "placeId", coalesce(p.name, lp.name) as name,
+      `select p.id as "placeId", coalesce(${placeDisplayNameSql("p")}, lp.name) as name,
               p.default_category_id as "categoryId", p.default_activity_description as description,
               p.logging_enabled as "loggingEnabled"
        from learned_places lp
@@ -797,15 +798,19 @@ async function segmentTitle(
     return isTimeAway(segment) ? timeAwayTitle(await timeAwayPlaceName(client, session, segment, stayIds)) : "Commute";
   }
   if (segment.learnedPlaceId) {
+    // A learned place accepted into a Home or Work place takes that role's label.
     const learned = await client.query<{ name: string }>(
-      "select name from learned_places where id = $1 and workspace_id = $2 and user_id = $3",
+      `select coalesce(${placeRoleLabelSql("p")}, lp.name) as name
+       from learned_places lp
+       left join places p on p.id = lp.place_id and p.workspace_id = lp.workspace_id and lp.status = 'accepted'
+       where lp.id = $1 and lp.workspace_id = $2 and lp.user_id = $3`,
       [segment.learnedPlaceId, session.workspaceId, session.userId]
     );
     if (learned.rows[0]) return `Visit ${learned.rows[0].name}`;
   }
   if (!segment.placeId) return segment.placeMatchKind === "ambiguous" ? "Visit near saved places" : "Visit at an unknown place";
   const place = await client.query<{ name: string }>(
-    "select name from places where id = $1 and workspace_id = $2",
+    `select ${placeDisplayNameSql("pl")} as name from places pl where pl.id = $1 and pl.workspace_id = $2`,
     [segment.placeId, session.workspaceId]
   );
   return place.rows[0] ? `Visit ${place.rows[0].name}` : "Visit at a saved place";

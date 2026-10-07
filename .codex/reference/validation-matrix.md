@@ -53,6 +53,15 @@ When changing category/activity storage, starter activities, activity icons or a
 - Run `npm run validate:starter-activities-db` against a disposable local `*_test` database prepared with `npx tsx scripts/setup-validation-db.ts ordered`. It covers new-workspace seeding, adding and linking starters without duplicate names, archived starter keys, the oldest same-named link, idempotence, a race with automatic Commute creation, a location replay that holds a workspace key-share before asking for Commute (must not deadlock with the starters route) and the column constraints. Workspace-serialising category writes lock the workspace row `for no key update`, never `for update`.
 - Apply `supabase/migrations/202610060001_category_icon_and_starter_key.sql` to staging before the Preview that reads the new columns, with owner approval.
 
+## Home and Work place roles
+
+When changing place roles, role labels or any read path that shows a saved place's name:
+
+- Run `packages/shared/src/placeRoles.test.ts` and the place-role cases in `packages/shared/src/index.test.ts` (Home-role confidence and titles, role-label matching before a place merely named Home, rule drafts), plus web `place-display`, `place-role-slots`, `placeRoleSlots.dom`, `api/places` and `api/places/role` tests.
+- Run `apps/web/src/lib/place-role-service.postgres.test.ts` with `DAYFRAME_PLACE_ROLE_TEST_DATABASE_URL` on a disposable local `*_test` database prepared with both `setup-validation-db.ts base` and `ordered`: moving Home leaves entries on the old place and renames it, clearing, one role per place, cross-workspace refusal, the unique index and check, a racing move returning a retryable conflict, and a Home/Work swap from both sides without deadlock. Re-run `npm run validate:location-v2-db` (time-away titles read the role label).
+- In a browser at desktop and 390 px: empty slots link straight to Add Home/Work, Add Home saves the place into the slot, moving Home offers the rename (suggested "Previous home", or the current name when Home moves back to the place already called that, and a typed name survives a change of choice and a failed save), Clear keeps the name by default, the Places list shows the role label with the saved name underneath, no console errors and no horizontal overflow.
+- Apply `supabase/migrations/202610070001_place_role.sql` to staging before the Preview that reads place roles, and to production before that server deploys, each with owner approval.
+
 ## Today in Blocks (iPhone)
 
 - Unit: `apps/mobile/src/components/accessibility/TodayTimerSurface.test.tsx` (labels, caps, on-block colours in both themes, Switch/Recording tiles, no duplicate start), `src/lib/quickStartMosaic.test.ts` (week window, ranking, flush columns), `src/lib/blocksMotion.test.tsx` (landing once per token, no replay, Reduce Motion opacity only, 2.4 s ring), `src/lib/haptics.test.ts` (moment map, one Stop composite, Settings switch).

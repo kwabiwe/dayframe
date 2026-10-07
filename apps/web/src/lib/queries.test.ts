@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { placeDisplayNameSql } from "./place-display";
 import {
   buildTimeEntriesQuery,
   getCategoryUsageRanks,
@@ -220,7 +221,7 @@ describe("time-entry range query", () => {
     expect(statement.text).toContain("coalesce(te.stopped_at, $3::timestamptz) > $4::timestamptz");
     expect(statement.text).toContain("coalesce(te.stopped_at, $3::timestamptz) - te.started_at");
     expect(statement.text).toContain('te.updated_at as "updatedAt"');
-    expect(statement.text).toContain('coalesce(pl.name, te.place_label) as "placeName"');
+    expect(statement.text).toContain(`coalesce(${placeDisplayNameSql("pl")}, te.place_label) as "placeName"`);
     expect(statement.text).toContain('end as "placeKind"');
     expect(statement.text).toContain("order by te.started_at desc, te.id desc");
     expect(statement.values).toEqual([

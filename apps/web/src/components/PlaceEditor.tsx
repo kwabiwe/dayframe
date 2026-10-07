@@ -4,9 +4,11 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { LocateFixed, MapPin } from "lucide-react";
 import { useCallback, useMemo, useRef, useState } from "react";
+import { placeRoleLabel, previousRolePlaceName, type PlaceRole } from "@dayframe/shared";
 import type { CategoryRow, LearnedPlaceRow, PlaceRow } from "@/lib/queries";
 import { clientFetch } from "@/lib/client-auth-fetch";
 import type { WebPlaceSuggestion } from "@/lib/place-search";
+import { placeRoleRequest } from "@/lib/place-role-slots";
 import {
   applyWebPlaceSuggestion,
   DEFAULT_WEB_PLACE_RADIUS_METERS,
@@ -29,13 +31,16 @@ export function PlaceEditor({
   learnedPlace,
   mode,
   place,
-  places
+  places,
+  role = null
 }: {
   categories: CategoryRow[];
   learnedPlace?: LearnedPlaceRow | null;
   mode: PlaceEditorMode;
   place?: PlaceRow | null;
   places: PlaceRow[];
+  /** Adding a new place straight into the Home or Work slot. */
+  role?: PlaceRole | null;
 }) {
   const router = useRouter();
   const entity = place ?? learnedPlace ?? null;
@@ -68,6 +73,10 @@ export function PlaceEditor({
   const [saving, setSaving] = useState(false);
   const [locating, setLocating] = useState(false);
   const [submitAttempted, setSubmitAttempted] = useState(false);
+  const newRole = mode === "edit" ? null : role;
+  const roleHolder = newRole ? places.find((candidate) => candidate.role === newRole) ?? null : null;
+  const [previousPlaceName, setPreviousPlaceName] = useState(newRole && roleHolder ? previousRolePlaceName(newRole) : "");
+  const shownRole = newRole ?? place?.role ?? null;
   const saveInFlight = useRef(false);
   const nameTouched = useRef(mode !== "create");
 
@@ -183,7 +192,11 @@ export function PlaceEditor({
           ...(mode === "learned" && learnedPlace ? { learnedPlaceId: learnedPlace.id } : {}),
           ...validation.value,
           priority: place?.priority ?? 5,
-          autoStart: false
+          autoStart: false,
+          ...(newRole ? {
+            role: newRole,
+            previousPlaceName: placeRoleRequest({ role: newRole, targetId: null, holder: roleHolder, previousPlaceName }).previousPlaceName
+          } : {})
         })
       });
       if (!response.ok) {
@@ -247,8 +260,9 @@ export function PlaceEditor({
       <section className="place-editor-panel">
         <TextField
           id="dayframe-place-name"
-          label="Name in Dayframe"
-          placeholder="Home, Gym, Mum's house…"
+          label={shownRole ? "Address or name" : "Name in Dayframe"}
+          help={shownRole ? `Dayframe shows this place as ${placeRoleLabel(shownRole)}; this name appears under it.` : undefined}
+          placeholder={shownRole ? "The street address" : "Home, Gym, Mum's house…"}
           value={name}
           error={submitAttempted && !validation.ok && validation.field === "name"
             ? validation.message
@@ -258,6 +272,17 @@ export function PlaceEditor({
             setName(event.target.value);
           }}
         />
+
+        {newRole && roleHolder ? (
+          <TextField
+            id="dayframe-place-previous-role-name"
+            label={`Rename the old ${placeRoleLabel(newRole).toLowerCase()}`}
+            help="Its past entries keep this name, so they don't read as an address. Leave it blank to keep the current name."
+            maxLength={120}
+            value={previousPlaceName}
+            onChange={(event) => setPreviousPlaceName(event.target.value)}
+          />
+        ) : null}
 
         <PlaceMapPreview
           coordinate={coordinate}

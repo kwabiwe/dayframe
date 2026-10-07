@@ -5,6 +5,7 @@ import {
 } from "@dayframe/shared";
 import { hasMeaningfulKnownPlaceWindow, isTimeAway, timeAwayTitle } from "@dayframe/shared";
 import type { RequestSession } from "../session";
+import { placeDisplayNameSql, placeRoleLabelSql } from "../place-display";
 import { ensureCommuteCategoryId } from "../automatic-category-service";
 import { locationSemanticDisposition } from "./location-semantic-policy";
 import { reopenSupersededReviews } from "./location-review-supersession";
@@ -47,12 +48,15 @@ async function timeAwayPlaceNames(
   }))].sort();
   for (const ids of chunks(placeIds)) {
     const result = await client.query<{ id: string; name: string }>(
-      "select id, name from places where workspace_id = $1 and id = any($2::uuid[])", [session.workspaceId, ids]);
+      `select pl.id, ${placeDisplayNameSql("pl")} as name from places pl where pl.workspace_id = $1 and pl.id = any($2::uuid[])`,
+      [session.workspaceId, ids]);
     for (const row of result.rows) savedNames.set(row.id, row.name);
   }
   for (const ids of chunks(originIds)) {
-    const result = await client.query<{ id: string; name: string }>(`select ss.id, lp.name from stay_segments ss
+    const result = await client.query<{ id: string; name: string }>(`select ss.id, coalesce(${placeRoleLabelSql("p")}, lp.name) as name
+      from stay_segments ss
       join learned_places lp on lp.id = ss.learned_place_id and lp.workspace_id = ss.workspace_id and lp.user_id = ss.user_id
+      left join places p on p.id = lp.place_id and p.workspace_id = lp.workspace_id and lp.status = 'accepted'
       where ss.workspace_id = $1 and ss.user_id = $2 and ss.id = any($3::uuid[])`, [session.workspaceId, session.userId, ids]);
     for (const row of result.rows) originNames.set(row.id, row.name);
   }
@@ -75,14 +79,14 @@ async function displayContext(
   const learnedIds = [...new Set(stays.flatMap(s => s.learnedPlaceId ? [s.learnedPlaceId] : []))].sort();
   // Saved places belong to a workspace; learned places additionally belong to a user.
   for (const ids of chunks(placeIds)) {
-    const result = await client.query<Place>(`select id, name, default_category_id as "categoryId",
-      default_activity_description as description, logging_enabled as "loggingEnabled"
-      from places where workspace_id = $1 and id = any($2::uuid[])`, [session.workspaceId, ids]);
+    const result = await client.query<Place>(`select pl.id, ${placeDisplayNameSql("pl")} as name, pl.default_category_id as "categoryId",
+      pl.default_activity_description as description, pl.logging_enabled as "loggingEnabled"
+      from places pl where pl.workspace_id = $1 and pl.id = any($2::uuid[])`, [session.workspaceId, ids]);
     for (const row of result.rows) places.set(row.id, row);
   }
   for (const ids of chunks(learnedIds)) {
-    const result = await client.query<LearnedPlace>(`select lp.id, lp.name,
-      case when p.id is null then null else jsonb_build_object('id',p.id,'name',coalesce(p.name,lp.name),
+    const result = await client.query<LearnedPlace>(`select lp.id, coalesce(${placeRoleLabelSql("p")}, lp.name) as name,
+      case when p.id is null then null else jsonb_build_object('id',p.id,'name',coalesce(${placeDisplayNameSql("p")},lp.name),
         'categoryId',p.default_category_id,'description',p.default_activity_description,
         'loggingEnabled',p.logging_enabled) end as saved
       from learned_places lp left join places p on p.id = lp.place_id and p.workspace_id = lp.workspace_id

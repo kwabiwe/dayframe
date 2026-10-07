@@ -24,6 +24,7 @@ import {
   X
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
+import { placeDisplayName } from "@dayframe/shared";
 import { AppShellRuntimeProvider, useAppShellRuntime } from "@/components/AppShellRuntime";
 import { DatePickerPopover } from "@/components/DatePickerPopover";
 import { DayframeBrand } from "@/components/brand/DayframeBrand";
@@ -590,7 +591,7 @@ function buildSearchResults(data: BootstrapData | null, query: string): SearchRe
     })),
     ...data.places.map((place) => ({
       id: `place:${place.id}`,
-      label: place.name,
+      label: placeDisplayName(place),
       detail: place.defaultCategoryName ?? "Place",
       group: "Place",
       href: "/places",

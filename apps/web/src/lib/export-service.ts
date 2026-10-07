@@ -1,5 +1,6 @@
 import { query } from "./db";
 import { type RequestSession } from "./session";
+import { placeDisplayNameSql } from "./place-display";
 
 export const EXPORT_KINDS = [
   "workspace_json",
@@ -96,7 +97,7 @@ export async function buildTimeEntriesCsv(session: RequestSession) {
             p.name as project,
             cl.name as client,
             c.name as category,
-            coalesce(pl.name, te.place_label) as place,
+            coalesce(${placeDisplayNameSql("pl")}, te.place_label) as place,
             case
               when pl.id is not null then 'saved'
               when te.place_label is not null then 'one_time'
@@ -138,7 +139,7 @@ async function table(tableName: string, session: RequestSession) {
 async function timeEntriesTable(session: RequestSession) {
   const result = await query(
     `select te.*,
-            coalesce(pl.name, te.place_label) as place_name,
+            coalesce(${placeDisplayNameSql("pl")}, te.place_label) as place_name,
             case
               when pl.id is not null then 'saved'
               when te.place_label is not null then 'one_time'
