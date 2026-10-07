@@ -6,6 +6,7 @@ const read = (path: string) => readFileSync(fileURLToPath(new URL(path, import.m
 const layout = read("../../../app/(tabs)/_layout.tsx");
 const dashboard = read("../DayframeDashboard.tsx");
 const slot = read("../../../app/(tabs)/orb.tsx");
+const orb = read("./PlayOrb.tsx");
 
 function body(start: string) {
   const index = dashboard.indexOf(start);
@@ -15,8 +16,13 @@ function body(start: string) {
 
 describe("Play orb wiring (Blocks parity step 3)", () => {
   it("reserves the tab bar's trailing slot with a disabled search-role item whose press is the orb's tap", () => {
-    expect(layout).toMatch(/<NativeTabs\.Trigger\s+disabled\s+listeners=\{\{\s*tabPress: \(\) => requestPlayOrbTap\(\)\s*\}\}\s+name=\{DAYFRAME_NATIVE_TABS\.orb\.route\}\s+role="search"/);
-    expect(layout).toContain('{timerRunning ? "Stop timer" : "Start a block"}');
+    const trigger = layout.slice(layout.indexOf("<NativeTabs.Trigger\n"), layout.indexOf("</NativeTabs>"));
+    expect(trigger).toContain('accessibilityLabel={timerRunning ? "Stop timer" : "Start a block"}');
+    expect(trigger).toMatch(/\bdisabled\b/);
+    expect(trigger).toContain("hidden={!playOrbAvailable}");
+    expect(trigger).toMatch(/listeners=\{\{\s*tabPress: \(\) => requestPlayOrbTap\(\)\s*\}\}/);
+    expect(trigger).toContain('name={DAYFRAME_NATIVE_TABS.orb.route}');
+    expect(trigger).toContain('role="search"');
     // A deep link to the slot lands on Today; nothing navigates there.
     expect(slot).toContain('<Redirect href="/today" />');
     expect(dashboard).not.toMatch(/router\.(push|replace|navigate)\(["']\/orb/);
@@ -32,8 +38,19 @@ describe("Play orb wiring (Blocks parity step 3)", () => {
   });
 
   it("hides with the tab bar and keeps the native item's label in step with the timer", () => {
-    expect(dashboard).toContain("hidden={reportsSheetPortal?.isPresented ?? false}");
+    expect(dashboard).toContain("hidden={!playOrbAvailable || (reportsSheetPortal?.isPresented ?? false)}");
+    expect(dashboard).toContain('const playOrbAvailable = authState === "authenticated" && PLAY_ORB_SUPPORTED;');
+    expect(dashboard).toContain("setPlayOrbAvailable(playOrbAvailable);");
     expect(dashboard).toContain("setPlayOrbRunning(hasLiveActiveTimer);");
     expect(dashboard).toContain("useEffect(() => onPlayOrbTap(() => tapPlayOrbRef.current()), []);");
+  });
+
+  it("presses in place under Reduce Motion and hit-tests bubbles in window points", () => {
+    expect(orb).toContain("scale.value = reduceMotion ? 0.9 : withSpring(0.9,");
+    expect(orb).toContain("scale.value = reduceMotion ? 1 : withSpring(1,");
+    expect(orb).toContain("bloomHit(spotOffsets.value, event.absoluteX - orbCenterX.value, event.absoluteY - orbCenterY.value)");
+    // The 1 s clock lives in the ring, so the Dashboard's tick never rebuilds the orb's gesture.
+    expect(orb).toContain("function OrbSecondsRing(");
+    expect(orb).not.toContain("nowMs: number;\n  onChoose");
   });
 });

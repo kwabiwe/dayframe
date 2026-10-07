@@ -65,7 +65,7 @@ const activities = ["work", "learn", "gym"].map((id) => ({ color: "blue", icon: 
 function render(overrides: Record<string, unknown> = {}) {
   mocks.gestures.length = 0;
   mocks.haptic.mockClear();
-  const props = { activities, hidden: false, nowMs: Date.parse("2026-10-07T21:00:15"), onChoose: vi.fn(), onTap: vi.fn(), reduceMotion: false, running: false, theme, ...overrides };
+  const props = { activities, hidden: false, onChoose: vi.fn(), onTap: vi.fn(), reduceMotion: false, running: false, theme, ...overrides };
   let tree!: ReturnType<typeof create>;
   act(() => {
     tree = create(<PlayOrb {...props} />);
@@ -75,6 +75,16 @@ function render(overrides: Record<string, unknown> = {}) {
   const bloom = () => tree.root.findAllByProps({ testID: "play-orb-bloom" })[0] as ReactTestInstance | undefined;
   return { bloom, hold, props, tap, tree };
 }
+
+describe("playOrbSupported", () => {
+  it("offers the orb only on iPhone with iOS 26 or later", async () => {
+    const { playOrbSupported } = await import("../../lib/playOrb");
+    expect(playOrbSupported({ OS: "ios", Version: "26.5" })).toBe(true);
+    expect(playOrbSupported({ OS: "ios", Version: "18.6" })).toBe(false);
+    expect(playOrbSupported({ OS: "ios", Version: "26.0", isPad: true })).toBe(false);
+    expect(playOrbSupported({ OS: "android", Version: 35 })).toBe(false);
+  });
+});
 
 describe("playOrbFrame", () => {
   it("centres the orb on the tab bar's trailing slot", () => {
@@ -90,11 +100,14 @@ describe("PlayOrb", () => {
     expect(idle.props.onTap).toHaveBeenCalledOnce();
     act(() => idle.tree.unmount());
 
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-10-07T21:00:15"));
     const running = render({ running: true });
     const ring = running.tree.root.findByProps({ testID: "play-orb-ring" });
     const circumference = 2 * Math.PI * (PLAY_ORB.size / 2 + 5 - 1.5);
     expect(ring.props.strokeDasharray).toBe(`${(15 / 60) * circumference} ${circumference}`);
     act(() => running.tree.unmount());
+    vi.useRealTimers();
   });
 
   it("opens the bloom after the hold and starts the activity the finger is released on", () => {
@@ -106,8 +119,11 @@ describe("PlayOrb", () => {
     expect(bloom()).toBeDefined();
     expect(mocks.haptic).toHaveBeenCalledWith("start");
     const [first] = bloomSpots(activities);
-    const center = PLAY_ORB.size / 2;
-    act(() => hold().handlers.onUpdate({ translationX: first.dx, translationY: first.dy, x: center + first.dx, y: center + first.dy }));
+    // Hit-testing is in window points, from the orb's centre on the tab bar's trailing slot.
+    const frame = playOrbFrame({ bottomInset: 34, height: 874, width: 402 });
+    const centerX = frame.left + PLAY_ORB.size / 2;
+    const centerY = frame.top + PLAY_ORB.size / 2;
+    act(() => hold().handlers.onUpdate({ absoluteX: centerX + first.dx, absoluteY: centerY + first.dy, translationX: first.dx, translationY: first.dy }));
     expect(mocks.haptic).toHaveBeenLastCalledWith("tick");
     expect(tree.root.findAllByType("Text" as never).map((node) => node.children.join(""))).toContain("work");
     act(() => {
@@ -144,7 +160,7 @@ describe("PlayOrb", () => {
     const { bloom, hold, props, tree } = render();
     act(() => {
       hold().handlers.onStart({});
-      hold().handlers.onUpdate({ translationX: -30, translationY: -20, x: 2, y: 12 });
+      hold().handlers.onUpdate({ absoluteX: 320, absoluteY: 800, translationX: -30, translationY: -20 });
       hold().handlers.onEnd({}, true);
     });
     expect(bloom()).toBeUndefined();

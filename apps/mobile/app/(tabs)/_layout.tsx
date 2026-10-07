@@ -4,7 +4,7 @@ import { DayframeDashboardProvider } from "@/components/DayframeDashboard";
 import { ReportsSheetPortalContext } from "@/components/reports/ReportsSheetPortal";
 import { useMobileTheme } from "@/lib/mobileTheme";
 import { DAYFRAME_NATIVE_TABS, DAYFRAME_NATIVE_TAB_MINIMIZE_BEHAVIOR } from "@/lib/nativeTabs";
-import { requestPlayOrbTap, usePlayOrbRunning } from "@/lib/playOrbBridge";
+import { requestPlayOrbTap, usePlayOrbAvailable, usePlayOrbRunning } from "@/lib/playOrbBridge";
 
 // Generated from the shared glyphs by scripts/generate-icons.mjs (@2x/@3x picked by scale).
 const DAYFRAME_TAB_ICON_IMAGES = {
@@ -18,6 +18,7 @@ export default function DashboardTabsLayout() {
   const { theme } = useMobileTheme();
   const reportsSheetPortal = useContext(ReportsSheetPortalContext);
   const timerRunning = usePlayOrbRunning();
+  const playOrbAvailable = usePlayOrbAvailable();
 
   return (
     <DayframeDashboardProvider>
@@ -61,7 +62,11 @@ export default function DashboardTabsLayout() {
             Dashboard draws the coral orb over it. The item is disabled, so a tap never selects it;
             its press (VoiceOver's double-tap) still reaches the orb's tap action. */}
         <NativeTabs.Trigger
+          // A system "search" item keeps its own title, so VoiceOver needs the label set here.
+          accessibilityLabel={timerRunning ? "Stop timer" : "Start a block"}
           disabled
+          // Signed out, on iPad or before iOS 26 there is no orb, so there is no slot either.
+          hidden={!playOrbAvailable}
           listeners={{
             tabPress: () => requestPlayOrbTap()
           }}

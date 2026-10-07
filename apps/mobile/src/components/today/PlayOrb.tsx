@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Pressable, StyleSheet, Text, View, useWindowDimensions } from "react-native";
 import { Gesture, GestureDetector } from "react-native-gesture-handler";
 import Reanimated, {
@@ -34,25 +34,39 @@ const SCRIM = { dark: "rgba(3, 6, 14, 0.66)", light: "rgba(17, 20, 29, 0.55)" } 
  * with a Tap) tracks the finger on the UI thread. VoiceOver reaches the same actions through the
  * native tab item underneath (see the tabs layout), so this view is hidden from it.
  */
-export function PlayOrb({
-  activities,
-  hidden,
-  nowMs,
-  onChoose,
-  onTap,
-  reduceMotion,
-  running,
-  theme,
-}: {
+type PlayOrbProps = {
   activities: readonly BloomActivity[];
   hidden: boolean;
-  nowMs: number;
   onChoose: (activityId: string) => void;
   onTap: () => void;
   reduceMotion: boolean;
   running: boolean;
   theme: MobileTheme;
-}) {
+};
+
+// The Dashboard re-renders every second; the orb only re-renders when what it shows changes (its
+// callbacks are read through refs), so its gesture is not rebuilt on the tick.
+export const PlayOrb = memo(PlayOrbView, (previous, next) =>
+  previous.activities === next.activities &&
+  previous.hidden === next.hidden &&
+  previous.reduceMotion === next.reduceMotion &&
+  previous.running === next.running &&
+  previous.theme === next.theme
+);
+
+function PlayOrbView({
+  activities,
+  hidden,
+  onChoose: onChooseProp,
+  onTap: onTapProp,
+  reduceMotion,
+  running,
+  theme,
+}: PlayOrbProps) {
+  const callbacks = useRef({ onChoose: onChooseProp, onTap: onTapProp });
+  callbacks.current = { onChoose: onChooseProp, onTap: onTapProp };
+  const onTap = useCallback(() => callbacks.current.onTap(), []);
+  const onChoose = useCallback((activityId: string) => callbacks.current.onChoose(activityId), []);
   const window = useWindowDimensions();
   const insets = useSafeAreaInsets();
   const frame = playOrbFrame({ bottomInset: insets.bottom, height: window.height, width: window.width });
@@ -68,6 +82,10 @@ export function PlayOrb({
   useEffect(() => {
     spotOffsets.value = spots.map(({ dx, dy }) => ({ dx, dy }));
   }, [spotOffsets, spots]);
+  // The orb's centre in window points: bubbles are hit-tested in window space, so the orb's own
+  // press scale never skews the reach.
+  const orbCenterX = useSharedValue(0);
+  const orbCenterY = useSharedValue(0);
 
   const closeBloom = useCallback(() => {
     bloomOpen.value = false;
@@ -105,12 +123,12 @@ export function PlayOrb({
   }, []);
 
   const gesture = useMemo(() => {
-    const center = PLAY_ORB.size / 2;
     const hold = Gesture.Pan()
       .activateAfterLongPress(PLAY_ORB.holdMs)
       .onBegin(() => {
         "worklet";
-        scale.value = withSpring(0.9, { ...BLOCKS_SPRING.control, reduceMotion: ReduceMotion.Never });
+        // Reduce Motion presses in place, without the spring.
+        scale.value = reduceMotion ? 0.9 : withSpring(0.9, { ...BLOCKS_SPRING.control, reduceMotion: ReduceMotion.Never });
       })
       .onStart(() => {
         "worklet";
@@ -123,7 +141,7 @@ export function PlayOrb({
         "worklet";
         if (Math.hypot(event.translationX, event.translationY) > PLAY_ORB.tapSlop) moved.value = true;
         if (!bloomOpen.value) return;
-        const index = bloomHit(spotOffsets.value, event.x - center, event.y - center);
+        const index = bloomHit(spotOffsets.value, event.absoluteX - orbCenterX.value, event.absoluteY - orbCenterY.value);
         if (index !== hot.value) {
           hot.value = index;
           runOnJS(markHot)(index);
@@ -136,7 +154,7 @@ export function PlayOrb({
       })
       .onFinalize((_event, success) => {
         "worklet";
-        scale.value = withSpring(1, { ...BLOCKS_SPRING.pop, reduceMotion: ReduceMotion.Never });
+        scale.value = reduceMotion ? 1 : withSpring(1, { ...BLOCKS_SPRING.pop, reduceMotion: ReduceMotion.Never });
         // A hold the system cancels closes the bloom without choosing.
         if (!success && bloomOpen.value) runOnJS(closeBloom)();
       });
@@ -147,16 +165,17 @@ export function PlayOrb({
         if (success) runOnJS(onTap)();
       });
     return Gesture.Exclusive(hold, tap);
-  }, [bloomOpen, closeBloom, hot, markHot, moved, onTap, openBloom, release, scale, spotOffsets]);
+  }, [bloomOpen, closeBloom, hot, markHot, moved, onTap, openBloom, orbCenterX, orbCenterY, reduceMotion, release, scale, spotOffsets]);
 
   const orbStyle = useAnimatedStyle(() => ({ transform: [{ scale: scale.value }] }));
 
-  if (hidden) return null;
   const centerX = frame.left + PLAY_ORB.size / 2;
   const centerY = frame.top + PLAY_ORB.size / 2;
-  const seconds = new Date(nowMs).getSeconds() + (nowMs % 1000) / 1000;
-  const ringRadius = PLAY_ORB.size / 2 + RING.inset - RING.stroke / 2;
-  const circumference = 2 * Math.PI * ringRadius;
+  useEffect(() => {
+    orbCenterX.value = centerX;
+    orbCenterY.value = centerY;
+  }, [centerX, centerY, orbCenterX, orbCenterY]);
+  if (hidden) return null;
   const hotSpot = hotIndex >= 0 ? spots[hotIndex] : null;
 
   return (
@@ -188,28 +207,42 @@ export function PlayOrb({
           ]}
           testID="play-orb"
         >
-          {running ? (
-            <Svg height={PLAY_ORB.size + RING.inset * 2} style={styles.ring} width={PLAY_ORB.size + RING.inset * 2}>
-              <Circle
-                cx={PLAY_ORB.size / 2 + RING.inset}
-                cy={PLAY_ORB.size / 2 + RING.inset}
-                fill="none"
-                opacity={RING.opacity}
-                origin={`${PLAY_ORB.size / 2 + RING.inset}, ${PLAY_ORB.size / 2 + RING.inset}`}
-                r={ringRadius}
-                rotation={-90}
-                stroke={theme.accent}
-                strokeDasharray={`${(seconds / 60) * circumference} ${circumference}`}
-                strokeLinecap="round"
-                strokeWidth={RING.stroke}
-                testID="play-orb-ring"
-              />
-            </Svg>
-          ) : null}
+          {running ? <OrbSecondsRing color={theme.accent} /> : null}
           <PrimaryTimerGlyph color={theme.onAccent} mode={running ? "stop" : "play"} />
         </Reanimated.View>
       </GestureDetector>
     </View>
+  );
+}
+
+/** The running orb's coral ring, filling with the current minute's seconds; it owns its own 1 s clock. */
+function OrbSecondsRing({ color }: { color: string }) {
+  const [nowMs, setNowMs] = useState(() => Date.now());
+  useEffect(() => {
+    const id = setInterval(() => setNowMs(Date.now()), 1000);
+    return () => clearInterval(id);
+  }, []);
+  const seconds = new Date(nowMs).getSeconds() + (nowMs % 1000) / 1000;
+  const ringRadius = PLAY_ORB.size / 2 + RING.inset - RING.stroke / 2;
+  const circumference = 2 * Math.PI * ringRadius;
+  const box = PLAY_ORB.size + RING.inset * 2;
+  return (
+    <Svg height={box} style={styles.ring} width={box}>
+      <Circle
+        cx={box / 2}
+        cy={box / 2}
+        fill="none"
+        opacity={RING.opacity}
+        origin={`${box / 2}, ${box / 2}`}
+        r={ringRadius}
+        rotation={-90}
+        stroke={color}
+        strokeDasharray={`${(seconds / 60) * circumference} ${circumference}`}
+        strokeLinecap="round"
+        strokeWidth={RING.stroke}
+        testID="play-orb-ring"
+      />
+    </Svg>
   );
 }
 

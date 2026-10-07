@@ -6,7 +6,10 @@ export const PLAY_ORB = {
   size: 64,
   /** How long the finger must rest on the orb before the bloom opens. */
   holdMs: 360,
-  /** A finger that travels further than this before the bloom opens is not a tap. */
+  /**
+   * A finger that travels further than this before the bloom opens is neither a tap nor a hold:
+   * press, wait for the bloom, then slide (unlike the web prototype, which still opens it).
+   */
   tapSlop: 10,
   /** Bubbles within this distance of the finger are under it. */
   hitRadius: 44,
@@ -17,6 +20,17 @@ export const PLAY_ORB = {
   /** Bubbles fly out from the orb with `pop`, this far apart. */
   staggerMs: 18,
 } as const;
+
+/**
+ * The orb needs iOS 26's tab bar, which draws a "search"-role item as its own circle beside the
+ * tabs. Older iOS draws a fourth tab slot instead, and iPad puts the tab bar at the top, so the
+ * orb (and its slot) is offered only on iPhone with iOS 26 or later.
+ */
+export function playOrbSupported(platform: { OS: string; Version: string | number; isPad?: boolean }) {
+  if (platform.OS !== "ios" || platform.isPad) return false;
+  const major = Number.parseInt(String(platform.Version), 10);
+  return Number.isFinite(major) && major >= 26;
+}
 
 /**
  * Where iOS draws the tab bar's trailing circular item (the hidden "search"-role tab the orb sits

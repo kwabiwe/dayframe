@@ -16,6 +16,7 @@ import {
   AppState,
   Easing,
   Linking,
+  Platform,
   Pressable,
   RefreshControl,
   ScrollView,
@@ -54,8 +55,14 @@ import { StopFlightOverlay, type StopFlight } from "./today/StopFlightOverlay";
 import { TodayPullBlocks } from "./today/TodayPullBlocks";
 import { PlayOrb } from "./today/PlayOrb";
 import { ReportsSheetPortalContext } from "./reports/ReportsSheetPortal";
-import { bloomActivities } from "../lib/playOrb";
-import { onPlayOrbTap, setPlayOrbRunning } from "../lib/playOrbBridge";
+import { bloomActivities, playOrbSupported } from "../lib/playOrb";
+import { onPlayOrbTap, setPlayOrbAvailable, setPlayOrbRunning } from "../lib/playOrbBridge";
+
+const PLAY_ORB_SUPPORTED = playOrbSupported({
+  OS: Platform.OS,
+  Version: Platform.Version,
+  isPad: Platform.OS === "ios" && Platform.isPad,
+});
 import { LIVE_FLIGHT_NODE, STOP_FLIGHT, measureFlightNode, rowFlightNode, stopFlightOverlayReady } from "../lib/stopFlight";
 import { switchRecents, type SwitchRecent } from "../lib/todaySwitch";
 import { TodayReviewNudge } from "./today/TodayReviewNudge";
@@ -1686,6 +1693,11 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
   useEffect(() => {
     setPlayOrbRunning(hasLiveActiveTimer);
   }, [hasLiveActiveTimer]);
+  // No orb (or slot) on the sign-in screen, on iPad or before iOS 26.
+  const playOrbAvailable = authState === "authenticated" && PLAY_ORB_SUPPORTED;
+  useEffect(() => {
+    setPlayOrbAvailable(playOrbAvailable);
+  }, [playOrbAvailable]);
 
   // Stable, so the flight's ghost is not re-rendered by the Dashboard's 1 s tick handing it a new callback.
   const finishStopFlight = useCallback((token: number, landed: boolean, entryId: string) => {
@@ -2846,8 +2858,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
       ) : null}
       <PlayOrb
         activities={bloomActivityList}
-        hidden={reportsSheetPortal?.isPresented ?? false}
-        nowMs={now}
+        hidden={!playOrbAvailable || (reportsSheetPortal?.isPresented ?? false)}
         onChoose={chooseFromPlayOrb}
         onTap={tapPlayOrb}
         reduceMotion={reduceMotion}
