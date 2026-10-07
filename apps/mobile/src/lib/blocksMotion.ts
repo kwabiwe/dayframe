@@ -132,3 +132,68 @@ export function useBreathingRing({ live, reduceMotion }: { live: boolean; reduce
 
   return useAnimatedStyle(() => ({ opacity: opacity.value }));
 }
+
+/** How long a pop request stays valid; like a landing, it is never replayed by a later mount. */
+export const POP_REQUEST_TTL_MS = 1200;
+/** A popped block starts this much larger and springs back with `pop`. */
+export const POP_FROM_SCALE = 1.5;
+
+/**
+ * Pops a Today row block once when the Stop flight lands on it (Blocks `pop` spring). The request
+ * comes from the flight's completion, never from a refresh, so remounts and reconciliation never
+ * replay it. Not used under Reduce Motion (the flight does not run).
+ */
+export function useBlockPop({ entryId, request }: { entryId: string; request: LandingRequest | null }) {
+  const scale = useSharedValue(1);
+  const playedToken = useRef<number | null>(null);
+
+  useEffect(() => {
+    if (!request || playedToken.current === request.token) return;
+    if (!request.entryIds?.includes(entryId) || Date.now() - request.requestedAt > POP_REQUEST_TTL_MS) return;
+    playedToken.current = request.token;
+    scale.value = POP_FROM_SCALE;
+    scale.value = withSpring(1, { ...BLOCKS_SPRING.pop, reduceMotion: ReduceMotion.Never });
+  }, [entryId, request, scale]);
+
+  useEffect(() => () => cancelAnimation(scale), [scale]);
+
+  return useAnimatedStyle(() => ({ transform: [{ scale: scale.value }] }));
+}
+
+/** The first-paint drop-in (Blocks prototype): tiles fall 18 points from 92 % with a short stagger. */
+export const DROP_IN = { distance: 18, fromScale: 0.92, firstDelayMs: 80, staggerMs: 45, fadeMs: 160 } as const;
+
+/**
+ * Drops one tile into place once, staggered by its order. `play` is decided by the caller when the
+ * tile mounts (first paint of the process only), so refreshes, hydration and remounts never replay it.
+ */
+export function useDropIn({ index, play }: { index: number; play: boolean }) {
+  const playing = useRef(play).current;
+  const translateY = useSharedValue(playing ? DROP_IN.distance : 0);
+  const scale = useSharedValue(playing ? DROP_IN.fromScale : 1);
+  const opacity = useSharedValue(playing ? 0 : 1);
+
+  useEffect(() => {
+    if (!playing) return undefined;
+    const delay = DROP_IN.firstDelayMs + index * DROP_IN.staggerMs;
+    const spring = { ...BLOCKS_SPRING.land, reduceMotion: ReduceMotion.Never };
+    translateY.value = withDelay(delay, withSpring(0, spring));
+    scale.value = withDelay(delay, withSpring(1, spring));
+    opacity.value = withDelay(delay, withTiming(1, { duration: DROP_IN.fadeMs, reduceMotion: ReduceMotion.Never }));
+    return () => {
+      cancelAnimation(translateY);
+      cancelAnimation(scale);
+      cancelAnimation(opacity);
+      // An interrupted drop-in settles at rest rather than leaving a tile hidden.
+      translateY.value = 0;
+      scale.value = 1;
+      opacity.value = 1;
+    };
+    // Plays once per mount; the index is fixed at that moment.
+  }, []);
+
+  return useAnimatedStyle(() => ({
+    opacity: opacity.value,
+    transform: [{ translateY: translateY.value }, { scale: scale.value }],
+  }));
+}

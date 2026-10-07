@@ -18,6 +18,7 @@ import type { MobileTheme } from "../../lib/mobileTheme";
 import { mobileTextProps } from "../../lib/mobileTypography";
 import { BLOCKS_SPRING, useBlockLanding, useBreathingRing, type LandingRequest } from "../../lib/blocksMotion";
 import { playHaptic } from "../../lib/haptics";
+import { LIVE_FLIGHT_NODE, flightNodeRef } from "../../lib/stopFlight";
 import { LIVE_SWIPE_COMMIT, liveSwipeOffset, liveSwipeRawFor } from "../../lib/todaySwitch";
 import { LiveOdometer } from "./LiveOdometer";
 import { TODAY_CARD, TODAY_CARD_ACTIONS_WIDTH, colorWithAlpha, spokenDuration } from "./todayBlocksLayout";
@@ -51,6 +52,7 @@ export function TodayLiveBlock({
   actionsStyle,
   detailsStyle,
   diagnostic,
+  ghostContentStyle,
   landing,
   onAddTime,
   onOpen,
@@ -63,6 +65,8 @@ export function TodayLiveBlock({
   actionsStyle?: ComponentProps<typeof Animated.View>["style"];
   detailsStyle?: ComponentProps<typeof Animated.View>["style"];
   diagnostic?: MobileAccessibilityDiagnostic;
+  /** Set only on the Stop flight's ghost: the content fades with it; the ghost is never measured or swiped. */
+  ghostContentStyle?: ComponentProps<typeof Reanimated.View>["style"];
   landing: LandingRequest | null;
   onAddTime: () => void;
   onOpen: () => void;
@@ -80,7 +84,9 @@ export function TodayLiveBlock({
   const ringStyle = useBreathingRing({ live: active.hasLiveActiveTimer, reduceMotion });
   const activityName = active.categoryLabel ?? "No activity";
   const titleStyle = [styles.title, { color: colors.text }, active.titleIsPlaceholder ? styles.placeholder : null];
-  const swipe = useLiveSwipe({ enabled: active.hasLiveActiveTimer, onSwitch, reduceMotion });
+  const ghost = ghostContentStyle !== undefined;
+  const swipe = useLiveSwipe({ enabled: active.hasLiveActiveTimer && !ghost, onSwitch, reduceMotion });
+  const registerLiveNode = useMemo(() => flightNodeRef(ghost ? undefined : LIVE_FLIGHT_NODE), [ghost]);
 
   return (
     <View style={styles.wrap}>
@@ -95,7 +101,13 @@ export function TodayLiveBlock({
         <Text {...mobileTextProps("control")} style={[styles.switchText, { color: theme.textPrimary }]}>Switch</Text>
       </Reanimated.View>
     <GestureDetector gesture={swipe.gesture}>
-    <Reanimated.View onLayout={swipe.onCardLayout} style={[styles.card, { backgroundColor: colors.fill }, swipe.cardStyle]} testID="today-live-block">
+    <Reanimated.View
+      collapsable={false}
+      onLayout={swipe.onCardLayout}
+      ref={registerLiveNode}
+      style={[styles.card, { backgroundColor: colors.fill }, swipe.cardStyle]}
+      testID={ghost ? "today-live-ghost" : "today-live-block"}
+    >
       <Reanimated.View
         pointerEvents="none"
         style={[styles.ring, { borderColor: colors.text }, ringStyle]}
@@ -113,7 +125,7 @@ export function TodayLiveBlock({
         onPress={onOpen}
         style={({ pressed }) => [styles.main, pressed && active.hasLiveActiveTimer ? styles.pressed : null]}
       >
-        <Reanimated.View style={[styles.content, landingStyle]} testID="today-live-content">
+        <Reanimated.View style={[styles.content, landingStyle, ghostContentStyle]} testID="today-live-content">
           <View style={styles.topRow}>
             <View style={[styles.chip, { backgroundColor: colorWithAlpha(colors.text, 0.14) }]}>
               {active.categoryColor ? (
@@ -159,6 +171,7 @@ export function TodayLiveBlock({
           </View>
         </Reanimated.View>
       </Pressable>
+      <Reanimated.View pointerEvents="box-none" style={[StyleSheet.absoluteFill, ghostContentStyle]}>
       <Animated.View
         pointerEvents={active.hasLiveActiveTimer ? "box-none" : "none"}
         style={[styles.actions, actionsStyle]}
@@ -196,6 +209,7 @@ export function TodayLiveBlock({
           <PrimaryTimerGlyph color={colors.fill} mode="stop" />
         </Pressable>
       </Animated.View>
+      </Reanimated.View>
     </Reanimated.View>
     </GestureDetector>
     </View>
@@ -210,9 +224,8 @@ export function TodayLiveBlock({
  * finger tracking without the tilt and returns in 120 ms.
  */
 function useLiveSwipe({ enabled, onSwitch, reduceMotion }: { enabled: boolean; onSwitch: () => void; reduceMotion: boolean }) {
-  // The finger's raw pull and the card's banded offset are kept apart, so a card grabbed while it
-  // springs home continues from where it is without banding twice.
-  const pull = useSharedValue(0);
+  // A card grabbed while it springs home continues from where it is: the raw pull is recovered from
+  // the shown offset with liveSwipeRawFor, so the band applies once.
   const offset = useSharedValue(0);
   const base = useSharedValue(0);
   const armed = useSharedValue(0);
@@ -235,12 +248,10 @@ function useLiveSwipe({ enabled, onSwitch, reduceMotion }: { enabled: boolean; o
       "worklet";
       // Continue from the raw pull that produced what is shown now.
       base.value = liveSwipeRawFor(offset.value);
-      pull.value = base.value;
     })
     .onUpdate((event) => {
       "worklet";
       const raw = Math.min(0, base.value + event.translationX);
-      pull.value = raw;
       offset.value = liveSwipeOffset(raw);
       // Arming needs this gesture's own travel past the commit point, as Today's rows do.
       const next = event.translationX < -LIVE_SWIPE_COMMIT && raw < -LIVE_SWIPE_COMMIT ? 1 : 0;
@@ -254,7 +265,6 @@ function useLiveSwipe({ enabled, onSwitch, reduceMotion }: { enabled: boolean; o
       // A gesture the system cancels ends unsuccessful: the card goes home and nothing opens.
       const open = success && armed.value === 1;
       armed.value = 0;
-      pull.value = 0;
       offset.value = reduceMotion
         ? withTiming(0, { duration: 120, reduceMotion: ReduceMotion.Never })
         : withSpring(0, { ...BLOCKS_SPRING.land, reduceMotion: ReduceMotion.Never });
@@ -263,7 +273,7 @@ function useLiveSwipe({ enabled, onSwitch, reduceMotion }: { enabled: boolean; o
     .onFinalize(() => {
       "worklet";
       armed.value = 0;
-    }), [armed, base, cardHeight, cardWidth, commit, enabled, offset, pull, reduceMotion, tick]);
+    }), [armed, base, cardHeight, cardWidth, commit, enabled, offset, reduceMotion, tick]);
 
   const cardStyle = useAnimatedStyle(() => ({
     transform: [

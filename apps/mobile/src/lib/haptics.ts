@@ -61,8 +61,11 @@ export function useHapticsPreference() {
   return enabled;
 }
 
-/** Play the haptic for one committed action. Rapid repeats each call this once per action. */
-export function playHaptic(moment: DayframeHapticMoment) {
+/**
+ * Play the haptic for one committed action. Rapid repeats each call this once per action. Stop's
+ * soft landing impact follows `stopLandingDelayMs` (the Stop flight lands later than a row landing).
+ */
+export function playHaptic(moment: DayframeHapticMoment, { stopLandingDelayMs = STOP_LANDING_HAPTIC_DELAY_MS } = {}) {
   if (!hapticsEnabled) return;
   switch (moment) {
     case "start":
@@ -74,7 +77,7 @@ export function playHaptic(moment: DayframeHapticMoment) {
       pendingStopLanding = setTimeout(() => {
         pendingStopLanding = null;
         if (hapticsEnabled) fire(() => Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Soft));
-      }, STOP_LANDING_HAPTIC_DELAY_MS);
+      }, stopLandingDelayMs);
       return;
     case "tick":
       return fire(() => Haptics.selectionAsync());

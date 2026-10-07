@@ -31,7 +31,7 @@ describe("Today rows swipe-to-delete contract", () => {
     expect(rowsSource).toContain("Gesture.Pan()");
     expect(rowsSource).toContain(".activeOffsetX([-8, 8])");
     expect(rowsSource).toContain(".failOffsetY([-10, 10])");
-    expect(rowsSource).toContain("useAnimatedStyle(() => ({ transform: [{ translateX: offset.value }] }))");
+    expect(rowsSource).toMatch(/const mainStyle = useAnimatedStyle\(\(\) => \(\{[\s\S]*?transform: \[\{ translateX: offset\.value \}\],/);
     expect(rowsSource).not.toContain("ReanimatedSwipeable");
     expect(rowsSource).not.toContain("LayoutAnimation");
   });

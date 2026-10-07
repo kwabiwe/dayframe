@@ -1,9 +1,11 @@
-import { memo, useCallback, useEffect, useMemo, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Pressable, StyleSheet, Text, View, useWindowDimensions } from "react-native";
 import { Gesture, GestureDetector } from "react-native-gesture-handler";
 import Reanimated, {
   Easing,
   ReduceMotion,
+  interpolateColor,
+  type SharedValue,
   runOnJS,
   useAnimatedStyle,
   useSharedValue,
@@ -14,7 +16,8 @@ import Reanimated, {
 } from "react-native-reanimated";
 import { DAYFRAME_APP_ICONS } from "@dayframe/shared";
 import type { MobileTimeEntry } from "../../lib/api";
-import { BLOCKS_SPRING, type LandingRequest } from "../../lib/blocksMotion";
+import { BLOCKS_SPRING, POP_REQUEST_TTL_MS, type LandingRequest } from "../../lib/blocksMotion";
+import { rowFlightNode } from "../../lib/stopFlight";
 import { playHaptic } from "../../lib/haptics";
 import type { HistoryEntryGroup } from "../../lib/historyPresentation";
 import { localLayoutTransition, localPresenceEntering, localPresenceExiting } from "../../lib/motion";
@@ -62,6 +65,7 @@ export function TodayBlockRows({
   onReplayEntry,
   reduceMotion,
   rowLanding,
+  rowPop = null,
   theme,
 }: {
   activeTimerRunning: boolean;
@@ -75,6 +79,8 @@ export function TodayBlockRows({
   onReplayEntry: (entry: Entry) => void;
   reduceMotion: boolean;
   rowLanding: LandingRequest | null;
+  /** The Stop flight's arrival: that row's block pops and the row briefly highlights. */
+  rowPop?: LandingRequest | null;
   theme: MobileTheme;
 }) {
   const [expanded, setExpanded] = useState<ReadonlySet<string>>(() => new Set());
@@ -145,6 +151,7 @@ export function TodayBlockRows({
                 onReplay={() => onReplayEntry(group.representative.entry)}
                 reduceMotion={reduceMotion}
                 rowLanding={rowLanding}
+                rowPop={rowPop}
                 theme={theme}
               />
               {isExpanded ? (
@@ -168,6 +175,7 @@ export function TodayBlockRows({
                         onReplay={() => onReplayEntry(entry)}
                         reduceMotion={reduceMotion}
                         rowLanding={rowLanding}
+                        rowPop={rowPop}
                         theme={theme}
                       />
                     </Reanimated.View>
@@ -180,6 +188,22 @@ export function TodayBlockRows({
       </Reanimated.View>
     </View>
   );
+}
+
+/** The row a Stop flight lands on lights up and fades back over 700 ms, as in the prototype. */
+const ROW_HIGHLIGHT_MS = 700;
+
+function useRowHighlight({ entryId, request }: { entryId: string; request: LandingRequest | null }): SharedValue<number> {
+  const highlight = useSharedValue(0);
+  const played = useRef<number | null>(null);
+  useEffect(() => {
+    if (!request || played.current === request.token) return;
+    if (!request.entryIds?.includes(entryId) || Date.now() - request.requestedAt > POP_REQUEST_TTL_MS) return;
+    played.current = request.token;
+    highlight.value = 1;
+    highlight.value = withTiming(0, { duration: ROW_HIGHLIGHT_MS, reduceMotion: ReduceMotion.Never });
+  }, [entryId, highlight, request]);
+  return highlight;
 }
 
 export const TodayBlockRow = memo(function TodayBlockRow({
@@ -200,6 +224,7 @@ export const TodayBlockRow = memo(function TodayBlockRow({
   onReplay,
   reduceMotion,
   rowLanding,
+  rowPop = null,
   spokenLabel,
   theme,
 }: {
@@ -221,6 +246,7 @@ export const TodayBlockRow = memo(function TodayBlockRow({
   onReplay: () => void;
   reduceMotion: boolean;
   rowLanding: LandingRequest | null;
+  rowPop?: LandingRequest | null;
   /** Read by VoiceOver: title, times read "to", activity, place and tags. */
   spokenLabel: string;
   theme: MobileTheme;
@@ -294,7 +320,11 @@ export const TodayBlockRow = memo(function TodayBlockRow({
       armed.value = 0;
     }), [armed, base, commitDelete, commitReplay, deletable, flyOut, live, offset, reduceMotion, replayable, tick]);
 
-  const mainStyle = useAnimatedStyle(() => ({ transform: [{ translateX: offset.value }] }));
+  const highlight = useRowHighlight({ entryId: entry.id, request: rowPop });
+  const mainStyle = useAnimatedStyle(() => ({
+    backgroundColor: interpolateColor(highlight.value, [0, 1], [theme.surface, theme.surfaceMuted]),
+    transform: [{ translateX: offset.value }],
+  }));
   const leftStyle = useAnimatedStyle(() => ({ opacity: offset.value > 0 ? 1 : 0 }));
   const rightStyle = useAnimatedStyle(() => ({ opacity: offset.value < 0 ? 1 : 0 }));
 
@@ -332,7 +362,7 @@ export const TodayBlockRow = memo(function TodayBlockRow({
         </Reanimated.View>
       ) : null}
       <GestureDetector gesture={pan}>
-        <Reanimated.View style={[{ backgroundColor: theme.surface }, mainStyle]}>
+        <Reanimated.View style={mainStyle}>
           <Pressable
             accessibilityActions={actions.length ? actions : undefined}
             accessibilityLabel={label}
@@ -364,8 +394,10 @@ export const TodayBlockRow = memo(function TodayBlockRow({
                 categoryIcon={icon}
                 categoryName={entry.categoryName ?? null}
                 entryId={entry.id}
+                flightNode={rowFlightNode(entry.id)}
                 height={rowBlockHeight(blockSeconds)}
                 landing={rowLanding}
+                pop={rowPop}
                 reduceMotion={reduceMotion}
                 theme={theme}
                 width={ROW_BLOCK.width}

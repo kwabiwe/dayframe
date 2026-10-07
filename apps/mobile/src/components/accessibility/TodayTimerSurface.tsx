@@ -24,6 +24,7 @@ export function TodayTimerSurface({
   activeTimerActionsStyle,
   activeTimerDetailsStyle,
   diagnostic,
+  liveHidden = false,
   liveLanding,
   onAddTime,
   onOpenActiveTimer,
@@ -40,6 +41,8 @@ export function TodayTimerSurface({
   activeTimerActionsStyle?: ComponentProps<typeof Animated.View>["style"];
   activeTimerDetailsStyle?: ComponentProps<typeof Animated.View>["style"];
   diagnostic?: MobileAccessibilityDiagnostic;
+  /** The Stop flight's ghost has taken the live block's place: it is hidden at once, not faded. */
+  liveHidden?: boolean;
   liveLanding: LandingRequest | null;
   onAddTime: () => void;
   onOpenActiveTimer: () => void;
@@ -76,6 +79,7 @@ export function TodayTimerSurface({
           testID={active ? "today-live-slot" : "today-idle-slot"}
         >
           {active ? (
+            <View style={liveHidden ? styles.hidden : null} testID="today-live-visibility">
             <TodayLiveBlock
               active={active}
               actionsStyle={activeTimerActionsStyle}
@@ -89,6 +93,7 @@ export function TodayTimerSurface({
               reduceMotion={reduceMotion}
               theme={theme}
             />
+            </View>
           ) : (
             <TodayIdleCard diagnostic={diagnostic} onAddTime={onAddTime} onStartBlank={onStartBlank} theme={theme} />
           )}
@@ -111,4 +116,5 @@ export function TodayTimerSurface({
 
 const styles = StyleSheet.create({
   stack: { gap: 22 },
+  hidden: { opacity: 0 },
 });
