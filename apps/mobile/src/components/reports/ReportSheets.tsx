@@ -401,7 +401,7 @@ function ReportSheet({
         : null;
     const hide = Keyboard.addListener(
       Platform.OS === "ios" ? "keyboardWillHide" : "keyboardDidHide",
-      (event) => {
+      () => {
         setKeyboardInset(0);
       },
     );

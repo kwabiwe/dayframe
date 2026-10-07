@@ -479,7 +479,6 @@ export default function ReviewScreen() {
   }, [
     commitData,
     commitReviewBacklog,
-    reduceMotion,
     startEvidencePrefetch
   ]);
 

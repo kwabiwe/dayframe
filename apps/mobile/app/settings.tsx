@@ -1917,7 +1917,7 @@ export default function SettingsScreen() {
                 )}
               </Reanimated.View>
             ) : null}
-            <View style={styles.queueDiagnosticCard}>
+            <Reanimated.View layout={localLayoutTransition(reduceMotion)} style={styles.queueDiagnosticCard}>
               <Text {...mobileTextProps("metadata")} style={styles.label}>Timer Stops</Text>
               <Text {...mobileTextProps("body")} style={styles.accountMeta}>
                 Pending {timerStopSyncDiagnostics?.pendingCount ?? 0} · Needs attention{" "}
@@ -1945,8 +1945,8 @@ export default function SettingsScreen() {
                   />
                 </Reanimated.View>
               ))}
-            </View>
-            <View style={styles.queueDiagnosticCard}>
+            </Reanimated.View>
+            <Reanimated.View layout={localLayoutTransition(reduceMotion)} style={styles.queueDiagnosticCard}>
               <Text {...mobileTextProps("metadata")} style={styles.label}>Time entry changes</Text>
               <Text {...mobileTextProps("body")} style={styles.accountMeta}>
                 Pending {timeEntrySyncDiagnostics?.pendingCount ?? 0} · Needs attention{" "}
@@ -2019,8 +2019,8 @@ export default function SettingsScreen() {
                   </Pressable>
                 </View>
               ) : null}
-            </View>
-            <View style={styles.queueDiagnosticCard}>
+            </Reanimated.View>
+            <Reanimated.View layout={localLayoutTransition(reduceMotion)} style={styles.queueDiagnosticCard}>
               <Text {...mobileTextProps("metadata")} style={styles.label}>Review changes</Text>
               <Text {...mobileTextProps("body")} style={styles.accountMeta}>
                 Pending {reviewSyncDiagnostics?.pendingCount ?? 0} · Retry wait{" "}
@@ -2081,8 +2081,8 @@ export default function SettingsScreen() {
                   ) : null}
                 </Reanimated.View>
               ))}
-            </View>
-            <View style={styles.buttonRow}>
+            </Reanimated.View>
+            <Reanimated.View layout={localLayoutTransition(reduceMotion)} style={styles.buttonRow}>
               <Pressable style={pressable(styles.secondaryButton, styles.buttonPressed)} onPress={() => void syncAndReload()}>
                 <Text {...mobileTextProps("control")} style={styles.secondaryButtonText}>Sync now</Text>
               </Pressable>
@@ -2111,7 +2111,7 @@ export default function SettingsScreen() {
               <Pressable style={pressable(styles.secondaryButton, styles.buttonPressed)} onPress={exportQueueDiagnostics}>
                 <Text {...mobileTextProps("control")} style={styles.secondaryButtonText}>Export diagnostics</Text>
               </Pressable>
-            </View>
+            </Reanimated.View>
           </View>
           ) : null}
 

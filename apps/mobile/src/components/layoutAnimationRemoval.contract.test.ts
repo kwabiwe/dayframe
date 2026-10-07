@@ -17,8 +17,19 @@ function sources(directory: string): string[] {
 // .codex/reference/motion.md). Nothing may rely on it; Reanimated layout/entering/exiting own motion.
 describe("no inert LayoutAnimation", () => {
   it("has no LayoutAnimation, Keyboard.scheduleLayoutAnimation or scheduleLayoutTransition in app code", () => {
-    const offenders = [...sources(join(mobileRoot, "app")), ...sources(join(mobileRoot, "src"))]
-      .filter((path) => /\bLayoutAnimation\.|scheduleLayoutAnimation\(|scheduleLayoutTransition|import \{[^}]*\bLayoutAnimation\b[^}]*\} from "react-native"/.test(readFileSync(path, "utf8")));
+    const forbidden = [
+      /\bLayoutAnimation\.(configureNext|create|Presets|Types|Properties|easeInEaseOut|linear|spring|setEnabled)\b/,
+      /\bscheduleLayoutAnimation\(/,
+      /\bscheduleLayoutTransition\(/,
+      /import\s*\{[^}]*\bLayoutAnimation\b[^}]*\}\s*from\s*["']react-native["']/,
+    ];
+    const offenders = ["app", "src", "modules", "scripts"]
+      .flatMap((folder) => sources(join(mobileRoot, folder)))
+      .filter((path) => {
+        // Comments may name the API; only code that uses it is forbidden.
+        const code = readFileSync(path, "utf8").replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|[^:])\/\/.*$/gm, "$1");
+        return forbidden.some((pattern) => pattern.test(code));
+      });
     expect(offenders).toEqual([]);
   });
 
