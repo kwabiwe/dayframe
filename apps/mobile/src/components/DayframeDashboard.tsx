@@ -62,6 +62,7 @@ import {
 import { TodayTimerSurface } from "@/components/accessibility/TodayTimerSurface";
 import { ActivityBlockMark } from "./today/ActivityBlockMark";
 import type { LandingRequest } from "@/lib/blocksMotion";
+import { minuteClock } from "@/lib/frameClock";
 import { loadHapticsPreference, playHaptic } from "@/lib/haptics";
 import { layoutQuickStartMosaic, rankQuickStartActivities, weeklySecondsByActivity } from "@/lib/quickStartMosaic";
 import { TodayReviewPresentationProvider, useTodayReviewPresentationContext } from "./today/TodayReviewPresentationContext";
@@ -1313,7 +1314,8 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
       toValue,
       duration: MOBILE_MOTION.layout,
       easing: Easing.out(Easing.cubic),
-      useNativeDriver: false
+      // UI thread: Stop also writes the outbox and re-renders the dashboard on the JS thread.
+      useNativeDriver: true
     });
     animation.start();
     return () => animation.stop();
@@ -1344,6 +1346,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
     ? activeDurationSeconds
     : activeTimerElapsedSeconds(retainedActiveEntryForSheet, now);
   const todayKey = useMemo(() => formatDateKey(new Date(now)), [now]);
+  const minuteNow = minuteClock(now);
   const historySourceEntries = useMemo(() => {
     if (!data) return [];
     return mergeActiveEntry(
@@ -1359,9 +1362,9 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
   const historySections = useMemo(
     () => buildHistoryDaySections({
       entries: historySourceEntries.filter((entry) => !isReviewNeededEntry(entry)),
-      nowMs: now
+      nowMs: minuteNow
     }),
-    [historySourceEntries, now]
+    [historySourceEntries, minuteNow]
   );
   const categoryIconById = useMemo(
     () => new Map((data?.categories ?? []).map((category) => [category.id, category.icon ?? null])),
@@ -1402,7 +1405,8 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
   const nativeCalendarBridge = useMemo(
     () => buildNativeCalendarBridgeState({
       data,
-      now,
+      // Whole minutes are all the Calendar shows; a per-second model made SwiftUI republish every second.
+      now: minuteNow,
       reduceMotion,
       reduceTransparency,
       refreshing,
@@ -1413,7 +1417,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
     [
       calendarTransitionDirection,
       data,
-      now,
+      minuteNow,
       reduceMotion,
       reduceTransparency,
       refreshing,
@@ -2455,7 +2459,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
           renderItem={({ item }) => (
             <HistoryDayCard
               activeTimerRunning={Boolean(displayedActiveEntry)}
-              now={now}
+              now={minuteNow}
               onDeleteEntries={scheduleHistoryDeletion}
               onOpenEntry={(entry) => {
                 if (!entry.stoppedAt) {

@@ -7,6 +7,7 @@ import {
   routeNativeCalendarOpenEvent,
   routeNativeCalendarRefresh
 } from "./nativeCalendarPresentation";
+import { minuteClock } from "./frameClock";
 
 describe("native Calendar presentation boundary", () => {
   it("serializes fixed 24-hour boundaries, week state, totals, and resolved theme roles", () => {
@@ -242,6 +243,17 @@ describe("native Calendar presentation boundary", () => {
     ]));
     expect(dense.model.entries.every((item) => item.layoutMode === "compactLane")).toBe(true);
     expect(dense.model.entries.every((item) => item.textDensity === "none")).toBe(true);
+  });
+});
+
+describe("native Calendar update cadence", () => {
+  it("sends SwiftUI the same model for every second of a minute while a timer runs", () => {
+    const startedAt = localTime(2026, 7, 10, 9, 0);
+    const running = entry({ id: "running", startedAt: iso(startedAt), stoppedAt: null });
+    const data = bootstrap([running], { activeEntry: running });
+    const at = (seconds: number) => JSON.stringify(build(minuteClock(localTime(2026, 7, 10, 10, 0) + seconds * 1000), data).model);
+    expect(at(1)).toBe(at(59));
+    expect(at(61)).not.toBe(at(1));
   });
 });
 
