@@ -189,16 +189,15 @@ final class DayframeSheetQATests: XCTestCase {
     )
     let stop = element(SheetQAIdentifiers.stop)
     let sheetElement = element(SheetQAIdentifiers.sheet)
+    // Blocks parity 4a: Stop sits in the action row after the dial, so open Suggestions obscure it
+    // (hidden from accessibility) until they close; tapping the sheet head closes them.
     try require(
-      stop.exists && stop.isHittable,
-      "Running Stop was not available while the blank keyboard and Suggestions overlay were visible.",
+      !stop.exists,
+      "Running Stop was exposed while the blank keyboard and Suggestions overlay obscured it.",
       state: initial
     )
-    try require(
-      sheetElement.exists && sheetElement.frame.contains(stop.frame),
-      "Running Stop was not geometrically contained by the visible sheet.",
-      state: initial
-    )
+    // stopRunningTimer later closes the keyboard and Suggestions from the head, then requires Stop
+    // to be hittable inside the sheet.
     let elapsed = element(SheetQAIdentifiers.elapsed)
     try require(
       elapsed.exists && !elapsed.frame.isEmpty && sheetElement.frame.intersects(elapsed.frame),
@@ -1650,7 +1649,17 @@ final class DayframeSheetQATests: XCTestCase {
     let before = try sheetState()
     let presentationID = try requiredInt(before, key: "presentationId")
     let stop = element(SheetQAIdentifiers.stop)
-    try require(stop.exists && stop.isHittable, "Running Stop was not immediately hittable.", state: before)
+    if !(stop.exists && stop.isHittable) {
+      // Stop is below the form: close the keyboard and Suggestions from the sheet head first.
+      try tap(SheetQAIdentifiers.hero)
+    }
+    try require(stop.waitForExistence(timeout: 2) && stop.isHittable, "Running Stop was not hittable once the keyboard and Suggestions closed.", state: before)
+    let sheetElement = element(SheetQAIdentifiers.sheet)
+    try require(
+      sheetElement.exists && sheetElement.frame.contains(stop.frame),
+      "Running Stop was not geometrically contained by the visible sheet.",
+      state: before
+    )
     reporter.record(
       "sheet_exit_started",
       step: step,

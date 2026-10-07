@@ -1335,7 +1335,8 @@ export function ActiveTimerEditSheet({
   const saveLabel = isRunningMode ? "Save timer edits" : isAddMode ? "Create time entry" : "Save entry edits";
   const sheetTitle = isAddMode ? "Add time" : "Edit entry";
   // The prototype's sheet head: an eyebrow and a title above the form, Done on the right.
-  const headEyebrow = isRunningMode ? "RECORDING" : isAddMode ? "ADD PAST TIME" : formatSheetDay(parsedStart.date ?? new Date(draftStartMs));
+  // A stopped block's eyebrow names the day it was saved on, not a start date being edited.
+  const headEyebrow = isRunningMode ? "RECORDING" : isAddMode ? "ADD PAST TIME" : formatSheetDay(new Date(entry?.startedAt ?? draftStartMs));
   const headTitle = isRunningMode ? "Running block" : isAddMode ? "New block" : "Edit block";
   const canStartAgain = !isRunningMode && !isAddMode && Boolean(onStartAgain) && Boolean(onSave);
   const keyboardLayout = editSheetKeyboardLayout({
@@ -2767,7 +2768,7 @@ export function ActiveTimerEditSheet({
                         testID="time-entry-sheet-delete"
                       >
                         <DayframeIcon color={theme.dangerText} glyph={DAYFRAME_APP_ICONS.delete} size={18} />
-                        <Text {...mobileTextProps("control")} style={[sheetStyles.actionText, { color: theme.dangerText }]}>
+                        <Text {...mobileTextProps("control")} numberOfLines={1} style={[sheetStyles.actionText, { color: theme.dangerText }]}>
                           {isRunningMode || isAddMode ? "Discard" : "Delete"}
                         </Text>
                       </Pressable>
@@ -2787,7 +2788,7 @@ export function ActiveTimerEditSheet({
                         testID="time-entry-sheet-stop"
                       >
                         <PrimaryTimerGlyph color={theme.onAccent} mode="stop" />
-                        <Text {...mobileTextProps("control")} style={[sheetStyles.actionText, { color: theme.onAccent }]}>Stop</Text>
+                        <Text {...mobileTextProps("control")} numberOfLines={1} style={[sheetStyles.actionText, { color: theme.onAccent }]}>Stop</Text>
                       </Pressable>
                     ) : null}
                     {canStartAgain ? (
@@ -2807,7 +2808,7 @@ export function ActiveTimerEditSheet({
                         testID="time-entry-sheet-start-again"
                       >
                         <DayframeIcon color={theme.textPrimary} glyph={DAYFRAME_APP_ICONS.startAgain} size={18} />
-                        <Text {...mobileTextProps("control")} style={[sheetStyles.actionText, { color: theme.textPrimary }]}>Start again</Text>
+                        <Text {...mobileTextProps("control")} numberOfLines={1} style={[sheetStyles.actionText, { color: theme.textPrimary }]}>Start again</Text>
                       </Pressable>
                     ) : null}
                   </View>
@@ -3062,11 +3063,10 @@ function colorWithAlpha(hex: string, alpha: number) {
   return `rgba(${red}, ${green}, ${blue}, ${alpha})`;
 }
 
-const SHEET_DAY_FORMAT = new Intl.DateTimeFormat("en-GB", { day: "numeric", month: "long", weekday: "long" });
-
-/** "WEDNESDAY 7 OCTOBER", the eyebrow of a stopped block's sheet. */
+/** "WEDNESDAY 7 OCTOBER" (in the device's language and order), the eyebrow of a stopped block's sheet. */
 function formatSheetDay(date: Date) {
-  return Number.isNaN(date.getTime()) ? "" : SHEET_DAY_FORMAT.format(date).replace(",", "").toUpperCase();
+  if (Number.isNaN(date.getTime())) return "";
+  return date.toLocaleDateString(undefined, { day: "numeric", month: "long", weekday: "long" }).replace(",", "").toLocaleUpperCase();
 }
 
 // The prototype's sheet head and action row (design/blocks/ios.html .sheet-head, .sheet-actions).
@@ -3103,5 +3103,5 @@ const sheetStyles = StyleSheet.create({
     minHeight: 48,
     paddingHorizontal: 16
   },
-  actionText: { fontSize: 15, fontWeight: "700" }
+  actionText: { flexShrink: 1, fontSize: 15, fontWeight: "700" }
 });

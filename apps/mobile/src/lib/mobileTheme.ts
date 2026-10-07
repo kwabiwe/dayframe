@@ -58,7 +58,6 @@ export const themeOptions: Array<{ value: ThemePreference; label: string }> = [
 
 const THEME_PREFERENCE_KEY = "dayframe.themePreference.v1";
 const monoFont = "System";
-const TIME_ENTRY_SHEET_TOP_ACTION_INSET = 16;
 const TIME_ENTRY_SHEET_TOP_ACTION_MIN_TARGET = 44;
 const TIME_ENTRY_SHEET_TITLE_ACTION_CLEARANCE = 104;
 const MobileThemeContext = createContext<MobileThemeContextValue | null>(null);

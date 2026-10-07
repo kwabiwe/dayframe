@@ -118,6 +118,7 @@ function SheetQaHarness() {
   const [secondDeletionCount, setSecondDeletionCount] = useState(0);
   const [mutationFailureMode, setMutationFailureMode] = useState<MutationFailureMode>(requestedFailure);
   const [mutationFailureCount, setMutationFailureCount] = useState(0);
+  const [startAgainCount, setStartAgainCount] = useState(0);
   const [tagCreateCount, setTagCreateCount] = useState(0);
   const runningLastStoppedAtRef = useRef(
     new Date(Date.now() - 90 * 60 * 1_000).toISOString()
@@ -351,6 +352,7 @@ function SheetQaHarness() {
     mutationFailureMode,
     mutationFailureCount,
     tagCreateCount,
+    startAgainCount,
     tagNames: (data.tags ?? []).map((tag) => tag.name),
     reduceMotion,
     fontScale: PixelRatio.getFontScale(),
@@ -540,6 +542,8 @@ function SheetQaHarness() {
           ) as MobileBootstrap);
           return true;
         }}
+        // The QA host records Start again (the Dashboard starts it once the sheet has left).
+        onStartAgain={mode === "entry" ? () => setStartAgainCount((count) => count + 1) : undefined}
         onStop={mode === "running" ? async () => {
           if (mutationFailureMode === "stop") {
             setMutationFailureCount((count) => count + 1);
