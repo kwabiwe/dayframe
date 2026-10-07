@@ -209,4 +209,13 @@ Optional detail status enters below the stable activity/time summary with the ex
 - Async outcome: none; the clock follows the displayed entry's elapsed time, including a reconciled start time (which rolls the changed digits once).
 - Accessibility: Reduce Motion sets each digit in place. The odometer is hidden from VoiceOver; the live block's value speaks the elapsed time in words.
 
-The prototype's later Today moves (swipe to switch, the Stop flight, drop-ins, block pull-to-refresh, the Play orb) arrive with steps 2b-2, 2b-3 and 3 and add their own contracts here.
+## Live block swipe to switch and the Switch sheet (Blocks parity step 2b-2)
+
+- Trigger: a leftward pan on the running live block; VoiceOver's "Switch" action on it; a tap on a recent block in the sheet.
+- Owner: one `Gesture.Pan` on the live block (`useLiveSwipe` in `TodayLiveBlock`) drives a Reanimated shared offset on the UI thread. It activates after 8 points sideways and fails after 10 points vertically, so Today keeps scrolling; a touch that starts on Add past time or Stop never becomes a swipe; and it is disabled while the block is only retained for the Stop exit. The card (with its ring and actions) follows the finger left only and tilts by offset/60 degrees; past 90 points it rubber-bands at 0.35 (`liveSwipeOffset`). A neutral "Switch" underlay shows behind it only while it is off its place. `SwipeDismissSheet` owns the sheet's presentation and exit.
+- Entrance/update/exit: crossing 90 points of this gesture's own travel arms it with one `tick` (and again after disarming). Releasing springs the card home with `land`; releasing armed also opens the sheet. A pick starts that block through the Dashboard's existing Start owner (its haptic and landing) and dismisses the sheet; a second tap while it leaves does nothing.
+- Interruption: a card grabbed while it springs home continues from where it is (the raw pull is kept apart from the banded offset, so the band applies once); a gesture the system cancels springs home and opens nothing. The sheet's list is taken when it opens, so it never reshuffles while it is up or leaving; logout closes it.
+- Async outcome: none of its own; Start is the Dashboard's optimistic owner.
+- Accessibility: Reduce Motion keeps the finger tracking without the tilt and returns in 120 ms; the sheet uses the shared Reduce Motion path. VoiceOver uses the block's "Switch" action; each recent is one button ("Switch to Deep work, Work, yesterday", or "Start …" once the running block has stopped elsewhere) with a hint.
+
+The prototype's later Today moves (the Stop flight, drop-ins, block pull-to-refresh, the Play orb) arrive with steps 2b-3 and 3 and add their own contracts here.

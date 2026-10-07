@@ -49,6 +49,8 @@ import { TodayReviewPresentationProvider } from "./today/TodayReviewPresentation
 import { AccountAvatarButton } from "./today/AccountAvatarButton";
 import { TodayGoalFrame } from "./today/TodayGoalFrame";
 import { formatLiveClock } from "./today/todayBlocksLayout";
+import { TodaySwitchSheet } from "./today/TodaySwitchSheet";
+import { switchRecents, type SwitchRecent } from "../lib/todaySwitch";
 import { TodayReviewNudge } from "./today/TodayReviewNudge";
 import { TodayBlockRows } from "./today/TodayBlockRows";
 import { EarlierThisWeek } from "./today/EarlierThisWeek";
@@ -356,6 +358,8 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
   // Blocks landings (motion.md): issued only by committed Start/Stop/Undo handlers, never by refresh.
   const landingSequence = useRef(0);
   const [liveLanding, setLiveLanding] = useState<LandingRequest | null>(null);
+  // The Switch sheet's list, taken when it opens, so it never reshuffles under the finger or while it leaves.
+  const [switchSheetRecents, setSwitchSheetRecents] = useState<SwitchRecent[] | null>(null);
   const [rowLanding, setRowLanding] = useState<LandingRequest | null>(null);
 
   useEffect(() => {
@@ -423,6 +427,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
     setCalendarEditEntry(null);
     setCalendarEditPresentation(null);
     setPendingDeletion(null);
+    setSwitchSheetRecents(null);
     setPendingTimerStops([]);
     setAuthState("signedOut");
   }, []);
@@ -1537,6 +1542,14 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
     });
   }
 
+  function switchToRecent(entry: TimeEntry) {
+    startFromToday(
+      entry.categoryId,
+      entry.description ?? "",
+      entry.tagNames ?? entry.tags?.map((tag) => tag.name) ?? []
+    );
+  }
+
   function openManualEntry() {
     presentManualEntry(createManualDraftEntry(Date.now()));
   }
@@ -2487,6 +2500,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
                 onStartActivity={(activityId) => startFromToday(activityId)}
                 onStartBlank={() => startFromToday(null)}
                 onStop={stopFromToday}
+                onSwitch={() => setSwitchSheetRecents(switchRecents(loggedSourceEntries, data?.activeEntry ?? null))}
                 quickStartColumns={quickStartColumns}
                 reduceMotion={reduceMotion}
                 runningActivityId={displayedActiveEntry?.categoryId ?? null}
@@ -2676,6 +2690,19 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
             <Text style={styles.historyDeleteUndoButtonText}>Undo</Text>
           </Pressable>
         </Reanimated.View>
+      ) : null}
+      {switchSheetRecents && reduceMotionPreferenceResolved ? (
+        <TodaySwitchSheet
+          activityIconFor={(categoryId) => (categoryId ? categoryIconById.get(categoryId) ?? null : null)}
+          nowMs={minuteNow}
+          onClose={() => setSwitchSheetRecents(null)}
+          onPick={switchToRecent}
+          recents={switchSheetRecents}
+          running={Boolean(data?.activeEntry)}
+          reduceMotion={reduceMotion}
+          styles={styles}
+          theme={theme}
+        />
       ) : null}
       {manualEntryPresentation && reduceMotionPreferenceResolved ? <ActiveTimerEditSheet
         categories={sortedCategories}

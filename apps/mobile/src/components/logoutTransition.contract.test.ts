@@ -25,6 +25,15 @@ describe("mobile logout transition contract", () => {
     expect(completeSignOut).toContain("finishSignedOutNavigation();");
   });
 
+  it("closes Today's Switch sheet with the other presentations when the session ends", () => {
+    const transition = dashboard.slice(
+      dashboard.indexOf("const transitionToSignedOut = useCallback("),
+      dashboard.indexOf("const syncQueuedEvents = useCallback(")
+    );
+    expect(transition).toContain("setPendingDeletion(null);");
+    expect(transition).toContain("setSwitchSheetRecents(null);");
+  });
+
   it("keeps Settings complete during cleanup and gates repeated logout actions", () => {
     expect(settings).toContain("if (signingOutRef.current) return;");
     expect(settings).toContain("if (signedOutNavigationScheduledRef.current) return;");

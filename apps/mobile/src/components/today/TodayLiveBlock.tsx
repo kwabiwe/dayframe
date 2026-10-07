@@ -1,14 +1,24 @@
 import type { ComponentProps } from "react";
-import { useMemo } from "react";
-import { Animated, Pressable, StyleSheet, Text, View, type GestureResponderEvent } from "react-native";
-import Reanimated from "react-native-reanimated";
+import { useCallback, useMemo } from "react";
+import { Animated, Pressable, StyleSheet, Text, View, type GestureResponderEvent, type LayoutChangeEvent } from "react-native";
+import { Gesture, GestureDetector } from "react-native-gesture-handler";
+import Reanimated, {
+  ReduceMotion,
+  runOnJS,
+  useAnimatedStyle,
+  useSharedValue,
+  withSpring,
+  withTiming,
+} from "react-native-reanimated";
 import { blockColorsFor, DAYFRAME_APP_ICONS } from "@dayframe/shared";
 import { PrimaryTimerGlyph } from "../PrimaryTimerAction";
 import { ActivityIcon, DayframeIcon } from "../icons/DayframeIcon";
 import { recordMobileLayout, recordMobileTextLayout, type MobileAccessibilityDiagnostic } from "../accessibility/diagnostics";
 import type { MobileTheme } from "../../lib/mobileTheme";
 import { mobileTextProps } from "../../lib/mobileTypography";
-import { useBlockLanding, useBreathingRing, type LandingRequest } from "../../lib/blocksMotion";
+import { BLOCKS_SPRING, useBlockLanding, useBreathingRing, type LandingRequest } from "../../lib/blocksMotion";
+import { playHaptic } from "../../lib/haptics";
+import { LIVE_SWIPE_COMMIT, liveSwipeOffset, liveSwipeRawFor } from "../../lib/todaySwitch";
 import { LiveOdometer } from "./LiveOdometer";
 import { TODAY_CARD, TODAY_CARD_ACTIONS_WIDTH, colorWithAlpha, spokenDuration } from "./todayBlocksLayout";
 
@@ -45,6 +55,7 @@ export function TodayLiveBlock({
   onAddTime,
   onOpen,
   onStop,
+  onSwitch,
   reduceMotion,
   theme,
 }: {
@@ -56,6 +67,8 @@ export function TodayLiveBlock({
   onAddTime: () => void;
   onOpen: () => void;
   onStop: () => void;
+  /** Opens the Switch sheet; pulling the block left past the commit point and letting go calls it. */
+  onSwitch: () => void;
   reduceMotion: boolean;
   theme: MobileTheme;
 }) {
@@ -67,17 +80,34 @@ export function TodayLiveBlock({
   const ringStyle = useBreathingRing({ live: active.hasLiveActiveTimer, reduceMotion });
   const activityName = active.categoryLabel ?? "No activity";
   const titleStyle = [styles.title, { color: colors.text }, active.titleIsPlaceholder ? styles.placeholder : null];
+  const swipe = useLiveSwipe({ enabled: active.hasLiveActiveTimer, onSwitch, reduceMotion });
 
   return (
-    <View style={[styles.card, { backgroundColor: colors.fill }]} testID="today-live-block">
+    <View style={styles.wrap}>
+      <Reanimated.View
+        accessibilityElementsHidden
+        importantForAccessibility="no-hide-descendants"
+        pointerEvents="none"
+        style={[styles.switchReveal, { backgroundColor: theme.surfaceMuted }, swipe.revealStyle]}
+        testID="today-live-switch-reveal"
+      >
+        <DayframeIcon color={theme.textPrimary} glyph={DAYFRAME_APP_ICONS.startAgain} size={20} />
+        <Text {...mobileTextProps("control")} style={[styles.switchText, { color: theme.textPrimary }]}>Switch</Text>
+      </Reanimated.View>
+    <GestureDetector gesture={swipe.gesture}>
+    <Reanimated.View onLayout={swipe.onCardLayout} style={[styles.card, { backgroundColor: colors.fill }, swipe.cardStyle]} testID="today-live-block">
       <Reanimated.View
         pointerEvents="none"
         style={[styles.ring, { borderColor: colors.text }, ringStyle]}
         testID="today-live-ring"
       />
       <Pressable
+        accessibilityActions={active.hasLiveActiveTimer ? [{ name: "switch", label: "Switch" }] : undefined}
         accessibilityLabel="Edit running timer"
         accessibilityRole="button"
+        onAccessibilityAction={(event) => {
+          if (event.nativeEvent.actionName === "switch" && active.hasLiveActiveTimer) onSwitch();
+        }}
         accessibilityValue={{ text: `${activityName}. ${active.title}. ${spokenDuration(active.elapsedSeconds)} so far.` }}
         disabled={!active.hasLiveActiveTimer}
         onPress={onOpen}
@@ -166,11 +196,114 @@ export function TodayLiveBlock({
           <PrimaryTimerGlyph color={colors.fill} mode="stop" />
         </Pressable>
       </Animated.View>
+    </Reanimated.View>
+    </GestureDetector>
     </View>
   );
 }
 
+/**
+ * Pull the live block left to switch (Blocks prototype): one Pan owns the card's offset on the UI
+ * thread. It activates after 8 points sideways and fails after 10 points vertically, so Today keeps
+ * scrolling. Past 90 points the card rubber-bands, tilts a little and arms with one tick; letting go
+ * springs it home with `land` and, when armed, opens the Switch sheet. Reduce Motion keeps the
+ * finger tracking without the tilt and returns in 120 ms.
+ */
+function useLiveSwipe({ enabled, onSwitch, reduceMotion }: { enabled: boolean; onSwitch: () => void; reduceMotion: boolean }) {
+  // The finger's raw pull and the card's banded offset are kept apart, so a card grabbed while it
+  // springs home continues from where it is without banding twice.
+  const pull = useSharedValue(0);
+  const offset = useSharedValue(0);
+  const base = useSharedValue(0);
+  const armed = useSharedValue(0);
+  const cardWidth = useSharedValue(0);
+  const cardHeight = useSharedValue(0);
+  const commit = useCallback(() => onSwitch(), [onSwitch]);
+  const tick = useCallback(() => playHaptic("tick"), []);
+
+  const gesture = useMemo(() => Gesture.Pan()
+    .enabled(enabled)
+    .activeOffsetX([-8, 8])
+    .failOffsetY([-10, 10])
+    .onTouchesDown((event, manager) => {
+      "worklet";
+      // As in the prototype, a touch that starts on Add past time or Stop never becomes a swipe.
+      const touch = event.allTouches[0];
+      if (touch && liveActionsContain(touch.x, touch.y, cardWidth.value, cardHeight.value)) manager.fail();
+    })
+    .onStart(() => {
+      "worklet";
+      // Continue from the raw pull that produced what is shown now.
+      base.value = liveSwipeRawFor(offset.value);
+      pull.value = base.value;
+    })
+    .onUpdate((event) => {
+      "worklet";
+      const raw = Math.min(0, base.value + event.translationX);
+      pull.value = raw;
+      offset.value = liveSwipeOffset(raw);
+      // Arming needs this gesture's own travel past the commit point, as Today's rows do.
+      const next = event.translationX < -LIVE_SWIPE_COMMIT && raw < -LIVE_SWIPE_COMMIT ? 1 : 0;
+      if (next !== armed.value) {
+        armed.value = next;
+        if (next) runOnJS(tick)();
+      }
+    })
+    .onEnd((_event, success) => {
+      "worklet";
+      // A gesture the system cancels ends unsuccessful: the card goes home and nothing opens.
+      const open = success && armed.value === 1;
+      armed.value = 0;
+      pull.value = 0;
+      offset.value = reduceMotion
+        ? withTiming(0, { duration: 120, reduceMotion: ReduceMotion.Never })
+        : withSpring(0, { ...BLOCKS_SPRING.land, reduceMotion: ReduceMotion.Never });
+      if (open) runOnJS(commit)();
+    })
+    .onFinalize(() => {
+      "worklet";
+      armed.value = 0;
+    }), [armed, base, cardHeight, cardWidth, commit, enabled, offset, pull, reduceMotion, tick]);
+
+  const cardStyle = useAnimatedStyle(() => ({
+    transform: [
+      { translateX: offset.value },
+      { rotate: reduceMotion ? "0deg" : `${offset.value / 60}deg` },
+    ],
+  }));
+  const revealStyle = useAnimatedStyle(() => ({ opacity: offset.value < 0 ? 1 : 0 }));
+  const onCardLayout = useCallback((event: LayoutChangeEvent) => {
+    cardWidth.value = event.nativeEvent.layout.width;
+    cardHeight.value = event.nativeEvent.layout.height;
+  }, [cardHeight, cardWidth]);
+  return { cardStyle, gesture, onCardLayout, revealStyle };
+}
+
+/** Whether a point on the card (from its top-left) falls on Add past time or Stop. */
+export function liveActionsContain(x: number, y: number, width: number, height: number) {
+  "worklet";
+  if (width <= 0 || height <= 0) return false;
+  const right = width - TODAY_CARD.padding;
+  const bottom = height - TODAY_CARD.liveBottomPadding;
+  return x >= right - TODAY_CARD_ACTIONS_WIDTH && x <= right && y >= bottom - TODAY_CARD.primaryActionSize && y <= bottom;
+}
+
 const styles = StyleSheet.create({
+  wrap: { position: "relative" },
+  switchReveal: {
+    alignItems: "center",
+    borderRadius: TODAY_CARD.radius,
+    bottom: 0,
+    flexDirection: "row",
+    gap: 8,
+    justifyContent: "flex-end",
+    left: 0,
+    paddingRight: 22,
+    position: "absolute",
+    right: 0,
+    top: 0,
+  },
+  switchText: { fontSize: 15, fontWeight: "700" },
   card: {
     borderRadius: TODAY_CARD.radius,
     overflow: "hidden",
