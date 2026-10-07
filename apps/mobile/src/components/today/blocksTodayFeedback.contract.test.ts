@@ -17,10 +17,17 @@ describe("Today Blocks feedback", () => {
     expect(start).toMatch(/startTask\([^)]*\)\.then\(\(accepted\) => \{\s*if \(!accepted\) return;\s*playHaptic\("start"\);\s*setLiveLanding\(nextLandingRequest\(\)\);/);
   });
 
-  it("plays the Stop composite and lands the stopped row only after the Stop intent persists", () => {
+  it("plays the Stop composite and lands or flies the stopped row only after the Stop intent persists", () => {
     const stop = body("function stopFromToday(");
     expect(stop).toContain("const entryId = latestData.current?.activeEntry?.id;");
-    expect(stop).toMatch(/if \(!accepted \|\| !entryId\) return;\s*playHaptic\("stop"\);[\s\S]*?setLiveLanding\(null\);\s*setRowLanding\(nextLandingRequest\(\[entryId\]\)\);/);
+    // Reduce Motion (or nothing to measure) keeps the row landing; otherwise the flight measures first.
+    expect(stop).toMatch(/if \(reduceMotion \|\| !entryId \|\| !presentation \|\| !stopFlightOverlayReady\(\)\) \{\s*runStopFromToday\(entryId, null\);/);
+    const run = body("function runStopFromToday(");
+    expect(run).toMatch(/if \(!accepted \|\| !entryId\) \{\s*dropFlight\(\);\s*return;\s*\}\s*playHaptic\("stop", flightToken !== null \? \{ stopLandingDelayMs: STOP_FLIGHT\.durationMs \} : undefined\);[\s\S]*?setLiveLanding\(null\);\s*if \(flightToken === null \|\| !flightHasRow\) \{[\s\S]*?setRowLanding\(nextLandingRequest\(\[entryId\]\)\);/);
+    // A Stop that throws drops the ghost too.
+    expect(run).toContain("}, dropFlight);");
+    // A refused Stop drops the ghost before any haptic.
+    expect(run.indexOf("dropFlight();")).toBeLessThan(run.indexOf("playHaptic"));
   });
 
   it("warns on a committed delete and lands restored rows on Undo", () => {
@@ -30,7 +37,7 @@ describe("Today Blocks feedback", () => {
   });
 
   it("never plays haptics from refresh, reconciliation or rollback paths", () => {
-    const calls = [...dashboard.matchAll(/playHaptic\("(\w+)"\)/g)].map((match) => match[1]);
+    const calls = [...dashboard.matchAll(/playHaptic\("(\w+)"[,)]/g)].map((match) => match[1]);
     // "tick" is the selection haptic for tapping a day in "Earlier this week" (a user action).
     expect(calls.sort()).toEqual(["delete", "delete", "start", "stop", "tick", "undoRestore"]);
     expect(body("const openCalendarDay = useCallback(")).toContain('playHaptic("tick")');

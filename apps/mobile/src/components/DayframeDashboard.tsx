@@ -23,7 +23,7 @@ import {
   TextInput,
   View
 } from "react-native";
-import Reanimated from "react-native-reanimated";
+import Reanimated, { useAnimatedScrollHandler, useSharedValue } from "react-native-reanimated";
 import Svg, { Circle, Path } from "react-native-svg";
 import { router, useFocusEffect, useIsFocused } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
@@ -40,7 +40,7 @@ import { ActiveTimerEditSheet } from "@/components/ActiveTimerEditSheet";
 import { ConnectivityStatusIndicator } from "@/components/ConnectivityStatusStrip";
 import { ReportsTab } from "@/components/reports/ReportsTab";
 import { DayframeBrand } from "@/components/brand";
-import { TodayTimerSurface } from "@/components/accessibility/TodayTimerSurface";
+import { TodayTimerSurface, type TodayActiveTimerPresentation } from "@/components/accessibility/TodayTimerSurface";
 import type { LandingRequest } from "@/lib/blocksMotion";
 import { minuteClock, newestShownTimestamp } from "@/lib/frameClock";
 import { loadHapticsPreference, playHaptic } from "@/lib/haptics";
@@ -50,6 +50,9 @@ import { AccountAvatarButton } from "./today/AccountAvatarButton";
 import { TodayGoalFrame } from "./today/TodayGoalFrame";
 import { formatLiveClock } from "./today/todayBlocksLayout";
 import { TodaySwitchSheet } from "./today/TodaySwitchSheet";
+import { StopFlightOverlay, type StopFlight } from "./today/StopFlightOverlay";
+import { TodayPullBlocks } from "./today/TodayPullBlocks";
+import { LIVE_FLIGHT_NODE, STOP_FLIGHT, measureFlightNode, rowFlightNode, stopFlightOverlayReady } from "../lib/stopFlight";
 import { switchRecents, type SwitchRecent } from "../lib/todaySwitch";
 import { TodayReviewNudge } from "./today/TodayReviewNudge";
 import { TodayBlockRows } from "./today/TodayBlockRows";
@@ -360,6 +363,16 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
   const [liveLanding, setLiveLanding] = useState<LandingRequest | null>(null);
   // The Switch sheet's list, taken when it opens, so it never reshuffles under the finger or while it leaves.
   const [switchSheetRecents, setSwitchSheetRecents] = useState<SwitchRecent[] | null>(null);
+  const todayScrollY = useSharedValue(0);
+  const todayScrollHandler = useAnimatedScrollHandler({
+    onScroll: (event) => {
+      todayScrollY.value = event.contentOffset.y;
+    },
+  });
+  const [stopFlight, setStopFlight] = useState<StopFlight | null>(null);
+  const [rowPop, setRowPop] = useState<LandingRequest | null>(null);
+  const stopFlightSequence = useRef(0);
+  const stopFlightMeasuring = useRef(false);
   const [rowLanding, setRowLanding] = useState<LandingRequest | null>(null);
 
   useEffect(() => {
@@ -428,6 +441,11 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
     setCalendarEditPresentation(null);
     setPendingDeletion(null);
     setSwitchSheetRecents(null);
+    // Today's motion requests belong to the session that made them.
+    setStopFlight(null);
+    setRowPop(null);
+    setRowLanding(null);
+    setLiveLanding(null);
     setPendingTimerStops([]);
     setAuthState("signedOut");
   }, []);
@@ -1422,6 +1440,23 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
   const activeCategoryLabel = activeTimerCopy.categoryLabel;
   const activeTitle = activeTimerCopy.title;
   const activeTitleIsPlaceholder = Boolean(displayedActiveEntry) && !displayTimerDescription(displayedActiveEntry);
+  const stopFlightOwnsLiveBlock = Boolean(stopFlight && stopFlight.entryId === displayedActiveEntry?.id);
+  const todayLivePresentation: TodayActiveTimerPresentation | null = displayedActiveEntry ? {
+    categoryColor: displayedActiveEntry.categoryName
+      ? displayedActiveEntry.categoryColor ?? displayedActiveEntry.categoryId ?? null
+      : null,
+    categoryIcon: displayedActiveEntry.categoryId
+      ? categoryIconById.get(displayedActiveEntry.categoryId) ?? null
+      : null,
+    categoryLabel: displayedActiveEntry.categoryName ? activeCategoryLabel : null,
+    elapsedLabel: formatLiveClock(displayedActiveDurationSeconds),
+    elapsedSeconds: displayedActiveDurationSeconds,
+    entryId: displayedActiveEntry.id,
+    hasLiveActiveTimer,
+    startedLabel: `Started ${formatTimeOfDay(new Date(displayedActiveEntry.startedAt))}`,
+    title: activeTitle,
+    titleIsPlaceholder: activeTitleIsPlaceholder,
+  } : null;
   const recentStoppedAt = useMemo(
     () => recentStoppedEntryTime(data?.entries ?? [], data?.activeEntry ?? null),
     [data?.activeEntry, data?.entries]
@@ -1533,14 +1568,76 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
 
   function stopFromToday() {
     const entryId = latestData.current?.activeEntry?.id;
-    void stopActiveTimer().then((accepted) => {
-      if (!accepted || !entryId) return;
-      playHaptic("stop");
-      // A rolled-back Stop remounts the live block; it must not replay the Start landing.
-      setLiveLanding(null);
-      setRowLanding(nextLandingRequest([entryId]));
+    const presentation = todayLivePresentation;
+    // No flight under Reduce Motion, or before the overlay that draws the ghost has measured itself.
+    if (reduceMotion || !entryId || !presentation || !stopFlightOverlayReady()) {
+      runStopFromToday(entryId, null);
+      return;
+    }
+    // The Stop flight (motion.md): measure the live block and its row first, so the ghost takes the
+    // block's place in the same frame the block hides and can fly the moment Stop is accepted.
+    // A second tap while measuring is the same Stop.
+    if (stopFlightMeasuring.current) return;
+    stopFlightMeasuring.current = true;
+    const token = ++stopFlightSequence.current;
+    void Promise.all([measureFlightNode(LIVE_FLIGHT_NODE), measureFlightNode(rowFlightNode(entryId))]).then(([from, to]) => {
+      stopFlightMeasuring.current = false;
+      if (from) setStopFlight({ entryId, flying: false, from, presentation, to: to ?? "none", token });
+      runStopFromToday(entryId, from ? token : null, Boolean(to));
     });
   }
+
+  function runStopFromToday(entryId: string | undefined, flightToken: number | null, flightHasRow = false) {
+    // A refused, failed or rejected Stop keeps the live block: the ghost leaves without flying.
+    const dropFlight = () => {
+      if (flightToken !== null) setStopFlight((current) => (current?.token === flightToken ? null : current));
+    };
+    void stopActiveTimer().then((accepted) => {
+      if (!accepted || !entryId) {
+        dropFlight();
+        return;
+      }
+      playHaptic("stop", flightToken !== null ? { stopLandingDelayMs: STOP_FLIGHT.durationMs } : undefined);
+      // A rolled-back Stop remounts the live block; it must not replay the Start landing.
+      setLiveLanding(null);
+      if (flightToken === null || !flightHasRow) {
+        // Without a flight, or with no row to land on (the ghost fades where it is), the row lands.
+        setRowLanding(nextLandingRequest([entryId]));
+        if (flightToken === null) return;
+      }
+      setStopFlight((current) => (current?.token === flightToken ? { ...current, flying: true } : current));
+      if (!flightHasRow) return;
+      // The idle card is shorter than the live block, so the row moves up once Stop commits:
+      // measure it again and let the ghost chase it.
+      requestAnimationFrame(() => {
+        void measureFlightNode(rowFlightNode(entryId)).then((to) => {
+          if (!to) return;
+          setStopFlight((current) => (current?.token === flightToken && current.to !== "none" ? { ...current, to } : current));
+        });
+      });
+    }, dropFlight);
+  }
+
+  // A Stop rolled back while its ghost is still flying (delivery rejected) brings the live block
+  // back at once: the ghost leaves without landing, so nothing pops on a row that is running again.
+  const stopFlightCommitted = useRef<number | null>(null);
+  useEffect(() => {
+    if (!stopFlight?.flying) return;
+    const activeId = data?.activeEntry?.id ?? null;
+    if (activeId !== stopFlight.entryId) {
+      stopFlightCommitted.current = stopFlight.token;
+      return;
+    }
+    if (stopFlightCommitted.current === stopFlight.token) setStopFlight(null);
+  }, [data?.activeEntry?.id, stopFlight]);
+
+  // Stable, so the flight's ghost is not re-rendered by the Dashboard's 1 s tick handing it a new callback.
+  const finishStopFlight = useCallback((token: number, landed: boolean, entryId: string) => {
+    setStopFlight((current) => (current?.token === token ? null : current));
+    // The row block pops and the row lights up as the ghost lands on it.
+    // nextLandingRequest reads only refs, so the first render's copy stays correct.
+    if (landed) setRowPop(nextLandingRequest([entryId]));
+  }, []);
 
   function switchToRecent(entry: TimeEntry) {
     startFromToday(
@@ -2448,8 +2545,17 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
         refreshGeneration={todayPresentationRefreshGeneration}
       >
       <SafeAreaView collapsable={false} edges={["top", "left", "right"]} style={styles.safeArea}>
+        {/* Behind the list: the blocks show in the gap a pull opens above Today. */}
+        <TodayPullBlocks
+          refreshing={isFocused && refreshing}
+          reduceMotion={reduceMotion}
+          scrollY={todayScrollY}
+          theme={theme}
+        />
         <Reanimated.FlatList
           contentContainerStyle={[styles.container, styles.todayListContent]}
+          onScroll={todayScrollHandler}
+          scrollEventThrottle={16}
           data={todaySections}
           itemLayoutAnimation={localLayoutTransition(reduceMotion)}
           keyExtractor={(section) => section.key}
@@ -2457,8 +2563,9 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
             <RefreshControl
               refreshing={isFocused && refreshing}
               onRefresh={refreshTodayPresentation}
-              tintColor={theme.textSecondary}
-              colors={[theme.textSecondary]}
+              // The native control owns the pull and the held gap; the blocks above replace its spinner.
+              tintColor="transparent"
+              colors={["transparent"]}
             />
           }
           ListHeaderComponent={(
@@ -2476,22 +2583,10 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
               <TodayGoalFrame dateLabel={formatEyebrowDay(currentDate)} theme={theme} {...todayGoalFrame} />
 
               <TodayTimerSurface
-                active={displayedActiveEntry ? {
-                  categoryColor: displayedActiveEntry.categoryName
-                    ? displayedActiveEntry.categoryColor ?? displayedActiveEntry.categoryId ?? null
-                    : null,
-                  categoryIcon: displayedActiveEntry.categoryId
-                    ? categoryIconById.get(displayedActiveEntry.categoryId) ?? null
-                    : null,
-                  categoryLabel: displayedActiveEntry.categoryName ? activeCategoryLabel : null,
-                  elapsedLabel: formatLiveClock(displayedActiveDurationSeconds),
-                  elapsedSeconds: displayedActiveDurationSeconds,
-                  entryId: displayedActiveEntry.id,
-                  hasLiveActiveTimer,
-                  startedLabel: `Started ${formatTimeOfDay(new Date(displayedActiveEntry.startedAt))}`,
-                  title: activeTitle,
-                  titleIsPlaceholder: activeTitleIsPlaceholder,
-                } : null}
+                // While the Stop flight's ghost holds the block's place, the block is hidden; once Stop
+                // commits the idle card comes in at once instead of waiting for the retained exit.
+                active={stopFlightOwnsLiveBlock && !hasLiveActiveTimer ? null : todayLivePresentation}
+                liveHidden={stopFlightOwnsLiveBlock}
                 activeTimerActionsStyle={activeTimerActionsStyle}
                 activeTimerDetailsStyle={activeTimerDetailsStyle}
                 liveLanding={liveLanding}
@@ -2542,6 +2637,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
               }}
               reduceMotion={reduceMotion}
               rowLanding={rowLanding}
+              rowPop={rowPop}
               theme={theme}
             />
           )}
@@ -2691,6 +2787,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
           </Pressable>
         </Reanimated.View>
       ) : null}
+      <StopFlightOverlay flight={stopFlight} onFinished={finishStopFlight} theme={theme} />
       {switchSheetRecents && reduceMotionPreferenceResolved ? (
         <TodaySwitchSheet
           activityIconFor={(categoryId) => (categoryId ? categoryIconById.get(categoryId) ?? null : null)}

@@ -64,6 +64,7 @@ vi.mock("../../lib/motion", () => ({
 }));
 
 import { TodayTimerSurface, type TodayActiveTimerPresentation } from "./TodayTimerSurface";
+import { resetMosaicDropInForTests } from "../today/QuickStartMosaic";
 import { layoutQuickStartMosaic, quickStartTileFrames } from "../../lib/quickStartMosaic";
 
 const darkTheme = { ...DAYFRAME_THEME.dark, mode: "dark", pressed: "pressed" } as never;
@@ -332,6 +333,32 @@ describe("TodayTimerSurface (Blocks)", () => {
     const { byLabel, tree } = render(props({ active: { ...running, hasLiveActiveTimer: false }, runningActivityId: "work" }));
     expect(gestures.pans.at(-1).isEnabled).toBe(false);
     expect(byLabel("Edit running timer").props.accessibilityActions).toBeUndefined();
+    act(() => tree.unmount());
+  });
+
+  it("drops the tiles in on the app's first paint only", () => {
+    resetMosaicDropInForTests();
+    const tileOpacities = (tree: ReturnType<typeof create>) =>
+      tree.root.findAllByType("ReanimatedView" as never)
+        .map((node) => flatStyle(node.props.style))
+        .filter((style) => style.flex === 1 && "opacity" in style)
+        .map((style) => style.opacity);
+    const first = render(props());
+    expect(tileOpacities(first.tree)).toEqual([0, 0]);
+    act(() => first.tree.unmount());
+    // Today mounting again (a tab return, a refresh, an account switch) shows them at rest.
+    const again = render(props());
+    expect(tileOpacities(again.tree)).toEqual([1, 1]);
+    act(() => again.tree.unmount());
+  });
+
+  it("hides the live block at once while the Stop flight's ghost holds its place", () => {
+    const { tree } = render(props({ active: running, liveHidden: true, runningActivityId: "work" }));
+    expect(flatStyle(tree.root.findByProps({ testID: "today-live-visibility" }).props.style).opacity).toBe(0);
+    // Hidden means untouchable too: a second tap on the old Stop reaches nothing.
+    expect(tree.root.findByProps({ testID: "today-live-visibility" }).props.pointerEvents).toBe("none");
+    act(() => tree.update(<TodayTimerSurface {...props({ active: running, runningActivityId: "work" })} />));
+    expect(flatStyle(tree.root.findByProps({ testID: "today-live-visibility" }).props.style).opacity).toBeUndefined();
     act(() => tree.unmount());
   });
 

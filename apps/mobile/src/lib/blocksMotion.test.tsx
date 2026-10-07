@@ -30,7 +30,17 @@ vi.mock("react-native-reanimated", () => ({
 }));
 vi.mock("./motion", () => ({ MOBILE_MOTION: { control: 140 } }));
 
-import { BLOCKS_SPRING, BREATHING_RING, useBlockLanding, useBreathingRing, type LandingRequest } from "./blocksMotion";
+import {
+  BLOCKS_SPRING,
+  BREATHING_RING,
+  DROP_IN,
+  POP_FROM_SCALE,
+  useBlockLanding,
+  useBlockPop,
+  useBreathingRing,
+  useDropIn,
+  type LandingRequest,
+} from "./blocksMotion";
 
 function Landing(props: Parameters<typeof useBlockLanding>[0]) {
   useBlockLanding(props);
@@ -156,5 +166,69 @@ describe("useBreathingRing", () => {
     const stopped = mountRing({ live: false, reduceMotion: false });
     expect(stopped.opacity.value).toMatchObject({ kind: "timing", to: 0 });
     act(() => stopped.tree.unmount());
+  });
+});
+
+describe("useBlockPop", () => {
+  function Pop(props: Parameters<typeof useBlockPop>[0]) {
+    useBlockPop(props);
+    return null;
+  }
+
+  it("pops its row block once from 1.5 with the pop spring, and never for another entry or a stale request", () => {
+    assigned.length = 0;
+    const request: LandingRequest = { ...now(), entryIds: ["entry-a"], token: 11 };
+    let tree!: ReturnType<typeof create>;
+    act(() => {
+      tree = create(<Pop entryId="entry-a" request={request} />);
+    });
+    const [scale] = assigned;
+    expect(POP_FROM_SCALE).toBe(1.5);
+    expect(scale.value).toEqual({ config: { ...BLOCKS_SPRING.pop, reduceMotion: "never" }, kind: "spring", to: 1 });
+    scale.value = 1;
+    act(() => tree.update(<Pop entryId="entry-a" request={request} />));
+    expect(scale.value).toBe(1);
+    act(() => tree.update(<Pop entryId="entry-a" request={{ ...request, entryIds: ["entry-b"], token: 12 }} />));
+    expect(scale.value).toBe(1);
+    act(() => tree.update(<Pop entryId="entry-a" request={{ ...request, requestedAt: Date.now() - 5000, token: 13 }} />));
+    expect(scale.value).toBe(1);
+    act(() => tree.unmount());
+  });
+});
+
+describe("useDropIn", () => {
+  function Drop(props: Parameters<typeof useDropIn>[0]) {
+    useDropIn(props);
+    return null;
+  }
+
+  it("drops a first-paint tile from 18 points and 92 %, staggered by its order", () => {
+    assigned.length = 0;
+    initialValues.length = 0;
+    let tree!: ReturnType<typeof create>;
+    act(() => {
+      tree = create(<Drop index={2} play />);
+    });
+    expect(initialValues).toEqual([DROP_IN.distance, DROP_IN.fromScale, 0]);
+    const [translateY, scale, opacity] = assigned;
+    const delay = DROP_IN.firstDelayMs + 2 * DROP_IN.staggerMs;
+    expect(translateY.value).toMatchObject({ delay, kind: "spring", to: 0 });
+    expect(scale.value).toMatchObject({ delay, kind: "spring", to: 1 });
+    expect(opacity.value).toMatchObject({ delay, kind: "timing", to: 1 });
+    act(() => tree.unmount());
+    // An interrupted drop-in settles at rest.
+    expect([translateY.value, scale.value, opacity.value]).toEqual([0, 1, 1]);
+  });
+
+  it("shows a tile at rest when it is not the app's first paint", () => {
+    assigned.length = 0;
+    initialValues.length = 0;
+    let tree!: ReturnType<typeof create>;
+    act(() => {
+      tree = create(<Drop index={0} play={false} />);
+    });
+    expect(initialValues).toEqual([0, 1, 1]);
+    expect(assigned.map((value) => value.value)).toEqual([0, 1, 1]);
+    act(() => tree.unmount());
   });
 });

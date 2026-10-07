@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 import Reanimated from "react-native-reanimated";
 import { blockColorsFor, DAYFRAME_BLOCKS } from "@dayframe/shared";
@@ -12,7 +12,19 @@ import {
   type QuickStartColumn,
   type QuickStartTile,
 } from "../../lib/quickStartMosaic";
+import { useDropIn } from "../../lib/blocksMotion";
 import { compactDuration, spokenDuration } from "./todayBlocksLayout";
+
+/**
+ * The tiles drop in on the first paint of the app only (Blocks prototype); a later mount of Today,
+ * a refresh or a cached launch in the same process shows them at rest.
+ */
+let mosaicDroppedIn = false;
+
+/** Test-only: lets each test start from a fresh app launch. */
+export function resetMosaicDropInForTests() {
+  mosaicDroppedIn = false;
+}
 
 /**
  * Pinned activities as solid blocks sized by the last seven days. Tap starts one, or switches to it
@@ -45,11 +57,15 @@ export function QuickStartMosaic({
   const tileExiting = useMemo(() => localPresenceExiting(reduceMotion), [reduceMotion]);
   // No entrance on first paint; a tile that arrives later (a newly pinned activity) fades in.
   const painted = useRef(false);
+  const frames = width > 0 && columns.length ? quickStartTileFrames(columns, width) : [];
+  // Decided once, on the render that first shows tiles: only the app's first paint drops them in.
+  const dropIn = useRef<boolean | null>(null);
+  if (dropIn.current === null && frames.length) dropIn.current = !mosaicDroppedIn && !reduceMotion;
   useEffect(() => {
     if (width > 0) painted.current = true;
-  }, [width]);
+    if (frames.length) mosaicDroppedIn = true;
+  }, [frames.length, width]);
   if (!columns.length) return null;
-  const frames = width > 0 ? quickStartTileFrames(columns, width) : [];
 
   return (
     <View style={styles.section} testID="today-quick-start">
@@ -70,7 +86,7 @@ export function QuickStartMosaic({
         style={styles.mosaic}
         testID="today-quick-start-mosaic"
       >
-        {frames.map((tile) => (
+        {frames.map((tile, index) => (
           <Reanimated.View
             entering={painted.current ? tileEntering : undefined}
             exiting={tileExiting}
@@ -78,18 +94,26 @@ export function QuickStartMosaic({
             layout={tileLayout}
             style={[styles.slot, { height: tile.height, left: tile.x, top: tile.y, width: tile.width }]}
           >
-            <QuickStartTileButton
-              onPress={() => (tile.id === runningActivityId ? onOpenRunning() : onStartActivity(tile.id))}
-              recording={tile.id === runningActivityId}
-              switching={timerRunning && tile.id !== runningActivityId}
-              theme={theme}
-              tile={tile}
-            />
+            <DropInTile index={index} play={Boolean(dropIn.current) && !painted.current}>
+              <QuickStartTileButton
+                onPress={() => (tile.id === runningActivityId ? onOpenRunning() : onStartActivity(tile.id))}
+                recording={tile.id === runningActivityId}
+                switching={timerRunning && tile.id !== runningActivityId}
+                theme={theme}
+                tile={tile}
+              />
+            </DropInTile>
           </Reanimated.View>
         ))}
       </View>
     </View>
   );
+}
+
+/** The drop-in moves the tile inside its slot; the slot keeps its own layout transition. */
+function DropInTile({ children, index, play }: { children: ReactNode; index: number; play: boolean }) {
+  const style = useDropIn({ index, play });
+  return <Reanimated.View style={[styles.dropIn, style]}>{children}</Reanimated.View>;
 }
 
 function QuickStartTileButton({
@@ -146,6 +170,7 @@ const styles = StyleSheet.create({
   caption: { flexShrink: 1, fontSize: 13, fontWeight: "500", minWidth: 0 },
   mosaic: { height: QUICK_START_MOSAIC.height, position: "relative" },
   slot: { position: "absolute" },
+  dropIn: { flex: 1 },
   tile: {
     borderRadius: DAYFRAME_BLOCKS.radius.block,
     flex: 1,

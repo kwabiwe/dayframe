@@ -4,7 +4,8 @@ import Reanimated from "react-native-reanimated";
 import { blockColorsFor, DAYFRAME_BLOCKS } from "@dayframe/shared";
 import { ActivityIcon } from "../icons/DayframeIcon";
 import type { MobileTheme } from "../../lib/mobileTheme";
-import { useBlockLanding, type LandingRequest } from "../../lib/blocksMotion";
+import { useBlockLanding, useBlockPop, type LandingRequest } from "../../lib/blocksMotion";
+import { flightNodeRef } from "../../lib/stopFlight";
 
 export const ACTIVITY_BLOCK_MARK_SIZE = 30;
 const ROW_LANDING_DISTANCE = -10;
@@ -17,8 +18,10 @@ export function ActivityBlockMark({
   categoryIcon,
   categoryName,
   entryId,
+  flightNode,
   height = ACTIVITY_BLOCK_MARK_SIZE,
   landing,
+  pop = null,
   reduceMotion,
   theme,
   width = ACTIVITY_BLOCK_MARK_SIZE,
@@ -27,9 +30,13 @@ export function ActivityBlockMark({
   categoryIcon: string | null;
   categoryName: string | null;
   entryId: string;
+  /** Today's rows register their block so the Stop flight can land on it. */
+  flightNode?: string;
   /** Today's blocks size the block by duration; history rows keep the square mark. */
   height?: number;
   landing: LandingRequest | null;
+  /** The Stop flight's arrival: the block pops once. */
+  pop?: LandingRequest | null;
   reduceMotion: boolean;
   theme: MobileTheme;
   width?: number;
@@ -45,14 +52,23 @@ export function ActivityBlockMark({
     reduceMotion,
     request: landing,
   });
+  const popStyle = useBlockPop({ entryId, request: pop });
+  const register = useMemo(() => flightNodeRef(flightNode), [flightNode]);
+  // The pop scales the resting frame (which the flight measures); the landing moves the block inside it.
   return (
     <Reanimated.View
       accessibilityElementsHidden
+      collapsable={false}
       importantForAccessibility="no-hide-descendants"
-      style={[styles.mark, { backgroundColor: colors.fill, height, width }, landingStyle]}
-      testID={`activity-block-${entryId}`}
+      ref={register}
+      style={[{ height, width }, popStyle]}
     >
-      <ActivityIcon color={colors.text} icon={categoryIcon} name={categoryName} size={16} />
+      <Reanimated.View
+        style={[styles.mark, { backgroundColor: colors.fill, height, width }, landingStyle]}
+        testID={`activity-block-${entryId}`}
+      >
+        <ActivityIcon color={colors.text} icon={categoryIcon} name={categoryName} size={16} />
+      </Reanimated.View>
     </Reanimated.View>
   );
 }
