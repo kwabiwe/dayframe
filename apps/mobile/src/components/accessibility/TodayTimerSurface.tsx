@@ -30,6 +30,7 @@ export function TodayTimerSurface({
   onStartActivity,
   onStartBlank,
   onStop,
+  onSwitch,
   quickStartColumns,
   reduceMotion,
   runningActivityId,
@@ -45,6 +46,7 @@ export function TodayTimerSurface({
   onStartActivity: (activityId: string) => void;
   onStartBlank: () => void;
   onStop: () => void;
+  onSwitch: () => void;
   quickStartColumns: QuickStartColumn[];
   reduceMotion: boolean;
   runningActivityId: string | null;
@@ -83,6 +85,7 @@ export function TodayTimerSurface({
               onAddTime={onAddTime}
               onOpen={onOpenActiveTimer}
               onStop={onStop}
+              onSwitch={onSwitch}
               reduceMotion={reduceMotion}
               theme={theme}
             />

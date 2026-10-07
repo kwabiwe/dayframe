@@ -25,8 +25,22 @@ vi.mock("react-native-svg", () => ({
   Rect: "Rect",
   default: "Svg",
 }));
+const gestures = vi.hoisted(() => ({ pans: [] as any[], haptic: vi.fn() }));
+vi.mock("react-native-gesture-handler", () => {
+  function Pan() {
+    const pan: any = { handlers: {}, isEnabled: true };
+    for (const method of ["activeOffsetX", "failOffsetY"]) pan[method] = () => pan;
+    pan.enabled = (value: boolean) => { pan.isEnabled = value; return pan; };
+    for (const name of ["onStart", "onUpdate", "onEnd", "onFinalize"]) pan[name] = (fn: unknown) => { pan.handlers[name] = fn; return pan; };
+    gestures.pans.push(pan);
+    return pan;
+  }
+  return { Gesture: { Pan }, GestureDetector: ({ children }: { children: unknown }) => children };
+});
+vi.mock("../../lib/haptics", () => ({ playHaptic: gestures.haptic }));
 vi.mock("react-native-reanimated", () => ({
   default: { View: "ReanimatedView" },
+  runOnJS: (fn: (...args: unknown[]) => unknown) => fn,
   Easing: { inOut: () => undefined, sin: undefined },
   ReduceMotion: { Always: "always", Never: "never", System: "system" },
   cancelAnimation: vi.fn(),
@@ -80,6 +94,7 @@ function props(overrides: Partial<ComponentProps<typeof TodayTimerSurface>> = {}
     onStartActivity: vi.fn(),
     onStartBlank: vi.fn(),
     onStop: vi.fn(),
+    onSwitch: vi.fn(),
     quickStartColumns: columns,
     reduceMotion: false,
     runningActivityId: null,
@@ -197,7 +212,8 @@ describe("TodayTimerSurface (Blocks)", () => {
     const { tree } = render(props({ active: running, liveLanding: landing, runningActivityId: "work" }));
     const card = flatStyle(tree.root.findByProps({ testID: "today-live-block" }).props.style);
     const content = flatStyle(tree.root.findByProps({ testID: "today-live-content" }).props.style);
-    expect(card.transform).toBeUndefined();
+    // The card moves only with the Switch swipe, which is at rest here.
+    expect(card.transform).toEqual([{ translateX: 0 }, { rotate: "0deg" }]);
     // A due landing mounts the content at its 14-point offset; the spring then brings it to rest.
     expect(content.transform).toEqual([{ translateY: 14 }]);
     act(() => tree.unmount());
@@ -243,6 +259,61 @@ describe("TodayTimerSurface (Blocks)", () => {
     act(() => tree.update(<TodayTimerSurface {...input} active={null} reduceMotion />));
     expect(tree.root.findByProps({ testID: "today-idle-slot" }).props.entering).toBeUndefined();
     expect(tree.root.findByProps({ testID: "today-idle-slot" }).props.exiting).toBeUndefined();
+    act(() => tree.unmount());
+  });
+
+  it("pulls the live block left to open the Switch sheet, with one tick when it arms", () => {
+    gestures.pans.length = 0;
+    gestures.haptic.mockClear();
+    const input = props({ active: running, runningActivityId: "work" });
+    const { tree } = render(input);
+    const pan = gestures.pans.at(-1);
+    expect(pan.isEnabled).toBe(true);
+    // A short pull springs home and opens nothing.
+    act(() => {
+      pan.handlers.onStart({});
+      pan.handlers.onUpdate({ translationX: -60 });
+      pan.handlers.onEnd({}, true);
+      pan.handlers.onFinalize({});
+    });
+    expect(input.onSwitch).not.toHaveBeenCalled();
+    expect(gestures.haptic).not.toHaveBeenCalled();
+    // Past 90 points it arms once; letting go opens the sheet.
+    act(() => {
+      pan.handlers.onStart({});
+      pan.handlers.onUpdate({ translationX: -95 });
+      pan.handlers.onUpdate({ translationX: -140 });
+      pan.handlers.onEnd({}, true);
+      pan.handlers.onFinalize({});
+    });
+    expect(gestures.haptic.mock.calls).toEqual([["tick"]]);
+    expect(input.onSwitch).toHaveBeenCalledOnce();
+    // A cancelled gesture never opens it.
+    act(() => {
+      pan.handlers.onStart({});
+      pan.handlers.onUpdate({ translationX: -140 });
+      pan.handlers.onEnd({}, false);
+      pan.handlers.onFinalize({});
+    });
+    expect(input.onSwitch).toHaveBeenCalledOnce();
+    act(() => tree.unmount());
+  });
+
+  it("offers Switch as a VoiceOver action on the running block", () => {
+    const input = props({ active: running, runningActivityId: "work" });
+    const { byLabel, tree } = render(input);
+    const block = byLabel("Edit running timer");
+    expect(block.props.accessibilityActions).toEqual([{ label: "Switch", name: "switch" }]);
+    act(() => block.props.onAccessibilityAction({ nativeEvent: { actionName: "switch" } }));
+    expect(input.onSwitch).toHaveBeenCalledOnce();
+    act(() => tree.unmount());
+  });
+
+  it("does not swipe a block whose timer has stopped (the retained Stop exit)", () => {
+    gestures.pans.length = 0;
+    const { byLabel, tree } = render(props({ active: { ...running, hasLiveActiveTimer: false }, runningActivityId: "work" }));
+    expect(gestures.pans.at(-1).isEnabled).toBe(false);
+    expect(byLabel("Edit running timer").props.accessibilityActions).toBeUndefined();
     act(() => tree.unmount());
   });
 

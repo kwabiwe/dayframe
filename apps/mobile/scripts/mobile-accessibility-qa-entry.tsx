@@ -410,6 +410,7 @@ function Probe() {
               onOpenActiveTimer={() => setActionResult("Local active timer editor callback")}
               onStartActivity={(activityId) => setActionResult(`Local quick start callback: ${activityId}`)}
               onStartBlank={() => setActionResult("Local blank timer callback")}
+              onSwitch={() => undefined}
               onStop={() => setActionResult("Local Stop callback")}
               quickStartColumns={layoutQuickStartMosaic([
                 { color: "moss", icon: "work", id: "qa-activity", name: "Long synthetic activity name", weekSeconds: 7200 },
