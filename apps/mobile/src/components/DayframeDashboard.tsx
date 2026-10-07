@@ -3,6 +3,7 @@ import {
   useCallback,
   useContext,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -1299,9 +1300,12 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
     return () => clearTimeout(timeout);
   }, [activeEditPresentation, activeEntryForDisplay, reduceMotion]);
 
-  useEffect(() => {
+  // A layout effect, so an instant value lands before the live block's first paint.
+  useLayoutEffect(() => {
     const toValue = hasLiveActiveTimer ? 1 : 0;
-    if (reduceMotion) {
+    // On Start the live block's own crossfade and landing own the entrance, so the details and
+    // actions appear at rest; this value only fades them out during the retained Stop exit.
+    if (reduceMotion || hasLiveActiveTimer) {
       activeTimerExpansion.setValue(toValue);
       return undefined;
     }
@@ -2442,7 +2446,10 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
                 runningActivityId={displayedActiveEntry?.categoryId ?? null}
                 theme={theme}
               />
-              <TodayReviewSummary isFocused={isFocused} />
+              {/* Moves with the timer card and mosaic above it (Reanimated owns Today motion). */}
+              <Reanimated.View layout={localLayoutTransition(reduceMotion)}>
+                <TodayReviewSummary isFocused={isFocused} />
+              </Reanimated.View>
             </Animated.View>
           )}
           renderItem={({ item }) => (

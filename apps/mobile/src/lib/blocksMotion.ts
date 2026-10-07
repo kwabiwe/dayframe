@@ -56,13 +56,16 @@ export function useBlockLanding({
   // A request that is already due when this node mounts starts from its offset on the very first
   // frame, so the content never paints at rest and then jumps before the landing plays.
   const dueAtMount = useRef(landingIsDue(request, entryId)).current;
+  // The token the mount decision used stays due in the effect even if the TTL lapses in between,
+  // so the content can never be left parked at its offset.
+  const mountToken = useRef(dueAtMount ? request?.token ?? null : null);
   const translateY = useSharedValue(dueAtMount && !reduceMotion ? distance : 0);
   const opacity = useSharedValue(dueAtMount && reduceMotion ? 0 : 1);
   const playedToken = useRef<number | null>(null);
 
   useEffect(() => {
     if (!request || playedToken.current === request.token) return;
-    if (!landingIsDue(request, entryId)) return;
+    if (mountToken.current !== request.token && !landingIsDue(request, entryId)) return;
     playedToken.current = request.token;
     if (reduceMotion) {
       // Reduce Motion keeps the same state change with opacity only.

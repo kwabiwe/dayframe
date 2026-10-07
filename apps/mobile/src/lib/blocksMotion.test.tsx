@@ -1,3 +1,4 @@
+import { useLayoutEffect } from "react";
 import { act, create } from "react-test-renderer";
 import { describe, expect, it, vi } from "vitest";
 
@@ -75,6 +76,35 @@ describe("useBlockLanding", () => {
     const idle = mountLanding({ distance: 14, reduceMotion: false, request: null });
     expect(initialValues.slice(0, 2)).toEqual([0, 1]);
     act(() => idle.tree.unmount());
+  });
+
+  it("still lands the token it mounted for even if the TTL lapses before the effect runs", () => {
+    const realNow = Date.now;
+    const start = realNow();
+    let clock = start;
+    Date.now = () => clock;
+    try {
+      const request: LandingRequest = { requestedAt: start - 1100, token: 9 };
+      assigned.length = 0;
+      initialValues.length = 0;
+      let tree!: ReturnType<typeof create>;
+      // Render while due (1.1 s old); a parent layout effect moves the clock past the 1.2 s TTL
+      // before the landing's passive effect runs.
+      const Delayed = () => {
+        useLayoutEffect(() => {
+          clock = start + 200;
+        }, []);
+        return <Landing distance={14} reduceMotion={false} request={request} />;
+      };
+      act(() => {
+        tree = create(<Delayed />);
+      });
+      expect(initialValues[0]).toBe(14);
+      expect(assigned[0].value).toMatchObject({ kind: "spring", to: 0 });
+      act(() => tree.unmount());
+    } finally {
+      Date.now = realNow;
+    }
   });
 
   it("does not replay for a remount after the request has expired, or for another entry's row", () => {

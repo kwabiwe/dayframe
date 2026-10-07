@@ -37,4 +37,12 @@ describe("Today Blocks feedback", () => {
       if (index >= 0) expect(body(path)).not.toContain("playHaptic(");
     }
   });
+
+  it("does not fade the live block's details in on Start; the expansion only fades them out on Stop", () => {
+    expect(dashboard).toMatch(/useLayoutEffect\(\(\) => \{\s*const toValue = hasLiveActiveTimer \? 1 : 0;[\s\S]*?if \(reduceMotion \|\| hasLiveActiveTimer\) \{\s*activeTimerExpansion\.setValue\(toValue\);/);
+  });
+
+  it("moves the Review summary with the card and mosaic above it", () => {
+    expect(dashboard).toMatch(/<Reanimated\.View layout=\{localLayoutTransition\(reduceMotion\)\}>\s*<TodayReviewSummary/);
+  });
 });

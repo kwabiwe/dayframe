@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 import Reanimated from "react-native-reanimated";
 import { blockColorsFor, DAYFRAME_BLOCKS } from "@dayframe/shared";
@@ -39,6 +39,10 @@ export function QuickStartMosaic({
   theme: MobileTheme;
 }) {
   const [width, setWidth] = useState(0);
+  // Memoised so the 1 s timer tick does not re-register a layout config on every tile.
+  const tileLayout = useMemo(() => localLayoutTransition(reduceMotion), [reduceMotion]);
+  const tileEntering = useMemo(() => localPresenceEntering(reduceMotion), [reduceMotion]);
+  const tileExiting = useMemo(() => localPresenceExiting(reduceMotion), [reduceMotion]);
   // No entrance on first paint; a tile that arrives later (a newly pinned activity) fades in.
   const painted = useRef(false);
   useEffect(() => {
@@ -68,10 +72,10 @@ export function QuickStartMosaic({
       >
         {frames.map((tile) => (
           <Reanimated.View
-            entering={painted.current ? localPresenceEntering(reduceMotion) : undefined}
-            exiting={localPresenceExiting(reduceMotion)}
+            entering={painted.current ? tileEntering : undefined}
+            exiting={tileExiting}
             key={tile.id}
-            layout={localLayoutTransition(reduceMotion)}
+            layout={tileLayout}
             style={[styles.slot, { height: tile.height, left: tile.x, top: tile.y, width: tile.width }]}
           >
             <QuickStartTileButton

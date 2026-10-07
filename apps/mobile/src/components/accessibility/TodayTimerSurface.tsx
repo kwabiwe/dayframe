@@ -1,4 +1,4 @@
-import { useEffect, useRef, type ComponentProps } from "react";
+import { useEffect, useMemo, useRef, type ComponentProps } from "react";
 import { Animated, StyleSheet, View } from "react-native";
 import Reanimated from "react-native-reanimated";
 import { recordMobileLayout, type MobileAccessibilityDiagnostic } from "./diagnostics";
@@ -55,8 +55,10 @@ export function TodayTimerSurface({
   useEffect(() => {
     painted.current = true;
   }, []);
-  const crossfade = painted.current && !reduceMotion;
-  const layout = localLayoutTransition(reduceMotion);
+  // Builders are memoised so the 1 s timer tick does not re-register layout configs.
+  const layout = useMemo(() => localLayoutTransition(reduceMotion), [reduceMotion]);
+  const cardEntering = useMemo(() => localPresenceEntering(false), []);
+  const cardExiting = useMemo(() => (reduceMotion ? undefined : localPresenceExiting(false)), [reduceMotion]);
 
   return (
     <View style={styles.stack}>
@@ -66,8 +68,8 @@ export function TodayTimerSurface({
         testID="today-timer-slot"
       >
         <Reanimated.View
-          entering={crossfade ? localPresenceEntering(false) : undefined}
-          exiting={crossfade ? localPresenceExiting(false) : undefined}
+          entering={painted.current && !reduceMotion ? cardEntering : undefined}
+          exiting={cardExiting}
           key={active ? "live" : "idle"}
           testID={active ? "today-live-slot" : "today-idle-slot"}
         >
