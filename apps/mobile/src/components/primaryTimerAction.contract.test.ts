@@ -6,6 +6,9 @@ const componentRoot = fileURLToPath(new URL("./", import.meta.url));
 const primaryAction = readFileSync(`${componentRoot}PrimaryTimerAction.tsx`, "utf8");
 const dashboard = readFileSync(`${componentRoot}DayframeDashboard.tsx`, "utf8");
 const timerSurface = readFileSync(`${componentRoot}accessibility/TodayTimerSurface.tsx`, "utf8");
+const idleCard = readFileSync(`${componentRoot}today/TodayIdleCard.tsx`, "utf8");
+const liveBlock = readFileSync(`${componentRoot}today/TodayLiveBlock.tsx`, "utf8");
+const todayLayout = readFileSync(`${componentRoot}today/todayBlocksLayout.ts`, "utf8");
 const editSheet = readFileSync(`${componentRoot}ActiveTimerEditSheet.tsx`, "utf8");
 const theme = readFileSync(fileURLToPath(new URL("../lib/mobileTheme.ts", import.meta.url)), "utf8");
 const layout = readFileSync(fileURLToPath(new URL("../lib/timerCardLayout.ts", import.meta.url)), "utf8");
@@ -26,9 +29,8 @@ describe("primary mobile timer action geometry", () => {
   });
 
   it("uses the shared primary glyph for idle, running and running-edit controls", () => {
-    expect(timerSurface.match(/<PrimaryTimerAction/g)).toHaveLength(2);
-    expect(timerSurface).toContain('mode="play"');
-    expect(timerSurface).toContain('mode="stop"');
+    expect(idleCard).toContain('<PrimaryTimerGlyph color={theme.onAccent} mode="play" />');
+    expect(liveBlock).toContain('<PrimaryTimerGlyph color={colors.fill} mode="stop" />');
     expect(primaryAction).toContain("<PrimaryTimerGlyph color={glyphColor} mode={mode} />");
     expect(editSheet).toContain('<PrimaryTimerGlyph color={theme.onAccent} mode="stop" />');
     expect(editSheet).not.toContain("function StopGlyph");
@@ -50,13 +52,13 @@ describe("primary mobile timer action geometry", () => {
   });
 
   it("keeps the idle timer hierarchy task-first without a reserved sync-copy row", () => {
-    const taskIndex = timerSurface.indexOf("What are you working on?");
-    const labelIndex = timerSurface.indexOf("QUICK ACTIONS");
-    const actionsIndex = timerSurface.indexOf('accessibilityLabel="Quick actions"');
+    const eyebrowIndex = idleCard.indexOf("Nothing recording");
+    const taskIndex = idleCard.indexOf("What are you working on?");
 
-    expect(taskIndex).toBeGreaterThan(-1);
-    expect(labelIndex).toBeGreaterThan(taskIndex);
-    expect(actionsIndex).toBeGreaterThan(labelIndex);
+    expect(eyebrowIndex).toBeGreaterThan(-1);
+    expect(taskIndex).toBeGreaterThan(eyebrowIndex);
+    expect(timerSurface.indexOf("<QuickStartMosaic")).toBeGreaterThan(timerSurface.indexOf("<TodayIdleCard"));
+    expect(timerSurface + idleCard).not.toContain("QUICK ACTIONS");
     expect(dashboard).not.toContain("Stop pending sync");
     expect(dashboard).not.toContain("Stop could not sync");
     expect(dashboard).not.toContain("timerSyncStatusSlot");
@@ -64,19 +66,19 @@ describe("primary mobile timer action geometry", () => {
     expect(theme).not.toContain("timerSyncStatusText");
   });
 
-  it("uses one explicit idle/running card geometry and a bottom-anchored action column", () => {
-    expect(timerSurface).toContain("styles.idleTimerPanel");
-    expect(timerSurface).toContain("styles.quickActionsGroup");
-    expect(theme.match(/minHeight: TIMER_CARD_MIN_HEIGHT/g)).toHaveLength(2);
-    expect(theme.match(/paddingHorizontal: TIMER_CARD_HORIZONTAL_INSET/g)).toHaveLength(2);
-    expect(theme.match(/paddingVertical: TIMER_CARD_VERTICAL_INSET/g)).toHaveLength(2);
-    expect(theme.match(/width: TIMER_CARD_ACTION_COLUMN_WIDTH/g)).toHaveLength(2);
-    expect(theme.match(/justifyContent: "space-between"/g)?.length ?? 0).toBeGreaterThanOrEqual(2);
-    expect(theme).toContain("minHeight: TIMER_CARD_QUICK_ACTION_PILL_HEIGHT");
-    expect(timerSurface).toContain("TIMER_CARD_QUICK_ACTION_HIT_SLOP");
+  it("uses one Blocks card geometry and one bottom action track for idle and running", () => {
+    for (const card of [idleCard, liveBlock]) {
+      expect(card).toContain("minHeight: TODAY_CARD.minHeight");
+      expect(card).toContain("borderRadius: TODAY_CARD.radius");
+      expect(card).toMatch(/actions: \{[\s\S]*?bottom: TODAY_CARD.padding,[\s\S]*?position: "absolute",[\s\S]*?right: TODAY_CARD.padding/);
+      expect(card).toMatch(/primaryAction: \{[\s\S]*?height: TODAY_CARD.primaryActionSize,[\s\S]*?width: TODAY_CARD.primaryActionSize/);
+      expect(card).toMatch(/secondaryAction: \{[\s\S]*?height: TODAY_CARD.secondaryActionSize,[\s\S]*?width: TODAY_CARD.secondaryActionSize/);
+    }
+    expect(todayLayout).toContain("primaryActionSize: 56");
+    expect(todayLayout).toContain("secondaryActionSize: 44");
     expect(dashboard).toContain("<TodayTimerSurface");
-    expect(dashboard).toContain("onStop={() => { void stopActiveTimer(); }}");
+    expect(dashboard).toContain("onStop={stopFromToday}");
+    expect(dashboard).toMatch(/function stopFromToday\(\) \{[\s\S]*?void stopActiveTimer\(\)/);
     expect(dashboard).toContain('onOpenActiveTimer={() => presentActiveEditor("existing_active_timer")}' );
-    expect(theme).not.toMatch(/idleTimerPanel: \{[^}]*paddingBottom: 8/);
   });
 });

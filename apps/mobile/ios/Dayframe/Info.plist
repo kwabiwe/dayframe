@@ -71,6 +71,11 @@
 	<true/>
 	<key>RCTNewArchEnabled</key>
 	<true/>
+	<key>UIAppFonts</key>
+	<array>
+		<string>BricolageGrotesque-Bold.ttf</string>
+		<string>BricolageGrotesque-ExtraBold.ttf</string>
+	</array>
 	<key>UIBackgroundModes</key>
 	<array>
 		<string>location</string>

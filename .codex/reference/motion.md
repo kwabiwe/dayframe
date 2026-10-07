@@ -99,6 +99,10 @@ Every PR that adds or changes movement must include:
 
 Tests should protect state ordering, timers, rollback, stable keys, and animation ownership where practical. Manual evidence remains required for continuity, gesture feel, and frame pacing.
 
+## Today live block, landings and quick start (Blocks Phase 2)
+
+Today on iPhone is the first migrated surface. `useBlockLanding` and `useBreathingRing` in `apps/mobile/src/lib/blocksMotion.ts` hold the springs and ring above. A committed Start (Play, a mosaic tile, a row's Start again) issues one tokenised landing request after the local start is accepted; the live block's content lands from 14 points below. A committed Stop issues one request for the stopped entry; that row's activity block lands 60 ms later, as the Stop composite's soft impact plays. Requests expire after 1.2 s and are never issued by refresh, reconciliation, hydration or a rejected action, so remounts and cached bootstraps do not replay them; a second rapid action replaces the request. The landings move transform and opacity of inner nodes only: the existing `activeTimerExpansion` still fades the card's details and actions on stop, and `scheduleLayoutTransition` still owns frame reflow. Idle and live cards share one height and action track, so ordinary Start/Stop causes no reflow below. Mosaic tiles reflow with `localLayoutTransition` when a stop changes this week's totals and have no entrance on first paint. Reduce Motion turns each landing into a 140 ms opacity change and holds the ring still; haptics, Undo and announcements are unchanged.
+
 ## Anti-Patterns
 
 Reports Revision 3 uses one fixed six-week calendar frame for month fades, not two

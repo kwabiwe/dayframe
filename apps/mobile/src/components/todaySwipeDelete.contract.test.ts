@@ -13,6 +13,10 @@ const timerSurfaceSource = readFileSync(
   fileURLToPath(new URL("./accessibility/TodayTimerSurface.tsx", import.meta.url)),
   "utf8"
 );
+const idleCardSource = readFileSync(
+  fileURLToPath(new URL("./today/TodayIdleCard.tsx", import.meta.url)),
+  "utf8"
+);
 const mobileThemeSource = readFileSync(
   fileURLToPath(new URL("../lib/mobileTheme.ts", import.meta.url)),
   "utf8"
@@ -277,7 +281,8 @@ describe("Today history swipe-to-delete contract", () => {
     expect(presentationSource).toContain('presentation.reason !== "blank_timer_started"');
     expect(presentationSource).toContain("blankTimerStartGate.current.release(blankStart.token)");
     expect(dashboardSource).toContain("onPresented={completeActiveEditorPresentation}");
-    expect(timerSurfaceSource).toContain('accessibilityLabel="Start task"');
+    expect(idleCardSource).toContain('accessibilityLabel="Start task"');
+    expect(timerSurfaceSource).toContain("onStartBlank={onStartBlank}");
   });
 
   it("limits conservative disposal to account/provider boundaries", () => {

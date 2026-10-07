@@ -27,7 +27,7 @@ Six decisions depart from the earlier Midnight Core rules:
 | Activities | The interface says "activity" and "activities" where it said "category", on every surface (shipped app-wide 6 Oct 2026). Database columns, API fields, code identifiers, tests and the report CSV keep `category`. | `.codex/reference/product-model.md` |
 | New layouts | Today gets a quick-start mosaic of pinned activities. Activities, Tags and Places merge into one Library page on web and Settings › Activities on iPhone. A press-and-hold Play orb with an activity menu is approved in principle, but must pass a physical-iPhone prototype test, including a VoiceOver path, before it is built. | The redesign phase PR for each surface |
 
-The interactive prototypes, review and phased plan live on the `agent/dayframe-redesign-concept` branch under `design/blocks/`. They are reference material, not production code.
+Migrated surfaces so far: iPhone Today (Phase 2: live block, quick-start mosaic, row blocks, landings and haptics). The interactive prototypes, review and phased plan live on the `agent/dayframe-redesign-concept` branch under `design/blocks/`. They are reference material, not production code.
 
 ## Brand assets
 
@@ -212,7 +212,7 @@ Everything people read or type uses system fonts. On iOS use San Francisco throu
 
 Blocks adds one display face, Bricolage Grotesque (SIL Open Font License). It is used only for screen titles, report headlines, the timer and large totals:
 
-- Bundle the font files with each app (Expo font assets on iOS, self-hosted at build time on web). The apps must not request fonts from a third-party server at runtime.
+- Bundle the font files with each app (on iOS, Bold and ExtraBold in `apps/mobile/ios/Dayframe/Fonts` with their OFL licence, listed in `UIAppFonts` and named by PostScript name through `MOBILE_DISPLAY_FONT`; self-hosted at build time on web). The apps must not request fonts from a third-party server at runtime.
 - Body text, labels, buttons, inputs and lists stay on the system font.
 - Display text still follows the Dynamic Type role caps below. Its fallback is the system font.
 - Numerals that update in place, such as the timer, use tabular figures or fixed-width digit cells so they never shift.

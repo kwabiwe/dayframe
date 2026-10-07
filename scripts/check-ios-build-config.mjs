@@ -105,6 +105,16 @@ expect(
   "Expo EAS config must declare the Live Activity extension capabilities."
 );
 
+// Bundled display face (docs/brand-style-guide.md, Typography): every UIAppFonts file must exist and be a host resource.
+const hostFonts = plistArrayFromText(hostInfo, "UIAppFonts");
+expect(hostFonts.length > 0, "Host Info.plist must register the bundled Bricolage Grotesque fonts in UIAppFonts.");
+const hostResources = project.match(/13B07F8E1A680F5B00A75B9A \/\* Resources \*\/ = \{[\s\S]*?\n\t\t\};/)?.[0] ?? "";
+for (const font of hostFonts) {
+  expect(existsSync(resolve(iosRoot, "Dayframe/Fonts", font)), `UIAppFonts lists ${font}, but Dayframe/Fonts/${font} is missing.`);
+  expect(hostResources.includes(`/* ${font} in Resources */`), `${font} must be copied by the Dayframe Resources build phase.`);
+}
+expect(existsSync(resolve(iosRoot, "Dayframe/Fonts/BricolageGrotesque-OFL.txt")), "Bundled fonts must keep their SIL Open Font License beside them.");
+
 const builtAppArgumentIndex = process.argv.indexOf("--built-app");
 if (builtAppArgumentIndex >= 0) verifyBuiltProducts(resolve(process.argv[builtAppArgumentIndex + 1] ?? ""));
 
@@ -126,6 +136,9 @@ console.log("iOS build configuration check passed.");
 function verifyBuiltProducts(appPath) {
   const hostInfoPath = resolve(appPath, "Info.plist");
   const identity = plistValue(hostInfoPath, "CFBundleIdentifier");
+  for (const font of hostFonts) {
+    expect(existsSync(resolve(appPath, font)), `Built app is missing the registered font ${font}.`);
+  }
   if (!["com.layereight.dayframe", "com.layereight.dayframe.staging"].includes(identity)) {
     failures.push(`Unrecognized built host identity: ${identity}`);
     return null;

@@ -24,3 +24,13 @@ export function mobileTextProps(role: MobileTextRole): MobileTextProps {
     maxFontSizeMultiplier: MOBILE_TEXT_CAP[role],
   };
 }
+
+/**
+ * Bricolage Grotesque, the Blocks display face (docs/brand-style-guide.md, Typography). Bundled in the iOS
+ * app (ios/Dayframe/Fonts, UIAppFonts) and named by PostScript name, so leave fontWeight unset with it.
+ * Use it only for screen titles, the timer and large totals; iOS falls back to the system font if it is missing.
+ */
+export const MOBILE_DISPLAY_FONT = {
+  bold: "BricolageGrotesque-Bold",
+  extraBold: "BricolageGrotesque-ExtraBold",
+} as const;

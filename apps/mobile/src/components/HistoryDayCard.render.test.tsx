@@ -72,6 +72,14 @@ vi.mock("./today/TodayReviewPresentationContext", () => ({
 }));
 vi.mock("./today/TodayReviewRow", () => ({ TodayReviewRow: () => null }));
 vi.mock("./today/TodayReviewSummary", () => ({ TodayReviewSummary: () => null }));
+vi.mock("./today/ActivityBlockMark", async () => {
+  const ReactRuntime = await import("react");
+  return {
+    ActivityBlockMark: (props: Record<string, unknown>) => ReactRuntime.createElement("ActivityBlockMark", props),
+  };
+});
+vi.mock("@/lib/haptics", () => ({ loadHapticsPreference: vi.fn(() => Promise.resolve(true)), playHaptic: vi.fn() }));
+vi.mock("@/lib/quickStartMosaic", async () => import("../lib/quickStartMosaic"));
 
 vi.mock("@/lib/mobileTheme", () => ({ pressable: vi.fn(), useMobileTheme: vi.fn() }));
 vi.mock("../lib/mobileTheme", () => ({ pressable: vi.fn(), useMobileTheme: vi.fn() }));

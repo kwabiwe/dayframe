@@ -11,7 +11,7 @@ Where a rule here conflicts with the approved Dayframe Blocks direction, it gove
 - Use clear hierarchy, stable spacing, and predictable interactions.
 - Avoid one-note palettes and decorative clutter.
 - Dayframe should feel like a compact personal time tool, not a project-management or billing app.
-- Mobile first screen should match the simple dashboard sketch: logo, active timer, start task, Today summary.
+- Mobile first screen should match the simple dashboard sketch: logo, active timer (the Blocks live block, or the idle card with Start), the quick-start mosaic, Today summary.
 - Use Midnight Core consistently: near-black midnight navy, layered neutral surfaces, compact controls, restrained elevation and coral for the primary action and live recording. Surfaces migrated to Dayframe Blocks follow the brand guide's Blocks section: solid activity blocks, one display face, and neutral selected navigation.
 - Treat light mode as a designed neutral companion. Preserve the same hierarchy and semantic roles rather than mechanically inverting dark mode.
 - Keep native navigation containers, Expo root views and screen content on the resolved theme canvas. During push, pop and swipe-back transitions, no default white window, rounded-card vignette or mismatched scene background should be visible.
