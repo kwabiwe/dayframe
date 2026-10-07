@@ -225,6 +225,18 @@ Mobile Today and integrated Review:
 - A locally saved Review decision removes its pending geometry immediately but does not create or count a synthetic entry. It stays visibly saved/syncing until an explicit result link and current canonical entry evidence resolve it. A reused Sleep entry remains one canonical interval; a receipt alone is not a new interval.
 - A bounded partial/cached presentation is qualified and leaves Open Review available; missing coverage is never shown as zero or as a complete donut. Today keeps the established Dashboard/timer, Review outbox, Health, Location, auth, and sync owners.
 
+Blocks prototype parity (owner decision 7 October 2026; built screen by screen):
+
+- Every iPhone and web screen, Settings included, is rebuilt to match the Blocks prototype (`docs/brand-style-guide.md`, Dayframe Blocks). The rules above stay in force for each screen until the PR that rebuilds it updates them.
+- Kept through the rebuild: grouped repeat rows in history; the Review Location evidence editor (behind "Edit before logging"); "Always ignore" and "Make rule" (a More menu on the Review card); the entry sheet's start/end date and time editing, historical description suggestions and rounding shortcuts; free-text tags with autocomplete; Retry/Discard for rejected changes; every export and delete path; logout on every width.
+- Changing: Quick Confirm and the Review donut leave iPhone Today, which gets a goal frame, a Today ribbon and a "moments to review" card that opens the Review card deck. The "covered" figure gives way to the goal frame.
+- New product settings: "Week starts on" (stored; Calendar, Reports and weekly goals honour it); the daily goal on iPhone, from the existing goal settings; the weekly goal shown in Reports; Notifications and Motion & Fitness rows under Settings › Automatic tracking.
+- Activities are archived with Restore instead of deleted, so their history is kept.
+- Reports: Week · Month is the main control; Today, Year, custom ranges and activity over time stay under a More range sheet.
+- At most six pinned quick-start activities on both platforms.
+- Connectivity: the indicator is to show only offline and a brief "back online"; syncing stays silent, and rejected changes surface through an attention badge that opens Sync help. `AGENTS.md` changes with that PR.
+- Stop gets Undo once the server supports un-stopping a timer (its own PR).
+
 Mobile accessibility and Dynamic Type:
 
 - Keep iOS system font scaling enabled. Assign local scaling roles only to compact presentation text: screen headings (1.5), section headings (1.5), items (1.35), controls (1.3), metadata (1.3), numerals (1.2), counters (1.2), and inputs (1.35). Explanations, warnings, help, errors, and ordinary body copy remain uncapped. Reports keeps its separately approved dense-layout roles and staging-badge exception.

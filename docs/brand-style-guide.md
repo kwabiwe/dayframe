@@ -23,11 +23,34 @@ Six decisions depart from the earlier Midnight Core rules:
 | Coral means live | Coral marks recording, the single primary action on a screen and the selected tab in the iPhone tab bar (owner decision 7 October 2026: a neutral tint washed out over Liquid Glass when bright activity blocks scrolled beneath it). Other selected navigation uses a neutral fill; durations, totals, chart marks and map pins never use coral. Browser text selection keeps its contrast-safe coral highlight, because it is a system affordance rather than an interface state. | Colour system |
 | Colour is the data | Entries render as solid category blocks with measured text on them, using per-theme display values for the same stored keys. | Category and chart palette |
 | One display face | Bricolage Grotesque for headlines and large numerals only; the system font for everything people read or type. | Typography |
-| Every action lands | Start, stop, log and delete share one landing spring with one small overshoot, one haptic each and an Undo. The live block carries one slow breathing ring. Reduce Motion keeps opacity only. | Motion; `.codex/reference/motion.md` |
+| Every action lands | Start, stop, log and delete share one landing spring with one small overshoot, one haptic each and an Undo. Migrated surfaces move the way the prototype moves (owner decision 7 October 2026): drop-ins, pops, rolling timer digits, the Stop flight into the list, row swipes, Review card throws and the Play orb bloom. The live block carries one slow breathing ring. Reduce Motion keeps opacity only. | Motion; `.codex/reference/motion.md` |
 | Activities | The interface says "activity" and "activities" where it said "category", on every surface (shipped app-wide 6 Oct 2026). Database columns, API fields, code identifiers, tests and the report CSV keep `category`. | `.codex/reference/product-model.md` |
-| New layouts | Today gets a quick-start mosaic of pinned activities. Activities, Tags and Places merge into one Library page on web and Settings › Activities on iPhone. A press-and-hold Play orb with an activity menu is approved in principle, but must pass a physical-iPhone prototype test, including a VoiceOver path, before it is built. | The redesign phase PR for each surface |
+| New layouts | Today gets a quick-start mosaic of pinned activities. Activities, Tags and Places merge into one Library page on web and Settings › Activities on iPhone. The press-and-hold Play orb with its activity bloom is approved (7 October 2026); it needs a VoiceOver path and must not cover the tab bar. | The redesign phase PR for each surface |
 
 Migrated surfaces so far: iPhone Today (Phase 2: live block, quick-start mosaic, row blocks, landings and haptics). The interactive prototypes, review and phased plan live on the `agent/dayframe-redesign-concept` branch under `design/blocks/`. They are reference material, not production code.
+
+### Prototype parity (owner decision 7 October 2026)
+
+Every screen on iPhone and web, Settings included, is rebuilt to look and behave like the interactive prototype (`design/blocks/ios.html`, `web.html` and `onboarding.html`), one PR per screen. Each PR keeps the data, sync and Review logic and the safety rules in `AGENTS.md`, and either keeps every current function reachable or records the owner's decision to drop it. Where the prototype is silent (offline and error states, the Places editor, notification settings, editing a finished block's start), the PR designs the gap in the same language.
+
+The owner settled these points where the prototype is ambiguous or drops a function:
+
+| # | Decision |
+| --- | --- |
+| D1 | Theme names are "Midnight · Daylight · System" on both platforms. |
+| D2 | At most six pinned quick-start activities on both platforms; keys 1–6 start them on web. |
+| D3 | "Week starts on" is a real stored preference that Calendar, Reports and weekly goals honour (the quick-start mosaic keeps its rolling seven days). |
+| D4 | The weekly goal shows in Reports (hero and streak). |
+| D5 | Notifications and Motion & Fitness get rows under Settings › Automatic tracking. |
+| D6 | Review keeps "Always ignore" and "Make rule" in a More menu on the card. |
+| D7 | Review's "Edit before logging" opens the existing evidence editor, restyled; the activity is chosen with the activity picker. |
+| D8 | A Blocks Places screen (list, editor, learned places, Home and Work) fills the prototype's gap. |
+| D9 | Reports uses Week · Month as the main control; Today, Year, custom ranges and the activity-over-time chart stay under a More range sheet. |
+| D10 | Activities are archived with Restore, never deleted, so history is kept. |
+| D11 | iPhone tags stay free text with autocomplete, shown as chips. |
+| D12 | iPhone shows the daily goal (ribbon and goal frame) from the existing goal settings, edited with steppers under "Your day". |
+
+Also kept: grouped repeat rows in history (styled as blocks), the Review evidence editor, the entry sheet's start/end times and rounding shortcuts, and Retry/Discard for rejected changes. The connectivity indicator is to show only offline and a brief "back online", with syncing silent; the PR that builds it also updates the connectivity rule in `AGENTS.md`, which governs until then. Product rules for these live in `docs/PRD.md` and delivery state in `docs/feature-fix-tracker.md`.
 
 ## Brand assets
 
@@ -348,7 +371,7 @@ Use the shared palette, `chartTrack`, stable segment ordering and exact value la
 
 Motion is short, purposeful, and consistent across a complete interaction: approximately 120–220 ms for control feedback and 180–300 ms for panels or chart reveals. Use standard ease-out timing and provide a reduced-motion path that removes nonessential transitions without hiding state changes.
 
-Blocks adds two deliberate exceptions, defined in `.codex/reference/motion.md`. When an entry is started, stopped, logged or deleted, its block lands with one small spring overshoot and a matching haptic. The one live block carries a slow breathing ring. No other decorative loop, glow or bounce is allowed. Reduce Motion keeps opacity only and the same states, haptics and Undo.
+Surfaces migrated to Blocks use the prototype's motion instead, defined in `.codex/reference/motion.md`: named springs (snap, sheet, land, pop, roll), drop-ins, pops, rolling timer digits, the Stop flight, swipes, card throws and the Play orb bloom. When an entry is started, stopped, logged or deleted, its block lands with one small spring overshoot and a matching haptic. The one live block carries a slow breathing ring. No glow, confetti, parallax or idle loop. Reduce Motion keeps opacity only and the same states, haptics and Undo.
 
 Every new feature with visible movement must define the trigger, one animation owner, entrance/update/exit behaviour, surrounding layout response, interruption, async success/Undo/failure states, and Reduce Motion path before implementation. A transition is not complete when the initiating gesture is smooth but the resulting content, feedback, dismissal, or rollback jumps. Use the canonical implementation and validation rules in `.codex/reference/motion.md`.
 
