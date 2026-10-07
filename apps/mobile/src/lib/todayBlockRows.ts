@@ -42,6 +42,23 @@ export function rowMeta(group: HistoryEntryGroup, nowMs: number) {
   ].filter(Boolean).join(" · ");
 }
 
+/**
+ * What VoiceOver reads for a row: the visible title and meta, with times read "09:00 to 10:00" and
+ * the place and tags that the row does not show, so rows that look alike still sound different.
+ */
+export function rowSpokenLabel(group: HistoryEntryGroup, nowMs: number) {
+  const { entry } = group.representative;
+  const tags = entry.tagNames ?? entry.tags?.map((tag) => tag.name) ?? [];
+  return [
+    rowTitle(entry),
+    `${clock(entry.startedAt, nowMs)} to ${entry.stoppedAt ? clock(entry.stoppedAt, nowMs) : "now"}`,
+    group.entries.length > 1 ? `${group.entries.length} entries` : null,
+    entry.categoryName ?? null,
+    entry.placeName ? `at ${entry.placeName}` : null,
+    tags.length ? `tags: ${tags.join(", ")}` : null,
+  ].filter(Boolean).join(", ");
+}
+
 /** "4h 12m", "35m" or "0m". */
 export function rowDuration(seconds: number) {
   const minutes = Math.floor(Math.max(0, seconds) / 60);
@@ -53,7 +70,7 @@ export function rowDuration(seconds: number) {
 
 /** A row can start again only with something to start: an activity or a description. */
 export function canStartAgain(entry: RowEntry) {
-  return Boolean(entry.categoryId || entry.description?.trim());
+  return Boolean(entry.categoryId || displayTimerDescription(entry)?.trim());
 }
 
 /** Swipe Delete only for stopped time; a running entry is stopped first. */

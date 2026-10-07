@@ -17,7 +17,7 @@ vi.mock("react-native-gesture-handler", () => {
   function Pan() {
     const pan: any = { handlers: {} };
     for (const method of ["activeOffsetX", "failOffsetY"]) pan[method] = () => pan;
-    for (const name of ["onUpdate", "onEnd", "onFinalize"]) pan[name] = (fn: unknown) => { pan.handlers[name] = fn; return pan; };
+    for (const name of ["onStart", "onUpdate", "onEnd", "onFinalize"]) pan[name] = (fn: unknown) => { pan.handlers[name] = fn; return pan; };
     mocks.pans.push(pan);
     return pan;
   }
@@ -84,11 +84,22 @@ function render(groups: HistoryEntryGroup[], overrides: Record<string, unknown> 
   return { tree, props };
 }
 
-function swipe(index: number, translationX: number) {
+function swipe(index: number, ...path: number[]) {
   const pan = mocks.pans[index];
   act(() => {
+    pan.handlers.onStart?.({});
+    for (const translationX of path) pan.handlers.onUpdate({ translationX });
+    pan.handlers.onEnd({}, true);
+    pan.handlers.onFinalize?.({});
+  });
+}
+
+function cancel(index: number, translationX: number) {
+  const pan = mocks.pans[index];
+  act(() => {
+    pan.handlers.onStart?.({});
     pan.handlers.onUpdate({ translationX });
-    pan.handlers.onEnd({});
+    pan.handlers.onEnd({}, false);
     pan.handlers.onFinalize?.({});
   });
 }
@@ -112,7 +123,7 @@ describe("TodayBlockRows", () => {
   it("reads each row as one button with its time, duration and swipe actions", () => {
     const { tree } = render([group(entry("a", at(8, 13), at(10)))]);
     const row = tree.root.findByProps({ testID: "today-block-row-a" });
-    expect(row.props.accessibilityLabel).toBe("Deep work, 08:13–10:00 · Focus, 1 hour");
+    expect(row.props.accessibilityLabel).toBe("Deep work, 08:13 to 10:00, Focus, 1 hour");
     expect(row.props.accessibilityActions.map((action: { name: string }) => action.name)).toEqual(["startAgain", "delete"]);
   });
 
@@ -123,6 +134,49 @@ describe("TodayBlockRows", () => {
     swipe(0, 120);
     expect(props.onReplayEntry).toHaveBeenCalledTimes(1);
     expect(mocks.haptic).toHaveBeenCalledWith("tick");
+  });
+
+  it("commits nothing when the finger pulls back under the threshold, ticking once per arming", () => {
+    const { props } = render([group(entry("a", at(8), at(9)))]);
+    swipe(0, 120, 60);
+    swipe(0, -120, -60);
+    expect(props.onReplayEntry).not.toHaveBeenCalled();
+    expect(props.onDeleteEntries).not.toHaveBeenCalled();
+    expect(mocks.haptic.mock.calls.filter(([kind]) => kind === "tick")).toHaveLength(2);
+  });
+
+  it("commits nothing when the system cancels an armed swipe", () => {
+    const { props } = render([group(entry("a", at(8), at(9)))]);
+    cancel(0, -150);
+    cancel(0, 150);
+    expect(props.onDeleteEntries).not.toHaveBeenCalled();
+    expect(props.onReplayEntry).not.toHaveBeenCalled();
+  });
+
+  it("deletes only the swiped child inside an open group", () => {
+    const first = entry("a", at(8), at(9));
+    const second = entry("b", at(10), at(11));
+    const { props, tree } = render([group(first, second)]);
+    act(() => tree.root.findByProps({ testID: "today-block-row-a" }).props.onPress());
+    const childIndex = mocks.pans.length - 1;
+    swipe(childIndex, -150);
+    expect(props.onDeleteEntries).toHaveBeenCalledWith([second]);
+  });
+
+  it("offers no Start again for a blank row with no activity", () => {
+    const { tree } = render([group(entry("blank", at(8), at(9), { categoryId: null, categoryName: null, description: null }))]);
+    const row = tree.root.findByProps({ testID: "today-block-row-blank" });
+    expect(row.props.accessibilityActions.map((action: { name: string }) => action.name)).toEqual(["delete"]);
+  });
+
+  it("forgets an open group once it no longer holds repeats", () => {
+    const first = entry("a", at(8), at(9));
+    const second = entry("b", at(10), at(11));
+    const { props, tree } = render([group(first, second)]);
+    act(() => tree.root.findByProps({ testID: "today-block-row-a" }).props.onPress());
+    act(() => tree.update(<TodayBlockRows {...(props as any)} groups={[group(first)]} />));
+    act(() => tree.update(<TodayBlockRows {...(props as any)} groups={[group(first, second)]} />));
+    expect(tree.root.findByProps({ testID: "today-block-row-a" }).props.accessibilityState).toEqual({ expanded: false });
   });
 
   it("deletes a whole group past the left threshold", () => {
@@ -143,7 +197,7 @@ describe("TodayBlockRows", () => {
     expect(mocks.haptic).not.toHaveBeenCalled();
     const row = tree.root.findByProps({ testID: "today-block-row-live" });
     expect(row.props.accessibilityActions).toBeUndefined();
-    expect(row.props.accessibilityLabel).toContain("11:00–now");
+    expect(row.props.accessibilityLabel).toContain("11:00 to now");
   });
 
   it("opens a group of repeats in place and edits a single row", () => {

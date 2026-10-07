@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { HistoryEntryGroup } from "./historyPresentation";
-import { canDeleteGroup, canStartAgain, rowBlockHeight, rowDuration, rowMeta, rowTimeRange, rowTitle, todayBlocksCaption } from "./todayBlockRows";
+import { canDeleteGroup, canStartAgain, rowBlockHeight, rowDuration, rowMeta, rowSpokenLabel, rowTimeRange, rowTitle, todayBlocksCaption } from "./todayBlockRows";
 
 const day = new Date(2026, 9, 7).getTime();
 const at = (h: number, m = 0) => new Date(day + (h * 60 + m) * 60_000).toISOString();
@@ -54,6 +54,19 @@ describe("today block rows", () => {
     expect(rowDuration(107 * 60)).toBe("1h 47m");
     expect(rowDuration(2 * 3600)).toBe("2h");
     expect(todayBlocksCaption([group(entry("a", at(8), at(9)), entry("b", at(10), at(11))), group(entry("c", at(12), at(13)))])).toBe("3 · swipe a row");
+  });
+
+  it("tells same-looking rows apart for VoiceOver by place and tags, reading times with 'to'", () => {
+    const a = group(entry("a", at(9), at(10), { placeName: "Place A", tagNames: ["legs"] }));
+    const b = group(entry("b", at(9), at(10), { placeName: "Place B" }));
+    expect(rowSpokenLabel(a, day)).toBe("Deep work, 09:00 to 10:00, Focus, at Place A, tags: legs");
+    expect(rowSpokenLabel(b, day)).toBe("Deep work, 09:00 to 10:00, Focus, at Place B");
+    expect(rowSpokenLabel(group(entry("c", at(9), null)), day + 11 * 3_600_000)).toBe("Deep work, 09:00 to now, Focus");
+    expect(rowSpokenLabel(group(entry("d", at(8), at(9)), entry("e", at(10), at(11))), day)).toBe("Deep work, 08:00 to 09:00, 2 entries, Focus");
+  });
+
+  it("does not start again a legacy placeholder description with no activity", () => {
+    expect(canStartAgain(entry("p", at(8), at(9), { categoryId: null, description: "Start activity" }))).toBe(false);
   });
 
   it("starts again only with something to start and deletes only stopped time", () => {

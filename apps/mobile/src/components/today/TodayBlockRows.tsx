@@ -1,8 +1,9 @@
-import { memo, useCallback, useMemo, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useState } from "react";
 import { Pressable, StyleSheet, Text, View, useWindowDimensions } from "react-native";
 import { Gesture, GestureDetector } from "react-native-gesture-handler";
 import Reanimated, {
   Easing,
+  ReduceMotion,
   runOnJS,
   useAnimatedStyle,
   useSharedValue,
@@ -27,6 +28,7 @@ import {
   rowBlockHeight,
   rowDuration,
   rowMeta,
+  rowSpokenLabel,
   rowTimeRange,
   rowTitle,
   todayBlocksCaption,
@@ -75,6 +77,15 @@ export function TodayBlockRows({
   const layout = useMemo(() => localLayoutTransition(reduceMotion), [reduceMotion]);
   const entering = useMemo(() => localPresenceEntering(reduceMotion), [reduceMotion]);
   const exiting = useMemo(() => localPresenceExiting(reduceMotion), [reduceMotion]);
+  // An opened group that no longer holds repeats (a child deleted) is forgotten, so a group that
+  // forms again later starts closed.
+  useEffect(() => {
+    const grouped = new Set(groups.filter((group) => group.entries.length > 1).map((group) => group.key));
+    setExpanded((current) => {
+      const kept = [...current].filter((key) => grouped.has(key));
+      return kept.length === current.size ? current : new Set(kept);
+    });
+  }, [groups]);
   const toggle = useCallback((key: string) => {
     setExpanded((current) => {
       const next = new Set(current);
@@ -118,6 +129,7 @@ export function TodayBlockRows({
                 expanded={grouped ? isExpanded : undefined}
                 icon={activityIconFor(group.representative.entry.categoryId)}
                 meta={rowMeta(group, nowMs)}
+                spokenLabel={rowSpokenLabel(group, nowMs)}
                 onDelete={() => onDeleteEntries(group.entries.map(({ entry }) => entry))}
                 onOpen={() => (grouped ? toggle(group.key) : onOpenEntry(group.representative.entry))}
                 onReplay={() => onReplayEntry(group.representative.entry)}
@@ -140,6 +152,7 @@ export function TodayBlockRows({
                         entry={entry}
                         icon={activityIconFor(entry.categoryId)}
                         meta={rowTimeRange(entry, nowMs)}
+                        spokenLabel={rowSpokenLabel({ entries: [{ entry, overlapSeconds }], key: entry.id, representative: { entry, overlapSeconds }, totalSeconds: overlapSeconds }, nowMs)}
                         onDelete={() => onDeleteEntries([entry])}
                         onOpen={() => onOpenEntry(entry)}
                         onReplay={() => onReplayEntry(entry)}
@@ -176,6 +189,7 @@ export const TodayBlockRow = memo(function TodayBlockRow({
   onReplay,
   reduceMotion,
   rowLanding,
+  spokenLabel,
   theme,
 }: {
   activeTimerRunning: boolean;
@@ -195,6 +209,8 @@ export const TodayBlockRow = memo(function TodayBlockRow({
   onReplay: () => void;
   reduceMotion: boolean;
   rowLanding: LandingRequest | null;
+  /** Read by VoiceOver: title, times read "to", activity, place and tags. */
+  spokenLabel: string;
   theme: MobileTheme;
 }) {
   const { width } = useWindowDimensions();
@@ -203,6 +219,7 @@ export const TodayBlockRow = memo(function TodayBlockRow({
   const title = rowTitle(entry);
   const duration = rowDuration(durationSeconds);
   const offset = useSharedValue(0);
+  const base = useSharedValue(0);
   const armed = useSharedValue(0);
   const flyOut = -Math.max(width, 400) * 1.1;
 
@@ -214,9 +231,14 @@ export const TodayBlockRow = memo(function TodayBlockRow({
   const pan = useMemo(() => Gesture.Pan()
     .activeOffsetX([-8, 8])
     .failOffsetY([-10, 10])
+    .onStart(() => {
+      "worklet";
+      // A row grabbed while it springs home continues from where it is.
+      base.value = offset.value;
+    })
     .onUpdate((event) => {
       "worklet";
-      let dx = event.translationX;
+      let dx = base.value + event.translationX;
       if (live || (dx > 0 && !replayable) || (dx < 0 && !deletable)) {
         dx = Math.max(Math.min(dx, LIVE_RESISTANCE.limit), -LIVE_RESISTANCE.limit) * LIVE_RESISTANCE.factor;
       }
@@ -227,9 +249,9 @@ export const TodayBlockRow = memo(function TodayBlockRow({
         if (next !== 0) runOnJS(tick)();
       }
     })
-    .onEnd(() => {
+    .onEnd((_event, success) => {
       "worklet";
-      const state = armed.value;
+      const state = success ? armed.value : 0;
       armed.value = 0;
       if (state === -1) {
         if (reduceMotion) {
@@ -243,13 +265,15 @@ export const TodayBlockRow = memo(function TodayBlockRow({
         runOnJS(commitDelete)();
         return;
       }
-      offset.value = reduceMotion ? withTiming(0, { duration: 120 }) : withSpring(0, BLOCKS_SPRING.land);
+      offset.value = reduceMotion
+        ? withTiming(0, { duration: 120, reduceMotion: ReduceMotion.Never })
+        : withSpring(0, BLOCKS_SPRING.land);
       if (state === 1) runOnJS(commitReplay)();
     })
     .onFinalize(() => {
       "worklet";
       armed.value = 0;
-    }), [armed, commitDelete, commitReplay, deletable, flyOut, live, offset, reduceMotion, replayable, tick]);
+    }), [armed, base, commitDelete, commitReplay, deletable, flyOut, live, offset, reduceMotion, replayable, tick]);
 
   const mainStyle = useAnimatedStyle(() => ({ transform: [{ translateX: offset.value }] }));
   const leftStyle = useAnimatedStyle(() => ({ opacity: offset.value > 0 ? 1 : 0 }));
@@ -257,8 +281,8 @@ export const TodayBlockRow = memo(function TodayBlockRow({
 
   const spoken = spokenDuration(durationSeconds);
   const label = count > 1
-    ? `${expanded ? "Collapse" : "Expand"} ${count} ${title} entries, ${meta}, ${spoken}`
-    : `${title}, ${meta}, ${spoken}`;
+    ? `${expanded ? "Collapse" : "Expand"} ${count} ${title} entries. ${spokenLabel}, ${spoken}`
+    : `${spokenLabel}, ${spoken}`;
   const actions = [
     ...(replayable ? [{ name: "startAgain", label: activeTimerRunning ? `Switch to ${title}` : "Start again" }] : []),
     ...(deletable ? [{ name: "delete", label: count > 1 ? `Delete ${count} ${title} entries` : `Delete ${title}` }] : []),
