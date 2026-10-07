@@ -2580,16 +2580,19 @@ export function ActiveTimerEditSheet({
                           ));
                           setValidationError(null);
                         }}
+                        hitSlop={{ top: 6, bottom: 6 }}
                         style={({ pressed }) => [
                           sheetStyles.tagChip,
                           { backgroundColor: theme.surfaceMuted },
-                          pressed && !busy ? styles.buttonPressed : null
+                          pressed && !busy ? styles.buttonPressed : null,
+                          busy ? styles.buttonDisabled : null
                         ]}
                         testID={`time-entry-tag-${index}`}
                       >
-                        <Text {...mobileTextProps("metadata")} numberOfLines={1} style={[sheetStyles.tagChipText, { color: theme.textSecondary }]}>
-                          #{tagName} ×
+                        <Text {...mobileTextProps("metadata")} numberOfLines={1} style={[sheetStyles.tagChipText, sheetStyles.tagChipName, { color: theme.textPrimary }]}>
+                          #{tagName}
                         </Text>
+                        <Text {...mobileTextProps("metadata")} style={[sheetStyles.tagChipText, { color: theme.textSecondary }]}> ×</Text>
                       </Pressable>
                     ))}
                     <Pressable
@@ -2597,7 +2600,7 @@ export function ActiveTimerEditSheet({
                       accessibilityLabel="Add a tag"
                       accessibilityRole="button"
                       disabled={busy}
-                      hitSlop={8}
+                      hitSlop={{ top: 6, bottom: 6 }}
                       onPress={startTagEntry}
                       onPressIn={beginTagEntryPress}
                       style={({ pressed }) => [
@@ -3196,8 +3199,11 @@ const sheetStyles = StyleSheet.create({
   sectionEyebrow: { fontSize: 11, fontWeight: "600", letterSpacing: 0.9 },
   chipWrap: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
   chipMeasure: { flexDirection: "row", left: 0, opacity: 0, position: "absolute", top: 0 },
-  tagChip: { alignItems: "center", borderRadius: 10, justifyContent: "center", maxWidth: "100%", minHeight: 32, paddingHorizontal: 10 },
+  // 32 points tall plus 6 of hit slop above and below: a 44-point target, as the old control had.
+  tagChip: { alignItems: "center", borderRadius: 10, flexDirection: "row", justifyContent: "center", maxWidth: "100%", minHeight: 32, minWidth: 44, paddingHorizontal: 10 },
   tagChipText: { fontSize: 13, fontWeight: "600" },
+  // A long name truncates; the × after it always stays visible.
+  tagChipName: { flexShrink: 1, minWidth: 0 },
   chip: {
     alignItems: "center",
     borderRadius: 999,
