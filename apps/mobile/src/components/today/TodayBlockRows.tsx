@@ -34,6 +34,7 @@ import {
   todayBlocksCaption,
 } from "../../lib/todayBlockRows";
 import { DayframeIcon } from "../icons/DayframeIcon";
+import { recordMobileLayout, recordMobileTextLayout, type MobileAccessibilityDiagnostic } from "../accessibility/diagnostics";
 import { ActivityBlockMark } from "./ActivityBlockMark";
 import { spokenDuration } from "./todayBlocksLayout";
 
@@ -53,6 +54,7 @@ const LIVE_RESISTANCE = { limit: 40, factor: 0.4 } as const;
 export function TodayBlockRows({
   activeTimerRunning,
   activityIconFor,
+  diagnostic,
   groups,
   nowMs,
   onDeleteEntries,
@@ -64,6 +66,8 @@ export function TodayBlockRows({
 }: {
   activeTimerRunning: boolean;
   activityIconFor: (categoryId: string | null | undefined) => string | null;
+  /** The accessibility probe's layout recorder (scripts/mobile-accessibility-qa-entry.tsx). */
+  diagnostic?: MobileAccessibilityDiagnostic;
   groups: readonly HistoryEntryGroup[];
   nowMs: number;
   onDeleteEntries: (entries: Entry[]) => void;
@@ -107,7 +111,11 @@ export function TodayBlockRows({
           </Text>
         ) : null}
       </View>
-      <Reanimated.View layout={layout} style={[styles.card, { backgroundColor: theme.surface }]}>
+      <Reanimated.View
+        layout={layout}
+        onLayout={(event) => recordMobileLayout(diagnostic, "today-blocks.card", event)}
+        style={[styles.card, { backgroundColor: theme.surface }]}
+      >
         {groups.length === 0 ? (
           <Reanimated.View entering={entering} layout={layout} style={styles.empty}>
             <Text {...mobileTextProps("itemTitle")} style={[styles.title, { color: theme.textPrimary }]}>No blocks yet</Text>
@@ -123,13 +131,15 @@ export function TodayBlockRows({
                 blockSeconds={group.totalSeconds}
                 count={grouped ? group.entries.length : 0}
                 deletable={canDeleteGroup(group)}
+                diagnostic={diagnostic}
                 divider={index > 0}
                 durationSeconds={group.totalSeconds}
                 entry={group.representative.entry}
                 expanded={grouped ? isExpanded : undefined}
                 icon={activityIconFor(group.representative.entry.categoryId)}
                 meta={rowMeta(group, nowMs)}
-                spokenLabel={rowSpokenLabel(group, nowMs)}
+                // The Expand/Collapse prefix already says how many entries the group holds.
+                spokenLabel={rowSpokenLabel(group, nowMs, { omitCount: grouped })}
                 onDelete={() => onDeleteEntries(group.entries.map(({ entry }) => entry))}
                 onOpen={() => (grouped ? toggle(group.key) : onOpenEntry(group.representative.entry))}
                 onReplay={() => onReplayEntry(group.representative.entry)}
@@ -178,6 +188,7 @@ export const TodayBlockRow = memo(function TodayBlockRow({
   child = false,
   count,
   deletable,
+  diagnostic,
   divider,
   durationSeconds,
   entry,
@@ -197,6 +208,7 @@ export const TodayBlockRow = memo(function TodayBlockRow({
   child?: boolean;
   count: number;
   deletable: boolean;
+  diagnostic?: MobileAccessibilityDiagnostic;
   divider: boolean;
   durationSeconds: number;
   entry: Entry;
@@ -243,7 +255,14 @@ export const TodayBlockRow = memo(function TodayBlockRow({
         dx = Math.max(Math.min(dx, LIVE_RESISTANCE.limit), -LIVE_RESISTANCE.limit) * LIVE_RESISTANCE.factor;
       }
       offset.value = dx;
-      const next = dx > ROW_SWIPE_COMMIT ? 1 : dx < -ROW_SWIPE_COMMIT ? -1 : 0;
+      // Arming needs this gesture's own full travel and the row shown past the threshold, so a
+      // row re-grabbed while it springs home commits neither on a short nudge nor on a reversal.
+      const travel = event.translationX;
+      const next = !live && replayable && travel > ROW_SWIPE_COMMIT && dx > ROW_SWIPE_COMMIT
+        ? 1
+        : !live && deletable && travel < -ROW_SWIPE_COMMIT && dx < -ROW_SWIPE_COMMIT
+          ? -1
+          : 0;
       if (next !== armed.value) {
         armed.value = next;
         if (next !== 0) runOnJS(tick)();
@@ -289,7 +308,9 @@ export const TodayBlockRow = memo(function TodayBlockRow({
   ];
 
   return (
-    <View style={[styles.row, divider ? { borderTopColor: theme.border, borderTopWidth: StyleSheet.hairlineWidth } : null]}>
+    <View
+      onLayout={(event) => recordMobileLayout(diagnostic, `today-blocks.row.${entry.id}`, event)}
+      style={[styles.row, divider ? { borderTopColor: theme.border, borderTopWidth: StyleSheet.hairlineWidth } : null]}>
       {replayable ? (
         <Reanimated.View
           accessibilityElementsHidden
@@ -327,7 +348,14 @@ export const TodayBlockRow = memo(function TodayBlockRow({
           >
             {count > 1 ? (
               <View style={[styles.count, { backgroundColor: theme.surfaceMuted }]}>
-                <Text {...mobileTextProps("counter")} style={[styles.countText, { color: theme.textPrimary }]}>{count}</Text>
+                <Text
+                  {...mobileTextProps("counter")}
+                  onLayout={(event) => recordMobileLayout(diagnostic, `today-blocks.count.${entry.id}.frame`, event)}
+                  onTextLayout={(event) => recordMobileTextLayout(diagnostic, `today-blocks.count.${entry.id}`, event, "counter", styles.countText)}
+                  style={[styles.countText, { color: theme.textPrimary }]}
+                >
+                  {count}
+                </Text>
               </View>
             ) : null}
             <View style={styles.blockSlot}>
@@ -344,14 +372,31 @@ export const TodayBlockRow = memo(function TodayBlockRow({
               />
             </View>
             <View style={styles.text}>
-              <Text {...mobileTextProps("itemTitle")} numberOfLines={1} style={[styles.title, { color: theme.textPrimary }]}>
+              <Text
+                {...mobileTextProps("itemTitle")}
+                numberOfLines={1}
+                onLayout={(event) => recordMobileLayout(diagnostic, `today-blocks.title.${entry.id}.frame`, event)}
+                onTextLayout={(event) => recordMobileTextLayout(diagnostic, `today-blocks.title.${entry.id}`, event, "itemTitle", styles.title)}
+                style={[styles.title, { color: theme.textPrimary }]}
+              >
                 {title}
               </Text>
-              <Text {...mobileTextProps("metadata")} numberOfLines={1} style={[styles.meta, { color: theme.textSecondary }]}>
+              <Text
+                {...mobileTextProps("metadata")}
+                numberOfLines={1}
+                onLayout={(event) => recordMobileLayout(diagnostic, `today-blocks.meta.${entry.id}.frame`, event)}
+                onTextLayout={(event) => recordMobileTextLayout(diagnostic, `today-blocks.meta.${entry.id}`, event, "metadata", styles.meta)}
+                style={[styles.meta, { color: theme.textSecondary }]}
+              >
                 {meta}
               </Text>
             </View>
-            <Text {...mobileTextProps("numeric")} style={[styles.duration, { color: live ? theme.accent : theme.textPrimary }]}>
+            <Text
+              {...mobileTextProps("numeric")}
+              onLayout={(event) => recordMobileLayout(diagnostic, `today-blocks.duration.${entry.id}.frame`, event)}
+              onTextLayout={(event) => recordMobileTextLayout(diagnostic, `today-blocks.duration.${entry.id}`, event, "numeric", styles.duration)}
+              style={[styles.duration, { color: live ? theme.accent : theme.textPrimary }]}
+            >
               {duration}
             </Text>
           </Pressable>

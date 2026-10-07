@@ -9,6 +9,10 @@ const dashboardSource = readFileSync(
   fileURLToPath(new URL("./DayframeDashboard.tsx", import.meta.url)),
   "utf8"
 );
+const rowsSource = readFileSync(
+  fileURLToPath(new URL("./today/TodayBlockRows.tsx", import.meta.url)),
+  "utf8"
+);
 const timerSurfaceSource = readFileSync(
   fileURLToPath(new URL("./accessibility/TodayTimerSurface.tsx", import.meta.url)),
   "utf8"
@@ -22,28 +26,20 @@ const mobileThemeSource = readFileSync(
   "utf8"
 );
 
-describe("Today history swipe-to-delete contract", () => {
-  it("moves the trailing action with a UI-thread swipe instead of statically revealing it", () => {
-    expect(dashboardSource).toContain("react-native-gesture-handler/ReanimatedSwipeable");
-    expect(dashboardSource).not.toContain('import { Swipeable } from "react-native-gesture-handler"');
-    expect(dashboardSource).toContain("const animatedStyle = useAnimatedStyle");
-    expect(dashboardSource).toContain("translation.value");
-    expect(dashboardSource).toContain("[-HISTORY_DELETE_ACTION_WIDTH, 0]");
-    expect(dashboardSource).toContain("[0, HISTORY_DELETE_ACTION_WIDTH]");
-    expect(dashboardSource).toContain("overshootRight={false}");
-    expect(dashboardSource).toContain("friction={1}");
+describe("Today rows swipe-to-delete contract", () => {
+  it("swipes rows with one UI-thread Pan whose underlay is revealed by the moving row", () => {
+    expect(rowsSource).toContain("Gesture.Pan()");
+    expect(rowsSource).toContain(".activeOffsetX([-8, 8])");
+    expect(rowsSource).toContain(".failOffsetY([-10, 10])");
+    expect(rowsSource).toContain("useAnimatedStyle(() => ({ transform: [{ translateX: offset.value }] }))");
+    expect(rowsSource).not.toContain("ReanimatedSwipeable");
+    expect(rowsSource).not.toContain("LayoutAnimation");
   });
 
-  it("keeps the normal trailing inset between duration text and the danger action", () => {
-    expect(dashboardSource).toContain("const HISTORY_DELETE_ACTION_BUTTON_WIDTH = 64");
-    expect(dashboardSource).toContain("const HISTORY_DELETE_ACTION_GAP = 14");
-    expect(dashboardSource).toContain("marginLeft: HISTORY_DELETE_ACTION_GAP");
-    expect(dashboardSource).toContain("width: HISTORY_DELETE_ACTION_BUTTON_WIDTH");
-  });
-
-  it("uses the semantic brand danger colours for the swipe action", () => {
-    expect(dashboardSource).toContain("backgroundColor: theme.danger");
-    expect(dashboardSource).toContain("<TrashGlyph color={theme.onDanger}");
+  it("uses the semantic brand danger colours for the Delete underlay and coral for Start again", () => {
+    expect(rowsSource).toContain("backgroundColor: theme.danger");
+    expect(rowsSource).toContain("color={theme.onDanger} glyph={DAYFRAME_APP_ICONS.delete}");
+    expect(rowsSource).toContain("backgroundColor: theme.accent");
   });
 
   it("deletes directly from the list without a confirmation step", () => {
@@ -57,14 +53,14 @@ describe("Today history swipe-to-delete contract", () => {
     expect(dashboardSource).not.toContain("historyDeleteEntries");
   });
 
-  it("keeps replay functional as an explicit switch while another timer runs", () => {
-    expect(dashboardSource).toContain("Switch the running timer to ${title}");
-    expect(dashboardSource).toContain("const canReplay = Boolean(entry.categoryId || entry.description?.trim())");
+  it("keeps Start again functional as an explicit switch while another timer runs", () => {
+    expect(rowsSource).toContain('activeTimerRunning ? `Switch to ${title}` : "Start again"');
+    expect(rowsSource).toContain("const replayable = !live && canStartAgain(entry)");
     expect(dashboardSource).toContain("!isActiveEntryPendingDeletion()");
   });
 
   it("allows immediate grouped deletion with a temporary undo action", () => {
-    expect(dashboardSource).toContain("onDeleteEntries(group.entries.map");
+    expect(rowsSource).toContain("onDeleteEntries(group.entries.map(({ entry }) => entry))");
     expect(dashboardSource).toContain("time entries deleted");
     expect(dashboardSource).toContain("undoDeletion");
     expect(DELETION_UNDO_MS).toBe(5_000);
@@ -74,34 +70,18 @@ describe("Today history swipe-to-delete contract", () => {
   });
 
   it("exposes VoiceOver Delete through the existing undoable callback for exact completed entries", () => {
-    const historySource = dashboardSource.slice(
-      dashboardSource.indexOf("export function HistoryDayCard("),
-      dashboardSource.indexOf("function dedupeEntriesById(")
-    );
-
-    expect(historySource).toContain('name: "delete"');
-    expect(historySource).toContain('event.nativeEvent.actionName === "delete"');
-    expect(historySource).toContain("group.entries.every(({ entry: groupedEntry }) => Boolean(groupedEntry.stoppedAt))");
-    expect(historySource).toContain("onDeleteEntries(group.entries.map(({ entry: groupedEntry }) => groupedEntry))");
-    expect(historySource).toContain("onDeleteEntries([childEntry])");
-    expect(historySource).toContain("accessibilityLabel={`${title}. ${detailContext}`}");
-    expect(dashboardSource).toContain("accessibilityLabel={`Delete ${accessibilityLabel}`}");
+    expect(rowsSource).toContain('name: "delete"');
+    expect(rowsSource).toContain('event.nativeEvent.actionName === "delete" && deletable');
+    expect(rowsSource).toContain("deletable={canDeleteGroup(group)}");
+    expect(rowsSource).toContain("deletable={Boolean(entry.stoppedAt)}");
+    expect(rowsSource).toContain("onDelete={() => onDeleteEntries([entry])}");
     expect(dashboardSource).toContain("coordinator.prepare(entries, snapshot)");
-    expect(historySource).not.toContain("Alert.alert");
+    expect(rowsSource).not.toContain("Alert.alert");
   });
 
-  it("omits row overlap copy while retaining underlying interval analysis", () => {
-    const historySource = dashboardSource.slice(
-      dashboardSource.indexOf("export function HistoryDayCard("),
-      dashboardSource.indexOf("function dedupeEntriesById(")
-    );
-
-    expect(historySource).not.toContain('accessibilityLabel="Overlap"');
-    expect(historySource).not.toContain("Overlaps other tracked time");
-    expect(historySource).not.toContain("Overlap:");
-    expect(historySource).toContain("analyzeTimeIntervals(");
-    expect(historySource).toContain("historyAnalysis.additionalOverlapSeconds");
-    expect(historySource).toContain("accessibilityLabel={`${title}. ${detailContext}`}");
+  it("omits row overlap copy", () => {
+    expect(rowsSource).not.toContain("Overlap");
+    expect(rowsSource).not.toMatch(/overlaps? (other|with)/i);
   });
 
   it("uses the shared tombstone filter for refresh and optimistic state", () => {

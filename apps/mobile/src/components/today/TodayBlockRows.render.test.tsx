@@ -145,6 +145,46 @@ describe("TodayBlockRows", () => {
     expect(mocks.haptic.mock.calls.filter(([kind]) => kind === "tick")).toHaveLength(2);
   });
 
+  it("needs a full swipe per commit even when grabbed mid-spring", () => {
+    const { props } = render([group(entry("a", at(8), at(9)))]);
+    // A gesture interrupted before release leaves the row out at +90 (as if still springing home).
+    act(() => {
+      mocks.pans[0].handlers.onStart({});
+      mocks.pans[0].handlers.onUpdate({ translationX: 90 });
+      mocks.pans[0].handlers.onFinalize({});
+    });
+    swipe(0, 30);
+    expect(props.onReplayEntry).not.toHaveBeenCalled();
+    swipe(0, 120);
+    expect(props.onReplayEntry).toHaveBeenCalledTimes(1);
+  });
+
+  it("never commits a reversed re-grab while the row is shown near centre", () => {
+    const { props } = render([group(entry("a", at(8), at(9)))]);
+    // Left out at -90 (springing home), then swiped right 100: the row shows +10 only.
+    act(() => {
+      mocks.pans[0].handlers.onStart({});
+      mocks.pans[0].handlers.onUpdate({ translationX: -90 });
+      mocks.pans[0].handlers.onFinalize({});
+    });
+    swipe(0, 100);
+    expect(props.onReplayEntry).not.toHaveBeenCalled();
+    // Right out at +90, then swiped left 100: the row shows -10 only.
+    act(() => {
+      mocks.pans[0].handlers.onStart({});
+      mocks.pans[0].handlers.onUpdate({ translationX: 100 });
+      mocks.pans[0].handlers.onFinalize({});
+    });
+    swipe(0, -100);
+    expect(props.onDeleteEntries).not.toHaveBeenCalled();
+  });
+
+  it("says a group's count once to VoiceOver", () => {
+    const { tree } = render([group(entry("a", at(8), at(9)), entry("b", at(10), at(11)))]);
+    const label = tree.root.findByProps({ testID: "today-block-row-a" }).props.accessibilityLabel as string;
+    expect(label).toBe("Expand 2 Deep work entries. Deep work, 08:00 to 09:00, Focus, 2 hours");
+  });
+
   it("commits nothing when the system cancels an armed swipe", () => {
     const { props } = render([group(entry("a", at(8), at(9)))]);
     cancel(0, -150);

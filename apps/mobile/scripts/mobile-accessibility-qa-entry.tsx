@@ -19,8 +19,6 @@ import {
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { File, Paths } from "expo-file-system";
 import type { MobileReviewItem, MobileTimeEntry } from "../src/lib/api";
-import { HistoryDayCard } from "../src/components/DayframeDashboard";
-import { TodayLoggedSummary } from "../src/components/accessibility/TodayLoggedSummary";
 import { TodayTimerSurface } from "../src/components/accessibility/TodayTimerSurface";
 import { TodayGoalFrame } from "../src/components/today/TodayGoalFrame";
 import { TodayBlockRows } from "../src/components/today/TodayBlockRows";
@@ -37,7 +35,6 @@ import { TagMetadata } from "../src/components/TagMetadata";
 const frames: Record<string, unknown> = {};
 const widths = [320, 375, 390, 430];
 const reviewCounts = [0, 1, 2, 99, 999, 10_000];
-const loggedStressValues = ["0m", "3h 37m", "11h 13m", "999h 59m", "100000h"];
 
 function syntheticTime(day: number, hour: number, minute: number) {
   return new Date(2026, 8, day, hour, minute).toISOString();
@@ -149,7 +146,6 @@ function Probe() {
     deviceWidth >= 390 ? 390 : deviceWidth >= 375 ? 375 : 320,
   );
   const [reviewCountIndex, setReviewCountIndex] = useState(3);
-  const [loggedStressIndex, setLoggedStressIndex] = useState(0);
   const [boldText, setBoldText] = useState(false);
   const [reduceMotion, setReduceMotion] = useState(false);
   const [showRunningTimer, setShowRunningTimer] = useState(false);
@@ -218,22 +214,18 @@ function Probe() {
         "today.goal.of.frame",
         "today.goal.of.text",
         "today.goal.cells",
-        "history.card",
-        "history.row.H01-cross-midnight",
-        "history.title.H01-cross-midnight.frame",
-        "history.title.H01-cross-midnight.text",
-        "history.time.H01-cross-midnight.frame",
-        "history.time.H01-cross-midnight.text",
-        "history.replay.H01-cross-midnight",
-        "history.count-text.H03-count-12-1.frame",
-        "history.count-text.H03-count-12-1.text",
-        "history.count-text.H03-count-123-1.frame",
-        "history.count-text.H03-count-123-1.text",
-        "logged.stress.row",
-        "logged.stress.label.frame",
-        "logged.stress.label.text",
-        "logged.stress.value.frame",
-        "logged.stress.value.text",
+        "today-blocks.card",
+        "today-blocks.row.H01-cross-midnight",
+        "today-blocks.title.H01-cross-midnight.frame",
+        "today-blocks.title.H01-cross-midnight.text",
+        "today-blocks.meta.H01-cross-midnight.frame",
+        "today-blocks.meta.H01-cross-midnight.text",
+        "today-blocks.duration.H01-cross-midnight.frame",
+        "today-blocks.duration.H01-cross-midnight.text",
+        "today-blocks.count.H03-count-12-1.frame",
+        "today-blocks.count.H03-count-12-1.text",
+        "today-blocks.count.H03-count-123-1.frame",
+        "today-blocks.count.H03-count-123-1.text",
         "settings.row",
         "settings.icon",
         "settings.text-column",
@@ -258,16 +250,6 @@ function Probe() {
       if (reviewCount > 0) {
         requiredMeasurements.push("review-nudge.card", "review-nudge.title.frame", "review-nudge.title.text", "review-nudge.detail.frame", "review-nudge.detail.text");
       }
-      if (frames["history.child-time.H03-group-1.0.frame"]) {
-        for (const childIndex of [0, 1]) {
-          requiredMeasurements.push(
-            `history.child-time.H03-group-1.${childIndex}.frame`,
-            `history.child-time.H03-group-1.${childIndex}.text`,
-            `history.child-duration.H03-group-1.${childIndex}.frame`,
-            `history.child-duration.H03-group-1.${childIndex}.text`,
-          );
-        }
-      }
       for (const id of [
         "tags.removable",
         "tags.removable.group.0",
@@ -279,11 +261,6 @@ function Probe() {
         "tags.removable.text.1.frame",
         "tags.removable.text.1.text",
       ]) requiredMeasurements.push(id);
-      for (const id of ["H01-cross-midnight", "H02-long-title", "H03-group-1", "H03-count-12-1", "H03-count-123-1"]) {
-        if (!frames[`history.duration.${id}.frame`] && !frames[`history.duration-stacked.${id}.frame`]) {
-          requiredMeasurements.push(`history.duration-layout.${id}`);
-        }
-      }
       const missingMeasurementIds = [...new Set(requiredMeasurements)].filter((id) => !(id in frames));
       const removableTagTargetIds = ["tags.removable.remove.0", "tags.removable.remove.1"];
       const removableTagTargets = removableTagTargetIds.map((id) => frames[id] as {
@@ -322,7 +299,6 @@ function Probe() {
         appearance: theme.mode,
         visibleState: {
           reviewNudge: reviewCount > 0,
-          loggedStressFixture: `L01-${loggedStressIndex}`,
           timer: showRunningTimer ? "running" : "idle",
         },
         platform: Platform.OS,
@@ -340,22 +316,17 @@ function Probe() {
           "review-nudge.detail.frame": "review-nudge.card",
           "today.timer.title.frame": "today.timer.running",
           "today.timer.elapsed.frame": "today.timer.running",
-          "history.card": "qa.host; todayEntryCard uses overflow:hidden, so children must remain within the measured rounded-card bounds",
-          "history.row.*": "history.card",
-          "history.main.*": "history.row.*",
-          "history.title.*.frame": "history.main.*",
-          "history.time.*.frame": "history.main.*",
-          "history.actions.*": "history.row.*",
-          "history.duration.*.frame": "history.actions.*",
-          "history.replay.*": "history.actions.*",
+          "today-blocks.card": "qa.host; the card clips rows (overflow hidden), so rows must stay within it",
+          "today-blocks.row.*": "today-blocks.card",
+          "today-blocks.title.*.frame": "today-blocks.row.*",
+          "today-blocks.meta.*.frame": "today-blocks.row.*",
+          "today-blocks.duration.*.frame": "today-blocks.row.*",
           "settings.row": "qa.host; settingsGroupRows has rounded-corner overflow clipping and rows grow intrinsically",
           "settings.label.frame": "settings.text-column",
           "settings.value.frame": "settings.text-column",
           "review.card": "qa.host; review card has no fixed maximum height",
           "review.title.frame": "review.header",
           "review.reason.frame": "review.card",
-          "logged.stress.row": "qa.host; earlier days keep the logged total, Today's total lives in the goal frame",
-          "logged.stress.value.frame": "logged.stress.row",
         },
         diagnosticComplete: missingMeasurementIds.length === 0,
         missingMeasurementIds,
@@ -379,7 +350,7 @@ function Probe() {
   useEffect(() => {
     const timer = setTimeout(() => reportWriterRef.current(), 2_000);
     return () => clearTimeout(timer);
-  }, [deviceWidth, deviceHeight, hostWidth, boldText, reduceMotion, theme.mode, reviewCount, loggedStressIndex, showRunningTimer]);
+  }, [deviceWidth, deviceHeight, hostWidth, boldText, reduceMotion, theme.mode, reviewCount, showRunningTimer]);
 
   useEffect(() => () => {
     if (reportTimerRef.current) clearTimeout(reportTimerRef.current);
@@ -395,9 +366,6 @@ function Probe() {
               <Text {...mobileTextProps("control")} style={{ color: theme.textPrimary, fontSize: 12 }}>{width} pt</Text>
             </Pressable>
           ))}
-          <Pressable accessibilityLabel={`Advance synthetic Logged total to ${loggedStressValues[(loggedStressIndex + 1) % loggedStressValues.length]}`} accessibilityRole="button" onPress={() => setLoggedStressIndex((index) => (index + 1) % loggedStressValues.length)} style={{ minHeight: 44, justifyContent: "center", paddingHorizontal: 8 }}>
-            <Text {...mobileTextProps("control")} style={{ color: theme.textPrimary, fontSize: 12 }}>Logged total {loggedStressValues[loggedStressIndex]}</Text>
-          </Pressable>
           <Pressable accessibilityLabel={`Advance synthetic Review count to ${reviewCounts[(reviewCountIndex + 1) % reviewCounts.length]}`} accessibilityRole="button" onPress={() => setReviewCountIndex((index) => (index + 1) % reviewCounts.length)} style={{ minHeight: 44, justifyContent: "center", paddingHorizontal: 8 }}>
             <Text {...mobileTextProps("control")} style={{ color: theme.textPrimary, fontSize: 12 }}>Review count {reviewCount}</Text>
           </Pressable>
@@ -462,6 +430,7 @@ function Probe() {
             <TodayBlockRows
               activeTimerRunning={showRunningTimer}
               activityIconFor={() => null}
+              diagnostic={diagnostic}
               groups={groupHistoryDayEntries(fixtures)}
               nowMs={now}
               onDeleteEntries={(deleted) => setActionResult(`Local delete callback: ${deleted.length} synthetic entries`)}
@@ -471,33 +440,6 @@ function Probe() {
               rowLanding={null}
               theme={theme}
             />
-            <HistoryDayCard
-              activeTimerRunning={false}
-              now={now}
-              onDeleteEntries={(deleted) => setActionResult(`Local delete callback: ${deleted.length} synthetic entries`)}
-              onOpenEntry={(opened) => setActionResult(`Local edit callback: ${opened.id}`)}
-              onReplayEntry={(replayed) => setActionResult(`Local replay callback: ${replayed.id}`)}
-              section={{
-                date: new Date(2026, 8, 12),
-                entries: fixtures,
-                isToday: true,
-                key: "synthetic-2026-09-12",
-                totalSeconds: fixtures.reduce((sum, item) => sum + item.overlapSeconds, 0),
-              }}
-              styles={styles}
-              theme={theme}
-              diagnostic={diagnostic}
-            />
-            <View style={{ width: hostWidth, gap: 6 }}>
-              <Text {...mobileTextProps("counter")} style={styles.quickCategoryHint}>L01 LOGGED TOTAL STRESS</Text>
-              <TodayLoggedSummary
-                value={loggedStressValues[loggedStressIndex]}
-                coveredValue="6h 34m covered"
-                styles={styles}
-                diagnostic={diagnostic}
-                diagnosticPrefix="logged.stress"
-              />
-            </View>
             <View style={{ width: hostWidth }}>
               <Text {...mobileTextProps("counter")} style={styles.quickCategoryHint}>H05 REMOVABLE TAGS</Text>
               <TagMetadata

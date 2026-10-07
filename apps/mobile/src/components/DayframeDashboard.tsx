@@ -23,20 +23,11 @@ import {
   TextInput,
   View
 } from "react-native";
-import ReanimatedSwipeable, {
-  type SwipeableMethods
-} from "react-native-gesture-handler/ReanimatedSwipeable";
-import Reanimated, {
-  Extrapolation,
-  interpolate,
-  useAnimatedStyle,
-  type SharedValue
-} from "react-native-reanimated";
+import Reanimated from "react-native-reanimated";
 import Svg, { Circle, Path } from "react-native-svg";
 import { router, useFocusEffect, useIsFocused } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
 import {
-  analyzeTimeIntervals,
   paletteColorFor,
   TIMER_STATE_RECONCILE_INTERVAL_MS,
   timerStateChanged,
@@ -47,19 +38,9 @@ import {
 import { DayframeCalendarView } from "../../modules/dayframe-calendar";
 import { ActiveTimerEditSheet } from "@/components/ActiveTimerEditSheet";
 import { ConnectivityStatusIndicator } from "@/components/ConnectivityStatusStrip";
-import { useIntrinsicTextMeasure } from "@/components/accessibility/IntrinsicTextMeasure";
-import { TodayLoggedSummary } from "@/components/accessibility/TodayLoggedSummary";
-import { recordMobileLayout, recordMobileTextLayout } from "@/components/accessibility/diagnostics";
-import type { MobileAccessibilityDiagnostic } from "@/components/accessibility/diagnostics";
 import { ReportsTab } from "@/components/reports/ReportsTab";
 import { DayframeBrand } from "@/components/brand";
-import {
-  CompactReplayPlayGlyph,
-  PrimaryTimerAction,
-  PlusGlyph
-} from "@/components/PrimaryTimerAction";
 import { TodayTimerSurface } from "@/components/accessibility/TodayTimerSurface";
-import { ActivityBlockMark } from "./today/ActivityBlockMark";
 import type { LandingRequest } from "@/lib/blocksMotion";
 import { minuteClock, newestShownTimestamp } from "@/lib/frameClock";
 import { loadHapticsPreference, playHaptic } from "@/lib/haptics";
@@ -69,6 +50,8 @@ import { AccountAvatarButton } from "./today/AccountAvatarButton";
 import { TodayGoalFrame } from "./today/TodayGoalFrame";
 import { TodayReviewNudge } from "./today/TodayReviewNudge";
 import { TodayBlockRows } from "./today/TodayBlockRows";
+import { EarlierThisWeek } from "./today/EarlierThisWeek";
+import { buildEarlierThisWeek, EARLIER_DAYS } from "@/lib/earlierThisWeek";
 import { buildTodayGoalFrame } from "@/lib/todayGoalFrame";
 import {
   AuthRequiredError,
@@ -173,8 +156,6 @@ import {
 import {
   buildHistoryDaySections,
   groupHistoryDayEntries,
-  historyDayLabel,
-  type HistoryDaySection,
   type HistoryEntryGroup
 } from "@/lib/historyPresentation";
 import {
@@ -183,12 +164,6 @@ import {
   type MobileStyles,
   type MobileTheme
 } from "@/lib/mobileTheme";
-import {
-  HISTORY_REPLAY_ACTION_WIDTH,
-  historyRowLayout,
-  summaryLayout
-} from "@/lib/mobileAccessibilityLayout";
-import { mobileTextProps } from "@/lib/mobileTypography";
 import { subscribeMobileSignedOut } from "@/lib/mobileSessionTransition";
 import {
   buildNativeCalendarBridgeState,
@@ -204,7 +179,6 @@ import {
   localLayoutTransition,
   localPresenceEntering,
   localPresenceExiting,
-  useReduceMotionPreference,
   useResolvedReduceMotionPreference,
   useReduceTransparencyPreference
 } from "@/lib/motion";
@@ -285,9 +259,6 @@ function DashboardBrandLockup({
   );
 }
 const RECENT_LAST_STOP_WINDOW_MS = 24 * 60 * 60 * 1000;
-const HISTORY_DELETE_ACTION_BUTTON_WIDTH = 64;
-const HISTORY_DELETE_ACTION_GAP = 14;
-const HISTORY_DELETE_ACTION_WIDTH = HISTORY_DELETE_ACTION_BUTTON_WIDTH + HISTORY_DELETE_ACTION_GAP;
 
 type DashboardContextValue = {
   renderTab: (tab: DayframeDashboardTab, isFocused: boolean) => ReactNode;
@@ -1375,13 +1346,17 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
     [historySourceEntries]
   );
   const minuteNow = minuteClock(now, newestShownMs);
+  // Today shows today's blocks and the six days before it; Calendar holds everything older.
   const historySections = useMemo(
     () => buildHistoryDaySections({
+      days: EARLIER_DAYS + 1,
       entries: historySourceEntries.filter((entry) => !isReviewNeededEntry(entry)),
       nowMs: minuteNow
     }),
     [historySourceEntries, minuteNow]
   );
+  const todaySections = useMemo(() => historySections.filter((section) => section.isToday), [historySections]);
+  const earlierDays = useMemo(() => buildEarlierThisWeek(historySections, minuteNow), [historySections, minuteNow]);
   const categoryIconById = useMemo(
     () => new Map((data?.categories ?? []).map((category) => [category.id, category.icon ?? null])),
     [data?.categories]
@@ -1873,6 +1848,13 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
       return dayKey;
     });
   }, []);
+
+  // "Earlier this week" on Today opens that day in the Calendar tab (same provider state).
+  const openCalendarDay = useCallback((dayKey: string) => {
+    playHaptic("tick");
+    selectCalendarDay(dayKey);
+    router.navigate("/(tabs)/calendar");
+  }, [selectCalendarDay]);
 
   const shiftSelectedCalendarWeek = useCallback((weeks: number) => {
     shiftSelectedCalendarDay(weeks * 7);
@@ -2431,7 +2413,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
       <SafeAreaView collapsable={false} edges={["top", "left", "right"]} style={styles.safeArea}>
         <Reanimated.FlatList
           contentContainerStyle={[styles.container, styles.todayListContent]}
-          data={historySections}
+          data={todaySections}
           itemLayoutAnimation={localLayoutTransition(reduceMotion)}
           keyExtractor={(section) => section.key}
           refreshControl={
@@ -2496,53 +2478,39 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
               </Reanimated.View>
             </Animated.View>
           )}
-          renderItem={({ item }) => {
-            const openEntry = (entry: TimeEntry) => {
-              if (!entry.stoppedAt) {
-                presentActiveEditor("existing_active_timer");
-                return;
-              }
-              presentCompletedEntry({ ...entry, isActive: false });
-            };
-            const replayEntry = (entry: TimeEntry) => {
-              startFromToday(
-                entry.categoryId,
-                entry.description ?? "",
-                entry.tagNames ?? entry.tags?.map((tag) => tag.name) ?? []
-              );
-            };
-            const iconFor = (categoryId: string | null | undefined) =>
-              (categoryId ? categoryIconById.get(categoryId) ?? null : null);
-            // Today's blocks follow the Blocks prototype; earlier days keep the history card until
-            // "Earlier this week" replaces them (parity step 2a-2b).
-            return item.isToday ? (
-              <TodayBlockRows
-                activeTimerRunning={Boolean(displayedActiveEntry)}
-                activityIconFor={iconFor}
-                groups={groupHistoryDayEntries(item.entries)}
-                nowMs={minuteNow}
-                onDeleteEntries={scheduleHistoryDeletion}
-                onOpenEntry={openEntry}
-                onReplayEntry={replayEntry}
-                reduceMotion={reduceMotion}
-                rowLanding={rowLanding}
-                theme={theme}
-              />
-            ) : (
-              <HistoryDayCard
-                activeTimerRunning={Boolean(displayedActiveEntry)}
-                now={minuteNow}
-                onDeleteEntries={scheduleHistoryDeletion}
-                onOpenEntry={openEntry}
-                onReplayEntry={replayEntry}
-                activityIconFor={iconFor}
-                rowLanding={rowLanding}
-                section={item}
-                styles={styles}
-                theme={theme}
-              />
-            );
-          }}
+          renderItem={({ item }) => (
+            <TodayBlockRows
+              activeTimerRunning={Boolean(displayedActiveEntry)}
+              activityIconFor={(categoryId) => (categoryId ? categoryIconById.get(categoryId) ?? null : null)}
+              groups={groupHistoryDayEntries(item.entries)}
+              nowMs={minuteNow}
+              onDeleteEntries={scheduleHistoryDeletion}
+              onOpenEntry={(entry) => {
+                if (!entry.stoppedAt) {
+                  presentActiveEditor("existing_active_timer");
+                  return;
+                }
+                presentCompletedEntry({ ...entry, isActive: false });
+              }}
+              onReplayEntry={(entry) => {
+                startFromToday(
+                  entry.categoryId,
+                  entry.description ?? "",
+                  entry.tagNames ?? entry.tags?.map((tag) => tag.name) ?? []
+                );
+              }}
+              reduceMotion={reduceMotion}
+              rowLanding={rowLanding}
+              theme={theme}
+            />
+          )}
+          ListFooterComponent={(
+            // The footer is not a FlatList cell, so it owns its own layout transition and moves
+            // with the rows above it rather than popping (motion.md).
+            <Reanimated.View layout={localLayoutTransition(reduceMotion)} style={styles.todayListFooter}>
+              <EarlierThisWeek days={earlierDays} onOpenDay={openCalendarDay} theme={theme} />
+            </Reanimated.View>
+          )}
           ItemSeparatorComponent={() => <View style={styles.historyDayGap} />}
           showsVerticalScrollIndicator={false}
         />
@@ -2819,465 +2787,6 @@ function PasswordVisibilityGlyph({
   );
 }
 
-function TrashGlyph({ color }: { color: string }) {
-  return (
-    <Svg width={21} height={21} viewBox="0 0 24 24">
-      <Path d="M4 7h16M10 11v6M14 11v6M9 7l1-2h4l1 2M6 7l1 13h10l1-13" fill="none" stroke={color} strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} />
-    </Svg>
-  );
-}
-
-function SwipeDeleteAction({
-  accessibilityLabel,
-  entry,
-  minHeight,
-  onDelete,
-  styles,
-  swipeable,
-  theme,
-  translation
-}: {
-  accessibilityLabel: string;
-  entry: TimeEntry;
-  minHeight: number;
-  onDelete: (entry: TimeEntry) => void;
-  styles: MobileStyles;
-  swipeable: SwipeableMethods;
-  theme: MobileTheme;
-  translation: SharedValue<number>;
-}) {
-  const animatedStyle = useAnimatedStyle(() => ({
-    transform: [{
-      translateX: interpolate(
-        translation.value,
-        [-HISTORY_DELETE_ACTION_WIDTH, 0],
-        [0, HISTORY_DELETE_ACTION_WIDTH],
-        Extrapolation.CLAMP
-      )
-    }]
-  }));
-
-  return (
-    <Reanimated.View
-      style={[
-        { minHeight, width: HISTORY_DELETE_ACTION_WIDTH },
-        animatedStyle
-      ]}
-    >
-      <Pressable
-        accessibilityLabel={`Delete ${accessibilityLabel}`}
-        accessibilityRole="button"
-        onPress={() => {
-          swipeable.close();
-          onDelete(entry);
-        }}
-        style={({ pressed }) => [
-          styles.historySwipeDeleteActionPressable,
-          {
-            backgroundColor: theme.danger,
-            marginLeft: HISTORY_DELETE_ACTION_GAP,
-            width: HISTORY_DELETE_ACTION_BUTTON_WIDTH
-          },
-          pressed ? styles.buttonPressed : null
-        ]}
-      >
-        <TrashGlyph color={theme.onDanger} />
-      </Pressable>
-    </Reanimated.View>
-  );
-}
-
-function SwipeableHistoryEntry({
-  accessibilityLabel,
-  children,
-  enabled = true,
-  entry,
-  minHeight,
-  onDelete,
-  styles,
-  theme
-}: {
-  accessibilityLabel: string;
-  children: ReactNode;
-  enabled?: boolean;
-  entry: TimeEntry;
-  minHeight: number;
-  onDelete: (entry: TimeEntry) => void;
-  styles: MobileStyles;
-  theme: MobileTheme;
-}) {
-  const [measuredHeight, setMeasuredHeight] = useState(minHeight);
-  return (
-    <ReanimatedSwipeable
-      enabled={enabled}
-      friction={1}
-      overshootRight={false}
-      rightThreshold={HISTORY_DELETE_ACTION_WIDTH / 2}
-      renderRightActions={(_progress, translation, swipeable) => enabled ? (
-        <SwipeDeleteAction
-          accessibilityLabel={accessibilityLabel}
-          entry={entry}
-          minHeight={measuredHeight}
-          onDelete={onDelete}
-          styles={styles}
-          swipeable={swipeable}
-          theme={theme}
-          translation={translation}
-        />
-      ) : null}
-    >
-      <View
-        onLayout={(event) => {
-          const height = Math.ceil(event.nativeEvent.layout.height);
-          setMeasuredHeight((current) => current === height ? current : Math.max(minHeight, height));
-        }}
-      >
-        {children}
-      </View>
-    </ReanimatedSwipeable>
-  );
-}
-
-export function HistoryDayCard({
-  activeTimerRunning,
-  activityIconFor,
-  now,
-  onDeleteEntries,
-  onOpenEntry,
-  onReplayEntry,
-  rowLanding = null,
-  section,
-  styles,
-  theme,
-  diagnostic
-}: {
-  activeTimerRunning: boolean;
-  activityIconFor?: (categoryId: string | null | undefined) => string | null;
-  rowLanding?: LandingRequest | null;
-  now: number;
-  onDeleteEntries: (entries: TimeEntry[]) => void;
-  onOpenEntry: (entry: TimeEntry) => void;
-  onReplayEntry: (entry: TimeEntry) => void;
-  section: HistoryDaySection;
-  styles: MobileStyles;
-  theme: MobileTheme;
-  diagnostic?: MobileAccessibilityDiagnostic;
-}) {
-  const reduceMotion = useReduceMotionPreference();
-  const [expandedGroups, setExpandedGroups] = useState<Set<string>>(() => new Set());
-  const [availableRowWidth, setAvailableRowWidth] = useState(0);
-  const entryGroups = useMemo(() => groupHistoryDayEntries(section.entries), [section.entries]);
-  const longestDuration = useMemo(
-    () => formatDuration(Math.max(0, ...entryGroups.map((group) => group.totalSeconds))),
-    [entryGroups]
-  );
-  const durationSample = longestDuration.replace(/[0-9]/g, "8");
-  const durationMeasure = useIntrinsicTextMeasure(
-    [durationSample],
-    styles.todayEntryDuration,
-    1.2,
-    "history-duration-measure"
-  );
-  const longestGroupCount = Math.max(0, ...entryGroups.map((group) => group.entries.length));
-  const groupCountSample = String(longestGroupCount).replace(/[0-9]/g, "8");
-  const groupCountMeasure = useIntrinsicTextMeasure(
-    [groupCountSample],
-    styles.historyGroupCountText,
-    1.2,
-    "history-group-count-measure"
-  );
-  const historyAnalysis = useMemo(() => {
-    const rangeStart = new Date(section.date);
-    rangeStart.setHours(0, 0, 0, 0);
-    const rangeEnd = addDaysToDate(rangeStart, 1);
-    return analyzeTimeIntervals(
-      section.entries.map(({ entry }) => ({
-        id: entry.id,
-        startedAt: entry.startedAt,
-        stoppedAt: entry.stoppedAt
-      })),
-      { range: { start: rangeStart, end: rangeEnd }, now }
-    );
-  }, [now, section.date, section.entries]);
-  const loggedValue = formatDuration(historyAnalysis.loggedSeconds);
-
-  function toggleGroup(groupKey: string) {
-    setExpandedGroups((current) => {
-      const next = new Set(current);
-      if (next.has(groupKey)) next.delete(groupKey);
-      else next.add(groupKey);
-      return next;
-    });
-  }
-
-  return (
-    <View style={styles.todaySummaryBlock}>
-      <Text {...mobileTextProps("sectionHeading")} style={styles.historyDayTitle}>{historyDayLabel(section, now)}</Text>
-      <View
-        style={styles.todayEntryCard}
-        onLayout={(event) => {
-          const layout = event?.nativeEvent?.layout;
-          if (!layout) return;
-          diagnostic?.onLayout?.("history.card", layout);
-          const width = Math.max(0, layout.width - 28);
-          setAvailableRowWidth((current) => current === width ? current : width);
-        }}
-      >
-        {durationMeasure.probe}
-        {groupCountMeasure.probe}
-        {entryGroups.length === 0 ? (
-          <Reanimated.View
-            entering={localPresenceEntering(reduceMotion)}
-            layout={localLayoutTransition(reduceMotion)}
-          >
-            <Text {...mobileTextProps("body")} style={styles.todayEmptyText}>No tracked time for this day.</Text>
-          </Reanimated.View>
-        ) : entryGroups.map((group, index) => {
-          const { entry } = group.representative;
-          const probeId = group.entries[0].entry.id;
-          const grouped = group.entries.length > 1;
-          const expanded = grouped && expandedGroups.has(group.key);
-          const canReplay = Boolean(entry.categoryId || entry.description?.trim());
-          const title = displayEntryTitle(entry);
-          const durationWidth = durationMeasure.widths[durationSample];
-          const groupCountWidth = groupCountMeasure.widths[groupCountSample];
-          const rowLayout = durationWidth === undefined || (grouped && groupCountWidth === undefined)
-            ? "stacked"
-            : historyRowLayout({
-              availableWidth: availableRowWidth,
-              countBadgeWidth: grouped ? Math.max(34, groupCountWidth + 16) : 0,
-              durationWidth,
-              replayWidth: HISTORY_REPLAY_ACTION_WIDTH,
-              gap: 10
-            });
-          const duration = formatDuration(group.totalSeconds);
-          const categoryPlace = [entry.categoryName, entry.placeName].filter(Boolean).join(" · ");
-          const tagNames = entry.tagNames ?? entry.tags?.map((tag) => tag.name) ?? [];
-          const timeRange = grouped
-            ? `${formatEntryTimeRange(entry, now)} · ${group.entries.length} entries`
-            : formatEntryTimeRange(entry, now);
-          const detailContext = [
-            timeRange,
-            categoryPlace,
-            tagNames.length ? `Tags: ${tagNames.join(", ")}` : null,
-            duration
-          ].filter(Boolean).join(". ");
-          return (
-            <Reanimated.View
-              key={`${section.key}:${group.key}`}
-              entering={localPresenceEntering(reduceMotion)}
-              exiting={localPresenceExiting(reduceMotion)}
-              layout={localLayoutTransition(reduceMotion)}
-            >
-              <SwipeableHistoryEntry
-                accessibilityLabel={`${title}. ${detailContext}`}
-                enabled={group.entries.every(({ entry: groupedEntry }) => Boolean(groupedEntry.stoppedAt))}
-                entry={entry}
-                minHeight={56}
-                onDelete={() => onDeleteEntries(group.entries.map(({ entry: groupedEntry }) => groupedEntry))}
-                styles={styles}
-                theme={theme}
-              >
-                <View style={[
-                  styles.todayEntryRow,
-                  rowLayout === "stacked" ? styles.historyEntryStackedRow : null,
-                  index > 0 ? styles.todayEntryDivider : null
-                ]} onLayout={(event) => {
-                  recordMobileLayout(diagnostic, `history.row.${probeId}`, event);
-                  const staleDurationPrefix = rowLayout === "inline"
-                    ? `history.duration-stacked.${probeId}`
-                    : `history.duration.${probeId}`;
-                  diagnostic?.onRemove?.(`${staleDurationPrefix}.frame`);
-                  diagnostic?.onRemove?.(`${staleDurationPrefix}.text`);
-                }}>
-                  <View style={rowLayout === "stacked" ? styles.historyEntryStackedTop : styles.historyEntryInlineTop}>
-                  <Pressable
-                  accessibilityLabel={`${grouped
-                    ? `${expanded ? "Collapse" : "Expand"} ${group.entries.length} ${title} entries`
-                    : `Edit ${title}`}. ${detailContext}`}
-                  accessibilityRole="button"
-                  accessibilityState={grouped ? { expanded } : undefined}
-                  accessibilityActions={group.entries.every(({ entry: groupedEntry }) => Boolean(groupedEntry.stoppedAt))
-                    ? [{ name: "delete", label: `Delete ${grouped ? `${group.entries.length} ${title} entries` : title}` }]
-                    : undefined}
-                  onAccessibilityAction={(event) => {
-                    if (event.nativeEvent.actionName === "delete" && group.entries.every(({ entry: groupedEntry }) => Boolean(groupedEntry.stoppedAt))) {
-                      onDeleteEntries(group.entries.map(({ entry: groupedEntry }) => groupedEntry));
-                    }
-                  }}
-                  onPress={() => {
-                    if (grouped) toggleGroup(group.key);
-                    else onOpenEntry(entry);
-                  }}
-                  style={({ pressed }) => [styles.historyEntryMain, pressed ? styles.buttonPressed : null]}
-                  onLayout={(event) => recordMobileLayout(diagnostic, `history.main.${probeId}`, event)}
-                >
-                  {grouped ? (
-                    <View
-                      style={styles.historyGroupCountBadge}
-                      onLayout={(event) => recordMobileLayout(diagnostic, `history.count.${probeId}`, event)}
-                    >
-                      <Text
-                        {...mobileTextProps("counter")}
-                        style={styles.historyGroupCountText}
-                        onLayout={(event) => recordMobileLayout(diagnostic, `history.count-text.${probeId}.frame`, event)}
-                        onTextLayout={(event) => recordMobileTextLayout(diagnostic, `history.count-text.${probeId}`, event, "counter", styles.historyGroupCountText)}
-                      >
-                        {group.entries.length}
-                      </Text>
-                    </View>
-                  ) : null}
-                  <ActivityBlockMark
-                    categoryColor={entry.categoryColor ?? entry.categoryId ?? null}
-                    categoryIcon={activityIconFor?.(entry.categoryId) ?? null}
-                    categoryName={entry.categoryName ?? null}
-                    entryId={entry.id}
-                    landing={rowLanding}
-                    reduceMotion={reduceMotion}
-                    theme={theme}
-                  />
-                  <View style={styles.todayEntryText}>
-                    <Text {...mobileTextProps("itemTitle")} style={styles.todayEntryTitle} numberOfLines={1} onLayout={(event) => recordMobileLayout(diagnostic, `history.title.${probeId}.frame`, event)} onTextLayout={(event) => recordMobileTextLayout(diagnostic, `history.title.${probeId}`, event, "itemTitle", styles.todayEntryTitle)}>{title}</Text>
-                    <Text {...mobileTextProps("metadata")} style={styles.todayEntryMeta} numberOfLines={1} onLayout={(event) => recordMobileLayout(diagnostic, `history.time.${probeId}.frame`, event)} onTextLayout={(event) => recordMobileTextLayout(diagnostic, `history.time.${probeId}`, event, "metadata", styles.todayEntryMeta)}>
-                      {timeRange}
-                    </Text>
-                    {entry.categoryName || tagNames.length ? (
-                      <Text {...mobileTextProps("metadata")} testID="history-entry-metadata" style={styles.todayEntryOptionalMeta} numberOfLines={1} ellipsizeMode="tail">
-                        {[entry.categoryName, ...tagNames].filter(Boolean).join(" · ")}
-                      </Text>
-                    ) : null}
-                  </View>
-                  </Pressable>
-                  <View style={styles.historyEntryActions} onLayout={(event) => recordMobileLayout(diagnostic, `history.actions.${probeId}`, event)}>
-                    {rowLayout === "inline" ? (
-                    <Text {...mobileTextProps("numeric")} style={styles.todayEntryDuration} onLayout={(event) => recordMobileLayout(diagnostic, `history.duration.${probeId}.frame`, event)} onTextLayout={(event) => recordMobileTextLayout(diagnostic, `history.duration.${probeId}`, event, "numeric", styles.todayEntryDuration)}>{duration}</Text>
-                    ) : null}
-                    <Pressable
-                      accessibilityLabel={activeTimerRunning
-                        ? `Switch the running timer to ${title}`
-                        : `Start ${title} now`}
-                      accessibilityRole="button"
-                      accessibilityState={{ disabled: !canReplay }}
-                      disabled={!canReplay}
-                        onPress={() => onReplayEntry(entry)}
-                        onLayout={(event) => recordMobileLayout(diagnostic, `history.replay.${probeId}`, event)}
-                      style={({ pressed }) => [
-                        styles.historyReplayButton,
-                        !canReplay ? styles.buttonDisabled : null,
-                        pressed && canReplay ? styles.buttonPressed : null
-                      ]}
-                    >
-                      <CompactReplayPlayGlyph
-                        color={canReplay ? theme.textPrimary : theme.textSecondary}
-                      />
-                    </Pressable>
-                  </View>
-                  </View>
-                  {rowLayout === "stacked" ? (
-                    <Text
-                      {...mobileTextProps("numeric")}
-                      style={styles.historyEntryStackedDuration}
-                      onLayout={(event) => recordMobileLayout(diagnostic, `history.duration-stacked.${probeId}.frame`, event)}
-                      onTextLayout={(event) => recordMobileTextLayout(diagnostic, `history.duration-stacked.${probeId}`, event, "numeric", styles.historyEntryStackedDuration)}
-                    >
-                      {duration}
-                    </Text>
-                  ) : null}
-                </View>
-              </SwipeableHistoryEntry>
-              {expanded ? (
-                <Reanimated.View
-                  entering={localPresenceEntering(reduceMotion)}
-                  exiting={localPresenceExiting(reduceMotion)}
-                  layout={localLayoutTransition(reduceMotion)}
-                  style={[styles.historyGroupChildren, rowLayout === "stacked" ? styles.historyGroupChildrenStacked : null]}
-                >
-                  {group.entries.map(({ entry: childEntry, overlapSeconds }, childIndex) => (
-                    <Reanimated.View
-                      key={childEntry.id}
-                      entering={localPresenceEntering(reduceMotion)}
-                      exiting={localPresenceExiting(reduceMotion)}
-                      layout={localLayoutTransition(reduceMotion)}
-                    >
-                      <SwipeableHistoryEntry
-                        accessibilityLabel={`${displayEntryTitle(childEntry)}, ${formatEntryTimeRange(childEntry, now)}, ${formatDuration(overlapSeconds)}`}
-                        enabled={Boolean(childEntry.stoppedAt)}
-                        entry={childEntry}
-                        minHeight={46}
-                        onDelete={(deletedEntry) => onDeleteEntries([deletedEntry])}
-                        styles={styles}
-                        theme={theme}
-                      >
-                        <View style={[styles.historyGroupChildDetails, childIndex > 0 ? styles.historyGroupChildDivider : null]}>
-                        <Pressable
-                          accessibilityLabel={`Edit ${displayEntryTitle(childEntry)}. ${childEntry.placeName ? `Place: ${childEntry.placeName}.` : ""} ${formatEntryTimeRange(childEntry, now)}. ${formatDuration(overlapSeconds)}.${(childEntry.tagNames ?? childEntry.tags?.map((tag) => tag.name) ?? []).length ? ` Tags: ${(childEntry.tagNames ?? childEntry.tags?.map((tag) => tag.name) ?? []).join(", ")}.` : ""}`}
-                          accessibilityRole="button"
-                          accessibilityActions={Boolean(childEntry.stoppedAt)
-                            ? [{ name: "delete", label: `Delete ${displayEntryTitle(childEntry)}` }]
-                            : undefined}
-                          onAccessibilityAction={(event) => {
-                            if (event.nativeEvent.actionName === "delete" && childEntry.stoppedAt) {
-                              onDeleteEntries([childEntry]);
-                            }
-                          }}
-                          onPress={() => onOpenEntry(childEntry)}
-                          style={({ pressed }) => [
-                            styles.historyGroupChild,
-                            pressed ? styles.buttonPressed : null
-                          ]}
-                        >
-                          <Text {...mobileTextProps("itemTitle")} style={styles.todayEntryTitle} numberOfLines={1} ellipsizeMode="tail">{displayEntryTitle(childEntry)}</Text>
-                          <View style={styles.historyGroupChildMain}>
-                            <ActivityBlockMark
-                              categoryColor={childEntry.categoryColor ?? childEntry.categoryId ?? null}
-                              categoryIcon={activityIconFor?.(childEntry.categoryId) ?? null}
-                              categoryName={childEntry.categoryName ?? null}
-                              entryId={childEntry.id}
-                              landing={rowLanding}
-                              reduceMotion={reduceMotion}
-                              theme={theme}
-                            />
-                            <Text {...mobileTextProps("metadata")} style={styles.historyGroupChildTime} numberOfLines={1} onLayout={(event) => recordMobileLayout(diagnostic, `history.child-time.${probeId}.${childIndex}.frame`, event)} onTextLayout={(event) => recordMobileTextLayout(diagnostic, `history.child-time.${probeId}.${childIndex}`, event, "metadata", styles.historyGroupChildTime)}>
-                              {formatEntryTimeRange(childEntry, now)}
-                            </Text>
-                            <Text
-                              {...mobileTextProps("numeric")}
-                              style={styles.todayEntryDuration}
-                              onLayout={(event) => recordMobileLayout(diagnostic, `history.child-duration.${probeId}.${childIndex}.frame`, event)}
-                              onTextLayout={(event) => recordMobileTextLayout(diagnostic, `history.child-duration.${probeId}.${childIndex}`, event, "numeric", styles.todayEntryDuration)}
-                            >
-                              {formatDuration(overlapSeconds)}
-                            </Text>
-                          </View>
-                        </Pressable>
-                        <Text {...mobileTextProps("metadata")} testID="history-entry-metadata" style={styles.todayEntryOptionalMeta} numberOfLines={1} ellipsizeMode="tail">
-                          {[childEntry.categoryName, ...(childEntry.tagNames ?? childEntry.tags?.map((tag) => tag.name) ?? [])].filter(Boolean).join(" · ")}
-                        </Text>
-                        </View>
-                      </SwipeableHistoryEntry>
-                    </Reanimated.View>
-                  ))}
-                </Reanimated.View>
-              ) : null}
-            </Reanimated.View>
-          );
-        })}
-      </View>
-      {/* Today's total lives in the goal frame at the top (Blocks prototype); earlier days keep theirs. */}
-      {section.isToday ? null : (
-      <TodayLoggedSummary
-        value={loggedValue}
-        coveredValue={historyAnalysis.additionalOverlapSeconds > 0
-          ? `${formatDuration(historyAnalysis.coveredSeconds)} covered`
-          : null}
-        styles={styles}
-        diagnostic={diagnostic}
-      />
-      )}
-    </View>
-  );
-}
-
 function dedupeEntriesById(entries: TimeEntry[]) {
   const byId = new Map<string, TimeEntry>();
   for (const entry of entries) byId.set(entry.id, entry);
@@ -3364,15 +2873,7 @@ function entryDurationSeconds(entry: TimeEntry, now: number) {
   return Math.max(entry.durationSeconds, Math.floor((now - startedAt) / 1000));
 }
 
-function displayEntryTitle(entry: TimeEntry) {
-  return displayTimerDescription(entry) ?? entry.categoryName ?? "No activity";
-}
 
-function formatEntryTimeRange(entry: TimeEntry, now: number) {
-  const startedAt = new Date(entry.startedAt);
-  const stoppedAt = entry.stoppedAt ? new Date(entry.stoppedAt) : new Date(now);
-  return `${formatTimeOfDay(startedAt)}-${entry.stoppedAt ? formatTimeOfDay(stoppedAt) : "now"}`;
-}
 
 /** Today's eyebrow (Blocks prototype): weekday, day and month, without the year. */
 function formatEyebrowDay(date: Date) {
@@ -3465,12 +2966,3 @@ function formatClockDuration(seconds: number) {
     .padStart(2, "0")}`;
 }
 
-function formatDuration(seconds: number) {
-  const safe = Math.max(0, Math.floor(seconds));
-  const hours = Math.floor(safe / 3600);
-  const minutes = Math.floor((safe % 3600) / 60);
-
-  if (hours === 0) return `${minutes}m`;
-  if (minutes === 0) return `${hours}h`;
-  return `${hours}h ${minutes}m`;
-}
