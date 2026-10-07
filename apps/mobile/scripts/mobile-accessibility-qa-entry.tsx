@@ -243,7 +243,7 @@ function Probe() {
         "review.reason.text",
       ];
       if (showRunningTimer) {
-        requiredMeasurements.push("today.timer.running", "today.timer.title.frame", "today.timer.title.text", "today.timer.elapsed.frame", "today.timer.elapsed.text");
+        requiredMeasurements.push("today.timer.running", "today.timer.title.frame", "today.timer.title.text", "today.timer.elapsed.frame");
       } else {
         requiredMeasurements.push("today.timer.idle", "today.timer.composer.frame");
       }

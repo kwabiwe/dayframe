@@ -52,7 +52,8 @@ export const TodayRibbon = memo(function TodayRibbon({
 }) {
   const [width, setWidth] = useState(0);
   const [hit, setHit] = useState<RibbonHit | null>(null);
-  const [tipWidth, setTipWidth] = useState(0);
+  // The tooltip's measured width, tied to the text it was measured with.
+  const [tipMeasure, setTipMeasure] = useState<{ text: string; width: number } | null>(null);
   // The block VoiceOver is on, by key, so a model rebuilt between swipe and double-tap keeps it.
   const [voiceKey, setVoiceKey] = useState<string | null>(null);
   const lastKey = useRef<string | null>(null);
@@ -106,6 +107,9 @@ export const TodayRibbon = memo(function TodayRibbon({
 
   const hotKey = hit?.kind === "block" ? hit.block.key : null;
   const tip = hit ? ribbonTip(hit) : null;
+  const tipText = tip ? `${tip.title}\n${tip.detail}` : null;
+  // Placed only once measured for the current text, so a new title never shows a frame off-centre.
+  const tipWidth = tipMeasure && tipMeasure.text === tipText ? tipMeasure.width : 0;
   const tipCenter = hit && width > 0 ? ((hit.atMs - model.dayStartMs) / model.dayMs) * width : 0;
   const voiceBlock = voiceKey ? model.blocks.find((block) => block.key === voiceKey) ?? null : null;
   const loggedCount = model.blocks.filter((block) => block.kind === "entry").length;
@@ -203,9 +207,12 @@ export const TodayRibbon = memo(function TodayRibbon({
       </GestureDetector>
       {tip && width > 0 ? (
         <View
+          // A new text remounts the tooltip, so it always measures again (even at the same width).
+          key={tipText ?? undefined}
           onLayout={(event) => {
             const measured = Math.ceil(event.nativeEvent.layout.width);
-            setTipWidth((current) => (current === measured ? current : measured));
+            if (!tipText) return;
+            setTipMeasure((current) => (current?.text === tipText && current.width === measured ? current : { text: tipText, width: measured }));
           }}
           pointerEvents="none"
           style={[
@@ -215,7 +222,6 @@ export const TodayRibbon = memo(function TodayRibbon({
               bottom: TRACK_HEIGHT + BLEED * 2 - BLEED + TIP_GAP,
               left: Math.min(Math.max(tipCenter - tipWidth / 2, 0), Math.max(0, width - tipWidth)),
               maxWidth: width,
-              // Placed once measured, so the first frame never shows it off-centre.
               opacity: tipWidth ? 1 : 0,
             },
           ]}

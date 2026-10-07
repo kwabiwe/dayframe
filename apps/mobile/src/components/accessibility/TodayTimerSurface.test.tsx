@@ -13,6 +13,7 @@ vi.mock("react-native", () => ({
   StyleSheet: { create: (styles: unknown) => styles },
   Text: "Text",
   View: "View",
+  useWindowDimensions: () => ({ fontScale: 1, height: 874, scale: 3, width: 402 }),
 }));
 vi.mock("react-native-svg", () => ({
   Circle: "Circle",
@@ -107,16 +108,23 @@ function flatStyle(style: unknown): Record<string, unknown> {
 }
 
 describe("TodayTimerSurface (Blocks)", () => {
-  it("shows the idle card with coral Play and starts pinned activities from the mosaic", () => {
+  it("shows the prototype idle card: a coral Start a block pill, Add past time, and the mosaic", () => {
     const input = props();
     const { byLabel, text, tree } = render(input);
-    expect(text("What are you working on?").props.maxFontSizeMultiplier).toBe(1.35);
-    expect(text("Start a block").props.accessibilityRole).toBe("header");
-    expect(flatStyle(byLabel("Start task").props.style({ pressed: false })).backgroundColor).toBe(DAYFRAME_THEME.dark.accent);
+    expect(text("NOTHING RECORDING")).toBeDefined();
+    const prompt = text("What are you working on?");
+    expect(prompt.props.maxFontSizeMultiplier).toBe(1.35);
+    expect(flatStyle(prompt.props.style).fontFamily).toBe("BricolageGrotesque-Bold");
+    const headers = tree.root.findAllByType("Text" as never).filter((node) => node.children.join("") === "Start a block");
+    expect(headers.some((node) => node.props.accessibilityRole === "header")).toBe(true);
+    expect(flatStyle(byLabel("Start a block").props.style({ pressed: false })).backgroundColor).toBe(DAYFRAME_THEME.dark.accent);
+    expect(flatStyle(byLabel("Add past time").props.style({ pressed: false })).minHeight).toBe(44);
 
-    act(() => byLabel("Start timer and add details").props.onPress());
+    act(() => byLabel("Start a block").props.onPress());
+    act(() => byLabel("Add past time").props.onPress());
     act(() => byLabel("Start Work, 2 hours in the last 7 days").props.onPress());
     expect(input.onStartBlank).toHaveBeenCalledOnce();
+    expect(input.onAddTime).toHaveBeenCalledOnce();
     expect(input.onStartActivity).toHaveBeenCalledWith("work");
     expect(text("2h").props.allowFontScaling).toBe(true);
     act(() => tree.unmount());
@@ -129,7 +137,7 @@ describe("TodayTimerSurface (Blocks)", () => {
       const expected = blockColorsFor("moss", mode, "Work");
       const block = tree.root.findByProps({ testID: "today-live-block" });
       expect(flatStyle(block.props.style).backgroundColor).toBe(expected.fill);
-      for (const value of ["Work", running.title, running.elapsedLabel, "Started 09:12", "Recording"]) {
+      for (const value of ["Work", running.title, "Started 09:12", "Recording"]) {
         const style = flatStyle(text(value).props.style);
         expect(style.color).toBe(expected.text);
         expect(style.opacity).toBeUndefined();
@@ -138,12 +146,17 @@ describe("TodayTimerSurface (Blocks)", () => {
     }
   });
 
-  it("uses the display face with tabular figures for the timer and keeps Dynamic Type caps", () => {
+  it("rolls the timer in the display face with tabular figures, hidden from VoiceOver", () => {
     const { text, tree } = render(props({ active: running, runningActivityId: "work" }));
-    const elapsed = text("1:02:03");
-    expect(flatStyle(elapsed.props.style).fontFamily).toBe("BricolageGrotesque-ExtraBold");
-    expect(flatStyle(elapsed.props.style).fontVariant).toEqual(["tabular-nums"]);
-    expect(elapsed.props.maxFontSizeMultiplier).toBe(1.2);
+    const odometer = tree.root.findByProps({ testID: "today-live-odometer" });
+    expect(odometer.props.accessibilityElementsHidden).toBe(true);
+    // "1:02:03": five digit cells, each a 0–9 strip, and two colons drawn as dots.
+    const digits = odometer.findAllByType("Text" as never);
+    expect(digits).toHaveLength(50);
+    const style = flatStyle(digits[0].props.style);
+    expect(style.fontFamily).toBe("BricolageGrotesque-Bold");
+    expect(style.fontVariant).toEqual(["tabular-nums"]);
+    expect(style.color).toBe(blockColorsFor("moss", "dark", "Work").text);
     expect(text(running.title).props.maxFontSizeMultiplier).toBe(1.35);
     act(() => tree.unmount());
   });
@@ -190,9 +203,8 @@ describe("TodayTimerSurface (Blocks)", () => {
     act(() => tree.unmount());
   });
 
-  it("never clips the elapsed time: the footer wraps the reserved action space instead", () => {
-    const { text, tree } = render(props({ active: { ...running, elapsedLabel: "123:45:06" }, runningActivityId: "work" }));
-    expect(text("123:45:06").props.numberOfLines).toBeUndefined();
+  it("never clips the start time: the footer wraps the reserved action space instead", () => {
+    const { tree } = render(props({ active: { ...running, elapsedLabel: "123:45:06" }, runningActivityId: "work" }));
     const reserve = tree.root.findByProps({ testID: "today-live-actions-reserve" });
     expect(flatStyle(reserve.props.style)).toMatchObject({ height: 56, marginLeft: "auto", width: 110 });
     expect(flatStyle(reserve.parent!.props.style)).toMatchObject({ flexDirection: "row", flexWrap: "wrap" });

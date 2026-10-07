@@ -7,8 +7,9 @@ import { PrimaryTimerGlyph } from "../PrimaryTimerAction";
 import { ActivityIcon, DayframeIcon } from "../icons/DayframeIcon";
 import { recordMobileLayout, recordMobileTextLayout, type MobileAccessibilityDiagnostic } from "../accessibility/diagnostics";
 import type { MobileTheme } from "../../lib/mobileTheme";
-import { MOBILE_DISPLAY_FONT, mobileTextProps } from "../../lib/mobileTypography";
+import { mobileTextProps } from "../../lib/mobileTypography";
 import { useBlockLanding, useBreathingRing, type LandingRequest } from "../../lib/blocksMotion";
+import { LiveOdometer } from "./LiveOdometer";
 import { TODAY_CARD, TODAY_CARD_ACTIONS_WIDTH, colorWithAlpha, spokenDuration } from "./todayBlocksLayout";
 
 export type TodayLiveBlockPresentation = {
@@ -18,6 +19,8 @@ export type TodayLiveBlockPresentation = {
   categoryLabel: string | null;
   elapsedLabel: string;
   elapsedSeconds: number;
+  /** The running entry; a different entry (a switch) shows its timer at rest instead of rolling to it. */
+  entryId?: string;
   hasLiveActiveTimer: boolean;
   startedLabel: string | null;
   title: string;
@@ -27,9 +30,11 @@ export type TodayLiveBlockPresentation = {
 const LIVE_LANDING_DISTANCE = 14;
 
 /**
- * The running entry as one solid activity block. Tap edits it; Stop and Add past time sit on the
- * shared action track. Only this block carries the breathing ring. The landing moves the block's
- * content only: the card, its ring and the action track stay where they are.
+ * The running entry as one solid activity block, laid out as the prototype's live card: activity
+ * chip and Recording, the description, the rolling timer, then the start time beside Stop. Tap
+ * edits it. Add past time stays beside Stop until the Play orb and entry sheet take it over. Only
+ * this block carries the breathing ring. The landing moves the block's content only: the card,
+ * its ring and the actions stay where they are.
  */
 export function TodayLiveBlock({
   active,
@@ -62,7 +67,6 @@ export function TodayLiveBlock({
   const ringStyle = useBreathingRing({ live: active.hasLiveActiveTimer, reduceMotion });
   const activityName = active.categoryLabel ?? "No activity";
   const titleStyle = [styles.title, { color: colors.text }, active.titleIsPlaceholder ? styles.placeholder : null];
-  const elapsedStyle = [styles.elapsed, { color: colors.text }];
 
   return (
     <View style={[styles.card, { backgroundColor: colors.fill }]} testID="today-live-block">
@@ -105,18 +109,16 @@ export function TodayLiveBlock({
           >
             {active.title}
           </Text>
-          {/* The footer wraps instead of clipping: when the time is too wide to sit beside the
+          <Animated.View
+            onLayout={(event) => recordMobileLayout(diagnostic, "today.timer.elapsed.frame", event)}
+            style={[styles.time, detailsStyle]}
+          >
+            <LiveOdometer color={colors.text} key={active.entryId ?? "live"} label={active.elapsedLabel} reduceMotion={reduceMotion} />
+          </Animated.View>
+          {/* The start time wraps instead of clipping: when it is too wide to sit beside the
               actions, the reserved action space moves to its own line and the card grows. */}
           <View style={styles.footer}>
             <Animated.View style={[styles.details, detailsStyle]}>
-              <Text
-                {...mobileTextProps("numeric")}
-                onLayout={(event) => recordMobileLayout(diagnostic, "today.timer.elapsed.frame", event)}
-                onTextLayout={(event) => recordMobileTextLayout(diagnostic, "today.timer.elapsed", event, "numeric", elapsedStyle)}
-                style={elapsedStyle}
-              >
-                {active.elapsedLabel}
-              </Text>
               {active.startedLabel ? (
                 <Text {...mobileTextProps("metadata")} numberOfLines={2} style={[styles.meta, { color: colors.text }]}>
                   {active.startedLabel}
@@ -154,7 +156,11 @@ export function TodayLiveBlock({
             event.stopPropagation();
             onStop();
           }}
-          style={({ pressed }) => [styles.primaryAction, { backgroundColor: colors.text }, pressed ? styles.pressed : null]}
+          style={({ pressed }) => [
+            styles.primaryAction,
+            { backgroundColor: colors.text },
+            pressed ? styles.stopPressed : null,
+          ]}
           testID="today-live-stop"
         >
           <PrimaryTimerGlyph color={colors.fill} mode="stop" />
@@ -167,7 +173,6 @@ export function TodayLiveBlock({
 const styles = StyleSheet.create({
   card: {
     borderRadius: TODAY_CARD.radius,
-    minHeight: TODAY_CARD.minHeight,
     overflow: "hidden",
   },
   ring: {
@@ -180,12 +185,13 @@ const styles = StyleSheet.create({
     top: 0,
   },
   main: {
-    flexGrow: 1,
-    minHeight: TODAY_CARD.minHeight,
-    padding: TODAY_CARD.padding,
+    paddingBottom: TODAY_CARD.liveBottomPadding,
+    paddingHorizontal: TODAY_CARD.padding,
+    paddingTop: TODAY_CARD.padding,
   },
-  content: { flexGrow: 1 },
+  content: { gap: 6 },
   pressed: { opacity: 0.82 },
+  stopPressed: { transform: [{ scale: 0.92 }] },
   topRow: { alignItems: "center", flexDirection: "row", gap: 12, justifyContent: "space-between" },
   chip: {
     alignItems: "center",
@@ -197,37 +203,31 @@ const styles = StyleSheet.create({
     paddingLeft: 8,
     paddingRight: 10,
   },
-  chipText: { flexShrink: 1, fontSize: 13, fontWeight: "700" },
-  recording: { alignItems: "center", flexDirection: "row", gap: 6 },
+  chipText: { flexShrink: 1, fontSize: 12.5, fontWeight: "700" },
+  recording: { alignItems: "center", flexDirection: "row", gap: 7 },
   recordingDot: { borderRadius: 4, height: 8, width: 8 },
   recordingText: { fontSize: 12, fontWeight: "700" },
-  title: { fontSize: 19, fontWeight: "600", letterSpacing: -0.2, lineHeight: 24, marginTop: 12 },
+  title: { fontSize: 19, fontWeight: "700", letterSpacing: -0.2, lineHeight: 24, marginTop: 6 },
   placeholder: { fontStyle: "italic", fontWeight: "400" },
+  time: { alignSelf: "stretch" },
   footer: {
-    alignItems: "flex-end",
+    alignItems: "center",
     columnGap: 12,
     flexDirection: "row",
     flexWrap: "wrap",
-    marginTop: "auto",
-    paddingTop: 8,
+    marginTop: 4,
+    minHeight: TODAY_CARD.primaryActionSize,
   },
-  details: { flexShrink: 0, maxWidth: "100%" },
+  details: { flexShrink: 1, maxWidth: "100%" },
   actionsReserve: {
     height: TODAY_CARD.primaryActionSize,
     marginLeft: "auto",
     width: TODAY_CARD_ACTIONS_WIDTH,
   },
-  elapsed: {
-    fontFamily: MOBILE_DISPLAY_FONT.extraBold,
-    fontSize: 36,
-    fontVariant: ["tabular-nums"],
-    letterSpacing: -0.7,
-    lineHeight: 40,
-  },
-  meta: { fontSize: 13, fontWeight: "500", marginTop: 2 },
+  meta: { fontSize: 13, fontWeight: "600" },
   actions: {
     alignItems: "center",
-    bottom: TODAY_CARD.padding,
+    bottom: TODAY_CARD.liveBottomPadding,
     flexDirection: "row",
     gap: TODAY_CARD.actionGap,
     position: "absolute",
@@ -245,6 +245,10 @@ const styles = StyleSheet.create({
     borderRadius: TODAY_CARD.primaryActionSize / 2,
     height: TODAY_CARD.primaryActionSize,
     justifyContent: "center",
+    shadowColor: "#000000",
+    shadowOffset: { height: 8, width: 0 },
+    shadowOpacity: 0.25,
+    shadowRadius: 9,
     width: TODAY_CARD.primaryActionSize,
   },
 });

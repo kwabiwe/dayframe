@@ -169,7 +169,7 @@ describe("TodayBlockRows", () => {
     });
     swipe(0, 100);
     expect(props.onReplayEntry).not.toHaveBeenCalled();
-    // Right out at +90, then swiped left 100: the row shows -10 only.
+    // Right out at +100, then swiped left 100: the row shows -10 only.
     act(() => {
       mocks.pans[0].handlers.onStart({});
       mocks.pans[0].handlers.onUpdate({ translationX: 100 });

@@ -89,6 +89,23 @@ describe("TodayRibbon", () => {
     expect(tree.root.findAllByProps({ testID: "today-ribbon-tip" })).toHaveLength(0);
   });
 
+  it("shows the tooltip only once it is measured for its current text", () => {
+    const { tree } = render();
+    const tipStyle = () => Object.assign({}, ...[tree.root.findByProps({ testID: "today-ribbon-tip" }).props.style].flat());
+    const measure = (width: number) =>
+      act(() => tree.root.findByProps({ testID: "today-ribbon-tip" }).props.onLayout({ nativeEvent: { layout: { height: 40, width, x: 0, y: 0 } } }));
+    act(() => mocks.pan.handlers.onStart({ x: 70 }));
+    expect(tipStyle().opacity).toBe(0);
+    measure(120);
+    expect(tipStyle()).toMatchObject({ opacity: 1 });
+    // A new block's text hides the tooltip until it is measured again: no frame at the old width.
+    act(() => mocks.pan.handlers.onUpdate({ x: 125 }));
+    expect(tipStyle().opacity).toBe(0);
+    measure(200);
+    expect(tipStyle().opacity).toBe(1);
+    act(() => mocks.pan.handlers.onFinalize({}));
+  });
+
   it("opens the block under a tap and ignores gaps and failed taps", () => {
     const { onOpenBlock } = render();
     act(() => mocks.tap.handlers.onEnd({ x: 105 }, true));
