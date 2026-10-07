@@ -10,7 +10,7 @@ import Reanimated, {
   withTiming,
 } from "react-native-reanimated";
 import type { MobileTheme } from "../../lib/mobileTheme";
-import { STOP_FLIGHT, stopFlightPose, type FlightFrame } from "../../lib/stopFlight";
+import { STOP_FLIGHT, setStopFlightOverlayOrigin, stopFlightPose, type FlightFrame } from "../../lib/stopFlight";
 import { TodayLiveBlock, type TodayLiveBlockPresentation } from "./TodayLiveBlock";
 
 export type StopFlight = {
@@ -44,12 +44,16 @@ export function StopFlightOverlay({
 }) {
   const host = useRef<View>(null);
   const [origin, setOrigin] = useState<{ x: number; y: number } | null>(null);
+  useEffect(() => () => setStopFlightOverlayOrigin(null), []);
 
   return (
     <View
       collapsable={false}
-      onLayout={() => host.current?.measureInWindow((x, y) => setOrigin({ x, y }))}
-      pointerEvents="none"
+      onLayout={() => host.current?.measureInWindow((x, y) => {
+        setOrigin({ x, y });
+        setStopFlightOverlayOrigin({ x, y });
+      })}
+      pointerEvents="box-none"
       ref={host}
       style={StyleSheet.absoluteFill}
       testID="stop-flight-overlay"
@@ -135,6 +139,8 @@ function FlightGhost({
 
   return (
     <Reanimated.View
+      // The ghost catches touches where it flies, so a second tap on the old Stop does nothing.
+      pointerEvents="auto"
       style={[
         styles.ghost,
         { height: from.height, left: from.x - origin.x, top: from.y - origin.y, width: from.width },

@@ -58,11 +58,13 @@ export function TodayPullBlocks({
   const top = useSafeAreaInsets().top - 6;
   const shown = useSharedValue(refreshing ? 1 : 0);
   useEffect(() => {
-    shown.value = withTiming(refreshing ? 1 : 0, { duration: refreshing ? 0 : 200, reduceMotion: ReduceMotion.Never });
+    shown.value = withTiming(refreshing ? 1 : 0, { duration: refreshing ? 120 : 200, reduceMotion: ReduceMotion.Never });
   }, [refreshing, shown]);
 
+  // Content scrolled up over the top while a refresh runs covers the blocks, so they fade with it.
   const rowStyle = useAnimatedStyle(() => ({
-    opacity: Math.max(shown.value, Math.min(1, Math.max(0, -scrollY.value / PULL_FULL_DISTANCE))),
+    opacity: Math.max(shown.value, Math.min(1, Math.max(0, -scrollY.value / PULL_FULL_DISTANCE))) *
+      Math.min(1, Math.max(0, 1 - scrollY.value / 20)),
   }));
 
   return (

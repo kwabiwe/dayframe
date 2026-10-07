@@ -52,7 +52,7 @@ import { formatLiveClock } from "./today/todayBlocksLayout";
 import { TodaySwitchSheet } from "./today/TodaySwitchSheet";
 import { StopFlightOverlay, type StopFlight } from "./today/StopFlightOverlay";
 import { TodayPullBlocks } from "./today/TodayPullBlocks";
-import { LIVE_FLIGHT_NODE, STOP_FLIGHT, measureFlightNode, rowFlightNode } from "../lib/stopFlight";
+import { LIVE_FLIGHT_NODE, STOP_FLIGHT, measureFlightNode, rowFlightNode, stopFlightOverlayReady } from "../lib/stopFlight";
 import { switchRecents, type SwitchRecent } from "../lib/todaySwitch";
 import { TodayReviewNudge } from "./today/TodayReviewNudge";
 import { TodayBlockRows } from "./today/TodayBlockRows";
@@ -441,6 +441,11 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
     setCalendarEditPresentation(null);
     setPendingDeletion(null);
     setSwitchSheetRecents(null);
+    // Today's motion requests belong to the session that made them.
+    setStopFlight(null);
+    setRowPop(null);
+    setRowLanding(null);
+    setLiveLanding(null);
     setPendingTimerStops([]);
     setAuthState("signedOut");
   }, []);
@@ -1564,7 +1569,8 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
   function stopFromToday() {
     const entryId = latestData.current?.activeEntry?.id;
     const presentation = todayLivePresentation;
-    if (reduceMotion || !entryId || !presentation) {
+    // No flight under Reduce Motion, or before the overlay that draws the ghost has measured itself.
+    if (reduceMotion || !entryId || !presentation || !stopFlightOverlayReady()) {
       runStopFromToday(entryId, null);
       return;
     }
@@ -1577,25 +1583,30 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
     void Promise.all([measureFlightNode(LIVE_FLIGHT_NODE), measureFlightNode(rowFlightNode(entryId))]).then(([from, to]) => {
       stopFlightMeasuring.current = false;
       if (from) setStopFlight({ entryId, flying: false, from, presentation, to: to ?? "none", token });
-      runStopFromToday(entryId, from ? token : null);
+      runStopFromToday(entryId, from ? token : null, Boolean(to));
     });
   }
 
-  function runStopFromToday(entryId: string | undefined, flightToken: number | null) {
+  function runStopFromToday(entryId: string | undefined, flightToken: number | null, flightHasRow = false) {
+    // A refused, failed or rejected Stop keeps the live block: the ghost leaves without flying.
+    const dropFlight = () => {
+      if (flightToken !== null) setStopFlight((current) => (current?.token === flightToken ? null : current));
+    };
     void stopActiveTimer().then((accepted) => {
       if (!accepted || !entryId) {
-        // A refused Stop keeps the live block: the ghost leaves without flying.
-        if (flightToken !== null) setStopFlight((current) => (current?.token === flightToken ? null : current));
+        dropFlight();
         return;
       }
       playHaptic("stop", flightToken !== null ? { stopLandingDelayMs: STOP_FLIGHT.durationMs } : undefined);
       // A rolled-back Stop remounts the live block; it must not replay the Start landing.
       setLiveLanding(null);
-      if (flightToken === null) {
+      if (flightToken === null || !flightHasRow) {
+        // Without a flight, or with no row to land on (the ghost fades where it is), the row lands.
         setRowLanding(nextLandingRequest([entryId]));
-        return;
+        if (flightToken === null) return;
       }
       setStopFlight((current) => (current?.token === flightToken ? { ...current, flying: true } : current));
+      if (!flightHasRow) return;
       // The idle card is shorter than the live block, so the row moves up once Stop commits:
       // measure it again and let the ghost chase it.
       requestAnimationFrame(() => {
@@ -1604,8 +1615,21 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
           setStopFlight((current) => (current?.token === flightToken && current.to !== "none" ? { ...current, to } : current));
         });
       });
-    });
+    }, dropFlight);
   }
+
+  // A Stop rolled back while its ghost is still flying (delivery rejected) brings the live block
+  // back at once: the ghost leaves without landing, so nothing pops on a row that is running again.
+  const stopFlightCommitted = useRef<number | null>(null);
+  useEffect(() => {
+    if (!stopFlight?.flying) return;
+    const activeId = data?.activeEntry?.id ?? null;
+    if (activeId !== stopFlight.entryId) {
+      stopFlightCommitted.current = stopFlight.token;
+      return;
+    }
+    if (stopFlightCommitted.current === stopFlight.token) setStopFlight(null);
+  }, [data?.activeEntry?.id, stopFlight]);
 
   // Stable, so the flight's ghost is not re-rendered by the Dashboard's 1 s tick handing it a new callback.
   const finishStopFlight = useCallback((token: number, landed: boolean, entryId: string) => {

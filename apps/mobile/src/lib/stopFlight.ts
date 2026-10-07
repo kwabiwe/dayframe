@@ -78,15 +78,22 @@ export function isUsableFrame(frame: FlightFrame | null | undefined): frame is F
  * Components register their host views while mounted; the Dashboard measures them in window
  * coordinates when a Stop is accepted. Nothing here animates.
  */
-const nodes = new Map<string, View>();
+// Every view registered under a key, newest last, so one leaving never strands another still mounted.
+const nodes = new Map<string, View[]>();
 
 export const LIVE_FLIGHT_NODE = "live";
 export const rowFlightNode = (entryId: string) => `row:${entryId}`;
 
-/** Registers a host view, or with `null` removes `previous` (only if it is still the one registered). */
+/** Registers a host view, or with `null` removes `previous` (and only that view). */
 export function registerFlightNode(key: string, node: View | null, previous?: View | null) {
-  if (node) nodes.set(key, node);
-  else if (previous && nodes.get(key) === previous) nodes.delete(key);
+  const list = nodes.get(key) ?? [];
+  if (node) {
+    nodes.set(key, [...list.filter((existing) => existing !== node), node]);
+    return;
+  }
+  const kept = list.filter((existing) => existing !== previous);
+  if (kept.length) nodes.set(key, kept);
+  else nodes.delete(key);
 }
 
 /** Registers `node` under `key` from a callback ref; returns the ref callback. */
@@ -105,7 +112,7 @@ export function flightNodeRef(key: string | undefined) {
 }
 
 export function measureFlightNode(key: string): Promise<FlightFrame | null> {
-  const node = nodes.get(key);
+  const node = nodes.get(key)?.at(-1);
   if (!node || typeof node.measureInWindow !== "function") return Promise.resolve(null);
   return new Promise((resolve) => {
     try {
@@ -117,4 +124,18 @@ export function measureFlightNode(key: string): Promise<FlightFrame | null> {
       resolve(null);
     }
   });
+}
+
+/*
+ * The overlay that draws the ghost reports when it has measured where it sits in the window; until
+ * then a Stop does not fly (it would hide the live block with nothing drawn in its place).
+ */
+let overlayOrigin: { x: number; y: number } | null = null;
+
+export function setStopFlightOverlayOrigin(origin: { x: number; y: number } | null) {
+  overlayOrigin = origin;
+}
+
+export function stopFlightOverlayReady() {
+  return overlayOrigin !== null;
 }

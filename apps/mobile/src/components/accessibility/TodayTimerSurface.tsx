@@ -79,7 +79,7 @@ export function TodayTimerSurface({
           testID={active ? "today-live-slot" : "today-idle-slot"}
         >
           {active ? (
-            <View style={liveHidden ? styles.hidden : null} testID="today-live-visibility">
+            <View pointerEvents={liveHidden ? "none" : "auto"} style={liveHidden ? styles.hidden : null} testID="today-live-visibility">
             <TodayLiveBlock
               active={active}
               actionsStyle={activeTimerActionsStyle}

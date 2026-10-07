@@ -394,7 +394,8 @@ export const TodayBlockRow = memo(function TodayBlockRow({
                 categoryIcon={icon}
                 categoryName={entry.categoryName ?? null}
                 entryId={entry.id}
-                flightNode={rowFlightNode(entry.id)}
+                // Only the group's own row is a landing place: an expanded child shows the same entry.
+                flightNode={child ? undefined : rowFlightNode(entry.id)}
                 height={rowBlockHeight(blockSeconds)}
                 landing={rowLanding}
                 pop={rowPop}

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { STOP_FLIGHT, isUsableFrame, stopFlightPose } from "./stopFlight";
+import { STOP_FLIGHT, flightNodeRef, isUsableFrame, measureFlightNode, stopFlightPose } from "./stopFlight";
 
 const from = { height: 230, width: 370, x: 16, y: 260 };
 const to = { height: 46, width: 34, x: 32, y: 900 };
@@ -28,5 +28,29 @@ describe("stopFlightPose", () => {
     expect(isUsableFrame(null)).toBe(false);
     expect(isUsableFrame({ ...to, width: 0 })).toBe(false);
     expect(isUsableFrame({ ...to, y: Number.NaN })).toBe(false);
+  });
+});
+
+describe("flight node registry", () => {
+  const view = (y: number) => ({ measureInWindow: (callback: (x: number, y: number, w: number, h: number) => void) => callback(32, y, 34, 46) }) as never;
+
+  it("measures the newest view still mounted under a key, so one leaving never strands another", async () => {
+    const group = flightNodeRef("row:e1");
+    const child = flightNodeRef("row:e1");
+    group(view(400));
+    child(view(500));
+    expect(await measureFlightNode("row:e1")).toMatchObject({ y: 500 });
+    // The expanded child collapses: the group's row is still there to land on.
+    child(null);
+    expect(await measureFlightNode("row:e1")).toMatchObject({ y: 400 });
+    group(null);
+    expect(await measureFlightNode("row:e1")).toBeNull();
+  });
+
+  it("ignores a view that measures as nothing", async () => {
+    const ref = flightNodeRef("row:e2");
+    ref({ measureInWindow: (callback: (x: number, y: number, w: number, h: number) => void) => callback(0, 0, 0, 0) } as never);
+    expect(await measureFlightNode("row:e2")).toBeNull();
+    ref(null);
   });
 });

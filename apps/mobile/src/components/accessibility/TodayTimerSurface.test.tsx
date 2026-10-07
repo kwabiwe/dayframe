@@ -355,6 +355,8 @@ describe("TodayTimerSurface (Blocks)", () => {
   it("hides the live block at once while the Stop flight's ghost holds its place", () => {
     const { tree } = render(props({ active: running, liveHidden: true, runningActivityId: "work" }));
     expect(flatStyle(tree.root.findByProps({ testID: "today-live-visibility" }).props.style).opacity).toBe(0);
+    // Hidden means untouchable too: a second tap on the old Stop reaches nothing.
+    expect(tree.root.findByProps({ testID: "today-live-visibility" }).props.pointerEvents).toBe("none");
     act(() => tree.update(<TodayTimerSurface {...props({ active: running, runningActivityId: "work" })} />));
     expect(flatStyle(tree.root.findByProps({ testID: "today-live-visibility" }).props.style).opacity).toBeUndefined();
     act(() => tree.unmount());
