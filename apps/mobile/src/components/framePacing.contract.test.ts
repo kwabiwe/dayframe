@@ -27,6 +27,12 @@ function objectLiteral(source: string, open: number) {
 
 // Investigation 2026-10-07 (dropped frames): JS-thread animations and per-second rebuilds starve frames.
 describe("mobile frame pacing", () => {
+  it("settles the screen entrance fade at 1 so a header mounted after it is never left invisible", () => {
+    // Simulator 7 Oct 2026: the native-driver fade left the JS value at 0 and Today's later-mounted
+    // header (avatar, goal frame, timer, mosaic, nudge) rendered fully transparent.
+    expect(dashboard).toMatch(/Animated\.timing\(entrance, \{[\s\S]*?useNativeDriver: true\s*\}\)\.start\(\(\) => entrance\.setValue\(1\)\);/);
+  });
+
   it("never drives an RN Animated value on the JS thread", () => {
     const files = ["app", "src", "modules"].flatMap((folder) => sources(join(mobileRoot, folder)));
     const offenders = files.flatMap((path) => {

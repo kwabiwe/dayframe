@@ -150,7 +150,7 @@ Offline Review mutation changes additionally require:
 
 When changing the Today Review presentation/read contract, run shared schema
 and proposal-hash tests; web presentation/mutation/Location tests; mobile
-presentation-cache, Quick Confirm, projection, navigation, row, donut and
+presentation-cache, Quick Confirm helper, projection, navigation, nudge and
 Reports/accessibility guards; then the applicable full workspace checks. Run
 the Review SQLite and disposable-local Review/Location database validators.
 Use `TZ=UTC`, `TZ=Europe/London`, and one non-UK zone for the date-sensitive
@@ -167,10 +167,13 @@ a truncated list as the total. Exercise completed/pending/saved/canonical/
 rejected/unknown accounting, reused Sleep, overlapping/cross-midnight/DST
 intervals, and no fake entry conversion.
 
-At mobile widths/default/MAX/Bold Text verify one summary control, bounded
-labels/centre, non-overlapping 44-point sibling controls, exact pending
-activation, inert confirmed slices, loading/partial/cached status, focus
-return, first entrance/local update/restore and Reduce Motion. On the signed
+Today itself now shows only the goal frame and the Review nudge (Blocks parity
+step 2a-1; the donut, rows and Quick Confirm left Today). At mobile
+widths/default/MAX/Bold Text verify the goal frame's eyebrow, total and cells
+do not clip, the nudge's exact/inexact/zero count wording, its 44-point-plus
+target, first-paint (no fade), later arrival and last-decision fades, and
+Reduce Motion; use the accessibility probe (`today.goal.*`,
+`review-nudge.*`). On the signed
 staging build, separately record the Stage B physical matrix—including
 Airplane Mode → termination → offline relaunch → reconnect → reuse—using only
 synthetic staging data. Diagnostics, a clean simulator build, or an unsigned

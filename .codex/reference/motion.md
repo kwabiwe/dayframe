@@ -40,6 +40,7 @@ Do not introduce Swift solely to make an otherwise ordinary React Native entranc
 ## Timing And Behaviour
 
 - Animations run on the UI thread. RN `Animated` values always use `useNativeDriver: true` (opacity and transforms); anything that needs layout uses Reanimated. A JS-thread animation drops frames exactly when the JS thread is busy, such as during Stop's outbox write and re-render (investigation 2026-10-07; `framePacing.contract.test.ts` enforces it).
+- A native-driver animation does not update the JS-side `Animated.Value`. When a view may mount after the animation (a list header, a remounted section), set the final value in the completion callback; otherwise the late view starts from the stale JS value. Today's screen entrance fade left the whole header transparent this way (Simulator, 7 October 2026; `framePacing.contract.test.ts`).
 - Do not rebuild per-minute data on the per-second clock. Today's history, the day cards and the native Calendar model read `minuteClock(now, newestShownTimestamp(entries, now))`, which holds still within a minute but never falls behind a start or stop already shown; only the live elapsed time ticks every second.
 - On surfaces not yet migrated to Blocks, reuse `MOBILE_MOTION` on iOS: approximately 140 ms for control feedback, 220 ms for local layout, 260 ms for sheets, and 280 ms for screen transitions.
 - On other unmigrated surfaces, follow the brand guide's 120–220 ms control and 180–300 ms panel ranges. On migrated Blocks surfaces the named springs below replace these durations for the moves they list; `MOBILE_MOTION` still covers whatever the springs do not list (presence fades, layout reflow, rollback). Prefer standard ease-out timing; exits may be shorter while staying in the same curve family.
@@ -123,7 +124,7 @@ Tests should protect state ordering, timers, rollback, stable keys, and animatio
 
 Today on iPhone is the first migrated surface. `useBlockLanding` and `useBreathingRing` in `apps/mobile/src/lib/blocksMotion.ts` hold the springs and ring above. A committed Start (Play, a mosaic tile, a row's Start again) issues one tokenised landing request after the local start is accepted; the live block's content (chip, title, time) lands from 14 points below while the card, its ring and the Stop/Add past time track stay fixed. A committed Stop issues one request for the stopped entry and clears the live block's request (a rolled-back Stop must not replay the Start landing); that row's activity block lands 60 ms later, as the Stop composite's soft impact plays. Undo lands the restored rows. Requests expire after 1.2 s and are never issued by refresh, reconciliation, hydration or a rejected action, so remounts and cached bootstraps do not replay them; a second rapid action replaces the request.
 
-Reanimated owns the Blocks transitions on Today. The card slot, the quick-start section and the Review summary carry `localLayoutTransition`, so a card that grows (larger text, or a time that wraps the action reserve onto its own line on a narrow phone) and the content below it move rather than jump. Idle card and live block crossfade at the same geometry with the shared presence fades after first paint; with Reduce Motion they swap in place and the live content's 140 ms fade is the single opacity change. The landing animates only the translation of the block's inner content in normal motion (it starts at its offset on the first frame) and never the card, ring or action track. The existing RN `Animated` value `activeTimerExpansion` only fades the card's details and actions out during the retained Stop exit; on Start it is set to rest before the first paint, so it never stacks with the crossfade. Mosaic tiles are absolutely positioned, keyed by activity and each owns a `localLayoutTransition`, so whatever changes the totals (stop, switch, Add past time, edit, delete, Undo, Review, the midnight roll-over) the same tiles move and resize, and with Reduce Motion they settle at once; tiles have no entrance on first paint and fade in or out only when an activity is pinned or unpinned. Tile sizes come from the last seven calendar days and change only when entries change or the day rolls over, never on a timer tick. Haptics, Undo and announcements are unchanged under Reduce Motion.
+Reanimated owns the Blocks transitions on Today. The card slot, the quick-start section and the Review nudge carry `localLayoutTransition`, so a card that grows (larger text, or a time that wraps the action reserve onto its own line on a narrow phone) and the content below it move rather than jump. Idle card and live block crossfade at the same geometry with the shared presence fades after first paint; with Reduce Motion they swap in place and the live content's 140 ms fade is the single opacity change. The landing animates only the translation of the block's inner content in normal motion (it starts at its offset on the first frame) and never the card, ring or action track. The existing RN `Animated` value `activeTimerExpansion` only fades the card's details and actions out during the retained Stop exit; on Start it is set to rest before the first paint, so it never stacks with the crossfade. Mosaic tiles are absolutely positioned, keyed by activity and each owns a `localLayoutTransition`, so whatever changes the totals (stop, switch, Add past time, edit, delete, Undo, Review, the midnight roll-over) the same tiles move and resize, and with Reduce Motion they settle at once; tiles have no entrance on first paint and fade in or out only when an activity is pinned or unpinned. Tile sizes come from the last seven calendar days and change only when entries change or the day rolls over, never on a timer tick. Haptics, Undo and announcements are unchanged under Reduce Motion.
 
 ## Anti-Patterns
 
@@ -170,22 +171,13 @@ reduced motion; a source contract or still frame is not physical gesture evidenc
 
 Optional detail status enters below the stable activity/time summary with the existing local presence/layout primitives; absence reserves no empty height. The native stack exclusively owns Back and post-commit dismissal. One SQLite commit accepts a resolving/structural action; its one/two source effects drive the existing card exit/reflow. Failed commit preserves the draft; permanent conflict restores only proven-open sources at surviving anchors. Cancel presentation-only prefetch and stale callbacks at Back/closing transition, without cancelling durable intent. Verify entrance/update/exit, rapid repeat, cancelled swipe, status replacement, rollback, keyboard focus and Reduce Motion (no travel, unchanged semantic result). No global spacing or navigation rewrite follows from removing this local gap.
 
-## Today integrated Review donut and rows
+## Today goal frame and Review nudge (Blocks parity step 2a-1)
 
-The Today summary uses one local Reanimated/arc owner; native navigation owns
-exact Review and Location pushes. On the first focused populated context, the
-donut may make one restrained entrance. A hidden eager mount, timer tick,
-minor bootstrap refresh, or cached hydration settles without replay. Source
-keys own arc/row identity: a local Quick Confirm changes the same row to
-saved-local while its provisional arc exits and adjacent rows reflow; it never
-waits for HTTP or replays the whole chart. Explicit canonical materialisation
-updates the solid category geometry once; a reused canonical entry wins rather
-than producing a duplicate row/arc. Rejection restores only the explicitly
-open source, and stale exit callbacks cannot remove a restored/newer key.
+- Trigger: entries change (start, stop, edit, delete, Undo, refresh) or the minute changes; the Review count changes.
+- Owner: the goal frame has no animation of its own; its cells re-render on the per-minute clock (`minuteClock`), never on the 1 s tick. The nudge owns its presence with the shared Reanimated `entering`/`exiting` fades; its parent `Reanimated.View` (with `localLayoutTransition`) moves it with the timer card and mosaic above.
+- Entrance/update/exit: no nudge entrance on first paint, hydration or a cached launch; a nudge that appears later (the first item arrives) fades in; a count change updates the text in place; the last decision fades it out while the layout transition closes the gap.
+- Interruption: a count that drops to zero and returns before the fade completes remounts the same card with a fresh fade; nothing waits on a timer.
+- Async outcome: the nudge follows the cached presentation or the bootstrap count; it never optimistically changes on its own.
+- Accessibility: Reduce Motion shortens the fades (90/70 ms) and keeps the layout settle immediate; the goal frame is one VoiceOver summary below the date header; the nudge is one button with an "Opens Review" hint.
 
-Reduce Motion settles geometry immediately while preserving the same summary
-copy, exact-item routes and VoiceOver feedback. Focus stays on the transformed
-row or advances once to the next logical row/Open Review; background receipts
-never steal focus. Validate first-visible entrance, accept/materialise/restore,
-rapid repeat, account/day replacement, measured-label reflow and the
-Reduce-Motion path on the actual component.
+The prototype's later Today moves (the ribbon scrub, row swipes, the odometer, drop-ins) arrive with steps 2a-2 to 2b and add their own contracts here.
