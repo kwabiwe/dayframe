@@ -2316,7 +2316,7 @@ function visitActivityDescription(
   const cachedPlaceName = typeof event.rawPayload.placeName === "string" ? event.rawPayload.placeName.trim() : "";
   const describedName = eventDescription?.toLowerCase();
   const describesSavedName = Boolean(place && describedName
-    && (describedName === place.name.trim().toLowerCase() || describedName === cachedPlaceName.toLowerCase()));
+    && [place.name.trim(), placeDisplayName(place), cachedPlaceName].some((name) => name && describedName === name.toLowerCase()));
   if (eventDescription && !describesSavedName) return eventDescription;
 
   const ruleDescription = rule?.activityDescription?.trim();
