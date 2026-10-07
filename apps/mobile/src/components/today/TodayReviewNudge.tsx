@@ -37,6 +37,14 @@ export function reviewNudgeCopy(
   return null;
 }
 
+/**
+ * A failed read only says a newer bootstrap could not be read through when the phone was online;
+ * offline the Dashboard keeps its cached bootstrap, which is never newer than the cached presentation.
+ */
+export function readFailedOnline(errorKind: string | null | undefined) {
+  return Boolean(errorKind) && errorKind !== "offline";
+}
+
 const UNCOUNTED: ReviewNudgeCopy = { count: null, detail: "Open Review for the latest items.", title: "Moments to review" };
 
 function counted(value: number): ReviewNudgeCopy {
@@ -68,7 +76,7 @@ export function TodayReviewNudge({
   const exiting = useMemo(() => localPresenceExiting(reduceMotion), [reduceMotion]);
   const context = useTodayReviewPresentationContext();
   const presentation = context?.isSummaryAvailable ? context.presentation : null;
-  const copy = reviewNudgeCopy(presentation?.globalReviewCount ?? null, fallback, Boolean(context?.errorKind));
+  const copy = reviewNudgeCopy(presentation?.globalReviewCount ?? null, fallback, readFailedOnline(context?.errorKind));
   if (!copy) return null;
   const colors = (presentation?.daySections ?? [])
     .flatMap((section) => section.activities)

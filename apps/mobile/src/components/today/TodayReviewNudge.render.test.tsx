@@ -18,7 +18,7 @@ vi.mock("../../lib/mobileTypography", () => ({ mobileTextProps: () => ({}) }));
 vi.mock("../icons/DayframeIcon", () => ({ DayframeIcon: () => null }));
 vi.mock("./TodayReviewPresentationContext", () => ({ useTodayReviewPresentationContext: () => mocks.context }));
 
-import { reviewNudgeCopy, TodayReviewNudge } from "./TodayReviewNudge";
+import { readFailedOnline, reviewNudgeCopy, TodayReviewNudge } from "./TodayReviewNudge";
 
 const theme = { mode: "dark", surface: "#151B26", surfaceMuted: "#202838", textMuted: "#707B91", textPrimary: "#FFF", textSecondary: "#8993A7" } as never;
 
@@ -51,6 +51,14 @@ describe("reviewNudgeCopy", () => {
   it("hides on the last decision even while the bootstrap count still lags", () => {
     expect(reviewNudgeCopy({ value: 0, exact: true }, { value: 1, exact: true })).toBeNull();
     expect(reviewNudgeCopy({ value: 0, exact: true }, { value: 1, exact: true }, false)).toBeNull();
+  });
+
+  it("hides on the last decision offline too: an offline read failure is not a newer bootstrap", () => {
+    expect(readFailedOnline("offline")).toBe(false);
+    expect(reviewNudgeCopy({ value: 0, exact: true }, { value: 1, exact: true }, readFailedOnline("offline"))).toBeNull();
+    expect(readFailedOnline(null)).toBe(false);
+    expect(readFailedOnline("server")).toBe(true);
+    expect(readFailedOnline("validation")).toBe(true);
   });
 
   it("keeps an uncounted card when a failed read leaves a cached zero against open bootstrap items", () => {

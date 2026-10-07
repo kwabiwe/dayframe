@@ -182,7 +182,7 @@ zero-size hidden probes never affect scrolling, focus or touch targets.
   100, so its length is never shown as a count), says "Moments to review"
   without a number when the count is inexact, and hides on an exact zero (the
   last decision, even while the bootstrap's count lags). Only when the
-  presentation read has failed does a positive bootstrap count keep an
+  presentation read has failed while online does a positive bootstrap count keep an
   uncounted card over a cached zero. It stacks up to three awaiting
   activities' colours.
 - Today has no Review rows, Quick Confirm, "Incomplete time" list, donut or

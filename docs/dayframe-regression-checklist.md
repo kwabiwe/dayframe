@@ -119,9 +119,9 @@ Review this checklist before and after changes that touch Dayframe UI, timer beh
   counting. The default goal is eight hours when the account has none.
 - The Review nudge says "N moments to review" with an exact count, "Moments to
   review" when the count is inexact (including more than 100 open items before
-  the presentation loads, or a cached zero after a failed presentation read
-  while the bootstrap reports items). Logging the last item in Review and
-  returning to Today removes the card at once. It opens Review. Goals that are not
+  the presentation loads, or a cached zero after a presentation read failed
+  online while the bootstrap reports items). Logging the last item in Review
+  and returning to Today removes the card at once, online or offline. It opens Review. Goals that are not
   whole hours (for example 6h 34m) must render without freezing. Today shows no Review rows, Quick Confirm, "Incomplete time",
   donut or logged/covered summary; earlier days keep their logged total.
 - Verify capped/partial/cache/offline states never claim zero or complete
