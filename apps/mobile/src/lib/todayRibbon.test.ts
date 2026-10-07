@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildTodayRibbon, ribbonHitAt, ribbonSpokenBlock, ribbonTip } from "./todayRibbon";
+import { buildTodayRibbon, ribbonHitAt, ribbonHourFraction, ribbonSpokenBlock, ribbonTip } from "./todayRibbon";
 
 const day = new Date(2026, 9, 7).getTime();
 const at = (h: number, m = 0) => day + (h * 60 + m) * 60_000;
@@ -51,6 +51,23 @@ describe("today ribbon", () => {
     expect(keyAt(10.5)).toBe("entry:b");
     expect(keyAt(13)).toBe("gap");
     expect(ribbonHitAt(model, -1).atMs).toBe(day);
+  });
+
+  it("hits a block where it is drawn when drawn wider than its time", () => {
+    const model = buildTodayRibbon({ entries: [entry("tiny", at(12), at(12, 1))], pending: [], nowMs: at(15) });
+    const offset = (2 / 240); // 2 points into a 3-point block on a 240-point strip
+    expect(ribbonHitAt(model, 0.5 + offset).kind).toBe("gap");
+    expect(ribbonHitAt(model, 0.5 + offset, 3 / 240).kind).toBe("block");
+  });
+
+  it("places hour ticks by wall-clock time on an ordinary day", () => {
+    const model = buildTodayRibbon({ entries: [], pending: [], nowMs: at(9) });
+    expect(ribbonHourFraction(model, 0)).toBe(0);
+    expect(ribbonHourFraction(model, 12)).toBeCloseTo(0.5, 10);
+    expect(ribbonHourFraction(model, 24)).toBe(1);
+    // A clock-change day: the fraction follows the real 25-hour day.
+    const longDay = { dayStartMs: 0, dayMs: 25 * 3_600_000 };
+    expect(ribbonHourFraction(longDay, 24)).toBe(1);
   });
 
   it("writes the scrub tooltip and the VoiceOver line", () => {

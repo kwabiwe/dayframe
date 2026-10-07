@@ -54,10 +54,14 @@ describe("mobile frame pacing", () => {
 
   it("rebuilds Today's history and the native Calendar model once a minute, not every second", () => {
     expect(dashboard).toContain("const minuteNow = minuteClock(now, newestShownMs);");
-    expect(dashboard).toMatch(/buildHistoryDaySections\(\{[\s\S]*?nowMs: minuteNow[\s\S]*?\}\),\s*\[historySourceEntries, minuteNow\]/);
+    expect(dashboard).toMatch(/buildHistoryDaySections\(\{[\s\S]*?nowMs: minuteNow[\s\S]*?\}\),\s*\[loggedSourceEntries, minuteNow\]/);
     expect(dashboard).toMatch(/buildNativeCalendarBridgeState\(\{[\s\S]*?now: minuteNow,/);
     expect(dashboard).toMatch(/<TodayBlockRows[\s\S]*?nowMs=\{minuteNow\}/);
     expect(dashboard).toContain("buildEarlierThisWeek(historySections, minuteNow)");
+    // A filtered array built inline would change identity every second and re-run the Review
+    // presentation projection and the ribbon behind it.
+    expect(dashboard).toContain("manualProjectedEntries={loggedSourceEntries}");
+    expect(dashboard).not.toMatch(/manualProjectedEntries=\{[^}]*\.filter\(/);
     // The native Calendar receives a stable model object between real changes.
     expect(dashboard).toContain("model={isFocused && refreshing ? nativeCalendarModelRefreshing : nativeCalendarModel}");
   });

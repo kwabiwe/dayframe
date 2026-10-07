@@ -16,6 +16,7 @@ import {
   RIBBON_MIN_BLOCK_WIDTH,
   RIBBON_TICK_HOURS,
   ribbonHitAt,
+  ribbonHourFraction,
   ribbonSpokenBlock,
   ribbonTip,
   type RibbonBlock,
@@ -27,11 +28,12 @@ import { useTodayReviewPresentationContext } from "./TodayReviewPresentationCont
 
 const TRACK_HEIGHT = 46;
 /** Room above and below the track for the now line's dot and a lifted block. */
-const BLEED = 6;
+const BLEED = 8;
 const BLOCK_INSET = 4;
 const HOT_SCALE = 1.18;
 const CARD_PADDING = 14;
-const TIP_WIDTH = 180;
+/** Gap between the tooltip and the top of the track. */
+const TIP_GAP = 6;
 
 /**
  * Today's ribbon card (Blocks prototype): "Today · Drag to scrub" over a 24-hour strip. A
@@ -50,14 +52,16 @@ export const TodayRibbon = memo(function TodayRibbon({
 }) {
   const [width, setWidth] = useState(0);
   const [hit, setHit] = useState<RibbonHit | null>(null);
-  const [voiceIndex, setVoiceIndex] = useState(-1);
+  const [tipWidth, setTipWidth] = useState(0);
+  // The block VoiceOver is on, by key, so a model rebuilt between swipe and double-tap keeps it.
+  const [voiceKey, setVoiceKey] = useState<string | null>(null);
   const lastKey = useRef<string | null>(null);
   const modelRef = useRef(model);
   modelRef.current = model;
 
   const scrubTo = useCallback((x: number, scrubbing: boolean) => {
     if (width <= 0) return;
-    const next = ribbonHitAt(modelRef.current, x / width);
+    const next = ribbonHitAt(modelRef.current, x / width, RIBBON_MIN_BLOCK_WIDTH / width);
     const key = next.kind === "block" ? next.block.key : "gap";
     if (key !== lastKey.current) {
       if (scrubbing && next.kind === "block") playHaptic("tick");
@@ -71,7 +75,7 @@ export const TodayRibbon = memo(function TodayRibbon({
   }, []);
   const tapAt = useCallback((x: number) => {
     if (width <= 0) return;
-    const next = ribbonHitAt(modelRef.current, x / width);
+    const next = ribbonHitAt(modelRef.current, x / width, RIBBON_MIN_BLOCK_WIDTH / width);
     if (next.kind === "block") onOpenBlock(next.block);
   }, [onOpenBlock, width]);
 
@@ -103,7 +107,7 @@ export const TodayRibbon = memo(function TodayRibbon({
   const hotKey = hit?.kind === "block" ? hit.block.key : null;
   const tip = hit ? ribbonTip(hit) : null;
   const tipCenter = hit && width > 0 ? ((hit.atMs - model.dayStartMs) / model.dayMs) * width : 0;
-  const voiceBlock = voiceIndex >= 0 ? model.blocks[voiceIndex] ?? null : null;
+  const voiceBlock = voiceKey ? model.blocks.find((block) => block.key === voiceKey) ?? null : null;
   const loggedCount = model.blocks.filter((block) => block.kind === "entry").length;
   const pendingCount = model.blocks.length - loggedCount;
   const summary = model.blocks.length
@@ -119,6 +123,7 @@ export const TodayRibbon = memo(function TodayRibbon({
         </Text>
         <Text {...mobileTextProps("metadata")} style={[styles.caption, { color: theme.textMuted }]}>Drag to scrub</Text>
       </View>
+      <View style={styles.trackWrap}>
       <GestureDetector gesture={gesture}>
         <View
           accessible
@@ -130,8 +135,8 @@ export const TodayRibbon = memo(function TodayRibbon({
             const name = event.nativeEvent.actionName;
             if (!ordered.length) return;
             const current = voiceBlock ? ordered.indexOf(voiceBlock) : -1;
-            if (name === "increment") setVoiceIndex(model.blocks.indexOf(ordered[Math.min(ordered.length - 1, current + 1)]));
-            if (name === "decrement") setVoiceIndex(model.blocks.indexOf(ordered[Math.max(0, current - 1)]));
+            if (name === "increment") setVoiceKey(ordered[Math.min(ordered.length - 1, current + 1)].key);
+            if (name === "decrement") setVoiceKey(ordered[Math.max(0, current - 1)].key);
             if (name === "activate" && voiceBlock) onOpenBlock(voiceBlock);
           }}
           onLayout={(event) => setWidth(Math.round(event.nativeEvent.layout.width))}
@@ -145,6 +150,7 @@ export const TodayRibbon = memo(function TodayRibbon({
                   const color = block.color ? blockColorsFor(block.color, theme.mode).fill : theme.textMuted;
                   return (
                     <Pattern height={12} id={patternId(block)} key={block.key} patternUnits="userSpaceOnUse" width={12}>
+                      <Rect fill={colorWithAlpha(color, 0.16)} height={12} width={12} />
                       <Path d="M-3 9 9 -3M3 15 15 3" stroke={colorWithAlpha(color, 0.4)} strokeWidth={4.2} />
                     </Pattern>
                   );
@@ -156,8 +162,8 @@ export const TodayRibbon = memo(function TodayRibbon({
                   key={hour}
                   stroke={hour % 6 ? theme.border : theme.borderStrong}
                   strokeWidth={1}
-                  x1={(hour / 24) * width}
-                  x2={(hour / 24) * width}
+                  x1={ribbonHourFraction(model, hour) * width}
+                  x2={ribbonHourFraction(model, hour) * width}
                   y1={BLEED + 8}
                   y2={BLEED + TRACK_HEIGHT - 8}
                 />
@@ -195,14 +201,39 @@ export const TodayRibbon = memo(function TodayRibbon({
           ) : null}
         </View>
       </GestureDetector>
-      <View style={styles.hours}>
+      {tip && width > 0 ? (
+        <View
+          onLayout={(event) => {
+            const measured = Math.ceil(event.nativeEvent.layout.width);
+            setTipWidth((current) => (current === measured ? current : measured));
+          }}
+          pointerEvents="none"
+          style={[
+            styles.tip,
+            {
+              backgroundColor: theme.textPrimary,
+              bottom: TRACK_HEIGHT + BLEED * 2 - BLEED + TIP_GAP,
+              left: Math.min(Math.max(tipCenter - tipWidth / 2, 0), Math.max(0, width - tipWidth)),
+              maxWidth: width,
+              // Placed once measured, so the first frame never shows it off-centre.
+              opacity: tipWidth ? 1 : 0,
+            },
+          ]}
+          testID="today-ribbon-tip"
+        >
+          <Text {...mobileTextProps("metadata")} numberOfLines={1} style={[styles.tipTitle, { color: theme.background }]}>{tip.title}</Text>
+          <Text {...mobileTextProps("metadata")} numberOfLines={1} style={[styles.tipDetail, { color: theme.background }]}>{tip.detail}</Text>
+        </View>
+      ) : null}
+      </View>
+      <View accessibilityElementsHidden importantForAccessibility="no-hide-descendants" style={styles.hours}>
         {RIBBON_LABEL_HOURS.map((hour, index) => (
           <Text
             {...mobileTextProps("metadata")}
             key={hour}
             style={[
               styles.hour,
-              { color: theme.textMuted, left: `${(hour / 24) * 100}%` },
+              { color: theme.textMuted, left: `${ribbonHourFraction(model, hour) * 100}%` },
               index === 0 ? null : index === RIBBON_LABEL_HOURS.length - 1 ? styles.hourLast : styles.hourMid,
             ]}
           >
@@ -210,16 +241,6 @@ export const TodayRibbon = memo(function TodayRibbon({
           </Text>
         ))}
       </View>
-      {tip && width > 0 ? (
-        <View
-          pointerEvents="none"
-          style={[styles.tip, { backgroundColor: theme.textPrimary, left: CARD_PADDING + Math.min(Math.max(tipCenter - TIP_WIDTH / 2, 0), Math.max(0, width - TIP_WIDTH)) }]}
-          testID="today-ribbon-tip"
-        >
-          <Text numberOfLines={1} style={[styles.tipTitle, { color: theme.background }]}>{tip.title}</Text>
-          <Text numberOfLines={1} style={[styles.tipDetail, { color: theme.background }]}>{tip.detail}</Text>
-        </View>
-      ) : null}
     </View>
   );
 });
@@ -272,13 +293,14 @@ const styles = StyleSheet.create({
   head: { alignItems: "baseline", flexDirection: "row", gap: 12, justifyContent: "space-between", marginBottom: 12 - BLEED },
   heading: { flexShrink: 1, fontSize: 17, fontWeight: "700", letterSpacing: -0.2 },
   caption: { fontSize: 13 },
+  trackWrap: { position: "relative", zIndex: 5 },
   track: { height: TRACK_HEIGHT + BLEED * 2 },
   svg: { overflow: "visible" },
   hours: { height: 16, marginTop: 6 - BLEED },
   hour: { fontSize: 10.5, fontVariant: ["tabular-nums"], position: "absolute", top: 0 },
   hourMid: { transform: [{ translateX: -14 }] },
   hourLast: { transform: [{ translateX: -28 }] },
-  tip: { borderRadius: 12, gap: 1, paddingHorizontal: 11, paddingVertical: 8, position: "absolute", top: 4, width: TIP_WIDTH, zIndex: 5 },
+  tip: { alignSelf: "flex-start", borderRadius: 12, gap: 1, paddingHorizontal: 11, paddingVertical: 8, position: "absolute", zIndex: 5 },
   tipTitle: { fontSize: 12, fontWeight: "700" },
   tipDetail: { fontSize: 12, fontVariant: ["tabular-nums"], opacity: 0.72 },
 });

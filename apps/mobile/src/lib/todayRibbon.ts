@@ -106,12 +106,25 @@ export function buildTodayRibbon({
 }
 
 /**
- * What the finger is over at `fraction` of the day. A logged block wins over waiting Review time;
- * among overlapping logged blocks the one that started last (drawn on top) wins.
+ * Where a wall-clock hour sits on the strip. On a clock-change day (23 or 25 hours) the hours are
+ * not evenly spaced, so ticks and labels follow the real day like the blocks do.
  */
-export function ribbonHitAt(model: RibbonModel, fraction: number): RibbonHit {
+export function ribbonHourFraction(model: Pick<RibbonModel, "dayStartMs" | "dayMs">, hour: number) {
+  if (hour >= 24) return 1;
+  const date = new Date(model.dayStartMs);
+  date.setHours(hour, 0, 0, 0);
+  return (date.getTime() - model.dayStartMs) / model.dayMs;
+}
+
+/**
+ * What the finger is over at `fraction` of the day. A logged block wins over waiting Review time;
+ * among overlapping logged blocks the one that started last (drawn on top) wins. `minFraction` is
+ * the drawn minimum width, so a block drawn wider than its time is hit where it is drawn.
+ */
+export function ribbonHitAt(model: RibbonModel, fraction: number, minFraction = 0): RibbonHit {
   const atMs = model.dayStartMs + Math.min(1, Math.max(0, fraction)) * model.dayMs;
-  const covering = model.blocks.filter((block) => atMs >= block.startMs && atMs <= block.endMs);
+  const minMs = minFraction * model.dayMs;
+  const covering = model.blocks.filter((block) => atMs >= block.startMs && atMs <= Math.max(block.endMs, block.startMs + minMs));
   const top = covering.filter((block) => block.kind === "entry").pop() ?? covering.pop();
   return top ? { kind: "block", block: top, atMs } : { kind: "gap", atMs };
 }

@@ -196,7 +196,7 @@ Optional detail status enters below the stable activity/time summary with the ex
 - Trigger: a horizontal drag or a tap on the strip; VoiceOver adjust/activate; the per-minute clock and entry changes.
 - Owner: one `Gesture.Race(Pan, Tap)` on the strip. The pan activates after 4 points sideways and fails after 10 points vertically, so the list keeps vertical scrolling; it reports the finger to JS, which picks the block (`ribbonHitAt`), shows the tooltip and lifts the block. The tap opens the block under it. The strip is one SVG redrawn only when its model or the hit changes (memoised; never on the 1 s tick).
 - Entrance/update/exit: the tooltip and the lifted block appear with the finger and disappear when it lifts or the gesture is cancelled; no fades, as in the prototype. Entering a different block while scrubbing plays one `tick`.
-- Interruption: a cancelled pan clears the tooltip; a tap that moves more than 8 points is not a tap.
+- Interruption: a cancelled pan clears the tooltip; a finger that moves 4 points sideways becomes a scrub (the pan wins the race) and one that moves more than 8 points vertically is neither a tap nor a scrub.
 - Async outcome: none; opening hands off to the existing editors and Review routes.
 - Accessibility: nothing moves under Reduce Motion beyond the finger-following tooltip; VoiceOver uses the adjustable element instead of scrubbing.
 

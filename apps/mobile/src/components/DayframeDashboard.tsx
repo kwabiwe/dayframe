@@ -1347,14 +1347,20 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
     [historySourceEntries]
   );
   const minuteNow = minuteClock(now, newestShownMs);
+  // Logged entries only: Review-needed time never counts on Today. Memoised so the per-second
+  // render does not hand the Review presentation (and the ribbon behind it) a new array.
+  const loggedSourceEntries = useMemo(
+    () => historySourceEntries.filter((entry) => !isReviewNeededEntry(entry)),
+    [historySourceEntries]
+  );
   // Today shows today's blocks and the six days before it; Calendar holds everything older.
   const historySections = useMemo(
     () => buildHistoryDaySections({
       days: EARLIER_DAYS + 1,
-      entries: historySourceEntries.filter((entry) => !isReviewNeededEntry(entry)),
+      entries: loggedSourceEntries,
       nowMs: minuteNow
     }),
-    [historySourceEntries, minuteNow]
+    [loggedSourceEntries, minuteNow]
   );
   const todaySections = useMemo(() => historySections.filter((section) => section.isToday), [historySections]);
   const earlierDays = useMemo(() => buildEarlierThisWeek(historySections, minuteNow), [historySections, minuteNow]);
@@ -1393,11 +1399,11 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
   // Whole minutes only, so the goal frame reads the per-minute clock (investigation 2026-10-07).
   const todayGoalFrame = useMemo(
     () => buildTodayGoalFrame({
-      entries: historySourceEntries.filter((entry) => !isReviewNeededEntry(entry)),
+      entries: loggedSourceEntries,
       goalMinutes: data?.user.dailyGoalMinutes,
       nowMs: minuteNow,
     }),
-    [data?.user.dailyGoalMinutes, historySourceEntries, minuteNow]
+    [data?.user.dailyGoalMinutes, loggedSourceEntries, minuteNow]
   );
   const activeCategoryColor = displayedActiveEntry?.categoryName
     ? paletteColorFor(
@@ -2422,7 +2428,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
       <TodayReviewPresentationProvider
         bootstrap={data}
         dashboardEntries={historySourceEntries}
-        manualProjectedEntries={historySourceEntries.filter((entry) => !isReviewNeededEntry(entry))}
+        manualProjectedEntries={loggedSourceEntries}
         isFocused={isFocused}
         nowMs={now}
         refreshGeneration={todayPresentationRefreshGeneration}
