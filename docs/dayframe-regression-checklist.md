@@ -342,7 +342,7 @@ Review this checklist before and after changes that touch Dayframe UI, timer beh
 Check these on every surface migrated to Blocks. Where an earlier check in this section conflicts with them, the earlier check applies only to surfaces not yet migrated:
 
 - Text on every activity block passes the measured contrast check (4.5:1 normal, 3:1 large) for every palette entry in Midnight and Daylight.
-- Coral appears only on live recording and the single primary action (browser text selection keeps its coral highlight). Selected navigation, durations, totals, chart marks and map pins do not use it.
+- Coral appears only on live recording, the single primary action and the selected iPhone tab (owner decision 7 Oct; browser text selection keeps its coral highlight). Other selected navigation, durations, totals, chart marks and map pins do not use it. With bright activity blocks scrolled under the tab bar, check the coral selected tab stays readable in Light and Dark, with Reduce Transparency and Increase Contrast.
 - Bricolage Grotesque appears only in display roles, is bundled with the app, scales with Dynamic Type, and falls back to the system font. The timer never shifts width as digits change.
 - Start, stop, log, Undo-restore and delete land with the shared spring and the documented haptic; automatic rollback and reconciliation fire none. Rapid repeats fire one haptic (Stop: one composite sequence) per committed action. The Settings switch and the system setting turn haptics off.
 - Only the live block breathes. Reduce Motion replaces springs and the ring with opacity and keeps states, haptics, Undo and announcements.

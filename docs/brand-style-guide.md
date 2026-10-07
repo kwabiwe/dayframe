@@ -20,7 +20,7 @@ Six decisions depart from the earlier Midnight Core rules:
 
 | Decision | Rule | Where it is defined |
 | --- | --- | --- |
-| Coral means live | Coral marks recording and the single primary action on a screen. Selected navigation uses a neutral fill; durations, totals, chart marks and map pins never use coral. Browser text selection keeps its contrast-safe coral highlight, because it is a system affordance rather than an interface state. | Colour system |
+| Coral means live | Coral marks recording, the single primary action on a screen and the selected tab in the iPhone tab bar (owner decision 7 October 2026: a neutral tint washed out over Liquid Glass when bright activity blocks scrolled beneath it). Other selected navigation uses a neutral fill; durations, totals, chart marks and map pins never use coral. Browser text selection keeps its contrast-safe coral highlight, because it is a system affordance rather than an interface state. | Colour system |
 | Colour is the data | Entries render as solid category blocks with measured text on them, using per-theme display values for the same stored keys. | Category and chart palette |
 | One display face | Bricolage Grotesque for headlines and large numerals only; the system font for everything people read or type. | Typography |
 | Every action lands | Start, stop, log and delete share one landing spring with one small overshoot, one haptic each and an Undo. The live block carries one slow breathing ring. Reduce Motion keeps opacity only. | Motion; `.codex/reference/motion.md` |
@@ -125,7 +125,7 @@ Eight-digit HEX values below include alpha as the last two digits. RGB entries f
 | `textPrimary` | `#F7F8FB` | `247, 248, 251` | Main text and values; 18.73:1 on `background`. |
 | `textSecondary` | `#8993A7` | `137, 147, 167` | Supporting copy; 6.44:1 on `background`. |
 | `textMuted` | `#707B91` | `112, 123, 145` | Tertiary copy; 4.67:1 on `background` but only 4.05:1 on `surface`, so do not use it for small body text on cards. |
-| `accent` | `#FF6248` | `255, 98, 72` | Primary action and live recording. Blocks surfaces use a neutral fill for selected navigation. Do not substitute it for danger. |
+| `accent` | `#FF6248` | `255, 98, 72` | Primary action and live recording; `accentText` also tints the selected iPhone tab. Other Blocks navigation uses a neutral fill for selection. Do not substitute it for danger. |
 | `accentText` | `#FF6248` | `255, 98, 72` | Contrast-safe accent foreground on dark surfaces. |
 | `accentStrong` | `#FF6248` | `255, 98, 72` | Compatibility alias for existing consumers; new UI should use `accent`. |
 | `accentHover` | `#FF745D` | `255, 116, 93` | Pointer hover only; retain focus treatment independently. |
@@ -160,7 +160,7 @@ Eight-digit HEX values below include alpha as the last two digits. RGB entries f
 | `textPrimary` | `#111827` | `17, 24, 39` | Main text and values; 16.39:1 on `background`. |
 | `textSecondary` | `#667085` | `102, 112, 133` | Supporting text; 4.97:1 on white `surface`. |
 | `textMuted` | `#667085` | `102, 112, 133` | Tertiary text; use state/opacity separately rather than a paler inaccessible grey. |
-| `accent` | `#F45D43` | `244, 93, 67` | Primary action and live recording. Blocks surfaces use a neutral fill for selected navigation. |
+| `accent` | `#F45D43` | `244, 93, 67` | Primary action and live recording; `accentText` also tints the selected iPhone tab. Other Blocks navigation uses a neutral fill for selection. |
 | `accentText` | `#B73A26` | `183, 58, 38` | Small accent foreground; 5.76:1 on white and 4.87:1 on `accentSoft`. |
 | `accentStrong` | `#F45D43` | `244, 93, 67` | Compatibility alias for existing consumers; new UI should use `accent`. |
 | `accentHover` | `#E85038` | `232, 80, 56` | Pointer hover state. |
@@ -323,8 +323,8 @@ Dayframe has one icon geometry on web and iOS: Lucide's 24-point grid with 2-poi
 
 - Activities store a Dayframe key such as `errands` in `categories.icon`, never a glyph name. With no stored key the icon comes from the name (`activityIconKeyForName`), and otherwise a neutral dot. Activity icons always sit beside the activity name and are hidden from assistive technology.
 - Sizes: 16 inline with text, 20 in lists, chips and blocks, 24 for navigation and icon buttons, 32 for empty states. Icon buttons keep 44-point targets.
-- Selected state is a neutral fill or tint, never a filled glyph. Play and Stop are the only solid glyphs: on the coral control where it is the screen's primary action, and on the live block's on-block Stop control (in the block's text colour) on Blocks surfaces.
-- The iOS tab bar uses Dayframe glyphs rendered as template images (`apps/mobile/assets/tab-icons`, generated with the registry) inside the system tab bar, so UIKit keeps Liquid Glass, tinting, the selection highlight and minimisation. Today is the sun, Calendar the calendar and Reports the column chart. The selected tab uses the neutral primary text colour, not coral.
+- Selected state is a neutral fill or tint (the iPhone tab bar's coral selected tab, below, is the one exception), never a filled glyph. Play and Stop are the only solid glyphs: on the coral control where it is the screen's primary action, and on the live block's on-block Stop control (in the block's text colour) on Blocks surfaces.
+- The iOS tab bar uses Dayframe glyphs rendered as template images (`apps/mobile/assets/tab-icons`, generated with the registry) inside the system tab bar, so UIKit keeps Liquid Glass, tinting, the selection highlight and minimisation. Today is the sun, Calendar the calendar and Reports the column chart. The selected tab's icon and label use `accentText` (coral; deeper in Light for contrast on the glass) and unselected tabs `textSecondary`, so the selection stays visible whatever scrolls beneath the glass.
 - Do not use SF Symbols, emoji or Unicode characters as icons, and do not add another icon package. Surfaces not yet migrated to Blocks may keep their existing `lucide-react` imports, mobile glyphs and SF Symbols (the iPhone connectivity slot via `expo-symbols`, the Live Activity, and the native Calendar and duration dial); a migrated surface draws from the registry.
 
 ### Component states

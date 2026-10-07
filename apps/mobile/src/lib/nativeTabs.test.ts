@@ -37,9 +37,13 @@ describe("native tab configuration", () => {
       expect(tabsLayout).toContain(`require("../../assets/tab-icons/${tab}.png")`);
       expect(tabsLayout).toContain(`<NativeTabs.Trigger.Icon src={DAYFRAME_TAB_ICON_IMAGES.${tab}} renderingMode="template" />`);
     }
-    // Blocks: selected navigation is neutral. Coral stays for recording and the primary action.
-    expect(tabsLayout).not.toContain("theme.accentText");
-    expect(tabsLayout.match(/theme\.textPrimary/g)?.length).toBe(3);
+    // Owner decision 7 Oct: the selected tab is coral (accentText), because a neutral tint washes out
+    // over Liquid Glass when bright activity blocks scroll beneath it. Unselected tabs stay neutral.
+    expect(tabsLayout).toContain("iconColor={{ default: theme.textSecondary, selected: theme.accentText }}");
+    expect(tabsLayout).toContain("tintColor={theme.accentText}");
+    expect(tabsLayout).toMatch(/selected: \{\s*color: theme\.accentText,/);
+    expect(tabsLayout).toMatch(/default: \{\s*color: theme\.textSecondary,/);
+    expect(tabsLayout).not.toContain("theme.textPrimary");
     // UIKit owns the glass material, so the layout must not set a background or blur of its own.
     expect(tabsLayout).not.toMatch(/backgroundColor=|blurEffect=|disableTransparentOnScrollEdge/);
     expect(DAYFRAME_NATIVE_TAB_MINIMIZE_BEHAVIOR).toBe("onScrollDown");

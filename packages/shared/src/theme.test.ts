@@ -15,6 +15,8 @@ describe("Midnight Core theme", () => {
       surface: "#151B27",
       surfaceRaised: "#1B2230",
       accent: "#FF6248",
+      // accentText also tints the selected iPhone tab (owner decision 7 Oct), so it must stay coral.
+      accentText: "#FF6248",
       onAccent: "#050914",
       focus: "#64718A",
       chartTrack: "#252E40"
@@ -24,6 +26,7 @@ describe("Midnight Core theme", () => {
       surface: "#FFFFFF",
       surfaceRaised: "#FFFFFF",
       accent: "#F45D43",
+      accentText: "#B73A26",
       onAccent: "#111827",
       focus: "#7D8797",
       chartTrack: "#E5E9F0"
