@@ -226,6 +226,30 @@ Mobile Today and integrated Review:
 - A locally saved Review decision removes its pending geometry immediately but does not create or count a synthetic entry. It stays visibly saved/syncing until an explicit result link and current canonical entry evidence resolve it. A reused Sleep entry remains one canonical interval; a receipt alone is not a new interval.
 - A bounded partial/cached presentation is qualified and leaves Open Review available; missing coverage is never shown as zero or as a complete donut. Today keeps the established Dashboard/timer, Review outbox, Health, Location, auth, and sync owners.
 
+Blocks prototype parity (owner decision 7 October 2026; built screen by screen):
+
+- Every iPhone and web screen, Settings included, is rebuilt to match the Blocks prototype (`docs/brand-style-guide.md`, Dayframe Blocks). The rules above stay in force for each screen until the PR that rebuilds it updates them.
+- Kept through the rebuild: grouped repeat rows in history; the Review Location evidence editor; "Always ignore" and "Make rule"; the entry sheet's start/end date and time editing, historical description suggestions and rounding shortcuts; free-text tags with autocomplete; Retry/Discard for rejected changes; every export and delete path; logout on every width.
+- On iPhone Today the Review donut gives way to a "moments to review" card that opens Review, with pending time shown in a Today ribbon. The owner confirmed on 7 October 2026 that Quick Confirm leaves Today (suggestions are confirmed in Review) and that the goal frame replaces the logged/"covered" summary.
+- Connectivity direction: the indicator should show only offline and a brief "back online", with syncing silent; rejected changes still need a visible way into Retry/Discard (an attention badge on the avatar is proposed). `AGENTS.md` governs until the PR that builds it.
+
+Decisions where the prototype is ambiguous or drops a function:
+
+| # | Decision |
+| --- | --- |
+| D1 | Theme names are "Midnight · Daylight · System" on both platforms. |
+| D2 | At most six pinned quick-start activities on both platforms; keys 1–6 start them on web. |
+| D3 | "Week starts on" is a real stored preference that Calendar, Reports and weekly goals honour (the quick-start mosaic keeps sizing tiles by the last seven days). |
+| D4 | The weekly goal shows in Reports (hero and streak). |
+| D5 | Notifications and Motion & Fitness get rows under Settings › Automatic tracking. |
+| D6 | Review keeps "Always ignore" and "Make rule" in a More menu on the card. |
+| D7 | Review's "Edit before logging" opens the existing evidence editor, restyled; the activity is chosen with the activity picker. |
+| D8 | A Blocks Places screen (list, editor, learned places, Home and Work) fills the prototype's gap. |
+| D9 | Reports uses Week · Month as the main control; Today, Year, custom ranges and the activity-over-time chart stay under a More range sheet. |
+| D10 | Activities are archived with Restore, never deleted, so history is kept. |
+| D11 | iPhone tags stay free text with autocomplete, shown as chips. |
+| D12 | iPhone shows the daily goal (ribbon and goal frame) from the existing goal settings, edited with steppers under "Your day". |
+
 Mobile accessibility and Dynamic Type:
 
 - Keep iOS system font scaling enabled. Assign local scaling roles only to compact presentation text: screen headings (1.5), section headings (1.5), items (1.35), controls (1.3), metadata (1.3), numerals (1.2), counters (1.2), and inputs (1.35). Explanations, warnings, help, errors, and ordinary body copy remain uncapped. Reports keeps its separately approved dense-layout roles and staging-badge exception.
