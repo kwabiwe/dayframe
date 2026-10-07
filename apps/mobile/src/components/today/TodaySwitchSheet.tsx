@@ -25,6 +25,7 @@ export function TodaySwitchSheet({
   onPick,
   recents,
   reduceMotion,
+  running,
   styles: shared,
   theme,
 }: {
@@ -32,8 +33,11 @@ export function TodaySwitchSheet({
   nowMs: number;
   onClose: () => void;
   onPick: (entry: MobileTimeEntry) => void;
+  /** Taken when the sheet opened; the sheet never reorders while it is up. */
   recents: readonly SwitchRecent[];
   reduceMotion: boolean;
+  /** Whether a block is recording now (it may have been stopped elsewhere while the sheet is up). */
+  running: boolean;
   styles: MobileStyles;
   theme: MobileTheme;
 }) {
@@ -79,8 +83,8 @@ export function TodaySwitchSheet({
               const meta = switchRecentMeta(entry, nowMs);
               return (
                 <Pressable
-                  accessibilityHint="Stops the running block and starts this one"
-                  accessibilityLabel={`Switch to ${title}, ${meta.replace(" · ", ", ")}`}
+                  accessibilityHint={running ? "Stops the running block and starts this one" : "Starts this block"}
+                  accessibilityLabel={`${running ? "Switch to" : "Start"} ${title}, ${meta.replace(" · ", ", ")}`}
                   accessibilityRole="button"
                   key={entry.id}
                   onPress={() => {

@@ -50,7 +50,7 @@ import { AccountAvatarButton } from "./today/AccountAvatarButton";
 import { TodayGoalFrame } from "./today/TodayGoalFrame";
 import { formatLiveClock } from "./today/todayBlocksLayout";
 import { TodaySwitchSheet } from "./today/TodaySwitchSheet";
-import { switchRecents } from "../lib/todaySwitch";
+import { switchRecents, type SwitchRecent } from "../lib/todaySwitch";
 import { TodayReviewNudge } from "./today/TodayReviewNudge";
 import { TodayBlockRows } from "./today/TodayBlockRows";
 import { EarlierThisWeek } from "./today/EarlierThisWeek";
@@ -358,7 +358,8 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
   // Blocks landings (motion.md): issued only by committed Start/Stop/Undo handlers, never by refresh.
   const landingSequence = useRef(0);
   const [liveLanding, setLiveLanding] = useState<LandingRequest | null>(null);
-  const [switchSheetOpen, setSwitchSheetOpen] = useState(false);
+  // The Switch sheet's list, taken when it opens, so it never reshuffles under the finger or while it leaves.
+  const [switchSheetRecents, setSwitchSheetRecents] = useState<SwitchRecent[] | null>(null);
   const [rowLanding, setRowLanding] = useState<LandingRequest | null>(null);
 
   useEffect(() => {
@@ -426,6 +427,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
     setCalendarEditEntry(null);
     setCalendarEditPresentation(null);
     setPendingDeletion(null);
+    setSwitchSheetRecents(null);
     setPendingTimerStops([]);
     setAuthState("signedOut");
   }, []);
@@ -2498,7 +2500,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
                 onStartActivity={(activityId) => startFromToday(activityId)}
                 onStartBlank={() => startFromToday(null)}
                 onStop={stopFromToday}
-                onSwitch={() => setSwitchSheetOpen(true)}
+                onSwitch={() => setSwitchSheetRecents(switchRecents(loggedSourceEntries, data?.activeEntry ?? null))}
                 quickStartColumns={quickStartColumns}
                 reduceMotion={reduceMotion}
                 runningActivityId={displayedActiveEntry?.categoryId ?? null}
@@ -2689,13 +2691,14 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
           </Pressable>
         </Reanimated.View>
       ) : null}
-      {switchSheetOpen && reduceMotionPreferenceResolved ? (
+      {switchSheetRecents && reduceMotionPreferenceResolved ? (
         <TodaySwitchSheet
           activityIconFor={(categoryId) => (categoryId ? categoryIconById.get(categoryId) ?? null : null)}
           nowMs={minuteNow}
-          onClose={() => setSwitchSheetOpen(false)}
+          onClose={() => setSwitchSheetRecents(null)}
           onPick={switchToRecent}
-          recents={switchRecents(loggedSourceEntries, data?.activeEntry ?? null)}
+          recents={switchSheetRecents}
+          running={Boolean(data?.activeEntry)}
           reduceMotion={reduceMotion}
           styles={styles}
           theme={theme}

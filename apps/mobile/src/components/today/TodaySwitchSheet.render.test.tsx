@@ -39,7 +39,7 @@ const recent = (id: string, title: string) => ({
 });
 
 function render(recents: ReturnType<typeof recent>[]) {
-  const props = { activityIconFor: () => null, nowMs: now, onClose: vi.fn(), onPick: vi.fn(), recents, reduceMotion: false, styles: {} as never, theme };
+  const props = { activityIconFor: () => null, nowMs: now, onClose: vi.fn(), onPick: vi.fn(), recents, reduceMotion: false, running: true, styles: {} as never, theme };
   let tree!: ReturnType<typeof create>;
   act(() => {
     tree = create(<TodaySwitchSheet {...props} />);
@@ -52,14 +52,26 @@ describe("TodaySwitchSheet", () => {
     mocks.dismiss.mockClear();
     const { props, tree } = render([recent("a", "Deep work"), recent("b", "Inbox zero")]);
     const texts = tree.root.findAllByType("Text" as never).map((node) => node.children.join(""));
-    expect(texts).toEqual(["SWITCH", "Pick up something recent", "Deep work", "Work · last yesterday", "Inbox zero", "Work · last yesterday"]);
+    expect(texts).toEqual(["SWITCH", "Pick up something recent", "Deep work", "Work · yesterday", "Inbox zero", "Work · yesterday"]);
     const row = tree.root.findByProps({ testID: "today-switch-b" });
-    expect(row.props.accessibilityLabel).toBe("Switch to Inbox zero, Work, last yesterday");
+    expect(row.props.accessibilityLabel).toBe("Switch to Inbox zero, Work, yesterday");
     act(() => row.props.onPress());
     act(() => tree.root.findByProps({ testID: "today-switch-a" }).props.onPress());
     expect(props.onPick).toHaveBeenCalledOnce();
     expect(props.onPick.mock.calls[0][0].id).toBe("b");
     expect(mocks.dismiss).toHaveBeenCalledOnce();
+    act(() => tree.unmount());
+  });
+
+  it("says Start, not Switch, once the running block has stopped elsewhere", () => {
+    const props = { activityIconFor: () => null, nowMs: now, onClose: vi.fn(), onPick: vi.fn(), recents: [recent("a", "Deep work")], reduceMotion: false, running: false, styles: {} as never, theme };
+    let tree!: ReturnType<typeof create>;
+    act(() => {
+      tree = create(<TodaySwitchSheet {...props} />);
+    });
+    const row = tree.root.findByProps({ testID: "today-switch-a" });
+    expect(row.props.accessibilityLabel).toBe("Start Deep work, Work, yesterday");
+    expect(row.props.accessibilityHint).toBe("Starts this block");
     act(() => tree.unmount());
   });
 

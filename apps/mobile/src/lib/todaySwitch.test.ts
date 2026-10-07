@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { MobileTimeEntry } from "./api";
-import { LIVE_SWIPE_COMMIT, liveSwipeOffset, switchRecentMeta, switchRecents } from "./todaySwitch";
+import { LIVE_SWIPE_COMMIT, liveSwipeOffset, liveSwipeRawFor, switchRecentMeta, switchRecents } from "./todaySwitch";
 
 function entry(id: string, overrides: Partial<MobileTimeEntry> = {}): MobileTimeEntry {
   return {
@@ -29,6 +29,12 @@ describe("live block swipe", () => {
     expect(liveSwipeOffset(-40)).toBe(-40);
     expect(liveSwipeOffset(-LIVE_SWIPE_COMMIT)).toBe(-90);
     expect(liveSwipeOffset(-190)).toBeCloseTo(-125);
+  });
+
+  it("re-grabs a card from the raw pull it shows, so the band applies once", () => {
+    for (const raw of [0, -40, -90, -140, -260]) expect(liveSwipeRawFor(liveSwipeOffset(raw))).toBeCloseTo(raw);
+    // Shown at -125 (a -190 pull), a further 8-point pull moves it 2.8 points, not back toward home.
+    expect(liveSwipeOffset(liveSwipeRawFor(-125) - 8)).toBeCloseTo(-127.8);
   });
 });
 
@@ -59,8 +65,8 @@ describe("switchRecents", () => {
 describe("switchRecentMeta", () => {
   it("names the activity and when it was last done", () => {
     const now = new Date("2026-10-07T21:00:00").getTime();
-    expect(switchRecentMeta({ categoryName: "Work", startedAt: "2026-10-07T08:00:00" }, now)).toBe("Work · last today");
-    expect(switchRecentMeta({ categoryName: "Work", startedAt: "2026-10-06T23:30:00" }, now)).toBe("Work · last yesterday");
+    expect(switchRecentMeta({ categoryName: "Work", startedAt: "2026-10-07T08:00:00" }, now)).toBe("Work · today");
+    expect(switchRecentMeta({ categoryName: "Work", startedAt: "2026-10-06T23:30:00" }, now)).toBe("Work · yesterday");
     expect(switchRecentMeta({ categoryName: null, startedAt: "2026-10-03T08:00:00" }, now)).toBe("No activity · last Sat 3");
   });
 });

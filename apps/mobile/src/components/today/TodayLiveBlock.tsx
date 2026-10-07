@@ -1,6 +1,6 @@
 import type { ComponentProps } from "react";
 import { useCallback, useMemo } from "react";
-import { Animated, Pressable, StyleSheet, Text, View, type GestureResponderEvent } from "react-native";
+import { Animated, Pressable, StyleSheet, Text, View, type GestureResponderEvent, type LayoutChangeEvent } from "react-native";
 import { Gesture, GestureDetector } from "react-native-gesture-handler";
 import Reanimated, {
   ReduceMotion,
@@ -18,7 +18,7 @@ import type { MobileTheme } from "../../lib/mobileTheme";
 import { mobileTextProps } from "../../lib/mobileTypography";
 import { BLOCKS_SPRING, useBlockLanding, useBreathingRing, type LandingRequest } from "../../lib/blocksMotion";
 import { playHaptic } from "../../lib/haptics";
-import { LIVE_SWIPE_COMMIT, liveSwipeOffset } from "../../lib/todaySwitch";
+import { LIVE_SWIPE_COMMIT, liveSwipeOffset, liveSwipeRawFor } from "../../lib/todaySwitch";
 import { LiveOdometer } from "./LiveOdometer";
 import { TODAY_CARD, TODAY_CARD_ACTIONS_WIDTH, colorWithAlpha, spokenDuration } from "./todayBlocksLayout";
 
@@ -95,7 +95,7 @@ export function TodayLiveBlock({
         <Text {...mobileTextProps("control")} style={[styles.switchText, { color: theme.textPrimary }]}>Switch</Text>
       </Reanimated.View>
     <GestureDetector gesture={swipe.gesture}>
-    <Reanimated.View style={[styles.card, { backgroundColor: colors.fill }, swipe.cardStyle]} testID="today-live-block">
+    <Reanimated.View onLayout={swipe.onCardLayout} style={[styles.card, { backgroundColor: colors.fill }, swipe.cardStyle]} testID="today-live-block">
       <Reanimated.View
         pointerEvents="none"
         style={[styles.ring, { borderColor: colors.text }, ringStyle]}
@@ -210,9 +210,14 @@ export function TodayLiveBlock({
  * finger tracking without the tilt and returns in 120 ms.
  */
 function useLiveSwipe({ enabled, onSwitch, reduceMotion }: { enabled: boolean; onSwitch: () => void; reduceMotion: boolean }) {
+  // The finger's raw pull and the card's banded offset are kept apart, so a card grabbed while it
+  // springs home continues from where it is without banding twice.
+  const pull = useSharedValue(0);
   const offset = useSharedValue(0);
   const base = useSharedValue(0);
   const armed = useSharedValue(0);
+  const cardWidth = useSharedValue(0);
+  const cardHeight = useSharedValue(0);
   const commit = useCallback(() => onSwitch(), [onSwitch]);
   const tick = useCallback(() => playHaptic("tick"), []);
 
@@ -220,14 +225,22 @@ function useLiveSwipe({ enabled, onSwitch, reduceMotion }: { enabled: boolean; o
     .enabled(enabled)
     .activeOffsetX([-8, 8])
     .failOffsetY([-10, 10])
+    .onTouchesDown((event, manager) => {
+      "worklet";
+      // As in the prototype, a touch that starts on Add past time or Stop never becomes a swipe.
+      const touch = event.allTouches[0];
+      if (touch && liveActionsContain(touch.x, touch.y, cardWidth.value, cardHeight.value)) manager.fail();
+    })
     .onStart(() => {
       "worklet";
-      // A card grabbed while it springs home continues from where it is.
-      base.value = offset.value;
+      // Continue from the raw pull that produced what is shown now.
+      base.value = liveSwipeRawFor(offset.value);
+      pull.value = base.value;
     })
     .onUpdate((event) => {
       "worklet";
       const raw = Math.min(0, base.value + event.translationX);
+      pull.value = raw;
       offset.value = liveSwipeOffset(raw);
       // Arming needs this gesture's own travel past the commit point, as Today's rows do.
       const next = event.translationX < -LIVE_SWIPE_COMMIT && raw < -LIVE_SWIPE_COMMIT ? 1 : 0;
@@ -241,6 +254,7 @@ function useLiveSwipe({ enabled, onSwitch, reduceMotion }: { enabled: boolean; o
       // A gesture the system cancels ends unsuccessful: the card goes home and nothing opens.
       const open = success && armed.value === 1;
       armed.value = 0;
+      pull.value = 0;
       offset.value = reduceMotion
         ? withTiming(0, { duration: 120, reduceMotion: ReduceMotion.Never })
         : withSpring(0, { ...BLOCKS_SPRING.land, reduceMotion: ReduceMotion.Never });
@@ -249,7 +263,7 @@ function useLiveSwipe({ enabled, onSwitch, reduceMotion }: { enabled: boolean; o
     .onFinalize(() => {
       "worklet";
       armed.value = 0;
-    }), [armed, base, commit, enabled, offset, reduceMotion, tick]);
+    }), [armed, base, cardHeight, cardWidth, commit, enabled, offset, pull, reduceMotion, tick]);
 
   const cardStyle = useAnimatedStyle(() => ({
     transform: [
@@ -258,7 +272,20 @@ function useLiveSwipe({ enabled, onSwitch, reduceMotion }: { enabled: boolean; o
     ],
   }));
   const revealStyle = useAnimatedStyle(() => ({ opacity: offset.value < 0 ? 1 : 0 }));
-  return { cardStyle, gesture, revealStyle };
+  const onCardLayout = useCallback((event: LayoutChangeEvent) => {
+    cardWidth.value = event.nativeEvent.layout.width;
+    cardHeight.value = event.nativeEvent.layout.height;
+  }, [cardHeight, cardWidth]);
+  return { cardStyle, gesture, onCardLayout, revealStyle };
+}
+
+/** Whether a point on the card (from its top-left) falls on Add past time or Stop. */
+export function liveActionsContain(x: number, y: number, width: number, height: number) {
+  "worklet";
+  if (width <= 0 || height <= 0) return false;
+  const right = width - TODAY_CARD.padding;
+  const bottom = height - TODAY_CARD.liveBottomPadding;
+  return x >= right - TODAY_CARD_ACTIONS_WIDTH && x <= right && y >= bottom - TODAY_CARD.primaryActionSize && y <= bottom;
 }
 
 const styles = StyleSheet.create({

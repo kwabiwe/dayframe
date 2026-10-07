@@ -31,7 +31,7 @@ vi.mock("react-native-gesture-handler", () => {
     const pan: any = { handlers: {}, isEnabled: true };
     for (const method of ["activeOffsetX", "failOffsetY"]) pan[method] = () => pan;
     pan.enabled = (value: boolean) => { pan.isEnabled = value; return pan; };
-    for (const name of ["onStart", "onUpdate", "onEnd", "onFinalize"]) pan[name] = (fn: unknown) => { pan.handlers[name] = fn; return pan; };
+    for (const name of ["onTouchesDown", "onStart", "onUpdate", "onEnd", "onFinalize"]) pan[name] = (fn: unknown) => { pan.handlers[name] = fn; return pan; };
     gestures.pans.push(pan);
     return pan;
   }
@@ -296,6 +296,24 @@ describe("TodayTimerSurface (Blocks)", () => {
       pan.handlers.onFinalize({});
     });
     expect(input.onSwitch).toHaveBeenCalledOnce();
+    act(() => tree.unmount());
+  });
+
+  it("never starts a swipe from Add past time or Stop", () => {
+    gestures.pans.length = 0;
+    const { tree } = render(props({ active: running, runningActivityId: "work" }));
+    act(() => tree.root.findByProps({ testID: "today-live-block" }).props.onLayout({ nativeEvent: { layout: { height: 230, width: 370, x: 0, y: 0 } } }));
+    const pan = gestures.pans.at(-1);
+    const touch = (x: number, y: number) => {
+      const manager = { fail: vi.fn() };
+      pan.handlers.onTouchesDown({ allTouches: [{ x, y }] }, manager);
+      return manager.fail.mock.calls.length;
+    };
+    // Stop sits at the bottom-right inset (18 right, 16 bottom, 56 tall); Add past time beside it.
+    expect(touch(370 - 18 - 28, 230 - 16 - 28)).toBe(1);
+    expect(touch(370 - 18 - 100, 230 - 16 - 28)).toBe(1);
+    expect(touch(120, 100)).toBe(0);
+    expect(touch(370 - 18 - 28, 40)).toBe(0);
     act(() => tree.unmount());
   });
 

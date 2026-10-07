@@ -13,6 +13,13 @@ export function liveSwipeOffset(dx: number) {
   return pull < -LIVE_SWIPE_COMMIT ? -LIVE_SWIPE_COMMIT + (pull + LIVE_SWIPE_COMMIT) * LIVE_SWIPE_RUBBER_BAND : pull;
 }
 
+/** The raw pull that `liveSwipeOffset` shows at `offset` (its inverse), so a re-grab bands once. */
+export function liveSwipeRawFor(offset: number) {
+  "worklet";
+  const shown = Math.min(0, offset);
+  return shown < -LIVE_SWIPE_COMMIT ? -LIVE_SWIPE_COMMIT + (shown + LIVE_SWIPE_COMMIT) / LIVE_SWIPE_RUBBER_BAND : shown;
+}
+
 export const SWITCH_RECENT_LIMIT = 6;
 
 export type SwitchRecent = {
@@ -56,7 +63,7 @@ export function switchRecents(
 
 const WEEKDAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"] as const;
 
-/** "Work · last Tue 6", as in the prototype; "today" and "yesterday" read as words. */
+/** "Work · last Tue 6", as in the prototype; "Work · today" and "Work · yesterday" when recent. */
 export function switchRecentMeta(entry: Pick<MobileTimeEntry, "categoryName" | "startedAt">, nowMs: number) {
   const started = new Date(entry.startedAt);
   const today = new Date(nowMs);
@@ -65,6 +72,6 @@ export function switchRecentMeta(entry: Pick<MobileTimeEntry, "categoryName" | "
       new Date(started.getFullYear(), started.getMonth(), started.getDate()).getTime()) /
       86_400_000
   );
-  const when = dayDiff <= 0 ? "today" : dayDiff === 1 ? "yesterday" : `${WEEKDAYS[started.getDay()]} ${started.getDate()}`;
-  return [entry.categoryName ?? "No activity", `last ${when}`].join(" · ");
+  const when = dayDiff <= 0 ? "today" : dayDiff === 1 ? "yesterday" : `last ${WEEKDAYS[started.getDay()]} ${started.getDate()}`;
+  return [entry.categoryName ?? "No activity", when].join(" · ");
 }
