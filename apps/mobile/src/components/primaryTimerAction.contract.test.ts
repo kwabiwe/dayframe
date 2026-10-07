@@ -58,14 +58,16 @@ describe("primary mobile timer action geometry", () => {
     expect(theme).not.toContain("timerSyncStatusText");
   });
 
-  it("uses one Blocks card geometry and one bottom action track for idle and running", () => {
+  it("sizes the Today cards from the prototype: a Start pill idle, Stop beside the start time live", () => {
     for (const card of [idleCard, liveBlock]) {
-      expect(card).toContain("minHeight: TODAY_CARD.minHeight");
       expect(card).toContain("borderRadius: TODAY_CARD.radius");
-      expect(card).toMatch(/actions: \{[\s\S]*?bottom: TODAY_CARD.padding,[\s\S]*?position: "absolute",[\s\S]*?right: TODAY_CARD.padding/);
-      expect(card).toMatch(/primaryAction: \{[\s\S]*?height: TODAY_CARD.primaryActionSize,[\s\S]*?width: TODAY_CARD.primaryActionSize/);
-      expect(card).toMatch(/secondaryAction: \{[\s\S]*?height: TODAY_CARD.secondaryActionSize,[\s\S]*?width: TODAY_CARD.secondaryActionSize/);
+      expect(card).not.toContain("minHeight: TODAY_CARD.minHeight");
     }
+    expect(idleCard).toMatch(/pill: \{[\s\S]*?minHeight: 44/);
+    expect(liveBlock).toMatch(/actions: \{[\s\S]*?bottom: TODAY_CARD.liveBottomPadding,[\s\S]*?position: "absolute",[\s\S]*?right: TODAY_CARD.padding/);
+    expect(liveBlock).toMatch(/primaryAction: \{[\s\S]*?height: TODAY_CARD.primaryActionSize,[\s\S]*?width: TODAY_CARD.primaryActionSize/);
+    expect(liveBlock).toMatch(/secondaryAction: \{[\s\S]*?height: TODAY_CARD.secondaryActionSize,[\s\S]*?width: TODAY_CARD.secondaryActionSize/);
+    expect(todayLayout).toContain("radius: 26");
     expect(todayLayout).toContain("primaryActionSize: 56");
     expect(todayLayout).toContain("secondaryActionSize: 44");
     expect(dashboard).toContain("<TodayTimerSurface");

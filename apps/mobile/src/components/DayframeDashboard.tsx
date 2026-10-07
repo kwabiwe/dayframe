@@ -48,6 +48,7 @@ import { layoutQuickStartMosaic, rankQuickStartActivities, weeklySecondsByActivi
 import { TodayReviewPresentationProvider } from "./today/TodayReviewPresentationContext";
 import { AccountAvatarButton } from "./today/AccountAvatarButton";
 import { TodayGoalFrame } from "./today/TodayGoalFrame";
+import { formatLiveClock } from "./today/todayBlocksLayout";
 import { TodayReviewNudge } from "./today/TodayReviewNudge";
 import { TodayBlockRows } from "./today/TodayBlockRows";
 import { EarlierThisWeek } from "./today/EarlierThisWeek";
@@ -2470,7 +2471,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
                     ? categoryIconById.get(displayedActiveEntry.categoryId) ?? null
                     : null,
                   categoryLabel: displayedActiveEntry.categoryName ? activeCategoryLabel : null,
-                  elapsedLabel: formatClockDuration(displayedActiveDurationSeconds),
+                  elapsedLabel: formatLiveClock(displayedActiveDurationSeconds),
                   elapsedSeconds: displayedActiveDurationSeconds,
                   hasLiveActiveTimer,
                   startedLabel: `Started ${formatTimeOfDay(new Date(displayedActiveEntry.startedAt))}`,
@@ -2973,21 +2974,3 @@ function recentStoppedEntryTime(entries: TimeEntry[], activeEntry: MobileBootstr
 function pad2(value: number) {
   return value.toString().padStart(2, "0");
 }
-
-function formatClockDuration(seconds: number) {
-  const safe = Math.max(0, Math.floor(seconds));
-  const hours = Math.floor(safe / 3600);
-  const minutes = Math.floor((safe % 3600) / 60);
-  const remainingSeconds = safe % 60;
-
-  if (hours === 0) {
-    return `${minutes.toString().padStart(2, "0")}:${remainingSeconds
-      .toString()
-      .padStart(2, "0")}`;
-  }
-
-  return `${hours}:${minutes.toString().padStart(2, "0")}:${remainingSeconds
-    .toString()
-    .padStart(2, "0")}`;
-}
-

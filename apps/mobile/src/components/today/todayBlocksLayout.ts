@@ -1,32 +1,19 @@
-import { DAYFRAME_BLOCKS } from "@dayframe/shared";
-
-// Today timer card geometry for Dayframe Blocks. The idle card and the live block share one minimum
-// height and one action track, so Start becomes Stop in place and the screen below never jumps.
+// Today timer card geometry for Dayframe Blocks, from the prototype (design/blocks/ios.html .live,
+// .idle): each card takes its natural height, and the mosaic below moves under the layout
+// transition when Start or Stop swaps them.
 export const TODAY_CARD = {
-  minHeight: 184,
   padding: 18,
-  radius: DAYFRAME_BLOCKS.radius.card,
+  liveBottomPadding: 16,
+  idlePadding: 20,
+  radius: 26,
   primaryActionSize: 56,
   secondaryActionSize: 44,
   actionGap: 10,
 } as const;
 
-/** Width the bottom row of text leaves free for the two actions. */
+/** Width the live block's footer leaves free for Add past time and Stop. */
 export const TODAY_CARD_ACTIONS_WIDTH =
   TODAY_CARD.primaryActionSize + TODAY_CARD.actionGap + TODAY_CARD.secondaryActionSize;
-
-/** Card-relative centres of the two actions; both cards must use these. */
-export function todayCardActionCentres(cardWidth: number, cardHeight: number = TODAY_CARD.minHeight) {
-  const bottom = cardHeight - TODAY_CARD.padding;
-  const primaryX = cardWidth - TODAY_CARD.padding - TODAY_CARD.primaryActionSize / 2;
-  return {
-    primary: { x: primaryX, y: bottom - TODAY_CARD.primaryActionSize / 2 },
-    secondary: {
-      x: primaryX - TODAY_CARD.primaryActionSize / 2 - TODAY_CARD.actionGap - TODAY_CARD.secondaryActionSize / 2,
-      y: bottom - TODAY_CARD.primaryActionSize / 2,
-    },
-  };
-}
 
 export function colorWithAlpha(hex: string, alpha: number) {
   const match = /^#?([0-9a-f]{6})$/i.exec(hex);
@@ -57,4 +44,11 @@ export function compactDuration(totalSeconds: number) {
   if (!hours) return `${minutes}m`;
   const rest = minutes % 60;
   return rest ? `${hours}h ${rest}m` : `${hours}h`;
+}
+
+/** The live block's clock, always H:MM:SS like the prototype ("0:04:09", "12:00:00"). */
+export function formatLiveClock(totalSeconds: number) {
+  const seconds = Math.max(0, Math.floor(totalSeconds));
+  const pad = (value: number) => value.toString().padStart(2, "0");
+  return `${Math.floor(seconds / 3600)}:${pad(Math.floor(seconds / 60) % 60)}:${pad(seconds % 60)}`;
 }

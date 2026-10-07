@@ -261,7 +261,7 @@ describe("Today rows swipe-to-delete contract", () => {
     expect(presentationSource).toContain('presentation.reason !== "blank_timer_started"');
     expect(presentationSource).toContain("blankTimerStartGate.current.release(blankStart.token)");
     expect(dashboardSource).toContain("onPresented={completeActiveEditorPresentation}");
-    expect(idleCardSource).toContain('accessibilityLabel="Start task"');
+    expect(idleCardSource).toContain('accessibilityLabel="Start a block"');
     expect(timerSurfaceSource).toContain("onStartBlank={onStartBlank}");
   });
 

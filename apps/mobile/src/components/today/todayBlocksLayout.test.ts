@@ -1,22 +1,18 @@
 import { describe, expect, it } from "vitest";
-import { TODAY_CARD, compactDuration, spokenDuration, todayCardActionCentres } from "./todayBlocksLayout";
+import { TODAY_CARD, compactDuration, formatLiveClock, spokenDuration } from "./todayBlocksLayout";
 
 describe("Today Blocks card layout", () => {
-  it.each([375, 402, 440])("keeps Play and Stop, and both Add past time buttons, on one track at %ipx", (width) => {
-    const idle = todayCardActionCentres(width);
-    const running = todayCardActionCentres(width);
-    expect(running).toEqual(idle);
-    expect(idle.primary.x).toBe(width - TODAY_CARD.padding - TODAY_CARD.primaryActionSize / 2);
-    expect(idle.primary.y).toBe(idle.secondary.y);
-    expect(idle.primary.x - idle.secondary.x).toBe(
-      TODAY_CARD.primaryActionSize / 2 + TODAY_CARD.actionGap + TODAY_CARD.secondaryActionSize / 2
-    );
+  it("keeps the prototype's card sizes and 44-point minimum targets", () => {
+    expect(TODAY_CARD).toMatchObject({ idlePadding: 20, liveBottomPadding: 16, padding: 18, primaryActionSize: 56, radius: 26 });
+    expect(TODAY_CARD.secondaryActionSize).toBeGreaterThanOrEqual(44);
   });
 
-  it("keeps the actions on the bottom inset when larger text grows the card", () => {
-    const grown = todayCardActionCentres(402, 260);
-    expect(grown.primary.y + TODAY_CARD.primaryActionSize / 2).toBe(260 - TODAY_CARD.padding);
-    expect(TODAY_CARD.secondaryActionSize).toBeGreaterThanOrEqual(44);
+  it("shows the live clock as H:MM:SS, as in the prototype", () => {
+    expect(formatLiveClock(5)).toBe("0:00:05");
+    expect(formatLiveClock(249)).toBe("0:04:09");
+    expect(formatLiveClock(3723.9)).toBe("1:02:03");
+    expect(formatLiveClock(43200)).toBe("12:00:00");
+    expect(formatLiveClock(-3)).toBe("0:00:00");
   });
 
   it("speaks durations naturally and shows compact week totals", () => {

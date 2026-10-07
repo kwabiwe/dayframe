@@ -4,10 +4,14 @@ import { PrimaryTimerGlyph } from "../PrimaryTimerAction";
 import { DayframeIcon } from "../icons/DayframeIcon";
 import { recordMobileLayout, type MobileAccessibilityDiagnostic } from "../accessibility/diagnostics";
 import type { MobileTheme } from "../../lib/mobileTheme";
-import { mobileTextProps } from "../../lib/mobileTypography";
-import { TODAY_CARD, TODAY_CARD_ACTIONS_WIDTH } from "./todayBlocksLayout";
+import { MOBILE_DISPLAY_FONT, mobileTextProps } from "../../lib/mobileTypography";
+import { TODAY_CARD } from "./todayBlocksLayout";
 
-/** Nothing recording: one prompt, coral Play (the screen's single primary action) and Add past time. */
+/**
+ * Nothing recording (Blocks prototype): the eyebrow, "What are you working on?" and the coral
+ * "Start a block" pill, the screen's single primary action. Add past time stays here as a quiet
+ * pill until the Play orb and the entry sheet take it over.
+ */
 export function TodayIdleCard({
   diagnostic,
   onAddTime,
@@ -21,40 +25,50 @@ export function TodayIdleCard({
 }) {
   return (
     <View style={[styles.card, { backgroundColor: theme.surface }]} testID="today-idle-card">
-      <Pressable
-        accessibilityLabel="Start timer and add details"
-        accessibilityRole="button"
-        onPress={onStartBlank}
-        style={({ pressed }) => [styles.main, pressed ? styles.pressed : null]}
+      <Text {...mobileTextProps("counter")} style={[styles.eyebrow, { color: theme.textMuted }]}>
+        NOTHING RECORDING
+      </Text>
+      <Text
+        {...mobileTextProps("itemTitle")}
+        accessibilityRole="header"
+        onLayout={(event) => recordMobileLayout(diagnostic, "today.timer.composer.frame", event)}
+        style={[styles.prompt, { color: theme.textPrimary }]}
       >
-        <Text {...mobileTextProps("counter")} style={[styles.eyebrow, { color: theme.textSecondary }]}>
-          Nothing recording
-        </Text>
-        <Text
-          {...mobileTextProps("itemTitle")}
-          onLayout={(event) => recordMobileLayout(diagnostic, "today.timer.composer.frame", event)}
-          style={[styles.prompt, { color: theme.textPrimary }]}
+        What are you working on?
+      </Text>
+      <View style={styles.actions}>
+        <Pressable
+          accessibilityHint="Starts a timer and opens it so you can add details"
+          accessibilityLabel="Start a block"
+          accessibilityRole="button"
+          onPress={onStartBlank}
+          style={({ pressed }) => [
+            styles.pill,
+            { backgroundColor: pressed ? theme.accentPressed : theme.accent },
+            pressed ? styles.pillPressed : null,
+          ]}
+          testID="today-idle-start"
         >
-          What are you working on?
-        </Text>
-      </Pressable>
-      <View pointerEvents="box-none" style={styles.actions}>
+          <PrimaryTimerGlyph color={theme.onAccent} mode="play" />
+          <Text {...mobileTextProps("control")} style={[styles.pillText, { color: theme.onAccent }]}>
+            Start a block
+          </Text>
+        </Pressable>
         <Pressable
           accessibilityLabel="Add past time"
           accessibilityRole="button"
           onPress={onAddTime}
-          style={({ pressed }) => [styles.secondaryAction, { backgroundColor: theme.surfaceMuted }, pressed ? styles.pressed : null]}
+          style={({ pressed }) => [
+            styles.pill,
+            { backgroundColor: theme.surfaceMuted },
+            pressed ? styles.pillPressed : null,
+          ]}
+          testID="today-idle-add-past-time"
         >
-          <DayframeIcon color={theme.textPrimary} glyph={DAYFRAME_APP_ICONS.add} size={20} />
-        </Pressable>
-        <Pressable
-          accessibilityLabel="Start task"
-          accessibilityRole="button"
-          onPress={onStartBlank}
-          style={({ pressed }) => [styles.primaryAction, { backgroundColor: pressed ? theme.accentPressed : theme.accent }]}
-          testID="today-idle-start"
-        >
-          <PrimaryTimerGlyph color={theme.onAccent} mode="play" />
+          <DayframeIcon color={theme.textPrimary} glyph={DAYFRAME_APP_ICONS.add} size={18} />
+          <Text {...mobileTextProps("control")} style={[styles.pillText, { color: theme.textPrimary }]}>
+            Add past time
+          </Text>
         </Pressable>
       </View>
     </View>
@@ -62,39 +76,25 @@ export function TodayIdleCard({
 }
 
 const styles = StyleSheet.create({
-  card: { borderRadius: TODAY_CARD.radius, minHeight: TODAY_CARD.minHeight },
-  main: { flexGrow: 1, minHeight: TODAY_CARD.minHeight, padding: TODAY_CARD.padding, paddingRight: TODAY_CARD.padding },
-  pressed: { opacity: 0.82 },
-  eyebrow: { fontSize: 12, fontWeight: "700", letterSpacing: 0.2 },
+  card: { borderRadius: TODAY_CARD.radius, gap: 14, padding: TODAY_CARD.idlePadding },
+  eyebrow: { fontSize: 11, fontWeight: "600", letterSpacing: 0.9 },
   prompt: {
-    fontSize: 20,
-    fontWeight: "700",
-    letterSpacing: -0.2,
-    lineHeight: 26,
-    marginTop: 8,
-    paddingBottom: TODAY_CARD.primaryActionSize + 8,
-    paddingRight: TODAY_CARD_ACTIONS_WIDTH / 2,
+    fontFamily: MOBILE_DISPLAY_FONT.bold,
+    fontSize: 28,
+    letterSpacing: -0.7,
+    lineHeight: 30,
   },
-  actions: {
+  actions: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
+  pill: {
     alignItems: "center",
-    bottom: TODAY_CARD.padding,
+    borderRadius: 999,
     flexDirection: "row",
-    gap: TODAY_CARD.actionGap,
-    position: "absolute",
-    right: TODAY_CARD.padding,
-  },
-  secondaryAction: {
-    alignItems: "center",
-    borderRadius: TODAY_CARD.secondaryActionSize / 2,
-    height: TODAY_CARD.secondaryActionSize,
+    gap: 6,
     justifyContent: "center",
-    width: TODAY_CARD.secondaryActionSize,
+    minHeight: 44,
+    paddingLeft: 14,
+    paddingRight: 18,
   },
-  primaryAction: {
-    alignItems: "center",
-    borderRadius: TODAY_CARD.primaryActionSize / 2,
-    height: TODAY_CARD.primaryActionSize,
-    justifyContent: "center",
-    width: TODAY_CARD.primaryActionSize,
-  },
+  pillPressed: { transform: [{ scale: 0.96 }] },
+  pillText: { fontSize: 14, fontWeight: "600" },
 });

@@ -21,6 +21,10 @@ export const BLOCKS_SPRING = {
   control: { stiffness: 560, damping: 38, mass: 1 },
   /** Sheets and panels settle without visible overshoot. */
   sheet: { stiffness: 340, damping: 34, mass: 1 },
+  /** Small celebratory pops: a row block or icon confirming a change. */
+  pop: { stiffness: 420, damping: 18, mass: 1 },
+  /** Odometer digits on the live timer. */
+  roll: { stiffness: 260, damping: 26, mass: 1 },
 } as const;
 
 /** The live block's breathing ring: one opacity cycle of about 2.4 s. Nothing else loops. */
