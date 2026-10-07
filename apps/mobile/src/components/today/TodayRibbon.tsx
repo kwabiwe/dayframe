@@ -207,6 +207,8 @@ export const TodayRibbon = memo(function TodayRibbon({
       </GestureDetector>
       {tip && width > 0 ? (
         <View
+          // A new text remounts the tooltip, so it always measures again (even at the same width).
+          key={tipText ?? undefined}
           onLayout={(event) => {
             const measured = Math.ceil(event.nativeEvent.layout.width);
             if (!tipText) return;

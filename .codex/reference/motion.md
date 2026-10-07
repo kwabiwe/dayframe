@@ -204,7 +204,7 @@ Optional detail status enters below the stable activity/time summary with the ex
 
 - Trigger: the 1 s timer tick changes a digit of the live block's `H:MM:SS` clock.
 - Owner: `LiveOdometer`. Each digit is a fixed cell clipping a 0–9 strip; a Reanimated shared offset per digit moves its strip on the UI thread with the `roll` spring (260/26). Only digits whose value changed move; separators never move. Cells are keyed from the right, so when the hours gain a digit only the new leading cell mounts.
-- Entrance/update/exit: no roll on mount (a card that appears, a remount or a cached launch shows the digits at rest); a changed digit rolls to its new value (9 → 0 rolls back through the strip, as in the prototype); the clock leaves with its card. A new cell size (Dynamic Type, or the clock shrinking to fit a narrower card) re-places the strips without rolling.
+- Entrance/update/exit: no roll on mount (a card that appears, a remount, a cached launch or a switch to another entry, which remounts the odometer, shows the digits at rest); a changed digit rolls to its new value (9 → 0 rolls back through the strip, as in the prototype); the clock leaves with its card. A new cell size (Dynamic Type, or the clock shrinking to fit a narrower card) re-places the strips without rolling.
 - Interruption: a digit that changes again mid-roll retargets its spring from where it is.
 - Async outcome: none; the clock follows the displayed entry's elapsed time, including a reconciled start time (which rolls the changed digits once).
 - Accessibility: Reduce Motion sets each digit in place. The odometer is hidden from VoiceOver; the live block's value speaks the elapsed time in words.

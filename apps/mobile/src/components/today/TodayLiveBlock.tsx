@@ -19,6 +19,8 @@ export type TodayLiveBlockPresentation = {
   categoryLabel: string | null;
   elapsedLabel: string;
   elapsedSeconds: number;
+  /** The running entry; a different entry (a switch) shows its timer at rest instead of rolling to it. */
+  entryId?: string;
   hasLiveActiveTimer: boolean;
   startedLabel: string | null;
   title: string;
@@ -111,7 +113,7 @@ export function TodayLiveBlock({
             onLayout={(event) => recordMobileLayout(diagnostic, "today.timer.elapsed.frame", event)}
             style={[styles.time, detailsStyle]}
           >
-            <LiveOdometer color={colors.text} label={active.elapsedLabel} reduceMotion={reduceMotion} />
+            <LiveOdometer color={colors.text} key={active.entryId ?? "live"} label={active.elapsedLabel} reduceMotion={reduceMotion} />
           </Animated.View>
           {/* The start time wraps instead of clipping: when it is too wide to sit beside the
               actions, the reserved action space moves to its own line and the card grows. */}

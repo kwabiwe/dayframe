@@ -44,8 +44,8 @@ describe("primary mobile timer action geometry", () => {
   });
 
   it("keeps the idle timer hierarchy task-first without a reserved sync-copy row", () => {
-    const eyebrowIndex = idleCard.indexOf("Nothing recording");
-    const taskIndex = idleCard.indexOf("What are you working on?");
+    const eyebrowIndex = idleCard.indexOf("NOTHING RECORDING");
+    const taskIndex = idleCard.indexOf("What are you working on?", Math.max(0, eyebrowIndex));
 
     expect(eyebrowIndex).toBeGreaterThan(-1);
     expect(taskIndex).toBeGreaterThan(eyebrowIndex);

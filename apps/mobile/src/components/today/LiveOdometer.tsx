@@ -6,6 +6,11 @@ import { MOBILE_DISPLAY_FONT, MOBILE_TEXT_CAP } from "../../lib/mobileTypography
 
 // Cell sizes in em, from the prototype's odometer (design/blocks/assets/blocks.css .odo-*).
 export const ODOMETER_EM = { digitWidth: 0.62, separatorWidth: 0.3, height: 1.04 } as const;
+/**
+ * Bricolage's natural line height. iOS centres a glyph in its line only when the line is at least
+ * this tall, so each digit is laid out on a 1.2 em line and lifted into its 1.04 em slot.
+ */
+const FONT_LINE_EM = 1.2;
 const DIGITS = ["0", "1", "2", "3", "4", "5", "6", "7", "8", "9"] as const;
 
 export type OdometerCell = { key: string; kind: "digit" | "separator"; value: string };
@@ -134,15 +139,18 @@ const OdometerDigit = memo(function OdometerDigit({
   useEffect(() => () => cancelAnimation(offset), [offset]);
 
   const stripStyle = useAnimatedStyle(() => ({ transform: [{ translateY: offset.value }] }));
-  const textStyle = [styles.digit, { color, fontSize: size, height: cellHeight, lineHeight: cellHeight }];
+  const lineHeight = size * FONT_LINE_EM;
+  const textStyle = [styles.digit, { color, fontSize: size, height: lineHeight, lineHeight, top: (cellHeight - lineHeight) / 2 }];
 
   return (
     <View style={[styles.digitCell, { height: cellHeight, width: size * ODOMETER_EM.digitWidth }]}>
       <Reanimated.View style={[styles.strip, stripStyle]}>
         {DIGITS.map((value) => (
-          <Text allowFontScaling={false} key={value} style={textStyle}>
-            {value}
-          </Text>
+          <View key={value} style={{ height: cellHeight }}>
+            <Text allowFontScaling={false} style={textStyle}>
+              {value}
+            </Text>
+          </View>
         ))}
       </Reanimated.View>
     </View>
@@ -153,7 +161,7 @@ function OdometerSeparator({ color, size, value }: { color: string; size: number
   const width = size * ODOMETER_EM.separatorWidth;
   if (value !== ":") {
     return (
-      <Text allowFontScaling={false} style={[styles.digit, styles.separatorText, { color, fontSize: size, width }]}>
+      <Text allowFontScaling={false} style={[styles.digit, styles.separatorText, { color, fontSize: size, lineHeight: size * FONT_LINE_EM, width }]}>
         {value}
       </Text>
     );
