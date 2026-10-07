@@ -229,7 +229,7 @@ Blocks prototype parity (owner decision 7 October 2026; built screen by screen):
 
 - Every iPhone and web screen, Settings included, is rebuilt to match the Blocks prototype (`docs/brand-style-guide.md`, Dayframe Blocks). The rules above stay in force for each screen until the PR that rebuilds it updates them.
 - Kept through the rebuild: grouped repeat rows in history; the Review Location evidence editor; "Always ignore" and "Make rule"; the entry sheet's start/end date and time editing, historical description suggestions and rounding shortcuts; free-text tags with autocomplete; Retry/Discard for rejected changes; every export and delete path; logout on every width.
-- On iPhone Today the Review donut gives way to a "moments to review" card that opens Review, with pending time shown in a Today ribbon. Removing Quick Confirm from Today and dropping the "covered" figure in favour of the goal frame await owner confirmation (tracker decision register); until then the rules above stand.
+- On iPhone Today the Review donut gives way to a "moments to review" card that opens Review, with pending time shown in a Today ribbon. The owner confirmed on 7 October 2026 that Quick Confirm leaves Today (suggestions are confirmed in Review) and that the goal frame replaces the logged/"covered" summary.
 - Connectivity direction: the indicator should show only offline and a brief "back online", with syncing silent; rejected changes still need a visible way into Retry/Discard (an attention badge on the avatar is proposed). `AGENTS.md` governs until the PR that builds it.
 
 Decisions where the prototype is ambiguous or drops a function:
@@ -238,7 +238,7 @@ Decisions where the prototype is ambiguous or drops a function:
 | --- | --- |
 | D1 | Theme names are "Midnight · Daylight · System" on both platforms. |
 | D2 | At most six pinned quick-start activities on both platforms; keys 1–6 start them on web. |
-| D3 | "Week starts on" is a real stored preference that Calendar, Reports and weekly goals honour (whether the quick-start mosaic moves from the last seven days to the current week awaits the owner). |
+| D3 | "Week starts on" is a real stored preference that Calendar, Reports and weekly goals honour (the quick-start mosaic keeps sizing tiles by the last seven days). |
 | D4 | The weekly goal shows in Reports (hero and streak). |
 | D5 | Notifications and Motion & Fitness get rows under Settings › Automatic tracking. |
 | D6 | Review keeps "Always ignore" and "Make rule" in a More menu on the card. |
