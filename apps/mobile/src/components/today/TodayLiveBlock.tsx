@@ -5,6 +5,7 @@ import Reanimated from "react-native-reanimated";
 import { blockColorsFor, DAYFRAME_APP_ICONS } from "@dayframe/shared";
 import { PrimaryTimerGlyph } from "../PrimaryTimerAction";
 import { ActivityIcon, DayframeIcon } from "../icons/DayframeIcon";
+import { recordMobileLayout, recordMobileTextLayout, type MobileAccessibilityDiagnostic } from "../accessibility/diagnostics";
 import type { MobileTheme } from "../../lib/mobileTheme";
 import { MOBILE_DISPLAY_FONT, mobileTextProps } from "../../lib/mobileTypography";
 import { useBlockLanding, useBreathingRing, type LandingRequest } from "../../lib/blocksMotion";
@@ -27,12 +28,14 @@ const LIVE_LANDING_DISTANCE = 14;
 
 /**
  * The running entry as one solid activity block. Tap edits it; Stop and Add past time sit on the
- * shared action track. Only this block carries the breathing ring.
+ * shared action track. Only this block carries the breathing ring. The landing moves the block's
+ * content only: the card, its ring and the action track stay where they are.
  */
 export function TodayLiveBlock({
   active,
   actionsStyle,
   detailsStyle,
+  diagnostic,
   landing,
   onAddTime,
   onOpen,
@@ -43,6 +46,7 @@ export function TodayLiveBlock({
   active: TodayLiveBlockPresentation;
   actionsStyle?: ComponentProps<typeof Animated.View>["style"];
   detailsStyle?: ComponentProps<typeof Animated.View>["style"];
+  diagnostic?: MobileAccessibilityDiagnostic;
   landing: LandingRequest | null;
   onAddTime: () => void;
   onOpen: () => void;
@@ -57,12 +61,11 @@ export function TodayLiveBlock({
   const landingStyle = useBlockLanding({ distance: LIVE_LANDING_DISTANCE, reduceMotion, request: landing });
   const ringStyle = useBreathingRing({ live: active.hasLiveActiveTimer, reduceMotion });
   const activityName = active.categoryLabel ?? "No activity";
+  const titleStyle = [styles.title, { color: colors.text }, active.titleIsPlaceholder ? styles.placeholder : null];
+  const elapsedStyle = [styles.elapsed, { color: colors.text }];
 
   return (
-    <Reanimated.View
-      style={[styles.card, { backgroundColor: colors.fill }, landingStyle]}
-      testID="today-live-block"
-    >
+    <View style={[styles.card, { backgroundColor: colors.fill }]} testID="today-live-block">
       <Reanimated.View
         pointerEvents="none"
         style={[styles.ring, { borderColor: colors.text }, ringStyle]}
@@ -76,39 +79,53 @@ export function TodayLiveBlock({
         onPress={onOpen}
         style={({ pressed }) => [styles.main, pressed && active.hasLiveActiveTimer ? styles.pressed : null]}
       >
-        <View style={styles.topRow}>
-          <View style={[styles.chip, { backgroundColor: colorWithAlpha(colors.text, 0.14) }]}>
-            {active.categoryColor ? (
-              <ActivityIcon color={colors.text} icon={active.categoryIcon} name={active.categoryLabel} size={15} />
-            ) : null}
-            <Text {...mobileTextProps("metadata")} numberOfLines={1} style={[styles.chipText, { color: colors.text }]}>
-              {activityName}
-            </Text>
+        <Reanimated.View style={[styles.content, landingStyle]} testID="today-live-content">
+          <View style={styles.topRow}>
+            <View style={[styles.chip, { backgroundColor: colorWithAlpha(colors.text, 0.14) }]}>
+              {active.categoryColor ? (
+                <ActivityIcon color={colors.text} icon={active.categoryIcon} name={active.categoryLabel} size={15} />
+              ) : null}
+              <Text {...mobileTextProps("metadata")} numberOfLines={1} style={[styles.chipText, { color: colors.text }]}>
+                {activityName}
+              </Text>
+            </View>
+            <View style={styles.recording}>
+              <View style={[styles.recordingDot, { backgroundColor: colors.text }]} />
+              <Text {...mobileTextProps("counter")} style={[styles.recordingText, { color: colors.text }]}>
+                Recording
+              </Text>
+            </View>
           </View>
-          <View style={styles.recording}>
-            <View style={[styles.recordingDot, { backgroundColor: colors.text }]} />
-            <Text {...mobileTextProps("counter")} style={[styles.recordingText, { color: colors.text }]}>
-              Recording
-            </Text>
-          </View>
-        </View>
-        <Text
-          {...mobileTextProps("itemTitle")}
-          numberOfLines={2}
-          style={[styles.title, { color: colors.text }, active.titleIsPlaceholder ? styles.placeholder : null]}
-        >
-          {active.title}
-        </Text>
-        <Animated.View style={[styles.details, detailsStyle]}>
-          <Text {...mobileTextProps("numeric")} numberOfLines={1} style={[styles.elapsed, { color: colors.text }]}>
-            {active.elapsedLabel}
+          <Text
+            {...mobileTextProps("itemTitle")}
+            numberOfLines={2}
+            onLayout={(event) => recordMobileLayout(diagnostic, "today.timer.title.frame", event)}
+            onTextLayout={(event) => recordMobileTextLayout(diagnostic, "today.timer.title", event, "itemTitle", titleStyle)}
+            style={titleStyle}
+          >
+            {active.title}
           </Text>
-          {active.startedLabel ? (
-            <Text {...mobileTextProps("metadata")} numberOfLines={1} style={[styles.meta, { color: colors.text }]}>
-              {active.startedLabel}
-            </Text>
-          ) : null}
-        </Animated.View>
+          {/* The footer wraps instead of clipping: when the time is too wide to sit beside the
+              actions, the reserved action space moves to its own line and the card grows. */}
+          <View style={styles.footer}>
+            <Animated.View style={[styles.details, detailsStyle]}>
+              <Text
+                {...mobileTextProps("numeric")}
+                onLayout={(event) => recordMobileLayout(diagnostic, "today.timer.elapsed.frame", event)}
+                onTextLayout={(event) => recordMobileTextLayout(diagnostic, "today.timer.elapsed", event, "numeric", elapsedStyle)}
+                style={elapsedStyle}
+              >
+                {active.elapsedLabel}
+              </Text>
+              {active.startedLabel ? (
+                <Text {...mobileTextProps("metadata")} numberOfLines={2} style={[styles.meta, { color: colors.text }]}>
+                  {active.startedLabel}
+                </Text>
+              ) : null}
+            </Animated.View>
+            <View pointerEvents="none" style={styles.actionsReserve} testID="today-live-actions-reserve" />
+          </View>
+        </Reanimated.View>
       </Pressable>
       <Animated.View
         pointerEvents={active.hasLiveActiveTimer ? "box-none" : "none"}
@@ -143,7 +160,7 @@ export function TodayLiveBlock({
           <PrimaryTimerGlyph color={colors.fill} mode="stop" />
         </Pressable>
       </Animated.View>
-    </Reanimated.View>
+    </View>
   );
 }
 
@@ -154,19 +171,20 @@ const styles = StyleSheet.create({
     overflow: "hidden",
   },
   ring: {
+    borderRadius: TODAY_CARD.radius,
+    borderWidth: 2,
     bottom: 0,
     left: 0,
     position: "absolute",
     right: 0,
     top: 0,
-    borderRadius: TODAY_CARD.radius,
-    borderWidth: 2,
   },
   main: {
     flexGrow: 1,
     minHeight: TODAY_CARD.minHeight,
     padding: TODAY_CARD.padding,
   },
+  content: { flexGrow: 1 },
   pressed: { opacity: 0.82 },
   topRow: { alignItems: "center", flexDirection: "row", gap: 12, justifyContent: "space-between" },
   chip: {
@@ -185,7 +203,20 @@ const styles = StyleSheet.create({
   recordingText: { fontSize: 12, fontWeight: "700" },
   title: { fontSize: 19, fontWeight: "600", letterSpacing: -0.2, lineHeight: 24, marginTop: 12 },
   placeholder: { fontStyle: "italic", fontWeight: "400" },
-  details: { marginTop: "auto", paddingRight: TODAY_CARD_ACTIONS_WIDTH + 12, paddingTop: 8 },
+  footer: {
+    alignItems: "flex-end",
+    columnGap: 12,
+    flexDirection: "row",
+    flexWrap: "wrap",
+    marginTop: "auto",
+    paddingTop: 8,
+  },
+  details: { flexShrink: 0, maxWidth: "100%" },
+  actionsReserve: {
+    height: TODAY_CARD.primaryActionSize,
+    marginLeft: "auto",
+    width: TODAY_CARD_ACTIONS_WIDTH,
+  },
   elapsed: {
     fontFamily: MOBILE_DISPLAY_FONT.extraBold,
     fontSize: 36,

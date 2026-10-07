@@ -209,7 +209,6 @@ import {
 import {
   activeTimerElapsedSeconds,
   activeTimerPresentation,
-  buildMobileQuickActions,
   createBlankTimerStartGate,
   createGenerationScopedExitCoordinator,
   createOptimisticTimerStartReconciler,
@@ -1260,7 +1259,6 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
     return () => subscription.remove();
   }, []);
 
-  const quickActions = useMemo(() => buildMobileQuickActions(data), [data]);
   const sortedCategories = useMemo(
     () => sortMobileCategoriesByUsage(data?.categories ?? [], data?.categoryUsage ?? []).map(({ category }) => category),
     [data?.categories, data?.categoryUsage]
@@ -1365,18 +1363,19 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
     () => new Map((data?.categories ?? []).map((category) => [category.id, category.icon ?? null])),
     [data?.categories]
   );
-  // Sized by the last seven days of completed time; recomputed per minute, not per timer tick.
-  const quickStartMinute = Math.floor(now / 60_000);
+  // Sized by the last seven calendar days of completed time; recomputed when entries or the day
+  // change, never on a timer tick.
   const quickStartColumns = useMemo(() => {
     const pinned = sortedCategories
       .filter((category) => category.isPinned)
       .map((category) => ({ color: category.color ?? null, icon: category.icon ?? null, id: category.id, name: category.name }));
     const weekly = weeklySecondsByActivity(
       historySourceEntries.filter((entry) => !isReviewNeededEntry(entry)),
-      quickStartMinute * 60_000
+      Date.now()
     );
     return layoutQuickStartMosaic(rankQuickStartActivities(pinned, weekly));
-  }, [historySourceEntries, quickStartMinute, sortedCategories]);
+    // todayKey moves the seven-day window at midnight.
+  }, [historySourceEntries, sortedCategories, todayKey]);
   const openReviewCount = useMemo(
     () => (data?.reviewItems ?? []).filter(isOpenReviewItem).length,
     [data?.reviewItems]
@@ -1496,6 +1495,8 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
     void stopActiveTimer().then((accepted) => {
       if (!accepted || !entryId) return;
       playHaptic("stop");
+      // A rolled-back Stop remounts the live block; it must not replay the Start landing.
+      setLiveLanding(null);
       setRowLanding(nextLandingRequest([entryId]));
     });
   }
@@ -3438,15 +3439,6 @@ function entryDurationSeconds(entry: TimeEntry, now: number) {
   return Math.max(entry.durationSeconds, Math.floor((now - startedAt) / 1000));
 }
 
-function entryCategoryColor(entry: TimeEntry, mode: MobileTheme["mode"]) {
-  if (!entry.categoryId && !entry.categoryName) return uncategorizedFillColor(mode);
-  return paletteColorFor(
-    entry.categoryColor ?? entry.categoryId,
-    entry.categoryName ?? "No activity",
-    mode
-  );
-}
-
 function displayEntryTitle(entry: TimeEntry) {
   return displayTimerDescription(entry) ?? entry.categoryName ?? "No activity";
 }
@@ -3500,10 +3492,6 @@ function addDaysToDate(date: Date, days: number) {
 
 function sameTimerStopOwner(left: TimerStopOwner, right: TimerStopOwner) {
   return left.userId === right.userId && left.workspaceId === right.workspaceId;
-}
-
-function uncategorizedFillColor(mode: MobileTheme["mode"]) {
-  return mode === "dark" ? "#323946" : "#EEF2F6";
 }
 
 function recentStoppedEntryTime(entries: TimeEntry[], activeEntry: MobileBootstrap["activeEntry"]) {

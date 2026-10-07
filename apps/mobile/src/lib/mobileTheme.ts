@@ -1293,7 +1293,8 @@ function createStyles(theme: MobileTheme) {
     todayReviewRowHeader: {
       flexDirection: "row",
       alignItems: "center",
-      gap: 8
+      // Matches confirmed rows so titles beside the 30-point activity blocks line up.
+      gap: 10
     },
     todayReviewStateBadge: {
       borderRadius: 999,
@@ -1368,11 +1369,6 @@ function createStyles(theme: MobileTheme) {
     todayEntryDivider: {
       borderTopWidth: 1,
       borderTopColor: theme.border
-    },
-    todayEntryDot: {
-      width: 9,
-      height: 9,
-      borderRadius: 999
     },
     todayEntryText: {
       flex: 1,

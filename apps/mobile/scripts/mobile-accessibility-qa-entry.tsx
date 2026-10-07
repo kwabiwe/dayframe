@@ -23,6 +23,7 @@ import { HistoryDayCard } from "../src/components/DayframeDashboard";
 import { TodayDateHeading } from "../src/components/accessibility/TodayDateHeading";
 import { TodayLoggedSummary } from "../src/components/accessibility/TodayLoggedSummary";
 import { TodayTimerSurface } from "../src/components/accessibility/TodayTimerSurface";
+import { layoutQuickStartMosaic } from "../src/lib/quickStartMosaic";
 import { ReviewItemCard } from "../app/review";
 import { SettingsMenuRow } from "../app/settings";
 import { MobileThemeProvider, useMobileTheme } from "../src/lib/mobileTheme";
@@ -414,24 +415,30 @@ function Probe() {
             <TodayDateHeading dateLabel="Saturday, 12 September 2026" styles={styles} diagnostic={diagnostic} />
             <TodayTimerSurface
               active={showRunningTimer ? {
-                categoryColor: "#6B8E73",
-                categoryLabel: "A long synthetic category label",
+                categoryColor: "moss",
+                categoryIcon: "work",
+                categoryLabel: "A long synthetic activity label",
                 elapsedLabel: "12:34:56",
+                elapsedSeconds: 45296,
                 hasLiveActiveTimer: true,
+                startedLabel: "Started 09:12",
                 title: "A long synthetic timer title for layout testing",
                 titleIsPlaceholder: false,
               } : null}
               diagnostic={diagnostic}
+              liveLanding={null}
               onAddTime={() => setActionResult("Local Add time callback")}
               onOpenActiveTimer={() => setActionResult("Local active timer editor callback")}
+              onStartActivity={(activityId) => setActionResult(`Local quick start callback: ${activityId}`)}
               onStartBlank={() => setActionResult("Local blank timer callback")}
-              onStartQuickAction={(action) => setActionResult(`Local quick action callback: ${action.key}`)}
               onStop={() => setActionResult("Local Stop callback")}
-              quickActions={[
-                { color: "moss", id: "qa-category", isUncategorized: false, key: "synthetic-quick-action", name: "Long synthetic category action", subtitle: "Synthetic" },
-                { color: null, id: null, isUncategorized: true, key: "synthetic-uncategorized", name: "Uncategorized", subtitle: null },
-              ]}
-              styles={styles}
+              quickStartColumns={layoutQuickStartMosaic([
+                { color: "moss", icon: "work", id: "qa-activity", name: "Long synthetic activity name", weekSeconds: 7200 },
+                { color: "blue", icon: null, id: "qa-activity-2", name: "Second synthetic activity", weekSeconds: 1800 },
+                { color: "amber", icon: "learning", id: "qa-activity-3", name: "Third", weekSeconds: 600 },
+              ])}
+              reduceMotion={false}
+              runningActivityId={showRunningTimer ? "qa-activity" : null}
               theme={theme}
             />
             <HistoryDayCard

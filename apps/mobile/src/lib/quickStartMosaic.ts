@@ -6,11 +6,9 @@ export const QUICK_START_MOSAIC = {
   gap: 8,
   minTileHeight: 54,
   /** Below this a tile shows icon and name on one row and drops its duration. */
-  compactBelow: 76,
+  compactBelow: 78,
   maxTiles: 6,
 } as const;
-
-const WEEK_MS = 7 * 24 * 60 * 60 * 1000;
 
 export type QuickStartActivity = {
   color: string | null;
@@ -38,11 +36,12 @@ type WeeklyEntry = {
 };
 
 /**
- * Completed time per activity over the last seven days. The running entry is left out on purpose,
- * so tiles keep their size while the timer ticks and change once, when a block is stopped.
+ * Completed time per activity over the last seven calendar days (today and the six before it, from
+ * local midnight). The running entry is left out on purpose, so tiles keep their size while the timer
+ * ticks and change once, when a block is stopped; the window only moves at midnight.
  */
 export function weeklySecondsByActivity(entries: readonly WeeklyEntry[], nowMs: number) {
-  const windowStart = nowMs - WEEK_MS;
+  const windowStart = lastSevenDaysStart(nowMs);
   const totals = new Map<string, number>();
   for (const entry of entries) {
     if (!entry.categoryId || !entry.stoppedAt) continue;
@@ -52,6 +51,14 @@ export function weeklySecondsByActivity(entries: readonly WeeklyEntry[], nowMs: 
     totals.set(entry.categoryId, (totals.get(entry.categoryId) ?? 0) + Math.round((end - start) / 1000));
   }
   return totals;
+}
+
+/** Local midnight six days before today. */
+export function lastSevenDaysStart(nowMs: number) {
+  const start = new Date(nowMs);
+  start.setHours(0, 0, 0, 0);
+  start.setDate(start.getDate() - 6);
+  return start.getTime();
 }
 
 /**
@@ -121,4 +128,28 @@ function columnHeights(seconds: number[]) {
   const rounded = heights.map((value) => Math.round(value * 2) / 2);
   rounded[rounded.length - 1] = available - rounded.slice(0, -1).reduce((sum, value) => sum + value, 0);
   return rounded;
+}
+
+export type QuickStartTileFrame = QuickStartTile & { x: number; y: number; width: number };
+
+/**
+ * Absolute frames for every tile in a container of the given width. Tiles are positioned by activity,
+ * not by column, so a change of rank moves the same tile instead of remounting a column.
+ */
+export function quickStartTileFrames(columns: readonly QuickStartColumn[], containerWidth: number): QuickStartTileFrame[] {
+  const { gap } = QUICK_START_MOSAIC;
+  const available = Math.max(0, containerWidth - gap * (columns.length - 1));
+  const flexTotal = columns.reduce((sum, column) => sum + column.flex, 0) || 1;
+  const frames: QuickStartTileFrame[] = [];
+  let x = 0;
+  for (const column of columns) {
+    const width = (available * column.flex) / flexTotal;
+    let y = 0;
+    for (const tile of column.tiles) {
+      frames.push({ ...tile, width, x, y });
+      y += tile.height + gap;
+    }
+    x += width + gap;
+  }
+  return frames;
 }

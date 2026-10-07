@@ -45,10 +45,11 @@ vi.mock("../../lib/motion", () => ({
   MOBILE_MOTION: { control: 140, layout: 220 },
   localLayoutTransition: () => "layout",
   localPresenceEntering: () => "entering",
+  localPresenceExiting: () => "exiting",
 }));
 
 import { TodayTimerSurface, type TodayActiveTimerPresentation } from "./TodayTimerSurface";
-import { layoutQuickStartMosaic } from "../../lib/quickStartMosaic";
+import { layoutQuickStartMosaic, quickStartTileFrames } from "../../lib/quickStartMosaic";
 
 const darkTheme = { ...DAYFRAME_THEME.dark, mode: "dark", pressed: "pressed" } as never;
 const lightTheme = { ...DAYFRAME_THEME.light, mode: "light", pressed: "pressed" } as never;
@@ -91,6 +92,9 @@ function render(input: ComponentProps<typeof TodayTimerSurface>) {
   act(() => {
     tree = create(<TodayTimerSurface {...input} />);
   });
+  // Tiles are absolutely positioned from the measured mosaic width.
+  const mosaic = tree.root.findAllByProps({ testID: "today-quick-start-mosaic" })[0];
+  if (mosaic) act(() => mosaic.props.onLayout({ nativeEvent: { layout: { height: 232, width: 343, x: 0, y: 0 } } }));
   const text = (value: string) =>
     tree.root.findAllByType("Text" as never).find((node) => node.children.join("") === value) as ReactTestInstance;
   const byLabel = (label: string) => tree.root.findByProps({ accessibilityLabel: label });
@@ -111,7 +115,7 @@ describe("TodayTimerSurface (Blocks)", () => {
     expect(flatStyle(byLabel("Start task").props.style({ pressed: false })).backgroundColor).toBe(DAYFRAME_THEME.dark.accent);
 
     act(() => byLabel("Start timer and add details").props.onPress());
-    act(() => byLabel("Start Work, 2 hours this week").props.onPress());
+    act(() => byLabel("Start Work, 2 hours in the last 7 days").props.onPress());
     expect(input.onStartBlank).toHaveBeenCalledOnce();
     expect(input.onStartActivity).toHaveBeenCalledWith("work");
     expect(text("2h").props.allowFontScaling).toBe(true);
@@ -168,10 +172,41 @@ describe("TodayTimerSurface (Blocks)", () => {
     const { byLabel, text, tree } = render(input);
     expect(text("Switch to").props.accessibilityRole).toBe("header");
     act(() => byLabel("Work, recording. Edit running timer").props.onPress());
-    act(() => byLabel("Switch to Gym, 30 minutes this week").props.onPress());
+    act(() => byLabel("Switch to Gym, 30 minutes in the last 7 days").props.onPress());
     expect(input.onOpenActiveTimer).toHaveBeenCalledOnce();
     expect(input.onStartActivity).toHaveBeenCalledOnce();
     expect(input.onStartActivity).toHaveBeenCalledWith("gym");
+    act(() => tree.unmount());
+  });
+
+  it("lands the block's content only: the card, ring and actions never move", () => {
+    const landing = { requestedAt: Date.now(), token: 1 };
+    const { tree } = render(props({ active: running, liveLanding: landing, runningActivityId: "work" }));
+    const card = flatStyle(tree.root.findByProps({ testID: "today-live-block" }).props.style);
+    const content = flatStyle(tree.root.findByProps({ testID: "today-live-content" }).props.style);
+    expect(card.transform).toBeUndefined();
+    expect(content.transform).toEqual([{ translateY: 0 }]);
+    act(() => tree.unmount());
+  });
+
+  it("never clips the elapsed time: the footer wraps the reserved action space instead", () => {
+    const { text, tree } = render(props({ active: { ...running, elapsedLabel: "123:45:06" }, runningActivityId: "work" }));
+    expect(text("123:45:06").props.numberOfLines).toBeUndefined();
+    const reserve = tree.root.findByProps({ testID: "today-live-actions-reserve" });
+    expect(flatStyle(reserve.props.style)).toMatchObject({ height: 56, marginLeft: "auto", width: 110 });
+    expect(flatStyle(reserve.parent!.props.style)).toMatchObject({ flexDirection: "row", flexWrap: "wrap" });
+    act(() => tree.unmount());
+  });
+
+  it("positions mosaic tiles absolutely from the shared frame calculation", () => {
+    const { tree } = render(props());
+    const slots = tree.root.findAllByType("ReanimatedView" as never)
+      .map((node) => flatStyle(node.props.style))
+      .filter((style) => style.position === "absolute");
+    const expected = quickStartTileFrames(columns, 343);
+    expect(slots.map(({ left, top, width, height }) => ({ height, left, top, width }))).toEqual(
+      expected.map(({ height, x, y, width }) => ({ height, left: x, top: y, width }))
+    );
     act(() => tree.unmount());
   });
 

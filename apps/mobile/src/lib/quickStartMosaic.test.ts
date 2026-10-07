@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
   QUICK_START_MOSAIC,
+  lastSevenDaysStart,
   layoutQuickStartMosaic,
+  quickStartTileFrames,
   rankQuickStartActivities,
   weeklySecondsByActivity,
   type QuickStartActivity,
@@ -15,19 +17,28 @@ function activity(id: string, weekSeconds = 0): QuickStartActivity {
 }
 
 describe("weeklySecondsByActivity", () => {
-  it("adds completed time inside the last seven days and clips entries that started earlier", () => {
+  it("adds completed time from local midnight six days ago and clips entries that started earlier", () => {
+    const windowStart = lastSevenDaysStart(NOW);
+    const iso = (ms: number) => new Date(ms).toISOString();
     const totals = weeklySecondsByActivity(
       [
-        { categoryId: "work", startedAt: "2026-10-07T09:00:00.000Z", stoppedAt: "2026-10-07T11:00:00.000Z" },
-        { categoryId: "work", startedAt: "2026-09-30T11:00:00.000Z", stoppedAt: "2026-09-30T13:00:00.000Z" },
-        { categoryId: "gym", startedAt: "2026-09-20T09:00:00.000Z", stoppedAt: "2026-09-20T10:00:00.000Z" },
-        { categoryId: null, startedAt: "2026-10-07T08:00:00.000Z", stoppedAt: "2026-10-07T08:30:00.000Z" },
+        { categoryId: "work", startedAt: iso(NOW - 3 * HOUR * 1000), stoppedAt: iso(NOW - HOUR * 1000) },
+        { categoryId: "work", startedAt: iso(windowStart - HOUR * 1000), stoppedAt: iso(windowStart + HOUR * 1000) },
+        { categoryId: "gym", startedAt: iso(windowStart - 3 * HOUR * 1000), stoppedAt: iso(windowStart - 2 * HOUR * 1000) },
+        { categoryId: null, startedAt: iso(NOW - HOUR * 1000), stoppedAt: iso(NOW - 1800 * 1000) },
       ],
       NOW
     );
     expect(totals.get("work")).toBe(3 * HOUR);
     expect(totals.has("gym")).toBe(false);
     expect(totals.size).toBe(1);
+  });
+
+  it("only moves its window at local midnight", () => {
+    const start = lastSevenDaysStart(NOW);
+    expect(new Date(start).getHours()).toBe(0);
+    expect(lastSevenDaysStart(NOW + 60_000)).toBe(start);
+    expect(Math.round((new Date(NOW).setHours(0, 0, 0, 0) - start) / 86_400_000)).toBe(6);
   });
 
   it("leaves the running entry out so tiles do not resize every second", () => {
@@ -89,5 +100,17 @@ describe("layoutQuickStartMosaic", () => {
     expect(layoutQuickStartMosaic([])).toEqual([]);
     expect(layoutQuickStartMosaic([activity("only")]).map((column) => column.flex)).toEqual([1]);
     expect(layoutQuickStartMosaic([activity("a", 2), activity("b", 1)]).map((column) => column.tiles[0].id)).toEqual(["a", "b"]);
+  });
+
+  it("frames tiles by activity: widths and gaps fill the container and a rank change keeps each id", () => {
+    const before = layoutQuickStartMosaic(["a", "b", "c", "d", "e", "f"].map((id, index) => activity(id, (6 - index) * HOUR)));
+    const frames = quickStartTileFrames(before, 343);
+    const columnsX = [...new Set(frames.map((frame) => frame.x))];
+    const right = Math.max(...frames.map((frame) => frame.x + frame.width));
+    expect(columnsX).toHaveLength(3);
+    expect(right).toBeCloseTo(343, 5);
+    const after = layoutQuickStartMosaic(["c", "a", "b", "d", "e", "f"].map((id, index) => activity(id, (6 - index) * HOUR)));
+    expect(quickStartTileFrames(after, 343).map((frame) => frame.id).sort()).toEqual(frames.map((frame) => frame.id).sort());
+    expect(quickStartTileFrames(after, 343).find((frame) => frame.id === "c")!.x).not.toBe(frames.find((frame) => frame.id === "c")!.x);
   });
 });

@@ -50,6 +50,7 @@ export function TodayTimerSurface({
             active={active}
             actionsStyle={activeTimerActionsStyle}
             detailsStyle={activeTimerDetailsStyle}
+            diagnostic={diagnostic}
             landing={liveLanding}
             onAddTime={onAddTime}
             onOpen={onOpenActiveTimer}
@@ -58,7 +59,7 @@ export function TodayTimerSurface({
             theme={theme}
           />
         ) : (
-          <TodayIdleCard onAddTime={onAddTime} onStartBlank={onStartBlank} theme={theme} />
+          <TodayIdleCard diagnostic={diagnostic} onAddTime={onAddTime} onStartBlank={onStartBlank} theme={theme} />
         )}
       </View>
       <QuickStartMosaic

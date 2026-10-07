@@ -2,16 +2,19 @@ import { Pressable, StyleSheet, Text, View } from "react-native";
 import { DAYFRAME_APP_ICONS } from "@dayframe/shared";
 import { PrimaryTimerGlyph } from "../PrimaryTimerAction";
 import { DayframeIcon } from "../icons/DayframeIcon";
+import { recordMobileLayout, type MobileAccessibilityDiagnostic } from "../accessibility/diagnostics";
 import type { MobileTheme } from "../../lib/mobileTheme";
 import { mobileTextProps } from "../../lib/mobileTypography";
 import { TODAY_CARD, TODAY_CARD_ACTIONS_WIDTH } from "./todayBlocksLayout";
 
 /** Nothing recording: one prompt, coral Play (the screen's single primary action) and Add past time. */
 export function TodayIdleCard({
+  diagnostic,
   onAddTime,
   onStartBlank,
   theme,
 }: {
+  diagnostic?: MobileAccessibilityDiagnostic;
   onAddTime: () => void;
   onStartBlank: () => void;
   theme: MobileTheme;
@@ -27,7 +30,11 @@ export function TodayIdleCard({
         <Text {...mobileTextProps("counter")} style={[styles.eyebrow, { color: theme.textSecondary }]}>
           Nothing recording
         </Text>
-        <Text {...mobileTextProps("itemTitle")} style={[styles.prompt, { color: theme.textPrimary }]}>
+        <Text
+          {...mobileTextProps("itemTitle")}
+          onLayout={(event) => recordMobileLayout(diagnostic, "today.timer.composer.frame", event)}
+          style={[styles.prompt, { color: theme.textPrimary }]}
+        >
           What are you working on?
         </Text>
       </Pressable>

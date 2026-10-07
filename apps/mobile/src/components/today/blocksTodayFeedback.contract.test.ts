@@ -20,7 +20,7 @@ describe("Today Blocks feedback", () => {
   it("plays the Stop composite and lands the stopped row only after the Stop intent persists", () => {
     const stop = body("function stopFromToday(");
     expect(stop).toContain("const entryId = latestData.current?.activeEntry?.id;");
-    expect(stop).toMatch(/if \(!accepted \|\| !entryId\) return;\s*playHaptic\("stop"\);\s*setRowLanding\(nextLandingRequest\(\[entryId\]\)\);/);
+    expect(stop).toMatch(/if \(!accepted \|\| !entryId\) return;\s*playHaptic\("stop"\);[\s\S]*?setLiveLanding\(null\);\s*setRowLanding\(nextLandingRequest\(\[entryId\]\)\);/);
   });
 
   it("warns on a committed delete and lands restored rows on Undo", () => {

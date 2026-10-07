@@ -20,6 +20,7 @@
     "app",
     "modules",
     "src",
+    "scripts/**/*.tsx",
     "expo-env.d.ts",
     ".expo/types/**/*.ts"
   ]
