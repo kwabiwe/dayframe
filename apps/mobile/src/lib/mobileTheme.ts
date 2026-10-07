@@ -33,11 +33,6 @@ import {
   TIMER_CARD_TRAILING_SCROLL_INSET,
   TIMER_CARD_VERTICAL_INSET
 } from "./timerCardLayout";
-import {
-  HISTORY_REPLAY_ACTION_GAP,
-  HISTORY_REPLAY_ACTION_WIDTH,
-  HISTORY_STACKED_DURATION_TRAILING_INSET
-} from "./mobileAccessibilityLayout";
 
 export type ThemeMode = "light" | "dark";
 export type ThemePreference = ThemeMode | "system";
@@ -164,6 +159,9 @@ function createStyles(theme: MobileTheme) {
     },
     todayListContent: {
       paddingBottom: 112
+    },
+    todayListFooter: {
+      paddingTop: 22
     },
     reportsScrollContent: {
       paddingBottom: 112
@@ -1170,9 +1168,6 @@ function createStyles(theme: MobileTheme) {
       fontWeight: "700",
       letterSpacing: -0.35
     },
-    todaySummaryBlock: {
-      gap: 8
-    },
     reviewFocusHighlight: {
       borderColor: theme.borderStrong,
       borderRadius: 18,
@@ -1182,201 +1177,6 @@ function createStyles(theme: MobileTheme) {
     },
     historyDayGap: {
       height: 14
-    },
-    historyDayTitle: {
-      color: theme.textPrimary,
-      fontFamily: monoFont,
-      fontSize: 15,
-      fontWeight: "600",
-      paddingHorizontal: 2
-    },
-    todayEntryCard: {
-      backgroundColor: theme.surface,
-      borderRadius: 18,
-      overflow: "hidden",
-      paddingHorizontal: 14
-    },
-    todayEntryRow: {
-      minHeight: 56,
-      flexDirection: "row",
-      alignItems: "center",
-      gap: 4
-    },
-    todayEntryDivider: {
-      borderTopWidth: 1,
-      borderTopColor: theme.border
-    },
-    todayEntryText: {
-      flex: 1,
-      minWidth: 0,
-      gap: 2
-    },
-    todayEntryTitle: {
-      color: theme.textPrimary,
-      fontFamily: monoFont,
-      fontSize: 14,
-      fontWeight: "600"
-    },
-    todayEntryMeta: {
-      color: theme.textSecondary,
-      fontFamily: monoFont,
-      fontSize: 11,
-      fontWeight: "400"
-    },
-    todayEntryOptionalMeta: {
-      color: theme.textSecondary,
-      fontFamily: monoFont,
-      fontSize: 11,
-      fontWeight: "400"
-    },
-    todayEntryDuration: {
-      color: theme.textPrimary,
-      fontFamily: monoFont,
-      fontSize: 13,
-      fontWeight: "600",
-      fontVariant: ["tabular-nums"]
-    },
-    historyEntryMain: {
-      flex: 1,
-      minWidth: 0,
-      minHeight: 56,
-      flexDirection: "row",
-      alignItems: "center",
-      gap: 10
-    },
-    historyGroupCountBadge: {
-      minWidth: 34,
-      minHeight: 34,
-      borderRadius: 999,
-      paddingHorizontal: 8,
-      paddingVertical: 5,
-      backgroundColor: theme.surfaceMuted,
-      alignItems: "center",
-      justifyContent: "center"
-    },
-    historyGroupCountText: {
-      color: theme.textPrimary,
-      fontFamily: monoFont,
-      fontSize: 14,
-      fontWeight: "600",
-      fontVariant: ["tabular-nums"]
-    },
-    historyGroupChildren: {
-      marginLeft: 44,
-      borderTopWidth: 1,
-      borderTopColor: theme.border
-    },
-    historyGroupChildrenStacked: {
-      marginLeft: 16
-    },
-    historyGroupChildDetails: {
-      paddingLeft: 10,
-      gap: 2
-    },
-    historyGroupChild: {
-      minHeight: 44,
-      flexDirection: "column",
-      alignItems: "stretch",
-      justifyContent: "center"
-    },
-    historyGroupChildMain: {
-      minHeight: 46,
-      flexDirection: "row",
-      alignItems: "center",
-      gap: 9
-    },
-    historyGroupChildDivider: {
-      borderTopWidth: 1,
-      borderTopColor: theme.border
-    },
-    historyGroupChildTime: {
-      flex: 1,
-      minWidth: 0,
-      color: theme.textSecondary,
-      fontFamily: monoFont,
-      fontSize: 12,
-      fontWeight: "500",
-      fontVariant: ["tabular-nums"]
-    },
-    historyEntryActions: {
-      minHeight: 44,
-      flexDirection: "row",
-      alignItems: "center",
-      gap: HISTORY_REPLAY_ACTION_GAP
-    },
-    historyReplayButton: {
-      width: HISTORY_REPLAY_ACTION_WIDTH,
-      height: HISTORY_REPLAY_ACTION_WIDTH,
-      borderRadius: 999,
-      alignItems: "center",
-      justifyContent: "center"
-    },
-    historySwipeDeleteActionPressable: {
-      flex: 1,
-      alignItems: "center",
-      justifyContent: "center"
-    },
-    todayEmptyText: {
-      color: theme.textSecondary,
-      fontFamily: monoFont,
-      fontSize: 13,
-      lineHeight: 18,
-      paddingVertical: 18
-    },
-    todayTrackedRow: {
-      minHeight: 48,
-      borderRadius: 16,
-      backgroundColor: theme.surfaceMuted,
-      paddingHorizontal: 14,
-      flexDirection: "row",
-      alignItems: "center",
-      justifyContent: "space-between"
-    },
-    todayTrackedRowStacked: {
-      alignItems: "flex-start",
-      justifyContent: "center",
-      flexDirection: "column",
-      paddingVertical: 10,
-      gap: 4
-    },
-    todayTrackedLabel: {
-      color: theme.textSecondary,
-      fontFamily: monoFont,
-      fontSize: 13,
-      fontWeight: "500"
-    },
-    todayTrackedValue: {
-      color: theme.textPrimary,
-      fontFamily: monoFont,
-      fontSize: 17,
-      fontWeight: "700",
-      fontVariant: ["tabular-nums"]
-    },
-    historyEntryStackedRow: {
-      minHeight: 0,
-      flexDirection: "column",
-      alignItems: "stretch",
-      paddingVertical: 8,
-      gap: 2
-    },
-    historyEntryInlineTop: {
-      flexDirection: "row",
-      alignItems: "center",
-      gap: 4
-    },
-    historyEntryStackedTop: {
-      flexDirection: "row",
-      alignItems: "flex-start",
-      gap: 4
-    },
-    historyEntryStackedDuration: {
-      color: theme.textPrimary,
-      fontFamily: monoFont,
-      fontSize: 13,
-      fontWeight: "600",
-      fontVariant: ["tabular-nums"],
-      alignSelf: "flex-end",
-      marginRight: HISTORY_STACKED_DURATION_TRAILING_INSET
     },
     compactCategoryScroller: {
       gap: 7,

@@ -87,17 +87,6 @@ export function buildHistoryDaySections({
     }));
 }
 
-export function historyDayLabel(section: Pick<HistoryDaySection, "date" | "isToday">, nowMs: number) {
-  if (section.isToday) return "Today";
-  const yesterday = addLocalDays(startOfLocalDay(new Date(nowMs)), -1);
-  if (formatLocalDayKey(section.date) === formatLocalDayKey(yesterday)) return "Yesterday";
-  return section.date.toLocaleDateString(undefined, {
-    day: "numeric",
-    month: "short",
-    weekday: "short"
-  });
-}
-
 export function groupHistoryDayEntries(entries: HistoryDayEntry[]): HistoryEntryGroup[] {
   const groups = new Map<string, HistoryEntryGroup>();
 

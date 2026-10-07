@@ -37,14 +37,6 @@ describe("primary mobile timer action geometry", () => {
     expect(theme).not.toMatch(/\bplayButton:|\bstopButton:/);
   });
 
-  it("keeps Today replay compact while sharing the rounded Play silhouette", () => {
-    expect(primaryAction).toContain("COMPACT_REPLAY_PLAY_GLYPH_SIZE = 14");
-    expect(primaryAction).toContain("function CompactReplayPlayGlyph");
-    expect(primaryAction.match(/d=\{PRIMARY_TIMER_PLAY_PATH\}/g)).toHaveLength(2);
-    expect(dashboard).toContain("<CompactReplayPlayGlyph");
-    expect(dashboard).not.toContain("M7 4v16l13-8L7 4Z");
-  });
-
   it("keeps the primary controls and the working field on the 44-point track", () => {
     expect(primaryAction).toMatch(/height: PRIMARY_TIMER_ACTION_SIZE,[\s\S]*width: PRIMARY_TIMER_ACTION_SIZE/);
     expect(theme).toMatch(/startInput: \{[\s\S]*?minHeight: 44/);

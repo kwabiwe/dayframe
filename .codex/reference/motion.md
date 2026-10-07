@@ -189,4 +189,6 @@ Optional detail status enters below the stable activity/time summary with the ex
 - Async outcome: deletion and Start are the Dashboard's existing optimistic owners; the row never waits for the network.
 - Accessibility: Reduce Motion keeps the finger tracking (direct manipulation) but replaces the fly-out with an immediate hand-off and the spring with a 120 ms return; VoiceOver uses the row's "Start again"/"Switch to …" and "Delete" actions instead of swiping.
 
+"Earlier this week" (2a-2b) adds no animation of its own: a tap plays the selection haptic and hands off to the native tab switch; its rows rebuild on the per-minute clock, never the 1 s tick, and change in place.
+
 The prototype's later Today moves (the ribbon scrub, the odometer, drop-ins) arrive with steps 2a-3 and 2b and add their own contracts here.

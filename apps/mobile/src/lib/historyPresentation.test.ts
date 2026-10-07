@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildHistoryDaySections, groupHistoryDayEntries, historyDayLabel } from "./historyPresentation";
+import { buildHistoryDaySections, groupHistoryDayEntries } from "./historyPresentation";
 import type { MobileTimeEntry } from "./api";
 
 describe("mobile history presentation", () => {
@@ -16,8 +16,7 @@ describe("mobile history presentation", () => {
 
     expect(sections.map((section) => section.key)).toEqual(["2026-07-16", "2026-07-15"]);
     expect(sections[0].totalSeconds).toBe(3600);
-    expect(historyDayLabel(sections[0], nowMs)).toBe("Today");
-    expect(historyDayLabel(sections[1], nowMs)).toBe("Yesterday");
+    expect(sections.map((section) => section.isToday)).toEqual([true, false]);
   });
 
   it("allocates cross-midnight time to both local day sections", () => {

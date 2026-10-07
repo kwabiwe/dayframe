@@ -56,7 +56,8 @@ describe("mobile frame pacing", () => {
     expect(dashboard).toContain("const minuteNow = minuteClock(now, newestShownMs);");
     expect(dashboard).toMatch(/buildHistoryDaySections\(\{[\s\S]*?nowMs: minuteNow[\s\S]*?\}\),\s*\[historySourceEntries, minuteNow\]/);
     expect(dashboard).toMatch(/buildNativeCalendarBridgeState\(\{[\s\S]*?now: minuteNow,/);
-    expect(dashboard).toMatch(/<HistoryDayCard[\s\S]*?now=\{minuteNow\}/);
+    expect(dashboard).toMatch(/<TodayBlockRows[\s\S]*?nowMs=\{minuteNow\}/);
+    expect(dashboard).toContain("buildEarlierThisWeek(historySections, minuteNow)");
     // The native Calendar receives a stable model object between real changes.
     expect(dashboard).toContain("model={isFocused && refreshing ? nativeCalendarModelRefreshing : nativeCalendarModel}");
   });
