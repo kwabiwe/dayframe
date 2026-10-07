@@ -14,6 +14,17 @@ function sources(directory: string): string[] {
   });
 }
 
+/** The text of the object literal starting at `open` (a "{"), matched by brace depth. */
+function objectLiteral(source: string, open: number) {
+  if (open < 0 || source[open] !== "{") return "";
+  let depth = 0;
+  for (let index = open; index < source.length; index += 1) {
+    if (source[index] === "{") depth += 1;
+    if (source[index] === "}" && --depth === 0) return source.slice(open, index + 1);
+  }
+  return "";
+}
+
 // Investigation 2026-10-07 (dropped frames): JS-thread animations and per-second rebuilds starve frames.
 describe("mobile frame pacing", () => {
   it("never drives an RN Animated value on the JS thread", () => {
@@ -22,10 +33,15 @@ describe("mobile frame pacing", () => {
       const source = readFileSync(path, "utf8");
       // Every timing/spring/decay call must opt into the native driver explicitly; RN falls back to
       // the JS driver when the flag is missing or false.
-      return [...source.matchAll(/Animated\.(timing|spring|decay)\(/g)]
-        .map((match) => source.slice(match.index, source.indexOf("})", match.index) + 2))
-        .filter((call) => !/useNativeDriver: true/.test(call))
-        .map((call) => `${path}: ${call.slice(0, 60)}`);
+      const explicitFalse = source.includes("useNativeDriver: false") ? [`${path}: useNativeDriver: false`] : [];
+      // Options must be an inline object with the flag; a variable could hide `false`.
+      const calls = [...source.matchAll(/Animated\.(timing|spring|decay)\(\s*[^,]+,\s*(\{)?/g)]
+        .filter((match) => !match[2] || !/useNativeDriver: true/.test(objectLiteral(source, match.index + match[0].length - 1)))
+        .map((match) => `${path}: ${match[0].slice(0, 60)}`);
+      const events = [...source.matchAll(/Animated\.event\(/g)]
+        .filter((match) => !/useNativeDriver: true/.test(objectLiteral(source, source.indexOf("{", source.indexOf("]", match.index)))))
+        .map(() => `${path}: Animated.event without useNativeDriver: true`);
+      return [...explicitFalse, ...calls, ...events];
     });
     expect(offenders).toEqual([]);
   });
