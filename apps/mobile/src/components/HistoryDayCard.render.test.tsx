@@ -80,6 +80,7 @@ vi.mock("./today/ActivityBlockMark", async () => {
 });
 vi.mock("@/lib/haptics", () => ({ loadHapticsPreference: vi.fn(() => Promise.resolve(true)), playHaptic: vi.fn() }));
 vi.mock("@/lib/quickStartMosaic", async () => import("../lib/quickStartMosaic"));
+vi.mock("@/lib/frameClock", async () => import("../lib/frameClock"));
 
 vi.mock("@/lib/mobileTheme", () => ({ pressable: vi.fn(), useMobileTheme: vi.fn() }));
 vi.mock("../lib/mobileTheme", () => ({ pressable: vi.fn(), useMobileTheme: vi.fn() }));

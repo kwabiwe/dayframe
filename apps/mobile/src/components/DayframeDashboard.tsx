@@ -62,6 +62,7 @@ import {
 import { TodayTimerSurface } from "@/components/accessibility/TodayTimerSurface";
 import { ActivityBlockMark } from "./today/ActivityBlockMark";
 import type { LandingRequest } from "@/lib/blocksMotion";
+import { minuteClock, newestShownTimestamp } from "@/lib/frameClock";
 import { loadHapticsPreference, playHaptic } from "@/lib/haptics";
 import { layoutQuickStartMosaic, rankQuickStartActivities, weeklySecondsByActivity } from "@/lib/quickStartMosaic";
 import { TodayReviewPresentationProvider, useTodayReviewPresentationContext } from "./today/TodayReviewPresentationContext";
@@ -378,6 +379,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
   const blankTimerStartGate = useRef(createBlankTimerStartGate());
   const entrance = useRef(new Animated.Value(0)).current;
   const activeTimerExpansion = useRef(new Animated.Value(0)).current;
+  const activeTimerExpansionTarget = useRef(0);
   // Blocks landings (motion.md): issued only by committed Start/Stop/Undo handlers, never by refresh.
   const landingSequence = useRef(0);
   const [liveLanding, setLiveLanding] = useState<LandingRequest | null>(null);
@@ -1303,6 +1305,9 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
   // A layout effect, so an instant value lands before the live block's first paint.
   useLayoutEffect(() => {
     const toValue = hasLiveActiveTimer ? 1 : 0;
+    // Nothing to animate (for example an idle mount): skip the no-op native animation.
+    if (activeTimerExpansionTarget.current === toValue) return undefined;
+    activeTimerExpansionTarget.current = toValue;
     // On Start the live block's own crossfade and landing own the entrance, so the details and
     // actions appear at rest; this value only fades them out during the retained Stop exit.
     if (reduceMotion || hasLiveActiveTimer) {
@@ -1313,10 +1318,15 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
       toValue,
       duration: MOBILE_MOTION.layout,
       easing: Easing.out(Easing.cubic),
-      useNativeDriver: false
+      // UI thread: Stop also writes the outbox and re-renders the dashboard on the JS thread.
+      useNativeDriver: true
     });
     animation.start();
-    return () => animation.stop();
+    return () => {
+      // An interrupted fade settles at its target, so the skip above never strands it midway.
+      animation.stop();
+      activeTimerExpansion.setValue(toValue);
+    };
   }, [activeTimerExpansion, hasLiveActiveTimer, reduceMotion]);
 
   const activeTimerDetailsStyle = {
@@ -1356,12 +1366,19 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
       data.activeEntry
     );
   }, [data]);
+  // Whole-minute consumers (history, day cards, native Calendar) rebuild once a minute, but never
+  // fall behind a start or stop already shown, so a block from this minute is never clipped away.
+  const newestShownMs = useMemo(
+    () => newestShownTimestamp(historySourceEntries, Date.now()),
+    [historySourceEntries]
+  );
+  const minuteNow = minuteClock(now, newestShownMs);
   const historySections = useMemo(
     () => buildHistoryDaySections({
       entries: historySourceEntries.filter((entry) => !isReviewNeededEntry(entry)),
-      nowMs: now
+      nowMs: minuteNow
     }),
-    [historySourceEntries, now]
+    [historySourceEntries, minuteNow]
   );
   const categoryIconById = useMemo(
     () => new Map((data?.categories ?? []).map((category) => [category.id, category.icon ?? null])),
@@ -1402,7 +1419,8 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
   const nativeCalendarBridge = useMemo(
     () => buildNativeCalendarBridgeState({
       data,
-      now,
+      // Whole minutes are all the Calendar shows; a per-second model made SwiftUI republish every second.
+      now: minuteNow,
       reduceMotion,
       reduceTransparency,
       refreshing,
@@ -1413,13 +1431,22 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
     [
       calendarTransitionDirection,
       data,
-      now,
+      minuteNow,
       reduceMotion,
       reduceTransparency,
       refreshing,
       selectedDayKey,
       theme
     ]
+  );
+  // Stable objects, so DayframeCalendarView re-serialises only when the model or refresh state changes.
+  const nativeCalendarModel = useMemo(
+    () => ({ ...nativeCalendarBridge.model, refreshing: false }),
+    [nativeCalendarBridge.model]
+  );
+  const nativeCalendarModelRefreshing = useMemo(
+    () => ({ ...nativeCalendarBridge.model, refreshing: true }),
+    [nativeCalendarBridge.model]
   );
   useEffect(() => {
     if (liveActivityReconciliationDeferred.current) return;
@@ -2455,7 +2482,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
           renderItem={({ item }) => (
             <HistoryDayCard
               activeTimerRunning={Boolean(displayedActiveEntry)}
-              now={now}
+              now={minuteNow}
               onDeleteEntries={scheduleHistoryDeletion}
               onOpenEntry={(entry) => {
                 if (!entry.stoppedAt) {
@@ -2523,10 +2550,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
               </Pressable>
             </Animated.View>
             <DayframeCalendarView
-              model={{
-                ...nativeCalendarBridge.model,
-                refreshing: isFocused && refreshing
-              }}
+              model={isFocused && refreshing ? nativeCalendarModelRefreshing : nativeCalendarModel}
               onChangeDay={(event) => shiftSelectedCalendarDay(event.nativeEvent.days)}
               onChangeWeek={(event) => shiftSelectedCalendarWeek(event.nativeEvent.weeks)}
               onOpenActiveTimer={(event) => routeOpenEvent("active", event.nativeEvent.entryId)}
