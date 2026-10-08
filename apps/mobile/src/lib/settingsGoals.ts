@@ -27,9 +27,12 @@ export function createGoalSaver({
   let pending: TimeGoals | null = null;
   let sequence = 0;
 
+  // Saves go one at a time, so the server applies them in the order they were made.
+  let queue: Promise<unknown> = Promise.resolve();
+
   function send(goals: TimeGoals) {
     const mine = ++sequence;
-    save(goals).then(
+    queue = queue.catch(() => undefined).then(() => save(goals)).then(
       () => {
         if (mine === sequence) onSaved(goals);
       },

@@ -29,12 +29,13 @@ function harness() {
 }
 
 describe("createGoalSaver", () => {
-  it("saves once after the quiet delay with the last value", () => {
+  it("saves once after the quiet delay with the last value", async () => {
     const h = harness();
     h.saver.schedule({ daily: 9, weekly: 40 });
     h.saver.schedule({ daily: 10, weekly: 40 });
     expect(h.saves).toHaveLength(0);
     h.fire();
+    await h.settle();
     expect(h.saves.map((save) => save.goals.daily)).toEqual([10]);
   });
 
@@ -42,12 +43,14 @@ describe("createGoalSaver", () => {
     const h = harness();
     h.saver.schedule({ daily: 9, weekly: 40 });
     h.fire();
+    await h.settle();
     h.saver.schedule({ daily: 11, weekly: 40 });
     // The first save resolves while the user is still tapping.
     h.saves[0].resolve();
     await h.settle();
     expect(h.saved).toEqual([]);
     h.fire();
+    await h.settle();
     h.saves[1].resolve();
     await h.settle();
     expect(h.saved).toEqual([{ daily: 11, weekly: 40 }]);
@@ -57,21 +60,27 @@ describe("createGoalSaver", () => {
     const h = harness();
     h.saver.schedule({ daily: 9, weekly: 40 });
     h.fire();
+    await h.settle();
     h.saver.schedule({ daily: 10, weekly: 40 });
     h.fire();
+    await h.settle();
     h.saves[0].reject(new Error("old"));
+    await h.settle();
+    await h.settle();
     h.saves[1].reject(new Error("new"));
     await h.settle();
     expect(h.failed).toEqual([new Error("new")]);
   });
 
-  it("saves a pending change at once when Settings is left", () => {
+  it("saves a pending change at once when Settings is left", async () => {
     const h = harness();
     h.saver.schedule({ daily: 9, weekly: 40 });
     h.saver.flush();
+    await h.settle();
     expect(h.saves.map((save) => save.goals.daily)).toEqual([9]);
     expect(h.timers.size).toBe(0);
     h.saver.flush();
+    await h.settle();
     expect(h.saves).toHaveLength(1);
   });
 
@@ -79,9 +88,11 @@ describe("createGoalSaver", () => {
     const h = harness();
     h.saver.schedule({ daily: 9, weekly: 40 });
     h.fire();
+    await h.settle();
     h.saver.schedule({ daily: 10, weekly: 40 });
     h.saver.cancel();
     h.fire();
+    await h.settle();
     h.saves[0].reject(new Error("Login required"));
     await h.settle();
     expect(h.saves).toHaveLength(1);
@@ -97,5 +108,22 @@ describe("saved goals channel", () => {
     unsubscribe();
     publishSavedTimeGoals({ userId: "u", dailyGoalMinutes: 600, weeklyGoalMinutes: 2400 });
     expect(seen).toEqual([540]);
+  });
+});
+
+describe("createGoalSaver ordering", () => {
+  it("sends the next save only after the previous one has settled", async () => {
+    const h = harness();
+    h.saver.schedule({ daily: 9, weekly: 40 });
+    h.fire();
+    await h.settle();
+    h.saver.schedule({ daily: 10, weekly: 40 });
+    h.fire();
+    await h.settle();
+    expect(h.saves.map((save) => save.goals.daily)).toEqual([9]);
+    h.saves[0].resolve();
+    await h.settle();
+    await h.settle();
+    expect(h.saves.map((save) => save.goals.daily)).toEqual([9, 10]);
   });
 });

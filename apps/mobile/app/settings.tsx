@@ -97,7 +97,7 @@ import {
   type MobileTheme
 } from "@/lib/mobileTheme";
 import { isRetryableMobileConnectivityFailure } from "@/lib/mobile-network";
-import { publishMobileSignedOut } from "@/lib/mobileSessionTransition";
+import { publishMobileSignedOut, subscribeMobileSignedOut } from "@/lib/mobileSessionTransition";
 import { REVIEW_COPY, isOpenReviewItem, isReviewNeededEntry } from "@/lib/review";
 import {
   SETTINGS_HEALTH_SNAPSHOT_TTL_MS,
@@ -233,6 +233,10 @@ function updateSettingsSnapshot(patch: Partial<SettingsSnapshot>) {
 function clearSettingsSnapshot() {
   cachedSettingsSnapshot = null;
 }
+
+// Any sign-out (Settings, Today's own 401 handling) drops the cached account, so the next account
+// never sees, or edits, the previous one's settings.
+subscribeMobileSignedOut(() => clearSettingsSnapshot());
 
 function isSettingsSnapshotFresh(now = Date.now()) {
   return !shouldRefreshSettingsSnapshot(cachedSettingsSnapshot?.updatedAt, now, SETTINGS_SNAPSHOT_TTL_MS);
@@ -647,20 +651,29 @@ export default function SettingsScreen() {
   // The account whose goals are on screen (Today is told only about the same account).
   const goalUserId = useRef<string | null>(null);
   goalUserId.current = data?.user.id ?? null;
+  const goalReload = useRef<((options: { silent: boolean }) => unknown) | null>(null);
+  goalReload.current = load;
   const goalSaver = useRef(createGoalSaver({
     delayMs: GOAL_SAVE_DELAY_MS,
     save: (goals) => updateTimeGoals({ dailyGoalMinutes: goals.daily * 60, weeklyGoalMinutes: goals.weekly * 60 }),
     onSaved: (goals) => {
       const userId = goalUserId.current;
-      setDataAndCache((currentData) => currentData
+      const withGoals = (currentData: MobileBootstrap | null) => currentData && currentData.user.id === userId
         ? { ...currentData, user: { ...currentData.user, dailyGoalMinutes: goals.daily * 60, weeklyGoalMinutes: goals.weekly * 60 } }
-        : currentData);
+        : currentData;
+      // The module snapshot is updated directly, so reopening Settings shows the saved goals even
+      // when this save finished after Settings closed.
+      const snapshotData = readSettingsSnapshot()?.data ?? null;
+      if (snapshotData) updateSettingsSnapshot({ data: withGoals(snapshotData) });
+      setDataAndCache(withGoals);
       setGoalDraft(null);
       if (userId) publishSavedTimeGoals({ userId, dailyGoalMinutes: goals.daily * 60, weeklyGoalMinutes: goals.weekly * 60 });
     },
     onFailed: (error) => {
       setGoalDraft(null);
       if (error instanceof AuthRequiredError) return;
+      // An earlier save may have landed: show what the account really holds.
+      void goalReload.current?.({ silent: true });
       Alert.alert(
         "Your day",
         isRetryableMobileConnectivityFailure(error)
@@ -1538,6 +1551,7 @@ export default function SettingsScreen() {
                     <SettingsStepper
                       canDecrease={data !== null && dailyGoalHours > DAILY_GOAL_HOURS.min}
                       canIncrease={data !== null && dailyGoalHours < DAILY_GOAL_HOURS.max}
+                      hint={`From ${DAILY_GOAL_HOURS.min} to ${DAILY_GOAL_HOURS.max} hours`}
                       label="daily goal"
                       onDecrease={() => changeGoal("daily", -1)}
                       onIncrease={() => changeGoal("daily", 1)}
@@ -1556,6 +1570,7 @@ export default function SettingsScreen() {
                     <SettingsStepper
                       canDecrease={data !== null && weeklyGoalHours > WEEKLY_GOAL_HOURS.min}
                       canIncrease={data !== null && weeklyGoalHours < WEEKLY_GOAL_HOURS.max}
+                      hint={`From ${WEEKLY_GOAL_HOURS.min} to ${WEEKLY_GOAL_HOURS.max} hours, in steps of ${WEEKLY_GOAL_HOURS.step}`}
                       label="weekly goal"
                       onDecrease={() => changeGoal("weekly", -1)}
                       onIncrease={() => changeGoal("weekly", 1)}

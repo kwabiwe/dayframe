@@ -293,12 +293,6 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
   const connectivity = useConnectivity();
   const [data, setData] = useState<MobileBootstrap | null>(null);
   const [refreshing, setRefreshing] = useState(false);
-  // Goals saved in Settings › Your day reach Today's goal frame at once (same account only).
-  useEffect(() => subscribeSavedTimeGoals((event) => {
-    setData((current) => current && current.user.id === event.userId
-      ? { ...current, user: { ...current.user, dailyGoalMinutes: event.dailyGoalMinutes, weeklyGoalMinutes: event.weeklyGoalMinutes } }
-      : current);
-  }), []);
   const [todayPresentationRefreshGeneration, setTodayPresentationRefreshGeneration] = useState(0);
   const [authSubmitting, setAuthSubmitting] = useState(false);
   const [authState, setAuthState] = useState<AuthState>("checking");
@@ -339,6 +333,18 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
     createSharedInFlightOperation<SyncQueueResult>()
   ).current;
   const latestData = useRef<MobileBootstrap | null>(null);
+  // Goals saved in Settings › Your day reach Today's goal frame at once (same account only). The
+  // canonical ref changes with the state so a later timer mutation keeps the new goals.
+  useEffect(() => subscribeSavedTimeGoals((event) => {
+    const current = latestData.current;
+    if (!current || current.user.id !== event.userId) return;
+    const next = {
+      ...current,
+      user: { ...current.user, dailyGoalMinutes: event.dailyGoalMinutes, weeklyGoalMinutes: event.weeklyGoalMinutes }
+    };
+    latestData.current = next;
+    setData(next);
+  }), []);
   const liveActivityReconciliationDeferred = useRef(false);
   const optimisticTimerIds = useRef(new Map<string, string>());
   const timerIdCorrelationsLoaded = useRef(false);

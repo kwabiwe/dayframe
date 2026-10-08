@@ -168,6 +168,7 @@ export function SettingsSwitch({
 export function SettingsStepper({
   canDecrease,
   canIncrease,
+  hint,
   label,
   onDecrease,
   onIncrease,
@@ -176,6 +177,8 @@ export function SettingsStepper({
 }: {
   canDecrease: boolean;
   canIncrease: boolean;
+  /** The range, read by VoiceOver so a swipe that does nothing at a limit makes sense. */
+  hint?: string;
   label: string;
   onDecrease: () => void;
   onIncrease: () => void;
@@ -205,6 +208,7 @@ export function SettingsStepper({
     <View
       accessible
       accessibilityActions={[{ name: "increment" }, { name: "decrement" }]}
+      accessibilityHint={hint}
       accessibilityLabel={label.charAt(0).toUpperCase() + label.slice(1)}
       accessibilityRole="adjustable"
       accessibilityValue={{ text: value }}
