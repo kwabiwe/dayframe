@@ -41,7 +41,7 @@ import {
 import { PrimaryTimerGlyph } from "@/components/PrimaryTimerAction";
 import { ActivityIcon, DayframeIcon } from "@/components/icons/DayframeIcon";
 import { ActivityPickerSheet } from "@/components/ActivityPickerSheet";
-import { activityChips, recentActivityIds } from "@/lib/activityChoice";
+import { activityChips, chipsThatFit, recentActivityIds } from "@/lib/activityChoice";
 import { playHaptic } from "@/lib/haptics";
 import { TimeEntryDurationDial } from "@/components/TimeEntryDurationDial";
 import { pressable, type MobileStyles, type MobileTheme } from "@/lib/mobileTheme";
@@ -194,9 +194,10 @@ export function ActiveTimerEditSheet({
   // The chips' order is fixed while the sheet is up (the prototype re-sorts only when it opens or
   // after a pick from All activities), so a tap never moves the chip under the finger.
   const [chipAnchorId, setChipAnchorId] = useState<string | null>(null);
-  // Chips dropped so the wrap stays within its row budget; reset whenever the order is re-anchored.
-  const [chipTrim, setChipTrim] = useState(0);
-  const [chipRowHeight, setChipRowHeight] = useState(0);
+  // Measured widths (a hidden row measures every candidate chip) for fitting the wrap to its rows.
+  const [chipWidths, setChipWidths] = useState<Record<string, number>>({});
+  const [chipPillWidth, setChipPillWidth] = useState(0);
+  const [chipRowWidth, setChipRowWidth] = useState(0);
   const [dateText, setDateText] = useState("");
   const [timeText, setTimeText] = useState("");
   const [stoppedDateText, setStoppedDateText] = useState("");
@@ -642,7 +643,6 @@ export function ActiveTimerEditSheet({
     setSelectedTagNames(hydratedTagNames);
     setSelectedCategoryId(snapshot.categoryId);
     setChipAnchorId(snapshot.categoryId);
-    setChipTrim(0);
     setActivityPickerOpen(false);
     setDateText(hydratedDateText);
     setTimeText(hydratedTimeText);
@@ -693,18 +693,30 @@ export function ActiveTimerEditSheet({
     fontScale: windowDimensions.fontScale,
     windowHeight: windowDimensions.height
   });
-  const chipLimit = Math.max(0, ACTIVITY_CHIP_LIMIT_BY_DENSITY[chipDensity] - chipTrim);
-  const chipActivities = useMemo(
-    () => activityChips(categories, chipAnchorId, recentActivities, chipLimit),
-    [categories, chipAnchorId, chipLimit, recentActivities]
+  const chipCandidates = useMemo(
+    () => activityChips(categories, chipAnchorId, recentActivities, ACTIVITY_CHIP_LIMIT_BY_DENSITY[chipDensity]),
+    [categories, chipAnchorId, chipDensity, recentActivities]
   );
   // The non-scrolling sheet keeps Discard/Stop on screen only if the chips stay within their rows:
-  // after each layout, one more chip is dropped until the wrap fits (the chosen one stays first).
+  // show the most leading chips that wrap, with All activities, into the row budget (the chosen one
+  // always stays). Until every candidate is measured, show them all (the sheet is still entering).
   const chipRowBudget = ACTIVITY_CHIP_ROWS_BY_DENSITY[chipDensity];
-  const handleChipWrapLayout = (height: number) => {
-    if (chipRowHeight <= 0 || chipActivities.length === 0) return;
-    const allowed = chipRowBudget * chipRowHeight + (chipRowBudget - 1) * ACTIVITY_CHIP_GAP + 1;
-    if (height > allowed) setChipTrim((trim) => trim + 1);
+  const chipActivities = useMemo(() => {
+    const widths = chipCandidates.map((category) => chipWidths[category.id]);
+    if (chipRowWidth <= 0 || chipPillWidth <= 0 || widths.some((width) => !width)) return chipCandidates;
+    const count = chipsThatFit({
+      chipWidths: widths as number[],
+      gap: ACTIVITY_CHIP_GAP,
+      keepFirst: chipCandidates[0]?.id === chipAnchorId,
+      maxRows: chipRowBudget,
+      pillWidth: chipPillWidth,
+      rowWidth: chipRowWidth
+    });
+    return chipCandidates.slice(0, count);
+  }, [chipAnchorId, chipCandidates, chipPillWidth, chipRowBudget, chipRowWidth, chipWidths]);
+  const recordChipWidth = (id: string, width: number) => {
+    const rounded = Math.ceil(width);
+    setChipWidths((current) => (current[id] === rounded ? current : { ...current, [id]: rounded }));
   };
   const historicalSuggestions = useMemo(
     () => buildHistoricalEntrySuggestions(normalizedHistoricalEntries, {
@@ -1794,7 +1806,6 @@ export function ActiveTimerEditSheet({
     );
     setSelectedCategoryId(patch.categoryId);
     setChipAnchorId(patch.categoryId);
-    setChipTrim(0);
     setSelectedTagNames(patch.tagNames);
     setValidationError(null);
     if (!requiresPersistence || !onApplySuggestion) {
@@ -2611,10 +2622,26 @@ export function ActiveTimerEditSheet({
                   <Text {...mobileTextProps("counter")} style={[sheetStyles.sectionEyebrow, { color: theme.textMuted }]}>ACTIVITY</Text>
                   <View
                     accessibilityLabel="Activity"
-                    onLayout={(event) => handleChipWrapLayout(event.nativeEvent.layout.height)}
+                    onLayout={(event) => {
+                      const width = Math.floor(event.nativeEvent.layout.width);
+                      setChipRowWidth((current) => (current === width ? current : width));
+                    }}
                     style={sheetStyles.chipWrap}
                     testID="time-entry-activity-chips"
                   >
+                    {/* Measures every candidate chip off screen, so the visible row can be fitted. */}
+                    <View
+                      accessibilityElementsHidden
+                      importantForAccessibility="no-hide-descendants"
+                      pointerEvents="none"
+                      style={sheetStyles.chipMeasure}
+                    >
+                      {chipCandidates.map((category) => (
+                        <View key={category.id} onLayout={(event) => recordChipWidth(category.id, event.nativeEvent.layout.width)}>
+                          <CategoryChip category={category} selected={selectedCategoryId === category.id} theme={theme} onPress={() => undefined} />
+                        </View>
+                      ))}
+                    </View>
                     {chipActivities.map((category) => (
                       <CategoryChip
                         key={category.id}
@@ -2635,8 +2662,8 @@ export function ActiveTimerEditSheet({
                       accessibilityRole="button"
                       hitSlop={{ top: 6, bottom: 6 }}
                       onLayout={(event) => {
-                        const height = Math.round(event.nativeEvent.layout.height);
-                        setChipRowHeight((current) => (current === height ? current : height));
+                        const width = Math.ceil(event.nativeEvent.layout.width);
+                        setChipPillWidth((current) => (current === width ? current : width));
                       }}
                       onPress={() => {
                         dismissTransientEditingSurfaces();
@@ -2923,7 +2950,6 @@ export function ActiveTimerEditSheet({
             onPick={(activityId) => {
               setSelectedCategoryId(activityId);
               setChipAnchorId(activityId);
-              setChipTrim(0);
             }}
             recentIds={recentActivities}
             reduceMotion={reduceMotion}
@@ -3157,6 +3183,7 @@ const sheetStyles = StyleSheet.create({
   donePillText: { fontSize: 14, fontWeight: "600" },
   sectionEyebrow: { fontSize: 11, fontWeight: "600", letterSpacing: 0.9 },
   chipWrap: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
+  chipMeasure: { flexDirection: "row", left: 0, opacity: 0, position: "absolute", top: 0 },
   chip: {
     alignItems: "center",
     borderRadius: 999,

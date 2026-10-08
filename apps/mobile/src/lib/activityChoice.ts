@@ -100,3 +100,47 @@ export function canCreateActivity(activities: readonly ChoosableActivity[], quer
   const lower = name.toLocaleLowerCase();
   return !activities.some((activity) => activity.name.trim().toLocaleLowerCase() === lower);
 }
+
+/** How many wrapped rows a sequence of items of these widths takes in a row of `rowWidth`. */
+export function wrappedRowCount(widths: readonly number[], rowWidth: number, gap: number) {
+  if (widths.length === 0) return 0;
+  let rows = 1;
+  let x = 0;
+  for (const width of widths) {
+    const w = Math.min(width, rowWidth);
+    if (x === 0) {
+      x = w;
+    } else if (x + gap + w <= rowWidth + 0.5) {
+      x += gap + w;
+    } else {
+      rows += 1;
+      x = w;
+    }
+  }
+  return rows;
+}
+
+/**
+ * The largest number of leading chips that, followed by the All-activities pill, wraps into at
+ * most `maxRows` rows. The chosen activity (`keepFirst`) is always kept, truncating if it must.
+ */
+export function chipsThatFit({
+  chipWidths,
+  gap,
+  keepFirst,
+  maxRows,
+  pillWidth,
+  rowWidth,
+}: {
+  chipWidths: readonly number[];
+  gap: number;
+  keepFirst: boolean;
+  maxRows: number;
+  pillWidth: number;
+  rowWidth: number;
+}) {
+  for (let count = chipWidths.length; count > 0; count -= 1) {
+    if (wrappedRowCount([...chipWidths.slice(0, count), pillWidth], rowWidth, gap) <= maxRows) return count;
+  }
+  return keepFirst && chipWidths.length > 0 ? 1 : 0;
+}

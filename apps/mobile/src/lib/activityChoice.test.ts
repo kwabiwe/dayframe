@@ -60,3 +60,19 @@ describe("canCreateActivity", () => {
     expect(canCreateActivity(all, "Pottery")).toBe(true);
   });
 });
+
+describe("chipsThatFit", () => {
+  it("keeps the most leading chips that wrap, with the pill, into the row budget", async () => {
+    const { chipsThatFit, wrappedRowCount } = await import("./activityChoice");
+    expect(wrappedRowCount([100, 100, 100], 320, 8)).toBe(1);
+    expect(wrappedRowCount([100, 100, 100, 100], 320, 8)).toBe(2);
+    // Seven 120-point chips: two per 361-point row. With a 170-point pill, two rows hold three chips.
+    const seven = Array(7).fill(120);
+    expect(chipsThatFit({ chipWidths: seven, gap: 8, keepFirst: true, maxRows: 2, pillWidth: 170, rowWidth: 361 })).toBe(3);
+    expect(chipsThatFit({ chipWidths: seven, gap: 8, keepFirst: true, maxRows: 1, pillWidth: 170, rowWidth: 361 })).toBe(1);
+    // A chosen chip too long for one row with the pill is still kept (it truncates).
+    expect(chipsThatFit({ chipWidths: [300], gap: 8, keepFirst: true, maxRows: 1, pillWidth: 170, rowWidth: 361 })).toBe(1);
+    expect(chipsThatFit({ chipWidths: [300], gap: 8, keepFirst: false, maxRows: 1, pillWidth: 170, rowWidth: 361 })).toBe(0);
+    expect(chipsThatFit({ chipWidths: [90, 90], gap: 8, keepFirst: false, maxRows: 2, pillWidth: 170, rowWidth: 361 })).toBe(2);
+  });
+});

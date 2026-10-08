@@ -48,13 +48,14 @@ describe("time-entry sheet activity chips", () => {
     expect(sheet).toContain("const ACTIVITY_CHIP_LIMIT_BY_DENSITY = { regular: 7, compact: 5, condensed: 3 } as const;");
     // The order is anchored when the sheet opens (and after a suggestion or a picker pick), never on
     // a chip tap, so the chip under the finger never moves.
-    expect(sheet).toContain("activityChips(categories, chipAnchorId, recentActivities, chipLimit)");
+    expect(sheet).toContain("activityChips(categories, chipAnchorId, recentActivities, ACTIVITY_CHIP_LIMIT_BY_DENSITY[chipDensity])");
     expect(sheet).toMatch(/setSelectedCategoryId\(snapshot\.categoryId\);\s*setChipAnchorId\(snapshot\.categoryId\);/);
     expect(sheet).toMatch(/onPick=\{\(activityId\) => \{\s*setSelectedCategoryId\(activityId\);\s*setChipAnchorId\(activityId\);/);
-    // A two-row budget (one when condensed), trimmed on layout so Discard/Stop stay on screen.
+    // A two-row budget (one when condensed): every candidate is measured in a hidden row and the
+    // visible row shows the most leading chips that fit with All activities (the chosen one stays).
     expect(sheet).toContain("const ACTIVITY_CHIP_ROWS_BY_DENSITY = { regular: 2, compact: 2, condensed: 1 } as const;");
-    expect(sheet).toContain("onLayout={(event) => handleChipWrapLayout(event.nativeEvent.layout.height)}");
-    expect(sheet).toContain("if (height > allowed) setChipTrim((trim) => trim + 1);");
+    expect(sheet).toMatch(/const count = chipsThatFit\(\{[\s\S]*?keepFirst: chipCandidates\[0\]\?\.id === chipAnchorId,[\s\S]*?maxRows: chipRowBudget,/);
+    expect(sheet).toContain("onLayout={(event) => recordChipWidth(category.id, event.nativeEvent.layout.width)}");
     // Tapping the chosen activity again clears it; there is no separate "No activity" chip.
     expect(sheet).toContain("setSelectedCategoryId((current) => (current === category.id ? null : category.id));");
     expect(sheet).not.toContain('"time-entry-category-clear"');
