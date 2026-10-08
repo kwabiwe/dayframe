@@ -88,7 +88,14 @@ describe("mobile tag interaction contract", () => {
     expect(metadata).toContain('fill={color}');
     expect(metadata).toContain('fillRule="evenodd"');
     expect(metadata).toContain('accessibilityLabel={`Remove tag ${tagName}`}');
-    expect(sheet).toContain("onPressTag={(tagName) => {");
+    // The sheet shows the prototype's "#tag ×" chips (draft-only removal), then "+ Tag".
+    expect(sheet).toContain("accessibilityLabel={`Remove tag ${tagName}`}");
+    expect(sheet).toContain("#{tagName}");
+    expect(sheet).toContain("> ×</Text>");
+    expect(sheet.indexOf("#{tagName}")).toBeLessThan(sheet.indexOf('accessibilityLabel="Add a tag"'));
+    // Each chip and + Tag keep a 44-point effective target (32 points plus 6 above and below).
+    expect(sheet).toMatch(/tagChip: \{[^}]*minHeight: 32, minWidth: 44/);
+    expect(sheet.match(/hitSlop=\{\{ top: 6, bottom: 6 \}\}/g)?.length).toBeGreaterThanOrEqual(4);
     expect(sheet).toContain("tagNames: appliedTagNames");
   });
 

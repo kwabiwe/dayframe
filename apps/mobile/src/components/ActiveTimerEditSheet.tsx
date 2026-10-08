@@ -55,7 +55,6 @@ import {
   HISTORICAL_SUGGESTION_ROLLBACK_ANNOUNCEMENT,
   historicalSuggestionAppliedAnnouncement
 } from "@/lib/historicalSuggestionsAccessibility";
-import { TagMetadata } from "@/components/TagMetadata";
 import {
   SwipeDismissSheet,
   type SwipeDismissSheetHandle
@@ -2567,37 +2566,53 @@ export function ActiveTimerEditSheet({
                     style={styles.tagEditorFooter}
                     testID="time-entry-description-obscured-footer"
                   >
-                    <Pressable
-                      accessibilityHint="Focuses Description and starts tag entry"
-                      accessibilityLabel="Add a tag"
-                      accessibilityRole="button"
-                      disabled={busy}
-                      hitSlop={8}
-                      onPress={startTagEntry}
-                      onPressIn={beginTagEntryPress}
-                      style={({ pressed }) => [
-                        styles.tagAddButton,
-                        pressed && !busy ? styles.buttonPressed : null,
-                        busy ? styles.buttonDisabled : null
-                      ]}
-                    >
-                      <Text {...mobileTextProps("control")} style={styles.tagAddButtonText}>Add a tag</Text>
-                    </Pressable>
-                    {appliedTagNames.length > 0 ? (
-                      <TagMetadata
-                        active
-                        onPressTag={(tagName) => {
+                    {appliedTagNames.map((tagName, index) => (
+                      <Pressable
+                        accessibilityHint="Removes this tag from the draft; save the entry to confirm"
+                        accessibilityLabel={`Remove tag ${tagName}`}
+                        accessibilityRole="button"
+                        disabled={busy}
+                        key={`${tagName}:${index}`}
+                        onPress={() => {
                           const normalizedName = normalizeTagName(tagName).normalizedName;
                           setSelectedTagNames((current) => current.filter(
                             (name) => normalizeTagName(name).normalizedName !== normalizedName
                           ));
                           setValidationError(null);
                         }}
-                        styles={styles}
-                        tagNames={appliedTagNames}
-                        theme={theme}
-                      />
-                    ) : null}
+                        hitSlop={{ top: 6, bottom: 6 }}
+                        style={({ pressed }) => [
+                          sheetStyles.tagChip,
+                          { backgroundColor: theme.surfaceMuted },
+                          pressed && !busy ? styles.buttonPressed : null,
+                          busy ? styles.buttonDisabled : null
+                        ]}
+                        testID={`time-entry-tag-${index}`}
+                      >
+                        <Text {...mobileTextProps("metadata")} numberOfLines={1} style={[sheetStyles.tagChipText, sheetStyles.tagChipName, { color: theme.textPrimary }]}>
+                          #{tagName}
+                        </Text>
+                        <Text {...mobileTextProps("metadata")} style={[sheetStyles.tagChipText, { color: theme.textSecondary }]}> ×</Text>
+                      </Pressable>
+                    ))}
+                    <Pressable
+                      accessibilityHint="Focuses Description and starts tag entry"
+                      accessibilityLabel="Add a tag"
+                      accessibilityRole="button"
+                      disabled={busy}
+                      hitSlop={{ top: 6, bottom: 6 }}
+                      onPress={startTagEntry}
+                      onPressIn={beginTagEntryPress}
+                      style={({ pressed }) => [
+                        sheetStyles.tagChip,
+                        { borderColor: theme.borderStrong, borderWidth: 1.5 },
+                        pressed && !busy ? styles.buttonPressed : null,
+                        busy ? styles.buttonDisabled : null
+                      ]}
+                      testID="time-entry-tag-add"
+                    >
+                      <Text {...mobileTextProps("metadata")} style={[sheetStyles.tagChipText, { color: theme.textSecondary }]}>+ Tag</Text>
+                    </Pressable>
                   </View>
                 </View>
 
@@ -3184,6 +3199,11 @@ const sheetStyles = StyleSheet.create({
   sectionEyebrow: { fontSize: 11, fontWeight: "600", letterSpacing: 0.9 },
   chipWrap: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
   chipMeasure: { flexDirection: "row", left: 0, opacity: 0, position: "absolute", top: 0 },
+  // 32 points tall plus 6 of hit slop above and below: a 44-point target, as the old control had.
+  tagChip: { alignItems: "center", borderRadius: 10, flexDirection: "row", justifyContent: "center", maxWidth: "100%", minHeight: 32, minWidth: 44, paddingHorizontal: 10 },
+  tagChipText: { fontSize: 13, fontWeight: "600" },
+  // A long name truncates; the × after it always stays visible.
+  tagChipName: { flexShrink: 1, minWidth: 0 },
   chip: {
     alignItems: "center",
     borderRadius: 999,
