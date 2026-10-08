@@ -979,7 +979,10 @@ export default function SettingsScreen() {
           text: "Discard",
           style: "destructive",
           onPress: () => {
-            void discardReviewSyncIssue(clientMutationId).then(() => refreshReviewDiagnostics()).catch(() => setSyncHelpNote("Couldn't discard that change. Nothing was removed."));
+            void discardReviewSyncIssue(clientMutationId).then(
+              () => { void refreshReviewDiagnostics().catch(() => undefined); },
+              () => setSyncHelpNote("Couldn't discard that change. Nothing was removed.")
+            );
           }
         }
       ]
@@ -996,7 +999,10 @@ export default function SettingsScreen() {
           text: "Discard",
           style: "destructive",
           onPress: () => {
-            void discardTimeEntrySyncIssue(clientCommandId).then(() => refreshTimeEntryDiagnostics()).catch(() => setSyncHelpNote("Couldn't discard that change. Nothing was removed."));
+            void discardTimeEntrySyncIssue(clientCommandId).then(
+              () => { void refreshTimeEntryDiagnostics().catch(() => undefined); },
+              () => setSyncHelpNote("Couldn't discard that change. Nothing was removed.")
+            );
           }
         }
       ]
@@ -1004,12 +1010,15 @@ export default function SettingsScreen() {
   }
 
   function retryTimeEntryIssue(clientCommandId: string) {
-    void retryTimeEntrySyncIssue(clientCommandId).then(async (retried) => {
-      await refreshTimeEntryDiagnostics();
-      if (retried) {
-        setSyncStatusMessageAndCache("Retrying the saved time entry change...");
-      }
-    }).catch(() => setSyncHelpNote("Couldn't retry that change. It's still saved on this iPhone."));
+    // Only the retry itself failing gets the note; a failed refresh afterwards is retried by the
+    // diagnostics subscription.
+    void retryTimeEntrySyncIssue(clientCommandId).then(
+      (retried) => {
+        void refreshTimeEntryDiagnostics().catch(() => undefined);
+        if (retried) setSyncStatusMessageAndCache("Retrying the saved time entry change...");
+      },
+      () => setSyncHelpNote("Couldn't retry that change. It's still saved on this iPhone.")
+    );
   }
 
   function confirmDiscardTimerStopIssue(clientEventId: string) {
@@ -1022,7 +1031,10 @@ export default function SettingsScreen() {
           text: "Discard Stop",
           style: "destructive",
           onPress: () => {
-            void discardTimerStopSyncIssue(clientEventId).then(() => refreshTimerStopDiagnostics()).catch(() => setSyncHelpNote("Couldn't discard that Stop. Nothing was removed."));
+            void discardTimerStopSyncIssue(clientEventId).then(
+              () => { void refreshTimerStopDiagnostics().catch(() => undefined); },
+              () => setSyncHelpNote("Couldn't discard that Stop. Nothing was removed.")
+            );
           }
         }
       ]
@@ -1030,12 +1042,15 @@ export default function SettingsScreen() {
   }
 
   function retryTimerStopIssue(clientEventId: string) {
-    void retryTimerStopSyncIssue(clientEventId).then(async (retried) => {
-      await refreshTimerStopDiagnostics();
-      if (retried) {
-        setSyncStatusMessageAndCache("Retrying the saved timer Stop...");
-      }
-    }).catch(() => setSyncHelpNote("Couldn't retry that Stop. It's still saved on this iPhone."));
+    // Only the retry itself failing gets the note; a failed refresh afterwards is retried by the
+    // diagnostics subscription.
+    void retryTimerStopSyncIssue(clientEventId).then(
+      (retried) => {
+        void refreshTimerStopDiagnostics().catch(() => undefined);
+        if (retried) setSyncStatusMessageAndCache("Retrying the saved timer Stop...");
+      },
+      () => setSyncHelpNote("Couldn't retry that Stop. It's still saved on this iPhone.")
+    );
   }
 
   function confirmClearTimeEntryQuarantine() {
@@ -1048,7 +1063,10 @@ export default function SettingsScreen() {
           text: "Clear",
           style: "destructive",
           onPress: () => {
-            void clearTimeEntryOutboxQuarantine().then(() => refreshTimeEntryDiagnostics()).catch(() => setSyncHelpNote("Couldn't clear those records. Nothing was removed."));
+            void clearTimeEntryOutboxQuarantine().then(
+              () => { void refreshTimeEntryDiagnostics().catch(() => undefined); },
+              () => setSyncHelpNote("Couldn't clear those records. Nothing was removed.")
+            );
           }
         }
       ]
@@ -1065,7 +1083,10 @@ export default function SettingsScreen() {
           text: "Clear",
           style: "destructive",
           onPress: () => {
-            void clearDeviceTimeEntryOutboxQuarantine().then(() => refreshTimeEntryDiagnostics()).catch(() => setSyncHelpNote("Couldn't clear those records. Nothing was removed."));
+            void clearDeviceTimeEntryOutboxQuarantine().then(
+              () => { void refreshTimeEntryDiagnostics().catch(() => undefined); },
+              () => setSyncHelpNote("Couldn't clear those records. Nothing was removed.")
+            );
           }
         }
       ]
