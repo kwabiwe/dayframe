@@ -9,6 +9,27 @@ export const REVIEW_DECK_VISIBLE_CARDS = 3;
 export const REVIEW_DECK_DEPTH_OFFSET = 14;
 export const REVIEW_DECK_DEPTH_SCALE = 0.05;
 
+/** Swipe (Blocks parity step 5b, prototype `wireCard`): past ±110 points a release decides. */
+export const REVIEW_DECK_THROW_THRESHOLD = 110;
+/** A decided card flies this far in 340 ms with cubic-bezier(.3, .6, .4, 1); it tilts dx/18°. */
+export const REVIEW_DECK_FLING = { distance: 520, durationMs: 340, easing: [0.3, 0.6, 0.4, 1] as const, lift: 100 };
+/** Undo flies the card back in from this far out. */
+export const REVIEW_DECK_RETURN_FROM = 420;
+export const REVIEW_DECK_TILT_DIVISOR = 18;
+/** Vertical drag follows the finger at 40 %. */
+export const REVIEW_DECK_VERTICAL_FOLLOW = 0.4;
+
+/**
+ * Which way a dragged card is armed. The card must sit past the threshold and the finger must have
+ * travelled past it in the same direction, so a card caught on its way home does not arm at once.
+ */
+export function reviewDeckArmDirection(cardX: number, fingerTravel: number): -1 | 0 | 1 {
+  "worklet";
+  if (cardX > REVIEW_DECK_THROW_THRESHOLD && fingerTravel > REVIEW_DECK_THROW_THRESHOLD) return 1;
+  if (cardX < -REVIEW_DECK_THROW_THRESHOLD && fingerTravel < -REVIEW_DECK_THROW_THRESHOLD) return -1;
+  return 0;
+}
+
 type ReviewKindInput = {
   eventSource: string | null;
   eventType: string | null;

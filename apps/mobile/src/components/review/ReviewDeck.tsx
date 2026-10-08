@@ -1,26 +1,55 @@
 import { memo, useEffect, useState, type ReactNode } from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
+import { Gesture, GestureDetector } from "react-native-gesture-handler";
 import Reanimated, {
+  Easing,
   ReduceMotion,
+  cancelAnimation,
+  runOnJS,
   useAnimatedStyle,
   useSharedValue,
-  withSpring
+  withDelay,
+  withSpring,
+  withTiming
 } from "react-native-reanimated";
 import Svg, { Circle, G, Path, Rect, Text as SvgText } from "react-native-svg";
 import { DAYFRAME_APP_ICONS, DAYFRAME_BLOCKS, type DayframeGlyph } from "@dayframe/shared";
 import { DayframeIcon } from "@/components/icons/DayframeIcon";
 import { recordMobileLayout, type MobileAccessibilityDiagnostic } from "@/components/accessibility/diagnostics";
 import { BLOCKS_SPRING } from "@/lib/blocksMotion";
+import { playHaptic } from "@/lib/haptics";
 import { localPresenceEntering, localPresenceExiting } from "@/lib/motion";
 import type { MobileTheme } from "@/lib/mobileTheme";
 import { MOBILE_DISPLAY_FONT, mobileTextProps } from "@/lib/mobileTypography";
 import {
   REVIEW_DECK_DEPTH_OFFSET,
   REVIEW_DECK_DEPTH_SCALE,
+  REVIEW_DECK_FLING,
+  REVIEW_DECK_RETURN_FROM,
+  REVIEW_DECK_THROW_THRESHOLD,
+  reviewDeckArmDirection,
+  REVIEW_DECK_TILT_DIVISOR,
+  REVIEW_DECK_VERTICAL_FOLLOW,
   REVIEW_DECK_VISIBLE_CARDS,
   type ReviewDeckPicture,
   type ReviewDeckSourceIcon
 } from "@/lib/reviewDeck";
+
+/** Height kept free under the last control for the Undo toast (52-point toast, 12 gap, slack for large text). */
+export const REVIEW_DECK_TOAST_RESERVE = 84;
+
+export type ReviewDeckDirection = 1 | -1;
+/** A Log it / Skip button press asks the top card to fly out as if thrown. */
+export type ReviewDeckThrowRequest = { key: string; direction: ReviewDeckDirection; token: number };
+/** Undo asks the returning card to fly back in from the side it left. */
+export type ReviewDeckReturn = { key: string; direction: ReviewDeckDirection; token: number };
+
+const flingEasing = Easing.bezier(...REVIEW_DECK_FLING.easing);
+const landSpring = { ...BLOCKS_SPRING.land, reduceMotion: ReduceMotion.Never };
+
+function playArmTick() {
+  playHaptic("tick");
+}
 
 export type ReviewDeckCardModel = {
   key: string;
@@ -43,6 +72,13 @@ export type ReviewDeckCardModel = {
   /** The card's More menu (Edit details, Dismiss suggestion). */
   moreLabel: string | null;
   menuOpen: boolean;
+  /** Swiping right logs; swiping left skips (or, for a card that cannot be skipped, defers). */
+  canLog: boolean;
+  canSkip: boolean;
+  /** Skip only moves the card behind the rest for this visit ("Skip for now"). */
+  skipDefers: boolean;
+  /** React key: changes when a deferred card comes back, so it returns as a fresh card. */
+  renderKey?: string;
 };
 
 const SOURCE_GLYPH: Record<ReviewDeckSourceIcon, DayframeGlyph> = {
@@ -192,9 +228,13 @@ function ReviewDeckCardView({
   onBodyHeight,
   onEdit,
   onMore,
+  onThrow,
+  onThrowStart,
   pictureHeight,
   reduceMotion,
-  theme
+  returnFrom,
+  theme,
+  throwRequest
 }: {
   card: ReviewDeckCardModel;
   depth: number;
@@ -203,9 +243,15 @@ function ReviewDeckCardView({
   onBodyHeight: (height: number) => void;
   onEdit: () => void;
   onMore: () => void;
+  /** Called as the card is thrown: the decision is taken here. */
+  onThrowStart: (direction: ReviewDeckDirection) => void;
+  /** Called once the card has left (after the fling, or at once with Reduce Motion). */
+  onThrow: (direction: ReviewDeckDirection) => void;
   pictureHeight: number;
   reduceMotion: boolean;
+  returnFrom: ReviewDeckReturn | null;
   theme: MobileTheme;
+  throwRequest: ReviewDeckThrowRequest | null;
 }) {
   // One owner per card: its depth in the stack. A card moving up after the top one is decided lands
   // with the Blocks `land` spring; Reduce Motion moves it at once.
@@ -215,18 +261,119 @@ function ReviewDeckCardView({
       ? depth
       : withSpring(depth, { ...BLOCKS_SPRING.land, reduceMotion: ReduceMotion.Never });
   }, [animatedDepth, depth, reduceMotion]);
-  const depthStyle = useAnimatedStyle(() => ({
+  const top = depth === 0;
+
+  // The top card's drag (Blocks parity step 5b): one Pan owner on the UI thread. It follows the
+  // finger (40 % vertically, tilting dx/18°), arms past ±110 with one tick, and on release either
+  // flies out (340 ms) and reports the throw, or springs home with `land`.
+  const returning = returnFrom && !reduceMotion ? returnFrom.direction * REVIEW_DECK_RETURN_FROM : 0;
+  const dragX = useSharedValue(returning);
+  const dragY = useSharedValue(0);
+  const armed = useSharedValue(0);
+  const thrown = useSharedValue(false);
+  useEffect(() => {
+    // The `sheet` spring settles without overshoot, so the opposite stamp never flashes on the way in.
+    if (returning) dragX.value = withSpring(0, { ...BLOCKS_SPRING.sheet, reduceMotion: ReduceMotion.Never });
+    // Plays once, when Undo brings this card back.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  // A request already present when this card mounts (e.g. it returns by Undo) is never replayed.
+  const lastThrowToken = useSharedValue(throwRequest?.token ?? 0);
+  const { canLog, canSkip } = card;
+  function flyOut(direction: ReviewDeckDirection) {
+    "worklet";
+    if (thrown.value) return;
+    thrown.value = true;
+    // The decision is reported as the throw starts, so leaving Review mid-flight still saves it;
+    // the flight is only visual, and its end lets the next card land.
+    runOnJS(onThrowStart)(direction);
+    if (reduceMotion) {
+      runOnJS(onThrow)(direction);
+      return;
+    }
+    dragY.value = withTiming(dragY.value - REVIEW_DECK_FLING.lift, { duration: REVIEW_DECK_FLING.durationMs, easing: flingEasing });
+    dragX.value = withTiming(
+      direction * REVIEW_DECK_FLING.distance,
+      { duration: REVIEW_DECK_FLING.durationMs, easing: flingEasing },
+      (finished) => {
+        if (finished) runOnJS(onThrow)(direction);
+      }
+    );
+  }
+  useEffect(() => {
+    if (!top || !throwRequest || throwRequest.key !== card.key || lastThrowToken.value === throwRequest.token) return;
+    lastThrowToken.value = throwRequest.token;
+    // A button press for a direction the card can no longer take (its sync state changed in the
+    // same moment) does nothing rather than throw a card nobody will catch.
+    if (throwRequest.direction === 1 ? !canLog : !canSkip) return;
+    flyOut(throwRequest.direction);
+    // flyOut reads only shared values and the latest props.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [throwRequest, top, card.key, canLog, canSkip]);
+  const dragStartX = useSharedValue(0);
+  const dragStartY = useSharedValue(0);
+  const pan = Gesture.Pan()
+    .enabled(top)
+    .activeOffsetX([-12, 12])
+    .failOffsetY([-14, 14])
+    .onStart(() => {
+      if (thrown.value) return;
+      // Catching a card that is still springing home (or flying back after Undo) continues from
+      // where it is instead of snapping.
+      cancelAnimation(dragX);
+      cancelAnimation(dragY);
+      dragStartX.value = dragX.value;
+      dragStartY.value = dragY.value;
+    })
+    .onUpdate((event) => {
+      if (thrown.value) return;
+      const x = dragStartX.value + event.translationX;
+      // A direction the card cannot take resists instead of arming.
+      const blocked = (x > 0 && !canLog) || (x < 0 && !canSkip);
+      dragX.value = blocked ? x * 0.2 : x;
+      dragY.value = dragStartY.value + event.translationY;
+      const next = reviewDeckArmDirection(dragX.value, event.translationX);
+      if (next !== armed.value) {
+        armed.value = next;
+        if (next !== 0) runOnJS(playArmTick)();
+      }
+    })
+    .onEnd((_event, success) => {
+      if (thrown.value) return;
+      const direction = armed.value as -1 | 0 | 1;
+      armed.value = 0;
+      // A cancelled gesture (interrupted, app backgrounded) never decides: the card goes home.
+      // A direction the card can no longer take (its sync state changed mid-drag) goes home too.
+      const allowed = direction === 1 ? canLog : canSkip;
+      if (direction !== 0 && success && allowed) {
+        flyOut(direction);
+        return;
+      }
+      dragX.value = reduceMotion ? 0 : withSpring(0, landSpring);
+      dragY.value = reduceMotion ? 0 : withSpring(0, landSpring);
+    });
+  const cardStyle = useAnimatedStyle(() => ({
     transform: [
-      { translateY: animatedDepth.value * REVIEW_DECK_DEPTH_OFFSET },
+      { translateX: dragX.value },
+      { translateY: animatedDepth.value * REVIEW_DECK_DEPTH_OFFSET + dragY.value * REVIEW_DECK_VERTICAL_FOLLOW },
+      // Reduce Motion: the card follows the finger without tilting.
+      { rotate: reduceMotion ? "0deg" : `${dragX.value / REVIEW_DECK_TILT_DIVISOR}deg` },
       { scale: 1 - animatedDepth.value * REVIEW_DECK_DEPTH_SCALE }
     ]
   }));
-  const top = depth === 0;
+  const logStampStyle = useAnimatedStyle(() => ({
+    opacity: Math.min(1, Math.max(0, dragX.value / REVIEW_DECK_THROW_THRESHOLD))
+  }));
+  const skipStampStyle = useAnimatedStyle(() => ({
+    opacity: Math.min(1, Math.max(0, -dragX.value / REVIEW_DECK_THROW_THRESHOLD))
+  }));
 
   return (
+    <GestureDetector gesture={pan}>
     <Reanimated.View
       accessibilityElementsHidden={!top}
-      entering={localPresenceEntering(reduceMotion)}
+      // A card brought back by Undo flies in instead of fading in.
+      entering={returnFrom && !reduceMotion ? undefined : localPresenceEntering(reduceMotion)}
       exiting={localPresenceExiting(reduceMotion)}
       importantForAccessibility={top ? "auto" : "no-hide-descendants"}
       pointerEvents={top ? "box-none" : "none"}
@@ -238,7 +385,7 @@ function ReviewDeckCardView({
           shadowColor: theme.shadow,
           zIndex: REVIEW_DECK_VISIBLE_CARDS - depth
         },
-        depthStyle
+        cardStyle
       ]}
       onLayout={(event) => recordMobileLayout(diagnostic, "review-deck.card", event)}
       testID={top ? "review-deck-card" : undefined}
@@ -289,6 +436,24 @@ function ReviewDeckCardView({
                 <DayframeIcon color={theme.textPrimary} glyph={DAYFRAME_APP_ICONS.more} size={18} />
               </Pill>
             </Pressable>
+          ) : null}
+          {top ? (
+            <>
+              <Reanimated.View
+                pointerEvents="none"
+                style={[deckStyles.stamp, deckStyles.stampLog, { backgroundColor: theme.success }, logStampStyle]}
+              >
+                <Text accessible={false} style={[deckStyles.stampText, { color: "#04130D" }]}>LOG IT</Text>
+              </Reanimated.View>
+              <Reanimated.View
+                pointerEvents="none"
+                style={[deckStyles.stamp, deckStyles.stampSkip, { backgroundColor: theme.surfaceMuted }, skipStampStyle]}
+              >
+                <Text accessible={false} style={[deckStyles.stampText, { color: theme.textPrimary }]}>
+                  {card.skipDefers ? "LATER" : "SKIP"}
+                </Text>
+              </Reanimated.View>
+            </>
           ) : null}
         </View>
         <View
@@ -356,6 +521,7 @@ function ReviewDeckCardView({
         </View>
       </View>
     </Reanimated.View>
+    </GestureDetector>
   );
 }
 
@@ -365,15 +531,23 @@ export function ReviewDeckStack({
   diagnostic,
   onEdit,
   onMore,
+  onThrow,
+  onThrowStart,
   reduceMotion,
-  theme
+  returnRequest = null,
+  theme,
+  throwRequest = null
 }: {
   cards: readonly ReviewDeckCardModel[];
   diagnostic?: MobileAccessibilityDiagnostic;
   onEdit: (key: string) => void;
   onMore: (key: string) => void;
+  onThrow: (key: string, direction: ReviewDeckDirection) => void;
+  onThrowStart: (key: string, direction: ReviewDeckDirection) => void;
   reduceMotion: boolean;
+  returnRequest?: ReviewDeckReturn | null;
   theme: MobileTheme;
+  throwRequest?: ReviewDeckThrowRequest | null;
 }) {
   const visible = cards.slice(0, REVIEW_DECK_VISIBLE_CARDS);
   // The card fills the deck: its body keeps its natural height and the picture takes what is
@@ -397,16 +571,20 @@ export function ReviewDeckStack({
           card={card}
           depth={depth}
           diagnostic={depth === 0 ? diagnostic : undefined}
-          key={card.key}
+          key={card.renderKey ?? card.key}
           onBodyHeight={(height) => {
             const rounded = Math.ceil(height);
             setBodyHeights((current) => (current[card.key] === rounded ? current : { ...current, [card.key]: rounded }));
           }}
           onEdit={() => onEdit(card.key)}
           onMore={() => onMore(card.key)}
+          onThrow={(direction) => onThrow(card.key, direction)}
+          onThrowStart={(direction) => onThrowStart(card.key, direction)}
           pictureHeight={pictureHeight}
           reduceMotion={reduceMotion}
+          returnFrom={returnRequest?.key === card.key ? returnRequest : null}
           theme={theme}
+          throwRequest={depth === 0 ? throwRequest : null}
         />
       ))}
     </View>
@@ -521,35 +699,81 @@ export function ReviewDeckActions({
   );
 }
 
+const popSpring = { ...BLOCKS_SPRING.pop, reduceMotion: ReduceMotion.Never };
+
+/** One finished block dropping in (prototype: from -260 points, tilted -12°, `land`, 80 + i×90 ms). */
+function FinishedBlock({ color, index, reduceMotion }: { color: string; index: number; reduceMotion: boolean }) {
+  const progress = useSharedValue(reduceMotion ? 1 : 0);
+  useEffect(() => {
+    if (reduceMotion) return;
+    progress.value = withDelay(80 + index * 90, withSpring(1, landSpring));
+    // Plays once when "All framed" appears.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  const style = useAnimatedStyle(() => ({
+    opacity: Math.min(1, progress.value * 2),
+    transform: [{ translateY: (1 - progress.value) * -260 }, { rotate: `${(1 - progress.value) * -12}deg` }]
+  }));
+  return (
+    <Reanimated.View
+      style={[deckStyles.finishedBlock, { backgroundColor: color, height: 36 + ((index * 37) % 70) }, style]}
+    />
+  );
+}
+
 /** The finished deck: "All framed" with this visit's logged moments as blocks. */
 export function ReviewDeckFinished({
   blocks,
+  celebrate,
   copy,
+  footer,
   onBack,
+  reduceMotion,
   theme
 }: {
   blocks: readonly string[];
+  /** Only a finish reached by this visit's own decision drops in and plays the haptic. */
+  celebrate: boolean;
   copy: string;
+  footer?: ReactNode;
   onBack: () => void;
+  reduceMotion: boolean;
   theme: MobileTheme;
 }) {
   const colors = blocks.length ? blocks : [theme.borderStrong];
+  const animate = celebrate && !reduceMotion;
+  const titleScale = useSharedValue(animate ? 0.8 : 1);
+  useEffect(() => {
+    if (animate) titleScale.value = withDelay(200, withSpring(1, popSpring));
+    // One success tick once the blocks have landed, only after this visit logged something.
+    const haptic = celebrate && blocks.length ? setTimeout(() => playHaptic("reviewLog"), 300) : null;
+    return () => {
+      if (haptic) clearTimeout(haptic);
+    };
+    // Plays once when "All framed" appears.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  const titleStyle = useAnimatedStyle(() => ({
+    opacity: Math.min(1, (titleScale.value - 0.8) * 5),
+    transform: [{ scale: titleScale.value }]
+  }));
   return (
     <View style={deckStyles.finished} testID="review-deck-finished">
       <View accessibilityElementsHidden importantForAccessibility="no-hide-descendants" style={deckStyles.finishedBlocks}>
         {colors.slice(0, 9).map((color, index) => (
-          <View
-            key={index}
-            style={[deckStyles.finishedBlock, { backgroundColor: color, height: 36 + ((index * 37) % 70) }]}
-          />
+          <FinishedBlock color={color} index={index} key={index} reduceMotion={!animate} />
         ))}
       </View>
-      <Text {...mobileTextProps("screenHeading")} accessibilityRole="header" style={[deckStyles.finishedTitle, { color: theme.textPrimary }]}>
-        All framed
-      </Text>
+      <Reanimated.View style={titleStyle}>
+        <Text {...mobileTextProps("screenHeading")} accessibilityRole="header" style={[deckStyles.finishedTitle, { color: theme.textPrimary }]}>
+          All framed
+        </Text>
+      </Reanimated.View>
       <Text {...mobileTextProps("body")} style={[deckStyles.finishedCopy, { color: theme.textSecondary }]}>
         {copy}
       </Text>
+      {/* The Undo toast hangs from this wrapper, out of flow, so its exit never moves the button. */}
+      <View style={deckStyles.finishedActions}>
       <Pressable
         accessibilityRole="button"
         onPress={onBack}
@@ -560,6 +784,8 @@ export function ReviewDeckFinished({
           Back to Today
         </Text>
       </Pressable>
+      {footer}
+      </View>
     </View>
   );
 }
@@ -644,6 +870,14 @@ const deckStyles = StyleSheet.create({
     gap: 6,
     height: 120
   },
+  finishedActions: {
+    alignItems: "center",
+    alignSelf: "stretch",
+    // Room for the Undo toast that hangs below, always reserved so it stays inside the scroll
+    // area and its exit moves nothing.
+    paddingBottom: REVIEW_DECK_TOAST_RESERVE,
+    position: "relative"
+  },
   finishedButton: {
     alignItems: "center",
     borderRadius: DAYFRAME_BLOCKS.radius.pill,
@@ -722,6 +956,27 @@ const deckStyles = StyleSheet.create({
   },
   reason: {
     fontSize: 12.5
+  },
+  stamp: {
+    borderRadius: 12,
+    opacity: 0,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    position: "absolute",
+    top: 26
+  },
+  stampLog: {
+    right: 18,
+    transform: [{ rotate: "10deg" }]
+  },
+  stampSkip: {
+    left: 18,
+    transform: [{ rotate: "-10deg" }]
+  },
+  stampText: {
+    fontFamily: MOBILE_DISPLAY_FONT.extraBold,
+    fontSize: 24,
+    letterSpacing: 0.5
   },
   round: {
     alignItems: "center",

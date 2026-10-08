@@ -937,6 +937,41 @@ function createStyles(theme: MobileTheme) {
       fontSize: 12
     },
     // Review deck (Blocks parity step 5a): prototype `.push` nav and padding.
+    // Anchored to the round actions: the toast's bottom edge sits 12 points above them.
+    // Above the deck's cards (their zIndex sets a layer position), so the toast is never hidden.
+    reviewDeckActionsAnchor: {
+      position: "relative",
+      zIndex: 20
+    },
+    reviewDeckToast: {
+      bottom: "100%",
+      left: 0,
+      marginBottom: 12,
+      right: 0,
+      zIndex: 20
+    },
+    // Under Back to Today once all is framed.
+    // Under Back to Today, out of flow: the summary stays readable and nothing moves on timeout.
+    // Sits in the space its parent reserves below the last control (paddingBottom 84).
+    reviewDeckToastUnderButton: {
+      bottom: 0,
+      marginBottom: 0
+    },
+    reviewDeckToastLabel: {
+      alignItems: "center",
+      flex: 1,
+      flexDirection: "row",
+      gap: 10,
+      minWidth: 0
+    },
+    reviewDeckToastSwatch: {
+      borderRadius: 4,
+      height: 14,
+      width: 14
+    },
+    reviewDeckToastText: {
+      flexShrink: 1
+    },
     reviewDeckNav: {
       alignItems: "center",
       flexDirection: "row",
@@ -979,6 +1014,14 @@ function createStyles(theme: MobileTheme) {
       alignItems: "center",
       flex: 1,
       justifyContent: "center"
+    },
+    reviewDeckWaitingContent: {
+      alignItems: "center",
+      alignSelf: "stretch",
+      gap: 12,
+      // Room for the Undo toast hanging below (REVIEW_DECK_TOAST_RESERVE in ReviewDeck.tsx).
+      paddingBottom: 84,
+      position: "relative"
     },
     reviewMetaLine: {
       color: theme.textSecondary,

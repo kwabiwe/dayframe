@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   formatReviewDeckWhen,
   orderReviewDeck,
+  reviewDeckArmDirection,
   reviewDeckPicture,
   reviewDeckPosition,
   reviewDeckSource
@@ -88,5 +89,20 @@ describe("reviewDeckPosition", () => {
       accessibilityLabel: "Moment 1 of at least 4"
     });
     expect(reviewDeckPosition({ decided: 3, remaining: 0, exact: true })).toBeNull();
+  });
+});
+
+describe("reviewDeckArmDirection (5b swipe arming)", () => {
+  it("arms once the card and the finger are both past the threshold", () => {
+    expect(reviewDeckArmDirection(130, 130)).toBe(1);
+    expect(reviewDeckArmDirection(-130, -130)).toBe(-1);
+    expect(reviewDeckArmDirection(100, 100)).toBe(0);
+  });
+
+  it("does not arm a card caught on its way home until the finger travels", () => {
+    // Caught at 100 points while springing back; 20 points more puts the card past 110.
+    expect(reviewDeckArmDirection(120, 20)).toBe(0);
+    expect(reviewDeckArmDirection(-120, -20)).toBe(0);
+    expect(reviewDeckArmDirection(230, 120)).toBe(1);
   });
 });

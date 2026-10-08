@@ -28,8 +28,13 @@ import {
   ReviewDeckActions,
   ReviewDeckFinished,
   ReviewDeckStack,
-  type ReviewDeckCardModel
+  type ReviewDeckCardModel,
+  type ReviewDeckDirection,
+  type ReviewDeckReturn,
+  type ReviewDeckThrowRequest
 } from "@/components/review/ReviewDeck";
+import { createReviewDeckHold, reviewDeckProposalSignature, type ReviewDeckHeldDecision } from "@/lib/reviewDeckHold";
+import { playHaptic } from "@/lib/haptics";
 import {
   OverflowMenu,
   type OverflowMenuAction
@@ -50,7 +55,7 @@ import { prepareReviewOverlapCounts, reviewPeerEntries } from "@/lib/reviewPrese
 import { useConnectivity } from "@/lib/connectivity";
 import { pressable, useMobileTheme } from "@/lib/mobileTheme";
 import { mergePersistedMobileTag } from "@/lib/mobileTags";
-import { useResolvedReduceMotionPreference } from "@/lib/motion";
+import { localPresenceEntering, localPresenceExiting, useResolvedReduceMotionPreference } from "@/lib/motion";
 import {
   formatReviewDeckDuration,
   formatReviewDeckWhen,
@@ -179,6 +184,27 @@ export default function ReviewScreen() {
   });
   // Legacy needs-review entries have no skip mutation; Skip moves them behind the rest for this visit.
   const [deferredDeckKeys, setDeferredDeckKeys] = useState<readonly string[]>([]);
+  // A deferred card was thrown off screen; it comes back as a fresh card at the back of the deck.
+  const deferGenerations = useRef(new Map<string, number>());
+  // Blocks parity step 5b: a thrown card is held for Undo before its decision is saved.
+  const [heldDeckDecision, setHeldDeckDecision] = useState<ReviewDeckHeldDecision | null>(null);
+  const [deckThrowRequest, setDeckThrowRequest] = useState<ReviewDeckThrowRequest | null>(null);
+  const [deckReturn, setDeckReturn] = useState<ReviewDeckReturn | null>(null);
+  // The held card stays on screen while it flies out; the cards beneath land when it has gone.
+  const [flyingDeckKey, setFlyingDeckKey] = useState<string | null>(null);
+  // A saved decision stays out of the deck until its SQLite projection drops the card.
+  const [committingDeckKeys, setCommittingDeckKeys] = useState<ReadonlySet<string>>(() => new Set());
+  // Cards this visit decided itself: "All framed" celebrates only when they emptied the deck.
+  const ownDeckDecisionKeys = useRef(new Set<string>());
+  const lastDeckKeys = useRef<readonly string[]>([]);
+  const deckWasFinished = useRef(false);
+  const celebrateDeckFinish = useRef(false);
+  const deckTokenSequence = useRef(0);
+  const commitHeldDeckDecisionRef = useRef<(held: ReviewDeckHeldDecision) => void>(() => undefined);
+  const deckHold = useRef(createReviewDeckHold({
+    onChange: setHeldDeckDecision,
+    onCommit: (held) => commitHeldDeckDecisionRef.current(held)
+  })).current;
   const deckTopKeyRef = useRef<string | null>(null);
   const [reviewMenuState, setReviewMenuState] = useState(CLOSED_REVIEW_MENU_STATE);
   const [reviewAvailabilityMessage, setReviewAvailabilityMessage] = useState<string | null>(null);
@@ -836,9 +862,11 @@ export default function ReviewScreen() {
       }))
     ];
     const deferred = new Set(deferredDeckKeys);
+    const heldKey = heldDeckDecision && heldDeckDecision.key !== flyingDeckKey ? heldDeckDecision.key : null;
+    const hidden = (key: string) => key === heldKey || committingDeckKeys.has(key);
     const ordered = [
-      ...sources.filter((source) => !deferred.has(source.key)),
-      ...deferredDeckKeys.flatMap((key) => sources.filter((source) => source.key === key))
+      ...sources.filter((source) => !deferred.has(source.key) && !hidden(source.key)),
+      ...deferredDeckKeys.flatMap((key) => sources.filter((source) => source.key === key && !hidden(key)))
     ];
     // The card on top stays on top while it is open: a backlog page or refresh arriving with a
     // different order never swaps the card being read. A ribbon focus or a deferral still wins.
@@ -847,11 +875,19 @@ export default function ReviewScreen() {
     const focusKey = highlightedFocusKey && ordered.some((source) => source.key === highlightedFocusKey)
       ? highlightedFocusKey
       : null;
-    return orderReviewDeck(ordered, focusKey ?? stickyKey);
-  }, [deferredDeckKeys, displayedReviewNeededEntries, highlightedFocusKey, openReviewItems]);
+    // A card brought back by Undo returns to the top.
+    const returnKey = deckReturn && ordered.some((source) => source.key === deckReturn.key) ? deckReturn.key : null;
+    // Undo wins over a ribbon focus: the card the user brought back is the one they want.
+    return orderReviewDeck(ordered, returnKey ?? focusKey ?? stickyKey);
+  }, [committingDeckKeys, deckReturn, deferredDeckKeys, displayedReviewNeededEntries, flyingDeckKey, heldDeckDecision, highlightedFocusKey, openReviewItems]);
   useEffect(() => {
     deckTopKeyRef.current = deckSources[0]?.key ?? null;
   }, [deckSources]);
+  // An Undo return is spent once its card leaves the deck, so a card a refresh briefly drops and
+  // brings back never replays the flight in.
+  useEffect(() => {
+    if (deckReturn && !deckSources.some((source) => source.key === deckReturn.key)) setDeckReturn(null);
+  }, [deckReturn, deckSources]);
   const deckCards = useMemo(
     () => deckSources.slice(0, 3).map((source): ReviewDeckCardModel => (
       source.kind === "review"
@@ -864,18 +900,35 @@ export default function ReviewScreen() {
             syncState: reviewItemSyncStates.get(source.item.id) ?? null
           })
         : reviewDeckCardForEntry(source.key, source.entry, { mode: theme.mode, neutral: theme.textSecondary, now })
-    )),
-    [deckSources, now, overlapCounts, reviewItemSyncStates, reviewMenuState.openItemId, theme.mode, theme.textSecondary]
+    )).map((card) => ({
+      ...card,
+      // Deferring the only card would change nothing.
+      canSkip: card.canSkip && !(card.skipDefers && deckSources.length <= 1),
+      // The card flying out cannot be edited or opened.
+      controlsDisabled: card.controlsDisabled || card.key === flyingDeckKey,
+      renderKey: `${card.key}#${deferGenerations.current.get(card.key) ?? 0}`
+    })),
+    // deferredDeckKeys changes whenever a defer generation does.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [deckSources, deferredDeckKeys, flyingDeckKey, now, overlapCounts, reviewItemSyncStates, reviewMenuState.openItemId, theme.mode, theme.textSecondary]
   );
   const topDeckSource = deckSources[0] ?? null;
+  // The top card is the held card still flying out: the round actions wait for the next card.
+  const deckFlying = flyingDeckKey !== null && topDeckSource?.key === flyingDeckKey;
+  // The flying held card is already decided, so "N of M" does not count it (a deferred card
+  // flying to the back still does).
+  const heldInFlight = deckFlying && heldDeckDecision?.key === flyingDeckKey;
+  const deckRemaining = heldInFlight ? deckSources.length - 1 : deckSources.length;
+  // The server count still includes decisions held for Undo or saving on this iPhone.
+  const locallyDecidedCount = (heldDeckDecision ? 1 : 0) + committingDeckKeys.size;
   // Every open item is loaded: the deck itself is the count, so a decision still syncing never
   // turns "2 of 5" into "2 of 5+". Otherwise the server count is used when it is exact.
   const deckBacklogComplete = reviewBacklog !== null && !reviewBacklog.nextCursor && reviewBacklog.recordsComplete;
   const deckPosition = reviewDeckPosition({
     decided: deckVisit.decided,
     remaining: deckBacklogComplete
-      ? deckSources.length
-      : reviewCountIsExact ? Math.max(totalNeedsReview, deckSources.length) : deckSources.length,
+      ? deckRemaining
+      : reviewCountIsExact ? Math.max(totalNeedsReview - locallyDecidedCount, deckRemaining) : deckRemaining,
     exact: deckBacklogComplete || reviewCountIsExact
   });
   // "All framed" only once a verified read says nothing else is open; a cached-only deck (offline,
@@ -883,12 +936,20 @@ export default function ReviewScreen() {
   // A reload after the last decision keeps the previous complete read until it is replaced, so
   // "All framed" does not blink back to the waiting copy.
   const deckFinished = deckSources.length === 0 && deckBacklogComplete;
+  // Decided while rendering so the finished screen mounts knowing whether to celebrate: only when
+  // the cards last on screen were all this visit's own decisions (a refresh emptying it is quiet).
+  if (deckFinished && !deckWasFinished.current) {
+    celebrateDeckFinish.current = lastDeckKeys.current.length > 0 &&
+      lastDeckKeys.current.every((key) => ownDeckDecisionKeys.current.has(key));
+  }
+  deckWasFinished.current = deckFinished;
+  if (deckSources.length) lastDeckKeys.current = deckSources.map((source) => source.key);
   const deckWaitingCopy = reviewBacklogLoading || refreshing || data === null
     ? "Looking for moments to review…"
     : reviewBacklog === null
       ? "Nothing else is saved on this iPhone. Pull to refresh when you're online."
       : "More moments may be waiting. Pull to refresh.";
-  const topDeckControlsDisabled = deckCards[0]?.controlsDisabled ?? true;
+  const topDeckControlsDisabled = deckFlying ? false : (deckCards[0]?.controlsDisabled ?? true);
   // A legacy entry has no skip mutation, and a card with a waiting or rejected change cannot be
   // decided here: Skip moves either behind the rest for this visit, so it never blocks the deck.
   const topDeckSkipDefers = topDeckSource?.kind === "legacy_entry" || topDeckControlsDisabled;
@@ -903,12 +964,230 @@ export default function ReviewScreen() {
     useCallback(() => {
       for (const decision of takeReviewDeckEvidenceDecisions()) {
         const item = knownDeckItems.current.get(decision.itemId);
+        ownDeckDecisionKeys.current.add(reviewFocusKey("review", decision.itemId));
         recordDeckDecision(decision.logged ? (item ? deckLoggedBlock(item) : { color: theme.textSecondary, seconds: 0 }) : null);
       }
       // recordDeckDecision and deckLoggedBlock only read theme values and state setters.
       // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [theme.mode, theme.textSecondary])
   );
+
+  function unrecordDeckDecision(logged: { color: string; seconds: number } | null) {
+    setDeckVisit((current) => {
+      let index = -1;
+      if (logged) {
+        for (let candidate = current.logged.length - 1; candidate >= 0; candidate -= 1) {
+          const block = current.logged[candidate];
+          if (block.color === logged.color && block.seconds === logged.seconds) {
+            index = candidate;
+            break;
+          }
+        }
+      }
+      return {
+        decided: Math.max(0, current.decided - 1),
+        logged: index >= 0 ? [...current.logged.slice(0, index), ...current.logged.slice(index + 1)] : current.logged
+      };
+    });
+  }
+
+  function deferDeckCard(key: string) {
+    deferGenerations.current.set(key, (deferGenerations.current.get(key) ?? 0) + 1);
+    setDeferredDeckKeys((current) => [...current.filter((candidate) => candidate !== key), key]);
+    if (highlightedFocusKey === key) setHighlightedFocusKey(null);
+  }
+
+  // A card left the deck by a swipe or a Log it / Skip press (after its fling).
+  // The card has left the screen: the next card may land; a deferral moves the card to the back.
+  function handleDeckThrowEnd(key: string, direction: ReviewDeckDirection) {
+    setFlyingDeckKey((current) => (current === key ? null : current));
+    const source = deckSources.find((candidate) => candidate.key === key);
+    const card = deckCards.find((candidate) => candidate.key === key);
+    if (source && (source.kind === "legacy_entry" || card?.skipDefers) && direction === -1) deferDeckCard(key);
+  }
+
+  // A card was thrown (swipe or Log it / Skip): its decision is taken now, before the flight ends,
+  // so leaving Review mid-flight still saves it.
+  function handleDeckThrow(key: string, direction: ReviewDeckDirection) {
+    setDeckThrowRequest(null);
+    setDeckReturn(null);
+    const source = deckSources.find((candidate) => candidate.key === key);
+    if (!source) return;
+    const card = deckCards.find((candidate) => candidate.key === key);
+    // The outgoing card's controls stay locked for the whole flight, deferral or decision.
+    setFlyingDeckKey(key);
+    if (source.kind === "legacy_entry" || card?.skipDefers) {
+      // Moving a card behind the rest is another card decided: a held one is saved now.
+      deckHold.flush();
+      return;
+    }
+    ownDeckDecisionKeys.current.add(key);
+    const item = source.item;
+    const logged = direction === 1;
+    const block = deckLoggedBlock(item);
+    deckTokenSequence.current += 1;
+    recordDeckDecision(logged ? block : null);
+    deckHold.hold({
+      token: deckTokenSequence.current,
+      key,
+      itemId: item.id,
+      logged,
+      direction,
+      title: card?.title ?? reviewItemTitle(item),
+      color: block.color,
+      seconds: block.seconds,
+      proposal: reviewDeckProposalSignature(item)
+    });
+    // A throw reported after Review lost focus or the app went to the background is saved at
+    // once: the lifecycle flush has already run.
+    if (!deckScreenActive.current) deckHold.flush();
+    playHaptic(logged ? "reviewLog" : "reviewSkip");
+    AccessibilityInfo.announceForAccessibility(
+      `${logged ? "Logged" : "Skipped"} ${card?.title ?? reviewItemTitle(item)}. Undo is available for a few seconds.`
+    );
+  }
+
+  function requestDeckThrow(direction: ReviewDeckDirection) {
+    const key = deckSources[0]?.key;
+    if (!key) return;
+    deckTokenSequence.current += 1;
+    setDeckThrowRequest({ key, direction, token: deckTokenSequence.current });
+  }
+
+  function undoHeldDeckDecision() {
+    const current = heldDeckDecision;
+    if (!current) return;
+    const held = deckHold.undo(current.token);
+    if (!held) return;
+    unrecordDeckDecision(held.logged ? { color: held.color, seconds: held.seconds } : null);
+    ownDeckDecisionKeys.current.delete(held.key);
+    setDeckThrowRequest(null);
+    if (flyingDeckKey === held.key) {
+      // Undone mid-flight: the card comes back as a fresh card instead of finishing its flight.
+      deferGenerations.current.set(held.key, (deferGenerations.current.get(held.key) ?? 0) + 1);
+      setFlyingDeckKey(null);
+    }
+    restorePagedOutDeckItem(held.itemId);
+    setDeckReturn({ key: held.key, direction: held.direction, token: held.token });
+    playHaptic("undoRestore");
+    AccessibilityInfo.announceForAccessibility(`${held.title} is back.`);
+  }
+
+  // A card brought back (Undo, a failed save) after a capped refresh paged its item out returns to
+  // the loaded data from the copy the deck showed, so the deck, More, Edit and saving all see it
+  // again. The next read replaces it like any other loaded item.
+  function restorePagedOutDeckItem(itemId: string) {
+    const loaded = dataRef.current;
+    const known = knownDeckItems.current.get(itemId);
+    if (!loaded || !known || !isOpenReviewItem(known)) return;
+    if (loaded.reviewItems.some((item) => item.id === itemId)) return;
+    commitData({ ...loaded, reviewItems: [...loaded.reviewItems, known] });
+  }
+
+  function setDeckKeyCommitting(key: string, committing: boolean) {
+    setCommittingDeckKeys((current) => {
+      if (current.has(key) === committing) return current;
+      const next = new Set(current);
+      if (committing) next.add(key);
+      else next.delete(key);
+      return next;
+    });
+  }
+
+  commitHeldDeckDecisionRef.current = (held) => {
+    const listedItem = dataRef.current?.reviewItems.find((candidate) => candidate.id === held.itemId);
+    // Missing from the loaded list is not "resolved": a capped refresh may only have paged it out.
+    const unlisted = !listedItem;
+    const knownItem = knownDeckItems.current.get(held.itemId);
+    const item = listedItem
+      ? (isOpenReviewItem(listedItem) ? listedItem : undefined)
+      : knownItem && isOpenReviewItem(knownItem) ? knownItem : undefined;
+    const undoCount = () => {
+      unrecordDeckDecision(held.logged ? { color: held.color, seconds: held.seconds } : null);
+      ownDeckDecisionKeys.current.delete(held.key);
+    };
+    if (!item) {
+      setFlyingDeckKey((current) => (current === held.key ? null : current));
+      // Resolved elsewhere while held: this visit did not decide it.
+      undoCount();
+      return;
+    }
+    if (reviewDeckProposalSignature(item) !== held.proposal) {
+      // A refresh changed the suggestion while the decision was held: the user decided about
+      // something else, so nothing is saved and the card comes back as it is now.
+      deferGenerations.current.set(held.key, (deferGenerations.current.get(held.key) ?? 0) + 1);
+      setFlyingDeckKey((current) => (current === held.key ? null : current));
+      restorePagedOutDeckItem(held.itemId);
+      undoCount();
+      AccessibilityInfo.announceForAccessibility(`${held.title} changed, so it was not saved. Review it again.`);
+      return;
+    }
+    setDeckKeyCommitting(held.key, true);
+    // A flight cut short (Review left or the app backgrounded mid-throw) never reports its end, so
+    // the outcome retires it; otherwise a card restored by a failed save would stay locked.
+    const settled = () => {
+      setDeckKeyCommitting(held.key, false);
+      setFlyingDeckKey((current) => (current === held.key ? null : current));
+    };
+    const failed = () => {
+      // The restored card is a fresh card: the thrown one's animation state is spent.
+      deferGenerations.current.set(held.key, (deferGenerations.current.get(held.key) ?? 0) + 1);
+      setDeckKeyCommitting(held.key, false);
+      setFlyingDeckKey((current) => (current === held.key ? null : current));
+      // "The suggestion is still available": a paged-out card comes back to retry.
+      restorePagedOutDeckItem(held.itemId);
+      undoCount();
+    };
+    const started = held.logged
+      ? resolveItem(item, hasV2LocationEvidence(item) ? { action: "confirm" } : { action: "accept" }, "Logged. Saved on this iPhone. Waiting to sync.", settled, failed, { unlisted })
+      : resolveItem(item, hasV2LocationEvidence(item) ? { action: "ignore_once_location" } : { action: "ignore_once" }, "Skipped. Saved on this iPhone. Waiting to sync.", settled, failed, { unlisted });
+    // Not started (a change for this item is already saving, or the item has gone): the card is
+    // not this visit's decision.
+    if (!started) failed();
+  };
+
+  // A committing card whose item has left the open list and has no save still in flight no longer
+  // needs hiding (a capped refresh can omit an item whose save is pending; it stays hidden).
+  useEffect(() => {
+    if (!committingDeckKeys.size) return;
+    const open = new Set(openReviewItems.map((item) => reviewFocusKey("review", item.id)));
+    const stale = [...committingDeckKeys].filter((key) => (
+      !open.has(key) && !reviewMutations.current.has(key.slice(key.indexOf(":") + 1))
+    ));
+    if (!stale.length) return;
+    setCommittingDeckKeys((current) => {
+      const next = new Set(current);
+      for (const key of stale) next.delete(key);
+      return next;
+    });
+  }, [committingDeckKeys, openReviewItems]);
+
+  // Leaving Review or backgrounding the app saves a held decision at once.
+  // Active means Review is focused and the app is in the foreground; returning to the
+  // foreground with another screen open does not reactivate it.
+  const deckScreenActive = useRef(true);
+  const deckScreenFocused = useRef(true);
+  useFocusEffect(
+    useCallback(() => {
+      deckScreenFocused.current = true;
+      deckScreenActive.current = AppState.currentState === "active";
+      return () => {
+        deckScreenFocused.current = false;
+        deckScreenActive.current = false;
+        deckHold.flush();
+      };
+    }, [deckHold])
+  );
+  useEffect(() => {
+    const subscription = AppState.addEventListener("change", (state) => {
+      deckScreenActive.current = state === "active" && deckScreenFocused.current;
+      if (state !== "active") deckHold.flush();
+    });
+    return () => {
+      subscription.remove();
+      deckHold.flush();
+    };
+  }, [deckHold]);
 
   function recordDeckDecision(logged: { color: string; seconds: number } | null) {
     setDeckVisit((current) => ({
@@ -1052,18 +1331,6 @@ export default function ReviewScreen() {
     });
   }, [applyReviewMenuEvent, openReviewItems]);
 
-  function confirmItem(item: MobileReviewItem) {
-    applyReviewMenuEvent({ type: "close" });
-    resolveItem(
-      item,
-      hasV2LocationEvidence(item)
-        ? { action: "confirm" }
-        : { action: "accept" },
-      "Logged. Saved on this iPhone. Waiting to sync.",
-      () => recordDeckDecision(deckLoggedBlock(item))
-    );
-  }
-
   function dismissItem(item: MobileReviewItem) {
     resolveItem(
       item,
@@ -1071,7 +1338,10 @@ export default function ReviewScreen() {
         ? { action: "ignore_once_location" }
         : { action: "ignore_once" },
       "Skipped. Saved on this iPhone. Waiting to sync.",
-      () => recordDeckDecision(null)
+      () => {
+        ownDeckDecisionKeys.current.add(reviewFocusKey("review", item.id));
+        recordDeckDecision(null);
+      }
     );
   }
 
@@ -1136,12 +1406,20 @@ export default function ReviewScreen() {
     item: MobileReviewItem,
     mutation: ReviewMutation,
     successAnnouncement: string,
-    onCommitted?: () => void
+    onCommitted?: () => void,
+    onFailed?: () => void,
+    options: { unlisted?: boolean } = {}
   ) {
-    if (reviewMutations.current.has(item.id)) return;
-    const currentData = dataRef.current;
-    if (!currentData) return;
-    if (!currentData.reviewItems.some((candidate) => candidate.id === item.id)) return;
+    if (reviewMutations.current.has(item.id)) return false;
+    // Any other decision (More › Dismiss, an edit) saves a held card first, as a throw does.
+    deckHold.flush();
+    const loadedData = dataRef.current;
+    if (!loadedData) return false;
+    const listed = loadedData.reviewItems.some((candidate) => candidate.id === item.id);
+    if (!listed && !options.unlisted) return false;
+    // A held card whose item a capped refresh paged out (still open, just not in the first page)
+    // is saved from the copy the deck showed.
+    const currentData = listed ? loadedData : { ...loadedData, reviewItems: [...loadedData.reviewItems, item] };
 
     reviewMutations.current.set(item.id, 1);
     const clientMutationId = createReviewClientMutationId();
@@ -1178,6 +1456,7 @@ export default function ReviewScreen() {
           });
       }).catch((error) => {
         reviewMutations.current.delete(item.id);
+        onFailed?.();
         AccessibilityInfo.announceForAccessibility(
           "The Review change was not saved. The suggestion is still available."
         );
@@ -1188,6 +1467,7 @@ export default function ReviewScreen() {
             : "Unable to save this Review change on this iPhone."
         );
       });
+    return true;
   }
 
   function beginReviewItemEdit(item: MobileReviewItem, handoverToken: number) {
@@ -1253,6 +1533,8 @@ export default function ReviewScreen() {
 
   async function saveEdit(entryId: string, patch: TimeEntryUpdatePatch) {
     if (!editTarget) return false;
+    // Saving any edit (a Review item or a legacy entry) saves a held card first.
+    deckHold.flush();
     setEditSaving(true);
     try {
       if (editTarget.kind === "reviewItem") {
@@ -1291,6 +1573,7 @@ export default function ReviewScreen() {
         } else {
           await reconcileLocalReviewProjection();
         }
+        ownDeckDecisionKeys.current.add(reviewFocusKey("review", editTarget.item.id));
         recordDeckDecision({
           color: reviewItemCategoryColor(
             editTarget.item,
@@ -1342,6 +1625,41 @@ export default function ReviewScreen() {
       if (error instanceof AuthRequiredError) router.replace("/");
       return null;
     }
+  }
+
+  // The Undo toast sits just above the round actions (or hangs under Back to Today once all is
+  // framed, out of flow),
+  // so it never covers the controls whatever the phone height or text size.
+  function renderDeckToast(placement: "actions" | "under") {
+    if (!heldDeckDecision) return null;
+    return (
+    <Reanimated.View
+      key={heldDeckDecision.token}
+      accessibilityLiveRegion="polite"
+      entering={localPresenceEntering(reduceMotion, "rise")}
+      exiting={localPresenceExiting(reduceMotion)}
+      style={[styles.historyDeleteUndoToast, styles.reviewDeckToast, placement === "under" ? styles.reviewDeckToastUnderButton : null]}
+      testID="review-deck-toast"
+    >
+      <View style={styles.reviewDeckToastLabel}>
+        <View style={[styles.reviewDeckToastSwatch, { backgroundColor: heldDeckDecision.color }]} />
+        <Text numberOfLines={1} style={[styles.historyDeleteUndoText, styles.reviewDeckToastText]}>
+          {heldDeckDecision.logged ? "Logged" : "Skipped"} {heldDeckDecision.title}
+        </Text>
+      </View>
+      <Pressable
+        accessibilityLabel={`Undo ${heldDeckDecision.logged ? "logging" : "skipping"} ${heldDeckDecision.title}`}
+        accessibilityRole="button"
+        // The shared Undo pill is 40 points tall; the slop makes it a 44-point target.
+        hitSlop={{ bottom: 4, left: 4, right: 4, top: 4 }}
+        onPress={undoHeldDeckDecision}
+        style={({ pressed }) => [styles.historyDeleteUndoButton, pressed ? styles.buttonPressed : null]}
+        testID="review-deck-undo"
+      >
+        <Text style={styles.historyDeleteUndoButtonText}>Undo</Text>
+      </Pressable>
+    </Reanimated.View>
+    );
   }
 
   return (
@@ -1404,8 +1722,11 @@ export default function ReviewScreen() {
         {deckFinished ? (
           <ReviewDeckFinished
             blocks={deckVisit.logged.map((block) => block.color)}
-            copy={deckFinishedCopy(deckVisit.logged)}
+            copy={deckFinishedCopy(deckVisit.logged, deckVisit.decided)}
+            celebrate={celebrateDeckFinish.current}
+            footer={renderDeckToast("under")}
             onBack={() => router.back()}
+            reduceMotion={reduceMotion}
             theme={theme}
           />
         ) : topDeckSource ? (
@@ -1422,12 +1743,18 @@ export default function ReviewScreen() {
                 const source = deckSources.find((candidate) => candidate.key === key);
                 if (source?.kind === "review") toggleReviewMenu(source.item);
               }}
+              onThrow={handleDeckThrowEnd}
+              onThrowStart={handleDeckThrow}
               reduceMotion={reduceMotion}
+              returnRequest={deckReturn}
               theme={theme}
+              throwRequest={deckThrowRequest}
             />
+            <View style={styles.reviewDeckActionsAnchor}>
+              {renderDeckToast("actions")}
             <ReviewDeckActions
-              logDisabled={topDeckControlsDisabled}
-              skipDisabled={topDeckSkipDefers && deckSources.length <= 1}
+              logDisabled={topDeckControlsDisabled || deckFlying}
+              skipDisabled={deckFlying || (topDeckSkipDefers && deckSources.length <= 1)}
               logLabel={topDeckSource.kind === "legacy_entry" ? "Edit to log" : "Log it"}
               onEdit={() => {
                 if (topDeckSource.kind === "legacy_entry") {
@@ -1442,23 +1769,18 @@ export default function ReviewScreen() {
               }}
               onLog={() => {
                 if (topDeckSource.kind === "legacy_entry") beginReviewNeededEntryEdit(topDeckSource.entry);
-                else confirmItem(topDeckSource.item);
+                else requestDeckThrow(1);
               }}
-              onSkip={() => {
-                if (topDeckSkipDefers) {
-                  const key = topDeckSource.key;
-                  setDeferredDeckKeys((current) => [...current.filter((candidate) => candidate !== key), key]);
-                  if (highlightedFocusKey === key) setHighlightedFocusKey(null);
-                } else {
-                  dismissItem(topDeckSource.item);
-                }
-              }}
+              onSkip={() => requestDeckThrow(-1)}
               skipLabel={topDeckSkipDefers ? "Skip for now" : "Skip"}
               theme={theme}
             />
+            </View>
           </>
         ) : (
           <View style={styles.reviewDeckWaiting}>
+            {/* A card thrown last keeps its Undo here too, hanging out of flow below. */}
+            <View style={styles.reviewDeckWaitingContent}>
             <Text {...mobileTextProps("body")} accessibilityLiveRegion="polite" style={styles.muted}>
               {deckWaitingCopy}
             </Text>
@@ -1472,9 +1794,12 @@ export default function ReviewScreen() {
                 <Text {...mobileTextProps("control")} style={styles.secondaryButtonText}>Load more Review items</Text>
               </Pressable>
             ) : null}
+            {renderDeckToast("under")}
+            </View>
           </View>
         )}
       </ScrollView>
+
 
       <OverflowMenu
         disabled={
@@ -1554,8 +1879,10 @@ function onColorFor(fill: string) {
   return contrastRatio(fill, white) >= contrastRatio(fill, ink) ? white : ink;
 }
 
-function deckFinishedCopy(logged: readonly { seconds: number }[]) {
-  if (!logged.length) return "Nothing to review right now.";
+function deckFinishedCopy(logged: readonly { seconds: number }[], decided = 0) {
+  if (!logged.length) {
+    return decided > 0 ? `${decided} ${decided === 1 ? "moment" : "moments"} skipped. Nothing new on your days.` : "Nothing to review right now.";
+  }
   const seconds = logged.reduce((total, block) => total + block.seconds, 0);
   const moments = `${logged.length} ${logged.length === 1 ? "moment" : "moments"} logged`;
   return seconds >= 60 ? `${moments}, ${formatReviewDeckDuration(seconds)} added to your days.` : `${moments}.`;
@@ -1607,6 +1934,9 @@ export function reviewDeckCardForItem(
     syncBadge: syncCopy?.badge ?? null,
     syncDetail: syncCopy?.detail ?? null,
     controlsDisabled: context.syncState != null,
+    canLog: context.syncState == null,
+    canSkip: true,
+    skipDefers: context.syncState != null,
     moreLabel: `More actions for ${title}`,
     menuOpen: context.menuOpen
   };
@@ -1644,6 +1974,9 @@ function reviewDeckCardForEntry(
     syncBadge: null,
     syncDetail: null,
     controlsDisabled: false,
+    canLog: false,
+    canSkip: true,
+    skipDefers: true,
     moreLabel: null,
     menuOpen: false
   };

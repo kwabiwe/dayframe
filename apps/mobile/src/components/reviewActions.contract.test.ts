@@ -21,8 +21,10 @@ describe("mobile Review action contracts", () => {
     // Blocks parity step 5a: the deck replaces the list. Log it confirms, Skip dismisses once,
     // Edit before logging opens Location evidence (D7) or the details sheet.
     expect(reviewSource).toContain("<ReviewDeckActions");
-    expect(reviewSource).toMatch(/onLog=\{[\s\S]*?confirmItem\(topDeckSource\.item\)/);
-    expect(reviewSource).toMatch(/onSkip=\{[\s\S]*?dismissItem\(topDeckSource\.item\)/);
+    // Step 5b: the buttons throw the card; the held decision is saved with the same mutations.
+    expect(reviewSource).toMatch(/onLog=\{[\s\S]*?requestDeckThrow\(1\)/);
+    expect(reviewSource).toContain("onSkip={() => requestDeckThrow(-1)}");
+    expect(reviewSource).toMatch(/commitHeldDeckDecisionRef\.current = [\s\S]*?\{ action: "confirm" \} : \{ action: "accept" \}[\s\S]*?\{ action: "ignore_once_location" \} : \{ action: "ignore_once" \}/);
     expect(reviewSource).toMatch(/hasV2LocationEvidence\(topDeckSource\.item\)[\s\S]*?pathname: "\/review\/\[id\]"/);
     expect(deckSource).toContain('accessibilityLabel="Edit before logging"');
     expect(helperSource).toContain("Confirm commute");
