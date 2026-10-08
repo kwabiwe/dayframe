@@ -2039,6 +2039,15 @@ describe("mobile API client", () => {
     );
   });
 
+  it("reports an activity name taken elsewhere as its own error", async () => {
+    storeBoundSession("session-token");
+    vi.stubGlobal("fetch", vi.fn(() => Promise.resolve(jsonResponse({ error: "An activity called Pottery already exists." }, 409))));
+    await expect(createCategory("Pottery")).rejects.toMatchObject({
+      message: "An activity called Pottery already exists.",
+      name: "ActivityNameTakenError",
+    });
+  });
+
   it("creates pinned categories through the hosted API", async () => {
     storeBoundSession("session-token");
     const fetchMock = vi.fn(() => Promise.resolve(jsonResponse({ ok: true }, 201)));
@@ -2052,7 +2061,6 @@ describe("mobile API client", () => {
         method: "POST",
         body: JSON.stringify({
           name: "DIY",
-          color: "lime",
           isPinned: true
         })
       })

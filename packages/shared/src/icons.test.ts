@@ -98,3 +98,12 @@ describe("Dayframe icon set", () => {
     expect(isActivityIconKey("shopping-bag")).toBe(false);
   });
 });
+
+describe("activityGroupFor", () => {
+  it("groups an activity by its icon, by name when no icon is stored, else as your own", async () => {
+    const { activityGroupFor } = await import("./icons");
+    expect(activityGroupFor({ icon: "work", name: "Anything" })).toBe("work");
+    expect(activityGroupFor({ icon: null, name: "Gym" })).toBe("body");
+    expect(activityGroupFor({ icon: null, name: "Zzqx" })).toBeNull();
+  });
+});

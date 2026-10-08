@@ -1662,15 +1662,17 @@ export async function createCategory(
       "Content-Type": "application/json",
       ...(await authHeaders())
     },
+    // Without a chosen colour the server picks the name's automatic palette colour (as on the web).
     body: JSON.stringify({
       name,
-      color: options.color ?? "lime",
+      ...(options.color ? { color: options.color } : {}),
       isPinned: Boolean(options.isPinned)
     })
   });
   if (response.status === 401) {
     throw new AuthRequiredError();
   }
+  if (response.status === 409) throw new ActivityNameTakenError(await errorMessage(response, "An activity with that name already exists."));
   if (!response.ok) throw new Error(await errorMessage(response, "Unable to create activity"));
   return readJsonResponse(response);
 }
@@ -2297,6 +2299,14 @@ async function readAllTimerEntryIdCorrelations(
 
 function optionalQueueOwnerText(value: unknown) {
   return typeof value === "string" && value.trim() ? value.trim() : undefined;
+}
+
+/** The server already has an active activity with this name (case-insensitive). */
+export class ActivityNameTakenError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "ActivityNameTakenError";
+  }
 }
 
 export class AuthRequiredError extends Error {

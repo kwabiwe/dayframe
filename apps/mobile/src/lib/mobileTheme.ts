@@ -2248,43 +2248,6 @@ function createStyles(theme: MobileTheme) {
       fontSize: 12,
       fontWeight: "400"
     },
-    activeEditCategoryViewport: {
-      height: 36,
-      overflow: "hidden"
-    },
-    activeEditCategoryScroll: {
-      height: 36,
-      flexGrow: 0
-    },
-    activeEditCategoryScroller: {
-      minHeight: 36,
-      alignItems: "center",
-      gap: 8,
-      paddingRight: 4
-    },
-    activeEditCategoryChip: {
-      minHeight: 32,
-      backgroundColor: theme.surfaceMuted,
-      borderRadius: 999,
-      paddingHorizontal: 11,
-      paddingVertical: 2,
-      flexDirection: "row",
-      alignItems: "center",
-      gap: 7
-    },
-    activeEditCategoryChipSelected: {
-      backgroundColor: theme.accentSoft
-    },
-    activeEditCategoryChipText: {
-      color: theme.textPrimary,
-      fontFamily: monoFont,
-      fontSize: 12,
-      fontWeight: "600",
-      lineHeight: 16
-    },
-    activeEditCategoryChipTextSelected: {
-      color: theme.textPrimary
-    },
     activeEditTimeRow: {
       flexDirection: "row",
       alignItems: "center",

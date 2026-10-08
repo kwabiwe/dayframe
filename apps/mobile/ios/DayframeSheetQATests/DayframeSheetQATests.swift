@@ -2387,7 +2387,7 @@ final class DayframeSheetQATests: XCTestCase {
       state: state
     )
     try require(
-      !element(SheetQAIdentifiers.categoryClear).exists,
+      !element(SheetQAIdentifiers.categoryAll).exists,
       "\(context) exposed an obscured Category control ahead of Suggestions.",
       state: state
     )
