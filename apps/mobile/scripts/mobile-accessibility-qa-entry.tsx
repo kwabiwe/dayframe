@@ -235,13 +235,10 @@ function Probe() {
         "settings.value.frame",
         "settings.value.text",
         "settings.chevron",
-        "review.card",
-        "review.header",
-        "review.badge",
-        "review.title.frame",
-        "review.title.text",
-        "review.reason.frame",
-        "review.reason.text",
+        "review-deck.card",
+        "review-deck.body",
+        "review-deck.title.frame",
+        "review-deck.reason.frame",
       ];
       if (showRunningTimer) {
         requiredMeasurements.push("today.timer.running", "today.timer.title.frame", "today.timer.title.text", "today.timer.elapsed.frame");
@@ -325,9 +322,10 @@ function Probe() {
           "settings.row": "qa.host; settingsGroupRows has rounded-corner overflow clipping and rows grow intrinsically",
           "settings.label.frame": "settings.text-column",
           "settings.value.frame": "settings.text-column",
-          "review.card": "qa.host; review card has no fixed maximum height",
-          "review.title.frame": "review.header",
-          "review.reason.frame": "review.card",
+          "review-deck.card": "qa.host; the deck card fills a fixed height and clips its body",
+          "review-deck.body": "review-deck.card",
+          "review-deck.title.frame": "review-deck.body",
+          "review-deck.reason.frame": "review-deck.body",
         },
         diagnosticComplete: missingMeasurementIds.length === 0,
         missingMeasurementIds,
@@ -476,6 +474,7 @@ function Probe() {
                   overlapCount: 0,
                   syncState: null
                 })]}
+                diagnostic={diagnostic}
                 onEdit={() => setActionResult("Local Review edit callback")}
                 onMore={() => setActionResult("Local Review menu callback")}
                 reduceMotion={reduceMotion}

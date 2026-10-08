@@ -1,4 +1,4 @@
-import { memo, useEffect, type ReactNode } from "react";
+import { memo, useEffect, useState, type ReactNode } from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 import Reanimated, {
   ReduceMotion,
@@ -9,6 +9,7 @@ import Reanimated, {
 import Svg, { Circle, G, Path, Rect, Text as SvgText } from "react-native-svg";
 import { DAYFRAME_APP_ICONS, DAYFRAME_BLOCKS, type DayframeGlyph } from "@dayframe/shared";
 import { DayframeIcon } from "@/components/icons/DayframeIcon";
+import { recordMobileLayout, type MobileAccessibilityDiagnostic } from "@/components/accessibility/diagnostics";
 import { BLOCKS_SPRING } from "@/lib/blocksMotion";
 import { localPresenceEntering, localPresenceExiting } from "@/lib/motion";
 import type { MobileTheme } from "@/lib/mobileTheme";
@@ -53,6 +54,8 @@ const SOURCE_GLYPH: Record<ReviewDeckSourceIcon, DayframeGlyph> = {
 };
 
 const PICTURE_HEIGHT = 230;
+/** The picture gives way first on short decks (small phones, large text, banners above). */
+const PICTURE_MIN_HEIGHT = 96;
 const SLEEP_BARS = [3, 2, 1, 2, 3, 2, 1, 1, 2, 3, 2, 1, 2, 2, 3, 2, 1, 2, 3, 3];
 const SUGGESTION_BLOCKS = [
   { x: 40, width: 70, height: 58 },
@@ -185,15 +188,22 @@ function Pill({ children, round, theme }: { children: ReactNode; round?: boolean
 function ReviewDeckCardView({
   card,
   depth,
+  diagnostic,
+  onBodyHeight,
   onEdit,
   onMore,
+  pictureHeight,
   reduceMotion,
   theme
 }: {
   card: ReviewDeckCardModel;
   depth: number;
+  /** Synthetic accessibility probe only: the top card reports its frames. */
+  diagnostic?: MobileAccessibilityDiagnostic;
+  onBodyHeight: (height: number) => void;
   onEdit: () => void;
   onMore: () => void;
+  pictureHeight: number;
   reduceMotion: boolean;
   theme: MobileTheme;
 }) {
@@ -230,104 +240,120 @@ function ReviewDeckCardView({
         },
         depthStyle
       ]}
+      onLayout={(event) => recordMobileLayout(diagnostic, "review-deck.card", event)}
       testID={top ? "review-deck-card" : undefined}
     >
-      <View style={deckStyles.picture}>
-        <ReviewDeckPictureView color={card.color} picture={card.picture} theme={theme} />
-        <View style={deckStyles.pillRow}>
-          <Pill theme={theme}>
-            <DayframeIcon color={theme.textPrimary} glyph={SOURCE_GLYPH[card.source.icon]} size={14} />
-            <Text {...mobileTextProps("counter")} style={[deckStyles.pillText, { color: theme.textPrimary }]}>
-              {card.syncBadge ?? card.source.label}
-            </Text>
-          </Pill>
-          {card.confidence && !card.syncBadge ? (
-            <View
-              accessible
-              accessibilityLabel={`Confidence: ${card.confidence.label}, ${card.confidence.score} of 5`}
+      {/* The outer view casts the shadow; this one clips the picture to the card's corners. */}
+      <View style={deckStyles.cardClip}>
+        <View style={[deckStyles.picture, { height: pictureHeight }]}>
+          <ReviewDeckPictureView color={card.color} picture={card.picture} theme={theme} />
+          <View style={deckStyles.pillRow}>
+            <Pill theme={theme}>
+              <DayframeIcon color={theme.textPrimary} glyph={SOURCE_GLYPH[card.source.icon]} size={14} />
+              <Text {...mobileTextProps("counter")} style={[deckStyles.pillText, { color: theme.textPrimary }]}>
+                {card.syncBadge ?? card.source.label}
+              </Text>
+            </Pill>
+            {card.confidence && !card.syncBadge ? (
+              <View
+                accessible
+                accessibilityLabel={`Confidence: ${card.confidence.label}, ${card.confidence.score} of 5`}
+              >
+                <Pill theme={theme}>
+                  <View style={deckStyles.confidenceDots}>
+                    {[1, 2, 3, 4, 5].map((score) => (
+                      <View
+                        key={score}
+                        style={[
+                          deckStyles.confidenceDot,
+                          { backgroundColor: score <= card.confidence!.score ? theme.textPrimary : theme.borderStrong }
+                        ]}
+                      />
+                    ))}
+                  </View>
+                </Pill>
+              </View>
+            ) : null}
+          </View>
+          {card.moreLabel ? (
+            <Pressable
+              accessibilityLabel={card.moreLabel}
+              accessibilityRole="button"
+              accessibilityState={{ disabled: card.controlsDisabled, expanded: card.menuOpen }}
+              disabled={card.controlsDisabled}
+              onPress={onMore}
+              style={({ pressed }) => [deckStyles.more, pressed ? deckStyles.pressed : null, card.controlsDisabled ? deckStyles.disabled : null]}
+              testID={top ? "review-deck-more" : undefined}
             >
-              <Pill theme={theme}>
-                <View style={deckStyles.confidenceDots}>
-                  {[1, 2, 3, 4, 5].map((score) => (
-                    <View
-                      key={score}
-                      style={[
-                        deckStyles.confidenceDot,
-                        { backgroundColor: score <= card.confidence!.score ? theme.textPrimary : theme.borderStrong }
-                      ]}
-                    />
-                  ))}
-                </View>
+              <Pill round theme={theme}>
+                <DayframeIcon color={theme.textPrimary} glyph={DAYFRAME_APP_ICONS.more} size={18} />
               </Pill>
-            </View>
+            </Pressable>
           ) : null}
         </View>
-        {card.moreLabel ? (
-          <Pressable
-            accessibilityLabel={card.moreLabel}
-            accessibilityRole="button"
-            accessibilityState={{ disabled: card.controlsDisabled, expanded: card.menuOpen }}
-            disabled={card.controlsDisabled}
-            onPress={onMore}
-            style={({ pressed }) => [deckStyles.more, pressed ? deckStyles.pressed : null, card.controlsDisabled ? deckStyles.disabled : null]}
-            testID={top ? "review-deck-more" : undefined}
-          >
-            <Pill round theme={theme}>
-              <DayframeIcon color={theme.textPrimary} glyph={DAYFRAME_APP_ICONS.more} size={18} />
-            </Pill>
-          </Pressable>
-        ) : null}
-      </View>
-      <View style={deckStyles.body}>
-        <Text
-          {...mobileTextProps("screenHeading")}
-          numberOfLines={2}
-          style={[deckStyles.title, { color: theme.textPrimary }]}
-        >
-          {card.title}
-        </Text>
-        {card.when ? (
-          <Text {...mobileTextProps("metadata")} style={[deckStyles.when, { color: theme.textSecondary }]}>
-            {card.when}
-          </Text>
-        ) : null}
-        <Pressable
-          accessibilityHint="Opens the details to change them before logging"
-          accessibilityLabel={`Log as ${card.logAsName}, ${card.activityName}`}
-          accessibilityRole="button"
-          accessibilityState={{ disabled: card.controlsDisabled }}
-          disabled={card.controlsDisabled}
-          onPress={onEdit}
-          style={({ pressed }) => [
-            deckStyles.logAs,
-            { backgroundColor: theme.surfaceInset },
-            pressed ? deckStyles.pressed : null
-          ]}
-          testID={top ? "review-deck-log-as" : undefined}
+        <View
+          onLayout={(event) => {
+            onBodyHeight(event.nativeEvent.layout.height);
+            recordMobileLayout(diagnostic, "review-deck.body", event);
+          }}
+          style={deckStyles.body}
         >
           <Text
-            {...mobileTextProps("control")}
-            numberOfLines={1}
-            style={[deckStyles.logAsName, { color: theme.textPrimary }]}
+            {...mobileTextProps("screenHeading")}
+            numberOfLines={2}
+            onLayout={(event) => recordMobileLayout(diagnostic, "review-deck.title.frame", event)}
+            style={[deckStyles.title, { color: theme.textPrimary }]}
           >
-            {card.logAsName}
+            {card.title}
           </Text>
-          <View style={[deckStyles.activityChip, { backgroundColor: card.color }]}>
-            <Text {...mobileTextProps("counter")} numberOfLines={1} style={[deckStyles.activityChipText, { color: card.onColor }]}>
-              {card.activityName}
+          {card.when ? (
+            <Text {...mobileTextProps("metadata")} style={[deckStyles.when, { color: theme.textSecondary }]}>
+              {card.when}
             </Text>
-          </View>
-        </Pressable>
-        {card.syncDetail ? (
-          <Text {...mobileTextProps("metadata")} accessibilityLiveRegion="polite" style={[deckStyles.reason, { color: theme.textSecondary }]}>
-            {card.syncDetail}
-          </Text>
-        ) : null}
-        {card.reason ? (
-          <Text {...mobileTextProps("metadata")} numberOfLines={3} style={[deckStyles.reason, { color: theme.textMuted }]}>
-            {card.reason}
-          </Text>
-        ) : null}
+          ) : null}
+          <Pressable
+            accessibilityHint="Opens the details to change them before logging"
+            accessibilityLabel={`Log as ${card.logAsName}, ${card.activityName}`}
+            accessibilityRole="button"
+            accessibilityState={{ disabled: card.controlsDisabled }}
+            disabled={card.controlsDisabled}
+            onPress={onEdit}
+            style={({ pressed }) => [
+              deckStyles.logAs,
+              { backgroundColor: theme.surfaceInset },
+              pressed ? deckStyles.pressed : null
+            ]}
+            testID={top ? "review-deck-log-as" : undefined}
+          >
+            <Text
+              {...mobileTextProps("control")}
+              numberOfLines={1}
+              style={[deckStyles.logAsName, { color: theme.textPrimary }]}
+            >
+              {card.logAsName}
+            </Text>
+            <View style={[deckStyles.activityChip, { backgroundColor: card.color }]}>
+              <Text {...mobileTextProps("counter")} numberOfLines={1} style={[deckStyles.activityChipText, { color: card.onColor }]}>
+                {card.activityName}
+              </Text>
+            </View>
+          </Pressable>
+          {card.syncDetail ? (
+            <Text {...mobileTextProps("metadata")} accessibilityLiveRegion="polite" style={[deckStyles.reason, { color: theme.textSecondary }]}>
+              {card.syncDetail}
+            </Text>
+          ) : null}
+          {card.reason ? (
+            <Text
+              {...mobileTextProps("metadata")}
+              numberOfLines={3}
+              onLayout={(event) => recordMobileLayout(diagnostic, "review-deck.reason.frame", event)}
+              style={[deckStyles.reason, { color: theme.textMuted }]}
+            >
+              {card.reason}
+            </Text>
+          ) : null}
+        </View>
       </View>
     </Reanimated.View>
   );
@@ -336,27 +362,45 @@ function ReviewDeckCardView({
 /** The stacked cards: the top one is live, up to two sit beneath it. */
 export function ReviewDeckStack({
   cards,
+  diagnostic,
   onEdit,
   onMore,
   reduceMotion,
   theme
 }: {
   cards: readonly ReviewDeckCardModel[];
+  diagnostic?: MobileAccessibilityDiagnostic;
   onEdit: (key: string) => void;
   onMore: (key: string) => void;
   reduceMotion: boolean;
   theme: MobileTheme;
 }) {
   const visible = cards.slice(0, REVIEW_DECK_VISIBLE_CARDS);
+  // The card fills the deck: its body keeps its natural height and the picture takes what is
+  // left (230 points at most, 96 at least), so the reason line is never cut off.
+  const [deckHeight, setDeckHeight] = useState(0);
+  const [bodyHeight, setBodyHeight] = useState(0);
+  const pictureHeight = deckHeight && bodyHeight
+    ? Math.max(PICTURE_MIN_HEIGHT, Math.min(PICTURE_HEIGHT, Math.floor(deckHeight - bodyHeight)))
+    : PICTURE_HEIGHT;
   return (
-    <View style={deckStyles.deck} testID="review-deck">
+    <View
+      onLayout={(event) => setDeckHeight(event.nativeEvent.layout.height)}
+      style={[deckStyles.deck, bodyHeight ? { minHeight: Math.max(360, bodyHeight + PICTURE_MIN_HEIGHT) } : null]}
+      testID="review-deck"
+    >
       {visible.map((card, depth) => (
         <ReviewDeckCardView
           card={card}
           depth={depth}
+          diagnostic={depth === 0 ? diagnostic : undefined}
           key={card.key}
+          onBodyHeight={(height) => {
+            if (depth === 0) setBodyHeight(Math.ceil(height));
+          }}
           onEdit={() => onEdit(card.key)}
           onMore={() => onMore(card.key)}
+          pictureHeight={pictureHeight}
           reduceMotion={reduceMotion}
           theme={theme}
         />
@@ -418,15 +462,18 @@ function RoundAction({
 
 /** Skip, Edit before logging and Log it under the deck (prototype `.review-actions`). */
 export function ReviewDeckActions({
-  disabled,
+  logDisabled,
   logLabel,
   onEdit,
   onLog,
   onSkip,
+  skipDisabled,
   skipLabel,
   theme
 }: {
-  disabled: boolean;
+  /** Log it and Edit before logging: off while the top card has a change waiting or rejected. */
+  logDisabled: boolean;
+  skipDisabled: boolean;
   logLabel: string;
   onEdit: () => void;
   onLog: () => void;
@@ -438,7 +485,7 @@ export function ReviewDeckActions({
     <View style={deckStyles.actions}>
       <RoundAction
         accessibilityLabel={skipLabel}
-        disabled={disabled}
+        disabled={skipDisabled}
         glyph={DAYFRAME_APP_ICONS.close}
         onPress={onSkip}
         size={64}
@@ -448,7 +495,7 @@ export function ReviewDeckActions({
       />
       <RoundAction
         accessibilityLabel="Edit before logging"
-        disabled={disabled}
+        disabled={logDisabled}
         glyph={DAYFRAME_APP_ICONS.edit}
         onPress={onEdit}
         size={52}
@@ -458,7 +505,7 @@ export function ReviewDeckActions({
       />
       <RoundAction
         accessibilityLabel={logLabel}
-        disabled={disabled}
+        disabled={logDisabled}
         glyph={DAYFRAME_APP_ICONS.done}
         onPress={onLog}
         size={72}
@@ -542,7 +589,6 @@ const deckStyles = StyleSheet.create({
     borderWidth: StyleSheet.hairlineWidth,
     bottom: 0,
     left: 0,
-    overflow: "hidden",
     position: "absolute",
     right: 0,
     shadowOffset: { height: 18, width: 0 },
@@ -550,6 +596,11 @@ const deckStyles = StyleSheet.create({
     shadowRadius: 28,
     top: 0,
     transformOrigin: "50% 100%"
+  },
+  cardClip: {
+    borderRadius: DAYFRAME_BLOCKS.radius.sheet,
+    flex: 1,
+    overflow: "hidden"
   },
   confidenceDot: {
     borderRadius: 3,
@@ -563,6 +614,8 @@ const deckStyles = StyleSheet.create({
   },
   deck: {
     flex: 1,
+    // Below this the screen scrolls rather than squeezing the card.
+    minHeight: 360,
     marginBottom: 22 + 2 * REVIEW_DECK_DEPTH_OFFSET,
     marginTop: 8,
     maxHeight: 520
@@ -632,7 +685,6 @@ const deckStyles = StyleSheet.create({
     width: 44
   },
   picture: {
-    height: PICTURE_HEIGHT,
     overflow: "hidden"
   },
   pill: {

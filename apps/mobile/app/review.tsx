@@ -15,7 +15,8 @@ import { router, useFocusEffect, useLocalSearchParams, useNavigation } from "exp
 import type { NativeStackNavigationProp } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
 import {
-  onBlockTextColor,
+  DAYFRAME_BLOCKS,
+  contrastRatio,
   paletteColorFor,
   readableLocationNameFromParts,
   travelModeLabel,
@@ -58,6 +59,7 @@ import {
   reviewDeckPosition,
   reviewDeckSource
 } from "@/lib/reviewDeck";
+import { takeReviewDeckEvidenceDecisions } from "@/lib/reviewDeckDecisions";
 import {
   REVIEW_COPY,
   isTimeAwayReviewItem,
@@ -862,12 +864,44 @@ export default function ReviewScreen() {
     [deckSources, now, overlapCounts, reviewItemSyncStates, reviewMenuState.openItemId, theme.mode, theme.textSecondary]
   );
   const topDeckSource = deckSources[0] ?? null;
+  // Every open item is loaded: the deck itself is the count, so a decision still syncing never
+  // turns "2 of 5" into "2 of 5+". Otherwise the server count is used when it is exact.
+  const deckBacklogComplete = reviewBacklog !== null && !reviewBacklog.nextCursor && reviewBacklog.recordsComplete;
   const deckPosition = reviewDeckPosition({
     decided: deckVisit.decided,
-    remaining: reviewCountIsExact ? Math.max(totalNeedsReview, deckSources.length) : deckSources.length,
-    exact: reviewCountIsExact
+    remaining: deckBacklogComplete
+      ? deckSources.length
+      : reviewCountIsExact ? Math.max(totalNeedsReview, deckSources.length) : deckSources.length,
+    exact: deckBacklogComplete || reviewCountIsExact
   });
-  const deckFinished = deckSources.length === 0 && (showEmptyReviewState || (deckVisit.decided > 0 && !reviewBacklog?.nextCursor));
+  // "All framed" only once a verified read says nothing else is open; a cached-only deck (offline,
+  // no backlog read yet) never claims completeness.
+  const deckFinished = deckSources.length === 0 && !reviewBacklogLoading && deckBacklogComplete;
+  const deckWaitingCopy = reviewBacklogLoading || refreshing
+    ? "Looking for moments to review…"
+    : reviewBacklog === null
+      ? "Nothing else is saved on this iPhone. Pull to refresh when you're online."
+      : "More moments may be waiting. Pull to refresh.";
+  const topDeckControlsDisabled = deckCards[0]?.controlsDisabled ?? true;
+  // A legacy entry has no skip mutation, and a card with a waiting or rejected change cannot be
+  // decided here: Skip moves either behind the rest for this visit, so it never blocks the deck.
+  const topDeckSkipDefers = topDeckSource?.kind === "legacy_entry" || topDeckControlsDisabled;
+
+  // Decisions made in Location evidence (Edit before logging, D7) count toward this visit.
+  const knownDeckItems = useRef(new Map<string, MobileReviewItem>());
+  useEffect(() => {
+    for (const item of openReviewItems) knownDeckItems.current.set(item.id, item);
+  }, [openReviewItems]);
+  useFocusEffect(
+    useCallback(() => {
+      for (const decision of takeReviewDeckEvidenceDecisions()) {
+        const item = knownDeckItems.current.get(decision.itemId);
+        recordDeckDecision(decision.logged ? (item ? deckLoggedBlock(item) : { color: theme.textSecondary, seconds: 0 }) : null);
+      }
+      // recordDeckDecision and deckLoggedBlock only read theme values and state setters.
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [theme.mode, theme.textSecondary])
+  );
 
   function recordDeckDecision(logged: { color: string; seconds: number } | null) {
     setDeckVisit((current) => ({
@@ -1385,7 +1419,8 @@ export default function ReviewScreen() {
               theme={theme}
             />
             <ReviewDeckActions
-              disabled={deckCards[0]?.controlsDisabled ?? true}
+              logDisabled={topDeckControlsDisabled}
+              skipDisabled={topDeckSkipDefers && deckSources.length <= 1}
               logLabel={topDeckSource.kind === "legacy_entry" ? "Edit to log" : "Log it"}
               onEdit={() => {
                 if (topDeckSource.kind === "legacy_entry") {
@@ -1403,7 +1438,7 @@ export default function ReviewScreen() {
                 else confirmItem(topDeckSource.item);
               }}
               onSkip={() => {
-                if (topDeckSource.kind === "legacy_entry") {
+                if (topDeckSkipDefers) {
                   const key = topDeckSource.key;
                   setDeferredDeckKeys((current) => [...current.filter((candidate) => candidate !== key), key]);
                   if (highlightedFocusKey === key) setHighlightedFocusKey(null);
@@ -1411,14 +1446,14 @@ export default function ReviewScreen() {
                   dismissItem(topDeckSource.item);
                 }
               }}
-              skipLabel={topDeckSource.kind === "legacy_entry" ? "Skip for now" : "Skip"}
+              skipLabel={topDeckSkipDefers ? "Skip for now" : "Skip"}
               theme={theme}
             />
           </>
         ) : (
           <View style={styles.reviewDeckWaiting}>
             <Text {...mobileTextProps("body")} accessibilityLiveRegion="polite" style={styles.muted}>
-              {reviewBacklogLoading || !reviewCountIsExact ? "Looking for moments to review…" : REVIEW_COPY.emptyState}
+              {deckWaitingCopy}
             </Text>
             {reviewBacklog?.nextCursor && !reviewBacklogLoading ? (
               <Pressable
@@ -1506,6 +1541,12 @@ function ReviewSyncStatus({
   );
 }
 
+/** On-chip text measured against the chip's actual fill: white or deep ink, whichever is higher. */
+function onColorFor(fill: string) {
+  const { ink, white } = DAYFRAME_BLOCKS.onBlock;
+  return contrastRatio(fill, white) >= contrastRatio(fill, ink) ? white : ink;
+}
+
 function deckFinishedCopy(logged: readonly { seconds: number }[]) {
   if (!logged.length) return "Nothing to review right now.";
   const seconds = logged.reduce((total, block) => total + block.seconds, 0);
@@ -1545,7 +1586,7 @@ export function reviewDeckCardForItem(
     key,
     picture: reviewDeckPicture(kind),
     color,
-    onColor: onBlockTextColor(item.categoryColor ?? item.suggestedCategoryId ?? color, context.mode, activityName),
+    onColor: onColorFor(color),
     source: reviewDeckSource(kind),
     confidence: { score: confidence.score, label: confidence.label },
     title,
@@ -1574,6 +1615,7 @@ function reviewDeckCardForEntry(
   // No activity stays neutral rather than taking a hashed palette colour.
   const neutral = !entry.categoryId && !entry.categoryName && !health;
   const colorKey = entry.categoryColor ?? (health ? "moss" : entry.categoryId);
+  const entryColor = neutral ? context.neutral : paletteColorFor(colorKey, activityName, context.mode);
   const kind = {
     eventSource: entry.source,
     eventType: null,
@@ -1583,8 +1625,8 @@ function reviewDeckCardForEntry(
   return {
     key,
     picture: reviewDeckPicture(kind),
-    color: neutral ? context.neutral : paletteColorFor(colorKey, activityName, context.mode),
-    onColor: neutral ? onBlockTextColor("slate", context.mode) : onBlockTextColor(colorKey, context.mode, activityName),
+    color: entryColor,
+    onColor: onColorFor(entryColor),
     source: reviewDeckSource(kind),
     confidence: null,
     title: displayEntryTitle(entry),
