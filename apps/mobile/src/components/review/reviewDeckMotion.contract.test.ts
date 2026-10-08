@@ -59,7 +59,7 @@ describe("Review deck motion contract (Blocks parity step 5b)", () => {
     expect(screen).toContain("lastDeckKeys.current.every((key) => ownDeckDecisionKeys.current.has(key))");
     expect(screen).not.toContain("lastDeckDecisionAt");
     expect(screen).toContain("controlsDisabled: card.controlsDisabled || card.key === flyingDeckKey");
-    expect(screen).toContain("logDisabled={topDeckControlsDisabled || deckFlying || topDeckLogBlocked}");
+    expect(screen).toContain("logDisabled={topDeckControlsDisabled || deckFlying}");
     expect(screen).toContain("skipDisabled={deckFlying || (topDeckSkipDefers && deckSources.length <= 1)}");
     expect(deck).toContain("reviewDeckArmDirection(dragX.value, event.translationX)");
   });
@@ -78,7 +78,7 @@ describe("Review deck motion contract (Blocks parity step 5b)", () => {
   });
 
   it("locks a deferred card's controls during its flight too (r3 6)", () => {
-    expect(screen).toMatch(/setFlyingDeckKey\(key\);\s*if \(source\.kind === "legacy_entry" \|\| card\?\.skipDefers\) \{\s*\/\/[^\n]*\n\s*deckHold\.flush\(\);/);
+    expect(screen).toMatch(/setFlyingDeckKey\(key\);\s*flyingDeckDefers\.current = [^\n]*\n\s*if \(source\.kind === "legacy_entry" \|\| card\?\.skipDefers\) \{\s*\/\/[^\n]*\n\s*deckHold\.flush\(\);/);
   });
 
   it("restores a failed save as a fresh card and never saves a changed proposal (r4 1, 2)", () => {
@@ -133,7 +133,9 @@ describe("Review deck live Log as (Blocks parity step 5c-1)", () => {
   it("never throws a card the outbox would refuse, and a dead card never reports a throw (polish)", () => {
     expect(screen).toContain("canLog: context.syncState == null && hasSuggestedTimeWindow(item),");
     expect(screen).toContain("skipDefers: context.syncState != null || !hasSuggestedTimeWindow(item),");
-    expect(screen).toContain("logDisabled={topDeckControlsDisabled || deckFlying || topDeckLogBlocked}");
+    expect(screen).toContain("controlsDisabled: context.syncState != null || !hasSuggestedTimeWindow(item),");
+    expect(screen).toMatch(/reviewItemSyncStates\.has\(item\.id\) \|\|\s*!hasSuggestedTimeWindow\(item\)/);
+    expect(screen).toContain("deferDeckCard(flyingDeckKey);");
     expect(deck).toMatch(/useEffect\(\(\) => \(\) => \{\s*cancelAnimation\(dragX\);\s*cancelAnimation\(dragY\);/);
   });
 });
