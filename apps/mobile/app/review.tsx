@@ -197,9 +197,6 @@ export default function ReviewScreen() {
   const [flyingDeckKey, setFlyingDeckKey] = useState<string | null>(null);
   // A saved decision stays out of the deck until its SQLite projection drops the card.
   const [committingDeckKeys, setCommittingDeckKeys] = useState<ReadonlySet<string>>(() => new Set());
-  // A card brought back by Undo after a capped refresh paged its item out, shown from the copy
-  // the deck had until the item is loaded again.
-  const [restoredDeckItems, setRestoredDeckItems] = useState<ReadonlyMap<string, MobileReviewItem>>(() => new Map());
   // Cards this visit decided itself: "All framed" celebrates only when they emptied the deck.
   const ownDeckDecisionKeys = useRef(new Set<string>());
   const lastDeckKeys = useRef<readonly string[]>([]);
@@ -872,12 +869,8 @@ export default function ReviewScreen() {
     | { key: string; kind: "review"; item: MobileReviewItem }
     | { key: string; kind: "legacy_entry"; entry: MobileTimeEntry };
   const deckSources = useMemo(() => {
-    const openIds = new Set(openReviewItems.map((item) => item.id));
     const sources: DeckSource[] = [
       ...openReviewItems.map((item) => ({ key: reviewFocusKey("review", item.id), kind: "review" as const, item })),
-      ...[...restoredDeckItems.values()]
-        .filter((item) => !openIds.has(item.id))
-        .map((item) => ({ key: reviewFocusKey("review", item.id), kind: "review" as const, item })),
       ...displayedReviewNeededEntries.map((entry) => ({
         key: reviewFocusKey("legacy_entry", entry.id),
         kind: "legacy_entry" as const,
@@ -902,7 +895,7 @@ export default function ReviewScreen() {
     const returnKey = deckReturn && ordered.some((source) => source.key === deckReturn.key) ? deckReturn.key : null;
     // Undo wins over a ribbon focus: the card the user brought back is the one they want.
     return orderReviewDeck(ordered, returnKey ?? focusKey ?? stickyKey);
-  }, [committingDeckKeys, deckReturn, deferredDeckKeys, displayedReviewNeededEntries, flyingDeckKey, heldDeckDecision, highlightedFocusKey, openReviewItems, restoredDeckItems]);
+  }, [committingDeckKeys, deckReturn, deferredDeckKeys, displayedReviewNeededEntries, flyingDeckKey, heldDeckDecision, highlightedFocusKey, openReviewItems]);
   useEffect(() => {
     deckTopKeyRef.current = deckSources[0]?.key ?? null;
   }, [deckSources]);
@@ -1091,13 +1084,21 @@ export default function ReviewScreen() {
       deferGenerations.current.set(held.key, (deferGenerations.current.get(held.key) ?? 0) + 1);
       setFlyingDeckKey(null);
     }
-    const knownItem = knownDeckItems.current.get(held.itemId);
-    if (knownItem && !openReviewItems.some((item) => item.id === held.itemId)) {
-      setRestoredDeckItems((current) => new Map(current).set(held.itemId, knownItem));
-    }
+    restorePagedOutDeckItem(held.itemId);
     setDeckReturn({ key: held.key, direction: held.direction, token: held.token });
     playHaptic("undoRestore");
     AccessibilityInfo.announceForAccessibility(`${held.title} is back.`);
+  }
+
+  // A card brought back (Undo, a failed save) after a capped refresh paged its item out returns to
+  // the loaded data from the copy the deck showed, so the deck, More, Edit and saving all see it
+  // again. The next read replaces it like any other loaded item.
+  function restorePagedOutDeckItem(itemId: string) {
+    const loaded = dataRef.current;
+    const known = knownDeckItems.current.get(itemId);
+    if (!loaded || !known || !isOpenReviewItem(known)) return;
+    if (loaded.reviewItems.some((item) => item.id === itemId)) return;
+    commitData({ ...loaded, reviewItems: [...loaded.reviewItems, known] });
   }
 
   function setDeckKeyCommitting(key: string, committing: boolean) {
@@ -1142,12 +1143,6 @@ export default function ReviewScreen() {
     // the outcome retires it; otherwise a card restored by a failed save would stay locked.
     const settled = () => {
       setDeckKeyCommitting(held.key, false);
-      setRestoredDeckItems((current) => {
-        if (!current.has(held.itemId)) return current;
-        const next = new Map(current);
-        next.delete(held.itemId);
-        return next;
-      });
       setFlyingDeckKey((current) => (current === held.key ? null : current));
     };
     const failed = () => {
@@ -1155,6 +1150,8 @@ export default function ReviewScreen() {
       deferGenerations.current.set(held.key, (deferGenerations.current.get(held.key) ?? 0) + 1);
       setDeckKeyCommitting(held.key, false);
       setFlyingDeckKey((current) => (current === held.key ? null : current));
+      // "The suggestion is still available": a paged-out card comes back to retry.
+      restorePagedOutDeckItem(held.itemId);
       undoCount();
     };
     let started: boolean;
@@ -1196,17 +1193,6 @@ export default function ReviewScreen() {
       return next;
     });
   }, [committingDeckKeys, openReviewItems]);
-  // A restored copy gives way to the item once it is loaded again.
-  useEffect(() => {
-    if (!restoredDeckItems.size) return;
-    const loaded = [...restoredDeckItems.keys()].filter((id) => openReviewItems.some((item) => item.id === id));
-    if (!loaded.length) return;
-    setRestoredDeckItems((current) => {
-      const next = new Map(current);
-      for (const id of loaded) next.delete(id);
-      return next;
-    });
-  }, [openReviewItems, restoredDeckItems]);
 
   // Leaving Review or backgrounding the app saves a held decision at once.
   // Active means Review is focused and the app is in the foreground; returning to the

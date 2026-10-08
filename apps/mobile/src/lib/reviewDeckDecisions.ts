@@ -13,7 +13,7 @@ export function reviewDeckDecisionForAction(action: LocationReviewAction["action
   // Classified by outcome so a new "…_and_confirm" or "record_…" action counts without a change here.
   const name: string = action;
   if (name === "accept" || name === "confirm" || name.endsWith("_and_confirm") || name.startsWith("record_")) return true;
-  if (name.startsWith("ignore") || name === "always_ignore_source") return false;
+  if (name.startsWith("ignore")) return false;
   return null;
 }
 

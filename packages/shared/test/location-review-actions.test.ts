@@ -2,6 +2,13 @@ import { describe, expect, it } from "vitest";
 import { LocationReviewActionSchema } from "../src/location/schemas";
 
 describe("Location Review action schema", () => {
+  it("keeps the legacy accept and ignore actions but rejects the removed rule actions", () => {
+    expect(LocationReviewActionSchema.parse({ action: "accept" })).toEqual({ action: "accept" });
+    expect(LocationReviewActionSchema.parse({ action: "ignore_once" })).toEqual({ action: "ignore_once" });
+    expect(LocationReviewActionSchema.safeParse({ action: "always_ignore_source" }).success).toBe(false);
+    expect(LocationReviewActionSchema.safeParse({ action: "create_rule" }).success).toBe(false);
+  });
+
   it("accepts one atomic saved-place correction with activity, category and time edits", () => {
     expect(LocationReviewActionSchema.parse({
       action: "change_place_and_confirm",

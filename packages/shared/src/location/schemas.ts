@@ -183,8 +183,9 @@ export const ReviewEntryEditSchema = z
   })
   .strict();
 
+// "always_ignore_source" and "create_rule" were removed by owner decision on 8 Oct 2026.
 const legacyReviewActionSchema = z.object({
-  action: z.enum(["accept", "ignore", "ignore_once", "always_ignore_source", "create_rule"])
+  action: z.enum(["accept", "ignore", "ignore_once"])
 }).strict();
 
 export const ConfirmLocationReviewSchema = z.object({ action: z.literal("confirm") }).strict();

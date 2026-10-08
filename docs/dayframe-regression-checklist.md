@@ -386,6 +386,8 @@ Before merging implementation PRs, ask KB to test the exact Ready Preview promot
 
 ## Review automation and friction acceptance
 
+- Web Review cards offer Accept and Ignore (plus View evidence for Location V2 items) and no "Always ignore" or "Make rule" (removed by owner decision 8 Oct 2026). `POST /api/review/{id}` with `always_ignore_source` or `create_rule` returns the structured `invalid_action` 400 and writes no `automation_rules` row; `accept` and `ignore_once` behave as before. Existing automation rules still apply at ingest.
+
 - A `needs_review` mobile entry must never contribute confirmed Today time through either dashboard fallback or manual projection. With its pending server source, expect zero logged time and exactly one pending row/slice. Proposal hashes use raw suggested category/place IDs even when display joins miss; stale Quick Confirm uses refresh guidance, and handover follows newly linked accepted IDs despite duplicate durable IDs.
 
 - Routine Today/Review presentation-read failures add no technical/connectivity banner. Verified cached content remains mounted, refresh/load-more can retry, and genuine partial coverage stays qualified. Safe read classifications/timestamps appear only in existing Sync & diagnostics; connectivity icon ownership and durable queue counts remain unchanged.

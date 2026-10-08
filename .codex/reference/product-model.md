@@ -22,11 +22,11 @@ Use this when changing timer flows, dashboards, reports, entity management, onbo
 - The interface says "activity" and "activities" everywhere on web and iPhone (owner-confirmed 6 Oct 2026; shipped app-wide rather than surface by surface). Database columns, API fields, code identifiers, tests and the report CSV export keep `category`, so nothing stored changes. `apps/web/src/app/activityWording.contract.test.ts` fails if interface text says "category" or "uncategorized".
 - Terms: an *activity* is what you start or file time under (Work, Sleep, Errands); an *entry* is a recorded stretch of time (a *time block* on Calendar); Apple Health records stay *workouts* or *sleep*; time with no activity reads "No activity". Title the list "Activities", never "Activity" alone, so it is not confused with Apple's Fitness "Activity". Library groups (Work and study, Body and mind…) may be called *life areas*.
 
-## Rule Assistant Rules
+## Automation Rules
 
-- Plain-language automation requests should become structured evidence checks before they become executable rules.
-- Multi-step rules such as home -> station -> home must simulate against event history and show rejection reasons before any automatic write is enabled.
-- Model-generated drafts can help with wording and intent, but the time-entry writer must stay deterministic and auditable.
+- The rule-drafting assistant, the automation-rule form, and Review's "Always ignore" and "Make rule" were removed by owner decision on 8 October 2026 (less code, simpler app). Review keeps Accept and Skip / Ignore once; the legacy Review API rejects `always_ignore_source` and `create_rule` with `invalid_action` (400), and `/api/entities` no longer creates `automation_rule`.
+- Existing `automation_rules` rows still apply at ingest and are still exported and deleted with the workspace, until the owner decides what happens to them. `/automation` redirects to Places for old bookmarks.
+- Any future rule surface must turn plain-language requests into structured evidence checks, simulate multi-step rules against event history with rejection reasons before automatic writes, and keep the time-entry writer deterministic and auditable.
 
 ## Data Compatibility
 
