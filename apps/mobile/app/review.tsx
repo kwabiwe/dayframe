@@ -33,7 +33,7 @@ import {
   type ReviewDeckReturn,
   type ReviewDeckThrowRequest
 } from "@/components/review/ReviewDeck";
-import { createReviewDeckHold, type ReviewDeckHeldDecision } from "@/lib/reviewDeckHold";
+import { createReviewDeckHold, reviewDeckProposalSignature, type ReviewDeckHeldDecision } from "@/lib/reviewDeckHold";
 import { playHaptic } from "@/lib/haptics";
 import {
   OverflowMenu,
@@ -877,7 +877,8 @@ export default function ReviewScreen() {
       : null;
     // A card brought back by Undo returns to the top.
     const returnKey = deckReturn && ordered.some((source) => source.key === deckReturn.key) ? deckReturn.key : null;
-    return orderReviewDeck(ordered, focusKey ?? returnKey ?? stickyKey);
+    // Undo wins over a ribbon focus: the card the user brought back is the one they want.
+    return orderReviewDeck(ordered, returnKey ?? focusKey ?? stickyKey);
   }, [committingDeckKeys, deckReturn, deferredDeckKeys, displayedReviewNeededEntries, flyingDeckKey, heldDeckDecision, highlightedFocusKey, openReviewItems]);
   useEffect(() => {
     deckTopKeyRef.current = deckSources[0]?.key ?? null;
@@ -1025,8 +1026,12 @@ export default function ReviewScreen() {
       direction,
       title: card?.title ?? reviewItemTitle(item),
       color: block.color,
-      seconds: block.seconds
+      seconds: block.seconds,
+      proposal: reviewDeckProposalSignature(item)
     });
+    // A throw reported after Review lost focus or the app went to the background is saved at
+    // once: the lifecycle flush has already run.
+    if (!deckScreenActive.current) deckHold.flush();
     playHaptic(logged ? "reviewLog" : "reviewSkip");
     AccessibilityInfo.announceForAccessibility(
       `${logged ? "Logged" : "Skipped"} ${card?.title ?? reviewItemTitle(item)}. Undo is available for a few seconds.`
@@ -1082,6 +1087,15 @@ export default function ReviewScreen() {
       undoCount();
       return;
     }
+    if (reviewDeckProposalSignature(item) !== held.proposal) {
+      // A refresh changed the suggestion while the decision was held: the user decided about
+      // something else, so nothing is saved and the card comes back as it is now.
+      deferGenerations.current.set(held.key, (deferGenerations.current.get(held.key) ?? 0) + 1);
+      setFlyingDeckKey((current) => (current === held.key ? null : current));
+      undoCount();
+      AccessibilityInfo.announceForAccessibility(`${held.title} changed, so it was not saved. Review it again.`);
+      return;
+    }
     setDeckKeyCommitting(held.key, true);
     // A flight cut short (Review left or the app backgrounded mid-throw) never reports its end, so
     // the outcome retires it; otherwise a card restored by a failed save would stay locked.
@@ -1090,6 +1104,8 @@ export default function ReviewScreen() {
       setFlyingDeckKey((current) => (current === held.key ? null : current));
     };
     const failed = () => {
+      // The restored card is a fresh card: the thrown one's animation state is spent.
+      deferGenerations.current.set(held.key, (deferGenerations.current.get(held.key) ?? 0) + 1);
       settled();
       undoCount();
     };
@@ -1115,11 +1131,19 @@ export default function ReviewScreen() {
   }, [committingDeckKeys, openReviewItems]);
 
   // Leaving Review or backgrounding the app saves a held decision at once.
+  const deckScreenActive = useRef(true);
   useFocusEffect(
-    useCallback(() => () => deckHold.flush(), [deckHold])
+    useCallback(() => {
+      deckScreenActive.current = AppState.currentState === "active";
+      return () => {
+        deckScreenActive.current = false;
+        deckHold.flush();
+      };
+    }, [deckHold])
   );
   useEffect(() => {
     const subscription = AppState.addEventListener("change", (state) => {
+      deckScreenActive.current = state === "active";
       if (state !== "active") deckHold.flush();
     });
     return () => {
@@ -1277,7 +1301,10 @@ export default function ReviewScreen() {
         ? { action: "ignore_once_location" }
         : { action: "ignore_once" },
       "Skipped. Saved on this iPhone. Waiting to sync.",
-      () => recordDeckDecision(null)
+      () => {
+        ownDeckDecisionKeys.current.add(reviewFocusKey("review", item.id));
+        recordDeckDecision(null);
+      }
     );
   }
 
@@ -1503,6 +1530,7 @@ export default function ReviewScreen() {
         } else {
           await reconcileLocalReviewProjection();
         }
+        ownDeckDecisionKeys.current.add(reviewFocusKey("review", editTarget.item.id));
         recordDeckDecision({
           color: reviewItemCategoryColor(
             editTarget.item,

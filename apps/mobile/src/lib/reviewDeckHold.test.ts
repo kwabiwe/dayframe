@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { createReviewDeckHold, type ReviewDeckHeldDecision } from "./reviewDeckHold";
+import { createReviewDeckHold, reviewDeckProposalSignature, type ReviewDeckHeldDecision } from "./reviewDeckHold";
 
 function decision(token: number, key = `review:${token}`): ReviewDeckHeldDecision {
-  return { token, key, itemId: key, logged: token % 2 === 1, direction: token % 2 === 1 ? 1 : -1, title: key, color: "#000000", seconds: 60 };
+  return { token, key, itemId: key, logged: token % 2 === 1, direction: token % 2 === 1 ? 1 : -1, title: key, color: "#000000", seconds: 60, proposal: "[]" };
 }
 
 function harness() {
@@ -68,5 +68,28 @@ describe("review deck hold", () => {
     expect(committed).toEqual([3]);
     hold.flush();
     expect(committed).toEqual([3]);
+  });
+});
+
+describe("reviewDeckProposalSignature", () => {
+  const item = {
+    title: "Walk",
+    suggestedStartedAt: "2026-10-08T09:00:00.000Z",
+    suggestedStoppedAt: "2026-10-08T09:30:00.000Z",
+    suggestedCategoryId: "walk",
+    suggestedPlaceId: null
+  };
+
+  it("is stable for the same proposal, whatever the timestamp spelling", () => {
+    expect(reviewDeckProposalSignature({ ...item, suggestedStartedAt: "2026-10-08T10:00:00+01:00" }))
+      .toBe(reviewDeckProposalSignature(item));
+  });
+
+  it("changes when a refresh revises the time, activity, place or name", () => {
+    const original = reviewDeckProposalSignature(item);
+    expect(reviewDeckProposalSignature({ ...item, suggestedStoppedAt: "2026-10-08T11:30:00.000Z" })).not.toBe(original);
+    expect(reviewDeckProposalSignature({ ...item, suggestedCategoryId: "run" })).not.toBe(original);
+    expect(reviewDeckProposalSignature({ ...item, suggestedPlaceId: "park" })).not.toBe(original);
+    expect(reviewDeckProposalSignature({ ...item, title: "Run" })).not.toBe(original);
   });
 });

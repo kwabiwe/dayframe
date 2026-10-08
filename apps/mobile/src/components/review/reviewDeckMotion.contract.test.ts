@@ -26,7 +26,7 @@ describe("Review deck motion contract (Blocks parity step 5b)", () => {
 
   it("holds a thrown decision for Undo and saves it on leaving or backgrounding", () => {
     expect(screen).toContain("deckHold.hold({");
-    expect(screen).toContain("useCallback(() => () => deckHold.flush(), [deckHold])");
+    expect(screen).toMatch(/return \(\) => \{\s*deckScreenActive\.current = false;\s*deckHold\.flush\(\);\s*\};\s*\}, \[deckHold\]\)/);
     expect(screen).toMatch(/if \(state !== "active"\) deckHold\.flush\(\);/);
     expect(screen).toContain('testID="review-deck-undo"');
     expect(screen).toContain("unrecordDeckDecision(");
@@ -77,5 +77,21 @@ describe("Review deck motion contract (Blocks parity step 5b)", () => {
 
   it("locks a deferred card's controls during its flight too (r3 6)", () => {
     expect(screen).toMatch(/setFlyingDeckKey\(key\);\s*if \(source\.kind === "legacy_entry" \|\| card\?\.skipDefers\) return;/);
+  });
+
+  it("restores a failed save as a fresh card and never saves a changed proposal (r4 1, 2)", () => {
+    expect(screen).toMatch(/const failed = \(\) => \{[^}]*deferGenerations\.current\.set\(held\.key/);
+    expect(screen).toContain("proposal: reviewDeckProposalSignature(item)");
+    expect(screen).toContain("if (reviewDeckProposalSignature(item) !== held.proposal) {");
+  });
+
+  it("saves a throw reported after leaving at once, and Undo beats a ribbon focus (r4 3, 4)", () => {
+    expect(screen).toContain("if (!deckScreenActive.current) deckHold.flush();");
+    expect(screen).toMatch(/deckScreenActive\.current = false;\s*deckHold\.flush\(\);/);
+    expect(screen).toContain("orderReviewDeck(ordered, returnKey ?? focusKey ?? stickyKey)");
+  });
+
+  it("counts Dismiss and a saved edit as this visit's own decisions for the celebration (r4 5)", () => {
+    expect(screen.match(/ownDeckDecisionKeys\.current\.add\(reviewFocusKey\("review", (item|editTarget\.item)\.id\)\)/g)?.length).toBe(2);
   });
 });

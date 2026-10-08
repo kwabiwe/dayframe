@@ -14,7 +14,29 @@ export type ReviewDeckHeldDecision = {
   title: string;
   color: string;
   seconds: number;
+  /** What the user saw when they decided (reviewDeckProposalSignature); a change cancels it. */
+  proposal: string;
 };
+
+/**
+ * The parts of a suggestion a decision is about. If a refresh changes any of them while the
+ * decision is held, it is not saved: the card comes back to be reviewed again.
+ */
+export function reviewDeckProposalSignature(item: {
+  title?: string | null;
+  suggestedStartedAt?: string | null;
+  suggestedStoppedAt?: string | null;
+  suggestedCategoryId?: string | null;
+  suggestedPlaceId?: string | null;
+}) {
+  return JSON.stringify([
+    item.title ?? null,
+    item.suggestedStartedAt ? Date.parse(item.suggestedStartedAt) : null,
+    item.suggestedStoppedAt ? Date.parse(item.suggestedStoppedAt) : null,
+    item.suggestedCategoryId ?? null,
+    item.suggestedPlaceId ?? null
+  ]);
+}
 
 type TimerHandle = unknown;
 
