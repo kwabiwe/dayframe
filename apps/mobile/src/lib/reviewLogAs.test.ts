@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { reviewLogAsEdit } from "./reviewLogAs";
+import { activeLogAsCategoryId, reviewLogAsEdit } from "./reviewLogAs";
 
 const base = {
   draftName: undefined,
@@ -48,5 +48,22 @@ describe("reviewLogAsEdit", () => {
   it("falls back to a plain confirm without a valid suggested window", () => {
     expect(reviewLogAsEdit({ ...base, draftName: "Lunch", stoppedAt: null })).toBeNull();
     expect(reviewLogAsEdit({ ...base, draftName: "Lunch", stoppedAt: base.startedAt })).toBeNull();
+  });
+});
+
+describe("activeLogAsCategoryId", () => {
+  const categories = [{ id: "walk" }, { id: "read" }];
+
+  it("keeps a drafted activity that is still active", () => {
+    expect(activeLogAsCategoryId("walk", categories)).toBe("walk");
+  });
+
+  it("drops a drafted activity archived since it was picked", () => {
+    expect(activeLogAsCategoryId("gym", categories)).toBeUndefined();
+    expect(activeLogAsCategoryId("walk", undefined)).toBeUndefined();
+  });
+
+  it("leaves an untouched chip untouched", () => {
+    expect(activeLogAsCategoryId(undefined, categories)).toBeUndefined();
   });
 });

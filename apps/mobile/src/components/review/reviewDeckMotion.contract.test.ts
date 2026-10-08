@@ -35,7 +35,8 @@ describe("Review deck motion contract (Blocks parity step 5b)", () => {
   it("keeps a saved decision out of the deck until its projection lands (r2 A)", () => {
     expect(screen).toContain("committingDeckKeys.has(key)");
     expect(screen).toContain("setDeckKeyCommitting(held.key, true);");
-    expect(screen).toMatch(/const started = held\.logged[\s\S]*settled, failed, \{ unlisted \}\)/);
+    expect(screen).toMatch(/started = resolveItem\(item, \{ action: "edit_and_confirm", edit \}, [^\n]*settled, failed, \{ unlisted \}\);/);
+    expect(screen).toMatch(/started = resolveItem\([^\n]*ignore_once[^\n]*settled, failed, \{ unlisted \}\);/);
     expect(screen).toContain("if (!started) failed();");
     expect(screen).toContain("if (reviewMutations.current.has(item.id)) return false;");
     expect(screen).toContain('Waiting to sync.", settled, failed, { unlisted })');

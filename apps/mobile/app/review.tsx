@@ -36,7 +36,7 @@ import {
 import { createReviewDeckHold, reviewDeckProposalSignature, type ReviewDeckHeldDecision } from "@/lib/reviewDeckHold";
 import { ActivityPickerSheet } from "@/components/ActivityPickerSheet";
 import { recentActivityIds } from "@/lib/activityChoice";
-import { reviewLogAsEdit } from "@/lib/reviewLogAs";
+import { activeLogAsCategoryId, reviewLogAsEdit } from "@/lib/reviewLogAs";
 import { playHaptic } from "@/lib/haptics";
 import {
   OverflowMenu,
@@ -1161,7 +1161,7 @@ export default function ReviewScreen() {
     const edit = held.logged
       ? reviewLogAsEdit({
           draftName: logAsNames.current.get(item.id),
-          draftCategoryId: logAsDraftsRef.current.get(item.id)?.categoryId,
+          draftCategoryId: activeLogAsCategoryId(logAsDraftsRef.current.get(item.id)?.categoryId, dataRef.current?.categories),
           defaultName: item.title?.trim() || reviewItemTitle(item),
           suggestedCategoryId: item.suggestedCategoryId,
           isLocationV2: hasV2LocationEvidence(item),
@@ -1887,7 +1887,7 @@ export default function ReviewScreen() {
           recentIds={recentLogAsActivityIds}
           reduceMotion={reduceMotion}
           selectedId={
-            logAsDrafts.get(logAsPickerItemId)?.categoryId ??
+            activeLogAsCategoryId(logAsDrafts.get(logAsPickerItemId)?.categoryId, data?.categories) ??
             (data?.reviewItems ?? []).find((item) => item.id === logAsPickerItemId)?.suggestedCategoryId ??
             null
           }
@@ -2034,7 +2034,8 @@ export function reviewDeckCardForItem(
       formatReviewDeckWhen(item.suggestedStartedAt, item.suggestedStoppedAt, reviewItemDurationSeconds(item, context.now), context.now),
       travelMode
     ].filter(Boolean).join(" · ") || null,
-    logAsName: context.draft?.description ?? (item.title?.trim() || title),
+    // A cleared field logs the default name, so the card says so too.
+    logAsName: context.draft?.description?.trim() || item.title?.trim() || title,
     logAsEditable: context.syncState == null && hasSuggestedTimeWindow(item),
     activityName,
     reason: [locationReason ?? reviewItemSummary(item), overlap].filter(Boolean).join(" ") || null,

@@ -39,3 +39,12 @@ export function reviewLogAsEdit(input: {
     stoppedAt: input.stoppedAt
   };
 }
+
+/** A drafted activity archived (or gone) since it was picked falls back to the suggestion's. */
+export function activeLogAsCategoryId(
+  categoryId: string | undefined,
+  categories: readonly { id: string }[] | undefined
+) {
+  if (categoryId === undefined) return undefined;
+  return categories?.some((category) => category.id === categoryId) ? categoryId : undefined;
+}
