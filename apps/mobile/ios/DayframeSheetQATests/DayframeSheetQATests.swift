@@ -730,7 +730,7 @@ final class DayframeSheetQATests: XCTestCase {
       success: true,
       state: persisted
     )
-    try tap(SheetQAIdentifiers.hero)
+    try tapSheetHead()
     _ = try waitForSheet("tag flow explicit focus release") { state in
       SheetQAValue.string(state, "keyboardPhase") == "hidden"
         && SheetQAValue.bool(state, "descriptionFocused") == false
@@ -1651,7 +1651,7 @@ final class DayframeSheetQATests: XCTestCase {
     let current = try sheetState()
     if SheetQAValue.string(current, "keyboardPhase") != "hidden"
       || SheetQAValue.string(current, "suggestionsPhase") != "closed" {
-      try tap(SheetQAIdentifiers.hero)
+      try tapSheetHead()
     }
     let before = try waitForSheet("keyboard and Suggestions closed before Stop") { state in
       SheetQAValue.string(state, "keyboardPhase") == "hidden"
@@ -2190,6 +2190,17 @@ final class DayframeSheetQATests: XCTestCase {
       pollRunLoop()
     }
     throw SheetQAFailure("Timed out waiting for \(description).")
+  }
+
+  /// Taps the sheet head (eyebrow and title) the way a finger does. The head's text is not an
+  /// accessibility element of its own, so XCUITest never reports it hittable; a coordinate tap
+  /// reaches the head's Pressable, which closes the keyboard and Suggestions.
+  private func tapSheetHead() throws {
+    let head = element(SheetQAIdentifiers.hero)
+    guard head.waitForExistence(timeout: 2), !head.frame.isEmpty else {
+      throw SheetQAFailure("The sheet head was not on screen to close the keyboard and Suggestions.")
+    }
+    head.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
   }
 
   private func tap(_ identifier: String, scrollIn scrollIdentifier: String? = nil) throws {
