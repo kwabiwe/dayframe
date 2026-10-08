@@ -476,20 +476,18 @@ export default function SettingsScreen() {
   const load = useCallback((options?: { silent?: boolean; trigger?: "navigation" | "focus" | "pull" }) => refreshes.current.run("settings", true, async () => {
     const showRefreshIndicator = shouldShowSettingsRefreshSpinner(options?.trigger ?? "navigation");
     if (showRefreshIndicator) setRefreshing(true);
+    // The local queue has one guarded reader (refreshQueueLatest): it publishes whether or not the
+    // bootstrap below succeeds, and never after Settings closed or the account changed.
+    void refreshQueueLatest();
     try {
       await drainNativeShortcutQueue();
-      const queueSequence = ++queueReadSequence.current;
-      const [bootstrap, queued, location] = await Promise.all([
+      const [bootstrap, location] = await Promise.all([
         fetchBootstrap(),
-        readQueue(),
         getLocationVisitDiagnostics()
       ]);
       const nextLocationStatus = locationStatusText(location);
-      // A newer queue read (the live subscription) wins over this one.
-      const queueIsLatest = queueSequence === queueReadSequence.current;
       updateSettingsSnapshot({
         data: bootstrap,
-        ...(queueIsLatest ? { queue: queued } : {}),
         locationDiagnostics: location,
         locationStatus: nextLocationStatus,
         updatedAt: Date.now()
@@ -497,8 +495,6 @@ export default function SettingsScreen() {
       setData(bootstrap);
       await configureLocationIntelligence(bootstrap);
       syncShortcutCatalog(bootstrap);
-      // Re-checked after the awaits above: a newer subscription read wins.
-      if (queueSequence === queueReadSequence.current) setQueue(queued);
       setLocationDiagnostics(location);
       setLocationStatus(nextLocationStatus);
       await refreshLocationV2Diagnostics();
@@ -957,7 +953,7 @@ export default function SettingsScreen() {
     setSyncStatusMessageAndCache(options?.syncingMessage ?? "Syncing device data...");
     try {
       const result = await synchroniseDeviceNow({ date: data?.dateRange?.selectedDate });
-      setQueueAndCache(await readQueue());
+      await refreshQueueLatest();
       setSyncStatusMessageAndCache(manualSyncSummary(result));
       await Promise.all([refreshReviewDiagnostics(), refreshLocationV2Diagnostics(), refreshTimeEntryDiagnostics(), refreshTimerStopDiagnostics()]);
       return result;
@@ -1081,7 +1077,7 @@ export default function SettingsScreen() {
     setSyncStatusMessageAndCache("Retrying failed items...");
     try {
       const result = await retryFailedQueuedEvents();
-      setQueueAndCache(result.remaining);
+      await refreshQueueLatest();
       setLastSyncResultAndCache(result);
       setSyncStatusMessageAndCache(null);
       // Network failures and rejections come back in the result, not as errors.
@@ -1121,7 +1117,7 @@ export default function SettingsScreen() {
   async function clearFailedQueue() {
     try {
       const result = await clearFailedQueuedEvents();
-      setQueueAndCache(result.remaining);
+      await refreshQueueLatest();
       setLastSyncResultAndCache(null);
       setSyncStatusMessageAndCache(
         `${result.removedCount} failed queued ${result.removedCount === 1 ? "event was" : "events were"} removed. ${result.remainingCount} queued ${result.remainingCount === 1 ? "event remains" : "events remain"}.`
@@ -1196,7 +1192,7 @@ export default function SettingsScreen() {
         title: `Dayframe sync diagnostics ${snapshot.exportedAt}`,
         message: JSON.stringify(snapshot, null, 2)
       });
-      setQueueAndCache(latestQueue);
+      await refreshQueueLatest();
     } catch (error) {
       setSyncStatusMessageAndCache(error instanceof Error ? error.message : "Unable to export queue diagnostics.");
       setSyncHelpNote("Couldn't prepare the support details. Try again.");
