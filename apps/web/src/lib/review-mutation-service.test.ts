@@ -221,6 +221,110 @@ describe("idempotent Review mutations", () => {
     ))).toBe(false);
   });
 
+  it("keeps the moment's own source and confidence when a generic suggestion is edited", async () => {
+    const reviewItemId = "30000000-0000-4000-8000-000000000012";
+    const client = clientForOverlappingGenericEdit(reviewItemId);
+    mocks.connect.mockResolvedValue(client);
+
+    await resolveIdempotentReviewMutation(
+      reviewItemId,
+      {
+        clientMutationId: "d87c35ce-2a63-4e44-a8fc-4370f2a5cd12",
+        mutation: {
+          action: "edit_and_confirm",
+          edit: {
+            categoryId: null,
+            placeId: null,
+            description: "Evening walk",
+            startedAt: "2026-07-27T10:00:00.000Z",
+            stoppedAt: "2026-07-27T11:00:00.000Z",
+            tags: []
+          }
+        }
+      },
+      session
+    );
+
+    const insert = client.query.mock.calls.find(([statement]) => String(statement).includes("insert into time_entries"));
+    expect(insert).toBeDefined();
+    const [statement, values] = insert as [string, unknown[]];
+    expect(statement).toContain("coalesce($5, 'manual_app'), coalesce($6, 'high')");
+    expect(statement).toContain("user_edited_at");
+    expect(statement).not.toContain("'manual_app', 'high'");
+    expect(values[4]).toBe("health_workout");
+    expect(values[5]).toBe("medium");
+    expect(values[6]).toBe("Evening walk");
+  });
+
+  it("edits a Health sleep into the night already logged and keeps the sleep link", async () => {
+    const reviewItemId = "30000000-0000-4000-8000-000000000013";
+    const client = clientForExtendedHealthSleep(reviewItemId);
+    mocks.connect.mockResolvedValue(client);
+
+    await expect(resolveIdempotentReviewMutation(
+      reviewItemId,
+      {
+        clientMutationId: "d87c35ce-2a63-4e44-a8fc-4370f2a5cd13",
+        mutation: {
+          action: "edit_and_confirm",
+          edit: {
+            categoryId: null,
+            placeId: null,
+            description: "Long sleep",
+            startedAt: "2026-07-31T21:53:00.000Z",
+            stoppedAt: "2026-08-01T04:51:00.000Z",
+            tags: []
+          }
+        }
+      },
+      session
+    )).resolves.toMatchObject({
+      action: "edit_and_confirm",
+      entryId: "health-entry-stable",
+      status: "accepted",
+      duplicate: true
+    });
+
+    const statements = client.query.mock.calls.map(([statement]) => String(statement));
+    expect(statements.some((statement) => statement.includes("insert into time_entries"))).toBe(false);
+    const edited = client.query.mock.calls.find(([statement]) => (
+      String(statement).includes("update time_entries") && String(statement).includes("user_edited_at = now()")
+    ));
+    expect(edited?.[1]).toEqual(expect.arrayContaining(["health-entry-stable", "Long sleep"]));
+    const link = client.query.mock.calls.find(([statement]) => String(statement).includes("set resolved_time_entry_id"));
+    expect(link?.[1]).toEqual(expect.arrayContaining(["health-event-extended", "health-entry-stable"]));
+  });
+
+  it("logs an edited Health sleep with no matching night as a Health entry linked to its event", async () => {
+    const reviewItemId = "30000000-0000-4000-8000-000000000014";
+    const client = clientForExtendedHealthSleep(reviewItemId, { matching: false });
+    mocks.connect.mockResolvedValue(client);
+
+    await expect(resolveIdempotentReviewMutation(
+      reviewItemId,
+      {
+        clientMutationId: "d87c35ce-2a63-4e44-a8fc-4370f2a5cd14",
+        mutation: {
+          action: "edit_and_confirm",
+          edit: {
+            categoryId: null,
+            placeId: null,
+            description: "Nap",
+            startedAt: "2026-07-31T21:53:00.000Z",
+            stoppedAt: "2026-08-01T04:51:00.000Z",
+            tags: []
+          }
+        }
+      },
+      session
+    )).resolves.toMatchObject({ action: "edit_and_confirm", entryId: "new-sleep-entry", status: "accepted" });
+
+    const insert = client.query.mock.calls.find(([statement]) => String(statement).includes("insert into time_entries"));
+    expect((insert?.[1] as unknown[])[4]).toBe("health_sleep");
+    const link = client.query.mock.calls.find(([statement]) => String(statement).includes("set resolved_time_entry_id"));
+    expect(link?.[1]).toEqual(expect.arrayContaining(["health-event-extended", "new-sleep-entry"]));
+  });
+
   it("accepts an extended Health sleep review by updating one stable entry and receipt", async () => {
     const reviewItemId = "30000000-0000-4000-8000-000000000003";
     const client = clientForExtendedHealthSleep(reviewItemId);
@@ -485,7 +589,7 @@ function clientForClosedGenericAccept(reviewItemId: string) {
   } as unknown as import("pg").PoolClient & { query: typeof query };
 }
 
-function clientForExtendedHealthSleep(reviewItemId: string) {
+function clientForExtendedHealthSleep(reviewItemId: string, options: { matching?: boolean } = {}) {
   const query = vi.fn(async (statement: string, values?: unknown[]) => {
     if (statement.includes("pg_try_advisory_xact_lock")) {
       return { rows: [{ acquired: true }] };
@@ -515,6 +619,7 @@ function clientForExtendedHealthSleep(reviewItemId: string) {
     }
     if (statement.includes("created_from_event_id = $3")) return { rows: [] };
     if (statement.includes("matching_health_sleep_session")) {
+      if (options.matching === false) return { rows: [] };
       return {
         rows: [{
           id: "health-entry-stable",
@@ -524,6 +629,7 @@ function clientForExtendedHealthSleep(reviewItemId: string) {
         }]
       };
     }
+    if (statement.includes("insert into time_entries")) return { rows: [{ id: "new-sleep-entry" }] };
     if (statement.startsWith("update time_entries")) {
       return {
         rows: [{

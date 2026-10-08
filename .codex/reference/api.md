@@ -128,6 +128,8 @@ When changing `/api/time-entries`, `/api/events`, session handling, or mobile sy
 
 `POST /api/review/:id` accepts every resolving/structural Location action through the strict shared `{ clientMutationId, mutation }` envelope. Reject malformed envelopes rather than falling back to a direct action. Complete `edit_and_confirm` requires both valid timestamps; optional edits on other structural actions preserve the existing server validation. Receipt replay returns exact stored IDs/results. Complex actions share the Location replay owner lock and one transaction for all side effects. On permanent conflict, scoped canonical statuses identify each source independently after rollback; mobile must not infer the adjacent merge item's status from the primary. See `offline-review-mutations.md` for the SQLite/account contract.
 
+A generic (non-Location) `edit_and_confirm` keeps the moment's own provenance: the entry is stored with the review event's source and the item's confidence (falling back to `manual_app`/`high` only when the item has no event) and is marked `user_edited_at`, so a later Health re-import never overwrites the user's changes. An edited `health_sleep_import` reconciles with the night already logged from Health like `accept` does (that one entry takes the user's name, activity and times) and records the event's sleep resolution link.
+
 ## Safe Location request diagnostics
 
 Both Location POST routes return `X-Dayframe-Request-Id` (new server UUID v4) and
