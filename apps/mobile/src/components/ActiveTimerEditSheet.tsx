@@ -30,6 +30,7 @@ import {
   normalizeNewTagName,
   normalizeTagName,
   DAYFRAME_APP_ICONS,
+  activityControlColor,
   blockColorsFor,
   type RecentActivitySuggestion
 } from "@dayframe/shared";
@@ -43,7 +44,7 @@ import { ActivityIcon, DayframeIcon } from "@/components/icons/DayframeIcon";
 import { ActivityPickerSheet } from "@/components/ActivityPickerSheet";
 import { activityChips, chipsThatFit, recentActivityIds } from "@/lib/activityChoice";
 import { playHaptic } from "@/lib/haptics";
-import { TimeEntryDurationDial } from "@/components/TimeEntryDurationDial";
+import { dialTrackColor, TimeEntryDurationDial } from "@/components/TimeEntryDurationDial";
 import { pressable, type MobileStyles, type MobileTheme } from "@/lib/mobileTheme";
 import { mobileTextProps } from "@/lib/mobileTypography";
 import {
@@ -692,6 +693,14 @@ export function ActiveTimerEditSheet({
     fontScale: windowDimensions.fontScale,
     windowHeight: windowDimensions.height
   });
+  // The dial's ring takes the chosen activity's colour, as in the prototype, deepened (or lifted)
+  // where a pale colour would measure under 3:1 against the dial's track or the sheet.
+  const dialActivityColor = useMemo(() => {
+    const chosen = categories.find((category) => category.id === selectedCategoryId);
+    return chosen
+      ? activityControlColor(chosen.color ?? chosen.id, theme.mode, [dialTrackColor(theme), theme.surfaceRaised], chosen.name)
+      : null;
+  }, [categories, selectedCategoryId, theme]);
   const chipCandidates = useMemo(
     () => activityChips(categories, chipAnchorId, recentActivities, ACTIVITY_CHIP_LIMIT_BY_DENSITY[chipDensity]),
     [categories, chipAnchorId, chipDensity, recentActivities]
@@ -2709,7 +2718,7 @@ export function ActiveTimerEditSheet({
                     windowDimensions.fontScale >= 1.6 ? styles.activeEditTimeGroupsStacked : null
                   ]}>
                     <View pointerEvents="box-none" style={styles.activeEditTimeGroup}>
-                      <Text {...mobileTextProps("metadata")} style={styles.activeEditSectionLabel}>Start</Text>
+                      <Text {...mobileTextProps("counter")} style={[sheetStyles.sectionEyebrow, { color: theme.textMuted }]}>START</Text>
                       <View style={styles.activeEditCompactTimeRow}>
                         <Pressable
                           accessibilityLabel="Edit start date"
@@ -2756,7 +2765,7 @@ export function ActiveTimerEditSheet({
                       </View>
                     </View>
                     <View pointerEvents="box-none" style={styles.activeEditTimeGroup}>
-                      <Text {...mobileTextProps("metadata")} style={styles.activeEditSectionLabel}>End</Text>
+                      <Text {...mobileTextProps("counter")} style={[sheetStyles.sectionEyebrow, { color: theme.textMuted }]}>{hasStoppedTime ? "END" : "NOW"}</Text>
                       {hasStoppedTime ? (
                         <View style={styles.activeEditCompactTimeRow}>
                           <Pressable
@@ -2819,6 +2828,7 @@ export function ActiveTimerEditSheet({
                 </View>
 
                 <TimeEntryDurationDial
+                  activityColor={dialActivityColor}
                   disabled={busy}
                   endMs={parsedStop.date?.getTime() ?? draftEndMs}
                   lastStoppedAt={lastStoppedAt}

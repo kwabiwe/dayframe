@@ -4,6 +4,8 @@ import {
   DAYFRAME_PALETTE,
   DAYFRAME_PALETTE_PICKER_KEYS,
   DAYFRAME_THEME,
+  ACTIVITY_CONTROL_MINIMUM_CONTRAST,
+  activityControlColor,
   blockColorsFor,
   contrastRatio,
   onBlockTextColor,
@@ -24,6 +26,25 @@ describe("Dayframe Blocks activity colours", () => {
       }
     }
     expect(failures).toEqual([]);
+  });
+
+  it("gives the dial's ring and knobs 3:1 against the track and the sheet in both themes", () => {
+    for (const color of DAYFRAME_PALETTE) {
+      for (const mode of modes) {
+        // The dial's track (muted in Light, inset in Dark) and the sheet.
+        const track = mode === "dark" ? DAYFRAME_THEME[mode].surfaceInset : DAYFRAME_THEME[mode].surfaceMuted;
+        const backgrounds = [track, DAYFRAME_THEME[mode].surfaceRaised];
+        const ring = activityControlColor(color.key, mode, backgrounds);
+        for (const background of backgrounds) {
+          expect(contrastRatio(ring, background), `${color.key} ${mode} ${ring} on ${background}`).toBeGreaterThanOrEqual(ACTIVITY_CONTROL_MINIMUM_CONTRAST);
+        }
+        const fill = mode === "light" ? color.lightHex : color.darkHex;
+        // A colour that already measures 3:1 is used unchanged.
+        if (backgrounds.every((background) => contrastRatio(fill, background) >= ACTIVITY_CONTROL_MINIMUM_CONTRAST)) {
+          expect(ring.toLowerCase()).toBe(fill.toLowerCase());
+        }
+      }
+    }
   });
 
   it("chooses whichever of white and deep ink measures higher", () => {

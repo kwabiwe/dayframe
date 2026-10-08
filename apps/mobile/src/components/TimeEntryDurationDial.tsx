@@ -22,6 +22,8 @@ import {
 import type { TimeEntrySheetLayoutDensity } from "@/lib/timeEntrySheetDraft";
 
 type TimeEntryDurationDialProps = {
+  /** The chosen activity's colour for the ring and knobs (Blocks prototype), at least 3:1; coral without one. */
+  activityColor?: string | null;
   disabled: boolean;
   endMs: number;
   lastStoppedAt: string | null;
@@ -39,7 +41,16 @@ type TimeEntryDurationDialProps = {
   theme: MobileTheme;
 };
 
+/**
+ * The dial's empty track: a step darker than the sheet in Dark (the prototype's --inset), and the
+ * muted fill in Light, where the inset token is too close to the white sheet to see.
+ */
+export function dialTrackColor(theme: MobileTheme) {
+  return theme.mode === "dark" ? theme.surfaceInset : theme.surfaceMuted;
+}
+
 export function TimeEntryDurationDial({
+  activityColor = null,
   disabled,
   endMs,
   lastStoppedAt,
@@ -82,6 +93,8 @@ export function TimeEntryDurationDial({
     theme: {
       accent: theme.accent,
       accentSoft: theme.accentSoft,
+      arc: activityColor ?? theme.accent,
+      track: dialTrackColor(theme),
       border: theme.border,
       onAccent: theme.onAccent,
       surface: theme.surfaceRaised,
@@ -90,6 +103,7 @@ export function TimeEntryDurationDial({
       textSecondary: theme.textSecondary
     }
   }), [
+    activityColor,
     endMs,
     mode,
     nowMs,
