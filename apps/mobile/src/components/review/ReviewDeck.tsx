@@ -4,6 +4,7 @@ import { Gesture, GestureDetector } from "react-native-gesture-handler";
 import Reanimated, {
   Easing,
   ReduceMotion,
+  cancelAnimation,
   runOnJS,
   useAnimatedStyle,
   useSharedValue,
@@ -224,6 +225,7 @@ function ReviewDeckCardView({
   onEdit,
   onMore,
   onThrow,
+  onThrowStart,
   pictureHeight,
   reduceMotion,
   returnFrom,
@@ -237,6 +239,8 @@ function ReviewDeckCardView({
   onBodyHeight: (height: number) => void;
   onEdit: () => void;
   onMore: () => void;
+  /** Called as the card is thrown: the decision is taken here. */
+  onThrowStart: (direction: ReviewDeckDirection) => void;
   /** Called once the card has left (after the fling, or at once with Reduce Motion). */
   onThrow: (direction: ReviewDeckDirection) => void;
   pictureHeight: number;
@@ -269,12 +273,16 @@ function ReviewDeckCardView({
     // Plays once, when Undo brings this card back.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
-  const lastThrowToken = useSharedValue(0);
+  // A request already present when this card mounts (e.g. it returns by Undo) is never replayed.
+  const lastThrowToken = useSharedValue(throwRequest?.token ?? 0);
   const { canLog, canSkip } = card;
   function flyOut(direction: ReviewDeckDirection) {
     "worklet";
     if (thrown.value) return;
     thrown.value = true;
+    // The decision is reported as the throw starts, so leaving Review mid-flight still saves it;
+    // the flight is only visual, and its end lets the next card land.
+    runOnJS(onThrowStart)(direction);
     if (reduceMotion) {
       runOnJS(onThrow)(direction);
       return;
@@ -295,16 +303,28 @@ function ReviewDeckCardView({
     // flyOut reads only shared values and the latest props.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [throwRequest, top, card.key]);
+  const dragStartX = useSharedValue(0);
+  const dragStartY = useSharedValue(0);
   const pan = Gesture.Pan()
     .enabled(top)
     .activeOffsetX([-12, 12])
     .failOffsetY([-14, 14])
+    .onStart(() => {
+      if (thrown.value) return;
+      // Catching a card that is still springing home (or flying back after Undo) continues from
+      // where it is instead of snapping.
+      cancelAnimation(dragX);
+      cancelAnimation(dragY);
+      dragStartX.value = dragX.value;
+      dragStartY.value = dragY.value;
+    })
     .onUpdate((event) => {
       if (thrown.value) return;
+      const x = dragStartX.value + event.translationX;
       // A direction the card cannot take resists instead of arming.
-      const blocked = (event.translationX > 0 && !canLog) || (event.translationX < 0 && !canSkip);
-      dragX.value = blocked ? event.translationX * 0.2 : event.translationX;
-      dragY.value = event.translationY;
+      const blocked = (x > 0 && !canLog) || (x < 0 && !canSkip);
+      dragX.value = blocked ? x * 0.2 : x;
+      dragY.value = dragStartY.value + event.translationY;
       const next = dragX.value > REVIEW_DECK_THROW_THRESHOLD ? 1 : dragX.value < -REVIEW_DECK_THROW_THRESHOLD ? -1 : 0;
       if (next !== armed.value) {
         armed.value = next;
@@ -342,7 +362,7 @@ function ReviewDeckCardView({
     <Reanimated.View
       accessibilityElementsHidden={!top}
       // A card brought back by Undo flies in instead of fading in.
-      entering={returnFrom ? undefined : localPresenceEntering(reduceMotion)}
+      entering={returnFrom && !reduceMotion ? undefined : localPresenceEntering(reduceMotion)}
       exiting={localPresenceExiting(reduceMotion)}
       importantForAccessibility={top ? "auto" : "no-hide-descendants"}
       pointerEvents={top ? "box-none" : "none"}
@@ -501,6 +521,7 @@ export function ReviewDeckStack({
   onEdit,
   onMore,
   onThrow,
+  onThrowStart,
   reduceMotion,
   returnRequest = null,
   theme,
@@ -511,6 +532,7 @@ export function ReviewDeckStack({
   onEdit: (key: string) => void;
   onMore: (key: string) => void;
   onThrow: (key: string, direction: ReviewDeckDirection) => void;
+  onThrowStart: (key: string, direction: ReviewDeckDirection) => void;
   reduceMotion: boolean;
   returnRequest?: ReviewDeckReturn | null;
   theme: MobileTheme;
@@ -546,6 +568,7 @@ export function ReviewDeckStack({
           onEdit={() => onEdit(card.key)}
           onMore={() => onMore(card.key)}
           onThrow={(direction) => onThrow(card.key, direction)}
+          onThrowStart={(direction) => onThrowStart(card.key, direction)}
           pictureHeight={pictureHeight}
           reduceMotion={reduceMotion}
           returnFrom={returnRequest?.key === card.key ? returnRequest : null}
@@ -690,23 +713,29 @@ function FinishedBlock({ color, index, reduceMotion }: { color: string; index: n
 /** The finished deck: "All framed" with this visit's logged moments as blocks. */
 export function ReviewDeckFinished({
   blocks,
+  celebrate,
   copy,
+  footer,
   onBack,
   reduceMotion,
   theme
 }: {
   blocks: readonly string[];
+  /** Only a finish reached by this visit's own decision drops in and plays the haptic. */
+  celebrate: boolean;
   copy: string;
+  footer?: ReactNode;
   onBack: () => void;
   reduceMotion: boolean;
   theme: MobileTheme;
 }) {
   const colors = blocks.length ? blocks : [theme.borderStrong];
-  const titleScale = useSharedValue(reduceMotion ? 1 : 0.8);
+  const animate = celebrate && !reduceMotion;
+  const titleScale = useSharedValue(animate ? 0.8 : 1);
   useEffect(() => {
-    if (!reduceMotion) titleScale.value = withDelay(200, withSpring(1, popSpring));
-    // One success tick once the blocks have landed, only when something was logged.
-    const haptic = blocks.length ? setTimeout(() => playHaptic("reviewLog"), 300) : null;
+    if (animate) titleScale.value = withDelay(200, withSpring(1, popSpring));
+    // One success tick once the blocks have landed, only after this visit logged something.
+    const haptic = celebrate && blocks.length ? setTimeout(() => playHaptic("reviewLog"), 300) : null;
     return () => {
       if (haptic) clearTimeout(haptic);
     };
@@ -721,7 +750,7 @@ export function ReviewDeckFinished({
     <View style={deckStyles.finished} testID="review-deck-finished">
       <View accessibilityElementsHidden importantForAccessibility="no-hide-descendants" style={deckStyles.finishedBlocks}>
         {colors.slice(0, 9).map((color, index) => (
-          <FinishedBlock color={color} index={index} key={index} reduceMotion={reduceMotion} />
+          <FinishedBlock color={color} index={index} key={index} reduceMotion={!animate} />
         ))}
       </View>
       <Reanimated.View style={titleStyle}>
@@ -742,6 +771,7 @@ export function ReviewDeckFinished({
           Back to Today
         </Text>
       </Pressable>
+      {footer}
     </View>
   );
 }

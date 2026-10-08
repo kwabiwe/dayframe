@@ -190,6 +190,9 @@ export default function ReviewScreen() {
   const [heldDeckDecision, setHeldDeckDecision] = useState<ReviewDeckHeldDecision | null>(null);
   const [deckThrowRequest, setDeckThrowRequest] = useState<ReviewDeckThrowRequest | null>(null);
   const [deckReturn, setDeckReturn] = useState<ReviewDeckReturn | null>(null);
+  // The held card stays on screen while it flies out; the cards beneath land when it has gone.
+  const [flyingDeckKey, setFlyingDeckKey] = useState<string | null>(null);
+  const lastDeckDecisionAt = useRef(0);
   const deckTokenSequence = useRef(0);
   const commitHeldDeckDecisionRef = useRef<(held: ReviewDeckHeldDecision) => void>(() => undefined);
   const deckHold = useRef(createReviewDeckHold({
@@ -853,7 +856,7 @@ export default function ReviewScreen() {
       }))
     ];
     const deferred = new Set(deferredDeckKeys);
-    const heldKey = heldDeckDecision?.key ?? null;
+    const heldKey = heldDeckDecision && heldDeckDecision.key !== flyingDeckKey ? heldDeckDecision.key : null;
     const ordered = [
       ...sources.filter((source) => !deferred.has(source.key) && source.key !== heldKey),
       ...deferredDeckKeys.flatMap((key) => sources.filter((source) => source.key === key && key !== heldKey))
@@ -868,7 +871,7 @@ export default function ReviewScreen() {
     // A card brought back by Undo returns to the top.
     const returnKey = deckReturn && ordered.some((source) => source.key === deckReturn.key) ? deckReturn.key : null;
     return orderReviewDeck(ordered, focusKey ?? returnKey ?? stickyKey);
-  }, [deckReturn, deferredDeckKeys, displayedReviewNeededEntries, heldDeckDecision, highlightedFocusKey, openReviewItems]);
+  }, [deckReturn, deferredDeckKeys, displayedReviewNeededEntries, flyingDeckKey, heldDeckDecision, highlightedFocusKey, openReviewItems]);
   useEffect(() => {
     deckTopKeyRef.current = deckSources[0]?.key ?? null;
   }, [deckSources]);
@@ -963,16 +966,25 @@ export default function ReviewScreen() {
   }
 
   // A card left the deck by a swipe or a Log it / Skip press (after its fling).
+  // The card has left the screen: the next card may land; a deferral moves the card to the back.
+  function handleDeckThrowEnd(key: string, direction: ReviewDeckDirection) {
+    setFlyingDeckKey((current) => (current === key ? null : current));
+    const source = deckSources.find((candidate) => candidate.key === key);
+    const card = deckCards.find((candidate) => candidate.key === key);
+    if (source && (source.kind === "legacy_entry" || card?.skipDefers) && direction === -1) deferDeckCard(key);
+  }
+
+  // A card was thrown (swipe or Log it / Skip): its decision is taken now, before the flight ends,
+  // so leaving Review mid-flight still saves it.
   function handleDeckThrow(key: string, direction: ReviewDeckDirection) {
     setDeckThrowRequest(null);
     setDeckReturn(null);
     const source = deckSources.find((candidate) => candidate.key === key);
     if (!source) return;
     const card = deckCards.find((candidate) => candidate.key === key);
-    if (source.kind === "legacy_entry" || card?.skipDefers) {
-      if (direction === -1) deferDeckCard(key);
-      return;
-    }
+    if (source.kind === "legacy_entry" || card?.skipDefers) return;
+    setFlyingDeckKey(key);
+    lastDeckDecisionAt.current = Date.now();
     const item = source.item;
     const logged = direction === 1;
     const block = deckLoggedBlock(item);
@@ -1007,6 +1019,12 @@ export default function ReviewScreen() {
     const held = deckHold.undo(current.token);
     if (!held) return;
     unrecordDeckDecision(held.logged ? { color: held.color, seconds: held.seconds } : null);
+    setDeckThrowRequest(null);
+    if (flyingDeckKey === held.key) {
+      // Undone mid-flight: the card comes back as a fresh card instead of finishing its flight.
+      deferGenerations.current.set(held.key, (deferGenerations.current.get(held.key) ?? 0) + 1);
+      setFlyingDeckKey(null);
+    }
     setDeckReturn({ key: held.key, direction: held.direction, token: held.token });
     playHaptic("undoRestore");
     AccessibilityInfo.announceForAccessibility(`${held.title} is back.`);
@@ -1016,7 +1034,11 @@ export default function ReviewScreen() {
     const item = dataRef.current?.reviewItems.find(
       (candidate) => candidate.id === held.itemId && isOpenReviewItem(candidate)
     );
-    if (!item) return;
+    if (!item) {
+      // Resolved elsewhere while held: this visit did not decide it.
+      unrecordDeckDecision(held.logged ? { color: held.color, seconds: held.seconds } : null);
+      return;
+    }
     const undoCount = () => unrecordDeckDecision(held.logged ? { color: held.color, seconds: held.seconds } : null);
     if (held.logged) {
       resolveItem(item, hasV2LocationEvidence(item) ? { action: "confirm" } : { action: "accept" }, "Logged. Saved on this iPhone. Waiting to sync.", undefined, undoCount);
@@ -1463,6 +1485,40 @@ export default function ReviewScreen() {
     }
   }
 
+  // The Undo toast sits just above the round actions (or under Back to Today once all is framed),
+  // so it never covers the controls whatever the phone height or text size.
+  function renderDeckToast(placement: "actions" | "finished") {
+    if (!heldDeckDecision) return null;
+    return (
+    <Reanimated.View
+      key={heldDeckDecision.token}
+      accessibilityLiveRegion="polite"
+      entering={localPresenceEntering(reduceMotion, "rise")}
+      exiting={localPresenceExiting(reduceMotion)}
+      style={[styles.historyDeleteUndoToast, styles.reviewDeckToast, placement === "finished" ? styles.reviewDeckToastInFlow : null]}
+      testID="review-deck-toast"
+    >
+      <View style={styles.reviewDeckToastLabel}>
+        <View style={[styles.reviewDeckToastSwatch, { backgroundColor: heldDeckDecision.color }]} />
+        <Text numberOfLines={1} style={[styles.historyDeleteUndoText, styles.reviewDeckToastText]}>
+          {heldDeckDecision.logged ? "Logged" : "Skipped"} {heldDeckDecision.title}
+        </Text>
+      </View>
+      <Pressable
+        accessibilityLabel={`Undo ${heldDeckDecision.logged ? "logging" : "skipping"} ${heldDeckDecision.title}`}
+        accessibilityRole="button"
+        // The shared Undo pill is 40 points tall; the slop makes it a 44-point target.
+        hitSlop={{ bottom: 4, left: 4, right: 4, top: 4 }}
+        onPress={undoHeldDeckDecision}
+        style={({ pressed }) => [styles.historyDeleteUndoButton, pressed ? styles.buttonPressed : null]}
+        testID="review-deck-undo"
+      >
+        <Text style={styles.historyDeleteUndoButtonText}>Undo</Text>
+      </Pressable>
+    </Reanimated.View>
+    );
+  }
+
   return (
     <SafeAreaView style={styles.safeArea}>
       <View style={styles.reviewDeckNav}>
@@ -1524,6 +1580,8 @@ export default function ReviewScreen() {
           <ReviewDeckFinished
             blocks={deckVisit.logged.map((block) => block.color)}
             copy={deckFinishedCopy(deckVisit.logged, deckVisit.decided)}
+            celebrate={Date.now() - lastDeckDecisionAt.current < 8_000}
+            footer={renderDeckToast("finished")}
             onBack={() => router.back()}
             reduceMotion={reduceMotion}
             theme={theme}
@@ -1542,12 +1600,15 @@ export default function ReviewScreen() {
                 const source = deckSources.find((candidate) => candidate.key === key);
                 if (source?.kind === "review") toggleReviewMenu(source.item);
               }}
-              onThrow={handleDeckThrow}
+              onThrow={handleDeckThrowEnd}
+              onThrowStart={handleDeckThrow}
               reduceMotion={reduceMotion}
               returnRequest={deckReturn}
               theme={theme}
               throwRequest={deckThrowRequest}
             />
+            <View style={styles.reviewDeckActionsAnchor}>
+              {renderDeckToast("actions")}
             <ReviewDeckActions
               logDisabled={topDeckControlsDisabled}
               skipDisabled={topDeckSkipDefers && deckSources.length <= 1}
@@ -1571,6 +1632,7 @@ export default function ReviewScreen() {
               skipLabel={topDeckSkipDefers ? "Skip for now" : "Skip"}
               theme={theme}
             />
+            </View>
           </>
         ) : (
           <View style={styles.reviewDeckWaiting}>
@@ -1591,32 +1653,6 @@ export default function ReviewScreen() {
         )}
       </ScrollView>
 
-      {heldDeckDecision ? (
-        <Reanimated.View
-          key={heldDeckDecision.token}
-          accessibilityLiveRegion="polite"
-          entering={localPresenceEntering(reduceMotion, "rise")}
-          exiting={localPresenceExiting(reduceMotion)}
-          style={[styles.historyDeleteUndoToast, styles.reviewDeckToast]}
-          testID="review-deck-toast"
-        >
-          <View style={styles.reviewDeckToastLabel}>
-            <View style={[styles.reviewDeckToastSwatch, { backgroundColor: heldDeckDecision.color }]} />
-            <Text numberOfLines={1} style={[styles.historyDeleteUndoText, styles.reviewDeckToastText]}>
-              {heldDeckDecision.logged ? "Logged" : "Skipped"} {heldDeckDecision.title}
-            </Text>
-          </View>
-          <Pressable
-            accessibilityLabel={`Undo ${heldDeckDecision.logged ? "logging" : "skipping"} ${heldDeckDecision.title}`}
-            accessibilityRole="button"
-            onPress={undoHeldDeckDecision}
-            style={({ pressed }) => [styles.historyDeleteUndoButton, pressed ? styles.buttonPressed : null]}
-            testID="review-deck-undo"
-          >
-            <Text style={styles.historyDeleteUndoButtonText}>Undo</Text>
-          </Pressable>
-        </Reanimated.View>
-      ) : null}
 
       <OverflowMenu
         disabled={

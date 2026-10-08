@@ -478,6 +478,7 @@ function Probe() {
                 onEdit={() => setActionResult("Local Review edit callback")}
                 onMore={() => setActionResult("Local Review menu callback")}
                 onThrow={() => setActionResult("Local Review throw callback")}
+                onThrowStart={() => setActionResult("Local Review throw started")}
                 reduceMotion={reduceMotion}
                 theme={theme}
               />

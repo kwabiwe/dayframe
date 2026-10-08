@@ -937,9 +937,26 @@ function createStyles(theme: MobileTheme) {
       fontSize: 12
     },
     // Review deck (Blocks parity step 5a): prototype `.push` nav and padding.
-    // Above the deck's round actions, not over them.
+    // Anchored to the round actions: the toast's bottom edge sits 12 points above them.
+    // Above the deck's cards (their zIndex sets a layer position), so the toast is never hidden.
+    reviewDeckActionsAnchor: {
+      position: "relative",
+      zIndex: 20
+    },
     reviewDeckToast: {
-      bottom: 186
+      bottom: "100%",
+      left: 0,
+      marginBottom: 12,
+      right: 0,
+      zIndex: 20
+    },
+    // Under Back to Today once all is framed.
+    reviewDeckToastInFlow: {
+      alignSelf: "stretch",
+      bottom: undefined,
+      marginBottom: 0,
+      marginTop: 8,
+      position: "relative"
     },
     reviewDeckToastLabel: {
       alignItems: "center",
