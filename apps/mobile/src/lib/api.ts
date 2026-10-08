@@ -1733,6 +1733,22 @@ export async function updateCategory(
   return readJsonResponse(response);
 }
 
+/** Settings › Your day: the daily and weekly goals (stored on the account, shared with the web). */
+export async function updateTimeGoals(goals: { dailyGoalMinutes?: number; weeklyGoalMinutes?: number }) {
+  const response = await mobileFetch(`${DAYFRAME_API_BASE}/api/profile`, {
+    method: "PATCH",
+    headers: {
+      "Content-Type": "application/json",
+      ...(await authHeaders())
+    },
+    body: JSON.stringify(goals)
+  });
+  if (response.status === 401) {
+    throw new AuthRequiredError();
+  }
+  if (!response.ok) throw new Error(await errorMessage(response, "Unable to save your goal"));
+}
+
 export async function archiveCategory(id: string) {
   const response = await mobileFetch(`${DAYFRAME_API_BASE}/api/categories?id=${encodeURIComponent(id)}`, {
     method: "DELETE",

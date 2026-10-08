@@ -62,6 +62,7 @@ import {
   readQueue,
   retryFailedQueuedEvents,
   updateCategory,
+  updateTimeGoals,
   type MobileBootstrap,
   type QueueDiagnostics,
   type QueuedEvent,
@@ -106,6 +107,17 @@ import {
 } from "@/lib/settingsRefresh";
 import { clampSettingsScrollOffset, settingsScrollNeedsClamp } from "@/lib/settingsScroll";
 import { mobileTextProps } from "@/lib/mobileTypography";
+import Constants from "expo-constants";
+import {
+  SettingsAccountCard,
+  SettingsActivityStrip,
+  SettingsBlockGroup,
+  SettingsBlockRow,
+  SettingsSegmented,
+  SettingsStatusDot,
+  SettingsStepper,
+  SettingsSwitch
+} from "@/components/settings/SettingsBlocks";
 import { recordMobileLayout, recordMobileTextLayout } from "@/components/accessibility/diagnostics";
 import type { MobileAccessibilityDiagnostic } from "@/components/accessibility/diagnostics";
 import { drainNativeShortcutQueue, syncShortcutCatalog } from "@/lib/shortcuts";
@@ -150,6 +162,17 @@ import { deviceSyncAttentionStatus } from "@/lib/settingsSyncDiagnostics";
 import { TimerStopIssueActions } from "@/components/TimerStopIssueActions";
 
 type Category = MobileBootstrap["categories"][number];
+// Settings › Your day goal ranges (hours): daily in 1 h steps, weekly in 5 h steps.
+const DAILY_GOAL_HOURS = { min: 1, max: 14, step: 1 } as const;
+const WEEKLY_GOAL_HOURS = { min: 5, max: 80, step: 5 } as const;
+const GOAL_SAVE_DELAY_MS = 600;
+// D1: the same theme names on iPhone and web.
+const SETTINGS_THEME_OPTIONS = [
+  { label: "Midnight", value: "dark" },
+  { label: "Daylight", value: "light" },
+  { label: "System", value: "system" }
+] as const;
+
 type SettingsSection = "index" | "profile" | "categories" | "automations" | "health" | "sync" | "appearance";
 type SettingsIcon = "profile" | "categories" | "automations" | "health" | "sync" | "appearance" | "review";
 
@@ -617,6 +640,63 @@ export default function SettingsScreen() {
   const settingsTitle = settingsSectionTitle(settingsSection);
   const categoryCount = data?.categories.length ?? 0;
   const workspaceLabel = data?.workspace?.name ?? "Default workspace";
+  const pinnedCategoryCount = (data?.categories ?? []).filter((category) => category.isPinned).length;
+  // Settings › Your day: shown at once, saved to the account a moment after the last tap.
+  const [goalDraft, setGoalDraft] = useState<{ daily: number; weekly: number } | null>(null);
+  const goalSave = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const dailyGoalHours = goalDraft?.daily ?? Math.round((data?.user.dailyGoalMinutes ?? 480) / 60);
+  const weeklyGoalHours = goalDraft?.weekly ?? Math.round((data?.user.weeklyGoalMinutes ?? 2400) / 60);
+  const locationAccessSummary = locationDiagnostics?.locationLearningCaptureState === "logout_cleanup"
+    ? "Paused while signing out"
+    : locationMonitoringAllowed
+      ? "Always"
+      : locationDiagnostics?.foregroundPermission === "granted"
+        ? "Needs Always access"
+        : locationDiagnostics?.foregroundPermission === "denied"
+          ? "Off in iPhone Settings"
+          : "Not set up";
+  const locationSuggestionsSummary = locationCaptureNeedsRetry
+    ? "Paused. Open Location to restart it."
+    : locationDiagnostics?.locationLearningEnabled && !locationMonitoringAllowed
+      ? "Needs Always location access"
+      : "Anything uncertain waits in Review";
+  const healthWorkoutKeys = HEALTH_IMPORT_PREFERENCE_OPTIONS.filter((option) => option.key !== "sleep");
+  const healthWorkoutSummary = healthImportPreferences
+    ? `${healthWorkoutKeys.filter((option) => healthImportPreferences[option.key]).length} of ${healthWorkoutKeys.length}`
+    : null;
+  const syncNeedsAttention = Boolean(
+    deviceAttentionStatus ||
+    reviewSyncDiagnostics?.needsAttentionCount ||
+    timeEntrySyncDiagnostics?.quarantinedCount ||
+    timeEntrySyncDiagnostics?.deviceQuarantinedCount
+  );
+
+  function changeGoal(kind: "daily" | "weekly", direction: -1 | 1) {
+    const limits = kind === "daily" ? DAILY_GOAL_HOURS : WEEKLY_GOAL_HOURS;
+    const current = { daily: dailyGoalHours, weekly: weeklyGoalHours };
+    const nextValue = Math.min(limits.max, Math.max(limits.min, current[kind] + direction * limits.step));
+    if (nextValue === current[kind]) return;
+    const next = { ...current, [kind]: nextValue };
+    setGoalDraft(next);
+    if (goalSave.current) clearTimeout(goalSave.current);
+    goalSave.current = setTimeout(() => {
+      goalSave.current = null;
+      void updateTimeGoals({ dailyGoalMinutes: next.daily * 60, weeklyGoalMinutes: next.weekly * 60 })
+        .then(() => {
+          setDataAndCache((currentData) => currentData
+            ? { ...currentData, user: { ...currentData.user, dailyGoalMinutes: next.daily * 60, weeklyGoalMinutes: next.weekly * 60 } }
+            : currentData);
+          setGoalDraft(null);
+        })
+        .catch((error) => {
+          setGoalDraft(null);
+          Alert.alert("Your day", error instanceof Error ? error.message : "Your goal was not saved. Try again when you're online.");
+        });
+    }, GOAL_SAVE_DELAY_MS);
+  }
+  useEffect(() => () => {
+    if (goalSave.current) clearTimeout(goalSave.current);
+  }, []);
 
   function goBack() {
     router.back();
@@ -1402,75 +1482,219 @@ export default function SettingsScreen() {
       >
         <View style={styles.contentStack}>
           {settingsSection === "index" ? (
-            <>
-              <SettingsGroup title="Dayframe">
-                <SettingsMenuRow
-                  icon="profile"
-                  label="Profile & workspace"
-                  value={workspaceLabel}
-                  styles={styles}
+            <View style={styles.settingsBlocksStack}>
+              <SettingsAccountCard
+                email={data?.user.email ?? ""}
+                name={data?.user.name ?? ""}
+                onPress={() => openSettingsSection("profile")}
+                theme={theme}
+                workspace={workspaceLabel}
+              />
+
+              <SettingsBlockGroup theme={theme} title="Your day">
+                <SettingsBlockRow
+                  control={
+                    <SettingsStepper
+                      canDecrease={dailyGoalHours > DAILY_GOAL_HOURS.min}
+                      canIncrease={dailyGoalHours < DAILY_GOAL_HOURS.max}
+                      label="daily goal"
+                      onDecrease={() => changeGoal("daily", -1)}
+                      onIncrease={() => changeGoal("daily", 1)}
+                      theme={theme}
+                      value={`${dailyGoalHours}h`}
+                    />
+                  }
+                  divider={false}
+                  subtitle="Fills the hour cells on Today"
+                  testID="settings-daily-goal"
                   theme={theme}
-                  onPress={() => openSettingsSection("profile")}
+                  title="Daily goal"
                 />
-                <SettingsMenuRow
-                  icon="categories"
-                  label="Activities"
-                  value={`${categoryCount} ${categoryCount === 1 ? "activity" : "activities"}`}
-                  styles={styles}
+                <SettingsBlockRow
+                  control={
+                    <SettingsStepper
+                      canDecrease={weeklyGoalHours > WEEKLY_GOAL_HOURS.min}
+                      canIncrease={weeklyGoalHours < WEEKLY_GOAL_HOURS.max}
+                      label="weekly goal"
+                      onDecrease={() => changeGoal("weekly", -1)}
+                      onIncrease={() => changeGoal("weekly", 1)}
+                      theme={theme}
+                      value={`${weeklyGoalHours}h`}
+                    />
+                  }
+                  testID="settings-weekly-goal"
                   theme={theme}
+                  title="Weekly goal"
+                />
+              </SettingsBlockGroup>
+
+              <SettingsBlockGroup theme={theme} title="Activities">
+                <SettingsBlockRow
+                  divider={false}
                   onPress={() => openSettingsSection("categories")}
-                />
-                <SettingsMenuRow
-                  icon="appearance"
-                  label="Appearance"
-                  value={themePreference === "system" ? "System" : themePreference === "dark" ? "Dark" : "Light"}
-                  styles={styles}
+                  subtitle={`${pinnedCategoryCount} in quick start`}
+                  testID="settings-activities"
                   theme={theme}
-                  last
-                  onPress={() => openSettingsSection("appearance")}
+                  title="Activities"
+                  value={String(categoryCount)}
                 />
-              </SettingsGroup>
+                <SettingsActivityStrip activities={data?.categories ?? []} theme={theme} />
+              </SettingsBlockGroup>
 
-              <SettingsGroup title="Tracking">
-                <SettingsMenuRow
-                  icon="automations"
-                  label="Places & Location"
-                  value="Places, permissions, learning"
-                  styles={styles}
-                  theme={theme}
+              <SettingsBlockGroup
+                foot="Dayframe only logs on its own at places you trust. Anything uncertain waits in Review."
+                theme={theme}
+                title="Automatic tracking"
+              >
+                <SettingsBlockRow
+                  divider={false}
                   onPress={() => openSettingsSection("automations")}
-                />
-                <SettingsMenuRow
-                  icon="health"
-                  label="Apple Health"
-                  value={healthAvailability?.notes ?? "Sleep and workouts"}
-                  styles={styles}
+                  subtitle={locationAccessSummary}
+                  testID="settings-location"
                   theme={theme}
-                  onPress={() => openSettingsSection("health")}
+                  title="Location"
                 />
-                <SettingsMenuRow
-                  icon="review"
-                  label={REVIEW_COPY.needsReview}
-                  value={`${openReviewCount} open`}
-                  styles={styles}
+                <SettingsBlockRow
+                  control={
+                    <SettingsSwitch
+                      accessibilityHint="Saves your choice for this account. Location access is set separately."
+                      disabled={locationDiagnostics === null}
+                      label="Suggest visits and commutes"
+                      onValueChange={toggleLocationLearning}
+                      theme={theme}
+                      value={locationDiagnostics?.locationLearningEnabled ?? false}
+                    />
+                  }
+                  subtitle={locationSuggestionsSummary}
+                  testID="settings-location-suggestions"
                   theme={theme}
-                  last
-                  onPress={() => router.push("./review")}
+                  title="Suggest visits and commutes"
                 />
-              </SettingsGroup>
+                <SettingsBlockRow
+                  onPress={() => openSettingsSection("automations")}
+                  subtitle={motionFitness?.label ?? null}
+                  testID="settings-motion"
+                  theme={theme}
+                  title="Motion & Fitness"
+                />
+                <SettingsBlockRow
+                  onPress={() => router.push("./places")}
+                  testID="settings-places"
+                  theme={theme}
+                  title="Saved places"
+                  value={String(data?.places.length ?? 0)}
+                />
+              </SettingsBlockGroup>
 
-              <SettingsGroup title="Device">
-                <SettingsMenuRow
-                  icon="sync"
-                  label="Sync & diagnostics"
-                  value={deviceSyncStatus}
-                  styles={styles}
+              <SettingsBlockGroup theme={theme} title="Apple Health">
+                <SettingsBlockRow
+                  control={
+                    <SettingsSwitch
+                      disabled={healthImportPreferences === null}
+                      label="Sleep"
+                      onValueChange={(enabled) => void updateHealthImportPreference("sleep", enabled)}
+                      theme={theme}
+                      value={healthImportPreferences?.sleep ?? false}
+                    />
+                  }
+                  divider={false}
+                  subtitle="Becomes a Sleep block you confirm"
+                  testID="settings-health-sleep"
                   theme={theme}
-                  last
-                  onPress={() => openSettingsSection("sync")}
+                  title="Sleep"
                 />
-              </SettingsGroup>
-            </>
+                <SettingsBlockRow
+                  onPress={() => openSettingsSection("health")}
+                  subtitle="Choose which ones become blocks"
+                  testID="settings-health-workouts"
+                  theme={theme}
+                  title="Workouts and walks"
+                  value={healthWorkoutSummary}
+                />
+              </SettingsBlockGroup>
+
+              <SettingsBlockGroup theme={theme} title="Appearance">
+                <SettingsBlockRow
+                  control={
+                    <SettingsSegmented
+                      label="Theme"
+                      onChange={setThemePreference}
+                      options={SETTINGS_THEME_OPTIONS}
+                      theme={theme}
+                      value={themePreference}
+                    />
+                  }
+                  divider={false}
+                  testID="settings-theme"
+                  theme={theme}
+                  title="Theme"
+                />
+                <SettingsBlockRow
+                  control={
+                    <SettingsSwitch
+                      label="Haptics"
+                      onValueChange={(enabled) => {
+                        void setHapticsEnabled(enabled).catch(() => undefined);
+                      }}
+                      theme={theme}
+                      value={hapticsEnabled}
+                    />
+                  }
+                  testID="settings-haptics"
+                  theme={theme}
+                  title="Haptics"
+                />
+              </SettingsBlockGroup>
+
+              <SettingsBlockGroup
+                foot="Health and precise location stay private to your account."
+                theme={theme}
+                title="Privacy and data"
+              >
+                <SettingsBlockRow
+                  danger
+                  divider={false}
+                  onPress={confirmDeleteLocationEvidence}
+                  subtitle="Location points from the last 7 days. Logged blocks stay."
+                  testID="settings-clear-location"
+                  theme={theme}
+                  title="Clear recent location history"
+                />
+              </SettingsBlockGroup>
+
+              <SettingsBlockGroup theme={theme} title="Help">
+                <SettingsBlockRow
+                  control={<SettingsStatusDot attention={syncNeedsAttention} theme={theme} />}
+                  divider={false}
+                  subtitle={deviceSyncStatus}
+                  testID="settings-sync-status"
+                  theme={theme}
+                  title={syncNeedsAttention ? "Something needs your attention" : "Sync"}
+                />
+                <SettingsBlockRow
+                  onPress={() => openSettingsSection("sync")}
+                  testID="settings-sync-help"
+                  theme={theme}
+                  title="Something not syncing?"
+                />
+              </SettingsBlockGroup>
+
+              <Pressable
+                accessibilityRole="button"
+                accessibilityState={{ disabled: signingOut, busy: signingOut }}
+                disabled={signingOut}
+                onPress={signOut}
+                style={({ pressed }) => [styles.settingsSignOut, pressed ? styles.buttonPressed : null]}
+                testID="settings-sign-out"
+              >
+                <Text {...mobileTextProps("control")} style={styles.settingsSignOutText}>
+                  {signingOut ? "Signing out…" : "Sign out"}
+                </Text>
+              </Pressable>
+              <Text {...mobileTextProps("metadata")} style={styles.settingsFooter}>
+                Dayframe {Constants.expoConfig?.version ?? ""} · {workspaceLabel}
+              </Text>
+            </View>
           ) : null}
 
           {settingsSection === "appearance" ? (
