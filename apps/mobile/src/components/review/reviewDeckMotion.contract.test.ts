@@ -166,7 +166,16 @@ describe("Review deck live Log as (Blocks parity step 5c-1)", () => {
     // Every card the batch covers is hidden while held, even the one on top.
     expect(screen).toContain('heldDeckDecision?.kind === "batch" || key !== flyingDeckKey');
     // Skip once only: never Log, never a rule.
-    expect(screen).toContain('mutation: hasV2LocationEvidence(entry.item) ? { action: "ignore_once_location" } : { action: "ignore_once" },');
+    expect(screen).toContain('mutation: hasV2LocationEvidence(item) ? { action: "ignore_once_location" } : { action: "ignore_once" },');
+    // Saved through runReviewBulkSkip (behaviour in reviewBulkSkip.run.test.ts), fenced to the
+    // account that held it; nothing is put back once the account changed.
+    expect(screen).toContain("await runReviewBulkSkip<MobileReviewItem>(claimed, {");
+    expect(screen).toMatch(/\/\/ Nothing is put back once the account has changed\.\s*if \(!ownerMatches\(\)\) return;/);
+    // A single decision whose flush saved the same item through a batch stops there.
+    expect(screen).toMatch(/deckHold\.flush\(\);\s*\/\/ That flush may have saved this very item[^\n]*\n\s*if \(reviewMutations\.current\.has\(item\.id\)\) return false;/);
+    // The longer menu stays inside the screen with a visible Cancel.
+    expect(menu).toContain("maxHeight: windowHeight - insets.top");
+    expect(menu).toContain(">Cancel</Text>");
     // One confirmation that states the count, after older pages are read.
     expect(screen).toContain("reviewBulkSkipConfirmation(candidates.length, scope, complete)");
     expect(screen).toContain("await inFlight.done;");

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { createReviewDeckHold, reviewDeckProposalSignature, type ReviewDeckHeldDecision } from "./reviewDeckHold";
+import { createReviewDeckHold, reviewDeckHeldKeys, reviewDeckProposalSignature, type ReviewDeckHeldDecision } from "./reviewDeckHold";
 
 function decision(token: number, key = `review:${token}`): ReviewDeckHeldDecision {
   return { kind: "single", token, key, itemId: key, logged: token % 2 === 1, direction: token % 2 === 1 ? 1 : -1, title: key, color: "#000000", seconds: 60, proposal: "[]" };
@@ -91,5 +91,36 @@ describe("reviewDeckProposalSignature", () => {
     expect(reviewDeckProposalSignature({ ...item, suggestedCategoryId: "run" })).not.toBe(original);
     expect(reviewDeckProposalSignature({ ...item, suggestedPlaceId: "park" })).not.toBe(original);
     expect(reviewDeckProposalSignature({ ...item, title: "Run" })).not.toBe(original);
+  });
+});
+
+describe("review deck hold with a bulk skip (5f)", () => {
+  const batch = (token: number) => ({
+    kind: "batch" as const,
+    token,
+    items: [
+      { key: "review:a", itemId: "a", proposal: "[]" },
+      { key: "review:b", itemId: "b", proposal: "[]" }
+    ]
+  });
+
+  it("holds the whole batch as one decision with one Undo", () => {
+    const { committed, fire, hold } = harness();
+    hold.hold(batch(7));
+    expect(reviewDeckHeldKeys(hold.current())).toEqual(["review:a", "review:b"]);
+    expect(hold.undo(7)?.kind).toBe("batch");
+    fire();
+    expect(committed).toEqual([]);
+  });
+
+  it("saves a held batch first when a card is thrown, and a held card first when a batch is held", () => {
+    const { committed, hold } = harness();
+    hold.hold(batch(7));
+    hold.hold(decision(8));
+    expect(committed).toEqual([7]);
+    hold.hold(batch(9));
+    expect(committed).toEqual([7, 8]);
+    hold.flush();
+    expect(committed).toEqual([7, 8, 9]);
   });
 });

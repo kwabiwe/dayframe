@@ -45,6 +45,7 @@ import {
   reviewBulkSkipCandidates,
   reviewBulkSkipConfirmation,
   reviewBulkSkipToast,
+  runReviewBulkSkip,
   type ReviewBulkSkipScope
 } from "@/lib/reviewBulkSkip";
 import { ActivityPickerSheet } from "@/components/ActivityPickerSheet";
@@ -1260,8 +1261,11 @@ export default function ReviewScreen() {
 
   function holdBulkSkip(items: MobileReviewItem[]) {
     if (!items.length) return;
-    // Another decision may have been held while the confirmation was up: it is saved first.
+    // Another decision may have been held while the confirmation was up: it is saved first, and
+    // anything that save claimed is no longer part of this batch.
     deckHold.flush();
+    items = items.filter((item) => !reviewMutations.current.has(item.id));
+    if (!items.length) return;
     applyReviewMenuEvent({ type: "close" });
     setDeckThrowRequest(null);
     setDeckReturn(null);
@@ -1302,81 +1306,94 @@ export default function ReviewScreen() {
   }
 
   // The batch ends its hold: each item still open and unchanged is skipped once, one after the
-  // other through the durable outbox, then the deck is projected and synced once.
+  // other through the durable outbox (runReviewBulkSkip re-checks each right before it is written
+  // and stops if the account changes), then the deck is projected and synced once.
   function commitHeldBulkSkip(held: ReviewDeckHeldBatch) {
-    const toSave: { key: string; item: MobileReviewItem }[] = [];
-    const resolvedElsewhere: string[] = [];
-    const changed: string[] = [];
-    for (const entry of held.items) {
-      const listed = dataRef.current?.reviewItems.find((candidate) => candidate.id === entry.itemId);
-      const known = knownDeckItems.current.get(entry.itemId);
-      const item = listed
-        ? (isOpenReviewItem(listed) ? listed : undefined)
-        : known && isOpenReviewItem(known) ? known : undefined;
-      if (!item) {
-        resolvedElsewhere.push(entry.key);
-      } else if (reviewDeckProposalSignature(item) !== entry.proposal || reviewMutations.current.has(item.id)) {
-        // Changed by a refresh (or already saving): not what the user confirmed, so it stays.
-        changed.push(entry.key);
-        restorePagedOutDeckItem(item.id);
-      } else {
-        toSave.push({ key: entry.key, item });
-      }
-    }
-    forgetBulkDecisions([...resolvedElsewhere, ...changed]);
-    if (changed.length) {
-      AccessibilityInfo.announceForAccessibility(
-        `${changed.length} ${changed.length === 1 ? "moment" : "moments"} changed, so ${changed.length === 1 ? "it was" : "they were"} not skipped.`
-      );
-    }
-    if (!toSave.length || !dataRef.current) {
-      forgetBulkDecisions(toSave.map((entry) => entry.key));
+    const loaded = dataRef.current;
+    if (!loaded) {
+      forgetBulkDecisions(held.items.map((entry) => entry.key));
       return;
     }
-    setDeckKeysCommitting(toSave.map((entry) => entry.key), true);
-    for (const { item } of toSave) reviewMutations.current.set(item.id, 1);
+    const owner = { workspaceId: loaded.workspace.id, userId: loaded.user.id };
+    const ownerMatches = () => (
+      dataRef.current?.workspace.id === owner.workspaceId && dataRef.current?.user.id === owner.userId
+    );
+    // The batch claims its items, so no single decision can start for them while it saves.
+    const claim = -held.token;
+    const claimed = held.items.filter((entry) => !reviewMutations.current.has(entry.itemId));
+    const busy = held.items.filter((entry) => reviewMutations.current.has(entry.itemId));
+    for (const entry of claimed) reviewMutations.current.set(entry.itemId, claim);
+    setDeckKeysCommitting(claimed.map((entry) => entry.key), true);
+    // An item a capped refresh paged out is still open: it is saved from the copy the deck showed.
+    const openItem = (itemId: string) => {
+      const listed = dataRef.current?.reviewItems.find((candidate) => candidate.id === itemId);
+      if (listed) return isOpenReviewItem(listed) ? listed : undefined;
+      const known = knownDeckItems.current.get(itemId);
+      return known && isOpenReviewItem(known) ? known : undefined;
+    };
     void (async () => {
-      const failed: { key: string; item: MobileReviewItem }[] = [];
-      for (const entry of toSave) {
-        const loaded = dataRef.current;
-        try {
-          if (!loaded) throw new Error("Review data is not loaded.");
-          // An item a capped refresh paged out is saved from the copy the deck showed.
-          const bootstrap = loaded.reviewItems.some((candidate) => candidate.id === entry.item.id)
-            ? loaded
-            : { ...loaded, reviewItems: [...loaded.reviewItems, entry.item] };
+      const outcome = await runReviewBulkSkip<MobileReviewItem>(claimed, {
+        enqueue: async (item) => {
+          const current = dataRef.current;
+          if (!current) throw new Error("Review data is not loaded.");
+          const bootstrap = current.reviewItems.some((candidate) => candidate.id === item.id)
+            ? current
+            : { ...current, reviewItems: [...current.reviewItems, item] };
           await enqueueReviewMutation({
             bootstrap,
-            item: entry.item,
-            mutation: hasV2LocationEvidence(entry.item) ? { action: "ignore_once_location" } : { action: "ignore_once" },
+            item,
+            mutation: hasV2LocationEvidence(item) ? { action: "ignore_once_location" } : { action: "ignore_once" },
             clientMutationId: createReviewClientMutationId()
           });
-        } catch {
-          failed.push(entry);
+        },
+        isSaving: (itemId) => {
+          const current = reviewMutations.current.get(itemId);
+          return current !== undefined && current !== claim;
+        },
+        openItem,
+        ownerMatches,
+        signature: reviewDeckProposalSignature
+      });
+      const sameOwner = ownerMatches();
+      if (outcome.saved.length && sameOwner) {
+        // Projected onto the newest data: a refresh that landed while saving is kept.
+        const savedIds = new Set(outcome.saved.map((entry) => entry.itemId));
+        const base = dataRef.current!;
+        const projected = await projectReviewBootstrapFromStore(base).catch(() => null);
+        if (ownerMatches()) {
+          const latest = dataRef.current!;
+          commitData(projected && latest === base ? projected : projectReviewBootstrap(latest, savedIds));
         }
       }
-      const saved = toSave.length - failed.length;
-      const projection = dataRef.current;
-      if (saved && projection) {
-        const ids = new Set(toSave.filter((entry) => !failed.includes(entry)).map((entry) => entry.item.id));
-        commitData(await projectReviewBootstrapFromStore(projection).catch(() => projectReviewBootstrap(projection, ids)));
+      for (const entry of claimed) {
+        if (reviewMutations.current.get(entry.itemId) === claim) reviewMutations.current.delete(entry.itemId);
       }
-      for (const { item } of toSave) reviewMutations.current.delete(item.id);
-      setDeckKeysCommitting(toSave.map((entry) => entry.key), false);
-      if (failed.length) {
-        for (const entry of failed) {
-          deferGenerations.current.set(entry.key, (deferGenerations.current.get(entry.key) ?? 0) + 1);
-          restorePagedOutDeckItem(entry.item.id);
-        }
-        forgetBulkDecisions(failed.map((entry) => entry.key));
+      setDeckKeysCommitting(claimed.map((entry) => entry.key), false);
+      const notSaved = [...busy, ...outcome.changed, ...outcome.failed];
+      forgetBulkDecisions([...notSaved, ...outcome.resolved, ...outcome.abandoned].map((entry) => entry.key));
+      // Nothing is put back once the account has changed.
+      if (!ownerMatches()) return;
+      for (const entry of [...outcome.changed, ...outcome.failed]) {
+        deferGenerations.current.set(entry.key, (deferGenerations.current.get(entry.key) ?? 0) + 1);
+        restorePagedOutDeckItem(entry.itemId);
+      }
+      // (A moment already saving another change is decided by that change; nothing to say.)
+      if (outcome.changed.length) {
+        const count = outcome.changed.length;
+        AccessibilityInfo.announceForAccessibility(
+          `${count} ${count === 1 ? "moment" : "moments"} changed, so ${count === 1 ? "it was" : "they were"} not skipped.`
+        );
+      }
+      if (outcome.failed.length) {
+        const count = outcome.failed.length;
         AccessibilityInfo.announceForAccessibility("Some moments were not skipped. They are still in Review.");
         Alert.alert(
           "Review",
-          `${failed.length} ${failed.length === 1 ? "moment wasn’t" : "moments weren’t"} skipped on this iPhone. ${failed.length === 1 ? "It is" : "They are"} still in Review.`
+          `${count} ${count === 1 ? "moment wasn’t" : "moments weren’t"} skipped on this iPhone. ${count === 1 ? "It is" : "They are"} still in Review.`
         );
       }
-      if (saved) {
-        AccessibilityInfo.announceForAccessibility(`${reviewBulkSkipToast(saved)}. Saved on this iPhone. Waiting to sync.`);
+      if (outcome.saved.length) {
+        AccessibilityInfo.announceForAccessibility(`${reviewBulkSkipToast(outcome.saved.length)}. Saved on this iPhone. Waiting to sync.`);
         void refreshReviewSyncDiagnostics();
         void synchroniseReviewMutations()
           .then(() => {
@@ -1735,6 +1752,8 @@ export default function ReviewScreen() {
     if (reviewMutations.current.has(item.id)) return false;
     // Any other decision (More › Dismiss, an edit) saves a held card first, as a throw does.
     deckHold.flush();
+    // That flush may have saved this very item (a held bulk skip covering it): decided once.
+    if (reviewMutations.current.has(item.id)) return false;
     const loadedData = dataRef.current;
     if (!loadedData) return false;
     const listed = loadedData.reviewItems.some((candidate) => candidate.id === item.id);

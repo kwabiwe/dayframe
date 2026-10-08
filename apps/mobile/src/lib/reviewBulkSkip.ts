@@ -65,3 +65,66 @@ export function reviewBulkSkipConfirmation(
 export function reviewBulkSkipToast(count: number) {
   return `Skipped ${moments(count)}`;
 }
+
+export type ReviewBulkSkipEntry = { key: string; itemId: string; proposal: string };
+
+export type ReviewBulkSkipOutcome = {
+  /** Skipped once through the durable outbox. */
+  saved: ReviewBulkSkipEntry[];
+  /** The local save failed; the moment stays to review. */
+  failed: ReviewBulkSkipEntry[];
+  /** A refresh changed the moment (or another change for it is saving): not what was confirmed. */
+  changed: ReviewBulkSkipEntry[];
+  /** Resolved elsewhere while held: nothing to do. */
+  resolved: ReviewBulkSkipEntry[];
+  /** The signed-in account changed: nothing more is written, and nothing is put back. */
+  abandoned: ReviewBulkSkipEntry[];
+};
+
+/**
+ * Saves a held bulk skip one moment at a time. Each moment is checked against the current data
+ * right before it is written (a refresh during an earlier write may have changed it), and the
+ * run stops the moment the account changes, so no write or restore crosses accounts.
+ */
+export async function runReviewBulkSkip<T>(
+  entries: readonly ReviewBulkSkipEntry[],
+  {
+    enqueue,
+    isSaving,
+    openItem,
+    ownerMatches,
+    signature
+  }: {
+    enqueue: (item: T) => Promise<void>;
+    isSaving: (itemId: string) => boolean;
+    openItem: (itemId: string) => T | undefined;
+    ownerMatches: () => boolean;
+    signature: (item: T) => string;
+  }
+): Promise<ReviewBulkSkipOutcome> {
+  const outcome: ReviewBulkSkipOutcome = { saved: [], failed: [], changed: [], resolved: [], abandoned: [] };
+  for (let index = 0; index < entries.length; index += 1) {
+    const entry = entries[index];
+    if (!ownerMatches()) {
+      outcome.abandoned.push(...entries.slice(index));
+      break;
+    }
+    const item = openItem(entry.itemId);
+    if (!item) {
+      outcome.resolved.push(entry);
+      continue;
+    }
+    if (signature(item) !== entry.proposal || isSaving(entry.itemId)) {
+      outcome.changed.push(entry);
+      continue;
+    }
+    try {
+      await enqueue(item);
+      outcome.saved.push(entry);
+    } catch {
+      if (ownerMatches()) outcome.failed.push(entry);
+      else outcome.abandoned.push(entry);
+    }
+  }
+  return outcome;
+}
