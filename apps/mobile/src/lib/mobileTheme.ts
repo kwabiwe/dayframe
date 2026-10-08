@@ -937,6 +937,25 @@ function createStyles(theme: MobileTheme) {
       fontSize: 12
     },
     // Review deck (Blocks parity step 5a): prototype `.push` nav and padding.
+    // Above the deck's round actions, not over them.
+    reviewDeckToast: {
+      bottom: 186
+    },
+    reviewDeckToastLabel: {
+      alignItems: "center",
+      flex: 1,
+      flexDirection: "row",
+      gap: 10,
+      minWidth: 0
+    },
+    reviewDeckToastSwatch: {
+      borderRadius: 4,
+      height: 14,
+      width: 14
+    },
+    reviewDeckToastText: {
+      flexShrink: 1
+    },
     reviewDeckNav: {
       alignItems: "center",
       flexDirection: "row",

@@ -269,5 +269,14 @@ Block pull-to-refresh:
 - Entrance/update/exit: the top card fades out while the cards beneath land one step up; a card arriving at the bottom of the stack fades in at its depth. "All framed" appears without motion in 5a (its drop-in is step 5b).
 - Interruption: a new decision while cards are landing retargets the springs from where they are.
 - Async outcome: the existing Review outbox owns success and failure (an alert keeps the card).
-- Accessibility: Reduce Motion moves cards to their depth at once and keeps the short fades. Only the top card is exposed to VoiceOver; each round action has a spoken label. Swipe throws, stamps, the toast with Undo and the finished drop-in arrive in 5b, each with its Reduce Motion path.
+- Accessibility: Reduce Motion moves cards to their depth at once and keeps the short fades. Only the top card is exposed to VoiceOver; each round action has a spoken label.
+
+## Review deck swipe, Undo and "All framed" (Blocks parity step 5b)
+
+- Trigger: a horizontal drag on the top card; Log it / Skip (the buttons throw the card the same way); Undo on the toast; the deck emptying.
+- Owner: the top card in `ReviewDeckStack` owns one `Gesture.Pan` (active after 12 points sideways, failing after 14 vertically so pull-to-refresh keeps the vertical axis) and its `dragX`/`dragY` shared values on the UI thread. The card follows the finger (40 % vertically), tilts dx/18°, and the LOG IT (right, success fill) / SKIP (left; LATER when Skip only defers) stamps fade in with dx/110. Crossing ±110 points arms the throw with one selection tick. A direction the card cannot take resists at 20 % and never arms.
+- Entrance/update/exit: a release past ±110 flies the card 520 points out in 340 ms (cubic-bezier .3, .6, .4, 1) while it lifts 40 points, then reports the throw; a short release springs home with `land`. The card is then held (`reviewDeckHold.ts`): it leaves the deck, the next card lands one step up, and the inverse-colour toast ("Logged …" / "Skipped …" with the activity swatch and Undo) rises in for 4.8 s. Undo drops the hold, the card returns to the top flying in from the side it left with the `sheet` spring (no overshoot, so the opposite stamp never flashes), with the undo haptic. When the deck empties, "All framed" drops this visit's logged blocks from 260 points above (tilted −12°, `land`, 80 + i × 90 ms apart), pops the title from 0.8 with `pop` at 200 ms and plays the success haptic at 300 ms when something was logged.
+- Interruption: deciding another card saves the held one first (one toast at a time); leaving Review, losing focus or backgrounding the app saves it at once; a throw cannot be re-armed mid-flight.
+- Async outcome: nothing reaches the outbox until the hold ends, so Undo needs no server contract; a failed local save keeps the card (alert) and takes the decision out of "N of M".
+- Accessibility: with Reduce Motion the throw reports at once (the card fades), a short release snaps home, Undo places the card without flying and "All framed" appears in place. The buttons remain the VoiceOver path for Log it and Skip, and each decision is announced with Undo available.
 
