@@ -973,7 +973,10 @@ export default function ReviewScreen() {
   const topDeckControlsDisabled = deckFlying ? false : (deckCards[0]?.controlsDisabled ?? true);
   // A legacy entry has no skip mutation, and a card with a waiting or rejected change cannot be
   // decided here: Skip moves either behind the rest for this visit, so it never blocks the deck.
-  const topDeckSkipDefers = topDeckSource?.kind === "legacy_entry" || topDeckControlsDisabled;
+  const topDeckSkipDefers = topDeckSource?.kind === "legacy_entry" || topDeckControlsDisabled || (deckCards[0]?.skipDefers ?? false);
+  // A Review card that cannot be logged (no complete window) keeps Log it off; a legacy entry's
+  // Log it opens its editor instead.
+  const topDeckLogBlocked = topDeckSource?.kind === "review" && deckCards[0]?.canLog === false;
 
   // Decisions made in Location evidence (Edit before logging, D7) count toward this visit.
   const knownDeckItems = useRef(new Map<string, MobileReviewItem>());
@@ -1825,7 +1828,7 @@ export default function ReviewScreen() {
             <View style={styles.reviewDeckActionsAnchor}>
               {renderDeckToast("actions")}
             <ReviewDeckActions
-              logDisabled={topDeckControlsDisabled || deckFlying}
+              logDisabled={topDeckControlsDisabled || deckFlying || topDeckLogBlocked}
               skipDisabled={deckFlying || (topDeckSkipDefers && deckSources.length <= 1)}
               logLabel={topDeckSource.kind === "legacy_entry" ? "Edit to log" : "Log it"}
               onEdit={() => {
@@ -2039,9 +2042,11 @@ export function reviewDeckCardForItem(
     syncBadge: syncCopy?.badge ?? null,
     syncDetail: syncCopy?.detail ?? null,
     controlsDisabled: context.syncState != null,
-    canLog: context.syncState == null,
+    // Every decision needs a complete suggested window (the outbox refuses one without), so a card
+    // without one resists both directions and Skip only moves it behind the rest.
+    canLog: context.syncState == null && hasSuggestedTimeWindow(item),
     canSkip: true,
-    skipDefers: context.syncState != null,
+    skipDefers: context.syncState != null || !hasSuggestedTimeWindow(item),
     moreLabel: `More actions for ${title}`,
     menuOpen: context.menuOpen
   };

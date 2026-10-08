@@ -59,7 +59,7 @@ describe("Review deck motion contract (Blocks parity step 5b)", () => {
     expect(screen).toContain("lastDeckKeys.current.every((key) => ownDeckDecisionKeys.current.has(key))");
     expect(screen).not.toContain("lastDeckDecisionAt");
     expect(screen).toContain("controlsDisabled: card.controlsDisabled || card.key === flyingDeckKey");
-    expect(screen).toContain("logDisabled={topDeckControlsDisabled || deckFlying}");
+    expect(screen).toContain("logDisabled={topDeckControlsDisabled || deckFlying || topDeckLogBlocked}");
     expect(screen).toContain("skipDisabled={deckFlying || (topDeckSkipDefers && deckSources.length <= 1)}");
     expect(deck).toContain("reviewDeckArmDirection(dragX.value, event.translationX)");
   });
@@ -128,5 +128,12 @@ describe("Review deck live Log as (Blocks parity step 5c-1)", () => {
     expect(deck).toContain("defaultValue={card.logAsName}");
     expect(deck).toContain(".requireExternalGestureToFail(logAsFieldGesture)");
     expect(screen).toContain("logAsEditable: context.syncState == null && hasSuggestedTimeWindow(item)");
+  });
+
+  it("never throws a card the outbox would refuse, and a dead card never reports a throw (polish)", () => {
+    expect(screen).toContain("canLog: context.syncState == null && hasSuggestedTimeWindow(item),");
+    expect(screen).toContain("skipDefers: context.syncState != null || !hasSuggestedTimeWindow(item),");
+    expect(screen).toContain("logDisabled={topDeckControlsDisabled || deckFlying || topDeckLogBlocked}");
+    expect(deck).toMatch(/useEffect\(\(\) => \(\) => \{\s*cancelAnimation\(dragX\);\s*cancelAnimation\(dragY\);/);
   });
 });
