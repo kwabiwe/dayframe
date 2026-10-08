@@ -14,18 +14,22 @@ const themeSource = source("../lib/mobileTheme.ts");
 const helperSource = source("../lib/review.ts");
 const menuSource = source("./OverflowMenu.tsx");
 const editSheetSource = source("./ActiveTimerEditSheet.tsx");
+const deckSource = source("./review/ReviewDeck.tsx");
 
 describe("mobile Review action contracts", () => {
-  it("uses a vertical evidence, semantic confirm, and overflow hierarchy", () => {
-    expect(reviewSource).toContain("reviewConfirmLabel(item)");
+  it("decides the top card with Skip, Edit before logging and Log it, and keeps the More menu", () => {
+    // Blocks parity step 5a: the deck replaces the list. Log it confirms, Skip dismisses once,
+    // Edit before logging opens Location evidence (D7) or the details sheet.
+    expect(reviewSource).toContain("<ReviewDeckActions");
+    expect(reviewSource).toMatch(/onLog=\{[\s\S]*?confirmItem\(topDeckSource\.item\)/);
+    expect(reviewSource).toMatch(/onSkip=\{[\s\S]*?dismissItem\(topDeckSource\.item\)/);
+    expect(reviewSource).toMatch(/hasV2LocationEvidence\(topDeckSource\.item\)[\s\S]*?pathname: "\/review\/\[id\]"/);
+    expect(deckSource).toContain('accessibilityLabel="Edit before logging"');
     expect(helperSource).toContain("Confirm commute");
-    expect(helperSource).toContain("Confirm visit");
-    expect(helperSource).toContain("Confirm activity");
     expect(reviewSource).toContain("<OverflowMenu");
     expect(menuSource).toMatch(/Edit details[\s\S]*Dismiss suggestion/);
-    expect(reviewSource).not.toMatch(/onEdit=\{[\s\S]*onDismiss=\{/);
-    expect(themeSource).toContain("reviewActionStack");
-    expect(themeSource).toMatch(/reviewActions:\s*\{\s*gap:\s*8\s*\}/);
+    // Round actions keep at least 44-point targets (52, 64 and 72).
+    expect(deckSource).toMatch(/size=\{64\}[\s\S]*size=\{52\}[\s\S]*size=\{72\}/);
   });
 
   it("uses the shared mobile back affordance on Location Evidence", () => {
@@ -38,16 +42,13 @@ describe("mobile Review action contracts", () => {
   it("keeps Review cards concise and expresses confidence accessibly", () => {
     expect(reviewSource).toContain("reviewConfidencePresentation(item.confidence)");
     expect(reviewSource).toContain("locationReviewReasonCopy(item");
-    expect(reviewSource).toContain("Confidence: ${confidence.label}, ${confidence.score} of 5");
-    expect(reviewSource).toContain("reviewOverlapRow");
+    expect(deckSource).toContain("Confidence: ${card.confidence.label}, ${card.confidence.score} of 5");
     expect(reviewSource).toContain("You can still confirm");
     expect(reviewSource).not.toContain("Reports will show logged and covered time separately");
     expect(reviewSource).not.toContain("ReviewDiagnosticsPanel");
-    expect(themeSource).toContain("reviewItemsSection");
-    expect(themeSource).toContain("reviewConfidenceDot");
-    expect(reviewSource).toContain("reviewCardAccentRail");
-    expect(themeSource).toMatch(/reviewCardAccentRail:[\s\S]*top:\s*12,[\s\S]*bottom:\s*12,[\s\S]*width:\s*3/);
-    expect(themeSource).not.toMatch(/reviewCard:[\s\S]{0,180}borderLeftWidth/);
+    // Cards beneath the top one are hidden from VoiceOver and take no touches.
+    expect(deckSource).toContain("accessibilityElementsHidden={!top}");
+    expect(deckSource).toContain('pointerEvents={top ? "box-none" : "none"}');
   });
 
   it("presents Location Evidence as activity, time and map while retaining resolution actions", () => {

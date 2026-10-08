@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { recordReviewDeckEvidenceDecision } from "@/lib/reviewDeckDecisions";
 import {
   AccessibilityInfo,
   ActivityIndicator,
@@ -405,12 +406,14 @@ export default function LocationReviewDetailScreen() {
         AccessibilityInfo.announceForAccessibility(
           "Saved on this iPhone. Waiting to sync."
         );
+        recordReviewDeckEvidenceDecision(id, action.action);
         void synchroniseReviewMutations().catch(() => undefined);
         router.back();
         return;
       }
       await resolveLocationReviewItem(id, action);
       if (generation !== loadGenerationRef.current) return;
+      recordReviewDeckEvidenceDecision(id, action.action);
       router.back();
     } catch (actionError) {
       if (generation !== loadGenerationRef.current) return;

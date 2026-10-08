@@ -26,10 +26,13 @@ describe("local motion ownership contracts", () => {
   it("gives Review and Places one local presence/layout owner around mutations", () => {
     expect(reviewSource).toContain("enqueueReviewMutation");
     expect(placesSource).toContain("applyAfterSuccessfulMutation");
-    for (const screenSource of [reviewSource, placesSource]) {
-      expect(screenSource).toContain("localLayoutTransition(reduceMotion)");
-      expect(screenSource).toContain("localPresenceExiting(reduceMotion)");
-    }
+    expect(placesSource).toContain("localLayoutTransition(reduceMotion)");
+    expect(placesSource).toContain("localPresenceExiting(reduceMotion)");
+    // The Review deck (Blocks step 5a): each card owns its depth spring and its presence.
+    const deckSource = source("./review/ReviewDeck.tsx");
+    expect(reviewSource).toContain("<ReviewDeckStack");
+    expect(deckSource).toContain("localPresenceExiting(reduceMotion)");
+    expect(deckSource).toContain("withSpring(depth, { ...BLOCKS_SPRING.land");
   });
 });
 

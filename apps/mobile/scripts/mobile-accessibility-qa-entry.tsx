@@ -26,7 +26,8 @@ import { TodayReviewNudge } from "../src/components/today/TodayReviewNudge";
 import { groupHistoryDayEntries } from "../src/lib/historyPresentation";
 import { layoutQuickStartMosaic } from "../src/lib/quickStartMosaic";
 import { buildTodayGoalFrame } from "../src/lib/todayGoalFrame";
-import { ReviewItemCard } from "../app/review";
+import { reviewDeckCardForItem } from "../app/review";
+import { ReviewDeckStack } from "../src/components/review/ReviewDeck";
 import { SettingsMenuRow } from "../app/settings";
 import { MobileThemeProvider, useMobileTheme } from "../src/lib/mobileTheme";
 import { mobileTextProps } from "../src/lib/mobileTypography";
@@ -234,13 +235,10 @@ function Probe() {
         "settings.value.frame",
         "settings.value.text",
         "settings.chevron",
-        "review.card",
-        "review.header",
-        "review.badge",
-        "review.title.frame",
-        "review.title.text",
-        "review.reason.frame",
-        "review.reason.text",
+        "review-deck.card",
+        "review-deck.body",
+        "review-deck.title.frame",
+        "review-deck.reason.frame",
       ];
       if (showRunningTimer) {
         requiredMeasurements.push("today.timer.running", "today.timer.title.frame", "today.timer.title.text", "today.timer.elapsed.frame");
@@ -324,9 +322,10 @@ function Probe() {
           "settings.row": "qa.host; settingsGroupRows has rounded-corner overflow clipping and rows grow intrinsically",
           "settings.label.frame": "settings.text-column",
           "settings.value.frame": "settings.text-column",
-          "review.card": "qa.host; review card has no fixed maximum height",
-          "review.title.frame": "review.header",
-          "review.reason.frame": "review.card",
+          "review-deck.card": "qa.host; the deck card fills a fixed height and clips its body",
+          "review-deck.body": "review-deck.card",
+          "review-deck.title.frame": "review-deck.body",
+          "review-deck.reason.frame": "review-deck.body",
         },
         diagnosticComplete: missingMeasurementIds.length === 0,
         missingMeasurementIds,
@@ -465,19 +464,23 @@ function Probe() {
                 diagnostic={diagnostic}
               />
             </View>
-            <ReviewItemCard
-              item={reviewFixture}
-              menuOpen={false}
-              now={now}
-              onConfirm={() => setActionResult("Local Review confirm callback")}
-              onToggleMenu={() => setActionResult("Local Review menu callback")}
-              onViewEvidence={() => setActionResult("Local evidence callback")}
-              overlapCount={0}
-              syncState={null}
-              styles={styles}
-              theme={theme}
-              diagnostic={diagnostic}
-            />
+            <View style={{ height: 520 }}>
+              <ReviewDeckStack
+                cards={[reviewDeckCardForItem("review:qa", reviewFixture, {
+                  menuOpen: false,
+                  mode: theme.mode,
+                  neutral: theme.textSecondary,
+                  now,
+                  overlapCount: 0,
+                  syncState: null
+                })]}
+                diagnostic={diagnostic}
+                onEdit={() => setActionResult("Local Review edit callback")}
+                onMore={() => setActionResult("Local Review menu callback")}
+                reduceMotion={reduceMotion}
+                theme={theme}
+              />
+            </View>
             <Text {...mobileTextProps("body")} style={{ color: theme.textSecondary, fontSize: 12 }}>{actionResult}</Text>
           </View>
         </ScrollView>
