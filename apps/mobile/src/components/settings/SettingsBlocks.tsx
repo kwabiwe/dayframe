@@ -200,10 +200,18 @@ export function SettingsStepper({
       <Text allowFontScaling={false} style={[blockStyles.stepGlyph, { color: theme.textPrimary }]}>{kind}</Text>
     </Pressable>
   );
+  // One adjustable control for VoiceOver (swipe up or down to change); the buttons are for touch.
   return (
     <View
-      accessibilityLabel={label}
+      accessible
+      accessibilityActions={[{ name: "increment" }, { name: "decrement" }]}
+      accessibilityLabel={label.charAt(0).toUpperCase() + label.slice(1)}
+      accessibilityRole="adjustable"
       accessibilityValue={{ text: value }}
+      onAccessibilityAction={(event) => {
+        if (event.nativeEvent.actionName === "increment" && canIncrease) onIncrease();
+        if (event.nativeEvent.actionName === "decrement" && canDecrease) onDecrease();
+      }}
       style={blockStyles.stepper}
     >
       {button("−", canDecrease, onDecrease)}
@@ -236,6 +244,7 @@ export function SettingsSegmented<T extends string>({
             accessibilityLabel={`${option.label} ${label.toLowerCase()}`}
             accessibilityRole="radio"
             accessibilityState={{ checked: selected }}
+            hitSlop={{ bottom: 4, top: 4 }}
             key={option.value}
             onPress={() => onChange(option.value)}
             style={[blockStyles.segment, selected ? { backgroundColor: theme.textPrimary } : null]}

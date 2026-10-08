@@ -107,6 +107,7 @@ import {
 } from "@/lib/settingsRefresh";
 import { clampSettingsScrollOffset, settingsScrollNeedsClamp } from "@/lib/settingsScroll";
 import { mobileTextProps } from "@/lib/mobileTypography";
+import { createGoalSaver, publishSavedTimeGoals, type TimeGoals } from "@/lib/settingsGoals";
 import Constants from "expo-constants";
 import {
   SettingsAccountCard,
@@ -642,8 +643,32 @@ export default function SettingsScreen() {
   const workspaceLabel = data?.workspace?.name ?? "Default workspace";
   const pinnedCategoryCount = (data?.categories ?? []).filter((category) => category.isPinned).length;
   // Settings › Your day: shown at once, saved to the account a moment after the last tap.
-  const [goalDraft, setGoalDraft] = useState<{ daily: number; weekly: number } | null>(null);
-  const goalSave = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [goalDraft, setGoalDraft] = useState<TimeGoals | null>(null);
+  // The account whose goals are on screen (Today is told only about the same account).
+  const goalUserId = useRef<string | null>(null);
+  goalUserId.current = data?.user.id ?? null;
+  const goalSaver = useRef(createGoalSaver({
+    delayMs: GOAL_SAVE_DELAY_MS,
+    save: (goals) => updateTimeGoals({ dailyGoalMinutes: goals.daily * 60, weeklyGoalMinutes: goals.weekly * 60 }),
+    onSaved: (goals) => {
+      const userId = goalUserId.current;
+      setDataAndCache((currentData) => currentData
+        ? { ...currentData, user: { ...currentData.user, dailyGoalMinutes: goals.daily * 60, weeklyGoalMinutes: goals.weekly * 60 } }
+        : currentData);
+      setGoalDraft(null);
+      if (userId) publishSavedTimeGoals({ userId, dailyGoalMinutes: goals.daily * 60, weeklyGoalMinutes: goals.weekly * 60 });
+    },
+    onFailed: (error) => {
+      setGoalDraft(null);
+      if (error instanceof AuthRequiredError) return;
+      Alert.alert(
+        "Your day",
+        isRetryableMobileConnectivityFailure(error)
+          ? "Your goal was not saved. Try again when you're online."
+          : error instanceof Error ? error.message : "Your goal was not saved. Try again."
+      );
+    }
+  })).current;
   const dailyGoalHours = goalDraft?.daily ?? Math.round((data?.user.dailyGoalMinutes ?? 480) / 60);
   const weeklyGoalHours = goalDraft?.weekly ?? Math.round((data?.user.weeklyGoalMinutes ?? 2400) / 60);
   const locationAccessSummary = locationDiagnostics?.locationLearningCaptureState === "logout_cleanup"
@@ -672,31 +697,25 @@ export default function SettingsScreen() {
   );
 
   function changeGoal(kind: "daily" | "weekly", direction: -1 | 1) {
+    if (!data) return;
     const limits = kind === "daily" ? DAILY_GOAL_HOURS : WEEKLY_GOAL_HOURS;
     const current = { daily: dailyGoalHours, weekly: weeklyGoalHours };
     const nextValue = Math.min(limits.max, Math.max(limits.min, current[kind] + direction * limits.step));
     if (nextValue === current[kind]) return;
     const next = { ...current, [kind]: nextValue };
     setGoalDraft(next);
-    if (goalSave.current) clearTimeout(goalSave.current);
-    goalSave.current = setTimeout(() => {
-      goalSave.current = null;
-      void updateTimeGoals({ dailyGoalMinutes: next.daily * 60, weeklyGoalMinutes: next.weekly * 60 })
-        .then(() => {
-          setDataAndCache((currentData) => currentData
-            ? { ...currentData, user: { ...currentData.user, dailyGoalMinutes: next.daily * 60, weeklyGoalMinutes: next.weekly * 60 } }
-            : currentData);
-          setGoalDraft(null);
-        })
-        .catch((error) => {
-          setGoalDraft(null);
-          Alert.alert("Your day", error instanceof Error ? error.message : "Your goal was not saved. Try again when you're online.");
-        });
-    }, GOAL_SAVE_DELAY_MS);
+    goalSaver.schedule(next);
   }
-  useEffect(() => () => {
-    if (goalSave.current) clearTimeout(goalSave.current);
-  }, []);
+  // Leaving Settings (or the app going to the background) saves a pending goal change at once.
+  useEffect(() => {
+    const subscription = AppState.addEventListener("change", (state) => {
+      if (state !== "active") goalSaver.flush();
+    });
+    return () => {
+      subscription.remove();
+      goalSaver.flush();
+    };
+  }, [goalSaver]);
 
   function goBack() {
     router.back();
@@ -1197,12 +1216,12 @@ export default function SettingsScreen() {
 
   function confirmDeleteLocationEvidence() {
     Alert.alert(
-      "Delete recent location evidence",
-      "Delete recent location samples and their local upload copies from this iPhone, and recent evidence from the server? Confirmed entries, saved and cached places, and summaries will remain.",
+      "Clear recent location history?",
+      "Removes recent location points from this iPhone and from your account. Logged blocks, saved places and Review items stay.",
       [
         { text: "Cancel", style: "cancel" },
         {
-          text: "Delete evidence",
+          text: "Clear history",
           style: "destructive",
           onPress: () => { void removeLocationEvidence(); }
         }
@@ -1380,6 +1399,25 @@ export default function SettingsScreen() {
     }
   }
 
+  // Settings › Apple Health › Sleep: the first switch-on asks for Apple Health access, so the
+  // switch never reads "on" while nothing can be imported.
+  async function setSleepImport(enabled: boolean) {
+    if (enabled && healthPermissionStatus?.status !== "available") {
+      try {
+        const permissions = await requestHealthKitPermissions();
+        updateHealthStatus(permissions);
+        if (permissions.status !== "available") {
+          Alert.alert("Apple Health", permissions.notes || "Allow Dayframe to read sleep in the Health app, then try again.");
+          return;
+        }
+      } catch (error) {
+        Alert.alert("Apple Health", friendlyHealthKitError(error, "request Apple Health permission"));
+        return;
+      }
+    }
+    await updateHealthImportPreference("sleep", enabled);
+  }
+
   function updateHealthStatus(status: HealthImportStatus) {
     setHealthStatusAndCache((current) => [
       status,
@@ -1400,6 +1438,8 @@ export default function SettingsScreen() {
   }
 
   async function signOut() {
+    // A goal change still waiting is saved while the session is valid.
+    goalSaver.flush();
     const diagnostics = await getReviewSyncDiagnostics();
     const unsynchronisedCount =
       diagnostics.waitingCount + diagnostics.needsAttentionCount;
@@ -1417,6 +1457,7 @@ export default function SettingsScreen() {
   }
 
   async function completeSignOut() {
+    goalSaver.cancel();
     if (signingOutRef.current) return;
     signingOutRef.current = true;
     setSigningOut(true);
@@ -1495,8 +1536,8 @@ export default function SettingsScreen() {
                 <SettingsBlockRow
                   control={
                     <SettingsStepper
-                      canDecrease={dailyGoalHours > DAILY_GOAL_HOURS.min}
-                      canIncrease={dailyGoalHours < DAILY_GOAL_HOURS.max}
+                      canDecrease={data !== null && dailyGoalHours > DAILY_GOAL_HOURS.min}
+                      canIncrease={data !== null && dailyGoalHours < DAILY_GOAL_HOURS.max}
                       label="daily goal"
                       onDecrease={() => changeGoal("daily", -1)}
                       onIncrease={() => changeGoal("daily", 1)}
@@ -1513,8 +1554,8 @@ export default function SettingsScreen() {
                 <SettingsBlockRow
                   control={
                     <SettingsStepper
-                      canDecrease={weeklyGoalHours > WEEKLY_GOAL_HOURS.min}
-                      canIncrease={weeklyGoalHours < WEEKLY_GOAL_HOURS.max}
+                      canDecrease={data !== null && weeklyGoalHours > WEEKLY_GOAL_HOURS.min}
+                      canIncrease={data !== null && weeklyGoalHours < WEEKLY_GOAL_HOURS.max}
                       label="weekly goal"
                       onDecrease={() => changeGoal("weekly", -1)}
                       onIncrease={() => changeGoal("weekly", 1)}
@@ -1590,15 +1631,19 @@ export default function SettingsScreen() {
                 <SettingsBlockRow
                   control={
                     <SettingsSwitch
-                      disabled={healthImportPreferences === null}
+                      disabled={healthImportPreferences === null || healthAvailability?.status === "unavailable"}
                       label="Sleep"
-                      onValueChange={(enabled) => void updateHealthImportPreference("sleep", enabled)}
+                      onValueChange={(enabled) => void setSleepImport(enabled)}
                       theme={theme}
                       value={healthImportPreferences?.sleep ?? false}
                     />
                   }
                   divider={false}
-                  subtitle="Becomes a Sleep block you confirm"
+                  subtitle={healthAvailability?.status === "unavailable"
+                    ? "Apple Health isn't available on this device"
+                    : healthImportPreferences?.sleep && healthPermissionStatus && healthPermissionStatus.status !== "available"
+                      ? "Allow sleep in the Health app to import it"
+                      : "Becomes a Sleep block you confirm"}
                   testID="settings-health-sleep"
                   theme={theme}
                   title="Sleep"
@@ -1655,7 +1700,7 @@ export default function SettingsScreen() {
                   danger
                   divider={false}
                   onPress={confirmDeleteLocationEvidence}
-                  subtitle="Location points from the last 7 days. Logged blocks stay."
+                  subtitle="Recent location points. Logged blocks stay."
                   testID="settings-clear-location"
                   theme={theme}
                   title="Clear recent location history"

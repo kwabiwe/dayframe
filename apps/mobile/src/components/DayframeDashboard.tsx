@@ -45,6 +45,7 @@ import { TodayTimerSurface, type TodayActiveTimerPresentation } from "@/componen
 import type { LandingRequest } from "@/lib/blocksMotion";
 import { minuteClock, newestShownTimestamp } from "@/lib/frameClock";
 import { loadHapticsPreference, playHaptic } from "@/lib/haptics";
+import { subscribeSavedTimeGoals } from "@/lib/settingsGoals";
 import { layoutQuickStartMosaic, rankQuickStartActivities, weeklySecondsByActivity } from "@/lib/quickStartMosaic";
 import { TodayReviewPresentationProvider } from "./today/TodayReviewPresentationContext";
 import { AccountAvatarButton } from "./today/AccountAvatarButton";
@@ -292,6 +293,12 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
   const connectivity = useConnectivity();
   const [data, setData] = useState<MobileBootstrap | null>(null);
   const [refreshing, setRefreshing] = useState(false);
+  // Goals saved in Settings › Your day reach Today's goal frame at once (same account only).
+  useEffect(() => subscribeSavedTimeGoals((event) => {
+    setData((current) => current && current.user.id === event.userId
+      ? { ...current, user: { ...current.user, dailyGoalMinutes: event.dailyGoalMinutes, weeklyGoalMinutes: event.weeklyGoalMinutes } }
+      : current);
+  }), []);
   const [todayPresentationRefreshGeneration, setTodayPresentationRefreshGeneration] = useState(0);
   const [authSubmitting, setAuthSubmitting] = useState(false);
   const [authState, setAuthState] = useState<AuthState>("checking");
