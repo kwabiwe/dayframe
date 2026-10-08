@@ -18,8 +18,10 @@ vi.mock("./location/location-review-service", () => ({
   resolveLocationReviewActionWithClient: mocks.resolveLocation
 }));
 
+const tagMocks = vi.hoisted(() => ({ syncTimeEntryTags: vi.fn() }));
+
 vi.mock("./tag-service", () => ({
-  syncTimeEntryTags: vi.fn()
+  syncTimeEntryTags: tagMocks.syncTimeEntryTags
 }));
 
 const { resolveIdempotentReviewMutation } = await import(
@@ -271,9 +273,9 @@ describe("idempotent Review mutations", () => {
             categoryId: null,
             placeId: null,
             description: "Long sleep",
-            startedAt: "2026-07-31T21:53:00.000Z",
-            stoppedAt: "2026-08-01T04:51:00.000Z",
-            tags: []
+            // Moved later: the night must still be found from the suggested window.
+            startedAt: "2026-07-31T23:30:00.000Z",
+            stoppedAt: "2026-08-01T07:30:00.000Z"
           }
         }
       },
@@ -291,6 +293,12 @@ describe("idempotent Review mutations", () => {
       String(statement).includes("update time_entries") && String(statement).includes("user_edited_at = now()")
     ));
     expect(edited?.[1]).toEqual(expect.arrayContaining(["health-entry-stable", "Long sleep"]));
+    expect(edited?.[1]).toEqual(expect.arrayContaining(["2026-07-31T23:30:00.000Z", "2026-08-01T07:30:00.000Z", "high"]));
+    const matching = client.query.mock.calls.find(([statement]) => String(statement).includes("matching_health_sleep_session"));
+    expect(matching?.[1]).toEqual(expect.arrayContaining(["2026-07-31T21:53:00.000Z", "2026-08-01T04:51:00.000Z"]));
+    expect(matching?.[1]).not.toContain("2026-07-31T23:30:00.000Z");
+    // No tag change was sent, so the reused night keeps its tags.
+    expect(tagMocks.syncTimeEntryTags).not.toHaveBeenCalled();
     const link = client.query.mock.calls.find(([statement]) => String(statement).includes("set resolved_time_entry_id"));
     expect(link?.[1]).toEqual(expect.arrayContaining(["health-event-extended", "health-entry-stable"]));
   });

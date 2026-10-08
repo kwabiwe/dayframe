@@ -601,13 +601,18 @@ async function editAndConfirmGenericReview(
   const categoryId = explicitNullable(edit, "categoryId", item.suggestedCategoryId);
   const placeId = explicitNullable(edit, "placeId", item.suggestedPlaceId);
   const description = edit.description?.trim() || null;
-  // An edited Health sleep that matches the night already logged from Health updates that one
-  // entry, as accept does, instead of logging the same night twice.
-  const matchingSleep = item.eventType === "health_sleep_import"
+  // An edited Health sleep whose original night is already logged from Health updates that one
+  // entry, as accept does, instead of logging the same night twice. The night is found from the
+  // Review evidence (the suggested window), never the edited times, so moving the times cannot
+  // pick a neighbouring night.
+  const suggestedWindow = item.eventType === "health_sleep_import"
+    ? validWindow(item.suggestedStartedAt, item.suggestedStoppedAt)
+    : null;
+  const matchingSleep = suggestedWindow
     ? await reconcileMatchingHealthSleepTimeEntry(client, session, {
         rawPayload: item.rawPayload,
-        startedAt: edit.startedAt,
-        stoppedAt: edit.stoppedAt
+        startedAt: suggestedWindow.startedAt,
+        stoppedAt: suggestedWindow.stoppedAt
       })
     : null;
   let entryId: string;
@@ -616,10 +621,10 @@ async function editAndConfirmGenericReview(
       // The user's own times win over the merged night.
       `update time_entries
        set category_id = $4, place_id = $5, description = $6,
-           started_at = $7, stopped_at = $8,
+           started_at = $7, stopped_at = $8, confidence = coalesce($9, confidence),
            user_edited_at = now(), updated_at = now()
        where id = $1 and workspace_id = $2 and user_id = $3`,
-      [matchingSleep.id, session.workspaceId, session.userId, categoryId, placeId, description, edit.startedAt, edit.stoppedAt]
+      [matchingSleep.id, session.workspaceId, session.userId, categoryId, placeId, description, edit.startedAt, edit.stoppedAt, item.confidence]
     );
     entryId = matchingSleep.id;
   } else {
@@ -648,7 +653,10 @@ async function editAndConfirmGenericReview(
     );
     entryId = inserted.rows[0].id;
   }
-  await syncTimeEntryTags(client, entryId, edit.tags ?? [], session);
+  // A reused night keeps its tags unless the edit sends a tag change.
+  if (!matchingSleep || edit.tags !== undefined) {
+    await syncTimeEntryTags(client, entryId, edit.tags ?? [], session);
+  }
   if (item.eventType === "health_sleep_import" && item.eventId) {
     await recordHealthSleepResolution(client, session, item.eventId, entryId);
   }
