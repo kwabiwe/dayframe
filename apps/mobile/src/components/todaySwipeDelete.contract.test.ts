@@ -213,7 +213,7 @@ describe("Today rows swipe-to-delete contract", () => {
     expect(stopSource.indexOf('pendingStop.failureKind === "permanent"')).toBeLessThan(
       stopSource.indexOf("optimisticStopActiveTimer(")
     );
-    expect(stopSource).toContain("Open Settings > Sync & diagnostics to retry or discard");
+    expect(stopSource).toContain("Open Settings > Sync help to retry or discard");
     expect(stopSource).toContain("void (async () => {");
     expect(stopSource).toContain("const summary = await deliverOwnedPendingTimerStops(bootstrap");
     expect(stopSource).toContain("summary.permanentRejectedClientEventIds.includes(");

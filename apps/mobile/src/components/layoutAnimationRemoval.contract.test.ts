@@ -33,8 +33,9 @@ describe("no inert LayoutAnimation", () => {
     expect(offenders).toEqual([]);
   });
 
-  it("gives the Sync troubleshooting disclosure the shared Reanimated presence", () => {
+  it("gives the Location troubleshooting disclosure the shared Reanimated presence", () => {
+    // Sync help (step 6a-2) has no disclosure any more; the Location page keeps one.
     const settings = readFileSync(join(mobileRoot, "app/settings.tsx"), "utf8");
-    expect(settings).toMatch(/\{showQueueDetails \? \(\s*<Reanimated\.View\s+entering=\{localPresenceEntering\(reduceMotion\)\}\s+exiting=\{localPresenceExiting\(reduceMotion\)\}\s+layout=\{localLayoutTransition\(reduceMotion\)\}\s+style=\{styles\.queueDiagnosticCard\}/);
+    expect(settings).toMatch(/\{showLocationTroubleshooting \? \(\s*<Reanimated\.View\s+entering=\{localPresenceEntering\(reduceMotion\)\}\s+exiting=\{localPresenceExiting\(reduceMotion\)\}\s+layout=\{localLayoutTransition\(reduceMotion\)\}/);
   });
 });

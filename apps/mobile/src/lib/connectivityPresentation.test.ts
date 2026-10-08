@@ -113,7 +113,7 @@ describe("connectivity status presentation", () => {
   it("keeps confirmed offline ahead of permanent attention in the one status slot", () => {
     expect(view("offline", 0, 1)).toMatchObject({
       accessibilityLabel:
-        "Offline. A timer or time entry sync issue also needs attention. Open Sync and diagnostics.",
+        "Offline. A timer or time entry sync issue also needs attention. Open Sync help in Settings.",
       isActionable: true,
       variant: "offline"
     });
@@ -194,10 +194,10 @@ describe("connectivity status presentation", () => {
     expect(tracker.next(syncing)).toBe("Syncing saved changes.");
     expect(tracker.next(syncing)).toBeNull();
     expect(tracker.next(attention)).toBe(
-      "A timer or time entry sync issue needs attention. Open Sync and diagnostics."
+      "A timer or time entry sync issue needs attention. Open Sync help in Settings."
     );
     expect(tracker.next(view("offline", 0, 1))).toBe(
-      "Offline. A timer or time entry sync issue also needs attention. Open Sync and diagnostics."
+      "Offline. A timer or time entry sync issue also needs attention. Open Sync help in Settings."
     );
     expect(tracker.next(null)).toBeNull();
     expect(tracker.next(offline)).toBe("Offline. Changes will sync later.");

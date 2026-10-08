@@ -21,9 +21,9 @@ describe("Review backlog paging contract", () => {
     expect(reviewScreen).toContain('recordReviewPresentationRead(owner, "backlog",');
     expect(reviewScreen).toContain("onPress={loadMoreReviewBacklog}");
     const settings = readFileSync(resolve(__dirname, "../../app/settings.tsx"), "utf8");
-    expect(settings).toContain("reviewSyncDiagnostics?.presentationReads?.map");
-    expect(settings).toContain("{read.status}");
-    expect(settings).toContain("formatQueueTime(read.checkedAt)");
+    // Failed presentation reads stay in the support details (Sync help › Copy details for support).
+    expect(settings).toContain("reviewSync: { diagnostics: latestReviewDiagnostics, mutations: reviewMutations }");
+    expect(settings).toContain("getReviewSyncDiagnostics()");
   });
   it("uses a bounded backlog page and exposes the next page as an accessible action", () => {
     expect(reviewScreen).toContain("fetchReviewPresentationPage");
