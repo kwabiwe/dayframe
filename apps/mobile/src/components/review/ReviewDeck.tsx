@@ -238,10 +238,16 @@ function ReviewDeckCardView({
   reduceMotion,
   returnFrom,
   theme,
-  throwRequest
+  throwRequest,
+  flying = false,
+  locked = false
 }: {
   card: ReviewDeckCardModel;
   depth: number;
+  /** Already thrown and on its way out: drawn above the rest, never touched or read. */
+  flying?: boolean;
+  /** Moving up under a card still flying out: in place at once, interactive once the flight ends. */
+  locked?: boolean;
   /** Synthetic accessibility probe only: the top card reports its frames. */
   diagnostic?: MobileAccessibilityDiagnostic;
   onBodyHeight: (height: number) => void;
@@ -267,7 +273,7 @@ function ReviewDeckCardView({
       ? depth
       : withSpring(depth, { ...BLOCKS_SPRING.land, reduceMotion: ReduceMotion.Never });
   }, [animatedDepth, depth, reduceMotion]);
-  const top = depth === 0;
+  const top = depth === 0 && !flying && !locked;
 
   // The top card's drag (Blocks parity step 5b): one Pan owner on the UI thread. It follows the
   // finger (40 % vertically, tilting dx/18°), arms past ±110 with one tick, and on release either
@@ -399,7 +405,7 @@ function ReviewDeckCardView({
           backgroundColor: theme.surfaceRaised,
           borderColor: theme.border,
           shadowColor: theme.shadow,
-          zIndex: REVIEW_DECK_VISIBLE_CARDS - depth
+          zIndex: flying ? REVIEW_DECK_VISIBLE_CARDS + 1 : REVIEW_DECK_VISIBLE_CARDS - depth
         },
         cardStyle
       ]}
@@ -453,7 +459,7 @@ function ReviewDeckCardView({
               </Pill>
             </Pressable>
           ) : null}
-          {top ? (
+          {top || flying ? (
             <>
               <Reanimated.View
                 pointerEvents="none"
@@ -587,8 +593,11 @@ export function ReviewDeckStack({
   reduceMotion,
   returnRequest = null,
   theme,
-  throwRequest = null
+  throwRequest = null,
+  flyingKey = null
 }: {
+  /** The thrown card still flying out: the cards beneath start moving up at once. */
+  flyingKey?: string | null;
   cards: readonly ReviewDeckCardModel[];
   diagnostic?: MobileAccessibilityDiagnostic;
   onEdit: (key: string) => void;
@@ -602,14 +611,19 @@ export function ReviewDeckStack({
   theme: MobileTheme;
   throwRequest?: ReviewDeckThrowRequest | null;
 }) {
-  const visible = cards.slice(0, REVIEW_DECK_VISIBLE_CARDS);
+  // While the top card flies out, the next ones already take its place (one more card shows at the
+  // back), so the deck never waits for the flight to end.
+  const topFlying = Boolean(flyingKey) && cards[0]?.key === flyingKey;
+  const visible = cards.slice(0, REVIEW_DECK_VISIBLE_CARDS + (topFlying ? 1 : 0));
   // The card fills the deck: its body keeps its natural height and the picture takes what is
   // left (230 points at most, 96 at least), so the reason line is never cut off.
   const [deckHeight, setDeckHeight] = useState(0);
   // Each card reports its own body; the top card's decides. A card promoted from beneath does not
   // lay out again, so its height must already be known.
   const [bodyHeights, setBodyHeights] = useState<Record<string, number>>({});
-  const bodyHeight = visible[0] ? bodyHeights[visible[0].key] ?? 0 : 0;
+  // Sized for the card taking the top, not the one flying out.
+  const sizingCard = visible[topFlying ? 1 : 0] ?? visible[0];
+  const bodyHeight = sizingCard ? bodyHeights[sizingCard.key] ?? 0 : 0;
   const pictureHeight = deckHeight && bodyHeight
     ? Math.max(PICTURE_MIN_HEIGHT, Math.min(PICTURE_HEIGHT, Math.floor(deckHeight - bodyHeight)))
     : PICTURE_HEIGHT;
@@ -619,11 +633,16 @@ export function ReviewDeckStack({
       style={[deckStyles.deck, bodyHeight ? { minHeight: Math.max(360, bodyHeight + PICTURE_MIN_HEIGHT) } : null]}
       testID="review-deck"
     >
-      {visible.map((card, depth) => (
+      {visible.map((card, index) => {
+        const flying = topFlying && index === 0;
+        const depth = topFlying && index > 0 ? index - 1 : index;
+        return (
         <ReviewDeckCardView
           card={card}
           depth={depth}
-          diagnostic={depth === 0 ? diagnostic : undefined}
+          diagnostic={depth === 0 && !flying ? diagnostic : undefined}
+          flying={flying}
+          locked={topFlying && !flying}
           key={card.renderKey ?? card.key}
           onBodyHeight={(height) => {
             const rounded = Math.ceil(height);
@@ -639,9 +658,10 @@ export function ReviewDeckStack({
           reduceMotion={reduceMotion}
           returnFrom={returnRequest?.key === card.key ? returnRequest : null}
           theme={theme}
-          throwRequest={depth === 0 ? throwRequest : null}
+          throwRequest={depth === 0 && !flying ? throwRequest : null}
         />
-      ))}
+        );
+      })}
     </View>
   );
 }

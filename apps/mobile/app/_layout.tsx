@@ -89,7 +89,10 @@ function ThemedStack() {
         <Stack.Screen name="settings" options={{ title: "Settings" }} />
         <Stack.Screen name="places" options={{ title: "Places" }} />
         <Stack.Screen name="place-editor" options={{ title: "Place" }} />
-        <Stack.Screen name="review" options={{ title: "Review" }} />
+        {/* The Review deck owns horizontal drags (swipe right logs a card, and a card springing home
+            or returning after Undo can reach the screen edge): no swipe-back here at all, so nothing
+            can race a card. ‹ Today goes back. */}
+        <Stack.Screen name="review" options={{ title: "Review", gestureEnabled: false }} />
         <Stack.Screen
           name="action/[verb]"
           options={{

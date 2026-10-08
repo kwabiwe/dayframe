@@ -918,7 +918,8 @@ export default function ReviewScreen() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [deckReturn, deckSources, flyingDeckKey, heldDeckDecision]);
   const deckCards = useMemo(
-    () => deckSources.slice(0, 3).map((source): ReviewDeckCardModel => (
+    // One more than the visible stack: while the top card flies out, the card behind moves in.
+    () => deckSources.slice(0, 4).map((source): ReviewDeckCardModel => (
       source.kind === "review"
         ? reviewDeckCardForItem(source.key, source.item, {
             categories: data?.categories,
@@ -954,10 +955,10 @@ export default function ReviewScreen() {
   const heldInFlight = deckFlying && heldDeckDecision?.key === flyingDeckKey;
   const deckRemaining = heldInFlight ? deckSources.length - 1 : deckSources.length;
   // The server count still includes decisions held for Undo or saving on this iPhone.
-  const locallyDecidedCount = (heldDeckDecision ? 1 : 0) + committingDeckKeys.size;
   // Every open item is loaded: the deck itself is the count, so a decision still syncing never
   // turns "2 of 5" into "2 of 5+". Otherwise the server count is used when it is exact.
   const deckBacklogComplete = reviewBacklog !== null && !reviewBacklog.nextCursor && reviewBacklog.recordsComplete;
+  const locallyDecidedCount = (heldDeckDecision ? 1 : 0) + committingDeckKeys.size;
   const deckPosition = reviewDeckPosition({
     decided: deckVisit.decided,
     remaining: deckBacklogComplete
@@ -1831,6 +1832,7 @@ export default function ReviewScreen() {
                 // keystroke never re-renders the screen.
                 if (source?.kind === "review") logAsNames.current.set(source.item.id, name);
               }}
+              flyingKey={flyingDeckKey}
               onThrow={handleDeckThrowEnd}
               onThrowStart={handleDeckThrow}
               reduceMotion={reduceMotion}
