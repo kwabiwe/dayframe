@@ -465,7 +465,8 @@ export default function SettingsScreen() {
       const queued = await readQueue();
       if (!queueMounted.current || mine !== queueReadSequence.current || !owner) return;
       const stillOwner = await readActiveMobileAccount();
-      if (!stillOwner || !mobileAccountOwnersEqual(owner, stillOwner) || mine !== queueReadSequence.current) return;
+      // Re-checked right before publishing: Settings may have closed during the owner read.
+      if (!queueMounted.current || !stillOwner || !mobileAccountOwnersEqual(owner, stillOwner) || mine !== queueReadSequence.current) return;
       setQueueAndCache(queued);
     } catch {
       // A failed local read leaves the last known queue in place.
@@ -496,7 +497,8 @@ export default function SettingsScreen() {
       setData(bootstrap);
       await configureLocationIntelligence(bootstrap);
       syncShortcutCatalog(bootstrap);
-      if (queueIsLatest) setQueue(queued);
+      // Re-checked after the awaits above: a newer subscription read wins.
+      if (queueSequence === queueReadSequence.current) setQueue(queued);
       setLocationDiagnostics(location);
       setLocationStatus(nextLocationStatus);
       await refreshLocationV2Diagnostics();
@@ -536,6 +538,8 @@ export default function SettingsScreen() {
     });
     return () => {
       queueMounted.current = false;
+      // Any read still in flight can no longer publish.
+      queueReadSequence.current += 1;
       unsubscribe();
     };
     // refreshQueueLatest only reads refs and stable setters.
