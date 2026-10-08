@@ -1542,7 +1542,7 @@ export default function SettingsScreen() {
               </SettingsBlockGroup>
 
               <SettingsBlockGroup
-                foot="Dayframe only logs on its own at places you trust. Anything uncertain waits in Review."
+                foot="Dayframe only logs on its own at places you trust."
                 theme={theme}
                 title="Automatic tracking"
               >
@@ -1669,7 +1669,7 @@ export default function SettingsScreen() {
                   subtitle={deviceSyncStatus}
                   testID="settings-sync-status"
                   theme={theme}
-                  title={syncNeedsAttention ? "Something needs your attention" : "Sync"}
+                  title={syncNeedsAttention ? "Something needs your attention" : "Everything is up to date"}
                 />
                 <SettingsBlockRow
                   onPress={() => openSettingsSection("sync")}
