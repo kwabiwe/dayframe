@@ -72,7 +72,7 @@ describe("connectivity status ownership", () => {
     expect(settings).toContain("!isRetryableMobileConnectivityFailure(error)");
     expect(settings).not.toContain('Alert.alert("Dayframe API"');
     expect(dashboard).toContain("Check available storage and try again.");
-    expect(dashboard).toContain("Check Sync and diagnostics for details.");
+    expect(dashboard).toContain("Check Settings, Sync help for details.");
   });
 
   it("routes permanently rejected timer Stops to attention diagnostics", () => {

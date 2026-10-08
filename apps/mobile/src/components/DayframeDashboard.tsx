@@ -2000,7 +2000,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
     ));
     Alert.alert(
       "Timer not started",
-      "Dayframe could not start this timer because the saved request was rejected. Check Sync and diagnostics for details."
+      "Dayframe could not start this timer because the saved request was rejected. Check Settings, Sync help for details."
     );
     setPresentedActiveEntry((current) => current?.id === optimisticId ? null : current);
   }

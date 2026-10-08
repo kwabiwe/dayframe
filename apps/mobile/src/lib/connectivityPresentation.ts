@@ -106,7 +106,7 @@ export function connectivityStatusViewModel(input: {
     if (input.attentionCount > 0) {
       return {
         accessibilityLabel:
-          "Offline. A timer or time entry sync issue also needs attention. Open Sync and diagnostics.",
+          "Offline. A timer or time entry sync issue also needs attention. Open Sync help in Settings.",
         id: "offline-attention",
         isActionable: true,
         variant: "offline"
@@ -121,7 +121,7 @@ export function connectivityStatusViewModel(input: {
   }
   if (input.attentionCount > 0) {
     return {
-      accessibilityLabel: "A timer or time entry sync issue needs attention. Open Sync and diagnostics.",
+      accessibilityLabel: "A timer or time entry sync issue needs attention. Open Sync help in Settings.",
       id: "attention",
       isActionable: true,
       variant: "attention"

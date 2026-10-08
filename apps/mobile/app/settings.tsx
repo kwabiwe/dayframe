@@ -703,6 +703,7 @@ export default function SettingsScreen() {
     : null;
   const syncNeedsAttention = Boolean(
     deviceAttentionStatus ||
+    queueDiagnostics.failedCount > 0 ||
     reviewSyncDiagnostics?.needsAttentionCount ||
     timeEntrySyncDiagnostics?.quarantinedCount ||
     timeEntrySyncDiagnostics?.deviceQuarantinedCount
@@ -718,15 +719,20 @@ export default function SettingsScreen() {
     queueDiagnostics.queuedCount +
     (timerStopSyncDiagnostics?.pendingCount ?? 0) +
     (timeEntrySyncDiagnostics?.pendingCount ?? 0) +
-    (reviewSyncDiagnostics?.waitingCount ?? 0);
+    Math.max(0, (reviewSyncDiagnostics?.waitingCount ?? 0) - (reviewSyncDiagnostics?.authenticationRequiredCount ?? 0));
+  const syncSignInCount = reviewSyncDiagnostics?.authenticationRequiredCount ?? 0;
   const syncHelpTitle = syncHelpIssueCount > 0 || syncNeedsAttention
     ? "Something needs your attention"
-    : syncWaitingCount > 0
+    : syncSignInCount > 0
+      ? "Sign in to send your changes"
+      : syncWaitingCount > 0
       ? `${syncWaitingCount} ${syncWaitingCount === 1 ? "change" : "changes"} waiting to send`
       : "Nothing is waiting";
   const syncHelpDetail = syncHelpIssueCount > 0
     ? "Choose what to do with each change below."
-    : syncWaitingCount > 0
+    : syncSignInCount > 0
+      ? `${syncSignInCount} Review ${syncSignInCount === 1 ? "change is" : "changes are"} saved on this iPhone. Sign in again to send ${syncSignInCount === 1 ? "it" : "them"}.`
+      : syncWaitingCount > 0
       ? "They send on their own when you're online."
       : "All your changes are saved.";
 
@@ -1121,10 +1127,15 @@ export default function SettingsScreen() {
   async function exportQueueDiagnostics() {
     try {
       const owner = await readActiveMobileAccount();
-      const [latestQueue, latestReviewDiagnostics, reviewMutations, location, native, health, manual] = await Promise.all([
+      const [
+        latestQueue, latestReviewDiagnostics, reviewMutations, location, native, health, manual,
+        timeEntryDiagnostics, timeEntryIssues, timerStopDiagnostics, timerStopIssues
+      ] = await Promise.all([
         readQueue(), getReviewSyncDiagnostics(), listReviewSyncDiagnosticMutations(),
         getLocationStoreDiagnostics(), getNativeLocationIntelligenceStatus().catch(() => null),
-        getHealthImportStatus(), getLastManualSyncResult()
+        getHealthImportStatus(), getLastManualSyncResult(),
+        getTimeEntryOutboxDiagnostics(), listTimeEntrySyncIssues(),
+        getTimerStopOutboxDiagnostics(), listTimerStopSyncIssues()
       ]);
       if (!owner || !mobileAccountOwnersEqual(owner, await readActiveMobileAccount())) return;
       const snapshot = {
@@ -1135,6 +1146,27 @@ export default function SettingsScreen() {
         activity: supportQueueDiagnostics(latestQueue),
         health,
         reviewSync: { diagnostics: latestReviewDiagnostics, mutations: reviewMutations },
+        // Rejected Edits/Deletes and Stops: status codes and errors left the Sync help screen, so
+        // support still gets them here (IDs shortened as elsewhere).
+        timeEntrySync: {
+          diagnostics: timeEntryDiagnostics,
+          issues: timeEntryIssues.map((issue) => ({
+            operation: issue.operation,
+            entry: (issue.targetEntryId ?? issue.optimisticEntryId ?? "").slice(0, 8) || null,
+            command: issue.clientCommandId.slice(0, 8),
+            statusCode: issue.lastStatusCode ?? null,
+            error: issue.lastError ?? null,
+            updatedAt: issue.updatedAt
+          }))
+        },
+        timerStopSync: {
+          diagnostics: timerStopDiagnostics,
+          issues: timerStopIssues.map((issue) => ({
+            event: issue.clientEventId.slice(0, 8),
+            queuedAt: issue.queuedAt,
+            failedAt: issue.failedAt ?? null
+          }))
+        },
         location,
         nativeLocation: native ? {
           pendingSignalCount: native.pendingSignalCount,
@@ -2166,7 +2198,9 @@ export default function SettingsScreen() {
                 <SettingsBlockRow
                   control={<SettingsStatusDot attention={syncNeedsAttention} theme={theme} />}
                   divider={false}
-                  subtitle={syncHelpDetail}
+                  // The outcome of this page's own actions (Try sending again, Check again, Retry…)
+                  // shows here until the next one.
+                  subtitle={syncStatusMessage ?? syncHelpDetail}
                   testID="sync-help-status"
                   theme={theme}
                   title={syncHelpTitle}
@@ -2235,9 +2269,9 @@ export default function SettingsScreen() {
                         : `${queueDiagnostics.failedCount} ${queueDiagnostics.failedCount === 1 ? "item" : "items"} from this iPhone couldn't be sent yet. Dayframe tries again on its own.`}
                       divider={timerStopSyncIssues.length + timeEntrySyncIssues.length + reviewSyncIssues.length > 0}
                       theme={theme}
-                      title="Waiting to send"
+                      title={queueDiagnostics.permanentFailedCount > 0 ? "Couldn't be sent" : "Waiting to send"}
                     >
-                      <SettingsPillButton disabled={!canRetryFailed} label="Retry" onPress={retryFailedAndReload} theme={theme} />
+                      <SettingsPillButton accessibilityLabel="Retry sending items from this iPhone" disabled={!canRetryFailed} label="Retry" onPress={retryFailedAndReload} theme={theme} />
                       <SettingsPillButton accessibilityLabel="Clear items that can't be sent" danger disabled={!canClearFailed} label="Clear" onPress={confirmClearFailedQueue} theme={theme} />
                     </SettingsIssueRow>
                   ) : null}

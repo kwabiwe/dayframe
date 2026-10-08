@@ -131,7 +131,7 @@ export function ConnectivityStatusIndicator({
     >
       {viewModel.isActionable ? (
         <Pressable
-          accessibilityHint="Opens Settings, Sync and diagnostics"
+          accessibilityHint="Opens Settings, Sync help"
           accessibilityLabel={viewModel.accessibilityLabel}
           accessibilityRole="button"
           accessibilityState={{ disabled: !isFocused }}
