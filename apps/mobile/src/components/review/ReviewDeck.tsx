@@ -340,7 +340,9 @@ function ReviewDeckCardView({
       const direction = armed.value as -1 | 0 | 1;
       armed.value = 0;
       // A cancelled gesture (interrupted, app backgrounded) never decides: the card goes home.
-      if (direction !== 0 && success) {
+      // A direction the card can no longer take (its sync state changed mid-drag) goes home too.
+      const allowed = direction === 1 ? canLog : canSkip;
+      if (direction !== 0 && success && allowed) {
         flyOut(direction);
         return;
       }

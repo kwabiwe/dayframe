@@ -194,6 +194,9 @@ export default function ReviewScreen() {
   const [flyingDeckKey, setFlyingDeckKey] = useState<string | null>(null);
   // A saved decision stays out of the deck until its SQLite projection drops the card.
   const [committingDeckKeys, setCommittingDeckKeys] = useState<ReadonlySet<string>>(() => new Set());
+  // A card brought back by Undo after a capped refresh paged its item out, shown from the copy
+  // the deck had until the item is loaded again.
+  const [restoredDeckItems, setRestoredDeckItems] = useState<ReadonlyMap<string, MobileReviewItem>>(() => new Map());
   // Cards this visit decided itself: "All framed" celebrates only when they emptied the deck.
   const ownDeckDecisionKeys = useRef(new Set<string>());
   const lastDeckKeys = useRef<readonly string[]>([]);
@@ -853,8 +856,12 @@ export default function ReviewScreen() {
     | { key: string; kind: "review"; item: MobileReviewItem }
     | { key: string; kind: "legacy_entry"; entry: MobileTimeEntry };
   const deckSources = useMemo(() => {
+    const openIds = new Set(openReviewItems.map((item) => item.id));
     const sources: DeckSource[] = [
       ...openReviewItems.map((item) => ({ key: reviewFocusKey("review", item.id), kind: "review" as const, item })),
+      ...[...restoredDeckItems.values()]
+        .filter((item) => !openIds.has(item.id))
+        .map((item) => ({ key: reviewFocusKey("review", item.id), kind: "review" as const, item })),
       ...displayedReviewNeededEntries.map((entry) => ({
         key: reviewFocusKey("legacy_entry", entry.id),
         kind: "legacy_entry" as const,
@@ -879,7 +886,7 @@ export default function ReviewScreen() {
     const returnKey = deckReturn && ordered.some((source) => source.key === deckReturn.key) ? deckReturn.key : null;
     // Undo wins over a ribbon focus: the card the user brought back is the one they want.
     return orderReviewDeck(ordered, returnKey ?? focusKey ?? stickyKey);
-  }, [committingDeckKeys, deckReturn, deferredDeckKeys, displayedReviewNeededEntries, flyingDeckKey, heldDeckDecision, highlightedFocusKey, openReviewItems]);
+  }, [committingDeckKeys, deckReturn, deferredDeckKeys, displayedReviewNeededEntries, flyingDeckKey, heldDeckDecision, highlightedFocusKey, openReviewItems, restoredDeckItems]);
   useEffect(() => {
     deckTopKeyRef.current = deckSources[0]?.key ?? null;
   }, [deckSources]);
@@ -1062,6 +1069,10 @@ export default function ReviewScreen() {
       deferGenerations.current.set(held.key, (deferGenerations.current.get(held.key) ?? 0) + 1);
       setFlyingDeckKey(null);
     }
+    const knownItem = knownDeckItems.current.get(held.itemId);
+    if (knownItem && !openReviewItems.some((item) => item.id === held.itemId)) {
+      setRestoredDeckItems((current) => new Map(current).set(held.itemId, knownItem));
+    }
     setDeckReturn({ key: held.key, direction: held.direction, token: held.token });
     playHaptic("undoRestore");
     AccessibilityInfo.announceForAccessibility(`${held.title} is back.`);
@@ -1109,12 +1120,19 @@ export default function ReviewScreen() {
     // the outcome retires it; otherwise a card restored by a failed save would stay locked.
     const settled = () => {
       setDeckKeyCommitting(held.key, false);
+      setRestoredDeckItems((current) => {
+        if (!current.has(held.itemId)) return current;
+        const next = new Map(current);
+        next.delete(held.itemId);
+        return next;
+      });
       setFlyingDeckKey((current) => (current === held.key ? null : current));
     };
     const failed = () => {
       // The restored card is a fresh card: the thrown one's animation state is spent.
       deferGenerations.current.set(held.key, (deferGenerations.current.get(held.key) ?? 0) + 1);
-      settled();
+      setDeckKeyCommitting(held.key, false);
+      setFlyingDeckKey((current) => (current === held.key ? null : current));
       undoCount();
     };
     const started = held.logged
@@ -1125,11 +1143,14 @@ export default function ReviewScreen() {
     if (!started) failed();
   };
 
-  // A committing card whose item has left the open list no longer needs hiding.
+  // A committing card whose item has left the open list and has no save still in flight no longer
+  // needs hiding (a capped refresh can omit an item whose save is pending; it stays hidden).
   useEffect(() => {
     if (!committingDeckKeys.size) return;
     const open = new Set(openReviewItems.map((item) => reviewFocusKey("review", item.id)));
-    const stale = [...committingDeckKeys].filter((key) => !open.has(key));
+    const stale = [...committingDeckKeys].filter((key) => (
+      !open.has(key) && !reviewMutations.current.has(key.slice(key.indexOf(":") + 1))
+    ));
     if (!stale.length) return;
     setCommittingDeckKeys((current) => {
       const next = new Set(current);
@@ -1137,13 +1158,29 @@ export default function ReviewScreen() {
       return next;
     });
   }, [committingDeckKeys, openReviewItems]);
+  // A restored copy gives way to the item once it is loaded again.
+  useEffect(() => {
+    if (!restoredDeckItems.size) return;
+    const loaded = [...restoredDeckItems.keys()].filter((id) => openReviewItems.some((item) => item.id === id));
+    if (!loaded.length) return;
+    setRestoredDeckItems((current) => {
+      const next = new Map(current);
+      for (const id of loaded) next.delete(id);
+      return next;
+    });
+  }, [openReviewItems, restoredDeckItems]);
 
   // Leaving Review or backgrounding the app saves a held decision at once.
+  // Active means Review is focused and the app is in the foreground; returning to the
+  // foreground with another screen open does not reactivate it.
   const deckScreenActive = useRef(true);
+  const deckScreenFocused = useRef(true);
   useFocusEffect(
     useCallback(() => {
+      deckScreenFocused.current = true;
       deckScreenActive.current = AppState.currentState === "active";
       return () => {
+        deckScreenFocused.current = false;
         deckScreenActive.current = false;
         deckHold.flush();
       };
@@ -1151,7 +1188,7 @@ export default function ReviewScreen() {
   );
   useEffect(() => {
     const subscription = AppState.addEventListener("change", (state) => {
-      deckScreenActive.current = state === "active";
+      deckScreenActive.current = state === "active" && deckScreenFocused.current;
       if (state !== "active") deckHold.flush();
     });
     return () => {
