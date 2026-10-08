@@ -47,12 +47,14 @@ describe("fixed timer-sheet layout contract", () => {
     expect(sheet).toContain('testID="time-entry-end-date"');
     expect(sheet).toContain('testID="time-entry-end-time"');
     // A four-digit time keeps its room at the largest input size; the date truncates first.
-    expect(theme).toMatch(/activeEditTimeCardMain:\s*\{[\s\S]*?minWidth: 14 \+ 76 \+ 4/);
+    expect(sheet).toContain("const timeCardMinWidth = 18 + Math.ceil(52 * Math.min(windowDimensions.fontScale, 1.35));");
+    expect(sheet).toContain("{ minWidth: timeCardMinWidth }");
     expect(theme).toMatch(/activeEditCompactDate:\s*\{\s*flexShrink: 1,\s*minWidth: 0/);
   });
 
   it("keeps the stopped dial's range handle inside the view and the shortcut state per presentation", () => {
     expect(nativeDial).toContain("DayframeDurationDialCore.baseRadius(");
+    expect(nativeDial).toContain("DayframeDurationDialCore.rangeHandleFits(");
     expect(nativeDial).not.toContain("* 0.34");
     expect(dial).toContain("shortcutsState.presentationId === presentationId");
     expect(dial).toContain("if (shortcutsOpen && shortcuts.length === 0)");
@@ -70,7 +72,7 @@ describe("fixed timer-sheet layout contract", () => {
   it("returns only the visible circular dial region to native gesture ownership", () => {
     expect(nativeDial).toContain("override func point(inside point: CGPoint, with event: UIEvent?)");
     expect(nativeDial).toContain("DayframeDurationDialCore.ownsTouch(");
-    expect(nativeDial).toContain('includesRangeHandle: record.mode != "running"');
+    expect(nativeDial).toContain('includesRangeHandle: showsRangeHandle(record: record)');
     expect(dial).toContain("blocksExternalGesture(sheetDismissGestureRef)");
     expect(dial).toContain('pointerEvents="box-none"');
   });

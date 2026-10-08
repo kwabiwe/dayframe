@@ -690,6 +690,9 @@ export function ActiveTimerEditSheet({
   // fewer on short screens and large text so the sheet's bottom actions stay on screen.
   const recentActivities = useMemo(() => recentActivityIds(historicalEntries), [historicalEntries]);
   const timeCardsStacked = windowDimensions.fontScale >= 1.6;
+  // Room for "00:00" (about 52 pt at 18 pt) at the input's current, capped text size plus the
+  // card's padding, so a time is never clipped; the date beside it truncates first.
+  const timeCardMinWidth = 18 + Math.ceil(52 * Math.min(windowDimensions.fontScale, 1.35));
   const chipDensity = timeEntrySheetLayoutDensity({
     fontScale: windowDimensions.fontScale,
     windowHeight: windowDimensions.height
@@ -2724,7 +2727,7 @@ export function ActiveTimerEditSheet({
                         accessible={false}
                         disabled={busy}
                         onPress={() => timeInputRef.current?.focus()}
-                        style={styles.activeEditTimeCardMain}
+                        style={[styles.activeEditTimeCardMain, { minWidth: timeCardMinWidth }]}
                       >
                         <Text {...mobileTextProps("counter")} style={[sheetStyles.sectionEyebrow, { color: theme.textMuted }]}>START</Text>
                           <TextInput
@@ -2776,7 +2779,7 @@ export function ActiveTimerEditSheet({
                           accessible={false}
                           disabled={busy}
                           onPress={() => endTimeInputRef.current?.focus()}
-                          style={styles.activeEditTimeCardMain}
+                          style={[styles.activeEditTimeCardMain, { minWidth: timeCardMinWidth }]}
                         >
                           <Text {...mobileTextProps("counter")} style={[sheetStyles.sectionEyebrow, { color: theme.textMuted }]}>END</Text>
                             <TextInput
@@ -2824,7 +2827,7 @@ export function ActiveTimerEditSheet({
                       </View>
                     ) : (
                       <View accessible accessibilityLabel={`Now, ${formatTimeInput(new Date(dialNowMs))}`} style={[styles.activeEditTimeGroup, timeCardsStacked ? styles.activeEditTimeGroupStacked : null]}>
-                        <View style={styles.activeEditTimeCardMain}>
+                        <View style={[styles.activeEditTimeCardMain, { minWidth: timeCardMinWidth }]}>
                           <Text {...mobileTextProps("counter")} style={[sheetStyles.sectionEyebrow, { color: theme.textMuted }]}>NOW</Text>
                           <Text {...mobileTextProps("numeric")} style={styles.activeEditRunningEndTime}>
                             {formatTimeInput(new Date(dialNowMs))}

@@ -2278,9 +2278,8 @@ function createStyles(theme: MobileTheme) {
     },
     activeEditTimeCardMain: {
       flex: 1,
-      // Room for "00:00" at the input's largest text size (18 pt × 1.35 ≈ 70 pt) plus padding:
-      // the date gives way first, so a typed time is never clipped.
-      minWidth: 14 + 76 + 4,
+      // The sheet adds a minimum width for "00:00" at the current text size (timeCardMinWidth).
+      minWidth: 0,
       justifyContent: "center",
       gap: 2,
       paddingLeft: 14,

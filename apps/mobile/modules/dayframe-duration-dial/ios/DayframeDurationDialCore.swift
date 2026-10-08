@@ -78,14 +78,25 @@ enum DayframeDurationDialCore {
   /// Half the range handle's 13-point dot.
   static let rangeHandleHalfSize = 6.5
 
+  /// The smallest ring that still fits the centre duration and its subtitle legibly.
+  static let minimumLegibleRadius = 40.0
+
+  /// Whether a stopped block's range handle can orbit inside the view without shrinking the ring
+  /// below `minimumLegibleRadius`. On the shortest (condensed) dial it cannot: there the handle is
+  /// not drawn or touchable, and "Move time window" stays available to VoiceOver.
+  static func rangeHandleFits(width: Double, height: Double) -> Bool {
+    let side = min(width, height)
+    return side / 2 - rangeHandleOffset - rangeHandleHalfSize >= min(side * 0.34, minimumLegibleRadius)
+  }
+
   /// The ring's radius: 34 % of the dial's shorter side. A stopped block's range handle orbits
-  /// outside the ring, so there the ring shrinks just enough to keep that handle inside the view
-  /// (a short dial at large text would otherwise clip it and lose its touches).
+  /// outside the ring, so where it is shown the ring shrinks just enough to keep that handle inside
+  /// the view (a short dial at large text would otherwise clip it and lose its touches).
   static func baseRadius(width: Double, height: Double, includesRangeHandle: Bool) -> Double {
     let side = min(width, height)
     let natural = side * 0.34
-    guard includesRangeHandle else { return natural }
-    return max(0, min(natural, side / 2 - rangeHandleOffset - rangeHandleHalfSize))
+    guard includesRangeHandle, rangeHandleFits(width: width, height: height) else { return natural }
+    return min(natural, side / 2 - rangeHandleOffset - rangeHandleHalfSize)
   }
 
   static func ownsTouch(

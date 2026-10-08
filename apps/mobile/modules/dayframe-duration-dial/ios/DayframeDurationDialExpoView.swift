@@ -122,7 +122,7 @@ final class DayframeDurationDialExpoView: ExpoView, UIGestureRecognizerDelegate 
       y: Double(point.y),
       width: Double(bounds.width),
       height: Double(bounds.height),
-      includesRangeHandle: record.mode != "running"
+      includesRangeHandle: showsRangeHandle(record: record)
     )
   }
 
@@ -136,7 +136,7 @@ final class DayframeDurationDialExpoView: ExpoView, UIGestureRecognizerDelegate 
     drawCentre(context: context, centre: centre, record: record)
     drawHandle(.end, record: record)
     drawHandle(.start, record: record)
-    if record.mode != "running" {
+    if showsRangeHandle(record: record) {
       drawHandle(.range, record: record)
     }
   }
@@ -313,7 +313,7 @@ final class DayframeDurationDialExpoView: ExpoView, UIGestureRecognizerDelegate 
   ) -> DayframeDurationDialHandle? {
     let candidates: [DayframeDurationDialHandle] = record.mode == "running"
       ? [.start]
-      : [.start, .end, .range]
+      : showsRangeHandle(record: record) ? [.start, .end, .range] : [.start, .end]
     return candidates
       .map { handle in (handle, distance(point, handlePoint(handle, record: record))) }
       .filter { $0.1 <= 32 }
@@ -325,11 +325,18 @@ final class DayframeDurationDialExpoView: ExpoView, UIGestureRecognizerDelegate 
     hypot(lhs.x - rhs.x, lhs.y - rhs.y)
   }
 
+  private func showsRangeHandle(record: DayframeDurationDialRecord) -> Bool {
+    record.mode != "running" && DayframeDurationDialCore.rangeHandleFits(
+      width: Double(bounds.width),
+      height: Double(bounds.height)
+    )
+  }
+
   private func dialRadius(record: DayframeDurationDialRecord) -> CGFloat {
     CGFloat(DayframeDurationDialCore.baseRadius(
       width: Double(bounds.width),
       height: Double(bounds.height),
-      includesRangeHandle: record.mode != "running"
+      includesRangeHandle: showsRangeHandle(record: record)
     ))
   }
 

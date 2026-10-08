@@ -98,13 +98,18 @@ final class DayframeDurationDialCoreTests: XCTestCase {
   func testStoppedRingShrinksToKeepTheRangeHandleInside() {
     // A tall dial: the natural 34 % ring already leaves room for the range handle.
     XCTAssertEqual(DayframeDurationDialCore.baseRadius(width: 358, height: 300, includesRangeHandle: true), 300 * 0.34, accuracy: 0.001)
-    // Regular, compact and condensed stopped dials: the handle's outer edge stays inside the view.
-    for height in [242.0, 194.0, 128.0] {
+    // Regular and compact stopped dials: the handle's outer edge stays inside the view and the
+    // ring stays legible.
+    for height in [242.0, 194.0] {
+      XCTAssertTrue(DayframeDurationDialCore.rangeHandleFits(width: 358, height: height))
       let radius = DayframeDurationDialCore.baseRadius(width: 358, height: height, includesRangeHandle: true)
       let outerEdge = radius + DayframeDurationDialCore.rangeHandleOffset + DayframeDurationDialCore.rangeHandleHalfSize
       XCTAssertLessThanOrEqual(outerEdge, height / 2 + 0.001)
-      XCTAssertGreaterThan(radius, 0)
+      XCTAssertGreaterThanOrEqual(radius, DayframeDurationDialCore.minimumLegibleRadius)
     }
+    // Condensed: no room for the handle, so it is not shown and the ring keeps its natural size.
+    XCTAssertFalse(DayframeDurationDialCore.rangeHandleFits(width: 358, height: 128))
+    XCTAssertEqual(DayframeDurationDialCore.baseRadius(width: 358, height: 128, includesRangeHandle: true), 128 * 0.34, accuracy: 0.001)
     // A running dial keeps the natural ring.
     XCTAssertEqual(DayframeDurationDialCore.baseRadius(width: 358, height: 128, includesRangeHandle: false), 128 * 0.34, accuracy: 0.001)
   }
