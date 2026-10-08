@@ -393,7 +393,7 @@ Core app:
   - Requires app bearer/cookie session or scoped ingest token.
 
 - `POST /api/review/:id`
-  - Accept, ignore, or create rule from review item.
+  - Accept or ignore once (structured envelope actions for Location items). "Always ignore" and "Make rule" were removed on 8 Oct 2026 and are rejected with `invalid_action` (400).
 
 - `GET /api/export`
   - Supports workspace JSON and time-entry exports.

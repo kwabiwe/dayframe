@@ -74,6 +74,17 @@ export class CategoryConflictError extends Error {
   }
 }
 
+/** An entity kind the API does not create (unknown, or retired like automation rules). */
+export class UnsupportedEntityError extends Error {
+  status = 400;
+  code = "unsupported_entity";
+
+  constructor(entity: string) {
+    super(`Unsupported entity: ${entity}`);
+    this.name = "UnsupportedEntityError";
+  }
+}
+
 type CategoryRowLike = {
   id: string;
   name: string;
@@ -2105,16 +2116,18 @@ export async function resolveReviewItem(
   session: RequestSession = getDevSession(),
   options: SyncTransactionOptions = {}
 ): Promise<ReviewResolutionResult> {
+  // Checked before any database work, so a removed action ("Always ignore", "Make rule") is a
+  // plain 400 even when the database is unavailable.
+  if (!isReviewResolutionAction(action)) {
+    throw new ReviewResolutionError("invalid_action", "Unsupported review action.", {
+      status: 400,
+      details: { action }
+    });
+  }
   try {
     return await withSyncTransaction("legacy_review", async ({ client }) => {
     setSyncPhase(client, "owner_lock");
     await lockUserTimerState(client, session);
-    if (!isReviewResolutionAction(action)) {
-      throw new ReviewResolutionError("invalid_action", "Unsupported review action.", {
-        status: 400,
-        details: { action }
-      });
-    }
 
     setSyncPhase(client, "review_lock");
     const review = await client.query<{
@@ -3092,7 +3105,7 @@ export async function createEntity(
         throw error;
       }
     default:
-      throw new Error(`Unsupported entity: ${entity}`);
+      throw new UnsupportedEntityError(entity);
   }
 }
 

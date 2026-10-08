@@ -1189,7 +1189,7 @@ describe("automation rule creation", () => {
   it("no longer creates automation rules through the entity endpoint", async () => {
     await expect(
       createEntity("automation_rule", { name: "Station pickup", placeId: placeId() }, session)
-    ).rejects.toThrow(/Unsupported entity: automation_rule/);
+    ).rejects.toMatchObject({ code: "unsupported_entity", status: 400, message: "Unsupported entity: automation_rule" });
     expect(mocks.query).not.toHaveBeenCalled();
   });
 });
@@ -2972,9 +2972,9 @@ describe("review item resolution", () => {
         code: "invalid_action",
         status: 400
       });
-      expect(client.query.mock.calls.some(([statement]) => String(statement).includes("from review_items ri"))).toBe(false);
-      expect(client.query.mock.calls.some(([statement]) => String(statement).includes("automation_rules"))).toBe(false);
-      expect(client.query).toHaveBeenCalledWith("rollback");
+      // Rejected before any database work: a 400 even when the database is unavailable.
+      expect(mocks.pool.connect).not.toHaveBeenCalled();
+      expect(client.query).not.toHaveBeenCalled();
     }
   );
 
