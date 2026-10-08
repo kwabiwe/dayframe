@@ -74,10 +74,14 @@ export function TimeEntryDurationDial({
   const snapshotsRef = useRef(new Map<string, TimeEntryDialInterval>());
   // The rounding shortcuts live behind "…" on the hint row (Blocks parity step 4e); a new
   // presentation, a turn of the dial or a shortcut closes them again.
-  const [shortcutsOpen, setShortcutsOpen] = useState(false);
-  useEffect(() => {
-    setShortcutsOpen(false);
-  }, [presentationId]);
+  // Keyed by presentation, so a retargeted sheet never shows the previous one's open pills.
+  const [shortcutsState, setShortcutsState] = useState<{ open: boolean; presentationId: typeof presentationId }>({
+    open: false,
+    presentationId
+  });
+  const shortcutsOpen = shortcutsState.open && shortcutsState.presentationId === presentationId;
+  const setShortcutsOpen = (open: boolean) => setShortcutsState({ open, presentationId });
+  const shortcutsScrollRef = useRef<ScrollView>(null);
   const nativeDialGesture = useMemo(
     () => Gesture.Native()
       .disallowInterruption(true)
@@ -180,6 +184,11 @@ export function TimeEntryDurationDial({
     });
   }
   const showShortcuts = shortcutsOpen && shortcuts.length > 0;
+  // When the last shortcut stops applying the pills close for good, rather than reopening by
+  // themselves if one applies again later.
+  useEffect(() => {
+    if (shortcutsOpen && shortcuts.length === 0) setShortcutsState({ open: false, presentationId });
+  }, [presentationId, shortcuts.length, shortcutsOpen]);
 
   return (
     <View
@@ -215,6 +224,28 @@ export function TimeEntryDurationDial({
         ]}
         testID="time-entry-dial-hint-row"
       >
+        {/* The toggle comes first so VoiceOver moves from it into the pills; the row is reversed. */}
+        {shortcuts.length ? (
+          <Pressable
+            accessibilityLabel={showShortcuts ? "Hide time shortcuts" : "Time shortcuts"}
+            accessibilityRole="button"
+            accessibilityState={{ disabled, expanded: showShortcuts }}
+            disabled={disabled}
+            onPress={() => {
+              onInteractionStart();
+              setShortcutsOpen(!showShortcuts);
+            }}
+            onTouchStart={(event) => event.stopPropagation()}
+            style={pressable([styles.durationDialShortcutToggle, disabled ? styles.buttonDisabled : null], styles.buttonPressed)}
+            testID="time-entry-dial-shortcuts"
+          >
+            <DayframeIcon
+              color={theme.textSecondary}
+              glyph={showShortcuts ? DAYFRAME_APP_ICONS.close : DAYFRAME_APP_ICONS.more}
+              size={18}
+            />
+          </Pressable>
+        ) : null}
         {showShortcuts ? (
           <Reanimated.View
             entering={localPresenceEntering(reduceMotion, "fade")}
@@ -226,7 +257,10 @@ export function TimeEntryDurationDial({
               contentContainerStyle={styles.durationDialShortcutsContent}
               horizontal
               keyboardShouldPersistTaps="handled"
-              showsHorizontalScrollIndicator={false}
+              // Three pills can run past a narrow row: flash the indicator so the rest is findable.
+              onContentSizeChange={() => shortcutsScrollRef.current?.flashScrollIndicators()}
+              ref={shortcutsScrollRef}
+              showsHorizontalScrollIndicator
             >
               {shortcuts.map((shortcut) => (
                 <DialShortcut
@@ -258,27 +292,6 @@ export function TimeEntryDurationDial({
             </Text>
           </Reanimated.View>
         )}
-        {shortcuts.length ? (
-          <Pressable
-            accessibilityLabel={showShortcuts ? "Hide time shortcuts" : "Time shortcuts"}
-            accessibilityRole="button"
-            accessibilityState={{ disabled, expanded: showShortcuts }}
-            disabled={disabled}
-            onPress={() => {
-              onInteractionStart();
-              setShortcutsOpen((open) => !open);
-            }}
-            onTouchStart={(event) => event.stopPropagation()}
-            style={pressable([styles.durationDialShortcutToggle, disabled ? styles.buttonDisabled : null], styles.buttonPressed)}
-            testID="time-entry-dial-shortcuts"
-          >
-            <DayframeIcon
-              color={theme.textSecondary}
-              glyph={showShortcuts ? DAYFRAME_APP_ICONS.close : DAYFRAME_APP_ICONS.more}
-              size={18}
-            />
-          </Pressable>
-        ) : null}
       </View>
     </View>
   );

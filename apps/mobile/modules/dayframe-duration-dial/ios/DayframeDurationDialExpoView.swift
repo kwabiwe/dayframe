@@ -130,7 +130,7 @@ final class DayframeDurationDialExpoView: ExpoView, UIGestureRecognizerDelegate 
     guard let record, let context = UIGraphicsGetCurrentContext() else { return }
     context.clear(rect)
     let centre = CGPoint(x: rect.midX, y: rect.midY)
-    let baseRadius = min(rect.width, rect.height) * 0.34
+    let baseRadius = dialRadius(record: record)
     drawTicks(context: context, centre: centre, radius: baseRadius, record: record)
     drawArc(context: context, centre: centre, radius: baseRadius, record: record)
     drawCentre(context: context, centre: centre, record: record)
@@ -325,13 +325,21 @@ final class DayframeDurationDialExpoView: ExpoView, UIGestureRecognizerDelegate 
     hypot(lhs.x - rhs.x, lhs.y - rhs.y)
   }
 
+  private func dialRadius(record: DayframeDurationDialRecord) -> CGFloat {
+    CGFloat(DayframeDurationDialCore.baseRadius(
+      width: Double(bounds.width),
+      height: Double(bounds.height),
+      includesRangeHandle: record.mode != "running"
+    ))
+  }
+
   private func handlePoint(
     _ handle: DayframeDurationDialHandle,
     record: DayframeDurationDialRecord
   ) -> CGPoint {
     let centre = CGPoint(x: bounds.midX, y: bounds.midY)
-    let baseRadius = min(bounds.width, bounds.height) * 0.34
-    let radius: CGFloat = handle == .range ? baseRadius + 34 : baseRadius
+    let baseRadius = dialRadius(record: record)
+    let radius: CGFloat = handle == .range ? baseRadius + CGFloat(DayframeDurationDialCore.rangeHandleOffset) : baseRadius
     let angle: Double
     switch handle {
     case .start:
@@ -425,7 +433,7 @@ final class DayframeDurationDialExpoView: ExpoView, UIGestureRecognizerDelegate 
     // while running or "21:19–21:26" for a stopped block ("1 full turn + 5 min" past an hour).
     let text = DayframeDurationDialCore.formatShortDuration(milliseconds: effectiveEnd - record.startMs)
     // 38 points as in the prototype, smaller on compact dials so it stays inside the ring.
-    let radius = min(bounds.width, bounds.height) * 0.34
+    let radius = dialRadius(record: record)
     var displaySize = min(38, radius * 0.4)
     func displayFont(_ size: CGFloat) -> UIFont {
       UIFont(name: "BricolageGrotesque-Bold", size: size) ?? UIFont.systemFont(ofSize: size, weight: .bold)

@@ -73,6 +73,21 @@ enum DayframeDurationDialCore {
     return 1
   }
 
+  /// How far outside the ring a stopped block's range handle orbits.
+  static let rangeHandleOffset = 34.0
+  /// Half the range handle's 13-point dot.
+  static let rangeHandleHalfSize = 6.5
+
+  /// The ring's radius: 34 % of the dial's shorter side. A stopped block's range handle orbits
+  /// outside the ring, so there the ring shrinks just enough to keep that handle inside the view
+  /// (a short dial at large text would otherwise clip it and lose its touches).
+  static func baseRadius(width: Double, height: Double, includesRangeHandle: Bool) -> Double {
+    let side = min(width, height)
+    let natural = side * 0.34
+    guard includesRangeHandle else { return natural }
+    return max(0, min(natural, side / 2 - rangeHandleOffset - rangeHandleHalfSize))
+  }
+
   static func ownsTouch(
     x: Double,
     y: Double,
@@ -82,8 +97,8 @@ enum DayframeDurationDialCore {
   ) -> Bool {
     guard x.isFinite, y.isFinite, width.isFinite, height.isFinite,
           width > 0, height > 0 else { return false }
-    let baseRadius = min(width, height) * 0.34
-    let handleOffset = includesRangeHandle ? 34.0 : 0.0
+    let baseRadius = baseRadius(width: width, height: height, includesRangeHandle: includesRangeHandle)
+    let handleOffset = includesRangeHandle ? rangeHandleOffset : 0.0
     let accessibilityRadius = baseRadius + handleOffset + 22.0
     return hypot(x - width / 2, y - height / 2) <= accessibilityRadius
   }

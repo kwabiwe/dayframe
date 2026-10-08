@@ -46,6 +46,17 @@ describe("fixed timer-sheet layout contract", () => {
     expect(sheet).toContain('testID="time-entry-start-time"');
     expect(sheet).toContain('testID="time-entry-end-date"');
     expect(sheet).toContain('testID="time-entry-end-time"');
+    // A four-digit time keeps its room at the largest input size; the date truncates first.
+    expect(theme).toMatch(/activeEditTimeCardMain:\s*\{[\s\S]*?minWidth: 14 \+ 76 \+ 4/);
+    expect(theme).toMatch(/activeEditCompactDate:\s*\{\s*flexShrink: 1,\s*minWidth: 0/);
+  });
+
+  it("keeps the stopped dial's range handle inside the view and the shortcut state per presentation", () => {
+    expect(nativeDial).toContain("DayframeDurationDialCore.baseRadius(");
+    expect(nativeDial).not.toContain("* 0.34");
+    expect(dial).toContain("shortcutsState.presentationId === presentationId");
+    expect(dial).toContain("if (shortcutsOpen && shortcuts.length === 0)");
+    expect(theme).toMatch(/durationDialHintRow:\s*\{[\s\S]*?flexDirection: "row-reverse"/);
   });
 
   it("uses responsive fixed geometry and leaves the timer form non-scrolling", () => {

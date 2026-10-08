@@ -1932,7 +1932,7 @@ function createStyles(theme: MobileTheme) {
     durationDialHintRow: {
       minHeight: 44,
       marginTop: -16,
-      flexDirection: "row",
+      flexDirection: "row-reverse",
       alignItems: "center",
       zIndex: 3,
       elevation: 3
@@ -2278,7 +2278,9 @@ function createStyles(theme: MobileTheme) {
     },
     activeEditTimeCardMain: {
       flex: 1,
-      minWidth: 0,
+      // Room for "00:00" at the input's largest text size (18 pt × 1.35 ≈ 70 pt) plus padding:
+      // the date gives way first, so a typed time is never clipped.
+      minWidth: 14 + 76 + 4,
       justifyContent: "center",
       gap: 2,
       paddingLeft: 14,
@@ -2286,7 +2288,8 @@ function createStyles(theme: MobileTheme) {
       paddingVertical: 8
     },
     activeEditCompactDate: {
-      flexShrink: 0,
+      flexShrink: 1,
+      minWidth: 0,
       maxWidth: "55%",
       minHeight: 44,
       paddingHorizontal: 12,
