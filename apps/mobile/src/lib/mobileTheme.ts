@@ -1909,72 +1909,89 @@ function createStyles(theme: MobileTheme) {
       alignSelf: "center",
       width: "100%",
       maxWidth: 340,
-      height: 286,
+      height: 258,
       backgroundColor: "transparent",
       overflow: "visible"
     },
     durationDialNativeViewCompact: {
-      height: 236
+      height: 200
     },
     durationDialNativeViewCondensed: {
-      height: 164
+      height: 128
     },
-    durationDialFieldActions: {
-      position: "absolute",
-      top: 0,
-      left: 0,
-      right: 0,
-      flexDirection: "row",
+    // Stopped blocks: the hint row sits below the dial (see durationDialHintRowStopped), so the
+    // dial gives up that overlap instead and the sheet's height stays the same.
+    durationDialNativeViewStopped: {
+      height: 242
+    },
+    durationDialNativeViewStoppedCompact: {
+      height: 194
+    },
+    // The ring's radius is 34 % of the dial's shorter side, so a band under the ticks stays empty:
+    // the hint row overlaps it by that much, keeping the sheet's total height unchanged.
+    durationDialHintRow: {
+      minHeight: 44,
+      marginTop: -16,
+      flexDirection: "row-reverse",
+      alignItems: "center",
       zIndex: 3,
       elevation: 3
     },
-    durationDialFieldActionStart: {
+    durationDialHintRowCompact: {
+      marginTop: -6
+    },
+    durationDialHintRowCondensed: {
+      marginTop: 0
+    },
+    durationDialHintRowStopped: {
+      marginTop: 0
+    },
+    durationDialHint: {
       flex: 1,
       minWidth: 0,
-      alignItems: "flex-start"
-    },
-    durationDialFieldActionEnd: {
-      flex: 1,
-      minWidth: 0,
-      alignItems: "flex-end"
-    },
-    durationDialFieldAction: {
-      minHeight: 44,
-      maxWidth: "100%",
-      paddingHorizontal: 4,
       alignItems: "center",
       justifyContent: "center"
     },
-    durationDialFieldActionText: {
-      color: theme.accentText,
-      fontFamily: monoFont,
-      fontSize: 10,
-      fontWeight: "600",
+    // Balances the 44-point "…" on the right so the hint stays centred under the dial.
+    durationDialHintBalanced: {
+      paddingLeft: 44
+    },
+    durationDialHintText: {
+      color: theme.textMuted,
+      fontSize: 12.5,
+      lineHeight: 16,
       textAlign: "center"
     },
-    durationDialInnerAction: {
-      position: "absolute",
-      top: "50%",
-      left: 0,
-      right: 0,
-      paddingTop: 18,
-      alignItems: "center",
-      zIndex: 4,
-      elevation: 4
+    durationDialShortcuts: {
+      flex: 1,
+      minWidth: 0
     },
-    durationDialInnerActionButton: {
+    durationDialShortcutsContent: {
+      alignItems: "center",
+      gap: 8,
+      paddingRight: 8
+    },
+    durationDialShortcut: {
       minHeight: 36,
       borderRadius: 999,
       backgroundColor: theme.surfaceMuted,
-      paddingHorizontal: 12,
+      paddingHorizontal: 14,
       alignItems: "center",
       justifyContent: "center"
     },
-    durationDialInnerActionText: {
-      color: theme.accentText,
-      fontFamily: monoFont,
-      fontSize: 10,
-      fontWeight: "600"
+    durationDialShortcutText: {
+      color: theme.textPrimary,
+      fontSize: 13,
+      fontWeight: "600",
+      fontVariant: ["tabular-nums"]
+    },
+    durationDialShortcutToggle: {
+      width: 44,
+      height: 44,
+      borderRadius: 22,
+      backgroundColor: theme.surfaceMuted,
+      alignItems: "center",
+      justifyContent: "center"
     },
     activeEditElapsedLabel: {
       color: theme.textSecondary,
@@ -2242,74 +2259,65 @@ function createStyles(theme: MobileTheme) {
     activeEditTimeGroupsStacked: {
       flexDirection: "column"
     },
+    // Blocks prototype time card (.time-pair): a filled card, eyebrow over the time, date on the right.
     activeEditTimeGroup: {
       flex: 1,
       minWidth: 0,
-      gap: 6
-    },
-    activeEditCompactTimeRow: {
-      minWidth: 0,
-      minHeight: 44,
-      backgroundColor: theme.surfaceMuted,
-      borderRadius: 12,
-      overflow: "hidden",
+      minHeight: 58,
       flexDirection: "row",
-      alignItems: "center",
-      gap: 0
+      alignItems: "stretch",
+      borderRadius: 14,
+      backgroundColor: theme.surfaceMuted,
+      overflow: "hidden"
+    },
+    // Stacked at the largest text sizes: each card takes its own height (a flex basis of 0 would
+    // let the column measure shorter than its cards, so the dial below would overlap them).
+    activeEditTimeGroupStacked: {
+      flex: 0,
+      alignSelf: "stretch"
+    },
+    activeEditTimeCardMain: {
+      flex: 1,
+      // The sheet adds a minimum width for "00:00" at the current text size (timeCardMinWidth).
+      minWidth: 0,
+      justifyContent: "center",
+      gap: 2,
+      paddingLeft: 14,
+      paddingRight: 4,
+      paddingVertical: 8
     },
     activeEditCompactDate: {
-      flex: 1,
+      flexShrink: 1,
       minWidth: 0,
+      maxWidth: "55%",
       minHeight: 44,
-      borderRadius: 0,
-      backgroundColor: "transparent",
-      paddingHorizontal: 9,
-      alignItems: "center",
+      paddingHorizontal: 12,
+      alignItems: "flex-end",
       justifyContent: "center"
     },
     activeEditCompactDateText: {
-      color: theme.textPrimary,
-      fontFamily: monoFont,
-      fontSize: 12,
+      color: theme.textSecondary,
+      fontSize: 12.5,
       fontWeight: "600"
     },
     activeEditCompactTimeInput: {
-      width: 72,
-      minHeight: 44,
+      minHeight: 28,
       backgroundColor: "transparent",
       borderRadius: 0,
-      paddingHorizontal: 6,
+      paddingHorizontal: 0,
       paddingVertical: 0,
-      color: theme.accentText,
-      fontFamily: monoFont,
-      fontSize: 15,
-      fontWeight: "600",
+      color: theme.textPrimary,
+      fontSize: 18,
+      fontWeight: "700",
       fontVariant: ["tabular-nums"],
-      textAlign: "center"
-    },
-    activeEditRunningEndSummary: {
-      minHeight: 44,
-      borderRadius: 12,
-      backgroundColor: theme.surfaceMuted,
-      paddingHorizontal: 9,
-      flexDirection: "row",
-      alignItems: "center",
-      justifyContent: "space-between",
-      gap: 6
-    },
-    activeEditTimeDivider: {
-      width: 1,
-      height: 22,
-      flexShrink: 0,
-      backgroundColor: theme.border
+      textAlign: "left"
     },
     activeEditRunningEndTime: {
       color: theme.textSecondary,
-      fontFamily: monoFont,
-      fontSize: 15,
-      fontWeight: "600",
+      fontSize: 18,
+      fontWeight: "700",
       fontVariant: ["tabular-nums"],
-      paddingLeft: 3
+      lineHeight: 28
     },
     activeEditDateInput: {
       flex: 1.25,

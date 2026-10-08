@@ -20,14 +20,45 @@ describe("fixed timer-sheet layout contract", () => {
     expect(suggestions).toContain("styles.taskSuggestionRowDivider");
   });
 
-  it("places field-specific actions above the dial and duration rounding inside it", () => {
-    expect(dial).toContain('label={mode === "running" ? "SET TO LAST STOP TIME"');
-    expect(dial).toContain('label="ROUND STOP TIME"');
-    expect(dial).toContain('testID="time-entry-round-duration"');
-    expect(dial).toContain('{mode === "stopped" ? (');
-    expect(theme).toMatch(/durationDialFieldActions:\s*\{[\s\S]*?position: "absolute"/);
-    expect(theme).toMatch(/durationDialInnerAction:\s*\{[\s\S]*?top: "50%"/);
+  it("keeps the time shortcuts behind one toggle on the hint row under the dial (step 4e)", () => {
+    expect(dial).toContain("One turn is an hour.");
+    expect(dial).toContain('testID="time-entry-dial-shortcuts"');
+    expect(dial).toContain('accessibilityState={{ disabled, expanded: showShortcuts }}');
+    expect(dial).toContain('testID: "time-entry-set-last-stop-time"');
+    expect(dial).toContain('testID: "time-entry-round-stop-time"');
+    expect(dial).toContain('testID: "time-entry-round-duration"');
+    // Rounding is for stopped blocks; the last stop only when it would move the start.
+    expect(dial).toContain('if (mode === "stopped") {');
+    expect(dial).toContain("Math.abs(lastStopMs - startMs) >= 60_000");
+    // A turn of the dial, a shortcut or a new presentation closes the shortcuts.
+    expect(dial).toMatch(/phase === "began"\) \{\s*setShortcutsOpen\(false\)/);
+    expect(dial).toContain("entering={localPresenceEntering(reduceMotion, \"fade\")}");
+    expect(theme).toMatch(/durationDialHintRow:\s*\{[\s\S]*?marginTop: -16/);
+    expect(theme).not.toContain("durationDialFieldActions");
+    expect(theme).not.toContain("durationDialInnerAction");
     expect(dial).not.toContain("durationDialQuickActions");
+  });
+
+  it("shows Start and End as the prototype's filled time cards above the dial", () => {
+    expect(sheet).toContain("styles.activeEditTimeCardMain");
+    expect(theme).toMatch(/activeEditTimeGroup:\s*\{[\s\S]*?borderRadius: 14,[\s\S]*?backgroundColor: theme.surfaceMuted/);
+    expect(sheet).toContain('testID="time-entry-start-date"');
+    expect(sheet).toContain('testID="time-entry-start-time"');
+    expect(sheet).toContain('testID="time-entry-end-date"');
+    expect(sheet).toContain('testID="time-entry-end-time"');
+    // A four-digit time keeps its room at the largest input size; the date truncates first.
+    expect(sheet).toContain("const timeCardMinWidth = 18 + Math.ceil(52 * Math.min(windowDimensions.fontScale, 1.35));");
+    expect(sheet).toContain("{ minWidth: timeCardMinWidth }");
+    expect(theme).toMatch(/activeEditCompactDate:\s*\{\s*flexShrink: 1,\s*minWidth: 0/);
+  });
+
+  it("keeps the stopped dial's range handle inside the view and the shortcut state per presentation", () => {
+    expect(nativeDial).toContain("DayframeDurationDialCore.baseRadius(");
+    expect(nativeDial).toContain("DayframeDurationDialCore.rangeHandleFits(");
+    expect(nativeDial).not.toContain("* 0.34");
+    expect(dial).toContain("shortcutsState.presentationId === presentationId");
+    expect(dial).toContain("if (shortcutsOpen && shortcuts.length === 0)");
+    expect(theme).toMatch(/durationDialHintRow:\s*\{[\s\S]*?flexDirection: "row-reverse"/);
   });
 
   it("uses responsive fixed geometry and leaves the timer form non-scrolling", () => {
@@ -41,7 +72,7 @@ describe("fixed timer-sheet layout contract", () => {
   it("returns only the visible circular dial region to native gesture ownership", () => {
     expect(nativeDial).toContain("override func point(inside point: CGPoint, with event: UIEvent?)");
     expect(nativeDial).toContain("DayframeDurationDialCore.ownsTouch(");
-    expect(nativeDial).toContain('includesRangeHandle: record.mode != "running"');
+    expect(nativeDial).toContain('includesRangeHandle: showsRangeHandle(record: record)');
     expect(dial).toContain("blocksExternalGesture(sheetDismissGestureRef)");
     expect(dial).toContain('pointerEvents="box-none"');
   });

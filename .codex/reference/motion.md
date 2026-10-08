@@ -252,3 +252,12 @@ Block pull-to-refresh:
 - Interruption: a hold the system cancels closes the bloom without choosing; the orb and bloom disappear with the tab bar (a Reports sheet); one pick per release.
 - Async outcome: none of its own; Start and Stop are the Dashboard's existing optimistic owners, with their own haptics and landings.
 - Accessibility: Reduce Motion presses the orb in place (no spring), shows the bubbles in place, keeps the fades short and holds no lift animation. Bubbles are hit-tested in window points from the orb's centre, so the press scale never skews the 44-point reach. A finger that slides more than 10 points before the bloom opens is neither a tap nor a hold (press, wait, then slide). The coral orb is hidden from VoiceOver; the native tab item underneath is the accessible element ("Start a block" or "Stop timer"): it is disabled, so activating it selects nothing, and its press runs the orb's tap. Choosing an activity without the bloom stays available through the quick-start mosaic, the Switch sheet and the entry sheet.
+
+## Entry sheet time cards and dial shortcuts (Blocks parity step 4e)
+
+- Trigger: a tap on `…` under the duration dial (or `×` while open); a tap on a shortcut pill; a turn of the dial; a new sheet presentation.
+- Owner: `TimeEntryDurationDial` owns the open state; the hint and the shortcut row are siblings in one fixed-height row keyed `hint` / `shortcuts`, each with `localPresenceEntering`/`localPresenceExiting` (a 140 ms crossfade). The row's height never changes, so nothing around it moves.
+- Entrance/update/exit: opening fades the hint out and the pills in; a shortcut applies its interval through the dial's existing `onChange` (the dial and the time cards update in the same render) and fades the pills back to the hint. The time cards have no motion of their own.
+- Interruption: turning the dial while the pills are open closes them; a disabled sheet (a mutation in flight) disables `…` and the pills.
+- Async outcome: none; shortcuts only change the draft.
+- Accessibility: Reduce Motion keeps the swap as a short fade (90 ms in, 70 ms out) with no movement. `…` reports `expanded`; its label is "Time shortcuts" or "Hide time shortcuts"; each pill has a spoken label ("Set start to the last stop time, 21:22", "Round stop time", "Round duration").
