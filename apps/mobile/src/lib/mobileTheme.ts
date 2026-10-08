@@ -1016,6 +1016,12 @@ function createStyles(theme: MobileTheme) {
       flex: 1,
       justifyContent: "center"
     },
+    reviewDeckWaitingContent: {
+      alignItems: "center",
+      alignSelf: "stretch",
+      gap: 12,
+      position: "relative"
+    },
     reviewMetaLine: {
       color: theme.textSecondary,
       fontFamily: monoFont,

@@ -332,11 +332,12 @@ function ReviewDeckCardView({
         if (next !== 0) runOnJS(playArmTick)();
       }
     })
-    .onEnd(() => {
+    .onEnd((_event, success) => {
       if (thrown.value) return;
       const direction = armed.value as -1 | 0 | 1;
       armed.value = 0;
-      if (direction !== 0) {
+      // A cancelled gesture (interrupted, app backgrounded) never decides: the card goes home.
+      if (direction !== 0 && success) {
         flyOut(direction);
         return;
       }

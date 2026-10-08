@@ -41,7 +41,8 @@ describe("Review deck motion contract (Blocks parity step 5b)", () => {
   });
 
   it("does not count the held card in flight toward \"N of M\" (r2 B)", () => {
-    expect(screen).toContain("const deckRemaining = deckFlying ? deckSources.length - 1 : deckSources.length;");
+    expect(screen).toContain("const deckRemaining = heldInFlight ? deckSources.length - 1 : deckSources.length;");
+    expect(screen).toContain("Math.max(totalNeedsReview - locallyDecidedCount, deckRemaining)");
     expect(screen).not.toMatch(/remaining: deckBacklogComplete\s*\?\s*deckSources\.length/);
   });
 
@@ -52,10 +53,29 @@ describe("Review deck motion contract (Blocks parity step 5b)", () => {
   });
 
   it("celebrates after any own decision and locks the flying card's controls (r2 D, F)", () => {
-    expect(screen).toMatch(/function recordDeckDecision\([^)]*\) \{\s*lastDeckDecisionAt\.current = Date\.now\(\);/);
+    expect(screen).toContain("celebrate={celebrateDeckFinish.current}");
+    expect(screen).toContain("lastDeckKeys.current.every((key) => ownDeckDecisionKeys.current.has(key))");
+    expect(screen).not.toContain("lastDeckDecisionAt");
     expect(screen).toContain("controlsDisabled: card.controlsDisabled || card.key === flyingDeckKey");
     expect(screen).toContain("logDisabled={topDeckControlsDisabled || deckFlying}");
     expect(screen).toContain("skipDisabled={deckFlying || (topDeckSkipDefers && deckSources.length <= 1)}");
     expect(deck).toContain("reviewDeckArmDirection(dragX.value, event.translationX)");
+  });
+
+  it("keeps Undo in every deck state and never decides a cancelled gesture (r3 1, 2)", () => {
+    expect(screen.match(/renderDeckToast\("under"\)/g)?.length).toBe(2);
+    expect(screen).toContain('renderDeckToast("actions")');
+    expect(deck).toContain(".onEnd((_event, success) => {");
+    expect(deck).toContain("if (direction !== 0 && success) {");
+  });
+
+  it("retires a cut-short flight on the save outcome and flushes a held card on any decision (r3 3, 4)", () => {
+    expect(screen).toMatch(/const settled = \(\) => \{\s*setDeckKeyCommitting\(held\.key, false\);\s*setFlyingDeckKey/);
+    expect(screen).toMatch(/if \(reviewMutations\.current\.has\(item\.id\)\) return false;\s*\/\/[^\n]*\n\s*deckHold\.flush\(\);/);
+    expect(screen).toMatch(/if \(editTarget\.kind === "reviewItem"\) \{\s*deckHold\.flush\(\);/);
+  });
+
+  it("locks a deferred card's controls during its flight too (r3 6)", () => {
+    expect(screen).toMatch(/setFlyingDeckKey\(key\);\s*if \(source\.kind === "legacy_entry" \|\| card\?\.skipDefers\) return;/);
   });
 });

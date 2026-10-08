@@ -194,7 +194,11 @@ export default function ReviewScreen() {
   const [flyingDeckKey, setFlyingDeckKey] = useState<string | null>(null);
   // A saved decision stays out of the deck until its SQLite projection drops the card.
   const [committingDeckKeys, setCommittingDeckKeys] = useState<ReadonlySet<string>>(() => new Set());
-  const lastDeckDecisionAt = useRef(0);
+  // Cards this visit decided itself: "All framed" celebrates only when they emptied the deck.
+  const ownDeckDecisionKeys = useRef(new Set<string>());
+  const lastDeckKeys = useRef<readonly string[]>([]);
+  const deckWasFinished = useRef(false);
+  const celebrateDeckFinish = useRef(false);
   const deckTokenSequence = useRef(0);
   const commitHeldDeckDecisionRef = useRef<(held: ReviewDeckHeldDecision) => void>(() => undefined);
   const deckHold = useRef(createReviewDeckHold({
@@ -905,8 +909,12 @@ export default function ReviewScreen() {
   const topDeckSource = deckSources[0] ?? null;
   // The top card is the held card still flying out: the round actions wait for the next card.
   const deckFlying = flyingDeckKey !== null && topDeckSource?.key === flyingDeckKey;
-  // The flying held card is already decided, so "N of M" does not count it.
-  const deckRemaining = deckFlying ? deckSources.length - 1 : deckSources.length;
+  // The flying held card is already decided, so "N of M" does not count it (a deferred card
+  // flying to the back still does).
+  const heldInFlight = deckFlying && heldDeckDecision?.key === flyingDeckKey;
+  const deckRemaining = heldInFlight ? deckSources.length - 1 : deckSources.length;
+  // The server count still includes decisions held for Undo or saving on this iPhone.
+  const locallyDecidedCount = (heldDeckDecision ? 1 : 0) + committingDeckKeys.size;
   // Every open item is loaded: the deck itself is the count, so a decision still syncing never
   // turns "2 of 5" into "2 of 5+". Otherwise the server count is used when it is exact.
   const deckBacklogComplete = reviewBacklog !== null && !reviewBacklog.nextCursor && reviewBacklog.recordsComplete;
@@ -914,7 +922,7 @@ export default function ReviewScreen() {
     decided: deckVisit.decided,
     remaining: deckBacklogComplete
       ? deckRemaining
-      : reviewCountIsExact ? Math.max(totalNeedsReview, deckRemaining) : deckRemaining,
+      : reviewCountIsExact ? Math.max(totalNeedsReview - locallyDecidedCount, deckRemaining) : deckRemaining,
     exact: deckBacklogComplete || reviewCountIsExact
   });
   // "All framed" only once a verified read says nothing else is open; a cached-only deck (offline,
@@ -922,6 +930,14 @@ export default function ReviewScreen() {
   // A reload after the last decision keeps the previous complete read until it is replaced, so
   // "All framed" does not blink back to the waiting copy.
   const deckFinished = deckSources.length === 0 && deckBacklogComplete;
+  // Decided while rendering so the finished screen mounts knowing whether to celebrate: only when
+  // the cards last on screen were all this visit's own decisions (a refresh emptying it is quiet).
+  if (deckFinished && !deckWasFinished.current) {
+    celebrateDeckFinish.current = lastDeckKeys.current.length > 0 &&
+      lastDeckKeys.current.every((key) => ownDeckDecisionKeys.current.has(key));
+  }
+  deckWasFinished.current = deckFinished;
+  if (deckSources.length) lastDeckKeys.current = deckSources.map((source) => source.key);
   const deckWaitingCopy = reviewBacklogLoading || refreshing || data === null
     ? "Looking for moments to review…"
     : reviewBacklog === null
@@ -942,6 +958,7 @@ export default function ReviewScreen() {
     useCallback(() => {
       for (const decision of takeReviewDeckEvidenceDecisions()) {
         const item = knownDeckItems.current.get(decision.itemId);
+        ownDeckDecisionKeys.current.add(reviewFocusKey("review", decision.itemId));
         recordDeckDecision(decision.logged ? (item ? deckLoggedBlock(item) : { color: theme.textSecondary, seconds: 0 }) : null);
       }
       // recordDeckDecision and deckLoggedBlock only read theme values and state setters.
@@ -991,8 +1008,10 @@ export default function ReviewScreen() {
     const source = deckSources.find((candidate) => candidate.key === key);
     if (!source) return;
     const card = deckCards.find((candidate) => candidate.key === key);
-    if (source.kind === "legacy_entry" || card?.skipDefers) return;
+    // The outgoing card's controls stay locked for the whole flight, deferral or decision.
     setFlyingDeckKey(key);
+    if (source.kind === "legacy_entry" || card?.skipDefers) return;
+    ownDeckDecisionKeys.current.add(key);
     const item = source.item;
     const logged = direction === 1;
     const block = deckLoggedBlock(item);
@@ -1027,6 +1046,7 @@ export default function ReviewScreen() {
     const held = deckHold.undo(current.token);
     if (!held) return;
     unrecordDeckDecision(held.logged ? { color: held.color, seconds: held.seconds } : null);
+    ownDeckDecisionKeys.current.delete(held.key);
     setDeckThrowRequest(null);
     if (flyingDeckKey === held.key) {
       // Undone mid-flight: the card comes back as a fresh card instead of finishing its flight.
@@ -1052,14 +1072,23 @@ export default function ReviewScreen() {
     const item = dataRef.current?.reviewItems.find(
       (candidate) => candidate.id === held.itemId && isOpenReviewItem(candidate)
     );
-    const undoCount = () => unrecordDeckDecision(held.logged ? { color: held.color, seconds: held.seconds } : null);
+    const undoCount = () => {
+      unrecordDeckDecision(held.logged ? { color: held.color, seconds: held.seconds } : null);
+      ownDeckDecisionKeys.current.delete(held.key);
+    };
     if (!item) {
+      setFlyingDeckKey((current) => (current === held.key ? null : current));
       // Resolved elsewhere while held: this visit did not decide it.
       undoCount();
       return;
     }
     setDeckKeyCommitting(held.key, true);
-    const settled = () => setDeckKeyCommitting(held.key, false);
+    // A flight cut short (Review left or the app backgrounded mid-throw) never reports its end, so
+    // the outcome retires it; otherwise a card restored by a failed save would stay locked.
+    const settled = () => {
+      setDeckKeyCommitting(held.key, false);
+      setFlyingDeckKey((current) => (current === held.key ? null : current));
+    };
     const failed = () => {
       settled();
       undoCount();
@@ -1100,7 +1129,6 @@ export default function ReviewScreen() {
   }, [deckHold]);
 
   function recordDeckDecision(logged: { color: string; seconds: number } | null) {
-    lastDeckDecisionAt.current = Date.now();
     setDeckVisit((current) => ({
       decided: current.decided + 1,
       logged: logged ? [...current.logged, logged] : current.logged
@@ -1318,6 +1346,8 @@ export default function ReviewScreen() {
     onFailed?: () => void
   ) {
     if (reviewMutations.current.has(item.id)) return false;
+    // Any other decision (More › Dismiss, an edit) saves a held card first, as a throw does.
+    deckHold.flush();
     const currentData = dataRef.current;
     if (!currentData) return false;
     if (!currentData.reviewItems.some((candidate) => candidate.id === item.id)) return false;
@@ -1437,6 +1467,7 @@ export default function ReviewScreen() {
     setEditSaving(true);
     try {
       if (editTarget.kind === "reviewItem") {
+        deckHold.flush();
         if (!patch.startedAt || !patch.stoppedAt) {
           Alert.alert("Edit", "Choose a start and end time before saving this suggestion.");
           return false;
@@ -1528,7 +1559,7 @@ export default function ReviewScreen() {
   // The Undo toast sits just above the round actions (or hangs under Back to Today once all is
   // framed, out of flow),
   // so it never covers the controls whatever the phone height or text size.
-  function renderDeckToast(placement: "actions" | "finished") {
+  function renderDeckToast(placement: "actions" | "under") {
     if (!heldDeckDecision) return null;
     return (
     <Reanimated.View
@@ -1536,7 +1567,7 @@ export default function ReviewScreen() {
       accessibilityLiveRegion="polite"
       entering={localPresenceEntering(reduceMotion, "rise")}
       exiting={localPresenceExiting(reduceMotion)}
-      style={[styles.historyDeleteUndoToast, styles.reviewDeckToast, placement === "finished" ? styles.reviewDeckToastUnderButton : null]}
+      style={[styles.historyDeleteUndoToast, styles.reviewDeckToast, placement === "under" ? styles.reviewDeckToastUnderButton : null]}
       testID="review-deck-toast"
     >
       <View style={styles.reviewDeckToastLabel}>
@@ -1621,8 +1652,8 @@ export default function ReviewScreen() {
           <ReviewDeckFinished
             blocks={deckVisit.logged.map((block) => block.color)}
             copy={deckFinishedCopy(deckVisit.logged, deckVisit.decided)}
-            celebrate={Date.now() - lastDeckDecisionAt.current < 8_000}
-            footer={renderDeckToast("finished")}
+            celebrate={celebrateDeckFinish.current}
+            footer={renderDeckToast("under")}
             onBack={() => router.back()}
             reduceMotion={reduceMotion}
             theme={theme}
@@ -1677,6 +1708,8 @@ export default function ReviewScreen() {
           </>
         ) : (
           <View style={styles.reviewDeckWaiting}>
+            {/* A card thrown last keeps its Undo here too, hanging out of flow below. */}
+            <View style={styles.reviewDeckWaitingContent}>
             <Text {...mobileTextProps("body")} accessibilityLiveRegion="polite" style={styles.muted}>
               {deckWaitingCopy}
             </Text>
@@ -1690,6 +1723,8 @@ export default function ReviewScreen() {
                 <Text {...mobileTextProps("control")} style={styles.secondaryButtonText}>Load more Review items</Text>
               </Pressable>
             ) : null}
+            {renderDeckToast("under")}
+            </View>
           </View>
         )}
       </ScrollView>
