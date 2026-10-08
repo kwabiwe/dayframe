@@ -149,11 +149,14 @@ describe("Review deck live Log as (Blocks parity step 5c-1)", () => {
     expect(layout).toContain('<Stack.Screen name="review" options={{ title: "Review", fullScreenGestureEnabled: false }} />');
     expect(screen).toContain("flyingKey={flyingDeckKey}");
     expect(deck).toContain("const topFlying = Boolean(flyingKey) && cards[0]?.key === flyingKey;");
-    expect(deck).toContain("const top = depth === 0 && !flying;");
+    expect(deck).toContain("const top = depth === 0 && !flying && !locked;");
+    expect(deck).toContain("locked={topFlying && !flying}");
+    expect(deck).toContain("const sizingCard = visible[topFlying ? 1 : 0] ?? visible[0];");
   });
 
   it("keeps the deck total steady while a decision syncs (5d)", () => {
-    expect(screen).toContain("if (exactDeckRemaining !== null) lastExactDeckTotal.current = deckVisit.decided + exactDeckRemaining;");
-    expect(screen).toContain("Math.max(lastExactDeckTotal.current - deckVisit.decided, deckRemaining)");
+    expect(screen).toContain("lastExactDeckTotal.current = { owner: deckOwnerKey, total: deckVisit.decided + exactDeckRemaining };");
+    expect(screen).toContain("if (lastExactDeckTotal.current && lastExactDeckTotal.current.owner !== deckOwnerKey) lastExactDeckTotal.current = null;");
+    expect(screen).toContain("reviewBacklog ? Math.max(0, reviewBacklog.globalCount - locallyDecidedCount) : Number.POSITIVE_INFINITY");
   });
 });

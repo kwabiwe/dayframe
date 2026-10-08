@@ -239,12 +239,15 @@ function ReviewDeckCardView({
   returnFrom,
   theme,
   throwRequest,
-  flying = false
+  flying = false,
+  locked = false
 }: {
   card: ReviewDeckCardModel;
   depth: number;
   /** Already thrown and on its way out: drawn above the rest, never touched or read. */
   flying?: boolean;
+  /** Moving up under a card still flying out: in place at once, interactive once the flight ends. */
+  locked?: boolean;
   /** Synthetic accessibility probe only: the top card reports its frames. */
   diagnostic?: MobileAccessibilityDiagnostic;
   onBodyHeight: (height: number) => void;
@@ -270,7 +273,7 @@ function ReviewDeckCardView({
       ? depth
       : withSpring(depth, { ...BLOCKS_SPRING.land, reduceMotion: ReduceMotion.Never });
   }, [animatedDepth, depth, reduceMotion]);
-  const top = depth === 0 && !flying;
+  const top = depth === 0 && !flying && !locked;
 
   // The top card's drag (Blocks parity step 5b): one Pan owner on the UI thread. It follows the
   // finger (40 % vertically, tilting dx/18°), arms past ±110 with one tick, and on release either
@@ -456,7 +459,7 @@ function ReviewDeckCardView({
               </Pill>
             </Pressable>
           ) : null}
-          {top ? (
+          {top || flying ? (
             <>
               <Reanimated.View
                 pointerEvents="none"
@@ -618,7 +621,9 @@ export function ReviewDeckStack({
   // Each card reports its own body; the top card's decides. A card promoted from beneath does not
   // lay out again, so its height must already be known.
   const [bodyHeights, setBodyHeights] = useState<Record<string, number>>({});
-  const bodyHeight = visible[0] ? bodyHeights[visible[0].key] ?? 0 : 0;
+  // Sized for the card taking the top, not the one flying out.
+  const sizingCard = visible[topFlying ? 1 : 0] ?? visible[0];
+  const bodyHeight = sizingCard ? bodyHeights[sizingCard.key] ?? 0 : 0;
   const pictureHeight = deckHeight && bodyHeight
     ? Math.max(PICTURE_MIN_HEIGHT, Math.min(PICTURE_HEIGHT, Math.floor(deckHeight - bodyHeight)))
     : PICTURE_HEIGHT;
@@ -637,6 +642,7 @@ export function ReviewDeckStack({
           depth={depth}
           diagnostic={depth === 0 && !flying ? diagnostic : undefined}
           flying={flying}
+          locked={topFlying && !flying}
           key={card.renderKey ?? card.key}
           onBodyHeight={(height) => {
             const rounded = Math.ceil(height);

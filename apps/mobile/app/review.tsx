@@ -918,7 +918,8 @@ export default function ReviewScreen() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [deckReturn, deckSources, flyingDeckKey, heldDeckDecision]);
   const deckCards = useMemo(
-    () => deckSources.slice(0, 3).map((source): ReviewDeckCardModel => (
+    // One more than the visible stack: while the top card flies out, the card behind moves in.
+    () => deckSources.slice(0, 4).map((source): ReviewDeckCardModel => (
       source.kind === "review"
         ? reviewDeckCardForItem(source.key, source.item, {
             categories: data?.categories,
@@ -964,14 +965,23 @@ export default function ReviewScreen() {
   const exactDeckRemaining = deckBacklogComplete
     ? deckRemaining
     : reviewCountIsExact ? Math.max(totalNeedsReview - locallyDecidedCount, deckRemaining) : null;
-  const lastExactDeckTotal = useRef<number | null>(null);
-  if (exactDeckRemaining !== null) lastExactDeckTotal.current = deckVisit.decided + exactDeckRemaining;
+  // Scoped to the account; a fresher, smaller server count (items resolved elsewhere) still wins.
+  const deckOwnerKey = data ? `${data.workspace.id}:${data.user.id}` : null;
+  const lastExactDeckTotal = useRef<{ owner: string; total: number } | null>(null);
+  if (lastExactDeckTotal.current && lastExactDeckTotal.current.owner !== deckOwnerKey) lastExactDeckTotal.current = null;
+  if (exactDeckRemaining !== null && deckOwnerKey) {
+    lastExactDeckTotal.current = { owner: deckOwnerKey, total: deckVisit.decided + exactDeckRemaining };
+  }
+  const frozenDeckRemaining = lastExactDeckTotal.current
+    ? Math.min(
+        lastExactDeckTotal.current.total - deckVisit.decided,
+        reviewBacklog ? Math.max(0, reviewBacklog.globalCount - locallyDecidedCount) : Number.POSITIVE_INFINITY
+      )
+    : null;
   const deckPosition = reviewDeckPosition({
     decided: deckVisit.decided,
-    remaining: exactDeckRemaining ?? (lastExactDeckTotal.current !== null
-      ? Math.max(lastExactDeckTotal.current - deckVisit.decided, deckRemaining)
-      : deckRemaining),
-    exact: exactDeckRemaining !== null || lastExactDeckTotal.current !== null
+    remaining: exactDeckRemaining ?? (frozenDeckRemaining !== null ? Math.max(frozenDeckRemaining, deckRemaining) : deckRemaining),
+    exact: exactDeckRemaining !== null || frozenDeckRemaining !== null
   });
   // "All framed" only once a verified read says nothing else is open; a cached-only deck (offline,
   // no backlog read yet) never claims completeness.
