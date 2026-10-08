@@ -703,17 +703,29 @@ export default function SettingsScreen() {
     : null;
   const syncNeedsAttention = Boolean(
     deviceAttentionStatus ||
-    queueDiagnostics.failedCount > 0 ||
+    queueDiagnostics.permanentFailedCount > 0 ||
     reviewSyncDiagnostics?.needsAttentionCount ||
     timeEntrySyncDiagnostics?.quarantinedCount ||
     timeEntrySyncDiagnostics?.deviceQuarantinedCount
   );
+  // Sync help: a short note about the page's own last action (never cached), cleared whenever the
+  // page opens or what it lists changes, so it can't contradict the status above it.
+  const [syncHelpNote, setSyncHelpNote] = useState<string | null>(null);
+  const syncHelpIssueKey = [
+    ...timerStopSyncIssues.map((issue) => issue.clientEventId),
+    ...timeEntrySyncIssues.map((issue) => issue.clientCommandId),
+    ...reviewSyncIssues.map((issue) => `${issue.clientMutationId}:${issue.resolutionStatus}`),
+    `failed:${queueDiagnostics.permanentFailedCount}`
+  ].join("|");
+  useEffect(() => {
+    setSyncHelpNote(null);
+  }, [settingsSection, syncHelpIssueKey]);
   // Sync help: one plain status line, then each change that needs a choice.
   const syncHelpIssueCount =
     timerStopSyncIssues.length +
     timeEntrySyncIssues.length +
     reviewSyncIssues.length +
-    (queueDiagnostics.failedCount > 0 ? 1 : 0) +
+    (queueDiagnostics.permanentFailedCount > 0 ? 1 : 0) +
     ((timeEntrySyncDiagnostics?.quarantinedCount ?? 0) > 0 || (timeEntrySyncDiagnostics?.deviceQuarantinedCount ?? 0) > 0 ? 1 : 0);
   const syncWaitingCount =
     queueDiagnostics.queuedCount +
@@ -1155,7 +1167,8 @@ export default function SettingsScreen() {
             entry: (issue.targetEntryId ?? issue.optimisticEntryId ?? "").slice(0, 8) || null,
             command: issue.clientCommandId.slice(0, 8),
             statusCode: issue.lastStatusCode ?? null,
-            error: issue.lastError ?? null,
+            // Bounded: enough to tell a 404 from a validation message, never a long free-text body.
+            error: issue.lastError ? issue.lastError.slice(0, 120) : null,
             updatedAt: issue.updatedAt
           }))
         },
@@ -2198,9 +2211,7 @@ export default function SettingsScreen() {
                 <SettingsBlockRow
                   control={<SettingsStatusDot attention={syncNeedsAttention} theme={theme} />}
                   divider={false}
-                  // The outcome of this page's own actions (Try sending again, Check again, Retry…)
-                  // shows here until the next one.
-                  subtitle={syncStatusMessage ?? syncHelpDetail}
+                  subtitle={syncHelpNote || syncHelpDetail}
                   testID="sync-help-status"
                   theme={theme}
                   title={syncHelpTitle}
@@ -2254,7 +2265,7 @@ export default function SettingsScreen() {
                         label="Check again"
                         onPress={() => void synchroniseReviewMutations({ force: true, clientMutationId: issue.clientMutationId })
                           .then(refreshReviewDiagnostics)
-                          .catch(() => setSyncStatusMessageAndCache("Couldn't check yet. Your choice is kept."))}
+                          .catch(() => setSyncHelpNote("Couldn't check yet. Your choice is kept."))}
                         theme={theme}
                       />
                       {issue.resolutionStatus !== "resolution_unknown" ? (
@@ -2262,14 +2273,14 @@ export default function SettingsScreen() {
                       ) : null}
                     </SettingsIssueRow>
                   ))}
-                  {queueDiagnostics.failedCount > 0 ? (
+                  {queueDiagnostics.permanentFailedCount > 0 ? (
                     <SettingsIssueRow
-                      detail={queueDiagnostics.permanentFailedCount > 0
-                        ? `${queueDiagnostics.failedCount} ${queueDiagnostics.failedCount === 1 ? "item" : "items"} from this iPhone couldn't be sent; ${queueDiagnostics.permanentFailedCount} can't be accepted.`
-                        : `${queueDiagnostics.failedCount} ${queueDiagnostics.failedCount === 1 ? "item" : "items"} from this iPhone couldn't be sent yet. Dayframe tries again on its own.`}
+                      // Items still retrying on their own are only "waiting" (background, AGENTS rule);
+                      // this row is for items the server will not accept as they are.
+                      detail={`${queueDiagnostics.permanentFailedCount} ${queueDiagnostics.permanentFailedCount === 1 ? "item" : "items"} from this iPhone can't be accepted as ${queueDiagnostics.permanentFailedCount === 1 ? "it is" : "they are"}. Updating Dayframe and retrying may help; clearing removes ${queueDiagnostics.permanentFailedCount === 1 ? "it" : "them"} from this iPhone.`}
                       divider={timerStopSyncIssues.length + timeEntrySyncIssues.length + reviewSyncIssues.length > 0}
                       theme={theme}
-                      title={queueDiagnostics.permanentFailedCount > 0 ? "Couldn't be sent" : "Waiting to send"}
+                      title="Couldn't be sent"
                     >
                       <SettingsPillButton accessibilityLabel="Retry sending items from this iPhone" disabled={!canRetryFailed} label="Retry" onPress={retryFailedAndReload} theme={theme} />
                       <SettingsPillButton accessibilityLabel="Clear items that can't be sent" danger disabled={!canClearFailed} label="Clear" onPress={confirmClearFailedQueue} theme={theme} />
@@ -2278,7 +2289,7 @@ export default function SettingsScreen() {
                   {(timeEntrySyncDiagnostics?.quarantinedCount ?? 0) > 0 || (timeEntrySyncDiagnostics?.deviceQuarantinedCount ?? 0) > 0 ? (
                     <SettingsIssueRow
                       detail="Some saved changes on this iPhone couldn't be read, so Dayframe set them aside. Clearing them removes only those unreadable copies."
-                      divider={timerStopSyncIssues.length + timeEntrySyncIssues.length + reviewSyncIssues.length + (queueDiagnostics.failedCount > 0 ? 1 : 0) > 0}
+                      divider={timerStopSyncIssues.length + timeEntrySyncIssues.length + reviewSyncIssues.length + (queueDiagnostics.permanentFailedCount > 0 ? 1 : 0) > 0}
                       theme={theme}
                       title="Unreadable saved changes"
                     >
@@ -2297,7 +2308,9 @@ export default function SettingsScreen() {
                 <SettingsBlockRow
                   accessibilityHint="Sends anything waiting on this iPhone and refreshes"
                   divider={false}
-                  onPress={() => void syncAndReload()}
+                  onPress={() => void syncAndReload().then((result) => {
+                    setSyncHelpNote(result ? null : "Couldn't reach Dayframe. Your changes are kept and send on their own.");
+                  })}
                   subtitle={syncingQueue ? "Sending…" : "Safe to do any time"}
                   testID="sync-help-send"
                   theme={theme}
