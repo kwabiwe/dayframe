@@ -128,3 +128,11 @@ export async function runReviewBulkSkip<T>(
   }
   return outcome;
 }
+
+/** Whether the loaded data still belongs to the account that held a bulk skip. */
+export function reviewBulkSkipOwnerMatches(
+  owner: { workspaceId: string; userId: string },
+  data: { workspace: { id: string }; user: { id: string } } | null | undefined
+) {
+  return Boolean(data && data.workspace.id === owner.workspaceId && data.user.id === owner.userId);
+}

@@ -44,6 +44,7 @@ import {
 import {
   reviewBulkSkipCandidates,
   reviewBulkSkipConfirmation,
+  reviewBulkSkipOwnerMatches,
   reviewBulkSkipToast,
   runReviewBulkSkip,
   type ReviewBulkSkipScope
@@ -245,6 +246,8 @@ export default function ReviewScreen() {
     onCommit: (held) => commitHeldDeckDecisionRef.current(held)
   })).current;
   const deckTopKeyRef = useRef<string | null>(null);
+  // Open items the deck has shown: Undo, a failed save or a Location evidence decision use them.
+  const knownDeckItems = useRef(new Map<string, MobileReviewItem>());
   const [reviewMenuState, setReviewMenuState] = useState(CLOSED_REVIEW_MENU_STATE);
   const [reviewAvailabilityMessage, setReviewAvailabilityMessage] = useState<string | null>(null);
   const [focusedLegacyEntry, setFocusedLegacyEntry] = useState<MobileTimeEntry | null>(null);
@@ -334,6 +337,8 @@ export default function ReviewScreen() {
       reviewBacklogRead.current?.controller.abort();
       reviewBacklogRead.current = null;
       reviewBacklogRef.current = null;
+      // Cards the deck remembers (for Undo or a failed save) belong to the previous account.
+      knownDeckItems.current.clear();
       setReviewBacklog(null);
       setReviewBacklogLoading(false);
     }
@@ -1025,7 +1030,6 @@ export default function ReviewScreen() {
   const topDeckSkipDefers = topDeckSource?.kind === "legacy_entry" || topDeckControlsDisabled || (deckCards[0]?.skipDefers ?? false);
 
   // Decisions made in Location evidence (Edit before logging, D7) count toward this visit.
-  const knownDeckItems = useRef(new Map<string, MobileReviewItem>());
   useEffect(() => {
     for (const item of openReviewItems) knownDeckItems.current.set(item.id, item);
   }, [openReviewItems]);
@@ -1275,10 +1279,13 @@ export default function ReviewScreen() {
       ownDeckDecisionKeys.current.add(reviewFocusKey("review", item.id));
     }
     setDeckVisit((current) => ({ ...current, decided: current.decided + items.length }));
+    const loaded = dataRef.current;
+    if (!loaded) return;
     deckTokenSequence.current += 1;
     deckHold.hold({
       kind: "batch",
       token: deckTokenSequence.current,
+      owner: { workspaceId: loaded.workspace.id, userId: loaded.user.id },
       items: items.map((item) => ({
         key: reviewFocusKey("review", item.id),
         itemId: item.id,
@@ -1298,6 +1305,8 @@ export default function ReviewScreen() {
 
   function undoHeldBulkSkip(held: ReviewDeckHeldBatch) {
     forgetBulkDecisions(held.items.map((item) => item.key));
+    // Another account signed in while it was held: nothing of the old account comes back.
+    if (!reviewBulkSkipOwnerMatches(held.owner, dataRef.current)) return;
     for (const item of held.items) restorePagedOutDeckItem(item.itemId);
     playHaptic("undoRestore");
     AccessibilityInfo.announceForAccessibility(
@@ -1309,15 +1318,12 @@ export default function ReviewScreen() {
   // other through the durable outbox (runReviewBulkSkip re-checks each right before it is written
   // and stops if the account changes), then the deck is projected and synced once.
   function commitHeldBulkSkip(held: ReviewDeckHeldBatch) {
-    const loaded = dataRef.current;
-    if (!loaded) {
+    // Fenced to the account that held it (not whichever is loaded when the hold ends).
+    const ownerMatches = () => reviewBulkSkipOwnerMatches(held.owner, dataRef.current);
+    if (!ownerMatches()) {
       forgetBulkDecisions(held.items.map((entry) => entry.key));
       return;
     }
-    const owner = { workspaceId: loaded.workspace.id, userId: loaded.user.id };
-    const ownerMatches = () => (
-      dataRef.current?.workspace.id === owner.workspaceId && dataRef.current?.user.id === owner.userId
-    );
     // The batch claims its items, so no single decision can start for them while it saves.
     const claim = -held.token;
     const claimed = held.items.filter((entry) => !reviewMutations.current.has(entry.itemId));

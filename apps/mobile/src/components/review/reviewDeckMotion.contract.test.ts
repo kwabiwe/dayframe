@@ -171,6 +171,12 @@ describe("Review deck live Log as (Blocks parity step 5c-1)", () => {
     // account that held it; nothing is put back once the account changed.
     expect(screen).toContain("await runReviewBulkSkip<MobileReviewItem>(claimed, {");
     expect(screen).toMatch(/\/\/ Nothing is put back once the account has changed\.\s*if \(!ownerMatches\(\)\) return;/);
+    // The batch is bound to the account that held it: the hold end and Undo are both fenced, and
+    // remembered cards are forgotten when another account's data arrives.
+    expect(screen).toContain("owner: { workspaceId: loaded.workspace.id, userId: loaded.user.id },");
+    expect(screen).toContain("const ownerMatches = () => reviewBulkSkipOwnerMatches(held.owner, dataRef.current);");
+    expect(screen).toMatch(/if \(!reviewBulkSkipOwnerMatches\(held\.owner, dataRef\.current\)\) return;\s*for \(const item of held\.items\) restorePagedOutDeckItem/);
+    expect(screen).toMatch(/reviewBacklogRef\.current = null;\s*\/\/ Cards the deck remembers[^\n]*\n\s*knownDeckItems\.current\.clear\(\);/);
     // A single decision whose flush saved the same item through a batch stops there.
     expect(screen).toMatch(/deckHold\.flush\(\);\s*\/\/ That flush may have saved this very item[^\n]*\n\s*if \(reviewMutations\.current\.has\(item\.id\)\) return false;/);
     // The longer menu stays inside the screen with a visible Cancel.

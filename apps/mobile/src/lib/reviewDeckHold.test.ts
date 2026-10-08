@@ -98,6 +98,7 @@ describe("review deck hold with a bulk skip (5f)", () => {
   const batch = (token: number) => ({
     kind: "batch" as const,
     token,
+    owner: { workspaceId: "w1", userId: "u1" },
     items: [
       { key: "review:a", itemId: "a", proposal: "[]" },
       { key: "review:b", itemId: "b", proposal: "[]" }

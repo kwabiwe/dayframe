@@ -26,6 +26,8 @@ export type ReviewDeckHeldDecision = {
 export type ReviewDeckHeldBatch = {
   kind: "batch";
   token: number;
+  /** The account that held it: nothing is saved or put back for any other. */
+  owner: { workspaceId: string; userId: string };
   items: { key: string; itemId: string; proposal: string }[];
 };
 

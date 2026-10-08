@@ -3,6 +3,7 @@ import {
   REVIEW_BULK_SKIP_AGE_MS,
   reviewBulkSkipCandidates,
   reviewBulkSkipConfirmation,
+  reviewBulkSkipOwnerMatches,
   reviewBulkSkipToast
 } from "./reviewBulkSkip";
 
@@ -55,5 +56,15 @@ describe("reviewBulkSkipConfirmation", () => {
   it("names the batch on the Undo toast", () => {
     expect(reviewBulkSkipToast(1)).toBe("Skipped 1 moment");
     expect(reviewBulkSkipToast(160)).toBe("Skipped 160 moments");
+  });
+});
+
+describe("reviewBulkSkipOwnerMatches", () => {
+  const owner = { workspaceId: "w1", userId: "u1" };
+  it("matches only the account that held the batch", () => {
+    expect(reviewBulkSkipOwnerMatches(owner, { workspace: { id: "w1" }, user: { id: "u1" } })).toBe(true);
+    expect(reviewBulkSkipOwnerMatches(owner, { workspace: { id: "w2" }, user: { id: "u1" } })).toBe(false);
+    expect(reviewBulkSkipOwnerMatches(owner, { workspace: { id: "w1" }, user: { id: "u2" } })).toBe(false);
+    expect(reviewBulkSkipOwnerMatches(owner, null)).toBe(false);
   });
 });
