@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { createReviewDeckHold, reviewDeckProposalSignature, type ReviewDeckHeldDecision } from "./reviewDeckHold";
 
 function decision(token: number, key = `review:${token}`): ReviewDeckHeldDecision {
-  return { token, key, itemId: key, logged: token % 2 === 1, direction: token % 2 === 1 ? 1 : -1, title: key, color: "#000000", seconds: 60, proposal: "[]" };
+  return { kind: "single", token, key, itemId: key, logged: token % 2 === 1, direction: token % 2 === 1 ? 1 : -1, title: key, color: "#000000", seconds: 60, proposal: "[]" };
 }
 
 function harness() {

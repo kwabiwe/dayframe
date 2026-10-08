@@ -5,6 +5,7 @@
 export const REVIEW_DECK_UNDO_MS = 4_800;
 
 export type ReviewDeckHeldDecision = {
+  kind: "single";
   token: number;
   key: string;
   itemId: string;
@@ -17,6 +18,24 @@ export type ReviewDeckHeldDecision = {
   /** What the user saw when they decided (reviewDeckProposalSignature); a change cancels it. */
   proposal: string;
 };
+
+/**
+ * Step 5f: "Skip older than 7 days" / "Skip all" hold every chosen card as one decision with one
+ * Undo. Each item keeps the proposal the user confirmed, so one changed by a refresh is not saved.
+ */
+export type ReviewDeckHeldBatch = {
+  kind: "batch";
+  token: number;
+  items: { key: string; itemId: string; proposal: string }[];
+};
+
+export type ReviewDeckHeld = ReviewDeckHeldDecision | ReviewDeckHeldBatch;
+
+/** The deck keys a hold keeps out of the deck. */
+export function reviewDeckHeldKeys(held: ReviewDeckHeld | null): string[] {
+  if (!held) return [];
+  return held.kind === "batch" ? held.items.map((item) => item.key) : [held.key];
+}
 
 /**
  * The parts of a suggestion a decision is about. If a refresh changes any of them while the
@@ -49,11 +68,11 @@ export function createReviewDeckHold({
 }: {
   clearTimer?: (handle: TimerHandle) => void;
   holdMs?: number;
-  onChange: (held: ReviewDeckHeldDecision | null) => void;
-  onCommit: (held: ReviewDeckHeldDecision) => void;
+  onChange: (held: ReviewDeckHeld | null) => void;
+  onCommit: (held: ReviewDeckHeld) => void;
   setTimer?: (callback: () => void, delayMs: number) => TimerHandle;
 }) {
-  let held: ReviewDeckHeldDecision | null = null;
+  let held: ReviewDeckHeld | null = null;
   let timer: TimerHandle | null = null;
 
   function release() {
@@ -76,7 +95,7 @@ export function createReviewDeckHold({
     current: () => held,
     flush,
     /** Holds a new decision; one toast at a time, so a decision already held is saved first. */
-    hold(decision: ReviewDeckHeldDecision) {
+    hold(decision: ReviewDeckHeld) {
       const previous = release();
       if (previous) onCommit(previous);
       held = decision;

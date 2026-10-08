@@ -280,3 +280,12 @@ Block pull-to-refresh:
 - Async outcome: nothing reaches the outbox until the hold ends, so Undo needs no server contract; a saved card stays out of the deck until its local projection drops it; a failed local save keeps the card (alert) and takes the decision out of "N of M".
 - Accessibility: with Reduce Motion the throw reports at once (the card fades), a short release snaps home, Undo places the card without flying and "All framed" appears in place. The buttons remain the VoiceOver path for Log it and Skip, and each decision is announced with Undo available.
 
+## Review deck bulk skip (Blocks parity step 5f)
+
+- Trigger: More › Review all › "Skip older than 7 days" or "Skip all" on the top card, confirmed in one system alert that states the count.
+- Owner: the same `reviewDeckHold.ts` hold as a thrown card, holding one batch decision (`kind: "batch"`); the deck owns no new animation. While older backlog pages are read before the alert, the nav count slot reads "Counting…" (no layout moves, no spinner).
+- Entrance/update/exit: on confirm every covered card leaves the deck at once with the deck's presence fade (140 ms), the first card not covered lands one step up with `land` (or "All framed" / the waiting copy appears when nothing is left), the success-neutral skip haptic plays and the inverse toast "Skipped N moments" (neutral swatch, 44-point Undo) rises in for 4.8 s in the same place as a single card's toast. Undo drops the hold, the cards fade back in at their natural places (no flight: they were never thrown) with the undo haptic.
+- Interruption: one toast at a time, so a throw, More › Dismiss, a saved edit or another bulk skip saves a held batch first, and a bulk skip saves a held card first; leaving Review, losing focus or backgrounding saves it at once; a moment a refresh changed (time, activity, place or name) or already saving while held is not saved and comes back; a moment resolved elsewhere is dropped quietly; only moments confirmed in the alert and still skippable when it is accepted are held.
+- Async outcome: nothing reaches the outbox until the hold ends; then each moment is written to the durable outbox one after another, the deck is projected once and synced once; a moment whose local save fails comes back as a fresh card with one alert naming the count.
+- Accessibility: the menu rows sit under a "Review all" header with hints; counting, the batch, Undo ("N moments are back") and any unsaved moments are announced. Reduce Motion keeps the same opacity-only presence fades.
+

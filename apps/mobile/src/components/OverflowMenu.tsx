@@ -30,6 +30,7 @@ type RenderedPresentation = {
 type PresentationPhase = "idle" | "presenting" | "open" | "closing" | "dismissing";
 
 export function OverflowMenu({
+  bulkSkip = false,
   disabled,
   instanceId,
   onClose,
@@ -38,6 +39,8 @@ export function OverflowMenu({
   title,
   visible
 }: {
+  /** Shows the "Review all" bulk skips (the Review deck's card menu). */
+  bulkSkip?: boolean;
   disabled: boolean;
   instanceId: string | null;
   onClose: () => void;
@@ -270,6 +273,35 @@ export function OverflowMenu({
           >
             <Text style={styles.overflowMenuDangerText}>Dismiss suggestion</Text>
           </Pressable>
+          {bulkSkip ? (
+            <>
+              <View style={styles.overflowMenuDivider} />
+              <Text accessibilityRole="header" style={styles.overflowMenuSectionLabel}>Review all</Text>
+              <Pressable
+                accessibilityHint="Asks before skipping every moment older than 7 days."
+                accessibilityLabel="Skip older than 7 days"
+                accessibilityRole="button"
+                disabled={disabled || !interactive}
+                style={pressable(styles.overflowMenuRow, styles.buttonPressed)}
+                onPress={() => select("skip_older")}
+                testID="review-menu-skip-older"
+              >
+                <Text style={styles.overflowMenuRowText}>Skip older than 7 days</Text>
+              </Pressable>
+              <View style={styles.overflowMenuDivider} />
+              <Pressable
+                accessibilityHint="Asks before skipping every moment waiting for review."
+                accessibilityLabel="Skip all"
+                accessibilityRole="button"
+                disabled={disabled || !interactive}
+                style={pressable(styles.overflowMenuRow, styles.buttonPressed)}
+                onPress={() => select("skip_all")}
+                testID="review-menu-skip-all"
+              >
+                <Text style={styles.overflowMenuRowText}>Skip all</Text>
+              </Pressable>
+            </>
+          ) : null}
         </Reanimated.View>
       </View>
     </Modal>
