@@ -1011,7 +1011,11 @@ export default function ReviewScreen() {
     const card = deckCards.find((candidate) => candidate.key === key);
     // The outgoing card's controls stay locked for the whole flight, deferral or decision.
     setFlyingDeckKey(key);
-    if (source.kind === "legacy_entry" || card?.skipDefers) return;
+    if (source.kind === "legacy_entry" || card?.skipDefers) {
+      // Moving a card behind the rest is another card decided: a held one is saved now.
+      deckHold.flush();
+      return;
+    }
     ownDeckDecisionKeys.current.add(key);
     const item = source.item;
     const logged = direction === 1;
@@ -1074,9 +1078,13 @@ export default function ReviewScreen() {
   }
 
   commitHeldDeckDecisionRef.current = (held) => {
-    const item = dataRef.current?.reviewItems.find(
-      (candidate) => candidate.id === held.itemId && isOpenReviewItem(candidate)
-    );
+    const listedItem = dataRef.current?.reviewItems.find((candidate) => candidate.id === held.itemId);
+    // Missing from the loaded list is not "resolved": a capped refresh may only have paged it out.
+    const unlisted = !listedItem;
+    const knownItem = knownDeckItems.current.get(held.itemId);
+    const item = listedItem
+      ? (isOpenReviewItem(listedItem) ? listedItem : undefined)
+      : knownItem && isOpenReviewItem(knownItem) ? knownItem : undefined;
     const undoCount = () => {
       unrecordDeckDecision(held.logged ? { color: held.color, seconds: held.seconds } : null);
       ownDeckDecisionKeys.current.delete(held.key);
@@ -1110,8 +1118,8 @@ export default function ReviewScreen() {
       undoCount();
     };
     const started = held.logged
-      ? resolveItem(item, hasV2LocationEvidence(item) ? { action: "confirm" } : { action: "accept" }, "Logged. Saved on this iPhone. Waiting to sync.", settled, failed)
-      : resolveItem(item, hasV2LocationEvidence(item) ? { action: "ignore_once_location" } : { action: "ignore_once" }, "Skipped. Saved on this iPhone. Waiting to sync.", settled, failed);
+      ? resolveItem(item, hasV2LocationEvidence(item) ? { action: "confirm" } : { action: "accept" }, "Logged. Saved on this iPhone. Waiting to sync.", settled, failed, { unlisted })
+      : resolveItem(item, hasV2LocationEvidence(item) ? { action: "ignore_once_location" } : { action: "ignore_once" }, "Skipped. Saved on this iPhone. Waiting to sync.", settled, failed, { unlisted });
     // Not started (a change for this item is already saving, or the item has gone): the card is
     // not this visit's decision.
     if (!started) failed();
@@ -1370,14 +1378,19 @@ export default function ReviewScreen() {
     mutation: ReviewMutation,
     successAnnouncement: string,
     onCommitted?: () => void,
-    onFailed?: () => void
+    onFailed?: () => void,
+    options: { unlisted?: boolean } = {}
   ) {
     if (reviewMutations.current.has(item.id)) return false;
     // Any other decision (More › Dismiss, an edit) saves a held card first, as a throw does.
     deckHold.flush();
-    const currentData = dataRef.current;
-    if (!currentData) return false;
-    if (!currentData.reviewItems.some((candidate) => candidate.id === item.id)) return false;
+    const loadedData = dataRef.current;
+    if (!loadedData) return false;
+    const listed = loadedData.reviewItems.some((candidate) => candidate.id === item.id);
+    if (!listed && !options.unlisted) return false;
+    // A held card whose item a capped refresh paged out (still open, just not in the first page)
+    // is saved from the copy the deck showed.
+    const currentData = listed ? loadedData : { ...loadedData, reviewItems: [...loadedData.reviewItems, item] };
 
     reviewMutations.current.set(item.id, 1);
     const clientMutationId = createReviewClientMutationId();
@@ -1491,10 +1504,11 @@ export default function ReviewScreen() {
 
   async function saveEdit(entryId: string, patch: TimeEntryUpdatePatch) {
     if (!editTarget) return false;
+    // Saving any edit (a Review item or a legacy entry) saves a held card first.
+    deckHold.flush();
     setEditSaving(true);
     try {
       if (editTarget.kind === "reviewItem") {
-        deckHold.flush();
         if (!patch.startedAt || !patch.stoppedAt) {
           Alert.alert("Edit", "Choose a start and end time before saving this suggestion.");
           return false;

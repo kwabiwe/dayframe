@@ -35,6 +35,9 @@ import {
   type ReviewDeckSourceIcon
 } from "@/lib/reviewDeck";
 
+/** Height kept free under the last control for the Undo toast (52-point toast, 12 gap, slack for large text). */
+export const REVIEW_DECK_TOAST_RESERVE = 84;
+
 export type ReviewDeckDirection = 1 | -1;
 /** A Log it / Skip button press asks the top card to fly out as if thrown. */
 export type ReviewDeckThrowRequest = { key: string; direction: ReviewDeckDirection; token: number };
@@ -348,7 +351,8 @@ function ReviewDeckCardView({
     transform: [
       { translateX: dragX.value },
       { translateY: animatedDepth.value * REVIEW_DECK_DEPTH_OFFSET + dragY.value * REVIEW_DECK_VERTICAL_FOLLOW },
-      { rotate: `${dragX.value / REVIEW_DECK_TILT_DIVISOR}deg` },
+      // Reduce Motion: the card follows the finger without tilting.
+      { rotate: reduceMotion ? "0deg" : `${dragX.value / REVIEW_DECK_TILT_DIVISOR}deg` },
       { scale: 1 - animatedDepth.value * REVIEW_DECK_DEPTH_SCALE }
     ]
   }));
@@ -864,6 +868,9 @@ const deckStyles = StyleSheet.create({
   finishedActions: {
     alignItems: "center",
     alignSelf: "stretch",
+    // Room for the Undo toast that hangs below, always reserved so it stays inside the scroll
+    // area and its exit moves nothing.
+    paddingBottom: REVIEW_DECK_TOAST_RESERVE,
     position: "relative"
   },
   finishedButton: {

@@ -952,11 +952,10 @@ function createStyles(theme: MobileTheme) {
     },
     // Under Back to Today once all is framed.
     // Under Back to Today, out of flow: the summary stays readable and nothing moves on timeout.
+    // Sits in the space its parent reserves below the last control (paddingBottom 84).
     reviewDeckToastUnderButton: {
-      bottom: undefined,
-      marginBottom: 0,
-      marginTop: 12,
-      top: "100%"
+      bottom: 0,
+      marginBottom: 0
     },
     reviewDeckToastLabel: {
       alignItems: "center",
@@ -1020,6 +1019,8 @@ function createStyles(theme: MobileTheme) {
       alignItems: "center",
       alignSelf: "stretch",
       gap: 12,
+      // Room for the Undo toast hanging below (REVIEW_DECK_TOAST_RESERVE in ReviewDeck.tsx).
+      paddingBottom: 84,
       position: "relative"
     },
     reviewMetaLine: {

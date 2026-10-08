@@ -35,9 +35,10 @@ describe("Review deck motion contract (Blocks parity step 5b)", () => {
   it("keeps a saved decision out of the deck until its projection lands (r2 A)", () => {
     expect(screen).toContain("committingDeckKeys.has(key)");
     expect(screen).toContain("setDeckKeyCommitting(held.key, true);");
-    expect(screen).toMatch(/const started = held\.logged[\s\S]*settled, failed\)/);
+    expect(screen).toMatch(/const started = held\.logged[\s\S]*settled, failed, \{ unlisted \}\)/);
     expect(screen).toContain("if (!started) failed();");
     expect(screen).toContain("if (reviewMutations.current.has(item.id)) return false;");
+    expect(screen).toContain('Waiting to sync.", settled, failed, { unlisted })');
   });
 
   it("does not count the held card in flight toward \"N of M\" (r2 B)", () => {
@@ -72,11 +73,11 @@ describe("Review deck motion contract (Blocks parity step 5b)", () => {
   it("retires a cut-short flight on the save outcome and flushes a held card on any decision (r3 3, 4)", () => {
     expect(screen).toMatch(/const settled = \(\) => \{\s*setDeckKeyCommitting\(held\.key, false\);\s*setFlyingDeckKey/);
     expect(screen).toMatch(/if \(reviewMutations\.current\.has\(item\.id\)\) return false;\s*\/\/[^\n]*\n\s*deckHold\.flush\(\);/);
-    expect(screen).toMatch(/if \(editTarget\.kind === "reviewItem"\) \{\s*deckHold\.flush\(\);/);
+    expect(screen).toMatch(/if \(!editTarget\) return false;\s*\/\/[^\n]*\n\s*deckHold\.flush\(\);/);
   });
 
   it("locks a deferred card's controls during its flight too (r3 6)", () => {
-    expect(screen).toMatch(/setFlyingDeckKey\(key\);\s*if \(source\.kind === "legacy_entry" \|\| card\?\.skipDefers\) return;/);
+    expect(screen).toMatch(/setFlyingDeckKey\(key\);\s*if \(source\.kind === "legacy_entry" \|\| card\?\.skipDefers\) \{\s*\/\/[^\n]*\n\s*deckHold\.flush\(\);/);
   });
 
   it("restores a failed save as a fresh card and never saves a changed proposal (r4 1, 2)", () => {
@@ -93,5 +94,12 @@ describe("Review deck motion contract (Blocks parity step 5b)", () => {
 
   it("counts Dismiss and a saved edit as this visit's own decisions for the celebration (r4 5)", () => {
     expect(screen.match(/ownDeckDecisionKeys\.current\.add\(reviewFocusKey\("review", (item|editTarget\.item)\.id\)\)/g)?.length).toBe(2);
+  });
+
+  it("saves a paged-out held card, keeps Undo reachable and drops the tilt with Reduce Motion (r5)", () => {
+    expect(screen).toContain("const unlisted = !listedItem;");
+    expect(screen).toContain("if (!listed && !options.unlisted) return false;");
+    expect(deck).toContain("paddingBottom: REVIEW_DECK_TOAST_RESERVE");
+    expect(deck).toContain('rotate: reduceMotion ? "0deg"');
   });
 });
