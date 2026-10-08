@@ -34,6 +34,8 @@ import {
   type ReviewDeckThrowRequest
 } from "@/components/review/ReviewDeck";
 import { createReviewDeckHold, reviewDeckProposalSignature, type ReviewDeckHeldDecision } from "@/lib/reviewDeckHold";
+import { ActivityPickerSheet } from "@/components/ActivityPickerSheet";
+import { recentActivityIds } from "@/lib/activityChoice";
 import { playHaptic } from "@/lib/haptics";
 import {
   OverflowMenu,
@@ -203,6 +205,8 @@ export default function ReviewScreen() {
   const deckWasFinished = useRef(false);
   const celebrateDeckFinish = useRef(false);
   const deckTokenSequence = useRef(0);
+  const [logAsDrafts, setLogAsDrafts] = useState<ReadonlyMap<string, ReviewLogAsDraft>>(new Map());
+  const [logAsPickerItemId, setLogAsPickerItemId] = useState<string | null>(null);
   const commitHeldDeckDecisionRef = useRef<(held: ReviewDeckHeldDecision) => void>(() => undefined);
   const deckHold = useRef(createReviewDeckHold({
     onChange: setHeldDeckDecision,
@@ -250,6 +254,7 @@ export default function ReviewScreen() {
   const navigation = useNavigation<NativeStackNavigationProp<ReactNavigation.RootParamList>>();
   const peerEntries = useMemo(() => reviewPeerEntries(data), [data]);
   const overlapCounts = useMemo(() => prepareReviewOverlapCounts(data?.reviewItems ?? [], peerEntries, Date.now()), [data, peerEntries]);
+  const recentLogAsActivityIds = useMemo(() => recentActivityIds(peerEntries), [peerEntries]);
   connectivityRef.current = { isOffline, isOnline, reconnectEpoch };
 
   const applyReviewMenuEvent = useCallback((event: ReviewMenuEvent) => {
@@ -894,6 +899,8 @@ export default function ReviewScreen() {
     () => deckSources.slice(0, 3).map((source): ReviewDeckCardModel => (
       source.kind === "review"
         ? reviewDeckCardForItem(source.key, source.item, {
+            categories: data?.categories,
+            draft: logAsDrafts.get(source.item.id),
             menuOpen: reviewMenuState.openItemId === source.item.id,
             mode: theme.mode,
             neutral: theme.textSecondary,
@@ -912,7 +919,7 @@ export default function ReviewScreen() {
     })),
     // deferredDeckKeys changes whenever a defer generation does.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [deckSources, deferredDeckKeys, flyingDeckKey, now, overlapCounts, reviewItemSyncStates, reviewMenuState.openItemId, theme.mode, theme.textSecondary]
+    [data?.categories, deckSources, deferredDeckKeys, flyingDeckKey, logAsDrafts, now, overlapCounts, reviewItemSyncStates, reviewMenuState.openItemId, theme.mode, theme.textSecondary]
   );
   const topDeckSource = deckSources[0] ?? null;
   // The top card is the held card still flying out: the round actions wait for the next card.
@@ -1029,7 +1036,9 @@ export default function ReviewScreen() {
     const block = deckLoggedBlock(item);
     deckTokenSequence.current += 1;
     recordDeckDecision(logged ? block : null);
+    const draft = logAsDrafts.get(item.id);
     deckHold.hold({
+      edit: logged && draft && (draft.description !== undefined || draft.categoryId !== undefined) ? draft : undefined,
       token: deckTokenSequence.current,
       key,
       itemId: item.id,
@@ -1135,9 +1144,23 @@ export default function ReviewScreen() {
       setFlyingDeckKey((current) => (current === held.key ? null : current));
       undoCount();
     };
-    const started = held.logged
-      ? resolveItem(item, hasV2LocationEvidence(item) ? { action: "confirm" } : { action: "accept" }, "Logged. Saved on this iPhone. Waiting to sync.", settled, failed, { unlisted })
-      : resolveItem(item, hasV2LocationEvidence(item) ? { action: "ignore_once_location" } : { action: "ignore_once" }, "Skipped. Saved on this iPhone. Waiting to sync.", settled, failed, { unlisted });
+    let started: boolean;
+    if (held.logged && held.edit && item.suggestedStartedAt && item.suggestedStoppedAt) {
+      const description = held.edit.description?.trim();
+      started = resolveItem(item, {
+        action: "edit_and_confirm",
+        edit: {
+          categoryId: held.edit.categoryId ?? item.suggestedCategoryId ?? null,
+          description: description || undefined,
+          startedAt: item.suggestedStartedAt,
+          stoppedAt: item.suggestedStoppedAt
+        }
+      }, "Logged. Saved on this iPhone. Waiting to sync.", settled, failed, { unlisted });
+    } else if (held.logged) {
+      started = resolveItem(item, hasV2LocationEvidence(item) ? { action: "confirm" } : { action: "accept" }, "Logged. Saved on this iPhone. Waiting to sync.", settled, failed, { unlisted });
+    } else {
+      started = resolveItem(item, hasV2LocationEvidence(item) ? { action: "ignore_once_location" } : { action: "ignore_once" }, "Skipped. Saved on this iPhone. Waiting to sync.", settled, failed, { unlisted });
+    }
     // Not started (a change for this item is already saving, or the item has gone): the card is
     // not this visit's decision.
     if (!started) failed();
@@ -1697,7 +1720,11 @@ export default function ReviewScreen() {
       </View>
       <ScrollView
         alwaysBounceVertical
+        // Typing a "Log as" name keeps the card above the keyboard; a tap elsewhere dismisses it.
+        automaticallyAdjustKeyboardInsets
         contentContainerStyle={styles.reviewDeckContent}
+        keyboardDismissMode="on-drag"
+        keyboardShouldPersistTaps="handled"
         refreshControl={
           <RefreshControl
             refreshing={refreshing}
@@ -1750,6 +1777,16 @@ export default function ReviewScreen() {
               onMore={(key) => {
                 const source = deckSources.find((candidate) => candidate.key === key);
                 if (source?.kind === "review") toggleReviewMenu(source.item);
+              }}
+              onLogAsActivity={(key) => {
+                const source = deckSources.find((candidate) => candidate.key === key);
+                if (source?.kind === "review") setLogAsPickerItemId(source.item.id);
+              }}
+              onLogAsName={(key, name) => {
+                const source = deckSources.find((candidate) => candidate.key === key);
+                // The name field is uncontrolled; typing updates this ref, not React state, so a
+                // keystroke never re-renders the screen.
+                if (source?.kind === "review") logAsNames.current.set(source.item.id, name);
               }}
               onThrow={handleDeckThrowEnd}
               onThrowStart={handleDeckThrow}
@@ -1808,6 +1845,26 @@ export default function ReviewScreen() {
         )}
       </ScrollView>
 
+
+      {logAsPickerItemId ? (
+        <ActivityPickerSheet
+          activities={data?.categories ?? []}
+          onClose={() => setLogAsPickerItemId(null)}
+          onPick={(activityId) => {
+            const itemId = logAsPickerItemId;
+            setLogAsDrafts((current) => new Map(current).set(itemId, { ...current.get(itemId), categoryId: activityId }));
+          }}
+          recentIds={recentLogAsActivityIds}
+          reduceMotion={reduceMotion}
+          selectedId={
+            logAsDrafts.get(logAsPickerItemId)?.categoryId ??
+            (data?.reviewItems ?? []).find((item) => item.id === logAsPickerItemId)?.suggestedCategoryId ??
+            null
+          }
+          styles={styles}
+          theme={theme}
+        />
+      ) : null}
 
       <OverflowMenu
         disabled={
@@ -1887,6 +1944,9 @@ function onColorFor(fill: string) {
   return contrastRatio(fill, white) >= contrastRatio(fill, ink) ? white : ink;
 }
 
+/** The card's live "Log as" changes, kept until the moment is decided. */
+type ReviewLogAsDraft = { description?: string; categoryId?: string };
+
 function deckFinishedCopy(logged: readonly { seconds: number }[], decided = 0) {
   if (!logged.length) {
     return decided > 0 ? `${decided} ${decided === 1 ? "moment" : "moments"} skipped. Nothing new on your days.` : "Nothing to review right now.";
@@ -1900,6 +1960,8 @@ export function reviewDeckCardForItem(
   key: string,
   item: MobileReviewItem,
   context: {
+    categories?: MobileBootstrap["categories"];
+    draft?: ReviewLogAsDraft;
     menuOpen: boolean;
     mode: ReturnType<typeof useMobileTheme>["theme"]["mode"];
     neutral: string;
@@ -1908,8 +1970,14 @@ export function reviewDeckCardForItem(
     syncState: ReviewItemSyncState | null;
   }
 ): ReviewDeckCardModel {
-  const activityName = reviewItemCategoryName(item);
-  const color = reviewItemCategoryColor(item, activityName, context.neutral, context.mode);
+  // A live "Log as" choice (step 5c-1) replaces the suggested activity on the card.
+  const draftCategory = context.draft?.categoryId
+    ? context.categories?.find((category) => category.id === context.draft?.categoryId) ?? null
+    : null;
+  const activityName = draftCategory?.name ?? reviewItemCategoryName(item);
+  const color = draftCategory
+    ? paletteColorFor(draftCategory.color, draftCategory.name, context.mode)
+    : reviewItemCategoryColor(item, activityName, context.neutral, context.mode);
   const kind = {
     eventSource: item.eventSource,
     eventType: item.eventType,
@@ -1936,7 +2004,8 @@ export function reviewDeckCardForItem(
       formatReviewDeckWhen(item.suggestedStartedAt, item.suggestedStoppedAt, reviewItemDurationSeconds(item, context.now), context.now),
       travelMode
     ].filter(Boolean).join(" · ") || null,
-    logAsName: item.title?.trim() || title,
+    logAsName: context.draft?.description ?? (item.title?.trim() || title),
+    logAsEditable: context.syncState == null && hasSuggestedTimeWindow(item),
     activityName,
     reason: [locationReason ?? reviewItemSummary(item), overlap].filter(Boolean).join(" ") || null,
     syncBadge: syncCopy?.badge ?? null,
@@ -1977,6 +2046,7 @@ function reviewDeckCardForEntry(
     title: displayEntryTitle(entry),
     when: formatReviewDeckWhen(entry.startedAt, entry.stoppedAt, entryDurationSeconds(entry, context.now), context.now),
     logAsName: displayEntryTitle(entry),
+    logAsEditable: false,
     activityName,
     reason: "Already on your timeline. Edit it to confirm the details.",
     syncBadge: null,

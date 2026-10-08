@@ -111,3 +111,13 @@ describe("Review deck motion contract (Blocks parity step 5b)", () => {
     expect(screen).toContain('deckScreenActive.current = state === "active" && deckScreenFocused.current;');
   });
 });
+
+describe("Review deck live Log as (Blocks parity step 5c-1)", () => {
+  it("edits the name and activity on the card and logs them as edit_and_confirm after the hold", () => {
+    expect(deck).toContain('testID="review-deck-log-as-name"');
+    expect(deck).toContain('testID="review-deck-log-as-activity"');
+    expect(screen).toContain("<ActivityPickerSheet");
+    expect(screen).toMatch(/held\.logged && held\.edit && item\.suggestedStartedAt && item\.suggestedStoppedAt[\s\S]*?action: "edit_and_confirm"/);
+    expect(screen).toContain("logAsEditable: context.syncState == null && hasSuggestedTimeWindow(item)");
+  });
+});

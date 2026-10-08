@@ -16,6 +16,8 @@ export type ReviewDeckHeldDecision = {
   seconds: number;
   /** What the user saw when they decided (reviewDeckProposalSignature); a change cancels it. */
   proposal: string;
+  /** A live "Log as" change: logging sends edit_and_confirm with these instead of a plain confirm. */
+  edit?: { description?: string; categoryId?: string };
 };
 
 /**

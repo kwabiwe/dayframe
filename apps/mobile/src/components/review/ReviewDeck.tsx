@@ -1,5 +1,5 @@
 import { memo, useEffect, useState, type ReactNode } from "react";
-import { Pressable, StyleSheet, Text, View } from "react-native";
+import { Pressable, StyleSheet, Text, TextInput, View } from "react-native";
 import { Gesture, GestureDetector } from "react-native-gesture-handler";
 import Reanimated, {
   Easing,
@@ -63,6 +63,8 @@ export type ReviewDeckCardModel = {
   title: string;
   when: string | null;
   logAsName: string;
+  /** Step 5c-1: the name and activity can be changed on the card before logging. */
+  logAsEditable: boolean;
   activityName: string;
   reason: string | null;
   /** A durable Review change for this card is waiting or needs attention. */
@@ -227,6 +229,8 @@ function ReviewDeckCardView({
   diagnostic,
   onBodyHeight,
   onEdit,
+  onLogAsActivity,
+  onLogAsName,
   onMore,
   onThrow,
   onThrowStart,
@@ -242,6 +246,8 @@ function ReviewDeckCardView({
   diagnostic?: MobileAccessibilityDiagnostic;
   onBodyHeight: (height: number) => void;
   onEdit: () => void;
+  onLogAsActivity: () => void;
+  onLogAsName: (name: string) => void;
   onMore: () => void;
   /** Called as the card is thrown: the decision is taken here. */
   onThrowStart: (direction: ReviewDeckDirection) => void;
@@ -473,33 +479,63 @@ function ReviewDeckCardView({
               {card.when}
             </Text>
           ) : null}
-          <Pressable
-            accessibilityHint="Opens the details to change them before logging"
-            accessibilityLabel={`Log as ${card.logAsName}, ${card.activityName}`}
-            accessibilityRole="button"
-            accessibilityState={{ disabled: card.controlsDisabled }}
-            disabled={card.controlsDisabled}
-            onPress={onEdit}
-            style={({ pressed }) => [
-              deckStyles.logAs,
-              { backgroundColor: theme.surfaceInset },
-              pressed ? deckStyles.pressed : null
-            ]}
-            testID={top ? "review-deck-log-as" : undefined}
-          >
-            <Text
-              {...mobileTextProps("control")}
-              numberOfLines={1}
-              style={[deckStyles.logAsName, { color: theme.textPrimary }]}
-            >
-              {card.logAsName}
-            </Text>
-            <View style={[deckStyles.activityChip, { backgroundColor: card.color }]}>
-              <Text {...mobileTextProps("counter")} numberOfLines={1} style={[deckStyles.activityChipText, { color: card.onColor }]}>
-                {card.activityName}
-              </Text>
+          {card.logAsEditable && top ? (
+            <View style={[deckStyles.logAs, { backgroundColor: theme.surfaceInset }]} testID="review-deck-log-as">
+              <TextInput
+                {...mobileTextProps("input")}
+                accessibilityLabel="Log as"
+                accessibilityHint="The name the moment is logged with"
+                maxLength={500}
+                onChangeText={onLogAsName}
+                placeholder="Name this moment"
+                placeholderTextColor={theme.textMuted}
+                returnKeyType="done"
+                style={[deckStyles.logAsName, deckStyles.logAsInput, { color: theme.textPrimary }]}
+                testID="review-deck-log-as-name"
+                value={card.logAsName}
+              />
+              <Pressable
+                accessibilityHint="Opens all activities"
+                accessibilityLabel={`Activity, ${card.activityName}`}
+                accessibilityRole="button"
+                onPress={onLogAsActivity}
+                style={({ pressed }) => [deckStyles.activityChip, deckStyles.activityChipButton, { backgroundColor: card.color }, pressed ? deckStyles.pressed : null]}
+                testID="review-deck-log-as-activity"
+              >
+                <Text {...mobileTextProps("counter")} numberOfLines={1} style={[deckStyles.activityChipText, { color: card.onColor }]}>
+                  {card.activityName}
+                </Text>
+              </Pressable>
             </View>
-          </Pressable>
+          ) : (
+            <Pressable
+              accessibilityHint="Opens the details to change them before logging"
+              accessibilityLabel={`Log as ${card.logAsName}, ${card.activityName}`}
+              accessibilityRole="button"
+              accessibilityState={{ disabled: card.controlsDisabled }}
+              disabled={card.controlsDisabled}
+              onPress={onEdit}
+              style={({ pressed }) => [
+                deckStyles.logAs,
+                { backgroundColor: theme.surfaceInset },
+                pressed ? deckStyles.pressed : null
+              ]}
+              testID={top ? "review-deck-log-as" : undefined}
+            >
+              <Text
+                {...mobileTextProps("control")}
+                numberOfLines={1}
+                style={[deckStyles.logAsName, { color: theme.textPrimary }]}
+              >
+                {card.logAsName}
+              </Text>
+              <View style={[deckStyles.activityChip, { backgroundColor: card.color }]}>
+                <Text {...mobileTextProps("counter")} numberOfLines={1} style={[deckStyles.activityChipText, { color: card.onColor }]}>
+                  {card.activityName}
+                </Text>
+              </View>
+            </Pressable>
+          )}
           {card.syncDetail ? (
             <Text {...mobileTextProps("metadata")} accessibilityLiveRegion="polite" style={[deckStyles.reason, { color: theme.textSecondary }]}>
               {card.syncDetail}
@@ -527,6 +563,8 @@ export function ReviewDeckStack({
   cards,
   diagnostic,
   onEdit,
+  onLogAsActivity,
+  onLogAsName,
   onMore,
   onThrow,
   onThrowStart,
@@ -538,6 +576,8 @@ export function ReviewDeckStack({
   cards: readonly ReviewDeckCardModel[];
   diagnostic?: MobileAccessibilityDiagnostic;
   onEdit: (key: string) => void;
+  onLogAsActivity?: (key: string) => void;
+  onLogAsName?: (key: string, name: string) => void;
   onMore: (key: string) => void;
   onThrow: (key: string, direction: ReviewDeckDirection) => void;
   onThrowStart: (key: string, direction: ReviewDeckDirection) => void;
@@ -574,6 +614,8 @@ export function ReviewDeckStack({
             setBodyHeights((current) => (current[card.key] === rounded ? current : { ...current, [card.key]: rounded }));
           }}
           onEdit={() => onEdit(card.key)}
+          onLogAsActivity={() => onLogAsActivity?.(card.key)}
+          onLogAsName={(name) => onLogAsName?.(card.key, name)}
           onMore={() => onMore(card.key)}
           onThrow={(direction) => onThrow(card.key, direction)}
           onThrowStart={(direction) => onThrowStart(card.key, direction)}
@@ -903,6 +945,14 @@ const deckStyles = StyleSheet.create({
     justifyContent: "space-between",
     minHeight: 52,
     padding: 12
+  },
+  logAsInput: {
+    minHeight: 44,
+    paddingVertical: 0
+  },
+  activityChipButton: {
+    justifyContent: "center",
+    minHeight: 44
   },
   logAsName: {
     flex: 1,
