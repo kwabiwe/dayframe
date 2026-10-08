@@ -19,6 +19,17 @@ export const REVIEW_DECK_TILT_DIVISOR = 18;
 /** Vertical drag follows the finger at 40 %. */
 export const REVIEW_DECK_VERTICAL_FOLLOW = 0.4;
 
+/**
+ * Which way a dragged card is armed. The card must sit past the threshold and the finger must have
+ * travelled past it in the same direction, so a card caught on its way home does not arm at once.
+ */
+export function reviewDeckArmDirection(cardX: number, fingerTravel: number): -1 | 0 | 1 {
+  "worklet";
+  if (cardX > REVIEW_DECK_THROW_THRESHOLD && fingerTravel > REVIEW_DECK_THROW_THRESHOLD) return 1;
+  if (cardX < -REVIEW_DECK_THROW_THRESHOLD && fingerTravel < -REVIEW_DECK_THROW_THRESHOLD) return -1;
+  return 0;
+}
+
 type ReviewKindInput = {
   eventSource: string | null;
   eventType: string | null;

@@ -27,6 +27,7 @@ import {
   REVIEW_DECK_FLING,
   REVIEW_DECK_RETURN_FROM,
   REVIEW_DECK_THROW_THRESHOLD,
+  reviewDeckArmDirection,
   REVIEW_DECK_TILT_DIVISOR,
   REVIEW_DECK_VERTICAL_FOLLOW,
   REVIEW_DECK_VISIBLE_CARDS,
@@ -325,7 +326,7 @@ function ReviewDeckCardView({
       const blocked = (x > 0 && !canLog) || (x < 0 && !canSkip);
       dragX.value = blocked ? x * 0.2 : x;
       dragY.value = dragStartY.value + event.translationY;
-      const next = dragX.value > REVIEW_DECK_THROW_THRESHOLD ? 1 : dragX.value < -REVIEW_DECK_THROW_THRESHOLD ? -1 : 0;
+      const next = reviewDeckArmDirection(dragX.value, event.translationX);
       if (next !== armed.value) {
         armed.value = next;
         if (next !== 0) runOnJS(playArmTick)();
@@ -761,6 +762,8 @@ export function ReviewDeckFinished({
       <Text {...mobileTextProps("body")} style={[deckStyles.finishedCopy, { color: theme.textSecondary }]}>
         {copy}
       </Text>
+      {/* The Undo toast hangs from this wrapper, out of flow, so its exit never moves the button. */}
+      <View style={deckStyles.finishedActions}>
       <Pressable
         accessibilityRole="button"
         onPress={onBack}
@@ -772,6 +775,7 @@ export function ReviewDeckFinished({
         </Text>
       </Pressable>
       {footer}
+      </View>
     </View>
   );
 }
@@ -855,6 +859,11 @@ const deckStyles = StyleSheet.create({
     flexDirection: "row",
     gap: 6,
     height: 120
+  },
+  finishedActions: {
+    alignItems: "center",
+    alignSelf: "stretch",
+    position: "relative"
   },
   finishedButton: {
     alignItems: "center",

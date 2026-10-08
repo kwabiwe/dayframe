@@ -951,12 +951,12 @@ function createStyles(theme: MobileTheme) {
       zIndex: 20
     },
     // Under Back to Today once all is framed.
-    reviewDeckToastInFlow: {
-      alignSelf: "stretch",
+    // Under Back to Today, out of flow: the summary stays readable and nothing moves on timeout.
+    reviewDeckToastUnderButton: {
       bottom: undefined,
       marginBottom: 0,
-      marginTop: 8,
-      position: "relative"
+      marginTop: 12,
+      top: "100%"
     },
     reviewDeckToastLabel: {
       alignItems: "center",
