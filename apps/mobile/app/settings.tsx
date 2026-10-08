@@ -62,6 +62,7 @@ import {
   readQueue,
   retryFailedQueuedEvents,
   updateCategory,
+  updateTimeGoals,
   type MobileBootstrap,
   type QueueDiagnostics,
   type QueuedEvent,
@@ -96,7 +97,7 @@ import {
   type MobileTheme
 } from "@/lib/mobileTheme";
 import { isRetryableMobileConnectivityFailure } from "@/lib/mobile-network";
-import { publishMobileSignedOut } from "@/lib/mobileSessionTransition";
+import { publishMobileSignedOut, subscribeMobileSignedOut } from "@/lib/mobileSessionTransition";
 import { REVIEW_COPY, isOpenReviewItem, isReviewNeededEntry } from "@/lib/review";
 import {
   SETTINGS_HEALTH_SNAPSHOT_TTL_MS,
@@ -106,6 +107,18 @@ import {
 } from "@/lib/settingsRefresh";
 import { clampSettingsScrollOffset, settingsScrollNeedsClamp } from "@/lib/settingsScroll";
 import { mobileTextProps } from "@/lib/mobileTypography";
+import { createGoalSaver, publishSavedTimeGoals, type TimeGoals } from "@/lib/settingsGoals";
+import Constants from "expo-constants";
+import {
+  SettingsAccountCard,
+  SettingsActivityStrip,
+  SettingsBlockGroup,
+  SettingsBlockRow,
+  SettingsSegmented,
+  SettingsStatusDot,
+  SettingsStepper,
+  SettingsSwitch
+} from "@/components/settings/SettingsBlocks";
 import { recordMobileLayout, recordMobileTextLayout } from "@/components/accessibility/diagnostics";
 import type { MobileAccessibilityDiagnostic } from "@/components/accessibility/diagnostics";
 import { drainNativeShortcutQueue, syncShortcutCatalog } from "@/lib/shortcuts";
@@ -150,6 +163,17 @@ import { deviceSyncAttentionStatus } from "@/lib/settingsSyncDiagnostics";
 import { TimerStopIssueActions } from "@/components/TimerStopIssueActions";
 
 type Category = MobileBootstrap["categories"][number];
+// Settings › Your day goal ranges (hours): daily in 1 h steps, weekly in 5 h steps.
+const DAILY_GOAL_HOURS = { min: 1, max: 14, step: 1 } as const;
+const WEEKLY_GOAL_HOURS = { min: 5, max: 80, step: 5 } as const;
+const GOAL_SAVE_DELAY_MS = 600;
+// D1: the same theme names on iPhone and web.
+const SETTINGS_THEME_OPTIONS = [
+  { label: "Midnight", value: "dark" },
+  { label: "Daylight", value: "light" },
+  { label: "System", value: "system" }
+] as const;
+
 type SettingsSection = "index" | "profile" | "categories" | "automations" | "health" | "sync" | "appearance";
 type SettingsIcon = "profile" | "categories" | "automations" | "health" | "sync" | "appearance" | "review";
 
@@ -209,6 +233,10 @@ function updateSettingsSnapshot(patch: Partial<SettingsSnapshot>) {
 function clearSettingsSnapshot() {
   cachedSettingsSnapshot = null;
 }
+
+// Any sign-out (Settings, Today's own 401 handling) drops the cached account, so the next account
+// never sees, or edits, the previous one's settings.
+subscribeMobileSignedOut(() => clearSettingsSnapshot());
 
 function isSettingsSnapshotFresh(now = Date.now()) {
   return !shouldRefreshSettingsSnapshot(cachedSettingsSnapshot?.updatedAt, now, SETTINGS_SNAPSHOT_TTL_MS);
@@ -617,6 +645,90 @@ export default function SettingsScreen() {
   const settingsTitle = settingsSectionTitle(settingsSection);
   const categoryCount = data?.categories.length ?? 0;
   const workspaceLabel = data?.workspace?.name ?? "Default workspace";
+  const pinnedCategoryCount = (data?.categories ?? []).filter((category) => category.isPinned).length;
+  // Settings › Your day: shown at once, saved to the account a moment after the last tap.
+  const [goalDraft, setGoalDraft] = useState<TimeGoals | null>(null);
+  // The account whose goals are on screen (Today is told only about the same account).
+  const goalUserId = useRef<string | null>(null);
+  goalUserId.current = data?.user.id ?? null;
+  const goalReload = useRef<((options: { silent: boolean }) => unknown) | null>(null);
+  goalReload.current = load;
+  const goalSaver = useRef(createGoalSaver({
+    delayMs: GOAL_SAVE_DELAY_MS,
+    save: (goals) => updateTimeGoals({ dailyGoalMinutes: goals.daily * 60, weeklyGoalMinutes: goals.weekly * 60 }),
+    onSaved: (goals) => {
+      const userId = goalUserId.current;
+      const withGoals = (currentData: MobileBootstrap | null) => currentData && currentData.user.id === userId
+        ? { ...currentData, user: { ...currentData.user, dailyGoalMinutes: goals.daily * 60, weeklyGoalMinutes: goals.weekly * 60 } }
+        : currentData;
+      // The module snapshot is updated directly, so reopening Settings shows the saved goals even
+      // when this save finished after Settings closed.
+      const snapshotData = readSettingsSnapshot()?.data ?? null;
+      if (snapshotData) updateSettingsSnapshot({ data: withGoals(snapshotData) });
+      setDataAndCache(withGoals);
+      setGoalDraft(null);
+      if (userId) publishSavedTimeGoals({ userId, dailyGoalMinutes: goals.daily * 60, weeklyGoalMinutes: goals.weekly * 60 });
+    },
+    onFailed: (error) => {
+      setGoalDraft(null);
+      if (error instanceof AuthRequiredError) return;
+      // An earlier save may have landed: show what the account really holds.
+      void goalReload.current?.({ silent: true });
+      Alert.alert(
+        "Your day",
+        isRetryableMobileConnectivityFailure(error)
+          ? "Your goal was not saved. Try again when you're online."
+          : error instanceof Error ? error.message : "Your goal was not saved. Try again."
+      );
+    }
+  })).current;
+  const dailyGoalHours = goalDraft?.daily ?? Math.round((data?.user.dailyGoalMinutes ?? 480) / 60);
+  const weeklyGoalHours = goalDraft?.weekly ?? Math.round((data?.user.weeklyGoalMinutes ?? 2400) / 60);
+  const locationAccessSummary = locationDiagnostics?.locationLearningCaptureState === "logout_cleanup"
+    ? "Paused while signing out"
+    : locationMonitoringAllowed
+      ? "Always"
+      : locationDiagnostics?.foregroundPermission === "granted"
+        ? "Needs Always access"
+        : locationDiagnostics?.foregroundPermission === "denied"
+          ? "Off in iPhone Settings"
+          : "Not set up";
+  const locationSuggestionsSummary = locationCaptureNeedsRetry
+    ? "Paused. Open Location to restart it."
+    : locationDiagnostics?.locationLearningEnabled && !locationMonitoringAllowed
+      ? "Needs Always location access"
+      : "Anything uncertain waits in Review";
+  const healthWorkoutKeys = HEALTH_IMPORT_PREFERENCE_OPTIONS.filter((option) => option.key !== "sleep");
+  const healthWorkoutSummary = healthImportPreferences
+    ? `${healthWorkoutKeys.filter((option) => healthImportPreferences[option.key]).length} of ${healthWorkoutKeys.length}`
+    : null;
+  const syncNeedsAttention = Boolean(
+    deviceAttentionStatus ||
+    reviewSyncDiagnostics?.needsAttentionCount ||
+    timeEntrySyncDiagnostics?.quarantinedCount ||
+    timeEntrySyncDiagnostics?.deviceQuarantinedCount
+  );
+
+  function changeGoal(kind: "daily" | "weekly", direction: -1 | 1) {
+    if (!data) return;
+    const limits = kind === "daily" ? DAILY_GOAL_HOURS : WEEKLY_GOAL_HOURS;
+    const current = { daily: dailyGoalHours, weekly: weeklyGoalHours };
+    const nextValue = Math.min(limits.max, Math.max(limits.min, current[kind] + direction * limits.step));
+    if (nextValue === current[kind]) return;
+    const next = { ...current, [kind]: nextValue };
+    setGoalDraft(next);
+    goalSaver.schedule(next);
+  }
+  // Leaving Settings (or the app going to the background) saves a pending goal change at once.
+  useEffect(() => {
+    const subscription = AppState.addEventListener("change", (state) => {
+      if (state !== "active") goalSaver.flush();
+    });
+    return () => {
+      subscription.remove();
+      goalSaver.flush();
+    };
+  }, [goalSaver]);
 
   function goBack() {
     router.back();
@@ -1117,12 +1229,12 @@ export default function SettingsScreen() {
 
   function confirmDeleteLocationEvidence() {
     Alert.alert(
-      "Delete recent location evidence",
-      "Delete recent location samples and their local upload copies from this iPhone, and recent evidence from the server? Confirmed entries, saved and cached places, and summaries will remain.",
+      "Clear recent location history?",
+      "Removes recent location points from this iPhone and from your account. Logged blocks, saved places and Review items stay.",
       [
         { text: "Cancel", style: "cancel" },
         {
-          text: "Delete evidence",
+          text: "Clear history",
           style: "destructive",
           onPress: () => { void removeLocationEvidence(); }
         }
@@ -1300,6 +1412,25 @@ export default function SettingsScreen() {
     }
   }
 
+  // Settings › Apple Health › Sleep: the first switch-on asks for Apple Health access, so the
+  // switch never reads "on" while nothing can be imported.
+  async function setSleepImport(enabled: boolean) {
+    if (enabled && healthPermissionStatus?.status !== "available") {
+      try {
+        const permissions = await requestHealthKitPermissions();
+        updateHealthStatus(permissions);
+        if (permissions.status !== "available") {
+          Alert.alert("Apple Health", permissions.notes || "Allow Dayframe to read sleep in the Health app, then try again.");
+          return;
+        }
+      } catch (error) {
+        Alert.alert("Apple Health", friendlyHealthKitError(error, "request Apple Health permission"));
+        return;
+      }
+    }
+    await updateHealthImportPreference("sleep", enabled);
+  }
+
   function updateHealthStatus(status: HealthImportStatus) {
     setHealthStatusAndCache((current) => [
       status,
@@ -1320,6 +1451,8 @@ export default function SettingsScreen() {
   }
 
   async function signOut() {
+    // A goal change still waiting is saved while the session is valid.
+    goalSaver.flush();
     const diagnostics = await getReviewSyncDiagnostics();
     const unsynchronisedCount =
       diagnostics.waitingCount + diagnostics.needsAttentionCount;
@@ -1337,6 +1470,7 @@ export default function SettingsScreen() {
   }
 
   async function completeSignOut() {
+    goalSaver.cancel();
     if (signingOutRef.current) return;
     signingOutRef.current = true;
     setSigningOut(true);
@@ -1402,75 +1536,225 @@ export default function SettingsScreen() {
       >
         <View style={styles.contentStack}>
           {settingsSection === "index" ? (
-            <>
-              <SettingsGroup title="Dayframe">
-                <SettingsMenuRow
-                  icon="profile"
-                  label="Profile & workspace"
-                  value={workspaceLabel}
-                  styles={styles}
+            <View style={styles.settingsBlocksStack}>
+              <SettingsAccountCard
+                email={data?.user.email ?? ""}
+                name={data?.user.name ?? ""}
+                onPress={() => openSettingsSection("profile")}
+                theme={theme}
+                workspace={workspaceLabel}
+              />
+
+              <SettingsBlockGroup theme={theme} title="Your day">
+                <SettingsBlockRow
+                  control={
+                    <SettingsStepper
+                      canDecrease={data !== null && dailyGoalHours > DAILY_GOAL_HOURS.min}
+                      canIncrease={data !== null && dailyGoalHours < DAILY_GOAL_HOURS.max}
+                      hint={`From ${DAILY_GOAL_HOURS.min} to ${DAILY_GOAL_HOURS.max} hours`}
+                      label="daily goal"
+                      onDecrease={() => changeGoal("daily", -1)}
+                      onIncrease={() => changeGoal("daily", 1)}
+                      theme={theme}
+                      value={`${dailyGoalHours}h`}
+                    />
+                  }
+                  divider={false}
+                  subtitle="Fills the hour cells on Today"
+                  testID="settings-daily-goal"
                   theme={theme}
-                  onPress={() => openSettingsSection("profile")}
+                  title="Daily goal"
                 />
-                <SettingsMenuRow
-                  icon="categories"
-                  label="Activities"
-                  value={`${categoryCount} ${categoryCount === 1 ? "activity" : "activities"}`}
-                  styles={styles}
+                <SettingsBlockRow
+                  control={
+                    <SettingsStepper
+                      canDecrease={data !== null && weeklyGoalHours > WEEKLY_GOAL_HOURS.min}
+                      canIncrease={data !== null && weeklyGoalHours < WEEKLY_GOAL_HOURS.max}
+                      hint={`From ${WEEKLY_GOAL_HOURS.min} to ${WEEKLY_GOAL_HOURS.max} hours, in steps of ${WEEKLY_GOAL_HOURS.step}`}
+                      label="weekly goal"
+                      onDecrease={() => changeGoal("weekly", -1)}
+                      onIncrease={() => changeGoal("weekly", 1)}
+                      theme={theme}
+                      value={`${weeklyGoalHours}h`}
+                    />
+                  }
+                  testID="settings-weekly-goal"
                   theme={theme}
+                  title="Weekly goal"
+                />
+              </SettingsBlockGroup>
+
+              <SettingsBlockGroup theme={theme} title="Activities">
+                <SettingsBlockRow
+                  divider={false}
                   onPress={() => openSettingsSection("categories")}
-                />
-                <SettingsMenuRow
-                  icon="appearance"
-                  label="Appearance"
-                  value={themePreference === "system" ? "System" : themePreference === "dark" ? "Dark" : "Light"}
-                  styles={styles}
+                  subtitle={`${pinnedCategoryCount} in quick start`}
+                  testID="settings-activities"
                   theme={theme}
-                  last
-                  onPress={() => openSettingsSection("appearance")}
+                  title="Activities"
+                  value={String(categoryCount)}
                 />
-              </SettingsGroup>
+                <SettingsActivityStrip activities={data?.categories ?? []} theme={theme} />
+              </SettingsBlockGroup>
 
-              <SettingsGroup title="Tracking">
-                <SettingsMenuRow
-                  icon="automations"
-                  label="Places & Location"
-                  value="Places, permissions, learning"
-                  styles={styles}
-                  theme={theme}
+              <SettingsBlockGroup
+                foot="Dayframe only logs on its own at places you trust."
+                theme={theme}
+                title="Automatic tracking"
+              >
+                <SettingsBlockRow
+                  divider={false}
                   onPress={() => openSettingsSection("automations")}
-                />
-                <SettingsMenuRow
-                  icon="health"
-                  label="Apple Health"
-                  value={healthAvailability?.notes ?? "Sleep and workouts"}
-                  styles={styles}
+                  subtitle={locationAccessSummary}
+                  testID="settings-location"
                   theme={theme}
-                  onPress={() => openSettingsSection("health")}
+                  title="Location"
                 />
-                <SettingsMenuRow
-                  icon="review"
-                  label={REVIEW_COPY.needsReview}
-                  value={`${openReviewCount} open`}
-                  styles={styles}
+                <SettingsBlockRow
+                  control={
+                    <SettingsSwitch
+                      accessibilityHint="Saves your choice for this account. Location access is set separately."
+                      disabled={locationDiagnostics === null}
+                      label="Suggest visits and commutes"
+                      onValueChange={toggleLocationLearning}
+                      theme={theme}
+                      value={locationDiagnostics?.locationLearningEnabled ?? false}
+                    />
+                  }
+                  subtitle={locationSuggestionsSummary}
+                  testID="settings-location-suggestions"
                   theme={theme}
-                  last
-                  onPress={() => router.push("./review")}
+                  title="Suggest visits and commutes"
                 />
-              </SettingsGroup>
+                <SettingsBlockRow
+                  onPress={() => openSettingsSection("automations")}
+                  subtitle={motionFitness?.label ?? null}
+                  testID="settings-motion"
+                  theme={theme}
+                  title="Motion & Fitness"
+                />
+                <SettingsBlockRow
+                  onPress={() => router.push("./places")}
+                  testID="settings-places"
+                  theme={theme}
+                  title="Saved places"
+                  value={String(data?.places.length ?? 0)}
+                />
+              </SettingsBlockGroup>
 
-              <SettingsGroup title="Device">
-                <SettingsMenuRow
-                  icon="sync"
-                  label="Sync & diagnostics"
-                  value={deviceSyncStatus}
-                  styles={styles}
+              <SettingsBlockGroup theme={theme} title="Apple Health">
+                <SettingsBlockRow
+                  control={
+                    <SettingsSwitch
+                      disabled={healthImportPreferences === null || healthAvailability?.status === "unavailable"}
+                      label="Sleep"
+                      onValueChange={(enabled) => void setSleepImport(enabled)}
+                      theme={theme}
+                      value={healthImportPreferences?.sleep ?? false}
+                    />
+                  }
+                  divider={false}
+                  subtitle={healthAvailability?.status === "unavailable"
+                    ? "Apple Health isn't available on this device"
+                    : healthImportPreferences?.sleep && healthPermissionStatus && healthPermissionStatus.status !== "available"
+                      ? "Allow sleep in the Health app to import it"
+                      : "Becomes a Sleep block you confirm"}
+                  testID="settings-health-sleep"
                   theme={theme}
-                  last
-                  onPress={() => openSettingsSection("sync")}
+                  title="Sleep"
                 />
-              </SettingsGroup>
-            </>
+                <SettingsBlockRow
+                  onPress={() => openSettingsSection("health")}
+                  subtitle="Choose which ones become blocks"
+                  testID="settings-health-workouts"
+                  theme={theme}
+                  title="Workouts and walks"
+                  value={healthWorkoutSummary}
+                />
+              </SettingsBlockGroup>
+
+              <SettingsBlockGroup theme={theme} title="Appearance">
+                <SettingsBlockRow
+                  control={
+                    <SettingsSegmented
+                      label="Theme"
+                      onChange={setThemePreference}
+                      options={SETTINGS_THEME_OPTIONS}
+                      theme={theme}
+                      value={themePreference}
+                    />
+                  }
+                  divider={false}
+                  testID="settings-theme"
+                  theme={theme}
+                  title="Theme"
+                />
+                <SettingsBlockRow
+                  control={
+                    <SettingsSwitch
+                      label="Haptics"
+                      onValueChange={(enabled) => {
+                        void setHapticsEnabled(enabled).catch(() => undefined);
+                      }}
+                      theme={theme}
+                      value={hapticsEnabled}
+                    />
+                  }
+                  testID="settings-haptics"
+                  theme={theme}
+                  title="Haptics"
+                />
+              </SettingsBlockGroup>
+
+              <SettingsBlockGroup
+                foot="Health and precise location stay private to your account."
+                theme={theme}
+                title="Privacy and data"
+              >
+                <SettingsBlockRow
+                  danger
+                  divider={false}
+                  onPress={confirmDeleteLocationEvidence}
+                  subtitle="Recent location points. Logged blocks stay."
+                  testID="settings-clear-location"
+                  theme={theme}
+                  title="Clear recent location history"
+                />
+              </SettingsBlockGroup>
+
+              <SettingsBlockGroup theme={theme} title="Help">
+                <SettingsBlockRow
+                  control={<SettingsStatusDot attention={syncNeedsAttention} theme={theme} />}
+                  divider={false}
+                  subtitle={deviceSyncStatus}
+                  testID="settings-sync-status"
+                  theme={theme}
+                  title={syncNeedsAttention ? "Something needs your attention" : "Everything is up to date"}
+                />
+                <SettingsBlockRow
+                  onPress={() => openSettingsSection("sync")}
+                  testID="settings-sync-help"
+                  theme={theme}
+                  title="Something not syncing?"
+                />
+              </SettingsBlockGroup>
+
+              <Pressable
+                accessibilityRole="button"
+                accessibilityState={{ disabled: signingOut, busy: signingOut }}
+                disabled={signingOut}
+                onPress={signOut}
+                style={({ pressed }) => [styles.settingsSignOut, pressed ? styles.buttonPressed : null]}
+                testID="settings-sign-out"
+              >
+                <Text {...mobileTextProps("control")} style={styles.settingsSignOutText}>
+                  {signingOut ? "Signing out…" : "Sign out"}
+                </Text>
+              </Pressable>
+              <Text {...mobileTextProps("metadata")} style={styles.settingsFooter}>
+                Dayframe {Constants.expoConfig?.version ?? ""} · {workspaceLabel}
+              </Text>
+            </View>
           ) : null}
 
           {settingsSection === "appearance" ? (

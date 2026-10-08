@@ -218,6 +218,28 @@ function createStyles(theme: MobileTheme) {
       justifyContent: "space-between",
       gap: 12
     },
+    // Blocks parity step 6a-1: the Settings index (prototype grouped lists).
+    settingsBlocksStack: {
+      gap: 22
+    },
+    settingsSignOut: {
+      alignItems: "center",
+      backgroundColor: theme.surface,
+      borderRadius: 999,
+      justifyContent: "center",
+      minHeight: 50,
+      paddingHorizontal: 20
+    },
+    settingsSignOutText: {
+      color: theme.textPrimary,
+      fontSize: 16,
+      fontWeight: "700"
+    },
+    settingsFooter: {
+      color: theme.textMuted,
+      marginTop: -8,
+      textAlign: "center"
+    },
     settingsGroup: {
       gap: 8
     },

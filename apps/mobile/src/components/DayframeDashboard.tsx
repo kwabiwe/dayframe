@@ -45,6 +45,7 @@ import { TodayTimerSurface, type TodayActiveTimerPresentation } from "@/componen
 import type { LandingRequest } from "@/lib/blocksMotion";
 import { minuteClock, newestShownTimestamp } from "@/lib/frameClock";
 import { loadHapticsPreference, playHaptic } from "@/lib/haptics";
+import { subscribeSavedTimeGoals } from "@/lib/settingsGoals";
 import { layoutQuickStartMosaic, rankQuickStartActivities, weeklySecondsByActivity } from "@/lib/quickStartMosaic";
 import { TodayReviewPresentationProvider } from "./today/TodayReviewPresentationContext";
 import { AccountAvatarButton } from "./today/AccountAvatarButton";
@@ -332,6 +333,21 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
     createSharedInFlightOperation<SyncQueueResult>()
   ).current;
   const latestData = useRef<MobileBootstrap | null>(null);
+  // Goals saved in Settings › Your day reach Today's goal frame at once (same account only). The
+  // canonical ref changes with the state so a later timer mutation keeps the new goals.
+  useEffect(() => subscribeSavedTimeGoals((event) => {
+    const current = latestData.current;
+    if (!current || current.user.id !== event.userId) return;
+    const next = {
+      ...current,
+      user: { ...current.user, dailyGoalMinutes: event.dailyGoalMinutes, weeklyGoalMinutes: event.weeklyGoalMinutes }
+    };
+    // A bootstrap already in flight carries the old goals: treat this like a mutation so it is
+    // reconciled instead of applied over the new ones.
+    dashboardMutationRevision.current += 1;
+    latestData.current = next;
+    setData(next);
+  }), []);
   const liveActivityReconciliationDeferred = useRef(false);
   const optimisticTimerIds = useRef(new Map<string, string>());
   const timerIdCorrelationsLoaded = useRef(false);
