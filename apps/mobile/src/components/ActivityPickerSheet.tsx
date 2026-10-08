@@ -30,8 +30,8 @@ export function ActivityPickerSheet<T extends ChoosableActivity>({
 }: {
   activities: readonly T[];
   onClose: () => void;
-  /** Creates the activity; resolves to its id, or null when it could not be created. */
-  onCreate?: (name: string) => Promise<string | null>;
+  /** Creates the activity; resolves to its id, or a message to show when it could not be created. */
+  onCreate?: (name: string) => Promise<{ id: string } | { error: string }>;
   onPick: (activityId: string) => void;
   recentIds: readonly string[];
   reduceMotion: boolean;
@@ -58,17 +58,24 @@ export function ActivityPickerSheet<T extends ChoosableActivity>({
   }
 
   async function create() {
-    if (!onCreate || creating || !trimmed) return;
+    if (!onCreate || creating || !trimmed || done.current) return;
     setCreating(true);
     setCreateError(null);
-    const id = await onCreate(trimmed).catch(() => null);
+    const result = await onCreate(trimmed).catch(() => ({ error: `Couldn't create "${trimmed}". Check your connection and try again.` }));
+    // Cancelled (or picked) while creating: never change the entry after the sheet was dismissed.
+    if (done.current) return;
     setCreating(false);
-    if (id) finish(id);
-    else setCreateError(`Couldn't create "${trimmed}". Check your connection and try again.`);
+    if ("id" in result) finish(result.id);
+    else setCreateError(result.error);
+  }
+
+  function cancel() {
+    done.current = true;
+    sheetRef.current?.dismiss();
   }
 
   return (
-    <Modal animationType="none" onRequestClose={() => sheetRef.current?.dismiss()} presentationStyle="overFullScreen" transparent visible>
+    <Modal animationType="none" onRequestClose={cancel} presentationStyle="overFullScreen" transparent visible>
       <View accessibilityViewIsModal style={shared.sheetOverlay}>
         <SwipeDismissSheet
           ref={sheetRef}
@@ -77,6 +84,11 @@ export function ActivityPickerSheet<T extends ChoosableActivity>({
           backdropStyle={shared.sheetBackdrop}
           handleStyle={shared.sheetHandle}
           onDismiss={onClose}
+          // Any way out (Cancel, backdrop, swipe, a pick) ends the picker: a create that resolves
+          // while it leaves never changes the entry.
+          onDismissStart={() => {
+            done.current = true;
+          }}
           reduceMotion={reduceMotion}
           style={[shared.activeEditSheet, styles.sheet, { paddingTop: 8 }]}
           testID="activity-picker"
@@ -112,7 +124,7 @@ export function ActivityPickerSheet<T extends ChoosableActivity>({
             <Pressable
               accessibilityLabel="Cancel"
               accessibilityRole="button"
-              onPress={() => sheetRef.current?.dismiss()}
+              onPress={cancel}
               style={({ pressed }) => [styles.cancel, pressed ? styles.pressed : null]}
               testID="activity-picker-cancel"
             >
@@ -125,6 +137,7 @@ export function ActivityPickerSheet<T extends ChoosableActivity>({
             </Text>
           )}
           <ScrollView
+            automaticallyAdjustKeyboardInsets
             contentContainerStyle={{ paddingBottom: Math.max(insets.bottom, 16) + 24 }}
             keyboardDismissMode="on-drag"
             keyboardShouldPersistTaps="handled"

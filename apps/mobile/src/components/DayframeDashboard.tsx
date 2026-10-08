@@ -72,6 +72,7 @@ import { TodayRibbonSection } from "./today/TodayRibbon";
 import { buildEarlierThisWeek, EARLIER_DAYS } from "@/lib/earlierThisWeek";
 import { buildTodayGoalFrame } from "@/lib/todayGoalFrame";
 import {
+  ActivityNameTakenError,
   AuthRequiredError,
   createManualTimeEntry,
   createCategory,
@@ -1796,16 +1797,24 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
 
   // The entry sheet's All-activities picker creates an activity (the server picks its colour) and
   // adds it to the cached bootstrap so the sheet can select it at once.
-  async function createSheetActivity(name: string) {
+  async function createSheetActivity(name: string): Promise<{ id: string } | { error: string }> {
     try {
       const response = await createCategory(name);
       updateDashboardData((current) => current
         ? { ...current, categories: [...current.categories.filter((category) => category.id !== response.category.id), response.category] }
         : current);
-      return response.category.id;
+      return { id: response.category.id };
     } catch (error) {
-      if (error instanceof AuthRequiredError) transitionToSignedOut();
-      return null;
+      if (error instanceof AuthRequiredError) {
+        transitionToSignedOut();
+        return { error: "Sign in again to create activities." };
+      }
+      if (error instanceof ActivityNameTakenError) {
+        // Created elsewhere since the last refresh: refresh so it appears in the list to pick.
+        void load();
+        return { error: `${error.message} It will appear in the list in a moment.` };
+      }
+      return { error: `Couldn't create "${name}". Check your connection and try again.` };
     }
   }
 

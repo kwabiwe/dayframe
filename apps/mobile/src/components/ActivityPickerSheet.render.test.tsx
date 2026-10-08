@@ -51,6 +51,24 @@ function render(overrides: Record<string, unknown> = {}) {
 }
 
 describe("ActivityPickerSheet", () => {
+  it("never picks a created activity after the picker was cancelled", async () => {
+    let resolveCreate!: (value: { id: string }) => void;
+    const onCreate = vi.fn(() => new Promise<{ id: string }>((resolve) => { resolveCreate = resolve; }));
+    const { props, search, tree } = render({ onCreate });
+    search("Pottery");
+    let pending!: Promise<void>;
+    act(() => {
+      pending = tree.root.findByProps({ testID: "activity-picker-create" }).props.onPress();
+    });
+    act(() => tree.root.findByProps({ testID: "activity-picker-cancel" }).props.onPress());
+    await act(async () => {
+      resolveCreate({ id: "pottery" });
+      await pending;
+    });
+    expect(props.onPick).not.toHaveBeenCalled();
+    act(() => tree.unmount());
+  });
+
   it("lists the count, Recent and groups, and picks once", () => {
     const { props, texts, tree } = render();
     expect(texts()).toEqual(expect.arrayContaining(["2 activities", "RECENT", "WORK AND STUDY", "Work", "Learning"]));
@@ -64,7 +82,7 @@ describe("ActivityPickerSheet", () => {
   });
 
   it("filters as you type and offers Create for a new name", async () => {
-    const onCreate = vi.fn(() => Promise.resolve("pottery"));
+    const onCreate = vi.fn(() => Promise.resolve({ id: "pottery" }));
     const { props, search, texts, tree } = render({ onCreate });
     search("work");
     expect(tree.root.findAllByProps({ testID: "activity-picker-create" })).toHaveLength(0);
@@ -79,14 +97,15 @@ describe("ActivityPickerSheet", () => {
   });
 
   it("keeps the sheet open with a plain message when creating fails", async () => {
-    const { props, search, texts, tree } = render({ onCreate: vi.fn(() => Promise.resolve(null)) });
+    const { props, search, texts, tree } = render({ onCreate: vi.fn(() => Promise.resolve({ error: "An activity with that name already exists." })) });
     search("Pottery");
     await act(async () => {
       await tree.root.findByProps({ testID: "activity-picker-create" }).props.onPress();
     });
     expect(props.onPick).not.toHaveBeenCalled();
     expect(mocks.dismiss).not.toHaveBeenCalled();
-    expect(texts()).toContain(`Couldn't create "Pottery". Check your connection and try again.`);
+    // The server's own message is shown (a name taken elsewhere is not a connection problem).
+    expect(texts()).toContain("An activity with that name already exists.");
     act(() => tree.unmount());
   });
 });

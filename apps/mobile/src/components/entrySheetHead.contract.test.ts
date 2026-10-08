@@ -46,7 +46,15 @@ describe("time-entry sheet head and actions", () => {
 describe("time-entry sheet activity chips", () => {
   it("wraps the chosen, pinned and recent activities, fewer on short screens and large text", () => {
     expect(sheet).toContain("const ACTIVITY_CHIP_LIMIT_BY_DENSITY = { regular: 7, compact: 5, condensed: 3 } as const;");
-    expect(sheet).toContain("activityChips(categories, selectedCategoryId, recentActivities, chipLimit)");
+    // The order is anchored when the sheet opens (and after a suggestion or a picker pick), never on
+    // a chip tap, so the chip under the finger never moves.
+    expect(sheet).toContain("activityChips(categories, chipAnchorId, recentActivities, chipLimit)");
+    expect(sheet).toMatch(/setSelectedCategoryId\(snapshot\.categoryId\);\s*setChipAnchorId\(snapshot\.categoryId\);/);
+    expect(sheet).toMatch(/onPick=\{\(activityId\) => \{\s*setSelectedCategoryId\(activityId\);\s*setChipAnchorId\(activityId\);/);
+    // A two-row budget (one when condensed), trimmed on layout so Discard/Stop stay on screen.
+    expect(sheet).toContain("const ACTIVITY_CHIP_ROWS_BY_DENSITY = { regular: 2, compact: 2, condensed: 1 } as const;");
+    expect(sheet).toContain("onLayout={(event) => handleChipWrapLayout(event.nativeEvent.layout.height)}");
+    expect(sheet).toContain("if (height > allowed) setChipTrim((trim) => trim + 1);");
     // Tapping the chosen activity again clears it; there is no separate "No activity" chip.
     expect(sheet).toContain("setSelectedCategoryId((current) => (current === category.id ? null : category.id));");
     expect(sheet).not.toContain('"time-entry-category-clear"');
@@ -54,11 +62,12 @@ describe("time-entry sheet activity chips", () => {
 
   it("opens the picker from All activities and creates activities through the Dashboard", () => {
     expect(sheet).toMatch(/testID="time-entry-category-all"/);
-    expect(sheet).toMatch(/<ActivityPickerSheet[\s\S]*?onCreate=\{onCreateActivity\}[\s\S]*?onPick=\{\(activityId\) => setSelectedCategoryId\(activityId\)\}/);
+    expect(sheet).toMatch(/<ActivityPickerSheet[\s\S]*?onCreate=\{onCreateActivity\}[\s\S]*?onPick=\{\(activityId\) => \{/);
     expect(dashboard.match(/onCreateActivity=\{createSheetActivity\}/g)).toHaveLength(3);
     const create = dashboard.slice(dashboard.indexOf("async function createSheetActivity("), dashboard.indexOf("async function createTimerSheetTag("));
     expect(create).toContain("const response = await createCategory(name);");
-    expect(create).toContain("return response.category.id;");
-    expect(create).toContain("return null;");
+    expect(create).toContain("return { id: response.category.id };");
+    // A name taken elsewhere shows the server's message and refreshes so it appears in the list.
+    expect(create).toMatch(/if \(error instanceof ActivityNameTakenError\) \{\s*\/\/[^\n]*\n\s*void load\(\);/);
   });
 });

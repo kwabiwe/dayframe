@@ -71,7 +71,7 @@ describe("compact location settings contract", () => {
 describe("entry sheet activity chips contract", () => {
   it("wraps at most seven activity chips and puts every other activity one search away", () => {
     // Blocks prototype quickChips: a short wrapped row, never scrolled sideways.
-    expect(timerSheetSource).toContain("activityChips(categories, selectedCategoryId, recentActivities, chipLimit)");
+    expect(timerSheetSource).toContain("activityChips(categories, chipAnchorId, recentActivities, chipLimit)");
     expect(timerSheetSource).toMatch(/chipWrap: \{ flexDirection: "row", flexWrap: "wrap", gap: 8 \}/);
     expect(timerSheetSource).toContain('testID="time-entry-category-all"');
     expect(timerSheetSource).toContain("<ActivityPickerSheet");
