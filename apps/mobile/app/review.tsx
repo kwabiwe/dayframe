@@ -899,6 +899,11 @@ export default function ReviewScreen() {
   useEffect(() => {
     deckTopKeyRef.current = deckSources[0]?.key ?? null;
   }, [deckSources]);
+  // An Undo return is spent once its card leaves the deck, so a card a refresh briefly drops and
+  // brings back never replays the flight in.
+  useEffect(() => {
+    if (deckReturn && !deckSources.some((source) => source.key === deckReturn.key)) setDeckReturn(null);
+  }, [deckReturn, deckSources]);
   const deckCards = useMemo(
     () => deckSources.slice(0, 3).map((source): ReviewDeckCardModel => (
       source.kind === "review"
@@ -1134,6 +1139,7 @@ export default function ReviewScreen() {
       // something else, so nothing is saved and the card comes back as it is now.
       deferGenerations.current.set(held.key, (deferGenerations.current.get(held.key) ?? 0) + 1);
       setFlyingDeckKey((current) => (current === held.key ? null : current));
+      restorePagedOutDeckItem(held.itemId);
       undoCount();
       AccessibilityInfo.announceForAccessibility(`${held.title} changed, so it was not saved. Review it again.`);
       return;
