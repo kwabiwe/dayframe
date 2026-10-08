@@ -454,20 +454,41 @@ export default function SettingsScreen() {
     setTimerStopSyncIssues(issues);
   }, []);
 
+  // Queue reads: the latest one started wins (load() and the live subscription share the
+  // sequence), and a read never lands after Settings closed or the account changed.
+  const queueReadSequence = useRef(0);
+  const queueMounted = useRef(false);
+  async function refreshQueueLatest() {
+    const mine = ++queueReadSequence.current;
+    try {
+      const owner = await readActiveMobileAccount();
+      const queued = await readQueue();
+      if (!queueMounted.current || mine !== queueReadSequence.current || !owner) return;
+      const stillOwner = await readActiveMobileAccount();
+      if (!stillOwner || !mobileAccountOwnersEqual(owner, stillOwner) || mine !== queueReadSequence.current) return;
+      setQueueAndCache(queued);
+    } catch {
+      // A failed local read leaves the last known queue in place.
+    }
+  }
+
   const load = useCallback((options?: { silent?: boolean; trigger?: "navigation" | "focus" | "pull" }) => refreshes.current.run("settings", true, async () => {
     const showRefreshIndicator = shouldShowSettingsRefreshSpinner(options?.trigger ?? "navigation");
     if (showRefreshIndicator) setRefreshing(true);
     try {
       await drainNativeShortcutQueue();
+      const queueSequence = ++queueReadSequence.current;
       const [bootstrap, queued, location] = await Promise.all([
         fetchBootstrap(),
         readQueue(),
         getLocationVisitDiagnostics()
       ]);
       const nextLocationStatus = locationStatusText(location);
+      // A newer queue read (the live subscription) wins over this one.
+      const queueIsLatest = queueSequence === queueReadSequence.current;
       updateSettingsSnapshot({
         data: bootstrap,
-        queue: queued,
+        ...(queueIsLatest ? { queue: queued } : {}),
         locationDiagnostics: location,
         locationStatus: nextLocationStatus,
         updatedAt: Date.now()
@@ -475,7 +496,7 @@ export default function SettingsScreen() {
       setData(bootstrap);
       await configureLocationIntelligence(bootstrap);
       syncShortcutCatalog(bootstrap);
-      setQueue(queued);
+      if (queueIsLatest) setQueue(queued);
       setLocationDiagnostics(location);
       setLocationStatus(nextLocationStatus);
       await refreshLocationV2Diagnostics();
@@ -506,13 +527,20 @@ export default function SettingsScreen() {
   // The activity queue changes outside Settings (timer actions while offline); keep its count live so
   // the Help row and Sync help never say "up to date" with something waiting.
   useEffect(() => {
+    queueMounted.current = true;
+    // Read once on opening (a timer action may have queued while Settings was closed) and on
+    // every change after.
+    void refreshQueueLatest();
     const unsubscribe = subscribeActivityQueue(() => {
-      void readQueue().then(setQueueAndCache).catch(() => undefined);
+      void refreshQueueLatest();
     });
     return () => {
+      queueMounted.current = false;
       unsubscribe();
     };
-  }, [setQueueAndCache]);
+    // refreshQueueLatest only reads refs and stable setters.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   useEffect(() => subscribeRecoveredDashboardBootstrap(event => {
     if (event.type === "completed") setDataAndCache(event.bootstrap);
@@ -695,7 +723,8 @@ export default function SettingsScreen() {
     ...timerStopSyncIssues.map((issue) => issue.clientEventId),
     ...timeEntrySyncIssues.map((issue) => issue.clientCommandId),
     ...reviewSyncIssues.map((issue) => `${issue.clientMutationId}:${issue.resolutionStatus}`),
-    `failed:${queueDiagnostics.permanentFailedCount}`
+    `failed:${queueDiagnostics.permanentFailedCount}`,
+    `quarantine:${timeEntrySyncDiagnostics?.quarantinedCount ?? 0}:${timeEntrySyncDiagnostics?.deviceQuarantinedCount ?? 0}`
   ].join("|");
   useEffect(() => {
     setSyncHelpNote(null);
@@ -950,9 +979,7 @@ export default function SettingsScreen() {
           text: "Discard",
           style: "destructive",
           onPress: () => {
-            void discardReviewSyncIssue(clientMutationId).then(() =>
-              refreshReviewDiagnostics()
-            );
+            void discardReviewSyncIssue(clientMutationId).then(() => refreshReviewDiagnostics()).catch(() => setSyncHelpNote("Couldn't discard that change. Nothing was removed."));
           }
         }
       ]
@@ -969,9 +996,7 @@ export default function SettingsScreen() {
           text: "Discard",
           style: "destructive",
           onPress: () => {
-            void discardTimeEntrySyncIssue(clientCommandId).then(() =>
-              refreshTimeEntryDiagnostics()
-            );
+            void discardTimeEntrySyncIssue(clientCommandId).then(() => refreshTimeEntryDiagnostics()).catch(() => setSyncHelpNote("Couldn't discard that change. Nothing was removed."));
           }
         }
       ]
@@ -984,7 +1009,7 @@ export default function SettingsScreen() {
       if (retried) {
         setSyncStatusMessageAndCache("Retrying the saved time entry change...");
       }
-    });
+    }).catch(() => setSyncHelpNote("Couldn't retry that change. It's still saved on this iPhone."));
   }
 
   function confirmDiscardTimerStopIssue(clientEventId: string) {
@@ -997,9 +1022,7 @@ export default function SettingsScreen() {
           text: "Discard Stop",
           style: "destructive",
           onPress: () => {
-            void discardTimerStopSyncIssue(clientEventId).then(() =>
-              refreshTimerStopDiagnostics()
-            );
+            void discardTimerStopSyncIssue(clientEventId).then(() => refreshTimerStopDiagnostics()).catch(() => setSyncHelpNote("Couldn't discard that Stop. Nothing was removed."));
           }
         }
       ]
@@ -1012,7 +1035,7 @@ export default function SettingsScreen() {
       if (retried) {
         setSyncStatusMessageAndCache("Retrying the saved timer Stop...");
       }
-    });
+    }).catch(() => setSyncHelpNote("Couldn't retry that Stop. It's still saved on this iPhone."));
   }
 
   function confirmClearTimeEntryQuarantine() {
@@ -1025,9 +1048,7 @@ export default function SettingsScreen() {
           text: "Clear",
           style: "destructive",
           onPress: () => {
-            void clearTimeEntryOutboxQuarantine().then(() =>
-              refreshTimeEntryDiagnostics()
-            );
+            void clearTimeEntryOutboxQuarantine().then(() => refreshTimeEntryDiagnostics()).catch(() => setSyncHelpNote("Couldn't clear those records. Nothing was removed."));
           }
         }
       ]
@@ -1044,9 +1065,7 @@ export default function SettingsScreen() {
           text: "Clear",
           style: "destructive",
           onPress: () => {
-            void clearDeviceTimeEntryOutboxQuarantine().then(() =>
-              refreshTimeEntryDiagnostics()
-            );
+            void clearDeviceTimeEntryOutboxQuarantine().then(() => refreshTimeEntryDiagnostics()).catch(() => setSyncHelpNote("Couldn't clear those records. Nothing was removed."));
           }
         }
       ]
@@ -1061,6 +1080,10 @@ export default function SettingsScreen() {
       setQueueAndCache(result.remaining);
       setLastSyncResultAndCache(result);
       setSyncStatusMessageAndCache(null);
+      // Network failures and rejections come back in the result, not as errors.
+      if (result.failedCount > 0 || result.firstError) {
+        setSyncHelpNote("Some items still couldn't be sent. They're kept on this iPhone.");
+      }
       await load();
     } catch (error) {
       if (error instanceof AuthRequiredError) {
