@@ -110,6 +110,11 @@ Expected Confirm behaviour:
 - remove item from visible Review
 - return structured JSON on expected errors
 
+Expected Edit-and-confirm behaviour (a renamed or re-filed Health moment, web or iPhone "Log as"):
+
+- the entry keeps the Health source and the item's confidence and is marked user-edited, so it still reads as Health and a re-import never overwrites it
+- an edited Sleep reuses the night already logged from Health (like Confirm) and links the event's sleep resolution to the entry
+
 Expected Dismiss behaviour:
 
 - mark review item ignored

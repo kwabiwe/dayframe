@@ -598,32 +598,75 @@ async function editAndConfirmGenericReview(
     }
     throw resolutionConflict(item.id, item.status);
   }
-  const inserted = await client.query<{ id: string }>(
-    `insert into time_entries (
-       workspace_id, user_id, category_id, place_id, source, confidence,
-       review_status, description, started_at, stopped_at, created_from_event_id
-     ) values ($1, $2, $3, $4, 'manual_app', 'high', 'confirmed',
-       $5, $6, $7, $8)
-     returning id`,
-    [
-      session.workspaceId,
-      session.userId,
-      explicitNullable(edit, "categoryId", item.suggestedCategoryId),
-      explicitNullable(edit, "placeId", item.suggestedPlaceId),
-      edit.description?.trim() || null,
-      edit.startedAt,
-      edit.stoppedAt,
-      item.eventId
-    ]
-  );
-  const entryId = inserted.rows[0].id;
-  await syncTimeEntryTags(client, entryId, edit.tags ?? [], session);
+  const categoryId = explicitNullable(edit, "categoryId", item.suggestedCategoryId);
+  const placeId = explicitNullable(edit, "placeId", item.suggestedPlaceId);
+  const description = edit.description?.trim() || null;
+  // An edited Health sleep whose original night is already logged from Health updates that one
+  // entry, as accept does, instead of logging the same night twice. The night is found from the
+  // Review evidence (the suggested window), never the edited times, so moving the times cannot
+  // pick a neighbouring night.
+  const suggestedWindow = item.eventType === "health_sleep_import"
+    ? validWindow(item.suggestedStartedAt, item.suggestedStoppedAt)
+    : null;
+  const matchingSleep = suggestedWindow
+    ? await reconcileMatchingHealthSleepTimeEntry(client, session, {
+        rawPayload: item.rawPayload,
+        startedAt: suggestedWindow.startedAt,
+        stoppedAt: suggestedWindow.stoppedAt
+      })
+    : null;
+  let entryId: string;
+  if (matchingSleep) {
+    await client.query(
+      // The user's own times win over the merged night.
+      `update time_entries
+       set category_id = $4, place_id = $5, description = $6,
+           started_at = $7, stopped_at = $8, confidence = coalesce($9, confidence),
+           user_edited_at = now(), updated_at = now()
+       where id = $1 and workspace_id = $2 and user_id = $3`,
+      [matchingSleep.id, session.workspaceId, session.userId, categoryId, placeId, description, edit.startedAt, edit.stoppedAt, item.confidence]
+    );
+    entryId = matchingSleep.id;
+  } else {
+    // The entry keeps the moment's own source and confidence (Health, Location, Shortcut…), so a
+    // renamed or re-filed suggestion is not mistaken for a manual entry. It is marked as edited so
+    // a later Health re-import never overwrites the user's changes.
+    const inserted = await client.query<{ id: string }>(
+      `insert into time_entries (
+         workspace_id, user_id, category_id, place_id, source, confidence,
+         review_status, description, started_at, stopped_at, created_from_event_id, user_edited_at
+       ) values ($1, $2, $3, $4, coalesce($5, 'manual_app'), coalesce($6, 'high'), 'confirmed',
+         $7, $8, $9, $10, now())
+       returning id`,
+      [
+        session.workspaceId,
+        session.userId,
+        categoryId,
+        placeId,
+        item.eventSource,
+        item.confidence,
+        description,
+        edit.startedAt,
+        edit.stoppedAt,
+        item.eventId
+      ]
+    );
+    entryId = inserted.rows[0].id;
+  }
+  // A reused night keeps its tags unless the edit sends a tag change.
+  if (!matchingSleep || edit.tags !== undefined) {
+    await syncTimeEntryTags(client, entryId, edit.tags ?? [], session);
+  }
+  if (item.eventType === "health_sleep_import" && item.eventId) {
+    await recordHealthSleepResolution(client, session, item.eventId, entryId);
+  }
   await resolveGenericReviewAndEvent(client, item, session, "accepted");
   return {
     ok: true,
     action: "edit_and_confirm",
     status: "accepted",
-    entryId
+    entryId,
+    ...(matchingSleep ? { duplicate: true } : {})
   };
 }
 
@@ -649,6 +692,12 @@ async function resolveClosedGenericReview(
       Boolean(
         item.eventId &&
         await entryCreatedFromEvent(client, item.eventId, session)
+          // An edited sleep may have updated the night already logged from Health.
+          .then((entry) => entry ?? (
+            item.eventType === "health_sleep_import" && item.resolvedTimeEntryId
+              ? { id: item.resolvedTimeEntryId }
+              : null
+          ))
           .then((entry) =>
             entry
               ? genericEditMatchesExisting(
@@ -845,6 +894,9 @@ async function genericEditMatchesExisting(
   ) {
     return false;
   }
+  // An edit that sends no tags leaves an entry's tags as they are (a reused Health night keeps
+  // its own), so its replay is equivalent whatever tags the entry has.
+  if (edit.tags === undefined) return true;
   const tags = await client.query<{ name: string }>(
     `select tag.name
      from time_entry_tags link
