@@ -83,6 +83,7 @@ import {
   reviewDeckSource
 } from "@/lib/reviewDeck";
 import { beginReviewDeckVisit, takeReviewDeckEvidenceDecisions } from "@/lib/reviewDeckDecisions";
+import { createReviewKnownItems, reviewDataOwnerKey } from "@/lib/reviewKnownItems";
 import {
   REVIEW_COPY,
   isTimeAwayReviewItem,
@@ -246,8 +247,9 @@ export default function ReviewScreen() {
     onCommit: (held) => commitHeldDeckDecisionRef.current(held)
   })).current;
   const deckTopKeyRef = useRef<string | null>(null);
-  // Open items the deck has shown: Undo, a failed save or a Location evidence decision use them.
-  const knownDeckItems = useRef(new Map<string, MobileReviewItem>());
+  // Open items the deck has shown (Undo, a failed save, a Location evidence decision), each read
+  // back only for the account it was shown for (reviewKnownItems.ts).
+  const knownDeckItems = useRef(createReviewKnownItems<MobileReviewItem>()).current;
   const [reviewMenuState, setReviewMenuState] = useState(CLOSED_REVIEW_MENU_STATE);
   const [reviewAvailabilityMessage, setReviewAvailabilityMessage] = useState<string | null>(null);
   const [focusedLegacyEntry, setFocusedLegacyEntry] = useState<MobileTimeEntry | null>(null);
@@ -338,7 +340,7 @@ export default function ReviewScreen() {
       reviewBacklogRead.current = null;
       reviewBacklogRef.current = null;
       // Cards the deck remembers (for Undo or a failed save) belong to the previous account.
-      knownDeckItems.current.clear();
+      knownDeckItems.clear();
       setReviewBacklog(null);
       setReviewBacklogLoading(false);
     }
@@ -1029,15 +1031,23 @@ export default function ReviewScreen() {
   // decided here: Skip moves either behind the rest for this visit, so it never blocks the deck.
   const topDeckSkipDefers = topDeckSource?.kind === "legacy_entry" || topDeckControlsDisabled || (deckCards[0]?.skipDefers ?? false);
 
+  // The account this render's open items belong to.
+  const deckOwnerKey = data ? reviewDataOwnerKey(data) : null;
   // Decisions made in Location evidence (Edit before logging, D7) count toward this visit.
   useEffect(() => {
-    for (const item of openReviewItems) knownDeckItems.current.set(item.id, item);
-  }, [openReviewItems]);
+    if (!deckOwnerKey) return;
+    for (const item of openReviewItems) knownDeckItems.remember(item, deckOwnerKey);
+  }, [deckOwnerKey, openReviewItems]);
+
+  /** A remembered open item, only when it was shown for the account loaded now. */
+  function knownDeckItem(itemId: string) {
+    return knownDeckItems.get(itemId, dataRef.current);
+  }
   useEffect(() => beginReviewDeckVisit(), []);
   useFocusEffect(
     useCallback(() => {
       for (const decision of takeReviewDeckEvidenceDecisions()) {
-        const item = knownDeckItems.current.get(decision.itemId);
+        const item = knownDeckItem(decision.itemId);
         ownDeckDecisionKeys.current.add(reviewFocusKey("review", decision.itemId));
         recordDeckDecision(decision.logged ? (item ? deckLoggedBlock(item) : { color: theme.textSecondary, seconds: 0 }) : null);
       }
@@ -1160,7 +1170,7 @@ export default function ReviewScreen() {
   // again. The next read replaces it like any other loaded item.
   function restorePagedOutDeckItem(itemId: string) {
     const loaded = dataRef.current;
-    const known = knownDeckItems.current.get(itemId);
+    const known = knownDeckItem(itemId);
     if (!loaded || !known || !isOpenReviewItem(known)) return;
     if (loaded.reviewItems.some((item) => item.id === itemId)) return;
     commitData({ ...loaded, reviewItems: [...loaded.reviewItems, known] });
@@ -1269,18 +1279,17 @@ export default function ReviewScreen() {
     // anything that save claimed is no longer part of this batch.
     deckHold.flush();
     items = items.filter((item) => !reviewMutations.current.has(item.id));
-    if (!items.length) return;
+    const loaded = dataRef.current;
+    if (!items.length || !loaded) return;
     applyReviewMenuEvent({ type: "close" });
     setDeckThrowRequest(null);
     setDeckReturn(null);
     setHighlightedFocusKey(null);
     for (const item of items) {
-      knownDeckItems.current.set(item.id, item);
+      knownDeckItems.remember(item, reviewDataOwnerKey(loaded));
       ownDeckDecisionKeys.current.add(reviewFocusKey("review", item.id));
     }
     setDeckVisit((current) => ({ ...current, decided: current.decided + items.length }));
-    const loaded = dataRef.current;
-    if (!loaded) return;
     deckTokenSequence.current += 1;
     deckHold.hold({
       kind: "batch",
@@ -1334,7 +1343,7 @@ export default function ReviewScreen() {
     const openItem = (itemId: string) => {
       const listed = dataRef.current?.reviewItems.find((candidate) => candidate.id === itemId);
       if (listed) return isOpenReviewItem(listed) ? listed : undefined;
-      const known = knownDeckItems.current.get(itemId);
+      const known = knownDeckItem(itemId);
       return known && isOpenReviewItem(known) ? known : undefined;
     };
     void (async () => {
@@ -1420,7 +1429,7 @@ export default function ReviewScreen() {
     const listedItem = dataRef.current?.reviewItems.find((candidate) => candidate.id === held.itemId);
     // Missing from the loaded list is not "resolved": a capped refresh may only have paged it out.
     const unlisted = !listedItem;
-    const knownItem = knownDeckItems.current.get(held.itemId);
+    const knownItem = knownDeckItem(held.itemId);
     const item = listedItem
       ? (isOpenReviewItem(listedItem) ? listedItem : undefined)
       : knownItem && isOpenReviewItem(knownItem) ? knownItem : undefined;
@@ -2630,4 +2639,3 @@ async function withTimeout<T>(promise: Promise<T>, timeoutMs: number): Promise<T
     if (timeout) clearTimeout(timeout);
   }
 }
-

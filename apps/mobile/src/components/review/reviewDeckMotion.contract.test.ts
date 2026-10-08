@@ -176,7 +176,12 @@ describe("Review deck live Log as (Blocks parity step 5c-1)", () => {
     expect(screen).toContain("owner: { workspaceId: loaded.workspace.id, userId: loaded.user.id },");
     expect(screen).toContain("const ownerMatches = () => reviewBulkSkipOwnerMatches(held.owner, dataRef.current);");
     expect(screen).toMatch(/if \(!reviewBulkSkipOwnerMatches\(held\.owner, dataRef\.current\)\) return;\s*for \(const item of held\.items\) restorePagedOutDeckItem/);
-    expect(screen).toMatch(/reviewBacklogRef\.current = null;\s*\/\/ Cards the deck remembers[^\n]*\n\s*knownDeckItems\.current\.clear\(\);/);
+    expect(screen).toMatch(/reviewBacklogRef\.current = null;\s*\/\/ Cards the deck remembers[^\n]*\n\s*knownDeckItems\.clear\(\);/);
+    // Remembered cards are tagged with their account and read back only for it (behaviour in
+    // reviewKnownItems.test.ts), so a late effect after an account change cannot leak one.
+    expect(screen).toContain("knownDeckItems.remember(item, deckOwnerKey);");
+    expect(screen).toContain("return knownDeckItems.get(itemId, dataRef.current);");
+    expect(screen).not.toMatch(/knownDeckItems\.current/);
     // A single decision whose flush saved the same item through a batch stops there.
     expect(screen).toMatch(/deckHold\.flush\(\);\s*\/\/ That flush may have saved this very item[^\n]*\n\s*if \(reviewMutations\.current\.has\(item\.id\)\) return false;/);
     // The longer menu stays inside the screen with a visible Cancel.
