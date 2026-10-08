@@ -108,7 +108,8 @@ describe("Review deck motion contract (Blocks parity step 5b)", () => {
     expect(deck).toContain("if (direction !== 0 && success && allowed) {");
     expect(screen).toContain('!open.has(key) && !reviewMutations.current.has(key.slice(key.indexOf(":") + 1))');
     expect(screen).toContain("commitData({ ...loaded, reviewItems: [...loaded.reviewItems, known] });");
-    expect(screen.match(/restorePagedOutDeckItem\(held\.itemId\);/g)?.length).toBe(2);
+    expect(screen.match(/restorePagedOutDeckItem\(held\.itemId\);/g)?.length).toBe(3);
+    expect(screen).toContain("if (deckReturn && !deckSources.some((source) => source.key === deckReturn.key)) setDeckReturn(null);");
     expect(deck).toContain("if (throwRequest.direction === 1 ? !canLog : !canSkip) return;");
     expect(screen).toContain('deckScreenActive.current = state === "active" && deckScreenFocused.current;');
   });
