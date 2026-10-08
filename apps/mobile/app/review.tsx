@@ -195,6 +195,8 @@ export default function ReviewScreen() {
   const [deckReturn, setDeckReturn] = useState<ReviewDeckReturn | null>(null);
   // The held card stays on screen while it flies out; the cards beneath land when it has gone.
   const [flyingDeckKey, setFlyingDeckKey] = useState<string | null>(null);
+  // Whether that flight only moves the card behind the rest (no decision is held for it).
+  const flyingDeckDefers = useRef(false);
   // A saved decision stays out of the deck until its SQLite projection drops the card.
   const [committingDeckKeys, setCommittingDeckKeys] = useState<ReadonlySet<string>>(() => new Set());
   // Cards this visit decided itself: "All framed" celebrates only when they emptied the deck.
@@ -903,7 +905,21 @@ export default function ReviewScreen() {
   // brings back never replays the flight in.
   useEffect(() => {
     if (deckReturn && !deckSources.some((source) => source.key === deckReturn.key)) setDeckReturn(null);
-  }, [deckReturn, deckSources]);
+    // A deferral flight whose card a refresh dropped mid-flight never reports its end: retire it
+    // here and still move the card behind the rest, so it never comes back locked. (A held flight
+    // is retired by its save outcome instead.)
+    if (
+      flyingDeckKey &&
+      flyingDeckDefers.current &&
+      heldDeckDecision?.key !== flyingDeckKey &&
+      !deckSources.some((source) => source.key === flyingDeckKey)
+    ) {
+      deferDeckCard(flyingDeckKey);
+      setFlyingDeckKey(null);
+    }
+    // deferDeckCard only touches refs and state setters.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [deckReturn, deckSources, flyingDeckKey, heldDeckDecision]);
   const deckCards = useMemo(
     () => deckSources.slice(0, 3).map((source): ReviewDeckCardModel => (
       source.kind === "review"
@@ -973,7 +989,7 @@ export default function ReviewScreen() {
   const topDeckControlsDisabled = deckFlying ? false : (deckCards[0]?.controlsDisabled ?? true);
   // A legacy entry has no skip mutation, and a card with a waiting or rejected change cannot be
   // decided here: Skip moves either behind the rest for this visit, so it never blocks the deck.
-  const topDeckSkipDefers = topDeckSource?.kind === "legacy_entry" || topDeckControlsDisabled;
+  const topDeckSkipDefers = topDeckSource?.kind === "legacy_entry" || topDeckControlsDisabled || (deckCards[0]?.skipDefers ?? false);
 
   // Decisions made in Location evidence (Edit before logging, D7) count toward this visit.
   const knownDeckItems = useRef(new Map<string, MobileReviewItem>());
@@ -1037,6 +1053,7 @@ export default function ReviewScreen() {
     const card = deckCards.find((candidate) => candidate.key === key);
     // The outgoing card's controls stay locked for the whole flight, deferral or decision.
     setFlyingDeckKey(key);
+    flyingDeckDefers.current = source.kind === "legacy_entry" || Boolean(card?.skipDefers);
     if (source.kind === "legacy_entry" || card?.skipDefers) {
       // Moving a card behind the rest is another card decided: a held one is saved now.
       deckHold.flush();
@@ -1389,7 +1406,8 @@ export default function ReviewScreen() {
       itemId: item.id,
       disabled:
         reviewMutations.current.has(item.id) ||
-        reviewItemSyncStates.has(item.id)
+        reviewItemSyncStates.has(item.id) ||
+        !hasSuggestedTimeWindow(item)
     });
   }
 
@@ -2038,10 +2056,14 @@ export function reviewDeckCardForItem(
     reason: [locationReason ?? reviewItemSummary(item), overlap].filter(Boolean).join(" ") || null,
     syncBadge: syncCopy?.badge ?? null,
     syncDetail: syncCopy?.detail ?? null,
-    controlsDisabled: context.syncState != null,
-    canLog: context.syncState == null,
+    // A card without a complete window cannot be decided (the outbox refuses it), so it locks like
+    // a card with a waiting change: no Log it, Edit, More or Log as; Skip only moves it back.
+    controlsDisabled: context.syncState != null || !hasSuggestedTimeWindow(item),
+    // Every decision needs a complete suggested window (the outbox refuses one without), so a card
+    // without one resists both directions and Skip only moves it behind the rest.
+    canLog: context.syncState == null && hasSuggestedTimeWindow(item),
     canSkip: true,
-    skipDefers: context.syncState != null,
+    skipDefers: context.syncState != null || !hasSuggestedTimeWindow(item),
     moreLabel: `More actions for ${title}`,
     menuOpen: context.menuOpen
   };

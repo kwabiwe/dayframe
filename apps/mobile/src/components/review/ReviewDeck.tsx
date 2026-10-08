@@ -275,6 +275,12 @@ function ReviewDeckCardView({
   const returning = returnFrom && !reduceMotion ? returnFrom.direction * REVIEW_DECK_RETURN_FROM : 0;
   const dragX = useSharedValue(returning);
   const dragY = useSharedValue(0);
+  // A card unmounted mid-flight (Undo re-mounts it) stops its fling, so the dead instance never
+  // reports a throw end that would cut the next flight short.
+  useEffect(() => () => {
+    cancelAnimation(dragX);
+    cancelAnimation(dragY);
+  }, [dragX, dragY]);
   const armed = useSharedValue(0);
   const thrown = useSharedValue(false);
   useEffect(() => {
