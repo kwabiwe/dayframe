@@ -1181,63 +1181,16 @@ describe("place persistence", () => {
   });
 });
 
-describe("automation rule persistence", () => {
+describe("automation rule creation", () => {
   beforeEach(() => {
     vi.resetAllMocks();
   });
 
-  it("persists natural-language activity descriptions on automation rules", async () => {
-    mocks.query
-      .mockResolvedValueOnce({ rows: [{ placeOk: true, projectOk: true, categoryOk: true }] })
-      .mockResolvedValueOnce({ rows: [{ id: "rule-1" }] });
-
-    await createEntity(
-      "automation_rule",
-      {
-        name: "Chelmsford Station pickup/drop-off",
-        triggerSource: "geofence_specific",
-        triggerType: "geofence_exit",
-        placeId: placeId(),
-        action: "create_review_item",
-        categoryId: categoryId(),
-        activityDescription: "Train station pickup/drop-off",
-        confidenceThreshold: "medium_high"
-      },
-      session
-    );
-
-    expect(mocks.query).toHaveBeenLastCalledWith(
-      expect.stringContaining("activity_description"),
-      [
-        session.workspaceId,
-        "Chelmsford Station pickup/drop-off",
-        "geofence_specific",
-        "geofence_exit",
-        placeId(),
-        "create_review_item",
-        null,
-        categoryId(),
-        "Train station pickup/drop-off",
-        "medium_high"
-      ]
-    );
-  });
-
-  it("rejects automation rules that reference entities outside the workspace", async () => {
-    mocks.query.mockResolvedValueOnce({ rows: [{ placeOk: false, projectOk: true, categoryOk: true }] });
-
+  it("no longer creates automation rules through the entity endpoint", async () => {
     await expect(
-      createEntity(
-        "automation_rule",
-        {
-          name: "Foreign place",
-          placeId: placeId(),
-          categoryId: categoryId()
-        },
-        session
-      )
-    ).rejects.toThrow(/active workspace/);
-    expect(mocks.query).toHaveBeenCalledTimes(1);
+      createEntity("automation_rule", { name: "Station pickup", placeId: placeId() }, session)
+    ).rejects.toMatchObject({ code: "unsupported_entity", status: 400, message: "Unsupported entity: automation_rule" });
+    expect(mocks.query).not.toHaveBeenCalled();
   });
 });
 
@@ -2949,15 +2902,15 @@ describe("review item resolution", () => {
     ]);
   });
 
-  it("validates review-created automation rule references before saving", async () => {
+  it("ignores a legacy review item once without writing an automation rule", async () => {
     const client = {
       query: vi.fn(async (statement: string) => {
         if (statement.includes("from review_items ri")) {
           return {
             rows: [
               {
-                id: "review-rule",
-                eventId: "event-rule",
+                id: "review-ignore",
+                eventId: "event-ignore",
                 title: "Station pickup",
                 status: "open",
                 suggestedProjectId: null,
@@ -2972,16 +2925,17 @@ describe("review item resolution", () => {
             ]
           };
         }
-        if (statement.includes("select ($2::uuid is null or exists")) {
-          return { rows: [{ placeOk: true, projectOk: true, categoryOk: true }] };
-        }
         return { rows: [] };
       }),
       release: vi.fn()
     };
     mocks.pool.connect.mockResolvedValueOnce(client);
 
-    await resolveReviewItem("review-rule", "create_rule", session);
+    await expect(resolveReviewItem("review-ignore", "ignore_once", session)).resolves.toMatchObject({
+      ok: true,
+      action: "ignore_once",
+      status: "ignored"
+    });
 
     const reviewSelect = client.query.mock.calls.find(([statement]) =>
       String(statement).includes("from review_items ri")
@@ -2990,28 +2944,39 @@ describe("review item resolution", () => {
     expect(reviewSelect?.[0]).toContain('c.id as "suggestedCategoryId"');
     expect(reviewSelect?.[0]).toContain('pl.id as "suggestedPlaceId"');
     expect(reviewSelect?.[0]).toContain("ae.workspace_id = ri.workspace_id");
-    expect(client.query).toHaveBeenCalledWith(expect.stringContaining("select ($2::uuid is null or exists"), [
+    expect(client.query).toHaveBeenCalledWith(expect.stringContaining("update review_items"), [
+      "review-ignore",
       session.workspaceId,
-      placeId(),
-      null,
-      categoryId()
+      "ignored",
+      "once",
+      session.userId
     ]);
-    expect(client.query).toHaveBeenCalledWith(
-      expect.stringContaining("insert into automation_rules"),
-      [
-        session.workspaceId,
-        "Suggestion from Station pickup",
-        "geofence_specific",
-        "geofence_exit",
-        placeId(),
-        null,
-        categoryId(),
-        "Station pickup",
-        "medium_high"
-      ]
-    );
+    expect(client.query.mock.calls.some(([statement]) => String(statement).includes("automation_rules"))).toBe(false);
+    expect(client.query.mock.calls.some(([statement]) => String(statement).includes("insert into time_entries"))).toBe(false);
     expect(client.query).toHaveBeenCalledWith("commit");
   });
+
+  it.each(["always_ignore_source", "create_rule"])(
+    "rejects the removed %s review action as invalid without touching the review item",
+    async (action) => {
+      const client = {
+        query: vi.fn(async (statement: string) => {
+          void statement;
+          return { rows: [] };
+        }),
+        release: vi.fn()
+      };
+      mocks.pool.connect.mockResolvedValueOnce(client);
+
+      await expect(resolveReviewItem("review-removed", action, session)).rejects.toMatchObject({
+        code: "invalid_action",
+        status: 400
+      });
+      // Rejected before any database work: a 400 even when the database is unavailable.
+      expect(mocks.pool.connect).not.toHaveBeenCalled();
+      expect(client.query).not.toHaveBeenCalled();
+    }
+  );
 
   it("marks duplicate event-created review candidates accepted without creating a second entry", async () => {
     const client = {

@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { createEntity } from "@/lib/event-service";
+import { createEntity, UnsupportedEntityError } from "@/lib/event-service";
 import { authErrorResponse } from "@/lib/api-errors";
 import { resolveRequestSession } from "@/lib/ingest-auth";
 
@@ -12,6 +12,9 @@ export async function POST(request: Request) {
   } catch (error) {
     const response = authErrorResponse(error);
     if (response) return response;
+    if (error instanceof UnsupportedEntityError) {
+      return NextResponse.json({ ok: false, code: error.code, error: error.message }, { status: error.status });
+    }
     throw error;
   }
 }

@@ -2,7 +2,7 @@
 
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { Check, CircleSlash, GitMerge, Map, WandSparkles } from "lucide-react";
+import { Check, CircleSlash, Map } from "lucide-react";
 import type { CategoryRow, ReviewItemRow } from "@/lib/queries";
 import { formatDate, formatEventLabel, formatSourceLabel, formatTime } from "@/lib/format";
 import { LocationReviewPanel } from "@/components/location/LocationReviewPanel";
@@ -62,16 +62,12 @@ function ReviewItemCard({
   const [actionError, setActionError] = useState<string | null>(null);
   const display = reviewItemDisplay(item);
 
-  async function act(action: string) {
+  async function act(action: "accept" | "ignore_once") {
     setActiveAction(action);
     setActionError(null);
     try {
       const body = hasV2Evidence(item)
-        ? action === "accept"
-          ? { action: "confirm" }
-          : action === "ignore_once"
-            ? { action: "ignore_once_location" }
-            : { action }
+        ? { action: action === "accept" ? "confirm" : "ignore_once_location" }
         : { action };
       const response = await clientFetch(`/api/review/${item.id}`, {
         method: "POST",
@@ -156,28 +152,6 @@ function ReviewItemCard({
             <CircleSlash size={15} />
             Ignore
           </button>
-          {!hasV2Evidence(item) ? (
-            <>
-              <button
-                className="industrial-button focus-ring min-h-11 whitespace-nowrap px-3 py-2 text-sm disabled:opacity-50"
-                type="button"
-                disabled={isPending || activeAction != null}
-                onClick={() => act("always_ignore_source")}
-              >
-                <GitMerge size={15} />
-                Always ignore
-              </button>
-              <button
-                className="industrial-button focus-ring min-h-11 whitespace-nowrap px-3 py-2 text-sm disabled:opacity-50"
-                type="button"
-                disabled={isPending || activeAction != null}
-                onClick={() => act("create_rule")}
-              >
-                <WandSparkles size={15} />
-                Make rule
-              </button>
-            </>
-          ) : null}
         </div>
         {showEvidence ? (
           <LocationReviewPanel

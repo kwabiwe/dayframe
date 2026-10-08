@@ -89,6 +89,25 @@ describe("POST /api/review/[id]", () => {
     });
   });
 
+  it.each(["always_ignore_source", "create_rule"])(
+    "returns a structured 400 for the removed %s review action",
+    async (action) => {
+      mocks.resolveReviewItem.mockRejectedValueOnce(
+        new ReviewResolutionError("invalid_action", "Unsupported review action.", {
+          status: 400,
+          details: { action }
+        })
+      );
+
+      const response = await POST(jsonRequest({ action }), params("review-1"));
+      const payload = await response.json();
+
+      expect(response.status).toBe(400);
+      expect(payload).toMatchObject({ ok: false, code: "invalid_action", action });
+      expect(mocks.resolveLocationReviewAction).not.toHaveBeenCalled();
+    }
+  );
+
   it("dispatches rich location actions through the atomic resolver", async () => {
     const action = {
       action: "edit_and_confirm" as const,
