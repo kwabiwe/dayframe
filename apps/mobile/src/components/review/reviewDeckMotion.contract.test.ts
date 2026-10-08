@@ -44,7 +44,7 @@ describe("Review deck motion contract (Blocks parity step 5b)", () => {
 
   it("does not count the held card in flight toward \"N of M\" (r2 B)", () => {
     expect(screen).toContain("const deckRemaining = heldInFlight ? deckSources.length - 1 : deckSources.length;");
-    expect(screen).toContain("deckRemaining,");
+    expect(screen).toContain("countReadStartedAt: backlogCountReadStartedAt,");
     expect(screen).not.toMatch(/remaining: deckBacklogComplete\s*\?\s*deckSources\.length/);
   });
 

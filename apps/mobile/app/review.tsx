@@ -96,6 +96,7 @@ import {
   createReviewClientMutationId,
   enqueueReviewMutation,
   getReviewItemSyncStates,
+  listReviewSyncDiagnosticMutations,
   getReviewSyncDiagnostics,
   loadCachedReviewBootstrap,
   projectReviewBootstrap,
@@ -176,6 +177,9 @@ export default function ReviewScreen() {
   } = useResolvedReduceMotionPreference();
   const [data, setData] = useState<MobileBootstrap | null>(null);
   const [reviewBacklog, setReviewBacklog] = useState<ReviewBacklogState | null>(null);
+  // "N of M": when the server count's read started, and this account's outbox per item.
+  const [backlogCountReadStartedAt, setBacklogCountReadStartedAt] = useState<number | null>(null);
+  const [reviewOutboxMarks, setReviewOutboxMarks] = useState<readonly { reviewItemId: string; state: string; updatedAt: string }[]>([]);
   const [reviewBacklogLoading, setReviewBacklogLoading] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [editTarget, setEditTarget] = useState<ReviewEditTarget | null>(null);
@@ -309,6 +313,7 @@ export default function ReviewScreen() {
       reviewBacklogRead.current = null;
       reviewBacklogRef.current = null;
       setReviewBacklog(null);
+      setBacklogCountReadStartedAt(null);
       setReviewBacklogLoading(false);
     }
     const openItemIds = (nextData?.reviewItems ?? [])
@@ -335,13 +340,19 @@ export default function ReviewScreen() {
 
   const refreshReviewSyncDiagnostics = useCallback(async () => {
     const generation = screenOwnerGeneration.current;
-    const [diagnostics, itemStates] = await Promise.all([
+    const [diagnostics, itemStates, mutations] = await Promise.all([
       getReviewSyncDiagnostics(),
-      getReviewItemSyncStates()
+      getReviewItemSyncStates(),
+      listReviewSyncDiagnosticMutations().catch(() => [])
     ]);
     if (generation !== screenOwnerGeneration.current || !screenFocusedRef.current) return;
     setReviewSyncDiagnostics(diagnostics);
     setReviewItemSyncStates(itemStates);
+    setReviewOutboxMarks(mutations.map((mutation) => ({
+      reviewItemId: mutation.reviewItemId,
+      state: mutation.state,
+      updatedAt: mutation.updatedAt
+    })));
   }, []);
 
   const reconcileLocalReviewProjection = useCallback(async (
@@ -427,6 +438,8 @@ export default function ReviewScreen() {
     let restart = false;
     let readPhase: "server" | "cache" = "server";
 
+    // The count on a backlog's first page reflects decisions acknowledged before this moment.
+    const readStartedAt = Date.now();
     try {
       const response = await fetchReviewPresentationPage({
         owner,
@@ -488,6 +501,7 @@ export default function ReviewScreen() {
         const nextBootstrap = mergeReviewBootstrapProjection(current, cached.bootstrap);
         commitData(nextBootstrap);
         commitReviewBacklog(nextBacklog);
+        if (!options.cursor) setBacklogCountReadStartedAt(readStartedAt);
         startEvidencePrefetch(nextBootstrap);
         setReviewAvailabilityMessage(null);
         recordReviewPresentationRead(owner, "backlog", "success");
@@ -956,7 +970,6 @@ export default function ReviewScreen() {
   const heldInFlight = deckFlying && heldDeckDecision?.key === flyingDeckKey;
   const deckRemaining = heldInFlight ? deckSources.length - 1 : deckSources.length;
   // The server count still includes decisions held for Undo or saving on this iPhone.
-  const locallyDecidedCount = (heldDeckDecision ? 1 : 0) + committingDeckKeys.size;
   // Every open item is loaded: the deck itself is the count, so a decision still syncing never
   // turns "2 of 5" into "2 of 5+". Otherwise the server count is used when it is exact.
   const deckBacklogComplete = reviewBacklog !== null && !reviewBacklog.nextCursor && reviewBacklog.recordsComplete;
@@ -967,11 +980,12 @@ export default function ReviewScreen() {
       backlogComplete: deckBacklogComplete,
       deckRemaining,
       serverOpenCount: reviewBacklog?.globalCount ?? null,
-      unappliedQueuedCount: reviewSyncDiagnostics
-        ? reviewSyncDiagnostics.pendingCount + reviewSyncDiagnostics.retryWaitCount + reviewSyncDiagnostics.authenticationRequiredCount
-        : 0,
-      held: Boolean(heldDeckDecision),
-      localDecidedCount: locallyDecidedCount
+      countReadStartedAt: backlogCountReadStartedAt,
+      localItemIds: [
+        ...(heldDeckDecision ? [heldDeckDecision.itemId] : []),
+        ...[...committingDeckKeys].map((key) => key.slice(key.indexOf(":") + 1))
+      ],
+      outbox: reviewOutboxMarks
     }),
     exact: deckBacklogComplete || reviewBacklog !== null
   });
