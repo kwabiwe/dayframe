@@ -44,7 +44,7 @@ import { ActivityIcon, DayframeIcon } from "@/components/icons/DayframeIcon";
 import { ActivityPickerSheet } from "@/components/ActivityPickerSheet";
 import { activityChips, chipsThatFit, recentActivityIds } from "@/lib/activityChoice";
 import { playHaptic } from "@/lib/haptics";
-import { TimeEntryDurationDial } from "@/components/TimeEntryDurationDial";
+import { dialTrackColor, TimeEntryDurationDial } from "@/components/TimeEntryDurationDial";
 import { pressable, type MobileStyles, type MobileTheme } from "@/lib/mobileTheme";
 import { mobileTextProps } from "@/lib/mobileTypography";
 import {
@@ -698,9 +698,9 @@ export function ActiveTimerEditSheet({
   const dialActivityColor = useMemo(() => {
     const chosen = categories.find((category) => category.id === selectedCategoryId);
     return chosen
-      ? activityControlColor(chosen.color ?? chosen.id, theme.mode, [theme.surfaceMuted, theme.surfaceRaised], chosen.name)
+      ? activityControlColor(chosen.color ?? chosen.id, theme.mode, [dialTrackColor(theme), theme.surfaceRaised], chosen.name)
       : null;
-  }, [categories, selectedCategoryId, theme.mode, theme.surfaceMuted, theme.surfaceRaised]);
+  }, [categories, selectedCategoryId, theme]);
   const chipCandidates = useMemo(
     () => activityChips(categories, chipAnchorId, recentActivities, ACTIVITY_CHIP_LIMIT_BY_DENSITY[chipDensity]),
     [categories, chipAnchorId, chipDensity, recentActivities]

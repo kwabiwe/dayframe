@@ -46,6 +46,13 @@ final class DayframeDurationDialCoreTests: XCTestCase {
     XCTAssertEqual(DayframeDurationDialCore.lapDetail(milliseconds: 120 * 60_000), "2 full turns + 0 min")
   }
 
+  func testMeasuresTheRingInteriorAtAnOffset() {
+    // A condensed dial (164 points): ring radius 55.76, inner edge 47.76.
+    XCTAssertEqual(DayframeDurationDialCore.chordWidth(innerRadius: 47.76, offset: 11.5), 92.71, accuracy: 0.05)
+    XCTAssertEqual(DayframeDurationDialCore.chordWidth(innerRadius: 40, offset: 0), 80, accuracy: 0.0001)
+    XCTAssertEqual(DayframeDurationDialCore.chordWidth(innerRadius: 40, offset: 41), 0)
+  }
+
   func testFormatsFullDay() {
     XCTAssertEqual(DayframeDurationDialCore.formatDuration(milliseconds: 86_400_000), "24:00:00")
   }

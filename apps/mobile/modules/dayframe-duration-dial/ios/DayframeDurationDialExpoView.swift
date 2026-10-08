@@ -439,19 +439,48 @@ final class DayframeDurationDialExpoView: ExpoView, UIGestureRecognizerDelegate 
       .font: displayFont(displaySize),
       .foregroundColor: UIColor(dayframeHex: record.theme.textPrimary)
     ]
-    let detail = DayframeDurationDialCore.lapDetail(milliseconds: effectiveEnd - record.startMs) ?? (record.mode == "running"
+    let clockDetail = record.mode == "running"
       ? "since \(DayframeDurationDialStyle.clock(record.startMs))"
-      : "\(DayframeDurationDialStyle.clock(record.startMs))–\(DayframeDurationDialStyle.clock(record.endMs))")
+      : "\(DayframeDurationDialStyle.clock(record.startMs))–\(DayframeDurationDialStyle.clock(record.endMs))"
+    let candidates = [DayframeDurationDialCore.lapDetail(milliseconds: effectiveEnd - record.startMs), clockDetail]
+      .compactMap { $0 }
+    let size = text.size(withAttributes: attributes)
+    let lift: CGFloat = displaySize >= 30 ? 14 : 8
+    let innerRadius = Double(radius - DayframeDurationDialStyle.ringWidth / 2)
+    // The subtitle must fit inside the ring where it is drawn: the lap text first, smaller if it
+    // must (down to 9 points), else the clock text, which is shorter.
+    func detailFont(_ size: CGFloat) -> UIFont { UIFont.systemFont(ofSize: size, weight: .semibold) }
+    func layout(_ detail: String, _ fontSize: CGFloat) -> (top: CGFloat, detailSize: CGSize, fits: Bool) {
+      let detailSize = detail.size(withAttributes: [.font: detailFont(fontSize)])
+      let top = centre.y - (size.height + 2 + detailSize.height) / 2 - lift
+      let bandTop = Double(top + size.height + 2 - centre.y)
+      let bandBottom = bandTop + Double(detailSize.height)
+      let room = DayframeDurationDialCore.chordWidth(
+        innerRadius: innerRadius,
+        offset: max(abs(bandTop), abs(bandBottom))
+      ) - 4
+      return (top, detailSize, Double(detailSize.width) <= room)
+    }
+    let baseDetailSize: CGFloat = displaySize >= 30 ? 12.5 : 11
+    var chosen = (text: clockDetail, fontSize: CGFloat(9))
+    search: for candidate in candidates {
+      var fontSize = baseDetailSize
+      while fontSize >= 9 {
+        if layout(candidate, fontSize).fits {
+          chosen = (candidate, fontSize)
+          break search
+        }
+        fontSize -= 0.5
+      }
+    }
+    let placed = layout(chosen.text, chosen.fontSize)
     let detailAttributes: [NSAttributedString.Key: Any] = [
-      .font: UIFont.systemFont(ofSize: displaySize >= 30 ? 12.5 : 11, weight: .semibold),
+      .font: detailFont(chosen.fontSize),
       .foregroundColor: UIColor(dayframeHex: record.theme.textSecondary)
     ]
-    let size = text.size(withAttributes: attributes)
-    let detailSize = detail.size(withAttributes: detailAttributes)
-    let top = centre.y - (size.height + 2 + detailSize.height) / 2 - (displaySize >= 30 ? 14 : 8)
-    text.draw(at: CGPoint(x: centre.x - size.width / 2, y: top), withAttributes: attributes)
-    detail.draw(
-      at: CGPoint(x: centre.x - detailSize.width / 2, y: top + size.height + 2),
+    text.draw(at: CGPoint(x: centre.x - size.width / 2, y: placed.top), withAttributes: attributes)
+    chosen.text.draw(
+      at: CGPoint(x: centre.x - placed.detailSize.width / 2, y: placed.top + size.height + 2),
       withAttributes: detailAttributes
     )
   }

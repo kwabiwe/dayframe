@@ -58,6 +58,12 @@ enum DayframeDurationDialCore {
     return "\(laps) full turn\(laps == 1 ? "" : "s") + \(minutes % 60) min"
   }
 
+  /// The width inside a ring of `innerRadius` along a horizontal line `offset` from its centre.
+  static func chordWidth(innerRadius: Double, offset: Double) -> Double {
+    let squared = innerRadius * innerRadius - offset * offset
+    return squared > 0 ? 2 * squared.squareRoot() : 0
+  }
+
   static func strongestHaptic(from previous: Int, to next: Int) -> Int {
     guard previous != next else { return 0 }
     let lower = min(previous, next)

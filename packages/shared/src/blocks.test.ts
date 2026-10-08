@@ -31,7 +31,9 @@ describe("Dayframe Blocks activity colours", () => {
   it("gives the dial's ring and knobs 3:1 against the track and the sheet in both themes", () => {
     for (const color of DAYFRAME_PALETTE) {
       for (const mode of modes) {
-        const backgrounds = [DAYFRAME_THEME[mode].surfaceMuted, DAYFRAME_THEME[mode].surfaceRaised];
+        // The dial's track (muted in Light, inset in Dark) and the sheet.
+        const track = mode === "dark" ? DAYFRAME_THEME[mode].surfaceInset : DAYFRAME_THEME[mode].surfaceMuted;
+        const backgrounds = [track, DAYFRAME_THEME[mode].surfaceRaised];
         const ring = activityControlColor(color.key, mode, backgrounds);
         for (const background of backgrounds) {
           expect(contrastRatio(ring, background), `${color.key} ${mode} ${ring} on ${background}`).toBeGreaterThanOrEqual(ACTIVITY_CONTROL_MINIMUM_CONTRAST);

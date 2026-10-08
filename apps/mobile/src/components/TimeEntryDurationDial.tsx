@@ -41,6 +41,14 @@ type TimeEntryDurationDialProps = {
   theme: MobileTheme;
 };
 
+/**
+ * The dial's empty track: a step darker than the sheet in Dark (the prototype's --inset), and the
+ * muted fill in Light, where the inset token is too close to the white sheet to see.
+ */
+export function dialTrackColor(theme: MobileTheme) {
+  return theme.mode === "dark" ? theme.surfaceInset : theme.surfaceMuted;
+}
+
 export function TimeEntryDurationDial({
   activityColor = null,
   disabled,
@@ -86,7 +94,7 @@ export function TimeEntryDurationDial({
       accent: theme.accent,
       accentSoft: theme.accentSoft,
       arc: activityColor ?? theme.accent,
-      track: theme.surfaceMuted,
+      track: dialTrackColor(theme),
       border: theme.border,
       onAccent: theme.onAccent,
       surface: theme.surfaceRaised,
