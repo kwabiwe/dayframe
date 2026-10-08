@@ -126,4 +126,20 @@ describe("createGoalSaver ordering", () => {
     await h.settle();
     expect(h.saves.map((save) => save.goals.daily)).toEqual([9, 10]);
   });
+
+  it("never sends a queued save after sign-out", async () => {
+    const h = harness();
+    h.saver.schedule({ daily: 9, weekly: 40 });
+    h.fire();
+    await h.settle();
+    h.saver.schedule({ daily: 10, weekly: 40 });
+    h.fire();
+    h.saver.cancel();
+    h.saves[0].reject(new Error("timeout"));
+    await h.settle();
+    await h.settle();
+    expect(h.saves).toHaveLength(1);
+    expect(h.saved).toEqual([]);
+    expect(h.failed).toEqual([]);
+  });
 });

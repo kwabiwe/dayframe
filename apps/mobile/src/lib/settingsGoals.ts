@@ -32,7 +32,9 @@ export function createGoalSaver({
 
   function send(goals: TimeGoals) {
     const mine = ++sequence;
-    queue = queue.catch(() => undefined).then(() => save(goals)).then(
+    // A save superseded or cancelled (sign-out) while it waited its turn is never sent: it could
+    // otherwise go out with the next account's session.
+    queue = queue.catch(() => undefined).then(() => (mine === sequence ? save(goals) : undefined)).then(
       () => {
         if (mine === sequence) onSaved(goals);
       },

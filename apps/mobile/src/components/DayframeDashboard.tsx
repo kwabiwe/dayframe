@@ -342,6 +342,9 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
       ...current,
       user: { ...current.user, dailyGoalMinutes: event.dailyGoalMinutes, weeklyGoalMinutes: event.weeklyGoalMinutes }
     };
+    // A bootstrap already in flight carries the old goals: treat this like a mutation so it is
+    // reconciled instead of applied over the new ones.
+    dashboardMutationRevision.current += 1;
     latestData.current = next;
     setData(next);
   }), []);
