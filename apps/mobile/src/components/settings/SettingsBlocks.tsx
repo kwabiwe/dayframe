@@ -196,7 +196,8 @@ export function SettingsStepper({
         pressed ? { backgroundColor: theme.border } : null
       ]}
     >
-      <Text style={[blockStyles.stepGlyph, { color: theme.textPrimary }]}>{kind}</Text>
+      {/* An icon, not text: it keeps its size inside the circle at every text size. */}
+      <Text allowFontScaling={false} style={[blockStyles.stepGlyph, { color: theme.textPrimary }]}>{kind}</Text>
     </Pressable>
   );
   return (
