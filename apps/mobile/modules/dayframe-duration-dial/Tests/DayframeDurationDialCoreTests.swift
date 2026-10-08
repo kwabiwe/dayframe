@@ -30,9 +30,20 @@ final class DayframeDurationDialCoreTests: XCTestCase {
   func testFormatsShortDurationsLikeThePrototype() {
     XCTAssertEqual(DayframeDurationDialCore.formatShortDuration(milliseconds: 0), "0m")
     XCTAssertEqual(DayframeDurationDialCore.formatShortDuration(milliseconds: 42 * 60_000 + 59_000), "42m")
-    XCTAssertEqual(DayframeDurationDialCore.formatShortDuration(milliseconds: 60 * 60_000), "1h")
+    XCTAssertEqual(DayframeDurationDialCore.formatShortDuration(milliseconds: 60 * 60_000), "1h 00m")
     XCTAssertEqual(DayframeDurationDialCore.formatShortDuration(milliseconds: 65 * 60_000), "1h 05m")
     XCTAssertEqual(DayframeDurationDialCore.formatShortDuration(milliseconds: -5_000), "0m")
+  }
+
+  func testSolidArcCoversOnlyTheCurrentHour() {
+    let turn = DayframeDurationDialCore.fullTurn
+    XCTAssertEqual(DayframeDurationDialCore.solidArcSweep(milliseconds: 15 * 60_000), turn / 4, accuracy: 0.0001)
+    XCTAssertEqual(DayframeDurationDialCore.solidArcSweep(milliseconds: 65 * 60_000), turn * 5 / 60, accuracy: 0.0001)
+    XCTAssertEqual(DayframeDurationDialCore.solidArcSweep(milliseconds: 60 * 60_000), 0, accuracy: 0.0001)
+    XCTAssertEqual(DayframeDurationDialCore.solidArcSweep(milliseconds: -1), 0, accuracy: 0.0001)
+    XCTAssertNil(DayframeDurationDialCore.lapDetail(milliseconds: 59 * 60_000))
+    XCTAssertEqual(DayframeDurationDialCore.lapDetail(milliseconds: 65 * 60_000), "1 full turn + 5 min")
+    XCTAssertEqual(DayframeDurationDialCore.lapDetail(milliseconds: 120 * 60_000), "2 full turns + 0 min")
   }
 
   func testFormatsFullDay() {

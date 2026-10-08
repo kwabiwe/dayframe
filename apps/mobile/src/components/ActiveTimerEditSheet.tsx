@@ -30,6 +30,7 @@ import {
   normalizeNewTagName,
   normalizeTagName,
   DAYFRAME_APP_ICONS,
+  activityControlColor,
   blockColorsFor,
   type RecentActivitySuggestion
 } from "@dayframe/shared";
@@ -692,11 +693,14 @@ export function ActiveTimerEditSheet({
     fontScale: windowDimensions.fontScale,
     windowHeight: windowDimensions.height
   });
-  // The dial's ring takes the chosen activity's colour, as in the prototype.
+  // The dial's ring takes the chosen activity's colour, as in the prototype, deepened (or lifted)
+  // where a pale colour would measure under 3:1 against the dial's track or the sheet.
   const dialActivityColor = useMemo(() => {
     const chosen = categories.find((category) => category.id === selectedCategoryId);
-    return chosen ? blockColorsFor(chosen.color ?? chosen.id, theme.mode, chosen.name).fill : null;
-  }, [categories, selectedCategoryId, theme.mode]);
+    return chosen
+      ? activityControlColor(chosen.color ?? chosen.id, theme.mode, [theme.surfaceMuted, theme.surfaceRaised], chosen.name)
+      : null;
+  }, [categories, selectedCategoryId, theme.mode, theme.surfaceMuted, theme.surfaceRaised]);
   const chipCandidates = useMemo(
     () => activityChips(categories, chipAnchorId, recentActivities, ACTIVITY_CHIP_LIMIT_BY_DENSITY[chipDensity]),
     [categories, chipAnchorId, chipDensity, recentActivities]

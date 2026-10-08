@@ -1994,12 +1994,6 @@ function createStyles(theme: MobileTheme) {
     activeEditTagSectionLayer: {
       zIndex: 20
     },
-    activeEditSectionLabel: {
-      color: theme.textSecondary,
-      fontFamily: monoFont,
-      fontSize: 12,
-      fontWeight: "600"
-    },
     taskSuggestionsPanel: {
       backgroundColor: theme.surfaceMuted,
       borderRadius: 16,

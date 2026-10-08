@@ -11,6 +11,10 @@ const swipeSheetSource = readFileSync(
   fileURLToPath(new URL("../components/SwipeDismissSheet.tsx", import.meta.url)),
   "utf8"
 );
+const sheetSource = readFileSync(
+  fileURLToPath(new URL("../components/ActiveTimerEditSheet.tsx", import.meta.url)),
+  "utf8"
+);
 const expoViewSource = readFileSync(`${moduleRoot}ios/DayframeDurationDialExpoView.swift`, "utf8");
 const coreSource = readFileSync(`${moduleRoot}ios/DayframeDurationDialCore.swift`, "utf8");
 
@@ -62,11 +66,15 @@ describe("native duration dial contract", () => {
     expect(expoViewSource).toContain("let arc: String?");
     expect(expoViewSource).toContain("let track: String?");
     expect(componentSource).toContain("arc: activityColor ?? theme.accent,");
-    expect(componentSource).toContain("track: theme.surfaceInset,");
+    expect(componentSource).toContain("track: theme.surfaceMuted,");
     expect(expoViewSource).toContain("static let ringWidth: CGFloat = 16");
     expect(expoViewSource).toContain("static let knobRadius: CGFloat = 13");
     expect(expoViewSource).toContain('UIFont(name: "BricolageGrotesque-Bold", size: size)');
     expect(expoViewSource).toContain("DayframeDurationDialCore.formatShortDuration(");
+    // Past an hour: a faint lap under a solid arc for the current hour only, and the lap subtitle.
+    expect(expoViewSource).toContain("DayframeDurationDialCore.solidArcSweep(");
+    expect(expoViewSource).toContain("DayframeDurationDialCore.lapDetail(");
+    expect(sheetSource).toContain("activityControlColor(chosen.color ?? chosen.id, theme.mode, [theme.surfaceMuted, theme.surfaceRaised], chosen.name)");
     // The handles are drawn shapes, not SF Symbols (one icon language).
     expect(expoViewSource).not.toContain("UIImage(systemName:");
   });

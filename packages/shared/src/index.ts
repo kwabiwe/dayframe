@@ -83,7 +83,9 @@ export {
   type PlaceRoleSlot
 } from "./placeRoles";
 export {
+  ACTIVITY_CONTROL_MINIMUM_CONTRAST,
   DAYFRAME_BLOCKS,
+  activityControlColor,
   blockColorsFor,
   contrastRatio,
   onBlockTextColor,

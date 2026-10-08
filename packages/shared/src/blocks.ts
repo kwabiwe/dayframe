@@ -30,6 +30,30 @@ export function blockColorsFor(value: unknown, mode: DayframeThemeMode, fallback
   return { fill: paletteColorFor(key, "", mode), text: onBlockTextColor(key, mode) };
 }
 
+/** Non-text contrast (WCAG 1.4.11) for a thin activity-coloured control such as a ring or knob. */
+export const ACTIVITY_CONTROL_MINIMUM_CONTRAST = 3;
+
+/**
+ * An activity colour for a thin control (the duration dial's ring and knobs): the display colour
+ * when it measures at least 3:1 against every background it sits on, otherwise that colour
+ * deepened toward deep ink (light theme) or lifted toward white (dark) just until it does.
+ */
+export function activityControlColor(value: unknown, mode: DayframeThemeMode, backgrounds: readonly string[], fallbackSeed = "") {
+  const fill = paletteColorFor(value, fallbackSeed, mode);
+  const toward = mode === "light" ? DAYFRAME_BLOCKS.onBlock.ink : DAYFRAME_BLOCKS.onBlock.white;
+  for (let step = 0; step <= 20; step += 1) {
+    const color = mixHex(fill, toward, step / 20);
+    if (backgrounds.every((background) => contrastRatio(color, background) >= ACTIVITY_CONTROL_MINIMUM_CONTRAST)) return color;
+  }
+  return toward;
+}
+
+function mixHex(from: string, to: string, amount: number) {
+  const channels = (hex: string) => [0, 2, 4].map((offset) => Number.parseInt(hex.replace("#", "").slice(offset, offset + 2), 16));
+  const [a, b] = [channels(from), channels(to)];
+  return `#${a.map((channel, index) => Math.round(channel + (b[index] - channel) * amount).toString(16).padStart(2, "0")).join("").toUpperCase()}`;
+}
+
 function relativeLuminance(hex: string) {
   const match = /^#?([0-9a-f]{6})$/i.exec(hex.trim());
   if (!match) throw new Error(`Expected a #RRGGBB colour, received ${hex}`);

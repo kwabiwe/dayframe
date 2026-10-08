@@ -385,9 +385,7 @@ final class DayframeDurationDialExpoView: ExpoView, UIGestureRecognizerDelegate 
     let start = DayframeDurationDialCore.angle(timestampMilliseconds: record.startMs)
     let effectiveEnd = record.mode == "running" ? record.nowMs : record.endMs
     let duration = max(0, effectiveEnd - record.startMs)
-    let end = duration >= 3_600_000
-      ? start + DayframeDurationDialCore.fullTurn
-      : DayframeDurationDialCore.angle(timestampMilliseconds: effectiveEnd)
+    let sweep = DayframeDurationDialCore.solidArcSweep(milliseconds: duration)
     let arcColor = UIColor(dayframeHex: record.theme.arc ?? record.theme.accent)
     let trackColor = UIColor(dayframeHex: record.theme.track ?? record.theme.surfaceMuted)
     context.saveGState()
@@ -401,16 +399,19 @@ final class DayframeDurationDialExpoView: ExpoView, UIGestureRecognizerDelegate 
       context.addArc(center: centre, radius: radius, startAngle: 0, endAngle: CGFloat(DayframeDurationDialCore.fullTurn), clockwise: false)
       context.strokePath()
     }
-    context.setStrokeColor(arcColor.cgColor)
-    context.setLineCap(.round)
-    context.addArc(
-      center: centre,
-      radius: radius,
-      startAngle: CGFloat(start),
-      endAngle: CGFloat(end < start ? end + DayframeDurationDialCore.fullTurn : end),
-      clockwise: false
-    )
-    context.strokePath()
+    // The solid arc covers only the current hour, so the faint lap stays visible past an hour.
+    if sweep > 0.0001 {
+      context.setStrokeColor(arcColor.cgColor)
+      context.setLineCap(.round)
+      context.addArc(
+        center: centre,
+        radius: radius,
+        startAngle: CGFloat(start),
+        endAngle: CGFloat(start + sweep),
+        clockwise: false
+      )
+      context.strokePath()
+    }
     context.restoreGState()
   }
 
@@ -421,7 +422,7 @@ final class DayframeDurationDialExpoView: ExpoView, UIGestureRecognizerDelegate 
   ) {
     let effectiveEnd = record.mode == "running" ? record.nowMs : record.endMs
     // Blocks prototype: the duration in the display face ("42m", "1h 05m"), then "since 21:22"
-    // while running or "21:19–21:26" for a stopped block.
+    // while running or "21:19–21:26" for a stopped block ("1 full turn + 5 min" past an hour).
     let text = DayframeDurationDialCore.formatShortDuration(milliseconds: effectiveEnd - record.startMs)
     // 38 points as in the prototype, smaller on compact dials so it stays inside the ring.
     let radius = min(bounds.width, bounds.height) * 0.34
@@ -438,9 +439,9 @@ final class DayframeDurationDialExpoView: ExpoView, UIGestureRecognizerDelegate 
       .font: displayFont(displaySize),
       .foregroundColor: UIColor(dayframeHex: record.theme.textPrimary)
     ]
-    let detail = record.mode == "running"
+    let detail = DayframeDurationDialCore.lapDetail(milliseconds: effectiveEnd - record.startMs) ?? (record.mode == "running"
       ? "since \(DayframeDurationDialStyle.clock(record.startMs))"
-      : "\(DayframeDurationDialStyle.clock(record.startMs))–\(DayframeDurationDialStyle.clock(record.endMs))"
+      : "\(DayframeDurationDialStyle.clock(record.startMs))–\(DayframeDurationDialStyle.clock(record.endMs))")
     let detailAttributes: [NSAttributedString.Key: Any] = [
       .font: UIFont.systemFont(ofSize: displaySize >= 30 ? 12.5 : 11, weight: .semibold),
       .foregroundColor: UIColor(dayframeHex: record.theme.textSecondary)
