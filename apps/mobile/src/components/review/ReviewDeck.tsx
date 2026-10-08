@@ -313,10 +313,14 @@ function ReviewDeckCardView({
     // flyOut reads only shared values and the latest props.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [throwRequest, top, card.key]);
+  // Touches that start in the name field belong to the field (cursor and selection drags), never
+  // to the card's throw.
+  const logAsFieldGesture = Gesture.Native();
   const dragStartX = useSharedValue(0);
   const dragStartY = useSharedValue(0);
   const pan = Gesture.Pan()
     .enabled(top)
+    .requireExternalGestureToFail(logAsFieldGesture)
     .activeOffsetX([-12, 12])
     .failOffsetY([-14, 14])
     .onStart(() => {
@@ -481,6 +485,7 @@ function ReviewDeckCardView({
           ) : null}
           {card.logAsEditable && top ? (
             <View style={[deckStyles.logAs, { backgroundColor: theme.surfaceInset }]} testID="review-deck-log-as">
+              <GestureDetector gesture={logAsFieldGesture}>
               <TextInput
                 {...mobileTextProps("input")}
                 accessibilityLabel="Log as"
@@ -492,8 +497,10 @@ function ReviewDeckCardView({
                 returnKeyType="done"
                 style={[deckStyles.logAsName, deckStyles.logAsInput, { color: theme.textPrimary }]}
                 testID="review-deck-log-as-name"
-                value={card.logAsName}
+                // Uncontrolled: typing never re-renders the deck. The card remounts on Undo.
+                defaultValue={card.logAsName}
               />
+              </GestureDetector>
               <Pressable
                 accessibilityHint="Opens all activities"
                 accessibilityLabel={`Activity, ${card.activityName}`}
@@ -951,8 +958,10 @@ const deckStyles = StyleSheet.create({
     paddingVertical: 0
   },
   activityChipButton: {
+    alignItems: "center",
     justifyContent: "center",
-    minHeight: 44
+    minHeight: 44,
+    minWidth: 44
   },
   logAsName: {
     flex: 1,

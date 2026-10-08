@@ -117,7 +117,12 @@ describe("Review deck live Log as (Blocks parity step 5c-1)", () => {
     expect(deck).toContain('testID="review-deck-log-as-name"');
     expect(deck).toContain('testID="review-deck-log-as-activity"');
     expect(screen).toContain("<ActivityPickerSheet");
-    expect(screen).toMatch(/held\.logged && held\.edit && item\.suggestedStartedAt && item\.suggestedStoppedAt[\s\S]*?action: "edit_and_confirm"/);
+    // The edit is decided when the hold ends, from what really changed (src/lib/reviewLogAs.ts).
+    expect(screen).toMatch(/const edit = held\.logged\s*\? reviewLogAsEdit\(/);
+    expect(screen).toContain('resolveItem(item, { action: "edit_and_confirm", edit }');
+    // The field is uncontrolled and its touches never start a throw.
+    expect(deck).toContain("defaultValue={card.logAsName}");
+    expect(deck).toContain(".requireExternalGestureToFail(logAsFieldGesture)");
     expect(screen).toContain("logAsEditable: context.syncState == null && hasSuggestedTimeWindow(item)");
   });
 });

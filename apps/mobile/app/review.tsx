@@ -36,6 +36,7 @@ import {
 import { createReviewDeckHold, reviewDeckProposalSignature, type ReviewDeckHeldDecision } from "@/lib/reviewDeckHold";
 import { ActivityPickerSheet } from "@/components/ActivityPickerSheet";
 import { recentActivityIds } from "@/lib/activityChoice";
+import { reviewLogAsEdit } from "@/lib/reviewLogAs";
 import { playHaptic } from "@/lib/haptics";
 import {
   OverflowMenu,
@@ -205,7 +206,13 @@ export default function ReviewScreen() {
   const deckWasFinished = useRef(false);
   const celebrateDeckFinish = useRef(false);
   const deckTokenSequence = useRef(0);
+  // Live "Log as" (step 5c-1): names typed on a card live in a ref (the field is uncontrolled);
+  // activities picked on the chip are state so the card recolours. Both are read when a held
+  // decision is saved, so a change made during the flight still counts.
   const [logAsDrafts, setLogAsDrafts] = useState<ReadonlyMap<string, ReviewLogAsDraft>>(new Map());
+  const logAsDraftsRef = useRef(logAsDrafts);
+  logAsDraftsRef.current = logAsDrafts;
+  const logAsNames = useRef(new Map<string, string>());
   const [logAsPickerItemId, setLogAsPickerItemId] = useState<string | null>(null);
   const commitHeldDeckDecisionRef = useRef<(held: ReviewDeckHeldDecision) => void>(() => undefined);
   const deckHold = useRef(createReviewDeckHold({
@@ -816,6 +823,10 @@ export default function ReviewScreen() {
       ...cachedOpenReviewItems.filter((item) => !loadedIds.has(item.id))
     ];
   }, [cachedOpenReviewItems, reviewBacklog]);
+  useEffect(() => {
+    // The picked-for moment left (decided elsewhere, refreshed away): close its picker.
+    if (logAsPickerItemId && !openReviewItems.some((item) => item.id === logAsPickerItemId)) setLogAsPickerItemId(null);
+  }, [logAsPickerItemId, openReviewItems]);
   const reviewNeededEntries = useMemo(
     () => collectReviewNeededEntries(data, reviewBacklog?.legacyEntries ?? []),
     [data, reviewBacklog]
@@ -900,7 +911,10 @@ export default function ReviewScreen() {
       source.kind === "review"
         ? reviewDeckCardForItem(source.key, source.item, {
             categories: data?.categories,
-            draft: logAsDrafts.get(source.item.id),
+            draft: {
+              categoryId: logAsDrafts.get(source.item.id)?.categoryId,
+              description: logAsNames.current.get(source.item.id)
+            },
             menuOpen: reviewMenuState.openItemId === source.item.id,
             mode: theme.mode,
             neutral: theme.textSecondary,
@@ -1035,17 +1049,16 @@ export default function ReviewScreen() {
     const logged = direction === 1;
     const block = deckLoggedBlock(item);
     deckTokenSequence.current += 1;
-    recordDeckDecision(logged ? block : null);
-    const draft = logAsDrafts.get(item.id);
+    recordDeckDecision(logged ? { ...block, color: card?.color ?? block.color } : null);
     deckHold.hold({
-      edit: logged && draft && (draft.description !== undefined || draft.categoryId !== undefined) ? draft : undefined,
       token: deckTokenSequence.current,
       key,
       itemId: item.id,
       logged,
       direction,
       title: card?.title ?? reviewItemTitle(item),
-      color: block.color,
+      // The colour the card showed (a live "Log as" activity included).
+      color: card?.color ?? block.color,
       seconds: block.seconds,
       proposal: reviewDeckProposalSignature(item)
     });
@@ -1145,17 +1158,19 @@ export default function ReviewScreen() {
       undoCount();
     };
     let started: boolean;
-    if (held.logged && held.edit && item.suggestedStartedAt && item.suggestedStoppedAt) {
-      const description = held.edit.description?.trim();
-      started = resolveItem(item, {
-        action: "edit_and_confirm",
-        edit: {
-          categoryId: held.edit.categoryId ?? item.suggestedCategoryId ?? null,
-          description: description || undefined,
-          startedAt: item.suggestedStartedAt,
-          stoppedAt: item.suggestedStoppedAt
-        }
-      }, "Logged. Saved on this iPhone. Waiting to sync.", settled, failed, { unlisted });
+    const edit = held.logged
+      ? reviewLogAsEdit({
+          draftName: logAsNames.current.get(item.id),
+          draftCategoryId: logAsDraftsRef.current.get(item.id)?.categoryId,
+          defaultName: item.title?.trim() || reviewItemTitle(item),
+          suggestedCategoryId: item.suggestedCategoryId,
+          isLocationV2: hasV2LocationEvidence(item),
+          startedAt: hasSuggestedTimeWindow(item) ? item.suggestedStartedAt : null,
+          stoppedAt: hasSuggestedTimeWindow(item) ? item.suggestedStoppedAt : null
+        })
+      : null;
+    if (edit) {
+      started = resolveItem(item, { action: "edit_and_confirm", edit }, "Logged. Saved on this iPhone. Waiting to sync.", settled, failed, { unlisted });
     } else if (held.logged) {
       started = resolveItem(item, hasV2LocationEvidence(item) ? { action: "confirm" } : { action: "accept" }, "Logged. Saved on this iPhone. Waiting to sync.", settled, failed, { unlisted });
     } else {
@@ -1502,11 +1517,26 @@ export default function ReviewScreen() {
   }
 
   function beginReviewItemEdit(item: MobileReviewItem, handoverToken: number) {
-    const draftEntry = buildReviewItemDraftEntry(
+    const builtEntry = buildReviewItemDraftEntry(
       item,
       dataRef.current?.categories ?? [],
       Date.now()
     );
+    // The details sheet starts from what the card's live "Log as" shows.
+    const typedName = logAsNames.current.get(item.id)?.trim();
+    const pickedCategoryId = logAsDraftsRef.current.get(item.id)?.categoryId;
+    const pickedCategory = pickedCategoryId
+      ? dataRef.current?.categories.find((category) => category.id === pickedCategoryId) ?? null
+      : null;
+    const draftEntry = builtEntry
+      ? {
+          ...builtEntry,
+          ...(typedName ? { description: typedName } : {}),
+          ...(pickedCategory
+            ? { categoryColor: pickedCategory.color, categoryId: pickedCategory.id, categoryName: pickedCategory.name }
+            : {})
+        }
+      : null;
     if (!draftEntry || !hasSuggestedTimeWindow(item)) {
       Alert.alert("Edit", "This suggested time entry does not include a start and end time yet.");
       return false;
