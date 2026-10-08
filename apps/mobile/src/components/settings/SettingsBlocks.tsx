@@ -133,6 +133,72 @@ export function SettingsBlockRow({
   );
 }
 
+/**
+ * Sync help › Needs attention: one saved change the server did not accept (or whose outcome is
+ * unknown), in plain words, with its own actions underneath.
+ */
+export function SettingsIssueRow({
+  children,
+  detail,
+  divider = true,
+  theme,
+  title
+}: {
+  children: ReactNode;
+  detail: string;
+  divider?: boolean;
+  theme: Theme;
+  title: string;
+}) {
+  return (
+    <View
+      style={[blockStyles.issue, divider ? { borderTopColor: theme.border, borderTopWidth: StyleSheet.hairlineWidth } : null]}
+    >
+      <View style={blockStyles.rowText}>
+        <Text {...mobileTextProps("itemTitle")} style={[blockStyles.rowTitle, { color: theme.textPrimary }]}>{title}</Text>
+        <Text {...mobileTextProps("metadata")} style={{ color: theme.textMuted }}>{detail}</Text>
+      </View>
+      <View style={blockStyles.issueActions}>{children}</View>
+    </View>
+  );
+}
+
+/** A small pill action inside a Settings row (Retry, Discard, Clear…). */
+export function SettingsPillButton({
+  accessibilityLabel,
+  danger = false,
+  disabled = false,
+  label,
+  onPress,
+  theme
+}: {
+  accessibilityLabel?: string;
+  danger?: boolean;
+  disabled?: boolean;
+  label: string;
+  onPress: () => void;
+  theme: Theme;
+}) {
+  return (
+    <Pressable
+      accessibilityLabel={accessibilityLabel ?? label}
+      accessibilityRole="button"
+      accessibilityState={{ disabled }}
+      disabled={disabled}
+      onPress={onPress}
+      style={({ pressed }) => [
+        blockStyles.pill,
+        { backgroundColor: theme.surfaceMuted, opacity: disabled ? 0.45 : 1 },
+        pressed ? { backgroundColor: theme.border } : null
+      ]}
+    >
+      <Text {...mobileTextProps("control")} style={[blockStyles.pillText, { color: danger ? theme.dangerText : theme.textPrimary }]}>
+        {label}
+      </Text>
+    </Pressable>
+  );
+}
+
 /** The prototype switch: green when on. */
 export function SettingsSwitch({
   accessibilityHint,
@@ -316,6 +382,10 @@ const blockStyles = StyleSheet.create({
   foot: { marginHorizontal: 4 },
   group: { gap: 8 },
   list: { borderRadius: 18, overflow: "hidden" },
+  issue: { gap: 10, paddingHorizontal: 16, paddingVertical: 12 },
+  issueActions: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
+  pill: { alignItems: "center", borderRadius: DAYFRAME_BLOCKS.radius.pill, justifyContent: "center", minHeight: 44, paddingHorizontal: 16 },
+  pillText: { fontWeight: "700" },
   row: {
     alignItems: "center",
     flexDirection: "row",

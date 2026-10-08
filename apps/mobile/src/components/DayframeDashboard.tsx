@@ -2075,7 +2075,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
         if (result.needsAttentionCount > 0) {
           Alert.alert(
             "Time entry change not applied",
-            "The server rejected this change, so Dayframe restored the server version. You can retry or discard the saved diagnostic in Settings > Sync & diagnostics."
+            "The server rejected this change, so Dayframe restored the server version. You can retry or discard it in Settings > Sync help."
           );
         }
       })().catch(() => undefined);
@@ -2162,7 +2162,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
     if (pendingStop.failureKind === "permanent") {
       Alert.alert(
         "Timer Stop needs attention",
-        "Open Settings > Sync & diagnostics to retry or discard the rejected Stop."
+        "Open Settings > Sync help to retry or discard the rejected Stop."
       );
       return false;
     }

@@ -114,6 +114,8 @@ import {
   SettingsActivityStrip,
   SettingsBlockGroup,
   SettingsBlockRow,
+  SettingsIssueRow,
+  SettingsPillButton,
   SettingsSegmented,
   SettingsStatusDot,
   SettingsStepper,
@@ -160,7 +162,6 @@ import {
   subscribeTimerStopOutbox
 } from "@/lib/timerStopOutbox";
 import { deviceSyncAttentionStatus } from "@/lib/settingsSyncDiagnostics";
-import { TimerStopIssueActions } from "@/components/TimerStopIssueActions";
 
 type Category = MobileBootstrap["categories"][number];
 // Settings › Your day goal ranges (hours): daily in 1 h steps, weekly in 5 h steps.
@@ -274,7 +275,6 @@ export default function SettingsScreen() {
   const [syncingQueue, setSyncingQueue] = useState(false);
   const [signingOut, setSigningOut] = useState(false);
   const [syncStatusMessage, setSyncStatusMessage] = useState<string | null>(cachedSnapshot?.syncStatusMessage ?? null);
-  const [showQueueDetails, setShowQueueDetails] = useState(false);
   const [reviewSyncDiagnostics, setReviewSyncDiagnostics] =
     useState<ReviewSyncDiagnostics | null>(null);
   const [reviewSyncIssues, setReviewSyncIssues] = useState<
@@ -600,7 +600,6 @@ export default function SettingsScreen() {
     ...(data?.entries ?? [])
   ].filter(isReviewNeededEntry).map((entry) => entry.id));
   const openReviewCount = (data?.reviewItems ?? []).filter(isOpenReviewItem).length + reviewNeededEntryIds.size;
-  const firstFailedEvent = queueDiagnostics.firstFailed;
   const canRetryFailed = queueDiagnostics.failedCount > 0;
   const canClearFailed = queueDiagnostics.clearableFailedCount > 0;
   const eventSyncStatus = deviceSyncStatusText({
@@ -708,6 +707,28 @@ export default function SettingsScreen() {
     timeEntrySyncDiagnostics?.quarantinedCount ||
     timeEntrySyncDiagnostics?.deviceQuarantinedCount
   );
+  // Sync help: one plain status line, then each change that needs a choice.
+  const syncHelpIssueCount =
+    timerStopSyncIssues.length +
+    timeEntrySyncIssues.length +
+    reviewSyncIssues.length +
+    (queueDiagnostics.failedCount > 0 ? 1 : 0) +
+    ((timeEntrySyncDiagnostics?.quarantinedCount ?? 0) > 0 || (timeEntrySyncDiagnostics?.deviceQuarantinedCount ?? 0) > 0 ? 1 : 0);
+  const syncWaitingCount =
+    queueDiagnostics.queuedCount +
+    (timerStopSyncDiagnostics?.pendingCount ?? 0) +
+    (timeEntrySyncDiagnostics?.pendingCount ?? 0) +
+    (reviewSyncDiagnostics?.waitingCount ?? 0);
+  const syncHelpTitle = syncHelpIssueCount > 0 || syncNeedsAttention
+    ? "Something needs your attention"
+    : syncWaitingCount > 0
+      ? `${syncWaitingCount} ${syncWaitingCount === 1 ? "change" : "changes"} waiting to send`
+      : "Nothing is waiting";
+  const syncHelpDetail = syncHelpIssueCount > 0
+    ? "Choose what to do with each change below."
+    : syncWaitingCount > 0
+      ? "They send on their own when you're online."
+      : "All your changes are saved.";
 
   function changeGoal(kind: "daily" | "weekly", direction: -1 | 1) {
     if (!data) return;
@@ -2140,263 +2161,123 @@ export default function SettingsScreen() {
           ) : null}
 
           {settingsSection === "sync" ? (
-          <View style={styles.panel}>
-            <Text {...mobileTextProps("sectionHeading")} style={styles.sectionTitle}>Device sync</Text>
-            <Text {...mobileTextProps("body")} style={styles.statusText}>{deviceSyncStatus}</Text>
-            {lastSyncResult?.firstError ? (
-              <Text {...mobileTextProps("body")} style={styles.muted}>Some queued data still needs attention. Details are available below.</Text>
-            ) : null}
-            <Pressable
-              accessibilityRole="button"
-              accessibilityState={{ expanded: showQueueDetails }}
-              style={pressable(styles.detailsToggle, styles.buttonPressed)}
-              onPress={() => {
-                setShowQueueDetails((current) => !current);
-              }}
-            >
-              <Text {...mobileTextProps("control")} style={styles.detailsToggleText}>Troubleshooting details</Text>
-              <DisclosureChevronGlyph color={theme.textSecondary} expanded={showQueueDetails} />
-            </Pressable>
-            {showQueueDetails ? (
-              <Reanimated.View
-                entering={localPresenceEntering(reduceMotion)}
-                exiting={localPresenceExiting(reduceMotion)}
-                layout={localLayoutTransition(reduceMotion)}
-                style={styles.queueDiagnosticCard}
-              >
-                <Text {...mobileTextProps("metadata")} style={styles.label}>Queue</Text>
-                <Text {...mobileTextProps("body")} style={styles.accountMeta}>
-                  Queued {queueDiagnostics.queuedCount} · Last synced {lastSyncResult?.syncedCount ?? 0} · Failed{" "}
-                  {queueDiagnostics.failedCount}
-                </Text>
-                {queueDiagnostics.failedCount > 0 ? (
-                  <Text {...mobileTextProps("body")} style={styles.accountMeta}>
-                    Retryable {queueDiagnostics.retryableFailedCount} · Invalid {queueDiagnostics.permanentFailedCount}
-                    {queueDiagnostics.nextRetryAt ? ` · Next retry ${formatQueueTime(queueDiagnostics.nextRetryAt)}` : ""}
-                  </Text>
-                ) : null}
-                {firstFailedEvent ? (
-                  <>
-                    <Text {...mobileTextProps("metadata")} style={styles.label}>First failed event</Text>
-                    <Text {...mobileTextProps("body")} style={styles.accountValue}>
-                      {formatSourceLabel(firstFailedEvent.source)} · {formatEventLabel(firstFailedEvent.type)} ·{" "}
-                      {formatQueueTime(firstFailedEvent.occurredAt)}
-                    </Text>
-                    <Text {...mobileTextProps("body")} style={styles.accountMeta}>
-                      {firstFailedEvent.lastError ?? "No error message was recorded."}
-                    </Text>
-                    {firstFailedEvent.lastAttemptedAt || firstFailedEvent.failedAt ? (
-                      <Text {...mobileTextProps("body")} style={styles.accountMeta}>
-                        Last attempt {formatQueueTime(firstFailedEvent.lastAttemptedAt ?? firstFailedEvent.failedAt)}
-                      </Text>
-                    ) : null}
-                    {firstFailedEvent.nextRetryAt ? (
-                      <Text {...mobileTextProps("body")} style={styles.accountMeta}>
-                        Next automatic retry {formatQueueTime(firstFailedEvent.nextRetryAt)}
-                      </Text>
-                    ) : null}
-                  </>
-                ) : (
-                  <Text {...mobileTextProps("body")} style={styles.accountMeta}>No failed queued events.</Text>
-                )}
-              </Reanimated.View>
-            ) : null}
-            <Reanimated.View layout={localLayoutTransition(reduceMotion)} style={styles.queueDiagnosticCard}>
-              <Text {...mobileTextProps("metadata")} style={styles.label}>Timer Stops</Text>
-              <Text {...mobileTextProps("body")} style={styles.accountMeta}>
-                Pending {timerStopSyncDiagnostics?.pendingCount ?? 0} · Needs attention{" "}
-                {timerStopSyncDiagnostics?.needsAttentionCount ?? 0}
-              </Text>
-              {timerStopSyncIssues.map((issue) => (
-                <Reanimated.View
-                  key={issue.clientEventId}
-                  entering={localPresenceEntering(reduceMotion)}
-                  exiting={localPresenceExiting(reduceMotion)}
-                  layout={localLayoutTransition(reduceMotion)}
-                  style={styles.accountRow}
+            <View style={styles.settingsBlocksStack}>
+              <SettingsBlockGroup theme={theme} title="Status">
+                <SettingsBlockRow
+                  control={<SettingsStatusDot attention={syncNeedsAttention} theme={theme} />}
+                  divider={false}
+                  subtitle={syncHelpDetail}
+                  testID="sync-help-status"
+                  theme={theme}
+                  title={syncHelpTitle}
+                />
+              </SettingsBlockGroup>
+
+              {syncHelpIssueCount > 0 ? (
+                <SettingsBlockGroup
+                  foot="Retry sends a change again. Discard keeps what your account already has."
+                  theme={theme}
+                  title="Needs attention"
                 >
-                  <Text {...mobileTextProps("body")} style={styles.accountValue}>
-                    Timer Stop rejected · {formatQueueTime(issue.failedAt ?? issue.queuedAt)}
-                  </Text>
-                  <Text {...mobileTextProps("body")} style={styles.accountMeta}>
-                    The server did not accept this Stop. Retry it, or discard it to keep the server timer unchanged.
-                  </Text>
-                  <TimerStopIssueActions
-                    clientEventId={issue.clientEventId}
-                    onDiscard={confirmDiscardTimerStopIssue}
-                    onRetry={retryTimerStopIssue}
-                    styles={styles}
-                  />
-                </Reanimated.View>
-              ))}
-            </Reanimated.View>
-            <Reanimated.View layout={localLayoutTransition(reduceMotion)} style={styles.queueDiagnosticCard}>
-              <Text {...mobileTextProps("metadata")} style={styles.label}>Time entry changes</Text>
-              <Text {...mobileTextProps("body")} style={styles.accountMeta}>
-                Pending {timeEntrySyncDiagnostics?.pendingCount ?? 0} · Needs attention{" "}
-                {timeEntrySyncDiagnostics?.needsAttentionCount ?? 0} · Account quarantine{" "}
-                {timeEntrySyncDiagnostics?.quarantinedCount ?? 0}
-              </Text>
-              {(timeEntrySyncDiagnostics?.deviceQuarantinedCount ?? 0) > 0 ? (
-                <Text {...mobileTextProps("body")} style={styles.accountMeta}>
-                  Device-wide quarantine {timeEntrySyncDiagnostics?.deviceQuarantinedCount ?? 0} · owner could not be recovered
-                </Text>
-              ) : null}
-              {timeEntrySyncDiagnostics?.nextRetryAt ? (
-                <Text {...mobileTextProps("body")} style={styles.accountMeta}>
-                  Next retry {formatQueueTime(timeEntrySyncDiagnostics.nextRetryAt)}
-                </Text>
-              ) : null}
-              {timeEntrySyncDiagnostics?.lastError ? (
-                <Text {...mobileTextProps("body")} style={styles.accountMeta}>
-                  Last error {timeEntrySyncDiagnostics.lastError}
-                </Text>
-              ) : null}
-              {timeEntrySyncIssues.map((issue) => (
-                <View key={issue.clientCommandId} style={styles.accountRow}>
-                  <Text {...mobileTextProps("body")} style={styles.accountValue}>
-                    {issue.operation === "delete" ? "Delete" : "Edit"} rejected ·{" "}
-                    {formatQueueTime(issue.updatedAt)}
-                  </Text>
-                  <Text {...mobileTextProps("body")} style={styles.accountMeta}>
-                    Entry {(issue.targetEntryId ?? issue.optimisticEntryId ?? "unknown").slice(0, 8)}
-                    {issue.lastStatusCode ? ` · HTTP ${issue.lastStatusCode}` : ""}
-                    {issue.lastError ? ` · ${issue.lastError}` : ""}
-                  </Text>
-                  <View style={styles.buttonRow}>
-                    <Pressable
-                      accessibilityRole="button"
-                      style={pressable(styles.secondaryButton, styles.buttonPressed)}
-                      onPress={() => retryTimeEntryIssue(issue.clientCommandId)}
+                  {timerStopSyncIssues.map((issue, index) => (
+                    <SettingsIssueRow
+                      detail={`Stopped ${formatQueueTime(issue.failedAt ?? issue.queuedAt)}. The server didn't accept it, so the timer still shows as running there.`}
+                      divider={index > 0}
+                      key={issue.clientEventId}
+                      theme={theme}
+                      title="Timer stop not accepted"
                     >
-                      <Text {...mobileTextProps("control")} style={styles.secondaryButtonText}>Retry change</Text>
-                    </Pressable>
-                    <Pressable
-                      accessibilityRole="button"
-                      style={pressable(styles.secondaryButton, styles.buttonPressed)}
-                      onPress={() => confirmDiscardTimeEntryIssue(issue.clientCommandId)}
+                      <SettingsPillButton accessibilityLabel="Retry rejected timer Stop" label="Retry" onPress={() => retryTimerStopIssue(issue.clientEventId)} theme={theme} />
+                      <SettingsPillButton accessibilityLabel="Discard rejected timer Stop" danger label="Discard" onPress={() => confirmDiscardTimerStopIssue(issue.clientEventId)} theme={theme} />
+                    </SettingsIssueRow>
+                  ))}
+                  {timeEntrySyncIssues.map((issue, index) => (
+                    <SettingsIssueRow
+                      detail={`Saved ${formatQueueTime(issue.updatedAt)}. The server didn't accept it, so your account keeps the earlier version.`}
+                      divider={timerStopSyncIssues.length + index > 0}
+                      key={issue.clientCommandId}
+                      theme={theme}
+                      title={issue.operation === "delete" ? "Delete not accepted" : "Edit not accepted"}
                     >
-                      <Text {...mobileTextProps("control")} style={styles.secondaryButtonText}>Discard change</Text>
-                    </Pressable>
-                  </View>
-                </View>
-              ))}
-              {(timeEntrySyncDiagnostics?.quarantinedCount ?? 0) > 0 ? (
-                <View style={styles.buttonRow}>
-                  <Pressable
-                    accessibilityRole="button"
-                    style={pressable(styles.secondaryButton, styles.buttonPressed)}
-                    onPress={confirmClearTimeEntryQuarantine}
-                  >
-                    <Text {...mobileTextProps("control")} style={styles.secondaryButtonText}>Clear quarantined data</Text>
-                  </Pressable>
-                </View>
-              ) : null}
-              {(timeEntrySyncDiagnostics?.deviceQuarantinedCount ?? 0) > 0 ? (
-                <View style={styles.buttonRow}>
-                  <Pressable
-                    accessibilityRole="button"
-                    style={pressable(styles.secondaryButton, styles.buttonPressed)}
-                    onPress={confirmClearDeviceTimeEntryQuarantine}
-                  >
-                    <Text {...mobileTextProps("control")} style={styles.secondaryButtonText}>Clear device-wide quarantine</Text>
-                  </Pressable>
-                </View>
-              ) : null}
-            </Reanimated.View>
-            <Reanimated.View layout={localLayoutTransition(reduceMotion)} style={styles.queueDiagnosticCard}>
-              <Text {...mobileTextProps("metadata")} style={styles.label}>Review changes</Text>
-              <Text {...mobileTextProps("body")} style={styles.accountMeta}>
-                Pending {reviewSyncDiagnostics?.pendingCount ?? 0} · Retry wait{" "}
-                {reviewSyncDiagnostics?.retryWaitCount ?? 0} · Sign-in required{" "}
-                {reviewSyncDiagnostics?.authenticationRequiredCount ?? 0} · Needs attention{" "}
-                {reviewSyncDiagnostics?.needsAttentionCount ?? 0}
-              </Text>
-              {reviewSyncDiagnostics?.oldestQueuedAt ? (
-                <Text {...mobileTextProps("body")} style={styles.accountMeta}>
-                  Oldest saved {formatQueueTime(reviewSyncDiagnostics.oldestQueuedAt)}
-                </Text>
-              ) : null}
-              {reviewSyncDiagnostics?.lastSuccessfulSyncAt ? (
-                <Text {...mobileTextProps("body")} style={styles.accountMeta}>
-                  Last successful Review sync{" "}
-                  {formatQueueTime(reviewSyncDiagnostics.lastSuccessfulSyncAt)}
-                </Text>
-              ) : null}
-              {reviewSyncDiagnostics?.nextRetryAt ? (
-                <Text {...mobileTextProps("body")} style={styles.accountMeta}>
-                  Next retry {formatQueueTime(reviewSyncDiagnostics.nextRetryAt)}
-                </Text>
-              ) : null}
-              {reviewSyncDiagnostics?.lastError ? (
-                <Text {...mobileTextProps("body")} style={styles.accountMeta}>
-                  Last error {reviewSyncDiagnostics.lastError}
-                </Text>
-              ) : null}
-              {reviewSyncDiagnostics?.presentationReads?.map((read) => (
-                <Text key={read.surface} {...mobileTextProps("body")} style={styles.accountMeta}>
-                  {read.surface === "today" ? "Today" : "Review backlog"} presentation: {read.status} · {formatQueueTime(read.checkedAt)}
-                </Text>
-              ))}
-              {reviewSyncIssues.map((issue) => (
-                <Reanimated.View key={issue.clientMutationId} style={styles.accountRow}
-                  entering={localPresenceEntering(reduceMotion)} exiting={localPresenceExiting(reduceMotion)} layout={localLayoutTransition(reduceMotion)}>
-                  <Text {...mobileTextProps("body")} style={styles.accountValue}>
-                    {formatReviewMutationAction(issue.action)} · {formatQueueTime(issue.createdAt)}
-                  </Text>
-                  <Text {...mobileTextProps("body")} style={styles.accountMeta}>
-                    Item {issue.reviewItemId.slice(0, 8)} · Mutation {issue.clientMutationId.slice(0, 8)}
-                    {issue.lastHttpStatus ? ` · HTTP ${issue.lastHttpStatus}` : ""}
-                  </Text>
-                  <Text {...mobileTextProps("body")} style={styles.accountMeta}>
-                    {issue.resolutionStatus === "resolution_unknown" ? "Outcome not yet verified. Your saved change is preserved." : "This saved change needs attention."}
-                  </Text>
-                  <Pressable accessibilityRole="button" accessibilityLabel="Reconcile saved Review change"
-                    style={pressable(styles.secondaryButton, styles.buttonPressed)}
-                    onPress={() => void synchroniseReviewMutations({ force: true, clientMutationId: issue.clientMutationId })
-                      .then(refreshReviewDiagnostics).catch(() => setSyncStatusMessageAndCache("Unable to reconcile. Your saved change is preserved."))}>
-                    <Text {...mobileTextProps("control")} style={styles.secondaryButtonText}>Reconcile now</Text>
-                  </Pressable>
-                  {issue.resolutionStatus !== "resolution_unknown" ? (
-                    <Pressable accessibilityRole="button" style={pressable(styles.secondaryButton, styles.buttonPressed)}
-                      onPress={() => confirmDiscardReviewIssue(issue.clientMutationId)}>
-                      <Text {...mobileTextProps("control")} style={styles.secondaryButtonText}>Discard failed change</Text>
-                    </Pressable>
+                      <SettingsPillButton accessibilityLabel={`Retry rejected ${issue.operation === "delete" ? "delete" : "edit"}`} label="Retry" onPress={() => retryTimeEntryIssue(issue.clientCommandId)} theme={theme} />
+                      <SettingsPillButton accessibilityLabel={`Discard rejected ${issue.operation === "delete" ? "delete" : "edit"}`} danger label="Discard" onPress={() => confirmDiscardTimeEntryIssue(issue.clientCommandId)} theme={theme} />
+                    </SettingsIssueRow>
+                  ))}
+                  {reviewSyncIssues.map((issue, index) => (
+                    <SettingsIssueRow
+                      detail={issue.resolutionStatus === "resolution_unknown"
+                        ? `Saved ${formatQueueTime(issue.createdAt)}. Dayframe is still checking whether it reached your account; your choice is kept.`
+                        : `Saved ${formatQueueTime(issue.createdAt)}. The server didn't accept this Review choice.`}
+                      divider={timerStopSyncIssues.length + timeEntrySyncIssues.length + index > 0}
+                      key={issue.clientMutationId}
+                      theme={theme}
+                      title={issue.resolutionStatus === "resolution_unknown"
+                        ? `${formatReviewMutationAction(issue.action)} · checking`
+                        : `${formatReviewMutationAction(issue.action)} not accepted`}
+                    >
+                      <SettingsPillButton
+                        accessibilityLabel="Check saved Review change again"
+                        label="Check again"
+                        onPress={() => void synchroniseReviewMutations({ force: true, clientMutationId: issue.clientMutationId })
+                          .then(refreshReviewDiagnostics)
+                          .catch(() => setSyncStatusMessageAndCache("Couldn't check yet. Your choice is kept."))}
+                        theme={theme}
+                      />
+                      {issue.resolutionStatus !== "resolution_unknown" ? (
+                        <SettingsPillButton accessibilityLabel="Discard rejected Review change" danger label="Discard" onPress={() => confirmDiscardReviewIssue(issue.clientMutationId)} theme={theme} />
+                      ) : null}
+                    </SettingsIssueRow>
+                  ))}
+                  {queueDiagnostics.failedCount > 0 ? (
+                    <SettingsIssueRow
+                      detail={queueDiagnostics.permanentFailedCount > 0
+                        ? `${queueDiagnostics.failedCount} ${queueDiagnostics.failedCount === 1 ? "item" : "items"} from this iPhone couldn't be sent; ${queueDiagnostics.permanentFailedCount} can't be accepted.`
+                        : `${queueDiagnostics.failedCount} ${queueDiagnostics.failedCount === 1 ? "item" : "items"} from this iPhone couldn't be sent yet. Dayframe tries again on its own.`}
+                      divider={timerStopSyncIssues.length + timeEntrySyncIssues.length + reviewSyncIssues.length > 0}
+                      theme={theme}
+                      title="Waiting to send"
+                    >
+                      <SettingsPillButton disabled={!canRetryFailed} label="Retry" onPress={retryFailedAndReload} theme={theme} />
+                      <SettingsPillButton accessibilityLabel="Clear items that can't be sent" danger disabled={!canClearFailed} label="Clear" onPress={confirmClearFailedQueue} theme={theme} />
+                    </SettingsIssueRow>
                   ) : null}
-                </Reanimated.View>
-              ))}
-            </Reanimated.View>
-            <Reanimated.View layout={localLayoutTransition(reduceMotion)} style={styles.buttonRow}>
-              <Pressable style={pressable(styles.secondaryButton, styles.buttonPressed)} onPress={() => void syncAndReload()}>
-                <Text {...mobileTextProps("control")} style={styles.secondaryButtonText}>Sync now</Text>
-              </Pressable>
-              <Pressable
-                disabled={!canRetryFailed}
-                style={({ pressed }) => [
-                  styles.secondaryButton,
-                  !canRetryFailed ? styles.buttonDisabled : null,
-                  pressed ? styles.buttonPressed : null
-                ]}
-                onPress={retryFailedAndReload}
-              >
-                <Text {...mobileTextProps("control")} style={styles.secondaryButtonText}>Retry failed</Text>
-              </Pressable>
-              <Pressable
-                disabled={!canClearFailed}
-                style={({ pressed }) => [
-                  styles.secondaryButton,
-                  !canClearFailed ? styles.buttonDisabled : null,
-                  pressed ? styles.buttonPressed : null
-                ]}
-                onPress={confirmClearFailedQueue}
-              >
-                <Text {...mobileTextProps("control")} style={styles.secondaryButtonText}>Clear failed/invalid</Text>
-              </Pressable>
-              <Pressable style={pressable(styles.secondaryButton, styles.buttonPressed)} onPress={exportQueueDiagnostics}>
-                <Text {...mobileTextProps("control")} style={styles.secondaryButtonText}>Export diagnostics</Text>
-              </Pressable>
-            </Reanimated.View>
-          </View>
+                  {(timeEntrySyncDiagnostics?.quarantinedCount ?? 0) > 0 || (timeEntrySyncDiagnostics?.deviceQuarantinedCount ?? 0) > 0 ? (
+                    <SettingsIssueRow
+                      detail="Some saved changes on this iPhone couldn't be read, so Dayframe set them aside. Clearing them removes only those unreadable copies."
+                      divider={timerStopSyncIssues.length + timeEntrySyncIssues.length + reviewSyncIssues.length + (queueDiagnostics.failedCount > 0 ? 1 : 0) > 0}
+                      theme={theme}
+                      title="Unreadable saved changes"
+                    >
+                      {(timeEntrySyncDiagnostics?.quarantinedCount ?? 0) > 0 ? (
+                        <SettingsPillButton accessibilityLabel="Clear unreadable saved changes for this account" danger label="Clear" onPress={confirmClearTimeEntryQuarantine} theme={theme} />
+                      ) : null}
+                      {(timeEntrySyncDiagnostics?.deviceQuarantinedCount ?? 0) > 0 ? (
+                        <SettingsPillButton accessibilityLabel="Clear unreadable saved changes on this iPhone" danger label="Clear for this iPhone" onPress={confirmClearDeviceTimeEntryQuarantine} theme={theme} />
+                      ) : null}
+                    </SettingsIssueRow>
+                  ) : null}
+                </SettingsBlockGroup>
+              ) : null}
+
+              <SettingsBlockGroup theme={theme} title="If something looks wrong">
+                <SettingsBlockRow
+                  accessibilityHint="Sends anything waiting on this iPhone and refreshes"
+                  divider={false}
+                  onPress={() => void syncAndReload()}
+                  subtitle={syncingQueue ? "Sending…" : "Safe to do any time"}
+                  testID="sync-help-send"
+                  theme={theme}
+                  title="Try sending again"
+                />
+                <SettingsBlockRow
+                  onPress={exportQueueDiagnostics}
+                  subtitle="App version and sync details, to send to support"
+                  testID="sync-help-copy"
+                  theme={theme}
+                  title="Copy details for support"
+                />
+              </SettingsBlockGroup>
+            </View>
           ) : null}
 
           {settingsSection === "automations" ? (
@@ -3035,7 +2916,7 @@ function settingsSectionTitle(section: SettingsSection) {
     case "health":
       return "Health";
     case "sync":
-      return "Sync";
+      return "Sync help";
     case "appearance":
       return "Appearance";
     case "index":
@@ -3153,40 +3034,6 @@ function defaultHealthDescription(type: HealthImportPreferenceKey) {
   return HEALTH_IMPORT_PREFERENCE_OPTIONS.find((option) => option.key === type)?.label ?? "Health activity";
 }
 
-const sourceLabels: Record<string, string> = {
-  manual_app: "Web app",
-  mobile_app: "Mobile app",
-  nfc: "NFC",
-  widget: "Widget",
-  shortcut: "Shortcut",
-  geofence_specific: "Specific place",
-  geofence_broad: "Broad place",
-  calendar: "Calendar",
-  health_sleep: "Health sleep",
-  health_workout: "Health workout",
-  location_learning: "Location learning",
-  home_assistant: "Home Assistant",
-  ha_button: "Home Assistant button",
-  ha_geofence: "Home Assistant geofence"
-};
-
-const eventLabels: Record<string, string> = {
-  timer_start: "Started timer",
-  timer_stop: "Stopped timer",
-  timer_switch: "Switched timer",
-  quick_action: "Quick action",
-  geofence_enter: "Entered place",
-  geofence_exit: "Left place",
-  unknown_stay: "Detected stay",
-  commute_detected: "Commute detected",
-  learned_place_visit: "Detected visit",
-  nfc_action: "NFC action",
-  shortcut_action: "Shortcut action",
-  calendar_hint: "Calendar hint",
-  health_sleep_import: "Health sleep import",
-  health_workout_import: "Health workout import"
-};
-
 function deviceSyncStatusText({
   syncingQueue,
   syncStatusMessage,
@@ -3222,16 +3069,6 @@ function formatItemCount(count: number) {
   return `${count} ${count === 1 ? "item" : "items"}`;
 }
 
-function formatSourceLabel(value?: string | null) {
-  if (!value) return "Unknown source";
-  return sourceLabels[value] ?? formatMachineLabel(value);
-}
-
-function formatEventLabel(value?: string | null) {
-  if (!value) return "Activity";
-  return eventLabels[value] ?? formatMachineLabel(value);
-}
-
 function formatReviewMutationAction(value: string) {
   switch (value) {
     case "accept":
@@ -3245,18 +3082,6 @@ function formatReviewMutationAction(value: string) {
     default:
       return "Review change";
   }
-}
-
-function formatMachineLabel(value: string) {
-  return value
-    .split(/[_-]+/)
-    .filter(Boolean)
-    .map((part) => {
-      if (part.toLowerCase() === "nfc") return "NFC";
-      if (part.toLowerCase() === "ha") return "Home Assistant";
-      return `${part.charAt(0).toUpperCase()}${part.slice(1)}`;
-    })
-    .join(" ");
 }
 
 function formatQueueTime(value?: Date | string) {
