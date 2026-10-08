@@ -602,33 +602,10 @@ export default function SettingsScreen() {
   const openReviewCount = (data?.reviewItems ?? []).filter(isOpenReviewItem).length + reviewNeededEntryIds.size;
   const canRetryFailed = queueDiagnostics.failedCount > 0;
   const canClearFailed = queueDiagnostics.clearableFailedCount > 0;
-  const eventSyncStatus = deviceSyncStatusText({
-    syncingQueue,
-    syncStatusMessage,
-    lastSyncResult,
-    queueDiagnostics
-  });
   const deviceAttentionStatus = deviceSyncAttentionStatus({
     timerStopNeedsAttentionCount: timerStopSyncDiagnostics?.needsAttentionCount,
     timeEntryNeedsAttentionCount: timeEntrySyncDiagnostics?.needsAttentionCount
   });
-  const deviceSyncStatus = deviceAttentionStatus ?? (timeEntrySyncDiagnostics?.quarantinedCount
-      ? `${timeEntrySyncDiagnostics.quarantinedCount} unreadable local sync ${
-          timeEntrySyncDiagnostics.quarantinedCount === 1 ? "record" : "records"
-        } quarantined`
-    : timeEntrySyncDiagnostics?.deviceQuarantinedCount
-      ? `${timeEntrySyncDiagnostics.deviceQuarantinedCount} unreadable device-wide sync ${
-          timeEntrySyncDiagnostics.deviceQuarantinedCount === 1 ? "record" : "records"
-        } quarantined`
-    : reviewSyncDiagnostics?.needsAttentionCount
-    ? `${reviewSyncDiagnostics.needsAttentionCount} Review ${
-        reviewSyncDiagnostics.needsAttentionCount === 1 ? "issue" : "issues"
-      }`
-    : reviewSyncDiagnostics?.waitingCount
-      ? `${reviewSyncDiagnostics.waitingCount} Review ${
-          reviewSyncDiagnostics.waitingCount === 1 ? "change" : "changes"
-        } waiting`
-      : eventSyncStatus);
   const locationMonitoringAllowed = locationDiagnostics?.backgroundPermission === "granted";
   const locationCaptureNeedsRetry = locationDiagnostics?.locationLearningEnabled === true &&
     locationDiagnostics.locationLearningCaptureState === "inactive";
@@ -1161,7 +1138,7 @@ export default function SettingsScreen() {
         // Rejected Edits/Deletes and Stops: status codes and errors left the Sync help screen, so
         // support still gets them here (IDs shortened as elsewhere).
         timeEntrySync: {
-          diagnostics: timeEntryDiagnostics,
+          diagnostics: { ...timeEntryDiagnostics, lastError: timeEntryDiagnostics.lastError?.slice(0, 120) ?? null },
           issues: timeEntryIssues.map((issue) => ({
             operation: issue.operation,
             entry: (issue.targetEntryId ?? issue.optimisticEntryId ?? "").slice(0, 8) || null,
@@ -1173,7 +1150,7 @@ export default function SettingsScreen() {
           }))
         },
         timerStopSync: {
-          diagnostics: timerStopDiagnostics,
+          diagnostics: { ...timerStopDiagnostics, lastError: timerStopDiagnostics.lastError?.slice(0, 120) ?? null },
           issues: timerStopIssues.map((issue) => ({
             event: issue.clientEventId.slice(0, 8),
             queuedAt: issue.queuedAt,
@@ -1792,10 +1769,11 @@ export default function SettingsScreen() {
                 <SettingsBlockRow
                   control={<SettingsStatusDot attention={syncNeedsAttention} theme={theme} />}
                   divider={false}
-                  subtitle={deviceSyncStatus}
+                  // The same plain status as Sync help: never queue internals or a past action's text.
+                  subtitle={syncHelpDetail}
                   testID="settings-sync-status"
                   theme={theme}
-                  title={syncNeedsAttention ? "Something needs your attention" : "Everything is up to date"}
+                  title={syncHelpTitle === "Nothing is waiting" ? "Everything is up to date" : syncHelpTitle}
                 />
                 <SettingsBlockRow
                   onPress={() => openSettingsSection("sync")}
@@ -2264,7 +2242,12 @@ export default function SettingsScreen() {
                         accessibilityLabel="Check saved Review change again"
                         label="Check again"
                         onPress={() => void synchroniseReviewMutations({ force: true, clientMutationId: issue.clientMutationId })
-                          .then(refreshReviewDiagnostics)
+                          .then((result) => {
+                            if (result.outcome === "transport_failure" || result.outcome === "server_busy") {
+                              setSyncHelpNote("Couldn't check yet. Your choice is kept.");
+                            }
+                            return refreshReviewDiagnostics();
+                          })
                           .catch(() => setSyncHelpNote("Couldn't check yet. Your choice is kept."))}
                         theme={theme}
                       />
@@ -2309,7 +2292,11 @@ export default function SettingsScreen() {
                   accessibilityHint="Sends anything waiting on this iPhone and refreshes"
                   divider={false}
                   onPress={() => void syncAndReload().then((result) => {
-                    setSyncHelpNote(result ? null : "Couldn't reach Dayframe. Your changes are kept and send on their own.");
+                    // Lane failures come back as outcomes, not errors.
+                    const unreachable = !result || Object.values(result.lanes).some(
+                      (lane) => lane.outcome === "transport_failure" || lane.outcome === "server_busy"
+                    );
+                    setSyncHelpNote(unreachable ? "Couldn't reach Dayframe. Your changes are kept and send on their own." : null);
                   })}
                   subtitle={syncingQueue ? "Sending…" : "Safe to do any time"}
                   testID="sync-help-send"
@@ -3079,41 +3066,6 @@ function defaultHealthCategoryLabel(type: HealthImportPreferenceKey) {
 
 function defaultHealthDescription(type: HealthImportPreferenceKey) {
   return HEALTH_IMPORT_PREFERENCE_OPTIONS.find((option) => option.key === type)?.label ?? "Health activity";
-}
-
-function deviceSyncStatusText({
-  syncingQueue,
-  syncStatusMessage,
-  lastSyncResult,
-  queueDiagnostics
-}: {
-  syncingQueue: boolean;
-  syncStatusMessage: string | null;
-  lastSyncResult: SyncQueueResult | null;
-  queueDiagnostics: QueueDiagnostics;
-}) {
-  if (syncingQueue) return syncStatusMessage ?? "Syncing device data...";
-  if (syncStatusMessage) return syncStatusMessage;
-
-  if (lastSyncResult) {
-    if (lastSyncResult.syncedCount > 0 && lastSyncResult.failedCount > 0) {
-      return `Synced ${formatItemCount(lastSyncResult.syncedCount)}. ${formatItemCount(lastSyncResult.failedCount)} ${lastSyncResult.failedCount === 1 ? "needs" : "need"} attention.`;
-    }
-    if (lastSyncResult.syncedCount > 0) {
-      return `Synced ${formatItemCount(lastSyncResult.syncedCount)}.`;
-    }
-    if (lastSyncResult.failedCount > 0) return "Some items need attention.";
-    if (lastSyncResult.remainingCount > 0) return "Device data is waiting to sync.";
-    return "Device data is synced.";
-  }
-
-  if (queueDiagnostics.failedCount > 0) return "Some items need attention.";
-  if (queueDiagnostics.queuedCount > 0) return "Device data is waiting to sync.";
-  return "Device data is synced.";
-}
-
-function formatItemCount(count: number) {
-  return `${count} ${count === 1 ? "item" : "items"}`;
 }
 
 function formatReviewMutationAction(value: string) {
