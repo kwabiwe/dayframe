@@ -107,7 +107,9 @@ describe("Review deck motion contract (Blocks parity step 5b)", () => {
     expect(deck).toContain("const allowed = direction === 1 ? canLog : canSkip;");
     expect(deck).toContain("if (direction !== 0 && success && allowed) {");
     expect(screen).toContain('!open.has(key) && !reviewMutations.current.has(key.slice(key.indexOf(":") + 1))');
-    expect(screen).toContain("setRestoredDeckItems((current) => new Map(current).set(held.itemId, knownItem));");
+    expect(screen).toContain("commitData({ ...loaded, reviewItems: [...loaded.reviewItems, known] });");
+    expect(screen.match(/restorePagedOutDeckItem\(held\.itemId\);/g)?.length).toBe(2);
+    expect(deck).toContain("if (throwRequest.direction === 1 ? !canLog : !canSkip) return;");
     expect(screen).toContain('deckScreenActive.current = state === "active" && deckScreenFocused.current;');
   });
 });

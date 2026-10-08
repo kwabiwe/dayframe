@@ -303,10 +303,13 @@ function ReviewDeckCardView({
   useEffect(() => {
     if (!top || !throwRequest || throwRequest.key !== card.key || lastThrowToken.value === throwRequest.token) return;
     lastThrowToken.value = throwRequest.token;
+    // A button press for a direction the card can no longer take (its sync state changed in the
+    // same moment) does nothing rather than throw a card nobody will catch.
+    if (throwRequest.direction === 1 ? !canLog : !canSkip) return;
     flyOut(throwRequest.direction);
     // flyOut reads only shared values and the latest props.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [throwRequest, top, card.key]);
+  }, [throwRequest, top, card.key, canLog, canSkip]);
   const dragStartX = useSharedValue(0);
   const dragStartY = useSharedValue(0);
   const pan = Gesture.Pan()
