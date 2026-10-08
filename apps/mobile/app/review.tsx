@@ -908,13 +908,10 @@ export default function ReviewScreen() {
     // A deferral flight whose card a refresh dropped mid-flight never reports its end: retire it
     // here and still move the card behind the rest, so it never comes back locked. (A held flight
     // is retired by its save outcome instead.)
-    if (
-      flyingDeckKey &&
-      flyingDeckDefers.current &&
-      heldDeckDecision?.key !== flyingDeckKey &&
-      !deckSources.some((source) => source.key === flyingDeckKey)
-    ) {
-      deferDeckCard(flyingDeckKey);
+    // Any flight whose card left the deck mid-flight is retired (it will never report its end): a
+    // deferral still moves the card behind the rest; a held card stays hidden behind its toast.
+    if (flyingDeckKey && !deckSources.some((source) => source.key === flyingDeckKey)) {
+      if (flyingDeckDefers.current && heldDeckDecision?.key !== flyingDeckKey) deferDeckCard(flyingDeckKey);
       setFlyingDeckKey(null);
     }
     // deferDeckCard only touches refs and state setters.
@@ -1057,6 +1054,7 @@ export default function ReviewScreen() {
     if (source.kind === "legacy_entry" || card?.skipDefers) {
       // Moving a card behind the rest is another card decided: a held one is saved now.
       deckHold.flush();
+      if (card?.title) AccessibilityInfo.announceForAccessibility(`${card.title} moved behind the rest.`);
       return;
     }
     ownDeckDecisionKeys.current.add(key);

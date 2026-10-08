@@ -138,4 +138,9 @@ describe("Review deck live Log as (Blocks parity step 5c-1)", () => {
     expect(screen).toContain("deferDeckCard(flyingDeckKey);");
     expect(deck).toMatch(/useEffect\(\(\) => \(\) => \{\s*cancelAnimation\(dragX\);\s*cancelAnimation\(dragY\);/);
   });
+
+  it("announces Skip for now and retires any flight whose card a refresh dropped (follow-ups)", () => {
+    expect(screen).toContain("moved behind the rest.`);");
+    expect(screen).toMatch(/if \(flyingDeckKey && !deckSources\.some\(\(source\) => source\.key === flyingDeckKey\)\) \{/);
+  });
 });

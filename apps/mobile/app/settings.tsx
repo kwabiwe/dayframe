@@ -61,6 +61,7 @@ import {
   logout,
   readQueue,
   retryFailedQueuedEvents,
+  subscribeActivityQueue,
   updateCategory,
   updateTimeGoals,
   type MobileBootstrap,
@@ -161,7 +162,7 @@ import {
   retryTimerStopSyncIssue,
   subscribeTimerStopOutbox
 } from "@/lib/timerStopOutbox";
-import { deviceSyncAttentionStatus } from "@/lib/settingsSyncDiagnostics";
+import { syncHelpStatus } from "@/lib/settingsSyncDiagnostics";
 
 type Category = MobileBootstrap["categories"][number];
 // Settings › Your day goal ranges (hours): daily in 1 h steps, weekly in 5 h steps.
@@ -453,20 +454,40 @@ export default function SettingsScreen() {
     setTimerStopSyncIssues(issues);
   }, []);
 
+  // Queue reads: the latest one started wins (load() and the live subscription share the
+  // sequence), and a read never lands after Settings closed or the account changed.
+  const queueReadSequence = useRef(0);
+  const queueMounted = useRef(false);
+  async function refreshQueueLatest() {
+    const mine = ++queueReadSequence.current;
+    try {
+      const owner = await readActiveMobileAccount();
+      const queued = await readQueue();
+      if (!queueMounted.current || mine !== queueReadSequence.current || !owner) return;
+      const stillOwner = await readActiveMobileAccount();
+      // Re-checked right before publishing: Settings may have closed during the owner read.
+      if (!queueMounted.current || !stillOwner || !mobileAccountOwnersEqual(owner, stillOwner) || mine !== queueReadSequence.current) return;
+      setQueueAndCache(queued);
+    } catch {
+      // A failed local read leaves the last known queue in place.
+    }
+  }
+
   const load = useCallback((options?: { silent?: boolean; trigger?: "navigation" | "focus" | "pull" }) => refreshes.current.run("settings", true, async () => {
     const showRefreshIndicator = shouldShowSettingsRefreshSpinner(options?.trigger ?? "navigation");
     if (showRefreshIndicator) setRefreshing(true);
+    // The local queue has one guarded reader (refreshQueueLatest): it publishes whether or not the
+    // bootstrap below succeeds, and never after Settings closed or the account changed.
+    void refreshQueueLatest();
     try {
       await drainNativeShortcutQueue();
-      const [bootstrap, queued, location] = await Promise.all([
+      const [bootstrap, location] = await Promise.all([
         fetchBootstrap(),
-        readQueue(),
         getLocationVisitDiagnostics()
       ]);
       const nextLocationStatus = locationStatusText(location);
       updateSettingsSnapshot({
         data: bootstrap,
-        queue: queued,
         locationDiagnostics: location,
         locationStatus: nextLocationStatus,
         updatedAt: Date.now()
@@ -474,7 +495,6 @@ export default function SettingsScreen() {
       setData(bootstrap);
       await configureLocationIntelligence(bootstrap);
       syncShortcutCatalog(bootstrap);
-      setQueue(queued);
       setLocationDiagnostics(location);
       setLocationStatus(nextLocationStatus);
       await refreshLocationV2Diagnostics();
@@ -501,6 +521,26 @@ export default function SettingsScreen() {
     refreshTimeEntryDiagnostics,
     refreshTimerStopDiagnostics
   ]);
+
+  // The activity queue changes outside Settings (timer actions while offline); keep its count live so
+  // the Help row and Sync help never say "up to date" with something waiting.
+  useEffect(() => {
+    queueMounted.current = true;
+    // Read once on opening (a timer action may have queued while Settings was closed) and on
+    // every change after.
+    void refreshQueueLatest();
+    const unsubscribe = subscribeActivityQueue(() => {
+      void refreshQueueLatest();
+    });
+    return () => {
+      queueMounted.current = false;
+      // Any read still in flight can no longer publish.
+      queueReadSequence.current += 1;
+      unsubscribe();
+    };
+    // refreshQueueLatest only reads refs and stable setters.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   useEffect(() => subscribeRecoveredDashboardBootstrap(event => {
     if (event.type === "completed") setDataAndCache(event.bootstrap);
@@ -602,10 +642,7 @@ export default function SettingsScreen() {
   const openReviewCount = (data?.reviewItems ?? []).filter(isOpenReviewItem).length + reviewNeededEntryIds.size;
   const canRetryFailed = queueDiagnostics.failedCount > 0;
   const canClearFailed = queueDiagnostics.clearableFailedCount > 0;
-  const deviceAttentionStatus = deviceSyncAttentionStatus({
-    timerStopNeedsAttentionCount: timerStopSyncDiagnostics?.needsAttentionCount,
-    timeEntryNeedsAttentionCount: timeEntrySyncDiagnostics?.needsAttentionCount
-  });
+
   const locationMonitoringAllowed = locationDiagnostics?.backgroundPermission === "granted";
   const locationCaptureNeedsRetry = locationDiagnostics?.locationLearningEnabled === true &&
     locationDiagnostics.locationLearningCaptureState === "inactive";
@@ -678,13 +715,7 @@ export default function SettingsScreen() {
   const healthWorkoutSummary = healthImportPreferences
     ? `${healthWorkoutKeys.filter((option) => healthImportPreferences[option.key]).length} of ${healthWorkoutKeys.length}`
     : null;
-  const syncNeedsAttention = Boolean(
-    deviceAttentionStatus ||
-    queueDiagnostics.permanentFailedCount > 0 ||
-    reviewSyncDiagnostics?.needsAttentionCount ||
-    timeEntrySyncDiagnostics?.quarantinedCount ||
-    timeEntrySyncDiagnostics?.deviceQuarantinedCount
-  );
+
   // Sync help: a short note about the page's own last action (never cached), cleared whenever the
   // page opens or what it lists changes, so it can't contradict the status above it.
   const [syncHelpNote, setSyncHelpNote] = useState<string | null>(null);
@@ -692,38 +723,27 @@ export default function SettingsScreen() {
     ...timerStopSyncIssues.map((issue) => issue.clientEventId),
     ...timeEntrySyncIssues.map((issue) => issue.clientCommandId),
     ...reviewSyncIssues.map((issue) => `${issue.clientMutationId}:${issue.resolutionStatus}`),
-    `failed:${queueDiagnostics.permanentFailedCount}`
+    `failed:${queueDiagnostics.permanentFailedCount}`,
+    `quarantine:${timeEntrySyncDiagnostics?.quarantinedCount ?? 0}:${timeEntrySyncDiagnostics?.deviceQuarantinedCount ?? 0}`
   ].join("|");
   useEffect(() => {
     setSyncHelpNote(null);
   }, [settingsSection, syncHelpIssueKey]);
-  // Sync help: one plain status line, then each change that needs a choice.
-  const syncHelpIssueCount =
-    timerStopSyncIssues.length +
-    timeEntrySyncIssues.length +
-    reviewSyncIssues.length +
-    (queueDiagnostics.permanentFailedCount > 0 ? 1 : 0) +
-    ((timeEntrySyncDiagnostics?.quarantinedCount ?? 0) > 0 || (timeEntrySyncDiagnostics?.deviceQuarantinedCount ?? 0) > 0 ? 1 : 0);
-  const syncWaitingCount =
-    queueDiagnostics.queuedCount +
-    (timerStopSyncDiagnostics?.pendingCount ?? 0) +
-    (timeEntrySyncDiagnostics?.pendingCount ?? 0) +
-    Math.max(0, (reviewSyncDiagnostics?.waitingCount ?? 0) - (reviewSyncDiagnostics?.authenticationRequiredCount ?? 0));
-  const syncSignInCount = reviewSyncDiagnostics?.authenticationRequiredCount ?? 0;
-  const syncHelpTitle = syncHelpIssueCount > 0 || syncNeedsAttention
-    ? "Something needs your attention"
-    : syncSignInCount > 0
-      ? "Sign in to send your changes"
-      : syncWaitingCount > 0
-      ? `${syncWaitingCount} ${syncWaitingCount === 1 ? "change" : "changes"} waiting to send`
-      : "Nothing is waiting";
-  const syncHelpDetail = syncHelpIssueCount > 0
-    ? "Choose what to do with each change below."
-    : syncSignInCount > 0
-      ? `${syncSignInCount} Review ${syncSignInCount === 1 ? "change is" : "changes are"} saved on this iPhone. Sign in again to send ${syncSignInCount === 1 ? "it" : "them"}.`
-      : syncWaitingCount > 0
-      ? "They send on their own when you're online."
-      : "All your changes are saved.";
+  // Sync help and the Settings Help row: one plain status (settingsSyncDiagnostics.syncHelpStatus).
+  const syncStatus = syncHelpStatus({
+    timerStopIssueCount: timerStopSyncIssues.length,
+    timeEntryIssueCount: timeEntrySyncIssues.length,
+    reviewIssueCount: reviewSyncIssues.length,
+    permanentFailedCount: queueDiagnostics.permanentFailedCount,
+    quarantinedCount: timeEntrySyncDiagnostics?.quarantinedCount ?? 0,
+    deviceQuarantinedCount: timeEntrySyncDiagnostics?.deviceQuarantinedCount ?? 0,
+    queuedCount: queueDiagnostics.queuedCount,
+    timerStopPendingCount: timerStopSyncDiagnostics?.pendingCount ?? 0,
+    timeEntryPendingCount: timeEntrySyncDiagnostics?.pendingCount ?? 0,
+    reviewWaitingCount: reviewSyncDiagnostics?.waitingCount ?? 0,
+    reviewSignInCount: reviewSyncDiagnostics?.authenticationRequiredCount ?? 0
+  });
+  const syncNeedsAttention = syncStatus.kind === "attention";
 
   function changeGoal(kind: "daily" | "weekly", direction: -1 | 1) {
     if (!data) return;
@@ -933,7 +953,7 @@ export default function SettingsScreen() {
     setSyncStatusMessageAndCache(options?.syncingMessage ?? "Syncing device data...");
     try {
       const result = await synchroniseDeviceNow({ date: data?.dateRange?.selectedDate });
-      setQueueAndCache(await readQueue());
+      await refreshQueueLatest();
       setSyncStatusMessageAndCache(manualSyncSummary(result));
       await Promise.all([refreshReviewDiagnostics(), refreshLocationV2Diagnostics(), refreshTimeEntryDiagnostics(), refreshTimerStopDiagnostics()]);
       return result;
@@ -959,8 +979,9 @@ export default function SettingsScreen() {
           text: "Discard",
           style: "destructive",
           onPress: () => {
-            void discardReviewSyncIssue(clientMutationId).then(() =>
-              refreshReviewDiagnostics()
+            void discardReviewSyncIssue(clientMutationId).then(
+              () => { void refreshReviewDiagnostics().catch(() => undefined); },
+              () => setSyncHelpNote("Couldn't discard that change. Nothing was removed.")
             );
           }
         }
@@ -978,8 +999,9 @@ export default function SettingsScreen() {
           text: "Discard",
           style: "destructive",
           onPress: () => {
-            void discardTimeEntrySyncIssue(clientCommandId).then(() =>
-              refreshTimeEntryDiagnostics()
+            void discardTimeEntrySyncIssue(clientCommandId).then(
+              () => { void refreshTimeEntryDiagnostics().catch(() => undefined); },
+              () => setSyncHelpNote("Couldn't discard that change. Nothing was removed.")
             );
           }
         }
@@ -988,12 +1010,15 @@ export default function SettingsScreen() {
   }
 
   function retryTimeEntryIssue(clientCommandId: string) {
-    void retryTimeEntrySyncIssue(clientCommandId).then(async (retried) => {
-      await refreshTimeEntryDiagnostics();
-      if (retried) {
-        setSyncStatusMessageAndCache("Retrying the saved time entry change...");
-      }
-    });
+    // Only the retry itself failing gets the note; a failed refresh afterwards is retried by the
+    // diagnostics subscription.
+    void retryTimeEntrySyncIssue(clientCommandId).then(
+      (retried) => {
+        void refreshTimeEntryDiagnostics().catch(() => undefined);
+        if (retried) setSyncStatusMessageAndCache("Retrying the saved time entry change...");
+      },
+      () => setSyncHelpNote("Couldn't retry that change. It's still saved on this iPhone.")
+    );
   }
 
   function confirmDiscardTimerStopIssue(clientEventId: string) {
@@ -1006,8 +1031,9 @@ export default function SettingsScreen() {
           text: "Discard Stop",
           style: "destructive",
           onPress: () => {
-            void discardTimerStopSyncIssue(clientEventId).then(() =>
-              refreshTimerStopDiagnostics()
+            void discardTimerStopSyncIssue(clientEventId).then(
+              () => { void refreshTimerStopDiagnostics().catch(() => undefined); },
+              () => setSyncHelpNote("Couldn't discard that Stop. Nothing was removed.")
             );
           }
         }
@@ -1016,12 +1042,15 @@ export default function SettingsScreen() {
   }
 
   function retryTimerStopIssue(clientEventId: string) {
-    void retryTimerStopSyncIssue(clientEventId).then(async (retried) => {
-      await refreshTimerStopDiagnostics();
-      if (retried) {
-        setSyncStatusMessageAndCache("Retrying the saved timer Stop...");
-      }
-    });
+    // Only the retry itself failing gets the note; a failed refresh afterwards is retried by the
+    // diagnostics subscription.
+    void retryTimerStopSyncIssue(clientEventId).then(
+      (retried) => {
+        void refreshTimerStopDiagnostics().catch(() => undefined);
+        if (retried) setSyncStatusMessageAndCache("Retrying the saved timer Stop...");
+      },
+      () => setSyncHelpNote("Couldn't retry that Stop. It's still saved on this iPhone.")
+    );
   }
 
   function confirmClearTimeEntryQuarantine() {
@@ -1034,8 +1063,9 @@ export default function SettingsScreen() {
           text: "Clear",
           style: "destructive",
           onPress: () => {
-            void clearTimeEntryOutboxQuarantine().then(() =>
-              refreshTimeEntryDiagnostics()
+            void clearTimeEntryOutboxQuarantine().then(
+              () => { void refreshTimeEntryDiagnostics().catch(() => undefined); },
+              () => setSyncHelpNote("Couldn't clear those records. Nothing was removed.")
             );
           }
         }
@@ -1053,8 +1083,9 @@ export default function SettingsScreen() {
           text: "Clear",
           style: "destructive",
           onPress: () => {
-            void clearDeviceTimeEntryOutboxQuarantine().then(() =>
-              refreshTimeEntryDiagnostics()
+            void clearDeviceTimeEntryOutboxQuarantine().then(
+              () => { void refreshTimeEntryDiagnostics().catch(() => undefined); },
+              () => setSyncHelpNote("Couldn't clear those records. Nothing was removed.")
             );
           }
         }
@@ -1067,9 +1098,13 @@ export default function SettingsScreen() {
     setSyncStatusMessageAndCache("Retrying failed items...");
     try {
       const result = await retryFailedQueuedEvents();
-      setQueueAndCache(result.remaining);
+      await refreshQueueLatest();
       setLastSyncResultAndCache(result);
       setSyncStatusMessageAndCache(null);
+      // Network failures and rejections come back in the result, not as errors.
+      if (result.failedCount > 0 || result.firstError) {
+        setSyncHelpNote("Some items still couldn't be sent. They're kept on this iPhone.");
+      }
       await load();
     } catch (error) {
       if (error instanceof AuthRequiredError) {
@@ -1077,6 +1112,7 @@ export default function SettingsScreen() {
         return;
       }
       setSyncStatusMessageAndCache(error instanceof Error ? error.message : "Unable to retry failed events.");
+      setSyncHelpNote("Couldn't retry those items. They're still saved on this iPhone.");
     } finally {
       setSyncingQueue(false);
     }
@@ -1102,7 +1138,7 @@ export default function SettingsScreen() {
   async function clearFailedQueue() {
     try {
       const result = await clearFailedQueuedEvents();
-      setQueueAndCache(result.remaining);
+      await refreshQueueLatest();
       setLastSyncResultAndCache(null);
       setSyncStatusMessageAndCache(
         `${result.removedCount} failed queued ${result.removedCount === 1 ? "event was" : "events were"} removed. ${result.remainingCount} queued ${result.remainingCount === 1 ? "event remains" : "events remain"}.`
@@ -1110,6 +1146,7 @@ export default function SettingsScreen() {
       await load({ silent: true });
     } catch (error) {
       setSyncStatusMessageAndCache(error instanceof Error ? error.message : "Unable to clear failed events.");
+      setSyncHelpNote("Couldn't clear those items. Nothing was removed.");
     }
   }
 
@@ -1176,9 +1213,10 @@ export default function SettingsScreen() {
         title: `Dayframe sync diagnostics ${snapshot.exportedAt}`,
         message: JSON.stringify(snapshot, null, 2)
       });
-      setQueueAndCache(latestQueue);
+      await refreshQueueLatest();
     } catch (error) {
       setSyncStatusMessageAndCache(error instanceof Error ? error.message : "Unable to export queue diagnostics.");
+      setSyncHelpNote("Couldn't prepare the support details. Try again.");
     }
   }
 
@@ -1770,10 +1808,10 @@ export default function SettingsScreen() {
                   control={<SettingsStatusDot attention={syncNeedsAttention} theme={theme} />}
                   divider={false}
                   // The same plain status as Sync help: never queue internals or a past action's text.
-                  subtitle={syncHelpDetail}
+                  subtitle={syncStatus.indexDetail}
                   testID="settings-sync-status"
                   theme={theme}
-                  title={syncHelpTitle === "Nothing is waiting" ? "Everything is up to date" : syncHelpTitle}
+                  title={syncStatus.indexTitle}
                 />
                 <SettingsBlockRow
                   onPress={() => openSettingsSection("sync")}
@@ -2189,14 +2227,14 @@ export default function SettingsScreen() {
                 <SettingsBlockRow
                   control={<SettingsStatusDot attention={syncNeedsAttention} theme={theme} />}
                   divider={false}
-                  subtitle={syncHelpNote || syncHelpDetail}
+                  subtitle={syncHelpNote || syncStatus.detail}
                   testID="sync-help-status"
                   theme={theme}
-                  title={syncHelpTitle}
+                  title={syncStatus.title}
                 />
               </SettingsBlockGroup>
 
-              {syncHelpIssueCount > 0 ? (
+              {syncStatus.issueCount > 0 ? (
                 <SettingsBlockGroup
                   foot="Retry sends a change again. Discard keeps what your account already has."
                   theme={theme}
