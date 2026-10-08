@@ -834,19 +834,6 @@ function createStyles(theme: MobileTheme) {
       color: theme.textPrimary,
       fontFamily: monoFont
     },
-    summaryHeader: {
-      flexDirection: "row",
-      alignItems: "center",
-      justifyContent: "space-between",
-      gap: 12
-    },
-    summaryTotal: {
-      color: theme.accentText,
-      fontFamily: monoFont,
-      fontSize: 20,
-      fontWeight: "600",
-      fontVariant: ["tabular-nums"]
-    },
     segmentedControl: {
       flexDirection: "row",
       borderRadius: 999,
@@ -949,157 +936,55 @@ function createStyles(theme: MobileTheme) {
       fontFamily: monoFont,
       fontSize: 12
     },
-    reviewList: {
-      gap: 12
-    },
-    reviewItemsSection: {
-      gap: 12
-    },
-    reviewCard: {
-      backgroundColor: theme.surfaceRaised,
-      borderRadius: 16,
-      position: "relative",
-      paddingHorizontal: 14,
-      paddingVertical: 14,
-      gap: 10
-    },
-    reviewCardAccentRail: {
-      position: "absolute",
-      left: 0,
-      top: 12,
-      bottom: 12,
-      width: 3
-    },
-    reviewCardHeader: {
+    // Review deck (Blocks parity step 5a): prototype `.push` nav and padding.
+    reviewDeckNav: {
+      alignItems: "center",
       flexDirection: "row",
-      alignItems: "flex-start",
-      justifyContent: "space-between",
-      gap: 10,
-      flexWrap: "wrap"
+      minHeight: 44,
+      paddingHorizontal: 20,
+      paddingTop: 2
     },
-    reviewBadge: {
-      alignSelf: "flex-start",
-      minHeight: 28,
-      backgroundColor: theme.surfaceMuted,
-      borderRadius: 999,
-      paddingHorizontal: 10,
-      justifyContent: "center",
-      flexShrink: 0
+    reviewDeckBack: {
+      alignItems: "center",
+      flex: 1,
+      flexDirection: "row",
+      gap: 2,
+      minHeight: 44
     },
-    reviewBadgeText: {
-      color: theme.warningText,
-      fontFamily: monoFont,
-      fontSize: 11,
+    reviewDeckBackText: {
+      fontSize: 16,
       fontWeight: "600"
     },
-    reviewTitleStack: {
-      flex: 1,
-      minWidth: 180,
-      gap: 4
-    },
-    reviewTitle: {
+    reviewDeckNavTitle: {
       color: theme.textPrimary,
-      fontFamily: monoFont,
-      fontSize: 18,
+      fontSize: 16,
       fontWeight: "700",
-      lineHeight: 24
+      textAlign: "center"
+    },
+    reviewDeckNavCount: {
+      color: theme.textSecondary,
+      flex: 1,
+      fontSize: 14,
+      fontVariant: ["tabular-nums"],
+      fontWeight: "600",
+      textAlign: "right"
+    },
+    reviewDeckContent: {
+      flexGrow: 1,
+      gap: 12,
+      paddingBottom: 18,
+      paddingHorizontal: 20
+    },
+    reviewDeckWaiting: {
+      alignItems: "center",
+      flex: 1,
+      justifyContent: "center"
     },
     reviewMetaLine: {
       color: theme.textSecondary,
       fontFamily: monoFont,
       fontSize: 12,
       lineHeight: 17
-    },
-    reviewSummary: {
-      color: theme.textSecondary,
-      fontFamily: monoFont,
-      fontSize: 13,
-      lineHeight: 19
-    },
-    reviewConfidenceRow: {
-      minHeight: 24,
-      flexDirection: "row",
-      alignItems: "center",
-      gap: 8,
-      flexWrap: "wrap"
-    },
-    reviewConfidenceLabel: {
-      color: theme.textPrimary,
-      fontFamily: monoFont,
-      fontSize: 12,
-      fontWeight: "600"
-    },
-    reviewConfidenceDots: {
-      flexDirection: "row",
-      gap: 4
-    },
-    reviewConfidenceDot: {
-      width: 7,
-      height: 7,
-      borderRadius: 999
-    },
-    reviewConfidenceValue: {
-      color: theme.textSecondary,
-      fontFamily: monoFont,
-      fontSize: 12
-    },
-    reviewOverlapRow: {
-      borderTopWidth: StyleSheet.hairlineWidth,
-      borderTopColor: theme.border,
-      paddingTop: 10,
-      flexDirection: "row",
-      alignItems: "flex-start",
-      gap: 8
-    },
-    reviewOverlapText: {
-      flex: 1,
-      color: theme.textSecondary,
-      fontFamily: monoFont,
-      fontSize: 12,
-      lineHeight: 17
-    },
-    reviewActions: {
-      gap: 8
-    },
-    reviewActionStack: {
-      gap: 8
-    },
-    reviewPrimaryButton: {
-      width: "100%",
-      minHeight: 44,
-      backgroundColor: theme.accent,
-      borderRadius: 999,
-      paddingHorizontal: 14,
-      alignItems: "center",
-      justifyContent: "center"
-    },
-    reviewSecondaryButton: {
-      width: "100%",
-      minHeight: 44,
-      backgroundColor: theme.surfaceMuted,
-      borderRadius: 999,
-      paddingHorizontal: 14,
-      alignItems: "center",
-      justifyContent: "center"
-    },
-    reviewSecondaryButtonText: {
-      color: theme.accentText,
-      fontFamily: monoFont,
-      fontWeight: "600"
-    },
-    reviewOverflowRow: {
-      minHeight: 44,
-      flexDirection: "row",
-      justifyContent: "flex-end",
-      alignItems: "center"
-    },
-    reviewOverflowButton: {
-      width: 44,
-      height: 44,
-      borderRadius: 999,
-      backgroundColor: theme.surfaceMuted,
-      alignItems: "center",
-      justifyContent: "center"
     },
     overflowMenuOverlay: {
       flex: 1,
@@ -1166,13 +1051,6 @@ function createStyles(theme: MobileTheme) {
       paddingVertical: 1,
       fontWeight: "700",
       letterSpacing: -0.35
-    },
-    reviewFocusHighlight: {
-      borderColor: theme.borderStrong,
-      borderRadius: 18,
-      borderWidth: 1,
-      paddingHorizontal: 2,
-      marginHorizontal: -2
     },
     historyDayGap: {
       height: 14

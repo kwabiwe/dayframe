@@ -26,7 +26,8 @@ import { TodayReviewNudge } from "../src/components/today/TodayReviewNudge";
 import { groupHistoryDayEntries } from "../src/lib/historyPresentation";
 import { layoutQuickStartMosaic } from "../src/lib/quickStartMosaic";
 import { buildTodayGoalFrame } from "../src/lib/todayGoalFrame";
-import { ReviewItemCard } from "../app/review";
+import { reviewDeckCardForItem } from "../app/review";
+import { ReviewDeckStack } from "../src/components/review/ReviewDeck";
 import { SettingsMenuRow } from "../app/settings";
 import { MobileThemeProvider, useMobileTheme } from "../src/lib/mobileTheme";
 import { mobileTextProps } from "../src/lib/mobileTypography";
@@ -465,19 +466,22 @@ function Probe() {
                 diagnostic={diagnostic}
               />
             </View>
-            <ReviewItemCard
-              item={reviewFixture}
-              menuOpen={false}
-              now={now}
-              onConfirm={() => setActionResult("Local Review confirm callback")}
-              onToggleMenu={() => setActionResult("Local Review menu callback")}
-              onViewEvidence={() => setActionResult("Local evidence callback")}
-              overlapCount={0}
-              syncState={null}
-              styles={styles}
-              theme={theme}
-              diagnostic={diagnostic}
-            />
+            <View style={{ height: 520 }}>
+              <ReviewDeckStack
+                cards={[reviewDeckCardForItem("review:qa", reviewFixture, {
+                  menuOpen: false,
+                  mode: theme.mode,
+                  neutral: theme.textSecondary,
+                  now,
+                  overlapCount: 0,
+                  syncState: null
+                })]}
+                onEdit={() => setActionResult("Local Review edit callback")}
+                onMore={() => setActionResult("Local Review menu callback")}
+                reduceMotion={reduceMotion}
+                theme={theme}
+              />
+            </View>
             <Text {...mobileTextProps("body")} style={{ color: theme.textSecondary, fontSize: 12 }}>{actionResult}</Text>
           </View>
         </ScrollView>

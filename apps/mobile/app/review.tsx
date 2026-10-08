@@ -10,11 +10,12 @@ import {
   View
 } from "react-native";
 import Reanimated from "react-native-reanimated";
-import Svg, { Circle, Path } from "react-native-svg";
+import Svg, { Path } from "react-native-svg";
 import { router, useFocusEffect, useLocalSearchParams, useNavigation } from "expo-router";
 import type { NativeStackNavigationProp } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
 import {
+  onBlockTextColor,
   paletteColorFor,
   readableLocationNameFromParts,
   travelModeLabel,
@@ -22,7 +23,12 @@ import {
   type ReviewMutation
 } from "@dayframe/shared";
 import { ActiveTimerEditSheet } from "@/components/ActiveTimerEditSheet";
-import { MobileBackButton } from "@/components/MobileBackButton";
+import {
+  ReviewDeckActions,
+  ReviewDeckFinished,
+  ReviewDeckStack,
+  type ReviewDeckCardModel
+} from "@/components/review/ReviewDeck";
 import {
   OverflowMenu,
   type OverflowMenuAction
@@ -43,12 +49,15 @@ import { prepareReviewOverlapCounts, reviewPeerEntries } from "@/lib/reviewPrese
 import { useConnectivity } from "@/lib/connectivity";
 import { pressable, useMobileTheme } from "@/lib/mobileTheme";
 import { mergePersistedMobileTag } from "@/lib/mobileTags";
+import { useResolvedReduceMotionPreference } from "@/lib/motion";
 import {
-  localLayoutTransition,
-  localPresenceEntering,
-  localPresenceExiting,
-  useResolvedReduceMotionPreference
-} from "@/lib/motion";
+  formatReviewDeckDuration,
+  formatReviewDeckWhen,
+  orderReviewDeck,
+  reviewDeckPicture,
+  reviewDeckPosition,
+  reviewDeckSource
+} from "@/lib/reviewDeck";
 import {
   REVIEW_COPY,
   isTimeAwayReviewItem,
@@ -65,14 +74,11 @@ import {
   isLocationReviewItem,
   reduceReviewMenuState,
   reviewConfidencePresentation,
-  reviewConfirmLabel,
   reviewItemCategoryLabel,
   reviewItemDurationSeconds,
   type ReviewMenuEvent
 } from "@/lib/review";
 import { mobileTextProps } from "@/lib/mobileTypography";
-import { recordMobileLayout, recordMobileTextLayout } from "@/components/accessibility/diagnostics";
-import type { MobileAccessibilityDiagnostic } from "@/components/accessibility/diagnostics";
 import {
   cacheReviewPresentation,
   recordReviewPresentationRead,
@@ -164,7 +170,13 @@ export default function ReviewScreen() {
   const [editTarget, setEditTarget] = useState<ReviewEditTarget | null>(null);
   const [editPresentation, setEditPresentation] = useState<TimeEntrySheetPresentation | null>(null);
   const [editSaving, setEditSaving] = useState(false);
-  const [showReviewInfo, setShowReviewInfo] = useState(false);
+  // This visit's decisions: the "N of M" position and the "All framed" summary.
+  const [deckVisit, setDeckVisit] = useState<{ decided: number; logged: { color: string; seconds: number }[] }>({
+    decided: 0,
+    logged: []
+  });
+  // Legacy needs-review entries have no skip mutation; Skip moves them behind the rest for this visit.
+  const [deferredDeckKeys, setDeferredDeckKeys] = useState<readonly string[]>([]);
   const [reviewMenuState, setReviewMenuState] = useState(CLOSED_REVIEW_MENU_STATE);
   const [reviewAvailabilityMessage, setReviewAvailabilityMessage] = useState<string | null>(null);
   const [focusedLegacyEntry, setFocusedLegacyEntry] = useState<MobileTimeEntry | null>(null);
@@ -192,11 +204,8 @@ export default function ReviewScreen() {
   const reviewMenuStateRef = useRef(CLOSED_REVIEW_MENU_STATE);
   const reviewMenuActionSequence = useRef(0);
   const reviewMutations = useRef(new Map<string, number>());
-  const reviewScrollRef = useRef<ScrollView>(null);
   const reviewBacklogRef = useRef<ReviewBacklogState | null>(null);
   const reviewBacklogRead = useRef<ReviewBacklogRead | null>(null);
-  const focusRowOffsets = useRef(new Map<string, number>());
-  const focusPendingKey = useRef<string | null>(null);
   const focusConsumedKey = useRef<string | null>(null);
   const focusLookupKey = useRef<string | null>(null);
   const loadRef = useRef<(options?: ReviewLoadOptions) => Promise<void>>(
@@ -811,37 +820,86 @@ export default function ReviewScreen() {
     (item) => item.id === overflowItemId
   ) ?? null;
 
+  type DeckSource =
+    | { key: string; kind: "review"; item: MobileReviewItem }
+    | { key: string; kind: "legacy_entry"; entry: MobileTimeEntry };
+  const deckSources = useMemo(() => {
+    const sources: DeckSource[] = [
+      ...openReviewItems.map((item) => ({ key: reviewFocusKey("review", item.id), kind: "review" as const, item })),
+      ...displayedReviewNeededEntries.map((entry) => ({
+        key: reviewFocusKey("legacy_entry", entry.id),
+        kind: "legacy_entry" as const,
+        entry
+      }))
+    ];
+    const deferred = new Set(deferredDeckKeys);
+    const ordered = [
+      ...sources.filter((source) => !deferred.has(source.key)),
+      ...deferredDeckKeys.flatMap((key) => sources.filter((source) => source.key === key))
+    ];
+    return orderReviewDeck(ordered, highlightedFocusKey);
+  }, [deferredDeckKeys, displayedReviewNeededEntries, highlightedFocusKey, openReviewItems]);
+  const deckCards = useMemo(
+    () => deckSources.slice(0, 3).map((source): ReviewDeckCardModel => (
+      source.kind === "review"
+        ? reviewDeckCardForItem(source.key, source.item, {
+            menuOpen: reviewMenuState.openItemId === source.item.id,
+            mode: theme.mode,
+            neutral: theme.textSecondary,
+            now,
+            overlapCount: overlapCounts.get(source.item.id) ?? 0,
+            syncState: reviewItemSyncStates.get(source.item.id) ?? null
+          })
+        : reviewDeckCardForEntry(source.key, source.entry, { mode: theme.mode, neutral: theme.textSecondary, now })
+    )),
+    [deckSources, now, overlapCounts, reviewItemSyncStates, reviewMenuState.openItemId, theme.mode, theme.textSecondary]
+  );
+  const topDeckSource = deckSources[0] ?? null;
+  const deckPosition = reviewDeckPosition({
+    decided: deckVisit.decided,
+    remaining: reviewCountIsExact ? Math.max(totalNeedsReview, deckSources.length) : deckSources.length,
+    exact: reviewCountIsExact
+  });
+  const deckFinished = deckSources.length === 0 && (showEmptyReviewState || (deckVisit.decided > 0 && !reviewBacklog?.nextCursor));
+
+  function recordDeckDecision(logged: { color: string; seconds: number } | null) {
+    setDeckVisit((current) => ({
+      decided: current.decided + 1,
+      logged: logged ? [...current.logged, logged] : current.logged
+    }));
+  }
+
+  function deckLoggedBlock(item: MobileReviewItem) {
+    const name = reviewItemCategoryName(item);
+    return {
+      color: reviewItemCategoryColor(item, name, theme.textSecondary, theme.mode),
+      seconds: reviewItemDurationSeconds(item, Date.now())
+    };
+  }
+
   const loadMoreReviewBacklog = useCallback(() => {
     const cursor = reviewBacklogRef.current?.nextCursor;
     if (!cursor) return;
     void loadReviewBacklogPage({ cursor, reset: false });
   }, [loadReviewBacklogPage]);
 
-  const scrollExactFocusIntoView = useCallback((key: string) => {
-    if (focusPendingKey.current !== key || focusConsumedKey.current === key) return;
-    const offset = focusRowOffsets.current.get(key);
-    if (offset === undefined) return;
-    focusPendingKey.current = null;
-    focusConsumedKey.current = key;
-    reviewScrollRef.current?.scrollTo({
-      y: Math.max(0, offset - 16),
-      animated: !reduceMotion
-    });
-    AccessibilityInfo.announceForAccessibility("Opened the exact Review item.");
-  }, [reduceMotion]);
+  // The next backlog page is read while cards remain on the stack, once per cursor; a failed read
+  // is not retried automatically (the empty deck offers "Load more Review items" instead).
+  const autoLoadedCursor = useRef<string | null>(null);
+  const deckNextCursor = deckSources.length < 3 ? reviewBacklog?.nextCursor ?? null : null;
+  useEffect(() => {
+    if (!deckNextCursor || reviewBacklogLoading || autoLoadedCursor.current === deckNextCursor) return;
+    autoLoadedCursor.current = deckNextCursor;
+    loadMoreReviewBacklog();
+  }, [deckNextCursor, loadMoreReviewBacklog, reviewBacklogLoading]);
 
+  // The exact item a Today ribbon tap asked for leads the deck (orderReviewDeck).
   const beginExactFocus = useCallback((key: string) => {
     if (focusConsumedKey.current === key) return;
-    focusPendingKey.current = key;
+    focusConsumedKey.current = key;
     setHighlightedFocusKey(key);
-    scrollExactFocusIntoView(key);
-  }, [scrollExactFocusIntoView]);
-
-  const recordFocusRowLayout = useCallback((key: string, y: number) => {
-    if (!Number.isFinite(y)) return;
-    focusRowOffsets.current.set(key, y);
-    scrollExactFocusIntoView(key);
-  }, [scrollExactFocusIntoView]);
+    AccessibilityInfo.announceForAccessibility("Opened the exact Review item.");
+  }, []);
 
   useEffect(() => {
     const request = focusRequest;
@@ -953,7 +1011,8 @@ export default function ReviewScreen() {
       hasV2LocationEvidence(item)
         ? { action: "confirm" }
         : { action: "accept" },
-      "Saved on this iPhone. Waiting to sync."
+      "Logged. Saved on this iPhone. Waiting to sync.",
+      () => recordDeckDecision(deckLoggedBlock(item))
     );
   }
 
@@ -963,7 +1022,8 @@ export default function ReviewScreen() {
       hasV2LocationEvidence(item)
         ? { action: "ignore_once_location" }
         : { action: "ignore_once" },
-      "Saved on this iPhone. Waiting to sync."
+      "Skipped. Saved on this iPhone. Waiting to sync.",
+      () => recordDeckDecision(null)
     );
   }
 
@@ -1027,7 +1087,8 @@ export default function ReviewScreen() {
   function resolveItem(
     item: MobileReviewItem,
     mutation: ReviewMutation,
-    successAnnouncement: string
+    successAnnouncement: string,
+    onCommitted?: () => void
   ) {
     if (reviewMutations.current.has(item.id)) return;
     const currentData = dataRef.current;
@@ -1051,6 +1112,7 @@ export default function ReviewScreen() {
         } else {
           await reconcileLocalReviewProjection();
         }
+        onCommitted?.();
         AccessibilityInfo.announceForAccessibility(successAnnouncement);
         reviewMutations.current.delete(item.id);
         void refreshReviewSyncDiagnostics();
@@ -1129,6 +1191,13 @@ export default function ReviewScreen() {
     commitEditPresentation(null);
   }
 
+  function beginDeckEdit(item: MobileReviewItem) {
+    if (reviewMutations.current.has(item.id) || reviewItemSyncStates.has(item.id)) return;
+    applyReviewMenuEvent({ type: "close" });
+    reviewMenuActionSequence.current += 1;
+    beginReviewItemEdit(item, reviewMenuActionSequence.current);
+  }
+
   function beginReviewNeededEntryEdit(entry: MobileTimeEntry) {
     commitEditTarget({ kind: "entry", entry });
     beginEditPresentation(false);
@@ -1174,6 +1243,15 @@ export default function ReviewScreen() {
         } else {
           await reconcileLocalReviewProjection();
         }
+        recordDeckDecision({
+          color: reviewItemCategoryColor(
+            editTarget.item,
+            reviewItemCategoryName(editTarget.item),
+            theme.textSecondary,
+            theme.mode
+          ),
+          seconds: Math.max(0, (Date.parse(patch.stoppedAt) - Date.parse(patch.startedAt)) / 1000)
+        });
         void refreshReviewSyncDiagnostics();
         AccessibilityInfo.announceForAccessibility(
           "Changes saved on this iPhone. Waiting to sync."
@@ -1220,16 +1298,32 @@ export default function ReviewScreen() {
 
   return (
     <SafeAreaView style={styles.safeArea}>
-      <View style={styles.settingsFloatingHeader}>
-        <View style={styles.settingsHeader}>
-          <MobileBackButton accessibilityLabel="Back" onPress={() => router.back()} />
-          <Text {...mobileTextProps("screenHeading")} style={styles.settingsTitle}>Review</Text>
-        </View>
+      <View style={styles.reviewDeckNav}>
+        <Pressable
+          accessibilityLabel="Back to Today"
+          accessibilityRole="button"
+          onPress={() => router.back()}
+          style={pressable(styles.reviewDeckBack, styles.buttonPressed)}
+          testID="review-deck-back"
+        >
+          <Svg accessibilityElementsHidden height={22} viewBox="0 0 24 24" width={22}>
+            <Path d="M15 5 8 12l7 7" fill="none" stroke={theme.accent} strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.3} />
+          </Svg>
+          <Text {...mobileTextProps("control")} style={[styles.reviewDeckBackText, { color: theme.accentText }]}>Today</Text>
+        </Pressable>
+        <Text {...mobileTextProps("control")} accessibilityRole="header" style={styles.reviewDeckNavTitle}>Review</Text>
+        <Text
+          {...mobileTextProps("numeric")}
+          accessibilityLabel={deckPosition?.accessibilityLabel ?? reviewCountCopy}
+          style={styles.reviewDeckNavCount}
+          testID="review-deck-count"
+        >
+          {deckFinished ? "" : deckPosition?.text ?? ""}
+        </Text>
       </View>
       <ScrollView
-        ref={reviewScrollRef}
-        style={styles.settingsScrollView}
-        contentContainerStyle={styles.settingsScrollContent}
+        alwaysBounceVertical
+        contentContainerStyle={styles.reviewDeckContent}
         refreshControl={
           <RefreshControl
             refreshing={refreshing}
@@ -1241,156 +1335,96 @@ export default function ReviewScreen() {
             colors={[theme.accent]}
           />
         }
+        style={styles.settingsScrollView}
       >
-        <View style={styles.contentStack}>
-          <View style={styles.panel}>
-            <View style={styles.summaryHeader}>
-              <View>
-                <Text {...mobileTextProps("counter")} style={styles.label}>{REVIEW_COPY.needsReview}</Text>
-                <Text {...mobileTextProps("sectionHeading")} style={styles.sectionTitle}>Review</Text>
-              </View>
-              <Text
-                {...mobileTextProps("numeric")}
-                accessibilityLabel={reviewCountCopy}
-                style={styles.summaryTotal}
-              >
-                {totalNeedsReview}
-              </Text>
-            </View>
-            <Text {...mobileTextProps("body")} style={styles.muted}>Detected visits and suggested time entries stay here until you confirm, edit or ignore them.</Text>
-            {!reviewCountIsExact ? (
-              <Text {...mobileTextProps("metadata")} accessibilityLiveRegion="polite" style={styles.reviewMetaLine}>
-                {reviewCountCopy}
-              </Text>
-            ) : null}
-            <Pressable
-              accessibilityRole="button"
-              accessibilityState={{ expanded: showReviewInfo }}
-              style={pressable(styles.detailsToggle, styles.buttonPressed)}
-              onPress={() => {
-                setShowReviewInfo((current) => !current);
-              }}
-            >
-              <Text {...mobileTextProps("control")} style={styles.detailsToggleText}>About Review</Text>
-              <ReviewChevronGlyph color={theme.textSecondary} expanded={showReviewInfo} />
-            </Pressable>
-            {showReviewInfo ? (
-              <Reanimated.View
-                entering={localPresenceEntering(reduceMotion)}
-                exiting={localPresenceExiting(reduceMotion)}
-                layout={localLayoutTransition(reduceMotion)}
-              >
-                <Text {...mobileTextProps("body")} style={styles.muted}>Dayframe keeps uncertain Health and location activity here so you can confirm the time, edit its details, or dismiss it without silently changing your timeline.</Text>
-              </Reanimated.View>
-            ) : null}
+        {reviewAvailabilityMessage ? (
+          <View style={styles.queueDiagnosticCard}>
+            <Text {...mobileTextProps("body")} accessibilityLiveRegion="polite" style={styles.muted}>
+              {reviewAvailabilityMessage}
+            </Text>
           </View>
+        ) : null}
 
-          {reviewAvailabilityMessage ? (
-            <View style={styles.queueDiagnosticCard}>
-              <Text {...mobileTextProps("body")} accessibilityLiveRegion="polite" style={styles.muted}>
-                {reviewAvailabilityMessage}
-              </Text>
-            </View>
-          ) : null}
+        <ReviewSyncStatus
+          diagnostics={reviewSyncDiagnostics}
+          onReviewIssue={() =>
+            router.push({ pathname: "/settings", params: { section: "sync" } })
+          }
+          styles={styles}
+        />
 
-          <ReviewSyncStatus
-            diagnostics={reviewSyncDiagnostics}
-            onReviewIssue={() =>
-              router.push({ pathname: "/settings", params: { section: "sync" } })
-            }
-            styles={styles}
+        {deckFinished ? (
+          <ReviewDeckFinished
+            blocks={deckVisit.logged.map((block) => block.color)}
+            copy={deckFinishedCopy(deckVisit.logged)}
+            onBack={() => router.back()}
+            theme={theme}
           />
-
-          <View style={styles.reviewItemsSection}>
-            <Text {...mobileTextProps("sectionHeading")} style={styles.sectionTitle}>Review items</Text>
-            {showEmptyReviewState ? (
-              <Text {...mobileTextProps("body")} style={styles.muted}>{REVIEW_COPY.emptyState}</Text>
-            ) : null}
-            <View style={styles.reviewList}>
-              {openReviewItems.map((item) => (
-                  <Reanimated.View
-                    key={item.id}
-                    onLayout={(event) => recordFocusRowLayout(
-                      reviewFocusKey("review", item.id),
-                      event.nativeEvent.layout.y
-                    )}
-                    entering={localPresenceEntering(reduceMotion)}
-                    exiting={localPresenceExiting(reduceMotion)}
-                    layout={localLayoutTransition(reduceMotion)}
-                    style={highlightedFocusKey === reviewFocusKey("review", item.id)
-                      ? styles.reviewFocusHighlight
-                      : undefined}
-                  >
-                    <ReviewItemCard
-                      item={item}
-                      overlapCount={overlapCounts.get(item.id) ?? 0}
-                      syncState={reviewItemSyncStates.get(item.id) ?? null}
-                      menuOpen={reviewMenuState.openItemId === item.id}
-                      now={now}
-                      onConfirm={() => confirmItem(item)}
-                      onToggleMenu={() => toggleReviewMenu(item)}
-                      onViewEvidence={() => {
-                        applyReviewMenuEvent({ type: "close" });
-                        router.push({ pathname: "/review/[id]", params: { id: item.id } } as never);
-                      }}
-                      styles={styles}
-                      theme={theme}
-                    />
-                  </Reanimated.View>
-              ))}
-            </View>
-            {displayedReviewNeededEntries.length > 0 ? (
-              <View style={styles.reviewList}>
-                {displayedReviewNeededEntries.map((entry) => (
-                  <Reanimated.View
-                    key={entry.id}
-                    onLayout={(event) => recordFocusRowLayout(
-                      reviewFocusKey("legacy_entry", entry.id),
-                      event.nativeEvent.layout.y
-                    )}
-                    entering={localPresenceEntering(reduceMotion)}
-                    exiting={localPresenceExiting(reduceMotion)}
-                    layout={localLayoutTransition(reduceMotion)}
-                    style={highlightedFocusKey === reviewFocusKey("legacy_entry", entry.id)
-                      ? styles.reviewFocusHighlight
-                      : undefined}
-                  >
-                    <ReviewNeededEntryCard
-                      entry={entry}
-                      now={now}
-                      onEdit={() => beginReviewNeededEntryEdit(entry)}
-                      styles={styles}
-                      theme={theme}
-                    />
-                  </Reanimated.View>
-                ))}
-              </View>
-            ) : null}
-            {backlogProgressCopy ? (
-              <Text {...mobileTextProps("metadata")} accessibilityLiveRegion="polite" style={styles.reviewMetaLine}>
-                {backlogProgressCopy}
-              </Text>
-            ) : null}
-            {reviewBacklog?.nextCursor ? (
+        ) : topDeckSource ? (
+          <>
+            <ReviewDeckStack
+              cards={deckCards}
+              onEdit={(key) => {
+                const source = deckSources.find((candidate) => candidate.key === key);
+                if (!source) return;
+                if (source.kind === "legacy_entry") beginReviewNeededEntryEdit(source.entry);
+                else beginDeckEdit(source.item);
+              }}
+              onMore={(key) => {
+                const source = deckSources.find((candidate) => candidate.key === key);
+                if (source?.kind === "review") toggleReviewMenu(source.item);
+              }}
+              reduceMotion={reduceMotion}
+              theme={theme}
+            />
+            <ReviewDeckActions
+              disabled={deckCards[0]?.controlsDisabled ?? true}
+              logLabel={topDeckSource.kind === "legacy_entry" ? "Edit to log" : "Log it"}
+              onEdit={() => {
+                if (topDeckSource.kind === "legacy_entry") {
+                  beginReviewNeededEntryEdit(topDeckSource.entry);
+                } else if (hasV2LocationEvidence(topDeckSource.item)) {
+                  // D7: Edit before logging opens the Location evidence editor.
+                  applyReviewMenuEvent({ type: "close" });
+                  router.push({ pathname: "/review/[id]", params: { id: topDeckSource.item.id } } as never);
+                } else {
+                  beginDeckEdit(topDeckSource.item);
+                }
+              }}
+              onLog={() => {
+                if (topDeckSource.kind === "legacy_entry") beginReviewNeededEntryEdit(topDeckSource.entry);
+                else confirmItem(topDeckSource.item);
+              }}
+              onSkip={() => {
+                if (topDeckSource.kind === "legacy_entry") {
+                  const key = topDeckSource.key;
+                  setDeferredDeckKeys((current) => [...current.filter((candidate) => candidate !== key), key]);
+                  if (highlightedFocusKey === key) setHighlightedFocusKey(null);
+                } else {
+                  dismissItem(topDeckSource.item);
+                }
+              }}
+              skipLabel={topDeckSource.kind === "legacy_entry" ? "Skip for now" : "Skip"}
+              theme={theme}
+            />
+          </>
+        ) : (
+          <View style={styles.reviewDeckWaiting}>
+            <Text {...mobileTextProps("body")} accessibilityLiveRegion="polite" style={styles.muted}>
+              {reviewBacklogLoading || !reviewCountIsExact ? "Looking for moments to review…" : REVIEW_COPY.emptyState}
+            </Text>
+            {reviewBacklog?.nextCursor && !reviewBacklogLoading ? (
               <Pressable
                 accessibilityLabel={`Load more Review items. ${backlogProgressCopy ?? ""}`.trim()}
                 accessibilityRole="button"
-                accessibilityState={{ busy: reviewBacklogLoading, disabled: reviewBacklogLoading }}
-                disabled={reviewBacklogLoading}
-                style={({ pressed }) => [
-                  styles.secondaryButton,
-                  pressed && !reviewBacklogLoading ? styles.buttonPressed : null,
-                  reviewBacklogLoading ? styles.buttonDisabled : null
-                ]}
                 onPress={loadMoreReviewBacklog}
+                style={pressable(styles.secondaryButton, styles.buttonPressed)}
               >
-                <Text {...mobileTextProps("control")} style={styles.secondaryButtonText}>
-                  {reviewBacklogLoading ? "Loading more Review items…" : "Load more Review items"}
-                </Text>
+                <Text {...mobileTextProps("control")} style={styles.secondaryButtonText}>Load more Review items</Text>
               </Pressable>
             ) : null}
           </View>
-        </View>
+        )}
       </ScrollView>
 
       <OverflowMenu
@@ -1465,223 +1499,98 @@ function ReviewSyncStatus({
   );
 }
 
-export function ReviewItemCard({
-  item,
-  menuOpen,
-  now,
-  onConfirm,
-  onToggleMenu,
-  onViewEvidence,
-  overlapCount,
-  syncState,
-  styles,
-  theme,
-  diagnostic
-}: {
-  item: MobileReviewItem;
-  menuOpen: boolean;
-  now: number;
-  onConfirm: () => void;
-  onToggleMenu: () => void;
-  onViewEvidence: () => void;
-  overlapCount: number;
-  syncState: ReviewItemSyncState | null;
-  styles: ReturnType<typeof useMobileTheme>["styles"];
-  theme: ReturnType<typeof useMobileTheme>["theme"];
-  diagnostic?: MobileAccessibilityDiagnostic;
-}) {
-  const durationSeconds = reviewItemDurationSeconds(item, now);
-  const title = reviewItemTitle(item);
-  const categoryName = reviewItemCategoryName(item);
-  const categoryColor = reviewItemCategoryColor(
-    item,
-    categoryName,
-    theme.textSecondary,
-    theme.mode
-  );
-  const controlsDisabled = syncState != null;
-  const confidence = reviewConfidencePresentation(item.confidence);
-  const locationReason = locationReviewReasonCopy(item, overlapCount);
-  const summary = locationReason ?? reviewItemSummary(item);
-  const syncCopy = reviewItemSyncStatusCopy(syncState);
-
-  return (
-    <View style={styles.reviewCard} onLayout={(event) => recordMobileLayout(diagnostic, "review.card", event)}>
-      <View
-        pointerEvents="none"
-        style={[styles.reviewCardAccentRail, { backgroundColor: categoryColor }]}
-      />
-      <View style={styles.reviewCardHeader} onLayout={(event) => recordMobileLayout(diagnostic, "review.header", event)}>
-        <View style={styles.reviewTitleStack}>
-          <Text {...mobileTextProps("itemTitle")} style={styles.reviewTitle} numberOfLines={2} onLayout={(event) => diagnostic?.onLayout?.("review.title.frame", event.nativeEvent.layout)} onTextLayout={(event) => recordMobileTextLayout(diagnostic, "review.title", event, "itemTitle", styles.reviewTitle)}>{title}</Text>
-          <Text {...mobileTextProps("metadata")} style={styles.reviewMetaLine}>{formatReviewItemMeta(item, durationSeconds)}</Text>
-        </View>
-        <View style={styles.reviewBadge} onLayout={(event) => recordMobileLayout(diagnostic, "review.badge", event)}>
-          <Text {...mobileTextProps("counter")} style={styles.reviewBadgeText}>
-            {syncCopy?.badge ?? REVIEW_COPY.needsReview}
-          </Text>
-        </View>
-      </View>
-
-      {syncCopy ? (
-        <Text {...mobileTextProps("body")} accessibilityLiveRegion="polite" style={styles.reviewMetaLine}>
-          {syncCopy.detail}
-        </Text>
-      ) : null}
-
-      <View style={styles.calendarBlockTitleRow}>
-        <View style={[styles.colorDot, { backgroundColor: categoryColor }]} />
-        <Text {...mobileTextProps("metadata")} style={[styles.reviewMetaLine, { flex: 1, minWidth: 0 }]}>
-          {categoryName}
-          {item.placeName ? ` · ${item.placeName}` : ""}
-        </Text>
-      </View>
-      <View
-        accessible
-        accessibilityLabel={`Confidence: ${confidence.label}, ${confidence.score} of 5`}
-        style={styles.reviewConfidenceRow}
-      >
-        <Text {...mobileTextProps("metadata")} style={styles.reviewConfidenceLabel}>Confidence</Text>
-        <View accessibilityElementsHidden style={styles.reviewConfidenceDots}>
-          {[1, 2, 3, 4, 5].map((score) => (
-            <View
-              key={score}
-              style={[
-                styles.reviewConfidenceDot,
-                {
-                  backgroundColor: score <= confidence.score
-                    ? theme.accent
-                    : theme.borderStrong
-                }
-              ]}
-            />
-          ))}
-        </View>
-        <Text {...mobileTextProps("metadata")} style={styles.reviewConfidenceValue}>{confidence.label}</Text>
-      </View>
-      {summary ? (
-        <Text {...mobileTextProps("body")} style={styles.reviewSummary} onLayout={(event) => recordMobileLayout(diagnostic, "review.reason.frame", event)} onTextLayout={(event) => recordMobileTextLayout(diagnostic, "review.reason", event, "body", styles.reviewSummary)}>{summary}</Text>
-      ) : null}
-      {overlapCount && !locationReason ? (
-        <View
-          accessibilityLiveRegion="polite"
-          accessibilityLabel={`Overlaps ${overlapCount} other ${overlapCount === 1 ? "entry" : "entries"}. You can still confirm.`}
-          style={styles.reviewOverlapRow}
-        >
-          <WarningGlyph color={theme.warningText} />
-          <Text {...mobileTextProps("body")} style={styles.reviewOverlapText}>
-            Overlaps {overlapCount} other {overlapCount === 1 ? "entry" : "entries"} · You can still confirm
-          </Text>
-        </View>
-      ) : null}
-
-      <View style={styles.reviewActionStack}>
-        {hasV2LocationEvidence(item) ? (
-          <Pressable
-            accessibilityRole="button"
-            disabled={controlsDisabled}
-            style={({ pressed }) => [
-              styles.reviewSecondaryButton,
-              pressed && !controlsDisabled ? styles.buttonPressed : null,
-              controlsDisabled ? styles.buttonDisabled : null
-            ]}
-            onPress={onViewEvidence}
-          >
-            <Text {...mobileTextProps("control")} style={styles.reviewSecondaryButtonText}>View evidence</Text>
-          </Pressable>
-        ) : null}
-        <Pressable
-          accessibilityRole="button"
-          disabled={controlsDisabled}
-          style={({ pressed }) => [
-            styles.reviewPrimaryButton,
-            pressed && !controlsDisabled ? styles.buttonPressed : null,
-            controlsDisabled ? styles.buttonDisabled : null
-          ]}
-          onPress={onConfirm}
-        >
-          <Text {...mobileTextProps("control")} style={styles.primaryButtonText}>{reviewConfirmLabel(item)}</Text>
-        </Pressable>
-        <View style={styles.reviewOverflowRow}>
-          <Pressable
-            accessibilityLabel={`More actions for ${title}`}
-            accessibilityRole="button"
-            accessibilityState={{ expanded: menuOpen, disabled: controlsDisabled }}
-            disabled={controlsDisabled}
-            style={({ pressed }) => [
-              styles.reviewOverflowButton,
-              pressed && !controlsDisabled ? styles.buttonPressed : null,
-              controlsDisabled ? styles.buttonDisabled : null
-            ]}
-            onPress={onToggleMenu}
-          >
-            <MoreActionsGlyph color={theme.accent} />
-          </Pressable>
-        </View>
-      </View>
-    </View>
-  );
+function deckFinishedCopy(logged: readonly { seconds: number }[]) {
+  if (!logged.length) return "Nothing to review right now.";
+  const seconds = logged.reduce((total, block) => total + block.seconds, 0);
+  const moments = `${logged.length} ${logged.length === 1 ? "moment" : "moments"} logged`;
+  return seconds >= 60 ? `${moments}, ${formatReviewDeckDuration(seconds)} added to your days.` : `${moments}.`;
 }
 
-function ReviewNeededEntryCard({
-  entry,
-  now,
-  onEdit,
-  styles,
-  theme
-}: {
-  entry: MobileTimeEntry;
-  now: number;
-  onEdit: () => void;
-  styles: ReturnType<typeof useMobileTheme>["styles"];
-  theme: ReturnType<typeof useMobileTheme>["theme"];
-}) {
-  const categoryName = entry.categoryName ?? (isHealthSource(entry.source) ? "Health" : "No activity");
-  // No activity stays neutral rather than taking a hashed palette colour.
-  const categoryColor = !entry.categoryId && !entry.categoryName && !isHealthSource(entry.source)
-    ? theme.textSecondary
-    : paletteColorFor(
-        entry.categoryColor ?? (isHealthSource(entry.source) ? "moss" : entry.categoryId),
-        categoryName,
-        theme.mode
-      );
+export function reviewDeckCardForItem(
+  key: string,
+  item: MobileReviewItem,
+  context: {
+    menuOpen: boolean;
+    mode: ReturnType<typeof useMobileTheme>["theme"]["mode"];
+    neutral: string;
+    now: number;
+    overlapCount: number;
+    syncState: ReviewItemSyncState | null;
+  }
+): ReviewDeckCardModel {
+  const activityName = reviewItemCategoryName(item);
+  const color = reviewItemCategoryColor(item, activityName, context.neutral, context.mode);
+  const kind = {
+    eventSource: item.eventSource,
+    eventType: item.eventType,
+    isLocation: isLocationReviewItem(item),
+    isTimeAway: isTimeAwayReviewItem(item)
+  };
+  const confidence = reviewConfidencePresentation(item.confidence);
+  const locationReason = locationReviewReasonCopy(item, context.overlapCount);
+  const overlap = context.overlapCount && !locationReason
+    ? `Overlaps ${context.overlapCount} other ${context.overlapCount === 1 ? "entry" : "entries"} · You can still confirm.`
+    : null;
+  const syncCopy = reviewItemSyncStatusCopy(context.syncState);
+  const title = reviewItemTitle(item);
+  const travelMode = item.eventType === "commute_detected" ? travelModeLabel(item.rawPayload?.travelMode) : null;
+  return {
+    key,
+    picture: reviewDeckPicture(kind),
+    color,
+    onColor: onBlockTextColor(item.categoryColor ?? item.suggestedCategoryId ?? color, context.mode, activityName),
+    source: reviewDeckSource(kind),
+    confidence: { score: confidence.score, label: confidence.label },
+    title,
+    when: [
+      formatReviewDeckWhen(item.suggestedStartedAt, item.suggestedStoppedAt, reviewItemDurationSeconds(item, context.now), context.now),
+      travelMode
+    ].filter(Boolean).join(" · ") || null,
+    logAsName: item.title?.trim() || title,
+    activityName,
+    reason: [locationReason ?? reviewItemSummary(item), overlap].filter(Boolean).join(" ") || null,
+    syncBadge: syncCopy?.badge ?? null,
+    syncDetail: syncCopy?.detail ?? null,
+    controlsDisabled: context.syncState != null,
+    moreLabel: `More actions for ${title}`,
+    menuOpen: context.menuOpen
+  };
+}
 
-  return (
-    <View style={styles.reviewCard}>
-      <View
-        pointerEvents="none"
-        style={[styles.reviewCardAccentRail, { backgroundColor: categoryColor }]}
-      />
-      <View style={styles.reviewCardHeader}>
-        <View style={styles.reviewTitleStack}>
-          <Text {...mobileTextProps("itemTitle")} style={styles.reviewTitle} numberOfLines={2}>{displayEntryTitle(entry)}</Text>
-          <Text {...mobileTextProps("metadata")} style={styles.reviewMetaLine}>
-            {formatEntryTimeRange(entry, now)} · {formatDuration(entryDurationSeconds(entry, now))}
-          </Text>
-        </View>
-        <View style={styles.reviewBadge}>
-          <Text {...mobileTextProps("counter")} style={styles.reviewBadgeText}>{REVIEW_COPY.needsReview}</Text>
-        </View>
-      </View>
-      <View style={styles.calendarBlockTitleRow}>
-        <View style={[styles.colorDot, { backgroundColor: categoryColor }]} />
-        <Text {...mobileTextProps("metadata")} style={[styles.reviewMetaLine, { flex: 1, minWidth: 0 }]}>
-          {categoryName}
-          {entry.placeName ? ` · ${entry.placeName}` : ""}
-        </Text>
-      </View>
-      <View style={styles.reviewActions}>
-        <Pressable
-          accessibilityRole="button"
-          style={pressable(styles.reviewSecondaryButton, styles.buttonPressed)}
-          onPress={onEdit}
-        >
-          <Text {...mobileTextProps("control")} style={styles.reviewSecondaryButtonText}>{REVIEW_COPY.editDetails}</Text>
-        </Pressable>
-      </View>
-      <Text {...mobileTextProps("body")} style={styles.reviewMetaLine}>Confirm and ignore are available for suggested time entries.</Text>
-    </View>
-  );
+function reviewDeckCardForEntry(
+  key: string,
+  entry: MobileTimeEntry,
+  context: { mode: ReturnType<typeof useMobileTheme>["theme"]["mode"]; neutral: string; now: number }
+): ReviewDeckCardModel {
+  const health = isHealthSource(entry.source);
+  const activityName = entry.categoryName ?? (health ? "Health" : "No activity");
+  // No activity stays neutral rather than taking a hashed palette colour.
+  const neutral = !entry.categoryId && !entry.categoryName && !health;
+  const colorKey = entry.categoryColor ?? (health ? "moss" : entry.categoryId);
+  const kind = {
+    eventSource: entry.source,
+    eventType: null,
+    isLocation: Boolean(entry.placeName) || entry.source?.startsWith("location") === true,
+    isTimeAway: false
+  };
+  return {
+    key,
+    picture: reviewDeckPicture(kind),
+    color: neutral ? context.neutral : paletteColorFor(colorKey, activityName, context.mode),
+    onColor: neutral ? onBlockTextColor("slate", context.mode) : onBlockTextColor(colorKey, context.mode, activityName),
+    source: reviewDeckSource(kind),
+    confidence: null,
+    title: displayEntryTitle(entry),
+    when: formatReviewDeckWhen(entry.startedAt, entry.stoppedAt, entryDurationSeconds(entry, context.now), context.now),
+    logAsName: displayEntryTitle(entry),
+    activityName,
+    reason: "Already on your timeline. Edit it to confirm the details.",
+    syncBadge: null,
+    syncDetail: null,
+    controlsDisabled: false,
+    moreLabel: null,
+    menuOpen: false
+  };
 }
 
 function collectReviewNeededEntries(
@@ -1766,27 +1675,6 @@ function reviewItemTitle(item: MobileReviewItem) {
   return item.title || REVIEW_COPY.suggestedActivity;
 }
 
-function formatReviewItemMeta(item: MobileReviewItem, durationSeconds: number) {
-  const parts: string[] = [];
-  const timeWindow = formatReviewItemTimeWindow(item);
-  if (timeWindow) parts.push(timeWindow);
-  if (durationSeconds > 0) parts.push(formatDuration(durationSeconds));
-  // Motion & Fitness: how a journey was travelled.
-  const travelMode = item.eventType === "commute_detected" ? travelModeLabel(item.rawPayload?.travelMode) : null;
-  if (travelMode) parts.push(travelMode);
-  if (!parts.length) parts.push(reviewItemKindLabel(item));
-  return parts.join(" · ");
-}
-
-function reviewItemKindLabel(item: MobileReviewItem) {
-  if (isTimeAwayReviewItem(item)) return "Time away";
-  if (item.eventType === "commute_detected") return "Commute";
-  if (isOneOffLocationReviewItem(item)) return "One-off activity";
-  if (isLocationReviewItem(item)) return REVIEW_COPY.detectedVisit;
-  if (isHealthReviewItem(item)) return "Health import";
-  return REVIEW_COPY.suggestedActivity;
-}
-
 function reviewItemSummary(item: MobileReviewItem) {
   if (isTimeAwayReviewItem(item)) {
     return typeof item.rawPayload?.stopCount === "number" && item.rawPayload.stopCount > 0
@@ -1855,30 +1743,8 @@ function isHealthSource(source: string | null | undefined) {
   return source?.startsWith("health_") ?? false;
 }
 
-function formatReviewItemTimeWindow(item: MobileReviewItem) {
-  if (!item.suggestedStartedAt) return null;
-  const startedAt = new Date(item.suggestedStartedAt);
-  const stoppedAt = item.suggestedStoppedAt ? new Date(item.suggestedStoppedAt) : null;
-  if (Number.isNaN(startedAt.getTime())) return null;
-  if (!stoppedAt || Number.isNaN(stoppedAt.getTime())) return formatDateTime(startedAt);
-  if (startedAt.toDateString() === stoppedAt.toDateString()) {
-    return `${formatDateTime(startedAt)}–${formatTimeOfDay(stoppedAt)}`;
-  }
-  return `${formatDateTime(startedAt)}–${formatDateTime(stoppedAt)}`;
-}
-
 function displayEntryTitle(entry: MobileTimeEntry) {
   return entry.description?.trim() || entry.categoryName || REVIEW_COPY.suggestedActivity;
-}
-
-function formatEntryTimeRange(entry: MobileTimeEntry, now: number) {
-  const startedAt = new Date(entry.startedAt);
-  const stoppedAt = entry.stoppedAt ? new Date(entry.stoppedAt) : new Date(now);
-  return `${formatTimeOfDay(startedAt)}-${entry.stoppedAt ? formatTimeOfDay(stoppedAt) : "now"}`;
-}
-
-function formatDateTime(date: Date) {
-  return `${date.toLocaleDateString(undefined, { month: "short", day: "numeric" })} ${formatTimeOfDay(date)}`;
 }
 
 function formatCachedAt(value: string) {
@@ -1930,15 +1796,6 @@ function entryDurationSeconds(entry: MobileTimeEntry, now: number) {
   return Math.max(entry.durationSeconds, Math.floor((now - startedAt) / 1000));
 }
 
-function formatDuration(seconds: number) {
-  const safe = Math.max(0, Math.floor(seconds));
-  const hours = Math.floor(safe / 3600);
-  const minutes = Math.floor((safe % 3600) / 60);
-  if (hours === 0) return `${minutes}m`;
-  if (minutes === 0) return `${hours}h`;
-  return `${hours}h ${minutes}m`;
-}
-
 function pad2(value: number) {
   return value.toString().padStart(2, "0");
 }
@@ -1955,49 +1812,3 @@ async function withTimeout<T>(promise: Promise<T>, timeoutMs: number): Promise<T
   }
 }
 
-function ReviewChevronGlyph({ color, expanded }: { color: string; expanded: boolean }) {
-  return (
-    <Svg accessibilityElementsHidden width={18} height={18} viewBox="0 0 24 24">
-      <Path
-        d={expanded ? "m6 15 6-6 6 6" : "m6 9 6 6 6-6"}
-        fill="none"
-        stroke={color}
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        strokeWidth={2}
-      />
-    </Svg>
-  );
-}
-
-function MoreActionsGlyph({ color }: { color: string }) {
-  return (
-    <Svg accessibilityElementsHidden width={22} height={22} viewBox="0 0 24 24">
-      <Circle cx={5} cy={12} r={1.7} fill={color} />
-      <Circle cx={12} cy={12} r={1.7} fill={color} />
-      <Circle cx={19} cy={12} r={1.7} fill={color} />
-    </Svg>
-  );
-}
-
-function WarningGlyph({ color }: { color: string }) {
-  return (
-    <Svg accessibilityElementsHidden width={16} height={16} viewBox="0 0 24 24">
-      <Path
-        d="M12 3 2.8 20h18.4L12 3Z"
-        fill="none"
-        stroke={color}
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        strokeWidth={1.8}
-      />
-      <Path
-        d="M12 9v4.5M12 17.25h.01"
-        fill="none"
-        stroke={color}
-        strokeLinecap="round"
-        strokeWidth={2}
-      />
-    </Svg>
-  );
-}

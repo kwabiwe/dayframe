@@ -19,7 +19,10 @@ describe("offline-first Review screen contracts", () => {
   it("only stops presentation work after navigation actually begins", () => {
     expect(reviewSource).toContain('navigation.addListener("beforeRemove", stopReviewPresentationWork)');
     expect(reviewSource).toContain('if (event.data.closing) stopReviewPresentationWork();');
-    expect(reviewSource).toContain('<MobileBackButton accessibilityLabel="Back" onPress={() => router.back()} />');
+    // The Review deck's "‹ Today" back (Blocks step 5a) only navigates; beforeRemove stops the work.
+    expect(reviewSource).toContain('accessibilityLabel="Back to Today"');
+    expect(reviewSource).toMatch(/testID="review-deck-back"/);
+    expect(reviewSource).not.toContain("stopReviewPresentationWork(); router.back()");
     expect(reviewSource).not.toContain('onPress={() => { stopReviewPresentationWork(); router.back(); }}');
   });
 
@@ -44,8 +47,9 @@ describe("offline-first Review screen contracts", () => {
   });
 
   it("uses Settings-style titles and delays cold evidence feedback", () => {
+    // The Review deck uses the prototype's compact nav title (Blocks step 5a).
     expect(reviewSource).toContain(
-      '<Text {...mobileTextProps("screenHeading")} style={styles.settingsTitle}>Review</Text>'
+      '<Text {...mobileTextProps("control")} accessibilityRole="header" style={styles.reviewDeckNavTitle}>Review</Text>'
     );
     expect(detailSource).toContain(
       '<Text {...mobileTextProps("screenHeading")} style={styles.settingsTitle}>Location evidence</Text>'

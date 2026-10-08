@@ -261,3 +261,13 @@ Block pull-to-refresh:
 - Interruption: turning the dial while the pills are open closes them; a disabled sheet (a mutation in flight) disables `…` and the pills.
 - Async outcome: none; shortcuts only change the draft.
 - Accessibility: Reduce Motion keeps the swap as a short fade (90 ms in, 70 ms out) with no movement. `…` reports `expanded`; its label is "Time shortcuts" or "Hide time shortcuts"; each pill has a spoken label ("Set start to the last stop time, 21:22", "Round stop time", "Round duration").
+
+## Review deck (Blocks parity step 5a)
+
+- Trigger: Log it, Skip or a saved edit deciding the top card; a backlog page or refresh adding cards; Skip for now moving a legacy entry back.
+- Owner: each card in `ReviewDeckStack` owns its depth (0–2) as one shared value; a change of depth springs to `translateY(depth × 14)` and `scale(1 − depth × 0.05)` with `BLOCKS_SPRING.land`. Cards enter and leave with `localPresenceEntering`/`localPresenceExiting` (a 140 ms fade). The decided card is removed only after its durable commit, so a failed commit leaves it on top.
+- Entrance/update/exit: the top card fades out while the cards beneath land one step up; a card arriving at the bottom of the stack fades in at its depth. "All framed" appears without motion in 5a (its drop-in is step 5b).
+- Interruption: a new decision while cards are landing retargets the springs from where they are.
+- Async outcome: the existing Review outbox owns success and failure (an alert keeps the card).
+- Accessibility: Reduce Motion moves cards to their depth at once and keeps the short fades. Only the top card is exposed to VoiceOver; each round action has a spoken label. Swipe throws, stamps, the toast with Undo and the finished drop-in arrive in 5b, each with its Reduce Motion path.
+
