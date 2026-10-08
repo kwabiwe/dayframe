@@ -35,7 +35,8 @@ describe("Review deck motion contract (Blocks parity step 5b)", () => {
   it("keeps a saved decision out of the deck until its projection lands (r2 A)", () => {
     expect(screen).toContain("committingDeckKeys.has(key)");
     expect(screen).toContain("setDeckKeyCommitting(held.key, true);");
-    expect(screen).toMatch(/const started = held\.logged[\s\S]*settled, failed, \{ unlisted \}\)/);
+    expect(screen).toMatch(/started = resolveItem\(item, \{ action: "edit_and_confirm", edit \}, [^\n]*settled, failed, \{ unlisted \}\);/);
+    expect(screen).toMatch(/started = resolveItem\([^\n]*ignore_once[^\n]*settled, failed, \{ unlisted \}\);/);
     expect(screen).toContain("if (!started) failed();");
     expect(screen).toContain("if (reviewMutations.current.has(item.id)) return false;");
     expect(screen).toContain('Waiting to sync.", settled, failed, { unlisted })');
@@ -112,5 +113,20 @@ describe("Review deck motion contract (Blocks parity step 5b)", () => {
     expect(screen).toContain("if (deckReturn && !deckSources.some((source) => source.key === deckReturn.key)) setDeckReturn(null);");
     expect(deck).toContain("if (throwRequest.direction === 1 ? !canLog : !canSkip) return;");
     expect(screen).toContain('deckScreenActive.current = state === "active" && deckScreenFocused.current;');
+  });
+});
+
+describe("Review deck live Log as (Blocks parity step 5c-1)", () => {
+  it("edits the name and activity on the card and logs them as edit_and_confirm after the hold", () => {
+    expect(deck).toContain('testID="review-deck-log-as-name"');
+    expect(deck).toContain('testID="review-deck-log-as-activity"');
+    expect(screen).toContain("<ActivityPickerSheet");
+    // The edit is decided when the hold ends, from what really changed (src/lib/reviewLogAs.ts).
+    expect(screen).toMatch(/const edit = held\.logged\s*\? reviewLogAsEdit\(/);
+    expect(screen).toContain('resolveItem(item, { action: "edit_and_confirm", edit }');
+    // The field is uncontrolled and its touches never start a throw.
+    expect(deck).toContain("defaultValue={card.logAsName}");
+    expect(deck).toContain(".requireExternalGestureToFail(logAsFieldGesture)");
+    expect(screen).toContain("logAsEditable: context.syncState == null && hasSuggestedTimeWindow(item)");
   });
 });
