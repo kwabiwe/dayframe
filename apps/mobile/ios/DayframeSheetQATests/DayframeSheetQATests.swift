@@ -275,7 +275,7 @@ final class DayframeSheetQATests: XCTestCase {
       SheetQAValue.string(state, "suggestionsPhase") == "closed"
         && SheetQAValue.string(state, "sheetPhase") == "presented"
     }
-    let focusCategory = elementWithLabel("Set category to Focus")
+    let focusCategory = elementWithLabel("Set activity to Focus")
     try require(focusCategory.exists && focusCategory.isSelected, "Bauhaus selection did not select Focus.")
     try require(elementWithLabel("Remove tag A24").exists, "Bauhaus selection did not apply tag A24.")
     try require(elementWithLabel("Remove tag Launch").exists, "Bauhaus selection did not apply tag Launch.")
@@ -1973,7 +1973,7 @@ final class DayframeSheetQATests: XCTestCase {
       SheetQAValue.string(state, "suggestionsPhase") == "closed"
         && SheetQAValue.string(state, "sheetPhase") == "presented"
     }
-    let category = elementWithLabel("Set category to Focus")
+    let category = elementWithLabel("Set activity to Focus")
     try require(category.exists && category.isSelected, "Bauhaus suggestion did not select the Focus category.", state: settled)
     try require(elementWithLabel("Remove tag A24").exists, "Bauhaus suggestion did not apply tag A24.", state: settled)
     try require(elementWithLabel("Remove tag Launch").exists, "Bauhaus suggestion did not apply tag Launch.", state: settled)
