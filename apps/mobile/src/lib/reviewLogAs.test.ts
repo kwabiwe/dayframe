@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { activeLogAsCategoryId, reviewLogAsEdit } from "./reviewLogAs";
+import { activeLogAsCategoryId, reviewLogAsEdit, reviewLogAsEditorName } from "./reviewLogAs";
 
 const base = {
   draftName: undefined,
@@ -65,5 +65,23 @@ describe("activeLogAsCategoryId", () => {
 
   it("leaves an untouched chip untouched", () => {
     expect(activeLogAsCategoryId(undefined, categories)).toBeUndefined();
+  });
+});
+
+describe("reviewLogAsEditorName (details sheet hand-off)", () => {
+  const base = { typedName: undefined, builtDescription: null, defaultName: "Possible journey", isLocationV2: false };
+
+  it("starts from the card's default name when nothing was typed and the suggestion has none", () => {
+    expect(reviewLogAsEditorName(base)).toBe("Possible journey");
+    expect(reviewLogAsEditorName({ ...base, typedName: "   " })).toBe("Possible journey");
+  });
+
+  it("prefers a typed name, then the suggestion's own description", () => {
+    expect(reviewLogAsEditorName({ ...base, typedName: "Drive to gym" })).toBe("Drive to gym");
+    expect(reviewLogAsEditorName({ ...base, builtDescription: "Commute" })).toBe("Commute");
+  });
+
+  it("leaves a Location visit unnamed so the server names it", () => {
+    expect(reviewLogAsEditorName({ ...base, isLocationV2: true })).toBeNull();
   });
 });

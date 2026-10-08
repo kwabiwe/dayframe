@@ -36,7 +36,7 @@ import {
 import { createReviewDeckHold, reviewDeckProposalSignature, type ReviewDeckHeldDecision } from "@/lib/reviewDeckHold";
 import { ActivityPickerSheet } from "@/components/ActivityPickerSheet";
 import { recentActivityIds } from "@/lib/activityChoice";
-import { activeLogAsCategoryId, reviewLogAsEdit } from "@/lib/reviewLogAs";
+import { activeLogAsCategoryId, reviewLogAsEdit, reviewLogAsEditorName } from "@/lib/reviewLogAs";
 import { playHaptic } from "@/lib/haptics";
 import {
   OverflowMenu,
@@ -1531,7 +1531,12 @@ export default function ReviewScreen() {
     const draftEntry = builtEntry
       ? {
           ...builtEntry,
-          ...(typedName ? { description: typedName } : {}),
+          description: reviewLogAsEditorName({
+            typedName,
+            builtDescription: builtEntry.description,
+            defaultName: item.title?.trim() || reviewItemTitle(item),
+            isLocationV2: hasV2LocationEvidence(item)
+          }),
           ...(pickedCategory
             ? { categoryColor: pickedCategory.color, categoryId: pickedCategory.id, categoryName: pickedCategory.name }
             : {})

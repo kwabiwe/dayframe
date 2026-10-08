@@ -48,3 +48,19 @@ export function activeLogAsCategoryId(
   if (categoryId === undefined) return undefined;
   return categories?.some((category) => category.id === categoryId) ? categoryId : undefined;
 }
+
+/**
+ * The name the details sheet starts from: what the card shows. A typed name wins; otherwise the
+ * suggestion's own description, or the card's default name for a generic moment (a Location visit
+ * is left unnamed so the server keeps naming it).
+ */
+export function reviewLogAsEditorName(input: {
+  typedName: string | undefined;
+  builtDescription: string | null | undefined;
+  defaultName: string;
+  isLocationV2: boolean;
+}) {
+  return input.typedName?.trim() ||
+    input.builtDescription?.trim() ||
+    (input.isLocationV2 ? null : input.defaultName.trim() || null);
+}
