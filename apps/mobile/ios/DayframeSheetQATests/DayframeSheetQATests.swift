@@ -1646,14 +1646,25 @@ final class DayframeSheetQATests: XCTestCase {
   }
 
   private func stopRunningTimer(step: String, iteration: Int? = nil) throws {
-    let before = try sheetState()
-    let presentationID = try requiredInt(before, key: "presentationId")
-    let stop = element(SheetQAIdentifiers.stop)
-    if !(stop.exists && stop.isHittable) {
-      // Stop is below the form: close the keyboard and Suggestions from the sheet head first.
+    // Stop sits below the form (Blocks parity 4a): close the keyboard and Suggestions from the
+    // sheet head and wait for them to settle before requiring it to be hittable.
+    let current = try sheetState()
+    if SheetQAValue.string(current, "keyboardPhase") != "hidden"
+      || SheetQAValue.string(current, "suggestionsPhase") != "closed" {
       try tap(SheetQAIdentifiers.hero)
     }
-    try require(stop.waitForExistence(timeout: 2) && stop.isHittable, "Running Stop was not hittable once the keyboard and Suggestions closed.", state: before)
+    let before = try waitForSheet("keyboard and Suggestions closed before Stop") { state in
+      SheetQAValue.string(state, "keyboardPhase") == "hidden"
+        && SheetQAValue.bool(state, "descriptionFocused") == false
+        && SheetQAValue.string(state, "suggestionsPhase") == "closed"
+    }
+    let presentationID = try requiredInt(before, key: "presentationId")
+    let stop = element(SheetQAIdentifiers.stop)
+    let hittableDeadline = Date().addingTimeInterval(2)
+    while !(stop.exists && stop.isHittable) && Date() < hittableDeadline {
+      RunLoop.current.run(until: Date().addingTimeInterval(0.05))
+    }
+    try require(stop.exists && stop.isHittable, "Running Stop was not hittable once the keyboard and Suggestions closed.", state: before)
     let sheetElement = element(SheetQAIdentifiers.sheet)
     try require(
       sheetElement.exists && sheetElement.frame.contains(stop.frame),
