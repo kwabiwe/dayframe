@@ -44,7 +44,7 @@ describe("Review deck motion contract (Blocks parity step 5b)", () => {
 
   it("does not count the held card in flight toward \"N of M\" (r2 B)", () => {
     expect(screen).toContain("const deckRemaining = heldInFlight ? deckSources.length - 1 : deckSources.length;");
-    expect(screen).toContain("Math.max(totalNeedsReview - locallyDecidedCount, deckRemaining)");
+    expect(screen).toContain("Math.max(reviewBacklog.globalCount - unreflectedDecisions, deckRemaining)");
     expect(screen).not.toMatch(/remaining: deckBacklogComplete\s*\?\s*deckSources\.length/);
   });
 
@@ -146,7 +146,7 @@ describe("Review deck live Log as (Blocks parity step 5c-1)", () => {
 
   it("never lets the full-screen back gesture race a card drag, and lands the next card as the throw starts (5d)", () => {
     const layout = source("../../../app/_layout.tsx");
-    expect(layout).toContain('<Stack.Screen name="review" options={{ title: "Review", fullScreenGestureEnabled: false }} />');
+    expect(layout).toContain('<Stack.Screen name="review" options={{ title: "Review", gestureEnabled: false }} />');
     expect(screen).toContain("flyingKey={flyingDeckKey}");
     expect(deck).toContain("const topFlying = Boolean(flyingKey) && cards[0]?.key === flyingKey;");
     expect(deck).toContain("const top = depth === 0 && !flying && !locked;");
@@ -155,8 +155,7 @@ describe("Review deck live Log as (Blocks parity step 5c-1)", () => {
   });
 
   it("keeps the deck total steady while a decision syncs (5d)", () => {
-    expect(screen).toContain("lastExactDeckTotal.current = { owner: deckOwnerKey, total: deckVisit.decided + exactDeckRemaining };");
-    expect(screen).toContain("if (lastExactDeckTotal.current && lastExactDeckTotal.current.owner !== deckOwnerKey) lastExactDeckTotal.current = null;");
-    expect(screen).toContain("reviewBacklog ? Math.max(0, reviewBacklog.globalCount - locallyDecidedCount) : Number.POSITIVE_INFINITY");
+    expect(screen).toContain("const unreflectedDecisions = Math.max(queuedReviewDecisions + (heldDeckDecision ? 1 : 0), locallyDecidedCount);");
+    expect(screen).toContain("Math.max(reviewBacklog.globalCount - unreflectedDecisions, deckRemaining)");
   });
 });

@@ -959,29 +959,25 @@ export default function ReviewScreen() {
   // Every open item is loaded: the deck itself is the count, so a decision still syncing never
   // turns "2 of 5" into "2 of 5+". Otherwise the server count is used when it is exact.
   const deckBacklogComplete = reviewBacklog !== null && !reviewBacklog.nextCursor && reviewBacklog.recordsComplete;
-  // While this visit's own decision is still syncing the server count is not exact, but the total
-  // ("M") has not changed: keep the last exact total so "14 of 160" never drops to the loaded
-  // cards ("14 of 56") and back.
-  const exactDeckRemaining = deckBacklogComplete
-    ? deckRemaining
-    : reviewCountIsExact ? Math.max(totalNeedsReview - locallyDecidedCount, deckRemaining) : null;
-  // Scoped to the account; a fresher, smaller server count (items resolved elsewhere) still wins.
-  const deckOwnerKey = data ? `${data.workspace.id}:${data.user.id}` : null;
-  const lastExactDeckTotal = useRef<{ owner: string; total: number } | null>(null);
-  if (lastExactDeckTotal.current && lastExactDeckTotal.current.owner !== deckOwnerKey) lastExactDeckTotal.current = null;
-  if (exactDeckRemaining !== null && deckOwnerKey) {
-    lastExactDeckTotal.current = { owner: deckOwnerKey, total: deckVisit.decided + exactDeckRemaining };
-  }
-  const frozenDeckRemaining = lastExactDeckTotal.current
-    ? Math.min(
-        lastExactDeckTotal.current.total - deckVisit.decided,
-        reviewBacklog ? Math.max(0, reviewBacklog.globalCount - locallyDecidedCount) : Number.POSITIVE_INFINITY
-      )
-    : null;
+  // While this visit's decisions sync, the last server count still includes them. Remaining is that
+  // count minus the decisions not yet reflected in it (queued in the outbox, or held/saving on this
+  // iPhone, each counted once), so "N of M" neither drops to the loaded cards nor ignores items
+  // resolved or added elsewhere.
+  const queuedReviewDecisions = reviewSyncDiagnostics
+    ? reviewSyncDiagnostics.pendingCount +
+      reviewSyncDiagnostics.retryWaitCount +
+      reviewSyncDiagnostics.authenticationRequiredCount +
+      reviewSyncDiagnostics.acknowledgedCount
+    : 0;
+  const unreflectedDecisions = Math.max(queuedReviewDecisions + (heldDeckDecision ? 1 : 0), locallyDecidedCount);
   const deckPosition = reviewDeckPosition({
     decided: deckVisit.decided,
-    remaining: exactDeckRemaining ?? (frozenDeckRemaining !== null ? Math.max(frozenDeckRemaining, deckRemaining) : deckRemaining),
-    exact: exactDeckRemaining !== null || frozenDeckRemaining !== null
+    remaining: deckBacklogComplete
+      ? deckRemaining
+      : reviewBacklog
+        ? Math.max(reviewBacklog.globalCount - unreflectedDecisions, deckRemaining)
+        : deckRemaining,
+    exact: deckBacklogComplete || reviewBacklog !== null
   });
   // "All framed" only once a verified read says nothing else is open; a cached-only deck (offline,
   // no backlog read yet) never claims completeness.
