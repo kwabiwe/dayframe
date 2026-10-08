@@ -44,7 +44,7 @@ describe("Review deck motion contract (Blocks parity step 5b)", () => {
 
   it("does not count the held card in flight toward \"N of M\" (r2 B)", () => {
     expect(screen).toContain("const deckRemaining = heldInFlight ? deckSources.length - 1 : deckSources.length;");
-    expect(screen).toContain("countReadStartedAt: backlogCountReadStartedAt,");
+    expect(screen).toContain("Math.max(totalNeedsReview - locallyDecidedCount, deckRemaining)");
     expect(screen).not.toMatch(/remaining: deckBacklogComplete\s*\?\s*deckSources\.length/);
   });
 
@@ -154,8 +154,4 @@ describe("Review deck live Log as (Blocks parity step 5c-1)", () => {
     expect(deck).toContain("const sizingCard = visible[topFlying ? 1 : 0] ?? visible[0];");
   });
 
-  it("keeps the deck total steady while a decision syncs (5d)", () => {
-    expect(screen).toContain("remaining: reviewDeckRemaining({");
-    expect(screen).toContain("serverOpenCount: reviewBacklog?.globalCount ?? null,");
-  });
 });

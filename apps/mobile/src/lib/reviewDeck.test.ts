@@ -3,7 +3,6 @@ import {
   formatReviewDeckWhen,
   orderReviewDeck,
   reviewDeckArmDirection,
-  reviewDeckRemaining,
   reviewDeckPicture,
   reviewDeckPosition,
   reviewDeckSource
@@ -105,38 +104,5 @@ describe("reviewDeckArmDirection (5b swipe arming)", () => {
     expect(reviewDeckArmDirection(120, 20)).toBe(0);
     expect(reviewDeckArmDirection(-120, -20)).toBe(0);
     expect(reviewDeckArmDirection(230, 120)).toBe(1);
-  });
-});
-
-describe("reviewDeckRemaining", () => {
-  const readAt = Date.parse("2026-10-08T12:00:00.000Z");
-  const before = "2026-10-08T11:59:00.000Z";
-  const after = "2026-10-08T12:00:30.000Z";
-  const base = { backlogComplete: false, deckRemaining: 56, serverOpenCount: 160, countReadStartedAt: readAt, localItemIds: [] as string[], outbox: [] as { reviewItemId: string; state: string; updatedAt: string }[] };
-
-  it("uses the deck when everything is loaded, and the deck until a server count exists", () => {
-    expect(reviewDeckRemaining({ ...base, backlogComplete: true, deckRemaining: 12 })).toBe(12);
-    expect(reviewDeckRemaining({ ...base, serverOpenCount: null })).toBe(56);
-  });
-
-  it("keeps the total through held, saving, queued and acknowledged-after-read (160 never becomes 161 or 56)", () => {
-    expect(reviewDeckRemaining({ ...base, localItemIds: ["a"] })).toBe(159);
-    expect(reviewDeckRemaining({ ...base, localItemIds: ["a"], outbox: [{ reviewItemId: "a", state: "pending", updatedAt: after }] })).toBe(159);
-    expect(reviewDeckRemaining({ ...base, outbox: [{ reviewItemId: "a", state: "retry_wait", updatedAt: after }] })).toBe(159);
-    expect(reviewDeckRemaining({ ...base, outbox: [{ reviewItemId: "a", state: "acknowledged", updatedAt: after }] })).toBe(159);
-  });
-
-  it("does not subtract a decision acknowledged before the count's read started", () => {
-    expect(reviewDeckRemaining({ ...base, serverOpenCount: 159, outbox: [{ reviewItemId: "a", state: "acknowledged", updatedAt: before }] })).toBe(159);
-  });
-
-  it("counts separate queued and saving decisions separately", () => {
-    expect(reviewDeckRemaining({ ...base, localItemIds: ["b"], outbox: [{ reviewItemId: "a", state: "retry_wait", updatedAt: after }] })).toBe(158);
-  });
-
-  it("follows items resolved or added elsewhere and never drops below the cards loaded", () => {
-    expect(reviewDeckRemaining({ ...base, serverOpenCount: 140, outbox: [{ reviewItemId: "a", state: "pending", updatedAt: after }] })).toBe(139);
-    expect(reviewDeckRemaining({ ...base, serverOpenCount: 180 })).toBe(180);
-    expect(reviewDeckRemaining({ ...base, serverOpenCount: 40 })).toBe(56);
   });
 });
