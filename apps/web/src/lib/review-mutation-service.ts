@@ -894,6 +894,9 @@ async function genericEditMatchesExisting(
   ) {
     return false;
   }
+  // An edit that sends no tags leaves an entry's tags as they are (a reused Health night keeps
+  // its own), so its replay is equivalent whatever tags the entry has.
+  if (edit.tags === undefined) return true;
   const tags = await client.query<{ name: string }>(
     `select tag.name
      from time_entry_tags link

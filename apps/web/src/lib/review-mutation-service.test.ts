@@ -333,6 +333,68 @@ describe("idempotent Review mutations", () => {
     expect(link?.[1]).toEqual(expect.arrayContaining(["health-event-extended", "new-sleep-entry"]));
   });
 
+  it("replays an equivalent tag-less sleep edit on a reused, tagged night instead of conflicting", async () => {
+    const reviewItemId = "30000000-0000-4000-8000-000000000015";
+    const query = vi.fn(async (statement: string) => {
+      if (statement.includes("pg_try_advisory_xact_lock")) return { rows: [{ acquired: true }] };
+      if (statement.includes("from review_mutation_receipts")) return { rows: [] };
+      if (statement.includes("for update of ri nowait")) {
+        return {
+          rows: [{
+            id: reviewItemId,
+            eventId: "health-event-extended",
+            title: "Sleep",
+            status: "accepted",
+            suggestedCategoryId: null,
+            suggestedPlaceId: null,
+            suggestedStartedAt: "2026-07-31T21:53:00.000Z",
+            suggestedStoppedAt: "2026-08-01T04:51:00.000Z",
+            confidence: "high",
+            eventSource: "health_sleep",
+            eventType: "health_sleep_import",
+            rawPayload: {},
+            resolvedTimeEntryId: "health-entry-stable",
+            locationSegmentId: null
+          }]
+        };
+      }
+      if (statement.includes("created_from_event_id = $3")) return { rows: [] };
+      if (statement.includes("where id = $1 and workspace_id = $2 and user_id = $3")) {
+        return {
+          rows: [{
+            categoryId: null,
+            placeId: null,
+            description: "Long sleep",
+            startedAt: "2026-07-31T23:30:00.000Z",
+            stoppedAt: "2026-08-01T07:30:00.000Z"
+          }]
+        };
+      }
+      // The night kept a tag the edit never mentioned.
+      if (statement.includes("from time_entry_tags")) return { rows: [{ name: "Travel" }] };
+      return { rows: [] };
+    });
+    mocks.connect.mockResolvedValue({ query, release: vi.fn() });
+
+    await expect(resolveIdempotentReviewMutation(
+      reviewItemId,
+      {
+        clientMutationId: "d87c35ce-2a63-4e44-a8fc-4370f2a5cd15",
+        mutation: {
+          action: "edit_and_confirm",
+          edit: {
+            categoryId: null,
+            placeId: null,
+            description: "Long sleep",
+            startedAt: "2026-07-31T23:30:00.000Z",
+            stoppedAt: "2026-08-01T07:30:00.000Z"
+          }
+        }
+      },
+      session
+    )).resolves.toMatchObject({ action: "edit_and_confirm", alreadyResolved: true, equivalent: true });
+  });
+
   it("accepts an extended Health sleep review by updating one stable entry and receipt", async () => {
     const reviewItemId = "30000000-0000-4000-8000-000000000003";
     const client = clientForExtendedHealthSleep(reviewItemId);
