@@ -231,7 +231,7 @@ Mobile Today and integrated Review:
 Blocks prototype parity (owner decision 7 October 2026; built screen by screen):
 
 - Every iPhone and web screen, Settings included, is rebuilt to match the Blocks prototype (`docs/brand-style-guide.md`, Dayframe Blocks). The rules above stay in force for each screen until the PR that rebuilds it updates them.
-- Kept through the rebuild: grouped repeat rows in history; the Review Location evidence editor; "Always ignore" and "Make rule"; the entry sheet's start/end date and time editing, historical description suggestions and rounding shortcuts; free-text tags with autocomplete; Retry/Discard for rejected changes; every export and delete path; logout on every width.
+- Kept through the rebuild: grouped repeat rows in history; the Review Location evidence editor; the entry sheet's start/end date and time editing, historical description suggestions and rounding shortcuts; free-text tags with autocomplete; Retry/Discard for rejected changes; every export and delete path; logout on every width.
 - On iPhone Today the Review donut gives way to a "moments to review" card that opens Review (built in step 2a-1), with pending time shown in a Today ribbon (step 2a-3). The owner confirmed on 7 October 2026 that Quick Confirm leaves Today (suggestions are confirmed in Review) and that the goal frame replaces the logged/"covered" summary.
 - Connectivity direction: the indicator should show only offline and a brief "back online", with syncing silent; rejected changes still need a visible way into Retry/Discard (an attention badge on the avatar is proposed). `AGENTS.md` governs until the PR that builds it.
 
@@ -244,7 +244,7 @@ Decisions where the prototype is ambiguous or drops a function:
 | D3 | "Week starts on" is a real stored preference that Calendar, Reports and weekly goals honour (the quick-start mosaic keeps sizing tiles by the last seven days). |
 | D4 | The weekly goal shows in Reports (hero and streak). |
 | D5 | Notifications and Motion & Fitness get rows under Settings › Automatic tracking. |
-| D6 | Review keeps "Always ignore" and "Make rule" in a More menu on the card. |
+| D6 | Review drops "Always ignore" and "Make rule" everywhere (owner decision 8 October 2026, replacing the 7 October choice of a More menu): Accept and Skip / Ignore once remain. Existing automation rules keep applying at ingest, but no screen or API creates new ones. |
 | D7 | Review's "Edit before logging" opens the existing evidence editor, restyled; the activity is chosen with the activity picker. |
 | D8 | A Blocks Places screen (list, editor, learned places, Home and Work) fills the prototype's gap. |
 | D9 | Reports uses Week · Month as the main control; Today, Year, custom ranges and the activity-over-time chart stay under a More range sheet. |

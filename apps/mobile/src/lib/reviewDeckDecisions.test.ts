@@ -14,7 +14,6 @@ describe("review deck evidence decisions", () => {
     expect(reviewDeckDecisionForAction("edit_and_confirm")).toBe(true);
     expect(reviewDeckDecisionForAction("change_place_and_confirm")).toBe(true);
     expect(reviewDeckDecisionForAction("record_once")).toBe(true);
-    expect(reviewDeckDecisionForAction("always_ignore_source")).toBe(false);
     expect(reviewDeckDecisionForAction("split")).toBeNull();
     expect(reviewDeckDecisionForAction("change_place")).toBeNull();
   });

@@ -63,6 +63,15 @@ describe("web Places list and editor contracts", () => {
     expect(combobox).toContain("OpenStreetMap");
   });
 
+  it("keeps project, client and tag labels out of the Places list UI", () => {
+    const placesPage = readFileSync(fileURLToPath(new URL("../app/places/page.tsx", import.meta.url)), "utf8");
+    const source = `${manager}\n${placesPage}`;
+
+    expect(source).not.toMatch(/\bProjects?\b/);
+    expect(source).not.toMatch(/\bClients?\b/);
+    expect(source).not.toMatch(/\bTags?\b/);
+  });
+
   it("keeps the suggestion switch pill-shaped on touch browsers", () => {
     expect(styles).toMatch(/\.place-suggestion-toggle input \{[^}]*min-width: 52px;[^}]*min-height: 30px;[^}]*border-radius: 999px;/s);
     expect(styles).toContain("-webkit-appearance: none;");

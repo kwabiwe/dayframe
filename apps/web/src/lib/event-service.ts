@@ -133,9 +133,13 @@ export type ReviewResolutionCode =
   | "review_query_cancelled"
   | "review_service_unavailable";
 
+// "Always ignore" (always_ignore_source) and "Make rule" (create_rule) were removed by
+// owner decision on 8 Oct 2026; they are now rejected as invalid_action.
+type ReviewResolutionAction = "accept" | "ignore_once";
+
 export type ReviewResolutionResult = {
   ok: true;
-  action: "accept" | "ignore_once" | "always_ignore_source" | "create_rule";
+  action: ReviewResolutionAction;
   status: "accepted" | "ignored";
   entryId?: string;
   duplicate?: boolean;
@@ -231,8 +235,6 @@ const HEALTH_RLS_MIGRATION = "supabase/migrations/202607020001_dayframe_rls.sql"
 const PLACE_DEFAULT_ACTIVITY_DESCRIPTION_MIGRATION =
   "supabase/migrations/202607070002_place_default_activity_description.sql";
 const PLACE_LOGGING_ENABLED_MIGRATION = "supabase/migrations/202607140002_place_logging_enabled.sql";
-const AUTOMATION_RULE_ACTIVITY_DESCRIPTION_MIGRATION =
-  "supabase/migrations/202607120001_automation_rule_activity_description.sql";
 const LOCATION_LEARNING_MIGRATION = "supabase/migrations/202607140001_location_learning_intelligence.sql";
 const DEFAULT_HEALTH_REPROCESS_BATCH_SIZE = 12;
 const MAX_HEALTH_REPROCESS_BATCH_SIZE = 25;
@@ -269,15 +271,6 @@ function missingPlaceLoggingEnabledColumnError(cause: unknown) {
     "places",
     "logging_enabled",
     PLACE_LOGGING_ENABLED_MIGRATION,
-    cause
-  );
-}
-
-function missingAutomationRuleActivityDescriptionColumnError(cause: unknown) {
-  return missingRequiredColumnError(
-    "automation_rules",
-    "activity_description",
-    AUTOMATION_RULE_ACTIVITY_DESCRIPTION_MIGRATION,
     cause
   );
 }
@@ -2267,72 +2260,7 @@ export async function resolveReviewItem(
       await recordHealthSleepResolution(client, session, item.eventId, entryId);
     }
 
-    if (action === "create_rule" && item.eventSource && item.eventType) {
-      await assertAutomationRuleReferences(
-        {
-          placeId: item.suggestedPlaceId,
-          projectId: item.suggestedProjectId,
-          categoryId: item.suggestedCategoryId
-        },
-        session,
-        client
-      );
-
-      await client.query(
-        `insert into automation_rules (
-            workspace_id,
-            name,
-            trigger_source,
-            trigger_type,
-            place_id,
-            action,
-            project_id,
-            category_id,
-            activity_description,
-            confidence_threshold,
-            enabled
-         )
-         values ($1, $2, $3, $4, $5, 'suggest_timer', $6, $7, $8, $9, true)`,
-        [
-          session.workspaceId,
-          `Suggestion from ${item.title}`,
-          item.eventSource,
-          item.eventType,
-          item.suggestedPlaceId,
-          item.suggestedProjectId,
-          item.suggestedCategoryId,
-          item.title,
-          item.confidence
-        ]
-      );
-    }
-
-    if (action === "always_ignore_source" && item.eventSource && item.eventType) {
-      await client.query(
-        `insert into automation_rules (
-            workspace_id,
-            name,
-            trigger_source,
-            trigger_type,
-            place_id,
-            action,
-            project_id,
-            category_id,
-            confidence_threshold,
-            enabled
-         )
-         values ($1, $2, $3, $4, null, 'ignore_source', null, null, $5, true)`,
-        [
-          session.workspaceId,
-          `Ignore ${item.eventSource} / ${item.eventType}`,
-          item.eventSource,
-          item.eventType,
-          item.confidence
-        ]
-      );
-    }
-
-    const resolvedStatus = action === "accept" || action === "create_rule" ? "accepted" : "ignored";
+    const resolvedStatus = action === "accept" ? "accepted" : "ignored";
     await client.query(
       `update review_items
        set status = $3,
@@ -2343,7 +2271,7 @@ export async function resolveReviewItem(
         id,
         session.workspaceId,
         resolvedStatus,
-        action === "always_ignore_source" ? "source" : action === "ignore_once" ? "once" : null,
+        action === "ignore_once" ? "once" : null,
         session.userId
       ]
     );
@@ -2367,15 +2295,8 @@ export async function resolveReviewItem(
   }
 }
 
-function isReviewResolutionAction(
-  value: unknown
-): value is "accept" | "ignore_once" | "always_ignore_source" | "create_rule" {
-  return (
-    value === "accept" ||
-    value === "ignore_once" ||
-    value === "always_ignore_source" ||
-    value === "create_rule"
-  );
+function isReviewResolutionAction(value: unknown): value is ReviewResolutionAction {
+  return value === "accept" || value === "ignore_once";
 }
 
 function reviewItemTimeWindow(item: {
@@ -3170,73 +3091,8 @@ export async function createEntity(
         }
         throw error;
       }
-    case "automation_rule":
-      try {
-        const placeId = nullableString(input.placeId);
-        const projectId = nullableString(input.projectId);
-        const categoryId = nullableString(input.categoryId);
-        await assertAutomationRuleReferences({ placeId, projectId, categoryId }, session);
-
-        return await query(
-          `insert into automation_rules (
-              workspace_id,
-              name,
-              trigger_source,
-              trigger_type,
-              place_id,
-              action,
-              project_id,
-              category_id,
-              activity_description,
-              confidence_threshold,
-              enabled
-           )
-           values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, true)`,
-          [
-            session.workspaceId,
-            String(input.name ?? "New automation"),
-            String(input.triggerSource ?? "geofence_specific"),
-            String(input.triggerType ?? "geofence_enter"),
-            placeId,
-            String(input.action ?? "suggest_timer"),
-            projectId,
-            categoryId,
-            normalizeOptionalText(input.activityDescription),
-            String(input.confidenceThreshold ?? "medium_high")
-          ]
-        );
-      } catch (error) {
-        if (isUndefinedColumnError(error, "activity_description")) {
-          throw missingAutomationRuleActivityDescriptionColumnError(error);
-        }
-        throw error;
-      }
     default:
       throw new Error(`Unsupported entity: ${entity}`);
-  }
-}
-
-async function assertAutomationRuleReferences(
-  input: { placeId: string | null; projectId: string | null; categoryId: string | null },
-  session: RequestSession,
-  client?: pg.PoolClient
-) {
-  const statement = `select ($2::uuid is null or exists (
-              select 1 from places where id = $2::uuid and workspace_id = $1
-            )) as "placeOk",
-            ($3::uuid is null or exists (
-              select 1 from projects where id = $3::uuid and workspace_id = $1 and is_archived = false
-            )) as "projectOk",
-            ($4::uuid is null or exists (
-              select 1 from categories where id = $4::uuid and workspace_id = $1 and is_archived = false
-            )) as "categoryOk"`;
-  const values = [session.workspaceId, input.placeId, input.projectId, input.categoryId];
-  const result = client
-    ? await client.query<{ placeOk: boolean; projectOk: boolean; categoryOk: boolean }>(statement, values)
-    : await query<{ placeOk: boolean; projectOk: boolean; categoryOk: boolean }>(statement, values);
-  const row = result.rows[0];
-  if (!row?.placeOk || !row.projectOk || !row.categoryOk) {
-    throw new Error("Automation rule references must belong to the active workspace.");
   }
 }
 

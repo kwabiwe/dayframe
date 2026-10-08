@@ -1,12 +1,10 @@
 import { describe, expect, it } from "vitest";
 import {
   applyActivityEvent,
-  automationRuleInputFromDraft,
   buildCategoryUsageRanks,
   buildRecentActivitySuggestions,
   calendarBlockContinuationEdges,
   classifyLocationLearningEvidence,
-  draftAutomationRuleFromText,
   healthAutoLogMappingFor,
   healthWorkoutLabel,
   matchHealthSleepSessionWindows,
@@ -880,142 +878,6 @@ describe("explicit Shortcut starts", () => {
   });
 });
 
-describe("automation rule drafting", () => {
-  it("drafts a station pickup rule as a guarded round trip", () => {
-    const draft = draftAutomationRuleFromText({
-      text: "If I drive to Chelmsford rail station and come back home shortly after, log it as picking up or dropping my wife.",
-      categories: [{ id: categoryId("family"), name: "Family" }],
-      places: [{ id: "place-station", name: "Chelmsford Station" }]
-    });
-
-    expect(draft).toMatchObject({
-      kind: "round_trip_place_visit",
-      title: "Chelmsford Station pickup/drop-off",
-      placeName: "Chelmsford Station",
-      outcome: {
-        categoryName: "Family",
-        description: "Train station pickup/drop-off",
-        mode: "auto_log_when_matched"
-      }
-    });
-    expect(draft.conditions).toEqual(expect.arrayContaining([
-      "Trip starts at Home and returns to Home.",
-      "No onward commute place appears before returning home."
-    ]));
-    expect(draft.simulationChecks.join(" ")).toMatch(/rejection reason/i);
-  });
-
-  it("keeps unknown rule drafts review-first", () => {
-    const draft = draftAutomationRuleFromText({
-      text: "When something unusual happens, ask me later."
-    });
-
-    expect(draft.kind).toBe("review_first_custom_rule");
-    expect(draft.outcome.mode).toBe("review_first");
-    expect(draft.unsupported[0]).toMatch(/more detail/i);
-  });
-
-  it("turns a supported draft into a review-first saved rule input", () => {
-    const draft = draftAutomationRuleFromText({
-      text: "If I drive to Chelmsford rail station and come back home shortly after, log it as picking up or dropping my wife.",
-      categories: [{ id: categoryId("family"), name: "Family" }],
-      places: [{ id: "place-station", name: "Chelmsford Station" }]
-    });
-
-    const savePlan = automationRuleInputFromDraft({
-      draft,
-      categories: [{ id: categoryId("family"), name: "Family" }],
-      places: [{ id: "place-station", name: "Chelmsford Station" }]
-    });
-
-    expect(savePlan.blockers).toEqual([]);
-    expect(savePlan.values).toMatchObject({
-      name: "Chelmsford Station pickup/drop-off",
-      triggerSource: "geofence_specific",
-      triggerType: "geofence_exit",
-      placeId: "place-station",
-      action: "create_review_item",
-      categoryId: categoryId("family"),
-      activityDescription: "Train station pickup/drop-off",
-      confidenceThreshold: "medium_high"
-    });
-    expect(savePlan.notes.join(" ")).toMatch(/review-first/i);
-  });
-
-  it("blocks saving drafts that do not resolve to a saved place", () => {
-    const draft = draftAutomationRuleFromText({
-      text: "When I leave the gym, log a workout.",
-      categories: [{ id: categoryId("gym"), name: "Gym" }],
-      places: []
-    });
-
-    const savePlan = automationRuleInputFromDraft({
-      draft,
-      categories: [{ id: categoryId("gym"), name: "Gym" }],
-      places: []
-    });
-
-    expect(savePlan.values).toBeUndefined();
-    expect(savePlan.blockers.join(" ")).toMatch(/saved place/i);
-  });
-
-  it("does not replace an unresolved named category with the place default", () => {
-    const draft = draftAutomationRuleFromText({
-      text: "When I leave the train station after pickup my wife, log it.",
-      categories: [],
-      places: [{ id: "place-station", name: "Train Station" }]
-    });
-
-    const savePlan = automationRuleInputFromDraft({
-      draft,
-      categories: [],
-      places: [
-        {
-          id: "place-station",
-          name: "Train Station",
-          defaultCategoryId: categoryId("travel")
-        }
-      ]
-    });
-
-    expect(savePlan.values).toBeUndefined();
-    expect(savePlan.blockers.join(" ")).toMatch(/Add "Family" as an activity/);
-  });
-
-  it("saves broad-place rules with a broad geofence source", () => {
-    const draft = draftAutomationRuleFromText({
-      text: "When I leave the town centre, log errands.",
-      categories: [{ id: categoryId("errands"), name: "Errands" }],
-      places: [{ id: placeId("town"), name: "Town Centre" }]
-    });
-
-    const savePlan = automationRuleInputFromDraft({
-      draft,
-      categories: [{ id: categoryId("errands"), name: "Errands" }],
-      places: [{ id: placeId("town"), name: "Town Centre", radiusMeters: 500 }]
-    });
-
-    expect(savePlan.values).toMatchObject({
-      placeId: placeId("town"),
-      triggerSource: "geofence_broad",
-      triggerType: "geofence_exit"
-    });
-  });
-
-  it("prefers the longest saved place name when drafting from text", () => {
-    const draft = draftAutomationRuleFromText({
-      text: "When I leave Home Office, log focused work.",
-      categories: [{ id: categoryId("focus"), name: "Focus" }],
-      places: [
-        { id: placeId("home"), name: "Home" },
-        { id: placeId("home-office"), name: "Home Office" }
-      ]
-    });
-
-    expect(draft.placeName).toBe("Home Office");
-  });
-});
-
 describe("automation rule normalization", () => {
   it("uses saved natural-language rule descriptions for place-exit review items", () => {
     const event = normalizeActivityEvent(
@@ -1185,28 +1047,6 @@ describe("place role normalization", () => {
       roleContext
     );
     expect(exit).toEqual(expect.objectContaining({ placeId: placeId("home") }));
-  });
-
-  it("drafts rules from the role label as well as the saved name", () => {
-    const draft = draftAutomationRuleFromText({
-      text: "When I leave home, log errands.",
-      categories: [],
-      places: [{ id: placeId("home"), name: "12 Example Street", role: "home" }]
-    });
-    expect(draft.placeName).toBe("Home");
-    const supported = draftAutomationRuleFromText({
-      text: "If I drive to the rail station and come back home shortly after, log it as a pickup.",
-      places: []
-    });
-    const plan = automationRuleInputFromDraft({
-      draft: { ...supported, placeName: "Home" },
-      categories: [{ id: categoryId("family"), name: "Family" }],
-      places: [
-        { id: placeId("station"), name: "Home" },
-        { id: placeId("home"), name: "12 Example Street", role: "home" }
-      ]
-    });
-    expect(plan.values?.placeId).toBe(placeId("home"));
   });
 });
 
