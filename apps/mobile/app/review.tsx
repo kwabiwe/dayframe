@@ -59,7 +59,7 @@ import {
   reviewDeckPosition,
   reviewDeckSource
 } from "@/lib/reviewDeck";
-import { takeReviewDeckEvidenceDecisions } from "@/lib/reviewDeckDecisions";
+import { beginReviewDeckVisit, takeReviewDeckEvidenceDecisions } from "@/lib/reviewDeckDecisions";
 import {
   REVIEW_COPY,
   isTimeAwayReviewItem,
@@ -843,7 +843,11 @@ export default function ReviewScreen() {
     // The card on top stays on top while it is open: a backlog page or refresh arriving with a
     // different order never swaps the card being read. A ribbon focus or a deferral still wins.
     const stickyKey = deferred.has(deckTopKeyRef.current ?? "") ? null : deckTopKeyRef.current;
-    return orderReviewDeck(ordered, highlightedFocusKey ?? stickyKey);
+    // The ribbon's focus leads only while that card is still open; afterwards the sticky top holds.
+    const focusKey = highlightedFocusKey && ordered.some((source) => source.key === highlightedFocusKey)
+      ? highlightedFocusKey
+      : null;
+    return orderReviewDeck(ordered, focusKey ?? stickyKey);
   }, [deferredDeckKeys, displayedReviewNeededEntries, highlightedFocusKey, openReviewItems]);
   useEffect(() => {
     deckTopKeyRef.current = deckSources[0]?.key ?? null;
@@ -876,8 +880,10 @@ export default function ReviewScreen() {
   });
   // "All framed" only once a verified read says nothing else is open; a cached-only deck (offline,
   // no backlog read yet) never claims completeness.
-  const deckFinished = deckSources.length === 0 && !reviewBacklogLoading && deckBacklogComplete;
-  const deckWaitingCopy = reviewBacklogLoading || refreshing
+  // A reload after the last decision keeps the previous complete read until it is replaced, so
+  // "All framed" does not blink back to the waiting copy.
+  const deckFinished = deckSources.length === 0 && deckBacklogComplete;
+  const deckWaitingCopy = reviewBacklogLoading || refreshing || data === null
     ? "Looking for moments to review…"
     : reviewBacklog === null
       ? "Nothing else is saved on this iPhone. Pull to refresh when you're online."
@@ -892,6 +898,7 @@ export default function ReviewScreen() {
   useEffect(() => {
     for (const item of openReviewItems) knownDeckItems.current.set(item.id, item);
   }, [openReviewItems]);
+  useEffect(() => beginReviewDeckVisit(), []);
   useFocusEffect(
     useCallback(() => {
       for (const decision of takeReviewDeckEvidenceDecisions()) {

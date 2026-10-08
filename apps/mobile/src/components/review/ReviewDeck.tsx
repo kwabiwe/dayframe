@@ -379,7 +379,10 @@ export function ReviewDeckStack({
   // The card fills the deck: its body keeps its natural height and the picture takes what is
   // left (230 points at most, 96 at least), so the reason line is never cut off.
   const [deckHeight, setDeckHeight] = useState(0);
-  const [bodyHeight, setBodyHeight] = useState(0);
+  // Each card reports its own body; the top card's decides. A card promoted from beneath does not
+  // lay out again, so its height must already be known.
+  const [bodyHeights, setBodyHeights] = useState<Record<string, number>>({});
+  const bodyHeight = visible[0] ? bodyHeights[visible[0].key] ?? 0 : 0;
   const pictureHeight = deckHeight && bodyHeight
     ? Math.max(PICTURE_MIN_HEIGHT, Math.min(PICTURE_HEIGHT, Math.floor(deckHeight - bodyHeight)))
     : PICTURE_HEIGHT;
@@ -396,7 +399,8 @@ export function ReviewDeckStack({
           diagnostic={depth === 0 ? diagnostic : undefined}
           key={card.key}
           onBodyHeight={(height) => {
-            if (depth === 0) setBodyHeight(Math.ceil(height));
+            const rounded = Math.ceil(height);
+            setBodyHeights((current) => (current[card.key] === rounded ? current : { ...current, [card.key]: rounded }));
           }}
           onEdit={() => onEdit(card.key)}
           onMore={() => onMore(card.key)}
