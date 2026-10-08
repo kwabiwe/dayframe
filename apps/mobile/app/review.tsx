@@ -177,6 +177,7 @@ export default function ReviewScreen() {
   });
   // Legacy needs-review entries have no skip mutation; Skip moves them behind the rest for this visit.
   const [deferredDeckKeys, setDeferredDeckKeys] = useState<readonly string[]>([]);
+  const deckTopKeyRef = useRef<string | null>(null);
   const [reviewMenuState, setReviewMenuState] = useState(CLOSED_REVIEW_MENU_STATE);
   const [reviewAvailabilityMessage, setReviewAvailabilityMessage] = useState<string | null>(null);
   const [focusedLegacyEntry, setFocusedLegacyEntry] = useState<MobileTimeEntry | null>(null);
@@ -837,8 +838,14 @@ export default function ReviewScreen() {
       ...sources.filter((source) => !deferred.has(source.key)),
       ...deferredDeckKeys.flatMap((key) => sources.filter((source) => source.key === key))
     ];
-    return orderReviewDeck(ordered, highlightedFocusKey);
+    // The card on top stays on top while it is open: a backlog page or refresh arriving with a
+    // different order never swaps the card being read. A ribbon focus or a deferral still wins.
+    const stickyKey = deferred.has(deckTopKeyRef.current ?? "") ? null : deckTopKeyRef.current;
+    return orderReviewDeck(ordered, highlightedFocusKey ?? stickyKey);
   }, [deferredDeckKeys, displayedReviewNeededEntries, highlightedFocusKey, openReviewItems]);
+  useEffect(() => {
+    deckTopKeyRef.current = deckSources[0]?.key ?? null;
+  }, [deckSources]);
   const deckCards = useMemo(
     () => deckSources.slice(0, 3).map((source): ReviewDeckCardModel => (
       source.kind === "review"
