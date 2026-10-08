@@ -27,6 +27,14 @@ final class DayframeDurationDialCoreTests: XCTestCase {
     XCTAssertEqual(DayframeDurationDialCore.strongestHaptic(from: 58, to: 64), 3)
   }
 
+  func testFormatsShortDurationsLikeThePrototype() {
+    XCTAssertEqual(DayframeDurationDialCore.formatShortDuration(milliseconds: 0), "0m")
+    XCTAssertEqual(DayframeDurationDialCore.formatShortDuration(milliseconds: 42 * 60_000 + 59_000), "42m")
+    XCTAssertEqual(DayframeDurationDialCore.formatShortDuration(milliseconds: 60 * 60_000), "1h")
+    XCTAssertEqual(DayframeDurationDialCore.formatShortDuration(milliseconds: 65 * 60_000), "1h 05m")
+    XCTAssertEqual(DayframeDurationDialCore.formatShortDuration(milliseconds: -5_000), "0m")
+  }
+
   func testFormatsFullDay() {
     XCTAssertEqual(DayframeDurationDialCore.formatDuration(milliseconds: 86_400_000), "24:00:00")
   }

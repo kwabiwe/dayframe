@@ -4,6 +4,10 @@ import UIKit
 private struct DayframeDurationDialTheme: Decodable {
   let accent: String
   let accentSoft: String
+  /// Blocks: the chosen activity's display colour (older JS bundles omit it).
+  let arc: String?
+  /// Blocks: the ring's empty track.
+  let track: String?
   let border: String
   let onAccent: String
   let surface: String
@@ -358,8 +362,9 @@ final class DayframeDurationDialExpoView: ExpoView, UIGestureRecognizerDelegate 
     for minute in 0..<60 {
       let angle = CGFloat(Double(minute) / 60 * DayframeDurationDialCore.fullTurn - Double.pi / 2)
       let strong = minute % 5 == 0
-      let inner = radius - (strong ? 10 : 5)
-      let outer = radius + (strong ? 2 : 0)
+      // Blocks prototype: minute ticks just outside the ring, stronger every five minutes.
+      let inner = radius + DayframeDurationDialStyle.ringWidth / 2 + (strong ? 3 : 5)
+      let outer = radius + DayframeDurationDialStyle.ringWidth / 2 + 9
       context.move(to: CGPoint(x: centre.x + cos(angle) * inner, y: centre.y + sin(angle) * inner))
       context.addLine(to: CGPoint(x: centre.x + cos(angle) * outer, y: centre.y + sin(angle) * outer))
       let tickColor = UIColor(dayframeHex: record.theme.textSecondary)
@@ -383,9 +388,20 @@ final class DayframeDurationDialExpoView: ExpoView, UIGestureRecognizerDelegate 
     let end = duration >= 3_600_000
       ? start + DayframeDurationDialCore.fullTurn
       : DayframeDurationDialCore.angle(timestampMilliseconds: effectiveEnd)
+    let arcColor = UIColor(dayframeHex: record.theme.arc ?? record.theme.accent)
+    let trackColor = UIColor(dayframeHex: record.theme.track ?? record.theme.surfaceMuted)
     context.saveGState()
-    context.setStrokeColor(UIColor(dayframeHex: record.theme.accent).cgColor)
-    context.setLineWidth(5)
+    context.setLineWidth(DayframeDurationDialStyle.ringWidth)
+    // The empty track, then a full faint lap for every hour already passed, then the arc.
+    context.setStrokeColor(trackColor.cgColor)
+    context.addArc(center: centre, radius: radius, startAngle: 0, endAngle: CGFloat(DayframeDurationDialCore.fullTurn), clockwise: false)
+    context.strokePath()
+    if duration >= 3_600_000 {
+      context.setStrokeColor(arcColor.withAlphaComponent(0.35).cgColor)
+      context.addArc(center: centre, radius: radius, startAngle: 0, endAngle: CGFloat(DayframeDurationDialCore.fullTurn), clockwise: false)
+      context.strokePath()
+    }
+    context.setStrokeColor(arcColor.cgColor)
     context.setLineCap(.round)
     context.addArc(
       center: centre,
@@ -404,15 +420,38 @@ final class DayframeDurationDialExpoView: ExpoView, UIGestureRecognizerDelegate 
     record: DayframeDurationDialRecord
   ) {
     let effectiveEnd = record.mode == "running" ? record.nowMs : record.endMs
-    let text = DayframeDurationDialCore.formatDuration(milliseconds: effectiveEnd - record.startMs)
+    // Blocks prototype: the duration in the display face ("42m", "1h 05m"), then "since 21:22"
+    // while running or "21:19–21:26" for a stopped block.
+    let text = DayframeDurationDialCore.formatShortDuration(milliseconds: effectiveEnd - record.startMs)
+    // 38 points as in the prototype, smaller on compact dials so it stays inside the ring.
+    let radius = min(bounds.width, bounds.height) * 0.34
+    var displaySize = min(38, radius * 0.4)
+    func displayFont(_ size: CGFloat) -> UIFont {
+      UIFont(name: "BricolageGrotesque-Bold", size: size) ?? UIFont.systemFont(ofSize: size, weight: .bold)
+    }
+    let maxTextWidth = (radius - DayframeDurationDialStyle.ringWidth) * 1.7
+    while displaySize > 14,
+          text.size(withAttributes: [.font: displayFont(displaySize)]).width > maxTextWidth {
+      displaySize -= 1
+    }
     let attributes: [NSAttributedString.Key: Any] = [
-      .font: UIFont.monospacedDigitSystemFont(ofSize: 24, weight: .semibold),
+      .font: displayFont(displaySize),
       .foregroundColor: UIColor(dayframeHex: record.theme.textPrimary)
     ]
+    let detail = record.mode == "running"
+      ? "since \(DayframeDurationDialStyle.clock(record.startMs))"
+      : "\(DayframeDurationDialStyle.clock(record.startMs))–\(DayframeDurationDialStyle.clock(record.endMs))"
+    let detailAttributes: [NSAttributedString.Key: Any] = [
+      .font: UIFont.systemFont(ofSize: displaySize >= 30 ? 12.5 : 11, weight: .semibold),
+      .foregroundColor: UIColor(dayframeHex: record.theme.textSecondary)
+    ]
     let size = text.size(withAttributes: attributes)
-    text.draw(
-      at: CGPoint(x: centre.x - size.width / 2, y: centre.y - size.height / 2),
-      withAttributes: attributes
+    let detailSize = detail.size(withAttributes: detailAttributes)
+    let top = centre.y - (size.height + 2 + detailSize.height) / 2 - (displaySize >= 30 ? 14 : 8)
+    text.draw(at: CGPoint(x: centre.x - size.width / 2, y: top), withAttributes: attributes)
+    detail.draw(
+      at: CGPoint(x: centre.x - detailSize.width / 2, y: top + size.height + 2),
+      withAttributes: detailAttributes
     )
   }
 
@@ -421,25 +460,28 @@ final class DayframeDurationDialExpoView: ExpoView, UIGestureRecognizerDelegate 
     record: DayframeDurationDialRecord
   ) {
     let point = handlePoint(handle, record: record)
-    let size: CGFloat = handle == .range ? 13 : 34
-    let rect = CGRect(x: point.x - size / 2, y: point.y - size / 2, width: size, height: size)
-    let fill = handle == .range
-      ? UIColor(dayframeHex: record.theme.accent)
-      : UIColor(dayframeHex: handle == .end && record.mode == "running"
-          ? record.theme.surfaceMuted
-          : record.theme.accent)
-    fill.setFill()
-    UIBezierPath(ovalIn: rect).fill()
-    guard handle != .range else { return }
-    let symbolName = handle == .start ? "play.fill" : "stop.fill"
-    let symbolColor = handle == .end && record.mode == "running"
-      ? UIColor(dayframeHex: record.theme.textPrimary)
-      : UIColor(dayframeHex: record.theme.onAccent)
-    let symbol = UIImage(systemName: symbolName)?.withTintColor(
-      symbolColor,
-      renderingMode: .alwaysOriginal
-    )
-    symbol?.draw(in: rect.insetBy(dx: 10, dy: 10))
+    let arcColor = UIColor(dayframeHex: record.theme.arc ?? record.theme.accent)
+    if handle == .range {
+      let size: CGFloat = 13
+      arcColor.setFill()
+      UIBezierPath(ovalIn: CGRect(x: point.x - size / 2, y: point.y - size / 2, width: size, height: size)).fill()
+      return
+    }
+    if handle == .end && record.mode == "running" {
+      // The end follows the current time: a small fixed dot, not a knob.
+      let size: CGFloat = 8
+      UIColor(dayframeHex: record.theme.surface).setFill()
+      UIBezierPath(ovalIn: CGRect(x: point.x - size / 2, y: point.y - size / 2, width: size, height: size)).fill()
+      return
+    }
+    // Blocks prototype knob: the sheet's surface ringed in the activity colour.
+    let radius = DayframeDurationDialStyle.knobRadius
+    let knob = UIBezierPath(ovalIn: CGRect(x: point.x - radius, y: point.y - radius, width: radius * 2, height: radius * 2))
+    UIColor(dayframeHex: record.theme.surface).setFill()
+    knob.fill()
+    arcColor.setStroke()
+    knob.lineWidth = 4
+    knob.stroke()
   }
 
   private func updateAccessibilityHandles() {
@@ -462,6 +504,21 @@ final class DayframeDurationDialExpoView: ExpoView, UIGestureRecognizerDelegate 
         button.accessibilityHint = "Swipe up or down to adjust by one minute"
       }
     }
+  }
+}
+
+private enum DayframeDurationDialStyle {
+  static let ringWidth: CGFloat = 16
+  static let knobRadius: CGFloat = 13
+
+  private static let clockFormatter: DateFormatter = {
+    let formatter = DateFormatter()
+    formatter.dateFormat = "HH:mm"
+    return formatter
+  }()
+
+  static func clock(_ milliseconds: Double) -> String {
+    clockFormatter.string(from: Date(timeIntervalSince1970: milliseconds / 1_000))
   }
 }
 

@@ -35,6 +35,15 @@ enum DayframeDurationDialCore {
     )
   }
 
+  /// "0m", "42m", "1h", "1h 05m": the dial centre's duration, as in the Blocks prototype.
+  static func formatShortDuration(milliseconds: Double) -> String {
+    let minutes = max(0, min(1_440, Int(milliseconds / 60_000)))
+    let hours = minutes / 60
+    let rest = minutes % 60
+    if hours == 0 { return "\(rest)m" }
+    return rest == 0 ? "\(hours)h" : String(format: "%dh %02dm", hours, rest)
+  }
+
   static func strongestHaptic(from previous: Int, to next: Int) -> Int {
     guard previous != next else { return 0 }
     let lower = min(previous, next)

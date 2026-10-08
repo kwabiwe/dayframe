@@ -22,6 +22,8 @@ import {
 import type { TimeEntrySheetLayoutDensity } from "@/lib/timeEntrySheetDraft";
 
 type TimeEntryDurationDialProps = {
+  /** The chosen activity's display colour for the ring (Blocks prototype); coral without one. */
+  activityColor?: string | null;
   disabled: boolean;
   endMs: number;
   lastStoppedAt: string | null;
@@ -40,6 +42,7 @@ type TimeEntryDurationDialProps = {
 };
 
 export function TimeEntryDurationDial({
+  activityColor = null,
   disabled,
   endMs,
   lastStoppedAt,
@@ -82,6 +85,8 @@ export function TimeEntryDurationDial({
     theme: {
       accent: theme.accent,
       accentSoft: theme.accentSoft,
+      arc: activityColor ?? theme.accent,
+      track: theme.surfaceInset,
       border: theme.border,
       onAccent: theme.onAccent,
       surface: theme.surfaceRaised,
@@ -90,6 +95,7 @@ export function TimeEntryDurationDial({
       textSecondary: theme.textSecondary
     }
   }), [
+    activityColor,
     endMs,
     mode,
     nowMs,

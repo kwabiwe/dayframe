@@ -24,6 +24,10 @@ export type DayframeDurationDialModel = {
   theme: {
     accent: string;
     accentSoft: string;
+    /** The ring's colour: the chosen activity's display colour, or the accent. */
+    arc?: string;
+    /** The ring's empty track. */
+    track?: string;
     border: string;
     onAccent: string;
     surface: string;

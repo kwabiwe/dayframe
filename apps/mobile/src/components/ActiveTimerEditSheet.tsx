@@ -692,6 +692,11 @@ export function ActiveTimerEditSheet({
     fontScale: windowDimensions.fontScale,
     windowHeight: windowDimensions.height
   });
+  // The dial's ring takes the chosen activity's colour, as in the prototype.
+  const dialActivityColor = useMemo(() => {
+    const chosen = categories.find((category) => category.id === selectedCategoryId);
+    return chosen ? blockColorsFor(chosen.color ?? chosen.id, theme.mode, chosen.name).fill : null;
+  }, [categories, selectedCategoryId, theme.mode]);
   const chipCandidates = useMemo(
     () => activityChips(categories, chipAnchorId, recentActivities, ACTIVITY_CHIP_LIMIT_BY_DENSITY[chipDensity]),
     [categories, chipAnchorId, chipDensity, recentActivities]
@@ -2709,7 +2714,7 @@ export function ActiveTimerEditSheet({
                     windowDimensions.fontScale >= 1.6 ? styles.activeEditTimeGroupsStacked : null
                   ]}>
                     <View pointerEvents="box-none" style={styles.activeEditTimeGroup}>
-                      <Text {...mobileTextProps("metadata")} style={styles.activeEditSectionLabel}>Start</Text>
+                      <Text {...mobileTextProps("counter")} style={[sheetStyles.sectionEyebrow, { color: theme.textMuted }]}>START</Text>
                       <View style={styles.activeEditCompactTimeRow}>
                         <Pressable
                           accessibilityLabel="Edit start date"
@@ -2756,7 +2761,7 @@ export function ActiveTimerEditSheet({
                       </View>
                     </View>
                     <View pointerEvents="box-none" style={styles.activeEditTimeGroup}>
-                      <Text {...mobileTextProps("metadata")} style={styles.activeEditSectionLabel}>End</Text>
+                      <Text {...mobileTextProps("counter")} style={[sheetStyles.sectionEyebrow, { color: theme.textMuted }]}>{hasStoppedTime ? "END" : "NOW"}</Text>
                       {hasStoppedTime ? (
                         <View style={styles.activeEditCompactTimeRow}>
                           <Pressable
@@ -2819,6 +2824,7 @@ export function ActiveTimerEditSheet({
                 </View>
 
                 <TimeEntryDurationDial
+                  activityColor={dialActivityColor}
                   disabled={busy}
                   endMs={parsedStop.date?.getTime() ?? draftEndMs}
                   lastStoppedAt={lastStoppedAt}

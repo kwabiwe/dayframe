@@ -56,4 +56,18 @@ describe("native duration dial contract", () => {
     expect(expoViewSource).toContain("UIImpactFeedbackGenerator(style: .light)");
     expect(expoViewSource).toContain("UIImpactFeedbackGenerator(style: .heavy)");
   });
+
+  it("draws the Blocks prototype dial: activity-coloured ring, ring knobs and a display-face centre", () => {
+    // Optional model fields, so a newer native view still decodes an older JS bundle.
+    expect(expoViewSource).toContain("let arc: String?");
+    expect(expoViewSource).toContain("let track: String?");
+    expect(componentSource).toContain("arc: activityColor ?? theme.accent,");
+    expect(componentSource).toContain("track: theme.surfaceInset,");
+    expect(expoViewSource).toContain("static let ringWidth: CGFloat = 16");
+    expect(expoViewSource).toContain("static let knobRadius: CGFloat = 13");
+    expect(expoViewSource).toContain('UIFont(name: "BricolageGrotesque-Bold", size: size)');
+    expect(expoViewSource).toContain("DayframeDurationDialCore.formatShortDuration(");
+    // The handles are drawn shapes, not SF Symbols (one icon language).
+    expect(expoViewSource).not.toContain("UIImage(systemName:");
+  });
 });
