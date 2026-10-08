@@ -27,6 +27,7 @@ enum SheetQAIdentifiers {
   static let roundDuration = "time-entry-round-duration"
   static let roundStopTime = "time-entry-round-stop-time"
   static let setLastStopTime = "time-entry-set-last-stop-time"
+  static let dialShortcuts = "time-entry-dial-shortcuts"
   static let suggestions = "historical-suggestions-overlay"
   static let suggestionList = "historical-suggestions-list"
   static let undo = "deletion-undo-action"

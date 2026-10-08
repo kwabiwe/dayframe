@@ -689,6 +689,7 @@ export function ActiveTimerEditSheet({
   // Activity chips (Blocks prototype): the chosen one, pinned, then recently used; at most seven,
   // fewer on short screens and large text so the sheet's bottom actions stay on screen.
   const recentActivities = useMemo(() => recentActivityIds(historicalEntries), [historicalEntries]);
+  const timeCardsStacked = windowDimensions.fontScale >= 1.6;
   const chipDensity = timeEntrySheetLayoutDensity({
     fontScale: windowDimensions.fontScale,
     windowHeight: windowDimensions.height
@@ -2715,114 +2716,127 @@ export function ActiveTimerEditSheet({
                 ]}>
                   <View pointerEvents="box-none" style={[
                     styles.activeEditTimeGroups,
-                    windowDimensions.fontScale >= 1.6 ? styles.activeEditTimeGroupsStacked : null
+                    timeCardsStacked ? styles.activeEditTimeGroupsStacked : null
                   ]}>
-                    <View pointerEvents="box-none" style={styles.activeEditTimeGroup}>
-                      <Text {...mobileTextProps("counter")} style={[sheetStyles.sectionEyebrow, { color: theme.textMuted }]}>START</Text>
-                      <View style={styles.activeEditCompactTimeRow}>
-                        <Pressable
-                          accessibilityLabel="Edit start date"
-                          accessibilityValue={{ text: formatPickerDate(displayedStartAt) }}
-                          accessibilityRole="button"
-                          disabled={busy}
-                          onPress={openStartPicker}
-                          style={pressable(styles.activeEditCompactDate, styles.buttonPressed)}
-                          testID="time-entry-start-date"
-                        >
-                          <Text {...mobileTextProps("metadata")} style={styles.activeEditCompactDateText} numberOfLines={1}>
-                            {formatPickerDate(displayedStartAt)}
-                          </Text>
-                        </Pressable>
-                        <View pointerEvents="none" style={styles.activeEditTimeDivider} />
-                        <TextInput
-                          ref={timeInputRef}
-                          {...mobileTextProps("input")}
-                          accessibilityLabel="Start time"
-                          blurOnSubmit
-                          caretHidden
-                          contextMenuHidden
-                          editable={!busy}
-                          keyboardType="number-pad"
-                          maxLength={5}
-                          onChangeText={updateTimeText}
-                          onFocus={() => {
-                            if (beginNativeKeyboardSession() === null) {
-                              timeInputRef.current?.blur();
-                              Keyboard.dismiss();
-                              return;
-                            }
-                            setDatePickerOpen(false);
-                          }}
-                          onSubmitEditing={Keyboard.dismiss}
-                          placeholder="09:00"
-                          placeholderTextColor={theme.textSecondary}
-                          returnKeyType="done"
-                          selectTextOnFocus
-                          style={[styles.textInput, styles.activeEditCompactTimeInput]}
-                          testID="time-entry-start-time"
-                          value={timeText}
-                        />
-                      </View>
-                    </View>
-                    <View pointerEvents="box-none" style={styles.activeEditTimeGroup}>
-                      <Text {...mobileTextProps("counter")} style={[sheetStyles.sectionEyebrow, { color: theme.textMuted }]}>{hasStoppedTime ? "END" : "NOW"}</Text>
-                      {hasStoppedTime ? (
-                        <View style={styles.activeEditCompactTimeRow}>
-                          <Pressable
-                            accessibilityLabel="Edit end date"
-                            accessibilityValue={{ text: formatPickerDate(displayedEndAt) }}
-                            accessibilityRole="button"
-                            disabled={busy}
-                            onPress={openEndPicker}
-                            style={pressable(styles.activeEditCompactDate, styles.buttonPressed)}
-                            testID="time-entry-end-date"
-                          >
-                            <Text {...mobileTextProps("metadata")} style={styles.activeEditCompactDateText} numberOfLines={1}>
-                              {formatPickerDate(displayedEndAt)}
-                            </Text>
-                          </Pressable>
-                          <View pointerEvents="none" style={styles.activeEditTimeDivider} />
+                    <View style={[styles.activeEditTimeGroup, timeCardsStacked ? styles.activeEditTimeGroupStacked : null]}>
+                      {/* Blocks prototype time card: eyebrow over the time; the date on the right. */}
+                      <Pressable
+                        accessible={false}
+                        disabled={busy}
+                        onPress={() => timeInputRef.current?.focus()}
+                        style={styles.activeEditTimeCardMain}
+                      >
+                        <Text {...mobileTextProps("counter")} style={[sheetStyles.sectionEyebrow, { color: theme.textMuted }]}>START</Text>
                           <TextInput
-                            ref={endTimeInputRef}
+                            ref={timeInputRef}
                             {...mobileTextProps("input")}
-                            accessibilityLabel="End time"
+                            accessibilityLabel="Start time"
                             blurOnSubmit
                             caretHidden
                             contextMenuHidden
                             editable={!busy}
                             keyboardType="number-pad"
                             maxLength={5}
-                            onChangeText={updateStoppedTimeText}
+                            onChangeText={updateTimeText}
                             onFocus={() => {
                               if (beginNativeKeyboardSession() === null) {
-                                endTimeInputRef.current?.blur();
+                                timeInputRef.current?.blur();
                                 Keyboard.dismiss();
                                 return;
                               }
                               setDatePickerOpen(false);
                             }}
                             onSubmitEditing={Keyboard.dismiss}
-                            placeholder="17:30"
+                            placeholder="09:00"
                             placeholderTextColor={theme.textSecondary}
                             returnKeyType="done"
                             selectTextOnFocus
                             style={[styles.textInput, styles.activeEditCompactTimeInput]}
-                            testID="time-entry-end-time"
-                            value={stoppedTimeText}
+                            testID="time-entry-start-time"
+                            value={timeText}
                           />
-                        </View>
-                      ) : (
-                        <View style={styles.activeEditRunningEndSummary}>
+                      </Pressable>
+                      <Pressable
+                        accessibilityLabel="Edit start date"
+                        accessibilityValue={{ text: formatPickerDate(displayedStartAt) }}
+                        accessibilityRole="button"
+                        disabled={busy}
+                        onPress={openStartPicker}
+                        style={pressable(styles.activeEditCompactDate, styles.buttonPressed)}
+                        testID="time-entry-start-date"
+                      >
+                        <Text {...mobileTextProps("metadata")} style={styles.activeEditCompactDateText} numberOfLines={1}>
+                          {formatPickerDate(displayedStartAt)}
+                        </Text>
+                      </Pressable>
+                    </View>
+                    {hasStoppedTime ? (
+                      <View style={[styles.activeEditTimeGroup, timeCardsStacked ? styles.activeEditTimeGroupStacked : null]}>
+                        <Pressable
+                          accessible={false}
+                          disabled={busy}
+                          onPress={() => endTimeInputRef.current?.focus()}
+                          style={styles.activeEditTimeCardMain}
+                        >
+                          <Text {...mobileTextProps("counter")} style={[sheetStyles.sectionEyebrow, { color: theme.textMuted }]}>END</Text>
+                            <TextInput
+                              ref={endTimeInputRef}
+                              {...mobileTextProps("input")}
+                              accessibilityLabel="End time"
+                              blurOnSubmit
+                              caretHidden
+                              contextMenuHidden
+                              editable={!busy}
+                              keyboardType="number-pad"
+                              maxLength={5}
+                              onChangeText={updateStoppedTimeText}
+                              onFocus={() => {
+                                if (beginNativeKeyboardSession() === null) {
+                                  endTimeInputRef.current?.blur();
+                                  Keyboard.dismiss();
+                                  return;
+                                }
+                                setDatePickerOpen(false);
+                              }}
+                              onSubmitEditing={Keyboard.dismiss}
+                              placeholder="17:30"
+                              placeholderTextColor={theme.textSecondary}
+                              returnKeyType="done"
+                              selectTextOnFocus
+                              style={[styles.textInput, styles.activeEditCompactTimeInput]}
+                              testID="time-entry-end-time"
+                              value={stoppedTimeText}
+                            />
+                        </Pressable>
+                        <Pressable
+                          accessibilityLabel="Edit end date"
+                          accessibilityValue={{ text: formatPickerDate(displayedEndAt) }}
+                          accessibilityRole="button"
+                          disabled={busy}
+                          onPress={openEndPicker}
+                          style={pressable(styles.activeEditCompactDate, styles.buttonPressed)}
+                          testID="time-entry-end-date"
+                        >
                           <Text {...mobileTextProps("metadata")} style={styles.activeEditCompactDateText} numberOfLines={1}>
-                            {formatPickerDate(new Date(dialNowMs))}
+                            {formatPickerDate(displayedEndAt)}
                           </Text>
-                          <View pointerEvents="none" style={styles.activeEditTimeDivider} />
+                        </Pressable>
+                      </View>
+                    ) : (
+                      <View accessible accessibilityLabel={`Now, ${formatTimeInput(new Date(dialNowMs))}`} style={[styles.activeEditTimeGroup, timeCardsStacked ? styles.activeEditTimeGroupStacked : null]}>
+                        <View style={styles.activeEditTimeCardMain}>
+                          <Text {...mobileTextProps("counter")} style={[sheetStyles.sectionEyebrow, { color: theme.textMuted }]}>NOW</Text>
                           <Text {...mobileTextProps("numeric")} style={styles.activeEditRunningEndTime}>
                             {formatTimeInput(new Date(dialNowMs))}
                           </Text>
                         </View>
-                      )}
-                    </View>
+                        <View style={styles.activeEditCompactDate}>
+                          <Text {...mobileTextProps("metadata")} style={styles.activeEditCompactDateText} numberOfLines={1}>
+                            {formatPickerDate(new Date(dialNowMs))}
+                          </Text>
+                        </View>
+                      </View>
+                    )}
                   </View>
                   {validationError ? <Text {...mobileTextProps("body")} style={styles.errorText}>{validationError}</Text> : null}
                 </View>
