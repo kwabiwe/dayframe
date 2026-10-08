@@ -220,6 +220,17 @@ describe("TodayTimerSurface (Blocks)", () => {
     act(() => tree.unmount());
   });
 
+  it("keeps the odometer through an id swap, and shows a switched-to block's timer at rest", () => {
+    const input = props({ active: { ...running, startedAt: "2026-10-07T09:12:00.000Z" }, runningActivityId: "work" });
+    const { tree } = render(input);
+    const first = tree.root.findByProps({ testID: "today-live-odometer" });
+    act(() => tree.update(<TodayTimerSurface {...input} active={{ ...running, startedAt: "2026-10-07T09:12:00.000Z", elapsedLabel: "1:02:04" }} />));
+    expect(tree.root.findByProps({ testID: "today-live-odometer" })).toBe(first);
+    act(() => tree.update(<TodayTimerSurface {...input} active={{ ...running, startedAt: "2026-10-07T10:14:03.000Z", elapsedLabel: "0:00:00" }} />));
+    expect(tree.root.findByProps({ testID: "today-live-odometer" })).not.toBe(first);
+    act(() => tree.unmount());
+  });
+
   it("never clips the start time: the footer wraps the reserved action space instead", () => {
     const { tree } = render(props({ active: { ...running, elapsedLabel: "123:45:06" }, runningActivityId: "work" }));
     const reserve = tree.root.findByProps({ testID: "today-live-actions-reserve" });

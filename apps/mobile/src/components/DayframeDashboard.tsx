@@ -16,6 +16,7 @@ import {
   AppState,
   Easing,
   Linking,
+  Platform,
   Pressable,
   RefreshControl,
   ScrollView,
@@ -52,6 +53,16 @@ import { formatLiveClock } from "./today/todayBlocksLayout";
 import { TodaySwitchSheet } from "./today/TodaySwitchSheet";
 import { StopFlightOverlay, type StopFlight } from "./today/StopFlightOverlay";
 import { TodayPullBlocks } from "./today/TodayPullBlocks";
+import { PlayOrb } from "./today/PlayOrb";
+import { ReportsSheetPortalContext } from "./reports/ReportsSheetPortal";
+import { bloomActivities, playOrbSupported } from "../lib/playOrb";
+import { onPlayOrbTap, setPlayOrbRunning } from "../lib/playOrbBridge";
+
+const PLAY_ORB_SUPPORTED = playOrbSupported({
+  OS: Platform.OS,
+  Version: Platform.Version,
+  isPad: Platform.OS === "ios" && Platform.isPad,
+});
 import { LIVE_FLIGHT_NODE, STOP_FLIGHT, measureFlightNode, rowFlightNode, stopFlightOverlayReady } from "../lib/stopFlight";
 import { switchRecents, type SwitchRecent } from "../lib/todaySwitch";
 import { TodayReviewNudge } from "./today/TodayReviewNudge";
@@ -372,6 +383,8 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
   const [stopFlight, setStopFlight] = useState<StopFlight | null>(null);
   const [rowPop, setRowPop] = useState<LandingRequest | null>(null);
   const stopFlightSequence = useRef(0);
+  const todayTabFocused = useRef(false);
+  const reportsSheetPortal = useContext(ReportsSheetPortalContext);
   const stopFlightMeasuring = useRef(false);
   const [rowLanding, setRowLanding] = useState<LandingRequest | null>(null);
 
@@ -1409,6 +1422,24 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
     return layoutQuickStartMosaic(rankQuickStartActivities(pinned, weekly));
     // todayKey moves the seven-day window at midnight.
   }, [historySourceEntries, sortedCategories, todayKey]);
+  // The Play orb's bloom: pinned activities first, then the most used over the last seven days.
+  const bloomActivityList = useMemo(() => {
+    const recent = weeklySecondsByActivity(
+      historySourceEntries.filter((entry) => !isReviewNeededEntry(entry)),
+      Date.now()
+    );
+    return bloomActivities(
+      sortedCategories.map((category) => ({
+        color: category.color ?? null,
+        icon: category.icon ?? null,
+        id: category.id,
+        name: category.name,
+        pinned: category.isPinned,
+      })),
+      recent
+    );
+    // todayKey moves the seven-day window at midnight.
+  }, [historySourceEntries, sortedCategories, todayKey]);
   const openReviewCount = useMemo(
     () => (data?.reviewItems ?? []).filter(isOpenReviewItem).length,
     [data?.reviewItems]
@@ -1451,8 +1482,8 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
     categoryLabel: displayedActiveEntry.categoryName ? activeCategoryLabel : null,
     elapsedLabel: formatLiveClock(displayedActiveDurationSeconds),
     elapsedSeconds: displayedActiveDurationSeconds,
-    entryId: displayedActiveEntry.id,
     hasLiveActiveTimer,
+    startedAt: displayedActiveEntry.startedAt,
     startedLabel: `Started ${formatTimeOfDay(new Date(displayedActiveEntry.startedAt))}`,
     title: activeTitle,
     titleIsPlaceholder: activeTitleIsPlaceholder,
@@ -1587,6 +1618,29 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
     });
   }
 
+  // The Play orb (step 3): tap starts a bare block (which opens it) or stops the running one; on
+  // Today the Stop flies the live block into its row, elsewhere it stops in place.
+  function tapPlayOrb() {
+    const entryId = latestData.current?.activeEntry?.id;
+    if (!entryId) {
+      startFromToday(null);
+      return;
+    }
+    if (todayTabFocused.current) stopFromToday();
+    else runStopFromToday(entryId, null);
+  }
+
+  // A bloom pick starts that activity, or switches to it; the running activity opens its editor
+  // instead of starting a duplicate, as its mosaic tile does.
+  function chooseFromPlayOrb(activityId: string) {
+    const active = latestData.current?.activeEntry;
+    if (active && active.categoryId === activityId) {
+      presentActiveEditor("existing_active_timer");
+      return;
+    }
+    startFromToday(activityId);
+  }
+
   function runStopFromToday(entryId: string | undefined, flightToken: number | null, flightHasRow = false) {
     // A refused, failed or rejected Stop keeps the live block: the ghost leaves without flying.
     const dropFlight = () => {
@@ -1630,6 +1684,23 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
     }
     if (stopFlightCommitted.current === stopFlight.token) setStopFlight(null);
   }, [data?.activeEntry?.id, stopFlight]);
+
+  // The native tab item under the orb (VoiceOver's way in) reports presses here and reads the
+  // running state for its label.
+  const tapPlayOrbRef = useRef(tapPlayOrb);
+  tapPlayOrbRef.current = tapPlayOrb;
+  useEffect(() => onPlayOrbTap(() => tapPlayOrbRef.current()), []);
+  useEffect(() => {
+    setPlayOrbRunning(hasLiveActiveTimer);
+  }, [hasLiveActiveTimer]);
+  // The coral orb needs a session and the tab bar's trailing slot (iPhone, iOS 26 or later).
+  const playOrbAvailable = authState === "authenticated" && PLAY_ORB_SUPPORTED;
+  // Stable callbacks that always run this render's actions: the orb is memoised, so it must never
+  // hold an older render's closures (an old live presentation would reach the Stop flight).
+  const chooseFromPlayOrbRef = useRef(chooseFromPlayOrb);
+  chooseFromPlayOrbRef.current = chooseFromPlayOrb;
+  const onPlayOrbTapStable = useCallback(() => tapPlayOrbRef.current(), []);
+  const onPlayOrbChooseStable = useCallback((activityId: string) => chooseFromPlayOrbRef.current(activityId), []);
 
   // Stable, so the flight's ghost is not re-rendered by the Dashboard's 1 s tick handing it a new callback.
   const finishStopFlight = useCallback((token: number, landed: boolean, entryId: string) => {
@@ -2534,6 +2605,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
   }
 
   function renderTodayTab(isFocused: boolean) {
+    todayTabFocused.current = isFocused;
     const currentDate = new Date(now);
     return (
       <TodayReviewPresentationProvider
@@ -2787,6 +2859,15 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
           </Pressable>
         </Reanimated.View>
       ) : null}
+      <PlayOrb
+        activities={bloomActivityList}
+        hidden={!playOrbAvailable || (reportsSheetPortal?.isPresented ?? false)}
+        onChoose={onPlayOrbChooseStable}
+        onTap={onPlayOrbTapStable}
+        reduceMotion={reduceMotion}
+        running={hasLiveActiveTimer}
+        theme={theme}
+      />
       <StopFlightOverlay flight={stopFlight} onFinished={finishStopFlight} theme={theme} />
       {switchSheetRecents && reduceMotionPreferenceResolved ? (
         <TodaySwitchSheet

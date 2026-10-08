@@ -28,5 +28,15 @@
       "reports@2x.png": "65f8cbe7feef85450e64494994298f8740f6735b95d57b2a4a712ef61eb25764",
       "reports@3x.png": "a5805295c741c96d55f7e58f8608e64525ae058799f264ab708a29e17d1e03c7"
     }
+  },
+  "orb": {
+    "glyph": "play",
+    "points": 26,
+    "svgSha256": "84697d243a1386f1561f89658bc7d77f6825c6a0c993aa161dd34e39bef0635d",
+    "images": {
+      "orb.png": "7d6e31062927b933aa24a08486384e5fbfe294b76f3bbbe4b21f93fc3958b2b4",
+      "orb@2x.png": "d57e3df8725cc9567fccc0905d44ada0b9469b51fd8cc6380a9575204049cfa9",
+      "orb@3x.png": "9a3898e43152ee579562831c489fd8157efc408ce8692d2d31155808cdaaf70a"
+    }
   }
 }

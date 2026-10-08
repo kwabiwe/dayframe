@@ -20,6 +20,13 @@ export const DAYFRAME_NATIVE_TABS = {
     dashboardTab: "reports",
     label: "Reports",
     glyph: DAYFRAME_APP_ICONS.reports
+  },
+  /** Never shown: it reserves the tab bar's trailing slot for the Play orb. */
+  orb: {
+    route: "orb",
+    dashboardTab: null,
+    label: "Start a block",
+    glyph: DAYFRAME_APP_ICONS.start
   }
 } as const;
 

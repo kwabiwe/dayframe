@@ -44,7 +44,7 @@ const CUSTOM_GLYPHS = {
 };
 
 // Native iOS tab bar icons, rendered as template images so UIKit tints them inside Liquid Glass.
-const TAB_ICONS = { today: "sun", calendar: "calendar-days", reports: "chart-column" };
+const TAB_ICONS = { today: "sun", calendar: "calendar-days", reports: "chart-column", orb: "play" };
 const TAB_POINTS = 26;
 
 async function lucideNodes(name) {
