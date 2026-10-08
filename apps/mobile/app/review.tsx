@@ -958,12 +958,20 @@ export default function ReviewScreen() {
   // Every open item is loaded: the deck itself is the count, so a decision still syncing never
   // turns "2 of 5" into "2 of 5+". Otherwise the server count is used when it is exact.
   const deckBacklogComplete = reviewBacklog !== null && !reviewBacklog.nextCursor && reviewBacklog.recordsComplete;
+  // While this visit's own decision is still syncing the server count is not exact, but the total
+  // ("M") has not changed: keep the last exact total so "14 of 160" never drops to the loaded
+  // cards ("14 of 56") and back.
+  const exactDeckRemaining = deckBacklogComplete
+    ? deckRemaining
+    : reviewCountIsExact ? Math.max(totalNeedsReview - locallyDecidedCount, deckRemaining) : null;
+  const lastExactDeckTotal = useRef<number | null>(null);
+  if (exactDeckRemaining !== null) lastExactDeckTotal.current = deckVisit.decided + exactDeckRemaining;
   const deckPosition = reviewDeckPosition({
     decided: deckVisit.decided,
-    remaining: deckBacklogComplete
-      ? deckRemaining
-      : reviewCountIsExact ? Math.max(totalNeedsReview - locallyDecidedCount, deckRemaining) : deckRemaining,
-    exact: deckBacklogComplete || reviewCountIsExact
+    remaining: exactDeckRemaining ?? (lastExactDeckTotal.current !== null
+      ? Math.max(lastExactDeckTotal.current - deckVisit.decided, deckRemaining)
+      : deckRemaining),
+    exact: exactDeckRemaining !== null || lastExactDeckTotal.current !== null
   });
   // "All framed" only once a verified read says nothing else is open; a cached-only deck (offline,
   // no backlog read yet) never claims completeness.
@@ -1831,6 +1839,7 @@ export default function ReviewScreen() {
                 // keystroke never re-renders the screen.
                 if (source?.kind === "review") logAsNames.current.set(source.item.id, name);
               }}
+              flyingKey={flyingDeckKey}
               onThrow={handleDeckThrowEnd}
               onThrowStart={handleDeckThrow}
               reduceMotion={reduceMotion}
