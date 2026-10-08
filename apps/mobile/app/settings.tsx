@@ -61,6 +61,7 @@ import {
   logout,
   readQueue,
   retryFailedQueuedEvents,
+  subscribeActivityQueue,
   updateCategory,
   updateTimeGoals,
   type MobileBootstrap,
@@ -161,7 +162,7 @@ import {
   retryTimerStopSyncIssue,
   subscribeTimerStopOutbox
 } from "@/lib/timerStopOutbox";
-import { deviceSyncAttentionStatus } from "@/lib/settingsSyncDiagnostics";
+import { syncHelpStatus } from "@/lib/settingsSyncDiagnostics";
 
 type Category = MobileBootstrap["categories"][number];
 // Settings › Your day goal ranges (hours): daily in 1 h steps, weekly in 5 h steps.
@@ -502,6 +503,17 @@ export default function SettingsScreen() {
     refreshTimerStopDiagnostics
   ]);
 
+  // The activity queue changes outside Settings (timer actions while offline); keep its count live so
+  // the Help row and Sync help never say "up to date" with something waiting.
+  useEffect(() => {
+    const unsubscribe = subscribeActivityQueue(() => {
+      void readQueue().then(setQueueAndCache).catch(() => undefined);
+    });
+    return () => {
+      unsubscribe();
+    };
+  }, [setQueueAndCache]);
+
   useEffect(() => subscribeRecoveredDashboardBootstrap(event => {
     if (event.type === "completed") setDataAndCache(event.bootstrap);
   }), [setDataAndCache]);
@@ -602,10 +614,7 @@ export default function SettingsScreen() {
   const openReviewCount = (data?.reviewItems ?? []).filter(isOpenReviewItem).length + reviewNeededEntryIds.size;
   const canRetryFailed = queueDiagnostics.failedCount > 0;
   const canClearFailed = queueDiagnostics.clearableFailedCount > 0;
-  const deviceAttentionStatus = deviceSyncAttentionStatus({
-    timerStopNeedsAttentionCount: timerStopSyncDiagnostics?.needsAttentionCount,
-    timeEntryNeedsAttentionCount: timeEntrySyncDiagnostics?.needsAttentionCount
-  });
+
   const locationMonitoringAllowed = locationDiagnostics?.backgroundPermission === "granted";
   const locationCaptureNeedsRetry = locationDiagnostics?.locationLearningEnabled === true &&
     locationDiagnostics.locationLearningCaptureState === "inactive";
@@ -678,13 +687,7 @@ export default function SettingsScreen() {
   const healthWorkoutSummary = healthImportPreferences
     ? `${healthWorkoutKeys.filter((option) => healthImportPreferences[option.key]).length} of ${healthWorkoutKeys.length}`
     : null;
-  const syncNeedsAttention = Boolean(
-    deviceAttentionStatus ||
-    queueDiagnostics.permanentFailedCount > 0 ||
-    reviewSyncDiagnostics?.needsAttentionCount ||
-    timeEntrySyncDiagnostics?.quarantinedCount ||
-    timeEntrySyncDiagnostics?.deviceQuarantinedCount
-  );
+
   // Sync help: a short note about the page's own last action (never cached), cleared whenever the
   // page opens or what it lists changes, so it can't contradict the status above it.
   const [syncHelpNote, setSyncHelpNote] = useState<string | null>(null);
@@ -697,33 +700,21 @@ export default function SettingsScreen() {
   useEffect(() => {
     setSyncHelpNote(null);
   }, [settingsSection, syncHelpIssueKey]);
-  // Sync help: one plain status line, then each change that needs a choice.
-  const syncHelpIssueCount =
-    timerStopSyncIssues.length +
-    timeEntrySyncIssues.length +
-    reviewSyncIssues.length +
-    (queueDiagnostics.permanentFailedCount > 0 ? 1 : 0) +
-    ((timeEntrySyncDiagnostics?.quarantinedCount ?? 0) > 0 || (timeEntrySyncDiagnostics?.deviceQuarantinedCount ?? 0) > 0 ? 1 : 0);
-  const syncWaitingCount =
-    queueDiagnostics.queuedCount +
-    (timerStopSyncDiagnostics?.pendingCount ?? 0) +
-    (timeEntrySyncDiagnostics?.pendingCount ?? 0) +
-    Math.max(0, (reviewSyncDiagnostics?.waitingCount ?? 0) - (reviewSyncDiagnostics?.authenticationRequiredCount ?? 0));
-  const syncSignInCount = reviewSyncDiagnostics?.authenticationRequiredCount ?? 0;
-  const syncHelpTitle = syncHelpIssueCount > 0 || syncNeedsAttention
-    ? "Something needs your attention"
-    : syncSignInCount > 0
-      ? "Sign in to send your changes"
-      : syncWaitingCount > 0
-      ? `${syncWaitingCount} ${syncWaitingCount === 1 ? "change" : "changes"} waiting to send`
-      : "Nothing is waiting";
-  const syncHelpDetail = syncHelpIssueCount > 0
-    ? "Choose what to do with each change below."
-    : syncSignInCount > 0
-      ? `${syncSignInCount} Review ${syncSignInCount === 1 ? "change is" : "changes are"} saved on this iPhone. Sign in again to send ${syncSignInCount === 1 ? "it" : "them"}.`
-      : syncWaitingCount > 0
-      ? "They send on their own when you're online."
-      : "All your changes are saved.";
+  // Sync help and the Settings Help row: one plain status (settingsSyncDiagnostics.syncHelpStatus).
+  const syncStatus = syncHelpStatus({
+    timerStopIssueCount: timerStopSyncIssues.length,
+    timeEntryIssueCount: timeEntrySyncIssues.length,
+    reviewIssueCount: reviewSyncIssues.length,
+    permanentFailedCount: queueDiagnostics.permanentFailedCount,
+    quarantinedCount: timeEntrySyncDiagnostics?.quarantinedCount ?? 0,
+    deviceQuarantinedCount: timeEntrySyncDiagnostics?.deviceQuarantinedCount ?? 0,
+    queuedCount: queueDiagnostics.queuedCount,
+    timerStopPendingCount: timerStopSyncDiagnostics?.pendingCount ?? 0,
+    timeEntryPendingCount: timeEntrySyncDiagnostics?.pendingCount ?? 0,
+    reviewWaitingCount: reviewSyncDiagnostics?.waitingCount ?? 0,
+    reviewSignInCount: reviewSyncDiagnostics?.authenticationRequiredCount ?? 0
+  });
+  const syncNeedsAttention = syncStatus.kind === "attention";
 
   function changeGoal(kind: "daily" | "weekly", direction: -1 | 1) {
     if (!data) return;
@@ -1077,6 +1068,7 @@ export default function SettingsScreen() {
         return;
       }
       setSyncStatusMessageAndCache(error instanceof Error ? error.message : "Unable to retry failed events.");
+      setSyncHelpNote("Couldn't retry those items. They're still saved on this iPhone.");
     } finally {
       setSyncingQueue(false);
     }
@@ -1110,6 +1102,7 @@ export default function SettingsScreen() {
       await load({ silent: true });
     } catch (error) {
       setSyncStatusMessageAndCache(error instanceof Error ? error.message : "Unable to clear failed events.");
+      setSyncHelpNote("Couldn't clear those items. Nothing was removed.");
     }
   }
 
@@ -1179,6 +1172,7 @@ export default function SettingsScreen() {
       setQueueAndCache(latestQueue);
     } catch (error) {
       setSyncStatusMessageAndCache(error instanceof Error ? error.message : "Unable to export queue diagnostics.");
+      setSyncHelpNote("Couldn't prepare the support details. Try again.");
     }
   }
 
@@ -1770,10 +1764,10 @@ export default function SettingsScreen() {
                   control={<SettingsStatusDot attention={syncNeedsAttention} theme={theme} />}
                   divider={false}
                   // The same plain status as Sync help: never queue internals or a past action's text.
-                  subtitle={syncHelpDetail}
+                  subtitle={syncStatus.indexDetail}
                   testID="settings-sync-status"
                   theme={theme}
-                  title={syncHelpTitle === "Nothing is waiting" ? "Everything is up to date" : syncHelpTitle}
+                  title={syncStatus.indexTitle}
                 />
                 <SettingsBlockRow
                   onPress={() => openSettingsSection("sync")}
@@ -2189,14 +2183,14 @@ export default function SettingsScreen() {
                 <SettingsBlockRow
                   control={<SettingsStatusDot attention={syncNeedsAttention} theme={theme} />}
                   divider={false}
-                  subtitle={syncHelpNote || syncHelpDetail}
+                  subtitle={syncHelpNote || syncStatus.detail}
                   testID="sync-help-status"
                   theme={theme}
-                  title={syncHelpTitle}
+                  title={syncStatus.title}
                 />
               </SettingsBlockGroup>
 
-              {syncHelpIssueCount > 0 ? (
+              {syncStatus.issueCount > 0 ? (
                 <SettingsBlockGroup
                   foot="Retry sends a change again. Discard keeps what your account already has."
                   theme={theme}
