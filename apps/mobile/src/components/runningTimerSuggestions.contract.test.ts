@@ -21,14 +21,15 @@ describe("time-entry sheet historical Suggestions contract", () => {
   it("floats a bounded, internally scrolling overlay after the stable form", () => {
     const overlayIndex = editSheetSource.indexOf("<HistoricalSuggestionsOverlay\n");
     const formCloseIndex = editSheetSource.lastIndexOf("</ScrollView>", overlayIndex);
-    const pinnedRunningHeroIndex = editSheetSource.indexOf("{isRunningMode ? timeEntryHero : null}");
+    // The prototype's sheet head (eyebrow, title, Done) sits above the form.
+    const sheetHeadIndex = editSheetSource.indexOf("testID=\"time-entry-sheet-hero\"");
     const formIndex = editSheetSource.indexOf("testID=\"time-entry-sheet-form\"");
 
     expect(overlayIndex).toBeGreaterThan(-1);
     expect(formCloseIndex).toBeGreaterThan(-1);
     expect(formCloseIndex).toBeLessThan(overlayIndex);
-    expect(pinnedRunningHeroIndex).toBeGreaterThan(-1);
-    expect(pinnedRunningHeroIndex).toBeLessThan(formIndex);
+    expect(sheetHeadIndex).toBeGreaterThan(-1);
+    expect(sheetHeadIndex).toBeLessThan(formIndex);
     expect(themeSource).toMatch(/historicalSuggestionsOverlay:\s*\{[\s\S]*?position: "absolute"/);
     expect(themeSource).toMatch(/historicalSuggestionsOverlay:\s*\{[\s\S]*?backgroundColor: "transparent"/);
     expect(themeSource).toMatch(/historicalSuggestionsSurface:\s*\{[\s\S]*?backgroundColor: theme\.surfaceRaised[\s\S]*?borderWidth: 1[\s\S]*?borderColor: theme\.borderStrong[\s\S]*?borderRadius: 14[\s\S]*?overflow: "hidden"/);
@@ -36,7 +37,6 @@ describe("time-entry sheet historical Suggestions contract", () => {
     expect(themeSource).toMatch(/historicalSuggestionsList:\s*\{[\s\S]*?backgroundColor: "transparent"[\s\S]*?flexShrink: 1[\s\S]*?minHeight: 0/);
     expect(themeSource).not.toContain("historicalSuggestionsBackground");
     expect(themeSource).toMatch(/activeEditBodyKeyboard:\s*\{[\s\S]*?flex: 1[\s\S]*?minHeight: 0/);
-    expect(themeSource).toMatch(/activeEditPinnedHeroRow:\s*\{[\s\S]*?flexShrink: 0/);
     expect(overlaySource).toContain("<ScrollView");
     expect(overlaySource).toContain("resolveHistoricalSuggestionsOverlayHeight");
     expect(overlaySource).toContain("resolveHistoricalSuggestionsOverlayMotionAction({");
@@ -97,8 +97,10 @@ describe("time-entry sheet historical Suggestions contract", () => {
     expect(editSheetSource.indexOf('testID="time-entry-description"')).toBeLessThan(
       editSheetSource.indexOf("accessibilityElementsHidden={suggestionsObscureFormAccessibility}")
     );
-    expect(editSheetSource.indexOf('testID="time-entry-sheet-stop"')).toBeLessThan(
-      editSheetSource.indexOf('testID="time-entry-sheet-form"')
+    // Stop sits in the action row after the dial (Blocks prototype), among the post-Description
+    // siblings that Suggestions obscure; dismissing Suggestions brings it back.
+    expect(editSheetSource.indexOf('testID="time-entry-sheet-stop"')).toBeGreaterThan(
+      editSheetSource.indexOf('testID="time-entry-sheet-obscured-form-content"')
     );
     const overlayIndex = editSheetSource.indexOf(
       "<HistoricalSuggestionsOverlay",

@@ -383,6 +383,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
   const [stopFlight, setStopFlight] = useState<StopFlight | null>(null);
   const [rowPop, setRowPop] = useState<LandingRequest | null>(null);
   const stopFlightSequence = useRef(0);
+  const pendingStartAgain = useRef<Pick<TimeEntryUpdatePatch, "categoryId" | "description" | "tagNames"> | null>(null);
   const todayTabFocused = useRef(false);
   const reportsSheetPortal = useContext(ReportsSheetPortalContext);
   const stopFlightMeasuring = useRef(false);
@@ -429,6 +430,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
       createGenerationScopedExitCoordinator<RejectedOptimisticStart>();
     timerIdCorrelationsLoaded.current = false;
     calendarEditPresentationRef.current = null;
+    pendingStartAgain.current = null;
     manualEntryPresentationRef.current = null;
     dashboardMutationRevision.current += 1;
     recoveredBootstrapGuards.current.clear();
@@ -919,6 +921,8 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
 
   function presentCompletedEntry(entry: NativeCalendarEntry) {
     const presentation = createSheetPresentation("completed_entry", false);
+    // A Start again from an earlier sheet that never finished leaving must not fire later.
+    pendingStartAgain.current = null;
     calendarEditPresentationRef.current = presentation;
     setCalendarEditEntry(entry);
     setCalendarEditPresentation(presentation);
@@ -963,6 +967,27 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
     calendarEditPresentationRef.current = null;
     setCalendarEditPresentation((current) => current?.id === presentationId ? null : current);
     setCalendarEditEntry(null);
+    const startAgain = pendingStartAgain.current;
+    pendingStartAgain.current = null;
+    if (startAgain) startAgainFromSheet(startAgain);
+  }
+
+  // "Start again" from a stopped block's sheet, after that sheet has left. A described block or one
+  // with an activity starts (or switches) like a row's Start again; a bare block starts directly,
+  // without opening the blank-timer editor, so no sheet is presented on its way out.
+  function startAgainFromSheet(values: Pick<TimeEntryUpdatePatch, "categoryId" | "description" | "tagNames">) {
+    const categoryId = values.categoryId ?? null;
+    const description = values.description?.trim() ?? "";
+    const tagNames = values.tagNames ?? [];
+    if (categoryId || description) {
+      startFromToday(categoryId, description, tagNames);
+      return;
+    }
+    void startTaskWith({ categoryId: null, description: "", startedAt: null, tagNames }).then((accepted) => {
+      if (!accepted) return;
+      playHaptic("start");
+      setLiveLanding(nextLandingRequest());
+    });
   }
 
   function nextTimerMutationVersion(entryId: string) {
@@ -2937,6 +2962,11 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
         onCreateTag={createTimerSheetTag}
         onDelete={deleteCalendarEntry}
         onSave={saveCalendarEntryEdit}
+        onStartAgain={(values) => {
+          // Start once this sheet has finished leaving: a second sheet presented while one is
+          // still on screen is refused by iOS (see completeCalendarEntryExit).
+          pendingStartAgain.current = values;
+        }}
         presentation={calendarEditPresentation}
         reduceMotion={reduceMotion}
         deleting={false}

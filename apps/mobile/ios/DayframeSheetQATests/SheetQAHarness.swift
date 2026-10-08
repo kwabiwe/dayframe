@@ -22,6 +22,7 @@ enum SheetQAIdentifiers {
   static let done = "time-entry-sheet-done"
   static let stop = "time-entry-sheet-stop"
   static let delete = "time-entry-sheet-delete"
+  static let startAgain = "time-entry-sheet-start-again"
   static let durationDial = "time-entry-duration-dial"
   static let roundDuration = "time-entry-round-duration"
   static let roundStopTime = "time-entry-round-stop-time"

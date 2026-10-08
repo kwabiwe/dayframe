@@ -189,16 +189,15 @@ final class DayframeSheetQATests: XCTestCase {
     )
     let stop = element(SheetQAIdentifiers.stop)
     let sheetElement = element(SheetQAIdentifiers.sheet)
+    // Blocks parity 4a: Stop sits in the action row after the dial, so open Suggestions obscure it
+    // (hidden from accessibility) until they close; tapping the sheet head closes them.
     try require(
-      stop.exists && stop.isHittable,
-      "Running Stop was not available while the blank keyboard and Suggestions overlay were visible.",
+      !stop.exists,
+      "Running Stop was exposed while the blank keyboard and Suggestions overlay obscured it.",
       state: initial
     )
-    try require(
-      sheetElement.exists && sheetElement.frame.contains(stop.frame),
-      "Running Stop was not geometrically contained by the visible sheet.",
-      state: initial
-    )
+    // stopRunningTimer later closes the keyboard and Suggestions from the head, then requires Stop
+    // to be hittable inside the sheet.
     let elapsed = element(SheetQAIdentifiers.elapsed)
     try require(
       elapsed.exists && !elapsed.frame.isEmpty && sheetElement.frame.intersects(elapsed.frame),
@@ -276,7 +275,7 @@ final class DayframeSheetQATests: XCTestCase {
       SheetQAValue.string(state, "suggestionsPhase") == "closed"
         && SheetQAValue.string(state, "sheetPhase") == "presented"
     }
-    let focusCategory = elementWithLabel("Set category to Focus")
+    let focusCategory = elementWithLabel("Set activity to Focus")
     try require(focusCategory.exists && focusCategory.isSelected, "Bauhaus selection did not select Focus.")
     try require(elementWithLabel("Remove tag A24").exists, "Bauhaus selection did not apply tag A24.")
     try require(elementWithLabel("Remove tag Launch").exists, "Bauhaus selection did not apply tag Launch.")
@@ -731,7 +730,7 @@ final class DayframeSheetQATests: XCTestCase {
       success: true,
       state: persisted
     )
-    try tap(SheetQAIdentifiers.hero)
+    try tapSheetHead()
     _ = try waitForSheet("tag flow explicit focus release") { state in
       SheetQAValue.string(state, "keyboardPhase") == "hidden"
         && SheetQAValue.bool(state, "descriptionFocused") == false
@@ -1647,10 +1646,31 @@ final class DayframeSheetQATests: XCTestCase {
   }
 
   private func stopRunningTimer(step: String, iteration: Int? = nil) throws {
-    let before = try sheetState()
+    // Stop sits below the form (Blocks parity 4a): close the keyboard and Suggestions from the
+    // sheet head and wait for them to settle before requiring it to be hittable.
+    let current = try sheetState()
+    if SheetQAValue.string(current, "keyboardPhase") != "hidden"
+      || SheetQAValue.string(current, "suggestionsPhase") != "closed" {
+      try tapSheetHead()
+    }
+    let before = try waitForSheet("keyboard and Suggestions closed before Stop") { state in
+      SheetQAValue.string(state, "keyboardPhase") == "hidden"
+        && SheetQAValue.bool(state, "descriptionFocused") == false
+        && SheetQAValue.string(state, "suggestionsPhase") == "closed"
+    }
     let presentationID = try requiredInt(before, key: "presentationId")
     let stop = element(SheetQAIdentifiers.stop)
-    try require(stop.exists && stop.isHittable, "Running Stop was not immediately hittable.", state: before)
+    let hittableDeadline = Date().addingTimeInterval(2)
+    while !(stop.exists && stop.isHittable) && Date() < hittableDeadline {
+      RunLoop.current.run(until: Date().addingTimeInterval(0.05))
+    }
+    try require(stop.exists && stop.isHittable, "Running Stop was not hittable once the keyboard and Suggestions closed.", state: before)
+    let sheetElement = element(SheetQAIdentifiers.sheet)
+    try require(
+      sheetElement.exists && sheetElement.frame.contains(stop.frame),
+      "Running Stop was not geometrically contained by the visible sheet.",
+      state: before
+    )
     reporter.record(
       "sheet_exit_started",
       step: step,
@@ -1953,7 +1973,7 @@ final class DayframeSheetQATests: XCTestCase {
       SheetQAValue.string(state, "suggestionsPhase") == "closed"
         && SheetQAValue.string(state, "sheetPhase") == "presented"
     }
-    let category = elementWithLabel("Set category to Focus")
+    let category = elementWithLabel("Set activity to Focus")
     try require(category.exists && category.isSelected, "Bauhaus suggestion did not select the Focus category.", state: settled)
     try require(elementWithLabel("Remove tag A24").exists, "Bauhaus suggestion did not apply tag A24.", state: settled)
     try require(elementWithLabel("Remove tag Launch").exists, "Bauhaus suggestion did not apply tag Launch.", state: settled)
@@ -2170,6 +2190,17 @@ final class DayframeSheetQATests: XCTestCase {
       pollRunLoop()
     }
     throw SheetQAFailure("Timed out waiting for \(description).")
+  }
+
+  /// Taps the sheet head (eyebrow and title) the way a finger does. The head's text is not an
+  /// accessibility element of its own, so XCUITest never reports it hittable; a coordinate tap
+  /// reaches the head's Pressable, which closes the keyboard and Suggestions.
+  private func tapSheetHead() throws {
+    let head = element(SheetQAIdentifiers.hero)
+    guard head.waitForExistence(timeout: 2), !head.frame.isEmpty else {
+      throw SheetQAFailure("The sheet head was not on screen to close the keyboard and Suggestions.")
+    }
+    head.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
   }
 
   private func tap(_ identifier: String, scrollIn scrollIdentifier: String? = nil) throws {
