@@ -65,6 +65,7 @@ import {
   orderReviewDeck,
   reviewDeckPicture,
   reviewDeckPosition,
+  reviewDeckRemaining,
   reviewDeckSource
 } from "@/lib/reviewDeck";
 import { beginReviewDeckVisit, takeReviewDeckEvidenceDecisions } from "@/lib/reviewDeckDecisions";
@@ -959,24 +960,19 @@ export default function ReviewScreen() {
   // Every open item is loaded: the deck itself is the count, so a decision still syncing never
   // turns "2 of 5" into "2 of 5+". Otherwise the server count is used when it is exact.
   const deckBacklogComplete = reviewBacklog !== null && !reviewBacklog.nextCursor && reviewBacklog.recordsComplete;
-  // While this visit's decisions sync, the last server count still includes them. Remaining is that
-  // count minus the decisions not yet reflected in it (queued in the outbox, or held/saving on this
-  // iPhone, each counted once), so "N of M" neither drops to the loaded cards nor ignores items
-  // resolved or added elsewhere.
-  const queuedReviewDecisions = reviewSyncDiagnostics
-    ? reviewSyncDiagnostics.pendingCount +
-      reviewSyncDiagnostics.retryWaitCount +
-      reviewSyncDiagnostics.authenticationRequiredCount +
-      reviewSyncDiagnostics.acknowledgedCount
-    : 0;
-  const unreflectedDecisions = Math.max(queuedReviewDecisions + (heldDeckDecision ? 1 : 0), locallyDecidedCount);
+  // While this visit's decisions sync the last server count still includes them (reviewDeckRemaining).
   const deckPosition = reviewDeckPosition({
     decided: deckVisit.decided,
-    remaining: deckBacklogComplete
-      ? deckRemaining
-      : reviewBacklog
-        ? Math.max(reviewBacklog.globalCount - unreflectedDecisions, deckRemaining)
-        : deckRemaining,
+    remaining: reviewDeckRemaining({
+      backlogComplete: deckBacklogComplete,
+      deckRemaining,
+      serverOpenCount: reviewBacklog?.globalCount ?? null,
+      unappliedQueuedCount: reviewSyncDiagnostics
+        ? reviewSyncDiagnostics.pendingCount + reviewSyncDiagnostics.retryWaitCount + reviewSyncDiagnostics.authenticationRequiredCount
+        : 0,
+      held: Boolean(heldDeckDecision),
+      localDecidedCount: locallyDecidedCount
+    }),
     exact: deckBacklogComplete || reviewBacklog !== null
   });
   // "All framed" only once a verified read says nothing else is open; a cached-only deck (offline,

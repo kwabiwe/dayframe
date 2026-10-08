@@ -3,6 +3,7 @@ import {
   formatReviewDeckWhen,
   orderReviewDeck,
   reviewDeckArmDirection,
+  reviewDeckRemaining,
   reviewDeckPicture,
   reviewDeckPosition,
   reviewDeckSource
@@ -104,5 +105,35 @@ describe("reviewDeckArmDirection (5b swipe arming)", () => {
     expect(reviewDeckArmDirection(120, 20)).toBe(0);
     expect(reviewDeckArmDirection(-120, -20)).toBe(0);
     expect(reviewDeckArmDirection(230, 120)).toBe(1);
+  });
+});
+
+describe("reviewDeckRemaining", () => {
+  const base = { backlogComplete: false, deckRemaining: 56, serverOpenCount: 160, unappliedQueuedCount: 0, held: false, localDecidedCount: 0 };
+
+  it("uses the deck when everything is loaded, and the deck until a server count exists", () => {
+    expect(reviewDeckRemaining({ ...base, backlogComplete: true, deckRemaining: 12 })).toBe(12);
+    expect(reviewDeckRemaining({ ...base, serverOpenCount: null })).toBe(56);
+  });
+
+  it("keeps the total while a decision is held, saving or queued (14 of 160 never becomes 14 of 56)", () => {
+    expect(reviewDeckRemaining({ ...base, held: true, localDecidedCount: 1 })).toBe(159);
+    expect(reviewDeckRemaining({ ...base, localDecidedCount: 1 })).toBe(159);
+    expect(reviewDeckRemaining({ ...base, unappliedQueuedCount: 1, localDecidedCount: 1 })).toBe(159);
+    expect(reviewDeckRemaining({ ...base, unappliedQueuedCount: 1 })).toBe(159);
+  });
+
+  it("does not subtract a decision the server already applied", () => {
+    // Logged one; the fresh server count already dropped to 159 and the outbox only holds an acknowledgement.
+    expect(reviewDeckRemaining({ ...base, serverOpenCount: 159, unappliedQueuedCount: 0 })).toBe(159);
+  });
+
+  it("follows items resolved or added elsewhere", () => {
+    expect(reviewDeckRemaining({ ...base, serverOpenCount: 140, unappliedQueuedCount: 1 })).toBe(139);
+    expect(reviewDeckRemaining({ ...base, serverOpenCount: 180, unappliedQueuedCount: 1 })).toBe(179);
+  });
+
+  it("never shows fewer than the cards loaded", () => {
+    expect(reviewDeckRemaining({ ...base, serverOpenCount: 40 })).toBe(56);
   });
 });

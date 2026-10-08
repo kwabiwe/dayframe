@@ -146,3 +146,26 @@ export function reviewDeckPosition(input: {
     ? { text: `${current} of ${total}`, accessibilityLabel: `Moment ${current} of ${total}` }
     : { text: `${current} of ${total}+`, accessibilityLabel: `Moment ${current} of at least ${total}` };
 }
+
+/**
+ * "N of M" remaining (Blocks parity step 5d). When every open item is loaded the deck is the count.
+ * Otherwise it is the last server count minus this account's decisions the server has not applied
+ * yet (queued in the outbox, or held/saving on this iPhone, each counted once); acknowledged
+ * decisions are already reflected in the count. Never fewer than the cards loaded.
+ */
+export function reviewDeckRemaining(input: {
+  backlogComplete: boolean;
+  deckRemaining: number;
+  /** null until a backlog read has given a server count. */
+  serverOpenCount: number | null;
+  /** Outbox decisions not yet applied by the server: pending, retry wait, sign-in required. */
+  unappliedQueuedCount: number;
+  /** A decision held for Undo (not in the outbox yet). */
+  held: boolean;
+  /** Held plus saving decisions (saving ones may already be in the outbox count). */
+  localDecidedCount: number;
+}) {
+  if (input.backlogComplete || input.serverOpenCount === null) return input.deckRemaining;
+  const unreflected = Math.max(input.unappliedQueuedCount + (input.held ? 1 : 0), input.localDecidedCount);
+  return Math.max(input.serverOpenCount - unreflected, input.deckRemaining);
+}
