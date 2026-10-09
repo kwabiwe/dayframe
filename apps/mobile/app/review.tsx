@@ -33,7 +33,22 @@ import {
   type ReviewDeckReturn,
   type ReviewDeckThrowRequest
 } from "@/components/review/ReviewDeck";
-import { createReviewDeckHold, reviewDeckProposalSignature, type ReviewDeckHeldDecision } from "@/lib/reviewDeckHold";
+import {
+  createReviewDeckHold,
+  reviewDeckHeldKeys,
+  reviewDeckProposalSignature,
+  type ReviewDeckHeld,
+  type ReviewDeckHeldBatch,
+  type ReviewDeckHeldDecision
+} from "@/lib/reviewDeckHold";
+import {
+  reviewBulkSkipCandidates,
+  reviewBulkSkipConfirmation,
+  reviewBulkSkipOwnerMatches,
+  reviewBulkSkipToast,
+  runReviewBulkSkip,
+  type ReviewBulkSkipScope
+} from "@/lib/reviewBulkSkip";
 import { ActivityPickerSheet } from "@/components/ActivityPickerSheet";
 import { recentActivityIds } from "@/lib/activityChoice";
 import { activeLogAsCategoryId, reviewLogAsEdit, reviewLogAsEditorName } from "@/lib/reviewLogAs";
@@ -68,6 +83,7 @@ import {
   reviewDeckSource
 } from "@/lib/reviewDeck";
 import { beginReviewDeckVisit, takeReviewDeckEvidenceDecisions } from "@/lib/reviewDeckDecisions";
+import { createReviewKnownItems, reviewDataOwnerKey } from "@/lib/reviewKnownItems";
 import {
   REVIEW_COPY,
   isTimeAwayReviewItem,
@@ -147,6 +163,8 @@ type ReviewLoadOptions = {
 type ReviewBacklogRead = {
   controller: AbortController;
   generation: number;
+  /** Settles when this read ends, whatever its outcome (a bulk skip waits for it). */
+  done: Promise<void>;
 };
 
 type ReviewBacklogLoadOptions = {
@@ -190,7 +208,17 @@ export default function ReviewScreen() {
   // A deferred card was thrown off screen; it comes back as a fresh card at the back of the deck.
   const deferGenerations = useRef(new Map<string, number>());
   // Blocks parity step 5b: a thrown card is held for Undo before its decision is saved.
-  const [heldDeckDecision, setHeldDeckDecision] = useState<ReviewDeckHeldDecision | null>(null);
+  const [heldDeckDecision, setHeldDeckDecision] = useState<ReviewDeckHeld | null>(null);
+  // A single thrown card (most of the deck's flight and Undo logic is about this one).
+  const heldDeckCard = heldDeckDecision?.kind === "single" ? heldDeckDecision : null;
+  // Step 5f: a bulk skip is being counted (older backlog pages load before the confirmation).
+  const [bulkSkipCounting, setBulkSkipCounting] = useState(false);
+  const bulkSkipInFlight = useRef(false);
+  // A bulk skip reads these after awaiting older pages and the confirmation, so never stale.
+  const bulkSkipStateRef = useRef<{ committing: ReadonlySet<string>; syncStates: ReadonlyMap<string, unknown> }>({
+    committing: new Set(),
+    syncStates: new Map()
+  });
   const [deckThrowRequest, setDeckThrowRequest] = useState<ReviewDeckThrowRequest | null>(null);
   const [deckReturn, setDeckReturn] = useState<ReviewDeckReturn | null>(null);
   // The held card stays on screen while it flies out; the cards beneath land when it has gone.
@@ -213,12 +241,15 @@ export default function ReviewScreen() {
   logAsDraftsRef.current = logAsDrafts;
   const logAsNames = useRef(new Map<string, string>());
   const [logAsPickerItemId, setLogAsPickerItemId] = useState<string | null>(null);
-  const commitHeldDeckDecisionRef = useRef<(held: ReviewDeckHeldDecision) => void>(() => undefined);
+  const commitHeldDeckDecisionRef = useRef<(held: ReviewDeckHeld) => void>(() => undefined);
   const deckHold = useRef(createReviewDeckHold({
     onChange: setHeldDeckDecision,
     onCommit: (held) => commitHeldDeckDecisionRef.current(held)
   })).current;
   const deckTopKeyRef = useRef<string | null>(null);
+  // Open items the deck has shown (Undo, a failed save, a Location evidence decision), each read
+  // back only for the account it was shown for (reviewKnownItems.ts).
+  const knownDeckItems = useRef(createReviewKnownItems<MobileReviewItem>()).current;
   const [reviewMenuState, setReviewMenuState] = useState(CLOSED_REVIEW_MENU_STATE);
   const [reviewAvailabilityMessage, setReviewAvailabilityMessage] = useState<string | null>(null);
   const [focusedLegacyEntry, setFocusedLegacyEntry] = useState<MobileTimeEntry | null>(null);
@@ -262,6 +293,7 @@ export default function ReviewScreen() {
   const overlapCounts = useMemo(() => prepareReviewOverlapCounts(data?.reviewItems ?? [], peerEntries, Date.now()), [data, peerEntries]);
   const recentLogAsActivityIds = useMemo(() => recentActivityIds(peerEntries), [peerEntries]);
   connectivityRef.current = { isOffline, isOnline, reconnectEpoch };
+  bulkSkipStateRef.current = { committing: committingDeckKeys, syncStates: reviewItemSyncStates };
 
   const applyReviewMenuEvent = useCallback((event: ReviewMenuEvent) => {
     const nextState = reduceReviewMenuState(reviewMenuStateRef.current, event);
@@ -307,6 +339,8 @@ export default function ReviewScreen() {
       reviewBacklogRead.current?.controller.abort();
       reviewBacklogRead.current = null;
       reviewBacklogRef.current = null;
+      // Cards the deck remembers (for Undo or a failed save) belong to the previous account.
+      knownDeckItems.clear();
       setReviewBacklog(null);
       setReviewBacklogLoading(false);
     }
@@ -421,7 +455,11 @@ export default function ReviewScreen() {
     const origin = { workspaceId: bootstrap.workspace.id, userId: bootstrap.user.id };
     const generation = screenOwnerGeneration.current;
     const controller = new AbortController();
-    reviewBacklogRead.current = { controller, generation };
+    let settleRead: () => void = () => undefined;
+    const done = new Promise<void>((resolve) => {
+      settleRead = resolve;
+    });
+    reviewBacklogRead.current = { controller, generation, done };
     setReviewBacklogLoading(true);
     let restart = false;
     let readPhase: "server" | "cache" = "server";
@@ -515,6 +553,7 @@ export default function ReviewScreen() {
         reviewBacklogRead.current = null;
         setReviewBacklogLoading(false);
       }
+      settleRead();
     }
 
     if (
@@ -880,8 +919,11 @@ export default function ReviewScreen() {
       }))
     ];
     const deferred = new Set(deferredDeckKeys);
-    const heldKey = heldDeckDecision && heldDeckDecision.key !== flyingDeckKey ? heldDeckDecision.key : null;
-    const hidden = (key: string) => key === heldKey || committingDeckKeys.has(key);
+    // A held card stays while it flies out; a held bulk skip hides every card it covers.
+    const heldKeys = new Set(reviewDeckHeldKeys(heldDeckDecision).filter((key) => (
+      heldDeckDecision?.kind === "batch" || key !== flyingDeckKey
+    )));
+    const hidden = (key: string) => heldKeys.has(key) || committingDeckKeys.has(key);
     const ordered = [
       ...sources.filter((source) => !deferred.has(source.key) && !hidden(source.key)),
       ...deferredDeckKeys.flatMap((key) => sources.filter((source) => source.key === key && !hidden(key)))
@@ -911,12 +953,12 @@ export default function ReviewScreen() {
     // Any flight whose card left the deck mid-flight is retired (it will never report its end): a
     // deferral still moves the card behind the rest; a held card stays hidden behind its toast.
     if (flyingDeckKey && !deckSources.some((source) => source.key === flyingDeckKey)) {
-      if (flyingDeckDefers.current && heldDeckDecision?.key !== flyingDeckKey) deferDeckCard(flyingDeckKey);
+      if (flyingDeckDefers.current && heldDeckCard?.key !== flyingDeckKey) deferDeckCard(flyingDeckKey);
       setFlyingDeckKey(null);
     }
     // deferDeckCard only touches refs and state setters.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [deckReturn, deckSources, flyingDeckKey, heldDeckDecision]);
+  }, [deckReturn, deckSources, flyingDeckKey, heldDeckCard]);
   const deckCards = useMemo(
     // One more than the visible stack: while the top card flies out, the card behind moves in.
     () => deckSources.slice(0, 4).map((source): ReviewDeckCardModel => (
@@ -952,13 +994,13 @@ export default function ReviewScreen() {
   const deckFlying = flyingDeckKey !== null && topDeckSource?.key === flyingDeckKey;
   // The flying held card is already decided, so "N of M" does not count it (a deferred card
   // flying to the back still does).
-  const heldInFlight = deckFlying && heldDeckDecision?.key === flyingDeckKey;
+  const heldInFlight = deckFlying && heldDeckCard?.key === flyingDeckKey;
   const deckRemaining = heldInFlight ? deckSources.length - 1 : deckSources.length;
   // The server count still includes decisions held for Undo or saving on this iPhone.
   // Every open item is loaded: the deck itself is the count, so a decision still syncing never
   // turns "2 of 5" into "2 of 5+". Otherwise the server count is used when it is exact.
   const deckBacklogComplete = reviewBacklog !== null && !reviewBacklog.nextCursor && reviewBacklog.recordsComplete;
-  const locallyDecidedCount = (heldDeckDecision ? 1 : 0) + committingDeckKeys.size;
+  const locallyDecidedCount = reviewDeckHeldKeys(heldDeckDecision).length + committingDeckKeys.size;
   const deckPosition = reviewDeckPosition({
     decided: deckVisit.decided,
     remaining: deckBacklogComplete
@@ -989,16 +1031,23 @@ export default function ReviewScreen() {
   // decided here: Skip moves either behind the rest for this visit, so it never blocks the deck.
   const topDeckSkipDefers = topDeckSource?.kind === "legacy_entry" || topDeckControlsDisabled || (deckCards[0]?.skipDefers ?? false);
 
+  // The account this render's open items belong to.
+  const deckOwnerKey = data ? reviewDataOwnerKey(data) : null;
   // Decisions made in Location evidence (Edit before logging, D7) count toward this visit.
-  const knownDeckItems = useRef(new Map<string, MobileReviewItem>());
   useEffect(() => {
-    for (const item of openReviewItems) knownDeckItems.current.set(item.id, item);
-  }, [openReviewItems]);
+    if (!deckOwnerKey) return;
+    for (const item of openReviewItems) knownDeckItems.remember(item, deckOwnerKey);
+  }, [deckOwnerKey, openReviewItems]);
+
+  /** A remembered open item, only when it was shown for the account loaded now. */
+  function knownDeckItem(itemId: string) {
+    return knownDeckItems.get(itemId, dataRef.current);
+  }
   useEffect(() => beginReviewDeckVisit(), []);
   useFocusEffect(
     useCallback(() => {
       for (const decision of takeReviewDeckEvidenceDecisions()) {
-        const item = knownDeckItems.current.get(decision.itemId);
+        const item = knownDeckItem(decision.itemId);
         ownDeckDecisionKeys.current.add(reviewFocusKey("review", decision.itemId));
         recordDeckDecision(decision.logged ? (item ? deckLoggedBlock(item) : { color: theme.textSecondary, seconds: 0 }) : null);
       }
@@ -1065,6 +1114,7 @@ export default function ReviewScreen() {
     deckTokenSequence.current += 1;
     recordDeckDecision(logged ? { ...block, color: card?.color ?? block.color } : null);
     deckHold.hold({
+      kind: "single",
       token: deckTokenSequence.current,
       key,
       itemId: item.id,
@@ -1097,6 +1147,10 @@ export default function ReviewScreen() {
     if (!current) return;
     const held = deckHold.undo(current.token);
     if (!held) return;
+    if (held.kind === "batch") {
+      undoHeldBulkSkip(held);
+      return;
+    }
     unrecordDeckDecision(held.logged ? { color: held.color, seconds: held.seconds } : null);
     ownDeckDecisionKeys.current.delete(held.key);
     setDeckThrowRequest(null);
@@ -1116,7 +1170,7 @@ export default function ReviewScreen() {
   // again. The next read replaces it like any other loaded item.
   function restorePagedOutDeckItem(itemId: string) {
     const loaded = dataRef.current;
-    const known = knownDeckItems.current.get(itemId);
+    const known = knownDeckItem(itemId);
     if (!loaded || !known || !isOpenReviewItem(known)) return;
     if (loaded.reviewItems.some((item) => item.id === itemId)) return;
     commitData({ ...loaded, reviewItems: [...loaded.reviewItems, known] });
@@ -1132,11 +1186,250 @@ export default function ReviewScreen() {
     });
   }
 
+  function setDeckKeysCommitting(keys: readonly string[], committing: boolean) {
+    if (!keys.length) return;
+    setCommittingDeckKeys((current) => {
+      const next = new Set(current);
+      for (const key of keys) {
+        if (committing) next.add(key);
+        else next.delete(key);
+      }
+      return next;
+    });
+  }
+
+  // Step 5f: "Review all" in the card's More menu. Older backlog pages are read first so the count
+  // covers every open moment; then one confirmation, and the batch is held for one Undo.
+  async function startBulkSkip(scope: ReviewBulkSkipScope) {
+    if (bulkSkipInFlight.current) return;
+    bulkSkipInFlight.current = true;
+    // Like any other decision, a bulk skip saves a held card first.
+    deckHold.flush();
+    const generation = screenOwnerGeneration.current;
+    const stillHere = () => generation === screenOwnerGeneration.current && screenFocusedRef.current;
+    try {
+      if (reviewBacklogRef.current?.nextCursor || reviewBacklogRead.current) {
+        setBulkSkipCounting(true);
+        AccessibilityInfo.announceForAccessibility("Counting moments to skip.");
+        // Bounded: at most 50 more pages of 100, and a page that does not advance stops it.
+        for (let page = 0; page < 50 && stillHere(); page += 1) {
+          const inFlight = reviewBacklogRead.current;
+          if (inFlight) {
+            await inFlight.done;
+            continue;
+          }
+          const cursor = reviewBacklogRef.current?.nextCursor;
+          if (!cursor) break;
+          await loadReviewBacklogPage({ cursor, reset: false });
+          if (reviewBacklogRef.current?.nextCursor === cursor) break;
+        }
+      }
+    } finally {
+      setBulkSkipCounting(false);
+    }
+    if (!stillHere()) {
+      bulkSkipInFlight.current = false;
+      return;
+    }
+    const backlog = reviewBacklogRef.current;
+    const complete = Boolean(backlog && !backlog.nextCursor && backlog.recordsComplete);
+    const candidates = bulkSkipCandidates(scope);
+    const confirmation = reviewBulkSkipConfirmation(candidates.length, scope, complete);
+    if (!confirmation.confirmLabel) {
+      bulkSkipInFlight.current = false;
+      Alert.alert(confirmation.title, confirmation.message);
+      return;
+    }
+    const chosen = new Set(candidates.map((item) => item.id));
+    Alert.alert(confirmation.title, confirmation.message, [
+      { style: "cancel", text: "Cancel", onPress: () => { bulkSkipInFlight.current = false; } },
+      {
+        style: "destructive",
+        text: confirmation.confirmLabel,
+        onPress: () => {
+          bulkSkipInFlight.current = false;
+          if (!stillHere()) return;
+          // Only what the user confirmed, and only what can still be skipped now.
+          holdBulkSkip(bulkSkipCandidates(scope).filter((item) => chosen.has(item.id)));
+        }
+      }
+    ], { cancelable: true, onDismiss: () => { bulkSkipInFlight.current = false; } });
+  }
+
+  function bulkSkipCandidates(scope: ReviewBulkSkipScope) {
+    const held = new Set(reviewDeckHeldKeys(deckHold.current()));
+    return reviewBulkSkipCandidates((dataRef.current?.reviewItems ?? []).filter(isOpenReviewItem), {
+      now: Date.now(),
+      scope,
+      // The same rule as a single Skip: a card that would only move behind the rest is left alone.
+      skippable: (item) => {
+        const key = reviewFocusKey("review", item.id);
+        return hasSuggestedTimeWindow(item) &&
+          !reviewMutations.current.has(item.id) &&
+          !bulkSkipStateRef.current.syncStates.has(item.id) &&
+          !bulkSkipStateRef.current.committing.has(key) &&
+          !held.has(key);
+      }
+    });
+  }
+
+  function holdBulkSkip(items: MobileReviewItem[]) {
+    if (!items.length) return;
+    // Another decision may have been held while the confirmation was up: it is saved first, and
+    // anything that save claimed is no longer part of this batch.
+    deckHold.flush();
+    items = items.filter((item) => !reviewMutations.current.has(item.id));
+    const loaded = dataRef.current;
+    if (!items.length || !loaded) return;
+    applyReviewMenuEvent({ type: "close" });
+    setDeckThrowRequest(null);
+    setDeckReturn(null);
+    setHighlightedFocusKey(null);
+    for (const item of items) {
+      knownDeckItems.remember(item, reviewDataOwnerKey(loaded));
+      ownDeckDecisionKeys.current.add(reviewFocusKey("review", item.id));
+    }
+    setDeckVisit((current) => ({ ...current, decided: current.decided + items.length }));
+    deckTokenSequence.current += 1;
+    deckHold.hold({
+      kind: "batch",
+      token: deckTokenSequence.current,
+      owner: { workspaceId: loaded.workspace.id, userId: loaded.user.id },
+      items: items.map((item) => ({
+        key: reviewFocusKey("review", item.id),
+        itemId: item.id,
+        proposal: reviewDeckProposalSignature(item)
+      }))
+    });
+    if (!deckScreenActive.current) deckHold.flush();
+    playHaptic("reviewSkip");
+    AccessibilityInfo.announceForAccessibility(`${reviewBulkSkipToast(items.length)}. Undo is available for a few seconds.`);
+  }
+
+  function forgetBulkDecisions(keys: readonly string[]) {
+    if (!keys.length) return;
+    for (const key of keys) ownDeckDecisionKeys.current.delete(key);
+    setDeckVisit((current) => ({ ...current, decided: Math.max(0, current.decided - keys.length) }));
+  }
+
+  function undoHeldBulkSkip(held: ReviewDeckHeldBatch) {
+    forgetBulkDecisions(held.items.map((item) => item.key));
+    // Another account signed in while it was held: nothing of the old account comes back.
+    if (!reviewBulkSkipOwnerMatches(held.owner, dataRef.current)) return;
+    for (const item of held.items) restorePagedOutDeckItem(item.itemId);
+    playHaptic("undoRestore");
+    AccessibilityInfo.announceForAccessibility(
+      `${held.items.length} ${held.items.length === 1 ? "moment is" : "moments are"} back.`
+    );
+  }
+
+  // The batch ends its hold: each item still open and unchanged is skipped once, one after the
+  // other through the durable outbox (runReviewBulkSkip re-checks each right before it is written
+  // and stops if the account changes), then the deck is projected and synced once.
+  function commitHeldBulkSkip(held: ReviewDeckHeldBatch) {
+    // Fenced to the account that held it (not whichever is loaded when the hold ends).
+    const ownerMatches = () => reviewBulkSkipOwnerMatches(held.owner, dataRef.current);
+    if (!ownerMatches()) {
+      forgetBulkDecisions(held.items.map((entry) => entry.key));
+      return;
+    }
+    // The batch claims its items, so no single decision can start for them while it saves.
+    const claim = -held.token;
+    const claimed = held.items.filter((entry) => !reviewMutations.current.has(entry.itemId));
+    const busy = held.items.filter((entry) => reviewMutations.current.has(entry.itemId));
+    for (const entry of claimed) reviewMutations.current.set(entry.itemId, claim);
+    setDeckKeysCommitting(claimed.map((entry) => entry.key), true);
+    // An item a capped refresh paged out is still open: it is saved from the copy the deck showed.
+    const openItem = (itemId: string) => {
+      const listed = dataRef.current?.reviewItems.find((candidate) => candidate.id === itemId);
+      if (listed) return isOpenReviewItem(listed) ? listed : undefined;
+      const known = knownDeckItem(itemId);
+      return known && isOpenReviewItem(known) ? known : undefined;
+    };
+    void (async () => {
+      const outcome = await runReviewBulkSkip<MobileReviewItem>(claimed, {
+        enqueue: async (item) => {
+          const current = dataRef.current;
+          if (!current) throw new Error("Review data is not loaded.");
+          const bootstrap = current.reviewItems.some((candidate) => candidate.id === item.id)
+            ? current
+            : { ...current, reviewItems: [...current.reviewItems, item] };
+          await enqueueReviewMutation({
+            bootstrap,
+            item,
+            mutation: hasV2LocationEvidence(item) ? { action: "ignore_once_location" } : { action: "ignore_once" },
+            clientMutationId: createReviewClientMutationId()
+          });
+        },
+        isSaving: (itemId) => {
+          const current = reviewMutations.current.get(itemId);
+          return current !== undefined && current !== claim;
+        },
+        openItem,
+        ownerMatches,
+        signature: reviewDeckProposalSignature
+      });
+      const sameOwner = ownerMatches();
+      if (outcome.saved.length && sameOwner) {
+        // Projected onto the newest data: a refresh that landed while saving is kept.
+        const savedIds = new Set(outcome.saved.map((entry) => entry.itemId));
+        const base = dataRef.current!;
+        const projected = await projectReviewBootstrapFromStore(base).catch(() => null);
+        if (ownerMatches()) {
+          const latest = dataRef.current!;
+          commitData(projected && latest === base ? projected : projectReviewBootstrap(latest, savedIds));
+        }
+      }
+      for (const entry of claimed) {
+        if (reviewMutations.current.get(entry.itemId) === claim) reviewMutations.current.delete(entry.itemId);
+      }
+      setDeckKeysCommitting(claimed.map((entry) => entry.key), false);
+      const notSaved = [...busy, ...outcome.changed, ...outcome.failed];
+      forgetBulkDecisions([...notSaved, ...outcome.resolved, ...outcome.abandoned].map((entry) => entry.key));
+      // Nothing is put back once the account has changed.
+      if (!ownerMatches()) return;
+      for (const entry of [...outcome.changed, ...outcome.failed]) {
+        deferGenerations.current.set(entry.key, (deferGenerations.current.get(entry.key) ?? 0) + 1);
+        restorePagedOutDeckItem(entry.itemId);
+      }
+      // (A moment already saving another change is decided by that change; nothing to say.)
+      if (outcome.changed.length) {
+        const count = outcome.changed.length;
+        AccessibilityInfo.announceForAccessibility(
+          `${count} ${count === 1 ? "moment" : "moments"} changed, so ${count === 1 ? "it was" : "they were"} not skipped.`
+        );
+      }
+      if (outcome.failed.length) {
+        const count = outcome.failed.length;
+        AccessibilityInfo.announceForAccessibility("Some moments were not skipped. They are still in Review.");
+        Alert.alert(
+          "Review",
+          `${count} ${count === 1 ? "moment wasn’t" : "moments weren’t"} skipped on this iPhone. ${count === 1 ? "It is" : "They are"} still in Review.`
+        );
+      }
+      if (outcome.saved.length) {
+        AccessibilityInfo.announceForAccessibility(`${reviewBulkSkipToast(outcome.saved.length)}. Saved on this iPhone. Waiting to sync.`);
+        void refreshReviewSyncDiagnostics();
+        void synchroniseReviewMutations()
+          .then(() => {
+            void load({ preserveMenu: true, queueIfBusy: true, silent: true, skipReprocess: true });
+          })
+          .catch(() => {
+            void refreshReviewSyncDiagnostics();
+          });
+      }
+    })();
+  }
+
   commitHeldDeckDecisionRef.current = (held) => {
+    if (held.kind === "batch") {
+      commitHeldBulkSkip(held);
+      return;
+    }
     const listedItem = dataRef.current?.reviewItems.find((candidate) => candidate.id === held.itemId);
     // Missing from the loaded list is not "resolved": a capped refresh may only have paged it out.
     const unlisted = !listedItem;
-    const knownItem = knownDeckItems.current.get(held.itemId);
+    const knownItem = knownDeckItem(held.itemId);
     const item = listedItem
       ? (isOpenReviewItem(listedItem) ? listedItem : undefined)
       : knownItem && isOpenReviewItem(knownItem) ? knownItem : undefined;
@@ -1454,6 +1747,12 @@ export default function ReviewScreen() {
       return;
     }
 
+    if (pendingAction.action === "skip_older" || pendingAction.action === "skip_all") {
+      finishAction();
+      void startBulkSkip(pendingAction.action === "skip_older" ? "older" : "all");
+      return;
+    }
+
     if (!beginReviewItemEdit(item, pendingAction.token)) finishAction();
   }
 
@@ -1468,6 +1767,8 @@ export default function ReviewScreen() {
     if (reviewMutations.current.has(item.id)) return false;
     // Any other decision (More › Dismiss, an edit) saves a held card first, as a throw does.
     deckHold.flush();
+    // That flush may have saved this very item (a held bulk skip covering it): decided once.
+    if (reviewMutations.current.has(item.id)) return false;
     const loadedData = dataRef.current;
     if (!loadedData) return false;
     const listed = loadedData.reviewItems.some((candidate) => candidate.id === item.id);
@@ -1706,10 +2007,18 @@ export default function ReviewScreen() {
   // framed, out of flow),
   // so it never covers the controls whatever the phone height or text size.
   function renderDeckToast(placement: "actions" | "under") {
-    if (!heldDeckDecision) return null;
+    const held = heldDeckDecision;
+    if (!held) return null;
+    // A bulk skip (step 5f) has one neutral swatch and names the count.
+    const label = held.kind === "batch"
+      ? reviewBulkSkipToast(held.items.length)
+      : `${held.logged ? "Logged" : "Skipped"} ${held.title}`;
+    const undoLabel = held.kind === "batch"
+      ? `Undo skipping ${held.items.length} ${held.items.length === 1 ? "moment" : "moments"}`
+      : `Undo ${held.logged ? "logging" : "skipping"} ${held.title}`;
     return (
     <Reanimated.View
-      key={heldDeckDecision.token}
+      key={held.token}
       accessibilityLiveRegion="polite"
       entering={localPresenceEntering(reduceMotion, "rise")}
       exiting={localPresenceExiting(reduceMotion)}
@@ -1717,13 +2026,13 @@ export default function ReviewScreen() {
       testID="review-deck-toast"
     >
       <View style={styles.reviewDeckToastLabel}>
-        <View style={[styles.reviewDeckToastSwatch, { backgroundColor: heldDeckDecision.color }]} />
+        <View style={[styles.reviewDeckToastSwatch, { backgroundColor: held.kind === "batch" ? theme.textSecondary : held.color }]} />
         <Text numberOfLines={1} style={[styles.historyDeleteUndoText, styles.reviewDeckToastText]}>
-          {heldDeckDecision.logged ? "Logged" : "Skipped"} {heldDeckDecision.title}
+          {label}
         </Text>
       </View>
       <Pressable
-        accessibilityLabel={`Undo ${heldDeckDecision.logged ? "logging" : "skipping"} ${heldDeckDecision.title}`}
+        accessibilityLabel={undoLabel}
         accessibilityRole="button"
         // The shared Undo pill is 40 points tall; the slop makes it a 44-point target.
         hitSlop={{ bottom: 4, left: 4, right: 4, top: 4 }}
@@ -1759,7 +2068,8 @@ export default function ReviewScreen() {
           style={styles.reviewDeckNavCount}
           testID="review-deck-count"
         >
-          {deckFinished ? "" : deckPosition?.text ?? ""}
+          {/* While a bulk skip counts older pages, the count slot says so (nothing else moves). */}
+          {bulkSkipCounting ? "Counting…" : deckFinished ? "" : deckPosition?.text ?? ""}
         </Text>
       </View>
       <ScrollView
@@ -1912,6 +2222,7 @@ export default function ReviewScreen() {
       ) : null}
 
       <OverflowMenu
+        bulkSkip
         disabled={
           !overflowItemId ||
           reviewMenuState.pendingAction != null
@@ -2328,4 +2639,3 @@ async function withTimeout<T>(promise: Promise<T>, timeoutMs: number): Promise<T
     if (timeout) clearTimeout(timeout);
   }
 }
-

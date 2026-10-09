@@ -1103,6 +1103,27 @@ function createStyles(theme: MobileTheme) {
       fontSize: 15,
       fontWeight: "600"
     },
+    overflowMenuScroll: {
+      flexGrow: 0,
+      flexShrink: 1
+    },
+    overflowMenuCancelText: {
+      color: theme.textSecondary,
+      fontFamily: monoFont,
+      fontSize: 15,
+      fontWeight: "600"
+    },
+    overflowMenuSectionLabel: {
+      color: theme.textSecondary,
+      fontFamily: monoFont,
+      fontSize: 12,
+      fontWeight: "600",
+      letterSpacing: 0.4,
+      paddingHorizontal: 18,
+      paddingTop: 14,
+      paddingBottom: 4,
+      textTransform: "uppercase"
+    },
     overflowMenuDivider: {
       height: StyleSheet.hairlineWidth,
       marginHorizontal: 18,

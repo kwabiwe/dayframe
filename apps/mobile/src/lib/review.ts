@@ -22,7 +22,8 @@ export function scheduleLocationEvidenceLoadingFeedback(onShow: () => void) {
 
 type MobileCategory = MobileBootstrap["categories"][number];
 
-export type ReviewMenuAction = "edit" | "dismiss";
+// "skip_older" / "skip_all" are the deck's "Review all" bulk skips (step 5f).
+export type ReviewMenuAction = "edit" | "dismiss" | "skip_older" | "skip_all";
 
 export type PendingReviewMenuAction = {
   action: ReviewMenuAction;

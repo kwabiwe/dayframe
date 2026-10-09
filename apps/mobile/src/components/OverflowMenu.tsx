@@ -3,9 +3,11 @@ import {
   AccessibilityInfo,
   Modal,
   Pressable,
+  ScrollView,
   Text,
   View,
-  findNodeHandle
+  findNodeHandle,
+  useWindowDimensions
 } from "react-native";
 import Reanimated, {
   Easing,
@@ -30,6 +32,7 @@ type RenderedPresentation = {
 type PresentationPhase = "idle" | "presenting" | "open" | "closing" | "dismissing";
 
 export function OverflowMenu({
+  bulkSkip = false,
   disabled,
   instanceId,
   onClose,
@@ -38,6 +41,8 @@ export function OverflowMenu({
   title,
   visible
 }: {
+  /** Shows the "Review all" bulk skips (the Review deck's card menu). */
+  bulkSkip?: boolean;
   disabled: boolean;
   instanceId: string | null;
   onClose: () => void;
@@ -48,6 +53,7 @@ export function OverflowMenu({
 }) {
   const { styles } = useMobileTheme();
   const insets = useSafeAreaInsets();
+  const { height: windowHeight } = useWindowDimensions();
   const reduceMotion = useReduceMotionPreference();
   const initialPresentation = visible && instanceId
     ? { id: instanceId, title, token: 1 }
@@ -248,27 +254,75 @@ export function OverflowMenu({
         />
         <Reanimated.View
           accessibilityLabel={`Actions for ${renderedPresentation.title}`}
-          style={[styles.overflowMenuSurface, menuStyle]}
+          style={[
+            styles.overflowMenuSurface,
+            // Never taller than the screen (the Review all rows at the largest text sizes): the
+            // actions scroll and Cancel stays visible.
+            { maxHeight: windowHeight - insets.top - Math.max(12, insets.bottom) - 24 },
+            menuStyle
+          ]}
         >
-          <Pressable
-            ref={firstActionRef}
-            accessibilityLabel="Edit details"
-            accessibilityRole="button"
-            disabled={disabled || !interactive}
-            style={pressable(styles.overflowMenuRow, styles.buttonPressed)}
-            onPress={() => select("edit")}
-          >
-            <Text style={styles.overflowMenuRowText}>Edit details</Text>
-          </Pressable>
+          <ScrollView alwaysBounceVertical={false} style={styles.overflowMenuScroll}>
+            <Pressable
+              ref={firstActionRef}
+              accessibilityLabel="Edit details"
+              accessibilityRole="button"
+              disabled={disabled || !interactive}
+              style={pressable(styles.overflowMenuRow, styles.buttonPressed)}
+              onPress={() => select("edit")}
+            >
+              <Text style={styles.overflowMenuRowText}>Edit details</Text>
+            </Pressable>
+            <View style={styles.overflowMenuDivider} />
+            <Pressable
+              accessibilityLabel="Dismiss suggestion"
+              accessibilityRole="button"
+              disabled={disabled || !interactive}
+              style={pressable(styles.overflowMenuRow, styles.buttonPressed)}
+              onPress={() => select("dismiss")}
+            >
+              <Text style={styles.overflowMenuDangerText}>Dismiss suggestion</Text>
+            </Pressable>
+            {bulkSkip ? (
+              <>
+                <View style={styles.overflowMenuDivider} />
+                <Text accessibilityRole="header" style={styles.overflowMenuSectionLabel}>Review all</Text>
+                <Pressable
+                  accessibilityHint="Asks before skipping every moment older than 7 days."
+                  accessibilityLabel="Skip older than 7 days"
+                  accessibilityRole="button"
+                  disabled={disabled || !interactive}
+                  style={pressable(styles.overflowMenuRow, styles.buttonPressed)}
+                  onPress={() => select("skip_older")}
+                  testID="review-menu-skip-older"
+                >
+                  <Text style={styles.overflowMenuRowText}>Skip older than 7 days</Text>
+                </Pressable>
+                <View style={styles.overflowMenuDivider} />
+                <Pressable
+                  accessibilityHint="Asks before skipping every moment waiting for review."
+                  accessibilityLabel="Skip all"
+                  accessibilityRole="button"
+                  disabled={disabled || !interactive}
+                  style={pressable(styles.overflowMenuRow, styles.buttonPressed)}
+                  onPress={() => select("skip_all")}
+                  testID="review-menu-skip-all"
+                >
+                  <Text style={styles.overflowMenuRowText}>Skip all</Text>
+                </Pressable>
+              </>
+            ) : null}
+          </ScrollView>
           <View style={styles.overflowMenuDivider} />
           <Pressable
-            accessibilityLabel="Dismiss suggestion"
+            accessibilityLabel="Cancel"
             accessibilityRole="button"
-            disabled={disabled || !interactive}
+            disabled={closing}
             style={pressable(styles.overflowMenuRow, styles.buttonPressed)}
-            onPress={() => select("dismiss")}
+            onPress={requestClose}
+            testID="overflow-menu-cancel"
           >
-            <Text style={styles.overflowMenuDangerText}>Dismiss suggestion</Text>
+            <Text style={styles.overflowMenuCancelText}>Cancel</Text>
           </Pressable>
         </Reanimated.View>
       </View>

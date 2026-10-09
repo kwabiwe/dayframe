@@ -93,8 +93,8 @@ describe("Review deck motion contract (Blocks parity step 5b)", () => {
     expect(screen).toContain("orderReviewDeck(ordered, returnKey ?? focusKey ?? stickyKey)");
   });
 
-  it("counts Dismiss and a saved edit as this visit's own decisions for the celebration (r4 5)", () => {
-    expect(screen.match(/ownDeckDecisionKeys\.current\.add\(reviewFocusKey\("review", (item|editTarget\.item)\.id\)\)/g)?.length).toBe(2);
+  it("counts Dismiss, a saved edit and a bulk skip as this visit's own decisions for the celebration (r4 5, 5f)", () => {
+    expect(screen.match(/ownDeckDecisionKeys\.current\.add\(reviewFocusKey\("review", (item|editTarget\.item)\.id\)\)/g)?.length).toBe(3);
   });
 
   it("saves a paged-out held card, keeps Undo reachable and drops the tilt with Reduce Motion (r5)", () => {
@@ -152,6 +152,44 @@ describe("Review deck live Log as (Blocks parity step 5c-1)", () => {
     expect(deck).toContain("const top = depth === 0 && !flying && !locked;");
     expect(deck).toContain("locked={topFlying && !flying}");
     expect(deck).toContain("const sizingCard = visible[topFlying ? 1 : 0] ?? visible[0];");
+  });
+
+  it("holds a bulk skip as one decision with one Undo, through the same hold as a throw (5f)", () => {
+    const menu = source("../OverflowMenu.tsx");
+    expect(menu).toContain(">Skip older than 7 days</Text>");
+    expect(menu).toContain(">Skip all</Text>");
+    expect(screen).toContain("<OverflowMenu\n        bulkSkip");
+    // One hold for single cards and batches: a throw saves a held batch first, leaving saves it.
+    expect(screen).toContain('kind: "batch",');
+    expect(screen).toMatch(/if \(held\.kind === "batch"\) \{\s*commitHeldBulkSkip\(held\);/);
+    expect(screen).toMatch(/if \(held\.kind === "batch"\) \{\s*undoHeldBulkSkip\(held\);/);
+    // Every card the batch covers is hidden while held, even the one on top.
+    expect(screen).toContain('heldDeckDecision?.kind === "batch" || key !== flyingDeckKey');
+    // Skip once only: never Log, never a rule.
+    expect(screen).toContain('mutation: hasV2LocationEvidence(item) ? { action: "ignore_once_location" } : { action: "ignore_once" },');
+    // Saved through runReviewBulkSkip (behaviour in reviewBulkSkip.run.test.ts), fenced to the
+    // account that held it; nothing is put back once the account changed.
+    expect(screen).toContain("await runReviewBulkSkip<MobileReviewItem>(claimed, {");
+    expect(screen).toMatch(/\/\/ Nothing is put back once the account has changed\.\s*if \(!ownerMatches\(\)\) return;/);
+    // The batch is bound to the account that held it: the hold end and Undo are both fenced, and
+    // remembered cards are forgotten when another account's data arrives.
+    expect(screen).toContain("owner: { workspaceId: loaded.workspace.id, userId: loaded.user.id },");
+    expect(screen).toContain("const ownerMatches = () => reviewBulkSkipOwnerMatches(held.owner, dataRef.current);");
+    expect(screen).toMatch(/if \(!reviewBulkSkipOwnerMatches\(held\.owner, dataRef\.current\)\) return;\s*for \(const item of held\.items\) restorePagedOutDeckItem/);
+    expect(screen).toMatch(/reviewBacklogRef\.current = null;\s*\/\/ Cards the deck remembers[^\n]*\n\s*knownDeckItems\.clear\(\);/);
+    // Remembered cards are tagged with their account and read back only for it (behaviour in
+    // reviewKnownItems.test.ts), so a late effect after an account change cannot leak one.
+    expect(screen).toContain("knownDeckItems.remember(item, deckOwnerKey);");
+    expect(screen).toContain("return knownDeckItems.get(itemId, dataRef.current);");
+    expect(screen).not.toMatch(/knownDeckItems\.current/);
+    // A single decision whose flush saved the same item through a batch stops there.
+    expect(screen).toMatch(/deckHold\.flush\(\);\s*\/\/ That flush may have saved this very item[^\n]*\n\s*if \(reviewMutations\.current\.has\(item\.id\)\) return false;/);
+    // The longer menu stays inside the screen with a visible Cancel.
+    expect(menu).toContain("maxHeight: windowHeight - insets.top");
+    expect(menu).toContain(">Cancel</Text>");
+    // One confirmation that states the count, after older pages are read.
+    expect(screen).toContain("reviewBulkSkipConfirmation(candidates.length, scope, complete)");
+    expect(screen).toContain("await inFlight.done;");
   });
 
 });
