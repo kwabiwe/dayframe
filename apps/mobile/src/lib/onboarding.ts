@@ -17,8 +17,20 @@ export const ONBOARDING_PROGRESS: readonly { step: OnboardingStep; color: Dayfra
 export type LocationChoice = "always" | "while" | "off";
 export type MotionChoice = "on" | "off" | "unavailable";
 
-/** The account's visit and journey suggestions (consent), separate from iOS permission. */
-export type SuggestionsState = "on" | "off" | "failed";
+/**
+ * The account's visit and journey suggestions, separate from iOS permission: "on" only while
+ * capture is actually running; "paused" when the consent is saved but capture isn't running
+ * (an interrupted switch-on; Settings calls it Retry capture).
+ */
+export type SuggestionsState = "on" | "off" | "paused" | "failed";
+
+/** Reads the account's suggestions from Location diagnostics (consent plus the capture state). */
+export function suggestionsStateFrom(diagnostics: { locationLearningEnabled?: boolean; locationLearningCaptureState?: string } | null | undefined): SuggestionsState {
+  if (!diagnostics?.locationLearningEnabled) return "off";
+  if (diagnostics.locationLearningCaptureState === "active") return "on";
+  if (diagnostics.locationLearningCaptureState === "inactive") return "paused";
+  return "off";
+}
 
 export type OnboardingAnswers = {
   location: LocationChoice | null;
@@ -63,6 +75,7 @@ export function locationResultText(choice: LocationChoice, suggestions: Suggesti
   switch (choice) {
     case "always":
       if (suggestions === "failed") return "Suggestions couldn't be switched on. Try again, or turn them on later in Settings.";
+      if (suggestions === "paused") return "Suggestions are on, but location capture isn't running. Retry to start it.";
       if (suggestions === "off") return "iOS allows Always. Turn on suggestions to see visits and journeys in Review.";
       return "Location is on, including when your phone is locked.";
     case "while":
@@ -96,7 +109,9 @@ export function onboardingSummary(answers: OnboardingAnswers): OnboardingSummary
       detail: answers.location === "always"
         ? answers.suggestions === "on"
           ? "Always, including locked"
-          : answers.suggestions === "failed" ? "Suggestions couldn't be switched on" : "Suggestions are off"
+          : answers.suggestions === "failed"
+            ? "Suggestions couldn't be switched on"
+            : answers.suggestions === "paused" ? "Capture paused, retry in Settings" : "Suggestions are off"
         : answers.location === "while"
           ? "Suggestions need Always"
           : "Visits and journeys are off"

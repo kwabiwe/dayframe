@@ -10,7 +10,8 @@ import {
   onboardingChrome,
   onboardingProgressDone,
   onboardingSummary,
-  previousOnboardingStep
+  previousOnboardingStep,
+  suggestionsStateFrom
 } from "./onboarding";
 
 describe("onboarding steps", () => {
@@ -67,5 +68,16 @@ describe("onboarding answers", () => {
     expect(notOptedIn).toMatchObject({ state: "later", detail: "Suggestions are off" });
     const [failed] = onboardingSummary({ ...EMPTY_ONBOARDING_ANSWERS, location: "always", suggestions: "failed" });
     expect(failed).toMatchObject({ state: "later", detail: "Suggestions couldn't be switched on" });
+  });
+
+  it("calls suggestions on only while capture runs; saved consent with capture stopped is paused (Codex r2)", () => {
+    expect(suggestionsStateFrom({ locationLearningEnabled: true, locationLearningCaptureState: "active" })).toBe("on");
+    expect(suggestionsStateFrom({ locationLearningEnabled: true, locationLearningCaptureState: "inactive" })).toBe("paused");
+    expect(suggestionsStateFrom({ locationLearningEnabled: true, locationLearningCaptureState: "logout_cleanup" })).toBe("off");
+    expect(suggestionsStateFrom({ locationLearningEnabled: false, locationLearningCaptureState: "off" })).toBe("off");
+    expect(suggestionsStateFrom(null)).toBe("off");
+    expect(locationResultText("always", "paused")).toMatch(/capture isn't running/);
+    const [paused] = onboardingSummary({ ...EMPTY_ONBOARDING_ANSWERS, location: "always", suggestions: "paused" });
+    expect(paused).toMatchObject({ state: "later", detail: "Capture paused, retry in Settings" });
   });
 });

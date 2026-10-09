@@ -33,8 +33,8 @@ describe("onboarding contract (Blocks 8-1a)", () => {
   });
 
   it("decides suggestions from the account's own consent, and offers it when Always was already allowed", () => {
-    expect(screen).toContain("enabled = (await getLocationVisitDiagnostics()).locationLearningEnabled === true;");
-    expect(screen).toContain("suggestions: diagnostics?.locationLearningEnabled ?");
+    expect(screen).toContain('enabled = suggestionsStateFrom(await getLocationVisitDiagnostics()) === "on";');
+    expect(screen).toContain("suggestions: diagnostics ? suggestionsStateFrom(diagnostics)");
     expect(screen).toContain('testID="onboarding-suggestions-on"');
   });
 
@@ -47,6 +47,8 @@ describe("onboarding contract (Blocks 8-1a)", () => {
   it("fences late answers by session, not only by account", () => {
     expect(screen).toContain("subscribeAuthenticatedSession(bump)");
     expect(screen).toContain("subscribeMobileSignedOut(bump)");
+    // Covered by another page: a pending answer no longer applies.
+    expect(screen).toMatch(/useFocusEffect\(useCallback\(\(\) => \(\) => \{\n    sessionEpoch.current \+= 1;/);
   });
 
   it("never starts a timer or writes time", () => {

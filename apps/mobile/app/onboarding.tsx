@@ -6,7 +6,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { AccessibilityInfo, Pressable, ScrollView, StyleSheet, Text, View, findNodeHandle } from "react-native";
 import * as Location from "expo-location";
-import { router } from "expo-router";
+import { router, useFocusEffect } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
 import Reanimated, {
   ReduceMotion,
@@ -35,6 +35,7 @@ import {
   locationChoiceFromPermissions,
   locationResultText,
   motionResultText,
+  suggestionsStateFrom,
   nextOnboardingStep,
   onboardingChrome,
   onboardingProgressDone,
@@ -77,6 +78,11 @@ export default function OnboardingScreen() {
     };
   }, []);
 
+  // Covered by another page (or left): an answer still in flight no longer applies.
+  useFocusEffect(useCallback(() => () => {
+    sessionEpoch.current += 1;
+  }, []));
+
   // A new step starts at its top (the scroll view is keyed by step) and VoiceOver moves to its heading.
   useEffect(() => {
     const handle = findNodeHandle(titleRef.current);
@@ -102,7 +108,7 @@ export default function OnboardingScreen() {
         ...current,
         location: current.location ?? (location === "while" ? null : location),
         // This account's own choice: Always on the phone doesn't mean this account turned suggestions on.
-        suggestions: diagnostics?.locationLearningEnabled ? "on" : current.suggestions,
+        suggestions: diagnostics ? suggestionsStateFrom(diagnostics) : current.suggestions,
         // While Using is already given: the Location step opens at the Always explainer.
         locationStage: location === "while" ? "upgrade" : current.locationStage,
         motion: current.motion ?? motionChoiceFrom(motion, false)
@@ -185,8 +191,8 @@ export default function OnboardingScreen() {
       if (!(await stillHere(epoch))) return;
       await setLocationLearningEnabled(true, data.places, { userId: data.user.id, workspaceId: data.workspace.id });
       if (!(await stillHere(epoch))) return;
-      // The account's own consent decides, not the call's wording.
-      enabled = (await getLocationVisitDiagnostics()).locationLearningEnabled === true;
+      // The account's own consent and a running capture decide, not the call's wording.
+      enabled = suggestionsStateFrom(await getLocationVisitDiagnostics()) === "on";
     } catch (error) {
       if (error instanceof AuthRequiredError) {
         if (mounted.current && epoch === sessionEpoch.current) router.replace("/");
@@ -453,7 +459,7 @@ function StepActions({
       <>
         <PrimaryButton
           busy={busy}
-          label={answers.suggestions === "failed" ? "Try again" : "Turn on suggestions"}
+          label={answers.suggestions === "failed" ? "Try again" : answers.suggestions === "paused" ? "Retry capture" : "Turn on suggestions"}
           onPress={onTurnOnSuggestions}
           testID="onboarding-suggestions-on"
           theme={theme}
