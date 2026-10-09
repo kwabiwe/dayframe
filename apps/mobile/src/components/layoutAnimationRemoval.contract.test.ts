@@ -33,9 +33,12 @@ describe("no inert LayoutAnimation", () => {
     expect(offenders).toEqual([]);
   });
 
-  it("gives the Location troubleshooting disclosure the shared Reanimated presence", () => {
-    // Sync help (step 6a-2) has no disclosure any more; the Location page keeps one.
+  it("opens Apple Health's per-type rows with the shared Reanimated presence and layout (6a-3)", () => {
+    // Sync help (6a-2) and the Location page (6a-3) have no disclosure any more.
     const settings = readFileSync(join(mobileRoot, "app/settings.tsx"), "utf8");
-    expect(settings).toMatch(/\{showLocationTroubleshooting \? \(\s*<Reanimated\.View\s+entering=\{localPresenceEntering\(reduceMotion\)\}\s+exiting=\{localPresenceExiting\(reduceMotion\)\}\s+layout=\{localLayoutTransition\(reduceMotion\)\}/);
+    expect(settings).toMatch(/\{enabled \? \(\s*<Reanimated\.View\s+entering=\{localPresenceEntering\(reduceMotion\)\}\s+exiting=\{localPresenceExiting\(reduceMotion\)\}/);
+    expect(settings).toContain("<Reanimated.View key={option.key} layout={localLayoutTransition(reduceMotion)}>");
+    expect(settings).toContain("<Reanimated.View key={group.title} layout={localLayoutTransition(reduceMotion)}>");
+    expect(settings).not.toContain("showLocationTroubleshooting");
   });
 });

@@ -53,7 +53,7 @@ Dayframe includes a bounded Health debug export in Settings for evidence-led inv
 Expected path:
 
 ```text
-Settings -> Apple Health -> Export debug
+Settings -> Something not syncing? (Sync help) -> Share Apple Health details
 ```
 
 The export should include:

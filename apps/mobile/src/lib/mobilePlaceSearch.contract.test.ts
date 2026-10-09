@@ -52,9 +52,11 @@ describe("mobile place editor contract", () => {
 
 describe("compact location settings contract", () => {
   it("hides internal rollout details from ordinary rendered copy", () => {
-    expect(settingsSource).toContain("Location suggestions");
-    expect(settingsSource).toContain("Privacy & troubleshooting");
-    expect(settingsSource).toContain("Share diagnostics");
+    // Blocks 6a-3: the Location page is plain grouped rows; capture details are shared from Sync help.
+    expect(settingsSource).toContain('title="Suggest visits and commutes"');
+    expect(settingsSource).toContain('title="Share location details"');
+    expect(settingsSource).not.toContain("HTTP: {attempt.details.httpStatus");
+    expect(settingsSource).not.toContain("Privacy & troubleshooting");
     expect(settingsSource).not.toContain(">Engine rollout<");
     expect(settingsSource).not.toContain(">V2 shadow<");
     expect(settingsSource).not.toContain(">Copy diagnostics<");

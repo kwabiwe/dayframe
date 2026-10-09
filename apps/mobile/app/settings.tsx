@@ -3,10 +3,9 @@ import { mobileBuildDiagnostics } from "@/lib/mobileBuildDiagnostics";
 import { supportQueueDiagnostics } from "@/lib/supportSyncDiagnostics";
 import { readActiveMobileAccount, mobileAccountOwnersEqual } from "@/lib/mobileAccount";
 import { synchroniseDeviceNow, getLastManualSyncResult } from "@/lib/manualSyncRuntime";
-import { manualSyncSummary } from "@/lib/syncCoordinator";
 import { createOwnerSyncCoalescer } from "@/lib/ownerSyncCoalescer";
 import { subscribeRecoveredDashboardBootstrap } from "@/lib/dashboardBootstrapChannel";
-import { useCallback, useEffect, useRef, useState, type ReactNode, type SetStateAction } from "react";
+import { useCallback, useEffect, useRef, useState, type SetStateAction } from "react";
 import {
   Alert,
   AppState,
@@ -19,7 +18,6 @@ import {
   RefreshControl,
   ScrollView,
   Share,
-  Switch,
   Text,
   TextInput,
   View
@@ -38,6 +36,8 @@ import {
   localPresenceExiting,
   useReduceMotionPreference
 } from "@/lib/motion";
+import { ActivityPickerSheet } from "@/components/ActivityPickerSheet";
+import { healthSyncNote, mergeHealthStatuses } from "@/lib/healthSyncNote";
 import { setHapticsEnabled, useHapticsPreference } from "@/lib/haptics";
 import {
   DAYFRAME_PALETTE,
@@ -84,6 +84,7 @@ import {
   getHealthImportPreferences,
   getHealthImportStatus,
   HEALTH_IMPORT_PREFERENCE_OPTIONS,
+  isHealthKitAutomaticSyncEnabled,
   reprocessExistingHealthReviewItems,
   requestHealthKitPermissions,
   setHealthAutoLogMapping,
@@ -92,7 +93,6 @@ import {
 } from "@/lib/health";
 import {
   pressable,
-  themeOptions,
   useMobileTheme,
   type MobileStyles,
   type MobileTheme
@@ -122,8 +122,6 @@ import {
   SettingsStepper,
   SettingsSwitch
 } from "@/components/settings/SettingsBlocks";
-import { recordMobileLayout, recordMobileTextLayout } from "@/components/accessibility/diagnostics";
-import type { MobileAccessibilityDiagnostic } from "@/components/accessibility/diagnostics";
 import { drainNativeShortcutQueue, syncShortcutCatalog } from "@/lib/shortcuts";
 import {
   configureLocationIntelligence,
@@ -131,8 +129,7 @@ import {
 } from "@/lib/location/runtime";
 import {
   getLocationStoreDiagnostics,
-  recordLocationStoreError,
-  type LocationStoreDiagnostics
+  recordLocationStoreError
 } from "@/lib/location/store";
 import { getLocationReviewEvidencePrefetchDiagnostics } from "@/lib/locationReviewEvidenceCache";
 import { motionFitnessPresentation, readMotionFitnessStatus, requestMotionFitness } from "@/lib/location/motionPermission";
@@ -176,8 +173,7 @@ const SETTINGS_THEME_OPTIONS = [
   { label: "System", value: "system" }
 ] as const;
 
-type SettingsSection = "index" | "profile" | "categories" | "automations" | "health" | "sync" | "appearance";
-type SettingsIcon = "profile" | "categories" | "automations" | "health" | "sync" | "appearance" | "review";
+type SettingsSection = "index" | "profile" | "categories" | "automations" | "health" | "sync";
 
 function healthAutomaticCategoryKinds(preferences: HealthImportPreferences) {
   const kinds: Array<"sleep" | "health"> = [];
@@ -192,7 +188,6 @@ type SettingsSnapshot = {
   data: MobileBootstrap | null;
   queue: QueuedEvent[];
   lastSyncResult: SyncQueueResult | null;
-  syncStatusMessage: string | null;
   locationStatus: string;
   locationDiagnostics: LocationVisitDiagnostics | null;
   healthStatus: HealthImportStatus[];
@@ -210,7 +205,6 @@ function defaultSettingsSnapshot(): SettingsSnapshot {
     data: null,
     queue: [],
     lastSyncResult: null,
-    syncStatusMessage: null,
     locationStatus: "Not requested",
     locationDiagnostics: null,
     healthStatus: [],
@@ -275,7 +269,6 @@ export default function SettingsScreen() {
   const [lastSyncResult, setLastSyncResult] = useState<SyncQueueResult | null>(cachedSnapshot?.lastSyncResult ?? null);
   const [syncingQueue, setSyncingQueue] = useState(false);
   const [signingOut, setSigningOut] = useState(false);
-  const [syncStatusMessage, setSyncStatusMessage] = useState<string | null>(cachedSnapshot?.syncStatusMessage ?? null);
   const [reviewSyncDiagnostics, setReviewSyncDiagnostics] =
     useState<ReviewSyncDiagnostics | null>(null);
   const [reviewSyncIssues, setReviewSyncIssues] = useState<
@@ -293,7 +286,6 @@ export default function SettingsScreen() {
   const [timerStopSyncIssues, setTimerStopSyncIssues] = useState<
     Awaited<ReturnType<typeof listTimerStopSyncIssues>>
   >([]);
-  const [showLocationTroubleshooting, setShowLocationTroubleshooting] = useState(false);
   const [locationInfoSheet, setLocationInfoSheet] = useState<"places" | "suggestions" | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   const [locationStatus, setLocationStatus] = useState(cachedSnapshot?.locationStatus ?? "Not requested");
@@ -301,7 +293,6 @@ export default function SettingsScreen() {
     cachedSnapshot?.locationDiagnostics ?? null
   );
   const [motionFitnessStatus, setMotionFitnessStatus] = useState<DayframeMotionAuthorizationStatus | null>(null);
-  const [locationV2Diagnostics, setLocationV2Diagnostics] = useState<LocationStoreDiagnostics | null>(null);
   const [nativeLocationStatus, setNativeLocationStatus] = useState<{
     authorizationStatus: string;
     accuracyAuthorization: string;
@@ -320,7 +311,9 @@ export default function SettingsScreen() {
   const [healthAutoLogMappings, setHealthAutoLogMappings] = useState<HealthAutoLogMappings>(
     cachedSnapshot?.healthAutoLogMappings ?? {}
   );
-  const [healthDebugStatus, setHealthDebugStatus] = useState<string | null>(null);
+  // Settings › Apple Health: the last Sync now result (never cached).
+  const [healthSyncNoteText, setHealthSyncNote] = useState<string | null>(null);
+  const [healthAccessGranted, setHealthAccessGranted] = useState<boolean | null>(null);
   const [exportingHealthDebug, setExportingHealthDebug] = useState(false);
   const [newCategoryName, setNewCategoryName] = useState("");
   const [newCategoryColor, setNewCategoryColor] = useState<DayframePaletteKey>("lime");
@@ -362,7 +355,6 @@ export default function SettingsScreen() {
 
   useEffect(() => {
     Keyboard.dismiss();
-    setShowLocationTroubleshooting(false);
     setLocationInfoSheet(null);
     settingsScrollOffsetRef.current = 0;
     const frame = requestAnimationFrame(() => {
@@ -395,13 +387,6 @@ export default function SettingsScreen() {
     });
   }, []);
 
-  const setSyncStatusMessageAndCache = useCallback((action: SetStateAction<string | null>) => {
-    setSyncStatusMessage((current) => {
-      const next = resolveStateAction(action, current);
-      updateSettingsSnapshot({ syncStatusMessage: next });
-      return next;
-    });
-  }, []);
 
   const setHealthStatusAndCache = useCallback((action: SetStateAction<HealthImportStatus[]>) => {
     setHealthStatus((current) => {
@@ -590,15 +575,20 @@ export default function SettingsScreen() {
     if (settingsSection !== "index" && settingsSection !== "health") return;
     if (settingsSection === "index" && isSettingsHealthSnapshotFresh()) return;
 
-    getHealthImportStatus().then(setHealthStatusAndCache).catch(() => {
-      setHealthStatusAndCache([
-        {
-          provider: "healthkit",
-          status: "error",
-          notes: "Unable to check Apple Health status."
-        }
-      ]);
-    });
+    // Availability is re-read here; the connection record from Connect is kept (mergeHealthStatuses).
+    getHealthImportStatus()
+      .then((statuses) => setHealthStatusAndCache((current) => mergeHealthStatuses(current, statuses)))
+      .catch(() => {
+        setHealthStatusAndCache((current) => mergeHealthStatuses(current, [
+          {
+            provider: "healthkit",
+            status: "error",
+            notes: "Unable to check Apple Health status."
+          }
+        ]));
+      });
+    // iOS never reveals read access, so "Connected" means Dayframe's access request was accepted.
+    isHealthKitAutomaticSyncEnabled().then(setHealthAccessGranted).catch(() => undefined);
     getHealthImportPreferences().then(setHealthImportPreferencesAndCache).catch(() => undefined);
     getHealthAutoLogMappings().then(setHealthAutoLogMappingsAndCache).catch(() => undefined);
   }, [
@@ -628,8 +618,6 @@ export default function SettingsScreen() {
   const healthAvailability =
     healthStatus.find((item) => item.provider === "healthkit" && item.kind === "availability") ??
     healthStatus.find((item) => item.provider === "healthkit");
-  const sleepStatus = healthStatus.find((item) => item.provider === "healthkit" && item.kind === "sleep");
-  const workoutStatus = healthStatus.find((item) => item.provider === "healthkit" && item.kind === "workout");
   const healthPermissionStatus = healthStatus.find(
     (item) => item.provider === "healthkit" && item.kind === "permissions"
   );
@@ -651,7 +639,6 @@ export default function SettingsScreen() {
     : locationDiagnostics?.foregroundPermission === "denied"
       ? "Review access"
       : "Enable";
-  const backgroundAccessSummary = locationMonitoringAllowed ? "On" : "Needs attention";
   const motionFitness = motionFitnessStatus
     ? motionFitnessPresentation(motionFitnessStatus, locationDiagnostics?.locationLearningEnabled === true)
     : null;
@@ -715,6 +702,26 @@ export default function SettingsScreen() {
   const healthWorkoutSummary = healthImportPreferences
     ? `${healthWorkoutKeys.filter((option) => healthImportPreferences[option.key]).length} of ${healthWorkoutKeys.length}`
     : null;
+  // Settings › Location: the consent switch's plain state, kept apart from the iOS permission.
+  const locationSuggestionsDetail = locationDiagnostics?.locationLearningCaptureState === "logout_cleanup"
+    ? "Paused while signing out. Sign out again to finish."
+    : locationCaptureNeedsRetry
+      ? "Paused. Tap Retry capture above to restart it."
+      : locationDiagnostics?.locationLearningEnabled && !locationMonitoringAllowed
+        ? "On, but needs Always location access"
+        : locationDiagnostics?.locationLearningActive
+          ? "On. Anything uncertain waits in Review."
+          : "Off";
+  // Settings › Apple Health: one plain access line (the notes behind it stay in the details).
+  const healthConnected = healthAccessGranted === true || healthPermissionStatus?.status === "available";
+  const healthAccessSummary = healthAvailability?.status === "unavailable"
+    ? "Apple Health isn't available on this iPhone"
+    : healthConnected
+      ? "Connected"
+      : healthPermissionStatus
+        ? "Allow Dayframe in the Health app"
+        : "Not connected yet";
+  const [healthPickerKey, setHealthPickerKey] = useState<HealthImportPreferenceKey | null>(null);
 
   // Sync help: a short note about the page's own last action (never cached), cleared whenever the
   // page opens or what it lists changes, so it can't contradict the status above it.
@@ -948,13 +955,11 @@ export default function SettingsScreen() {
     }
   }
 
-  async function syncAndReload(options?: { syncingMessage?: string }) {
+  async function syncAndReload() {
     setSyncingQueue(true);
-    setSyncStatusMessageAndCache(options?.syncingMessage ?? "Syncing device data...");
     try {
       const result = await synchroniseDeviceNow({ date: data?.dateRange?.selectedDate });
       await refreshQueueLatest();
-      setSyncStatusMessageAndCache(manualSyncSummary(result));
       await Promise.all([refreshReviewDiagnostics(), refreshLocationV2Diagnostics(), refreshTimeEntryDiagnostics(), refreshTimerStopDiagnostics()]);
       return result;
     } catch (error) {
@@ -962,7 +967,6 @@ export default function SettingsScreen() {
         finishSignedOutNavigation();
         return null;
       }
-      setSyncStatusMessageAndCache(error instanceof Error ? error.message : "Unable to sync queued events.");
       return null;
     } finally {
       setSyncingQueue(false);
@@ -1015,7 +1019,6 @@ export default function SettingsScreen() {
     void retryTimeEntrySyncIssue(clientCommandId).then(
       (retried) => {
         void refreshTimeEntryDiagnostics().catch(() => undefined);
-        if (retried) setSyncStatusMessageAndCache("Retrying the saved time entry change...");
       },
       () => setSyncHelpNote("Couldn't retry that change. It's still saved on this iPhone.")
     );
@@ -1047,7 +1050,6 @@ export default function SettingsScreen() {
     void retryTimerStopSyncIssue(clientEventId).then(
       (retried) => {
         void refreshTimerStopDiagnostics().catch(() => undefined);
-        if (retried) setSyncStatusMessageAndCache("Retrying the saved timer Stop...");
       },
       () => setSyncHelpNote("Couldn't retry that Stop. It's still saved on this iPhone.")
     );
@@ -1095,12 +1097,10 @@ export default function SettingsScreen() {
 
   async function retryFailedAndReload() {
     setSyncingQueue(true);
-    setSyncStatusMessageAndCache("Retrying failed items...");
     try {
       const result = await retryFailedQueuedEvents();
       await refreshQueueLatest();
       setLastSyncResultAndCache(result);
-      setSyncStatusMessageAndCache(null);
       // Network failures and rejections come back in the result, not as errors.
       if (result.failedCount > 0 || result.firstError) {
         setSyncHelpNote("Some items still couldn't be sent. They're kept on this iPhone.");
@@ -1111,7 +1111,6 @@ export default function SettingsScreen() {
         finishSignedOutNavigation();
         return;
       }
-      setSyncStatusMessageAndCache(error instanceof Error ? error.message : "Unable to retry failed events.");
       setSyncHelpNote("Couldn't retry those items. They're still saved on this iPhone.");
     } finally {
       setSyncingQueue(false);
@@ -1140,12 +1139,9 @@ export default function SettingsScreen() {
       const result = await clearFailedQueuedEvents();
       await refreshQueueLatest();
       setLastSyncResultAndCache(null);
-      setSyncStatusMessageAndCache(
-        `${result.removedCount} failed queued ${result.removedCount === 1 ? "event was" : "events were"} removed. ${result.remainingCount} queued ${result.remainingCount === 1 ? "event remains" : "events remain"}.`
-      );
+      setSyncHelpNote(`Cleared ${result.removedCount} ${result.removedCount === 1 ? "item" : "items"} from this iPhone.`);
       await load({ silent: true });
     } catch (error) {
-      setSyncStatusMessageAndCache(error instanceof Error ? error.message : "Unable to clear failed events.");
       setSyncHelpNote("Couldn't clear those items. Nothing was removed.");
     }
   }
@@ -1215,7 +1211,6 @@ export default function SettingsScreen() {
       });
       await refreshQueueLatest();
     } catch (error) {
-      setSyncStatusMessageAndCache(error instanceof Error ? error.message : "Unable to export queue diagnostics.");
       setSyncHelpNote("Couldn't prepare the support details. Try again.");
     }
   }
@@ -1295,13 +1290,12 @@ export default function SettingsScreen() {
     try {
       const owner = await readActiveMobileAccount();
       const session = owner ? await readOwnedAuthenticatedSessionSnapshot(owner) : null;
-      const [local, native] = await Promise.all([
+      const [, native] = await Promise.all([
         getLocationStoreDiagnostics(),
         getNativeLocationIntelligenceStatus().catch(() => null)
       ]);
       if (!mobileAccountOwnersEqual(owner, await readActiveMobileAccount())) return;
       if (session?.status === "authenticated" && !isAuthenticatedSessionSnapshotCurrent(session.snapshot)) return;
-      setLocationV2Diagnostics(local);
       setNativeLocationStatus(native);
     } catch (error) {
       await recordLocationStoreError(error);
@@ -1399,26 +1393,31 @@ export default function SettingsScreen() {
     try {
       const permissions = await requestHealthKitPermissions();
       updateHealthStatus(permissions);
+      if (permissions.status === "available") setHealthAccessGranted(true);
       if (permissions.status === "available") {
         const preferences = healthImportPreferences ?? await getHealthImportPreferences();
         const kinds = healthAutomaticCategoryKinds(preferences);
         if (kinds.length > 0) await ensureAutomaticLoggingCategories(kinds);
-        await syncAppleHealth({ silent: true });
+        await syncAppleHealth({ silent: true, connected: true });
       }
     } catch (error) {
       Alert.alert("Apple Health", friendlyHealthKitError(error, "request Apple Health permission"));
     }
   }
 
-  async function syncAppleHealth(options?: { silent?: boolean }) {
+  async function syncAppleHealth(options?: { silent?: boolean; connected?: boolean }) {
+    setHealthSyncNote(null);
     try {
-      setSyncStatusMessageAndCache("Syncing Health data...");
-      await syncAndReload({ syncingMessage: "Syncing Health data..." });
-      setHealthStatusAndCache(await getHealthImportStatus());
+      const result = await syncAndReload();
+      const statuses = await getHealthImportStatus();
+      setHealthStatusAndCache((current) => mergeHealthStatuses(current, statuses));
+      // A returned result is not a successful one: the Health lanes say what this tap did.
+      // Connect passes connected: its grant is not yet in this render's healthConnected.
+      setHealthSyncNote(healthSyncNote(result, { connected: options?.connected ?? healthConnected }));
     } catch (error) {
       if (error instanceof AuthRequiredError) return;
       const message = friendlyHealthKitError(error, "sync Apple Health");
-      setSyncStatusMessageAndCache(message);
+      setHealthSyncNote(message);
       if (!options?.silent) {
         Alert.alert("Apple Health", message);
       }
@@ -1472,7 +1471,7 @@ export default function SettingsScreen() {
 
   async function exportAppleHealthDebug() {
     setExportingHealthDebug(true);
-    setHealthDebugStatus("Preparing Health debug export...");
+    setSyncHelpNote("Preparing Apple Health details…");
     try {
       const snapshot = await exportHealthDebugSnapshot();
       const summary =
@@ -1483,10 +1482,10 @@ export default function SettingsScreen() {
         title: `Dayframe Health debug ${snapshot.exportedAt}`,
         message: JSON.stringify(snapshot, null, 2)
       });
-      setHealthDebugStatus(summary);
+      setSyncHelpNote(summary);
     } catch (error) {
       const message = friendlyHealthKitError(error, "export Health debug data");
-      setHealthDebugStatus(message);
+      setSyncHelpNote(message);
       Alert.alert("Apple Health", message);
     } finally {
       setExportingHealthDebug(false);
@@ -1839,87 +1838,6 @@ export default function SettingsScreen() {
             </View>
           ) : null}
 
-          {settingsSection === "appearance" ? (
-            <View style={styles.appearanceStack}>
-              <Text {...mobileTextProps("body")} style={styles.appearanceIntro}>Choose how Dayframe follows your iPhone.</Text>
-              <View style={styles.segmentedControl}>
-                {themeOptions.map((option) => {
-                  const selected = option.value === themePreference;
-                  return (
-                    <Pressable
-                      accessibilityLabel={`${option.label} theme`}
-                      accessibilityRole="button"
-                      accessibilityState={{ selected }}
-                      key={option.value}
-                      style={pressable(
-                        [styles.segmentButton, selected ? styles.segmentButtonSelected : null],
-                        styles.buttonPressed
-                      )}
-                      onPress={() => setThemePreference(option.value)}
-                    >
-                      <Text {...mobileTextProps("control")} style={[styles.segmentButtonText, selected ? styles.segmentButtonTextSelected : null]}>
-                        {option.label}
-                      </Text>
-                    </Pressable>
-                  );
-                })}
-              </View>
-              <View style={styles.appearanceSelectionCard}>
-                <Text {...mobileTextProps("itemTitle")} style={styles.appearanceSelectionTitle}>
-                  {themePreference === "system" ? "System" : themePreference === "light" ? "Light" : "Dark"}
-                </Text>
-                <Text {...mobileTextProps("body")} style={styles.appearanceSelectionMeta}>
-                  {themePreference === "system"
-                    ? "Automatically matches iOS appearance."
-                    : themePreference === "light"
-                      ? "Uses the designed light companion throughout Dayframe."
-                      : "Uses Midnight Core throughout Dayframe."}
-                </Text>
-              </View>
-
-              <Text {...mobileTextProps("sectionHeading")} style={styles.appearanceSectionLabel}>Feedback</Text>
-              <View style={styles.healthPreferenceRow}>
-                <View style={styles.healthPreferenceHeader}>
-                  <View style={styles.healthPreferenceText}>
-                    <Text {...mobileTextProps("itemTitle")} style={styles.categoryName}>Haptics</Text>
-                    <Text {...mobileTextProps("body")} style={styles.categoryMeta}>
-                      A tap you can feel when you start, stop, delete or undo. Your iPhone's System Haptics setting still applies.
-                    </Text>
-                  </View>
-                  <Switch
-                    style={{ flexShrink: 0 }}
-                    accessibilityLabel="Haptics"
-                    value={hapticsEnabled}
-                    onValueChange={(enabled) => {
-                      void setHapticsEnabled(enabled).catch(() => undefined);
-                    }}
-                    trackColor={{ false: theme.borderStrong, true: theme.accent }}
-                    thumbColor={hapticsEnabled ? theme.onAccent : theme.surfaceRaised}
-                    ios_backgroundColor={theme.borderStrong}
-                  />
-                </View>
-              </View>
-
-              <Text {...mobileTextProps("sectionHeading")} style={styles.appearanceSectionLabel}>Preview</Text>
-              <View style={styles.appearancePreviewRow}>
-                <AppearancePreviewCard mode="light" selected={themePreference === "light"} styles={styles} />
-                <AppearancePreviewCard mode="dark" selected={themePreference === "dark"} styles={styles} />
-              </View>
-
-              <Text {...mobileTextProps("sectionHeading")} style={styles.appearanceSectionLabel}>Display details</Text>
-              <View style={styles.appearanceDetailsCard}>
-                <View style={styles.appearanceDetailRow}>
-                  <Text {...mobileTextProps("itemTitle")} style={styles.appearanceDetailTitle}>Midnight Core</Text>
-                  <Text {...mobileTextProps("metadata")} style={styles.appearanceDetailMeta}>Always preserved</Text>
-                </View>
-                <View style={[styles.appearanceDetailRow, styles.appearanceDetailDivider]}>
-                  <Text {...mobileTextProps("itemTitle")} style={styles.appearanceDetailTitle}>Colour logo</Text>
-                  <Text {...mobileTextProps("metadata")} style={styles.appearanceDetailMeta}>Never recoloured</Text>
-                </View>
-              </View>
-            </View>
-          ) : null}
-
           {settingsSection === "categories" ? (
           <View style={styles.panel}>
             <View style={styles.categoryList}>
@@ -2156,69 +2074,40 @@ export default function SettingsScreen() {
           ) : null}
 
           {settingsSection === "profile" ? (
-          <View style={styles.panel}>
-            <Text {...mobileTextProps("sectionHeading")} style={styles.sectionTitle}>Account</Text>
-            {data?.user || data?.workspace ? (
-              <View style={styles.accountList}>
-                {data.user ? (
-                  <View style={styles.accountRow}>
-                    <Text {...mobileTextProps("metadata")} style={styles.label}>Signed in as</Text>
-                    <Text {...mobileTextProps("body")} style={styles.accountValue}>
-                      {data.user.name || data.user.email}
-                    </Text>
-                    <Text {...mobileTextProps("body")} style={styles.accountMeta}>{data.user.email}</Text>
-                  </View>
-                ) : null}
-                {data.workspace ? (
-                  <View style={styles.accountRow}>
-                    <Text {...mobileTextProps("metadata")} style={styles.label}>Workspace</Text>
-                    <Text {...mobileTextProps("body")} style={styles.accountValue}>{data.workspace.name}</Text>
-                  </View>
-                ) : null}
-              </View>
-            ) : null}
-            <View style={styles.buttonRow}>
-              <Pressable
-                accessibilityState={{ disabled: signingOut }}
-                disabled={signingOut}
-                style={pressable(
-                  [styles.secondaryButton, signingOut ? styles.buttonDisabled : null],
-                  styles.buttonPressed
-                )}
-                onPress={signOut}
+            <View style={styles.settingsBlocksStack}>
+              <SettingsBlockGroup
+                foot="Change your name, password or workspace on the web."
+                theme={theme}
+                title="Signed in as"
               >
-                <Text {...mobileTextProps("control")} style={styles.secondaryButtonText}>
-                  {signingOut ? "Logging out..." : "Log out"}
+                <SettingsBlockRow
+                  divider={false}
+                  subtitle={data?.user.email ?? null}
+                  testID="settings-account-user"
+                  theme={theme}
+                  title={data?.user.name || data?.user.email || "Your account"}
+                />
+                <SettingsBlockRow
+                  // A row without onPress shows no value column, so the name is the subtitle.
+                  subtitle={workspaceLabel}
+                  testID="settings-account-workspace"
+                  theme={theme}
+                  title="Workspace"
+                />
+              </SettingsBlockGroup>
+              <Pressable
+                accessibilityRole="button"
+                accessibilityState={{ disabled: signingOut, busy: signingOut }}
+                disabled={signingOut}
+                onPress={signOut}
+                style={({ pressed }) => [styles.settingsSignOut, pressed ? styles.buttonPressed : null]}
+                testID="settings-account-sign-out"
+              >
+                <Text {...mobileTextProps("control")} style={styles.settingsSignOutText}>
+                  {signingOut ? "Signing out…" : "Sign out"}
                 </Text>
               </Pressable>
             </View>
-          </View>
-          ) : null}
-
-          {settingsSection === "automations" ? (
-          <>
-          <View style={styles.panel}>
-            <View style={styles.healthPreferenceHeader}>
-              <Text {...mobileTextProps("sectionHeading")} style={styles.sectionTitle}>Places</Text>
-              <InfoButton
-                accessibilityLabel="About saved places"
-                onPress={() => setLocationInfoSheet("places")}
-                styles={styles}
-                theme={theme}
-              />
-            </View>
-            <Text {...mobileTextProps("body")} style={styles.muted}>Save locations Dayframe should recognise.</Text>
-            <View style={styles.buttonRow}>
-              <Pressable
-                accessibilityRole="button"
-                style={pressable(styles.secondaryButton, styles.buttonPressed)}
-                onPress={() => router.push("./places")}
-              >
-                <Text {...mobileTextProps("control")} style={styles.secondaryButtonText}>Manage places</Text>
-              </Pressable>
-            </View>
-          </View>
-          </>
           ) : null}
 
           {settingsSection === "sync" ? (
@@ -2348,292 +2237,244 @@ export default function SettingsScreen() {
                   theme={theme}
                   title="Copy details for support"
                 />
+                <SettingsBlockRow
+                  onPress={() => void shareLocationDiagnostics()}
+                  subtitle="How location capture is running, without places or points"
+                  testID="sync-help-location"
+                  theme={theme}
+                  title="Share location details"
+                />
+                <SettingsBlockRow
+                  onPress={() => void exportAppleHealthDebug()}
+                  subtitle={exportingHealthDebug ? "Preparing…" : "Includes your Apple Health samples. Share only with support."}
+                  testID="sync-help-health"
+                  theme={theme}
+                  title="Share Apple Health details"
+                />
               </SettingsBlockGroup>
             </View>
           ) : null}
 
           {settingsSection === "automations" ? (
-          <View style={styles.panel}>
-            <View style={styles.healthPreferenceHeader}>
-              <Text {...mobileTextProps("sectionHeading")} style={styles.sectionTitle}>Location suggestions</Text>
-              <InfoButton
-                accessibilityLabel="How location suggestions work"
-                onPress={() => setLocationInfoSheet("suggestions")}
-                styles={styles}
+            <View style={styles.settingsBlocksStack}>
+              <SettingsBlockGroup
+                foot="Always access lets Dayframe notice visits while it's closed. iOS can still pause it at times."
                 theme={theme}
-              />
-            </View>
-            <View style={styles.healthPreferenceRow}>
-              <View style={styles.healthPreferenceHeader}>
-                <View style={styles.healthPreferenceText}>
-                  <Text {...mobileTextProps("itemTitle")} style={styles.categoryName}>Suggest visits and journeys</Text>
-                  <Text {...mobileTextProps("body")} style={styles.categoryMeta}>
-                    {locationDiagnostics?.locationLearningCaptureState === "logout_cleanup"
-                      ? "Capture is paused. Retry signing out to finish local cleanup."
-                      : locationDiagnostics?.locationLearningEnabled && !locationDiagnostics.locationLearningActive
-                      ? "Consent is saved. Capture is inactive; retry below."
-                      : locationDiagnostics?.locationLearningActive
-                      ? "Background location can create suggestions in Review."
-                      : "Location suggestions are off."}
-                  </Text>
-                </View>
-                <Switch
-                  style={{ flexShrink: 0 }}
-                  accessibilityLabel="Commute and regular-place learning"
-                  accessibilityHint="Saves consent for this account. Capture status is shown beside this switch."
-                  value={locationDiagnostics?.locationLearningEnabled ?? false}
-                  onValueChange={toggleLocationLearning}
-                  trackColor={{ false: theme.borderStrong, true: theme.accent }}
-                  thumbColor={locationDiagnostics?.locationLearningEnabled ? theme.onAccent : theme.surfaceRaised}
-                  ios_backgroundColor={theme.borderStrong}
-                />
-              </View>
-            </View>
-            <Text {...mobileTextProps("body")} style={styles.statusText}>Background access: {backgroundAccessSummary}</Text>
-            <View style={styles.buttonRow}>
-              <Pressable style={pressable(styles.secondaryButton, styles.buttonPressed)} onPress={enableLocation}>
-                <Text {...mobileTextProps("control")} style={styles.secondaryButtonText}>{locationActionLabel}</Text>
-              </Pressable>
-            </View>
-            <Reanimated.View layout={localLayoutTransition(reduceMotion)} style={styles.healthPreferenceRow}>
-              <View style={styles.healthPreferenceText}>
-                <Text {...mobileTextProps("itemTitle")} style={styles.categoryName}>Motion & Fitness</Text>
-                <Text {...mobileTextProps("body")} style={styles.categoryMeta}>
-                  {motionFitness ? `${motionFitness.label} · ${motionFitness.detail}` : "Checking…"}
-                </Text>
-              </View>
-              {motionFitness?.action ? (
-                <Reanimated.View
-                  entering={localPresenceEntering(reduceMotion)}
-                  exiting={localPresenceExiting(reduceMotion)}
-                  style={styles.buttonRow}
-                >
-                  <Pressable
-                    accessibilityRole="button"
-                    style={pressable(styles.secondaryButton, styles.buttonPressed)}
-                    onPress={() => void handleMotionFitnessAction()}
-                  >
-                    <Text {...mobileTextProps("control")} style={styles.secondaryButtonText}>{motionFitness.action.label}</Text>
-                  </Pressable>
-                </Reanimated.View>
-              ) : null}
-            </Reanimated.View>
-            <Pressable
-              accessibilityRole="button"
-              accessibilityState={{ expanded: showLocationTroubleshooting }}
-              style={pressable(styles.detailsToggle, styles.buttonPressed)}
-              onPress={() => {
-                setShowLocationTroubleshooting((current) => !current);
-              }}
-            >
-              <Text {...mobileTextProps("control")} style={styles.detailsToggleText}>Privacy & troubleshooting</Text>
-              <DisclosureChevronGlyph color={theme.textSecondary} expanded={showLocationTroubleshooting} />
-            </Pressable>
-            {showLocationTroubleshooting ? (
-              <Reanimated.View
-                entering={localPresenceEntering(reduceMotion)}
-                exiting={localPresenceExiting(reduceMotion)}
-                layout={localLayoutTransition(reduceMotion)}
-                style={styles.healthPreferenceRow}
+                title="Access"
               >
-                <Text {...mobileTextProps("body")} style={styles.muted}>
-                  Location data is private. Motion & Fitness activity (still, walking, driving) is kept with it and never leaves Dayframe. Local journal samples expire after seven days. Upload copies, cached places and summaries can stay on this iPhone longer, even after upload or signing back in. Signing out clears this account’s local Location data; synced entries and saved places stay in your account.
-                </Text>
-                {([['Evidence upload', locationV2Diagnostics?.uploadAttempt],
-                  ['Location processing', locationV2Diagnostics?.replayAttempt]] as const).map(([label, attempt]) => (
-                  <View key={label}>
-                    <Text {...mobileTextProps("body")} style={styles.muted}>
-                      {label}: {attempt?.outcome === "success" ? "Succeeded" : attempt?.outcome === "partial" ? "Partly acknowledged" : attempt ? "Failed" : "No recent result"}
-                      {"\n"}Last attempt: {attempt ? formatQueueTime(attempt.attemptedAt) : "Not recorded"}
-                      {"\n"}Last success: {attempt?.lastSuccessAt ? formatQueueTime(attempt.lastSuccessAt) : "Not recorded"}
-                    </Text>
-                    {attempt ? <Text selectable {...mobileTextProps("body")} style={styles.muted}>
-                      HTTP: {attempt.details.httpStatus ?? "Unknown"} · Phase: {attempt.details.phase}
-                      {"\n"}Stage: {attempt.details.locationStage ?? "Unknown"} · Reason: {attempt.outcome === "success" ? "None" : attempt.details.reason}
-                      {"\n"}Server duration: {attempt.details.durationMs === undefined ? "Not provided" : `${attempt.details.durationMs} ms`}
-                      {"\n"}Client elapsed: {attempt.clientElapsedMs} ms
-                      {"\n"}Request ID: {attempt.details.requestId ?? "Not provided"}
-                    </Text> : null}
-                  </View>
-                ))}
-                <Text {...mobileTextProps("body")} style={styles.muted}>
-                  Foreground access: {formatPermissionStatus(locationDiagnostics?.foregroundPermission ?? "unknown")} · Background access: {backgroundAccessSummary}
-                </Text>
-                {locationDiagnostics ? <Text {...mobileTextProps("body")} style={styles.muted}>{locationMonitorCountText(locationDiagnostics)}</Text> : null}
-                <View style={styles.buttonRow}>
-                  <Pressable style={pressable(styles.secondaryButton, styles.buttonPressed)} onPress={enableLocation}>
-                    <Text {...mobileTextProps("control")} style={styles.secondaryButtonText}>Refresh monitoring</Text>
-                  </Pressable>
-                  <Pressable style={pressable(styles.secondaryButton, styles.buttonPressed)} onPress={() => void shareLocationDiagnostics()}>
-                    <Text {...mobileTextProps("control")} style={styles.secondaryButtonText}>Share diagnostics</Text>
-                  </Pressable>
-                  <Pressable style={pressable(styles.secondaryButton, styles.buttonPressed)} onPress={confirmDeleteLocationEvidence}>
-                    <Text {...mobileTextProps("control")} style={styles.secondaryButtonText}>Delete recent evidence</Text>
-                  </Pressable>
-                </View>
-              </Reanimated.View>
-            ) : null}
-          </View>
+                <SettingsBlockRow
+                  control={
+                    <SettingsPillButton
+                      accessibilityLabel={`${locationActionLabel} location access`}
+                      label={locationActionLabel}
+                      onPress={() => void enableLocation()}
+                      theme={theme}
+                    />
+                  }
+                  divider={false}
+                  subtitle={locationAccessSummary}
+                  testID="location-access"
+                  theme={theme}
+                  title="Location"
+                />
+              </SettingsBlockGroup>
+
+              <SettingsBlockGroup theme={theme} title="Suggestions">
+                <SettingsBlockRow
+                  control={
+                    <SettingsSwitch
+                      // Consent for this account, separate from the iOS permission above.
+                      accessibilityHint="Saves your choice for this account. Location access is set separately."
+                      disabled={locationDiagnostics === null}
+                      label="Suggest visits and commutes"
+                      onValueChange={toggleLocationLearning}
+                      theme={theme}
+                      value={locationDiagnostics?.locationLearningEnabled ?? false}
+                    />
+                  }
+                  divider={false}
+                  subtitle={locationSuggestionsDetail}
+                  testID="location-suggestions"
+                  theme={theme}
+                  title="Suggest visits and commutes"
+                />
+                <SettingsBlockRow
+                  control={motionFitness?.action ? (
+                    <SettingsPillButton
+                      label={motionFitness.action.label}
+                      onPress={() => void handleMotionFitnessAction()}
+                      theme={theme}
+                    />
+                  ) : undefined}
+                  subtitle={motionFitness ? `${motionFitness.label} · ${motionFitness.detail}` : "Checking…"}
+                  testID="location-motion"
+                  theme={theme}
+                  title="Motion & Fitness"
+                />
+                <SettingsBlockRow
+                  onPress={() => setLocationInfoSheet("suggestions")}
+                  testID="location-how-it-works"
+                  theme={theme}
+                  title="How suggestions work"
+                />
+              </SettingsBlockGroup>
+
+              <SettingsBlockGroup
+                foot="Dayframe only logs on its own at places you trust. Anything else waits in Review."
+                theme={theme}
+                title="Places"
+              >
+                <SettingsBlockRow
+                  divider={false}
+                  onPress={() => router.push("./places")}
+                  testID="location-saved-places"
+                  theme={theme}
+                  title="Saved places"
+                  value={String(data?.places.length ?? 0)}
+                />
+              </SettingsBlockGroup>
+
+              <SettingsBlockGroup
+                foot="Location stays private to your account. Recent points on this iPhone expire after seven days; upload copies can stay longer, even after they are sent. Signing out clears them all."
+                theme={theme}
+                title="Privacy"
+              >
+                <SettingsBlockRow
+                  danger
+                  divider={false}
+                  onPress={confirmDeleteLocationEvidence}
+                  subtitle="Recent location points. Logged blocks stay."
+                  testID="location-clear-history"
+                  theme={theme}
+                  title="Clear recent location history"
+                />
+              </SettingsBlockGroup>
+            </View>
           ) : null}
 
           {settingsSection === "health" ? (
-          <View style={styles.panel}>
-            <Text {...mobileTextProps("sectionHeading")} style={styles.sectionTitle}>Apple Health</Text>
-            <Text {...mobileTextProps("body")} style={styles.muted}>
-              Sleep and workouts are queued as health activity events first, then logged when confidence is high.
-            </Text>
-            <Text {...mobileTextProps("body")} style={styles.statusText}>
-              {healthAvailability?.notes ?? "Apple Health status not checked"}
-            </Text>
-            {healthPermissionStatus ? <Text {...mobileTextProps("body")} style={styles.muted}>{healthPermissionStatus.notes}</Text> : null}
-            <Text {...mobileTextProps("body")} style={styles.muted}>Sleep: {sleepStatus?.notes ?? "Not synced yet."}</Text>
-            <Text {...mobileTextProps("body")} style={styles.muted}>Workouts: {workoutStatus?.notes ?? "Not synced yet."}</Text>
-            {healthDebugStatus ? <Text {...mobileTextProps("body")} style={styles.muted}>{healthDebugStatus}</Text> : null}
-            <View style={styles.healthPreferenceList}>
-              {HEALTH_IMPORT_PREFERENCE_OPTIONS.map((option) => {
-                const enabled = healthImportPreferences?.[option.key] ?? option.defaultEnabled;
-                const mapping = healthAutoLogMappings[option.key] ?? {};
-                const selectedCategoryName =
-                  data?.categories.find((category) => category.id === mapping.categoryId)?.name ??
-                  defaultHealthCategoryLabel(option.key);
-                return (
-                  <View key={option.key} style={styles.healthPreferenceRow}>
-                    <View style={styles.healthPreferenceHeader}>
-                      <View style={styles.healthPreferenceText}>
-                        <Text {...mobileTextProps("itemTitle")} style={styles.categoryName}>{option.label}</Text>
-                        <Text {...mobileTextProps("body")} style={styles.categoryMeta}>
-                          {enabled
-                            ? `Logs to ${selectedCategoryName}`
-                            : "Ignored during Health sync"}
-                        </Text>
-                      </View>
-                      <Switch
-                        style={{ flexShrink: 0 }}
-                        accessibilityLabel={`${option.label} Apple Health auto-log`}
-                        value={enabled}
-                        onValueChange={(value) => updateHealthImportPreference(option.key, value)}
-                        trackColor={{ false: theme.borderStrong, true: theme.accent }}
-                        thumbColor={enabled ? theme.onAccent : theme.surfaceRaised}
-                        ios_backgroundColor={theme.borderStrong}
-                      />
-                    </View>
-                    {enabled ? (
-                      <View style={styles.healthMappingPanel}>
-                        <Text {...mobileTextProps("metadata")} style={styles.healthMappingLabel}>Activity</Text>
-                        <ScrollView
-                          horizontal
-                          showsHorizontalScrollIndicator={false}
-                          contentContainerStyle={styles.categoryChoiceScroller}
-                        >
-                          <Pressable
-                            accessibilityRole="button"
-                            accessibilityLabel={`${option.label} default Health activity`}
-                            accessibilityState={{ selected: !mapping.categoryId }}
-                            onPress={() => updateHealthAutoLogMapping(option.key, { categoryId: null })}
-                            style={pressable(
-                              [
-                                styles.categoryChoice,
-                                !mapping.categoryId ? styles.categoryChoiceSelected : null,
-                                !mapping.categoryId ? { borderColor: theme.accent } : null
-                              ],
-                              styles.buttonPressed
-                            )}
-                          >
-                            <Text
-                              {...mobileTextProps("control")}
-                              style={[
-                                styles.categoryChoiceText,
-                                !mapping.categoryId ? styles.categoryChoiceTextSelected : null,
-                                !mapping.categoryId ? { color: theme.accent } : null
-                              ]}
-                            >
-                              Default {defaultHealthCategoryLabel(option.key)}
-                            </Text>
-                            {!mapping.categoryId ? <CheckGlyph color={theme.accent} /> : null}
-                          </Pressable>
-                          {(data?.categories ?? []).map((category) => {
-                            const selected = mapping.categoryId === category.id;
-                            const categoryColor = paletteColorFor(category.color, category.name, theme.mode);
-                            return (
-                              <Pressable
-                                key={`${option.key}:${category.id}`}
-                                accessibilityRole="button"
-                                accessibilityLabel={`${option.label} activity ${category.name}`}
-                                accessibilityState={{ selected }}
-                                onPress={() => updateHealthAutoLogMapping(option.key, { categoryId: category.id })}
-                                style={pressable(
-                                  [
-                                    styles.categoryChoice,
-                                    { borderColor: categoryColor },
-                                    selected ? styles.categoryChoiceSelected : null,
-                                    selected ? { borderColor: categoryColor } : null
-                                  ],
-                                  styles.buttonPressed
-                                )}
-                              >
-                                <View
-                                  style={[
-                                    styles.colorDot,
-                                    { backgroundColor: categoryColor, borderColor: categoryColor }
-                                  ]}
-                                />
-                                <Text
-                                  {...mobileTextProps("control")}
-                                  style={[
-                                    styles.categoryChoiceText,
-                                    selected ? styles.categoryChoiceTextSelected : null,
-                                    selected ? { color: categoryColor } : null
-                                  ]}
-                                >
-                                  {category.name}
-                                </Text>
-                                {selected ? <CheckGlyph color={categoryColor} /> : null}
-                              </Pressable>
-                            );
-                          })}
-                        </ScrollView>
-                        <Text {...mobileTextProps("metadata")} style={styles.healthMappingLabel}>Description</Text>
-                        <TextInput
-                          accessibilityLabel={`${option.label} description`}
-                          {...mobileTextProps("input")}
-                          key={`${option.key}:${mapping.description ?? ""}`}
-                          style={[styles.textInput, styles.healthMappingInput]}
-                          defaultValue={mapping.description ?? ""}
-                          placeholder={defaultHealthDescription(option.key)}
-                          placeholderTextColor={theme.textSecondary}
-                          returnKeyType="done"
-                          onEndEditing={(event) =>
-                            updateHealthAutoLogMapping(option.key, {
-                              description: event.nativeEvent.text.trim() || null
-                            })
-                          }
-                        />
-                      </View>
-                    ) : null}
-                  </View>
-                );
-              })}
-            </View>
-            <View style={styles.buttonRow}>
-              <Pressable style={pressable(styles.secondaryButton, styles.buttonPressed)} onPress={connectAppleHealth}>
-                <Text {...mobileTextProps("control")} style={styles.secondaryButtonText}>Connect</Text>
-              </Pressable>
-              <Pressable style={pressable(styles.secondaryButton, styles.buttonPressed)} onPress={() => syncAppleHealth()}>
-                <Text {...mobileTextProps("control")} style={styles.secondaryButtonText}>Sync now</Text>
-              </Pressable>
-              <Pressable
-                disabled={exportingHealthDebug}
-                style={({ pressed }) => [
-                  styles.secondaryButton,
-                  exportingHealthDebug ? styles.buttonDisabled : null,
-                  pressed ? styles.buttonPressed : null
-                ]}
-                onPress={exportAppleHealthDebug}
+            <View style={styles.settingsBlocksStack}>
+              <SettingsBlockGroup
+                foot="Each one becomes a block you confirm in Review, or logs itself when Dayframe is sure."
+                theme={theme}
+                title="Apple Health"
               >
-                <Text {...mobileTextProps("control")} style={styles.secondaryButtonText}>{exportingHealthDebug ? "Exporting..." : "Export debug"}</Text>
-              </Pressable>
+                <SettingsBlockRow
+                  control={healthConnected ? undefined : (
+                    <SettingsPillButton
+                      accessibilityLabel="Connect Apple Health"
+                      disabled={healthAvailability?.status === "unavailable"}
+                      label="Connect"
+                      onPress={() => void connectAppleHealth()}
+                      theme={theme}
+                    />
+                  )}
+                  divider={false}
+                  subtitle={healthAccessSummary}
+                  testID="health-access"
+                  theme={theme}
+                  title="Access"
+                />
+                <SettingsBlockRow
+                  accessibilityHint="Reads new sleep and workouts from Apple Health now"
+                  onPress={() => void syncAppleHealth()}
+                  subtitle={syncingQueue ? "Syncing…" : healthSyncNoteText ?? "Dayframe also syncs on its own"}
+                  testID="health-sync-now"
+                  theme={theme}
+                  title="Sync now"
+                />
+              </SettingsBlockGroup>
+
+              {HEALTH_IMPORT_GROUPS.map((group) => (
+                // Opening a type's rows moves the groups below with the shared layout transition.
+                <Reanimated.View key={group.title} layout={localLayoutTransition(reduceMotion)}>
+                <SettingsBlockGroup theme={theme} title={group.title}>
+                  {HEALTH_IMPORT_PREFERENCE_OPTIONS.filter((option) => group.keys.includes(option.key)).map((option, index) => {
+                    const enabled = healthImportPreferences?.[option.key] ?? option.defaultEnabled;
+                    const mapping = healthAutoLogMappings[option.key] ?? {};
+                    const mappedCategory = data?.categories.find((category) => category.id === mapping.categoryId) ?? null;
+                    const label = option.key === "other" ? "Other workouts" : option.label;
+                    return (
+                      <Reanimated.View key={option.key} layout={localLayoutTransition(reduceMotion)}>
+                        <SettingsBlockRow
+                          control={
+                            <SettingsSwitch
+                              label={label}
+                              onValueChange={(value) => void updateHealthImportPreference(option.key, value)}
+                              theme={theme}
+                              value={enabled}
+                            />
+                          }
+                          divider={index > 0}
+                          // When on, the "Logs as" row below says where it goes.
+                          subtitle={enabled ? null : "Not imported"}
+                          testID={`health-type-${option.key}`}
+                          theme={theme}
+                          title={label}
+                        />
+                        {enabled ? (
+                          <Reanimated.View
+                            entering={localPresenceEntering(reduceMotion)}
+                            exiting={localPresenceExiting(reduceMotion)}
+                          >
+                            <SettingsBlockRow
+                              accessibilityHint={`Chooses the activity ${label} logs to`}
+                              onPress={() => setHealthPickerKey(option.key)}
+                              testID={`health-activity-${option.key}`}
+                              theme={theme}
+                              title="Logs as"
+                              value={mappedCategory?.name ?? `${defaultHealthCategoryLabel(option.key)} (default)`}
+                            />
+                            {mapping.categoryId ? (
+                              <Reanimated.View
+                                entering={localPresenceEntering(reduceMotion)}
+                                exiting={localPresenceExiting(reduceMotion)}
+                                layout={localLayoutTransition(reduceMotion)}
+                              >
+                              <SettingsBlockRow
+                                control={
+                                  <SettingsPillButton
+                                    accessibilityLabel={`Use the default activity for ${label}`}
+                                    label="Use default"
+                                    onPress={() => void updateHealthAutoLogMapping(option.key, { categoryId: null })}
+                                    theme={theme}
+                                  />
+                                }
+                                subtitle={`Logs as ${defaultHealthCategoryLabel(option.key)}`}
+                                testID={`health-default-${option.key}`}
+                                theme={theme}
+                                title="Default activity"
+                              />
+                              </Reanimated.View>
+                            ) : null}
+                            {/* Moves with the shared layout transition when Use default comes or goes. */}
+                            <Reanimated.View layout={localLayoutTransition(reduceMotion)} style={styles.healthNameRow}>
+                              <Text {...mobileTextProps("control")} style={styles.healthNameLabel}>Name</Text>
+                              <TextInput
+                                accessibilityLabel={`${label} name`}
+                                {...mobileTextProps("input")}
+                                key={`${option.key}:${mapping.description ?? ""}`}
+                                style={styles.healthNameInput}
+                                defaultValue={mapping.description ?? ""}
+                                placeholder={defaultHealthDescription(option.key)}
+                                placeholderTextColor={theme.textSecondary}
+                                returnKeyType="done"
+                                onEndEditing={(event) =>
+                                  void updateHealthAutoLogMapping(option.key, {
+                                    description: event.nativeEvent.text.trim() || null
+                                  })
+                                }
+                              />
+                            </Reanimated.View>
+                          </Reanimated.View>
+                        ) : null}
+                      </Reanimated.View>
+                    );
+                  })}
+                </SettingsBlockGroup>
+                </Reanimated.View>
+              ))}
             </View>
-          </View>
           ) : null}
         </View>
       </ScrollView>
@@ -2644,30 +2485,19 @@ export default function SettingsScreen() {
         styles={styles}
         theme={theme}
       />
+      {healthPickerKey ? (
+        <ActivityPickerSheet
+          activities={data?.categories ?? []}
+          onClose={() => setHealthPickerKey(null)}
+          onPick={(activityId) => void updateHealthAutoLogMapping(healthPickerKey, { categoryId: activityId })}
+          recentIds={[]}
+          reduceMotion={reduceMotion}
+          selectedId={healthAutoLogMappings[healthPickerKey]?.categoryId ?? null}
+          styles={styles}
+          theme={theme}
+        />
+      ) : null}
     </SafeAreaView>
-  );
-}
-
-function InfoButton({
-  accessibilityLabel,
-  onPress,
-  styles,
-  theme
-}: {
-  accessibilityLabel: string;
-  onPress: () => void;
-  styles: MobileStyles;
-  theme: MobileTheme;
-}) {
-  return (
-    <Pressable
-      accessibilityLabel={accessibilityLabel}
-      accessibilityRole="button"
-      style={pressable(styles.iconButton, styles.buttonPressed)}
-      onPress={onPress}
-    >
-      <InfoGlyph color={theme.accent} />
-    </Pressable>
   );
 }
 
@@ -2786,189 +2616,6 @@ function CategoryColorPicker({
   );
 }
 
-export function SettingsGroup({ children, title }: { children: ReactNode; title: string }) {
-  const { styles } = useMobileTheme();
-  return (
-    <View style={styles.settingsGroup}>
-      <Text {...mobileTextProps("counter")} style={styles.settingsGroupTitle}>{title}</Text>
-      <View style={styles.settingsGroupRows}>{children}</View>
-    </View>
-  );
-}
-
-function AppearancePreviewCard({
-  mode,
-  selected,
-  styles
-}: {
-  mode: "light" | "dark";
-  selected: boolean;
-  styles: MobileStyles;
-}) {
-  const dark = mode === "dark";
-  return (
-    <View style={styles.appearancePreviewColumn}>
-      <Text {...mobileTextProps("metadata")} style={styles.appearancePreviewLabel}>{dark ? "Dark" : "Light"}</Text>
-      <View style={[
-        styles.appearancePreviewCard,
-        dark ? styles.appearancePreviewCardDark : styles.appearancePreviewCardLight,
-        selected ? styles.appearancePreviewCardSelected : null
-      ]}>
-        <View style={[
-          styles.appearancePreviewSurface,
-          dark ? styles.appearancePreviewSurfaceDark : styles.appearancePreviewSurfaceLight
-        ]}>
-          <View style={[styles.appearancePreviewLine, dark ? styles.appearancePreviewLineDark : styles.appearancePreviewLineLight]} />
-          <View style={[styles.appearancePreviewLineShort, dark ? styles.appearancePreviewLineMutedDark : styles.appearancePreviewLineMutedLight]} />
-          <View style={styles.appearancePreviewAccent} />
-        </View>
-        <View style={[
-          styles.appearancePreviewPill,
-          dark ? styles.appearancePreviewPillDark : styles.appearancePreviewPillLight
-        ]}>
-          <Text style={[styles.appearancePreviewPillText, dark ? styles.appearancePreviewPillTextDark : null]}>
-            Midnight Core
-          </Text>
-        </View>
-      </View>
-    </View>
-  );
-}
-
-export function SettingsMenuRow({
-  icon,
-  label,
-  last = false,
-  onPress,
-  styles,
-  theme,
-  value,
-  diagnostic
-}: {
-  icon: SettingsIcon;
-  label: string;
-  last?: boolean;
-  onPress: () => void;
-  styles: MobileStyles;
-  theme: MobileTheme;
-  value?: string;
-  diagnostic?: MobileAccessibilityDiagnostic;
-}) {
-  return (
-    <View>
-      <Pressable
-        accessibilityLabel={label}
-        accessibilityValue={value ? { text: value } : undefined}
-        accessibilityRole="button"
-        style={pressable(styles.settingsMenuRow, styles.buttonPressed)}
-        onLayout={(event) => recordMobileLayout(diagnostic, "settings.row", event)}
-        onPress={onPress}
-      >
-        <View style={styles.settingsMenuIcon} onLayout={(event) => recordMobileLayout(diagnostic, "settings.icon", event)}>
-          <SettingsRowGlyph name={icon} color={theme.accentText} />
-        </View>
-        <View style={styles.settingsMenuText} onLayout={(event) => recordMobileLayout(diagnostic, "settings.text-column", event)}>
-          <Text {...mobileTextProps("itemTitle")} style={styles.settingsMenuTitle} onLayout={(event) => recordMobileLayout(diagnostic, "settings.label.frame", event)} onTextLayout={(event) => recordMobileTextLayout(diagnostic, "settings.label", event, "itemTitle", styles.settingsMenuTitle)}>{label}</Text>
-          {value ? <Text {...mobileTextProps("metadata")} style={styles.settingsMenuMeta} onLayout={(event) => recordMobileLayout(diagnostic, "settings.value.frame", event)} onTextLayout={(event) => recordMobileTextLayout(diagnostic, "settings.value", event, "metadata", styles.settingsMenuMeta)}>{value}</Text> : null}
-        </View>
-        <View style={styles.settingsMenuChevron} onLayout={(event) => recordMobileLayout(diagnostic, "settings.chevron", event)}>
-          <ChevronGlyph color={theme.textSecondary} />
-        </View>
-      </Pressable>
-      {!last ? <View pointerEvents="none" style={styles.settingsMenuDivider} /> : null}
-    </View>
-  );
-}
-
-function SettingsRowGlyph({ color, name }: { color: string; name: SettingsIcon }) {
-  switch (name) {
-    case "profile":
-      return (
-        <Svg width={18} height={18} viewBox="0 0 24 24">
-          <Path d="M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8Z" fill="none" stroke={color} strokeWidth={2} />
-          <Path d="M4 21a8 8 0 0 1 16 0" fill="none" stroke={color} strokeLinecap="round" strokeWidth={2} />
-        </Svg>
-      );
-    case "categories":
-      return (
-        <Svg width={18} height={18} viewBox="0 0 24 24">
-          <Path d="M5 5h6v6H5V5Zm8 0h6v6h-6V5ZM5 13h6v6H5v-6Zm8 0h6v6h-6v-6Z" fill="none" stroke={color} strokeLinejoin="round" strokeWidth={2} />
-        </Svg>
-      );
-    case "automations":
-      return (
-        <Svg width={18} height={18} viewBox="0 0 24 24">
-          <Path d="m13 3-8 11h6l-1 7 9-12h-6l0-6Z" fill="none" stroke={color} strokeLinejoin="round" strokeWidth={2} />
-        </Svg>
-      );
-    case "health":
-      return (
-        <Svg width={18} height={18} viewBox="0 0 24 24">
-          <Path d="M12 5v14M5 12h14" stroke={color} strokeLinecap="round" strokeWidth={2.2} />
-        </Svg>
-      );
-    case "sync":
-      return (
-        <Svg width={18} height={18} viewBox="0 0 24 24">
-          <Path d="M17 7H7l3-3M7 17h10l-3 3" fill="none" stroke={color} strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} />
-        </Svg>
-      );
-    case "appearance":
-      return (
-        <Svg width={18} height={18} viewBox="0 0 24 24">
-          <Path d="M12 4a8 8 0 1 0 8 8 6 6 0 0 1-8-8Z" fill="none" stroke={color} strokeLinejoin="round" strokeWidth={2} />
-        </Svg>
-      );
-    case "review":
-      return (
-        <Svg width={18} height={18} viewBox="0 0 24 24">
-          <Path d="m5 12 4 4L19 6" fill="none" stroke={color} strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.2} />
-        </Svg>
-      );
-  }
-}
-
-function CheckGlyph({ color }: { color: string }) {
-  return (
-    <Svg width={15} height={15} viewBox="0 0 24 24">
-      <Path d="m5 12 4 4 10-10" fill="none" stroke={color} strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.4} />
-    </Svg>
-  );
-}
-
-function ChevronGlyph({ color }: { color: string }) {
-  return (
-    <Svg width={18} height={18} viewBox="0 0 24 24">
-      <Path d="m9 6 6 6-6 6" fill="none" stroke={color} strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} />
-    </Svg>
-  );
-}
-
-function DisclosureChevronGlyph({ color, expanded }: { color: string; expanded: boolean }) {
-  return (
-    <Svg width={18} height={18} viewBox="0 0 24 24">
-      <Path
-        d={expanded ? "m6 15 6-6 6 6" : "m6 9 6 6 6-6"}
-        fill="none"
-        stroke={color}
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        strokeWidth={2}
-      />
-    </Svg>
-  );
-}
-
-function InfoGlyph({ color }: { color: string }) {
-  return (
-    <Svg width={19} height={19} viewBox="0 0 24 24">
-      <Path d="M12 11v6" stroke={color} strokeLinecap="round" strokeWidth={2} />
-      <Path d="M12 7h.01" stroke={color} strokeLinecap="round" strokeWidth={2.8} />
-      <Path d="M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18Z" fill="none" stroke={color} strokeWidth={2} />
-    </Svg>
-  );
-}
-
 function CloseGlyph({ color }: { color: string }) {
   return (
     <Svg width={18} height={18} viewBox="0 0 24 24">
@@ -2980,17 +2627,15 @@ function CloseGlyph({ color }: { color: string }) {
 function settingsSectionTitle(section: SettingsSection) {
   switch (section) {
     case "profile":
-      return "Profile";
+      return "Account";
     case "categories":
       return "Activities";
     case "automations":
-      return "Places & Location";
+      return "Location";
     case "health":
-      return "Health";
+      return "Apple Health";
     case "sync":
       return "Sync help";
-    case "appearance":
-      return "Appearance";
     case "index":
       return "Settings";
   }
@@ -3004,7 +2649,6 @@ function normalizeSettingsSection(value: string | string[] | undefined): Setting
     case "automations":
     case "health":
     case "sync":
-    case "appearance":
       return section;
     default:
       return "index";
@@ -3077,26 +2721,10 @@ function locationStatusText(diagnostics: LocationVisitDiagnostics) {
   return "Location learning is enabled. No saved-place monitors are active.";
 }
 
-function locationMonitorCountText(diagnostics: LocationVisitDiagnostics) {
-  if (diagnostics.backgroundPermission !== "granted") return "No place monitors are active.";
-  if (diagnostics.activeMonitorCount > 0) {
-    return `Monitoring ${diagnostics.activeMonitorCount} saved ${diagnostics.activeMonitorCount === 1 ? "place" : "places"}.`;
-  }
-  return "No saved places with coordinates are being monitored.";
-}
-
-function formatPermissionStatus(value: LocationVisitDiagnostics["foregroundPermission"]) {
-  switch (value) {
-    case "granted":
-      return "Allowed";
-    case "denied":
-      return "Denied";
-    case "undetermined":
-      return "Not requested";
-    case "unknown":
-      return "Unknown";
-  }
-}
+const HEALTH_IMPORT_GROUPS: readonly { title: string; keys: readonly HealthImportPreferenceKey[] }[] = [
+  { title: "Sleep", keys: ["sleep"] },
+  { title: "Workouts and walks", keys: ["walking", "running", "cycling", "strength_training", "swimming", "other"] }
+];
 
 function defaultHealthCategoryLabel(type: HealthImportPreferenceKey) {
   return type === "sleep" ? "Sleep" : "Health";

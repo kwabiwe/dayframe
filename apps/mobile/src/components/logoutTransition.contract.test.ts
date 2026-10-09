@@ -37,9 +37,10 @@ describe("mobile logout transition contract", () => {
   it("keeps Settings complete during cleanup and gates repeated logout actions", () => {
     expect(settings).toContain("if (signingOutRef.current) return;");
     expect(settings).toContain("if (signedOutNavigationScheduledRef.current) return;");
-    expect(settings).toContain('signingOut ? "Logging out..." : "Log out"');
+    // Sign out on the Settings index and the Account page (6a-3) both show the busy state.
+    expect(settings.match(/signingOut \? "Signing out…" : "Sign out"/g)?.length).toBe(2);
     expect(settings).toContain("clearSettingsSnapshot();");
-    expect(settings).toContain("accessibilityState={{ disabled: signingOut }}");
+    expect(settings).toContain("accessibilityState={{ disabled: signingOut, busy: signingOut }}");
     expect(settings).toContain("<Stack.Screen options={{ gestureEnabled: !signingOut }} />");
   });
 

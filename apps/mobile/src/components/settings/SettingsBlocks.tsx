@@ -6,6 +6,7 @@ import { DAYFRAME_APP_ICONS, DAYFRAME_BLOCKS, blockColorsFor } from "@dayframe/s
 import { ActivityIcon, DayframeIcon } from "../icons/DayframeIcon";
 import type { MobileTheme } from "../../lib/mobileTheme";
 import { mobileTextProps } from "../../lib/mobileTypography";
+import { recordMobileLayout, recordMobileTextLayout, type MobileAccessibilityDiagnostic } from "../accessibility/diagnostics";
 
 type Theme = MobileTheme;
 
@@ -78,6 +79,7 @@ export function SettingsBlockRow({
   accessibilityHint,
   control,
   danger = false,
+  diagnostic,
   divider = true,
   onPress,
   subtitle,
@@ -89,6 +91,8 @@ export function SettingsBlockRow({
   accessibilityHint?: string;
   control?: ReactNode;
   danger?: boolean;
+  /** Large-text QA probe only (scripts/mobile-accessibility-qa-entry.tsx). */
+  diagnostic?: MobileAccessibilityDiagnostic;
   divider?: boolean;
   onPress?: () => void;
   subtitle?: string | null;
@@ -97,12 +101,28 @@ export function SettingsBlockRow({
   title: string;
   value?: string | null;
 }) {
+  const titleStyle = [blockStyles.rowTitle, { color: danger ? theme.dangerText : theme.textPrimary }];
+  const subtitleStyle = { color: theme.textMuted };
   const text = (
-    <View style={blockStyles.rowText}>
-      <Text {...mobileTextProps("itemTitle")} style={[blockStyles.rowTitle, { color: danger ? theme.dangerText : theme.textPrimary }]}>
+    <View style={blockStyles.rowText} onLayout={(event) => recordMobileLayout(diagnostic, "settings.text-column", event)}>
+      <Text
+        {...mobileTextProps("itemTitle")}
+        onLayout={(event) => recordMobileLayout(diagnostic, "settings.label.frame", event)}
+        onTextLayout={(event) => recordMobileTextLayout(diagnostic, "settings.label", event, "itemTitle", titleStyle)}
+        style={titleStyle}
+      >
         {title}
       </Text>
-      {subtitle ? <Text {...mobileTextProps("metadata")} style={{ color: theme.textMuted }}>{subtitle}</Text> : null}
+      {subtitle ? (
+        <Text
+          {...mobileTextProps("metadata")}
+          onLayout={(event) => recordMobileLayout(diagnostic, "settings.value.frame", event)}
+          onTextLayout={(event) => recordMobileTextLayout(diagnostic, "settings.value", event, "metadata", subtitleStyle)}
+          style={subtitleStyle}
+        >
+          {subtitle}
+        </Text>
+      ) : null}
     </View>
   );
   const dividerStyle = divider ? { borderTopColor: theme.border, borderTopWidth: StyleSheet.hairlineWidth } : null;
@@ -113,12 +133,13 @@ export function SettingsBlockRow({
         accessibilityLabel={subtitle ? `${title}, ${subtitle}` : title}
         accessibilityRole="button"
         accessibilityValue={value ? { text: value } : undefined}
+        onLayout={(event) => recordMobileLayout(diagnostic, "settings.row", event)}
         onPress={onPress}
         style={({ pressed }) => [blockStyles.row, dividerStyle, pressed ? { backgroundColor: theme.surfaceMuted } : null]}
         testID={testID}
       >
         {text}
-        <View style={blockStyles.rowValue}>
+        <View onLayout={(event) => recordMobileLayout(diagnostic, "settings.chevron", event)} style={blockStyles.rowValue}>
           {value ? <Text {...mobileTextProps("metadata")} numberOfLines={1} style={{ color: theme.textMuted }}>{value}</Text> : null}
           {danger ? null : <DayframeIcon color={theme.textMuted} glyph={DAYFRAME_APP_ICONS.next} size={18} />}
         </View>
