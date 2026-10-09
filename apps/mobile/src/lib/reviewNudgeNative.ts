@@ -50,3 +50,18 @@ export function subscribeReviewNudgeOpens(onOpen: (accountKey: string | null) =>
   }).catch(() => undefined);
   return () => subscription.remove();
 }
+
+/**
+ * Shows the reminder even while Dayframe is open (iOS otherwise drops it), but only when it
+ * belongs to the signed-in account. Dayframe sends no other notifications.
+ */
+export function installReviewNudgeForegroundHandler(isCurrentAccount: (accountKey: string | null) => Promise<boolean>) {
+  Notifications.setNotificationHandler({
+    handleNotification: async (notification) => {
+      const data = notification.request.content.data as { kind?: unknown; accountKey?: unknown } | undefined;
+      const show = data?.kind === "review-nudge" &&
+        await isCurrentAccount(typeof data.accountKey === "string" ? data.accountKey : null).catch(() => false);
+      return { shouldShowBanner: show, shouldShowList: show, shouldPlaySound: show, shouldSetBadge: false };
+    }
+  });
+}

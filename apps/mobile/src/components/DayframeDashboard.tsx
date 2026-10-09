@@ -1320,12 +1320,17 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
   useEffect(() => {
     let unsubscribe: (() => void) | null = null;
     let cancelled = false;
-    void import("@/lib/reviewNudgeNative").then(({ subscribeReviewNudgeOpens }) => {
+    const isCurrentAccount = async (accountKey: string | null) => {
+      const { mobileAccountKey, readActiveMobileAccount } = await import("@/lib/mobileAccount");
+      const owner = await readActiveMobileAccount();
+      return Boolean(owner && accountKey === mobileAccountKey(owner));
+    };
+    void import("@/lib/reviewNudgeNative").then(({ installReviewNudgeForegroundHandler, subscribeReviewNudgeOpens }) => {
       if (cancelled) return;
+      installReviewNudgeForegroundHandler(isCurrentAccount);
       unsubscribe = subscribeReviewNudgeOpens((accountKey) => {
-        void import("@/lib/mobileAccount").then(async ({ mobileAccountKey, readActiveMobileAccount }) => {
-          const owner = await readActiveMobileAccount();
-          if (!cancelled && owner && accountKey === mobileAccountKey(owner)) router.push("/review");
+        void isCurrentAccount(accountKey).then((current) => {
+          if (!cancelled && current) router.push("/review");
         }).catch(() => undefined);
       });
     }).catch(() => undefined);

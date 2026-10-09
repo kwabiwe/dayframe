@@ -141,6 +141,28 @@ describe("review nudge store", () => {
     expect((await nudge.readReviewNudgeState(owner)).enabled).toBe(true);
   });
 
+  it("keeps a fired day quiet after a later count and a later time (Codex r1 repro)", async () => {
+    await nudge.setReviewNudgeEnabled(owner, true, at(2026, 10, 9, 15));
+    await nudge.noteReviewCount(owner, 3, at(2026, 10, 9, 15));
+    expect(native.scheduled.at(-1)?.fireAt).toEqual(at(2026, 10, 9, 20));
+    // 20:00 passes (the reminder fires); a count at 21:00 schedules tomorrow.
+    await nudge.noteReviewCount(owner, 3, at(2026, 10, 9, 21));
+    expect(native.scheduled.at(-1)?.fireAt).toEqual(at(2026, 10, 10, 20));
+    // Moving the time later the same evening must not add a second reminder today.
+    await nudge.setReviewNudgeMinutes(owner, 21 * 60 + 30, at(2026, 10, 9, 21, 5));
+    expect(native.scheduled.at(-1)?.fireAt).toEqual(at(2026, 10, 10, 21, 30));
+    expect((await nudge.readReviewNudgeState(owner)).firedOn).toBe("2026-10-09");
+  });
+
+  it("does not count a reminder cancelled before its time as fired", async () => {
+    await nudge.setReviewNudgeEnabled(owner, true, at(2026, 10, 9, 15));
+    await nudge.noteReviewCount(owner, 3, at(2026, 10, 9, 15));
+    await nudge.noteReviewCount(owner, 0, at(2026, 10, 9, 19));
+    await nudge.noteReviewCount(owner, 2, at(2026, 10, 9, 19, 30));
+    expect(native.scheduled.at(-1)?.fireAt).toEqual(at(2026, 10, 9, 20));
+    expect((await nudge.readReviewNudgeState(owner)).firedOn).toBeNull();
+  });
+
   it("ignores counts that aren't whole numbers", async () => {
     await nudge.setReviewNudgeEnabled(owner, true);
     await nudge.noteReviewCount(owner, "3" as unknown as number);

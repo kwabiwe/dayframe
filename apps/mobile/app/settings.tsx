@@ -5,7 +5,6 @@ import { readActiveMobileAccount, mobileAccountOwnersEqual, type MobileAccountOw
 import {
   REVIEW_NUDGE_MINUTES,
   formatReviewNudgeTime,
-  noteReviewCount,
   readReviewNudgeState,
   setReviewNudgeEnabled,
   setReviewNudgeMinutes,
@@ -661,14 +660,8 @@ export default function SettingsScreen() {
     if (permission === "undetermined") permission = await nativeModule.requestReviewNudgePermission().catch(() => "denied" as const);
     setNudgePermission(permission);
     if (permission !== "granted") return;
-    await changeReviewNudge(async (owner) => {
-      const enabled = await setReviewNudgeEnabled(owner, true);
-      // Schedule from the count this page already has instead of waiting for the next refresh.
-      const count = data?.stats?.reviewCount;
-      if (typeof count !== "number") return enabled;
-      await noteReviewCount(owner, count);
-      return readReviewNudgeState(owner);
-    });
+    // Plans from the latest count the reminder heard (with its time), never this page's cache.
+    await changeReviewNudge((owner) => setReviewNudgeEnabled(owner, true));
   }
 
   // Motion & Fitness is changed in iOS Settings: re-read it whenever the app returns.

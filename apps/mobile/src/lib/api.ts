@@ -641,6 +641,15 @@ export async function signup(email: string, password: string, name?: string, wor
   return authenticate("/api/auth/signup", { email, password, name, workspaceName });
 }
 
+// Any way the session ends (sign-out, expiry, a revoked session) takes the evening Review reminder
+// with it: it belongs to the account that left.
+subscribeAuthenticatedSession(() => {
+  void readAuthenticatedSessionSnapshot().then((read) => {
+    if (read.status !== "signed_out") return;
+    return import("./reviewNudge").then(({ cancelReviewNudgeForLogout }) => cancelReviewNudgeForLogout());
+  }).catch(() => undefined);
+});
+
 export async function logout() {
   void endAllTimerBackgroundExecution("logout");
   // Capture the existing session authority before any await. A delayed logout

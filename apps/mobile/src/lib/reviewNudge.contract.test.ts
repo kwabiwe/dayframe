@@ -34,6 +34,15 @@ describe("evening Review reminder contract (Blocks 8-0)", () => {
     expect(api).toContain("noteReviewCountQuietly(owner, (payload as { reviewCount?: unknown }).reviewCount)");
     expect(api).toContain("cancelReviewNudgeForLogout()");
     expect(locationStore).toContain("noteLocationReviewCount(owner, payload.reviewCount)");
+    // Any end of the session (expiry, revocation), not only Sign out.
+    expect(api).toMatch(/subscribeAuthenticatedSession\(\(\) => \{\n  void readAuthenticatedSessionSnapshot\(\)/);
+    // Settings never feeds its cached count back as new.
+    expect(settings).not.toContain("noteReviewCount");
+  });
+
+  it("shows the reminder while Dayframe is open, only for the signed-in account", () => {
+    expect(dashboard).toContain("installReviewNudgeForegroundHandler(isCurrentAccount)");
+    expect(nativeSource).toContain("Notifications.setNotificationHandler");
   });
 
   it("never puts places in the reminder", () => {

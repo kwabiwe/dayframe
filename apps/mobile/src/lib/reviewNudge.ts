@@ -15,8 +15,10 @@ export type ReviewNudgeState = {
   minutes: number;
   knownCount: number | null;
   knownAt: string | null;
-  /** When the scheduled reminder was set to fire; one already fired today keeps today quiet. */
+  /** When the pending reminder is set to fire (null when none is scheduled). */
   lastFireAt: string | null;
+  /** Local day ("YYYY-MM-DD") of the latest reminder that has fired; that day stays quiet. */
+  firedOn: string | null;
 };
 
 export const DEFAULT_REVIEW_NUDGE_STATE: ReviewNudgeState = {
@@ -24,7 +26,8 @@ export const DEFAULT_REVIEW_NUDGE_STATE: ReviewNudgeState = {
   minutes: REVIEW_NUDGE_DEFAULT_MINUTES,
   knownCount: null,
   knownAt: null,
-  lastFireAt: null
+  lastFireAt: null,
+  firedOn: null
 };
 
 export type ReviewNudgePlan = { fireAt: Date; body: string };
@@ -44,17 +47,30 @@ function atMinutes(day: Date, minutes: number) {
   return new Date(day.getFullYear(), day.getMonth(), day.getDate(), Math.floor(minutes / 60), minutes % 60, 0, 0);
 }
 
-function sameLocalDay(left: Date, right: Date) {
-  return left.getFullYear() === right.getFullYear() && left.getMonth() === right.getMonth() && left.getDate() === right.getDate();
+export function localDayKey(date: Date) {
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+}
+
+/**
+ * A scheduled reminder whose time has passed has fired (a reminder cancelled before its time is
+ * cleared, never left behind). Moves that fire into `firedOn` and clears the pending time.
+ */
+export function settleFiredReminder(state: ReviewNudgeState, now: Date): ReviewNudgeState {
+  if (!state.lastFireAt) return state;
+  const fireAt = new Date(state.lastFireAt);
+  if (Number.isNaN(fireAt.getTime())) return { ...state, lastFireAt: null };
+  if (fireAt.getTime() > now.getTime()) return state;
+  const day = localDayKey(fireAt);
+  return { ...state, lastFireAt: null, firedOn: !state.firedOn || day > state.firedOn ? day : state.firedOn };
 }
 
 /** When (and with what words) the next reminder fires, or null when nothing should be scheduled. */
 export function planReviewNudge(state: ReviewNudgeState, now: Date): ReviewNudgePlan | null {
   if (!state.enabled || state.knownCount === null || state.knownCount <= 0 || !state.knownAt) return null;
   const minutes = clampReviewNudgeMinutes(state.minutes);
-  const lastFire = state.lastFireAt ? new Date(state.lastFireAt) : null;
+  const settled = settleFiredReminder(state, now);
   let fireAt = atMinutes(now, minutes);
-  const firedToday = lastFire !== null && lastFire.getTime() <= now.getTime() && sameLocalDay(lastFire, now);
+  const firedToday = settled.firedOn === localDayKey(now);
   if (fireAt.getTime() <= now.getTime() || firedToday) {
     const tomorrow = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1);
     fireAt = atMinutes(tomorrow, minutes);
@@ -81,7 +97,8 @@ function parseState(raw: string | null): ReviewNudgeState {
       minutes: clampReviewNudgeMinutes(typeof value.minutes === "number" ? value.minutes : REVIEW_NUDGE_DEFAULT_MINUTES),
       knownCount: typeof value.knownCount === "number" && Number.isInteger(value.knownCount) && value.knownCount >= 0 ? value.knownCount : null,
       knownAt: typeof value.knownAt === "string" ? value.knownAt : null,
-      lastFireAt: typeof value.lastFireAt === "string" ? value.lastFireAt : null
+      lastFireAt: typeof value.lastFireAt === "string" ? value.lastFireAt : null,
+      firedOn: typeof value.firedOn === "string" && /^\d{4}-\d{2}-\d{2}$/.test(value.firedOn) ? value.firedOn : null
     };
   } catch {
     return { ...DEFAULT_REVIEW_NUDGE_STATE };
@@ -110,7 +127,7 @@ async function native() {
  */
 async function update(owner: MobileAccountOwner, change: (state: ReviewNudgeState) => ReviewNudgeState, now = new Date()) {
   return serialised(async () => {
-    const next = change(await readReviewNudgeState(owner));
+    const next = settleFiredReminder(change(await readReviewNudgeState(owner)), now);
     if (!mobileAccountOwnersEqual(owner, await readActiveMobileAccount())) {
       // Saved under that account's key only; its reminder is scheduled when it is back.
       await AsyncStorage.setItem(storageKey(owner), JSON.stringify(next));
@@ -118,13 +135,16 @@ async function update(owner: MobileAccountOwner, change: (state: ReviewNudgeStat
     }
     const plan = planReviewNudge(next, now);
     const nativeModule = await native();
-    if (plan && (await nativeModule.readReviewNudgePermission()) === "granted") {
+    const allowed = plan !== null && (await nativeModule.readReviewNudgePermission()) === "granted";
+    // The account can change while the native module loads or permission is read.
+    const stillActive = mobileAccountOwnersEqual(owner, await readActiveMobileAccount());
+    if (plan && allowed && stillActive) {
       await nativeModule.scheduleReviewNudge(plan.fireAt, plan.body, mobileAccountKey(owner));
       next.lastFireAt = plan.fireAt.toISOString();
     } else {
-      await nativeModule.cancelReviewNudge();
-      // Keep a fire time that already passed today, so a later count can't add a second one.
-      if (next.lastFireAt && new Date(next.lastFireAt).getTime() > now.getTime()) next.lastFireAt = null;
+      // Never cancel another account's reminder: it replaces this one when its own count arrives.
+      if (stillActive) await nativeModule.cancelReviewNudge();
+      next.lastFireAt = null;
     }
     await AsyncStorage.setItem(storageKey(owner), JSON.stringify(next));
     return next;
@@ -138,12 +158,12 @@ export function noteReviewCount(owner: MobileAccountOwner | null, count: unknown
     .then(() => undefined, () => undefined);
 }
 
-export function setReviewNudgeEnabled(owner: MobileAccountOwner, enabled: boolean) {
-  return update(owner, (state) => ({ ...state, enabled }));
+export function setReviewNudgeEnabled(owner: MobileAccountOwner, enabled: boolean, now = new Date()) {
+  return update(owner, (state) => ({ ...state, enabled }), now);
 }
 
-export function setReviewNudgeMinutes(owner: MobileAccountOwner, minutes: number) {
-  return update(owner, (state) => ({ ...state, minutes: clampReviewNudgeMinutes(minutes) }));
+export function setReviewNudgeMinutes(owner: MobileAccountOwner, minutes: number, now = new Date()) {
+  return update(owner, (state) => ({ ...state, minutes: clampReviewNudgeMinutes(minutes) }), now);
 }
 
 /** Sign-out: the reminder belongs to the account that is leaving. */
