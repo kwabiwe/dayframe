@@ -59,6 +59,7 @@ export type NativeCalendarPresentationEntry = {
   layoutMode: TimeIntervalLayout["mode"];
   meta: string;
   offsetFraction: number;
+  /** Overlaps with any shown block, Review included: drives hit geometry (no 44-pt expansion). */
   overlapCount: number;
   overlapSeconds: number;
   placeText: string | null;
@@ -70,6 +71,8 @@ export type NativeCalendarPresentationEntry = {
   textColor: string;
   textDensity: TimeIntervalLayout["textDensity"];
   title: string;
+  /** Overlaps among logged blocks only: the warning dot and the VoiceOver note. */
+  warningOverlapCount: number;
   widthFraction: number;
   zIndex: number;
 };
@@ -180,9 +183,16 @@ export function buildNativeCalendarBridgeState({
     })),
     { range: { start: dayStart, end: dayEnd }, now }
   );
+  // Hit geometry must know about every block a tap could land on, Review suggestions included, so a
+  // short block never grows a 44-point target over a neighbour; the warning counts logged time only.
+  const allEntryAnalysis = analyzeTimeIntervals(
+    entries.map((entry) => ({ id: entry.id, startedAt: entry.startedAt, stoppedAt: entry.stoppedAt })),
+    { range: { start: dayStart, end: dayEnd }, now }
+  );
+  const analysisById = new Map(allEntryAnalysis.entries.map((entry) => [entry.id, entry]));
+  const warningById = new Map(confirmedAnalysis.entries.map((entry) => [entry.id, entry.overlapCount]));
   // Confirmed blocks overlap only each other; Review suggestions sit in their own lane on the right
   // (REVIEW_LANE_WIDTH of the day column) above them, so a suggestion never squeezes logged time.
-  const analysisById = new Map(confirmedAnalysis.entries.map((entry) => [entry.id, entry]));
   const reviewEntries = entries.filter((entry) => isCalendarReviewNeeded(entry));
   const layoutById = new Map([
     ...layoutDayEntries(confirmedEntries, dayStart, dayEnd, now).map((layout) => [layout.id, layout] as const),
@@ -209,7 +219,8 @@ export function buildNativeCalendarBridgeState({
         now,
         theme,
         layoutById.get(entry.id),
-        analysisById.get(entry.id)
+        analysisById.get(entry.id),
+        isCalendarReviewNeeded(entry) ? 0 : warningById.get(entry.id) ?? 0
       )),
       modelVersion: 4,
       monthTitle: formatMonthTitle(selectedDate, new Date(now)),
@@ -275,7 +286,8 @@ function serializeCalendarEntry(
   now: number,
   theme: MobileTheme,
   layout?: TimeIntervalLayout,
-  analysis?: { overlapCount: number; overlapSeconds: number }
+  analysis?: { overlapCount: number; overlapSeconds: number },
+  warningOverlapCount = 0
 ): NativeCalendarPresentationEntry {
   const reviewNeeded = isCalendarReviewNeeded(entry);
   const startedAtMs = Date.parse(entry.startedAt);
@@ -307,7 +319,7 @@ function serializeCalendarEntry(
   return {
     actionId,
     actionKind,
-    accessibilityLabel: `${reviewNeeded ? REVIEW_COPY.needsReview : entry.isActive ? "Edit running timer" : "Open time block"}: ${title}${entry.placeName ? `. Place: ${entry.placeName}` : ""}${tagText ? `. Tags: ${tagText}` : ""}${analysis?.overlapCount ? `. Overlaps ${analysis.overlapCount} other ${analysis.overlapCount === 1 ? "entry" : "entries"}.` : ""}`,
+    accessibilityLabel: `${reviewNeeded ? REVIEW_COPY.needsReview : entry.isActive ? "Edit running timer" : "Open time block"}: ${title}${entry.placeName ? `. Place: ${entry.placeName}` : ""}${tagText ? `. Tags: ${tagText}` : ""}${warningOverlapCount ? `. Overlaps ${warningOverlapCount} other ${warningOverlapCount === 1 ? "entry" : "entries"}.` : ""}`,
     color,
     continuesIntoNextDay: continuation.continuesIntoNextDay,
     entryId: entry.id,
@@ -329,6 +341,7 @@ function serializeCalendarEntry(
     textColor,
     textDensity: layout?.textDensity ?? "full",
     title,
+    warningOverlapCount,
     widthFraction: layout?.widthFraction ?? 1,
     zIndex: layout?.zIndex ?? 0
   };

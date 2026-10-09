@@ -55,6 +55,7 @@ struct DayframeCalendarEntryRecord: Codable {
   var textColor = "#0B1020"
   var textDensity = "full"
   var title = ""
+  var warningOverlapCount = 0
   var widthFraction: Double = 1
   var zIndex = 0
 }

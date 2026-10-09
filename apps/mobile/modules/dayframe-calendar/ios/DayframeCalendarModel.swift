@@ -87,6 +87,7 @@ struct DayframeCalendarEntry: Equatable, Identifiable {
   let textColor: String
   let textDensity: String
   let title: String
+  let warningOverlapCount: Int
   let widthFraction: Double
   let zIndex: Int
 
@@ -119,6 +120,7 @@ struct DayframeCalendarEntry: Equatable, Identifiable {
     textColor = record.textColor
     textDensity = record.textDensity
     title = record.title
+    warningOverlapCount = max(0, record.warningOverlapCount)
     widthFraction = record.widthFraction
     zIndex = record.zIndex
   }

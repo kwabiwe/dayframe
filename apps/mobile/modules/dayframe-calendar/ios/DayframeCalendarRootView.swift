@@ -570,7 +570,7 @@ private struct DayframeCalendarBlockView: View {
             Text(entry.meta)
               .font(.caption2.weight(.semibold))
               .monospacedDigit()
-              .foregroundStyle(textColor.opacity(0.82))
+              .foregroundStyle(textColor)
               .lineLimit(metrics.height < DayframeCalendarConstants.metaMinimumHeight + 16 ? 1 : 2)
           }
 
@@ -583,7 +583,7 @@ private struct DayframeCalendarBlockView: View {
                 .font(.caption2)
                 .lineLimit(1)
             }
-            .foregroundStyle(textColor.opacity(0.82))
+            .foregroundStyle(textColor)
           }
 
           if metrics.showMeta, horizontal.showMeta, let tagText = entry.tagText, !tagText.isEmpty {
@@ -595,7 +595,7 @@ private struct DayframeCalendarBlockView: View {
                 .font(.caption2)
                 .lineLimit(1)
             }
-            .foregroundStyle(textColor.opacity(0.82))
+            .foregroundStyle(textColor)
           }
         }
         .padding(.horizontal, 10)
@@ -608,7 +608,7 @@ private struct DayframeCalendarBlockView: View {
       y: 2
     )
     .overlay(alignment: .topTrailing) {
-      if entry.overlapCount > 0 && horizontal.width >= 22 {
+      if entry.warningOverlapCount > 0 && horizontal.width >= 22 {
         Circle()
           .fill(Color(dayframeCSS: theme.warning))
           .overlay(Circle().strokeBorder(textColor.opacity(0.6), lineWidth: 1))

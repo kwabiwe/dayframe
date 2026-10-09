@@ -339,18 +339,45 @@ describe("native Calendar Blocks presentation", () => {
     expect(work).toMatchObject({
       color: blockColorsFor("blue", "dark").fill,
       offsetFraction: 0,
-      overlapCount: 0,
       textColor: blockColorsFor("blue", "dark").text,
+      warningOverlapCount: 0,
       widthFraction: 1
     });
     expect(review).toMatchObject({
       color: blockColorsFor("amber", "dark").fill,
-      overlapCount: 0,
-      textColor: theme.textPrimary
+      textColor: theme.textPrimary,
+      warningOverlapCount: 0
     });
+    // Hit geometry still sees the overlap, so neither block grows a 44-point target over the other.
+    expect(work?.overlapCount).toBe(1);
+    expect(review?.overlapCount).toBe(1);
+    expect(work?.accessibilityLabel).not.toContain("Overlaps");
     expect(review?.offsetFraction).toBeCloseTo(1 - REVIEW_LANE_WIDTH);
     expect(review?.widthFraction).toBeCloseTo(REVIEW_LANE_WIDTH);
     expect(review!.zIndex).toBeGreaterThan(work!.zIndex);
+  });
+
+  it("keeps nested Review suggestions at their semantic hit height", () => {
+    const now = localTime(2026, 7, 10, 12, 0);
+    const suggestion = (id: string, start: number, stop: number) => entry({
+      id,
+      reviewStatus: "needs_review",
+      startedAt: iso(start),
+      stoppedAt: iso(stop)
+    });
+    const state = build(now, bootstrap([
+      suggestion("long", localTime(2026, 7, 10, 9, 0), localTime(2026, 7, 10, 10, 0)),
+      suggestion("short", localTime(2026, 7, 10, 9, 20), localTime(2026, 7, 10, 9, 25)),
+      entry({ id: "logged-a", startedAt: iso(localTime(2026, 7, 10, 11, 0)), stoppedAt: iso(localTime(2026, 7, 10, 11, 30)) }),
+      entry({ id: "logged-b", startedAt: iso(localTime(2026, 7, 10, 11, 15)), stoppedAt: iso(localTime(2026, 7, 10, 11, 45)) })
+    ]));
+    const byId = new Map(state.model.entries.map((candidate) => [candidate.entryId, candidate]));
+
+    expect(byId.get("short")?.overlapCount).toBe(1);
+    expect(byId.get("long")?.overlapCount).toBe(1);
+    expect(byId.get("short")?.warningOverlapCount).toBe(0);
+    expect(byId.get("logged-a")?.warningOverlapCount).toBe(1);
+    expect(byId.get("logged-a")?.accessibilityLabel).toContain("Overlaps 1 other entry.");
   });
 
   it("passes the Dayframe haptics setting to the native view", () => {

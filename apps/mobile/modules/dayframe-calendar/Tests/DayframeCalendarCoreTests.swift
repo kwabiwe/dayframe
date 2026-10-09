@@ -915,7 +915,7 @@ final class DayframeCalendarCoreTests: XCTestCase {
         "layoutMode":"insetOverlay","meta":"11:20 – Now","offsetFraction":0.14,
         "overlapCount":1,"overlapSeconds":1800,"startedAtMs":1000,
         "startsBeforeDay":false,"stoppedAtMs":null,"tagText":"Deep work","textColor":"#0B1020","textDensity":"title",
-        "title":"Planning","widthFraction":0.86,"zIndex":2
+        "title":"Planning","warningOverlapCount":1,"widthFraction":0.86,"zIndex":2
       }]
       """
     )
