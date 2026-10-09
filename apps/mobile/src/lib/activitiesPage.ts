@@ -86,3 +86,25 @@ export function createActivityChangeGate() {
     }
   };
 }
+
+/**
+ * Settings › Activities › Archived reads: only the newest read applies, and only if no archive or
+ * restore answer landed while it was out, so a slow list fetched before a Restore can never put
+ * the restored activity back under Archived. A change calls `changed()` and then reads again.
+ */
+export function createArchivedReadGate() {
+  let issued = 0;
+  let changes = 0;
+  return {
+    begin() {
+      issued += 1;
+      return { read: issued, changes };
+    },
+    changed() {
+      changes += 1;
+    },
+    current(token: { read: number; changes: number }) {
+      return token.read === issued && token.changes === changes;
+    }
+  };
+}

@@ -20,6 +20,8 @@ import {
   shouldAutoConfirmHealthWorkout,
   TimeEntryTagsPatchSchema,
   readableLocationNameFromParts,
+  isStarterActivityKey,
+  starterActivityByKey,
   type LocationDisplayAddress,
   type ActivityEventType,
   type ActivityEventInput,
@@ -56,6 +58,7 @@ import {
   ensureAutomaticCategoryId,
   ensureCommuteCategoryId,
   ensureHealthEventCategoryId,
+  lockActivityNames,
   healthCategorySpecForEventType,
   type AutomaticLoggingCategoryKind
 } from "./automatic-category-service";
@@ -1251,6 +1254,9 @@ export async function createCategory(
 
   try {
     await client.query("begin");
+    // The name lock first (as automatic Sleep/Commute/Health creation takes it), then the
+    // workspace: the same order as every other activity writer.
+    await lockActivityNames(client, session.workspaceId, [name]);
     await client.query(
       "select id from workspaces where id = $1 for no key update",
       [session.workspaceId]
@@ -1346,17 +1352,36 @@ export async function updateCategory(
 
   try {
     await client.query("begin");
+    // Lock order shared by every activity writer: per-name locks (sorted), then the workspace
+    // row, then the activity row. A rename locks its new name; a restore locks the archived
+    // name and its starter's name, so automatic creation of either waits for this answer.
+    // (An archived row cannot be renamed, so what is read here still holds once locked.)
+    const before = restoreRequested
+      ? await client.query<{ name: string; starterKey: string | null }>(
+        `select name, starter_key as "starterKey" from categories where id = $1 and workspace_id = $2`,
+        [id, session.workspaceId]
+      )
+      : null;
+    const beforeStarterKey = before?.rows[0]?.starterKey ?? null;
+    await lockActivityNames(client, session.workspaceId, [
+      normalizedName,
+      hasName ? null : before?.rows[0]?.name,
+      beforeStarterKey && isStarterActivityKey(beforeStarterKey) ? starterActivityByKey(beforeStarterKey).name : null
+    ]);
     // The same workspace lock as createCategory, so a rename, a pin or a restore is checked
     // against the activities as they are, not as two racing requests each saw them.
     await client.query(
       "select id from workspaces where id = $1 for no key update",
       [session.workspaceId]
     );
-    const current = await client.query<{ name: string; isPinned: boolean; isArchived: boolean }>(
-      `select name, is_pinned as "isPinned", is_archived as "isArchived"
+    // NO KEY UPDATE, not FOR UPDATE: it never waits on inserts that merely reference this
+    // activity (location or Health capture holding a key-share lock while it waits for a name
+    // lock this request already holds).
+    const current = await client.query<{ name: string; isPinned: boolean; isArchived: boolean; starterKey: string | null }>(
+      `select name, is_pinned as "isPinned", is_archived as "isArchived", starter_key as "starterKey"
        from categories
        where id = $1 and workspace_id = $2
-       for update`,
+       for no key update`,
       [id, session.workspaceId]
     );
     const row = current.rows[0];
@@ -1365,6 +1390,10 @@ export async function updateCategory(
     if (!row || (row.isArchived && !restoring)) {
       await client.query("rollback");
       return null;
+    }
+    if (restoring && !hasName && row.name !== before?.rows[0]?.name) {
+      // Unreachable while archived rows cannot be renamed; refuse rather than check an unlocked name.
+      throw new CategoryConflictError();
     }
 
     const finalName = normalizedName ?? row.name;
@@ -1384,19 +1413,39 @@ export async function updateCategory(
 
     // Quick start holds QUICK_START_PIN_LIMIT: only a new pin is checked, so editing an activity
     // that is already pinned (or a workspace already over the limit) keeps working.
+    // A restore always comes back unpinned: it wins over any pin in the same request and is
+    // never refused for a full quick start.
     const wasPinned = row.isPinned && !row.isArchived;
-    if (hasIsPinned && input.isPinned && !wasPinned) {
+    if (!restoring && hasIsPinned && input.isPinned && !wasPinned) {
       const pinned = await pinnedCategoryCount(client, session.workspaceId, id);
       if (pinned >= QUICK_START_PIN_LIMIT) throw new QuickStartFullError();
+    }
+
+    // A starter recreated while this one was archived (automatic Sleep, say) keeps its starter
+    // key; the restored activity comes back as a plain activity instead of colliding with it.
+    let dropStarterKey = false;
+    if (restoring && row.starterKey) {
+      const keyed = await client.query<{ id: string }>(
+        `select id
+         from categories
+         where workspace_id = $1
+           and id <> $2
+           and starter_key = $3
+           and is_archived = false
+         limit 1`,
+        [session.workspaceId, id, row.starterKey]
+      );
+      dropStarterKey = Boolean(keyed.rows[0]);
     }
 
     const result = await client.query<CategoryRowLike>(
       `update categories
        set name = case when $3 then $4 else name end,
            color = case when $5 then $6 else color end,
-           is_pinned = case when $7 then $8 when $11 then false else is_pinned end,
+           is_pinned = case when $11 then false when $7 then $8 else is_pinned end,
            icon = case when $9 then $10 else icon end,
-           is_archived = case when $11 then false else is_archived end
+           is_archived = case when $11 then false else is_archived end,
+           starter_key = case when $12 then null else starter_key end
        where id = $1 and workspace_id = $2
        ${CATEGORY_RETURNING}`,
       [
@@ -1410,7 +1459,8 @@ export async function updateCategory(
         Boolean(input.isPinned),
         hasIcon,
         hasIcon && isActivityIconKey(input.icon) ? input.icon : null,
-        restoring
+        restoring,
+        dropStarterKey
       ]
     );
 

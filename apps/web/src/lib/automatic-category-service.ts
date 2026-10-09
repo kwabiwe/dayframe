@@ -44,6 +44,28 @@ export function automaticCategoryLockKey(workspaceId: string, name: string) {
 // these locks take them in this (alphabetical) order.
 export const AUTOMATIC_STARTER_LOCK_NAMES = ["Commute", "Sleep"] as const;
 
+/**
+ * Takes the per-name activity locks automatic creation uses, deduplicated and in one sorted
+ * order (the same alphabetical order as AUTOMATIC_STARTER_LOCK_NAMES). Every activity writer
+ * that checks a name takes these BEFORE the workspace row lock, so a rename, restore or create
+ * serialises with automatic creation of the same name and the lock order never inverts.
+ */
+export async function lockActivityNames(
+  client: Pick<pg.PoolClient, "query">,
+  workspaceId: string,
+  names: Array<string | null | undefined>
+) {
+  const keys = [...new Set(names
+    .filter((name): name is string => Boolean(name?.trim()))
+    .map((name) => name.trim().toLowerCase()))].sort();
+  for (const name of keys) {
+    await client.query(
+      "select pg_advisory_xact_lock(hashtextextended($1, 0))",
+      [automaticCategoryLockKey(workspaceId, name)]
+    );
+  }
+}
+
 export async function ensureAutomaticCategoryId(
   client: pg.PoolClient,
   session: RequestSession,

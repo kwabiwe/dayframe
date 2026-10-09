@@ -44,6 +44,7 @@ import {
   QUICK_START_PIN_LIMIT,
   activitiesPageGroups,
   createActivityChangeGate,
+  createArchivedReadGate,
   activityWeekSeconds as activityWeekSecondsFor,
   formatActivityWeek,
   pinLimitReached
@@ -770,6 +771,7 @@ export default function SettingsScreen() {
   const [activityEditor, setActivityEditor] = useState<{ activity: Category | null } | null>(null);
   // Settings › Activities › Archived (Blocks 6b-2): read from the server when the page opens.
   const [archivedActivities, setArchivedActivities] = useState<Category[] | null>(null);
+  const archivedReads = useRef(createArchivedReadGate()).current;
   // One activity change at a time on the Activities page (pins, saves, creates, archives).
   const activityChanges = useRef(createActivityChangeGate()).current;
   // The activities the gate reads: kept current at once by applyActivityCategories, and
@@ -889,8 +891,9 @@ export default function SettingsScreen() {
       if (!(await activityOwnerStill(owner))) return;
       // Archived: it leaves every list (and quick start) at once, even if the refresh fails.
       applyActivityCategories((categories) => categories.filter((item) => item.id !== activity.id));
-      await load({ silent: true });
+      archivedReads.changed();
       void refreshArchivedActivities();
+      await load({ silent: true });
     }).catch((error: unknown) => ({ ran: true as const, error }));
     if (!change.ran) return ACTIVITY_CHANGE_BUSY_MESSAGE;
     if (!("error" in change)) return null;
@@ -902,10 +905,14 @@ export default function SettingsScreen() {
   }
 
   async function refreshArchivedActivities() {
+    const read = archivedReads.begin();
     const owner = await readActiveMobileAccount();
     try {
       const archived = await listArchivedCategories();
-      if (await activityOwnerStillQuiet(owner)) setArchivedActivities(archived);
+      // A read that was out while an archive or restore landed (or behind a newer read) is dropped.
+      if (archivedReads.current(read) && (await activityOwnerStillQuiet(owner)) && archivedReads.current(read)) {
+        setArchivedActivities(archived);
+      }
     } catch (error) {
       if (error instanceof AuthRequiredError) finishSignedOutNavigation();
       // Otherwise the Archived section simply stays as it was (or hidden).
@@ -926,7 +933,9 @@ export default function SettingsScreen() {
         ? categories
         : [...categories, result.category]);
       setArchivedActivities((current) => current?.filter((item) => item.id !== activity.id) ?? current);
+      archivedReads.changed();
       AccessibilityInfo.announceForAccessibility(`${result.category.name} restored.`);
+      void refreshArchivedActivities();
       await load({ silent: true });
     }).catch((error: unknown) => ({ ran: true as const, error }));
     if ("error" in change) {
@@ -1653,7 +1662,10 @@ export default function SettingsScreen() {
         refreshControl={
           <RefreshControl
             refreshing={refreshing}
-            onRefresh={() => load({ trigger: "pull" })}
+            onRefresh={() => {
+              if (settingsSection === "categories") void refreshArchivedActivities();
+              return load({ trigger: "pull" });
+            }}
             tintColor={theme.accent}
             colors={[theme.accent]}
           />

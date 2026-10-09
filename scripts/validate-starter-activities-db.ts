@@ -1,8 +1,9 @@
 import assert from "node:assert/strict";
 import { DAYFRAME_STARTER_ACTIVITIES } from "@dayframe/shared";
 import { seedDefaultWorkspaceData } from "../apps/web/src/lib/auth/local";
-import { ensureCommuteCategoryId } from "../apps/web/src/lib/automatic-category-service";
+import { ensureAutomaticCategoryId, ensureCommuteCategoryId, healthCategorySpecForEventType } from "../apps/web/src/lib/automatic-category-service";
 import { pool } from "../apps/web/src/lib/db";
+import { CategoryConflictError, updateCategory } from "../apps/web/src/lib/event-service";
 import type { RequestSession } from "../apps/web/src/lib/session";
 import { addMissingStarterActivities } from "../apps/web/src/lib/starter-activities-service";
 
@@ -160,6 +161,92 @@ async function validateReplayThenCommuteOrdering() {
   await pool.query("delete from clients where workspace_id = $1", [RACE_WORKSPACE]);
 }
 
+async function insertCategoryId(workspaceId: string, name: string, starterKey: string | null, isArchived = false) {
+  const result = await pool.query<{ id: string }>(
+    `insert into categories (workspace_id, name, color, starter_key, is_archived)
+     values ($1, $2, 'steel', $3, $4) returning id`,
+    [workspaceId, name, starterKey, isArchived]
+  );
+  return result.rows[0].id;
+}
+
+// Blocks 6b-2: capture holds a key-share on an activity it references and then asks for the
+// Commute lock; the starters route holds Commute and waits for the workspace; an activity PATCH
+// holds the workspace and locks that activity. The PATCH's NO KEY UPDATE row lock must not wait
+// on the key-share, or Postgres aborts one of the three as a deadlock.
+async function validatePatchCaptureStartersOrdering() {
+  await pool.query("delete from projects where workspace_id = $1", [RACE_WORKSPACE]);
+  await pool.query("delete from categories where workspace_id = $1", [RACE_WORKSPACE]);
+  const mapped = await insertCategoryId(RACE_WORKSPACE, "Mapped", null);
+  const capture = await pool.connect();
+  try {
+    await capture.query("begin");
+    await capture.query("insert into projects (workspace_id, name, category_id) values ($1, 'Capture holds key share', $2)", [RACE_WORKSPACE, mapped]);
+    const patch = updateCategory(mapped, { isPinned: true }, session(RACE_WORKSPACE));
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    const starters = addMissingStarterActivities(session(RACE_WORKSPACE));
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    const commute = ensureCommuteCategoryId(capture, session(RACE_WORKSPACE)).then(async (id) => {
+      await capture.query("commit");
+      return id;
+    });
+    const [patched, startersResult, commuteId] = await Promise.all([patch, starters, commute]);
+    assert.equal(patched?.isPinned, true, "the PATCH completes");
+    assert.ok(startersResult && commuteId, "capture and the starters call complete");
+  } catch (error) {
+    await capture.query("rollback").catch(() => undefined);
+    throw error;
+  } finally {
+    capture.release();
+  }
+  await pool.query("delete from projects where workspace_id = $1", [RACE_WORKSPACE]);
+}
+
+// A rename to "Health" while automatic Health creation is still uncommitted waits for it and
+// is then refused, so the workspace never ends with two active "Health" activities.
+async function validateRenameWaitsForAutomaticCreation() {
+  await pool.query("delete from categories where workspace_id = $1", [RACE_WORKSPACE]);
+  const focus = await insertCategoryId(RACE_WORKSPACE, "Focus", null);
+  const automatic = await pool.connect();
+  try {
+    await automatic.query("begin");
+    await ensureAutomaticCategoryId(automatic, session(RACE_WORKSPACE), healthCategorySpecForEventType("health_workout_import"));
+    const rename = updateCategory(focus, { name: "Health" }, session(RACE_WORKSPACE)).then(
+      () => "renamed",
+      (error: unknown) => (error instanceof CategoryConflictError ? "refused" : Promise.reject(error))
+    );
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    await automatic.query("commit");
+    assert.equal(await rename, "refused", "the rename waits for automatic Health and is refused");
+  } catch (error) {
+    await automatic.query("rollback").catch(() => undefined);
+    throw error;
+  } finally {
+    automatic.release();
+  }
+  const health = (await categories(RACE_WORKSPACE)).filter((row) => !row.isArchived && row.name.toLowerCase() === "health");
+  assert.equal(health.length, 1, "one active Health after the race");
+}
+
+// Restoring an archived Sleep starter after automatic Sleep was recreated (and renamed) brings
+// it back as a plain activity instead of failing on the starter-key index; a pin asked for in
+// the same request never wins over Restore's unpinned rule.
+async function validateRestoreStarterKeyCollision() {
+  await pool.query("delete from categories where workspace_id = $1", [RACE_WORKSPACE]);
+  const archived = await insertCategoryId(RACE_WORKSPACE, "Sleep", "sleep", true);
+  await pool.query("update categories set is_pinned = true where id = $1", [archived]);
+  await insertCategoryId(RACE_WORKSPACE, "Bedtime", "sleep");
+  const restored = await updateCategory(archived, { isArchived: false, isPinned: true }, session(RACE_WORKSPACE));
+  assert.ok(restored, "the restore succeeds");
+  assert.equal(restored.isPinned, false, "a restore comes back unpinned even when a pin was asked for");
+  const rows = await categories(RACE_WORKSPACE);
+  assert.deepEqual(
+    rows.filter((row) => !row.isArchived).map((row) => [row.name, row.starterKey]).sort(),
+    [["Bedtime", "sleep"], ["Sleep", null]],
+    "the recreated starter keeps the key; the restored one is a plain activity"
+  );
+}
+
 async function validateConstraints() {
   await assert.rejects(
     pool.query("insert into categories (workspace_id, name, color, starter_key) values ($1, 'Second Sleep', 'steel', 'sleep')", [NEW_WORKSPACE]),
@@ -177,10 +264,13 @@ async function run() {
   await validateExistingWorkspace();
   await validateRaceWithAutomaticCommute();
   await validateReplayThenCommuteOrdering();
+  await validatePatchCaptureStartersOrdering();
+  await validateRenameWaitsForAutomaticCreation();
+  await validateRestoreStarterKeyCollision();
   await validateConstraints();
   await pool.query("delete from workspaces where id = any($1::uuid[])", [[NEW_WORKSPACE, EXISTING_WORKSPACE, RACE_WORKSPACE]]);
   await pool.query("delete from users where id = $1", [USER_ID]);
-  console.log("Starter activity validation passed: seeding, add/link without duplicates, archived keys, oldest link, idempotence, automatic race, replay-then-Commute ordering, constraints.");
+  console.log("Starter activity validation passed: seeding, add/link without duplicates, archived keys, oldest link, idempotence, automatic race, replay-then-Commute ordering, PATCH/capture/starters ordering, rename vs automatic creation, restore key collision, constraints.");
 }
 
 run()
