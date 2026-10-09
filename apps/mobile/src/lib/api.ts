@@ -1654,7 +1654,7 @@ export async function saveEditedReviewItem(
 
 export async function createCategory(
   name: string,
-  options: { color?: string; isPinned?: boolean } = {}
+  options: { color?: string; isPinned?: boolean; icon?: string | null } = {}
 ): Promise<MobileCategoryResponse> {
   const response = await mobileFetch(`${DAYFRAME_API_BASE}/api/categories`, {
     method: "POST",
@@ -1666,6 +1666,8 @@ export async function createCategory(
     body: JSON.stringify({
       name,
       ...(options.color ? { color: options.color } : {}),
+      // An icon key from the shared set; left out, the name decides the icon.
+      ...(options.icon !== undefined ? { icon: options.icon } : {}),
       isPinned: Boolean(options.isPinned)
     })
   });
@@ -1716,7 +1718,7 @@ export async function ensureAutomaticLoggingCategories(
 
 export async function updateCategory(
   id: string,
-  options: { name?: string; color?: string; isPinned?: boolean }
+  options: { name?: string; color?: string; isPinned?: boolean; icon?: string | null }
 ): Promise<MobileCategoryResponse> {
   const response = await mobileFetch(`${DAYFRAME_API_BASE}/api/categories`, {
     method: "PATCH",

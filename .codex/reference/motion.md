@@ -305,3 +305,9 @@ Block pull-to-refresh:
 - Entrance/update/exit: the pin row fades in under its row while the rest of the list slides down, and out when the pin is finished or used; choosing a split fades in its confirm row. Rows are always visible (no disclosure), so nothing else moves.
 - Interruption: every More options row and pill is disabled while a save runs (the place, activity and map choices keep their earlier behaviour); finishing the pin keeps the drafted name and Use this pin until the pin is used; a failed save keeps the whole draft (unchanged mutation owner).
 - Accessibility: Reduce Motion keeps opacity-only presence and no layout movement; rows are 52-point targets with plain titles and subtitles; the activity title is a header.
+## Activities page and editor (Blocks parity step 6b-1)
+
+- Trigger: New activity or an activity row opens the editor sheet; Save, Create, Cancel, a backdrop tap, a swipe down or a confirmed Archive closes it; the pin button toggles a pin.
+- Owner: `SwipeDismissSheet` owns the editor's entrance, drag and exit (Reduce Motion: its opacity path); the page has no other movement. The preview block, icon and colour selections and the pin's fill update in place. After a save or archive the page's list re-renders from the reloaded data (a moved or archived row appears in or leaves its group without its own animation, as other Settings lists do).
+- Interruption: activity changes run one at a time across the page and the sheet (a second is refused, never queued behind a stale answer); a save or archive in progress disables Save and Archive; leaving the sheet mid-save keeps whatever the server accepted (the next load shows it). A seventh pin is refused with an alert and nothing moves.
+- Accessibility: icon and colour choices are radio groups with labels; the pin button names its action ("Add X to quick start"); all targets are at least 44 points.

@@ -9,7 +9,6 @@ import { useCallback, useEffect, useRef, useState, type SetStateAction } from "r
 import {
   Alert,
   AppState,
-  findNodeHandle,
   Keyboard,
   Linking,
   Modal,
@@ -37,12 +36,23 @@ import {
   useReduceMotionPreference
 } from "@/lib/motion";
 import { ActivityPickerSheet } from "@/components/ActivityPickerSheet";
+import { ActivityEditorSheet, type ActivityEditorDraft } from "@/components/settings/ActivityEditorSheet";
+import { ActivityIcon, DayframeIcon } from "@/components/icons/DayframeIcon";
+import {
+  ACTIVITY_CHANGE_BUSY_MESSAGE,
+  QUICK_START_PIN_LIMIT,
+  activitiesPageGroups,
+  createActivityChangeGate,
+  activityWeekSeconds as activityWeekSecondsFor,
+  formatActivityWeek,
+  pinLimitReached
+} from "@/lib/activitiesPage";
 import { healthSyncNote, mergeHealthStatuses } from "@/lib/healthSyncNote";
 import { setHapticsEnabled, useHapticsPreference } from "@/lib/haptics";
 import {
   DAYFRAME_PALETTE,
-  DAYFRAME_PALETTE_PICKER,
-  paletteColorFor,
+  DAYFRAME_APP_ICONS,
+  blockColorsFor,
   type DayframePaletteKey,
   type HealthAutoLogMapping,
   type HealthAutoLogMappings,
@@ -198,7 +208,6 @@ type SettingsSnapshot = {
 };
 
 let cachedSettingsSnapshot: SettingsSnapshot | null = null;
-const CATEGORY_EDITOR_KEYBOARD_CLEARANCE = 360;
 
 function defaultSettingsSnapshot(): SettingsSnapshot {
   return {
@@ -225,6 +234,11 @@ function updateSettingsSnapshot(patch: Partial<SettingsSnapshot>) {
     ...patch
   };
 }
+
+// Advances whenever an activity change gets its answer, applied or not (in any Settings visit).
+// A refresh fetched before the latest answer is not published, and pin capacity counts as fresh
+// only when no answer arrived since this visit's last published refresh.
+let activityAnswerEpoch = 0;
 
 function clearSettingsSnapshot() {
   cachedSettingsSnapshot = null;
@@ -315,16 +329,7 @@ export default function SettingsScreen() {
   const [healthSyncNoteText, setHealthSyncNote] = useState<string | null>(null);
   const [healthAccessGranted, setHealthAccessGranted] = useState<boolean | null>(null);
   const [exportingHealthDebug, setExportingHealthDebug] = useState(false);
-  const [newCategoryName, setNewCategoryName] = useState("");
-  const [newCategoryColor, setNewCategoryColor] = useState<DayframePaletteKey>("lime");
-  const [creatingCategory, setCreatingCategory] = useState(false);
-  const [pinNewCategory, setPinNewCategory] = useState(true);
-  const [editingCategoryId, setEditingCategoryId] = useState<string | null>(null);
-  const [editingCategoryName, setEditingCategoryName] = useState("");
-  const [editingCategoryColor, setEditingCategoryColor] = useState("lime");
   const refreshes = useRef(createOwnerSyncCoalescer<void>());
-  const categoryEditRef = useRef<TextInput>(null);
-  const newCategoryInputRef = useRef<TextInput>(null);
   const settingsScrollRef = useRef<ScrollView>(null);
   const settingsScrollOffsetRef = useRef(0);
   const settingsScrollContentHeightRef = useRef(0);
@@ -461,15 +466,28 @@ export default function SettingsScreen() {
   const load = useCallback((options?: { silent?: boolean; trigger?: "navigation" | "focus" | "pull" }) => refreshes.current.run("settings", true, async () => {
     const showRefreshIndicator = shouldShowSettingsRefreshSpinner(options?.trigger ?? "navigation");
     if (showRefreshIndicator) setRefreshing(true);
+    let staleActivityRefresh = false;
     // The local queue has one guarded reader (refreshQueueLatest): it publishes whether or not the
     // bootstrap below succeeds, and never after Settings closed or the account changed.
     void refreshQueueLatest();
     try {
+      const loadOwner = await readActiveMobileAccount();
       await drainNativeShortcutQueue();
+      const epochAtFetch = activityAnswerEpoch;
       const [bootstrap, location] = await Promise.all([
         fetchBootstrap(),
         getLocationVisitDiagnostics()
       ]);
+      // Published only while Settings is open for the account that asked: a refresh finishing
+      // after a sign-out or an account switch never refills the cleared snapshot or this screen.
+      const publishOwner = await readActiveMobileAccount();
+      if (!queueMounted.current || !loadOwner || !mobileAccountOwnersEqual(loadOwner, publishOwner)) return;
+      // Fetched before an activity change's answer: it may miss that change, so it is not shown;
+      // a fresh refresh follows.
+      if (epochAtFetch !== activityAnswerEpoch) {
+        staleActivityRefresh = true;
+        return;
+      }
       const nextLocationStatus = locationStatusText(location);
       updateSettingsSnapshot({
         data: bootstrap,
@@ -477,6 +495,9 @@ export default function SettingsScreen() {
         locationStatus: nextLocationStatus,
         updatedAt: Date.now()
       });
+      // The activity gate counts the refreshed activities before any awaiting change continues.
+      activityCategoriesRef.current = bootstrap.categories;
+      activityFreshEpoch.current = epochAtFetch;
       setData(bootstrap);
       await configureLocationIntelligence(bootstrap);
       syncShortcutCatalog(bootstrap);
@@ -499,6 +520,9 @@ export default function SettingsScreen() {
       }
     } finally {
       if (showRefreshIndicator) setRefreshing(false);
+      // A refresh skipped for being older than an activity answer is fetched again, after this
+      // run has finished (so it is a new fetch, not this one joined).
+      if (staleActivityRefresh && queueMounted.current) setTimeout(() => void goalReload.current?.({ silent: true }), 0);
     }
   }, async () => {}), [
     finishSignedOutNavigation,
@@ -527,8 +551,23 @@ export default function SettingsScreen() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // A reconnect bootstrap is held to the same rule as load(): one fetched before an activity
+  // answer may miss that change (a rename), so it is not shown; a fresh refresh follows instead.
+  const recoveryEpochs = useRef(new Map<number, number>());
   useEffect(() => subscribeRecoveredDashboardBootstrap(event => {
-    if (event.type === "completed") setDataAndCache(event.bootstrap);
+    if (event.type === "started") {
+      recoveryEpochs.current.set(event.publicationId, activityAnswerEpoch);
+      return;
+    }
+    if (event.type !== "completed") return;
+    const startedAt = recoveryEpochs.current.get(event.publicationId);
+    recoveryEpochs.current.delete(event.publicationId);
+    if (startedAt === undefined || startedAt !== activityAnswerEpoch) {
+      void goalReload.current?.({ silent: true });
+      return;
+    }
+    activityCategoriesRef.current = event.bootstrap.categories;
+    setDataAndCache(event.bootstrap);
   }), [setDataAndCache]);
 
   useEffect(() => {
@@ -567,8 +606,9 @@ export default function SettingsScreen() {
   useFocusEffect(
     useCallback(() => {
       void reloadThemePreference();
-      if (!isSettingsSnapshotFresh()) void load({ silent: true, trigger: "focus" });
-    }, [load, reloadThemePreference])
+      // Activities always refreshes on open: pins are only counted from this visit's own data.
+      if (!isSettingsSnapshotFresh() || settingsSection === "categories") void load({ silent: true, trigger: "focus" });
+    }, [load, reloadThemePreference, settingsSection])
   );
 
   useEffect(() => {
@@ -722,6 +762,27 @@ export default function SettingsScreen() {
         ? "Allow Dayframe in the Health app"
         : "Not connected yet";
   const [healthPickerKey, setHealthPickerKey] = useState<HealthImportPreferenceKey | null>(null);
+  const [activityEditor, setActivityEditor] = useState<{ activity: Category | null } | null>(null);
+  // One activity change at a time on the Activities page (pins, saves, creates, archives).
+  const activityChanges = useRef(createActivityChangeGate()).current;
+  // The activities the gate reads: kept current at once by applyActivityCategories, and
+  // re-synced from each committed load.
+  const activityCategoriesRef = useRef<Category[]>([]);
+  // The answer epoch this visit's last published refresh was fetched at (-1: none yet). Pins
+  // count as fresh only while no activity answer has arrived since.
+  const activityFreshEpoch = useRef(-1);
+  const activityPinsFresh = () => activityFreshEpoch.current === activityAnswerEpoch;
+  const lastSyncedCategories = useRef<Category[] | undefined>(undefined);
+  if (data?.categories !== lastSyncedCategories.current) {
+    lastSyncedCategories.current = data?.categories;
+    activityCategoriesRef.current = data?.categories ?? [];
+  }
+  // Settings › Activities: each row's last seven days, from the same lists as Today's quick start.
+  const activityWeekSeconds = activityWeekSecondsFor(
+    [data?.historyEntries, data?.entries, data?.weekEntries, data?.dayEntries],
+    Date.now(),
+    isReviewNeededEntry
+  );
 
   // Sync help: a short note about the page's own last action (never cached), cleared whenever the
   // page opens or what it lists changes, so it can't contradict the status above it.
@@ -781,178 +842,92 @@ export default function SettingsScreen() {
     router.push({ pathname: "/settings", params: { section } });
   }
 
-  const revealCategoryCreator = useCallback(() => {
-    requestAnimationFrame(() => {
-      settingsScrollRef.current?.scrollToEnd({ animated: !reduceMotion });
-    });
-  }, [reduceMotion]);
-
-  const revealCategoryEditor = useCallback(() => {
-    requestAnimationFrame(() => {
-      const inputHandle = findNodeHandle(categoryEditRef.current);
-      if (inputHandle === null) return;
-      settingsScrollRef.current?.scrollResponderScrollNativeHandleToKeyboard(
-        inputHandle,
-        CATEGORY_EDITOR_KEYBOARD_CLEARANCE,
-        true
-      );
-    });
-  }, []);
-
-  useEffect(() => {
-    if (!editingCategoryId) return undefined;
-
-    const focusTimer = setTimeout(() => {
-      categoryEditRef.current?.focus();
-      revealCategoryEditor();
-    }, 50);
-
-    return () => clearTimeout(focusTimer);
-  }, [editingCategoryId, revealCategoryEditor]);
-
-  useEffect(() => {
-    if (
-      settingsSection !== "categories" ||
-      (!creatingCategory && !editingCategoryId)
-    ) return undefined;
-
-    const revealFocusedEditor = creatingCategory ? revealCategoryCreator : revealCategoryEditor;
-    revealFocusedEditor();
-    const keyboardSubscription = Keyboard.addListener("keyboardDidShow", revealFocusedEditor);
-    return () => keyboardSubscription.remove();
-  }, [
-    creatingCategory,
-    editingCategoryId,
-    revealCategoryCreator,
-    revealCategoryEditor,
-    settingsSection
-  ]);
-
-  function beginCreateCategory() {
-    if (!creatingCategory) {
-      if (!newCategoryName.trim()) {
-        setNewCategoryColor(nextCategoryColor(data?.categories ?? []));
-      }
-      setCreatingCategory(true);
+  // Settings › Activities (Blocks 6b-1): the editor sheet for New activity or one activity.
+  async function saveActivityFromEditor(activity: Category | null, draft: ActivityEditorDraft) {
+    // Every activity change waits its turn (createActivityChangeGate): an older answer never
+    // lands on top of a newer change.
+    const change = await activityChanges.run(async () => {
+      const owner = await readActiveMobileAccount();
+      // A pin asked for when the sheet opened is checked against quick start as it is now.
+      const pinnedNow = activityCategoriesRef.current.filter((item) => item.isPinned).length;
+      // Only counted from this visit's own refresh: an older cached copy may be missing a pin.
+      const pinned = !activity && draft.isPinned && activityPinsFresh() && pinnedNow < QUICK_START_PIN_LIMIT;
+      const result = activity
+        ? await updateCategory(activity.id, { name: draft.name, color: draft.color, icon: draft.icon })
+        : await createCategory(draft.name, { color: draft.color, icon: draft.icon, isPinned: pinned });
+      if (!(await activityOwnerStill(owner))) return;
+      // The accepted activity shows at once, even if the refresh below fails.
+      applyActivityCategories((categories) => categories.some((item) => item.id === result.category.id)
+        ? categories.map((item) => item.id === result.category.id ? { ...item, ...result.category } : item)
+        : [...categories, result.category]);
+      await load({ silent: true });
+    }).catch((error: unknown) => ({ ran: true as const, error }));
+    if (!change.ran) return ACTIVITY_CHANGE_BUSY_MESSAGE;
+    if (!("error" in change)) return null;
+    if (change.error instanceof AuthRequiredError) {
+      finishSignedOutNavigation();
+      return null;
     }
-    if (editingCategoryId) {
-      setEditingCategoryId(null);
-      setEditingCategoryName("");
-      setEditingCategoryColor("lime");
-    }
-    revealCategoryCreator();
+    return change.error instanceof Error ? change.error.message : "Couldn't save the activity. Try again.";
   }
 
-  function cancelCreateCategory() {
-    setCreatingCategory(false);
-    setNewCategoryName("");
-    setNewCategoryColor(nextCategoryColor(data?.categories ?? []));
-    setPinNewCategory(true);
-    Keyboard.dismiss();
-  }
-
-  async function addCategory() {
-    const name = newCategoryName.trim();
-    if (!name) return;
-    try {
-      await createCategory(name, { color: newCategoryColor, isPinned: pinNewCategory });
-      setCreatingCategory(false);
-      setNewCategoryName("");
-      setPinNewCategory(true);
-      Keyboard.dismiss();
-      await load();
-    } catch (error) {
-      if (error instanceof AuthRequiredError) {
-        finishSignedOutNavigation();
-        return;
-      }
-      Alert.alert("Activities", error instanceof Error ? error.message : "Unable to create activity.");
+  async function archiveActivityFromEditor(activity: { id: string }) {
+    const change = await activityChanges.run(async () => {
+      const owner = await readActiveMobileAccount();
+      await archiveCategory(activity.id);
+      if (!(await activityOwnerStill(owner))) return;
+      // Archived: it leaves every list (and quick start) at once, even if the refresh fails.
+      applyActivityCategories((categories) => categories.filter((item) => item.id !== activity.id));
+      await load({ silent: true });
+    }).catch((error: unknown) => ({ ran: true as const, error }));
+    if (!change.ran) return ACTIVITY_CHANGE_BUSY_MESSAGE;
+    if (!("error" in change)) return null;
+    if (change.error instanceof AuthRequiredError) {
+      finishSignedOutNavigation();
+      return null;
     }
-  }
-
-  function beginEditCategory(category: Category) {
-    setCreatingCategory(false);
-    setEditingCategoryId(category.id);
-    setEditingCategoryName(category.name);
-    setEditingCategoryColor(category.color);
-  }
-
-  function cancelEditCategory() {
-    setEditingCategoryId(null);
-    setEditingCategoryName("");
-    setEditingCategoryColor("lime");
-  }
-
-  async function saveCategoryEdit(category: Category) {
-    const name = editingCategoryName.trim();
-    if (!name) {
-      Alert.alert("Activities", "Activity name is required.");
-      return;
-    }
-    try {
-      await updateCategory(category.id, {
-        name,
-        color: editingCategoryColor
-      });
-      cancelEditCategory();
-      await load();
-    } catch (error) {
-      if (error instanceof AuthRequiredError) {
-        finishSignedOutNavigation();
-        return;
-      }
-      Alert.alert("Activities", error instanceof Error ? error.message : "Unable to save activity.");
-    }
+    return change.error instanceof Error ? change.error.message : "Couldn't archive the activity. Try again.";
   }
 
   async function toggleCategoryPin(category: Category) {
+    // Pins share the one-change-at-a-time gate: an unpin still saving never frees a slot for
+    // another pin or a pinned create (if it failed, quick start would end with seven).
+    if (activityChanges.busy()) {
+      // Visible (and spoken by VoiceOver): the tap did not change the pin.
+      Alert.alert("Activities", ACTIVITY_CHANGE_BUSY_MESSAGE);
+      return;
+    }
+    // Pins are counted from this visit's own refresh, never from an older cached copy.
+    if (!activityPinsFresh()) {
+      Alert.alert("Activities", "Still loading your activities. Try again in a moment.");
+      void load({ silent: true });
+      return;
+    }
+    if (pinLimitReached(activityCategoriesRef.current, category.id)) {
+      Alert.alert("Quick start is full", `Quick start holds ${QUICK_START_PIN_LIMIT} activities. Unpin one first.`);
+      return;
+    }
     const nextPinned = !category.isPinned;
-    patchCategory(category.id, { isPinned: nextPinned });
-    try {
-      const result = await updateCategory(category.id, { isPinned: nextPinned });
-      if (result.category.isPinned !== nextPinned) {
-        throw new Error("The activity pin was not saved. Check that the Dayframe server is up to date, then try again.");
-      }
-      await load({ silent: true });
-    } catch (error) {
-      patchCategory(category.id, { isPinned: category.isPinned });
-      if (error instanceof AuthRequiredError) {
-        finishSignedOutNavigation();
-        return;
-      }
-      Alert.alert("Activities", error instanceof Error ? error.message : "Unable to update activity.");
-    }
-  }
-
-  function confirmDeleteCategory(category: Category) {
-    Alert.alert(
-      "Delete activity",
-      `Delete ${category.name}? Existing time entries keep their history.`,
-      [
-        { text: "Cancel", style: "cancel" },
-        {
-          text: "Delete",
-          style: "destructive",
-          onPress: () => {
-            void deleteSelectedCategory(category);
-          }
+    await activityChanges.run(async () => {
+      const owner = await readActiveMobileAccount();
+      patchCategory(category.id, { isPinned: nextPinned });
+      try {
+        const result = await updateCategory(category.id, { isPinned: nextPinned });
+        if (!(await activityOwnerStill(owner))) return;
+        if (result.category.isPinned !== nextPinned) {
+          throw new Error("The activity pin was not saved. Check that the Dayframe server is up to date, then try again.");
         }
-      ]
-    );
-  }
-
-  async function deleteSelectedCategory(category: Category) {
-    try {
-      await archiveCategory(category.id);
-      if (editingCategoryId === category.id) cancelEditCategory();
-      await load();
-    } catch (error) {
-      if (error instanceof AuthRequiredError) {
-        finishSignedOutNavigation();
-        return;
+        await load({ silent: true });
+      } catch (error) {
+        if (!(await activityOwnerStill(owner))) return;
+        patchCategory(category.id, { isPinned: category.isPinned });
+        if (error instanceof AuthRequiredError) {
+          finishSignedOutNavigation();
+          return;
+        }
+        Alert.alert("Activities", error instanceof Error ? error.message : "Unable to update activity.");
       }
-      Alert.alert("Activities", error instanceof Error ? error.message : "Unable to delete activity.");
-    }
+    });
   }
 
   async function syncAndReload() {
@@ -1519,15 +1494,31 @@ export default function SettingsScreen() {
   }
 
   function patchCategory(id: string, patch: Partial<Category>) {
-    setDataAndCache((current) => {
-      if (!current) return current;
-      return {
-        ...current,
-        categories: current.categories.map((category) =>
-          category.id === id ? { ...category, ...patch } : category
-        )
-      };
-    });
+    applyActivityCategories((categories) => categories.map((category) =>
+      category.id === id ? { ...category, ...patch } : category
+    ));
+  }
+
+  // An activity change applies its answer only while Settings is open for the account it started
+  // with: a late answer after signing out or switching account never writes the old account's
+  // activities into this screen or its cached snapshot.
+  async function activityOwnerStill(owner: Awaited<ReturnType<typeof readActiveMobileAccount>>) {
+    // An answer arrived: every Settings visit's refreshes fetched before now are out of date.
+    activityAnswerEpoch += 1;
+    const now = await readActiveMobileAccount();
+    if (queueMounted.current && owner && now && mobileAccountOwnersEqual(owner, now)) return true;
+    // The answer is not applied here, so the cached activities may be behind the server (a pin
+    // the server accepted): the next Settings visit refreshes before it trusts them.
+    if (owner && now && mobileAccountOwnersEqual(owner, now)) updateSettingsSnapshot({ updatedAt: 0 });
+    return false;
+  }
+
+  // Changes the page's activities and, at once, the copy the activity gate reads, so a change
+  // (an unpin rolled back, a create, an archive) counts before the next one can start, not only
+  // after React commits it.
+  function applyActivityCategories(change: (categories: Category[]) => Category[]) {
+    activityCategoriesRef.current = change(activityCategoriesRef.current);
+    setDataAndCache((current) => current ? { ...current, categories: change(current.categories) } : current);
   }
 
   async function signOut() {
@@ -1588,11 +1579,10 @@ export default function SettingsScreen() {
       <ScrollView
         key={settingsSection}
         ref={settingsScrollRef}
-        automaticallyAdjustKeyboardInsets={Platform.OS === "ios" && settingsSection === "categories"}
         style={styles.settingsScrollView}
         contentContainerStyle={styles.settingsScrollContent}
         keyboardDismissMode={Platform.OS === "ios" ? "interactive" : "on-drag"}
-        keyboardShouldPersistTaps={settingsSection === "categories" ? "always" : "handled"}
+        keyboardShouldPersistTaps="handled"
         onContentSizeChange={(_width, height) => {
           settingsScrollContentHeightRef.current = height;
           requestAnimationFrame(clampSettingsScroll);
@@ -1839,238 +1829,70 @@ export default function SettingsScreen() {
           ) : null}
 
           {settingsSection === "categories" ? (
-          <View style={styles.panel}>
-            <View style={styles.categoryList}>
-              {(data?.categories ?? []).map((category) => {
-                const categoryColor = paletteColorFor(category.color, category.name, theme.mode);
-                const editing = editingCategoryId === category.id;
+            <View style={styles.settingsBlocksStack}>
+              <Pressable
+                accessibilityRole="button"
+                onPress={() => setActivityEditor({ activity: null })}
+                style={({ pressed }) => [styles.settingsNewActivity, pressed ? styles.buttonPressed : null]}
+                testID="activities-new"
+              >
+                <DayframeIcon color={theme.onAccent} glyph={DAYFRAME_APP_ICONS.add} size={18} />
+                <Text {...mobileTextProps("control")} style={styles.settingsNewActivityText}>New activity</Text>
+              </Pressable>
 
-                if (editing) {
-                  return (
-                    <Reanimated.View
-                      key={category.id}
-                      entering={localPresenceEntering(reduceMotion)}
-                      exiting={localPresenceExiting(reduceMotion)}
-                      layout={localLayoutTransition(reduceMotion)}
-                      onLayout={revealCategoryEditor}
-                      style={styles.categoryEditCard}
-                    >
-                      <View style={styles.categoryEditHeader}>
-                        <View
-                          style={[
-                            styles.colorDot,
-                            { backgroundColor: paletteColorFor(editingCategoryColor, category.name, theme.mode) }
-                          ]}
-                        />
-                        <TextInput
-                          ref={categoryEditRef}
-                          accessibilityLabel="Activity name"
-                          {...mobileTextProps("input")}
-                          style={[styles.textInput, styles.categoryEditInput]}
-                          value={editingCategoryName}
-                          onChangeText={setEditingCategoryName}
-                          placeholder="Activity name"
-                          placeholderTextColor={theme.textSecondary}
-                          returnKeyType="done"
-                          onSubmitEditing={() => saveCategoryEdit(category)}
-                        />
-                      </View>
-                      <CategoryColorPicker
-                        selectedColor={editingCategoryColor}
-                        onSelect={setEditingCategoryColor}
-                        styles={styles}
-                        theme={theme}
-                      />
-                      <View style={styles.buttonRow}>
-                        <Pressable
-                          accessibilityRole="button"
-                          style={pressable(styles.secondaryButton, styles.buttonPressed)}
-                          onPress={cancelEditCategory}
-                        >
-                          <Text {...mobileTextProps("control")} style={styles.secondaryButtonText}>Cancel</Text>
-                        </Pressable>
-                        <Pressable
-                          accessibilityLabel={`Delete ${category.name}`}
-                          accessibilityRole="button"
-                          style={pressable(styles.secondaryButton, styles.buttonPressed)}
-                          onPress={() => confirmDeleteCategory(category)}
-                        >
-                          <Text {...mobileTextProps("control")} style={styles.activeEditDeleteText}>Delete</Text>
-                        </Pressable>
-                        <Pressable
-                          accessibilityRole="button"
-                          style={pressable(styles.primaryInlineButton, styles.buttonPressed)}
-                          onPress={() => saveCategoryEdit(category)}
-                        >
-                          <Text {...mobileTextProps("control")} style={styles.primaryButtonText}>Save</Text>
-                        </Pressable>
-                      </View>
-                    </Reanimated.View>
-                  );
-                }
-
-                return (
-                  <Reanimated.View
-                    key={category.id}
-                    layout={localLayoutTransition(reduceMotion)}
-                    style={[styles.categoryRow, category.isPinned ? styles.categoryRowPinned : null]}
-                  >
-                    <Pressable
-                      accessibilityLabel={`Edit ${category.name}`}
-                      accessibilityRole="button"
-                      onPress={() => beginEditCategory(category)}
-                      style={pressable(styles.categoryRowMain, styles.buttonPressed)}
-                    >
-                      <View style={[styles.colorDot, { backgroundColor: categoryColor }]} />
-                      <View style={styles.categoryTextStack}>
-                    <Text {...mobileTextProps("itemTitle")} style={styles.categoryName}>{category.name}</Text>
-                        <Text {...mobileTextProps("metadata")} style={[styles.categoryMeta, category.isPinned ? styles.categoryMetaPinned : null]}>
-                          {category.isPinned ? "Pinned" : "Unpinned"}
-                        </Text>
-                      </View>
-                    </Pressable>
-                    <View style={styles.categoryActions}>
-                      <Pressable
-                        accessibilityLabel={category.isPinned ? `Unpin ${category.name}` : `Pin ${category.name}`}
-                        accessibilityRole="button"
-                        style={pressable(
-                          [
-                            styles.categoryIconButton,
-                            category.isPinned ? styles.categoryIconButtonSelected : null
-                          ],
-                          styles.buttonPressed
-                        )}
-                        onPress={() => toggleCategoryPin(category)}
+              {activitiesPageGroups(data?.categories ?? []).map((group) => (
+                <SettingsBlockGroup key={group.key} theme={theme} title={group.title}>
+                  {group.rows.map((category, index) => {
+                    const colors = blockColorsFor(category.color, theme.mode, category.name);
+                    const week = formatActivityWeek(activityWeekSeconds.get(category.id) ?? 0);
+                    return (
+                      <View
+                        key={category.id}
+                        style={[styles.settingsActivityRow, index > 0 ? styles.settingsActivityRowDivider : null]}
                       >
-                        {category.isPinned ? (
-                          <PinGlyph color={theme.accentText} />
-                        ) : (
-                          <PinOffGlyph color={theme.textSecondary} />
-                        )}
-                      </Pressable>
-                    </View>
-                  </Reanimated.View>
-                );
-              })}
+                        <Pressable
+                          accessibilityHint="Edits this activity"
+                          accessibilityLabel={`${category.name}, ${week}`}
+                          accessibilityRole="button"
+                          onPress={() => setActivityEditor({ activity: category })}
+                          style={({ pressed }) => [styles.settingsActivityOpen, pressed ? styles.buttonPressed : null]}
+                          testID={`activities-row-${category.id}`}
+                        >
+                          <View style={[styles.settingsActivityBlock, { backgroundColor: colors.fill }]}>
+                            <ActivityIcon color={colors.text} icon={category.icon} name={category.name} size={18} />
+                          </View>
+                          <View style={styles.settingsActivityText}>
+                            <Text {...mobileTextProps("itemTitle")} numberOfLines={1} style={styles.settingsActivityName}>{category.name}</Text>
+                            <Text {...mobileTextProps("metadata")} style={styles.settingsActivityMeta}>{week}</Text>
+                          </View>
+                        </Pressable>
+                        <Pressable
+                          accessibilityLabel={category.isPinned ? `Remove ${category.name} from quick start` : `Add ${category.name} to quick start`}
+                          accessibilityRole="button"
+                          accessibilityState={{ selected: category.isPinned }}
+                          onPress={() => void toggleCategoryPin(category)}
+                          style={({ pressed }) => [
+                            styles.settingsActivityPin,
+                            category.isPinned ? styles.settingsActivityPinOn : null,
+                            pressed ? styles.buttonPressed : null
+                          ]}
+                          testID={`activities-pin-${category.id}`}
+                        >
+                          <DayframeIcon
+                            color={category.isPinned ? theme.textPrimary : theme.textMuted}
+                            glyph={DAYFRAME_APP_ICONS.pin}
+                            size={18}
+                          />
+                        </Pressable>
+                      </View>
+                    );
+                  })}
+                </SettingsBlockGroup>
+              ))}
+              <Text {...mobileTextProps("metadata")} style={styles.settingsFooter}>
+                Pinned activities fill the Start tiles on Today. Quick start holds {QUICK_START_PIN_LIMIT}.
+              </Text>
             </View>
-            <Reanimated.View
-              layout={localLayoutTransition(reduceMotion)}
-              onLayout={creatingCategory ? revealCategoryCreator : undefined}
-              style={creatingCategory ? styles.categoryEditCard : null}
-            >
-              <View style={styles.categoryCreateRow}>
-                {creatingCategory ? (
-                  <View
-                    style={[
-                      styles.colorDot,
-                      { backgroundColor: paletteColorFor(newCategoryColor, newCategoryName, theme.mode) }
-                    ]}
-                  />
-                ) : null}
-                <TextInput
-                  ref={newCategoryInputRef}
-                  accessibilityLabel="New activity name"
-                  {...mobileTextProps("input")}
-                  style={[styles.textInput, styles.categoryCreateInput]}
-                  value={newCategoryName}
-                  onChangeText={setNewCategoryName}
-                  onFocus={beginCreateCategory}
-                  onSubmitEditing={addCategory}
-                  placeholder="New activity"
-                  placeholderTextColor={theme.textSecondary}
-                  returnKeyType="done"
-                />
-                {!creatingCategory ? (
-                  <>
-                    <Pressable
-                      accessibilityLabel={pinNewCategory ? "Create as pinned activity" : "Create as unpinned activity"}
-                      accessibilityRole="button"
-                      accessibilityState={{ selected: pinNewCategory }}
-                      style={pressable(
-                        [styles.categoryIconButton, pinNewCategory ? styles.categoryIconButtonSelected : null],
-                        styles.buttonPressed
-                      )}
-                      onPress={() => setPinNewCategory((current) => !current)}
-                    >
-                      {pinNewCategory ? (
-                        <PinGlyph color={theme.accentText} />
-                      ) : (
-                        <PinOffGlyph color={theme.textSecondary} />
-                      )}
-                    </Pressable>
-                    <Pressable
-                      accessibilityLabel="Create activity"
-                      accessibilityRole="button"
-                      disabled={!newCategoryName.trim()}
-                      style={({ pressed }) => [
-                        styles.categoryIconButtonPrimary,
-                        pressed && newCategoryName.trim() ? styles.buttonPressed : null,
-                        !newCategoryName.trim() ? styles.buttonDisabled : null
-                      ]}
-                      onPress={addCategory}
-                    >
-                      <PlusGlyph color={theme.onAccent} />
-                    </Pressable>
-                  </>
-                ) : null}
-              </View>
-              {creatingCategory ? (
-                <Reanimated.View
-                  entering={localPresenceEntering(reduceMotion)}
-                  exiting={localPresenceExiting(reduceMotion)}
-                  layout={localLayoutTransition(reduceMotion)}
-                  style={styles.categoryCreateDetails}
-                >
-                  <CategoryColorPicker
-                    selectedColor={newCategoryColor}
-                    onSelect={setNewCategoryColor}
-                    styles={styles}
-                    theme={theme}
-                  />
-                  <View style={styles.buttonRow}>
-                    <Pressable
-                      accessibilityRole="button"
-                      style={pressable(styles.secondaryButton, styles.buttonPressed)}
-                      onPress={cancelCreateCategory}
-                    >
-                      <Text {...mobileTextProps("control")} style={styles.secondaryButtonText}>Cancel</Text>
-                    </Pressable>
-                    <Pressable
-                      accessibilityLabel={pinNewCategory ? "New activity pinned" : "New activity unpinned"}
-                      accessibilityRole="button"
-                      accessibilityState={{ selected: pinNewCategory }}
-                      style={pressable(
-                        [styles.secondaryButton, styles.categoryCreatePinButton],
-                        styles.buttonPressed
-                      )}
-                      onPress={() => setPinNewCategory((current) => !current)}
-                    >
-                      {pinNewCategory ? (
-                        <PinGlyph color={theme.accentText} />
-                      ) : (
-                        <PinOffGlyph color={theme.textSecondary} />
-                      )}
-                      <Text {...mobileTextProps("control")} style={styles.secondaryButtonText}>
-                        {pinNewCategory ? "Pinned" : "Unpinned"}
-                      </Text>
-                    </Pressable>
-                    <Pressable
-                      accessibilityRole="button"
-                      disabled={!newCategoryName.trim()}
-                      style={({ pressed }) => [
-                        styles.primaryInlineButton,
-                        pressed && newCategoryName.trim() ? styles.buttonPressed : null,
-                        !newCategoryName.trim() ? styles.buttonDisabled : null
-                      ]}
-                      onPress={addCategory}
-                    >
-                      <Text {...mobileTextProps("control")} style={styles.primaryButtonText}>Create</Text>
-                    </Pressable>
-                  </View>
-                </Reanimated.View>
-              ) : null}
-            </Reanimated.View>
-          </View>
           ) : null}
 
           {settingsSection === "profile" ? (
@@ -2478,6 +2300,21 @@ export default function SettingsScreen() {
           ) : null}
         </View>
       </ScrollView>
+      {activityEditor ? (
+        <ActivityEditorSheet
+          activities={data?.categories ?? []}
+          activity={activityEditor.activity}
+          defaultColor={nextCategoryColor(data?.categories ?? [])}
+          pinnedCount={(data?.categories ?? []).filter((category) => category.isPinned).length}
+          pinReady={activityPinsFresh()}
+          onArchive={archiveActivityFromEditor}
+          onClose={() => setActivityEditor(null)}
+          onSave={(draft) => saveActivityFromEditor(activityEditor.activity, draft)}
+          reduceMotion={reduceMotion}
+          styles={styles}
+          theme={theme}
+        />
+      ) : null}
       <LocationInformationSheet
         kind={locationInfoSheet}
         onClose={() => setLocationInfoSheet(null)}
@@ -2579,42 +2416,6 @@ function LocationInformationSheet({
   );
 }
 
-function CategoryColorPicker({
-  onSelect,
-  selectedColor,
-  styles,
-  theme
-}: {
-  onSelect: (color: DayframePaletteKey) => void;
-  selectedColor: string;
-  styles: MobileStyles;
-  theme: MobileTheme;
-}) {
-  return (
-    <View accessibilityLabel="Activity colour" style={styles.paletteGrid}>
-      {DAYFRAME_PALETTE_PICKER.map((color) => {
-        const selected = selectedColor === color.key;
-        return (
-          <Pressable
-            key={color.key}
-            accessibilityLabel={`${color.label} activity colour`}
-            accessibilityRole="button"
-            accessibilityState={{ selected }}
-            style={pressable(
-              [
-                styles.paletteSwatch,
-                { backgroundColor: paletteColorFor(color.key, color.label, theme.mode) },
-                selected ? styles.paletteSwatchSelected : null
-              ],
-              styles.buttonPressed
-            )}
-            onPress={() => onSelect(color.key)}
-          />
-        );
-      })}
-    </View>
-  );
-}
 
 function CloseGlyph({ color }: { color: string }) {
   return (
@@ -2659,43 +2460,6 @@ function BackGlyph({ color }: { color: string }) {
   return (
     <Svg width={20} height={20} viewBox="0 0 24 24">
       <Path d="M15 5 8 12l7 7" fill="none" stroke={color} strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.3} />
-    </Svg>
-  );
-}
-
-function PinGlyph({ color }: { color: string }) {
-  return (
-    <Svg width={18} height={18} viewBox="0 0 24 24">
-      <Path
-        d="M9 4h6l-1 6 4 3v2h-5l-1 6-1-6H6v-2l4-3-1-6Z"
-        fill={color}
-        stroke={color}
-        strokeLinejoin="round"
-        strokeWidth={2}
-      />
-    </Svg>
-  );
-}
-
-function PinOffGlyph({ color }: { color: string }) {
-  return (
-    <Svg width={18} height={18} viewBox="0 0 24 24">
-      <Path
-        d="M9 4h6l-1 6 4 3v2h-5l-1 6-1-6H6v-2l4-3-1-6Z"
-        fill="none"
-        stroke={color}
-        strokeLinejoin="round"
-        strokeWidth={2}
-      />
-      <Path d="M4 4l16 16" stroke={color} strokeLinecap="round" strokeWidth={2.2} />
-    </Svg>
-  );
-}
-
-function PlusGlyph({ color }: { color: string }) {
-  return (
-    <Svg width={20} height={20} viewBox="0 0 24 24">
-      <Path d="M12 5v14M5 12h14" stroke={color} strokeLinecap="round" strokeWidth={2.2} />
     </Svg>
   );
 }
