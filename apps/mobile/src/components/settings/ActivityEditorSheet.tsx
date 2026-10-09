@@ -37,6 +37,7 @@ export function ActivityEditorSheet({
   onClose,
   onSave,
   pinnedCount,
+  pinReady = true,
   reduceMotion,
   styles: shared,
   theme
@@ -52,6 +53,8 @@ export function ActivityEditorSheet({
   onSave: (draft: ActivityEditorDraft) => Promise<string | null>;
   /** How many activities are pinned now (quick start holds QUICK_START_PIN_LIMIT). */
   pinnedCount: number;
+  /** False until this visit has refreshed quick start; a pin can't be chosen until then. */
+  pinReady?: boolean;
   reduceMotion: boolean;
   styles: MobileStyles;
   theme: MobileTheme;
@@ -100,7 +103,7 @@ export function ActivityEditorSheet({
     busy.current = true;
     setSaving(true);
     setProblem(null);
-    const result = await onSave({ name: name.trim(), color, icon, isPinned: !activity && pinNew && !quickStartFull })
+    const result = await onSave({ name: name.trim(), color, icon, isPinned: !activity && pinNew && pinReady && !quickStartFull })
       .catch(() => "Couldn't save. Check your connection and try again.");
     busy.current = false;
     if (done.current) return;
@@ -245,15 +248,17 @@ export function ActivityEditorSheet({
                 <View style={styles.pinText}>
                   <Text {...mobileTextProps("itemTitle")} style={{ color: theme.textPrimary, fontSize: 15, fontWeight: "600" }}>Pin to quick start</Text>
                   <Text {...mobileTextProps("metadata")} style={{ color: theme.textMuted }}>
-                    {quickStartFull ? `Quick start holds ${QUICK_START_PIN_LIMIT}. Unpin one to add this.` : "Shows it in the Start tiles on Today"}
+                    {!pinReady
+                      ? "Checking quick start… Pin it from the list once it has loaded."
+                      : quickStartFull ? `Quick start holds ${QUICK_START_PIN_LIMIT}. Unpin one to add this.` : "Shows it in the Start tiles on Today"}
                   </Text>
                 </View>
                 <SettingsSwitch
-                  disabled={quickStartFull || saving}
+                  disabled={!pinReady || quickStartFull || saving}
                   label="Pin to quick start"
                   onValueChange={setPinNew}
                   theme={theme}
-                  value={pinNew && !quickStartFull}
+                  value={pinReady && pinNew && !quickStartFull}
                 />
               </View>
             )}

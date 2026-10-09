@@ -235,6 +235,11 @@ function updateSettingsSnapshot(patch: Partial<SettingsSnapshot>) {
   };
 }
 
+// Advances whenever an activity change gets its answer, applied or not (in any Settings visit).
+// A refresh fetched before the latest answer is not published, and pin capacity counts as fresh
+// only when no answer arrived since this visit's last published refresh.
+let activityAnswerEpoch = 0;
+
 function clearSettingsSnapshot() {
   cachedSettingsSnapshot = null;
 }
@@ -461,12 +466,14 @@ export default function SettingsScreen() {
   const load = useCallback((options?: { silent?: boolean; trigger?: "navigation" | "focus" | "pull" }) => refreshes.current.run("settings", true, async () => {
     const showRefreshIndicator = shouldShowSettingsRefreshSpinner(options?.trigger ?? "navigation");
     if (showRefreshIndicator) setRefreshing(true);
+    let staleActivityRefresh = false;
     // The local queue has one guarded reader (refreshQueueLatest): it publishes whether or not the
     // bootstrap below succeeds, and never after Settings closed or the account changed.
     void refreshQueueLatest();
     try {
       const loadOwner = await readActiveMobileAccount();
       await drainNativeShortcutQueue();
+      const epochAtFetch = activityAnswerEpoch;
       const [bootstrap, location] = await Promise.all([
         fetchBootstrap(),
         getLocationVisitDiagnostics()
@@ -475,6 +482,12 @@ export default function SettingsScreen() {
       // after a sign-out or an account switch never refills the cleared snapshot or this screen.
       const publishOwner = await readActiveMobileAccount();
       if (!queueMounted.current || !loadOwner || !mobileAccountOwnersEqual(loadOwner, publishOwner)) return;
+      // Fetched before an activity change's answer: it may miss that change, so it is not shown;
+      // a fresh refresh follows.
+      if (epochAtFetch !== activityAnswerEpoch) {
+        staleActivityRefresh = true;
+        return;
+      }
       const nextLocationStatus = locationStatusText(location);
       updateSettingsSnapshot({
         data: bootstrap,
@@ -484,7 +497,7 @@ export default function SettingsScreen() {
       });
       // The activity gate counts the refreshed activities before any awaiting change continues.
       activityCategoriesRef.current = bootstrap.categories;
-      activityDataFresh.current = true;
+      activityFreshEpoch.current = epochAtFetch;
       setData(bootstrap);
       await configureLocationIntelligence(bootstrap);
       syncShortcutCatalog(bootstrap);
@@ -507,6 +520,9 @@ export default function SettingsScreen() {
       }
     } finally {
       if (showRefreshIndicator) setRefreshing(false);
+      // A refresh skipped for being older than an activity answer is fetched again, after this
+      // run has finished (so it is a new fetch, not this one joined).
+      if (staleActivityRefresh && queueMounted.current) setTimeout(() => void goalReload.current?.({ silent: true }), 0);
     }
   }, async () => {}), [
     finishSignedOutNavigation,
@@ -737,8 +753,10 @@ export default function SettingsScreen() {
   // The activities the gate reads: kept current at once by applyActivityCategories, and
   // re-synced from each committed load.
   const activityCategoriesRef = useRef<Category[]>([]);
-  // Whether this visit has its own refreshed activities (set by load()); pins wait for it.
-  const activityDataFresh = useRef(false);
+  // The answer epoch this visit's last published refresh was fetched at (-1: none yet). Pins
+  // count as fresh only while no activity answer has arrived since.
+  const activityFreshEpoch = useRef(-1);
+  const activityPinsFresh = () => activityFreshEpoch.current === activityAnswerEpoch;
   const lastSyncedCategories = useRef<Category[] | undefined>(undefined);
   if (data?.categories !== lastSyncedCategories.current) {
     lastSyncedCategories.current = data?.categories;
@@ -818,7 +836,7 @@ export default function SettingsScreen() {
       // A pin asked for when the sheet opened is checked against quick start as it is now.
       const pinnedNow = activityCategoriesRef.current.filter((item) => item.isPinned).length;
       // Only counted from this visit's own refresh: an older cached copy may be missing a pin.
-      const pinned = !activity && draft.isPinned && activityDataFresh.current && pinnedNow < QUICK_START_PIN_LIMIT;
+      const pinned = !activity && draft.isPinned && activityPinsFresh() && pinnedNow < QUICK_START_PIN_LIMIT;
       const result = activity
         ? await updateCategory(activity.id, { name: draft.name, color: draft.color, icon: draft.icon })
         : await createCategory(draft.name, { color: draft.color, icon: draft.icon, isPinned: pinned });
@@ -865,7 +883,7 @@ export default function SettingsScreen() {
       return;
     }
     // Pins are counted from this visit's own refresh, never from an older cached copy.
-    if (!activityDataFresh.current) {
+    if (!activityPinsFresh()) {
       Alert.alert("Activities", "Still loading your activities. Try again in a moment.");
       void load({ silent: true });
       return;
@@ -1470,6 +1488,8 @@ export default function SettingsScreen() {
   // with: a late answer after signing out or switching account never writes the old account's
   // activities into this screen or its cached snapshot.
   async function activityOwnerStill(owner: Awaited<ReturnType<typeof readActiveMobileAccount>>) {
+    // An answer arrived: every Settings visit's refreshes fetched before now are out of date.
+    activityAnswerEpoch += 1;
     const now = await readActiveMobileAccount();
     if (queueMounted.current && owner && now && mobileAccountOwnersEqual(owner, now)) return true;
     // The answer is not applied here, so the cached activities may be behind the server (a pin
@@ -2271,6 +2291,7 @@ export default function SettingsScreen() {
           activity={activityEditor.activity}
           defaultColor={nextCategoryColor(data?.categories ?? [])}
           pinnedCount={(data?.categories ?? []).filter((category) => category.isPinned).length}
+          pinReady={activityPinsFresh()}
           onArchive={archiveActivityFromEditor}
           onClose={() => setActivityEditor(null)}
           onSave={(draft) => saveActivityFromEditor(activityEditor.activity, draft)}

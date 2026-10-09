@@ -84,6 +84,15 @@ describe("ActivityEditorSheet", () => {
     expect(onSave).toHaveBeenCalledWith({ name: "Piano", color: "lime", icon: null, isPinned: true });
   });
 
+  it("offers no pin until quick start has loaded, and never sends one", () => {
+    const { onSave } = render({ pinReady: false });
+    expect(pinSwitch().props.disabled).toBe(true);
+    expect(pinSwitch().props.value).toBe(false);
+    act(() => byTestId("activity-editor-name").props.onChangeText("Piano"));
+    act(() => byTestId("activity-editor-save").props.onPress());
+    expect(onSave).toHaveBeenCalledWith(expect.objectContaining({ isPinned: false }));
+  });
+
   it("never pins a new activity when quick start is full", () => {
     const { onSave } = render({ pinnedCount: 6 });
     expect(pinSwitch().props.disabled).toBe(true);

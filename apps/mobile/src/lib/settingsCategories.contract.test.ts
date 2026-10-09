@@ -30,15 +30,21 @@ describe("mobile Activities page contract", () => {
     expect(settingsSource).toMatch(/function patchCategory\([^)]*\) \{\s*applyActivityCategories\(/);
     expect(settingsSource).toContain("if (pinLimitReached(activityCategoriesRef.current, category.id)) {");
     // The refresh inside a change counts before the gate opens (a pin added on another device).
-    expect(settingsSource).toMatch(/activityCategoriesRef\.current = bootstrap\.categories;\s*activityDataFresh\.current = true;\s*setData\(bootstrap\);/);
+    expect(settingsSource).toMatch(/activityCategoriesRef\.current = bootstrap\.categories;\s*activityFreshEpoch\.current = epochAtFetch;\s*setData\(bootstrap\);/);
+    // Every answer advances one shared epoch: a refresh fetched before it is not shown (another
+    // follows), and pins count as fresh only while nothing has been answered since.
+    expect(settingsSource).toMatch(/activityAnswerEpoch \+= 1;/);
+    expect(settingsSource).toMatch(/if \(epochAtFetch !== activityAnswerEpoch\) \{\s*staleActivityRefresh = true;\s*return;/);
+    expect(settingsSource).toContain("const activityPinsFresh = () => activityFreshEpoch.current === activityAnswerEpoch;");
+    expect(settingsSource).toContain("pinReady={activityPinsFresh()}");
     // A late answer after signing out, switching account or closing Settings applies nothing.
     expect(settingsSource.match(/if \(!\(await activityOwnerStill\(owner\)\)\) return;/g)).toHaveLength(4);
     // A refresh is published only for the account and visit that asked for it.
     expect(settingsSource).toContain("if (!queueMounted.current || !loadOwner || !mobileAccountOwnersEqual(loadOwner, publishOwner)) return;");
     // A discarded answer marks the cache stale; pins wait for this visit's own refresh.
     expect(settingsSource).toContain("updateSettingsSnapshot({ updatedAt: 0 });");
-    expect(settingsSource).toContain("if (!activityDataFresh.current) {");
-    expect(settingsSource).toContain("const pinned = !activity && draft.isPinned && activityDataFresh.current && pinnedNow < QUICK_START_PIN_LIMIT;");
+    expect(settingsSource).toContain("if (!activityPinsFresh()) {");
+    expect(settingsSource).toContain("const pinned = !activity && draft.isPinned && activityPinsFresh() && pinnedNow < QUICK_START_PIN_LIMIT;");
     expect(settingsSource).toContain("if (queueMounted.current && owner && now && mobileAccountOwnersEqual(owner, now)) return true;");
     expect(settingsSource).toContain("accessibilityState={{ selected: category.isPinned }}");
     expect(settingsSource).toContain('testID="activities-new"');
