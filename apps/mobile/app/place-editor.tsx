@@ -16,10 +16,20 @@ import { router, useLocalSearchParams } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
 import Svg, { Circle as SvgCircle, Path } from "react-native-svg";
 import MapView, { Circle, Marker, type MapPressEvent } from "react-native-maps";
-import { paletteColorFor } from "@dayframe/shared";
+import {
+  PlaceRoleSchema,
+  leavingRoleHolder,
+  paletteColorFor,
+  placeDisplayName,
+  placeRoleLabel,
+  placeRoleRequest,
+  placeRoleSlots,
+  previousRolePlaceName
+} from "@dayframe/shared";
 import {
   AuthRequiredError,
   createPlace,
+  deletePlace,
   fetchBootstrap,
   updatePlace,
   type MobileBootstrap,
@@ -33,6 +43,7 @@ import {
   locationAccuracyWarning,
   suggestedPlaceNameFromGeocode,
   validatePlaceForm,
+  withRole,
   DEFAULT_PLACE_RADIUS_METERS
 } from "@/lib/places";
 import {
@@ -74,6 +85,8 @@ export default function PlaceEditorScreen() {
     mode?: string;
     placeId?: string;
     learnedPlaceId?: string;
+    /** "home" or "work": a new place goes straight into that slot (Places › Home and Work). */
+    role?: string;
   }>();
   const mode: EditorMode = params.mode === "edit"
     ? "edit"
@@ -104,6 +117,8 @@ export default function PlaceEditorScreen() {
   const [locationAccuracy, setLocationAccuracy] = useState<number | null>(null);
   const [locationPrecise, setLocationPrecise] = useState(true);
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
+  const [previousRoleName, setPreviousRoleName] = useState<string | null>(null);
+  const [deleting, setDeleting] = useState(false);
   const saveInFlight = useRef(false);
   const nameTouched = useRef(mode !== "create");
   const initialCoordinate = useRef<{ latitude: number; longitude: number } | null>(null);
@@ -192,7 +207,17 @@ export default function PlaceEditorScreen() {
     defaultCategoryId: loggingEnabled ? defaultCategoryId : "",
     defaultActivityDescription: loggingEnabled ? defaultActivityDescription : ""
   });
-  const title = mode === "edit" ? "Edit place" : mode === "learned" ? "Save learned place" : "New place";
+  // A new place added from Places › Home and Work goes straight into that slot; the place the
+  // role leaves can be renamed, as on the web (Blocks 7a).
+  const parsedRole = PlaceRoleSchema.safeParse(params.role);
+  const newRole = mode === "create" && parsedRole.success ? parsedRole.data : null;
+  const roleSlot = newRole && data ? placeRoleSlots(data.places.map(withRole)).find((slot) => slot.role === newRole) ?? null : null;
+  const roleHolder = roleSlot ? leavingRoleHolder(roleSlot, null) : null;
+  const title = mode === "edit"
+    ? "Edit place"
+    : mode === "learned"
+      ? "Save learned place"
+      : newRole ? `Add ${placeRoleLabel(newRole)}` : "New place";
   const accuracyWarning = locationAccuracyWarning(locationAccuracy, locationPrecise);
 
   function changeSearchQuery(value: string) {
@@ -312,7 +337,15 @@ export default function PlaceEditorScreen() {
           loggingEnabled,
           defaultCategoryId: loggingEnabled ? validation.value.defaultCategoryId : null,
           defaultActivityDescription: loggingEnabled ? validation.value.defaultActivityDescription : null
-        });
+        }, newRole ? {
+          role: newRole,
+          previousPlaceName: placeRoleRequest({
+            role: newRole,
+            targetId: null,
+            holder: roleHolder,
+            previousPlaceName: previousRoleName ?? previousRolePlaceName(newRole)
+          }).previousPlaceName
+        } : undefined);
       }
       const refreshed = await fetchBootstrap();
       await refreshGeofencesForPlaces(refreshed.places, { userId: refreshed.user.id, workspaceId: refreshed.workspace.id }).catch(() => 0);
@@ -326,6 +359,42 @@ export default function PlaceEditorScreen() {
     } finally {
       saveInFlight.current = false;
       setSaving(false);
+    }
+  }
+
+  function confirmDeletePlace() {
+    if (mode !== "edit" || !loadedEntity || saveInFlight.current) return;
+    const place = loadedEntity as MobilePlace;
+    Alert.alert(
+      "Delete place",
+      `Delete ${placeDisplayName(withRole(place))}? Existing time entries keep their time data, but this place label will be removed.`,
+      [
+        { text: "Cancel", style: "cancel" },
+        { text: "Delete", style: "destructive", onPress: () => void removePlace(place) }
+      ]
+    );
+  }
+
+  async function removePlace(place: MobilePlace) {
+    if (saveInFlight.current) return;
+    saveInFlight.current = true;
+    setDeleting(true);
+    try {
+      await deletePlace(place.id);
+      const refreshed = await fetchBootstrap().catch(() => null);
+      if (refreshed) {
+        await refreshGeofencesForPlaces(refreshed.places, { userId: refreshed.user.id, workspaceId: refreshed.workspace.id }).catch(() => 0);
+      }
+      router.back();
+    } catch (error) {
+      if (error instanceof AuthRequiredError) {
+        router.replace("/");
+        return;
+      }
+      Alert.alert("Places", error instanceof Error ? error.message : "Unable to delete place.");
+    } finally {
+      saveInFlight.current = false;
+      setDeleting(false);
     }
   }
 
@@ -607,6 +676,27 @@ export default function PlaceEditorScreen() {
               ) : null}
             </View>
 
+            {newRole && roleHolder ? (
+              <View style={styles.panel}>
+                <Text style={styles.label}>Rename the old {placeRoleLabel(newRole).toLowerCase()}</Text>
+                <TextInput
+                  accessibilityHint="Its past entries keep this name. Leave it blank to keep the current name."
+                  accessibilityLabel={`Rename the old ${placeRoleLabel(newRole).toLowerCase()}`}
+                  maxLength={120}
+                  onChangeText={setPreviousRoleName}
+                  placeholder={roleHolder.name}
+                  placeholderTextColor={theme.textSecondary}
+                  returnKeyType="done"
+                  style={styles.textInput}
+                  testID="place-editor-previous-role-name"
+                  value={previousRoleName ?? previousRolePlaceName(newRole)}
+                />
+                <Text style={styles.categoryMeta}>
+                  {placeRoleLabel(newRole)} moves to this new place. The old one keeps its entries under this name, so they don&apos;t read as an address.
+                </Text>
+              </View>
+            ) : null}
+
             <View style={styles.panel}>
               <View style={styles.healthPreferenceHeader}>
                 <View style={styles.healthPreferenceText}>
@@ -706,6 +796,18 @@ export default function PlaceEditorScreen() {
                 <Text style={styles.primaryButtonText}>{saving ? "Saving…" : "Save"}</Text>
               </Pressable>
             </View>
+            {mode === "edit" && loadedEntity ? (
+              <Pressable
+                accessibilityRole="button"
+                accessibilityState={{ busy: deleting, disabled: saving || deleting }}
+                disabled={saving || deleting}
+                onPress={confirmDeletePlace}
+                style={({ pressed }) => [editorStyles.deleteButton, { backgroundColor: theme.surfaceMuted }, pressed ? styles.buttonPressed : null]}
+                testID="place-editor-delete"
+              >
+                <Text style={[editorStyles.deleteText, { color: theme.dangerText }]}>{deleting ? "Deleting…" : "Delete place"}</Text>
+              </Pressable>
+            ) : null}
           </View>
         )}
       </ScrollView>
@@ -880,7 +982,9 @@ function createEditorStyles(theme: MobileTheme) {
     coordinateFields: { gap: 9 },
     coordinateField: { gap: 5 },
     suggestionPreferences: { gap: 9 },
-    actions: { flexDirection: "row", justifyContent: "flex-end", gap: 9, paddingBottom: 6 }
+    actions: { flexDirection: "row", justifyContent: "flex-end", gap: 9, paddingBottom: 6 },
+    deleteButton: { alignItems: "center", borderRadius: 999, justifyContent: "center", marginTop: 8, minHeight: 48 },
+    deleteText: { fontSize: 15, fontWeight: "700" }
   });
 }
 

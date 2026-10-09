@@ -311,3 +311,10 @@ Block pull-to-refresh:
 - Owner: `SwipeDismissSheet` owns the editor's entrance, drag and exit (Reduce Motion: its opacity path); the page has no other movement. The preview block, icon and colour selections and the pin's fill update in place. After a save or archive the page's list re-renders from the reloaded data (a moved or archived row appears in or leaves its group without its own animation, as other Settings lists do).
 - Interruption: activity changes run one at a time across the page and the sheet (a second is refused, never queued behind a stale answer); a save or archive in progress disables Save and Archive; leaving the sheet mid-save keeps whatever the server accepted (the next load shows it). A seventh pin is refused with an alert and nothing moves.
 - Accessibility: icon and colour choices are radio groups with labels; the pin button names its action ("Add X to quick start"); all targets are at least 44 points.
+
+## Places page and Home/Work sheet (Blocks parity step 7a)
+
+- Trigger: Add place, a saved place row and a suggestion's Save open the place editor (existing pushed route); Set, Change and Clear open the Home/Work sheet; Save, Clear, Cancel, a backdrop tap, a swipe down or "Add a new place as Home/Work" closes it; a suggestion row opens the existing suggestion sheet.
+- Owner: `SwipeDismissSheet` owns the Home/Work sheet's entrance, drag and exit (Reduce Motion: its opacity path). "Add a new place as …" pushes the editor only from the sheet's `onDismiss`, so the sheet's exit and the route push never overlap. Saved and suggested place rows and the status line keep the shared `localPresenceEntering` / `localPresenceExiting` / `localLayoutTransition`; the slot rows update in place after a save.
+- Interruption: Save and Clear are one-shot (a second tap or a swipe mid-save does nothing more); a refused save keeps the sheet open with the reason announced; a typed rename survives choosing another place.
+- Accessibility: Reduce Motion keeps opacity-only presence and no layout movement; the saved-place choice is a radio group; Change, Clear and Set name their slot ("Change Home"); every target is at least 44 points.
