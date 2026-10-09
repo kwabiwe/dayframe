@@ -465,11 +465,16 @@ export default function SettingsScreen() {
     // bootstrap below succeeds, and never after Settings closed or the account changed.
     void refreshQueueLatest();
     try {
+      const loadOwner = await readActiveMobileAccount();
       await drainNativeShortcutQueue();
       const [bootstrap, location] = await Promise.all([
         fetchBootstrap(),
         getLocationVisitDiagnostics()
       ]);
+      // Published only while Settings is open for the account that asked: a refresh finishing
+      // after a sign-out or an account switch never refills the cleared snapshot or this screen.
+      const publishOwner = await readActiveMobileAccount();
+      if (!queueMounted.current || !loadOwner || !mobileAccountOwnersEqual(loadOwner, publishOwner)) return;
       const nextLocationStatus = locationStatusText(location);
       updateSettingsSnapshot({
         data: bootstrap,
@@ -479,6 +484,7 @@ export default function SettingsScreen() {
       });
       // The activity gate counts the refreshed activities before any awaiting change continues.
       activityCategoriesRef.current = bootstrap.categories;
+      activityDataFresh.current = true;
       setData(bootstrap);
       await configureLocationIntelligence(bootstrap);
       syncShortcutCatalog(bootstrap);
@@ -569,8 +575,9 @@ export default function SettingsScreen() {
   useFocusEffect(
     useCallback(() => {
       void reloadThemePreference();
-      if (!isSettingsSnapshotFresh()) void load({ silent: true, trigger: "focus" });
-    }, [load, reloadThemePreference])
+      // Activities always refreshes on open: pins are only counted from this visit's own data.
+      if (!isSettingsSnapshotFresh() || settingsSection === "categories") void load({ silent: true, trigger: "focus" });
+    }, [load, reloadThemePreference, settingsSection])
   );
 
   useEffect(() => {
@@ -730,6 +737,8 @@ export default function SettingsScreen() {
   // The activities the gate reads: kept current at once by applyActivityCategories, and
   // re-synced from each committed load.
   const activityCategoriesRef = useRef<Category[]>([]);
+  // Whether this visit has its own refreshed activities (set by load()); pins wait for it.
+  const activityDataFresh = useRef(false);
   const lastSyncedCategories = useRef<Category[] | undefined>(undefined);
   if (data?.categories !== lastSyncedCategories.current) {
     lastSyncedCategories.current = data?.categories;
@@ -808,7 +817,8 @@ export default function SettingsScreen() {
       const owner = await readActiveMobileAccount();
       // A pin asked for when the sheet opened is checked against quick start as it is now.
       const pinnedNow = activityCategoriesRef.current.filter((item) => item.isPinned).length;
-      const pinned = !activity && draft.isPinned && pinnedNow < QUICK_START_PIN_LIMIT;
+      // Only counted from this visit's own refresh: an older cached copy may be missing a pin.
+      const pinned = !activity && draft.isPinned && activityDataFresh.current && pinnedNow < QUICK_START_PIN_LIMIT;
       const result = activity
         ? await updateCategory(activity.id, { name: draft.name, color: draft.color, icon: draft.icon })
         : await createCategory(draft.name, { color: draft.color, icon: draft.icon, isPinned: pinned });
@@ -852,6 +862,12 @@ export default function SettingsScreen() {
     if (activityChanges.busy()) {
       // Visible (and spoken by VoiceOver): the tap did not change the pin.
       Alert.alert("Activities", ACTIVITY_CHANGE_BUSY_MESSAGE);
+      return;
+    }
+    // Pins are counted from this visit's own refresh, never from an older cached copy.
+    if (!activityDataFresh.current) {
+      Alert.alert("Activities", "Still loading your activities. Try again in a moment.");
+      void load({ silent: true });
       return;
     }
     if (pinLimitReached(activityCategoriesRef.current, category.id)) {
@@ -1454,9 +1470,12 @@ export default function SettingsScreen() {
   // with: a late answer after signing out or switching account never writes the old account's
   // activities into this screen or its cached snapshot.
   async function activityOwnerStill(owner: Awaited<ReturnType<typeof readActiveMobileAccount>>) {
-    if (!queueMounted.current || !owner) return false;
     const now = await readActiveMobileAccount();
-    return Boolean(queueMounted.current && now && mobileAccountOwnersEqual(owner, now));
+    if (queueMounted.current && owner && now && mobileAccountOwnersEqual(owner, now)) return true;
+    // The answer is not applied here, so the cached activities may be behind the server (a pin
+    // the server accepted): the next Settings visit refreshes before it trusts them.
+    if (owner && now && mobileAccountOwnersEqual(owner, now)) updateSettingsSnapshot({ updatedAt: 0 });
+    return false;
   }
 
   // Changes the page's activities and, at once, the copy the activity gate reads, so a change
