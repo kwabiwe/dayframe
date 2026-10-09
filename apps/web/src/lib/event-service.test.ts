@@ -111,6 +111,31 @@ describe("category persistence", () => {
     expect(client.release).toHaveBeenCalledOnce();
   });
 
+  it("creates a legacy entities-route activity through the same locked writer", async () => {
+    const client = {
+      query: vi.fn(async (statement: string, values?: unknown[]) => {
+        if (statement.includes("insert into categories")) {
+          return { rows: [{ id: categoryId(), name: values?.[1], color: values?.[2], isPinned: values?.[3] }] };
+        }
+        if (statement.includes("count(*)")) return { rows: [{ count: "6" }] };
+        return { rows: [] };
+      }),
+      release: vi.fn()
+    };
+    mocks.pool.connect.mockResolvedValueOnce(client);
+
+    await createEntity("category", { name: "Writing", isPinned: true }, session);
+
+    expect(client.query).toHaveBeenCalledWith(
+      "select pg_advisory_xact_lock(hashtextextended($1, 0))",
+      [automaticCategoryLockKey(session.workspaceId, "writing")]
+    );
+    expect(client.query).toHaveBeenCalledWith("select id from workspaces where id = $1 for no key update", [session.workspaceId]);
+    // Quick start is full, so the legacy route cannot add a seventh pin either.
+    const insert = client.query.mock.calls.find(([statement]) => String(statement).includes("insert into categories"));
+    expect(insert?.[1]?.[3]).toBe(false);
+  });
+
   it("rejects an active category name case-insensitively before insert", async () => {
     const client = {
       query: vi.fn(async (statement: string) => {

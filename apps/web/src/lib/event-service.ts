@@ -3179,27 +3179,16 @@ export async function createEntity(
         normalizePaletteKey(input.color, String(input.name ?? "New client"))
       ]);
     case "category":
-      try {
-        return await query(
-          "insert into categories (workspace_id, name, color, is_pinned) values ($1, $2, $3, $4)",
-          [
-            session.workspaceId,
-            String(input.name ?? "New activity"),
-            normalizePaletteKey(input.color, String(input.name ?? "New activity")),
-            Boolean(input.isPinned)
-          ]
-        );
-      } catch (error) {
-        if (!isUndefinedColumnError(error, "is_pinned")) throw error;
-        return query(
-          "insert into categories (workspace_id, name, color) values ($1, $2, $3)",
-          [
-            session.workspaceId,
-            String(input.name ?? "New activity"),
-            normalizePaletteKey(input.color, String(input.name ?? "New activity"))
-          ]
-        );
-      }
+      // The legacy entities route creates activities through the one activity writer, so it
+      // takes the same name lock, duplicate check and quick-start cap as /api/categories.
+      return createCategory(
+        {
+          name: String(input.name ?? "New activity"),
+          color: typeof input.color === "string" ? input.color : null,
+          isPinned: Boolean(input.isPinned)
+        },
+        session
+      );
     case "tag":
       return createTag({ name: String(input.name ?? "new-tag") }, session);
     case "project":
