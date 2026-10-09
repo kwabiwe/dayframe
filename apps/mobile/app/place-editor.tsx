@@ -37,6 +37,8 @@ import {
   type MobilePlace
 } from "@/lib/api";
 import { refreshGeofencesForPlaces } from "@/lib/geofence";
+import { mobileAccountKey, mobileAccountOwnersEqual, readActiveMobileAccount, type MobileAccountOwner } from "@/lib/mobileAccount";
+import { notePlaceDeleted } from "@/lib/placesPage";
 import {
   foregroundLocationPermissionGuidance,
   formatLocationAccuracy,
@@ -120,6 +122,10 @@ export default function PlaceEditorScreen() {
   const [previousRoleName, setPreviousRoleName] = useState<string | null>(null);
   const [deleting, setDeleting] = useState(false);
   const saveInFlight = useRef(false);
+  const mounted = useRef(true);
+  useEffect(() => () => {
+    mounted.current = false;
+  }, []);
   const nameTouched = useRef(mode !== "create");
   const initialCoordinate = useRef<{ latitude: number; longitude: number } | null>(null);
   const fallbackSearchBias = useRef<PlaceSearchBias | null>(null);
@@ -315,6 +321,7 @@ export default function PlaceEditorScreen() {
     Keyboard.dismiss();
     saveInFlight.current = true;
     setSaving(true);
+    const owner = await readActiveMobileAccount();
     try {
       if (mode === "edit" && loadedEntity) {
         await updatePlace(loadedEntity.id, {
@@ -347,19 +354,35 @@ export default function PlaceEditorScreen() {
           }).previousPlaceName
         } : undefined);
       }
-      const refreshed = await fetchBootstrap();
-      await refreshGeofencesForPlaces(refreshed.places, { userId: refreshed.user.id, workspaceId: refreshed.workspace.id }).catch(() => 0);
-      router.back();
     } catch (error) {
+      saveInFlight.current = false;
+      if (!(await editorStillFor(owner))) return;
+      setSaving(false);
       if (error instanceof AuthRequiredError) {
         router.replace("/");
         return;
       }
       Alert.alert("Places", error instanceof Error ? error.message : "Unable to save place.");
-    } finally {
-      saveInFlight.current = false;
-      setSaving(false);
+      return;
     }
+    // Accepted. Save stays locked (a retry would create the place again), and a refresh that
+    // fails here does not undo it: Places refreshes when it is shown.
+    await refreshGeofencesAfterChange(null);
+    if (await editorStillFor(owner)) router.back();
+  }
+
+  /** True while this editor is still open for the account that started the change. */
+  async function editorStillFor(owner: MobileAccountOwner | null) {
+    return mounted.current && mobileAccountOwnersEqual(owner, await readActiveMobileAccount());
+  }
+
+  /** Best effort after an accepted change: a fresh read, else this editor's own snapshot. */
+  async function refreshGeofencesAfterChange(deletedPlaceId: string | null) {
+    const refreshed = await fetchBootstrap().catch(() => null);
+    const source = refreshed ?? data;
+    if (!source) return;
+    const places = refreshed ? refreshed.places : source.places.filter((place) => place.id !== deletedPlaceId);
+    await refreshGeofencesForPlaces(places, { userId: source.user.id, workspaceId: source.workspace.id }).catch(() => 0);
   }
 
   function confirmDeletePlace() {
@@ -379,24 +402,26 @@ export default function PlaceEditorScreen() {
     if (saveInFlight.current) return;
     saveInFlight.current = true;
     setDeleting(true);
+    const owner = await readActiveMobileAccount();
     try {
       await deletePlace(place.id);
-      const refreshed = await fetchBootstrap().catch(() => null);
-      if (refreshed) {
-        await refreshGeofencesForPlaces(refreshed.places, { userId: refreshed.user.id, workspaceId: refreshed.workspace.id }).catch(() => 0);
-      }
-      router.back();
     } catch (error) {
+      saveInFlight.current = false;
+      if (!(await editorStillFor(owner))) return;
+      setDeleting(false);
       if (error instanceof AuthRequiredError) {
         router.replace("/");
         return;
       }
       Alert.alert("Places", error instanceof Error ? error.message : "Unable to delete place.");
-    } finally {
-      saveInFlight.current = false;
-      setDeleting(false);
+      return;
     }
+    // Accepted: Places drops the row when it is shown again, even if its own refresh fails.
+    if (owner) notePlaceDeleted(mobileAccountKey(owner), place.id);
+    await refreshGeofencesAfterChange(place.id);
+    if (await editorStillFor(owner)) router.back();
   }
+
 
   return (
     <SafeAreaView style={styles.safeArea}>

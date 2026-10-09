@@ -44,8 +44,11 @@ export function PlaceRoleSheet({
   /** Leaves the sheet for the place editor, adding a new place straight into this slot. */
   onAddNew: (role: PlaceRole) => void;
   onClose: () => void;
-  /** Resolves to null when saved, or a message to show when it could not be. */
-  onSave: (request: ReturnType<typeof placeRoleRequest>) => Promise<string | null>;
+  /**
+   * Resolves to null when saved, or a message to show when it could not be. `holderId` is the
+   * place the role leaves (it takes the requested name), so the page can apply the answer at once.
+   */
+  onSave: (request: ReturnType<typeof placeRoleRequest>, holderId: string | null) => Promise<string | null>;
   places: readonly RolePlace[];
   reduceMotion: boolean;
   slot: PlaceRoleSlot<RolePlace>;
@@ -94,7 +97,7 @@ export function PlaceRoleSheet({
     setSaving(true);
     setProblem(null);
     const request = placeRoleRequest({ role: slot.role, targetId: clearing ? null : targetId, holder, previousPlaceName: previousName });
-    const result = await onSave(request).catch(() => "Couldn't save. Check your connection and try again.");
+    const result = await onSave(request, holder?.id ?? null).catch(() => "Couldn't save. Check your connection and try again.");
     busy.current = false;
     if (done.current) return;
     setSaving(false);
@@ -107,6 +110,9 @@ export function PlaceRoleSheet({
   }
 
   function cancel() {
+    // A save in flight finishes (or fails) inside the sheet: closing it mid-save would hide the
+    // answer and let a second change start before the first one lands.
+    if (busy.current) return;
     done.current = true;
     sheetRef.current?.dismiss();
   }
@@ -133,7 +139,9 @@ export function PlaceRoleSheet({
             if (pendingAddNew.current) onAddNew(slot.role);
             onClose();
           }}
+          disabled={saving}
           onDismissStart={() => {
+            if (busy.current) return false;
             done.current = true;
           }}
           reduceMotion={reduceMotion}
@@ -144,6 +152,8 @@ export function PlaceRoleSheet({
           <View style={sheetStyles.head}>
             <Pressable
               accessibilityRole="button"
+              accessibilityState={{ disabled: saving }}
+              disabled={saving}
               onPress={cancel}
               style={({ pressed }) => [sheetStyles.headButton, pressed ? sheetStyles.pressed : null]}
               testID="place-role-cancel"
@@ -237,6 +247,8 @@ export function PlaceRoleSheet({
             {clearing ? null : (
               <Pressable
                 accessibilityRole="button"
+                accessibilityState={{ disabled: saving }}
+                disabled={saving}
                 onPress={addNew}
                 style={({ pressed }) => [sheetStyles.addNew, { backgroundColor: theme.surfaceMuted }, pressed ? sheetStyles.pressed : null]}
                 testID="place-role-add-new"

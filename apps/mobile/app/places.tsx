@@ -24,7 +24,8 @@ import {
 import { DayframeIcon } from "@/components/icons/DayframeIcon";
 import { PlaceRoleSheet, type PlaceRoleSheetMode } from "@/components/places/PlaceRoleSheet";
 import { SettingsBlockGroup, SettingsPillButton } from "@/components/settings/SettingsBlocks";
-import { learnedPlaceSubtitle, placeRowSubtitle } from "@/lib/placesPage";
+import { applyPlaceRoleLocally, learnedPlaceSubtitle, placeRowSubtitle, takeDeletedPlaces } from "@/lib/placesPage";
+import { mobileAccountKey, mobileAccountOwnersEqual, readActiveMobileAccount } from "@/lib/mobileAccount";
 import { mobileTextProps } from "@/lib/mobileTypography";
 import { SheetMutationProgress } from "@/components/SheetMutationProgress";
 import {
@@ -70,11 +71,21 @@ export default function PlacesScreen() {
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
   // Home and Work (Blocks 7a): which slot's sheet is open, and whether it sets or clears.
   const [roleSheet, setRoleSheet] = useState<{ role: PlaceRole; mode: PlaceRoleSheetMode } | null>(null);
+  // One Home/Work change at a time across the page (a second sheet can't open mid-save).
+  const roleSaving = useRef(false);
+  // Bumped by every accepted change: a read that started before it is out of date and dropped.
+  const changeEpoch = useRef(0);
+  const mounted = useRef(true);
+  useEffect(() => () => {
+    mounted.current = false;
+  }, []);
 
   const load = useCallback(async (options?: { refresh?: boolean; silent?: boolean }) => {
     if (options?.refresh) setRefreshing(true);
+    const epoch = changeEpoch.current;
     try {
       const bootstrap = await fetchBootstrap();
+      if (!mounted.current || epoch !== changeEpoch.current) return;
       setData(bootstrap);
       void backfillLearnedPlaceLocations(bootstrap.learnedPlaces ?? []).then((resolved) => {
         if (resolved.length === 0) return;
@@ -99,7 +110,17 @@ export default function PlacesScreen() {
 
   useFocusEffect(
     useCallback(() => {
-      void load({ silent: true });
+      // A place the editor deleted leaves the list at once, even if the refresh below fails.
+      void readActiveMobileAccount().then((owner) => {
+        const deleted = owner ? takeDeletedPlaces(mobileAccountKey(owner)) : [];
+        if (deleted.length === 0 || !mounted.current) return;
+        changeEpoch.current += 1;
+        setData((current) => current && mobileAccountOwnersEqual(owner, { userId: current.user.id, workspaceId: current.workspace.id })
+          ? deleted.reduce((next, id) => reconcileBootstrapPlaces(next, { removePlaceId: id }), current)
+          : current);
+      }).finally(() => {
+        void load({ silent: true });
+      });
     }, [load])
   );
 
@@ -213,6 +234,7 @@ export default function PlacesScreen() {
   }
 
   function removeLocalLearnedPlace(id: string) {
+    changeEpoch.current += 1;
     setData((current) => current ? reconcileBootstrapPlaces(current, { removeLearnedPlaceId: id }) : current);
   }
 
@@ -222,8 +244,14 @@ export default function PlacesScreen() {
     removePlaceId?: string;
     removeLearnedPlaceId?: string;
   }) {
+    const epoch = changeEpoch.current;
     try {
       const bootstrap = await fetchBootstrap();
+      if (!mounted.current) return;
+      if (epoch !== changeEpoch.current) {
+        setStatusMessage(options.prefix);
+        return;
+      }
       const reconciled = reconcileBootstrapPlaces(bootstrap, options);
       setData(reconciled);
       await refreshGeofencesForPlaces(reconciled.places, { userId: reconciled.user.id, workspaceId: reconciled.workspace.id }).catch(() => 0);
@@ -249,6 +277,7 @@ export default function PlacesScreen() {
   const editingSlot = roleSheet ? slots.find((slot) => slot.role === roleSheet.role) ?? null : null;
 
   function openRole(role: PlaceRole, mode: PlaceRoleSheetMode) {
+    if (roleSaving.current) return;
     setStatusMessage(null);
     // Nothing saved to choose from yet: go straight to adding the place into the slot.
     if (mode === "choose" && places.length === 0) {
@@ -262,19 +291,31 @@ export default function PlacesScreen() {
     router.push({ pathname: "/place-editor", params: { mode: "create", role } } as never);
   }
 
-  async function saveRole(request: ReturnType<typeof placeRoleRequest>) {
+  async function saveRole(request: ReturnType<typeof placeRoleRequest>, holderId: string | null) {
+    if (roleSaving.current) return "Another change is still saving. Try again in a moment.";
+    roleSaving.current = true;
     try {
-      await setPlaceRole(request);
-    } catch (error) {
-      if (error instanceof AuthRequiredError) {
-        router.replace("/");
-        return null;
+      const owner = await readActiveMobileAccount();
+      try {
+        await setPlaceRole(request);
+      } catch (error) {
+        if (error instanceof AuthRequiredError) {
+          router.replace("/");
+          return null;
+        }
+        return error instanceof Error ? error.message : "Couldn't update this place. Try again.";
       }
-      return error instanceof Error ? error.message : "Couldn't update this place. Try again.";
+      // Accepted: shown at once (only for the account that asked, while Places is open), and any
+      // read that started before this answer is dropped.
+      if (!mounted.current || !mobileAccountOwnersEqual(owner, await readActiveMobileAccount())) return null;
+      changeEpoch.current += 1;
+      setData((current) => current ? { ...current, places: applyPlaceRoleLocally(current.places, request, holderId) } : current);
+      const label = placeRoleLabel(request.role);
+      await refreshAfterPlaceChange({ prefix: request.placeId ? `${label} updated.` : `${label} cleared.` });
+      return null;
+    } finally {
+      roleSaving.current = false;
     }
-    const label = placeRoleLabel(request.role);
-    await refreshAfterPlaceChange({ prefix: request.placeId ? `${label} updated.` : `${label} cleared.` });
-    return null;
   }
 
   return (
