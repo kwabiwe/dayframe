@@ -18,7 +18,8 @@ vi.mock("react-native", () => ({
   useWindowDimensions: () => ({ fontScale: 1, width: 375, height: 812 })
 }));
 vi.mock("react-native-reanimated", () => ({ default: { View: "AnimatedView" } }));
-vi.mock("react-native-svg", () => ({ default: "Svg", Circle: "Circle", Path: "Path", Rect: "Rect" }));
+// The Blocks groups (SettingsBlocks) bring DayframeIcon, which draws ellipses, lines and polylines too.
+vi.mock("react-native-svg", () => ({ default: "Svg", Circle: "Circle", Ellipse: "Ellipse", G: "G", Line: "Line", Path: "Path", Polygon: "Polygon", Polyline: "Polyline", Rect: "Rect" }));
 vi.mock("@/lib/mobileTheme", () => ({
   pressable: (value: unknown) => value,
   useMobileTheme: () => ({ styles: {}, theme: {

@@ -35,7 +35,6 @@ import {
   formatLocationReviewTimeInput,
   initialLocationReviewDescription,
   keyboardRevealScrollOffset,
-  locationActivityGlyphName,
   locationReviewJourneyCopy,
   parseLocationReviewWindow,
   type LocationActivityGlyphName,
@@ -53,7 +52,8 @@ import {
   type PlaceSearchState
 } from "@/lib/placeSearch";
 import { pressable, useMobileTheme, type MobileTheme } from "@/lib/mobileTheme";
-import { mobileTextProps } from "@/lib/mobileTypography";
+import { MOBILE_DISPLAY_FONT, mobileTextProps } from "@/lib/mobileTypography";
+import { SettingsBlockGroup, SettingsBlockRow, SettingsPillButton } from "../settings/SettingsBlocks";
 import {
   localLayoutTransition,
   localPresenceEntering,
@@ -151,7 +151,6 @@ export function LocationReviewCorrectionEditor({
   const [nearbyState, setNearbyState] = useState<NearbyPointOfInterestState>(emptyNearbyState);
   const [saveForFuture, setSaveForFuture] = useState(false);
   const [resolvingSuggestion, setResolvingSuggestion] = useState(false);
-  const [advancedExpanded, setAdvancedExpanded] = useState(false);
   const [selectedSplitAt, setSelectedSplitAt] = useState<string | null>(null);
   const [startTimeText, setStartTimeText] = useState(() => formatLocationReviewTimeInput(startAt));
   const [stopTimeText, setStopTimeText] = useState(() => stopAt ? formatLocationReviewTimeInput(stopAt) : "");
@@ -244,13 +243,6 @@ export function LocationReviewCorrectionEditor({
   const baselinePlace = placeForSelection(baselinePlaceId, evidence.map.nearbySavedPlaces, places);
   const nearbyChoices = visibleNearbyPlaces(nearbyState.places, baselinePlace);
 
-  const selectedCategory = categories.find((category) => category.id === selectedCategoryId) ?? null;
-  const activityGlyph = locationActivityGlyphName({
-    categoryName: selectedCategory?.name ?? reviewItem?.categoryName ?? null,
-    description,
-    segmentKind: evidence.segment.kind,
-    timeAway: evidence.segment.timeAway === true
-  });
   const selectedPlace = placeForSelection(
     selectedSavedPlaceId,
     evidence.map.nearbySavedPlaces,
@@ -372,7 +364,6 @@ export function LocationReviewCorrectionEditor({
     void controllerRef.current?.cancel();
     setSelectedSavedPlaceId(null);
     setEditingCentre(false);
-    setAdvancedExpanded(false);
   }
 
   function parsedEdit() {
@@ -471,9 +462,9 @@ export function LocationReviewCorrectionEditor({
         contentContainerStyle={[styles.settingsScrollContent, editorStyles.scrollContent]}
       >
         <View style={styles.contentStack}>
-          <Reanimated.View layout={localLayoutTransition(reduceMotion)} style={styles.panel}>
-            <Text {...mobileTextProps("counter")} style={styles.label}>Location evidence</Text>
-            <Text {...mobileTextProps("sectionHeading")} style={styles.sectionTitle}>{locationActivityLabel(evidence)}</Text>
+          {/* Blocks 5e: one heading (the screen title says "Location evidence"), on the canvas. */}
+          <Reanimated.View layout={localLayoutTransition(reduceMotion)} style={editorStyles.hero}>
+            <Text {...mobileTextProps("screenHeading")} accessibilityRole="header" style={editorStyles.heroTitle}>{locationActivityLabel(evidence)}</Text>
             <Text {...mobileTextProps("metadata")} style={styles.reviewMetaLine}>{formatEvidenceTimeRange(evidence)}</Text>
             {stopsHeading ? (
               // Refreshed evidence can add or remove stops after the screen
@@ -530,23 +521,12 @@ export function LocationReviewCorrectionEditor({
               onSelectPoint={evidence.segment.kind === "stay" && editingCentre ? setSelectedPoint : undefined}
               onSelectSavedPlace={evidence.segment.kind === "stay" ? chooseSavedPlace : undefined}
             />
-            {editingCentre ? (
-              <Text {...mobileTextProps("body")} style={editorStyles.helperText}>Tap the map to move the pin.</Text>
-            ) : null}
           </Reanimated.View>
 
-          <Reanimated.View
-            layout={localLayoutTransition(reduceMotion)}
-            style={editorStyles.correctionCard}
-          >
-            {evidence.segment.kind === "stay" ? (
-              <>
+          {evidence.segment.kind === "stay" ? (
+            <Reanimated.View layout={localLayoutTransition(reduceMotion)}>
+              <SettingsBlockGroup theme={theme} title="Where were you?">
                 <View style={editorStyles.section}>
-                  <SectionHeading
-                    glyph="place"
-                    label="Where were you?"
-                    theme={theme}
-                  />
                   {placeAnswer ? (
                     <View style={editorStyles.answerRow}>
                       <View style={editorStyles.answerIcon}>
@@ -722,17 +702,13 @@ export function LocationReviewCorrectionEditor({
                     </View>
                   ) : null}
                 </View>
+              </SettingsBlockGroup>
+            </Reanimated.View>
+          ) : null}
 
-                <View style={editorStyles.divider} />
-              </>
-            ) : null}
-
+          <Reanimated.View layout={localLayoutTransition(reduceMotion)}>
+            <SettingsBlockGroup theme={theme} title="What did you do?">
             <View style={editorStyles.section}>
-              <SectionHeading
-                glyph={activityGlyph}
-                label="What did you do?"
-                theme={theme}
-              />
               <TextInput
                 ref={activityInputRef}
                 {...mobileTextProps("input")}
@@ -791,11 +767,12 @@ export function LocationReviewCorrectionEditor({
                 ))}
               </ScrollView>
             </View>
+            </SettingsBlockGroup>
+          </Reanimated.View>
 
-            <View style={editorStyles.divider} />
-
+          <Reanimated.View layout={localLayoutTransition(reduceMotion)}>
+            <SettingsBlockGroup theme={theme} title="When?">
             <View style={editorStyles.section}>
-              <SectionHeading glyph="time" label="When?" theme={theme} />
               <View style={[editorStyles.timeGroups, fontScale >= 1.45 ? editorStyles.timeGroupsStacked : null]}>
                 <View style={editorStyles.timeGroup}>
                   <Text {...mobileTextProps("metadata")} style={editorStyles.fieldLabel}>Start</Text>
@@ -866,6 +843,7 @@ export function LocationReviewCorrectionEditor({
                 <Text {...mobileTextProps("body")} accessibilityLiveRegion="assertive" style={editorStyles.errorText}>{validationError}</Text>
               ) : null}
             </View>
+            </SettingsBlockGroup>
           </Reanimated.View>
 
           <Pressable
@@ -881,161 +859,123 @@ export function LocationReviewCorrectionEditor({
             <Text {...mobileTextProps("control")} style={styles.primaryButtonText}>{primaryLabel}</Text>
           </Pressable>
 
-          <Reanimated.View layout={localLayoutTransition(reduceMotion)} style={styles.panel}>
-            <Pressable
-              accessibilityLabel={`${advancedExpanded ? "Hide" : "Show"} more resolution options`}
-              accessibilityRole="button"
-              accessibilityState={{ expanded: advancedExpanded }}
-              disabled={saving}
-              onPress={() => {
-                if (advancedExpanded) setEditingCentre(false);
-                setAdvancedExpanded((current) => !current);
-              }}
-              style={pressable(editorStyles.disclosure, styles.buttonPressed)}
-            >
-              <Text {...mobileTextProps("control")} style={editorStyles.disclosureText}>More options</Text>
-              <ChevronGlyph color={theme.textSecondary} expanded={advancedExpanded} />
-            </Pressable>
-
-            {advancedExpanded ? (
-              <Reanimated.View
-                entering={localPresenceEntering(reduceMotion, "rise")}
-                exiting={localPresenceExiting(reduceMotion)}
-                layout={localLayoutTransition(reduceMotion)}
-                style={editorStyles.advancedContent}
-              >
-                {evidence.segment.kind === "stay" ? (
-                  <View style={editorStyles.advancedGroup}>
-                    <Text {...mobileTextProps("metadata")} style={editorStyles.fieldLabel}>Use a map pin instead</Text>
-                    <Pressable
-                      accessibilityRole="button"
-                      disabled={saving}
-                      onPress={() => setEditingCentre((current) => !current)}
-                      style={pressable(editorStyles.secondaryAction, styles.buttonPressed)}
-                    >
-                      <Text {...mobileTextProps("control")} style={editorStyles.secondaryActionText}>{editingCentre ? "Finish moving pin" : "Move map pin"}</Text>
-                    </Pressable>
-                    <TextInput
-                      accessibilityLabel="New saved place name"
-                      {...mobileTextProps("input")}
-                      editable={!saving}
-                      onChangeText={setManualPlaceName}
-                      placeholder="Place name"
-                      placeholderTextColor={theme.textSecondary}
-                      style={styles.textInput}
-                      value={manualPlaceName}
-                    />
-                    <Pressable
-                      accessibilityRole="button"
-                      disabled={saving || !selectedPoint || !manualPlaceName.trim()}
-                      onPress={useManualMapPin}
-                      style={({ pressed }) => [
-                        editorStyles.secondaryAction,
-                        pressed ? styles.buttonPressed : null,
-                        saving || !selectedPoint || !manualPlaceName.trim() ? styles.buttonDisabled : null
-                      ]}
-                    >
-                    <Text {...mobileTextProps("control")} style={editorStyles.secondaryActionText}>Use this pin</Text>
-                    </Pressable>
-                  </View>
-                ) : null}
-
-                {evidence.suggestedSplitPoints.length > 0 ? (
-                  <View style={editorStyles.advancedGroup}>
-                    <Text {...mobileTextProps("metadata")} style={editorStyles.fieldLabel}>Split detected time</Text>
-                    {evidence.suggestedSplitPoints.map((split) => (
-                      <Pressable
-                        accessibilityRole="button"
-                        disabled={saving}
-                        key={split.at}
-                        onPress={() => setSelectedSplitAt(split.at)}
-                        style={pressable(editorStyles.secondaryAction, styles.buttonPressed)}
-                      >
-                        <Text {...mobileTextProps("control")} style={editorStyles.secondaryActionText}>Split near {formatTime(split.at)}</Text>
-                      </Pressable>
-                    ))}
-                    {selectedSplitAt ? (
-                      <Reanimated.View
-                        entering={localPresenceEntering(reduceMotion)}
-                        exiting={localPresenceExiting(reduceMotion)}
-                        style={editorStyles.splitSummary}
-                      >
-                        <Text {...mobileTextProps("metadata")} style={editorStyles.answerMeta}>Before: {formatTime(evidence.segment.startedAt)}–{formatTime(selectedSplitAt)}</Text>
-                        <Text {...mobileTextProps("metadata")} style={editorStyles.answerMeta}>After: {formatTime(selectedSplitAt)}–{evidence.segment.stoppedAt ? formatTime(evidence.segment.stoppedAt) : "ongoing"}</Text>
-                        <Pressable
-                          accessibilityRole="button"
-                          disabled={saving}
-                          onPress={() => void onResolve(
-                            { action: "split", splitAt: selectedSplitAt },
-                            "The detected time was split into two review items."
-                          )}
-                          style={pressable(editorStyles.secondaryAction, styles.buttonPressed)}
-                        >
-                          <Text {...mobileTextProps("control")} style={editorStyles.secondaryActionText}>Confirm split</Text>
-                        </Pressable>
-                      </Reanimated.View>
-                    ) : null}
-                  </View>
-                ) : null}
-
-                {adjacentReview && evidence.segment.kind === "stay" ? (
-                  <Pressable
-                    accessibilityRole="button"
+          {/* More options is a plain list of the other ways to resolve this moment (D7). */}
+          <Reanimated.View layout={localLayoutTransition(reduceMotion)}>
+            <SettingsBlockGroup theme={theme} title="More options">
+              {evidence.segment.kind === "stay" ? (
+                <>
+                  <SettingsBlockRow
+                    accessibilityHint={editingCentre ? "Stops moving the pin" : "Lets you tap the map to place a pin"}
                     disabled={saving}
-                    onPress={() => void onResolve({
-                      action: "merge",
-                      adjacentReviewItemId: adjacentReview.id,
-                      acknowledgeContradictoryEvidence: false
-                    }, "The adjacent visits were merged into one review item.")}
-                    style={pressable(editorStyles.secondaryAction, styles.buttonPressed)}
-                  >
-                    <Text {...mobileTextProps("control")} style={editorStyles.secondaryActionText}>Merge with adjacent visit</Text>
-                  </Pressable>
-                ) : null}
+                    divider={false}
+                    onPress={() => setEditingCentre((current) => !current)}
+                    subtitle={editingCentre ? "Tap the map to move the pin, then name it below" : "Name a spot on the map yourself"}
+                    testID="location-evidence-map-pin"
+                    theme={theme}
+                    title={editingCentre ? "Finish moving pin" : "Use a map pin instead"}
+                  />
+                  {editingCentre ? (
+                    <Reanimated.View
+                      entering={localPresenceEntering(reduceMotion)}
+                      exiting={localPresenceExiting(reduceMotion)}
+                      layout={localLayoutTransition(reduceMotion)}
+                      style={editorStyles.inlineRow}
+                    >
+                      <TextInput
+                        accessibilityLabel="New saved place name"
+                        {...mobileTextProps("input")}
+                        editable={!saving}
+                        onChangeText={setManualPlaceName}
+                        placeholder="Place name"
+                        placeholderTextColor={theme.textSecondary}
+                        style={editorStyles.inlineInput}
+                        value={manualPlaceName}
+                      />
+                      <SettingsPillButton
+                        disabled={saving || !selectedPoint || !manualPlaceName.trim()}
+                        label="Use this pin"
+                        onPress={useManualMapPin}
+                        theme={theme}
+                      />
+                    </Reanimated.View>
+                  ) : null}
+                </>
+              ) : null}
 
-                <Pressable
-                  accessibilityRole="button"
+              {evidence.suggestedSplitPoints.map((split, index) => (
+                <SettingsBlockRow
                   disabled={saving}
-                  onPress={() => void recordOnce()}
-                  style={pressable(editorStyles.secondaryAction, styles.buttonPressed)}
+                  divider={evidence.segment.kind === "stay" || index > 0}
+                  key={split.at}
+                  onPress={() => setSelectedSplitAt(split.at)}
+                  subtitle="Makes two moments to review"
+                  theme={theme}
+                  title={`Split near ${formatTime(split.at)}`}
+                />
+              ))}
+              {selectedSplitAt ? (
+                <Reanimated.View
+                  entering={localPresenceEntering(reduceMotion)}
+                  exiting={localPresenceExiting(reduceMotion)}
+                  layout={localLayoutTransition(reduceMotion)}
                 >
-                  <Text {...mobileTextProps("control")} style={editorStyles.secondaryActionText}>Record once</Text>
-                </Pressable>
-                <Pressable
-                  accessibilityRole="button"
+                  <SettingsBlockRow
+                    control={
+                      <SettingsPillButton
+                        accessibilityLabel={`Confirm split near ${formatTime(selectedSplitAt)}`}
+                        disabled={saving}
+                        label="Confirm split"
+                        onPress={() => void onResolve(
+                          { action: "split", splitAt: selectedSplitAt },
+                          "The detected time was split into two review items."
+                        )}
+                        theme={theme}
+                      />
+                    }
+                    subtitle={`After: ${formatTime(selectedSplitAt)}–${evidence.segment.stoppedAt ? formatTime(evidence.segment.stoppedAt) : "ongoing"}`}
+                    theme={theme}
+                    title={`Before: ${formatTime(evidence.segment.startedAt)}–${formatTime(selectedSplitAt)}`}
+                  />
+                </Reanimated.View>
+              ) : null}
+
+              {adjacentReview && evidence.segment.kind === "stay" ? (
+                <SettingsBlockRow
                   disabled={saving}
-                  onPress={() => void onResolve({ action: "ignore_once_location" }, "This suggestion was ignored.")}
-                  style={pressable(editorStyles.secondaryAction, styles.buttonPressed)}
-                >
-                  <Text {...mobileTextProps("control")} style={[editorStyles.secondaryActionText, { color: theme.danger }]}>Ignore suggestion</Text>
-                </Pressable>
-              </Reanimated.View>
-            ) : null}
+                  onPress={() => void onResolve({
+                    action: "merge",
+                    adjacentReviewItemId: adjacentReview.id,
+                    acknowledgeContradictoryEvidence: false
+                  }, "The adjacent visits were merged into one review item.")}
+                  subtitle="Joins it with the visit just before or after"
+                  theme={theme}
+                  title="Merge with adjacent visit"
+                />
+              ) : null}
+
+              <SettingsBlockRow
+                disabled={saving}
+                divider={evidence.segment.kind === "stay" || evidence.suggestedSplitPoints.length > 0 || Boolean(adjacentReview)}
+                onPress={() => void recordOnce()}
+                subtitle="Logs this time without saving a new place"
+                testID="location-evidence-record-once"
+                theme={theme}
+                title="Record once"
+              />
+              <SettingsBlockRow
+                danger
+                disabled={saving}
+                onPress={() => void onResolve({ action: "ignore_once_location" }, "This suggestion was ignored.")}
+                subtitle="Nothing is logged"
+                testID="location-evidence-skip"
+                theme={theme}
+                title="Skip this suggestion"
+              />
+            </SettingsBlockGroup>
           </Reanimated.View>
         </View>
       </ScrollView>
     </>
-  );
-}
-
-function SectionHeading({
-  glyph,
-  label,
-  theme
-}: {
-  glyph: LocationActivityGlyphName | "time";
-  label: string;
-  theme: MobileTheme;
-}) {
-  return (
-    <View style={sectionHeadingStyles.row}>
-      <View style={[sectionHeadingStyles.icon, { backgroundColor: theme.accentSoft }]}>
-        {glyph === "time"
-          ? <ClockGlyph color={theme.accentText} />
-          : <ActivityGlyph name={glyph} color={theme.accentText} />}
-      </View>
-      <Text {...mobileTextProps("sectionHeading")} style={[sectionHeadingStyles.label, { color: theme.textPrimary }]}>{label}</Text>
-    </View>
   );
 }
 
@@ -1144,10 +1084,6 @@ function ActivityGlyph({ name, color }: { name: LocationActivityGlyphName; color
   return <Svg width={20} height={20} viewBox="0 0 24 24"><Path d="M12 21s6-5.2 6-11a6 6 0 1 0-12 0c0 5.8 6 11 6 11Z" fill="none" stroke={color} strokeLinejoin="round" strokeWidth={1.9} /><SvgCircle cx={12} cy={10} r={2} fill="none" stroke={color} strokeWidth={1.8} /></Svg>;
 }
 
-function ClockGlyph({ color }: { color: string }) {
-  return <Svg width={20} height={20} viewBox="0 0 24 24"><SvgCircle cx={12} cy={12} r={8} fill="none" stroke={color} strokeWidth={1.9} /><Path d="M12 7v5l3 2" fill="none" stroke={color} strokeLinecap="round" strokeWidth={1.9} /></Svg>;
-}
-
 function SearchGlyph({ color }: { color: string }) {
   return <Svg width={18} height={18} viewBox="0 0 24 24"><SvgCircle cx={11} cy={11} r={6} fill="none" stroke={color} strokeWidth={2} /><Path d="m16 16 4 4" stroke={color} strokeLinecap="round" strokeWidth={2} /></Svg>;
 }
@@ -1158,10 +1094,6 @@ function CloseGlyph({ color }: { color: string }) {
 
 function CheckGlyph({ color }: { color: string }) {
   return <Svg width={17} height={17} viewBox="0 0 24 24"><Path d="m5 12 4 4L19 6" fill="none" stroke={color} strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.2} /></Svg>;
-}
-
-function ChevronGlyph({ color, expanded }: { color: string; expanded: boolean }) {
-  return <Svg width={18} height={18} viewBox="0 0 24 24"><Path d={expanded ? "m6 15 6-6 6 6" : "m6 9 6 6 6-6"} fill="none" stroke={color} strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} /></Svg>;
 }
 
 function pointFromEvidence(evidence: LocationReviewEvidenceDto) {
@@ -1225,13 +1157,27 @@ function formatLocationReviewDuration(startedAt: string, stoppedAt: string) {
 function createEditorStyles(theme: MobileTheme) {
   return StyleSheet.create({
     scrollContent: { paddingBottom: 34 },
-    correctionCard: {
-      backgroundColor: theme.surfaceRaised,
-      borderRadius: 18,
-      overflow: "hidden"
-    },
+    hero: { gap: 4, paddingHorizontal: 4 },
+    heroTitle: { color: theme.textPrimary, fontFamily: MOBILE_DISPLAY_FONT.bold, fontSize: 30, letterSpacing: -0.6, lineHeight: 34 },
     section: { padding: 16, gap: 12 },
-    divider: { height: StyleSheet.hairlineWidth, backgroundColor: theme.border, marginHorizontal: 16 },
+    inlineRow: {
+      alignItems: "center",
+      borderTopColor: theme.border,
+      borderTopWidth: StyleSheet.hairlineWidth,
+      flexDirection: "row",
+      gap: 10,
+      paddingHorizontal: 16,
+      paddingVertical: 8
+    },
+    inlineInput: {
+      backgroundColor: theme.surfaceInset,
+      borderRadius: 12,
+      color: theme.textPrimary,
+      flex: 1,
+      fontSize: 15,
+      minHeight: 44,
+      paddingHorizontal: 12
+    },
     tripStops: { marginTop: 8, gap: 6 },
     tripStopDivider: { height: StyleSheet.hairlineWidth, backgroundColor: theme.border, marginBottom: 6 },
     tripStopRow: { color: theme.textPrimary, fontSize: 15, lineHeight: 20 },
@@ -1330,33 +1276,8 @@ function createEditorStyles(theme: MobileTheme) {
       fontVariant: ["tabular-nums"]
     },
     errorText: { color: theme.danger, fontSize: 12, lineHeight: 17, fontWeight: "600" },
-    disclosure: {
-      minHeight: 44,
-      flexDirection: "row",
-      alignItems: "center",
-      justifyContent: "space-between"
-    },
-    disclosureText: { color: theme.textPrimary, fontSize: 15, fontWeight: "700" },
-    advancedContent: { gap: 9, paddingTop: 4 },
-    advancedGroup: { gap: 8 },
-    secondaryAction: {
-      minHeight: 44,
-      borderRadius: 14,
-      backgroundColor: theme.surfaceMuted,
-      justifyContent: "center",
-      paddingHorizontal: 12,
-      paddingVertical: 9
-    },
-    secondaryActionText: { color: theme.accentText, fontSize: 14, lineHeight: 18, fontWeight: "700", textAlign: "center" },
-    splitSummary: { gap: 7, borderRadius: 14, backgroundColor: theme.surfaceMuted, padding: 10 }
   });
 }
-
-const sectionHeadingStyles = StyleSheet.create({
-  row: { minHeight: 44, flexDirection: "row", alignItems: "center", gap: 10 },
-  icon: { width: 38, height: 38, borderRadius: 19, alignItems: "center", justifyContent: "center" },
-  label: { flex: 1, fontSize: 19, lineHeight: 24, fontWeight: "700" }
-});
 
 const placeChoiceStyles = StyleSheet.create({
   row: { minHeight: 54, flexDirection: "row", alignItems: "center", gap: 10, borderRadius: 14, paddingHorizontal: 12, paddingVertical: 8 },
