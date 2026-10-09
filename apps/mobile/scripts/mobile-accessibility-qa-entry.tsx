@@ -28,7 +28,7 @@ import { layoutQuickStartMosaic } from "../src/lib/quickStartMosaic";
 import { buildTodayGoalFrame } from "../src/lib/todayGoalFrame";
 import { reviewDeckCardForItem } from "../app/review";
 import { ReviewDeckStack } from "../src/components/review/ReviewDeck";
-import { SettingsMenuRow } from "../app/settings";
+import { SettingsBlockGroup, SettingsBlockRow } from "../src/components/settings/SettingsBlocks";
 import { MobileThemeProvider, useMobileTheme } from "../src/lib/mobileTheme";
 import { mobileTextProps } from "../src/lib/mobileTypography";
 import { TagMetadata } from "../src/components/TagMetadata";
@@ -454,15 +454,15 @@ function Probe() {
             </View>
             <View style={{ gap: 8 }}>
               <Text {...mobileTextProps("sectionHeading")} style={styles.sectionTitle}>Settings</Text>
-              <SettingsMenuRow
-                icon="appearance"
-                label="Places & Location"
-                value="Always"
-                onPress={() => setActionResult("Local Settings row callback")}
-                styles={styles}
-                theme={theme}
-                diagnostic={diagnostic}
-              />
+              <SettingsBlockGroup theme={theme} title="Automatic tracking">
+                <SettingsBlockRow
+                  divider={false}
+                  onPress={() => setActionResult("Local Settings row callback")}
+                  subtitle="Always"
+                  theme={theme}
+                  title="Location"
+                />
+              </SettingsBlockGroup>
             </View>
             <View style={{ height: 520 }}>
               <ReviewDeckStack

@@ -22,7 +22,7 @@ describe("Motion & Fitness native contract", () => {
 
   it("offers Motion & Fitness in Settings beside Location, re-reading it when the app returns", () => {
     const settings = read("../../../app/settings.tsx");
-    expect(settings).toContain(">Motion & Fitness</Text>");
+    expect(settings).toContain('title="Motion & Fitness"');
     expect(settings).toContain("motionFitnessPresentation(");
     expect(settings).toContain("Linking.openSettings()");
     expect(settings).toMatch(/AppState\.addEventListener\("change"/);

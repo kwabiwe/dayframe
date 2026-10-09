@@ -1103,6 +1103,32 @@ function createStyles(theme: MobileTheme) {
       fontSize: 15,
       fontWeight: "600"
     },
+    healthNameRow: {
+      alignItems: "center",
+      borderTopColor: theme.border,
+      borderTopWidth: StyleSheet.hairlineWidth,
+      flexDirection: "row",
+      gap: 12,
+      minHeight: 52,
+      paddingHorizontal: 16,
+      paddingVertical: 8
+    },
+    healthNameLabel: {
+      color: theme.textPrimary,
+      fontFamily: monoFont,
+      fontSize: 15,
+      fontWeight: "600"
+    },
+    healthNameInput: {
+      backgroundColor: theme.surfaceInset,
+      borderRadius: 12,
+      color: theme.textPrimary,
+      flex: 1,
+      fontFamily: monoFont,
+      fontSize: 15,
+      minHeight: 40,
+      paddingHorizontal: 12
+    },
     overflowMenuScroll: {
       flexGrow: 0,
       flexShrink: 1
