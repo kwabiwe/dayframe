@@ -17,23 +17,25 @@ import {
 } from "./onboarding";
 
 describe("onboarding steps", () => {
-  it("walks welcome → location → motion → health → reminders → done and back, never past either end", () => {
-    expect(ONBOARDING_STEPS).toEqual(["welcome", "location", "motion", "health", "reminders", "done"]);
+  it("walks welcome → location → motion → health → reminders → activities → done and back, never past either end", () => {
+    expect(ONBOARDING_STEPS).toEqual(["welcome", "location", "motion", "health", "reminders", "activities", "done"]);
     expect(nextOnboardingStep("welcome")).toBe("location");
     expect(nextOnboardingStep("motion")).toBe("health");
-    expect(nextOnboardingStep("reminders")).toBe("done");
+    expect(nextOnboardingStep("reminders")).toBe("activities");
+    expect(nextOnboardingStep("activities")).toBe("done");
     expect(nextOnboardingStep("done")).toBe("done");
     expect(previousOnboardingStep("location")).toBe("welcome");
     expect(previousOnboardingStep("welcome")).toBe("welcome");
   });
 
   it("fills one progress block per finished permission step, in the logo's colours", () => {
-    expect(ONBOARDING_PROGRESS.map((item) => item.color)).toEqual(["red", "amber", "lime", "blue"]);
+    expect(ONBOARDING_PROGRESS.map((item) => item.color)).toEqual(["red", "amber", "lime", "blue", "violet"]);
     expect(onboardingProgressDone("welcome")).toBe(0);
     expect(onboardingProgressDone("location")).toBe(0);
     expect(onboardingProgressDone("motion")).toBe(1);
     expect(onboardingProgressDone("reminders")).toBe(3);
-    expect(onboardingProgressDone("done")).toBe(4);
+    expect(onboardingProgressDone("activities")).toBe(4);
+    expect(onboardingProgressDone("done")).toBe(5);
   });
 
   it("shows Back and Later only on the permission steps", () => {
@@ -62,8 +64,10 @@ describe("onboarding answers", () => {
       expect.objectContaining({ key: "location", state: "later", detail: "Suggestions need Always" }),
       expect.objectContaining({ key: "motion", state: "none", detail: "Not available on this iPhone" })
     ]);
-    expect(onboardingSummary({ ...EMPTY_ONBOARDING_ANSWERS, location: "always", suggestions: "on", motion: "on", health: "on", reminders: "on" }).map((row) => row.state))
-      .toEqual(["on", "on", "on", "on"]);
+    expect(onboardingSummary({ ...EMPTY_ONBOARDING_ANSWERS, location: "always", suggestions: "on", motion: "on", health: "on", reminders: "on", quickStarts: 4 }).map((row) => row.state))
+      .toEqual(["on", "on", "on", "on", "on"]);
+    expect(onboardingSummary({ ...EMPTY_ONBOARDING_ANSWERS, quickStarts: 4 })[4]).toMatchObject({ key: "activities", detail: "4 pinned" });
+    expect(onboardingSummary({ ...EMPTY_ONBOARDING_ANSWERS, quickStarts: 0 })[4]).toMatchObject({ state: "later", detail: "None pinned yet · Settings › Activities" });
   });
 
   it("keeps Always permission apart from this account's suggestions (Codex r1)", () => {

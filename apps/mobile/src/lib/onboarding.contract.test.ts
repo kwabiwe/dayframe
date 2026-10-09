@@ -11,9 +11,15 @@ const settings = read("../../app/settings.tsx");
 const dashboard = read("../components/DayframeDashboard.tsx");
 
 describe("onboarding contract (Blocks 8-1a)", () => {
-  it("is only reached from Settings for now (the first-sign-in gate comes with the last step)", () => {
+  it("is reached from Settings, and offered right after sign-in only (8-1c), never on launch", () => {
     expect(settings).toContain('router.push("/onboarding")');
-    expect(dashboard).not.toContain("/onboarding");
+    expect(dashboard.match(/router\.push\("\/onboarding"\)/g)).toHaveLength(1);
+    expect(dashboard).toMatch(/setAuthPassword\(""\);\n      void offerOnboardingAfterSignIn\(\);/);
+  });
+
+  it("pins quick starts with the Settings activity update and keeps the six-pin limit (8-1c)", () => {
+    expect(screen).toContain("updateCategory(activity.id, { isPinned: pin })");
+    expect(screen).toContain("pinnedCount >= ONBOARDING_PIN_LIMIT");
   });
 
   it("can't be swiped away half-way through a permission", () => {
@@ -61,6 +67,13 @@ describe("onboarding contract (Blocks 8-1a)", () => {
     expect(screen).toContain("const saved = await setReviewNudgeEnabled(owner.current, true).then((state) => state.enabled, () => false);");
     expect(screen).toContain('testID="onboarding-health-retry"');
     expect(screen).toContain('testID="onboarding-reminders-retry"');
+  });
+
+  it("reloads activities when Quick starts opens, with Try again, and asks Today to refresh after a pin (Codex r1 on #278)", () => {
+    expect(screen).toContain('if (step === "activities") void loadActivities();');
+    expect(screen).toContain('testID="onboarding-activities-retry"');
+    expect(screen).toContain("requestDashboardRefresh();");
+    expect(dashboard).toContain('if (takeDashboardRefresh() && authState === "authenticated") void load({ silent: true });');
   });
 
   it("never starts a timer or writes time", () => {
