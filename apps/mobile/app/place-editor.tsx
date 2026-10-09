@@ -460,6 +460,13 @@ export default function PlaceEditorScreen() {
 
 
   const defaultActivity = categories.find((category) => category.id === defaultCategoryId) ?? null;
+  // A saved default the picker can't list (an archived activity) still shows by its saved name and
+  // can still be removed.
+  const savedDefaultName = mode === "edit" && defaultCategoryId && !defaultActivity
+    && (loadedEntity as MobilePlace | null)?.defaultCategoryId === defaultCategoryId
+    ? (loadedEntity as MobilePlace).defaultCategoryName ?? "An archived activity"
+    : null;
+  const defaultActivityLabel = defaultActivity?.name ?? savedDefaultName ?? (defaultCategoryId ? "An archived activity" : null);
   // The map draws the place in the colour of the activity its visits log as (neutral without one),
   // as the Review deck's place cards do; coral stays for Save.
   const mapColor = defaultActivity && loggingEnabled
@@ -658,6 +665,7 @@ export default function PlaceEditorScreen() {
                 <Pressable
                   accessibilityHint="Centres this place where you are now"
                   accessibilityLabel="Use current location"
+                  accessibilityValue={locationAccuracy !== null && !locating ? { text: formatLocationAccuracy(locationAccuracy) } : undefined}
                   accessibilityRole="button"
                   accessibilityState={{ busy: locating, disabled: locating }}
                   disabled={locating}
@@ -808,9 +816,9 @@ export default function PlaceEditorScreen() {
                       testID="place-editor-logs-as"
                       theme={theme}
                       title="Logs as"
-                      value={defaultActivity?.name ?? "No default activity"}
+                      value={defaultActivityLabel ?? "No default activity"}
                     />
-                    {defaultActivity ? (
+                    {defaultCategoryId ? (
                       <Reanimated.View
                         entering={localPresenceEntering(reduceMotion)}
                         exiting={localPresenceExiting(reduceMotion)}
@@ -1033,7 +1041,7 @@ const editorStyles = StyleSheet.create({
   fieldLabel: { flex: 1, fontSize: 15, fontWeight: "600" },
   fieldInput: { fontSize: 16, minHeight: 52, paddingHorizontal: 16, paddingVertical: 12 },
   inlineInput: { flex: 1.4, fontSize: 16, minHeight: 44, minWidth: 0, textAlign: "right" },
-  radiusInput: { borderRadius: 12, fontSize: 16, fontVariant: ["tabular-nums"], minHeight: 40, textAlign: "center", width: 84 },
+  radiusInput: { borderRadius: 12, fontSize: 16, fontVariant: ["tabular-nums"], minHeight: 44, textAlign: "center", width: 84 },
   deleteButton: { alignItems: "center", borderRadius: DAYFRAME_BLOCKS.radius.pill, justifyContent: "center", minHeight: 50 },
   deleteText: { fontSize: 15, fontWeight: "700" }
 });

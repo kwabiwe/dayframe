@@ -60,6 +60,11 @@ describe("mobile place editor contract", () => {
     // An accepted create never depends on a later read (a retry would add the place twice).
     expect(apiSource).not.toContain("findCreatedPlace");
     expect(apiSource).not.toMatch(/entity: "place"/);
+    // A saved default that is no longer listed (archived) keeps its name and its Remove action.
+    expect(editorSource).toContain("defaultCategoryName");
+    expect(editorSource).toContain("{defaultCategoryId ? (");
+    // VoiceOver hears the current-location accuracy on the row.
+    expect(editorSource).toContain("accessibilityValue={locationAccuracy !== null && !locating");
   });
 });
 
