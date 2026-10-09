@@ -73,7 +73,11 @@ describe("mobile Review action contracts", () => {
     expect(evidenceEditorSource).not.toContain("Route detected");
     expect(evidenceEditorSource).not.toContain("Start and end are shown on the map");
     expect(evidenceEditorSource).toContain("What did you do?");
-    expect(evidenceEditorSource).toContain('label="When?"');
+    // Blocks 5e: Where / What / When are Blocks groups; More options is a plain list.
+    expect(evidenceEditorSource).toContain('<SettingsBlockGroup theme={theme} title="When?">');
+    expect(evidenceEditorSource).toContain('<SettingsBlockGroup theme={theme} title="More options">');
+    expect(evidenceEditorSource).not.toContain("advancedExpanded");
+    expect(evidenceEditorSource).not.toContain(">Location evidence</Text>");
     expect(evidenceEditorSource).toContain("createNativePlaceSearchProvider");
     expect(evidenceEditorSource).toContain("buildLocationReviewResolutionAction");
     expect(evidenceEditorSource).not.toContain("FloatingDatePicker");

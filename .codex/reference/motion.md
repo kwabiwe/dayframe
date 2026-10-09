@@ -297,3 +297,11 @@ Block pull-to-refresh:
 - Entrance/update/exit: switching a type on fades its rows in while the rows and groups below slide down; switching it off fades them out while the rest slides up. Choosing an activity uses the All activities sheet's own motion. Use default fades its own row out while the Name row below moves up with the shared layout transition; a failed save brings the row back the same way.
 - Interruption: toggling again mid-transition retargets from the current position; a failed save rolls the switch or mapping back with an alert and the rows follow.
 - Accessibility: Reduce Motion keeps opacity-only presence and no layout movement. Rows keep 44-point targets and plain labels; every pill states its action.
+
+## Location evidence in Blocks (Blocks parity step 5e)
+
+- Trigger: Edit before logging opens the screen (existing pushed route); in More options, Use a map pin instead and Split near HH:MM.
+- Owner: each group and each More options row is a `Reanimated.View` with the shared `localLayoutTransition`; the inline pin-name row and the Before/After split row enter and leave with `localPresenceEntering` / `localPresenceExiting`. Search results, nearby places, trip stops and the status note keep their existing presence owners. The header stays fixed.
+- Entrance/update/exit: the pin row fades in under its row while the rest of the list slides down, and out when the pin is finished or used; choosing a split fades in its confirm row. Rows are always visible (no disclosure), so nothing else moves.
+- Interruption: every More options row and pill is disabled while a save runs (the place, activity and map choices keep their earlier behaviour); finishing the pin keeps the drafted name and Use this pin until the pin is used; a failed save keeps the whole draft (unchanged mutation owner).
+- Accessibility: Reduce Motion keeps opacity-only presence and no layout movement; rows are 52-point targets with plain titles and subtitles; the activity title is a header.

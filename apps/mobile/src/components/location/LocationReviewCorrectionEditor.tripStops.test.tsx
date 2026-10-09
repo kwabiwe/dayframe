@@ -18,7 +18,8 @@ vi.mock("react-native", () => ({
   useWindowDimensions: () => ({ fontScale: 1, width: 375, height: 812 })
 }));
 vi.mock("react-native-reanimated", () => ({ default: { View: "AnimatedView" } }));
-vi.mock("react-native-svg", () => ({ default: "Svg", Circle: "Circle", Path: "Path", Rect: "Rect" }));
+// The Blocks groups (SettingsBlocks) bring DayframeIcon, which draws ellipses, lines and polylines too.
+vi.mock("react-native-svg", () => ({ default: "Svg", Circle: "Circle", Ellipse: "Ellipse", G: "G", Line: "Line", Path: "Path", Polygon: "Polygon", Polyline: "Polyline", Rect: "Rect" }));
 vi.mock("@/lib/mobileTheme", () => ({
   pressable: (value: unknown) => value,
   useMobileTheme: () => ({ styles: {}, theme: {
@@ -129,5 +130,43 @@ describe("trip stops in mobile Location Evidence", () => {
     expect(rows[1].props.accessibilityLabel).toMatch(/^Stop 2 of 2: /);
     const heading = tree!.root.findAllByType("Text" as never).find((node) => text(node) === "2 stops on this trip");
     expect(heading?.props.accessibilityRole).toBe("header");
+  });
+});
+
+// Codex review of #270 r1/r2: finishing the pin, clearing its name or reopening it must never
+// hide Use this pin or lose the name, and using it proposes the named place.
+describe("map pin in More options", () => {
+  const byTestId = (id: string) => tree!.root.find((node) => node.props.testID === id);
+  const pinNameInput = () => tree!.root.findAll((node) => node.props.accessibilityLabel === "New saved place name" && typeof node.type === "string");
+  const textNodes = (value: string) => tree!.root.findAllByType("Text" as never).filter((node) => text(node) === value);
+  const useThisPin = () => tree!.root.find((node) => node.props.label === "Use this pin");
+  const stayWithCentre = () => {
+    const evidence = fixture(undefined, "stay") as unknown as { map: Record<string, unknown> };
+    evidence.map.centre = { type: "Point", coordinates: [-0.12, 51.5] };
+    return evidence as unknown as LocationReviewEvidenceDto;
+  };
+
+  it("keeps the field and Use this pin through finishing, clearing and retyping, then proposes the place", () => {
+    act(() => { tree = create(editor(stayWithCentre())); });
+    expect(pinNameInput()).toHaveLength(0);
+    act(() => byTestId("location-evidence-map-pin").props.onPress());
+    // Finishing before a name is typed keeps the field.
+    act(() => byTestId("location-evidence-map-pin").props.onPress());
+    expect(pinNameInput()).toHaveLength(1);
+    act(() => pinNameInput()[0].props.onChangeText("Library"));
+    act(() => pinNameInput()[0].props.onChangeText(""));
+    expect(pinNameInput()).toHaveLength(1);
+    act(() => pinNameInput()[0].props.onChangeText("Town library"));
+    expect(useThisPin().props.disabled).toBe(false);
+    act(() => useThisPin().props.onPress());
+    // Used: the editor closes and the primary action now records with this place.
+    expect(pinNameInput()).toHaveLength(0);
+    expect(textNodes("Use once and record")).toHaveLength(1);
+    // Reopening keeps the name for a quick adjustment.
+    act(() => byTestId("location-evidence-map-pin").props.onPress());
+    expect(pinNameInput()[0].props.value).toBe("Town library");
+    for (const id of ["location-evidence-record-once", "location-evidence-skip"]) {
+      expect(byTestId(id).parent!.props).toMatchObject({ layout: { marker: "local-layout" } });
+    }
   });
 });

@@ -80,6 +80,7 @@ export function SettingsBlockRow({
   control,
   danger = false,
   diagnostic,
+  disabled = false,
   divider = true,
   onPress,
   subtitle,
@@ -93,6 +94,8 @@ export function SettingsBlockRow({
   danger?: boolean;
   /** Large-text QA probe only (scripts/mobile-accessibility-qa-entry.tsx). */
   diagnostic?: MobileAccessibilityDiagnostic;
+  /** A tappable row that can't act right now (e.g. while a save runs). */
+  disabled?: boolean;
   divider?: boolean;
   onPress?: () => void;
   subtitle?: string | null;
@@ -132,10 +135,17 @@ export function SettingsBlockRow({
         accessibilityHint={accessibilityHint}
         accessibilityLabel={subtitle ? `${title}, ${subtitle}` : title}
         accessibilityRole="button"
+        accessibilityState={disabled ? { disabled } : undefined}
         accessibilityValue={value ? { text: value } : undefined}
+        disabled={disabled}
         onLayout={(event) => recordMobileLayout(diagnostic, "settings.row", event)}
         onPress={onPress}
-        style={({ pressed }) => [blockStyles.row, dividerStyle, pressed ? { backgroundColor: theme.surfaceMuted } : null]}
+        style={({ pressed }) => [
+          blockStyles.row,
+          dividerStyle,
+          disabled ? { opacity: 0.45 } : null,
+          pressed ? { backgroundColor: theme.surfaceMuted } : null
+        ]}
         testID={testID}
       >
         {text}
