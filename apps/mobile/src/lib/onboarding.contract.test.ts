@@ -32,6 +32,23 @@ describe("onboarding contract (Blocks 8-1a)", () => {
     expect(screen).toMatch(/async function finishAlways[\s\S]*ensureAutomaticLoggingCategories\(\["commute"\]\)[\s\S]*setLocationLearningEnabled\(true/);
   });
 
+  it("decides suggestions from the account's own consent, and offers it when Always was already allowed", () => {
+    expect(screen).toContain("enabled = (await getLocationVisitDiagnostics()).locationLearningEnabled === true;");
+    expect(screen).toContain("suggestions: diagnostics?.locationLearningEnabled ?");
+    expect(screen).toContain('testID="onboarding-suggestions-on"');
+  });
+
+  it("opens Today at the end, starts each step at its top with VoiceOver on its heading", () => {
+    expect(screen).toContain('router.dismissTo("/(tabs)/today")');
+    expect(screen).toContain("key={step} style={styles.body}");
+    expect(screen).toContain("AccessibilityInfo.setAccessibilityFocus(handle)");
+  });
+
+  it("fences late answers by session, not only by account", () => {
+    expect(screen).toContain("subscribeAuthenticatedSession(bump)");
+    expect(screen).toContain("subscribeMobileSignedOut(bump)");
+  });
+
   it("never starts a timer or writes time", () => {
     expect(screen).not.toMatch(/startTimer|stopTimer|createTimeEntry|queueEvent|enqueue/);
   });

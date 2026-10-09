@@ -57,6 +57,15 @@ describe("onboarding answers", () => {
       expect.objectContaining({ key: "location", state: "later", detail: "Suggestions need Always" }),
       expect.objectContaining({ key: "motion", state: "none", detail: "Not available on this iPhone" })
     ]);
-    expect(onboardingSummary({ ...EMPTY_ONBOARDING_ANSWERS, location: "always", motion: "on" }).map((row) => row.state)).toEqual(["on", "on"]);
+    expect(onboardingSummary({ ...EMPTY_ONBOARDING_ANSWERS, location: "always", suggestions: "on", motion: "on" }).map((row) => row.state)).toEqual(["on", "on"]);
+  });
+
+  it("keeps Always permission apart from this account's suggestions (Codex r1)", () => {
+    expect(locationResultText("always", "off")).toMatch(/Turn on suggestions/);
+    expect(locationResultText("always", "failed")).toMatch(/couldn't be switched on/);
+    const [notOptedIn] = onboardingSummary({ ...EMPTY_ONBOARDING_ANSWERS, location: "always", suggestions: "off" });
+    expect(notOptedIn).toMatchObject({ state: "later", detail: "Suggestions are off" });
+    const [failed] = onboardingSummary({ ...EMPTY_ONBOARDING_ANSWERS, location: "always", suggestions: "failed" });
+    expect(failed).toMatchObject({ state: "later", detail: "Suggestions couldn't be switched on" });
   });
 });

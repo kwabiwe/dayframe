@@ -17,14 +17,18 @@ export const ONBOARDING_PROGRESS: readonly { step: OnboardingStep; color: Dayfra
 export type LocationChoice = "always" | "while" | "off";
 export type MotionChoice = "on" | "off" | "unavailable";
 
+/** The account's visit and journey suggestions (consent), separate from iOS permission. */
+export type SuggestionsState = "on" | "off" | "failed";
+
 export type OnboardingAnswers = {
   location: LocationChoice | null;
+  suggestions: SuggestionsState;
   /** Location's second ask: While Using was given, the Always explainer is showing. */
   locationStage: "explain" | "upgrade";
   motion: MotionChoice | null;
 };
 
-export const EMPTY_ONBOARDING_ANSWERS: OnboardingAnswers = { location: null, locationStage: "explain", motion: null };
+export const EMPTY_ONBOARDING_ANSWERS: OnboardingAnswers = { location: null, suggestions: "off", locationStage: "explain", motion: null };
 
 export function nextOnboardingStep(step: OnboardingStep): OnboardingStep {
   const index = ONBOARDING_STEPS.indexOf(step);
@@ -55,9 +59,11 @@ export function locationChoiceFromPermissions(foregroundGranted: boolean, backgr
 }
 
 /** The line under the Location step once it is answered. Suggestions need Always in this app. */
-export function locationResultText(choice: LocationChoice) {
+export function locationResultText(choice: LocationChoice, suggestions: SuggestionsState = "on") {
   switch (choice) {
     case "always":
+      if (suggestions === "failed") return "Suggestions couldn't be switched on. Try again, or turn them on later in Settings.";
+      if (suggestions === "off") return "iOS allows Always. Turn on suggestions to see visits and journeys in Review.";
       return "Location is on, including when your phone is locked.";
     case "while":
       return "Location works while Dayframe is open. Visit and journey suggestions need Always, which you can switch on in Settings › Location.";
@@ -86,9 +92,11 @@ export function onboardingSummary(answers: OnboardingAnswers): OnboardingSummary
     {
       key: "location",
       title: "Location",
-      state: answers.location === "always" ? "on" : "later",
+      state: answers.location === "always" && answers.suggestions === "on" ? "on" : "later",
       detail: answers.location === "always"
-        ? "Always, including locked"
+        ? answers.suggestions === "on"
+          ? "Always, including locked"
+          : answers.suggestions === "failed" ? "Suggestions couldn't be switched on" : "Suggestions are off"
         : answers.location === "while"
           ? "Suggestions need Always"
           : "Visits and journeys are off"

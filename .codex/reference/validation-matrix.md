@@ -66,7 +66,7 @@ When changing place roles, role labels or any read path that shows a saved place
 ## Onboarding (iPhone)
 
 - Run `npx vitest run src/lib/onboarding.test.ts src/lib/onboarding.contract.test.ts` in `apps/mobile`.
-- Simulator: reset the app's location permission (`xcrun simctl privacy booted reset location com.layereight.dayframe`), set a location, open `dayframe://onboarding` and walk Welcome → Allow location (While Using) → Continue to iOS prompt (Always) → Continue → Motion (not available in the Simulator) → summary → Open Today. Afterwards turn Suggest visits and commutes off again on the QA account and reset the permission. Motion & Fitness and the real Always prompt behaviour need a physical iPhone.
+- Simulator (the Debug app is `com.layereight.dayframe` with the `dayframe://` scheme; a staging phone app is `com.layereight.dayframe.staging` with `dayframe-staging://`): reset the app's location permission (`xcrun simctl privacy booted reset location com.layereight.dayframe`), set a location, open `dayframe://onboarding` and walk Welcome → Allow location (While Using) → Continue to iOS prompt (Always) → Continue → Motion (not available in the Simulator) → summary → Open Today. Also grant Always first (`xcrun simctl privacy booted grant location-always com.layereight.dayframe`) with suggestions off: the Location step must offer Turn on suggestions without an iOS prompt. Afterwards turn Suggest visits and commutes off again on the QA account and reset the permission. Motion & Fitness and the real Always prompt behaviour need a physical iPhone.
 
 ## Evening Review reminder (iPhone)
 

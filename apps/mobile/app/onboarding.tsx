@@ -4,7 +4,7 @@
 // and nothing here starts a timer or logs time. The screen owns permissions and the step state;
 // `src/lib/onboarding.ts` holds the order and the words.
 import { useCallback, useEffect, useRef, useState } from "react";
-import { AccessibilityInfo, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import { AccessibilityInfo, Pressable, ScrollView, StyleSheet, Text, View, findNodeHandle } from "react-native";
 import * as Location from "expo-location";
 import { router } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
@@ -19,10 +19,12 @@ import Reanimated, {
 import { DAYFRAME_APP_ICONS, DAYFRAME_BLOCKS, blockColorsFor, type DayframeGlyph, type DayframePaletteKey } from "@dayframe/shared";
 import { DayframeIcon } from "@/components/icons/DayframeIcon";
 import { AuthRequiredError, ensureAutomaticLoggingCategories, fetchBootstrap } from "@/lib/api";
-import { setLocationLearningEnabled } from "@/lib/geofence";
+import { getLocationVisitDiagnostics, setLocationLearningEnabled } from "@/lib/geofence";
 import { playHaptic } from "@/lib/haptics";
 import { readMotionFitnessStatus, requestMotionFitness } from "@/lib/location/motionPermission";
 import { mobileAccountOwnersEqual, readActiveMobileAccount, type MobileAccountOwner } from "@/lib/mobileAccount";
+import { subscribeMobileSignedOut } from "@/lib/mobileSessionTransition";
+import { subscribeAuthenticatedSession } from "@/lib/secure-session";
 import { useMobileTheme, type MobileTheme } from "@/lib/mobileTheme";
 import { MOBILE_DISPLAY_FONT, mobileTextProps } from "@/lib/mobileTypography";
 import { BLOCKS_SPRING } from "@/lib/blocksMotion";
@@ -54,29 +56,53 @@ export default function OnboardingScreen() {
   const [direction, setDirection] = useState<1 | -1>(1);
   // The progress block a forward move just finished; it lands once.
   const [landed, setLanded] = useState<OnboardingStep | null>(null);
-  const [suggestionsProblem, setSuggestionsProblem] = useState(false);
   const mounted = useRef(true);
   const owner = useRef<MobileAccountOwner | null>(null);
-  useEffect(() => () => {
-    mounted.current = false;
+  // Bumped whenever the session changes or ends: an answer from before that never applies (an
+  // A → B → A switch passes an owner comparison alone).
+  const sessionEpoch = useRef(0);
+  // The welcome's sample day drops in once per visit, not again after Back.
+  const welcomePlayed = useRef(false);
+  const titleRef = useRef<Text>(null);
+  useEffect(() => {
+    const bump = () => {
+      sessionEpoch.current += 1;
+    };
+    const unsubscribeSession = subscribeAuthenticatedSession(bump);
+    const unsubscribeSignedOut = subscribeMobileSignedOut(bump);
+    return () => {
+      mounted.current = false;
+      unsubscribeSession();
+      unsubscribeSignedOut();
+    };
   }, []);
+
+  // A new step starts at its top (the scroll view is keyed by step) and VoiceOver moves to its heading.
+  useEffect(() => {
+    const handle = findNodeHandle(titleRef.current);
+    if (handle) AccessibilityInfo.setAccessibilityFocus(handle);
+  }, [step, answers.locationStage]);
 
   // Setup opened again from Settings shows what is already answered rather than asking twice.
   useEffect(() => {
     void (async () => {
+      const epoch = sessionEpoch.current;
       owner.current = await readActiveMobileAccount();
-      const [foreground, background, motion] = await Promise.all([
+      const [foreground, background, motion, diagnostics] = await Promise.all([
         Location.getForegroundPermissionsAsync().catch(() => null),
         Location.getBackgroundPermissionsAsync().catch(() => null),
-        readMotionFitnessStatus()
+        readMotionFitnessStatus(),
+        getLocationVisitDiagnostics().catch(() => null)
       ]);
-      if (!mounted.current) return;
+      if (!(await stillHere(epoch))) return;
       const location = foreground && !foreground.granted && !foreground.canAskAgain
         ? "off"
         : locationChoiceFromPermissions(Boolean(foreground?.granted), Boolean(background?.granted));
       setAnswers((current) => ({
         ...current,
         location: current.location ?? (location === "while" ? null : location),
+        // This account's own choice: Always on the phone doesn't mean this account turned suggestions on.
+        suggestions: diagnostics?.locationLearningEnabled ? "on" : current.suggestions,
         // While Using is already given: the Location step opens at the Always explainer.
         locationStage: location === "while" ? "upgrade" : current.locationStage,
         motion: current.motion ?? motionChoiceFrom(motion, false)
@@ -84,10 +110,11 @@ export default function OnboardingScreen() {
     })();
   }, []);
 
-  /** True while this screen is still open for the account it opened with. */
-  const stillHere = useCallback(async () => {
-    if (!mounted.current) return false;
-    return mobileAccountOwnersEqual(owner.current, await readActiveMobileAccount());
+  /** True while this screen is still open in the same session, for the account it opened with. */
+  const stillHere = useCallback(async (epoch: number) => {
+    if (!mounted.current || epoch !== sessionEpoch.current) return false;
+    const active = await readActiveMobileAccount();
+    return mounted.current && epoch === sessionEpoch.current && mobileAccountOwnersEqual(owner.current, active);
   }, []);
 
   function go(next: OnboardingStep, dir: 1 | -1) {
@@ -97,11 +124,11 @@ export default function OnboardingScreen() {
     playHaptic("tick");
   }
 
-  async function run(work: () => Promise<void>) {
+  async function run(work: (epoch: number) => Promise<void>) {
     if (busy) return;
     setBusy(true);
     try {
-      await work();
+      await work(sessionEpoch.current);
     } finally {
       if (mounted.current) setBusy(false);
     }
@@ -109,18 +136,18 @@ export default function OnboardingScreen() {
 
   // Location, first ask: While Using. iOS shows its own prompt; ours explains first.
   function allowLocation() {
-    void run(async () => {
+    void run(async (epoch) => {
       const foreground = await Location.requestForegroundPermissionsAsync().catch(() => null);
-      if (!(await stillHere())) return;
+      if (!(await stillHere(epoch))) return;
       if (!foreground?.granted) {
         setAnswers((current) => ({ ...current, location: "off" }));
         announce("Location is off.");
         return;
       }
       const background = await Location.getBackgroundPermissionsAsync().catch(() => null);
-      if (!(await stillHere())) return;
+      if (!(await stillHere(epoch))) return;
       if (background?.granted) {
-        await finishAlways();
+        await finishAlways(epoch);
         return;
       }
       setAnswers((current) => ({ ...current, locationStage: "upgrade" }));
@@ -129,12 +156,17 @@ export default function OnboardingScreen() {
 
   // Location, second ask: Always, so trips aren't missed with the phone locked.
   function askAlways() {
-    void run(async () => {
+    void run(async (epoch) => {
       const background = await Location.requestBackgroundPermissionsAsync().catch(() => null);
-      if (!(await stillHere())) return;
-      if (background?.granted) await finishAlways();
+      if (!(await stillHere(epoch))) return;
+      if (background?.granted) await finishAlways(epoch);
       else keepWhileUsing();
     });
+  }
+
+  // Always was already allowed (on this phone, perhaps for another account): this account opts in.
+  function turnOnSuggestions() {
+    void run((epoch) => finishAlways(epoch));
   }
 
   function keepWhileUsing() {
@@ -143,30 +175,33 @@ export default function OnboardingScreen() {
   }
 
   /** Always is allowed: switch on visit and journey suggestions, as Settings › Location does. */
-  async function finishAlways() {
+  async function finishAlways(epoch: number) {
     setAnswers((current) => ({ ...current, location: "always", locationStage: "explain" }));
-    announce("Location is on.");
+    let enabled = false;
     try {
       const data = await fetchBootstrap();
-      if (!(await stillHere())) return;
+      if (!(await stillHere(epoch))) return;
       await ensureAutomaticLoggingCategories(["commute"]);
-      if (!(await stillHere())) return;
+      if (!(await stillHere(epoch))) return;
       await setLocationLearningEnabled(true, data.places, { userId: data.user.id, workspaceId: data.workspace.id });
-      if (mounted.current) setSuggestionsProblem(false);
+      if (!(await stillHere(epoch))) return;
+      // The account's own consent decides, not the call's wording.
+      enabled = (await getLocationVisitDiagnostics()).locationLearningEnabled === true;
     } catch (error) {
       if (error instanceof AuthRequiredError) {
-        if (mounted.current) router.replace("/");
+        if (mounted.current && epoch === sessionEpoch.current) router.replace("/");
         return;
       }
-      // Permission is in place; only the account switch failed. Settings can finish it.
-      if (mounted.current) setSuggestionsProblem(true);
     }
+    if (!(await stillHere(epoch))) return;
+    setAnswers((current) => ({ ...current, suggestions: enabled ? "on" : "failed" }));
+    announce(enabled ? "Location is on. Suggestions are on." : "Suggestions couldn't be switched on.");
   }
 
   function allowMotion() {
-    void run(async () => {
+    void run(async (epoch) => {
       const status = await requestMotionFitness();
-      if (!(await stillHere())) return;
+      if (!(await stillHere(epoch))) return;
       const choice = motionChoiceFrom(status, true) ?? "off";
       setAnswers((current) => ({ ...current, motion: choice }));
       announce(choice === "on" ? "Motion & Fitness is on." : "Motion & Fitness is off.");
@@ -180,12 +215,12 @@ export default function OnboardingScreen() {
   }
 
   function finish() {
-    if (router.canGoBack()) router.back();
-    else router.replace("/");
+    // Today, whichever page setup was opened from.
+    router.dismissTo("/(tabs)/today");
   }
 
   const chrome = onboardingChrome(step);
-  const content = stepContent(step, answers, suggestionsProblem);
+  const content = stepContent(step, answers);
 
   return (
     <SafeAreaView style={[styles.safe, { backgroundColor: theme.background }]}>
@@ -221,7 +256,7 @@ export default function OnboardingScreen() {
         </View>
       </View>
 
-      <ScrollView contentContainerStyle={styles.bodyContent} style={styles.body}>
+      <ScrollView contentContainerStyle={styles.bodyContent} key={step} style={styles.body}>
         {/* One owner for step movement: each step (and the Always explainer) enters from the side
             it comes from with the sheet spring; Reduce Motion fades. The old step leaves at once. */}
         <Reanimated.View
@@ -229,9 +264,9 @@ export default function OnboardingScreen() {
           key={`${step}:${answers.locationStage}`}
           style={styles.step}
         >
-          {step === "welcome" ? <WelcomeDay reduceMotion={reduceMotion} theme={theme} /> : null}
+          {step === "welcome" ? <WelcomeDay played={welcomePlayed} reduceMotion={reduceMotion} theme={theme} /> : null}
           {content.glyph ? <StepGlyph color={content.glyph.color} glyph={content.glyph.name} theme={theme} /> : null}
-          <Text {...mobileTextProps("screenHeading")} accessibilityRole="header" style={[styles.title, { color: theme.textPrimary }]}>
+          <Text {...mobileTextProps("screenHeading")} accessibilityRole="header" ref={titleRef} style={[styles.title, { color: theme.textPrimary }]}>
             {content.title}
           </Text>
           {content.lede ? (
@@ -276,6 +311,7 @@ export default function OnboardingScreen() {
           onAllowMotion={allowMotion}
           onAskAlways={askAlways}
           onContinue={() => go(nextOnboardingStep(step), 1)}
+          onTurnOnSuggestions={turnOnSuggestions}
           onFinish={finish}
           onKeepWhileUsing={keepWhileUsing}
           onNotNow={notNow}
@@ -307,7 +343,7 @@ type StepContent = {
   result: { on: boolean; text: string } | null;
 };
 
-function stepContent(step: OnboardingStep, answers: OnboardingAnswers, suggestionsProblem: boolean): StepContent {
+function stepContent(step: OnboardingStep, answers: OnboardingAnswers): StepContent {
   switch (step) {
     case "welcome":
       return {
@@ -333,10 +369,8 @@ function stepContent(step: OnboardingStep, answers: OnboardingAnswers, suggestio
         privacy: upgrade ? null : "Precise location stays private to your account. It is never used for ads or analytics, and you can export or delete it any time.",
         result: answers.location
           ? {
-              on: answers.location === "always",
-              text: answers.location === "always" && suggestionsProblem
-                ? "Location is on, but suggestions couldn't be switched on. Turn on Suggest visits and commutes in Settings."
-                : locationResultText(answers.location)
+              on: answers.location === "always" && answers.suggestions === "on",
+              text: locationResultText(answers.location, answers.suggestions)
             }
           : null
       };
@@ -375,6 +409,7 @@ function StepActions({
   onFinish,
   onKeepWhileUsing,
   onNotNow,
+  onTurnOnSuggestions,
   step,
   theme
 }: {
@@ -387,6 +422,7 @@ function StepActions({
   onFinish: () => void;
   onKeepWhileUsing: () => void;
   onNotNow: () => void;
+  onTurnOnSuggestions: () => void;
   step: OnboardingStep;
   theme: MobileTheme;
 }) {
@@ -412,6 +448,20 @@ function StepActions({
       </>
     );
   }
+  if (step === "location" && answers.location === "always" && answers.suggestions !== "on") {
+    return (
+      <>
+        <PrimaryButton
+          busy={busy}
+          label={answers.suggestions === "failed" ? "Try again" : "Turn on suggestions"}
+          onPress={onTurnOnSuggestions}
+          testID="onboarding-suggestions-on"
+          theme={theme}
+        />
+        <SecondaryButton disabled={busy} label="Not now" onPress={onNotNow} testID="onboarding-not-now" theme={theme} />
+      </>
+    );
+  }
   if (step === "motion" && !answers.motion) {
     return (
       <>
@@ -420,7 +470,7 @@ function StepActions({
       </>
     );
   }
-  return <PrimaryButton label="Continue" onPress={onContinue} testID="onboarding-continue" theme={theme} />;
+  return <PrimaryButton busy={busy} label="Continue" onPress={onContinue} testID="onboarding-continue" theme={theme} />;
 }
 
 function PrimaryButton({ busy = false, label, onPress, testID, theme }: { busy?: boolean; label: string; onPress: () => void; testID: string; theme: MobileTheme }) {
@@ -516,7 +566,12 @@ const WELCOME_COLUMNS: { blocks: [DayframePaletteKey, number, string][] }[] = [
 ];
 
 /** The welcome's sample day: the logo's blocks fall into three columns (first paint only). */
-function WelcomeDay({ reduceMotion, theme }: { reduceMotion: boolean; theme: MobileTheme }) {
+function WelcomeDay({ played, reduceMotion, theme }: { played: { current: boolean }; reduceMotion: boolean; theme: MobileTheme }) {
+  // Decided once per mount from the screen's flag, so Back to the welcome shows it at rest.
+  const [play] = useState(() => !reduceMotion && !played.current);
+  useEffect(() => {
+    played.current = true;
+  }, [played]);
   let index = 0;
   return (
     <View accessibilityLabel="A sample day made of activity blocks" accessible style={styles.day}>
@@ -524,7 +579,7 @@ function WelcomeDay({ reduceMotion, theme }: { reduceMotion: boolean; theme: Mob
         <View key={columnIndex} style={styles.dayColumn}>
           {column.blocks.map(([color, weight, name]) => {
             const order = index++;
-            return <WelcomeBlock color={color} index={order} key={`${columnIndex}:${name}`} name={name} play={!reduceMotion} theme={theme} weight={weight} />;
+            return <WelcomeBlock color={color} index={order} key={`${columnIndex}:${name}`} name={name} play={play} theme={theme} weight={weight} />;
           })}
         </View>
       ))}
