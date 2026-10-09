@@ -2148,7 +2148,7 @@ describe("mobile API client", () => {
     );
   });
 
-  it("creates places through the hosted API without auto-start", async () => {
+  it("creates places through the hosted places API in one request, without auto-start", async () => {
     storeBoundSession("session-token");
     const savedPlace = {
       id: "30000000-0000-4000-8000-000000000001",
@@ -2162,9 +2162,7 @@ describe("mobile API client", () => {
       defaultCategoryName: "Fitness",
       defaultActivityDescription: "School drop-off/pickup"
     };
-    const fetchMock = vi.fn()
-      .mockResolvedValueOnce(jsonResponse({ ok: true }, 201))
-      .mockResolvedValueOnce(jsonResponse({ user: { id: TIMER_STOP_OWNER.userId }, workspace: { id: TIMER_STOP_OWNER.workspaceId }, places: [savedPlace] }, 200));
+    const fetchMock = vi.fn(() => Promise.resolve(jsonResponse({ ok: true, place: savedPlace }, 201)));
     vi.stubGlobal("fetch", fetchMock);
 
     const result = await createPlace({
@@ -2178,9 +2176,10 @@ describe("mobile API client", () => {
     });
 
     expect(result.place).toEqual(savedPlace);
-    expect(fetchMock).toHaveBeenNthCalledWith(
-      1,
-      "https://dayframe.test/api/entities",
+    // The accepted place comes back with the POST: no follow-up read that could fail after the save.
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock).toHaveBeenCalledWith(
+      "https://dayframe.test/api/places",
       expect.objectContaining({
         method: "POST",
         headers: {
@@ -2188,26 +2187,16 @@ describe("mobile API client", () => {
           Authorization: "Bearer session-token"
         },
         body: JSON.stringify({
-          entity: "place",
-          values: {
-            name: "Gym",
-            latitude: 51.5,
-            longitude: -0.12,
-            radiusMeters: 100,
-            priority: 5,
-            categoryId: "20000000-0000-4000-8000-000000000001",
-            defaultActivityDescription: "School drop-off/pickup",
-            autoStart: false,
-            loggingEnabled: true
-          }
+          name: "Gym",
+          latitude: 51.5,
+          longitude: -0.12,
+          radiusMeters: 100,
+          priority: 5,
+          defaultCategoryId: "20000000-0000-4000-8000-000000000001",
+          defaultActivityDescription: "School drop-off/pickup",
+          autoStart: false,
+          loggingEnabled: true
         })
-      })
-    );
-    expect(fetchMock).toHaveBeenNthCalledWith(
-      2,
-      "https://dayframe.test/api/bootstrap",
-      expect.objectContaining({
-        headers: { Authorization: "Bearer session-token" }
       })
     );
   });
@@ -2347,13 +2336,11 @@ describe("mobile API client", () => {
     storeBoundSession("session-token");
     vi.stubGlobal(
       "fetch",
-      vi.fn()
-        .mockResolvedValueOnce(jsonResponse({ ok: true }, 201))
-        .mockResolvedValueOnce(jsonResponse({ user: { id: TIMER_STOP_OWNER.userId }, workspace: { id: TIMER_STOP_OWNER.workspaceId }, places: [] }, 200))
+      vi.fn(() => Promise.resolve(jsonResponse({ ok: true }, 201)))
     );
 
     await expect(createPlace({ name: "Gym", latitude: 51.5, longitude: -0.12, radiusMeters: 100 })).rejects.toThrow(
-      /refreshed place list/
+      "Unable to save place"
     );
   });
 
