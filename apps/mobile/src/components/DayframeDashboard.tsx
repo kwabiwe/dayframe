@@ -45,7 +45,7 @@ import { DayframeBrand } from "@/components/brand";
 import { TodayTimerSurface, type TodayActiveTimerPresentation } from "@/components/accessibility/TodayTimerSurface";
 import type { LandingRequest } from "@/lib/blocksMotion";
 import { minuteClock, newestShownTimestamp } from "@/lib/frameClock";
-import { loadHapticsPreference, playHaptic } from "@/lib/haptics";
+import { loadHapticsPreference, playHaptic, useHapticsPreference } from "@/lib/haptics";
 import { subscribeSavedTimeGoals } from "@/lib/settingsGoals";
 import { layoutQuickStartMosaic, rankQuickStartActivities, weeklySecondsByActivity } from "@/lib/quickStartMosaic";
 import { TodayReviewPresentationProvider } from "./today/TodayReviewPresentationContext";
@@ -1562,9 +1562,11 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
     () => recentStoppedEntryTime(data?.entries ?? [], data?.activeEntry ?? null),
     [data?.activeEntry, data?.entries]
   );
+  const hapticsEnabled = useHapticsPreference();
   const nativeCalendarBridge = useMemo(
     () => buildNativeCalendarBridgeState({
       data,
+      hapticsEnabled,
       // Whole minutes are all the Calendar shows; a per-second model made SwiftUI republish every second.
       now: minuteNow,
       reduceMotion,
@@ -1577,6 +1579,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
     [
       calendarTransitionDirection,
       data,
+      hapticsEnabled,
       minuteNow,
       reduceMotion,
       reduceTransparency,
@@ -2871,14 +2874,12 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
           <View style={styles.nativeCalendarScreen}>
             <Animated.View style={[styles.nativeCalendarHeader, enteringStyle]}>
               <DashboardBrandLockup isFocused={isFocused} styles={styles} theme={theme} />
-              <Pressable
-                accessibilityLabel="Open settings"
-                accessibilityRole="button"
-                style={pressable(styles.iconButton, styles.buttonPressed)}
+              <AccountAvatarButton
+                email={data?.user.email}
+                name={data?.user.name}
                 onPress={() => router.push("/settings")}
-              >
-                <SettingsGlyph color={theme.accent} />
-              </Pressable>
+                theme={theme}
+              />
             </Animated.View>
             <DayframeCalendarView
               model={isFocused && refreshing ? nativeCalendarModelRefreshing : nativeCalendarModel}

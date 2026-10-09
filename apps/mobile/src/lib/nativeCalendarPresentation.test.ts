@@ -1,8 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
-import { DAYFRAME_THEME } from "@dayframe/shared";
+import { DAYFRAME_THEME, blockColorsFor } from "@dayframe/shared";
 import type { MobileBootstrap, MobileTimeEntry } from "./api";
 import type { MobileTheme } from "./mobileTheme";
 import {
+  REVIEW_LANE_WIDTH,
   buildNativeCalendarBridgeState,
   routeNativeCalendarOpenEvent,
   routeNativeCalendarRefresh
@@ -246,6 +247,156 @@ describe("native Calendar presentation boundary", () => {
   });
 });
 
+describe("native Calendar Blocks presentation", () => {
+  it("titles the screen with the month and says how much was framed on the selected day", () => {
+    const now = localTime(2026, 7, 10, 12, 0);
+    const state = build(now, bootstrap([entry({ durationSeconds: 80 * 60, stoppedAt: iso(localTime(2026, 7, 10, 10, 20)) })]));
+    const weekday = new Date(localTime(2026, 7, 10, 0, 0)).toLocaleDateString(undefined, { weekday: "long" });
+
+    expect(state.model.monthTitle).toBe(new Date(now).toLocaleDateString(undefined, { month: "long" }));
+    expect(state.model.framedLabel).toBe(`1h 20m framed on ${weekday}`);
+
+    const empty = build(now, bootstrap([]));
+    expect(empty.model.framedLabel).toBe(`Nothing framed on ${weekday}`);
+  });
+
+  it("adds the year to the month title outside the current year", () => {
+    const now = localTime(2026, 1, 3, 12, 0);
+    const state = buildNativeCalendarBridgeState({
+      data: bootstrap([]),
+      now,
+      reduceMotion: false,
+      reduceTransparency: false,
+      refreshing: false,
+      selectedDayKey: "2025-12-30",
+      theme: darkTheme(),
+      transitionDirection: -1
+    });
+    expect(state.model.monthTitle).toBe(new Date(2025, 11, 30).toLocaleDateString(undefined, { month: "long", year: "numeric" }));
+  });
+
+  it("gives each week-strip day up to three bars for its biggest activities, Review excluded", () => {
+    const now = localTime(2026, 7, 10, 23, 0);
+    const theme = darkTheme();
+    const data = bootstrap([
+      entry({ id: "work", categoryId: "work", categoryName: "Work", categoryColor: "blue", startedAt: iso(localTime(2026, 7, 10, 9, 0)), stoppedAt: iso(localTime(2026, 7, 10, 12, 0)) }),
+      entry({ id: "gym", categoryId: "gym", categoryName: "Gym", categoryColor: "green", startedAt: iso(localTime(2026, 7, 10, 13, 0)), stoppedAt: iso(localTime(2026, 7, 10, 14, 0)) }),
+      entry({ id: "none", categoryId: null, categoryName: null, categoryColor: null, startedAt: iso(localTime(2026, 7, 10, 14, 0)), stoppedAt: iso(localTime(2026, 7, 10, 16, 0)) }),
+      entry({ id: "read", categoryId: "read", categoryName: "Reading", categoryColor: "violet", startedAt: iso(localTime(2026, 7, 10, 20, 0)), stoppedAt: iso(localTime(2026, 7, 10, 20, 30)) }),
+      entry({ id: "pending", categoryId: "rest", categoryName: "Rest", categoryColor: "red", reviewStatus: "needs_review", startedAt: iso(localTime(2026, 7, 10, 0, 0)), stoppedAt: iso(localTime(2026, 7, 10, 8, 0)) })
+    ]);
+    const state = buildNativeCalendarBridgeState({
+      data,
+      now,
+      reduceMotion: false,
+      reduceTransparency: false,
+      refreshing: false,
+      selectedDayKey: "2026-07-10",
+      theme,
+      transitionDirection: 1
+    });
+    const friday = state.model.weekDays.find((day) => day.dayKey === "2026-07-10");
+    const thursday = state.model.weekDays.find((day) => day.dayKey === "2026-07-09");
+
+    expect(friday?.bars).toEqual([
+      blockColorsFor("blue", "dark").fill,
+      theme.textMuted,
+      blockColorsFor("green", "dark").fill
+    ]);
+    expect(thursday?.bars).toEqual([]);
+  });
+
+  it("serializes solid block colours with measured text and puts Review suggestions in their own right lane", () => {
+    const now = localTime(2026, 7, 10, 12, 0);
+    const theme = darkTheme();
+    const data = bootstrap([
+      entry({ id: "work", startedAt: iso(localTime(2026, 7, 10, 8, 0)), stoppedAt: iso(localTime(2026, 7, 10, 9, 0)) })
+    ], {
+      reviewItems: [{
+        categoryColor: "amber",
+        categoryName: "Commute",
+        confidence: "medium",
+        createdAt: iso(localTime(2026, 7, 10, 8, 0)),
+        eventSource: "location",
+        eventType: "commute_detected",
+        id: "review-123",
+        notes: null,
+        placeName: null,
+        rawPayload: null,
+        status: "open",
+        suggestedCategoryId: "category-commute",
+        suggestedPlaceId: null,
+        suggestedStartedAt: iso(localTime(2026, 7, 10, 8, 0)),
+        suggestedStoppedAt: iso(localTime(2026, 7, 10, 8, 30)),
+        title: "Commute",
+        type: "review"
+      }]
+    });
+    const state = build(now, data, theme);
+    const work = state.model.entries.find((candidate) => candidate.entryId === "work");
+    const review = state.model.entries.find((candidate) => candidate.isReview);
+
+    expect(work).toMatchObject({
+      color: blockColorsFor("blue", "dark").fill,
+      offsetFraction: 0,
+      textColor: blockColorsFor("blue", "dark").text,
+      warningOverlapCount: 0,
+      widthFraction: 1
+    });
+    expect(review).toMatchObject({
+      color: blockColorsFor("amber", "dark").fill,
+      textColor: theme.textPrimary,
+      warningOverlapCount: 0
+    });
+    // Hit geometry still sees the overlap, so neither block grows a 44-point target over the other.
+    expect(work?.overlapCount).toBe(1);
+    expect(review?.overlapCount).toBe(1);
+    expect(work?.accessibilityLabel).not.toContain("Overlaps");
+    expect(review?.offsetFraction).toBeCloseTo(1 - REVIEW_LANE_WIDTH);
+    expect(review?.widthFraction).toBeCloseTo(REVIEW_LANE_WIDTH);
+    expect(review!.zIndex).toBeGreaterThan(work!.zIndex);
+  });
+
+  it("keeps nested Review suggestions at their semantic hit height", () => {
+    const now = localTime(2026, 7, 10, 12, 0);
+    const suggestion = (id: string, start: number, stop: number) => entry({
+      id,
+      reviewStatus: "needs_review",
+      startedAt: iso(start),
+      stoppedAt: iso(stop)
+    });
+    const state = build(now, bootstrap([
+      suggestion("long", localTime(2026, 7, 10, 9, 0), localTime(2026, 7, 10, 10, 0)),
+      suggestion("short", localTime(2026, 7, 10, 9, 20), localTime(2026, 7, 10, 9, 25)),
+      entry({ id: "logged-a", startedAt: iso(localTime(2026, 7, 10, 11, 0)), stoppedAt: iso(localTime(2026, 7, 10, 11, 30)) }),
+      entry({ id: "logged-b", startedAt: iso(localTime(2026, 7, 10, 11, 15)), stoppedAt: iso(localTime(2026, 7, 10, 11, 45)) })
+    ]));
+    const byId = new Map(state.model.entries.map((candidate) => [candidate.entryId, candidate]));
+
+    expect(byId.get("short")?.overlapCount).toBe(1);
+    expect(byId.get("long")?.overlapCount).toBe(1);
+    expect(byId.get("short")?.warningOverlapCount).toBe(0);
+    expect(byId.get("logged-a")?.warningOverlapCount).toBe(1);
+    expect(byId.get("logged-a")?.accessibilityLabel).toContain("Overlaps 1 other entry.");
+  });
+
+  it("passes the Dayframe haptics setting to the native view", () => {
+    const now = localTime(2026, 7, 10, 12, 0);
+    const base = {
+      data: bootstrap([]),
+      now,
+      reduceMotion: false,
+      reduceTransparency: false,
+      refreshing: false,
+      selectedDayKey: "2026-07-10",
+      theme: darkTheme(),
+      transitionDirection: 1
+    };
+    expect(buildNativeCalendarBridgeState(base).model.hapticsEnabled).toBe(true);
+    expect(buildNativeCalendarBridgeState({ ...base, hapticsEnabled: false }).model.hapticsEnabled).toBe(false);
+  });
+});
+
 describe("native Calendar update cadence", () => {
   // The dashboard feeds the Calendar minuteClock(now, newestShownTimestamp(entries, now)).
   function clock(entries: MobileTimeEntry[], nowMs: number) {
@@ -272,7 +423,7 @@ describe("native Calendar update cadence", () => {
   });
 });
 
-function build(now: number, data: MobileBootstrap) {
+function build(now: number, data: MobileBootstrap, theme: MobileTheme = darkTheme()) {
   return buildNativeCalendarBridgeState({
     data,
     now,
@@ -280,7 +431,7 @@ function build(now: number, data: MobileBootstrap) {
     reduceTransparency: false,
     refreshing: false,
     selectedDayKey: "2026-07-10",
-    theme: darkTheme(),
+    theme,
     transitionDirection: 1
   });
 }

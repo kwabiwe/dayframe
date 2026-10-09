@@ -290,6 +290,13 @@ Block pull-to-refresh:
 - Accessibility: the menu rows sit under a "Review all" header with hints; the menu never grows past the screen (its actions scroll and a Cancel row stays visible); counting, the batch, Undo ("N moments are back") and any unsaved moments are announced. Reduce Motion keeps the same opacity-only presence fades.
 
 
+## Calendar (Blocks parity step 9)
+
+- Trigger: a week-strip day, a strip swipe (week) or timeline swipe (day), the − / + zoom buttons, a pinch, Today's "Earlier this week" days.
+- Owner: SwiftUI owns the strip and blocks; `DayframeCalendarScrollCoordinator` stays the only owner of timeline geometry. The selected-day circle slides between days with `matchedGeometryEffect` on a spring (response 0.32, damping 0.82); the day's blocks keep the existing slide-and-fade from the swipe side (0.21 s). A zoom button publishes one zoom request; the coordinator animates the hour height by ×1.4 (or ÷1.4) over 260 ms ease-out cubic around the viewport centre with one display link, keeping the minute under the centre fixed (the pinch rule). The running block's inner ring breathes 0.35 ↔ 1 over 2.4 s. Day taps and zoom presses play the selection haptic; long-press creation keeps its slot haptics; all native haptics follow the Dayframe haptics setting.
+- Interruption: a press during a running zoom chains from that step's target, so rapid presses each count; a pinch, a finger dragging the timeline or long-press creation stops the zoom at the geometry already shown; detaching the view stops it. Buttons are disabled at the zoom limits.
+- Accessibility: Reduce Motion applies a zoom step at once, moves the selected circle without a spring, keeps the day change without a slide and holds the live ring at 0.6. The zoom buttons are 44 points, labelled "Zoom out" / "Zoom in"; the month title is a header; the timeline hint mentions the zoom buttons.
+
 ## Onboarding (Blocks parity step 8-1a)
 
 - Trigger: Settings › Help › "Set up Dayframe again" opens the route (8-1c adds the first-sign-in gate); "Set up Dayframe", Allow / Continue / Not now, Back (previous step), Later (to the summary) and Open Today move through it.

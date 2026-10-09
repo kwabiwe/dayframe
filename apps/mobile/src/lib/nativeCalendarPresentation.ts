@@ -1,8 +1,8 @@
 import {
   analyzeTimeIntervals,
+  blockColorsFor,
   calendarBlockContinuationEdges,
   layoutTimeIntervals,
-  paletteColorFor,
   type TimeIntervalLayout
 } from "@dayframe/shared";
 import type { MobileBootstrap, MobileTimeEntry } from "./api";
@@ -32,11 +32,13 @@ export type NativeCalendarTheme = Pick<
   | "background"
   | "border"
   | "borderStrong"
+  | "onAccent"
   | "shadow"
   | "surface"
   | "surfaceMuted"
   | "surfaceRaised"
   | "textPrimary"
+  | "textMuted"
   | "textSecondary"
   | "warning"
   | "warningText"
@@ -57,6 +59,7 @@ export type NativeCalendarPresentationEntry = {
   layoutMode: TimeIntervalLayout["mode"];
   meta: string;
   offsetFraction: number;
+  /** Overlaps with any shown block, Review included: drives hit geometry (no 44-pt expansion). */
   overlapCount: number;
   overlapSeconds: number;
   placeText: string | null;
@@ -64,8 +67,12 @@ export type NativeCalendarPresentationEntry = {
   startsBeforeDay: boolean;
   stoppedAtMs: number | null;
   tagText: string | null;
+  /** Measured on-block text colour for the solid fill (deep ink or white); theme text for Review. */
+  textColor: string;
   textDensity: TimeIntervalLayout["textDensity"];
   title: string;
+  /** Overlaps among logged blocks only: the warning dot and the VoiceOver note. */
+  warningOverlapCount: number;
   widthFraction: number;
   zIndex: number;
 };
@@ -75,7 +82,12 @@ export type NativeCalendarPresentation = {
   dayStartMs: number;
   emptyState: string;
   entries: NativeCalendarPresentationEntry[];
+  /** "5h 20m framed on Friday": confirmed time on the selected day (Review suggestions excluded). */
+  framedLabel: string;
+  hapticsEnabled: boolean;
   modelVersion: 4;
+  /** The selected day's month; the year is added outside the current year. */
+  monthTitle: string;
   nowMs: number;
   reduceMotion: boolean;
   reduceTransparency: boolean;
@@ -94,6 +106,8 @@ export type NativeCalendarPresentation = {
   transitionDirection: -1 | 1;
   weekDays: Array<{
     accessibilityLabel: string;
+    /** Up to three activity colours, most time first (confirmed time only). */
+    bars: string[];
     dayKey: string;
     dayNumber: string;
     isSelected: boolean;
@@ -118,8 +132,24 @@ export type NativeCalendarOpenHandlers = {
   onOpenReview: (reviewItemId: string) => void;
 };
 
+/** Review suggestions take the right 44% of the day column (Blocks prototype). */
+export const REVIEW_LANE_WIDTH = 0.44;
+const REVIEW_LANE_Z_INDEX = 1_000;
+
+function layoutDayEntries(entries: NativeCalendarEntry[], dayStart: Date, dayEnd: Date, now: number) {
+  return layoutTimeIntervals(
+    entries.map((entry) => ({
+      id: entry.id,
+      startedAt: Math.max(dayStart.getTime(), Date.parse(entry.startedAt)),
+      stoppedAt: Math.min(dayEnd.getTime(), entry.stoppedAt ? Date.parse(entry.stoppedAt) : now)
+    })),
+    now
+  );
+}
+
 export function buildNativeCalendarBridgeState({
   data,
+  hapticsEnabled = true,
   now,
   reduceMotion,
   reduceTransparency,
@@ -129,6 +159,7 @@ export function buildNativeCalendarBridgeState({
   transitionDirection
 }: {
   data: MobileBootstrap | null;
+  hapticsEnabled?: boolean;
   now: number;
   reduceMotion: boolean;
   reduceTransparency: boolean;
@@ -141,7 +172,8 @@ export function buildNativeCalendarBridgeState({
   const dayStart = startOfLocalDay(selectedDate);
   const dayEnd = addDays(dayStart, 1);
   const todayKey = formatDateKey(new Date(now));
-  const entries = buildCalendarEntries(data, selectedDayKey, now);
+  const timeEntries = buildTimeEntries(data);
+  const entries = buildCalendarEntries(data, timeEntries, selectedDayKey, now);
   const confirmedEntries = entries.filter((entry) => !isCalendarReviewNeeded(entry));
   const confirmedAnalysis = analyzeTimeIntervals(
     confirmedEntries.map((entry) => ({
@@ -151,28 +183,26 @@ export function buildNativeCalendarBridgeState({
     })),
     { range: { start: dayStart, end: dayEnd }, now }
   );
+  // Hit geometry must know about every block a tap could land on, Review suggestions included, so a
+  // short block never grows a 44-point target over a neighbour; the warning counts logged time only.
   const allEntryAnalysis = analyzeTimeIntervals(
-    entries.map((entry) => ({
-      id: entry.id,
-      startedAt: entry.startedAt,
-      stoppedAt: entry.stoppedAt
-    })),
+    entries.map((entry) => ({ id: entry.id, startedAt: entry.startedAt, stoppedAt: entry.stoppedAt })),
     { range: { start: dayStart, end: dayEnd }, now }
   );
   const analysisById = new Map(allEntryAnalysis.entries.map((entry) => [entry.id, entry]));
-  const layoutById = new Map(
-    layoutTimeIntervals(
-      entries.map((entry) => ({
-        id: entry.id,
-        startedAt: Math.max(dayStart.getTime(), Date.parse(entry.startedAt)),
-        stoppedAt: Math.min(
-          dayEnd.getTime(),
-          entry.stoppedAt ? Date.parse(entry.stoppedAt) : now
-        )
-      })),
-      now
-    ).map((layout) => [layout.id, layout])
-  );
+  const warningById = new Map(confirmedAnalysis.entries.map((entry) => [entry.id, entry.overlapCount]));
+  // Confirmed blocks overlap only each other; Review suggestions sit in their own lane on the right
+  // (REVIEW_LANE_WIDTH of the day column) above them, so a suggestion never squeezes logged time.
+  const reviewEntries = entries.filter((entry) => isCalendarReviewNeeded(entry));
+  const layoutById = new Map([
+    ...layoutDayEntries(confirmedEntries, dayStart, dayEnd, now).map((layout) => [layout.id, layout] as const),
+    ...layoutDayEntries(reviewEntries, dayStart, dayEnd, now).map((layout) => [layout.id, {
+      ...layout,
+      offsetFraction: 1 - REVIEW_LANE_WIDTH + layout.offsetFraction * REVIEW_LANE_WIDTH,
+      widthFraction: layout.widthFraction * REVIEW_LANE_WIDTH,
+      zIndex: REVIEW_LANE_Z_INDEX + layout.zIndex
+    }] as const)
+  ]);
 
   return {
     actionEntries: entries,
@@ -180,6 +210,8 @@ export function buildNativeCalendarBridgeState({
       dayEndMs: dayEnd.getTime(),
       dayStartMs: dayStart.getTime(),
       emptyState: "No tracked time for this day.",
+      framedLabel: formatFramedLabel(confirmedAnalysis.loggedSeconds, selectedDate),
+      hapticsEnabled,
       entries: entries.map((entry) => serializeCalendarEntry(
         entry,
         dayStart,
@@ -187,9 +219,11 @@ export function buildNativeCalendarBridgeState({
         now,
         theme,
         layoutById.get(entry.id),
-        analysisById.get(entry.id)
+        analysisById.get(entry.id),
+        isCalendarReviewNeeded(entry) ? 0 : warningById.get(entry.id) ?? 0
       )),
       modelVersion: 4,
+      monthTitle: formatMonthTitle(selectedDate, new Date(now)),
       nowMs: now,
       reduceMotion,
       reduceTransparency,
@@ -208,6 +242,7 @@ export function buildNativeCalendarBridgeState({
       transitionDirection: transitionDirection < 0 ? -1 : 1,
       weekDays: buildWeekStripDays(selectedDayKey).map(({ date, key }) => ({
         accessibilityLabel: `Show ${formatSelectedDayTitle(date, todayKey)}`,
+        bars: weekDayBars(timeEntries, date, now, theme),
         dayKey: key,
         dayNumber: String(date.getDate()),
         isSelected: key === selectedDayKey,
@@ -251,7 +286,8 @@ function serializeCalendarEntry(
   now: number,
   theme: MobileTheme,
   layout?: TimeIntervalLayout,
-  analysis?: { overlapCount: number; overlapSeconds: number }
+  analysis?: { overlapCount: number; overlapSeconds: number },
+  warningOverlapCount = 0
 ): NativeCalendarPresentationEntry {
   const reviewNeeded = isCalendarReviewNeeded(entry);
   const startedAtMs = Date.parse(entry.startedAt);
@@ -269,10 +305,13 @@ function serializeCalendarEntry(
     : entry.isActive ? "active" : "completed";
   const actionId = entry.reviewItemId ?? entry.id;
   const isUncategorized = !entry.categoryId && !entry.categoryName;
-  const categoryColor = isUncategorized
-    ? uncategorizedFillColor(theme.mode)
-    : paletteColorFor(entry.categoryColor ?? entry.categoryId, entry.categoryName ?? "No activity", theme.mode);
-  const color = reviewNeeded ? theme.textSecondary : categoryColor;
+  const blockColors = isUncategorized
+    ? { fill: uncategorizedFillColor(theme.mode), text: theme.textPrimary }
+    : blockColorsFor(entry.categoryColor ?? entry.categoryId, theme.mode, entry.categoryName ?? "No activity");
+  // A Review suggestion is hatched in its suggested activity's colour (neutral without one) and
+  // keeps theme text, as on Today's ribbon.
+  const color = reviewNeeded && isUncategorized ? theme.textMuted : blockColors.fill;
+  const textColor = reviewNeeded ? theme.textPrimary : blockColors.text;
   const tagText = entry.tags?.map((tag) => tag.name).join(" · ")
     || entry.tagNames?.join(" · ")
     || null;
@@ -280,7 +319,7 @@ function serializeCalendarEntry(
   return {
     actionId,
     actionKind,
-    accessibilityLabel: `${reviewNeeded ? REVIEW_COPY.needsReview : entry.isActive ? "Edit running timer" : "Open time block"}: ${title}${entry.placeName ? `. Place: ${entry.placeName}` : ""}${tagText ? `. Tags: ${tagText}` : ""}${analysis?.overlapCount ? `. Overlaps ${analysis.overlapCount} other ${analysis.overlapCount === 1 ? "entry" : "entries"}.` : ""}`,
+    accessibilityLabel: `${reviewNeeded ? REVIEW_COPY.needsReview : entry.isActive ? "Edit running timer" : "Open time block"}: ${title}${entry.placeName ? `. Place: ${entry.placeName}` : ""}${tagText ? `. Tags: ${tagText}` : ""}${warningOverlapCount ? `. Overlaps ${warningOverlapCount} other ${warningOverlapCount === 1 ? "entry" : "entries"}.` : ""}`,
     color,
     continuesIntoNextDay: continuation.continuesIntoNextDay,
     entryId: entry.id,
@@ -299,16 +338,18 @@ function serializeCalendarEntry(
     startsBeforeDay: continuation.startsBeforeDay,
     stoppedAtMs: stoppedAtMs !== null && Number.isFinite(stoppedAtMs) ? stoppedAtMs : null,
     tagText,
+    textColor,
     textDensity: layout?.textDensity ?? "full",
     title,
+    warningOverlapCount,
     widthFraction: layout?.widthFraction ?? 1,
     zIndex: layout?.zIndex ?? 0
   };
 }
 
-function buildCalendarEntries(data: MobileBootstrap | null, selectedDayKey: string, now: number) {
+function buildTimeEntries(data: MobileBootstrap | null): NativeCalendarEntry[] {
   if (!data) return [];
-  const mergedEntries = mergeActiveEntry(
+  return mergeActiveEntry(
     dedupeEntriesById([
       ...(data.historyEntries ?? []),
       ...(data.entries ?? []),
@@ -316,13 +357,20 @@ function buildCalendarEntries(data: MobileBootstrap | null, selectedDayKey: stri
       ...(data.dayEntries ?? [])
     ]),
     data.activeEntry
-  );
-  const timeEntries: NativeCalendarEntry[] = mergedEntries
-    .filter((entry) => entryOverlapsDay(entry, selectedDayKey, now))
-    .map((entry) => ({
-      ...entry,
-      isActive: data.activeEntry?.id === entry.id || !entry.stoppedAt
-    }));
+  ).map((entry) => ({
+    ...entry,
+    isActive: data.activeEntry?.id === entry.id || !entry.stoppedAt
+  }));
+}
+
+function buildCalendarEntries(
+  data: MobileBootstrap | null,
+  allTimeEntries: NativeCalendarEntry[],
+  selectedDayKey: string,
+  now: number
+) {
+  if (!data) return [];
+  const timeEntries = allTimeEntries.filter((entry) => entryOverlapsDay(entry, selectedDayKey, now));
   const reviewEntries: NativeCalendarEntry[] = [];
 
   for (const item of data.reviewItems ?? []) {
@@ -341,6 +389,33 @@ function buildCalendarEntries(data: MobileBootstrap | null, selectedDayKey: stri
 
   return [...timeEntries, ...reviewEntries]
     .sort((left, right) => Date.parse(left.startedAt) - Date.parse(right.startedAt));
+}
+
+/**
+ * The week strip's colour bars: a day's three biggest activities by confirmed time within that day,
+ * most first. Entries still waiting for Review do not count; time without an activity is neutral.
+ */
+function weekDayBars(entries: NativeCalendarEntry[], date: Date, now: number, theme: MobileTheme) {
+  const dayStart = startOfLocalDay(date).getTime();
+  const dayEnd = addDays(startOfLocalDay(date), 1).getTime();
+  const totals = new Map<string, { color: string; seconds: number }>();
+  for (const entry of entries) {
+    if (isCalendarReviewNeeded(entry)) continue;
+    const start = Math.max(dayStart, Date.parse(entry.startedAt));
+    const stop = Math.min(dayEnd, entry.stoppedAt ? Date.parse(entry.stoppedAt) : now);
+    if (!Number.isFinite(start) || !Number.isFinite(stop) || stop <= start) continue;
+    const uncategorized = !entry.categoryId && !entry.categoryName;
+    const key = uncategorized ? "" : entry.categoryId ?? `name:${entry.categoryName}`;
+    const color = uncategorized
+      ? theme.textMuted
+      : blockColorsFor(entry.categoryColor ?? entry.categoryId, theme.mode, entry.categoryName ?? "").fill;
+    const current = totals.get(key);
+    totals.set(key, { color, seconds: (current?.seconds ?? 0) + (stop - start) / 1000 });
+  }
+  return [...totals.values()]
+    .sort((left, right) => right.seconds - left.seconds)
+    .slice(0, 3)
+    .map((total) => total.color);
 }
 
 function buildWeekStripDays(selectedDayKey: string) {
@@ -416,10 +491,12 @@ function nativeCalendarTheme(theme: MobileTheme): NativeCalendarTheme {
     border: theme.border,
     borderStrong: theme.borderStrong,
     mode: theme.mode,
+    onAccent: theme.onAccent,
     shadow: theme.shadow,
     surface: theme.surface,
     surfaceMuted: theme.surfaceMuted,
     surfaceRaised: theme.surfaceRaised,
+    textMuted: theme.textMuted,
     textPrimary: theme.textPrimary,
     textSecondary: theme.textSecondary,
     warning: theme.warning,
@@ -461,7 +538,19 @@ function formatSelectedDayTitle(date: Date, todayKey: string) {
 }
 
 function formatWeekday(date: Date) {
-  return date.toLocaleDateString(undefined, { weekday: "short" }).slice(0, 2);
+  return date.toLocaleDateString(undefined, { weekday: "narrow" });
+}
+
+function formatMonthTitle(date: Date, today: Date) {
+  return date.toLocaleDateString(
+    undefined,
+    date.getFullYear() === today.getFullYear() ? { month: "long" } : { month: "long", year: "numeric" }
+  );
+}
+
+function formatFramedLabel(seconds: number, date: Date) {
+  const weekday = date.toLocaleDateString(undefined, { weekday: "long" });
+  return Math.round(seconds / 60) > 0 ? `${formatDuration(seconds)} framed on ${weekday}` : `Nothing framed on ${weekday}`;
 }
 
 function formatTimeOfDay(date: Date) {

@@ -9,10 +9,12 @@ struct DayframeCalendarTheme: Equatable {
   let border: String
   let borderStrong: String
   let mode: String
+  let onAccent: String
   let shadow: String
   let surface: String
   let surfaceMuted: String
   let surfaceRaised: String
+  let textMuted: String
   let textPrimary: String
   let textSecondary: String
   let warning: String
@@ -26,10 +28,12 @@ struct DayframeCalendarTheme: Equatable {
     border = record.border
     borderStrong = record.borderStrong
     mode = record.mode
+    onAccent = record.onAccent
     shadow = record.shadow
     surface = record.surface
     surfaceMuted = record.surfaceMuted
     surfaceRaised = record.surfaceRaised
+    textMuted = record.textMuted
     textPrimary = record.textPrimary
     textSecondary = record.textSecondary
     warning = record.warning
@@ -39,6 +43,7 @@ struct DayframeCalendarTheme: Equatable {
 
 struct DayframeCalendarWeekDay: Equatable, Identifiable {
   let accessibilityLabel: String
+  let bars: [String]
   let dayKey: String
   let dayNumber: String
   let isSelected: Bool
@@ -49,6 +54,7 @@ struct DayframeCalendarWeekDay: Equatable, Identifiable {
 
   init(_ record: DayframeCalendarWeekDayRecord) {
     accessibilityLabel = record.accessibilityLabel
+    bars = Array(record.bars.prefix(3))
     dayKey = record.dayKey
     dayNumber = record.dayNumber
     isSelected = record.isSelected
@@ -78,8 +84,10 @@ struct DayframeCalendarEntry: Equatable, Identifiable {
   let startsBeforeDay: Bool
   let stoppedAtMs: Double?
   let tagText: String?
+  let textColor: String
   let textDensity: String
   let title: String
+  let warningOverlapCount: Int
   let widthFraction: Double
   let zIndex: Int
 
@@ -109,8 +117,10 @@ struct DayframeCalendarEntry: Equatable, Identifiable {
     startsBeforeDay = record.startsBeforeDay
     stoppedAtMs = record.stoppedAtMs
     tagText = record.tagText
+    textColor = record.textColor
     textDensity = record.textDensity
     title = record.title
+    warningOverlapCount = max(0, record.warningOverlapCount)
     widthFraction = record.widthFraction
     zIndex = record.zIndex
   }
@@ -121,7 +131,10 @@ struct DayframeCalendarPresentation: Equatable {
   let dayStartMs: Double
   let emptyState: String
   let entries: [DayframeCalendarEntry]
+  let framedLabel: String
+  let hapticsEnabled: Bool
   let modelVersion: Int
+  let monthTitle: String
   let nowMs: Double
   let reduceMotion: Bool
   let reduceTransparency: Bool
@@ -145,7 +158,10 @@ struct DayframeCalendarPresentation: Equatable {
     dayStartMs = record.dayStartMs
     emptyState = record.emptyState
     entries = record.entries.map(DayframeCalendarEntry.init)
+    framedLabel = record.framedLabel
+    hapticsEnabled = record.hapticsEnabled
     modelVersion = record.modelVersion
+    monthTitle = record.monthTitle
     nowMs = record.nowMs
     reduceMotion = record.reduceMotion
     reduceTransparency = record.reduceTransparency
@@ -168,6 +184,13 @@ struct DayframeCalendarPresentation: Equatable {
   static let empty = DayframeCalendarPresentation(DayframeCalendarPresentationRecord())
 }
 
+/// One press of the header's zoom − / + buttons. The scroll coordinator, the timeline's only
+/// geometry owner, animates it around the viewport centre and records the token it has handled.
+struct DayframeCalendarZoomRequest: Equatable {
+  let token: UInt64
+  let direction: Int
+}
+
 struct DayframeCalendarCreationPreview: Equatable {
   let sessionToken: UInt64
   let dayKey: String
@@ -180,7 +203,18 @@ final class DayframeCalendarViewModel: ObservableObject {
   @Published private(set) var presentation = DayframeCalendarPresentation.empty
   @Published private(set) var hourHeight = CGFloat(DayframeCalendarConstants.defaultHourHeight)
   @Published private(set) var creationPreview: DayframeCalendarCreationPreview?
+  @Published private(set) var zoomRequest: DayframeCalendarZoomRequest?
   private var nextCreationSessionToken: UInt64 = 0
+  private var nextZoomToken: UInt64 = 0
+
+  var canZoomIn: Bool { Double(hourHeight) < DayframeCalendarConstants.maximumHourHeight - 0.5 }
+  var canZoomOut: Bool { Double(hourHeight) > DayframeCalendarConstants.minimumHourHeight + 0.5 }
+
+  func requestZoom(direction: Int) {
+    guard direction > 0 ? canZoomIn : canZoomOut else { return }
+    nextZoomToken &+= 1
+    zoomRequest = DayframeCalendarZoomRequest(token: nextZoomToken, direction: direction > 0 ? 1 : -1)
+  }
 
   func update(_ record: DayframeCalendarPresentationRecord) {
     guard record.modelVersion == 4 else {
