@@ -30,6 +30,11 @@ describe("mobile Activities page contract", () => {
     expect(settingsSource).toContain("function applyActivityCategories(change: (categories: Category[]) => Category[]) {\n    activityCategoriesRef.current = change(activityCategoriesRef.current);");
     expect(settingsSource).toMatch(/function patchCategory\([^)]*\) \{\s*applyActivityCategories\(/);
     expect(settingsSource).toContain("if (pinLimitReached(activityCategoriesRef.current, category.id)) {");
+    // The refresh inside a change counts before the gate opens (a pin added on another device).
+    expect(settingsSource).toMatch(/activityCategoriesRef\.current = bootstrap\.categories;\s*setData\(bootstrap\);/);
+    // A late answer after signing out, switching account or closing Settings applies nothing.
+    expect(settingsSource.match(/if \(!\(await activityOwnerStill\(owner\)\)\) return;/g)).toHaveLength(4);
+    expect(settingsSource).toContain("return Boolean(queueMounted.current && now && mobileAccountOwnersEqual(owner, now));");
     expect(settingsSource).toContain("accessibilityState={{ selected: category.isPinned }}");
     expect(settingsSource).toContain('testID="activities-new"');
   });

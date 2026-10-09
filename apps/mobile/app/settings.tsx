@@ -477,6 +477,8 @@ export default function SettingsScreen() {
         locationStatus: nextLocationStatus,
         updatedAt: Date.now()
       });
+      // The activity gate counts the refreshed activities before any awaiting change continues.
+      activityCategoriesRef.current = bootstrap.categories;
       setData(bootstrap);
       await configureLocationIntelligence(bootstrap);
       syncShortcutCatalog(bootstrap);
@@ -803,12 +805,14 @@ export default function SettingsScreen() {
     // Every activity change waits its turn (createActivityChangeGate): an older answer never
     // lands on top of a newer change.
     const change = await activityChanges.run(async () => {
+      const owner = await readActiveMobileAccount();
       // A pin asked for when the sheet opened is checked against quick start as it is now.
       const pinnedNow = activityCategoriesRef.current.filter((item) => item.isPinned).length;
       const pinned = !activity && draft.isPinned && pinnedNow < QUICK_START_PIN_LIMIT;
       const result = activity
         ? await updateCategory(activity.id, { name: draft.name, color: draft.color, icon: draft.icon })
         : await createCategory(draft.name, { color: draft.color, icon: draft.icon, isPinned: pinned });
+      if (!(await activityOwnerStill(owner))) return;
       // The accepted activity shows at once, even if the refresh below fails.
       applyActivityCategories((categories) => categories.some((item) => item.id === result.category.id)
         ? categories.map((item) => item.id === result.category.id ? { ...item, ...result.category } : item)
@@ -826,7 +830,9 @@ export default function SettingsScreen() {
 
   async function archiveActivityFromEditor(activity: { id: string }) {
     const change = await activityChanges.run(async () => {
+      const owner = await readActiveMobileAccount();
       await archiveCategory(activity.id);
+      if (!(await activityOwnerStill(owner))) return;
       // Archived: it leaves every list (and quick start) at once, even if the refresh fails.
       applyActivityCategories((categories) => categories.filter((item) => item.id !== activity.id));
       await load({ silent: true });
@@ -854,14 +860,17 @@ export default function SettingsScreen() {
     }
     const nextPinned = !category.isPinned;
     await activityChanges.run(async () => {
+      const owner = await readActiveMobileAccount();
       patchCategory(category.id, { isPinned: nextPinned });
       try {
         const result = await updateCategory(category.id, { isPinned: nextPinned });
+        if (!(await activityOwnerStill(owner))) return;
         if (result.category.isPinned !== nextPinned) {
           throw new Error("The activity pin was not saved. Check that the Dayframe server is up to date, then try again.");
         }
         await load({ silent: true });
       } catch (error) {
+        if (!(await activityOwnerStill(owner))) return;
         patchCategory(category.id, { isPinned: category.isPinned });
         if (error instanceof AuthRequiredError) {
           finishSignedOutNavigation();
@@ -1439,6 +1448,15 @@ export default function SettingsScreen() {
     applyActivityCategories((categories) => categories.map((category) =>
       category.id === id ? { ...category, ...patch } : category
     ));
+  }
+
+  // An activity change applies its answer only while Settings is open for the account it started
+  // with: a late answer after signing out or switching account never writes the old account's
+  // activities into this screen or its cached snapshot.
+  async function activityOwnerStill(owner: Awaited<ReturnType<typeof readActiveMobileAccount>>) {
+    if (!queueMounted.current || !owner) return false;
+    const now = await readActiveMobileAccount();
+    return Boolean(queueMounted.current && now && mobileAccountOwnersEqual(owner, now));
   }
 
   // Changes the page's activities and, at once, the copy the activity gate reads, so a change
