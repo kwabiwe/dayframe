@@ -26,7 +26,7 @@ export function CategoryManager({ categories }: { categories: CategoryRow[] }) {
 
   async function createCategory(formData: FormData) {
     const name = String(formData.get("name") ?? "").trim();
-    if (!name) return;
+    if (!name) return false;
     setActionError(null);
     const response = await clientFetch("/api/categories", {
       method: "POST",
@@ -39,9 +39,10 @@ export function CategoryManager({ categories }: { categories: CategoryRow[] }) {
     });
     if (!response.ok) {
       setActionError(await responseError(response, "Unable to create the activity."));
-      return;
+      return false;
     }
     refresh();
+    return true;
   }
 
   async function updateCategory(category: CategoryRow, formData: FormData) {
@@ -146,7 +147,17 @@ export function CategoryManager({ categories }: { categories: CategoryRow[] }) {
         />
       </section>
 
-      <form action={createCategory} className="fill-inset-surface space-y-4 p-4">
+      <form
+        className="fill-inset-surface space-y-4 p-4"
+        // onSubmit, not a form action: an action resets the fields even when the server refuses.
+        onSubmit={(event) => {
+          event.preventDefault();
+          const form = event.currentTarget;
+          void createCategory(new FormData(form)).then((created) => {
+            if (created) form.reset();
+          });
+        }}
+      >
         <div>
           <h2 className="text-base font-semibold">New activity</h2>
           <p className="mt-1 text-sm text-[var(--muted)]">Activities are what you track time for, like Work, Exercise or Errands.</p>
@@ -212,7 +223,11 @@ function CategorySection({
           editingId === category.id ? (
             <form
               key={category.id}
-              action={(formData) => onUpdate(category, formData)}
+              // onSubmit keeps the typed name when the server refuses it (a form action resets it).
+              onSubmit={(event) => {
+                event.preventDefault();
+                void onUpdate(category, new FormData(event.currentTarget));
+              }}
               className="grid gap-3 px-4 py-4 md:grid-cols-[minmax(180px,1fr)_minmax(240px,1.4fr)_auto]"
             >
               <label className="text-sm">
