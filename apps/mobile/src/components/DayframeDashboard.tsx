@@ -1316,6 +1316,25 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
     return () => subscription.remove();
   }, []);
 
+  // Tapping the evening Review reminder opens Review, but only for the account it was scheduled for.
+  useEffect(() => {
+    let unsubscribe: (() => void) | null = null;
+    let cancelled = false;
+    void import("@/lib/reviewNudgeNative").then(({ subscribeReviewNudgeOpens }) => {
+      if (cancelled) return;
+      unsubscribe = subscribeReviewNudgeOpens((accountKey) => {
+        void import("@/lib/mobileAccount").then(async ({ mobileAccountKey, readActiveMobileAccount }) => {
+          const owner = await readActiveMobileAccount();
+          if (!cancelled && owner && accountKey === mobileAccountKey(owner)) router.push("/review");
+        }).catch(() => undefined);
+      });
+    }).catch(() => undefined);
+    return () => {
+      cancelled = true;
+      unsubscribe?.();
+    };
+  }, []);
+
   const sortedCategories = useMemo(
     () => sortMobileCategoriesByUsage(data?.categories ?? [], data?.categoryUsage ?? []).map(({ category }) => category),
     [data?.categories, data?.categoryUsage]

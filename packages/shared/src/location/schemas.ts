@@ -169,8 +169,17 @@ export const LocationReplayResponseSchema = z.object({
   clientAcknowledgedMode: z.boolean(),
   finalisedSegmentCount: z.number().int().nonnegative(),
   semanticSegmentCount: z.number().int().nonnegative(),
-  warnings: z.array(z.string())
+  warnings: z.array(z.string()),
+  /** Suggestions waiting in Review; only sent to clients that ask with `REVIEW_COUNT_REQUEST_HEADER`. */
+  reviewCount: z.number().int().nonnegative().optional()
 }).strict();
+
+/**
+ * Asks the location replay reply to carry the open Review count. A header (not a body field) so
+ * older servers, whose replay request schema is strict, simply ignore it — and the reply only
+ * gains the field for clients whose strict reply schema accepts it.
+ */
+export const REVIEW_COUNT_REQUEST_HEADER = "x-dayframe-review-count";
 
 export const ReviewEntryEditSchema = z
   .object({

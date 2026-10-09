@@ -5,6 +5,7 @@ import { ZodError } from "zod";
 import { isLockNotAvailableError, isStatementTimeoutError, query } from "@/lib/db";
 import { authErrorResponse } from "@/lib/api-errors";
 import { resolveRequestSession } from "@/lib/ingest-auth";
+import { openReviewCountFor, withReviewCount } from "@/lib/review-count";
 import {
   ingestLocationEvidence,
   LOCATION_EVIDENCE_BODY_LIMIT_BYTES,
@@ -44,7 +45,8 @@ export async function POST(request: Request) {
       return respond({ error: "Location evidence body must be valid JSON." }, 400);
     }
     const result = await ingestLocationEvidence(body, session, undefined, {signal: request.signal, deadlineAt: startedAt + 8_000, onLocationStage: diagnostics.onLocationStage});
-    return respond(result, result.duplicateBatch ? 200 : 201);
+    // The phone schedules its evening Review reminder from this count.
+    return respond(withReviewCount(result, await openReviewCountFor(session)), result.duplicateBatch ? 200 : 201);
   } catch (error) {
     const authResponse = authErrorResponse(error);
     if (authResponse) {

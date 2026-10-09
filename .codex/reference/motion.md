@@ -290,6 +290,13 @@ Block pull-to-refresh:
 - Accessibility: the menu rows sit under a "Review all" header with hints; the menu never grows past the screen (its actions scroll and a Cancel row stays visible); counting, the batch, Undo ("N moments are back") and any unsaved moments are announced. Reduce Motion keeps the same opacity-only presence fades.
 
 
+## Evening reminder rows (Blocks parity step 8-0)
+
+- Trigger: the Evening reminder switch (or Open Settings when iOS has notifications off) and the Time stepper in Settings › Automatic tracking.
+- Owner: the Time row enters and leaves with `localPresenceEntering` / `localPresenceExiting` when the reminder turns on or off; the switch, its subtitle and the time value update in place. The iOS permission alert is the system's. Nothing else moves.
+- Interruption: one change at a time (the switch and stepper are off while a change saves); a refused permission leaves the switch off; changes from Settings, counts from replies and the time are applied in order, so a late count never undoes a newer choice.
+- Accessibility: Reduce Motion makes the Time row appear and disappear without movement; the stepper is one adjustable control with its range as the hint; every target is at least 44 points.
+
 ## Settings detail pages (Blocks parity step 6a-3)
 
 - Trigger: a Settings row opens Account, Location or Apple Health (the existing pushed-route transition, unchanged); on Apple Health, a type's switch.

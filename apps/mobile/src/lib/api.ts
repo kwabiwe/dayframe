@@ -503,6 +503,12 @@ type ApiJsonRead<T> =
   | { ok: true; payload: T }
   | { ok: false; message: string };
 
+/** Hands a Review count from any Dayframe reply to the evening reminder. Never blocks or throws. */
+function noteReviewCountQuietly(owner: MobileAccountOwner | null, count: unknown) {
+  if (typeof count !== "number") return;
+  void import("./reviewNudge").then(({ noteReviewCount }) => noteReviewCount(owner, count)).catch(() => undefined);
+}
+
 export async function fetchBootstrap(options: { date?: string; signal?: AbortSignal; deadlineAt?: number } = {}): Promise<MobileBootstrap> {
   const logoutAllowsResponse = captureBootstrapLogoutGuard();
   const requireLogoutAllowsResponse = () => { if (!logoutAllowsResponse()) throw new StaleMobileSessionResponseError(); };
@@ -580,6 +586,7 @@ export async function fetchBootstrap(options: { date?: string; signal?: AbortSig
     requireBootstrapCurrent();
     await activateMobileAccount(owner);
     requireBootstrapCurrent();
+    noteReviewCountQuietly(owner, bootstrap.stats?.reviewCount);
   }
   const reviewStore = await reviewSyncStore();
   requireLogoutAllowsResponse();
@@ -693,6 +700,8 @@ export async function logout() {
     requireCurrent();
     await clearSessionToken();
     logoutSucceeded = true;
+    // The evening Review reminder belongs to the account that just left.
+    void import("./reviewNudge").then(({ cancelReviewNudgeForLogout }) => cancelReviewNudgeForLogout()).catch(() => undefined);
   } finally {
     unsubscribe();
     finishBootstrapLogoutRequest?.();
@@ -1260,6 +1269,7 @@ async function syncQueueItems(
           throw new Error("The Health acknowledgement backend is not verified.");
         }
       }
+      noteReviewCountQuietly(owner, (payload as { reviewCount?: unknown }).reviewCount);
       synced.push(item.localId);
     } catch (error) {
       if (error instanceof AuthRequiredError) throw error;

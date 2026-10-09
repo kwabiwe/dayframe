@@ -7,11 +7,16 @@ const session = {
   scopes: ["app:read", "app:write", "events:write"]
 };
 
+const reviewCountMock = vi.hoisted(() => vi.fn());
 const mocks = vi.hoisted(() => ({
   resolveRequestSession: vi.fn(),
   replayRetainedLocationEvidence: vi.fn()
 }));
 
+vi.mock("@/lib/review-count", () => ({
+  openReviewCountFor: reviewCountMock,
+  withReviewCount: (body: object, reviewCount?: number) => reviewCount === undefined ? body : { ...body, reviewCount }
+}));
 vi.mock("@/lib/ingest-auth", () => ({ resolveRequestSession: mocks.resolveRequestSession }));
 vi.mock("@/lib/db", () => ({
   isLockNotAvailableError: (error: { code?: string }) => error?.code === "55P03",
@@ -38,6 +43,30 @@ describe("POST /api/location/replay", () => {
       semanticSegmentCount: 1,
       warnings: []
     });
+  });
+
+  it("adds the open Review count for the phone's evening reminder", async () => {
+    reviewCountMock.mockResolvedValueOnce(5);
+    const response = await POST(new Request("https://dayframe.test/api/location/replay", {
+      method: "POST",
+      headers: { "content-type": "application/json", "x-dayframe-review-count": "1" },
+      body: JSON.stringify({ deviceId: "ios-device", algorithmVersion: "location-v2.0", rolloutMode: "v2_review", semanticModeAcknowledgedAt: "2026-08-11T12:00:00.000Z" })
+    }));
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({ ok: true, reviewCount: 5 });
+    expect(reviewCountMock).toHaveBeenCalledWith(session);
+  });
+
+  it("keeps the reply unchanged for clients that don't ask for the count (older builds parse it strictly)", async () => {
+    reviewCountMock.mockResolvedValueOnce(5);
+    const response = await POST(new Request("https://dayframe.test/api/location/replay", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ deviceId: "ios-device", algorithmVersion: "location-v2.0", rolloutMode: "v2_review", semanticModeAcknowledgedAt: "2026-08-11T12:00:00.000Z" })
+    }));
+    const payload = await response.json();
+    expect(payload).not.toHaveProperty("reviewCount");
+    expect(reviewCountMock).not.toHaveBeenCalled();
   });
 
   it("authenticates before replaying retained evidence and returns private data", async () => {
