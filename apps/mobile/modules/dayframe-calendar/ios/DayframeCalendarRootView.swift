@@ -598,8 +598,18 @@ private struct DayframeCalendarBlockView: View {
             .foregroundStyle(textColor)
           }
         }
-        .padding(.horizontal, 10)
-        .padding(.vertical, metrics.compact ? 3 : 6)
+        // Review text sits on an opaque surface plate: theme text on the theme surface is the
+        // measured pair, whatever the hatch colour underneath (Reduce Transparency included).
+        .padding(.horizontal, entry.isReview ? 5 : 0)
+        .padding(.vertical, entry.isReview ? 1 : 0)
+        .background {
+          if entry.isReview {
+            RoundedRectangle(cornerRadius: 6, style: .continuous)
+              .fill(Color(dayframeCSS: theme.surface))
+          }
+        }
+        .padding(.horizontal, entry.isReview ? 5 : 10)
+        .padding(.vertical, metrics.compact ? (entry.isReview ? 2 : 3) : (entry.isReview ? 5 : 6))
       }
     }
     .shadow(

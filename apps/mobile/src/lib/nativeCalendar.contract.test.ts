@@ -169,6 +169,8 @@ describe("native Calendar production contract", () => {
     // Measured on-block text stays opaque (4.5:1 is measured for the solid colour, not a blend).
     expect(rootView).not.toMatch(/foregroundStyle\(textColor\.opacity/);
     expect(rootView).toContain("if entry.warningOverlapCount > 0 && horizontal.width >= 22 {");
+    // Review text never sits directly on the hatch.
+    expect(rootView).toMatch(/if entry\.isReview \{\n\s+RoundedRectangle\(cornerRadius: 6, style: \.continuous\)\n\s+\.fill\(Color\(dayframeCSS: theme\.surface\)\)/);
     expect(rootView).toContain("Color(dayframeCSS: entry.textColor)");
     expect(rootView).toContain("DayframeCalendarLiveRing(color: textColor, reduceMotion: reduceMotion, shape: shape)");
     expect(rootView).toContain(".opacity(reduceMotion ? 0.6 : bright ? 1 : 0.35)");
