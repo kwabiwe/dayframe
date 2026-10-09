@@ -309,5 +309,5 @@ Block pull-to-refresh:
 
 - Trigger: New activity or an activity row opens the editor sheet; Save, Create, Cancel, a backdrop tap, a swipe down or a confirmed Archive closes it; the pin button toggles a pin.
 - Owner: `SwipeDismissSheet` owns the editor's entrance, drag and exit (Reduce Motion: its opacity path); the page has no other movement. The preview block, icon and colour selections and the pin's fill update in place. After a save or archive the page's list re-renders from the reloaded data (a moved or archived row appears in or leaves its group without its own animation, as other Settings lists do).
-- Interruption: a save or archive in progress disables Save and Archive; leaving the sheet mid-save keeps whatever the server accepted (the next load shows it). A seventh pin is refused with an alert and nothing moves.
+- Interruption: activity changes run one at a time across the page and the sheet (a second is refused, never queued behind a stale answer); a save or archive in progress disables Save and Archive; leaving the sheet mid-save keeps whatever the server accepted (the next load shows it). A seventh pin is refused with an alert and nothing moves.
 - Accessibility: icon and colour choices are radio groups with labels; the pin button names its action ("Add X to quick start"); all targets are at least 44 points.

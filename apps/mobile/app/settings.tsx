@@ -7,6 +7,7 @@ import { createOwnerSyncCoalescer } from "@/lib/ownerSyncCoalescer";
 import { subscribeRecoveredDashboardBootstrap } from "@/lib/dashboardBootstrapChannel";
 import { useCallback, useEffect, useRef, useState, type SetStateAction } from "react";
 import {
+  AccessibilityInfo,
   Alert,
   AppState,
   Keyboard,
@@ -39,8 +40,10 @@ import { ActivityPickerSheet } from "@/components/ActivityPickerSheet";
 import { ActivityEditorSheet, type ActivityEditorDraft } from "@/components/settings/ActivityEditorSheet";
 import { ActivityIcon, DayframeIcon } from "@/components/icons/DayframeIcon";
 import {
+  ACTIVITY_CHANGE_BUSY_MESSAGE,
   QUICK_START_PIN_LIMIT,
   activitiesPageGroups,
+  createActivityChangeGate,
   activityWeekSeconds as activityWeekSecondsFor,
   formatActivityWeek,
   pinLimitReached
@@ -721,7 +724,10 @@ export default function SettingsScreen() {
         : "Not connected yet";
   const [healthPickerKey, setHealthPickerKey] = useState<HealthImportPreferenceKey | null>(null);
   const [activityEditor, setActivityEditor] = useState<{ activity: Category | null } | null>(null);
-  const pinMutationInFlight = useRef(false);
+  // One activity change at a time on the Activities page (pins, saves, creates, archives).
+  const activityChanges = useRef(createActivityChangeGate()).current;
+  const activityCategoriesRef = useRef<Category[]>([]);
+  activityCategoriesRef.current = data?.categories ?? [];
   // Settings › Activities: each row's last seven days, from the same lists as Today's quick start.
   const activityWeekSeconds = activityWeekSecondsFor(
     [data?.historyEntries, data?.entries, data?.weekEntries, data?.dayEntries],
@@ -789,10 +795,15 @@ export default function SettingsScreen() {
 
   // Settings › Activities (Blocks 6b-1): the editor sheet for New activity or one activity.
   async function saveActivityFromEditor(activity: Category | null, draft: ActivityEditorDraft) {
-    try {
+    // Every activity change waits its turn (createActivityChangeGate): an older answer never
+    // lands on top of a newer change.
+    const change = await activityChanges.run(async () => {
+      // A pin asked for when the sheet opened is checked against quick start as it is now.
+      const pinned = !activity && draft.isPinned &&
+        activityCategoriesRef.current.filter((category) => category.isPinned).length < QUICK_START_PIN_LIMIT;
       const result = activity
         ? await updateCategory(activity.id, { name: draft.name, color: draft.color, icon: draft.icon })
-        : await createCategory(draft.name, { color: draft.color, icon: draft.icon, isPinned: draft.isPinned });
+        : await createCategory(draft.name, { color: draft.color, icon: draft.icon, isPinned: pinned });
       // The accepted activity shows at once, even if the refresh below fails.
       setDataAndCache((current) => current ? {
         ...current,
@@ -801,18 +812,18 @@ export default function SettingsScreen() {
           : [...current.categories, result.category]
       } : current);
       await load({ silent: true });
+    }).catch((error: unknown) => ({ ran: true as const, error }));
+    if (!change.ran) return ACTIVITY_CHANGE_BUSY_MESSAGE;
+    if (!("error" in change)) return null;
+    if (change.error instanceof AuthRequiredError) {
+      finishSignedOutNavigation();
       return null;
-    } catch (error) {
-      if (error instanceof AuthRequiredError) {
-        finishSignedOutNavigation();
-        return null;
-      }
-      return error instanceof Error ? error.message : "Couldn't save the activity. Try again.";
     }
+    return change.error instanceof Error ? change.error.message : "Couldn't save the activity. Try again.";
   }
 
   async function archiveActivityFromEditor(activity: { id: string }) {
-    try {
+    const change = await activityChanges.run(async () => {
       await archiveCategory(activity.id);
       // Archived: it leaves every list (and quick start) at once, even if the refresh fails.
       setDataAndCache((current) => current ? {
@@ -820,43 +831,45 @@ export default function SettingsScreen() {
         categories: current.categories.filter((category) => category.id !== activity.id)
       } : current);
       await load({ silent: true });
+    }).catch((error: unknown) => ({ ran: true as const, error }));
+    if (!change.ran) return ACTIVITY_CHANGE_BUSY_MESSAGE;
+    if (!("error" in change)) return null;
+    if (change.error instanceof AuthRequiredError) {
+      finishSignedOutNavigation();
       return null;
-    } catch (error) {
-      if (error instanceof AuthRequiredError) {
-        finishSignedOutNavigation();
-        return null;
-      }
-      return error instanceof Error ? error.message : "Couldn't archive the activity. Try again.";
     }
+    return change.error instanceof Error ? change.error.message : "Couldn't archive the activity. Try again.";
   }
 
   async function toggleCategoryPin(category: Category) {
-    // One pin change at a time: an unpin still saving never frees a slot for another pin (if it
-    // failed, quick start would end with seven).
-    if (pinMutationInFlight.current) return;
+    // Pins share the one-change-at-a-time gate: an unpin still saving never frees a slot for
+    // another pin or a pinned create (if it failed, quick start would end with seven).
+    if (activityChanges.busy()) {
+      AccessibilityInfo.announceForAccessibility(ACTIVITY_CHANGE_BUSY_MESSAGE);
+      return;
+    }
     if (pinLimitReached(data?.categories ?? [], category.id)) {
       Alert.alert("Quick start is full", `Quick start holds ${QUICK_START_PIN_LIMIT} activities. Unpin one first.`);
       return;
     }
-    pinMutationInFlight.current = true;
     const nextPinned = !category.isPinned;
-    patchCategory(category.id, { isPinned: nextPinned });
-    try {
-      const result = await updateCategory(category.id, { isPinned: nextPinned });
-      if (result.category.isPinned !== nextPinned) {
-        throw new Error("The activity pin was not saved. Check that the Dayframe server is up to date, then try again.");
+    await activityChanges.run(async () => {
+      patchCategory(category.id, { isPinned: nextPinned });
+      try {
+        const result = await updateCategory(category.id, { isPinned: nextPinned });
+        if (result.category.isPinned !== nextPinned) {
+          throw new Error("The activity pin was not saved. Check that the Dayframe server is up to date, then try again.");
+        }
+        await load({ silent: true });
+      } catch (error) {
+        patchCategory(category.id, { isPinned: category.isPinned });
+        if (error instanceof AuthRequiredError) {
+          finishSignedOutNavigation();
+          return;
+        }
+        Alert.alert("Activities", error instanceof Error ? error.message : "Unable to update activity.");
       }
-      await load({ silent: true });
-    } catch (error) {
-      patchCategory(category.id, { isPinned: category.isPinned });
-      if (error instanceof AuthRequiredError) {
-        finishSignedOutNavigation();
-        return;
-      }
-      Alert.alert("Activities", error instanceof Error ? error.message : "Unable to update activity.");
-    } finally {
-      pinMutationInFlight.current = false;
-    }
+    });
   }
 
   async function syncAndReload() {

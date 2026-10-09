@@ -62,3 +62,27 @@ export function formatActivityWeek(seconds: number) {
   const amount = hours ? (rest ? `${hours}h ${rest}m` : `${hours}h`) : `${rest}m`;
   return `${amount} in the last 7 days`;
 }
+
+export const ACTIVITY_CHANGE_BUSY_MESSAGE = "Another activity change is still saving. Try again in a moment.";
+
+/**
+ * One activity change at a time on the Activities page (pins, saves, creates and archives), so an
+ * older answer can never land on top of a newer change: a slow save cannot bring back an activity
+ * archived after it, and a pending unpin cannot free a quick-start slot for another pin or a
+ * pinned create. A change asked for while another is saving does not run.
+ */
+export function createActivityChangeGate() {
+  let running = false;
+  return {
+    busy: () => running,
+    async run<T>(change: () => Promise<T>): Promise<{ ran: true; value: T } | { ran: false }> {
+      if (running) return { ran: false };
+      running = true;
+      try {
+        return { ran: true, value: await change() };
+      } finally {
+        running = false;
+      }
+    }
+  };
+}

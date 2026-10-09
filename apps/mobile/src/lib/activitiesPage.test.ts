@@ -1,5 +1,5 @@
-import { describe, expect, it } from "vitest";
-import { QUICK_START_PIN_LIMIT, activitiesPageGroups, activityNameProblem, activityWeekSeconds, formatActivityWeek, pinLimitReached } from "./activitiesPage";
+import { describe, expect, it, vi } from "vitest";
+import { QUICK_START_PIN_LIMIT, activitiesPageGroups, createActivityChangeGate, activityNameProblem, activityWeekSeconds, formatActivityWeek, pinLimitReached } from "./activitiesPage";
 
 const activity = (id: string, name: string, extra: { icon?: string | null; isPinned?: boolean } = {}) => ({ id, name, isPinned: false, ...extra });
 
@@ -55,5 +55,39 @@ describe("activityWeekSeconds and formatActivityWeek", () => {
     expect(formatActivityWeek(45 * 60)).toBe("45m in the last 7 days");
     expect(formatActivityWeek(2 * 3600)).toBe("2h in the last 7 days");
     expect(formatActivityWeek(2 * 3600 + 30 * 60)).toBe("2h 30m in the last 7 days");
+  });
+});
+
+describe("createActivityChangeGate", () => {
+  function deferred<T>() {
+    let resolve!: (value: T) => void;
+    let reject!: (error: Error) => void;
+    const promise = new Promise<T>((res, rej) => { resolve = res; reject = rej; });
+    return { promise, reject, resolve };
+  }
+
+  it("refuses a pinned create while an unpin is still saving, and allows it once that unpin fails", async () => {
+    const gate = createActivityChangeGate();
+    const unpin = deferred<void>();
+    const pending = gate.run(() => unpin.promise);
+    const create = vi.fn(async () => "created");
+    expect(await gate.run(create)).toEqual({ ran: false });
+    expect(create).not.toHaveBeenCalled();
+    unpin.reject(new Error("offline"));
+    await expect(pending).rejects.toThrow("offline");
+    expect(gate.busy()).toBe(false);
+    expect(await gate.run(create)).toEqual({ ran: true, value: "created" });
+  });
+
+  it("refuses an archive while an earlier save is still waiting for its answer", async () => {
+    const gate = createActivityChangeGate();
+    const save = deferred<string>();
+    const saving = gate.run(() => save.promise);
+    const archive = vi.fn(async () => null);
+    expect(await gate.run(archive)).toEqual({ ran: false });
+    save.resolve("saved");
+    expect(await saving).toEqual({ ran: true, value: "saved" });
+    expect(await gate.run(archive)).toEqual({ ran: true, value: null });
+    expect(archive).toHaveBeenCalledTimes(1);
   });
 });
