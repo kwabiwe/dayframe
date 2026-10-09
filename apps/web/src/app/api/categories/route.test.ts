@@ -12,7 +12,8 @@ const mocks = vi.hoisted(() => ({
   getBootstrapData: vi.fn(),
   createCategory: vi.fn(),
   updateCategory: vi.fn(),
-  archiveCategory: vi.fn()
+  archiveCategory: vi.fn(),
+  listArchivedCategories: vi.fn()
 }));
 
 vi.mock("@/lib/ingest-auth", () => ({
@@ -27,13 +28,18 @@ vi.mock("@/lib/event-service", () => ({
   CategoryConflictError: class CategoryConflictError extends Error {
     status = 409;
   },
+  QuickStartFullError: class QuickStartFullError extends Error {
+    status = 409;
+    code = "quick_start_full";
+  },
   createCategory: mocks.createCategory,
   updateCategory: mocks.updateCategory,
-  archiveCategory: mocks.archiveCategory
+  archiveCategory: mocks.archiveCategory,
+  listArchivedCategories: mocks.listArchivedCategories
 }));
 
 const { missingRequiredColumnError } = await import("@/lib/db");
-const { CategoryConflictError } = await import("@/lib/event-service");
+const { CategoryConflictError, QuickStartFullError } = await import("@/lib/event-service");
 const { DELETE, GET, PATCH, POST } = await import("./route");
 
 describe("/api/categories", () => {
@@ -161,6 +167,57 @@ describe("/api/categories", () => {
 
     expect(response.status).toBe(200);
     expect(mocks.archiveCategory).toHaveBeenCalledWith(categoryId(), session);
+  });
+});
+
+// Blocks 6b-2: Archived activities, Restore, and the server's rename and quick-start checks.
+describe("/api/categories archive, restore and limits", () => {
+  beforeEach(() => {
+    vi.resetAllMocks();
+    mocks.resolveRequestSession.mockResolvedValue(session);
+    mocks.updateCategory.mockResolvedValue({ id: categoryId(), name: "Pottery", color: "orange", isPinned: false });
+  });
+
+  it("lists archived activities for the signed-in workspace", async () => {
+    mocks.listArchivedCategories.mockResolvedValue([{ id: categoryId(), name: "Pottery", color: "orange", isPinned: false }]);
+    const response = await GET(new Request("https://dayframe.test/api/categories?archived=1"));
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ categories: [{ id: categoryId(), name: "Pottery", color: "orange", isPinned: false }] });
+    expect(mocks.listArchivedCategories).toHaveBeenCalledWith(session);
+    expect(mocks.getBootstrapData).not.toHaveBeenCalled();
+  });
+
+  it("restores with isArchived false and refuses any other archive value", async () => {
+    const restored = await PATCH(new Request("https://dayframe.test/api/categories", {
+      method: "PATCH",
+      body: JSON.stringify({ id: categoryId(), isArchived: false })
+    }));
+    expect(restored.status).toBe(200);
+    expect(mocks.updateCategory).toHaveBeenCalledWith(categoryId(), expect.objectContaining({ isArchived: false }), session);
+
+    const archiving = await PATCH(new Request("https://dayframe.test/api/categories", {
+      method: "PATCH",
+      body: JSON.stringify({ id: categoryId(), isArchived: true })
+    }));
+    expect(archiving.status).toBe(400);
+  });
+
+  it("answers 409 for a rename to a taken name and for a pin past quick start's limit", async () => {
+    mocks.updateCategory.mockRejectedValueOnce(new CategoryConflictError("An activity with that name already exists."));
+    const taken = await PATCH(new Request("https://dayframe.test/api/categories", {
+      method: "PATCH",
+      body: JSON.stringify({ id: categoryId(), name: "Focus" })
+    }));
+    expect(taken.status).toBe(409);
+    expect(await taken.json()).toMatchObject({ code: "name_taken" });
+
+    mocks.updateCategory.mockRejectedValueOnce(new QuickStartFullError("Quick start holds 6 activities. Unpin one first."));
+    const full = await PATCH(new Request("https://dayframe.test/api/categories", {
+      method: "PATCH",
+      body: JSON.stringify({ id: categoryId(), isPinned: true })
+    }));
+    expect(full.status).toBe(409);
+    expect(await full.json()).toMatchObject({ code: "quick_start_full", error: "Quick start holds 6 activities. Unpin one first." });
   });
 });
 

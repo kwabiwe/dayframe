@@ -28,6 +28,7 @@ vi.mock("./location/location-rollout", () => ({
 
 const {
   CategoryConflictError,
+  QuickStartFullError,
   createCategory,
   createPlace,
   createPlaceFromLearnedPlace,
@@ -50,6 +51,7 @@ const {
   updateTimeEntryDescriptions,
   updatePlace
 } = await import("./event-service");
+const { automaticCategoryLockKey } = await import("./automatic-category-service");
 
 const session = {
   userId: "00000000-0000-4000-8000-000000000001",
@@ -97,8 +99,41 @@ describe("category persistence", () => {
       expect.stringContaining("lower(btrim(name)) = lower($2)"),
       [session.workspaceId, "Writing"]
     );
+    // The name lock automatic creation uses, before the workspace lock.
+    const statements = client.query.mock.calls.map(([statement]) => String(statement));
+    expect(client.query).toHaveBeenCalledWith(
+      "select pg_advisory_xact_lock(hashtextextended($1, 0))",
+      [automaticCategoryLockKey(session.workspaceId, "writing")]
+    );
+    expect(statements.findIndex((statement) => statement.includes("pg_advisory_xact_lock")))
+      .toBeLessThan(statements.findIndex((statement) => statement.includes("from workspaces")));
     expect(client.query).toHaveBeenCalledWith("commit");
     expect(client.release).toHaveBeenCalledOnce();
+  });
+
+  it("creates a legacy entities-route activity through the same locked writer", async () => {
+    const client = {
+      query: vi.fn(async (statement: string, values?: unknown[]) => {
+        if (statement.includes("insert into categories")) {
+          return { rows: [{ id: categoryId(), name: values?.[1], color: values?.[2], isPinned: values?.[3] }] };
+        }
+        if (statement.includes("count(*)")) return { rows: [{ count: "6" }] };
+        return { rows: [] };
+      }),
+      release: vi.fn()
+    };
+    mocks.pool.connect.mockResolvedValueOnce(client);
+
+    await createEntity("category", { name: "Writing", isPinned: true }, session);
+
+    expect(client.query).toHaveBeenCalledWith(
+      "select pg_advisory_xact_lock(hashtextextended($1, 0))",
+      [automaticCategoryLockKey(session.workspaceId, "writing")]
+    );
+    expect(client.query).toHaveBeenCalledWith("select id from workspaces where id = $1 for no key update", [session.workspaceId]);
+    // Quick start is full, so the legacy route cannot add a seventh pin either.
+    const insert = client.query.mock.calls.find(([statement]) => String(statement).includes("insert into categories"));
+    expect(insert?.[1]?.[3]).toBe(false);
   });
 
   it("rejects an active category name case-insensitively before insert", async () => {
@@ -341,6 +376,190 @@ describe("category persistence", () => {
     expect(client.query).toHaveBeenCalledWith("commit");
   });
 
+  // updateCategory runs in one workspace-locked transaction (Blocks 6b-2): the row is read for
+  // update, then a rename, a new pin and a restore are checked before the update.
+  function updateClient({
+    current = { name: "Focus", isPinned: false, isArchived: false } as { name: string; isPinned: boolean; isArchived: boolean; starterKey?: string | null } | null,
+    duplicate = false,
+    starterTaken = false,
+    pinned = 0,
+    updated = { id: categoryId(), name: "Focus", color: "lime", isPinned: true, icon: null, starterKey: null } as Record<string, unknown>,
+    updateError = null as Error | null
+  } = {}) {
+    const client = {
+      query: vi.fn(async (statement: string, values?: unknown[]) => {
+        void values;
+        if (statement.includes('is_archived as "isArchived"')) return { rows: current ? [{ starterKey: null, ...current }] : [] };
+        if (statement.startsWith('select name, starter_key as "starterKey" from categories')) {
+          return { rows: current ? [{ name: current.name, starterKey: current.starterKey ?? null }] : [] };
+        }
+        if (statement.includes("starter_key = $3")) return { rows: starterTaken ? [{ id: "other" }] : [] };
+        if (statement.includes("id <> $2") && statement.includes("lower(btrim(name))")) return { rows: duplicate ? [{ id: "other" }] : [] };
+        if (statement.includes("count(*)")) return { rows: [{ count: String(pinned) }] };
+        if (statement.includes("update categories")) {
+          if (updateError) throw updateError;
+          return { rows: [updated] };
+        }
+        return { rows: [] };
+      }),
+      release: vi.fn()
+    };
+    mocks.pool.connect.mockResolvedValueOnce(client);
+    return client;
+  }
+  const updateCall = (client: ReturnType<typeof updateClient>) =>
+    client.query.mock.calls.find(([statement]) => String(statement).includes("update categories"));
+
+  it("updates or clears an activity icon without touching other fields", async () => {
+    const first = updateClient();
+    await updateCategory(categoryId(), { icon: "focus" }, session);
+    const second = updateClient();
+    await updateCategory(categoryId(), { icon: null }, session);
+
+    expect(String(updateCall(first)?.[0])).toContain("icon = case when $9 then $10 else icon end");
+    expect(updateCall(first)?.[1]).toEqual([categoryId(), session.workspaceId, false, null, false, null, false, false, true, "focus", false, false]);
+    expect(updateCall(second)?.[1]).toEqual([categoryId(), session.workspaceId, false, null, false, null, false, false, true, null, false, false]);
+    expect(first.query).toHaveBeenCalledWith("select id from workspaces where id = $1 for no key update", [session.workspaceId]);
+    expect(first.query).toHaveBeenCalledWith("commit");
+    expect(first.release).toHaveBeenCalledOnce();
+  });
+
+  it("persists pin and unpin state to the categories.is_pinned column", async () => {
+    const pin = updateClient({ pinned: 2 });
+    const result = await updateCategory(categoryId(), { isPinned: true }, session);
+    expect(result?.isPinned).toBe(true);
+    expect(String(updateCall(pin)?.[0])).toContain("is_pinned = case when $11 then false when $7 then $8 else is_pinned end");
+    expect(updateCall(pin)?.[1]).toEqual([categoryId(), session.workspaceId, false, null, false, null, true, true, false, null, false, false]);
+
+    const unpin = updateClient({ current: { name: "Focus", isPinned: true, isArchived: false }, updated: { id: categoryId(), isPinned: false } });
+    await updateCategory(categoryId(), { isPinned: false }, session);
+    expect((updateCall(unpin)?.[1] as unknown[] | undefined)?.slice(6, 8)).toEqual([true, false]);
+    // Unpinning never counts quick start.
+    expect(unpin.query.mock.calls.some(([statement]) => String(statement).includes("count(*)"))).toBe(false);
+  });
+
+  it("refuses a seventh pin, but lets an already-pinned activity be edited", async () => {
+    const full = updateClient({ pinned: 6 });
+    await expect(updateCategory(categoryId(), { isPinned: true }, session)).rejects.toBeInstanceOf(QuickStartFullError);
+    expect(updateCall(full)).toBeUndefined();
+    expect(full.query).toHaveBeenCalledWith("rollback");
+    expect(full.release).toHaveBeenCalledOnce();
+
+    const alreadyPinned = updateClient({ current: { name: "Focus", isPinned: true, isArchived: false }, pinned: 7 });
+    await updateCategory(categoryId(), { name: "Deep focus", isPinned: true }, session);
+    expect(updateCall(alreadyPinned)).toBeDefined();
+  });
+
+  it("refuses a rename to another active activity's name, in any case", async () => {
+    const taken = updateClient({ duplicate: true });
+    await expect(updateCategory(categoryId(), { name: "writing" }, session)).rejects.toBeInstanceOf(CategoryConflictError);
+    expect(updateCall(taken)).toBeUndefined();
+    expect(taken.query).toHaveBeenCalledWith(expect.stringContaining("id <> $2"), [session.workspaceId, categoryId(), "writing"]);
+    expect(taken.query).toHaveBeenCalledWith("rollback");
+  });
+
+  it("restores an archived activity unpinned, after the same name check", async () => {
+    const restore = updateClient({ current: { name: "Pottery", isPinned: false, isArchived: true }, updated: { id: categoryId(), name: "Pottery", isPinned: false } });
+    const result = await updateCategory(categoryId(), { isArchived: false }, session);
+    expect(result).toMatchObject({ name: "Pottery", isPinned: false });
+    expect(String(updateCall(restore)?.[0])).toContain("is_archived = case when $11 then false else is_archived end");
+    expect(updateCall(restore)?.[1]?.[10]).toBe(true);
+    expect(restore.query).toHaveBeenCalledWith(expect.stringContaining("id <> $2"), [session.workspaceId, categoryId(), "Pottery"]);
+
+    const clash = updateClient({ current: { name: "Pottery", isPinned: false, isArchived: true }, duplicate: true });
+    await expect(updateCategory(categoryId(), { isArchived: false }, session)).rejects.toBeInstanceOf(CategoryConflictError);
+    expect(updateCall(clash)).toBeUndefined();
+  });
+
+  it("restores unpinned even when the request also asks for a pin, without counting quick start", async () => {
+    const restore = updateClient({ current: { name: "Pottery", isPinned: true, isArchived: true }, pinned: 6, updated: { id: categoryId(), name: "Pottery", isPinned: false } });
+    const result = await updateCategory(categoryId(), { isArchived: false, isPinned: true }, session);
+    expect(result).toMatchObject({ isPinned: false });
+    expect(restore.query.mock.calls.some(([statement]) => String(statement).includes("count(*)"))).toBe(false);
+    // $11 (restoring) wins over $7/$8 (the requested pin).
+    expect(updateCall(restore)?.[1]?.slice(6, 8)).toEqual([true, true]);
+    expect(updateCall(restore)?.[1]?.[10]).toBe(true);
+  });
+
+  it("restores a starter whose key a recreated starter now holds as a plain activity", async () => {
+    const collide = updateClient({ current: { name: "Sleep", isPinned: false, isArchived: true, starterKey: "sleep" }, starterTaken: true });
+    await updateCategory(categoryId(), { isArchived: false }, session);
+    expect(String(updateCall(collide)?.[0])).toContain("starter_key = case when $12 then null else starter_key end");
+    expect(updateCall(collide)?.[1]?.[11]).toBe(true);
+
+    const free = updateClient({ current: { name: "Sleep", isPinned: false, isArchived: true, starterKey: "sleep" } });
+    await updateCategory(categoryId(), { isArchived: false }, session);
+    expect(updateCall(free)?.[1]?.[11]).toBe(false);
+  });
+
+  it("takes name locks (sorted), then the workspace, then the activity row without blocking key-share", async () => {
+    const advisory = (client: ReturnType<typeof updateClient>) => client.query.mock.calls
+      .filter(([statement]) => String(statement).includes("pg_advisory_xact_lock"))
+      .map(([, values]) => (values as unknown[])[0]);
+    const order = (client: ReturnType<typeof updateClient>) => client.query.mock.calls.map(([statement]) => String(statement));
+
+    const rename = updateClient();
+    await updateCategory(categoryId(), { name: "Health" }, session);
+    expect(advisory(rename)).toEqual([automaticCategoryLockKey(session.workspaceId, "health")]);
+    const statements = order(rename);
+    const lockAt = statements.findIndex((statement) => statement.includes("pg_advisory_xact_lock"));
+    const workspaceAt = statements.findIndex((statement) => statement.includes("from workspaces"));
+    const rowAt = statements.findIndex((statement) => statement.includes('is_archived as "isArchived"'));
+    expect(lockAt).toBeLessThan(workspaceAt);
+    expect(workspaceAt).toBeLessThan(rowAt);
+    expect(statements[rowAt]).toContain("for no key update");
+
+    // A restore locks its own name and its starter's name, in the starters route's order.
+    const restore = updateClient({ current: { name: "Bedtime", isPinned: false, isArchived: true, starterKey: "sleep" } });
+    await updateCategory(categoryId(), { isArchived: false }, session);
+    expect(advisory(restore)).toEqual([
+      automaticCategoryLockKey(session.workspaceId, "bedtime"),
+      automaticCategoryLockKey(session.workspaceId, "sleep")
+    ]);
+
+    // A pin or icon change checks no name and takes no name lock.
+    const pin = updateClient();
+    await updateCategory(categoryId(), { isPinned: true }, session);
+    expect(advisory(pin)).toEqual([]);
+  });
+
+  it("treats an archived activity as not found for anything but a restore", async () => {
+    const archived = updateClient({ current: { name: "Pottery", isPinned: false, isArchived: true } });
+    expect(await updateCategory(categoryId(), { name: "Clay" }, session)).toBeNull();
+    expect(updateCall(archived)).toBeUndefined();
+    const missing = updateClient({ current: null });
+    expect(await updateCategory(categoryId(), { isArchived: false }, session)).toBeNull();
+    expect(missing.query).toHaveBeenCalledWith("rollback");
+  });
+
+  it("does not silently reload categories as unpinned when the pin column is missing", async () => {
+    const client = updateClient({
+      updateError: Object.assign(new Error('column "is_pinned" does not exist'), { code: "42703" })
+    });
+    await expect(updateCategory(categoryId(), { isPinned: false }, session)).rejects.toThrow(/categories\.is_pinned/);
+    expect(client.query).toHaveBeenCalledWith("rollback");
+  });
+
+  it("creates the activity unpinned when quick start is already full", async () => {
+    const inserts: unknown[][] = [];
+    const client = {
+      query: vi.fn(async (statement: string, values?: unknown[]) => {
+        if (statement.includes("count(*)")) return { rows: [{ count: "6" }] };
+        if (statement.includes("from categories")) return { rows: [] };
+        if (statement.includes("insert into categories")) {
+          inserts.push(values ?? []);
+          return { rows: [{ id: categoryId(), name: values?.[1], color: values?.[2], isPinned: values?.[3] }] };
+        }
+        return { rows: [] };
+      }),
+      release: vi.fn()
+    };
+    mocks.pool.connect.mockResolvedValueOnce(client);
+    const category = await createCategory({ name: "Piano", isPinned: true }, session);
+    expect(category).toMatchObject({ name: "Piano", isPinned: false });
+    expect(inserts[0][3]).toBe(false);
+  });
+
   it("stores a chosen activity icon when creating a category and ignores unknown keys", async () => {
     const inserts: unknown[][] = [];
     const client = {
@@ -364,43 +583,6 @@ describe("category persistence", () => {
     expect(inserts[1][4]).toBeNull();
     expect(String(client.query.mock.calls.find(([statement]) => String(statement).includes("insert into categories"))?.[0]))
       .toContain('returning id, name, color, is_pinned as "isPinned", icon, starter_key as "starterKey"');
-  });
-
-  it("updates or clears an activity icon without touching other fields", async () => {
-    mocks.query.mockResolvedValue({ rows: [{ id: categoryId(), name: "Focus", color: "lime", isPinned: true, icon: "focus", starterKey: null }] });
-
-    await updateCategory(categoryId(), { icon: "focus" }, session);
-    await updateCategory(categoryId(), { icon: null }, session);
-
-    const [first, second] = mocks.query.mock.calls;
-    expect(String(first[0])).toContain("icon = case when $9 then $10 else icon end");
-    expect(first[1]).toEqual([categoryId(), session.workspaceId, false, null, false, null, false, false, true, "focus"]);
-    expect(second[1]).toEqual([categoryId(), session.workspaceId, false, null, false, null, false, false, true, null]);
-  });
-
-  it("persists pin state to the categories.is_pinned column", async () => {
-    mocks.query.mockResolvedValueOnce({
-      rows: [{ id: categoryId(), name: "Focus", color: "lime", isPinned: true }]
-    });
-
-    const result = await updateCategory(categoryId(), { isPinned: true }, session);
-
-    expect(result?.isPinned).toBe(true);
-    expect(mocks.query).toHaveBeenCalledWith(
-      expect.stringContaining('is_pinned = case when $7 then $8 else is_pinned end'),
-      [
-        categoryId(),
-        session.workspaceId,
-        false,
-        null,
-        false,
-        null,
-        true,
-        true,
-        false,
-        null
-      ]
-    );
   });
 
   it("creates missing automatic logging categories and reuses existing names case-insensitively", async () => {
@@ -445,42 +627,6 @@ describe("category persistence", () => {
     ).toEqual(["commute", "health", "sleep"]);
     expect(client.query).toHaveBeenCalledWith("commit");
     expect(client.release).toHaveBeenCalled();
-  });
-
-  it("persists unpin state to the categories.is_pinned column", async () => {
-    mocks.query.mockResolvedValueOnce({
-      rows: [{ id: categoryId(), name: "Focus", color: "lime", isPinned: false }]
-    });
-
-    const result = await updateCategory(categoryId(), { isPinned: false }, session);
-
-    expect(result?.isPinned).toBe(false);
-    expect(mocks.query).toHaveBeenCalledWith(
-      expect.any(String),
-      [
-        categoryId(),
-        session.workspaceId,
-        false,
-        null,
-        false,
-        null,
-        true,
-        false,
-        false,
-        null
-      ]
-    );
-  });
-
-  it("does not silently reload categories as unpinned when the pin column is missing", async () => {
-    mocks.query.mockRejectedValueOnce(
-      Object.assign(new Error('column "is_pinned" does not exist'), { code: "42703" })
-    );
-
-    await expect(updateCategory(categoryId(), { isPinned: true }, session)).rejects.toThrow(
-      /categories\.is_pinned/
-    );
-    expect(mocks.query).toHaveBeenCalledTimes(1);
   });
 
   it("closes an existing active timer before inserting a category-only replacement", async () => {

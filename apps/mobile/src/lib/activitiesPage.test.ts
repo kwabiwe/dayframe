@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { QUICK_START_PIN_LIMIT, activitiesPageGroups, createActivityChangeGate, activityNameProblem, activityWeekSeconds, formatActivityWeek, pinLimitReached } from "./activitiesPage";
+import { QUICK_START_PIN_LIMIT, activitiesPageGroups, createActivityChangeGate, createArchivedReadGate, activityNameProblem, activityWeekSeconds, formatActivityWeek, pinLimitReached } from "./activitiesPage";
 
 const activity = (id: string, name: string, extra: { icon?: string | null; isPinned?: boolean } = {}) => ({ id, name, isPinned: false, ...extra });
 
@@ -89,5 +89,31 @@ describe("createActivityChangeGate", () => {
     expect(await saving).toEqual({ ran: true, value: "saved" });
     expect(await gate.run(archive)).toEqual({ ran: true, value: null });
     expect(archive).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("createArchivedReadGate", () => {
+  it("drops a read that was out while a restore landed, and keeps the read after it", () => {
+    const gate = createArchivedReadGate();
+    const before = gate.begin();
+    gate.changed();
+    const after = gate.begin();
+    expect(gate.current(before)).toBe(false);
+    expect(gate.current(after)).toBe(true);
+  });
+
+  it("only the newest of two overlapping reads applies", () => {
+    const gate = createArchivedReadGate();
+    const first = gate.begin();
+    const second = gate.begin();
+    expect(gate.current(first)).toBe(false);
+    expect(gate.current(second)).toBe(true);
+  });
+
+  it("a read still out when a change lands is stale even if no newer read started", () => {
+    const gate = createArchivedReadGate();
+    const read = gate.begin();
+    gate.changed();
+    expect(gate.current(read)).toBe(false);
   });
 });

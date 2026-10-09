@@ -15,6 +15,8 @@ export function CategoryManager({ categories }: { categories: CategoryRow[] }) {
   const [categoryPendingDelete, setCategoryPendingDelete] = useState<CategoryRow | null>(null);
   const [deleteError, setDeleteError] = useState<string | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
+  // A create, rename or pin the server refused (a taken name, quick start full): said, not ignored.
+  const [actionError, setActionError] = useState<string | null>(null);
   const pinned = categories.filter((category) => category.isPinned);
   const unpinned = categories.filter((category) => !category.isPinned);
 
@@ -24,8 +26,9 @@ export function CategoryManager({ categories }: { categories: CategoryRow[] }) {
 
   async function createCategory(formData: FormData) {
     const name = String(formData.get("name") ?? "").trim();
-    if (!name) return;
-    await clientFetch("/api/categories", {
+    if (!name) return false;
+    setActionError(null);
+    const response = await clientFetch("/api/categories", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -34,11 +37,17 @@ export function CategoryManager({ categories }: { categories: CategoryRow[] }) {
         isPinned: formData.get("isPinned") === "true"
       })
     });
+    if (!response.ok) {
+      setActionError(await responseError(response, "Unable to create the activity."));
+      return false;
+    }
     refresh();
+    return true;
   }
 
   async function updateCategory(category: CategoryRow, formData: FormData) {
-    await clientFetch("/api/categories", {
+    setActionError(null);
+    const response = await clientFetch("/api/categories", {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -48,12 +57,18 @@ export function CategoryManager({ categories }: { categories: CategoryRow[] }) {
         isPinned: category.isPinned
       })
     });
+    if (!response.ok) {
+      // The editor stays open so the name can be changed.
+      setActionError(await responseError(response, "Unable to save the activity."));
+      return;
+    }
     setEditingId(null);
     refresh();
   }
 
   async function togglePin(category: CategoryRow) {
-    await clientFetch("/api/categories", {
+    setActionError(null);
+    const response = await clientFetch("/api/categories", {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -61,6 +76,10 @@ export function CategoryManager({ categories }: { categories: CategoryRow[] }) {
         isPinned: !category.isPinned
       })
     });
+    if (!response.ok) {
+      setActionError(await responseError(response, "Unable to change the pin."));
+      return;
+    }
     refresh();
   }
 
@@ -96,6 +115,7 @@ export function CategoryManager({ categories }: { categories: CategoryRow[] }) {
           <p className="mt-1 text-sm text-[var(--muted)]">
             Pinned activities appear first in timer and mobile quick-start controls.
           </p>
+          {actionError ? <p className="mt-2 text-sm text-[var(--danger-text)]" role="alert">{actionError}</p> : null}
         </div>
         <CategorySection
           title="Pinned"
@@ -127,7 +147,17 @@ export function CategoryManager({ categories }: { categories: CategoryRow[] }) {
         />
       </section>
 
-      <form action={createCategory} className="fill-inset-surface space-y-4 p-4">
+      <form
+        className="fill-inset-surface space-y-4 p-4"
+        // onSubmit, not a form action: an action resets the fields even when the server refuses.
+        onSubmit={(event) => {
+          event.preventDefault();
+          const form = event.currentTarget;
+          void createCategory(new FormData(form)).then((created) => {
+            if (created) form.reset();
+          });
+        }}
+      >
         <div>
           <h2 className="text-base font-semibold">New activity</h2>
           <p className="mt-1 text-sm text-[var(--muted)]">Activities are what you track time for, like Work, Exercise or Errands.</p>
@@ -193,7 +223,11 @@ function CategorySection({
           editingId === category.id ? (
             <form
               key={category.id}
-              action={(formData) => onUpdate(category, formData)}
+              // onSubmit keeps the typed name when the server refuses it (a form action resets it).
+              onSubmit={(event) => {
+                event.preventDefault();
+                void onUpdate(category, new FormData(event.currentTarget));
+              }}
               className="grid gap-3 px-4 py-4 md:grid-cols-[minmax(180px,1fr)_minmax(240px,1.4fr)_auto]"
             >
               <label className="text-sm">
@@ -292,4 +326,14 @@ function PalettePicker({ name, defaultValue }: { name: string; defaultValue: str
       </div>
     </fieldset>
   );
+}
+
+async function responseError(response: Response, fallback: string) {
+  try {
+    const payload = (await response.json()) as { error?: string };
+    return payload.error ?? fallback;
+  } catch {
+    // Runtime failures may not return JSON.
+    return fallback;
+  }
 }

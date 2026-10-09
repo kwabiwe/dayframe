@@ -22,7 +22,8 @@ describe("mobile Activities page contract", () => {
     // activitiesPage.test.ts), so a failing unpin never leaves seven pinned and a slow save never
     // brings back an archived activity.
     expect(settingsSource).toContain("const activityChanges = useRef(createActivityChangeGate()).current;");
-    expect(settingsSource.match(/await activityChanges\.run\(async \(\) => \{/g)).toHaveLength(3);
+    // Save/create, archive, pin and restore (6b-2) all go through the one gate.
+    expect(settingsSource.match(/await activityChanges\.run\(async \(\) => \{/g)).toHaveLength(4);
     expect(settingsSource).toContain("if (activityChanges.busy()) {");
     // A pinned create checks quick start's room when it runs, not when the sheet opened.
     // The list the gate reads changes at once (an unpin rolled back counts before the gate opens).
@@ -40,7 +41,8 @@ describe("mobile Activities page contract", () => {
     // Reconnect bootstraps follow the same rule (r7): one started before an answer is not shown.
     expect(settingsSource).toMatch(/if \(startedAt === undefined \|\| startedAt !== activityAnswerEpoch\) \{\s*void goalReload\.current\?\.\(\{ silent: true \}\);\s*return;/);
     // A late answer after signing out, switching account or closing Settings applies nothing.
-    expect(settingsSource.match(/if \(!\(await activityOwnerStill\(owner\)\)\) return;/g)).toHaveLength(4);
+    // Save, archive, pin (answer and failure) and restore (6b-2).
+    expect(settingsSource.match(/if \(!\(await activityOwnerStill\(owner\)\)\) return;/g)).toHaveLength(5);
     // A refresh is published only for the account and visit that asked for it.
     expect(settingsSource).toContain("if (!queueMounted.current || !loadOwner || !mobileAccountOwnersEqual(loadOwner, publishOwner)) return;");
     // A discarded answer marks the cache stale; pins wait for this visit's own refresh.
@@ -74,5 +76,14 @@ describe("mobile Activities page contract", () => {
     expect(settingsSource).not.toContain("CategoryColorPicker");
     expect(settingsSource).not.toContain("newCategoryName");
     expect(settingsSource).not.toContain("editingCategoryId");
+  });
+
+  it("lists archived activities with Restore, through the same gate and owner guard (6b-2)", () => {
+    expect(settingsSource).toContain('title="Archived"');
+    expect(settingsSource).toContain("const result = await restoreCategory(activity.id);");
+    expect(settingsSource).toContain("if (settingsSection === \"categories\") void refreshArchivedActivities();");
+    expect(settingsSource).toContain("accessibilityLabel={`Restore ${category.name}`}");
+    // A create the server left unpinned (its own quick-start cap) is said, not hidden.
+    expect(settingsSource).toContain("if (!activity && pinned && !result.category.isPinned) {");
   });
 });
