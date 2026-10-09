@@ -562,9 +562,10 @@ export default function SettingsScreen() {
       recoveryEpochs.current.set(event.publicationId, activityAnswerEpoch);
       return;
     }
-    if (event.type !== "completed") return;
     const startedAt = recoveryEpochs.current.get(event.publicationId);
+    // Every ending (completed, failed, cancelled) forgets its record, so the map never grows.
     recoveryEpochs.current.delete(event.publicationId);
+    if (event.type !== "completed") return;
     if (startedAt === undefined || startedAt !== activityAnswerEpoch) {
       void goalReload.current?.({ silent: true });
       return;
