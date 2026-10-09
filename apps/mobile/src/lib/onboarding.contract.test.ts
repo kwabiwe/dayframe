@@ -56,6 +56,13 @@ describe("onboarding contract (Blocks 8-1a)", () => {
     expect(screen).toMatch(/Promise\.race\(\[\n      switchOn,/);
   });
 
+  it("shows Health and the reminder as on only after their saves succeed (8-1b)", () => {
+    expect(screen).toContain("const saved = await applyHealthPick(pick).then(() => true, () => false);");
+    expect(screen).toContain("const saved = await setReviewNudgeEnabled(owner.current, true).then((state) => state.enabled, () => false);");
+    expect(screen).toContain('testID="onboarding-health-retry"');
+    expect(screen).toContain('testID="onboarding-reminders-retry"');
+  });
+
   it("never starts a timer or writes time", () => {
     expect(screen).not.toMatch(/startTimer|stopTimer|createTimeEntry|queueEvent|enqueue/);
   });

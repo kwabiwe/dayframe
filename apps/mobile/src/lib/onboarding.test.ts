@@ -96,4 +96,12 @@ describe("onboarding answers", () => {
     const [, , health] = onboardingSummary({ ...EMPTY_ONBOARDING_ANSWERS, health: "on", healthPick: { sleep: false, workouts: true } });
     expect(health).toMatchObject({ state: "on", detail: "Workouts and walks" });
   });
+
+  it("never reports Health or the reminder as on when saving failed (Codex r1 on #277)", () => {
+    expect(healthResultText("failed", { sleep: true, workouts: false })).toMatch(/couldn't be saved/);
+    expect(remindersResultText("failed")).toMatch(/couldn't be switched on/);
+    const rows = onboardingSummary({ ...EMPTY_ONBOARDING_ANSWERS, health: "failed", reminders: "failed" });
+    expect(rows[2]).toMatchObject({ key: "health", state: "later", detail: "Choices not saved" });
+    expect(rows[3]).toMatchObject({ key: "reminders", state: "later", detail: "Off" });
+  });
 });

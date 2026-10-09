@@ -18,8 +18,10 @@ export const ONBOARDING_PROGRESS: readonly { step: OnboardingStep; color: Dayfra
 
 export type LocationChoice = "always" | "while" | "off";
 export type MotionChoice = "on" | "off" | "unavailable";
-export type HealthChoice = "on" | "off" | "unavailable";
-export type RemindersChoice = "on" | "off" | "denied";
+/** "failed": access was asked for but the picks couldn't be saved (Try again). */
+export type HealthChoice = "on" | "off" | "unavailable" | "failed";
+/** "failed": allowed, but the reminder couldn't be switched on (Try again). */
+export type RemindersChoice = "on" | "off" | "denied" | "failed";
 /** What Apple Health may bring in: sleep, and workouts and walks. */
 export type HealthPick = { sleep: boolean; workouts: boolean };
 
@@ -126,6 +128,8 @@ export function healthResultText(choice: HealthChoice, pick: HealthPick) {
       return "Apple Health isn't connected. Sleep and workouts won't come in until you connect it in Settings.";
     case "unavailable":
       return "Apple Health isn't available on this device.";
+    case "failed":
+      return "Your choices couldn't be saved. Try again, or choose them in Settings › Apple Health.";
   }
 }
 
@@ -137,6 +141,8 @@ export function remindersResultText(choice: RemindersChoice) {
       return "No reminders. Review still shows a count on Today.";
     case "denied":
       return "Notifications are off for Dayframe in iPhone Settings. Allow them there, then turn on Evening reminder in Settings.";
+    case "failed":
+      return "The reminder couldn't be switched on. Try again, or turn it on later in Settings.";
   }
 }
 
@@ -176,7 +182,9 @@ export function onboardingSummary(answers: OnboardingAnswers): OnboardingSummary
       state: answers.health === "on" ? "on" : answers.health === "unavailable" ? "none" : "later",
       detail: answers.health === "on"
         ? healthPickText(answers.healthPick)
-        : answers.health === "unavailable" ? "Not available on this device" : "Not connected"
+        : answers.health === "unavailable"
+          ? "Not available on this device"
+          : answers.health === "failed" ? "Choices not saved" : "Not connected"
     },
     {
       key: "reminders",

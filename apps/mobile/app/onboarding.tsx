@@ -85,6 +85,8 @@ export default function OnboardingScreen() {
   // The welcome's sample day drops in once per visit, not again after Back.
   const welcomePlayed = useRef(false);
   const titleRef = useRef<Text>(null);
+  // Picks the person changed win over a late first read of the saved ones.
+  const pickEdited = useRef(false);
   useEffect(() => {
     const bump = () => {
       sessionEpoch.current += 1;
@@ -132,7 +134,7 @@ export default function OnboardingScreen() {
         locationStage: location === "while" ? "upgrade" : current.locationStage,
         motion: current.motion ?? motionChoiceFrom(motion, false),
         health: current.health ?? (healthConnected ? "on" : null),
-        healthPick: healthPreferences ? healthPickFrom(healthPreferences) : current.healthPick,
+        healthPick: healthPreferences && !pickEdited.current ? healthPickFrom(healthPreferences) : current.healthPick,
         reminders: current.reminders ?? (nudge?.enabled && notifications === "granted" ? "on" : null)
       }));
     })();
@@ -274,8 +276,14 @@ export default function OnboardingScreen() {
         announce(choice === "unavailable" ? "Apple Health isn't available." : "Apple Health isn't connected.");
         return;
       }
-      await applyHealthPick(pick).catch(() => undefined);
+      // Automatic sync is already on after the grant: the picks must be saved, or setup says so.
+      const saved = await applyHealthPick(pick).then(() => true, () => false);
       if (!(await stillHere(epoch))) return;
+      if (!saved) {
+        setAnswers((current) => ({ ...current, health: "failed" }));
+        announce("Your Apple Health choices couldn't be saved.");
+        return;
+      }
       // The categories Health imports log as, as Settings prepares them; bounded, and not fatal:
       // suggestions still reach Review without them.
       const kinds = [pick.sleep ? "sleep" as const : null, pick.workouts ? "health" as const : null].filter((kind) => kind !== null);
@@ -302,14 +310,15 @@ export default function OnboardingScreen() {
         announce("Notifications are off.");
         return;
       }
-      await setReviewNudgeEnabled(owner.current, true).catch(() => undefined);
+      const saved = await setReviewNudgeEnabled(owner.current, true).then((state) => state.enabled, () => false);
       if (!(await stillHere(epoch))) return;
-      setAnswers((current) => ({ ...current, reminders: "on" }));
-      announce("Evening reminders are on.");
+      setAnswers((current) => ({ ...current, reminders: saved ? "on" : "failed" }));
+      announce(saved ? "Evening reminders are on." : "The reminder couldn't be switched on.");
     });
   }
 
   function togglePick(key: keyof HealthPick) {
+    pickEdited.current = true;
     setAnswers((current) => ({ ...current, healthPick: { ...current.healthPick, [key]: !current.healthPick[key] } }));
   }
 
@@ -591,6 +600,22 @@ function StepActions({
           testID="onboarding-suggestions-on"
           theme={theme}
         />
+        <SecondaryButton disabled={busy} label="Not now" onPress={onNotNow} testID="onboarding-not-now" theme={theme} />
+      </>
+    );
+  }
+  if (step === "health" && answers.health === "failed") {
+    return (
+      <>
+        <PrimaryButton busy={busy} label="Try again" onPress={onConnectHealth} testID="onboarding-health-retry" theme={theme} />
+        <SecondaryButton disabled={busy} label="Not now" onPress={onNotNow} testID="onboarding-not-now" theme={theme} />
+      </>
+    );
+  }
+  if (step === "reminders" && answers.reminders === "failed") {
+    return (
+      <>
+        <PrimaryButton busy={busy} label="Try again" onPress={onTurnOnReminders} testID="onboarding-reminders-retry" theme={theme} />
         <SecondaryButton disabled={busy} label="Not now" onPress={onNotNow} testID="onboarding-not-now" theme={theme} />
       </>
     );
