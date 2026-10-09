@@ -63,6 +63,11 @@ When changing place roles, role labels or any read path that shows a saved place
 - On iPhone (no Home/Work controls yet): after a role is set on web, Settings › Places rows show "Home"/"Work" with the saved name underneath, and the Review correction editor names the place by its label. Run `apps/mobile/src/lib/geofence.test.ts` (a Work-role place records "Entered Work", a "Work" visit description and `placeName`, and "Work" in diagnostics) and the `api.test.ts` role cases.
 - Apply `supabase/migrations/202610070001_place_role.sql` to staging before the Preview that reads place roles, and to production before that server deploys, each with owner approval.
 
+## Onboarding (iPhone)
+
+- Run `npx vitest run src/lib/onboarding.test.ts src/lib/onboarding.contract.test.ts` in `apps/mobile`.
+- Simulator (the Debug app is `com.layereight.dayframe` with the `dayframe://` scheme; a staging phone app is `com.layereight.dayframe.staging` with `dayframe-staging://`): reset the app's location permission (`xcrun simctl privacy booted reset location com.layereight.dayframe`), set a location, open `dayframe://onboarding` and walk Welcome → Allow location (While Using) → Continue to iOS prompt (Always) → Continue → Motion (not available in the Simulator) → summary → Open Today. Also grant Always first (`xcrun simctl privacy booted grant location-always com.layereight.dayframe`) with suggestions off: the Location step must offer Turn on suggestions without an iOS prompt. Afterwards turn Suggest visits and commutes off again on the QA account and reset the permission. Motion & Fitness and the real Always prompt behaviour need a physical iPhone.
+
 ## Evening Review reminder (iPhone)
 
 - Run `npx vitest run src/lib/reviewNudge.test.ts` in `apps/mobile` (time today/tomorrow, once a day, stale counts, permission, account fence, ordering) and the route tests for `/api/events`, `/api/location/evidence` and `/api/location/replay` plus `src/lib/review-count.test.ts` in `apps/web` (count only for app sessions; replay only when asked; a slow or failed count is left out).
