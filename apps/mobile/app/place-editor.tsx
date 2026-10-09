@@ -380,7 +380,7 @@ export default function PlaceEditorScreen() {
     const snapshot = data
       ? [...data.places.filter((place) => place.id !== accepted.id), roleChange ? { ...accepted, role: null } : accepted]
       : [];
-    await refreshGeofencesAfterChange(roleChange ? applyPlaceRoleLocally(snapshot, roleChange) : snapshot);
+    if (!(await refreshGeofencesAfterChange(roleChange ? applyPlaceRoleLocally(snapshot, roleChange) : snapshot))) return;
     if (await editorStillFor(owner)) router.back();
   }
 
@@ -390,12 +390,23 @@ export default function PlaceEditorScreen() {
   }
 
   /** Best effort after an accepted change: a fresh read, else this editor's own snapshot. */
+  /** Returns false when the read found the session signed out (the editor goes to sign-in). */
   async function refreshGeofencesAfterChange(fallbackPlaces: MobilePlace[]) {
-    const refreshed = await fetchBootstrap().catch(() => null);
+    let refreshed: MobileBootstrap | null = null;
+    try {
+      refreshed = await fetchBootstrap();
+    } catch (error) {
+      if (error instanceof AuthRequiredError) {
+        // The change was accepted; the session ended after it. Save/Delete stay locked.
+        if (mounted.current) router.replace("/");
+        return false;
+      }
+    }
     const source = refreshed ?? data;
-    if (!source) return;
+    if (!source) return true;
     const places = refreshed ? refreshed.places : fallbackPlaces;
     await refreshGeofencesForPlaces(places, { userId: source.user.id, workspaceId: source.workspace.id }).catch(() => 0);
+    return true;
   }
 
   function confirmDeletePlace() {
@@ -433,7 +444,7 @@ export default function PlaceEditorScreen() {
     }
     // Accepted: Places drops the row when it is shown again, even if its own refresh fails.
     if (owner) notePlaceDeleted(mobileAccountKey(owner), place.id);
-    await refreshGeofencesAfterChange((data?.places ?? []).filter((candidate) => candidate.id !== place.id));
+    if (!(await refreshGeofencesAfterChange((data?.places ?? []).filter((candidate) => candidate.id !== place.id)))) return;
     if (await editorStillFor(owner)) router.back();
   }
 
