@@ -1121,6 +1121,15 @@ function createStyles(theme: MobileTheme) {
     settingsActivityName: { color: theme.textPrimary, fontFamily: monoFont, fontSize: 15, fontWeight: "600" },
     settingsActivityMeta: { color: theme.textMuted, fontFamily: monoFont, fontSize: 13 },
     settingsActivityBlockArchived: { opacity: 0.6 },
+    // Blocks parity step 7a: the Places page rows (Home and Work, Saved places, Suggested places).
+    placesRow: { alignItems: "center", flexDirection: "row", gap: 8, minHeight: 60, paddingRight: 12 },
+    placesRowMain: { alignItems: "center", flex: 1, flexDirection: "row", gap: 12, minHeight: 60, paddingLeft: 16, paddingVertical: 10 },
+    placesRowPressed: { backgroundColor: theme.surfaceMuted },
+    placesRowActions: { flexDirection: "row", gap: 6 },
+    placesBlock: { alignItems: "center", backgroundColor: theme.surfaceInset, borderRadius: 10, height: 36, justifyContent: "center", width: 36 },
+    placesBlockSuggested: { opacity: 0.75 },
+    placesEmpty: { minHeight: 52, justifyContent: "center", paddingHorizontal: 16 },
+    placesStatus: { color: theme.textSecondary, fontFamily: monoFont, fontSize: 13, textAlign: "center" },
     settingsActivityPin: { alignItems: "center", borderRadius: 22, height: 44, justifyContent: "center", width: 44 },
     settingsActivityPinOn: { backgroundColor: theme.surfaceInset },
     healthNameRow: {

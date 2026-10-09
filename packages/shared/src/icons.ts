@@ -91,6 +91,8 @@ export const DAYFRAME_APP_ICONS = {
   library: "library",
   settings: "settings",
   places: "map-pin",
+  placeHome: "house",
+  placeWork: "briefcase",
   account: "circle-user-round",
   start: "play",
   startAgain: "rotate-ccw",

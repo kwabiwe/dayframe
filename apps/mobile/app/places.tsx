@@ -13,7 +13,20 @@ import * as Clipboard from "expo-clipboard";
 import { router, useFocusEffect } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
 import Svg, { Path } from "react-native-svg";
-import { placeDisplayName, placeSecondaryName } from "@dayframe/shared";
+import {
+  DAYFRAME_APP_ICONS,
+  placeDisplayName,
+  placeRoleLabel,
+  placeRoleSlots,
+  type PlaceRole,
+  type placeRoleRequest
+} from "@dayframe/shared";
+import { DayframeIcon } from "@/components/icons/DayframeIcon";
+import { PlaceRoleSheet, type PlaceRoleSheetMode } from "@/components/places/PlaceRoleSheet";
+import { SettingsBlockGroup, SettingsPillButton } from "@/components/settings/SettingsBlocks";
+import { applyPlaceRoleLocally, learnedPlaceSubtitle, placeRowSubtitle, subscribeDeletedPlaces, takeDeletedPlaces } from "@/lib/placesPage";
+import { mobileAccountKey, mobileAccountOwnersEqual, readActiveMobileAccount } from "@/lib/mobileAccount";
+import { mobileTextProps } from "@/lib/mobileTypography";
 import { SheetMutationProgress } from "@/components/SheetMutationProgress";
 import {
   SwipeDismissSheet,
@@ -21,10 +34,10 @@ import {
 } from "@/components/SwipeDismissSheet";
 import {
   AuthRequiredError,
-  deletePlace,
   fetchBootstrap,
   forgetLearnedPlace,
   ignoreLearnedPlace,
+  setPlaceRole,
   type MobileBootstrap,
   type MobileLearnedPlace,
   type MobilePlace
@@ -51,17 +64,36 @@ export default function PlacesScreen() {
   const reduceMotion = useReduceMotionPreference();
   const { styles, theme } = useMobileTheme();
   const [data, setData] = useState<MobileBootstrap | null>(null);
+  const dataRef = useRef(data);
+  dataRef.current = data;
   const [refreshing, setRefreshing] = useState(false);
-  const [deletingId, setDeletingId] = useState<string | null>(null);
   const [ignoringLearnedId, setIgnoringLearnedId] = useState<string | null>(null);
   const [forgettingLearnedId, setForgettingLearnedId] = useState<string | null>(null);
   const [selectedLearnedPlace, setSelectedLearnedPlace] = useState<MobileLearnedPlace | null>(null);
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
+  // Home and Work (Blocks 7a): which slot's sheet is open, and whether it sets or clears.
+  const [roleSheet, setRoleSheet] = useState<{ role: PlaceRole; mode: PlaceRoleSheetMode } | null>(null);
+  // One Home/Work change at a time across the page (a second sheet can't open mid-save).
+  const roleSaving = useRef(false);
+  // Bumped by every accepted change: a read that started before it is out of date and dropped.
+  const changeEpoch = useRef(0);
+  // Only the newest page read applies (mount and focus can both be out at once).
+  const readSequence = useRef(0);
+  const mounted = useRef(true);
+  useEffect(() => () => {
+    mounted.current = false;
+  }, []);
 
   const load = useCallback(async (options?: { refresh?: boolean; silent?: boolean }) => {
     if (options?.refresh) setRefreshing(true);
+    const epoch = changeEpoch.current;
+    const read = ++readSequence.current;
     try {
-      const bootstrap = await fetchBootstrap();
+      const fetched = await fetchBootstrap();
+      if (!mounted.current || epoch !== changeEpoch.current || read !== readSequence.current) return;
+      // Deletes accepted while this read was out (possibly before the page had any data) still apply.
+      const bootstrap = takeDeletedPlaces(mobileAccountKey({ userId: fetched.user.id, workspaceId: fetched.workspace.id }))
+        .reduce((next, id) => reconcileBootstrapPlaces(next, { removePlaceId: id }), fetched);
       setData(bootstrap);
       void backfillLearnedPlaceLocations(bootstrap.learnedPlaces ?? []).then((resolved) => {
         if (resolved.length === 0) return;
@@ -84,10 +116,32 @@ export default function PlacesScreen() {
     void load();
   }, [load]);
 
+  // A place the editor deleted leaves the list at once, even if a refresh then fails: on focus,
+  // and when the delete finishes after the person already came back to this page.
+  const applyDeletedPlaces = useCallback(async () => {
+    const owner = await readActiveMobileAccount();
+    const current = dataRef.current;
+    // Nothing shown yet: leave the deletes for the opening read to apply (it is not dropped).
+    if (!mounted.current || !owner || !current
+      || !mobileAccountOwnersEqual(owner, { userId: current.user.id, workspaceId: current.workspace.id })) return;
+    const deleted = takeDeletedPlaces(mobileAccountKey(owner));
+    if (deleted.length === 0) return;
+    changeEpoch.current += 1;
+    setData((current) => current && mobileAccountOwnersEqual(owner, { userId: current.user.id, workspaceId: current.workspace.id })
+      ? deleted.reduce((next, id) => reconcileBootstrapPlaces(next, { removePlaceId: id }), current)
+      : current);
+  }, []);
+
+  useEffect(() => subscribeDeletedPlaces(() => {
+    void applyDeletedPlaces();
+  }), [applyDeletedPlaces]);
+
   useFocusEffect(
     useCallback(() => {
-      void load({ silent: true });
-    }, [load])
+      void applyDeletedPlaces().finally(() => {
+        void load({ silent: true });
+      });
+    }, [applyDeletedPlaces, load])
   );
 
   function beginAddPlace() {
@@ -106,45 +160,6 @@ export default function PlacesScreen() {
   function beginEditPlace(place: MobilePlace) {
     setStatusMessage(null);
     router.push({ pathname: "/place-editor", params: { mode: "edit", placeId: place.id } } as never);
-  }
-
-  function confirmDeletePlace(place: MobilePlace) {
-    Alert.alert(
-      "Delete place",
-      `Delete ${placeDisplayName(withRole(place))}? Existing time entries keep their time data, but this place label will be removed.`,
-      [
-        { text: "Cancel", style: "cancel" },
-        {
-          text: "Delete",
-          style: "destructive",
-          onPress: () => {
-            void removePlace(place);
-          }
-        }
-      ]
-    );
-  }
-
-  async function removePlace(place: MobilePlace) {
-    setDeletingId(place.id);
-    try {
-      await applyAfterSuccessfulMutation(
-        () => deletePlace(place.id),
-        () => removeLocalPlace(place.id)
-      );
-      await refreshAfterPlaceChange({
-        prefix: "Place deleted.",
-        removePlaceId: place.id
-      });
-    } catch (error) {
-      if (error instanceof AuthRequiredError) {
-        router.replace("/");
-        return;
-      }
-      Alert.alert("Places", error instanceof Error ? error.message : "Unable to delete place.");
-    } finally {
-      setDeletingId(null);
-    }
   }
 
   function confirmIgnoreLearnedCandidate(
@@ -238,11 +253,8 @@ export default function PlacesScreen() {
     }
   }
 
-  function removeLocalPlace(id: string) {
-    setData((current) => current ? reconcileBootstrapPlaces(current, { removePlaceId: id }) : current);
-  }
-
   function removeLocalLearnedPlace(id: string) {
+    changeEpoch.current += 1;
     setData((current) => current ? reconcileBootstrapPlaces(current, { removeLearnedPlaceId: id }) : current);
   }
 
@@ -251,26 +263,34 @@ export default function PlacesScreen() {
     upsertPlace?: MobilePlace;
     removePlaceId?: string;
     removeLearnedPlaceId?: string;
+    /** Places as this page now shows them, for monitoring when the fresh read fails. */
+    fallbackPlaces?: MobilePlace[];
   }) {
+    const epoch = changeEpoch.current;
     try {
       const bootstrap = await fetchBootstrap();
+      if (!mounted.current) return;
+      if (epoch !== changeEpoch.current) {
+        setStatusMessage(options.prefix);
+        return;
+      }
       const reconciled = reconcileBootstrapPlaces(bootstrap, options);
       setData(reconciled);
-      const monitoredCount = await refreshGeofencesForPlaces(reconciled.places, { userId: reconciled.user.id, workspaceId: reconciled.workspace.id }).catch(() => 0);
+      await refreshGeofencesForPlaces(reconciled.places, { userId: reconciled.user.id, workspaceId: reconciled.workspace.id }).catch(() => 0);
       const bootstrapHasPlace =
         !options.upsertPlace || bootstrap.places.some((place) => place.id === options.upsertPlace?.id);
-      const refreshNote = bootstrapHasPlace ? "" : " Saved locally while the server list catches up.";
-      setStatusMessage(
-        monitoredCount > 0
-          ? `${options.prefix} Monitoring ${monitoredCount} places.${refreshNote}`
-          : `${options.prefix} Background place monitoring is unchanged.${refreshNote}`
-      );
+      setStatusMessage(bootstrapHasPlace ? options.prefix : `${options.prefix} It may take a moment to show everywhere.`);
     } catch (error) {
       if (error instanceof AuthRequiredError) {
         router.replace("/");
         return;
       }
-      setStatusMessage(`${options.prefix} Pull to refresh if it does not appear on another device.`);
+      const current = dataRef.current;
+      // Only while nothing else changed since: a later delete or change already set monitoring.
+      if (options.fallbackPlaces && current && epoch === changeEpoch.current) {
+        await refreshGeofencesForPlaces(options.fallbackPlaces, { userId: current.user.id, workspaceId: current.workspace.id }).catch(() => 0);
+      }
+      setStatusMessage(`${options.prefix} Pull to refresh if it doesn't show on another device.`);
     }
   }
 
@@ -279,6 +299,57 @@ export default function PlacesScreen() {
     (learnedPlace) => learnedPlace.classification === "place_candidate"
   );
   const categories = data?.categories ?? [];
+  const rolePlaces = places.map(withRole);
+  const slots = placeRoleSlots(rolePlaces);
+  const editingSlot = roleSheet ? slots.find((slot) => slot.role === roleSheet.role) ?? null : null;
+
+  function openRole(role: PlaceRole, mode: PlaceRoleSheetMode) {
+    if (roleSaving.current) return;
+    setStatusMessage(null);
+    // Nothing saved to choose from yet: go straight to adding the place into the slot.
+    if (mode === "choose" && places.length === 0) {
+      beginAddRolePlace(role);
+      return;
+    }
+    setRoleSheet({ role, mode });
+  }
+
+  function beginAddRolePlace(role: PlaceRole) {
+    router.push({ pathname: "/place-editor", params: { mode: "create", role } } as never);
+  }
+
+  async function saveRole(request: ReturnType<typeof placeRoleRequest>) {
+    if (roleSaving.current) return "Another change is still saving. Try again in a moment.";
+    roleSaving.current = true;
+    try {
+      const owner = await readActiveMobileAccount();
+      try {
+        await setPlaceRole(request);
+      } catch (error) {
+        if (error instanceof AuthRequiredError) {
+          router.replace("/");
+          return null;
+        }
+        return error instanceof Error ? error.message : "Couldn't update this place. Try again.";
+      }
+      // Accepted: shown at once (only for the account that asked, while Places is open), and any
+      // read that started before this answer is dropped.
+      if (!mounted.current || !mobileAccountOwnersEqual(owner, await readActiveMobileAccount())) return null;
+      changeEpoch.current += 1;
+      const shown = dataRef.current;
+      const nextPlaces = shown ? applyPlaceRoleLocally(shown.places, request) : undefined;
+      if (shown && nextPlaces) {
+        const next = { ...shown, places: nextPlaces };
+        dataRef.current = next;
+        setData(next);
+      }
+      const label = placeRoleLabel(request.role);
+      await refreshAfterPlaceChange({ prefix: request.placeId ? `${label} updated.` : `${label} cleared.`, fallbackPlaces: nextPlaces });
+      return null;
+    } finally {
+      roleSaving.current = false;
+    }
+  }
 
   return (
     <SafeAreaView style={styles.safeArea}>
@@ -308,86 +379,148 @@ export default function PlacesScreen() {
           />
         }
       >
-        <View style={styles.contentStack}>
-          <View style={styles.panel}>
-            <Text style={styles.muted}>Save locations Dayframe should recognise.</Text>
-            <View style={styles.buttonRow}>
-              <Pressable
-                accessibilityRole="button"
-                style={pressable(styles.primaryInlineButton, styles.buttonPressed)}
-                onPress={beginAddPlace}
-              >
-                <Text style={styles.primaryButtonText}>Add place</Text>
-              </Pressable>
-            </View>
-            {statusMessage ? (
-              <Reanimated.View
-                key={statusMessage}
-                entering={localPresenceEntering(reduceMotion)}
-                exiting={localPresenceExiting(reduceMotion)}
-                layout={localLayoutTransition(reduceMotion)}
-              >
-                <Text accessibilityLiveRegion="polite" style={styles.statusText}>{statusMessage}</Text>
-              </Reanimated.View>
-            ) : null}
-          </View>
+        <View style={styles.settingsBlocksStack}>
+          <Pressable
+            accessibilityRole="button"
+            onPress={beginAddPlace}
+            style={({ pressed }) => [styles.settingsNewActivity, pressed ? styles.buttonPressed : null]}
+            testID="places-add"
+          >
+            <DayframeIcon color={theme.onAccent} glyph={DAYFRAME_APP_ICONS.add} size={18} />
+            <Text {...mobileTextProps("control")} style={styles.settingsNewActivityText}>Add place</Text>
+          </Pressable>
+          {statusMessage ? (
+            <Reanimated.View
+              key={statusMessage}
+              entering={localPresenceEntering(reduceMotion)}
+              exiting={localPresenceExiting(reduceMotion)}
+              layout={localLayoutTransition(reduceMotion)}
+            >
+              <Text {...mobileTextProps("metadata")} accessibilityLiveRegion="polite" style={styles.placesStatus}>{statusMessage}</Text>
+            </Reanimated.View>
+          ) : null}
 
-          <View style={styles.panel}>
-            <Text style={styles.sectionTitle}>Your places</Text>
-            <View style={styles.placeList}>
-              {places.map((place) => (
-                  <Reanimated.View
-                    key={place.id}
-                    entering={localPresenceEntering(reduceMotion)}
-                    exiting={localPresenceExiting(reduceMotion)}
-                    layout={localLayoutTransition(reduceMotion)}
-                  >
-                    <PlaceRow
-                      place={place}
-                      categories={categories}
-                      deleting={deletingId === place.id}
-                      onEdit={() => beginEditPlace(place)}
-                      onDelete={() => confirmDeletePlace(place)}
-                      theme={theme}
-                      styles={styles}
-                    />
-                  </Reanimated.View>
-              ))}
-            </View>
+          <SettingsBlockGroup foot="Trips and time away are named after these." theme={theme} title="Home and Work">
+            {slots.map((slot, index) => (
+              <View key={slot.role} style={[styles.placesRow, index > 0 ? styles.settingsActivityRowDivider : null]} testID={`places-role-${slot.role}`}>
+                <View style={styles.placesRowMain}>
+                  <View style={styles.placesBlock}>
+                    <DayframeIcon color={theme.textPrimary} glyph={slot.role === "home" ? DAYFRAME_APP_ICONS.placeHome : DAYFRAME_APP_ICONS.placeWork} size={18} />
+                  </View>
+                  <View style={styles.settingsActivityText}>
+                    <Text {...mobileTextProps("itemTitle")} numberOfLines={1} style={styles.settingsActivityName}>{slot.label}</Text>
+                    <Text {...mobileTextProps("metadata")} numberOfLines={2} style={styles.settingsActivityMeta}>
+                      {slot.place ? slot.secondary ?? `${slot.place.radiusMeters} m radius` : "Not set"}
+                    </Text>
+                  </View>
+                </View>
+                <View style={styles.placesRowActions}>
+                  {slot.place ? (
+                    <>
+                      <SettingsPillButton accessibilityLabel={`Change ${slot.label}`} label="Change" onPress={() => openRole(slot.role, "choose")} theme={theme} />
+                      <SettingsPillButton accessibilityLabel={`Clear ${slot.label}`} label="Clear" onPress={() => openRole(slot.role, "clear")} theme={theme} />
+                    </>
+                  ) : (
+                    <SettingsPillButton accessibilityLabel={`Set ${slot.label}`} label="Set" onPress={() => openRole(slot.role, "choose")} theme={theme} />
+                  )}
+                </View>
+              </View>
+            ))}
+          </SettingsBlockGroup>
+
+          <SettingsBlockGroup
+            foot={places.length === 0 ? "No places yet. Add one by searching for an address or using where you are." : "Tap a place to change it or delete it."}
+            theme={theme}
+            title="Saved places"
+          >
             {places.length === 0 ? (
-              <Reanimated.View entering={localPresenceEntering(reduceMotion)}>
-                <Text style={styles.muted}>No places yet. Search for an address or use your current location.</Text>
-              </Reanimated.View>
+              <View style={styles.placesEmpty}>
+                <Text {...mobileTextProps("metadata")} style={styles.settingsActivityMeta}>Nothing saved yet</Text>
+              </View>
             ) : null}
-            <View style={styles.settingsDivider} />
-            <Text style={styles.sectionTitle}>Learned places</Text>
-            <Text style={styles.muted}>Place suggestions require repeat visits on different days and stable location evidence.</Text>
-            <View style={styles.placeList}>
-              {learnedPlaces.map((learnedPlace) => (
-                  <Reanimated.View
-                    key={learnedPlace.id}
-                    entering={localPresenceEntering(reduceMotion)}
-                    exiting={localPresenceExiting(reduceMotion)}
-                    layout={localLayoutTransition(reduceMotion)}
+            {places.map((place, index) => {
+              const rolePlace = withRole(place);
+              const name = placeDisplayName(rolePlace);
+              const subtitle = placeRowSubtitle(rolePlace, categories);
+              return (
+                <Reanimated.View
+                  key={place.id}
+                  entering={localPresenceEntering(reduceMotion)}
+                  exiting={localPresenceExiting(reduceMotion)}
+                  layout={localLayoutTransition(reduceMotion)}
+                >
+                  <Pressable
+                    accessibilityHint="Edits this place"
+                    accessibilityLabel={`${name}, ${subtitle.replace(/\n/g, ", ")}`}
+                    accessibilityRole="button"
+                    onPress={() => beginEditPlace(place)}
+                    style={({ pressed }) => [
+                      styles.placesRow,
+                      index > 0 ? styles.settingsActivityRowDivider : null,
+                      pressed ? styles.placesRowPressed : null
+                    ]}
+                    testID={`places-row-${place.id}`}
                   >
-                    <LearnedPlaceRow
-                      learnedPlace={learnedPlace}
-                      ignoring={ignoringLearnedId === learnedPlace.id}
-                      onOpen={() => setSelectedLearnedPlace(learnedPlace)}
-                      onSave={() => beginSaveLearnedPlace(learnedPlace)}
-                      onIgnore={() => confirmIgnoreLearnedCandidate(learnedPlace)}
-                      theme={theme}
-                      styles={styles}
-                    />
-                  </Reanimated.View>
+                    <View style={styles.placesRowMain}>
+                      <View style={styles.placesBlock}>
+                        <DayframeIcon
+                          color={theme.textPrimary}
+                          glyph={rolePlace.role === "home" ? DAYFRAME_APP_ICONS.placeHome : rolePlace.role === "work" ? DAYFRAME_APP_ICONS.placeWork : DAYFRAME_APP_ICONS.places}
+                          size={18}
+                        />
+                      </View>
+                      <View style={styles.settingsActivityText}>
+                        <Text {...mobileTextProps("itemTitle")} numberOfLines={1} style={styles.settingsActivityName}>{name}</Text>
+                        <Text {...mobileTextProps("metadata")} numberOfLines={3} style={styles.settingsActivityMeta}>{subtitle}</Text>
+                      </View>
+                    </View>
+                    <DayframeIcon color={theme.textMuted} glyph={DAYFRAME_APP_ICONS.next} size={18} />
+                  </Pressable>
+                </Reanimated.View>
+              );
+            })}
+          </SettingsBlockGroup>
+
+          {learnedPlaces.length > 0 ? (
+            <SettingsBlockGroup foot="Dayframe suggests a place after repeat visits on different days. Nothing is saved until you choose Save." theme={theme} title="Suggested places">
+              {learnedPlaces.map((learnedPlace, index) => (
+                <Reanimated.View
+                  key={learnedPlace.id}
+                  entering={localPresenceEntering(reduceMotion)}
+                  exiting={localPresenceExiting(reduceMotion)}
+                  layout={localLayoutTransition(reduceMotion)}
+                >
+                  <View style={[styles.placesRow, index > 0 ? styles.settingsActivityRowDivider : null]}>
+                    <Pressable
+                      accessibilityHint="Shows details, Ignore and Forget"
+                      accessibilityLabel={`Suggested place ${learnedPlace.name}, ${learnedPlaceSubtitle(learnedPlace)}`}
+                      accessibilityRole="button"
+                      onPress={() => setSelectedLearnedPlace(learnedPlace)}
+                      style={({ pressed }) => [styles.placesRowMain, pressed ? styles.placesRowPressed : null]}
+                      testID={`places-learned-${learnedPlace.id}`}
+                    >
+                      <View style={[styles.placesBlock, styles.placesBlockSuggested]}>
+                        <DayframeIcon color={theme.textSecondary} glyph={DAYFRAME_APP_ICONS.places} size={18} />
+                      </View>
+                      <View style={styles.settingsActivityText}>
+                        <Text {...mobileTextProps("itemTitle")} numberOfLines={2} style={styles.settingsActivityName}>{learnedPlace.name}</Text>
+                        <Text {...mobileTextProps("metadata")} numberOfLines={2} style={styles.settingsActivityMeta}>{learnedPlaceSubtitle(learnedPlace)}</Text>
+                      </View>
+                    </Pressable>
+                    <View style={styles.placesRowActions}>
+                      <SettingsPillButton
+                        accessibilityLabel={`Save ${learnedPlace.name} as a place`}
+                        disabled={ignoringLearnedId === learnedPlace.id || forgettingLearnedId === learnedPlace.id}
+                        label="Save"
+                        onPress={() => beginSaveLearnedPlace(learnedPlace)}
+                        theme={theme}
+                      />
+                    </View>
+                  </View>
+                </Reanimated.View>
               ))}
-            </View>
-            {learnedPlaces.length === 0 ? (
-              <Reanimated.View entering={localPresenceEntering(reduceMotion)}>
-                <Text style={styles.muted}>No learned candidates yet.</Text>
-              </Reanimated.View>
-            ) : null}
-          </View>
+            </SettingsBlockGroup>
+          ) : null}
         </View>
       </ScrollView>
       <LearnedPlaceDetailSheet
@@ -403,134 +536,21 @@ export default function PlacesScreen() {
         styles={styles}
         theme={theme}
       />
+      {roleSheet && editingSlot ? (
+        <PlaceRoleSheet
+          key={`${roleSheet.role}-${roleSheet.mode}`}
+          mode={roleSheet.mode}
+          onAddNew={beginAddRolePlace}
+          onClose={() => setRoleSheet(null)}
+          onSave={saveRole}
+          places={rolePlaces}
+          reduceMotion={reduceMotion}
+          slot={editingSlot}
+          styles={styles}
+          theme={theme}
+        />
+      ) : null}
     </SafeAreaView>
-  );
-}
-
-function PlaceRow({
-  place,
-  categories,
-  deleting,
-  onEdit,
-  onDelete,
-  theme,
-  styles
-}: {
-  place: MobilePlace;
-  categories: Category[];
-  deleting: boolean;
-  onEdit: () => void;
-  onDelete: () => void;
-  theme: MobileTheme;
-  styles: MobileStyles;
-}) {
-  const defaultCategoryName =
-    place.defaultCategoryName ??
-    categories.find((category) => category.id === place.defaultCategoryId)?.name ??
-    null;
-  const visitLoggingEnabled = place.loggingEnabled !== false;
-  return (
-    <View style={styles.placeRow}>
-      <MapPinGlyph color={theme.accent} />
-      <View style={styles.placeTextStack}>
-        <Text style={styles.placeName} numberOfLines={1}>{placeDisplayName(withRole(place))}</Text>
-        {placeSecondaryName(withRole(place)) ? (
-          <Text style={styles.placeMeta} numberOfLines={1}>{placeSecondaryName(withRole(place))}</Text>
-        ) : null}
-        {visitLoggingEnabled && place.defaultActivityDescription ? (
-          <Text style={styles.placeMeta} numberOfLines={2}>
-            {place.defaultActivityDescription}
-          </Text>
-        ) : null}
-        <Text style={styles.placeMeta} numberOfLines={2}>
-          {visitLoggingEnabled
-            ? `${defaultCategoryName ?? "No default activity"} · ${place.radiusMeters}m radius`
-            : `Visit logging off · ${place.radiusMeters}m radius`}
-        </Text>
-      </View>
-      <View style={styles.placeActions}>
-        <Pressable
-          accessibilityLabel={`Edit ${placeDisplayName(withRole(place))}`}
-          accessibilityRole="button"
-          style={pressable(styles.categoryIconButton, styles.buttonPressed)}
-          onPress={onEdit}
-        >
-          <PencilGlyph color={theme.accent} />
-        </Pressable>
-        <Pressable
-          accessibilityLabel={`Delete ${placeDisplayName(withRole(place))}`}
-          accessibilityRole="button"
-          disabled={deleting}
-          style={({ pressed }) => [
-            styles.categoryIconButton,
-            deleting ? styles.buttonDisabled : null,
-            pressed ? styles.buttonPressed : null
-          ]}
-          onPress={onDelete}
-        >
-          <ArchiveGlyph color={theme.danger} />
-        </Pressable>
-      </View>
-    </View>
-  );
-}
-
-function LearnedPlaceRow({
-  learnedPlace,
-  ignoring,
-  onOpen,
-  onSave,
-  onIgnore,
-  theme,
-  styles
-}: {
-  learnedPlace: MobileLearnedPlace;
-  ignoring: boolean;
-  onOpen: () => void;
-  onSave: () => void;
-  onIgnore: () => void;
-  theme: MobileTheme;
-  styles: MobileStyles;
-}) {
-  const displayName = learnedPlace.name;
-  return (
-    <Pressable
-      accessibilityLabel={`Open place suggestion ${displayName}`}
-      accessibilityRole="button"
-      style={pressable(styles.placeRow, styles.buttonPressed)}
-      onPress={onOpen}
-    >
-      <MapPinGlyph color={theme.textSecondary} />
-      <View style={styles.placeTextStack}>
-        <Text style={styles.placeName} numberOfLines={2}>{displayName}</Text>
-        <Text style={styles.placeMeta} numberOfLines={2}>
-          {formatLearnedPlaceMeta(learnedPlace)}
-        </Text>
-      </View>
-      <View style={styles.placeActions}>
-        <Pressable
-          accessibilityLabel={`Save ${displayName} as a place`}
-          accessibilityRole="button"
-          style={pressable(styles.learnedPlaceSaveButton, styles.buttonPressed)}
-          onPress={onSave}
-        >
-          <Text style={styles.learnedPlaceSaveButtonText}>Save</Text>
-        </Pressable>
-        <Pressable
-          accessibilityLabel={`Ignore ${displayName}`}
-          accessibilityRole="button"
-          disabled={ignoring}
-          style={({ pressed }) => [
-            styles.categoryIconButton,
-            ignoring ? styles.buttonDisabled : null,
-            pressed ? styles.buttonPressed : null
-          ]}
-          onPress={onIgnore}
-        >
-          <ArchiveGlyph color={theme.textSecondary} />
-        </Pressable>
-      </View>
-    </Pressable>
   );
 }
 
@@ -824,14 +844,6 @@ function sortPlaces(places: MobilePlace[]) {
   });
 }
 
-function formatLearnedPlaceMeta(learnedPlace: MobileLearnedPlace) {
-  const visits = learnedPlace.visitCount === 1 ? "1 visit" : `${learnedPlace.visitCount} visits`;
-  const days = learnedPlace.distinctDayCount === 1 ? "1 day" : `${learnedPlace.distinctDayCount} days`;
-  const samples = learnedPlace.sampleCount === 1 ? "1 sample" : `${learnedPlace.sampleCount} samples`;
-  const lastSeen = formatShortDateTime(learnedPlace.lastSeenAt);
-  return `${visits} across ${days} · ${samples} · Last seen ${lastSeen}`;
-}
-
 function formatDwell(seconds: number) {
   const minutes = Math.max(0, Math.round(Number(seconds) / 60));
   if (minutes < 60) return `${minutes}m`;
@@ -874,15 +886,6 @@ function BackGlyph({ color }: { color: string }) {
   );
 }
 
-function MapPinGlyph({ color }: { color: string }) {
-  return (
-    <Svg width={18} height={18} viewBox="0 0 24 24">
-      <Path d="M12 21s7-5.2 7-12a7 7 0 0 0-14 0c0 6.8 7 12 7 12Z" fill="none" stroke={color} strokeLinejoin="round" strokeWidth={2} />
-      <Path d="M12 12.2a2.4 2.4 0 1 0 0-4.8 2.4 2.4 0 0 0 0 4.8Z" fill="none" stroke={color} strokeWidth={2} />
-    </Svg>
-  );
-}
-
 function CopyGlyph({ color }: { color: string }) {
   return (
     <Svg width={15} height={15} viewBox="0 0 24 24">
@@ -900,21 +903,3 @@ function CloseGlyph({ color }: { color: string }) {
   );
 }
 
-function PencilGlyph({ color }: { color: string }) {
-  return (
-    <Svg width={18} height={18} viewBox="0 0 24 24">
-      <Path d="M4 20h4l10.5-10.5-4-4L4 16v4Z" fill="none" stroke={color} strokeLinejoin="round" strokeWidth={2} />
-      <Path d="m13.5 6.5 4 4" stroke={color} strokeLinecap="round" strokeWidth={2} />
-    </Svg>
-  );
-}
-
-function ArchiveGlyph({ color }: { color: string }) {
-  return (
-    <Svg width={18} height={18} viewBox="0 0 24 24">
-      <Path d="M5 7h14" stroke={color} strokeLinecap="round" strokeWidth={2} />
-      <Path d="M9 7V5h6v2" stroke={color} strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} />
-      <Path d="M8 10v9h8v-9" fill="none" stroke={color} strokeLinejoin="round" strokeWidth={2} />
-    </Svg>
-  );
-}
