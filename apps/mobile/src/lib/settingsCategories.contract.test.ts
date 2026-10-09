@@ -8,34 +8,39 @@ const settingsSource = readFileSync(
   fileURLToPath(new URL("../../app/settings.tsx", import.meta.url)),
   "utf8"
 );
-const themeSource = readFileSync(
-  fileURLToPath(new URL("./mobileTheme.ts", import.meta.url)),
+const editorSource = readFileSync(
+  fileURLToPath(new URL("../components/settings/ActivityEditorSheet.tsx", import.meta.url)),
   "utf8"
 );
 
-describe("mobile Categories creation contract", () => {
-  it("keeps the focused creator in a keyboard-adjusted scroll viewport", () => {
-    expect(settingsSource).toContain('automaticallyAdjustKeyboardInsets={Platform.OS === "ios" && settingsSection === "categories"}');
-    expect(settingsSource).toContain('keyboardDismissMode={Platform.OS === "ios" ? "interactive" : "on-drag"}');
-    expect(settingsSource).toContain('Keyboard.addListener("keyboardDidShow", revealFocusedEditor)');
-    expect(settingsSource).toContain("settingsScrollRef.current?.scrollToEnd");
-    expect(settingsSource).toContain("scrollResponderScrollNativeHandleToKeyboard");
-    expect(settingsSource).toContain("CATEGORY_EDITOR_KEYBOARD_CLEARANCE = 360");
-    expect(settingsSource.match(/placeholder="New activity"/g)).toHaveLength(1);
+// Blocks parity step 6b-1: Settings › Activities and the activity editor sheet.
+describe("mobile Activities page contract", () => {
+  it("lists activities in the picker's groups with a week total and a 44-point pin, capped at six", () => {
+    expect(settingsSource).toContain("activitiesPageGroups(data?.categories ?? []).map((group) => (");
+    expect(settingsSource).toContain("formatActivityWeek(activityWeekSeconds.get(category.id) ?? 0)");
+    expect(settingsSource).toContain("if (pinLimitReached(data?.categories ?? [], category.id)) {");
+    expect(settingsSource).toContain("accessibilityState={{ selected: category.isPinned }}");
+    expect(settingsSource).toContain('testID="activities-new"');
   });
 
-  it("offers the shared hue-grouped picker before creating a category", () => {
-    expect(settingsSource.match(/<CategoryColorPicker/g)).toHaveLength(2);
-    expect(settingsSource).toContain("DAYFRAME_PALETTE_PICKER.map");
-    expect(themeSource).toMatch(/paletteGrid: \{[^}]*flexWrap: "wrap",[^}]*gap: 8,[^}]*width: 252,/s);
-    expect(settingsSource).toContain("selectedColor={newCategoryColor}");
-    expect(settingsSource).toContain("color: newCategoryColor");
-    expect(settingsSource).toContain('accessibilityLabel="Activity colour"');
+  it("creates and edits through one editor sheet with name, icon and colour, and archives from it", () => {
+    expect(settingsSource).toContain("<ActivityEditorSheet");
+    expect(settingsSource).toContain("await updateCategory(activity.id, { name: draft.name, color: draft.color, icon: draft.icon });");
+    expect(settingsSource).toContain("await createCategory(draft.name, { color: draft.color, icon: draft.icon, isPinned: false });");
+    expect(settingsSource).toContain("await archiveCategory(activity.id);");
+    expect(editorSource).toContain("DAYFRAME_ACTIVITY_ICONS.map((option) => {");
+    expect(editorSource).toContain("DAYFRAME_PALETTE_PICKER.map((option) => {");
+    expect(editorSource).toContain('accessibilityRole="radiogroup"');
+    expect(editorSource).toContain("activityNameProblem(activities, name, activity?.id ?? null)");
+    // Archive asks first, and the sheet leaves with its own exit motion once archived.
+    expect(editorSource).toMatch(/Alert\.alert\(`Archive \$\{target\.name\}\?`/);
+    expect(editorSource).toContain("sheetRef.current?.dismiss();");
+    expect(editorSource).toContain("<SwipeDismissSheet");
   });
 
-  it("uses one local owner for creator presence and surrounding layout", () => {
-    expect(settingsSource).toContain("layout={localLayoutTransition(reduceMotion)}");
-    expect(settingsSource).toContain("entering={localPresenceEntering(reduceMotion)}");
-    expect(settingsSource).toContain("exiting={localPresenceExiting(reduceMotion)}");
+  it("has no inline creator or editor left on the page", () => {
+    expect(settingsSource).not.toContain("CategoryColorPicker");
+    expect(settingsSource).not.toContain("newCategoryName");
+    expect(settingsSource).not.toContain("editingCategoryId");
   });
 });

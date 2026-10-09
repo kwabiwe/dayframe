@@ -9,7 +9,6 @@ import { useCallback, useEffect, useRef, useState, type SetStateAction } from "r
 import {
   Alert,
   AppState,
-  findNodeHandle,
   Keyboard,
   Linking,
   Modal,
@@ -37,12 +36,21 @@ import {
   useReduceMotionPreference
 } from "@/lib/motion";
 import { ActivityPickerSheet } from "@/components/ActivityPickerSheet";
+import { ActivityEditorSheet, type ActivityEditorDraft } from "@/components/settings/ActivityEditorSheet";
+import { ActivityIcon, DayframeIcon } from "@/components/icons/DayframeIcon";
+import {
+  QUICK_START_PIN_LIMIT,
+  activitiesPageGroups,
+  activityWeekSeconds as activityWeekSecondsFor,
+  formatActivityWeek,
+  pinLimitReached
+} from "@/lib/activitiesPage";
 import { healthSyncNote, mergeHealthStatuses } from "@/lib/healthSyncNote";
 import { setHapticsEnabled, useHapticsPreference } from "@/lib/haptics";
 import {
   DAYFRAME_PALETTE,
-  DAYFRAME_PALETTE_PICKER,
-  paletteColorFor,
+  DAYFRAME_APP_ICONS,
+  blockColorsFor,
   type DayframePaletteKey,
   type HealthAutoLogMapping,
   type HealthAutoLogMappings,
@@ -198,7 +206,6 @@ type SettingsSnapshot = {
 };
 
 let cachedSettingsSnapshot: SettingsSnapshot | null = null;
-const CATEGORY_EDITOR_KEYBOARD_CLEARANCE = 360;
 
 function defaultSettingsSnapshot(): SettingsSnapshot {
   return {
@@ -315,16 +322,7 @@ export default function SettingsScreen() {
   const [healthSyncNoteText, setHealthSyncNote] = useState<string | null>(null);
   const [healthAccessGranted, setHealthAccessGranted] = useState<boolean | null>(null);
   const [exportingHealthDebug, setExportingHealthDebug] = useState(false);
-  const [newCategoryName, setNewCategoryName] = useState("");
-  const [newCategoryColor, setNewCategoryColor] = useState<DayframePaletteKey>("lime");
-  const [creatingCategory, setCreatingCategory] = useState(false);
-  const [pinNewCategory, setPinNewCategory] = useState(true);
-  const [editingCategoryId, setEditingCategoryId] = useState<string | null>(null);
-  const [editingCategoryName, setEditingCategoryName] = useState("");
-  const [editingCategoryColor, setEditingCategoryColor] = useState("lime");
   const refreshes = useRef(createOwnerSyncCoalescer<void>());
-  const categoryEditRef = useRef<TextInput>(null);
-  const newCategoryInputRef = useRef<TextInput>(null);
   const settingsScrollRef = useRef<ScrollView>(null);
   const settingsScrollOffsetRef = useRef(0);
   const settingsScrollContentHeightRef = useRef(0);
@@ -722,6 +720,13 @@ export default function SettingsScreen() {
         ? "Allow Dayframe in the Health app"
         : "Not connected yet";
   const [healthPickerKey, setHealthPickerKey] = useState<HealthImportPreferenceKey | null>(null);
+  const [activityEditor, setActivityEditor] = useState<{ activity: Category | null } | null>(null);
+  // Settings › Activities: each row's last seven days, from the same lists as Today's quick start.
+  const activityWeekSeconds = activityWeekSecondsFor(
+    [data?.historyEntries, data?.entries, data?.weekEntries, data?.dayEntries],
+    Date.now(),
+    isReviewNeededEntry
+  );
 
   // Sync help: a short note about the page's own last action (never cached), cleared whenever the
   // page opens or what it lists changes, so it can't contradict the status above it.
@@ -781,131 +786,44 @@ export default function SettingsScreen() {
     router.push({ pathname: "/settings", params: { section } });
   }
 
-  const revealCategoryCreator = useCallback(() => {
-    requestAnimationFrame(() => {
-      settingsScrollRef.current?.scrollToEnd({ animated: !reduceMotion });
-    });
-  }, [reduceMotion]);
-
-  const revealCategoryEditor = useCallback(() => {
-    requestAnimationFrame(() => {
-      const inputHandle = findNodeHandle(categoryEditRef.current);
-      if (inputHandle === null) return;
-      settingsScrollRef.current?.scrollResponderScrollNativeHandleToKeyboard(
-        inputHandle,
-        CATEGORY_EDITOR_KEYBOARD_CLEARANCE,
-        true
-      );
-    });
-  }, []);
-
-  useEffect(() => {
-    if (!editingCategoryId) return undefined;
-
-    const focusTimer = setTimeout(() => {
-      categoryEditRef.current?.focus();
-      revealCategoryEditor();
-    }, 50);
-
-    return () => clearTimeout(focusTimer);
-  }, [editingCategoryId, revealCategoryEditor]);
-
-  useEffect(() => {
-    if (
-      settingsSection !== "categories" ||
-      (!creatingCategory && !editingCategoryId)
-    ) return undefined;
-
-    const revealFocusedEditor = creatingCategory ? revealCategoryCreator : revealCategoryEditor;
-    revealFocusedEditor();
-    const keyboardSubscription = Keyboard.addListener("keyboardDidShow", revealFocusedEditor);
-    return () => keyboardSubscription.remove();
-  }, [
-    creatingCategory,
-    editingCategoryId,
-    revealCategoryCreator,
-    revealCategoryEditor,
-    settingsSection
-  ]);
-
-  function beginCreateCategory() {
-    if (!creatingCategory) {
-      if (!newCategoryName.trim()) {
-        setNewCategoryColor(nextCategoryColor(data?.categories ?? []));
-      }
-      setCreatingCategory(true);
-    }
-    if (editingCategoryId) {
-      setEditingCategoryId(null);
-      setEditingCategoryName("");
-      setEditingCategoryColor("lime");
-    }
-    revealCategoryCreator();
-  }
-
-  function cancelCreateCategory() {
-    setCreatingCategory(false);
-    setNewCategoryName("");
-    setNewCategoryColor(nextCategoryColor(data?.categories ?? []));
-    setPinNewCategory(true);
-    Keyboard.dismiss();
-  }
-
-  async function addCategory() {
-    const name = newCategoryName.trim();
-    if (!name) return;
+  // Settings › Activities (Blocks 6b-1): the editor sheet for New activity or one activity.
+  async function saveActivityFromEditor(activity: Category | null, draft: ActivityEditorDraft) {
     try {
-      await createCategory(name, { color: newCategoryColor, isPinned: pinNewCategory });
-      setCreatingCategory(false);
-      setNewCategoryName("");
-      setPinNewCategory(true);
-      Keyboard.dismiss();
-      await load();
+      if (activity) {
+        await updateCategory(activity.id, { name: draft.name, color: draft.color, icon: draft.icon });
+      } else {
+        await createCategory(draft.name, { color: draft.color, icon: draft.icon, isPinned: false });
+      }
+      await load({ silent: true });
+      return null;
     } catch (error) {
       if (error instanceof AuthRequiredError) {
         finishSignedOutNavigation();
-        return;
+        return null;
       }
-      Alert.alert("Activities", error instanceof Error ? error.message : "Unable to create activity.");
+      return error instanceof Error ? error.message : "Couldn't save the activity. Try again.";
     }
   }
 
-  function beginEditCategory(category: Category) {
-    setCreatingCategory(false);
-    setEditingCategoryId(category.id);
-    setEditingCategoryName(category.name);
-    setEditingCategoryColor(category.color);
-  }
-
-  function cancelEditCategory() {
-    setEditingCategoryId(null);
-    setEditingCategoryName("");
-    setEditingCategoryColor("lime");
-  }
-
-  async function saveCategoryEdit(category: Category) {
-    const name = editingCategoryName.trim();
-    if (!name) {
-      Alert.alert("Activities", "Activity name is required.");
-      return;
-    }
+  async function archiveActivityFromEditor(activity: { id: string }) {
     try {
-      await updateCategory(category.id, {
-        name,
-        color: editingCategoryColor
-      });
-      cancelEditCategory();
-      await load();
+      await archiveCategory(activity.id);
+      await load({ silent: true });
+      return null;
     } catch (error) {
       if (error instanceof AuthRequiredError) {
         finishSignedOutNavigation();
-        return;
+        return null;
       }
-      Alert.alert("Activities", error instanceof Error ? error.message : "Unable to save activity.");
+      return error instanceof Error ? error.message : "Couldn't archive the activity. Try again.";
     }
   }
 
   async function toggleCategoryPin(category: Category) {
+    if (pinLimitReached(data?.categories ?? [], category.id)) {
+      Alert.alert("Quick start is full", `Quick start holds ${QUICK_START_PIN_LIMIT} activities. Unpin one first.`);
+      return;
+    }
     const nextPinned = !category.isPinned;
     patchCategory(category.id, { isPinned: nextPinned });
     try {
@@ -921,37 +839,6 @@ export default function SettingsScreen() {
         return;
       }
       Alert.alert("Activities", error instanceof Error ? error.message : "Unable to update activity.");
-    }
-  }
-
-  function confirmDeleteCategory(category: Category) {
-    Alert.alert(
-      "Delete activity",
-      `Delete ${category.name}? Existing time entries keep their history.`,
-      [
-        { text: "Cancel", style: "cancel" },
-        {
-          text: "Delete",
-          style: "destructive",
-          onPress: () => {
-            void deleteSelectedCategory(category);
-          }
-        }
-      ]
-    );
-  }
-
-  async function deleteSelectedCategory(category: Category) {
-    try {
-      await archiveCategory(category.id);
-      if (editingCategoryId === category.id) cancelEditCategory();
-      await load();
-    } catch (error) {
-      if (error instanceof AuthRequiredError) {
-        finishSignedOutNavigation();
-        return;
-      }
-      Alert.alert("Activities", error instanceof Error ? error.message : "Unable to delete activity.");
     }
   }
 
@@ -1588,11 +1475,10 @@ export default function SettingsScreen() {
       <ScrollView
         key={settingsSection}
         ref={settingsScrollRef}
-        automaticallyAdjustKeyboardInsets={Platform.OS === "ios" && settingsSection === "categories"}
         style={styles.settingsScrollView}
         contentContainerStyle={styles.settingsScrollContent}
         keyboardDismissMode={Platform.OS === "ios" ? "interactive" : "on-drag"}
-        keyboardShouldPersistTaps={settingsSection === "categories" ? "always" : "handled"}
+        keyboardShouldPersistTaps="handled"
         onContentSizeChange={(_width, height) => {
           settingsScrollContentHeightRef.current = height;
           requestAnimationFrame(clampSettingsScroll);
@@ -1839,238 +1725,70 @@ export default function SettingsScreen() {
           ) : null}
 
           {settingsSection === "categories" ? (
-          <View style={styles.panel}>
-            <View style={styles.categoryList}>
-              {(data?.categories ?? []).map((category) => {
-                const categoryColor = paletteColorFor(category.color, category.name, theme.mode);
-                const editing = editingCategoryId === category.id;
+            <View style={styles.settingsBlocksStack}>
+              <Pressable
+                accessibilityRole="button"
+                onPress={() => setActivityEditor({ activity: null })}
+                style={({ pressed }) => [styles.settingsNewActivity, pressed ? styles.buttonPressed : null]}
+                testID="activities-new"
+              >
+                <DayframeIcon color={theme.onAccent} glyph={DAYFRAME_APP_ICONS.add} size={18} />
+                <Text {...mobileTextProps("control")} style={styles.settingsNewActivityText}>New activity</Text>
+              </Pressable>
 
-                if (editing) {
-                  return (
-                    <Reanimated.View
-                      key={category.id}
-                      entering={localPresenceEntering(reduceMotion)}
-                      exiting={localPresenceExiting(reduceMotion)}
-                      layout={localLayoutTransition(reduceMotion)}
-                      onLayout={revealCategoryEditor}
-                      style={styles.categoryEditCard}
-                    >
-                      <View style={styles.categoryEditHeader}>
-                        <View
-                          style={[
-                            styles.colorDot,
-                            { backgroundColor: paletteColorFor(editingCategoryColor, category.name, theme.mode) }
-                          ]}
-                        />
-                        <TextInput
-                          ref={categoryEditRef}
-                          accessibilityLabel="Activity name"
-                          {...mobileTextProps("input")}
-                          style={[styles.textInput, styles.categoryEditInput]}
-                          value={editingCategoryName}
-                          onChangeText={setEditingCategoryName}
-                          placeholder="Activity name"
-                          placeholderTextColor={theme.textSecondary}
-                          returnKeyType="done"
-                          onSubmitEditing={() => saveCategoryEdit(category)}
-                        />
-                      </View>
-                      <CategoryColorPicker
-                        selectedColor={editingCategoryColor}
-                        onSelect={setEditingCategoryColor}
-                        styles={styles}
-                        theme={theme}
-                      />
-                      <View style={styles.buttonRow}>
-                        <Pressable
-                          accessibilityRole="button"
-                          style={pressable(styles.secondaryButton, styles.buttonPressed)}
-                          onPress={cancelEditCategory}
-                        >
-                          <Text {...mobileTextProps("control")} style={styles.secondaryButtonText}>Cancel</Text>
-                        </Pressable>
-                        <Pressable
-                          accessibilityLabel={`Delete ${category.name}`}
-                          accessibilityRole="button"
-                          style={pressable(styles.secondaryButton, styles.buttonPressed)}
-                          onPress={() => confirmDeleteCategory(category)}
-                        >
-                          <Text {...mobileTextProps("control")} style={styles.activeEditDeleteText}>Delete</Text>
-                        </Pressable>
-                        <Pressable
-                          accessibilityRole="button"
-                          style={pressable(styles.primaryInlineButton, styles.buttonPressed)}
-                          onPress={() => saveCategoryEdit(category)}
-                        >
-                          <Text {...mobileTextProps("control")} style={styles.primaryButtonText}>Save</Text>
-                        </Pressable>
-                      </View>
-                    </Reanimated.View>
-                  );
-                }
-
-                return (
-                  <Reanimated.View
-                    key={category.id}
-                    layout={localLayoutTransition(reduceMotion)}
-                    style={[styles.categoryRow, category.isPinned ? styles.categoryRowPinned : null]}
-                  >
-                    <Pressable
-                      accessibilityLabel={`Edit ${category.name}`}
-                      accessibilityRole="button"
-                      onPress={() => beginEditCategory(category)}
-                      style={pressable(styles.categoryRowMain, styles.buttonPressed)}
-                    >
-                      <View style={[styles.colorDot, { backgroundColor: categoryColor }]} />
-                      <View style={styles.categoryTextStack}>
-                    <Text {...mobileTextProps("itemTitle")} style={styles.categoryName}>{category.name}</Text>
-                        <Text {...mobileTextProps("metadata")} style={[styles.categoryMeta, category.isPinned ? styles.categoryMetaPinned : null]}>
-                          {category.isPinned ? "Pinned" : "Unpinned"}
-                        </Text>
-                      </View>
-                    </Pressable>
-                    <View style={styles.categoryActions}>
-                      <Pressable
-                        accessibilityLabel={category.isPinned ? `Unpin ${category.name}` : `Pin ${category.name}`}
-                        accessibilityRole="button"
-                        style={pressable(
-                          [
-                            styles.categoryIconButton,
-                            category.isPinned ? styles.categoryIconButtonSelected : null
-                          ],
-                          styles.buttonPressed
-                        )}
-                        onPress={() => toggleCategoryPin(category)}
+              {activitiesPageGroups(data?.categories ?? []).map((group) => (
+                <SettingsBlockGroup key={group.key} theme={theme} title={group.title}>
+                  {group.rows.map((category, index) => {
+                    const colors = blockColorsFor(category.color, theme.mode, category.name);
+                    const week = formatActivityWeek(activityWeekSeconds.get(category.id) ?? 0);
+                    return (
+                      <View
+                        key={category.id}
+                        style={[styles.settingsActivityRow, index > 0 ? styles.settingsActivityRowDivider : null]}
                       >
-                        {category.isPinned ? (
-                          <PinGlyph color={theme.accentText} />
-                        ) : (
-                          <PinOffGlyph color={theme.textSecondary} />
-                        )}
-                      </Pressable>
-                    </View>
-                  </Reanimated.View>
-                );
-              })}
+                        <Pressable
+                          accessibilityHint="Edits this activity"
+                          accessibilityLabel={`${category.name}, ${week}`}
+                          accessibilityRole="button"
+                          onPress={() => setActivityEditor({ activity: category })}
+                          style={({ pressed }) => [styles.settingsActivityOpen, pressed ? styles.buttonPressed : null]}
+                          testID={`activities-row-${category.id}`}
+                        >
+                          <View style={[styles.settingsActivityBlock, { backgroundColor: colors.fill }]}>
+                            <ActivityIcon color={colors.text} icon={category.icon} name={category.name} size={18} />
+                          </View>
+                          <View style={styles.settingsActivityText}>
+                            <Text {...mobileTextProps("itemTitle")} numberOfLines={1} style={styles.settingsActivityName}>{category.name}</Text>
+                            <Text {...mobileTextProps("metadata")} style={styles.settingsActivityMeta}>{week}</Text>
+                          </View>
+                        </Pressable>
+                        <Pressable
+                          accessibilityLabel={category.isPinned ? `Remove ${category.name} from quick start` : `Add ${category.name} to quick start`}
+                          accessibilityRole="button"
+                          accessibilityState={{ selected: category.isPinned }}
+                          onPress={() => void toggleCategoryPin(category)}
+                          style={({ pressed }) => [
+                            styles.settingsActivityPin,
+                            category.isPinned ? styles.settingsActivityPinOn : null,
+                            pressed ? styles.buttonPressed : null
+                          ]}
+                          testID={`activities-pin-${category.id}`}
+                        >
+                          <DayframeIcon
+                            color={category.isPinned ? theme.textPrimary : theme.textMuted}
+                            glyph={DAYFRAME_APP_ICONS.pin}
+                            size={18}
+                          />
+                        </Pressable>
+                      </View>
+                    );
+                  })}
+                </SettingsBlockGroup>
+              ))}
+              <Text {...mobileTextProps("metadata")} style={styles.settingsFooter}>
+                Pinned activities fill the Start tiles on Today. Quick start holds {QUICK_START_PIN_LIMIT}.
+              </Text>
             </View>
-            <Reanimated.View
-              layout={localLayoutTransition(reduceMotion)}
-              onLayout={creatingCategory ? revealCategoryCreator : undefined}
-              style={creatingCategory ? styles.categoryEditCard : null}
-            >
-              <View style={styles.categoryCreateRow}>
-                {creatingCategory ? (
-                  <View
-                    style={[
-                      styles.colorDot,
-                      { backgroundColor: paletteColorFor(newCategoryColor, newCategoryName, theme.mode) }
-                    ]}
-                  />
-                ) : null}
-                <TextInput
-                  ref={newCategoryInputRef}
-                  accessibilityLabel="New activity name"
-                  {...mobileTextProps("input")}
-                  style={[styles.textInput, styles.categoryCreateInput]}
-                  value={newCategoryName}
-                  onChangeText={setNewCategoryName}
-                  onFocus={beginCreateCategory}
-                  onSubmitEditing={addCategory}
-                  placeholder="New activity"
-                  placeholderTextColor={theme.textSecondary}
-                  returnKeyType="done"
-                />
-                {!creatingCategory ? (
-                  <>
-                    <Pressable
-                      accessibilityLabel={pinNewCategory ? "Create as pinned activity" : "Create as unpinned activity"}
-                      accessibilityRole="button"
-                      accessibilityState={{ selected: pinNewCategory }}
-                      style={pressable(
-                        [styles.categoryIconButton, pinNewCategory ? styles.categoryIconButtonSelected : null],
-                        styles.buttonPressed
-                      )}
-                      onPress={() => setPinNewCategory((current) => !current)}
-                    >
-                      {pinNewCategory ? (
-                        <PinGlyph color={theme.accentText} />
-                      ) : (
-                        <PinOffGlyph color={theme.textSecondary} />
-                      )}
-                    </Pressable>
-                    <Pressable
-                      accessibilityLabel="Create activity"
-                      accessibilityRole="button"
-                      disabled={!newCategoryName.trim()}
-                      style={({ pressed }) => [
-                        styles.categoryIconButtonPrimary,
-                        pressed && newCategoryName.trim() ? styles.buttonPressed : null,
-                        !newCategoryName.trim() ? styles.buttonDisabled : null
-                      ]}
-                      onPress={addCategory}
-                    >
-                      <PlusGlyph color={theme.onAccent} />
-                    </Pressable>
-                  </>
-                ) : null}
-              </View>
-              {creatingCategory ? (
-                <Reanimated.View
-                  entering={localPresenceEntering(reduceMotion)}
-                  exiting={localPresenceExiting(reduceMotion)}
-                  layout={localLayoutTransition(reduceMotion)}
-                  style={styles.categoryCreateDetails}
-                >
-                  <CategoryColorPicker
-                    selectedColor={newCategoryColor}
-                    onSelect={setNewCategoryColor}
-                    styles={styles}
-                    theme={theme}
-                  />
-                  <View style={styles.buttonRow}>
-                    <Pressable
-                      accessibilityRole="button"
-                      style={pressable(styles.secondaryButton, styles.buttonPressed)}
-                      onPress={cancelCreateCategory}
-                    >
-                      <Text {...mobileTextProps("control")} style={styles.secondaryButtonText}>Cancel</Text>
-                    </Pressable>
-                    <Pressable
-                      accessibilityLabel={pinNewCategory ? "New activity pinned" : "New activity unpinned"}
-                      accessibilityRole="button"
-                      accessibilityState={{ selected: pinNewCategory }}
-                      style={pressable(
-                        [styles.secondaryButton, styles.categoryCreatePinButton],
-                        styles.buttonPressed
-                      )}
-                      onPress={() => setPinNewCategory((current) => !current)}
-                    >
-                      {pinNewCategory ? (
-                        <PinGlyph color={theme.accentText} />
-                      ) : (
-                        <PinOffGlyph color={theme.textSecondary} />
-                      )}
-                      <Text {...mobileTextProps("control")} style={styles.secondaryButtonText}>
-                        {pinNewCategory ? "Pinned" : "Unpinned"}
-                      </Text>
-                    </Pressable>
-                    <Pressable
-                      accessibilityRole="button"
-                      disabled={!newCategoryName.trim()}
-                      style={({ pressed }) => [
-                        styles.primaryInlineButton,
-                        pressed && newCategoryName.trim() ? styles.buttonPressed : null,
-                        !newCategoryName.trim() ? styles.buttonDisabled : null
-                      ]}
-                      onPress={addCategory}
-                    >
-                      <Text {...mobileTextProps("control")} style={styles.primaryButtonText}>Create</Text>
-                    </Pressable>
-                  </View>
-                </Reanimated.View>
-              ) : null}
-            </Reanimated.View>
-          </View>
           ) : null}
 
           {settingsSection === "profile" ? (
@@ -2478,6 +2196,19 @@ export default function SettingsScreen() {
           ) : null}
         </View>
       </ScrollView>
+      {activityEditor ? (
+        <ActivityEditorSheet
+          activities={data?.categories ?? []}
+          activity={activityEditor.activity}
+          defaultColor={nextCategoryColor(data?.categories ?? [])}
+          onArchive={archiveActivityFromEditor}
+          onClose={() => setActivityEditor(null)}
+          onSave={(draft) => saveActivityFromEditor(activityEditor.activity, draft)}
+          reduceMotion={reduceMotion}
+          styles={styles}
+          theme={theme}
+        />
+      ) : null}
       <LocationInformationSheet
         kind={locationInfoSheet}
         onClose={() => setLocationInfoSheet(null)}
@@ -2579,42 +2310,6 @@ function LocationInformationSheet({
   );
 }
 
-function CategoryColorPicker({
-  onSelect,
-  selectedColor,
-  styles,
-  theme
-}: {
-  onSelect: (color: DayframePaletteKey) => void;
-  selectedColor: string;
-  styles: MobileStyles;
-  theme: MobileTheme;
-}) {
-  return (
-    <View accessibilityLabel="Activity colour" style={styles.paletteGrid}>
-      {DAYFRAME_PALETTE_PICKER.map((color) => {
-        const selected = selectedColor === color.key;
-        return (
-          <Pressable
-            key={color.key}
-            accessibilityLabel={`${color.label} activity colour`}
-            accessibilityRole="button"
-            accessibilityState={{ selected }}
-            style={pressable(
-              [
-                styles.paletteSwatch,
-                { backgroundColor: paletteColorFor(color.key, color.label, theme.mode) },
-                selected ? styles.paletteSwatchSelected : null
-              ],
-              styles.buttonPressed
-            )}
-            onPress={() => onSelect(color.key)}
-          />
-        );
-      })}
-    </View>
-  );
-}
 
 function CloseGlyph({ color }: { color: string }) {
   return (
@@ -2659,43 +2354,6 @@ function BackGlyph({ color }: { color: string }) {
   return (
     <Svg width={20} height={20} viewBox="0 0 24 24">
       <Path d="M15 5 8 12l7 7" fill="none" stroke={color} strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.3} />
-    </Svg>
-  );
-}
-
-function PinGlyph({ color }: { color: string }) {
-  return (
-    <Svg width={18} height={18} viewBox="0 0 24 24">
-      <Path
-        d="M9 4h6l-1 6 4 3v2h-5l-1 6-1-6H6v-2l4-3-1-6Z"
-        fill={color}
-        stroke={color}
-        strokeLinejoin="round"
-        strokeWidth={2}
-      />
-    </Svg>
-  );
-}
-
-function PinOffGlyph({ color }: { color: string }) {
-  return (
-    <Svg width={18} height={18} viewBox="0 0 24 24">
-      <Path
-        d="M9 4h6l-1 6 4 3v2h-5l-1 6-1-6H6v-2l4-3-1-6Z"
-        fill="none"
-        stroke={color}
-        strokeLinejoin="round"
-        strokeWidth={2}
-      />
-      <Path d="M4 4l16 16" stroke={color} strokeLinecap="round" strokeWidth={2.2} />
-    </Svg>
-  );
-}
-
-function PlusGlyph({ color }: { color: string }) {
-  return (
-    <Svg width={20} height={20} viewBox="0 0 24 24">
-      <Path d="M12 5v14M5 12h14" stroke={color} strokeLinecap="round" strokeWidth={2.2} />
     </Svg>
   );
 }

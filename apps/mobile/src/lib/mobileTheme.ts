@@ -1103,6 +1103,25 @@ function createStyles(theme: MobileTheme) {
       fontSize: 15,
       fontWeight: "600"
     },
+    settingsNewActivity: {
+      alignItems: "center",
+      backgroundColor: theme.accent,
+      borderRadius: 999,
+      flexDirection: "row",
+      gap: 8,
+      justifyContent: "center",
+      minHeight: 52
+    },
+    settingsNewActivityText: { color: theme.onAccent, fontFamily: monoFont, fontSize: 16, fontWeight: "700" },
+    settingsActivityRow: { alignItems: "center", flexDirection: "row", minHeight: 60, paddingRight: 8 },
+    settingsActivityRowDivider: { borderTopColor: theme.border, borderTopWidth: StyleSheet.hairlineWidth },
+    settingsActivityOpen: { alignItems: "center", flex: 1, flexDirection: "row", gap: 12, minHeight: 60, paddingLeft: 16, paddingVertical: 8 },
+    settingsActivityBlock: { alignItems: "center", borderRadius: 10, height: 36, justifyContent: "center", width: 36 },
+    settingsActivityText: { flex: 1, minWidth: 0 },
+    settingsActivityName: { color: theme.textPrimary, fontFamily: monoFont, fontSize: 15, fontWeight: "600" },
+    settingsActivityMeta: { color: theme.textMuted, fontFamily: monoFont, fontSize: 13 },
+    settingsActivityPin: { alignItems: "center", borderRadius: 22, height: 44, justifyContent: "center", width: 44 },
+    settingsActivityPinOn: { backgroundColor: theme.surfaceInset },
     healthNameRow: {
       alignItems: "center",
       borderTopColor: theme.border,
@@ -1216,9 +1235,6 @@ function createStyles(theme: MobileTheme) {
     colorDotMuted: {
       backgroundColor: "transparent",
       borderColor: theme.textSecondary
-    },
-    categoryList: {
-      gap: 0
     },
     placeList: {
       gap: 8
@@ -1369,33 +1385,6 @@ function createStyles(theme: MobileTheme) {
     categoryChoiceTextSelected: {
       color: theme.accentText
     },
-    categoryRow: {
-      minHeight: 54,
-      borderBottomWidth: 1,
-      borderBottomColor: theme.border,
-      backgroundColor: "transparent",
-      paddingHorizontal: 2,
-      paddingVertical: 5,
-      flexDirection: "row",
-      alignItems: "center",
-      gap: 8
-    },
-    categoryRowPinned: {
-      backgroundColor: "transparent"
-    },
-    categoryRowMain: {
-      flex: 1,
-      minWidth: 0,
-      minHeight: 44,
-      flexDirection: "row",
-      alignItems: "center",
-      gap: 8
-    },
-    categoryTextStack: {
-      flex: 1,
-      gap: 1,
-      minWidth: 0
-    },
     categoryName: {
       color: theme.textPrimary,
       fontFamily: monoFont,
@@ -1408,13 +1397,6 @@ function createStyles(theme: MobileTheme) {
       fontSize: 11,
       fontWeight: "400"
     },
-    categoryMetaPinned: {
-      color: theme.accentText
-    },
-    categoryActions: {
-      flexDirection: "row",
-      gap: 4
-    },
     categoryIconButton: {
       width: 44,
       height: 44,
@@ -1422,66 +1404,6 @@ function createStyles(theme: MobileTheme) {
       borderRadius: 999,
       alignItems: "center",
       justifyContent: "center"
-    },
-    categoryIconButtonSelected: {
-      backgroundColor: theme.accentSoft
-    },
-    categoryIconButtonPrimary: {
-      width: 44,
-      height: 44,
-      backgroundColor: theme.accent,
-      borderRadius: 999,
-      alignItems: "center",
-      justifyContent: "center"
-    },
-    categoryEditCard: {
-      backgroundColor: theme.surfaceMuted,
-      borderRadius: 16,
-      padding: 10,
-      gap: 10
-    },
-    categoryEditHeader: {
-      flexDirection: "row",
-      alignItems: "center",
-      gap: 8
-    },
-    categoryEditInput: {
-      flex: 1,
-      minHeight: 44
-    },
-    paletteGrid: {
-      flexDirection: "row",
-      flexWrap: "wrap",
-      gap: 8,
-      width: 252,
-      alignSelf: "center"
-    },
-    paletteSwatch: {
-      width: 44,
-      height: 44,
-      borderWidth: 1,
-      borderColor: theme.controlBorder,
-      borderRadius: 999
-    },
-    paletteSwatchSelected: {
-      borderWidth: 3,
-      borderColor: theme.accent
-    },
-    categoryCreateRow: {
-      flexDirection: "row",
-      alignItems: "center",
-      gap: 8
-    },
-    categoryCreateDetails: {
-      gap: 10
-    },
-    categoryCreatePinButton: {
-      flexDirection: "row",
-      gap: 7
-    },
-    categoryCreateInput: {
-      flex: 1,
-      minHeight: 44
     },
     textInput: {
       minHeight: 48,
