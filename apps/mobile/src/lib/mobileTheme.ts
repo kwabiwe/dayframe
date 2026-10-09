@@ -1126,7 +1126,7 @@ function createStyles(theme: MobileTheme) {
       flex: 1,
       fontFamily: monoFont,
       fontSize: 15,
-      minHeight: 40,
+      minHeight: 44,
       paddingHorizontal: 12
     },
     overflowMenuScroll: {

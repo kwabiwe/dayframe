@@ -37,6 +37,7 @@ import {
   useReduceMotionPreference
 } from "@/lib/motion";
 import { ActivityPickerSheet } from "@/components/ActivityPickerSheet";
+import { healthSyncNote, mergeHealthStatuses } from "@/lib/healthSyncNote";
 import { setHapticsEnabled, useHapticsPreference } from "@/lib/haptics";
 import {
   DAYFRAME_PALETTE,
@@ -83,6 +84,7 @@ import {
   getHealthImportPreferences,
   getHealthImportStatus,
   HEALTH_IMPORT_PREFERENCE_OPTIONS,
+  isHealthKitAutomaticSyncEnabled,
   reprocessExistingHealthReviewItems,
   requestHealthKitPermissions,
   setHealthAutoLogMapping,
@@ -310,7 +312,8 @@ export default function SettingsScreen() {
     cachedSnapshot?.healthAutoLogMappings ?? {}
   );
   // Settings › Apple Health: the last Sync now result (never cached).
-  const [healthSyncNote, setHealthSyncNote] = useState<string | null>(null);
+  const [healthSyncNoteText, setHealthSyncNote] = useState<string | null>(null);
+  const [healthAccessGranted, setHealthAccessGranted] = useState<boolean | null>(null);
   const [exportingHealthDebug, setExportingHealthDebug] = useState(false);
   const [newCategoryName, setNewCategoryName] = useState("");
   const [newCategoryColor, setNewCategoryColor] = useState<DayframePaletteKey>("lime");
@@ -572,15 +575,20 @@ export default function SettingsScreen() {
     if (settingsSection !== "index" && settingsSection !== "health") return;
     if (settingsSection === "index" && isSettingsHealthSnapshotFresh()) return;
 
-    getHealthImportStatus().then(setHealthStatusAndCache).catch(() => {
-      setHealthStatusAndCache([
-        {
-          provider: "healthkit",
-          status: "error",
-          notes: "Unable to check Apple Health status."
-        }
-      ]);
-    });
+    // Availability is re-read here; the connection record from Connect is kept (mergeHealthStatuses).
+    getHealthImportStatus()
+      .then((statuses) => setHealthStatusAndCache((current) => mergeHealthStatuses(current, statuses)))
+      .catch(() => {
+        setHealthStatusAndCache((current) => mergeHealthStatuses(current, [
+          {
+            provider: "healthkit",
+            status: "error",
+            notes: "Unable to check Apple Health status."
+          }
+        ]));
+      });
+    // iOS never reveals read access, so "Connected" means Dayframe's access request was accepted.
+    isHealthKitAutomaticSyncEnabled().then(setHealthAccessGranted).catch(() => undefined);
     getHealthImportPreferences().then(setHealthImportPreferencesAndCache).catch(() => undefined);
     getHealthAutoLogMappings().then(setHealthAutoLogMappingsAndCache).catch(() => undefined);
   }, [
@@ -610,8 +618,6 @@ export default function SettingsScreen() {
   const healthAvailability =
     healthStatus.find((item) => item.provider === "healthkit" && item.kind === "availability") ??
     healthStatus.find((item) => item.provider === "healthkit");
-  const sleepStatus = healthStatus.find((item) => item.provider === "healthkit" && item.kind === "sleep");
-  const workoutStatus = healthStatus.find((item) => item.provider === "healthkit" && item.kind === "workout");
   const healthPermissionStatus = healthStatus.find(
     (item) => item.provider === "healthkit" && item.kind === "permissions"
   );
@@ -707,7 +713,7 @@ export default function SettingsScreen() {
           ? "On. Anything uncertain waits in Review."
           : "Off";
   // Settings › Apple Health: one plain access line (the notes behind it stay in the details).
-  const healthConnected = healthPermissionStatus?.status === "available";
+  const healthConnected = healthAccessGranted === true || healthPermissionStatus?.status === "available";
   const healthAccessSummary = healthAvailability?.status === "unavailable"
     ? "Apple Health isn't available on this iPhone"
     : healthConnected
@@ -716,13 +722,6 @@ export default function SettingsScreen() {
         ? "Allow Dayframe in the Health app"
         : "Not connected yet";
   const [healthPickerKey, setHealthPickerKey] = useState<HealthImportPreferenceKey | null>(null);
-  const healthLastSyncedAt = [sleepStatus?.lastSync, workoutStatus?.lastSync]
-    .filter((value): value is string => Boolean(value))
-    .sort()
-    .at(-1);
-  const healthLastSyncedCopy = healthLastSyncedAt
-    ? `Last synced ${formatQueueTime(healthLastSyncedAt)}. Dayframe also syncs on its own.`
-    : "Dayframe also syncs on its own";
 
   // Sync help: a short note about the page's own last action (never cached), cleared whenever the
   // page opens or what it lists changes, so it can't contradict the status above it.
@@ -1394,6 +1393,7 @@ export default function SettingsScreen() {
     try {
       const permissions = await requestHealthKitPermissions();
       updateHealthStatus(permissions);
+      if (permissions.status === "available") setHealthAccessGranted(true);
       if (permissions.status === "available") {
         const preferences = healthImportPreferences ?? await getHealthImportPreferences();
         const kinds = healthAutomaticCategoryKinds(preferences);
@@ -1409,9 +1409,10 @@ export default function SettingsScreen() {
     setHealthSyncNote(null);
     try {
       const result = await syncAndReload();
-      setHealthStatusAndCache(await getHealthImportStatus());
-      // syncAndReload keeps its own failures quiet; the Health page says what happened.
-      setHealthSyncNote(result ? "Synced just now." : "Couldn't reach Dayframe. Your Health data syncs on its own later.");
+      const statuses = await getHealthImportStatus();
+      setHealthStatusAndCache((current) => mergeHealthStatuses(current, statuses));
+      // A returned result is not a successful one: the Health lanes say what this tap did.
+      setHealthSyncNote(healthSyncNote(result));
     } catch (error) {
       if (error instanceof AuthRequiredError) return;
       const message = friendlyHealthKitError(error, "sync Apple Health");
@@ -2333,7 +2334,7 @@ export default function SettingsScreen() {
               </SettingsBlockGroup>
 
               <SettingsBlockGroup
-                foot="Location stays private to your account. Points on this iPhone expire after seven days; signing out clears them."
+                foot="Location stays private to your account. Recent points on this iPhone expire after seven days; copies waiting to upload can stay longer. Signing out clears them all."
                 theme={theme}
                 title="Privacy"
               >
@@ -2376,7 +2377,7 @@ export default function SettingsScreen() {
                 <SettingsBlockRow
                   accessibilityHint="Reads new sleep and workouts from Apple Health now"
                   onPress={() => void syncAppleHealth()}
-                  subtitle={syncingQueue ? "Syncing…" : healthSyncNote ?? healthLastSyncedCopy}
+                  subtitle={syncingQueue ? "Syncing…" : healthSyncNoteText ?? "Dayframe also syncs on its own"}
                   testID="health-sync-now"
                   theme={theme}
                   title="Sync now"
@@ -2424,6 +2425,11 @@ export default function SettingsScreen() {
                               value={mappedCategory?.name ?? `${defaultHealthCategoryLabel(option.key)} (default)`}
                             />
                             {mapping.categoryId ? (
+                              <Reanimated.View
+                                entering={localPresenceEntering(reduceMotion)}
+                                exiting={localPresenceExiting(reduceMotion)}
+                                layout={localLayoutTransition(reduceMotion)}
+                              >
                               <SettingsBlockRow
                                 control={
                                   <SettingsPillButton
@@ -2438,8 +2444,10 @@ export default function SettingsScreen() {
                                 theme={theme}
                                 title="Default activity"
                               />
+                              </Reanimated.View>
                             ) : null}
-                            <View style={styles.healthNameRow}>
+                            {/* Moves with the shared layout transition when Use default comes or goes. */}
+                            <Reanimated.View layout={localLayoutTransition(reduceMotion)} style={styles.healthNameRow}>
                               <Text {...mobileTextProps("control")} style={styles.healthNameLabel}>Name</Text>
                               <TextInput
                                 accessibilityLabel={`${label} name`}
@@ -2456,7 +2464,7 @@ export default function SettingsScreen() {
                                   })
                                 }
                               />
-                            </View>
+                            </Reanimated.View>
                           </Reanimated.View>
                         ) : null}
                       </Reanimated.View>

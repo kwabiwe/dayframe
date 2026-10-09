@@ -294,6 +294,6 @@ Block pull-to-refresh:
 
 - Trigger: a Settings row opens Account, Location or Apple Health (the existing pushed-route transition, unchanged); on Apple Health, a type's switch.
 - Owner: the route stack owns page movement; on Apple Health each type and each group is a `Reanimated.View` with the shared `localLayoutTransition`, and an enabled type's "Logs as" / Use default / Name rows enter and leave with `localPresenceEntering` / `localPresenceExiting`. Nothing else on these pages moves; status changes (access line, Sync now result, switch state) update in place.
-- Entrance/update/exit: switching a type on fades its rows in while the rows and groups below slide down; switching it off fades them out while the rest slides up. Choosing an activity uses the All activities sheet's own motion. Use default removes its own row the same way.
+- Entrance/update/exit: switching a type on fades its rows in while the rows and groups below slide down; switching it off fades them out while the rest slides up. Choosing an activity uses the All activities sheet's own motion. Use default fades its own row out while the Name row below moves up with the shared layout transition; a failed save brings the row back the same way.
 - Interruption: toggling again mid-transition retargets from the current position; a failed save rolls the switch or mapping back with an alert and the rows follow.
 - Accessibility: Reduce Motion keeps opacity-only presence and no layout movement. Rows keep 44-point targets and plain labels; every pill states its action.

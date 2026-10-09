@@ -228,7 +228,6 @@ function Probe() {
         "today-blocks.count.H03-count-123-1.frame",
         "today-blocks.count.H03-count-123-1.text",
         "settings.row",
-        "settings.icon",
         "settings.text-column",
         "settings.label.frame",
         "settings.label.text",
@@ -456,6 +455,7 @@ function Probe() {
               <Text {...mobileTextProps("sectionHeading")} style={styles.sectionTitle}>Settings</Text>
               <SettingsBlockGroup theme={theme} title="Automatic tracking">
                 <SettingsBlockRow
+                  diagnostic={diagnostic}
                   divider={false}
                   onPress={() => setActionResult("Local Settings row callback")}
                   subtitle="Always"
