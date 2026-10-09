@@ -24,7 +24,7 @@ import {
 import { DayframeIcon } from "@/components/icons/DayframeIcon";
 import { PlaceRoleSheet, type PlaceRoleSheetMode } from "@/components/places/PlaceRoleSheet";
 import { SettingsBlockGroup, SettingsPillButton } from "@/components/settings/SettingsBlocks";
-import { applyPlaceRoleLocally, learnedPlaceSubtitle, placeRowSubtitle, takeDeletedPlaces } from "@/lib/placesPage";
+import { applyPlaceRoleLocally, learnedPlaceSubtitle, placeRowSubtitle, subscribeDeletedPlaces, takeDeletedPlaces } from "@/lib/placesPage";
 import { mobileAccountKey, mobileAccountOwnersEqual, readActiveMobileAccount } from "@/lib/mobileAccount";
 import { mobileTextProps } from "@/lib/mobileTypography";
 import { SheetMutationProgress } from "@/components/SheetMutationProgress";
@@ -108,20 +108,28 @@ export default function PlacesScreen() {
     void load();
   }, [load]);
 
+  // A place the editor deleted leaves the list at once, even if a refresh then fails: on focus,
+  // and when the delete finishes after the person already came back to this page.
+  const applyDeletedPlaces = useCallback(async () => {
+    const owner = await readActiveMobileAccount();
+    const deleted = owner ? takeDeletedPlaces(mobileAccountKey(owner)) : [];
+    if (deleted.length === 0 || !mounted.current) return;
+    changeEpoch.current += 1;
+    setData((current) => current && mobileAccountOwnersEqual(owner, { userId: current.user.id, workspaceId: current.workspace.id })
+      ? deleted.reduce((next, id) => reconcileBootstrapPlaces(next, { removePlaceId: id }), current)
+      : current);
+  }, []);
+
+  useEffect(() => subscribeDeletedPlaces(() => {
+    void applyDeletedPlaces();
+  }), [applyDeletedPlaces]);
+
   useFocusEffect(
     useCallback(() => {
-      // A place the editor deleted leaves the list at once, even if the refresh below fails.
-      void readActiveMobileAccount().then((owner) => {
-        const deleted = owner ? takeDeletedPlaces(mobileAccountKey(owner)) : [];
-        if (deleted.length === 0 || !mounted.current) return;
-        changeEpoch.current += 1;
-        setData((current) => current && mobileAccountOwnersEqual(owner, { userId: current.user.id, workspaceId: current.workspace.id })
-          ? deleted.reduce((next, id) => reconcileBootstrapPlaces(next, { removePlaceId: id }), current)
-          : current);
-      }).finally(() => {
+      void applyDeletedPlaces().finally(() => {
         void load({ silent: true });
       });
-    }, [load])
+    }, [applyDeletedPlaces, load])
   );
 
   function beginAddPlace() {
@@ -291,7 +299,7 @@ export default function PlacesScreen() {
     router.push({ pathname: "/place-editor", params: { mode: "create", role } } as never);
   }
 
-  async function saveRole(request: ReturnType<typeof placeRoleRequest>, holderId: string | null) {
+  async function saveRole(request: ReturnType<typeof placeRoleRequest>) {
     if (roleSaving.current) return "Another change is still saving. Try again in a moment.";
     roleSaving.current = true;
     try {
@@ -309,7 +317,7 @@ export default function PlacesScreen() {
       // read that started before this answer is dropped.
       if (!mounted.current || !mobileAccountOwnersEqual(owner, await readActiveMobileAccount())) return null;
       changeEpoch.current += 1;
-      setData((current) => current ? { ...current, places: applyPlaceRoleLocally(current.places, request, holderId) } : current);
+      setData((current) => current ? { ...current, places: applyPlaceRoleLocally(current.places, request) } : current);
       const label = placeRoleLabel(request.role);
       await refreshAfterPlaceChange({ prefix: request.placeId ? `${label} updated.` : `${label} cleared.` });
       return null;

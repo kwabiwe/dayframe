@@ -44,11 +44,8 @@ export function PlaceRoleSheet({
   /** Leaves the sheet for the place editor, adding a new place straight into this slot. */
   onAddNew: (role: PlaceRole) => void;
   onClose: () => void;
-  /**
-   * Resolves to null when saved, or a message to show when it could not be. `holderId` is the
-   * place the role leaves (it takes the requested name), so the page can apply the answer at once.
-   */
-  onSave: (request: ReturnType<typeof placeRoleRequest>, holderId: string | null) => Promise<string | null>;
+  /** Resolves to null when saved, or a message to show when it could not be. */
+  onSave: (request: ReturnType<typeof placeRoleRequest>) => Promise<string | null>;
   places: readonly RolePlace[];
   reduceMotion: boolean;
   slot: PlaceRoleSlot<RolePlace>;
@@ -97,7 +94,7 @@ export function PlaceRoleSheet({
     setSaving(true);
     setProblem(null);
     const request = placeRoleRequest({ role: slot.role, targetId: clearing ? null : targetId, holder, previousPlaceName: previousName });
-    const result = await onSave(request, holder?.id ?? null).catch(() => "Couldn't save. Check your connection and try again.");
+    const result = await onSave(request).catch(() => "Couldn't save. Check your connection and try again.");
     busy.current = false;
     if (done.current) return;
     setSaving(false);

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { applyPlaceRoleLocally, learnedPlaceSubtitle, notePlaceDeleted, placeRowSubtitle, takeDeletedPlaces } from "./placesPage";
+import { applyPlaceRoleLocally, learnedPlaceSubtitle, notePlaceDeleted, placeRowSubtitle, subscribeDeletedPlaces, takeDeletedPlaces } from "./placesPage";
 
 const categories = [{ id: "c1", name: "Exercise" }];
 
@@ -43,7 +43,7 @@ describe("applyPlaceRoleLocally", () => {
   ];
 
   it("moves the role and renames the place it left", () => {
-    expect(applyPlaceRoleLocally(places, { role: "home", placeId: "c", previousPlaceName: "Previous home" }, "a")).toEqual([
+    expect(applyPlaceRoleLocally(places, { role: "home", placeId: "c", previousPlaceName: "Previous home" })).toEqual([
       { id: "a", name: "Previous home", role: null },
       { id: "b", name: "Office tower", role: "work" },
       { id: "c", name: "Gym", role: "home" }
@@ -51,18 +51,51 @@ describe("applyPlaceRoleLocally", () => {
   });
 
   it("takes the other role's place, leaving that slot empty", () => {
-    const next = applyPlaceRoleLocally(places, { role: "home", placeId: "b", previousPlaceName: null }, "a");
+    const next = applyPlaceRoleLocally(places, { role: "home", placeId: "b", previousPlaceName: null });
     expect(next.map((place) => place.role)).toEqual([null, "home", null]);
     expect(next[0].name).toBe("12 Example Street");
   });
 
   it("clears a slot", () => {
-    expect(applyPlaceRoleLocally(places, { role: "work", placeId: null, previousPlaceName: null }, "b").map((place) => place.role))
+    expect(applyPlaceRoleLocally(places, { role: "work", placeId: null, previousPlaceName: null }).map((place) => place.role))
       .toEqual(["home", null, null]);
   });
 });
 
+describe("applyPlaceRoleLocally with implicit holders", () => {
+  const places = [
+    { id: "a", name: "Home", role: null },
+    { id: "b", name: " HOME ", role: null },
+    { id: "c", name: "Flat", role: null }
+  ];
+
+  it("renames every role-less place named like the role when a name is given, as the server does", () => {
+    expect(applyPlaceRoleLocally(places, { role: "home", placeId: "c", previousPlaceName: "Previous home" })).toEqual([
+      { id: "a", name: "Previous home", role: null },
+      { id: "b", name: "Previous home", role: null },
+      { id: "c", name: "Flat", role: "home" }
+    ]);
+  });
+
+  it("leaves them alone without a name, and never renames the target", () => {
+    expect(applyPlaceRoleLocally(places, { role: "home", placeId: "a", previousPlaceName: "Previous home" }).map((place) => [place.name, place.role]))
+      .toEqual([["Home", "home"], ["Previous home", null], ["Flat", null]]);
+    expect(applyPlaceRoleLocally(places, { role: "home", placeId: "c", previousPlaceName: null }).map((place) => place.name))
+      .toEqual(["Home", " HOME ", "Flat"]);
+  });
+});
+
 describe("deleted places hand-off", () => {
+  it("tells a page that is already showing", () => {
+    const heard: string[] = [];
+    const stop = subscribeDeletedPlaces((key) => heard.push(key));
+    notePlaceDeleted("w:live", "p9");
+    stop();
+    notePlaceDeleted("w:live", "p10");
+    expect(heard).toEqual(["w:live"]);
+    expect(takeDeletedPlaces("w:live")).toEqual(["p9", "p10"]);
+  });
+
   it("is per account and taken once", () => {
     notePlaceDeleted("w:u", "p1");
     notePlaceDeleted("w:u", "p2");

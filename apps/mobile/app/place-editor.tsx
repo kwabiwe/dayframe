@@ -38,7 +38,7 @@ import {
 } from "@/lib/api";
 import { refreshGeofencesForPlaces } from "@/lib/geofence";
 import { mobileAccountKey, mobileAccountOwnersEqual, readActiveMobileAccount, type MobileAccountOwner } from "@/lib/mobileAccount";
-import { notePlaceDeleted } from "@/lib/placesPage";
+import { applyPlaceRoleLocally, notePlaceDeleted } from "@/lib/placesPage";
 import {
   foregroundLocationPermissionGuidance,
   formatLocationAccuracy,
@@ -322,9 +322,11 @@ export default function PlaceEditorScreen() {
     saveInFlight.current = true;
     setSaving(true);
     const owner = await readActiveMobileAccount();
+    let accepted: MobilePlace;
+    let roleChange: Parameters<typeof applyPlaceRoleLocally>[1] | null = null;
     try {
       if (mode === "edit" && loadedEntity) {
-        await updatePlace(loadedEntity.id, {
+        accepted = (await updatePlace(loadedEntity.id, {
           name: validation.value.name,
           latitude: validation.value.latitude,
           longitude: validation.value.longitude,
@@ -332,9 +334,18 @@ export default function PlaceEditorScreen() {
           loggingEnabled,
           defaultCategoryId: loggingEnabled ? validation.value.defaultCategoryId : null,
           defaultActivityDescription: loggingEnabled ? validation.value.defaultActivityDescription : null
-        });
+        })).place;
       } else {
-        await createPlace({
+        const newRoleRequest = newRole ? {
+          role: newRole,
+          previousPlaceName: placeRoleRequest({
+            role: newRole,
+            targetId: null,
+            holder: roleHolder,
+            previousPlaceName: previousRoleName ?? previousRolePlaceName(newRole)
+          }).previousPlaceName
+        } : undefined;
+        accepted = (await createPlace({
           learnedPlaceId: mode === "learned" ? params.learnedPlaceId : undefined,
           name: validation.value.name,
           latitude: validation.value.latitude,
@@ -344,15 +355,8 @@ export default function PlaceEditorScreen() {
           loggingEnabled,
           defaultCategoryId: loggingEnabled ? validation.value.defaultCategoryId : null,
           defaultActivityDescription: loggingEnabled ? validation.value.defaultActivityDescription : null
-        }, newRole ? {
-          role: newRole,
-          previousPlaceName: placeRoleRequest({
-            role: newRole,
-            targetId: null,
-            holder: roleHolder,
-            previousPlaceName: previousRoleName ?? previousRolePlaceName(newRole)
-          }).previousPlaceName
-        } : undefined);
+        }, newRoleRequest)).place;
+        if (newRoleRequest) roleChange = { role: newRoleRequest.role, placeId: accepted.id, previousPlaceName: newRoleRequest.previousPlaceName ?? null };
       }
     } catch (error) {
       saveInFlight.current = false;
@@ -367,7 +371,12 @@ export default function PlaceEditorScreen() {
     }
     // Accepted. Save stays locked (a retry would create the place again), and a refresh that
     // fails here does not undo it: Places refreshes when it is shown.
-    await refreshGeofencesAfterChange(null);
+    // If the fresh read fails, monitoring uses this editor's snapshot with the accepted place
+    // (and the role it took) applied, never the places as they were before the save.
+    const snapshot = data
+      ? [...data.places.filter((place) => place.id !== accepted.id), accepted]
+      : [];
+    await refreshGeofencesAfterChange(roleChange ? applyPlaceRoleLocally(snapshot, roleChange) : snapshot);
     if (await editorStillFor(owner)) router.back();
   }
 
@@ -377,11 +386,11 @@ export default function PlaceEditorScreen() {
   }
 
   /** Best effort after an accepted change: a fresh read, else this editor's own snapshot. */
-  async function refreshGeofencesAfterChange(deletedPlaceId: string | null) {
+  async function refreshGeofencesAfterChange(fallbackPlaces: MobilePlace[]) {
     const refreshed = await fetchBootstrap().catch(() => null);
     const source = refreshed ?? data;
     if (!source) return;
-    const places = refreshed ? refreshed.places : source.places.filter((place) => place.id !== deletedPlaceId);
+    const places = refreshed ? refreshed.places : fallbackPlaces;
     await refreshGeofencesForPlaces(places, { userId: source.user.id, workspaceId: source.workspace.id }).catch(() => 0);
   }
 
@@ -418,7 +427,7 @@ export default function PlaceEditorScreen() {
     }
     // Accepted: Places drops the row when it is shown again, even if its own refresh fails.
     if (owner) notePlaceDeleted(mobileAccountKey(owner), place.id);
-    await refreshGeofencesAfterChange(place.id);
+    await refreshGeofencesAfterChange((data?.places ?? []).filter((candidate) => candidate.id !== place.id));
     if (await editorStillFor(owner)) router.back();
   }
 
