@@ -1398,21 +1398,22 @@ export default function SettingsScreen() {
         const preferences = healthImportPreferences ?? await getHealthImportPreferences();
         const kinds = healthAutomaticCategoryKinds(preferences);
         if (kinds.length > 0) await ensureAutomaticLoggingCategories(kinds);
-        await syncAppleHealth({ silent: true });
+        await syncAppleHealth({ silent: true, connected: true });
       }
     } catch (error) {
       Alert.alert("Apple Health", friendlyHealthKitError(error, "request Apple Health permission"));
     }
   }
 
-  async function syncAppleHealth(options?: { silent?: boolean }) {
+  async function syncAppleHealth(options?: { silent?: boolean; connected?: boolean }) {
     setHealthSyncNote(null);
     try {
       const result = await syncAndReload();
       const statuses = await getHealthImportStatus();
       setHealthStatusAndCache((current) => mergeHealthStatuses(current, statuses));
       // A returned result is not a successful one: the Health lanes say what this tap did.
-      setHealthSyncNote(healthSyncNote(result));
+      // Connect passes connected: its grant is not yet in this render's healthConnected.
+      setHealthSyncNote(healthSyncNote(result, { connected: options?.connected ?? healthConnected }));
     } catch (error) {
       if (error instanceof AuthRequiredError) return;
       const message = friendlyHealthKitError(error, "sync Apple Health");
@@ -2334,7 +2335,7 @@ export default function SettingsScreen() {
               </SettingsBlockGroup>
 
               <SettingsBlockGroup
-                foot="Location stays private to your account. Recent points on this iPhone expire after seven days; copies waiting to upload can stay longer. Signing out clears them all."
+                foot="Location stays private to your account. Recent points on this iPhone expire after seven days; upload copies can stay longer, even after they are sent. Signing out clears them all."
                 theme={theme}
                 title="Privacy"
               >

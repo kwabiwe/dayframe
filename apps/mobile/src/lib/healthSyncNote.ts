@@ -3,7 +3,7 @@
 import type { HealthImportStatus } from "./health";
 import type { ManualSyncResult } from "./syncCoordinator";
 
-export function healthSyncNote(result: ManualSyncResult | null): string {
+export function healthSyncNote(result: ManualSyncResult | null, { connected }: { connected: boolean }): string {
   if (!result) return "Couldn't sync. Your Health data syncs on its own later.";
   const outcomes = [result.lanes.sleep, result.lanes.workouts]
     .filter((lane) => lane.stage !== "disabled")
@@ -14,7 +14,9 @@ export function healthSyncNote(result: ManualSyncResult | null): string {
     return "Couldn't reach Dayframe. Your Health data is kept and syncs on its own.";
   }
   if (outcomes.some((outcome) => outcome !== "complete")) return "Sync didn't finish. Dayframe keeps trying on its own.";
-  return outcomes.length ? "Synced just now." : "Nothing to sync: every Health type is off.";
+  if (outcomes.length) return "Synced just now.";
+  // Both lanes are off when Apple Health was never connected, whatever the switches say.
+  return connected ? "Nothing to sync: every Health type is off." : "Connect Apple Health first, then sync.";
 }
 
 /**
