@@ -1751,6 +1751,36 @@ export async function updateTimeGoals(goals: { dailyGoalMinutes?: number; weekly
   if (!response.ok) throw new Error(await errorMessage(response, "Unable to save your goal"));
 }
 
+/** Settings › Activities › Archived (Blocks 6b-2): the workspace's archived activities. */
+export async function listArchivedCategories(): Promise<MobileBootstrap["categories"]> {
+  const response = await mobileFetch(`${DAYFRAME_API_BASE}/api/categories?archived=1`, {
+    headers: await authHeaders()
+  });
+  if (response.status === 401) {
+    throw new AuthRequiredError();
+  }
+  if (!response.ok) throw new Error(await errorMessage(response, "Unable to load archived activities"));
+  const body = await readJsonResponse<{ categories: MobileBootstrap["categories"] }>(response);
+  return body.categories;
+}
+
+/** Restores an archived activity (unpinned; a name now taken by another activity is refused). */
+export async function restoreCategory(id: string): Promise<MobileCategoryResponse> {
+  const response = await mobileFetch(`${DAYFRAME_API_BASE}/api/categories`, {
+    method: "PATCH",
+    headers: {
+      "Content-Type": "application/json",
+      ...(await authHeaders())
+    },
+    body: JSON.stringify({ id, isArchived: false })
+  });
+  if (response.status === 401) {
+    throw new AuthRequiredError();
+  }
+  if (!response.ok) throw new Error(await errorMessage(response, "Unable to restore the activity"));
+  return readJsonResponse(response);
+}
+
 export async function archiveCategory(id: string) {
   const response = await mobileFetch(`${DAYFRAME_API_BASE}/api/categories?id=${encodeURIComponent(id)}`, {
     method: "DELETE",

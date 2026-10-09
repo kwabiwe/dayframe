@@ -15,6 +15,8 @@ export function CategoryManager({ categories }: { categories: CategoryRow[] }) {
   const [categoryPendingDelete, setCategoryPendingDelete] = useState<CategoryRow | null>(null);
   const [deleteError, setDeleteError] = useState<string | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
+  // A create, rename or pin the server refused (a taken name, quick start full): said, not ignored.
+  const [actionError, setActionError] = useState<string | null>(null);
   const pinned = categories.filter((category) => category.isPinned);
   const unpinned = categories.filter((category) => !category.isPinned);
 
@@ -25,7 +27,8 @@ export function CategoryManager({ categories }: { categories: CategoryRow[] }) {
   async function createCategory(formData: FormData) {
     const name = String(formData.get("name") ?? "").trim();
     if (!name) return;
-    await clientFetch("/api/categories", {
+    setActionError(null);
+    const response = await clientFetch("/api/categories", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -34,11 +37,16 @@ export function CategoryManager({ categories }: { categories: CategoryRow[] }) {
         isPinned: formData.get("isPinned") === "true"
       })
     });
+    if (!response.ok) {
+      setActionError(await responseError(response, "Unable to create the activity."));
+      return;
+    }
     refresh();
   }
 
   async function updateCategory(category: CategoryRow, formData: FormData) {
-    await clientFetch("/api/categories", {
+    setActionError(null);
+    const response = await clientFetch("/api/categories", {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -48,12 +56,18 @@ export function CategoryManager({ categories }: { categories: CategoryRow[] }) {
         isPinned: category.isPinned
       })
     });
+    if (!response.ok) {
+      // The editor stays open so the name can be changed.
+      setActionError(await responseError(response, "Unable to save the activity."));
+      return;
+    }
     setEditingId(null);
     refresh();
   }
 
   async function togglePin(category: CategoryRow) {
-    await clientFetch("/api/categories", {
+    setActionError(null);
+    const response = await clientFetch("/api/categories", {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -61,6 +75,10 @@ export function CategoryManager({ categories }: { categories: CategoryRow[] }) {
         isPinned: !category.isPinned
       })
     });
+    if (!response.ok) {
+      setActionError(await responseError(response, "Unable to change the pin."));
+      return;
+    }
     refresh();
   }
 
@@ -96,6 +114,7 @@ export function CategoryManager({ categories }: { categories: CategoryRow[] }) {
           <p className="mt-1 text-sm text-[var(--muted)]">
             Pinned activities appear first in timer and mobile quick-start controls.
           </p>
+          {actionError ? <p className="mt-2 text-sm text-[var(--danger-text)]" role="alert">{actionError}</p> : null}
         </div>
         <CategorySection
           title="Pinned"
@@ -292,4 +311,14 @@ function PalettePicker({ name, defaultValue }: { name: string; defaultValue: str
       </div>
     </fieldset>
   );
+}
+
+async function responseError(response: Response, fallback: string) {
+  try {
+    const payload = (await response.json()) as { error?: string };
+    return payload.error ?? fallback;
+  } catch {
+    // Runtime failures may not return JSON.
+    return fallback;
+  }
 }

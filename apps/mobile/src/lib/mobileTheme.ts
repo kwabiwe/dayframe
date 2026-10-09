@@ -1120,6 +1120,7 @@ function createStyles(theme: MobileTheme) {
     settingsActivityText: { flex: 1, minWidth: 0 },
     settingsActivityName: { color: theme.textPrimary, fontFamily: monoFont, fontSize: 15, fontWeight: "600" },
     settingsActivityMeta: { color: theme.textMuted, fontFamily: monoFont, fontSize: 13 },
+    settingsActivityBlockArchived: { opacity: 0.6 },
     settingsActivityPin: { alignItems: "center", borderRadius: 22, height: 44, justifyContent: "center", width: 44 },
     settingsActivityPinOn: { backgroundColor: theme.surfaceInset },
     healthNameRow: {

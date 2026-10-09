@@ -7,6 +7,7 @@ import { createOwnerSyncCoalescer } from "@/lib/ownerSyncCoalescer";
 import { subscribeRecoveredDashboardBootstrap } from "@/lib/dashboardBootstrapChannel";
 import { useCallback, useEffect, useRef, useState, type SetStateAction } from "react";
 import {
+  AccessibilityInfo,
   Alert,
   AppState,
   Keyboard,
@@ -62,6 +63,8 @@ import {
 import {
   AuthRequiredError,
   archiveCategory,
+  listArchivedCategories,
+  restoreCategory,
   clearFailedQueuedEvents,
   createCategory,
   deleteRecentLocationEvidence,
@@ -608,6 +611,7 @@ export default function SettingsScreen() {
       void reloadThemePreference();
       // Activities always refreshes on open: pins are only counted from this visit's own data.
       if (!isSettingsSnapshotFresh() || settingsSection === "categories") void load({ silent: true, trigger: "focus" });
+      if (settingsSection === "categories") void refreshArchivedActivities();
     }, [load, reloadThemePreference, settingsSection])
   );
 
@@ -763,6 +767,8 @@ export default function SettingsScreen() {
         : "Not connected yet";
   const [healthPickerKey, setHealthPickerKey] = useState<HealthImportPreferenceKey | null>(null);
   const [activityEditor, setActivityEditor] = useState<{ activity: Category | null } | null>(null);
+  // Settings › Activities › Archived (Blocks 6b-2): read from the server when the page opens.
+  const [archivedActivities, setArchivedActivities] = useState<Category[] | null>(null);
   // One activity change at a time on the Activities page (pins, saves, creates, archives).
   const activityChanges = useRef(createActivityChangeGate()).current;
   // The activities the gate reads: kept current at once by applyActivityCategories, and
@@ -856,6 +862,10 @@ export default function SettingsScreen() {
         ? await updateCategory(activity.id, { name: draft.name, color: draft.color, icon: draft.icon })
         : await createCategory(draft.name, { color: draft.color, icon: draft.icon, isPinned: pinned });
       if (!(await activityOwnerStill(owner))) return;
+      if (!activity && pinned && !result.category.isPinned) {
+        // The server's own quick-start cap won (another device pinned one meanwhile).
+        Alert.alert("Quick start is full", `${result.category.name} was created but not pinned. Unpin one to add it.`);
+      }
       // The accepted activity shows at once, even if the refresh below fails.
       applyActivityCategories((categories) => categories.some((item) => item.id === result.category.id)
         ? categories.map((item) => item.id === result.category.id ? { ...item, ...result.category } : item)
@@ -879,6 +889,7 @@ export default function SettingsScreen() {
       // Archived: it leaves every list (and quick start) at once, even if the refresh fails.
       applyActivityCategories((categories) => categories.filter((item) => item.id !== activity.id));
       await load({ silent: true });
+      void refreshArchivedActivities();
     }).catch((error: unknown) => ({ ran: true as const, error }));
     if (!change.ran) return ACTIVITY_CHANGE_BUSY_MESSAGE;
     if (!("error" in change)) return null;
@@ -887,6 +898,43 @@ export default function SettingsScreen() {
       return null;
     }
     return change.error instanceof Error ? change.error.message : "Couldn't archive the activity. Try again.";
+  }
+
+  async function refreshArchivedActivities() {
+    const owner = await readActiveMobileAccount();
+    try {
+      const archived = await listArchivedCategories();
+      if (await activityOwnerStillQuiet(owner)) setArchivedActivities(archived);
+    } catch (error) {
+      if (error instanceof AuthRequiredError) finishSignedOutNavigation();
+      // Otherwise the Archived section simply stays as it was (or hidden).
+    }
+  }
+
+  async function restoreArchivedActivity(activity: Category) {
+    if (activityChanges.busy()) {
+      Alert.alert("Activities", ACTIVITY_CHANGE_BUSY_MESSAGE);
+      return;
+    }
+    const change = await activityChanges.run(async () => {
+      const owner = await readActiveMobileAccount();
+      const result = await restoreCategory(activity.id);
+      if (!(await activityOwnerStill(owner))) return;
+      // Back in its group at once (unpinned), and out of Archived.
+      applyActivityCategories((categories) => categories.some((item) => item.id === result.category.id)
+        ? categories
+        : [...categories, result.category]);
+      setArchivedActivities((current) => current?.filter((item) => item.id !== activity.id) ?? current);
+      AccessibilityInfo.announceForAccessibility(`${result.category.name} restored.`);
+      await load({ silent: true });
+    }).catch((error: unknown) => ({ ran: true as const, error }));
+    if ("error" in change) {
+      if (change.error instanceof AuthRequiredError) {
+        finishSignedOutNavigation();
+        return;
+      }
+      Alert.alert("Activities", change.error instanceof Error ? change.error.message : "Couldn't restore the activity. Try again.");
+    }
   }
 
   async function toggleCategoryPin(category: Category) {
@@ -1502,6 +1550,12 @@ export default function SettingsScreen() {
   // An activity change applies its answer only while Settings is open for the account it started
   // with: a late answer after signing out or switching account never writes the old account's
   // activities into this screen or its cached snapshot.
+  /** The same owner check for a plain read, without counting as an activity answer. */
+  async function activityOwnerStillQuiet(owner: Awaited<ReturnType<typeof readActiveMobileAccount>>) {
+    const now = await readActiveMobileAccount();
+    return Boolean(queueMounted.current && owner && now && mobileAccountOwnersEqual(owner, now));
+  }
+
   async function activityOwnerStill(owner: Awaited<ReturnType<typeof readActiveMobileAccount>>) {
     // An answer arrived: every Settings visit's refreshes fetched before now are out of date.
     activityAnswerEpoch += 1;
@@ -1889,6 +1943,36 @@ export default function SettingsScreen() {
                   })}
                 </SettingsBlockGroup>
               ))}
+              {archivedActivities?.length ? (
+                <SettingsBlockGroup foot="Archived activities keep their history. Restoring brings one back unpinned." theme={theme} title="Archived">
+                  {archivedActivities.map((category, index) => {
+                    const colors = blockColorsFor(category.color, theme.mode, category.name);
+                    return (
+                      <View
+                        key={category.id}
+                        style={[styles.settingsActivityRow, index > 0 ? styles.settingsActivityRowDivider : null]}
+                        testID={`activities-archived-${category.id}`}
+                      >
+                        <View style={styles.settingsActivityOpen}>
+                          <View style={[styles.settingsActivityBlock, styles.settingsActivityBlockArchived, { backgroundColor: colors.fill }]}>
+                            <ActivityIcon color={colors.text} icon={category.icon} name={category.name} size={18} />
+                          </View>
+                          <View style={styles.settingsActivityText}>
+                            <Text {...mobileTextProps("itemTitle")} numberOfLines={1} style={styles.settingsActivityName}>{category.name}</Text>
+                            <Text {...mobileTextProps("metadata")} style={styles.settingsActivityMeta}>History kept</Text>
+                          </View>
+                        </View>
+                        <SettingsPillButton
+                          accessibilityLabel={`Restore ${category.name}`}
+                          label="Restore"
+                          onPress={() => void restoreArchivedActivity(category)}
+                          theme={theme}
+                        />
+                      </View>
+                    );
+                  })}
+                </SettingsBlockGroup>
+              ) : null}
               <Text {...mobileTextProps("metadata")} style={styles.settingsFooter}>
                 Pinned activities fill the Start tiles on Today. Quick start holds {QUICK_START_PIN_LIMIT}.
               </Text>

@@ -5,6 +5,8 @@ import {
   archiveCategory,
   CategoryConflictError,
   createCategory,
+  listArchivedCategories,
+  QuickStartFullError,
   updateCategory
 } from "@/lib/event-service";
 import { authErrorResponse } from "@/lib/api-errors";
@@ -31,12 +33,18 @@ const updateCategorySchema = z.object({
   name: z.string().trim().min(1).optional(),
   color: z.string().trim().optional(),
   isPinned: z.boolean().optional(),
-  icon: activityIconSchema
+  icon: activityIconSchema,
+  // Restores an archived activity; archiving stays DELETE.
+  isArchived: z.literal(false).optional()
 });
 
 export async function GET(request: Request) {
   try {
     const session = await resolveRequestSession(request);
+    // ?archived=1 lists archived activities (Settings › Activities › Archived).
+    if (new URL(request.url).searchParams.get("archived") === "1") {
+      return NextResponse.json({ categories: await listArchivedCategories(session) });
+    }
     const data = await getBootstrapData(session);
     return NextResponse.json({ categories: data.categories });
   } catch (error) {
@@ -81,6 +89,12 @@ export async function PATCH(request: Request) {
     if (response) return response;
     const schemaResponse = schemaErrorResponse(error);
     if (schemaResponse) return schemaResponse;
+    if (error instanceof CategoryConflictError) {
+      return NextResponse.json({ error: error.message, code: "name_taken" }, { status: error.status });
+    }
+    if (error instanceof QuickStartFullError) {
+      return NextResponse.json({ error: error.message, code: error.code }, { status: error.status });
+    }
     if (error instanceof ZodError) {
       return NextResponse.json({ error: error.message }, { status: 400 });
     }
