@@ -77,6 +77,8 @@ export default function PlacesScreen() {
   const roleSaving = useRef(false);
   // Bumped by every accepted change: a read that started before it is out of date and dropped.
   const changeEpoch = useRef(0);
+  // Only the newest page read applies (mount and focus can both be out at once).
+  const readSequence = useRef(0);
   const mounted = useRef(true);
   useEffect(() => () => {
     mounted.current = false;
@@ -85,9 +87,10 @@ export default function PlacesScreen() {
   const load = useCallback(async (options?: { refresh?: boolean; silent?: boolean }) => {
     if (options?.refresh) setRefreshing(true);
     const epoch = changeEpoch.current;
+    const read = ++readSequence.current;
     try {
       const fetched = await fetchBootstrap();
-      if (!mounted.current || epoch !== changeEpoch.current) return;
+      if (!mounted.current || epoch !== changeEpoch.current || read !== readSequence.current) return;
       // Deletes accepted while this read was out (possibly before the page had any data) still apply.
       const bootstrap = takeDeletedPlaces(mobileAccountKey({ userId: fetched.user.id, workspaceId: fetched.workspace.id }))
         .reduce((next, id) => reconcileBootstrapPlaces(next, { removePlaceId: id }), fetched);
@@ -283,7 +286,8 @@ export default function PlacesScreen() {
         return;
       }
       const current = dataRef.current;
-      if (options.fallbackPlaces && current) {
+      // Only while nothing else changed since: a later delete or change already set monitoring.
+      if (options.fallbackPlaces && current && epoch === changeEpoch.current) {
         await refreshGeofencesForPlaces(options.fallbackPlaces, { userId: current.user.id, workspaceId: current.workspace.id }).catch(() => 0);
       }
       setStatusMessage(`${options.prefix} Pull to refresh if it doesn't show on another device.`);

@@ -360,12 +360,14 @@ export default function PlaceEditorScreen() {
       }
     } catch (error) {
       saveInFlight.current = false;
-      if (!(await editorStillFor(owner))) return;
-      setSaving(false);
+      // Signed out (the session was rejected): go to sign-in from this editor even though the
+      // account is no longer active. Only another account taking over leaves it untouched.
       if (error instanceof AuthRequiredError) {
-        router.replace("/");
+        if (mounted.current) router.replace("/");
         return;
       }
+      if (!(await editorStillFor(owner))) return;
+      setSaving(false);
       Alert.alert("Places", error instanceof Error ? error.message : "Unable to save place.");
       return;
     }
@@ -418,12 +420,14 @@ export default function PlaceEditorScreen() {
       await deletePlace(place.id);
     } catch (error) {
       saveInFlight.current = false;
-      if (!(await editorStillFor(owner))) return;
-      setDeleting(false);
+      // Signed out (the session was rejected): go to sign-in from this editor even though the
+      // account is no longer active. Only another account taking over leaves it untouched.
       if (error instanceof AuthRequiredError) {
-        router.replace("/");
+        if (mounted.current) router.replace("/");
         return;
       }
+      if (!(await editorStillFor(owner))) return;
+      setDeleting(false);
       Alert.alert("Places", error instanceof Error ? error.message : "Unable to delete place.");
       return;
     }
