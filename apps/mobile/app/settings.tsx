@@ -7,7 +7,6 @@ import { createOwnerSyncCoalescer } from "@/lib/ownerSyncCoalescer";
 import { subscribeRecoveredDashboardBootstrap } from "@/lib/dashboardBootstrapChannel";
 import { useCallback, useEffect, useRef, useState, type SetStateAction } from "react";
 import {
-  AccessibilityInfo,
   Alert,
   AppState,
   Keyboard,
@@ -726,8 +725,14 @@ export default function SettingsScreen() {
   const [activityEditor, setActivityEditor] = useState<{ activity: Category | null } | null>(null);
   // One activity change at a time on the Activities page (pins, saves, creates, archives).
   const activityChanges = useRef(createActivityChangeGate()).current;
+  // The activities the gate reads: kept current at once by applyActivityCategories, and
+  // re-synced from each committed load.
   const activityCategoriesRef = useRef<Category[]>([]);
-  activityCategoriesRef.current = data?.categories ?? [];
+  const lastSyncedCategories = useRef<Category[] | undefined>(undefined);
+  if (data?.categories !== lastSyncedCategories.current) {
+    lastSyncedCategories.current = data?.categories;
+    activityCategoriesRef.current = data?.categories ?? [];
+  }
   // Settings › Activities: each row's last seven days, from the same lists as Today's quick start.
   const activityWeekSeconds = activityWeekSecondsFor(
     [data?.historyEntries, data?.entries, data?.weekEntries, data?.dayEntries],
@@ -799,18 +804,15 @@ export default function SettingsScreen() {
     // lands on top of a newer change.
     const change = await activityChanges.run(async () => {
       // A pin asked for when the sheet opened is checked against quick start as it is now.
-      const pinned = !activity && draft.isPinned &&
-        activityCategoriesRef.current.filter((category) => category.isPinned).length < QUICK_START_PIN_LIMIT;
+      const pinnedNow = activityCategoriesRef.current.filter((item) => item.isPinned).length;
+      const pinned = !activity && draft.isPinned && pinnedNow < QUICK_START_PIN_LIMIT;
       const result = activity
         ? await updateCategory(activity.id, { name: draft.name, color: draft.color, icon: draft.icon })
         : await createCategory(draft.name, { color: draft.color, icon: draft.icon, isPinned: pinned });
       // The accepted activity shows at once, even if the refresh below fails.
-      setDataAndCache((current) => current ? {
-        ...current,
-        categories: current.categories.some((category) => category.id === result.category.id)
-          ? current.categories.map((category) => category.id === result.category.id ? { ...category, ...result.category } : category)
-          : [...current.categories, result.category]
-      } : current);
+      applyActivityCategories((categories) => categories.some((item) => item.id === result.category.id)
+        ? categories.map((item) => item.id === result.category.id ? { ...item, ...result.category } : item)
+        : [...categories, result.category]);
       await load({ silent: true });
     }).catch((error: unknown) => ({ ran: true as const, error }));
     if (!change.ran) return ACTIVITY_CHANGE_BUSY_MESSAGE;
@@ -826,10 +828,7 @@ export default function SettingsScreen() {
     const change = await activityChanges.run(async () => {
       await archiveCategory(activity.id);
       // Archived: it leaves every list (and quick start) at once, even if the refresh fails.
-      setDataAndCache((current) => current ? {
-        ...current,
-        categories: current.categories.filter((category) => category.id !== activity.id)
-      } : current);
+      applyActivityCategories((categories) => categories.filter((item) => item.id !== activity.id));
       await load({ silent: true });
     }).catch((error: unknown) => ({ ran: true as const, error }));
     if (!change.ran) return ACTIVITY_CHANGE_BUSY_MESSAGE;
@@ -845,10 +844,11 @@ export default function SettingsScreen() {
     // Pins share the one-change-at-a-time gate: an unpin still saving never frees a slot for
     // another pin or a pinned create (if it failed, quick start would end with seven).
     if (activityChanges.busy()) {
-      AccessibilityInfo.announceForAccessibility(ACTIVITY_CHANGE_BUSY_MESSAGE);
+      // Visible (and spoken by VoiceOver): the tap did not change the pin.
+      Alert.alert("Activities", ACTIVITY_CHANGE_BUSY_MESSAGE);
       return;
     }
-    if (pinLimitReached(data?.categories ?? [], category.id)) {
+    if (pinLimitReached(activityCategoriesRef.current, category.id)) {
       Alert.alert("Quick start is full", `Quick start holds ${QUICK_START_PIN_LIMIT} activities. Unpin one first.`);
       return;
     }
@@ -1436,15 +1436,17 @@ export default function SettingsScreen() {
   }
 
   function patchCategory(id: string, patch: Partial<Category>) {
-    setDataAndCache((current) => {
-      if (!current) return current;
-      return {
-        ...current,
-        categories: current.categories.map((category) =>
-          category.id === id ? { ...category, ...patch } : category
-        )
-      };
-    });
+    applyActivityCategories((categories) => categories.map((category) =>
+      category.id === id ? { ...category, ...patch } : category
+    ));
+  }
+
+  // Changes the page's activities and, at once, the copy the activity gate reads, so a change
+  // (an unpin rolled back, a create, an archive) counts before the next one can start, not only
+  // after React commits it.
+  function applyActivityCategories(change: (categories: Category[]) => Category[]) {
+    activityCategoriesRef.current = change(activityCategoriesRef.current);
+    setDataAndCache((current) => current ? { ...current, categories: change(current.categories) } : current);
   }
 
   async function signOut() {

@@ -18,7 +18,6 @@ describe("mobile Activities page contract", () => {
   it("lists activities in the picker's groups with a week total and a 44-point pin, capped at six", () => {
     expect(settingsSource).toContain("activitiesPageGroups(data?.categories ?? []).map((group) => (");
     expect(settingsSource).toContain("formatActivityWeek(activityWeekSeconds.get(category.id) ?? 0)");
-    expect(settingsSource).toContain("if (pinLimitReached(data?.categories ?? [], category.id)) {");
     // One activity change at a time (pins, saves, creates, archives; behaviour in
     // activitiesPage.test.ts), so a failing unpin never leaves seven pinned and a slow save never
     // brings back an archived activity.
@@ -26,7 +25,11 @@ describe("mobile Activities page contract", () => {
     expect(settingsSource.match(/await activityChanges\.run\(async \(\) => \{/g)).toHaveLength(3);
     expect(settingsSource).toContain("if (activityChanges.busy()) {");
     // A pinned create checks quick start's room when it runs, not when the sheet opened.
-    expect(settingsSource).toContain("activityCategoriesRef.current.filter((category) => category.isPinned).length < QUICK_START_PIN_LIMIT");
+    expect(settingsSource).toContain("const pinned = !activity && draft.isPinned && pinnedNow < QUICK_START_PIN_LIMIT;");
+    // The list the gate reads changes at once (an unpin rolled back counts before the gate opens).
+    expect(settingsSource).toContain("function applyActivityCategories(change: (categories: Category[]) => Category[]) {\n    activityCategoriesRef.current = change(activityCategoriesRef.current);");
+    expect(settingsSource).toMatch(/function patchCategory\([^)]*\) \{\s*applyActivityCategories\(/);
+    expect(settingsSource).toContain("if (pinLimitReached(activityCategoriesRef.current, category.id)) {");
     expect(settingsSource).toContain("accessibilityState={{ selected: category.isPinned }}");
     expect(settingsSource).toContain('testID="activities-new"');
   });
@@ -37,7 +40,7 @@ describe("mobile Activities page contract", () => {
     expect(settingsSource).toContain(": await createCategory(draft.name, { color: draft.color, icon: draft.icon, isPinned: pinned });");
     // Accepted saves and archives show at once, even if the refresh after them fails.
     expect(settingsSource).toContain("// The accepted activity shows at once, even if the refresh below fails.");
-    expect(settingsSource).toContain("categories: current.categories.filter((category) => category.id !== activity.id)");
+    expect(settingsSource).toContain("applyActivityCategories((categories) => categories.filter((item) => item.id !== activity.id));");
     expect(settingsSource).toContain("await archiveCategory(activity.id);");
     expect(editorSource).toContain("DAYFRAME_ACTIVITY_ICONS.map((option) => {");
     expect(editorSource).toContain("DAYFRAME_PALETTE_PICKER.map((option) => {");
