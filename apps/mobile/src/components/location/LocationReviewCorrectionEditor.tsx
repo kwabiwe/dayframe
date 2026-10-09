@@ -146,6 +146,9 @@ export function LocationReviewCorrectionEditor({
   const [selectedPoint, setSelectedPoint] = useState(() => pointFromEvidence(evidence));
   const [editingCentre, setEditingCentre] = useState(false);
   const [manualPlaceName, setManualPlaceName] = useState("");
+  // The pin's name field and Use this pin stay open from the first tap until the pin is used,
+  // whatever the field holds, so finishing the pin or retyping the name never hides them.
+  const [pinEditorOpen, setPinEditorOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [searchState, setSearchState] = useState<PlaceSearchState>(emptySearchState);
   const [nearbyState, setNearbyState] = useState<NearbyPointOfInterestState>(emptyNearbyState);
@@ -364,7 +367,8 @@ export function LocationReviewCorrectionEditor({
     void controllerRef.current?.cancel();
     setSelectedSavedPlaceId(null);
     setEditingCentre(false);
-    setManualPlaceName("");
+    // The name stays, so reopening the pin to adjust it keeps what was used.
+    setPinEditorOpen(false);
   }
 
   function parsedEdit() {
@@ -869,14 +873,16 @@ export function LocationReviewCorrectionEditor({
                     accessibilityHint={editingCentre ? "Stops moving the pin" : "Lets you tap the map to place a pin"}
                     disabled={saving}
                     divider={false}
-                    onPress={() => setEditingCentre((current) => !current)}
+                    onPress={() => {
+                      setPinEditorOpen(true);
+                      setEditingCentre((current) => !current);
+                    }}
                     subtitle={editingCentre ? "Tap the map to move the pin, then name it below" : "Name a spot on the map yourself"}
                     testID="location-evidence-map-pin"
                     theme={theme}
                     title={editingCentre ? "Finish moving pin" : "Use a map pin instead"}
                   />
-                  {/* Stays while a name is drafted, so finishing the pin never hides Use this pin. */}
-                  {editingCentre || manualPlaceName.trim() ? (
+                  {pinEditorOpen ? (
                     <Reanimated.View
                       entering={localPresenceEntering(reduceMotion)}
                       exiting={localPresenceExiting(reduceMotion)}
