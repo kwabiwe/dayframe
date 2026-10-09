@@ -364,6 +364,7 @@ export function LocationReviewCorrectionEditor({
     void controllerRef.current?.cancel();
     setSelectedSavedPlaceId(null);
     setEditingCentre(false);
+    setManualPlaceName("");
   }
 
   function parsedEdit() {
@@ -874,7 +875,8 @@ export function LocationReviewCorrectionEditor({
                     theme={theme}
                     title={editingCentre ? "Finish moving pin" : "Use a map pin instead"}
                   />
-                  {editingCentre ? (
+                  {/* Stays while a name is drafted, so finishing the pin never hides Use this pin. */}
+                  {editingCentre || manualPlaceName.trim() ? (
                     <Reanimated.View
                       entering={localPresenceEntering(reduceMotion)}
                       exiting={localPresenceExiting(reduceMotion)}
@@ -902,16 +904,18 @@ export function LocationReviewCorrectionEditor({
                 </>
               ) : null}
 
+              {/* Each row moves with the shared layout transition when a row above opens or closes. */}
               {evidence.suggestedSplitPoints.map((split, index) => (
+                <Reanimated.View key={split.at} layout={localLayoutTransition(reduceMotion)}>
                 <SettingsBlockRow
                   disabled={saving}
                   divider={evidence.segment.kind === "stay" || index > 0}
-                  key={split.at}
                   onPress={() => setSelectedSplitAt(split.at)}
                   subtitle="Makes two moments to review"
                   theme={theme}
                   title={`Split near ${formatTime(split.at)}`}
                 />
+                </Reanimated.View>
               ))}
               {selectedSplitAt ? (
                 <Reanimated.View
@@ -940,6 +944,7 @@ export function LocationReviewCorrectionEditor({
               ) : null}
 
               {adjacentReview && evidence.segment.kind === "stay" ? (
+                <Reanimated.View layout={localLayoutTransition(reduceMotion)}>
                 <SettingsBlockRow
                   disabled={saving}
                   onPress={() => void onResolve({
@@ -951,8 +956,10 @@ export function LocationReviewCorrectionEditor({
                   theme={theme}
                   title="Merge with adjacent visit"
                 />
+                </Reanimated.View>
               ) : null}
 
+              <Reanimated.View layout={localLayoutTransition(reduceMotion)}>
               <SettingsBlockRow
                 disabled={saving}
                 divider={evidence.segment.kind === "stay" || evidence.suggestedSplitPoints.length > 0 || Boolean(adjacentReview)}
@@ -962,6 +969,8 @@ export function LocationReviewCorrectionEditor({
                 theme={theme}
                 title="Record once"
               />
+              </Reanimated.View>
+              <Reanimated.View layout={localLayoutTransition(reduceMotion)}>
               <SettingsBlockRow
                 danger
                 disabled={saving}
@@ -971,6 +980,7 @@ export function LocationReviewCorrectionEditor({
                 theme={theme}
                 title="Skip this suggestion"
               />
+              </Reanimated.View>
             </SettingsBlockGroup>
           </Reanimated.View>
         </View>

@@ -132,3 +132,24 @@ describe("trip stops in mobile Location Evidence", () => {
     expect(heading?.props.accessibilityRole).toBe("header");
   });
 });
+
+// Codex review of #270 r1: finishing the pin hid Use this pin before the drafted name was used.
+describe("map pin in More options", () => {
+  const byTestId = (id: string) => tree!.root.find((node) => node.props.testID === id);
+  const pinNameInput = () => tree!.root.findAll((node) => node.props.accessibilityLabel === "New saved place name");
+  const useThisPin = () => tree!.root.findAllByType("Text" as never).filter((node) => text(node) === "Use this pin");
+
+  it("keeps the drafted name and Use this pin after Finish moving pin, and every row has a layout owner", () => {
+    act(() => { tree = create(editor(fixture(undefined, "stay"))); });
+    expect(pinNameInput()).toHaveLength(0);
+    act(() => byTestId("location-evidence-map-pin").props.onPress());
+    act(() => pinNameInput()[0].props.onChangeText("Library"));
+    act(() => byTestId("location-evidence-map-pin").props.onPress());
+    expect(pinNameInput()).toHaveLength(1);
+    expect(pinNameInput()[0].props.value).toBe("Library");
+    expect(useThisPin()).toHaveLength(1);
+    for (const id of ["location-evidence-record-once", "location-evidence-skip"]) {
+      expect(byTestId(id).parent!.props).toMatchObject({ layout: { marker: "local-layout" } });
+    }
+  });
+});
