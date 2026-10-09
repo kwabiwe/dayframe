@@ -551,8 +551,23 @@ export default function SettingsScreen() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // A reconnect bootstrap is held to the same rule as load(): one fetched before an activity
+  // answer may miss that change (a rename), so it is not shown; a fresh refresh follows instead.
+  const recoveryEpochs = useRef(new Map<number, number>());
   useEffect(() => subscribeRecoveredDashboardBootstrap(event => {
-    if (event.type === "completed") setDataAndCache(event.bootstrap);
+    if (event.type === "started") {
+      recoveryEpochs.current.set(event.publicationId, activityAnswerEpoch);
+      return;
+    }
+    if (event.type !== "completed") return;
+    const startedAt = recoveryEpochs.current.get(event.publicationId);
+    recoveryEpochs.current.delete(event.publicationId);
+    if (startedAt === undefined || startedAt !== activityAnswerEpoch) {
+      void goalReload.current?.({ silent: true });
+      return;
+    }
+    activityCategoriesRef.current = event.bootstrap.categories;
+    setDataAndCache(event.bootstrap);
   }), [setDataAndCache]);
 
   useEffect(() => {

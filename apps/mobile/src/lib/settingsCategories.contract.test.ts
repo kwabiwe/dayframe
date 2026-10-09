@@ -37,6 +37,8 @@ describe("mobile Activities page contract", () => {
     expect(settingsSource).toMatch(/if \(epochAtFetch !== activityAnswerEpoch\) \{\s*staleActivityRefresh = true;\s*return;/);
     expect(settingsSource).toContain("const activityPinsFresh = () => activityFreshEpoch.current === activityAnswerEpoch;");
     expect(settingsSource).toContain("pinReady={activityPinsFresh()}");
+    // Reconnect bootstraps follow the same rule (r7): one started before an answer is not shown.
+    expect(settingsSource).toMatch(/if \(startedAt === undefined \|\| startedAt !== activityAnswerEpoch\) \{\s*void goalReload\.current\?\.\(\{ silent: true \}\);\s*return;/);
     // A late answer after signing out, switching account or closing Settings applies nothing.
     expect(settingsSource.match(/if \(!\(await activityOwnerStill\(owner\)\)\) return;/g)).toHaveLength(4);
     // A refresh is published only for the account and visit that asked for it.
