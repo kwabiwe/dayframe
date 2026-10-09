@@ -47,6 +47,8 @@ import {
 } from "@/lib/onboarding";
 
 const STEP_SLIDE = 36;
+/** How long setup waits for suggestions to switch on before offering Try again. */
+const SWITCH_ON_DEADLINE_MS = 15_000;
 
 export default function OnboardingScreen() {
   const { theme } = useMobileTheme();
@@ -77,11 +79,6 @@ export default function OnboardingScreen() {
       unsubscribeSignedOut();
     };
   }, []);
-
-  // Covered by another page (or left): an answer still in flight no longer applies.
-  useFocusEffect(useCallback(() => () => {
-    sessionEpoch.current += 1;
-  }, []));
 
   // A new step starts at its top (the scroll view is keyed by step) and VoiceOver moves to its heading.
   useEffect(() => {
@@ -122,6 +119,18 @@ export default function OnboardingScreen() {
     const active = await readActiveMobileAccount();
     return mounted.current && epoch === sessionEpoch.current && mobileAccountOwnersEqual(owner.current, active);
   }, []);
+
+  // Covered by another page (or left): an answer still in flight no longer applies. Coming back
+  // re-reads this account's suggestions, which may have finished switching on meanwhile.
+  useFocusEffect(useCallback(() => {
+    const epoch = sessionEpoch.current;
+    void getLocationVisitDiagnostics().then(async (diagnostics) => {
+      if (await stillHere(epoch)) setAnswers((current) => ({ ...current, suggestions: suggestionsStateFrom(diagnostics) }));
+    }).catch(() => undefined);
+    return () => {
+      sessionEpoch.current += 1;
+    };
+  }, [stillHere]));
 
   function go(next: OnboardingStep, dir: 1 | -1) {
     setDirection(dir);
@@ -183,23 +192,36 @@ export default function OnboardingScreen() {
   /** Always is allowed: switch on visit and journey suggestions, as Settings › Location does. */
   async function finishAlways(epoch: number) {
     setAnswers((current) => ({ ...current, location: "always", locationStage: "explain" }));
-    let enabled = false;
-    try {
-      const data = await fetchBootstrap();
-      if (!(await stillHere(epoch))) return;
-      await ensureAutomaticLoggingCategories(["commute"]);
-      if (!(await stillHere(epoch))) return;
-      await setLocationLearningEnabled(true, data.places, { userId: data.user.id, workspaceId: data.workspace.id });
-      if (!(await stillHere(epoch))) return;
-      // The account's own consent and a running capture decide, not the call's wording.
-      enabled = suggestionsStateFrom(await getLocationVisitDiagnostics()) === "on";
-    } catch (error) {
-      if (error instanceof AuthRequiredError) {
-        if (mounted.current && epoch === sessionEpoch.current) router.replace("/");
-        return;
+    let timedOut = false;
+    const switchOn = (async (): Promise<boolean | "signed_out"> => {
+      try {
+        const data = await fetchBootstrap();
+        if (!(await stillHere(epoch))) return false;
+        await ensureAutomaticLoggingCategories(["commute"]);
+        if (!(await stillHere(epoch))) return false;
+        await setLocationLearningEnabled(true, data.places, { userId: data.user.id, workspaceId: data.workspace.id });
+        if (!(await stillHere(epoch))) return false;
+        // The account's own consent and a running capture decide, not the call's wording.
+        const enabled = suggestionsStateFrom(await getLocationVisitDiagnostics()) === "on";
+        // Finished after the screen stopped waiting: show what actually happened.
+        if (timedOut && (await stillHere(epoch))) setAnswers((current) => ({ ...current, suggestions: enabled ? "on" : "failed" }));
+        return enabled;
+      } catch (error) {
+        return error instanceof AuthRequiredError ? "signed_out" : false;
       }
+    })();
+    // A stalled request never traps setup: the controls come back with Try again.
+    const outcome = await Promise.race([
+      switchOn,
+      new Promise<"timeout">((resolve) => setTimeout(() => resolve("timeout"), SWITCH_ON_DEADLINE_MS))
+    ]);
+    if (outcome === "timeout") timedOut = true;
+    if (outcome === "signed_out") {
+      if (mounted.current && epoch === sessionEpoch.current) router.replace("/");
+      return;
     }
     if (!(await stillHere(epoch))) return;
+    const enabled = outcome === true;
     setAnswers((current) => ({ ...current, suggestions: enabled ? "on" : "failed" }));
     announce(enabled ? "Location is on. Suggestions are on." : "Suggestions couldn't be switched on.");
   }

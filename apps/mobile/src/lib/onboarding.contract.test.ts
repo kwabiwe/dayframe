@@ -48,7 +48,12 @@ describe("onboarding contract (Blocks 8-1a)", () => {
     expect(screen).toContain("subscribeAuthenticatedSession(bump)");
     expect(screen).toContain("subscribeMobileSignedOut(bump)");
     // Covered by another page: a pending answer no longer applies.
-    expect(screen).toMatch(/useFocusEffect\(useCallback\(\(\) => \(\) => \{\n    sessionEpoch.current \+= 1;/);
+    expect(screen).toMatch(/useFocusEffect\(useCallback\(\(\) => \{[\s\S]{0,400}return \(\) => \{\n      sessionEpoch.current \+= 1;/);
+  });
+
+  it("never lets a stalled switch-on trap setup (Codex r3)", () => {
+    expect(screen).toContain("const SWITCH_ON_DEADLINE_MS = 15_000;");
+    expect(screen).toMatch(/Promise\.race\(\[\n      switchOn,/);
   });
 
   it("never starts a timer or writes time", () => {
