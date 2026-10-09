@@ -16,11 +16,26 @@ import Reanimated, {
   withSpring,
   withTiming
 } from "react-native-reanimated";
-import { DAYFRAME_APP_ICONS, DAYFRAME_BLOCKS, blockColorsFor, type DayframeGlyph, type DayframePaletteKey } from "@dayframe/shared";
+import {
+  DAYFRAME_APP_ICONS,
+  DAYFRAME_BLOCKS,
+  HEALTH_IMPORT_PREFERENCE_OPTIONS,
+  blockColorsFor,
+  type DayframeGlyph,
+  type DayframePaletteKey,
+  type HealthImportPreferences
+} from "@dayframe/shared";
 import { DayframeIcon } from "@/components/icons/DayframeIcon";
 import { AuthRequiredError, ensureAutomaticLoggingCategories, fetchBootstrap } from "@/lib/api";
 import { getLocationVisitDiagnostics, setLocationLearningEnabled } from "@/lib/geofence";
 import { playHaptic } from "@/lib/haptics";
+import {
+  getHealthImportPreferences,
+  isHealthKitAutomaticSyncEnabled,
+  requestHealthKitPermissions,
+  setHealthImportPreference
+} from "@/lib/health";
+import { readReviewNudgeState, setReviewNudgeEnabled } from "@/lib/reviewNudge";
 import { readMotionFitnessStatus, requestMotionFitness } from "@/lib/location/motionPermission";
 import { mobileAccountOwnersEqual, readActiveMobileAccount, type MobileAccountOwner } from "@/lib/mobileAccount";
 import { subscribeMobileSignedOut } from "@/lib/mobileSessionTransition";
@@ -32,6 +47,8 @@ import { localLayoutTransition, localPresenceEntering, useReduceMotionPreference
 import {
   EMPTY_ONBOARDING_ANSWERS,
   ONBOARDING_PROGRESS,
+  healthResultText,
+  remindersResultText,
   locationChoiceFromPermissions,
   locationResultText,
   motionResultText,
@@ -41,6 +58,7 @@ import {
   onboardingProgressDone,
   onboardingSummary,
   previousOnboardingStep,
+  type HealthPick,
   type MotionChoice,
   type OnboardingAnswers,
   type OnboardingStep
@@ -91,11 +109,15 @@ export default function OnboardingScreen() {
     void (async () => {
       const epoch = sessionEpoch.current;
       owner.current = await readActiveMobileAccount();
-      const [foreground, background, motion, diagnostics] = await Promise.all([
+      const [foreground, background, motion, diagnostics, healthConnected, healthPreferences, nudge, notifications] = await Promise.all([
         Location.getForegroundPermissionsAsync().catch(() => null),
         Location.getBackgroundPermissionsAsync().catch(() => null),
         readMotionFitnessStatus(),
-        getLocationVisitDiagnostics().catch(() => null)
+        getLocationVisitDiagnostics().catch(() => null),
+        isHealthKitAutomaticSyncEnabled().catch(() => false),
+        getHealthImportPreferences().catch(() => null),
+        owner.current ? readReviewNudgeState(owner.current).catch(() => null) : Promise.resolve(null),
+        import("@/lib/reviewNudgeNative").then(({ readReviewNudgePermission }) => readReviewNudgePermission()).catch(() => null)
       ]);
       if (!(await stillHere(epoch))) return;
       const location = foreground && !foreground.granted && !foreground.canAskAgain
@@ -108,7 +130,10 @@ export default function OnboardingScreen() {
         suggestions: diagnostics ? suggestionsStateFrom(diagnostics) : current.suggestions,
         // While Using is already given: the Location step opens at the Always explainer.
         locationStage: location === "while" ? "upgrade" : current.locationStage,
-        motion: current.motion ?? motionChoiceFrom(motion, false)
+        motion: current.motion ?? motionChoiceFrom(motion, false),
+        health: current.health ?? (healthConnected ? "on" : null),
+        healthPick: healthPreferences ? healthPickFrom(healthPreferences) : current.healthPick,
+        reminders: current.reminders ?? (nudge?.enabled && notifications === "granted" ? "on" : null)
       }));
     })();
   }, []);
@@ -236,9 +261,63 @@ export default function OnboardingScreen() {
     });
   }
 
+  // Apple Health: iOS asks for read access; the picks decide what comes in (Settings › Apple Health).
+  function connectHealth() {
+    const pick = answers.healthPick;
+    if (!pick.sleep && !pick.workouts) return;
+    void run(async (epoch) => {
+      const permissions = await requestHealthKitPermissions().catch(() => null);
+      if (!(await stillHere(epoch))) return;
+      if (!permissions || permissions.status !== "available") {
+        const choice = permissions?.status === "unavailable" ? "unavailable" : "off";
+        setAnswers((current) => ({ ...current, health: choice }));
+        announce(choice === "unavailable" ? "Apple Health isn't available." : "Apple Health isn't connected.");
+        return;
+      }
+      await applyHealthPick(pick).catch(() => undefined);
+      if (!(await stillHere(epoch))) return;
+      // The categories Health imports log as, as Settings prepares them; bounded, and not fatal:
+      // suggestions still reach Review without them.
+      const kinds = [pick.sleep ? "sleep" as const : null, pick.workouts ? "health" as const : null].filter((kind) => kind !== null);
+      await Promise.race([
+        ensureAutomaticLoggingCategories(kinds).catch(() => undefined),
+        new Promise((resolve) => setTimeout(resolve, SWITCH_ON_DEADLINE_MS))
+      ]);
+      if (!(await stillHere(epoch))) return;
+      setAnswers((current) => ({ ...current, health: "on" }));
+      announce("Apple Health is connected.");
+    });
+  }
+
+  // The evening Review reminder: iOS asks once; the reminder itself is this account's choice.
+  function turnOnReminders() {
+    void run(async (epoch) => {
+      const nativeModule = await import("@/lib/reviewNudgeNative").catch(() => null);
+      if (!nativeModule) return;
+      let permission = await nativeModule.readReviewNudgePermission().catch(() => "denied" as const);
+      if (permission === "undetermined") permission = await nativeModule.requestReviewNudgePermission().catch(() => "denied" as const);
+      if (!(await stillHere(epoch))) return;
+      if (permission !== "granted" || !owner.current) {
+        setAnswers((current) => ({ ...current, reminders: "denied" }));
+        announce("Notifications are off.");
+        return;
+      }
+      await setReviewNudgeEnabled(owner.current, true).catch(() => undefined);
+      if (!(await stillHere(epoch))) return;
+      setAnswers((current) => ({ ...current, reminders: "on" }));
+      announce("Evening reminders are on.");
+    });
+  }
+
+  function togglePick(key: keyof HealthPick) {
+    setAnswers((current) => ({ ...current, healthPick: { ...current.healthPick, [key]: !current.healthPick[key] } }));
+  }
+
   function notNow() {
     if (step === "location") setAnswers((current) => ({ ...current, location: current.location ?? "off" }));
     if (step === "motion") setAnswers((current) => ({ ...current, motion: current.motion ?? "off" }));
+    if (step === "health") setAnswers((current) => ({ ...current, health: current.health ?? "off" }));
+    if (step === "reminders") setAnswers((current) => ({ ...current, reminders: current.reminders ?? "off" }));
     go(nextOnboardingStep(step), 1);
   }
 
@@ -302,6 +381,8 @@ export default function OnboardingScreen() {
           ) : null}
           {step === "location" && answers.locationStage === "explain" && !answers.location ? <ReviewPreview theme={theme} /> : null}
           {step === "motion" && !answers.motion ? <MotionPreview theme={theme} /> : null}
+          {step === "health" && !answers.health ? <HealthPicks disabled={busy} onToggle={togglePick} pick={answers.healthPick} theme={theme} /> : null}
+          {step === "reminders" && !answers.reminders ? <NotificationPreview theme={theme} /> : null}
           {content.bullets.map((bullet) => (
             <View key={bullet.text} style={styles.bullet}>
               <DayframeIcon color={theme.textSecondary} glyph={bullet.glyph} size={18} />
@@ -337,6 +418,8 @@ export default function OnboardingScreen() {
           busy={busy}
           onAllowLocation={allowLocation}
           onAllowMotion={allowMotion}
+          onConnectHealth={connectHealth}
+          onTurnOnReminders={turnOnReminders}
           onAskAlways={askAlways}
           onContinue={() => go(nextOnboardingStep(step), 1)}
           onTurnOnSuggestions={turnOnSuggestions}
@@ -415,6 +498,24 @@ function stepContent(step: OnboardingStep, answers: OnboardingAnswers): StepCont
         privacy: "Motion activity is used only to understand your trips. It stays on your account and is never used for ads or analytics.",
         result: answers.motion ? { on: answers.motion === "on", text: motionResultText(answers.motion) } : null
       };
+    case "health":
+      return {
+        glyph: { name: "heart-pulse", color: "lime" },
+        title: "Add sleep and workouts",
+        lede: "Bring in what Apple Health already knows. Choose what Dayframe may read; you can change it any time.",
+        bullets: [],
+        privacy: "Dayframe only reads. It never writes to Apple Health, and health data is never used for ads or analytics.",
+        result: answers.health ? { on: answers.health === "on", text: healthResultText(answers.health, answers.healthPick) } : null
+      };
+    case "reminders":
+      return {
+        glyph: { name: "bell", color: "blue" },
+        title: "A nudge when Review fills up",
+        lede: "One quiet notification in the evening when suggestions are waiting. Never more than one a day, and never for anything Dayframe logged on its own.",
+        bullets: [],
+        privacy: "Notifications never include where you were. You can change the time or turn them off in Settings.",
+        result: answers.reminders ? { on: answers.reminders === "on", text: remindersResultText(answers.reminders) } : null
+      };
     case "done":
       return {
         glyph: null,
@@ -433,6 +534,8 @@ function StepActions({
   onAllowLocation,
   onAllowMotion,
   onAskAlways,
+  onConnectHealth,
+  onTurnOnReminders,
   onContinue,
   onFinish,
   onKeepWhileUsing,
@@ -446,6 +549,8 @@ function StepActions({
   onAllowLocation: () => void;
   onAllowMotion: () => void;
   onAskAlways: () => void;
+  onConnectHealth: () => void;
+  onTurnOnReminders: () => void;
   onContinue: () => void;
   onFinish: () => void;
   onKeepWhileUsing: () => void;
@@ -490,6 +595,23 @@ function StepActions({
       </>
     );
   }
+  if (step === "health" && !answers.health) {
+    const none = !answers.healthPick.sleep && !answers.healthPick.workouts;
+    return (
+      <>
+        <PrimaryButton busy={busy} disabled={none} label="Connect Apple Health" onPress={onConnectHealth} testID="onboarding-health-connect" theme={theme} />
+        <SecondaryButton disabled={busy} label="Not now" onPress={onNotNow} testID="onboarding-not-now" theme={theme} />
+      </>
+    );
+  }
+  if (step === "reminders" && !answers.reminders) {
+    return (
+      <>
+        <PrimaryButton busy={busy} label="Turn on reminders" onPress={onTurnOnReminders} testID="onboarding-reminders-on" theme={theme} />
+        <SecondaryButton disabled={busy} label="Not now" onPress={onNotNow} testID="onboarding-not-now" theme={theme} />
+      </>
+    );
+  }
   if (step === "motion" && !answers.motion) {
     return (
       <>
@@ -501,14 +623,15 @@ function StepActions({
   return <PrimaryButton busy={busy} label="Continue" onPress={onContinue} testID="onboarding-continue" theme={theme} />;
 }
 
-function PrimaryButton({ busy = false, label, onPress, testID, theme }: { busy?: boolean; label: string; onPress: () => void; testID: string; theme: MobileTheme }) {
+function PrimaryButton({ busy = false, disabled = false, label, onPress, testID, theme }: { busy?: boolean; disabled?: boolean; label: string; onPress: () => void; testID: string; theme: MobileTheme }) {
+  const off = busy || disabled;
   return (
     <Pressable
       accessibilityRole="button"
-      accessibilityState={{ busy, disabled: busy }}
-      disabled={busy}
+      accessibilityState={{ busy, disabled: off }}
+      disabled={off}
       onPress={onPress}
-      style={({ pressed }) => [styles.primary, { backgroundColor: theme.accent }, pressed ? styles.pressed : null]}
+      style={({ pressed }) => [styles.primary, { backgroundColor: theme.accent, opacity: disabled ? 0.45 : 1 }, pressed ? styles.pressed : null]}
       testID={testID}
     >
       <Text {...mobileTextProps("control")} style={[styles.primaryText, { color: theme.onAccent }]}>{label}</Text>
@@ -675,7 +798,9 @@ function MotionPreview({ theme }: { theme: MobileTheme }) {
 function DoneSummary({ answers, theme }: { answers: OnboardingAnswers; theme: MobileTheme }) {
   const glyphs: Record<string, [DayframeGlyph, DayframePaletteKey]> = {
     location: [DAYFRAME_APP_ICONS.places, "red"],
-    motion: ["footprints", "amber"]
+    motion: ["footprints", "amber"],
+    health: ["heart-pulse", "lime"],
+    reminders: ["bell", "blue"]
   };
   return (
     <View style={[styles.summary, { backgroundColor: theme.surface }]} testID="onboarding-summary">
@@ -704,6 +829,84 @@ function DoneSummary({ answers, theme }: { answers: OnboardingAnswers; theme: Mo
           </View>
         );
       })}
+    </View>
+  );
+}
+
+function healthPickFrom(preferences: HealthImportPreferences): HealthPick {
+  return {
+    sleep: preferences.sleep,
+    workouts: HEALTH_IMPORT_PREFERENCE_OPTIONS.some((option) => option.key !== "sleep" && preferences[option.key])
+  };
+}
+
+/** Saves the picks as Settings › Apple Health would: workouts keep their own types, or the defaults. */
+async function applyHealthPick(pick: HealthPick) {
+  const preferences = await getHealthImportPreferences();
+  await setHealthImportPreference("sleep", pick.sleep);
+  const workouts = HEALTH_IMPORT_PREFERENCE_OPTIONS.filter((option) => option.key !== "sleep");
+  const anyOn = workouts.some((option) => preferences[option.key]);
+  for (const option of workouts) {
+    await setHealthImportPreference(option.key, pick.workouts ? (anyOn ? preferences[option.key] : option.defaultEnabled) : false);
+  }
+}
+
+/** Sleep and Workouts and walks, both on to start; at least one must stay chosen to connect. */
+function HealthPicks({ disabled, onToggle, pick, theme }: { disabled: boolean; onToggle: (key: keyof HealthPick) => void; pick: HealthPick; theme: MobileTheme }) {
+  const choices: { key: keyof HealthPick; glyph: DayframeGlyph; color: DayframePaletteKey; title: string; text: string }[] = [
+    { key: "sleep", glyph: "moon", color: "blue-bold", title: "Sleep", text: "Last night becomes a Sleep block to confirm." },
+    { key: "workouts", glyph: "dumbbell", color: "red", title: "Workouts and walks", text: "Runs, rides and walks become Exercise or Walk blocks." }
+  ];
+  return (
+    <View style={[styles.summary, { backgroundColor: theme.surface }]}>
+      {choices.map((choice, index) => {
+        const block = blockColorsFor(choice.color, theme.mode);
+        const checked = pick[choice.key];
+        return (
+          <Pressable
+            accessibilityHint={choice.text}
+            accessibilityLabel={choice.title}
+            accessibilityRole="checkbox"
+            accessibilityState={{ checked, disabled }}
+            disabled={disabled}
+            key={choice.key}
+            onPress={() => onToggle(choice.key)}
+            style={({ pressed }) => [
+              styles.summaryRow,
+              index > 0 ? { borderTopColor: theme.border, borderTopWidth: StyleSheet.hairlineWidth } : null,
+              pressed ? { backgroundColor: theme.surfaceMuted } : null
+            ]}
+            testID={`onboarding-health-${choice.key}`}
+          >
+            <View style={[styles.summaryGlyph, { backgroundColor: block.fill }]}>
+              <DayframeIcon color={block.text} glyph={choice.glyph} size={18} />
+            </View>
+            <View style={styles.summaryText}>
+              <Text {...mobileTextProps("itemTitle")} style={[styles.summaryTitle, { color: theme.textPrimary }]}>{choice.title}</Text>
+              <Text {...mobileTextProps("metadata")} style={{ color: theme.textMuted }}>{choice.text}</Text>
+            </View>
+            <View style={[styles.check, { backgroundColor: checked ? theme.success : theme.surfaceMuted }]}>
+              {checked ? <DayframeIcon color={theme.background} glyph="check" size={14} strokeWidth={3} /> : null}
+            </View>
+          </Pressable>
+        );
+      })}
+    </View>
+  );
+}
+
+/** An example of the evening notification (sample). */
+function NotificationPreview({ theme }: { theme: MobileTheme }) {
+  return (
+    <View accessibilityLabel="Example notification: Dayframe, 3 suggestions are ready to review." accessible style={[styles.banner, { backgroundColor: theme.surface }]}>
+      <View style={[styles.bannerIcon, { backgroundColor: theme.surfaceMuted }]}>
+        <DayframeIcon color={theme.textPrimary} glyph="bell" size={16} />
+      </View>
+      <View style={styles.summaryText}>
+        <Text {...mobileTextProps("itemTitle")} style={[styles.summaryTitle, { color: theme.textPrimary }]}>Dayframe</Text>
+        <Text {...mobileTextProps("metadata")} style={{ color: theme.textSecondary }}>3 suggestions are ready to review.</Text>
+      </View>
+      <Text {...mobileTextProps("metadata")} style={{ color: theme.textMuted }}>20:00</Text>
     </View>
   );
 }
@@ -777,5 +980,8 @@ const styles = StyleSheet.create({
   summaryGlyph: { alignItems: "center", borderRadius: 10, height: 36, justifyContent: "center", width: 36 },
   summaryText: { flex: 1, minWidth: 0 },
   summaryTitle: { fontSize: 15, fontWeight: "600" },
-  summaryState: { fontSize: 15, fontWeight: "700" }
+  summaryState: { fontSize: 15, fontWeight: "700" },
+  check: { alignItems: "center", borderRadius: 12, height: 24, justifyContent: "center", width: 24 },
+  banner: { alignItems: "center", borderRadius: 18, flexDirection: "row", gap: 12, padding: 14 },
+  bannerIcon: { alignItems: "center", borderRadius: 9, height: 32, justifyContent: "center", width: 32 }
 });

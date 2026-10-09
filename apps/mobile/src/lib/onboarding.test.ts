@@ -11,25 +11,29 @@ import {
   onboardingProgressDone,
   onboardingSummary,
   previousOnboardingStep,
+  healthResultText,
+  remindersResultText,
   suggestionsStateFrom
 } from "./onboarding";
 
 describe("onboarding steps", () => {
-  it("walks welcome → location → motion → done and back, never past either end", () => {
-    expect(ONBOARDING_STEPS).toEqual(["welcome", "location", "motion", "done"]);
+  it("walks welcome → location → motion → health → reminders → done and back, never past either end", () => {
+    expect(ONBOARDING_STEPS).toEqual(["welcome", "location", "motion", "health", "reminders", "done"]);
     expect(nextOnboardingStep("welcome")).toBe("location");
-    expect(nextOnboardingStep("motion")).toBe("done");
+    expect(nextOnboardingStep("motion")).toBe("health");
+    expect(nextOnboardingStep("reminders")).toBe("done");
     expect(nextOnboardingStep("done")).toBe("done");
     expect(previousOnboardingStep("location")).toBe("welcome");
     expect(previousOnboardingStep("welcome")).toBe("welcome");
   });
 
   it("fills one progress block per finished permission step, in the logo's colours", () => {
-    expect(ONBOARDING_PROGRESS.map((item) => item.color)).toEqual(["red", "amber"]);
+    expect(ONBOARDING_PROGRESS.map((item) => item.color)).toEqual(["red", "amber", "lime", "blue"]);
     expect(onboardingProgressDone("welcome")).toBe(0);
     expect(onboardingProgressDone("location")).toBe(0);
     expect(onboardingProgressDone("motion")).toBe(1);
-    expect(onboardingProgressDone("done")).toBe(2);
+    expect(onboardingProgressDone("reminders")).toBe(3);
+    expect(onboardingProgressDone("done")).toBe(4);
   });
 
   it("shows Back and Later only on the permission steps", () => {
@@ -54,11 +58,12 @@ describe("onboarding answers", () => {
 
   it("summarises On, Later, and nothing to do when this iPhone has no motion chip", () => {
     const rows = onboardingSummary({ ...EMPTY_ONBOARDING_ANSWERS, location: "while", motion: "unavailable" });
-    expect(rows).toEqual([
+    expect(rows.slice(0, 2)).toEqual([
       expect.objectContaining({ key: "location", state: "later", detail: "Suggestions need Always" }),
       expect.objectContaining({ key: "motion", state: "none", detail: "Not available on this iPhone" })
     ]);
-    expect(onboardingSummary({ ...EMPTY_ONBOARDING_ANSWERS, location: "always", suggestions: "on", motion: "on" }).map((row) => row.state)).toEqual(["on", "on"]);
+    expect(onboardingSummary({ ...EMPTY_ONBOARDING_ANSWERS, location: "always", suggestions: "on", motion: "on", health: "on", reminders: "on" }).map((row) => row.state))
+      .toEqual(["on", "on", "on", "on"]);
   });
 
   it("keeps Always permission apart from this account's suggestions (Codex r1)", () => {
@@ -79,5 +84,16 @@ describe("onboarding answers", () => {
     expect(locationResultText("always", "paused")).toMatch(/capture isn't running/);
     const [paused] = onboardingSummary({ ...EMPTY_ONBOARDING_ANSWERS, location: "always", suggestions: "paused" });
     expect(paused).toMatchObject({ state: "later", detail: "Capture paused, retry in Settings" });
+  });
+
+  it("words Apple Health by what was picked, and reminders by what iOS allowed (8-1b)", () => {
+    expect(healthResultText("on", { sleep: true, workouts: false })).toMatch(/^Connected\. Dayframe reads the sleep you allowed/);
+    expect(healthResultText("on", { sleep: true, workouts: true })).toMatch(/sleep and workouts and walks you allowed/);
+    expect(remindersResultText("denied")).toMatch(/iPhone Settings/);
+    const rows = onboardingSummary({ ...EMPTY_ONBOARDING_ANSWERS, health: "unavailable", reminders: "denied" });
+    expect(rows[2]).toMatchObject({ key: "health", state: "none" });
+    expect(rows[3]).toMatchObject({ key: "reminders", state: "later", detail: "Off" });
+    const [, , health] = onboardingSummary({ ...EMPTY_ONBOARDING_ANSWERS, health: "on", healthPick: { sleep: false, workouts: true } });
+    expect(health).toMatchObject({ state: "on", detail: "Workouts and walks" });
   });
 });
