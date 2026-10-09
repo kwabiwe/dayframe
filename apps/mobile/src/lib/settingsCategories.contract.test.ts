@@ -19,14 +19,19 @@ describe("mobile Activities page contract", () => {
     expect(settingsSource).toContain("activitiesPageGroups(data?.categories ?? []).map((group) => (");
     expect(settingsSource).toContain("formatActivityWeek(activityWeekSeconds.get(category.id) ?? 0)");
     expect(settingsSource).toContain("if (pinLimitReached(data?.categories ?? [], category.id)) {");
+    // One pin change at a time, so a failing unpin can never leave seven pinned.
+    expect(settingsSource).toMatch(/if \(pinMutationInFlight\.current\) return;[\s\S]*pinMutationInFlight\.current = true;[\s\S]*\} finally \{\s*pinMutationInFlight\.current = false;/);
     expect(settingsSource).toContain("accessibilityState={{ selected: category.isPinned }}");
     expect(settingsSource).toContain('testID="activities-new"');
   });
 
   it("creates and edits through one editor sheet with name, icon and colour, and archives from it", () => {
     expect(settingsSource).toContain("<ActivityEditorSheet");
-    expect(settingsSource).toContain("await updateCategory(activity.id, { name: draft.name, color: draft.color, icon: draft.icon });");
-    expect(settingsSource).toContain("await createCategory(draft.name, { color: draft.color, icon: draft.icon, isPinned: false });");
+    expect(settingsSource).toContain("? await updateCategory(activity.id, { name: draft.name, color: draft.color, icon: draft.icon })");
+    expect(settingsSource).toContain(": await createCategory(draft.name, { color: draft.color, icon: draft.icon, isPinned: draft.isPinned });");
+    // Accepted saves and archives show at once, even if the refresh after them fails.
+    expect(settingsSource).toContain("// The accepted activity shows at once, even if the refresh below fails.");
+    expect(settingsSource).toContain("categories: current.categories.filter((category) => category.id !== activity.id)");
     expect(settingsSource).toContain("await archiveCategory(activity.id);");
     expect(editorSource).toContain("DAYFRAME_ACTIVITY_ICONS.map((option) => {");
     expect(editorSource).toContain("DAYFRAME_PALETTE_PICKER.map((option) => {");

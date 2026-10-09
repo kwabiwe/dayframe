@@ -721,6 +721,7 @@ export default function SettingsScreen() {
         : "Not connected yet";
   const [healthPickerKey, setHealthPickerKey] = useState<HealthImportPreferenceKey | null>(null);
   const [activityEditor, setActivityEditor] = useState<{ activity: Category | null } | null>(null);
+  const pinMutationInFlight = useRef(false);
   // Settings › Activities: each row's last seven days, from the same lists as Today's quick start.
   const activityWeekSeconds = activityWeekSecondsFor(
     [data?.historyEntries, data?.entries, data?.weekEntries, data?.dayEntries],
@@ -789,11 +790,16 @@ export default function SettingsScreen() {
   // Settings › Activities (Blocks 6b-1): the editor sheet for New activity or one activity.
   async function saveActivityFromEditor(activity: Category | null, draft: ActivityEditorDraft) {
     try {
-      if (activity) {
-        await updateCategory(activity.id, { name: draft.name, color: draft.color, icon: draft.icon });
-      } else {
-        await createCategory(draft.name, { color: draft.color, icon: draft.icon, isPinned: false });
-      }
+      const result = activity
+        ? await updateCategory(activity.id, { name: draft.name, color: draft.color, icon: draft.icon })
+        : await createCategory(draft.name, { color: draft.color, icon: draft.icon, isPinned: draft.isPinned });
+      // The accepted activity shows at once, even if the refresh below fails.
+      setDataAndCache((current) => current ? {
+        ...current,
+        categories: current.categories.some((category) => category.id === result.category.id)
+          ? current.categories.map((category) => category.id === result.category.id ? { ...category, ...result.category } : category)
+          : [...current.categories, result.category]
+      } : current);
       await load({ silent: true });
       return null;
     } catch (error) {
@@ -808,6 +814,11 @@ export default function SettingsScreen() {
   async function archiveActivityFromEditor(activity: { id: string }) {
     try {
       await archiveCategory(activity.id);
+      // Archived: it leaves every list (and quick start) at once, even if the refresh fails.
+      setDataAndCache((current) => current ? {
+        ...current,
+        categories: current.categories.filter((category) => category.id !== activity.id)
+      } : current);
       await load({ silent: true });
       return null;
     } catch (error) {
@@ -820,10 +831,14 @@ export default function SettingsScreen() {
   }
 
   async function toggleCategoryPin(category: Category) {
+    // One pin change at a time: an unpin still saving never frees a slot for another pin (if it
+    // failed, quick start would end with seven).
+    if (pinMutationInFlight.current) return;
     if (pinLimitReached(data?.categories ?? [], category.id)) {
       Alert.alert("Quick start is full", `Quick start holds ${QUICK_START_PIN_LIMIT} activities. Unpin one first.`);
       return;
     }
+    pinMutationInFlight.current = true;
     const nextPinned = !category.isPinned;
     patchCategory(category.id, { isPinned: nextPinned });
     try {
@@ -839,6 +854,8 @@ export default function SettingsScreen() {
         return;
       }
       Alert.alert("Activities", error instanceof Error ? error.message : "Unable to update activity.");
+    } finally {
+      pinMutationInFlight.current = false;
     }
   }
 
@@ -2201,6 +2218,7 @@ export default function SettingsScreen() {
           activities={data?.categories ?? []}
           activity={activityEditor.activity}
           defaultColor={nextCategoryColor(data?.categories ?? [])}
+          pinnedCount={(data?.categories ?? []).filter((category) => category.isPinned).length}
           onArchive={archiveActivityFromEditor}
           onClose={() => setActivityEditor(null)}
           onSave={(draft) => saveActivityFromEditor(activityEditor.activity, draft)}

@@ -1,5 +1,5 @@
 import { useRef, useState } from "react";
-import { Alert, Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, View, useWindowDimensions } from "react-native";
+import { AccessibilityInfo, Alert, Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, View, useWindowDimensions } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import {
   DAYFRAME_ACTIVITY_ICONS,
@@ -13,11 +13,13 @@ import {
 } from "@dayframe/shared";
 import { SwipeDismissSheet, type SwipeDismissSheetHandle } from "../SwipeDismissSheet";
 import { ActivityIcon } from "../icons/DayframeIcon";
-import { activityNameProblem } from "../../lib/activitiesPage";
+import { SettingsSwitch } from "./SettingsBlocks";
+import { QUICK_START_PIN_LIMIT, activityNameProblem } from "../../lib/activitiesPage";
 import type { MobileStyles, MobileTheme } from "../../lib/mobileTheme";
 import { MOBILE_DISPLAY_FONT, mobileTextProps } from "../../lib/mobileTypography";
 
-export type ActivityEditorDraft = { name: string; color: DayframePaletteKey; icon: string | null };
+/** isPinned is only used when creating; an existing activity's pin is the page's pin button. */
+export type ActivityEditorDraft = { name: string; color: DayframePaletteKey; icon: string | null; isPinned: boolean };
 
 type EditableActivity = { id: string; name: string; color: string; icon?: string | null; starterKey?: string | null };
 
@@ -34,6 +36,7 @@ export function ActivityEditorSheet({
   onArchive,
   onClose,
   onSave,
+  pinnedCount,
   reduceMotion,
   styles: shared,
   theme
@@ -47,6 +50,8 @@ export function ActivityEditorSheet({
   onClose: () => void;
   /** Resolves to null when saved, or a message to show when it could not be. */
   onSave: (draft: ActivityEditorDraft) => Promise<string | null>;
+  /** How many activities are pinned now (quick start holds QUICK_START_PIN_LIMIT). */
+  pinnedCount: number;
   reduceMotion: boolean;
   styles: MobileStyles;
   theme: MobileTheme;
@@ -58,27 +63,46 @@ export function ActivityEditorSheet({
   const { height: windowHeight, width: windowWidth } = useWindowDimensions();
   // Six icon columns: the sheet's 16-point sides and the body's 4-point inset, 8-point gaps.
   // Measured rather than wrapped with aspectRatio, which over-measured the grid's height.
-  const iconCell = Math.max(44, Math.floor((windowWidth - 2 * 16 - 2 * 4 - 5 * ICON_GAP) / 6));
+  const iconRow = windowWidth - 2 * 16 - 2 * 4;
+  // Six columns even on a 320-point phone: the gaps narrow first, and a cell under 44 points gets
+  // the rest of its 44-point target as hit slop.
+  const iconGap = iconRow >= 6 * 44 + 5 * ICON_GAP ? ICON_GAP : 4;
+  const iconCell = Math.floor((iconRow - 5 * iconGap) / 6);
+  const iconSlop = Math.max(0, Math.ceil((44 - iconCell) / 2));
   const [name, setName] = useState(activity?.name ?? "");
   const [color, setColor] = useState<DayframePaletteKey>(() => activity ? paletteKeyFor(activity.color, activity.name) : defaultColor);
   // null: the icon follows the name (as for activities that never chose one).
   const [icon, setIcon] = useState<string | null>(activity?.icon ?? null);
-  const [problem, setProblem] = useState<string | null>(null);
+  const quickStartFull = pinnedCount >= QUICK_START_PIN_LIMIT;
+  // A new activity joins quick start by default while there is room (as before this page).
+  const [pinNew, setPinNew] = useState(!quickStartFull);
+  const [problem, setProblemState] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const done = useRef(false);
+  // One synchronous gate for Save and a confirmed Archive: a second tap before React commits,
+  // or an Archive confirmed while a save runs, does nothing.
+  const busy = useRef(false);
+  function setProblem(message: string | null) {
+    setProblemState(message);
+    // accessibilityLiveRegion is Android-only; VoiceOver hears the reason here.
+    if (message) AccessibilityInfo.announceForAccessibility(message);
+  }
   const block = blockColorsFor(color, theme.mode);
   const shownIcon = resolveActivityIcon({ icon, name }).key;
 
   async function save() {
-    if (saving || done.current) return;
+    if (busy.current || done.current) return;
     const nameProblem = activityNameProblem(activities, name, activity?.id ?? null);
     if (nameProblem) {
       setProblem(nameProblem);
       return;
     }
+    busy.current = true;
     setSaving(true);
     setProblem(null);
-    const result = await onSave({ name: name.trim(), color, icon }).catch(() => "Couldn't save. Check your connection and try again.");
+    const result = await onSave({ name: name.trim(), color, icon, isPinned: !activity && pinNew && !quickStartFull })
+      .catch(() => "Couldn't save. Check your connection and try again.");
+    busy.current = false;
     if (done.current) return;
     setSaving(false);
     if (result) {
@@ -90,19 +114,22 @@ export function ActivityEditorSheet({
   }
 
   function archive(target: EditableActivity) {
-    if (saving || done.current) return;
+    if (busy.current || done.current) return;
     Alert.alert(`Archive ${target.name}?`, "It leaves your lists and quick start. Its history stays.", [
       { style: "cancel", text: "Cancel" },
       {
         style: "destructive",
         text: "Archive",
         onPress: () => {
-          if (done.current) return;
+          // Re-checked: a save may have started while the confirmation was up.
+          if (busy.current || done.current) return;
+          busy.current = true;
           setSaving(true);
           setProblem(null);
           void onArchive(target)
             .catch(() => "Couldn't archive. Check your connection and try again.")
             .then((result) => {
+              busy.current = false;
               if (done.current) return;
               setSaving(false);
               if (result) {
@@ -213,8 +240,26 @@ export function ActivityEditorSheet({
               </Text>
             ) : null}
 
+            {activity ? null : (
+              <View style={styles.pinRow}>
+                <View style={styles.pinText}>
+                  <Text {...mobileTextProps("itemTitle")} style={{ color: theme.textPrimary, fontSize: 15, fontWeight: "600" }}>Pin to quick start</Text>
+                  <Text {...mobileTextProps("metadata")} style={{ color: theme.textMuted }}>
+                    {quickStartFull ? `Quick start holds ${QUICK_START_PIN_LIMIT}. Unpin one to add this.` : "Shows it in the Start tiles on Today"}
+                  </Text>
+                </View>
+                <SettingsSwitch
+                  disabled={quickStartFull || saving}
+                  label="Pin to quick start"
+                  onValueChange={setPinNew}
+                  theme={theme}
+                  value={pinNew && !quickStartFull}
+                />
+              </View>
+            )}
+
             <Text {...mobileTextProps("counter")} accessibilityRole="header" style={[styles.eyebrow, { color: theme.textMuted }]}>ICON</Text>
-            <View accessibilityLabel="Icon" accessibilityRole="radiogroup" style={styles.iconGrid}>
+            <View accessibilityLabel="Icon" accessibilityRole="radiogroup" style={[styles.iconGrid, { gap: iconGap }]}>
               {DAYFRAME_ACTIVITY_ICONS.map((option) => {
                 const selected = shownIcon === option.key;
                 return (
@@ -222,6 +267,7 @@ export function ActivityEditorSheet({
                     accessibilityLabel={option.label}
                     accessibilityRole="radio"
                     accessibilityState={{ checked: selected }}
+                    hitSlop={iconSlop}
                     key={option.key}
                     onPress={() => setIcon(option.key)}
                     style={({ pressed }) => [
@@ -245,16 +291,18 @@ export function ActivityEditorSheet({
                     accessibilityLabel={option.label}
                     accessibilityRole="radio"
                     accessibilityState={{ checked: selected }}
-                    hitSlop={4}
                     key={option.key}
                     onPress={() => setColor(option.key)}
-                    style={({ pressed }) => [
-                      styles.swatch,
-                      { backgroundColor: paletteColorFor(option.key, "", theme.mode) },
-                      selected ? { borderColor: theme.textPrimary, borderWidth: 3 } : null,
-                      pressed ? styles.pressed : null
-                    ]}
-                  />
+                    style={({ pressed }) => [styles.swatchTarget, pressed ? styles.pressed : null]}
+                  >
+                    <View
+                      style={[
+                        styles.swatch,
+                        { backgroundColor: paletteColorFor(option.key, "", theme.mode) },
+                        selected ? { borderColor: theme.textPrimary, borderWidth: 3 } : null
+                      ]}
+                    />
+                  </Pressable>
                 );
               })}
             </View>
@@ -295,10 +343,13 @@ const styles = StyleSheet.create({
   previewName: { fontFamily: MOBILE_DISPLAY_FONT.bold, fontSize: 24 },
   nameInput: { borderRadius: 14, fontSize: 16, minHeight: 48, paddingHorizontal: 14 },
   problem: { fontSize: 14, marginTop: -6 },
-  iconGrid: { flexDirection: "row", flexWrap: "wrap", gap: ICON_GAP },
+  iconGrid: { flexDirection: "row", flexWrap: "wrap" },
   iconCell: { alignItems: "center", borderRadius: 12, justifyContent: "center" },
-  swatches: { flexDirection: "row", flexWrap: "wrap", gap: 12 },
+  swatches: { flexDirection: "row", flexWrap: "wrap", gap: 4 },
+  swatchTarget: { alignItems: "center", height: 44, justifyContent: "center", width: 44 },
   swatch: { borderColor: "transparent", borderRadius: 18, borderWidth: 0, height: 36, width: 36 },
+  pinRow: { alignItems: "center", flexDirection: "row", gap: 12, minHeight: 52, paddingHorizontal: 4 },
+  pinText: { flex: 1, gap: 2 },
   archive: { alignItems: "center", borderRadius: DAYFRAME_BLOCKS.radius.pill, justifyContent: "center", marginTop: 8, minHeight: 48 },
   archiveText: { fontSize: 15, fontWeight: "700" },
   pressed: { opacity: 0.7 }
