@@ -2471,6 +2471,30 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
     );
   }
 
+  // First sign-in setup (Blocks 8-1c): offered once per account on this phone, right after signing
+  // in, and only when nothing is set up yet. Never on launch, refresh or an update.
+  async function offerOnboardingAfterSignIn() {
+    const signedIn = latestData.current;
+    if (!signedIn?.user?.id || !signedIn.workspace?.id) return;
+    const owner = { userId: signedIn.user.id, workspaceId: signedIn.workspace.id };
+    try {
+      const [{ claimOnboardingOffer }, { isHealthKitAutomaticSyncEnabled }, { getLocationVisitDiagnostics }] = await Promise.all([
+        import("@/lib/onboardingGate"),
+        import("@/lib/health"),
+        import("@/lib/geofence")
+      ]);
+      const offer = await claimOnboardingOffer(owner, async () => ({
+        savedPlaces: signedIn.places.length,
+        healthConnected: await isHealthKitAutomaticSyncEnabled().catch(() => false),
+        locationSuggestionsOn: (await getLocationVisitDiagnostics()).locationLearningEnabled === true
+      }));
+      const { mobileAccountOwnersEqual, readActiveMobileAccount } = await import("@/lib/mobileAccount");
+      if (offer && mobileAccountOwnersEqual(owner, await readActiveMobileAccount())) router.push("/onboarding");
+    } catch {
+      // Setup stays one tap away in Settings.
+    }
+  }
+
   async function submitAuth() {
     if (authSubmittingRef.current) return;
     authSubmittingRef.current = true;
@@ -2506,6 +2530,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
         preserveAuthPasswordOnSignedOut.current = false;
       }
       setAuthPassword("");
+      void offerOnboardingAfterSignIn();
     } catch (error) {
       setAuthError(error instanceof Error ? error.message : "Unable to authenticate");
       setAuthState("signedOut");

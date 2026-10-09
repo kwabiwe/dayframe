@@ -25,8 +25,8 @@ import {
   type DayframePaletteKey,
   type HealthImportPreferences
 } from "@dayframe/shared";
-import { DayframeIcon } from "@/components/icons/DayframeIcon";
-import { AuthRequiredError, ensureAutomaticLoggingCategories, fetchBootstrap } from "@/lib/api";
+import { ActivityIcon, DayframeIcon } from "@/components/icons/DayframeIcon";
+import { AuthRequiredError, ensureAutomaticLoggingCategories, fetchBootstrap, updateCategory, type MobileBootstrap } from "@/lib/api";
 import { getLocationVisitDiagnostics, setLocationLearningEnabled } from "@/lib/geofence";
 import { playHaptic } from "@/lib/haptics";
 import {
@@ -46,6 +46,7 @@ import { BLOCKS_SPRING } from "@/lib/blocksMotion";
 import { localLayoutTransition, localPresenceEntering, useReduceMotionPreference } from "@/lib/motion";
 import {
   EMPTY_ONBOARDING_ANSWERS,
+  ONBOARDING_PIN_LIMIT,
   ONBOARDING_PROGRESS,
   healthResultText,
   remindersResultText,
@@ -63,6 +64,8 @@ import {
   type OnboardingAnswers,
   type OnboardingStep
 } from "@/lib/onboarding";
+
+type Activity = MobileBootstrap["categories"][number];
 
 const STEP_SLIDE = 36;
 /** How long setup waits for suggestions to switch on before offering Try again. */
@@ -87,6 +90,10 @@ export default function OnboardingScreen() {
   const titleRef = useRef<Text>(null);
   // Picks the person changed win over a late first read of the saved ones.
   const pickEdited = useRef(false);
+  // This account's activities for the quick-start step (null until read).
+  const [activities, setActivities] = useState<Activity[] | null>(null);
+  const [pinning, setPinning] = useState<string | null>(null);
+  const [pinNote, setPinNote] = useState<string | null>(null);
   useEffect(() => {
     const bump = () => {
       sessionEpoch.current += 1;
@@ -121,6 +128,7 @@ export default function OnboardingScreen() {
         owner.current ? readReviewNudgeState(owner.current).catch(() => null) : Promise.resolve(null),
         import("@/lib/reviewNudgeNative").then(({ readReviewNudgePermission }) => readReviewNudgePermission()).catch(() => null)
       ]);
+      const bootstrap = await fetchBootstrap().catch(() => null);
       if (!(await stillHere(epoch))) return;
       const location = foreground && !foreground.granted && !foreground.canAskAgain
         ? "off"
@@ -135,8 +143,13 @@ export default function OnboardingScreen() {
         motion: current.motion ?? motionChoiceFrom(motion, false),
         health: current.health ?? (healthConnected ? "on" : null),
         healthPick: healthPreferences && !pickEdited.current ? healthPickFrom(healthPreferences) : current.healthPick,
-        reminders: current.reminders ?? (nudge?.enabled && notifications === "granted" ? "on" : null)
+        reminders: current.reminders ?? (nudge?.enabled && notifications === "granted" ? "on" : null),
+        quickStarts: bootstrap ? bootstrap.categories.filter((category) => category.isPinned).length : current.quickStarts
       }));
+      if (bootstrap && owner.current && bootstrap.user.id === owner.current.userId && bootstrap.workspace.id === owner.current.workspaceId) {
+        // Pinned first, then A–Z, decided once: tiles don't move while you tap them.
+        setActivities([...bootstrap.categories].sort((a, b) => Number(b.isPinned) - Number(a.isPinned) || a.name.localeCompare(b.name)));
+      }
     })();
   }, []);
 
@@ -267,6 +280,8 @@ export default function OnboardingScreen() {
   function connectHealth() {
     const pick = answers.healthPick;
     if (!pick.sleep && !pick.workouts) return;
+    // From here the picks shown are the ones saved: a late first read must not replace them.
+    pickEdited.current = true;
     void run(async (epoch) => {
       const permissions = await requestHealthKitPermissions().catch(() => null);
       if (!(await stillHere(epoch))) return;
@@ -314,6 +329,46 @@ export default function OnboardingScreen() {
       if (!(await stillHere(epoch))) return;
       setAnswers((current) => ({ ...current, reminders: saved ? "on" : "failed" }));
       announce(saved ? "Evening reminders are on." : "The reminder couldn't be switched on.");
+    });
+  }
+
+  // Quick starts: a tap pins or unpins, as Settings › Activities does. The server holds the limit too.
+  function togglePin(activity: Activity) {
+    if (busy || pinning || !activities) return;
+    const pinnedCount = activities.filter((item) => item.isPinned).length;
+    if (!activity.isPinned && pinnedCount >= ONBOARDING_PIN_LIMIT) {
+      setPinNote(`Quick start holds ${ONBOARDING_PIN_LIMIT}. Unpin one first.`);
+      announce(`Quick start holds ${ONBOARDING_PIN_LIMIT}. Unpin one first.`);
+      return;
+    }
+    const epoch = sessionEpoch.current;
+    const pin = !activity.isPinned;
+    setPinning(activity.id);
+    setPinNote(null);
+    void updateCategory(activity.id, { isPinned: pin }).then(
+      async () => {
+        if (!(await stillHere(epoch))) return;
+        // One pin change at a time (`pinning`), so the list read here is current.
+        const next = activities.map((item) => (item.id === activity.id ? { ...item, isPinned: pin } : item));
+        setActivities(next);
+        setAnswers((current) => ({ ...current, quickStarts: next.filter((item) => item.isPinned).length }));
+        playHaptic("tick");
+        announce(`${activity.name} ${pin ? "pinned" : "unpinned"}.`);
+      },
+      async (error) => {
+        if (error instanceof AuthRequiredError) {
+          if (mounted.current && epoch === sessionEpoch.current) router.replace("/");
+          return;
+        }
+        if (!(await stillHere(epoch))) return;
+        const message = error instanceof Error && /quick start/i.test(error.message)
+          ? error.message
+          : "That pin couldn't be changed. Try again.";
+        setPinNote(message);
+        announce(message);
+      }
+    ).finally(() => {
+      if (mounted.current) setPinning(null);
     });
   }
 
@@ -392,6 +447,9 @@ export default function OnboardingScreen() {
           {step === "motion" && !answers.motion ? <MotionPreview theme={theme} /> : null}
           {step === "health" && !answers.health ? <HealthPicks disabled={busy} onToggle={togglePick} pick={answers.healthPick} theme={theme} /> : null}
           {step === "reminders" && !answers.reminders ? <NotificationPreview theme={theme} /> : null}
+          {step === "activities" ? (
+            <QuickStartTiles activities={activities} note={pinNote} onToggle={togglePin} pinning={pinning} theme={theme} />
+          ) : null}
           {content.bullets.map((bullet) => (
             <View key={bullet.text} style={styles.bullet}>
               <DayframeIcon color={theme.textSecondary} glyph={bullet.glyph} size={18} />
@@ -524,6 +582,15 @@ function stepContent(step: OnboardingStep, answers: OnboardingAnswers): StepCont
         bullets: [],
         privacy: "Notifications never include where you were. You can change the time or turn them off in Settings.",
         result: answers.reminders ? { on: answers.reminders === "on", text: remindersResultText(answers.reminders) } : null
+      };
+    case "activities":
+      return {
+        glyph: null,
+        title: "Pick your quick starts",
+        lede: "These become the tiles on Today. Tap one to start timing it. Rename, recolour or add your own any time in Settings › Activities.",
+        bullets: [],
+        privacy: null,
+        result: null
       };
     case "done":
       return {
@@ -825,7 +892,8 @@ function DoneSummary({ answers, theme }: { answers: OnboardingAnswers; theme: Mo
     location: [DAYFRAME_APP_ICONS.places, "red"],
     motion: ["footprints", "amber"],
     health: ["heart-pulse", "lime"],
-    reminders: ["bell", "blue"]
+    reminders: ["bell", "blue"],
+    activities: ["pin", "violet"]
   };
   return (
     <View style={[styles.summary, { backgroundColor: theme.surface }]} testID="onboarding-summary">
@@ -854,6 +922,73 @@ function DoneSummary({ answers, theme }: { answers: OnboardingAnswers; theme: Mo
           </View>
         );
       })}
+    </View>
+  );
+}
+
+/** This account's activities as tiles: pinned ones are solid blocks with a check, the rest quiet. */
+function QuickStartTiles({
+  activities,
+  note,
+  onToggle,
+  pinning,
+  theme
+}: {
+  activities: Activity[] | null;
+  note: string | null;
+  onToggle: (activity: Activity) => void;
+  pinning: string | null;
+  theme: MobileTheme;
+}) {
+  if (!activities) {
+    return <Text {...mobileTextProps("body")} style={{ color: theme.textSecondary }}>Loading your activities…</Text>;
+  }
+  if (activities.length === 0) {
+    return <Text {...mobileTextProps("body")} style={{ color: theme.textSecondary }}>No activities yet. Add them any time in Settings › Activities.</Text>;
+  }
+  const pinned = activities.filter((activity) => activity.isPinned).length;
+  return (
+    <View style={styles.tilesWrap}>
+      <Text {...mobileTextProps("counter")} accessibilityLiveRegion="polite" style={[styles.previewEyebrow, { color: theme.textMuted }]}>
+        {`PINNED TO TODAY ${pinned} OF ${ONBOARDING_PIN_LIMIT}`}
+      </Text>
+      {/* Under the count, where it is seen without scrolling. */}
+      {note ? (
+        <Text {...mobileTextProps("metadata")} accessibilityLiveRegion="polite" style={{ color: theme.textSecondary }} testID="onboarding-pin-note">{note}</Text>
+      ) : null}
+      <View style={styles.tiles}>
+        {activities.map((activity) => {
+          const block = blockColorsFor(activity.color ?? activity.id, theme.mode, activity.name);
+          const on = activity.isPinned;
+          return (
+            <Pressable
+              accessibilityHint={on ? "Removes it from the tiles on Today" : "Adds it to the tiles on Today"}
+              accessibilityLabel={activity.name}
+              accessibilityRole="checkbox"
+              accessibilityState={{ busy: pinning === activity.id, checked: on, disabled: pinning !== null }}
+              disabled={pinning !== null}
+              key={activity.id}
+              onPress={() => onToggle(activity)}
+              style={({ pressed }) => [
+                styles.tile,
+                { backgroundColor: on ? block.fill : theme.surface },
+                pressed ? styles.pressed : null
+              ]}
+              testID={`onboarding-pin-${activity.id}`}
+            >
+              <ActivityIcon color={on ? block.text : block.fill} icon={activity.icon} name={activity.name} size={20} />
+              <Text {...mobileTextProps("metadata")} numberOfLines={2} style={[styles.tileName, { color: on ? block.text : theme.textPrimary }]}>
+                {activity.name}
+              </Text>
+              {on ? (
+                <View style={[styles.tileCheck, { backgroundColor: block.text }]}>
+                  <DayframeIcon color={block.fill} glyph="check" size={12} strokeWidth={3} />
+                </View>
+              ) : null}
+            </Pressable>
+          );
+        })}
+      </View>
     </View>
   );
 }
@@ -1007,6 +1142,11 @@ const styles = StyleSheet.create({
   summaryTitle: { fontSize: 15, fontWeight: "600" },
   summaryState: { fontSize: 15, fontWeight: "700" },
   check: { alignItems: "center", borderRadius: 12, height: 24, justifyContent: "center", width: 24 },
+  tilesWrap: { gap: 10 },
+  tiles: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
+  tile: { borderRadius: 16, gap: 6, minHeight: 84, padding: 12, width: "31.5%" },
+  tileName: { fontSize: 13, fontWeight: "700" },
+  tileCheck: { alignItems: "center", borderRadius: 9, height: 18, justifyContent: "center", position: "absolute", right: 8, top: 8, width: 18 },
   banner: { alignItems: "center", borderRadius: 18, flexDirection: "row", gap: 12, padding: 14 },
   bannerIcon: { alignItems: "center", borderRadius: 9, height: 32, justifyContent: "center", width: 32 }
 });

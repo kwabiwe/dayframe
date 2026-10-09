@@ -3,17 +3,21 @@
 // they stay testable and the same everywhere (Done summary, Settings).
 import type { DayframePaletteKey } from "@dayframe/shared";
 
-export type OnboardingStep = "welcome" | "location" | "motion" | "health" | "reminders" | "done";
+export type OnboardingStep = "welcome" | "location" | "motion" | "health" | "reminders" | "activities" | "done";
 
-/** The steps this build walks through, in order. Quick starts join with 8-1c. */
-export const ONBOARDING_STEPS: readonly OnboardingStep[] = ["welcome", "location", "motion", "health", "reminders", "done"];
+/** The steps, in order (prototype design/blocks/onboarding.html). */
+export const ONBOARDING_STEPS: readonly OnboardingStep[] = ["welcome", "location", "motion", "health", "reminders", "activities", "done"];
+
+/** Quick start on Today holds six pinned activities (as Settings › Activities). */
+export const ONBOARDING_PIN_LIMIT = 6;
 
 /** One progress block per permission step, filled in the logo's colours as each finishes. */
 export const ONBOARDING_PROGRESS: readonly { step: OnboardingStep; color: DayframePaletteKey }[] = [
   { step: "location", color: "red" },
   { step: "motion", color: "amber" },
   { step: "health", color: "lime" },
-  { step: "reminders", color: "blue" }
+  { step: "reminders", color: "blue" },
+  { step: "activities", color: "violet" }
 ];
 
 export type LocationChoice = "always" | "while" | "off";
@@ -49,6 +53,8 @@ export type OnboardingAnswers = {
   health: HealthChoice | null;
   healthPick: HealthPick;
   reminders: RemindersChoice | null;
+  /** How many activities are pinned to quick start, once known. */
+  quickStarts: number | null;
 };
 
 export const EMPTY_ONBOARDING_ANSWERS: OnboardingAnswers = {
@@ -58,7 +64,8 @@ export const EMPTY_ONBOARDING_ANSWERS: OnboardingAnswers = {
   motion: null,
   health: null,
   healthPick: { sleep: true, workouts: true },
-  reminders: null
+  reminders: null,
+  quickStarts: null
 };
 
 export function nextOnboardingStep(step: OnboardingStep): OnboardingStep {
@@ -148,7 +155,12 @@ export function remindersResultText(choice: RemindersChoice) {
 
 /** A Done summary row: on, or waiting in Settings for later. */
 /** "none": nothing to turn on later (this iPhone has no motion chip). */
-export type OnboardingSummaryRow = { key: "location" | "motion" | "health" | "reminders"; title: string; detail: string; state: "on" | "later" | "none" };
+export type OnboardingSummaryRow = {
+  key: "location" | "motion" | "health" | "reminders" | "activities";
+  title: string;
+  detail: string;
+  state: "on" | "later" | "none";
+};
 
 export function onboardingSummary(answers: OnboardingAnswers): OnboardingSummaryRow[] {
   return [
@@ -191,6 +203,14 @@ export function onboardingSummary(answers: OnboardingAnswers): OnboardingSummary
       title: "Reminders",
       state: answers.reminders === "on" ? "on" : "later",
       detail: answers.reminders === "on" ? "One evening nudge" : "Off"
+    },
+    {
+      key: "activities",
+      title: "Quick starts on Today",
+      state: answers.quickStarts && answers.quickStarts > 0 ? "on" : "later",
+      detail: answers.quickStarts && answers.quickStarts > 0
+        ? `${answers.quickStarts} pinned`
+        : "None pinned yet"
     }
   ];
 }
