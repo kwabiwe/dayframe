@@ -1982,6 +1982,13 @@ export default function SettingsScreen() {
                   theme={theme}
                   title="Something not syncing?"
                 />
+                <SettingsBlockRow
+                  accessibilityHint="Walks through location, motion and the other permissions again"
+                  onPress={() => router.push("/onboarding")}
+                  testID="settings-setup-again"
+                  theme={theme}
+                  title="Set up Dayframe again"
+                />
               </SettingsBlockGroup>
 
               <Pressable

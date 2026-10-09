@@ -290,6 +290,13 @@ Block pull-to-refresh:
 - Accessibility: the menu rows sit under a "Review all" header with hints; the menu never grows past the screen (its actions scroll and a Cancel row stays visible); counting, the batch, Undo ("N moments are back") and any unsaved moments are announced. Reduce Motion keeps the same opacity-only presence fades.
 
 
+## Onboarding (Blocks parity step 8-1a)
+
+- Trigger: Settings › Help › "Set up Dayframe again" opens the route (8-1c adds the first-sign-in gate); "Set up Dayframe", Allow / Continue / Not now, Back (previous step), Later (to the summary) and Open Today move through it.
+- Owner: the stack fades the route in (Reduce Motion: none) and turns swipe-back off, so a swipe can never leave half-way through an iOS prompt. Inside, one keyed `Reanimated.View` per step (and per Location stage) owns step movement: it enters from 36 points on the side it comes from (forward from the right, Back from the left) with `BLOCKS_SPRING.sheet` and a 180 ms fade; the old step leaves at once. A forward move lands the finished step's progress block (from 14 points above at 60 % scale with `BLOCKS_SPRING.land`). The welcome's sample-day blocks drop from 260 points above with a 70 ms stagger (`land`) once when the welcome first shows. A step's result line enters with the shared presence fade under `localLayoutTransition`. The `tick` haptic plays on each step change.
+- Interruption: one permission request at a time (the step's buttons, Back and Later are off while iOS asks); an answer arriving after the screen closed or the account changed is dropped; Back after an answer shows that answer again rather than asking twice.
+- Accessibility: Reduce Motion fades steps (`localPresenceEntering`), sets progress blocks with a 160 ms opacity change and shows the sample day in place; each result is announced; the progress blocks read "Setup progress: N of M steps done"; samples are labelled as examples; every target is at least 44 points.
+
 ## Evening reminder rows (Blocks parity step 8-0)
 
 - Trigger: the Evening reminder switch (or Open Settings when iOS has notifications off) and the Time stepper in Settings › Automatic tracking.

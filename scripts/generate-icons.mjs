@@ -28,8 +28,8 @@ const GLYPHS = [
   "laptop", "library", "list-checks", "mail", "map-pin", "message-circle", "moon", "mountain", "music", "palette",
   "party-popper", "paw-print", "pen-line", "pencil", "person-standing", "phone", "pill", "pin", "plane", "play",
   "plus", "presentation", "refresh-cw", "rotate-ccw", "route", "scissors", "search", "settings", "ship", "shirt", "shopping-bag",
-  "shopping-cart", "sprout", "square", "stethoscope", "sun", "tag", "tent", "timer", "train-front", "trash-2", "tv",
-  "undo-2", "user-round", "users", "utensils", "wallet", "wrench", "x"
+  "shield", "shopping-cart", "sprout", "square", "stethoscope", "sun", "tag", "tent", "timer", "train-front", "trash-2", "tv",
+  "undo-2", "user-round", "users", "utensils", "wallet", "wrench", "x", "zap"
 ];
 
 // Dayframe-drawn glyphs on Lucide's grid: 24 x 24, 2-point round strokes, outline only.
