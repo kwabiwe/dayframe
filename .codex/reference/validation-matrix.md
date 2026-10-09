@@ -63,6 +63,11 @@ When changing place roles, role labels or any read path that shows a saved place
 - On iPhone (no Home/Work controls yet): after a role is set on web, Settings › Places rows show "Home"/"Work" with the saved name underneath, and the Review correction editor names the place by its label. Run `apps/mobile/src/lib/geofence.test.ts` (a Work-role place records "Entered Work", a "Work" visit description and `placeName`, and "Work" in diagnostics) and the `api.test.ts` role cases.
 - Apply `supabase/migrations/202610070001_place_role.sql` to staging before the Preview that reads place roles, and to production before that server deploys, each with owner approval.
 
+## Evening Review reminder (iPhone)
+
+- Run `npx vitest run src/lib/reviewNudge.test.ts` in `apps/mobile` (time today/tomorrow, once a day, stale counts, permission, account fence, ordering) and the route tests for `/api/events`, `/api/location/evidence` and `/api/location/replay` plus `src/lib/review-count.test.ts` in `apps/web` (count only for app sessions; replay only when asked; a slow or failed count is left out).
+- Native module change: `pod install` (Xcode 26.6, `LANG=en_US.UTF-8`), a full Debug simulator build, then on the simulator turn the reminder on with suggestions waiting and confirm it is scheduled for the chosen time; to see one arrive, temporarily (never committed) let the planner fire a minute ahead, confirm one notification with the count and no place, and that tapping it opens Review. On a staging phone confirm the permission prompt, the notification and that an older installed build still syncs location against the new server.
+
 ## Today in Blocks (iPhone)
 
 - Unit: `apps/mobile/src/components/accessibility/TodayTimerSurface.test.tsx` (labels, caps, on-block colours in both themes, Switch/Recording tiles, no duplicate start), `src/lib/quickStartMosaic.test.ts` (week window, ranking, flush columns), `src/lib/blocksMotion.test.tsx` (landing once per token, no replay, Reduce Motion opacity only, 2.4 s ring), `src/lib/haptics.test.ts` (moment map, one Stop composite, Settings switch).

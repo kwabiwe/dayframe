@@ -7,12 +7,17 @@ const session = {
   scopes: ["app:read", "app:write", "events:write"]
 };
 
+const reviewCountMock = vi.hoisted(() => vi.fn());
 const mocks = vi.hoisted(() => ({
   resolveRequestSession: vi.fn(),
   ingestLocationEvidence: vi.fn(),
   query: vi.fn()
 }));
 
+vi.mock("@/lib/review-count", () => ({
+  openReviewCountFor: reviewCountMock,
+  withReviewCount: (body: object, reviewCount?: number) => reviewCount === undefined ? body : { ...body, reviewCount }
+}));
 vi.mock("@/lib/ingest-auth", () => ({ resolveRequestSession: mocks.resolveRequestSession }));
 vi.mock("@/lib/db", () => ({
   query: mocks.query,
@@ -64,6 +69,18 @@ describe("POST /api/location/evidence", () => {
     expect(response.headers.get("cache-control")).toBe("private, no-store, max-age=0");
     expect(response.headers.get("vary")).toBe("Authorization, Cookie");
     expect(mocks.ingestLocationEvidence).toHaveBeenCalledWith(body, session, undefined, expect.objectContaining({ signal: expect.any(AbortSignal), deadlineAt: expect.any(Number) }));
+  });
+
+  it("adds the open Review count for the phone's evening reminder", async () => {
+    reviewCountMock.mockResolvedValueOnce(2);
+    const response = await POST(new Request("https://dayframe.test/api/location/evidence", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ clientBatchId: "batch-1", evidence: [{ clientEvidenceId: "evidence-1" }] })
+    }));
+    expect(response.status).toBe(201);
+    expect(await response.json()).toMatchObject({ ok: true, reviewCount: 2 });
+    expect(reviewCountMock).toHaveBeenCalledWith(session);
   });
 
   it("returns a retryable busy response when owner processing is locked", async () => {

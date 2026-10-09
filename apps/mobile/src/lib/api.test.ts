@@ -31,6 +31,8 @@ const healthBackend = vi.hoisted(() => ({id:"staging-fixture"}));
 vi.mock("./backendIdentity",()=>({get DAYFRAME_BACKEND_ID(){return healthBackend.id;}}));
 vi.mock("expo-crypto",()=>({}));
 vi.mock("./healthSyncStore",()=>({recordHealthAcknowledgement:healthAcknowledgement}));
+const reviewNudge = vi.hoisted(() => ({ cancel: vi.fn(() => Promise.resolve()), note: vi.fn(() => Promise.resolve()) }));
+vi.mock("./reviewNudge",()=>({cancelReviewNudgeForLogout:reviewNudge.cancel,noteReviewCount:reviewNudge.note}));
 
 vi.mock("expo-secure-store", () => ({
   AFTER_FIRST_UNLOCK_THIS_DEVICE_ONLY: 1,
@@ -2883,3 +2885,12 @@ function deferred<T>() {
   });
   return { promise, reject, resolve };
 }
+
+describe("evening Review reminder lifecycle", () => {
+  it("cancels the reminder when a rejected session is announced only through the signed-out event", async () => {
+    const { publishMobileSignedOut } = await import("./mobileSessionTransition");
+    reviewNudge.cancel.mockClear();
+    publishMobileSignedOut();
+    await vi.waitFor(() => expect(reviewNudge.cancel).toHaveBeenCalled());
+  });
+});

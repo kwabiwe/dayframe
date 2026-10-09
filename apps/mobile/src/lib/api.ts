@@ -1,6 +1,7 @@
 import { DAYFRAME_BACKEND_ID } from "./backendIdentity";
 import type { HealthCaptureOwner } from "./healthSyncStore";
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import { subscribeMobileSignedOut } from "./mobileSessionTransition";
 import { AppState } from "react-native";
 import {
   ActivityEventInputSchema,
@@ -503,6 +504,12 @@ type ApiJsonRead<T> =
   | { ok: true; payload: T }
   | { ok: false; message: string };
 
+/** Hands a Review count from any Dayframe reply to the evening reminder. Never blocks or throws. */
+function noteReviewCountQuietly(owner: MobileAccountOwner | null, count: unknown) {
+  if (typeof count !== "number") return;
+  void import("./reviewNudge").then(({ noteReviewCount }) => noteReviewCount(owner, count)).catch(() => undefined);
+}
+
 export async function fetchBootstrap(options: { date?: string; signal?: AbortSignal; deadlineAt?: number } = {}): Promise<MobileBootstrap> {
   const logoutAllowsResponse = captureBootstrapLogoutGuard();
   const requireLogoutAllowsResponse = () => { if (!logoutAllowsResponse()) throw new StaleMobileSessionResponseError(); };
@@ -580,6 +587,7 @@ export async function fetchBootstrap(options: { date?: string; signal?: AbortSig
     requireBootstrapCurrent();
     await activateMobileAccount(owner);
     requireBootstrapCurrent();
+    noteReviewCountQuietly(owner, bootstrap.stats?.reviewCount);
   }
   const reviewStore = await reviewSyncStore();
   requireLogoutAllowsResponse();
@@ -633,6 +641,19 @@ export async function login(email: string, password: string) {
 export async function signup(email: string, password: string, name?: string, workspaceName?: string) {
   return authenticate("/api/auth/signup", { email, password, name, workspaceName });
 }
+
+// Any way the session ends (sign-out, expiry, a revoked session) takes the evening Review reminder
+// with it: it belongs to the account that left. A rejected session is announced only through the
+// signed-out event, a cleared token through the session listeners, so both are heard.
+function cancelReviewNudgeAfterSignOut() {
+  void import("./reviewNudge").then(({ cancelReviewNudgeForLogout }) => cancelReviewNudgeForLogout()).catch(() => undefined);
+}
+subscribeMobileSignedOut(cancelReviewNudgeAfterSignOut);
+subscribeAuthenticatedSession(() => {
+  void readAuthenticatedSessionSnapshot().then((read) => {
+    if (read.status === "signed_out") cancelReviewNudgeAfterSignOut();
+  }).catch(() => undefined);
+});
 
 export async function logout() {
   void endAllTimerBackgroundExecution("logout");
@@ -693,6 +714,8 @@ export async function logout() {
     requireCurrent();
     await clearSessionToken();
     logoutSucceeded = true;
+    // The evening Review reminder belongs to the account that just left.
+    void import("./reviewNudge").then(({ cancelReviewNudgeForLogout }) => cancelReviewNudgeForLogout()).catch(() => undefined);
   } finally {
     unsubscribe();
     finishBootstrapLogoutRequest?.();
@@ -1260,6 +1283,7 @@ async function syncQueueItems(
           throw new Error("The Health acknowledgement backend is not verified.");
         }
       }
+      noteReviewCountQuietly(owner, (payload as { reviewCount?: unknown }).reviewCount);
       synced.push(item.localId);
     } catch (error) {
       if (error instanceof AuthRequiredError) throw error;

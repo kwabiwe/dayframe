@@ -11,6 +11,8 @@ PODS:
     - ExpoModulesCore
   - DayframePlaceSearch (0.1.0):
     - ExpoModulesCore
+  - EXApplication (56.0.3):
+    - ExpoModulesCore
   - EXConstants (56.0.23):
     - ExpoModulesCore
   - Expo (56.0.19):
@@ -98,6 +100,8 @@ PODS:
     - ExpoModulesJSI
     - ExpoModulesWorklets
     - RNWorklets
+  - ExpoNotifications (56.0.23):
+    - ExpoModulesCore
   - ExpoRouter (56.2.18):
     - ExpoModulesCore
     - RNScreens
@@ -2402,6 +2406,7 @@ DEPENDENCIES:
   - DayframeLocationVisits (from `../modules/dayframe-location-visits/ios`)
   - DayframeMotionActivity (from `../modules/dayframe-motion-activity/ios`)
   - DayframePlaceSearch (from `../modules/dayframe-place-search/ios`)
+  - EXApplication (from `../../../node_modules/expo-application/ios`)
   - EXConstants (from `../../../node_modules/expo-constants/ios`)
   - Expo (from `../../../node_modules/expo`)
   - ExpoAsset (from `../../../node_modules/expo-asset/ios`)
@@ -2420,6 +2425,7 @@ DEPENDENCIES:
   - ExpoModulesJSI (from `../../../node_modules/expo-modules-jsi/apple`)
   - ExpoModulesWorklets (from `../node_modules/expo-modules-core`)
   - ExpoModulesWorkletsAdapter (from `../node_modules/expo-modules-core`)
+  - ExpoNotifications (from `../../../node_modules/expo-notifications/ios`)
   - ExpoRouter (from `../node_modules/expo-router/ios`)
   - ExpoSecureStore (from `../../../node_modules/expo-secure-store/ios`)
   - ExpoSQLite (from `../../../node_modules/expo-sqlite/ios`)
@@ -2529,6 +2535,8 @@ EXTERNAL SOURCES:
     :path: "../modules/dayframe-motion-activity/ios"
   DayframePlaceSearch:
     :path: "../modules/dayframe-place-search/ios"
+  EXApplication:
+    :path: "../../../node_modules/expo-application/ios"
   EXConstants:
     :path: "../../../node_modules/expo-constants/ios"
   Expo:
@@ -2565,6 +2573,8 @@ EXTERNAL SOURCES:
     :path: "../node_modules/expo-modules-core"
   ExpoModulesWorkletsAdapter:
     :path: "../node_modules/expo-modules-core"
+  ExpoNotifications:
+    :path: "../../../node_modules/expo-notifications/ios"
   ExpoRouter:
     :path: "../node_modules/expo-router/ios"
   ExpoSecureStore:
@@ -2762,6 +2772,7 @@ SPEC CHECKSUMS:
   DayframeLocationVisits: a92d96c395edf56959289c8e57ebb10ab4417884
   DayframeMotionActivity: d10a88e8894cb8c6a37bc317fb306c73bed8d9eb
   DayframePlaceSearch: 0dca400edd668a45b1c00b986ecb147ada6bfea5
+  EXApplication: e6040c92edc5522accd62852342e6b14742d42c0
   EXConstants: 6bcea1db4d1215969dc3409dfe33d94a5bfe50ca
   Expo: b06a9178293f86989516ee226c240605fb307d12
   ExpoAsset: 87b14d63c50edc7a07f6e99128c0832c03ef2bad
@@ -2780,6 +2791,7 @@ SPEC CHECKSUMS:
   ExpoModulesJSI: e62656cfaffb5aeb3fdc1dd2bc49f77e87ed2261
   ExpoModulesWorklets: 40fe3862230a3d967899ff29211480efc5daf4e2
   ExpoModulesWorkletsAdapter: 036c0be70f07d6fff89023f33da6e28556a85838
+  ExpoNotifications: 0b1d20c332a90db507a3e50076e7e756a56f2951
   ExpoRouter: fc7a05eee579d54869806f9f95c799020c7800fc
   ExpoSecureStore: f1bd083c1b7b8d4142013ffcc0082d377d9f49f4
   ExpoSQLite: eba0f88d7c17165f4af12fb311b30d5a6a34b00e

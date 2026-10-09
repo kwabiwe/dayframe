@@ -5,6 +5,8 @@ import { ZodError } from "zod";
 import { authErrorResponse } from "@/lib/api-errors";
 import { isLockNotAvailableError, isStatementTimeoutError } from "@/lib/db";
 import { resolveRequestSession } from "@/lib/ingest-auth";
+import { openReviewCountFor, withReviewCount } from "@/lib/review-count";
+import { REVIEW_COUNT_REQUEST_HEADER } from "@dayframe/shared";
 import {
   LOCATION_EVIDENCE_BODY_LIMIT_BYTES,
   LocationIngestError,
@@ -60,7 +62,12 @@ export async function POST(request: Request) {
       onLocationCount: diagnostics.onLocationCount,
       onSyncTiming: diagnostics.onSyncTiming
     });
-    return respond(result);
+    // The phone schedules its evening Review reminder from this count. Only clients that ask get it:
+    // older iPhone builds parse this reply strictly and would reject an extra field.
+    const reviewCount = request.headers.get(REVIEW_COUNT_REQUEST_HEADER) === "1"
+      ? await openReviewCountFor(session)
+      : undefined;
+    return respond(withReviewCount(result, reviewCount));
   } catch (error) {
     const authResponse = authErrorResponse(error);
     if (authResponse) {

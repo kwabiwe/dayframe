@@ -1,7 +1,16 @@
 import { readOwnedAuthenticatedSessionSnapshot, isAuthenticatedSessionSnapshotCurrent } from "@/lib/secure-session";
 import { mobileBuildDiagnostics } from "@/lib/mobileBuildDiagnostics";
 import { supportQueueDiagnostics } from "@/lib/supportSyncDiagnostics";
-import { readActiveMobileAccount, mobileAccountOwnersEqual } from "@/lib/mobileAccount";
+import { readActiveMobileAccount, mobileAccountOwnersEqual, type MobileAccountOwner } from "@/lib/mobileAccount";
+import {
+  REVIEW_NUDGE_MINUTES,
+  formatReviewNudgeTime,
+  readReviewNudgeState,
+  setReviewNudgeEnabled,
+  setReviewNudgeMinutes,
+  type ReviewNudgeState
+} from "@/lib/reviewNudge";
+import type { ReviewNudgePermission } from "@/lib/reviewNudgeNative";
 import { synchroniseDeviceNow, getLastManualSyncResult } from "@/lib/manualSyncRuntime";
 import { createOwnerSyncCoalescer } from "@/lib/ownerSyncCoalescer";
 import { subscribeRecoveredDashboardBootstrap } from "@/lib/dashboardBootstrapChannel";
@@ -599,6 +608,61 @@ export default function SettingsScreen() {
       void refreshTimerStopDiagnostics();
     });
   }, [refreshTimerStopDiagnostics]);
+
+  // The evening Review reminder: this account's choice plus the iOS notification permission,
+  // re-read whenever the app returns (the permission is changed in iOS Settings).
+  const [reviewNudge, setReviewNudge] = useState<ReviewNudgeState | null>(null);
+  const [nudgePermission, setNudgePermission] = useState<ReviewNudgePermission | null>(null);
+  const [nudgeBusy, setNudgeBusy] = useState(false);
+  const refreshReviewNudge = useCallback(async () => {
+    const owner = await readActiveMobileAccount();
+    if (!owner) return;
+    const [state, permission] = await Promise.all([
+      readReviewNudgeState(owner),
+      import("@/lib/reviewNudgeNative").then(({ readReviewNudgePermission }) => readReviewNudgePermission()).catch(() => null)
+    ]);
+    if (!mobileAccountOwnersEqual(owner, await readActiveMobileAccount())) return;
+    setReviewNudge(state);
+    setNudgePermission(permission);
+  }, []);
+  useEffect(() => {
+    void refreshReviewNudge();
+    const subscription = AppState.addEventListener("change", (state) => { if (state === "active") void refreshReviewNudge(); });
+    return () => subscription.remove();
+  }, [refreshReviewNudge]);
+
+  const reviewNudgeOn = Boolean(reviewNudge?.enabled) && nudgePermission === "granted";
+
+  async function changeReviewNudge(change: (owner: MobileAccountOwner) => Promise<ReviewNudgeState>) {
+    if (nudgeBusy) return;
+    setNudgeBusy(true);
+    try {
+      const owner = await readActiveMobileAccount();
+      if (!owner) return;
+      const next = await change(owner);
+      if (mobileAccountOwnersEqual(owner, await readActiveMobileAccount())) setReviewNudge(next);
+    } catch {
+      Alert.alert("Evening reminder", "The reminder couldn't be changed. Try again.");
+    } finally {
+      setNudgeBusy(false);
+    }
+  }
+
+  async function toggleReviewNudge(enabled: boolean) {
+    if (!enabled) {
+      await changeReviewNudge((owner) => setReviewNudgeEnabled(owner, false));
+      return;
+    }
+    // iOS asks once; after that the choice lives in iPhone Settings.
+    const nativeModule = await import("@/lib/reviewNudgeNative").catch(() => null);
+    if (!nativeModule) return;
+    let permission = await nativeModule.readReviewNudgePermission().catch(() => "denied" as const);
+    if (permission === "undetermined") permission = await nativeModule.requestReviewNudgePermission().catch(() => "denied" as const);
+    setNudgePermission(permission);
+    if (permission !== "granted") return;
+    // Plans from the latest count the reminder heard (with its time), never this page's cache.
+    await changeReviewNudge((owner) => setReviewNudgeEnabled(owner, true));
+  }
 
   // Motion & Fitness is changed in iOS Settings: re-read it whenever the app returns.
   useEffect(() => {
@@ -1777,6 +1841,49 @@ export default function SettingsScreen() {
                   title="Saved places"
                   value={String(data?.places.length ?? 0)}
                 />
+                <SettingsBlockRow
+                  control={nudgePermission === "denied" ? (
+                    <SettingsPillButton
+                      accessibilityLabel="Open iPhone Settings to allow notifications"
+                      label="Open Settings"
+                      onPress={() => void Linking.openSettings()}
+                      theme={theme}
+                    />
+                  ) : (
+                    <SettingsSwitch
+                      disabled={reviewNudge === null || nudgeBusy}
+                      label="Evening reminder"
+                      onValueChange={(enabled) => void toggleReviewNudge(enabled)}
+                      theme={theme}
+                      value={reviewNudgeOn}
+                    />
+                  )}
+                  subtitle={nudgePermission === "denied" ? "Notifications are off in iPhone Settings" : "When suggestions are waiting"}
+                  testID="settings-review-nudge"
+                  theme={theme}
+                  title="Evening reminder"
+                />
+                {reviewNudgeOn && reviewNudge ? (
+                  <Reanimated.View entering={localPresenceEntering(reduceMotion)} exiting={localPresenceExiting(reduceMotion)}>
+                    <SettingsBlockRow
+                      control={
+                        <SettingsStepper
+                          canDecrease={!nudgeBusy && reviewNudge.minutes > REVIEW_NUDGE_MINUTES.min}
+                          canIncrease={!nudgeBusy && reviewNudge.minutes < REVIEW_NUDGE_MINUTES.max}
+                          hint={`From ${formatReviewNudgeTime(REVIEW_NUDGE_MINUTES.min)} to ${formatReviewNudgeTime(REVIEW_NUDGE_MINUTES.max)}, in half hours`}
+                          label="reminder time"
+                          onDecrease={() => void changeReviewNudge((owner) => setReviewNudgeMinutes(owner, reviewNudge.minutes - REVIEW_NUDGE_MINUTES.step))}
+                          onIncrease={() => void changeReviewNudge((owner) => setReviewNudgeMinutes(owner, reviewNudge.minutes + REVIEW_NUDGE_MINUTES.step))}
+                          theme={theme}
+                          value={formatReviewNudgeTime(reviewNudge.minutes)}
+                        />
+                      }
+                      testID="settings-review-nudge-time"
+                      theme={theme}
+                      title="Time"
+                    />
+                  </Reanimated.View>
+                ) : null}
               </SettingsBlockGroup>
 
               <SettingsBlockGroup theme={theme} title="Apple Health">

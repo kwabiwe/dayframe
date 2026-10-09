@@ -6,6 +6,7 @@ import { resolveRequestSession } from "@/lib/ingest-auth";
 import { processActivityEvent, TimerMutationBusyError } from "@/lib/event-service";
 import { isDatabasePayloadError, isDatabaseReadinessError, isMissingRequiredColumnError, isStatementTimeoutError, isLockNotAvailableError } from "@/lib/db";
 import { scheduleLiveActivityNotification } from "@/lib/live-activity-post-response";
+import { openReviewCountFor, withReviewCount } from "@/lib/review-count";
 
 export async function POST(request: Request) {
   const deadlineAt = Date.now() + 8_000;
@@ -17,9 +18,11 @@ export async function POST(request: Request) {
     const body = await request.json();
     const result = await processActivityEvent(body, session, { signal: request.signal, deadlineAt });
     scheduleLiveActivityNotification(session);
-    return NextResponse.json({ ...result,
+    // The phone schedules its evening Review reminder from this count.
+    const reviewCount = await openReviewCountFor(session);
+    return NextResponse.json(withReviewCount({ ...result,
       ...(typeof body?.clientEventId === "string" ? { clientEventId: body.clientEventId } : {})
-    }, { status: result.duplicate ? 200 : 201 });
+    }, reviewCount), { status: result.duplicate ? 200 : 201 });
   } catch (error) {
     const readiness = databaseReadinessResponse(error);
     if (readiness) return readiness;

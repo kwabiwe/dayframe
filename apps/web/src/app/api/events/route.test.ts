@@ -7,12 +7,17 @@ const session = {
   scopes: ["app:read", "app:write", "events:write"]
 };
 
+const reviewCountMock = vi.hoisted(() => vi.fn());
 const mocks = vi.hoisted(() => ({
   resolveRequestSession: vi.fn(),
   processActivityEvent: vi.fn(),
   scheduleLiveActivityNotification: vi.fn()
 }));
 
+vi.mock("@/lib/review-count", () => ({
+  openReviewCountFor: reviewCountMock,
+  withReviewCount: (body: object, reviewCount?: number) => reviewCount === undefined ? body : { ...body, reviewCount }
+}));
 vi.mock("@/lib/ingest-auth", () => ({
   resolveRequestSession: mocks.resolveRequestSession
 }));
@@ -52,6 +57,13 @@ describe("POST /api/events", () => {
     expect(payload.eventId).toBe("event-1");
     expect(mocks.processActivityEvent).toHaveBeenCalledWith(healthSleepEvent(), session, {signal:expect.any(AbortSignal),deadlineAt:expect.any(Number)});
     expect(mocks.scheduleLiveActivityNotification).toHaveBeenCalledWith(session);
+  });
+
+  it("adds the open Review count for the phone's evening reminder", async () => {
+    reviewCountMock.mockResolvedValueOnce(4);
+    const payload = await (await POST(jsonRequest(healthSleepEvent()))).json();
+    expect(payload).toMatchObject({ eventId: "event-1", reviewCount: 4 });
+    expect(reviewCountMock).toHaveBeenCalledWith(session);
   });
 
   it("reports a Health SQL timeout with its real phase and preserves retry semantics",async()=>{
