@@ -86,7 +86,10 @@ export function formatReviewNudgeTime(minutes: number) {
   return `${hours12}:${String(mins).padStart(2, "0")} ${hours24 < 12 ? "am" : "pm"}`;
 }
 
-const storageKey = (owner: MobileAccountOwner) => `dayframe:review-nudge:v1:${mobileAccountKey(owner)}`;
+const storageKeyFor = (accountKey: string) => `dayframe:review-nudge:v1:${accountKey}`;
+const storageKey = (owner: MobileAccountOwner) => storageKeyFor(mobileAccountKey(owner));
+/** The account whose reminder is currently scheduled (the one native identifier is shared). */
+const SCHEDULED_FOR_KEY = "dayframe:review-nudge:v1:scheduled-for";
 
 function parseState(raw: string | null): ReviewNudgeState {
   if (!raw) return { ...DEFAULT_REVIEW_NUDGE_STATE };
@@ -141,6 +144,7 @@ async function update(owner: MobileAccountOwner, change: (state: ReviewNudgeStat
     if (plan && allowed && stillActive) {
       await nativeModule.scheduleReviewNudge(plan.fireAt, plan.body, mobileAccountKey(owner));
       next.lastFireAt = plan.fireAt.toISOString();
+      await AsyncStorage.setItem(SCHEDULED_FOR_KEY, mobileAccountKey(owner));
     } else {
       // Never cancel another account's reminder: it replaces this one when its own count arrives.
       if (stillActive) await nativeModule.cancelReviewNudge();
@@ -166,9 +170,16 @@ export function setReviewNudgeMinutes(owner: MobileAccountOwner, minutes: number
   return update(owner, (state) => ({ ...state, minutes: clampReviewNudgeMinutes(minutes) }), now);
 }
 
-/** Sign-out: the reminder belongs to the account that is leaving. */
-export function cancelReviewNudgeForLogout() {
+/**
+ * Sign-out: the reminder belongs to the account that is leaving. Its pending time is cleared (a
+ * reminder that already fired keeps its day), so signing back in can still remind today.
+ */
+export function cancelReviewNudgeForLogout(now = new Date()) {
   return serialised(async () => {
     await (await native()).cancelReviewNudge();
+    const accountKey = await AsyncStorage.getItem(SCHEDULED_FOR_KEY);
+    if (!accountKey) return;
+    const state = settleFiredReminder(parseState(await AsyncStorage.getItem(storageKeyFor(accountKey))), now);
+    await AsyncStorage.setItem(storageKeyFor(accountKey), JSON.stringify({ ...state, lastFireAt: null }));
   }).catch(() => undefined);
 }

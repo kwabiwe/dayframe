@@ -163,6 +163,22 @@ describe("review nudge store", () => {
     expect((await nudge.readReviewNudgeState(owner)).firedOn).toBeNull();
   });
 
+  it("clears the leaving account's pending time at sign-out but keeps a day that already fired", async () => {
+    await nudge.setReviewNudgeEnabled(owner, true, at(2026, 10, 9, 15));
+    await nudge.noteReviewCount(owner, 3, at(2026, 10, 9, 15));
+    await nudge.cancelReviewNudgeForLogout(at(2026, 10, 9, 19));
+    let state = await nudge.readReviewNudgeState(owner);
+    expect(state.lastFireAt).toBeNull();
+    expect(state.firedOn).toBeNull();
+    // Back at 21:00 and choosing 22:00: today never had a reminder, so it can still come today.
+    await nudge.setReviewNudgeMinutes(owner, 22 * 60, at(2026, 10, 9, 21));
+    expect(native.scheduled.at(-1)?.fireAt).toEqual(at(2026, 10, 9, 22));
+    // A reminder that already fired keeps its day through a sign-out.
+    await nudge.cancelReviewNudgeForLogout(at(2026, 10, 9, 22, 30));
+    state = await nudge.readReviewNudgeState(owner);
+    expect(state.firedOn).toBe("2026-10-09");
+  });
+
   it("ignores counts that aren't whole numbers", async () => {
     await nudge.setReviewNudgeEnabled(owner, true);
     await nudge.noteReviewCount(owner, "3" as unknown as number);

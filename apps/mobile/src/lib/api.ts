@@ -1,6 +1,7 @@
 import { DAYFRAME_BACKEND_ID } from "./backendIdentity";
 import type { HealthCaptureOwner } from "./healthSyncStore";
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import { subscribeMobileSignedOut } from "./mobileSessionTransition";
 import { AppState } from "react-native";
 import {
   ActivityEventInputSchema,
@@ -642,11 +643,15 @@ export async function signup(email: string, password: string, name?: string, wor
 }
 
 // Any way the session ends (sign-out, expiry, a revoked session) takes the evening Review reminder
-// with it: it belongs to the account that left.
+// with it: it belongs to the account that left. A rejected session is announced only through the
+// signed-out event, a cleared token through the session listeners, so both are heard.
+function cancelReviewNudgeAfterSignOut() {
+  void import("./reviewNudge").then(({ cancelReviewNudgeForLogout }) => cancelReviewNudgeForLogout()).catch(() => undefined);
+}
+subscribeMobileSignedOut(cancelReviewNudgeAfterSignOut);
 subscribeAuthenticatedSession(() => {
   void readAuthenticatedSessionSnapshot().then((read) => {
-    if (read.status !== "signed_out") return;
-    return import("./reviewNudge").then(({ cancelReviewNudgeForLogout }) => cancelReviewNudgeForLogout());
+    if (read.status === "signed_out") cancelReviewNudgeAfterSignOut();
   }).catch(() => undefined);
 });
 
