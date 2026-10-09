@@ -373,8 +373,10 @@ export default function PlaceEditorScreen() {
     // fails here does not undo it: Places refreshes when it is shown.
     // If the fresh read fails, monitoring uses this editor's snapshot with the accepted place
     // (and the role it took) applied, never the places as they were before the save.
+    // The role is applied against the snapshot as it was before the assignment (the accepted place
+    // added without it), so implicit holders named like the role are renamed as the server did.
     const snapshot = data
-      ? [...data.places.filter((place) => place.id !== accepted.id), accepted]
+      ? [...data.places.filter((place) => place.id !== accepted.id), roleChange ? { ...accepted, role: null } : accepted]
       : [];
     await refreshGeofencesAfterChange(roleChange ? applyPlaceRoleLocally(snapshot, roleChange) : snapshot);
     if (await editorStillFor(owner)) router.back();

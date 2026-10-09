@@ -64,6 +64,8 @@ export default function PlacesScreen() {
   const reduceMotion = useReduceMotionPreference();
   const { styles, theme } = useMobileTheme();
   const [data, setData] = useState<MobileBootstrap | null>(null);
+  const dataRef = useRef(data);
+  dataRef.current = data;
   const [refreshing, setRefreshing] = useState(false);
   const [ignoringLearnedId, setIgnoringLearnedId] = useState<string | null>(null);
   const [forgettingLearnedId, setForgettingLearnedId] = useState<string | null>(null);
@@ -84,8 +86,11 @@ export default function PlacesScreen() {
     if (options?.refresh) setRefreshing(true);
     const epoch = changeEpoch.current;
     try {
-      const bootstrap = await fetchBootstrap();
+      const fetched = await fetchBootstrap();
       if (!mounted.current || epoch !== changeEpoch.current) return;
+      // Deletes accepted while this read was out (possibly before the page had any data) still apply.
+      const bootstrap = takeDeletedPlaces(mobileAccountKey({ userId: fetched.user.id, workspaceId: fetched.workspace.id }))
+        .reduce((next, id) => reconcileBootstrapPlaces(next, { removePlaceId: id }), fetched);
       setData(bootstrap);
       void backfillLearnedPlaceLocations(bootstrap.learnedPlaces ?? []).then((resolved) => {
         if (resolved.length === 0) return;
@@ -112,8 +117,12 @@ export default function PlacesScreen() {
   // and when the delete finishes after the person already came back to this page.
   const applyDeletedPlaces = useCallback(async () => {
     const owner = await readActiveMobileAccount();
-    const deleted = owner ? takeDeletedPlaces(mobileAccountKey(owner)) : [];
-    if (deleted.length === 0 || !mounted.current) return;
+    const current = dataRef.current;
+    // Nothing shown yet: leave the deletes for the opening read to apply (it is not dropped).
+    if (!mounted.current || !owner || !current
+      || !mobileAccountOwnersEqual(owner, { userId: current.user.id, workspaceId: current.workspace.id })) return;
+    const deleted = takeDeletedPlaces(mobileAccountKey(owner));
+    if (deleted.length === 0) return;
     changeEpoch.current += 1;
     setData((current) => current && mobileAccountOwnersEqual(owner, { userId: current.user.id, workspaceId: current.workspace.id })
       ? deleted.reduce((next, id) => reconcileBootstrapPlaces(next, { removePlaceId: id }), current)
@@ -251,6 +260,8 @@ export default function PlacesScreen() {
     upsertPlace?: MobilePlace;
     removePlaceId?: string;
     removeLearnedPlaceId?: string;
+    /** Places as this page now shows them, for monitoring when the fresh read fails. */
+    fallbackPlaces?: MobilePlace[];
   }) {
     const epoch = changeEpoch.current;
     try {
@@ -270,6 +281,10 @@ export default function PlacesScreen() {
       if (error instanceof AuthRequiredError) {
         router.replace("/");
         return;
+      }
+      const current = dataRef.current;
+      if (options.fallbackPlaces && current) {
+        await refreshGeofencesForPlaces(options.fallbackPlaces, { userId: current.user.id, workspaceId: current.workspace.id }).catch(() => 0);
       }
       setStatusMessage(`${options.prefix} Pull to refresh if it doesn't show on another device.`);
     }
@@ -317,9 +332,15 @@ export default function PlacesScreen() {
       // read that started before this answer is dropped.
       if (!mounted.current || !mobileAccountOwnersEqual(owner, await readActiveMobileAccount())) return null;
       changeEpoch.current += 1;
-      setData((current) => current ? { ...current, places: applyPlaceRoleLocally(current.places, request) } : current);
+      const shown = dataRef.current;
+      const nextPlaces = shown ? applyPlaceRoleLocally(shown.places, request) : undefined;
+      if (shown && nextPlaces) {
+        const next = { ...shown, places: nextPlaces };
+        dataRef.current = next;
+        setData(next);
+      }
       const label = placeRoleLabel(request.role);
-      await refreshAfterPlaceChange({ prefix: request.placeId ? `${label} updated.` : `${label} cleared.` });
+      await refreshAfterPlaceChange({ prefix: request.placeId ? `${label} updated.` : `${label} cleared.`, fallbackPlaces: nextPlaces });
       return null;
     } finally {
       roleSaving.current = false;
