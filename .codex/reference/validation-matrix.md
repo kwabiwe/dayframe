@@ -374,7 +374,7 @@ Native Calendar evidence:
 Native Calendar block styling additionally requires:
 
 - Swift behaviour tests proving one nominal compact radius, a one-point visual-only gap, zero gap for next-day continuation, positive tiny geometry, unchanged semantic text thresholds, and semantic hit height.
-- Source/bridge contracts proving the old half-height capsule rule is absent; active/Review dashes and Uncategorized hatch remain; styling adds no Play, networking, mutation, model-version bump, hosting controller, or additional gesture owner beyond the one documented Calendar creation recognizer.
+- Source/bridge contracts proving the old half-height capsule rule is absent; solid fills with measured text, the live ring and the hatched Review lane remain; styling adds no Play, networking, mutation, model-version bump, hosting controller, or additional gesture owner beyond the one documented Calendar creation recognizer.
 - Rendered tall, short, tiny, exact sequential, active, Review, Uncategorized, tagged, long-title, contained/partial/dense overlap, and both continuation directions at minimum/default/maximum zoom.
 - Measure a stable `1pt` vertical separation and `1pt` border at each zoom/display scale. Confirm no false midnight gap, no time/grid/current-line drift, no overlap-lane change, and no text/marker clipping from the one-point paint inset.
 - Tap every fixture, including both sides of a sequential boundary and dense/contained lanes. Verify isolated `44pt` targets and semantic-height overlap targets route to the intended existing React editor/Review flow.

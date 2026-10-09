@@ -4,54 +4,136 @@ import UIKit
 struct DayframeCalendarRootView: View {
   @ObservedObject var model: DayframeCalendarViewModel
   let actions: DayframeCalendarActions
+  @Namespace private var weekStripSelection
+  @State private var selectionHaptic = UISelectionFeedbackGenerator()
 
   var body: some View {
     let presentation = model.presentation
     let theme = presentation.theme
 
-    VStack(spacing: 12) {
+    VStack(spacing: 10) {
+      calendarHeader(presentation: presentation, theme: theme)
+        .padding(.horizontal, 18)
       weekStrip(presentation: presentation, theme: theme)
-      calendarPanel(presentation: presentation, theme: theme)
+        .padding(.horizontal, 12)
+      timeline(presentation: presentation, theme: theme)
     }
-    .padding(.horizontal, 16)
-    .padding(.top, 8)
-    .padding(.bottom, 10)
+    .padding(.top, 4)
     .frame(maxWidth: .infinity, maxHeight: .infinity)
     .background(Color(dayframeCSS: theme.background).ignoresSafeArea())
     .preferredColorScheme(theme.mode == "light" ? .light : .dark)
   }
 
+  private func playSelectionHaptic() {
+    guard model.presentation.hapticsEnabled else { return }
+    selectionHaptic.selectionChanged()
+    selectionHaptic.prepare()
+  }
+
+  // Blocks header: the month as the screen title, the selected day's framed time, zoom − / +.
+  @ViewBuilder
+  private func calendarHeader(
+    presentation: DayframeCalendarPresentation,
+    theme: DayframeCalendarTheme
+  ) -> some View {
+    HStack(alignment: .center, spacing: 12) {
+      VStack(alignment: .leading, spacing: 2) {
+        Text(presentation.monthTitle)
+          .font(.custom("BricolageGrotesque-Bold", size: 30, relativeTo: .largeTitle))
+          .foregroundStyle(Color(dayframeCSS: theme.textPrimary))
+          .lineLimit(1)
+          .minimumScaleFactor(0.7)
+          .accessibilityAddTraits(.isHeader)
+        Text(presentation.framedLabel)
+          .font(.subheadline.weight(.semibold))
+          .monospacedDigit()
+          .foregroundStyle(Color(dayframeCSS: theme.textSecondary))
+          .lineLimit(2)
+          .fixedSize(horizontal: false, vertical: true)
+      }
+      .frame(maxWidth: .infinity, alignment: .leading)
+      .accessibilityElement(children: .combine)
+
+      zoomPill(theme: theme)
+    }
+    .dynamicTypeSize(.xSmall ... .xxxLarge)
+  }
+
+  @ViewBuilder
+  private func zoomPill(theme: DayframeCalendarTheme) -> some View {
+    HStack(spacing: 2) {
+      zoomButton(direction: -1, enabled: model.canZoomOut, theme: theme)
+      zoomButton(direction: 1, enabled: model.canZoomIn, theme: theme)
+    }
+    .padding(3)
+    .background(Capsule(style: .continuous).fill(Color(dayframeCSS: theme.surface)))
+  }
+
+  @ViewBuilder
+  private func zoomButton(direction: Int, enabled: Bool, theme: DayframeCalendarTheme) -> some View {
+    Button {
+      playSelectionHaptic()
+      model.requestZoom(direction: direction)
+    } label: {
+      Image(systemName: direction > 0 ? "plus" : "minus")
+        .font(.system(size: 17, weight: .semibold))
+        .foregroundStyle(Color(dayframeCSS: theme.textPrimary))
+        .frame(width: 44, height: 44)
+        .contentShape(Circle())
+    }
+    .buttonStyle(.plain)
+    .disabled(!enabled)
+    .opacity(enabled ? 1 : 0.35)
+    .accessibilityLabel(direction > 0 ? "Zoom in" : "Zoom out")
+    .accessibilityHint("Changes how many hours fit on screen")
+  }
+
+  // Week strip: weekday initial, the date in a 32-point circle (selected filled, today coral) and up
+  // to three bars for the day's biggest activities. Swipe sideways to change week.
   @ViewBuilder
   private func weekStrip(
     presentation: DayframeCalendarPresentation,
     theme: DayframeCalendarTheme
   ) -> some View {
-    HStack(spacing: 6) {
+    HStack(spacing: 4) {
       ForEach(presentation.weekDays) { day in
         Button {
+          if !day.isSelected { playSelectionHaptic() }
           actions.selectDay(day.dayKey)
         } label: {
-          VStack(spacing: 4) {
+          VStack(spacing: 3) {
             Text(day.weekdayLabel)
-              .font(.caption2.weight(.semibold))
-              .foregroundStyle(Color(dayframeCSS: day.isSelected || day.isToday ? theme.accentText : theme.textSecondary))
+              .font(.caption2.weight(.bold))
+              .textCase(.uppercase)
+              .foregroundStyle(Color(dayframeCSS: theme.textSecondary))
               .lineLimit(1)
-            Text(day.dayNumber)
-              .font(.body.weight(.semibold))
-              .monospacedDigit()
-              .foregroundStyle(Color(dayframeCSS: day.isSelected ? theme.accentText : theme.textPrimary))
-              .lineLimit(1)
-            Circle()
-              .fill(Color(dayframeCSS: theme.accent))
-              .frame(width: 4, height: 4)
-              .opacity(day.isToday && !day.isSelected ? 1 : 0)
+            ZStack {
+              if day.isSelected {
+                Circle()
+                  .fill(Color(dayframeCSS: theme.textPrimary))
+                  .matchedGeometryEffect(id: "selected-day", in: weekStripSelection)
+              }
+              Text(day.dayNumber)
+                .font(.system(size: 15, weight: .bold))
+                .monospacedDigit()
+                .foregroundStyle(Color(dayframeCSS: dayNumberColor(day, theme: theme)))
+                .lineLimit(1)
+                .minimumScaleFactor(0.7)
+            }
+            .frame(width: 32, height: 32)
+            HStack(spacing: 2) {
+              ForEach(Array(day.bars.enumerated()), id: \.offset) { _, color in
+                RoundedRectangle(cornerRadius: 2, style: .continuous)
+                  .fill(Color(dayframeCSS: color))
+                  .frame(width: 5, height: 4)
+              }
+            }
+            .frame(height: 4)
+            .accessibilityHidden(true)
           }
-          .frame(maxWidth: .infinity, minHeight: 56)
-          .background(
-            RoundedRectangle(cornerRadius: 14, style: .continuous)
-              .fill(Color(dayframeCSS: day.isSelected ? theme.accentSoft : theme.surfaceMuted))
-          )
-          .contentShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+          .padding(.vertical, 5)
+          .frame(maxWidth: .infinity, minHeight: 44)
+          .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .accessibilityLabel(day.accessibilityLabel)
@@ -59,15 +141,9 @@ struct DayframeCalendarRootView: View {
       }
     }
     .dynamicTypeSize(.xSmall ... .large)
-    .padding(8)
-    .background(
-      RoundedRectangle(cornerRadius: 18, style: .continuous)
-        .fill(Color(dayframeCSS: theme.surfaceRaised))
-        .shadow(
-          color: presentation.reduceTransparency ? .clear : Color(dayframeCSS: theme.shadow),
-          radius: 10,
-          y: 3
-        )
+    .animation(
+      presentation.reduceMotion ? nil : .spring(response: 0.32, dampingFraction: 0.82),
+      value: presentation.selectedDayKey
     )
     .contentShape(Rectangle())
     .simultaneousGesture(
@@ -81,98 +157,25 @@ struct DayframeCalendarRootView: View {
     )
   }
 
+  private func dayNumberColor(_ day: DayframeCalendarWeekDay, theme: DayframeCalendarTheme) -> String {
+    if day.isSelected { return theme.background }
+    return day.isToday ? theme.accent : theme.textPrimary
+  }
+
   @ViewBuilder
-  private func calendarPanel(
+  private func timeline(
     presentation: DayframeCalendarPresentation,
     theme: DayframeCalendarTheme
   ) -> some View {
-    VStack(spacing: 12) {
-      calendarHeader(presentation: presentation, theme: theme)
-
-      ScrollView(.vertical) {
-        DayframeCalendarTimelineCanvas(model: model, actions: actions)
-          .frame(height: 24 * model.hourHeight)
-      }
-      .dynamicTypeSize(.xSmall ... .large)
-      .frame(maxWidth: .infinity, maxHeight: .infinity)
-      .background(Color(dayframeCSS: theme.surfaceMuted))
-      .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
-      .accessibilityLabel("24-hour Calendar timeline")
-      .accessibilityHint("Scroll vertically. Use two fingers to change time density. Touch and hold empty time, drag to adjust, then release to add an entry.")
+    ScrollView(.vertical, showsIndicators: false) {
+      DayframeCalendarTimelineCanvas(model: model, actions: actions)
+        .frame(height: 24 * model.hourHeight)
+        .padding(.trailing, 12)
     }
-    .padding(14)
+    .dynamicTypeSize(.xSmall ... .large)
     .frame(maxWidth: .infinity, maxHeight: .infinity)
-    .background(
-      RoundedRectangle(cornerRadius: 18, style: .continuous)
-        .fill(Color(dayframeCSS: theme.surfaceRaised))
-        .shadow(
-          color: presentation.reduceTransparency ? .clear : Color(dayframeCSS: theme.shadow),
-          radius: 12,
-          y: 4
-        )
-    )
-  }
-
-  @ViewBuilder
-  private func calendarHeader(
-    presentation: DayframeCalendarPresentation,
-    theme: DayframeCalendarTheme
-  ) -> some View {
-    ViewThatFits(in: .horizontal) {
-      HStack(alignment: .center, spacing: 12) {
-        calendarTitle(presentation: presentation, theme: theme)
-          .fixedSize(horizontal: true, vertical: false)
-        Spacer(minLength: 8)
-        calendarTotal(presentation: presentation, theme: theme)
-          .fixedSize(horizontal: true, vertical: false)
-      }
-
-      VStack(alignment: .leading, spacing: 8) {
-        calendarTitle(presentation: presentation, theme: theme)
-        calendarTotal(presentation: presentation, theme: theme)
-      }
-      .frame(maxWidth: .infinity, alignment: .leading)
-    }
-    .dynamicTypeSize(.xSmall ... .xxxLarge)
-  }
-
-  @ViewBuilder
-  private func calendarTitle(
-    presentation: DayframeCalendarPresentation,
-    theme: DayframeCalendarTheme
-  ) -> some View {
-    VStack(alignment: .leading, spacing: 3) {
-      Text("Calendar")
-        .font(.caption2.weight(.semibold))
-        .foregroundStyle(Color(dayframeCSS: theme.textSecondary))
-        .textCase(.uppercase)
-        .lineLimit(1)
-      Text(presentation.selectedDayTitle)
-        .font(.headline.weight(.semibold))
-        .foregroundStyle(Color(dayframeCSS: theme.textPrimary))
-        .lineLimit(2)
-    }
-  }
-
-  @ViewBuilder
-  private func calendarTotal(
-    presentation: DayframeCalendarPresentation,
-    theme: DayframeCalendarTheme
-  ) -> some View {
-    VStack(alignment: .leading, spacing: 2) {
-      Text("\(presentation.loggedLabel) logged")
-        .font(.title3.weight(.semibold))
-        .foregroundStyle(Color(dayframeCSS: theme.accentText))
-      if presentation.additionalOverlapSeconds > 0 {
-        Text("\(presentation.coveredLabel) covered")
-          .font(.caption.weight(.semibold))
-          .foregroundStyle(Color(dayframeCSS: theme.textSecondary))
-      }
-    }
-    .monospacedDigit()
-    .accessibilityLabel(
-      "Selected day, \(presentation.loggedLabel) logged, \(presentation.coveredLabel) covered"
-    )
+    .accessibilityLabel("24-hour Calendar timeline")
+    .accessibilityHint("Scroll vertically. Use two fingers or the zoom buttons to change time density. Touch and hold empty time, drag to adjust, then release to add an entry.")
   }
 }
 
@@ -215,15 +218,16 @@ private struct DayframeCalendarTimelineCanvas: View {
         if presentation.selectedDayKey == presentation.todayKey {
           let currentMinute = CGFloat(minuteOfDay(milliseconds: presentation.nowMs))
           let lineTop = min(timelineHeight, max(0, currentMinute / 60 * hourHeight))
-          Rectangle()
-            .fill(Color(dayframeCSS: theme.accent))
-            .frame(width: max(0, geometry.size.width - hourLabelWidth - 8), height: 2)
-            .position(
-              x: hourLabelWidth + max(0, geometry.size.width - hourLabelWidth - 8) / 2,
-              y: lineTop
-            )
-            .allowsHitTesting(false)
-            .accessibilityHidden(true)
+          DayframeCalendarNowMarker(
+            hourLabelWidth: hourLabelWidth,
+            label: clockLabel(milliseconds: presentation.nowMs),
+            theme: theme,
+            width: geometry.size.width
+          )
+          .position(x: geometry.size.width / 2, y: lineTop)
+          .zIndex(9_000)
+          .allowsHitTesting(false)
+          .accessibilityHidden(true)
         }
 
         if
@@ -284,12 +288,51 @@ private struct DayframeCalendarTimelineCanvas: View {
     }
   }
 
+  private func clockLabel(milliseconds: Double) -> String {
+    let date = Date(timeIntervalSince1970: milliseconds / 1000)
+    let components = Calendar.current.dateComponents([.hour, .minute], from: date)
+    return String(format: "%02d:%02d", components.hour ?? 0, components.minute ?? 0)
+  }
+
   private func minuteOfDay(milliseconds: Double) -> Double {
     let date = Date(timeIntervalSince1970: milliseconds / 1000)
     let components = Calendar.current.dateComponents([.hour, .minute, .second], from: date)
     return Double(components.hour ?? 0) * 60
       + Double(components.minute ?? 0)
       + Double(components.second ?? 0) / 60
+  }
+}
+
+/// Coral now line across the day column with a dot at its start and the time in a pill over the
+/// hour labels (Blocks prototype).
+private struct DayframeCalendarNowMarker: View {
+  let hourLabelWidth: CGFloat
+  let label: String
+  let theme: DayframeCalendarTheme
+  let width: CGFloat
+
+  var body: some View {
+    let accent = Color(dayframeCSS: theme.accent)
+    ZStack(alignment: .leading) {
+      Rectangle()
+        .fill(accent)
+        .frame(width: max(0, width - hourLabelWidth + 4), height: 2)
+        .offset(x: hourLabelWidth - 4)
+      Circle()
+        .fill(accent)
+        .frame(width: 10, height: 10)
+        .offset(x: hourLabelWidth - 9)
+      Text(label)
+        .font(.caption2.weight(.heavy))
+        .monospacedDigit()
+        .foregroundStyle(Color(dayframeCSS: theme.onAccent))
+        .lineLimit(1)
+        .minimumScaleFactor(0.8)
+        .frame(width: max(0, hourLabelWidth - 16), height: 18)
+        .background(RoundedRectangle(cornerRadius: 6, style: .continuous).fill(accent))
+        .offset(x: 4)
+    }
+    .frame(width: width, height: 18, alignment: .leading)
   }
 }
 
@@ -321,33 +364,27 @@ private struct DayframeCalendarCreationPreviewLayer: View {
         startsBeforeDay: false
       )
       let accentColor = UIColor(dayframeCSS: theme.accent)
-      let backgroundColor = UIColor(dayframeCSS: theme.surfaceMuted)
-      let borderBase = UIColor(dayframeCSS: theme.borderStrong)
       let fill = accentColor.dayframeBlended(
-        over: backgroundColor,
+        over: UIColor(dayframeCSS: theme.surface),
         alpha: reduceTransparency ? 0.34 : 0.22
       )
-      let border = accentColor.dayframeBlended(over: borderBase, alpha: 0.72)
 
       ZStack(alignment: .leading) {
         shape.fill(Color(uiColor: fill))
-        shape.strokeBorder(
-          Color(uiColor: border),
-          style: StrokeStyle(lineWidth: 1, lineCap: .round, dash: [5, 3])
-        )
+        shape.strokeBorder(Color(uiColor: accentColor), lineWidth: 2)
 
         if visibleHeight >= 18 {
           VStack(alignment: .leading, spacing: 1) {
             if visibleHeight >= 50 {
-              Text("New entry")
-                .font(.caption.weight(.medium))
+              Text("New block")
+                .font(.footnote.weight(.bold))
                 .foregroundStyle(Color(dayframeCSS: theme.textPrimary))
                 .lineLimit(1)
             }
             Text(timeRange)
               .font(.caption2.weight(.semibold))
               .monospacedDigit()
-              .foregroundStyle(Color(dayframeCSS: theme.accentText))
+              .foregroundStyle(Color(dayframeCSS: theme.textPrimary))
               .lineLimit(1)
               .minimumScaleFactor(0.72)
           }
@@ -390,7 +427,7 @@ private struct DayframeCalendarHourGrid: View {
       Text(String(format: "%02d:00", hour % 24))
         .font(.caption2.weight(.semibold))
         .monospacedDigit()
-        .foregroundStyle(Color(dayframeCSS: theme.textSecondary))
+        .foregroundStyle(Color(dayframeCSS: theme.textMuted))
         .frame(width: hourLabelWidth - 8, alignment: .trailing)
         .position(x: (hourLabelWidth - 8) / 2, y: labelTop)
         .accessibilityHidden(true)
@@ -452,6 +489,7 @@ private struct DayframeCalendarEntriesLayer: View {
               entry: entry,
               horizontal: horizontal,
               metrics: metrics,
+              reduceMotion: presentation.reduceMotion,
               reduceTransparency: presentation.reduceTransparency,
               theme: presentation.theme
             )
@@ -483,11 +521,14 @@ private struct DayframeCalendarEntriesLayer: View {
   }
 }
 
+// Blocks: a logged block is a solid activity fill with measured on-block text; the running block
+// adds a breathing inner ring; a Review suggestion is hatched in its suggested colour with theme text.
 private struct DayframeCalendarBlockView: View {
   let cornerRadius: CGFloat
   let entry: DayframeCalendarEntry
   let horizontal: DayframeCalendarHorizontalMetrics
   let metrics: DayframeCalendarBlockMetrics
+  let reduceMotion: Bool
   let reduceTransparency: Bool
   let theme: DayframeCalendarTheme
 
@@ -497,57 +538,39 @@ private struct DayframeCalendarBlockView: View {
       continuesIntoNextDay: metrics.continuesIntoNextDay,
       startsBeforeDay: metrics.startsBeforeDay
     )
-    let cueColor = UIColor(dayframeCSS: entry.color)
-    let backgroundColor = UIColor(dayframeCSS: theme.surfaceMuted)
-    let baseBorderColor = UIColor(dayframeCSS: theme.border)
-    let strongBorderColor = UIColor(dayframeCSS: theme.borderStrong)
-    let fillAlpha: CGFloat = entry.isReview ? 0.16 : entry.isActive ? 0.22 : 0.30
-    let resolvedAlpha = reduceTransparency ? min(0.48, fillAlpha + 0.10) : fillAlpha
-    let fill = cueColor.dayframeBlended(over: backgroundColor, alpha: resolvedAlpha)
-    let border: UIColor = if entry.isReview {
-      strongBorderColor
-    } else if entry.isUncategorized {
-      reduceTransparency ? strongBorderColor : baseBorderColor
-    } else {
-      cueColor.dayframeBlended(over: baseBorderColor, alpha: 0.42)
-    }
+    let blockColor = UIColor(dayframeCSS: entry.color)
+    let textColor = Color(dayframeCSS: entry.textColor)
 
-    ZStack(alignment: .leading) {
-      shape.fill(Color(uiColor: fill))
-
-      if entry.isUncategorized {
-        DayframeCalendarHatch(color: Color(dayframeCSS: theme.textSecondary))
+    ZStack(alignment: .topLeading) {
+      if entry.isReview {
+        let base = blockColor.dayframeBlended(
+          over: UIColor(dayframeCSS: theme.surface),
+          alpha: reduceTransparency ? 0.28 : 0.16
+        )
+        shape.fill(Color(uiColor: base))
+        DayframeCalendarHatch(color: Color(uiColor: blockColor))
+          .opacity(reduceTransparency ? 0.55 : 0.4)
           .clipShape(shape)
-          .opacity(reduceTransparency ? 0.34 : 0.22)
+        shape.strokeBorder(Color(uiColor: blockColor).opacity(0.7), lineWidth: 1.5)
+      } else {
+        shape.fill(Color(uiColor: blockColor))
+        if entry.isActive {
+          DayframeCalendarLiveRing(color: textColor, reduceMotion: reduceMotion, shape: shape)
+        }
       }
 
-      shape.strokeBorder(
-        Color(uiColor: border),
-        style: StrokeStyle(
-          lineWidth: 1,
-          lineCap: .round,
-          dash: entry.isReview || entry.isActive ? [4, 3] : []
-        )
-      )
-
       if metrics.showTitle && horizontal.showTitle {
-        VStack(alignment: .leading, spacing: metrics.compact ? 1 : 4) {
-          HStack(spacing: 5) {
-            Circle()
-              .fill(Color(dayframeCSS: entry.color))
-              .frame(width: 6, height: 6)
-              .accessibilityHidden(true)
-            Text(entry.title)
-              .font(.caption.weight(.medium))
-              .foregroundStyle(Color(dayframeCSS: theme.textPrimary))
-              .lineLimit(1)
-          }
+        VStack(alignment: .leading, spacing: 1) {
+          Text(entry.isReview ? "\(entry.title) · review" : entry.title)
+            .font(.footnote.weight(.bold))
+            .foregroundStyle(textColor)
+            .lineLimit(1)
 
           if metrics.showMeta && horizontal.showMeta {
             Text(entry.meta)
               .font(.caption2.weight(.semibold))
               .monospacedDigit()
-              .foregroundStyle(Color(dayframeCSS: theme.textPrimary))
+              .foregroundStyle(textColor.opacity(0.82))
               .lineLimit(metrics.height < DayframeCalendarConstants.metaMinimumHeight + 16 ? 1 : 2)
           }
 
@@ -560,7 +583,7 @@ private struct DayframeCalendarBlockView: View {
                 .font(.caption2)
                 .lineLimit(1)
             }
-            .foregroundStyle(Color(dayframeCSS: theme.textSecondary))
+            .foregroundStyle(textColor.opacity(0.82))
           }
 
           if metrics.showMeta, horizontal.showMeta, let tagText = entry.tagText, !tagText.isEmpty {
@@ -572,21 +595,56 @@ private struct DayframeCalendarBlockView: View {
                 .font(.caption2)
                 .lineLimit(1)
             }
-            .foregroundStyle(Color(dayframeCSS: theme.textSecondary))
+            .foregroundStyle(textColor.opacity(0.82))
           }
         }
-        .padding(.horizontal, 8)
-        .padding(.vertical, metrics.compact ? 3 : 7)
+        .padding(.horizontal, 10)
+        .padding(.vertical, metrics.compact ? 3 : 6)
       }
     }
+    .shadow(
+      color: entry.isReview && !reduceTransparency ? Color(dayframeCSS: theme.shadow) : .clear,
+      radius: 6,
+      y: 2
+    )
     .overlay(alignment: .topTrailing) {
       if entry.overlapCount > 0 && horizontal.width >= 22 {
         Circle()
           .fill(Color(dayframeCSS: theme.warning))
-          .frame(width: 7, height: 7)
+          .overlay(Circle().strokeBorder(textColor.opacity(0.6), lineWidth: 1))
+          .frame(width: 8, height: 8)
           .padding(5)
           .accessibilityHidden(true)
       }
+    }
+  }
+}
+
+/// The running block's inner ring: on-block text colour at 40%, breathing 0.35 ↔ 1 over 2.4 s.
+/// Reduce Motion holds it still at 0.6.
+private struct DayframeCalendarLiveRing: View {
+  let color: Color
+  let reduceMotion: Bool
+  let shape: DayframeCalendarBlockShape
+  @State private var bright = false
+
+  var body: some View {
+    shape
+      .strokeBorder(color.opacity(0.4), lineWidth: 2)
+      .opacity(reduceMotion ? 0.6 : bright ? 1 : 0.35)
+      .allowsHitTesting(false)
+      .accessibilityHidden(true)
+      .task(id: reduceMotion) { startBreathing() }
+  }
+
+  private func startBreathing() {
+    guard !reduceMotion else {
+      bright = false
+      return
+    }
+    bright = false
+    withAnimation(.easeInOut(duration: 1.2).repeatForever(autoreverses: true)) {
+      bright = true
     }
   }
 }
@@ -659,10 +717,10 @@ private struct DayframeCalendarHatch: View {
         while x < geometry.size.width + diagonal {
           path.move(to: CGPoint(x: x, y: geometry.size.height))
           path.addLine(to: CGPoint(x: x + diagonal, y: 0))
-          x += 8
+          x += 12
         }
       }
-      .stroke(color, lineWidth: 1)
+      .stroke(color, lineWidth: 4)
     }
     .allowsHitTesting(false)
     .accessibilityHidden(true)

@@ -8,10 +8,12 @@ struct DayframeCalendarThemeRecord: Codable {
   var border = "#2A3345"
   var borderStrong = "#3B465B"
   var mode = "dark"
+  var onAccent = "#050914"
   var shadow = "rgba(0, 0, 0, 0.32)"
   var surface = "#151B27"
   var surfaceMuted = "#202838"
   var surfaceRaised = "#1B2230"
+  var textMuted = "#707B91"
   var textPrimary = "#F7F8FB"
   var textSecondary = "#8993A7"
   var warning = "#F2BA38"
@@ -20,6 +22,7 @@ struct DayframeCalendarThemeRecord: Codable {
 
 struct DayframeCalendarWeekDayRecord: Codable {
   var accessibilityLabel = ""
+  var bars: [String] = []
   var dayKey = ""
   var dayNumber = ""
   var isSelected = false
@@ -49,6 +52,7 @@ struct DayframeCalendarEntryRecord: Codable {
   var startsBeforeDay = false
   var stoppedAtMs: Double?
   var tagText: String?
+  var textColor = "#0B1020"
   var textDensity = "full"
   var title = ""
   var widthFraction: Double = 1
@@ -60,7 +64,10 @@ struct DayframeCalendarPresentationRecord: Codable {
   var dayStartMs: Double = 0
   var emptyState = "No tracked time for this day."
   var entries: [DayframeCalendarEntryRecord] = []
+  var framedLabel = ""
+  var hapticsEnabled = true
   var modelVersion = 4
+  var monthTitle = ""
   var nowMs: Double = 0
   var reduceMotion = false
   var reduceTransparency = false

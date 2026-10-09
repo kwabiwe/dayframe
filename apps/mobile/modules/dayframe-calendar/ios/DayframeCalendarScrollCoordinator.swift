@@ -56,6 +56,20 @@ struct DayframeCalendarScrollResolver: UIViewRepresentable {
       }
     }
 
+    private final class ZoomDisplayLinkProxy: NSObject {
+      weak var owner: Coordinator?
+
+      @objc func tick(_ displayLink: CADisplayLink) {
+        owner?.handleButtonZoomFrame(displayLink)
+      }
+    }
+
+    private struct ButtonZoomAnimation {
+      let start: DayframeCalendarPinchStart
+      let targetHourHeight: Double
+      var startTimestamp: CFTimeInterval?
+    }
+
     private weak var model: DayframeCalendarViewModel?
     private let actions: DayframeCalendarActions
     private weak var scrollView: UIScrollView?
@@ -65,6 +79,10 @@ struct DayframeCalendarScrollResolver: UIViewRepresentable {
     private let refreshControl = UIRefreshControl()
     private let selectionHaptic = UISelectionFeedbackGenerator()
     private let displayLinkProxy = DisplayLinkProxy()
+    private let zoomDisplayLinkProxy = ZoomDisplayLinkProxy()
+    private var zoomDisplayLink: CADisplayLink?
+    private var buttonZoom: ButtonZoomAnimation?
+    private var handledZoomToken: UInt64 = 0
     private var layout: DayframeCalendarTimelineLayout
     private var longPressCandidate: LongPressCandidate?
     private var creationDragState = DayframeCalendarCreationDragState()
@@ -88,8 +106,10 @@ struct DayframeCalendarScrollResolver: UIViewRepresentable {
       self.model = model
       self.actions = actions
       self.layout = layout
+      handledZoomToken = model.zoomRequest?.token ?? 0
       super.init()
       displayLinkProxy.owner = self
+      zoomDisplayLinkProxy.owner = self
 
       pinchGesture.addTarget(self, action: #selector(handlePinch(_:)))
       pinchGesture.delegate = self
@@ -120,6 +140,7 @@ struct DayframeCalendarScrollResolver: UIViewRepresentable {
     deinit {
       NotificationCenter.default.removeObserver(self)
       edgeAutoscrollDisplayLink?.invalidate()
+      zoomDisplayLink?.invalidate()
     }
 
     func update(layout nextLayout: DayframeCalendarTimelineLayout) {
@@ -160,6 +181,7 @@ struct DayframeCalendarScrollResolver: UIViewRepresentable {
     }
 
     func detach() {
+      stopButtonZoom()
       guard let scrollView else {
         cancelCreationInteraction()
         return
@@ -196,6 +218,10 @@ struct DayframeCalendarScrollResolver: UIViewRepresentable {
       if model.presentation.refreshing,
          creationDragState.session != nil || longPressCandidate != nil {
         cancelLongPressRecognition()
+      }
+      if let request = model.zoomRequest, request.token != handledZoomToken {
+        handledZoomToken = request.token
+        beginButtonZoom(direction: request.direction, model: model, scrollView: scrollView)
       }
       refreshControl.tintColor = UIColor(dayframeCSS: model.presentation.theme.accent)
       if model.presentation.refreshing {
@@ -244,6 +270,8 @@ struct DayframeCalendarScrollResolver: UIViewRepresentable {
 
       switch gesture.state {
       case .began:
+        // A pinch takes over from a button zoom at the geometry already shown.
+        stopButtonZoom()
         pinchStart = DayframeCalendarPinchStart(
           contentOffsetY: Double(scrollView.contentOffset.y),
           hourHeight: Double(model.hourHeight),
@@ -330,8 +358,9 @@ struct DayframeCalendarScrollResolver: UIViewRepresentable {
           dayKey: request.dayKey,
           startMinute: previewStartMinute
         )
+        stopButtonZoom()
         setCreationGestureLock(true)
-        if transition.shouldTriggerHaptic {
+        if transition.shouldTriggerHaptic, model.presentation.hapticsEnabled {
           selectionHaptic.selectionChanged()
           selectionHaptic.prepare()
         }
@@ -525,7 +554,7 @@ struct DayframeCalendarScrollResolver: UIViewRepresentable {
           startMinute: previewStartMinute
         )
       }
-      if transition.shouldTriggerHaptic {
+      if transition.shouldTriggerHaptic, model.presentation.hapticsEnabled {
         selectionHaptic.selectionChanged()
         selectionHaptic.prepare()
       }
@@ -679,6 +708,100 @@ struct DayframeCalendarScrollResolver: UIViewRepresentable {
         contentY: Double(longPressGesture.location(in: scrollView).y),
         model: model
       )
+    }
+
+    /// Header zoom − / +: one step around the viewport centre. A press during a running step chains
+    /// from that step's target, so rapid presses each count; Reduce Motion applies the step at once.
+    private func beginButtonZoom(
+      direction: Int,
+      model: DayframeCalendarViewModel,
+      scrollView: UIScrollView
+    ) {
+      guard creationDragState.session == nil, pinchStart == nil else { return }
+      let fromHeight = buttonZoom?.targetHourHeight ?? Double(model.hourHeight)
+      let target = DayframeCalendarZoomMath.buttonTarget(hourHeight: fromHeight, direction: direction)
+      guard abs(target - Double(model.hourHeight)) > 0.01 else {
+        stopButtonZoom()
+        return
+      }
+      let start = DayframeCalendarPinchStart(
+        contentOffsetY: Double(scrollView.contentOffset.y),
+        hourHeight: Double(model.hourHeight),
+        midpointY: Double(scrollView.bounds.height) / 2
+      )
+      if model.presentation.reduceMotion {
+        stopButtonZoom()
+        applyButtonZoom(start: start, target: target, progress: 1, model: model, scrollView: scrollView)
+        return
+      }
+      buttonZoom = ButtonZoomAnimation(start: start, targetHourHeight: target, startTimestamp: nil)
+      if zoomDisplayLink == nil {
+        let displayLink = CADisplayLink(
+          target: zoomDisplayLinkProxy,
+          selector: #selector(ZoomDisplayLinkProxy.tick(_:))
+        )
+        displayLink.add(to: .main, forMode: .common)
+        zoomDisplayLink = displayLink
+      }
+    }
+
+    fileprivate func handleButtonZoomFrame(_ displayLink: CADisplayLink) {
+      // A finger on the timeline owns the geometry: stop at the step already shown.
+      guard
+        var animation = buttonZoom,
+        let model,
+        let scrollView,
+        !scrollView.isDragging,
+        pinchStart == nil,
+        creationDragState.session == nil
+      else {
+        stopButtonZoom()
+        return
+      }
+      let startTimestamp = animation.startTimestamp ?? displayLink.timestamp
+      if animation.startTimestamp == nil {
+        animation.startTimestamp = startTimestamp
+        buttonZoom = animation
+      }
+      let progress = (displayLink.targetTimestamp - startTimestamp)
+        / DayframeCalendarZoomMath.buttonAnimationDuration
+      applyButtonZoom(
+        start: animation.start,
+        target: animation.targetHourHeight,
+        progress: progress,
+        model: model,
+        scrollView: scrollView
+      )
+      if progress >= 1 {
+        stopButtonZoom()
+      }
+    }
+
+    private func applyButtonZoom(
+      start: DayframeCalendarPinchStart,
+      target: Double,
+      progress: Double,
+      model: DayframeCalendarViewModel,
+      scrollView: UIScrollView
+    ) {
+      let next = DayframeCalendarZoomMath.buttonFrame(
+        start: start,
+        targetHourHeight: target,
+        progress: progress,
+        viewportHeight: Double(scrollView.bounds.height)
+      )
+      model.updateHourHeight(next.hourHeight)
+      pendingContentOffsetY = next.contentOffsetY
+      scrollView.setContentOffset(
+        CGPoint(x: scrollView.contentOffset.x, y: CGFloat(next.contentOffsetY)),
+        animated: false
+      )
+    }
+
+    private func stopButtonZoom() {
+      buttonZoom = nil
+      zoomDisplayLink?.invalidate()
+      zoomDisplayLink = nil
     }
 
     private func viewportMidpointY(

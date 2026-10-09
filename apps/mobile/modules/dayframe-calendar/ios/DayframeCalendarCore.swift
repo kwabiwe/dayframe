@@ -7,7 +7,7 @@ public enum DayframeCalendarConstants {
   public static let minutesPerDay = 24.0 * 60.0
   public static let minimumVisibleBlockHeight = 4.0
   public static let minimumVisualBlockHeight = 1.0
-  public static let blockCornerRadius = 8.0
+  public static let blockCornerRadius = 10.0
   public static let blockVisualGap = 1.0
   public static let titleMinimumHeight = 24.0
   public static let metaMinimumHeight = 58.0
@@ -720,6 +720,33 @@ public enum DayframeCalendarZoomMath {
     return DayframeCalendarZoomState(
       contentOffsetY: clampContentOffset(nextOffset, hourHeight: nextHourHeight, viewportHeight: viewportHeight),
       hourHeight: nextHourHeight
+    )
+  }
+
+  /// The zoom − / + buttons change the hour height by this factor per press.
+  public static let buttonStepFactor = 1.4
+  public static let buttonAnimationDuration = 0.26
+
+  public static func buttonTarget(hourHeight: Double, direction: Int) -> Double {
+    clampHourHeight(clampHourHeight(hourHeight) * (direction > 0 ? buttonStepFactor : 1 / buttonStepFactor))
+  }
+
+  /// One frame of a button zoom: ease-out cubic from the start height to the target, keeping the
+  /// time at the viewport centre fixed (the same focal rule as a pinch). Progress 1 is the target.
+  public static func buttonFrame(
+    start: DayframeCalendarPinchStart,
+    targetHourHeight: Double,
+    progress: Double,
+    viewportHeight: Double
+  ) -> DayframeCalendarZoomState {
+    let clampedProgress = min(1, max(0, progress.isFinite ? progress : 1))
+    let eased = 1 - pow(1 - clampedProgress, 3)
+    let height = start.hourHeight + (clampHourHeight(targetHourHeight) - start.hourHeight) * eased
+    return update(
+      start: start,
+      absoluteScale: height / start.hourHeight,
+      currentMidpointY: start.midpointY,
+      viewportHeight: viewportHeight
     )
   }
 

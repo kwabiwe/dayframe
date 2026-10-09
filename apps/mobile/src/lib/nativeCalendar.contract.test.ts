@@ -7,26 +7,65 @@ const mobileRoot = fileURLToPath(new URL("../../", import.meta.url));
 const moduleRoot = fileURLToPath(new URL("../../modules/dayframe-calendar/", import.meta.url));
 
 describe("native Calendar production contract", () => {
-  it("bounds Dynamic Type only around the native header and lets totals use the stacked fallback", () => {
+  it("shows the Blocks header: month title, framed time and a 44-point zoom pill", () => {
     const rootView = readFileSync(`${moduleRoot}ios/DayframeCalendarRootView.swift`, "utf8");
     const header = rootView.slice(
       rootView.indexOf("private func calendarHeader("),
-      rootView.indexOf("private func calendarTitle(")
+      rootView.indexOf("private func weekStrip(")
     );
-    const total = rootView.slice(
-      rootView.indexOf("private func calendarTotal("),
-      rootView.indexOf("private struct DayframeCalendarTimelineCanvas")
-    );
-    expect(header).toContain("ViewThatFits(in: .horizontal)");
+    expect(header).toContain("presentation.monthTitle");
+    expect(header).toContain('.font(.custom("BricolageGrotesque-Bold", size: 30, relativeTo: .largeTitle))');
+    expect(header).toContain("presentation.framedLabel");
     expect(header).toContain(".dynamicTypeSize(.xSmall ... .xxxLarge)");
-    expect(header.match(/dynamicTypeSize/g)).toHaveLength(1);
-    expect(total).toContain("VStack(alignment: .leading, spacing: 2)");
-    expect(total).toContain("presentation.loggedLabel");
-    expect(total).toContain("presentation.coveredLabel");
-    expect(total).not.toContain("minimumScaleFactor");
-    expect(total).not.toContain("lineLimit(1)");
-    expect(rootView.slice(rootView.indexOf("private func calendarPanel("), rootView.indexOf("private func calendarHeader(")))
-      .toContain("DayframeCalendarTimelineCanvas");
+    expect(header).toContain("model.requestZoom(direction: direction)");
+    expect(header).toContain(".frame(width: 44, height: 44)");
+    expect(header).toContain('"Zoom in" : "Zoom out"');
+    expect(header).toContain(".disabled(!enabled)");
+    expect(header).not.toContain("coveredLabel");
+    expect(rootView).not.toContain("private func calendarPanel(");
+  });
+
+  it("draws the week strip with a sliding selected circle, coral today and activity bars", () => {
+    const rootView = readFileSync(`${moduleRoot}ios/DayframeCalendarRootView.swift`, "utf8");
+    const strip = rootView.slice(rootView.indexOf("private func weekStrip("), rootView.indexOf("private func dayNumberColor("));
+    expect(strip).toContain(".matchedGeometryEffect(id: \"selected-day\", in: weekStripSelection)");
+    expect(strip).toContain("ForEach(Array(day.bars.enumerated())");
+    expect(strip).toContain(".frame(width: 5, height: 4)");
+    expect(strip).toContain("presentation.reduceMotion ? nil : .spring(");
+    expect(strip).toContain("actions.changeWeek(");
+    expect(strip).toContain("if !day.isSelected { playSelectionHaptic() }");
+    expect(rootView).toContain("return day.isToday ? theme.accent : theme.textPrimary");
+    expect(rootView).toContain("guard model.presentation.hapticsEnabled else { return }");
+  });
+
+  it("animates the zoom buttons in the one scroll coordinator and yields to a finger", () => {
+    const coordinator = readFileSync(`${moduleRoot}ios/DayframeCalendarScrollCoordinator.swift`, "utf8");
+    const model = readFileSync(`${moduleRoot}ios/DayframeCalendarModel.swift`, "utf8");
+    const pinch = coordinator.slice(coordinator.indexOf("@objc private func handlePinch"), coordinator.indexOf("@objc private func handleHorizontalPan"));
+    const frame = coordinator.slice(coordinator.indexOf("fileprivate func handleButtonZoomFrame"), coordinator.indexOf("private func applyButtonZoom("));
+    const begin = coordinator.slice(coordinator.indexOf("private func beginButtonZoom("), coordinator.indexOf("fileprivate func handleButtonZoomFrame"));
+
+    expect(model).toContain("@Published private(set) var zoomRequest: DayframeCalendarZoomRequest?");
+    expect(coordinator).toContain("if let request = model.zoomRequest, request.token != handledZoomToken {");
+    expect(coordinator).toContain("handledZoomToken = model.zoomRequest?.token ?? 0");
+    expect(begin).toContain("let fromHeight = buttonZoom?.targetHourHeight ?? Double(model.hourHeight)");
+    expect(begin).toContain("if model.presentation.reduceMotion {");
+    expect(begin).toContain("midpointY: Double(scrollView.bounds.height) / 2");
+    expect(frame).toContain("!scrollView.isDragging");
+    expect(frame).toContain("DayframeCalendarZoomMath.buttonAnimationDuration");
+    expect(pinch).toContain("stopButtonZoom()");
+    expect(coordinator).toMatch(/stopButtonZoom\(\)\n\s+setCreationGestureLock\(true\)/);
+    expect(coordinator.match(/transition\.shouldTriggerHaptic, model\.presentation\.hapticsEnabled/g)).toHaveLength(2);
+  });
+
+  it("marks now with a coral line, dot and time pill over the hour labels", () => {
+    const rootView = readFileSync(`${moduleRoot}ios/DayframeCalendarRootView.swift`, "utf8");
+    const marker = rootView.slice(rootView.indexOf("private struct DayframeCalendarNowMarker"), rootView.indexOf("private struct DayframeCalendarCreationPreviewLayer"));
+    expect(rootView).toContain("DayframeCalendarNowMarker(");
+    expect(marker).toContain("Color(dayframeCSS: theme.accent)");
+    expect(marker).toContain("Color(dayframeCSS: theme.onAccent)");
+    expect(marker).toContain(".frame(width: 10, height: 10)");
+    expect(marker).toContain("RoundedRectangle(cornerRadius: 6, style: .continuous).fill(accent)");
   });
 
   it("removes the React pinch, temporary transform, and outer-scroll ownership", () => {
@@ -114,7 +153,7 @@ describe("native Calendar production contract", () => {
     const rootView = readFileSync(`${moduleRoot}ios/DayframeCalendarRootView.swift`, "utf8");
     const swiftSources = [core, rootView].join("\n");
 
-    expect(core).toContain("public static let blockCornerRadius = 8.0");
+    expect(core).toContain("public static let blockCornerRadius = 10.0");
     expect(core).toContain("public static let blockVisualGap = 1.0");
     expect(core).toContain("public enum DayframeCalendarBlockVisualMath");
     expect(core).toContain("public enum DayframeCalendarVerticalMath");
@@ -126,9 +165,12 @@ describe("native Calendar production contract", () => {
     expect(rootView).toContain("y: CGFloat(vertical.hitCenterY)");
     expect(rootView).toContain("semanticHeight: metrics.height");
     expect(rootView).not.toContain(".frame(width: width, height: hitHeight)");
-    expect(rootView).toContain("alpha: 0.42");
-    expect(rootView).toContain("entry.isReview || entry.isActive ? [4, 3] : []");
-    expect(rootView).toContain("DayframeCalendarHatch");
+    expect(rootView).toContain("shape.fill(Color(uiColor: blockColor))");
+    expect(rootView).toContain("Color(dayframeCSS: entry.textColor)");
+    expect(rootView).toContain("DayframeCalendarLiveRing(color: textColor, reduceMotion: reduceMotion, shape: shape)");
+    expect(rootView).toContain(".opacity(reduceMotion ? 0.6 : bright ? 1 : 0.35)");
+    expect(rootView).toContain("DayframeCalendarHatch(color: Color(uiColor: blockColor))");
+    expect(rootView).toContain('entry.isReview ? "\\(entry.title) · review" : entry.title');
     expect(swiftSources).not.toContain("min(13");
     expect(swiftSources).not.toContain("rect.height / 2), height: min(13");
     expect(swiftSources).not.toContain("onLongPressGesture");
@@ -188,9 +230,8 @@ describe("native Calendar production contract", () => {
     expect(rootView).toContain("preview.dayKey == presentation.selectedDayKey");
     expect(previewView).toContain("DayframeCalendarBlockVisualMath.metrics");
     expect(previewView).toContain("cornerRadius: CGFloat(visual.cornerRadius)");
-    expect(previewView).toContain("StrokeStyle(lineWidth: 1");
-    expect(previewView).toContain("dash: [5, 3]");
-    expect(previewView).toContain('Text("New entry")');
+    expect(previewView).toContain("shape.strokeBorder(Color(uiColor: accentColor), lineWidth: 2)");
+    expect(previewView).toContain('Text("New block")');
     expect(previewView).toContain("theme.accent");
     expect(previewView).toContain(".monospacedDigit()");
     expect(rootView).toContain(".zIndex(10_000)");

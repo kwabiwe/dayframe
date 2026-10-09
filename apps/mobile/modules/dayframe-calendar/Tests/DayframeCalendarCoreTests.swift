@@ -65,6 +65,31 @@ final class DayframeCalendarCoreTests: XCTestCase {
     XCTAssertEqual(sameAbsoluteScale, moved)
   }
 
+  func testZoomButtonsStepByOnePointFourAndStopAtTheBounds() {
+    XCTAssertEqual(DayframeCalendarZoomMath.buttonTarget(hourHeight: 72, direction: 1), 100.8, accuracy: 0.001)
+    XCTAssertEqual(DayframeCalendarZoomMath.buttonTarget(hourHeight: 72, direction: -1), 72 / 1.4, accuracy: 0.001)
+    XCTAssertEqual(DayframeCalendarZoomMath.buttonTarget(hourHeight: 120, direction: 1), 128)
+    XCTAssertEqual(DayframeCalendarZoomMath.buttonTarget(hourHeight: 50, direction: -1), 48)
+  }
+
+  func testZoomButtonFramesEaseToTheTargetAroundTheViewportCentre() {
+    let start = DayframeCalendarPinchStart(contentOffsetY: 400, hourHeight: 72, midpointY: 350)
+    let first = DayframeCalendarZoomMath.buttonFrame(start: start, targetHourHeight: 100.8, progress: 0, viewportHeight: 700)
+    let middle = DayframeCalendarZoomMath.buttonFrame(start: start, targetHourHeight: 100.8, progress: 0.5, viewportHeight: 700)
+    let last = DayframeCalendarZoomMath.buttonFrame(start: start, targetHourHeight: 100.8, progress: 1, viewportHeight: 700)
+    let overshoot = DayframeCalendarZoomMath.buttonFrame(start: start, targetHourHeight: 100.8, progress: 1.4, viewportHeight: 700)
+
+    XCTAssertEqual(first.hourHeight, 72, accuracy: 0.001)
+    XCTAssertEqual(first.contentOffsetY, 400, accuracy: 0.001)
+    // Ease-out cubic: 87.5% of the way at half time.
+    XCTAssertEqual(middle.hourHeight, 72 + 28.8 * 0.875, accuracy: 0.001)
+    XCTAssertEqual(last.hourHeight, 100.8, accuracy: 0.001)
+    XCTAssertEqual(overshoot, last)
+    // The minute under the viewport centre stays under it.
+    let centreMinute = (400.0 + 350.0) / 72.0 * 60.0
+    XCTAssertEqual((last.contentOffsetY + 350) / 100.8 * 60, centreMinute, accuracy: 0.001)
+  }
+
   func testPinchClampsTopAndBottomContentOffsets() {
     let topStart = DayframeCalendarPinchStart(contentOffsetY: 0, hourHeight: 72, midpointY: 30)
     let top = DayframeCalendarZoomMath.update(
@@ -164,7 +189,7 @@ final class DayframeCalendarCoreTests: XCTestCase {
       continuesIntoNextDay: false
     )
 
-    XCTAssertEqual(visual.cornerRadius, 8)
+    XCTAssertEqual(visual.cornerRadius, 10)
     XCTAssertEqual(visual.semanticHeight, 72)
     XCTAssertEqual(visual.visualHeight, 71)
     XCTAssertEqual(visual.visualGap, 1)
@@ -179,7 +204,7 @@ final class DayframeCalendarCoreTests: XCTestCase {
       )
     }
 
-    XCTAssertEqual(metrics.map(\.cornerRadius), [8, 8, 8])
+    XCTAssertEqual(metrics.map(\.cornerRadius), [10, 10, 10])
     XCTAssertEqual(metrics.last?.visualHeight, 3)
     XCTAssertEqual(metrics.last?.visualGap, 1)
   }
@@ -889,7 +914,7 @@ final class DayframeCalendarCoreTests: XCTestCase {
         "isReview":false,"isUncategorized":false,"laneCount":2,"laneIndex":1,
         "layoutMode":"insetOverlay","meta":"11:20 – Now","offsetFraction":0.14,
         "overlapCount":1,"overlapSeconds":1800,"startedAtMs":1000,
-        "startsBeforeDay":false,"stoppedAtMs":null,"tagText":"Deep work","textDensity":"title",
+        "startsBeforeDay":false,"stoppedAtMs":null,"tagText":"Deep work","textColor":"#0B1020","textDensity":"title",
         "title":"Planning","widthFraction":0.86,"zIndex":2
       }]
       """
@@ -903,6 +928,11 @@ final class DayframeCalendarCoreTests: XCTestCase {
     XCTAssertEqual(later.entries.first?.tagText, "Deep work")
     XCTAssertEqual(later.entries.first?.layoutMode, "insetOverlay")
     XCTAssertEqual(later.entries.first?.overlapCount, 1)
+    XCTAssertEqual(later.entries.first?.textColor, "#0B1020")
+    XCTAssertEqual(later.monthTitle, "July")
+    XCTAssertEqual(later.framedLabel, "Nothing framed on Sunday")
+    XCTAssertFalse(later.hapticsEnabled)
+    XCTAssertEqual(later.theme.textMuted, "#707B91")
   }
 
   private func decodePresentation(
@@ -913,12 +943,13 @@ final class DayframeCalendarCoreTests: XCTestCase {
     let json = """
     {
       "dayEndMs":86400000,"dayStartMs":0,"emptyState":"No tracked time for this day.",
-      "entries":\(entriesJSON),"modelVersion":4,"nowMs":\(nowMs),"reduceMotion":false,
+      "entries":\(entriesJSON),"framedLabel":"Nothing framed on Sunday","hapticsEnabled":false,
+      "modelVersion":4,"monthTitle":"July","nowMs":\(nowMs),"reduceMotion":false,
       "reduceTransparency":false,"refreshing":false,"selectedDayKey":"\(selectedDayKey)",
       "selectedDayTitle":"Today","theme":{"accent":"#FF6248","accentSoft":"#33201E",
       "accentText":"#FF8A76","background":"#050914","border":"#2A3345",
-      "borderStrong":"#3B465B","mode":"dark","shadow":"#000000","surface":"#151B27",
-      "surfaceMuted":"#202838","surfaceRaised":"#1B2230","textPrimary":"#F7F8FB",
+      "borderStrong":"#3B465B","mode":"dark","onAccent":"#050914","shadow":"#000000","surface":"#151B27",
+      "surfaceMuted":"#202838","surfaceRaised":"#1B2230","textMuted":"#707B91","textPrimary":"#F7F8FB",
       "textSecondary":"#8993A7","warning":"#F2BA38","warningText":"#F2BA38"},"todayKey":"2026-07-19",
       "additionalOverlapSeconds":0,"coveredLabel":"0m","coveredSeconds":0,
       "loggedLabel":"0m","loggedSeconds":0,"totalLabel":"0m",
