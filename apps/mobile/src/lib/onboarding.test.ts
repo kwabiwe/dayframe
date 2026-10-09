@@ -67,7 +67,7 @@ describe("onboarding answers", () => {
     expect(onboardingSummary({ ...EMPTY_ONBOARDING_ANSWERS, location: "always", suggestions: "on", motion: "on", health: "on", reminders: "on", quickStarts: 4 }).map((row) => row.state))
       .toEqual(["on", "on", "on", "on", "on"]);
     expect(onboardingSummary({ ...EMPTY_ONBOARDING_ANSWERS, quickStarts: 4 })[4]).toMatchObject({ key: "activities", detail: "4 pinned" });
-    expect(onboardingSummary({ ...EMPTY_ONBOARDING_ANSWERS, quickStarts: 0 })[4]).toMatchObject({ state: "later", detail: "None pinned yet" });
+    expect(onboardingSummary({ ...EMPTY_ONBOARDING_ANSWERS, quickStarts: 0 })[4]).toMatchObject({ state: "later", detail: "None pinned yet · Settings › Activities" });
   });
 
   it("keeps Always permission apart from this account's suggestions (Codex r1)", () => {

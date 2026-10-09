@@ -27,6 +27,7 @@ import {
 import Reanimated, { useAnimatedScrollHandler, useSharedValue } from "react-native-reanimated";
 import Svg, { Circle, Path } from "react-native-svg";
 import { router, useFocusEffect, useIsFocused } from "expo-router";
+import { takeDashboardRefresh } from "@/lib/todayRefreshRequest";
 import { SafeAreaView } from "react-native-safe-area-context";
 import {
   paletteColorFor,
@@ -1182,7 +1183,9 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
   useFocusEffect(
     useCallback(() => {
       void reloadThemePreference();
-    }, [reloadThemePreference])
+      // Another page changed what Today shows (setup's quick starts): read it now.
+      if (takeDashboardRefresh() && authState === "authenticated") void load({ silent: true });
+    }, [authState, load, reloadThemePreference])
   );
 
   useEffect(() => {

@@ -36,6 +36,7 @@ import {
   setHealthImportPreference
 } from "@/lib/health";
 import { readReviewNudgeState, setReviewNudgeEnabled } from "@/lib/reviewNudge";
+import { requestDashboardRefresh } from "@/lib/todayRefreshRequest";
 import { readMotionFitnessStatus, requestMotionFitness } from "@/lib/location/motionPermission";
 import { mobileAccountOwnersEqual, readActiveMobileAccount, type MobileAccountOwner } from "@/lib/mobileAccount";
 import { subscribeMobileSignedOut } from "@/lib/mobileSessionTransition";
@@ -92,6 +93,7 @@ export default function OnboardingScreen() {
   const pickEdited = useRef(false);
   // This account's activities for the quick-start step (null until read).
   const [activities, setActivities] = useState<Activity[] | null>(null);
+  const [activitiesFailed, setActivitiesFailed] = useState(false);
   const [pinning, setPinning] = useState<string | null>(null);
   const [pinNote, setPinNote] = useState<string | null>(null);
   useEffect(() => {
@@ -146,10 +148,7 @@ export default function OnboardingScreen() {
         reminders: current.reminders ?? (nudge?.enabled && notifications === "granted" ? "on" : null),
         quickStarts: bootstrap ? bootstrap.categories.filter((category) => category.isPinned).length : current.quickStarts
       }));
-      if (bootstrap && owner.current && bootstrap.user.id === owner.current.userId && bootstrap.workspace.id === owner.current.workspaceId) {
-        // Pinned first, then A–Z, decided once: tiles don't move while you tap them.
-        setActivities([...bootstrap.categories].sort((a, b) => Number(b.isPinned) - Number(a.isPinned) || a.name.localeCompare(b.name)));
-      }
+
     })();
   }, []);
 
@@ -332,6 +331,31 @@ export default function OnboardingScreen() {
     });
   }
 
+  // Quick starts reads this account's activities each time the step opens (setup may just have
+  // added Sleep or Health), with Try again when the read fails.
+  const loadActivities = useCallback(async () => {
+    const epoch = sessionEpoch.current;
+    setActivitiesFailed(false);
+    try {
+      const bootstrap = await fetchBootstrap();
+      if (!(await stillHere(epoch))) return;
+      if (!owner.current || bootstrap.user.id !== owner.current.userId || bootstrap.workspace.id !== owner.current.workspaceId) return;
+      // Pinned first, then A–Z, decided once per visit: tiles don't move while you tap them.
+      const ordered = [...bootstrap.categories].sort((a, b) => Number(b.isPinned) - Number(a.isPinned) || a.name.localeCompare(b.name));
+      setActivities(ordered);
+      setAnswers((current) => ({ ...current, quickStarts: ordered.filter((item) => item.isPinned).length }));
+    } catch (error) {
+      if (error instanceof AuthRequiredError) {
+        if (mounted.current && epoch === sessionEpoch.current) router.replace("/");
+        return;
+      }
+      if (await stillHere(epoch)) setActivitiesFailed(true);
+    }
+  }, [stillHere]);
+  useEffect(() => {
+    if (step === "activities") void loadActivities();
+  }, [loadActivities, step]);
+
   // Quick starts: a tap pins or unpins, as Settings › Activities does. The server holds the limit too.
   function togglePin(activity: Activity) {
     if (busy || pinning || !activities) return;
@@ -351,6 +375,7 @@ export default function OnboardingScreen() {
         // One pin change at a time (`pinning`), so the list read here is current.
         const next = activities.map((item) => (item.id === activity.id ? { ...item, isPinned: pin } : item));
         setActivities(next);
+        requestDashboardRefresh();
         setAnswers((current) => ({ ...current, quickStarts: next.filter((item) => item.isPinned).length }));
         playHaptic("tick");
         announce(`${activity.name} ${pin ? "pinned" : "unpinned"}.`);
@@ -448,7 +473,15 @@ export default function OnboardingScreen() {
           {step === "health" && !answers.health ? <HealthPicks disabled={busy} onToggle={togglePick} pick={answers.healthPick} theme={theme} /> : null}
           {step === "reminders" && !answers.reminders ? <NotificationPreview theme={theme} /> : null}
           {step === "activities" ? (
-            <QuickStartTiles activities={activities} note={pinNote} onToggle={togglePin} pinning={pinning} theme={theme} />
+            <QuickStartTiles
+              activities={activities}
+              failed={activitiesFailed}
+              note={pinNote}
+              onRetry={() => void loadActivities()}
+              onToggle={togglePin}
+              pinning={pinning}
+              theme={theme}
+            />
           ) : null}
           {content.bullets.map((bullet) => (
             <View key={bullet.text} style={styles.bullet}>
@@ -929,17 +962,31 @@ function DoneSummary({ answers, theme }: { answers: OnboardingAnswers; theme: Mo
 /** This account's activities as tiles: pinned ones are solid blocks with a check, the rest quiet. */
 function QuickStartTiles({
   activities,
+  failed,
   note,
+  onRetry,
   onToggle,
   pinning,
   theme
 }: {
   activities: Activity[] | null;
+  failed: boolean;
   note: string | null;
+  onRetry: () => void;
   onToggle: (activity: Activity) => void;
   pinning: string | null;
   theme: MobileTheme;
 }) {
+  if (!activities && failed) {
+    return (
+      <View style={styles.tilesWrap}>
+        <Text {...mobileTextProps("body")} accessibilityLiveRegion="polite" style={{ color: theme.textSecondary }}>
+          Your activities couldn&apos;t be loaded. Check your connection and try again, or pin them later in Settings › Activities.
+        </Text>
+        <SecondaryButton disabled={false} label="Try again" onPress={onRetry} testID="onboarding-activities-retry" theme={theme} />
+      </View>
+    );
+  }
   if (!activities) {
     return <Text {...mobileTextProps("body")} style={{ color: theme.textSecondary }}>Loading your activities…</Text>;
   }

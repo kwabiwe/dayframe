@@ -69,6 +69,13 @@ describe("onboarding contract (Blocks 8-1a)", () => {
     expect(screen).toContain('testID="onboarding-reminders-retry"');
   });
 
+  it("reloads activities when Quick starts opens, with Try again, and asks Today to refresh after a pin (Codex r1 on #278)", () => {
+    expect(screen).toContain('if (step === "activities") void loadActivities();');
+    expect(screen).toContain('testID="onboarding-activities-retry"');
+    expect(screen).toContain("requestDashboardRefresh();");
+    expect(dashboard).toContain('if (takeDashboardRefresh() && authState === "authenticated") void load({ silent: true });');
+  });
+
   it("never starts a timer or writes time", () => {
     expect(screen).not.toMatch(/startTimer|stopTimer|createTimeEntry|queueEvent|enqueue/);
   });

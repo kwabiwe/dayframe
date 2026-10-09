@@ -210,7 +210,7 @@ export function onboardingSummary(answers: OnboardingAnswers): OnboardingSummary
       state: answers.quickStarts && answers.quickStarts > 0 ? "on" : "later",
       detail: answers.quickStarts && answers.quickStarts > 0
         ? `${answers.quickStarts} pinned`
-        : "None pinned yet"
+        : "None pinned yet · Settings › Activities"
     }
   ];
 }
