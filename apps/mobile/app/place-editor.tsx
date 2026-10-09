@@ -5,7 +5,6 @@ import {
   Pressable,
   ScrollView,
   StyleSheet,
-  Switch,
   Text,
   TextInput,
   View
@@ -17,9 +16,11 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import Svg, { Circle as SvgCircle, Path } from "react-native-svg";
 import MapView, { Circle, Marker, type MapPressEvent } from "react-native-maps";
 import {
+  DAYFRAME_APP_ICONS,
+  DAYFRAME_BLOCKS,
   PlaceRoleSchema,
+  blockColorsFor,
   leavingRoleHolder,
-  paletteColorFor,
   placeDisplayName,
   placeRoleLabel,
   placeRoleRequest,
@@ -36,6 +37,14 @@ import {
   type MobileLearnedPlace,
   type MobilePlace
 } from "@/lib/api";
+import { ActivityPickerSheet } from "@/components/ActivityPickerSheet";
+import { DayframeIcon } from "@/components/icons/DayframeIcon";
+import {
+  SettingsBlockGroup,
+  SettingsBlockRow,
+  SettingsPillButton,
+  SettingsSwitch
+} from "@/components/settings/SettingsBlocks";
 import { refreshGeofencesForPlaces } from "@/lib/geofence";
 import { mobileAccountKey, mobileAccountOwnersEqual, readActiveMobileAccount, type MobileAccountOwner } from "@/lib/mobileAccount";
 import { applyPlaceRoleLocally, notePlaceDeleted } from "@/lib/placesPage";
@@ -46,7 +55,9 @@ import {
   suggestedPlaceNameFromGeocode,
   validatePlaceForm,
   withRole,
-  DEFAULT_PLACE_RADIUS_METERS
+  DEFAULT_PLACE_RADIUS_METERS,
+  MAX_PLACE_RADIUS_METERS,
+  MIN_PLACE_RADIUS_METERS
 } from "@/lib/places";
 import {
   createNativePlaceSearchProvider,
@@ -63,7 +74,8 @@ import {
   resolvedPlaceSelectionDraft,
   shouldClearResolvedPlace
 } from "@/lib/placeEditorState";
-import { pressable, useMobileTheme, type MobileStyles, type MobileTheme } from "@/lib/mobileTheme";
+import { useMobileTheme } from "@/lib/mobileTheme";
+import { MOBILE_DISPLAY_FONT, mobileTextProps } from "@/lib/mobileTypography";
 import {
   localLayoutTransition,
   localPresenceEntering,
@@ -71,7 +83,6 @@ import {
   useReduceMotionPreference
 } from "@/lib/motion";
 
-type Category = MobileBootstrap["categories"][number];
 type EditorMode = "create" | "edit" | "learned";
 
 const emptySearchState: PlaceSearchState = {
@@ -97,7 +108,6 @@ export default function PlaceEditorScreen() {
       : "create";
   const reduceMotion = useReduceMotionPreference();
   const { styles, theme } = useMobileTheme();
-  const editorStyles = useMemo(() => createEditorStyles(theme), [theme]);
   const provider = useMemo(() => createNativePlaceSearchProvider(), []);
   const [data, setData] = useState<MobileBootstrap | null>(null);
   const [loadedEntity, setLoadedEntity] = useState<MobilePlace | MobileLearnedPlace | null>(null);
@@ -106,6 +116,7 @@ export default function PlaceEditorScreen() {
   const [locating, setLocating] = useState(false);
   const [resolvingSuggestion, setResolvingSuggestion] = useState(false);
   const [advancedExpanded, setAdvancedExpanded] = useState(false);
+  const [activityPickerOpen, setActivityPickerOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [searchState, setSearchState] = useState<PlaceSearchState>(emptySearchState);
   const [selectedResult, setSelectedResult] = useState<ResolvedPlaceSearchResult | null>(null);
@@ -175,7 +186,6 @@ export default function PlaceEditorScreen() {
           longitude: learnedPlace.longitude
         };
         initialCoordinate.current = existingCoordinate;
-        setStatusMessage("Review the learned place before saving it.");
       }
       void resolvePlaceSearchBias({
         existingCoordinate,
@@ -222,7 +232,7 @@ export default function PlaceEditorScreen() {
   const title = mode === "edit"
     ? "Edit place"
     : mode === "learned"
-      ? "Save learned place"
+      ? "Save this place"
       : newRole ? `Add ${placeRoleLabel(newRole)}` : "New place";
   const accuracyWarning = locationAccuracyWarning(locationAccuracy, locationPrecise);
 
@@ -275,7 +285,8 @@ export default function PlaceEditorScreen() {
   async function useCurrentLocation() {
     if (locating) return;
     setLocating(true);
-    setStatusMessage("Checking current location...");
+    // The Use current location row says "Finding you…" and then the accuracy.
+    setStatusMessage(null);
     try {
       let permission = await Location.getForegroundPermissionsAsync();
       if (!permission.granted && permission.canAskAgain) {
@@ -297,7 +308,6 @@ export default function PlaceEditorScreen() {
         const suggestion = await suggestCurrentPlaceName(latitude, longitude);
         if (suggestion) setPlaceName(suggestion);
       }
-      setStatusMessage(formatLocationAccuracy(accuracy));
     } catch {
       const message = "Current location is unavailable. Try again, or enter coordinates.";
       setStatusMessage(message);
@@ -414,7 +424,7 @@ export default function PlaceEditorScreen() {
     const place = loadedEntity as MobilePlace;
     Alert.alert(
       "Delete place",
-      `Delete ${placeDisplayName(withRole(place))}? Existing time entries keep their time data, but this place label will be removed.`,
+      `Delete ${placeDisplayName(withRole(place))}? Past entries keep their time but lose this place.`,
       [
         { text: "Cancel", style: "cancel" },
         { text: "Delete", style: "destructive", onPress: () => void removePlace(place) }
@@ -449,20 +459,62 @@ export default function PlaceEditorScreen() {
   }
 
 
+  const defaultActivity = categories.find((category) => category.id === defaultCategoryId) ?? null;
+  // A saved default the picker can't list (an archived activity) still shows by its saved name and
+  // can still be removed.
+  const savedDefaultName = mode === "edit" && defaultCategoryId && !defaultActivity
+    && (loadedEntity as MobilePlace | null)?.defaultCategoryId === defaultCategoryId
+    ? (loadedEntity as MobilePlace).defaultCategoryName ?? "An archived activity"
+    : null;
+  const defaultActivityLabel = defaultActivity?.name ?? savedDefaultName ?? (defaultCategoryId ? "An archived activity" : null);
+  // The map draws the place in the colour of the activity its visits log as (neutral without one),
+  // as the Review deck's place cards do; coral stays for Save.
+  const mapColor = defaultActivity && loggingEnabled
+    ? blockColorsFor(defaultActivity.color ?? defaultActivity.id, theme.mode, defaultActivity.name).fill
+    : theme.textSecondary;
+  const eyebrow = mode === "edit"
+    ? (loadedEntity as MobilePlace | null)?.role ? placeRoleLabel((loadedEntity as MobilePlace).role!).toUpperCase() : "SAVED PLACE"
+    : mode === "learned" ? "SUGGESTED PLACE" : "NEW";
+  const coordinateProblem = !validation.ok && /Latitude|Longitude/.test(validation.message) ? validation.message : null;
+  const radiusProblem = !validation.ok && /Radius/.test(validation.message) ? validation.message : null;
+  const busy = saving || deleting;
+  const canSave = validation.ok && !busy && !loading;
+
   return (
     <SafeAreaView style={styles.safeArea}>
-      <View style={styles.settingsFloatingHeader}>
-        <View style={styles.settingsHeader}>
-          <Pressable
-            accessibilityLabel="Cancel place editing"
-            accessibilityRole="button"
-            style={pressable(styles.iconButton, styles.buttonPressed)}
-            onPress={() => router.back()}
-          >
-            <BackGlyph color={theme.accent} />
-          </Pressable>
-          <Text style={styles.settingsTitle} numberOfLines={1}>{title}</Text>
+      {/* A sheet-like head on the pushed route: Cancel, the title and the coral Save. It stays put. */}
+      <View style={[editorStyles.head, { borderBottomColor: theme.border }]}>
+        <Pressable
+          accessibilityLabel="Cancel place editing"
+          accessibilityRole="button"
+          onPress={() => router.back()}
+          style={({ pressed }) => [editorStyles.headButton, pressed ? styles.buttonPressed : null]}
+          testID="place-editor-cancel"
+        >
+          <Text {...mobileTextProps("control")} style={[editorStyles.cancelText, { color: theme.textSecondary }]}>Cancel</Text>
+        </Pressable>
+        <View style={editorStyles.headTitle}>
+          <Text {...mobileTextProps("counter")} numberOfLines={1} style={[editorStyles.eyebrow, { color: theme.textMuted }]}>{eyebrow}</Text>
+          <Text {...mobileTextProps("screenHeading")} accessibilityRole="header" numberOfLines={1} style={[editorStyles.title, { color: theme.textPrimary }]}>
+            {title}
+          </Text>
         </View>
+        <Pressable
+          accessibilityHint={validation.ok ? undefined : validation.message}
+          accessibilityLabel={saving ? "Saving place" : "Save place"}
+          accessibilityRole="button"
+          accessibilityState={{ busy: saving, disabled: !canSave }}
+          disabled={!canSave}
+          onPress={() => void savePlace()}
+          style={({ pressed }) => [
+            editorStyles.savePill,
+            { backgroundColor: theme.accent, opacity: canSave || saving ? 1 : 0.45 },
+            pressed ? styles.buttonPressed : null
+          ]}
+          testID="place-editor-save"
+        >
+          <Text {...mobileTextProps("control")} style={[editorStyles.saveText, { color: theme.onAccent }]}>{saving ? "Saving…" : "Save"}</Text>
+        </Pressable>
       </View>
 
       <ScrollView
@@ -473,140 +525,15 @@ export default function PlaceEditorScreen() {
         style={styles.settingsScrollView}
       >
         {loading ? (
-          <Text accessibilityLiveRegion="polite" style={styles.muted}>Loading place…</Text>
+          <Text {...mobileTextProps("body")} accessibilityLiveRegion="polite" style={{ color: theme.textSecondary }}>Loading place…</Text>
         ) : (
-          <View style={styles.contentStack}>
-            <View style={styles.panel}>
-              <Text style={styles.label}>Address or place</Text>
-              <View style={editorStyles.searchField}>
-                <SearchGlyph color={theme.textSecondary} />
-                <TextInput
-                  accessibilityLabel="Address or place"
-                  autoCapitalize="words"
-                  autoCorrect={false}
-                  clearButtonMode="never"
-                  onChangeText={changeSearchQuery}
-                  placeholder="Search address or place"
-                  placeholderTextColor={theme.textSecondary}
-                  returnKeyType="search"
-                  style={editorStyles.searchInput}
-                  value={searchQuery}
-                />
-                {searchQuery ? (
-                  <Pressable
-                    accessibilityLabel="Clear place search"
-                    accessibilityRole="button"
-                    hitSlop={8}
-                    onPress={clearSearch}
-                    style={pressable(editorStyles.clearButton, styles.buttonPressed)}
-                  >
-                    <CloseGlyph color={theme.textSecondary} />
-                  </Pressable>
-                ) : null}
-              </View>
-
-              {!provider ? (
-                <Text accessibilityLiveRegion="polite" style={styles.statusText}>
-                  Place search is unavailable in this build. Use Current location or Advanced coordinates.
-                </Text>
-              ) : null}
-              {provider && searchState.status === "loading" ? (
-                <Text accessibilityLiveRegion="polite" style={styles.diagnosticText}>Searching…</Text>
-              ) : null}
-              {provider && searchState.status === "typing" && searchQuery.trim().length === 1 ? (
-                <Text style={styles.diagnosticText}>Type one more character to search.</Text>
-              ) : null}
-              {provider && searchState.message ? (
-                <Text accessibilityLiveRegion="polite" style={styles.statusText}>{searchState.message}</Text>
-              ) : null}
-
-              {searchState.suggestions.length > 0 ? (
-                <Reanimated.View
-                  accessibilityLabel={`${searchState.suggestions.length} place search results`}
-                  accessibilityLiveRegion="polite"
-                  entering={localPresenceEntering(reduceMotion)}
-                  exiting={localPresenceExiting(reduceMotion)}
-                  layout={localLayoutTransition(reduceMotion)}
-                  style={editorStyles.suggestionList}
-                >
-                  <ScrollView
-                    keyboardShouldPersistTaps="handled"
-                    nestedScrollEnabled
-                    style={editorStyles.suggestionScroller}
-                  >
-                    {searchState.suggestions.map((suggestion, index) => (
-                      <Pressable
-                        accessibilityLabel={[suggestion.title, suggestion.subtitle].filter(Boolean).join(", ")}
-                        accessibilityRole="button"
-                        disabled={resolvingSuggestion}
-                        key={suggestion.id}
-                        onPress={() => void chooseSuggestion(suggestion)}
-                        style={({ pressed }) => [
-                          editorStyles.suggestionRow,
-                          index > 0 ? editorStyles.suggestionDivider : null,
-                          pressed ? styles.buttonPressed : null
-                        ]}
-                      >
-                        <MapPinGlyph color={theme.accent} />
-                        <View style={editorStyles.suggestionText}>
-                          <Text numberOfLines={1} style={editorStyles.suggestionTitle}>{suggestion.title}</Text>
-                          {suggestion.subtitle ? (
-                            <Text numberOfLines={2} style={editorStyles.suggestionSubtitle}>{suggestion.subtitle}</Text>
-                          ) : null}
-                        </View>
-                      </Pressable>
-                    ))}
-                  </ScrollView>
-                </Reanimated.View>
-              ) : null}
-
-              {selectedResult ? (
-                <Reanimated.View
-                  entering={localPresenceEntering(reduceMotion)}
-                  exiting={localPresenceExiting(reduceMotion)}
-                  layout={localLayoutTransition(reduceMotion)}
-                  style={editorStyles.selectedResult}
-                >
-                  <MapPinGlyph color={theme.accent} />
-                  <View style={editorStyles.suggestionText}>
-                    <Text style={editorStyles.suggestionTitle}>{selectedResult.title}</Text>
-                    {selectedResult.formattedAddress || selectedResult.subtitle ? (
-                      <Text style={editorStyles.suggestionSubtitle} numberOfLines={2}>
-                        {selectedResult.formattedAddress || selectedResult.subtitle}
-                      </Text>
-                    ) : null}
-                  </View>
-                  <Pressable
-                    accessibilityLabel="Change selected place"
-                    accessibilityRole="button"
-                    onPress={clearSearch}
-                    style={pressable(editorStyles.changeButton, styles.buttonPressed)}
-                  >
-                    <Text style={editorStyles.changeButtonText}>Change</Text>
-                  </Pressable>
-                </Reanimated.View>
-              ) : null}
-            </View>
-
-            <View style={styles.panel}>
-              <Text style={styles.label}>Name in Dayframe</Text>
-              <TextInput
-                accessibilityLabel="Name in Dayframe"
-                onChangeText={(value) => {
-                  nameTouched.current = true;
-                  setPlaceName(value);
-                }}
-                placeholder="Home, Gym, Mum's house…"
-                placeholderTextColor={theme.textSecondary}
-                returnKeyType="done"
-                style={styles.textInput}
-                value={placeName}
-              />
-
+          <View style={editorStyles.stack}>
+            {/* The map card: the centre and radius, tap to fine-tune. Updates in place. */}
+            <Reanimated.View layout={localLayoutTransition(reduceMotion)}>
               {formCoordinate ? (
-                <View style={editorStyles.mapSection}>
+                <View style={editorStyles.mapCard}>
                   <MapView
-                    accessibilityLabel={`Saved place centre and ${Number.isFinite(numericRadius) ? numericRadius : 0} metre radius preview`}
+                    accessibilityLabel={`Map of this place with a ${Number.isFinite(numericRadius) ? numericRadius : 0} metre circle. Tap to move the centre.`}
                     onPress={(event: MapPressEvent) => {
                       applyCoordinate(
                         event.nativeEvent.coordinate.latitude,
@@ -616,300 +543,425 @@ export default function PlaceEditorScreen() {
                     pitchEnabled={false}
                     region={{ ...formCoordinate, latitudeDelta: 0.006, longitudeDelta: 0.006 }}
                     rotateEnabled={false}
-                    style={editorStyles.mapPreview}
+                    style={editorStyles.map}
+                    testID="place-editor-map"
                   >
                     {Number.isFinite(numericRadius) && numericRadius > 0 ? (
                       <Circle
                         center={formCoordinate}
-                        fillColor={`${theme.accent}24`}
+                        fillColor={`${mapColor}2E`}
                         radius={numericRadius}
-                        strokeColor={theme.accent}
+                        strokeColor={mapColor}
                         strokeWidth={2}
                       />
                     ) : null}
-                    <Marker coordinate={formCoordinate} pinColor={theme.accent} title="Saved place centre" />
+                    <Marker coordinate={formCoordinate} pinColor={mapColor} title="Place centre" />
                   </MapView>
-                  <Text style={styles.muted}>Tap the map to fine-tune the centre.</Text>
+                  <Text {...mobileTextProps("metadata")} style={[editorStyles.mapFoot, { color: theme.textMuted }]}>
+                    Tap the map to fine-tune the centre.
+                  </Text>
                 </View>
               ) : (
-                <Text style={styles.muted}>
-                  Choose a search result, use Current location, or enter coordinates.
-                </Text>
+                <View style={[editorStyles.mapPlaceholder, { backgroundColor: theme.surfaceInset }]} testID="place-editor-map-empty">
+                  <DayframeIcon color={theme.textMuted} glyph={DAYFRAME_APP_ICONS.places} size={26} />
+                  <Text {...mobileTextProps("body")} style={[editorStyles.mapPlaceholderText, { color: theme.textSecondary }]}>
+                    Search for a place or use your current location.
+                  </Text>
+                </View>
               )}
+            </Reanimated.View>
 
-              <View style={editorStyles.locationRadiusRow}>
+            <Reanimated.View layout={localLayoutTransition(reduceMotion)}>
+              <SettingsBlockGroup theme={theme} title="Where">
+                <View style={editorStyles.searchRow}>
+                  <DayframeIcon color={theme.textMuted} glyph={DAYFRAME_APP_ICONS.search} size={18} />
+                  <TextInput
+                    {...mobileTextProps("input")}
+                    accessibilityLabel="Address or place"
+                    autoCapitalize="words"
+                    autoCorrect={false}
+                    clearButtonMode="never"
+                    onChangeText={changeSearchQuery}
+                    placeholder="Search address or place"
+                    placeholderTextColor={theme.textMuted}
+                    returnKeyType="search"
+                    style={[editorStyles.searchInput, { color: theme.textPrimary }]}
+                    testID="place-editor-search"
+                    value={searchQuery}
+                  />
+                  {searchQuery ? (
+                    <Pressable
+                      accessibilityLabel="Clear place search"
+                      accessibilityRole="button"
+                      onPress={clearSearch}
+                      style={({ pressed }) => [editorStyles.iconTarget, pressed ? styles.buttonPressed : null]}
+                    >
+                      <DayframeIcon color={theme.textMuted} glyph={DAYFRAME_APP_ICONS.close} size={17} />
+                    </Pressable>
+                  ) : null}
+                </View>
+
+                {searchState.suggestions.length > 0 ? (
+                  <Reanimated.View
+                    accessibilityLabel={`${searchState.suggestions.length} place search results`}
+                    accessibilityLiveRegion="polite"
+                    entering={localPresenceEntering(reduceMotion)}
+                    exiting={localPresenceExiting(reduceMotion)}
+                    layout={localLayoutTransition(reduceMotion)}
+                  >
+                    <ScrollView
+                      keyboardShouldPersistTaps="handled"
+                      nestedScrollEnabled
+                      style={editorStyles.suggestionScroller}
+                    >
+                      {searchState.suggestions.map((suggestion) => (
+                        <Pressable
+                          accessibilityLabel={[suggestion.title, suggestion.subtitle].filter(Boolean).join(", ")}
+                          accessibilityRole="button"
+                          disabled={resolvingSuggestion}
+                          key={suggestion.id}
+                          onPress={() => void chooseSuggestion(suggestion)}
+                          style={({ pressed }) => [
+                            editorStyles.resultRow,
+                            { borderTopColor: theme.border },
+                            pressed ? { backgroundColor: theme.surfaceMuted } : null
+                          ]}
+                        >
+                          <DayframeIcon color={theme.textMuted} glyph={DAYFRAME_APP_ICONS.places} size={18} />
+                          <View style={editorStyles.resultText}>
+                            <Text {...mobileTextProps("itemTitle")} numberOfLines={1} style={[editorStyles.resultTitle, { color: theme.textPrimary }]}>
+                              {suggestion.title}
+                            </Text>
+                            {suggestion.subtitle ? (
+                              <Text {...mobileTextProps("metadata")} numberOfLines={2} style={{ color: theme.textMuted }}>{suggestion.subtitle}</Text>
+                            ) : null}
+                          </View>
+                        </Pressable>
+                      ))}
+                    </ScrollView>
+                  </Reanimated.View>
+                ) : null}
+
+                {selectedResult ? (
+                  <Reanimated.View
+                    entering={localPresenceEntering(reduceMotion)}
+                    exiting={localPresenceExiting(reduceMotion)}
+                    layout={localLayoutTransition(reduceMotion)}
+                    style={[editorStyles.resultRow, { borderTopColor: theme.border }]}
+                  >
+                    <DayframeIcon color={theme.textPrimary} glyph={DAYFRAME_APP_ICONS.done} size={18} />
+                    <View style={editorStyles.resultText}>
+                      <Text {...mobileTextProps("itemTitle")} style={[editorStyles.resultTitle, { color: theme.textPrimary }]}>{selectedResult.title}</Text>
+                      {selectedResult.formattedAddress || selectedResult.subtitle ? (
+                        <Text {...mobileTextProps("metadata")} numberOfLines={2} style={{ color: theme.textMuted }}>
+                          {selectedResult.formattedAddress || selectedResult.subtitle}
+                        </Text>
+                      ) : null}
+                    </View>
+                    <SettingsPillButton accessibilityLabel="Change selected place" label="Change" onPress={clearSearch} theme={theme} />
+                  </Reanimated.View>
+                ) : null}
+
                 <Pressable
+                  accessibilityHint="Centres this place where you are now"
                   accessibilityLabel="Use current location"
+                  accessibilityValue={locationAccuracy !== null && !locating ? { text: formatLocationAccuracy(locationAccuracy) } : undefined}
                   accessibilityRole="button"
+                  accessibilityState={{ busy: locating, disabled: locating }}
                   disabled={locating}
                   onPress={() => void useCurrentLocation()}
                   style={({ pressed }) => [
-                    editorStyles.currentLocationAction,
-                    locating ? styles.buttonDisabled : null,
-                    pressed ? styles.buttonPressed : null
+                    editorStyles.resultRow,
+                    { borderTopColor: theme.border },
+                    pressed ? { backgroundColor: theme.surfaceMuted } : null
                   ]}
+                  testID="place-editor-current-location"
                 >
-                  <View style={editorStyles.currentLocationIcon}>
-                    <TargetGlyph color={theme.accent} />
+                  <TargetGlyph color={theme.textPrimary} />
+                  <View style={editorStyles.resultText}>
+                    <Text {...mobileTextProps("itemTitle")} style={[editorStyles.resultTitle, { color: theme.textPrimary }]}>
+                      {locating ? "Finding you…" : "Use current location"}
+                    </Text>
+                    {locationAccuracy !== null && !locating ? (
+                      <Text {...mobileTextProps("metadata")} style={{ color: theme.textMuted }}>{formatLocationAccuracy(locationAccuracy)}</Text>
+                    ) : null}
                   </View>
-                  <Text style={editorStyles.currentLocationLabel}>
-                    {locating ? "Finding…" : "Current location"}
-                  </Text>
                 </Pressable>
-                <View style={editorStyles.radiusGroup}>
-                  <Text style={styles.label}>Radius</Text>
-                  <View style={editorStyles.radiusInputRow}>
-                    <TextInput
-                      accessibilityLabel="Place radius in metres"
-                      keyboardType="number-pad"
-                      onChangeText={setRadiusMeters}
-                      placeholder="100"
-                      placeholderTextColor={theme.textSecondary}
-                      style={[styles.textInput, editorStyles.radiusInput]}
-                      value={radiusMeters}
-                    />
-                    <Text style={styles.muted}>m</Text>
-                  </View>
-                </View>
-              </View>
-
-              {locationAccuracy !== null ? (
-                <Text style={styles.diagnosticText}>{formatLocationAccuracy(locationAccuracy)}</Text>
+              </SettingsBlockGroup>
+              {!provider ? (
+                <Text {...mobileTextProps("metadata")} accessibilityLiveRegion="polite" style={[editorStyles.note, { color: theme.textSecondary }]}>
+                  Place search is unavailable in this build. Use Current location or Advanced coordinates.
+                </Text>
               ) : null}
-              {accuracyWarning ? <Text style={styles.warningText}>{accuracyWarning}</Text> : null}
-
-              <Pressable
-                accessibilityRole="button"
-                accessibilityState={{ expanded: advancedExpanded }}
-                onPress={() => {
-                  setAdvancedExpanded((expanded) => !expanded);
-                }}
-                style={pressable(editorStyles.disclosureButton, styles.buttonPressed)}
-              >
-                <Text style={editorStyles.disclosureText}>Advanced coordinates</Text>
-                <ChevronGlyph color={theme.textSecondary} expanded={advancedExpanded} />
-              </Pressable>
-              {advancedExpanded ? (
-                <Reanimated.View
-                  entering={localPresenceEntering(reduceMotion)}
-                  exiting={localPresenceExiting(reduceMotion)}
-                  layout={localLayoutTransition(reduceMotion)}
-                  style={editorStyles.coordinateFields}
-                >
-                  <View style={editorStyles.coordinateField}>
-                    <Text style={styles.label}>Latitude</Text>
-                    <TextInput
-                      accessibilityLabel="Latitude"
-                      keyboardType="numbers-and-punctuation"
-                      onChangeText={setLatitudeText}
-                      placeholder="51.5074"
-                      placeholderTextColor={theme.textSecondary}
-                      style={styles.textInput}
-                      value={latitudeText}
-                    />
-                  </View>
-                  <View style={editorStyles.coordinateField}>
-                    <Text style={styles.label}>Longitude</Text>
-                    <TextInput
-                      accessibilityLabel="Longitude"
-                      keyboardType="numbers-and-punctuation"
-                      onChangeText={setLongitudeText}
-                      placeholder="-0.1278"
-                      placeholderTextColor={theme.textSecondary}
-                      style={styles.textInput}
-                      value={longitudeText}
-                    />
-                  </View>
-                  {!validation.ok && /Latitude|Longitude/.test(validation.message) ? (
-                    <Text accessibilityLiveRegion="polite" style={styles.warningText}>{validation.message}</Text>
-                  ) : null}
-                </Reanimated.View>
+              {provider && searchState.status === "loading" ? (
+                <Text {...mobileTextProps("metadata")} accessibilityLiveRegion="polite" style={[editorStyles.note, { color: theme.textMuted }]}>Searching…</Text>
               ) : null}
-            </View>
+              {provider && searchState.status === "typing" && searchQuery.trim().length === 1 ? (
+                <Text {...mobileTextProps("metadata")} style={[editorStyles.note, { color: theme.textMuted }]}>Type one more character to search.</Text>
+              ) : null}
+              {provider && searchState.message ? (
+                <Text {...mobileTextProps("metadata")} accessibilityLiveRegion="polite" style={[editorStyles.note, { color: theme.textSecondary }]}>{searchState.message}</Text>
+              ) : null}
+              {accuracyWarning ? (
+                <Text {...mobileTextProps("metadata")} style={[editorStyles.note, { color: theme.warningText }]}>{accuracyWarning}</Text>
+              ) : null}
+            </Reanimated.View>
+
+            <Reanimated.View layout={localLayoutTransition(reduceMotion)}>
+              <SettingsBlockGroup theme={theme} title="Name">
+                <TextInput
+                  {...mobileTextProps("input")}
+                  accessibilityLabel="Name in Dayframe"
+                  maxLength={120}
+                  onChangeText={(value) => {
+                    nameTouched.current = true;
+                    setPlaceName(value);
+                  }}
+                  placeholder="Home, Gym, Mum's house…"
+                  placeholderTextColor={theme.textMuted}
+                  returnKeyType="done"
+                  style={[editorStyles.fieldInput, { color: theme.textPrimary }]}
+                  testID="place-editor-name"
+                  value={placeName}
+                />
+              </SettingsBlockGroup>
+            </Reanimated.View>
 
             {newRole && roleHolder ? (
-              <View style={styles.panel}>
-                <Text style={styles.label}>Rename the old {placeRoleLabel(newRole).toLowerCase()}</Text>
-                <TextInput
-                  accessibilityHint="Its past entries keep this name. Leave it blank to keep the current name."
-                  accessibilityLabel={`Rename the old ${placeRoleLabel(newRole).toLowerCase()}`}
-                  maxLength={120}
-                  onChangeText={setPreviousRoleName}
-                  placeholder={roleHolder.name}
-                  placeholderTextColor={theme.textSecondary}
-                  returnKeyType="done"
-                  style={styles.textInput}
-                  testID="place-editor-previous-role-name"
-                  value={previousRoleName ?? previousRolePlaceName(newRole)}
-                />
-                <Text style={styles.categoryMeta}>
-                  {placeRoleLabel(newRole)} moves to this new place. The old one keeps its entries under this name, so they don&apos;t read as an address.
-                </Text>
-              </View>
+              <Reanimated.View layout={localLayoutTransition(reduceMotion)}>
+                <SettingsBlockGroup
+                  foot={`${placeRoleLabel(newRole)} moves to this new place. The old one keeps its entries under this name.`}
+                  theme={theme}
+                  title={`Old ${placeRoleLabel(newRole).toLowerCase()}`}
+                >
+                  <TextInput
+                    {...mobileTextProps("input")}
+                    accessibilityHint="Its past entries keep this name. Leave it blank to keep the current name."
+                    accessibilityLabel={`Rename the old ${placeRoleLabel(newRole).toLowerCase()}`}
+                    maxLength={120}
+                    onChangeText={setPreviousRoleName}
+                    placeholder={roleHolder.name}
+                    placeholderTextColor={theme.textMuted}
+                    returnKeyType="done"
+                    style={[editorStyles.fieldInput, { color: theme.textPrimary }]}
+                    testID="place-editor-previous-role-name"
+                    value={previousRoleName ?? previousRolePlaceName(newRole)}
+                  />
+                </SettingsBlockGroup>
+              </Reanimated.View>
             ) : null}
 
-            <View style={styles.panel}>
-              <View style={styles.healthPreferenceHeader}>
-                <View style={styles.healthPreferenceText}>
-                  <Text style={styles.categoryName}>Suggest visits here</Text>
-                  <Text style={styles.categoryMeta}>
-                    {loggingEnabled
-                      ? "Show detected visits in Review."
-                      : "Do not suggest visits for this place."}
-                  </Text>
-                </View>
-                <Switch
-                  accessibilityLabel="Suggest visits here"
-                  ios_backgroundColor={theme.borderStrong}
-                  onValueChange={(enabled) => {
-                    setLoggingEnabled(enabled);
-                    if (!enabled) {
-                      setDefaultCategoryId("");
-                      setDefaultActivityDescription("");
-                    }
-                  }}
-                  thumbColor={loggingEnabled ? theme.onAccent : theme.surfaceRaised}
-                  trackColor={{ false: theme.borderStrong, true: theme.accent }}
-                  value={loggingEnabled}
-                />
-              </View>
-              {loggingEnabled ? (
-                <Reanimated.View
-                  entering={localPresenceEntering(reduceMotion)}
-                  exiting={localPresenceExiting(reduceMotion)}
-                  layout={localLayoutTransition(reduceMotion)}
-                  style={editorStyles.suggestionPreferences}
-                >
-                  <Text style={styles.label}>Default activity</Text>
-                  <ScrollView
-                    alwaysBounceVertical={false}
-                    bounces={false}
-                    directionalLockEnabled
-                    horizontal
-                    showsHorizontalScrollIndicator={false}
-                    contentContainerStyle={styles.categoryChoiceScroller}
-                  >
-                    <CategoryChoice
-                      label="No default"
-                      selected={!defaultCategoryId}
-                      onPress={() => setDefaultCategoryId("")}
-                      theme={theme}
-                      styles={styles}
-                    />
-                    {categories.map((category) => (
-                      <CategoryChoice
-                        category={category}
-                        key={category.id}
-                        label={category.name}
-                        selected={defaultCategoryId === category.id}
-                        onPress={() => setDefaultCategoryId(category.id)}
-                        theme={theme}
-                        styles={styles}
-                      />
-                    ))}
-                  </ScrollView>
-                  <Text style={styles.label}>Default task description</Text>
+            <Reanimated.View layout={localLayoutTransition(reduceMotion)}>
+              <SettingsBlockGroup theme={theme} title="Size">
+                <View style={editorStyles.fieldRow}>
+                  <Text {...mobileTextProps("itemTitle")} style={[editorStyles.fieldLabel, { color: theme.textPrimary }]}>Radius</Text>
                   <TextInput
-                    accessibilityLabel="Default task description"
-                    onChangeText={setDefaultActivityDescription}
-                    placeholder="School drop-off/pickup"
-                    placeholderTextColor={theme.textSecondary}
-                    returnKeyType="done"
-                    style={styles.textInput}
-                    value={defaultActivityDescription}
+                    {...mobileTextProps("input")}
+                    accessibilityHint={`Between ${MIN_PLACE_RADIUS_METERS} and ${MAX_PLACE_RADIUS_METERS} metres`}
+                    accessibilityLabel="Place radius in metres"
+                    keyboardType="number-pad"
+                    maxLength={4}
+                    onChangeText={setRadiusMeters}
+                    placeholder={String(DEFAULT_PLACE_RADIUS_METERS)}
+                    placeholderTextColor={theme.textMuted}
+                    style={[editorStyles.radiusInput, { backgroundColor: theme.surfaceInset, color: theme.textPrimary }]}
+                    testID="place-editor-radius"
+                    value={radiusMeters}
                   />
-                </Reanimated.View>
+                  <Text {...mobileTextProps("body")} style={{ color: theme.textSecondary }}>m</Text>
+                </View>
+              </SettingsBlockGroup>
+              {radiusProblem ? (
+                <Text {...mobileTextProps("metadata")} accessibilityLiveRegion="polite" style={[editorStyles.note, { color: theme.dangerText }]}>{radiusProblem}</Text>
               ) : null}
-            </View>
+            </Reanimated.View>
+
+            <Reanimated.View layout={localLayoutTransition(reduceMotion)}>
+              <SettingsBlockGroup
+                foot={loggingEnabled ? "Show detected visits in Review." : "Visits here are not suggested."}
+                theme={theme}
+                title="Visits"
+              >
+                <SettingsBlockRow
+                  control={
+                    <SettingsSwitch
+                      label="Suggest visits here"
+                      onValueChange={(enabled) => {
+                        setLoggingEnabled(enabled);
+                        if (!enabled) {
+                          setDefaultCategoryId("");
+                          setDefaultActivityDescription("");
+                        }
+                      }}
+                      theme={theme}
+                      value={loggingEnabled}
+                    />
+                  }
+                  divider={false}
+                  testID="place-editor-suggest"
+                  theme={theme}
+                  title="Suggest visits here"
+                />
+                {loggingEnabled ? (
+                  <Reanimated.View
+                    entering={localPresenceEntering(reduceMotion)}
+                    exiting={localPresenceExiting(reduceMotion)}
+                  >
+                    <SettingsBlockRow
+                      accessibilityHint="Chooses the activity a visit here is suggested as"
+                      onPress={() => {
+                        Keyboard.dismiss();
+                        setActivityPickerOpen(true);
+                      }}
+                      testID="place-editor-logs-as"
+                      theme={theme}
+                      title="Logs as"
+                      value={defaultActivityLabel ?? "No default activity"}
+                    />
+                    {defaultCategoryId ? (
+                      <Reanimated.View
+                        entering={localPresenceEntering(reduceMotion)}
+                        exiting={localPresenceExiting(reduceMotion)}
+                        layout={localLayoutTransition(reduceMotion)}
+                      >
+                        <SettingsBlockRow
+                          control={
+                            <SettingsPillButton
+                              accessibilityLabel="Remove the default activity"
+                              label="Remove"
+                              onPress={() => setDefaultCategoryId("")}
+                              theme={theme}
+                            />
+                          }
+                          testID="place-editor-clear-activity"
+                          theme={theme}
+                          title="Default activity"
+                        />
+                      </Reanimated.View>
+                    ) : null}
+                    <Reanimated.View layout={localLayoutTransition(reduceMotion)} style={[editorStyles.fieldRow, { borderTopColor: theme.border, borderTopWidth: StyleSheet.hairlineWidth }]}>
+                      <Text {...mobileTextProps("itemTitle")} style={[editorStyles.fieldLabel, { color: theme.textPrimary }]}>Entry name</Text>
+                      <TextInput
+                        {...mobileTextProps("input")}
+                        accessibilityHint="What a logged visit here is called. Optional."
+                        accessibilityLabel="Default task description"
+                        maxLength={240}
+                        onChangeText={setDefaultActivityDescription}
+                        placeholder="Optional"
+                        placeholderTextColor={theme.textMuted}
+                        returnKeyType="done"
+                        style={[editorStyles.inlineInput, { color: theme.textPrimary }]}
+                        testID="place-editor-description"
+                        value={defaultActivityDescription}
+                      />
+                    </Reanimated.View>
+                  </Reanimated.View>
+                ) : null}
+              </SettingsBlockGroup>
+            </Reanimated.View>
+
+            <Reanimated.View layout={localLayoutTransition(reduceMotion)}>
+              <SettingsBlockGroup theme={theme} title="Advanced">
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityState={{ expanded: advancedExpanded }}
+                  onPress={() => {
+                    setAdvancedExpanded((expanded) => !expanded);
+                  }}
+                  style={({ pressed }) => [editorStyles.fieldRow, pressed ? { backgroundColor: theme.surfaceMuted } : null]}
+                  testID="place-editor-advanced"
+                >
+                  <Text {...mobileTextProps("itemTitle")} style={[editorStyles.fieldLabel, { color: theme.textPrimary }]}>Advanced coordinates</Text>
+                  <ChevronGlyph color={theme.textMuted} expanded={advancedExpanded} />
+                </Pressable>
+                {advancedExpanded ? (
+                  <Reanimated.View
+                    entering={localPresenceEntering(reduceMotion)}
+                    exiting={localPresenceExiting(reduceMotion)}
+                  >
+                    <View style={[editorStyles.fieldRow, { borderTopColor: theme.border, borderTopWidth: StyleSheet.hairlineWidth }]}>
+                      <Text {...mobileTextProps("itemTitle")} style={[editorStyles.fieldLabel, { color: theme.textPrimary }]}>Latitude</Text>
+                      <TextInput
+                        {...mobileTextProps("input")}
+                        accessibilityLabel="Latitude"
+                        keyboardType="numbers-and-punctuation"
+                        onChangeText={setLatitudeText}
+                        placeholder="51.5074"
+                        placeholderTextColor={theme.textMuted}
+                        style={[editorStyles.inlineInput, { color: theme.textPrimary }]}
+                        testID="place-editor-latitude"
+                        value={latitudeText}
+                      />
+                    </View>
+                    <View style={[editorStyles.fieldRow, { borderTopColor: theme.border, borderTopWidth: StyleSheet.hairlineWidth }]}>
+                      <Text {...mobileTextProps("itemTitle")} style={[editorStyles.fieldLabel, { color: theme.textPrimary }]}>Longitude</Text>
+                      <TextInput
+                        {...mobileTextProps("input")}
+                        accessibilityLabel="Longitude"
+                        keyboardType="numbers-and-punctuation"
+                        onChangeText={setLongitudeText}
+                        placeholder="-0.1278"
+                        placeholderTextColor={theme.textMuted}
+                        style={[editorStyles.inlineInput, { color: theme.textPrimary }]}
+                        testID="place-editor-longitude"
+                        value={longitudeText}
+                      />
+                    </View>
+                  </Reanimated.View>
+                ) : null}
+              </SettingsBlockGroup>
+              {coordinateProblem && (advancedExpanded || latitudeText || longitudeText) ? (
+                <Text {...mobileTextProps("metadata")} accessibilityLiveRegion="polite" style={[editorStyles.note, { color: theme.dangerText }]}>{coordinateProblem}</Text>
+              ) : null}
+            </Reanimated.View>
 
             {statusMessage ? (
-              <Text accessibilityLiveRegion="polite" style={styles.statusText}>{statusMessage}</Text>
+              <Reanimated.Text
+                {...mobileTextProps("metadata")}
+                accessibilityLiveRegion="polite"
+                entering={localPresenceEntering(reduceMotion)}
+                exiting={localPresenceExiting(reduceMotion)}
+                layout={localLayoutTransition(reduceMotion)}
+                style={[editorStyles.note, { color: theme.textSecondary }]}
+              >
+                {statusMessage}
+              </Reanimated.Text>
             ) : null}
-            <View style={editorStyles.actions}>
-              <Pressable
-                accessibilityRole="button"
-                onPress={() => router.back()}
-                style={pressable(styles.secondaryButton, styles.buttonPressed)}
-              >
-                <Text style={styles.secondaryButtonText}>Cancel</Text>
-              </Pressable>
-              <Pressable
-                accessibilityRole="button"
-                accessibilityState={{ disabled: saving || !validation.ok }}
-                disabled={saving || !validation.ok}
-                onPress={() => void savePlace()}
-                style={({ pressed }) => [
-                  styles.primaryInlineButton,
-                  saving || !validation.ok ? styles.buttonDisabled : null,
-                  pressed ? styles.buttonPressed : null
-                ]}
-              >
-                <Text style={styles.primaryButtonText}>{saving ? "Saving…" : "Save"}</Text>
-              </Pressable>
-            </View>
+
             {mode === "edit" && loadedEntity ? (
-              <Pressable
-                accessibilityRole="button"
-                accessibilityState={{ busy: deleting, disabled: saving || deleting }}
-                disabled={saving || deleting}
-                onPress={confirmDeletePlace}
-                style={({ pressed }) => [editorStyles.deleteButton, { backgroundColor: theme.surfaceMuted }, pressed ? styles.buttonPressed : null]}
-                testID="place-editor-delete"
-              >
-                <Text style={[editorStyles.deleteText, { color: theme.dangerText }]}>{deleting ? "Deleting…" : "Delete place"}</Text>
-              </Pressable>
+              <Reanimated.View layout={localLayoutTransition(reduceMotion)}>
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityState={{ busy: deleting, disabled: busy }}
+                  disabled={busy}
+                  onPress={confirmDeletePlace}
+                  style={({ pressed }) => [
+                    editorStyles.deleteButton,
+                    { backgroundColor: theme.surface, opacity: busy && !deleting ? 0.45 : 1 },
+                    pressed ? { backgroundColor: theme.surfaceMuted } : null
+                  ]}
+                  testID="place-editor-delete"
+                >
+                  <Text {...mobileTextProps("control")} style={[editorStyles.deleteText, { color: theme.dangerText }]}>{deleting ? "Deleting…" : "Delete place"}</Text>
+                </Pressable>
+              </Reanimated.View>
             ) : null}
           </View>
         )}
       </ScrollView>
+      {activityPickerOpen ? (
+        <ActivityPickerSheet
+          activities={categories}
+          onClose={() => setActivityPickerOpen(false)}
+          onPick={(activityId) => setDefaultCategoryId(activityId)}
+          recentIds={[]}
+          reduceMotion={reduceMotion}
+          selectedId={defaultCategoryId || null}
+          styles={styles}
+          theme={theme}
+        />
+      ) : null}
     </SafeAreaView>
-  );
-}
-
-function CategoryChoice({
-  category,
-  label,
-  selected,
-  onPress,
-  theme,
-  styles
-}: {
-  category?: Category;
-  label: string;
-  selected: boolean;
-  onPress: () => void;
-  theme: MobileTheme;
-  styles: MobileStyles;
-}) {
-  const chipColor = category
-    ? paletteColorFor(category.color, category.name, theme.mode)
-    : theme.accent;
-  return (
-    <Pressable
-      accessibilityRole="button"
-      accessibilityState={{ selected }}
-      hitSlop={{ top: 6, bottom: 6 }}
-      onPress={onPress}
-      style={pressable(
-        [
-          styles.categoryChoice,
-          category ? { borderColor: chipColor } : null,
-          selected ? styles.categoryChoiceSelected : null,
-          selected ? { borderColor: chipColor } : null
-        ],
-        styles.buttonPressed
-      )}
-    >
-      {category ? <View style={[styles.colorDot, { backgroundColor: chipColor, borderColor: chipColor }]} /> : null}
-      <Text style={[
-        styles.categoryChoiceText,
-        selected ? styles.categoryChoiceTextSelected : null,
-        selected ? { color: chipColor } : null
-      ]}>
-        {label}
-      </Text>
-      {selected ? <CheckGlyph color={chipColor} /> : null}
-    </Pressable>
   );
 }
 
@@ -945,124 +997,59 @@ function formatOptionalCoordinate(value?: number | null) {
   return typeof value === "number" ? formatCoordinate(value) : "";
 }
 
-function createEditorStyles(theme: MobileTheme) {
-  return StyleSheet.create({
-    scrollContent: { paddingBottom: 34 },
-    searchField: {
-      minHeight: 48,
-      flexDirection: "row",
-      alignItems: "center",
-      gap: 8,
-      borderRadius: 14,
-      backgroundColor: theme.surfaceMuted,
-      paddingLeft: 12,
-      paddingRight: 6
-    },
-    searchInput: {
-      flex: 1,
-      minWidth: 0,
-      minHeight: 48,
-      color: theme.textPrimary,
-      fontFamily: "System",
-      fontSize: 15,
-      paddingVertical: 9
-    },
-    clearButton: {
-      width: 44,
-      height: 44,
-      borderRadius: 22,
-      alignItems: "center",
-      justifyContent: "center"
-    },
-    suggestionList: {
-      borderRadius: 14,
-      backgroundColor: theme.surfaceMuted,
-      overflow: "hidden"
-    },
-    suggestionScroller: { maxHeight: 294 },
-    suggestionRow: {
-      minHeight: 49,
-      flexDirection: "row",
-      alignItems: "center",
-      gap: 10,
-      paddingHorizontal: 12,
-      paddingVertical: 8
-    },
-    suggestionDivider: { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: theme.border },
-    suggestionText: { flex: 1, minWidth: 0, gap: 2 },
-    suggestionTitle: { color: theme.textPrimary, fontSize: 14, fontWeight: "700", lineHeight: 18 },
-    suggestionSubtitle: { color: theme.textSecondary, fontSize: 12, lineHeight: 16 },
-    selectedResult: {
-      minHeight: 58,
-      flexDirection: "row",
-      alignItems: "center",
-      gap: 10,
-      borderRadius: 14,
-      backgroundColor: theme.accentSoft,
-      padding: 10
-    },
-    changeButton: {
-      minHeight: 44,
-      justifyContent: "center",
-      paddingHorizontal: 8
-    },
-    changeButtonText: { color: theme.accentText, fontSize: 12, fontWeight: "700" },
-    mapSection: { gap: 7 },
-    mapPreview: { width: "100%", height: 180, borderRadius: 16 },
-    locationRadiusRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 28 },
-    currentLocationAction: { minHeight: 64, minWidth: 118, flexDirection: "row", alignItems: "center", gap: 8 },
-    currentLocationIcon: {
-      width: 44,
-      height: 44,
-      borderRadius: 22,
-      alignItems: "center",
-      justifyContent: "center",
-      backgroundColor: theme.accentSoft
-    },
-    currentLocationLabel: { color: theme.textPrimary, fontSize: 12, fontWeight: "700", flexShrink: 1 },
-    radiusGroup: { flex: 1, minWidth: 0, gap: 5, alignSelf: "center", alignItems: "center" },
-    radiusInputRow: { flexDirection: "row", alignItems: "center", gap: 7 },
-    radiusInput: { width: 90, textAlign: "center" },
-    disclosureButton: {
-      minHeight: 44,
-      flexDirection: "row",
-      alignItems: "center",
-      justifyContent: "space-between"
-    },
-    disclosureText: { color: theme.textPrimary, fontSize: 14, fontWeight: "700" },
-    coordinateFields: { gap: 9 },
-    coordinateField: { gap: 5 },
-    suggestionPreferences: { gap: 9 },
-    actions: { flexDirection: "row", justifyContent: "flex-end", gap: 9, paddingBottom: 6 },
-    deleteButton: { alignItems: "center", borderRadius: 999, justifyContent: "center", marginTop: 8, minHeight: 48 },
-    deleteText: { fontSize: 15, fontWeight: "700" }
-  });
-}
-
-function BackGlyph({ color }: { color: string }) {
-  return <Svg width={20} height={20} viewBox="0 0 24 24"><Path d="M15 5 8 12l7 7" fill="none" stroke={color} strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.3} /></Svg>;
-}
-
-function SearchGlyph({ color }: { color: string }) {
-  return <Svg width={18} height={18} viewBox="0 0 24 24"><SvgCircle cx={11} cy={11} fill="none" r={6} stroke={color} strokeWidth={2} /><Path d="m16 16 4 4" stroke={color} strokeLinecap="round" strokeWidth={2} /></Svg>;
-}
-
-function CloseGlyph({ color }: { color: string }) {
-  return <Svg width={17} height={17} viewBox="0 0 24 24"><Path d="m7 7 10 10M17 7 7 17" stroke={color} strokeLinecap="round" strokeWidth={2} /></Svg>;
-}
-
-function MapPinGlyph({ color }: { color: string }) {
-  return <Svg width={18} height={18} viewBox="0 0 24 24"><Path d="M12 21s7-5.2 7-12a7 7 0 0 0-14 0c0 6.8 7 12 7 12Z" fill="none" stroke={color} strokeLinejoin="round" strokeWidth={2} /><Path d="M12 12.2a2.4 2.4 0 1 0 0-4.8 2.4 2.4 0 0 0 0 4.8Z" fill="none" stroke={color} strokeWidth={2} /></Svg>;
-}
+const editorStyles = StyleSheet.create({
+  head: {
+    alignItems: "center",
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    flexDirection: "row",
+    gap: 8,
+    paddingBottom: 8,
+    paddingHorizontal: 16,
+    paddingTop: 6
+  },
+  headButton: { alignItems: "flex-start", justifyContent: "center", minHeight: 44, minWidth: 64, paddingHorizontal: 6 },
+  headTitle: { alignItems: "center", flex: 1, minWidth: 0 },
+  cancelText: { fontSize: 15, fontWeight: "600" },
+  eyebrow: { fontSize: 11, fontWeight: "700", letterSpacing: 0.9 },
+  title: { fontFamily: MOBILE_DISPLAY_FONT.bold, fontSize: 20 },
+  savePill: { alignItems: "center", borderRadius: DAYFRAME_BLOCKS.radius.pill, justifyContent: "center", minHeight: 44, minWidth: 64, paddingHorizontal: 16 },
+  saveText: { fontSize: 15, fontWeight: "700" },
+  scrollContent: { paddingBottom: 40, paddingTop: 14 },
+  stack: { gap: 22 },
+  mapCard: { gap: 8 },
+  map: { borderRadius: 22, height: 200, overflow: "hidden", width: "100%" },
+  mapFoot: { marginHorizontal: 4 },
+  mapPlaceholder: { alignItems: "center", borderRadius: 22, gap: 10, justifyContent: "center", minHeight: 140, padding: 20 },
+  mapPlaceholderText: { textAlign: "center" },
+  searchRow: { alignItems: "center", flexDirection: "row", gap: 10, minHeight: 52, paddingLeft: 16, paddingRight: 4 },
+  searchInput: { flex: 1, fontSize: 16, minHeight: 48, minWidth: 0, paddingVertical: 10 },
+  iconTarget: { alignItems: "center", height: 44, justifyContent: "center", width: 44 },
+  suggestionScroller: { maxHeight: 294 },
+  resultRow: {
+    alignItems: "center",
+    borderTopWidth: StyleSheet.hairlineWidth,
+    flexDirection: "row",
+    gap: 12,
+    minHeight: 52,
+    paddingHorizontal: 16,
+    paddingVertical: 8
+  },
+  resultText: { flex: 1, gap: 2, minWidth: 0 },
+  resultTitle: { fontSize: 15, fontWeight: "600" },
+  note: { marginHorizontal: 4, marginTop: 8 },
+  fieldRow: { alignItems: "center", flexDirection: "row", gap: 12, minHeight: 52, paddingHorizontal: 16, paddingVertical: 6 },
+  fieldLabel: { flex: 1, fontSize: 15, fontWeight: "600" },
+  fieldInput: { fontSize: 16, minHeight: 52, paddingHorizontal: 16, paddingVertical: 12 },
+  inlineInput: { flex: 1.4, fontSize: 16, minHeight: 44, minWidth: 0, textAlign: "right" },
+  radiusInput: { borderRadius: 12, fontSize: 16, fontVariant: ["tabular-nums"], minHeight: 44, textAlign: "center", width: 84 },
+  deleteButton: { alignItems: "center", borderRadius: DAYFRAME_BLOCKS.radius.pill, justifyContent: "center", minHeight: 50 },
+  deleteText: { fontSize: 15, fontWeight: "700" }
+});
 
 function TargetGlyph({ color }: { color: string }) {
-  return <Svg width={21} height={21} viewBox="0 0 24 24"><SvgCircle cx={12} cy={12} fill="none" r={6} stroke={color} strokeWidth={2} /><SvgCircle cx={12} cy={12} fill={color} r={2} /><Path d="M12 2v3M12 19v3M2 12h3M19 12h3" stroke={color} strokeLinecap="round" strokeWidth={2} /></Svg>;
+  return <Svg width={18} height={18} viewBox="0 0 24 24"><SvgCircle cx={12} cy={12} fill="none" r={6} stroke={color} strokeWidth={2} /><SvgCircle cx={12} cy={12} fill={color} r={2} /><Path d="M12 2v3M12 19v3M2 12h3M19 12h3" stroke={color} strokeLinecap="round" strokeWidth={2} /></Svg>;
 }
 
 function ChevronGlyph({ color, expanded }: { color: string; expanded: boolean }) {
   return <Svg width={18} height={18} viewBox="0 0 24 24"><Path d={expanded ? "m6 15 6-6 6 6" : "m6 9 6 6 6-6"} fill="none" stroke={color} strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} /></Svg>;
-}
-
-function CheckGlyph({ color }: { color: string }) {
-  return <Svg width={15} height={15} viewBox="0 0 24 24"><Path d="m5 12 4 4 10-10" fill="none" stroke={color} strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.4} /></Svg>;
 }

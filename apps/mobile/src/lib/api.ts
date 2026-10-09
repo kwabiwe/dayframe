@@ -1795,64 +1795,38 @@ export async function archiveCategory(id: string) {
 
 export type NewPlaceRole = { role: PlaceRole; previousPlaceName?: string | null };
 
+/**
+ * Creates a place in one request that returns it, so an accepted save never depends on a later
+ * read (a retry after a failed follow-up read would add the place twice).
+ */
 export async function createPlace(input: { name: string } & PlaceMutationInput, newRole?: NewPlaceRole) {
-  if (input.learnedPlaceId || newRole) {
-    const response = await mobileFetch(`${DAYFRAME_API_BASE}/api/places`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        ...(await authHeaders())
-      },
-      body: JSON.stringify({
-        name: input.name.trim(),
-        latitude: input.latitude ?? null,
-        longitude: input.longitude ?? null,
-        radiusMeters: input.radiusMeters ?? DEFAULT_PLACE_RADIUS_METERS,
-        priority: input.priority ?? DEFAULT_PLACE_PRIORITY,
-        defaultCategoryId: input.loggingEnabled === false ? null : input.defaultCategoryId ?? null,
-        defaultActivityDescription: input.loggingEnabled === false ? null : input.defaultActivityDescription?.trim() || null,
-        autoStart: false,
-        loggingEnabled: input.loggingEnabled !== false,
-        learnedPlaceId: input.learnedPlaceId,
-        // Added straight into the Home or Work slot, renaming the old holder if asked.
-        ...(newRole ? { role: newRole.role, previousPlaceName: newRole.previousPlaceName ?? null } : {})
-      })
-    });
-    if (response.status === 401) {
-      throw new AuthRequiredError();
-    }
-    const fallback = input.learnedPlaceId ? "Unable to save learned place" : "Unable to save place";
-    if (!response.ok) throw new Error(await errorMessage(response, fallback));
-    return readPlaceResponse(response, fallback);
-  }
-
-  const response = await mobileFetch(`${DAYFRAME_API_BASE}/api/entities`, {
+  const response = await mobileFetch(`${DAYFRAME_API_BASE}/api/places`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
       ...(await authHeaders())
     },
     body: JSON.stringify({
-      entity: "place",
-      values: placeEntityValues(input)
+      name: input.name.trim(),
+      latitude: input.latitude ?? null,
+      longitude: input.longitude ?? null,
+      radiusMeters: input.radiusMeters ?? DEFAULT_PLACE_RADIUS_METERS,
+      priority: input.priority ?? DEFAULT_PLACE_PRIORITY,
+      defaultCategoryId: input.loggingEnabled === false ? null : input.defaultCategoryId ?? null,
+      defaultActivityDescription: input.loggingEnabled === false ? null : input.defaultActivityDescription?.trim() || null,
+      autoStart: false,
+      loggingEnabled: input.loggingEnabled !== false,
+      ...(input.learnedPlaceId ? { learnedPlaceId: input.learnedPlaceId } : {}),
+      // Added straight into the Home or Work slot, renaming the old holder if asked.
+      ...(newRole ? { role: newRole.role, previousPlaceName: newRole.previousPlaceName ?? null } : {})
     })
   });
   if (response.status === 401) {
     throw new AuthRequiredError();
   }
-  if (!response.ok) throw new Error(await errorMessage(response, "Unable to save place"));
-
-  const payload = await readApiJson<{ ok?: boolean } & ApiErrorPayload>(response, "Unable to save place");
-  if (!payload.ok) throw new Error(payload.message);
-  const apiError = formatApiError(payload.payload);
-  if (apiError) throw new Error(apiError);
-
-  const bootstrap = await fetchBootstrap();
-  const place = findCreatedPlace(bootstrap.places, input);
-  if (!place) {
-    throw new Error("Place was saved, but the refreshed place list did not include it.");
-  }
-  return { ok: true, place };
+  const fallback = input.learnedPlaceId ? "Unable to save learned place" : "Unable to save place";
+  if (!response.ok) throw new Error(await errorMessage(response, fallback));
+  return readPlaceResponse(response, fallback);
 }
 
 /** Moves the Home or Work role to `placeId` (null empties the slot); past entries never move. */
@@ -2495,38 +2469,6 @@ function formatBlockingEntry(payload: ApiErrorPayload) {
   const label = blockingEntry.description?.trim() || blockingEntry.source || "existing entry";
   const status = blockingEntry.reviewStatus ? ` (${blockingEntry.reviewStatus})` : "";
   return `Blocked by ${label}${status}.`;
-}
-
-function placeEntityValues(input: { name: string } & PlaceMutationInput) {
-  return {
-    name: input.name.trim(),
-    latitude: input.latitude ?? null,
-    longitude: input.longitude ?? null,
-    radiusMeters: input.radiusMeters ?? DEFAULT_PLACE_RADIUS_METERS,
-    priority: input.priority ?? DEFAULT_PLACE_PRIORITY,
-    categoryId: input.loggingEnabled === false ? null : input.defaultCategoryId ?? null,
-    defaultActivityDescription: input.loggingEnabled === false ? null : input.defaultActivityDescription?.trim() || null,
-    autoStart: false,
-    loggingEnabled: input.loggingEnabled !== false
-  };
-}
-
-function findCreatedPlace(places: MobilePlace[], input: { name: string } & PlaceMutationInput) {
-  const values = placeEntityValues(input);
-  return places.find((place) =>
-    place.name.trim() === values.name &&
-    sameNullableNumber(place.latitude, values.latitude) &&
-    sameNullableNumber(place.longitude, values.longitude) &&
-    Number(place.radiusMeters) === Number(values.radiusMeters) &&
-    (place.defaultCategoryId ?? null) === values.categoryId &&
-    (place.defaultActivityDescription ?? null) === values.defaultActivityDescription &&
-    (place.loggingEnabled ?? true) === values.loggingEnabled
-  ) ?? null;
-}
-
-function sameNullableNumber(left?: number | null, right?: number | null) {
-  if (left == null || right == null) return left == null && right == null;
-  return Math.abs(left - right) < 0.000001;
 }
 
 function nonJsonApiMessage(response: Response, text: string, fallback: string) {

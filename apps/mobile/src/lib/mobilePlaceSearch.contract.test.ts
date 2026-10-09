@@ -15,6 +15,7 @@ const layoutSource = readSource("../../app/_layout.tsx");
 const settingsSource = readSource("../../app/settings.tsx");
 const timerSheetSource = readSource("../components/ActiveTimerEditSheet.tsx");
 const themeSource = readSource("./mobileTheme.ts");
+const apiSource = readSource("./api.ts");
 
 describe("mobile place editor contract", () => {
   it("keeps the Places route list-only and passes stable editor identifiers", () => {
@@ -47,6 +48,23 @@ describe("mobile place editor contract", () => {
     expect(editorSource).toContain("Place search is unavailable in this build");
     expect(editorSource).toContain("Current location");
     expect(editorSource).toContain("Advanced coordinates");
+  });
+
+  it("uses the Blocks groups, the shared activity picker and one-request place creation (Blocks 7b)", () => {
+    expect(editorSource).toContain("<SettingsBlockGroup");
+    expect(editorSource).toContain("<ActivityPickerSheet");
+    expect(editorSource).toContain('title="Logs as"');
+    expect(editorSource).toContain('testID="place-editor-save"');
+    // The horizontal chip scroller is gone; every activity is one search away.
+    expect(editorSource).not.toContain("CategoryChoice");
+    // An accepted create never depends on a later read (a retry would add the place twice).
+    expect(apiSource).not.toContain("findCreatedPlace");
+    expect(apiSource).not.toMatch(/entity: "place"/);
+    // A saved default that is no longer listed (archived) keeps its name and its Remove action.
+    expect(editorSource).toContain("defaultCategoryName");
+    expect(editorSource).toContain("{defaultCategoryId ? (");
+    // VoiceOver hears the current-location accuracy on the row.
+    expect(editorSource).toContain("accessibilityValue={locationAccuracy !== null && !locating");
   });
 });
 
