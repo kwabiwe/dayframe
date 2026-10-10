@@ -201,7 +201,7 @@ export function PersistentTimerBar({ workspaceMode = false }: { workspaceMode?: 
   // never while typing or while a popup, dialog or inline editor owns the keyboard.
   useEffect(() => {
     function startQuickActionFromKey(event: globalThis.KeyboardEvent) {
-      if (event.altKey || event.ctrlKey || event.metaKey || event.shiftKey || event.defaultPrevented) return;
+      if (event.altKey || event.ctrlKey || event.metaKey || event.shiftKey || event.defaultPrevented || event.repeat) return;
       if (!/^[1-6]$/.test(event.key) || isTypingTarget(event.target) || hasOpenDialog()) return;
       const action = quickActions[Number(event.key) - 1];
       if (!action) return;
@@ -238,8 +238,13 @@ export function PersistentTimerBar({ workspaceMode = false }: { workspaceMode?: 
   // Idle Start: `@activity` picks the activity and a trailing duration logs a finished block
   // ending now (through the manual-entry path) instead of starting the timer.
   async function runCommand() {
-    const command = parseCommand(timerDraft.description, data!.categories);
-    const categoryId = command.categoryId ?? timerDraft.categoryId;
+    const submitted = timerDraft;
+    const command = parseCommand(submitted.description, data!.categories);
+    const categoryId = command.categoryId ?? submitted.categoryId;
+    // Only the command that was sent is cleared or restored: text typed while it was in flight wins.
+    const isUntouched = (current: typeof submitted) => current.description === submitted.description
+      && current.categoryId === submitted.categoryId
+      && current.tagNames.join("\u0000") === submitted.tagNames.join("\u0000");
     setCommandNotice(null);
     if (command.durationSeconds) {
       const stoppedAt = new Date();
@@ -248,7 +253,7 @@ export function PersistentTimerBar({ workspaceMode = false }: { workspaceMode?: 
       const outcome = await createManualEntry({
         categoryId: categoryId || undefined,
         description: command.description || undefined,
-        tagNames: timerDraft.tagNames,
+        tagNames: submitted.tagNames,
         startedAt: startedAt.toISOString(),
         stoppedAt: stoppedAt.toISOString()
       });
@@ -257,11 +262,15 @@ export function PersistentTimerBar({ workspaceMode = false }: { workspaceMode?: 
         return;
       }
       const activityName = data!.categories.find((category) => category.id === categoryId)?.name;
-      setTimerDraft({ categoryId: "", description: "", tagNames: [] });
+      setTimerDraft((current) => isUntouched(current) ? { categoryId: "", description: "", tagNames: [] } : current);
       setCommandNotice(`Added ${formatDuration(command.durationSeconds)}${activityName ? ` to ${activityName}` : ""}.`);
       return;
     }
-    await startTimer({ categoryId, description: command.description, tagNames: timerDraft.tagNames });
+    const outcome = await startTimer({ categoryId, description: command.description, tagNames: submitted.tagNames });
+    if (!outcome.ok) {
+      // A rejected Start rolls the draft back; keep what was typed so Retry is one press.
+      setTimerDraft((current) => (current.description || current.tagNames.length || isUntouched(current) ? current : submitted));
+    }
   }
 
   function startQuickAction(action: QuickAction) {
@@ -366,7 +375,7 @@ export function PersistentTimerBar({ workspaceMode = false }: { workspaceMode?: 
           }}
           open={categoryMenuOpen}
           portal
-          selectedId={timerDraft.categoryId}
+          selectedId={parsedCommand?.categoryId ?? timerDraft.categoryId}
           variant="block"
         />
 

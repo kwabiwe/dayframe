@@ -33,8 +33,30 @@ describe("Blocks command timer", () => {
     expect(input).toMatchObject({ categoryId: "focus", description: "Plan launch", tagNames: ["Deep work"] });
     expect(Date.parse(input.stoppedAt) - Date.parse(input.startedAt)).toBe(45 * 60 * 1000);
     expect(runtime.startTimer).not.toHaveBeenCalled();
-    expect(runtime.setTimerDraft).toHaveBeenCalledWith({ categoryId: "", description: "", tagNames: [] });
+    const clear = (runtime.setTimerDraft as ReturnType<typeof vi.fn>).mock.calls.at(-1)![0] as (draft: unknown) => unknown;
+    const submitted = { categoryId: "", description: "Plan launch @foc 45m", tagNames: ["Deep work"] };
+    expect(clear(submitted)).toEqual({ categoryId: "", description: "", tagNames: [] });
+    // Text typed while the add was in flight is kept.
+    const newer = { categoryId: "", description: "Next task", tagNames: [] };
+    expect(clear(newer)).toBe(newer);
     expect(screen.getByText("Added 45m to Focus.")).not.toBeNull();
+  });
+
+  it("puts a rejected shorthand Start back in the bar, unless something newer was typed", async () => {
+    runtime = runtimeFixture({ description: "Plan launch @focus" });
+    (runtime.startTimer as ReturnType<typeof vi.fn>).mockResolvedValue({ ok: false, error: "Offline" });
+    render(<PersistentTimerBar />);
+    await act(async () => { fireEvent.click(screen.getByRole("button", { name: "Start timer" })); });
+    const restore = (runtime.setTimerDraft as ReturnType<typeof vi.fn>).mock.calls.at(-1)![0] as (draft: unknown) => unknown;
+    expect(restore({ categoryId: "", description: "", tagNames: [] })).toEqual({ categoryId: "", description: "Plan launch @focus", tagNames: [] });
+    const newer = { categoryId: "", description: "Other", tagNames: [] };
+    expect(restore(newer)).toBe(newer);
+  });
+
+  it("shows the typed @activity on the activity square", () => {
+    runtime = runtimeFixture({ description: "Plan @writ" });
+    render(<PersistentTimerBar />);
+    expect(screen.getByRole("button", { name: "Activity: Writing" })).not.toBeNull();
   });
 
   it("starts the timer with the @activity removed from the description", async () => {
@@ -71,6 +93,7 @@ describe("Blocks command timer", () => {
     popup.remove();
 
     fireEvent.keyDown(document.body, { key: "1", metaKey: true });
+    fireEvent.keyDown(document.body, { key: "1", repeat: true });
     expect(startTimer).not.toHaveBeenCalled();
     fireEvent.keyDown(document.body, { key: "2" });
     expect(startTimer).toHaveBeenCalledWith({ categoryId: "write", description: "", tagNames: [] });
@@ -155,3 +178,11 @@ function timeEntry(overrides: Partial<TimeEntryRow> = {}): TimeEntryRow {
     ...overrides
   };
 }
+
+describe("Space shortcut contract", () => {
+  it("ignores a held Space so one press makes one timer change", async () => {
+    const { readFileSync } = await import("node:fs");
+    const shell = readFileSync(`${process.cwd()}/src/components/AppShell.tsx`, "utf8");
+    expect(shell).toMatch(/if \(bare && event\.code === "Space"\) \{[\s\S]*?if \(event\.repeat\) return;[\s\S]*?void toggleTimer\(\);/);
+  });
+});

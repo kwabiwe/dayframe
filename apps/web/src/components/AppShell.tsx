@@ -235,6 +235,8 @@ function AppShellContent({ children }: { children: ReactNode }) {
         if (!event.shiftKey && isPressableTarget(event.target)) return;
         if (event.defaultPrevented || hasOpenDialog()) return;
         event.preventDefault();
+        // Holding the key must not start, stop and start again.
+        if (event.repeat) return;
         const starting = !data?.activeEntry;
         void toggleTimer();
         if (starting) focusCommandInput();

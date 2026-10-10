@@ -10750,8 +10750,9 @@ button.df-cmd-clock:hover {
   }
 
   .df-cmd-clock {
+    min-height: 44px;
     grid-auto-flow: column;
-    align-items: baseline;
+    align-items: center;
     gap: 8px;
     font-size: 24px;
   }
