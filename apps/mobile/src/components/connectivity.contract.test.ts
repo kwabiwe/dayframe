@@ -25,7 +25,7 @@ describe("connectivity status ownership", () => {
     expect(content).not.toContain("ConnectivityStatusProvider");
   });
 
-  it("keeps a fixed icon slot beside the shared wordmark with one revisitable label", () => {
+  it("keeps a fixed, non-interactive icon slot beside the shared wordmark", () => {
     const status = source("./ConnectivityStatusStrip.tsx");
     const dashboard = source("./DayframeDashboard.tsx");
 
@@ -36,30 +36,40 @@ describe("connectivity status ownership", () => {
     expect(status).toContain("height: 44");
     expect(status).toContain("size={34}");
     expect(status).toContain("translateY: 1");
-    expect(status).toContain("const statusColor = theme.textSecondary");
-    expect(status).toContain("const content = viewModel ? (");
+    expect(status).toContain("tintColor={theme.textSecondary}");
     expect(status).toContain("accessibilityLabel={viewModel.accessibilityLabel}");
     expect(status).toContain('accessibilityRole="text"');
-    expect(status).toContain('accessibilityRole="button"');
-    expect(dashboard).toContain('params: { section: "sync" }');
+    // The slot is never a button: attention moved to the account avatar.
+    expect(status).not.toContain("Pressable");
+    expect(status).toContain('pointerEvents="none"');
     expect(status).not.toContain("<Text");
+    expect(dashboard).toContain("<ConnectivityStatusIndicator isFocused={isFocused} />");
   });
 
-  it("rotates only the syncing arrows and preserves a Reduce Motion path", () => {
+  it("shows only offline and back online, with no sync arrows, synced check or attention icon", () => {
     const status = source("./ConnectivityStatusStrip.tsx");
 
-    expect(status).toContain('variant !== "syncing" || reduceMotion');
-    expect(status).toContain('variant === "syncing"');
-    expect(status).not.toContain('variant === "pending"');
-    expect(status).toContain("withRepeat(");
-    expect(status).toContain("Easing.linear");
-    expect(status).toContain("cancelAnimation(rotation)");
+    expect(status).toContain('offline: "icloud.slash"');
+    expect(status).toContain('online: "checkmark.icloud"');
+    expect(status).not.toContain("arrow.triangle.2.circlepath");
+    expect(status).not.toContain("xmark.icloud");
+    expect(status).not.toContain("withRepeat(");
+    expect(status).not.toContain("timerBackgroundExecution");
     expect(status).toContain("useReduceMotionPreference()");
-    expect(status).toContain('name="arrow.triangle.2.circlepath"');
-    expect(status).toContain("styles.syncArrows");
-    expect(status).not.toContain("styles.syncCloud");
-    expect(status).toContain("duration: 3_200");
-    expect(status).not.toContain('d="M20 7h-5V2');
+  });
+
+  it("badges the avatar for rejected changes and routes it to Sync help on every tab", () => {
+    const status = source("./ConnectivityStatusStrip.tsx");
+    const dashboard = source("./DayframeDashboard.tsx");
+    const avatar = source("./today/AccountAvatarButton.tsx");
+
+    expect(status).toContain("durableWork.timeEntryNeedsAttentionCount + durableWork.timerStopNeedsAttentionCount");
+    expect(status).toContain("export function useSyncAttentionCount()");
+    expect(avatar).toContain('onPress(attention ? "sync" : "settings")');
+    expect(avatar).toContain('testID="account-avatar-attention"');
+    expect(dashboard.match(/attentionCount=\{syncAttentionCount\}/g)).toHaveLength(3);
+    expect(dashboard.match(/onPress=\{openAccount\}/g)).toHaveLength(3);
+    expect(dashboard).toContain('router.push({ pathname: "/settings", params: { section: "sync" } })');
   });
 
   it("keeps retryable connectivity delivery silent and local failures actionable", () => {
