@@ -1,4 +1,9 @@
-import type { ReportSummaryRequest } from "@dayframe/shared";
+import {
+  DAYFRAME_ACTIVITY_ICON_GROUPS,
+  activityGroupFor,
+  type ReportSummaryRequest,
+} from "@dayframe/shared";
+import type { ReportCategoryOption, ReportFilterDraft } from "./reportsSelection";
 import { compactDuration, spokenDuration } from "../components/today/todayBlocksLayout";
 import {
   addLocalDays,
@@ -163,4 +168,42 @@ export function reportStackHeights(
     heights = heights.map((h) => (h > minimumHeight ? Math.max(minimumHeight, h * factor) : h));
   }
   return heights.map((h) => Math.floor(h * 2) / 2);
+}
+
+const FILTER_GROUPS: ReadonlyArray<{ id: string | null; label: string }> = [
+  { id: null, label: "Your own" },
+  ...DAYFRAME_ACTIVITY_ICON_GROUPS.map((group) => ({ id: group.id as string, label: group.label })),
+];
+
+/**
+ * The filter sheet's list (prototype openFilterSheet): without a search, activities grouped like the
+ * All activities picker (your own first, then the icon groups, A–Z), with No activity and any
+ * activity that is no longer available under "Other"; with a search, one list of matches.
+ */
+export function reportFilterSections(options: readonly ReportCategoryOption[], query: string) {
+  const needle = query.trim().toLocaleLowerCase();
+  if (needle)
+    return [{ key: "results", title: null as string | null, rows: options.filter((option) => option.name.toLocaleLowerCase().includes(needle)) }];
+  const byName = (left: ReportCategoryOption, right: ReportCategoryOption) =>
+    left.name.localeCompare(right.name, undefined, { sensitivity: "base" }) || left.key.localeCompare(right.key);
+  const activities = options.filter((option) => !option.isUncategorized && !option.isUnavailable);
+  const sections: Array<{ key: string; title: string | null; rows: ReportCategoryOption[] }> = [];
+  for (const group of FILTER_GROUPS) {
+    const rows = activities
+      .filter((option) => activityGroupFor({ icon: option.icon, name: option.name }) === group.id)
+      .sort(byName);
+    if (rows.length) sections.push({ key: `group-${group.id ?? "own"}`, title: group.label, rows });
+  }
+  const other = options.filter((option) => option.isUncategorized || option.isUnavailable);
+  if (other.length) sections.push({ key: "other", title: "Other", rows: other });
+  return sections;
+}
+
+/** How many activities a filter draft keeps, and its Apply button ("Show 3 activities"). */
+export function reportFilterApplyLabel(draft: ReportFilterDraft) {
+  const total = draft.universe.length;
+  const kept = draft.mode === "all" ? total : draft.mode === "none" ? 0 : draft.keys.filter((key) => draft.universe.includes(key)).length;
+  if (kept >= total && total > 0) return "Show all activities";
+  if (kept === 0) return "Show none";
+  return `Show ${kept} ${kept === 1 ? "activity" : "activities"}`;
 }

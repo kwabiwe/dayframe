@@ -1,3 +1,4 @@
+import { DAYFRAME_THEME } from "@dayframe/shared";
 import { describe, expect, it } from "vitest";
 import type { ReportSummary } from "@dayframe/shared";
 import type { MobileBootstrap, MobileTimeEntry } from "./api";
@@ -210,6 +211,10 @@ describe("Revision 2 Reports projection", () => {
       "test-a",
       "test-z",
     ]);
+    // Time without an activity is neutral, as on Calendar and Today.
+    expect(result.visibleCategorySegments.find((segment) => segment.key === "uncategorized")?.color).toBe(
+      DAYFRAME_THEME.dark.textMuted,
+    );
   });
   it("clips a future projected timer to now instead of creating future time", () => {
     const future = entry({

@@ -48,7 +48,7 @@ vi.mock("react-native-reanimated", () => ({
   LinearTransition: { duration: () => ({}) },
 }));
 vi.mock("react-native-svg", () => ({ default: "Svg", Path: "Path" }));
-vi.mock("@/components/charts/DonutChart", () => ({ DonutChart: "DonutChart" }));
+vi.mock("./ReportsDonut", () => ({ ReportDonutCard: "ReportDonutCard" }));
 vi.mock("./ReportActivityChart", () => ({
   ReportActivityChart: "ReportActivityChart",
 }));
@@ -255,9 +255,7 @@ describe("Revision 3 Reports owner", () => {
     expect(rangeCalls()).toHaveLength(1);
     await act(async () => finish(result(requested)));
     expect(rangeCalls()).toHaveLength(2);
-    expect(tree.root.findByType("DonutChart" as never).props.centerValue).toBe(
-      "01:00:00",
-    );
+    expect(tree.root.findByType("ReportDonutCard" as never).props.totalSeconds).toBe(3600);
     act(() => tree.unmount());
   });
   beforeEach(() => {
@@ -271,24 +269,13 @@ describe("Revision 3 Reports owner", () => {
     expect(JSON.stringify(tree.toJSON())).not.toMatch(
       /Time covered|Total logged|Daily bars|Category chart type/,
     );
-    const chart = () => tree.root.findByType("DonutChart" as never);
-    expect(chart().props.centerLabel).toBe("Total");
-    expect(chart().props.centerValue).toBe("01:00:00");
-    expect(chart().props.onSegmentPress).toBeUndefined();
-    const row = tree.root
-      .findAllByProps({ accessibilityRole: "text" })
-      .find((node) => node.props.accessibilityLabel.startsWith("Work,"))!;
-    expect(row.props.onPress).toBeUndefined();
-    expect(row.props.accessibilityHint).toBeUndefined();
-    expect(row.props.style[0]).toMatchObject({
-      minHeight: 38,
-      paddingVertical: 5,
-    });
-    expect(
-      tree.root
-        .findAllByType("View" as never)
-        .some((node) => node.props.style?.gap === 0),
-    ).toBe(true);
+    const chart = () => tree.root.findByType("ReportDonutCard" as never);
+    expect(chart().props.periodLabel).toBe("Today");
+    expect(chart().props.totalSeconds).toBe(3600);
+    expect(chart().props.empty).toBeNull();
+    expect(chart().props.segments).toEqual([
+      expect.objectContaining({ key: "a", name: "Work", seconds: 3600 }),
+    ]);
     await act(async () =>
       tree.root
         .findByProps({
@@ -311,11 +298,9 @@ describe("Revision 3 Reports owner", () => {
       1,
     );
     await act(async () => sheet.props.onDismissed(sheet.props.presentationId));
-    expect(chart().props.centerValue).toBe("00:00:00");
+    expect(chart().props.totalSeconds).toBe(0);
     expect(chart().props.segments).toHaveLength(0);
-    expect(JSON.stringify(tree.toJSON())).toContain(
-      "No logged time for the selected activities.",
-    );
+    expect(chart().props.empty).toBe("No logged time for the selected activities.");
     await act(async () =>
       tree.root
         .findByProps({
@@ -331,7 +316,7 @@ describe("Revision 3 Reports owner", () => {
     sheet = tree.root.findByType("ReportFiltersSheet" as never);
     await act(async () => sheet.props.onApply());
     await act(async () => sheet.props.onDismissed(sheet.props.presentationId));
-    expect(JSON.stringify(tree.toJSON())).toContain("No activities selected");
+    expect(chart().props.empty).toBe("No activities selected");
     expect(
       tree.root
         .findByType("ReportActivityChart" as never)
@@ -358,6 +343,9 @@ describe("Revision 3 Reports owner", () => {
     expect(activity().props.outsidePressDismissal).toBe(
       initialOutsidePress + 1,
     );
+    // A ring touch or row tap in the donut card dismisses the tooltip too.
+    act(() => tree.root.findByType("ReportDonutCard" as never).props.onInteraction());
+    expect(activity().props.outsidePressDismissal).toBe(initialOutsidePress + 2);
     const initialContext = activity().props.semanticContextKey;
     await act(async () =>
       tree.root
@@ -369,7 +357,7 @@ describe("Revision 3 Reports owner", () => {
     expect(activity().props.semanticContextKey).not.toBe(initialContext);
     act(() => tree.unmount());
   });
-  it("waits for first focused data, then never replays entrance for updates", async () => {
+  it("waits for first focused data before showing the donut card", async () => {
     let finish!: (value: ReportSummary) => void;
     let requested!: ReportSummaryRequest;
     mocks.fetch.mockImplementationOnce((input: ReportSummaryRequest) => {
@@ -399,34 +387,12 @@ describe("Revision 3 Reports owner", () => {
     expect(mocks.fetch).not.toHaveBeenCalled();
     await act(async () => tree.update(view(true)));
     expect(rangeCalls()).toHaveLength(1);
-    expect(tree.root.findAllByType("DonutChart" as never)).toHaveLength(0);
+    expect(tree.root.findAllByType("ReportDonutCard" as never)).toHaveLength(0);
     await act(async () => finish(result(requested)));
-    const donut = () => tree.root.findByType("DonutChart" as never);
-    expect(donut().props.animateEntrance).toBe(true);
-    await act(async () => tree.update(view(true, nowMs + 1_000)));
-    expect(donut().props.animateEntrance).toBe(false);
-    await act(async () => tree.update(view(true, nowMs + 1_000, "light")));
-    expect(donut().props.animateEntrance).toBe(false);
+    expect(tree.root.findByType("ReportDonutCard" as never).props.totalSeconds).toBe(3600);
     await act(async () => tree.update(view(false, nowMs + 1_000, "light")));
-    expect(donut().props.settleImmediately).toBe(true);
     await act(async () => tree.update(view(true, nowMs + 1_000, "light")));
-    expect(donut().props.animateEntrance).toBe(false);
-    await act(async () =>
-      tree.root
-        .findByProps({
-          accessibilityLabel: "Filter activities, all activities selected",
-        })
-        .props.onPress(),
-    );
-    const sheet = tree.root.findByType("ReportFiltersSheet" as never);
-    await act(async () =>
-      sheet.props.onChange({
-        mode: "none",
-        universe: ["a", "uncategorized"],
-      }),
-    );
-    await act(async () => sheet.props.onApply());
-    expect(donut().props.animateEntrance).toBe(false);
+    expect(tree.root.findByType("ReportDonutCard" as never).props.totalSeconds).toBe(3600);
     act(() => tree.unmount());
   });
   it("ignores late Year after Month and never reuses numbers for uncached failed range", async () => {
@@ -443,7 +409,7 @@ describe("Revision 3 Reports owner", () => {
       return Promise.resolve(result(input));
     });
     await chooseRange(tree, "year");
-    expect(tree.root.findAllByType("DonutChart" as never)).toHaveLength(0);
+    expect(tree.root.findAllByType("ReportDonutCard" as never)).toHaveLength(0);
     await chooseRange(tree, "month");
     await act(async () =>
       resolveYear({ ...result(year), totalSeconds: 999999 }),
@@ -455,7 +421,7 @@ describe("Revision 3 Reports owner", () => {
     expect(tree.root.findAllByType("ReportActivityChart" as never)).toHaveLength(0);
     mocks.fetch.mockRejectedValue(new Error("offline"));
     await chooseRange(tree, "week");
-    expect(tree.root.findAllByType("DonutChart" as never)).toHaveLength(0);
+    expect(tree.root.findAllByType("ReportDonutCard" as never)).toHaveLength(0);
     expect(JSON.stringify(tree.toJSON())).toContain(
       "Connect to load this report range",
     );
@@ -464,7 +430,7 @@ describe("Revision 3 Reports owner", () => {
   it("clears account results and rejects late responses after session change", async () => {
     const tree = await render();
     await act(async () => mocks.subscriber?.());
-    expect(tree.root.findAllByType("DonutChart" as never)).toHaveLength(0);
+    expect(tree.root.findAllByType("ReportDonutCard" as never)).toHaveLength(0);
     act(() => tree.unmount());
   });
   it("ignores a stale sheet completion and releases only the current presentation", async () => {
@@ -484,7 +450,7 @@ describe("Revision 3 Reports owner", () => {
     expect(tree.root.findAllByType("ReportFiltersSheet" as never)).toHaveLength(0);
     act(() => tree.unmount());
   });
-  it("feeds the same exact-duration order to the donut and summary list", async () => {
+  it("feeds the exact-duration order to the donut card", async () => {
     mocks.fetch.mockImplementationOnce(async (input: ReportSummaryRequest) => ({
       ...result(input),
       totalSeconds: 10_800,
@@ -507,14 +473,9 @@ describe("Revision 3 Reports owner", () => {
     const tree = await render();
     expect(
       tree.root
-        .findByType("DonutChart" as never)
-        .props.segments.map((segment: { id: string }) => segment.id),
+        .findByType("ReportDonutCard" as never)
+        .props.segments.map((segment: { key: string }) => segment.key),
     ).toEqual(["b", "a"]);
-    expect(
-      tree.root
-        .findAllByProps({ accessibilityRole: "text" })
-        .map((node) => node.props.accessibilityLabel.split(",")[0]),
-    ).toEqual(["Rest", "Work"]);
     act(() => tree.unmount());
   });
 });

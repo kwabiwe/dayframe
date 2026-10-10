@@ -382,7 +382,7 @@ const styles = StyleSheet.create({
   heroWords: { fontSize: 14 },
   delta: { overflow: "hidden", borderRadius: 999, paddingHorizontal: 9, paddingVertical: 3, fontSize: 12.5, fontWeight: "700", fontVariant: ["tabular-nums"] },
   // Columns touch (no gap) so each is a full-width, 208-point-tall target: at least 44 points wide
-  // from a 375-point screen; Display Zoom at 320 points gives 41, and nothing overflows.
+  // from a 375-point screen; Display Zoom at 320 points gives about 39, and nothing overflows.
   weekCard: { flexDirection: "row", height: 236, borderRadius: 22, paddingHorizontal: 8, paddingTop: 16, paddingBottom: 12 },
   weekColumn: { flex: 1, minWidth: 0, gap: 8, justifyContent: "flex-end", paddingHorizontal: 3.5 },
   weekStack: { flex: 1, flexDirection: "column-reverse", gap: 3 },

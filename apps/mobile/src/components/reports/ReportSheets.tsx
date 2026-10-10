@@ -40,12 +40,15 @@ import {
 } from "@/lib/reportsRanges";
 import {
   reportSelectionIncludes,
-  selectAllReportFilterDraft,
   toggleReportFilterDraftKey,
   type ReportCategoryOption,
   type ReportFilterDraft,
 } from "@/lib/reportsSelection";
 import { REPORT_TEXT_CAP } from "@/lib/reportsTypography";
+import { DAYFRAME_BLOCKS, contrastRatio } from "@dayframe/shared";
+import { ActivityIcon } from "../icons/DayframeIcon";
+import { playHaptic } from "../../lib/haptics";
+import { reportFilterApplyLabel, reportFilterSections } from "../../lib/reportsBlocks";
 
 export function ReportFiltersSheet({
   rootHosted = false,
@@ -69,77 +72,127 @@ export function ReportFiltersSheet({
   onDismissed: (presentationId: number) => void;
 }) {
   const [search, setSearch] = useState("");
+  const sections = reportFilterSections(options, search);
+  const link = (label: "All" | "None") => (
+    <Pressable
+      accessibilityLabel={label === "All" ? "Select all activities" : "Select no activities"}
+      accessibilityRole="button"
+      hitSlop={{ top: 6, bottom: 6 }}
+      onPress={() => {
+        playHaptic("tick");
+        onChange({ mode: label === "All" ? "all" : "none", universe: draft.universe });
+      }}
+      style={s.headLink}
+      testID={`report-filter-${label.toLowerCase()}`}
+    >
+      <Text maxFontSizeMultiplier={REPORT_TEXT_CAP.control} style={[s.headLinkText, { color: theme.accentText }]}>
+        {label}
+      </Text>
+    </Pressable>
+  );
   return (
     <ReportSheet
       rootHosted={rootHosted}
-      title="Activities"
+      title="Filter activities"
       presentationId={presentationId}
       theme={theme}
       reduceMotion={reduceMotion}
-      action="Apply"
+      action={reportFilterApplyLabel(draft)}
       onApply={onApply}
       onDismissed={onDismissed}
       fixedHeader={
-        <TextInput
-          testID="report-filter-search"
-          maxFontSizeMultiplier={REPORT_TEXT_CAP.control}
-          accessibilityLabel="Search activities"
-          value={search}
-          onChangeText={setSearch}
-          placeholder="Search activities"
-          placeholderTextColor={theme.textMuted}
-          style={[
-            s.search,
-            { backgroundColor: theme.surfaceInset, color: theme.textPrimary },
-          ]}
-        />
+        <View style={s.filterHead}>
+          <View style={s.filterTitleRow}>
+            <View style={s.filterTitles}>
+              <Text maxFontSizeMultiplier={REPORT_TEXT_CAP.small} style={[s.eyebrow, { color: theme.textSecondary }]}>
+                REPORTS
+              </Text>
+              <Text
+                accessibilityRole="header"
+                maxFontSizeMultiplier={REPORT_TEXT_CAP.heading}
+                style={[s.filterTitle, { color: theme.textPrimary }]}
+              >
+                Filter activities
+              </Text>
+            </View>
+            {link("All")}
+            <Text style={{ color: theme.textMuted }}>·</Text>
+            {link("None")}
+          </View>
+          <TextInput
+            testID="report-filter-search"
+            maxFontSizeMultiplier={REPORT_TEXT_CAP.control}
+            accessibilityLabel="Search activities"
+            value={search}
+            onChangeText={setSearch}
+            placeholder="Search activities"
+            placeholderTextColor={theme.textMuted}
+            style={[
+              s.search,
+              { backgroundColor: theme.surfaceInset, color: theme.textPrimary },
+            ]}
+          />
+        </View>
       }
     >
-      <Option
-        label="All activities"
-        checked={
-          draft.mode === "all" ? true : draft.mode === "none" ? false : "mixed"
-        }
-        theme={theme}
-        onPress={() => onChange(selectAllReportFilterDraft(draft))}
-      />
-      {options
-        .filter((option) =>
-          option.name
-            .toLocaleLowerCase()
-            .includes(search.trim().toLocaleLowerCase()),
-        )
-        .map((option) => (
-          <Option
-            key={option.key}
-            label={
-              option.isUnavailable
-                ? `${option.name} (not currently available)`
-                : option.name
-            }
-            checked={reportSelectionIncludes(draft, option.key)}
-            theme={theme}
-            color={option.color}
-            onPress={() =>
-              onChange(toggleReportFilterDraftKey(draft, option.key))
-            }
-          />
-        ))}
+      {sections.map((section) => (
+        <View key={section.key} style={s.filterSection}>
+          {section.title ? (
+            <Text
+              accessibilityRole="header"
+              maxFontSizeMultiplier={REPORT_TEXT_CAP.small}
+              style={[s.eyebrow, { color: theme.textSecondary }]}
+            >
+              {section.title.toUpperCase()}
+            </Text>
+          ) : null}
+          {section.rows.map((option) => (
+            <Option
+              key={option.key}
+              label={
+                option.isUnavailable
+                  ? `${option.name} (not currently available)`
+                  : option.name
+              }
+              checked={reportSelectionIncludes(draft, option.key)}
+              theme={theme}
+              option={option}
+              onPress={() => {
+                playHaptic("tick");
+                onChange(toggleReportFilterDraftKey(draft, option.key));
+              }}
+            />
+          ))}
+        </View>
+      ))}
+      {sections.every((section) => section.rows.length === 0) ? (
+        <Text style={{ color: theme.textSecondary }}>No activity called “{search.trim()}”.</Text>
+      ) : null}
     </ReportSheet>
   );
+}
+
+/** The measured on-block colour (white or deep ink) for a solid activity block, theme text otherwise. */
+function onBlockColor(fill: string, fallback: string) {
+  try {
+    const { white, ink } = DAYFRAME_BLOCKS.onBlock;
+    return contrastRatio(fill, white) >= contrastRatio(fill, ink) ? white : ink;
+  } catch {
+    return fallback;
+  }
 }
 
 function Option({
   label,
   checked,
   theme,
-  color,
+  option,
   onPress,
 }: {
   label: string;
-  checked: boolean | "mixed";
+  checked: boolean;
   theme: MobileTheme;
-  color?: string;
+  option: ReportCategoryOption;
   onPress: () => void;
 }) {
   return (
@@ -149,9 +202,13 @@ function Option({
       accessibilityLabel={label}
       accessibilityState={{ checked }}
       onPress={onPress}
-      style={[s.option, { borderBottomColor: theme.border }]}
+      style={s.option}
     >
-      {color ? <View style={[s.dot, { backgroundColor: color }]} /> : null}
+      <View style={[s.optionBlock, { backgroundColor: option.color }]}>
+        {option.isUncategorized || option.isUnavailable ? null : (
+          <ActivityIcon color={onBlockColor(option.color, theme.textPrimary)} icon={option.icon} name={option.name} size={16} />
+        )}
+      </View>
       <Text
         numberOfLines={1}
         ellipsizeMode="tail"
@@ -160,13 +217,15 @@ function Option({
       >
         {label}
       </Text>
-      <View style={s.glyphSlot}>
-        {checked ? (
-          <CalendarGlyph
-            kind={checked === "mixed" ? "mixed" : "tick"}
-            color={theme.accentText}
-          />
-        ) : null}
+      <View
+        style={[
+          s.check,
+          checked
+            ? { backgroundColor: theme.accent, borderColor: theme.accent }
+            : { borderColor: theme.borderStrong },
+        ]}
+      >
+        {checked ? <CalendarGlyph kind="tick" color={theme.onAccent} /> : null}
       </View>
     </Pressable>
   );
@@ -528,7 +587,7 @@ function ReportSheet({
             onPress={requestCommit}
             style={[
               s.apply,
-              calendarLayout ? s.dateAction : null,
+              calendarLayout ? s.dateAction : s.filterAction,
               compactCalendarLayout ? s.compactDateAction : null,
               {
                 backgroundColor:
@@ -605,18 +664,28 @@ const s = StyleSheet.create({
     padding: 12,
   },
   dateAction: { marginTop: 16 },
+  // Blocks filter sheet: one full-width coral pill ("Show 3 activities").
+  filterAction: { alignSelf: "stretch", width: "100%", maxWidth: "100%" },
   compactDateAction: { marginTop: 6 },
   search: { minHeight: 44, padding: 10, borderRadius: 12, fontSize: 15 },
   option: {
     minHeight: 44,
     flexDirection: "row",
     alignItems: "center",
-    gap: 10,
+    gap: 12,
     paddingVertical: 6,
-    borderBottomWidth: StyleSheet.hairlineWidth,
   },
-  optionText: { flex: 1, minWidth: 0, fontSize: 14 },
-  dot: { height: 10, width: 10, borderRadius: 5 },
+  optionText: { flex: 1, minWidth: 0, fontSize: 15, fontWeight: "600" },
+  optionBlock: { width: 34, height: 30, borderRadius: 8, alignItems: "center", justifyContent: "center" },
+  check: { width: 24, height: 24, borderRadius: 12, borderWidth: 1.5, alignItems: "center", justifyContent: "center" },
+  filterHead: { gap: 12 },
+  filterTitleRow: { flexDirection: "row", alignItems: "center", gap: 4 },
+  filterTitles: { flex: 1, minWidth: 0, gap: 2 },
+  filterTitle: { fontSize: 20, fontWeight: "700" },
+  eyebrow: { fontSize: 11, fontWeight: "700", letterSpacing: 0.7 },
+  headLink: { minHeight: 44, minWidth: 44, alignItems: "center", justifyContent: "center", paddingHorizontal: 6 },
+  headLinkText: { fontSize: 15, fontWeight: "700" },
+  filterSection: { gap: 2, paddingTop: 6 },
   glyphSlot: {
     width: 24,
     height: 24,
