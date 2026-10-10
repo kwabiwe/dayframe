@@ -330,7 +330,10 @@ export function ReviewDeck({ initialData }: { initialData: BootstrapData }) {
 
   // Moments past the newest 100 the page loaded: the queue refills from them after a refresh.
   // Cards the deck keeps itself are among the unloaded remainder already: never count them twice.
-  const beyondLoaded = Math.max(0, data.stats.reviewCount - openItems.length - (deckItems.length - openItems.length));
+  // Held or saving decisions for cards the newest 100 no longer list are not available either.
+  const deckIds = new Set(deckItems.map((item) => item.id));
+  const heldUnlisted = [...state.hiddenIds].filter((id) => !deckIds.has(id)).length;
+  const beyondLoaded = Math.max(0, data.stats.reviewCount - deckItems.length - heldUnlisted);
   const total = visible.length + beyondLoaded;
   const toast = state.notice ? (
     <BlocksToast
@@ -487,6 +490,17 @@ export function ReviewDeck({ initialData }: { initialData: BootstrapData }) {
                   entries={entries}
                   initialCategoryId={selected.suggestedCategoryId}
                   onClose={() => setEvidenceOpenId(null)}
+                  onResolved={() => {
+                    // The editor saved: a copy the deck kept is stale; fresh data decides now.
+                    const resolvedId = selected.id;
+                    setEditorSnapshot(null);
+                    setRevived((current) => {
+                      if (!current.has(resolvedId)) return current;
+                      const next = new Map(current);
+                      next.delete(resolvedId);
+                      return next;
+                    });
+                  }}
                   reviewItemId={selected.id}
                 />
               </div>

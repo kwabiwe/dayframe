@@ -30,7 +30,8 @@ export function LocationReviewPanel({
   categories,
   entries,
   initialCategoryId,
-  onClose
+  onClose,
+  onResolved
 }: {
   reviewItemId: string;
   adjacentReviewItemId?: string;
@@ -38,6 +39,8 @@ export function LocationReviewPanel({
   entries: TimeEntryRow[];
   initialCategoryId: string | null;
   onClose: () => void;
+  /** A saved action (confirm, split, merge…): the suggestion as shown is no longer current. */
+  onResolved?: () => void;
 }) {
   const router = useRouter();
   const [evidence, setEvidence] = useState<LocationReviewEvidenceDto | null>(null);
@@ -95,6 +98,7 @@ export function LocationReviewPanel({
         setError(body.message ?? body.error ?? "Unable to update this location review.");
         return;
       }
+      onResolved?.();
       startTransition(() => router.refresh());
       onClose();
     } finally {

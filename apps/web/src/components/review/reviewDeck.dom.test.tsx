@@ -10,6 +10,16 @@ vi.mock("next/navigation", () => ({
   useRouter: () => ({ refresh: () => undefined, push: () => undefined })
 }));
 
+// The real editor loads private evidence; a stub lets a test confirm (onResolved, then onClose) or close it.
+vi.mock("@/components/location/LocationReviewPanel", () => ({
+  LocationReviewPanel: ({ onClose, onResolved }: { onClose: () => void; onResolved?: () => void }) => (
+    <div>
+      <button type="button" onClick={() => { onResolved?.(); onClose(); }}>Stub confirm</button>
+      <button type="button" onClick={onClose}>Stub close</button>
+    </div>
+  )
+}));
+
 vi.mock("next/link", () => ({
   default: ({ children, href, ...props }: { children: React.ReactNode; href: string }) => <a href={href} {...props}>{children}</a>
 }));
@@ -417,6 +427,35 @@ describe("Review round-4 fixes", () => {
     await render([review(READ, "Reading", "admin")]);
     expect(title(container)).toBe("Visit");
     expect(container.querySelector(".df-revidence")).not.toBeNull();
+    await act(async () => root.unmount());
+  });
+
+  it("retires a revived card once its evidence editor saves, and keeps it when the editor is closed", async () => {
+    const visit = { ...review(WALK, "Visit", "focus"), eventSource: "location_learning", eventType: "learned_place_visit", rawPayload: { algorithmVersion: "location-v2.0" } };
+    const { container, root, render } = await controllable([visit, review(READ, "Reading", "admin")]);
+    await key("y");
+    await render([review(READ, "Reading", "admin")]);
+    await act(async () => container.querySelector<HTMLButtonElement>(".df-toast-action")!.click());
+    expect(queue(container)).toEqual(["Reading", "Visit"]);
+    const openEditor = async () => {
+      const edit = [...container.querySelectorAll<HTMLButtonElement>(".df-ractions button")].find((button) => button.textContent === "Edit before logging")!;
+      await act(async () => edit.click());
+    };
+    await openEditor();
+    await act(async () => [...container.querySelectorAll<HTMLButtonElement>("button")].find((button) => button.textContent === "Stub close")!.click());
+    expect(queue(container)).toEqual(["Reading", "Visit"]);
+    await openEditor();
+    await act(async () => [...container.querySelectorAll<HTMLButtonElement>("button")].find((button) => button.textContent === "Stub confirm")!.click());
+    expect(queue(container)).toEqual(["Reading"]);
+    await act(async () => root.unmount());
+  });
+
+  it("does not count a held card the newest 100 no longer list", async () => {
+    const { container, root, render } = await controllable([review(WALK, "Morning walk", "focus"), review(READ, "Reading", "admin")]);
+    await key("y");
+    // The server still counts the held card (2 open); the page lists only Reading now.
+    await render([review(READ, "Reading", "admin")], 2);
+    expect(container.querySelector(".df-review-head p")?.textContent).toMatch(/^1 moment /);
     await act(async () => root.unmount());
   });
 
