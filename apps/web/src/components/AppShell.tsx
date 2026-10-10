@@ -3,27 +3,14 @@
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import type { ReactNode } from "react";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import {
-  CheckCircle2,
-  ChevronLeft,
-  ChevronRight,
-  Clock3,
-  FileText,
-  Folder,
-  Inbox,
-  MapPin,
-  Search,
-  Settings,
-  Tags,
-  X
-} from "lucide-react";
-import type { LucideIcon } from "lucide-react";
-import { placeDisplayName } from "@dayframe/shared";
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { CheckCircle2, ChevronLeft, ChevronRight, Folder, Settings } from "lucide-react";
 import { AppShellRuntimeProvider, useAppShellRuntime } from "@/components/AppShellRuntime";
 import { DatePickerPopover } from "@/components/DatePickerPopover";
 import { DayframeBrand } from "@/components/brand/DayframeBrand";
 import { DayframeIcon } from "@/components/blocks/DayframeIcon";
+import { CommandPalette } from "@/components/blocks/CommandPalette";
+import { getResolvedThemeChoice, setThemeChoice, subscribeToThemeChoice } from "@/components/ThemeSettings";
 import { ShellSidebarNav, ShellTabBar } from "@/components/blocks/ShellNav";
 import { PersistentTimerBar } from "@/components/PersistentTimerBar";
 import { SignOutControl } from "@/components/SignOutControl";
@@ -31,9 +18,7 @@ import { ShellProfileIdentity, ShellProfileInitials, initials } from "@/componen
 import { ThemeToggleButton } from "@/components/ThemeToggleButton";
 import { IconButton, ModalDialog, PopoverPanel } from "@/components/ui/Primitives";
 import { clientFetch } from "@/lib/client-auth-fetch";
-import { timeEntryTitle } from "@/lib/display";
-import { formatDuration, formatTime } from "@/lib/format";
-import type { GlobalSearchResult } from "@/lib/global-search";
+import { basePaletteCommands, type PaletteCommand } from "@/lib/command-palette";
 import { isSearchShortcut, SEARCH_SHORTCUT_LABEL } from "@/lib/keyboard-shortcuts";
 import type { BootstrapData } from "@/lib/queries";
 import { hasOpenDialog, isTypingTarget } from "@/lib/keyboard-ownership";
@@ -48,8 +33,7 @@ import {
 import {
   shiftTimelineState,
   timelineHref,
-  timelineStateFromSearchParams,
-  toTimelineDateKey
+  timelineStateFromSearchParams
 } from "@/lib/timeline-view";
 
 type Overlay = "search" | "profile" | "help" | null;
@@ -86,6 +70,7 @@ function AppShellContent({ children }: { children: ReactNode }) {
   const {
     data,
     loadDate,
+    openManualEntry,
     refresh,
     selectedDate,
     startTimer,
@@ -95,59 +80,41 @@ function AppShellContent({ children }: { children: ReactNode }) {
   const [overlay, setOverlay] = useState<Overlay>(null);
   const goToPending = useRef(false);
   const goToTimer = useRef<number | undefined>(undefined);
-  const [query, setQuery] = useState("");
-  const [remoteSearch, setRemoteSearch] = useState<{ query: string; results: GlobalSearchResult[] }>({
-    query: "",
-    results: []
-  });
-  const [searchStatus, setSearchStatus] = useState<"idle" | "loading" | "ready" | "error">("idle");
   const isTimeline = pathname === "/timeline";
   const activeSection = activeShellSection(pathname);
   const libraryTab = activeLibraryTab(pathname);
   const reviewCount = data?.stats.reviewCount ?? 0;
+  const resolvedTheme = useSyncExternalStore(subscribeToThemeChoice, getResolvedThemeChoice, () => "light" as const);
+  const paletteCommands = useMemo(
+    () => basePaletteCommands({ activities: data?.categories ?? [], theme: resolvedTheme }),
+    [data?.categories, resolvedTheme]
+  );
+  const runPaletteCommand = useCallback((command: PaletteCommand) => {
+    setOverlay(command.action.kind === "shortcuts" ? "help" : null);
+    switch (command.action.kind) {
+      case "start":
+        void startTimer(command.action.draft);
+        return;
+      case "navigate":
+        router.push(command.action.href);
+        return;
+      case "add-block":
+        openManualEntry();
+        return;
+      case "toggle-theme":
+        setThemeChoice(resolvedTheme === "dark" ? "light" : "dark");
+        return;
+      case "shortcuts":
+        return;
+    }
+  }, [openManualEntry, resolvedTheme, router, startTimer]);
   const showDateNavigation = pathname === "/" || pathname === "/timeline";
   const showShellDateContext = pathname === "/";
   const timelineState = useMemo(
     () => timelineStateFromSearchParams(searchParams),
     [searchParams]
   );
-  const searchResults = useMemo(
-    () => query.trim().length >= 2
-      ? remoteSearch.query === query.trim()
-        ? remoteSearch.results.map(globalSearchResult)
-        : []
-      : buildSearchResults(data, ""),
-    [data, query, remoteSearch]
-  );
 
-  useEffect(() => {
-    const searchTerm = query.trim();
-    if (overlay !== "search" || searchTerm.length < 2) {
-      return;
-    }
-    const controller = new AbortController();
-    const timeout = window.setTimeout(async () => {
-      setSearchStatus("loading");
-      try {
-        const response = await clientFetch(`/api/search?q=${encodeURIComponent(searchTerm)}`, {
-          cache: "no-store",
-          signal: controller.signal
-        });
-        if (!response.ok) throw new Error(`Search failed: ${response.status}`);
-        const payload = (await response.json()) as { results: GlobalSearchResult[] };
-        setRemoteSearch({ query: searchTerm, results: payload.results });
-        setSearchStatus("ready");
-      } catch {
-        if (controller.signal.aborted) return;
-        setRemoteSearch({ query: searchTerm, results: [] });
-        setSearchStatus("error");
-      }
-    }, 180);
-    return () => {
-      window.clearTimeout(timeout);
-      controller.abort();
-    };
-  }, [overlay, query]);
 
   useEffect(() => {
     const media = window.matchMedia("(prefers-color-scheme: dark)");
@@ -356,20 +323,15 @@ function AppShellContent({ children }: { children: ReactNode }) {
           }}
         />
       ) : null}
-      {overlay === "search" ? (
-        <SearchPalette
-          query={query}
-          setQuery={setQuery}
-          results={searchResults}
-          status={query.trim().length >= 2 && remoteSearch.query !== query.trim()
-            ? "loading"
-            : searchStatus}
-          onStartAgain={async (result) => {
-            const outcome = await startTimer(result.startAgain);
-            if (outcome.ok) setOverlay(null);
-            return outcome;
-          }}
+      {overlay === "search" && data ? (
+        <CommandPalette
+          commands={paletteCommands}
           onClose={() => setOverlay(null)}
+          onRun={runPaletteCommand}
+          onStartTyped={(description) => {
+            setOverlay(null);
+            void startTimer({ categoryId: "", description, tagNames: [] });
+          }}
         />
       ) : null}
       {overlay === "help" ? <HelpDialog onClose={() => setOverlay(null)} /> : null}
@@ -497,61 +459,6 @@ function ProfileWorkspacePopover({
   );
 }
 
-function SearchPalette({
-  query,
-  setQuery,
-  results,
-  status,
-  onStartAgain,
-  onClose
-}: {
-  query: string;
-  setQuery: (query: string) => void;
-  results: SearchResult[];
-  status: "idle" | "loading" | "ready" | "error";
-  onStartAgain: (result: SearchResult & { startAgain: NonNullable<SearchResult["startAgain"]> }) => Promise<unknown>;
-  onClose: () => void;
-}) {
-  return (
-    <ModalDialog ariaLabel="Search Dayframe" onClose={onClose} showClose={false}>
-      <div className="swiss-search-input">
-        <Search size={21} />
-        <input autoFocus value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search activities, entries, places, review items" />
-        <kbd>Esc</kbd>
-        <IconButton label="Close search" onClick={onClose}><X size={18} /></IconButton>
-      </div>
-      <div className="swiss-search-results">
-        {results.map((result) => {
-          const Icon = result.icon;
-          return (
-            <div className="swiss-search-result" key={result.id}>
-              <Link href={result.href} onClick={onClose}>
-                <Icon size={19} />
-                <span><strong>{result.label}</strong><small>{result.detail}</small></span>
-                <em>{result.group}</em>
-              </Link>
-              {result.startAgain ? (
-                <button
-                  className="swiss-search-start-again"
-                  type="button"
-                  onClick={() => void onStartAgain({ ...result, startAgain: result.startAgain! })}
-                >
-                  Start Again
-                </button>
-              ) : null}
-            </div>
-          );
-        })}
-        {status === "loading" ? <p role="status">Searching all history…</p> : null}
-        {status === "error" ? <p role="alert">Search is unavailable. Try again.</p> : null}
-        {status !== "loading" && status !== "error" && results.length === 0
-          ? <p>No matching results.</p>
-          : null}
-      </div>
-    </ModalDialog>
-  );
-}
-
 function HelpDialog({ onClose }: { onClose: () => void }) {
   return (
     <ModalDialog description="Use these shortcuts from Dayframe screens when you are not typing in a field." onClose={onClose} title="Keyboard shortcuts">
@@ -561,117 +468,6 @@ function HelpDialog({ onClose }: { onClose: () => void }) {
     </ModalDialog>
   );
 }
-
-type SearchResult = {
-  id: string;
-  label: string;
-  detail: string;
-  group: string;
-  href: string;
-  icon: LucideIcon;
-  startAgain?: {
-    categoryId?: string;
-    placeId?: string;
-    description?: string;
-    tagNames?: string[];
-  };
-};
-
-function globalSearchResult(result: GlobalSearchResult): SearchResult {
-  const occurredAt = result.occurredAt ? new Date(result.occurredAt) : null;
-  const date = occurredAt && !Number.isNaN(occurredAt.getTime())
-    ? toTimelineDateKey(occurredAt)
-    : null;
-  const href = result.kind === "entry" && result.entryId && date
-    ? `/timeline?date=${date}&scope=day&view=list&entry=${result.entryId}`
-    : result.kind === "review"
-      ? `/review#review-${result.id.slice("review:".length)}`
-      : result.kind === "place"
-        ? `/places#place-${result.placeId}`
-        : result.kind === "tag"
-          ? `/tags#tag-${result.id.slice("tag:".length)}`
-          : result.kind === "category"
-            ? `/categories#category-${result.categoryId}`
-            : date && result.entryId
-              ? `/timeline?date=${date}&scope=day&view=list&entry=${result.entryId}`
-              : "/timeline?view=list";
-  const iconByKind: Record<GlobalSearchResult["kind"], LucideIcon> = {
-    activity: Clock3,
-    entry: Clock3,
-    place: MapPin,
-    category: FileText,
-    tag: Tags,
-    review: Inbox
-  };
-  const groupByKind: Record<GlobalSearchResult["kind"], string> = {
-    activity: "Recent",
-    entry: "Entry",
-    place: "Place",
-    category: "Activities",
-    tag: "Tag",
-    review: "Review"
-  };
-  return {
-    id: result.id,
-    label: result.label,
-    detail: result.detail || (occurredAt ? occurredAt.toLocaleDateString() : groupByKind[result.kind]),
-    group: groupByKind[result.kind],
-    href,
-    icon: iconByKind[result.kind],
-    ...(result.kind === "activity"
-      ? {
-          startAgain: {
-            ...(result.categoryId ? { categoryId: result.categoryId } : {}),
-            ...(result.placeId ? { placeId: result.placeId } : {}),
-            ...(result.description ? { description: result.description } : {}),
-            ...(result.tagNames.length ? { tagNames: result.tagNames } : {})
-          }
-        }
-      : {})
-  };
-}
-
-function buildSearchResults(data: BootstrapData | null, query: string): SearchResult[] {
-  if (!data) return [];
-  const needle = query.trim().toLowerCase();
-  const results: SearchResult[] = [
-    ...data.categories.map((category) => ({
-      id: `category:${category.id}`,
-      label: category.name,
-      detail: category.isPinned ? "Pinned activity" : "Activity",
-      group: "Activities",
-      href: "/categories",
-      icon: FileText
-    })),
-    ...data.places.map((place) => ({
-      id: `place:${place.id}`,
-      label: placeDisplayName(place),
-      detail: place.defaultCategoryName ?? "Place",
-      group: "Place",
-      href: "/places",
-      icon: MapPin
-    })),
-    ...data.entries.slice(0, 40).map((entry) => ({
-      id: `entry:${entry.id}`,
-      label: timeEntryTitle(entry),
-      detail: `${formatTime(entry.startedAt)} · ${formatDuration(entry.durationSeconds)}`,
-      group: "Entry",
-      href: "/timeline?view=list",
-      icon: Clock3
-    })),
-    ...data.reviewItems.map((item) => ({
-      id: `review:${item.id}`,
-      label: item.title,
-      detail: item.status,
-      group: "Review",
-      href: "/review",
-      icon: Inbox
-    }))
-  ];
-  if (!needle) return results.slice(0, 8);
-  return results.filter((result) => `${result.label} ${result.detail} ${result.group}`.toLowerCase().includes(needle)).slice(0, 12);
-}
-
 
 function formatLongDate(date: string) {
   const [year, month, day] = date.split("-").map(Number);
