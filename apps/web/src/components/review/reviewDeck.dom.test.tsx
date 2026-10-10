@@ -493,6 +493,39 @@ describe("Review round-4 fixes", () => {
     await act(async () => root.unmount());
   });
 
+  it("never lets a late save from an earlier opening close the same card's reopened editor", async () => {
+    const visit = { ...review(WALK, "Visit", "focus"), eventSource: "location_learning", eventType: "learned_place_visit", rawPayload: { algorithmVersion: "location-v2.0" } };
+    const { container } = await mount([visit, review(READ, "Reading", "admin")]);
+    const button = (label: string) => [...container.querySelectorAll<HTMLButtonElement>("button")].find((candidate) => candidate.textContent === label)!;
+    heldEditorCallbacks.length = 0;
+    await act(async () => button("Edit before logging").click());
+    await act(async () => button("Stub hold").click());
+    await act(async () => button("Stub close").click());
+    expect(container.querySelector(".df-revidence")).toBeNull();
+    await act(async () => button("Edit before logging").click());
+    await act(async () => {
+      heldEditorCallbacks[0].onResolved?.();
+      heldEditorCallbacks[0].onClose();
+    });
+    expect(container.querySelector(".df-revidence")).not.toBeNull();
+  });
+
+  it("moves focus to the empty state when confirming the last card's evidence empties the queue", async () => {
+    const visit = { ...review(WALK, "Visit", "focus"), eventSource: "location_learning", eventType: "learned_place_visit", rawPayload: { algorithmVersion: "location-v2.0" } };
+    const { container, render } = await controllable([visit]);
+    const button = (label: string) => [...container.querySelectorAll<HTMLButtonElement>("button")].find((candidate) => candidate.textContent === label)!;
+    await act(async () => button("Edit before logging").click());
+    const confirm = button("Stub confirm");
+    confirm.focus();
+    await act(async () => confirm.click());
+    await act(async () => vi.advanceTimersByTimeAsync(20));
+    // The authoritative refresh no longer lists the confirmed visit.
+    await render([]);
+    await act(async () => vi.advanceTimersByTimeAsync(20));
+    expect(document.activeElement).toBe(container.querySelector("#df-done-title"));
+    expect(container.querySelector(".df-done.is-celebrating")).toBeNull();
+  });
+
   it("hands focus to the card when the evidence editor confirms", async () => {
     const visit = { ...review(WALK, "Visit", "focus"), eventSource: "location_learning", eventType: "learned_place_visit", rawPayload: { algorithmVersion: "location-v2.0" } };
     const { container, root } = await mount([visit, review(READ, "Reading", "admin")]);

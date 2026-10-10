@@ -107,6 +107,9 @@ export function ReviewDeck({ initialData }: { initialData: BootstrapData }) {
 
   // The card whose evidence editor is open stays the card, whatever the queue order becomes.
   const selected = visible.find((item) => item.id === (evidenceOpenId ?? selectedId)) ?? visible[0] ?? null;
+  // The page has shown a card this visit (focus can then be lost when the queue empties).
+  const [hadCard, setHadCard] = useState(false);
+  if (selected && !hadCard) setHadCard(true);
   // A refill (refresh, Undo) ends this visit's "emptied" state; a later empty queue is not ours.
   if (emptiedByDecision && visible.length > 0) setEmptiedByDecision(false);
   const openIdsRef = useRef<ReadonlySet<string>>(new Set());
@@ -139,6 +142,13 @@ export function ReviewDeck({ initialData }: { initialData: BootstrapData }) {
   // queue only.
   const lastRestored = useRef(0);
   const evidenceOpenRef = useRef<string | null>(null);
+  // Each opening of the evidence editor is its own session: a late save from an earlier opening
+  // (of this card or another) never closes or clears the one open now.
+  const [editorSession, setEditorSession] = useState(0);
+  const editorSessionRef = useRef(0);
+  useLayoutEffect(() => {
+    editorSessionRef.current = editorSession;
+  }, [editorSession]);
   useLayoutEffect(() => {
     evidenceOpenRef.current = evidenceOpenId;
   }, [evidenceOpenId]);
@@ -236,10 +246,10 @@ export function ReviewDeck({ initialData }: { initialData: BootstrapData }) {
     if (!prefersReducedMotion()) setGhost({ key: ++enterSequence.current, item, draft, dir });
   }, [categories, decide, drafts, evidenceOpenId, revived, visibleIds]);
 
-  // An editor's close is fenced to the card that opened it: a late save from an earlier card's
-  // editor never closes the one open now. Focus inside the closing editor moves to the card.
-  const closeEvidence = useCallback((itemId: string) => {
-    if (evidenceOpenRef.current !== itemId) return;
+  // An editor's close is fenced to the opening it belongs to. Focus inside the closing editor
+  // moves to the card.
+  const closeEvidence = useCallback((session: number) => {
+    if (editorSessionRef.current !== session || evidenceOpenRef.current === null) return;
     const active = document.activeElement;
     const focusInEditor = !active || active === document.body || Boolean(active.closest(".df-revidence"));
     setEvidenceOpenId(null);
@@ -384,7 +394,12 @@ export function ReviewDeck({ initialData }: { initialData: BootstrapData }) {
         <ReviewHead count={beyondLoaded} />
         {errorLine}
         {missingLine}
-        <AllFramed celebrate={emptiedByDecision} decided={state.decided} moreComing={beyondLoaded > 0} />
+        <AllFramed
+          celebrate={emptiedByDecision}
+          decided={state.decided}
+          moreComing={beyondLoaded > 0}
+          takeFocus={hadCard}
+        />
         {ghost ? <GhostCard ghost={ghost} categories={categories} nowMs={nowMs} onDone={() => setGhost(null)} /> : null}
         {toast}
       </div>
@@ -488,6 +503,7 @@ export function ReviewDeck({ initialData }: { initialData: BootstrapData }) {
                   className="df-rbtn df-rbtn--ghost"
                   onClick={() => {
                     setEditorSnapshot(selected);
+                    if (!evidenceOpen) setEditorSession((current) => current + 1);
                     setEvidenceOpenId(evidenceOpen ? null : selected.id);
                   }}
                   type="button"
@@ -504,10 +520,12 @@ export function ReviewDeck({ initialData }: { initialData: BootstrapData }) {
                   categories={categories}
                   entries={entries}
                   initialCategoryId={selected.suggestedCategoryId}
-                  key={selected.id}
-                  onClose={() => closeEvidence(selected.id)}
+                  key={editorSession}
+                  onClose={() => closeEvidence(editorSession)}
                   onResolved={() => {
                     // The editor saved: a copy the deck kept is stale; fresh data decides now.
+                    // A late save from an earlier opening leaves the current one alone.
+                    if (editorSessionRef.current !== editorSession) return;
                     const resolvedId = selected.id;
                     setEditorSnapshot((current) => (current?.id === resolvedId ? null : current));
                     setRevived((current) => {
@@ -756,11 +774,14 @@ function GhostCard({
 function AllFramed({
   celebrate: emptiedHere,
   decided,
-  moreComing
+  moreComing,
+  takeFocus
 }: {
   celebrate: boolean;
   decided: ReviewDecisionState["decided"];
   moreComing: boolean;
+  /** Cards were on screen this visit: whatever emptied the queue, focus lands on the heading. */
+  takeFocus: boolean;
 }) {
   const logged = decided.filter((decision) => decision.kind === "log");
   const loggedMs = logged.reduce((sum, decision) => sum + decision.durationMs, 0);
@@ -769,10 +790,10 @@ function AllFramed({
   const headingRef = useRef<HTMLHeadingElement | null>(null);
   // The decided card's buttons are gone: the heading takes focus so Tab continues from here.
   useEffect(() => {
-    if (!emptiedHere) return;
+    if (!takeFocus) return;
     const active = document.activeElement;
     if (!active || active === document.body) headingRef.current?.focus();
-  }, [emptiedHere]);
+  }, [takeFocus]);
   if (moreComing) {
     return (
       <section aria-labelledby="df-done-title" className="df-card df-done">
