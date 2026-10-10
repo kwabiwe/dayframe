@@ -1202,7 +1202,7 @@ export function CalendarReview({
                   <Link
                     aria-label={`${item.title}, needs review, ${range}. Open Review.`}
                     className={`calendar-review-block${item.color ? " df-block" : ""}`}
-                    href="/review"
+                    href={`/review#review-${item.id}`}
                     key={`review:${item.id}`}
                     tabIndex={visibleSelectedTarget ? -1 : undefined}
                     onClick={(event) => {
@@ -1213,7 +1213,9 @@ export function CalendarReview({
                       // (no pointer to consume) never leaves for Review either.
                       if (
                         (event.detail === 0 && visibleSelectedTarget) ||
-                        pressConsumedByEditorRef.current ||
+                        // Only a pointer click can be the press the editor consumed; a keyboard
+                        // Enter after a clean outside-click dismissal must still open Review.
+                        (event.detail > 0 && pressConsumedByEditorRef.current) ||
                         (pointer && calendarPointerMatchesConsumed(consumedPointerRef.current, pointer))
                       ) {
                         event.preventDefault();

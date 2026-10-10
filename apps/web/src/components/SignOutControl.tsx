@@ -2,6 +2,7 @@
 
 import { LogOut } from "lucide-react";
 import { useRef, useState, type FormEvent } from "react";
+import { beforeSessionChange } from "@/lib/session-change";
 
 export function SignOutControl({
   className,
@@ -20,6 +21,10 @@ export function SignOutControl({
     }
     submissionStarted.current = true;
     setPending(true);
+    // Held Review decisions are saved before the session ends, then the form posts as usual.
+    event.preventDefault();
+    const form = event.currentTarget;
+    void beforeSessionChange().finally(() => form.submit());
   }
 
   return (

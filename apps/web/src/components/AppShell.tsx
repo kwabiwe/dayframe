@@ -17,6 +17,7 @@ import { ShellProfileIdentity, ShellProfileInitials, initials } from "@/componen
 import { ThemeToggleButton } from "@/components/ThemeToggleButton";
 import { ModalDialog, PopoverPanel } from "@/components/ui/Primitives";
 import { clientFetch } from "@/lib/client-auth-fetch";
+import { beforeSessionChange } from "@/lib/session-change";
 import { basePaletteCommands, type PaletteCommand } from "@/lib/command-palette";
 import { isSearchShortcut, SEARCH_SHORTCUT_LABEL } from "@/lib/keyboard-shortcuts";
 import type { BootstrapData } from "@/lib/queries";
@@ -354,6 +355,8 @@ function ProfileWorkspacePopover({
   async function switchWorkspace(workspaceId: string) {
     if (workspaceId === data.workspace.id) return;
     await run(async () => {
+      // Held Review decisions are saved under the workspace they were made in.
+      await beforeSessionChange();
       const response = await clientFetch("/api/workspace/switch", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
