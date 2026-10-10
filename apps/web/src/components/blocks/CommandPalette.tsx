@@ -73,11 +73,25 @@ export function CommandPalette({
     listRef.current?.querySelector<HTMLElement>(`[data-index="${activeIndex}"]`)?.scrollIntoView?.({ block: "nearest" });
   }, [activeIndex]);
 
+  // Typed text only becomes a new block once history has answered (or could not be searched):
+  // a match may still arrive with the activity and tags to start again.
+  const searchSettled = term.length < 2 || (searchForTerm !== null && searchForTerm.status !== "loading");
+
   function run(index: number) {
     const command = results[index];
     if (command) onRun(command);
-    else if (term) onStartTyped(term);
+    else if (term && searchSettled) onStartTyped(term);
   }
+
+  const sections = results.reduce<Array<{ group: string; items: Array<{ command: PaletteCommand; index: number }> }>>(
+    (groups, command, index) => {
+      const last = groups.at(-1);
+      if (last && last.group === command.group) last.items.push({ command, index });
+      else groups.push({ group: command.group, items: [{ command, index }] });
+      return groups;
+    },
+    []
+  );
 
   return (
     <ModalDialog ariaLabel="Search and commands" className="df-palette" initialFocusRef={inputRef} onClose={onClose} showClose={false}>
@@ -116,12 +130,14 @@ export function CommandPalette({
         </IconButton>
       </div>
       <div ref={listRef} className="df-palette-list" id={listId} role="listbox" aria-label="Results">
-        {results.map((command, index) => {
-          const heading = index === 0 || results[index - 1].group !== command.group ? command.group : null;
-          return (
-            <div key={command.id} role="presentation">
-              {heading ? <div className="df-palette-group" role="presentation">{heading}</div> : null}
+        {sections.map((section) => (
+          <div key={section.group} role="group" aria-labelledby={`${listId}-${section.group.replace(/\s+/g, "-")}`}>
+            <div className="df-palette-group" id={`${listId}-${section.group.replace(/\s+/g, "-")}`} role="presentation">
+              {section.group}
+            </div>
+            {section.items.map(({ command, index }) => (
               <div
+                key={command.id}
                 aria-selected={index === activeIndex}
                 className="df-palette-item"
                 data-index={index}
@@ -142,12 +158,16 @@ export function CommandPalette({
                 </span>
                 {command.hint ? <kbd>{command.hint}</kbd> : null}
               </div>
-            </div>
-          );
-        })}
+            ))}
+          </div>
+        ))}
         {searching ? <p className="df-palette-note" role="status">Searching all history…</p> : null}
-        {searchForTerm?.status === "error" ? <p className="df-palette-note" role="alert">Search is unavailable. Try again.</p> : null}
-        {!results.length && !searching && term ? (
+        {searchForTerm?.status === "error" ? (
+          <p className="df-palette-note" role="alert">
+            Search is unavailable.{results.length ? " Try again." : ` Press Enter to start a block called “${term}”.`}
+          </p>
+        ) : null}
+        {!results.length && searchSettled && searchForTerm?.status !== "error" && term ? (
           <p className="df-palette-note">Nothing matches. Press Enter to start a block called “{term}”.</p>
         ) : null}
       </div>

@@ -67,6 +67,29 @@ describe("CommandPalette", () => {
     expect(onStartTyped).toHaveBeenCalledWith("Quarterly memo");
   });
 
+  it("does not start typed text while history is still being searched", async () => {
+    vi.useFakeTimers();
+    let answer: ((value: Response) => void) | undefined;
+    mocks.clientFetch.mockReturnValue(new Promise<Response>((resolve) => { answer = resolve; }));
+    const { input, onStartTyped, onRun } = renderPalette();
+    fireEvent.change(input, { target: { value: "Quarterly memo" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    await act(async () => { await vi.advanceTimersByTimeAsync(200); });
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(onStartTyped).not.toHaveBeenCalled();
+    expect(onRun).not.toHaveBeenCalled();
+    expect(screen.queryByText(/Nothing matches/)).toBeNull();
+    await act(async () => { answer?.(new Response(JSON.stringify({ results: [] }), { status: 200 })); });
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(onStartTyped).toHaveBeenCalledWith("Quarterly memo");
+  });
+
+  it("names each section for assistive technology", () => {
+    renderPalette();
+    expect(screen.getByRole("group", { name: "Start" })).not.toBeNull();
+    expect(screen.getByRole("group", { name: "Go to" })).not.toBeNull();
+  });
+
   it("shows search results as Start again", async () => {
     vi.useFakeTimers();
     mocks.clientFetch.mockResolvedValue(new Response(JSON.stringify({ results: [{
