@@ -1,17 +1,17 @@
 import { describe, expect, it } from "vitest";
 import { springLinearEasing } from "./blocks-motion";
-import { SHELL_SECTIONS, activeLibraryTab, activeShellSection, shellSectionForKey } from "./shell-nav";
+import { SHELL_SECTIONS, activeLibraryTab, activeShellSection, goToTarget, startsGoToSequence } from "./shell-nav";
 
 const bare = { altKey: false, ctrlKey: false, metaKey: false, shiftKey: false };
 
 describe("Blocks shell sections", () => {
-  it("lists Today, Calendar, Review, Reports and Library on keys 1–5", () => {
-    expect(SHELL_SECTIONS.map((section) => `${section.key} ${section.label}`)).toEqual([
-      "1 Today",
-      "2 Calendar",
-      "3 Review",
-      "4 Reports",
-      "5 Library"
+  it("lists Today, Calendar, Review, Reports and Library with their G letters", () => {
+    expect(SHELL_SECTIONS.map((section) => `${section.letter} ${section.label}`)).toEqual([
+      "t Today",
+      "c Calendar",
+      "r Review",
+      "p Reports",
+      "l Library"
     ]);
   });
 
@@ -32,12 +32,16 @@ describe("Blocks shell sections", () => {
     expect(activeLibraryTab("/reports")).toBeNull();
   });
 
-  it("only treats bare digits as section keys", () => {
-    expect(shellSectionForKey({ ...bare, key: "4" })?.id).toBe("reports");
-    expect(shellSectionForKey({ ...bare, key: "6" })).toBeNull();
-    expect(shellSectionForKey({ ...bare, key: "1", metaKey: true })).toBeNull();
-    expect(shellSectionForKey({ ...bare, key: "1", ctrlKey: true })).toBeNull();
-    expect(shellSectionForKey({ ...bare, key: "1", altKey: true })).toBeNull();
+  it("jumps with G then a letter, leaving digits for pinned activities", () => {
+    expect(startsGoToSequence({ ...bare, key: "g" })).toBe(true);
+    expect(startsGoToSequence({ ...bare, key: "G", shiftKey: true })).toBe(false);
+    expect(startsGoToSequence({ ...bare, key: "g", metaKey: true })).toBe(false);
+    expect(goToTarget({ ...bare, key: "p" })).toBe("/reports");
+    expect(goToTarget({ ...bare, key: "l" })).toBe("/categories");
+    expect(goToTarget({ ...bare, key: "s" })).toBe("/settings");
+    expect(goToTarget({ ...bare, key: "1" })).toBeNull();
+    expect(goToTarget({ ...bare, key: "x" })).toBeNull();
+    expect(goToTarget({ ...bare, key: "t", ctrlKey: true })).toBeNull();
   });
 });
 

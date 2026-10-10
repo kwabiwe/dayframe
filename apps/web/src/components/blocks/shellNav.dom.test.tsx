@@ -74,8 +74,8 @@ describe("Blocks shell contract", () => {
     expect(shell).toContain("<SignOutControl");
   });
 
-  it("never leaves a page by digit key while a dialog or editor owns the keyboard", () => {
-    expect(shell).toMatch(/const section = shellSectionForKey\(event\);[\s\S]*if \(event\.defaultPrevented \|\| hasOpenDialog\(\)\) return;/);
+  it("never leaves a page by G sequence while a dialog or editor owns the keyboard", () => {
+    expect(shell).toMatch(/if \(goTo \|\| startsGoToSequence\(event\)\) \{\s*\/\/[^\n]*\n\s*if \(event\.defaultPrevented \|\| hasOpenDialog\(\)\) return;/);
     expect(shell).toContain("if (isTypingTarget(event.target)) return;");
   });
 

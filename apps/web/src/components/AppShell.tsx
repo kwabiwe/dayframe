@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import type { ReactNode } from "react";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   CheckCircle2,
   ChevronLeft,
@@ -36,7 +36,14 @@ import { formatDuration, formatTime } from "@/lib/format";
 import type { GlobalSearchResult } from "@/lib/global-search";
 import { isSearchShortcut, SEARCH_SHORTCUT_LABEL } from "@/lib/keyboard-shortcuts";
 import type { BootstrapData } from "@/lib/queries";
-import { LIBRARY_TABS, activeLibraryTab, activeShellSection, shellSectionForKey } from "@/lib/shell-nav";
+import {
+  GO_TO_SEQUENCE_MS,
+  LIBRARY_TABS,
+  activeLibraryTab,
+  activeShellSection,
+  goToTarget,
+  startsGoToSequence
+} from "@/lib/shell-nav";
 import {
   shiftTimelineState,
   timelineHref,
@@ -49,7 +56,7 @@ type Overlay = "search" | "profile" | "help" | null;
 const shortcuts = [
   [SEARCH_SHORTCUT_LABEL, "Open search"],
   ["?", "Keyboard shortcuts"],
-  ["1–5", "Today, Calendar, Review, Reports, Library"],
+  ["G then T, C, R, P, L, S", "Go to Today, Calendar, Review, Reports, Library, Settings"],
   ["Shift+Space", "Start or stop timer"],
   ["N", "Add time block"],
   ["Alt+Left", "Previous day or week"],
@@ -85,6 +92,8 @@ function AppShellContent({ children }: { children: ReactNode }) {
   } = useAppShellRuntime();
   const shellIdentity = data ? { userName: data.user.name, workspaceName: data.workspace.name } : null;
   const [overlay, setOverlay] = useState<Overlay>(null);
+  const goToPending = useRef(false);
+  const goToTimer = useRef<number | undefined>(undefined);
   const [query, setQuery] = useState("");
   const [remoteSearch, setRemoteSearch] = useState<{ query: string; results: GlobalSearchResult[] }>({
     query: "",
@@ -204,12 +213,19 @@ function AppShellContent({ children }: { children: ReactNode }) {
         setOverlay("help");
         return;
       }
-      const section = shellSectionForKey(event);
-      if (section) {
+      const goTo = goToPending.current ? goToTarget(event) : null;
+      goToPending.current = false;
+      if (goTo || startsGoToSequence(event)) {
         // Never leave a page while a dialog, popover or inline editor owns the keyboard.
         if (event.defaultPrevented || hasOpenDialog()) return;
         event.preventDefault();
-        if (pathname !== section.href) router.push(section.href);
+        if (goTo) {
+          if (pathname !== goTo) router.push(goTo);
+          return;
+        }
+        goToPending.current = true;
+        window.clearTimeout(goToTimer.current);
+        goToTimer.current = window.setTimeout(() => { goToPending.current = false; }, GO_TO_SEQUENCE_MS);
         return;
       }
       if (event.shiftKey && event.code === "Space") {
@@ -234,7 +250,11 @@ function AppShellContent({ children }: { children: ReactNode }) {
       }
     }
     window.addEventListener("keydown", handleKeydown);
-    return () => window.removeEventListener("keydown", handleKeydown);
+    return () => {
+      window.removeEventListener("keydown", handleKeydown);
+      window.clearTimeout(goToTimer.current);
+      goToPending.current = false;
+    };
   }, [navigatePeriod, openManualEntry, pathname, router, selectedDate, showTimerShell, toggleTimer]);
 
   return (

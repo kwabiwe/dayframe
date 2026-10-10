@@ -297,7 +297,7 @@ Block pull-to-refresh:
 
 ## Web shell sidebar thumb (Blocks parity step 11a)
 
-- Trigger: the route changes to another of the five sections (link, phone tab, or keys 1–5).
+- Trigger: the route changes to another of the five sections (link, phone tab, or G then a letter).
 - Owner: `ShellSidebarNav` owns one neutral thumb behind the sidebar links. Its first placement is still; later moves are a CSS `transform` transition using the `snap` spring as a `linear()` easing (`springTransition` in `apps/web/src/lib/blocks-motion.ts`), so a second route change retargets from wherever the thumb is. Window resizes re-place it without travel. A page outside the five sections (Settings) fades the thumb out (140 ms opacity); returning fades it back in.
 - Surrounding layout: links, labels and the Review count never move; only the thumb travels. The phone tab bar has no animated element: the current tab is a neutral fill.
 - Accessibility: Reduce Motion moves the thumb without travel (opacity only). The current link carries `aria-current="page"`; the Review link's name includes the count.
