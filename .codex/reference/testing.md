@@ -65,7 +65,7 @@ For any app chrome, navigation, account, workspace, settings, or floating-surfac
 - Profile/account menu is reachable.
 - Logout is reachable.
 - Keyboard shortcuts opens fully on-screen (desktop; the phone top bar has Search and the avatar only).
-- Search palette opens fully on-screen.
+- The ⌘K palette (Search and commands) opens fully on-screen above the tab bar, with a 44px close button.
 - Notifications panel opens fully on-screen.
 - No horizontal overflow.
 - No zooming or landscape rotation required.
