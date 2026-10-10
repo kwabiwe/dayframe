@@ -3,20 +3,15 @@
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import type { ReactNode } from "react";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
-  BarChart3,
-  CalendarRange,
   CheckCircle2,
-  ChevronDown,
   ChevronLeft,
   ChevronRight,
   Clock3,
   FileText,
   Folder,
-  HelpCircle,
   Inbox,
-  LayoutDashboard,
   MapPin,
   Search,
   Settings,
@@ -28,6 +23,8 @@ import { placeDisplayName } from "@dayframe/shared";
 import { AppShellRuntimeProvider, useAppShellRuntime } from "@/components/AppShellRuntime";
 import { DatePickerPopover } from "@/components/DatePickerPopover";
 import { DayframeBrand } from "@/components/brand/DayframeBrand";
+import { DayframeIcon } from "@/components/blocks/DayframeIcon";
+import { ShellSidebarNav, ShellTabBar } from "@/components/blocks/ShellNav";
 import { PersistentTimerBar } from "@/components/PersistentTimerBar";
 import { SignOutControl } from "@/components/SignOutControl";
 import { ShellProfileIdentity, ShellProfileInitials, initials } from "@/components/ShellProfileIdentity";
@@ -39,6 +36,15 @@ import { formatDuration, formatTime } from "@/lib/format";
 import type { GlobalSearchResult } from "@/lib/global-search";
 import { isSearchShortcut, SEARCH_SHORTCUT_LABEL } from "@/lib/keyboard-shortcuts";
 import type { BootstrapData } from "@/lib/queries";
+import { hasOpenDialog } from "@/lib/keyboard-ownership";
+import {
+  GO_TO_SEQUENCE_MS,
+  LIBRARY_TABS,
+  activeLibraryTab,
+  activeShellSection,
+  goToTarget,
+  startsGoToSequence
+} from "@/lib/shell-nav";
 import {
   shiftTimelineState,
   timelineHref,
@@ -48,20 +54,10 @@ import {
 
 type Overlay = "search" | "profile" | "help" | null;
 
-const navItems = [
-  { href: "/", label: "Dashboard", icon: LayoutDashboard },
-  { href: "/timeline", label: "Timeline", icon: CalendarRange },
-  { href: "/categories", label: "Activities", icon: FileText },
-  { href: "/tags", label: "Tags", icon: Tags },
-  { href: "/reports", label: "Reports", icon: BarChart3 },
-  { href: "/places", label: "Places", icon: MapPin },
-  { href: "/review", label: "Review", icon: Inbox },
-  { href: "/settings", label: "Settings", icon: Settings }
-];
-
 const shortcuts = [
   [SEARCH_SHORTCUT_LABEL, "Open search"],
-  ["?", "Open Help & Shortcuts"],
+  ["?", "Keyboard shortcuts"],
+  ["G then T, C, R, P, L, S", "Go to Today, Calendar, Review, Reports, Library, Settings"],
   ["Shift+Space", "Start or stop timer"],
   ["N", "Add time block"],
   ["Alt+Left", "Previous day or week"],
@@ -97,6 +93,8 @@ function AppShellContent({ children }: { children: ReactNode }) {
   } = useAppShellRuntime();
   const shellIdentity = data ? { userName: data.user.name, workspaceName: data.workspace.name } : null;
   const [overlay, setOverlay] = useState<Overlay>(null);
+  const goToPending = useRef(false);
+  const goToTimer = useRef<number | undefined>(undefined);
   const [query, setQuery] = useState("");
   const [remoteSearch, setRemoteSearch] = useState<{ query: string; results: GlobalSearchResult[] }>({
     query: "",
@@ -104,6 +102,9 @@ function AppShellContent({ children }: { children: ReactNode }) {
   });
   const [searchStatus, setSearchStatus] = useState<"idle" | "loading" | "ready" | "error">("idle");
   const isTimeline = pathname === "/timeline";
+  const activeSection = activeShellSection(pathname);
+  const libraryTab = activeLibraryTab(pathname);
+  const reviewCount = data?.stats.reviewCount ?? 0;
   const showTimerShell = pathname === "/" || pathname === "/timeline";
   const showShellDateContext = pathname === "/";
   const timelineState = useMemo(
@@ -213,6 +214,21 @@ function AppShellContent({ children }: { children: ReactNode }) {
         setOverlay("help");
         return;
       }
+      const goTo = goToPending.current ? goToTarget(event) : null;
+      goToPending.current = false;
+      if (goTo || startsGoToSequence(event)) {
+        // Never leave a page while a dialog, popover or inline editor owns the keyboard.
+        if (event.defaultPrevented || hasOpenDialog()) return;
+        event.preventDefault();
+        if (goTo) {
+          if (pathname !== goTo) router.push(goTo);
+          return;
+        }
+        goToPending.current = true;
+        window.clearTimeout(goToTimer.current);
+        goToTimer.current = window.setTimeout(() => { goToPending.current = false; }, GO_TO_SEQUENCE_MS);
+        return;
+      }
       if (event.shiftKey && event.code === "Space") {
         event.preventDefault();
         void toggleTimer();
@@ -235,55 +251,60 @@ function AppShellContent({ children }: { children: ReactNode }) {
       }
     }
     window.addEventListener("keydown", handleKeydown);
-    return () => window.removeEventListener("keydown", handleKeydown);
-  }, [navigatePeriod, openManualEntry, router, selectedDate, showTimerShell, toggleTimer]);
+    return () => {
+      window.removeEventListener("keydown", handleKeydown);
+      window.clearTimeout(goToTimer.current);
+      goToPending.current = false;
+    };
+  }, [navigatePeriod, openManualEntry, pathname, router, selectedDate, showTimerShell, toggleTimer]);
 
   return (
     <div className={`swiss-app-shell${isTimeline ? " is-timeline" : ""}`}>
-      <aside className="swiss-sidebar">
-        <div className="swiss-sidebar-head">
-          <Link href="/" className="swiss-brand" aria-label="Dayframe dashboard">
-            <DayframeBrand decorative size="md" />
-            {isStaging ? <span className="dayframe-environment-badge">Staging</span> : null}
-          </Link>
-          <div className="swiss-mobile-shell-actions">
-            <IconButton label="Search" onClick={() => setOverlay("search")}><Search size={19} /></IconButton>
-            <IconButton label="Help and shortcuts" onClick={() => setOverlay("help")}><HelpCircle size={19} /></IconButton>
-            <button type="button" aria-label="Profile and workspace" className="swiss-mobile-account-button" onClick={() => setOverlay("profile")}>
-              <ShellProfileInitials identity={shellIdentity} />
+      <aside className="df-side">
+        <Link href="/" className="df-brand" aria-label="Dayframe Today">
+          <DayframeBrand decorative size="md" />
+          {isStaging ? <span className="dayframe-environment-badge">Staging</span> : null}
+        </Link>
+        <ShellSidebarNav activeId={activeSection?.id ?? null} reviewCount={reviewCount} />
+        <div className="df-side-foot">
+          <div className="df-side-row">
+            <ThemeToggleButton />
+            <button type="button" className="df-side-search" onClick={() => setOverlay("search")}>
+              <DayframeIcon glyph="search" size={17} />
+              <span>Search</span>
+              <kbd>{SEARCH_SHORTCUT_LABEL}</kbd>
             </button>
           </div>
-        </div>
-        <nav className="swiss-nav" aria-label="Main navigation">
-          <button type="button" className="swiss-nav-search" onClick={() => setOverlay("search")}>
-            <Search size={19} />
-            <span>Search</span>
-            <kbd>{SEARCH_SHORTCUT_LABEL}</kbd>
+          <button type="button" className="df-side-shortcuts" onClick={() => setOverlay("help")}>
+            <span>Keyboard shortcuts</span>
+            <kbd>?</kbd>
           </button>
-          {navItems.map((item) => {
-            const Icon = item.icon;
-            const active = item.href === "/" ? pathname === "/" : pathname.startsWith(item.href);
-            return (
-              <Link key={item.href} href={item.href} className={active ? "is-active" : ""}>
-                <Icon size={19} />
-                {item.label}
-              </Link>
-            );
-          })}
-        </nav>
-        <div className="swiss-sidebar-bottom">
-          <ThemeToggleButton />
-          <button type="button" className="swiss-help-link" onClick={() => setOverlay("help")}>
-            <HelpCircle size={20} />
-            Help & Shortcuts
-          </button>
-          <button type="button" className="swiss-profile-button" onClick={() => setOverlay("profile")}>
+          <button
+            type="button"
+            className="df-profile"
+            aria-label="Profile, workspace and settings"
+            onClick={() => setOverlay("profile")}
+          >
             <ShellProfileInitials identity={shellIdentity} />
             <ShellProfileIdentity identity={shellIdentity} />
-            <ChevronDown size={15} />
           </button>
         </div>
       </aside>
+
+      <header className="df-mtop">
+        <Link href="/" className="df-brand" aria-label="Dayframe Today">
+          <DayframeBrand decorative size="sm" />
+          {isStaging ? <span className="dayframe-environment-badge">Staging</span> : null}
+        </Link>
+        <div className="df-mtop-actions">
+          <button type="button" className="df-mtop-button" aria-label="Search" onClick={() => setOverlay("search")}>
+            <DayframeIcon glyph="search" size={20} />
+          </button>
+          <button type="button" className="df-mtop-avatar" aria-label="Profile, workspace and settings" onClick={() => setOverlay("profile")}>
+            <ShellProfileInitials identity={shellIdentity} />
+          </button>
+        </div>
+      </header>
 
       <div className={`swiss-main-frame${isTimeline ? " is-timeline" : ""}`}>
         {isTimeline ? (
@@ -308,10 +329,15 @@ function AppShellContent({ children }: { children: ReactNode }) {
                 ) : null}
               </div>
             ) : null}
-            <main>{children}</main>
+            <main>
+              {libraryTab ? <LibraryTabs activeHref={libraryTab.href} /> : null}
+              {children}
+            </main>
           </>
         )}
       </div>
+
+      <ShellTabBar activeId={activeSection?.id ?? null} reviewCount={reviewCount} />
 
       {overlay === "profile" && data ? (
         <ProfileWorkspacePopover
@@ -342,6 +368,19 @@ function AppShellContent({ children }: { children: ReactNode }) {
       ) : null}
       {overlay === "help" ? <HelpDialog onClose={() => setOverlay(null)} /> : null}
     </div>
+  );
+}
+
+/** Activities, Tags and Places stay separate pages, reached as the three Library tabs. */
+function LibraryTabs({ activeHref }: { activeHref: string }) {
+  return (
+    <nav className="df-library-tabs" aria-label="Library">
+      {LIBRARY_TABS.map((tab) => (
+        <Link key={tab.href} href={tab.href} aria-current={tab.href === activeHref ? "page" : undefined}>
+          {tab.label}
+        </Link>
+      ))}
+    </nav>
   );
 }
 
@@ -500,7 +539,7 @@ function SearchPalette({
 
 function HelpDialog({ onClose }: { onClose: () => void }) {
   return (
-    <ModalDialog description="Use these shortcuts from Dayframe screens when you are not typing in a field." onClose={onClose} title="Help & Shortcuts">
+    <ModalDialog description="Use these shortcuts from Dayframe screens when you are not typing in a field." onClose={onClose} title="Keyboard shortcuts">
       <div className="swiss-shortcut-list">
         {shortcuts.map(([keys, action]) => <div key={keys}><kbd>{keys}</kbd><span>{action}</span></div>)}
       </div>

@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import localFont from "next/font/local";
 import Script from "next/script";
 import { Suspense } from "react";
 import "./globals.css";
@@ -6,6 +7,18 @@ import "maplibre-gl/dist/maplibre-gl.css";
 import { AppLoadingState } from "@/components/AppLoadingState";
 import { AppShell } from "@/components/AppShell";
 import { getOptionalPageSession, isAuthenticatedPageSession } from "@/lib/auth/server";
+
+// Bricolage Grotesque (SIL OFL, `fonts/BricolageGrotesque-OFL.txt`) is bundled and self-hosted:
+// it is the Blocks display face for titles, the timer and large totals only.
+const displayFont = localFont({
+  src: [
+    { path: "./fonts/BricolageGrotesque-Bold.ttf", weight: "700", style: "normal" },
+    { path: "./fonts/BricolageGrotesque-ExtraBold.ttf", weight: "800", style: "normal" }
+  ],
+  variable: "--font-display-face",
+  display: "swap",
+  fallback: ["ui-rounded", "-apple-system", "BlinkMacSystemFont", "Segoe UI", "sans-serif"]
+});
 
 export const metadata: Metadata = {
   title: "Dayframe",
@@ -19,7 +32,7 @@ export default async function RootLayout({ children }: Readonly<{ children: Reac
   const session = await getOptionalPageSession();
 
   return (
-    <html lang="en" suppressHydrationWarning>
+    <html lang="en" className={displayFont.variable} suppressHydrationWarning>
       <body>
         <Script
           id="dayframe-theme-init"

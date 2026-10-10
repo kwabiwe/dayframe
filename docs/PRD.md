@@ -428,7 +428,7 @@ Functional requirements:
 - ✅ Only allowlisted beta users can create accounts.
 - ✅ Web and mobile share active timer state.
 - ✅ Mobile can queue events offline and sync later with retry and diagnostics; real-device reconnect/background/conflict behaviour remains under Watch before wider beta confidence.
-- ⚠️ iOS provides one fixed-slot connectivity status plus an account-owned retry coordinator. Cached and fetched Dashboard truth is deterministically composed with durable Start/Edit/Delete/Stop work, so refresh/relaunch cannot erase offline changes; pending and actively transmitting work remain distinct, and the brief settled notice is driven only by live pending work reaching zero. Signed staging and physical-iPhone network/background-transition evidence remains required before release confidence.
+- ⚠️ iOS provides one fixed-slot connectivity status plus an account-owned retry coordinator. Cached and fetched Dashboard truth is deterministically composed with durable Start/Edit/Delete/Stop work, so refresh/relaunch cannot erase offline changes; pending and actively transmitting work remain distinct but sync silently in the background (Blocks step 10c), and the brief "back online" notice follows only a confirmed offline-to-online transition. Signed staging and physical-iPhone network/background-transition evidence remains required before release confidence.
 - ✅ Trusted places can auto-start entries.
 - ✅ Ambiguous location events appear in review.
 - ✅ HealthKit sleep and workouts/walks appear as time entries or high-confidence review items; duplicate/overlapping Sleep remains a tracked investigation.

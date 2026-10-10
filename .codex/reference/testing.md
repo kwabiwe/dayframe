@@ -64,7 +64,7 @@ For any app chrome, navigation, account, workspace, settings, or floating-surfac
 - Workspace switcher opens fully on-screen.
 - Profile/account menu is reachable.
 - Logout is reachable.
-- Help & Shortcuts opens fully on-screen.
+- Keyboard shortcuts opens fully on-screen (desktop; the phone top bar has Search and the avatar only).
 - Search palette opens fully on-screen.
 - Notifications panel opens fully on-screen.
 - No horizontal overflow.

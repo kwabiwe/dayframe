@@ -78,7 +78,7 @@ describe("web Settings contracts", () => {
 
   it("keeps Settings rows inset and the mobile account trigger at 44 pixels", () => {
     expect(globalStyles).toMatch(/\.settings-group \.ui-settings-row \+ \.ui-settings-row::before \{[^}]*left: 52px;[^}]*right: 18px;/s);
-    expect(globalStyles).toMatch(/\.swiss-mobile-account-button \{[^}]*width: 44px;[^}]*height: 44px;[^}]*place-items: center;/s);
+    expect(globalStyles).toMatch(/\.df-mtop-button,\s*\.df-mtop-avatar \{[^}]*width: 44px;[^}]*height: 44px;[^}]*place-items: center;/s);
   });
 
   it("uses cached shell data with a first-load-only state and recoverable errors", () => {
