@@ -115,7 +115,9 @@ export function ReportFiltersPanel({
 
       <div className={`report-more-filters${moreOpen ? " is-open" : ""}`} ref={moreRef}>
         <button
+          aria-controls="report-more-filters-panel"
           aria-expanded={moreOpen}
+          aria-haspopup="dialog"
           className="report-more-filters-trigger"
           onClick={() => setMoreOpen((current) => !current)}
           ref={moreTriggerRef}
@@ -124,7 +126,13 @@ export function ReportFiltersPanel({
           <span>More filters</span>
           <ChevronDown aria-hidden="true" size={18} />
         </button>
-        <div className={`ui-floating-surface report-more-filter-grid${moreOpen ? " is-open" : ""}`} hidden={!moreOpen}>
+        <div
+          aria-label="More filters"
+          className={`ui-floating-surface report-more-filter-grid${moreOpen ? " is-open" : ""}`}
+          hidden={!moreOpen}
+          id="report-more-filters-panel"
+          role="dialog"
+        >
           <ReportMultiSelect
             label="Place"
             options={places}
