@@ -7,6 +7,8 @@ export type ReportCategoryOption = {
   key: string;
   name: string;
   color: string;
+  /** The activity's stored icon key (null derives from the name). */
+  icon?: string | null;
   isUncategorized: boolean;
   isUnavailable: boolean;
 };

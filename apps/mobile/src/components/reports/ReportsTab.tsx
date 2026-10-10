@@ -16,11 +16,6 @@ import {
   findNodeHandle,
   useWindowDimensions,
 } from "react-native";
-import Animated, {
-  FadeIn,
-  FadeOut,
-  LinearTransition,
-} from "react-native-reanimated";
 import { CalendarGlyph } from "@/components/calendar/DatePickerCalendar";
 import { compactDuration } from "../today/todayBlocksLayout";
 import { playHaptic } from "@/lib/haptics";
@@ -34,15 +29,12 @@ import {
 } from "../../lib/reportsBlocks";
 import { REPORT_TEXT_CAP, reportNumericColumns } from "@/lib/reportsTypography";
 import { paletteColorFor, type ReportSummary } from "@dayframe/shared";
-import { DonutChart } from "@/components/charts/DonutChart";
 import type { MobileBootstrap } from "@/lib/api";
 import type { MobileStyles, MobileTheme } from "@/lib/mobileTheme";
-import { MOBILE_MOTION, useResolvedReduceMotionPreference } from "@/lib/motion";
+import { useResolvedReduceMotionPreference } from "@/lib/motion";
 import {
   buildReportsPresentation,
   reportTrackedSeconds,
-  formatReportDuration,
-  formatReportPercent,
   spokenReportDuration,
 } from "@/lib/reportsPresentation";
 import {
@@ -62,6 +54,7 @@ import {
 import { fetchReportSummary, ReportRangeCache } from "@/lib/reportsClient";
 import { subscribeAuthenticatedSession } from "@/lib/secure-session";
 import { ReportActivityChart } from "./ReportActivityChart";
+import { ReportDonutCard } from "./ReportsDonut";
 import { ReportDateSheet, ReportFiltersSheet } from "./ReportSheets";
 import {
   ReportGoalStreak,
@@ -139,7 +132,6 @@ export function ReportsTab({
   const activeFilterPresentation = useRef(filterPresentation);
   const activeDatePresentation = useRef(datePresentation);
   const reportsOwnerActive = useRef(isFocused && foreground);
-  const presented = useRef(false);
   const filterRef = useRef<View>(null);
   const calendarRef = useRef<View>(null);
   const { fontScale } = useWindowDimensions();
@@ -309,15 +301,6 @@ export function ReportsTab({
     [data, summary, range, reportNow, selection, theme.mode],
   );
   const segments = report?.visibleCategorySegments ?? [];
-  const entrance =
-    isFocused &&
-    foreground &&
-    resolved &&
-    Boolean(report?.selectedDurationMs) &&
-    !presented.current;
-  useEffect(() => {
-    if (entrance) presented.current = true;
-  }, [entrance]);
   const filterOptions = useMemo(
     () =>
       report?.filterOptions ?? [
@@ -338,6 +321,7 @@ export function ReportsTab({
           key: c.id,
           name: c.name,
           color: paletteColorFor(c.color ?? c.id, c.name, theme.mode),
+          icon: c.icon ?? null,
           isUncategorized: false,
           isUnavailable: false,
         })),
@@ -380,7 +364,7 @@ export function ReportsTab({
   const columns = reportNumericColumns(
     contentWidth,
     fontScale,
-    segments.map((s) => formatReportDuration(s.durationMs / 1000)),
+    segments.map((s) => compactDuration(s.durationMs / 1000)),
   );
   const measuredNumbers = useReportTextMeasure(
     ["100%", "<1%", columns.durationSample],
@@ -582,6 +566,12 @@ export function ReportsTab({
   const playBlocks = Boolean(report) && !blocksAnimated.current && !reduceMotion && resolved && isFocused;
   if (playBlocks && choice === "week" && days.some((day) => day.segments.length))
     blocksAnimated.current = true;
+  const donutPeriodLabel =
+    choice === "week"
+      ? "This week"
+      : choice === "today"
+        ? "Today"
+        : range.title;
   const moreLabel =
     choice === "week" || choice === "month" ? "More" : rangeDisplayTitle;
   const openFilters = () => {
@@ -738,7 +728,7 @@ export function ReportsTab({
           <Pressable
             accessible={false}
             onPress={() => setTooltipOutsidePress((value) => value + 1)}
-            style={[s.outsideDismissSurface, { backgroundColor: theme.surface }]}
+            style={s.outsideDismissSurface}
             testID="report-tooltip-outside-summary"
           >
             {failedKey === requestKey ? (
@@ -746,109 +736,32 @@ export function ReportsTab({
                 Saved report for this range. Connect to refresh.
               </Text>
             ) : null}
-            <View style={s.chart}>
-              <DonutChart
-                animateEntrance={entrance}
-                centerLabel="Total"
-                spokenValue={spokenReportDuration(report.selectedLoggedSeconds)}
-                centerValue={formatReportDuration(report.selectedLoggedSeconds)}
-                reduceMotion={reduceMotion}
-                settleImmediately={!isFocused || !foreground}
-                segments={segments.map((segment) => ({
-                  id: segment.key,
-                  value: segment.durationMs,
-                  color: segment.color,
-                  selected: segment.selected,
-                  isUncategorized: segment.isUncategorized,
-                }))}
-                theme={theme}
-              />
-            </View>
-            {selection.mode === "none" || report.selectedLoggedSeconds === 0 ? (
-              <Text
-                accessibilityLiveRegion="polite"
-                style={{ color: theme.textSecondary }}
-              >
-                {selection.mode === "none"
+            <ReportDonutCard
+              empty={
+                selection.mode === "none"
                   ? "No activities selected"
-                  : selection.mode === "include"
-                    ? "No logged time for the selected activities."
-                    : "No tracked time yet."}
-              </Text>
-            ) : null}
-            {segments.length ? (
-              <View style={s.categoryList}>
-                {segments.map((segment) => (
-                  <Animated.View
-                    key={segment.key}
-                    entering={FadeIn.duration(
-                      reduceMotion ? 0 : MOBILE_MOTION.control,
-                    )}
-                    exiting={FadeOut.duration(
-                      reduceMotion ? 0 : MOBILE_MOTION.control,
-                    )}
-                    layout={
-                      reduceMotion
-                        ? undefined
-                        : LinearTransition.duration(MOBILE_MOTION.layout)
-                    }
-                  >
-                    <View
-                      accessible
-                      accessibilityRole="text"
-                      accessibilityLabel={`${segment.categoryName}, ${formatReportPercent(segment.durationMs, report.selectedDurationMs)} of selected time, ${spokenReportDuration(segment.durationMs / 1000)}`}
-                      style={[
-                        s.category,
-                        { borderBottomColor: theme.border, gap: columns.gap },
-                      ]}
-                    >
-                      <View style={[s.dot, { backgroundColor: segment.color }]} />
-                      <Text
-                        numberOfLines={1}
-                        ellipsizeMode="tail"
-                        maxFontSizeMultiplier={REPORT_TEXT_CAP.name}
-                        style={[s.name, { color: theme.textPrimary }]}
-                      >
-                        {segment.categoryName}
-                      </Text>
-                      <View style={[s.numbers, { gap: columns.gap }]}>
-                        <Text
-                          numberOfLines={1}
-                          maxFontSizeMultiplier={REPORT_TEXT_CAP.numeric}
-                          style={[
-                            s.number,
-                            {
-                              color: theme.textSecondary,
-                              width: columns.percentWidth,
-                              fontSize: columns.fontSize,
-                            },
-                          ]}
-                        >
-                          {formatReportPercent(
-                            segment.durationMs,
-                            report.selectedDurationMs,
-                          )}
-                        </Text>
-                        <Text
-                          numberOfLines={1}
-                          maxFontSizeMultiplier={REPORT_TEXT_CAP.numeric}
-                          style={[
-                            s.number,
-                            {
-                              color: theme.textPrimary,
-                              width: columns.durationWidth,
-                              fontSize: columns.fontSize,
-                            },
-                          ]}
-                        >
-                          {formatReportDuration(segment.durationMs / 1000)}
-                        </Text>
-                      </View>
-                    </View>
-                  </Animated.View>
-                ))}
-              </View>
-            ) : null}
+                  : report.selectedLoggedSeconds === 0
+                    ? selection.mode === "include"
+                      ? "No logged time for the selected activities."
+                      : "No tracked time yet."
+                    : null
+              }
+              numberWidths={{
+                duration: columns.durationWidth,
+                fontSize: columns.fontSize,
+                gap: columns.gap,
+                percent: columns.percentWidth,
+              }}
+              periodLabel={donutPeriodLabel}
+              segments={segments.map((segment) => ({
+                key: segment.key,
+                name: segment.categoryName,
+                seconds: segment.durationMs / 1000,
+                color: segment.color,
+              }))}
+              theme={theme}
+              totalSeconds={report.selectedLoggedSeconds}
+            />
           </Pressable>
         )}
         {report && choice !== "week" && choice !== "month" ? (
@@ -871,7 +784,7 @@ const s = StyleSheet.create({
   titleRow: { flexDirection: "row", alignItems: "center", gap: 12 },
   titlePress: { flex: 1, minWidth: 0 },
   title: { fontFamily: MOBILE_DISPLAY_FONT.bold, fontSize: 30, lineHeight: 36 },
-  outsideDismissSurface: { gap: 12, borderRadius: 22, padding: 16 },
+  outsideDismissSurface: { gap: 14 },
   row: { flexDirection: "row", alignItems: "center", gap: 8 },
   rangeAction: {
     flex: 1,

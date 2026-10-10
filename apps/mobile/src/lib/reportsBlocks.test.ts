@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { buildReportRange } from "./reportsRanges";
 import {
+  reportFilterApplyLabel,
+  reportFilterSections,
   formatReportDelta,
   monthGridLeadingBlanks,
   previousReportWindow,
@@ -137,5 +139,31 @@ describe("Blocks Reports helpers", () => {
     const lateMarch = +new Date(2026, 2, 31, 12);
     const march = buildReportRange("month", lateMarch);
     expect(previousReportWindow("month", march, lateMarch)!.currentCutoff).toBeNull();
+  });
+
+  it("groups filter options like the activity picker, with No activity under Other", () => {
+    const option = (key: string, name: string, extra: object = {}) => ({
+      key, name, color: "#000", icon: null, isUncategorized: false, isUnavailable: false, ...extra,
+    });
+    const options = [
+      option("uncategorized", "No activity", { isUncategorized: true }),
+      option("z", "Zebra project"),
+      option("r", "Running", { icon: "footprints" }),
+      option("w", "Work", { icon: "briefcase" }),
+      option("gone", "Unavailable activity", { isUnavailable: true }),
+    ];
+    const sections = reportFilterSections(options, "");
+    expect(sections.map((section) => section.title)).toEqual(["Your own", "Work and study", "Body and mind", "Other"]);
+    expect(sections.at(-1)!.rows.map((row) => row.key)).toEqual(["uncategorized", "gone"]);
+    expect(reportFilterSections(options, " run ")).toEqual([{ key: "results", title: null, rows: [options[2]] }]);
+  });
+
+  it("names the filter's Apply button by what it keeps", () => {
+    const universe = ["a", "b", "c"];
+    expect(reportFilterApplyLabel({ mode: "all", universe })).toBe("Show all activities");
+    expect(reportFilterApplyLabel({ mode: "none", universe })).toBe("Show none");
+    expect(reportFilterApplyLabel({ mode: "include", keys: ["a"], universe })).toBe("Show 1 activity");
+    expect(reportFilterApplyLabel({ mode: "include", keys: ["a", "b"], universe })).toBe("Show 2 activities");
+    expect(reportFilterApplyLabel({ mode: "include", keys: ["a", "b", "c"], universe })).toBe("Show all activities");
   });
 });

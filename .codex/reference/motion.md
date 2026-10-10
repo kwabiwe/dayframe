@@ -297,6 +297,13 @@ Block pull-to-refresh:
 - Interruption: changing range or filter during a focus clears the focus; a late previous-period read for an old range is ignored (keyed by its exact request).
 - Accessibility: Reduce Motion places the thumb without a spring and shows the columns without the grow; the hero is one live-region element ("19 hours 47 minutes framed this week. 19 hours 47 minutes more than last week so far"); each column is a 44-point button with its day and total, selected while focused.
 
+## Reports donut and filter (Blocks parity step 10b)
+
+- Trigger: a finger on the ring, a row tap, VoiceOver increment/decrement, All / None / a row in the filter sheet.
+- Owner: `ReportDonutCard` owns the highlighted activity; the highlight changes stroke width and opacity at once (no animation), the centre text and the row background change in the same render. The ring takes the touch with the responder system and refuses to hand it to the scroll view until release, so scrubbing never scrolls the page. The filter sheet keeps `SwipeDismissSheet` as its only transition owner.
+- Interruption: a range or filter change that removes the highlighted activity clears the highlight; releasing the finger keeps the last highlight (tap its row, or step past the last activity, to return to the total).
+- Accessibility: nothing moves, so Reduce Motion needs no other path; the ring is adjustable for VoiceOver; rows are 44-point buttons with their full name, percentage and duration; the `tick` haptic follows the Dayframe haptics setting.
+
 ## Calendar (Blocks parity step 9)
 
 - Trigger: a week-strip day, a strip swipe (week) or timeline swipe (day), the − / + zoom buttons, a pinch, Today's "Earlier this week" days.

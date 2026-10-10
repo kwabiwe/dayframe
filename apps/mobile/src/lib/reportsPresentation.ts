@@ -1,4 +1,4 @@
-import { paletteColorFor, type ReportSummary } from "@dayframe/shared";
+import { DAYFRAME_THEME, paletteColorFor, type ReportSummary } from "@dayframe/shared";
 import type { MobileBootstrap, MobileTimeEntry } from "./api";
 import type { MobileTheme } from "./mobileTheme";
 import type { ReportRange, ReportWindow } from "./reportsRanges";
@@ -151,7 +151,11 @@ export function buildReportsPresentation(input: {
       durationMs:
         buckets.reduce((sum, b) => sum + (b.byCategory.get(c.key) ?? 0), 0) *
         1000,
-      color: paletteColorFor(c.color ?? c.key, c.name, themeMode),
+      // Time without an activity is neutral everywhere in Blocks (Calendar bars, Today's rows).
+      color:
+        c.key === "uncategorized"
+          ? DAYFRAME_THEME[themeMode].textMuted
+          : paletteColorFor(c.color ?? c.key, c.name, themeMode),
       isUncategorized: c.key === "uncategorized",
       selected: reportSelectionIncludes(selection, c.key),
     }))
@@ -162,6 +166,7 @@ export function buildReportsPresentation(input: {
       key: c.id,
       name: c.name,
       color: paletteColorFor(c.color ?? c.id, c.name, themeMode),
+      icon: c.icon ?? null,
       isUncategorized: false,
       isUnavailable: false,
     });
@@ -177,7 +182,7 @@ export function buildReportsPresentation(input: {
   filterOptions.set("uncategorized", {
     key: "uncategorized",
     name: "No activity",
-    color: paletteColorFor("uncategorized", "No activity", themeMode),
+    color: DAYFRAME_THEME[themeMode].textMuted,
     isUncategorized: true,
     isUnavailable: false,
   });

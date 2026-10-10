@@ -93,6 +93,9 @@ vi.mock(
   async () => import("../calendar/DatePickerCalendar"),
 );
 vi.mock("react-native-svg", () => ({ default: "Svg", Path: "Path" }));
+vi.mock("../icons/DayframeIcon", () => ({ ActivityIcon: "ActivityIcon" }));
+const haptic = vi.hoisted(() => vi.fn());
+vi.mock("../../lib/haptics", () => ({ playHaptic: haptic }));
 vi.mock("react-native-reanimated", () => ({
   default: { View: "AnimatedView" },
   FadeIn: { duration: () => ({}) },
@@ -277,7 +280,7 @@ describe("Reports sheet interactions", () => {
     act(() => tree.unmount());
   });
   it.each(["all", "include", "none"] as const)(
-    "exposes %s tri-state, search, toggles and zero-result Apply",
+    "exposes the %s draft: All/None links, search, toggles, grouped rows and the Show N Apply",
     (mode) => {
       const onChange = vi.fn(),
         onApply = vi.fn(),
@@ -294,25 +297,27 @@ describe("Reports sheet interactions", () => {
           reduceMotion
         />,
       );
-      expect(button("All activities").props.accessibilityState.checked).toBe(
-        mode === "all" ? true : mode === "none" ? false : "mixed",
-      );
-      expect(button("Apply").props.disabled).toBe(false);
-      press("Apply");
-      press("Apply");
+      const apply =
+        mode === "all" ? "Show all activities" : mode === "none" ? "Show none" : "Show 1 activity";
+      expect(button("Work").props.accessibilityState.checked).toBe(mode !== "none");
+      expect(button("Rest").props.accessibilityState.checked).toBe(mode === "all");
+      expect(button(apply).props.disabled).toBe(false);
+      press(apply);
+      press(apply);
       expect(onApply).toHaveBeenCalledOnce();
-      press("All activities");
-      expect(onChange.mock.calls[0][0].mode).toBe(
-        mode === "all" ? "none" : "all",
-      );
+      press("Select all activities");
+      expect(onChange.mock.calls[0][0]).toEqual({ mode: "all", universe: ["Work", "Rest"] });
+      press("Select no activities");
+      expect(onChange.mock.calls[1][0]).toEqual({ mode: "none", universe: ["Work", "Rest"] });
       press("Work");
-      expect(onChange).toHaveBeenCalledTimes(2);
+      expect(onChange).toHaveBeenCalledTimes(3);
+      expect(haptic).toHaveBeenCalled();
       act(() =>
         tree.root.findByType("TextInput" as never).props.onChangeText("rest"),
       );
       expect(button("Work")).toBeUndefined();
       expect(button("Rest")).toBeDefined();
-      expect(button("All activities")).toBeDefined();
+      expect(button("Select all activities")).toBeDefined();
       expect(button("Cancel Activities")).toBeUndefined();
       const scroll = tree.root.findByProps({
         testID: "report-filter-options-scroll",
@@ -331,13 +336,12 @@ describe("Reports sheet interactions", () => {
       );
       expect(
         tree.root.findByProps({ testID: "report-filter-sheet-action" }),
-      ).toBe(button("Apply"));
-      expect(button("Apply").props.style[0]).toMatchObject({
-        alignSelf: "center",
-        width: 160,
-        maxWidth: "60%",
+      ).toBe(button(apply));
+      expect(button(apply).props.style[1]).toMatchObject({
+        alignSelf: "stretch",
+        width: "100%",
       });
-      press("Close Activities");
+      press("Close Filter activities");
       expect(onDismissed).toHaveBeenCalledWith(1);
       expect(onApply).toHaveBeenCalledOnce();
       expect(tree.root.findByType("Modal" as never).props.animationType).toBe(
@@ -370,8 +374,8 @@ describe("Reports sheet interactions", () => {
         .findAllByType("Text" as never)
         .some((node) => node.props.children === "Activities"),
     ).toBe(false);
-    press("Close Activities");
-    press("Close Activities");
+    press("Close Filter activities");
+    press("Close Filter activities");
     expect(onApply).not.toHaveBeenCalled();
     expect(onDismissed).toHaveBeenCalledOnce();
     expect(onDismissed).toHaveBeenCalledWith(7);
@@ -438,7 +442,7 @@ describe("Reports sheet interactions", () => {
     );
     const sheet = tree.root.findByType("SwipeDismissSheet" as never);
     act(() => expect(sheet.props.onDismissStart(8)).toBe(true));
-    press("Apply");
+    press("Show all activities");
     expect(onApply).not.toHaveBeenCalled();
     act(() => sheet.props.onDismiss(7));
     expect(onDismissed).not.toHaveBeenCalled();
@@ -462,12 +466,12 @@ describe("Reports sheet interactions", () => {
       />,
     );
     const sheet = tree.root.findByType("SwipeDismissSheet" as never);
-    press("Apply");
+    press("Show all activities");
     expect(onApply).toHaveBeenCalledOnce();
     expect(onDismissed).toHaveBeenCalledOnce();
     expect(onDismissed).toHaveBeenCalledWith(11);
     act(() => expect(sheet.props.onDismissStart(11)).toBe(true));
-    press("Apply");
+    press("Show all activities");
     expect(onApply).toHaveBeenCalledOnce();
     act(() => sheet.props.onDismiss(10));
     expect(onDismissed).toHaveBeenCalledOnce();
