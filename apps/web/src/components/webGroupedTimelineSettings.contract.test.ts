@@ -61,6 +61,7 @@ describe("grouped Timeline and Settings follow-up contracts", () => {
     expect(settings).toContain('authMode === "local" || authMode === "provider"');
     expect(styles).toMatch(/\.settings-save-row-goals \{[^}]*justify-content: flex-end;/s);
     expect(styles).toMatch(/\.settings-save-row-goals \.ui-button \{[^}]*min-width: 104px;/s);
-    expect(styles).toContain(".swiss-nav a:focus-visible");
+    // Shell navigation keeps the shared neutral link focus ring rather than its own.
+    expect(styles).not.toMatch(/\.df-(nav|tabbar|library-tabs) a:focus-visible/);
   });
 });

@@ -27,7 +27,7 @@ Six decisions depart from the earlier Midnight Core rules:
 | Activities | The interface says "activity" and "activities" where it said "category", on every surface (shipped app-wide 6 Oct 2026). Database columns, API fields, code identifiers, tests and the report CSV keep `category`. | `.codex/reference/product-model.md` |
 | New layouts | Today gets a quick-start mosaic of pinned activities. Activities, Tags and Places merge into one Library page on web and Settings › Activities on iPhone. The press-and-hold Play orb with its activity bloom is approved (7 October 2026) and built on iPhone (parity step 3): it sits in the tab bar's own trailing slot, so it never covers the tabs, and VoiceOver reaches it through that native item. | The redesign phase PR for each surface |
 
-Migrated surfaces so far: iPhone Today (Phase 2: live block, quick-start mosaic, row blocks, landings and haptics). The interactive prototypes, review and phased plan live on the `agent/dayframe-redesign-concept` branch under `design/blocks/`. They are reference material, not production code.
+Migrated surfaces so far: iPhone Today (Phase 2: live block, quick-start mosaic, row blocks, landings and haptics), and, through parity steps 2–10, every iPhone screen listed in `docs/feature-fix-tracker.md`. On web, the app shell (sidebar, phone top bar and tab bar; parity step 11a) is migrated and Bricolage Grotesque is bundled with the web app through `next/font/local`; the pages inside it migrate in steps 12–16. The interactive prototypes, review and phased plan live on the `agent/dayframe-redesign-concept` branch under `design/blocks/`. They are reference material, not production code.
 
 ### Prototype parity (owner decision 7 October 2026)
 

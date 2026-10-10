@@ -295,6 +295,13 @@ Block pull-to-refresh:
 - Interruption: changing range or filter during a focus clears the focus; a late previous-period read for an old range is ignored (keyed by its exact request).
 - Accessibility: Reduce Motion places the thumb without a spring and shows the columns without the grow; the hero is one live-region element ("19 hours 47 minutes framed this week. 19 hours 47 minutes more than last week so far"); each column is a 44-point button with its day and total, selected while focused.
 
+## Web shell sidebar thumb (Blocks parity step 11a)
+
+- Trigger: the route changes to another of the five sections (link, phone tab, or keys 1–5).
+- Owner: `ShellSidebarNav` owns one neutral thumb behind the sidebar links. Its first placement is still; later moves are a CSS `transform` transition using the `snap` spring as a `linear()` easing (`springTransition` in `apps/web/src/lib/blocks-motion.ts`), so a second route change retargets from wherever the thumb is. Window resizes re-place it without travel. A page outside the five sections (Settings) fades the thumb out (140 ms opacity); returning fades it back in.
+- Surrounding layout: links, labels and the Review count never move; only the thumb travels. The phone tab bar has no animated element: the current tab is a neutral fill.
+- Accessibility: Reduce Motion moves the thumb without travel (opacity only). The current link carries `aria-current="page"`; the Review link's name includes the count.
+
 ## Connectivity slot and avatar badge (Blocks parity step 10c)
 
 - Trigger: confirmed offline, a live return to online, a rejected Stop/Edit/Delete appearing or resolving.
