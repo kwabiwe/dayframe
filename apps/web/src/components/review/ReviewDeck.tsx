@@ -88,6 +88,8 @@ export function ReviewDeck({ initialData }: { initialData: BootstrapData }) {
   const cardRef = useRef<HTMLElement | null>(null);
 
   const selected = visible.find((item) => item.id === selectedId) ?? visible[0] ?? null;
+  // A refill (refresh, Undo) ends this visit's "emptied" state; a later empty queue is not ours.
+  if (emptiedByDecision && visible.length > 0) setEmptiedByDecision(false);
   const openIdsRef = useRef<ReadonlySet<string>>(new Set());
   useLayoutEffect(() => {
     openIdsRef.current = new Set(openItems.map((item) => item.id));
@@ -156,6 +158,8 @@ export function ReviewDeck({ initialData }: { initialData: BootstrapData }) {
   const decideCurrent = useCallback((kind: ReviewDecisionKind) => {
     const item = selectedRef.current;
     if (!item) return;
+    // The evidence editor owns an open card: its own actions decide it.
+    if (evidenceOpenId === item.id) return;
     if (kind === "log" && !reviewWindow(item)) return;
     const draft = activeDraft(drafts.get(item.id), categories);
     const category = reviewCardCategory(item, draft, categories);
@@ -180,7 +184,7 @@ export function ReviewDeck({ initialData }: { initialData: BootstrapData }) {
     setEmptiedByDecision(next === null);
     if (next) setEnter({ itemId: next, from: "decision", dir, key: ++enterSequence.current });
     if (!prefersReducedMotion()) setGhost({ key: ++enterSequence.current, item, draft, dir });
-  }, [categories, decide, drafts, visibleIds]);
+  }, [categories, decide, drafts, evidenceOpenId, visibleIds]);
 
   // Y / N / E / ↑ ↓ (prototype keys). Window capture runs before the shell's own keys (N focuses
   // the command bar elsewhere), so the deck owns them while a card is showing.
@@ -219,6 +223,16 @@ export function ReviewDeck({ initialData }: { initialData: BootstrapData }) {
     window.addEventListener("keydown", onKeyDown, true);
     return () => window.removeEventListener("keydown", onKeyDown, true);
   }, [decideCurrent, evidenceOpenId, hydrated, select, visibleIds]);
+
+  // A toast leaving with focus on its Undo hands focus to the card (or the empty state's heading).
+  useEffect(() => {
+    if (!state.notice?.isExiting) return;
+    const active = document.activeElement;
+    if (!active?.closest(".df-toast-host")) return;
+    const target = cardRef.current?.querySelector<HTMLElement>(".df-ractions button:not(:disabled)")
+      ?? document.getElementById("df-done-title");
+    target?.focus();
+  }, [state.notice?.isExiting]);
 
   // ⌘Z / Ctrl+Z takes back the held decision while its toast is up.
   useEffect(() => {
@@ -358,6 +372,7 @@ export function ReviewDeck({ initialData }: { initialData: BootstrapData }) {
               categories={categories}
               draft={draft}
               item={selected}
+              locked={evidenceOpen}
               nameInputRef={nameInputRef}
               nowMs={nowMs}
               onDecide={decideCurrent}
@@ -367,18 +382,18 @@ export function ReviewDeck({ initialData }: { initialData: BootstrapData }) {
             {span ? (
               <div className="df-rcard-overlap">
                 <OverlapNotice
-                  candidate={{ startedAt: selected.suggestedStartedAt!, stoppedAt: selected.suggestedStoppedAt! }}
+                  candidate={{ startedAt: new Date(span.startMs).toISOString(), stoppedAt: new Date(span.stopMs).toISOString() }}
                   entries={entries}
                 />
               </div>
             ) : null}
             <div className="df-ractions">
-              <button className="df-rbtn df-rbtn--live" disabled={!span} onClick={() => decideCurrent("log")} type="button">
+              <button className="df-rbtn df-rbtn--live" disabled={!span || evidenceOpen} onClick={() => decideCurrent("log")} type="button">
                 <Check size={16} aria-hidden="true" />
                 Log it
                 <span className="df-kbd" aria-hidden="true">Y</span>
               </button>
-              <button className="df-rbtn" onClick={() => decideCurrent("skip")} type="button">
+              <button className="df-rbtn" disabled={evidenceOpen} onClick={() => decideCurrent("skip")} type="button">
                 <X size={16} aria-hidden="true" />
                 Skip
                 <span className="df-kbd" aria-hidden="true">N</span>
@@ -386,6 +401,7 @@ export function ReviewDeck({ initialData }: { initialData: BootstrapData }) {
               {span ? (
                 <button
                   className="df-rbtn df-rbtn--ghost"
+                  disabled={evidenceOpen}
                   onClick={() => {
                     nameInputRef.current?.focus();
                     nameInputRef.current?.select();
@@ -464,6 +480,7 @@ function CardFace({
   draft,
   inert = false,
   item,
+  locked = false,
   nameInputRef,
   nowMs,
   onDecide,
@@ -474,6 +491,8 @@ function CardFace({
   draft: ReviewLogAsDraft | undefined;
   inert?: boolean;
   item: ReviewItemRow;
+  /** The evidence editor is open: "Log as" is read-only and cannot decide. */
+  locked?: boolean;
   nameInputRef?: React.RefObject<HTMLInputElement | null>;
   nowMs: number;
   onDecide?: (kind: ReviewDecisionKind) => void;
@@ -491,6 +510,7 @@ function CardFace({
   const chipRefs = useRef<(HTMLButtonElement | null)[]>([]);
 
   const onChipKeyDown = (event: ReactKeyboardEvent<HTMLButtonElement>, index: number) => {
+    if (event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return;
     const step = event.key === "ArrowRight" || event.key === "ArrowDown" ? 1 : event.key === "ArrowLeft" || event.key === "ArrowUp" ? -1 : 0;
     if (!step || !categories.length) return;
     event.preventDefault();
@@ -540,7 +560,7 @@ function CardFace({
               onKeyDown={(event) => {
                 const plain = !event.altKey && !event.ctrlKey && !event.metaKey && !event.shiftKey;
                 // Enter that confirms an input-method candidate is not a decision.
-                if (event.key === "Enter" && plain && !event.nativeEvent.isComposing && event.keyCode !== 229) {
+                if (event.key === "Enter" && plain && !locked && !event.nativeEvent.isComposing && event.keyCode !== 229) {
                   event.preventDefault();
                   onDecide?.("log");
                 }
@@ -549,7 +569,7 @@ function CardFace({
                   event.currentTarget.blur();
                 }
               }}
-              readOnly={inert}
+              readOnly={inert || locked}
               ref={inert ? undefined : nameInputRef}
               type="text"
               value={draft?.name ?? reviewDefaultName(item)}
@@ -563,6 +583,7 @@ function CardFace({
                       aria-checked={checked}
                       className={`df-rchip${checked ? " is-checked df-block" : ""}`}
                       key={category.id}
+                      disabled={locked}
                       onClick={() => onDraft?.({ categoryId: category.id })}
                       onKeyDown={(event) => onChipKeyDown(event, index)}
                       ref={(element) => {

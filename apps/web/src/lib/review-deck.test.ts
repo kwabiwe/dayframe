@@ -100,6 +100,19 @@ describe("Review deck helpers", () => {
     expect(reviewProposalSignature(base)).not.toBe(reviewProposalSignature({ ...base, suggestedCategoryId: OTHER }));
   });
 
+  it("reads server Date props and refreshed ISO strings as the same suggestion, to the millisecond", () => {
+    const iso = item({ suggestedStartedAt: "2026-10-10T07:00:00.250Z", suggestedStoppedAt: "2026-10-10T07:45:00.750Z" });
+    const fromServer = {
+      ...iso,
+      suggestedStartedAt: new Date("2026-10-10T07:00:00.250Z"),
+      suggestedStoppedAt: new Date("2026-10-10T07:45:00.750Z")
+    } as unknown as ReviewItemRow;
+    expect(reviewProposalSignature(fromServer)).toBe(reviewProposalSignature(iso));
+    expect(reviewMutationFor(fromServer, "log", { name: "Park run" })).toMatchObject({
+      edit: { startedAt: "2026-10-10T07:00:00.250Z", stoppedAt: "2026-10-10T07:45:00.750Z" }
+    });
+  });
+
   it("writes the when-line in local days", () => {
     const now = new Date(2026, 9, 10, 12).getTime();
     expect(reviewWhen(item(), now)).toBe("Today · 07:00–07:45");

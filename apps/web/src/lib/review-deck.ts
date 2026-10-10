@@ -127,9 +127,24 @@ export function reviewReason(item: Pick<ReviewItemRow, "eventSource" | "eventTyp
   return "Dayframe asks before logging location time.";
 }
 
+/**
+ * A suggested time as epoch milliseconds. Server-rendered props carry timestamps as `Date` objects
+ * while a refreshed bootstrap carries ISO strings; both must read as the same instant (to the ms).
+ */
+export function timeMs(value: unknown) {
+  if (value instanceof Date) return value.getTime();
+  if (typeof value === "string" && value) return Date.parse(value);
+  return Number.NaN;
+}
+
+function nullableMs(value: unknown) {
+  const ms = timeMs(value);
+  return Number.isFinite(ms) ? ms : null;
+}
+
 export function reviewWindow(item: Pick<ReviewItemRow, "suggestedStartedAt" | "suggestedStoppedAt">) {
-  const start = item.suggestedStartedAt ? Date.parse(item.suggestedStartedAt) : Number.NaN;
-  const stop = item.suggestedStoppedAt ? Date.parse(item.suggestedStoppedAt) : Number.NaN;
+  const start = timeMs(item.suggestedStartedAt);
+  const stop = timeMs(item.suggestedStoppedAt);
   if (!Number.isFinite(start) || !Number.isFinite(stop) || stop <= start) return null;
   return { startMs: start, stopMs: stop };
 }
@@ -171,7 +186,7 @@ export function formatReviewDuration(ms: number) {
 export function reviewWhen(item: Pick<ReviewItemRow, "suggestedStartedAt" | "suggestedStoppedAt">, nowMs: number) {
   const window = reviewWindow(item);
   if (!window) {
-    const start = item.suggestedStartedAt ? Date.parse(item.suggestedStartedAt) : Number.NaN;
+    const start = timeMs(item.suggestedStartedAt);
     return Number.isFinite(start) ? `${reviewDayLabel(start, nowMs)} · ${clock(start)}` : null;
   }
   const sameDay = localDayStart(window.startMs) === localDayStart(window.stopMs);
@@ -185,8 +200,8 @@ export function reviewWhen(item: Pick<ReviewItemRow, "suggestedStartedAt" | "sug
 export function reviewProposalSignature(item: Pick<ReviewItemRow, "title" | "suggestedStartedAt" | "suggestedStoppedAt" | "suggestedCategoryId" | "suggestedPlaceId">) {
   return JSON.stringify([
     item.title ?? null,
-    item.suggestedStartedAt ? Date.parse(item.suggestedStartedAt) : null,
-    item.suggestedStoppedAt ? Date.parse(item.suggestedStoppedAt) : null,
+    nullableMs(item.suggestedStartedAt),
+    nullableMs(item.suggestedStoppedAt),
     item.suggestedCategoryId ?? null,
     item.suggestedPlaceId ?? null
   ]);
@@ -210,15 +225,16 @@ export function reviewLogAsEdit(item: ReviewItemRow, draft: ReviewLogAsDraft | u
   const nameChanged = typed !== undefined && typed !== "" && typed !== defaultName;
   const categoryChanged = draft?.categoryId !== undefined && draft.categoryId !== item.suggestedCategoryId;
   if (!nameChanged && !categoryChanged) return null;
-  if (!reviewWindow(item)) return null;
+  const span = reviewWindow(item);
+  if (!span) return null;
   // A generic entry is stored with exactly this description, so an activity-only change keeps the
   // name the card shows; a Location visit derives its own name when none is sent.
   const description = nameChanged ? typed : hasV2Evidence(item) ? undefined : defaultName || undefined;
   return {
     categoryId: categoryChanged ? draft!.categoryId ?? null : item.suggestedCategoryId ?? null,
     ...(description ? { description } : {}),
-    startedAt: item.suggestedStartedAt!,
-    stoppedAt: item.suggestedStoppedAt!
+    startedAt: new Date(span.startMs).toISOString(),
+    stoppedAt: new Date(span.stopMs).toISOString()
   };
 }
 
@@ -251,15 +267,15 @@ export function activeDraft(draft: ReviewLogAsDraft | undefined, categories: rea
 /** The nearest other V2 stay within 15 minutes, which the evidence editor can merge with. */
 export function adjacentV2StayReviewId(item: ReviewItemRow, candidates: readonly ReviewItemRow[]) {
   if (!hasV2Evidence(item) || item.eventType === "commute_detected") return undefined;
-  const itemStart = Date.parse(String(item.suggestedStartedAt ?? ""));
-  const itemStop = Date.parse(String(item.suggestedStoppedAt ?? ""));
+  const itemStart = timeMs(item.suggestedStartedAt);
+  const itemStop = timeMs(item.suggestedStoppedAt);
   if (!Number.isFinite(itemStart) || !Number.isFinite(itemStop)) return undefined;
   const maximumAdjacentGapMs = 15 * 60_000;
   return candidates
     .flatMap((candidate) => {
       if (candidate.id === item.id || !hasV2Evidence(candidate) || candidate.eventType === "commute_detected") return [];
-      const candidateStart = Date.parse(String(candidate.suggestedStartedAt ?? ""));
-      const candidateStop = Date.parse(String(candidate.suggestedStoppedAt ?? ""));
+      const candidateStart = timeMs(candidate.suggestedStartedAt);
+      const candidateStop = timeMs(candidate.suggestedStoppedAt);
       if (!Number.isFinite(candidateStart) || !Number.isFinite(candidateStop)) return [];
       const gap = Math.min(Math.abs(candidateStart - itemStop), Math.abs(itemStart - candidateStop));
       return gap <= maximumAdjacentGapMs ? [{ id: candidate.id, gap }] : [];

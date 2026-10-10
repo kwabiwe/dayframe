@@ -267,6 +267,62 @@ describe("Review review-round fixes", () => {
   });
 });
 
+describe("Review round-2 fixes", () => {
+  it("lets neither Enter in Log as nor Shift+arrows on the chips act while the evidence editor is open", async () => {
+    const visit = { ...review(WALK, "Visit", "focus"), eventSource: "location_learning", eventType: "learned_place_visit", rawPayload: { algorithmVersion: "location-v2.0" } };
+    const { container, root } = await mount([visit, review(READ, "Reading", "admin")]);
+    const focusChip = container.querySelector<HTMLButtonElement>("[role='radio'][aria-checked='true']")!;
+    await act(async () => {
+      focusChip.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowRight", shiftKey: true, bubbles: true, cancelable: true }));
+    });
+    expect(container.querySelector("[role='radio'][aria-checked='true']")?.textContent).toBe("Focus");
+    const edit = [...container.querySelectorAll<HTMLButtonElement>(".df-ractions button")].find((button) => button.textContent === "Edit before logging")!;
+    await act(async () => edit.click());
+    const input = container.querySelector<HTMLInputElement>("#df-logas-name")!;
+    expect(input.readOnly).toBe(true);
+    await act(async () => {
+      input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }));
+    });
+    expect(title(container)).toBe("Visit");
+    expect(container.querySelector(".df-toast")).toBeNull();
+    expect(container.querySelector(".df-revidence")).not.toBeNull();
+    await act(async () => root.unmount());
+  });
+
+  it("hands focus from an expiring Undo to the card", async () => {
+    const { container, root } = await mount();
+    await key("y");
+    const undoButton = container.querySelector<HTMLButtonElement>(".df-toast-action")!;
+    undoButton.focus();
+    await act(async () => vi.advanceTimersByTimeAsync(5_000));
+    expect(document.activeElement?.textContent).toContain("Log it");
+    expect(title(container)).toBe("Reading");
+    await act(async () => root.unmount());
+  });
+
+  it("does not celebrate again when a refilled queue empties without this visit", async () => {
+    vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout", "setInterval", "clearInterval"] });
+    vi.setSystemTime(NOW);
+    const container = document.createElement("div");
+    document.body.append(container);
+    const root = createRoot(container);
+    const render = (items: ReviewItemRow[]) => act(async () => root.render(
+      <AppShellRuntimeProvider>
+        <ReviewDeck initialData={bootstrap(items)} />
+      </AppShellRuntimeProvider>
+    ));
+    await render([review(WALK, "Morning walk", "focus")]);
+    await key("y");
+    expect(container.querySelector(".df-done.is-celebrating")).not.toBeNull();
+    await render([review(WALK, "Morning walk", "focus"), review(READ, "Reading", "admin")]);
+    expect(title(container)).toBe("Reading");
+    await render([review(WALK, "Morning walk", "focus")]);
+    expect(container.querySelector(".df-done")).not.toBeNull();
+    expect(container.querySelector(".df-done.is-celebrating")).toBeNull();
+    await act(async () => root.unmount());
+  });
+});
+
 function review(id: string, title: string, categoryId: string): ReviewItemRow {
   return {
     id,
