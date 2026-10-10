@@ -59,8 +59,12 @@ function installEditorGeometry() {
   });
 }
 
-function renderCalendar(entries: TimeEntryRow[], reviewItems: ReviewItemRow[] = []) {
-  return render(createElement(CalendarReview, {
+function renderCalendar(entries: TimeEntryRow[], reviewItems: ReviewItemRow[] = [], day = new Date(2026, 7, 2, 12, 0, 0, 0)) {
+  return render(calendarElement(entries, reviewItems, day));
+}
+
+function calendarElement(entries: TimeEntryRow[], reviewItems: ReviewItemRow[], day: Date) {
+  return createElement(CalendarReview, {
     calendarHoursMode: "fullDay",
     capturedNow: new Date(2026, 7, 2, 12, 0),
     categories: [],
@@ -72,8 +76,8 @@ function renderCalendar(entries: TimeEntryRow[], reviewItems: ReviewItemRow[] = 
     reviewItems,
     scrollContainerRef: vi.fn(),
     tags: [],
-    visibleDays: [new Date(2026, 7, 2, 12, 0, 0, 0)]
-  }));
+    visibleDays: [day]
+  });
 }
 
 describe("Calendar in Blocks", () => {
@@ -158,6 +162,36 @@ describe("Calendar in Blocks", () => {
     const click = new MouseEvent("click", { bubbles: true, cancelable: true, detail: 0 });
     link.dispatchEvent(click);
     expect(click.defaultPrevented).toBe(true);
+  });
+
+  it("lets Enter open Review again once a period change has hidden the editor", async () => {
+    installEditorGeometry();
+    const entries = [
+      entry({ id: "a", categoryId: "focus", categoryName: "Focus", categoryColor: "mint", startedAt: local(9), stoppedAt: local(10) }),
+      entry({ id: "n", startedAt: new Date(2026, 7, 1, 9).toISOString(), stoppedAt: new Date(2026, 7, 1, 10).toISOString() })
+    ];
+    const reviews = [
+      review({ id: "r1", title: "Gym visit", suggestedStartedAt: local(7), suggestedStoppedAt: local(8) }),
+      review({ id: "r2", title: "Walk", suggestedStartedAt: new Date(2026, 7, 1, 7).toISOString(), suggestedStoppedAt: new Date(2026, 7, 1, 8).toISOString() })
+    ];
+    const view = renderCalendar(entries, reviews);
+    await act(async () => {
+      document.querySelector<HTMLButtonElement>('[data-entry-id="a"] .calendar-entry-primary')!.click();
+    });
+    view.rerender(calendarElement(entries, reviews, new Date(2026, 7, 1, 12, 0, 0, 0)));
+    const link = document.querySelector<HTMLAnchorElement>(".calendar-review-block")!;
+    expect(link.getAttribute("tabindex")).toBeNull();
+    const click = new MouseEvent("click", { bubbles: true, cancelable: true, detail: 0 });
+    // Note whether Calendar cancelled it, then stop jsdom's own navigation.
+    let cancelledByCalendar: boolean | null = null;
+    const record = (event: MouseEvent) => {
+      cancelledByCalendar = event.defaultPrevented;
+      event.preventDefault();
+    };
+    window.addEventListener("click", record);
+    link.dispatchEvent(click);
+    window.removeEventListener("click", record);
+    expect(cancelledByCalendar).toBe(false);
   });
 
   it("labels each day heading with its full date and its logged total", () => {

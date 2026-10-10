@@ -1212,7 +1212,7 @@ export function CalendarReview({
                       // While an editor is open its draft owns the page: a keyboard activation
                       // (no pointer to consume) never leaves for Review either.
                       if (
-                        (event.detail === 0 && selectedTargetRef.current) ||
+                        (event.detail === 0 && visibleSelectedTarget) ||
                         pressConsumedByEditorRef.current ||
                         (pointer && calendarPointerMatchesConsumed(consumedPointerRef.current, pointer))
                       ) {
