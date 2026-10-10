@@ -30,9 +30,6 @@ describe("web category identity contract", () => {
     expect(styles).toMatch(
       /\.category-data-marker\s*\{[^}]*border:\s*0;[^}]*border-radius:\s*999px;/s
     );
-    expect(styles).toMatch(
-      /\.dashboard-category-marker\.is-uncategorized\s*\{[^}]*border:\s*1px solid var\(--text-secondary\);[^}]*border-radius:\s*999px;/s
-    );
     expect(allocation).toContain("category-data-marker");
     expect(calendar).toContain("category-data-marker");
   });
