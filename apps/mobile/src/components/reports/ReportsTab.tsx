@@ -22,6 +22,15 @@ import Animated, {
   LinearTransition,
 } from "react-native-reanimated";
 import { CalendarGlyph } from "@/components/calendar/DatePickerCalendar";
+import { compactDuration } from "../today/todayBlocksLayout";
+import { playHaptic } from "@/lib/haptics";
+import { MOBILE_DISPLAY_FONT } from "../../lib/mobileTypography";
+import {
+  formatReportDelta,
+  previousReportWindow,
+  reportHeroPeriod,
+  weekGoalDays,
+} from "../../lib/reportsBlocks";
 import { REPORT_TEXT_CAP, reportNumericColumns } from "@/lib/reportsTypography";
 import { paletteColorFor, type ReportSummary } from "@dayframe/shared";
 import { DonutChart } from "@/components/charts/DonutChart";
@@ -41,6 +50,7 @@ import {
   type ReportRangeChoice,
 } from "@/lib/reportsRanges";
 import {
+  reportSelectionIncludes,
   applyReportFilterDraft,
   openReportFilterDraft,
   refreshReportFilterDraft,
@@ -51,6 +61,14 @@ import { fetchReportSummary, ReportRangeCache } from "@/lib/reportsClient";
 import { subscribeAuthenticatedSession } from "@/lib/secure-session";
 import { ReportActivityChart } from "./ReportActivityChart";
 import { ReportDateSheet, ReportFiltersSheet } from "./ReportSheets";
+import {
+  ReportGoalStreak,
+  ReportHero,
+  ReportMonthGrid,
+  ReportRangeSwitch,
+  ReportWeekColumns,
+  type ReportDayStack,
+} from "./ReportsBlocks";
 import { ReportsSheetPortalContext } from "./ReportsSheetPortal";
 import { useReportTextMeasure } from "./ReportTextMeasure";
 
@@ -66,18 +84,21 @@ type DatePresentation = {
 
 export function ReportsTab({
   data,
+  initialChoice = "week",
   isFocused,
   nowMs,
   styles,
   theme,
 }: {
   data: MobileBootstrap;
+  /** Week, as in the prototype; tests start other ranges directly. */
+  initialChoice?: ReportRangeChoice;
   isFocused: boolean;
   nowMs: number;
   styles: MobileStyles;
   theme: MobileTheme;
 }) {
-  const [choice, setChoice] = useState<ReportRangeChoice>("today");
+  const [choice, setChoice] = useState<ReportRangeChoice>(initialChoice);
   const sheetPortal = useContext(ReportsSheetPortalContext);
   const onSheetPortalChange = sheetPortal?.present;
   const [selection, setSelection] = useState<ReportCategorySelection>({
@@ -95,6 +116,12 @@ export function ReportsTab({
     summary: ReportSummary;
   } | null>(null);
   const [failedKey, setFailedKey] = useState<string | null>(null);
+  const [previousLoaded, setPreviousLoaded] = useState<{
+    key: string;
+    summary: ReportSummary;
+  } | null>(null);
+  const [focusedDayKey, setFocusedDayKey] = useState<string | null>(null);
+  const blocksAnimated = useRef(false);
   const [reload, setReload] = useState(0);
   const [tooltipOutsidePress, setTooltipOutsidePress] = useState(0);
   const [contentWidth, setContentWidth] = useState(256);
@@ -118,6 +145,14 @@ export function ReportsTab({
   const day = formatLocalDateKey(new Date(nowMs));
   const range = useMemo(() => buildReportRange(choice, nowMs), [choice, day]);
   const requestKey = JSON.stringify(range.request);
+  // The same stretch of the previous period, for the hero's change pill (none for custom ranges).
+  const previous = useMemo(
+    () => previousReportWindow(choice, range, nowMs),
+    // The window moves in five-minute steps, so its key changes rarely.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [choice, range, Math.floor(nowMs / 300_000)],
+  );
+  const previousKey = previous ? JSON.stringify(previous.request) : null;
   const summary =
     loaded?.key === requestKey ? loaded.summary : cache.current.get(requestKey);
   // A cached running contribution can still need replacement after an optimistic Stop.
@@ -149,6 +184,8 @@ export function ReportsTab({
         activeFilterPresentation.current = null;
         activeDatePresentation.current = null;
         setLoaded(null);
+        setPreviousLoaded(null);
+        setFocusedDayKey(null);
         setSelection({ mode: "all" });
         setFilterPresentation(null);
         setDatePresentation(null);
@@ -212,6 +249,33 @@ export function ReportsTab({
       refreshRequest.current?.();
     }
   }, [data, reload]);
+  useEffect(() => {
+    if (!isFocused || !foreground || !previous || !previousKey) return;
+    const cached = cache.current.get(previousKey);
+    if (cached) {
+      setPreviousLoaded({ key: previousKey, summary: cached });
+      return;
+    }
+    const current = generation.current;
+    const controller = new AbortController();
+    // Best effort: a failed comparison read only hides the pill.
+    fetchReportSummary(
+      previous.request,
+      { userId: data.user.id, workspaceId: data.workspace.id },
+      controller.signal,
+    )
+      .then((result) => {
+        if (controller.signal.aborted || current !== generation.current) return;
+        cache.current.put(previousKey, result);
+        setPreviousLoaded({ key: previousKey, summary: result });
+      })
+      .catch(() => undefined);
+    return () => controller.abort();
+  }, [previousKey, data.user.id, data.workspace.id, isFocused, foreground]);
+  // A new range or filter shows the whole range again.
+  useEffect(() => {
+    setFocusedDayKey(null);
+  }, [requestKey, selection]);
   useEffect(() => {
     if (!isFocused) {
       activeFilterPresentation.current = null;
@@ -428,53 +492,92 @@ export function ReportsTab({
         ? selection.keys.length
         : null;
   const rangeDisplayTitle = reportRangeDisplayTitle(range, choice);
+  const todayKey = formatLocalDateKey(new Date(nowMs));
+  // Day stacks for the week columns and month grid: one per day bucket, with the selected activities.
+  const days: ReportDayStack[] =
+    report && range.bucketUnit === "day"
+      ? report.buckets.map((bucket, index) => ({
+          key: formatLocalDateKey(range.buckets[index].start),
+          start: range.buckets[index].start,
+          seconds: bucket.seconds,
+          segments: bucket.segments,
+        }))
+      : [];
+  const focusedDay = days.find((day) => day.key === focusedDayKey) ?? null;
+  const heroSeconds = focusedDay
+    ? focusedDay.seconds
+    : (report?.selectedLoggedSeconds ?? 0);
+  const previousSummary =
+    previousKey && previousLoaded?.key === previousKey
+      ? previousLoaded.summary
+      : previousKey
+        ? cache.current.get(previousKey)
+        : undefined;
+  const delta =
+    report && previous && previousSummary && selection.mode !== "none"
+      ? formatReportDelta(
+          report.selectedLoggedSeconds -
+            previousSummary.categories.reduce(
+              (sum, category) =>
+                sum +
+                (reportSelectionIncludes(selection, category.key)
+                  ? category.seconds
+                  : 0),
+              0,
+            ),
+          previous.comparison,
+        )
+      : null;
+  const dailyGoalMinutes = data.user.dailyGoalMinutes;
+  const goalDays =
+    choice === "week" && selection.mode === "all" && report
+      ? weekGoalDays(days, nowMs, dailyGoalMinutes)
+      : [];
+  const playBlocks = Boolean(report) && !blocksAnimated.current && !reduceMotion && resolved && isFocused;
+  if (playBlocks && days.some((day) => day.segments.length)) blocksAnimated.current = true;
+  const moreLabel =
+    choice === "week" || choice === "month" ? "More" : rangeDisplayTitle;
+  const openFilters = () => {
+    setTooltipOutsidePress((value) => value + 1);
+    const id = ++presentationSequence.current;
+    const presentation = {
+      id,
+      draft: openReportFilterDraft(selection, universe),
+    };
+    activeFilterPresentation.current = presentation;
+    setFilterPresentation(presentation);
+  };
+  const openRanges = () => {
+    setTooltipOutsidePress((value) => value + 1);
+    const id = ++presentationSequence.current;
+    const presentation = { id, initial: choice };
+    activeDatePresentation.current = presentation;
+    setDatePresentation(presentation);
+  };
   return (
     <View style={styles.tabScreenStack}>
       <View
         onLayout={(event) =>
           setContentWidth(Math.max(1, event.nativeEvent.layout.width - 32))
         }
-        style={[s.surface, { backgroundColor: theme.surfaceRaised }]}
+        style={s.screen}
       >
         {measuredNumbers.probe}
-        <Pressable
-          accessible={false}
-          onPress={() => setTooltipOutsidePress((value) => value + 1)}
-          testID="report-tooltip-outside-title"
-        >
-          <Text
-            testID="reports-title"
-            numberOfLines={1}
-            maxFontSizeMultiplier={REPORT_TEXT_CAP.heading}
-            style={styles.reportScreenTitle}
-          >
-            Reports
-          </Text>
-        </Pressable>
-        <View style={s.row}>
+        <View style={s.titleRow}>
           <Pressable
-            testID="reports-range-control"
-            ref={calendarRef}
-            accessibilityRole="button"
-            accessibilityLabel={`Choose report dates, ${range.title}`}
-            onPress={() => {
-              setTooltipOutsidePress((value) => value + 1);
-              const id = ++presentationSequence.current;
-              const presentation = { id, initial: choice };
-              activeDatePresentation.current = presentation;
-              setDatePresentation(presentation);
-            }}
-            style={[s.rangeAction, { backgroundColor: theme.surfaceMuted }]}
+            accessible={false}
+            onPress={() => setTooltipOutsidePress((value) => value + 1)}
+            style={s.titlePress}
+            testID="report-tooltip-outside-title"
           >
-            <CalendarGlyph kind="calendar" color={theme.textPrimary} />
             <Text
-              testID="reports-range-label"
+              accessibilityRole="header"
+              testID="reports-title"
               numberOfLines={1}
-              ellipsizeMode="tail"
-              maxFontSizeMultiplier={REPORT_TEXT_CAP.control}
-              style={[s.rangeLabel, { color: theme.textPrimary }]}
+              maxFontSizeMultiplier={REPORT_TEXT_CAP.heading}
+              style={[s.title, { color: theme.textPrimary }]}
             >
-              {rangeDisplayTitle}
+              Reports
             </Text>
           </Pressable>
           <Pressable
@@ -485,16 +588,7 @@ export function ReportsTab({
                 ? "Filter activities, all activities selected"
                 : `Filter activities, ${filterCount} ${filterCount === 1 ? "activity" : "activities"} selected`
             }
-            onPress={() => {
-              setTooltipOutsidePress((value) => value + 1);
-              const id = ++presentationSequence.current;
-              const presentation = {
-                id,
-                draft: openReportFilterDraft(selection, universe),
-              };
-              activeFilterPresentation.current = presentation;
-              setFilterPresentation(presentation);
-            }}
+            onPress={openFilters}
             style={[
               s.iconAction,
               {
@@ -502,6 +596,7 @@ export function ReportsTab({
                   filterCount !== null ? theme.accentSoft : theme.surfaceMuted,
               },
             ]}
+            testID="reports-filter-button"
           >
             <CalendarGlyph kind="funnel" color={theme.textPrimary} />
             {filterCount !== null ? (
@@ -520,6 +615,63 @@ export function ReportsTab({
             ) : null}
           </Pressable>
         </View>
+        <ReportRangeSwitch
+          choice={choice}
+          moreAccessibilityLabel={`Choose report dates, ${range.title}`}
+          moreLabel={moreLabel}
+          moreRef={calendarRef}
+          onChoose={(value) => {
+            if (value === choice) return;
+            playHaptic("tick");
+            setTooltipOutsidePress((current) => current + 1);
+            setChoice(value);
+          }}
+          onMore={openRanges}
+          reduceMotion={reduceMotion}
+          theme={theme}
+        />
+        {report ? (
+          <ReportHero
+            delta={delta}
+            focusLabel={
+              focusedDay
+                ? focusedDay.start.toLocaleDateString(undefined, {
+                    weekday: "long",
+                    day: "numeric",
+                    month: "long",
+                  })
+                : null
+            }
+            period={reportHeroPeriod(choice, range)}
+            spokenTotal={spokenReportDuration(heroSeconds)}
+            theme={theme}
+            total={compactDuration(heroSeconds)}
+          />
+        ) : null}
+        {report && choice === "week" && days.length === 7 ? (
+          <ReportWeekColumns
+            animate={playBlocks}
+            days={days}
+            focusedKey={focusedDay?.key ?? null}
+            onFocus={(key) => {
+              playHaptic("tick");
+              setFocusedDayKey(key);
+            }}
+            theme={theme}
+            todayKey={todayKey}
+          />
+        ) : null}
+        {report && choice === "month" && days.length ? (
+          <ReportMonthGrid days={days} theme={theme} todayKey={todayKey} />
+        ) : null}
+        {goalDays.length && dailyGoalMinutes ? (
+          <ReportGoalStreak
+            days={goalDays}
+            goalLabel={compactDuration(dailyGoalMinutes * 60)}
+            reduceMotion={reduceMotion}
+            theme={theme}
+          />
+        ) : null}
         {!report ? (
           <View style={s.unavailable}>
             <Text
@@ -544,7 +696,7 @@ export function ReportsTab({
           <Pressable
             accessible={false}
             onPress={() => setTooltipOutsidePress((value) => value + 1)}
-            style={s.outsideDismissSurface}
+            style={[s.outsideDismissSurface, { backgroundColor: theme.surface }]}
             testID="report-tooltip-outside-summary"
           >
             {failedKey === requestKey ? (
@@ -657,7 +809,7 @@ export function ReportsTab({
             ) : null}
           </Pressable>
         )}
-        {report ? (
+        {report && choice !== "week" && choice !== "month" ? (
           <ReportActivityChart
             buckets={report.buckets}
             axisLayout={range.axisLayout}
@@ -673,8 +825,11 @@ export function ReportsTab({
   );
 }
 const s = StyleSheet.create({
-  surface: { padding: 16, borderRadius: 20, gap: 12 },
-  outsideDismissSurface: { gap: 12 },
+  screen: { gap: 14 },
+  titleRow: { flexDirection: "row", alignItems: "center", gap: 12 },
+  titlePress: { flex: 1, minWidth: 0 },
+  title: { fontFamily: MOBILE_DISPLAY_FONT.bold, fontSize: 30, lineHeight: 36 },
+  outsideDismissSurface: { gap: 12, borderRadius: 22, padding: 16 },
   row: { flexDirection: "row", alignItems: "center", gap: 8 },
   rangeAction: {
     flex: 1,

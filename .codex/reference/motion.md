@@ -290,6 +290,13 @@ Block pull-to-refresh:
 - Accessibility: the menu rows sit under a "Review all" header with hints; the menu never grows past the screen (its actions scroll and a Cancel row stays visible); counting, the batch, Undo ("N moments are back") and any unsaved moments are announced. Reduce Motion keeps the same opacity-only presence fades.
 
 
+## Reports top (Blocks parity step 10a)
+
+- Trigger: Week / Month / More, tapping a week column, Apply in the filter or date sheet, data arriving.
+- Owner: `ReportRangeSwitch` owns its thumb (one shared value pair, `BLOCKS_SPRING.control`; the first measurement places it without movement). The week columns' blocks grow from the bottom with `BLOCKS_SPRING.land`, 14 ms apart, once per mount when the first week with data appears (`growEntering`); later data, focus and range changes repaint in place. Focusing a day changes the hero text and the other columns' opacity at once. The goal streak enters with the shared presence fade. The donut keeps its existing entrance. Week/Month and day taps play the `tick` haptic.
+- Interruption: changing range or filter during a focus clears the focus; a late previous-period read for an old range is ignored (keyed by its exact request).
+- Accessibility: Reduce Motion places the thumb without a spring and shows the columns without the grow; the hero is one live-region element ("19 hours 47 minutes framed this week. 19 hours 47 minutes more than last week so far"); each column is a 44-point button with its day and total, selected while focused.
+
 ## Calendar (Blocks parity step 9)
 
 - Trigger: a week-strip day, a strip swipe (week) or timeline swipe (day), the − / + zoom buttons, a pinch, Today's "Earlier this week" days.

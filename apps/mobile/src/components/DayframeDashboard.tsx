@@ -2925,14 +2925,12 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
           <Animated.View style={[styles.contentStack, enteringStyle]}>
           <View style={styles.header}>
             <DashboardBrandLockup isFocused={isFocused} styles={styles} theme={theme} />
-            <Pressable
-              accessibilityLabel="Open settings"
-              accessibilityRole="button"
-              style={pressable(styles.iconButton, styles.buttonPressed)}
+            <AccountAvatarButton
+              email={data?.user.email}
+              name={data?.user.name}
               onPress={() => router.push("/settings")}
-            >
-              <SettingsGlyph color={theme.accent} />
-            </Pressable>
+              theme={theme}
+            />
           </View>
 
           {data ? (

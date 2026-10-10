@@ -273,3 +273,61 @@ describe("Revision 2 Reports projection", () => {
     },
   );
 });
+
+describe("Blocks day stacks", () => {
+  it("gives each bucket its selected activities in the overall order, with their colours", () => {
+    const week = buildReportRange("week", now);
+    const weekSummary: ReportSummary = {
+      capturedNow: new Date(now).toISOString(),
+      range: week.request,
+      totalSeconds: 9000,
+      categories: [
+        { key: "a", categoryId: "a", name: "Work", color: "blue", seconds: 5400 },
+        { key: "b", categoryId: "b", name: "Gym", color: "red", seconds: 3600 },
+      ],
+      buckets: week.buckets.map((b, index) => ({
+        key: b.key,
+        seconds: index === 0 ? 5400 : index === 1 ? 3600 : 0,
+        byCategory:
+          index === 0
+            ? [
+                { key: "b", seconds: 1800 },
+                { key: "a", seconds: 3600 },
+              ]
+            : index === 1
+              ? [
+                  { key: "a", seconds: 1800 },
+                  { key: "b", seconds: 1800 },
+                ]
+              : [],
+      })),
+      active: null,
+    };
+    const all = buildReportsPresentation({
+      data: data(),
+      summary: weekSummary,
+      range: week,
+      nowMs: now,
+      selection: { mode: "all" },
+      themeMode: "dark",
+    });
+    expect(all.buckets[0].segments.map((s) => [s.key, s.seconds])).toEqual([
+      ["a", 3600],
+      ["b", 1800],
+    ]);
+    expect(all.buckets[0].segments[0].color).toBe(
+      all.allCategorySegments.find((c) => c.key === "a")!.color,
+    );
+    expect(all.buckets[2].segments).toEqual([]);
+    const gymOnly = buildReportsPresentation({
+      data: data(),
+      summary: weekSummary,
+      range: week,
+      nowMs: now,
+      selection: { mode: "include", keys: ["b"] },
+      themeMode: "dark",
+    });
+    expect(gymOnly.buckets[1].segments.map((s) => s.key)).toEqual(["b"]);
+    expect(gymOnly.buckets[1].seconds).toBe(1800);
+  });
+});
