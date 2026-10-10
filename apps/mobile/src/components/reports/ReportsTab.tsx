@@ -755,6 +755,7 @@ export function ReportsTab({
                 gap: columns.gap,
                 percent: columns.percentWidth,
               }}
+              onInteraction={() => setTooltipOutsidePress((value) => value + 1)}
               onScrubbingChange={onScrubbingChange}
               periodLabel={donutPeriodLabel}
               segments={segments.map((segment) => ({

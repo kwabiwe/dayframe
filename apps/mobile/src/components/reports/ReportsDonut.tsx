@@ -52,6 +52,7 @@ export function reportPercent(seconds: number, total: number) {
 export const ReportDonutCard = memo(function ReportDonutCard({
   empty,
   numberWidths,
+  onInteraction,
   onScrubbingChange,
   periodLabel,
   segments,
@@ -66,6 +67,8 @@ export const ReportDonutCard = memo(function ReportDonutCard({
    * refusing the JS responder alone does not stop the native iOS scroll pan.
    */
   onScrubbingChange?: (scrubbing: boolean) => void;
+  /** A touch on the ring or a row: counts as a press outside the activity chart's tooltip. */
+  onInteraction?: () => void;
   periodLabel: string;
   segments: readonly ReportDonutSegment[];
   theme: MobileTheme;
@@ -137,6 +140,7 @@ export const ReportDonutCard = memo(function ReportDonutCard({
           onAccessibilityAction={(event) => step(event.nativeEvent.actionName === "increment" ? 1 : -1)}
           onMoveShouldSetResponder={() => segments.length > 0}
           onResponderGrant={(event) => {
+            onInteraction?.();
             setScrubbing(true);
             scrub(event);
           }}
@@ -211,7 +215,10 @@ export const ReportDonutCard = memo(function ReportDonutCard({
                 accessibilityLabel={`${segment.name}, ${percent} of selected time, ${spokenDuration(segment.seconds)}`}
                 accessibilityRole="button"
                 accessibilityState={{ selected: isHot }}
-                onPress={() => choose(isHot ? null : segment.key)}
+                onPress={() => {
+                  onInteraction?.();
+                  choose(isHot ? null : segment.key);
+                }}
                 style={[
                   styles.row,
                   { gap: numberWidths.gap },
@@ -234,7 +241,8 @@ export const ReportDonutCard = memo(function ReportDonutCard({
                 <Text
                   {...mobileTextProps("numeric")}
                   numberOfLines={1}
-                  style={[styles.rowNumber, { color: theme.textSecondary, fontSize: numberWidths.fontSize - 1.5, width: numberWidths.percent }]}
+                  // Secondary text measures 4.39:1 on the highlighted (muted) row in Light; primary there.
+                  style={[styles.rowNumber, { color: isHot ? theme.textPrimary : theme.textSecondary, fontSize: numberWidths.fontSize - 1.5, width: numberWidths.percent }]}
                 >
                   {percent}
                 </Text>

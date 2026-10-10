@@ -105,11 +105,26 @@ describe("Reports donut", () => {
     expect(onScrubbingChange.mock.calls.at(-1)).toEqual([false]);
   });
 
-  it("keeps percentages in secondary text, not the muted token", () => {
+  it("keeps percentages readable: secondary text, primary on the highlighted row", () => {
     const tree = render();
-    const work = tree.root.findByProps({ testID: "reports-activity-work" });
-    const texts = work.findAllByType("Text" as never);
-    expect(texts.at(-1)!.props.style[1].color).toBe("#8993A7");
+    const percent = (key: string) =>
+      tree.root.findByProps({ testID: `reports-activity-${key}` }).findAllByType("Text" as never).at(-1)!.props.style[1].color;
+    expect(percent("work")).toBe("#8993A7");
+    act(() => tree.root.findByProps({ testID: "reports-activity-work" }).props.onPress());
+    expect(percent("work")).toBe("#F7F8FB");
+    expect(percent("gym")).toBe("#8993A7");
+  });
+
+  it("counts a ring touch or a row tap as a press outside the activity chart's tooltip", () => {
+    const onInteraction = vi.fn();
+    let tree!: ReturnType<typeof create>;
+    act(() => {
+      tree = create(<ReportDonutCard empty={null} numberWidths={widths} onInteraction={onInteraction} periodLabel="Today" segments={segments} theme={theme} totalSeconds={4 * 3600} />);
+    });
+    act(() => tree.root.findByProps({ testID: "reports-donut" }).props.onResponderGrant(touch(168, 84)));
+    act(() => tree.root.findByProps({ testID: "reports-donut" }).props.onResponderRelease());
+    act(() => tree.root.findByProps({ testID: "reports-activity-gym" }).props.onPress());
+    expect(onInteraction).toHaveBeenCalledTimes(2);
   });
 
   it("drops a highlight whose activity leaves the range or filter", () => {

@@ -343,6 +343,9 @@ describe("Revision 3 Reports owner", () => {
     expect(activity().props.outsidePressDismissal).toBe(
       initialOutsidePress + 1,
     );
+    // A ring touch or row tap in the donut card dismisses the tooltip too.
+    act(() => tree.root.findByType("ReportDonutCard" as never).props.onInteraction());
+    expect(activity().props.outsidePressDismissal).toBe(initialOutsidePress + 2);
     const initialContext = activity().props.semanticContextKey;
     await act(async () =>
       tree.root
