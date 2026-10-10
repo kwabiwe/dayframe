@@ -362,9 +362,9 @@ describe("Review round-4 fixes", () => {
     const container = document.createElement("div");
     document.body.append(container);
     const root = createRoot(container);
-    const render = (next: ReviewItemRow[]) => act(async () => root.render(
+    const render = (next: ReviewItemRow[], reviewCount = next.length) => act(async () => root.render(
       <AppShellRuntimeProvider>
-        <ReviewDeck initialData={bootstrap(next)} />
+        <ReviewDeck initialData={bootstrap(next, reviewCount)} />
       </AppShellRuntimeProvider>
     ));
     await render(items);
@@ -383,6 +383,29 @@ describe("Review round-4 fixes", () => {
     });
     expect(title(container)).toBe("Reading");
     expect(queue(container)).toEqual(["Reading"]);
+    await act(async () => root.unmount());
+  });
+
+  it("decides once for a held Enter on Log it or Skip", async () => {
+    const { container, root } = await mount();
+    const logIt = container.querySelector<HTMLButtonElement>(".df-ractions button")!;
+    const held = new KeyboardEvent("keydown", { key: "Enter", repeat: true, bubbles: true, cancelable: true });
+    logIt.dispatchEvent(held);
+    expect(held.defaultPrevented).toBe(true);
+    const first = new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true });
+    logIt.dispatchEvent(first);
+    expect(first.defaultPrevented).toBe(false);
+    await act(async () => root.unmount());
+  });
+
+  it("counts a kept card once in the moments line", async () => {
+    const visit = { ...review(WALK, "Visit", "focus"), eventSource: "location_learning", eventType: "learned_place_visit", rawPayload: { algorithmVersion: "location-v2.0" } };
+    const { container, root, render } = await controllable([visit, review(READ, "Reading", "admin")]);
+    const edit = [...container.querySelectorAll<HTMLButtonElement>(".df-ractions button")].find((button) => button.textContent === "Edit before logging")!;
+    await act(async () => edit.click());
+    // The newest page no longer lists the visit, but the server still counts it (2 open).
+    await render([review(READ, "Reading", "admin")], 2);
+    expect(container.querySelector(".df-review-head p")?.textContent).toMatch(/^2 moments/);
     await act(async () => root.unmount());
   });
 
@@ -434,7 +457,7 @@ function review(id: string, title: string, categoryId: string): ReviewItemRow {
   };
 }
 
-function bootstrap(reviewItems: ReviewItemRow[]): BootstrapData {
+function bootstrap(reviewItems: ReviewItemRow[], reviewCount = reviewItems.length): BootstrapData {
   return {
     activeEntry: null,
     user: { id: "user", email: "user@example.test", name: "Test User", dailyGoalMinutes: 480, weeklyGoalMinutes: 2400 },
@@ -448,7 +471,7 @@ function bootstrap(reviewItems: ReviewItemRow[]): BootstrapData {
     tags: [],
     taskSuggestions: [],
     reviewItems,
-    stats: { todaySeconds: 0, weekSeconds: 0, todayCoveredSeconds: 0, weekCoveredSeconds: 0, todayAdditionalOverlapSeconds: 0, weekAdditionalOverlapSeconds: 0, reviewCount: reviewItems.length },
+    stats: { todaySeconds: 0, weekSeconds: 0, todayCoveredSeconds: 0, weekCoveredSeconds: 0, todayAdditionalOverlapSeconds: 0, weekAdditionalOverlapSeconds: 0, reviewCount },
     activityEvents: [],
     entries: [],
     historyEntries: [],

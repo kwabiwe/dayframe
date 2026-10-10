@@ -329,7 +329,8 @@ export function ReviewDeck({ initialData }: { initialData: BootstrapData }) {
   }
 
   // Moments past the newest 100 the page loaded: the queue refills from them after a refresh.
-  const beyondLoaded = Math.max(0, data.stats.reviewCount - openItems.length);
+  // Cards the deck keeps itself are among the unloaded remainder already: never count them twice.
+  const beyondLoaded = Math.max(0, data.stats.reviewCount - openItems.length - (deckItems.length - openItems.length));
   const total = visible.length + beyondLoaded;
   const toast = state.notice ? (
     <BlocksToast
@@ -438,12 +439,12 @@ export function ReviewDeck({ initialData }: { initialData: BootstrapData }) {
               </div>
             ) : null}
             <div className="df-ractions">
-              <button className="df-rbtn df-rbtn--live" disabled={!span || evidenceOpen} onClick={() => decideCurrent("log")} type="button">
+              <button className="df-rbtn df-rbtn--live" disabled={!span || evidenceOpen} onClick={() => decideCurrent("log")} onKeyDown={ignoreRepeatedActivation} type="button">
                 <Check size={16} aria-hidden="true" />
                 Log it
                 <span className="df-kbd" aria-hidden="true">Y</span>
               </button>
-              <button className="df-rbtn" disabled={evidenceOpen} onClick={() => decideCurrent("skip")} type="button">
+              <button className="df-rbtn" disabled={evidenceOpen} onClick={() => decideCurrent("skip")} onKeyDown={ignoreRepeatedActivation} type="button">
                 <X size={16} aria-hidden="true" />
                 Skip
                 <span className="df-kbd" aria-hidden="true">N</span>
@@ -497,6 +498,11 @@ export function ReviewDeck({ initialData }: { initialData: BootstrapData }) {
       {toast}
     </div>
   );
+}
+
+/** A held Enter on Log it / Skip decides once: the button stays focused as the next card arrives. */
+function ignoreRepeatedActivation(event: ReactKeyboardEvent<HTMLButtonElement>) {
+  if (event.repeat && (event.key === "Enter" || event.key === " ")) event.preventDefault();
 }
 
 function ReviewHead({ count }: { count: number | null }) {
