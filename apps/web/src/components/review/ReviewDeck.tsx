@@ -246,10 +246,34 @@ export function ReviewDeck({ initialData }: { initialData: BootstrapData }) {
     if (!prefersReducedMotion()) setGhost({ key: ++enterSequence.current, item, draft, dir });
   }, [categories, decide, drafts, evidenceOpenId, revived, visibleIds]);
 
+  // The editor saved its card: the copy the deck kept of that card is stale and retires (fresh
+  // data decides now). A late save from an earlier opening never touches the editor open now: if
+  // that editor is on the same card, the card retires when it closes instead.
+  const retireOnCloseRef = useRef(new Set<string>());
+  const retireRevived = useCallback((itemId: string) => {
+    setRevived((current) => {
+      if (!current.has(itemId)) return current;
+      const next = new Map(current);
+      next.delete(itemId);
+      return next;
+    });
+  }, []);
+  const resolveEvidence = useCallback((itemId: string, session: number) => {
+    const current = editorSessionRef.current === session;
+    if (current) setEditorSnapshot((snapshot) => (snapshot?.id === itemId ? null : snapshot));
+    if (!current && evidenceOpenRef.current === itemId) {
+      retireOnCloseRef.current.add(itemId);
+      return;
+    }
+    retireRevived(itemId);
+  }, [retireRevived]);
+
   // An editor's close is fenced to the opening it belongs to. Focus inside the closing editor
   // moves to the card.
   const closeEvidence = useCallback((session: number) => {
     if (editorSessionRef.current !== session || evidenceOpenRef.current === null) return;
+    const closingId = evidenceOpenRef.current;
+    if (retireOnCloseRef.current.delete(closingId)) retireRevived(closingId);
     const active = document.activeElement;
     const focusInEditor = !active || active === document.body || Boolean(active.closest(".df-revidence"));
     setEvidenceOpenId(null);
@@ -259,7 +283,7 @@ export function ReviewDeck({ initialData }: { initialData: BootstrapData }) {
       if (now && now !== document.body && now.isConnected) return;
       cardRef.current?.querySelector<HTMLElement>(".df-ractions button:not(:disabled)")?.focus();
     });
-  }, []);
+  }, [retireRevived]);
 
   // Y / N / E / ↑ ↓ (prototype keys). Window capture runs before the shell's own keys (N focuses
   // the command bar elsewhere), so the deck owns them while a card is showing.
@@ -519,22 +543,12 @@ export function ReviewDeck({ initialData }: { initialData: BootstrapData }) {
                   adjacentReviewItemId={adjacentV2StayReviewId(selected, visible)}
                   categories={categories}
                   entries={entries}
-                  initialCategoryId={selected.suggestedCategoryId}
+                  // The editor starts from the card's "Log as" choices.
+                  initialCategoryId={draft?.categoryId !== undefined ? draft.categoryId : selected.suggestedCategoryId}
+                  initialDescription={draft?.name?.trim() || undefined}
                   key={editorSession}
                   onClose={() => closeEvidence(editorSession)}
-                  onResolved={() => {
-                    // The editor saved: a copy the deck kept is stale; fresh data decides now.
-                    // A late save from an earlier opening leaves the current one alone.
-                    if (editorSessionRef.current !== editorSession) return;
-                    const resolvedId = selected.id;
-                    setEditorSnapshot((current) => (current?.id === resolvedId ? null : current));
-                    setRevived((current) => {
-                      if (!current.has(resolvedId)) return current;
-                      const next = new Map(current);
-                      next.delete(resolvedId);
-                      return next;
-                    });
-                  }}
+                  onResolved={() => resolveEvidence(selected.id, editorSession)}
                   reviewItemId={selected.id}
                 />
               </div>

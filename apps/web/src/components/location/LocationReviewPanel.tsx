@@ -30,6 +30,7 @@ export function LocationReviewPanel({
   categories,
   entries,
   initialCategoryId,
+  initialDescription,
   onClose,
   onResolved
 }: {
@@ -38,6 +39,8 @@ export function LocationReviewPanel({
   categories: CategoryRow[];
   entries: TimeEntryRow[];
   initialCategoryId: string | null;
+  /** A name chosen before opening (Review's "Log as"); otherwise the evidence title. */
+  initialDescription?: string;
   onClose: () => void;
   /** A saved action (confirm, split, merge…): the suggestion as shown is no longer current. */
   onResolved?: () => void;
@@ -69,7 +72,7 @@ export function LocationReviewPanel({
       .then((next) => {
         if (cancelled) return;
         setEvidence(next);
-        setDescription(next.display.title);
+        setDescription(initialDescription ?? next.display.title);
         setStartedAt(toLocalDateTimeInput(next.segment.startedAt));
         setStoppedAt(next.segment.stoppedAt ? toLocalDateTimeInput(next.segment.stoppedAt) : "");
         if (next.map.centre) {
@@ -82,7 +85,7 @@ export function LocationReviewPanel({
         }
       });
     return () => { cancelled = true; };
-  }, [loadAttempt, reviewItemId]);
+  }, [initialDescription, loadAttempt, reviewItemId]);
 
   async function act(action: LocationReviewAction) {
     setError(null);

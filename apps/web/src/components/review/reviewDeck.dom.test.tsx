@@ -14,8 +14,13 @@ vi.mock("next/navigation", () => ({
 // "Stub hold" keeps the callbacks, like a save still in flight, for the test to finish later.
 const heldEditorCallbacks: Array<{ onClose: () => void; onResolved?: () => void }> = [];
 vi.mock("@/components/location/LocationReviewPanel", () => ({
-  LocationReviewPanel: ({ onClose, onResolved }: { onClose: () => void; onResolved?: () => void }) => (
-    <div>
+  LocationReviewPanel: ({ initialCategoryId, initialDescription, onClose, onResolved }: {
+    initialCategoryId: string | null;
+    initialDescription?: string;
+    onClose: () => void;
+    onResolved?: () => void;
+  }) => (
+    <div data-category={initialCategoryId ?? ""} data-description={initialDescription ?? ""} data-testid="stub-editor">
       <button type="button" onClick={() => { onResolved?.(); onClose(); }}>Stub confirm</button>
       <button type="button" onClick={onClose}>Stub close</button>
       <button type="button" onClick={() => heldEditorCallbacks.push({ onClose, onResolved })}>Stub hold</button>
@@ -508,6 +513,48 @@ describe("Review round-4 fixes", () => {
       heldEditorCallbacks[0].onClose();
     });
     expect(container.querySelector(".df-revidence")).not.toBeNull();
+  });
+
+  it("retires a revived card whose late editor save lands while another card's editor is open", async () => {
+    const visitA = { ...review(WALK, "Visit A", "focus"), eventSource: "location_learning", eventType: "learned_place_visit", rawPayload: { algorithmVersion: "location-v2.0" } };
+    const visitB = { ...review(READ, "Visit B", "admin"), eventSource: "location_learning", eventType: "learned_place_visit", rawPayload: { algorithmVersion: "location-v2.0" } };
+    const { container, render } = await controllable([visitA, visitB]);
+    const button = (label: string) => [...container.querySelectorAll<HTMLButtonElement>("button")].find((candidate) => candidate.textContent === label)!;
+    await key("y");
+    await render([visitB]);
+    await act(async () => container.querySelector<HTMLButtonElement>(".df-toast-action")!.click());
+    expect(queue(container)).toEqual(["Visit B", "Visit A"]);
+    expect(title(container)).toBe("Visit A");
+    heldEditorCallbacks.length = 0;
+    await act(async () => button("Edit before logging").click());
+    await act(async () => button("Stub hold").click());
+    await act(async () => container.querySelectorAll<HTMLButtonElement>(".df-qrow")[0].click());
+    await act(async () => button("Edit before logging").click());
+    await act(async () => {
+      heldEditorCallbacks[0].onResolved?.();
+      heldEditorCallbacks[0].onClose();
+    });
+    expect(queue(container)).toEqual(["Visit B"]);
+    expect(title(container)).toBe("Visit B");
+    expect(container.querySelector(".df-revidence")).not.toBeNull();
+  });
+
+  it("opens the evidence editor from the card's Log as name and activity", async () => {
+    const visit = { ...review(WALK, "Visit", "focus"), eventSource: "location_learning", eventType: "learned_place_visit", rawPayload: { algorithmVersion: "location-v2.0" } };
+    const { container } = await mount([visit]);
+    const input = container.querySelector<HTMLInputElement>("#df-logas-name")!;
+    await act(async () => {
+      const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!;
+      setter.call(input, "Library");
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    const admin = [...container.querySelectorAll<HTMLButtonElement>("[role='radio']")].find((chip) => chip.textContent === "Admin")!;
+    await act(async () => admin.click());
+    const edit = [...container.querySelectorAll<HTMLButtonElement>("button")].find((candidate) => candidate.textContent === "Edit before logging")!;
+    await act(async () => edit.click());
+    const editor = container.querySelector<HTMLElement>("[data-testid='stub-editor']")!;
+    expect(editor.dataset.description).toBe("Library");
+    expect(editor.dataset.category).toBe("admin");
   });
 
   it("moves focus to the empty state when confirming the last card's evidence empties the queue", async () => {
