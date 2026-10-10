@@ -70,7 +70,26 @@ export function ReviewDeck({ initialData }: { initialData: BootstrapData }) {
   );
 
   const { state, decide, undo, clearError } = useReviewDecisions(openItems, refresh);
-  const visible = useMemo(() => openItems.filter((item) => !state.hiddenIds.has(item.id)), [openItems, state.hiddenIds]);
+  // Cards the deck keeps although the loaded data (the newest 100) no longer lists them: the card
+  // whose evidence editor is open, and a card Undo or a failed save brought back (iPhone keeps the
+  // copy the deck showed the same way).
+  const [editorSnapshot, setEditorSnapshot] = useState<ReviewItemRow | null>(null);
+  const [revived, setRevived] = useState<ReadonlyMap<string, ReviewItemRow>>(() => new Map());
+  const decidedSnapshots = useRef(new Map<string, ReviewItemRow>());
+  const [evidenceOpenId, setEvidenceOpenId] = useState<string | null>(null);
+  const loadedIds = useMemo(() => new Set(openItems.map((item) => item.id)), [openItems]);
+  // A revived card the data lists again is the data's card from then on.
+  if ([...revived.keys()].some((id) => loadedIds.has(id))) {
+    setRevived(new Map([...revived].filter(([id]) => !loadedIds.has(id))));
+  }
+  const deckItems = useMemo(() => {
+    const extra = [...revived.values()].filter((item) => !loadedIds.has(item.id));
+    if (evidenceOpenId && editorSnapshot?.id === evidenceOpenId && !loadedIds.has(evidenceOpenId) && !revived.has(evidenceOpenId)) {
+      extra.push(editorSnapshot);
+    }
+    return extra.length ? [...openItems, ...extra] : openItems;
+  }, [editorSnapshot, evidenceOpenId, loadedIds, openItems, revived]);
+  const visible = useMemo(() => deckItems.filter((item) => !state.hiddenIds.has(item.id)), [deckItems, state.hiddenIds]);
   const visibleIds = useMemo(() => visible.map((item) => item.id), [visible]);
 
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -80,14 +99,14 @@ export function ReviewDeck({ initialData }: { initialData: BootstrapData }) {
   // "All framed" celebrates only when this visit's own decision emptied the queue.
   const [emptiedByDecision, setEmptiedByDecision] = useState(false);
   const [drafts, setDrafts] = useState<ReadonlyMap<string, ReviewLogAsDraft>>(() => new Map());
-  const [evidenceOpenId, setEvidenceOpenId] = useState<string | null>(null);
   const [ghost, setGhost] = useState<{ key: number; item: ReviewItemRow; draft?: ReviewLogAsDraft; dir: 1 | -1 } | null>(null);
   const [enter, setEnter] = useState<{ itemId: string; from: "decision" | "undo" | "select"; dir: 1 | -1; key: number } | null>(null);
   const enterSequence = useRef(0);
   const nameInputRef = useRef<HTMLInputElement | null>(null);
   const cardRef = useRef<HTMLElement | null>(null);
 
-  const selected = visible.find((item) => item.id === selectedId) ?? visible[0] ?? null;
+  // The card whose evidence editor is open stays the card, whatever the queue order becomes.
+  const selected = visible.find((item) => item.id === (evidenceOpenId ?? selectedId)) ?? visible[0] ?? null;
   // A refill (refresh, Undo) ends this visit's "emptied" state; a later empty queue is not ours.
   if (emptiedByDecision && visible.length > 0) setEmptiedByDecision(false);
   const openIdsRef = useRef<ReadonlySet<string>>(new Set());
@@ -126,7 +145,12 @@ export function ReviewDeck({ initialData }: { initialData: BootstrapData }) {
   useEffect(() => {
     if (!state.restored || state.restored.sequence === lastRestored.current) return;
     lastRestored.current = state.restored.sequence;
-    if (evidenceOpenRef.current && evidenceOpenRef.current !== state.restored.itemId) return;
+    const restoredId = state.restored.itemId;
+    const snapshot = decidedSnapshots.current.get(restoredId);
+    if (!openIdsRef.current.has(restoredId) && snapshot) {
+      setRevived((current) => new Map(current).set(restoredId, snapshot));
+    }
+    if (evidenceOpenRef.current && evidenceOpenRef.current !== restoredId) return;
     setSelectedId(state.restored.itemId);
     setMissingTargetId(null);
     setEmptiedByDecision(false);
@@ -172,6 +196,7 @@ export function ReviewDeck({ initialData }: { initialData: BootstrapData }) {
     const category = reviewCardCategory(item, draft, categories);
     const span = reviewWindow(item);
     const name = draft?.name?.trim() || reviewDefaultName(item);
+    decidedSnapshots.current.set(item.id, item);
     const held = decide({
       itemId: item.id,
       kind,
@@ -183,6 +208,13 @@ export function ReviewDeck({ initialData }: { initialData: BootstrapData }) {
       colorName: category?.name ?? ""
     });
     if (!held) return;
+    if (revived.has(item.id)) {
+      setRevived((current) => {
+        const next = new Map(current);
+        next.delete(item.id);
+        return next;
+      });
+    }
     // A decision removes the focused queue row, card action or toast: focus moves to the next
     // card's first action (or the empty state's heading) instead of falling to the page.
     const focusWasInDeck = Boolean(document.activeElement?.closest(".df-review-page, .df-toast-host"));
@@ -202,7 +234,7 @@ export function ReviewDeck({ initialData }: { initialData: BootstrapData }) {
     setEmptiedByDecision(next === null);
     if (next) setEnter({ itemId: next, from: "decision", dir, key: ++enterSequence.current });
     if (!prefersReducedMotion()) setGhost({ key: ++enterSequence.current, item, draft, dir });
-  }, [categories, decide, drafts, evidenceOpenId, visibleIds]);
+  }, [categories, decide, drafts, evidenceOpenId, revived, visibleIds]);
 
   // Y / N / E / ↑ ↓ (prototype keys). Window capture runs before the shell's own keys (N focuses
   // the command bar elsewhere), so the deck owns them while a card is showing.
@@ -435,7 +467,10 @@ export function ReviewDeck({ initialData }: { initialData: BootstrapData }) {
                 <button
                   aria-expanded={evidenceOpen}
                   className="df-rbtn df-rbtn--ghost"
-                  onClick={() => setEvidenceOpenId(evidenceOpen ? null : selected.id)}
+                  onClick={() => {
+                    setEditorSnapshot(selected);
+                    setEvidenceOpenId(evidenceOpen ? null : selected.id);
+                  }}
                   type="button"
                 >
                   <MapIcon size={15} aria-hidden="true" />
@@ -578,7 +613,7 @@ function CardFace({
               onKeyDown={(event) => {
                 const plain = !event.altKey && !event.ctrlKey && !event.metaKey && !event.shiftKey;
                 // Enter that confirms an input-method candidate is not a decision.
-                if (event.key === "Enter" && plain && !locked && !event.nativeEvent.isComposing && event.keyCode !== 229) {
+                if (event.key === "Enter" && plain && !locked && !event.repeat && !event.nativeEvent.isComposing && event.keyCode !== 229) {
                   event.preventDefault();
                   onDecide?.("log");
                 }

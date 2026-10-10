@@ -355,6 +355,61 @@ describe("Review round-3 fixes", () => {
   });
 });
 
+describe("Review round-4 fixes", () => {
+  async function controllable(items: ReviewItemRow[]) {
+    vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout", "setInterval", "clearInterval"] });
+    vi.setSystemTime(NOW);
+    const container = document.createElement("div");
+    document.body.append(container);
+    const root = createRoot(container);
+    const render = (next: ReviewItemRow[]) => act(async () => root.render(
+      <AppShellRuntimeProvider>
+        <ReviewDeck initialData={bootstrap(next)} />
+      </AppShellRuntimeProvider>
+    ));
+    await render(items);
+    return { container, root, render };
+  }
+
+  it("logs once for a held Enter", async () => {
+    const { container, root } = await mount();
+    const input = container.querySelector<HTMLInputElement>("#df-logas-name")!;
+    input.focus();
+    await act(async () => {
+      input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }));
+    });
+    await act(async () => {
+      input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", repeat: true, bubbles: true, cancelable: true }));
+    });
+    expect(title(container)).toBe("Reading");
+    expect(queue(container)).toEqual(["Reading"]);
+    await act(async () => root.unmount());
+  });
+
+  it("keeps the card whose evidence editor is open when a capped refresh no longer lists it", async () => {
+    const visit = { ...review(WALK, "Visit", "focus"), eventSource: "location_learning", eventType: "learned_place_visit", rawPayload: { algorithmVersion: "location-v2.0" } };
+    const { container, root, render } = await controllable([visit, review(READ, "Reading", "admin")]);
+    const edit = [...container.querySelectorAll<HTMLButtonElement>(".df-ractions button")].find((button) => button.textContent === "Edit before logging")!;
+    await act(async () => edit.click());
+    await render([review(READ, "Reading", "admin")]);
+    expect(title(container)).toBe("Visit");
+    expect(container.querySelector(".df-revidence")).not.toBeNull();
+    await act(async () => root.unmount());
+  });
+
+  it("brings an undone card back although a capped refresh dropped it while held", async () => {
+    const { container, root, render } = await controllable([review(WALK, "Morning walk", "focus"), review(READ, "Reading", "admin")]);
+    await key("y");
+    await render([review(READ, "Reading", "admin")]);
+    await act(async () => container.querySelector<HTMLButtonElement>(".df-toast-action")!.click());
+    expect(queue(container)).toEqual(["Reading", "Morning walk"]);
+    expect(title(container)).toBe("Morning walk");
+    await act(async () => vi.advanceTimersByTime(6_000));
+    expect(sent).toEqual([]);
+    await act(async () => root.unmount());
+  });
+});
+
 function review(id: string, title: string, categoryId: string): ReviewItemRow {
   return {
     id,
