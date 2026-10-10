@@ -5311,10 +5311,6 @@ kbd {
     grid-template-columns: 1fr;
   }
 
-  .swiss-current-timer {
-    grid-template-columns: 1fr;
-  }
-
 }
 
 @media (max-width: 760px) {
@@ -5617,10 +5613,6 @@ kbd {
 
   .swiss-day-footer button:last-child {
     justify-self: start;
-  }
-
-  .swiss-quick-actions-strip button::before {
-    inset: 2px 0;
   }
 }
 
@@ -6632,10 +6624,6 @@ kbd {
   border-bottom: 0;
 }
 
-.is-timeline .swiss-persistent-timer {
-  border-radius: var(--web-radius-group) var(--web-radius-group) 0 0;
-}
-
 .swiss-date-context-row {
   display: flex;
   min-width: 0;
@@ -6664,94 +6652,8 @@ kbd {
   box-shadow: none;
 }
 
-.swiss-current-timer {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr);
-  gap: var(--web-gap-md);
-  margin-bottom: 24px;
-  border: 0;
-  border-radius: var(--web-radius-group);
-  background: var(--surface);
-  padding: var(--web-panel-padding);
-  box-shadow: none;
-}
-
-.swiss-persistent-timer {
-  position: relative;
-  gap: var(--web-gap-md);
-  margin: 0;
-  overflow: visible;
-  padding: 16px 20px;
-}
-
-.swiss-persistent-timer-form {
-  display: grid;
-  grid-template-areas:
-    "description-label category-label . . ."
-    "description category time action secondary";
-  grid-template-columns:
-    minmax(0, 1fr)
-    minmax(160px, 220px)
-    minmax(132px, 144px)
-    var(--web-icon-button-size)
-    var(--web-icon-button-size);
-  align-items: start;
-  column-gap: var(--web-gap-md);
-  row-gap: var(--web-field-gap);
-}
-
-.swiss-timer-field-label {
-  min-width: 0;
-  color: var(--muted);
-  font-size: 13px;
-  font-weight: 500;
-  line-height: 1.35;
-}
-
-.swiss-timer-description-label {
-  grid-area: description-label;
-}
-
-.swiss-timer-category-label {
-  grid-area: category-label;
-}
-
 .swiss-timer-description-control {
   grid-area: description;
-}
-
-.swiss-timer-category-control {
-  grid-area: category;
-}
-
-.swiss-persistent-timer .swiss-work-input,
-.swiss-persistent-timer .swiss-category-field,
-.swiss-persistent-timer .swiss-category-trigger-value,
-.swiss-persistent-timer .swiss-category-trigger-value span:last-child {
-  min-width: 0;
-}
-
-.swiss-persistent-timer .swiss-manual-entry-action,
-.swiss-persistent-timer .swiss-timer-more,
-.swiss-persistent-timer .swiss-command-play {
-  width: var(--web-icon-button-size);
-  min-width: var(--web-icon-button-size);
-  height: var(--web-icon-button-size);
-  min-height: var(--web-icon-button-size);
-  margin: 0;
-  border-radius: 999px;
-  padding: 0;
-}
-
-.swiss-timer-actions {
-  grid-area: action;
-  display: flex;
-}
-
-.swiss-timer-secondary-actions {
-  grid-area: secondary;
-  position: relative;
-  display: flex;
 }
 
 .swiss-timer-actions-menu {
@@ -6784,69 +6686,6 @@ kbd {
 .swiss-timer-actions-menu button:hover,
 .swiss-timer-actions-menu button:focus-visible {
   background: var(--surface-muted);
-}
-
-.swiss-persistent-timer .swiss-command-play:not(.is-active) svg {
-  transform: translateX(1px);
-}
-
-.swiss-timer-time-control {
-  position: relative;
-  display: grid;
-  grid-area: time;
-  min-width: 0;
-}
-
-.swiss-persistent-time-button,
-.swiss-persistent-time-placeholder {
-  display: flex;
-  width: 100%;
-  min-width: 0;
-  height: var(--web-control-height);
-  min-height: var(--web-control-height);
-  flex-direction: column;
-  align-items: flex-start;
-  justify-content: center;
-  border: 0;
-  border-radius: var(--web-radius-control);
-  background: var(--surface-inset);
-  padding: 0 var(--web-control-padding-inline);
-  color: var(--foreground);
-  font-variant-numeric: tabular-nums;
-  font-weight: 650;
-  line-height: 1.05;
-  white-space: nowrap;
-}
-
-.swiss-persistent-time-button:hover {
-  background: var(--surface-muted);
-}
-
-.swiss-persistent-time-button small {
-  max-width: 100%;
-  margin-top: 3px;
-  overflow: hidden;
-  color: var(--muted);
-  font-size: 10px;
-  font-weight: 500;
-  line-height: 1;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.swiss-timer-inline-tags {
-  gap: 0;
-}
-
-.swiss-timer-inline-tags .inline-tag-help:empty {
-  display: none;
-}
-
-.swiss-timer-inline-tags .inline-tag-help:not(:empty) {
-  display: block;
-  min-width: 0;
-  padding: 5px 8px 0;
-  line-height: 16px;
 }
 
 .swiss-compact-time-editor,
@@ -6999,7 +6838,6 @@ kbd {
   color: var(--foreground);
 }
 
-.swiss-work-input,
 .swiss-category-field {
   position: relative;
   display: grid;
@@ -7498,42 +7336,6 @@ kbd {
   background: transparent;
 }
 
-.swiss-command-play {
-  display: grid;
-  width: var(--web-icon-button-size);
-  height: var(--web-icon-button-size);
-  min-width: var(--web-icon-button-size);
-  min-height: var(--web-icon-button-size);
-  place-items: center;
-  border: 0;
-  border-radius: 999px;
-  background: var(--accent);
-  padding: 0;
-  color: var(--on-accent);
-  box-shadow: none;
-}
-
-.swiss-command-play:hover {
-  background: var(--accent-hover);
-}
-
-.swiss-command-play:active {
-  background: var(--accent-pressed);
-}
-
-.swiss-command-play.is-active {
-  display: grid;
-  width: var(--web-icon-button-size);
-  min-width: var(--web-icon-button-size);
-  height: var(--web-icon-button-size);
-  min-height: var(--web-icon-button-size);
-  border: 0;
-  border-radius: 999px;
-  padding: 0;
-  box-shadow: none;
-  font-weight: 600;
-}
-
 .swiss-active-start-edit,
 .swiss-start-time-editor button,
 .swiss-note-row button,
@@ -7562,117 +7364,10 @@ kbd {
   background: color-mix(in srgb, var(--danger) 14%, var(--surface-muted));
 }
 
-.swiss-quick-actions-strip {
-  display: flex;
-  min-width: 0;
-  align-items: center;
-  gap: var(--web-gap-md);
-  border-top: 1px solid var(--line);
-  padding-top: 14px;
-}
-
-.swiss-quick-actions-strip > span {
-  flex: 0 0 auto;
-  color: var(--muted);
-}
-
-.swiss-quick-actions-strip > span,
 .swiss-panel-label {
   letter-spacing: 0;
   font-size: 13px;
   font-weight: 600;
-}
-
-.swiss-quick-actions-rail {
-  display: flex;
-  min-width: 0;
-  flex: 1 1 auto;
-  flex-wrap: nowrap;
-  gap: var(--web-gap-sm);
-  overflow-x: auto;
-  overscroll-behavior-inline: contain;
-  padding: 3px 2px 8px;
-  scrollbar-color: transparent transparent;
-  scrollbar-width: thin;
-}
-
-.swiss-quick-actions-rail:hover,
-.swiss-quick-actions-rail:focus-within {
-  scrollbar-color: var(--line-strong) var(--surface-inset);
-}
-
-.swiss-quick-actions-rail::-webkit-scrollbar {
-  height: 8px;
-}
-
-.swiss-quick-actions-rail::-webkit-scrollbar-track {
-  background: transparent;
-}
-
-.swiss-quick-actions-rail::-webkit-scrollbar-thumb {
-  border-radius: 999px;
-  background: transparent;
-}
-
-.swiss-quick-actions-rail:hover::-webkit-scrollbar-thumb,
-.swiss-quick-actions-rail:focus-within::-webkit-scrollbar-thumb {
-  background: var(--line-strong);
-}
-
-.swiss-quick-actions-strip button {
-  position: relative;
-  display: inline-flex;
-  isolation: isolate;
-  min-height: 44px;
-  flex: 0 0 auto;
-  max-width: 320px;
-  align-items: center;
-  gap: 6px;
-  border: 0;
-  border-radius: 999px;
-  background: transparent;
-  padding: 0 13px;
-  color: var(--foreground);
-  font-size: 12px;
-  font-weight: 650;
-  transform: none;
-}
-
-.swiss-quick-actions-strip button::before {
-  position: absolute;
-  inset: 4px 0;
-  z-index: -1;
-  border: 0;
-  border-radius: 999px;
-  background: var(--surface-inset);
-  box-shadow: none;
-  content: "";
-}
-
-.swiss-quick-actions-strip button:hover,
-.swiss-quick-actions-strip button:hover::before {
-  border: 0;
-  background: var(--surface-muted);
-  box-shadow: none;
-  transform: none;
-}
-
-.swiss-quick-actions-strip button > span {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.swiss-quick-actions-strip i {
-  width: 7px;
-  height: 7px;
-  flex: 0 0 auto;
-  border-radius: 999px;
-}
-
-.swiss-quick-actions-strip b {
-  font-weight: 650;
 }
 
 .timeline-calendar-workspace,
@@ -7953,28 +7648,6 @@ kbd {
 
 }
 
-@media (max-width: 840px) {
-  .swiss-persistent-timer-form {
-    grid-template-areas:
-      "description-label description-label description-label description-label"
-      "description description description description"
-      "category-label category-label category-label category-label"
-      "category time action secondary";
-    grid-template-columns:
-      minmax(0, 1fr)
-      minmax(104px, 118px)
-      var(--web-icon-button-size)
-      var(--web-icon-button-size);
-    column-gap: var(--web-gap-sm);
-    row-gap: var(--web-field-gap);
-  }
-
-  .swiss-persistent-timer .swiss-quick-actions-rail {
-    flex-wrap: nowrap;
-    overflow-x: auto;
-  }
-}
-
 @media (max-width: 760px) {
   .fill-page-header {
     padding-top: 22px;
@@ -7999,15 +7672,6 @@ kbd {
 
   .swiss-timeline-main {
     padding: 0 12px 12px;
-  }
-
-  .is-timeline .swiss-persistent-timer {
-    border-radius: 20px 20px 0 0;
-  }
-
-  .swiss-persistent-timer {
-    margin: 0;
-    padding: 14px;
   }
 
   .swiss-date-context-row {
@@ -8069,21 +7733,6 @@ kbd {
   }
 
 }
-
-@media (max-width: 350px) {
-  .swiss-persistent-timer-form {
-    grid-template-areas:
-      "description-label description-label description-label"
-      "description description description"
-      "category-label category-label category-label"
-      "category category category"
-      "time action secondary";
-    grid-template-columns:
-      minmax(0, 1fr)
-      var(--web-icon-button-size)
-      max-content;
-  }
-}
 /* Tags stay intentionally quieter than categories. */
 .tag-metadata {
   display: inline-flex;
@@ -8124,22 +7773,6 @@ kbd {
   border: 0;
   background: transparent;
   outline: 0;
-  box-shadow: none;
-}
-
-.swiss-work-input .inline-tag-input-anchor {
-  height: var(--web-control-height);
-  min-height: var(--web-control-height);
-}
-
-.swiss-work-input .inline-tag-input-anchor .inline-tag-description-input {
-  min-height: calc(var(--web-control-height) - (2 * var(--web-control-border-width)));
-  border: 0;
-  border-radius: calc(var(--web-radius-control) - var(--web-control-border-width));
-  background: transparent;
-  padding: 0 calc(var(--web-control-padding-inline) + 36px) 0 var(--web-control-padding-inline);
-  font-size: 15px;
-  font-weight: 400;
   box-shadow: none;
 }
 
@@ -8941,10 +8574,6 @@ dialog.ui-dialog.manual-entry-dialog {
 
   .swiss-persistent-timer-shell {
     padding: 12px 24px 0;
-  }
-
-  .swiss-persistent-timer {
-    padding: 12px 16px;
   }
 
   .swiss-dashboard {
@@ -9963,24 +9592,6 @@ dialog.ui-dialog.manual-entry-dialog {
   padding: 0;
 }
 
-.swiss-timeline-surface .swiss-persistent-timer.is-workspace {
-  border-radius: 0;
-  background: transparent;
-  padding: 14px 16px 0;
-}
-
-.swiss-timeline-surface .swiss-persistent-timer.is-workspace .swiss-quick-actions-strip {
-  gap: 0;
-  border-top: 0;
-  padding-top: 4px;
-}
-
-.swiss-timer-workspace-divider {
-  height: 1px;
-  margin: 2px 16px 0;
-  background: var(--line);
-}
-
 .swiss-timeline-surface .swiss-timeline-main {
   padding: 0;
 }
@@ -10225,7 +9836,6 @@ dialog.ui-dialog.manual-entry-dialog {
   overflow: visible;
 }
 
-.swiss-work-input .inline-tag-input-anchor .inline-tag-description-input,
 .inline-tag-input-anchor .inline-tag-description-input {
   width: auto;
   min-width: 96px;
@@ -10364,11 +9974,6 @@ dialog.ui-dialog.manual-entry-dialog {
 
   .swiss-timeline-surface {
     border-radius: 20px;
-  }
-
-  .swiss-timeline-surface .swiss-persistent-timer.is-workspace {
-    border-radius: 0;
-    padding: 12px 12px 0;
   }
 
   .swiss-timeline-surface .swiss-timeline-main {
@@ -10831,5 +10436,367 @@ dialog.ui-dialog.manual-entry-dialog {
 @media (prefers-reduced-motion: reduce) {
   .df-nav a {
     transition: none;
+  }
+}
+
+/*
+ * Dayframe Blocks command timer (parity step 11b): one bar with the activity block, the
+ * description (with @activity, #tags and a trailing duration), rolling digits and the coral
+ * Start / Add / Stop control; pinned quick starts below as solid blocks with keys 1–6.
+ */
+.df-block {
+  background: var(--block);
+  color: var(--on-block);
+}
+
+.df-cmd-wrap {
+  display: grid;
+  min-width: 0;
+  gap: 8px;
+}
+
+.df-cmd {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto auto auto;
+  grid-template-areas: "activity description time action secondary";
+  align-items: center;
+  gap: 10px;
+  border-radius: 22px;
+  padding: 8px;
+  background: var(--surface);
+  box-shadow: var(--shadow-soft), inset 0 0 0 1px var(--border);
+}
+
+.df-cmd.is-live {
+  box-shadow: var(--shadow-soft), inset 0 0 0 2px color-mix(in oklab, var(--block, var(--text-muted)) 70%, transparent);
+}
+
+.df-cmd-activity-field {
+  grid-area: activity;
+}
+
+.df-cmd-activity {
+  display: grid;
+  width: 48px;
+  height: 48px;
+  place-items: center;
+  border: 0;
+  border-radius: 14px;
+  background: var(--surface-inset);
+  color: var(--text-secondary);
+}
+
+.df-cmd-activity.df-block {
+  background: var(--block);
+  color: var(--on-block);
+}
+
+.df-cmd-field {
+  position: relative;
+  min-width: 0;
+  grid-area: description;
+}
+
+.df-cmd-field .inline-tag-input-anchor {
+  min-height: 48px;
+  border-color: transparent;
+  border-radius: 14px;
+  background: transparent;
+}
+
+.df-cmd-field .inline-tag-input-anchor .inline-tag-description-input {
+  min-height: 44px;
+  padding: 0 40px 0 6px;
+  font-size: 17px;
+  font-weight: 600;
+}
+
+.df-cmd-field .inline-tag-input-anchor .inline-tag-description-input::placeholder {
+  color: var(--text-muted);
+  font-weight: 500;
+}
+
+.df-cmd-tags {
+  gap: 0;
+}
+
+.df-cmd-tags .inline-tag-help:empty {
+  display: none;
+}
+
+.df-cmd-tags .inline-tag-help:not(:empty) {
+  display: block;
+  min-width: 0;
+  padding: 5px 8px 0;
+  line-height: 16px;
+}
+
+.df-cmd-time {
+  position: relative;
+  grid-area: time;
+}
+
+.df-cmd-clock {
+  display: grid;
+  justify-items: end;
+  border: 0;
+  border-radius: 12px;
+  padding: 2px 8px;
+  background: transparent;
+  color: var(--text-primary);
+  font-family: var(--font-display);
+  font-size: 30px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.02em;
+  line-height: 1.05;
+}
+
+button.df-cmd-clock:hover {
+  background: var(--surface-muted);
+}
+
+.df-cmd-clock small {
+  color: var(--text-secondary);
+  font-family: inherit;
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", system-ui, sans-serif;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0;
+}
+
+.df-cmd-clock.is-idle {
+  color: var(--text-muted);
+}
+
+.df-odometer {
+  display: inline-flex;
+  font-variant-numeric: tabular-nums;
+}
+
+.df-odometer-digit {
+  display: inline-block;
+  height: 1.05em;
+  overflow: hidden;
+}
+
+.df-odometer-strip {
+  display: flex;
+  flex-direction: column;
+  transition: transform var(--df-roll-ms, 0ms) var(--df-roll-easing, ease-out);
+}
+
+.df-odometer-strip > span {
+  height: 1.05em;
+  line-height: 1.05;
+}
+
+.df-cmd-go {
+  display: inline-flex;
+  height: 48px;
+  grid-area: action;
+  align-items: center;
+  gap: 8px;
+  border: 0;
+  border-radius: 999px;
+  padding: 0 18px 0 16px;
+  background: var(--accent);
+  color: var(--on-accent);
+  font-size: 15px;
+  font-weight: 750;
+  white-space: nowrap;
+}
+
+.df-cmd-go:hover {
+  background: var(--accent-hover);
+}
+
+.df-cmd-go:active {
+  background: var(--accent-pressed);
+}
+
+.df-cmd-go svg[data-glyph="play"],
+.df-cmd-go svg[data-glyph="square"] {
+  fill: currentColor;
+}
+
+.df-cmd-go kbd {
+  border: 0;
+  border-radius: 6px;
+  padding: 2px 6px;
+  background: color-mix(in oklab, var(--on-accent) 14%, transparent);
+  color: var(--on-accent);
+  font-family: inherit;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.df-cmd-go.is-stop {
+  width: 48px;
+  justify-content: center;
+  padding: 0;
+}
+
+.df-cmd-secondary {
+  position: relative;
+  grid-area: secondary;
+}
+
+.df-cmd-icon.ui-icon-button {
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+}
+
+.df-cmd-parse {
+  display: flex;
+  min-height: 0;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  padding: 0 12px;
+  color: var(--text-secondary);
+  font-size: 12.5px;
+}
+
+.df-cmd-parse:empty {
+  display: none;
+}
+
+.df-cmd-chip {
+  border-radius: 8px;
+  padding: 3px 8px;
+  background: var(--surface-muted);
+  color: var(--text-primary);
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
+}
+
+.df-cmd-chip.df-block {
+  background: var(--block);
+  color: var(--on-block);
+}
+
+.df-cmd-hint {
+  color: var(--text-muted);
+}
+
+.df-quick {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.df-quick-button {
+  display: inline-flex;
+  min-height: 36px;
+  align-items: center;
+  gap: 8px;
+  border: 0;
+  border-radius: 12px;
+  padding: 0 8px 0 12px;
+  font-size: 13px;
+  font-weight: 750;
+  transition: transform 140ms cubic-bezier(0.22, 1, 0.36, 1), filter 140ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.df-quick-button:hover {
+  filter: brightness(1.06);
+  transform: translateY(-1px);
+}
+
+.df-quick-button:active {
+  transform: scale(0.95);
+}
+
+.df-quick-button.is-recording {
+  box-shadow: inset 0 0 0 2px var(--on-block);
+}
+
+.df-quick-button kbd {
+  display: grid;
+  min-width: 18px;
+  height: 18px;
+  place-items: center;
+  border: 0;
+  border-radius: 5px;
+  padding: 0 4px;
+  background: color-mix(in oklab, var(--on-block) 16%, transparent);
+  color: var(--on-block);
+  font-family: inherit;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.swiss-timeline-surface .df-cmd-wrap {
+  padding: 12px 12px 10px;
+}
+
+@media (max-width: 860px) {
+  .df-cmd {
+    grid-template-columns: auto minmax(0, 1fr) auto auto;
+    grid-template-areas:
+      "activity description action secondary"
+      "time time time time";
+    row-gap: 0;
+  }
+
+  .df-cmd-time {
+    justify-self: start;
+  }
+
+  .df-cmd-clock {
+    min-height: 44px;
+    grid-auto-flow: column;
+    align-items: center;
+    gap: 8px;
+    font-size: 24px;
+  }
+
+  .df-cmd-go-label,
+  .df-cmd-go kbd {
+    display: none;
+  }
+
+  .df-cmd-go {
+    width: 48px;
+    justify-content: center;
+    padding: 0;
+  }
+
+  .df-quick {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+
+  .df-quick-button {
+    flex: 0 0 auto;
+    min-height: 44px;
+  }
+
+  .df-quick-button kbd {
+    display: none;
+  }
+}
+
+/* Between phone and desktop the clock sits at the start of its own row, so its start-time
+   editor opens from the left edge rather than hanging off it (phones use the bottom sheet). */
+@media (min-width: 561px) and (max-width: 860px) {
+  .df-cmd-time .swiss-start-time-popover {
+    right: auto;
+    left: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .df-odometer-strip,
+  .df-quick-button {
+    transition: none;
+  }
+
+  .df-quick-button:hover,
+  .df-quick-button:active {
+    transform: none;
   }
 }

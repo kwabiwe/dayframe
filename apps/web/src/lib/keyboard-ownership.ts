@@ -7,3 +7,10 @@ export function hasOpenDialog() {
     "[role='dialog'], [role='menu'], [role='listbox'], [aria-modal='true'], dialog[open]"
   )).some((element) => !element.closest("[aria-hidden='true'], [inert], [hidden]") && element.getClientRects().length > 0);
 }
+
+/** Typing in a field: page shortcuts never act on these keys. */
+export function isTypingTarget(target: EventTarget | null) {
+  if (!(target instanceof HTMLElement)) return false;
+  const tag = target.tagName.toLowerCase();
+  return tag === "input" || tag === "textarea" || tag === "select" || target.isContentEditable;
+}

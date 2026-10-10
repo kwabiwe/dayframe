@@ -25,9 +25,10 @@ const styles = readFileSync(
 
 describe("persistent timer floating surfaces", () => {
   it("keeps timer-owned overlays outside the shared panel clipping boundary", () => {
-    expect(styles).toMatch(
-      /\.swiss-persistent-timer\s*\{[^}]*overflow:\s*visible;/s
-    );
+    // The Blocks command bar never clips its popovers (start time, More, suggestions).
+    const commandRules = styles.match(/\.df-cmd(?:-wrap)?\s*\{[^}]*\}/g) ?? [];
+    expect(commandRules.length).toBeGreaterThan(0);
+    for (const rule of commandRules) expect(rule).not.toMatch(/overflow:\s*(hidden|clip|auto)/);
     expect(taskSuggestionsSource).toContain(
       "ui-floating-surface swiss-task-suggestions"
     );

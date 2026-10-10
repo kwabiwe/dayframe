@@ -295,6 +295,13 @@ Block pull-to-refresh:
 - Interruption: changing range or filter during a focus clears the focus; a late previous-period read for an old range is ignored (keyed by its exact request).
 - Accessibility: Reduce Motion places the thumb without a spring and shows the columns without the grow; the hero is one live-region element ("19 hours 47 minutes framed this week. 19 hours 47 minutes more than last week so far"); each column is a 44-point button with its day and total, selected while focused.
 
+## Web command timer (Blocks parity step 11b)
+
+- Trigger: elapsed time changing each second; a quick start pressed; the bar entering or leaving the live state.
+- Owner: `Odometer` owns the rolling digits: each digit strip is a CSS `transform` transition with the `roll` spring (`linear()` set after mount, so the first paint is still); positions are keyed from the right so a new hours digit never shifts the seconds. Quick-start blocks lift 1 px on hover and press to 0.95 with a 140 ms ease-out. The live state changes the bar's ring colour in place; nothing else moves. Below 860 px the clock keeps its own row in both states (idle shows a muted 00:00), so Start and Stop never shift the quick starts or the page.
+- Interruption: a digit that changes again mid-roll retargets from where it is.
+- Accessibility: Reduce Motion removes the roll and the press scale (values change in place). The rolling strips are hidden from assistive technology; the clock button's label carries the start time and elapsed time.
+
 ## Web shell sidebar thumb (Blocks parity step 11a)
 
 - Trigger: the route changes to another of the five sections (link, phone tab, or G then a letter).

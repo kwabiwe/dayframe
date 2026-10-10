@@ -39,6 +39,60 @@ describe("shell timer runtime", () => {
     expect(gate.isActive()).toBe(false);
   });
 
+  it("keeps the started draft after a rejected idle Start, or anything typed while it was pending", async () => {
+    for (const typedMeanwhile of [null, { categoryId: "", description: "Updated plan", tagNames: [] }]) {
+      const gate = createTimerMutationGate();
+      let draft: TimerDraft = timerDraftForEntry(null);
+      let reject: ((error: Error) => void) | undefined;
+      const start = runTimerStartMutation({
+        gate,
+        snapshot: bootstrapData(null),
+        currentDraft: draft,
+        input: { categoryId: "focus", description: "Plan", tagNames: [] },
+        now: () => "2026-08-24T16:00:00.000Z",
+        createOptimisticId: () => "optimistic",
+        getCurrentDraft: () => draft,
+        commit: () => undefined,
+        setDraft: (next) => { draft = next; },
+        setBusy: () => undefined,
+        setError: () => undefined,
+        send: () => new Promise<void>((_, fail) => { reject = fail; }),
+        refresh: async () => undefined
+      });
+      await vi.waitFor(() => expect(reject).toBeDefined());
+      if (typedMeanwhile) draft = typedMeanwhile;
+      reject!(new Error("offline"));
+      await expect(start).resolves.toMatchObject({ ok: false });
+      expect(draft).toEqual(typedMeanwhile ?? { categoryId: "focus", description: "Plan", tagNames: [] });
+    }
+  });
+
+  it("returns a rejected switch to the still-running entry's own details", async () => {
+    const gate = createTimerMutationGate();
+    const running = entry({ id: "running", description: "Writing", categoryId: "focus" });
+    let draft: TimerDraft = timerDraftForEntry(running);
+    const start = runTimerStartMutation({
+      gate,
+      snapshot: bootstrapData(running),
+      currentDraft: draft,
+      input: { description: "Next" },
+      now: () => "2026-08-24T16:00:00.000Z",
+      createOptimisticId: () => "optimistic",
+      getCurrentDraft: () => draft,
+      commit: () => undefined,
+      setDraft: (next) => { draft = next; },
+      setBusy: () => undefined,
+      setError: () => undefined,
+      send: async () => {
+        draft = { ...draft, description: "Typed for the rejected entry" };
+        throw new Error("offline");
+      },
+      refresh: async () => undefined
+    });
+    await expect(start).resolves.toMatchObject({ ok: false });
+    expect(draft).toEqual(timerDraftForEntry(running));
+  });
+
   it("cancels a queued latest Start inertly when its provider is disposed", async () => {
     const gate = createTimerMutationGate();
     let finishStop: (() => void) | undefined;

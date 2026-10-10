@@ -100,6 +100,9 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
   const canonicalTimerDraftRef = useRef(timerDraftForEntry(null));
   const timerDraftEntryIdRef = useRef<string | null>(null);
   const activeEntryVersionRef = useRef("unhydrated");
+  // Set by a rejected Start: the next active-entry identity change keeps this draft instead of
+  // resetting the bar to the restored entry's details.
+  const rollbackDraftRef = useRef<{ draft: TimerDraft; entryId: string | null } | null>(null);
   const refreshRequestRef = useRef(0);
   const dateLoadRequestRef = useRef(0);
   const isDateLoadingRef = useRef(false);
@@ -154,12 +157,12 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
     activeEntryVersionRef.current = activeEntryVersion;
     const activeEntryId = data?.activeEntry?.id ?? null;
     const canonicalDraft = timerDraftForEntry(data?.activeEntry);
-    const nextDraft = reconcileTimerDraft(
-      timerDraftEntryIdRef.current !== activeEntryId,
-      draftRef.current,
-      canonicalTimerDraftRef.current,
-      canonicalDraft
-    );
+    const activeEntryChanged = timerDraftEntryIdRef.current !== activeEntryId;
+    const rollbackDraft = rollbackDraftRef.current;
+    rollbackDraftRef.current = null;
+    const nextDraft = activeEntryChanged && rollbackDraft?.entryId === activeEntryId
+      ? rollbackDraft.draft
+      : reconcileTimerDraft(activeEntryChanged, draftRef.current, canonicalTimerDraftRef.current, canonicalDraft);
     timerDraftEntryIdRef.current = activeEntryId;
     canonicalTimerDraftRef.current = canonicalDraft;
     if (!timerDraftsEqual(nextDraft, draftRef.current)) setTimerDraft(nextDraft);
@@ -326,6 +329,9 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
       getCurrentSnapshot: () => dataRef.current ?? snapshot,
       onAccepted: () => {
         refreshRequestRef.current += 1;
+      },
+      onRollback: (draft, entryId) => {
+        rollbackDraftRef.current = { draft, entryId };
       },
       commit: (nextData) => commitData(nextData, "optimistic"),
       setDraft: setTimerDraft,

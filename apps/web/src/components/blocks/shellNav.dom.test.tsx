@@ -80,7 +80,7 @@ describe("Blocks shell contract", () => {
   });
 
   it("uses neutral selection and 44-pixel phone targets, and leaves coral to recording", () => {
-    const shellCss = styles.slice(styles.indexOf("Dayframe Blocks web shell"));
+    const shellCss = styles.slice(styles.indexOf("Dayframe Blocks web shell"), styles.indexOf("Dayframe Blocks command timer"));
     expect(shellCss).not.toMatch(/var\(--accent/);
     expect(shellCss).toMatch(/\.df-tabbar a \{[^}]*min-height: 52px;/s);
     expect(shellCss).toMatch(/\.df-tabbar \{[^}]*bottom: calc\(10px \+ env\(safe-area-inset-bottom, 0px\)\);/s);
@@ -91,7 +91,7 @@ describe("G sequence guard", () => {
   const shell = readFileSync(`${process.cwd()}/src/components/AppShell.tsx`, "utf8");
 
   it("uses the shared keyboard-ownership check (tested in lib/keyboard-ownership.dom.test.ts)", () => {
-    expect(shell).toContain('import { hasOpenDialog } from "@/lib/keyboard-ownership";');
+    expect(shell).toContain('import { hasOpenDialog, isTypingTarget } from "@/lib/keyboard-ownership";');
   });
 });
 
