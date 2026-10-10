@@ -615,13 +615,26 @@ export function CalendarReview({
   const consumedPointerRef = useRef<CalendarConsumedPointer | null>(null);
   // The last press anywhere, seen in the window's capture phase: before an open editor's own
   // document listener, which may stop the event from reaching the suggestion link.
+  // Whether that press was taken is read at its pointerup, again in the window's capture phase,
+  // before the document listener above forgets the consumed pointer; the click comes after both.
   const reviewLinkPointerRef = useRef<{ pointerId: number; pointerDownTimeStamp: number } | null>(null);
+  const pressConsumedByEditorRef = useRef(false);
   useEffect(() => {
     const remember = (event: PointerEvent) => {
       reviewLinkPointerRef.current = { pointerId: event.pointerId, pointerDownTimeStamp: event.timeStamp };
+      pressConsumedByEditorRef.current = false;
+    };
+    const settle = (event: PointerEvent) => {
+      const pointer = reviewLinkPointerRef.current;
+      if (!pointer || pointer.pointerId !== event.pointerId) return;
+      pressConsumedByEditorRef.current = calendarPointerMatchesConsumed(consumedPointerRef.current, pointer);
     };
     window.addEventListener("pointerdown", remember, true);
-    return () => window.removeEventListener("pointerdown", remember, true);
+    window.addEventListener("pointerup", settle, true);
+    return () => {
+      window.removeEventListener("pointerdown", remember, true);
+      window.removeEventListener("pointerup", settle, true);
+    };
   }, []);
   const [resizeDraft, setResizeDraft] = useState<CalendarResizeDraft | null>(null);
   const [resizingId, setResizingId] = useState<string | null>(null);
@@ -1195,9 +1208,13 @@ export function CalendarReview({
                       // A press an open editor took for its own dismissal (and any discard
                       // prompt) only dismisses, as on blank time: it never also leaves Calendar.
                       const pointer = reviewLinkPointerRef.current;
-                      if (pointer && calendarPointerMatchesConsumed(consumedPointerRef.current, pointer)) {
+                      if (
+                        pressConsumedByEditorRef.current ||
+                        (pointer && calendarPointerMatchesConsumed(consumedPointerRef.current, pointer))
+                      ) {
                         event.preventDefault();
                       }
+                      pressConsumedByEditorRef.current = false;
                     }}
 
                     style={{

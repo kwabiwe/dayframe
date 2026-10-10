@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 import { createElement } from "react";
-import { cleanup, render } from "@testing-library/react";
+import { act, cleanup, render } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ReviewItemRow, TimeEntryRow } from "@/lib/queries";
 
@@ -32,7 +32,27 @@ const local = (hour: number, minute = 0) => new Date(2026, 7, 2, hour, minute).t
 afterEach(() => {
   cleanup();
   document.body.innerHTML = "";
+  vi.restoreAllMocks();
 });
+
+/** The compact editor closes when its anchor looks off screen, so give the grid real boxes. */
+function installEditorGeometry() {
+  Object.defineProperty(window, "innerWidth", { configurable: true, value: 1_200 });
+  Object.defineProperty(window, "innerHeight", { configurable: true, value: 900 });
+  Object.defineProperty(window, "matchMedia", {
+    configurable: true,
+    value: (query: string) => ({ matches: true, media: query, addEventListener: vi.fn(), removeEventListener: vi.fn(), addListener: vi.fn(), removeListener: vi.fn() })
+  });
+  const box = (x: number, y: number, width: number, height: number) =>
+    ({ x, y, left: x, top: y, width, height, right: x + width, bottom: y + height, toJSON: () => ({}) }) as DOMRect;
+  vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function rect(this: HTMLElement) {
+    if (this.classList.contains("calendar-grid-scroller")) return box(0, 0, 1_000, 850);
+    if (this.matches("[data-calendar-day-body]")) return box(104, 0, 800, 1_536);
+    if (this.matches("[data-calendar-block-key]")) return box(120, 400, 760, 60);
+    if (this.classList.contains("calendar-compact-editor")) return box(12, 12, 360, 320);
+    return box(0, 0, 100, 44);
+  });
+}
 
 function renderCalendar(entries: TimeEntryRow[], reviewItems: ReviewItemRow[] = []) {
   return render(createElement(CalendarReview, {
@@ -77,6 +97,44 @@ describe("Calendar in Blocks", () => {
     expect(links).toHaveLength(1);
     expect(links[0].getAttribute("href")).toBe("/review");
     expect(links[0].getAttribute("aria-label")).toBe("Gym visit, needs review, 07:00 to 08:00. Open Review.");
+  });
+
+  it("lets a press an open editor takes only dismiss it, never also open Review", async () => {
+    installEditorGeometry();
+    renderCalendar(
+      [entry({ id: "a", categoryId: "focus", categoryName: "Focus", categoryColor: "mint", startedAt: local(9), stoppedAt: local(10) })],
+      [review({ id: "r1", title: "Gym visit", suggestedStartedAt: local(7), suggestedStoppedAt: local(8) })]
+    );
+    const link = document.querySelector<HTMLAnchorElement>(".calendar-review-block")!;
+    const navigations: boolean[] = [];
+    const record = (event: MouseEvent) => {
+      if (event.target !== link) return;
+      navigations.push(!event.defaultPrevented);
+      event.preventDefault();
+    };
+    window.addEventListener("click", record);
+    const press = (pointerId: number) => {
+      for (const type of ["pointerdown", "pointerup"]) {
+        const event = new MouseEvent(type, { bubbles: true, cancelable: true, composed: true });
+        Object.defineProperty(event, "pointerId", { value: pointerId });
+        link.dispatchEvent(event);
+      }
+      link.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
+    };
+
+    press(1);
+    await act(async () => {
+      document.querySelector<HTMLButtonElement>('[data-entry-id="a"] .calendar-entry-primary')!.click();
+    });
+    // The editor starts listening for outside presses on the next task.
+    for (let index = 0; index < 5; index += 1) {
+      await act(async () => new Promise((resolve) => setTimeout(resolve, 0)));
+    }
+    await act(async () => new Promise((resolve) => setTimeout(resolve, 100)));
+    expect(document.querySelector('[data-testid="calendar-compact-editor"]')).not.toBeNull();
+    await act(async () => press(2));
+    window.removeEventListener("click", record);
+    expect(navigations).toEqual([true, false]);
   });
 
   it("labels each day heading with its full date and its logged total", () => {
