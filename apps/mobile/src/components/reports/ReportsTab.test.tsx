@@ -10,6 +10,7 @@ vi.mock("react", async () => {
 const mocks = vi.hoisted(() => ({
   fetch: vi.fn(),
   haptic: vi.fn(),
+  announce: vi.fn(),
   fontScale: 1,
   subscriber: null as null | (() => void),
 }));
@@ -18,7 +19,10 @@ vi.stubGlobal("requestAnimationFrame", (callback: () => void) => {
   return 1;
 });
 vi.mock("react-native", () => ({
-  AccessibilityInfo: { setAccessibilityFocus: vi.fn() },
+  AccessibilityInfo: {
+    announceForAccessibility: mocks.announce,
+    setAccessibilityFocus: vi.fn(),
+  },
   AppState: {
     currentState: "active",
     addEventListener: () => ({ remove: vi.fn() }),
@@ -618,6 +622,97 @@ describe("Blocks Reports owner (parity step 10a)", () => {
     await act(async () => sheet.props.onApply());
     await act(async () => sheet.props.onDismissed(sheet.props.presentationId));
     expect(tree.root.findAllByType("ReportGoalStreak" as never)).toHaveLength(0);
+    act(() => tree.unmount());
+  });
+
+  it("compares like with like: time since the shared cutoff does not count as a gain", async () => {
+    // Today at 12:04 with a timer running since 09:00; yesterday the same timer ran 09:00–17:00.
+    const at = +new Date(2026, 8, 9, 12, 4);
+    const startedAt = new Date(2026, 8, 9, 9).toISOString();
+    const active = { id: "timer", categoryId: "a", categoryName: "Work", startedAt, stoppedAt: null, reviewStatus: "confirmed" };
+    mocks.fetch.mockImplementation(async (input: ReportSummaryRequest) => {
+      if (input.buckets[0].key === "previous") {
+        // Yesterday 00:00 to 12:00 (five-minute grain): three hours.
+        expect(new Date(input.end)).toEqual(new Date(2026, 8, 8, 12, 0));
+        return {
+          ...result(input),
+          totalSeconds: 3 * 3600,
+          categories: [{ key: "a", categoryId: "a", name: "Work", color: "blue", seconds: 3 * 3600 }],
+          buckets: [{ key: "previous", seconds: 3 * 3600, byCategory: [{ key: "a", seconds: 3 * 3600 }] }],
+        };
+      }
+      return {
+        ...result(input),
+        capturedNow: new Date(at).toISOString(),
+        totalSeconds: 3 * 3600 + 240,
+        categories: [{ key: "a", categoryId: "a", name: "Work", color: "blue", seconds: 3 * 3600 + 240 }],
+        buckets: [{ key: input.buckets[0].key, seconds: 3 * 3600 + 240, byCategory: [{ key: "a", seconds: 3 * 3600 + 240 }] }],
+        active: { id: "timer", categoryId: "a", startedAt, buckets: [{ key: input.buckets[0].key, seconds: 3 * 3600 + 240 }] },
+      };
+    });
+    let tree!: ReturnType<typeof create>;
+    await act(async () => {
+      tree = create(
+        <ReportsTab
+          data={{ ...data, activeEntry: active, entries: [active] } as unknown as MobileBootstrap}
+          initialChoice="today"
+          isFocused
+          nowMs={at}
+          styles={{} as never}
+          theme={{ mode: "dark" } as never}
+        />,
+      );
+    });
+    const hero = tree.root.findByType("ReportHero" as never);
+    expect(hero.props.total).toBe("3h 4m");
+    expect(hero.props.delta.text).toBe("Same as yesterday so far");
+    act(() => tree.unmount());
+  });
+
+  it("reads the comparison again on refresh even when it is cached", async () => {
+    let previousSeconds = 1800;
+    mocks.fetch.mockImplementation(async (input: ReportSummaryRequest) =>
+      input.buckets[0].key === "previous"
+        ? {
+            ...result(input),
+            totalSeconds: previousSeconds,
+            categories: [{ key: "a", categoryId: "a", name: "Work", color: "blue", seconds: previousSeconds }],
+            buckets: [{ key: "previous", seconds: previousSeconds, byCategory: [{ key: "a", seconds: previousSeconds }] }],
+          }
+        : result(input),
+    );
+    const tree = await week();
+    expect(tree.root.findByType("ReportHero" as never).props.delta.text).toBe("+30m vs last week so far");
+    previousSeconds = 3600;
+    await act(async () =>
+      tree.update(
+        <ReportsTab
+          data={{ ...data }}
+          isFocused
+          nowMs={nowMs}
+          styles={{} as never}
+          theme={{ mode: "dark", textMuted: "#707B91" } as never}
+        />,
+      ),
+    );
+    expect(tree.root.findByType("ReportHero" as never).props.delta.text).toBe("Same as last week so far");
+    act(() => tree.unmount());
+  });
+
+  it("announces the hero once after a user change, not on refreshes", async () => {
+    mocks.announce.mockReset();
+    const tree = await week();
+    expect(mocks.announce).not.toHaveBeenCalled();
+    const columns = tree.root.findByType("ReportWeekColumns" as never);
+    await act(async () => columns.props.onFocus(columns.props.days[0].key));
+    expect(mocks.announce).toHaveBeenCalledTimes(1);
+    expect(mocks.announce.mock.calls[0][0]).toMatch(/^1 hour on Monday/);
+    await act(async () =>
+      tree.update(
+        <ReportsTab data={{ ...data }} isFocused nowMs={nowMs + 60_000} styles={{} as never} theme={{ mode: "dark", textMuted: "#707B91" } as never} />,
+      ),
+    );
+    expect(mocks.announce).toHaveBeenCalledTimes(1);
     act(() => tree.unmount());
   });
 

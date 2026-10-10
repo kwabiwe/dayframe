@@ -101,4 +101,30 @@ describe("Blocks Reports helpers", () => {
     expect(reportStackHeights([16 * 3600], 16 * 3600, 170, 6)).toEqual([170]);
     expect(reportStackHeights([], 0, 170, 6)).toEqual([]);
   });
+
+  it("keeps minimums and gaps inside the stack budget", () => {
+    const fits = (heights: number[], gap: number, budget: number) =>
+      heights.reduce((sum, h) => sum + h, 0) + gap * Math.max(0, heights.length - 1) <= budget;
+    // Eight equal activities in a 12-hour day, Month cell: 24 points, 2-point minimum and gap.
+    const eight = reportStackHeights(Array(8).fill(1.5 * 3600), 12 * 3600, 24, 2, 2);
+    expect(eight).toHaveLength(6);
+    expect(fits(eight, 2, 24)).toBe(true);
+    expect(eight.every((h) => h >= 2)).toBe(true);
+    // Sixteen in a week column: 170 points, 6-point minimum, 3-point gap.
+    const sixteen = reportStackHeights(Array(16).fill(0.75 * 3600), 12 * 3600, 170, 6, 3);
+    expect(fits(sixteen, 3, 170)).toBe(true);
+    // A big block shrinks so a small one keeps its minimum.
+    const mixed = reportStackHeights([11.9 * 3600, 60], 12 * 3600, 24, 2, 2);
+    expect(mixed[1]).toBe(2);
+    expect(fits(mixed, 2, 24)).toBe(true);
+  });
+
+  it("cuts this period at the same elapsed stretch, or not at all when last period was shorter", () => {
+    const week = buildReportRange("week", now);
+    const previous = previousReportWindow("week", week, now)!;
+    expect(+previous.currentCutoff! - +week.start).toBe(+previous.end - +previous.start);
+    const lateMarch = +new Date(2026, 2, 31, 12);
+    const march = buildReportRange("month", lateMarch);
+    expect(previousReportWindow("month", march, lateMarch)!.currentCutoff).toBeNull();
+  });
 });

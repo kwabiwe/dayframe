@@ -112,11 +112,13 @@ describe("Blocks Reports pieces", () => {
     expect(monday.props.accessibilityState).toEqual({ selected: true });
     expect(monday.props.accessibilityLabel).toContain("1 hour 30 minutes");
     const blocks = monday.findAll((node) => node.type === ("AnimatedView" as never));
-    // 12 hours fill the 170-point column: 1 h = 14, 30 min = 7 (less the 3-point gap).
+    // 12 hours fill the 170-point column: 1 h is 14 points, 30 min 7 (gaps are separate).
     expect(blocks.map((node) => node.props.style[1])).toEqual([
-      { backgroundColor: "#3B82F6", height: 11 },
-      { backgroundColor: "#EF4444", height: 4 },
+      { backgroundColor: "#3B82F6", height: 14 },
+      { backgroundColor: "#EF4444", height: 7 },
     ]);
+    // Columns touch, so each is a full-width target of at least 44 points.
+    expect(monday.props.style).toMatchObject({ minWidth: 44, minHeight: 44 });
     const tuesday = tree.root.findByProps({ testID: "reports-week-day-2026-10-06" });
     expect(tuesday.props.accessibilityLabel).toContain("nothing framed");
     expect(tuesday.findAll((node) => node.props.style?.[1]?.opacity === 0.35)).toHaveLength(1);

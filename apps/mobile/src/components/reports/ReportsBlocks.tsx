@@ -15,7 +15,7 @@ import { BLOCKS_SPRING } from "../../lib/blocksMotion";
 import type { MobileTheme } from "../../lib/mobileTheme";
 import { localPresenceEntering } from "../../lib/motion";
 import { MOBILE_DISPLAY_FONT, mobileTextProps } from "../../lib/mobileTypography";
-import { monthGridLeadingBlanks, reportStackHeights } from "../../lib/reportsBlocks";
+import { monthGridLeadingBlanks, reportHeroSpokenLabel, reportStackHeights } from "../../lib/reportsBlocks";
 import type { ReportRangeChoice } from "../../lib/reportsRanges";
 
 // Blocks Reports (design/blocks/ios.html, renderReports): range switch, hero total, week columns,
@@ -136,8 +136,7 @@ export function ReportHero({
   return (
     <View
       accessible
-      accessibilityLabel={`${spokenTotal} ${words}${delta && !focusLabel ? `. ${delta.spoken}` : ""}`}
-      accessibilityLiveRegion="polite"
+      accessibilityLabel={reportHeroSpokenLabel({ delta, focusLabel, period, spokenTotal })}
       style={styles.hero}
       testID="reports-hero"
     >
@@ -214,7 +213,7 @@ export const ReportWeekColumns = memo(function ReportWeekColumns({
       {days.map((day) => {
         const focused = focusedKey === day.key;
         const dimmed = focusedKey !== null && !focused;
-        const heights = reportStackHeights(day.segments.map((s) => s.seconds), busiest, WEEK_COLUMN_HEIGHT, 6);
+        const heights = reportStackHeights(day.segments.map((s) => s.seconds), busiest, WEEK_COLUMN_HEIGHT, 3, 3);
         const name = day.start.toLocaleDateString(undefined, { weekday: "long", day: "numeric", month: "long" });
         return (
           <Pressable
@@ -228,13 +227,13 @@ export const ReportWeekColumns = memo(function ReportWeekColumns({
             testID={`reports-week-day-${day.key}`}
           >
             <View style={[styles.weekStack, { opacity: dimmed ? 0.35 : 1 }]}>
-              {day.segments.map((segment, index) => {
+              {day.segments.slice(0, heights.length).map((segment, index) => {
                 const delay = order++ * 14;
                 return (
                   <Reanimated.View
                     key={segment.key}
                     entering={animate ? growEntering(delay) : undefined}
-                    style={[styles.weekBlock, { backgroundColor: segment.color, height: Math.max(3, heights[index] - 3) }]}
+                    style={[styles.weekBlock, { backgroundColor: segment.color, height: heights[index] }]}
                   />
                 );
               })}
@@ -295,7 +294,7 @@ export const ReportMonthGrid = memo(function ReportMonthGrid({
           <View key={`blank-${index}`} style={styles.monthCellSlot} />
         ))}
         {days.map((day) => {
-          const heights = reportStackHeights(day.segments.map((s) => s.seconds), busiest, MONTH_STACK_HEIGHT, 2);
+          const heights = reportStackHeights(day.segments.map((s) => s.seconds), busiest, MONTH_STACK_HEIGHT, 2, 2);
           return (
             <View key={day.key} style={styles.monthCellSlot}>
               <View
@@ -307,7 +306,7 @@ export const ReportMonthGrid = memo(function ReportMonthGrid({
                   day.key === todayKey ? { borderColor: theme.accent, borderWidth: 1.5 } : null,
                 ]}
               >
-                {day.segments.map((segment, index) => (
+                {day.segments.slice(0, heights.length).map((segment, index) => (
                   <View key={segment.key} style={[styles.monthBlock, { backgroundColor: segment.color, height: heights[index] }]} />
                 ))}
                 <Text
@@ -379,8 +378,9 @@ const styles = StyleSheet.create({
   heroLine: { flexDirection: "row", flexWrap: "wrap", alignItems: "center", gap: 8 },
   heroWords: { fontSize: 14 },
   delta: { overflow: "hidden", borderRadius: 999, paddingHorizontal: 9, paddingVertical: 3, fontSize: 12.5, fontWeight: "700", fontVariant: ["tabular-nums"] },
-  weekCard: { flexDirection: "row", gap: 7, height: 236, borderRadius: 22, paddingHorizontal: 14, paddingTop: 16, paddingBottom: 12 },
-  weekColumn: { flex: 1, minHeight: 44, gap: 8, justifyContent: "flex-end" },
+  // Columns touch (no gap) so each is a full-width target: at least 44 points on a 375-point phone.
+  weekCard: { flexDirection: "row", height: 236, borderRadius: 22, paddingHorizontal: 8, paddingTop: 16, paddingBottom: 12 },
+  weekColumn: { flex: 1, minHeight: 44, minWidth: 44, gap: 8, justifyContent: "flex-end", paddingHorizontal: 3.5 },
   weekStack: { flex: 1, flexDirection: "column-reverse", gap: 3 },
   weekBlock: { borderRadius: 6 },
   weekLabel: { fontSize: 11, fontWeight: "700", textAlign: "center" },

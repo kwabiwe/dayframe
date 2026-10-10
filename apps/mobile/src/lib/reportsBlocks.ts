@@ -23,7 +23,17 @@ export function previousReportWindow(
   choice: ReportRangeChoice,
   range: ReportRange,
   nowMs: number,
-): { start: Date; end: Date; comparison: ReportComparison; request: ReportSummaryRequest } | null {
+): {
+  start: Date;
+  end: Date;
+  comparison: ReportComparison;
+  /**
+   * Where this period must be cut to compare like with like: the same elapsed (five-minute) stretch.
+   * Null when the previous period is shorter than that stretch (it is compared whole).
+   */
+  currentCutoff: Date | null;
+  request: ReportSummaryRequest;
+} | null {
   if (typeof choice !== "string") return null;
   const elapsed =
     Math.floor((Math.min(nowMs, +range.end) - +range.start) / PREVIOUS_GRAIN_MS) * PREVIOUS_GRAIN_MS;
@@ -38,11 +48,13 @@ export function previousReportWindow(
           ? new Date(from.getFullYear(), from.getMonth() - 1, 1)
           : new Date(from.getFullYear() - 1, 0, 1);
   const end = new Date(Math.min(+start + elapsed, +from));
+  const currentCutoff = +start + elapsed <= +from ? new Date(+from + elapsed) : null;
   const comparison: ReportComparison = choice === "today" ? "yesterday" : choice;
   return {
     start,
     end,
     comparison,
+    currentCutoff,
     request: {
       start: start.toISOString(),
       end: end.toISOString(),
@@ -66,6 +78,22 @@ export function formatReportDelta(deltaSeconds: number, comparison: ReportCompar
     text: `${more ? "+" : "−"}${compactDuration(size)} vs ${words} so far`,
     spoken: `${spokenDuration(size)} ${more ? "more" : "less"} than ${words} so far`,
   };
+}
+
+/** The hero as VoiceOver reads it: "19 hours framed this week. 2 hours more than last week so far". */
+export function reportHeroSpokenLabel({
+  delta,
+  focusLabel,
+  period,
+  spokenTotal,
+}: {
+  delta: { spoken: string } | null;
+  focusLabel: string | null;
+  period: string;
+  spokenTotal: string;
+}) {
+  if (focusLabel) return `${spokenTotal} on ${focusLabel}`;
+  return `${spokenTotal} framed ${period}${delta ? `. ${delta.spoken}` : ""}`;
 }
 
 /** The words after "framed" under the hero total. */
@@ -100,15 +128,30 @@ export function monthGridLeadingBlanks(firstOfMonth: Date) {
 export const REPORT_STACK_MIN_SCALE_SECONDS = 12 * 3600;
 
 /**
- * Block heights in one day's stack. The column holds 12 hours (the prototype's scale) unless the
- * busiest day in view holds more, so a long day rescales instead of overflowing.
+ * Block heights in one day's stack, ranked biggest first. The stack holds 12 hours (the prototype's
+ * scale) unless the busiest day in view holds more, so a long day rescales instead of overflowing.
+ * Minimum heights and the gaps between blocks always fit the budget: blocks that cannot fit at the
+ * minimum are left out (the smallest ones, last in rank), and the others shrink toward it.
  */
 export function reportStackHeights(
   seconds: readonly number[],
   busiestSeconds: number,
   columnHeight: number,
   minimumHeight: number,
+  gap = 0,
 ) {
   const scale = Math.max(REPORT_STACK_MIN_SCALE_SECONDS, busiestSeconds);
-  return seconds.map((value) => Math.max(minimumHeight, Math.round((value / scale) * columnHeight)));
+  const fit = Math.max(0, Math.floor((columnHeight + gap) / (minimumHeight + gap)));
+  const shown = seconds.slice(0, fit);
+  const budget = columnHeight - gap * Math.max(0, shown.length - 1);
+  let heights = shown.map((value) => Math.max(minimumHeight, (value / scale) * columnHeight));
+  // Shrink the blocks above the minimum until the stack fits, keeping their proportions.
+  for (let pass = 0; pass < 4 && heights.reduce((sum, h) => sum + h, 0) > budget + 0.01; pass += 1) {
+    const floor = heights.filter((h) => h <= minimumHeight).length * minimumHeight;
+    const flexible = heights.filter((h) => h > minimumHeight).reduce((sum, h) => sum + h, 0);
+    if (flexible <= 0) break;
+    const factor = Math.max(0, budget - floor) / flexible;
+    heights = heights.map((h) => (h > minimumHeight ? Math.max(minimumHeight, h * factor) : h));
+  }
+  return heights.map((h) => Math.floor(h * 2) / 2);
 }

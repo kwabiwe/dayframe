@@ -29,6 +29,7 @@ import {
   formatReportDelta,
   previousReportWindow,
   reportHeroPeriod,
+  reportHeroSpokenLabel,
   weekGoalDays,
 } from "../../lib/reportsBlocks";
 import { REPORT_TEXT_CAP, reportNumericColumns } from "@/lib/reportsTypography";
@@ -39,6 +40,7 @@ import type { MobileStyles, MobileTheme } from "@/lib/mobileTheme";
 import { MOBILE_MOTION, useResolvedReduceMotionPreference } from "@/lib/motion";
 import {
   buildReportsPresentation,
+  reportTrackedSeconds,
   formatReportDuration,
   formatReportPercent,
   spokenReportDuration,
@@ -122,6 +124,9 @@ export function ReportsTab({
   } | null>(null);
   const [focusedDayKey, setFocusedDayKey] = useState<string | null>(null);
   const blocksAnimated = useRef(false);
+  // A user change (range, focus, filter) is read out once its hero is ready; VoiceOver focus stays
+  // on the control, and iOS has no live regions.
+  const announceHero = useRef(false);
   const [reload, setReload] = useState(0);
   const [tooltipOutsidePress, setTooltipOutsidePress] = useState(0);
   const [contentWidth, setContentWidth] = useState(256);
@@ -251,11 +256,10 @@ export function ReportsTab({
   }, [data, reload]);
   useEffect(() => {
     if (!isFocused || !foreground || !previous || !previousKey) return;
+    // Show a cached comparison at once, but read it again on every refresh: a comparison window
+    // that stops moving (the whole of a shorter last month) must still pick up edits.
     const cached = cache.current.get(previousKey);
-    if (cached) {
-      setPreviousLoaded({ key: previousKey, summary: cached });
-      return;
-    }
+    if (cached) setPreviousLoaded({ key: previousKey, summary: cached });
     const current = generation.current;
     const controller = new AbortController();
     // Best effort: a failed comparison read only hides the pill.
@@ -271,7 +275,7 @@ export function ReportsTab({
       })
       .catch(() => undefined);
     return () => controller.abort();
-  }, [previousKey, data.user.id, data.workspace.id, isFocused, foreground]);
+  }, [previousKey, data, reload, isFocused, foreground]);
   // A new range or filter shows the whole range again.
   useEffect(() => {
     setFocusedDayKey(null);
@@ -433,6 +437,7 @@ export function ReportsTab({
           onApply={() => {
             const current = activeFilterPresentation.current;
             if (current?.id !== filterPresentation.id) return false;
+            announceHero.current = true;
             setSelection(applyReportFilterDraft(current.draft));
             return true;
           }}
@@ -460,6 +465,7 @@ export function ReportsTab({
           onApply={(value) => {
             if (activeDatePresentation.current?.id !== datePresentation.id)
               return false;
+            announceHero.current = true;
             setChoice(value);
             return true;
           }}
@@ -516,7 +522,17 @@ export function ReportsTab({
   const delta =
     report && previous && previousSummary && selection.mode !== "none"
       ? formatReportDelta(
+          // This period cut at the same elapsed stretch as the previous read: the live total less
+          // what was tracked since that cutoff (at most a few minutes, held on the phone).
           report.selectedLoggedSeconds -
+            (previous.currentCutoff
+              ? reportTrackedSeconds(
+                  data,
+                  { start: previous.currentCutoff, end: new Date(reportNow) },
+                  reportNow,
+                  selection,
+                )
+              : 0) -
             previousSummary.categories.reduce(
               (sum, category) =>
                 sum +
@@ -528,13 +544,34 @@ export function ReportsTab({
           previous.comparison,
         )
       : null;
+  const focusLabel = focusedDay
+    ? focusedDay.start.toLocaleDateString(undefined, {
+        weekday: "long",
+        day: "numeric",
+        month: "long",
+      })
+    : null;
+  const heroSpokenLabel = report
+    ? reportHeroSpokenLabel({
+        delta,
+        focusLabel,
+        period: reportHeroPeriod(choice, range),
+        spokenTotal: spokenReportDuration(heroSeconds),
+      })
+    : null;
+  useEffect(() => {
+    if (!announceHero.current || !heroSpokenLabel || !isFocused || !foreground) return;
+    announceHero.current = false;
+    AccessibilityInfo.announceForAccessibility(heroSpokenLabel);
+  }, [heroSpokenLabel, isFocused, foreground]);
   const dailyGoalMinutes = data.user.dailyGoalMinutes;
   const goalDays =
     choice === "week" && selection.mode === "all" && report
       ? weekGoalDays(days, nowMs, dailyGoalMinutes)
       : [];
   const playBlocks = Boolean(report) && !blocksAnimated.current && !reduceMotion && resolved && isFocused;
-  if (playBlocks && days.some((day) => day.segments.length)) blocksAnimated.current = true;
+  if (playBlocks && choice === "week" && days.some((day) => day.segments.length))
+    blocksAnimated.current = true;
   const moreLabel =
     choice === "week" || choice === "month" ? "More" : rangeDisplayTitle;
   const openFilters = () => {
@@ -624,6 +661,7 @@ export function ReportsTab({
             if (value === choice) return;
             playHaptic("tick");
             setTooltipOutsidePress((current) => current + 1);
+            announceHero.current = true;
             setChoice(value);
           }}
           onMore={openRanges}
@@ -633,15 +671,7 @@ export function ReportsTab({
         {report ? (
           <ReportHero
             delta={delta}
-            focusLabel={
-              focusedDay
-                ? focusedDay.start.toLocaleDateString(undefined, {
-                    weekday: "long",
-                    day: "numeric",
-                    month: "long",
-                  })
-                : null
-            }
+            focusLabel={focusLabel}
             period={reportHeroPeriod(choice, range)}
             spokenTotal={spokenReportDuration(heroSeconds)}
             theme={theme}
@@ -650,11 +680,12 @@ export function ReportsTab({
         ) : null}
         {report && choice === "week" && days.length === 7 ? (
           <ReportWeekColumns
-            animate={playBlocks}
+            animate={playBlocks && choice === "week"}
             days={days}
             focusedKey={focusedDay?.key ?? null}
             onFocus={(key) => {
               playHaptic("tick");
+              announceHero.current = true;
               setFocusedDayKey(key);
             }}
             theme={theme}
