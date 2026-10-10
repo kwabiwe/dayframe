@@ -7,7 +7,7 @@ function source(relativePath: string) {
 }
 
 const shell = source("./AppShell.tsx");
-const dashboard = source("./DashboardRealtime.tsx");
+const today = source("./today/TodayView.tsx");
 const timeline = source("./TimeReviewViews.tsx");
 const timer = source("./PersistentTimerBar.tsx");
 const categoryPicker = source("./CategoryPicker.tsx");
@@ -21,7 +21,8 @@ describe("persistent timer shell contract", () => {
   it("mounts one timer owner in the persistent shell and none in either page", () => {
     expect(shell.match(/<PersistentTimerBar/g)).toHaveLength(1);
     expect(shell).toContain("<AppShellRuntimeProvider>");
-    expect(dashboard).not.toContain("CurrentTimerPanel");
+    expect(today).not.toContain("CurrentTimerPanel");
+    expect(today).not.toContain("<PersistentTimerBar");
     expect(timeline).not.toContain("CurrentTimerPanel");
   });
 

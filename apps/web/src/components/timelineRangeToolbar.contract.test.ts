@@ -93,9 +93,10 @@ describe("Timeline range and toolbar contract", () => {
     expect(runtime).toContain("Date.now() - lastCommitAtRef.current >= BOOTSTRAP_FOCUS_RECONCILE_MIN_AGE_MS");
   });
 
-  it("keeps the shell date owner on Dashboard and makes Timeline shortcuts scope-aware", () => {
-    expect(shell).toContain('const showShellDateContext = pathname === "/"');
-    expect(shell).toContain('if (pathname === "/timeline")');
+  it("keeps date navigation on Timeline only (Today is always today) and makes its shortcuts scope-aware", () => {
+    expect(shell).toContain('const showDateNavigation = pathname === "/timeline"');
+    expect(shell).not.toContain("DateContextRow");
+    expect(shell).toContain('if (pathname !== "/timeline") return;');
     expect(shell).toContain('shiftTimelineState(timelineState, direction)');
     expect(shell.match(/window\.addEventListener\("keydown"/g)).toHaveLength(1);
   });

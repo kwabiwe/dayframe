@@ -4,9 +4,8 @@ import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import type { ReactNode } from "react";
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
-import { CheckCircle2, ChevronLeft, ChevronRight, Folder, Settings } from "lucide-react";
+import { CheckCircle2, Folder, Settings } from "lucide-react";
 import { AppShellRuntimeProvider, useAppShellRuntime } from "@/components/AppShellRuntime";
-import { DatePickerPopover } from "@/components/DatePickerPopover";
 import { DayframeBrand } from "@/components/brand/DayframeBrand";
 import { DayframeIcon } from "@/components/blocks/DayframeIcon";
 import { CommandPalette } from "@/components/blocks/CommandPalette";
@@ -16,7 +15,7 @@ import { PersistentTimerBar } from "@/components/PersistentTimerBar";
 import { SignOutControl } from "@/components/SignOutControl";
 import { ShellProfileIdentity, ShellProfileInitials, initials } from "@/components/ShellProfileIdentity";
 import { ThemeToggleButton } from "@/components/ThemeToggleButton";
-import { IconButton, ModalDialog, PopoverPanel } from "@/components/ui/Primitives";
+import { ModalDialog, PopoverPanel } from "@/components/ui/Primitives";
 import { clientFetch } from "@/lib/client-auth-fetch";
 import { basePaletteCommands, type PaletteCommand } from "@/lib/command-palette";
 import { isSearchShortcut, SEARCH_SHORTCUT_LABEL } from "@/lib/keyboard-shortcuts";
@@ -72,7 +71,6 @@ function AppShellContent({ children }: { children: ReactNode }) {
     loadDate,
     openManualEntry,
     refresh,
-    selectedDate,
     startTimer,
     toggleTimer
   } = useAppShellRuntime();
@@ -108,8 +106,7 @@ function AppShellContent({ children }: { children: ReactNode }) {
         return;
     }
   }, [openManualEntry, resolvedTheme, router, startTimer]);
-  const showDateNavigation = pathname === "/" || pathname === "/timeline";
-  const showShellDateContext = pathname === "/";
+  const showDateNavigation = pathname === "/timeline";
   const timelineState = useMemo(
     () => timelineStateFromSearchParams(searchParams),
     [searchParams]
@@ -137,32 +134,20 @@ function AppShellContent({ children }: { children: ReactNode }) {
     };
   }, []);
 
-  const navigateDate = useCallback((date: string) => {
-    if (!showDateNavigation) return;
-    const params = new URLSearchParams(searchParams.toString());
-    params.set("date", date);
-    router.push(`${pathname}?${params.toString()}`);
-  }, [pathname, router, searchParams, showDateNavigation]);
-
-  const previousDate = addDaysKey(selectedDate, -1);
-  const nextDate = addDaysKey(selectedDate, 1);
   const persistentTimer = <PersistentTimerBar workspaceMode={isTimeline} />;
   const navigatePeriod = useCallback(async (direction: "previous" | "next") => {
-    if (pathname === "/timeline") {
-      const nextState = shiftTimelineState(timelineState, direction);
-      const originSearch = searchParams.toString();
-      const outcome = await loadDate(nextState.date);
-      if (outcome.ok && window.location.search.slice(1) === originSearch) {
-        window.history.pushState(
-          null,
-          "",
-          timelineHref(searchParams.toString(), nextState)
-        );
-      }
-      return;
+    if (pathname !== "/timeline") return;
+    const nextState = shiftTimelineState(timelineState, direction);
+    const originSearch = searchParams.toString();
+    const outcome = await loadDate(nextState.date);
+    if (outcome.ok && window.location.search.slice(1) === originSearch) {
+      window.history.pushState(
+        null,
+        "",
+        timelineHref(searchParams.toString(), nextState)
+      );
     }
-    navigateDate(direction === "previous" ? previousDate : nextDate);
-  }, [loadDate, navigateDate, nextDate, pathname, previousDate, searchParams, timelineState]);
+  }, [loadDate, pathname, searchParams, timelineState]);
 
   useEffect(() => {
     function handleKeydown(event: KeyboardEvent) {
@@ -293,14 +278,6 @@ function AppShellContent({ children }: { children: ReactNode }) {
           <>
             <div className="swiss-persistent-timer-shell">
               {persistentTimer}
-              {showShellDateContext ? (
-                <DateContextRow
-                  selectedDate={selectedDate}
-                  onPrevious={() => navigateDate(previousDate)}
-                  onNext={() => navigateDate(nextDate)}
-                  onSelect={navigateDate}
-                />
-              ) : null}
             </div>
             <main>
               {libraryTab ? <LibraryTabs activeHref={libraryTab.href} /> : null}
@@ -361,31 +338,6 @@ function LibraryTabs({ activeHref }: { activeHref: string }) {
   );
 }
 
-function DateContextRow({
-  onNext,
-  onPrevious,
-  onSelect,
-  selectedDate
-}: {
-  onNext: () => void;
-  onPrevious: () => void;
-  onSelect: (date: string) => void;
-  selectedDate: string;
-}) {
-  const today = dateKey(new Date());
-  return (
-    <div className="swiss-date-context-row" aria-label="Date navigation">
-      <IconButton label="Previous day" onClick={onPrevious}><ChevronLeft size={19} /></IconButton>
-      <DatePickerPopover
-        label={formatLongDate(selectedDate)}
-        onChange={onSelect}
-        today={today}
-        value={selectedDate}
-      />
-      <IconButton label="Next day" onClick={onNext}><ChevronRight size={19} /></IconButton>
-    </div>
-  );
-}
 
 function ProfileWorkspacePopover({
   data,
@@ -467,21 +419,4 @@ function HelpDialog({ onClose }: { onClose: () => void }) {
       </div>
     </ModalDialog>
   );
-}
-
-function formatLongDate(date: string) {
-  const [year, month, day] = date.split("-").map(Number);
-  return new Intl.DateTimeFormat("en-GB", { weekday: "long", day: "2-digit", month: "long", year: "numeric" })
-    .format(new Date(year, month - 1, day));
-}
-
-function addDaysKey(date: string, days: number) {
-  const [year, month, day] = date.split("-").map(Number);
-  const next = new Date(year, month - 1, day);
-  next.setDate(next.getDate() + days);
-  return dateKey(next);
-}
-
-function dateKey(date: Date) {
-  return `${date.getFullYear()}-${`${date.getMonth() + 1}`.padStart(2, "0")}-${`${date.getDate()}`.padStart(2, "0")}`;
 }

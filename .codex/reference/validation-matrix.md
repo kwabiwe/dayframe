@@ -202,7 +202,7 @@ Required checks:
 - Offline queue fallback path.
 - Completed entry persistence.
 - No duplicate active timers.
-- Web Dashboard and Timeline render exactly one shell-owned timer. Navigate in both directions while it is active and while details/start time are being edited; active-entry identity, elapsed time and edits must remain continuous.
+- Web Today and Timeline render exactly one shell-owned timer. Navigate in both directions while it is active and while details/start time are being edited; active-entry identity, elapsed time and edits must remain continuous.
 - Delay a Timeline period response through the fetched-data/URL hand-off and verify the persistent timer retains stable shell data while period content stays URL-matched; it must never disappear.
 - Measure browser requests for one explicit start and one explicit stop. Each action, including `Space`, `Shift+Space` and quick-start keys 1–6, must emit exactly one timer mutation through the shell owner.
 - ⌘K palette (Blocks step 11c): open with Ctrl/⌘K, the sidebar Search button and the phone top-bar Search; check the empty list (pinned Starts, Go to, Add a block, theme, shortcuts), typing a section or activity, a two-character search returning Start again and Found rows, ↑/↓ wrap with `aria-activedescendant`, Enter and click run, Enter with no match starts a block, Esc closes and focus returns. At 375 px the palette sits above the tab bar with a 44 px close; Light and Dark.

@@ -102,7 +102,6 @@ describe("web manual entry and Timeline control refinement", () => {
   });
 
   it("keeps date navigation geometry stable through one shared picker", () => {
-    expect(shell).toContain("<DatePickerPopover");
     expect(timeline).toContain("<DatePickerPopover");
     expect(timeline).not.toContain("Selected day");
     expect(timeline).not.toContain("Selected week");
