@@ -128,10 +128,11 @@ export function monthGridLeadingBlanks(firstOfMonth: Date) {
 export const REPORT_STACK_MIN_SCALE_SECONDS = 12 * 3600;
 
 /**
- * Block heights in one day's stack, ranked biggest first. The stack holds 12 hours (the prototype's
- * scale) unless the busiest day in view holds more, so a long day rescales instead of overflowing.
- * Minimum heights and the gaps between blocks always fit the budget: blocks that cannot fit at the
- * minimum are left out (the smallest ones, last in rank), and the others shrink toward it.
+ * Block heights in one day's stack, in the given (display) order. The stack holds 12 hours (the
+ * prototype's scale) unless the busiest day in view holds more, so a long day rescales instead of
+ * overflowing. Minimum heights and the gaps between blocks always fit the budget: when not every
+ * block fits at the minimum, that day's smallest blocks are left out (height 0), and the others
+ * shrink toward it.
  */
 export function reportStackHeights(
   seconds: readonly number[],
@@ -142,12 +143,20 @@ export function reportStackHeights(
 ) {
   const scale = Math.max(REPORT_STACK_MIN_SCALE_SECONDS, busiestSeconds);
   const fit = Math.max(0, Math.floor((columnHeight + gap) / (minimumHeight + gap)));
-  const shown = seconds.slice(0, fit);
-  const budget = columnHeight - gap * Math.max(0, shown.length - 1);
-  let heights = shown.map((value) => Math.max(minimumHeight, (value / scale) * columnHeight));
+  const kept = new Set(
+    seconds
+      .map((value, index) => ({ value, index }))
+      .sort((left, right) => right.value - left.value || left.index - right.index)
+      .slice(0, fit)
+      .map((item) => item.index),
+  );
+  const budget = columnHeight - gap * Math.max(0, kept.size - 1);
+  let heights = seconds.map((value, index) =>
+    kept.has(index) ? Math.max(minimumHeight, (value / scale) * columnHeight) : 0,
+  );
   // Shrink the blocks above the minimum until the stack fits, keeping their proportions.
   for (let pass = 0; pass < 4 && heights.reduce((sum, h) => sum + h, 0) > budget + 0.01; pass += 1) {
-    const floor = heights.filter((h) => h <= minimumHeight).length * minimumHeight;
+    const floor = heights.filter((h) => h > 0 && h <= minimumHeight).length * minimumHeight;
     const flexible = heights.filter((h) => h > minimumHeight).reduce((sum, h) => sum + h, 0);
     if (flexible <= 0) break;
     const factor = Math.max(0, budget - floor) / flexible;

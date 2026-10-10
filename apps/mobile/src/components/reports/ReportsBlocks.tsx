@@ -227,7 +227,8 @@ export const ReportWeekColumns = memo(function ReportWeekColumns({
             testID={`reports-week-day-${day.key}`}
           >
             <View style={[styles.weekStack, { opacity: dimmed ? 0.35 : 1 }]}>
-              {day.segments.slice(0, heights.length).map((segment, index) => {
+              {day.segments.map((segment, index) => {
+                if (!heights[index]) return null;
                 const delay = order++ * 14;
                 return (
                   <Reanimated.View
@@ -306,9 +307,11 @@ export const ReportMonthGrid = memo(function ReportMonthGrid({
                   day.key === todayKey ? { borderColor: theme.accent, borderWidth: 1.5 } : null,
                 ]}
               >
-                {day.segments.slice(0, heights.length).map((segment, index) => (
-                  <View key={segment.key} style={[styles.monthBlock, { backgroundColor: segment.color, height: heights[index] }]} />
-                ))}
+                {day.segments.map((segment, index) =>
+                  heights[index] ? (
+                    <View key={segment.key} style={[styles.monthBlock, { backgroundColor: segment.color, height: heights[index] }]} />
+                  ) : null,
+                )}
                 <Text
                   {...mobileTextProps("metadata")}
                   accessible={false}
@@ -378,9 +381,10 @@ const styles = StyleSheet.create({
   heroLine: { flexDirection: "row", flexWrap: "wrap", alignItems: "center", gap: 8 },
   heroWords: { fontSize: 14 },
   delta: { overflow: "hidden", borderRadius: 999, paddingHorizontal: 9, paddingVertical: 3, fontSize: 12.5, fontWeight: "700", fontVariant: ["tabular-nums"] },
-  // Columns touch (no gap) so each is a full-width target: at least 44 points on a 375-point phone.
+  // Columns touch (no gap) so each is a full-width, 208-point-tall target: at least 44 points wide
+  // from a 375-point screen; Display Zoom at 320 points gives 41, and nothing overflows.
   weekCard: { flexDirection: "row", height: 236, borderRadius: 22, paddingHorizontal: 8, paddingTop: 16, paddingBottom: 12 },
-  weekColumn: { flex: 1, minHeight: 44, minWidth: 44, gap: 8, justifyContent: "flex-end", paddingHorizontal: 3.5 },
+  weekColumn: { flex: 1, minWidth: 0, gap: 8, justifyContent: "flex-end", paddingHorizontal: 3.5 },
   weekStack: { flex: 1, flexDirection: "column-reverse", gap: 3 },
   weekBlock: { borderRadius: 6 },
   weekLabel: { fontSize: 11, fontWeight: "700", textAlign: "center" },

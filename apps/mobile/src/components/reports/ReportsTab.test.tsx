@@ -716,6 +716,39 @@ describe("Blocks Reports owner (parity step 10a)", () => {
     act(() => tree.unmount());
   });
 
+  it("clears a focused day in the same change as a new range, so VoiceOver reads the range", async () => {
+    mocks.announce.mockReset();
+    const tree = await week();
+    const columns = tree.root.findByType("ReportWeekColumns" as never);
+    await act(async () => columns.props.onFocus(columns.props.days[0].key));
+    mocks.announce.mockReset();
+    await act(async () =>
+      tree.root.findByType("ReportRangeSwitch" as never).props.onChoose("month"),
+    );
+    expect(mocks.announce).toHaveBeenCalledTimes(1);
+    expect(mocks.announce.mock.calls[0][0]).toMatch(/framed in /);
+    expect(mocks.announce.mock.calls[0][0]).not.toContain(" on ");
+    act(() => tree.unmount());
+  });
+
+  it("hides the change pill when a re-read of a cached comparison fails", async () => {
+    let fail = false;
+    mocks.fetch.mockImplementation(async (input: ReportSummaryRequest) => {
+      if (input.buckets[0].key === "previous" && fail) throw new Error("offline");
+      return result(input);
+    });
+    const tree = await week();
+    expect(tree.root.findByType("ReportHero" as never).props.delta).not.toBeNull();
+    fail = true;
+    await act(async () =>
+      tree.update(
+        <ReportsTab data={{ ...data }} isFocused nowMs={nowMs} styles={{} as never} theme={{ mode: "dark", textMuted: "#707B91" } as never} />,
+      ),
+    );
+    expect(tree.root.findByType("ReportHero" as never).props.delta).toBeNull();
+    act(() => tree.unmount());
+  });
+
   it("hides the change pill when the previous read fails", async () => {
     mocks.fetch.mockImplementation(async (input: ReportSummaryRequest) => {
       if (input.buckets[0].key === "previous") throw new Error("offline");

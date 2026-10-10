@@ -117,8 +117,8 @@ describe("Blocks Reports pieces", () => {
       { backgroundColor: "#3B82F6", height: 14 },
       { backgroundColor: "#EF4444", height: 7 },
     ]);
-    // Columns touch, so each is a full-width target of at least 44 points.
-    expect(monday.props.style).toMatchObject({ minWidth: 44, minHeight: 44 });
+    // Columns touch and share the width (no minimum that could overflow a 320-point screen).
+    expect(monday.props.style).toMatchObject({ flex: 1, minWidth: 0 });
     const tuesday = tree.root.findByProps({ testID: "reports-week-day-2026-10-06" });
     expect(tuesday.props.accessibilityLabel).toContain("nothing framed");
     expect(tuesday.findAll((node) => node.props.style?.[1]?.opacity === 0.35)).toHaveLength(1);

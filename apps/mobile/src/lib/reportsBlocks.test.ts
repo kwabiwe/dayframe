@@ -103,13 +103,15 @@ describe("Blocks Reports helpers", () => {
   });
 
   it("keeps minimums and gaps inside the stack budget", () => {
-    const fits = (heights: number[], gap: number, budget: number) =>
-      heights.reduce((sum, h) => sum + h, 0) + gap * Math.max(0, heights.length - 1) <= budget;
+    const fits = (all: number[], gap: number, budget: number) => {
+      const heights = all.filter((h) => h > 0);
+      return heights.reduce((sum, h) => sum + h, 0) + gap * Math.max(0, heights.length - 1) <= budget;
+    };
     // Eight equal activities in a 12-hour day, Month cell: 24 points, 2-point minimum and gap.
     const eight = reportStackHeights(Array(8).fill(1.5 * 3600), 12 * 3600, 24, 2, 2);
-    expect(eight).toHaveLength(6);
+    expect(eight.filter((h) => h > 0)).toHaveLength(6);
     expect(fits(eight, 2, 24)).toBe(true);
-    expect(eight.every((h) => h >= 2)).toBe(true);
+    expect(eight.filter((h) => h > 0).every((h) => h >= 2)).toBe(true);
     // Sixteen in a week column: 170 points, 6-point minimum, 3-point gap.
     const sixteen = reportStackHeights(Array(16).fill(0.75 * 3600), 12 * 3600, 170, 6, 3);
     expect(fits(sixteen, 3, 170)).toBe(true);
@@ -117,6 +119,15 @@ describe("Blocks Reports helpers", () => {
     const mixed = reportStackHeights([11.9 * 3600, 60], 12 * 3600, 24, 2, 2);
     expect(mixed[1]).toBe(2);
     expect(fits(mixed, 2, 24)).toBe(true);
+  });
+
+  it("leaves out a day's smallest blocks, never its biggest, and keeps the display order", () => {
+    // Overall order puts six one-minute activities before this day's eight-hour one.
+    const day = [60, 60, 60, 60, 60, 60, 8 * 3600];
+    const heights = reportStackHeights(day, 12 * 3600, 24, 2, 2);
+    expect(heights[6]).toBeGreaterThan(2);
+    expect(heights.filter((h) => h > 0)).toHaveLength(6);
+    expect(heights[5]).toBe(0);
   });
 
   it("cuts this period at the same elapsed stretch, or not at all when last period was shorter", () => {

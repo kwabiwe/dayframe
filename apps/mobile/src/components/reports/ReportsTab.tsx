@@ -123,6 +123,7 @@ export function ReportsTab({
     summary: ReportSummary;
   } | null>(null);
   const [focusedDayKey, setFocusedDayKey] = useState<string | null>(null);
+  const [previousFailedKey, setPreviousFailedKey] = useState<string | null>(null);
   const blocksAnimated = useRef(false);
   // A user change (range, focus, filter) is read out once its hero is ready; VoiceOver focus stays
   // on the control, and iOS has no live regions.
@@ -272,8 +273,13 @@ export function ReportsTab({
         if (controller.signal.aborted || current !== generation.current) return;
         cache.current.put(previousKey, result);
         setPreviousLoaded({ key: previousKey, summary: result });
+        setPreviousFailedKey(null);
       })
-      .catch(() => undefined);
+      .catch(() => {
+        // A failed re-read hides the pill rather than showing an old comparison as current.
+        if (!controller.signal.aborted && current === generation.current)
+          setPreviousFailedKey(previousKey);
+      });
     return () => controller.abort();
   }, [previousKey, data, reload, isFocused, foreground]);
   // A new range or filter shows the whole range again.
@@ -438,6 +444,7 @@ export function ReportsTab({
             const current = activeFilterPresentation.current;
             if (current?.id !== filterPresentation.id) return false;
             announceHero.current = true;
+            setFocusedDayKey(null);
             setSelection(applyReportFilterDraft(current.draft));
             return true;
           }}
@@ -466,6 +473,7 @@ export function ReportsTab({
             if (activeDatePresentation.current?.id !== datePresentation.id)
               return false;
             announceHero.current = true;
+            setFocusedDayKey(null);
             setChoice(value);
             return true;
           }}
@@ -514,7 +522,9 @@ export function ReportsTab({
     ? focusedDay.seconds
     : (report?.selectedLoggedSeconds ?? 0);
   const previousSummary =
-    previousKey && previousLoaded?.key === previousKey
+    previousKey === previousFailedKey
+      ? undefined
+      : previousKey && previousLoaded?.key === previousKey
       ? previousLoaded.summary
       : previousKey
         ? cache.current.get(previousKey)
@@ -662,6 +672,7 @@ export function ReportsTab({
             playHaptic("tick");
             setTooltipOutsidePress((current) => current + 1);
             announceHero.current = true;
+            setFocusedDayKey(null);
             setChoice(value);
           }}
           onMore={openRanges}
