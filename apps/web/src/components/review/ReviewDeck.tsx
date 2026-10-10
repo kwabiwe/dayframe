@@ -236,6 +236,21 @@ export function ReviewDeck({ initialData }: { initialData: BootstrapData }) {
     if (!prefersReducedMotion()) setGhost({ key: ++enterSequence.current, item, draft, dir });
   }, [categories, decide, drafts, evidenceOpenId, revived, visibleIds]);
 
+  // An editor's close is fenced to the card that opened it: a late save from an earlier card's
+  // editor never closes the one open now. Focus inside the closing editor moves to the card.
+  const closeEvidence = useCallback((itemId: string) => {
+    if (evidenceOpenRef.current !== itemId) return;
+    const active = document.activeElement;
+    const focusInEditor = !active || active === document.body || Boolean(active.closest(".df-revidence"));
+    setEvidenceOpenId(null);
+    if (!focusInEditor) return;
+    requestAnimationFrame(() => {
+      const now = document.activeElement;
+      if (now && now !== document.body && now.isConnected) return;
+      cardRef.current?.querySelector<HTMLElement>(".df-ractions button:not(:disabled)")?.focus();
+    });
+  }, []);
+
   // Y / N / E / ↑ ↓ (prototype keys). Window capture runs before the shell's own keys (N focuses
   // the command bar elsewhere), so the deck owns them while a card is showing.
   useEffect(() => {
@@ -489,11 +504,12 @@ export function ReviewDeck({ initialData }: { initialData: BootstrapData }) {
                   categories={categories}
                   entries={entries}
                   initialCategoryId={selected.suggestedCategoryId}
-                  onClose={() => setEvidenceOpenId(null)}
+                  key={selected.id}
+                  onClose={() => closeEvidence(selected.id)}
                   onResolved={() => {
                     // The editor saved: a copy the deck kept is stale; fresh data decides now.
                     const resolvedId = selected.id;
-                    setEditorSnapshot(null);
+                    setEditorSnapshot((current) => (current?.id === resolvedId ? null : current));
                     setRevived((current) => {
                       if (!current.has(resolvedId)) return current;
                       const next = new Map(current);

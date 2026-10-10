@@ -11,11 +11,14 @@ vi.mock("next/navigation", () => ({
 }));
 
 // The real editor loads private evidence; a stub lets a test confirm (onResolved, then onClose) or close it.
+// "Stub hold" keeps the callbacks, like a save still in flight, for the test to finish later.
+const heldEditorCallbacks: Array<{ onClose: () => void; onResolved?: () => void }> = [];
 vi.mock("@/components/location/LocationReviewPanel", () => ({
   LocationReviewPanel: ({ onClose, onResolved }: { onClose: () => void; onResolved?: () => void }) => (
     <div>
       <button type="button" onClick={() => { onResolved?.(); onClose(); }}>Stub confirm</button>
       <button type="button" onClick={onClose}>Stub close</button>
+      <button type="button" onClick={() => heldEditorCallbacks.push({ onClose, onResolved })}>Stub hold</button>
     </div>
   )
 }));
@@ -62,7 +65,24 @@ const NOW = new Date(2026, 7, 17, 12, 0);
 const WALK = "30000000-0000-4000-8000-000000000001";
 const READ = "30000000-0000-4000-8000-000000000002";
 
+// Animation frames follow the fake clock, so focus hand-offs are deterministic.
+function fakeFrames() {
+  vi.spyOn(window, "requestAnimationFrame").mockImplementation((callback) => setTimeout(() => callback(Date.now()), 16) as unknown as number);
+  vi.spyOn(window, "cancelAnimationFrame").mockImplementation((handle) => clearTimeout(handle as unknown as ReturnType<typeof setTimeout>));
+}
+
+// Every root a test creates is unmounted afterwards, so one failing test never leaks into the next.
+const roots: Array<ReturnType<typeof createRoot>> = [];
+function trackedRoot(container: HTMLElement) {
+  const root = createRoot(container);
+  roots.push(root);
+  return root;
+}
+
 afterEach(() => {
+  // A root a test already unmounted unmounts again as a no-op.
+  for (const root of roots.splice(0)) act(() => root.unmount());
+  vi.restoreAllMocks();
   vi.useRealTimers();
   fetchMock.mockClear();
   sent.length = 0;
@@ -74,9 +94,10 @@ afterEach(() => {
 async function mount(items = [review(WALK, "Morning walk", "focus"), review(READ, "Reading", "admin")]) {
   vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout", "setInterval", "clearInterval"] });
   vi.setSystemTime(NOW);
+  fakeFrames();
   const container = document.createElement("div");
   document.body.append(container);
-  const root = createRoot(container);
+  const root = trackedRoot(container);
   await act(async () => root.render(
     <AppShellRuntimeProvider>
       <ReviewDeck initialData={bootstrap(items)} />
@@ -313,9 +334,10 @@ describe("Review round-2 fixes", () => {
   it("does not celebrate again when a refilled queue empties without this visit", async () => {
     vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout", "setInterval", "clearInterval"] });
     vi.setSystemTime(NOW);
+    fakeFrames();
     const container = document.createElement("div");
     document.body.append(container);
-    const root = createRoot(container);
+    const root = trackedRoot(container);
     const render = (items: ReviewItemRow[]) => act(async () => root.render(
       <AppShellRuntimeProvider>
         <ReviewDeck initialData={bootstrap(items)} />
@@ -369,9 +391,10 @@ describe("Review round-4 fixes", () => {
   async function controllable(items: ReviewItemRow[]) {
     vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout", "setInterval", "clearInterval"] });
     vi.setSystemTime(NOW);
+    fakeFrames();
     const container = document.createElement("div");
     document.body.append(container);
-    const root = createRoot(container);
+    const root = trackedRoot(container);
     const render = (next: ReviewItemRow[], reviewCount = next.length) => act(async () => root.render(
       <AppShellRuntimeProvider>
         <ReviewDeck initialData={bootstrap(next, reviewCount)} />
@@ -447,6 +470,39 @@ describe("Review round-4 fixes", () => {
     await openEditor();
     await act(async () => [...container.querySelectorAll<HTMLButtonElement>("button")].find((button) => button.textContent === "Stub confirm")!.click());
     expect(queue(container)).toEqual(["Reading"]);
+    await act(async () => root.unmount());
+  });
+
+  it("never lets an earlier card's late editor save close the editor open now", async () => {
+    const visitA = { ...review(WALK, "Visit A", "focus"), eventSource: "location_learning", eventType: "learned_place_visit", rawPayload: { algorithmVersion: "location-v2.0" } };
+    const visitB = { ...review(READ, "Visit B", "admin"), eventSource: "location_learning", eventType: "learned_place_visit", rawPayload: { algorithmVersion: "location-v2.0" } };
+    const { container, root } = await mount([visitA, visitB]);
+    const button = (label: string) => [...container.querySelectorAll<HTMLButtonElement>("button")].find((candidate) => candidate.textContent === label)!;
+    heldEditorCallbacks.length = 0;
+    await act(async () => button("Edit before logging").click());
+    await act(async () => button("Stub hold").click());
+    await act(async () => container.querySelectorAll<HTMLButtonElement>(".df-qrow")[1].click());
+    await act(async () => button("Edit before logging").click());
+    expect(title(container)).toBe("Visit B");
+    await act(async () => {
+      heldEditorCallbacks[0].onResolved?.();
+      heldEditorCallbacks[0].onClose();
+    });
+    expect(container.querySelector(".df-revidence")).not.toBeNull();
+    expect(title(container)).toBe("Visit B");
+    await act(async () => root.unmount());
+  });
+
+  it("hands focus to the card when the evidence editor confirms", async () => {
+    const visit = { ...review(WALK, "Visit", "focus"), eventSource: "location_learning", eventType: "learned_place_visit", rawPayload: { algorithmVersion: "location-v2.0" } };
+    const { container, root } = await mount([visit, review(READ, "Reading", "admin")]);
+    const button = (label: string) => [...container.querySelectorAll<HTMLButtonElement>("button")].find((candidate) => candidate.textContent === label)!;
+    await act(async () => button("Edit before logging").click());
+    const confirm = button("Stub confirm");
+    confirm.focus();
+    await act(async () => confirm.click());
+    await act(async () => vi.advanceTimersByTimeAsync(20));
+    expect(document.activeElement?.closest(".df-ractions")).not.toBeNull();
     await act(async () => root.unmount());
   });
 
