@@ -244,12 +244,13 @@ export function ribbonHitAt(
   entries: ReadonlyArray<{ id: string; fromMs: number; toMs: number; startedMs?: number }>,
   pending: ReadonlyArray<{ id: string; fromMs: number; toMs: number }>
 ): RibbonHit {
-  // The ribbon paints later-started blocks on top; two blocks clipped to the same midnight
-  // still differ by when they really started.
+  // The ribbon paints in `todayBlocks` order reversed: later start on top, then the larger ID.
+  // Two blocks clipped to the same midnight still differ by when they really started.
   let hit: { id: string; order: number } | null = null;
   for (const entry of entries) {
     const order = entry.startedMs ?? entry.fromMs;
-    if (atMs >= entry.fromMs && atMs <= entry.toMs && (!hit || order >= hit.order)) hit = { id: entry.id, order };
+    if (atMs < entry.fromMs || atMs > entry.toMs) continue;
+    if (!hit || order > hit.order || (order === hit.order && entry.id.localeCompare(hit.id) > 0)) hit = { id: entry.id, order };
   }
   if (hit) return { kind: "entry", id: hit.id };
   const span = pending.find((item) => atMs >= item.fromMs && atMs <= item.toMs);

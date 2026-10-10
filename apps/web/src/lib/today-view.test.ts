@@ -216,6 +216,13 @@ describe("ribbon details", () => {
     expect(ribbonHitAt(150, entries, [])).toEqual({ kind: "entry", id: "older" });
   });
 
+  it("breaks an equal-start tie the way the ribbon paints it (larger ID on top), in any input order", () => {
+    const a = { id: "a", fromMs: 0, toMs: 100, startedMs: 0 };
+    const b = { id: "b", fromMs: 0, toMs: 100, startedMs: 0 };
+    expect(ribbonHitAt(50, [a, b], [])).toEqual({ kind: "entry", id: "b" });
+    expect(ribbonHitAt(50, [b, a], [])).toEqual({ kind: "entry", id: "b" });
+  });
+
   it("places hour marks by local wall-clock time", () => {
     const start = at(10, 0);
     expect(hourPercent(start, localDayEnd(start), 6)).toBeCloseTo(25);
