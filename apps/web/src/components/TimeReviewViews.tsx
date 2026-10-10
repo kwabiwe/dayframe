@@ -1204,11 +1204,15 @@ export function CalendarReview({
                     className={`calendar-review-block${item.color ? " df-block" : ""}`}
                     href="/review"
                     key={`review:${item.id}`}
+                    tabIndex={visibleSelectedTarget ? -1 : undefined}
                     onClick={(event) => {
                       // A press an open editor took for its own dismissal (and any discard
                       // prompt) only dismisses, as on blank time: it never also leaves Calendar.
                       const pointer = reviewLinkPointerRef.current;
+                      // While an editor is open its draft owns the page: a keyboard activation
+                      // (no pointer to consume) never leaves for Review either.
                       if (
+                        (event.detail === 0 && selectedTargetRef.current) ||
                         pressConsumedByEditorRef.current ||
                         (pointer && calendarPointerMatchesConsumed(consumedPointerRef.current, pointer))
                       ) {

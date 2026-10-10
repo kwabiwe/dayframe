@@ -43,6 +43,11 @@ function installEditorGeometry() {
     configurable: true,
     value: (query: string) => ({ matches: true, media: query, addEventListener: vi.fn(), removeEventListener: vi.fn(), addListener: vi.fn(), removeListener: vi.fn() })
   });
+  for (const name of ["setPointerCapture", "releasePointerCapture"] as const) {
+    Object.defineProperty(HTMLElement.prototype, name, { configurable: true, value: () => undefined });
+  }
+  Object.defineProperty(HTMLElement.prototype, "hasPointerCapture", { configurable: true, value: () => false });
+  Object.defineProperty(document, "elementFromPoint", { configurable: true, value: () => null });
   const box = (x: number, y: number, width: number, height: number) =>
     ({ x, y, left: x, top: y, width, height, right: x + width, bottom: y + height, toJSON: () => ({}) }) as DOMRect;
   vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function rect(this: HTMLElement) {
@@ -135,6 +140,24 @@ describe("Calendar in Blocks", () => {
     await act(async () => press(2));
     window.removeEventListener("click", record);
     expect(navigations).toEqual([true, false]);
+  });
+
+  it("keeps suggestions out of the tab order and inert to Enter while an editor is open", async () => {
+    installEditorGeometry();
+    renderCalendar(
+      [entry({ id: "a", categoryId: "focus", categoryName: "Focus", categoryColor: "mint", startedAt: local(9), stoppedAt: local(10) })],
+      [review({ id: "r1", title: "Gym visit", suggestedStartedAt: local(7), suggestedStoppedAt: local(8) })]
+    );
+    const link = document.querySelector<HTMLAnchorElement>(".calendar-review-block")!;
+    expect(link.getAttribute("tabindex")).toBeNull();
+    await act(async () => {
+      document.querySelector<HTMLButtonElement>('[data-entry-id="a"] .calendar-entry-primary')!.click();
+    });
+    expect(link.getAttribute("tabindex")).toBe("-1");
+    // A keyboard activation is a click with detail 0.
+    const click = new MouseEvent("click", { bubbles: true, cancelable: true, detail: 0 });
+    link.dispatchEvent(click);
+    expect(click.defaultPrevented).toBe(true);
   });
 
   it("labels each day heading with its full date and its logged total", () => {
