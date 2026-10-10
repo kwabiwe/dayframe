@@ -1,6 +1,7 @@
 "use client";
 
 import type { CSSProperties } from "react";
+import { useEffect, useRef } from "react";
 import { springTransition } from "@/lib/blocks-motion";
 
 /**
@@ -11,18 +12,27 @@ import { springTransition } from "@/lib/blocks-motion";
  */
 export function BlocksToast({
   actionLabel,
+  autoFocusAction = false,
   exiting = false,
   message,
   onAction,
   swatchStyle
 }: {
   actionLabel?: string;
+  /** Move focus to the action when the toast appears (when the surface that was focused just went away). */
+  autoFocusAction?: boolean;
   exiting?: boolean;
   message: string;
   onAction?: () => void;
   swatchStyle?: CSSProperties;
 }) {
   const pop = springTransition("pop");
+  const actionRef = useRef<HTMLButtonElement | null>(null);
+  useEffect(() => {
+    if (!autoFocusAction || exiting) return;
+    const frame = window.requestAnimationFrame(() => actionRef.current?.focus());
+    return () => window.cancelAnimationFrame(frame);
+  }, [autoFocusAction, exiting]);
   return (
     <div className="df-toast-host">
       <div
@@ -35,7 +45,7 @@ export function BlocksToast({
         <span className="df-toast-swatch" style={swatchStyle} aria-hidden="true" />
         <span className="df-toast-message">{message}</span>
         {actionLabel && onAction ? (
-          <button className="df-toast-action" disabled={exiting} onClick={onAction} type="button">
+          <button className="df-toast-action" disabled={exiting} onClick={onAction} ref={actionRef} type="button">
             {actionLabel}
           </button>
         ) : null}
