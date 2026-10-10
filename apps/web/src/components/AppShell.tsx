@@ -36,6 +36,7 @@ import { formatDuration, formatTime } from "@/lib/format";
 import type { GlobalSearchResult } from "@/lib/global-search";
 import { isSearchShortcut, SEARCH_SHORTCUT_LABEL } from "@/lib/keyboard-shortcuts";
 import type { BootstrapData } from "@/lib/queries";
+import { hasOpenDialog } from "@/lib/keyboard-ownership";
 import {
   GO_TO_SEQUENCE_MS,
   LIBRARY_TABS,
@@ -654,11 +655,6 @@ function buildSearchResults(data: BootstrapData | null, query: string): SearchRe
   ];
   if (!needle) return results.slice(0, 8);
   return results.filter((result) => `${result.label} ${result.detail} ${result.group}`.toLowerCase().includes(needle)).slice(0, 12);
-}
-
-function hasOpenDialog() {
-  return Array.from(document.querySelectorAll<HTMLElement>("[role='dialog'], [aria-modal='true'], dialog[open]"))
-    .some((element) => !element.closest("[aria-hidden='true'], [inert], [hidden]") && element.getClientRects().length > 0);
 }
 
 function isTypingTarget(target: EventTarget | null) {

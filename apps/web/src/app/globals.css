@@ -10747,6 +10747,7 @@ dialog.ui-dialog.manual-entry-dialog {
     display: flex;
     height: 100vh;
     height: 100dvh;
+    min-height: 0;
     flex-direction: column;
     overflow: hidden;
   }

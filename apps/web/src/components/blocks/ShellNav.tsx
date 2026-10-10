@@ -27,6 +27,7 @@ export function ShellSidebarNav({ activeId, reviewCount }: { activeId: ShellSect
     if (!thumb || !nav) return;
     const link = activeId ? nav.querySelector<HTMLElement>(`[data-section="${activeId}"]`) : null;
     if (!link) {
+      thumb.style.transition = "opacity 140ms ease-out";
       thumb.style.opacity = "0";
       return;
     }

@@ -86,3 +86,21 @@ describe("Blocks shell contract", () => {
     expect(shellCss).toMatch(/\.df-tabbar \{[^}]*bottom: calc\(10px \+ env\(safe-area-inset-bottom, 0px\)\);/s);
   });
 });
+
+describe("G sequence guard", () => {
+  const shell = readFileSync(`${process.cwd()}/src/components/AppShell.tsx`, "utf8");
+
+  it("uses the shared keyboard-ownership check (tested in lib/keyboard-ownership.dom.test.ts)", () => {
+    expect(shell).toContain('import { hasOpenDialog } from "@/lib/keyboard-ownership";');
+  });
+});
+
+describe("Settings thumb fade", () => {
+  it("fades the thumb out even when it was last placed without travel", () => {
+    setReducedMotion(false);
+    const { rerender } = render(<ShellSidebarNav activeId="today" reviewCount={0} />);
+    rerender(<ShellSidebarNav activeId={null} reviewCount={0} />);
+    expect(thumb().style.transition).toBe("opacity 140ms ease-out");
+    expect(thumb().style.opacity).toBe("0");
+  });
+});
