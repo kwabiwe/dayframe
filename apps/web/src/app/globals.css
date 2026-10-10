@@ -10468,7 +10468,7 @@ dialog.ui-dialog.manual-entry-dialog {
 }
 
 .df-cmd.is-live {
-  box-shadow: var(--shadow-soft), inset 0 0 0 2px color-mix(in oklab, var(--block) 70%, transparent);
+  box-shadow: var(--shadow-soft), inset 0 0 0 2px color-mix(in oklab, var(--block, var(--text-muted)) 70%, transparent);
 }
 
 .df-cmd-activity-field {

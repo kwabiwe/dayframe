@@ -116,6 +116,48 @@ describe("AppShellRuntime latest timer intent", () => {
   });
 });
 
+describe("AppShellRuntime rejected Start", () => {
+  beforeEach(() => vi.resetAllMocks());
+
+  for (const typeMeanwhile of [false, true]) {
+    it(typeMeanwhile
+      ? "keeps text typed while a rejected Start was pending"
+      : "keeps the started command in the bar after a rejected Start", async () => {
+      const idle = bootstrap(null);
+      let rejectStart: (() => void) | undefined;
+      mocks.clientFetch.mockImplementation(async (url: string) => {
+        if (url === "/api/time-entries") {
+          await new Promise<void>((resolve) => { rejectStart = resolve; });
+          return response({ error: "Server unavailable" }, 503);
+        }
+        if (url.startsWith("/api/bootstrap")) return response(idle);
+        if (url === "/api/timer-state") return response({ activeEntryId: null, updatedAt: null, serverNow: "2026-08-17T05:00:03.000Z" });
+        return response({}, 404);
+      });
+
+      render(
+        <AppShellRuntimeProvider>
+          <PersistentTimerBar />
+          <TimerIntentHarness initial={idle} />
+        </AppShellRuntimeProvider>
+      );
+      fireEvent.click(screen.getByRole("button", { name: "Hydrate timer A" }));
+      const description = await screen.findByLabelText("Task description") as HTMLInputElement;
+      fireEvent.change(description, { target: { value: "Plan @focus" } });
+      fireEvent.click(screen.getByRole("button", { name: "Start timer" }));
+      await waitFor(() => expect(rejectStart).toBeDefined());
+      await waitFor(() => expect(screen.getByTestId("active-timer").textContent).toBe("Focus"));
+      if (typeMeanwhile) fireEvent.change(description, { target: { value: "Updated plan" } });
+
+      await act(async () => { rejectStart?.(); });
+      await waitFor(() => expect(screen.getByTestId("active-timer").textContent).toBe("idle"));
+      await waitFor(() => expect((screen.getByLabelText("Task description") as HTMLInputElement).value)
+        .toBe(typeMeanwhile ? "Updated plan" : "Plan"));
+      expect(screen.getByRole("button", { name: "Activity: Focus" })).not.toBeNull();
+    });
+  }
+});
+
 function TimerIntentHarness({ initial }: { initial: BootstrapData }) {
   const { data, hydrate } = useAppShellRuntime();
   return <>

@@ -220,6 +220,7 @@ export async function runTimerStartMutation({
   getCurrentDraft,
   getCurrentSnapshot,
   onAccepted,
+  onRollback,
   commit,
   setDraft,
   setBusy,
@@ -236,6 +237,8 @@ export async function runTimerStartMutation({
   getCurrentDraft?: () => TimerDraft;
   getCurrentSnapshot?: () => BootstrapData;
   onAccepted?: () => void;
+  /** Called just before a rejected Start restores the snapshot, with the draft the bar keeps. */
+  onRollback?: (keptDraft: TimerDraft, restoredEntryId: string | null) => void;
   commit: (data: BootstrapData) => void;
   setDraft: (draft: TimerDraft) => void;
   setBusy: (busy: boolean) => void;
@@ -258,17 +261,16 @@ export async function runTimerStartMutation({
       await send(timerStartRequestPayload(draft));
       return { ok: true } as const;
     } catch (error) {
+      // A failed switch returns to the entry that is still running, with its own details (a
+      // draft typed for the rejected entry must not be saved onto it). From idle, keep anything
+      // typed while the Start was pending, otherwise what was started, so a retry is one press.
+      const latestDraft = getCurrentDraft?.() ?? draft;
+      const keptDraft = acceptedSnapshot.activeEntry
+        ? timerDraftForEntry(acceptedSnapshot.activeEntry)
+        : timerDraftsEqual(latestDraft, draft) ? draft : latestDraft;
+      onRollback?.(keptDraft, acceptedSnapshot.activeEntry?.id ?? null);
       commit(acceptedSnapshot);
-      if (acceptedSnapshot.activeEntry) {
-        // A failed switch returns to the entry that is still running, with its own details;
-        // a draft typed for the rejected entry must not be saved onto it.
-        setDraft(timerDraftForEntry(acceptedSnapshot.activeEntry));
-      } else {
-        // From idle, keep anything typed while the Start was pending, otherwise what was
-        // started, so a retry is one press.
-        const latestDraft = getCurrentDraft?.() ?? draft;
-        setDraft(timerDraftsEqual(latestDraft, draft) ? draft : latestDraft);
-      }
+      setDraft(keptDraft);
       const message = timerStartErrorMessage(error);
       setError(message);
       return { ok: false, error: message } as const;
