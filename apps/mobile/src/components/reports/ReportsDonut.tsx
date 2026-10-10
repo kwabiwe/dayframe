@@ -52,6 +52,7 @@ export function reportPercent(seconds: number, total: number) {
 export const ReportDonutCard = memo(function ReportDonutCard({
   empty,
   numberWidths,
+  onScrubbingChange,
   periodLabel,
   segments,
   theme,
@@ -60,6 +61,11 @@ export const ReportDonutCard = memo(function ReportDonutCard({
   /** Shown instead of the rows when nothing is selected or nothing was framed. */
   empty: string | null;
   numberWidths: { duration: number; percent: number; fontSize: number; gap: number };
+  /**
+   * True while a finger is on the ring. The screen's scroll view turns scrolling off for that time:
+   * refusing the JS responder alone does not stop the native iOS scroll pan.
+   */
+  onScrubbingChange?: (scrubbing: boolean) => void;
   periodLabel: string;
   segments: readonly ReportDonutSegment[];
   theme: MobileTheme;
@@ -81,6 +87,16 @@ export const ReportDonutCard = memo(function ReportDonutCard({
     setHot(key);
     if (key) playHaptic("tick");
   };
+  const scrubbing = useRef(false);
+  const setScrubbing = (next: boolean) => {
+    if (scrubbing.current === next) return;
+    scrubbing.current = next;
+    onScrubbingChange?.(next);
+  };
+  // An unmount mid-scrub (range change, tab switch) must never leave the page unscrollable.
+  useEffect(() => () => {
+    if (scrubbing.current) onScrubbingChange?.(false);
+  }, []);
   const scrub = (event: GestureResponderEvent) => {
     const { locationX, locationY } = event.nativeEvent;
     choose(donutSegmentAt(segments, donutTurn(locationX, locationY)));
@@ -120,8 +136,13 @@ export const ReportDonutCard = memo(function ReportDonutCard({
           }}
           onAccessibilityAction={(event) => step(event.nativeEvent.actionName === "increment" ? 1 : -1)}
           onMoveShouldSetResponder={() => segments.length > 0}
-          onResponderGrant={scrub}
+          onResponderGrant={(event) => {
+            setScrubbing(true);
+            scrub(event);
+          }}
           onResponderMove={scrub}
+          onResponderRelease={() => setScrubbing(false)}
+          onResponderTerminate={() => setScrubbing(false)}
           onResponderTerminationRequest={() => false}
           onStartShouldSetResponder={() => segments.length > 0}
           style={styles.donut}
@@ -213,7 +234,7 @@ export const ReportDonutCard = memo(function ReportDonutCard({
                 <Text
                   {...mobileTextProps("numeric")}
                   numberOfLines={1}
-                  style={[styles.rowNumber, { color: theme.textMuted, fontSize: numberWidths.fontSize - 1.5, width: numberWidths.percent }]}
+                  style={[styles.rowNumber, { color: theme.textSecondary, fontSize: numberWidths.fontSize - 1.5, width: numberWidths.percent }]}
                 >
                   {percent}
                 </Text>

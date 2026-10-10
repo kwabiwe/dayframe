@@ -130,10 +130,8 @@ Reanimated owns the Blocks transitions on Today. The card slot, the quick-start 
 
 Reports Revision 3 uses one fixed six-week calendar frame for month fades, not two
 in-flow months. Outgoing calendar/row/donut visuals must cease interaction and
-accessibility immediately. Donut exits retain IDs until zero-sweep completion;
-cleanup checks the current transition generation and desired IDs so rapid removal,
-restore and removal cannot delete a newer visual. Survivors interpolate to the
-selected-only denominator. Category changes occur only through filter-sheet Apply;
+accessibility immediately. (The animated donut and its exit rules were replaced by
+the static Blocks ring in step 10b; see "Reports donut and filter" below.) Category changes occur only through filter-sheet Apply;
 informational rows/slices never move focus. Month fade copies are immediately
 touch/AX hidden; queued taps validate the current generation, including A–B–A.
 One bounded
@@ -293,14 +291,14 @@ Block pull-to-refresh:
 ## Reports top (Blocks parity step 10a)
 
 - Trigger: Week / Month / More, tapping a week column, Apply in the filter or date sheet, data arriving.
-- Owner: `ReportRangeSwitch` owns its thumb (one shared value pair, `BLOCKS_SPRING.control`; the first measurement places it without movement). The week columns' blocks grow from the bottom with `BLOCKS_SPRING.land`, 14 ms apart, once per mount when the first week with data appears (`growEntering`); later data, focus and range changes repaint in place. Focusing a day changes the hero text and the other columns' opacity at once. The goal streak enters with the shared presence fade. The donut keeps its existing entrance. Week/Month and day taps play the `tick` haptic.
+- Owner: `ReportRangeSwitch` owns its thumb (one shared value pair, `BLOCKS_SPRING.control`; the first measurement places it without movement). The week columns' blocks grow from the bottom with `BLOCKS_SPRING.land`, 14 ms apart, once per mount when the first week with data appears (`growEntering`); later data, focus and range changes repaint in place. Focusing a day changes the hero text and the other columns' opacity at once. The goal streak enters with the shared presence fade. The donut has no entrance (step 10b replaced the animated Revision 3 donut; it is drawn at rest). Week/Month and day taps play the `tick` haptic.
 - Interruption: changing range or filter during a focus clears the focus; a late previous-period read for an old range is ignored (keyed by its exact request).
 - Accessibility: Reduce Motion places the thumb without a spring and shows the columns without the grow; the hero is one live-region element ("19 hours 47 minutes framed this week. 19 hours 47 minutes more than last week so far"); each column is a 44-point button with its day and total, selected while focused.
 
 ## Reports donut and filter (Blocks parity step 10b)
 
 - Trigger: a finger on the ring, a row tap, VoiceOver increment/decrement, All / None / a row in the filter sheet.
-- Owner: `ReportDonutCard` owns the highlighted activity; the highlight changes stroke width and opacity at once (no animation), the centre text and the row background change in the same render. The ring takes the touch with the responder system and refuses to hand it to the scroll view until release, so scrubbing never scrolls the page. The filter sheet keeps `SwipeDismissSheet` as its only transition owner.
+- Owner: `ReportDonutCard` owns the highlighted activity; the highlight changes stroke width and opacity at once (no animation), the centre text and the row background change in the same render. The ring takes the touch with the responder system and refuses to hand it over until release; while a finger is on it the Reports scroll view turns `scrollEnabled` off (refusing the JS responder alone does not stop the native iOS pan), and release, termination or unmount turn it back on, so scrubbing never scrolls the page. The filter sheet keeps `SwipeDismissSheet` as its only transition owner.
 - Interruption: a range or filter change that removes the highlighted activity clears the highlight; releasing the finger keeps the last highlight (tap its row, or step past the last activity, to return to the total).
 - Accessibility: nothing moves, so Reduce Motion needs no other path; the ring is adjustable for VoiceOver; rows are 44-point buttons with their full name, percentage and duration; the `tick` haptic follows the Dayframe haptics setting.
 

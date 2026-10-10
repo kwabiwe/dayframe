@@ -34,3 +34,28 @@ export function reportNumericColumns(
     durationSample: `${"8".repeat(hours)}:88:88`,
   };
 }
+
+/**
+ * Columns for the Blocks activity rows, which show compact durations ("12h 30m", "45m"): the sample
+ * is the widest compact form at the actual hour-digit capacity, measured natively after layout.
+ */
+export function reportCompactNumericColumns(
+  width: number,
+  fontScale: number,
+  durations: string[],
+) {
+  const hours = Math.max(1, ...durations.map((s) => /^(\d+)h/.exec(s)?.[1].length ?? 1));
+  const sample = `${"8".repeat(hours)}h 88m`;
+  const scale = Math.min(Math.max(1, fontScale), REPORT_TEXT_CAP.numeric);
+  const gap = 10;
+  const usable = width - 14 - gap * 3 - 72; // swatch, gaps, minimum name space
+  const fontSize = Math.max(12, Math.min(14, usable / ((sample.length + 4) * 0.72 * scale)));
+  const cell = fontSize * scale * 0.72;
+  return {
+    fontSize,
+    gap,
+    percentWidth: Math.ceil(4 * cell),
+    durationWidth: Math.ceil(sample.length * cell),
+    durationSample: sample,
+  };
+}

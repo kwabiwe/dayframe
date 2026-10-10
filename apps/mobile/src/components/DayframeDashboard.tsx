@@ -301,6 +301,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
   const [calendarEditEntry, setCalendarEditEntry] = useState<NativeCalendarEntry | null>(null);
   const [calendarEditPresentation, setCalendarEditPresentation] = useState<TimeEntrySheetPresentation | null>(null);
   const [calendarTransitionDirection, setCalendarTransitionDirection] = useState(1);
+  const [reportsScrubbing, setReportsScrubbing] = useState(false);
   const [authView, setAuthView] = useState<AuthView>("login");
   const [authEmail, setAuthEmail] = useState("");
   const [authPassword, setAuthPassword] = useState("");
@@ -2912,6 +2913,8 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
         <ScrollView
           contentContainerStyle={[styles.container, styles.reportsScrollContent]}
           directionalLockEnabled
+          // Scrubbing the Reports donut owns the finger; iOS cancels the page pan when this turns off.
+          scrollEnabled={!reportsScrubbing}
           keyboardShouldPersistTaps="handled"
           refreshControl={
             <RefreshControl
@@ -2939,6 +2942,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
               data={data}
               isFocused={isFocused}
               nowMs={now}
+              onScrubbingChange={setReportsScrubbing}
               styles={styles}
               theme={theme}
             />

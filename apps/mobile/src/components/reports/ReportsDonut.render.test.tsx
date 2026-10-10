@@ -84,6 +84,34 @@ describe("Reports donut", () => {
     expect(donut().props.accessibilityValue.text).toBe("This week, 4 hours, 2 activities");
   });
 
+  it("turns page scrolling off for exactly the time a finger is on the ring", () => {
+    const onScrubbingChange = vi.fn();
+    let tree!: ReturnType<typeof create>;
+    act(() => {
+      tree = create(<ReportDonutCard empty={null} numberWidths={widths} onScrubbingChange={onScrubbingChange} periodLabel="This week" segments={segments} theme={theme} totalSeconds={4 * 3600} />);
+    });
+    const donut = () => tree.root.findByProps({ testID: "reports-donut" });
+    act(() => donut().props.onResponderGrant(touch(168, 84)));
+    act(() => donut().props.onResponderMove(touch(160, 120)));
+    expect(onScrubbingChange.mock.calls).toEqual([[true]]);
+    act(() => donut().props.onResponderRelease());
+    expect(onScrubbingChange.mock.calls).toEqual([[true], [false]]);
+    act(() => donut().props.onResponderGrant(touch(168, 84)));
+    act(() => donut().props.onResponderTerminate());
+    expect(onScrubbingChange.mock.calls).toEqual([[true], [false], [true], [false]]);
+    // Unmounting mid-scrub hands scrolling back.
+    act(() => donut().props.onResponderGrant(touch(168, 84)));
+    act(() => tree.unmount());
+    expect(onScrubbingChange.mock.calls.at(-1)).toEqual([false]);
+  });
+
+  it("keeps percentages in secondary text, not the muted token", () => {
+    const tree = render();
+    const work = tree.root.findByProps({ testID: "reports-activity-work" });
+    const texts = work.findAllByType("Text" as never);
+    expect(texts.at(-1)!.props.style[1].color).toBe("#8993A7");
+  });
+
   it("drops a highlight whose activity leaves the range or filter", () => {
     const tree = render();
     act(() => tree.root.findByProps({ testID: "reports-activity-gym" }).props.onPress());

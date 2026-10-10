@@ -27,7 +27,7 @@ import {
   reportHeroSpokenLabel,
   weekGoalDays,
 } from "../../lib/reportsBlocks";
-import { REPORT_TEXT_CAP, reportNumericColumns } from "@/lib/reportsTypography";
+import { REPORT_TEXT_CAP, reportCompactNumericColumns } from "@/lib/reportsTypography";
 import { paletteColorFor, type ReportSummary } from "@dayframe/shared";
 import type { MobileBootstrap } from "@/lib/api";
 import type { MobileStyles, MobileTheme } from "@/lib/mobileTheme";
@@ -81,6 +81,7 @@ export function ReportsTab({
   data,
   initialChoice = "week",
   isFocused,
+  onScrubbingChange,
   nowMs,
   styles,
   theme,
@@ -89,6 +90,8 @@ export function ReportsTab({
   /** Week, as in the prototype; tests start other ranges directly. */
   initialChoice?: ReportRangeChoice;
   isFocused: boolean;
+  /** The donut is being scrubbed: the screen's scroll view turns scrolling off meanwhile. */
+  onScrubbingChange?: (scrubbing: boolean) => void;
   nowMs: number;
   styles: MobileStyles;
   theme: MobileTheme;
@@ -361,7 +364,7 @@ export function ReportsTab({
     ],
   );
   const universe = filterOptions.map((option) => option.key);
-  const columns = reportNumericColumns(
+  const columns = reportCompactNumericColumns(
     contentWidth,
     fontScale,
     segments.map((s) => compactDuration(s.durationMs / 1000)),
@@ -752,6 +755,7 @@ export function ReportsTab({
                 gap: columns.gap,
                 percent: columns.percentWidth,
               }}
+              onScrubbingChange={onScrubbingChange}
               periodLabel={donutPeriodLabel}
               segments={segments.map((segment) => ({
                 key: segment.key,
