@@ -266,11 +266,8 @@ export function PersistentTimerBar({ workspaceMode = false }: { workspaceMode?: 
       setCommandNotice(`Added ${formatDuration(command.durationSeconds)}${activityName ? ` to ${activityName}` : ""}.`);
       return;
     }
-    const outcome = await startTimer({ categoryId, description: command.description, tagNames: submitted.tagNames });
-    if (!outcome.ok) {
-      // A rejected Start rolls the draft back; keep what was typed so Retry is one press.
-      setTimerDraft((current) => (current.description || current.tagNames.length || isUntouched(current) ? current : submitted));
-    }
+    // A rejected Start keeps the started details (or anything typed meanwhile) in the bar.
+    await startTimer({ categoryId, description: command.description, tagNames: submitted.tagNames });
   }
 
   function startQuickAction(action: QuickAction) {

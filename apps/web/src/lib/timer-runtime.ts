@@ -259,7 +259,16 @@ export async function runTimerStartMutation({
       return { ok: true } as const;
     } catch (error) {
       commit(acceptedSnapshot);
-      setDraft(timerDraftForEntry(acceptedSnapshot.activeEntry));
+      if (acceptedSnapshot.activeEntry) {
+        // A failed switch returns to the entry that is still running, with its own details;
+        // a draft typed for the rejected entry must not be saved onto it.
+        setDraft(timerDraftForEntry(acceptedSnapshot.activeEntry));
+      } else {
+        // From idle, keep anything typed while the Start was pending, otherwise what was
+        // started, so a retry is one press.
+        const latestDraft = getCurrentDraft?.() ?? draft;
+        setDraft(timerDraftsEqual(latestDraft, draft) ? draft : latestDraft);
+      }
       const message = timerStartErrorMessage(error);
       setError(message);
       return { ok: false, error: message } as const;

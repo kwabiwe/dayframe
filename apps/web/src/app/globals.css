@@ -10741,10 +10741,6 @@ button.df-cmd-clock:hover {
     row-gap: 0;
   }
 
-  .df-cmd-wrap.is-idle .df-cmd-time {
-    display: none;
-  }
-
   .df-cmd-time {
     justify-self: start;
   }
@@ -10781,6 +10777,15 @@ button.df-cmd-clock:hover {
 
   .df-quick-button kbd {
     display: none;
+  }
+}
+
+/* Between phone and desktop the clock sits at the start of its own row, so its start-time
+   editor opens from the left edge rather than hanging off it (phones use the bottom sheet). */
+@media (min-width: 561px) and (max-width: 860px) {
+  .df-cmd-time .swiss-start-time-popover {
+    right: auto;
+    left: 0;
   }
 }
 

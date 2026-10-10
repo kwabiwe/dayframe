@@ -42,17 +42,6 @@ describe("Blocks command timer", () => {
     expect(screen.getByText("Added 45m to Focus.")).not.toBeNull();
   });
 
-  it("puts a rejected shorthand Start back in the bar, unless something newer was typed", async () => {
-    runtime = runtimeFixture({ description: "Plan launch @focus" });
-    (runtime.startTimer as ReturnType<typeof vi.fn>).mockResolvedValue({ ok: false, error: "Offline" });
-    render(<PersistentTimerBar />);
-    await act(async () => { fireEvent.click(screen.getByRole("button", { name: "Start timer" })); });
-    const restore = (runtime.setTimerDraft as ReturnType<typeof vi.fn>).mock.calls.at(-1)![0] as (draft: unknown) => unknown;
-    expect(restore({ categoryId: "", description: "", tagNames: [] })).toEqual({ categoryId: "", description: "Plan launch @focus", tagNames: [] });
-    const newer = { categoryId: "", description: "Other", tagNames: [] };
-    expect(restore(newer)).toBe(newer);
-  });
-
   it("shows the typed @activity on the activity square", () => {
     runtime = runtimeFixture({ description: "Plan @writ" });
     render(<PersistentTimerBar />);
