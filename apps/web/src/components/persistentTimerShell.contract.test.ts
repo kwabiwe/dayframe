@@ -32,13 +32,13 @@ describe("persistent timer shell contract", () => {
     expect(entries).not.toContain('mode: "start"');
   });
 
-  it("keeps the timer strip on one measured five-part control track plus a stable secondary action", () => {
-    expect(styles).toMatch(/\.swiss-persistent-timer-form \{[^}]*"description category time action secondary";[^}]*minmax\(0, 1fr\)[^}]*minmax\(132px, 144px\)[^}]*var\(--web-icon-button-size\)[^}]*var\(--web-icon-button-size\);/s);
-    expect(styles).toMatch(/\.swiss-persistent-timer \.swiss-manual-entry-action,[\s\S]*\.swiss-persistent-timer \.swiss-timer-more,[\s\S]*\.swiss-persistent-timer \.swiss-command-play \{[^}]*width: var\(--web-icon-button-size\);[^}]*height: var\(--web-icon-button-size\);/s);
-    expect(styles).toMatch(/\.swiss-timer-time-control \{[^}]*grid-area: time;/s);
-    expect(styles).toMatch(/\.swiss-timer-secondary-actions \{[^}]*grid-area: secondary;/s);
-    expect(styles).toMatch(/\.swiss-persistent-time-button,[\s\S]*\.swiss-persistent-time-placeholder \{[^}]*height: var\(--web-control-height\);/s);
-    expect(styles).not.toMatch(/\.swiss-command-play\.is-active \{[^}]*min-width:\s*92px/s);
+  it("keeps the Blocks command bar on one track: activity, description, time, action, secondary", () => {
+    expect(styles).toMatch(/\.df-cmd \{[^}]*grid-template-areas: "activity description time action secondary";/s);
+    expect(styles).toMatch(/\.df-cmd-activity \{[^}]*width: 48px;[^}]*height: 48px;/s);
+    expect(styles).toMatch(/\.df-cmd-go \{[^}]*height: 48px;[^}]*background: var\(--accent\);/s);
+    expect(styles).toMatch(/\.df-cmd-time \{[^}]*grid-area: time;/s);
+    expect(styles).toMatch(/\.df-cmd-secondary \{[^}]*grid-area: secondary;/s);
+    expect(styles).toMatch(/\.df-cmd-icon\.ui-icon-button \{[^}]*width: 44px;[^}]*height: 44px;/s);
     expect(styles).not.toContain(".swiss-entrybar-actions");
     expect(timer).toContain('label="More timer actions"');
     expect(timer).toContain("Delete running task");
@@ -52,11 +52,11 @@ describe("persistent timer shell contract", () => {
     );
 
     expect(compoundControl).toContain('className={`inline-tag-picker-trigger');
-    expect(timer).toContain('className="swiss-timer-field-label swiss-timer-description-label"');
+    expect(timer).toContain('className="sr-only swiss-timer-description-label"');
     expect(timer).toContain('ariaLabelledBy="persistent-timer-category-label"');
     expect(categoryPicker).toContain("aria-labelledby={ariaLabelledBy}");
     expect(timer).toContain('aria-label="Timer is idle. Elapsed time 00:00."');
-    expect(timer).toContain('aria-label={active ? "Stop timer" : "Start timer"}');
+    expect(timer).toContain('aria-label={active ? "Stop timer" : parsedCommand?.durationSeconds ? `${goLabel} ending now` : "Start timer"}');
     expect(timer).toContain("disabled={Boolean(active) && isTimerBusy}");
     expect(inlineTags).toContain("selectedTagNames.map");
     expect(inlineTags).toContain("Remove tag ${tagName}");
@@ -65,8 +65,8 @@ describe("persistent timer shell contract", () => {
   });
 
   it("keeps compact overlays and the timer row usable at phone widths", () => {
-    expect(styles).toMatch(/@media \(max-width: 840px\)[\s\S]*"category time action secondary";[\s\S]*minmax\(104px, 118px\)/);
-    expect(styles).toMatch(/@media \(max-width: 350px\)[\s\S]*"category category category"[\s\S]*"time action secondary";/);
+    expect(styles).toMatch(/@media \(max-width: 860px\)[\s\S]*\.df-cmd \{[^}]*"activity description action secondary"[^}]*"time time time time";/);
+    expect(styles).toMatch(/@media \(max-width: 860px\)[\s\S]*\.df-quick-button \{[^}]*min-height: 44px;/);
     expect(styles).toMatch(/\.swiss-category-menu \{[^}]*max-width: calc\(100vw - 24px\);[^}]*max-height: min\(232px, calc\(100dvh - 96px\)\);/s);
     expect(styles).toMatch(/\.swiss-category-trigger \{[^}]*width: 100%;[^}]*min-width: 0;/s);
     expect(styles).toMatch(/\.swiss-category-trigger-value \{[^}]*flex: 1 1 auto;[^}]*min-width: 0;[^}]*overflow: hidden;/s);

@@ -15,13 +15,17 @@ import {
 import { createPortal } from "react-dom";
 import { Check, CheckCircle2, ChevronDown, Plus } from "lucide-react";
 import {
+  DAYFRAME_APP_ICONS,
   DAYFRAME_PALETTE_PICKER,
   DEFAULT_PALETTE_KEY,
+  resolveActivityIcon,
   paletteCssColorFor,
   paletteKeyFor,
   type DayframePaletteKey
 } from "@dayframe/shared";
 import type { CategoryRow } from "@/lib/queries";
+import { DayframeIcon } from "@/components/blocks/DayframeIcon";
+import { blockStyle } from "@/lib/block-style";
 
 export type CreateCategoryOutcome =
   | { ok: true; category: CategoryRow }
@@ -60,8 +64,10 @@ export function CategoryPicker({
   selectedId: string;
   triggerId?: string;
   triggerRef?: RefObject<HTMLButtonElement | null>;
-  variant: "timer" | "quick";
+  /** "block" is the Blocks command timer: a solid activity square opening the timer menu. */
+  variant: "timer" | "quick" | "block";
 }) {
+  const menuVariant = variant === "quick" ? "quick" : "timer";
   const rootRef = useRef<HTMLDivElement | null>(null);
   const localTriggerRef = useRef<HTMLButtonElement | null>(null);
   const menuRef = useRef<HTMLDivElement | null>(null);
@@ -513,10 +519,10 @@ export function CategoryPicker({
     }
   }
 
-  const wrapperClass = variant === "timer"
+  const wrapperClass = menuVariant === "timer"
     ? `swiss-category-field ${className}`.trim()
     : `calendar-compact-category-field ${className}`.trim();
-  const menuClass = variant === "timer"
+  const menuClass = menuVariant === "timer"
     ? `ui-floating-surface swiss-category-menu${open ? " is-open" : ""}`
     : "calendar-compact-category-menu";
 
@@ -532,12 +538,40 @@ export function CategoryPicker({
       ref={rootRef}
     >
       {label ? <span className="calendar-compact-field-label">{label}</span> : null}
+      {variant === "block" ? (
+        <button
+          aria-controls={menuId}
+          aria-expanded={open}
+          aria-haspopup={isCreating ? "dialog" : "listbox"}
+          aria-label={selectedCategory ? `Activity: ${selectedCategory.name}` : "Choose activity"}
+          className={`df-cmd-activity${selectedCategory ? " df-block" : ""}`}
+          disabled={disabled}
+          id={triggerId}
+          onClick={() => {
+            if (open) {
+              if (!isCreateBusy) closePicker(false);
+              return;
+            }
+            openPicker();
+          }}
+          onKeyDown={handleTriggerKeyDown}
+          ref={assignTrigger}
+          style={selectedCategory ? blockStyle(selectedCategory.color, selectedCategory.name) : undefined}
+          title={selectedCategory?.name ?? "Choose activity"}
+          type="button"
+        >
+          <DayframeIcon
+            glyph={selectedCategory ? resolveActivityIcon(selectedCategory).glyph : DAYFRAME_APP_ICONS.tag}
+            size={20}
+          />
+        </button>
+      ) : (
       <button
         aria-controls={menuId}
         aria-expanded={open}
         aria-haspopup={isCreating ? "dialog" : "listbox"}
         aria-labelledby={ariaLabelledBy}
-        className={variant === "timer" ? "swiss-category-trigger" : undefined}
+        className={menuVariant === "timer" ? "swiss-category-trigger" : undefined}
         disabled={disabled}
         id={triggerId}
         onClick={() => {
@@ -551,18 +585,19 @@ export function CategoryPicker({
         ref={assignTrigger}
         type="button"
       >
-        <span className={variant === "timer" ? "swiss-category-trigger-value" : "category-picker-trigger-value"}>
+        <span className={menuVariant === "timer" ? "swiss-category-trigger-value" : "category-picker-trigger-value"}>
           <span
             aria-hidden="true"
-            className={variant === "timer"
+            className={menuVariant === "timer"
               ? `swiss-focus-dot${selectedCategory ? "" : " is-muted"}`
               : "calendar-compact-category-dot"}
-            style={{ background: selectedColor ?? (variant === "timer" ? "transparent" : "var(--muted)") }}
+            style={{ background: selectedColor ?? (menuVariant === "timer" ? "transparent" : "var(--muted)") }}
           />
           <span>{selectedCategory?.name ?? "No activity"}</span>
         </span>
-        <ChevronDown aria-hidden="true" size={variant === "timer" ? 16 : 15} />
+        <ChevronDown aria-hidden="true" size={menuVariant === "timer" ? 16 : 15} />
       </button>
+      )}
       {mountMenu(<div
         aria-hidden={!open}
         className={`${menuClass} category-picker-menu${portal ? " is-portalled time-entry-quick-editor-nested-surface" : ""}`}
@@ -665,7 +700,7 @@ export function CategoryPicker({
               onFocus={() => setActiveIndex(0)}
               onSelect={() => chooseCategory("")}
               selected={!selectedId}
-              variant={variant}
+              variant={menuVariant}
             />
             {categories.map((category, index) => (
               <CategoryOption
@@ -675,13 +710,13 @@ export function CategoryPicker({
                 onFocus={() => setActiveIndex(index + 1)}
                 onSelect={() => chooseCategory(category.id)}
                 selected={category.id === selectedId}
-                variant={variant}
+                variant={menuVariant}
               />
             ))}
             {onCreateCategory ? (
               <button
                 aria-selected="false"
-                className={variant === "timer"
+                className={menuVariant === "timer"
                   ? "swiss-category-option category-picker-create-option"
                   : `category-picker-create-option${activeIndex === optionValues.length - 1 ? " is-active" : ""}`}
                 onClick={beginCreate}

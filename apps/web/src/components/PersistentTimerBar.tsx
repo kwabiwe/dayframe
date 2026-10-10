@@ -9,9 +9,11 @@ import type {
   RefObject
 } from "react";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { normalizeTagName, paletteCssColorFor } from "@dayframe/shared";
-import { CalendarDays, Clock3, Ellipsis, Play, Plus, Square, Trash2 } from "lucide-react";
+import { normalizeTagName, resolveActivityIcon, type DayframeGlyph } from "@dayframe/shared";
+import { CalendarDays, Clock3, Ellipsis, Plus, Trash2 } from "lucide-react";
 import { useAppShellRuntime } from "@/components/AppShellRuntime";
+import { DayframeIcon } from "@/components/blocks/DayframeIcon";
+import { Odometer } from "@/components/blocks/Odometer";
 import { CategoryPicker, type CreateCategoryOutcome } from "@/components/CategoryPicker";
 import { InlineTagInput } from "@/components/InlineTagInput";
 import { DayframeDateTimePicker } from "@/components/DayframeDateTimePicker";
@@ -20,11 +22,14 @@ import { TaskSuggestionsPanel } from "@/components/TaskSuggestionsPanel";
 import { Button, Field, IconButton, ModalDialog } from "@/components/ui/Primitives";
 import { calendarEntryLocalDayOffset, formatCalendarEntryCompactDuration } from "@/lib/calendar-entry-compact-editor";
 import { timeEntryAccentColor } from "@/lib/display";
-import { dateTimeLocalInputToIso, formatClockDuration, formatTime } from "@/lib/format";
+import { dateTimeLocalInputToIso, formatClockDuration, formatDuration, formatTime } from "@/lib/format";
 import { validateManualTimeEntryWindow } from "@/lib/manual-time-entry";
 import type { BootstrapData } from "@/lib/queries";
 import { shouldStartTimerFromEntrySubmit } from "@/lib/timer-entry-draft";
 import { quickActionTimerDraft } from "@/lib/timer-runtime";
+import { blockStyle } from "@/lib/block-style";
+import { parseCommand } from "@/lib/command-parse";
+import { hasOpenDialog, isTypingTarget } from "@/lib/keyboard-ownership";
 
 const TASK_SUGGESTION_LIMIT = 5;
 
@@ -56,6 +61,8 @@ export function PersistentTimerBar({ workspaceMode = false }: { workspaceMode?: 
   const [startTimeDraft, setStartTimeDraft] = useState("");
   const [startEditError, setStartEditError] = useState<string | null>(null);
   const [now, setNow] = useState(0);
+  const [commandFocused, setCommandFocused] = useState(false);
+  const [commandNotice, setCommandNotice] = useState<string | null>(null);
   const descriptionInputRef = useRef<HTMLInputElement | null>(null);
   const suppressSuggestionFocusRef = useRef(false);
   const suggestionsRef = useRef<HTMLDivElement | null>(null);
@@ -89,6 +96,10 @@ export function PersistentTimerBar({ workspaceMode = false }: { workspaceMode?: 
       .slice(0, TASK_SUGGESTION_LIMIT);
   }, [taskSuggestions, timerDraft.description]);
   const quickActions = useMemo(() => data ? buildLearnedQuickActions(data) : [], [data]);
+  const parsedCommand = useMemo(
+    () => active ? null : parseCommand(timerDraft.description, data?.categories ?? []),
+    [active, data?.categories, timerDraft.description]
+  );
   const activeAccent = active
     ? timeEntryAccentColor({
         ...active,
@@ -180,6 +191,27 @@ export function PersistentTimerBar({ workspaceMode = false }: { workspaceMode?: 
     };
   }, [timerActionsOpen]);
 
+  useEffect(() => {
+    if (!commandNotice) return undefined;
+    const handle = window.setTimeout(() => setCommandNotice(null), 5000);
+    return () => window.clearTimeout(handle);
+  }, [commandNotice]);
+
+  // Keys 1–6 start the pinned quick starts in the order shown (prototype; owner decision D2),
+  // never while typing or while a popup, dialog or inline editor owns the keyboard.
+  useEffect(() => {
+    function startQuickActionFromKey(event: globalThis.KeyboardEvent) {
+      if (event.altKey || event.ctrlKey || event.metaKey || event.shiftKey || event.defaultPrevented) return;
+      if (!/^[1-6]$/.test(event.key) || isTypingTarget(event.target) || hasOpenDialog()) return;
+      const action = quickActions[Number(event.key) - 1];
+      if (!action) return;
+      event.preventDefault();
+      startQuickAction(action);
+    }
+    document.addEventListener("keydown", startQuickActionFromKey);
+    return () => document.removeEventListener("keydown", startQuickActionFromKey);
+  });
+
   if (!data) return null;
 
   async function submitTimer(event: FormEvent<HTMLFormElement>) {
@@ -189,7 +221,7 @@ export function PersistentTimerBar({ workspaceMode = false }: { workspaceMode?: 
       isBusy: isTimerBusy && Boolean(active)
     })) return;
     setSuggestionsOpen(false);
-    await startTimer();
+    await runCommand();
   }
 
   function startFromEnter(event: ReactKeyboardEvent<HTMLInputElement>) {
@@ -200,7 +232,44 @@ export function PersistentTimerBar({ workspaceMode = false }: { workspaceMode?: 
       isBusy: isTimerBusy && Boolean(active)
     })) return;
     setSuggestionsOpen(false);
-    void startTimer();
+    void runCommand();
+  }
+
+  // Idle Start: `@activity` picks the activity and a trailing duration logs a finished block
+  // ending now (through the manual-entry path) instead of starting the timer.
+  async function runCommand() {
+    const command = parseCommand(timerDraft.description, data!.categories);
+    const categoryId = command.categoryId ?? timerDraft.categoryId;
+    setCommandNotice(null);
+    if (command.durationSeconds) {
+      const stoppedAt = new Date();
+      stoppedAt.setSeconds(0, 0);
+      const startedAt = new Date(stoppedAt.getTime() - command.durationSeconds * 1000);
+      const outcome = await createManualEntry({
+        categoryId: categoryId || undefined,
+        description: command.description || undefined,
+        tagNames: timerDraft.tagNames,
+        startedAt: startedAt.toISOString(),
+        stoppedAt: stoppedAt.toISOString()
+      });
+      if (!outcome.ok) {
+        setCommandNotice(outcome.error);
+        return;
+      }
+      const activityName = data!.categories.find((category) => category.id === categoryId)?.name;
+      setTimerDraft({ categoryId: "", description: "", tagNames: [] });
+      setCommandNotice(`Added ${formatDuration(command.durationSeconds)}${activityName ? ` to ${activityName}` : ""}.`);
+      return;
+    }
+    await startTimer({ categoryId, description: command.description, tagNames: timerDraft.tagNames });
+  }
+
+  function startQuickAction(action: QuickAction) {
+    const draft = quickActionTimerDraft(action.categoryId);
+    setCategoryMenuOpen(false);
+    setSuggestionsOpen(false);
+    setTimerDraft(draft);
+    void startTimer(draft);
   }
 
   async function chooseTimerSuggestion(suggestion: BootstrapData["taskSuggestions"][number]) {
@@ -250,38 +319,73 @@ export function PersistentTimerBar({ workspaceMode = false }: { workspaceMode?: 
     } else setStartEditError(outcome.error);
   }
 
+  const liveCategory = active ? data.categories.find((category) => category.id === (timerDraft.categoryId || active.categoryId)) ?? null : null;
+  const previewCategory = parsedCommand?.categoryId
+    ? data.categories.find((category) => category.id === parsedCommand.categoryId) ?? null
+    : null;
+  const commandHasShorthand = Boolean(parsedCommand && timerDraft.description.trim() && (parsedCommand.categoryId || parsedCommand.durationSeconds));
+  const exampleActivity = data.categories.find((category) => category.isPinned)?.name ?? data.categories[0]?.name ?? "work";
+  const goLabel = parsedCommand?.durationSeconds
+    ? `Add ${formatDuration(parsedCommand.durationSeconds)}`
+    : "Start";
+
   return (
     <section
       className={[
-        "swiss-panel swiss-current-timer swiss-persistent-timer",
+        "df-cmd-wrap",
         active ? "is-running" : "is-idle",
         workspaceMode ? "is-workspace" : ""
       ].filter(Boolean).join(" ")}
       data-testid="persistent-timer"
       style={activeAccent ? ({ "--timer-accent": activeAccent } as CSSProperties) : undefined}
     >
-      <form className="swiss-persistent-timer-form" onSubmit={submitTimer}>
-        <label className="swiss-timer-field-label swiss-timer-description-label" htmlFor="persistent-timer-description">
+      <form
+        className={`df-cmd${active ? " is-live" : ""}`}
+        onBlur={(event) => {
+          if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setCommandFocused(false);
+        }}
+        onSubmit={submitTimer}
+        style={liveCategory ? blockStyle(liveCategory.color, liveCategory.name) : undefined}
+      >
+        <label className="sr-only swiss-timer-description-label" htmlFor="persistent-timer-description">
           Task description
         </label>
-        <span className="swiss-timer-field-label swiss-timer-category-label" id="persistent-timer-category-label">
-          Activity
-        </span>
+        <span className="sr-only" id="persistent-timer-category-label">Activity</span>
 
-        <div className="swiss-work-input swiss-timer-description-control" ref={suggestionsRef}>
+        <CategoryPicker
+          ariaLabelledBy="persistent-timer-category-label"
+          categories={data.categories}
+          className="df-cmd-activity-field"
+          menuId="persistent-timer-category-menu"
+          onBeforeOpen={() => setSuggestionsOpen(false)}
+          onCreateCategory={createCategory}
+          onOpenChange={setCategoryMenuOpen}
+          onSelect={(categoryId) => {
+            setTimerDraft((current) => ({ ...current, categoryId }));
+            setSuggestionsOpen(false);
+          }}
+          open={categoryMenuOpen}
+          portal
+          selectedId={timerDraft.categoryId}
+          variant="block"
+        />
+
+        <div className="df-cmd-field swiss-timer-description-control" ref={suggestionsRef}>
           <InlineTagInput
             ariaLabel="Task description"
-            className="swiss-timer-inline-tags"
+            className="df-cmd-tags"
             inputId="persistent-timer-description"
             inputRef={descriptionInputRef}
             name="timer-description"
             onChange={(description) => {
+              setCommandNotice(null);
               setTimerDraft((current) => ({ ...current, description }));
               setSuggestionsOpen(true);
             }}
             onClick={() => setSuggestionsOpen(true)}
             onEnter={startFromEnter}
             onFocus={() => {
+              setCommandFocused(true);
               if (suppressSuggestionFocusRef.current) {
                 suppressSuggestionFocusRef.current = false;
                 return;
@@ -303,7 +407,7 @@ export function PersistentTimerBar({ workspaceMode = false }: { workspaceMode?: 
               }
             }}
             onSelectedTagNamesChange={(tagNames) => setTimerDraft((current) => ({ ...current, tagNames }))}
-            placeholder={active ? "Add a task description" : "What are you working on?"}
+            placeholder={active ? "Add a description" : "What are you working on?"}
             selectedTagNames={timerDraft.tagNames}
             tags={data.tags}
             value={timerDraft.description}
@@ -318,31 +422,13 @@ export function PersistentTimerBar({ workspaceMode = false }: { workspaceMode?: 
           ) : null}
         </div>
 
-        <CategoryPicker
-          ariaLabelledBy="persistent-timer-category-label"
-          categories={data.categories}
-          className="swiss-timer-category-control"
-          menuId="persistent-timer-category-menu"
-          onBeforeOpen={() => setSuggestionsOpen(false)}
-          onCreateCategory={createCategory}
-          onOpenChange={setCategoryMenuOpen}
-          onSelect={(categoryId) => {
-            setTimerDraft((current) => ({ ...current, categoryId }));
-            setSuggestionsOpen(false);
-          }}
-          open={categoryMenuOpen}
-          portal
-          selectedId={timerDraft.categoryId}
-          variant="timer"
-        />
-
-        <div className="swiss-timer-time-control" ref={startEditorRef}>
+        <div className="df-cmd-time" ref={startEditorRef}>
           {active ? (
             <button
               aria-controls="persistent-timer-start-editor"
               aria-expanded={startEditorOpen}
               aria-haspopup="dialog"
-              className="swiss-persistent-time-button"
+              className="df-cmd-clock"
               type="button"
               aria-label={`Edit start date and time. Started ${formatTime(active.startedAt)}. Elapsed ${formatClockDuration(durationSeconds)}`}
               onClick={() => {
@@ -351,11 +437,11 @@ export function PersistentTimerBar({ workspaceMode = false }: { workspaceMode?: 
               }}
               ref={startEditorTriggerRef}
             >
-              <span>{formatClockDuration(durationSeconds)}</span>
+              <Odometer value={formatClockDuration(durationSeconds)} />
               <small>Started {formatTime(active.startedAt)}</small>
             </button>
           ) : (
-            <span className="swiss-persistent-time-placeholder" aria-label="Timer is idle. Elapsed time 00:00.">
+            <span className="df-cmd-clock is-idle" aria-label="Timer is idle. Elapsed time 00:00.">
               {formatClockDuration(0)}
             </span>
           )}
@@ -457,28 +543,34 @@ export function PersistentTimerBar({ workspaceMode = false }: { workspaceMode?: 
           ) : null}
         </div>
 
-        <div className="swiss-timer-actions">
-          <button
-            className={["swiss-command-play", active ? "is-active" : ""].filter(Boolean).join(" ")}
-            type={active ? "button" : "submit"}
-            disabled={Boolean(active) && isTimerBusy}
-            aria-busy={(Boolean(active) && isTimerBusy) || undefined}
-            aria-label={active ? "Stop timer" : "Start timer"}
-            onClick={() => {
-              if (active) void stopTimer();
-            }}
-          >
-            {active ? <Square size={14} fill="currentColor" /> : <Play size={18} fill="currentColor" strokeWidth={0} />}
-          </button>
-        </div>
+        <button
+          className={`df-cmd-go${active ? " is-stop" : ""}`}
+          type={active ? "button" : "submit"}
+          disabled={Boolean(active) && isTimerBusy}
+          aria-busy={(Boolean(active) && isTimerBusy) || undefined}
+          aria-label={active ? "Stop timer" : parsedCommand?.durationSeconds ? `${goLabel} ending now` : "Start timer"}
+          onClick={() => {
+            if (active) void stopTimer();
+          }}
+        >
+          {active ? (
+            <DayframeIcon glyph="square" size={18} />
+          ) : (
+            <>
+              <DayframeIcon glyph={parsedCommand?.durationSeconds ? "plus" : "play"} size={18} />
+              <span className="df-cmd-go-label">{goLabel}</span>
+              {parsedCommand?.durationSeconds ? null : <kbd>Space</kbd>}
+            </>
+          )}
+        </button>
 
-        <div className="swiss-timer-secondary-actions" ref={timerActionsRef}>
+        <div className="df-cmd-secondary" ref={timerActionsRef}>
           {active ? (
             <>
               <IconButton
                 aria-expanded={timerActionsOpen}
                 aria-haspopup="menu"
-                className="swiss-timer-more"
+                className="df-cmd-icon"
                 disabled={isTimerBusy}
                 label="More timer actions"
                 onClick={() => setTimerActionsOpen((open) => !open)}
@@ -508,7 +600,7 @@ export function PersistentTimerBar({ workspaceMode = false }: { workspaceMode?: 
             </>
           ) : (
             <IconButton
-              className="swiss-manual-entry-action"
+              className="df-cmd-icon"
               disabled={isTimerBusy}
               label="Add time manually"
               onClick={openManualEntry}
@@ -519,6 +611,34 @@ export function PersistentTimerBar({ workspaceMode = false }: { workspaceMode?: 
         </div>
       </form>
 
+      <div className="df-cmd-parse" aria-live="polite">
+        {commandNotice ? (
+          <span className="df-cmd-hint">{commandNotice}</span>
+        ) : commandHasShorthand && parsedCommand ? (
+          <>
+            {previewCategory ? (
+              <span className="df-cmd-chip df-block" style={blockStyle(previewCategory.color, previewCategory.name)}>
+                {previewCategory.name}
+              </span>
+            ) : null}
+            {parsedCommand.durationSeconds ? (
+              <>
+                <span className="df-cmd-chip">{commandRangeLabel(parsedCommand.durationSeconds)}</span>
+                <span className="df-cmd-hint">logs a finished block ending now</span>
+              </>
+            ) : (
+              <span className="df-cmd-hint">Enter starts the timer</span>
+            )}
+          </>
+        ) : !active && commandFocused && !timerDraft.description ? (
+          <>
+            <span className="df-cmd-hint">Try</span>
+            <span className="df-cmd-chip">Write proposal @{exampleActivity.replace(/\s+/g, "").toLocaleLowerCase()} 45m</span>
+            <span className="df-cmd-hint">@ picks an activity, # adds tags, a trailing duration logs time you already spent.</span>
+          </>
+        ) : null}
+      </div>
+
       {timerError ? (
         <p className="swiss-inline-error" role="alert">
           {timerError}
@@ -527,30 +647,26 @@ export function PersistentTimerBar({ workspaceMode = false }: { workspaceMode?: 
       ) : null}
 
       {quickActions.length ? (
-        <div className="swiss-quick-actions-strip" aria-label="Quick actions">
-          {!workspaceMode ? <span>Quick actions</span> : null}
-          <div className="swiss-quick-actions-rail">
-            {quickActions.map((action) => (
+        <div className="df-quick" role="group" aria-label="Quick start">
+          {quickActions.map((action, index) => {
+            const recording = Boolean(active && active.categoryId === action.categoryId);
+            return (
               <button
                 key={action.key}
+                aria-label={`${recording ? "Recording" : "Start"} ${action.label} (${index + 1})`}
+                className={`df-quick-button df-block${recording ? " is-recording" : ""}`}
+                onClick={() => startQuickAction(action)}
+                style={blockStyle(action.color, action.label)}
                 type="button"
-                onClick={() => {
-                  const draft = quickActionTimerDraft(action.categoryId);
-                  setCategoryMenuOpen(false);
-                  setSuggestionsOpen(false);
-                  setTimerDraft(draft);
-                  void startTimer(draft);
-                }}
               >
-                <Play size={13} fill="currentColor" strokeWidth={0} />
-                <i style={{ backgroundColor: action.color }} />
-                <span><b>{action.label}</b></span>
+                <DayframeIcon glyph={action.glyph} size={15} />
+                <span>{action.label}</span>
+                <kbd>{index + 1}</kbd>
               </button>
-            ))}
-          </div>
+            );
+          })}
         </div>
       ) : null}
-      {workspaceMode ? <div className="swiss-timer-workspace-divider" aria-hidden="true" /> : null}
 
       {isManualEntryOpen ? (
         <ManualEntryDialog
@@ -809,10 +925,18 @@ function ManualEntryDialog({
 
 type QuickAction = {
   categoryId: string | null;
-  color: string;
+  color: string | null;
+  glyph: DayframeGlyph;
   key: string;
   label: string;
 };
+
+function commandRangeLabel(durationSeconds: number) {
+  const stoppedAt = new Date();
+  stoppedAt.setSeconds(0, 0);
+  const startedAt = new Date(stoppedAt.getTime() - durationSeconds * 1000);
+  return `${formatTime(startedAt.toISOString())}–${formatTime(stoppedAt.toISOString())}`;
+}
 
 function NativePickerControl({
   icon,
@@ -860,7 +984,8 @@ function buildLearnedQuickActions(data: BootstrapData): QuickAction[] {
     .slice(0, 6)
     .map(({ category }) => ({
       categoryId: category.id,
-      color: paletteCssColorFor(category.color, category.name),
+      color: category.color,
+      glyph: resolveActivityIcon(category).glyph,
       key: `category:${category.id}`,
       label: category.name
     }));

@@ -121,7 +121,7 @@ describe("Timeline range and toolbar contract", () => {
     expect(styles).toContain(".timeline-timesheet-scroll");
     expect(styles).toContain(".calendar-time-axis");
     expect(styles).toContain(".timeline-timesheet-activity-cell");
-    expect(styles).toContain(".swiss-quick-actions-rail");
+    expect(styles).toContain(".df-quick");
     expect(styles).toContain("flex-wrap: nowrap");
     expect(styles).toContain("overflow-x: auto");
     expect(styles).toContain(".swiss-timer-description-control .ui-compound-control");

@@ -20,7 +20,7 @@ describe("web Settings and running-timer follow-up", () => {
   it("keeps running start-time submission inside one form owner", () => {
     const editor = timer.slice(
       timer.indexOf('id="persistent-timer-start-editor"'),
-      timer.indexOf('<div className="swiss-timer-actions">')
+      timer.indexOf('className={`df-cmd-go')
     );
     expect(editor).not.toContain("<form");
     expect(editor).toContain('event.key !== "Enter"');

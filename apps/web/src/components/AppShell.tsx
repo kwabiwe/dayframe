@@ -36,7 +36,7 @@ import { formatDuration, formatTime } from "@/lib/format";
 import type { GlobalSearchResult } from "@/lib/global-search";
 import { isSearchShortcut, SEARCH_SHORTCUT_LABEL } from "@/lib/keyboard-shortcuts";
 import type { BootstrapData } from "@/lib/queries";
-import { hasOpenDialog } from "@/lib/keyboard-ownership";
+import { hasOpenDialog, isTypingTarget } from "@/lib/keyboard-ownership";
 import {
   GO_TO_SEQUENCE_MS,
   LIBRARY_TABS,
@@ -58,8 +58,9 @@ const shortcuts = [
   [SEARCH_SHORTCUT_LABEL, "Open search"],
   ["?", "Keyboard shortcuts"],
   ["G then T, C, R, P, L, S", "Go to Today, Calendar, Review, Reports, Library, Settings"],
-  ["Shift+Space", "Start or stop timer"],
-  ["N", "Add time block"],
+  ["Space", "Start or stop the timer"],
+  ["N", "Type what you're working on"],
+  ["1–6", "Start a pinned activity"],
   ["Alt+Left", "Previous day or week"],
   ["Alt+Right", "Next day or week"],
   ["Esc", "Close menus"]
@@ -85,7 +86,6 @@ function AppShellContent({ children }: { children: ReactNode }) {
   const {
     data,
     loadDate,
-    openManualEntry,
     refresh,
     selectedDate,
     startTimer,
@@ -105,7 +105,7 @@ function AppShellContent({ children }: { children: ReactNode }) {
   const activeSection = activeShellSection(pathname);
   const libraryTab = activeLibraryTab(pathname);
   const reviewCount = data?.stats.reviewCount ?? 0;
-  const showTimerShell = pathname === "/" || pathname === "/timeline";
+  const showDateNavigation = pathname === "/" || pathname === "/timeline";
   const showShellDateContext = pathname === "/";
   const timelineState = useMemo(
     () => timelineStateFromSearchParams(searchParams),
@@ -171,11 +171,11 @@ function AppShellContent({ children }: { children: ReactNode }) {
   }, []);
 
   const navigateDate = useCallback((date: string) => {
-    if (!showTimerShell) return;
+    if (!showDateNavigation) return;
     const params = new URLSearchParams(searchParams.toString());
     params.set("date", date);
     router.push(`${pathname}?${params.toString()}`);
-  }, [pathname, router, searchParams, showTimerShell]);
+  }, [pathname, router, searchParams, showDateNavigation]);
 
   const previousDate = addDaysKey(selectedDate, -1);
   const nextDate = addDaysKey(selectedDate, 1);
@@ -229,23 +229,29 @@ function AppShellContent({ children }: { children: ReactNode }) {
         goToTimer.current = window.setTimeout(() => { goToPending.current = false; }, GO_TO_SEQUENCE_MS);
         return;
       }
-      if (event.shiftKey && event.code === "Space") {
+      const bare = !event.altKey && !event.ctrlKey && !event.metaKey;
+      if (bare && event.code === "Space") {
+        // Space on a focused control presses it; elsewhere it starts or stops the timer.
+        if (!event.shiftKey && isPressableTarget(event.target)) return;
+        if (event.defaultPrevented || hasOpenDialog()) return;
         event.preventDefault();
+        const starting = !data?.activeEntry;
         void toggleTimer();
+        if (starting) focusCommandInput();
         return;
       }
-      if (event.key.toLowerCase() === "n") {
+      if (bare && !event.shiftKey && event.key.toLowerCase() === "n") {
+        if (event.defaultPrevented || hasOpenDialog()) return;
         event.preventDefault();
-        openManualEntry();
-        if (!showTimerShell) router.push(`/?date=${selectedDate}`);
+        focusCommandInput();
         return;
       }
-      if (showTimerShell && event.altKey && event.key === "ArrowLeft") {
+      if (showDateNavigation && event.altKey && event.key === "ArrowLeft") {
         event.preventDefault();
         void navigatePeriod("previous");
         return;
       }
-      if (showTimerShell && event.altKey && event.key === "ArrowRight") {
+      if (showDateNavigation && event.altKey && event.key === "ArrowRight") {
         event.preventDefault();
         void navigatePeriod("next");
       }
@@ -256,7 +262,7 @@ function AppShellContent({ children }: { children: ReactNode }) {
       window.clearTimeout(goToTimer.current);
       goToPending.current = false;
     };
-  }, [navigatePeriod, openManualEntry, pathname, router, selectedDate, showTimerShell, toggleTimer]);
+  }, [data?.activeEntry, navigatePeriod, pathname, router, showDateNavigation, toggleTimer]);
 
   return (
     <div className={`swiss-app-shell${isTimeline ? " is-timeline" : ""}`}>
@@ -316,19 +322,17 @@ function AppShellContent({ children }: { children: ReactNode }) {
           </section>
         ) : (
           <>
-            {showTimerShell ? (
-              <div className="swiss-persistent-timer-shell">
-                {persistentTimer}
-                {showShellDateContext ? (
-                  <DateContextRow
-                    selectedDate={selectedDate}
-                    onPrevious={() => navigateDate(previousDate)}
-                    onNext={() => navigateDate(nextDate)}
-                    onSelect={navigateDate}
-                  />
-                ) : null}
-              </div>
-            ) : null}
+            <div className="swiss-persistent-timer-shell">
+              {persistentTimer}
+              {showShellDateContext ? (
+                <DateContextRow
+                  selectedDate={selectedDate}
+                  onPrevious={() => navigateDate(previousDate)}
+                  onNext={() => navigateDate(nextDate)}
+                  onSelect={navigateDate}
+                />
+              ) : null}
+            </div>
             <main>
               {libraryTab ? <LibraryTabs activeHref={libraryTab.href} /> : null}
               {children}
@@ -372,6 +376,15 @@ function AppShellContent({ children }: { children: ReactNode }) {
 }
 
 /** Activities, Tags and Places stay separate pages, reached as the three Library tabs. */
+function focusCommandInput() {
+  window.requestAnimationFrame(() => document.getElementById("persistent-timer-description")?.focus());
+}
+
+function isPressableTarget(target: EventTarget | null) {
+  return target instanceof HTMLElement
+    && Boolean(target.closest("button, a[href], summary, [role='button'], [role='option'], [role='menuitem'], [role='tab'], [role='switch'], [role='checkbox']"));
+}
+
 function LibraryTabs({ activeHref }: { activeHref: string }) {
   return (
     <nav className="df-library-tabs" aria-label="Library">
@@ -657,11 +670,6 @@ function buildSearchResults(data: BootstrapData | null, query: string): SearchRe
   return results.filter((result) => `${result.label} ${result.detail} ${result.group}`.toLowerCase().includes(needle)).slice(0, 12);
 }
 
-function isTypingTarget(target: EventTarget | null) {
-  if (!(target instanceof HTMLElement)) return false;
-  const tag = target.tagName.toLowerCase();
-  return tag === "input" || tag === "textarea" || tag === "select" || target.isContentEditable;
-}
 
 function formatLongDate(date: string) {
   const [year, month, day] = date.split("-").map(Number);

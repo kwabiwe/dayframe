@@ -54,7 +54,7 @@ describe("web contextual category creation contract", () => {
   });
 
   it("uses borderless colour dots in both trigger variants and picker options", () => {
-    expect(picker).toContain('className={variant === "timer" ? "swiss-category-trigger-value" : "category-picker-trigger-value"}');
+    expect(picker).toContain('className={menuVariant === "timer" ? "swiss-category-trigger-value" : "category-picker-trigger-value"}');
     expect(picker).toContain('"calendar-compact-category-dot"');
     expect(styles).toMatch(/\.calendar-compact-category-dot\s*\{[^}]*border:\s*0;[^}]*box-shadow:\s*none;/s);
     expect(styles).toMatch(/\.category-picker-color-swatch\s*\{[^}]*border:\s*0;[^}]*box-shadow:\s*none;/s);
