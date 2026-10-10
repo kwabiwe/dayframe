@@ -539,6 +539,45 @@ describe("Review round-4 fixes", () => {
     expect(container.querySelector(".df-revidence")).not.toBeNull();
   });
 
+  it("retires a revived card a late save confirmed when its reopened editor closes by the toggle", async () => {
+    const visitA = { ...review(WALK, "Visit A", "focus"), eventSource: "location_learning", eventType: "learned_place_visit", rawPayload: { algorithmVersion: "location-v2.0" } };
+    const other = review(READ, "Reading", "admin");
+    const { container, render } = await controllable([visitA, other]);
+    const button = (label: string) => [...container.querySelectorAll<HTMLButtonElement>("button")].find((candidate) => candidate.textContent === label)!;
+    await key("y");
+    await render([other]);
+    await act(async () => container.querySelector<HTMLButtonElement>(".df-toast-action")!.click());
+    expect(title(container)).toBe("Visit A");
+    heldEditorCallbacks.length = 0;
+    await act(async () => button("Edit before logging").click());
+    await act(async () => button("Stub hold").click());
+    await act(async () => button("Stub close").click());
+    await act(async () => button("Edit before logging").click());
+    await act(async () => {
+      heldEditorCallbacks[0].onResolved?.();
+      heldEditorCallbacks[0].onClose();
+    });
+    expect(queue(container)).toEqual(["Reading", "Visit A"]);
+    await act(async () => button("Edit before logging").click());
+    expect(queue(container)).toEqual(["Reading"]);
+  });
+
+  it("retires every kept card when an editor save (a merge) changes the queue", async () => {
+    const visitA = { ...review(WALK, "Visit A", "focus"), eventSource: "location_learning", eventType: "learned_place_visit", rawPayload: { algorithmVersion: "location-v2.0" } };
+    const visitB = { ...review(READ, "Visit B", "admin"), eventSource: "location_learning", eventType: "learned_place_visit", rawPayload: { algorithmVersion: "location-v2.0" } };
+    const { container, render } = await controllable([visitA, visitB]);
+    const button = (label: string) => [...container.querySelectorAll<HTMLButtonElement>("button")].find((candidate) => candidate.textContent === label)!;
+    await act(async () => container.querySelectorAll<HTMLButtonElement>(".df-qrow")[1].click());
+    await key("y");
+    await render([visitA]);
+    await act(async () => container.querySelector<HTMLButtonElement>(".df-toast-action")!.click());
+    expect(queue(container)).toEqual(["Visit A", "Visit B"]);
+    await act(async () => container.querySelectorAll<HTMLButtonElement>(".df-qrow")[0].click());
+    await act(async () => button("Edit before logging").click());
+    await act(async () => button("Stub confirm").click());
+    expect(queue(container)).toEqual(["Visit A"]);
+  });
+
   it("opens the evidence editor from the card's Log as name and activity", async () => {
     const visit = { ...review(WALK, "Visit", "focus"), eventSource: "location_learning", eventType: "learned_place_visit", rawPayload: { algorithmVersion: "location-v2.0" } };
     const { container } = await mount([visit]);
