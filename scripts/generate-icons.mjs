@@ -23,7 +23,7 @@ const tabManifestPath = join(tabIconDir, "manifest.json");
 const GLYPHS = [
   "baby", "bell", "bike", "book-open", "brain", "briefcase", "building-2", "bus", "calendar-days", "camera",
   "car", "chart-column", "check", "chef-hat", "chevron-right", "circle-dot", "circle-user-round", "cloud-alert", "cloud-check",
-  "cloud-off", "code-xml", "coffee", "download", "dumbbell", "ellipsis", "flower-2", "footprints", "gamepad-2",
+  "cloud-off", "code-xml", "coffee", "download", "dumbbell", "ellipsis", "flame", "flower-2", "footprints", "gamepad-2",
   "git-merge", "graduation-cap", "guitar", "hand-heart", "heart", "heart-pulse", "house", "inbox", "languages",
   "laptop", "library", "list-checks", "mail", "map-pin", "message-circle", "moon", "mountain", "music", "palette",
   "party-popper", "paw-print", "pen-line", "pencil", "person-standing", "phone", "pill", "pin", "plane", "play",

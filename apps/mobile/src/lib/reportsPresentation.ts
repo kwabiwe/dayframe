@@ -58,6 +58,26 @@ export function reportCategoryKey(entry: Pick<MobileTimeEntry, "categoryId">) {
 const eligible = (entry: MobileTimeEntry) =>
   entry.reviewStatus === "confirmed" || entry.reviewStatus === "accepted";
 
+/**
+ * Confirmed time inside a window for the selected activities, from the entries the phone already
+ * holds (bootstrap plus the running timer). Used for short, recent windows only.
+ */
+export function reportTrackedSeconds(
+  data: MobileBootstrap,
+  window: ReportWindow,
+  nowMs: number,
+  selection: ReportCategorySelection,
+) {
+  if (+window.end <= +window.start) return 0;
+  return reportEntryUnion(data).reduce(
+    (sum, entry) =>
+      eligible(entry) && reportSelectionIncludes(selection, reportCategoryKey(entry))
+        ? sum + entryOverlapMs(entry, window, nowMs) / 1000
+        : sum,
+    0,
+  );
+}
+
 /** Replace only the server's current timer contribution with the existing Dashboard projection. */
 export function buildReportsPresentation(input: {
   data: MobileBootstrap;
@@ -179,6 +199,9 @@ export function buildReportsPresentation(input: {
     (sum, c) => sum + c.durationMs,
     0,
   );
+  // Day stacks (Blocks week columns and month cells) use the same rank and colours as the donut.
+  const rank = new Map(allCategorySegments.map((c, index) => [c.key, index]));
+  const colorByKey = new Map(allCategorySegments.map((c) => [c.key, c.color]));
   return {
     allCategorySegments,
     visibleCategorySegments,
@@ -195,6 +218,19 @@ export function buildReportsPresentation(input: {
           sum + (reportSelectionIncludes(selection, key) ? seconds : 0),
         0,
       ),
+      segments: [...b.byCategory]
+        .filter(
+          ([key, seconds]) =>
+            seconds > 0 &&
+            rank.has(key) &&
+            reportSelectionIncludes(selection, key),
+        )
+        .sort(([left], [right]) => rank.get(left)! - rank.get(right)!)
+        .map(([key, seconds]) => ({
+          key,
+          seconds,
+          color: colorByKey.get(key)!,
+        })),
     })),
     filterOptions: [...filterOptions.values()].sort(
       (a, b) => a.name.localeCompare(b.name) || a.key.localeCompare(b.key),
