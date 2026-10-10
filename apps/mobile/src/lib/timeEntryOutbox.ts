@@ -272,6 +272,8 @@ export async function getTimeEntryOutboxDiagnostics(
       )
     ).length,
     needsAttentionCount: permanent.length,
+    /** Stable identities of the rejected commands, so a new rejection is noticed even at an equal count. */
+    needsAttentionIds: permanent.map((command) => `entry:${command.clientCommandId}`),
     quarantinedCount: ownedQuarantine.length,
     deviceQuarantinedCount: deviceQuarantine.length,
     nextRetryAt: retryable

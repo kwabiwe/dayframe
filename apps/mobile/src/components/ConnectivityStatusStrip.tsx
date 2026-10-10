@@ -42,8 +42,11 @@ export function ConnectivityStatusProvider({ children }: { children: ReactNode }
   const announcementTracker = useRef(createDistinctConnectivityAnnouncementTracker());
   const attentionCount =
     durableWork.timeEntryNeedsAttentionCount + durableWork.timerStopNeedsAttentionCount;
-  // Starts from the current count, so a cold launch does not re-announce an older rejection.
-  const announcedAttention = useRef({ accountKey: durableWork.accountKey, count: attentionCount });
+  const attentionIds = durableWork.attentionIds ?? [];
+  const attentionKey = attentionIds.join("|");
+  // Starts from the current rejections, so a cold launch does not re-announce an older one; compares
+  // identities, so a new rejection is announced even when another one cleared in the same update.
+  const announcedAttention = useRef({ accountKey: durableWork.accountKey, ids: new Set(attentionIds) });
   const [, setClockRevision] = useState(0);
   const now = Date.now();
 
@@ -78,13 +81,14 @@ export function ConnectivityStatusProvider({ children }: { children: ReactNode }
   useEffect(() => {
     const previous = announcedAttention.current;
     const sameAccount = previous.accountKey === durableWork.accountKey;
-    announcedAttention.current = { accountKey: durableWork.accountKey, count: attentionCount };
-    if (sameAccount && attentionCount > previous.count) {
+    const current = new Set(attentionKey ? attentionKey.split("|") : []);
+    announcedAttention.current = { accountKey: durableWork.accountKey, ids: current };
+    if (sameAccount && [...current].some((id) => !previous.ids.has(id))) {
       AccessibilityInfo.announceForAccessibility(
         "A change couldn't be saved. Open Sync help from the account button."
       );
     }
-  }, [attentionCount, durableWork.accountKey]);
+  }, [attentionKey, durableWork.accountKey]);
 
   return (
     <ConnectivityStatusContext.Provider value={viewModel}>
