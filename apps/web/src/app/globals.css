@@ -8705,61 +8705,6 @@ dialog.ui-dialog.manual-entry-dialog {
   opacity: 0.58;
 }
 
-.timeline-delete-undo button {
-  min-height: 44px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 6px;
-  border: 0;
-  border-radius: 999px;
-  padding: 0 12px;
-  background: var(--surface-muted);
-  color: var(--foreground);
-}
-
-.timeline-delete-undo {
-  position: fixed;
-  right: max(12px, env(safe-area-inset-right));
-  bottom: max(12px, env(safe-area-inset-bottom));
-  z-index: 80;
-  width: fit-content;
-  max-width: calc(100vw - 24px);
-  height: var(--web-control-height);
-  box-sizing: border-box;
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  border-radius: 999px;
-  padding: 3px 4px 3px 14px;
-  background: var(--foreground);
-  color: var(--background);
-  box-shadow: var(--shadow-raised);
-  animation: timeline-delete-notice-enter 160ms ease-out both;
-}
-
-.timeline-delete-undo.is-exiting {
-  pointer-events: none;
-  animation: timeline-delete-notice-exit 160ms ease-in both;
-}
-
-.timeline-delete-undo > span {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.timeline-delete-undo button {
-  min-height: 0;
-  height: auto;
-  align-self: stretch;
-  flex: 0 0 auto;
-  padding-inline: 11px;
-  background: var(--accent);
-  color: var(--on-accent);
-}
-
 .timeline-delete-error {
   position: fixed;
   right: max(12px, env(safe-area-inset-right));
@@ -8775,7 +8720,7 @@ dialog.ui-dialog.manual-entry-dialog {
   animation: timeline-delete-notice-enter 160ms ease-out both;
 }
 
-.timeline-workspace:has(.timeline-delete-undo) .timeline-delete-error {
+.timeline-workspace:has(.df-toast-host) .timeline-delete-error {
   bottom: max(80px, calc(env(safe-area-inset-bottom) + 68px));
 }
 
@@ -8814,16 +8759,6 @@ dialog.ui-dialog.manual-entry-dialog {
 
   .calendar-compact-editor.is-entered {
     transform: translateY(0);
-  }
-
-  .timeline-delete-undo {
-    align-items: center;
-    gap: 8px;
-    padding: 3px 4px 3px 12px;
-  }
-
-  .timeline-delete-undo > span {
-    padding-left: 0;
   }
 }
 
@@ -8960,12 +8895,11 @@ dialog.ui-dialog.manual-entry-dialog {
   }
 
   .calendar-compact-editor,
-  .time-entry-quick-editor-modal,
-  .calendar-compact-editor-default-actions,
-  .calendar-compact-feedback-actions,
-  .calendar-compact-discard-confirmation,
-  .timeline-delete-undo,
-  .timeline-delete-error {
+.time-entry-quick-editor-modal,
+.calendar-compact-editor-default-actions,
+.calendar-compact-feedback-actions,
+.calendar-compact-discard-confirmation,
+.timeline-delete-error {
     animation: none;
     transition: opacity 1ms linear;
     transform: none;
@@ -11172,5 +11106,212 @@ dialog.ui-dialog.df-palette {
 
   to {
     opacity: 0;
+  }
+}
+
+/*
+ * Dayframe Blocks Calendar (parity step 12b): the Timeline's Calendar view in the Blocks language.
+ * Solid activity blocks with their measured on-block text, a breathing ring on the running block,
+ * weekday / date / total day headings, a coral now line, hatched Review suggestions in a
+ * right-hand lane and neutral view switches. Geometry, drag-to-create and resize are unchanged.
+ */
+.timeline-range-controls .ui-segmented-control button[aria-pressed="true"] {
+  background: var(--surface);
+  color: var(--text-primary);
+  box-shadow: 0 1px 3px color-mix(in srgb, var(--foreground) 14%, transparent);
+}
+
+.swiss-timeline-surface .timeline-range-navigation:has(.timeline-today-button) {
+  grid-template-columns: var(--web-icon-button-size) max-content var(--web-icon-button-size) auto;
+}
+
+@media (max-width: 760px) {
+  .swiss-timeline-surface .timeline-range-navigation:has(.timeline-today-button) {
+    width: 100%;
+    grid-template-columns: var(--web-icon-button-size) minmax(0, 1fr) var(--web-icon-button-size) auto;
+  }
+
+  /* With Today beside it the period label may shrink (it ellipsises) instead of overflowing Next. */
+  .swiss-timeline-surface .timeline-range-navigation:has(.timeline-today-button) .timeline-date-picker {
+    min-width: 0;
+  }
+}
+
+.timeline-today-button {
+  min-height: var(--web-icon-button-size, 38px);
+  border: 0;
+  border-radius: 999px;
+  padding: 0 14px;
+  background: var(--surface-muted);
+  color: var(--text-primary);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.timeline-today-button:hover:not(:disabled) {
+  background: var(--border);
+}
+
+.timeline-today-button:disabled {
+  color: var(--text-muted);
+  opacity: 0.6;
+}
+
+.calendar-day-heading .calendar-day-date {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+}
+
+.calendar-day-heading .calendar-day-date small {
+  color: var(--text-muted);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.calendar-day-heading .calendar-day-date b {
+  font-family: var(--font-display);
+  font-size: 18px;
+  font-weight: 750;
+  font-variant-numeric: tabular-nums;
+}
+
+.calendar-day-heading.is-today .calendar-day-date b {
+  color: var(--accent);
+}
+
+.calendar-day-heading .calendar-day-total {
+  margin-left: auto;
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
+.calendar-time-block.df-block {
+  --calendar-block-radius: 8px;
+  border-color: transparent;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.2), inset 0 -1px 0 rgba(0, 0, 0, 0.1);
+}
+
+/* Everything drawn on a solid block uses its measured on-block colour; metadata at 80 %. */
+.calendar-time-block.df-block .calendar-entry-primary,
+.calendar-time-block.df-block .calendar-entry-primary-line,
+.calendar-time-block.df-block .calendar-entry-description,
+.calendar-time-block.df-block .calendar-start-again {
+  color: var(--on-block);
+}
+
+.calendar-time-block.df-block .calendar-entry-primary-metadata,
+.calendar-time-block.df-block .calendar-entry-separator,
+.calendar-time-block.df-block .calendar-entry-category,
+.calendar-time-block.df-block .calendar-entry-tag,
+.calendar-time-block.df-block .calendar-entry-tag-count,
+.calendar-time-block.df-block .calendar-entry-secondary-line {
+  color: color-mix(in srgb, var(--on-block) 80%, transparent);
+}
+
+.calendar-time-block.df-block:hover:not(.is-selected):not(.is-resizing) {
+  filter: brightness(1.06);
+}
+
+.calendar-time-block.df-block.is-selected {
+  outline: 2px solid var(--text-primary);
+  outline-offset: 1px;
+}
+
+.calendar-time-block.df-block.is-running {
+  border-style: solid;
+}
+
+.calendar-time-block.df-block.is-running::after {
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  box-shadow: inset 0 0 0 2px color-mix(in oklab, var(--on-block) 45%, transparent);
+  content: "";
+  pointer-events: none;
+  animation: df-live-breathe 2.4s ease-in-out infinite;
+}
+
+@keyframes df-live-breathe {
+  0%,
+  100% {
+    opacity: 0.35;
+  }
+
+  50% {
+    opacity: 1;
+  }
+}
+
+.calendar-time-block:hover,
+.calendar-time-block.is-selected,
+.calendar-time-block.is-resizing,
+.calendar-time-block:has(:focus-visible) {
+  z-index: 14 !important;
+}
+
+.calendar-now-line {
+  position: absolute;
+  z-index: 13;
+  right: 0;
+  left: 0;
+  height: 2px;
+  margin-top: -1px;
+  background: var(--accent);
+  pointer-events: none;
+}
+
+.calendar-now-line::before {
+  position: absolute;
+  top: -4px;
+  left: -5px;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--accent);
+  content: "";
+}
+
+/*
+ * Layers in a day column: entries (lane z-index 2 + lane), then Review suggestions in their lane,
+ * then the now line; a hovered, selected or resizing entry rises above the suggestions.
+ */
+.calendar-review-block {
+  position: absolute;
+  z-index: 12;
+  right: 4px;
+  display: block;
+  width: 42%;
+  min-width: 0;
+  overflow: hidden;
+  border-radius: 8px;
+  padding: 4px 6px;
+  background:
+    repeating-linear-gradient(135deg, color-mix(in oklab, var(--block, var(--text-muted)) 40%, transparent) 0 6px, transparent 6px 12px),
+    color-mix(in oklab, var(--block, var(--text-muted)) 16%, var(--surface));
+  box-shadow: inset 0 0 0 1.5px color-mix(in oklab, var(--block, var(--text-muted)) 70%, transparent);
+  color: var(--text-primary);
+  font-size: 11px;
+  text-decoration: none;
+}
+
+.calendar-review-block.df-block {
+  color: var(--text-primary);
+}
+
+.calendar-review-block b {
+  display: block;
+  overflow: hidden;
+  font-weight: 700;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .calendar-time-block.df-block.is-running::after {
+    animation: none;
+    opacity: 0.6;
   }
 }

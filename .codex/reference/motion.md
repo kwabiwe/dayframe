@@ -302,6 +302,12 @@ Block pull-to-refresh:
 - Interruption: a digit that changes again mid-roll retargets from where it is.
 - Accessibility: Reduce Motion removes the roll and the press scale (values change in place). The rolling strips are hidden from assistive technology; the clock button's label carries the start time and elapsed time.
 
+## Web Calendar (Blocks parity step 12b)
+
+- Trigger: entries change, the running block, the clock, hover and selection.
+- Owner: CSS only. The running block's on-block ring breathes on opacity over 2.4 s (the live ring); hovered blocks brighten in place (no lift, so lanes and the drag-to-create surface never move); selection is an instant outline. Drag-to-create, resize, zoom and the compact editor keep their existing owners and motion. The Delete Undo toast is the Blocks toast (`pop` in, 160 ms out) and takes focus as it appears, since the editor that held focus has closed.
+- Accessibility: Reduce Motion stops the ring's breathing (a static ring). Review suggestion blocks are links named with the title, "needs review" and their times; the now line is decorative.
+
 ## Web Today (Blocks parity step 12a)
 
 - Trigger: entries change (start, stop, edit, delete, Undo, refresh), the clock (each second while a block records, otherwise every 20 s), pointer movement over the ribbon, a row delete (button, editor, Backspace/Delete) and Undo (toast button or ⌘Z/Ctrl+Z).

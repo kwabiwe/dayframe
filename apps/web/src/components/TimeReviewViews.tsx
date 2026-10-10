@@ -8,6 +8,7 @@ import { CalendarDays, ChevronLeft, ChevronRight, List, Play, Table2 } from "luc
 import { analyzeTimeIntervals, calendarBlockContinuationEdges } from "@dayframe/shared";
 import { useAppShellRuntime, useRuntimePageData } from "@/components/AppShellRuntime";
 import { CalendarEntryCompactEditor } from "@/components/CalendarEntryCompactEditor";
+import { BlocksToast } from "@/components/blocks/BlocksToast";
 import { DatePickerPopover } from "@/components/DatePickerPopover";
 import { OverlapNotice } from "@/components/OverlapNotice";
 import { EntriesTable } from "@/components/EntriesTable";
@@ -20,7 +21,9 @@ import {
   timeEntryCategoryLabel,
   timeEntryTitle
 } from "@/lib/display";
-import type { BootstrapData, CategoryRow, PlaceRow, TimeEntryRow } from "@/lib/queries";
+import { blockStyle as activityBlockStyle } from "@/lib/block-style";
+import type { BootstrapData, CategoryRow, PlaceRow, ReviewItemRow, TimeEntryRow } from "@/lib/queries";
+import { pendingReviewSpans } from "@/lib/today-view";
 import {
   dateTimeLocalInputToIso,
   formatDate,
@@ -236,8 +239,8 @@ export function TimeReviewViews({
   }, [persistPreference, preferenceState]);
 
   useEffect(() => {
-    if (!hasRunningEntry) return undefined;
-    const interval = window.setInterval(() => setPresentationNow(Date.now()), 1_000);
+    // Each second while a block runs; otherwise each 30 s so Calendar's now line keeps moving.
+    const interval = window.setInterval(() => setPresentationNow(Date.now()), hasRunningEntry ? 1_000 : 30_000);
     return () => window.clearInterval(interval);
   }, [hasRunningEntry]);
 
@@ -361,7 +364,10 @@ export function TimeReviewViews({
     requestDelete,
     undoPendingDelete
   } = useTimelineDeleteUndo({ entryIds: timelineEntryIds, onSynced: refreshData });
+  const [deletedEntrySwatch, setDeletedEntrySwatch] = useState<CSSProperties | undefined>(undefined);
   const requestTimelineDelete = useCallback((entries: readonly TimeEntryRow[]) => {
+    const first = entries[0];
+    setDeletedEntrySwatch(first?.categoryId ? activityBlockStyle(first.categoryColor, first.categoryName ?? "") : undefined);
     requestDelete({ entries, label: timelineDeleteNoticeLabel(entries) });
   }, [requestDelete]);
   const visibleDayEntries = dayEntries.filter((entry) => !hiddenEntryIds.has(entry.id));
@@ -385,6 +391,7 @@ export function TimeReviewViews({
   );
   const periodLabel = formatTimelinePeriodLabel(state.scope, ranges, capturedNow);
   const todayKey = toTimelineDateKey(capturedNow);
+  const showsToday = capturedNow >= ranges.active.start && capturedNow < ranges.active.end;
   const dayReportFrom = toTimelineDateKey(ranges.day.start);
   const dayReportTo = toTimelineDateKey(addDays(ranges.day.end, -1));
   const weekReportFrom = toTimelineDateKey(ranges.week.start);
@@ -423,6 +430,16 @@ export function TimeReviewViews({
           >
             <ChevronRight size={18} />
           </IconButton>
+          {showsToday ? null : (
+            <button
+              className="timeline-today-button"
+              disabled={isDateLoading}
+              onClick={() => void navigate({ date: todayKey })}
+              type="button"
+            >
+              Today
+            </button>
+          )}
         </div>
 
         <nav className="timeline-range-totals" aria-label="Open Timeline totals in Reports">
@@ -493,6 +510,7 @@ export function TimeReviewViews({
             onScroll={(event) => rememberScrollPosition("calendar", event)}
             hasRememberedScroll={hasRememberedCalendarScroll}
             onSynced={refreshData}
+            reviewItems={data.reviewItems}
             scrollContainerRef={registerScrollContainer}
             tags={data.tags}
             visibleDays={state.scope === "day" ? [ranges.day.start] : ranges.weekDays}
@@ -523,45 +541,20 @@ export function TimeReviewViews({
         ) : null}
       </div>
       {pendingNotice ? (
-        <TimelineDeleteUndoNotice
-          isExiting={pendingNotice.isExiting}
-          notice={pendingNotice}
-          onUndo={undoPendingDelete}
+        <BlocksToast
+          actionLabel="Undo"
+          autoFocusAction
+          exiting={pendingNotice.isExiting}
+          key={pendingNotice.token}
+          message={pendingNotice.label}
+          onAction={undoPendingDelete}
+          swatchStyle={deletedEntrySwatch}
         />
       ) : null}
     </section>
   );
 }
 
-function TimelineDeleteUndoNotice({
-  isExiting,
-  notice,
-  onUndo
-}: {
-  isExiting: boolean;
-  notice: { label: string; token: number };
-  onUndo: () => void;
-}) {
-  const undoRef = useRef<HTMLButtonElement | null>(null);
-
-  useEffect(() => {
-    if (isExiting) return;
-    const frame = window.requestAnimationFrame(() => undoRef.current?.focus());
-    return () => window.cancelAnimationFrame(frame);
-  }, [isExiting, notice.token]);
-
-  return (
-    <div
-      className={`timeline-delete-undo${isExiting ? " is-exiting" : ""}`}
-      role="status"
-      aria-live="polite"
-      aria-atomic="true"
-    >
-      <span>{notice.label}</span>
-      <button ref={undoRef} disabled={isExiting} type="button" onClick={onUndo}>Undo</button>
-    </div>
-  );
-}
 
 function timelineDeleteNoticeLabel(entries: readonly TimeEntryRow[]) {
   const entry = entries[0];
@@ -583,6 +576,7 @@ export function CalendarReview({
   onDeleteEntries,
   onScroll,
   onSynced,
+  reviewItems = [],
   scrollContainerRef,
   tags,
   visibleDays
@@ -597,6 +591,8 @@ export function CalendarReview({
   onScroll: (event: UIEvent<HTMLDivElement>) => void;
   onSynced: () => Promise<void>;
   places?: PlaceRow[];
+  /** Open Review items; suggestions with a full window show as hatched blocks in a right-hand lane. */
+  reviewItems?: readonly ReviewItemRow[];
   scrollContainerRef: (element: HTMLDivElement | null) => void;
   tags: BootstrapData["tags"];
   visibleDays: Date[];
@@ -617,6 +613,29 @@ export function CalendarReview({
   const selectionSessionRef = useRef(0);
   const createPointerSequenceRef = useRef<CalendarCreatePointerSequence | null>(null);
   const consumedPointerRef = useRef<CalendarConsumedPointer | null>(null);
+  // The last press anywhere, seen in the window's capture phase: before an open editor's own
+  // document listener, which may stop the event from reaching the suggestion link.
+  // Whether that press was taken is read at its pointerup, again in the window's capture phase,
+  // before the document listener above forgets the consumed pointer; the click comes after both.
+  const reviewLinkPointerRef = useRef<{ pointerId: number; pointerDownTimeStamp: number } | null>(null);
+  const pressConsumedByEditorRef = useRef(false);
+  useEffect(() => {
+    const remember = (event: PointerEvent) => {
+      reviewLinkPointerRef.current = { pointerId: event.pointerId, pointerDownTimeStamp: event.timeStamp };
+      pressConsumedByEditorRef.current = false;
+    };
+    const settle = (event: PointerEvent) => {
+      const pointer = reviewLinkPointerRef.current;
+      if (!pointer || pointer.pointerId !== event.pointerId) return;
+      pressConsumedByEditorRef.current = calendarPointerMatchesConsumed(consumedPointerRef.current, pointer);
+    };
+    window.addEventListener("pointerdown", remember, true);
+    window.addEventListener("pointerup", settle, true);
+    return () => {
+      window.removeEventListener("pointerdown", remember, true);
+      window.removeEventListener("pointerup", settle, true);
+    };
+  }, []);
   const [resizeDraft, setResizeDraft] = useState<CalendarResizeDraft | null>(null);
   const [resizingId, setResizingId] = useState<string | null>(null);
   const [resizeError, setResizeError] = useState<string | null>(null);
@@ -1111,12 +1130,15 @@ export function CalendarReview({
                   sameDay(day, today) ? "is-today" : ""
                 ].join(" ")}
               >
-                <div className="calendar-day-date text-sm font-semibold">{formatDate(day)}</div>
+                <div className="calendar-day-date" aria-label={formatDate(day)}>
+                  <small aria-hidden="true">{formatCalendarWeekday(day)}</small>
+                  <b aria-hidden="true">{day.getDate()}</b>
+                </div>
                 <div
                   aria-label={`${loggedLabel} logged`}
-                  className="calendar-day-total tabular text-xs text-[var(--muted)]"
+                  className="calendar-day-total tabular"
                 >
-                  {loggedLabel}
+                  {total.loggedSeconds > 0 ? loggedLabel : "–"}
                 </div>
               </div>
             );
@@ -1157,6 +1179,58 @@ export function CalendarReview({
                 backgroundImage: `repeating-linear-gradient(to bottom, transparent 0, transparent ${Math.max(0, gridLineSpacing - 1)}px, var(--line) ${gridLineSpacing}px)`
               }}
             >
+              {sameDay(day, today) ? (
+                <span
+                  aria-hidden="true"
+                  className="calendar-now-line"
+                  style={{ top: Math.round(((minutesFromDate(capturedNow) - calendarHours.startHour * 60) / 60) * rowHeight) }}
+                />
+              ) : null}
+              {pendingReviewSpans(reviewItems, startOfDay(day).getTime(), addDays(startOfDay(day), 1).getTime(), capturedNow.getTime()).map((item) => {
+                const geometry = calendarBlockStyle(
+                  { startedAt: new Date(item.fromMs).toISOString(), stoppedAt: new Date(item.toMs).toISOString() },
+                  null,
+                  day,
+                  rowHeight,
+                  calendarHeight,
+                  calendarHours,
+                  capturedNow
+                );
+                if (!geometry) return null;
+                const range = `${formatTime(new Date(item.fromMs))} to ${formatTime(new Date(item.toMs))}`;
+                return (
+                  <Link
+                    aria-label={`${item.title}, needs review, ${range}. Open Review.`}
+                    className={`calendar-review-block${item.color ? " df-block" : ""}`}
+                    href="/review"
+                    key={`review:${item.id}`}
+                    tabIndex={visibleSelectedTarget ? -1 : undefined}
+                    onClick={(event) => {
+                      // A press an open editor took for its own dismissal (and any discard
+                      // prompt) only dismisses, as on blank time: it never also leaves Calendar.
+                      const pointer = reviewLinkPointerRef.current;
+                      // While an editor is open its draft owns the page: a keyboard activation
+                      // (no pointer to consume) never leaves for Review either.
+                      if (
+                        (event.detail === 0 && visibleSelectedTarget) ||
+                        pressConsumedByEditorRef.current ||
+                        (pointer && calendarPointerMatchesConsumed(consumedPointerRef.current, pointer))
+                      ) {
+                        event.preventDefault();
+                      }
+                      pressConsumedByEditorRef.current = false;
+                    }}
+
+                    style={{
+                      ...(item.color ? activityBlockStyle(item.color, item.name) : {}),
+                      top: geometry.top,
+                      height: Math.max(14, geometry.height - 2)
+                    }}
+                  >
+                    {geometry.height >= 30 ? <b>{item.title}</b> : null}
+                  </Link>
+                );
+              })}
               {visibleSelectedTarget?.kind === "create" && visibleSelectedTarget.dayKey === formatCalendarDateKey(day) ? (() => {
                 const geometry = calculateCalendarDraftAnchorGeometry({
                   day,
@@ -1283,7 +1357,7 @@ export function CalendarReview({
                         entry.stoppedAt ? "" : "is-running",
                         startsBeforeDay ? "is-continuation-from-previous" : "",
                         continuesIntoNextDay ? "is-continuation-to-next" : "",
-                        entry.categoryId ? "" : "is-uncategorized",
+                        entry.categoryId ? "df-block" : "is-uncategorized",
                         lane.textDensity === "none" ? "has-no-text is-compact-overlap" : "",
                         hasInlineActionSlot ? "has-inline-action-slot" : "",
                         ...timeBlockDensityClassNames(density)
@@ -1291,11 +1365,13 @@ export function CalendarReview({
                       style={{
                         ...blockPositionStyle,
                         ...calendarBlockLaneStyle(lane),
+                        // Blocks: a solid activity fill with its measured on-block text colour.
+                        ...(entry.categoryId ? activityBlockStyle(entry.categoryColor, entry.categoryName ?? "") : {}),
                         "--calendar-block-accent": accent,
-                        "--calendar-block-fill": `color-mix(in srgb, ${accent} 18%, var(--surface))`,
-                        "--calendar-block-selected-fill": `color-mix(in srgb, ${accent} 26%, var(--surface-inset))`,
-                        "--calendar-block-border": `color-mix(in srgb, ${accent} 42%, var(--line))`,
-                        color: "var(--foreground)"
+                        "--calendar-block-fill": entry.categoryId ? "var(--block)" : `color-mix(in srgb, ${accent} 18%, var(--surface))`,
+                        "--calendar-block-selected-fill": entry.categoryId ? "var(--block)" : `color-mix(in srgb, ${accent} 26%, var(--surface-inset))`,
+                        "--calendar-block-border": entry.categoryId ? "transparent" : `color-mix(in srgb, ${accent} 42%, var(--line))`,
+                        color: entry.categoryId ? "var(--on-block)" : "var(--foreground)"
                       } as CSSProperties}
                       data-entry-id={entry.id}
                       data-calendar-block-key={blockKey}
@@ -1590,7 +1666,7 @@ function TimesheetView({
 }
 
 function calendarBlockStyle(
-  entry: TimeEntryRow,
+  entry: Pick<TimeEntryRow, "startedAt" | "stoppedAt">,
   draft: CalendarResizeDraft | null,
   day: Date,
   rowHeight: number,
@@ -1719,6 +1795,10 @@ function calendarDurationSeconds(
   capturedNow: Date
 ) {
   return calendarEntrySliceDetails(entry, draft, day, capturedNow).durationSeconds;
+}
+
+function formatCalendarWeekday(day: Date) {
+  return new Intl.DateTimeFormat("en-GB", { weekday: "short" }).format(day);
 }
 
 function minutesFromDate(date: Date) {

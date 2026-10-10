@@ -17,7 +17,7 @@ const allocation = readFileSync(
 
 describe("web category identity contract", () => {
   it("marks uncategorized Calendar blocks for the shared hatch treatment", () => {
-    expect(calendar).toContain('entry.categoryId ? "" : "is-uncategorized"');
+    expect(calendar).toContain('entry.categoryId ? "df-block" : "is-uncategorized"');
     expect(styles).toMatch(
       /\.calendar-time-block\.is-uncategorized\s*\{[^}]*background-image:\s*repeating-linear-gradient/s
     );
