@@ -16,10 +16,14 @@ vi.mock("next/link", () => ({
 
 type Sent = { url: string; body: { clientMutationId: string; mutation: Record<string, unknown> }; keepalive?: boolean };
 const sent: Sent[] = [];
+// A test may answer a Review POST itself (another device's decision, a failure).
+let answer: ((body: Sent["body"]) => Response | undefined) | null = null;
 const fetchMock = vi.fn(async (input: string, init?: RequestInit) => {
   if (init?.method === "POST" && input.startsWith("/api/review/")) {
     const body = JSON.parse(String(init.body)) as Sent["body"];
     sent.push({ url: input, body, keepalive: init.keepalive });
+    const answered = answer?.(body);
+    if (answered) return answered;
     const reviewItemId = input.slice("/api/review/".length);
     const action = body.mutation.action as string;
     const ignored = action.startsWith("ignore");
@@ -41,6 +45,7 @@ vi.mock("@/lib/client-auth-fetch", () => ({
 
 const { AppShellRuntimeProvider } = await import("@/components/AppShellRuntime");
 const { ReviewDeck } = await import("./ReviewDeck");
+const { beforeSessionChange } = await import("@/lib/session-change");
 
 const local = (hour: number, minute = 0) => new Date(2026, 7, 17, hour, minute).toISOString();
 const NOW = new Date(2026, 7, 17, 12, 0);
@@ -51,6 +56,8 @@ afterEach(() => {
   vi.useRealTimers();
   fetchMock.mockClear();
   sent.length = 0;
+  answer = null;
+  window.location.hash = "";
   document.body.innerHTML = "";
 });
 
@@ -167,6 +174,95 @@ describe("Review", () => {
     expect(title(container)).toBe("Morning walk");
     await key("n");
     expect(container.querySelector(".df-done")).not.toBeNull();
+    await act(async () => root.unmount());
+  });
+});
+
+describe("Review review-round fixes", () => {
+  it("keeps Enter for an input method and modified Enter from logging", async () => {
+    const { container, root } = await mount();
+    const input = container.querySelector<HTMLInputElement>("#df-logas-name")!;
+    input.focus();
+    await act(async () => {
+      input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", isComposing: true, bubbles: true, cancelable: true }));
+      input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", metaKey: true, bubbles: true, cancelable: true }));
+    });
+    expect(title(container)).toBe("Morning walk");
+    expect(container.querySelector(".df-toast")).toBeNull();
+    await act(async () => root.unmount());
+  });
+
+  it("drops a moment decided differently elsewhere quietly, and does not count an equivalent one", async () => {
+    answer = (body) => body.mutation.action === "ignore_once"
+      ? new Response(JSON.stringify({ ok: false, code: "resolution_conflict", canonicalStatus: "accepted" }), { status: 409 })
+      : new Response(JSON.stringify({ ok: true, action: "accept", status: "accepted", alreadyResolved: true, equivalent: true }), { status: 200 });
+    const { container, root } = await mount();
+    await key("n");
+    await key("y");
+    await act(async () => vi.advanceTimersByTimeAsync(5_000));
+    expect(sent.map((request) => request.body.mutation.action)).toEqual(["ignore_once", "accept"]);
+    expect(container.querySelector("[role='alert']")).toBeNull();
+    expect(queue(container)).toEqual([]);
+    expect(container.querySelector(".df-done p")?.textContent).toContain("Nothing to review");
+    await act(async () => root.unmount());
+  });
+
+  it("saves a held decision before the session changes (workspace switch or log out)", async () => {
+    const { root } = await mount();
+    await key("y");
+    expect(sent).toEqual([]);
+    await act(async () => beforeSessionChange());
+    expect(sent.map((request) => request.body.mutation)).toEqual([{ action: "accept" }]);
+    await act(async () => root.unmount());
+  });
+
+  it("says when a linked moment is not in the queue instead of opening another silently", async () => {
+    window.location.hash = "#review-30000000-0000-4000-8000-000000000099";
+    const { container, root } = await mount();
+    expect(container.textContent).toContain("That moment isn’t waiting here");
+    await act(async () => root.unmount());
+    window.location.hash = `#review-${READ}`;
+    const second = await mount();
+    expect(title(second.container)).toBe("Reading");
+    expect(second.container.textContent).not.toContain("That moment isn’t waiting here");
+    await act(async () => second.root.unmount());
+  });
+
+  it("moves focus to All framed after the last decision and back to the card after Undo", async () => {
+    const { container, root } = await mount([review(WALK, "Morning walk", "focus")]);
+    const logIt = container.querySelector<HTMLButtonElement>(".df-ractions button")!;
+    logIt.focus();
+    await act(async () => logIt.click());
+    expect(document.activeElement).toBe(container.querySelector("#df-done-title"));
+    const undoButton = container.querySelector<HTMLButtonElement>(".df-toast-action")!;
+    undoButton.focus();
+    await act(async () => undoButton.click());
+    await act(async () => vi.advanceTimersByTimeAsync(20));
+    expect(document.activeElement?.textContent).toContain("Log it");
+    await act(async () => root.unmount());
+  });
+
+  it("leaves Y, N and ⌘Z to the evidence editor while it is open", async () => {
+    const visit = { ...review(WALK, "Visit", "focus"), eventSource: "location_learning", eventType: "learned_place_visit", rawPayload: { algorithmVersion: "location-v2.0" } };
+    const { container, root } = await mount([visit, review(READ, "Reading", "admin")]);
+    await act(async () => {
+      [...container.querySelectorAll<HTMLButtonElement>(".df-qrow")][1].click();
+    });
+    await key("n");
+    expect(container.querySelector(".df-toast")?.textContent).toContain("Skipped Reading");
+    const edit = [...container.querySelectorAll<HTMLButtonElement>(".df-ractions button")].find((button) => button.textContent === "Edit before logging")!;
+    await act(async () => edit.click());
+    expect(edit.getAttribute("aria-expanded")).toBe("true");
+    const n = new KeyboardEvent("keydown", { key: "n", bubbles: true, cancelable: true });
+    const undoKey = new KeyboardEvent("keydown", { key: "z", metaKey: true, bubbles: true, cancelable: true });
+    await act(async () => {
+      edit.dispatchEvent(n);
+      edit.dispatchEvent(undoKey);
+    });
+    // N is swallowed (the shell's command bar does not take it either); ⌘Z does not undo.
+    expect(n.defaultPrevented).toBe(true);
+    expect(queue(container)).toEqual(["Visit"]);
+    expect(container.querySelector(".df-revidence")).not.toBeNull();
     await act(async () => root.unmount());
   });
 });

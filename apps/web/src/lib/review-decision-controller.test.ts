@@ -110,6 +110,11 @@ describe("ReviewDecisionController", () => {
     await vi.advanceTimersByTimeAsync(REVIEW_DECISION_UNDO_MS);
     expect(state().decided).toEqual([]);
     expect(state().error).toBeNull();
+    // Stays out of the queue until fresh data drops it.
+    expect(state().hiddenIds.has("a")).toBe(true);
+    controller.reconcileItemIds(new Set());
+    expect(state().hiddenIds.has("a")).toBe(false);
+    expect(state().decided).toEqual([]);
   });
 
   it("flush saves the held decision at once with keepalive (leaving the page)", async () => {

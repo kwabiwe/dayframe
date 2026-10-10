@@ -53,7 +53,8 @@ export type ReviewDecisionState = {
   restored: { itemId: string; sequence: number } | null;
 };
 
-type Active = { decision: ReviewDecision; status: "saving" | "saved" };
+/** "gone": decided elsewhere; hidden until the data drops it, but not this visit's decision. */
+type Active = { decision: ReviewDecision; status: "saving" | "saved" | "gone" };
 
 export class ReviewDecisionController {
   private active = new Map<number, Active>();
@@ -66,6 +67,7 @@ export class ReviewDecisionController {
   private sequence = 0;
   /** Saved decisions whose item has left the data: still this visit's, for "All framed". */
   private settled: ReviewDecision[] = [];
+  private inFlight = new Set<Promise<unknown>>();
   private timer: ReturnType<typeof setTimeout> | null = null;
 
   private commit: ReviewDecisionCommit = async () => {
@@ -85,9 +87,9 @@ export class ReviewDecisionController {
   getState(): ReviewDecisionState {
     const hiddenIds = new Set<string>();
     const decided: ReviewDecision[] = [...this.settled];
-    for (const { decision } of this.active.values()) {
+    for (const { decision, status } of this.active.values()) {
       hiddenIds.add(decision.itemId);
-      decided.push(decision);
+      if (status !== "gone") decided.push(decision);
     }
     if (this.pending) {
       hiddenIds.add(this.pending.itemId);
@@ -137,6 +139,12 @@ export class ReviewDecisionController {
     this.startCommit(this.pending, { keepalive: true });
   }
 
+  /** Saves the held decision and waits for every save in flight (before the session changes). */
+  async flushAndSettle() {
+    this.flush();
+    await Promise.allSettled([...this.inFlight]);
+  }
+
   clearError() {
     if (this.error === null) return;
     this.error = null;
@@ -150,10 +158,10 @@ export class ReviewDecisionController {
   reconcileItemIds(openIds: ReadonlySet<string>) {
         let changed = false;
     for (const [token, active] of this.active) {
-      if (active.status === "saved" && !openIds.has(active.decision.itemId)) {
+      if (active.status !== "saving" && !openIds.has(active.decision.itemId)) {
         this.active.delete(token);
-        // Still this visit's decision for "All framed": keep it counted.
-        this.settled.push(active.decision);
+        // A saved decision is still this visit's for "All framed": keep it counted.
+        if (active.status === "saved") this.settled.push(active.decision);
         changed = true;
       }
     }
@@ -169,14 +177,14 @@ export class ReviewDecisionController {
     }
     this.active.set(decision.token, { decision, status: "saving" });
     this.emit();
-    void this.commit(decision, options)
+    const saving = this.commit(decision, options)
       .then((result) => {
         if (this.active.get(decision.token)?.status !== "saving") return;
         if (result === "saved") {
           this.active.set(decision.token, { decision, status: "saved" });
         } else if (result === "gone") {
           // Decided elsewhere while held: not this visit's decision, and nothing to bring back.
-          this.active.delete(decision.token);
+          this.active.set(decision.token, { decision, status: "gone" });
         } else {
           this.active.delete(decision.token);
           this.error = `“${decision.label.replace(/^(Logged|Skipped) /, "")}” changed, so it was not saved. Review it again.`;
@@ -192,7 +200,11 @@ export class ReviewDecisionController {
           : "Couldn’t save that decision. It’s back in the queue.";
         this.markRestored(decision.itemId);
         this.emit();
+      })
+      .finally(() => {
+        this.inFlight.delete(saving);
       });
+    this.inFlight.add(saving);
   }
 
   private markRestored(itemId: string) {

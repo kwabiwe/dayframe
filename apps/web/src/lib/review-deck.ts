@@ -201,8 +201,8 @@ export type ReviewLogAsDraft = {
 
 /**
  * Logging sends edit_and_confirm only when the user really changed the name or the activity;
- * otherwise the plain confirm/accept keeps the item's own source and confidence (an edit is stored
- * as a manual entry). Needs a complete suggested window, as the server's edit contract does.
+ * otherwise the plain confirm/accept is sent, as on iPhone (the server keeps a moment's source and
+ * confidence either way since #261). Needs a complete suggested window, as the edit contract does.
  */
 export function reviewLogAsEdit(item: ReviewItemRow, draft: ReviewLogAsDraft | undefined): ReviewMutationEdit | null {
   const typed = draft?.name?.trim();
