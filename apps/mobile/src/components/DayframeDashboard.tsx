@@ -39,7 +39,7 @@ import {
 } from "@dayframe/shared";
 import { DayframeCalendarView } from "../../modules/dayframe-calendar";
 import { ActiveTimerEditSheet } from "@/components/ActiveTimerEditSheet";
-import { ConnectivityStatusIndicator } from "@/components/ConnectivityStatusStrip";
+import { ConnectivityStatusIndicator, useSyncAttentionCount } from "@/components/ConnectivityStatusStrip";
 import { ReportsTab } from "@/components/reports/ReportsTab";
 import { DayframeBrand } from "@/components/brand";
 import { TodayTimerSurface, type TodayActiveTimerPresentation } from "@/components/accessibility/TodayTimerSurface";
@@ -269,13 +269,7 @@ function DashboardBrandLockup({
         size="md"
         tone={theme.mode === "dark" ? "light" : "dark"}
       />
-      <ConnectivityStatusIndicator
-        isFocused={isFocused}
-        onOpenDiagnostics={() => router.push({
-          pathname: "/settings",
-          params: { section: "sync" }
-        })}
-      />
+      <ConnectivityStatusIndicator isFocused={isFocused} />
       <StagingBadge styles={styles} />
     </View>
   );
@@ -302,6 +296,12 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
   const [calendarEditPresentation, setCalendarEditPresentation] = useState<TimeEntrySheetPresentation | null>(null);
   const [calendarTransitionDirection, setCalendarTransitionDirection] = useState(1);
   const [reportsScrubbing, setReportsScrubbing] = useState(false);
+  // A rejected change badges the avatar, which then opens Settings › Sync help.
+  const syncAttentionCount = useSyncAttentionCount();
+  const openAccount = useCallback((target: "settings" | "sync") => {
+    if (target === "sync") router.push({ pathname: "/settings", params: { section: "sync" } });
+    else router.push("/settings");
+  }, []);
   const [authView, setAuthView] = useState<AuthView>("login");
   const [authEmail, setAuthEmail] = useState("");
   const [authPassword, setAuthPassword] = useState("");
@@ -2767,9 +2767,10 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
               <View style={styles.header}>
                 <DashboardBrandLockup isFocused={isFocused} styles={styles} theme={theme} />
                 <AccountAvatarButton
+                  attentionCount={syncAttentionCount}
                   email={data?.user.email}
                   name={data?.user.name}
-                  onPress={() => router.push("/settings")}
+                  onPress={openAccount}
                   theme={theme}
                 />
               </View>
@@ -2876,9 +2877,10 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
             <Animated.View style={[styles.nativeCalendarHeader, enteringStyle]}>
               <DashboardBrandLockup isFocused={isFocused} styles={styles} theme={theme} />
               <AccountAvatarButton
+                attentionCount={syncAttentionCount}
                 email={data?.user.email}
                 name={data?.user.name}
-                onPress={() => router.push("/settings")}
+                onPress={openAccount}
                 theme={theme}
               />
             </Animated.View>
@@ -2929,9 +2931,10 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
           <View style={styles.header}>
             <DashboardBrandLockup isFocused={isFocused} styles={styles} theme={theme} />
             <AccountAvatarButton
+              attentionCount={syncAttentionCount}
               email={data?.user.email}
               name={data?.user.name}
-              onPress={() => router.push("/settings")}
+              onPress={openAccount}
               theme={theme}
             />
           </View>

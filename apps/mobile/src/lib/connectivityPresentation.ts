@@ -1,15 +1,15 @@
 import { CONNECTIVITY_SUCCESS_NOTICE_MS, type ConnectivityStatus } from "./connectivityState";
 
-export type ConnectivityStatusVariant =
-  | "offline"
-  | "syncing"
-  | "synced"
-  | "attention";
+// Blocks connectivity (owner decision 7 Oct, built as parity step 10c): the header slot shows only
+// confirmed offline and, for about two seconds after a real return, "back online". Saving and
+// syncing stay silent in the background. A rejected change that needs the user is a badge on the
+// account avatar (see `syncAttentionPresentation`), not a header icon.
+
+export type ConnectivityStatusVariant = "offline" | "online";
 
 export type ConnectivityStatusViewModel = {
   accessibilityLabel: string;
   id: string;
-  isActionable: boolean;
   variant: ConnectivityStatusVariant;
 };
 
@@ -19,138 +19,95 @@ export function connectivityStatusColorRole(_variant: ConnectivityStatusVariant)
 
 export type ConnectivityPresentationState = {
   accountKey: string | null;
-  completionSequence: number;
-  onlineUntil: number | null;
-  previousPendingCount: number;
+  /** Confirmed offline since the last "back online" (an unknown spell in between keeps it). */
+  wasOffline: boolean;
+  backOnlineSequence: number;
+  backOnlineUntil: number | null;
 };
 
 export function createConnectivityPresentationState(): ConnectivityPresentationState {
   return {
     accountKey: null,
-    completionSequence: 0,
-    onlineUntil: null,
-    previousPendingCount: 0
+    wasOffline: false,
+    backOnlineSequence: 0,
+    backOnlineUntil: null
   };
 }
 
 export function updateConnectivityPresentation(input: {
   accountKey: string | null;
-  attentionCount: number;
-  isTransmitting?: boolean;
   now: number;
-  pendingCount: number;
   state: ConnectivityPresentationState;
   status: ConnectivityStatus;
 }) {
-  const attentionCount = Math.max(0, Math.trunc(input.attentionCount));
-  const pendingCount = Math.max(0, Math.trunc(input.pendingCount));
   let state = input.state;
   if (state.accountKey !== input.accountKey) {
+    // A new account never inherits the previous account's notice.
     state = {
       ...state,
       accountKey: input.accountKey,
-      onlineUntil: null,
-      previousPendingCount: pendingCount
+      wasOffline: input.status === "offline",
+      backOnlineUntil: null
     };
   }
-
-  if (pendingCount > 0) {
-    if (state.previousPendingCount !== pendingCount || state.onlineUntil !== null) {
-      state = {
-        ...state,
-        onlineUntil: null,
-        previousPendingCount: pendingCount
-      };
+  if (input.status === "offline") {
+    if (!state.wasOffline || state.backOnlineUntil !== null) {
+      state = { ...state, wasOffline: true, backOnlineUntil: null };
     }
-  } else if (state.previousPendingCount > 0) {
+  } else if (input.status === "online" && state.wasOffline) {
     state = {
       ...state,
-      completionSequence: state.completionSequence + 1,
-      onlineUntil:
-        input.status === "online" && attentionCount === 0
-          ? input.now + CONNECTIVITY_SUCCESS_NOTICE_MS
-          : null,
-      previousPendingCount: 0
+      wasOffline: false,
+      backOnlineSequence: state.backOnlineSequence + 1,
+      backOnlineUntil: input.now + CONNECTIVITY_SUCCESS_NOTICE_MS
     };
-  } else if (
-    state.onlineUntil !== null &&
-    (state.onlineUntil <= input.now || attentionCount > 0)
-  ) {
-    state = { ...state, onlineUntil: null };
+  } else if (state.backOnlineUntil !== null && state.backOnlineUntil <= input.now) {
+    state = { ...state, backOnlineUntil: null };
   }
 
   return {
     state,
     viewModel: connectivityStatusViewModel({
-      attentionCount,
-      completionSequence: state.completionSequence,
-      isTransmitting: input.isTransmitting,
+      backOnlineSequence: state.backOnlineSequence,
+      backOnlineUntil: state.backOnlineUntil,
       now: input.now,
-      onlineUntil: state.onlineUntil,
-      pendingCount,
       status: input.status
     })
   };
 }
 
 export function connectivityStatusViewModel(input: {
-  attentionCount: number;
-  completionSequence: number;
-  isTransmitting?: boolean;
+  backOnlineSequence: number;
+  backOnlineUntil: number | null;
   now: number;
-  onlineUntil: number | null;
-  pendingCount: number;
   status: ConnectivityStatus;
 }): ConnectivityStatusViewModel | null {
   if (input.status === "offline") {
-    if (input.attentionCount > 0) {
-      return {
-        accessibilityLabel:
-          "Offline. A timer or time entry sync issue also needs attention. Open Sync help in Settings.",
-        id: "offline-attention",
-        isActionable: true,
-        variant: "offline"
-      };
-    }
     return {
-      accessibilityLabel: "Offline. Changes will sync later.",
+      accessibilityLabel: "Offline. Changes are saved on this iPhone and will sync when you're back online.",
       id: "offline",
-      isActionable: false,
       variant: "offline"
     };
   }
-  if (input.attentionCount > 0) {
+  if (input.status === "online" && input.backOnlineUntil !== null && input.backOnlineUntil > input.now) {
     return {
-      accessibilityLabel: "A timer or time entry sync issue needs attention. Open Sync help in Settings.",
-      id: "attention",
-      isActionable: true,
-      variant: "attention"
-    };
-  }
-  if (input.status === "online" && input.pendingCount > 0) {
-    return input.isTransmitting
-      ? {
-          accessibilityLabel: "Syncing saved changes.",
-          id: "syncing",
-          isActionable: false,
-          variant: "syncing"
-        }
-      : null;
-  }
-  if (
-    input.status === "online" &&
-    input.pendingCount === 0 &&
-    input.onlineUntil !== null &&
-    input.onlineUntil > input.now
-  ) {
-    return {
-      accessibilityLabel: "Saved changes synced.",
-      id: `synced-${input.completionSequence}`,
-      isActionable: false,
-      variant: "synced"
+      accessibilityLabel: "Back online.",
+      id: `online-${input.backOnlineSequence}`,
+      variant: "online"
     };
   }
   return null;
+}
+
+/** The avatar's attention badge: a rejected Stop, Edit or Delete that needs the user in Sync help. */
+export function syncAttentionPresentation(attentionCount: number) {
+  const count = Math.max(0, Math.trunc(attentionCount));
+  if (count === 0) return null;
+  return {
+    accessibilityLabel: `Account and settings. ${count === 1 ? "A change" : `${count} changes`} couldn't be saved and ${count === 1 ? "needs" : "need"} your attention.`,
+    accessibilityHint: "Opens Sync help in Settings",
+    count
+  };
 }
 
 export function createDistinctConnectivityAnnouncementTracker() {

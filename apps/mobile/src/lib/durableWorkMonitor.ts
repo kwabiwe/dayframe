@@ -42,6 +42,8 @@ export type DurableWorkSnapshot = {
   timerMutationCount: number;
   timerStopCount: number;
   timerStopNeedsAttentionCount: number;
+  /** Rejected Stop/Edit/Delete identities (sorted); a new one is announced even at an equal count. */
+  attentionIds?: readonly string[];
   timeEntryCommandCount: number;
   timeEntryNeedsAttentionCount: number;
   timeEntryQuarantinedCount: number;
@@ -64,6 +66,7 @@ const EMPTY_SNAPSHOT: DurableWorkSnapshot = {
   timerMutationCount: 0,
   timerStopCount: 0,
   timerStopNeedsAttentionCount: 0,
+  attentionIds: [],
   timeEntryCommandCount: 0,
   timeEntryNeedsAttentionCount: 0,
   timeEntryQuarantinedCount: 0,
@@ -223,6 +226,12 @@ async function refreshOnce() {
     timerMutationCount,
     timerStopCount,
     timerStopNeedsAttentionCount,
+    attentionIds: [
+      ...ownedTimerStops
+        .filter((stop) => stop.failureKind === "permanent")
+        .map((stop) => `stop:${stop.clientEventId}`),
+      ...timeEntries.needsAttentionIds
+    ].sort(),
     timeEntryCommandCount: timeEntries.pendingCount,
     timeEntryNeedsAttentionCount: timeEntries.needsAttentionCount,
     timeEntryQuarantinedCount: timeEntries.quarantinedCount,
@@ -257,6 +266,7 @@ function snapshotsEqual(left: DurableWorkSnapshot, right: DurableWorkSnapshot) {
     left.timerMutationCount === right.timerMutationCount &&
     left.timerStopCount === right.timerStopCount &&
     left.timerStopNeedsAttentionCount === right.timerStopNeedsAttentionCount &&
+    (left.attentionIds ?? []).join("|") === (right.attentionIds ?? []).join("|") &&
     left.timeEntryCommandCount === right.timeEntryCommandCount &&
     left.timeEntryNeedsAttentionCount === right.timeEntryNeedsAttentionCount &&
     left.timeEntryQuarantinedCount === right.timeEntryQuarantinedCount &&

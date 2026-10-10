@@ -295,6 +295,13 @@ Block pull-to-refresh:
 - Interruption: changing range or filter during a focus clears the focus; a late previous-period read for an old range is ignored (keyed by its exact request).
 - Accessibility: Reduce Motion places the thumb without a spring and shows the columns without the grow; the hero is one live-region element ("19 hours 47 minutes framed this week. 19 hours 47 minutes more than last week so far"); each column is a 44-point button with its day and total, selected while focused.
 
+## Connectivity slot and avatar badge (Blocks parity step 10c)
+
+- Trigger: confirmed offline, a live return to online, a rejected Stop/Edit/Delete appearing or resolving.
+- Owner: the root `ConnectivityStatusProvider` owns state, expiry and announcements; each tab's `ConnectivityStatusIndicator` cross-fades the one glyph in its fixed 44-point slot (`FadeIn`/`FadeOut`, 140 ms; Reduce Motion 70/60 ms). Nothing rotates. The avatar badge appears and disappears in place with the attention count; nothing moves around it.
+- Interruption: a new outage replaces "back online" at once; an account change clears any notice; the expiry timer is cleared when superseded.
+- Accessibility: one announcement per distinct slot state and one per new rejection (not at launch); the slot is a text element, never a button; the badged avatar carries its own label and hint.
+
 ## Reports donut and filter (Blocks parity step 10b)
 
 - Trigger: a finger on the ring, a row tap, VoiceOver increment/decrement, All / None / a row in the filter sheet.

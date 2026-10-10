@@ -233,7 +233,7 @@ Blocks prototype parity (owner decision 7 October 2026; built screen by screen):
 - Every iPhone and web screen, Settings included, is rebuilt to match the Blocks prototype (`docs/brand-style-guide.md`, Dayframe Blocks). The rules above stay in force for each screen until the PR that rebuilds it updates them.
 - Kept through the rebuild: grouped repeat rows in history; the Review Location evidence editor; the entry sheet's start/end date and time editing, historical description suggestions and rounding shortcuts; free-text tags with autocomplete; Retry/Discard for rejected changes; every export and delete path; logout on every width.
 - On iPhone Today the Review donut gives way to a "moments to review" card that opens Review (built in step 2a-1), with pending time shown in a Today ribbon (step 2a-3). The owner confirmed on 7 October 2026 that Quick Confirm leaves Today (suggestions are confirmed in Review) and that the goal frame replaces the logged/"covered" summary.
-- Connectivity direction: the indicator should show only offline and a brief "back online", with syncing silent; rejected changes still need a visible way into Retry/Discard (an attention badge on the avatar is proposed). `AGENTS.md` governs until the PR that builds it.
+- Connectivity direction: the indicator should show only offline and a brief "back online", with syncing silent; rejected changes badge the account avatar, which opens Sync help for Retry/Discard. Built in Blocks step 10c; `AGENTS.md` carries the rule.
 
 Decisions where the prototype is ambiguous or drops a function:
 
