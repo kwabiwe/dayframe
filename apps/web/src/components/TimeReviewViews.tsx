@@ -239,8 +239,8 @@ export function TimeReviewViews({
   }, [persistPreference, preferenceState]);
 
   useEffect(() => {
-    if (!hasRunningEntry) return undefined;
-    const interval = window.setInterval(() => setPresentationNow(Date.now()), 1_000);
+    // Each second while a block runs; otherwise each 30 s so Calendar's now line keeps moving.
+    const interval = window.setInterval(() => setPresentationNow(Date.now()), hasRunningEntry ? 1_000 : 30_000);
     return () => window.clearInterval(interval);
   }, [hasRunningEntry]);
 
