@@ -104,7 +104,7 @@ describe("Calendar in Blocks", () => {
     expect(document.querySelector(".calendar-now-line")).not.toBeNull();
     const links = document.querySelectorAll<HTMLAnchorElement>(".calendar-review-block");
     expect(links).toHaveLength(1);
-    expect(links[0].getAttribute("href")).toBe("/review");
+    expect(links[0].getAttribute("href")).toBe("/review#review-r1");
     expect(links[0].getAttribute("aria-label")).toBe("Gym visit, needs review, 07:00 to 08:00. Open Review.");
   });
 
@@ -128,7 +128,7 @@ describe("Calendar in Blocks", () => {
         Object.defineProperty(event, "pointerId", { value: pointerId });
         link.dispatchEvent(event);
       }
-      link.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
+      link.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, detail: 1 }));
     };
 
     press(1);
