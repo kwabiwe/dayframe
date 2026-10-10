@@ -253,7 +253,11 @@ export function ribbonHitAt(
     if (!hit || order > hit.order || (order === hit.order && entry.id.localeCompare(hit.id) > 0)) hit = { id: entry.id, order };
   }
   if (hit) return { kind: "entry", id: hit.id };
-  const span = pending.find((item) => atMs >= item.fromMs && atMs <= item.toMs);
+  // Suggestions paint in order, so the last one under the point is the one on top.
+  let span: { id: string } | null = null;
+  for (const item of pending) {
+    if (atMs >= item.fromMs && atMs <= item.toMs) span = item;
+  }
   return span ? { kind: "pending", id: span.id } : { kind: "gap", atMs };
 }
 

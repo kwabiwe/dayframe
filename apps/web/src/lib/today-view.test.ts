@@ -223,6 +223,15 @@ describe("ribbon details", () => {
     expect(ribbonHitAt(50, [b, a], [])).toEqual({ kind: "entry", id: "b" });
   });
 
+  it("picks the suggestion painted on top when suggestions overlap", () => {
+    const pending = [
+      { id: "location", fromMs: 0, toMs: 100 },
+      { id: "walk", fromMs: 25, toMs: 75 }
+    ];
+    expect(ribbonHitAt(50, [], pending)).toEqual({ kind: "pending", id: "walk" });
+    expect(ribbonHitAt(90, [], pending)).toEqual({ kind: "pending", id: "location" });
+  });
+
   it("places hour marks by local wall-clock time", () => {
     const start = at(10, 0);
     expect(hourPercent(start, localDayEnd(start), 6)).toBeCloseTo(25);
