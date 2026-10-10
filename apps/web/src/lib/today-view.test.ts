@@ -11,7 +11,9 @@ import {
   pendingReviewSpans,
   previousDays,
   ribbonHitAt,
+  staleEditError,
   todayBlocks,
+  withMinimumSpan,
   type TodayEntry
 } from "@/lib/today-view";
 
@@ -181,5 +183,23 @@ describe("Review on Today", () => {
     expect(ribbonHitAt(75, entries, pending)).toEqual({ kind: "entry", id: "late" });
     expect(ribbonHitAt(250, entries, pending)).toEqual({ kind: "pending", id: "p" });
     expect(ribbonHitAt(400, entries, pending)).toEqual({ kind: "gap", atMs: 400 });
+  });
+
+  it("hit-tests a very short block at its drawn minimum width", () => {
+    const entries = withMinimumSpan([{ id: "short", fromMs: 1000, toMs: 1010 }], 500);
+    expect(ribbonHitAt(1300, entries, [])).toEqual({ kind: "entry", id: "short" });
+    expect(ribbonHitAt(1600, entries, [])).toEqual({ kind: "gap", atMs: 1600 });
+  });
+});
+
+describe("editing a block that changed elsewhere", () => {
+  it("refuses a running block's save once it stopped, another block runs, or it was deleted", () => {
+    const running = { id: "a", stoppedAt: null };
+    expect(staleEditError(running, [running], "a")).toBeNull();
+    expect(staleEditError(running, [{ id: "a", stoppedAt: iso(10, 9) }, { id: "b", stoppedAt: null }], "b")).toMatch(/stopped/);
+    expect(staleEditError(running, [running, { id: "b", stoppedAt: null }], "b")).toMatch(/stopped/);
+    expect(staleEditError(running, [], null)).toMatch(/deleted/);
+    const finished = { id: "c", stoppedAt: iso(10, 9) };
+    expect(staleEditError(finished, [finished], "b")).toBeNull();
   });
 });

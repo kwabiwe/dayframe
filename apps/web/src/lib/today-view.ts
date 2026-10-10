@@ -226,6 +226,13 @@ export function pendingReviewSeconds(items: readonly ReviewItemRow[]) {
   return Math.floor(total / 1000);
 }
 
+/** Widens spans to what the ribbon draws (`max(3px, width)`), so a hit matches the visible block. */
+export function withMinimumSpan<T extends { fromMs: number; toMs: number }>(spans: readonly T[], minimumMs: number): T[] {
+  return spans.map((item) => (item.toMs - item.fromMs >= minimumMs ? item : { ...item, toMs: item.fromMs + minimumMs }));
+}
+
+export const RIBBON_MIN_BLOCK_PX = 3;
+
 export type RibbonHit =
   | { kind: "entry"; id: string }
   | { kind: "pending"; id: string }
@@ -244,4 +251,22 @@ export function ribbonHitAt(
   if (hit) return { kind: "entry", id: hit.id };
   const span = pending.find((item) => atMs >= item.fromMs && atMs <= item.toMs);
   return span ? { kind: "pending", id: span.id } : { kind: "gap", atMs };
+}
+
+/**
+ * Why an editor's save must not go ahead, or null. Saving a running block goes through the
+ * shell's "update what is running" path, so it is only safe while the block the editor opened is
+ * still the one running; it may have been stopped, switched or deleted elsewhere since.
+ */
+export function staleEditError(
+  editing: Pick<TimeEntryRow, "id" | "stoppedAt">,
+  entries: ReadonlyArray<Pick<TimeEntryRow, "id" | "stoppedAt">>,
+  activeId: string | null
+) {
+  const current = entries.find((entry) => entry.id === editing.id);
+  if (!current) return "This block was deleted. Close the editor to continue.";
+  if (!editing.stoppedAt && (current.stoppedAt || activeId !== editing.id)) {
+    return "This block stopped while you were editing. Close the editor and edit it again.";
+  }
+  return null;
 }

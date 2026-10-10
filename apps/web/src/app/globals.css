@@ -10617,10 +10617,17 @@ dialog.ui-dialog.df-palette {
   padding: 8px 11px;
   background: var(--text-primary);
   color: var(--surface);
+  max-width: min(320px, 100%);
   font-size: 12px;
   pointer-events: none;
-  white-space: nowrap;
   box-shadow: var(--shadow-soft);
+}
+
+.df-ribbon-tip b,
+.df-ribbon-tip span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .df-ribbon-tip b {
@@ -10828,7 +10835,8 @@ dialog.ui-dialog.df-palette {
   align-items: center;
   border-radius: 14px;
   transition: opacity 180ms ease-in;
-  animation: df-presence-in 140ms ease-out both;
+  /* Backwards fill only: once it has run, `.is-leaving` owns the opacity. */
+  animation: df-presence-in 140ms ease-out backwards;
 }
 
 @keyframes df-presence-in {
@@ -10990,7 +10998,7 @@ dialog.ui-dialog.df-palette {
   align-items: center;
   gap: 12px;
   border-radius: 999px;
-  padding: 6px 6px 6px 16px;
+  padding: 4px 4px 4px 16px;
   background: var(--text-primary);
   color: var(--surface);
   font-weight: 600;
@@ -11022,7 +11030,7 @@ dialog.ui-dialog.df-palette {
 
 .df-toast-action {
   min-width: 44px;
-  min-height: 36px;
+  min-height: 44px;
   border: 0;
   border-radius: 999px;
   padding: 0 14px;

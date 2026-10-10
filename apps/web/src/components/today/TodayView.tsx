@@ -28,7 +28,10 @@ import {
   pendingReviewSpans,
   previousDays,
   ribbonHitAt,
+  RIBBON_MIN_BLOCK_PX,
+  staleEditError,
   todayBlocks,
+  withMinimumSpan,
   type GoalCellSlice
 } from "@/lib/today-view";
 
@@ -66,6 +69,11 @@ export function TodayView({ initialData }: { initialData: BootstrapData; rendere
     [data.activeEntry, data.dayEntries, data.entries, data.historyEntries, data.weekEntries]
   );
   const hasLive = allEntries.some((entry) => !entry.stoppedAt);
+  // The editor keeps the callbacks it opened with, so its save reads the newest data from here.
+  const latestRef = useRef({ allEntries, activeId: data.activeEntry?.id ?? null });
+  useEffect(() => {
+    latestRef.current = { allEntries, activeId: data.activeEntry?.id ?? null };
+  }, [allEntries, data.activeEntry]);
   const nowMs = useTodayClock(hydrated, hasLive);
 
   const entryIds = useMemo(() => new Set(allEntries.map((entry) => entry.id)), [allEntries]);
@@ -279,18 +287,17 @@ export function TodayView({ initialData }: { initialData: BootstrapData; rendere
         ) : null}
         {blocks.length ? (
           <ul className="df-rows">
-            {blocks.map(({ entry, clip }, index) => {
+            {blocks.map(({ entry }, index) => {
               const category = entry.categoryId ? categoriesById.get(entry.categoryId) ?? null : null;
               const nextId = blocks[index + 1]?.entry.id ?? blocks[index - 1]?.entry.id ?? null;
               return (
                 <TodayBlockRow
                   category={category}
-                  durationMs={clip.toMs - clip.fromMs}
+                  durationMs={(entry.stoppedAt ? Date.parse(entry.stoppedAt) : nowMs) - Date.parse(entry.startedAt)}
                   entry={entry}
                   isLeaving={leavingIds.has(entry.id)}
                   isStarting={startingId === entry.id}
                   key={entry.id}
-                  nowMs={nowMs}
                   onDelete={() => deleteEntry(entry, nextId)}
                   onEdit={() => setEditingEntry(entry)}
                   onStartAgain={async () => {
@@ -336,6 +343,11 @@ export function TodayView({ initialData }: { initialData: BootstrapData; rendere
             deleteEntry(entry, null);
           } : undefined}
           onSave={async (plan) => {
+            // The running-block path patches whatever is running now, so only use it while the
+            // block this editor opened is still the one running (it may have stopped or been
+            // switched on another device since).
+            const stale = staleEditError(editingEntry, latestRef.current.allEntries, latestRef.current.activeId);
+            if (stale) return { ok: false, error: stale };
             const outcome = editingEntry.stoppedAt
               ? await saveTimeEntryQuickEdit(editingEntry.id, plan)
               : await updateActiveEntryFromCalendar({ plan });
@@ -425,15 +437,23 @@ function TodayRibbon({
   const trackRef = useRef<HTMLDivElement | null>(null);
   const [tip, setTip] = useState<{ x: number; atMs: number; width: number } | null>(null);
 
-  const entrySpans = blocks.map(({ entry, clip }) => ({ id: entry.id, ...clip }));
+  // Hit-test what is drawn: a block is at least 3 px wide however short its time.
+  const hitAt = (atMs: number, width: number) => {
+    const minimumMs = (RIBBON_MIN_BLOCK_PX / width) * span;
+    return ribbonHitAt(
+      atMs,
+      withMinimumSpan(blocks.map(({ entry, clip }) => ({ id: entry.id, ...clip })), minimumMs),
+      withMinimumSpan(pending, minimumMs)
+    );
+  };
   const hitFor = (clientX: number) => {
     const rect = trackRef.current?.getBoundingClientRect();
     if (!rect || rect.width <= 0) return null;
     const x = Math.min(Math.max(clientX - rect.left, 0), rect.width);
     const atMs = dayStart + (x / rect.width) * span;
-    return { x, atMs, width: rect.width, hit: ribbonHitAt(atMs, entrySpans, pending) };
+    return { x, atMs, width: rect.width, hit: hitAt(atMs, rect.width) };
   };
-  const hover = tip ? ribbonHitAt(tip.atMs, entrySpans, pending) : null;
+  const hover = tip ? hitAt(tip.atMs, tip.width) : null;
   const hotId = hover && hover.kind !== "gap" ? hover.id : null;
   const tipEntry = hover?.kind === "entry" ? blocks.find((block) => block.entry.id === hover.id) ?? null : null;
   const tipPending = hover?.kind === "pending" ? pending.find((item) => item.id === hover.id) ?? null : null;
@@ -579,7 +599,6 @@ function TodayBlockRow({
   entry,
   isLeaving,
   isStarting,
-  nowMs,
   onDelete,
   onEdit,
   onStartAgain,
@@ -591,7 +610,6 @@ function TodayBlockRow({
   entry: TimeEntryRow;
   isLeaving: boolean;
   isStarting: boolean;
-  nowMs: number;
   onDelete: () => void;
   onEdit: () => void;
   onStartAgain: () => void;
@@ -604,7 +622,8 @@ function TodayBlockRow({
   const tags = entry.tagNames.map((tag) => `#${tag}`).join(" ");
   const start = formatTime(entry.startedAt);
   const end = entry.stoppedAt ? formatTime(entry.stoppedAt) : "now";
-  const elapsedSeconds = live ? (nowMs - Date.parse(entry.startedAt)) / 1000 : durationMs / 1000;
+  // A row is the whole block: its times and duration include any part before midnight.
+  const elapsedSeconds = durationMs / 1000;
   const glyph = resolveActivityIcon({ icon: category?.icon ?? null, name: entry.categoryName }).glyph;
 
   function onKeyDown(event: ReactKeyboardEvent<HTMLButtonElement>) {

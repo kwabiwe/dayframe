@@ -136,6 +136,26 @@ describe("Today", () => {
     await act(async () => root.unmount());
   });
 
+  it("shows an overnight block's whole interval and duration", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(NOW);
+    const data = bootstrap();
+    const night = entry({
+      id: "80000000-0000-4000-8000-000000000003",
+      description: "Late shift",
+      startedAt: new Date(2026, 7, 16, 23, 0).toISOString(),
+      stoppedAt: local(1),
+      durationSeconds: 7200
+    });
+    data.historyEntries = [...data.historyEntries, night];
+    const { container, root } = await mount(data);
+    const row = [...container.querySelectorAll(".df-erow-main")].find((button) =>
+      button.getAttribute("aria-label")?.startsWith("Late shift"));
+    expect(row?.getAttribute("aria-label")).toContain("23:00 to 01:00, 2h 00m");
+    expect(row?.querySelector(".df-erow-dur")?.textContent).toBe("2h 00m");
+    await act(async () => root.unmount());
+  });
+
   it("never offers Delete or Start again on the running block", async () => {
     vi.useFakeTimers({ toFake: ["Date"] });
     vi.setSystemTime(NOW);
