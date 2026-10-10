@@ -11130,6 +11130,11 @@ dialog.ui-dialog.df-palette {
     width: 100%;
     grid-template-columns: var(--web-icon-button-size) minmax(0, 1fr) var(--web-icon-button-size) auto;
   }
+
+  /* With Today beside it the period label may shrink (it ellipsises) instead of overflowing Next. */
+  .swiss-timeline-surface .timeline-range-navigation:has(.timeline-today-button) .timeline-date-picker {
+    min-width: 0;
+  }
 }
 
 .timeline-today-button {
@@ -11243,7 +11248,7 @@ dialog.ui-dialog.df-palette {
 .calendar-time-block:hover,
 .calendar-time-block.is-selected,
 .calendar-time-block.is-resizing,
-.calendar-time-block:has(.calendar-entry-primary:focus-visible) {
+.calendar-time-block:has(:focus-visible) {
   z-index: 14 !important;
 }
 

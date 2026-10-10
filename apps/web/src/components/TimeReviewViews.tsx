@@ -613,6 +613,16 @@ export function CalendarReview({
   const selectionSessionRef = useRef(0);
   const createPointerSequenceRef = useRef<CalendarCreatePointerSequence | null>(null);
   const consumedPointerRef = useRef<CalendarConsumedPointer | null>(null);
+  // The last press anywhere, seen in the window's capture phase: before an open editor's own
+  // document listener, which may stop the event from reaching the suggestion link.
+  const reviewLinkPointerRef = useRef<{ pointerId: number; pointerDownTimeStamp: number } | null>(null);
+  useEffect(() => {
+    const remember = (event: PointerEvent) => {
+      reviewLinkPointerRef.current = { pointerId: event.pointerId, pointerDownTimeStamp: event.timeStamp };
+    };
+    window.addEventListener("pointerdown", remember, true);
+    return () => window.removeEventListener("pointerdown", remember, true);
+  }, []);
   const [resizeDraft, setResizeDraft] = useState<CalendarResizeDraft | null>(null);
   const [resizingId, setResizingId] = useState<string | null>(null);
   const [resizeError, setResizeError] = useState<string | null>(null);
@@ -1181,6 +1191,15 @@ export function CalendarReview({
                     className={`calendar-review-block${item.color ? " df-block" : ""}`}
                     href="/review"
                     key={`review:${item.id}`}
+                    onClick={(event) => {
+                      // A press an open editor took for its own dismissal (and any discard
+                      // prompt) only dismisses, as on blank time: it never also leaves Calendar.
+                      const pointer = reviewLinkPointerRef.current;
+                      if (pointer && calendarPointerMatchesConsumed(consumedPointerRef.current, pointer)) {
+                        event.preventDefault();
+                      }
+                    }}
+
                     style={{
                       ...(item.color ? activityBlockStyle(item.color, item.name) : {}),
                       top: geometry.top,
