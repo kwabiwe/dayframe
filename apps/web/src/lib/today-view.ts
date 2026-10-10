@@ -241,12 +241,15 @@ export type RibbonHit =
 /** What sits under a point on the day ribbon: an entry (newest wins), else a Review span, else a gap. */
 export function ribbonHitAt(
   atMs: number,
-  entries: ReadonlyArray<{ id: string; fromMs: number; toMs: number }>,
+  entries: ReadonlyArray<{ id: string; fromMs: number; toMs: number; startedMs?: number }>,
   pending: ReadonlyArray<{ id: string; fromMs: number; toMs: number }>
 ): RibbonHit {
-  let hit: { id: string; fromMs: number } | null = null;
+  // The ribbon paints later-started blocks on top; two blocks clipped to the same midnight
+  // still differ by when they really started.
+  let hit: { id: string; order: number } | null = null;
   for (const entry of entries) {
-    if (atMs >= entry.fromMs && atMs <= entry.toMs && (!hit || entry.fromMs >= hit.fromMs)) hit = entry;
+    const order = entry.startedMs ?? entry.fromMs;
+    if (atMs >= entry.fromMs && atMs <= entry.toMs && (!hit || order >= hit.order)) hit = { id: entry.id, order };
   }
   if (hit) return { kind: "entry", id: hit.id };
   const span = pending.find((item) => atMs >= item.fromMs && atMs <= item.toMs);
@@ -269,4 +272,17 @@ export function staleEditError(
     return "This block stopped while you were editing. Close the editor and edit it again.";
   }
   return null;
+}
+
+/** An entry the shell has not saved yet (an optimistic Start); it gets its real ID on reconcile. */
+export function isUnsavedEntryId(id: string) {
+  return id.startsWith("optimistic-");
+}
+
+/** Where a local wall-clock hour sits on the day (23- and 25-hour days included), as a percentage. */
+export function hourPercent(dayStartMs: number, dayEndMs: number, hour: number) {
+  if (hour >= 24) return 100;
+  const at = new Date(dayStartMs);
+  at.setHours(hour, 0, 0, 0);
+  return ((at.getTime() - dayStartMs) / (dayEndMs - dayStartMs)) * 100;
 }

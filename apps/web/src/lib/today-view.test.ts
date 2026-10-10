@@ -5,6 +5,8 @@ import {
   blockRowHeight,
   buildGoalFrame,
   formatGoalHours,
+  hourPercent,
+  isUnsavedEntryId,
   localDayEnd,
   localDayStart,
   pendingReviewSeconds,
@@ -201,5 +203,27 @@ describe("editing a block that changed elsewhere", () => {
     expect(staleEditError(running, [], null)).toMatch(/deleted/);
     const finished = { id: "c", stoppedAt: iso(10, 9) };
     expect(staleEditError(finished, [finished], "b")).toBeNull();
+  });
+});
+
+describe("ribbon details", () => {
+  it("picks the later-started block when two are clipped to the same midnight", () => {
+    const entries = [
+      { id: "older", fromMs: 0, toMs: 200, startedMs: -7200 },
+      { id: "newer", fromMs: 0, toMs: 100, startedMs: -3600 }
+    ];
+    expect(ribbonHitAt(50, entries, [])).toEqual({ kind: "entry", id: "newer" });
+    expect(ribbonHitAt(150, entries, [])).toEqual({ kind: "entry", id: "older" });
+  });
+
+  it("places hour marks by local wall-clock time", () => {
+    const start = at(10, 0);
+    expect(hourPercent(start, localDayEnd(start), 6)).toBeCloseTo(25);
+    expect(hourPercent(start, localDayEnd(start), 24)).toBe(100);
+  });
+
+  it("recognises a Start the server has not saved yet", () => {
+    expect(isUnsavedEntryId("optimistic-timer:2026-10-10T09:00:00.000Z:1")).toBe(true);
+    expect(isUnsavedEntryId("80000000-0000-4000-8000-000000000001")).toBe(false);
   });
 });

@@ -22,6 +22,8 @@ import {
   blockRowHeight,
   buildGoalFrame,
   formatGoalHours,
+  hourPercent,
+  isUnsavedEntryId,
   localDayEnd,
   localDayStart,
   pendingReviewSeconds,
@@ -197,7 +199,9 @@ export function TodayView({ initialData }: { initialData: BootstrapData; rendere
           dayEnd={dayEnd}
           dayStart={dayStart}
           nowMs={nowMs}
-          onSelect={(entry) => setEditingEntry(entry)}
+          onSelect={(entry) => {
+            if (!isUnsavedEntryId(entry.id)) setEditingEntry(entry);
+          }}
           pending={pending}
         />
       </section>
@@ -299,7 +303,11 @@ export function TodayView({ initialData }: { initialData: BootstrapData; rendere
                   isStarting={startingId === entry.id}
                   key={entry.id}
                   onDelete={() => deleteEntry(entry, nextId)}
-                  onEdit={() => setEditingEntry(entry)}
+                  onEdit={() => {
+                    // A Start that has not reached the server yet has a temporary ID; it can be
+                    // edited once it is saved (from the command bar meanwhile).
+                    if (!isUnsavedEntryId(entry.id)) setEditingEntry(entry);
+                  }}
                   onStartAgain={async () => {
                     const outcome = await startAgain(entry);
                     if (!outcome.ok) setActionError(outcome.error);
@@ -442,7 +450,7 @@ function TodayRibbon({
     const minimumMs = (RIBBON_MIN_BLOCK_PX / width) * span;
     return ribbonHitAt(
       atMs,
-      withMinimumSpan(blocks.map(({ entry, clip }) => ({ id: entry.id, ...clip })), minimumMs),
+      withMinimumSpan(blocks.map(({ entry, clip }) => ({ id: entry.id, startedMs: Date.parse(entry.startedAt), ...clip })), minimumMs),
       withMinimumSpan(pending, minimumMs)
     );
   };
@@ -479,7 +487,7 @@ function TodayRibbon({
         ref={trackRef}
       >
         {[3, 6, 9, 12, 15, 18, 21].map((hour) => (
-          <i className={`df-ribbon-tick${hour % 6 ? "" : " is-major"}`} key={hour} style={{ left: `${(hour / 24) * 100}%` }} />
+          <i className={`df-ribbon-tick${hour % 6 ? "" : " is-major"}`} key={hour} style={{ left: `${hourPercent(dayStart, dayEnd, hour)}%` }} />
         ))}
         {pending.map((item) => (
           <span
@@ -507,7 +515,7 @@ function TodayRibbon({
       </div>
       <div className="df-ribbon-hours" aria-hidden="true">
         {[0, 6, 12, 18, 24].map((hour) => (
-          <span key={hour} style={{ left: `${(hour / 24) * 100}%` }}>{String(hour).padStart(2, "0")}:00</span>
+          <span key={hour} style={{ left: `${hourPercent(dayStart, dayEnd, hour)}%` }}>{String(hour).padStart(2, "0")}:00</span>
         ))}
       </div>
       {tip ? (
@@ -671,7 +679,13 @@ function TodayBlockRow({
             <DayframeIcon glyph="rotate-ccw" size={16} />
           </button>
         ) : null}
-        <button aria-label={`Edit ${title}`} className="df-icon-action" disabled={isLeaving} onClick={onEdit} type="button">
+        <button
+          aria-label={`Edit ${title}`}
+          className="df-icon-action"
+          disabled={isLeaving || isUnsavedEntryId(entry.id)}
+          onClick={onEdit}
+          type="button"
+        >
           <DayframeIcon glyph="pencil" size={16} />
         </button>
         {!live ? (
