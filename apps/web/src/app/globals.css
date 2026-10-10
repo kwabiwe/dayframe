@@ -11720,7 +11720,8 @@ dialog.ui-dialog.df-palette {
 .df-done {
   display: grid;
   min-height: 420px;
-  place-content: center;
+  grid-template-columns: minmax(0, 1fr);
+  align-content: center;
   justify-items: center;
   gap: 12px;
   text-align: center;
@@ -11742,13 +11743,18 @@ dialog.ui-dialog.df-palette {
 
 .df-done-blocks {
   display: flex;
+  width: 100%;
+  max-width: 520px;
+  justify-content: center;
   height: 130px;
   align-items: flex-end;
   gap: 8px;
 }
 
+/* Twelve blocks (the most shown) shrink to fit a phone-width card. */
 .df-done-blocks span {
-  width: 36px;
+  min-width: 10px;
+  flex: 0 1 36px;
   border-radius: 10px;
 }
 

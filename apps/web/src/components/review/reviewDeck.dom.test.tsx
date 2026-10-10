@@ -323,6 +323,38 @@ describe("Review round-2 fixes", () => {
   });
 });
 
+describe("Review round-3 fixes", () => {
+  it("brings an undone card back to the queue without closing another card's evidence editor", async () => {
+    const visit = { ...review(READ, "Visit", "admin"), eventSource: "location_learning", eventType: "learned_place_visit", rawPayload: { algorithmVersion: "location-v2.0" } };
+    const { container, root } = await mount([review(WALK, "Morning walk", "focus"), visit]);
+    await key("n");
+    expect(title(container)).toBe("Visit");
+    const edit = [...container.querySelectorAll<HTMLButtonElement>(".df-ractions button")].find((button) => button.textContent === "Edit before logging")!;
+    await act(async () => edit.click());
+    await act(async () => container.querySelector<HTMLButtonElement>(".df-toast-action")!.click());
+    await act(async () => vi.advanceTimersByTimeAsync(20));
+    expect(queue(container)).toEqual(["Morning walk", "Visit"]);
+    expect(title(container)).toBe("Visit");
+    expect(container.querySelector(".df-revidence")).not.toBeNull();
+    await act(async () => root.unmount());
+  });
+
+  it("keeps focus in the deck when a decision removes the focused row or replaces the focused toast", async () => {
+    const { container, root } = await mount([review(WALK, "Morning walk", "focus"), review(READ, "Reading", "admin"), { ...review(WALK, "Third", "focus"), id: "30000000-0000-4000-8000-000000000003" }]);
+    const row = container.querySelectorAll<HTMLButtonElement>(".df-qrow")[0];
+    row.focus();
+    await key("y", row);
+    await act(async () => vi.advanceTimersByTimeAsync(20));
+    expect(document.activeElement?.textContent).toContain("Log it");
+    const undoButton = container.querySelector<HTMLButtonElement>(".df-toast-action")!;
+    undoButton.focus();
+    await key("n", undoButton);
+    await act(async () => vi.advanceTimersByTimeAsync(20));
+    expect(document.activeElement?.closest(".df-ractions")).not.toBeNull();
+    await act(async () => root.unmount());
+  });
+});
+
 function review(id: string, title: string, categoryId: string): ReviewItemRow {
   return {
     id,

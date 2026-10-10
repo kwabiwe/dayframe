@@ -115,11 +115,18 @@ export function ReviewDeck({ initialData }: { initialData: BootstrapData }) {
     return () => window.removeEventListener("hashchange", fromHash);
   }, [hydrated]);
 
-  // Undo, or a save that failed or found the suggestion changed, brings the card back on top.
+  // Undo, or a save that failed or found the suggestion changed, brings the card back on top —
+  // unless another card's evidence editor is open: its draft stays, and the card returns to the
+  // queue only.
   const lastRestored = useRef(0);
+  const evidenceOpenRef = useRef<string | null>(null);
+  useLayoutEffect(() => {
+    evidenceOpenRef.current = evidenceOpenId;
+  }, [evidenceOpenId]);
   useEffect(() => {
     if (!state.restored || state.restored.sequence === lastRestored.current) return;
     lastRestored.current = state.restored.sequence;
+    if (evidenceOpenRef.current && evidenceOpenRef.current !== state.restored.itemId) return;
     setSelectedId(state.restored.itemId);
     setMissingTargetId(null);
     setEmptiedByDecision(false);
@@ -176,6 +183,17 @@ export function ReviewDeck({ initialData }: { initialData: BootstrapData }) {
       colorName: category?.name ?? ""
     });
     if (!held) return;
+    // A decision removes the focused queue row, card action or toast: focus moves to the next
+    // card's first action (or the empty state's heading) instead of falling to the page.
+    const focusWasInDeck = Boolean(document.activeElement?.closest(".df-review-page, .df-toast-host"));
+    if (focusWasInDeck) {
+      requestAnimationFrame(() => {
+        const active = document.activeElement;
+        if (active && active !== document.body && active.isConnected) return;
+        (cardRef.current?.querySelector<HTMLElement>(".df-ractions button:not(:disabled)") ??
+          document.getElementById("df-done-title"))?.focus();
+      });
+    }
     const dir = kind === "log" ? 1 : -1;
     const next = nextAfterDecision(visibleIds, item.id);
     setSelectedId(next);
