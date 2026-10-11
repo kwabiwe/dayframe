@@ -545,8 +545,11 @@ export function collapseCrowdedReviewLane(
       // Where iOS draws it (wall clock), for the crowd's bounds on a clock-change day.
       const bounded = Number.isFinite(dayStartMs) && Number.isFinite(dayEndMs);
       const drawnStart = bounded ? wallClockOffsetMs(realStart, dayStartMs, dayEndMs) : realStart;
-      const drawnEnd = bounded ? wallClockOffsetMs(realEnd, dayStartMs, dayEndMs) : realEnd;
-      return { entry, realStart, start: envelope.start, realEnd, end: envelope.end, drawnStart, drawnEnd };
+      const rawDrawnEnd = bounded ? wallClockOffsetMs(realEnd, dayStartMs, dayEndMs) : realEnd;
+      // iOS draws at least 4 points (5 minutes at the widest zoom) from the drawn start, also when
+      // the clock folds back inside the item and its drawn end comes before its start.
+      const drawnEnd = drawnStart + Math.max(rawDrawnEnd - drawnStart, REVIEW_LANE_MIN_VISIBLE_MS);
+      return { entry, realStart, start: envelope.start, realEnd, end: envelope.end, drawnStart, drawnEnd, rawDrawnEnd };
     })
     .filter((item) => Number.isFinite(item.start) && Number.isFinite(item.end))
     .sort((left, right) => left.start - right.start || left.end - right.end);
@@ -564,7 +567,9 @@ export function collapseCrowdedReviewLane(
       const first = crowd.reduce((best, item) => item.drawnStart < best.drawnStart ? item : best);
       const last = crowd.reduce((best, item) => item.drawnEnd > best.drawnEnd ? item : best);
       const startMs = first.realStart;
-      const endMs = last.realEnd > startMs ? last.realEnd : startMs + (last.drawnEnd - first.drawnStart);
+      const endMs = last.drawnEnd === last.rawDrawnEnd && last.realEnd > startMs
+        ? last.realEnd
+        : startMs + (last.drawnEnd - first.drawnStart);
       result.push(reviewCrowdEntry(
         [...crowd].sort((left, right) => left.realStart - right.realStart).map((item) => item.entry),
         startMs,

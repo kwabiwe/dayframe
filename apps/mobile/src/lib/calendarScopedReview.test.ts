@@ -19,7 +19,14 @@ describe("Calendar's scoped Review items (UIA-060)", () => {
     // Across a month and year boundary.
     cached.set("2026-12-31", "window ending 31 Dec");
     expect(await newestCachedReviewWindow("2027-01-01", read)).toBe("window ending 31 Dec");
-    expect(await newestCachedReviewWindow("2026-03-01", async () => null)).toBeNull();
+    // Two days offline or in the background: the 24 Oct window still covers the older days (Codex r12).
+    expect(await newestCachedReviewWindow("2026-10-26", async (dayKey) => dayKey === "2026-10-24" ? "window ending 24 Oct" : null))
+      .toBe("window ending 24 Oct");
+    // Never a window that no longer overlaps today's 60 days.
+    const tried: string[] = [];
+    expect(await newestCachedReviewWindow("2026-03-01", async (dayKey) => { tried.push(dayKey); return null; })).toBeNull();
+    expect(tried).toHaveLength(60);
+    expect(tried.at(-1)).toBe("2026-01-01");
   });
 
   it("takes open suggestions from the scoped snapshot, less ones decided on this iPhone", () => {
