@@ -91,6 +91,9 @@ import { useIsHydrated } from "@/components/useHydrationSafeNow";
 
 type CalendarHoursMode = "fullDay";
 
+/** Half the now pill's height (11 px text + 2 px padding each side), for clamping it inside the axis. */
+const NOW_PILL_HALF_HEIGHT = 10;
+
 const viewItems: Array<{ id: TimelineView; label: string; icon: ReactNode }> = [
   { id: "calendar", label: "Calendar", icon: <CalendarDays size={16} /> },
   { id: "list", label: "List", icon: <List size={16} /> },
@@ -642,6 +645,9 @@ export function CalendarReview({
   const [zoomLevel, setZoomLevel] = useState<CalendarZoom>("hour");
   const [calendarScroller, setCalendarScroller] = useState<HTMLDivElement | null>(null);
   const today = capturedNow;
+  // The now pill shows a clock time in the browser's time zone, which the server render can't know;
+  // it appears once the page has hydrated so both renders agree (Codex r1 on #303).
+  const nowPillHydrated = useIsHydrated();
   const zoom = calendarZooms[zoomLevel];
   const calendarHours = calendarHourModes[calendarHoursMode];
   const zoomKeys = Object.keys(calendarZooms) as CalendarZoom[];
@@ -1143,11 +1149,13 @@ export function CalendarReview({
           })}
 
           <div className="calendar-time-axis" style={{ height: calendarHeight }}>
-            {visibleDays.some((day) => sameDay(day, today)) ? (
+            {nowPillHydrated && visibleDays.some((day) => sameDay(day, today)) ? (
               <span
                 aria-hidden="true"
                 className="calendar-now-pill"
-                style={{ top: Math.round(((minutesFromDate(capturedNow) - calendarHours.startHour * 60) / 60) * rowHeight) }}
+                // Clamped so the pill stays inside the axis at midnight and at the day's end; the
+                // line keeps the exact time.
+                style={{ top: Math.min(calendarHeight - NOW_PILL_HALF_HEIGHT, Math.max(NOW_PILL_HALF_HEIGHT, Math.round(((minutesFromDate(capturedNow) - calendarHours.startHour * 60) / 60) * rowHeight))) }}
               >
                 {formatTime(capturedNow)}
               </span>

@@ -24,6 +24,7 @@ export type CalendarHeadModel = {
 const MONTH = new Intl.DateTimeFormat("en-GB", { month: "long" });
 const WEEKDAY_LONG = new Intl.DateTimeFormat("en-GB", { weekday: "long" });
 const DAY_LONG = new Intl.DateTimeFormat("en-GB", { weekday: "long", day: "numeric", month: "long" });
+const WEEK_OF = new Intl.DateTimeFormat("en-GB", { day: "numeric", month: "short" });
 
 /**
  * The Calendar page head (Trello: Calendar page improvements, owner-approved): the month as the
@@ -65,6 +66,8 @@ export function calendarHeadModel({
         accessibleName: `${DAY_LONG.format(day)}, ${seconds > 0 ? `${formatDuration(seconds)} framed` : "nothing framed"}`
       };
     }),
-    weekTotal: `${formatDuration(weekLoggedSeconds)} this week`
+    weekTotal: weekDays.some((day) => toTimelineDateKey(day) === todayKey)
+      ? `${formatDuration(weekLoggedSeconds)} this week`
+      : `${formatDuration(weekLoggedSeconds)} in the week of ${WEEK_OF.format(weekDays[0] ?? selectedDay)}`
   };
 }
