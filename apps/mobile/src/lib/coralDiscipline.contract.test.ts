@@ -22,7 +22,7 @@ describe("Coral discipline on iPhone (audit A4)", () => {
     expect(reports).toContain("borderColor: theme.textPrimary, borderWidth: 1.5");
   });
 
-  it("never offers later days for a block's start or end", () => {
-    expect(editSheet).toMatch(/<FloatingDatePicker[\s\S]*?maxDate=\{new Date\(\)\}/);
+  it("passes the entry sheet's date limit through the tested helper", () => {
+    expect(editSheet).toMatch(/<FloatingDatePicker[\s\S]*?maxDate=\{entryDatePickerMaxDate\(\{ running: isRunningMode, target: datePickerTarget, now: new Date\(\) \}\)\}/);
   });
 });

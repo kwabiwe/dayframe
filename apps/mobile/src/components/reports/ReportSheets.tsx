@@ -45,6 +45,7 @@ import {
   type ReportFilterDraft,
 } from "@/lib/reportsSelection";
 import { REPORT_TEXT_CAP } from "@/lib/reportsTypography";
+import { MOBILE_DISPLAY_FONT } from "../../lib/mobileTypography";
 import { DAYFRAME_BLOCKS, contrastRatio } from "@dayframe/shared";
 import { ActivityIcon } from "../icons/DayframeIcon";
 import { playHaptic } from "../../lib/haptics";
@@ -240,6 +241,8 @@ function Option({
   );
 }
 
+export const REPORT_DATE_HEAD_MIN_HEIGHT = 667;
+
 export function ReportDateSheet({
   rootHosted = false,
   presentationId,
@@ -260,6 +263,9 @@ export function ReportDateSheet({
   onDismissed: (presentationId: number) => void;
 }) {
   const [draft, setDraft] = useState(() => openReportDateDraft(initial, nowMs));
+  // The head fits from a 667-point screen up; the smallest phones keep every date row and Done
+  // on screen instead (the sheet's accessibility label still names it).
+  const showHead = useWindowDimensions().height >= REPORT_DATE_HEAD_MIN_HEIGHT;
   const result = reportDraftResult(draft, nowMs);
   const highlight = reportDraftHighlight(draft, nowMs);
   const readable = (key: string) =>
@@ -291,6 +297,7 @@ export function ReportDateSheet({
       }}
     >
       {/* Blocks head (UIA-026). */}
+      {showHead ? (
       <View style={s.dateHead}>
         <Text maxFontSizeMultiplier={REPORT_TEXT_CAP.small} style={[s.eyebrow, { color: theme.textSecondary }]}>
           REPORTS
@@ -303,6 +310,7 @@ export function ReportDateSheet({
           Choose dates
         </Text>
       </View>
+      ) : null}
       <View style={s.presets}>
         {(["today", "week", "month", "year"] as ReportPreset[]).map(
           (preset) => {
@@ -713,7 +721,7 @@ const s = StyleSheet.create({
   filterHead: { gap: 12 },
   filterTitleRow: { flexDirection: "row", alignItems: "center", gap: 4 },
   filterTitles: { flex: 1, minWidth: 0, gap: 2 },
-  filterTitle: { fontSize: 20, fontWeight: "700" },
+  filterTitle: { fontFamily: MOBILE_DISPLAY_FONT.bold, fontSize: 20 },
   eyebrow: { fontSize: 11, fontWeight: "700", letterSpacing: 0.7 },
   headLink: { minHeight: 44, minWidth: 44, alignItems: "center", justifyContent: "center", paddingHorizontal: 6 },
   headLinkText: { fontSize: 15, fontWeight: "700" },

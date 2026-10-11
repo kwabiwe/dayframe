@@ -698,4 +698,26 @@ describe("Neutral selection in Reports sheets and the date picker (UIA-010/011/0
     expect(styleOf(week).backgroundColor).toBe(dark.textPrimary);
     expect(styleOf(button("Done")).backgroundColor).toBe(dark.textPrimary);
   });
+
+  it("leaves the head out on the smallest phones so every date row and Done fit", () => {
+    const previous = mockLayout.windowHeight;
+    mockLayout.windowHeight = 568;
+    try {
+      const { tree } = mount(
+        <ReportDateSheet
+          presentationId={1}
+          initial="week"
+          nowMs={Date.parse("2026-09-16T12:00:00")}
+          theme={dark as never}
+          reduceMotion={false}
+          onApply={vi.fn()}
+          onDismissed={vi.fn()}
+        />,
+      );
+      const texts = tree.root.findAllByType("Text" as never).map((node) => node.props.children);
+      expect(texts).not.toContain("Choose dates");
+    } finally {
+      mockLayout.windowHeight = previous;
+    }
+  });
 });

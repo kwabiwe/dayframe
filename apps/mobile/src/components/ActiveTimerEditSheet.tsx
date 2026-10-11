@@ -34,6 +34,7 @@ import {
   type RecentActivitySuggestion
 } from "@dayframe/shared";
 import { FloatingDatePicker } from "@/components/FloatingDatePicker";
+import { entryDatePickerMaxDate } from "@/lib/entryDatePickerLimit";
 import {
   HistoricalSuggestionsOverlay,
   type HistoricalSuggestionsOverlayRenderState
@@ -3000,8 +3001,7 @@ export function ActiveTimerEditSheet({
           theme={theme}
         />
         <FloatingDatePicker
-          // A block's start and end are never in the future (UIA-011): later days can't be chosen.
-          maxDate={new Date()}
+          maxDate={entryDatePickerMaxDate({ running: isRunningMode, target: datePickerTarget, now: new Date() })}
           onClose={() => {
             closeDatePickerAfterTouch();
           }}
