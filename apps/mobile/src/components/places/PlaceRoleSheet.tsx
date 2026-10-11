@@ -190,8 +190,8 @@ export function PlaceRoleSheet({
           >
             <Text {...mobileTextProps("body")} style={[sheetStyles.lead, { color: theme.textSecondary }]}>
               {clearing
-                ? `The place stays saved and keeps its entries; it just stops being ${label}.`
-                : `Choose the saved place that is your ${label.toLowerCase()}. Past entries stay where they were recorded.`}
+                ? `The place stays saved and keeps its blocks; it just stops being ${label}.`
+                : `Choose the saved place that is your ${label.toLowerCase()}. Past blocks stay where they were recorded.`}
             </Text>
 
             {clearing ? null : (
@@ -262,7 +262,7 @@ export function PlaceRoleSheet({
                 </Text>
                 <TextInput
                   {...mobileTextProps("input")}
-                  accessibilityHint="Its past entries keep this name. Leave it as it is to keep the current name."
+                  accessibilityHint="Its past blocks keep this name. Leave it as it is to keep the current name."
                   accessibilityLabel={clearing ? "Name for this place" : `Rename the old ${label.toLowerCase()}`}
                   maxLength={120}
                   onChangeText={(value) => {

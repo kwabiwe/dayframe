@@ -502,7 +502,7 @@ export default function ReviewScreen() {
         restart = (options.restartAttempt ?? 0) < 1;
         if (!restart) {
           setReviewAvailabilityMessage(
-            "Review changed while more items were loading. Pull to refresh the list."
+            "Review changed while more moments were loading. Pull to refresh."
           );
         }
       } else {
@@ -552,7 +552,7 @@ export default function ReviewScreen() {
         restart = (options.restartAttempt ?? 0) < 1;
         if (!restart) {
           setReviewAvailabilityMessage(
-            "Review changed while more items were loading. Pull to refresh the list."
+            "Review changed while more moments were loading. Pull to refresh."
           );
         }
       }
@@ -897,14 +897,14 @@ export default function ReviewScreen() {
     ? reviewBacklog.globalCount
     : visibleReviewItemCount;
   const reviewCountCopy = reviewCountIsExact
-    ? `${reviewBacklog.globalCount} ${reviewBacklog.globalCount === 1 ? "item" : "items"} need review`
+    ? `${reviewBacklog.globalCount} ${reviewBacklog.globalCount === 1 ? "moment" : "moments"} to review`
     : reviewBacklog
       ? "Review available · count updating"
-      : `At least ${visibleReviewItemCount} ${visibleReviewItemCount === 1 ? "item" : "items"} need review`;
+      : `At least ${visibleReviewItemCount} ${visibleReviewItemCount === 1 ? "moment" : "moments"} to review`;
   const backlogProgressCopy = reviewBacklog?.nextCursor
-    ? `Loaded ${reviewBacklog.recordKeys.length} of ${reviewBacklog.globalCount} Review items.`
+    ? `Showing ${reviewBacklog.recordKeys.length} of ${reviewBacklog.globalCount} moments.`
     : reviewBacklog && !reviewBacklog.recordsComplete
-      ? `Loaded ${reviewBacklog.recordKeys.length} of ${reviewBacklog.globalCount} Review items. More Review items may be available after this bounded collection.`
+      ? `Showing ${reviewBacklog.recordKeys.length} of ${reviewBacklog.globalCount} moments.`
       : null;
   const showEmptyReviewState = reviewCountIsExact && totalNeedsReview === 0 && visibleReviewItemCount === 0;
   const editingEntry = editTarget?.entry ?? null;
@@ -1568,7 +1568,7 @@ export default function ReviewScreen() {
   }, [loadReviewBacklogPage]);
 
   // The next backlog page is read while cards remain on the stack, once per cursor; a failed read
-  // is not retried automatically (the empty deck offers "Load more Review items" instead).
+  // is not retried automatically (the empty deck offers "Show more" instead).
   const autoLoadedCursor = useRef<string | null>(null);
   const deckNextCursor = deckSources.length < 3 ? reviewBacklog?.nextCursor ?? null : null;
   useEffect(() => {
@@ -1582,7 +1582,7 @@ export default function ReviewScreen() {
     if (focusConsumedKey.current === key) return;
     focusConsumedKey.current = key;
     setHighlightedFocusKey(key);
-    AccessibilityInfo.announceForAccessibility("Opened the exact Review item.");
+    AccessibilityInfo.announceForAccessibility("Opened that moment.");
   }, []);
 
   useEffect(() => {
@@ -1609,7 +1609,7 @@ export default function ReviewScreen() {
     if (focusLookupKey.current === focusKey) return;
     if (!DAYFRAME_BACKEND_ID) {
       focusConsumedKey.current = focusKey;
-      setReviewAvailabilityMessage("This exact Review item cannot be resolved in this app build. Refresh Review.");
+      setReviewAvailabilityMessage("This moment can’t be opened in this version of Dayframe. Refresh Review.");
       return;
     }
     focusLookupKey.current = focusKey;
@@ -1662,7 +1662,7 @@ export default function ReviewScreen() {
         }
       }
       focusConsumedKey.current = focusKey;
-      setReviewAvailabilityMessage("This Review item is already resolved or no longer available. Refreshing Review.");
+      setReviewAvailabilityMessage("This moment was already reviewed or is no longer there. Refreshing Review.");
       void loadRef.current({ preserveMenu: true, queueIfBusy: true, silent: true, skipReprocess: true });
     }).catch((error) => {
       if (focusConsumedKey.current === focusKey) return;
@@ -1671,7 +1671,7 @@ export default function ReviewScreen() {
         return;
       }
       focusConsumedKey.current = focusKey;
-      setReviewAvailabilityMessage("Couldn’t find that exact Review item. It may have changed; refresh Review.");
+      setReviewAvailabilityMessage("Couldn’t find that moment. It may have changed; refresh Review.");
     });
   }, [
     beginExactFocus,
@@ -1824,13 +1824,13 @@ export default function ReviewScreen() {
         reviewMutations.current.delete(item.id);
         onFailed?.();
         AccessibilityInfo.announceForAccessibility(
-          "The Review change was not saved. The suggestion is still available."
+          "The Review choice wasn’t saved. The moment is still here."
         );
         Alert.alert(
           "Review",
           error instanceof Error
             ? error.message
-            : "Unable to save this Review change on this iPhone."
+            : "Couldn’t save this Review choice on this iPhone."
         );
       });
     return true;
@@ -2193,12 +2193,12 @@ export default function ReviewScreen() {
             </Text>
             {reviewBacklog?.nextCursor && !reviewBacklogLoading ? (
               <Pressable
-                accessibilityLabel={`Load more Review items. ${backlogProgressCopy ?? ""}`.trim()}
+                accessibilityLabel={`Show more moments. ${backlogProgressCopy ?? ""}`.trim()}
                 accessibilityRole="button"
                 onPress={loadMoreReviewBacklog}
                 style={pressable(styles.secondaryButton, styles.buttonPressed)}
               >
-                <Text {...mobileTextProps("control")} style={styles.secondaryButtonText}>Load more Review items</Text>
+                <Text {...mobileTextProps("control")} style={styles.secondaryButtonText}>Show more</Text>
               </Pressable>
             ) : null}
             {renderDeckToast("under")}
@@ -2351,7 +2351,7 @@ export function reviewDeckCardForItem(
   const confidence = reviewConfidencePresentation(item.confidence);
   const locationReason = locationReviewReasonCopy(item, context.overlapCount);
   const overlap = context.overlapCount && !locationReason
-    ? `Overlaps ${context.overlapCount} other ${context.overlapCount === 1 ? "entry" : "entries"} · You can still confirm.`
+    ? `Overlaps ${context.overlapCount} other ${context.overlapCount === 1 ? "block" : "blocks"} · You can still confirm.`
     : null;
   const syncCopy = reviewItemSyncStatusCopy(context.syncState);
   const title = reviewItemTitle(item);

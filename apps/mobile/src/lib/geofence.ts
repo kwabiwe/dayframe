@@ -1076,7 +1076,7 @@ async function recordPlaceExit(place: MonitoredPlace, region: DayframeRegion, oc
   const openVisit = openVisits[place.id];
   if (!openVisit) {
     await updateLocationDiagnostics({
-      lastStatus: `Left ${place.name}, but no matching entry was recorded.`,
+      lastStatus: `Left ${place.name}, but no matching block was recorded.`,
       lastPlaceName: place.name,
       lastEventAt: occurredAt.toISOString(),
       lastGeofenceEvent: {
@@ -1212,7 +1212,7 @@ async function recordPlaceExit(place: MonitoredPlace, region: DayframeRegion, oc
   await writeLastCompletedVisit(currentVisit);
   await writeSeenVisitIds([localId, ...seenVisitIds.filter((id) => id !== localId)].slice(0, MAX_SEEN_VISIT_IDS));
   await updateLocationDiagnostics({
-    lastStatus: `Queued ${place.name} visit for review. Saved-place visits are review-first before becoming time entries.`,
+    lastStatus: `Queued ${place.name} visit for review. Saved-place visits are review-first before becoming blocks.`,
     lastPlaceName: place.name,
     lastEventAt: stoppedAt.toISOString(),
     lastGeofenceEvent: {

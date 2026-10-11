@@ -1,3 +1,4 @@
+import { formatDuration } from "@dayframe/shared";
 // Blocks parity step 5a: the pure presentation model behind the iPhone Review deck.
 // The deck shows one Review card at a time over at most two cards beneath it.
 
@@ -78,12 +79,7 @@ function localDayStart(date: Date) {
 const SHORT_DAY = new Intl.DateTimeFormat("en-GB", { weekday: "short", day: "numeric", month: "short" });
 
 export function formatReviewDeckDuration(seconds: number) {
-  const safe = Math.max(0, Math.floor(seconds));
-  const hours = Math.floor(safe / 3600);
-  const minutes = Math.floor((safe % 3600) / 60);
-  if (hours === 0) return `${minutes}m`;
-  if (minutes === 0) return `${hours}h`;
-  return `${hours}h ${minutes}m`;
+  return formatDuration(seconds);
 }
 
 /**

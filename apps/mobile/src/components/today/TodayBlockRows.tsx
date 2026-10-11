@@ -330,11 +330,11 @@ export const TodayBlockRow = memo(function TodayBlockRow({
 
   const spoken = spokenDuration(durationSeconds);
   const label = count > 1
-    ? `${expanded ? "Collapse" : "Expand"} ${count} ${title} entries. ${spokenLabel}, ${spoken}`
+    ? `${expanded ? "Collapse" : "Expand"} ${count} ${title} blocks. ${spokenLabel}, ${spoken}`
     : `${spokenLabel}, ${spoken}`;
   const actions = [
     ...(replayable ? [{ name: "startAgain", label: activeTimerRunning ? `Switch to ${title}` : "Start again" }] : []),
-    ...(deletable ? [{ name: "delete", label: count > 1 ? `Delete ${count} ${title} entries` : `Delete ${title}` }] : []),
+    ...(deletable ? [{ name: "delete", label: count > 1 ? `Delete ${count} ${title} blocks` : `Delete ${title}` }] : []),
   ];
 
   return (

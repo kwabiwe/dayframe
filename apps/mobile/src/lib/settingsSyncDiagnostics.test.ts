@@ -2,11 +2,11 @@ import { describe, expect, it } from "vitest";
 import { deviceSyncAttentionStatus, syncHelpStatus } from "./settingsSyncDiagnostics";
 
 describe("Settings sync diagnostics summary", () => {
-  it("reports timer Stop and time-entry attention together", () => {
+  it("reports block Stop and time-entry attention together", () => {
     expect(deviceSyncAttentionStatus({
       timerStopNeedsAttentionCount: 1,
       timeEntryNeedsAttentionCount: 2
-    })).toBe("1 timer Stop and 2 block changes need attention");
+    })).toBe("1 block Stop and 2 block changes need attention");
   });
 
   it("keeps singular and empty attention summaries clear", () => {

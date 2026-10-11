@@ -6,7 +6,7 @@ export function deviceSyncAttentionStatus(input: {
   const timeEntries = nonNegativeCount(input.timeEntryNeedsAttentionCount);
   const messages = [
     timerStops > 0
-      ? `${timerStops} timer ${timerStops === 1 ? "Stop" : "Stops"}`
+      ? `${timerStops} block ${timerStops === 1 ? "Stop" : "Stops"}`
       : null,
     timeEntries > 0
       ? `${timeEntries} block ${timeEntries === 1 ? "change" : "changes"}`

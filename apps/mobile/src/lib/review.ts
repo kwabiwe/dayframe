@@ -2,12 +2,12 @@ import type { MobileBootstrap, MobileReviewItem, MobileTimeEntry } from "./api";
 
 export const REVIEW_COPY = {
   needsReview: "Needs review",
-  suggestedActivity: "Suggested time entry",
+  suggestedActivity: "Suggested block",
   detectedVisit: "Detected visit",
   editDetails: "Edit details",
   dismissSuggestion: "Dismiss suggestion",
   suggestedNote: "Some suggested time needs review.",
-  emptyState: "No detected visits or suggested time entries need review."
+  emptyState: "No detected visits or suggested blocks need review."
 } as const;
 
 export const LOCATION_EVIDENCE_LOADING_FEEDBACK_DELAY_MS = 300;
@@ -460,7 +460,7 @@ export function locationReviewReasonCopy(
   if (!isLocationReviewItem(item)) return null;
 
   if (overlapCount > 0 && !item.rawPayload?.semanticReason && !item.rawPayload?.policyVersion) {
-    return `Not added automatically · overlaps ${overlapCount} ${overlapCount === 1 ? "entry" : "entries"}`;
+    return `Not added automatically · overlaps ${overlapCount} ${overlapCount === 1 ? "block" : "blocks"}`;
   }
 
   const reason = typeof item.rawPayload?.semanticReason === "string"

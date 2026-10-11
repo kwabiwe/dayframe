@@ -51,14 +51,14 @@ const ALLOWED_ALERTS: Record<string, string[]> = {
     '"Unable to refresh Dayframe"',
     '"Unable to add time"',
     '"Time not added"',
-    '"Timer not started"',
-    '"Timer not started"',
+    '"Block not started"',
+    '"Block not started"',
     "errorTitle",
     '"Change not saved"',
-    '"Timer not stopped"',
-    '"Timer Stop needs attention"',
-    'entries.length > 1 ? "Entries not deleted" : "Entry not deleted"',
-    'currentIds.length > 1 ? "Entries not deleted" : "Entry not deleted"'
+    '"Block not stopped"',
+    '"Stop needs attention"',
+    'entries.length > 1 ? "Blocks not deleted" : "Block not deleted"',
+    'currentIds.length > 1 ? "Blocks not deleted" : "Block not deleted"'
   ],
   "src/components/location/LocationReviewCorrectionEditor.tsx": [
     '"Place search"', // search failed

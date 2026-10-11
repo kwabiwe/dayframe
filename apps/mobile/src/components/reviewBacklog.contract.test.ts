@@ -29,7 +29,8 @@ describe("Review backlog paging contract", () => {
     expect(reviewScreen).toContain("fetchReviewPresentationPage");
     expect(reviewScreen).toContain('mode: "backlog"');
     expect(reviewScreen).toContain("mergeReviewBacklogPage");
-    expect(reviewScreen).toContain("Load more Review items");
-    expect(reviewScreen).toContain("Review changed while more items were loading");
+    expect(reviewScreen).toContain(">Show more</Text>");
+    expect(reviewScreen).not.toMatch(/"[^"]*Review items[^"]*"|`[^`]*Review items[^`]*`/);
+    expect(reviewScreen).toContain("Review changed while more moments were loading");
   });
 });

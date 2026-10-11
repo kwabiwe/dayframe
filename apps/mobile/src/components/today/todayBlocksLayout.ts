@@ -1,3 +1,4 @@
+import { formatDuration } from "@dayframe/shared";
 // Today timer card geometry for Dayframe Blocks, from the prototype (design/blocks/ios.html .live,
 // .idle): each card takes its natural height, and the mosaic below moves under the layout
 // transition when Start or Stop swaps them.
@@ -37,13 +38,9 @@ export function spokenDuration(totalSeconds: number) {
   return parts.join(" ");
 }
 
-/** "4h 12m", "35m" or "0m" for a tile's week total. */
+/** "4h 12m", "35m", "<1m" or "0m" (the shared `formatDuration`, UIA-042). */
 export function compactDuration(totalSeconds: number) {
-  const minutes = Math.floor(Math.max(0, totalSeconds) / 60);
-  const hours = Math.floor(minutes / 60);
-  if (!hours) return `${minutes}m`;
-  const rest = minutes % 60;
-  return rest ? `${hours}h ${rest}m` : `${hours}h`;
+  return formatDuration(totalSeconds);
 }
 
 /** The live block's clock, always H:MM:SS like the prototype ("0:04:09", "12:00:00"). */

@@ -175,7 +175,7 @@ export default function PlacesScreen() {
     confirmSheet.confirm({
       eyebrow: "Place suggestion",
       title: "Ignore learned place?",
-      message: "Ignore hides this learned location from save suggestions. It will not create or confirm any time entries.",
+      message: "Ignore hides this learned location from save suggestions. It will not create or confirm any blocks.",
       confirmLabel: "Ignore",
       tone: "neutral",
       onConfirm: () => {

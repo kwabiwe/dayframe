@@ -1424,7 +1424,7 @@ export async function deliverPendingTimerStop(
       return { status: "delivered", pendingStop };
     }
 
-    const message = await errorMessage(response, "Unable to sync timer Stop");
+    const message = await errorMessage(response, "Couldn't sync the Stop");
     const failureKind = permanentStatusCodes.has(response.status) ? "permanent" : "retryable";
     const updated = await markPendingTimerStopFailure(pendingStop.clientEventId, {
       message,
@@ -2497,7 +2497,7 @@ function formatApiError(payload: ApiErrorPayload) {
 function formatBlockingEntry(payload: ApiErrorPayload) {
   const blockingEntry = payload.blockingEntry;
   if (!blockingEntry) return undefined;
-  const label = blockingEntry.description?.trim() || blockingEntry.source || "existing entry";
+  const label = blockingEntry.description?.trim() || blockingEntry.source || "an existing block";
   const status = blockingEntry.reviewStatus ? ` (${blockingEntry.reviewStatus})` : "";
   return `Blocked by ${label}${status}.`;
 }

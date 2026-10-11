@@ -464,7 +464,7 @@ describe("mobile API client", () => {
     await expect(getSessionToken()).resolves.toBeNull();
   });
 
-  it("fails closed when migrating an old unscoped queued timer Stop", async () => {
+  it("fails closed when migrating an old unscoped queued Stop", async () => {
     asyncStore.set(
       "dayframe.offlineQueue.v1",
       JSON.stringify([
