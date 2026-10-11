@@ -23,6 +23,7 @@ import { REPORT_TEXT_CAP } from "@/lib/reportsTypography";
 import type { ReportAxisLayout, ReportBucket } from "@/lib/reportsRanges";
 import { CalendarGlyph } from "@/components/calendar/DatePickerCalendar";
 import { useReportTextMeasure } from "./ReportTextMeasure";
+import { reportStackHeights } from "@/lib/reportsBlocks";
 const HEIGHT = 168;
 const LABEL_HEIGHT = 38;
 type ChartSegment = { key: string; seconds: number; color: string };
@@ -366,19 +367,24 @@ function ReportStack({
   const style = useAnimatedStyle(() => ({ height: value.value }));
   const radius = Math.min(4, width / 3);
   const gap = width >= 8 ? 1.5 : 1;
+  // Each block's height out of this column's own height, with minimums and gaps budgeted: when
+  // not every block fits, the smallest are left out rather than clipped (reportStackHeights).
+  const heights = reportStackHeights(segments.map((segment) => segment.seconds), segments.reduce((sum, segment) => sum + segment.seconds, 0), height, 1, gap, 0);
   return (
     <Animated.View
       testID="report-activity-bar"
       style={[s.stack, { width, gap }, style]}
     >
       {segments.length ? (
-        segments.map((segment) => (
-          <View
-            key={segment.key}
-            testID="report-activity-block"
-            style={{ flex: segment.seconds, minHeight: 1, borderRadius: radius, backgroundColor: segment.color }}
-          />
-        ))
+        segments.map((segment, index) =>
+          heights[index] ? (
+            <View
+              key={segment.key}
+              testID="report-activity-block"
+              style={{ height: heights[index], borderRadius: radius, backgroundColor: segment.color }}
+            />
+          ) : null,
+        )
       ) : (
         <View style={{ flex: 1, borderRadius: radius, backgroundColor: theme.textMuted }} />
       )}

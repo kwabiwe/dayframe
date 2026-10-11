@@ -147,9 +147,15 @@ export function reportStackHeights(
   columnHeight: number,
   minimumHeight: number,
   gap = 0,
+  /** The smallest time the full column stands for (12 hours on Week; 0 fills the column). */
+  minimumScaleSeconds = REPORT_STACK_MIN_SCALE_SECONDS,
 ) {
-  const scale = Math.max(REPORT_STACK_MIN_SCALE_SECONDS, busiestSeconds);
-  const fit = Math.max(0, Math.floor((columnHeight + gap) / (minimumHeight + gap)));
+  const scale = Math.max(minimumScaleSeconds, busiestSeconds);
+  // At least the biggest block shows in any column with room for a sliver.
+  const fit = Math.max(
+    columnHeight > 0 ? 1 : 0,
+    Math.floor((columnHeight + gap) / (minimumHeight + gap)),
+  );
   const kept = new Set(
     seconds
       .map((value, index) => ({ value, index }))
@@ -158,16 +164,17 @@ export function reportStackHeights(
       .map((item) => item.index),
   );
   const budget = columnHeight - gap * Math.max(0, kept.size - 1);
+  const floorHeight = Math.min(minimumHeight, Math.max(0, budget));
   let heights = seconds.map((value, index) =>
-    kept.has(index) ? Math.max(minimumHeight, (value / scale) * columnHeight) : 0,
+    kept.has(index) ? Math.max(floorHeight, (value / scale) * columnHeight) : 0,
   );
   // Shrink the blocks above the minimum until the stack fits, keeping their proportions.
   for (let pass = 0; pass < 4 && heights.reduce((sum, h) => sum + h, 0) > budget + 0.01; pass += 1) {
-    const floor = heights.filter((h) => h > 0 && h <= minimumHeight).length * minimumHeight;
-    const flexible = heights.filter((h) => h > minimumHeight).reduce((sum, h) => sum + h, 0);
+    const floor = heights.filter((h) => h > 0 && h <= floorHeight).length * floorHeight;
+    const flexible = heights.filter((h) => h > floorHeight).reduce((sum, h) => sum + h, 0);
     if (flexible <= 0) break;
     const factor = Math.max(0, budget - floor) / flexible;
-    heights = heights.map((h) => (h > minimumHeight ? Math.max(minimumHeight, h * factor) : h));
+    heights = heights.map((h) => (h > floorHeight ? Math.max(floorHeight, h * factor) : h));
   }
   return heights.map((h) => Math.floor(h * 2) / 2);
 }

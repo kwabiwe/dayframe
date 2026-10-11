@@ -32,6 +32,7 @@ vi.mock(
   async () => import("../../lib/reportsPresentation"),
 );
 vi.mock("@/lib/reportPlot", async () => import("../../lib/reportPlot"));
+vi.mock("@/lib/reportsBlocks", async () => import("../../lib/reportsBlocks"));
 vi.mock(
   "@/lib/reportsTypography",
   async () => import("../../lib/reportsTypography"),
@@ -233,11 +234,41 @@ describe("Activity chart", () => {
     const card = tree.root.findByProps({ testID: "reports-activity-card" });
     expect(card.props.style[1].backgroundColor).toBe("card");
     const blocks = tree.root.findAllByProps({ testID: "report-activity-block" });
-    expect(blocks.map((block) => [block.props.style.backgroundColor, block.props.style.flex])).toEqual([
-      ["blue", 3600],
-      ["lime", 1800],
-    ]);
+    const heights = blocks.map((block) => block.props.style.height);
+    expect(blocks.map((block) => block.props.style.backgroundColor)).toEqual(["blue", "lime"]);
+    expect(heights[0]).toBeGreaterThan(heights[1]);
     expect(JSON.stringify(tree.toJSON())).not.toContain("coral");
+    act(() => tree.unmount());
+  });
+  it("never clips a short column's blocks: the smallest are left out instead (Codex r1)", () => {
+    let tree!: ReturnType<typeof create>;
+    const tiny = [
+      { ...buckets[0], seconds: 12 * 3600, segments: [{ key: "work", seconds: 12 * 3600, color: "blue" }] },
+      { ...buckets[1], seconds: 600, segments: [
+        { key: "a", seconds: 240, color: "red" },
+        { key: "b", seconds: 240, color: "lime" },
+        { key: "c", seconds: 120, color: "teal" },
+      ] },
+    ];
+    act(() => {
+      tree = create(
+        <ReportActivityChart
+          buckets={tiny}
+          axisLayout="month"
+          theme={{ surface: "card", textMuted: "muted" } as never}
+          reduceMotion
+          semanticContextKey="tiny"
+          outsidePressDismissal={0}
+        />,
+      );
+    });
+    const columns = tree.root.findAllByProps({ testID: "report-activity-bar" });
+    const small = columns[1];
+    const columnHeight = small.props.style.at(-1).height;
+    const shown = small.findAllByProps({ testID: "report-activity-block" });
+    const used = shown.reduce((sum, block) => sum + block.props.style.height, 0) + Math.max(0, shown.length - 1) * small.props.style[1].gap;
+    expect(shown.length).toBeGreaterThan(0);
+    expect(used).toBeLessThanOrEqual(columnHeight + 0.01);
     act(() => tree.unmount());
   });
   it("keeps chart actions, live ticks, theme updates and vertical scrolling selected", () => {
