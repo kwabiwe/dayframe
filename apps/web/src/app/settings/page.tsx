@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { resolveActivityIcon } from "@dayframe/shared";
 import { useAppShellRuntime } from "@/components/AppShellRuntime";
 import { DayframeIcon } from "@/components/blocks/DayframeIcon";
@@ -25,6 +25,8 @@ import type { CategoryRow } from "@/lib/queries";
  */
 export default function SettingsPage() {
   const { data, refresh } = useAppShellRuntime();
+  // Account feedback lives here: the account card is re-created when the workspace changes.
+  const [accountNotice, setAccountNotice] = useState<string | null>(null);
 
   useEffect(() => {
     void refresh();
@@ -39,6 +41,8 @@ export default function SettingsPage() {
       <AccountSettings
         key={`${data.user.id}:${data.workspace.id}`}
         authMode={authMode}
+        notice={accountNotice}
+        onNotice={setAccountNotice}
         user={data.user}
         workspace={data.workspace}
         workspaces={data.workspaces}

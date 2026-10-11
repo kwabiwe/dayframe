@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useEffect, useState, type FormEvent } from "react";
+import { useCallback, useEffect, useState, type FormEvent } from "react";
 import {
   ChevronDown,
   Download,
@@ -31,6 +31,12 @@ type SettingsAuthMode = "dev" | "local" | "provider" | "token";
 
 type AccountSettingsProps = {
   authMode: SettingsAuthMode;
+  /**
+   * The last account change that succeeded, held by the page so it survives this card being
+   * re-created after a workspace switch or create.
+   */
+  notice?: string | null;
+  onNotice?: (message: string | null) => void;
   user: { email: string; name: string };
   workspace: { id: string; name: string };
   workspaces: Array<{ id: string; name: string }>;
@@ -38,6 +44,8 @@ type AccountSettingsProps = {
 
 export function AccountSettings({
   authMode,
+  notice = null,
+  onNotice,
   user,
   workspace,
   workspaces
@@ -54,7 +62,9 @@ export function AccountSettings({
   const [busyAction, setBusyAction] = useState<string | null>(null);
   // The account card's dialogs: Edit profile, Switch workspace, Change password.
   const [dialog, setDialog] = useState<"profile" | "workspace" | "password" | null>(null);
-  const [message, setMessage] = useState<string | null>(null);
+  const [localMessage, setLocalMessage] = useState<string | null>(null);
+  const message = onNotice ? notice : localMessage;
+  const setMessage = useCallback((next: string | null) => (onNotice ? onNotice(next) : setLocalMessage(next)), [onNotice]);
   const [error, setError] = useState<string | null>(null);
 
   async function run(actionName: string, action: () => Promise<void>) {
@@ -112,6 +122,7 @@ export function AccountSettings({
       if (!response.ok) throw new Error(await safeResponseMessage(response, "Unable to rename this workspace."));
       setMessage("Workspace name saved.");
       setWorkspaceAction(null);
+      setDialog(null);
       await refreshAccount();
     });
   }
@@ -135,6 +146,7 @@ export function AccountSettings({
       setNewWorkspaceName("");
       setMessage("Workspace created and selected.");
       setWorkspaceAction(null);
+      setDialog(null);
       await refreshAccount();
     });
   }
@@ -151,6 +163,7 @@ export function AccountSettings({
       if (!response.ok) throw new Error(await safeResponseMessage(response, "Unable to switch workspace."));
       setWorkspaceName(nextWorkspaceName);
       setMessage(`Switched to ${nextWorkspaceName}.`);
+      setDialog(null);
       await refreshAccount();
     });
   }
@@ -307,7 +320,6 @@ export function AccountSettings({
               </Button>
               <Button compact type="button" onClick={() => setWorkspaceAction(null)}>Cancel</Button>
             </form> : null}
-            {message ? <p className="settings-section-feedback" role="status">{message}</p> : null}
             {dialogError}
           </div>
         </ModalDialog>

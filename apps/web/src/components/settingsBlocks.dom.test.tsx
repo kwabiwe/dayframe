@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 
+import { useState } from "react";
 import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -81,6 +82,51 @@ describe("Settings in Blocks", () => {
     await userEvents.selectOptions(within(screen.getByRole("dialog")).getByLabelText("Active workspace"), "w2");
     await waitFor(() => expect(order).toContain("/api/workspace/switch"));
     expect(order.indexOf("held decisions saved")).toBeLessThan(order.indexOf("/api/workspace/switch"));
+  });
+
+  it("keeps a workspace switch's confirmation on the card after the card is re-created", async () => {
+    const userEvents = userEvent.setup();
+    // As on the Settings page: the notice lives above the card, and a workspace change re-keys it.
+    function Harness() {
+      const [notice, setNotice] = useState<string | null>(null);
+      const [current, setCurrent] = useState(workspaces[0]);
+      return (
+        <AppShellRuntimeProvider>
+          <AccountSettings
+            authMode="provider"
+            key={current.id}
+            notice={notice}
+            onNotice={(next) => {
+              setNotice(next);
+              if (next?.startsWith("Switched")) setCurrent(workspaces[1]);
+            }}
+            user={user}
+            workspace={current}
+            workspaces={workspaces}
+          />
+        </AppShellRuntimeProvider>
+      );
+    }
+    render(<Harness />);
+    await userEvents.click(screen.getByRole("button", { name: /Switch workspace/ }));
+    await userEvents.selectOptions(within(screen.getByRole("dialog")).getByLabelText("Active workspace"), "w2");
+    await waitFor(() => expect(screen.getByRole("status").textContent).toBe("Switched to Studio."));
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(document.querySelector("#account")?.textContent).toContain("· Studio");
+  });
+
+  it("closes the workspace dialog after a rename and confirms on the card", async () => {
+    const userEvents = userEvent.setup();
+    mountAccount();
+    await userEvents.click(screen.getByRole("button", { name: /Switch workspace/ }));
+    const dialog = screen.getByRole("dialog");
+    await userEvents.click(within(dialog).getByRole("button", { name: "Rename" }));
+    const name = within(dialog).getByLabelText("Workspace name");
+    await userEvents.clear(name);
+    await userEvents.type(name, "Home life");
+    await userEvents.click(within(dialog).getByRole("button", { name: "Save name" }));
+    await waitFor(() => expect(screen.getByRole("status").textContent).toBe("Workspace name saved."));
+    expect(screen.queryByRole("dialog")).toBeNull();
   });
 
   it("opens the shell's keyboard shortcuts and links to Review from Help", async () => {

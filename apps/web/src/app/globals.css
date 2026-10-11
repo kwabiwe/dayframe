@@ -12488,6 +12488,18 @@ dialog.ui-dialog.df-palette {
   margin-left: auto;
 }
 
+/* Goals take the full card width under their label and stack when the card is narrow. */
+.df-set-card .settings-goals-row .ui-settings-row-action {
+  flex: 1 1 100%;
+  margin-left: 0;
+}
+
+.df-set-card .settings-goal-control {
+  width: 100%;
+  min-width: 0;
+  grid-template-columns: repeat(auto-fit, minmax(172px, 1fr));
+}
+
 /* Selection is neutral in Blocks: coral stays for recording and the one primary action. */
 .df-set-card .settings-appearance-row .ui-segmented-control button[aria-pressed="true"],
 .df-set-card .ui-segmented-control button[aria-pressed="true"] {
