@@ -13279,6 +13279,7 @@ dialog.ui-dialog.df-rf-dialog {
    so the profile popover opens under it, top right, instead of bottom left over the tab bar. */
 @media (min-width: 761px) and (max-width: 860px) {
   dialog.ui-popover-panel.bottom-left {
+    max-height: calc(100dvh - 64px - 12px);
     margin: 64px 12px auto auto;
   }
 }

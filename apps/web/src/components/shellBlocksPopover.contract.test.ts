@@ -9,7 +9,7 @@ const styles = read("../app/globals.css");
 
 describe("web shell popover, shortcuts and touch targets (audit UIA-204, UIA-208)", () => {
   it("opens the profile popover under the top-bar avatar between the phone layout and the sidebar", () => {
-    expect(styles).toMatch(/@media \(min-width: 761px\) and \(max-width: 860px\) \{\s*dialog\.ui-popover-panel\.bottom-left \{\s*margin: 64px 12px auto auto;/);
+    expect(styles).toMatch(/@media \(min-width: 761px\) and \(max-width: 860px\) \{\s*dialog\.ui-popover-panel\.bottom-left \{\s*max-height: calc\(100dvh - 64px - 12px\);\s*margin: 64px 12px auto auto;/);
   });
 
   it("draws Profile & workspace in Blocks with 44 px rows, a neutral current workspace and Sign out", () => {
