@@ -174,13 +174,6 @@ function createStyles(theme: MobileTheme) {
       paddingBottom: 18,
       backgroundColor: theme.background
     },
-    settingsFloatingHeader: {
-      paddingHorizontal: 16,
-      paddingTop: 18,
-      paddingBottom: 10,
-      backgroundColor: theme.background,
-      zIndex: 10
-    },
     tabScreenStack: {
       gap: 12
     },
@@ -210,13 +203,6 @@ function createStyles(theme: MobileTheme) {
     nativeCalendarView: {
       flex: 1,
       backgroundColor: theme.background
-    },
-    settingsHeader: {
-      minHeight: 44,
-      flexDirection: "row",
-      alignItems: "center",
-      justifyContent: "space-between",
-      gap: 12
     },
     // Blocks parity step 6a-1: the Settings index (prototype grouped lists).
     settingsBlocksStack: {
@@ -527,14 +513,6 @@ function createStyles(theme: MobileTheme) {
       fontWeight: "700",
       color: theme.textPrimary,
       fontFamily: monoFont
-    },
-    settingsTitle: {
-      flex: 1,
-      fontSize: 22,
-      fontWeight: "700",
-      color: theme.textPrimary,
-      fontFamily: monoFont,
-      textAlign: "right"
     },
     subtitle: {
       marginTop: 2,
@@ -994,33 +972,48 @@ function createStyles(theme: MobileTheme) {
     reviewDeckToastText: {
       flexShrink: 1
     },
-    reviewDeckNav: {
+    // Blocks navigation bar for pushed pages (BlocksNavHeader; UIA-001): text back, centred title,
+    // trailing slot. The side slots flex equally so the title stays centred.
+    blocksNav: {
       alignItems: "center",
+      backgroundColor: theme.background,
       flexDirection: "row",
+      gap: 8,
       minHeight: 44,
-      paddingHorizontal: 20,
-      paddingTop: 2
+      paddingHorizontal: 16,
+      paddingTop: 2,
+      zIndex: 10
     },
-    reviewDeckBack: {
+    blocksNavBack: {
       alignItems: "center",
+      alignSelf: "stretch",
       flex: 1,
       flexDirection: "row",
       gap: 2,
-      minHeight: 44
+      minHeight: 44,
+      minWidth: 0
     },
-    reviewDeckBackText: {
+    blocksNavBackText: {
+      flexShrink: 1,
       fontSize: 16,
       fontWeight: "600"
     },
-    reviewDeckNavTitle: {
+    blocksNavTitle: {
       color: theme.textPrimary,
+      flexShrink: 1,
       fontSize: 16,
       fontWeight: "700",
+      maxWidth: "50%",
       textAlign: "center"
+    },
+    blocksNavTrailing: {
+      alignItems: "flex-end",
+      flex: 1,
+      justifyContent: "center",
+      minWidth: 0
     },
     reviewDeckNavCount: {
       color: theme.textSecondary,
-      flex: 1,
       fontSize: 14,
       fontVariant: ["tabular-nums"],
       fontWeight: "600",

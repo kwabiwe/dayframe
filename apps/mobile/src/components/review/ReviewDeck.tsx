@@ -1,3 +1,4 @@
+import { backActionLabel } from "@/lib/blocksNav";
 import { memo, useEffect, useState, type ReactNode } from "react";
 import { Pressable, StyleSheet, Text, TextInput, View } from "react-native";
 import { Gesture, GestureDetector } from "react-native-gesture-handler";
@@ -798,6 +799,7 @@ function FinishedBlock({ color, index, reduceMotion }: { color: string; index: n
 
 /** The finished deck: "All framed" with this visit's logged moments as blocks. */
 export function ReviewDeckFinished({
+  backLabel = "Today",
   blocks,
   celebrate,
   copy,
@@ -806,6 +808,8 @@ export function ReviewDeckFinished({
   reduceMotion,
   theme
 }: {
+  /** The screen Review returns to (Today or Calendar). */
+  backLabel?: string;
   blocks: readonly string[];
   /** Only a finish reached by this visit's own decision drops in and plays the haptic. */
   celebrate: boolean;
@@ -856,7 +860,7 @@ export function ReviewDeckFinished({
         testID="review-deck-back-to-today"
       >
         <Text {...mobileTextProps("control")} style={[deckStyles.finishedButtonText, { color: theme.onAccent }]}>
-          Back to Today
+          {backActionLabel(backLabel)}
         </Text>
       </Pressable>
       {footer}

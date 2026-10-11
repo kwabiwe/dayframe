@@ -93,7 +93,7 @@ Where a rule here conflicts with the approved Dayframe Blocks direction, it gove
 - [ ] Canonical symbol geometry is unchanged and the correct wordmark tone is used for the resolved theme.
 - [ ] Brand artwork has one accessible name or is fully decorative.
 - [ ] No legacy PNG banner or unintended white logo rectangle remains in primary branding.
-- [ ] Focus is visibly neutral grey—not blue—on every web interactive control, while text, icon, border and chart contrast remain legible in System, Light and Dark modes.
+- [ ] Focus is visibly neutral grey—not blue—on every web interactive control, while text, icon, border and chart contrast remain legible in System, Midnight (dark) and Daylight (light) appearances.
 - [ ] Field focus has one owner, does not shift layout or clip at container edges, and remains distinct from selected, invalid and disabled states.
 - [ ] Mobile dashboard excludes sync/logout/permission clutter from primary chrome.
 - [ ] New or changed movement has a documented motion contract and consistent entrance/update/exit behaviour, including Reduce Motion.
