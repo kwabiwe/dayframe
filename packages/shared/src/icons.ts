@@ -94,6 +94,7 @@ export const DAYFRAME_APP_ICONS = {
   placeHome: "house",
   placeWork: "briefcase",
   account: "circle-user-round",
+  signOut: "log-out",
   start: "play",
   startAgain: "rotate-ccw",
   stop: "square",

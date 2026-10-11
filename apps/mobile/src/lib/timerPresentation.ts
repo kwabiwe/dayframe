@@ -13,7 +13,7 @@ export const OPTIMISTIC_TIMER_ID_PREFIX = "optimistic-active-timer:";
 export const MISSING_QUEUED_TIMER_START_MESSAGE =
   "This timer start is no longer available to update.";
 export const MISSING_QUEUED_TIMER_DELETE_MESSAGE =
-  "The queued timer start could not be found for deletion.";
+  "The timer you started couldn't be found to delete it.";
 
 export type BlankTimerStartClaim = {
   entryId: string | null;

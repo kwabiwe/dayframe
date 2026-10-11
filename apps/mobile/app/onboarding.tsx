@@ -695,7 +695,7 @@ function StepActions({
       <>
         <PrimaryButton
           busy={busy}
-          label={answers.suggestions === "failed" ? "Try again" : answers.suggestions === "paused" ? "Retry capture" : "Turn on suggestions"}
+          label={answers.suggestions === "failed" ? "Try again" : answers.suggestions === "paused" ? "Restart location" : "Turn on suggestions"}
           onPress={onTurnOnSuggestions}
           testID="onboarding-suggestions-on"
           theme={theme}
