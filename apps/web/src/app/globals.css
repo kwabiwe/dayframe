@@ -12027,6 +12027,15 @@ dialog.ui-dialog.df-palette {
   background: var(--surface);
 }
 
+.df-lnew:disabled,
+.df-lcard .df-rbtn:disabled {
+  cursor: progress;
+}
+
+.df-lcard:target {
+  box-shadow: inset 0 0 0 2px var(--focus);
+}
+
 .df-simple-list {
   display: grid;
   margin: 0;
@@ -12217,6 +12226,12 @@ dialog.ui-dialog.df-palette {
 
   .df-lnew {
     min-height: 150px;
+  }
+
+  /* Phone touch targets: 44 px. */
+  .df-rbtn--sm,
+  .df-seg a {
+    min-height: 44px;
   }
 
   .df-lmeta {

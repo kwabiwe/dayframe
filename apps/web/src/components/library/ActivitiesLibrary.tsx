@@ -31,7 +31,15 @@ const NOTICE_MS = 5_000;
 const NOTICE_EXIT_MS = 160;
 const BUSY_MESSAGE = "Another activity change is still saving. Try again in a moment.";
 
-type Notice = { token: number; label: string; swatch?: CSSProperties; undo?: () => void; exiting: boolean };
+type Notice = {
+  token: number;
+  label: string;
+  swatch?: CSSProperties;
+  undo?: () => void;
+  /** The control that held focus went away (the editor closed): focus moves to Undo. */
+  takeFocus?: boolean;
+  exiting: boolean;
+};
 
 /**
  * Library › Activities (Blocks parity step 14a-1): activity cards by group (your own first, then
@@ -93,9 +101,16 @@ export function ActivitiesLibrary({ initialData }: { initialData: BootstrapData 
     return () => clearTimeout(gone);
   }, [notice]);
 
-  const announce = useCallback((label: string, swatch?: CSSProperties, undo?: () => void) => {
-    setNotice({ token: ++noticeSequence.current, label, swatch, undo, exiting: false });
+  const announce = useCallback((label: string, swatch?: CSSProperties, undo?: () => void, takeFocus = false) => {
+    setNotice({ token: ++noticeSequence.current, label, swatch, undo, takeFocus, exiting: false });
   }, []);
+
+  // A toast leaving with focus on its Undo hands focus to New activity, so it never falls to the page.
+  useEffect(() => {
+    if (!notice?.exiting) return;
+    if (!document.activeElement?.closest(".df-toast-host")) return;
+    document.querySelector<HTMLElement>(".df-lnew")?.focus();
+  }, [notice?.exiting]);
 
   /** One change at a time; the shell (quick starts, pickers) refreshes after each. */
   const run = useCallback(async (change: () => Promise<Response>, fallback: string) => {
@@ -141,11 +156,17 @@ export function ActivitiesLibrary({ initialData }: { initialData: BootstrapData 
   }, [activities, announce, patch, run]);
 
   const restore = useCallback(async (activity: CategoryRow, repin = false) => {
-    const done = await run(() => patch({ id: activity.id, isArchived: false, ...(repin ? { isPinned: true } : {}) }), "Couldn’t restore the activity.");
-    if (done) {
-      void loadArchived();
-      announce(`${activity.name} restored`, blockStyle(activity.color, activity.name));
-    }
+    // The server restores an activity unpinned, so a re-pin (Undo of archiving a pinned
+    // activity) is its own request after the restore, inside the same one-change slot.
+    let restored = false;
+    const done = await run(async () => {
+      const response = await patch({ id: activity.id, isArchived: false });
+      if (!response.ok || !repin) return response;
+      restored = true;
+      return patch({ id: activity.id, isPinned: true });
+    }, "Couldn’t restore the activity.");
+    if (done || restored) void loadArchived();
+    if (done) announce(`${activity.name} restored`, blockStyle(activity.color, activity.name));
     return Boolean(done);
   }, [announce, loadArchived, patch, run]);
 
@@ -155,7 +176,7 @@ export function ActivitiesLibrary({ initialData }: { initialData: BootstrapData 
     void loadArchived();
     announce(`${activity.name} archived. Its history stays.`, blockStyle(activity.color, activity.name), () => {
       void restore(activity, activity.isPinned);
-    });
+    }, true);
     return true;
   }, [announce, loadArchived, restore, run]);
 
@@ -212,7 +233,7 @@ export function ActivitiesLibrary({ initialData }: { initialData: BootstrapData 
               />
             ))}
             {group.ownGroup ? (
-              <button className="df-lnew" onClick={() => setEditing("new")} type="button">
+              <button className="df-lnew" disabled={busy} onClick={() => setEditing("new")} type="button">
                 <DayframeIcon glyph="plus" size={26} />
                 New activity
                 <small>Pick a name, icon and colour</small>
@@ -269,10 +290,16 @@ export function ActivitiesLibrary({ initialData }: { initialData: BootstrapData 
       {notice ? (
         <BlocksToast
           actionLabel={notice.undo ? "Undo" : undefined}
+          autoFocusAction={Boolean(notice.undo && notice.takeFocus)}
           exiting={notice.exiting}
           key={notice.token}
           message={notice.label}
           onAction={notice.undo ? () => {
+            // While another change saves, Undo stays on screen to try again.
+            if (busyRef.current) {
+              setError(BUSY_MESSAGE);
+              return;
+            }
             const undo = notice.undo;
             setNotice((current) => (current ? { ...current, exiting: true } : current));
             undo?.();
@@ -301,7 +328,7 @@ function ActivityCard({
   const series = weeks ?? [0, 0, 0, 0, 0, 0];
   const max = Math.max(...series, 1);
   return (
-    <article aria-label={activity.name} className="df-card df-lcard" style={blockStyle(activity.color, activity.name)}>
+    <article aria-label={activity.name} className="df-card df-lcard" id={`category-${activity.id}`} style={blockStyle(activity.color, activity.name)}>
       <div className="df-lswatch df-block">
         <DayframeIcon glyph={glyph} size={22} />
         <button
@@ -327,7 +354,7 @@ function ActivityCard({
           {series.map((seconds, index) => <i key={index} style={{ height: Math.max(3, (seconds / max) * 30) }} />)}
         </span>
       </div>
-      <button aria-label={`Edit ${activity.name}`} className="df-rbtn df-rbtn--sm" onClick={onEdit} type="button">
+      <button aria-label={`Edit ${activity.name}`} className="df-rbtn df-rbtn--sm" disabled={busy} onClick={onEdit} type="button">
         <DayframeIcon glyph="pencil" size={15} />
         Edit
       </button>

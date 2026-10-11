@@ -312,7 +312,8 @@ Block pull-to-refresh:
 
 - Trigger: pin or unpin, save or create in the editor, archive (and its Undo), restore.
 - Owner: CSS and the existing dialog. Cards and rows appear in place with the refreshed data (no list animation); the editor is the shared `ModalDialog`; the Blocks toast ("X pinned to quick start", "X archived. Its history stays." with Undo, "X restored", "X created") pops in and leaves as on Today (5 s, 160 ms exit).
-- Interruption: one change saves at a time — pins, Edit and Restore are disabled while one is saving, and a change asked for meanwhile is refused with a message; a refused change (taken name, quick start full) is shown and the editor keeps what was typed.
+- Interruption: one change saves at a time — pins, Edit, New activity and Restore are disabled while one is saving, and a change asked for meanwhile is refused with a message (Undo pressed then stays on screen to try again); a refused change (taken name, quick start full) is shown and the editor keeps what was typed. Undo of archiving a pinned activity restores it and then re-pins it (two requests: the server restores unpinned).
+- Focus: archiving closes the editor, so focus moves to the toast's Undo; when that toast leaves with focus on it, focus moves to New activity. Cards keep their `#category-<id>` anchors for ⌘K links.
 - Accessibility: Reduce Motion follows the toast's own path. Pins are toggle buttons named "Pin/Unpin X to/from quick start"; each Edit is named for its activity; the editor's icon and colour choices are radio groups with roving focus (arrow keys without modifiers); sparklines are decorative.
 
 ## Web Review (Blocks parity step 13)
