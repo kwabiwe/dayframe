@@ -32,7 +32,7 @@ describe("Blocks confirm sheet and toast call sites (UIA-003/004/005)", () => {
       expect(settings).toContain(`title: ${title}`);
     }
     // The unsynced-data warning keeps its meaning and Log out still runs the same sign-out.
-    const signOut = between(settings, "async function signOut()", "async function completeSignOut()");
+    const signOut = between(settings, "async function signOutChecked()", "async function completeSignOut()");
     expect(signOut).toContain("void confirmForSession({");
     expect(signOut).toContain("${reviewWarning}Unsynchronised Location evidence will be removed from this iPhone. Synced history stays in your account.");
     expect(signOut).toContain("onConfirm: () => { void completeSignOut(); }");
@@ -54,17 +54,17 @@ describe("Blocks confirm sheet and toast call sites (UIA-003/004/005)", () => {
     expect(between(settings, "async function offerLogoutRecovery()", "async function confirmForSession(")).toContain("confirmSheet.confirm({");
     expect(settings.match(/void confirmForSession\(\{/g)).toHaveLength(8);
     const wrapper = between(settings, "async function confirmForSession(", "\n  }\n");
-    expect(wrapper).toContain("const authority = captured ?? await captureConfirmAuthority();");
-    expect(wrapper).toContain("if (!authority || !(await confirmAuthorityStillCurrent(authority))) return false;");
+    expect(wrapper).toContain("authority ??= await captureConfirmAuthority();");
+    expect(wrapper).toContain("if (!authority || !(await confirmAuthorityStillCurrent(authority))) {");
     expect(wrapper).toContain("confirmSheet.confirm(bindConfirmToSession(request, authority, {");
     // Log out pins the session before it reads anything, and confirms with that same authority.
-    const signOut = between(settings, "async function signOut()", "async function completeSignOut()");
+    const signOut = between(settings, "async function signOutChecked()", "async function completeSignOut()");
     expect(signOut.indexOf("const authority = await captureConfirmAuthority();")).toBeLessThan(signOut.indexOf("getReviewSyncDiagnostics()"));
     expect(signOut).toContain("}, authority);");
   });
 
   it("keeps Log out reachable after a logout that failed partway, bound to that state (Codex r2)", () => {
-    const signOut = between(settings, "async function signOut()", "async function completeSignOut()");
+    const signOut = between(settings, "async function signOutChecked()", "async function completeSignOut()");
     expect(signOut).toMatch(/if \(!authority\) \{\s*\/\/[^\n]*\n\s*await offerLogoutRecovery\(\);\s*return;\s*\}/);
     const recovery = between(settings, "async function offerLogoutRecovery()", "async function confirmForSession(");
     expect(recovery).toContain("const recovery = await captureLogoutRecovery();");
@@ -74,7 +74,18 @@ describe("Blocks confirm sheet and toast call sites (UIA-003/004/005)", () => {
     // The cleanup runs through the same logout path, only while the recovered state is still current.
     expect(recovery).toContain("void logoutRecoveryStillCurrent(recovery).then(");
     expect(recovery).toContain("if (current) void completeSignOut();");
-    expect(recovery).toContain('else settingsNotice.show("Your account changed, so nothing was changed.");');
+    expect(recovery).toContain("else settingsNotice.show(ACCOUNT_CHANGED_NOTICE);");
+  });
+
+  it("never lets a Log out tap end silently (Codex r3)", () => {
+    // A sign-in that can't be read (Keychain locked or failing) says so with a retry.
+    const signOut = between(settings, "async function signOut()", "async function signOutChecked()");
+    expect(signOut).toMatch(/try \{\s*await signOutChecked\(\);\s*\} catch \{\s*settingsNotice\.show\(SIGN_IN_UNREADABLE_NOTICE\);/);
+    expect(settings).toContain("const SIGN_IN_UNREADABLE_NOTICE = \"Dayframe couldn't read your sign-in on this iPhone. Unlock your iPhone, then try again.\";");
+    // A session change while the warning is prepared voids the tap and says so.
+    const wrapper = between(settings, "async function confirmForSession(", "\n  }\n");
+    expect(wrapper).toMatch(/confirmAuthorityStillCurrent\(authority\)\)\) \{\s*\/\/[^\n]*\n\s*settingsNotice\.show\(ACCOUNT_CHANGED_NOTICE\);\s*return false;/);
+    expect(wrapper).toMatch(/\} catch \{\s*settingsNotice\.show\(SIGN_IN_UNREADABLE_NOTICE\);\s*return false;/);
   });
 
   it("starts the 'created but not pinned' notice only after the activity editor has left (Codex r1 #2)", () => {

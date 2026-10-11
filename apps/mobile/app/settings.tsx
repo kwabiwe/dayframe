@@ -195,6 +195,8 @@ type Category = MobileBootstrap["categories"][number];
 const DAILY_GOAL_HOURS = { min: 1, max: 14, step: 1 } as const;
 const WEEKLY_GOAL_HOURS = { min: 5, max: 80, step: 5 } as const;
 const GOAL_SAVE_DELAY_MS = 600;
+const ACCOUNT_CHANGED_NOTICE = "Your account changed, so nothing was changed.";
+const SIGN_IN_UNREADABLE_NOTICE = "Dayframe couldn't read your sign-in on this iPhone. Unlock your iPhone, then try again.";
 // D1: the same theme names on iPhone and web.
 const SETTINGS_THEME_OPTIONS = [
   { label: "Midnight", value: "dark" },
@@ -1648,10 +1650,20 @@ export default function SettingsScreen() {
   }
 
   async function signOut() {
+    // Log out is never a silent no-op: a sign-in that can't be read (the Keychain locked or
+    // failing) says so and how to retry.
+    try {
+      await signOutChecked();
+    } catch {
+      settingsNotice.show(SIGN_IN_UNREADABLE_NOTICE);
+    }
+  }
+
+  async function signOutChecked() {
     // Consent to log out is for this account's session only: pinned before anything is read.
     const authority = await captureConfirmAuthority();
     if (!authority) {
-      // Log out is never a silent no-op: finish a logout that failed partway, or go to sign-in.
+      // Finish a logout that failed partway, or go to sign-in.
       await offerLogoutRecovery();
       return;
     }
@@ -1700,9 +1712,9 @@ export default function SettingsScreen() {
         void logoutRecoveryStillCurrent(recovery).then(
           (current) => {
             if (current) void completeSignOut();
-            else settingsNotice.show("Your account changed, so nothing was changed.");
+            else settingsNotice.show(ACCOUNT_CHANGED_NOTICE);
           },
-          () => settingsNotice.show("Your account changed, so nothing was changed.")
+          () => settingsNotice.show(ACCOUNT_CHANGED_NOTICE)
         );
       }
     });
@@ -1715,10 +1727,20 @@ export default function SettingsScreen() {
    * sheet is up voids it).
    */
   async function confirmForSession(request: BlocksConfirmRequest, captured?: ConfirmAuthority) {
-    const authority = captured ?? await captureConfirmAuthority();
-    if (!authority || !(await confirmAuthorityStillCurrent(authority))) return false;
+    let authority: ConfirmAuthority | null | undefined = captured;
+    try {
+      authority ??= await captureConfirmAuthority();
+      if (!authority || !(await confirmAuthorityStillCurrent(authority))) {
+        // The tap is voided because the session changed while it was being prepared: say so.
+        settingsNotice.show(ACCOUNT_CHANGED_NOTICE);
+        return false;
+      }
+    } catch {
+      settingsNotice.show(SIGN_IN_UNREADABLE_NOTICE);
+      return false;
+    }
     return confirmSheet.confirm(bindConfirmToSession(request, authority, {
-      onStale: () => settingsNotice.show("Your account changed, so nothing was changed.")
+      onStale: () => settingsNotice.show(ACCOUNT_CHANGED_NOTICE)
     }));
   }
 
