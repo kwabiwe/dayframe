@@ -597,13 +597,24 @@ export function collapseCrowdedReviewLane(
  * across a clock change.
  */
 function momentAtWallClock(afterMs: number, wallOffsetMs: number, dayStartMs: number, dayEndMs: number) {
-  let moment = afterMs + (wallOffsetMs - wallClockOffsetMs(afterMs, dayStartMs, dayEndMs));
+  const wall = (ms: number) => wallClockOffsetMs(ms, dayStartMs, dayEndMs);
+  let moment = afterMs + (wallOffsetMs - wall(afterMs));
   for (let step = 0; step < 3; step += 1) {
-    const off = wallOffsetMs - wallClockOffsetMs(moment, dayStartMs, dayEndMs);
-    if (Math.abs(off) < 1_000) break;
+    const off = wallOffsetMs - wall(moment);
+    if (Math.abs(off) < 1_000) return Math.min(dayEndMs, Math.max(afterMs + 60_000, moment));
     moment += off;
   }
-  return Math.min(dayEndMs, Math.max(afterMs + 60_000, moment));
+  // No moment shows that time (it falls in the hour skipped when clocks go forward): the earliest
+  // moment drawn at or after it, so the crowd still covers every member. Drawn time only moves
+  // forward between the start and the day's end apart from a fold, which the corrections handle.
+  let low = afterMs;
+  let high = dayEndMs;
+  while (high - low > 1_000) {
+    const middle = low + (high - low) / 2;
+    if (wall(middle) >= wallOffsetMs) high = middle;
+    else low = middle;
+  }
+  return Math.min(dayEndMs, Math.max(afterMs + 60_000, high));
 }
 
 /** "Needs review: 3 suggestions, 09:00 to 10:20. Opens Gym first." — distinct per crowd. */
