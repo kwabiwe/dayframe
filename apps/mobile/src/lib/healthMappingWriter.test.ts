@@ -47,7 +47,8 @@ function setup(initial: HealthAutoLogMappings = {}) {
       accountListeners.add(listener);
       return () => accountListeners.delete(listener);
     },
-    settle: async (saved, isCurrent) => {
+    settle: async (saved, isCurrent, origin) => {
+      expect(origin).toBe(account);
       if (settleGate) await settleGate;
       if (!(await isCurrent())) return;
       settles.push({ account, saved });
@@ -352,5 +353,22 @@ describe("Health mapping writer (UIA-085)", () => {
     expect(draft).toBe("A");
     expect(t.failed).toHaveBeenCalledTimes(1);
     expect(t.lastShown().walking).toEqual({ description: "A" });
+  });
+
+  it("Codex r8 (2): a failed read puts back only its own Name; a later queued Name still lands", async () => {
+    const t = setup({ walking: { description: "Old" } });
+    await t.writer.refresh();
+    const restore = vi.fn();
+    t.writer.attach("walking", restore);
+    t.holdRead();
+    const first = t.writer.commitName("walking", "A");
+    await tick();
+    const second = t.writer.commitName("walking", "B");
+    t.readHolds[0].fail();
+    expect(await first).toBe(false);
+    expect(restore).toHaveBeenCalledWith("Old", "A");
+    expect(await second).toBe(true);
+    await t.writer.idle("walking");
+    expect(t.stored().walking).toEqual({ description: "B" });
   });
 });

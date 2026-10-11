@@ -22,7 +22,11 @@ type Entry<A> = {
   authority: Promise<A | null>;
   done: (ok: boolean) => void;
   stale: boolean;
-} & ({ kind: "patch"; patch: HealthAutoLogMapping } | { kind: "name"; started: boolean });
+} & (
+  | { kind: "patch"; patch: HealthAutoLogMapping }
+  // `name` is this commit's Name, updated while it waits by newer commits it absorbs.
+  | { kind: "name"; started: boolean; name: string }
+);
 
 export type HealthMappingWriterDeps<A> = {
   /** Reads the saved mappings (the source of truth). */
@@ -39,7 +43,11 @@ export type HealthMappingWriterDeps<A> = {
    * Runs once a type's queue is empty again after a write landed (reprocessing). `isCurrent`
    * says whether the account that made the change is still signed in; check it before each request.
    */
-  settle?: (saved: HealthAutoLogMappings, isCurrent: () => Promise<boolean>) => Promise<void> | void;
+  settle?: (
+    saved: HealthAutoLogMappings,
+    isCurrent: () => Promise<boolean>,
+    origin: A
+  ) => Promise<void> | void;
 };
 
 export type HealthMappingListener = {
@@ -103,7 +111,7 @@ export function createHealthMappingWriter<A>(deps: HealthMappingWriterDeps<A>) {
     for (const [type, entries] of queues) {
       for (const entry of entries) {
         if (entry.stale) continue;
-        const patch = entry.kind === "patch" ? entry.patch : { description: (names.get(type) ?? "").trim() || null };
+        const patch = entry.kind === "patch" ? entry.patch : { description: entry.name.trim() || null };
         shown = withMapping(shown, type, merge(shown[type], patch));
       }
     }
@@ -149,7 +157,7 @@ export function createHealthMappingWriter<A>(deps: HealthMappingWriterDeps<A>) {
       try {
         const saving = await deps.readSaved();
         remember(saving);
-        if (entry.kind === "name") attempted = (names.get(type) ?? "").trim();
+        if (entry.kind === "name") attempted = entry.name.trim();
         if (await current(entry)) {
           if (entry.kind === "patch") {
             remember(await deps.write(type, merge(saving[type], entry.patch)));
@@ -164,7 +172,8 @@ export function createHealthMappingWriter<A>(deps: HealthMappingWriterDeps<A>) {
         if (await current(entry)) {
           for (const listener of listeners) listener.failed?.(error);
           // A Name that could not be read or written: the sheet gets the saved Name back.
-          if (entry.kind === "name") failedName = attempted ?? (names.get(type) ?? "").trim();
+          // Only this commit's Name failed; a later queued Name is left to run.
+          if (entry.kind === "name") failedName = attempted ?? entry.name.trim();
         }
       }
       if (landed && await current(entry)) wrote.add(type);
@@ -183,9 +192,10 @@ export function createHealthMappingWriter<A>(deps: HealthMappingWriterDeps<A>) {
       wrote.delete(type);
       const isCurrent = () => current(entry);
       // Reprocessing runs only for the account that made the change, checked before each request.
-      if (await isCurrent()) {
+      const origin = await entry.authority.catch(() => null);
+      if (origin !== null && await isCurrent()) {
         try {
-          await deps.settle?.(cache ?? await deps.readSaved(), isCurrent);
+          await deps.settle?.(cache ?? await deps.readSaved(), isCurrent, origin);
         } catch {
           // Settling (reprocessing) is best effort; the mapping itself is saved.
         }
@@ -231,6 +241,7 @@ export function createHealthMappingWriter<A>(deps: HealthMappingWriterDeps<A>) {
       const committed = waiting
         // A Name is already waiting its turn; it reads the newest Name when it runs.
         ? new Promise<boolean>((done) => {
+            if (waiting.kind === "name") waiting.name = name;
             const previous = waiting.done;
             waiting.done = (ok) => {
               previous(ok);
@@ -238,7 +249,7 @@ export function createHealthMappingWriter<A>(deps: HealthMappingWriterDeps<A>) {
             };
           })
         : new Promise<boolean>((done) => {
-            enqueue(type, { kind: "name", started: false, done, stale: false, authority: deps.capture() });
+            enqueue(type, { kind: "name", started: false, name, done, stale: false, authority: deps.capture() });
           });
       publish();
       return committed;

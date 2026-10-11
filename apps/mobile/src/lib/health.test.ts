@@ -770,6 +770,31 @@ describe("HealthKit mapping", () => {
     });
   });
 
+  it("stops before a batch request once the session that asked is no longer current (UIA-085)", async () => {
+    apiMocks.reprocessHealthReviewItems.mockResolvedValueOnce({
+      ok: true,
+      checkedCount: 25,
+      confirmedCount: 25,
+      ignoredCount: 0,
+      leftInReviewCount: 0,
+      skippedCount: 0,
+      failedCount: 0,
+      updatedCategoryCount: 25,
+      remainingReviewCount: 88,
+      batchSize: 25,
+      partial: true,
+      hasMore: true,
+      errorSummary: []
+    });
+    const current = [true, false];
+    const result = await reprocessExistingHealthReviewItems(undefined, {
+      force: true,
+      beforeRequest: async () => current.shift() ?? false
+    });
+    expect(apiMocks.reprocessHealthReviewItems).toHaveBeenCalledTimes(1);
+    expect(result).toMatchObject({ partial: true, hasMore: true });
+  });
+
   it("keeps background Health review reprocess failures non-fatal", async () => {
     apiMocks.reprocessHealthReviewItems.mockRejectedValueOnce(new Error("Unable to reprocess Health review items: 500"));
 

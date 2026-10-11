@@ -4,6 +4,7 @@ import {
   reprocessExistingHealthReviewItems,
   setHealthAutoLogMapping
 } from "./health";
+import { captureConfirmAuthority, confirmAuthorityStillCurrent } from "./confirmAuthority";
 import { createHealthMappingWriter } from "./healthMappingWriter";
 import { mobileAccountOwnersEqual, readActiveMobileAccount, subscribeActiveMobileAccount } from "./mobileAccount";
 
@@ -19,15 +20,24 @@ export const healthMappingWriter = createHealthMappingWriter({
   capture: readActiveMobileAccount,
   stillCurrent: async (owner) => mobileAccountOwnersEqual(await readActiveMobileAccount(), owner),
   onAccountChange: subscribeActiveMobileAccount,
-  settle: async (saved, isCurrent) => {
-    const preferences = await getHealthImportPreferences();
-    // Checked again after every wait, and an account change aborts the requests still running,
-    // so one account's mappings are never reprocessed with another account's session.
+  settle: async (saved, isCurrent, origin) => {
+    // Reprocessing talks to the server, so it is pinned to the signed-in session itself, not only
+    // the active-account record (which can lag a sign-out): the session is captured now, must
+    // belong to the account that made the change, and is checked again before every request.
+    const session = await captureConfirmAuthority();
+    if (!session || !mobileAccountOwnersEqual(session.owner, origin) || !(await isCurrent())) return;
+    const sessionCurrent = async () => (await isCurrent()) && (await confirmAuthorityStillCurrent(session));
     const controller = new AbortController();
     const stop = subscribeActiveMobileAccount(() => controller.abort());
     try {
-      if (!(await isCurrent()) || controller.signal.aborted) return;
-      await reprocessExistingHealthReviewItems(preferences, { force: true, mappings: saved, signal: controller.signal });
+      const preferences = await getHealthImportPreferences();
+      if (controller.signal.aborted || !(await sessionCurrent())) return;
+      await reprocessExistingHealthReviewItems(preferences, {
+        force: true,
+        mappings: saved,
+        signal: controller.signal,
+        beforeRequest: sessionCurrent,
+      });
     } finally {
       stop();
     }
