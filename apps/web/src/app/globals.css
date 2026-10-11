@@ -12358,3 +12358,216 @@ dialog.ui-dialog.df-palette {
     padding: 0 10px;
   }
 }
+
+/*
+ * Dayframe Blocks Settings (parity step 14b): the account card, then two columns of cards
+ * (Your day, Activities, Appearance · Automatic tracking, Privacy and data, Help) and Sign out.
+ * Existing settings rows keep their markup and sit in the cards as plain divided rows.
+ */
+.df-settings-page {
+  display: grid;
+  max-width: 1120px;
+  gap: 16px;
+  padding: 20px 32px 96px;
+}
+
+.df-set-account {
+  display: grid;
+  grid-template-columns: 56px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px 16px;
+}
+
+.df-set-placeholder {
+  display: block;
+  min-height: 92px;
+}
+
+.df-av-lg {
+  display: grid;
+  width: 56px;
+  height: 56px;
+  place-items: center;
+  border-radius: 999px;
+  background: var(--surface-muted);
+  color: var(--text-primary);
+  font-size: 18px;
+  font-weight: 750;
+}
+
+.df-set-id {
+  display: grid;
+  min-width: 0;
+}
+
+.df-set-id b {
+  font-size: 17px;
+}
+
+.df-set-id small {
+  overflow: hidden;
+  color: var(--text-secondary);
+  font-size: 13px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.df-set-acts {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.df-set-feedback {
+  grid-column: 1 / -1;
+  margin: 0;
+}
+
+.df-set-dialog-form {
+  align-items: end;
+}
+
+.df-settings {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  align-items: start;
+  gap: 16px;
+}
+
+.df-set-col {
+  display: grid;
+  min-width: 0;
+  gap: 16px;
+}
+
+.df-set-card {
+  display: grid;
+  gap: 6px;
+  padding: 16px 4px 8px;
+}
+
+.df-set-card h2 {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  padding: 0 16px;
+  font-size: 16px;
+  font-weight: 750;
+}
+
+.df-set-note {
+  margin: 0;
+  padding: 0 16px;
+  color: var(--text-secondary);
+  font-size: 13px;
+}
+
+.df-set-card .settings-group {
+  display: grid;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+/* Rows wrap: a wide control (goal fields, the theme switch) moves under its label. */
+.df-set-card .ui-settings-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  column-gap: 12px;
+}
+
+.df-set-card .ui-settings-row > div:not(.ui-settings-row-action) {
+  min-width: min(100%, 200px);
+  flex: 1 1 200px;
+}
+
+.df-set-card .ui-settings-row-action {
+  margin-left: auto;
+}
+
+/* Selection is neutral in Blocks: coral stays for recording and the one primary action. */
+.df-set-card .settings-appearance-row .ui-segmented-control button[aria-pressed="true"],
+.df-set-card .ui-segmented-control button[aria-pressed="true"] {
+  background: var(--surface-muted);
+  color: var(--text-primary);
+  box-shadow: inset 0 0 0 1px var(--border-strong);
+}
+
+.df-set-card .settings-appearance-row .ui-segmented-control button[aria-pressed="true"] span,
+.df-set-card .settings-appearance-row .ui-segmented-control button[aria-pressed="true"] svg {
+  color: var(--text-primary);
+}
+
+.df-set-card .ui-settings-row + .ui-settings-row::before {
+  border-top-color: var(--border);
+}
+
+.df-set-card .ui-settings-row > svg {
+  color: var(--text-secondary);
+}
+
+.df-set-card details {
+  margin: 4px 16px 8px;
+}
+
+.df-act-strip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 4px 16px 10px;
+}
+
+.df-act-strip span {
+  display: grid;
+  width: 32px;
+  height: 32px;
+  place-items: center;
+  border-radius: 9px;
+}
+
+.df-set-signout {
+  justify-self: start;
+}
+
+.df-set-signout:disabled {
+  color: var(--disabled);
+}
+
+@media (max-width: 960px) {
+  .df-settings {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+@media (max-width: 860px) {
+  .df-settings-page {
+    gap: 12px;
+    padding: 12px 12px calc(var(--df-tabbar-space) + 72px);
+  }
+
+  .df-set-account {
+    grid-template-columns: 48px minmax(0, 1fr);
+  }
+
+  .df-av-lg {
+    width: 48px;
+    height: 48px;
+  }
+
+  .df-set-acts {
+    grid-column: 1 / -1;
+    justify-content: flex-start;
+  }
+
+  .df-set-id small {
+    overflow-wrap: anywhere;
+    white-space: normal;
+  }
+
+  .df-set-acts .df-rbtn {
+    min-height: 44px;
+  }
+}

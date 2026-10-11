@@ -1,17 +1,28 @@
 "use client";
 
+import Link from "next/link";
 import { useEffect, type ReactNode } from "react";
+import { resolveActivityIcon } from "@dayframe/shared";
 import { useAppShellRuntime } from "@/components/AppShellRuntime";
+import { DayframeIcon } from "@/components/blocks/DayframeIcon";
 import { GoalSettings } from "@/components/GoalSettings";
-import { PageHeader } from "@/components/PageHeader";
 import {
   AccountSettings,
   DataPrivacySettings,
+  HelpSettings,
   PlacesLocationSettings,
-  TroubleshootingSettings
+  SettingsSignOut
 } from "@/components/SettingsForms";
 import { ThemeSettings } from "@/components/ThemeSettings";
+import { blockStyle } from "@/lib/block-style";
+import type { CategoryRow } from "@/lib/queries";
 
+/**
+ * Settings in Blocks (parity step 14b): the account card (Edit profile, Workspace, Change
+ * password), then two columns of cards — Your day, Activities, Appearance; Automatic tracking,
+ * Privacy and data, Help — and Sign out. Every earlier setting stays; the page reads the shell's
+ * last bootstrap and refreshes quietly.
+ */
 export default function SettingsPage() {
   const { data, refresh } = useAppShellRuntime();
 
@@ -23,109 +34,126 @@ export default function SettingsPage() {
   const authMode = data.authMode ?? "provider";
 
   return (
-    <>
-      <PageHeader
-        title="Settings"
-        description="Manage how Dayframe looks, tracks goals, uses location and protects your account."
+    <div className="df-settings-page">
+      <SettingsHead />
+      <AccountSettings
+        key={`${data.user.id}:${data.workspace.id}`}
+        authMode={authMode}
+        user={data.user}
+        workspace={data.workspace}
+        workspaces={data.workspaces}
       />
-      <div className="settings-page">
-        <SettingsSection
-          id="general"
-          title="General"
-          description="Your appearance and progress targets."
-        >
-          <ThemeSettings />
-          <GoalSettings
-            dailyGoalMinutes={data.user.dailyGoalMinutes}
-            weeklyGoalMinutes={data.user.weeklyGoalMinutes}
-          />
-        </SettingsSection>
-
-        <SettingsSection
-          id="places-location"
-          title="Places and location"
-          description="Saved places, visit suggestions and browser access."
-        >
-          <PlacesLocationSettings />
-        </SettingsSection>
-
-        <SettingsSection
-          id="account"
-          title="Account and workspace"
-          description="Your profile, current workspace and sign-in security."
-        >
-          <AccountSettings
-            key={`${data.user.id}:${data.workspace.id}`}
-            authMode={authMode}
-            user={data.user}
-            workspace={data.workspace}
-            workspaces={data.workspaces}
-          />
-        </SettingsSection>
-
-        <SettingsSection
-          id="data-privacy"
-          title="Data and privacy"
-          description="Export your information or remove recent raw location evidence."
-        >
-          <DataPrivacySettings />
-        </SettingsSection>
-
-        <section className="settings-section" aria-labelledby="privacy-troubleshooting-title">
-          <h2 className="sr-only" id="privacy-troubleshooting-title">Privacy and troubleshooting</h2>
-          <TroubleshootingSettings authMode={authMode} />
-        </section>
+      <div className="df-settings">
+        <div className="df-set-col">
+          <SetCard glyph="timer" id="your-day" title="Your day">
+            <GoalSettings
+              dailyGoalMinutes={data.user.dailyGoalMinutes}
+              weeklyGoalMinutes={data.user.weeklyGoalMinutes}
+            />
+          </SetCard>
+          <SetCard glyph="palette" id="activities" title="Activities">
+            <ActivitiesSummary categories={data.categories} />
+          </SetCard>
+          <SetCard glyph="sun" id="appearance" title="Appearance">
+            <ThemeSettings />
+          </SetCard>
+        </div>
+        <div className="df-set-col">
+          <SetCard
+            glyph="map-pin"
+            id="automatic-tracking"
+            note="Dayframe only logs on its own at places you trust. Anything it isn’t sure about waits in Review for you."
+            title="Automatic tracking"
+          >
+            <PlacesLocationSettings />
+          </SetCard>
+          <SetCard
+            glyph="shield"
+            id="privacy-data"
+            note="Health and precise location stay private to your account and are never used for analytics."
+            title="Privacy and data"
+          >
+            <DataPrivacySettings />
+          </SetCard>
+          <SetCard glyph="message-circle" id="help" title="Help">
+            <HelpSettings authMode={authMode} reviewCount={data.stats.reviewCount} />
+          </SetCard>
+          <SettingsSignOut />
+        </div>
       </div>
-    </>
+    </div>
+  );
+}
+
+function SettingsHead() {
+  return (
+    <div className="df-page-head">
+      <div>
+        <h1>Settings</h1>
+        <p>Your account, your day, and what Dayframe tracks for you.</p>
+      </div>
+    </div>
   );
 }
 
 function SettingsInitialLoading() {
   return (
-    <>
-      <PageHeader
-        title="Settings"
-        description="Manage how Dayframe looks, tracks goals, uses location and protects your account."
-      />
-      <div className="settings-page" aria-busy="true" aria-live="polite">
-        <section className="settings-section" aria-labelledby="settings-loading-title">
-          <header className="settings-section-header">
-            <h2 id="settings-loading-title">Loading settings</h2>
-            <p>Your preferences and account details will appear here.</p>
-          </header>
-          <div className="settings-group">
-            <div className="ui-settings-row">
-              <div>
-                <strong>Just a moment</strong>
-                <span>Dayframe is loading your settings.</span>
-              </div>
-            </div>
-          </div>
-        </section>
-      </div>
-    </>
+    <div className="df-settings-page" aria-busy="true" aria-live="polite">
+      <SettingsHead />
+      <section className="df-card df-set-account df-set-placeholder" aria-label="Loading settings">
+        <p className="df-muted">Dayframe is loading your settings.</p>
+      </section>
+    </div>
   );
 }
 
-function SettingsSection({
+function SetCard({
   children,
-  description,
+  glyph,
   id,
+  note,
   title
 }: {
   children: ReactNode;
-  description: string;
+  glyph: Parameters<typeof DayframeIcon>[0]["glyph"];
   id: string;
+  note?: string;
   title: string;
 }) {
   const titleId = `${id}-title`;
   return (
-    <section className="settings-section" aria-labelledby={titleId}>
-      <header className="settings-section-header">
-        <h2 id={titleId}>{title}</h2>
-        <p>{description}</p>
-      </header>
+    <section className="df-card df-set-card" aria-labelledby={titleId}>
+      <h2 id={titleId}>
+        <DayframeIcon glyph={glyph} size={18} />
+        {title}
+      </h2>
+      {note ? <p className="df-set-note">{note}</p> : null}
       <div className="settings-group">{children}</div>
     </section>
+  );
+}
+
+function ActivitiesSummary({ categories }: { categories: CategoryRow[] }) {
+  const pinned = categories.filter((category) => category.isPinned).length;
+  const own = categories.filter((category) => !category.starterKey).length;
+  return (
+    <>
+      <div className="ui-settings-row">
+        <div>
+          <strong>{categories.length} {categories.length === 1 ? "activity" : "activities"}</strong>
+          <span>{pinned} in quick start · {own} of your own</span>
+        </div>
+        <div className="ui-settings-row-action">
+          <Link className="df-rbtn df-rbtn--sm" href="/categories">Manage</Link>
+        </div>
+      </div>
+      <div className="df-act-strip" aria-hidden="true">
+        {categories.slice(0, 12).map((category) => (
+          <span className="df-block" key={category.id} style={blockStyle(category.color, category.name)}>
+            <DayframeIcon glyph={resolveActivityIcon({ icon: category.icon ?? null, name: category.name }).glyph} size={16} />
+          </span>
+        ))}
+      </div>
+    </>
   );
 }

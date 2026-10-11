@@ -7,7 +7,6 @@ import {
   ChevronDown,
   Download,
   Folder,
-  LogOut,
   MapPin,
   Pencil,
   Plus,
@@ -25,6 +24,8 @@ import {
   TextField
 } from "@/components/ui/Primitives";
 import { clientFetch } from "@/lib/client-auth-fetch";
+import { OPEN_SHORTCUTS_EVENT } from "@/lib/shell-nav";
+import { beforeSessionChange } from "@/lib/session-change";
 
 type SettingsAuthMode = "dev" | "local" | "provider" | "token";
 
@@ -51,6 +52,8 @@ export function AccountSettings({
   const [newPassword, setNewPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   const [busyAction, setBusyAction] = useState<string | null>(null);
+  // The account card's dialogs: Edit profile, Switch workspace, Change password.
+  const [dialog, setDialog] = useState<"profile" | "workspace" | "password" | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -88,6 +91,7 @@ export function AccountSettings({
       });
       if (!response.ok) throw new Error(await safeResponseMessage(response, "Unable to save your profile."));
       setMessage("Profile saved.");
+      setDialog(null);
       await refreshAccount();
     });
   }
@@ -120,6 +124,8 @@ export function AccountSettings({
       return;
     }
     void run("create-workspace", async () => {
+      // The new workspace becomes the current one: held Review decisions save first.
+      await beforeSessionChange();
       const response = await clientFetch("/api/workspaces", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -135,6 +141,8 @@ export function AccountSettings({
 
   function switchWorkspace(workspaceId: string, nextWorkspaceName: string) {
     void run("switch-workspace", async () => {
+      // Held Review decisions are saved under the workspace they were made in.
+      await beforeSessionChange();
       const response = await clientFetch("/api/workspace/switch", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -168,17 +176,48 @@ export function AccountSettings({
       setNewPassword("");
       setConfirmPassword("");
       setMessage("Password changed.");
+      setDialog(null);
     });
   }
 
+  const canChangePassword = authMode === "local" || authMode === "provider";
+  const closeDialog = () => {
+    if (busyAction) return;
+    setDialog(null);
+    setError(null);
+    setWorkspaceAction(null);
+  };
+  const dialogError = dialog && error ? <p className="settings-section-feedback is-error" role="alert">{error}</p> : null;
+
   return (
-    <>
-      <SettingsRow
-        icon={UserRound}
-        label="Profile"
-        detail={user.email}
-        action={(
-          <form className="settings-inline-form" onSubmit={saveProfile}>
+    <section className="df-card df-set-account" aria-label="Account" id="account">
+      <span className="df-av-lg" aria-hidden="true">{initials(user.name)}</span>
+      <span className="df-set-id">
+        <b>{user.name}</b>
+        <small>{user.email} · {workspace.name}</small>
+      </span>
+      <span className="df-set-acts">
+        <button className="df-rbtn df-rbtn--sm" onClick={() => setDialog("profile")} type="button">
+          <UserRound aria-hidden="true" size={15} />
+          Edit profile
+        </button>
+        <button className="df-rbtn df-rbtn--sm" onClick={() => setDialog("workspace")} type="button">
+          <Folder aria-hidden="true" size={15} />
+          {workspaces.length > 1 ? "Switch workspace" : "Workspace"}
+        </button>
+        {canChangePassword ? (
+          <button className="df-rbtn df-rbtn--sm df-rbtn--ghost" onClick={() => setDialog("password")} type="button">
+            <ShieldCheck aria-hidden="true" size={15} />
+            Change password
+          </button>
+        ) : null}
+      </span>
+      {message && !dialog ? <p className="settings-section-feedback df-set-feedback" role="status">{message}</p> : null}
+      {error && !dialog ? <p className="settings-section-feedback is-error df-set-feedback" role="alert">{error}</p> : null}
+
+      {dialog === "profile" ? (
+        <ModalDialog busy={busyAction === "profile"} description={user.email} onClose={closeDialog} title="Edit profile">
+          <form className="settings-inline-form df-set-dialog-form" onSubmit={saveProfile}>
             <TextField
               compact
               id="settings-profile-name"
@@ -192,13 +231,12 @@ export function AccountSettings({
               {busyAction === "profile" ? "Saving…" : "Save profile"}
             </Button>
           </form>
-        )}
-      />
-      <SettingsRow
-        icon={Folder}
-        label="Workspace"
-        detail={`Currently using ${workspace.name}`}
-        action={(
+          {dialogError}
+        </ModalDialog>
+      ) : null}
+
+      {dialog === "workspace" ? (
+        <ModalDialog busy={Boolean(busyAction)} description={`Currently using ${workspace.name}`} onClose={closeDialog} title="Workspace">
           <div className="settings-workspace-actions">
             <div className="settings-workspace-toolbar">
               <label className="settings-workspace-select">
@@ -269,15 +307,15 @@ export function AccountSettings({
               </Button>
               <Button compact type="button" onClick={() => setWorkspaceAction(null)}>Cancel</Button>
             </form> : null}
+            {message ? <p className="settings-section-feedback" role="status">{message}</p> : null}
+            {dialogError}
           </div>
-        )}
-      />
-      <SettingsRow
-        icon={ShieldCheck}
-        label="Security"
-        detail={securitySummary(authMode)}
-        action={authMode === "local" || authMode === "provider" ? (
-          <form className="settings-security-form" onSubmit={changePassword}>
+        </ModalDialog>
+      ) : null}
+
+      {dialog === "password" && canChangePassword ? (
+        <ModalDialog busy={busyAction === "password"} description={securitySummary(authMode)} onClose={closeDialog} title="Change password">
+          <form className="settings-security-form df-set-dialog-form" onSubmit={changePassword}>
             <TextField
               compact
               autoComplete="current-password"
@@ -314,18 +352,17 @@ export function AccountSettings({
               {busyAction === "password" ? "Saving…" : "Change password"}
             </Button>
           </form>
-        ) : undefined}
-      />
-      <SettingsRow
-        icon={LogOut}
-        label="Sign out"
-        detail="End this Dayframe session on this browser."
-        action={<SignOutControl className="ui-button ui-button-secondary" />}
-      />
-      {message ? <p className="settings-section-feedback" role="status">{message}</p> : null}
-      {error ? <p className="settings-section-feedback is-error" role="alert">{error}</p> : null}
-    </>
+          {dialogError}
+        </ModalDialog>
+      ) : null}
+    </section>
   );
+}
+
+function initials(name: string) {
+  const parts = name.trim().split(/\s+/).filter(Boolean);
+  const letters = parts.length > 1 ? `${parts[0][0]}${parts[parts.length - 1][0]}` : (parts[0] ?? "?").slice(0, 2);
+  return letters.toUpperCase();
 }
 
 export function PlacesLocationSettings() {
@@ -333,9 +370,9 @@ export function PlacesLocationSettings() {
     <>
       <SettingsRow
         icon={MapPin}
-        label="Places"
-        detail="Manage saved places and the visit suggestions attached to them."
-        action={<Link className="ui-button ui-button-secondary" href="/places">Manage places</Link>}
+        label="Saved places"
+        detail="Places Dayframe recognises, and whether visits there are suggested."
+        action={<Link className="df-rbtn df-rbtn--sm" href="/places">Manage</Link>}
       />
       <SettingsRow
         label="Suggest visits"
@@ -468,20 +505,38 @@ export function DataPrivacySettings() {
   );
 }
 
-export function TroubleshootingSettings({ authMode }: { authMode: SettingsAuthMode }) {
+/** Settings › Help: Review, keyboard shortcuts, and what to try when something looks wrong. */
+export function HelpSettings({ authMode, reviewCount }: { authMode: SettingsAuthMode; reviewCount: number }) {
   return (
-    <Disclosure summary="Privacy and troubleshooting">
-      <div className="settings-troubleshooting-copy">
-        <p>{securitySummary(authMode)}</p>
-        <p>Recent raw location evidence is private and normally deleted after seven days.</p>
-        <p>If Dayframe looks out of date, refresh this page. If that does not help, log out and sign in again.</p>
-        <div className="settings-troubleshooting-actions">
-          <SignOutControl className="ui-button ui-button-secondary" />
-          <Link className="ui-button ui-button-ghost" href="/review">Open Review</Link>
+    <>
+      <SettingsRow
+        label="Review"
+        detail={reviewCount === 0 ? "Nothing waiting." : `${reviewCount} ${reviewCount === 1 ? "moment" : "moments"} waiting.`}
+        action={<Link className="df-rbtn df-rbtn--sm" href="/review">Open Review</Link>}
+      />
+      <SettingsRow
+        label="Keyboard shortcuts"
+        detail="Start, stop, jump between pages and more."
+        action={(
+          <button className="df-rbtn df-rbtn--sm" onClick={() => window.dispatchEvent(new Event(OPEN_SHORTCUTS_EVENT))} type="button">
+            Show
+          </button>
+        )}
+      />
+      <Disclosure summary="Something not right?">
+        <div className="settings-troubleshooting-copy">
+          <p>{securitySummary(authMode)}</p>
+          <p>Recent raw location evidence is private and normally deleted after seven days.</p>
+          <p>If Dayframe looks out of date, refresh this page. If that does not help, sign out and sign in again.</p>
         </div>
-      </div>
-    </Disclosure>
+      </Disclosure>
+    </>
   );
+}
+
+/** The page's own Sign out, under the cards (the profile menu has another). */
+export function SettingsSignOut() {
+  return <SignOutControl className="df-rbtn df-set-signout" showIcon />;
 }
 
 function permissionCopy(state: PermissionState) {

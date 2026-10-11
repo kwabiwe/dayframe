@@ -25,6 +25,7 @@ import { hasOpenDialog, isTypingTarget } from "@/lib/keyboard-ownership";
 import {
   GO_TO_SEQUENCE_MS,
   activeShellSection,
+  OPEN_SHORTCUTS_EVENT,
   goToTarget,
   startsGoToSequence
 } from "@/lib/shell-nav";
@@ -146,6 +147,12 @@ function AppShellContent({ children }: { children: ReactNode }) {
       );
     }
   }, [loadDate, pathname, searchParams, timelineState]);
+
+  useEffect(() => {
+    const openShortcuts = () => setOverlay("help");
+    window.addEventListener(OPEN_SHORTCUTS_EVENT, openShortcuts);
+    return () => window.removeEventListener(OPEN_SHORTCUTS_EVENT, openShortcuts);
+  }, []);
 
   useEffect(() => {
     function handleKeydown(event: KeyboardEvent) {
