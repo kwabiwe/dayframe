@@ -61,10 +61,10 @@ describe("grouped Timeline and Settings follow-up contracts", () => {
   });
 
   it("keeps settings actions uniform and password changes available in provider mode", () => {
-    expect(goals).toContain("settings-save-row-goals");
+    // Goals are steppers that save on change (UIA-309): no Save button.
+    expect(goals).toContain("<GoalStepper");
+    expect(goals).not.toContain('type="submit"');
     expect(settings).toContain('authMode === "local" || authMode === "provider"');
-    expect(styles).toMatch(/\.settings-save-row-goals \{[^}]*justify-content: flex-end;/s);
-    expect(styles).toMatch(/\.settings-save-row-goals \.ui-button \{[^}]*min-width: 104px;/s);
     // Shell navigation keeps the shared neutral link focus ring rather than its own.
     expect(styles).not.toMatch(/\.df-(nav|tabbar|library-tabs) a:focus-visible/);
   });

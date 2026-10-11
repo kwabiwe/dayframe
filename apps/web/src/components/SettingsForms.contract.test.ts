@@ -29,8 +29,11 @@ const errorSource = readFileSync(
 );
 
 describe("web Settings contracts", () => {
-  it("uses the shared Appearance segmented control with persisted System, Light and Dark choices", () => {
+  it("uses the shared Appearance segmented control: Midnight · Daylight · System, persisted (D1, UIA-310)", () => {
     expect(themeSource).toContain("SegmentedControl");
+    const order = ['label: "Midnight"', 'label: "Daylight"', 'label: "System"'].map((label) => themeSource.indexOf(label));
+    expect(order.every((index) => index > -1)).toBe(true);
+    expect([...order].sort((a, b) => a - b)).toEqual(order);
     expect(themeSource).toContain('label="Appearance"');
     expect(themeSource).toContain('value: "system"');
     expect(themeSource).toContain('value: "light"');
@@ -62,10 +65,25 @@ describe("web Settings contracts", () => {
     expect(profilePopover).not.toContain("createWorkspace");
   });
 
-  it("shows password controls for Dayframe email/password modes and reads browser permission without prompting", () => {
+  it("shows password controls for Dayframe email/password modes and never asks for location in Settings", () => {
     expect(settingsFormsSource).toContain('authMode === "local" || authMode === "provider"');
-    expect(settingsFormsSource).toContain('navigator.permissions.query({ name: "geolocation" })');
     expect(settingsFormsSource).not.toContain("navigator.geolocation.getCurrentPosition");
+    // UIA-312: no text-only rows; the notes live in the section's description.
+    expect(settingsFormsSource).not.toContain('label="Suggest visits"');
+    expect(settingsFormsSource).not.toContain('label="Location access"');
+  });
+
+  it("offers one Export with the other files in a small menu (UIA-312)", () => {
+    expect(settingsFormsSource).toContain('href="/api/export?kind=workspace_json" download>Export</a>');
+    expect(settingsFormsSource).toContain('aria-label="More export formats"');
+    expect(settingsFormsSource).toContain("/api/export?kind=time_entries_csv");
+    expect(settingsFormsSource).toContain("/api/export?kind=activity_events_json");
+  });
+
+  it("hides keyboard shortcuts on touch-only devices (UIA-313)", () => {
+    expect(settingsFormsSource).toContain('className="df-shortcuts-row"');
+    expect(readFileSync(new URL("../app/globals.css", import.meta.url), "utf8"))
+      .toMatch(/@media \(hover: none\) and \(pointer: coarse\) \{\s*\.df-shortcuts-row,\s*\.df-side-shortcuts \{\s*display: none;/);
   });
 
   it("converts compact hour and minute controls to the existing minute contract", () => {
