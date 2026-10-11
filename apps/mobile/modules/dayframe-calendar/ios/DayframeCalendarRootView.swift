@@ -498,6 +498,12 @@ private struct DayframeCalendarEntriesLayer: View {
             .frame(height: semanticHeight, alignment: .top)
             .offset(y: CGFloat(vertical.visualOffsetWithinHitTarget))
             .frame(height: hitHeight, alignment: .top)
+            // Only horizontal lane geometry animates (DayframeCalendarHorizontalGeometry): the
+            // block's own heights, offsets and hit height always settle at once, even when a lane
+            // change starts the width animation in the same update.
+            .transaction { transaction in
+              transaction.animation = nil
+            }
           }
           .buttonStyle(.plain)
           .contentShape(Rectangle())
