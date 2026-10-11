@@ -250,10 +250,13 @@ function PasswordResetRequest({ initialEmail, onBack }: { initialEmail: string; 
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const headingRef = useRef<HTMLHeadingElement | null>(null);
-  // The card replaces Log in: focus moves to its heading (instant swap, nothing animates).
+  // The card replaces Log in: focus moves to its heading (instant swap, nothing animates), and
+  // back there once the sent reply replaces the Send button.
   useEffect(() => {
-    headingRef.current?.focus();
-  }, []);
+    if (status === "idle" || status === "sent") headingRef.current?.focus();
+    // On mount and once sent; an error keeps focus where it is (the alert announces it).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [status === "sent"]);
 
   async function send(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();

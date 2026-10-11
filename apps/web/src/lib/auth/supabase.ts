@@ -4,6 +4,7 @@ import {
   LoginInputSchema,
   SignupInputSchema,
   createSession,
+  databaseNow,
   normalizeEmail,
   seedDefaultWorkspaceData,
   toAuthPayload,
@@ -73,6 +74,8 @@ export async function loginSupabaseAccount(input: unknown, userAgent?: string | 
   const parsed = LoginInputSchema.parse(input);
   const email = normalizeEmail(parsed.email);
   const supabase = createSupabaseAuthClient();
+  // Taken before the password check: a reset since then refuses this sign-in (createSession).
+  const authenticatedAt = await databaseNow();
   const { data, error } = await supabase.auth.signInWithPassword({
     email,
     password: parsed.password
@@ -89,7 +92,7 @@ export async function loginSupabaseAccount(input: unknown, userAgent?: string | 
     workspaceName: stringMetadata(metadata.workspace_name) ?? "My Dayframe"
   });
 
-  return createProviderAppSession(account.user, account.workspace, userAgent);
+  return createProviderAppSession(account.user, account.workspace, userAgent, authenticatedAt);
 }
 
 export async function changeSupabasePassword(
@@ -135,21 +138,41 @@ export async function completeSupabasePasswordReset(input: { accessToken: string
   const userId = data.user.id;
   // Dayframe sign-ins end before the password changes: if this fails, nothing has changed and the
   // same link can be used again.
-  await revokeDayframeSessions(userId);
+  await endDayframeSignIns(userId);
   const { error: updateError } = await supabase.auth.updateUser({ password: input.password });
-  if (updateError) throw new AuthError(updateError.message, authStatus(updateError.status));
-  // Once more after the change, for a sign-in with the old password that was already under way.
-  await revokeDayframeSessions(userId).catch(() => {
-    console.error("Dayframe sessions not revoked after a password reset");
-  });
-  // Dayframe never accepts Supabase sessions for its own access (sign-in issues Dayframe sessions),
-  // so the recovery session ending is tidy-up: a failure is reported, not fatal.
-  const { error: signOutError } = await supabase.auth.signOut({ scope: "global" }).catch(() => ({ error: new Error("sign-out failed") }));
-  if (signOutError) console.error("Supabase sessions not signed out after a password reset");
+  // A retry after a later step failed: the password is already this one; carry on.
+  if (updateError && (updateError as { code?: string }).code !== "same_password") {
+    throw new AuthError(updateError.message, authStatus(updateError.status));
+  }
+  // Again after the change: no sign-in that checked the old password can start a session now
+  // (createSession refuses one authenticated before this), and any made meanwhile are revoked.
+  await endDayframeSignIns(userId);
+  // The recovery session itself must end too, or its tokens could change the password again. A
+  // failure is reported so the page can try again with the same link (each step above repeats safely).
+  const { error: signOutError } = await supabase.auth.signOut({ scope: "global" })
+    .catch(() => ({ error: new Error("sign-out failed") }));
+  if (signOutError) {
+    throw new AuthError("Your password is changed, but signing you out everywhere didn't finish. Try again.", 502);
+  }
 }
 
-async function revokeDayframeSessions(userId: string) {
-  await pool.query("update auth_sessions set revoked_at = now() where user_id = $1 and revoked_at is null", [userId]);
+/**
+ * Ends every Dayframe sign-in for a user and refuses any sign-in authenticated before now, in one
+ * transaction: the user row's lock orders it against createSession.
+ */
+async function endDayframeSignIns(userId: string) {
+  const client = await pool.connect();
+  try {
+    await client.query("begin");
+    await client.query("update users set sessions_valid_after = now() where id = $1", [userId]);
+    await client.query("update auth_sessions set revoked_at = now() where user_id = $1 and revoked_at is null", [userId]);
+    await client.query("commit");
+  } catch (error) {
+    await client.query("rollback").catch(() => undefined);
+    throw error;
+  } finally {
+    client.release();
+  }
 }
 
 export function getSupabaseProviderEnvStatus() {
@@ -169,11 +192,12 @@ export function getSupabaseProviderEnvStatus() {
 async function createProviderAppSession(
   user: UserRow,
   workspace: WorkspaceRow,
-  userAgent?: string | null
+  userAgent?: string | null,
+  authenticatedAt?: Date
 ) {
   const client = await pool.connect();
   try {
-    const session = await createSession(client, user.id, workspace.id, userAgent);
+    const session = await createSession(client, user.id, workspace.id, userAgent, authenticatedAt);
     return toAuthPayload(session.token, session.expiresAt, user, workspace);
   } finally {
     client.release();

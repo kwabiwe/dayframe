@@ -308,17 +308,38 @@ export async function createSession(
   client: pg.PoolClient,
   userId: string,
   workspaceId: string,
-  userAgent?: string | null
+  userAgent?: string | null,
+  /**
+   * When the password was checked (database time). A password reset since then
+   * (`users.sessions_valid_after`) refuses the session: the user row is locked first, so a reset
+   * either sees this session and revokes it, or this insert sees the reset (UIA-317).
+   */
+  authenticatedAt?: Date
 ) {
   const token = generateSessionToken();
   const expiresAt = new Date(Date.now() + APP_SESSION_TTL_SECONDS * 1000);
-  await client.query(
-    `insert into auth_sessions (user_id, workspace_id, token_hash, expires_at, user_agent, last_used_at)
-     values ($1, $2, $3, $4, $5, now())`,
-    [userId, workspaceId, hashSessionToken(token), expiresAt, userAgent ?? null]
+  const inserted = await client.query(
+    `with signer as (
+       select id from users
+       where id = $1
+         and ($6::timestamptz is null or sessions_valid_after is null or sessions_valid_after < $6::timestamptz)
+       for share
+     )
+     insert into auth_sessions (user_id, workspace_id, token_hash, expires_at, user_agent, last_used_at)
+     select $1, $2, $3, $4, $5, now() from signer`,
+    [userId, workspaceId, hashSessionToken(token), expiresAt, userAgent ?? null, authenticatedAt ?? null]
   );
+  if (inserted.rowCount === 0) {
+    throw new AuthError("Your password was just changed. Log in with the new one.", 401);
+  }
 
   return { token, expiresAt };
+}
+
+/** The database's time, for `createSession`'s authenticatedAt (taken before the password check). */
+export async function databaseNow(client: Pick<pg.PoolClient, "query"> = pool) {
+  const result = await client.query<{ at: Date }>("select now() as at");
+  return result.rows[0]?.at;
 }
 
 export async function getDefaultWorkspaceForUser(userId: string) {
