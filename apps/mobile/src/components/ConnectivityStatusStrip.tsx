@@ -85,7 +85,7 @@ export function ConnectivityStatusProvider({ children }: { children: ReactNode }
     announcedAttention.current = { accountKey: durableWork.accountKey, ids: current };
     if (sameAccount && [...current].some((id) => !previous.ids.has(id))) {
       AccessibilityInfo.announceForAccessibility(
-        "A change couldn't be saved. Open Sync help from the account button."
+        "A change couldn't be saved. Open Settings › Sync help."
       );
     }
   }, [attentionKey, durableWork.accountKey]);

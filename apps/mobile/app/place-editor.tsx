@@ -428,7 +428,7 @@ export default function PlaceEditorScreen() {
     confirmSheet.confirm({
       eyebrow: "Place",
       title: `Delete ${placeDisplayName(withRole(place))}?`,
-      message: "Past entries keep their time but lose this place.",
+      message: "Past blocks keep their time but lose this place.",
       confirmLabel: "Delete",
       confirmHint: "This can't be undone.",
       // removePlace re-checks saveInFlight, so a save started meanwhile still wins.
@@ -734,13 +734,13 @@ export default function PlaceEditorScreen() {
             {newRole && roleHolder ? (
               <Reanimated.View layout={localLayoutTransition(reduceMotion)}>
                 <SettingsBlockGroup
-                  foot={`${placeRoleLabel(newRole)} moves to this new place. The old one keeps its entries under this name.`}
+                  foot={`${placeRoleLabel(newRole)} moves to this new place. The old one keeps its blocks under this name.`}
                   theme={theme}
                   title={`Old ${placeRoleLabel(newRole).toLowerCase()}`}
                 >
                   <TextInput
                     {...mobileTextProps("input")}
-                    accessibilityHint="Its past entries keep this name. Leave it blank to keep the current name."
+                    accessibilityHint="Its past blocks keep this name. Leave it blank to keep the current name."
                     accessibilityLabel={`Rename the old ${placeRoleLabel(newRole).toLowerCase()}`}
                     maxLength={120}
                     onChangeText={setPreviousRoleName}

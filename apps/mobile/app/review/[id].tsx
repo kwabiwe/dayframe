@@ -425,7 +425,7 @@ export default function LocationReviewDetailScreen() {
       }
       setActionMessage(
         actionError instanceof LocationReviewDraftError ? actionError.message : durableAction
-          ? "This Review change was not saved on this iPhone. Your edits are still here."
+          ? "This Review choice wasn’t saved on this iPhone. Your edits are still here."
           : normaliseLocationReviewRequestError(actionError, "action")
       );
     } finally {

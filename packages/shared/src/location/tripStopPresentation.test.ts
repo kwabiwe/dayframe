@@ -16,8 +16,8 @@ describe("trip stop presentation", () => {
       { startedAt: "2026-10-04T12:22:17.000Z", stoppedAt: "2026-10-04T12:28:15.000Z", durationSeconds: 358, approximate: false }
     ], time);
     expect(rows).toEqual([
-      { key: "2026-10-04T12:22:17.000Z-2026-10-04T12:28:15.000Z", label: "Stopped 12:22–12:28 · 6m",
-        accessibilityLabel: "Stopped from 12:22 to 12:28, 6 minutes" },
+      { key: "2026-10-04T12:22:17.000Z-2026-10-04T12:28:15.000Z", label: "Stopped 12:22–12:28 · 5m",
+        accessibilityLabel: "Stopped from 12:22 to 12:28, 5 minutes" },
       { key: "2026-10-04T12:40:00.000Z-2026-10-04T13:45:00.000Z", label: "Stopped about 12:40–13:45 · 1h 5m",
         accessibilityLabel: "Stopped from about 12:40 to 13:45, 65 minutes, approximate" }
     ]);
@@ -25,8 +25,9 @@ describe("trip stop presentation", () => {
     expect(tripStopsHeading([rows[0], rows[1]] as never)).toBe("2 stops on this trip");
   });
 
-  it("never shows a zero-minute stop", () => {
-    expect(tripStopRows([{ startedAt: "2026-10-04T12:00:00.000Z", stoppedAt: "2026-10-04T12:00:20.000Z", durationSeconds: 20, approximate: false }], time)[0].label)
-      .toBe("Stopped 12:00–12:00 · 1m");
+  it("writes durations as everywhere else: whole minutes, \"<1m\" under a minute (UIA-042)", () => {
+    const [row] = tripStopRows([{ startedAt: "2026-10-04T12:00:00.000Z", stoppedAt: "2026-10-04T12:00:20.000Z", durationSeconds: 20, approximate: false }], time);
+    expect(row.label).toBe("Stopped 12:00–12:00 · <1m");
+    expect(row.accessibilityLabel).toBe("Stopped from 12:00 to 12:00, less than a minute");
   });
 });

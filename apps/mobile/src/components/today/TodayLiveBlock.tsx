@@ -118,7 +118,7 @@ export function TodayLiveBlock({
       />
       <Pressable
         accessibilityActions={active.hasLiveActiveTimer ? [{ name: "switch", label: "Switch" }] : undefined}
-        accessibilityLabel="Edit running timer"
+        accessibilityLabel="Edit running block"
         accessibilityRole="button"
         onAccessibilityAction={(event) => {
           if (event.nativeEvent.actionName === "switch" && active.hasLiveActiveTimer) onSwitch();
@@ -196,7 +196,7 @@ export function TodayLiveBlock({
           <DayframeIcon color={colors.text} glyph={DAYFRAME_APP_ICONS.add} size={20} />
         </Pressable>
         <Pressable
-          accessibilityLabel="Stop current timer"
+          accessibilityLabel="Stop recording"
           accessibilityRole="button"
           onPress={(event: GestureResponderEvent) => {
             event.stopPropagation();

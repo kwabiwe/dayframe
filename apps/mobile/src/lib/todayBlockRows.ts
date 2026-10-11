@@ -1,3 +1,4 @@
+import { formatDuration } from "@dayframe/shared";
 import type { HistoryEntryGroup } from "./historyPresentation";
 import { displayTimerDescription } from "./timerPresentation";
 
@@ -37,7 +38,7 @@ export function rowMeta(group: HistoryEntryGroup, nowMs: number) {
   const { entry } = group.representative;
   return [
     rowTimeRange(entry, nowMs),
-    group.entries.length > 1 ? `${group.entries.length} entries` : null,
+    group.entries.length > 1 ? `${group.entries.length} blocks` : null,
     entry.categoryName ?? null,
   ].filter(Boolean).join(" · ");
 }
@@ -52,20 +53,16 @@ export function rowSpokenLabel(group: HistoryEntryGroup, nowMs: number, { omitCo
   return [
     rowTitle(entry),
     `${clock(entry.startedAt, nowMs)} to ${entry.stoppedAt ? clock(entry.stoppedAt, nowMs) : "now"}`,
-    group.entries.length > 1 && !omitCount ? `${group.entries.length} entries` : null,
+    group.entries.length > 1 && !omitCount ? `${group.entries.length} blocks` : null,
     entry.categoryName ?? null,
     entry.placeName ? `at ${entry.placeName}` : null,
     tags.length ? `tags: ${tags.join(", ")}` : null,
   ].filter(Boolean).join(", ");
 }
 
-/** "4h 12m", "35m" or "0m". */
+/** "4h 12m", "35m", "<1m" or "0m" (the shared `formatDuration`). */
 export function rowDuration(seconds: number) {
-  const minutes = Math.floor(Math.max(0, seconds) / 60);
-  const hours = Math.floor(minutes / 60);
-  if (!hours) return `${minutes}m`;
-  const rest = minutes % 60;
-  return rest ? `${hours}h ${rest}m` : `${hours}h`;
+  return formatDuration(seconds);
 }
 
 /** A row can start again only with something to start: an activity or a description. */

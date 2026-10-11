@@ -1394,9 +1394,9 @@ export function ActiveTimerEditSheet({
   const canStop = isRunningMode && Boolean(onStop);
   const canDelete = Boolean(onDelete);
   const showDeleteButton = canDelete || isAddMode;
-  const cancelLabel = isRunningMode ? "Cancel editing timer" : isAddMode ? "Cancel adding time" : "Cancel editing entry";
-  const saveLabel = isRunningMode ? "Save timer edits" : isAddMode ? "Create time entry" : "Save entry edits";
-  const sheetTitle = isAddMode ? "Add time" : "Edit entry";
+  const cancelLabel = isRunningMode ? "Cancel editing block" : isAddMode ? "Cancel adding time" : "Cancel editing block";
+  const saveLabel = isRunningMode ? "Save block" : isAddMode ? "Add block" : "Save block";
+  const sheetTitle = isAddMode ? "Add time" : "Edit block";
   // The prototype's sheet head: an eyebrow and a title above the form, Done on the right.
   // A stopped block's eyebrow names the day it was saved on, not a start date being edited.
   const headEyebrow = isRunningMode ? "RECORDING" : isAddMode ? "ADD PAST TIME" : formatSheetDay(new Date(entry?.startedAt ?? draftStartMs));
@@ -1726,11 +1726,11 @@ export function ActiveTimerEditSheet({
       return;
     }
     if (isRunningMode && parsed.date.getTime() > Date.now() - TIME_ENTRY_DIAL_MIN_DURATION_MS) {
-      setValidationError("A running timer must start at least one second before now.");
+      setValidationError("A running block must start at least one second before now.");
       return;
     }
     if (isRunningMode && Date.now() - parsed.date.getTime() > TIME_ENTRY_DIAL_MAX_DURATION_MS) {
-      setValidationError("Timers can be no longer than 24 hours.");
+      setValidationError("A block can be no longer than 24 hours.");
       return;
     }
 
@@ -1755,7 +1755,7 @@ export function ActiveTimerEditSheet({
         return;
       }
       if (stopped.date.getTime() - parsed.date.getTime() > TIME_ENTRY_DIAL_MAX_DURATION_MS) {
-        setValidationError("Entries can be no longer than 24 hours.");
+        setValidationError("A block can be no longer than 24 hours.");
         return;
       }
       patch.stoppedAt = stopped.date.toISOString();
@@ -2236,7 +2236,7 @@ export function ActiveTimerEditSheet({
           <SafeAreaView edges={[]} pointerEvents="box-none" style={styles.sheetSafeArea}>
             <SwipeDismissSheet
               ref={sheetRef}
-              accessibilityLabel={isRunningMode ? "Edit timer" : sheetTitle}
+              accessibilityLabel={isRunningMode ? "Edit block" : sheetTitle}
               backdropAccessibilityLabel={cancelLabel}
               backdropStyle={styles.sheetBackdrop}
               disabled={busy || datePickerOpen || datePickerDismissGuarded}
@@ -2402,7 +2402,7 @@ export function ActiveTimerEditSheet({
                       ref={descriptionInputRef}
                       {...mobileTextProps("input")}
                       accessibilityHint="Type a hashtag to add optional tag context"
-                      accessibilityLabel={isRunningMode ? "Timer description" : "Entry description"}
+                      accessibilityLabel={isRunningMode ? "Block description" : "Block description"}
                       blurOnSubmit
                       editable={!busy}
                       onBlur={() => {
@@ -2574,7 +2574,7 @@ export function ActiveTimerEditSheet({
                   >
                     {appliedTagNames.map((tagName, index) => (
                       <Pressable
-                        accessibilityHint="Removes this tag from the draft; save the entry to confirm"
+                        accessibilityHint="Removes this tag from the draft; save the block to confirm"
                         accessibilityLabel={`Remove tag ${tagName}`}
                         accessibilityRole="button"
                         disabled={busy}
@@ -2602,7 +2602,7 @@ export function ActiveTimerEditSheet({
                       </Pressable>
                     ))}
                     <Pressable
-                      accessibilityHint="Focuses Description and starts tag entry"
+                      accessibilityHint="Focuses Description and starts adding a tag"
                       accessibilityLabel="Add a tag"
                       accessibilityRole="button"
                       disabled={busy}
@@ -2860,7 +2860,7 @@ export function ActiveTimerEditSheet({
                   <View style={sheetStyles.actions} testID="time-entry-sheet-actions">
                     {showDeleteButton ? (
                       <Pressable
-                        accessibilityLabel={isRunningMode ? "Discard timer" : isAddMode ? "Discard" : "Delete entry"}
+                        accessibilityLabel={isRunningMode ? "Discard block" : isAddMode ? "Discard" : "Delete block"}
                         accessibilityRole="button"
                         disabled={busy}
                         onPress={() => {
@@ -2883,7 +2883,7 @@ export function ActiveTimerEditSheet({
                     ) : null}
                     {canStop ? (
                       <Pressable
-                        accessibilityLabel="Stop timer from edit sheet"
+                        accessibilityLabel="Stop recording"
                         accessibilityRole="button"
                         disabled={busy}
                         onPress={stopFromSheet}

@@ -1206,7 +1206,7 @@ export default function SettingsScreen() {
     void confirmForSession({
       eyebrow: "Sync help",
       title: "Discard this Stop?",
-      message: "The timer stays as your account has it. Only this Stop is removed from this iPhone.",
+      message: "The block stays as your account has it. Only this Stop is removed from this iPhone.",
       confirmLabel: "Discard Stop",
       confirmHint: "This can't be undone.",
       onConfirm: () => {
@@ -2320,13 +2320,13 @@ export default function SettingsScreen() {
                 >
                   {timerStopSyncIssues.map((issue, index) => (
                     <SettingsIssueRow
-                      detail={`Stopped ${formatQueueTime(issue.failedAt ?? issue.queuedAt)}. Dayframe couldn't save the Stop, so your account still shows the timer running.`}
+                      detail={`Stopped ${formatQueueTime(issue.failedAt ?? issue.queuedAt)}. Dayframe couldn't save the Stop, so your account still shows the block running.`}
                       divider={index > 0}
                       key={issue.clientEventId}
                       theme={theme}
-                      title="Couldn't stop the timer"
+                      title="Couldn't stop the block"
                     >
-                      <SettingsPillButton accessibilityLabel="Try stopping the timer again" label="Try again" onPress={() => retryTimerStopIssue(issue.clientEventId)} theme={theme} />
+                      <SettingsPillButton accessibilityLabel="Try stopping the block again" label="Try again" onPress={() => retryTimerStopIssue(issue.clientEventId)} theme={theme} />
                       <SettingsPillButton accessibilityLabel="Discard this Stop" danger label="Discard" onPress={() => confirmDiscardTimerStopIssue(issue.clientEventId)} theme={theme} />
                     </SettingsIssueRow>
                   ))}

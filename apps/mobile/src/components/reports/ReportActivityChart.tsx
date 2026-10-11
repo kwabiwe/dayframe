@@ -10,8 +10,8 @@ import Animated, {
 } from "react-native-reanimated";
 import type { MobileTheme } from "@/lib/mobileTheme";
 import { MOBILE_MOTION } from "@/lib/motion";
+import { formatDuration } from "@dayframe/shared";
 import {
-  formatReportDuration,
   spokenReportDuration,
   reportAxis,
 } from "@/lib/reportsPresentation";
@@ -300,7 +300,7 @@ function ReportTooltip({
           accessibilityLabel={`${bucket.fullLabel}, ${spokenReportDuration(bucket.seconds)}`}
           style={{ color: theme.textPrimary, fontSize: 14 }}
         >
-          {bucket.fullLabel}: {formatReportDuration(bucket.seconds)}
+          {bucket.fullLabel}: {formatDuration(bucket.seconds)}
         </Text>
       </ScrollView>
       <View style={s.actions}>

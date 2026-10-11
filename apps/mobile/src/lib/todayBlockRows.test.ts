@@ -39,7 +39,7 @@ describe("today block rows", () => {
 
   it("puts time, repeat count and activity on one line", () => {
     expect(rowMeta(group(entry("a", at(8), at(9))), day)).toBe("08:00–09:00 · Focus");
-    expect(rowMeta(group(entry("a", at(8), at(9)), entry("b", at(10), at(11))), day)).toBe("08:00–09:00 · 2 entries · Focus");
+    expect(rowMeta(group(entry("a", at(8), at(9)), entry("b", at(10), at(11))), day)).toBe("08:00–09:00 · 2 blocks · Focus");
     expect(rowMeta(group(entry("a", at(8), at(9), { categoryName: null, categoryId: null })), day)).toBe("08:00–09:00");
   });
 
@@ -50,7 +50,8 @@ describe("today block rows", () => {
   });
 
   it("formats durations and the caption", () => {
-    expect(rowDuration(59)).toBe("0m");
+    expect(rowDuration(59)).toBe("<1m");
+    expect(rowDuration(0)).toBe("0m");
     expect(rowDuration(107 * 60)).toBe("1h 47m");
     expect(rowDuration(2 * 3600)).toBe("2h");
     expect(todayBlocksCaption([group(entry("a", at(8), at(9)), entry("b", at(10), at(11))), group(entry("c", at(12), at(13)))])).toBe("3 · swipe a row");
@@ -62,7 +63,7 @@ describe("today block rows", () => {
     expect(rowSpokenLabel(a, day)).toBe("Deep work, 09:00 to 10:00, Focus, at Place A, tags: legs");
     expect(rowSpokenLabel(b, day)).toBe("Deep work, 09:00 to 10:00, Focus, at Place B");
     expect(rowSpokenLabel(group(entry("c", at(9), null)), day + 11 * 3_600_000)).toBe("Deep work, 09:00 to now, Focus");
-    expect(rowSpokenLabel(group(entry("d", at(8), at(9)), entry("e", at(10), at(11))), day)).toBe("Deep work, 08:00 to 09:00, 2 entries, Focus");
+    expect(rowSpokenLabel(group(entry("d", at(8), at(9)), entry("e", at(10), at(11))), day)).toBe("Deep work, 08:00 to 09:00, 2 blocks, Focus");
   });
 
   it("does not start again a legacy placeholder description with no activity", () => {

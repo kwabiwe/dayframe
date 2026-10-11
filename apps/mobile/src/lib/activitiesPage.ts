@@ -1,3 +1,4 @@
+import { formatDuration } from "@dayframe/shared";
 // Blocks parity step 6b-1: Settings › Activities. Activities are grouped the way the All
 // activities picker groups them (your own first, then by icon group), pinning is capped at the
 // quick-start mosaic's six tiles, and the editor checks names the way the server does.
@@ -55,12 +56,8 @@ export function activityWeekSeconds<E extends WeekEntry>(
 
 /** "2h 30m in the last 7 days", or a plain line when the activity wasn't used. */
 export function formatActivityWeek(seconds: number) {
-  const minutes = Math.floor(seconds / 60);
-  if (minutes < 1) return "Not used in the last 7 days";
-  const hours = Math.floor(minutes / 60);
-  const rest = minutes % 60;
-  const amount = hours ? (rest ? `${hours}h ${rest}m` : `${hours}h`) : `${rest}m`;
-  return `${amount} in the last 7 days`;
+  if (!(seconds > 0)) return "Not used in the last 7 days";
+  return `${formatDuration(seconds)} in the last 7 days`;
 }
 
 export const ACTIVITY_CHANGE_BUSY_MESSAGE = "Another activity change is still saving. Try again in a moment.";

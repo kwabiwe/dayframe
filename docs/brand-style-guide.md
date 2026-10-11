@@ -235,7 +235,7 @@ Do not add Sofia Pro or any other font. The Dayframe wordmark is outline geometr
 | Timer numerals | Live block odometer 58 on iPhone (scaled to the numeric Dynamic Type cap, shrunk only to fit the card); duration dial up to 38 | 700–800 | Odometer: each digit is laid out on a 1.2 em native text line, centred inside a 1.04 em visual digit cell (0.62 em wide); dial and web timers 1.0–1.15 | `-0.02em` |
 | Report headline | Reports hero total 52 on iPhone; other report and goal totals 24–30 | 700–800 | 1.05–1.2 | `-0.04em` to `-0.02em` |
 
-Use `font-variant-numeric: tabular-nums` on timers, durations, clock labels and report figures. Do not force monospace typography across the interface. Allow Dynamic Type to grow without clipping; labels may wrap before touch targets shrink.
+Use `font-variant-numeric: tabular-nums` on timers, durations, clock labels and report figures. Write every duration one way, with the shared `formatDuration` (`packages/shared`): "6h 25m", "6h", "35m", "<1m" for a positive amount under a minute and "0m" for nothing (audit UIA-042/UIA-207); only a running clock ("0:04:09") and the duration dial keep the clock form. (Still to move: web's own duration helper and the native Calendar's block labels, which round to the nearest minute.) What people read or hear says block and activity — never timer, entry, time entry or task (UIA-100; guarded by `blockWording.contract.test.ts` on iPhone) — counts inside Review say moments ("Loaded 12 of 30 moments."), and paths read "Settings › Sync help" with a single-character ellipsis "…". Do not force monospace typography across the interface. Allow Dynamic Type to grow without clipping; labels may wrap before touch targets shrink.
 
 ### iOS Dynamic Type roles
 
