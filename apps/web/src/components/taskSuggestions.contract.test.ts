@@ -47,6 +47,6 @@ describe("web task suggestion interaction", () => {
   it("starts Quick Actions from a clean category-only draft", () => {
     expect(timerSource).toContain("const draft = quickActionTimerDraft(action.categoryId)");
     expect(timerSource).toContain("setTimerDraft(draft)");
-    expect(timerSource).toContain("void startTimer(draft)");
+    expect(timerSource).toContain("void startTimer(draft, { dedupeRunning: true })");
   });
 });
