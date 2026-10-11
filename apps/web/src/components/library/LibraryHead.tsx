@@ -11,7 +11,7 @@ export function LibraryHead({ action, current }: { action?: ReactNode; current: 
   return (
     <div className="df-page-head">
       <div>
-        <h1>Library</h1>
+        <h1 tabIndex={-1}>Library</h1>
         <p>Activities, tags and places in one place. Pinned activities appear in quick start.</p>
       </div>
       <div className="df-page-head-actions">

@@ -60,6 +60,8 @@ export function ActivitiesLibrary({ initialData }: { initialData: BootstrapData 
   const [archivedError, setArchivedError] = useState<string | null>(null);
   const [notice, setNotice] = useState<Notice | null>(null);
   const busyRef = useRef(false);
+  // Undo pressed while another change saves runs as soon as that change finishes.
+  const queuedUndoRef = useRef<(() => void) | null>(null);
   const [busy, setBusy] = useState(false);
   const noticeSequence = useRef(0);
 
@@ -105,11 +107,12 @@ export function ActivitiesLibrary({ initialData }: { initialData: BootstrapData 
     setNotice({ token: ++noticeSequence.current, label, swatch, undo, takeFocus, exiting: false });
   }, []);
 
-  // A toast leaving with focus on its Undo hands focus to New activity, so it never falls to the page.
+  // A toast leaving with focus on its Undo hands focus to New activity (or, while that is
+  // disabled by a saving change, the Library heading), so it never falls to the page.
   useEffect(() => {
     if (!notice?.exiting) return;
     if (!document.activeElement?.closest(".df-toast-host")) return;
-    document.querySelector<HTMLElement>(".df-lnew")?.focus();
+    focusLibraryFallback();
   }, [notice?.exiting]);
 
   /** One change at a time; the shell (quick starts, pickers) refreshes after each. */
@@ -136,6 +139,9 @@ export function ActivitiesLibrary({ initialData }: { initialData: BootstrapData 
     } finally {
       busyRef.current = false;
       setBusy(false);
+      const queued = queuedUndoRef.current;
+      queuedUndoRef.current = null;
+      if (queued) queueMicrotask(queued);
     }
   }, [refresh]);
 
@@ -166,9 +172,11 @@ export function ActivitiesLibrary({ initialData }: { initialData: BootstrapData 
       return patch({ id: activity.id, isPinned: true });
     }, "Couldn’t restore the activity.");
     if (done || restored) void loadArchived();
+    // Restored but not re-pinned (quick start filled meanwhile): the shell still shows it.
+    if (restored && !done) void refresh().catch(() => null);
     if (done) announce(`${activity.name} restored`, blockStyle(activity.color, activity.name));
     return Boolean(done);
-  }, [announce, loadArchived, patch, run]);
+  }, [announce, loadArchived, patch, refresh, run]);
 
   const archive = useCallback(async (activity: CategoryRow) => {
     const done = await run(() => clientFetch(`/api/categories?id=${encodeURIComponent(activity.id)}`, { method: "DELETE" }), "Couldn’t archive the activity.");
@@ -180,7 +188,7 @@ export function ActivitiesLibrary({ initialData }: { initialData: BootstrapData 
     return true;
   }, [announce, loadArchived, restore, run]);
 
-  const save = useCallback(async (target: CategoryRow | null, draft: { name: string; color: DayframePaletteKey; icon?: string }) => {
+  const save = useCallback(async (target: CategoryRow | null, draft: { name: string; color: DayframePaletteKey; icon?: string }): Promise<string | null> => {
     // An icon is sent only when one was picked; otherwise the stored choice (or the name) stands.
     const body = { name: draft.name.trim(), color: draft.color, ...(draft.icon ? { icon: draft.icon } : {}) };
     const done = await run(
@@ -189,8 +197,11 @@ export function ActivitiesLibrary({ initialData }: { initialData: BootstrapData 
         : clientFetch("/api/categories", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }),
       target ? "Couldn’t save the activity." : "Couldn’t create the activity."
     );
-    if (done && !target) announce(`${body.name} created`, blockStyle(body.color, body.name));
-    return Boolean(done);
+    if (!done) return null;
+    if (!target) announce(`${body.name} created`, blockStyle(body.color, body.name));
+    if (target) return target.id;
+    const created = await done.clone().json().catch(() => ({})) as { category?: { id?: string } };
+    return created.category?.id ?? "";
   }, [announce, patch, run]);
 
   const nowMs = useClockMs(hydrated);
@@ -280,7 +291,11 @@ export function ActivitiesLibrary({ initialData }: { initialData: BootstrapData 
           }}
           onClose={() => setEditing(null)}
           onSave={async (draft) => {
-            if (await save(editing === "new" ? null : editing, draft)) setEditing(null);
+            const savedId = await save(editing === "new" ? null : editing, draft);
+            if (savedId === null) return;
+            setEditing(null);
+            // The card may have moved group (or is new): focus its Edit once the dialog has closed.
+            focusCardEdit(savedId);
           }}
           serverError={error}
           target={editing === "new" ? null : editing}
@@ -295,14 +310,11 @@ export function ActivitiesLibrary({ initialData }: { initialData: BootstrapData 
           key={notice.token}
           message={notice.label}
           onAction={notice.undo ? () => {
-            // While another change saves, Undo stays on screen to try again.
-            if (busyRef.current) {
-              setError(BUSY_MESSAGE);
-              return;
-            }
             const undo = notice.undo;
             setNotice((current) => (current ? { ...current, exiting: true } : current));
-            undo?.();
+            // While another change saves, the Undo waits for it and then runs.
+            if (busyRef.current) queuedUndoRef.current = () => undo?.();
+            else undo?.();
           } : undefined}
           swatchStyle={notice.swatch}
         />
@@ -505,6 +517,28 @@ function ActivityEditor({
       </div>
     </ModalDialog>
   );
+}
+
+function focusLibraryFallback() {
+  const create = document.querySelector<HTMLButtonElement>(".df-lnew");
+  if (create && !create.disabled) {
+    create.focus();
+    return;
+  }
+  document.querySelector<HTMLElement>(".df-page-head h1")?.focus();
+}
+
+/** After the editor closes (its opener may be gone), focus the activity's Edit, else a fallback. */
+function focusCardEdit(activityId: string) {
+  requestAnimationFrame(() => requestAnimationFrame(() => {
+    const active = document.activeElement;
+    if (active && active !== document.body && active.isConnected) return;
+    const edit = activityId
+      ? document.getElementById(`category-${activityId}`)?.querySelector<HTMLButtonElement>('button[aria-label^="Edit "]') ?? null
+      : null;
+    if (edit && !edit.disabled) edit.focus();
+    else focusLibraryFallback();
+  }));
 }
 
 /** The browser clock after hydration, each minute (sparklines and "last 7 days"). */

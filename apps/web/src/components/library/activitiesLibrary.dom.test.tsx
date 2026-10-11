@@ -12,11 +12,13 @@ vi.mock("next/link", () => ({
 
 type Call = { url: string; method: string; body: Record<string, unknown> | null };
 const calls: Call[] = [];
+let bootstrapReads = 0;
 let answer: (call: Call) => Response | Promise<Response> | undefined = () => undefined;
 vi.mock("@/lib/client-auth-fetch", () => ({
   clientFetch: async (url: string, init?: RequestInit) => {
     const call = { url, method: init?.method ?? "GET", body: init?.body ? JSON.parse(String(init.body)) : null };
-    if (call.url !== "/api/bootstrap") calls.push(call);
+    if (call.url.startsWith("/api/bootstrap")) bootstrapReads += 1;
+    else calls.push(call);
     const answered = await answer(call);
     if (answered) return answered;
     if (url.startsWith("/api/categories?archived=1")) return new Response(JSON.stringify({ categories: [] }), { status: 200 });
@@ -122,7 +124,7 @@ describe("Library › Activities", () => {
     ]));
   });
 
-  it("keeps Undo on screen when another change is still saving", async () => {
+  it("runs an Undo pressed while another change saves as soon as that change finishes", async () => {
     const user = userEvent.setup();
     let release: () => void = () => undefined;
     answer = (call) => call.method === "PATCH" && call.body?.isPinned === true
@@ -134,11 +136,53 @@ describe("Library › Activities", () => {
     const toast = (await screen.findByText("Reading archived. Its history stays.")).closest(".df-toast") as HTMLElement;
     await user.click(screen.getByRole("button", { name: "Pin Piano to quick start" }));
     await user.click(within(toast).getByRole("button", { name: "Undo" }));
-    expect(screen.getByRole("alert").textContent).toContain("still saving");
     expect(changes().filter((call) => call.body?.isArchived === false)).toEqual([]);
-    expect(toast.isConnected && !toast.classList.contains("is-exiting")).toBe(true);
     release();
-    await waitFor(() => expect((within(toast).getByRole("button", { name: "Undo" }) as HTMLButtonElement).disabled).toBe(false));
+    await waitFor(() => expect(changes().filter((call) => call.body?.isArchived === false)).toEqual([
+      { url: "/api/categories", method: "PATCH", body: { id: ID(1), isArchived: false } }
+    ]));
+  });
+
+  it("refreshes the shell when a restore lands but its re-pin is refused", async () => {
+    const user = userEvent.setup();
+    answer = (call) => call.method === "PATCH" && call.body?.isPinned === true && call.body?.id === ID(1)
+      ? new Response(JSON.stringify({ error: "Quick start holds 6 activities. Unpin one first." }), { status: 409 })
+      : undefined;
+    mount([activity(ID(1), "Reading", { isPinned: true })]);
+    await user.click(await screen.findByRole("button", { name: "Edit Reading" }));
+    await user.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Archive" }));
+    const toast = (await screen.findByText("Reading archived. Its history stays.")).closest(".df-toast") as HTMLElement;
+    const before = bootstrapReads;
+    await user.click(within(toast).getByRole("button", { name: "Undo" }));
+    await waitFor(() => expect(screen.getByRole("alert").textContent).toContain("Quick start holds 6"));
+    await waitFor(() => expect(bootstrapReads).toBeGreaterThan(before));
+  });
+
+  it("puts focus on the saved activity's Edit even when the save moved it to another group", async () => {
+    const user = userEvent.setup();
+    let saved = false;
+    // After the save, the refreshed data has the activity with its new icon (another group).
+    answer = (call) => {
+      if (call.method === "PATCH") {
+        saved = true;
+        return undefined;
+      }
+      if (call.url.startsWith("/api/bootstrap") && saved) {
+        const refreshed = bootstrap([activity(ID(1), "Zither practice", { icon: "music" })]);
+        const date = new URL(call.url, "http://localhost").searchParams.get("date") ?? "";
+        return new Response(JSON.stringify({ ...refreshed, dateRange: { ...refreshed.dateRange, selectedDate: date } }), { status: 200 });
+      }
+      return undefined;
+    };
+    const { container } = mount([activity(ID(1), "Zither practice")]);
+    const groupOf = () => container.querySelector(`#category-${ID(1)}`)?.closest("section")?.querySelector("h2")?.firstChild?.textContent;
+    expect(groupOf()).toBe("Your own");
+    await user.click(await screen.findByRole("button", { name: "Edit Zither practice" }));
+    await user.click(within(screen.getByRole("dialog")).getByRole("radio", { name: "Music" }));
+    await user.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    expect(groupOf()).toBe("Free time");
+    await waitFor(() => expect(document.activeElement?.getAttribute("aria-label")).toBe("Edit Zither practice"));
   });
 
   it("keeps each card reachable by its activity link and locks Edit while a change saves", async () => {
