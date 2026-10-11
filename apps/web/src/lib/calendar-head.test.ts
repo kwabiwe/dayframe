@@ -46,4 +46,33 @@ describe("Calendar page head (Trello: Calendar page improvements)", () => {
     expect(model.days[0].accessibleName).toBe("Monday 5 October, nothing framed");
     expect(model.days[1].accessibleName).toBe("Tuesday 6 October, 7h 30m framed");
   });
+
+  it("names a past week by its Monday instead of calling it this week", () => {
+    const past = calendarHeadModel({
+      dayLoggedSeconds: 0,
+      entries: [],
+      nowMs: new Date(2026, 9, 11, 14, 48).getTime(),
+      selectedDay: day(1),
+      weekDays: [28, 29, 30].map((date) => new Date(2026, 8, date)).concat([1, 2, 3, 4].map(day)),
+      weekLoggedSeconds: 3600
+    });
+    expect(past.weekTotal).toBe("1h 00m in the week of 28 Sept");
+    expect(past.days.some((d) => d.isToday)).toBe(false);
+  });
+
+  it("leaves today out until hydration, so the server render and the browser agree", () => {
+    const beforeHydration = calendarHeadModel({
+      dayLoggedSeconds: 0,
+      entries: entries as never,
+      hydrated: false,
+      nowMs: new Date(2026, 9, 11, 14, 48).getTime(),
+      selectedDay: day(11),
+      weekDays,
+      weekLoggedSeconds: 3600
+    });
+    expect(beforeHydration.days.some((d) => d.isToday)).toBe(false);
+    expect(beforeHydration.days.every((d) => d.bars.length === 0)).toBe(true);
+    expect(beforeHydration.days[0].accessibleName).toBe("Monday 5 October");
+    expect(beforeHydration.weekTotal).toBe("1h 00m in the week of 5 Oct");
+  });
 });

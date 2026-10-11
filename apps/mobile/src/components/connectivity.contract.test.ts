@@ -68,8 +68,8 @@ describe("connectivity status ownership", () => {
     expect(avatar).toContain('onPress(attention ? "sync" : "settings")');
     expect(avatar).toContain('testID="account-avatar-attention"');
     expect(dashboard.match(/attentionCount=\{syncAttentionCount\}/g)).toHaveLength(3);
-    expect(dashboard.match(/onPress=\{openAccount\}/g)).toHaveLength(3);
-    expect(dashboard).toContain('router.push({ pathname: "/settings", params: { section: "sync" } })');
+    expect(dashboard.match(/onPress=\{openAccountFrom(Today|Calendar|Reports)\}/g)).toHaveLength(3);
+    expect(dashboard).toContain('router.push({ pathname: "/settings", params: { from, section: "sync" } })');
   });
 
   it("keeps retryable connectivity delivery silent and local failures actionable", () => {

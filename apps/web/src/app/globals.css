@@ -11551,12 +11551,24 @@ dialog.ui-dialog.df-palette {
   font-size: 13px;
 }
 
-.df-rcard-overlap {
-  padding: 0 24px;
+/* Overlap on a Review card: one quiet line under the time; a warning cue only when the overlap
+   covers most of the block (Trello, owner-approved). */
+.df-roverlap {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 4px 0 0;
+  color: var(--text-secondary);
+  font-size: 13px;
 }
 
-.df-rcard-overlap:empty {
-  display: none;
+.df-roverlap.is-large {
+  color: var(--warning-text);
+  font-weight: 650;
+}
+
+.df-roverlap svg {
+  flex: none;
 }
 
 .df-ractions {
@@ -11730,10 +11742,6 @@ dialog.ui-dialog.df-palette {
 
   .df-rbody h2 {
     font-size: 28px;
-  }
-
-  .df-rcard-overlap {
-    padding: 0 16px;
   }
 
   .df-ractions {
@@ -13131,10 +13139,13 @@ dialog.ui-dialog.df-rf-dialog {
   position: absolute;
   z-index: 3;
   right: 4px;
+  box-sizing: border-box;
+  height: 20px;
   transform: translateY(-50%);
   border-radius: 999px;
   background: var(--accent);
   padding: 2px 7px;
+  line-height: 16px;
   color: var(--on-accent);
   font-size: 11px;
   font-weight: 750;
@@ -13150,6 +13161,9 @@ dialog.ui-dialog.df-rf-dialog {
 }
 
 .df-cal-framed {
+  display: inline-flex;
+  min-height: 44px;
+  align-items: center;
   color: inherit;
   text-decoration: none;
 }
@@ -13235,6 +13249,9 @@ dialog.ui-dialog.df-rf-dialog {
 }
 
 .df-cal-weektotal {
+  display: inline-flex;
+  min-height: 44px;
+  align-items: center;
   color: var(--text-secondary);
   font-size: 13px;
   font-weight: 650;
@@ -13252,16 +13269,25 @@ dialog.ui-dialog.df-rf-dialog {
 @media (max-width: 760px) {
   .df-cal-head {
     display: grid;
-    grid-template-areas: "title total" "days days";
-    grid-template-columns: minmax(0, 1fr) auto;
-    align-items: start;
-    gap: 6px 12px;
+    grid-template-areas: "title total" "framed framed" "days days";
+    grid-template-columns: auto minmax(0, 1fr);
+    align-items: center;
+    gap: 0 12px;
     padding: 10px 12px 6px;
   }
 
+  /* The month and the week total share the first row; the day's framed line gets its own row, and
+     a long past-week total wraps beside the month instead of overlapping it. */
   .df-cal-head > div:first-child {
+    display: contents;
+  }
+
+  .df-cal-head h1 {
     grid-area: title;
-    min-width: 0;
+  }
+
+  .df-cal-head > div:first-child > p {
+    grid-area: framed;
   }
 
   .df-cal-head h1 {
@@ -13269,7 +13295,7 @@ dialog.ui-dialog.df-rf-dialog {
   }
 
   .df-cal-head p {
-    margin-top: 0;
+    margin-top: -8px;
     font-size: 13px;
   }
 
@@ -13277,14 +13303,22 @@ dialog.ui-dialog.df-rf-dialog {
     display: contents;
   }
 
+  /* Seven 44 px days need 308 px: no gaps (the buttons have no fill), and below that the strip
+     scrolls sideways inside itself rather than shrinking the targets or overflowing the page. */
   .df-cal-days {
     grid-area: days;
     width: 100%;
+    grid-template-columns: repeat(7, minmax(44px, 1fr));
+    gap: 0;
+    overflow-x: auto;
+    scrollbar-width: none;
   }
 
   .df-cal-weektotal {
     grid-area: total;
-    padding-top: 6px;
+    justify-self: end;
+    text-align: right;
+    white-space: normal;
   }
 
   .df-cal-day {

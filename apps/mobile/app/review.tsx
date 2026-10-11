@@ -10,7 +10,6 @@ import {
   View
 } from "react-native";
 import Reanimated from "react-native-reanimated";
-import Svg, { Path } from "react-native-svg";
 import { router, useFocusEffect, useLocalSearchParams, useNavigation } from "expo-router";
 import type { NativeStackNavigationProp } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
@@ -105,6 +104,7 @@ import {
   type ReviewMenuEvent
 } from "@/lib/review";
 import { mobileTextProps } from "@/lib/mobileTypography";
+import { BlocksNavHeader, usePreviousScreenLabel } from "@/components/BlocksNavHeader";
 import {
   cacheReviewPresentation,
   recordReviewPresentationRead,
@@ -289,6 +289,8 @@ export default function ReviewScreen() {
   ).current;
   const now = Date.now();
   const navigation = useNavigation<NativeStackNavigationProp<ReactNavigation.RootParamList>>();
+  // Review opens from Today and from Calendar; the back button names the screen it returns to.
+  const backLabel = usePreviousScreenLabel() ?? "Today";
   const peerEntries = useMemo(() => reviewPeerEntries(data), [data]);
   const overlapCounts = useMemo(() => prepareReviewOverlapCounts(data?.reviewItems ?? [], peerEntries, Date.now()), [data, peerEntries]);
   const recentLogAsActivityIds = useMemo(() => recentActivityIds(peerEntries), [peerEntries]);
@@ -2048,30 +2050,23 @@ export default function ReviewScreen() {
 
   return (
     <SafeAreaView style={styles.safeArea}>
-      <View style={styles.reviewDeckNav}>
-        <Pressable
-          accessibilityLabel="Back to Today"
-          accessibilityRole="button"
-          onPress={() => router.back()}
-          style={pressable(styles.reviewDeckBack, styles.buttonPressed)}
-          testID="review-deck-back"
-        >
-          <Svg accessibilityElementsHidden height={22} viewBox="0 0 24 24" width={22}>
-            <Path d="M15 5 8 12l7 7" fill="none" stroke={theme.accent} strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.3} />
-          </Svg>
-          <Text {...mobileTextProps("control")} style={[styles.reviewDeckBackText, { color: theme.accentText }]}>Today</Text>
-        </Pressable>
-        <Text {...mobileTextProps("control")} accessibilityRole="header" style={styles.reviewDeckNavTitle}>Review</Text>
-        <Text
-          {...mobileTextProps("numeric")}
-          accessibilityLabel={deckPosition?.accessibilityLabel ?? reviewCountCopy}
-          style={styles.reviewDeckNavCount}
-          testID="review-deck-count"
-        >
-          {/* While a bulk skip counts older pages, the count slot says so (nothing else moves). */}
-          {bulkSkipCounting ? "Counting…" : deckFinished ? "" : deckPosition?.text ?? ""}
-        </Text>
-      </View>
+      <BlocksNavHeader
+        backLabel={backLabel}
+        backTestID="review-deck-back"
+        onBack={() => router.back()}
+        title="Review"
+        trailing={
+          <Text
+            {...mobileTextProps("numeric")}
+            accessibilityLabel={deckPosition?.accessibilityLabel ?? reviewCountCopy}
+            style={styles.reviewDeckNavCount}
+            testID="review-deck-count"
+          >
+            {/* While a bulk skip counts older pages, the count slot says so (nothing else moves). */}
+            {bulkSkipCounting ? "Counting…" : deckFinished ? "" : deckPosition?.text ?? ""}
+          </Text>
+        }
+      />
       <ScrollView
         alwaysBounceVertical
         // Typing a "Log as" name keeps the card above the keyboard; a tap elsewhere dismisses it.
@@ -2103,13 +2098,14 @@ export default function ReviewScreen() {
         <ReviewSyncStatus
           diagnostics={reviewSyncDiagnostics}
           onReviewIssue={() =>
-            router.push({ pathname: "/settings", params: { section: "sync" } })
+            router.push({ pathname: "/settings", params: { from: "review", section: "sync" } })
           }
           styles={styles}
         />
 
         {deckFinished ? (
           <ReviewDeckFinished
+            backLabel={backLabel}
             blocks={deckVisit.logged.map((block) => block.color)}
             copy={deckFinishedCopy(deckVisit.logged, deckVisit.decided)}
             celebrate={celebrateDeckFinish.current}

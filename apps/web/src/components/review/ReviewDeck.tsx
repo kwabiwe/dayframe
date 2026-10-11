@@ -8,7 +8,7 @@ import { validReviewAcknowledgement, type ReviewMutationEnvelope } from "@dayfra
 import { useAppShellRuntime, useRuntimePageData } from "@/components/AppShellRuntime";
 import { BlocksToast } from "@/components/blocks/BlocksToast";
 import { LocationReviewPanel } from "@/components/location/LocationReviewPanel";
-import { OverlapNotice } from "@/components/OverlapNotice";
+import { OverlapLine } from "@/components/OverlapNotice";
 import { ReviewVisual } from "@/components/review/ReviewVisual";
 import { useIsHydrated } from "@/components/useHydrationSafeNow";
 import { blockStyle } from "@/lib/block-style";
@@ -492,16 +492,15 @@ export function ReviewDeck({ initialData }: { initialData: BootstrapData }) {
               nowMs={nowMs}
               onDecide={decideCurrent}
               onDraft={(patch) => setDraft(selected.id, patch)}
-              titleId="df-rcard-title"
-            />
-            {span ? (
-              <div className="df-rcard-overlap">
-                <OverlapNotice
+              overlap={span ? (
+                <OverlapLine
                   candidate={{ startedAt: new Date(span.startMs).toISOString(), stoppedAt: new Date(span.stopMs).toISOString() }}
                   entries={entries}
+                  nowMs={nowMs}
                 />
-              </div>
-            ) : null}
+              ) : null}
+              titleId="df-rcard-title"
+            />
             <div className="df-ractions">
               <button className="df-rbtn df-rbtn--live" disabled={!span || evidenceOpen} onClick={() => decideCurrent("log")} onKeyDown={ignoreRepeatedActivation} type="button">
                 <Check size={16} aria-hidden="true" />
@@ -617,6 +616,7 @@ function CardFace({
   nowMs,
   onDecide,
   onDraft,
+  overlap,
   titleId
 }: {
   categories: readonly CategoryRow[];
@@ -629,6 +629,8 @@ function CardFace({
   nowMs: number;
   onDecide?: (kind: ReviewDecisionKind) => void;
   onDraft?: (patch: ReviewLogAsDraft) => void;
+  /** The top card's overlap line, shown under the time. */
+  overlap?: React.ReactNode;
   titleId?: string;
 }) {
   const picture = reviewPicture(item);
@@ -681,6 +683,7 @@ function CardFace({
             {span ? ` · ${formatReviewDuration(span.stopMs - span.startMs)}` : ""}
           </p>
         ) : null}
+        {overlap}
         {span ? (
           <div className="df-logas">
             <label htmlFor={inert ? undefined : "df-logas-name"}>Log as</label>

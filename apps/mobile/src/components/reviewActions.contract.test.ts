@@ -34,8 +34,8 @@ describe("mobile Review action contracts", () => {
     expect(deckSource).toMatch(/size=\{64\}[\s\S]*size=\{52\}[\s\S]*size=\{72\}/);
   });
 
-  it("uses the shared mobile back affordance on Location Evidence", () => {
-    expect(evidenceSource).toContain("<MobileBackButton");
+  it("uses the shared Blocks navigation bar on Location Evidence", () => {
+    expect(evidenceSource).toContain("<BlocksNavHeader");
     expect(evidenceSource).not.toContain(">‹</Text>");
     expect(evidenceSource).toContain("loadGenerationRef");
     expect(evidenceSource).toContain("generation !== loadGenerationRef.current");

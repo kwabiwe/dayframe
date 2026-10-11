@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect, useRef } from "react";
 import Link from "next/link";
 import { blockStyle } from "@/lib/block-style";
 import type { CalendarHeadModel } from "@/lib/calendar-head";
@@ -22,6 +23,20 @@ export function CalendarHead({
   onSelectDay: (dateKey: string) => void;
   weekReportHref: string;
 }) {
+  const daysRef = useRef<HTMLDivElement | null>(null);
+  const selectedKey = model.days.find((day) => day.selected)?.key;
+  // On the narrowest phones the strip scrolls sideways; keep the chosen day in view (inside the strip
+  // only, never scrolling the page).
+  useEffect(() => {
+    const strip = daysRef.current;
+    const chosen = strip?.querySelector<HTMLElement>('[aria-pressed="true"]');
+    if (!strip || !chosen || strip.scrollWidth <= strip.clientWidth) return;
+    const stripRect = strip.getBoundingClientRect();
+    const chosenRect = chosen.getBoundingClientRect();
+    if (chosenRect.right > stripRect.right) strip.scrollLeft += chosenRect.right - stripRect.right;
+    else if (chosenRect.left < stripRect.left) strip.scrollLeft -= stripRect.left - chosenRect.left;
+  }, [selectedKey]);
+
   return (
     <div className="df-page-head df-cal-head">
       <div>
@@ -33,7 +48,7 @@ export function CalendarHead({
         </p>
       </div>
       <div className="df-cal-week">
-        <div aria-label="Choose a day" className="df-cal-days" role="group">
+        <div aria-label="Choose a day" className="df-cal-days" ref={daysRef} role="group">
           {model.days.map((day) => (
             <button
               aria-label={day.accessibleName}

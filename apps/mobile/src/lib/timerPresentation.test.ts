@@ -32,7 +32,9 @@ import {
   rollbackOptimisticTimeEntryPatch,
   rollbackRejectedOptimisticTimerStart,
   runningTimerSheetElapsedSeconds,
-  shouldAwaitTimerMutationAcceptance
+  shouldAwaitTimerMutationAcceptance,
+  isSameRunningEntry,
+  OPTIMISTIC_TIMER_ID_PREFIX
 } from "./timerPresentation";
 import type { MobileBootstrap } from "./api";
 import { createDeletionCoordinator } from "./historyDeletion";
@@ -1504,3 +1506,21 @@ function deferred<T>() {
   });
   return { promise, reject, resolve };
 }
+
+describe("isSameRunningEntry (UIA-053)", () => {
+  const optimisticId = `${OPTIMISTIC_TIMER_ID_PREFIX}1:1`;
+  const correlation = new Map([[optimisticId, "server-1"]]);
+  const persisted = (id: string) => id.startsWith(OPTIMISTIC_TIMER_ID_PREFIX) ? correlation.get(id) ?? null : id;
+
+  it("matches the running block across the optimistic-to-server id swap, either way round", () => {
+    expect(isSameRunningEntry("server-1", optimisticId, persisted)).toBe(true);
+    expect(isSameRunningEntry(optimisticId, "server-1", persisted)).toBe(true);
+    expect(isSameRunningEntry(optimisticId, optimisticId, persisted)).toBe(true);
+  });
+
+  it("still refuses a different block, or an unconfirmed start it cannot correlate", () => {
+    expect(isSameRunningEntry("server-2", optimisticId, persisted)).toBe(false);
+    expect(isSameRunningEntry("server-1", `${OPTIMISTIC_TIMER_ID_PREFIX}9:9`, persisted)).toBe(false);
+    expect(isSameRunningEntry(`${OPTIMISTIC_TIMER_ID_PREFIX}9:9`, `${OPTIMISTIC_TIMER_ID_PREFIX}8:8`, persisted)).toBe(false);
+  });
+});

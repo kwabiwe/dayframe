@@ -74,7 +74,7 @@ describe("TodayRibbonSection", () => {
     act(() => mocks.tap.handlers.onEnd({ x: 95 }, true));
     expect(mocks.push).toHaveBeenLastCalledWith({ pathname: "/review", params: { focusReviewId: REVIEW_ID } });
     act(() => mocks.tap.handlers.onEnd({ x: 125 }, true));
-    expect(mocks.push).toHaveBeenLastCalledWith({ pathname: "/review/[id]", params: { id: LOCATION_ID } });
+    expect(mocks.push).toHaveBeenLastCalledWith({ pathname: "/review/[id]", params: { from: "today", id: LOCATION_ID } });
     act(() => mocks.tap.handlers.onEnd({ x: 145 }, true));
     expect(mocks.push).toHaveBeenCalledTimes(2);
     expect(onOpenEntry).not.toHaveBeenCalled();
