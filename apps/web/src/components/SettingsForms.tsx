@@ -4,7 +4,7 @@ import { DayframeIcon } from "@/components/blocks/DayframeIcon";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useState, type FormEvent } from "react";
-import { ChevronDown, Folder, Plus, ShieldCheck, UserRound } from "lucide-react";
+import { ChevronDown, Folder, Plus, ShieldCheck } from "lucide-react";
 import { useAppShellRuntime } from "@/components/AppShellRuntime";
 import { SignOutControl } from "@/components/SignOutControl";
 import {
@@ -202,7 +202,7 @@ export function AccountSettings({
       </span>
       <span className="df-set-acts">
         <button className="df-rbtn df-rbtn--sm" onClick={() => setDialog("profile")} type="button">
-          <UserRound aria-hidden="true" size={15} />
+          <DayframeIcon glyph="user-round" size={15} />
           Edit profile
         </button>
         <button className="df-rbtn df-rbtn--sm" onClick={() => setDialog("workspace")} type="button">
