@@ -28,7 +28,7 @@ export function ReportDetailsTable({ report }: { report: ReportResult }) {
       <header className="report-section-header report-details-header">
         <div>
           <h2 id="report-details-title">Matching blocks</h2>
-          <p>{report.pagination.totalEntries} entr{report.pagination.totalEntries === 1 ? "y" : "ies"} make up these totals.</p>
+          <p>{report.pagination.totalEntries === 1 ? "1 block makes" : `${report.pagination.totalEntries} blocks make`} up these totals.</p>
         </div>
         <label className="report-sort-control">
           <span>Sort</span>

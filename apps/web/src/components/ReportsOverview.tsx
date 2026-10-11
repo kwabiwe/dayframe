@@ -133,7 +133,7 @@ function TagBreakdown({ report }: { report: ReportResult }) {
             >
               <span className="report-ranked-name">{row.name}</span>
               <strong>{formatDuration(row.seconds)}</strong>
-              <small>{percentageOf(row.seconds, report.totalSeconds)}% · {row.entryCount} entr{row.entryCount === 1 ? "y" : "ies"}</small>
+              <small>{percentageOf(row.seconds, report.totalSeconds)}% · {row.entryCount} {row.entryCount === 1 ? "block" : "blocks"}</small>
               <span className="report-ranked-track" aria-hidden="true">
                 <i style={{ width: `${percentageOf(row.seconds, report.totalSeconds)}%` }} />
               </span>

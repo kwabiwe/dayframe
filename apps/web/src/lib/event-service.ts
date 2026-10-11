@@ -202,7 +202,7 @@ export class ReviewResolutionError extends Error {
 export class TimerReplacementWindowError extends Error {
   status = 409;
 
-  constructor(message = "Start time must be after the currently running timer's start time.") {
+  constructor(message = "Start time must be after the running block's start time.") {
     super(message);
     this.name = "TimerReplacementWindowError";
   }
@@ -212,7 +212,7 @@ export class TimerMutationBusyError extends Error {
   readonly code = "timer_busy";
   readonly status = 503;
 
-  constructor(message = "This timer is busy. Dayframe will retry the Stop shortly.") {
+  constructor(message = "This block is busy. Dayframe will retry the Stop shortly.") {
     super(message);
     this.name = "TimerMutationBusyError";
   }
@@ -543,7 +543,7 @@ async function processActivityEventWithClient(
       ...candidate,
       action: "record_only",
       reviewStatus: "confirmed",
-      reason: "An unscoped legacy iOS Stop was recorded but could not target a newer timer."
+      reason: "An unscoped legacy iOS Stop was recorded but could not target a newer block."
     };
   }
   if (fastDuplicate) {
@@ -619,9 +619,9 @@ async function processActivityEventWithClient(
         action:sourceDecision.kind==="needs_review"?"create_review_item":"record_only",
         reviewStatus:sourceDecision.kind==="ignored"?"ignored":sourceDecision.kind==="needs_review"?"needs_review":"confirmed",
         reason:sourceDecision.kind==="ignored" ? "These Apple Health source samples were previously ignored; their decision is preserved."
-          : sourceDecision.kind==="resolution_unavailable" ? "These source samples were previously resolved, but their recorded entry is unavailable. No replacement was created."
+          : sourceDecision.kind==="resolution_unavailable" ? "These source samples were previously resolved, but their recorded block is unavailable. No replacement was created."
           : sourceDecision.kind==="existing_workout" ? "This Apple Health source revision refers to the existing workout; later edits are preserved."
-          : "This Health source revision needs review because its prior decisions or entry links are ambiguous."
+          : "This Health source revision needs review because its prior decisions or block links are ambiguous."
       };
     }
 
