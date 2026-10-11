@@ -40,9 +40,11 @@ function texts(node: ts.Node): string[] {
   }
   if (ts.isParenthesizedExpression(node) || ts.isJsxExpression(node)) return node.expression ? texts(node.expression) : [];
   if (ts.isArrayLiteralExpression(node)) return node.elements.flatMap(texts);
-  // An object passed to a visible attribute or call ({ text }, { title, message }) shows its values.
+  // An object passed to a visible attribute or call shows its values. Visible fields ({ title,
+  // message, text }) are left to the property rule, which reports each once at its own line.
   if (ts.isObjectLiteralExpression(node)) {
-    return node.properties.flatMap((property) => ts.isPropertyAssignment(property) ? texts(property.initializer) : []);
+    return node.properties.flatMap((property) =>
+      ts.isPropertyAssignment(property) && !VISIBLE_KEYS.has(property.name.getText().replace(/["']/g, "")) ? texts(property.initializer) : []);
   }
   return [];
 }
@@ -88,8 +90,7 @@ export function blockWordingOffenders(source: string, fileName = "file.tsx") {
     ts.forEachChild(node, visit);
   };
   visit(file);
-  // A visible field inside a visible call is read by both rules; report it once.
-  return [...new Set(found)];
+  return found;
 }
 
 function files(directory: string): string[] {
@@ -137,6 +138,10 @@ describe("block wording (UIA-100)", () => {
       "setCreateError(\"Unable to create timer\");",
       "const copy = { title: \"timer\", message: \"task\" };",
       "confirmSheet.confirm(copy);",
+      "confirmSheet.confirm({",
+      "  title: \"Delete timer\",",
+      "  message: \"The entry goes.\"",
+      "});",
     ].join("\n");
     expect(blockWordingOffenders(source)).toEqual([
       "file.tsx:1 Timer",
@@ -159,6 +164,9 @@ describe("block wording (UIA-100)", () => {
       // Hoisted visible fields count too (Codex r5).
       "file.tsx:25 timer",
       "file.tsx:25 task",
+      // A multi-line object reports each field once, at its own line (Codex r6).
+      "file.tsx:28 Delete timer",
+      "file.tsx:29 The entry goes.",
     ]);
   });
 

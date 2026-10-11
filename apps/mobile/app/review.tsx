@@ -58,6 +58,7 @@ import {
 } from "@/components/OverflowMenu";
 import {
   AuthRequiredError,
+  blockWordingForServerMessage,
   createTag,
   fetchBootstrap,
   updateTimeEntry,
@@ -2569,8 +2570,9 @@ function reviewItemSummary(item: MobileReviewItem) {
       : "A stay was detected at this location.";
   }
 
+  // Server notes (bootstrap or cached) can still say "entry" or "timer" (UIA-100).
   const notes = item.notes?.trim();
-  if (notes) return notes;
+  if (notes) return blockWordingForServerMessage(notes);
   if (isHealthReviewItem(item)) return "Review this Health activity before it is added.";
   return "Review this suggested time before it is added.";
 }

@@ -2904,6 +2904,9 @@ describe("server messages in block wording (UIA-100)", () => {
     expect(blockWordingForServerMessage("Category not found.")).toBe("Category not found.");
     expect(blockWordingForServerMessage("Entries can be no longer than 24 hours.")).toBe("Blocks can be no longer than 24 hours.");
     expect(blockWordingForServerMessage("This entry overlaps 2 entries.")).toBe("This block overlaps 2 blocks.");
+    // A Review note the server writes (Codex r6).
+    expect(blockWordingForServerMessage("This Health source revision needs review because its prior decisions or entry links are ambiguous."))
+      .toBe("This Health source revision needs review because its prior decisions or block links are ambiguous.");
   });
 
   it("an edit the server rejects with an entry message reaches the alert as block wording (Codex r5)", async () => {
