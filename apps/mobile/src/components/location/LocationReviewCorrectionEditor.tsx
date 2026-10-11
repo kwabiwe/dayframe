@@ -6,7 +6,6 @@ import {
   Pressable,
   ScrollView,
   StyleSheet,
-  Switch,
   Text,
   TextInput,
   useWindowDimensions,
@@ -53,7 +52,7 @@ import {
 } from "@/lib/placeSearch";
 import { pressable, useMobileTheme, type MobileTheme } from "@/lib/mobileTheme";
 import { MOBILE_DISPLAY_FONT, mobileTextProps } from "@/lib/mobileTypography";
-import { SettingsBlockGroup, SettingsBlockRow, SettingsPillButton } from "../settings/SettingsBlocks";
+import { SettingsBlockGroup, SettingsBlockRow, SettingsPillButton, SettingsSwitch } from "../settings/SettingsBlocks";
 import {
   localLayoutTransition,
   localPresenceEntering,
@@ -515,7 +514,8 @@ export function LocationReviewCorrectionEditor({
           <Reanimated.View layout={localLayoutTransition(reduceMotion)} style={styles.panel}>
             <LocationEvidenceMap
               evidence={evidence}
-              accentColor={theme.accent}
+              // Neutral map marks (UIA-027), as the place editor draws a place without an activity.
+              accentColor={theme.textPrimary}
               surfaceColor={theme.surfaceMuted}
               textColor={theme.textSecondary}
               dangerColor={theme.danger}
@@ -535,7 +535,7 @@ export function LocationReviewCorrectionEditor({
                   {placeAnswer ? (
                     <View style={editorStyles.answerRow}>
                       <View style={editorStyles.answerIcon}>
-                        <ActivityGlyph name="place" color={theme.accentText} />
+                        <ActivityGlyph name="place" color={theme.textPrimary} />
                       </View>
                       <View style={editorStyles.answerText}>
                         <Text {...mobileTextProps("itemTitle")} style={editorStyles.answerTitle}>{placeAnswer}</Text>
@@ -679,7 +679,7 @@ export function LocationReviewCorrectionEditor({
                             pressed ? styles.buttonPressed : null
                           ]}
                         >
-                          <ActivityGlyph name="place" color={theme.accentText} />
+                          <ActivityGlyph name="place" color={theme.textPrimary} />
                           <View style={editorStyles.answerText}>
                             <Text {...mobileTextProps("itemTitle")} style={editorStyles.suggestionTitle}>{suggestion.title}</Text>
                             {suggestion.subtitle ? (
@@ -696,12 +696,11 @@ export function LocationReviewCorrectionEditor({
                         <Text {...mobileTextProps("control")} style={editorStyles.toggleTitle}>Save for future visits</Text>
                         <Text {...mobileTextProps("body")} style={editorStyles.answerMeta}>Creates a saved place that Dayframe can learn from later.</Text>
                       </View>
-                      <Switch
-                        accessibilityLabel="Save for future visits"
+                      <SettingsSwitch
                         disabled={saving}
+                        label="Save for future visits"
                         onValueChange={setSaveForFuture}
-                        trackColor={{ false: theme.border, true: theme.accentSoft }}
-                        thumbColor={saveForFuture ? theme.accent : theme.textSecondary}
+                        theme={theme}
                         value={saveForFuture}
                       />
                     </View>
@@ -1016,7 +1015,8 @@ function PlaceChoice({
       onPress={onPress}
       style={({ pressed }) => [
         placeChoiceStyles.row,
-        { backgroundColor: selected ? theme.accentSoft : theme.surfaceMuted },
+        // Neutral selection (UIA-027): the chosen row is raised and checked, never coral.
+        { backgroundColor: selected ? theme.surfaceMuted : theme.surfaceInset },
         pressed ? { opacity: 0.72 } : null
       ]}
     >
@@ -1024,7 +1024,7 @@ function PlaceChoice({
         <Text {...mobileTextProps("itemTitle")} style={[placeChoiceStyles.name, { color: theme.textPrimary }]}>{name}</Text>
         <Text {...mobileTextProps("metadata")} style={[placeChoiceStyles.detail, { color: theme.textSecondary }]}>{detail}</Text>
       </View>
-      {selected ? <CheckGlyph color={theme.accentText} /> : null}
+      {selected ? <CheckGlyph color={theme.textPrimary} /> : null}
     </Pressable>
   );
 }
@@ -1060,11 +1060,11 @@ function CategoryChoice({
       <View
         style={[
           categoryChoiceStyles.visual,
-          { backgroundColor: selected ? theme.accentSoft : theme.surfaceMuted }
+          { backgroundColor: selected ? theme.textPrimary : theme.surfaceMuted }
         ]}
       >
         <View style={[categoryChoiceStyles.dot, { backgroundColor: color }]} />
-        <Text {...mobileTextProps("control")} style={[categoryChoiceStyles.text, { color: selected ? theme.accentText : theme.textPrimary }]}>
+        <Text {...mobileTextProps("control")} style={[categoryChoiceStyles.text, { color: selected ? theme.background : theme.textPrimary }]}>
           {label}
         </Text>
       </View>
@@ -1212,7 +1212,7 @@ function createEditorStyles(theme: MobileTheme) {
       borderRadius: 19,
       alignItems: "center",
       justifyContent: "center",
-      backgroundColor: theme.accentSoft
+      backgroundColor: theme.surfaceMuted
     },
     answerText: { flex: 1, minWidth: 0, gap: 2 },
     answerTitle: { color: theme.textPrimary, fontSize: 16, lineHeight: 21, fontWeight: "700" },
