@@ -41,21 +41,24 @@ export const TOAST_MOTION = {
   reducedExitMs: 70,
 } as const;
 
-/** Whether this toast's entrance has finished: a shared value owned by the toast (see BlocksToast). */
-export type ToastSettled = { value: boolean };
+/**
+ * Where this toast's entrance is: a shared value owned by the toast (see BlocksToast). "fading" is
+ * a Reduce Motion entrance, which animates opacity only, so it has no live transform to carry.
+ */
+export type ToastPhase = { value: "entering" | "fading" | "settled" };
 
 /** Where the toast rests once its entrance has finished: the exit's start when nothing is running. */
 const TOAST_REST = { opacity: 1, transform: [{ translateY: 0 }, { scale: 1 }] };
 
-export function blocksToastEntering(reduceMotion: boolean, settled: ToastSettled) {
+export function blocksToastEntering(reduceMotion: boolean, phase: ToastPhase) {
   const callback = (finished: boolean) => {
     "worklet";
-    if (finished) settled.value = true;
+    if (finished) phase.value = "settled";
   };
   if (reduceMotion) {
     return () => {
       "worklet";
-      settled.value = false;
+      phase.value = "fading";
       return {
         initialValues: { opacity: 0 },
         animations: { opacity: withTiming(1, { duration: TOAST_MOTION.reducedEnterMs, reduceMotion: ReduceMotion.Never }) },
@@ -65,7 +68,7 @@ export function blocksToastEntering(reduceMotion: boolean, settled: ToastSettled
   }
   return () => {
     "worklet";
-    settled.value = false;
+    phase.value = "entering";
     const spring = { ...BLOCKS_SPRING.pop, reduceMotion: ReduceMotion.Never };
     return {
       initialValues: {
@@ -82,27 +85,31 @@ export function blocksToastEntering(reduceMotion: boolean, settled: ToastSettled
 }
 
 /**
- * The exit's starting values. While the entrance is still running, none: Reanimated then carries
- * the entrance's current values into the exit, so a toast replaced or undone mid-entrance never
- * jumps back to rest first. Once the entrance has finished Reanimated has dropped those values, so
- * the exit starts from the rest values instead (an empty start would animate from nothing).
+ * The exit's starting values. While the entrance is still running, Reanimated carries its current
+ * values into the exit, so a toast replaced or undone mid-entrance never jumps back to rest first:
+ * none are given for what the entrance animates. Everything else starts at rest: once the entrance
+ * has finished Reanimated has dropped its values, and a Reduce Motion entrance (opacity only) has
+ * no transform to carry if the setting changes before the exit. An empty start animates from nothing.
  */
-export function toastExitStart(settled: ToastSettled) {
+export function toastExitStart(phase: ToastPhase) {
   "worklet";
-  return settled.value ? { opacity: TOAST_REST.opacity, transform: TOAST_REST.transform.map((track) => ({ ...track })) } : {};
+  const transform = TOAST_REST.transform.map((track) => ({ ...track }));
+  if (phase.value === "entering") return {};
+  if (phase.value === "fading") return { transform };
+  return { opacity: TOAST_REST.opacity, transform };
 }
 
 /**
  * The exit replaces the entrance's animations, so nothing from the entrance keeps running.
  * Reduce Motion settles the transform at once and fades.
  */
-export function blocksToastExiting(reduceMotion: boolean, settled: ToastSettled) {
+export function blocksToastExiting(reduceMotion: boolean, phase: ToastPhase) {
   if (reduceMotion) {
     return () => {
       "worklet";
       const settle = { duration: 0, reduceMotion: ReduceMotion.Never };
       return {
-        initialValues: toastExitStart(settled),
+        initialValues: toastExitStart(phase),
         animations: {
           opacity: withTiming(0, { duration: TOAST_MOTION.reducedExitMs, reduceMotion: ReduceMotion.Never }),
           transform: [{ translateY: withTiming(0, settle) }, { scale: withTiming(1, settle) }],
@@ -114,7 +121,7 @@ export function blocksToastExiting(reduceMotion: boolean, settled: ToastSettled)
     "worklet";
     const timing = { duration: TOAST_MOTION.exitMs, easing: Easing.in(Easing.quad), reduceMotion: ReduceMotion.Never };
     return {
-      initialValues: toastExitStart(settled),
+      initialValues: toastExitStart(phase),
       animations: {
         opacity: withTiming(0, timing),
         transform: [{ translateY: withTiming(TOAST_MOTION.exitTo.translateY, timing) }, { scale: withTiming(TOAST_MOTION.exitTo.scale, timing) }],

@@ -3,7 +3,7 @@ import { AccessibilityInfo, Pressable, StyleSheet, Text, View, type StyleProp, t
 import Reanimated, { useSharedValue } from "react-native-reanimated";
 import { DAYFRAME_BLOCKS } from "@dayframe/shared";
 import { colorWithAlpha } from "../today/todayBlocksLayout";
-import { blocksToastEntering, blocksToastExiting } from "../../lib/blocksMotion";
+import { blocksToastEntering, blocksToastExiting, type ToastPhase } from "../../lib/blocksMotion";
 import type { MobileTheme } from "../../lib/mobileTheme";
 import { mobileTextProps } from "../../lib/mobileTypography";
 
@@ -46,13 +46,13 @@ export function BlocksToast({
   testID,
   theme
 }: BlocksToastProps) {
-  // Set when the entrance finishes, so the exit knows where to start (blocksToastExiting).
-  const settled = useSharedValue(false);
+  // Where the entrance is, so the exit knows where to start (blocksToastExiting).
+  const phase = useSharedValue<ToastPhase["value"]>("entering");
   return (
     <Reanimated.View
       accessibilityLiveRegion="polite"
-      entering={blocksToastEntering(reduceMotion, settled)}
-      exiting={blocksToastExiting(reduceMotion, settled)}
+      entering={blocksToastEntering(reduceMotion, phase)}
+      exiting={blocksToastExiting(reduceMotion, phase)}
       style={[toastStyles.toast, { backgroundColor: theme.textPrimary, shadowColor: theme.shadow }, style]}
       testID={testID}
     >

@@ -20,7 +20,7 @@ vi.mock("react", () => ({ useEffect: () => undefined, useRef: (value: unknown) =
 const { BLOCKS_SPRING, TOAST_MOTION, blocksToastEntering, blocksToastExiting } = await import("./blocksMotion");
 
 type Config = { initialValues: Record<string, unknown>; animations: Record<string, unknown>; callback?: (finished: boolean) => void };
-const settledValue = () => ({ value: false });
+const settledValue = () => ({ value: "entering" as "entering" | "fading" | "settled" });
 
 /**
  * Reanimated 4's layout-animation manager, reduced to what decides an exit's starting values: a
@@ -28,7 +28,7 @@ const settledValue = () => ({ value: false });
  * them); once the entrance finishes the manager forgets them and the exit starts from its own
  * initial values alone.
  */
-function playToast(reduceMotion: boolean, entranceFinishedBeforeExit: boolean) {
+function playToast(reduceMotion: boolean, entranceFinishedBeforeExit: boolean, exitReduceMotion = reduceMotion) {
   const settled = settledValue();
   const enter = (blocksToastEntering(reduceMotion, settled) as unknown as () => Config)();
   const live: Record<string, unknown> = { ...enter.initialValues };
@@ -38,7 +38,7 @@ function playToast(reduceMotion: boolean, entranceFinishedBeforeExit: boolean) {
   } else {
     enter.callback?.(false);
   }
-  const exit = (blocksToastExiting(reduceMotion, settled) as unknown as () => Config)();
+  const exit = (blocksToastExiting(exitReduceMotion, settled) as unknown as () => Config)();
   const start = { ...live, ...exit.initialValues };
   return { exit, start };
 }
@@ -54,13 +54,15 @@ describe("the Undo toast's motion (X4)", () => {
   });
 
   it("exits from wherever the toast is mid-entrance, replacing the entrance springs (Codex r1)", () => {
-    for (const reduceMotion of [false, true]) {
-      const { exit, start } = playToast(reduceMotion, false);
-      expect(exit.initialValues).toEqual({});
-      // The live entrance values carry into the exit: nothing jumps back to rest.
-      expect(start.opacity).toBe(0);
-      expect(Object.keys(exit.animations).sort()).toEqual(["opacity", "transform"]);
-    }
+    const { exit, start } = playToast(false, false);
+    expect(exit.initialValues).toEqual({});
+    // The live entrance values carry into the exit: nothing jumps back to rest.
+    expect(start.opacity).toBe(0);
+    expect(Object.keys(exit.animations).sort()).toEqual(["opacity", "transform"]);
+    // A Reduce Motion entrance carries its live opacity; the transform it never had starts at rest.
+    const fading = playToast(true, false);
+    expect(fading.exit.initialValues).toEqual({ transform: [{ translateY: 0 }, { scale: 1 }] });
+    expect(fading.start.opacity).toBe(0);
     const reduced = (blocksToastExiting(true, settledValue()) as unknown as () => { animations: { transform: Array<Record<string, { timing: number; config: { duration: number } }>> } })();
     // The transform settles at once; only opacity animates.
     expect(reduced.animations.transform.map((track) => Object.values(track)[0].config.duration)).toEqual([0, 0]);
@@ -76,13 +78,24 @@ describe("the Undo toast's motion (X4)", () => {
     }
   });
 
+  it("starts every exit track defined when Reduce Motion changes mid-entrance, either way (Codex r3)", () => {
+    for (const [enter, exit] of [[true, false], [false, true]] as const) {
+      const { exit: config, start } = playToast(enter, false, exit);
+      for (const key of Object.keys(config.animations)) expect(start[key]).toBeDefined();
+      const tracks = (start.transform as Array<Record<string, number>>).map((track) => Object.values(track)[0]);
+      expect(tracks.every(Number.isFinite)).toBe(true);
+    }
+  });
+
   it("a new entrance forgets that an earlier one finished", () => {
     const settled = settledValue();
     const first = (blocksToastEntering(false, settled) as unknown as () => Config)();
     first.callback?.(true);
-    expect(settled.value).toBe(true);
+    expect(settled.value).toBe("settled");
     (blocksToastEntering(false, settled) as unknown as () => Config)();
-    expect(settled.value).toBe(false);
+    expect(settled.value).toBe("entering");
+    (blocksToastEntering(true, settled) as unknown as () => Config)();
+    expect(settled.value).toBe("fading");
   });
 
   it("drops away in 160 ms", () => {
