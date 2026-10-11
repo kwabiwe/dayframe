@@ -105,6 +105,9 @@ import {
 } from "@/lib/review";
 import { mobileTextProps } from "@/lib/mobileTypography";
 import { BlocksNavHeader, usePreviousScreenLabel } from "@/components/BlocksNavHeader";
+import { DayframeIcon } from "@/components/icons/DayframeIcon";
+import { SettingsStatusDot } from "@/components/settings/SettingsBlocks";
+import { DAYFRAME_APP_ICONS } from "@dayframe/shared";
 import { BlocksConfirmHost, useBlocksConfirm } from "@/components/blocks/BlocksConfirmSheet";
 import { BlocksToast, useBlocksNotice } from "@/components/blocks/BlocksToast";
 import {
@@ -1753,7 +1756,11 @@ export default function ReviewScreen() {
 
     if (pendingAction.action === "dismiss") {
       finishAction();
-      dismissItem(item);
+      // UIA-024: More › Skip is the deck's Skip: the top card is thrown (haptic, held with Undo).
+      // More only opens on the top card; if it is no longer on top (or a card is flying), the
+      // stale choice is dropped rather than skipping a card without Undo.
+      const top = deckSources[0];
+      if (!deckFlying && top && top.kind !== "legacy_entry" && top.item.id === item.id) requestDeckThrow(-1);
       return;
     }
 
@@ -1763,6 +1770,13 @@ export default function ReviewScreen() {
       return;
     }
 
+    // Edit before logging opens the same editor as the card's pencil (Location evidence for a
+    // location moment).
+    if (hasV2LocationEvidence(item)) {
+      finishAction();
+      router.push({ pathname: "/review/[id]", params: { id: item.id } } as never);
+      return;
+    }
     if (!beginReviewItemEdit(item, pendingAction.token)) finishAction();
   }
 
@@ -2112,6 +2126,7 @@ export default function ReviewScreen() {
             router.push({ pathname: "/settings", params: { from: "review", section: "sync" } })
           }
           styles={styles}
+          theme={theme}
         />
 
         {deckFinished ? (
@@ -2269,38 +2284,58 @@ export default function ReviewScreen() {
   );
 }
 
+/**
+ * Review's sync line as the Settings status row (UIA-023): a status dot, one short sentence and,
+ * when something needs checking, "Fix" with a chevron to Sync help.
+ */
 function ReviewSyncStatus({
   diagnostics,
   onReviewIssue,
-  styles
+  styles,
+  theme
 }: {
   diagnostics: ReviewSyncDiagnostics | null;
   onReviewIssue: () => void;
   styles: ReturnType<typeof useMobileTheme>["styles"];
+  theme: ReturnType<typeof useMobileTheme>["theme"];
 }) {
   if (!diagnostics) return null;
   const copy = reviewSyncStatusCopy(diagnostics);
   if (!copy) return null;
+  const attention = diagnostics.needsAttentionCount > 0;
+  const content = (
+    <>
+      <SettingsStatusDot attention theme={theme} />
+      <Text {...mobileTextProps("body")} style={[styles.reviewMetaLine, { flex: 1, minWidth: 0 }]}>{copy}</Text>
+      {attention ? (
+        <View style={{ alignItems: "center", flexDirection: "row", gap: 2 }}>
+          <Text {...mobileTextProps("control")} style={{ color: theme.textPrimary, fontWeight: "700" }}>Fix</Text>
+          <DayframeIcon color={theme.textMuted} glyph={DAYFRAME_APP_ICONS.next} size={18} />
+        </View>
+      ) : null}
+    </>
+  );
   return (
-    <Reanimated.View
-      accessibilityLiveRegion={diagnostics.needsAttentionCount > 0 ? "assertive" : "polite"}
-      style={styles.queueDiagnosticCard}
-    >
-      <Text {...mobileTextProps("body")} style={styles.reviewMetaLine}>{copy}</Text>
-      <View style={styles.buttonRow}>
-        {diagnostics.needsAttentionCount > 0 ? (
-          <Pressable
-            accessibilityRole="button"
-            style={pressable(styles.secondaryButton, styles.buttonPressed)}
-            onPress={onReviewIssue}
-          >
-            <Text {...mobileTextProps("control")} style={styles.secondaryButtonText}>Review issue</Text>
-          </Pressable>
-        ) : null}
-      </View>
+    <Reanimated.View accessibilityLiveRegion={attention ? "assertive" : "polite"}>
+      {attention ? (
+        <Pressable
+          accessibilityHint="Opens Sync help"
+          accessibilityLabel={`${copy}. Fix`}
+          accessibilityRole="button"
+          onPress={onReviewIssue}
+          style={({ pressed }) => [styles.queueDiagnosticCard, reviewStatusRowStyle, pressed ? { opacity: 0.72 } : null]}
+          testID="review-sync-status"
+        >
+          {content}
+        </Pressable>
+      ) : (
+        <View style={[styles.queueDiagnosticCard, reviewStatusRowStyle]} testID="review-sync-status">{content}</View>
+      )}
     </Reanimated.View>
   );
 }
+
+const reviewStatusRowStyle = { alignItems: "center", flexDirection: "row", gap: 10, minHeight: 44 } as const;
 
 /** On-chip text measured against the chip's actual fill: white or deep ink, whichever is higher. */
 function onColorFor(fill: string) {

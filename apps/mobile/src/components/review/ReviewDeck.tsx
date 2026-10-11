@@ -72,7 +72,7 @@ export type ReviewDeckCardModel = {
   syncBadge: string | null;
   syncDetail: string | null;
   controlsDisabled: boolean;
-  /** The card's More menu (Edit details, Dismiss suggestion). */
+  /** The card's More menu (Edit before logging, Skip, Clear the pile). */
   moreLabel: string | null;
   menuOpen: boolean;
   /** Swiping right logs; swiping left skips (or, for a card that cannot be skipped, defers). */
