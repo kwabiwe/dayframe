@@ -64,6 +64,7 @@ import {
   DAYFRAME_PALETTE,
   DAYFRAME_APP_ICONS,
   blockColorsFor,
+  paletteColorFor,
   type DayframePaletteKey,
   type HealthAutoLogMapping,
   type HealthAutoLogMappings,
@@ -131,6 +132,8 @@ import {
 } from "@/lib/settingsRefresh";
 import { clampSettingsScrollOffset, settingsScrollNeedsClamp } from "@/lib/settingsScroll";
 import { BlocksNavHeader, usePreviousScreenLabel } from "@/components/BlocksNavHeader";
+import { BlocksConfirmHost, useBlocksConfirm } from "@/components/blocks/BlocksConfirmSheet";
+import { BlocksToast, useBlocksNotice } from "@/components/blocks/BlocksToast";
 import { blocksNavOrigin, settingsBackLabel, settingsSectionTitle } from "@/lib/blocksNav";
 import { mobileTextProps } from "@/lib/mobileTypography";
 import { createGoalSaver, publishSavedTimeGoals, type TimeGoals } from "@/lib/settingsGoals";
@@ -289,6 +292,9 @@ export default function SettingsScreen() {
     themePreference
   } = useMobileTheme();
   const hapticsEnabled = useHapticsPreference();
+  // UIA-005/003: destructive confirmations use the Blocks confirm sheet; notices are toasts.
+  const confirmSheet = useBlocksConfirm();
+  const settingsNotice = useBlocksNotice();
   const params = useLocalSearchParams<{ from?: string | string[]; section?: string | string[] }>();
   const routeSettingsSection = normalizeSettingsSection(params.section);
   const settingsSection = routeSettingsSection;
@@ -934,7 +940,7 @@ export default function SettingsScreen() {
       if (!(await activityOwnerStill(owner))) return;
       if (!activity && pinned && !result.category.isPinned) {
         // The server's own quick-start cap won (another device pinned one meanwhile).
-        Alert.alert("Quick start is full", `${result.category.name} was created but not pinned. Unpin one to add it.`);
+        settingsNotice.show(`Quick start is full. ${result.category.name} was created but not pinned.`, paletteColorFor(result.category.color, result.category.name, theme.mode));
       }
       // The accepted activity shows at once, even if the refresh below fails.
       applyActivityCategories((categories) => categories.some((item) => item.id === result.category.id)
@@ -988,7 +994,7 @@ export default function SettingsScreen() {
 
   async function restoreArchivedActivity(activity: Category) {
     if (activityChanges.busy()) {
-      Alert.alert("Activities", ACTIVITY_CHANGE_BUSY_MESSAGE);
+      settingsNotice.show(ACTIVITY_CHANGE_BUSY_MESSAGE);
       return;
     }
     const change = await activityChanges.run(async () => {
@@ -1019,17 +1025,17 @@ export default function SettingsScreen() {
     // another pin or a pinned create (if it failed, quick start would end with seven).
     if (activityChanges.busy()) {
       // Visible (and spoken by VoiceOver): the tap did not change the pin.
-      Alert.alert("Activities", ACTIVITY_CHANGE_BUSY_MESSAGE);
+      settingsNotice.show(ACTIVITY_CHANGE_BUSY_MESSAGE);
       return;
     }
     // Pins are counted from this visit's own refresh, never from an older cached copy.
     if (!activityPinsFresh()) {
-      Alert.alert("Activities", "Still loading your activities. Try again in a moment.");
+      settingsNotice.show("Still loading your activities. Try again in a moment.");
       void load({ silent: true });
       return;
     }
     if (pinLimitReached(activityCategoriesRef.current, category.id)) {
-      Alert.alert("Quick start is full", `Quick start holds ${QUICK_START_PIN_LIMIT} activities. Unpin one first.`);
+      settingsNotice.show(`Quick start holds ${QUICK_START_PIN_LIMIT}. Unpin one first.`, paletteColorFor(category.color, category.name, theme.mode));
       return;
     }
     const nextPinned = !category.isPinned;
@@ -1074,43 +1080,33 @@ export default function SettingsScreen() {
   }
 
   function confirmDiscardReviewIssue(clientMutationId: string) {
-    Alert.alert(
-      "Discard saved Review change?",
-      "This removes only the permanently failed local Review change. Pending changes are not affected.",
-      [
-        { text: "Cancel", style: "cancel" },
-        {
-          text: "Discard",
-          style: "destructive",
-          onPress: () => {
-            void discardReviewSyncIssue(clientMutationId).then(
-              () => { void refreshReviewDiagnostics().catch(() => undefined); },
-              () => setSyncHelpNote("Couldn't discard that change. Nothing was removed.")
-            );
-          }
-        }
-      ]
-    );
+    confirmSheet.confirm({
+      eyebrow: "Sync help",
+      title: "Discard saved Review change?",
+      message: "This removes only the permanently failed local Review change. Pending changes are not affected.",
+      confirmLabel: "Discard",
+      onConfirm: () => {
+        void discardReviewSyncIssue(clientMutationId).then(
+          () => { void refreshReviewDiagnostics().catch(() => undefined); },
+          () => setSyncHelpNote("Couldn't discard that change. Nothing was removed.")
+        );
+      }
+    });
   }
 
   function confirmDiscardTimeEntryIssue(clientCommandId: string) {
-    Alert.alert(
-      "Discard failed time entry change?",
-      "The server version is already restored. This removes the rejected local change from diagnostics.",
-      [
-        { text: "Cancel", style: "cancel" },
-        {
-          text: "Discard",
-          style: "destructive",
-          onPress: () => {
-            void discardTimeEntrySyncIssue(clientCommandId).then(
-              () => { void refreshTimeEntryDiagnostics().catch(() => undefined); },
-              () => setSyncHelpNote("Couldn't discard that change. Nothing was removed.")
-            );
-          }
-        }
-      ]
-    );
+    confirmSheet.confirm({
+      eyebrow: "Sync help",
+      title: "Discard failed time entry change?",
+      message: "The server version is already restored. This removes the rejected local change from diagnostics.",
+      confirmLabel: "Discard",
+      onConfirm: () => {
+        void discardTimeEntrySyncIssue(clientCommandId).then(
+          () => { void refreshTimeEntryDiagnostics().catch(() => undefined); },
+          () => setSyncHelpNote("Couldn't discard that change. Nothing was removed.")
+        );
+      }
+    });
   }
 
   function retryTimeEntryIssue(clientCommandId: string) {
@@ -1125,23 +1121,18 @@ export default function SettingsScreen() {
   }
 
   function confirmDiscardTimerStopIssue(clientEventId: string) {
-    Alert.alert(
-      "Discard rejected timer Stop?",
-      "The server timer will stay unchanged. This removes only the rejected Stop saved on this iPhone.",
-      [
-        { text: "Cancel", style: "cancel" },
-        {
-          text: "Discard Stop",
-          style: "destructive",
-          onPress: () => {
-            void discardTimerStopSyncIssue(clientEventId).then(
-              () => { void refreshTimerStopDiagnostics().catch(() => undefined); },
-              () => setSyncHelpNote("Couldn't discard that Stop. Nothing was removed.")
-            );
-          }
-        }
-      ]
-    );
+    confirmSheet.confirm({
+      eyebrow: "Sync help",
+      title: "Discard rejected timer Stop?",
+      message: "The server timer will stay unchanged. This removes only the rejected Stop saved on this iPhone.",
+      confirmLabel: "Discard Stop",
+      onConfirm: () => {
+        void discardTimerStopSyncIssue(clientEventId).then(
+          () => { void refreshTimerStopDiagnostics().catch(() => undefined); },
+          () => setSyncHelpNote("Couldn't discard that Stop. Nothing was removed.")
+        );
+      }
+    });
   }
 
   function retryTimerStopIssue(clientEventId: string) {
@@ -1156,43 +1147,33 @@ export default function SettingsScreen() {
   }
 
   function confirmClearTimeEntryQuarantine() {
-    Alert.alert(
-      "Clear unreadable local sync data?",
-      "These records cannot be replayed. Clearing them removes only quarantined diagnostics.",
-      [
-        { text: "Cancel", style: "cancel" },
-        {
-          text: "Clear",
-          style: "destructive",
-          onPress: () => {
-            void clearTimeEntryOutboxQuarantine().then(
-              () => { void refreshTimeEntryDiagnostics().catch(() => undefined); },
-              () => setSyncHelpNote("Couldn't clear those records. Nothing was removed.")
-            );
-          }
-        }
-      ]
-    );
+    confirmSheet.confirm({
+      eyebrow: "Sync help",
+      title: "Clear unreadable local sync data?",
+      message: "These records cannot be replayed. Clearing them removes only quarantined diagnostics.",
+      confirmLabel: "Clear",
+      onConfirm: () => {
+        void clearTimeEntryOutboxQuarantine().then(
+          () => { void refreshTimeEntryDiagnostics().catch(() => undefined); },
+          () => setSyncHelpNote("Couldn't clear those records. Nothing was removed.")
+        );
+      }
+    });
   }
 
   function confirmClearDeviceTimeEntryQuarantine() {
-    Alert.alert(
-      "Clear unreadable device-wide sync data?",
-      "The damaged data has no recoverable account owner and cannot be replayed. Clearing it removes only device-wide quarantine diagnostics.",
-      [
-        { text: "Cancel", style: "cancel" },
-        {
-          text: "Clear",
-          style: "destructive",
-          onPress: () => {
-            void clearDeviceTimeEntryOutboxQuarantine().then(
-              () => { void refreshTimeEntryDiagnostics().catch(() => undefined); },
-              () => setSyncHelpNote("Couldn't clear those records. Nothing was removed.")
-            );
-          }
-        }
-      ]
-    );
+    confirmSheet.confirm({
+      eyebrow: "Sync help",
+      title: "Clear unreadable device-wide sync data?",
+      message: "The damaged data has no recoverable account owner and cannot be replayed. Clearing it removes only device-wide quarantine diagnostics.",
+      confirmLabel: "Clear",
+      onConfirm: () => {
+        void clearDeviceTimeEntryOutboxQuarantine().then(
+          () => { void refreshTimeEntryDiagnostics().catch(() => undefined); },
+          () => setSyncHelpNote("Couldn't clear those records. Nothing was removed.")
+        );
+      }
+    });
   }
 
   async function retryFailedAndReload() {
@@ -1218,20 +1199,15 @@ export default function SettingsScreen() {
   }
 
   function confirmClearFailedQueue() {
-    Alert.alert(
-      "Clear failed queued events",
-      "Failed queued events that Dayframe has marked invalid will be removed from this device. Queued events that are still retryable will stay queued.",
-      [
-        { text: "Cancel", style: "cancel" },
-        {
-          text: "Clear failed",
-          style: "destructive",
-          onPress: () => {
-            void clearFailedQueue();
-          }
-        }
-      ]
-    );
+    confirmSheet.confirm({
+      eyebrow: "Sync help",
+      title: "Clear failed queued events?",
+      message: "Failed queued events that Dayframe has marked invalid will be removed from this device. Queued events that are still retryable will stay queued.",
+      confirmLabel: "Clear failed",
+      onConfirm: () => {
+        void clearFailedQueue();
+      }
+    });
   }
 
   async function clearFailedQueue() {
@@ -1403,27 +1379,22 @@ export default function SettingsScreen() {
   }
 
   function confirmDeleteLocationEvidence() {
-    Alert.alert(
-      "Clear recent location history?",
-      "Removes recent location points from this iPhone and from your account. Logged blocks, saved places and Review items stay.",
-      [
-        { text: "Cancel", style: "cancel" },
-        {
-          text: "Clear history",
-          style: "destructive",
-          onPress: () => { void removeLocationEvidence(); }
-        }
-      ]
-    );
+    confirmSheet.confirm({
+      eyebrow: "Location history",
+      title: "Clear recent location history?",
+      message: "Removes recent location points from this iPhone and from your account. Logged blocks, saved places and Review items stay.",
+      confirmLabel: "Clear history",
+      onConfirm: () => { void removeLocationEvidence(); }
+    });
   }
 
   async function removeLocationEvidence() {
     try {
       const result = await deleteRecentLocationEvidence();
       await refreshLocationV2Diagnostics();
-      Alert.alert(
-        "Location evidence deleted",
-        `Removed ${result.localDeletedEvidenceCount} local and ${result.deletedEvidenceCount} server evidence items. Derived entries were kept.`
+      // A success notice, not a failure: the Blocks toast says what went (UIA-005).
+      settingsNotice.show(
+        `Cleared ${result.localDeletedEvidenceCount} local and ${result.deletedEvidenceCount} account location points. Logged blocks stay.`
       );
     } catch (error) {
       if (error instanceof AuthRequiredError) {
@@ -1661,14 +1632,13 @@ export default function SettingsScreen() {
     const reviewWarning = unsynchronisedCount > 0
       ? `${unsynchronisedCount} unsynchronised Review ${unsynchronisedCount === 1 ? "change" : "changes"} will be removed from this iPhone. `
       : "";
-    Alert.alert(
-      "Log out and remove saved changes?",
-      `${reviewWarning}Unsynchronised Location evidence will be removed from this iPhone. Synced history stays in your account.`,
-      [
-        { text: "Cancel", style: "cancel" },
-        { text: "Log out", style: "destructive", onPress: () => { void completeSignOut(); } }
-      ]
-    );
+    confirmSheet.confirm({
+      eyebrow: "Account",
+      title: "Log out and remove saved changes?",
+      message: `${reviewWarning}Unsynchronised Location evidence will be removed from this iPhone. Synced history stays in your account.`,
+      confirmLabel: "Log out",
+      onConfirm: () => { void completeSignOut(); }
+    });
   }
 
   async function completeSignOut() {
@@ -2534,6 +2504,18 @@ export default function SettingsScreen() {
           theme={theme}
         />
       ) : null}
+      {settingsNotice.notice ? (
+        <BlocksToast
+          key={settingsNotice.notice.token}
+          message={settingsNotice.notice.message}
+          reduceMotion={reduceMotion}
+          style={styles.blocksToastOverlay}
+          swatchColor={settingsNotice.notice.swatchColor}
+          testID="settings-notice-toast"
+          theme={theme}
+        />
+      ) : null}
+      <BlocksConfirmHost controller={confirmSheet} reduceMotion={reduceMotion} styles={styles} theme={theme} />
     </SafeAreaView>
   );
 }

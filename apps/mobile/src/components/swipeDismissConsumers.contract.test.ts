@@ -61,7 +61,11 @@ describe("shared swipe-dismiss ownership integration", () => {
 
   it("vetoes dirty user dismissals until the explicit Discard action authorizes one exit", () => {
     expect(editSource).toContain('"Discard changes?"');
-    expect(editSource).toContain('text: "Discard"');
+    // UIA-005: the Blocks confirm sheet, not a system alert, asks; Discard is its danger pill.
+    expect(editSource).toContain('confirmLabel: "Discard"');
+    expect(editSource).toContain('cancelLabel: "Keep editing"');
+    expect(editSource).toContain("<BlocksConfirmHost");
+    expect(editSource).not.toContain("Alert.alert");
     expect(editSource).toContain("draftHasUnsavedChanges");
     expect(editSource).toContain("discardBypassPresentationIdRef.current");
     expect(editSource).toContain("presentDiscardConfirmation();\n      return false;");

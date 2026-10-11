@@ -37,6 +37,7 @@ import {
   type MobileLearnedPlace,
   type MobilePlace
 } from "@/lib/api";
+import { BlocksConfirmHost, useBlocksConfirm } from "@/components/blocks/BlocksConfirmSheet";
 import { ActivityPickerSheet } from "@/components/ActivityPickerSheet";
 import { DayframeIcon } from "@/components/icons/DayframeIcon";
 import {
@@ -108,6 +109,7 @@ export default function PlaceEditorScreen() {
       : "create";
   const reduceMotion = useReduceMotionPreference();
   const { styles, theme } = useMobileTheme();
+  const confirmSheet = useBlocksConfirm();
   const provider = useMemo(() => createNativePlaceSearchProvider(), []);
   const [data, setData] = useState<MobileBootstrap | null>(null);
   const [loadedEntity, setLoadedEntity] = useState<MobilePlace | MobileLearnedPlace | null>(null);
@@ -422,14 +424,14 @@ export default function PlaceEditorScreen() {
   function confirmDeletePlace() {
     if (mode !== "edit" || !loadedEntity || saveInFlight.current) return;
     const place = loadedEntity as MobilePlace;
-    Alert.alert(
-      "Delete place",
-      `Delete ${placeDisplayName(withRole(place))}? Past entries keep their time but lose this place.`,
-      [
-        { text: "Cancel", style: "cancel" },
-        { text: "Delete", style: "destructive", onPress: () => void removePlace(place) }
-      ]
-    );
+    confirmSheet.confirm({
+      eyebrow: "Place",
+      title: `Delete ${placeDisplayName(withRole(place))}?`,
+      message: "Past entries keep their time but lose this place.",
+      confirmLabel: "Delete",
+      // removePlace re-checks saveInFlight, so a save started meanwhile still wins.
+      onConfirm: () => void removePlace(place)
+    });
   }
 
   async function removePlace(place: MobilePlace) {
@@ -961,6 +963,7 @@ export default function PlaceEditorScreen() {
           theme={theme}
         />
       ) : null}
+      <BlocksConfirmHost controller={confirmSheet} reduceMotion={reduceMotion} styles={styles} theme={theme} />
     </SafeAreaView>
   );
 }
