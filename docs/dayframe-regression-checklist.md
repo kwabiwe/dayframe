@@ -135,10 +135,12 @@ Review this checklist before and after changes that touch Dayframe UI, timer beh
 ## Today top and Review (Blocks parity; the Stage B presentation reads)
 
 - Today's top shows the avatar (opens Settings, account and logout), the
-  date eyebrow and the goal frame: covered time today (overlaps count once,
-  the running timer up to now) against the daily goal, one cell per goal hour
-  filled in time order, the percentage capped at 100 while the total keeps
-  counting. The default goal is eight hours when the account has none.
+  date eyebrow and the goal frame: today's framed total (every block's time,
+  overlaps included — 09:00–11:00 plus 10:00–12:00 reads 4h — and the running
+  block up to now) against the daily goal, the cells and percentage filling
+  with covered time ("framed · 3h toward 8h" in that example), one cell per
+  goal hour filled in time order, the percentage capped at 100 while the total
+  keeps counting. The default goal is eight hours when the account has none.
 - The Review nudge says "N moments to review" with an exact count, "Moments to
   review" when the count is inexact (including more than 100 open items before
   the presentation loads, or a cached zero after a presentation read failed

@@ -2,11 +2,12 @@ import { goalCountingEntries, type GoalCountingCategory } from "@dayframe/shared
 
 /**
  * Today's goal frame (Blocks prototype): the day's tracked total against the daily goal, drawn as
- * one cell per goal hour that fills with entries in the order they happened. Goals use covered
- * time, as on the web dashboard (product-model.md): time that overlapping entries share counts
- * once and is drawn in the colour of the entry that started first. Cells stop at the goal; the
- * total does not. The total is every framed minute; the cells and percent use only activities
- * that count toward the goal (`goalCountingEntries`, UIA-043: Sleep does not by default).
+ * one cell per goal hour that fills with entries in the order they happened. The total is every
+ * block's own time, overlaps included (UIA-305, owner: one total wherever totals appear, so a day
+ * can pass 24h). Goals use covered time (product-model.md): time that overlapping entries share
+ * counts once toward the goal and is drawn in the colour of the entry that started first. Cells
+ * stop at the goal; the total does not. The cells and percent use only activities that count
+ * toward the goal (`goalCountingEntries`, UIA-043: Sleep does not by default).
  */
 type GoalFrameEntry = {
   id: string;
@@ -43,7 +44,7 @@ export function buildTodayGoalFrame({
   dayStart.setHours(0, 0, 0, 0);
   const startMs = dayStart.getTime();
 
-  const totalMs = coveredPieces(entries, startMs, nowMs).reduce((sum, piece) => sum + piece.ms, 0);
+  const totalMs = loggedMs(entries, startMs, nowMs);
   const pieces = coveredPieces(goalCountingEntries(entries, categories), startMs, nowMs);
   const goalCountedMs = pieces.reduce((sum, piece) => sum + piece.ms, 0);
   const cells: GoalFrameSlice[][] = Array.from({ length: cellCount }, () => []);
@@ -75,6 +76,17 @@ export function buildTodayGoalFrame({
     percent: Math.min(100, Math.round((goalCountedMs / goalMs) * 100)),
     totalSeconds: Math.floor(totalMs / 1000),
   };
+}
+
+/** Every entry's own time today, overlaps included. */
+function loggedMs(entries: readonly GoalFrameEntry[], startMs: number, nowMs: number) {
+  let total = 0;
+  for (const entry of entries) {
+    const from = Math.max(Date.parse(entry.startedAt), startMs);
+    const to = Math.min(entry.stoppedAt ? Date.parse(entry.stoppedAt) : nowMs, nowMs);
+    if (Number.isFinite(from) && Number.isFinite(to) && to > from) total += to - from;
+  }
+  return total;
 }
 
 /** Union in start order: each entry contributes only the time no earlier entry already covers. */

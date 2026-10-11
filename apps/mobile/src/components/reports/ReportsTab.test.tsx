@@ -177,7 +177,8 @@ describe("Revision 3 Reports owner", () => {
       maxFontSizeMultiplier: 1.5,
     });
     const rangeSwitch = () => tree.root.findByType("ReportRangeSwitch" as never);
-    expect(rangeSwitch().props.moreLabel).toBe("Today");
+    // More keeps its word; the hero names the range, so the header never reflows (UIA-002).
+    expect(rangeSwitch().props.moreLabel).toBe("More");
     expect(rangeSwitch().props.moreAccessibilityLabel).toBe(
       "Choose report dates, Today",
     );

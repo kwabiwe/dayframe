@@ -10,7 +10,8 @@ import Reanimated, {
   type EntryAnimationsValues,
 } from "react-native-reanimated";
 import { DayframeIcon } from "../icons/DayframeIcon";
-import { colorWithAlpha, spokenDuration } from "../today/todayBlocksLayout";
+import { colorWithAlpha, compactDuration, spokenDuration } from "../today/todayBlocksLayout";
+import { spokenReportDuration } from "../../lib/reportsPresentation";
 import { BLOCKS_SPRING } from "../../lib/blocksMotion";
 import type { MobileTheme } from "../../lib/mobileTheme";
 import { localPresenceEntering } from "../../lib/motion";
@@ -336,17 +337,24 @@ export function ReportGoalStreak({
   goalLabel,
   reduceMotion,
   theme,
+  week,
 }: {
   days: readonly boolean[];
   goalLabel: string;
   reduceMotion: boolean;
   theme: MobileTheme;
+  /** The weekly goal (UIA-104 D4): goal time so far this week against it. */
+  week?: { seconds: number; goalSeconds: number } | null;
 }) {
   const met = days.filter(Boolean).length;
+  const weekLine = week ? `${compactDuration(week.seconds)} of your ${compactDuration(week.goalSeconds)} week` : null;
+  const weekSpoken = week
+    ? ` ${spokenReportDuration(week.seconds)} of your ${spokenReportDuration(week.goalSeconds)} weekly goal.`
+    : "";
   return (
     <Reanimated.View
       accessible
-      accessibilityLabel={`${met} of ${days.length} ${days.length === 1 ? "day" : "days"} on goal. Within 15 percent of your ${goalLabel} day.`}
+      accessibilityLabel={`${met} of ${days.length} ${days.length === 1 ? "day" : "days"} on goal. Within 15 percent of your ${goalLabel} day.${weekSpoken}`}
       entering={localPresenceEntering(reduceMotion)}
       style={[styles.streak, { backgroundColor: theme.surface }]}
       testID="reports-goal-streak"
@@ -359,6 +367,11 @@ export function ReportGoalStreak({
         <Text {...mobileTextProps("metadata")} style={{ color: theme.textSecondary, fontSize: 12.5 }}>
           Within 15% of your {goalLabel} day
         </Text>
+        {weekLine ? (
+          <Text {...mobileTextProps("metadata")} style={{ color: theme.textSecondary, fontSize: 12.5 }} testID="reports-weekly-goal">
+            {weekLine}
+          </Text>
+        ) : null}
       </View>
       <View style={styles.streakCells}>
         {days.map((on, index) => (
@@ -375,7 +388,8 @@ export function ReportGoalStreak({
 const styles = StyleSheet.create({
   switch: { alignSelf: "flex-start", maxWidth: "100%", flexDirection: "row", borderRadius: 999, padding: 3 },
   thumb: { position: "absolute", top: 3, bottom: 3, left: 0, borderRadius: 999, shadowColor: "#000", shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.18, shadowRadius: 2 },
-  segment: { flexShrink: 1, minHeight: 44, minWidth: 54, justifyContent: "center", alignItems: "center", paddingHorizontal: 12, borderRadius: 999 },
+  // 10-point sides so the switch fits beside "Reports" and the filter on one row (UIA-002).
+  segment: { flexShrink: 1, minHeight: 44, minWidth: 50, justifyContent: "center", alignItems: "center", paddingHorizontal: 10, borderRadius: 999 },
   segmentLabel: { fontSize: 14, fontWeight: "700" },
   hero: { gap: 6 },
   heroNumber: { fontFamily: MOBILE_DISPLAY_FONT.extraBold, fontSize: 52, fontVariant: ["tabular-nums"], letterSpacing: -2, lineHeight: 56 },

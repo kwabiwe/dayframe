@@ -23,8 +23,11 @@ import { REPORT_TEXT_CAP } from "@/lib/reportsTypography";
 import type { ReportAxisLayout, ReportBucket } from "@/lib/reportsRanges";
 import { CalendarGlyph } from "@/components/calendar/DatePickerCalendar";
 import { useReportTextMeasure } from "./ReportTextMeasure";
+import { reportStackHeights } from "@/lib/reportsBlocks";
 const HEIGHT = 168;
 const LABEL_HEIGHT = 38;
+type ChartSegment = { key: string; seconds: number; color: string };
+type ChartBucket = ReportBucket & { seconds: number; segments?: readonly ChartSegment[] };
 export function ReportActivityChart({
   buckets,
   axisLayout,
@@ -33,7 +36,7 @@ export function ReportActivityChart({
   semanticContextKey,
   outsidePressDismissal,
 }: {
-  buckets: Array<ReportBucket & { seconds: number }>;
+  buckets: ChartBucket[];
   axisLayout: ReportAxisLayout;
   theme: MobileTheme;
   reduceMotion: boolean;
@@ -73,7 +76,8 @@ export function ReportActivityChart({
     if (buckets[index]) setTooltip(buckets[index].key);
   };
   return (
-    <View style={s.root}>
+    // UIA-025: the period's activities as stacked columns in a card, like Week's stacks above it.
+    <View style={[s.root, { backgroundColor: theme.surface }]} testID="reports-activity-card">
       {measuredTicks.probe}
       <Pressable accessible={false} onPress={() => setTooltip(null)}>
         <Text
@@ -177,8 +181,9 @@ export function ReportActivityChart({
                     alignItems: "center",
                   }}
                 >
-                  <ReportBar
+                  <ReportStack
                     height={(bucket.seconds / axis.maximum) * HEIGHT}
+                    segments={bucket.segments ?? []}
                     width={barWidth}
                     theme={theme}
                     reduceMotion={reduceMotion}
@@ -335,13 +340,20 @@ function ReportTooltip({
     </Animated.View>
   );
 }
-function ReportBar({
+/**
+ * One period's column: its activities stacked from the bottom in the report's order and colours
+ * (never coral), each block's share of the column its share of the period's time. The column's
+ * height animates when the range or filter changes (Reduce Motion: at once).
+ */
+function ReportStack({
   height,
+  segments,
   width,
   theme,
   reduceMotion,
 }: {
   height: number;
+  segments: readonly ChartSegment[];
   width: number;
   theme: MobileTheme;
   reduceMotion: boolean;
@@ -353,22 +365,51 @@ function ReportBar({
     });
   }, [height, reduceMotion, value]);
   const style = useAnimatedStyle(() => ({ height: value.value }));
+  const radius = Math.min(4, width / 3);
+  const gap = width >= 8 ? 1.5 : 1;
+  // Each block's share of this column's own height, with minimums and gaps budgeted: when not
+  // every block fits, the smallest are left out rather than clipped (reportStackHeights). The
+  // shares become flex weights, so the blocks follow the column's height animation.
+  const heights = reportStackHeights(segments.map((segment) => segment.seconds), segments.reduce((sum, segment) => sum + segment.seconds, 0), height, 1, gap, 0);
+  // Flex grows only by the weights' share when they sum below one, so a sub-point column would get
+  // a fraction of its height (and round to no pixels); scaled to sum at least one, the kept blocks
+  // always fill the column between them.
+  const weightTotal = heights.reduce((sum, value) => sum + value, 0);
+  const weightScale = weightTotal > 0 && weightTotal < 1 ? 1 / weightTotal : 1;
   return (
     <Animated.View
       testID="report-activity-bar"
-      style={[s.bar, { width, backgroundColor: theme.accent }, style]}
-    />
+      style={[s.stack, { width, gap }, style]}
+    >
+      {segments.length ? (
+        segments.map((segment, index) =>
+          heights[index] ? (
+            // Heights are flex weights of the animating column, so blocks shrink and grow with it;
+            // a block that leaves or arrives (a filter change) fades (Reduce Motion: at once).
+            <Animated.View
+              key={segment.key}
+              entering={reduceMotion ? undefined : FadeIn.duration(MOBILE_MOTION.layout)}
+              exiting={reduceMotion ? undefined : FadeOut.duration(MOBILE_MOTION.layout)}
+              testID="report-activity-block"
+              style={{ flexGrow: heights[index] * weightScale, flexShrink: 1, flexBasis: 0, borderRadius: radius, backgroundColor: segment.color }}
+            />
+          ) : null,
+        )
+      ) : (
+        <View style={{ flex: 1, borderRadius: radius, backgroundColor: theme.textMuted }} />
+      )}
+    </Animated.View>
   );
 }
 const s = StyleSheet.create({
-  root: { gap: 16, paddingTop: 24 },
+  root: { gap: 14, borderRadius: 22, paddingHorizontal: 16, paddingTop: 16, paddingBottom: 8 },
   title: {
     fontSize: 18,
     lineHeight: 24,
     paddingVertical: 1,
     fontWeight: "600",
   },
-  plotRow: { flexDirection: "row", gap: 8, paddingTop: 8 },
+  plotRow: { flexDirection: "row", gap: 8 },
   plot: { flex: 1, minWidth: 0 },
   tick: {
     position: "absolute",
@@ -383,7 +424,7 @@ const s = StyleSheet.create({
     top: 6,
   },
   xLabel: { fontSize: 9, textAlign: "center" },
-  bar: { borderTopLeftRadius: 3, borderTopRightRadius: 3 },
+  stack: { flexDirection: "column-reverse", overflow: "hidden" },
   tooltip: {
     position: "absolute",
     bottom: LABEL_HEIGHT + 2,
