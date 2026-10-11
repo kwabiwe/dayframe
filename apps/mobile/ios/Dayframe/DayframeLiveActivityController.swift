@@ -19,6 +19,7 @@ enum DayframeLiveActivityController {
     title: String,
     categoryName: String?,
     categoryColor: String? = nil,
+    categoryColorLight: String? = nil,
     startedAt: Date = Date()
   ) async -> StartResult? {
     guard #available(iOS 16.2, *) else {
@@ -37,7 +38,8 @@ enum DayframeLiveActivityController {
       startedAt: startedAt,
       elapsedSeconds: 0,
       isRunning: true,
-      canStop: false
+      canStop: false,
+      categoryColorLight: cleanText(categoryColorLight)
     )
 
     if
@@ -141,7 +143,8 @@ enum DayframeLiveActivityController {
       startedAt: current.startedAt,
       elapsedSeconds: current.elapsedSeconds,
       isRunning: current.isRunning,
-      canStop: true
+      canStop: true,
+      categoryColorLight: current.categoryColorLight
     )
     await activity.update(ActivityContent(state: state, staleDate: nil))
     return true
@@ -239,7 +242,8 @@ enum DayframeLiveActivityController {
       startedAt: activity.content.state.startedAt,
       elapsedSeconds: elapsedSeconds(from: activity.content.state.startedAt),
       isRunning: false,
-      canStop: false
+      canStop: false,
+      categoryColorLight: activity.content.state.categoryColorLight
     )
     await activity.end(
       ActivityContent(state: state, staleDate: Date()),

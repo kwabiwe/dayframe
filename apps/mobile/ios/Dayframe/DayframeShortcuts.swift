@@ -167,6 +167,7 @@ private enum DayframeShortcutPerformer {
         title: event.description ?? category?.name ?? "No activity",
         categoryName: category?.name ?? dayframeCleanText(categoryName),
         categoryColor: category?.color,
+        categoryColorLight: category?.lightColor,
         startedAt: event.occurredAt
       )
     case .stopEntry(let entryId):
@@ -379,6 +380,8 @@ private struct DayframeShortcutWorkspace: Decodable {
 
 private struct DayframeShortcutCategory: Decodable {
   let color: String?
+  // Optional: catalogs written by older builds have the dark fill only.
+  let lightColor: String?
   let id: String
   let name: String
 }

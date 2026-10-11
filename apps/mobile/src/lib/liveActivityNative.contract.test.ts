@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
+import { DAYFRAME_BLOCKS, DAYFRAME_THEME } from "@dayframe/shared";
 
 const mobileRoot = fileURLToPath(new URL("../../", import.meta.url));
 
@@ -237,15 +238,15 @@ describe("native Live Activity presentation contract", () => {
     expect(bridge).toContain("RCT_EXTERN_METHOD(enableStop:");
   });
 
-  it("lifts both lock-screen metadata rows clear of the lower clipping edge", () => {
+  it("keeps the lock-screen rows whole: activity, description, then the digits", () => {
     const liveActivity = readFileSync(
       `${mobileRoot}ios/DayframeLiveActivity/DayframeTimerLiveActivity.swift`,
       "utf8"
     );
-
-    expect(liveActivity).toMatch(
-      /DayframeLiveActivityLabel\(state: state, size: \.lockScreen\)\s+\.offset\(y: -4\)/
-    );
+    const lockScreen = liveActivity.slice(liveActivity.indexOf("private struct DayframeLockScreenTimerView"));
+    expect(lockScreen.indexOf("dayframeActivityName(state)")).toBeLessThan(lockScreen.indexOf("dayframeDistinctDescription(state)"));
+    expect(lockScreen.indexOf("dayframeDistinctDescription(state)")).toBeLessThan(lockScreen.indexOf("size: .lockScreen"));
+    expect(lockScreen).toContain(".padding(.vertical, 14)");
   });
 
   it("keeps the complete Dynamic Island metadata row above the clipping edge", () => {
@@ -256,11 +257,41 @@ describe("native Live Activity presentation contract", () => {
 
     expect(liveActivity).toContain("dayframeExpandedMetadataLift: CGFloat = 10");
     expect(liveActivity).toMatch(
-      /DayframeLiveActivityLabel\(state: context\.state, size: \.expandedIsland\)[\s\S]*?\.offset\(y: -dayframeExpandedMetadataLift\)/
+      /DayframeIslandLabel\(state: context\.state, colors: colors\)[\s\S]*?\.offset\(y: -dayframeExpandedMetadataLift\)/
     );
     expect(liveActivity).toContain("@ScaledMetric(relativeTo: .headline)");
     expect(liveActivity).toContain("@ScaledMetric(relativeTo: .subheadline)");
     expect(liveActivity).toContain(".fixedSize(horizontal: false, vertical: true)");
-    expect(liveActivity).toContain(".frame(minHeight: categorySize + 2, alignment: .topLeading)");
+  });
+
+  it("is drawn in Blocks: token colours per appearance, Bricolage digits, block markers, no SF Symbols (UIA-028)", () => {
+    const liveActivity = readFileSync(
+      `${mobileRoot}ios/DayframeLiveActivity/DayframeTimerLiveActivity.swift`,
+      "utf8"
+    );
+    const plist = readFileSync(`${mobileRoot}ios/DayframeLiveActivity/Info.plist`, "utf8");
+    expect(liveActivity).not.toContain("systemName:");
+    expect(liveActivity).not.toContain("design: .rounded");
+    expect(liveActivity).not.toContain("Circle()\n              .fill(categoryColor)");
+    expect(liveActivity).toContain('"BricolageGrotesque-Bold"');
+    expect(plist).toMatch(/<key>UIAppFonts<\/key>\s*<array>\s*<string>BricolageGrotesque-Bold\.ttf<\/string>/);
+    expect(liveActivity).toContain("@Environment(\\.colorScheme)");
+    expect(liveActivity).toContain("state.categoryColorLight ?? state.categoryColor");
+    // Tokens from packages/shared (theme.ts / blocks.ts).
+    const tokens: Record<string, string> = {
+      accentDark: DAYFRAME_THEME.dark.accent,
+      surfaceRaisedDark: DAYFRAME_THEME.dark.surfaceRaised,
+      surfaceRaisedLight: DAYFRAME_THEME.light.surfaceRaised,
+      textPrimaryDark: DAYFRAME_THEME.dark.textPrimary,
+      textPrimaryLight: DAYFRAME_THEME.light.textPrimary,
+      textMutedDark: DAYFRAME_THEME.dark.textMuted
+    };
+    for (const [name, hex] of Object.entries(tokens)) {
+      expect(liveActivity).toContain(`static let ${name} = Color(dayframeHex: "${hex}")!`);
+    }
+    expect(liveActivity).toContain(`static let onBlockWhite = "${DAYFRAME_BLOCKS.onBlock.white}"`);
+    expect(liveActivity).toContain(`static let onBlockInk = "${DAYFRAME_BLOCKS.onBlock.ink}"`);
+    // The name is never shown twice when a block has no description.
+    expect(liveActivity).toContain("title != dayframeActivityName(state)");
   });
 });
