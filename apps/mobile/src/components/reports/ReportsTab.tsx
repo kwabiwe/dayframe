@@ -563,23 +563,32 @@ export function ReportsTab({
     AccessibilityInfo.announceForAccessibility(heroSpokenLabel);
   }, [heroSpokenLabel, isFocused, foreground]);
   const dailyGoalMinutes = data.user.dailyGoalMinutes;
-  const goalDays =
+  // Goal time per day of the week (UIA-043): covered time in activities that count, never the
+  // logged sum — the same fresh report as the totals, or, from an older server, the phone's entries.
+  const weekGoalSeconds =
     choice === "week" && selection.mode === "all" && report
       ? (() => {
-          // Goal time is covered time in activities that count (UIA-043), never the logged sum: the
-          // same fresh report as the totals, or, from an older server without it, the phone's entries.
           const fromServer = report.buckets.every((bucket) => typeof bucket.goalSeconds === "number");
           const local = fromServer ? null : reportGoalSeconds(data, range.buckets, reportNow);
-          return weekGoalDays(
-            days.map((day, index) => ({
-              ...day,
-              goalSeconds: (fromServer ? report.buckets[index]?.goalSeconds : local?.[index]) ?? 0,
-            })),
-            nowMs,
-            dailyGoalMinutes,
-          );
+          return days.map((_, index) => (fromServer ? report.buckets[index]?.goalSeconds : local?.[index]) ?? 0);
         })()
-      : [];
+      : null;
+  const goalDays = weekGoalSeconds
+    ? weekGoalDays(
+        days.map((day, index) => ({ ...day, goalSeconds: weekGoalSeconds[index] ?? 0 })),
+        nowMs,
+        dailyGoalMinutes,
+      )
+    : [];
+  // The weekly goal on Week (UIA-104 D4): this week's goal time against it.
+  const weeklyGoalMinutes = data.user.weeklyGoalMinutes;
+  const weeklyGoal =
+    weekGoalSeconds && weeklyGoalMinutes && weeklyGoalMinutes > 0
+      ? {
+          goalSeconds: weeklyGoalMinutes * 60,
+          seconds: weekGoalSeconds.reduce((sum, seconds) => sum + seconds, 0),
+        }
+      : null;
   const playBlocks = Boolean(report) && !blocksAnimated.current && !reduceMotion && resolved && isFocused;
   if (playBlocks && choice === "week" && days.some((day) => day.segments.length))
     blocksAnimated.current = true;
@@ -617,6 +626,8 @@ export function ReportsTab({
         style={s.screen}
       >
         {measuredNumbers.probe}
+        {/* One row (UIA-002): the title, then the filter and Week · Month · More; on a narrow
+            screen or with large text the controls wrap under the title instead of shrinking. */}
         <View style={s.titleRow}>
           <Pressable
             accessible={false}
@@ -634,58 +645,60 @@ export function ReportsTab({
               Reports
             </Text>
           </Pressable>
-          <Pressable
-            ref={filterRef}
-            accessibilityRole="button"
-            accessibilityLabel={
-              filterCount === null
-                ? "Filter activities, all activities selected"
-                : `Filter activities, ${filterCount} ${filterCount === 1 ? "activity" : "activities"} selected`
-            }
-            onPress={openFilters}
-            style={[
-              s.iconAction,
-              {
-                backgroundColor:
-                  filterCount !== null ? theme.accentSoft : theme.surfaceMuted,
-              },
-            ]}
-            testID="reports-filter-button"
-          >
-            <CalendarGlyph kind="funnel" color={theme.textPrimary} />
-            {filterCount !== null ? (
-              <Text
-                maxFontSizeMultiplier={REPORT_TEXT_CAP.small}
-                style={[
-                  s.badge,
-                  {
-                    color: theme.textPrimary,
-                    backgroundColor: theme.surfaceInset,
-                  },
-                ]}
-              >
-                {filterCount}
-              </Text>
-            ) : null}
-          </Pressable>
+          <View style={s.headControls}>
+            <Pressable
+              ref={filterRef}
+              accessibilityRole="button"
+              accessibilityLabel={
+                filterCount === null
+                  ? "Filter activities, all activities selected"
+                  : `Filter activities, ${filterCount} ${filterCount === 1 ? "activity" : "activities"} selected`
+              }
+              onPress={openFilters}
+              style={[
+                s.iconAction,
+                {
+                  backgroundColor:
+                    filterCount !== null ? theme.accentSoft : theme.surfaceMuted,
+                },
+              ]}
+              testID="reports-filter-button"
+            >
+              <CalendarGlyph kind="funnel" color={theme.textPrimary} />
+              {filterCount !== null ? (
+                <Text
+                  maxFontSizeMultiplier={REPORT_TEXT_CAP.small}
+                  style={[
+                    s.badge,
+                    {
+                      color: theme.textPrimary,
+                      backgroundColor: theme.surfaceInset,
+                    },
+                  ]}
+                >
+                  {filterCount}
+                </Text>
+              ) : null}
+            </Pressable>
+            <ReportRangeSwitch
+              choice={choice}
+              moreAccessibilityLabel={`Choose report dates, ${range.title}`}
+              moreLabel={moreLabel}
+              moreRef={calendarRef}
+              onChoose={(value) => {
+                if (value === choice) return;
+                playHaptic("tick");
+                setTooltipOutsidePress((current) => current + 1);
+                announceHero.current = true;
+                setFocusedDayKey(null);
+                setChoice(value);
+              }}
+              onMore={openRanges}
+              reduceMotion={reduceMotion}
+              theme={theme}
+            />
+          </View>
         </View>
-        <ReportRangeSwitch
-          choice={choice}
-          moreAccessibilityLabel={`Choose report dates, ${range.title}`}
-          moreLabel={moreLabel}
-          moreRef={calendarRef}
-          onChoose={(value) => {
-            if (value === choice) return;
-            playHaptic("tick");
-            setTooltipOutsidePress((current) => current + 1);
-            announceHero.current = true;
-            setFocusedDayKey(null);
-            setChoice(value);
-          }}
-          onMore={openRanges}
-          reduceMotion={reduceMotion}
-          theme={theme}
-        />
         {report ? (
           <ReportHero
             delta={delta}
@@ -718,6 +731,7 @@ export function ReportsTab({
             days={goalDays}
             goalLabel={compactDuration(dailyGoalMinutes * 60)}
             reduceMotion={reduceMotion}
+            week={weeklyGoal}
             theme={theme}
           />
         ) : null}
@@ -800,8 +814,9 @@ export function ReportsTab({
 }
 const s = StyleSheet.create({
   screen: { gap: 14 },
-  titleRow: { flexDirection: "row", alignItems: "center", gap: 12 },
-  titlePress: { flex: 1, minWidth: 0 },
+  titleRow: { flexDirection: "row", flexWrap: "wrap", alignItems: "center", columnGap: 12, rowGap: 10 },
+  titlePress: { flexGrow: 1, flexShrink: 0 },
+  headControls: { flexDirection: "row", alignItems: "center", gap: 8, maxWidth: "100%" },
   title: { fontFamily: MOBILE_DISPLAY_FONT.bold, fontSize: 30, lineHeight: 36 },
   outsideDismissSurface: { gap: 14 },
   row: { flexDirection: "row", alignItems: "center", gap: 8 },

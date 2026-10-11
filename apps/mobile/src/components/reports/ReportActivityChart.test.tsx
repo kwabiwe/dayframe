@@ -210,6 +210,36 @@ describe("Activity chart", () => {
     ).toBe(true);
     act(() => tree.unmount());
   });
+  it("stacks each period's activities in their colours inside a card, never coral (UIA-025)", () => {
+    let tree!: ReturnType<typeof create>;
+    const stacked = [
+      { ...buckets[1], seconds: 5400, segments: [
+        { key: "work", seconds: 3600, color: "blue" },
+        { key: "walk", seconds: 1800, color: "lime" },
+      ] },
+    ];
+    act(() => {
+      tree = create(
+        <ReportActivityChart
+          buckets={stacked}
+          axisLayout="single-day"
+          theme={{ accent: "coral", surface: "card", textMuted: "muted" } as never}
+          reduceMotion
+          semanticContextKey="stack"
+          outsidePressDismissal={0}
+        />,
+      );
+    });
+    const card = tree.root.findByProps({ testID: "reports-activity-card" });
+    expect(card.props.style[1].backgroundColor).toBe("card");
+    const blocks = tree.root.findAllByProps({ testID: "report-activity-block" });
+    expect(blocks.map((block) => [block.props.style.backgroundColor, block.props.style.flex])).toEqual([
+      ["blue", 3600],
+      ["lime", 1800],
+    ]);
+    expect(JSON.stringify(tree.toJSON())).not.toContain("coral");
+    act(() => tree.unmount());
+  });
   it("keeps chart actions, live ticks, theme updates and vertical scrolling selected", () => {
     const { tree, plot, tap } = mount();
     tap(180);
