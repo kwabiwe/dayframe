@@ -4,7 +4,7 @@ import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import type { ReactNode } from "react";
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
-import { CheckCircle2, Folder, Settings } from "lucide-react";
+import { Check, Folder, Settings } from "lucide-react";
 import { AppShellRuntimeProvider, useAppShellRuntime } from "@/components/AppShellRuntime";
 import { DayframeBrand } from "@/components/brand/DayframeBrand";
 import { DayframeIcon } from "@/components/blocks/DayframeIcon";
@@ -372,34 +372,39 @@ function ProfileWorkspacePopover({
 
   return (
     <PopoverPanel title="Profile & workspace" onClose={onClose} align="bottom-left" busy={isBusy}>
-      <div className="swiss-profile-summary">
-        <span>{initials(data.user.name)}</span>
-        <div><strong>{data.user.name}</strong><small>{data.user.email}</small></div>
-      </div>
-
-      <section className="swiss-profile-section" aria-labelledby="workspace-switcher-heading">
-        <h3 id="workspace-switcher-heading">Workspaces</h3>
-        <div className="swiss-menu-list">
-          {data.workspaces.map((workspace) => (
-            <button
-              key={workspace.id}
-              type="button"
-              disabled={isBusy}
-              className={workspace.id === data.workspace.id ? "is-selected" : ""}
-              onClick={() => void switchWorkspace(workspace.id)}
-            >
-              <Folder size={18} />
-              <span>{workspace.name}</span>
-              {workspace.id === data.workspace.id ? <CheckCircle2 size={16} /> : null}
-            </button>
-          ))}
+      <div className="df-profile">
+        <div className="df-profile-card">
+          <span aria-hidden="true">{initials(data.user.name)}</span>
+          <div><strong>{data.user.name}</strong><small>{data.user.email}</small></div>
         </div>
-        {error ? <p className="swiss-inline-error" role="alert">{error}</p> : null}
-      </section>
 
-      <div className="swiss-profile-links">
-        <Link href="/settings#account" className="swiss-menu-action" onClick={onClose}><Settings size={17} />Settings</Link>
-        <SignOutControl className="swiss-menu-action" showIcon />
+        <section aria-labelledby="workspace-switcher-heading">
+          <h3 id="workspace-switcher-heading">Workspaces</h3>
+          <div className="df-profile-rows">
+            {data.workspaces.map((workspace) => {
+              const current = workspace.id === data.workspace.id;
+              return (
+                <button
+                  aria-current={current || undefined}
+                  disabled={isBusy}
+                  key={workspace.id}
+                  onClick={() => void switchWorkspace(workspace.id)}
+                  type="button"
+                >
+                  <Folder aria-hidden="true" size={18} />
+                  <span>{workspace.name}</span>
+                  {current ? <Check aria-label="Current workspace" size={16} /> : null}
+                </button>
+              );
+            })}
+          </div>
+          {error ? <p className="swiss-inline-error" role="alert">{error}</p> : null}
+        </section>
+
+        <div className="df-profile-rows">
+          <Link href="/settings#account" onClick={onClose}><Settings aria-hidden="true" size={17} />Settings</Link>
+          <SignOutControl className="" showIcon />
+        </div>
       </div>
     </PopoverPanel>
   );
@@ -408,8 +413,8 @@ function ProfileWorkspacePopover({
 function HelpDialog({ onClose }: { onClose: () => void }) {
   return (
     <ModalDialog description="Use these shortcuts from Dayframe screens when you are not typing in a field." onClose={onClose} title="Keyboard shortcuts">
-      <div className="swiss-shortcut-list">
-        {shortcuts.map(([keys, action]) => <div key={keys}><kbd>{keys}</kbd><span>{action}</span></div>)}
+      <div className="df-shortcuts">
+        {shortcuts.map(([keys, action]) => <div key={keys}><span>{action}</span><kbd>{keys}</kbd></div>)}
       </div>
     </ModalDialog>
   );

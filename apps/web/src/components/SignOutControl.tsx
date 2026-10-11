@@ -31,7 +31,7 @@ export function SignOutControl({
     <form className="sign-out-form" action="/logout" method="post" onSubmit={submit}>
       <button className={className} type="submit" disabled={pending} aria-live="polite">
         {showIcon ? <LogOut size={17} aria-hidden="true" /> : null}
-        {pending ? "Signing out…" : "Log out"}
+        {pending ? "Signing out…" : "Sign out"}
       </button>
     </form>
   );
