@@ -131,9 +131,11 @@ private struct DayframeLockScreenTimerView: View {
     let colors = DayframeLiveBlockColors(state: state, colorScheme: colorScheme)
     HStack(alignment: .center, spacing: 14) {
       VStack(alignment: .leading, spacing: 2) {
+        // Full on-block colour: measured contrast holds only for opaque text (hierarchy comes from
+        // size and weight).
         Text(dayframeActivityName(state))
-          .font(.system(size: activitySize, weight: .semibold))
-          .foregroundStyle(colors.text.opacity(0.78))
+          .font(.system(size: activitySize, weight: .medium))
+          .foregroundStyle(colors.text)
           .lineLimit(1)
           .minimumScaleFactor(0.75)
           .fixedSize(horizontal: false, vertical: true)
@@ -178,24 +180,31 @@ private struct DayframeIslandLabel: View {
 
   var body: some View {
     HStack(spacing: 8) {
+      // The chip truncates within the region (long names, large text) and is kept ahead of the
+      // description, which gives way first.
       Text(dayframeActivityName(state))
         .font(.system(size: chipSize, weight: .semibold))
         .foregroundStyle(colors.text)
         .lineLimit(1)
+        .truncationMode(.tail)
         .padding(.horizontal, 8)
         .padding(.vertical, 4)
         .background(
           RoundedRectangle(cornerRadius: DayframeLiveTokens.chipRadius, style: .continuous)
             .fill(colors.fill)
         )
-        .fixedSize(horizontal: true, vertical: false)
+        .fixedSize(horizontal: false, vertical: true)
+        .layoutPriority(1)
       if let description = dayframeDistinctDescription(state) {
         Text(description)
           .font(.system(size: descriptionSize, weight: .semibold))
           .foregroundStyle(DayframeLiveTokens.textPrimaryDark)
           .lineLimit(1)
+          .truncationMode(.tail)
           .minimumScaleFactor(0.72)
           .fixedSize(horizontal: false, vertical: true)
+          // Keeps a readable start of the description beside a long activity name.
+          .frame(minWidth: 80, alignment: .leading)
       }
     }
   }

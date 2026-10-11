@@ -293,5 +293,9 @@ describe("native Live Activity presentation contract", () => {
     expect(liveActivity).toContain(`static let onBlockInk = "${DAYFRAME_BLOCKS.onBlock.ink}"`);
     // The name is never shown twice when a block has no description.
     expect(liveActivity).toContain("title != dayframeActivityName(state)");
+    // On-block text stays opaque (measured contrast), and the island chip can truncate (Codex r1).
+    expect(liveActivity).not.toMatch(/colors\.text\.opacity\(/);
+    expect(liveActivity).not.toContain(".fixedSize(horizontal: true");
+    expect(liveActivity).toContain(".frame(minWidth: 80, alignment: .leading)");
   });
 });
