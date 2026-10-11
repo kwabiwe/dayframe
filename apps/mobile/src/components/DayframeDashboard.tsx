@@ -2586,16 +2586,18 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
           <View style={styles.header}>
             <DashboardBrandLockup styles={styles} theme={theme} />
           </View>
-          <View style={styles.panel}>
-            <Text style={styles.sectionTitle}>{authView === "signup" ? "Create account" : "Log in"}</Text>
-            <Text style={styles.muted}>
-              Use your Dayframe account to sync timers, location events and Apple Health imports with your workspace.
+          <View style={styles.authCard}>
+            <Text accessibilityRole="header" style={styles.authTitle}>{authView === "signup" ? "Create account" : "Log in"}</Text>
+            <Text style={styles.authBody}>
+              {authView === "signup"
+                ? "Create your Dayframe account and personal workspace."
+                : "Use your Dayframe account to sync timers, places and Apple Health with your workspace."}
             </Text>
             {authView === "signup" ? (
               <>
                 <TextInput
                   ref={authNameRef}
-                  style={styles.textInput}
+                  style={[styles.textInput, styles.authInput]}
                   value={authName}
                   onChangeText={setAuthName}
                   onSubmitEditing={() => authWorkspaceRef.current?.focus()}
@@ -2609,7 +2611,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
                 />
                 <TextInput
                   ref={authWorkspaceRef}
-                  style={styles.textInput}
+                  style={[styles.textInput, styles.authInput]}
                   value={authWorkspace}
                   onChangeText={setAuthWorkspace}
                   onSubmitEditing={() => authEmailRef.current?.focus()}
@@ -2625,7 +2627,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
             ) : null}
             <TextInput
               ref={authEmailRef}
-              style={styles.textInput}
+              style={[styles.textInput, styles.authInput]}
               value={authEmail}
               onChangeText={setAuthEmail}
               onSubmitEditing={() => authPasswordRef.current?.focus()}
@@ -2646,6 +2648,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
                   ref={authPasswordRef}
                   style={[
                     styles.textInput,
+                    styles.authInput,
                     styles.authPasswordInput,
                     authPasswordVisible ? styles.authPasswordInputRevealed : null
                   ]}
@@ -2671,7 +2674,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
                     pointerEvents="none"
                     style={styles.authPasswordRevealOverlay}
                   >
-                    <Text numberOfLines={1} style={styles.authPasswordRevealText}>
+                    <Text numberOfLines={1} style={[styles.authPasswordRevealText, styles.authInput]}>
                       {authPassword}
                     </Text>
                   </View>
@@ -2699,27 +2702,32 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
               accessibilityState={{ disabled: authSubmitting }}
               disabled={authSubmitting}
               style={pressable(
-                [styles.primaryButton, authSubmitting ? styles.buttonDisabled : null],
+                [styles.primaryButton, styles.authPrimaryButton, authSubmitting ? styles.buttonDisabled : null],
                 styles.buttonPressed
               )}
               onPress={submitAuth}
             >
-              <Text style={styles.primaryButtonText}>
+              <Text style={[styles.primaryButtonText, styles.authPrimaryButtonText]}>
                 {authSubmitting ? "Working..." : authView === "signup" ? "Create account" : "Log in"}
               </Text>
             </Pressable>
-            <Pressable
-              style={pressable([styles.secondaryButton, styles.authSecondaryButton], styles.buttonPressed)}
-              onPress={() => {
-                setAuthError(null);
-                setAuthPasswordVisible(false);
-                setAuthView(authView === "signup" ? "login" : "signup");
-              }}
-            >
-              <Text style={[styles.secondaryButtonText, styles.authSecondaryButtonText]}>
-                {authView === "signup" ? "Use existing account" : "Create account"}
+            <View style={styles.authSwitchRow}>
+              <Text style={styles.authSwitchText}>
+                {authView === "signup" ? "Already have an account?" : "New to Dayframe?"}
               </Text>
-            </Pressable>
+              <Pressable
+                accessibilityLabel={authView === "signup" ? "Log in with an existing account" : "Create an account"}
+                accessibilityRole="button"
+                style={pressable(styles.authSwitchLink, styles.buttonPressed)}
+                onPress={() => {
+                  setAuthError(null);
+                  setAuthPasswordVisible(false);
+                  setAuthView(authView === "signup" ? "login" : "signup");
+                }}
+              >
+                <Text style={styles.authSwitchLinkText}>{authView === "signup" ? "Log in" : "Create one"}</Text>
+              </Pressable>
+            </View>
           </View>
         </ScrollView>
       </SafeAreaView>
