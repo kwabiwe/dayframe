@@ -16,6 +16,13 @@ export type TimerDraftInput = Partial<TimerDraft>;
 export type TimerMutationGate = ReturnType<typeof createTimerMutationGate>;
 
 export type TimerMutationOutcome = { ok: true } | { ok: false; error: string };
+/**
+ * An accepted Start also says what it replaced: the block running when this Start actually ran
+ * (not when it was asked for, which a queued Start may outlive) and when the switch happened.
+ */
+export type TimerStartOutcome =
+  | { ok: true; replaced: BootstrapData["activeEntry"]; switchedAt: string }
+  | { ok: false; error: string };
 
 export type TimerStartRequestPayload = {
   mode: "start";
@@ -245,8 +252,8 @@ export async function runTimerStartMutation({
   setError: (error: string | null) => void;
   send: (payload: TimerStartRequestPayload) => Promise<void>;
   refresh: () => Promise<void>;
-}): Promise<TimerMutationOutcome> {
-  const result = await gate.runLatest(async () => {
+}): Promise<TimerStartOutcome> {
+  const result = await gate.runLatest(async (): Promise<TimerStartOutcome> => {
     const acceptedSnapshot = getCurrentSnapshot?.() ?? snapshot;
     const acceptedDraft = getCurrentDraft?.() ?? currentDraft;
     const draft = mergeTimerDraft(acceptedDraft, input);
@@ -259,7 +266,7 @@ export async function runTimerStartMutation({
 
     try {
       await send(timerStartRequestPayload(draft));
-      return { ok: true } as const;
+      return { ok: true, replaced: acceptedSnapshot.activeEntry, switchedAt: startedAt } as const;
     } catch (error) {
       // A failed switch returns to the entry that is still running, with its own details (a
       // draft typed for the rejected entry must not be saved onto it). From idle, keep anything

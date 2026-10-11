@@ -316,10 +316,13 @@ export function PersistentTimerBar({ workspaceMode = false }: { workspaceMode?: 
       announce(alreadyRecordingToastMessage(active!), swatch);
       return;
     }
-    const previous = active;
     setTimerDraft(draft);
+    // The toast names the block this Start actually replaced, timed to the switch: a queued Start
+    // can run after an earlier one was rejected or accepted.
     void startTimer(draft).then((outcome) => {
-      if (outcome.ok && previous) announce(switchedToastMessage(action.label, previous, Date.now()), swatch);
+      if (outcome.ok && outcome.replaced) {
+        announce(switchedToastMessage(action.label, outcome.replaced, Date.parse(outcome.switchedAt)), swatch);
+      }
     });
   }
 

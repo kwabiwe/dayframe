@@ -13468,7 +13468,8 @@ dialog.ui-dialog.df-rf-dialog {
 }
 
 @media (hover: none), (max-width: 760px) {
-  .df-actmenu-chips .df-rchip {
+  .df-actmenu-chips .df-rchip,
+  .df-actmenu-chips .df-rchip.category-picker-create-option {
     min-height: 44px;
   }
 }

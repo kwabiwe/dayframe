@@ -102,13 +102,19 @@ describe("Blocks command timer", () => {
 
 describe("Command timer menus and switch toasts (UIA-202/209/210)", () => {
   it("says Switched with the time logged to the block it replaced, without Undo", async () => {
-    vi.useFakeTimers({ toFake: ["Date"] });
-    vi.setSystemTime(new Date("2026-08-14T09:42:30.000Z"));
-    runtime = runtimeFixture({ activeEntry: timeEntry({ categoryId: "focus", categoryName: "Focus", description: "Plan launch" }) });
+    const running = timeEntry({ categoryId: "focus", categoryName: "Focus", description: "Plan launch" });
+    runtime = runtimeFixture({ activeEntry: running });
+    // The toast names what the Start actually replaced when it ran (here an earlier queued block),
+    // timed to the switch, not the block on screen when the quick start was pressed.
+    (runtime.startTimer as ReturnType<typeof vi.fn>).mockResolvedValue({
+      ok: true,
+      replaced: { ...running, id: "queued", description: "Standup", startedAt: "2026-08-14T09:30:00.000Z" },
+      switchedAt: "2026-08-14T09:42:00.000Z"
+    });
     render(<PersistentTimerBar />);
     await act(async () => { fireEvent.click(screen.getByRole("button", { name: "Start Writing (2)" })); });
     expect(runtime.startTimer).toHaveBeenCalledWith({ categoryId: "write", description: "", tagNames: [] });
-    expect(screen.getByRole("status").textContent).toContain("Switched to Writing · 42m logged to Plan launch");
+    expect(screen.getByRole("status").textContent).toContain("Switched to Writing · 12m logged to Standup");
     expect(screen.queryByRole("button", { name: "Undo" })).toBeNull();
   });
 

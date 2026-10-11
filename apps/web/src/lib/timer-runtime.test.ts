@@ -93,6 +93,39 @@ describe("shell timer runtime", () => {
     expect(draft).toEqual(timerDraftForEntry(running));
   });
 
+  it("reports the block a queued Start actually replaced, after an earlier Start was rejected", async () => {
+    const gate = createTimerMutationGate();
+    const focus = entry({ id: "focus-entry", description: "Focus", categoryId: "focus" });
+    let current = bootstrapData(focus);
+    let draft: TimerDraft = timerDraftForEntry(focus);
+    let rejectWriting: ((error: Error) => void) | undefined;
+    let clock = "2026-08-24T16:00:00.000Z";
+    const run = (categoryId: string, send: () => Promise<void>) => runTimerStartMutation({
+      gate,
+      snapshot: current,
+      currentDraft: draft,
+      input: { categoryId, description: "", tagNames: [] },
+      now: () => clock,
+      createOptimisticId: (startedAt) => `optimistic:${categoryId}:${startedAt}`,
+      getCurrentDraft: () => draft,
+      getCurrentSnapshot: () => current,
+      commit: (next) => { current = next; },
+      setDraft: (next) => { draft = next; },
+      setBusy: () => undefined,
+      setError: () => undefined,
+      send,
+      refresh: async () => undefined
+    });
+    const writing = run("write", () => new Promise<void>((_, fail) => { rejectWriting = fail; }));
+    await vi.waitFor(() => expect(rejectWriting).toBeDefined());
+    // Admin is asked for while Writing is pending (Writing is on screen), then Writing fails.
+    const admin = run("admin", async () => undefined);
+    clock = "2026-08-24T16:05:00.000Z";
+    rejectWriting!(new Error("offline"));
+    await expect(writing).resolves.toMatchObject({ ok: false });
+    await expect(admin).resolves.toEqual({ ok: true, replaced: focus, switchedAt: "2026-08-24T16:05:00.000Z" });
+  });
+
   it("cancels a queued latest Start inertly when its provider is disposed", async () => {
     const gate = createTimerMutationGate();
     let finishStop: (() => void) | undefined;
@@ -267,7 +300,7 @@ describe("shell timer runtime", () => {
     expect(draft).toEqual({ categoryId: "work", description: "Calendar draft", tagNames: ["ship"] });
 
     release?.();
-    await expect(first).resolves.toEqual({ ok: true });
+    await expect(first).resolves.toMatchObject({ ok: true });
     expect(data.activeEntry?.updatedAt).toBe("2026-07-22T10:05:00.000Z");
     expect(refresh).toHaveBeenCalledTimes(1);
     expect(requests).toHaveLength(1);
@@ -298,7 +331,7 @@ describe("shell timer runtime", () => {
       setDraft: (nextDraft) => { draft = nextDraft; },
       setError: () => undefined,
       snapshot
-    })).resolves.toEqual({ ok: true });
+    })).resolves.toMatchObject({ ok: true });
 
     expect(send).toHaveBeenCalledOnce();
     expect(send).toHaveBeenCalledWith("active-tags", expect.objectContaining({ tagNames: ["writing"] }));
@@ -391,7 +424,7 @@ describe("shell timer runtime", () => {
     });
     const harness = timerStartHarness(bootstrapData(previous));
 
-    await expect(harness.run(quickActionTimerDraft("chores"))).resolves.toEqual({ ok: true });
+    await expect(harness.run(quickActionTimerDraft("chores"))).resolves.toMatchObject({ ok: true });
 
     const state = harness.state();
     const stoppedPrevious = state.data.entries.find((item) => item.id === previous.id);
@@ -472,9 +505,9 @@ describe("shell timer runtime", () => {
     }]);
 
     releaseRequest?.();
-    await expect(first).resolves.toEqual({ ok: true });
-    await expect(repeated).resolves.toEqual({ ok: true });
-    await expect(different).resolves.toEqual({ ok: true });
+    await expect(first).resolves.toMatchObject({ ok: true });
+    await expect(repeated).resolves.toMatchObject({ ok: true });
+    await expect(different).resolves.toMatchObject({ ok: true });
     const state = harness.state();
     expect(state.data.entries.filter((item) => item.stoppedAt === null)).toHaveLength(1);
     expect(state.data.activeEntry).toEqual(expect.objectContaining({ categoryId: "focus" }));
@@ -518,7 +551,7 @@ describe("shell timer runtime", () => {
     });
 
     finishRefresh?.();
-    await expect(mutation).resolves.toEqual({ ok: true });
+    await expect(mutation).resolves.toMatchObject({ ok: true });
   });
 
   it("queues Start B behind Stop A instead of rejecting the latest intent", async () => {
@@ -551,7 +584,7 @@ describe("shell timer runtime", () => {
     expect(sent).toHaveLength(0);
     finishStop?.();
     await expect(stopA).resolves.toEqual({ ran: true, value: { ok: true } });
-    await expect(startB).resolves.toEqual({ ok: true });
+    await expect(startB).resolves.toMatchObject({ ok: true });
     expect(sent).toEqual([{
       mode: "start",
       categoryId: "focus",
