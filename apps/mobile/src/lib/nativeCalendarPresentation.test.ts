@@ -265,6 +265,15 @@ describe("native Calendar presentation boundary", () => {
       for (const item of lane) expect(item.widthFraction).toBeCloseTo(REVIEW_LANE_WIDTH / 2);
     });
 
+    it("adjacent short suggestions get their own lanes, since their 44-pt targets would overlap (Codex r7)", () => {
+      const state = build(now, bootstrap([], { reviewItems: [suggestion("a", 9, 0, 1), suggestion("b", 9, 1, 1)] }));
+      const lane = state.model.entries;
+      expect(lane.map((item) => item.actionId)).toEqual(["a", "b"]);
+      expect(lane[0].offsetFraction).not.toBeCloseTo(lane[1].offsetFraction);
+      // Drawn at their real times.
+      expect(lane[0].stoppedAtMs).toBe(localTime(2026, 7, 10, 9, 1));
+    });
+
     it("each crowd says its own time range and what it opens (Codex r2)", () => {
       const state = build(now, bootstrap([], {
         reviewItems: [

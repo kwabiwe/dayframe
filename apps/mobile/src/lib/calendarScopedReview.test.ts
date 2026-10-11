@@ -51,4 +51,9 @@ describe("Calendar's scoped Review items (UIA-060)", () => {
     const item = (id: string) => ({ id }) as never;
     expect(calendarReviewItems([item("x")], [item("y")], true).map((entry) => (entry as { id: string }).id)).toEqual(["x", "y"]);
   });
+
+  it("leaves out items the store already suppresses, such as ones terminal in a newer read (Codex r7)", () => {
+    const snapshot = { response: { records: [record("a"), record("b")], lookup: { reviewItems: [] } }, effects: [] } as never;
+    expect(scopedOpenReviewItems(snapshot, new Set(["a"])).map((item) => item.id)).toEqual(["b"]);
+  });
 });

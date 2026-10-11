@@ -53,7 +53,7 @@ import { layoutQuickStartMosaic, rankQuickStartActivities, weeklySecondsByActivi
 import { TodayReviewPresentationProvider } from "./today/TodayReviewPresentationContext";
 import { currentTimeZone, localDayKey, reviewOwner, windowScopeFor } from "./today/useTodayReviewPresentation";
 import { bootstrapReviewListMayBeIncomplete, calendarReviewItems, scopedOpenReviewItems } from "@/lib/calendarScopedReview";
-import { readReviewPresentationSnapshot, subscribeReviewSync } from "@/lib/reviewSyncStore";
+import { readReviewPresentationSnapshot, readSuppressedReviewItemIds, subscribeReviewSync } from "@/lib/reviewSyncStore";
 import { AccountAvatarButton } from "./today/AccountAvatarButton";
 import { TodayGoalFrame } from "./today/TodayGoalFrame";
 import { formatLiveClock } from "./today/todayBlocksLayout";
@@ -1628,9 +1628,12 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
     // decision made here), always for today's window scope.
     const read = () => {
       const mine = ++sequence;
-      readReviewPresentationSnapshot({ owner: scopedOwner, response: { scope: windowScopeFor(scopedDayKey, timeZone) } })
-        .then((snapshot) => {
-          if (current && mine === sequence) setScopedReviewItems(scopedOpenReviewItems(snapshot));
+      Promise.all([
+        readReviewPresentationSnapshot({ owner: scopedOwner, response: { scope: windowScopeFor(scopedDayKey, timeZone) } }),
+        readSuppressedReviewItemIds(scopedOwner)
+      ])
+        .then(([snapshot, suppressed]) => {
+          if (current && mine === sequence) setScopedReviewItems(scopedOpenReviewItems(snapshot, suppressed));
         })
         .catch(() => undefined);
     };

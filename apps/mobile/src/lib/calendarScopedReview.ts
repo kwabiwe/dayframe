@@ -10,11 +10,16 @@ export const BOOTSTRAP_REVIEW_ITEM_CAP = 100;
  * the bootstrap's list only when that list reached its cap, so a burst of newer suggestions never
  * hides a recent day's Review block (UIA-060).
  */
-export function scopedOpenReviewItems(snapshot: ReviewPresentationStoreSnapshot | null): MobileReviewItem[] {
+export function scopedOpenReviewItems(
+  snapshot: ReviewPresentationStoreSnapshot | null,
+  /** Items the store already suppresses (hidden by a local decision, or terminal in a newer read). */
+  suppressed: ReadonlySet<string> = new Set()
+): MobileReviewItem[] {
   if (!snapshot) return [];
-  const decided = new Set(
-    snapshot.effects.filter((effect) => effect.localEffect === "hidden").map((effect) => effect.reviewItemId)
-  );
+  const decided = new Set([
+    ...snapshot.effects.filter((effect) => effect.localEffect === "hidden").map((effect) => effect.reviewItemId),
+    ...suppressed
+  ]);
   // The snapshot's own linkage (links, and older needs-review entries naming their suggestion), so
   // a suggestion and the entry created from it still draw once (as the bootstrap's linkedEntryIds).
   const linked = new Map<string, Set<string>>();
