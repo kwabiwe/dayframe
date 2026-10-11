@@ -306,7 +306,7 @@ export async function runTimerStartMutation({
     }
   });
 
-  if (!result.ran) return { ok: false, error: "Timer update was cancelled." };
+  if (!result.ran) return { ok: false, error: "The block update was cancelled." };
   if (result.ownsResult && result.value.ok && !result.value.alreadyRunning && !gate.isActive()) await refresh();
   // A superseded waiter is handed the latest Start's result; it is not this Start's to announce.
   return result.value.ok ? { ...result.value, own: result.ownsResult } : result.value;
@@ -331,7 +331,7 @@ export function entryContinuationDecision(
   if (!entry.categoryId && !description) {
     return {
       ok: false,
-      error: "This entry does not have a task or activity to start."
+      error: "This block has no description or activity to start."
     };
   }
 
@@ -506,7 +506,7 @@ export async function runActiveEntryCompactMutation({
   setError: (error: string | null) => void;
   snapshot: BootstrapData;
 }): Promise<TimerMutationOutcome> {
-  if (!snapshot.activeEntry) return { ok: false, error: "There is no running timer to edit." };
+  if (!snapshot.activeEntry) return { ok: false, error: "There is no running block to edit." };
   const activeEntry = snapshot.activeEntry;
   const nextDraft: TimerDraft = {
     categoryId: input.plan.resolved.categoryId ?? "",
@@ -538,7 +538,7 @@ export async function runActiveEntryCompactMutation({
   if (result.ran && result.value.ok && !gate.isActive()) await refresh();
   return result.ran
     ? result.value
-    : { ok: false, error: "A timer update is already in progress." };
+    : { ok: false, error: "A block update is already in progress." };
 }
 
 export function timerCompactEditErrorMessage(error: unknown) {

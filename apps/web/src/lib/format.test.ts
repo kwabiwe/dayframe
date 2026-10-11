@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  formatExportDuration,
   dateTimeLocalInputToIso,
   formatActivityEventLabel,
   durationInputValue,
@@ -53,5 +54,14 @@ describe("activity event labels", () => {
   it("labels time away as itself, never as a detected commute (round 3 finding 3)", () => {
     expect(formatActivityEventLabel({ eventType: "commute_detected", timeAway: true })).toBe("Time away");
     expect(formatActivityEventLabel({ eventType: "commute_detected", timeAway: false })).toBe("Commute detected");
+  });
+});
+
+describe("formatExportDuration", () => {
+  it("keeps the report CSV's duration cells as they were", () => {
+    expect(formatExportDuration(3600)).toBe("1h 00m");
+    expect(formatExportDuration(3900)).toBe("1h 05m");
+    expect(formatExportDuration(59.5)).toBe("1m");
+    expect(formatExportDuration(0)).toBe("0m");
   });
 });

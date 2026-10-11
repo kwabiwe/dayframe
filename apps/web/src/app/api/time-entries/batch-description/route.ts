@@ -24,10 +24,10 @@ export async function PATCH(request: Request) {
     const response = authErrorResponse(error);
     if (response) return response;
     if (error instanceof ZodError || error instanceof TimeEntryValidationError) {
-      return NextResponse.json({ error: error instanceof ZodError ? "Choose at least two valid grouped entries." : error.message }, { status: 400 });
+      return NextResponse.json({ error: error instanceof ZodError ? "Choose at least two valid grouped blocks." : error.message }, { status: 400 });
     }
     if (error instanceof TimeEntryNotFoundError) {
-      return NextResponse.json({ error: "One or more time entries were not found." }, { status: 404 });
+      return NextResponse.json({ error: "One or more blocks were not found." }, { status: 404 });
     }
     throw error;
   }

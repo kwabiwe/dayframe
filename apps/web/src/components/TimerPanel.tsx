@@ -69,7 +69,7 @@ export function TimerPanel({
 
   async function refreshClientData() {
     const response = await clientFetch("/api/bootstrap", { cache: "no-store" });
-    if (!response.ok) throw new Error(`Unable to refresh block state: ${response.status}`);
+    if (!response.ok) throw new Error(`Unable to refresh the recording state: ${response.status}`);
     const data = (await response.json()) as BootstrapData;
     onSynced?.(data);
   }
@@ -89,7 +89,7 @@ export function TimerPanel({
             stoppedAt: activeEntry.stoppedAt
           })
         });
-        if (!updateResponse.ok) throw new Error(`Unable to save block details: ${updateResponse.status}`);
+        if (!updateResponse.ok) throw new Error(`Unable to save the block details: ${updateResponse.status}`);
       }
 
       const response = await clientFetch("/api/time-entries", {
@@ -126,7 +126,7 @@ export function TimerPanel({
         method: "DELETE"
       });
       if (!response.ok) {
-        let errorMessage = `Unable to delete block: ${response.status}`;
+        let errorMessage = `Unable to delete the block: ${response.status}`;
         try {
           const payload = (await response.json()) as { error?: string };
           errorMessage = payload.error ?? errorMessage;
@@ -180,7 +180,7 @@ export function TimerPanel({
     >
       <div className="border-b border-[var(--line)] px-4 py-3">
         <div className="flex flex-col gap-1 md:flex-row md:items-center md:justify-between">
-          <h2 className="text-base font-semibold">Time entry</h2>
+          <h2 className="text-base font-semibold">Block</h2>
           <p className="text-xs text-[var(--muted)]">
             {activeEntry
               ? `${timeEntryTitle(activeEntry)} since ${formatTime(activeEntry.startedAt)}`

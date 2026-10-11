@@ -683,7 +683,7 @@ export function EntriesTable({
     const editor = inlineEditor?.entryId === entry.id ? inlineEditor : null;
     if (editor?.error) return <span className="timeline-inline-edit-error" role="alert">{editor.error}</span>;
     if (editor?.isSaving) {
-      return <span className="sr-only" role="status">{editor.target.kind === "group" ? "Saving grouped entries" : "Saving entry"}</span>;
+      return <span className="sr-only" role="status">{editor.target.kind === "group" ? "Saving grouped blocks" : "Saving block"}</span>;
     }
     return null;
   }

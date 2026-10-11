@@ -5,7 +5,7 @@ import { DayframeBrand } from "@/components/brand/DayframeBrand";
 const productPoints = [
   {
     icon: Clock3,
-    title: "Manual blocks stay fast",
+    title: "Start a block quickly",
     body: "Type what you are doing, choose an activity, and keep the same calendar available on web and iPhone."
   },
   {
@@ -69,8 +69,8 @@ export function LandingPage() {
         <div className="landing-hero-copy">
           <h1>Personal time tracking that understands the shape of your day.</h1>
           <p>
-            Dayframe combines a fast task timer with iOS location and Apple Health signals, then lets you review
-            what should become part of your timeline.
+            Dayframe combines quick manual blocks with iOS location and Apple Health signals, then lets you review
+            what should become part of your day.
           </p>
           <div className="landing-hero-actions">
             <Link className="landing-primary-action" href="/signup">
@@ -109,7 +109,7 @@ export function LandingPage() {
           </li>
           <li>
             <CheckCircle2 size={18} />
-            Automatic entries can remain suggestions until you accept them.
+            Automatic blocks can stay suggestions until you accept them.
           </li>
           <li>
             <CheckCircle2 size={18} />

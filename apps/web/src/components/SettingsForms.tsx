@@ -474,7 +474,7 @@ export function DataPrivacySettings() {
         action={(
           <div className="settings-export-actions">
             <a className="ui-button ui-button-secondary" href="/api/export?kind=workspace_json" download>Dayframe data</a>
-            <a className="ui-button ui-button-secondary" href="/api/export?kind=time_entries_csv" download>Time entries</a>
+            <a className="ui-button ui-button-secondary" href="/api/export?kind=time_entries_csv" download>Blocks</a>
             <a className="ui-button ui-button-secondary" href="/api/export?kind=activity_events_json" download>Activity history</a>
           </div>
         )}

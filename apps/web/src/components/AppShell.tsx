@@ -273,7 +273,7 @@ function AppShellContent({ children }: { children: ReactNode }) {
 
       <div className={`swiss-main-frame${isTimeline ? " is-timeline" : ""}`}>
         {isTimeline ? (
-          <section className="swiss-timeline-surface" aria-label="Timeline workspace">
+          <section className="swiss-timeline-surface" aria-label="Calendar">
             <div className="swiss-persistent-timer-shell">
               {persistentTimer}
             </div>

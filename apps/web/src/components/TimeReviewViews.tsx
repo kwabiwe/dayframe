@@ -863,7 +863,7 @@ export function CalendarReview({
       })
     });
 
-    if (!response.ok) throw new Error(`Unable to resize block: ${response.status}`);
+    if (!response.ok) throw new Error(`Unable to resize the block: ${response.status}`);
     await onSynced();
     startTransition(() => router.refresh());
   }

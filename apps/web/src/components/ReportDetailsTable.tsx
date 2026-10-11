@@ -60,15 +60,15 @@ export function ReportDetailsTable({ report }: { report: ReportResult }) {
                     <strong>{formatDate(entry.startedAt)}</strong>
                     <span>{formatTime(entry.startedAt)}–{entry.stoppedAt ? formatTime(entry.stoppedAt) : "now"}</span>
                   </td>
-                  <td data-label="Task and tags" className="report-entry-task">
+                  <td data-label="Description and tags" className="report-entry-task">
                     <strong>{timeEntryTitle(entry)}</strong>
                     <TagMetadata tagNames={entry.tagNames} />
                     {entry.isRunning ? <span className="report-running-pill">Running</span> : null}
                     {entry.overlapCount > 0 ? (
                       <span
                         className="overlap-marker"
-                        title={`${formatDuration(entry.overlapSeconds)} overlaps ${entry.overlapCount} other ${entry.overlapCount === 1 ? "entry" : "entries"}`}
-                        aria-label={`Overlap: ${formatDuration(entry.overlapSeconds)} shared with ${entry.overlapCount} other ${entry.overlapCount === 1 ? "entry" : "entries"}`}
+                        title={`${formatDuration(entry.overlapSeconds)} overlaps ${entry.overlapCount} other ${entry.overlapCount === 1 ? "block" : "blocks"}`}
+                        aria-label={`Overlap: ${formatDuration(entry.overlapSeconds)} shared with ${entry.overlapCount} other ${entry.overlapCount === 1 ? "block" : "blocks"}`}
                       >
                         Overlap · {formatDuration(entry.overlapSeconds)}
                       </span>
@@ -104,7 +104,7 @@ export function ReportDetailsTable({ report }: { report: ReportResult }) {
       )}
 
       {report.pagination.totalPages > 1 ? (
-        <nav className="report-pagination" aria-label="Report entries pages">
+        <nav className="report-pagination" aria-label="Report block pages">
           {report.pagination.hasPrevious ? (
             <Link href={reportsHref(report.appliedFilters, { page: report.pagination.page - 1 })}>Previous</Link>
           ) : <span aria-disabled="true">Previous</span>}

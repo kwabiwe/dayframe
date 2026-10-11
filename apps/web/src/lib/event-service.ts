@@ -2198,7 +2198,7 @@ export async function splitActiveEntry(session: RequestSession = getDevSession()
       [session.workspaceId, session.userId]
     );
     const row = active.rows[0];
-    if (!row) throw new Error("No active timer is available to split.");
+    if (!row) throw new Error("No block is recording to split.");
 
     const eventResult = await client.query<{ id: string }>(
       `insert into activity_events (

@@ -22,8 +22,7 @@ export function OverlapNotice({
   const overlap = overlapNoticeForCandidate({ candidate, entries, excludeEntryId });
   if (!overlap?.overlapCount) return null;
   if (compact) {
-    const totalMinutes = Math.max(0, Math.round(overlap.uniqueOverlapSeconds / 60));
-    const duration = `${String(Math.floor(totalMinutes / 60)).padStart(2, "0")}:${String(totalMinutes % 60).padStart(2, "0")}`;
+    const duration = formatDuration(overlap.uniqueOverlapSeconds);
     return (
       <aside className="overlap-notice is-compact" role="status" aria-live="polite">
         <p>

@@ -34,7 +34,7 @@ export function timeEntryCategoryLabel(entry: TimeEntryDisplayFields) {
 export function timeEntryAccentColor(entry: TimeEntryDisplayFields) {
   return paletteCssColorFor(
     entry.projectColor ?? entry.categoryColor,
-    entry.projectName ?? entry.categoryName ?? entry.description ?? entry.id ?? "Block"
+    entry.projectName ?? entry.categoryName ?? entry.description ?? entry.id ?? "Time entry"
   );
 }
 

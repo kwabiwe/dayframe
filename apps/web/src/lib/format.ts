@@ -7,6 +7,18 @@ export function formatDuration(seconds: number) {
   return formatSharedDuration(seconds);
 }
 
+/**
+ * The report CSV's duration cell ("1h 05m", "59m"), unchanged so existing spreadsheets keep
+ * reading; the interface uses `formatDuration`.
+ */
+export function formatExportDuration(seconds: number) {
+  const safe = Math.max(0, Math.round(seconds));
+  const hours = Math.floor(safe / 3600);
+  const minutes = Math.floor((safe % 3600) / 60);
+  if (hours === 0) return `${minutes}m`;
+  return `${hours}h ${minutes.toString().padStart(2, "0")}m`;
+}
+
 export function formatClockDuration(seconds: number) {
   const safe = Math.max(0, Math.floor(seconds));
   const hours = Math.floor(safe / 3600);

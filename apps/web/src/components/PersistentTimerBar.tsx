@@ -684,7 +684,7 @@ export function PersistentTimerBar({ workspaceMode = false }: { workspaceMode?: 
                 <span className="df-cmd-hint">logs a finished block ending now</span>
               </>
             ) : (
-              <span className="df-cmd-hint">Enter starts the timer</span>
+              <span className="df-cmd-hint">Enter starts a block</span>
             )}
           </>
         ) : !active && commandFocused && !timerDraft.description ? (

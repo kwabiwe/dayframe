@@ -276,7 +276,7 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
       timerStatePollInFlightRef.current = true;
       try {
         const response = await clientFetch("/api/timer-state", { cache: "no-store" });
-        if (!response.ok) throw new Error(`Unable to check block state: ${response.status}`);
+        if (!response.ok) throw new Error(`Unable to check the recording state: ${response.status}`);
         const next = (await response.json()) as TimerStateFingerprint;
         const changed = timerStateChanged(timerStateRef.current, next);
         timerStateRef.current = next;
@@ -348,7 +348,7 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(payload)
         });
-        if (!response.ok) throw new Error(await responseError(response, `Unable to start block: ${response.status}`));
+        if (!response.ok) throw new Error(await responseError(response, `Unable to start the block: ${response.status}`));
       },
       refresh: async () => {
         await refresh({ force: true });
@@ -388,7 +388,7 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
             })
           });
           if (!updateResponse.ok) {
-            throw new Error(await responseError(updateResponse, `Unable to save block details: ${updateResponse.status}`));
+            throw new Error(await responseError(updateResponse, `Unable to save the block details: ${updateResponse.status}`));
           }
         }
         const response = await clientFetch("/api/events", {
@@ -406,7 +406,7 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
             }
           })
         });
-        if (!response.ok) throw new Error(await responseError(response, `Unable to stop block: ${response.status}`));
+        if (!response.ok) throw new Error(await responseError(response, `Unable to stop the block: ${response.status}`));
         return { ok: true } as const;
       } catch (error) {
         commitData(snapshot, "optimistic");
@@ -438,7 +438,7 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
         const response = await clientFetch(`/api/time-entries/${snapshot.activeEntry!.id}`, {
           method: "DELETE"
         });
-        if (!response.ok) throw new Error(await responseError(response, `Unable to delete block: ${response.status}`));
+        if (!response.ok) throw new Error(await responseError(response, `Unable to delete the block: ${response.status}`));
         return { ok: true } as const;
       } catch (error) {
         commitData(snapshot, "optimistic");
@@ -475,7 +475,7 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
             tagNames: draft.tagNames
           })
         });
-        if (!response.ok) throw new Error(await responseError(response, `Unable to save block details: ${response.status}`));
+        if (!response.ok) throw new Error(await responseError(response, `Unable to save the block details: ${response.status}`));
         const result = (await response.json()) as { updatedAt?: string };
         if (result.updatedAt && dataRef.current) {
           commitData(
@@ -523,7 +523,7 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
           body: JSON.stringify(payload)
         });
         if (!response.ok) {
-          throw new Error(await responseError(response, `Unable to save block details: ${response.status}`));
+          throw new Error(await responseError(response, `Unable to save the block details: ${response.status}`));
         }
         return (await response.json()) as { updatedAt?: string };
       },
@@ -589,7 +589,7 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ mode: "manual", ...input })
         });
-        if (!response.ok) throw new Error(await responseError(response, `Unable to add block: ${response.status}`));
+        if (!response.ok) throw new Error(await responseError(response, `Unable to add the block: ${response.status}`));
         return { ok: true } as const;
       } catch (error) {
         return { ok: false, error: errorMessage(error, "Unable to add this block.") } as const;

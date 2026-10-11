@@ -93,7 +93,7 @@ export default async function ReportsPage({
       />
       {report.additionalOverlappingActivitySeconds > 0 ? (
         <p className="report-metric-explainer">
-          Total logged counts every entry in full; Total framed (time covered) counts overlapping time once.
+          Total logged counts every block in full; Total framed (time covered) counts overlapping time once.
         </p>
       ) : null}
       <ReportsOverview report={report} showTrend={reportBlocksLayout(report) === null} />

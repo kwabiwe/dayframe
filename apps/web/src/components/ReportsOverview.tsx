@@ -220,7 +220,7 @@ function AccessibleBreakdownTable({
       <div className="report-data-table-scroll">
         <table>
           <caption>{caption}</caption>
-          <thead><tr><th>Name</th><th>Duration</th><th>Share</th><th>Entries</th></tr></thead>
+          <thead><tr><th>Name</th><th>Duration</th><th>Share</th><th>Blocks</th></tr></thead>
           <tbody>
             {rows.map((row) => (
               <tr key={row.id}>
