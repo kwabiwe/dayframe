@@ -136,6 +136,10 @@ export function ReviewDeck({ initialData }: { initialData: BootstrapData }) {
   if (selected && !hadCard) setHadCard(true);
   // A refill (refresh, Undo) ends this visit's "emptied" state; a later empty queue is not ours.
   if (emptiedByDecision && visible.length > 0) setEmptiedByDecision(false);
+  // A decided card's copy flies only where it started (card slot or empty state): once the deck
+  // leaves that branch (Undo, a refill, a refresh that empties it) the copy is gone for good, so
+  // coming back to the branch later never starts its flight again.
+  if (ghost && ghost.overEmpty !== !selected) setGhost(null);
   const openIdsRef = useRef<ReadonlySet<string>>(new Set());
   useLayoutEffect(() => {
     openIdsRef.current = new Set(openItems.map((item) => item.id));

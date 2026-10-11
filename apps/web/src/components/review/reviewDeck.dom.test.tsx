@@ -318,6 +318,43 @@ describe("Review review-round fixes", () => {
     }
   });
 
+  it("never flies a copy twice when a refill and a later empty take the deck away and back (Codex r4)", async () => {
+    const flights: Keyframe[][] = [];
+    Object.defineProperty(HTMLElement.prototype, "animate", {
+      configurable: true,
+      value: function (this: HTMLElement, keyframes: Keyframe[]) {
+        if (this.classList.contains("df-rcard-ghost")) flights.push(keyframes);
+        return { cancel: () => undefined, onfinish: null } as unknown as Animation;
+      }
+    });
+    try {
+      vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout", "setInterval", "clearInterval"] });
+      vi.setSystemTime(NOW);
+      fakeFrames();
+      const container = document.createElement("div");
+      document.body.append(container);
+      const root = trackedRoot(container);
+      const render = (items: ReviewItemRow[]) => act(async () => root.render(
+        <AppShellRuntimeProvider>
+          <ReviewDeck initialData={bootstrap(items)} />
+        </AppShellRuntimeProvider>
+      ));
+      await render([review(WALK, "Morning walk", "focus")]);
+      await key("y");
+      expect(flights).toHaveLength(1);
+      // A refill mid-flight: the deck shows a card, and the copy is gone.
+      await render([review(WALK, "Morning walk", "focus"), review(READ, "Reading", "admin")]);
+      expect(container.querySelector(".df-rcard-ghost")).toBeNull();
+      // Empty again later: the old copy does not come back and fly again.
+      await render([review(WALK, "Morning walk", "focus")]);
+      expect(container.querySelector(".df-rcard-ghost")).toBeNull();
+      expect(flights).toHaveLength(1);
+      await act(async () => root.unmount());
+    } finally {
+      delete (HTMLElement.prototype as { animate?: unknown }).animate;
+    }
+  });
+
   it("leaves Y, N and ⌘Z to the evidence editor while it is open", async () => {
     const visit = { ...review(WALK, "Visit", "focus"), eventSource: "location_learning", eventType: "learned_place_visit", rawPayload: { algorithmVersion: "location-v2.0" } };
     const { container, root } = await mount([visit, review(READ, "Reading", "admin")]);
