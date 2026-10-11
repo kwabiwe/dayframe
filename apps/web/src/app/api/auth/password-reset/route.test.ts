@@ -6,6 +6,14 @@ const mocks = vi.hoisted(() => ({
   complete: vi.fn(async () => undefined)
 }));
 
+// The email is requested after the reply (next/server `after`); run it in place to observe it.
+const afterTasks = vi.hoisted(() => [] as Array<() => Promise<void>>);
+vi.mock("next/server", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("next/server")>()),
+  after: (task: () => Promise<void>) => { afterTasks.push(task); }
+}));
+const runAfter = async () => { while (afterTasks.length) await afterTasks.shift()!(); };
+
 vi.mock("@/lib/auth/supabase", () => ({
   requestSupabasePasswordReset: mocks.request,
   completeSupabasePasswordReset: mocks.complete
@@ -41,15 +49,22 @@ describe("Forgot password (UIA-317)", () => {
     const response = await requestReset(post("https://dayframe-staging.vercel.app/api/auth/password-reset", { email: " someone@example.invalid " }));
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual({ ok: true, message: "If an account uses that email, a reset link is on its way. Check your email." });
+    // Requested only after the reply.
+    expect(mocks.request).not.toHaveBeenCalled();
+    await runAfter();
     expect(mocks.request).toHaveBeenCalledWith("someone@example.invalid", "https://dayframe-staging.vercel.app/reset-password");
   });
 
-  it("rejects a malformed email and passes Supabase's rate limit on", async () => {
+  it("rejects a malformed email; an existing account's cooldown or a delivery failure never changes the reply (Codex r1)", async () => {
     vi.stubEnv("DAYFRAME_AUTH_MODE", "provider");
     expect((await requestReset(post("https://dayframe.test/api/auth/password-reset", { email: "nope" }))).status).toBe(400);
-    mocks.request.mockRejectedValueOnce(new AuthError("Too many reset emails. Wait a minute, then try again.", 429));
-    const limited = await requestReset(post("https://dayframe.test/api/auth/password-reset", { email: "a@example.invalid" }));
-    expect(limited.status).toBe(429);
+    for (const failure of [new AuthError("Too many reset emails. Wait a minute, then try again.", 429), new AuthError("Dayframe couldn't send the reset email. Try again later.", 502), new Error("boom")]) {
+      mocks.request.mockRejectedValueOnce(failure);
+      const response = await requestReset(post("https://dayframe.test/api/auth/password-reset", { email: "a@example.invalid" }));
+      expect(response.status).toBe(200);
+      expect((await response.json()).ok).toBe(true);
+      await runAfter();
+    }
   });
 
   it("sets the new password from the link's session; short passwords and expired links are refused", async () => {

@@ -33,6 +33,8 @@ describe("Forgot password and sign-up (UIA-317, UIA-318)", () => {
     fireEvent.change(screen.getByLabelText("Email"), { target: { value: "someone@example.invalid" } });
     fireEvent.click(screen.getByRole("button", { name: "Forgot password?" }));
     expect((screen.getByLabelText("Email") as HTMLInputElement).value).toBe("someone@example.invalid");
+    // Focus moves to the new card's heading, not the page body (Codex r1).
+    expect(document.activeElement).toBe(screen.getByRole("heading", { name: "Reset password" }));
     fireEvent.click(screen.getByRole("button", { name: "Send reset link" }));
     await waitFor(() => expect(screen.getByRole("status").textContent).toContain("Check your email"));
     expect(fetchMock).toHaveBeenCalledWith("/api/auth/password-reset", expect.objectContaining({
@@ -40,7 +42,7 @@ describe("Forgot password and sign-up (UIA-317, UIA-318)", () => {
       body: JSON.stringify({ email: "someone@example.invalid" })
     }));
     fireEvent.click(screen.getByRole("button", { name: "Back to Log in" }));
-    expect(screen.getByRole("heading", { name: "Log in" })).toBeTruthy();
+    expect(document.activeElement).toBe(screen.getByRole("heading", { name: "Log in" }));
   });
 
   it("creates an account without a Workspace field and states the 8-character rule", () => {

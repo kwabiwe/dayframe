@@ -39,14 +39,25 @@ describe("Supabase password reset (UIA-317)", () => {
       .rejects.toMatchObject({ status: 502, message: "Dayframe couldn't send the reset email. Try again later." });
   });
 
-  it("sets the password from the link's session and ends every Dayframe sign-in for that account", async () => {
+  it("ends every Dayframe sign-in before and after setting the password from the link's session", async () => {
+    const calls: string[] = [];
+    mocks.query.mockImplementation(async () => { calls.push("revoke"); return { rows: [] }; });
+    mocks.auth.updateUser.mockImplementationOnce(async () => { calls.push("update"); return { error: null }; });
     await completeSupabasePasswordReset({ accessToken: "access", refreshToken: "refresh", password: "a new password" });
     expect(mocks.auth.setSession).toHaveBeenCalledWith({ access_token: "access", refresh_token: "refresh" });
     expect(mocks.auth.updateUser).toHaveBeenCalledWith({ password: "a new password" });
+    expect(calls).toEqual(["revoke", "update", "revoke"]);
     expect(mocks.query).toHaveBeenCalledWith(
       "update auth_sessions set revoked_at = now() where user_id = $1 and revoked_at is null",
       ["00000000-0000-4000-8000-000000000001"]
     );
+    expect(mocks.auth.signOut).toHaveBeenCalledWith({ scope: "global" });
+  });
+
+  it("changes nothing when ending the sign-ins fails first, so the link can be used again (Codex r1)", async () => {
+    mocks.query.mockRejectedValueOnce(new Error("db down"));
+    await expect(completeSupabasePasswordReset({ accessToken: "a", refreshToken: "r", password: "a new password" })).rejects.toThrow();
+    expect(mocks.auth.updateUser).not.toHaveBeenCalled();
   });
 
   it("refuses an expired or used link without changing anything", async () => {

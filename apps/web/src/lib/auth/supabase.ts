@@ -132,10 +132,24 @@ export async function completeSupabasePasswordReset(input: { accessToken: string
   if (sessionError || !data.user?.id) {
     throw new AuthError("This reset link has expired or was already used. Ask for a new one.", 400);
   }
+  const userId = data.user.id;
+  // Dayframe sign-ins end before the password changes: if this fails, nothing has changed and the
+  // same link can be used again.
+  await revokeDayframeSessions(userId);
   const { error: updateError } = await supabase.auth.updateUser({ password: input.password });
   if (updateError) throw new AuthError(updateError.message, authStatus(updateError.status));
-  await pool.query("update auth_sessions set revoked_at = now() where user_id = $1 and revoked_at is null", [data.user.id]);
-  await supabase.auth.signOut().catch(() => undefined);
+  // Once more after the change, for a sign-in with the old password that was already under way.
+  await revokeDayframeSessions(userId).catch(() => {
+    console.error("Dayframe sessions not revoked after a password reset");
+  });
+  // Dayframe never accepts Supabase sessions for its own access (sign-in issues Dayframe sessions),
+  // so the recovery session ending is tidy-up: a failure is reported, not fatal.
+  const { error: signOutError } = await supabase.auth.signOut({ scope: "global" }).catch(() => ({ error: new Error("sign-out failed") }));
+  if (signOutError) console.error("Supabase sessions not signed out after a password reset");
+}
+
+async function revokeDayframeSessions(userId: string) {
+  await pool.query("update auth_sessions set revoked_at = now() where user_id = $1 and revoked_at is null", [userId]);
 }
 
 export function getSupabaseProviderEnvStatus() {

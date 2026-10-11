@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { Eye, EyeOff } from "lucide-react";
-import { useEffect, useState, type FormEvent } from "react";
+import { useEffect, useRef, useState, type FormEvent } from "react";
 import { Button, Field, IconButton } from "@/components/ui/Primitives";
 
 type RecoveryTokens = { accessToken: string; refreshToken: string };
@@ -32,6 +32,12 @@ export function PasswordResetForm() {
     // The tokens never stay in the address bar or history.
     if (window.location.hash) window.history.replaceState(null, "", window.location.pathname);
   }, []);
+  // When the form gives way to the outcome (changed, or the link no longer works), focus moves to
+  // the heading and the outcome is announced (instant swap, nothing animates).
+  const headingRef = useRef<HTMLHeadingElement | null>(null);
+  useEffect(() => {
+    if (status === "done" || status === "invalid") headingRef.current?.focus();
+  }, [status]);
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -65,8 +71,8 @@ export function PasswordResetForm() {
   return (
     <section className="auth-card mx-auto w-full max-w-[440px]">
       <div className="auth-card-head">
-        <h1>{status === "done" ? "Password changed" : "New password"}</h1>
-        <p>
+        <h1 ref={headingRef} tabIndex={-1}>{status === "done" ? "Password changed" : "New password"}</h1>
+        <p aria-live="polite">
           {status === "done"
             ? "You're signed out everywhere. Log in with your new password, on the web and on your iPhone."
             : status === "invalid"
@@ -108,7 +114,7 @@ export function PasswordResetForm() {
         </form>
       ) : null}
       {status === "done" || status === "invalid" ? (
-        <p className="auth-switch">
+        <p className="auth-switch auth-switch--standalone">
           <Link href="/login">Log in</Link>
         </p>
       ) : null}

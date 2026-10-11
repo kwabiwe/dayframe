@@ -1,4 +1,4 @@
-import { NextResponse } from "next/server";
+import { after, NextResponse } from "next/server";
 import { z } from "zod";
 import { requestSupabasePasswordReset } from "@/lib/auth/supabase";
 import { AuthError, getAuthMode } from "@/lib/session";
@@ -18,16 +18,17 @@ export async function POST(request: Request) {
   } catch {
     return NextResponse.json({ error: "Enter a valid email." }, { status: 400 });
   }
-  try {
-    // The link returns to this deployment's reset page; Supabase only follows redirect URLs that
-    // are allowed in its Auth settings.
-    await requestSupabasePasswordReset(email, new URL("/reset-password", request.url).toString());
-    return NextResponse.json(SENT);
-  } catch (error) {
-    if (error instanceof AuthError) {
-      return NextResponse.json({ error: error.message }, { status: error.status });
+  // The link returns to this deployment's reset page; Supabase only follows redirect URLs that are
+  // allowed in its Auth settings. The email is requested after the reply, and the reply never
+  // depends on it: an existing account's cooldown, a delivery failure or the time Supabase takes
+  // must not tell anyone whether an account uses the address.
+  const redirectTo = new URL("/reset-password", request.url).toString();
+  after(async () => {
+    try {
+      await requestSupabasePasswordReset(email, redirectTo);
+    } catch (error) {
+      console.error("Dayframe password reset email not requested", error instanceof AuthError ? error.status : "unknown");
     }
-    console.error("Dayframe password reset request failed");
-    return NextResponse.json({ error: "Dayframe couldn't send the reset email. Try again later." }, { status: 502 });
-  }
+  });
+  return NextResponse.json(SENT);
 }

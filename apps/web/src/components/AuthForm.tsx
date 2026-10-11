@@ -21,6 +21,12 @@ export function AuthForm({
   next?: string | null;
 }) {
   const [resetting, setResetting] = useState(false);
+  // Coming back from Reset password puts focus on this card's heading (not the page body).
+  const [returnedFromReset, setReturnedFromReset] = useState(false);
+  const headingRef = useRef<HTMLHeadingElement | null>(null);
+  useEffect(() => {
+    if (returnedFromReset && !resetting) headingRef.current?.focus();
+  }, [resetting, returnedFromReset]);
   const [status, setStatus] = useState<AuthFormStatus>("idle");
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
@@ -87,7 +93,15 @@ export function AuthForm({
   }
 
   if (resetting) {
-    return <PasswordResetRequest initialEmail={email} onBack={() => setResetting(false)} />;
+    return (
+      <PasswordResetRequest
+        initialEmail={email}
+        onBack={() => {
+          setReturnedFromReset(true);
+          setResetting(false);
+        }}
+      />
+    );
   }
 
   if (status === "opening") {
@@ -101,7 +115,7 @@ export function AuthForm({
   return (
     <section className="auth-card mx-auto w-full max-w-[440px]">
       <div className="auth-card-head">
-        <h1>{isSignup ? "Create account" : "Log in"}</h1>
+        <h1 ref={headingRef} tabIndex={-1}>{isSignup ? "Create account" : "Log in"}</h1>
         <p>
           {isSignup
             ? "Create your Dayframe account and personal workspace."
@@ -235,6 +249,11 @@ function PasswordResetRequest({ initialEmail, onBack }: { initialEmail: string; 
   const [status, setStatus] = useState<"idle" | "sending" | "sent">("idle");
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const headingRef = useRef<HTMLHeadingElement | null>(null);
+  // The card replaces Log in: focus moves to its heading (instant swap, nothing animates).
+  useEffect(() => {
+    headingRef.current?.focus();
+  }, []);
 
   async function send(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -264,7 +283,7 @@ function PasswordResetRequest({ initialEmail, onBack }: { initialEmail: string; 
   return (
     <section className="auth-card mx-auto w-full max-w-[440px]">
       <div className="auth-card-head">
-        <h1>Reset password</h1>
+        <h1 ref={headingRef} tabIndex={-1}>Reset password</h1>
         <p>We’ll email you a link to choose a new password.</p>
       </div>
       <form className="auth-card-form" onSubmit={send} aria-busy={status === "sending"}>

@@ -3405,6 +3405,7 @@ kbd {
 }
 
 .auth-card form > p a,
+.auth-switch--standalone a,
 .landing-footer a {
   display: inline-flex;
   min-width: 44px;
@@ -3413,7 +3414,8 @@ kbd {
   justify-content: center;
 }
 
-.auth-card form > p a {
+.auth-card form > p a,
+.auth-switch--standalone a {
   color: var(--text-primary);
   font-weight: 700;
   text-decoration: underline;
