@@ -205,8 +205,8 @@ export function PlacesManager({
         <ModalDialog
           busy={busyId === deletingPlace.id}
           description={deletingPlace.role
-            ? `This is your ${placeRoleLabel(deletingPlace.role)}, so that slot will be empty. Existing time entries keep their time data, but this place label will be removed.`
-            : "Existing time entries keep their time data, but this place label will be removed."}
+            ? `This is your ${placeRoleLabel(deletingPlace.role)}, so that slot will be empty. Existing blocks keep their time data, but this place label will be removed.`
+            : "Existing blocks keep their time data, but this place label will be removed."}
           footer={(
             <>
               <Button disabled={busyId === deletingPlace.id} onClick={() => setDeletingPlace(null)}>

@@ -185,7 +185,7 @@ function ReportFilterDialog({
             className="ui-control"
             maxLength={160}
             onChange={(event) => setDraft((current) => ({ ...current, description: event.target.value }))}
-            placeholder="Search task descriptions"
+            placeholder="Search descriptions"
             type="search"
             value={draft.description}
           />

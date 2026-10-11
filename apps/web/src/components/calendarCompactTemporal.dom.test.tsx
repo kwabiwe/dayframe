@@ -135,7 +135,7 @@ describe("Calendar compact temporal DOM", () => {
     const editor = await screen.findByTestId("calendar-compact-editor");
     const feedback = editor.querySelector(".calendar-compact-editor-footer") as HTMLElement;
     expect(feedback.getAttribute("data-feedback-mode")).toBe("overlap");
-    expect(screen.getByText("Overlaps one entry by 00:15")).not.toBeNull();
+    expect(screen.getByText("Overlaps one block by 00:15")).not.toBeNull();
 
     const finish = screen.getByLabelText("End time") as HTMLInputElement;
     fireEvent.change(finish, { target: { value: "09:00" } });
@@ -170,13 +170,13 @@ describe("Calendar compact temporal DOM", () => {
     }));
 
     const notice = screen.getByRole("status");
-    expect(notice.textContent).toContain("Overlaps 2 entries by 00:30");
+    expect(notice.textContent).toContain("Overlaps 2 blocks by 00:30");
     expect(notice.querySelector("svg")).toBeNull();
     expect(screen.queryByText(/Private name/)).toBeNull();
     expect(screen.queryByText(/This is allowed/)).toBeNull();
   });
 
-  it("allows a completed entry to finish in the future without error styling", async () => {
+  it("allows a completed block to finish in the future without error styling", async () => {
     renderEditor({
       capturedNow: new Date(2026, 7, 2, 10),
       sourceEntry: entry("2026-08-02T09:00", "2026-08-02T09:30")

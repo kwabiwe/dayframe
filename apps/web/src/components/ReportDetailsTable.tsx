@@ -27,7 +27,7 @@ export function ReportDetailsTable({ report }: { report: ReportResult }) {
     <section className="fill-group-surface report-details" aria-labelledby="report-details-title">
       <header className="report-section-header report-details-header">
         <div>
-          <h2 id="report-details-title">Matching entries</h2>
+          <h2 id="report-details-title">Matching blocks</h2>
           <p>{report.pagination.totalEntries} entr{report.pagination.totalEntries === 1 ? "y" : "ies"} make up these totals.</p>
         </div>
         <label className="report-sort-control">
@@ -42,11 +42,11 @@ export function ReportDetailsTable({ report }: { report: ReportResult }) {
       {report.entries.length > 0 ? (
         <div className="report-detail-table-scroll">
           <table className="report-detail-table">
-            <caption>Individual time entries matching the active report filters</caption>
+            <caption>Individual blocks matching the active report filters</caption>
             <thead>
               <tr>
                 <th>Date and time</th>
-                <th>Task and tags</th>
+                <th>Description and tags</th>
                 <th>Activity</th>
                 <th>Place</th>
                 <th>Duration</th>
@@ -98,7 +98,7 @@ export function ReportDetailsTable({ report }: { report: ReportResult }) {
         </div>
       ) : (
         <div className="report-empty-details">
-          <strong>No matching entries</strong>
+          <strong>No matching blocks</strong>
           <p>Remove a filter or choose another date range to see tracked time.</p>
         </div>
       )}

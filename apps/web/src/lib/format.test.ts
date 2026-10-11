@@ -3,7 +3,6 @@ import {
   dateTimeLocalInputToIso,
   formatActivityEventLabel,
   durationInputValue,
-  formatCompactHoursMinutes,
   parseDurationInput
 } from "./format";
 
@@ -49,17 +48,6 @@ describe("duration form helpers", () => {
   });
 });
 
-describe("formatCompactHoursMinutes", () => {
-  it.each([
-    [0, "0:00"],
-    [59, "0:00"],
-    [60, "0:01"],
-    [3660, "1:01"],
-    [360_060, "100:01"]
-  ])("formats %i seconds as %s", (seconds, expected) => {
-    expect(formatCompactHoursMinutes(seconds)).toBe(expected);
-  });
-});
 
 describe("activity event labels", () => {
   it("labels time away as itself, never as a detected commute (round 3 finding 3)", () => {

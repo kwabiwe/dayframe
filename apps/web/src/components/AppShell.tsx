@@ -41,7 +41,7 @@ const shortcuts = [
   [SEARCH_SHORTCUT_LABEL, "Open search"],
   ["?", "Keyboard shortcuts"],
   ["G then T, C, R, P, L, S", "Go to Today, Calendar, Review, Reports, Library, Settings"],
-  ["Space", "Start or stop the timer"],
+  ["Space", "Start or stop recording"],
   ["N", "Type what you're working on"],
   ["1–6", "Start a pinned activity"],
   ["Alt+Left", "Previous day or week"],

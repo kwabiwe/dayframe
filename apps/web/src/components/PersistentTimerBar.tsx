@@ -498,7 +498,7 @@ export function PersistentTimerBar({ workspaceMode = false }: { workspaceMode?: 
               <small>Started {formatTime(active.startedAt)}</small>
             </button>
           ) : (
-            <span className="df-cmd-clock is-idle" aria-label="Timer is idle. Elapsed time 00:00.">
+            <span className="df-cmd-clock is-idle" aria-label="Nothing is recording. Elapsed time 00:00.">
               {formatClockDuration(0)}
             </span>
           )}
@@ -605,7 +605,7 @@ export function PersistentTimerBar({ workspaceMode = false }: { workspaceMode?: 
           type={active ? "button" : "submit"}
           disabled={Boolean(active) && isTimerBusy}
           aria-busy={(Boolean(active) && isTimerBusy) || undefined}
-          aria-label={active ? "Stop timer" : parsedCommand?.durationSeconds ? `${goLabel} ending now` : "Start timer"}
+          aria-label={active ? "Stop recording" : parsedCommand?.durationSeconds ? `${goLabel} ending now` : "Start a block"}
           onClick={() => {
             if (active) void stopTimer();
           }}
@@ -629,7 +629,7 @@ export function PersistentTimerBar({ workspaceMode = false }: { workspaceMode?: 
                 aria-haspopup="menu"
                 className="df-cmd-icon"
                 disabled={isTimerBusy}
-                label="More timer actions"
+                label="More block actions"
                 onClick={() => setTimerActionsOpen((open) => !open)}
                 ref={timerActionsTriggerRef}
               >
@@ -879,7 +879,7 @@ function ManualEntryDialog({
           <label htmlFor="manual-entry-description">Description</label>
           <div ref={descriptionInteractionRef}>
             <InlineTagInput
-              ariaLabel="Manual time entry description"
+              ariaLabel="Manual block description"
               className="manual-entry-inline-tags time-entry-quick-tags"
               inputId="manual-entry-description"
               inputRef={descriptionInputRef}

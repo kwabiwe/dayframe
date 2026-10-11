@@ -1,3 +1,4 @@
+import { formatDuration as formatSharedDuration } from "@dayframe/shared";
 "use client";
 
 import Link from "next/link";
@@ -136,7 +137,7 @@ export function TodayView({ initialData }: { initialData: BootstrapData; rendere
 
   const startAgain = useCallback(async (entry: TimeEntryRow) => {
     if (startingId || isTimerBusy) {
-      return { ok: false, error: "A timer update is already in progress." } as const;
+      return { ok: false, error: "A block update is already in progress." } as const;
     }
     setStartingId(entry.id);
     setActionError(null);
@@ -726,11 +727,7 @@ function formatWeekdayLong(ms: number) {
 }
 
 function formatShortDuration(seconds: number) {
-  const minutes = Math.floor(seconds / 60);
-  if (minutes < 60) return `${minutes}m`;
-  const hours = Math.floor(minutes / 60);
-  const rest = minutes % 60;
-  return rest ? `${hours}h ${rest}m` : `${hours}h`;
+  return formatSharedDuration(seconds);
 }
 
 /** Durations as Dayframe writes them, with "<1m" for a block shorter than a minute. */

@@ -25,7 +25,7 @@ export function ReportsOverview({ report, showTrend = true }: { report: ReportRe
           <header className="report-section-header">
             <div>
               <h2 id="report-allocation-title">Time by activity</h2>
-              <p>Activity totals divide Total logged. Overlapping entries count in each activity.</p>
+              <p>Activity totals divide Total logged. Overlapping blocks count in each activity.</p>
             </div>
           </header>
           <AccessibleBreakdownTable caption="Exact time by activity" rows={report.byCategory} totalSeconds={report.totalSeconds} />
@@ -118,7 +118,7 @@ function TagBreakdown({ report }: { report: ReportResult }) {
       <header className="report-section-header">
         <div>
           <h2 id="report-tags-title">Tags</h2>
-          <p>Entries can contain multiple tags, so tag totals may overlap.</p>
+          <p>Blocks can contain multiple tags, so tag totals may overlap.</p>
         </div>
         <Tags aria-hidden="true" size={19} />
       </header>
@@ -141,7 +141,7 @@ function TagBreakdown({ report }: { report: ReportResult }) {
           ))}
         </div>
       ) : (
-        <EmptyAnalysis title="No tags in this result" body="Tagged entries will appear here when they match the selected filters." />
+        <EmptyAnalysis title="No tags in this result" body="Tagged blocks will appear here when they match the selected filters." />
       )}
       <AccessibleBreakdownTable caption="Exact tag totals; totals may overlap" rows={report.byTag} totalSeconds={report.totalSeconds} />
     </section>

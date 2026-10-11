@@ -482,7 +482,7 @@ export function DataPrivacySettings() {
       <SettingsRow
         icon={Trash2}
         label="Recent location evidence"
-        detail="Raw map evidence is normally deleted after seven days. Confirmed time entries and saved places are kept."
+        detail="Raw map evidence is normally deleted after seven days. Confirmed blocks and saved places are kept."
         action={(
           <Button variant="danger" compact onClick={() => setConfirmDelete(true)}>
             Delete recent evidence
@@ -508,7 +508,7 @@ export function DataPrivacySettings() {
           title="Delete recent location evidence?"
         >
           <div className="settings-confirm-copy">
-            <p>Confirmed time entries and saved places will remain.</p>
+            <p>Confirmed blocks and saved places will remain.</p>
             <p>This cannot be undone.</p>
           </div>
         </ModalDialog>

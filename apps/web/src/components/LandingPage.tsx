@@ -5,8 +5,8 @@ import { DayframeBrand } from "@/components/brand/DayframeBrand";
 const productPoints = [
   {
     icon: Clock3,
-    title: "Manual timers stay fast",
-    body: "Type what you are doing, choose an activity, and keep the same timeline available on web and iPhone."
+    title: "Manual blocks stay fast",
+    body: "Type what you are doing, choose an activity, and keep the same calendar available on web and iPhone."
   },
   {
     icon: MapPin,
