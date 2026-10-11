@@ -91,13 +91,14 @@ vi.mock("./config", () => ({
 vi.mock("./location/runtime", () => runtimeMocks);
 // These legacy classifier fixtures intentionally isolate the capture owner;
 // real account/task/SQLite admission is exercised in ownership.sqlite.test.ts.
+const captureState = vi.hoisted(() => ({ current: true }));
 vi.mock("./location/store", () => ({
   captureLocationOwnership: async () => ({ revision: 0, binding: {id:"capture-test", enabled:true, boundAt:"2020-01-01T00:00:00Z"},
     context: {userId:"user-geofence",workspaceId:"workspace-geofence",savedPlaces:{some:()=>true}} }),
   updateLocationCaptureCatalogue: async () => true,
   getLocationRolloutMode: async () => "v1",
   hasLegacyLocationOwner: async () => true,
-  isLocationCaptureSnapshotCurrent: () => true,
+  isLocationCaptureSnapshotCurrent: () => captureState.current,
   locationCaptureRevision: () => 0
 }));
 
@@ -740,6 +741,22 @@ describe("Always already asked, after a restart (UIA-111, Codex r3–r4)", () =>
     locationMocks.getForegroundPermissionsAsync.mockReset();
     locationMocks.getBackgroundPermissionsAsync.mockReset();
     fg("granted"); bgUndetermined(); // downgraded to While Using, then a restart
+    expect(await locationAccessNeedsIosSettings()).toBe(true);
+  });
+
+  it("an ordinary launch records a seen Always grant even with suggestions off (Codex r7)", async () => {
+    captureState.current = false; // suggestions off: no enabled capture binding
+    try {
+      locationMocks.getForegroundPermissionsAsync.mockResolvedValue({ status: "granted", granted: true } as never);
+      locationMocks.getBackgroundPermissionsAsync.mockResolvedValue({ status: "granted", granted: true } as never);
+      await refreshGeofencesForPlaces([place]).catch(() => undefined);
+      await vi.waitFor(() => expect(asyncStore.get("dayframe.location.alwaysRequest.v2")).toBe("asked"));
+    } finally {
+      captureState.current = true;
+    }
+    locationMocks.getForegroundPermissionsAsync.mockReset();
+    locationMocks.getBackgroundPermissionsAsync.mockReset();
+    fg("granted"); bgUndetermined();
     expect(await locationAccessNeedsIosSettings()).toBe(true);
   });
 

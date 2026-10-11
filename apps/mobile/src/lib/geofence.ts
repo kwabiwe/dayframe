@@ -522,6 +522,9 @@ export function startLocationLearning(places: Parameters<typeof startLocationLea
   return withLocationCaptureLifecycle(async () => startLocationLearningUnsafe(places, await captured));
 }
 export function refreshGeofencesForPlaces(places: Parameters<typeof refreshGeofencesForPlacesUnsafe>[0], owner?: MobileAccountOwner) {
+  // Every launch notes a seen Always grant, whatever this account's consent or binding: whether iOS
+  // will ask again belongs to the iPhone, not to capture (UIA-111).
+  void readBackgroundLocationPermission().catch(() => undefined);
   const captured = captureLocationOwnership();
   return withLocationCaptureLifecycle(async () => {
     const capture = await refreshCaptureCatalogue(places, owner, await captured);
