@@ -246,6 +246,29 @@ describe("native Calendar presentation boundary", () => {
       expect(crowd.isReview).toBe(true);
     });
 
+    it("a short suggestion inside a longer one sits beside it, never as an inset strip (Codex r2)", () => {
+      const state = build(now, bootstrap([], {
+        reviewItems: [suggestion("gym", 9, 0, 60), suggestion("workout", 9, 15, 30)]
+      }));
+      const lane = state.model.entries;
+      expect(lane.map((item) => [item.actionId, item.layoutMode])).toEqual([["gym", "lane"], ["workout", "lane"]]);
+      for (const item of lane) expect(item.widthFraction).toBeCloseTo(REVIEW_LANE_WIDTH / 2);
+      expect(lane[0].offsetFraction).not.toBeCloseTo(lane[1].offsetFraction);
+    });
+
+    it("each crowd says its own time range and what it opens (Codex r2)", () => {
+      const state = build(now, bootstrap([], {
+        reviewItems: [
+          suggestion("a", 9, 0, 60), suggestion("b", 9, 10, 60), suggestion("c", 9, 20, 30),
+          suggestion("d", 14, 0, 30), suggestion("e", 14, 5, 30), suggestion("f", 14, 10, 30)
+        ]
+      }));
+      expect(state.model.entries.map((item) => item.accessibilityLabel)).toEqual([
+        "Needs review: 3 suggestions, 09:00 to 10:10. Opens Suggestion a first.",
+        "Needs review: 3 suggestions, 14:00 to 14:40. Opens Suggestion d first."
+      ]);
+    });
+
     it("a chain that never has three at once stays as separate blocks", () => {
       const state = build(now, bootstrap([], {
         reviewItems: [suggestion("a", 9, 0, 40), suggestion("b", 9, 30, 40), suggestion("c", 10, 0, 40)]
@@ -258,6 +281,7 @@ describe("native Calendar presentation boundary", () => {
       expect(state.model.entries.map((item) => [item.title, item.actionKind, item.actionId])).toEqual([
         ["3 suggestions", "review", ""]
       ]);
+      expect(state.model.entries[0].accessibilityLabel).toBe("Needs review: 3 suggestions, 09:00 to 10:00. Opens the Review list.");
       const onOpenReview = vi.fn();
       routeNativeCalendarOpenEvent({ actionId: "", kind: "review" }, state.actionEntries, {
         onOpenActive: vi.fn(), onOpenCompleted: vi.fn(), onOpenReview

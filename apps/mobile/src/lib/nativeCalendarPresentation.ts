@@ -21,6 +21,8 @@ export type NativeCalendarEntry = MobileTimeEntry & {
   isActive: boolean;
   isReviewSuggestion?: boolean;
   reviewItemId?: string;
+  /** A crowd of Review items drawn as one block: how many, and the suggestion it opens. */
+  reviewCrowd?: { count: number; opensTitle: string | null };
 };
 
 export type NativeCalendarTheme = Pick<
@@ -137,14 +139,21 @@ export const REVIEW_LANE_WIDTH = 0.44;
 export const REVIEW_LANE_MAX_LANES = 2;
 const REVIEW_LANE_Z_INDEX = 1_000;
 
-function layoutDayEntries(entries: NativeCalendarEntry[], dayStart: Date, dayEnd: Date, now: number) {
+function layoutDayEntries(
+  entries: NativeCalendarEntry[],
+  dayStart: Date,
+  dayEnd: Date,
+  now: number,
+  options?: { insetOverlays?: boolean }
+) {
   return layoutTimeIntervals(
     entries.map((entry) => ({
       id: entry.id,
       startedAt: Math.max(dayStart.getTime(), Date.parse(entry.startedAt)),
       stoppedAt: Math.min(dayEnd.getTime(), entry.stoppedAt ? Date.parse(entry.stoppedAt) : now)
     })),
-    now
+    now,
+    options
   );
 }
 
@@ -197,7 +206,9 @@ export function buildNativeCalendarBridgeState({
   const reviewEntries = entries.filter((entry) => isCalendarReviewNeeded(entry));
   const layoutById = new Map([
     ...layoutDayEntries(confirmedEntries, dayStart, dayEnd, now).map((layout) => [layout.id, layout] as const),
-    ...layoutDayEntries(reviewEntries, dayStart, dayEnd, now).map((layout) => [layout.id, {
+    // The lane is narrow: overlapping Review items always sit side by side (never an inset over a
+    // longer one, which would leave it a strip too thin to tap).
+    ...layoutDayEntries(reviewEntries, dayStart, dayEnd, now, { insetOverlays: false }).map((layout) => [layout.id, {
       ...layout,
       offsetFraction: 1 - REVIEW_LANE_WIDTH + layout.offsetFraction * REVIEW_LANE_WIDTH,
       widthFraction: layout.widthFraction * REVIEW_LANE_WIDTH,
@@ -320,7 +331,9 @@ function serializeCalendarEntry(
   return {
     actionId,
     actionKind,
-    accessibilityLabel: `${reviewNeeded ? REVIEW_COPY.needsReview : entry.isActive ? "Edit running timer" : "Open time block"}: ${title}${entry.placeName ? `. Place: ${entry.placeName}` : ""}${tagText ? `. Tags: ${tagText}` : ""}${warningOverlapCount ? `. Overlaps ${warningOverlapCount} other ${warningOverlapCount === 1 ? "entry" : "entries"}.` : ""}`,
+    accessibilityLabel: entry.reviewCrowd
+      ? reviewCrowdAccessibilityLabel(entry.reviewCrowd, startedAtMs, effectiveStoppedAtMs)
+      : `${reviewNeeded ? REVIEW_COPY.needsReview : entry.isActive ? "Edit running timer" : "Open time block"}: ${title}${entry.placeName ? `. Place: ${entry.placeName}` : ""}${tagText ? `. Tags: ${tagText}` : ""}${warningOverlapCount ? `. Overlaps ${warningOverlapCount} other ${warningOverlapCount === 1 ? "entry" : "entries"}.` : ""}`,
     color,
     continuesIntoNextDay: continuation.continuesIntoNextDay,
     entryId: entry.id,
@@ -443,6 +456,21 @@ export function collapseCrowdedReviewLane(entries: NativeCalendarEntry[], now: n
   return result;
 }
 
+/** "Needs review: 3 suggestions, 09:00 to 10:20. Opens Gym first." — distinct per crowd. */
+function reviewCrowdAccessibilityLabel(
+  crowd: NonNullable<NativeCalendarEntry["reviewCrowd"]>,
+  startMs: number,
+  endMs: number
+) {
+  const opens = crowd.opensTitle ? `Opens ${crowd.opensTitle} first.` : "Opens the Review list.";
+  return `${REVIEW_COPY.needsReview}: ${crowd.count} suggestions, ${clockText(startMs)} to ${clockText(endMs)}. ${opens}`;
+}
+
+function clockText(ms: number) {
+  const date = new Date(ms);
+  return `${String(date.getHours()).padStart(2, "0")}:${String(date.getMinutes()).padStart(2, "0")}`;
+}
+
 function maxConcurrent(items: { start: number; end: number }[]) {
   const edges = items.flatMap((item) => [
     { at: item.start, delta: 1 },
@@ -473,6 +501,7 @@ function reviewCrowdEntry(entries: NativeCalendarEntry[], startMs: number, endMs
     placeName: null,
     // "" opens the Review list rather than one card.
     reviewItemId: first?.reviewItemId ?? "",
+    reviewCrowd: { count: entries.length, opensTitle: first ? displayEntryTitle(first) : null },
     reviewStatus: "needs_review",
     startedAt: new Date(startMs).toISOString(),
     stoppedAt: new Date(endMs).toISOString(),

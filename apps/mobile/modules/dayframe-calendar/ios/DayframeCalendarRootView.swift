@@ -510,6 +510,9 @@ private struct DayframeCalendarEntriesLayer: View {
             presentation.reduceMotion ? nil : .easeOut(duration: 0.21),
             value: "\(entry.offsetFraction):\(entry.widthFraction)"
           )
+          // A block that arrives or leaves within the day (a new suggestion, a crowd of Review
+          // suggestions forming or splitting) fades; Reduce Motion: it simply appears or goes.
+          .transition(presentation.reduceMotion ? .identity : .opacity)
           .zIndex(Double(entry.zIndex))
           .accessibilityLabel(entry.accessibilityLabel)
           .accessibilityHint(entry.isReview ? "Opens Review" : entry.isActive ? "Opens Edit Timer" : "Opens entry editor")
@@ -518,6 +521,13 @@ private struct DayframeCalendarEntriesLayer: View {
       }
     }
     .frame(width: availableWidth, height: 24 * hourHeight, alignment: .topLeading)
+    // The one owner of within-day presence: model updates arrive without animation, so the set of
+    // blocks changing drives the fade above (interrupted fades retarget; no fade across days,
+    // where the whole layer moves instead).
+    .animation(
+      presentation.reduceMotion ? nil : .easeOut(duration: 0.21),
+      value: presentation.entries.map(\.id)
+    )
   }
 }
 
