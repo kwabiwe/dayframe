@@ -773,26 +773,34 @@ export default function SettingsScreen() {
   const locationCaptureNeedsRetry = locationDiagnostics?.locationLearningEnabled === true &&
     locationDiagnostics.locationLearningCaptureState === "inactive";
   // UIA-111: once iOS won't ask again (Location denied or restricted, or Always already declined),
-  // the action opens this app's page in iOS Settings instead of a request that shows nothing.
-  // Read live (canAskAgain) whenever the location diagnostics change.
+  // the action opens this app's page in iOS Settings instead of a request that shows nothing. The
+  // live permission (canAskAgain) decides; it is read again whenever the diagnostics change and when
+  // Dayframe returns to the foreground (coming back from iOS Settings), without waiting for the
+  // network.
   const [iosSettingsNeeded, setIosSettingsNeeded] = useState(false);
+  const readIosSettingsNeed = useCallback(() => {
+    locationAccessNeedsIosSettings().then(setIosSettingsNeeded).catch(() => undefined);
+  }, []);
   useEffect(() => {
-    let current = true;
-    locationAccessNeedsIosSettings()
-      .then((needed) => {
-        if (current) setIosSettingsNeeded(needed);
-      })
-      .catch(() => undefined);
-    return () => {
-      current = false;
-    };
-  }, [locationDiagnostics?.foregroundPermission, locationDiagnostics?.backgroundPermission]);
-  const locationNeedsIosSettings = !locationMonitoringAllowed && iosSettingsNeeded;
-  const locationActionLabel = locationCaptureNeedsRetry ? "Restart location" : locationMonitoringAllowed
-    ? "Refresh"
-    : locationNeedsIosSettings
-      ? "Open Settings"
-      : "Enable";
+    readIosSettingsNeed();
+  }, [locationDiagnostics?.foregroundPermission, locationDiagnostics?.backgroundPermission, readIosSettingsNeed]);
+  const refreshLocationOnReturn = useRef<() => void>(() => undefined);
+  useEffect(() => {
+    const subscription = AppState.addEventListener("change", (state) => {
+      if (state === "active") refreshLocationOnReturn.current();
+    });
+    return () => subscription.remove();
+  }, []);
+  const locationNeedsIosSettings = iosSettingsNeeded;
+  // One action drives the pill's label and what VoiceOver says; Settings comes first, because a
+  // restart can't succeed until iOS allows location again.
+  const locationAction: "settings" | "restart" | "refresh" | "enable" = locationNeedsIosSettings
+    ? "settings"
+    : locationCaptureNeedsRetry ? "restart" : locationMonitoringAllowed ? "refresh" : "enable";
+  const locationActionLabel = { settings: "Open Settings", restart: "Restart location", refresh: "Refresh", enable: "Enable" }[locationAction];
+  const locationActionAccessibilityLabel = locationAction === "settings"
+    ? "Open iPhone Settings to allow location"
+    : `${locationActionLabel} location access`;
   const motionFitness = motionFitnessStatus
     ? motionFitnessPresentation(motionFitnessStatus, locationDiagnostics?.locationLearningEnabled === true)
     : null;
@@ -1344,7 +1352,8 @@ export default function SettingsScreen() {
   }
 
   async function enableLocation() {
-    if (!locationMonitoringAllowed && !locationCaptureNeedsRetry && await locationAccessNeedsIosSettings().catch(() => false)) {
+    // The live permission decides, whatever the cached diagnostics say.
+    if (await locationAccessNeedsIosSettings().catch(() => false)) {
       await Linking.openSettings();
       return;
     }
@@ -1378,7 +1387,7 @@ export default function SettingsScreen() {
   }
 
   async function toggleLocationLearning(enabled: boolean) {
-    if (enabled && !locationMonitoringAllowed && await locationAccessNeedsIosSettings().catch(() => false)) {
+    if (enabled && await locationAccessNeedsIosSettings().catch(() => false)) {
       // iOS won't ask again; Always can only be turned on in iOS Settings.
       await Linking.openSettings();
       return;
@@ -1410,6 +1419,11 @@ export default function SettingsScreen() {
       );
     }
   }
+
+  refreshLocationOnReturn.current = () => {
+    readIosSettingsNeed();
+    void refreshLocationDiagnostics().catch(() => undefined);
+  };
 
   async function refreshLocationDiagnostics(fallbackStatus?: string) {
     const diagnostics = await getLocationVisitDiagnostics();
@@ -1921,7 +1935,9 @@ export default function SettingsScreen() {
                 <SettingsBlockRow
                   control={
                     <SettingsSwitch
-                      accessibilityHint="Saves your choice for this account. Location access is set separately."
+                      accessibilityHint={locationNeedsIosSettings
+                        ? "Opens iPhone Settings, where location must be allowed first."
+                        : "Saves your choice for this account. Location access is set separately."}
                       disabled={locationDiagnostics === null}
                       label="Suggest visits and commutes"
                       onValueChange={toggleLocationLearning}
@@ -2431,7 +2447,7 @@ export default function SettingsScreen() {
                 <SettingsBlockRow
                   control={
                     <SettingsPillButton
-                      accessibilityLabel={locationNeedsIosSettings ? "Open iPhone Settings to allow location" : `${locationActionLabel} location access`}
+                      accessibilityLabel={locationActionAccessibilityLabel}
                       label={locationActionLabel}
                       onPress={() => void enableLocation()}
                       theme={theme}
@@ -2450,7 +2466,9 @@ export default function SettingsScreen() {
                   control={
                     <SettingsSwitch
                       // Consent for this account, separate from the iOS permission above.
-                      accessibilityHint="Saves your choice for this account. Location access is set separately."
+                      accessibilityHint={locationNeedsIosSettings
+                        ? "Opens iPhone Settings, where location must be allowed first."
+                        : "Saves your choice for this account. Location access is set separately."}
                       disabled={locationDiagnostics === null}
                       label="Suggest visits and commutes"
                       onValueChange={toggleLocationLearning}
