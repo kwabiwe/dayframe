@@ -1683,9 +1683,23 @@ function createStyles(theme: MobileTheme) {
       color: theme.onAccent,
       fontWeight: "700"
     },
+    datePickerHead: {
+      minHeight: 44,
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 8,
+      paddingLeft: 4
+    },
+    datePickerTitle: {
+      flex: 1,
+      minWidth: 0,
+      color: theme.textPrimary,
+      fontFamily: MOBILE_DISPLAY_FONT.bold,
+      fontSize: 20
+    },
     datePickerActions: {
       flexDirection: "row",
-      justifyContent: "flex-end",
+      justifyContent: "flex-start",
       gap: 8,
       paddingTop: 2
     },
@@ -1703,16 +1717,17 @@ function createStyles(theme: MobileTheme) {
       fontSize: 13,
       fontWeight: "600"
     },
+    // Neutral Done (UIA-011): coral is for live time and the one primary action of a screen.
     datePickerDoneButton: {
       minHeight: 44,
       borderRadius: 999,
-      backgroundColor: theme.accent,
+      backgroundColor: theme.textPrimary,
       paddingHorizontal: 18,
       alignItems: "center",
       justifyContent: "center"
     },
     datePickerDoneText: {
-      color: theme.onAccent,
+      color: theme.background,
       fontFamily: monoFont,
       fontSize: 13,
       fontWeight: "700"
@@ -1863,8 +1878,9 @@ function createStyles(theme: MobileTheme) {
       paddingVertical: 8,
       marginTop: 2
     },
+    // Destructive text is danger red, never coral (UIA-014).
     activeEditDeleteText: {
-      color: theme.accentText,
+      color: theme.danger,
       fontFamily: monoFont,
       fontSize: 13,
       fontWeight: "600"
@@ -2534,8 +2550,9 @@ function createStyles(theme: MobileTheme) {
       borderColor: theme.accent,
       backgroundColor: theme.accentSoft
     },
+    // Secondary actions are neutral (UIA-012); coral text read as a second primary action.
     secondaryButtonText: {
-      color: theme.accentText,
+      color: theme.textPrimary,
       fontWeight: "600",
       fontFamily: monoFont,
       fontSize: 13,

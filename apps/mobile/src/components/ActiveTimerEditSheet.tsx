@@ -3001,6 +3001,8 @@ export function ActiveTimerEditSheet({
           />
         ) : null}
         <FloatingDatePicker
+          // A block's start and end are never in the future (UIA-011): later days can't be chosen.
+          maxDate={new Date()}
           onClose={() => {
             closeDatePickerAfterTouch();
           }}

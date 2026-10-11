@@ -140,7 +140,7 @@ describe("Blocks Reports pieces", () => {
     expect(slots[3].children).toHaveLength(1);
     const today = tree.root.findAll((node) => node.props.accessible && node.props.accessibilityLabel?.includes("1 hour"));
     expect(today).toHaveLength(1);
-    expect(today[0].props.style[2]).toEqual({ borderColor: "#FF6248", borderWidth: 1.5 });
+    expect(today[0].props.style[2]).toEqual({ borderColor: "#F7F8FB", borderWidth: 1.5 });
   });
 
   it("counts days on goal", () => {

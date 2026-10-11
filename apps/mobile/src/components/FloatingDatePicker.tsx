@@ -76,6 +76,31 @@ export function FloatingDatePicker({
           },
         ]}
       >
+        {/* Blocks head (UIA-011): the title, and Done as a neutral pill in the corner. */}
+        <View style={styles.datePickerHead}>
+          <Text
+            accessibilityRole="header"
+            maxFontSizeMultiplier={REPORT_TEXT_CAP.heading}
+            numberOfLines={1}
+            style={styles.datePickerTitle}
+          >
+            Choose a date
+          </Text>
+          <Pressable
+            accessibilityLabel="Done"
+            accessibilityHint="Closes the date picker"
+            accessibilityRole="button"
+            onPress={onClose}
+            style={pressable(styles.datePickerDoneButton, styles.buttonPressed)}
+          >
+            <Text
+              maxFontSizeMultiplier={REPORT_TEXT_CAP.control}
+              style={styles.datePickerDoneText}
+            >
+              Done
+            </Text>
+          </Pressable>
+        </View>
         <DatePickerCalendar
           month={month}
           onMonthChange={setMonth}
@@ -102,19 +127,6 @@ export function FloatingDatePicker({
               style={styles.datePickerTodayText}
             >
               Today
-            </Text>
-          </Pressable>
-          <Pressable
-            accessibilityLabel="Close date picker"
-            accessibilityRole="button"
-            onPress={onClose}
-            style={pressable(styles.datePickerDoneButton, styles.buttonPressed)}
-          >
-            <Text
-              maxFontSizeMultiplier={REPORT_TEXT_CAP.control}
-              style={styles.datePickerDoneText}
-            >
-              Done
             </Text>
           </Pressable>
         </View>

@@ -85,7 +85,7 @@ export function ReportFiltersSheet({
       style={s.headLink}
       testID={`report-filter-${label.toLowerCase()}`}
     >
-      <Text maxFontSizeMultiplier={REPORT_TEXT_CAP.control} style={[s.headLinkText, { color: theme.accentText }]}>
+      <Text maxFontSizeMultiplier={REPORT_TEXT_CAP.control} style={[s.headLinkText, { color: theme.textPrimary }]}>
         {label}
       </Text>
     </Pressable>
@@ -146,8 +146,12 @@ export function ReportFiltersSheet({
               {section.title.toUpperCase()}
             </Text>
           ) : null}
-          {section.rows.map((option) => (
+          {/* Each section's rows sit in one rounded card (UIA-010). */}
+          {section.rows.length ? (
+          <View style={[s.optionCard, { backgroundColor: theme.surfaceInset }]}>
+          {section.rows.map((option, index) => (
             <Option
+              divider={index > 0}
               key={option.key}
               label={
                 option.isUnavailable
@@ -163,6 +167,8 @@ export function ReportFiltersSheet({
               }}
             />
           ))}
+          </View>
+          ) : null}
         </View>
       ))}
       {sections.every((section) => section.rows.length === 0) ? (
@@ -183,12 +189,14 @@ function onBlockColor(fill: string, fallback: string) {
 }
 
 function Option({
+  divider = false,
   label,
   checked,
   theme,
   option,
   onPress,
 }: {
+  divider?: boolean;
   label: string;
   checked: boolean;
   theme: MobileTheme;
@@ -202,7 +210,7 @@ function Option({
       accessibilityLabel={label}
       accessibilityState={{ checked }}
       onPress={onPress}
-      style={s.option}
+      style={[s.option, divider ? { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: theme.border } : null]}
     >
       <View style={[s.optionBlock, { backgroundColor: option.color }]}>
         {option.isUncategorized || option.isUnavailable ? null : (
@@ -220,12 +228,13 @@ function Option({
       <View
         style={[
           s.check,
+          // A neutral check (UIA-010): coral marks live time and the one primary action.
           checked
-            ? { backgroundColor: theme.accent, borderColor: theme.accent }
+            ? { backgroundColor: theme.textPrimary, borderColor: theme.textPrimary }
             : { borderColor: theme.borderStrong },
         ]}
       >
-        {checked ? <CalendarGlyph kind="tick" color={theme.onAccent} /> : null}
+        {checked ? <CalendarGlyph kind="tick" color={theme.background} /> : null}
       </View>
     </Pressable>
   );
@@ -281,6 +290,19 @@ export function ReportDateSheet({
         return true;
       }}
     >
+      {/* Blocks head (UIA-026). */}
+      <View style={s.dateHead}>
+        <Text maxFontSizeMultiplier={REPORT_TEXT_CAP.small} style={[s.eyebrow, { color: theme.textSecondary }]}>
+          REPORTS
+        </Text>
+        <Text
+          accessibilityRole="header"
+          maxFontSizeMultiplier={REPORT_TEXT_CAP.heading}
+          style={[s.filterTitle, { color: theme.textPrimary }]}
+        >
+          Choose dates
+        </Text>
+      </View>
       <View style={s.presets}>
         {(["today", "week", "month", "year"] as ReportPreset[]).map(
           (preset) => {
@@ -300,7 +322,7 @@ export function ReportDateSheet({
                     s.presetFill,
                     {
                       backgroundColor: selected
-                        ? theme.accentSoft
+                        ? theme.textPrimary
                         : theme.surfaceMuted,
                     },
                   ]}
@@ -311,7 +333,7 @@ export function ReportDateSheet({
                     style={[
                       s.actionText,
                       {
-                        color: selected ? theme.accentText : theme.textPrimary,
+                        color: selected ? theme.background : theme.textPrimary,
                       },
                     ]}
                   >
@@ -590,8 +612,14 @@ function ReportSheet({
               calendarLayout ? s.dateAction : s.filterAction,
               compactCalendarLayout ? s.compactDateAction : null,
               {
+                // The filter's "Show N activities" is the sheet's primary action (coral); the
+                // date sheet's Done is a neutral pill (UIA-026).
                 backgroundColor:
-                  disabled || closing ? theme.surfaceMuted : theme.accent,
+                  disabled || closing
+                    ? theme.surfaceMuted
+                    : calendarLayout
+                      ? theme.textPrimary
+                      : theme.accent,
               },
             ]}
           >
@@ -601,7 +629,11 @@ function ReportSheet({
                 s.actionText,
                 {
                   color:
-                    disabled || closing ? theme.textSecondary : theme.onAccent,
+                    disabled || closing
+                      ? theme.textSecondary
+                      : calendarLayout
+                        ? theme.background
+                        : theme.onAccent,
                 },
               ]}
             >
@@ -685,7 +717,9 @@ const s = StyleSheet.create({
   eyebrow: { fontSize: 11, fontWeight: "700", letterSpacing: 0.7 },
   headLink: { minHeight: 44, minWidth: 44, alignItems: "center", justifyContent: "center", paddingHorizontal: 6 },
   headLinkText: { fontSize: 15, fontWeight: "700" },
-  filterSection: { gap: 2, paddingTop: 6 },
+  filterSection: { gap: 6, paddingTop: 6 },
+  optionCard: { borderRadius: 16, paddingHorizontal: 12 },
+  dateHead: { gap: 2, marginHorizontal: 10, marginBottom: 6 },
   glyphSlot: {
     width: 24,
     height: 24,
