@@ -3,6 +3,7 @@ import { DAYFRAME_THEME, blockColorsFor } from "@dayframe/shared";
 import type { MobileBootstrap, MobileTimeEntry } from "./api";
 import type { MobileTheme } from "./mobileTheme";
 import {
+  REVIEW_LANE_MAX_LANES,
   REVIEW_LANE_WIDTH,
   buildNativeCalendarBridgeState,
   reviewTargetEnvelope,
@@ -720,6 +721,57 @@ describe("native Calendar Blocks presentation", () => {
       if (previousTz === undefined) delete process.env.TZ;
       else process.env.TZ = previousTz;
     }
+  });
+
+  describe("the Review lane after a clock change keeps targets apart (Codex r15)", () => {
+    const withTz = (tz: string, run: () => void) => {
+      const previousTz = process.env.TZ;
+      process.env.TZ = tz;
+      try { run(); } finally {
+        if (previousTz === undefined) delete process.env.TZ;
+        else process.env.TZ = previousTz;
+      }
+    };
+    const suggestion = (id: string, start: string, stop: string) => entry({ id, reviewStatus: "needs_review", startedAt: start, stoppedAt: stop });
+    const expectApart = (state: ReturnType<typeof build>, dayKey: string) => {
+      const lane = state.model.entries.filter((candidate) => candidate.isReview);
+      const [year, month, day] = dayKey.split("-").map(Number);
+      const dayStart = new Date(year, month - 1, day).getTime();
+      const dayEnd = new Date(year, month - 1, day + 1).getTime();
+      for (const item of lane) expect(item.widthFraction).toBeGreaterThanOrEqual(REVIEW_LANE_WIDTH / REVIEW_LANE_MAX_LANES - 1e-9);
+      for (const [index, a] of lane.entries()) {
+        for (const b of lane.slice(index + 1)) {
+          if (Math.abs(a.offsetFraction - b.offsetFraction) > 1e-9) continue;
+          const ea = reviewTargetEnvelope(a.startedAtMs, a.stoppedAtMs!, dayStart, dayEnd);
+          const eb = reviewTargetEnvelope(b.startedAtMs, b.stoppedAtMs!, dayStart, dayEnd);
+          expect(ea.end <= eb.start || eb.end <= ea.start, `${a.actionId} and ${b.actionId} share a lane`).toBe(true);
+        }
+      }
+      return lane;
+    };
+
+    it("a crowd stretched into the skipped hour forms again with later suggestions, never three lanes", () => withTz("Europe/London", () => {
+      const state = build(Date.parse("2026-03-29T20:00:00Z"), bootstrap([
+        suggestion("a", "2026-03-29T00:40:00.000Z", "2026-03-29T00:45:00.000Z"),
+        suggestion("b", "2026-03-29T00:55:00.000Z", "2026-03-29T00:56:00.000Z"),
+        suggestion("c", "2026-03-29T00:58:00.000Z", "2026-03-29T00:59:00.000Z"),
+        suggestion("d", "2026-03-29T01:01:00.000Z", "2026-03-29T01:02:00.000Z"),
+        suggestion("e", "2026-03-29T01:05:00.000Z", "2026-03-29T01:06:00.000Z")
+      ]), undefined, "2026-03-29");
+      const lane = expectApart(state, "2026-03-29");
+      const crowd = lane.find((item) => item.accessibilityLabel.includes("suggestions"));
+      expect(crowd?.accessibilityLabel).toContain("5 suggestions");
+    }));
+
+    it("a day that starts at 01:00 is drawn from 01:00 (America/Santiago, 6 Sep 2026)", () => withTz("America/Santiago", () => {
+      // Clocks go from 00:00 to 01:00; 04:00Z is 01:00 local.
+      const state = build(Date.parse("2026-09-06T20:00:00Z"), bootstrap([
+        suggestion("a", "2026-09-06T04:00:00.000Z", "2026-09-06T04:01:00.000Z"),
+        suggestion("b", "2026-09-06T04:01:00.000Z", "2026-09-06T04:02:00.000Z"),
+        suggestion("c", "2026-09-06T04:45:00.000Z", "2026-09-06T04:46:00.000Z")
+      ]), undefined, "2026-09-06");
+      expectApart(state, "2026-09-06");
+    }));
   });
 
   it("reserves Review targets by the wall-clock time iOS draws, across a clock change (Codex r10)", () => {

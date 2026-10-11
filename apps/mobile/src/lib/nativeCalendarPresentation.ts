@@ -156,9 +156,10 @@ const DAY_MS = 24 * 60 * 60_000;
  * can share a wall-clock time and are then drawn in the same place.
  */
 function wallClockOffsetMs(ms: number, dayStartMs: number, dayEndMs: number) {
-  if (ms <= dayStartMs) return 0;
   if (ms >= dayEndMs) return DAY_MS;
-  const date = new Date(ms);
+  // Clipped to the day, then its real local time: a day that starts at 01:00 (a clock change at
+  // midnight) is drawn from 01:00, as iOS's localMinute does.
+  const date = new Date(Math.max(ms, dayStartMs));
   return ((date.getHours() * 60 + date.getMinutes()) * 60 + date.getSeconds()) * 1000 + date.getMilliseconds();
 }
 
@@ -512,12 +513,16 @@ function buildCalendarEntries(
   );
 
   const dayStartMs = startOfLocalDay(dateFromKey(selectedDayKey)).getTime();
-  const laneEntries = collapseCrowdedReviewLane(
-    [...timeEntries.filter(isCalendarReviewNeeded), ...reviewEntries],
-    now,
-    dayStartMs,
-    addDays(new Date(dayStartMs), 1).getTime()
-  );
+  // A crowd's own span can reach further than its members (iOS's minimum height, a clock change),
+  // meeting more suggestions: crowds are formed again until nothing changes, so the lane never
+  // holds more than REVIEW_LANE_MAX_LANES side by side.
+  let laneEntries = [...timeEntries.filter(isCalendarReviewNeeded), ...reviewEntries];
+  for (let pass = 0; pass < 8; pass += 1) {
+    const next = collapseCrowdedReviewLane(laneEntries, now, dayStartMs, addDays(new Date(dayStartMs), 1).getTime());
+    const settled = next.length === laneEntries.length;
+    laneEntries = next;
+    if (settled) break;
+  }
   return [...timeEntries.filter((entry) => !isCalendarReviewNeeded(entry)), ...laneEntries]
     .sort((left, right) => Date.parse(left.startedAt) - Date.parse(right.startedAt));
 }
@@ -648,10 +653,12 @@ function maxConcurrent(items: { start: number; end: number }[]) {
 
 function reviewCrowdEntry(entries: NativeCalendarEntry[], startMs: number, endMs: number): NativeCalendarEntry {
   const first = entries.find((entry) => entry.reviewItemId) ?? null;
-  const label = `${entries.length} suggestions`;
+  // A crowd formed again around an earlier crowd counts that crowd's members.
+  const count = entries.reduce((total, entry) => total + (entry.reviewCrowd?.count ?? 1), 0);
+  const label = `${count} suggestions`;
   return {
     ...entries[0],
-    id: `review-crowd:${entries[0].id}`,
+    id: entries[0].id.startsWith("review-crowd:") ? entries[0].id : `review-crowd:${entries[0].id}`,
     categoryColor: null,
     categoryId: null,
     categoryName: null,
@@ -662,7 +669,7 @@ function reviewCrowdEntry(entries: NativeCalendarEntry[], startMs: number, endMs
     placeName: null,
     // "" opens the Review list rather than one card.
     reviewItemId: first?.reviewItemId ?? "",
-    reviewCrowd: { count: entries.length, opensTitle: first ? displayEntryTitle(first) : null },
+    reviewCrowd: { count, opensTitle: first ? first.reviewCrowd?.opensTitle ?? displayEntryTitle(first) : null },
     reviewStatus: "needs_review",
     startedAt: new Date(startMs).toISOString(),
     stoppedAt: new Date(endMs).toISOString(),
