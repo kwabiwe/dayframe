@@ -10,18 +10,26 @@ export type AutomaticCategorySpec = {
   icon: string;
   /** Starter activity this category stands for; found by key first so renames keep working. */
   starterKey: DayframeStarterActivityKey | null;
+  /** Whether a newly created activity fills the daily goal (Sleep does not). */
+  countsTowardGoal: boolean;
 };
 
 function starterSpec(key: DayframeStarterActivityKey): AutomaticCategorySpec {
   const starter = starterActivityByKey(key);
-  return { name: starter.name, color: starter.color, icon: starter.icon, starterKey: starter.starterKey };
+  return {
+    name: starter.name,
+    color: starter.color,
+    icon: starter.icon,
+    starterKey: starter.starterKey,
+    countsTowardGoal: starter.countsTowardGoal
+  };
 }
 
 export function healthCategorySpecForEventType(
   eventType: string | null | undefined
 ): AutomaticCategorySpec {
   if (eventType === "health_sleep_import") return starterSpec("sleep");
-  return { name: "Health", color: "moss", icon: "health", starterKey: null };
+  return { name: "Health", color: "moss", icon: "health", starterKey: null, countsTowardGoal: true };
 }
 
 export function commuteCategorySpec(): AutomaticCategorySpec {
@@ -100,10 +108,10 @@ export async function ensureAutomaticCategoryId(
   if (existing.rows[0]) return existing.rows[0].id;
 
   const created = await client.query<{ id: string }>(
-    `insert into categories (workspace_id, name, color, is_pinned, icon, starter_key)
-     values ($1, $2, $3, false, $4, $5)
+    `insert into categories (workspace_id, name, color, is_pinned, icon, starter_key, counts_toward_goal)
+     values ($1, $2, $3, false, $4, $5, $6)
      returning id`,
-    [session.workspaceId, spec.name, spec.color, spec.icon, spec.starterKey]
+    [session.workspaceId, spec.name, spec.color, spec.icon, spec.starterKey, spec.countsTowardGoal]
   );
   return created.rows[0].id;
 }

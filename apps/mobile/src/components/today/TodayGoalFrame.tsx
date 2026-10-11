@@ -25,6 +25,7 @@ export const TodayGoalFrame = memo(function TodayGoalFrame({
   dateLabel,
   diagnostic,
   goalHours,
+  goalSeconds,
   percent,
   theme,
   totalSeconds,
@@ -33,10 +34,16 @@ export const TodayGoalFrame = memo(function TodayGoalFrame({
   dateLabel: string;
   diagnostic?: MobileAccessibilityDiagnostic;
   goalHours: number;
+  /** Framed time that fills the goal; less than the total when an activity doesn't count. */
+  goalSeconds?: number;
   percent: number;
   theme: MobileTheme;
   totalSeconds: number;
 }) {
+  // Time in activities that don't count (Sleep by default, UIA-043) stays in the total; the line
+  // then says how much of it fills the goal.
+  const counted = goalSeconds ?? totalSeconds;
+  const partial = counted < totalSeconds;
   return (
     <View
       onLayout={(event) => recordMobileLayout(diagnostic, "today.goal", event)}
@@ -54,7 +61,9 @@ export const TodayGoalFrame = memo(function TodayGoalFrame({
         {dateLabel.toUpperCase()}
       </Text>
       <View
-        accessibilityLabel={`${spokenDuration(totalSeconds)} tracked. Daily goal ${spokenGoal(goalHours)}, ${percent} percent.`}
+        accessibilityLabel={partial
+          ? `${spokenDuration(totalSeconds)} tracked, ${spokenDuration(counted)} toward your daily goal of ${spokenGoal(goalHours)}, ${percent} percent.`
+          : `${spokenDuration(totalSeconds)} tracked. Daily goal ${spokenGoal(goalHours)}, ${percent} percent.`}
         accessible
         style={styles.goal}
       >
@@ -73,7 +82,8 @@ export const TodayGoalFrame = memo(function TodayGoalFrame({
             onTextLayout={(event) => recordMobileTextLayout(diagnostic, "today.goal.of", event, "metadata", styles.of)}
             style={[styles.of, { color: theme.textSecondary }]}
           >
-            framed of {goalLabel(goalHours)}
+            {partial ? `framed · ${compactDuration(counted)} toward ` : "framed of "}
+            {goalLabel(goalHours)}
           </Text>
           <Text {...mobileTextProps("metadata")} style={[styles.percent, { color: theme.textSecondary }]}>
             {percent}%

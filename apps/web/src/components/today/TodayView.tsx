@@ -3,7 +3,7 @@
 import Link from "next/link";
 import type { CSSProperties, KeyboardEvent as ReactKeyboardEvent, PointerEvent as ReactPointerEvent } from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { resolveActivityIcon } from "@dayframe/shared";
+import { resolveActivityIcon, withGoalExclusions } from "@dayframe/shared";
 import { useAppShellRuntime, useRuntimePageData } from "@/components/AppShellRuntime";
 import { BlocksToast } from "@/components/blocks/BlocksToast";
 import { DayframeIcon } from "@/components/blocks/DayframeIcon";
@@ -170,7 +170,7 @@ export function TodayView({ initialData }: { initialData: BootstrapData; rendere
 
   const dayStart = localDayStart(nowMs);
   const dayEnd = localDayEnd(dayStart);
-  const goal = buildGoalFrame({ entries, goalMinutes: data.user.dailyGoalMinutes, nowMs });
+  const goal = buildGoalFrame({ categories: withGoalExclusions(data.categories, data.goalExcludedCategoryIds), entries, goalMinutes: data.user.dailyGoalMinutes, nowMs });
   const blocks = todayBlocks(entries, dayStart, nowMs);
   const totals = activityTotals(entries, dayStart, dayEnd, nowMs);
   const pending = pendingReviewSpans(data.reviewItems, dayStart, dayEnd, nowMs);
@@ -189,7 +189,9 @@ export function TodayView({ initialData }: { initialData: BootstrapData; rendere
               {formatDuration(goal.totalSeconds)}
             </p>
             <p className="df-today-sub">
-              framed today · {goal.percent}% of your {formatGoalHours(goal.goalMinutes)} goal
+              {goal.goalSeconds < goal.totalSeconds
+                ? `framed today · ${formatDuration(goal.goalSeconds)} toward your ${formatGoalHours(goal.goalMinutes)} goal (${goal.percent}%)`
+                : `framed today · ${goal.percent}% of your ${formatGoalHours(goal.goalMinutes)} goal`}
             </p>
           </div>
           <GoalCells cells={goal.cells} />

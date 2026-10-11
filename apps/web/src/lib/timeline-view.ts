@@ -1,5 +1,6 @@
 export const TIMELINE_SCOPES = ["day", "week"] as const;
-export const TIMELINE_VIEWS = ["calendar", "list", "timesheet"] as const;
+// Timesheet left Calendar (owner, 11 Oct): an old view=timesheet link or cookie opens the Calendar.
+export const TIMELINE_VIEWS = ["calendar", "list"] as const;
 
 export type TimelineScope = (typeof TIMELINE_SCOPES)[number];
 export type TimelineView = (typeof TIMELINE_VIEWS)[number];
@@ -52,13 +53,11 @@ export function timelineStateFromSearchParams(
     : isTimelineView(requestedView)
       ? requestedView
       : DEFAULT_TIMELINE_PREFERENCE.lastView;
-  const scope = view === "timesheet"
-    ? "week"
-    : requestedScope == null
-      ? preference.preferredScope
-      : isTimelineScope(requestedScope)
-        ? requestedScope
-        : DEFAULT_TIMELINE_PREFERENCE.preferredScope;
+  const scope = requestedScope == null
+    ? preference.preferredScope
+    : isTimelineScope(requestedScope)
+      ? requestedScope
+      : DEFAULT_TIMELINE_PREFERENCE.preferredScope;
 
   return { date, scope, view };
 }
@@ -76,13 +75,9 @@ export function timelinePreferenceCookieValue(preference: TimelinePreference) {
 }
 
 export function updateTimelinePreference(
-  current: TimelinePreference | null | undefined,
   state: Pick<TimelineState, "scope" | "view">
 ): TimelinePreference {
-  const preference = normalizeTimelinePreference(current);
-  return state.view === "timesheet"
-    ? { ...preference, lastView: "timesheet" }
-    : { lastView: state.view, preferredScope: state.scope };
+  return { lastView: state.view, preferredScope: state.scope };
 }
 
 export function timelineSearchString(input: TimelineSearchInput) {
@@ -210,11 +205,7 @@ export function addCalendarDays(date: Date, days: number) {
 function normalizeTimelineState(state: TimelineState): TimelineState {
   const date = parseTimelineDateKey(state.date);
   const view = isTimelineView(state.view) ? state.view : "calendar";
-  const scope = view === "timesheet"
-    ? "week"
-    : isTimelineScope(state.scope)
-      ? state.scope
-      : "week";
+  const scope = isTimelineScope(state.scope) ? state.scope : "week";
   return {
     date: toTimelineDateKey(date ?? startOfLocalDay(new Date())),
     scope,
@@ -266,5 +257,5 @@ function isTimelineScope(value?: string | null): value is TimelineScope {
 }
 
 function isTimelineView(value?: string | null): value is TimelineView {
-  return value === "calendar" || value === "list" || value === "timesheet";
+  return value === "calendar" || value === "list";
 }

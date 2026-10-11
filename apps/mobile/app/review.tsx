@@ -72,7 +72,7 @@ import { prepareReviewOverlapCounts, reviewPeerEntries } from "@/lib/reviewPrese
 import { useConnectivity } from "@/lib/connectivity";
 import { pressable, useMobileTheme } from "@/lib/mobileTheme";
 import { mergePersistedMobileTag } from "@/lib/mobileTags";
-import { localPresenceEntering, localPresenceExiting, useResolvedReduceMotionPreference } from "@/lib/motion";
+import { useResolvedReduceMotionPreference } from "@/lib/motion";
 import {
   formatReviewDeckDuration,
   formatReviewDeckWhen,
@@ -105,6 +105,8 @@ import {
 } from "@/lib/review";
 import { mobileTextProps } from "@/lib/mobileTypography";
 import { BlocksNavHeader, usePreviousScreenLabel } from "@/components/BlocksNavHeader";
+import { BlocksConfirmHost, useBlocksConfirm } from "@/components/blocks/BlocksConfirmSheet";
+import { BlocksToast, useBlocksNotice } from "@/components/blocks/BlocksToast";
 import {
   cacheReviewPresentation,
   recordReviewPresentationRead,
@@ -191,6 +193,10 @@ export default function ReviewScreen() {
     reduceMotion,
     resolved: reduceMotionPreferenceResolved
   } = useResolvedReduceMotionPreference();
+  // UIA-005/003: the bulk-skip confirmation is a Blocks confirm sheet; "Nothing to skip" is a notice
+  // in the deck toast's place (a held decision's Undo toast always wins that place).
+  const confirmSheet = useBlocksConfirm();
+  const deckNotice = useBlocksNotice();
   const [data, setData] = useState<MobileBootstrap | null>(null);
   const [reviewBacklog, setReviewBacklog] = useState<ReviewBacklogState | null>(null);
   const [reviewBacklogLoading, setReviewBacklogLoading] = useState(false);
@@ -1239,23 +1245,25 @@ export default function ReviewScreen() {
     const confirmation = reviewBulkSkipConfirmation(candidates.length, scope, complete);
     if (!confirmation.confirmLabel) {
       bulkSkipInFlight.current = false;
-      Alert.alert(confirmation.title, confirmation.message);
+      deckNotice.show(`${confirmation.title}. ${confirmation.message}`);
       return;
     }
     const chosen = new Set(candidates.map((item) => item.id));
-    Alert.alert(confirmation.title, confirmation.message, [
-      { style: "cancel", text: "Cancel", onPress: () => { bulkSkipInFlight.current = false; } },
-      {
-        style: "destructive",
-        text: confirmation.confirmLabel,
-        onPress: () => {
-          bulkSkipInFlight.current = false;
-          if (!stillHere()) return;
-          // Only what the user confirmed, and only what can still be skipped now.
-          holdBulkSkip(bulkSkipCandidates(scope).filter((item) => chosen.has(item.id)));
-        }
+    const shown = confirmSheet.confirm({
+      eyebrow: "Review all",
+      title: confirmation.title,
+      message: confirmation.message,
+      confirmLabel: confirmation.confirmLabel,
+      // Cancel, a swipe down, a backdrop tap or VoiceOver escape.
+      onCancel: () => { bulkSkipInFlight.current = false; },
+      onConfirm: () => {
+        bulkSkipInFlight.current = false;
+        if (!stillHere()) return;
+        // Only what the user confirmed, and only what can still be skipped now.
+        holdBulkSkip(bulkSkipCandidates(scope).filter((item) => chosen.has(item.id)));
       }
-    ], { cancelable: true, onDismiss: () => { bulkSkipInFlight.current = false; } });
+    });
+    if (!shown) bulkSkipInFlight.current = false;
   }
 
   function bulkSkipCandidates(scope: ReviewBulkSkipScope) {
@@ -1855,7 +1863,7 @@ export default function ReviewScreen() {
         }
       : null;
     if (!draftEntry || !hasSuggestedTimeWindow(item)) {
-      Alert.alert("Edit", "This suggested time entry does not include a start and end time yet.");
+      deckNotice.show("This suggestion has no start and end time yet.");
       return false;
     }
     commitEditTarget({
@@ -2010,7 +2018,21 @@ export default function ReviewScreen() {
   // so it never covers the controls whatever the phone height or text size.
   function renderDeckToast(placement: "actions" | "under") {
     const held = heldDeckDecision;
-    if (!held) return null;
+    const placementStyle = [styles.reviewDeckToast, placement === "under" ? styles.reviewDeckToastUnderButton : null];
+    if (!held) {
+      const notice = deckNotice.notice;
+      return notice ? (
+        <BlocksToast
+          key={`notice-${notice.token}`}
+          message={notice.message}
+          reduceMotion={reduceMotion}
+          style={placementStyle}
+          swatchColor={notice.swatchColor}
+          testID="review-deck-notice"
+          theme={theme}
+        />
+      ) : null;
+    }
     // A bulk skip (step 5f) has one neutral swatch and names the count.
     const label = held.kind === "batch"
       ? reviewBulkSkipToast(held.items.length)
@@ -2018,33 +2040,22 @@ export default function ReviewScreen() {
     const undoLabel = held.kind === "batch"
       ? `Undo skipping ${held.items.length} ${held.items.length === 1 ? "moment" : "moments"}`
       : `Undo ${held.logged ? "logging" : "skipping"} ${held.title}`;
+    // The shared Blocks toast (UIA-003): swatch, sentence and a neutral 44-point Undo pill. The
+    // hold (reviewDeckHold.ts, 4.8 s) still owns its lifetime; the token re-mounts a newer toast.
     return (
-    <Reanimated.View
-      key={held.token}
-      accessibilityLiveRegion="polite"
-      entering={localPresenceEntering(reduceMotion, "rise")}
-      exiting={localPresenceExiting(reduceMotion)}
-      style={[styles.historyDeleteUndoToast, styles.reviewDeckToast, placement === "under" ? styles.reviewDeckToastUnderButton : null]}
-      testID="review-deck-toast"
-    >
-      <View style={styles.reviewDeckToastLabel}>
-        <View style={[styles.reviewDeckToastSwatch, { backgroundColor: held.kind === "batch" ? theme.textSecondary : held.color }]} />
-        <Text numberOfLines={1} style={[styles.historyDeleteUndoText, styles.reviewDeckToastText]}>
-          {label}
-        </Text>
-      </View>
-      <Pressable
-        accessibilityLabel={undoLabel}
-        accessibilityRole="button"
-        // The shared Undo pill is 40 points tall; the slop makes it a 44-point target.
-        hitSlop={{ bottom: 4, left: 4, right: 4, top: 4 }}
-        onPress={undoHeldDeckDecision}
-        style={({ pressed }) => [styles.historyDeleteUndoButton, pressed ? styles.buttonPressed : null]}
-        testID="review-deck-undo"
-      >
-        <Text style={styles.historyDeleteUndoButtonText}>Undo</Text>
-      </Pressable>
-    </Reanimated.View>
+      <BlocksToast
+        key={held.token}
+        actionAccessibilityLabel={undoLabel}
+        actionLabel="Undo"
+        actionTestID="review-deck-undo"
+        message={label}
+        onAction={undoHeldDeckDecision}
+        reduceMotion={reduceMotion}
+        style={placementStyle}
+        swatchColor={held.kind === "batch" ? theme.textSecondary : held.color}
+        testID="review-deck-toast"
+        theme={theme}
+      />
     );
   }
 
@@ -2253,6 +2264,7 @@ export default function ReviewScreen() {
           visible={Boolean(editingEntry)}
         />
       ) : null}
+      <BlocksConfirmHost controller={confirmSheet} reduceMotion={reduceMotion} styles={styles} theme={theme} />
     </SafeAreaView>
   );
 }

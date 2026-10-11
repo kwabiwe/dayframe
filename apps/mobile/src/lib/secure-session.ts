@@ -251,6 +251,26 @@ export async function bindAuthenticatedSessionOwner(
   });
 }
 
+/** Bumped by every sign-in, sign-out and invalidation; a recovery is bound to the one it saw. */
+export function currentSessionGeneration() {
+  return sessionRevision;
+}
+
+/**
+ * Whether the Keychain still holds a sign-in, read without loading it into this process. After a
+ * logout whose Keychain deletion failed, the process is signed out while the token remains; Log
+ * out uses this to offer finishing that cleanup.
+ */
+export function hasPersistedSessionToken() {
+  return serialiseSessionOperation(async () => {
+    const current = await withInteractionRetry(() =>
+      SecureStore.getItemAsync(SESSION_TOKEN_KEY, SESSION_TOKEN_OPTIONS)
+    );
+    if (current) return true;
+    return Boolean(await withInteractionRetry(() => SecureStore.getItemAsync(LEGACY_SESSION_TOKEN_KEY)));
+  });
+}
+
 export async function clearSessionToken() {
   sessionRevision += 1;
   cachedSession = null;

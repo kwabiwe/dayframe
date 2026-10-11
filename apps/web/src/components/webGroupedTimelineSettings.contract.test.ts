@@ -20,16 +20,20 @@ describe("grouped Timeline and Settings follow-up contracts", () => {
     expect(entries).toContain("timeline-group-count");
     expect(entries).toContain("startEntryAgain(entry)");
     expect(entries).toContain("timeline-entry-highlight");
-    expect(entries).toContain(">Task<");
-    expect(entries.indexOf(">Task<")).toBeLessThan(entries.indexOf(">Time<"));
+    expect(entries).toContain(">Block<");
+    expect(entries.indexOf(">Block<")).toBeLessThan(entries.indexOf(">Time<"));
     expect(entries).not.toContain(">Activity<");
-    expect(entries).toContain("timeline-task-category-dot");
+    expect(entries).toContain("<ListBlockMark");
     expect(entries).toContain("{timeEntryTitle(entry)}");
     expect(entries).toContain("{timeEntryCategoryLabel(entry)}");
     expect(entries).not.toContain("ChevronDown");
     expect(entries).toContain('colSpan={4}');
-    expect(entries).toContain("EntryActionsMenu");
-    expect(entries).toContain("Delete whole group");
+    // Actions are direct icon buttons now, as on Today: Start again, Edit (the latest occurrence for a
+    // group) and Delete (the whole group for a group), with labels saying which.
+    expect(entries).toContain('glyph="rotate-ccw"');
+    expect(entries).toContain("`Edit the latest ${timeEntryTitle(entry)}`");
+    expect(entries).toContain("`Delete all ${group.entries.length} ${timeEntryTitle(entry)} blocks`");
+    expect(entries).toContain("onDeleteEntries(isGrouped ? group.entries : [entry])");
     expect(entries).toContain("onDeleteEntries(isGrouped ? group.entries : [entry])");
     expect(entries).toContain("onDeleteEntries([occurrence])");
     expect(deleteHook).toContain('clientFetch("/api/time-entries/batch-delete"');

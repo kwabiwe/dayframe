@@ -417,11 +417,27 @@ describe("category persistence", () => {
     await updateCategory(categoryId(), { icon: null }, session);
 
     expect(String(updateCall(first)?.[0])).toContain("icon = case when $9 then $10 else icon end");
-    expect(updateCall(first)?.[1]).toEqual([categoryId(), session.workspaceId, false, null, false, null, false, false, true, "focus", false, false]);
-    expect(updateCall(second)?.[1]).toEqual([categoryId(), session.workspaceId, false, null, false, null, false, false, true, null, false, false]);
+    expect(updateCall(first)?.[1]).toEqual([categoryId(), session.workspaceId, false, null, false, null, false, false, true, "focus", false, false, false, true]);
+    expect(updateCall(second)?.[1]).toEqual([categoryId(), session.workspaceId, false, null, false, null, false, false, true, null, false, false, false, true]);
     expect(first.query).toHaveBeenCalledWith("select id from workspaces where id = $1 for no key update", [session.workspaceId]);
     expect(first.query).toHaveBeenCalledWith("commit");
     expect(first.release).toHaveBeenCalledOnce();
+  });
+
+  it("switches Counts toward goal only when the request names it (UIA-043)", async () => {
+    const off = updateClient();
+    await updateCategory(categoryId(), { countsTowardGoal: false }, session);
+    expect(String(updateCall(off)?.[0])).toContain("counts_toward_goal = case when $13 then $14 else counts_toward_goal end");
+    expect(String(updateCall(off)?.[0])).toContain('counts_toward_goal as "countsTowardGoal"');
+    expect((updateCall(off)?.[1] as unknown[]).slice(12)).toEqual([true, false]);
+
+    const on = updateClient();
+    await updateCategory(categoryId(), { countsTowardGoal: true }, session);
+    expect((updateCall(on)?.[1] as unknown[]).slice(12)).toEqual([true, true]);
+
+    const rename = updateClient();
+    await updateCategory(categoryId(), { name: "Deep work" }, session);
+    expect((updateCall(rename)?.[1] as unknown[]).slice(12, 13)).toEqual([false]);
   });
 
   it("persists pin and unpin state to the categories.is_pinned column", async () => {
@@ -429,7 +445,7 @@ describe("category persistence", () => {
     const result = await updateCategory(categoryId(), { isPinned: true }, session);
     expect(result?.isPinned).toBe(true);
     expect(String(updateCall(pin)?.[0])).toContain("is_pinned = case when $11 then false when $7 then $8 else is_pinned end");
-    expect(updateCall(pin)?.[1]).toEqual([categoryId(), session.workspaceId, false, null, false, null, true, true, false, null, false, false]);
+    expect(updateCall(pin)?.[1]).toEqual([categoryId(), session.workspaceId, false, null, false, null, true, true, false, null, false, false, false, true]);
 
     const unpin = updateClient({ current: { name: "Focus", isPinned: true, isArchived: false }, updated: { id: categoryId(), isPinned: false } });
     await updateCategory(categoryId(), { isPinned: false }, session);
@@ -585,6 +601,36 @@ describe("category persistence", () => {
       .toContain('returning id, name, color, is_pinned as "isPinned", icon, starter_key as "starterKey"');
   });
 
+  it("stores Counts toward goal on create, counting by default (UIA-043)", async () => {
+    const inserts: unknown[][] = [];
+    const client = {
+      query: vi.fn(async (statement: string, values?: unknown[]) => {
+        if (statement.includes("from categories")) return { rows: [] };
+        if (statement.includes("insert into categories")) {
+          inserts.push(values ?? []);
+          return { rows: [{ id: categoryId(), name: values?.[1], countsTowardGoal: values?.[5] }] };
+        }
+        return { rows: [] };
+      }),
+      release: vi.fn()
+    };
+    mocks.pool.connect.mockResolvedValue(client);
+
+    await createCategory({ name: "Garden" }, session);
+    const nap = await createCategory({ name: "Nap", countsTowardGoal: false }, session);
+    // A new activity named Sleep starts off unless the request says otherwise.
+    await createCategory({ name: " sleep " }, session);
+    await createCategory({ name: "Sleep", countsTowardGoal: true }, session);
+
+    expect(String(client.query.mock.calls.find(([statement]) => String(statement).includes("insert into categories"))?.[0]))
+      .toContain("is_pinned, icon, counts_toward_goal)");
+    expect(inserts[0][5]).toBe(true);
+    expect(inserts[1][5]).toBe(false);
+    expect(nap).toMatchObject({ countsTowardGoal: false });
+    expect(inserts[2][5]).toBe(false);
+    expect(inserts[3][5]).toBe(true);
+  });
+
   it("creates missing automatic logging categories and reuses existing names case-insensitively", async () => {
     const client = {
       query: vi.fn(async (statement: string, values?: unknown[]) => {
@@ -610,9 +656,9 @@ describe("category persistence", () => {
     );
 
     expect(categories).toEqual([
-      { id: sleepCategoryId(), name: "Sleep", color: "blue-bold", icon: "sleep", starterKey: "sleep" },
-      { id: healthCategoryId(), name: "Health", color: "moss", icon: "health", starterKey: null },
-      { id: commuteCategoryId(), name: "Commute", color: "graphite", icon: "commute", starterKey: "commute" }
+      { id: sleepCategoryId(), name: "Sleep", color: "blue-bold", icon: "sleep", starterKey: "sleep", countsTowardGoal: false },
+      { id: healthCategoryId(), name: "Health", color: "moss", icon: "health", starterKey: null, countsTowardGoal: true },
+      { id: commuteCategoryId(), name: "Commute", color: "graphite", icon: "commute", starterKey: "commute", countsTowardGoal: true }
     ]);
     expect(
       client.query.mock.calls.filter(([statement]) =>
@@ -1742,7 +1788,7 @@ describe("health event persistence", () => {
     );
     expect(client.query).toHaveBeenCalledWith(
       expect.stringContaining("insert into categories"),
-      [session.workspaceId, "Health", "moss", "health", null]
+      [session.workspaceId, "Health", "moss", "health", null, true]
     );
     const activityInsert = client.query.mock.calls.find(([statement]) =>
       String(statement).includes("insert into activity_events")

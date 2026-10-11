@@ -30,9 +30,9 @@ function clientWithRows(existingId?: string) {
 
 describe("automatic category service", () => {
   it("uses the starter activities for Sleep and Commute, and Health's own spec", () => {
-    expect(commuteCategorySpec()).toEqual({ name: "Commute", color: "graphite", icon: "commute", starterKey: "commute" });
-    expect(automaticLoggingCategorySpec("sleep")).toEqual({ name: "Sleep", color: "blue-bold", icon: "sleep", starterKey: "sleep" });
-    expect(automaticLoggingCategorySpec("health")).toEqual({ name: "Health", color: "moss", icon: "health", starterKey: null });
+    expect(commuteCategorySpec()).toEqual({ name: "Commute", color: "graphite", icon: "commute", starterKey: "commute", countsTowardGoal: true });
+    expect(automaticLoggingCategorySpec("sleep")).toEqual({ name: "Sleep", color: "blue-bold", icon: "sleep", starterKey: "sleep", countsTowardGoal: false });
+    expect(automaticLoggingCategorySpec("health")).toEqual({ name: "Health", color: "moss", icon: "health", starterKey: null, countsTowardGoal: true });
   });
 
   it("finds a renamed Commute starter by its key before looking at names", async () => {
@@ -69,6 +69,6 @@ describe("automatic category service", () => {
     const insert = vi.mocked(client.query).mock.calls.find(([statement]) =>
       String(statement).includes("insert into categories")
     );
-    expect(insert?.[1]).toEqual([session.workspaceId, "Commute", "graphite", "commute", "commute"]);
+    expect(insert?.[1]).toEqual([session.workspaceId, "Commute", "graphite", "commute", "commute", true]);
   });
 });
