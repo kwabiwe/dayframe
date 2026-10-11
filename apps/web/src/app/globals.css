@@ -10298,11 +10298,14 @@ dialog.ui-dialog.df-palette {
   font-variant-numeric: tabular-nums;
 }
 
+/* The prototype's eyebrow (blocks.css .eyebrow): small capitals over the hero. */
 .df-eyebrow {
   margin: 0 0 8px;
-  color: var(--text-secondary);
-  font-size: 13px;
+  color: var(--text-muted);
+  font-size: 11px;
   font-weight: 650;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
 }
 
 .df-today-hero {
@@ -10329,10 +10332,14 @@ dialog.ui-dialog.df-palette {
   letter-spacing: -0.035em;
 }
 
+/* The prototype's hero-sub: 14 px in its --text-2, which sits between our secondary and primary
+   text (#A3ACC1 in Midnight, #586176 in Daylight), straight under the total. */
 .df-today-sub {
-  margin: 6px 0 0;
-  color: var(--text-secondary);
+  margin: 2px 0 0;
+  color: color-mix(in srgb, var(--text-primary) 28%, var(--text-secondary));
   font-size: 14px;
+  font-weight: 400;
+  line-height: 1.45;
 }
 
 .df-goal-cells {
@@ -10343,8 +10350,10 @@ dialog.ui-dialog.df-palette {
   height: 20px;
 }
 
+/* Activities inside an hour cell sit 2 px apart, so neighbouring blocks never touch (owner, Trello). */
 .df-goal-cell {
   display: flex;
+  gap: 2px;
   overflow: hidden;
   border-radius: 6px;
   background: var(--surface-muted);
