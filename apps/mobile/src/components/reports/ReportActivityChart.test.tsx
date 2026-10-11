@@ -271,6 +271,22 @@ describe("Activity chart", () => {
     expect(used).toBeLessThanOrEqual(columnHeight + 0.01);
     act(() => tree.unmount());
   });
+  it("gives a sub-point column flex weights that fill it (Codex r3)", () => {
+    let tree!: ReturnType<typeof create>;
+    const sliver = [
+      { ...buckets[0], seconds: 20 * 3600, segments: [{ key: "work", seconds: 20 * 3600, color: "blue" }] },
+      { ...buckets[1], seconds: 180, segments: [{ key: "walk", seconds: 180, color: "lime" }] },
+    ];
+    act(() => {
+      tree = create(
+        <ReportActivityChart buckets={sliver} axisLayout="month" theme={{ surface: "card", textMuted: "muted" } as never} reduceMotion semanticContextKey="sliver" outsidePressDismissal={0} />,
+      );
+    });
+    const small = tree.root.findAllByProps({ testID: "report-activity-bar" })[1];
+    const weights = small.findAllByProps({ testID: "report-activity-block" }).map((block) => block.props.style.flexGrow);
+    expect(weights.reduce((sum, value) => sum + value, 0)).toBeGreaterThanOrEqual(1);
+    act(() => tree.unmount());
+  });
   it("keeps chart actions, live ticks, theme updates and vertical scrolling selected", () => {
     const { tree, plot, tap } = mount();
     tap(180);

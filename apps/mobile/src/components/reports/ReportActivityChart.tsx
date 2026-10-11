@@ -371,6 +371,11 @@ function ReportStack({
   // every block fits, the smallest are left out rather than clipped (reportStackHeights). The
   // shares become flex weights, so the blocks follow the column's height animation.
   const heights = reportStackHeights(segments.map((segment) => segment.seconds), segments.reduce((sum, segment) => sum + segment.seconds, 0), height, 1, gap, 0);
+  // Flex grows only by the weights' share when they sum below one, so a sub-point column would get
+  // a fraction of its height (and round to no pixels); scaled to sum at least one, the kept blocks
+  // always fill the column between them.
+  const weightTotal = heights.reduce((sum, value) => sum + value, 0);
+  const weightScale = weightTotal > 0 && weightTotal < 1 ? 1 / weightTotal : 1;
   return (
     <Animated.View
       testID="report-activity-bar"
@@ -386,7 +391,7 @@ function ReportStack({
               entering={reduceMotion ? undefined : FadeIn.duration(MOBILE_MOTION.layout)}
               exiting={reduceMotion ? undefined : FadeOut.duration(MOBILE_MOTION.layout)}
               testID="report-activity-block"
-              style={{ flexGrow: heights[index], flexShrink: 1, flexBasis: 0, borderRadius: radius, backgroundColor: segment.color }}
+              style={{ flexGrow: heights[index] * weightScale, flexShrink: 1, flexBasis: 0, borderRadius: radius, backgroundColor: segment.color }}
             />
           ) : null,
         )
