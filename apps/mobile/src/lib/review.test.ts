@@ -603,8 +603,8 @@ describe("mobile review helpers", () => {
       "Needs review",
       "Suggested block",
       "Detected visit",
-      "Edit details",
-      "Dismiss suggestion"
+      "Edit before logging",
+      "Skip"
     ]));
     expect(copy.join(" ")).not.toMatch(/\b(projects?|clients?|tags?)\b/i);
   });

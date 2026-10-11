@@ -46,9 +46,24 @@ describe("Review sync presentation", () => {
     expect(reviewSyncStatusCopy(diagnostics({
       authenticationRequiredCount: 1,
       waitingCount: 1
-    }))).toContain("sign in to sync");
+    }))).toBe("1 change saved on this iPhone · sign in to send");
     expect(reviewSyncStatusCopy(diagnostics({
       needsAttentionCount: 1
-    }))).toContain("needs attention");
+    }))).toBe("1 change needs checking");
+    expect(reviewSyncStatusCopy(diagnostics({
+      needsAttentionCount: 2,
+      waitingCount: 1
+    }))).toBe("2 changes need checking · 1 still sending");
+    // Work that needs a sign-in is not "still sending".
+    expect(reviewSyncStatusCopy(diagnostics({
+      needsAttentionCount: 1,
+      authenticationRequiredCount: 1,
+      waitingCount: 1
+    }))).toBe("1 change needs checking · 1 needs you to sign in");
+    expect(reviewSyncStatusCopy(diagnostics({
+      needsAttentionCount: 1,
+      authenticationRequiredCount: 1,
+      waitingCount: 3
+    }))).toBe("1 change needs checking · 1 needs you to sign in · 2 still sending");
   });
 });

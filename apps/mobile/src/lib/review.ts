@@ -4,8 +4,8 @@ export const REVIEW_COPY = {
   needsReview: "Needs review",
   suggestedActivity: "Suggested block",
   detectedVisit: "Detected visit",
-  editDetails: "Edit details",
-  dismissSuggestion: "Dismiss suggestion",
+  editDetails: "Edit before logging",
+  dismissSuggestion: "Skip",
   suggestedNote: "Some suggested time needs review.",
   emptyState: "No detected visits or suggested blocks need review."
 } as const;

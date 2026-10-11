@@ -5,6 +5,7 @@ import {
   Pressable,
   RefreshControl,
   ScrollView,
+  StyleSheet,
   Text,
   View
 } from "react-native";
@@ -12,9 +13,9 @@ import Reanimated from "react-native-reanimated";
 import * as Clipboard from "expo-clipboard";
 import { router, useFocusEffect } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
-import Svg, { Path } from "react-native-svg";
 import {
   DAYFRAME_APP_ICONS,
+  DAYFRAME_BLOCKS,
   placeDisplayName,
   placeRoleLabel,
   placeRoleSlots,
@@ -25,11 +26,10 @@ import { BlocksNavHeader, usePreviousScreenLabel } from "@/components/BlocksNavH
 import { BlocksConfirmHost, useBlocksConfirm, type BlocksConfirmController } from "@/components/blocks/BlocksConfirmSheet";
 import { DayframeIcon } from "@/components/icons/DayframeIcon";
 import { PlaceRoleSheet, type PlaceRoleSheetMode } from "@/components/places/PlaceRoleSheet";
-import { SettingsBlockGroup, SettingsPillButton } from "@/components/settings/SettingsBlocks";
+import { SettingsBlockGroup, SettingsBlockRow, SettingsPillButton } from "@/components/settings/SettingsBlocks";
 import { applyPlaceRoleLocally, learnedPlaceSubtitle, placeRowSubtitle, subscribeDeletedPlaces, takeDeletedPlaces } from "@/lib/placesPage";
 import { mobileAccountKey, mobileAccountOwnersEqual, readActiveMobileAccount } from "@/lib/mobileAccount";
-import { mobileTextProps } from "@/lib/mobileTypography";
-import { SheetMutationProgress } from "@/components/SheetMutationProgress";
+import { MOBILE_DISPLAY_FONT, mobileTextProps } from "@/lib/mobileTypography";
 import {
   SwipeDismissSheet,
   type SwipeDismissSheetHandle
@@ -630,107 +630,106 @@ function LearnedPlaceDetailSheet({
           style={styles.activeEditSheet}
           visible
         >
-          <View>
-            <View style={[styles.sheetHeader, styles.sheetHeaderCentered]}>
-              <Text style={[styles.sheetTitle, styles.sheetTitleCentered]} numberOfLines={2}>Place suggestion</Text>
-              <Pressable
-                accessibilityLabel="Close place suggestion"
-                accessibilityRole="button"
-                hitSlop={8}
-                style={pressable(styles.iconButton, styles.buttonPressed)}
-                onPress={() => dismissWith()}
-              >
-                <CloseGlyph color={theme.textPrimary} />
-              </Pressable>
+          {/* Blocks head (UIA-031): the eyebrow over the place's name, and a circular close. */}
+          <View style={learnedSheetStyles.head}>
+            <View style={learnedSheetStyles.headTitle}>
+              <Text {...mobileTextProps("counter")} style={[learnedSheetStyles.eyebrow, { color: theme.textMuted }]}>PLACE SUGGESTION</Text>
+              <Text {...mobileTextProps("screenHeading")} accessibilityRole="header" numberOfLines={2} style={[learnedSheetStyles.title, { color: theme.textPrimary }]}>
+                {details.name}
+              </Text>
             </View>
-            <SheetMutationProgress
-              accessibilityLabel={forgetting ? "Forgetting place suggestion" : ignoring ? "Ignoring place suggestion" : "Working"}
-              active={disabled}
-              styles={styles}
-            />
+            <Pressable
+              accessibilityLabel="Close place suggestion"
+              accessibilityRole="button"
+              disabled={disabled}
+              onPress={() => dismissWith()}
+              style={({ pressed }) => [learnedSheetStyles.close, { backgroundColor: theme.surfaceMuted }, pressed ? styles.buttonPressed : null]}
+            >
+              <DayframeIcon color={theme.textPrimary} glyph="x" size={18} />
+            </Pressable>
           </View>
 
-          <ScrollView style={styles.activeEditScroller} contentContainerStyle={styles.activeEditContent}>
-            <Text style={styles.sectionTitle}>{details.name}</Text>
-            <Text style={styles.muted}>
-              Repeat visits suggest this may be worth saving. It remains unsaved until you choose Save place.
+          <ScrollView style={styles.activeEditScroller} contentContainerStyle={[styles.activeEditContent, learnedSheetStyles.body]}>
+            <Text {...mobileTextProps("body")} style={{ color: theme.textSecondary }}>
+              You keep coming back here, so it may be worth saving. Nothing changes until you save it.
             </Text>
 
-            <View style={styles.accountList}>
-              <LearnedPlaceDetailRow label="Resolved name / POI" value={details.name} styles={styles} />
-              <LearnedPlaceDetailRow
-                copyLabel="address"
-                label="Address/postcode"
-                onCopy={details.address ? () => void copyDetail("Address", details.address) : undefined}
-                value={details.address ?? "Not resolved"}
-                styles={styles}
+            <SettingsBlockGroup theme={theme} title="Where">
+              <SettingsBlockRow
+                control={details.address ? (
+                  <SettingsPillButton accessibilityLabel="Copy address" label="Copy" onPress={() => void copyDetail("Address", details.address)} theme={theme} />
+                ) : undefined}
+                divider={false}
+                subtitle={details.address ?? "Not found yet"}
                 theme={theme}
+                title="Address"
               />
-              <LearnedPlaceDetailRow
-                copyLabel="coordinates"
-                label="Coordinates"
-                onCopy={details.coordinates ? () => void copyDetail("Coordinates", details.coordinates) : undefined}
-                value={details.coordinates ?? "Unavailable"}
-                styles={styles}
+              <SettingsBlockRow
+                control={details.coordinates ? (
+                  <SettingsPillButton accessibilityLabel="Copy coordinates" label="Copy" onPress={() => void copyDetail("Coordinates", details.coordinates)} theme={theme} />
+                ) : undefined}
+                subtitle={details.coordinates ?? "Not available"}
                 theme={theme}
+                title="Coordinates"
               />
-              <View style={styles.learnedPlaceMetricGrid}>
-                <LearnedPlaceDetailRow compact label="Visits" value={`${learnedPlace.visitCount}`} styles={styles} />
-                <LearnedPlaceDetailRow compact label="Samples" value={`${learnedPlace.sampleCount}`} styles={styles} />
-                <LearnedPlaceDetailRow compact label="Days" value={`${learnedPlace.distinctDayCount}`} styles={styles} />
-                <LearnedPlaceDetailRow compact label="Radius" value={`${learnedPlace.radiusMeters}m`} styles={styles} />
-              </View>
-              <LearnedPlaceDetailRow
-                label="Dwell evidence"
-                value={`${formatDwell(learnedPlace.totalDwellSeconds)} total · ${formatDwell(learnedPlace.longestDwellSeconds)} longest stay`}
-                styles={styles}
-              />
-              <LearnedPlaceDetailRow label="Last seen" value={formatShortDateTime(learnedPlace.lastSeenAt)} styles={styles} />
-              <LearnedPlaceDetailRow label="Activity" value={associatedCategory} styles={styles} />
-              <LearnedPlaceDetailRow label="Status" value="Place suggestion · Not saved" styles={styles} />
-            </View>
+              <SettingsBlockRow subtitle={`${learnedPlace.radiusMeters} m around the centre`} theme={theme} title="Size" />
+            </SettingsBlockGroup>
 
-            <View style={styles.buttonRow}>
+            <SettingsBlockGroup theme={theme} title="Your visits">
+              <SettingsBlockRow
+                divider={false}
+                subtitle={`${learnedPlace.visitCount} ${learnedPlace.visitCount === 1 ? "visit" : "visits"} on ${learnedPlace.distinctDayCount} ${learnedPlace.distinctDayCount === 1 ? "day" : "days"}`}
+                theme={theme}
+                title="Visits seen"
+              />
+              <SettingsBlockRow
+                subtitle={`${formatDwell(learnedPlace.totalDwellSeconds)} in all · longest ${formatDwell(learnedPlace.longestDwellSeconds)}`}
+                theme={theme}
+                title="Time spent here"
+              />
+              <SettingsBlockRow subtitle={formatShortDateTime(learnedPlace.lastSeenAt)} theme={theme} title="Last seen" />
+              <SettingsBlockRow subtitle={associatedCategory} theme={theme} title="Activity" />
+            </SettingsBlockGroup>
+
+            <View style={learnedSheetStyles.actions}>
               <Pressable
                 accessibilityRole="button"
-                style={pressable(styles.primaryInlineButton, styles.buttonPressed)}
+                accessibilityState={{ disabled }}
+                disabled={disabled}
                 onPress={() => dismissWith(() => onSave(learnedPlace))}
+                style={({ pressed }) => [learnedSheetStyles.pill, { backgroundColor: theme.accent, opacity: disabled ? 0.45 : 1 }, pressed ? styles.buttonPressed : null]}
               >
-                <Text style={styles.primaryButtonText}>Save place</Text>
+                <Text {...mobileTextProps("control")} style={[learnedSheetStyles.pillText, { color: theme.onAccent }]}>Save place</Text>
               </Pressable>
               <Pressable
                 accessibilityRole="button"
-                style={pressable(styles.secondaryButton, styles.buttonPressed)}
+                accessibilityState={{ disabled }}
+                disabled={disabled}
                 onPress={() => dismissWith(() => onEdit(learnedPlace))}
+                style={({ pressed }) => [learnedSheetStyles.pill, { backgroundColor: theme.surfaceMuted, opacity: disabled ? 0.45 : 1 }, pressed ? styles.buttonPressed : null]}
               >
-                <Text style={styles.secondaryButtonText}>Edit before saving</Text>
+                <Text {...mobileTextProps("control")} style={[learnedSheetStyles.pillText, { color: theme.textPrimary }]}>Edit before saving</Text>
               </Pressable>
-            </View>
-            <View style={styles.buttonRow}>
-              <Pressable
-                accessibilityRole="button"
-                disabled={disabled}
-                style={({ pressed }) => [
-                  styles.secondaryButton,
-                  disabled ? styles.buttonDisabled : null,
-                  pressed && !disabled ? styles.buttonPressed : null
-                ]}
-                onPress={() => onIgnore(learnedPlace, () => dismissWith())}
-              >
-                <Text style={styles.secondaryButtonText}>{ignoring ? "Ignoring..." : "Ignore"}</Text>
-              </Pressable>
-              <Pressable
-                accessibilityRole="button"
-                disabled={disabled}
-                style={({ pressed }) => [
-                  styles.activeEditDeleteButton,
-                  disabled ? styles.buttonDisabled : null,
-                  pressed && !disabled ? styles.buttonPressed : null
-                ]}
-                onPress={() => onForget(learnedPlace, () => dismissWith())}
-              >
-                <Text style={styles.activeEditDeleteText}>{forgetting ? "Forgetting..." : "Forget"}</Text>
-              </Pressable>
+              <View style={learnedSheetStyles.actionRow}>
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityState={{ busy: ignoring, disabled }}
+                  disabled={disabled}
+                  onPress={() => onIgnore(learnedPlace, () => dismissWith())}
+                  style={({ pressed }) => [learnedSheetStyles.pill, learnedSheetStyles.half, { backgroundColor: theme.surfaceMuted, opacity: disabled && !ignoring ? 0.45 : 1 }, pressed ? styles.buttonPressed : null]}
+                >
+                  <Text {...mobileTextProps("control")} style={[learnedSheetStyles.pillText, { color: theme.textPrimary }]}>{ignoring ? "Ignoring…" : "Ignore"}</Text>
+                </Pressable>
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityState={{ busy: forgetting, disabled }}
+                  disabled={disabled}
+                  onPress={() => onForget(learnedPlace, () => dismissWith())}
+                  style={({ pressed }) => [learnedSheetStyles.pill, learnedSheetStyles.half, { backgroundColor: theme.surfaceMuted, opacity: disabled && !forgetting ? 0.45 : 1 }, pressed ? styles.buttonPressed : null]}
+                >
+                  <Text {...mobileTextProps("control")} style={[learnedSheetStyles.pillText, { color: theme.dangerText }]}>{forgetting ? "Forgetting…" : "Forget"}</Text>
+                </Pressable>
+              </View>
             </View>
           </ScrollView>
           {copyToast ? (
@@ -751,45 +750,6 @@ function LearnedPlaceDetailSheet({
       {/* Ignore / Forget confirmations, presented over this sheet's modal. */}
       <BlocksConfirmHost controller={confirmSheet} reduceMotion={reduceMotion} styles={styles} theme={theme} />
     </Modal>
-  );
-}
-
-function LearnedPlaceDetailRow({
-  compact,
-  copyLabel,
-  label,
-  onCopy,
-  value,
-  styles,
-  theme
-}: {
-  compact?: boolean;
-  copyLabel?: string;
-  label: string;
-  onCopy?: () => void;
-  value: string;
-  styles: MobileStyles;
-  theme?: MobileTheme;
-}) {
-  return (
-    <View style={[styles.accountRow, compact ? styles.learnedPlaceMetricCell : null]}>
-      <View style={styles.learnedPlaceDetailHeader}>
-        <Text style={styles.label}>{label}</Text>
-        {onCopy && theme ? (
-          <Pressable
-            accessibilityLabel={`Copy ${copyLabel ?? label}`}
-            accessibilityRole="button"
-            hitSlop={6}
-            style={pressable(styles.learnedPlaceCopyButton, styles.buttonPressed)}
-            onPress={onCopy}
-          >
-            <CopyGlyph color={theme.accent} />
-            <Text style={styles.learnedPlaceCopyText}>Copy</Text>
-          </Pressable>
-        ) : null}
-      </View>
-      <Text style={styles.accountValue} numberOfLines={3}>{value}</Text>
-    </View>
   );
 }
 
@@ -870,20 +830,16 @@ function formatShortDateTime(value: string) {
   });
 }
 
-function CopyGlyph({ color }: { color: string }) {
-  return (
-    <Svg width={15} height={15} viewBox="0 0 24 24">
-      <Path d="M9 9h10v10H9z" fill="none" stroke={color} strokeLinejoin="round" strokeWidth={2} />
-      <Path d="M15 9V5H5v10h4" fill="none" stroke={color} strokeLinejoin="round" strokeWidth={2} />
-    </Svg>
-  );
-}
-
-function CloseGlyph({ color }: { color: string }) {
-  return (
-    <Svg accessibilityElementsHidden width={20} height={20} viewBox="0 0 24 24">
-      <Path d="m6 6 12 12M18 6 6 18" fill="none" stroke={color} strokeLinecap="round" strokeWidth={2.2} />
-    </Svg>
-  );
-}
-
+const learnedSheetStyles = StyleSheet.create({
+  head: { alignItems: "center", flexDirection: "row", gap: 12, paddingBottom: 8, paddingHorizontal: 4, paddingTop: 6 },
+  headTitle: { flex: 1, gap: 2, minWidth: 0 },
+  eyebrow: { fontSize: 11, fontWeight: "700", letterSpacing: 0.9 },
+  title: { fontFamily: MOBILE_DISPLAY_FONT.bold, fontSize: 22 },
+  close: { alignItems: "center", borderRadius: 22, height: 44, justifyContent: "center", width: 44 },
+  body: { gap: 16 },
+  actions: { gap: 10 },
+  actionRow: { flexDirection: "row", gap: 10 },
+  pill: { alignItems: "center", borderRadius: DAYFRAME_BLOCKS.radius.pill, justifyContent: "center", minHeight: 48, paddingHorizontal: 18 },
+  half: { flex: 1 },
+  pillText: { fontSize: 16, fontWeight: "700" }
+});
