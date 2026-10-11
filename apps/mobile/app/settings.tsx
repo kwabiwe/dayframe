@@ -2707,11 +2707,13 @@ function HealthTypeSheet({
   }
   // The Name is written by the app's one Health mapping writer, queued with this type's other
   // changes. From the moment this sheet opens it is told when a Name fails; it puts the saved Name
-  // back only when nothing was typed after that commit (then follows the writer again).
+  // back only when nothing was typed after that commit, then follows the writer again.
   useEffect(() => healthMappingWriter.attach(healthKey, (savedName, _failedName, token) => {
     if (token !== undefined && token === versionRef.current) {
+      // Back to what the writer shows now: the saved Name with any later queued Name over it
+      // (an identical commit still on its way keeps the field on it).
       typedRef.current = false;
-      setNameDraft(savedName);
+      setNameDraft(healthMappingWriter.shown()?.[healthKey]?.description ?? savedName);
     }
   }), [healthKey]);
   function commitName() {

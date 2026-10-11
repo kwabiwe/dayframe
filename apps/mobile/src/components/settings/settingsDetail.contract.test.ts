@@ -40,5 +40,7 @@ describe("Settings detail (audit A8b)", () => {
     expect(settings).toContain("versionRef.current = nextHealthNameDraftVersion();");
     expect(settings).toContain("healthMappingWriter.commitName(healthKey, draftRef.current, versionRef.current)");
     expect(settings).not.toContain("draftRef.current.trim() === failedName");
+    // A restore lands on what the writer shows now (Codex r10), not blindly on the saved Name.
+    expect(settings).toContain("setNameDraft(healthMappingWriter.shown()?.[healthKey]?.description ?? savedName)");
   });
 });

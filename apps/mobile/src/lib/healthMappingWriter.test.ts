@@ -394,4 +394,24 @@ describe("Health mapping writer (UIA-085)", () => {
     await t.writer.idle("walking");
     expect(t.stored().walking).toEqual({ description: "A" });
   });
+
+  it("Codex r10: a failed commit with the same draft as a later queued one leaves the field on the queued Name", async () => {
+    const t = setup({ walking: { description: "Old" } });
+    await t.writer.refresh();
+    const version = 7;
+    let draft = "A";
+    t.writer.attach("walking", (saved, _failed, token) => {
+      if (token === version) draft = t.writer.shown()?.walking?.description ?? saved;
+    });
+    t.hold();
+    const first = t.writer.commitName("walking", "A", version);
+    await tick();
+    const second = t.writer.commitName("walking", "A", version); // blur again without typing
+    t.holds[0].fail();
+    expect(await first).toBe(false);
+    expect(draft).toBe("A");
+    expect(await second).toBe(true);
+    await t.writer.idle("walking");
+    expect(t.stored().walking).toEqual({ description: "A" });
+  });
 });
