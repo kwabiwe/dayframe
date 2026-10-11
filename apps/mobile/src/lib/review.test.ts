@@ -596,8 +596,8 @@ describe("mobile review helpers", () => {
       "Needs review",
       "Suggested time entry",
       "Detected visit",
-      "Edit details",
-      "Dismiss suggestion"
+      "Edit before logging",
+      "Skip"
     ]));
     expect(copy.join(" ")).not.toMatch(/\b(projects?|clients?|tags?)\b/i);
   });

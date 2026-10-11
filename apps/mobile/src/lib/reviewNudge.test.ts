@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const store = new Map<string, string>();
 const native = vi.hoisted(() => ({
@@ -102,6 +102,15 @@ describe("planReviewNudge", () => {
 });
 
 describe("review nudge store", () => {
+  // The store schedules from the current time; pin it to an afternoon so the evening reminder is
+  // always still ahead, whatever time zone or hour the suite runs in.
+  beforeEach(() => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(at(2026, 10, 9, 14));
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
   beforeEach(() => {
     store.clear();
     native.permission = "granted";
