@@ -313,6 +313,9 @@ describe("mobile API client", () => {
     expect(plainAuthError("Email not confirmed", 400)).toBe("Confirm your email first, then log in.");
     expect(plainAuthError(undefined, 502)).toBe("Dayframe couldn't sign you in. Try again in a moment.");
     expect(plainAuthError("Enter a valid email and password.", 400)).toBe("Enter a valid email and password.");
+    expect(plainAuthError("Enter a valid email and a password of at least 8 characters.", 400))
+      .toBe("Enter a valid email and a password of at least 8 characters.");
+    expect(plainAuthError("Password should be at least 8 characters.", 422)).toBe("Use at least 8 characters for the password.");
   });
 
   it("clears the session token when bootstrap returns 401", async () => {

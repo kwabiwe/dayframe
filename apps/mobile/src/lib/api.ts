@@ -670,7 +670,10 @@ export function plainAuthError(message: string | undefined, status: number) {
   if (/invalid login credentials|invalid email or password/i.test(text)) return "That email and password don't match.";
   if (/email not confirmed/i.test(text)) return "Confirm your email first, then log in.";
   if (/already registered|already exists/i.test(text)) return "An account already uses that email. Log in instead.";
-  if (/at least 8|password should be at least/i.test(text)) return "Use at least 8 characters for the password.";
+  // Only a password-only rule is rephrased; a combined email-and-password message stays whole.
+  if (/password should be at least/i.test(text) || (/at least 8/i.test(text) && !/email/i.test(text))) {
+    return "Use at least 8 characters for the password.";
+  }
   if (status === 429) return "Too many tries. Wait a minute, then try again.";
   if (status >= 500 || !text) return "Dayframe couldn't sign you in. Try again in a moment.";
   return text;

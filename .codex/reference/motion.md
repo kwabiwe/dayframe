@@ -366,6 +366,14 @@ Block pull-to-refresh:
 - Interruption: a press during a running zoom chains from that step's target, so rapid presses each count; a pinch, a finger dragging the timeline or long-press creation stops the zoom at the geometry already shown; detaching the view stops it. Buttons are disabled at the zoom limits.
 - Accessibility: Reduce Motion applies a zoom step at once, moves the selected circle without a spring, keeps the day change without a slide and holds the live ring at 0.6. The zoom buttons are 44 points, labelled "Zoom out" / "Zoom in"; the month title is a header; the timeline hint mentions the zoom buttons.
 
+## iPhone sign-in card (audit A15, UIA-317)
+
+- Trigger: "Create one" / "Log in" (switch views), "Forgot password?" (the reset view), a reply arriving (a notice or an error line), and the primary action's own label change while it works.
+- Owner: Reanimated layout animations on the card (`DayframeDashboard`'s signed-out branch) are the one owner. The card is a `Reanimated.View` with `localLayoutTransition`; the Name group (Create account only), the Password group (with "Forgot password?", hidden on Reset password) and the notice/error lines enter and leave with `localPresenceEntering`/`localPresenceExiting` under the same layout transition, and the Email group, primary action and switch row move with it, so nothing below a change jumps.
+- Interruption and rollback: while a request is in flight every way to change view (the switch link and "Forgot password?") is off, so a reply always lands on the view that sent it and the working label ("Logging in…", "Creating account…", "Sending…") describes the request actually running; rapid view toggles before sending are Reanimated's (an exiting group fades from where it is). A failed request leaves the view as it was and adds only its error line; a sign-up needing email confirmation returns to Log in with the notice (one layout change).
+- Focus and keyboard: changing view keeps the email (and focus where it was); the Return key moves Name → Email → Password → submit (Reset: Email → Send). AutoFill stays on (owner); keyboard continuity is a physical-iPhone check (#160).
+- Accessibility: Reduce Motion keeps the fades (shortened) and drops the movement (`localLayoutTransition` with `ReduceMotion.Always`); the primary action is a button that exposes disabled and busy while working; headings change with the view.
+
 ## Onboarding (Blocks parity step 8-1a)
 
 - Trigger: Settings › Help › "Set up Dayframe again" opens the route (8-1c adds the first-sign-in gate); "Set up Dayframe", Allow / Continue / Not now, Back (previous step), Later (to the summary) and Open Today move through it.

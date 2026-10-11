@@ -33,4 +33,21 @@ describe("iPhone sign-in (A15)", () => {
     expect(dashboard).toMatch(/accessibilityRole="progressbar"\s*style=\{styles\.authCard\}/);
     expect(theme).toMatch(/authPasswordRevealText: \{\s*color: theme\.textPrimary,\s*fontSize: 16\s*\}/);
   });
+
+  it("keeps a reply on the view that sent it: no view change while a request runs (Codex r1)", () => {
+    const card = dashboard.slice(dashboard.indexOf('if (authState === "signedOut")'));
+    for (const label of [">Forgot password?</Text>", '{authView === "login" ? "Create one" : "Log in"}']) {
+      const control = card.slice(card.lastIndexOf("<Pressable", card.indexOf(label)), card.indexOf(label));
+      expect(control).toContain("disabled={authSubmitting}");
+      expect(control).toContain("accessibilityState={{ disabled: authSubmitting }}");
+    }
+  });
+
+  it("gives the card one Reanimated motion owner and the primary action button semantics (Codex r1)", () => {
+    const card = dashboard.slice(dashboard.indexOf('if (authState === "signedOut")'));
+    expect(card).toContain("<Reanimated.View layout={localLayoutTransition(reduceMotion)} style={styles.authCard}>");
+    expect(card.match(/entering=\{localPresenceEntering\(reduceMotion\)\}/g)?.length).toBe(4);
+    expect(card).toContain("accessibilityState={{ busy: authSubmitting, disabled: authSubmitting }}");
+    expect(card).not.toMatch(/LayoutAnimation\./);
+  });
 });

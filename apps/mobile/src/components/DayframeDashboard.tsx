@@ -212,6 +212,8 @@ import { drainNativeShortcutQueue, syncShortcutCatalog } from "@/lib/shortcuts";
 import {
   MOBILE_MOTION,
   localLayoutTransition,
+  localPresenceEntering,
+  localPresenceExiting,
   useResolvedReduceMotionPreference,
   useReduceTransparencyPreference
 } from "@/lib/motion";
@@ -2664,7 +2666,10 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
           <View style={styles.header}>
             <DashboardBrandLockup styles={styles} theme={theme} />
           </View>
-          <View style={styles.authCard}>
+          {/* One motion owner (Reanimated layout animations): the card resizes, the Name and Password
+              groups and the notice/error lines fade in and out, and everything below them moves with
+              the card. Reduce Motion: fades only, no movement. */}
+          <Reanimated.View layout={localLayoutTransition(reduceMotion)} style={styles.authCard}>
             <Text accessibilityRole="header" style={styles.authTitle}>
               {authView === "signup" ? "Create account" : authView === "reset" ? "Reset password" : "Log in"}
             </Text>
@@ -2676,7 +2681,11 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
                   : "Sign in to sync your blocks, places and Apple Health."}
             </Text>
             {authView === "signup" ? (
-              <>
+              <Reanimated.View
+                entering={localPresenceEntering(reduceMotion)}
+                exiting={localPresenceExiting(reduceMotion)}
+                layout={localLayoutTransition(reduceMotion)}
+              >
                 <Text style={styles.authLabel}>Name</Text>
                 <TextInput
                   ref={authNameRef}
@@ -2693,8 +2702,9 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
                   returnKeyType="next"
                   submitBehavior="submit"
                 />
-              </>
+              </Reanimated.View>
             ) : null}
+            <Reanimated.View layout={localLayoutTransition(reduceMotion)}>
             <Text style={styles.authLabel}>Email</Text>
             <TextInput
               ref={authEmailRef}
@@ -2716,8 +2726,13 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
               returnKeyType={authView === "reset" ? "send" : "next"}
               submitBehavior={authView === "reset" ? "blurAndSubmit" : "submit"}
             />
+            </Reanimated.View>
             {authView === "reset" ? null : (
-            <>
+            <Reanimated.View
+              entering={localPresenceEntering(reduceMotion)}
+              exiting={localPresenceExiting(reduceMotion)}
+              layout={localLayoutTransition(reduceMotion)}
+            >
             <Text style={styles.authLabel}>Password</Text>
             <View style={styles.authPasswordField}>
               <View style={styles.authPasswordInputFrame}>
@@ -2779,6 +2794,8 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
             {authView === "login" ? (
               <Pressable
                 accessibilityRole="button"
+                accessibilityState={{ disabled: authSubmitting }}
+                disabled={authSubmitting}
                 onPress={() => {
                   setAuthError(null);
                   setAuthNotice(null);
@@ -2790,12 +2807,32 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
                 <Text style={styles.authTextLinkText}>Forgot password?</Text>
               </Pressable>
             ) : null}
-            </>
+            </Reanimated.View>
             )}
-            {authNotice ? <Text style={styles.statusText}>{authNotice}</Text> : null}
-            {authError ? <Text style={styles.errorText}>{authError}</Text> : null}
+            {authNotice ? (
+              <Reanimated.Text
+                entering={localPresenceEntering(reduceMotion)}
+                exiting={localPresenceExiting(reduceMotion)}
+                layout={localLayoutTransition(reduceMotion)}
+                style={styles.statusText}
+              >
+                {authNotice}
+              </Reanimated.Text>
+            ) : null}
+            {authError ? (
+              <Reanimated.Text
+                entering={localPresenceEntering(reduceMotion)}
+                exiting={localPresenceExiting(reduceMotion)}
+                layout={localLayoutTransition(reduceMotion)}
+                style={styles.errorText}
+              >
+                {authError}
+              </Reanimated.Text>
+            ) : null}
+            <Reanimated.View layout={localLayoutTransition(reduceMotion)}>
             <Pressable
-              accessibilityState={{ disabled: authSubmitting }}
+              accessibilityRole="button"
+              accessibilityState={{ busy: authSubmitting, disabled: authSubmitting }}
               disabled={authSubmitting}
               style={pressable(
                 [styles.primaryButton, styles.authPrimaryButton, authSubmitting ? styles.buttonDisabled : null],
@@ -2816,6 +2853,9 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
               <Pressable
                 accessibilityLabel={authView === "login" ? "Create an account" : "Log in with an existing account"}
                 accessibilityRole="button"
+                // A request in flight belongs to the view that sent it: the view cannot change under it.
+                accessibilityState={{ disabled: authSubmitting }}
+                disabled={authSubmitting}
                 style={pressable(styles.authSwitchLink, styles.buttonPressed)}
                 onPress={() => {
                   setAuthError(null);
@@ -2827,7 +2867,8 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
                 <Text style={styles.authSwitchLinkText}>{authView === "login" ? "Create one" : "Log in"}</Text>
               </Pressable>
             </View>
-          </View>
+            </Reanimated.View>
+          </Reanimated.View>
         </ScrollView>
       </SafeAreaView>
     );
