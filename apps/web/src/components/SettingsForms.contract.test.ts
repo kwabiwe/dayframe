@@ -41,9 +41,10 @@ describe("web Settings contracts", () => {
 
   it("keeps normal Settings free of implementation-facing values and commands", () => {
     expect(settingsPageSource).not.toMatch(/DAYFRAME_|\/api\/export|npm run|seeded demo|ingest token/i);
-    expect(settingsPageSource).toContain('title="Places and location"');
-    expect(settingsPageSource).toContain('title="Account and workspace"');
-    expect(settingsFormsSource).toContain('summary="Privacy and troubleshooting"');
+    expect(settingsPageSource).toContain('title="Automatic tracking"');
+    expect(settingsPageSource).toContain('title="Privacy and data"');
+    expect(settingsFormsSource).toContain('id="account"');
+    expect(settingsFormsSource).toContain('summary="Something not right?"');
     expect(settingsFormsSource).not.toMatch(/workspace id|user id|bearer token|database table|engine version/i);
   });
 

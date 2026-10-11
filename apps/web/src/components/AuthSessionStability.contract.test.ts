@@ -23,7 +23,7 @@ describe("web auth session-stability contracts", () => {
   it("prevents user-facing logout links and requires one explicit POST control", () => {
     expect(`${appShellSource}\n${settingsSource}`).not.toContain('href="/logout"');
     expect(appShellSource.match(/<SignOutControl/g)).toHaveLength(1);
-    expect(settingsSource.match(/<SignOutControl/g)).toHaveLength(2);
+    expect(settingsSource.match(/<SignOutControl/g)).toHaveLength(1);
     expect(signOutSource).toContain('action="/logout"');
     expect(signOutSource).toContain('method="post"');
     expect(signOutSource).toContain("submissionStarted.current");

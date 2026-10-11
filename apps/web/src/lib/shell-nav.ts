@@ -64,3 +64,6 @@ export function goToTarget(event: KeyLike): string | null {
   if (letter === "s") return "/settings";
   return SHELL_SECTIONS.find((section) => section.letter === letter)?.href ?? null;
 }
+
+/** Settings › Help asks the shell to open its Keyboard shortcuts dialog. */
+export const OPEN_SHORTCUTS_EVENT = "dayframe:open-shortcuts";
