@@ -81,7 +81,7 @@ describe("Blocks confirm sheet and toast call sites (UIA-003/004/005)", () => {
     // A sign-in that can't be read (Keychain locked or failing) says so with a retry.
     const signOut = between(settings, "async function signOut()", "async function signOutChecked()");
     expect(signOut).toMatch(/try \{\s*await signOutChecked\(\);\s*\} catch \{\s*settingsNotice\.show\(SIGN_IN_UNREADABLE_NOTICE\);/);
-    expect(settings).toContain("const SIGN_IN_UNREADABLE_NOTICE = \"Dayframe couldn't read your sign-in on this iPhone. Unlock your iPhone, then try again.\";");
+    expect(settings).toContain("const SIGN_IN_UNREADABLE_NOTICE = \"Unlock your iPhone and try again.\";");
     // A session change while the warning is prepared voids the tap and says so.
     const wrapper = between(settings, "async function confirmForSession(", "\n  }\n");
     expect(wrapper).toMatch(/confirmAuthorityStillCurrent\(authority\)\)\) \{\s*\/\/[^\n]*\n\s*settingsNotice\.show\(ACCOUNT_CHANGED_NOTICE\);\s*return false;/);

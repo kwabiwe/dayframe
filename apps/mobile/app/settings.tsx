@@ -196,7 +196,7 @@ const DAILY_GOAL_HOURS = { min: 1, max: 14, step: 1 } as const;
 const WEEKLY_GOAL_HOURS = { min: 5, max: 80, step: 5 } as const;
 const GOAL_SAVE_DELAY_MS = 600;
 const ACCOUNT_CHANGED_NOTICE = "Your account changed, so nothing was changed.";
-const SIGN_IN_UNREADABLE_NOTICE = "Dayframe couldn't read your sign-in on this iPhone. Unlock your iPhone, then try again.";
+const SIGN_IN_UNREADABLE_NOTICE = "Unlock your iPhone and try again.";
 // D1: the same theme names on iPhone and web.
 const SETTINGS_THEME_OPTIONS = [
   { label: "Midnight", value: "dark" },
