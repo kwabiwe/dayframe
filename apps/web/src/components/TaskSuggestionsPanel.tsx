@@ -1,10 +1,10 @@
 "use client";
 
+import { DayframeIcon } from "@/components/blocks/DayframeIcon";
 import { useLayoutEffect, useRef, useState, type CSSProperties, type RefObject } from "react";
 import { createPortal } from "react-dom";
 import type { RecentActivitySuggestion } from "@dayframe/shared";
 import { paletteCssColorFor } from "@dayframe/shared";
-import { Play } from "lucide-react";
 
 export function TaskSuggestionsPanel({
   anchorRef,
@@ -131,7 +131,7 @@ export function TaskSuggestionsPanel({
                 {suggestion.tagNames.length ? ` · ${suggestion.tagNames.map((tag) => `#${tag}`).join(" ")}` : ""}
               </small>
             </span>
-            <Play size={14} fill="currentColor" strokeWidth={0} aria-hidden="true" />
+            <DayframeIcon glyph="play" size={14} fill="currentColor" strokeWidth={0}/>
           </button>
         ))}
       </div>

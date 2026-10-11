@@ -1,8 +1,9 @@
 "use client";
 
+import { DayframeIcon } from "@/components/blocks/DayframeIcon";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { LocateFixed, MapPin } from "lucide-react";
+import { LocateFixed } from "lucide-react";
 import { useCallback, useMemo, useRef, useState } from "react";
 import {
   leavingRoleHolder,
@@ -243,7 +244,7 @@ export function PlaceEditor({
         />
         {selectedResult ? (
           <div className="place-selected-result">
-            <span className="place-selected-icon"><MapPin aria-hidden="true" size={19} /></span>
+            <span className="place-selected-icon"><DayframeIcon glyph="map-pin" size={19}/></span>
             <span className="place-selected-copy">
               <strong>{selectedResult.title}</strong>
               {selectedResult.formattedAddress || selectedResult.subtitle ? (

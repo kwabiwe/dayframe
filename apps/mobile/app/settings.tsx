@@ -14,7 +14,7 @@ import type { ReviewNudgePermission } from "@/lib/reviewNudgeNative";
 import { synchroniseDeviceNow, getLastManualSyncResult } from "@/lib/manualSyncRuntime";
 import { createOwnerSyncCoalescer } from "@/lib/ownerSyncCoalescer";
 import { subscribeRecoveredDashboardBootstrap } from "@/lib/dashboardBootstrapChannel";
-import { useCallback, useEffect, useRef, useState, type SetStateAction } from "react";
+import { useCallback, useEffect, useRef, useState, type ReactNode, type SetStateAction } from "react";
 import {
   AccessibilityInfo,
   Alert,
@@ -27,9 +27,11 @@ import {
   RefreshControl,
   ScrollView,
   Share,
+  StyleSheet,
   Text,
   TextInput,
-  View
+  View,
+  useWindowDimensions
 } from "react-native";
 import Reanimated from "react-native-reanimated";
 import Svg, { Path } from "react-native-svg";
@@ -104,14 +106,12 @@ import {
 import {
   friendlyHealthKitError,
   exportHealthDebugSnapshot,
-  getHealthAutoLogMappings,
   getHealthImportPreferences,
   getHealthImportStatus,
   HEALTH_IMPORT_PREFERENCE_OPTIONS,
   isHealthKitAutomaticSyncEnabled,
   reprocessExistingHealthReviewItems,
   requestHealthKitPermissions,
-  setHealthAutoLogMapping,
   setHealthImportPreference,
   type HealthImportStatus
 } from "@/lib/health";
@@ -135,6 +135,7 @@ import { BlocksNavHeader, usePreviousScreenLabel } from "@/components/BlocksNavH
 import { BlocksConfirmHost, useBlocksConfirm, type BlocksConfirmRequest } from "@/components/blocks/BlocksConfirmSheet";
 import { bindConfirmToSession, captureConfirmAuthority, captureLogoutRecovery, confirmAuthorityStillCurrent, logoutRecoveryStillCurrent, type ConfirmAuthority } from "@/lib/confirmAuthority";
 import { BlocksToast, useBlocksNotice } from "@/components/blocks/BlocksToast";
+import { BlocksInfoSheet, type BlocksInfoRow } from "@/components/blocks/BlocksInfoSheet";
 import { blocksNavOrigin, settingsBackLabel, settingsSectionTitle } from "@/lib/blocksNav";
 import { mobileTextProps } from "@/lib/mobileTypography";
 import { createGoalSaver, publishSavedTimeGoals, type TimeGoals } from "@/lib/settingsGoals";
@@ -191,6 +192,7 @@ import {
 } from "@/lib/timerStopOutbox";
 import { syncHelpStatus } from "@/lib/settingsSyncDiagnostics";
 import { DAYFRAME_API_BASE } from "@/lib/config";
+import { healthMappingWriter } from "@/lib/healthMappingOwner";
 
 type Category = MobileBootstrap["categories"][number];
 // Settings › Your day goal ranges (hours): daily in 1 h steps, weekly in 5 h steps.
@@ -340,7 +342,7 @@ export default function SettingsScreen() {
   const [timerStopSyncIssues, setTimerStopSyncIssues] = useState<
     Awaited<ReturnType<typeof listTimerStopSyncIssues>>
   >([]);
-  const [locationInfoSheet, setLocationInfoSheet] = useState<"places" | "suggestions" | null>(null);
+  const [locationInfoSheet, setLocationInfoSheet] = useState<"suggestions" | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   const [locationStatus, setLocationStatus] = useState(cachedSnapshot?.locationStatus ?? "Not requested");
   const [locationDiagnostics, setLocationDiagnostics] = useState<LocationVisitDiagnostics | null>(
@@ -591,6 +593,19 @@ export default function SettingsScreen() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // Apple Health mappings have one app-wide writer (UIA-085, healthMappingWriter): Logs as, Use
+  // default and Name queue per type and merge into the saved mapping when they run. This screen
+  // shows its mappings (saved, with queued changes laid over them) while it is open.
+  const loadRef = useRef(load);
+  loadRef.current = load;
+  useEffect(() => healthMappingWriter.subscribe({
+    show: setHealthAutoLogMappingsAndCache,
+    failed: (error) => {
+      Alert.alert("Apple Health", error instanceof Error ? error.message : "Unable to save Health mapping.");
+    },
+    settled: () => void loadRef.current({ silent: true })
+  }), [setHealthAutoLogMappingsAndCache]);
+
   // A reconnect bootstrap is held to the same rule as load(): one fetched before an activity
   // answer may miss that change (a rename), so it is not shown; a fresh refresh follows instead.
   const recoveryEpochs = useRef(new Map<number, number>());
@@ -727,7 +742,7 @@ export default function SettingsScreen() {
     // iOS never reveals read access, so "Connected" means Dayframe's access request was accepted.
     isHealthKitAutomaticSyncEnabled().then(setHealthAccessGranted).catch(() => undefined);
     getHealthImportPreferences().then(setHealthImportPreferencesAndCache).catch(() => undefined);
-    getHealthAutoLogMappings().then(setHealthAutoLogMappingsAndCache).catch(() => undefined);
+    void healthMappingWriter.refresh();
   }, [
     setHealthAutoLogMappingsAndCache,
     setHealthImportPreferencesAndCache,
@@ -860,6 +875,7 @@ export default function SettingsScreen() {
         ? "Allow Dayframe in the Health app"
         : "Not connected yet";
   const [healthPickerKey, setHealthPickerKey] = useState<HealthImportPreferenceKey | null>(null);
+  const [healthDetailKey, setHealthDetailKey] = useState<HealthImportPreferenceKey | null>(null);
   const [activityEditor, setActivityEditor] = useState<{ activity: Category | null } | null>(null);
   activityEditorOpen.current = activityEditor !== null;
   // Settings › Activities › Archived (Blocks 6b-2): read from the server when the page opens.
@@ -1551,29 +1567,9 @@ export default function SettingsScreen() {
     }
   }
 
-  async function updateHealthAutoLogMapping(type: HealthImportPreferenceKey, patch: HealthAutoLogMapping) {
-    const current = healthAutoLogMappings;
-    const nextMapping = {
-      ...(current[type] ?? {}),
-      ...patch
-    };
-    const optimistic = { ...current };
-    if (nextMapping.categoryId || nextMapping.description) {
-      optimistic[type] = nextMapping;
-    } else {
-      delete optimistic[type];
-    }
-    setHealthAutoLogMappingsAndCache(optimistic);
-    try {
-      const saved = await setHealthAutoLogMapping(type, nextMapping);
-      setHealthAutoLogMappingsAndCache(saved);
-      const preferences = healthImportPreferences ?? await getHealthImportPreferences();
-      await reprocessExistingHealthReviewItems(preferences, { force: true, mappings: saved });
-      await load({ silent: true });
-    } catch (error) {
-      setHealthAutoLogMappingsAndCache(current);
-      Alert.alert("Apple Health", error instanceof Error ? error.message : "Unable to save Health mapping.");
-    }
+  /** Saves a Health type's mapping change; true once it is saved (a failure shows the saved mapping and alerts). */
+  function updateHealthAutoLogMapping(type: HealthImportPreferenceKey, patch: HealthAutoLogMapping): Promise<boolean> {
+    return healthMappingWriter.patch(type, patch);
   }
 
   async function exportAppleHealthDebug() {
@@ -2081,7 +2077,7 @@ export default function SettingsScreen() {
                 />
                 <SettingsBlockRow
                   accessibilityHint="Walks through location, motion and the other permissions again"
-                  onPress={() => router.push("/onboarding")}
+                  onPress={() => router.push({ pathname: "/onboarding", params: { from: "settings" } })}
                   testID="settings-setup-again"
                   theme={theme}
                   title="Set up Dayframe again"
@@ -2534,81 +2530,28 @@ export default function SettingsScreen() {
                     const mapping = healthAutoLogMappings[option.key] ?? {};
                     const mappedCategory = data?.categories.find((category) => category.id === mapping.categoryId) ?? null;
                     const label = option.key === "other" ? "Other workouts" : option.label;
+                    // UIA-085: one row per type; its Logs as and Name live in the type's own sheet.
                     return (
-                      <Reanimated.View key={option.key} layout={localLayoutTransition(reduceMotion)}>
-                        <SettingsBlockRow
-                          control={
-                            <SettingsSwitch
-                              label={label}
-                              onValueChange={(value) => void updateHealthImportPreference(option.key, value)}
-                              theme={theme}
-                              value={enabled}
-                            />
-                          }
-                          divider={index > 0}
-                          // When on, the "Logs as" row below says where it goes.
-                          subtitle={enabled ? null : "Not imported"}
-                          testID={`health-type-${option.key}`}
-                          theme={theme}
-                          title={label}
-                        />
-                        {enabled ? (
-                          <Reanimated.View
-                            entering={localPresenceEntering(reduceMotion)}
-                            exiting={localPresenceExiting(reduceMotion)}
-                          >
-                            <SettingsBlockRow
-                              accessibilityHint={`Chooses the activity ${label} logs to`}
-                              onPress={() => setHealthPickerKey(option.key)}
-                              testID={`health-activity-${option.key}`}
-                              theme={theme}
-                              title="Logs as"
-                              value={mappedCategory?.name ?? `${defaultHealthCategoryLabel(option.key)} (default)`}
-                            />
-                            {mapping.categoryId ? (
-                              <Reanimated.View
-                                entering={localPresenceEntering(reduceMotion)}
-                                exiting={localPresenceExiting(reduceMotion)}
-                                layout={localLayoutTransition(reduceMotion)}
-                              >
-                              <SettingsBlockRow
-                                control={
-                                  <SettingsPillButton
-                                    accessibilityLabel={`Use the default activity for ${label}`}
-                                    label="Use default"
-                                    onPress={() => void updateHealthAutoLogMapping(option.key, { categoryId: null })}
-                                    theme={theme}
-                                  />
-                                }
-                                subtitle={`Logs as ${defaultHealthCategoryLabel(option.key)}`}
-                                testID={`health-default-${option.key}`}
-                                theme={theme}
-                                title="Default activity"
-                              />
-                              </Reanimated.View>
-                            ) : null}
-                            {/* Moves with the shared layout transition when Use default comes or goes. */}
-                            <Reanimated.View layout={localLayoutTransition(reduceMotion)} style={styles.healthNameRow}>
-                              <Text {...mobileTextProps("control")} style={styles.healthNameLabel}>Name</Text>
-                              <TextInput
-                                accessibilityLabel={`${label} name`}
-                                {...mobileTextProps("input")}
-                                key={`${option.key}:${mapping.description ?? ""}`}
-                                style={styles.healthNameInput}
-                                defaultValue={mapping.description ?? ""}
-                                placeholder={defaultHealthDescription(option.key)}
-                                placeholderTextColor={theme.textSecondary}
-                                returnKeyType="done"
-                                onEndEditing={(event) =>
-                                  void updateHealthAutoLogMapping(option.key, {
-                                    description: event.nativeEvent.text.trim() || null
-                                  })
-                                }
-                              />
-                            </Reanimated.View>
-                          </Reanimated.View>
-                        ) : null}
-                      </Reanimated.View>
+                      <SettingsBlockRow
+                        accessibilityHint={`Opens ${label}: the activity it logs to and its name`}
+                        control={
+                          <SettingsSwitch
+                            label={label}
+                            onValueChange={(value) => void updateHealthImportPreference(option.key, value)}
+                            theme={theme}
+                            value={enabled}
+                          />
+                        }
+                        divider={index > 0}
+                        key={option.key}
+                        onPress={() => setHealthDetailKey(option.key)}
+                        subtitle={enabled
+                          ? `Logs as ${mappedCategory?.name ?? defaultHealthCategoryLabel(option.key)}`
+                          : "Not imported"}
+                        testID={`health-type-${option.key}`}
+                        theme={theme}
+                        title={label}
+                      />
                     );
                   })}
                 </SettingsBlockGroup>
@@ -2636,24 +2579,55 @@ export default function SettingsScreen() {
           theme={theme}
         />
       ) : null}
-      <LocationInformationSheet
-        kind={locationInfoSheet}
-        onClose={() => setLocationInfoSheet(null)}
-        reduceMotion={reduceMotion}
-        styles={styles}
-        theme={theme}
-      />
-      {healthPickerKey ? (
-        <ActivityPickerSheet
-          activities={data?.categories ?? []}
-          onClose={() => setHealthPickerKey(null)}
-          onPick={(activityId) => void updateHealthAutoLogMapping(healthPickerKey, { categoryId: activityId })}
-          recentIds={[]}
+      {locationInfoSheet === "suggestions" ? (
+        <BlocksInfoSheet
+          eyebrow="Location"
+          note={LOCATION_SUGGESTIONS_PRIVACY}
+          onClose={() => setLocationInfoSheet(null)}
           reduceMotion={reduceMotion}
-          selectedId={healthAutoLogMappings[healthPickerKey]?.categoryId ?? null}
+          rows={LOCATION_SUGGESTION_ROWS}
+          styles={styles}
+          testID="location-suggestions-info"
+          theme={theme}
+          title="How suggestions work"
+        />
+      ) : null}
+      {healthDetailKey ? (
+        <HealthTypeSheet
+          categories={data?.categories ?? []}
+          enabled={healthImportPreferences?.[healthDetailKey]
+            ?? HEALTH_IMPORT_PREFERENCE_OPTIONS.find((option) => option.key === healthDetailKey)?.defaultEnabled
+            ?? false}
+          healthKey={healthDetailKey}
+          label={healthDetailKey === "other"
+            ? "Other workouts"
+            : HEALTH_IMPORT_PREFERENCE_OPTIONS.find((option) => option.key === healthDetailKey)?.label ?? "Workout"}
+          mapping={healthAutoLogMappings[healthDetailKey] ?? {}}
+          onClose={() => {
+            setHealthPickerKey(null);
+            setHealthDetailKey(null);
+          }}
+          onEnabledChange={(value) => void updateHealthImportPreference(healthDetailKey, value)}
+          onMappingChange={(patch) => updateHealthAutoLogMapping(healthDetailKey, patch)}
+          onPickActivity={() => setHealthPickerKey(healthDetailKey)}
+          reduceMotion={reduceMotion}
           styles={styles}
           theme={theme}
-        />
+        >
+          {/* The activity picker opens over the type's sheet. */}
+          {healthPickerKey ? (
+            <ActivityPickerSheet
+              activities={data?.categories ?? []}
+              onClose={() => setHealthPickerKey(null)}
+              onPick={(activityId) => void updateHealthAutoLogMapping(healthPickerKey, { categoryId: activityId })}
+              recentIds={[]}
+              reduceMotion={reduceMotion}
+              selectedId={healthAutoLogMappings[healthPickerKey]?.categoryId ?? null}
+              styles={styles}
+              theme={theme}
+            />
+          ) : null}
+        </HealthTypeSheet>
       ) : null}
       {settingsNotice.notice ? (
         <BlocksToast
@@ -2671,22 +2645,89 @@ export default function SettingsScreen() {
   );
 }
 
-function LocationInformationSheet({
-  kind,
+let healthNameDraftVersion = 0;
+function nextHealthNameDraftVersion() {
+  healthNameDraftVersion += 1;
+  return healthNameDraftVersion;
+}
+
+/**
+ * One Apple Health type's settings (UIA-085): the import switch, the activity it logs to (Use
+ * default once mapped) and the name its blocks get. The activity picker opens over it.
+ */
+function HealthTypeSheet({
+  categories,
+  children,
+  enabled,
+  healthKey,
+  label,
+  mapping,
   onClose,
+  onEnabledChange,
+  onMappingChange,
+  onPickActivity,
   reduceMotion,
   styles,
   theme
 }: {
-  kind: "places" | "suggestions" | null;
+  categories: readonly { id: string; name: string }[];
+  children?: ReactNode;
+  enabled: boolean;
+  healthKey: HealthImportPreferenceKey;
+  label: string;
+  mapping: HealthAutoLogMapping;
   onClose: () => void;
+  onEnabledChange: (value: boolean) => void;
+  onMappingChange: (patch: HealthAutoLogMapping) => Promise<boolean>;
+  onPickActivity: () => void;
   reduceMotion: boolean;
   styles: MobileStyles;
   theme: MobileTheme;
 }) {
   const sheetRef = useRef<SwipeDismissSheetHandle>(null);
-  if (!kind) return null;
-  const isPlaces = kind === "places";
+  const { height: windowHeight } = useWindowDimensions();
+  const mappedCategory = categories.find((category) => category.id === mapping.categoryId) ?? null;
+  // Name is a draft saved once: when editing ends, or when the sheet starts to leave by any way
+  // (Close, backdrop, swipe, accessibility escape), so a focused edit is never lost.
+  const [nameDraft, setNameDraftState] = useState(mapping.description ?? "");
+  const draftRef = useRef(mapping.description ?? "");
+  const [closing, setClosing] = useState(false);
+  const closingRef = useRef(false);
+  function setNameDraft(value: string) {
+    draftRef.current = value;
+    setNameDraftState(value);
+  }
+  // Until the person types, the field follows the Name the writer shows (a change still on its
+  // way when this sheet opened), so closing an untouched sheet never commits an older Name.
+  const typedRef = useRef(false);
+  // Every edit gets an app-wide draft version, so a failed commit can tell whether anything was
+  // typed after it — even text that happens to match the failed Name.
+  const versionRef = useRef(nextHealthNameDraftVersion());
+  const shownName = mapping.description ?? "";
+  useEffect(() => {
+    if (!typedRef.current && draftRef.current !== shownName) setNameDraft(shownName);
+  }, [shownName]);
+  function typeName(value: string) {
+    typedRef.current = true;
+    versionRef.current = nextHealthNameDraftVersion();
+    setNameDraft(value);
+  }
+  // The Name is written by the app's one Health mapping writer, queued with this type's other
+  // changes. From the moment this sheet opens it is told when a Name fails; it puts the saved Name
+  // back only when nothing was typed after that commit, then follows the writer again.
+  useEffect(() => healthMappingWriter.attach(healthKey, (savedName, _failedName, token) => {
+    if (token !== undefined && token === versionRef.current) {
+      // Back to what the writer shows now: the saved Name with any later queued Name over it
+      // (an identical commit still on its way keeps the field on it).
+      typedRef.current = false;
+      // An empty Name is a Name (a queued clear); only a missing snapshot falls back to the saved one.
+      const shown = healthMappingWriter.shown();
+      setNameDraft(shown ? shown[healthKey]?.description ?? "" : savedName);
+    }
+  }), [healthKey]);
+  function commitName() {
+    void healthMappingWriter.commitName(healthKey, draftRef.current, versionRef.current);
+  }
   return (
     <Modal
       animationType="none"
@@ -2698,56 +2739,152 @@ function LocationInformationSheet({
       <View accessibilityViewIsModal style={styles.sheetOverlay}>
         <SwipeDismissSheet
           ref={sheetRef}
-          accessibilityLabel={isPlaces ? "About saved places" : "About location suggestions"}
-          backdropAccessibilityLabel="Close information"
+          accessibilityLabel={label}
+          backdropAccessibilityLabel={`Close ${label}`}
           backdropStyle={styles.sheetBackdrop}
           handleStyle={styles.sheetHandle}
           onDismiss={onClose}
+          onDismissStart={() => {
+            // Leaving: save the Name draft once and make the sheet inert, so a late tap (Logs as)
+            // can't present the picker over a sheet that is going away.
+            if (!closingRef.current) {
+              closingRef.current = true;
+              setClosing(true);
+              commitName();
+            }
+          }}
           reduceMotion={reduceMotion}
-          style={styles.activeEditSheet}
+          // Tall like the activity editor, so the scroll view can lift Name above the keyboard.
+          style={[styles.activeEditSheet, { height: Math.round(windowHeight * 0.7) }]}
           visible
         >
+          <View
+            accessibilityElementsHidden={closing}
+            importantForAccessibility={closing ? "no-hide-descendants" : "auto"}
+            pointerEvents={closing ? "none" : "auto"}
+            style={{ flex: 1, minHeight: 0 }}
+          >
           <View style={styles.sheetHeader}>
-            <Text {...mobileTextProps("sectionHeading")} style={styles.sheetTitle}>{isPlaces ? "About saved places" : "About location suggestions"}</Text>
+            <View style={{ flex: 1, minWidth: 0 }}>
+              <Text {...mobileTextProps("metadata")} style={styles.muted}>APPLE HEALTH</Text>
+              <Text {...mobileTextProps("sectionHeading")} accessibilityRole="header" style={styles.sheetTitle}>{label}</Text>
+            </View>
             <Pressable
-              accessibilityLabel="Close information"
+              accessibilityLabel={`Close ${label}`}
               accessibilityRole="button"
               style={pressable(styles.iconButton, styles.buttonPressed)}
-              onPress={() => sheetRef.current?.dismiss()}
+              onPress={() => {
+                Keyboard.dismiss();
+                sheetRef.current?.dismiss();
+              }}
             >
-              <CloseGlyph color={theme.accent} />
+              <CloseGlyph color={theme.textPrimary} />
             </Pressable>
           </View>
           <ScrollView
+            automaticallyAdjustKeyboardInsets
             contentContainerStyle={styles.activeEditContent}
+            keyboardDismissMode="on-drag"
+            keyboardShouldPersistTaps="handled"
             style={styles.activeEditScroller}
           >
-            {isPlaces ? (
-              <>
-                <Text {...mobileTextProps("body")} style={styles.muted}>
-                  Saved places help Dayframe recognise where you spent time. Detected visits appear in Review before they become time entries.
-                </Text>
-                <Text {...mobileTextProps("body")} style={styles.muted}>You can edit a saved name and radius at any time.</Text>
-              </>
-            ) : (
-              <>
-                <Text {...mobileTextProps("body")} style={styles.muted}>
-                  Dayframe uses background location to suggest visits and journeys. Suggestions go to Review before becoming time entries.
-                </Text>
-                <Text {...mobileTextProps("body")} style={styles.muted}>
-                  Location data is private. Motion & Fitness activity (still, walking, driving) is kept with it and never leaves Dayframe. Local journal samples expire after seven days. Upload copies, cached places and summaries can stay on this iPhone longer, even after upload or signing back in. Signing out clears this account’s local Location data; synced entries and saved places stay in your account.
-                </Text>
-                <Text {...mobileTextProps("body")} style={styles.muted}>
-                  iOS can pause or limit background updates, so Dayframe may not capture every movement.
-                </Text>
-              </>
-            )}
+            <SettingsBlockGroup
+              foot={enabled ? "Each one becomes a block you confirm in Review, or logs itself when Dayframe is sure." : undefined}
+              theme={theme}
+              title="Import"
+            >
+              <SettingsBlockRow
+                control={<SettingsSwitch label={`Import ${label}`} onValueChange={onEnabledChange} theme={theme} value={enabled} />}
+                divider={false}
+                subtitle={enabled ? null : "Not imported"}
+                testID={`health-detail-import-${healthKey}`}
+                theme={theme}
+                title="Import"
+              />
+              {/* Import on: the type's rows fade in and later rows move (Reduce Motion: no movement). */}
+              {enabled ? (
+                <Reanimated.View
+                  entering={localPresenceEntering(reduceMotion)}
+                  exiting={localPresenceExiting(reduceMotion)}
+                  layout={localLayoutTransition(reduceMotion)}
+                >
+                <SettingsBlockRow
+                  accessibilityHint={`Chooses the activity ${label} logs to`}
+                  onPress={() => {
+                    if (!closingRef.current) onPickActivity();
+                  }}
+                  testID={`health-activity-${healthKey}`}
+                  theme={theme}
+                  title="Logs as"
+                  value={mappedCategory?.name ?? `${defaultHealthCategoryLabel(healthKey)} (default)`}
+                />
+                </Reanimated.View>
+              ) : null}
+              {enabled && mapping.categoryId ? (
+                <Reanimated.View
+                  entering={localPresenceEntering(reduceMotion)}
+                  exiting={localPresenceExiting(reduceMotion)}
+                  layout={localLayoutTransition(reduceMotion)}
+                >
+                <SettingsBlockRow
+                  control={
+                    <SettingsPillButton
+                      accessibilityLabel={`Use the default activity for ${label}`}
+                      label="Use default"
+                      onPress={() => void onMappingChange({ categoryId: null })}
+                      theme={theme}
+                    />
+                  }
+                  subtitle={`Logs as ${defaultHealthCategoryLabel(healthKey)}`}
+                  testID={`health-default-${healthKey}`}
+                  theme={theme}
+                  title="Default activity"
+                />
+                </Reanimated.View>
+              ) : null}
+              {enabled ? (
+                <Reanimated.View
+                  entering={localPresenceEntering(reduceMotion)}
+                  exiting={localPresenceExiting(reduceMotion)}
+                  layout={localLayoutTransition(reduceMotion)}
+                  style={[styles.healthNameRow, { borderTopColor: theme.border, borderTopWidth: StyleSheet.hairlineWidth }]}>
+                  <Text {...mobileTextProps("control")} style={styles.healthNameLabel}>Name</Text>
+                  <TextInput
+                    accessibilityLabel={`${label} name`}
+                    {...mobileTextProps("input")}
+                    style={styles.healthNameInput}
+                    onChangeText={typeName}
+                    placeholder={defaultHealthDescription(healthKey)}
+                    placeholderTextColor={theme.textSecondary}
+                    returnKeyType="done"
+                    testID={`health-name-${healthKey}`}
+                    onEndEditing={commitName}
+                    value={nameDraft}
+                  />
+                </Reanimated.View>
+              ) : null}
+            </SettingsBlockGroup>
           </ScrollView>
+          </View>
+          {children}
         </SwipeDismissSheet>
       </View>
     </Modal>
   );
 }
+
+/** Settings › Location › How suggestions work (UIA-022). */
+const LOCATION_SUGGESTION_ROWS: readonly BlocksInfoRow[] = [
+  { glyph: "inbox", lead: "Suggestions wait in Review.", text: "Dayframe notices visits and journeys and shows them as blocks for you to confirm." },
+  { glyph: "check", lead: "Only saved places log on their own.", text: "A clear stay at a place you saved can be logged straight away; anything less certain waits in Review." },
+  { glyph: "footprints", lead: "Motion helps with trips.", text: "Motion & Fitness tells walking from driving. It stays with your location and never leaves Dayframe." },
+  { glyph: "refresh-cw", lead: "iOS may pause updates.", text: "iOS can pause or limit background location, so a movement can be missed." }
+];
+
+const LOCATION_SUGGESTIONS_PRIVACY = {
+  glyph: "shield" as const,
+  text: "Location stays private to your account and is never used for ads or analytics. Recent points on this iPhone expire after seven days; upload copies can stay longer. Signing out clears them all."
+};
 
 function CloseGlyph({ color }: { color: string }) {
   return (

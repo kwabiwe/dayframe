@@ -1,8 +1,9 @@
 "use client";
 
+import { DayframeIcon } from "@/components/blocks/DayframeIcon";
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { Pencil, Plus, Tag, Trash2 } from "lucide-react";
+import { Plus } from "lucide-react";
 import { DestructiveConfirmationDialog } from "@/components/DestructiveConfirmationDialog";
 import { clientFetch } from "@/lib/client-auth-fetch";
 import type { TagRow } from "@/lib/queries";
@@ -89,7 +90,7 @@ export function TagManager({ tags }: { tags: TagRow[] }) {
         }}
       >
         <label className="df-tag-new-field">
-          <span className="df-srow-ic" aria-hidden="true"><Tag size={17} /></span>
+          <span className="df-srow-ic" aria-hidden="true"><DayframeIcon glyph="tag" size={17}/></span>
           <span className="sr-only">New tag name</span>
           <input maxLength={48} name="name" placeholder="New tag, like Planning" required />
         </label>
@@ -106,7 +107,7 @@ export function TagManager({ tags }: { tags: TagRow[] }) {
         <ul className="df-card df-simple-list" aria-busy={isPending}>
           {tags.map((tag) => editingId === tag.id ? (
             <li className="df-srow df-srow--edit" key={tag.id}>
-              <span className="df-srow-ic" aria-hidden="true"><Tag size={17} /></span>
+              <span className="df-srow-ic" aria-hidden="true"><DayframeIcon glyph="tag" size={17}/></span>
               <form
                 className="df-tag-rename"
                 onSubmit={(event) => {
@@ -122,17 +123,17 @@ export function TagManager({ tags }: { tags: TagRow[] }) {
             </li>
           ) : (
             <li className="df-srow df-srow--tag" id={`tag-${tag.id}`} key={tag.id}>
-              <span className="df-srow-ic" aria-hidden="true"><Tag size={17} /></span>
+              <span className="df-srow-ic" aria-hidden="true"><DayframeIcon glyph="tag" size={17}/></span>
               <span className="df-srow-text">
                 <b>#{tag.name}</b>
                 <small>{tag.usageCount} {tag.usageCount === 1 ? "block" : "blocks"}</small>
               </span>
               <span className="df-srow-acts">
                 <button aria-label={`Rename ${tag.name}`} className="df-rbtn df-rbtn--sm df-rbtn--ghost" onClick={() => setEditingId(tag.id)} type="button">
-                  <Pencil size={15} aria-hidden="true" /> Rename
+                  <DayframeIcon glyph="pencil" size={15}/> Rename
                 </button>
                 <button aria-label={`Delete ${tag.name}`} className="df-icon-action df-icon-action--44" onClick={() => setPendingDelete(tag)} type="button">
-                  <Trash2 size={16} aria-hidden="true" />
+                  <DayframeIcon glyph="trash-2" size={16}/>
                 </button>
               </span>
             </li>

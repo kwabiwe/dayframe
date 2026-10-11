@@ -50,12 +50,6 @@ type MobileThemeContextValue = {
   themePreference: ThemePreference;
 };
 
-export const themeOptions: Array<{ value: ThemePreference; label: string }> = [
-  { value: "system", label: "System" },
-  { value: "light", label: "Light" },
-  { value: "dark", label: "Dark" }
-];
-
 const THEME_PREFERENCE_KEY = "dayframe.themePreference.v1";
 const monoFont = "System";
 const TIME_ENTRY_SHEET_TOP_ACTION_MIN_TARGET = 44;
@@ -228,237 +222,10 @@ function createStyles(theme: MobileTheme) {
       marginTop: -8,
       textAlign: "center"
     },
-    settingsGroup: {
-      gap: 8
-    },
-    settingsGroupTitle: {
-      color: theme.textSecondary,
-      fontFamily: monoFont,
-      fontSize: 12,
-      fontWeight: "600",
-      letterSpacing: 0.4,
-      textTransform: "uppercase",
-      paddingHorizontal: 4
-    },
     settingsGroupRows: {
       backgroundColor: theme.surface,
       borderRadius: 18,
       overflow: "hidden"
-    },
-    settingsMenuRow: {
-      minHeight: 58,
-      paddingHorizontal: 14,
-      paddingVertical: 8,
-      flexDirection: "row",
-      alignItems: "center",
-      gap: 11
-    },
-    settingsMenuDivider: {
-      position: "absolute",
-      left: 61,
-      right: 14,
-      bottom: 0,
-      height: 1,
-      backgroundColor: theme.border
-    },
-    settingsMenuIcon: {
-      width: 36,
-      height: 36,
-      flexShrink: 0,
-      borderRadius: 999,
-      backgroundColor: theme.surfaceMuted,
-      alignItems: "center",
-      justifyContent: "center"
-    },
-    settingsMenuText: {
-      flex: 1,
-      minWidth: 0,
-      gap: 3
-    },
-    settingsMenuChevron: {
-      width: 18,
-      height: 18,
-      flexShrink: 0,
-      alignItems: "center",
-      justifyContent: "center"
-    },
-    settingsMenuTitle: {
-      color: theme.textPrimary,
-      fontFamily: monoFont,
-      fontSize: 14,
-      fontWeight: "600"
-    },
-    settingsMenuMeta: {
-      color: theme.textSecondary,
-      fontFamily: monoFont,
-      fontSize: 12,
-      fontWeight: "500"
-    },
-    appearanceStack: {
-      gap: 14
-    },
-    appearanceIntro: {
-      color: theme.textSecondary,
-      fontFamily: monoFont,
-      fontSize: 14,
-      lineHeight: 20,
-      paddingHorizontal: 2
-    },
-    appearanceSelectionCard: {
-      backgroundColor: theme.accentSoft,
-      borderRadius: 18,
-      padding: 16,
-      gap: 5
-    },
-    appearanceSelectionTitle: {
-      color: theme.textPrimary,
-      fontFamily: monoFont,
-      fontSize: 16,
-      fontWeight: "600"
-    },
-    appearanceSelectionMeta: {
-      color: theme.textSecondary,
-      fontFamily: monoFont,
-      fontSize: 13,
-      lineHeight: 18
-    },
-    appearanceSectionLabel: {
-      color: theme.textSecondary,
-      fontFamily: monoFont,
-      fontSize: 11,
-      fontWeight: "600",
-      letterSpacing: 0.5,
-      textTransform: "uppercase",
-      paddingHorizontal: 2,
-      marginTop: 4
-    },
-    appearancePreviewRow: {
-      flexDirection: "row",
-      alignItems: "flex-start",
-      gap: 12
-    },
-    appearancePreviewColumn: {
-      flex: 1,
-      minWidth: 0,
-      gap: 8
-    },
-    appearancePreviewLabel: {
-      color: theme.textPrimary,
-      fontFamily: monoFont,
-      fontSize: 14,
-      fontWeight: "600",
-      paddingHorizontal: 2
-    },
-    appearancePreviewCard: {
-      borderRadius: 20,
-      padding: 12,
-      gap: 10
-    },
-    appearancePreviewCardLight: {
-      backgroundColor: "#FFFFFF"
-    },
-    appearancePreviewCardDark: {
-      backgroundColor: "#050914"
-    },
-    appearancePreviewCardSelected: {
-      shadowColor: theme.shadow,
-      shadowOpacity: 1,
-      shadowRadius: 10,
-      shadowOffset: { width: 0, height: 5 },
-      elevation: 3
-    },
-    appearancePreviewSurface: {
-      minHeight: 76,
-      borderRadius: 14,
-      padding: 12,
-      gap: 9,
-      justifyContent: "center"
-    },
-    appearancePreviewSurfaceLight: {
-      backgroundColor: "#F4F6F9"
-    },
-    appearancePreviewSurfaceDark: {
-      backgroundColor: "#1B2230"
-    },
-    appearancePreviewLine: {
-      height: 7,
-      width: "68%",
-      borderRadius: 999
-    },
-    appearancePreviewLineShort: {
-      height: 7,
-      width: "88%",
-      borderRadius: 999
-    },
-    appearancePreviewLineLight: {
-      backgroundColor: "#111827"
-    },
-    appearancePreviewLineDark: {
-      backgroundColor: "#F7F8FB"
-    },
-    appearancePreviewLineMutedLight: {
-      backgroundColor: "#667085"
-    },
-    appearancePreviewLineMutedDark: {
-      backgroundColor: "#8993A7"
-    },
-    appearancePreviewAccent: {
-      width: 48,
-      height: 8,
-      borderRadius: 999,
-      backgroundColor: "#F45D43"
-    },
-    appearancePreviewPill: {
-      minHeight: 38,
-      borderRadius: 999,
-      alignItems: "center",
-      justifyContent: "center",
-      paddingHorizontal: 8
-    },
-    appearancePreviewPillLight: {
-      backgroundColor: "#EEF1F6"
-    },
-    appearancePreviewPillDark: {
-      backgroundColor: "#202838"
-    },
-    appearancePreviewPillText: {
-      color: "#111827",
-      fontFamily: monoFont,
-      fontSize: 11,
-      fontWeight: "500"
-    },
-    appearancePreviewPillTextDark: {
-      color: "#F7F8FB"
-    },
-    appearanceDetailsCard: {
-      backgroundColor: theme.surface,
-      borderRadius: 18,
-      overflow: "hidden",
-      paddingHorizontal: 14
-    },
-    appearanceDetailRow: {
-      minHeight: 56,
-      flexDirection: "row",
-      alignItems: "center",
-      justifyContent: "space-between",
-      gap: 12
-    },
-    appearanceDetailDivider: {
-      borderTopWidth: 1,
-      borderTopColor: theme.border
-    },
-    appearanceDetailTitle: {
-      color: theme.textPrimary,
-      fontFamily: monoFont,
-      fontSize: 14,
-      fontWeight: "500"
-    },
-    appearanceDetailMeta: {
-      color: theme.textSecondary,
-      fontFamily: monoFont,
-      fontSize: 12,
-      fontWeight: "400",
-      textAlign: "right"
     },
     logoLockup: {
       alignItems: "center",
@@ -478,22 +245,6 @@ function createStyles(theme: MobileTheme) {
       flexShrink: 0,
       paddingHorizontal: 8,
       paddingVertical: 5
-    },
-    datePill: {
-      minHeight: 38,
-      borderRadius: 999,
-      backgroundColor: theme.surface,
-      paddingHorizontal: 14,
-      flexDirection: "row",
-      alignItems: "center",
-      justifyContent: "center",
-      gap: 5
-    },
-    datePillText: {
-      color: theme.textPrimary,
-      fontFamily: monoFont,
-      fontSize: 13,
-      fontWeight: "600"
     },
     todayTitle: {
       color: theme.textPrimary,
@@ -528,234 +279,11 @@ function createStyles(theme: MobileTheme) {
       padding: 14,
       gap: 10
     },
-    idleTimerPanel: {
-      minHeight: TIMER_CARD_MIN_HEIGHT,
-      paddingHorizontal: TIMER_CARD_HORIZONTAL_INSET,
-      paddingVertical: TIMER_CARD_VERTICAL_INSET
-    },
-    timerPanel: {
-      position: "relative",
-      backgroundColor: theme.surfaceRaised,
-      borderRadius: 18,
-      minHeight: TIMER_CARD_MIN_HEIGHT,
-      paddingHorizontal: TIMER_CARD_HORIZONTAL_INSET,
-      paddingVertical: TIMER_CARD_VERTICAL_INSET,
-      gap: 8,
-      shadowColor: theme.shadow,
-      shadowOpacity: 1,
-      shadowRadius: theme.mode === "dark" ? 12 : 8,
-      shadowOffset: { width: 0, height: 4 },
-      elevation: 2
-    },
-    activeTimerAccentRail: {
-      position: "absolute",
-      left: 0,
-      top: 12,
-      bottom: 12,
-      width: 4,
-      borderRadius: 999
-    },
-    lifecyclePanel: {
-      backgroundColor: theme.surfaceRaised,
-      borderRadius: 18,
-      padding: 14,
-      gap: 12
-    },
-    calendarWeekStrip: {
-      flexDirection: "row",
-      alignItems: "stretch",
-      gap: 6
-    },
-    calendarDayButton: {
-      flex: 1,
-      minWidth: 0,
-      minHeight: 56,
-      backgroundColor: theme.surfaceMuted,
-      borderRadius: 14,
-      alignItems: "center",
-      justifyContent: "center",
-      gap: 4
-    },
-    calendarDayButtonSelected: {
-      backgroundColor: theme.accentSoft
-    },
-    calendarDayButtonToday: {
-      backgroundColor: theme.surfaceMuted
-    },
-    calendarWeekday: {
-      color: theme.textSecondary,
-      fontFamily: monoFont,
-      fontSize: 11,
-      fontWeight: "600"
-    },
-    calendarDayNumber: {
-      color: theme.textPrimary,
-      fontFamily: monoFont,
-      fontSize: 18,
-      fontWeight: "600"
-    },
-    calendarDayTextSelected: {
-      color: theme.accentText
-    },
-    calendarOptionsRow: {
-      flexDirection: "row",
-      flexWrap: "wrap",
-      gap: 8
-    },
-    calendarOptionChip: {
-      minHeight: 44,
-      backgroundColor: theme.surfaceMuted,
-      borderRadius: 999,
-      paddingHorizontal: 13,
-      alignItems: "center",
-      justifyContent: "center"
-    },
-    calendarOptionChipSelected: {
-      borderColor: theme.accent,
-      backgroundColor: theme.accentSoft
-    },
-    calendarOptionChipText: {
-      color: theme.textSecondary,
-      fontFamily: monoFont,
-      fontSize: 12,
-      fontWeight: "600"
-    },
-    calendarOptionChipTextSelected: {
-      color: theme.accentText
-    },
-    calendarTimelinePanel: {
-      backgroundColor: theme.surfaceMuted,
-      borderRadius: 18,
-      overflow: "hidden"
-    },
-    calendarEdgeStack: {
-      borderBottomWidth: 1,
-      borderBottomColor: theme.border,
-      paddingHorizontal: 10,
-      paddingVertical: 10,
-      gap: 8
-    },
-    calendarEdgeTimeRow: {
-      minHeight: 20,
-      flexDirection: "row",
-      alignItems: "center",
-      gap: 6
-    },
-    calendarOutsideBlock: {
-      minHeight: 52,
-      borderRadius: 13,
-      backgroundColor: theme.surfaceMuted,
-      paddingHorizontal: 10,
-      paddingVertical: 8,
-      gap: 4,
-      justifyContent: "center"
-    },
-    calendarTimelineCanvas: {
-      position: "relative"
-    },
-    calendarHourLabel: {
-      position: "absolute",
-      left: 0,
-      width: 68,
-      height: 22,
-      color: theme.textSecondary,
-      fontFamily: monoFont,
-      fontSize: 11,
-      fontWeight: "600",
-      textAlign: "right",
-      paddingRight: 8
-    },
-    calendarHourLine: {
-      position: "absolute",
-      left: 68,
-      right: 0,
-      height: 1,
-      backgroundColor: theme.border
-    },
-    calendarBlock: {
-      position: "absolute",
-      left: 76,
-      right: 10,
-      borderRadius: 13,
-      paddingHorizontal: 10,
-      paddingVertical: 7,
-      gap: 4,
-      justifyContent: "center"
-    },
-    calendarBlockCompact: {
-      paddingVertical: 4,
-      gap: 0
-    },
-    calendarBlockTiny: {
-      borderRadius: 8,
-      paddingHorizontal: 0,
-      paddingVertical: 0
-    },
-    calendarBlockActive: {
-      borderStyle: "dashed"
-    },
-    calendarBlockReview: {
-      borderStyle: "dashed",
-      opacity: 0.72
-    },
-    calendarBlockFromPrevious: {
-      borderTopWidth: 0,
-      borderTopLeftRadius: 0,
-      borderTopRightRadius: 0
-    },
-    calendarBlockIntoNext: {
-      borderBottomWidth: 0,
-      borderBottomLeftRadius: 0,
-      borderBottomRightRadius: 0
-    },
-    calendarBlockTitleRow: {
-      flexDirection: "row",
-      alignItems: "center",
-      gap: 7,
-      minWidth: 0
-    },
-    calendarBlockTitle: {
-      flex: 1,
-      color: theme.textPrimary,
-      fontFamily: monoFont,
-      fontSize: 13,
-      fontWeight: "600"
-    },
     calendarBlockMeta: {
       color: theme.textPrimary,
       fontFamily: monoFont,
       fontSize: 11,
       fontWeight: "600"
-    },
-    calendarReviewLabel: {
-      color: theme.textPrimary,
-      fontFamily: monoFont,
-      fontSize: 10,
-      fontWeight: "600"
-    },
-    currentTimeRow: {
-      position: "absolute",
-      left: 68,
-      right: 8,
-      height: 18,
-      flexDirection: "row",
-      alignItems: "center",
-      gap: 6
-    },
-    currentTimeLabel: {
-      width: 68,
-      color: theme.accentText,
-      fontFamily: monoFont,
-      fontSize: 11,
-      fontWeight: "600",
-      textAlign: "right",
-      paddingRight: 8
-    },
-    currentTimeLine: {
-      flex: 1,
-      height: 2,
-      borderRadius: 999,
-      backgroundColor: theme.accent
     },
     label: {
       fontSize: 11,
@@ -764,59 +292,10 @@ function createStyles(theme: MobileTheme) {
       fontWeight: "600",
       letterSpacing: 0.5
     },
-    timerText: {
-      fontSize: 18,
-      fontWeight: "600",
-      color: theme.textPrimary,
-      fontFamily: monoFont
-    },
-    activeTimerHeader: {
-      flexDirection: "row",
-      alignItems: "stretch",
-      justifyContent: "space-between",
-      gap: TIMER_CARD_CONTENT_TO_ACTION_GAP,
-      minHeight: TIMER_CARD_CONTENT_MIN_HEIGHT
-    },
-    activeTimerTextStack: {
-      flex: 1,
-      gap: 5,
-      minWidth: 0
-    },
-    activeTimerExpandedContent: {
-      overflow: "hidden",
-      gap: 5
-    },
-    activeTimerActions: {
-      flexDirection: "column",
-      alignItems: "center",
-      alignSelf: "stretch",
-      gap: TIMER_CARD_ACTION_COLUMN_GAP,
-      justifyContent: "space-between",
-      width: TIMER_CARD_ACTION_COLUMN_WIDTH
-    },
-    activeTitleRow: {
-      flexDirection: "row",
-      alignItems: "center",
-      gap: 8
-    },
-    activeTitleText: {
-      flex: 1
-    },
-    activeTitlePlaceholderText: {
-      color: theme.textSecondary,
-      fontWeight: "700"
-    },
     activeDescription: {
       fontSize: 14,
       color: theme.textSecondary,
       fontFamily: monoFont
-    },
-    activeElapsed: {
-      color: theme.accentText,
-      fontFamily: monoFont,
-      fontSize: 30,
-      fontWeight: "700",
-      fontVariant: ["tabular-nums"]
     },
     muted: {
       fontSize: 13,
@@ -824,119 +303,15 @@ function createStyles(theme: MobileTheme) {
       color: theme.textSecondary,
       fontFamily: monoFont
     },
-    sectionHeader: {
-      gap: 4,
-      borderBottomWidth: 1,
-      borderBottomColor: theme.border,
-      paddingBottom: 10
-    },
     sectionTitle: {
       fontSize: 17,
       fontWeight: "600",
       color: theme.textPrimary,
       fontFamily: monoFont
     },
-    segmentedControl: {
-      flexDirection: "row",
-      borderRadius: 999,
-      backgroundColor: theme.mode === "dark" ? theme.surfaceMuted : theme.textPrimary,
-      padding: 4
-    },
-    segmentButton: {
-      flex: 1,
-      minHeight: 36,
-      alignItems: "center",
-      justifyContent: "center",
-      borderRadius: 999,
-      paddingVertical: 7
-    },
-    segmentButtonSelected: {
-      backgroundColor: theme.mode === "dark" ? theme.textPrimary : theme.surfaceRaised
-    },
-    segmentButtonText: {
-      color: theme.mode === "dark" ? theme.textSecondary : theme.surface,
-      fontFamily: monoFont,
-      fontWeight: "600"
-    },
-    segmentButtonTextSelected: {
-      color: theme.mode === "dark" ? theme.background : theme.textPrimary
-    },
-    chartWrap: {
-      alignItems: "center",
-      paddingVertical: 2
-    },
-    chartBox: {
-      width: 184,
-      height: 184,
-      alignItems: "center",
-      justifyContent: "center"
-    },
-    chartCenter: {
-      position: "absolute",
-      width: 86,
-      height: 86,
-      alignItems: "center",
-      justifyContent: "center"
-    },
-    chartCenterLabel: {
-      color: theme.textSecondary,
-      fontFamily: monoFont,
-      fontSize: 11
-    },
-    chartCenterValue: {
-      color: theme.textPrimary,
-      fontFamily: monoFont,
-      fontSize: 18,
-      fontWeight: "600",
-      fontVariant: ["tabular-nums"]
-    },
-    legendList: {
-      gap: 10
-    },
-    legendRow: {
-      flexDirection: "row",
-      alignItems: "center",
-      gap: 10,
-      borderTopWidth: 1,
-      borderTopColor: theme.border,
-      paddingTop: 10
-    },
-    legendSwatch: {
-      width: 12,
-      height: 32,
-      borderRadius: 999,
-      overflow: "hidden"
-    },
     legendText: {
       flex: 1,
       gap: 2
-    },
-    legendPlace: {
-      color: theme.textPrimary,
-      fontFamily: monoFont,
-      fontSize: 14,
-      fontWeight: "600"
-    },
-    legendProject: {
-      color: theme.textSecondary,
-      fontFamily: monoFont,
-      fontSize: 12
-    },
-    legendNumbers: {
-      alignItems: "flex-end",
-      gap: 2
-    },
-    legendDuration: {
-      color: theme.textPrimary,
-      fontFamily: monoFont,
-      fontSize: 13,
-      fontWeight: "600",
-      fontVariant: ["tabular-nums"]
-    },
-    legendShare: {
-      color: theme.textSecondary,
-      fontFamily: monoFont,
-      fontSize: 12
     },
     // Review deck (Blocks parity step 5a): prototype `.push` nav and padding.
     // Anchored to the round actions: the toast's bottom edge sits 12 points above them.
@@ -1177,38 +552,6 @@ function createStyles(theme: MobileTheme) {
     historyDayGap: {
       height: 14
     },
-    compactCategoryScroller: {
-      gap: 7,
-      paddingRight: TIMER_CARD_TRAILING_SCROLL_INSET
-    },
-    quickActionsInline: {
-      flexGrow: 0,
-      minHeight: TIMER_CARD_QUICK_ACTION_PILL_HEIGHT
-    },
-    categoryPillTouch: {
-      minHeight: TIMER_CARD_QUICK_ACTION_PILL_HEIGHT,
-      justifyContent: "center"
-    },
-    categoryPill: {
-      minHeight: TIMER_CARD_QUICK_ACTION_PILL_HEIGHT,
-      backgroundColor: theme.surfaceMuted,
-      borderRadius: 999,
-      paddingHorizontal: 11,
-      paddingVertical: 4,
-      flexDirection: "row",
-      alignItems: "center",
-      gap: 7
-    },
-    categoryPillMuted: {
-      backgroundColor: theme.surfaceMuted
-    },
-    categoryPillText: {
-      color: theme.textPrimary,
-      fontFamily: monoFont,
-      fontSize: 12,
-      fontWeight: "600",
-      maxWidth: 168
-    },
     quickCategoryHint: {
       color: theme.textSecondary,
       fontFamily: monoFont,
@@ -1218,94 +561,15 @@ function createStyles(theme: MobileTheme) {
       lineHeight: TIMER_CARD_QUICK_ACTION_LABEL_LINE_HEIGHT,
       paddingHorizontal: 2
     },
-    colorDot: {
-      width: 9,
-      height: 9,
-      borderRadius: 999
-    },
-    colorDotMuted: {
-      backgroundColor: "transparent",
-      borderColor: theme.textSecondary
-    },
-    placeList: {
-      gap: 8
-    },
-    placeRow: {
-      minHeight: 62,
-      backgroundColor: theme.surfaceRaised,
-      borderRadius: 16,
-      paddingHorizontal: 10,
-      paddingVertical: 8,
-      flexDirection: "row",
-      alignItems: "center",
-      gap: 9
-    },
-    placeTextStack: {
-      flex: 1,
-      gap: 3,
-      minWidth: 0
-    },
     placeName: {
       color: theme.textPrimary,
       fontFamily: monoFont,
       fontSize: 14,
       fontWeight: "600"
     },
-    placeMeta: {
-      color: theme.textSecondary,
-      fontFamily: monoFont,
-      fontSize: 12,
-      fontWeight: "700"
-    },
-    placeActions: {
-      flexDirection: "row",
-      gap: 4
-    },
-    learnedPlaceSaveButton: {
-      minHeight: 44,
-      minWidth: 52,
-      backgroundColor: theme.surfaceMuted,
-      borderRadius: 999,
-      paddingHorizontal: 12,
-      paddingVertical: 0,
-      alignItems: "center",
-      justifyContent: "center"
-    },
-    learnedPlaceSaveButtonText: {
-      color: theme.accentText,
-      fontFamily: monoFont,
-      fontSize: 12,
-      fontWeight: "600",
-      lineHeight: 16,
-      textAlign: "center"
-    },
-    placeForm: {
-      backgroundColor: theme.surfaceRaised,
-      borderRadius: 14,
-      padding: 12,
-      gap: 10
-    },
-    placeFormRow: {
-      flexDirection: "row",
-      gap: 8
-    },
-    placeFormField: {
-      flex: 1,
-      minWidth: 0,
-      gap: 5
-    },
-    coordinateInput: {
-      minHeight: 46
-    },
     radiusInput: {
       width: 112,
       textAlign: "center"
-    },
-    diagnosticText: {
-      color: theme.textSecondary,
-      fontFamily: monoFont,
-      fontSize: 11,
-      lineHeight: 16
     },
     warningText: {
       color: theme.warningText,
@@ -1314,87 +578,11 @@ function createStyles(theme: MobileTheme) {
       fontWeight: "700",
       lineHeight: 17
     },
-    healthPreferenceList: {
-      gap: 8
-    },
-    healthPreferenceRow: {
-      minHeight: 58,
-      backgroundColor: theme.surfaceRaised,
-      borderRadius: 16,
-      paddingHorizontal: 12,
-      paddingVertical: 10,
-      gap: 12
-    },
-    healthPreferenceHeader: {
-      flexDirection: "row",
-      alignItems: "center",
-      justifyContent: "space-between",
-      gap: 12
-    },
-    healthPreferenceText: {
-      flex: 1,
-      minWidth: 0,
-      gap: 3
-    },
-    healthMappingPanel: {
-      gap: 8
-    },
-    healthMappingLabel: {
-      color: theme.textSecondary,
-      fontFamily: monoFont,
-      fontSize: 11,
-      fontWeight: "600",
-      textTransform: "uppercase"
-    },
-    healthMappingInput: {
-      minHeight: 44
-    },
-    categoryChoiceScroller: {
-      gap: 8,
-      paddingRight: 4
-    },
-    categoryChoice: {
-      minHeight: 44,
-      backgroundColor: theme.surfaceMuted,
-      borderRadius: 999,
-      paddingHorizontal: 11,
-      paddingVertical: 4,
-      flexDirection: "row",
-      alignItems: "center",
-      gap: 7
-    },
-    categoryChoiceSelected: {
-      backgroundColor: theme.accentSoft
-    },
-    categoryChoiceText: {
-      color: theme.textPrimary,
-      fontFamily: monoFont,
-      fontSize: 12,
-      fontWeight: "600",
-      lineHeight: 16
-    },
-    categoryChoiceTextSelected: {
-      color: theme.accentText
-    },
     categoryName: {
       color: theme.textPrimary,
       fontFamily: monoFont,
       fontSize: 13,
       fontWeight: "600"
-    },
-    categoryMeta: {
-      color: theme.textSecondary,
-      fontFamily: monoFont,
-      fontSize: 11,
-      fontWeight: "400"
-    },
-    categoryIconButton: {
-      width: 44,
-      height: 44,
-      backgroundColor: theme.surfaceMuted,
-      borderRadius: 999,
-      alignItems: "center",
-      justifyContent: "center"
     },
     textInput: {
       minHeight: 48,
@@ -1527,53 +715,9 @@ function createStyles(theme: MobileTheme) {
       alignItems: "center",
       justifyContent: "center"
     },
-    startInputRow: {
-      flexDirection: "row",
-      alignItems: "stretch",
-      gap: TIMER_CARD_CONTENT_TO_ACTION_GAP,
-      minHeight: TIMER_CARD_CONTENT_MIN_HEIGHT
-    },
-    startComposerMain: {
-      flex: 1,
-      minWidth: 0,
-      gap: TIMER_CARD_DESCRIPTION_TO_QUICK_ACTIONS_SPACING
-    },
-    quickActionsGroup: {
-      gap: TIMER_CARD_LABEL_TO_PILL_SPACING
-    },
     startInput: {
       flex: 1,
       minHeight: 44,
-      justifyContent: "center"
-    },
-    startInputText: {
-      color: theme.textSecondary,
-      fontFamily: monoFont,
-      fontSize: 14,
-      fontWeight: "600",
-      lineHeight: 18
-    },
-    startActionColumn: {
-      alignItems: "center",
-      alignSelf: "stretch",
-      gap: TIMER_CARD_ACTION_COLUMN_GAP,
-      justifyContent: "space-between",
-      width: TIMER_CARD_ACTION_COLUMN_WIDTH
-    },
-    addPastTimeButton: {
-      width: 44,
-      height: 44,
-      backgroundColor: theme.accentSoft,
-      borderRadius: 999,
-      alignItems: "center",
-      justifyContent: "center"
-    },
-    deleteTimerButton: {
-      width: 44,
-      height: 44,
-      backgroundColor: theme.danger,
-      borderRadius: 999,
-      alignItems: "center",
       justifyContent: "center"
     },
     sheetOverlay: {
@@ -1604,72 +748,6 @@ function createStyles(theme: MobileTheme) {
       shadowRadius: 20,
       shadowOffset: { width: 0, height: 10 },
       elevation: 8
-    },
-    datePickerHeader: {
-      minHeight: 44,
-      flexDirection: "row",
-      alignItems: "center",
-      justifyContent: "space-between",
-      gap: 8
-    },
-    datePickerNavButton: {
-      width: 44,
-      height: 44,
-      borderRadius: 999,
-      backgroundColor: theme.surfaceMuted,
-      alignItems: "center",
-      justifyContent: "center"
-    },
-    datePickerMonth: {
-      flex: 1,
-      color: theme.textPrimary,
-      fontFamily: monoFont,
-      fontSize: 17,
-      fontWeight: "600",
-      textAlign: "center"
-    },
-    datePickerWeekdays: {
-      flexDirection: "row"
-    },
-    datePickerWeekday: {
-      width: `${100 / 7}%`,
-      color: theme.textSecondary,
-      fontFamily: monoFont,
-      fontSize: 11,
-      fontWeight: "600",
-      textAlign: "center"
-    },
-    datePickerGrid: {
-      flexDirection: "row",
-      flexWrap: "wrap"
-    },
-    datePickerDay: {
-      width: `${100 / 7}%`,
-      minHeight: 44,
-      borderRadius: 999,
-      alignItems: "center",
-      justifyContent: "center"
-    },
-    datePickerDayToday: {
-      backgroundColor: theme.surfaceMuted
-    },
-    datePickerDaySelected: {
-      backgroundColor: theme.accent
-    },
-    datePickerDayText: {
-      color: theme.textPrimary,
-      fontFamily: monoFont,
-      fontSize: 14,
-      fontWeight: "500",
-      fontVariant: ["tabular-nums"]
-    },
-    datePickerDayTextOutside: {
-      color: theme.textSecondary,
-      opacity: 0.5
-    },
-    datePickerDayTextSelected: {
-      color: theme.onAccent,
-      fontWeight: "700"
     },
     datePickerHead: {
       minHeight: 44,
@@ -1777,9 +855,6 @@ function createStyles(theme: MobileTheme) {
       justifyContent: "center",
       marginBottom: 4
     },
-    sheetHeaderWithTopAction: {
-      paddingRight: TIME_ENTRY_SHEET_TITLE_ACTION_CLEARANCE
-    },
     sheetHeaderCentered: {
       justifyContent: "center"
     },
@@ -1794,26 +869,6 @@ function createStyles(theme: MobileTheme) {
     sheetTitleCentered: {
       flex: 0,
       textAlign: "center"
-    },
-    sheetIconButton: {
-      width: 52,
-      height: 52,
-      backgroundColor: theme.surfaceMuted,
-      borderRadius: 999,
-      alignItems: "center",
-      justifyContent: "center"
-    },
-    sheetHeaderSpacer: {
-      width: 52,
-      height: 52
-    },
-    sheetSaveButton: {
-      width: 52,
-      height: 52,
-      backgroundColor: theme.surfaceMuted,
-      borderRadius: 999,
-      alignItems: "center",
-      justifyContent: "center"
     },
     sheetProgressSlot: {
       height: 3,
@@ -1966,12 +1021,6 @@ function createStyles(theme: MobileTheme) {
       alignItems: "center",
       justifyContent: "center"
     },
-    activeEditElapsedLabel: {
-      color: theme.textSecondary,
-      fontFamily: monoFont,
-      fontSize: 12,
-      fontWeight: "600"
-    },
     activeEditSection: {
       gap: 8
     },
@@ -1983,11 +1032,6 @@ function createStyles(theme: MobileTheme) {
     },
     activeEditTagSectionLayer: {
       zIndex: 20
-    },
-    taskSuggestionsPanel: {
-      backgroundColor: theme.surfaceMuted,
-      borderRadius: 16,
-      overflow: "hidden"
     },
     historicalSuggestionsOverlay: {
       position: "absolute",
@@ -2046,18 +1090,6 @@ function createStyles(theme: MobileTheme) {
       flexShrink: 1,
       minHeight: 0
     },
-    taskSuggestionsTitle: {
-      color: theme.textSecondary,
-      fontFamily: monoFont,
-      fontSize: 11,
-      fontWeight: "600",
-      letterSpacing: 0.4,
-      paddingVertical: 8
-    },
-    taskSuggestionsList: {
-      borderTopWidth: 1,
-      borderTopColor: theme.border
-    },
     taskSuggestionRow: {
       minHeight: 46,
       backgroundColor: "transparent",
@@ -2074,51 +1106,6 @@ function createStyles(theme: MobileTheme) {
       right: 12,
       height: 1,
       backgroundColor: theme.border
-    },
-    taskSuggestionTextStack: {
-      flex: 1,
-      minWidth: 0,
-      flexDirection: "row",
-      alignItems: "center",
-      gap: 8
-    },
-    taskSuggestionTitle: {
-      color: theme.textPrimary,
-      fontFamily: monoFont,
-      fontSize: 13,
-      fontWeight: "500",
-      flex: 1,
-      flexShrink: 4,
-      minWidth: 0
-    },
-    taskSuggestionMetadataLine: {
-      minWidth: 0,
-      flexDirection: "row",
-      alignItems: "center",
-      gap: 8
-    },
-    taskSuggestionMetaRow: {
-      flexDirection: "row",
-      alignItems: "center",
-      gap: 5,
-      flexShrink: 0,
-      minWidth: 0
-    },
-    taskSuggestionMeta: {
-      color: theme.textSecondary,
-      fontFamily: monoFont,
-      fontSize: 11,
-      fontWeight: "400",
-      flexShrink: 1,
-      maxWidth: 112
-    },
-    taskSuggestionTags: {
-      color: theme.textSecondary,
-      fontFamily: monoFont,
-      fontSize: 11,
-      fontWeight: "400",
-      flexShrink: 1,
-      maxWidth: 96
     },
     activeEditDescriptionInput: {
       minHeight: 48
@@ -2236,11 +1223,6 @@ function createStyles(theme: MobileTheme) {
       fontSize: 12,
       fontWeight: "400"
     },
-    activeEditTimeRow: {
-      flexDirection: "row",
-      alignItems: "center",
-      gap: 8
-    },
     activeEditTimeGroups: {
       flexDirection: "row",
       alignItems: "flex-start",
@@ -2309,222 +1291,6 @@ function createStyles(theme: MobileTheme) {
       fontVariant: ["tabular-nums"],
       lineHeight: 28
     },
-    activeEditDateInput: {
-      flex: 1.25,
-      minHeight: 48
-    },
-    activeEditTimeInput: {
-      width: 94,
-      minHeight: 48,
-      color: theme.accentText,
-      fontFamily: monoFont,
-      fontSize: 18,
-      fontWeight: "600",
-      fontVariant: ["tabular-nums"],
-      textAlign: "center"
-    },
-    activeEditStartSummary: {
-      flex: 1,
-      minWidth: 0,
-      minHeight: 48,
-      backgroundColor: theme.surfaceMuted,
-      borderRadius: 14,
-      paddingHorizontal: 12,
-      paddingVertical: 8,
-      flexDirection: "row",
-      alignItems: "center",
-      justifyContent: "space-between",
-      gap: 12
-    },
-    activeEditStartSummaryText: {
-      flex: 1,
-      minWidth: 0
-    },
-    activeEditStartDate: {
-      color: theme.textPrimary,
-      fontFamily: monoFont,
-      fontSize: 14,
-      fontWeight: "600"
-    },
-    activeEditStartMeta: {
-      color: theme.textSecondary,
-      fontFamily: monoFont,
-      fontSize: 12,
-      fontWeight: "700"
-    },
-    activeEditStartTime: {
-      color: theme.accentText,
-      fontFamily: monoFont,
-      fontSize: 20,
-      fontWeight: "600",
-      fontVariant: ["tabular-nums"]
-    },
-    activeEditLastStopButton: {
-      minHeight: 36,
-      borderWidth: 0,
-      borderColor: "transparent",
-      backgroundColor: "transparent",
-      borderRadius: 12,
-      paddingHorizontal: 2,
-      paddingVertical: 4,
-      flexDirection: "row",
-      alignItems: "center",
-      justifyContent: "space-between",
-      gap: 10
-    },
-    activeEditLastStopText: {
-      flex: 1,
-      color: theme.accentText,
-      fontFamily: monoFont,
-      fontSize: 13,
-      fontWeight: "600"
-    },
-    activeEditLastStopMeta: {
-      color: theme.textSecondary,
-      fontFamily: monoFont,
-      fontSize: 13,
-      fontWeight: "600"
-    },
-    activeEditPickerPanel: {
-      backgroundColor: theme.surfaceMuted,
-      borderRadius: 16,
-      padding: 12,
-      gap: 12
-    },
-    activeEditPickerHeader: {
-      flexDirection: "row",
-      alignItems: "center",
-      justifyContent: "space-between",
-      gap: 10
-    },
-    activeEditPickerHeaderText: {
-      flex: 1,
-      minWidth: 0
-    },
-    activeEditPickerTitle: {
-      color: theme.textPrimary,
-      fontFamily: monoFont,
-      fontSize: 14,
-      fontWeight: "600"
-    },
-    activeEditPickerMeta: {
-      color: theme.textSecondary,
-      fontFamily: monoFont,
-      fontSize: 12,
-      fontWeight: "700"
-    },
-    activeEditPickerActions: {
-      flexDirection: "row",
-      alignItems: "center",
-      gap: 8
-    },
-    activeEditPickerPrimaryButton: {
-      minHeight: 44,
-      backgroundColor: theme.accent,
-      borderRadius: 999,
-      paddingHorizontal: 12,
-      alignItems: "center",
-      justifyContent: "center"
-    },
-    activeEditPickerPrimaryText: {
-      color: theme.onAccent,
-      fontFamily: monoFont,
-      fontSize: 12,
-      fontWeight: "600"
-    },
-    activeEditPickerSecondaryButton: {
-      minHeight: 44,
-      backgroundColor: theme.surfaceRaised,
-      borderRadius: 999,
-      paddingHorizontal: 12,
-      alignItems: "center",
-      justifyContent: "center"
-    },
-    activeEditPickerSecondaryText: {
-      color: theme.textPrimary,
-      fontFamily: monoFont,
-      fontSize: 12,
-      fontWeight: "600"
-    },
-    activeEditPickerShortcutRow: {
-      flexDirection: "row",
-      alignItems: "center",
-      gap: 8
-    },
-    activeEditPickerChip: {
-      minHeight: 44,
-      backgroundColor: theme.surfaceRaised,
-      borderRadius: 999,
-      paddingHorizontal: 12,
-      alignItems: "center",
-      justifyContent: "center"
-    },
-    activeEditPickerChipText: {
-      color: theme.accentText,
-      fontFamily: monoFont,
-      fontSize: 12,
-      fontWeight: "600"
-    },
-    activeEditPickerGrid: {
-      gap: 8
-    },
-    activeEditPickerStepper: {
-      backgroundColor: theme.surfaceRaised,
-      borderRadius: 14,
-      paddingHorizontal: 10,
-      paddingVertical: 8,
-      flexDirection: "row",
-      alignItems: "center",
-      justifyContent: "space-between",
-      gap: 10
-    },
-    activeEditPickerStepperLabel: {
-      width: 58,
-      color: theme.textSecondary,
-      fontFamily: monoFont,
-      fontSize: 11,
-      fontWeight: "600",
-      textAlign: "left"
-    },
-    activeEditPickerStepperControls: {
-      flex: 1,
-      flexDirection: "row",
-      alignItems: "center",
-      justifyContent: "flex-end",
-      gap: 6
-    },
-    activeEditPickerStepperButton: {
-      width: 44,
-      height: 44,
-      backgroundColor: theme.surfaceMuted,
-      borderRadius: 999,
-      alignItems: "center",
-      justifyContent: "center"
-    },
-    activeEditPickerStepperButtonText: {
-      color: theme.accentText,
-      fontFamily: monoFont,
-      fontSize: 18,
-      fontWeight: "600",
-      lineHeight: 20
-    },
-    activeEditPickerStepperValue: {
-      flex: 1,
-      minWidth: 0,
-      color: theme.textPrimary,
-      fontFamily: monoFont,
-      fontSize: 15,
-      fontWeight: "600",
-      textAlign: "center"
-    },
-    activeEditStartButton: {
-      width: 52,
-      height: 52,
-      backgroundColor: theme.accentSoft,
-      borderRadius: 999,
-      alignItems: "center",
-      justifyContent: "center"
-    },
     buttonPressed: {
       borderColor: theme.pressed,
       opacity: 0.88,
@@ -2551,10 +1317,6 @@ function createStyles(theme: MobileTheme) {
       alignItems: "center",
       justifyContent: "center"
     },
-    toggleSelected: {
-      borderColor: theme.accent,
-      backgroundColor: theme.accentSoft
-    },
     // Secondary actions are neutral (UIA-012); coral text read as a second primary action.
     secondaryButtonText: {
       color: theme.textPrimary,
@@ -2570,11 +1332,6 @@ function createStyles(theme: MobileTheme) {
       justifyContent: "space-between",
       gap: 10
     },
-    settingsDivider: {
-      height: 1,
-      backgroundColor: theme.border,
-      marginVertical: 8
-    },
     accountList: {
       gap: 8
     },
@@ -2584,39 +1341,6 @@ function createStyles(theme: MobileTheme) {
       paddingHorizontal: 10,
       paddingVertical: 8,
       gap: 2
-    },
-    learnedPlaceDetailHeader: {
-      minHeight: 44,
-      flexDirection: "row",
-      alignItems: "center",
-      justifyContent: "space-between",
-      gap: 8
-    },
-    learnedPlaceMetricGrid: {
-      flexDirection: "row",
-      flexWrap: "wrap",
-      gap: 8
-    },
-    learnedPlaceMetricCell: {
-      flexBasis: "47%",
-      flexGrow: 1,
-      minWidth: 112
-    },
-    learnedPlaceCopyButton: {
-      minHeight: 44,
-      minWidth: 72,
-      flexDirection: "row",
-      alignItems: "center",
-      justifyContent: "center",
-      gap: 6,
-      borderRadius: 999,
-      paddingHorizontal: 10
-    },
-    learnedPlaceCopyText: {
-      color: theme.accentText,
-      fontFamily: monoFont,
-      fontSize: 12,
-      fontWeight: "600"
     },
     copyToast: {
       alignSelf: "center",
@@ -2662,32 +1386,12 @@ function createStyles(theme: MobileTheme) {
       fontSize: 13,
       fontWeight: "600"
     },
-    accountMeta: {
-      color: theme.textSecondary,
-      fontFamily: monoFont,
-      fontSize: 12
-    },
     queueDiagnosticCard: {
       backgroundColor: theme.surfaceRaised,
       borderRadius: 12,
       paddingHorizontal: 10,
       paddingVertical: 8,
       gap: 4
-    },
-    detailsToggle: {
-      alignSelf: "flex-start",
-      minHeight: 44,
-      flexDirection: "row",
-      alignItems: "center",
-      gap: 6,
-      justifyContent: "center",
-      paddingVertical: 4
-    },
-    detailsToggleText: {
-      color: theme.textSecondary,
-      fontFamily: monoFont,
-      fontSize: 13,
-      fontWeight: "600"
     },
     buttonRow: {
       flexDirection: "row",

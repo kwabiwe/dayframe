@@ -1,7 +1,9 @@
 "use client";
 
+import { DayframeIcon } from "@/components/blocks/DayframeIcon";
+
 import Link from "next/link";
-import { Briefcase, House, Plus } from "lucide-react";
+import { Plus } from "lucide-react";
 import { useRef, useState } from "react";
 import {
   initialPreviousPlaceName,
@@ -25,7 +27,7 @@ type Editing = {
   mode: "choose" | "clear";
 };
 
-const ROLE_ICONS = { home: House, work: Briefcase } as const;
+const ROLE_GLYPHS = { home: "house", work: "briefcase" } as const;
 
 /**
  * The two pinned Home and Work slots at the top of Places. A slot points at a saved place;
@@ -109,10 +111,9 @@ export function PlaceRoleSlots({
       </header>
       <div className="places-list">
         {slots.map((slot) => {
-          const Icon = ROLE_ICONS[slot.role];
           return (
             <article className="place-list-row place-role-slot" key={slot.role}>
-              <span className="place-list-icon"><Icon aria-hidden="true" size={19} /></span>
+              <span className="place-list-icon"><DayframeIcon glyph={ROLE_GLYPHS[slot.role]} size={19} /></span>
               <div className="place-list-copy">
                 <h3>{slot.label}</h3>
                 <p>{slot.place ? slot.secondary ?? `${slot.place.radiusMeters}m radius` : "Not set"}</p>

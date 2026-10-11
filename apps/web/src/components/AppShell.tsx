@@ -4,7 +4,7 @@ import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import type { ReactNode } from "react";
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
-import { Check, Folder, Settings } from "lucide-react";
+import { Check, Folder } from "lucide-react";
 import { AppShellRuntimeProvider, useAppShellRuntime } from "@/components/AppShellRuntime";
 import { DayframeBrand } from "@/components/brand/DayframeBrand";
 import { DayframeIcon } from "@/components/blocks/DayframeIcon";
@@ -402,7 +402,7 @@ function ProfileWorkspacePopover({
         </section>
 
         <div className="df-profile-pop-rows">
-          <Link href="/settings#account" onClick={onClose}><Settings aria-hidden="true" size={17} />Settings</Link>
+          <Link href="/settings#account" onClick={onClose}><DayframeIcon glyph="settings" size={17}/>Settings</Link>
           <SignOutControl className="" showIcon />
         </div>
       </div>
