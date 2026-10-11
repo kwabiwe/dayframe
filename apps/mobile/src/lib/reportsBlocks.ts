@@ -176,7 +176,11 @@ export function reportStackHeights(
     const factor = Math.max(0, budget - floor) / flexible;
     heights = heights.map((h) => (h > floorHeight ? Math.max(floorHeight, h * factor) : h));
   }
-  return heights.map((h) => Math.floor(h * 2) / 2);
+  // Half-point steps, but a kept block never rounds away: a sliver under half a point stays.
+  return heights.map((h) => {
+    const rounded = Math.floor(h * 2) / 2;
+    return h > 0 && rounded === 0 ? h : rounded;
+  });
 }
 
 const FILTER_GROUPS: ReadonlyArray<{ id: string | null; label: string }> = [

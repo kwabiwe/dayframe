@@ -234,7 +234,7 @@ describe("Activity chart", () => {
     const card = tree.root.findByProps({ testID: "reports-activity-card" });
     expect(card.props.style[1].backgroundColor).toBe("card");
     const blocks = tree.root.findAllByProps({ testID: "report-activity-block" });
-    const heights = blocks.map((block) => block.props.style.height);
+    const heights = blocks.map((block) => block.props.style.flexGrow);
     expect(blocks.map((block) => block.props.style.backgroundColor)).toEqual(["blue", "lime"]);
     expect(heights[0]).toBeGreaterThan(heights[1]);
     expect(JSON.stringify(tree.toJSON())).not.toContain("coral");
@@ -266,7 +266,7 @@ describe("Activity chart", () => {
     const small = columns[1];
     const columnHeight = small.props.style.at(-1).height;
     const shown = small.findAllByProps({ testID: "report-activity-block" });
-    const used = shown.reduce((sum, block) => sum + block.props.style.height, 0) + Math.max(0, shown.length - 1) * small.props.style[1].gap;
+    const used = shown.reduce((sum, block) => sum + block.props.style.flexGrow, 0) + Math.max(0, shown.length - 1) * small.props.style[1].gap;
     expect(shown.length).toBeGreaterThan(0);
     expect(used).toBeLessThanOrEqual(columnHeight + 0.01);
     act(() => tree.unmount());

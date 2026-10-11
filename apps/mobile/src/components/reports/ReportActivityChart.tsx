@@ -367,8 +367,9 @@ function ReportStack({
   const style = useAnimatedStyle(() => ({ height: value.value }));
   const radius = Math.min(4, width / 3);
   const gap = width >= 8 ? 1.5 : 1;
-  // Each block's height out of this column's own height, with minimums and gaps budgeted: when
-  // not every block fits, the smallest are left out rather than clipped (reportStackHeights).
+  // Each block's share of this column's own height, with minimums and gaps budgeted: when not
+  // every block fits, the smallest are left out rather than clipped (reportStackHeights). The
+  // shares become flex weights, so the blocks follow the column's height animation.
   const heights = reportStackHeights(segments.map((segment) => segment.seconds), segments.reduce((sum, segment) => sum + segment.seconds, 0), height, 1, gap, 0);
   return (
     <Animated.View
@@ -378,10 +379,14 @@ function ReportStack({
       {segments.length ? (
         segments.map((segment, index) =>
           heights[index] ? (
-            <View
+            // Heights are flex weights of the animating column, so blocks shrink and grow with it;
+            // a block that leaves or arrives (a filter change) fades (Reduce Motion: at once).
+            <Animated.View
               key={segment.key}
+              entering={reduceMotion ? undefined : FadeIn.duration(MOBILE_MOTION.layout)}
+              exiting={reduceMotion ? undefined : FadeOut.duration(MOBILE_MOTION.layout)}
               testID="report-activity-block"
-              style={{ height: heights[index], borderRadius: radius, backgroundColor: segment.color }}
+              style={{ flexGrow: heights[index], flexShrink: 1, flexBasis: 0, borderRadius: radius, backgroundColor: segment.color }}
             />
           ) : null,
         )
