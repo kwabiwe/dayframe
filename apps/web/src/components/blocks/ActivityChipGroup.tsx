@@ -30,6 +30,8 @@ export function ActivityChipGroup({
   const tabStop = checkedIndex >= 0 ? checkedIndex : 0;
 
   function onKeyDown(event: KeyboardEvent<HTMLButtonElement>, index: number) {
+    // Modified arrows belong to the browser (Alt+Left is Back) and other shortcuts.
+    if (event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return;
     const step = event.key === "ArrowRight" || event.key === "ArrowDown" ? 1 : event.key === "ArrowLeft" || event.key === "ArrowUp" ? -1 : 0;
     if (!step) return;
     event.preventDefault();

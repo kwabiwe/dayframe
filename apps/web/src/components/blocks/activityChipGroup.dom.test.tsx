@@ -33,6 +33,10 @@ describe("Activity chips (UIA-201 entry editor)", () => {
     fireEvent.keyDown(gym, { key: "ArrowRight" });
     expect(onSelect).toHaveBeenLastCalledWith("read");
     expect(document.activeElement).toBe(screen.getByRole("radio", { name: "Read" }));
+    onSelect.mockClear();
+    fireEvent.keyDown(gym, { key: "ArrowLeft", altKey: true });
+    fireEvent.keyDown(gym, { key: "ArrowRight", metaKey: true });
+    expect(onSelect).not.toHaveBeenCalled();
     rerender(<ActivityChipGroup categories={all.slice(0, 3)} onSelect={onSelect} selectedId="" />);
     expect(screen.getByRole("radio", { name: "Work" }).tabIndex).toBe(0);
   });
