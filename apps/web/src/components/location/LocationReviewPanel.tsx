@@ -1,7 +1,8 @@
 "use client";
 
+import { DayframeIcon } from "@/components/blocks/DayframeIcon";
 import { useEffect, useState, useTransition } from "react";
-import { Check, GitMerge, MapPin, RotateCw, Scissors, X } from "lucide-react";
+import { Check, RotateCw, X } from "lucide-react";
 import dynamic from "next/dynamic";
 import { useRouter } from "next/navigation";
 import { tripStopRows, tripStopsHeading, type LocationReviewAction, type LocationReviewEvidenceDto } from "@dayframe/shared";
@@ -193,7 +194,7 @@ export function LocationReviewPanel({
                     type="button"
                     onClick={() => void act({ action: "change_place_and_confirm", placeId: place.id, learnedPlaceId: null })}
                   >
-                    <MapPin size={15} /> Use {place.name} and confirm
+                    <DayframeIcon glyph="map-pin" size={15}/> Use {place.name} and confirm
                   </button>
                 ))}
               </div>
@@ -320,7 +321,7 @@ export function LocationReviewPanel({
                   type="button"
                   onClick={() => void act({ action: "split", splitAt: split.at })}
                 >
-                  <Scissors size={15} /> Split near {formatTime(split.at)}
+                  <DayframeIcon glyph="scissors" size={15}/> Split near {formatTime(split.at)}
                 </button>
               ))}
               {adjacentReviewItemId && evidence.segment.kind === "stay" ? (
@@ -334,7 +335,7 @@ export function LocationReviewPanel({
                     acknowledgeContradictoryEvidence: false
                   })}
                 >
-                  <GitMerge size={15} /> Merge adjacent
+                  <DayframeIcon glyph="git-merge" size={15}/> Merge adjacent
                 </button>
               ) : null}
             </div>

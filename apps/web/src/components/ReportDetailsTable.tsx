@@ -1,9 +1,9 @@
 "use client";
 
+import { DayframeIcon } from "@/components/blocks/DayframeIcon";
 import { useState, useTransition } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { Pencil } from "lucide-react";
 import { useAppShellRuntime } from "@/components/AppShellRuntime";
 import { saveTimeEntryQuickEdit, TimeEntryQuickEditorModal } from "@/components/TimeEntryQuickEditor";
 import { TagMetadata } from "@/components/TagMetadata";
@@ -88,7 +88,7 @@ export function ReportDetailsTable({ report }: { report: ReportResult }) {
                   <td data-label="Duration" className="report-entry-duration">{formatDuration(entry.durationSeconds)}</td>
                   <td data-label="Actions">
                     <IconButton label={`Edit ${timeEntryTitle(entry)}`} onClick={() => setEditingEntry(entry)} disabled={isPending}>
-                      <Pencil aria-hidden="true" size={16} />
+                      <DayframeIcon glyph="pencil" size={16}/>
                     </IconButton>
                   </td>
                 </tr>

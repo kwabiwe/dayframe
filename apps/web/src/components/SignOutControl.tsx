@@ -1,6 +1,6 @@
 "use client";
 
-import { LogOut } from "lucide-react";
+import { DayframeIcon } from "@/components/blocks/DayframeIcon";
 import { useRef, useState, type FormEvent } from "react";
 import { beforeSessionChange } from "@/lib/session-change";
 
@@ -30,7 +30,7 @@ export function SignOutControl({
   return (
     <form className="sign-out-form" action="/logout" method="post" onSubmit={submit}>
       <button className={className} type="submit" disabled={pending} aria-live="polite">
-        {showIcon ? <LogOut size={17} aria-hidden="true" /> : null}
+        {showIcon ? <DayframeIcon glyph="log-out" size={17}/> : null}
         {pending ? "Signing out…" : "Sign out"}
       </button>
     </form>

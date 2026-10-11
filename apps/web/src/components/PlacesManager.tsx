@@ -1,8 +1,9 @@
 "use client";
 
+import { DayframeIcon } from "@/components/blocks/DayframeIcon";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { Info, MapPin, Pencil, Plus, Trash2 } from "lucide-react";
+import { Info, Plus } from "lucide-react";
 import { useState, useTransition } from "react";
 import { placeDisplayName, placeRoleLabel, placeSecondaryName } from "@dayframe/shared";
 import type { LearnedPlaceRow, PlaceRow } from "@/lib/queries";
@@ -100,7 +101,7 @@ export function PlacesManager({
         <div className="places-list">
           {places.map((place) => (
             <article className="place-list-row" id={`place-${place.id}`} key={place.id}>
-              <span className="place-list-icon"><MapPin aria-hidden="true" size={19} /></span>
+              <span className="place-list-icon"><DayframeIcon glyph="map-pin" size={19}/></span>
               <div className="place-list-copy">
                 <h3>{placeDisplayName(place)}</h3>
                 {placeSecondaryName(place) ? <p>{placeSecondaryName(place)}</p> : null}
@@ -124,7 +125,7 @@ export function PlacesManager({
                   className="ui-button ui-button-secondary is-compact"
                   href={`/places/${encodeURIComponent(place.id)}/edit`}
                 >
-                  <Pencil aria-hidden="true" size={16} />
+                  <DayframeIcon glyph="pencil" size={16}/>
                   Edit
                 </Link>
                 <IconButton
@@ -132,14 +133,14 @@ export function PlacesManager({
                   variant="danger"
                   onClick={() => setDeletingPlace(place)}
                 >
-                  <Trash2 aria-hidden="true" size={17} />
+                  <DayframeIcon glyph="trash-2" size={17}/>
                 </IconButton>
               </div>
             </article>
           ))}
           {places.length === 0 ? (
             <div className="places-empty-state">
-              <MapPin aria-hidden="true" size={22} />
+              <DayframeIcon glyph="map-pin" size={22}/>
               <strong>No saved places yet</strong>
               <span>Search for a place to add your first one.</span>
               <Link className="ui-button ui-button-primary" href="/places/new">Add place</Link>
@@ -159,7 +160,7 @@ export function PlacesManager({
         <div className="places-list">
           {learnedPlaces.map((learnedPlace) => (
             <article className="place-list-row" key={learnedPlace.id}>
-              <span className="place-list-icon"><MapPin aria-hidden="true" size={19} /></span>
+              <span className="place-list-icon"><DayframeIcon glyph="map-pin" size={19}/></span>
               <div className="place-list-copy">
                 <h3>{learnedPlace.poiName || learnedPlace.name}</h3>
                 <p>{learnedPlace.formattedAddress || learnedEvidenceSummary(learnedPlace)}</p>

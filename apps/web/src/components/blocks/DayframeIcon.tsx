@@ -7,11 +7,14 @@ import { DAYFRAME_GLYPHS, type DayframeGlyph } from "@dayframe/shared";
  */
 export function DayframeIcon({
   className,
+  fill = "none",
   glyph,
   size = 20,
   strokeWidth = 2
 }: {
   className?: string;
+  /** "currentColor" draws a solid glyph (the Play triangle); outlines otherwise. */
+  fill?: string;
   glyph: DayframeGlyph;
   size?: number;
   strokeWidth?: number;
@@ -21,7 +24,7 @@ export function DayframeIcon({
       aria-hidden="true"
       className={className}
       data-glyph={glyph}
-      fill="none"
+      fill={fill}
       focusable="false"
       height={size}
       stroke="currentColor"

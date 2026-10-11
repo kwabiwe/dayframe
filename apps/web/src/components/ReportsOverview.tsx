@@ -1,6 +1,7 @@
+import { DayframeIcon } from "@/components/blocks/DayframeIcon";
 import type { CSSProperties } from "react";
 import Link from "next/link";
-import { ChevronDown, Tags } from "lucide-react";
+import { ChevronDown } from "lucide-react";
 import { formatDuration, formatSourceLabel } from "@/lib/format";
 import {
   buildReportTrendSeries,
@@ -120,7 +121,7 @@ function TagBreakdown({ report }: { report: ReportResult }) {
           <h2 id="report-tags-title">Tags</h2>
           <p>Entries can contain multiple tags, so tag totals may overlap.</p>
         </div>
-        <Tags aria-hidden="true" size={19} />
+        <DayframeIcon glyph="tag" size={19}/>
       </header>
       {report.byTag.length > 0 ? (
         <div className="report-ranked-list">

@@ -1,20 +1,21 @@
+import { DayframeIcon } from "@/components/blocks/DayframeIcon";
 import Link from "next/link";
-import { ArrowRight, CheckCircle2, Clock3, HeartPulse, MapPin, ShieldCheck } from "lucide-react";
+import { ArrowRight, CheckCircle2, ShieldCheck } from "lucide-react";
 import { DayframeBrand } from "@/components/brand/DayframeBrand";
 
 const productPoints = [
   {
-    icon: Clock3,
+    glyph: "timer" as const,
     title: "Manual timers stay fast",
     body: "Type what you are doing, choose an activity, and keep the same timeline available on web and iPhone."
   },
   {
-    icon: MapPin,
+    glyph: "map-pin" as const,
     title: "Trusted places can suggest time",
     body: "Use location signals conservatively, with review before broad or uncertain activity becomes part of your day."
   },
   {
-    icon: HeartPulse,
+    glyph: "heart-pulse" as const,
     title: "Health summaries add context",
     body: "Bring sleep and workout summaries from iOS into the same personal productivity record."
   }
@@ -86,10 +87,9 @@ export function LandingPage() {
 
       <section className="landing-feature-strip" aria-label="Dayframe features">
         {productPoints.map((point) => {
-          const Icon = point.icon;
           return (
             <article key={point.title}>
-              <Icon size={22} />
+              <DayframeIcon glyph={point.glyph} size={22} />
               <h2>{point.title}</h2>
               <p>{point.body}</p>
             </article>
