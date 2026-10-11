@@ -79,9 +79,11 @@ describe("Blocks shell contract", () => {
     expect(shell).toContain("if (isTypingTarget(event.target)) return;");
   });
 
-  it("uses neutral selection and 44-pixel phone targets, and leaves coral to recording", () => {
+  it("uses neutral selection and 44-pixel phone targets; coral only on the current page's icon (W10)", () => {
     const shellCss = styles.slice(styles.indexOf("Dayframe Blocks web shell"), styles.indexOf("Dayframe Blocks command timer"));
-    expect(shellCss).not.toMatch(/var\(--accent/);
+    const currentIcon = /\.df-(?:nav a\[aria-current="page"\] > svg|tabbar a\[aria-current="page"\] \.df-tab-icon > svg) \{\s*color: var\(--accent-text\);\s*\}/g;
+    expect(shellCss.match(currentIcon)).toHaveLength(2);
+    expect(shellCss.replace(currentIcon, "")).not.toMatch(/var\(--accent/);
     expect(shellCss).toMatch(/\.df-tabbar a \{[^}]*min-height: 52px;/s);
     expect(shellCss).toMatch(/\.df-tabbar \{[^}]*bottom: calc\(10px \+ env\(safe-area-inset-bottom, 0px\)\);/s);
   });

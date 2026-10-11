@@ -1,5 +1,4 @@
 import Link from "next/link";
-import { Plus } from "lucide-react";
 import { LibraryHead } from "@/components/library/LibraryHead";
 import { PlacesManager } from "@/components/PlacesManager";
 import { resolvePageSession } from "@/lib/auth/server";
@@ -16,7 +15,6 @@ export default async function PlacesPage() {
       <LibraryHead
         action={(
           <Link className="df-rbtn df-rbtn--sm" href="/places/new">
-            <Plus aria-hidden="true" size={16} />
             Add place
           </Link>
         )}
