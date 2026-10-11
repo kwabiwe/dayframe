@@ -15,9 +15,11 @@ vi.mock("react-native", () => ({
   Keyboard: { dismiss: () => mocks.keyboardDismiss() },
   Modal: "Modal",
   Pressable: "Pressable",
+  ScrollView: "ScrollView",
   StyleSheet: { create: <T,>(value: T) => value },
   Text: "Text",
-  View: "View"
+  View: "View",
+  useWindowDimensions: () => ({ fontScale: 3.1, height: 667, width: 375 })
 }));
 vi.mock("react-native-safe-area-context", () => ({ useSafeAreaInsets: () => ({ bottom: 34, left: 0, right: 0, top: 0 }) }));
 vi.mock("../SwipeDismissSheet", async () => {
@@ -101,7 +103,27 @@ describe("BlocksConfirmSheet", () => {
       expect(pill.props.accessibilityRole).toBe("button");
       expect(flatStyle(pill).minHeight).toBeGreaterThanOrEqual(44);
     }
+  });
+
+  it("says a removal can't be undone only when the request says so (Codex r1 nice-to-have)", () => {
+    render();
+    expect(byTestId("blocks-confirm-sheet-confirm").props.accessibilityHint).toBeUndefined();
+    act(() => tree!.unmount());
+    render({ confirmHint: "This can't be undone." });
     expect(byTestId("blocks-confirm-sheet-confirm").props.accessibilityHint).toBe("This can't be undone.");
+  });
+
+  it("scrolls a long body inside a sheet that fits the screen, keeping both actions outside it (Codex r1 #3)", () => {
+    render({ message: "Unsynchronised changes will be removed. ".repeat(40) });
+    const sheetStyle = Object.assign({}, ...[mocks.sheetProps.at(-1)?.style].flat(3).filter(Boolean));
+    // 667-point screen, top inset 0, 24 points of breathing room.
+    expect(sheetStyle.maxHeight).toBe(643);
+    const body = tree!.root.find((node: ReactTestInstance) => (node.type as unknown) === "ScrollView");
+    expect(flatStyle(body).flexShrink).toBe(1);
+    const bodyTexts = body.findAll((node: ReactTestInstance) => (node.type as unknown) === "Text").map((node) => node.children.join(""));
+    expect(bodyTexts).toContain("Clear recent location history?");
+    expect(bodyTexts).not.toContain("Cancel");
+    expect(bodyTexts).not.toContain("Clear history");
   });
 
   it("is modal for VoiceOver, and escape, the system close and the backdrop are Cancel", () => {
@@ -151,7 +173,6 @@ describe("BlocksConfirmSheet", () => {
     render({ cancelLabel: "Keep editing", tone: "neutral" });
     expect(texts()).toContain("Keep editing");
     expect(flatStyle(byTestId("blocks-confirm-sheet-confirm")).backgroundColor).toBe("primary");
-    expect(byTestId("blocks-confirm-sheet-confirm").props.accessibilityHint).toBeUndefined();
   });
 });
 

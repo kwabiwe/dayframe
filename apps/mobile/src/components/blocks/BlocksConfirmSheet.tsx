@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Keyboard, Modal, Pressable, StyleSheet, Text, View } from "react-native";
+import { Keyboard, Modal, Pressable, ScrollView, StyleSheet, Text, View, useWindowDimensions } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { DAYFRAME_BLOCKS } from "@dayframe/shared";
 import { SwipeDismissSheet, type SwipeDismissSheetHandle } from "../SwipeDismissSheet";
@@ -17,6 +17,11 @@ export type BlocksConfirmRequest = {
   cancelLabel?: string;
   /** "danger" (default) for removals; "neutral" for a reversible hide such as Ignore. */
   tone?: "danger" | "neutral";
+  /**
+   * What VoiceOver adds on the confirm pill, only when it is true for this action ("This can't be
+   * undone." for a removal; nothing for Skip, which has Undo, or Archive, which has Restore).
+   */
+  confirmHint?: string;
   /** Runs once, after the sheet has left. */
   onConfirm: () => void;
   /** Runs once for Cancel, a backdrop tap, a swipe down, VoiceOver escape or dismissal. */
@@ -51,6 +56,10 @@ export function BlocksConfirmSheet({
 }) {
   const sheetRef = useRef<SwipeDismissSheetHandle>(null);
   const insets = useSafeAreaInsets();
+  const { height: windowHeight } = useWindowDimensions();
+  // At the largest text sizes the body can outgrow the screen: the sheet stops below the status
+  // bar, the body scrolls inside it and both actions stay on screen under it.
+  const maxSheetHeight = Math.max(240, windowHeight - insets.top - 24);
   const choice = useRef<Choice | null>(null);
   const settled = useRef(false);
   const tone = request.tone ?? "danger";
@@ -91,11 +100,16 @@ export function BlocksConfirmSheet({
             if (!choice.current) choice.current = "cancel";
           }}
           reduceMotion={reduceMotion}
-          style={[shared.activeEditSheet, { paddingBottom: Math.max(insets.bottom, 16) + 8, paddingTop: 8 }]}
+          style={[shared.activeEditSheet, { maxHeight: maxSheetHeight, paddingBottom: Math.max(insets.bottom, 16) + 8, paddingTop: 8 }]}
           testID={testID}
           visible
         >
-          <View style={confirmStyles.body}>
+          <ScrollView
+            alwaysBounceVertical={false}
+            contentContainerStyle={confirmStyles.body}
+            style={confirmStyles.scroll}
+            testID={`${testID}-body`}
+          >
             <Text {...mobileTextProps("counter")} style={[confirmStyles.eyebrow, { color: theme.textMuted }]}>
               {request.eyebrow.toUpperCase()}
             </Text>
@@ -105,7 +119,7 @@ export function BlocksConfirmSheet({
             <Text {...mobileTextProps("body")} style={[confirmStyles.message, { color: theme.textSecondary }]}>
               {request.message}
             </Text>
-          </View>
+          </ScrollView>
           <View style={confirmStyles.actions}>
             <Pressable
               accessibilityRole="button"
@@ -118,7 +132,7 @@ export function BlocksConfirmSheet({
               </Text>
             </Pressable>
             <Pressable
-              accessibilityHint={tone === "danger" ? "This can't be undone." : undefined}
+              accessibilityHint={request.confirmHint}
               accessibilityRole="button"
               onPress={() => choose("confirm")}
               style={({ pressed }) => [
@@ -197,11 +211,12 @@ export function BlocksConfirmHost({
 }
 
 const confirmStyles = StyleSheet.create({
+  scroll: { flexGrow: 0, flexShrink: 1 },
   body: { gap: 6, paddingHorizontal: 4, paddingTop: 10 },
   eyebrow: { fontSize: 11, fontWeight: "700", letterSpacing: 0.9 },
   title: { fontFamily: MOBILE_DISPLAY_FONT.bold, fontSize: 22 },
   message: { fontSize: 15, lineHeight: 21 },
-  actions: { flexDirection: "row", gap: 10, paddingHorizontal: 4, paddingTop: 18 },
+  actions: { flexDirection: "row", flexShrink: 0, gap: 10, paddingHorizontal: 4, paddingTop: 18 },
   pill: {
     alignItems: "center",
     borderRadius: DAYFRAME_BLOCKS.radius.pill,

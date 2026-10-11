@@ -219,6 +219,7 @@ export default function PlacesScreen() {
       title: "Forget learned place?",
       message: "Forget deletes this learned candidate. Dayframe may learn it again later if future visits provide enough evidence.",
       confirmLabel: "Forget",
+      confirmHint: "This can't be undone.",
       onConfirm: () => {
         void forgetLearnedCandidate(learnedPlace).then((succeeded) => {
           if (succeeded) onSuccess?.();

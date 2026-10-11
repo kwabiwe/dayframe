@@ -132,7 +132,8 @@ import {
 } from "@/lib/settingsRefresh";
 import { clampSettingsScrollOffset, settingsScrollNeedsClamp } from "@/lib/settingsScroll";
 import { BlocksNavHeader, usePreviousScreenLabel } from "@/components/BlocksNavHeader";
-import { BlocksConfirmHost, useBlocksConfirm } from "@/components/blocks/BlocksConfirmSheet";
+import { BlocksConfirmHost, useBlocksConfirm, type BlocksConfirmRequest } from "@/components/blocks/BlocksConfirmSheet";
+import { bindConfirmToSession, captureConfirmAuthority, confirmAuthorityStillCurrent, type ConfirmAuthority } from "@/lib/confirmAuthority";
 import { BlocksToast, useBlocksNotice } from "@/components/blocks/BlocksToast";
 import { blocksNavOrigin, settingsBackLabel, settingsSectionTitle } from "@/lib/blocksNav";
 import { mobileTextProps } from "@/lib/mobileTypography";
@@ -295,6 +296,20 @@ export default function SettingsScreen() {
   // UIA-005/003: destructive confirmations use the Blocks confirm sheet; notices are toasts.
   const confirmSheet = useBlocksConfirm();
   const settingsNotice = useBlocksNotice();
+  // A notice raised while the activity editor's modal is up waits for the editor to leave, so its
+  // 5 s start when it can be seen.
+  const activityEditorOpen = useRef(false);
+  const noticeAfterActivityEditor = useRef<{ message: string; swatchColor: string | null } | null>(null);
+  function showAfterActivityEditor(message: string, swatchColor: string | null) {
+    if (activityEditorOpen.current) noticeAfterActivityEditor.current = { message, swatchColor };
+    else settingsNotice.show(message, swatchColor);
+  }
+  function activityEditorClosed() {
+    activityEditorOpen.current = false;
+    const pending = noticeAfterActivityEditor.current;
+    noticeAfterActivityEditor.current = null;
+    if (pending) settingsNotice.show(pending.message, pending.swatchColor);
+  }
   const params = useLocalSearchParams<{ from?: string | string[]; section?: string | string[] }>();
   const routeSettingsSection = normalizeSettingsSection(params.section);
   const settingsSection = routeSettingsSection;
@@ -842,6 +857,7 @@ export default function SettingsScreen() {
         : "Not connected yet";
   const [healthPickerKey, setHealthPickerKey] = useState<HealthImportPreferenceKey | null>(null);
   const [activityEditor, setActivityEditor] = useState<{ activity: Category | null } | null>(null);
+  activityEditorOpen.current = activityEditor !== null;
   // Settings › Activities › Archived (Blocks 6b-2): read from the server when the page opens.
   const [archivedActivities, setArchivedActivities] = useState<Category[] | null>(null);
   const archivedReads = useRef(createArchivedReadGate()).current;
@@ -940,7 +956,8 @@ export default function SettingsScreen() {
       if (!(await activityOwnerStill(owner))) return;
       if (!activity && pinned && !result.category.isPinned) {
         // The server's own quick-start cap won (another device pinned one meanwhile).
-        settingsNotice.show(`Quick start is full. ${result.category.name} was created but not pinned.`, paletteColorFor(result.category.color, result.category.name, theme.mode));
+        // Shown once the editor has left (its modal would hide it); see showAfterActivityEditor.
+        showAfterActivityEditor(`Quick start is full. ${result.category.name} was created but not pinned.`, paletteColorFor(result.category.color, result.category.name, theme.mode));
       }
       // The accepted activity shows at once, even if the refresh below fails.
       applyActivityCategories((categories) => categories.some((item) => item.id === result.category.id)
@@ -1080,11 +1097,12 @@ export default function SettingsScreen() {
   }
 
   function confirmDiscardReviewIssue(clientMutationId: string) {
-    confirmSheet.confirm({
+    void confirmForSession({
       eyebrow: "Sync help",
       title: "Discard saved Review change?",
       message: "This removes only the permanently failed local Review change. Pending changes are not affected.",
       confirmLabel: "Discard",
+      confirmHint: "This can't be undone.",
       onConfirm: () => {
         void discardReviewSyncIssue(clientMutationId).then(
           () => { void refreshReviewDiagnostics().catch(() => undefined); },
@@ -1095,11 +1113,12 @@ export default function SettingsScreen() {
   }
 
   function confirmDiscardTimeEntryIssue(clientCommandId: string) {
-    confirmSheet.confirm({
+    void confirmForSession({
       eyebrow: "Sync help",
       title: "Discard failed time entry change?",
       message: "The server version is already restored. This removes the rejected local change from diagnostics.",
       confirmLabel: "Discard",
+      confirmHint: "This can't be undone.",
       onConfirm: () => {
         void discardTimeEntrySyncIssue(clientCommandId).then(
           () => { void refreshTimeEntryDiagnostics().catch(() => undefined); },
@@ -1121,11 +1140,12 @@ export default function SettingsScreen() {
   }
 
   function confirmDiscardTimerStopIssue(clientEventId: string) {
-    confirmSheet.confirm({
+    void confirmForSession({
       eyebrow: "Sync help",
       title: "Discard rejected timer Stop?",
       message: "The server timer will stay unchanged. This removes only the rejected Stop saved on this iPhone.",
       confirmLabel: "Discard Stop",
+      confirmHint: "This can't be undone.",
       onConfirm: () => {
         void discardTimerStopSyncIssue(clientEventId).then(
           () => { void refreshTimerStopDiagnostics().catch(() => undefined); },
@@ -1147,11 +1167,12 @@ export default function SettingsScreen() {
   }
 
   function confirmClearTimeEntryQuarantine() {
-    confirmSheet.confirm({
+    void confirmForSession({
       eyebrow: "Sync help",
       title: "Clear unreadable local sync data?",
       message: "These records cannot be replayed. Clearing them removes only quarantined diagnostics.",
       confirmLabel: "Clear",
+      confirmHint: "This can't be undone.",
       onConfirm: () => {
         void clearTimeEntryOutboxQuarantine().then(
           () => { void refreshTimeEntryDiagnostics().catch(() => undefined); },
@@ -1162,11 +1183,12 @@ export default function SettingsScreen() {
   }
 
   function confirmClearDeviceTimeEntryQuarantine() {
-    confirmSheet.confirm({
+    void confirmForSession({
       eyebrow: "Sync help",
       title: "Clear unreadable device-wide sync data?",
       message: "The damaged data has no recoverable account owner and cannot be replayed. Clearing it removes only device-wide quarantine diagnostics.",
       confirmLabel: "Clear",
+      confirmHint: "This can't be undone.",
       onConfirm: () => {
         void clearDeviceTimeEntryOutboxQuarantine().then(
           () => { void refreshTimeEntryDiagnostics().catch(() => undefined); },
@@ -1199,11 +1221,12 @@ export default function SettingsScreen() {
   }
 
   function confirmClearFailedQueue() {
-    confirmSheet.confirm({
+    void confirmForSession({
       eyebrow: "Sync help",
       title: "Clear failed queued events?",
       message: "Failed queued events that Dayframe has marked invalid will be removed from this device. Queued events that are still retryable will stay queued.",
       confirmLabel: "Clear failed",
+      confirmHint: "This can't be undone.",
       onConfirm: () => {
         void clearFailedQueue();
       }
@@ -1379,11 +1402,12 @@ export default function SettingsScreen() {
   }
 
   function confirmDeleteLocationEvidence() {
-    confirmSheet.confirm({
+    void confirmForSession({
       eyebrow: "Location history",
       title: "Clear recent location history?",
       message: "Removes recent location points from this iPhone and from your account. Logged blocks, saved places and Review items stay.",
       confirmLabel: "Clear history",
+      confirmHint: "This can't be undone.",
       onConfirm: () => { void removeLocationEvidence(); }
     });
   }
@@ -1624,6 +1648,9 @@ export default function SettingsScreen() {
   }
 
   async function signOut() {
+    // Consent to log out is for this account's session only: pinned before anything is read.
+    const authority = await captureConfirmAuthority();
+    if (!authority) return;
     // A goal change still waiting is saved while the session is valid.
     goalSaver.flush();
     const diagnostics = await getReviewSyncDiagnostics();
@@ -1632,13 +1659,28 @@ export default function SettingsScreen() {
     const reviewWarning = unsynchronisedCount > 0
       ? `${unsynchronisedCount} unsynchronised Review ${unsynchronisedCount === 1 ? "change" : "changes"} will be removed from this iPhone. `
       : "";
-    confirmSheet.confirm({
+    void confirmForSession({
       eyebrow: "Account",
       title: "Log out and remove saved changes?",
       message: `${reviewWarning}Unsynchronised Location evidence will be removed from this iPhone. Synced history stays in your account.`,
       confirmLabel: "Log out",
+      confirmHint: "Changes not yet synced can't be recovered.",
       onConfirm: () => { void completeSignOut(); }
-    });
+    }, authority);
+  }
+
+  /**
+   * Every destructive Settings confirmation is bound to the account and session it was asked in:
+   * pinned when it opens and checked again once the sheet has left, so consent given for one
+   * account never clears, discards or logs out another (a sign-out or account switch while the
+   * sheet is up voids it).
+   */
+  async function confirmForSession(request: BlocksConfirmRequest, captured?: ConfirmAuthority) {
+    const authority = captured ?? await captureConfirmAuthority();
+    if (!authority || !(await confirmAuthorityStillCurrent(authority))) return false;
+    return confirmSheet.confirm(bindConfirmToSession(request, authority, {
+      onStale: () => settingsNotice.show("Your account changed, so nothing was changed.")
+    }));
   }
 
   async function completeSignOut() {
@@ -2478,7 +2520,10 @@ export default function SettingsScreen() {
           pinnedCount={(data?.categories ?? []).filter((category) => category.isPinned).length}
           pinReady={activityPinsFresh()}
           onArchive={archiveActivityFromEditor}
-          onClose={() => setActivityEditor(null)}
+          onClose={() => {
+            setActivityEditor(null);
+            activityEditorClosed();
+          }}
           onSave={(draft) => saveActivityFromEditor(activityEditor.activity, draft)}
           reduceMotion={reduceMotion}
           styles={styles}

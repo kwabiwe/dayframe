@@ -1666,6 +1666,7 @@ export function ActiveTimerEditSheet({
       message: "Your unsaved changes will be lost.",
       cancelLabel: "Keep editing",
       confirmLabel: "Discard",
+      confirmHint: "Your unsaved changes can't be recovered.",
       // Keep editing, a swipe down, a backdrop tap or VoiceOver escape.
       onCancel: () => {
         if (discardPromptPresentationIdRef.current === promptPresentationId) {

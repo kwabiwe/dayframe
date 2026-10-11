@@ -344,6 +344,10 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
   // Today's notices without an action (UIA-004: "Switched to …", "Already recording …"). They share
   // the delete Undo toast's place; that Undo toast always wins it.
   const todayNotice = useBlocksNotice();
+  const clearTodayNotice = todayNotice.clear;
+  // Notices belong to the session that raised them: a sign-out bumps this, so a start that is
+  // accepted after the account left never shows its "Switched to …" over sign-in or another account.
+  const noticeSessionGeneration = useRef(0);
   const reduceTransparency = useReduceTransparencyPreference();
   const refreshInFlight = useRef(false);
   const refreshQueued = useRef(false);
@@ -441,6 +445,8 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
   const transitionToSignedOut = useCallback((options?: SignedOutTransitionOptions) => {
     void endAllTimerBackgroundExecution("logout");
     authStateCurrent.current = "signedOut";
+    noticeSessionGeneration.current += 1;
+    clearTodayNotice();
     const signedOutOwner = latestData.current
       ? timerStopOwner(latestData.current)
       : undefined;
@@ -499,7 +505,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
     setLiveLanding(null);
     setPendingTimerStops([]);
     setAuthState("signedOut");
-  }, []);
+  }, [clearTodayNotice]);
 
   useEffect(() => subscribeMobileSignedOut(() => transitionToSignedOut({
     preserveAuthPassword: preserveAuthPasswordOnSignedOut.current
@@ -1689,11 +1695,14 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
     }
     const switching = Boolean(running) && Boolean(categoryId || description.trim());
     const category = categoryId ? latestData.current?.categories.find((item) => item.id === categoryId) ?? null : null;
+    const noticeOwner = todayNoticeOwner();
     void startTask(categoryId, description, tagNames).then((accepted) => {
       if (!accepted) return;
       playHaptic("start");
       setLiveLanding(nextLandingRequest());
       if (!switching || !running) return;
+      // Dropped when the account or session changed while the start was being accepted.
+      if (!todayNoticeOwnerStill(noticeOwner)) return;
       const nextName = description.trim() || category?.name || "No activity";
       showTodayNotice(
         switchedToastMessage(nextName, running, Date.now()),
@@ -1702,7 +1711,26 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
     });
   }
 
+  function todayNoticeOwner() {
+    const current = latestData.current;
+    return {
+      generation: noticeSessionGeneration.current,
+      userId: current?.user.id ?? null,
+      workspaceId: current?.workspace.id ?? null
+    };
+  }
+
+  function todayNoticeOwnerStill(owner: ReturnType<typeof todayNoticeOwner>) {
+    const current = latestData.current;
+    return authStateCurrent.current === "authenticated" &&
+      owner.generation === noticeSessionGeneration.current &&
+      owner.userId !== null &&
+      owner.userId === (current?.user.id ?? null) &&
+      owner.workspaceId === (current?.workspace.id ?? null);
+  }
+
   function showTodayNotice(message: string, swatchColor: string | null) {
+    if (authStateCurrent.current !== "authenticated") return;
     // The delete Undo toast holds the place: VoiceOver still hears the notice, nothing is drawn.
     if (deletionCoordinator.current?.current()?.phase === "active") {
       AccessibilityInfo.announceForAccessibility(message);
@@ -3018,7 +3046,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
           testID="today-delete-toast"
           theme={theme}
         />
-      ) : todayNotice.notice ? (
+      ) : todayNotice.notice && authState === "authenticated" ? (
         <BlocksToast
           key={`notice-${todayNotice.notice.token}`}
           message={todayNotice.notice.message}

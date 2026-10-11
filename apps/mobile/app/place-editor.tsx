@@ -429,6 +429,7 @@ export default function PlaceEditorScreen() {
       title: `Delete ${placeDisplayName(withRole(place))}?`,
       message: "Past entries keep their time but lose this place.",
       confirmLabel: "Delete",
+      confirmHint: "This can't be undone.",
       // removePlace re-checks saveInFlight, so a save started meanwhile still wins.
       onConfirm: () => void removePlace(place)
     });
