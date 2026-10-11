@@ -2401,7 +2401,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
         ));
         Alert.alert(
           currentIds.length > 1 ? "Blocks not deleted" : "Block not deleted",
-          "Dayframe could not finish saving this deletion on your iPhone. The block was restored; check available storage and try again."
+          `Dayframe could not finish saving this deletion on your iPhone. ${currentIds.length > 1 ? "The blocks were" : "The block was"} restored; check available storage and try again.`
         );
         AccessibilityInfo.announceForAccessibility(
           currentIds.length > 1
@@ -2652,7 +2652,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
           >
             <Text style={styles.sectionTitle}>Opening Dayframe…</Text>
             <Text style={styles.muted}>
-              Loading your latest timers and saved activity.
+              Loading your latest blocks and saved activity.
             </Text>
           </View>
         </View>

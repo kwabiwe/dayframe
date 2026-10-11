@@ -12,6 +12,7 @@ describe("formatDuration (UIA-042, UIA-207)", () => {
 
   it("says <1m for a positive amount under a minute and 0m for nothing", () => {
     expect(formatDuration(1)).toBe("<1m");
+    expect(formatDuration(0.5)).toBe("<1m");
     expect(formatDuration(59.9)).toBe("<1m");
     expect(formatDuration(0)).toBe("0m");
     expect(formatDuration(-5)).toBe("0m");

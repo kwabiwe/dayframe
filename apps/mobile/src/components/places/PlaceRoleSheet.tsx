@@ -277,7 +277,7 @@ export function PlaceRoleSheet({
                   value={previousName}
                 />
                 <Text {...mobileTextProps("metadata")} style={{ color: theme.textMuted }}>
-                  Its past entries keep this name, so they don&apos;t read as an address.
+                  Its past blocks keep this name, so they don&apos;t read as an address.
                 </Text>
               </View>
             ) : null}

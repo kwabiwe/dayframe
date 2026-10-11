@@ -902,9 +902,9 @@ export default function ReviewScreen() {
       ? "Review available · count updating"
       : `At least ${visibleReviewItemCount} ${visibleReviewItemCount === 1 ? "moment" : "moments"} to review`;
   const backlogProgressCopy = reviewBacklog?.nextCursor
-    ? `Showing ${reviewBacklog.recordKeys.length} of ${reviewBacklog.globalCount} moments.`
+    ? `Loaded ${reviewBacklog.recordKeys.length} of ${reviewBacklog.globalCount} moments.`
     : reviewBacklog && !reviewBacklog.recordsComplete
-      ? `Showing ${reviewBacklog.recordKeys.length} of ${reviewBacklog.globalCount} moments.`
+      ? `Loaded ${reviewBacklog.recordKeys.length} of ${reviewBacklog.globalCount} moments.`
       : null;
   const showEmptyReviewState = reviewCountIsExact && totalNeedsReview === 0 && visibleReviewItemCount === 0;
   const editingEntry = editTarget?.entry ?? null;

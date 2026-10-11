@@ -5,10 +5,9 @@
  * their clock form. Whole minutes are rounded down, as the clocks do.
  */
 export function formatDuration(seconds: number) {
-  if (!Number.isFinite(seconds)) return "0m";
-  const whole = Math.max(0, Math.floor(seconds));
-  if (whole > 0 && whole < 60) return "<1m";
-  const minutes = Math.floor(whole / 60);
+  if (!Number.isFinite(seconds) || seconds <= 0) return "0m";
+  if (seconds < 60) return "<1m";
+  const minutes = Math.floor(seconds / 60);
   const hours = Math.floor(minutes / 60);
   if (!hours) return `${minutes}m`;
   const rest = minutes % 60;
