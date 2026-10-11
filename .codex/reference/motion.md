@@ -308,6 +308,12 @@ Block pull-to-refresh:
 - Owner: CSS only. The running block's on-block ring breathes on opacity over 2.4 s (the live ring); hovered blocks brighten in place (no lift, so lanes and the drag-to-create surface never move); selection is an instant outline. Drag-to-create, resize, zoom and the compact editor keep their existing owners and motion. The Delete Undo toast is the Blocks toast (`pop` in, 160 ms out) and takes focus as it appears, since the editor that held focus has closed.
 - Accessibility: Reduce Motion stops the ring's breathing (a static ring). Review suggestion blocks are links named with the title, "needs review" and their times; the now line is decorative.
 
+## Web Reports top (Blocks parity step 15a)
+
+- Trigger: the Reports page loading a range (a server render).
+- Owner: CSS only. Each day column's activity blocks grow from the bottom (`scaleY` 0→1 with opacity) on the `land` spring as a `linear()` easing, once, as the page renders; month-grid cells and tiles appear in place.
+- Accessibility: Reduce Motion removes the growth. Each day column is one list item named with its date, framed total and per-activity times; month cells are images named with their date and total; the stacks are decorative.
+
 ## Web Library › Activities (Blocks parity step 14a-1)
 
 - Trigger: pin or unpin, save or create in the editor, archive (and its Undo), restore.

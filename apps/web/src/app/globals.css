@@ -12588,3 +12588,261 @@ dialog.ui-dialog.df-palette {
     min-height: 44px;
   }
 }
+
+/*
+ * Dayframe Blocks Reports top (parity step 15a): four hero tiles and the range in activity
+ * blocks — stacked columns per day (up to 14 days) or a Monday-first month grid.
+ */
+.df-reports-page {
+  display: grid;
+  min-width: 0;
+  gap: 16px;
+  padding: 20px 32px 96px;
+}
+
+.df-report-tiles {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 16px;
+}
+
+.df-tile {
+  display: grid;
+  min-height: 116px;
+  align-content: start;
+  gap: 4px;
+}
+
+.df-tile small {
+  color: var(--text-secondary);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.df-stat-big {
+  margin-top: 2px;
+  font-family: var(--font-display);
+  font-size: 30px;
+  font-weight: 750;
+  letter-spacing: -0.03em;
+}
+
+.df-stat-of {
+  font-size: 18px;
+}
+
+.df-delta {
+  color: var(--text-secondary);
+  font-size: 12.5px;
+}
+
+.df-goal-dots {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 6px;
+}
+
+.df-goal-dots i {
+  width: 16px;
+  height: 22px;
+  border-radius: 5px;
+  background: var(--surface-muted);
+}
+
+.df-goal-dots i.is-met {
+  background: var(--success, #3ec98a);
+}
+
+.df-report-blocks {
+  min-width: 0;
+}
+
+.df-wblocks {
+  display: grid;
+  grid-auto-columns: minmax(0, 1fr);
+  grid-auto-flow: column;
+  gap: 10px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.df-wb {
+  display: grid;
+  min-width: 0;
+  grid-template-rows: var(--df-wb-height, 230px) auto;
+  gap: 8px;
+  border-radius: 12px;
+  padding: 6px 4px 4px;
+}
+
+.df-wb.is-today {
+  background: var(--surface-muted);
+}
+
+.df-wb-stack {
+  display: flex;
+  min-height: 0;
+  flex-direction: column-reverse;
+  gap: 3px;
+  overflow: hidden;
+}
+
+.df-wb-stack > span {
+  flex: none;
+  border-radius: 7px;
+  transform-origin: bottom;
+  animation: df-wb-grow var(--df-land-ms, 600ms) var(--df-land, cubic-bezier(0.22, 1, 0.36, 1)) both;
+}
+
+@supports not (transition-timing-function: linear(0, 1)) {
+  .df-wb-stack > span {
+    animation-timing-function: cubic-bezier(0.22, 1, 0.36, 1);
+  }
+}
+
+@keyframes df-wb-grow {
+  from {
+    opacity: 0;
+    transform: scaleY(0);
+  }
+
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .df-wb-stack > span {
+    animation: none;
+  }
+}
+
+.df-wb-none {
+  background:
+    repeating-linear-gradient(135deg, color-mix(in oklab, var(--text-muted) 35%, transparent) 0 5px, transparent 5px 10px),
+    var(--surface-muted);
+}
+
+.df-wb-label {
+  display: grid;
+  justify-items: center;
+  gap: 2px;
+  text-align: center;
+}
+
+.df-wb-label b {
+  overflow: hidden;
+  max-width: 100%;
+  font-size: 12px;
+  font-weight: 700;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.df-wb.is-today .df-wb-label b {
+  color: var(--accent);
+}
+
+.df-wb-label small {
+  color: var(--text-secondary);
+  font-size: 11.5px;
+}
+
+.df-month {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.df-dow {
+  color: var(--text-muted);
+  font-size: 11px;
+  font-weight: 700;
+  text-align: center;
+}
+
+.df-mday {
+  display: flex;
+  height: 78px;
+  min-width: 0;
+  flex-direction: column-reverse;
+  gap: 2px;
+  overflow: hidden;
+  border-radius: 10px;
+  padding: 18px 4px 4px;
+  background: var(--surface-muted);
+  position: relative;
+}
+
+.df-mday.is-empty {
+  background: transparent;
+}
+
+.df-mday.is-today {
+  box-shadow: inset 0 0 0 2px var(--accent);
+}
+
+.df-mday em {
+  position: absolute;
+  top: 3px;
+  left: 6px;
+  color: var(--text-secondary);
+  font-size: 11px;
+  font-style: normal;
+  font-weight: 700;
+}
+
+.df-mday i {
+  flex: none;
+  border-radius: 3px;
+}
+
+@media (max-width: 1100px) {
+  .df-report-tiles {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 860px) {
+  .df-reports-page {
+    gap: 12px;
+    padding: 12px 12px calc(var(--df-tabbar-space) + 72px);
+  }
+
+  .df-report-tiles {
+    gap: 10px;
+  }
+
+  .df-stat-big {
+    font-size: 24px;
+  }
+
+  .df-wblocks {
+    gap: 4px;
+  }
+
+  .df-wb {
+    --df-wb-height: 160px;
+    padding: 4px 1px 2px;
+  }
+
+  .df-wb-label b {
+    font-size: 10.5px;
+  }
+
+  .df-wb-label small {
+    font-size: 10px;
+  }
+
+  .df-month {
+    gap: 3px;
+  }
+
+  .df-mday {
+    height: 56px;
+    padding-top: 15px;
+  }
+}

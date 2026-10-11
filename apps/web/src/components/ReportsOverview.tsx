@@ -1,11 +1,10 @@
 import type { CSSProperties } from "react";
 import Link from "next/link";
-import { ArrowRight, CalendarDays, ChevronDown, Clock3, Layers3, Tags } from "lucide-react";
+import { ArrowRight, ChevronDown, Tags } from "lucide-react";
 import { ReportDonutSegment } from "@/components/ReportDonutSegment";
 import { categoryDisplay } from "@/lib/display";
 import { formatDuration, formatSourceLabel } from "@/lib/format";
 import {
-  buildComparisonCopy,
   buildReportCategoryAllocation,
   buildReportTrendSeries,
   percentageOf
@@ -16,31 +15,17 @@ import type { ReportBreakdownRow, ReportResult } from "@/lib/report-service";
 const donutRadius = 44;
 const donutCircumference = 2 * Math.PI * donutRadius;
 
-export function ReportsOverview({ report }: { report: ReportResult }) {
-  const comparison = buildComparisonCopy(report.comparison, formatDuration);
+/**
+ * The analysis below the Blocks top (step 15a): the daily trend for ranges the blocks card does not
+ * draw, time by activity, tags and the secondary breakdowns. The summary numbers moved to the
+ * hero tiles.
+ */
+export function ReportsOverview({ report, showTrend = true }: { report: ReportResult; showTrend?: boolean }) {
   const allocation = buildReportCategoryAllocation(report.byCategory, report.totalSeconds);
 
   return (
     <>
-      <section className="report-summary-grid" aria-label="Report summary">
-        <SummaryMetric label="Total logged" value={formatDuration(report.totalLoggedSeconds)} detail={`The sum of every entry across ${report.range.dayCount} calendar day${report.range.dayCount === 1 ? "" : "s"}`} icon={Clock3} />
-        <SummaryMetric
-          label="Time covered"
-          value={formatDuration(report.timeCoveredSeconds)}
-          detail={report.additionalOverlappingActivitySeconds > 0
-            ? `${formatDuration(report.timeCoveredSeconds)} distinct clock time · ${formatDuration(report.additionalOverlappingActivitySeconds)} additional overlapping activity`
-            : `${formatDuration(report.timeCoveredSeconds)} distinct clock time · no overlapping entries`}
-          icon={Layers3}
-        />
-        <SummaryMetric label="Daily average" value={formatDuration(report.dailyAverageSeconds)} detail="Across the selected calendar range" icon={CalendarDays} />
-        <SummaryMetric label="Active days" value={`${report.activeDayCount}`} detail={`${report.range.dayCount - report.activeDayCount} day${report.range.dayCount - report.activeDayCount === 1 ? "" : "s"} with no tracked time`} icon={CalendarDays} />
-        <SummaryMetric label="Previous period" value={comparison.value} detail={comparison.detail} icon={ArrowRight} />
-      </section>
-      <p className="report-metric-explainer">
-        Each entry counts in full towards Total logged. Time covered counts concurrent entries once.
-      </p>
-
-      <DailyTrend report={report} />
+      {showTrend ? <DailyTrend report={report} /> : null}
 
       <div className="report-analysis-grid">
         <CategoryAllocation report={report} allocation={allocation} />
@@ -49,29 +34,6 @@ export function ReportsOverview({ report }: { report: ReportResult }) {
 
       <SecondaryInsights report={report} />
     </>
-  );
-}
-
-function SummaryMetric({
-  detail,
-  icon: Icon,
-  label,
-  value
-}: {
-  detail: string;
-  icon: typeof Clock3;
-  label: string;
-  value: string;
-}) {
-  return (
-    <article className="fill-group-surface report-summary-card">
-      <div>
-        <span>{label}</span>
-        <Icon aria-hidden="true" size={17} />
-      </div>
-      <strong>{value}</strong>
-      <p>{detail}</p>
-    </article>
   );
 }
 

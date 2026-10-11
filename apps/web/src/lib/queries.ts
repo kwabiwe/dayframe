@@ -407,7 +407,7 @@ export async function getNormalizationContext(
   };
 }
 
-async function getUser(session: RequestSession) {
+export async function getUser(session: RequestSession) {
   const result = await query<{ id: string; email: string; name: string; dailyGoalMinutes: number; weeklyGoalMinutes: number }>(
     `select id, email, name,
             daily_goal_minutes as "dailyGoalMinutes",
