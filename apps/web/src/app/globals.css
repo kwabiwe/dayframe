@@ -509,6 +509,12 @@ html.ui-dialog-open {
   color: var(--accent-text);
 }
 
+/* A dialog's close button stays neutral on hover: coral is kept for the primary action and recording. */
+.ui-dialog-header .ui-icon-button:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--foreground) 8%, var(--surface-muted));
+  color: var(--foreground);
+}
+
 .ui-icon-button-selected {
   background: var(--accent-soft);
   color: var(--accent-text);
@@ -12001,6 +12007,7 @@ dialog.ui-dialog.df-palette {
 
 .df-lcard {
   display: grid;
+  min-width: 0;
   align-content: start;
   gap: 12px;
 }
@@ -12041,7 +12048,9 @@ dialog.ui-dialog.df-palette {
 
 .df-lcard h3 {
   margin: 0;
-  overflow-wrap: break-word;
+  /* anywhere (not break-word) also lowers the min-content width, so a long unbroken name can't
+     widen its grid track at phone widths. */
+  overflow-wrap: anywhere;
   hyphens: auto;
   font-size: 16px;
   font-weight: 750;

@@ -20,6 +20,17 @@ const timelineDeleteSource = readFileSync(
 );
 
 describe("web UI foundation contracts", () => {
+  it("keeps the dialog close button neutral on hover (coral is for the primary action and recording)", () => {
+    const rule = globalStyles.match(/\.ui-dialog-header \.ui-icon-button:hover:not\(:disabled\) \{([^}]*)\}/)?.[1] ?? "";
+    expect(rule).toContain("color: var(--foreground);");
+    expect(rule).not.toMatch(/--accent|--live|--coral/);
+  });
+
+  it("lets a long unbroken activity name wrap inside its Library card at phone widths", () => {
+    expect(globalStyles).toMatch(/\.df-lcard \{[^}]*min-width: 0;/);
+    expect(globalStyles).toMatch(/\.df-lcard h3 \{[^}]*overflow-wrap: anywhere;/);
+  });
+
   it("uses one native modal owner with focus entry, cancellation, scroll lock and restoration", () => {
     expect(primitiveSource).toContain("dialog.showModal()");
     expect(primitiveSource).toContain('classList.add("ui-dialog-open")');

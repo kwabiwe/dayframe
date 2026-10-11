@@ -49,6 +49,14 @@ export function ReportsBlocksPanel({
   const hot = slices.find((slice) => slice.id === hotId) ?? null;
   // The slice holding keyboard focus gets its own neutral ring, independent of the highlight.
   const [focusedId, setFocusedId] = useState<string | null>(null);
+  // When a filter navigation brings new slices, drop ids they no longer contain, so a slice that
+  // went away and later comes back (filtered out, then the filter removed) returns unhighlighted.
+  const [seenSlices, setSeenSlices] = useState(slices);
+  if (seenSlices !== slices) {
+    setSeenSlices(slices);
+    if (hotId !== null && !slices.some((slice) => slice.id === hotId)) setHotId(null);
+    if (focusedId !== null && !slices.some((slice) => slice.id === focusedId)) setFocusedId(null);
+  }
   const hotIds = hot ? new Set(hot.categoryIds) : null;
   const highlight = (slice: AllocationSlice) => (on: boolean) => setHotId((current) => (on ? slice.id : current === slice.id ? null : current));
 
