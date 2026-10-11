@@ -112,12 +112,19 @@ describe("Reports blocks and Where it went", () => {
       <ReportsBlocksPanel blocks={reportBlocksModel(report(), formatDuration)} land={land} slices={current} totalLabel="logged this week" totalSeconds={10 * 3600} />
     ));
     await render([slices[0], other]);
-    await act(async () => container.querySelector<HTMLAnchorElement>('a[aria-label^="Filter by Other"]')!.focus());
+    // Keyboard focus on Other's donut slice: highlighted and ringed.
+    await act(async () => container.querySelector<SVGCircleElement>('circle[aria-label^="Filter by Other"]')!.focus());
     expect(container.querySelector(".df-donut-center")?.textContent).toBe("1h 00mOther");
+    expect(container.querySelectorAll(".df-donut-focus")).toHaveLength(1);
     // The filtered report replaces Other with its activities; the same panel stays mounted.
     await render([slices[0], { ...other, id: "a", categoryIds: ["a"], name: "A" }]);
     expect(container.querySelector(".df-wblocks")?.classList.contains("has-hot")).toBe(false);
     expect(container.querySelector(".df-donut-center")?.textContent).toBe("10h 00mlogged this week");
+    // Back to the unfiltered report: Other returns, but nothing is focused or hovered, so it stays plain.
+    await render([slices[0], other]);
+    expect(container.querySelector(".df-wblocks")?.classList.contains("has-hot")).toBe(false);
+    expect(container.querySelector(".df-donut-center")?.textContent).toBe("10h 00mlogged this week");
+    expect(container.querySelector(".df-donut-focus")).toBeNull();
     await act(async () => root.unmount());
   });
 
