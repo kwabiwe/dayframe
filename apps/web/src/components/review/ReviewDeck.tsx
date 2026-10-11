@@ -5,7 +5,7 @@ import type { DayframeGlyph } from "@dayframe/shared";
 import Link from "next/link";
 import type { CSSProperties, KeyboardEvent as ReactKeyboardEvent } from "react";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { Check, Map as MapIcon, Sparkles, X } from "lucide-react";
+import { Check, X } from "lucide-react";
 import { validReviewAcknowledgement, type ReviewMutationEnvelope } from "@dayframe/shared";
 import { useAppShellRuntime, useRuntimePageData } from "@/components/AppShellRuntime";
 import { BlocksToast } from "@/components/blocks/BlocksToast";
@@ -544,7 +544,7 @@ export function ReviewDeck({ initialData }: { initialData: BootstrapData }) {
                   }}
                   type="button"
                 >
-                  <MapIcon size={15} aria-hidden="true" />
+                  <DayframeIcon glyph="map-pin" size={15} />
                   Edit before logging
                 </button>
               ) : null}
@@ -594,13 +594,13 @@ function ReviewHead({ count }: { count: number | null }) {
   );
 }
 
-// The source pill's glyph: Dayframe things from the registry; a plain suggestion keeps lucide's
-// sparkles (the registry has none).
-const SOURCE_GLYPH: Record<Exclude<ReviewPicture, "suggestion">, DayframeGlyph> = {
+// The source pill's glyph, from the registry (a plain suggestion is the circle-dot, as on iPhone).
+const SOURCE_GLYPH: Record<ReviewPicture, DayframeGlyph> = {
   place: "map-pin",
   commute: "route",
   workout: "footprints",
-  sleep: "moon"
+  sleep: "moon",
+  suggestion: "circle-dot"
 };
 
 function clock(ms: number) {
@@ -665,7 +665,7 @@ function CardFace({
         />
         <div className="df-rsrc">
           <span className="df-rpill">
-            {picture === "suggestion" ? <Sparkles size={14} aria-hidden="true" /> : <DayframeIcon glyph={SOURCE_GLYPH[picture]} size={14} />}
+            <DayframeIcon glyph={SOURCE_GLYPH[picture]} size={14} />
             {reviewSourceLabel(picture)}
           </span>
           {confidence.score > 0 ? (
