@@ -14,4 +14,10 @@ describe("web Today ribbon blocks (X2)", () => {
     expect(rule).toContain("box-sizing: border-box;");
     expect(rule).toMatch(/box-shadow: inset 0 0 0 1px color-mix\(in srgb, var\(--text-primary\) 14%, transparent\);/);
   });
+
+  it("no ribbon block variant resets the clip with the background shorthand (Codex r1)", () => {
+    for (const match of css.matchAll(/\n\.df-ribbon-block[^{]*\{([^}]*)\}/g)) {
+      expect(match[1]).not.toMatch(/(^|[;\s])background\s*:/);
+    }
+  });
 });

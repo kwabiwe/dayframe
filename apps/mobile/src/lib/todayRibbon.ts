@@ -41,6 +41,18 @@ export const RIBBON_TICK_HOURS = [3, 6, 9, 12, 15, 18, 21] as const;
 export const RIBBON_LABEL_HOURS = [0, 6, 12, 18, 24] as const;
 /** A block this narrow or narrower is still drawn this wide (points), as in the prototype. */
 export const RIBBON_MIN_BLOCK_WIDTH = 3;
+/** Neighbouring ribbon blocks sit this far apart (owner, X2). */
+export const RIBBON_BLOCK_GAP = 1;
+
+/**
+ * Where a ribbon block is drawn: its time span, at least RIBBON_MIN_BLOCK_WIDTH wide (the hit
+ * width), less half the gap on each side, so neighbours never touch and what is drawn always lies
+ * inside what a tap selects.
+ */
+export function ribbonBlockFrame(left: number, widthFraction: number, trackWidth: number) {
+  const hitWidth = Math.max(RIBBON_MIN_BLOCK_WIDTH, widthFraction * trackWidth);
+  return { x: left * trackWidth + RIBBON_BLOCK_GAP / 2, width: Math.max(0, hitWidth - RIBBON_BLOCK_GAP) };
+}
 
 export function buildTodayRibbon({
   entries,

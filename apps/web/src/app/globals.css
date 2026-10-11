@@ -10404,7 +10404,8 @@ dialog.ui-dialog.df-palette {
 }
 
 .df-ribbon-block.is-none {
-  background: var(--uncategorized-color, var(--text-muted));
+  /* background-color, not the shorthand, so the padding-box clip (the 1 px gap) survives. */
+  background-color: var(--uncategorized-color, var(--text-muted));
 }
 
 .df-ribbon-block.is-pending {
