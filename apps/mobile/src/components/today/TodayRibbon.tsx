@@ -186,6 +186,14 @@ export const TodayRibbon = memo(function TodayRibbon({
                 const { x, width: w } = ribbonBlockFrame(model, block, width);
                 // A block squeezed out by its neighbour's start (a minute just before another) is not drawn.
                 if (w <= 0) return null;
+                // Narrower than its stroke, a block is drawn as fill alone, so no stroke ever spills past
+                // its frame (onto a neighbour, or where a tap selects something else).
+                if (block.kind === "pending" && w < PENDING_STROKE * 2) {
+                  return <Rect fill={colorWithAlpha(color, 0.45)} height={height} key={block.key} width={w} x={x} y={y} />;
+                }
+                if (block.kind !== "pending" && w < 2) {
+                  return <Rect fill={color} height={height} key={block.key} width={w} x={x} y={y} />;
+                }
                 return block.kind === "pending" ? (
                   // The hatch's stroke is centred on its path, so the path is inset by half the stroke
                   // and the whole outline stays inside the block's drawn bounds.

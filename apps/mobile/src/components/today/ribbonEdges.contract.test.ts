@@ -49,6 +49,11 @@ describe("iPhone Today ribbon blocks (X2)", () => {
     expect(hit(150.1)).toBe("a");
   });
 
+  it("a block narrower than its stroke is drawn as fill alone (Codex r4)", () => {
+    expect(source).toContain("if (block.kind === \"pending\" && w < PENDING_STROKE * 2) {");
+    expect(source).toContain("if (block.kind !== \"pending\" && w < 2) {");
+  });
+
   it("draws the full fill, then a faint inset edge on it; pending outlines stay inside the block", () => {
     expect(source).toMatch(/<Rect fill=\{color\} height=\{height\} rx=\{Math\.min\(6, w \/ 2\)\} ry=\{Math\.min\(6, w \/ 2\)\} width=\{w\} x=\{x\} y=\{y\} \/>/);
     expect(source).toContain("rx={Math.max(0, Math.min(6, w / 2) - 0.5)}");

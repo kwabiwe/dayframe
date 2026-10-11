@@ -9,9 +9,9 @@ describe("web Today ribbon blocks (X2)", () => {
   it("keep 1 px apart with a faint inner edge", () => {
     const start = css.indexOf("\n.df-ribbon-block {");
     const rule = css.slice(start, css.indexOf("}", start));
-    expect(rule).toContain("border-inline: 0.5px solid transparent;");
-    expect(rule).toContain("background-clip: padding-box;");
-    expect(rule).toContain("box-sizing: border-box;");
+    // A clip, not a border: border widths under 1 px snap to a whole device pixel (Codex r4).
+    expect(rule).toContain("clip-path: inset(0 0.5px round 6px);");
+    expect(rule).not.toMatch(/border(?:-inline)?\s*:/);
     expect(rule).toMatch(/box-shadow: inset 0 0 0 1px color-mix\(in srgb, var\(--text-primary\) 14%, transparent\);/);
   });
 
