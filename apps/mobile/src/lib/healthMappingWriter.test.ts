@@ -11,12 +11,21 @@ function setup(initial: HealthAutoLogMappings = {}) {
   const holds: Array<{ release: () => void; fail: () => void }> = [];
   let holdNext = 0;
   let failNext = 0;
+  const readHolds: Array<{ release: () => void; fail: () => void }> = [];
+  let holdReads = 0;
+  let settleGate: Promise<void> | null = null;
   const shown: HealthAutoLogMappings[] = [];
   const settles: { account: string | null; saved: HealthAutoLogMappings }[] = [];
   const settled = vi.fn();
   const failed = vi.fn();
   const writer = createHealthMappingWriter<string>({
-    readSaved: async () => stored,
+    readSaved: async () => {
+      if (holdReads > 0) {
+        holdReads -= 1;
+        await new Promise<void>((release, reject) => readHolds.push({ release, fail: () => reject(new Error("storage")) }));
+      }
+      return stored;
+    },
     write: async (type, mapping) => {
       writes.push({ type, mapping });
       if (holdNext > 0) {
@@ -38,7 +47,9 @@ function setup(initial: HealthAutoLogMappings = {}) {
       accountListeners.add(listener);
       return () => accountListeners.delete(listener);
     },
-    settle: (saved) => {
+    settle: async (saved, isCurrent) => {
+      if (settleGate) await settleGate;
+      if (!(await isCurrent())) return;
       settles.push({ account, saved });
     }
   });
@@ -53,6 +64,13 @@ function setup(initial: HealthAutoLogMappings = {}) {
     failed,
     unsubscribe,
     hold: (count = 1) => { holdNext += count; },
+    holdRead: () => { holdReads += 1; },
+    readHolds,
+    gateSettle: () => {
+      let open!: () => void;
+      settleGate = new Promise<void>((done) => { open = done; });
+      return () => { settleGate = null; open(); };
+    },
     failOnce: () => { failNext += 1; },
     stored: () => stored,
     lastShown: () => shown[shown.length - 1],
@@ -264,5 +282,75 @@ describe("Health mapping writer (UIA-085)", () => {
     expect(await t.writer.patch("walking", { categoryId: "b-category" })).toBe(true);
     await t.writer.idle("walking");
     expect(t.settles.map((entry) => entry.account)).toEqual(["B"]);
+  });
+
+  it("Codex r7 (1): reprocessing waits re-check the account, so B never reprocesses A's change", async () => {
+    const t = setup({});
+    const open = t.gateSettle();
+    await t.writer.commitName("walking", "A's name");
+    await tick();
+    t.switchAccount(null);
+    t.switchAccount("B");
+    open();
+    await t.writer.idle("walking");
+    await tick();
+    expect(t.writes).toHaveLength(1);
+    expect(t.settles).toEqual([]);
+    expect(t.settled).not.toHaveBeenCalled();
+  });
+
+  it("Codex r7 (2): a change whose read is still waiting when the account changes is never written", async () => {
+    const t = setup({});
+    await t.writer.refresh();
+    t.holdRead();
+    const pending = t.writer.patch("walking", { categoryId: "a-category" });
+    await tick();
+    t.switchAccount("B");
+    t.readHolds[0].release();
+    expect(await pending).toBe(false);
+    expect(t.writes).toEqual([]);
+  });
+
+  it("Codex r7 (2b): a write that fails after the account changed neither alerts nor restores", async () => {
+    const t = setup({ walking: { description: "Old" } });
+    const restore = vi.fn();
+    t.writer.attach("walking", restore);
+    t.hold();
+    const pending = t.writer.commitName("walking", "A's name");
+    await tick();
+    t.switchAccount("B");
+    t.holds[0].fail();
+    await pending;
+    expect(t.failed).not.toHaveBeenCalled();
+    expect(restore).not.toHaveBeenCalled();
+  });
+
+  it("Codex r7 (3): a committed Name shows at once, with no storage read in between", async () => {
+    const t = setup({ walking: { description: "Old" } });
+    await t.writer.refresh();
+    t.hold();
+    void t.writer.commitName("walking", "A");
+    await tick();
+    t.holdRead(); // any later read stays pending
+    void t.writer.commitName("walking", "B");
+    expect(t.lastShown().walking).toEqual({ description: "B" });
+    expect(t.writer.shown()?.walking).toEqual({ description: "B" });
+  });
+
+  it("Codex r7 (4): a Name whose read fails is put back in the open sheet too", async () => {
+    const t = setup({ walking: { description: "A" } });
+    await t.writer.refresh();
+    let draft = "B";
+    t.writer.attach("walking", (saved, failedName) => {
+      if (draft.trim() === failedName) draft = saved;
+    });
+    t.holdRead();
+    const pending = t.writer.commitName("walking", "B");
+    await tick();
+    t.readHolds[0].fail();
+    expect(await pending).toBe(false);
+    expect(draft).toBe("A");
+    expect(t.failed).toHaveBeenCalledTimes(1);
+    expect(t.lastShown().walking).toEqual({ description: "A" });
   });
 });

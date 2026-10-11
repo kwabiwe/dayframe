@@ -19,7 +19,17 @@ export const healthMappingWriter = createHealthMappingWriter({
   capture: readActiveMobileAccount,
   stillCurrent: async (owner) => mobileAccountOwnersEqual(await readActiveMobileAccount(), owner),
   onAccountChange: subscribeActiveMobileAccount,
-  settle: async (saved) => {
-    await reprocessExistingHealthReviewItems(await getHealthImportPreferences(), { force: true, mappings: saved });
+  settle: async (saved, isCurrent) => {
+    const preferences = await getHealthImportPreferences();
+    // Checked again after every wait, and an account change aborts the requests still running,
+    // so one account's mappings are never reprocessed with another account's session.
+    const controller = new AbortController();
+    const stop = subscribeActiveMobileAccount(() => controller.abort());
+    try {
+      if (!(await isCurrent()) || controller.signal.aborted) return;
+      await reprocessExistingHealthReviewItems(preferences, { force: true, mappings: saved, signal: controller.signal });
+    } finally {
+      stop();
+    }
   }
 });

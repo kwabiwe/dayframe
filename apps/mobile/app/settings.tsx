@@ -2684,6 +2684,17 @@ function HealthTypeSheet({
     draftRef.current = value;
     setNameDraftState(value);
   }
+  // Until the person types, the field follows the Name the writer shows (a change still on its
+  // way when this sheet opened), so closing an untouched sheet never commits an older Name.
+  const typedRef = useRef(false);
+  const shownName = mapping.description ?? "";
+  useEffect(() => {
+    if (!typedRef.current && draftRef.current !== shownName) setNameDraft(shownName);
+  }, [shownName]);
+  function typeName(value: string) {
+    typedRef.current = true;
+    setNameDraft(value);
+  }
   // The Name is written by the app's one Health mapping writer, queued with this type's other
   // changes. From the moment this sheet opens it is told when a Name fails, and puts the saved
   // Name back unless newer text was typed.
@@ -2818,7 +2829,7 @@ function HealthTypeSheet({
                     accessibilityLabel={`${label} name`}
                     {...mobileTextProps("input")}
                     style={styles.healthNameInput}
-                    onChangeText={setNameDraft}
+                    onChangeText={typeName}
                     placeholder={defaultHealthDescription(healthKey)}
                     placeholderTextColor={theme.textSecondary}
                     returnKeyType="done"

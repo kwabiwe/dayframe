@@ -35,8 +35,11 @@ export type HealthMappingWriterDeps<A> = {
   stillCurrent: (authority: A) => Promise<boolean>;
   /** Calls back on every account change. */
   onAccountChange: (listener: () => void) => () => void;
-  /** Runs once a type's queue is empty again after a write landed (reprocessing). */
-  settle?: (saved: HealthAutoLogMappings) => Promise<void> | void;
+  /**
+   * Runs once a type's queue is empty again after a write landed (reprocessing). `isCurrent`
+   * says whether the account that made the change is still signed in; check it before each request.
+   */
+  settle?: (saved: HealthAutoLogMappings, isCurrent: () => Promise<boolean>) => Promise<void> | void;
 };
 
 export type HealthMappingListener = {
@@ -72,7 +75,10 @@ export function createHealthMappingWriter<A>(deps: HealthMappingWriterDeps<A>) {
   const restorers = new Map<HealthImportPreferenceKey, Restorer>();
   const wrote = new Set<HealthImportPreferenceKey>();
   const listeners = new Set<HealthMappingListener>();
-  let shownSeq = 0;
+  // The last saved mappings read or written: what is shown is laid over it at once, so a change
+  // shows the moment it is made (a reopened sheet always starts from it).
+  let cache: HealthAutoLogMappings | null = null;
+  let readSeq = 0;
 
   // Nothing queued by one account acts under another: waiting changes are dropped on a switch.
   deps.onAccountChange(() => {
@@ -104,13 +110,24 @@ export function createHealthMappingWriter<A>(deps: HealthMappingWriterDeps<A>) {
     return shown;
   }
 
-  async function refresh(saved?: HealthAutoLogMappings) {
-    const seq = ++shownSeq;
-    const base = saved ?? await deps.readSaved().catch(() => null);
-    // Only the newest refresh shows, so an older read can't land over a newer one.
-    if (!base || seq !== shownSeq) return;
-    const shown = overlay(base);
+  /** Shows the cached saved mappings with queued changes laid over them, synchronously. */
+  function publish() {
+    if (!cache) return;
+    const shown = overlay(cache);
     for (const listener of listeners) listener.show(shown);
+  }
+
+  /** Re-reads the saved mappings, then publishes (an older read never lands over a newer one). */
+  async function refresh() {
+    const seq = ++readSeq;
+    const saved = await deps.readSaved().catch(() => null);
+    if (saved && seq === readSeq) cache = saved;
+    publish();
+  }
+
+  function remember(saved: HealthAutoLogMappings) {
+    readSeq += 1;
+    cache = saved;
   }
 
   async function current(entry: Entry<A>) {
@@ -123,52 +140,56 @@ export function createHealthMappingWriter<A>(deps: HealthMappingWriterDeps<A>) {
   async function run(type: HealthImportPreferenceKey, entry: Entry<A>) {
     let ok = false;
     let failedName: string | null = null;
-    let saved: HealthAutoLogMappings | null = null;
+    let landed = false;
     if (entry.kind === "name") entry.started = true;
-    // A change from a session that is no longer current is dropped without a write or an alert.
-    const live = await current(entry);
-    if (live) {
+    // A change from an account that is no longer signed in is dropped: no write, alert or restore.
+    // The account is checked before the read, before the write and after it.
+    if (await current(entry)) {
+      let attempted: string | null = null;
       try {
         const saving = await deps.readSaved();
-        if (entry.kind === "patch") {
-          saved = await deps.write(type, merge(saving[type], entry.patch));
-          wrote.add(type);
-        } else {
-          const name = (names.get(type) ?? "").trim();
-          if (name === nameOf(saving[type])) {
-            saved = saving;
-          } else {
-            failedName = name;
-            saved = await deps.write(type, merge(saving[type], { description: name || null }));
-            failedName = null;
-            wrote.add(type);
+        remember(saving);
+        if (entry.kind === "name") attempted = (names.get(type) ?? "").trim();
+        if (await current(entry)) {
+          if (entry.kind === "patch") {
+            remember(await deps.write(type, merge(saving[type], entry.patch)));
+            landed = true;
+          } else if (attempted !== nameOf(saving[type])) {
+            remember(await deps.write(type, merge(saving[type], { description: attempted || null })));
+            landed = true;
           }
+          ok = true;
         }
-        ok = true;
       } catch (error) {
-        for (const listener of listeners) listener.failed?.(error);
+        if (await current(entry)) {
+          for (const listener of listeners) listener.failed?.(error);
+          // A Name that could not be read or written: the sheet gets the saved Name back.
+          if (entry.kind === "name") failedName = attempted ?? (names.get(type) ?? "").trim();
+        }
       }
+      if (landed && await current(entry)) wrote.add(type);
     }
     const entries = queued(type);
     entries.splice(entries.indexOf(entry), 1);
     if (failedName !== null) {
-      // Put the saved Name back where the newest sheet shows it, unless something newer was typed.
-      const savedName = nameOf((await deps.readSaved().catch(() => ({} as HealthAutoLogMappings)))[type]);
+      // Put the saved Name back where the open sheet shows it, unless something newer was typed.
+      const savedName = nameOf(cache?.[type]);
       if ((names.get(type) ?? "").trim() === failedName) names.set(type, savedName);
       restorers.get(type)?.(savedName, failedName);
     }
-    await refresh(saved ?? undefined);
+    publish();
     entry.done(ok);
     if (entries.length === 0 && wrote.has(type)) {
       wrote.delete(type);
-      // Reprocessing runs under the session that made the change, and only while it is current.
-      if (await current(entry)) {
+      const isCurrent = () => current(entry);
+      // Reprocessing runs only for the account that made the change, checked before each request.
+      if (await isCurrent()) {
         try {
-          await deps.settle?.(saved ?? await deps.readSaved());
+          await deps.settle?.(cache ?? await deps.readSaved(), isCurrent);
         } catch {
           // Settling (reprocessing) is best effort; the mapping itself is saved.
         }
-        for (const listener of listeners) listener.settled?.();
+        if (await isCurrent()) for (const listener of listeners) listener.settled?.();
       }
     }
   }
@@ -186,6 +207,7 @@ export function createHealthMappingWriter<A>(deps: HealthMappingWriterDeps<A>) {
     /** Shows the mappings to a screen while it is open; returns its unsubscribe. */
     subscribe(listener: HealthMappingListener) {
       listeners.add(listener);
+      if (cache) listener.show(overlay(cache));
       void refresh();
       return () => {
         listeners.delete(listener);
@@ -193,11 +215,13 @@ export function createHealthMappingWriter<A>(deps: HealthMappingWriterDeps<A>) {
     },
     /** Shows the saved mappings, with queued changes laid over them, again. */
     refresh: () => refresh(),
+    /** What a screen shows now (saved with queued changes), or null before the first read. */
+    shown: () => (cache ? overlay(cache) : null),
     /** Changes Logs as / Use default; true once the change is saved. */
     patch(type: HealthImportPreferenceKey, patch: HealthAutoLogMapping): Promise<boolean> {
       return new Promise<boolean>((done) => {
         enqueue(type, { kind: "patch", patch, done, stale: false, authority: deps.capture() });
-        void refresh();
+        publish();
       });
     },
     /** Commits a type's Name (the newest commit wins); true once it is saved. */
@@ -216,7 +240,7 @@ export function createHealthMappingWriter<A>(deps: HealthMappingWriterDeps<A>) {
         : new Promise<boolean>((done) => {
             enqueue(type, { kind: "name", started: false, done, stale: false, authority: deps.capture() });
           });
-      void refresh();
+      publish();
       return committed;
     },
     /**
