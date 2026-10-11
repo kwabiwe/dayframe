@@ -1446,6 +1446,7 @@ function createStyles(theme: MobileTheme) {
       marginBottom: 4
     },
     authInput: {
+      backgroundColor: theme.surfaceInset,
       fontFamily: undefined,
       fontSize: 16
     },
@@ -1480,7 +1481,7 @@ function createStyles(theme: MobileTheme) {
     },
     authPasswordField: {
       minHeight: 48,
-      backgroundColor: theme.surfaceMuted,
+      backgroundColor: theme.surfaceInset,
       borderRadius: 14,
       flexDirection: "row",
       alignItems: "center",
@@ -1524,7 +1525,7 @@ function createStyles(theme: MobileTheme) {
       justifyContent: "center"
     },
     authPasswordVisibilityPressed: {
-      backgroundColor: theme.surfaceInset
+      backgroundColor: theme.surfaceMuted
     },
     primaryButton: {
       marginTop: 8,
