@@ -61,6 +61,7 @@ import {
   useReduceMotionPreference
 } from "@/lib/motion";
 import { LocationEvidenceMap } from "./LocationEvidenceMap";
+import { DayframeIcon } from "../icons/DayframeIcon";
 
 type Category = MobileBootstrap["categories"][number];
 type Place = MobileBootstrap["places"][number];
@@ -622,7 +623,7 @@ export function LocationReviewCorrectionEditor({
 
                   <Text {...mobileTextProps("metadata")} style={editorStyles.fieldLabel}>Search other places</Text>
                   <View style={editorStyles.searchField}>
-                    <SearchGlyph color={theme.textSecondary} />
+                    <DayframeIcon color={theme.textSecondary} glyph="search" size={18} />
                     <TextInput
                       ref={searchInputRef}
                       {...mobileTextProps("input")}
@@ -647,7 +648,7 @@ export function LocationReviewCorrectionEditor({
                         onPress={clearPlaceSearch}
                         style={pressable(editorStyles.iconButton, styles.buttonPressed)}
                       >
-                        <CloseGlyph color={theme.textSecondary} />
+                        <DayframeIcon color={theme.textSecondary} glyph="x" size={17} />
                       </Pressable>
                     ) : null}
                   </View>
@@ -1026,7 +1027,7 @@ function PlaceChoice({
         <Text {...mobileTextProps("itemTitle")} style={[placeChoiceStyles.name, { color: theme.textPrimary }]}>{name}</Text>
         <Text {...mobileTextProps("metadata")} style={[placeChoiceStyles.detail, { color: theme.textSecondary }]}>{detail}</Text>
       </View>
-      {selected ? <CheckGlyph color={theme.textPrimary} /> : null}
+      {selected ? <DayframeIcon color={theme.textPrimary} glyph="check" size={17} strokeWidth={2.2} /> : null}
     </Pressable>
   );
 }
@@ -1100,18 +1101,6 @@ function ActivityGlyph({ name, color }: { name: LocationActivityGlyphName; color
     return <Svg width={20} height={20} viewBox="0 0 24 24"><Path d="M5 17h14M7 17l1-7h8l1 7M9 10l1-3h4l1 3M8 14h.01M16 14h.01" fill="none" stroke={color} strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.9} /></Svg>;
   }
   return <Svg width={20} height={20} viewBox="0 0 24 24"><Path d="M12 21s6-5.2 6-11a6 6 0 1 0-12 0c0 5.8 6 11 6 11Z" fill="none" stroke={color} strokeLinejoin="round" strokeWidth={1.9} /><SvgCircle cx={12} cy={10} r={2} fill="none" stroke={color} strokeWidth={1.8} /></Svg>;
-}
-
-function SearchGlyph({ color }: { color: string }) {
-  return <Svg width={18} height={18} viewBox="0 0 24 24"><SvgCircle cx={11} cy={11} r={6} fill="none" stroke={color} strokeWidth={2} /><Path d="m16 16 4 4" stroke={color} strokeLinecap="round" strokeWidth={2} /></Svg>;
-}
-
-function CloseGlyph({ color }: { color: string }) {
-  return <Svg width={17} height={17} viewBox="0 0 24 24"><Path d="m7 7 10 10M17 7 7 17" stroke={color} strokeLinecap="round" strokeWidth={2} /></Svg>;
-}
-
-function CheckGlyph({ color }: { color: string }) {
-  return <Svg width={17} height={17} viewBox="0 0 24 24"><Path d="m5 12 4 4L19 6" fill="none" stroke={color} strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.2} /></Svg>;
 }
 
 function pointFromEvidence(evidence: LocationReviewEvidenceDto) {

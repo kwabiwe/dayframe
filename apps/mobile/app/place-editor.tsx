@@ -44,6 +44,7 @@ import {
   SettingsBlockGroup,
   SettingsBlockRow,
   SettingsPillButton,
+  SettingsSegmented,
   SettingsSwitch
 } from "@/components/settings/SettingsBlocks";
 import { refreshGeofencesForPlaces } from "@/lib/geofence";
@@ -57,8 +58,8 @@ import {
   validatePlaceForm,
   withRole,
   DEFAULT_PLACE_RADIUS_METERS,
-  MAX_PLACE_RADIUS_METERS,
-  MIN_PLACE_RADIUS_METERS
+  PLACE_RADIUS_OPTIONS,
+  placeRadiusOffMenu
 } from "@/lib/places";
 import {
   createNativePlaceSearchProvider,
@@ -756,24 +757,24 @@ export default function PlaceEditorScreen() {
 
             <Reanimated.View layout={localLayoutTransition(reduceMotion)}>
               <SettingsBlockGroup theme={theme} title="Size">
-                <View style={editorStyles.fieldRow}>
+                {/* UIA-088: three sizes to pick from instead of typing metres; a place saved with
+                    another size keeps it (no segment chosen, a note below) until one is picked. */}
+                <View style={editorStyles.radiusRow}>
                   <Text {...mobileTextProps("itemTitle")} style={[editorStyles.fieldLabel, { color: theme.textPrimary }]}>Radius</Text>
-                  <TextInput
-                    {...mobileTextProps("input")}
-                    accessibilityHint={`Between ${MIN_PLACE_RADIUS_METERS} and ${MAX_PLACE_RADIUS_METERS} metres`}
-                    accessibilityLabel="Place radius in metres"
-                    keyboardType="number-pad"
-                    maxLength={4}
-                    onChangeText={setRadiusMeters}
-                    placeholder={String(DEFAULT_PLACE_RADIUS_METERS)}
-                    placeholderTextColor={theme.textMuted}
-                    style={[editorStyles.radiusInput, { backgroundColor: theme.surfaceInset, color: theme.textPrimary }]}
-                    testID="place-editor-radius"
+                  <SettingsSegmented
+                    label="Place radius"
+                    onChange={setRadiusMeters}
+                    options={PLACE_RADIUS_OPTIONS}
+                    theme={theme}
                     value={radiusMeters}
                   />
-                  <Text {...mobileTextProps("body")} style={{ color: theme.textSecondary }}>m</Text>
                 </View>
               </SettingsBlockGroup>
+              {placeRadiusOffMenu(radiusMeters) !== null ? (
+                <Text {...mobileTextProps("metadata")} style={[editorStyles.note, { color: theme.textSecondary }]}>
+                  This place uses {placeRadiusOffMenu(radiusMeters)} m. Pick a size to change it.
+                </Text>
+              ) : null}
               {radiusProblem ? (
                 <Text {...mobileTextProps("metadata")} accessibilityLiveRegion="polite" style={[editorStyles.note, { color: theme.dangerText }]}>{radiusProblem}</Text>
               ) : null}
@@ -1043,9 +1044,10 @@ const editorStyles = StyleSheet.create({
   note: { marginHorizontal: 4, marginTop: 8 },
   fieldRow: { alignItems: "center", flexDirection: "row", gap: 12, minHeight: 52, paddingHorizontal: 16, paddingVertical: 6 },
   fieldLabel: { flex: 1, fontSize: 15, fontWeight: "600" },
+  // The label wraps above the segments when they don't fit beside it (large text, a fourth size).
+  radiusRow: { alignItems: "center", columnGap: 12, flexDirection: "row", flexWrap: "wrap", minHeight: 52, paddingHorizontal: 16, paddingVertical: 6, rowGap: 6 },
   fieldInput: { fontSize: 16, minHeight: 52, paddingHorizontal: 16, paddingVertical: 12 },
   inlineInput: { flex: 1.4, fontSize: 16, minHeight: 44, minWidth: 0, textAlign: "right" },
-  radiusInput: { borderRadius: 12, fontSize: 16, fontVariant: ["tabular-nums"], minHeight: 44, textAlign: "center", width: 84 },
   deleteButton: { alignItems: "center", borderRadius: DAYFRAME_BLOCKS.radius.pill, justifyContent: "center", minHeight: 50 },
   deleteText: { fontSize: 15, fontWeight: "700" }
 });

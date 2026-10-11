@@ -5,6 +5,21 @@ export const MIN_PLACE_RADIUS_METERS = 25;
 export const MAX_PLACE_RADIUS_METERS = 2000;
 export const POOR_LOCATION_ACCURACY_METERS = 150;
 
+/** The place editor's radius choices (UIA-088). */
+export const PLACE_RADIUS_CHOICES = [50, 100, 200] as const;
+
+/** The radius segments: 50, 100 and 200 m (UIA-088). */
+export const PLACE_RADIUS_OPTIONS = PLACE_RADIUS_CHOICES.map((meters) => ({ label: `${meters} m`, value: String(meters) }));
+
+/**
+ * A place saved with another size (a learned or older place) keeps it until a segment is picked:
+ * no segment is selected and a note names the size, so editing never changes it unasked.
+ */
+export function placeRadiusOffMenu(current: string): number | null {
+  const value = Number(current);
+  return Number.isFinite(value) && value > 0 && !PLACE_RADIUS_CHOICES.some((meters) => meters === value) ? value : null;
+}
+
 export type PlaceFormInput = {
   name: string;
   latitude: string;

@@ -129,6 +129,29 @@ export function SettingsBlockRow({
     </View>
   );
   const dividerStyle = divider ? { borderTopColor: theme.border, borderTopWidth: StyleSheet.hairlineWidth } : null;
+  if (onPress && control) {
+    // A row with its own control (a switch) whose text opens more: the text is the button, the
+    // control stays separate (UIA-085, Apple Health types).
+    return (
+      <View style={[blockStyles.row, dividerStyle]} testID={testID}>
+        <Pressable
+          accessibilityHint={accessibilityHint}
+          accessibilityLabel={subtitle ? `${title}, ${subtitle}` : title}
+          accessibilityRole="button"
+          accessibilityState={disabled ? { disabled } : undefined}
+          disabled={disabled}
+          hitSlop={{ bottom: 8, top: 8 }}
+          onPress={onPress}
+          style={({ pressed }) => [blockStyles.rowPressArea, pressed ? { opacity: 0.6 } : null]}
+          testID={testID ? `${testID}-open` : undefined}
+        >
+          {text}
+          <DayframeIcon color={theme.textMuted} glyph={DAYFRAME_APP_ICONS.next} size={18} />
+        </Pressable>
+        {control}
+      </View>
+    );
+  }
   if (onPress) {
     return (
       <Pressable
@@ -433,6 +456,7 @@ const blockStyles = StyleSheet.create({
     paddingVertical: 8
   },
   rowText: { flex: 1, minWidth: 0 },
+  rowPressArea: { alignItems: "center", flex: 1, flexDirection: "row", gap: 6, minHeight: 44, minWidth: 0 },
   rowTitle: { fontSize: 15, fontWeight: "600" },
   rowValue: { alignItems: "center", flexDirection: "row", flexShrink: 1, gap: 2, maxWidth: "45%" },
   segment: { alignItems: "center", borderRadius: DAYFRAME_BLOCKS.radius.pill, justifyContent: "center", minHeight: 36, paddingHorizontal: 12 },
