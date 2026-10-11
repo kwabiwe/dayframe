@@ -450,27 +450,48 @@ private struct DayframeCalendarEntriesLayer: View {
   let hourLabelWidth: CGFloat
   let presentation: DayframeCalendarPresentation
 
+  private func geometry(
+    for entry: DayframeCalendarEntry
+  ) -> (DayframeCalendarBlockMetrics, DayframeCalendarEntryGeometryMetrics)? {
+    guard let metrics = DayframeCalendarBlockMath.metrics(
+      startedAtMs: entry.startedAtMs,
+      stoppedAtMs: entry.stoppedAtMs,
+      nowMs: presentation.nowMs,
+      dayStartMs: presentation.dayStartMs,
+      dayEndMs: presentation.dayEndMs,
+      hourHeight: Double(hourHeight)
+    ), let entryGeometry = DayframeCalendarEntryGeometryMath.metrics(
+      availableWidth: Double(availableWidth),
+      hourLabelWidth: Double(hourLabelWidth),
+      semanticTop: metrics.top,
+      semanticHeight: metrics.height,
+      offsetFraction: entry.offsetFraction,
+      widthFraction: entry.widthFraction,
+      overlapCount: entry.overlapCount,
+      textDensity: entry.textDensity,
+      timelineHeight: 24 * Double(hourHeight)
+    ) else {
+      return nil
+    }
+    return (metrics, entryGeometry)
+  }
+
   var body: some View {
+    // Logged blocks' targets win over a Review suggestion's enlarged target (clippingReviewTarget).
+    let loggedTargets = presentation.entries
+      .filter { !$0.isReview }
+      .compactMap { geometry(for: $0)?.1.hitFrame }
     ZStack(alignment: .topLeading) {
       ForEach(presentation.entries) { entry in
-        if let metrics = DayframeCalendarBlockMath.metrics(
-          startedAtMs: entry.startedAtMs,
-          stoppedAtMs: entry.stoppedAtMs,
-          nowMs: presentation.nowMs,
-          dayStartMs: presentation.dayStartMs,
-          dayEndMs: presentation.dayEndMs,
-          hourHeight: Double(hourHeight)
-        ), let entryGeometry = DayframeCalendarEntryGeometryMath.metrics(
-          availableWidth: Double(availableWidth),
-          hourLabelWidth: Double(hourLabelWidth),
-          semanticTop: metrics.top,
-          semanticHeight: metrics.height,
-          offsetFraction: entry.offsetFraction,
-          widthFraction: entry.widthFraction,
-          overlapCount: entry.overlapCount,
-          textDensity: entry.textDensity,
-          timelineHeight: 24 * Double(hourHeight)
-        ) {
+        if let laidOut = geometry(for: entry) {
+          let metrics = laidOut.0
+          let entryGeometry = entry.isReview
+            ? laidOut.1.clippingReviewTarget(
+                semanticTop: metrics.top,
+                semanticHeight: metrics.height,
+                loggedTargets: loggedTargets
+              )
+            : laidOut.1
           let visualMetrics = DayframeCalendarBlockVisualMath.metrics(
             semanticHeight: metrics.height,
             continuesIntoNextDay: metrics.continuesIntoNextDay

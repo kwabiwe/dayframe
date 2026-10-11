@@ -5,6 +5,7 @@ import type { MobileTheme } from "./mobileTheme";
 import {
   REVIEW_LANE_WIDTH,
   buildNativeCalendarBridgeState,
+  reviewTargetEnvelope,
   routeNativeCalendarOpenEvent,
   routeNativeCalendarRefresh
 } from "./nativeCalendarPresentation";
@@ -272,6 +273,27 @@ describe("native Calendar presentation boundary", () => {
       expect(lane[0].offsetFraction).not.toBeCloseTo(lane[1].offsetFraction);
       // Drawn at their real times.
       expect(lane[0].stoppedAtMs).toBe(localTime(2026, 7, 10, 9, 1));
+    });
+
+    it("reserves the target around iOS's 4-point minimum block, not the raw time (Codex r9)", () => {
+      // 09:00–09:01 draws 4 points tall, so its target centres at 09:02:30 and reaches 09:30; the
+      // 09:53–09:58 target starts at 09:28. They overlap, so they need their own lanes.
+      expect(reviewTargetEnvelope(localTime(2026, 7, 10, 9, 0), localTime(2026, 7, 10, 9, 1), localTime(2026, 7, 10, 0, 0), localTime(2026, 7, 11, 0, 0)))
+        .toEqual({ start: localTime(2026, 7, 10, 8, 35), end: localTime(2026, 7, 10, 9, 30) });
+      expect(reviewTargetEnvelope(localTime(2026, 7, 10, 9, 53), localTime(2026, 7, 10, 9, 58), localTime(2026, 7, 10, 0, 0), localTime(2026, 7, 11, 0, 0)))
+        .toEqual({ start: localTime(2026, 7, 10, 9, 28), end: localTime(2026, 7, 10, 10, 23) });
+      const state = build(now, bootstrap([], { reviewItems: [suggestion("a", 9, 0, 1), suggestion("b", 9, 53, 5)] }));
+      const lane = state.model.entries;
+      expect(lane.map((item) => item.actionId)).toEqual(["a", "b"]);
+      expect(lane[0].offsetFraction).not.toBeCloseTo(lane[1].offsetFraction);
+    });
+
+    it("targets that do not overlap share a lane (09:00–09:01 and 09:58–10:03)", () => {
+      const state = build(now, bootstrap([], { reviewItems: [suggestion("a", 9, 0, 1), suggestion("b", 9, 58, 5)] }));
+      const lane = state.model.entries;
+      // a reaches 09:30; b (09:58–10:03) starts its target at 09:33.
+      expect(lane[0].offsetFraction).toBeCloseTo(lane[1].offsetFraction);
+      expect(lane[0].widthFraction).toBeCloseTo(REVIEW_LANE_WIDTH);
     });
 
     it("each crowd says its own time range and what it opens (Codex r2)", () => {

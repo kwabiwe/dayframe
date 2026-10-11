@@ -161,6 +161,88 @@ final class DayframeCalendarCoreTests: XCTestCase {
     XCTAssertEqual(intoNext?.continuesIntoNextDay, true)
   }
 
+  /// The Review lane reserves each suggestion's target as reviewTargetEnvelope in
+  /// nativeCalendarPresentation.ts computes it; these are the same boundary cases (Codex r9 on #317).
+  func testReviewTargetsMatchThePresentationEnvelopeAtMinimumZoom() throws {
+    var calendar = Calendar(identifier: .gregorian)
+    calendar.timeZone = TimeZone(secondsFromGMT: 0)!
+    let dayStart = try milliseconds("2026-07-10T00:00:00Z")
+    let dayEnd = try milliseconds("2026-07-11T00:00:00Z")
+    func target(_ start: String, _ stop: String, hourHeight: Double) throws -> DayframeCalendarHitFrame {
+      let block = try XCTUnwrap(DayframeCalendarBlockMath.metrics(
+        startedAtMs: try milliseconds(start),
+        stoppedAtMs: try milliseconds(stop),
+        nowMs: dayEnd,
+        dayStartMs: dayStart,
+        dayEndMs: dayEnd,
+        hourHeight: hourHeight,
+        calendar: calendar
+      ))
+      return try XCTUnwrap(DayframeCalendarEntryGeometryMath.metrics(
+        availableWidth: 320,
+        hourLabelWidth: 44,
+        semanticTop: block.top,
+        semanticHeight: block.height,
+        offsetFraction: 0.56,
+        widthFraction: 0.44,
+        overlapCount: 0,
+        textDensity: "full",
+        timelineHeight: 24 * hourHeight
+      )).hitFrame
+    }
+    // Envelope 08:35–09:30 and 09:28–10:23 at 48 points an hour.
+    let first = try target("2026-07-10T09:00:00Z", "2026-07-10T09:01:00Z", hourHeight: 48)
+    XCTAssertEqual(first.minY, 8 * 48 + 35.0 / 60 * 48, accuracy: 0.001)
+    XCTAssertEqual(first.maxY, 9.5 * 48, accuracy: 0.001)
+    let second = try target("2026-07-10T09:53:00Z", "2026-07-10T09:58:00Z", hourHeight: 48)
+    XCTAssertEqual(second.minY, 9 * 48 + 28.0 / 60 * 48, accuracy: 0.001)
+    XCTAssertEqual(second.maxY, 10 * 48 + 23.0 / 60 * 48, accuracy: 0.001)
+    // Closer zooms stay inside the envelope, in minutes.
+    for hourHeight in [49.0, 72, 128] {
+      let cases: [(String, String, Double, Double)] = [
+        ("2026-07-10T09:00:00Z", "2026-07-10T09:01:00Z", 515, 570),
+        ("2026-07-10T09:53:00Z", "2026-07-10T09:58:00Z", 568, 623)
+      ]
+      for (start, stop, envelopeStart, envelopeEnd) in cases {
+        let frame = try target(start, stop, hourHeight: hourHeight)
+        XCTAssertGreaterThanOrEqual(frame.minY / hourHeight * 60, envelopeStart - 0.001)
+        XCTAssertLessThanOrEqual(frame.maxY / hourHeight * 60, envelopeEnd + 0.001)
+      }
+    }
+  }
+
+  func testReviewTargetGivesWayToLoggedTargetsButKeepsItsBlock() {
+    // Three logged 09:00–09:30 lanes at 48 pt/h (432–456); a 09:10–09:11 suggestion over the right one.
+    let review = DayframeCalendarEntryGeometryMath.metrics(
+      availableWidth: 320,
+      hourLabelWidth: 44,
+      semanticTop: 9 * 48 + 8,
+      semanticHeight: 4,
+      offsetFraction: 0.56,
+      widthFraction: 0.44,
+      overlapCount: 0,
+      textDensity: "full"
+    )!
+    XCTAssertEqual(review.hitFrame.maxY - review.hitFrame.minY, 44, accuracy: 0.001)
+    let loggedRight = DayframeCalendarHitFrame(minX: 230, maxX: 310, minY: 432, maxY: 456)
+    let loggedLeft = DayframeCalendarHitFrame(minX: 52, maxX: 130, minY: 400, maxY: 500)
+    let clipped = review.clippingReviewTarget(semanticTop: 440, semanticHeight: 4, loggedTargets: [loggedRight, loggedLeft])
+    XCTAssertEqual(clipped.hitFrame.minY, 440, accuracy: 0.001)
+    XCTAssertEqual(clipped.hitFrame.maxY, 444, accuracy: 0.001)
+    XCTAssertEqual(clipped.vertical.visualOffsetWithinHitTarget, 0, accuracy: 0.001)
+    XCTAssertEqual(clipped.vertical.hitCenterY, 442, accuracy: 0.001)
+
+    // A logged target only above it trims the top; free space below stays the suggestion's.
+    let above = DayframeCalendarHitFrame(minX: 230, maxX: 310, minY: 400, maxY: 430)
+    let trimmed = review.clippingReviewTarget(semanticTop: 440, semanticHeight: 4, loggedTargets: [above])
+    XCTAssertEqual(trimmed.hitFrame.minY, 430, accuracy: 0.001)
+    XCTAssertEqual(trimmed.hitFrame.maxY, review.hitFrame.maxY, accuracy: 0.001)
+    XCTAssertEqual(trimmed.vertical.visualOffsetWithinHitTarget, 10, accuracy: 0.001)
+
+    // Nothing in its columns: unchanged.
+    XCTAssertEqual(review.clippingReviewTarget(semanticTop: 440, semanticHeight: 4, loggedTargets: [loggedLeft]), review)
+  }
+
   func testCompactAndTinyPresentationThresholdsStayNative() throws {
     var calendar = Calendar(identifier: .gregorian)
     calendar.timeZone = TimeZone(secondsFromGMT: 0)!

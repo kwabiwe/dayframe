@@ -138,19 +138,24 @@ export const REVIEW_LANE_WIDTH = 0.44;
 /** At most two side by side in the Review lane keeps every target 44 points wide at 320 points. */
 export const REVIEW_LANE_MAX_LANES = 2;
 /**
- * A short block's tap target is 44 points tall, centred on the block (and kept inside the day at
- * midnight), which at the most zoomed-out Calendar (48 points an hour) spans 55 minutes. For the
- * Review lane's lanes and crowds an item counts as covering that whole target, so two Review items
- * never share one at any zoom; what is drawn keeps the real times.
+ * A short block's tap target is 44 points tall, centred on its drawn block (and kept inside the day
+ * at midnight). For the Review lane's lanes and crowds an item counts as covering that whole target
+ * at the most zoomed-out Calendar (48 points an hour), where it spans 55 minutes; at every closer
+ * zoom the target is inside that span, so two Review items never share one at any zoom. What is
+ * drawn keeps the real times. This mirrors DayframeCalendarBlockMath / VerticalMath in
+ * DayframeCalendarCore.swift exactly (DayframeCalendarCoreTests checks the same boundary cases).
  */
 export const REVIEW_LANE_TARGET_MS = 55 * 60_000;
+/** iOS draws a block at least 4 points tall: 5 minutes at 48 points an hour. */
+export const REVIEW_LANE_MIN_VISIBLE_MS = 5 * 60_000;
 
 /** The time a Review item's tap target covers at the most zoomed-out Calendar. */
 export function reviewTargetEnvelope(startMs: number, endMs: number, dayStartMs: number, dayEndMs: number) {
   const start = Math.max(dayStartMs, startMs);
   const end = Math.min(dayEndMs, Math.max(start, endMs));
   if (end - start >= REVIEW_LANE_TARGET_MS) return { start, end };
-  const middle = (start + end) / 2;
+  // Centred on the drawn block, which starts at the real start and is at least 4 points tall.
+  const middle = start + Math.max(end - start, REVIEW_LANE_MIN_VISIBLE_MS) / 2;
   const envelopeStart = Math.min(Math.max(dayStartMs, middle - REVIEW_LANE_TARGET_MS / 2), dayEndMs - REVIEW_LANE_TARGET_MS);
   return { start: envelopeStart, end: envelopeStart + REVIEW_LANE_TARGET_MS };
 }
