@@ -78,7 +78,7 @@ describe("Calendar position after leaving and returning", () => {
     document.body.innerHTML = "";
   });
 
-  it.each(["list", "timesheet"])("restores where the user left the calendar after visiting %s", async (otherView) => {
+  it.each(["list"])("restores where the user left the calendar after visiting %s", async (otherView) => {
     let view: ReturnType<typeof render> | undefined;
     await act(async () => {
       view = render(createElement(TimeReviewViews, { initialData: bootstrap(), initialPreference: null, renderedAt: new Date().toISOString() }));
@@ -103,7 +103,7 @@ describe("Timeline hydration with a running timer", () => {
     document.body.innerHTML = "";
   });
 
-  it.each(["calendar", "list", "timesheet"])("hydrates the %s view a minute after the server render without a mismatch", async (viewName) => {
+  it.each(["calendar", "list"])("hydrates the %s view a minute after the server render without a mismatch", async (viewName) => {
     navigation.search = `date=2026-10-06&scope=week&view=${viewName}`;
     installDom();
     const renderedAt = new Date(2026, 9, 6, 16, 30, 0, 250).toISOString();

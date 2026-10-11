@@ -959,14 +959,6 @@ textarea.ui-control {
   outline-offset: 2px;
 }
 
-.timeline-task-category-dot {
-  width: 12px;
-  height: 12px;
-  margin: calc((var(--timeline-task-primary-height) - 12px) / 2) 0 0;
-  align-self: start;
-  border: 0;
-  border-radius: 999px;
-}
 
 .category-data-marker {
   width: 12px;
@@ -976,7 +968,6 @@ textarea.ui-control {
   border-radius: 999px;
 }
 
-.timeline-task-category-dot.is-uncategorized,
 .category-data-marker.is-uncategorized {
   border: 1px solid var(--text-secondary);
 }
@@ -1225,22 +1216,15 @@ textarea.ui-control {
   grid-template-columns: auto minmax(0, 1fr);
 }
 
-.timeline-entry-highlight {
-  background: var(--accent-soft) !important;
-  box-shadow: inset 3px 0 0 var(--accent);
+/* The ?entry= deep link: the row's cells carry the highlight (they paint over the row), with a
+   neutral edge on the first cell; hovering keeps it. */
+.timeline-list-row.timeline-entry-highlight > td,
+.timeline-list-row.timeline-entry-highlight:hover > td {
+  background: color-mix(in srgb, var(--foreground) 12%, var(--surface-inset));
 }
 
-.timeline-entry-actions-popover {
-  position: fixed;
-  z-index: 120;
-}
-
-.timeline-entry-actions-popover button {
-  color: var(--foreground);
-}
-
-.timeline-entry-actions-popover button.is-danger {
-  color: var(--danger);
+.timeline-list-row.timeline-entry-highlight > td:first-child {
+  box-shadow: inset 3px 0 0 var(--focus);
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -6834,8 +6818,7 @@ kbd {
 }
 
 .timeline-calendar-workspace,
-.timeline-list-workspace,
-.timeline-timesheet-workspace {
+.timeline-list-workspace {
   display: flex;
   min-width: 0;
   min-height: 0;
@@ -6865,8 +6848,7 @@ kbd {
 }
 
 .calendar-grid-scroller,
-.timeline-list-scroll,
-.timeline-timesheet-scroll {
+.timeline-list-scroll {
   min-width: 0;
   min-height: 0;
   flex: 1 1 auto;
@@ -6925,13 +6907,11 @@ kbd {
   background-color: var(--surface);
 }
 
-.timeline-list-scroll,
-.timeline-timesheet-scroll {
+.timeline-list-scroll {
   overflow: auto;
 }
 
-.timeline-list-table,
-.timeline-timesheet-table {
+.timeline-list-table {
   width: 100%;
   min-width: 640px;
   border-collapse: separate;
@@ -6939,8 +6919,7 @@ kbd {
   font-size: 14px;
 }
 
-.timeline-list-table th,
-.timeline-timesheet-table th {
+.timeline-list-table th {
   position: sticky;
   top: 0;
   z-index: 2;
@@ -6966,41 +6945,11 @@ kbd {
   font-weight: 650;
 }
 
-.timeline-timesheet-table {
-  min-width: 980px;
-}
 
-.timeline-timesheet-table td {
-  min-width: 96px;
-  border-right: 1px solid var(--line);
-  border-bottom: 1px solid var(--line);
-  padding: var(--web-table-cell-padding-block) var(--web-table-cell-padding-inline);
-  color: var(--muted);
-}
 
-.timeline-timesheet-table th {
-  min-width: 96px;
-  border-right: 1px solid var(--line);
-}
 
-.timeline-timesheet-activity-cell {
-  position: sticky;
-  left: 0;
-  z-index: 3;
-  min-width: 160px !important;
-  background: var(--surface);
-  color: var(--foreground) !important;
-}
 
-.timeline-timesheet-table thead .timeline-timesheet-activity-cell {
-  z-index: 4;
-  background: var(--surface-inset);
-}
 
-.timeline-timesheet-total {
-  color: var(--accent-text) !important;
-  font-weight: 700;
-}
 
 .swiss-day-header,
 .swiss-list-header {
@@ -9020,8 +8969,7 @@ dialog.ui-dialog.manual-entry-dialog {
 }
 
 .timeline-calendar-workspace,
-.timeline-list-workspace,
-.timeline-timesheet-workspace {
+.timeline-list-workspace {
   border-radius: 0 0 24px 24px;
   background: transparent;
 }
@@ -9106,16 +9054,16 @@ dialog.ui-dialog.manual-entry-dialog {
   box-shadow: 0 -1px 0 var(--line);
 }
 
-.timeline-list-table th:nth-child(2) {
+.timeline-list-table col.timeline-list-col-time {
   width: 20%;
 }
 
-.timeline-list-table th:nth-child(3) {
+.timeline-list-table col.timeline-list-col-duration {
   width: 13%;
 }
 
-.timeline-list-table th:nth-child(4) {
-  width: 116px;
+.timeline-list-table col.timeline-list-col-actions {
+  width: 176px;
 }
 
 .timeline-task-cell {
@@ -9344,8 +9292,7 @@ dialog.ui-dialog.manual-entry-dialog {
   }
 
   .timeline-calendar-workspace,
-  .timeline-list-workspace,
-  .timeline-timesheet-workspace {
+  .timeline-list-workspace {
     border-radius: 0 0 20px 20px;
   }
 }
@@ -13383,4 +13330,100 @@ dialog.ui-dialog.df-rf-dialog {
     width: 28px;
     height: 28px;
   }
+}
+
+/* Calendar › List in Blocks (owner on UIA-203: like Today's blocks). Rows are fill rows with the
+   activity block and icon, neutral bold durations and icon actions; repeats stay grouped. */
+.timeline-list-head {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+
+.timeline-list-table {
+  border-spacing: 0 6px;
+  padding: 0 12px 12px;
+}
+
+.timeline-list-table .timeline-list-day-heading > td {
+  top: 0;
+  box-shadow: none;
+  border-bottom: 0;
+  background: var(--surface);
+  padding: 14px 6px 4px;
+  color: var(--foreground);
+  font-family: var(--font-display);
+  font-size: 15px;
+  font-weight: 750;
+}
+
+.timeline-list-day-heading > td > span + span {
+  float: right;
+  color: var(--text-secondary);
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 650;
+}
+
+.timeline-list-row > td {
+  background: var(--surface-inset);
+  transition: background-color 140ms ease-out;
+}
+
+.timeline-list-row > td:first-child {
+  border-radius: 14px 0 0 14px;
+}
+
+.timeline-list-row > td:last-child {
+  border-radius: 0 14px 14px 0;
+}
+
+.timeline-list-row:hover > td {
+  background: var(--surface-muted);
+}
+
+.timeline-task-block {
+  display: grid;
+  width: 30px;
+  height: 30px;
+  flex: none;
+  place-items: center;
+  /* Centred on the row's primary line, like the group count beside it. */
+  margin-top: calc((var(--timeline-task-primary-height) - 30px) / 2);
+  align-self: start;
+  border-radius: 9px;
+  background: var(--surface-muted);
+  color: var(--text-secondary);
+}
+
+.timeline-task-block.df-block {
+  background: var(--block);
+  color: var(--on-block);
+}
+
+.timeline-list-duration {
+  color: var(--foreground);
+  font-weight: 750;
+}
+
+.timeline-list-actions .df-icon-action {
+  width: 44px;
+  height: 44px;
+  min-width: 44px;
+  min-height: 44px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .timeline-list-row > td {
+    transition: none;
+  }
+}
+
+.timeline-list-continued > td {
+  padding: 4px 8px 8px;
+  color: var(--text-secondary);
+  font-size: 13px;
 }

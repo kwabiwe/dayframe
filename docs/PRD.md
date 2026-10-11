@@ -50,7 +50,7 @@ Core Functionality:
 
 - ✅ Web and mobile manual timer start/stop/switch with live active timer sync. Mobile Stop is accepted only after an exact, account-owned Stop intent is durable on device; server delivery is entry-scoped, idempotent, bounded, and safe to replay after relaunch. Already-started durable timer saves receive best-effort finite iOS background time, while offline, expiry and force-quit continue through the same durable recovery path.
 - ✅ Description, category, place, source, confidence, and review status on time entries.
-- ✅ Calendar, List, and Timesheet review views.
+- ✅ Calendar and List review views (Timesheet removed 11 Oct 2026, owner decision: Reports covers weekly totals and the CSV export).
 - ✅ Review inbox for ambiguous geofence/health/location suggestions.
 - ✅ Auto-start for trusted places only.
 - ✅ Conservative suggestions for broad/ambiguous places.
@@ -119,7 +119,7 @@ Deployment:
    - Example: Review opens from the last account-owned snapshot, cached private Location Evidence remains usable for up to seven days, and every resolving/structural Location action (including save-place, record-once, split and merge), Confirm, Dismiss, or complete Edit-and-confirm disappears after its account-owned SQLite commit while Dayframe retries the canonical server mutation later.
    - Nearby/search lookup and the compatibility-only pure place-change action require a bounded live connection. Resolving and structural corrections preserve the exact selected action in the account-owned outbox; offline support must never substitute a different action or expose another account's cached Review/location evidence.
 
-7. As a user reviewing time, I want Calendar, List, and Timesheet views, so that I can edit precise entries and understand daily/weekly totals.
+7. As a user reviewing time, I want Calendar and List views, so that I can edit precise entries and understand daily/weekly totals (the Calendar head shows the day's framed time and the week's total).
    - Example: Resize/edit a time block, delete an accidental entry, and review weekly totals by category.
 
 8. As the product owner, I want an explainable way to assess automation quality without exposing sensitive context.
@@ -204,7 +204,7 @@ Timeline/review:
 
 - Calendar view with time blocks.
 - List view with chronological grouped entries and edit/delete/start-again actions.
-- Timesheet view with weekly grouped totals.
+- Weekly grouped totals live in Reports (the Calendar Timesheet view was removed on 11 Oct 2026).
 - Review inbox for suggestions, ignored items, and rule creation.
 
 Mobile Reports:
