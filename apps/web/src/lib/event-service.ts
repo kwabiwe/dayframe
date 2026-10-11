@@ -1,6 +1,7 @@
 import { inspectHealthSourceRevision, type HealthSourceDecision } from "./health-source-provenance";
 import { withSyncTransaction, setSyncPhase, syncFailureMetadata, SyncOperationError, type SyncTransactionOptions } from "./sync-transaction";
 import {
+  defaultCountsTowardGoal,
   ActivityEventInputSchema,
   hasAutomaticConfidence,
   classifyLocationLearningEvidence,
@@ -108,9 +109,11 @@ type CategoryRowLike = {
   isPinned: boolean;
   icon?: string | null;
   starterKey?: string | null;
+  countsTowardGoal: boolean;
 };
 
-const CATEGORY_RETURNING = 'returning id, name, color, is_pinned as "isPinned", icon, starter_key as "starterKey"';
+const CATEGORY_COLUMNS = 'id, name, color, is_pinned as "isPinned", icon, starter_key as "starterKey", counts_toward_goal as "countsTowardGoal"';
+const CATEGORY_RETURNING = `returning ${CATEGORY_COLUMNS}`;
 
 type PlaceRowLike = {
   id: string;
@@ -1244,6 +1247,8 @@ export async function createCategory(
     color?: string | null;
     isPinned?: boolean;
     icon?: string | null;
+    /** Left out, a new activity counts toward the goal unless it is named Sleep. */
+    countsTowardGoal?: boolean;
   },
   session: RequestSession = getDevSession()
 ) {
@@ -1277,15 +1282,16 @@ export async function createCategory(
       (await pinnedCategoryCount(client, session.workspaceId, null)) < QUICK_START_PIN_LIMIT;
 
     const result = await client.query<CategoryRowLike>(
-      `insert into categories (workspace_id, name, color, is_pinned, icon)
-       values ($1, $2, $3, $4, $5)
+      `insert into categories (workspace_id, name, color, is_pinned, icon, counts_toward_goal)
+       values ($1, $2, $3, $4, $5, $6)
        ${CATEGORY_RETURNING}`,
       [
         session.workspaceId,
         name,
         color,
         pin,
-        icon
+        icon,
+        input.countsTowardGoal ?? defaultCountsTowardGoal(name)
       ]
     );
 
@@ -1334,6 +1340,8 @@ export async function updateCategory(
     color?: string | null;
     isPinned?: boolean;
     icon?: string | null;
+    /** Whether the activity's time fills the daily goal (UIA-043). */
+    countsTowardGoal?: boolean;
     /** false restores an archived activity (Blocks 6b-2); archiving stays DELETE. */
     isArchived?: false;
   },
@@ -1343,6 +1351,7 @@ export async function updateCategory(
   const hasName = Object.prototype.hasOwnProperty.call(input, "name");
   const hasColor = Object.prototype.hasOwnProperty.call(input, "color");
   const hasIsPinned = Object.prototype.hasOwnProperty.call(input, "isPinned");
+  const hasCountsTowardGoal = typeof input.countsTowardGoal === "boolean";
   const restoreRequested = input.isArchived === false;
   const normalizedName = hasName ? normalizeName(input.name, "Activity") : null;
   const normalizedColor = hasColor
@@ -1445,7 +1454,8 @@ export async function updateCategory(
            is_pinned = case when $11 then false when $7 then $8 else is_pinned end,
            icon = case when $9 then $10 else icon end,
            is_archived = case when $11 then false else is_archived end,
-           starter_key = case when $12 then null else starter_key end
+           starter_key = case when $12 then null else starter_key end,
+           counts_toward_goal = case when $13 then $14 else counts_toward_goal end
        where id = $1 and workspace_id = $2
        ${CATEGORY_RETURNING}`,
       [
@@ -1460,7 +1470,9 @@ export async function updateCategory(
         hasIcon,
         hasIcon && isActivityIconKey(input.icon) ? input.icon : null,
         restoring,
-        dropStarterKey
+        dropStarterKey,
+        hasCountsTowardGoal,
+        input.countsTowardGoal !== false
       ]
     );
 
@@ -1495,7 +1507,7 @@ async function pinnedCategoryCount(
 /** Archived activities, for Settings › Activities › Archived (Blocks 6b-2). */
 export async function listArchivedCategories(session: RequestSession = getDevSession()) {
   const result = await query<CategoryRowLike>(
-    `select id, name, color, is_pinned as "isPinned", icon, starter_key as "starterKey"
+    `select ${CATEGORY_COLUMNS}
      from categories
      where workspace_id = $1 and is_archived = true
      order by lower(name), id`,

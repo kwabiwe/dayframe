@@ -11,17 +11,18 @@ import {
   useState,
   useTransition
 } from "react";
-import { createPortal, flushSync } from "react-dom";
+import { flushSync } from "react-dom";
 import { useRouter, useSearchParams } from "next/navigation";
-import { Ellipsis, Minus, Pencil, Play, Trash2 } from "lucide-react";
-import { analyzeTimeIntervals, type TimeIntervalAnalysisEntry } from "@dayframe/shared";
+import { Minus } from "lucide-react";
+import { analyzeTimeIntervals, resolveActivityIcon, type TimeIntervalAnalysisEntry } from "@dayframe/shared";
+import { DayframeIcon } from "@/components/blocks/DayframeIcon";
+import { blockStyle } from "@/lib/block-style";
 import { useAppShellRuntime } from "@/components/AppShellRuntime";
 import { DatePickerPopover } from "@/components/DatePickerPopover";
 import { saveTimeEntryQuickEdit, TimeEntryQuickEditorModal } from "@/components/TimeEntryQuickEditor";
 import { TagMetadata } from "@/components/TagMetadata";
-import { IconButton } from "@/components/ui/Primitives";
 import { clientFetch } from "@/lib/client-auth-fetch";
-import { timeEntryCategoryColor, timeEntryCategoryLabel, timeEntryTitle } from "@/lib/display";
+import { timeEntryCategoryLabel, timeEntryTitle } from "@/lib/display";
 import type { CategoryRow, TagRow, TimeEntryRow } from "@/lib/queries";
 import {
   dateTimeLocal,
@@ -281,6 +282,22 @@ export function EntriesTable({
       )
     }));
   }, [capturedNow, displayRange, displayedEntries]);
+  // Each day heading carries that day's time: every block's shown interval clipped to the local day
+  // (an overnight block counts on both days; a running one up to the captured time).
+  const dayTotals = useMemo(
+    () => listDayTotals(displayedEntries.map((entry) => timelineEntryDisplayInterval(entry, displayRange, capturedNow)), capturedNow, formatDate),
+    [capturedNow, displayRange, displayedEntries]
+  );
+  const categoriesById = useMemo(() => new Map(categories.map((category) => [category.id, category])), [categories]);
+  // Days that only continue a block started earlier (overnight, or still running) have time but no
+  // row of their own; they still get a heading with their total, in date order (newest first).
+  const continuedDays = useMemo(() => {
+    const groupDays = new Set(grouped.map((group) => group.day));
+    return [...dayTotals.entries()]
+      .filter(([label]) => !groupDays.has(label))
+      .map(([label, total]) => ({ label, ...total }))
+      .sort((left, right) => right.dayStartMs - left.dayStartMs);
+  }, [dayTotals, grouped]);
 
   useEffect(() => {
     if (!highlightedEntryId) return;
@@ -696,12 +713,20 @@ export function EntriesTable({
         }}
       >
         <table className="timeline-list-table">
-          <thead className="bg-[var(--surface-inset)] text-left text-xs text-[var(--muted)]">
+          {/* Column names stay for screen readers; the rows read as Blocks rows (as on Today). */}
+          {/* Column widths live here: the header row is visually hidden, so it can't size the columns. */}
+          <colgroup>
+            <col className="timeline-list-col-block" />
+            <col className="timeline-list-col-time" />
+            <col className="timeline-list-col-duration" />
+            <col className="timeline-list-col-actions" />
+          </colgroup>
+          <thead className="timeline-list-head">
             <tr>
-              <th className="border-b border-[var(--line)] px-3 py-3">Task</th>
-              <th className="border-b border-[var(--line)] px-3 py-3">Time</th>
-              <th className="border-b border-[var(--line)] px-3 py-3">Duration</th>
-              <th className="border-b border-[var(--line)] px-3 py-3">Actions</th>
+              <th>Block</th>
+              <th>Time</th>
+              <th>Duration</th>
+              <th>Actions</th>
             </tr>
           </thead>
           <tbody>
@@ -729,16 +754,23 @@ export function EntriesTable({
                 : undefined;
               return (
                 <Fragment key={group.key}>
+                  {shouldShowDate
+                    ? continuedDays
+                      .filter((day) => day.dayStartMs > (dayTotals.get(group.day)?.dayStartMs ?? 0) &&
+                        (previousDate === null || day.dayStartMs < (dayTotals.get(previousDate)?.dayStartMs ?? Infinity)))
+                      .map((day) => <ContinuedDayRows day={day} key={`continued-${day.label}`} />)
+                    : null}
                   {shouldShowDate ? (
                     <tr key={`${group.day}-${entry.id}-group`} className="timeline-list-day-heading">
                       <td colSpan={4}>
-                        {group.day}
+                        <span>{group.day}</span>
+                        <span className="tabular">{formatDuration(dayTotals.get(group.day)?.seconds ?? 0)}</span>
                       </td>
                     </tr>
                   ) : null}
                 <tr
                   className={[
-                    "motion-row border-b border-[var(--line)] align-middle last:border-b-0 hover:bg-[var(--surface-strong)]",
+                    "motion-row timeline-list-row align-middle",
                     highlightedEntryId === entry.id && !isGrouped ? "timeline-entry-highlight" : ""
                   ].join(" ")}
                   data-timeline-group-key={group.key}
@@ -762,11 +794,7 @@ export function EntriesTable({
                           {group.entries.length}
                         </button>
                       ) : null}
-                      <span
-                        aria-hidden="true"
-                        className={`timeline-task-category-dot${entry.categoryName ? "" : " is-uncategorized"}`}
-                        style={{ backgroundColor: timeEntryCategoryColor(entry) }}
-                      />
+                      <ListBlockMark category={entry.categoryId ? categoriesById.get(entry.categoryId) ?? null : null} entry={entry} />
                       <span className="timeline-task-details">
                         <span className="timeline-task-primary-line">
                           {renderInlineDescription(entry, groupEditTarget)}
@@ -808,33 +836,44 @@ export function EntriesTable({
                         : renderInlineTime(entry, displayInterval)}
                     </div>
                   </td>
-                  <td className="tabular px-3 py-3 font-semibold text-[var(--accent-text)]">
+                  <td className="tabular px-3 py-3 timeline-list-duration">
                     <div className="timeline-list-duration-content">
                       {isGrouped ? formatDuration(group.totalSeconds) : renderDuration(entry, group.totalSeconds)}
                     </div>
                   </td>
                   <td className="px-3 py-3">
                     <div className="timeline-list-actions">
-                      <IconButton
+                      <button
+                        className="df-icon-action"
                         disabled={isPending || Boolean(continuingEntryId)}
-                        label={!entry.stoppedAt
+                        aria-label={!entry.stoppedAt
                           ? `Restart ${timeEntryTitle(entry)} from zero`
                           : isGrouped
                             ? `Start ${timeEntryTitle(entry)} from this group again`
                             : `Start ${timeEntryTitle(entry)} again`}
                         onClick={() => continueEntry(entry)}
+                        type="button"
                       >
-                        <Play size={15} fill="currentColor" strokeWidth={0} />
-                      </IconButton>
-                      <EntryActionsMenu
-                        deleteLabel={isGrouped ? "Delete whole group" : "Delete"}
-                        editLabel={isGrouped ? "Edit latest occurrence" : "Edit"}
-                        label={`More actions for ${timeEntryTitle(entry)}`}
-                        onDelete={() => {
-                          onDeleteEntries(isGrouped ? group.entries : [entry]);
-                        }}
-                        onEdit={() => openFullEditor(entry)}
-                      />
+                        <DayframeIcon glyph="rotate-ccw" size={16} />
+                      </button>
+                      <button
+                        className="df-icon-action"
+                        aria-label={isGrouped ? `Edit the latest ${timeEntryTitle(entry)}` : `Edit ${timeEntryTitle(entry)}`}
+                        onClick={() => openFullEditor(entry)}
+                        type="button"
+                      >
+                        <DayframeIcon glyph="pencil" size={16} />
+                      </button>
+                      <button
+                        className="df-icon-action"
+                        aria-label={isGrouped
+                          ? `Delete all ${group.entries.length} ${timeEntryTitle(entry)} blocks`
+                          : `Delete ${timeEntryTitle(entry)}`}
+                        onClick={() => onDeleteEntries(isGrouped ? group.entries : [entry])}
+                        type="button"
+                      >
+                        <DayframeIcon glyph="trash-2" size={16} />
+                      </button>
                     </div>
                   </td>
                 </tr>
@@ -843,17 +882,13 @@ export function EntriesTable({
                   const highlighted = highlightedEntryId === occurrence.id;
                   return (
                     <tr
-                      className={`timeline-occurrence-row motion-row border-b border-[var(--line)] align-middle${highlighted ? " timeline-entry-highlight" : ""}`}
+                      className={`timeline-occurrence-row motion-row timeline-list-row align-middle${highlighted ? " timeline-entry-highlight" : ""}`}
                       id={`timeline-entry-${occurrence.id}`}
                       key={occurrence.id}
                     >
                       <td className="px-3 py-3">
                         <div className="timeline-task-cell timeline-occurrence-task">
-                          <span
-                            aria-hidden="true"
-                            className={`timeline-task-category-dot${occurrence.categoryName ? "" : " is-uncategorized"}`}
-                            style={{ backgroundColor: timeEntryCategoryColor(occurrence) }}
-                          />
+                          <ListBlockMark category={occurrence.categoryId ? categoriesById.get(occurrence.categoryId) ?? null : null} entry={occurrence} />
                           <span className="timeline-task-details">
                             <span className="timeline-task-primary-line">
                               {renderInlineDescription(occurrence)}
@@ -886,22 +921,29 @@ export function EntriesTable({
                           {renderInlineTime(occurrence, occurrenceInterval)}
                         </div>
                       </td>
-                      <td className="tabular px-3 py-3 font-semibold text-[var(--accent-text)]">
+                      <td className="tabular px-3 py-3 timeline-list-duration">
                         <div className="timeline-list-duration-content">
                           {renderDuration(occurrence, intervalSeconds(occurrenceInterval, capturedNow))}
                         </div>
                       </td>
                       <td className="px-3 py-3">
                         <div className="timeline-list-actions">
-                          <EntryActionsMenu
-                            deleteLabel="Delete"
-                            editLabel="Edit"
-                            label={`More actions for ${timeEntryTitle(occurrence)} occurrence`}
-                            onDelete={() => {
-                              onDeleteEntries([occurrence]);
-                            }}
-                            onEdit={() => openFullEditor(occurrence)}
-                          />
+                          <button
+                            className="df-icon-action"
+                            aria-label={`Edit this ${timeEntryTitle(occurrence)}`}
+                            onClick={() => openFullEditor(occurrence)}
+                            type="button"
+                          >
+                            <DayframeIcon glyph="pencil" size={16} />
+                          </button>
+                          <button
+                            className="df-icon-action"
+                            aria-label={`Delete this ${timeEntryTitle(occurrence)}`}
+                            onClick={() => onDeleteEntries([occurrence])}
+                            type="button"
+                          >
+                            <DayframeIcon glyph="trash-2" size={16} />
+                          </button>
                         </div>
                       </td>
                     </tr>
@@ -910,6 +952,11 @@ export function EntriesTable({
                 </Fragment>
               );
             })}
+            {groupByDay && grouped.length
+              ? continuedDays
+                .filter((day) => day.dayStartMs < (dayTotals.get(grouped[grouped.length - 1].day)?.dayStartMs ?? -Infinity))
+                .map((day) => <ContinuedDayRows day={day} key={`continued-${day.label}`} />)
+              : null}
           </tbody>
         </table>
       </div>
@@ -963,114 +1010,66 @@ function overlapMarkerDescription(
   }${peerDetail}. ${timeEntryTitle(entry)} still counts in full towards Total logged.`;
 }
 
-function EntryActionsMenu({
-  deleteLabel,
-  editLabel,
-  label,
-  onDelete,
-  onEdit
-}: {
-  deleteLabel: string;
-  editLabel: string;
-  label: string;
-  onDelete: () => void;
-  onEdit: () => void;
-}) {
-  const [open, setOpen] = useState(false);
-  const [position, setPosition] = useState({ right: 12, top: 0 });
-  const triggerRef = useRef<HTMLButtonElement | null>(null);
-  const menuRef = useRef<HTMLDivElement | null>(null);
+export type ListDayTotal = { dayStartMs: number; seconds: number };
 
-  useEffect(() => {
-    if (!open) return undefined;
-    const frame = window.requestAnimationFrame(() => {
-      menuRef.current?.querySelector<HTMLButtonElement>('[role="menuitem"]')?.focus();
-    });
-    function closeOnOutside(event: MouseEvent) {
-      const target = event.target as Node;
-      if (!triggerRef.current?.contains(target) && !menuRef.current?.contains(target)) {
-        setOpen(false);
-        triggerRef.current?.focus();
+/** Time per local day (keyed by the List's day label) across intervals, each clipped to its days. */
+export function listDayTotals(
+  intervals: ReadonlyArray<{ startedAt: string; stoppedAt: string | null }>,
+  capturedNow: Date,
+  dayLabel: (iso: string) => string
+) {
+  const totals = new Map<string, ListDayTotal>();
+  for (const interval of intervals) {
+    const start = Date.parse(interval.startedAt);
+    const end = interval.stoppedAt ? Date.parse(interval.stoppedAt) : capturedNow.getTime();
+    if (!(end > start)) continue;
+    const cursor = new Date(start);
+    cursor.setHours(0, 0, 0, 0);
+    while (cursor.getTime() < end) {
+      const next = new Date(cursor);
+      next.setDate(next.getDate() + 1);
+      const from = Math.max(start, cursor.getTime());
+      const to = Math.min(end, next.getTime());
+      if (to > from) {
+        const key = dayLabel(new Date(from).toISOString());
+        const current = totals.get(key) ?? { dayStartMs: cursor.getTime(), seconds: 0 };
+        current.seconds += Math.floor((to - from) / 1000);
+        totals.set(key, current);
       }
+      cursor.setTime(next.getTime());
     }
-    function closeOnEscape(event: KeyboardEvent) {
-      if (event.key !== "Escape") return;
-      event.preventDefault();
-      setOpen(false);
-      triggerRef.current?.focus();
-    }
-    document.addEventListener("mousedown", closeOnOutside);
-    document.addEventListener("keydown", closeOnEscape);
-    return () => {
-      window.cancelAnimationFrame(frame);
-      document.removeEventListener("mousedown", closeOnOutside);
-      document.removeEventListener("keydown", closeOnEscape);
-    };
-  }, [open]);
+  }
+  return totals;
+}
 
+/** A day that only continues an earlier block: its heading and total, and a note saying so. */
+function ContinuedDayRows({ day }: { day: { label: string; seconds: number } }) {
   return (
     <>
-      <IconButton
-        aria-expanded={open}
-        aria-haspopup="menu"
-        label={label}
-        onClick={() => {
-          const rect = triggerRef.current?.getBoundingClientRect();
-          if (rect) {
-            const opensBelow = window.innerHeight - rect.bottom >= 124;
-            setPosition({
-              right: Math.max(12, window.innerWidth - rect.right),
-              top: opensBelow ? rect.bottom + 8 : Math.max(12, rect.top - 108)
-            });
-          }
-          setOpen((current) => !current);
-        }}
-        ref={triggerRef}
-      >
-        <Ellipsis size={18} />
-      </IconButton>
-      {open && typeof document !== "undefined" ? createPortal(
-        <div
-          className="ui-floating-surface swiss-timer-actions-menu timeline-entry-actions-popover is-open"
-          ref={menuRef}
-          role="menu"
-          style={{ right: position.right, top: position.top }}
-          onKeyDown={(event) => {
-            if (event.key !== "ArrowDown" && event.key !== "ArrowUp") return;
-            event.preventDefault();
-            const items = [...event.currentTarget.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')];
-            const index = items.indexOf(document.activeElement as HTMLButtonElement);
-            const delta = event.key === "ArrowDown" ? 1 : -1;
-            items[(index + delta + items.length) % items.length]?.focus();
-          }}
-        >
-          <button
-            onClick={() => {
-              setOpen(false);
-              onEdit();
-            }}
-            role="menuitem"
-            type="button"
-          >
-            <Pencil aria-hidden="true" size={16} />
-            {editLabel}
-          </button>
-          <button
-            className="is-danger"
-            onClick={() => {
-              setOpen(false);
-              onDelete();
-            }}
-            role="menuitem"
-            type="button"
-          >
-            <Trash2 aria-hidden="true" size={16} />
-            {deleteLabel}
-          </button>
-        </div>,
-        document.body
-      ) : null}
+      <tr className="timeline-list-day-heading">
+        <td colSpan={4}>
+          <span>{day.label}</span>
+          <span className="tabular">{formatDuration(day.seconds)}</span>
+        </td>
+      </tr>
+      <tr className="timeline-list-continued">
+        <td colSpan={4}>Continues from the day before</td>
+      </tr>
     </>
+  );
+}
+
+/** The activity block with its icon (as on Today's rows); no activity is a neutral block. */
+function ListBlockMark({ category, entry }: { category: CategoryRow | null; entry: TimeEntryRow }) {
+  const glyph = resolveActivityIcon({ icon: category?.icon ?? null, name: entry.categoryName }).glyph;
+  return (
+    <span
+      aria-hidden="true"
+      className={`timeline-task-block${entry.categoryId ? " df-block" : ""}`}
+      style={entry.categoryId ? blockStyle(entry.categoryColor, entry.categoryName ?? "") : undefined}
+    >
+      <DayframeIcon glyph={entry.categoryId ? glyph : "tag"} size={14} />
+    </span>
   );
 }
 

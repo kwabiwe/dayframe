@@ -21,6 +21,8 @@ import {
   type PlaceRole,
   type placeRoleRequest
 } from "@dayframe/shared";
+import { BlocksNavHeader, usePreviousScreenLabel } from "@/components/BlocksNavHeader";
+import { BlocksConfirmHost, useBlocksConfirm, type BlocksConfirmController } from "@/components/blocks/BlocksConfirmSheet";
 import { DayframeIcon } from "@/components/icons/DayframeIcon";
 import { PlaceRoleSheet, type PlaceRoleSheetMode } from "@/components/places/PlaceRoleSheet";
 import { SettingsBlockGroup, SettingsPillButton } from "@/components/settings/SettingsBlocks";
@@ -61,8 +63,12 @@ import {
 type Category = MobileBootstrap["categories"][number];
 
 export default function PlacesScreen() {
+  const backLabel = usePreviousScreenLabel() ?? "Settings";
   const reduceMotion = useReduceMotionPreference();
   const { styles, theme } = useMobileTheme();
+  // Ignore/Forget are asked from the learned-place sheet, which presents this controller's sheet
+  // over its own modal (UIA-005).
+  const confirmSheet = useBlocksConfirm();
   const [data, setData] = useState<MobileBootstrap | null>(null);
   const dataRef = useRef(data);
   dataRef.current = data;
@@ -166,21 +172,18 @@ export default function PlacesScreen() {
     learnedPlace: MobileLearnedPlace,
     onSuccess?: () => void
   ) {
-    Alert.alert(
-      "Ignore learned place",
-      "Ignore hides this learned location from save suggestions. It will not create or confirm any time entries.",
-      [
-        { text: "Cancel", style: "cancel" },
-        {
-          text: "Ignore",
-          onPress: () => {
-            void ignoreLearnedCandidate(learnedPlace).then((succeeded) => {
-              if (succeeded) onSuccess?.();
-            });
-          }
-        }
-      ]
-    );
+    confirmSheet.confirm({
+      eyebrow: "Place suggestion",
+      title: "Ignore learned place?",
+      message: "Ignore hides this learned location from save suggestions. It will not create or confirm any time entries.",
+      confirmLabel: "Ignore",
+      tone: "neutral",
+      onConfirm: () => {
+        void ignoreLearnedCandidate(learnedPlace).then((succeeded) => {
+          if (succeeded) onSuccess?.();
+        });
+      }
+    });
   }
 
   async function ignoreLearnedCandidate(learnedPlace: MobileLearnedPlace) {
@@ -211,22 +214,18 @@ export default function PlacesScreen() {
     learnedPlace: MobileLearnedPlace,
     onSuccess?: () => void
   ) {
-    Alert.alert(
-      "Forget learned place",
-      "Forget deletes this learned candidate. Dayframe may learn it again later if future visits provide enough evidence.",
-      [
-        { text: "Cancel", style: "cancel" },
-        {
-          text: "Forget",
-          style: "destructive",
-          onPress: () => {
-            void forgetLearnedCandidate(learnedPlace).then((succeeded) => {
-              if (succeeded) onSuccess?.();
-            });
-          }
-        }
-      ]
-    );
+    confirmSheet.confirm({
+      eyebrow: "Place suggestion",
+      title: "Forget learned place?",
+      message: "Forget deletes this learned candidate. Dayframe may learn it again later if future visits provide enough evidence.",
+      confirmLabel: "Forget",
+      confirmHint: "This can't be undone.",
+      onConfirm: () => {
+        void forgetLearnedCandidate(learnedPlace).then((succeeded) => {
+          if (succeeded) onSuccess?.();
+        });
+      }
+    });
   }
 
   async function forgetLearnedCandidate(learnedPlace: MobileLearnedPlace) {
@@ -353,19 +352,7 @@ export default function PlacesScreen() {
 
   return (
     <SafeAreaView style={styles.safeArea}>
-      <View style={styles.settingsFloatingHeader}>
-        <View style={styles.settingsHeader}>
-          <Pressable
-            accessibilityLabel="Back"
-            accessibilityRole="button"
-            style={pressable(styles.iconButton, styles.buttonPressed)}
-            onPress={() => router.back()}
-          >
-            <BackGlyph color={theme.accent} />
-          </Pressable>
-          <Text style={styles.settingsTitle} numberOfLines={1}>Places</Text>
-        </View>
-      </View>
+      <BlocksNavHeader backLabel={backLabel} onBack={() => router.back()} title="Saved places" />
       <ScrollView
         style={styles.settingsScrollView}
         contentContainerStyle={styles.settingsScrollContent}
@@ -525,6 +512,7 @@ export default function PlacesScreen() {
       </ScrollView>
       <LearnedPlaceDetailSheet
         categories={categories}
+        confirmSheet={confirmSheet}
         forgetting={Boolean(selectedLearnedPlace && forgettingLearnedId === selectedLearnedPlace.id)}
         ignoring={Boolean(selectedLearnedPlace && ignoringLearnedId === selectedLearnedPlace.id)}
         learnedPlace={selectedLearnedPlace}
@@ -556,6 +544,7 @@ export default function PlacesScreen() {
 
 function LearnedPlaceDetailSheet({
   categories,
+  confirmSheet,
   forgetting,
   ignoring,
   learnedPlace,
@@ -568,6 +557,7 @@ function LearnedPlaceDetailSheet({
   theme
 }: {
   categories: Category[];
+  confirmSheet: BlocksConfirmController;
   forgetting: boolean;
   ignoring: boolean;
   learnedPlace: MobileLearnedPlace | null;
@@ -758,6 +748,8 @@ function LearnedPlaceDetailSheet({
           ) : null}
         </SwipeDismissSheet>
       </View>
+      {/* Ignore / Forget confirmations, presented over this sheet's modal. */}
+      <BlocksConfirmHost controller={confirmSheet} reduceMotion={reduceMotion} styles={styles} theme={theme} />
     </Modal>
   );
 }
@@ -876,14 +868,6 @@ function formatShortDateTime(value: string) {
     month: "short",
     day: "numeric"
   });
-}
-
-function BackGlyph({ color }: { color: string }) {
-  return (
-    <Svg width={20} height={20} viewBox="0 0 24 24">
-      <Path d="M15 5 8 12l7 7" fill="none" stroke={color} strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.3} />
-    </Svg>
-  );
 }
 
 function CopyGlyph({ color }: { color: string }) {

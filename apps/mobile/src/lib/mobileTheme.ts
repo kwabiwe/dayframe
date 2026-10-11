@@ -174,13 +174,6 @@ function createStyles(theme: MobileTheme) {
       paddingBottom: 18,
       backgroundColor: theme.background
     },
-    settingsFloatingHeader: {
-      paddingHorizontal: 16,
-      paddingTop: 18,
-      paddingBottom: 10,
-      backgroundColor: theme.background,
-      zIndex: 10
-    },
     tabScreenStack: {
       gap: 12
     },
@@ -210,13 +203,6 @@ function createStyles(theme: MobileTheme) {
     nativeCalendarView: {
       flex: 1,
       backgroundColor: theme.background
-    },
-    settingsHeader: {
-      minHeight: 44,
-      flexDirection: "row",
-      alignItems: "center",
-      justifyContent: "space-between",
-      gap: 12
     },
     // Blocks parity step 6a-1: the Settings index (prototype grouped lists).
     settingsBlocksStack: {
@@ -527,14 +513,6 @@ function createStyles(theme: MobileTheme) {
       fontWeight: "700",
       color: theme.textPrimary,
       fontFamily: monoFont
-    },
-    settingsTitle: {
-      flex: 1,
-      fontSize: 22,
-      fontWeight: "700",
-      color: theme.textPrimary,
-      fontFamily: monoFont,
-      textAlign: "right"
     },
     subtitle: {
       marginTop: 2,
@@ -966,6 +944,7 @@ function createStyles(theme: MobileTheme) {
       zIndex: 20
     },
     reviewDeckToast: {
+      position: "absolute",
       bottom: "100%",
       left: 0,
       marginBottom: 12,
@@ -979,48 +958,48 @@ function createStyles(theme: MobileTheme) {
       bottom: 0,
       marginBottom: 0
     },
-    reviewDeckToastLabel: {
+    // Blocks navigation bar for pushed pages (BlocksNavHeader; UIA-001): text back, centred title,
+    // trailing slot. The side slots flex equally so the title stays centred.
+    blocksNav: {
       alignItems: "center",
-      flex: 1,
+      backgroundColor: theme.background,
       flexDirection: "row",
-      gap: 10,
-      minWidth: 0
-    },
-    reviewDeckToastSwatch: {
-      borderRadius: 4,
-      height: 14,
-      width: 14
-    },
-    reviewDeckToastText: {
-      flexShrink: 1
-    },
-    reviewDeckNav: {
-      alignItems: "center",
-      flexDirection: "row",
+      gap: 8,
       minHeight: 44,
-      paddingHorizontal: 20,
-      paddingTop: 2
+      paddingHorizontal: 16,
+      paddingTop: 2,
+      zIndex: 10
     },
-    reviewDeckBack: {
+    blocksNavBack: {
       alignItems: "center",
+      alignSelf: "stretch",
       flex: 1,
       flexDirection: "row",
       gap: 2,
-      minHeight: 44
+      minHeight: 44,
+      minWidth: 0
     },
-    reviewDeckBackText: {
+    blocksNavBackText: {
+      flexShrink: 1,
       fontSize: 16,
       fontWeight: "600"
     },
-    reviewDeckNavTitle: {
+    blocksNavTitle: {
       color: theme.textPrimary,
+      flexShrink: 1,
       fontSize: 16,
       fontWeight: "700",
+      maxWidth: "50%",
       textAlign: "center"
+    },
+    blocksNavTrailing: {
+      alignItems: "flex-end",
+      flex: 1,
+      justifyContent: "center",
+      minWidth: 0
     },
     reviewDeckNavCount: {
       color: theme.textSecondary,
-      flex: 1,
       fontSize: 14,
       fontVariant: ["tabular-nums"],
       fontWeight: "600",
@@ -2624,48 +2603,22 @@ function createStyles(theme: MobileTheme) {
       alignItems: "center",
       zIndex: 3
     },
-    historyDeleteUndoToast: {
+    // The shared Blocks toast (BlocksToast) on a pushed page: above the home indicator, full width
+    // less the 16-point gutters, over the content (out of flow, so its exit moves nothing).
+    blocksToastOverlay: {
+      position: "absolute",
+      left: 16,
+      right: 16,
+      bottom: 24,
+      zIndex: 30
+    },
+    // Today's toast place (BlocksToast: delete Undo, Switched, Already recording): above the
+    // tab bar, out of flow, so its entrance and exit move nothing.
+    todayToast: {
       position: "absolute",
       left: 20,
       right: 20,
-      bottom: 92,
-      minHeight: 52,
-      flexDirection: "row",
-      alignItems: "center",
-      justifyContent: "space-between",
-      gap: 16,
-      backgroundColor: theme.textPrimary,
-      borderRadius: 999,
-      paddingLeft: 16,
-      paddingRight: 8,
-      paddingVertical: 8,
-      shadowColor: theme.shadow,
-      shadowOpacity: 1,
-      shadowRadius: 12,
-      shadowOffset: { width: 0, height: 6 },
-      elevation: 5
-    },
-    historyDeleteUndoText: {
-      flex: 1,
-      color: theme.background,
-      fontFamily: monoFont,
-      fontSize: 13,
-      fontWeight: "600"
-    },
-    historyDeleteUndoButton: {
-      minWidth: 64,
-      minHeight: 40,
-      alignItems: "center",
-      justifyContent: "center",
-      backgroundColor: theme.accent,
-      borderRadius: 999,
-      paddingHorizontal: 10
-    },
-    historyDeleteUndoButtonText: {
-      color: theme.onAccent,
-      fontFamily: monoFont,
-      fontSize: 13,
-      fontWeight: "700"
+      bottom: 92
     },
     accountValue: {
       color: theme.textPrimary,

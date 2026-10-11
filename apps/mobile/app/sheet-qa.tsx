@@ -1,9 +1,9 @@
 import { Redirect, useLocalSearchParams } from "expo-router";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AppState, PixelRatio, Pressable, ScrollView, Text, View } from "react-native";
-import Reanimated from "react-native-reanimated";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { ActiveTimerEditSheet } from "@/components/ActiveTimerEditSheet";
+import { BlocksToast } from "@/components/blocks/BlocksToast";
 import type { MobileBootstrap, MobileTimeEntry } from "@/lib/api";
 import {
   createDeletionCoordinator,
@@ -12,9 +12,6 @@ import {
 import { useMobileTheme } from "@/lib/mobileTheme";
 import { mergePersistedMobileTag } from "@/lib/mobileTags";
 import {
-  localLayoutTransition,
-  localPresenceEntering,
-  localPresenceExiting,
   useResolvedReduceMotionPreference
 } from "@/lib/motion";
 import {
@@ -465,28 +462,17 @@ function SheetQaHarness() {
       </ScrollView>
 
       {pendingDeletion?.phase === "active" ? (
-        <Reanimated.View
-          accessibilityLiveRegion="polite"
-          entering={localPresenceEntering(reduceMotion, "rise")}
-          exiting={localPresenceExiting(reduceMotion)}
-          layout={localLayoutTransition(reduceMotion)}
-          style={styles.historyDeleteUndoToast}
+        <BlocksToast
+          actionAccessibilityLabel="Undo deleting this block"
+          actionLabel="Undo"
+          actionTestID="deletion-undo-action"
+          message="Deleted this block"
+          onAction={undoDeletion}
+          reduceMotion={reduceMotion}
+          style={styles.todayToast}
           testID="deletion-undo-toast"
-        >
-          <Text style={styles.historyDeleteUndoText}>Time entry deleted</Text>
-          <Pressable
-            accessibilityLabel="Undo deleting time entries"
-            accessibilityRole="button"
-            onPress={undoDeletion}
-            style={({ pressed }) => [
-              styles.historyDeleteUndoButton,
-              pressed ? styles.buttonPressed : null
-            ]}
-            testID="deletion-undo-action"
-          >
-            <Text style={styles.historyDeleteUndoButtonText}>Undo</Text>
-          </Pressable>
-        </Reanimated.View>
+          theme={theme}
+        />
       ) : null}
 
       {reduceMotionPreferenceResolved ? <ActiveTimerEditSheet

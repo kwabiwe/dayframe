@@ -9,7 +9,7 @@ describe("todayReviewNavigationTarget", () => {
     expect(todayReviewNavigationTarget(activity({ source: { kind: "review", reviewItemId: id }, reviewSourceKind: "generic" })))
       .toEqual({ kind: "generic_review", pathname: "/review", params: { focusReviewId: id } });
     expect(todayReviewNavigationTarget(activity({ source: { kind: "review", reviewItemId: id }, reviewSourceKind: "location_v2" })))
-      .toEqual({ kind: "location_evidence", pathname: "/review/[id]", params: { id } });
+      .toEqual({ kind: "location_evidence", pathname: "/review/[id]", params: { from: "today", id } });
     expect(todayReviewNavigationTarget(activity({ source: { kind: "legacy_review_entry", entryId: id } })))
       .toEqual({ kind: "legacy_entry", pathname: "/review", params: { focusEntryId: id } });
   });

@@ -39,6 +39,8 @@ export type CategoryRow = {
   icon?: string | null;
   /** Starter activity key; set by Dayframe, never by clients. */
   starterKey?: string | null;
+  /** false leaves this activity's time out of goal progress (UIA-043; Sleep starts false). */
+  countsTowardGoal?: boolean;
 };
 
 export type ProjectRow = {
@@ -214,6 +216,11 @@ export type BootstrapData = {
   dateRange: DashboardDateRange;
   clients: ClientRow[];
   categories: CategoryRow[];
+  /**
+   * Every activity, active or archived, switched off "Counts toward goal" (UIA-043). `categories`
+   * holds only active ones, so this keeps an archived Sleep's history out of goal progress.
+   */
+  goalExcludedCategoryIds: string[];
   projects: ProjectRow[];
   tags: TagRow[];
   places: PlaceRow[];
@@ -245,6 +252,7 @@ export async function getBootstrapData(
     workspaces,
     clients,
     categories,
+    goalExcludedCategoryIds,
     projects,
     tags,
     places,
@@ -265,6 +273,7 @@ export async function getBootstrapData(
     getWorkspaces(session),
     getClients(session),
     getCategories(session),
+    getGoalExcludedCategoryIds(session),
     getProjects(session),
     getTags(session),
     getPlaces(session),
@@ -329,6 +338,7 @@ export async function getBootstrapData(
     dateRange,
     clients,
     categories,
+    goalExcludedCategoryIds,
     projects,
     tags,
     places,
@@ -378,7 +388,8 @@ export async function getNormalizationContext(
       name: category.name,
       color: category.color,
       isPinned: category.isPinned,
-      starterKey: category.starterKey ?? null
+      starterKey: category.starterKey ?? null,
+      countsTowardGoal: category.countsTowardGoal
     })),
     places: places.map<PlaceSummary>((place) => ({
       id: place.id,
@@ -451,7 +462,8 @@ async function getClients(session: RequestSession) {
 async function getCategories(session: RequestSession, execute: typeof query = query) {
   try {
     const result = await execute<CategoryRow>(
-      `select id, name, color, is_pinned as "isPinned", icon, starter_key as "starterKey"
+      `select id, name, color, is_pinned as "isPinned", icon, starter_key as "starterKey",
+              counts_toward_goal as "countsTowardGoal"
        from categories
        where workspace_id = $1 and is_archived = false
        order by is_pinned desc, name`,
@@ -476,6 +488,38 @@ async function getCategories(session: RequestSession, execute: typeof query = qu
           error
         );
       }
+    }
+    if (isUndefinedColumnError(error, "counts_toward_goal")) {
+      throw missingRequiredColumnError(
+        "categories",
+        "counts_toward_goal",
+        "supabase/migrations/202610110001_category_counts_toward_goal.sql",
+        error
+      );
+    }
+    throw error;
+  }
+}
+
+/** Activities (active or archived) whose time does not count toward the goal (UIA-043). */
+async function getGoalExcludedCategoryIds(session: RequestSession) {
+  try {
+    const result = await query<{ id: string }>(
+      `select id
+       from categories
+       where workspace_id = $1 and counts_toward_goal = false
+       order by id`,
+      [session.workspaceId]
+    );
+    return result.rows.map((row) => row.id);
+  } catch (error) {
+    if (isUndefinedColumnError(error, "counts_toward_goal")) {
+      throw missingRequiredColumnError(
+        "categories",
+        "counts_toward_goal",
+        "supabase/migrations/202610110001_category_counts_toward_goal.sql",
+        error
+      );
     }
     throw error;
   }

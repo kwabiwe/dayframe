@@ -1,4 +1,12 @@
-import { DAYFRAME_THEME, paletteColorFor, type ReportSummary } from "@dayframe/shared";
+import {
+  DAYFRAME_THEME,
+  categoryCountsTowardGoal,
+  goalCountingEntries,
+  goalExcludedCategoryIds,
+  paletteColorFor,
+  withGoalExclusions,
+  type ReportSummary,
+} from "@dayframe/shared";
 import type { MobileBootstrap, MobileTimeEntry } from "./api";
 import type { MobileTheme } from "./mobileTheme";
 import type { ReportRange, ReportWindow } from "./reportsRanges";
@@ -78,6 +86,50 @@ export function reportTrackedSeconds(
   );
 }
 
+/**
+ * Each window's goal time for the goal streak: covered time (overlapping entries count once, as on
+ * Today and web Reports) of confirmed entries in activities that count toward the goal (UIA-043;
+ * archived activities that don't count stay out through `goalExcludedCategoryIds`), from the
+ * entries the phone holds (bootstrap plus the running timer). Recent windows only, like
+ * `reportTrackedSeconds`: the streak covers the current week.
+ */
+export function reportGoalSeconds(
+  data: MobileBootstrap,
+  windows: readonly ReportWindow[],
+  nowMs: number,
+) {
+  const counting = goalCountingEntries(
+    reportEntryUnion(data).filter(eligible),
+    withGoalExclusions(data.categories, data.goalExcludedCategoryIds),
+  );
+  return windows.map((window) =>
+    coveredSeconds(counting.map((entry) => entrySpan(entry, nowMs)), window),
+  );
+}
+
+function entrySpan(entry: Pick<MobileTimeEntry, "startedAt" | "stoppedAt">, nowMs: number) {
+  return [
+    Date.parse(entry.startedAt),
+    Math.min(entry.stoppedAt ? Date.parse(entry.stoppedAt) : nowMs, nowMs),
+  ] as const;
+}
+
+/** Seconds covered by the union of spans (ms), clipped to the window. */
+function coveredSeconds(spans: readonly (readonly [number, number])[], window: ReportWindow) {
+  const clipped = spans
+    .map(([start, end]) => [Math.max(start, +window.start), Math.min(end, +window.end)] as const)
+    .filter(([start, end]) => Number.isFinite(start) && Number.isFinite(end) && end > start)
+    .sort((a, b) => a[0] - b[0]);
+  let coveredMs = 0;
+  let coveredUntil = Number.NEGATIVE_INFINITY;
+  for (const [start, end] of clipped) {
+    const from = Math.max(start, coveredUntil);
+    if (end > from) coveredMs += end - from;
+    coveredUntil = Math.max(coveredUntil, end);
+  }
+  return coveredMs / 1000;
+}
+
 /** Replace only the server's current timer contribution with the existing Dashboard projection. */
 export function buildReportsPresentation(input: {
   data: MobileBootstrap;
@@ -95,6 +147,27 @@ export function buildReportsPresentation(input: {
   }));
   const entries = reportEntryUnion(data);
   const active = summary.active;
+  // Goal time per bucket (UIA-043). Preferred: the server's merged covered intervals without the
+  // running entry, unioned with the phone's own projected timer (overlaps count once). From a server
+  // with only goalSeconds, its running-timer share is swapped for the projection instead.
+  const goalExcluded = goalExcludedCategoryIds(
+    withGoalExclusions(data.categories, data.goalExcludedCategoryIds),
+  );
+  const goalIntervals = summary.buckets.every((b) => Array.isArray(b.goalIntervals))
+    ? summary.buckets.map((b) =>
+        (b.goalIntervals ?? []).map((interval) => [Date.parse(interval.start), Date.parse(interval.end)] as const),
+      )
+    : null;
+  const goalProjected: (readonly [number, number])[] = [];
+  const goalSeconds = !goalIntervals && summary.buckets.every((b) => typeof b.goalSeconds === "number")
+    ? summary.buckets.map((b) => b.goalSeconds as number)
+    : null;
+  if (active && goalSeconds && categoryCountsTowardGoal(active.categoryId, goalExcluded)) {
+    for (const contribution of active.buckets) {
+      const index = summary.buckets.findIndex((b) => b.key === contribution.key);
+      if (index >= 0) goalSeconds[index] -= contribution.seconds;
+    }
+  }
   if (active) {
     const key = active.categoryId || "uncategorized";
     for (const contribution of active.buckets) {
@@ -135,12 +208,15 @@ export function buildReportsPresentation(input: {
       color: entry.categoryColor ?? null,
       seconds: 0,
     });
+    const countsTowardGoal = categoryCountsTowardGoal(entry.categoryId, goalExcluded);
+    if (countsTowardGoal) goalProjected.push(entrySpan(entry, nowMs));
     range.buckets.forEach((window, index) => {
       const seconds = entryOverlapMs(entry, window, nowMs) / 1000;
       buckets[index].byCategory.set(
         key,
         (buckets[index].byCategory.get(key) ?? 0) + seconds,
       );
+      if (goalSeconds && countsTowardGoal) goalSeconds[index] += seconds;
     });
   }
   // Sum the same unrounded pieces for every view; round only duration labels.
@@ -218,6 +294,12 @@ export function buildReportsPresentation(input: {
     ),
     buckets: buckets.map((b, index) => ({
       ...range.buckets[index],
+      /** Covered goal time from the server (all activities that count); undefined from older servers. */
+      goalSeconds: goalIntervals
+        ? coveredSeconds([...(goalIntervals[index] ?? []), ...goalProjected], range.buckets[index])
+        : goalSeconds
+          ? Math.max(0, goalSeconds[index] ?? 0)
+          : undefined,
       seconds: [...b.byCategory].reduce(
         (sum, [key, seconds]) =>
           sum + (reportSelectionIncludes(selection, key) ? seconds : 0),

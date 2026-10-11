@@ -25,6 +25,10 @@ const mobileThemeSource = readFileSync(
   fileURLToPath(new URL("../lib/mobileTheme.ts", import.meta.url)),
   "utf8"
 );
+const blocksToastSource = readFileSync(
+  fileURLToPath(new URL("./blocks/BlocksToast.tsx", import.meta.url)),
+  "utf8"
+);
 
 describe("Today rows swipe-to-delete contract", () => {
   it("swipes rows with one UI-thread Pan whose underlay is revealed by the moving row", () => {
@@ -61,8 +65,10 @@ describe("Today rows swipe-to-delete contract", () => {
 
   it("allows immediate grouped deletion with a temporary undo action", () => {
     expect(rowsSource).toContain("onDeleteEntries(group.entries.map(({ entry }) => entry))");
-    expect(dashboardSource).toContain("time entries deleted");
-    expect(dashboardSource).toContain("undoDeletion");
+    // UIA-003: "Deleted Deep work" (or "Deleted 3 blocks") on the shared Blocks toast.
+    expect(dashboardSource).toContain("message={deletedToastMessage(pendingDeletion.entries)}");
+    expect(dashboardSource).toContain("deletedToastAnnouncement(entries)");
+    expect(dashboardSource).toContain("onAction={undoDeletion}");
     expect(DELETION_UNDO_MS).toBe(5_000);
     expect(dashboardSource).toContain("createDeletionCoordinator");
     expect(dashboardSource).toContain("coordinator.prepare(entries, snapshot)");
@@ -282,19 +288,20 @@ describe("Today rows swipe-to-delete contract", () => {
 
   it("uses one local Reanimated owner for presence and surrounding reflow", () => {
     expect(dashboardSource).toContain("itemLayoutAnimation={localLayoutTransition(reduceMotion)}");
-    expect(dashboardSource).toContain("exiting={localPresenceExiting(reduceMotion)}");
+    // The Undo toast's presence is BlocksToast's own Reanimated entering/exiting.
+    expect(dashboardSource).toContain("<BlocksToast");
+    expect(blocksToastSource).toContain("exiting={localPresenceExiting(reduceMotion)}");
   });
 
-  it("renders the undo notice as an inverse bean with a branded action", () => {
-    const toastStyle = mobileThemeSource.slice(
-      mobileThemeSource.indexOf("historyDeleteUndoToast:"),
-      mobileThemeSource.indexOf("accountValue:")
-    );
-
-    expect(toastStyle).toContain("backgroundColor: theme.textPrimary");
-    expect(toastStyle).toContain("borderRadius: 999");
-    expect(toastStyle).toContain("color: theme.background");
-    expect(toastStyle).toContain("backgroundColor: theme.accent");
-    expect(toastStyle).toContain("color: theme.onAccent");
+  it("renders the undo notice as the inverse Blocks toast with a neutral action (UIA-003)", () => {
+    expect(blocksToastSource).toContain("backgroundColor: theme.textPrimary");
+    expect(blocksToastSource).toContain("borderRadius: DAYFRAME_BLOCKS.radius.pill");
+    expect(blocksToastSource).toContain("color: theme.background");
+    // Neutral, never coral.
+    expect(blocksToastSource).toContain("colorWithAlpha(theme.background, pressed ? 0.24 : 0.14)");
+    expect(blocksToastSource).not.toContain("theme.accent");
+    expect(blocksToastSource).not.toContain("theme.onAccent");
+    expect(mobileThemeSource).not.toContain("historyDeleteUndoButton");
+    expect(mobileThemeSource).toContain("todayToast: {");
   });
 });

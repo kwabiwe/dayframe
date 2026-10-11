@@ -51,6 +51,24 @@ describe("reportHero", () => {
     expect(hero.deltaSeconds).toBe(-2 * 3600);
   });
 
+  it("meets a goal day only with time that counts toward the goal (UIA-043)", () => {
+    const days = [day(5), day(6), day(7)];
+    const hero = reportHero(report({
+      dailySeries: days.map((entry, index) => ({
+        key: entry.key,
+        label: entry.label,
+        seconds: 0,
+        coveredSeconds: 9 * 3600,
+        // Day 5: 9h framed, 7h of it Sleep. Day 6: all of it counts.
+        goalSeconds: [2, 9, 0][index] * 3600,
+        additionalOverlappingActivitySeconds: 0
+      }))
+    }), 420);
+    expect(hero.goalDays).toEqual([false, true]);
+    // Framed time is unchanged everywhere else.
+    expect(hero.best).toEqual({ label: "Day 5", seconds: 9 * 3600 });
+  });
+
   it("has no goal cells without a goal and no change for a custom range", () => {
     const hero = reportHero(report({ range: { preset: "custom" } as ReportResult["range"] }), 0);
     expect(hero.goalDays).toEqual([]);

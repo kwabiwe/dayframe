@@ -56,8 +56,16 @@ describe("mobile Activities page contract", () => {
 
   it("creates and edits through one editor sheet with name, icon and colour, and archives from it", () => {
     expect(settingsSource).toContain("<ActivityEditorSheet");
-    expect(settingsSource).toContain("? await updateCategory(activity.id, { name: draft.name, color: draft.color, icon: draft.icon })");
-    expect(settingsSource).toContain(": await createCategory(draft.name, { color: draft.color, icon: draft.icon, isPinned: pinned });");
+    expect(settingsSource).toContain("? await updateCategory(activity.id, { name: draft.name, color: draft.color, icon: draft.icon, countsTowardGoal: draft.countsTowardGoal })");
+    expect(settingsSource).toContain(": await createCategory(draft.name, { color: draft.color, icon: draft.icon, isPinned: pinned, countsTowardGoal: draft.countsTowardGoal });");
+    // Today and Reports hear about the accepted activity (UIA-043), ordered by a sequence taken before sending.
+    expect(settingsSource.indexOf("const sequence = beginSavedActivityChange();")).toBeLessThan(settingsSource.indexOf("? await updateCategory(activity.id"));
+    expect(settingsSource).toContain("publishSavedActivity({ userId: owner.userId, workspaceId: owner.workspaceId, category: result.category, sequence });");
+    // Published on account/workspace ownership alone, before the Settings-mounted check, so closing
+    // Settings during Save still updates Today and Reports.
+    const save = settingsSource.slice(settingsSource.indexOf("async function saveActivityFromEditor"));
+    expect(save.indexOf("if (owner && ownerNow && mobileAccountOwnersEqual(owner, ownerNow))")).toBeGreaterThan(0);
+    expect(save.indexOf("publishSavedActivity(")).toBeLessThan(save.indexOf("if (!(await activityOwnerStill(owner))) return;"));
     // Accepted saves and archives show at once, even if the refresh after them fails.
     expect(settingsSource).toContain("// The accepted activity shows at once, even if the refresh below fails.");
     expect(settingsSource).toContain("applyActivityCategories((categories) => categories.filter((item) => item.id !== activity.id));");
@@ -67,7 +75,8 @@ describe("mobile Activities page contract", () => {
     expect(editorSource).toContain('accessibilityRole="radiogroup"');
     expect(editorSource).toContain("activityNameProblem(activities, name, activity?.id ?? null)");
     // Archive asks first, and the sheet leaves with its own exit motion once archived.
-    expect(editorSource).toMatch(/Alert\.alert\(`Archive \$\{target\.name\}\?`/);
+    expect(editorSource).toContain("title: `Archive ${target.name}?`");
+    expect(editorSource).toContain("<BlocksConfirmHost");
     expect(editorSource).toContain("sheetRef.current?.dismiss();");
     expect(editorSource).toContain("<SwipeDismissSheet");
   });
