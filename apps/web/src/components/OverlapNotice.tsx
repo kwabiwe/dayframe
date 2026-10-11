@@ -68,7 +68,7 @@ export function OverlapNotice({
   );
 }
 
-/** An overlap that covers at least this share of the block gets the stronger cue. */
+/** An overlap that covers more than this share of the block gets the stronger cue. */
 export const LARGE_OVERLAP_SHARE = 0.5;
 
 /**
@@ -86,7 +86,8 @@ export function OverlapLine({
   /** Where a running block (no stop) ends. */
   nowMs: number;
 }) {
-  const overlap = overlapNoticeForCandidate({ candidate, entries });
+  // One clock for the analysis, the ranking and the threshold, so the same props say the same thing.
+  const overlap = overlapNoticeForCandidate({ candidate, entries, now: new Date(nowMs) });
   if (!overlap?.overlapCount) return null;
   const start = new Date(candidate.startedAt).getTime();
   const stop = candidate.stoppedAt ? new Date(candidate.stoppedAt).getTime() : nowMs;
@@ -101,8 +102,14 @@ export function OverlapLine({
   const firstName = first?.categoryName?.trim() || first?.description?.trim() || "another block";
   const others = overlap.overlapCount - 1;
   const what = others > 0 ? `${firstName} and ${others} more` : firstName;
-  const blockSeconds = Math.max(0, (stop - start) / 1000);
-  const large = blockSeconds > 0 && overlap.uniqueOverlapSeconds / blockSeconds >= LARGE_OVERLAP_SHARE;
+  // "Most of this block": strictly more than half, measured in milliseconds on both sides.
+  const shared = mergedSharedMs(
+    overlap.overlappingEntryIds
+      .map((id) => peerById.get(id))
+      .filter((entry): entry is OverlapPeerEntry => Boolean(entry))
+      .map((entry) => [Math.max(start, new Date(entry.startedAt).getTime()), Math.min(stop, entry.stoppedAt ? new Date(entry.stoppedAt).getTime() : nowMs)] as const)
+  );
+  const large = stop > start && shared > (stop - start) * LARGE_OVERLAP_SHARE;
   return (
     <p className={`df-roverlap df-tnum${large ? " is-large" : ""}`}>
       {large ? <AlertTriangle aria-hidden="true" size={14} /> : null}
@@ -112,4 +119,18 @@ export function OverlapLine({
       </span>
     </p>
   );
+}
+
+function mergedSharedMs(ranges: ReadonlyArray<readonly [number, number]>) {
+  const sorted = ranges.filter(([from, to]) => to > from).sort((a, b) => a[0] - b[0]);
+  let total = 0;
+  let open: [number, number] | null = null;
+  for (const [from, to] of sorted) {
+    if (open && from <= open[1]) open[1] = Math.max(open[1], to);
+    else {
+      if (open) total += open[1] - open[0];
+      open = [from, to];
+    }
+  }
+  return open ? total + open[1] - open[0] : total;
 }
