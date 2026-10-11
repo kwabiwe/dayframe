@@ -10298,10 +10298,11 @@ dialog.ui-dialog.df-palette {
   font-variant-numeric: tabular-nums;
 }
 
-/* The prototype's eyebrow (blocks.css .eyebrow): small capitals over the hero. */
+/* The prototype's eyebrow (blocks.css .eyebrow): small capitals over the hero, in the secondary
+   text colour (the prototype's text-3 measures 4.05:1 on a Midnight card, under 4.5:1). */
 .df-eyebrow {
   margin: 0 0 8px;
-  color: var(--text-muted);
+  color: var(--text-secondary);
   font-size: 11px;
   font-weight: 650;
   letter-spacing: 0.08em;
@@ -10350,10 +10351,8 @@ dialog.ui-dialog.df-palette {
   height: 20px;
 }
 
-/* Activities inside an hour cell sit 2 px apart, so neighbouring blocks never touch (owner, Trello). */
 .df-goal-cell {
   display: flex;
-  gap: 2px;
   overflow: hidden;
   border-radius: 6px;
   background: var(--surface-muted);
@@ -10370,6 +10369,17 @@ dialog.ui-dialog.df-palette {
 
 .df-goal-cell > .is-live {
   box-shadow: inset -2px 0 0 var(--accent);
+}
+
+/* Activities inside an hour cell never touch (owner, Trello): each one after the first starts with
+   a 2 px strip in the cell's own colour, drawn inside its width so every slice keeps its exact
+   share of the hour and the live edge stays where the time is. */
+.df-goal-cell > span + span {
+  box-shadow: inset 2px 0 0 var(--surface-muted);
+}
+
+.df-goal-cell > span + span.is-live {
+  box-shadow: inset 2px 0 0 var(--surface-muted), inset -2px 0 0 var(--accent);
 }
 
 .df-ribbon {

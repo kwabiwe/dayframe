@@ -23,7 +23,13 @@ describe("web Today hero (W9)", () => {
     expect(sub).toContain("margin: 2px 0 0;");
   });
 
-  it("keeps 2 px between activities inside a goal hour cell", () => {
-    expect(rule(".df-goal-cell")).toContain("gap: 2px;");
+  it("keeps a contrast-safe colour for the small capitals (4.5:1 on a Midnight card)", () => {
+    expect(rule(".df-eyebrow")).toContain("color: var(--text-secondary);");
+  });
+
+  it("separates activities inside a goal hour cell without changing their widths (Codex r1)", () => {
+    expect(rule(".df-goal-cell")).not.toContain("gap:");
+    expect(rule(".df-goal-cell > span + span")).toContain("box-shadow: inset 2px 0 0 var(--surface-muted);");
+    expect(rule(".df-goal-cell > span + span.is-live")).toContain("inset 2px 0 0 var(--surface-muted), inset -2px 0 0 var(--accent)");
   });
 });
