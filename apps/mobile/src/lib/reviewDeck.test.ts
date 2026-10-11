@@ -16,6 +16,11 @@ describe("reviewDeckPicture", () => {
     expect(reviewDeckPicture({ ...base, eventType: "commute_detected", isTimeAway: true })).toBe("place");
     expect(reviewDeckPicture({ ...base, eventSource: "health_sleep", eventType: "health_sleep_import" })).toBe("sleep");
     expect(reviewDeckPicture({ ...base, eventSource: "health_workout", eventType: "health_workout_import" })).toBe("workout");
+    // UIA-070: only workouts that cover ground draw a route.
+    const workout = { ...base, eventSource: "health_workout", eventType: "health_workout_import" };
+    for (const type of ["walking", "running", "cycling"]) expect(reviewDeckPicture({ ...workout, workoutType: type })).toBe("workout");
+    for (const type of ["strength_training", "swimming", "other"]) expect(reviewDeckPicture({ ...workout, workoutType: type })).toBe("exercise");
+    expect(reviewDeckSource({ ...workout, workoutType: "strength_training" })).toEqual({ icon: "walk", label: "Apple Health" });
     expect(reviewDeckPicture({ ...base, isLocation: true })).toBe("place");
     expect(reviewDeckPicture(base)).toBe("suggestion");
   });
