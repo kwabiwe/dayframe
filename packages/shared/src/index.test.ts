@@ -850,7 +850,7 @@ describe("explicit Shortcut starts", () => {
       expect.objectContaining({
         action: "start_timer",
         categoryId: undefined,
-        title: "Block started",
+        title: "Timer started",
         description: undefined
       })
     );
