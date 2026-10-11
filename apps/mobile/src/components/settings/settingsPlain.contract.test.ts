@@ -42,4 +42,14 @@ describe("Settings in plain language (audit A8a)", () => {
     expect(blocks).toContain('backgroundColor: theme.mode === "dark" ? theme.surfaceInset : theme.surfaceMuted');
     expect(blocks).toContain('selected ? { backgroundColor: theme.mode === "dark" ? theme.surfaceMuted : theme.surface } : null');
   });
+
+  it("sends location access to iOS Settings when iOS won't ask again (UIA-111)", () => {
+    // Settings first, one action for label and VoiceOver, the live permission decides taps.
+    expect(settings).toContain("const locationAction = locationAccessAction({");
+    expect(settings).toContain("accessibilityLabel={locationActionAccessibilityLabel}");
+    expect(settings).toContain("// The live permission decides, whatever the cached diagnostics say.");
+    expect(settings).toContain("if (enabled && await locationAccessNeedsIosSettings().catch(() => false)) {");
+    // Coming back from iOS Settings re-reads local permissions without the network.
+    expect(settings).toContain('if (state === "active") refreshLocationOnReturn.current();');
+  });
 });

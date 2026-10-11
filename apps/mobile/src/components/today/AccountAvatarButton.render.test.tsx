@@ -32,7 +32,7 @@ describe("AccountAvatarButton", () => {
       tree.update(<AccountAvatarButton attentionCount={2} email="qa@example.com" name="QA Today" onPress={onPress} theme={theme} />);
     });
     expect(avatar().props.accessibilityLabel).toBe("Account and settings. 2 changes couldn't be saved and need your attention.");
-    expect(avatar().props.accessibilityHint).toBe("Opens Sync help in Settings");
+    expect(avatar().props.accessibilityHint).toBe("Opens Settings › Sync help");
     expect(tree.root.findByProps({ testID: "account-avatar-attention" }).props.style[1]).toEqual({ backgroundColor: "#E5484D", borderColor: "#050914" });
     act(() => avatar().props.onPress());
     expect(onPress.mock.calls).toEqual([["settings"], ["sync"]]);

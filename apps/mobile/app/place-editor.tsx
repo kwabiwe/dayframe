@@ -47,7 +47,7 @@ import {
   SettingsSegmented,
   SettingsSwitch
 } from "@/components/settings/SettingsBlocks";
-import { refreshGeofencesForPlaces } from "@/lib/geofence";
+import { refreshGeofencesForPlaces, requestForegroundLocationPermission } from "@/lib/geofence";
 import { mobileAccountKey, mobileAccountOwnersEqual, readActiveMobileAccount, type MobileAccountOwner } from "@/lib/mobileAccount";
 import { applyPlaceRoleLocally, notePlaceDeleted } from "@/lib/placesPage";
 import {
@@ -293,7 +293,7 @@ export default function PlaceEditorScreen() {
     try {
       let permission = await Location.getForegroundPermissionsAsync();
       if (!permission.granted && permission.canAskAgain) {
-        permission = await Location.requestForegroundPermissionsAsync();
+        permission = await requestForegroundLocationPermission();
       }
       const guidance = foregroundLocationPermissionGuidance(permission);
       if (guidance) {
@@ -428,7 +428,7 @@ export default function PlaceEditorScreen() {
     confirmSheet.confirm({
       eyebrow: "Place",
       title: `Delete ${placeDisplayName(withRole(place))}?`,
-      message: "Past entries keep their time but lose this place.",
+      message: "Past blocks keep their time but lose this place.",
       confirmLabel: "Delete",
       confirmHint: "This can't be undone.",
       // removePlace re-checks saveInFlight, so a save started meanwhile still wins.
@@ -734,13 +734,13 @@ export default function PlaceEditorScreen() {
             {newRole && roleHolder ? (
               <Reanimated.View layout={localLayoutTransition(reduceMotion)}>
                 <SettingsBlockGroup
-                  foot={`${placeRoleLabel(newRole)} moves to this new place. The old one keeps its entries under this name.`}
+                  foot={`${placeRoleLabel(newRole)} moves to this new place. The old one keeps its blocks under this name.`}
                   theme={theme}
                   title={`Old ${placeRoleLabel(newRole).toLowerCase()}`}
                 >
                   <TextInput
                     {...mobileTextProps("input")}
-                    accessibilityHint="Its past entries keep this name. Leave it blank to keep the current name."
+                    accessibilityHint="Its past blocks keep this name. Leave it blank to keep the current name."
                     accessibilityLabel={`Rename the old ${placeRoleLabel(newRole).toLowerCase()}`}
                     maxLength={120}
                     onChangeText={setPreviousRoleName}
@@ -1022,9 +1022,9 @@ const editorStyles = StyleSheet.create({
   scrollContent: { paddingBottom: 40, paddingTop: 14 },
   stack: { gap: 22 },
   mapCard: { gap: 8 },
-  map: { borderRadius: 22, height: 200, overflow: "hidden", width: "100%" },
+  map: { borderRadius: DAYFRAME_BLOCKS.radius.phoneCard, height: 200, overflow: "hidden", width: "100%" },
   mapFoot: { marginHorizontal: 4 },
-  mapPlaceholder: { alignItems: "center", borderRadius: 22, gap: 10, justifyContent: "center", minHeight: 140, padding: 20 },
+  mapPlaceholder: { alignItems: "center", borderRadius: DAYFRAME_BLOCKS.radius.phoneCard, gap: 10, justifyContent: "center", minHeight: 140, padding: 20 },
   mapPlaceholderText: { textAlign: "center" },
   searchRow: { alignItems: "center", flexDirection: "row", gap: 10, minHeight: 52, paddingLeft: 16, paddingRight: 4 },
   searchInput: { flex: 1, fontSize: 16, minHeight: 48, minWidth: 0, paddingVertical: 10 },

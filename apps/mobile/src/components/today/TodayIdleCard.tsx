@@ -38,7 +38,7 @@ export function TodayIdleCard({
       </Text>
       <View style={styles.actions}>
         <Pressable
-          accessibilityHint="Starts a timer and opens it so you can add details"
+          accessibilityHint="Starts a block and opens it so you can add details"
           accessibilityLabel="Start a block"
           accessibilityRole="button"
           onPress={onStartBlank}

@@ -107,7 +107,7 @@ export function locationResultText(choice: LocationChoice, suggestions: Suggesti
     case "while":
       return "Location works while Dayframe is open. Visit and journey suggestions need Always, which you can switch on in Settings › Location.";
     case "off":
-      return "Location is off. Timers, Review and Apple Health still work. You can turn it on later in Settings.";
+      return "Location is off. Blocks, Review and Apple Health still work. You can turn it on later in Settings.";
   }
 }
 

@@ -331,7 +331,7 @@ function generatedStopEventId() {
 
 function requiredText(value: unknown, field: string) {
   const text = optionalText(value);
-  if (!text) throw new Error(`${field} is required for timer Stop recovery.`);
+  if (!text) throw new Error(`${field} is required to recover a Stop.`);
   return text;
 }
 

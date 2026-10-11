@@ -273,10 +273,10 @@ private struct DayframeLiveActivityStopButton: View {
         stopButtonContent
       }
       .buttonStyle(.plain)
-      .accessibilityLabel("Stop running block")
+      .accessibilityLabel("Stop recording")
     } else {
       stopButtonContent
-        .accessibilityLabel("Stop running block")
+        .accessibilityLabel("Stop recording")
     }
   }
 

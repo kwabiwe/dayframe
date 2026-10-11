@@ -1,4 +1,5 @@
 import { Pressable, StyleSheet, Text, View } from "react-native";
+import { DAYFRAME_BLOCKS } from "@dayframe/shared";
 import type { MobileTheme } from "../../lib/mobileTheme";
 import { mobileTextProps } from "../../lib/mobileTypography";
 import { accountInitials } from "../../lib/accountInitials";
@@ -48,7 +49,7 @@ export function AccountAvatarButton({
 }
 
 const styles = StyleSheet.create({
-  avatar: { alignItems: "center", borderRadius: 22, height: 44, justifyContent: "center", width: 44 },
+  avatar: { alignItems: "center", borderRadius: DAYFRAME_BLOCKS.radius.pill, height: 44, justifyContent: "center", width: 44 },
   badge: { borderRadius: 7, borderWidth: 2, height: 14, position: "absolute", right: 0, top: 0, width: 14 },
   initials: { fontSize: 13, fontWeight: "800" },
   pressed: { opacity: 0.82 },

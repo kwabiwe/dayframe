@@ -18,7 +18,7 @@ import {
   type StyleProp,
   type ViewStyle
 } from "react-native";
-import { DAYFRAME_THEME, type DayframeTheme } from "@dayframe/shared";
+import { DAYFRAME_BLOCKS, DAYFRAME_THEME, type DayframeTheme } from "@dayframe/shared";
 import {
   TIMER_CARD_ACTION_COLUMN_GAP,
   TIMER_CARD_ACTION_COLUMN_WIDTH,
@@ -486,7 +486,7 @@ function createStyles(theme: MobileTheme) {
     placesBlockSuggested: { opacity: 0.75 },
     placesEmpty: { minHeight: 52, justifyContent: "center", paddingHorizontal: 16 },
     placesStatus: { color: theme.textSecondary, fontFamily: monoFont, fontSize: 13, textAlign: "center" },
-    settingsActivityPin: { alignItems: "center", borderRadius: 22, height: 44, justifyContent: "center", width: 44 },
+    settingsActivityPin: { alignItems: "center", borderRadius: DAYFRAME_BLOCKS.radius.pill, height: 44, justifyContent: "center", width: 44 },
     settingsActivityPinOn: { backgroundColor: theme.surfaceInset },
     healthNameRow: {
       alignItems: "center",
@@ -598,7 +598,7 @@ function createStyles(theme: MobileTheme) {
     // the system face, the coral pill and a plain switch line.
     authCard: {
       backgroundColor: theme.surface,
-      borderRadius: 22,
+      borderRadius: DAYFRAME_BLOCKS.radius.phoneCard,
       gap: 12,
       padding: 20
     },
@@ -739,7 +739,7 @@ function createStyles(theme: MobileTheme) {
     datePickerSheet: {
       width: "100%",
       maxWidth: 361,
-      borderRadius: 24,
+      borderRadius: DAYFRAME_BLOCKS.radius.sheet,
       backgroundColor: theme.surfaceRaised,
       padding: 16,
       gap: 10,
@@ -818,8 +818,8 @@ function createStyles(theme: MobileTheme) {
     activeEditSheet: {
       position: "relative",
       maxHeight: "96%",
-      borderTopLeftRadius: 24,
-      borderTopRightRadius: 24,
+      borderTopLeftRadius: DAYFRAME_BLOCKS.radius.sheet,
+      borderTopRightRadius: DAYFRAME_BLOCKS.radius.sheet,
       backgroundColor: theme.surfaceRaised,
       paddingHorizontal: 16,
       paddingTop: 8,
@@ -1016,7 +1016,7 @@ function createStyles(theme: MobileTheme) {
     durationDialShortcutToggle: {
       width: 44,
       height: 44,
-      borderRadius: 22,
+      borderRadius: DAYFRAME_BLOCKS.radius.pill,
       backgroundColor: theme.surfaceMuted,
       alignItems: "center",
       justifyContent: "center"

@@ -1,7 +1,7 @@
 import type { RecentActivitySuggestion } from "@dayframe/shared";
 
 export const HISTORICAL_SUGGESTION_ROLLBACK_ANNOUNCEMENT =
-  "Suggestion could not be applied. Your previous timer details were restored.";
+  "Suggestion could not be applied. Your previous block details were restored.";
 
 export function historicalSuggestionAppliedAnnouncement(
   suggestion: Pick<
