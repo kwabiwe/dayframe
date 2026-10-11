@@ -566,10 +566,13 @@ export function collapseCrowdedReviewLane(
       // later moment than the latest drawn end, so the end then keeps the drawn length instead.
       const first = crowd.reduce((best, item) => item.drawnStart < best.drawnStart ? item : best);
       const last = crowd.reduce((best, item) => item.drawnEnd > best.drawnEnd ? item : best);
-      const startMs = first.realStart;
+      // Anchored to the visible day: a crowd starting the night before starts at midnight.
+      const startMs = Number.isFinite(dayStartMs) ? Math.max(first.realStart, dayStartMs) : first.realStart;
       const endMs = last.drawnEnd === last.rawDrawnEnd && last.realEnd > startMs
         ? last.realEnd
-        : startMs + (last.drawnEnd - first.drawnStart);
+        : Number.isFinite(dayStartMs) && Number.isFinite(dayEndMs)
+          ? momentAtWallClock(startMs, last.drawnEnd, dayStartMs, dayEndMs)
+          : startMs + (last.drawnEnd - first.drawnStart);
       result.push(reviewCrowdEntry(
         [...crowd].sort((left, right) => left.realStart - right.realStart).map((item) => item.entry),
         startMs,
@@ -586,6 +589,21 @@ export function collapseCrowdedReviewLane(
   }
   flush();
   return result;
+}
+
+/**
+ * The first moment after `afterMs` that iOS draws at `wallOffsetMs` into the day: elapsed time is
+ * corrected by how far the wall clock is off, so the result lands on the intended drawn time even
+ * across a clock change.
+ */
+function momentAtWallClock(afterMs: number, wallOffsetMs: number, dayStartMs: number, dayEndMs: number) {
+  let moment = afterMs + (wallOffsetMs - wallClockOffsetMs(afterMs, dayStartMs, dayEndMs));
+  for (let step = 0; step < 3; step += 1) {
+    const off = wallOffsetMs - wallClockOffsetMs(moment, dayStartMs, dayEndMs);
+    if (Math.abs(off) < 1_000) break;
+    moment += off;
+  }
+  return Math.min(dayEndMs, Math.max(afterMs + 60_000, moment));
 }
 
 /** "Needs review: 3 suggestions, 09:00 to 10:20. Opens Gym first." — distinct per crowd. */

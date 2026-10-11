@@ -655,6 +655,50 @@ describe("native Calendar Blocks presentation", () => {
     }
   });
 
+  it("a crowd that starts the night before is drawn from midnight on the selected day (Codex r13)", () => {
+    const previousTz = process.env.TZ;
+    process.env.TZ = "Europe/London";
+    try {
+      const suggestion = (id: string, start: string, stop: string) => entry({ id, reviewStatus: "needs_review", startedAt: start, stoppedAt: stop });
+      const state = build(Date.parse("2026-07-10T20:00:00Z"), bootstrap([
+        suggestion("a", "2026-07-09T22:00:00.000Z", "2026-07-09T23:01:00.000Z"),
+        suggestion("b", "2026-07-09T23:01:00.000Z", "2026-07-09T23:02:00.000Z"),
+        suggestion("c", "2026-07-09T23:02:00.000Z", "2026-07-09T23:03:00.000Z")
+      ]), undefined, "2026-07-10");
+      const crowd = state.model.entries.filter((candidate) => candidate.isReview);
+      expect(crowd).toHaveLength(1);
+      const clock = (ms: number) => new Date(ms).toTimeString().slice(0, 5);
+      expect(new Date(crowd[0].startedAtMs).getDate()).toBe(10);
+      expect(clock(crowd[0].startedAtMs)).toBe("00:00");
+      expect(clock(crowd[0].stoppedAtMs!)).toBe("00:07");
+    } finally {
+      if (previousTz === undefined) delete process.env.TZ;
+      else process.env.TZ = previousTz;
+    }
+  });
+
+  it("a crowd's end lands on its drawn wall-clock time across the fold (Codex r13)", () => {
+    const previousTz = process.env.TZ;
+    process.env.TZ = "Europe/London";
+    try {
+      const suggestion = (id: string, start: string, stop: string) => entry({ id, reviewStatus: "needs_review", startedAt: start, stoppedAt: stop });
+      const state = build(Date.parse("2026-10-25T20:00:00Z"), bootstrap([
+        suggestion("a", "2026-10-25T00:40:00.000Z", "2026-10-25T00:45:00.000Z"),
+        suggestion("b", "2026-10-25T00:55:00.000Z", "2026-10-25T01:10:00.000Z"),
+        suggestion("c", "2026-10-25T00:59:00.000Z", "2026-10-25T01:10:00.000Z")
+      ]), undefined, "2026-10-25");
+      const crowd = state.model.entries.filter((candidate) => candidate.isReview);
+      expect(crowd).toHaveLength(1);
+      const clock = (ms: number) => new Date(ms).toTimeString().slice(0, 5);
+      expect(clock(crowd[0].startedAtMs)).toBe("01:40");
+      expect(clock(crowd[0].stoppedAtMs!)).toBe("02:04");
+      expect(crowd[0].stoppedAtMs!).toBeGreaterThan(crowd[0].startedAtMs);
+    } finally {
+      if (previousTz === undefined) delete process.env.TZ;
+      else process.env.TZ = previousTz;
+    }
+  });
+
   it("reserves Review targets by the wall-clock time iOS draws, across a clock change (Codex r10)", () => {
     const previousTz = process.env.TZ;
     process.env.TZ = "Europe/London";
