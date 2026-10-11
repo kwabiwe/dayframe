@@ -1,7 +1,7 @@
 "use client";
 
+import { DayframeIcon } from "@/components/blocks/DayframeIcon";
 import { useEffect, useRef, useState } from "react";
-import { MapPinned } from "lucide-react";
 import maplibregl, {
   type GeoJSONSource,
   type Map as MapLibreMap,
@@ -120,7 +120,7 @@ export function LocationEvidenceMap({
           />
         ) : (
           <div className="location-evidence-empty" role="status">
-            <MapPinned aria-hidden="true" size={22} />
+            <DayframeIcon glyph="map-pin" size={22}/>
             <strong>No mapped evidence</strong>
             <span>{caption}</span>
           </div>

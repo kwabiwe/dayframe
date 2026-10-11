@@ -1,19 +1,10 @@
 "use client";
 
+import { DayframeIcon } from "@/components/blocks/DayframeIcon";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useState, type FormEvent } from "react";
-import {
-  ChevronDown,
-  Download,
-  Folder,
-  MapPin,
-  Pencil,
-  Plus,
-  ShieldCheck,
-  Trash2,
-  UserRound
-} from "lucide-react";
+import { ChevronDown, Folder, Plus, ShieldCheck } from "lucide-react";
 import { useAppShellRuntime } from "@/components/AppShellRuntime";
 import { SignOutControl } from "@/components/SignOutControl";
 import {
@@ -211,7 +202,7 @@ export function AccountSettings({
       </span>
       <span className="df-set-acts">
         <button className="df-rbtn df-rbtn--sm" onClick={() => setDialog("profile")} type="button">
-          <UserRound aria-hidden="true" size={15} />
+          <DayframeIcon glyph="user-round" size={15} />
           Edit profile
         </button>
         <button className="df-rbtn df-rbtn--sm" onClick={() => setDialog("workspace")} type="button">
@@ -276,7 +267,7 @@ export function AccountSettings({
                 onClick={() => setWorkspaceAction((current) => current === "rename" ? null : "rename")}
                 type="button"
               >
-                <Pencil aria-hidden="true" size={15} />
+                <DayframeIcon glyph="pencil" size={15}/>
                 Rename
               </Button>
               <Button
@@ -381,7 +372,7 @@ export function PlacesLocationSettings() {
   return (
     <>
       <SettingsRow
-        icon={MapPin}
+        glyph="map-pin"
         label="Saved places"
         detail="Places Dayframe recognises, and whether visits there are suggested."
         action={<Link className="df-rbtn df-rbtn--sm" href="/places">Manage</Link>}
@@ -468,7 +459,7 @@ export function DataPrivacySettings() {
   return (
     <>
       <SettingsRow
-        icon={Download}
+        glyph="download"
         label="Export data"
         detail="Download a copy of your Dayframe information."
         action={(
@@ -480,7 +471,7 @@ export function DataPrivacySettings() {
         )}
       />
       <SettingsRow
-        icon={Trash2}
+        glyph="trash-2"
         label="Recent location evidence"
         detail="Raw map evidence is normally deleted after seven days. Confirmed time entries and saved places are kept."
         action={(

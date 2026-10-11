@@ -1,5 +1,8 @@
 "use client";
 
+import { DayframeIcon } from "@/components/blocks/DayframeIcon";
+import type { DayframeGlyph } from "@dayframe/shared";
+
 import {
   ChevronDown,
   X,
@@ -211,18 +214,21 @@ export function SettingsRow({
   action,
   className,
   detail,
+  glyph,
   icon: Icon,
   label
 }: {
   action?: ReactNode;
   className?: string;
   detail?: ReactNode;
+  /** A Dayframe thing (places, export, history…) draws its registry glyph; generic rows may use lucide. */
+  glyph?: DayframeGlyph;
   icon?: LucideIcon;
   label: string;
 }) {
   return (
-    <div className={classNames("ui-settings-row", Icon ? "has-icon" : "", className)}>
-      {Icon ? <Icon size={18} aria-hidden="true" /> : null}
+    <div className={classNames("ui-settings-row", Icon || glyph ? "has-icon" : "", className)}>
+      {glyph ? <DayframeIcon glyph={glyph} size={18} /> : Icon ? <Icon size={18} aria-hidden="true" /> : null}
       <div>
         <strong>{label}</strong>
         {detail ? <span>{detail}</span> : null}

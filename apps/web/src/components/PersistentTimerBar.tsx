@@ -10,7 +10,7 @@ import type {
 } from "react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { normalizeTagName, resolveActivityIcon, type DayframeGlyph } from "@dayframe/shared";
-import { CalendarDays, Clock3, Ellipsis, Plus, Trash2 } from "lucide-react";
+import { Clock3, Ellipsis, Plus } from "lucide-react";
 import { useAppShellRuntime } from "@/components/AppShellRuntime";
 import { BlocksToast } from "@/components/blocks/BlocksToast";
 import { DayframeIcon } from "@/components/blocks/DayframeIcon";
@@ -527,7 +527,7 @@ export function PersistentTimerBar({ workspaceMode = false }: { workspaceMode?: 
               >
                 <Field htmlFor="active-start-date" label="Start date">
                   <NativePickerControl
-                    icon={<CalendarDays size={16} aria-hidden="true" />}
+                    icon={<DayframeIcon glyph="calendar-days" size={16}/>}
                     inputRef={startDateInputRef}
                     inputProps={{
                       id: "active-start-date",
@@ -650,7 +650,7 @@ export function PersistentTimerBar({ workspaceMode = false }: { workspaceMode?: 
                   role="menuitem"
                   type="button"
                 >
-                  <Trash2 aria-hidden="true" size={16} />
+                  <DayframeIcon glyph="trash-2" size={16}/>
                   Discard running block
                 </button>
               </div>
