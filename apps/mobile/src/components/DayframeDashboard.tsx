@@ -30,6 +30,7 @@ import { router, useFocusEffect, useIsFocused } from "expo-router";
 import { takeDashboardRefresh } from "@/lib/todayRefreshRequest";
 import { SafeAreaView } from "react-native-safe-area-context";
 import {
+  withGoalExclusions,
   paletteColorFor,
   TIMER_STATE_RECONCILE_INTERVAL_MS,
   timerStateChanged,
@@ -47,6 +48,7 @@ import type { LandingRequest } from "@/lib/blocksMotion";
 import { minuteClock, newestShownTimestamp } from "@/lib/frameClock";
 import { loadHapticsPreference, playHaptic, useHapticsPreference } from "@/lib/haptics";
 import { subscribeSavedTimeGoals } from "@/lib/settingsGoals";
+import { applySavedActivity, subscribeSavedActivity } from "@/lib/settingsActivities";
 import { layoutQuickStartMosaic, rankQuickStartActivities, weeklySecondsByActivity } from "@/lib/quickStartMosaic";
 import { TodayReviewPresentationProvider } from "./today/TodayReviewPresentationContext";
 import { AccountAvatarButton } from "./today/AccountAvatarButton";
@@ -366,6 +368,20 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
     };
     // A bootstrap already in flight carries the old goals: treat this like a mutation so it is
     // reconciled instead of applied over the new ones.
+    dashboardMutationRevision.current += 1;
+    latestData.current = next;
+    setData(next);
+  }), []);
+  // An activity saved in Settings (name, colour, icon or "Counts toward goal") reaches Today's goal
+  // frame and Reports at once, for the same account and workspace only; an older answer never
+  // replaces a newer one (applySavedActivity).
+  const appliedSavedActivities = useRef(new Map<string, number>());
+  useEffect(() => subscribeSavedActivity((event) => {
+    const current = latestData.current;
+    if (!current) return;
+    const next = applySavedActivity(current, event, appliedSavedActivities.current);
+    if (next === current) return;
+    // A bootstrap already in flight may predate this change: reconcile it like a mutation.
     dashboardMutationRevision.current += 1;
     latestData.current = next;
     setData(next);
@@ -1547,11 +1563,12 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
   // Whole minutes only, so the goal frame reads the per-minute clock (investigation 2026-10-07).
   const todayGoalFrame = useMemo(
     () => buildTodayGoalFrame({
+      categories: withGoalExclusions(data?.categories, data?.goalExcludedCategoryIds),
       entries: loggedSourceEntries,
       goalMinutes: data?.user.dailyGoalMinutes,
       nowMs: minuteNow,
     }),
-    [data?.user.dailyGoalMinutes, loggedSourceEntries, minuteNow]
+    [data?.categories, data?.goalExcludedCategoryIds, data?.user.dailyGoalMinutes, loggedSourceEntries, minuteNow]
   );
   const activeCategoryColor = displayedActiveEntry?.categoryName
     ? paletteColorFor(

@@ -2,30 +2,32 @@ import type { DayframeActivityIconKey } from "./icons";
 import type { DayframePaletteKey } from "./palette";
 
 // The activities every new workspace starts with. `starterKey` is stored on the category so
-// Health and Location can still find Sleep or Commute after someone renames it.
+// Health and Location can still find Sleep or Commute after someone renames it. Every starter
+// counts toward the daily goal except Sleep (owner decision UIA-043, 11 Oct 2026).
 export const DAYFRAME_STARTER_ACTIVITIES = [
-  { starterKey: "work", name: "Work", color: "blue", icon: "work", isPinned: true },
-  { starterKey: "admin", name: "Admin", color: "steel", icon: "admin", isPinned: true },
-  { starterKey: "learning", name: "Learning", color: "amber", icon: "learning", isPinned: true },
-  { starterKey: "exercise", name: "Exercise", color: "red", icon: "gym", isPinned: true },
-  { starterKey: "walk", name: "Walk", color: "lime", icon: "walk", isPinned: false },
-  { starterKey: "sleep", name: "Sleep", color: "blue-bold", icon: "sleep", isPinned: false },
-  { starterKey: "mindfulness", name: "Mindfulness", color: "teal", icon: "mindfulness", isPinned: false },
-  { starterKey: "meals", name: "Meals", color: "orange", icon: "meals", isPinned: false },
-  { starterKey: "chores", name: "Chores", color: "moss", icon: "chores", isPinned: false },
-  { starterKey: "errands", name: "Errands", color: "chartreuse", icon: "errands", isPinned: false },
-  { starterKey: "personal", name: "Personal", color: "sky", icon: "personal", isPinned: true },
-  { starterKey: "hobbies", name: "Hobbies", color: "purple", icon: "hobbies", isPinned: false },
-  { starterKey: "family", name: "Family", color: "rose", icon: "family", isPinned: false },
-  { starterKey: "social", name: "Social", color: "magenta", icon: "social", isPinned: false },
-  { starterKey: "commute", name: "Commute", color: "graphite", icon: "commute", isPinned: false },
-  { starterKey: "travel", name: "Travel", color: "rust", icon: "travel", isPinned: false }
+  { starterKey: "work", name: "Work", color: "blue", icon: "work", isPinned: true, countsTowardGoal: true },
+  { starterKey: "admin", name: "Admin", color: "steel", icon: "admin", isPinned: true, countsTowardGoal: true },
+  { starterKey: "learning", name: "Learning", color: "amber", icon: "learning", isPinned: true, countsTowardGoal: true },
+  { starterKey: "exercise", name: "Exercise", color: "red", icon: "gym", isPinned: true, countsTowardGoal: true },
+  { starterKey: "walk", name: "Walk", color: "lime", icon: "walk", isPinned: false, countsTowardGoal: true },
+  { starterKey: "sleep", name: "Sleep", color: "blue-bold", icon: "sleep", isPinned: false, countsTowardGoal: false },
+  { starterKey: "mindfulness", name: "Mindfulness", color: "teal", icon: "mindfulness", isPinned: false, countsTowardGoal: true },
+  { starterKey: "meals", name: "Meals", color: "orange", icon: "meals", isPinned: false, countsTowardGoal: true },
+  { starterKey: "chores", name: "Chores", color: "moss", icon: "chores", isPinned: false, countsTowardGoal: true },
+  { starterKey: "errands", name: "Errands", color: "chartreuse", icon: "errands", isPinned: false, countsTowardGoal: true },
+  { starterKey: "personal", name: "Personal", color: "sky", icon: "personal", isPinned: true, countsTowardGoal: true },
+  { starterKey: "hobbies", name: "Hobbies", color: "purple", icon: "hobbies", isPinned: false, countsTowardGoal: true },
+  { starterKey: "family", name: "Family", color: "rose", icon: "family", isPinned: false, countsTowardGoal: true },
+  { starterKey: "social", name: "Social", color: "magenta", icon: "social", isPinned: false, countsTowardGoal: true },
+  { starterKey: "commute", name: "Commute", color: "graphite", icon: "commute", isPinned: false, countsTowardGoal: true },
+  { starterKey: "travel", name: "Travel", color: "rust", icon: "travel", isPinned: false, countsTowardGoal: true }
 ] as const satisfies ReadonlyArray<{
   starterKey: string;
   name: string;
   color: DayframePaletteKey;
   icon: DayframeActivityIconKey;
   isPinned: boolean;
+  countsTowardGoal: boolean;
 }>;
 
 export type DayframeStarterActivity = (typeof DAYFRAME_STARTER_ACTIVITIES)[number];

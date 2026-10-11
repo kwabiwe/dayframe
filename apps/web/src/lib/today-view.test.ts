@@ -74,6 +74,26 @@ describe("goal frame", () => {
     expect(slices.find((slice) => slice.live)?.key.startsWith("live:")).toBe(true);
   });
 
+  it("keeps Sleep in the framed total but out of the goal cells and percent (UIA-043)", () => {
+    const now = at(10, 12);
+    const entries = [entry("night", iso(10, 0), iso(10, 7), "sleep"), entry("work", iso(10, 8), iso(10, 10), "focus"), entry("bare", iso(10, 10), iso(10, 11), null)];
+    const frame = buildGoalFrame({
+      categories: [{ id: "sleep", countsTowardGoal: false }, { id: "focus", countsTowardGoal: true }],
+      entries,
+      goalMinutes: 480,
+      nowMs: now
+    });
+    expect(frame.totalSeconds).toBe(10 * 3600);
+    // Time without an activity counts; Sleep does not.
+    expect(frame.goalSeconds).toBe(3 * 3600);
+    expect(frame.percent).toBe(38);
+    expect(frame.cells.flat().some((slice) => slice.key.startsWith("night:"))).toBe(false);
+    // Switched back on, or without the flag at all, every framed minute fills the goal.
+    const on = buildGoalFrame({ categories: [{ id: "sleep", countsTowardGoal: true }], entries, goalMinutes: 480, nowMs: now });
+    expect(on.goalSeconds).toBe(10 * 3600);
+    expect(buildGoalFrame({ entries, goalMinutes: 480, nowMs: now }).percent).toBe(125);
+  });
+
   it("falls back to an 8 hour goal and names it", () => {
     const frame = buildGoalFrame({ entries: [], goalMinutes: 0, nowMs: at(10, 9) });
     expect(frame.cells).toHaveLength(8);

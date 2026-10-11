@@ -138,6 +138,7 @@ import { BlocksToast, useBlocksNotice } from "@/components/blocks/BlocksToast";
 import { blocksNavOrigin, settingsBackLabel, settingsSectionTitle } from "@/lib/blocksNav";
 import { mobileTextProps } from "@/lib/mobileTypography";
 import { createGoalSaver, publishSavedTimeGoals, type TimeGoals } from "@/lib/settingsGoals";
+import { beginSavedActivityChange, publishSavedActivity } from "@/lib/settingsActivities";
 import Constants from "expo-constants";
 import {
   SettingsAccountCard,
@@ -952,9 +953,17 @@ export default function SettingsScreen() {
       const pinnedNow = activityCategoriesRef.current.filter((item) => item.isPinned).length;
       // Only counted from this visit's own refresh: an older cached copy may be missing a pin.
       const pinned = !activity && draft.isPinned && activityPinsFresh() && pinnedNow < QUICK_START_PIN_LIMIT;
+      const sequence = beginSavedActivityChange();
       const result = activity
-        ? await updateCategory(activity.id, { name: draft.name, color: draft.color, icon: draft.icon })
-        : await createCategory(draft.name, { color: draft.color, icon: draft.icon, isPinned: pinned });
+        ? await updateCategory(activity.id, { name: draft.name, color: draft.color, icon: draft.icon, countsTowardGoal: draft.countsTowardGoal })
+        : await createCategory(draft.name, { color: draft.color, icon: draft.icon, isPinned: pinned, countsTowardGoal: draft.countsTowardGoal });
+      // Today and Reports (the Dashboard's bootstrap) pick it up too, e.g. a "Counts toward goal"
+      // change, whenever the account and workspace are unchanged, even if Settings closed meanwhile.
+      const ownerNow = await readActiveMobileAccount();
+      if (owner && ownerNow && mobileAccountOwnersEqual(owner, ownerNow)) {
+        publishSavedActivity({ userId: owner.userId, workspaceId: owner.workspaceId, category: result.category, sequence });
+      }
+      // Settings' own state only while Settings is still open for that account.
       if (!(await activityOwnerStill(owner))) return;
       if (!activity && pinned && !result.category.isPinned) {
         // The server's own quick-start cap won (another device pinned one meanwhile).

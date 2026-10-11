@@ -5,6 +5,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   DAYFRAME_ACTIVITY_ICONS,
   DAYFRAME_PALETTE_PICKER,
+  defaultCountsTowardGoal,
   paletteKeyFor,
   resolveActivityIcon,
   type DayframePaletteKey
@@ -30,6 +31,9 @@ import type { BootstrapData, CategoryRow } from "@/lib/queries";
 const NOTICE_MS = 5_000;
 const NOTICE_EXIT_MS = 160;
 const BUSY_MESSAGE = "Another activity change is still saving. Try again in a moment.";
+
+/** What the editor dialog saves; Create and Save both send countsTowardGoal (UIA-043). */
+type ActivityDraft = { name: string; color: DayframePaletteKey; icon?: string; countsTowardGoal: boolean };
 
 type Notice = {
   token: number;
@@ -188,9 +192,14 @@ export function ActivitiesLibrary({ initialData }: { initialData: BootstrapData 
     return true;
   }, [announce, loadArchived, restore, run]);
 
-  const save = useCallback(async (target: CategoryRow | null, draft: { name: string; color: DayframePaletteKey; icon?: string }): Promise<string | null> => {
+  const save = useCallback(async (target: CategoryRow | null, draft: ActivityDraft): Promise<string | null> => {
     // An icon is sent only when one was picked; otherwise the stored choice (or the name) stands.
-    const body = { name: draft.name.trim(), color: draft.color, ...(draft.icon ? { icon: draft.icon } : {}) };
+    const body = {
+      name: draft.name.trim(),
+      color: draft.color,
+      ...(draft.icon ? { icon: draft.icon } : {}),
+      countsTowardGoal: draft.countsTowardGoal
+    };
     const done = await run(
       () => target
         ? patch({ id: target.id, ...body })
@@ -395,7 +404,7 @@ function ActivityEditor({
   busy: boolean;
   onArchive: (activity: CategoryRow) => Promise<void>;
   onClose: () => void;
-  onSave: (draft: { name: string; color: DayframePaletteKey; icon?: string }) => Promise<void>;
+  onSave: (draft: ActivityDraft) => Promise<void>;
   serverError: string | null;
   target: CategoryRow | null;
 }) {
@@ -406,6 +415,11 @@ function ActivityEditor({
   const resolved = resolveActivityIcon({ icon: pickedIcon ?? target?.icon ?? null, name });
   const icon = resolved.key ?? "";
   const setIcon = (key: string) => setPickedIcon(key);
+  // UIA-043: only an explicit false leaves the activity out of goal progress.
+  // An existing activity keeps its stored choice; a new one follows its name (Sleep starts off)
+  // until the switch is touched.
+  const [goalChoice, setCountsTowardGoal] = useState<boolean | null>(target ? target.countsTowardGoal !== false : null);
+  const countsTowardGoal = goalChoice ?? defaultCountsTowardGoal(name);
   const [problem, setProblem] = useState<string | null>(null);
   const nameRef = useRef<HTMLInputElement | null>(null);
   const iconGlyph = resolved.glyph;
@@ -417,7 +431,7 @@ function ActivityEditor({
       nameRef.current?.focus();
       return;
     }
-    void onSave({ name, color, icon: pickedIcon ?? undefined });
+    void onSave({ name, color, icon: pickedIcon ?? undefined, countsTowardGoal });
   };
 
   const radioKeys = (keys: readonly string[], current: string, pick: (key: string) => void, group: string) =>
@@ -522,6 +536,20 @@ function ActivityEditor({
             ))}
           </div>
         </div>
+        <label className="place-suggestion-toggle df-ce-toggle">
+          <span>
+            <strong>Counts toward goal</strong>
+            <small id="df-ce-goal-hint">When off, time here still shows in your day but doesn’t fill the goal.</small>
+          </span>
+          <input
+            aria-describedby="df-ce-goal-hint"
+            checked={countsTowardGoal}
+            disabled={busy}
+            onChange={(event) => setCountsTowardGoal(event.target.checked)}
+            role="switch"
+            type="checkbox"
+          />
+        </label>
       </div>
     </ModalDialog>
   );

@@ -6,6 +6,7 @@ import {
   DAYFRAME_BLOCKS,
   DAYFRAME_PALETTE_PICKER,
   blockColorsFor,
+  defaultCountsTowardGoal,
   paletteColorFor,
   paletteKeyFor,
   resolveActivityIcon,
@@ -19,10 +20,26 @@ import { QUICK_START_PIN_LIMIT, activityNameProblem } from "../../lib/activities
 import type { MobileStyles, MobileTheme } from "../../lib/mobileTheme";
 import { MOBILE_DISPLAY_FONT, mobileTextProps } from "../../lib/mobileTypography";
 
-/** isPinned is only used when creating; an existing activity's pin is the page's pin button. */
-export type ActivityEditorDraft = { name: string; color: DayframePaletteKey; icon: string | null; isPinned: boolean };
+/**
+ * isPinned is only used when creating; an existing activity's pin is the page's pin button.
+ * countsTowardGoal is the "Counts toward goal" switch (UIA-043), saved with the other fields.
+ */
+export type ActivityEditorDraft = {
+  name: string;
+  color: DayframePaletteKey;
+  icon: string | null;
+  isPinned: boolean;
+  countsTowardGoal: boolean;
+};
 
-type EditableActivity = { id: string; name: string; color: string; icon?: string | null; starterKey?: string | null };
+type EditableActivity = {
+  id: string;
+  name: string;
+  color: string;
+  icon?: string | null;
+  starterKey?: string | null;
+  countsTowardGoal?: boolean;
+};
 
 /**
  * Blocks parity step 6b-1 (prototype openActivityEditor): New activity / Edit activity as a tall
@@ -81,6 +98,10 @@ export function ActivityEditorSheet({
   const quickStartFull = pinnedCount >= QUICK_START_PIN_LIMIT;
   // A new activity joins quick start by default while there is room (as before this page).
   const [pinNew, setPinNew] = useState(!quickStartFull);
+  // An existing activity keeps its stored choice (only an explicit false leaves it out); a new one
+  // follows its name (Sleep starts off) until the switch is touched.
+  const [goalChoice, setCountsTowardGoal] = useState<boolean | null>(activity ? activity.countsTowardGoal !== false : null);
+  const countsTowardGoal = goalChoice ?? defaultCountsTowardGoal(name);
   const [problem, setProblemState] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const done = useRef(false);
@@ -105,7 +126,13 @@ export function ActivityEditorSheet({
     busy.current = true;
     setSaving(true);
     setProblem(null);
-    const result = await onSave({ name: name.trim(), color, icon, isPinned: !activity && pinNew && pinReady && !quickStartFull })
+    const result = await onSave({
+      name: name.trim(),
+      color,
+      icon,
+      isPinned: !activity && pinNew && pinReady && !quickStartFull,
+      countsTowardGoal
+    })
       .catch(() => "Couldn't save. Check your connection and try again.");
     busy.current = false;
     if (done.current) return;
@@ -263,6 +290,23 @@ export function ActivityEditorSheet({
                 />
               </View>
             )}
+
+            <View style={styles.pinRow} testID="activity-editor-goal-row">
+              <View style={styles.pinText}>
+                <Text {...mobileTextProps("itemTitle")} style={{ color: theme.textPrimary, fontSize: 15, fontWeight: "600" }}>Counts toward goal</Text>
+                <Text {...mobileTextProps("metadata")} style={{ color: theme.textMuted }}>
+                  When off, time here still shows in your day but doesn’t fill the goal.
+                </Text>
+              </View>
+              <SettingsSwitch
+                disabled={saving}
+                accessibilityHint="When off, time here still shows in your day but doesn’t fill the goal."
+                label="Counts toward goal"
+                onValueChange={setCountsTowardGoal}
+                theme={theme}
+                value={countsTowardGoal}
+              />
+            </View>
 
             <Text {...mobileTextProps("counter")} accessibilityRole="header" style={[styles.eyebrow, { color: theme.textMuted }]}>ICON</Text>
             <View accessibilityLabel="Icon" accessibilityRole="radiogroup" style={[styles.iconGrid, { gap: iconGap }]}>

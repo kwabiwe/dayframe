@@ -64,6 +64,27 @@ describe("TodayGoalFrame", () => {
     expect(summary[0].props.accessibilityLabel).toBe("2 hours 30 minutes tracked. Daily goal 8 hours, 31 percent.");
   });
 
+  it("says how much fills the goal when an activity doesn't count (UIA-043)", () => {
+    const tree = render(buildTodayGoalFrame({
+      categories: [{ id: "sleep", countsTowardGoal: false }],
+      entries: [
+        { id: "s", startedAt: at(0), stoppedAt: at(7), categoryId: "sleep", categoryColor: "blue" },
+        { id: "w", startedAt: at(8), stoppedAt: at(10), categoryId: "work", categoryColor: "lime" },
+      ],
+      goalMinutes: 480,
+      nowMs: day + 12 * 3_600_000,
+    }));
+    const texts = tree.root.findAllByType("Text" as never);
+    expect(texts.map((text) => text.props.children)).toEqual([
+      "WEDNESDAY 7 OCTOBER",
+      "9h",
+      ["framed · 2h toward ", "8h"],
+      [25, "%"],
+    ]);
+    const summary = tree.root.findAll((node) => node.props.accessible === true && typeof node.props.accessibilityLabel === "string");
+    expect(summary[0].props.accessibilityLabel).toBe("9 hours tracked, 2 hours toward your daily goal of 8 hours, 25 percent.");
+  });
+
   it("draws one cell per goal hour and marks the live slice with the recording colour", () => {
     const tree = render(buildTodayGoalFrame({
       entries: [{ id: "live", startedAt: at(9), stoppedAt: null, categoryColor: "lime" }],

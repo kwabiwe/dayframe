@@ -25,7 +25,9 @@ const createCategorySchema = z.object({
   name: z.string().trim().min(1, "Activity name is required."),
   color: z.string().trim().optional(),
   isPinned: z.boolean().optional(),
-  icon: activityIconSchema
+  icon: activityIconSchema,
+  // Left out (older clients), a new activity counts toward the daily goal unless it is named Sleep.
+  countsTowardGoal: z.boolean().optional()
 });
 
 const updateCategorySchema = z.object({
@@ -34,6 +36,7 @@ const updateCategorySchema = z.object({
   color: z.string().trim().optional(),
   isPinned: z.boolean().optional(),
   icon: activityIconSchema,
+  countsTowardGoal: z.boolean().optional(),
   // Restores an archived activity; archiving stays DELETE.
   isArchived: z.literal(false).optional()
 });

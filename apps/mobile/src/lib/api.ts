@@ -206,7 +206,12 @@ export type MobileBootstrap = {
     categoryName: string | null;
     clientName: string | null;
   }>;
-  categories: Array<{ id: string; name: string; color: string; isPinned: boolean; icon?: string | null; starterKey?: string | null }>;
+  // countsTowardGoal: false leaves the activity's time out of goal progress (UIA-043); an older
+  // server leaves it out, and then every activity counts.
+  categories: Array<{ id: string; name: string; color: string; isPinned: boolean; icon?: string | null; starterKey?: string | null; countsTowardGoal?: boolean }>;
+  // Every activity, active or archived, that doesn't count toward the goal; `categories` holds only
+  // active ones, so an archived Sleep's history stays out of goal progress. Older servers omit it.
+  goalExcludedCategoryIds?: string[];
   tags?: MobileTag[];
   entries: MobileTimeEntry[];
   historyEntries?: MobileTimeEntry[];
@@ -1678,7 +1683,7 @@ export async function saveEditedReviewItem(
 
 export async function createCategory(
   name: string,
-  options: { color?: string; isPinned?: boolean; icon?: string | null } = {}
+  options: { color?: string; isPinned?: boolean; icon?: string | null; countsTowardGoal?: boolean } = {}
 ): Promise<MobileCategoryResponse> {
   const response = await mobileFetch(`${DAYFRAME_API_BASE}/api/categories`, {
     method: "POST",
@@ -1692,6 +1697,8 @@ export async function createCategory(
       ...(options.color ? { color: options.color } : {}),
       // An icon key from the shared set; left out, the name decides the icon.
       ...(options.icon !== undefined ? { icon: options.icon } : {}),
+      // Left out, the server counts a new activity toward the goal.
+      ...(options.countsTowardGoal !== undefined ? { countsTowardGoal: options.countsTowardGoal } : {}),
       isPinned: Boolean(options.isPinned)
     })
   });
@@ -1742,7 +1749,7 @@ export async function ensureAutomaticLoggingCategories(
 
 export async function updateCategory(
   id: string,
-  options: { name?: string; color?: string; isPinned?: boolean; icon?: string | null }
+  options: { name?: string; color?: string; isPinned?: boolean; icon?: string | null; countsTowardGoal?: boolean }
 ): Promise<MobileCategoryResponse> {
   const response = await mobileFetch(`${DAYFRAME_API_BASE}/api/categories`, {
     method: "PATCH",

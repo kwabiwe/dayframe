@@ -79,7 +79,50 @@ describe("ActivityEditorSheet", () => {
       byTestId("activity-editor-save").props.onPress();
     });
     expect(onSave).toHaveBeenCalledTimes(1);
-    expect(onSave).toHaveBeenCalledWith({ name: "Piano", color: "lime", icon: null, isPinned: true });
+    expect(onSave).toHaveBeenCalledWith({ name: "Piano", color: "lime", icon: null, isPinned: true, countsTowardGoal: true });
+  });
+
+  it("shows the Counts toward goal switch from the activity and saves its value (UIA-043)", () => {
+    const goalSwitch = () => tree!.root.find((node: ReactTestInstance) => node.props.accessibilityLabel === "Counts toward goal" && (node.type as unknown) === "Switch");
+    const { onSave } = render({ activity: { id: "s", name: "Sleep", color: "blue-bold", countsTowardGoal: false } });
+    expect(goalSwitch().props.value).toBe(false);
+    expect(JSON.stringify(byTestId("activity-editor-goal-row").props.children)).toContain("When off, time here still shows in your day but doesn’t fill the goal.");
+    act(() => goalSwitch().props.onValueChange(true));
+    expect(goalSwitch().props.value).toBe(true);
+    act(() => byTestId("activity-editor-save").props.onPress());
+    expect(onSave).toHaveBeenCalledWith(expect.objectContaining({ name: "Sleep", countsTowardGoal: true }));
+  });
+
+  it("starts an activity without the flag counting, and a new one can be switched off", () => {
+    const goalSwitch = () => tree!.root.find((node: ReactTestInstance) => node.props.accessibilityLabel === "Counts toward goal" && (node.type as unknown) === "Switch");
+    const { onSave } = render();
+    expect(goalSwitch().props.value).toBe(true);
+    act(() => goalSwitch().props.onValueChange(false));
+    act(() => byTestId("activity-editor-name").props.onChangeText("Nap"));
+    act(() => byTestId("activity-editor-save").props.onPress());
+    expect(onSave).toHaveBeenCalledWith(expect.objectContaining({ name: "Nap", countsTowardGoal: false }));
+  });
+
+  it("starts a new activity named Sleep switched off until the switch is touched", () => {
+    const goalSwitch = () => tree!.root.find((node: ReactTestInstance) => node.props.accessibilityLabel === "Counts toward goal" && (node.type as unknown) === "Switch");
+    const { onSave } = render();
+    act(() => byTestId("activity-editor-name").props.onChangeText(" sleep "));
+    expect(goalSwitch().props.value).toBe(false);
+    act(() => byTestId("activity-editor-name").props.onChangeText("Sleep in"));
+    expect(goalSwitch().props.value).toBe(true);
+    act(() => byTestId("activity-editor-name").props.onChangeText("Sleep"));
+    act(() => goalSwitch().props.onValueChange(true));
+    act(() => byTestId("activity-editor-name").props.onChangeText("sleep"));
+    // Touched: the name no longer decides.
+    expect(goalSwitch().props.value).toBe(true);
+    act(() => byTestId("activity-editor-save").props.onPress());
+    expect(onSave).toHaveBeenCalledWith(expect.objectContaining({ name: "sleep", countsTowardGoal: true }));
+  });
+
+  it("keeps an existing activity's stored switch whatever its name", () => {
+    const goalSwitch = () => tree!.root.find((node: ReactTestInstance) => node.props.accessibilityLabel === "Counts toward goal" && (node.type as unknown) === "Switch");
+    render({ activity: { id: "s", name: "Sleep", color: "blue-bold", countsTowardGoal: true } });
+    expect(goalSwitch().props.value).toBe(true);
   });
 
   it("offers no pin until quick start has loaded, and never sends one", () => {

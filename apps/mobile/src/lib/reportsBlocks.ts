@@ -111,10 +111,12 @@ export function reportHeroPeriod(choice: ReportRangeChoice, range: ReportRange) 
 
 /**
  * Goal streak cells for the current week: one per day up to and including today, met when the
- * day's framed time is within 15% of the daily goal. No goal, no cells.
+ * day's goal time is within 15% of the daily goal. Goal time leaves out activities switched off
+ * "Counts toward goal" (Sleep by default, UIA-043); without it, the day's framed time. No goal,
+ * no cells.
  */
 export function weekGoalDays(
-  days: readonly { start: Date; seconds: number }[],
+  days: readonly { start: Date; seconds: number; goalSeconds?: number }[],
   nowMs: number,
   dailyGoalMinutes: number | null | undefined,
 ) {
@@ -122,7 +124,7 @@ export function weekGoalDays(
   const today = +startOfLocalDay(new Date(nowMs));
   return days
     .filter((day) => +day.start <= today)
-    .map((day) => day.seconds >= dailyGoalMinutes * 60 * 0.85);
+    .map((day) => (day.goalSeconds ?? day.seconds) >= dailyGoalMinutes * 60 * 0.85);
 }
 
 /** Empty cells before the 1st in a Monday-first month grid. */

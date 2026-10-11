@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { withGoalExclusions } from "@dayframe/shared";
 import { buildTodayGoalFrame } from "./todayGoalFrame";
 
 const day = new Date(2026, 9, 7).getTime();
@@ -13,6 +14,48 @@ const entry = (id: string, start: string, stop: string | null, color = "blue") =
 });
 
 describe("buildTodayGoalFrame", () => {
+  it("keeps Sleep in the total but out of the goal cells and percent (UIA-043)", () => {
+    const entries = [entry("night", at(0), at(7), "sleep"), entry("work", at(9), at(11), "blue")];
+    const off = buildTodayGoalFrame({
+      categories: [{ id: "cat-sleep", countsTowardGoal: false }, { id: "cat-blue", countsTowardGoal: true }],
+      entries,
+      goalMinutes: 480,
+      nowMs: day + 12 * 3_600_000,
+    });
+    expect(off.totalSeconds).toBe(9 * 3600);
+    expect(off.goalSeconds).toBe(2 * 3600);
+    expect(off.percent).toBe(25);
+    expect(off.cells.flat().map((slice) => slice.color)).toEqual(["blue", "blue"]);
+    // Switched back on (or an older server without the flag), Sleep fills the goal again.
+    const on = buildTodayGoalFrame({ categories: [{ id: "cat-sleep", countsTowardGoal: true }], entries, goalMinutes: 480, nowMs: day + 12 * 3_600_000 });
+    expect(on.goalSeconds).toBe(9 * 3600);
+    expect(on.percent).toBe(100);
+    expect(buildTodayGoalFrame({ entries, goalMinutes: 480, nowMs: day + 12 * 3_600_000 }).goalSeconds).toBe(9 * 3600);
+  });
+
+  it("keeps an archived non-counting activity out through the bootstrap's exclusion list", () => {
+    const entries = [entry("night", at(0), at(7), "sleep"), entry("work", at(9), at(10), "blue")];
+    const frame = buildTodayGoalFrame({
+      // Sleep is archived: only the exclusion list knows it doesn't count.
+      categories: withGoalExclusions([{ id: "cat-blue", countsTowardGoal: true }], ["cat-sleep"]),
+      entries,
+      goalMinutes: 480,
+      nowMs: day + 12 * 3_600_000,
+    });
+    expect(frame.totalSeconds).toBe(8 * 3600);
+    expect(frame.goalSeconds).toBe(3600);
+  });
+
+  it("counts time without an activity toward the goal", () => {
+    const frame = buildTodayGoalFrame({
+      categories: [{ id: "cat-sleep", countsTowardGoal: false }],
+      entries: [{ id: "bare", startedAt: at(9), stoppedAt: at(10), categoryId: null }],
+      goalMinutes: 480,
+      nowMs: day + 12 * 3_600_000,
+    });
+    expect(frame.goalSeconds).toBe(3600);
+  });
+
   it("fills hour cells in time order and reports the share of the goal", () => {
     const frame = buildTodayGoalFrame({
       entries: [entry("b", at(10), at(10, 30), "lime"), entry("a", at(8), at(9, 30), "blue")],

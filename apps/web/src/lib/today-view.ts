@@ -1,3 +1,4 @@
+import { goalCountingEntries, type GoalCountingCategory } from "@dayframe/shared";
 import type { ReviewItemRow, TimeEntryRow } from "@/lib/queries";
 
 /**
@@ -68,13 +69,18 @@ export type GoalCellSlice = { key: string; color: string | null; name: string; f
 
 /**
  * The goal frame (same rules as iPhone's `todayGoalFrame.ts`): one cell per goal hour, filled with
- * covered time in the order it happened. Cells stop at the goal; the total does not.
+ * covered time in the order it happened. Cells stop at the goal; the total does not. The total is
+ * every framed minute; the cells and percent use only time in activities that count toward the
+ * goal (`goalCountingEntries`, UIA-043: Sleep does not by default).
  */
 export function buildGoalFrame({
+  categories,
   entries,
   goalMinutes,
   nowMs
 }: {
+  /** The workspace's activities with their "Counts toward goal" switch; left out, all time counts. */
+  categories?: Iterable<GoalCountingCategory> | null;
   entries: readonly TodayEntry[];
   goalMinutes: number | null | undefined;
   nowMs: number;
@@ -84,8 +90,10 @@ export function buildGoalFrame({
   const cellCount = Math.max(1, Math.round(minutes / 60));
   const edges = Array.from({ length: cellCount }, (_, index) => Math.round(((index + 1) * goalMs) / cellCount));
   const dayStart = localDayStart(nowMs);
-  const pieces = coveredPieces(entries, dayStart, localDayEnd(dayStart), nowMs);
-  const totalMs = pieces.reduce((sum, piece) => sum + piece.ms, 0);
+  const dayEnd = localDayEnd(dayStart);
+  const totalMs = coveredPieces(entries, dayStart, dayEnd, nowMs).reduce((sum, piece) => sum + piece.ms, 0);
+  const pieces = coveredPieces(goalCountingEntries(entries, categories), dayStart, dayEnd, nowMs);
+  const goalCountedMs = pieces.reduce((sum, piece) => sum + piece.ms, 0);
   const cells: GoalCellSlice[][] = Array.from({ length: cellCount }, () => []);
   let cursor = 0;
   let index = 0;
@@ -110,7 +118,9 @@ export function buildGoalFrame({
   return {
     cells,
     goalMinutes: minutes,
-    percent: Math.round((totalMs / goalMs) * 100),
+    /** Framed time that fills the goal (all of it unless an activity is switched off). */
+    goalSeconds: Math.floor(goalCountedMs / 1000),
+    percent: Math.round((goalCountedMs / goalMs) * 100),
     totalSeconds: Math.floor(totalMs / 1000)
   };
 }
