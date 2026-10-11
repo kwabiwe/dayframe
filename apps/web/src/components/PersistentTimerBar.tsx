@@ -29,7 +29,7 @@ import type { BootstrapData } from "@/lib/queries";
 import { shouldStartTimerFromEntrySubmit } from "@/lib/timer-entry-draft";
 import { quickActionTimerDraft } from "@/lib/timer-runtime";
 import { blockStyle } from "@/lib/block-style";
-import { alreadyRecordingToastMessage, startMatchesRunning, switchedToastMessage } from "@/lib/blocks-toast-copy";
+import { alreadyRecordingToastMessage, switchedToastMessage } from "@/lib/blocks-toast-copy";
 import { parseCommand } from "@/lib/command-parse";
 import { hasOpenDialog, isTypingTarget } from "@/lib/keyboard-ownership";
 
@@ -311,16 +311,15 @@ export function PersistentTimerBar({ workspaceMode = false }: { workspaceMode?: 
     setCategoryMenuOpen(false);
     setSuggestionsOpen(false);
     const swatch = action.categoryId ? blockStyle(action.color, action.label) : undefined;
-    // Asking for exactly what is recording would only stop and restart it: say so instead.
-    if (startMatchesRunning(active, { ...draft, categoryId: draft.categoryId || null })) {
-      announce(alreadyRecordingToastMessage(active!), swatch);
-      return;
-    }
     setTimerDraft(draft);
-    // The toast names the block this Start actually replaced, timed to the switch: a queued Start
-    // can run after an earlier one was rejected or accepted.
-    void startTimer(draft).then((outcome) => {
-      if (outcome.ok && outcome.replaced) {
+    // The Start decides when it runs (a queued Start can run after earlier ones settle): asking for
+    // exactly the running block changes nothing and says so; a switch names the block it actually
+    // replaced, timed to the switch. A Start superseded by a later one announces nothing.
+    void startTimer(draft, { dedupeRunning: true }).then((outcome) => {
+      if (!outcome.ok || !outcome.own) return;
+      if (outcome.alreadyRunning) {
+        if (outcome.unchanged) announce(alreadyRecordingToastMessage(outcome.unchanged), swatch);
+      } else if (outcome.replaced) {
         announce(switchedToastMessage(action.label, outcome.replaced, Date.parse(outcome.switchedAt)), swatch);
       }
     });

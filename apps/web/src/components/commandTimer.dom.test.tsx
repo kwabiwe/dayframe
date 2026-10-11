@@ -85,7 +85,7 @@ describe("Blocks command timer", () => {
     fireEvent.keyDown(document.body, { key: "1", repeat: true });
     expect(startTimer).not.toHaveBeenCalled();
     fireEvent.keyDown(document.body, { key: "2" });
-    expect(startTimer).toHaveBeenCalledWith({ categoryId: "write", description: "", tagNames: [] });
+    expect(startTimer).toHaveBeenCalledWith({ categoryId: "write", description: "", tagNames: [] }, { dedupeRunning: true });
   });
 
   it("draws quick starts as activity blocks with their key and marks the one recording", () => {
@@ -108,22 +108,41 @@ describe("Command timer menus and switch toasts (UIA-202/209/210)", () => {
     // timed to the switch, not the block on screen when the quick start was pressed.
     (runtime.startTimer as ReturnType<typeof vi.fn>).mockResolvedValue({
       ok: true,
+      own: true,
+      alreadyRunning: false,
+      unchanged: null,
       replaced: { ...running, id: "queued", description: "Standup", startedAt: "2026-08-14T09:30:00.000Z" },
       switchedAt: "2026-08-14T09:42:00.000Z"
     });
     render(<PersistentTimerBar />);
     await act(async () => { fireEvent.click(screen.getByRole("button", { name: "Start Writing (2)" })); });
-    expect(runtime.startTimer).toHaveBeenCalledWith({ categoryId: "write", description: "", tagNames: [] });
+    expect(runtime.startTimer).toHaveBeenCalledWith({ categoryId: "write", description: "", tagNames: [] }, { dedupeRunning: true });
     expect(screen.getByRole("status").textContent).toContain("Switched to Writing · 12m logged to Standup");
     expect(screen.queryByRole("button", { name: "Undo" })).toBeNull();
   });
 
-  it("says Already recording instead of restarting the same block", async () => {
-    runtime = runtimeFixture({ activeEntry: timeEntry({ categoryId: "focus", categoryName: "Focus" }) });
+  it("says Already recording when the Start found exactly that block running", async () => {
+    const running = timeEntry({ categoryId: "focus", categoryName: "Focus" });
+    runtime = runtimeFixture({ activeEntry: running });
+    (runtime.startTimer as ReturnType<typeof vi.fn>).mockResolvedValue({
+      ok: true, own: true, alreadyRunning: true, unchanged: running, replaced: null, switchedAt: "2026-08-14T09:42:00.000Z"
+    });
     render(<PersistentTimerBar />);
     await act(async () => { fireEvent.click(screen.getByRole("button", { name: "Recording Focus (1)" })); });
-    expect(runtime.startTimer).not.toHaveBeenCalled();
+    // The decision is the mutation owner's (it runs after anything queued), not the bar's.
+    expect(runtime.startTimer).toHaveBeenCalledWith({ categoryId: "focus", description: "", tagNames: [] }, { dedupeRunning: true });
     expect(screen.getByRole("status").textContent).toContain("Already recording Focus");
+  });
+
+  it("announces nothing for a Start a later Start superseded", async () => {
+    runtime = runtimeFixture({ activeEntry: timeEntry({ categoryId: "focus", categoryName: "Focus" }) });
+    (runtime.startTimer as ReturnType<typeof vi.fn>).mockResolvedValue({
+      ok: true, own: false, alreadyRunning: false, unchanged: null,
+      replaced: timeEntry({ categoryId: "focus", categoryName: "Focus" }), switchedAt: "2026-08-14T09:42:00.000Z"
+    });
+    render(<PersistentTimerBar />);
+    await act(async () => { fireEvent.click(screen.getByRole("button", { name: "Start Writing (2)" })); });
+    expect(screen.queryByRole("status")).toBeNull();
   });
 
   it("shows no toast for a start with nothing running, or a rejected switch", async () => {

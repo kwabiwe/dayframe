@@ -4,6 +4,7 @@ import type {
   CalendarEntryCompactSavePlan
 } from "@/lib/calendar-entry-compact-editor";
 import type { BootstrapData, TimeEntryRow } from "@/lib/queries";
+import { startMatchesRunning } from "@/lib/blocks-toast-copy";
 
 export type TimerDraft = {
   categoryId: string;
@@ -21,7 +22,17 @@ export type TimerMutationOutcome = { ok: true } | { ok: false; error: string };
  * (not when it was asked for, which a queued Start may outlive) and when the switch happened.
  */
 export type TimerStartOutcome =
-  | { ok: true; replaced: BootstrapData["activeEntry"]; switchedAt: string }
+  | {
+      ok: true;
+      /** False when a later Start superseded this one: the result is that later Start's. */
+      own: boolean;
+      /** True when the Start asked for exactly the running block and so changed nothing. */
+      alreadyRunning: boolean;
+      /** The block left running when the Start was a no-op (alreadyRunning); null otherwise. */
+      unchanged: BootstrapData["activeEntry"];
+      replaced: BootstrapData["activeEntry"];
+      switchedAt: string;
+    }
   | { ok: false; error: string };
 
 export type TimerStartRequestPayload = {
@@ -233,7 +244,8 @@ export async function runTimerStartMutation({
   setBusy,
   setError,
   send,
-  refresh
+  refresh,
+  dedupeRunning = false
 }: {
   gate: TimerMutationGate;
   snapshot: BootstrapData;
@@ -252,12 +264,20 @@ export async function runTimerStartMutation({
   setError: (error: string | null) => void;
   send: (payload: TimerStartRequestPayload) => Promise<void>;
   refresh: () => Promise<void>;
+  /**
+   * A quick start for exactly the block that is running when this Start runs (not when it was
+   * asked for) changes nothing instead of stopping and restarting it.
+   */
+  dedupeRunning?: boolean;
 }): Promise<TimerStartOutcome> {
   const result = await gate.runLatest(async (): Promise<TimerStartOutcome> => {
     const acceptedSnapshot = getCurrentSnapshot?.() ?? snapshot;
     const acceptedDraft = getCurrentDraft?.() ?? currentDraft;
     const draft = mergeTimerDraft(acceptedDraft, input);
     const startedAt = now();
+    if (dedupeRunning && startMatchesRunning(acceptedSnapshot.activeEntry, { ...draft, categoryId: draft.categoryId || null })) {
+      return { ok: true, own: true, alreadyRunning: true, unchanged: acceptedSnapshot.activeEntry, replaced: null, switchedAt: startedAt } as const;
+    }
     onAccepted?.();
     setBusy(true);
     setError(null);
@@ -266,7 +286,7 @@ export async function runTimerStartMutation({
 
     try {
       await send(timerStartRequestPayload(draft));
-      return { ok: true, replaced: acceptedSnapshot.activeEntry, switchedAt: startedAt } as const;
+      return { ok: true, own: true, alreadyRunning: false, unchanged: null, replaced: acceptedSnapshot.activeEntry, switchedAt: startedAt } as const;
     } catch (error) {
       // A failed switch returns to the entry that is still running, with its own details (a
       // draft typed for the rejected entry must not be saved onto it). From idle, keep anything
@@ -287,8 +307,9 @@ export async function runTimerStartMutation({
   });
 
   if (!result.ran) return { ok: false, error: "Timer update was cancelled." };
-  if (result.ownsResult && result.value.ok && !gate.isActive()) await refresh();
-  return result.value;
+  if (result.ownsResult && result.value.ok && !result.value.alreadyRunning && !gate.isActive()) await refresh();
+  // A superseded waiter is handed the latest Start's result; it is not this Start's to announce.
+  return result.value.ok ? { ...result.value, own: result.ownsResult } : result.value;
 }
 
 export function mergeTimerDraft(current: TimerDraft, input: TimerDraftInput): TimerDraft {

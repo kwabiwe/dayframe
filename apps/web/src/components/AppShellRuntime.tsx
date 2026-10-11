@@ -70,7 +70,7 @@ type RuntimeContext = {
   setTimerDraft: (draft: TimerDraft | ((current: TimerDraft) => TimerDraft)) => void;
   shellData: BootstrapData | null;
   startEntryAgain: (entry: TimeEntryRow) => Promise<MutationOutcome>;
-  startTimer: (input?: TimerDraftInput) => Promise<TimerStartOutcome>;
+  startTimer: (input?: TimerDraftInput, options?: { dedupeRunning?: boolean }) => Promise<TimerStartOutcome>;
   stopTimer: (input?: TimerDraftInput) => Promise<MutationOutcome>;
   timerDraft: TimerDraft;
   timerError: string | null;
@@ -316,10 +316,14 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
     commitData(nextData, "hydrate");
   }, [commitData, selectedDate]);
 
-  const startTimer = useCallback(async (input: TimerDraftInput = {}): Promise<TimerStartOutcome> => {
+  const startTimer = useCallback(async (
+    input: TimerDraftInput = {},
+    options: { dedupeRunning?: boolean } = {}
+  ): Promise<TimerStartOutcome> => {
     const snapshot = dataRef.current;
     if (!snapshot) return { ok: false, error: "Timer data is still loading." };
     return runTimerStartMutation({
+      dedupeRunning: options.dedupeRunning,
       gate: mutationGateRef.current,
       snapshot,
       currentDraft: draftRef.current,

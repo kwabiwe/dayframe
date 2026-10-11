@@ -123,7 +123,45 @@ describe("shell timer runtime", () => {
     clock = "2026-08-24T16:05:00.000Z";
     rejectWriting!(new Error("offline"));
     await expect(writing).resolves.toMatchObject({ ok: false });
-    await expect(admin).resolves.toEqual({ ok: true, replaced: focus, switchedAt: "2026-08-24T16:05:00.000Z" });
+    await expect(admin).resolves.toEqual({
+      ok: true, own: true, alreadyRunning: false, unchanged: null, replaced: focus, switchedAt: "2026-08-24T16:05:00.000Z"
+    });
+  });
+
+  it("hands a superseded Start the later result as not its own, and dedupes the running block when it runs", async () => {
+    const gate = createTimerMutationGate();
+    const focus = entry({ id: "focus-entry", description: null, categoryId: "focus", tagNames: [], tags: [] });
+    let current = bootstrapData(focus);
+    let draft: TimerDraft = timerDraftForEntry(focus);
+    let acceptWriting: (() => void) | undefined;
+    const sent: string[] = [];
+    const run = (categoryId: string, dedupeRunning: boolean, send: () => Promise<void> = async () => undefined) => runTimerStartMutation({
+      gate,
+      snapshot: current,
+      currentDraft: draft,
+      input: { categoryId, description: "", tagNames: [] },
+      now: () => "2026-08-24T16:00:00.000Z",
+      createOptimisticId: (startedAt) => `optimistic:${categoryId}:${startedAt}`,
+      getCurrentDraft: () => draft,
+      getCurrentSnapshot: () => current,
+      commit: (next) => { current = next; },
+      setDraft: (next) => { draft = next; },
+      setBusy: () => undefined,
+      setError: () => undefined,
+      send: async () => { sent.push(categoryId); await send(); },
+      refresh: async () => undefined,
+      dedupeRunning
+    });
+    const writing = run("work", true, () => new Promise<void>((resolve) => { acceptWriting = resolve; }));
+    await vi.waitFor(() => expect(acceptWriting).toBeDefined());
+    const focusAgain = run("focus", true);
+    const writingAgain = run("work", true);
+    acceptWriting!();
+    await expect(writing).resolves.toMatchObject({ ok: true, own: true, alreadyRunning: false });
+    // Focus was superseded before it ran; the latest (Writing, already running) changed nothing.
+    await expect(focusAgain).resolves.toMatchObject({ ok: true, own: false });
+    await expect(writingAgain).resolves.toMatchObject({ ok: true, own: true, alreadyRunning: true });
+    expect(sent).toEqual(["work"]);
   });
 
   it("cancels a queued latest Start inertly when its provider is disposed", async () => {
