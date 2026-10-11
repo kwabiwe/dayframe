@@ -34,7 +34,6 @@ import {
   useWindowDimensions
 } from "react-native";
 import Reanimated from "react-native-reanimated";
-import Svg, { Path } from "react-native-svg";
 import { router, Stack, useFocusEffect, useLocalSearchParams } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
 import {
@@ -2778,7 +2777,7 @@ function HealthTypeSheet({
                 sheetRef.current?.dismiss();
               }}
             >
-              <CloseGlyph color={theme.textPrimary} />
+              <DayframeIcon color={theme.textPrimary} glyph={DAYFRAME_APP_ICONS.close} size={18} />
             </Pressable>
           </View>
           <ScrollView
@@ -2885,14 +2884,6 @@ const LOCATION_SUGGESTIONS_PRIVACY = {
   glyph: "shield" as const,
   text: "Location stays private to your account and is never used for ads or analytics. Recent points on this iPhone expire after seven days; upload copies can stay longer. Signing out clears them all."
 };
-
-function CloseGlyph({ color }: { color: string }) {
-  return (
-    <Svg width={18} height={18} viewBox="0 0 24 24">
-      <Path d="m7 7 10 10M17 7 7 17" stroke={color} strokeLinecap="round" strokeWidth={2} />
-    </Svg>
-  );
-}
 
 function normalizeSettingsSection(value: string | string[] | undefined): SettingsSection {
   const section = Array.isArray(value) ? value[0] : value;

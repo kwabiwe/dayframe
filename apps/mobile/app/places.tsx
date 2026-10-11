@@ -835,7 +835,7 @@ const learnedSheetStyles = StyleSheet.create({
   headTitle: { flex: 1, gap: 2, minWidth: 0 },
   eyebrow: { fontSize: 11, fontWeight: "700", letterSpacing: 0.9 },
   title: { fontFamily: MOBILE_DISPLAY_FONT.bold, fontSize: 22 },
-  close: { alignItems: "center", borderRadius: 22, height: 44, justifyContent: "center", width: 44 },
+  close: { alignItems: "center", borderRadius: DAYFRAME_BLOCKS.radius.pill, height: 44, justifyContent: "center", width: 44 },
   body: { gap: 16 },
   actions: { gap: 10 },
   actionRow: { flexDirection: "row", gap: 10 },

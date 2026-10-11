@@ -4,7 +4,7 @@ import { router } from "expo-router";
 import { Gesture, GestureDetector } from "react-native-gesture-handler";
 import { runOnJS } from "react-native-reanimated";
 import Svg, { Circle, Defs, Line, Path, Pattern, Rect } from "react-native-svg";
-import { blockColorsFor } from "@dayframe/shared";
+import { blockColorsFor, DAYFRAME_BLOCKS } from "@dayframe/shared";
 import type { MobileTimeEntry } from "../../lib/api";
 import { playHaptic } from "../../lib/haptics";
 import type { MobileTheme } from "../../lib/mobileTheme";
@@ -295,7 +295,7 @@ function patternId(block: RibbonBlock) {
 }
 
 const styles = StyleSheet.create({
-  card: { borderRadius: 22, paddingBottom: 10, paddingHorizontal: CARD_PADDING, paddingTop: 14 },
+  card: { borderRadius: DAYFRAME_BLOCKS.radius.phoneCard, paddingBottom: 10, paddingHorizontal: CARD_PADDING, paddingTop: 14 },
   head: { alignItems: "baseline", flexDirection: "row", gap: 12, justifyContent: "space-between", marginBottom: 12 - BLEED },
   heading: { flexShrink: 1, fontSize: 17, fontWeight: "700", letterSpacing: -0.2 },
   caption: { fontSize: 13 },

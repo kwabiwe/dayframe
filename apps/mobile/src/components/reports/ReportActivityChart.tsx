@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { DAYFRAME_BLOCKS } from "@dayframe/shared";
 import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import Animated, {
   FadeIn,
@@ -402,7 +403,7 @@ function ReportStack({
   );
 }
 const s = StyleSheet.create({
-  root: { gap: 14, borderRadius: 22, paddingHorizontal: 16, paddingTop: 16, paddingBottom: 8 },
+  root: { gap: 14, borderRadius: DAYFRAME_BLOCKS.radius.phoneCard, paddingHorizontal: 16, paddingTop: 16, paddingBottom: 8 },
   title: {
     fontSize: 18,
     lineHeight: 24,

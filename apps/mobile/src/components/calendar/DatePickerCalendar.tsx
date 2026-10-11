@@ -1,4 +1,5 @@
 import { useLayoutEffect, useRef, useState } from "react";
+import { DAYFRAME_BLOCKS } from "@dayframe/shared";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 import Animated, {
   useAnimatedStyle,
@@ -288,7 +289,7 @@ const s = StyleSheet.create({
   nav: {
     width: 44,
     height: 44,
-    borderRadius: 22,
+    borderRadius: DAYFRAME_BLOCKS.radius.pill,
     alignItems: "center",
     justifyContent: "center",
   },

@@ -1206,7 +1206,7 @@ const styles = StyleSheet.create({
   top: { alignItems: "center", flexDirection: "row", minHeight: 56, paddingHorizontal: 16 },
   topSide: { minWidth: 72 },
   topRight: { alignItems: "flex-end" },
-  back: { alignItems: "center", borderRadius: 22, height: 44, justifyContent: "center", width: 44 },
+  back: { alignItems: "center", borderRadius: DAYFRAME_BLOCKS.radius.pill, height: 44, justifyContent: "center", width: 44 },
   later: { alignItems: "center", justifyContent: "center", minHeight: 44, minWidth: 64, paddingHorizontal: 6 },
   laterText: { fontSize: 15, fontWeight: "600" },
   progress: { alignItems: "center", flex: 1, flexDirection: "row", gap: 6, justifyContent: "center" },

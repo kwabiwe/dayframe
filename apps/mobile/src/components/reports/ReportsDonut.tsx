@@ -1,4 +1,5 @@
 import { memo, useEffect, useRef, useState } from "react";
+import { DAYFRAME_BLOCKS } from "@dayframe/shared";
 import { Pressable, StyleSheet, Text, View, type GestureResponderEvent } from "react-native";
 import Svg, { Circle } from "react-native-svg";
 import { compactDuration, spokenDuration } from "../today/todayBlocksLayout";
@@ -256,14 +257,14 @@ export const ReportDonutCard = memo(function ReportDonutCard({
 });
 
 const styles = StyleSheet.create({
-  card: { borderRadius: 22, padding: 16, gap: 14 },
+  card: { borderRadius: DAYFRAME_BLOCKS.radius.phoneCard, padding: 16, gap: 14 },
   donutRow: { flexDirection: "row", flexWrap: "wrap", alignItems: "center", gap: 16 },
   donut: { width: SIZE, height: SIZE },
   center: { position: "absolute", top: 0, left: 0, right: 0, bottom: 0, alignItems: "center", justifyContent: "center", paddingHorizontal: 34 },
   centerValue: { fontFamily: MOBILE_DISPLAY_FONT.extraBold, fontSize: 24, fontVariant: ["tabular-nums"], letterSpacing: -0.5 },
   centerLabel: { fontSize: 11.5, fontWeight: "600", maxWidth: 96 },
   hint: { flex: 1, minWidth: 120, fontSize: 13 },
-  rows: { borderRadius: 22, overflow: "hidden" },
+  rows: { borderRadius: DAYFRAME_BLOCKS.radius.phoneCard, overflow: "hidden" },
   row: { flexDirection: "row", alignItems: "center", minHeight: 44, paddingHorizontal: 16, paddingVertical: 6 },
   swatch: { width: 14, height: 14, borderRadius: 4 },
   rowName: { flex: 1, minWidth: 0, fontSize: 14, fontWeight: "600" },
