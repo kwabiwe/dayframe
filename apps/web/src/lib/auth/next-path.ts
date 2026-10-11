@@ -9,7 +9,10 @@ export function safeNextPath(value: string | string[] | null | undefined): strin
   try {
     const parsed = new URL(raw, "https://dayframe.invalid");
     if (parsed.origin !== "https://dayframe.invalid") return null;
-    return `${parsed.pathname}${parsed.search}`;
+    // Check what is actually emitted: normalising dot segments can turn "/.//x" into "//x".
+    const path = `${parsed.pathname}${parsed.search}`;
+    if (!path.startsWith("/") || path.startsWith("//") || path.includes("\\")) return null;
+    return path;
   } catch {
     return null;
   }

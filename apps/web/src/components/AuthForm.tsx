@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { Eye, EyeOff } from "lucide-react";
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { AppLoadingState } from "@/components/AppLoadingState";
@@ -20,7 +21,10 @@ export function AuthForm({ mode, next = null }: { mode: AuthMode; next?: string 
   const [showPassword, setShowPassword] = useState(false);
   const submissionStarted = useRef(false);
   const navigationStarted = useRef(false);
+  const router = useRouter();
   const isSignup = mode === "signup";
+  // Switching between sign-in and sign-up keeps where to go afterwards.
+  const otherModeHref = `${isSignup ? "/login" : "/signup"}${next ? `?next=${encodeURIComponent(next)}` : ""}`;
   const formLocked =
     status === "submitting" ||
     status === "opening" ||
@@ -180,7 +184,15 @@ export function AuthForm({ mode, next = null }: { mode: AuthMode; next?: string 
 
         <p className="auth-switch">
           {isSignup ? "Already have an account?" : "New to Dayframe?"}{" "}
-          <Link href={isSignup ? "/login" : "/signup"}>
+          <Link
+            href={otherModeHref}
+            onClick={(event) => {
+              // Keep a #section (Settings › Privacy and data) across the switch too.
+              if (!window.location.hash) return;
+              event.preventDefault();
+              router.push(`${otherModeHref}${window.location.hash}`);
+            }}
+          >
             {isSignup ? "Log in" : "Create one"}
           </Link>
         </p>
