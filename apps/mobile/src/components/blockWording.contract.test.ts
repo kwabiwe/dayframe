@@ -21,7 +21,7 @@ const VISIBLE_KEYS = new Set([
   "accessibilityLabel", "accessibilityHint", "placeholder", "title", "label", "message", "body",
   "subtitle", "hint", "lede", "emptyState", "detail", "text", "caption", "privacy", "accessibilityValue"
 ]);
-const VISIBLE_CALLS = /(^|\.)(alert|announceForAccessibility|showNotice|setNotice|setStatus|setMessage|Alert\.alert)$/;
+const VISIBLE_CALLS = /(^|\.)(alert|announceForAccessibility|showNotice|setNotice|setStatus|setMessage|setValidationError|setError|setNote|setSyncHelpNote|Alert\.alert)$/;
 
 /** Every piece of literal text an expression can evaluate to (both branches of a condition). */
 function texts(node: ts.Node): string[] {
@@ -30,7 +30,14 @@ function texts(node: ts.Node): string[] {
     return [node.head.text, ...node.templateSpans.flatMap((span) => [...texts(span.expression), span.literal.text])];
   }
   if (ts.isConditionalExpression(node)) return [...texts(node.whenTrue), ...texts(node.whenFalse)];
-  if (ts.isBinaryExpression(node)) return [...texts(node.left), ...texts(node.right)];
+  if (ts.isBinaryExpression(node)) {
+    const operator = node.operatorToken.kind;
+    // A comparison renders nothing; `a && "Text"` renders its right side; `||`, `??` and `+` either.
+    if (operator === ts.SyntaxKind.EqualsEqualsEqualsToken || operator === ts.SyntaxKind.ExclamationEqualsEqualsToken ||
+        operator === ts.SyntaxKind.EqualsEqualsToken || operator === ts.SyntaxKind.ExclamationEqualsToken) return [];
+    if (operator === ts.SyntaxKind.AmpersandAmpersandToken) return texts(node.right);
+    return [...texts(node.left), ...texts(node.right)];
+  }
   if (ts.isParenthesizedExpression(node) || ts.isJsxExpression(node)) return node.expression ? texts(node.expression) : [];
   if (ts.isArrayLiteralExpression(node)) return node.elements.flatMap(texts);
   return [];
@@ -39,14 +46,16 @@ function texts(node: ts.Node): string[] {
 export function blockWordingOffenders(source: string, fileName = "file.tsx") {
   const file = ts.createSourceFile(fileName, source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
   const found: string[] = [];
-  const check = (node: ts.Node, candidates: string[]) => {
-    // Words people read: the expression as a whole reads as words (a space between words, or one
-    // capitalised word), never an identifier, path or kebab key on its own.
+  const check = (node: ts.Node, candidates: string[], alwaysVisible = false) => {
+    // Words people read: JSX text always; elsewhere the expression as a whole reads as words (words
+    // separated by any whitespace, or one capitalised word). Only a single identifier-like token
+    // (camelCase, a path or a kebab key) is treated as code.
     const whole = candidates.join(" ");
-    const reads = /[A-Za-z] +[A-Za-z]/.test(whole) || /^[A-Z][a-z]+$/.test(whole.trim());
+    const reads = alwaysVisible || /[A-Za-z][^A-Za-z0-9]+[A-Za-z]/.test(whole) || /^[A-Z][a-z]+\W*$/.test(whole.trim());
     if (!reads) return;
     for (const text of candidates) {
-      if (/^[a-z]+[A-Z]|[a-z0-9]+[-_./][a-z0-9]+/.test(text.trim())) continue;
+      const token = text.trim();
+      if (!/\s/.test(token) && /^[a-z]+[A-Z]|[a-z0-9]+[-_./][a-z0-9]+/.test(token)) continue;
       if (BLOCK_WORDING_NOUN.test(text)) {
         const { line } = file.getLineAndCharacterOfPosition(node.getStart());
         found.push(`${fileName}:${line + 1} ${text.trim()}`);
@@ -54,7 +63,7 @@ export function blockWordingOffenders(source: string, fileName = "file.tsx") {
     }
   };
   const visit = (node: ts.Node) => {
-    if (ts.isJsxText(node)) check(node, [node.text]);
+    if (ts.isJsxText(node)) check(node, [node.text], true);
     else if (ts.isJsxExpression(node) && node.parent && (ts.isJsxElement(node.parent) || ts.isJsxFragment(node.parent))) {
       check(node, texts(node));
     } else if (ts.isJsxAttribute(node) && node.initializer && VISIBLE_KEYS.has(node.name.getText())) {
@@ -100,6 +109,12 @@ describe("block wording (UIA-100)", () => {
       "/>;",
       "Alert.alert(\"Timer not saved\", \"Try again.\");",
       "const d = { title: \"Work\", internalLookup: \"timer start\" };",
+      "const e = <Text>Timer:</Text>;",
+      "const f = <Text>Stop",
+      "  timer</Text>;",
+      "const g = <Text>Timer is read-only</Text>;",
+      "const h = <Text>{kind === \"timer\" && \"Recording\"}</Text>;",
+      "setValidationError(\"Timers can be no longer than 24 hours.\");",
     ].join("\n");
     expect(blockWordingOffenders(source)).toEqual([
       "file.tsx:1 Timer",
@@ -107,6 +122,10 @@ describe("block wording (UIA-100)", () => {
       "file.tsx:4 entry",
       "file.tsx:4 entries",
       "file.tsx:10 Timer not saved",
+      "file.tsx:12 Timer:",
+      "file.tsx:13 Stop\n  timer",
+      "file.tsx:15 Timer is read-only",
+      "file.tsx:17 Timers can be no longer than 24 hours.",
     ]);
   });
 
@@ -114,7 +133,8 @@ describe("block wording (UIA-100)", () => {
     const swift = ["ios/Dayframe/DayframeShortcuts.swift", "ios/DayframeLiveActivity/DayframeTimerLiveActivity.swift"]
       .map((path) => readFileSync(join(mobileRoot, path), "utf8"));
     const phrases = swift.flatMap((source) => [...source.matchAll(/"((?:[^"\\]|\\.)*)"/g)].map((match) => match[1]))
-      .filter((text) => text.includes(" ") && !/\\\(/.test(text.replace(/\\\(\.applicationName\)/g, "")));
+      .map((text) => text.replace(/\\\([^)]*\)/g, " "))
+      .filter((text) => /[A-Za-z]/.test(text) && (text.includes(" ") || /^[A-Z]/.test(text)));
     expect(phrases.filter((text) => BLOCK_WORDING_NOUN.test(text))).toEqual([]);
   });
 });

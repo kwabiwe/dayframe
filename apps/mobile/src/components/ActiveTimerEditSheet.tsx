@@ -1730,7 +1730,7 @@ export function ActiveTimerEditSheet({
       return;
     }
     if (isRunningMode && Date.now() - parsed.date.getTime() > TIME_ENTRY_DIAL_MAX_DURATION_MS) {
-      setValidationError("Timers can be no longer than 24 hours.");
+      setValidationError("A block can be no longer than 24 hours.");
       return;
     }
 
