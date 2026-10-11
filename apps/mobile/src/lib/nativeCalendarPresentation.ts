@@ -138,18 +138,29 @@ export const REVIEW_LANE_WIDTH = 0.44;
 /** At most two side by side in the Review lane keeps every target 44 points wide at 320 points. */
 export const REVIEW_LANE_MAX_LANES = 2;
 /**
- * A short block's tap target is at least 44 points tall, which at the most zoomed-out Calendar
- * (48 points an hour) spans 55 minutes. For the Review lane's lanes and crowds an item counts as
- * lasting at least that long, so two short suggestions next to each other never share a target
- * at any zoom; what is drawn keeps the real times.
+ * A short block's tap target is 44 points tall, centred on the block (and kept inside the day at
+ * midnight), which at the most zoomed-out Calendar (48 points an hour) spans 55 minutes. For the
+ * Review lane's lanes and crowds an item counts as covering that whole target, so two Review items
+ * never share one at any zoom; what is drawn keeps the real times.
  */
 export const REVIEW_LANE_TARGET_MS = 55 * 60_000;
 
-function withReviewTargetSpan(entry: NativeCalendarEntry, now: number): NativeCalendarEntry {
+/** The time a Review item's tap target covers at the most zoomed-out Calendar. */
+export function reviewTargetEnvelope(startMs: number, endMs: number, dayStartMs: number, dayEndMs: number) {
+  const start = Math.max(dayStartMs, startMs);
+  const end = Math.min(dayEndMs, Math.max(start, endMs));
+  if (end - start >= REVIEW_LANE_TARGET_MS) return { start, end };
+  const middle = (start + end) / 2;
+  const envelopeStart = Math.min(Math.max(dayStartMs, middle - REVIEW_LANE_TARGET_MS / 2), dayEndMs - REVIEW_LANE_TARGET_MS);
+  return { start: envelopeStart, end: envelopeStart + REVIEW_LANE_TARGET_MS };
+}
+
+function withReviewTargetSpan(entry: NativeCalendarEntry, now: number, dayStart: Date, dayEnd: Date): NativeCalendarEntry {
   const start = Date.parse(entry.startedAt);
   const end = entry.stoppedAt ? Date.parse(entry.stoppedAt) : now;
-  if (!Number.isFinite(start) || !Number.isFinite(end) || end - start >= REVIEW_LANE_TARGET_MS) return entry;
-  return { ...entry, stoppedAt: new Date(start + REVIEW_LANE_TARGET_MS).toISOString() };
+  if (!Number.isFinite(start) || !Number.isFinite(end)) return entry;
+  const envelope = reviewTargetEnvelope(start, end, dayStart.getTime(), dayEnd.getTime());
+  return { ...entry, startedAt: new Date(envelope.start).toISOString(), stoppedAt: new Date(envelope.end).toISOString() };
 }
 const REVIEW_LANE_Z_INDEX = 1_000;
 
@@ -224,7 +235,7 @@ export function buildNativeCalendarBridgeState({
     // longer one, which would leave it a strip too thin to tap).
     // Any overlap at all, even under a minute, splits lanes here: two suggestions must never share
     // one tap target.
-    ...layoutDayEntries(reviewEntries.map((entry) => withReviewTargetSpan(entry, now)), dayStart, dayEnd, now, { insetOverlays: false, minimumOverlapMs: 0 }).map((layout) => [layout.id, {
+    ...layoutDayEntries(reviewEntries.map((entry) => withReviewTargetSpan(entry, now, dayStart, dayEnd)), dayStart, dayEnd, now, { insetOverlays: false, minimumOverlapMs: 0 }).map((layout) => [layout.id, {
       ...layout,
       offsetFraction: 1 - REVIEW_LANE_WIDTH + layout.offsetFraction * REVIEW_LANE_WIDTH,
       widthFraction: layout.widthFraction * REVIEW_LANE_WIDTH,
@@ -247,7 +258,9 @@ export function buildNativeCalendarBridgeState({
         now,
         theme,
         layoutById.get(entry.id),
-        analysisById.get(entry.id),
+        // Review-lane items never share a target (their lanes and crowds already use the target
+        // envelope), so iOS gives each its full 44-point height even when the times overlap.
+        isCalendarReviewNeeded(entry) ? { overlapCount: 0, overlapSeconds: 0 } : analysisById.get(entry.id),
         isCalendarReviewNeeded(entry) ? 0 : warningById.get(entry.id) ?? 0
       )),
       modelVersion: 4,
@@ -427,9 +440,12 @@ function buildCalendarEntries(
     && !(linkedEntryIds.has(entry.id) && isCalendarReviewNeeded(entry))
   );
 
+  const dayStartMs = startOfLocalDay(dateFromKey(selectedDayKey)).getTime();
   const laneEntries = collapseCrowdedReviewLane(
     [...timeEntries.filter(isCalendarReviewNeeded), ...reviewEntries],
-    now
+    now,
+    dayStartMs,
+    addDays(new Date(dayStartMs), 1).getTime()
   );
   return [...timeEntries.filter((entry) => !isCalendarReviewNeeded(entry)), ...laneEntries]
     .sort((left, right) => Date.parse(left.startedAt) - Date.parse(right.startedAt));
@@ -441,13 +457,21 @@ function buildCalendarEntries(
  * "N suggestions" block over the whole crowd that opens Review on its earliest suggestion
  * (or the Review list when the crowd holds only older needs-review entries).
  */
-export function collapseCrowdedReviewLane(entries: NativeCalendarEntry[], now: number): NativeCalendarEntry[] {
+export function collapseCrowdedReviewLane(
+  entries: NativeCalendarEntry[],
+  now: number,
+  dayStartMs = Number.NEGATIVE_INFINITY,
+  dayEndMs = Number.POSITIVE_INFINITY
+): NativeCalendarEntry[] {
   const timed = entries
     .map((entry) => {
-      const start = Date.parse(entry.startedAt);
-      const realEnd = Math.max(start, entry.stoppedAt ? Date.parse(entry.stoppedAt) : now);
-      // Clustering uses the tap-target span; the crowd is drawn over the real times.
-      return { entry, start, realEnd, end: Math.max(realEnd, start + REVIEW_LANE_TARGET_MS) };
+      const realStart = Date.parse(entry.startedAt);
+      const realEnd = Math.max(realStart, entry.stoppedAt ? Date.parse(entry.stoppedAt) : now);
+      // Clustering uses the tap-target envelope; the crowd is drawn over the real times.
+      const envelope = Number.isFinite(dayStartMs) && Number.isFinite(dayEndMs)
+        ? reviewTargetEnvelope(realStart, realEnd, dayStartMs, dayEndMs)
+        : { start: realStart, end: Math.max(realEnd, realStart + REVIEW_LANE_TARGET_MS) };
+      return { entry, realStart, start: envelope.start, realEnd, end: envelope.end };
     })
     .filter((item) => Number.isFinite(item.start) && Number.isFinite(item.end))
     .sort((left, right) => left.start - right.start || left.end - right.end);
@@ -459,7 +483,12 @@ export function collapseCrowdedReviewLane(entries: NativeCalendarEntry[], now: n
     if (maxConcurrent(crowd) <= REVIEW_LANE_MAX_LANES) {
       result.push(...crowd.map((item) => item.entry));
     } else {
-      result.push(reviewCrowdEntry(crowd.map((item) => item.entry), crowd[0].start, Math.max(...crowd.map((item) => item.realEnd))));
+      // The crowd opens its earliest suggestion by real start time.
+      result.push(reviewCrowdEntry(
+        [...crowd].sort((left, right) => left.realStart - right.realStart).map((item) => item.entry),
+        Math.min(...crowd.map((item) => item.realStart)),
+        Math.max(...crowd.map((item) => item.realEnd))
+      ));
     }
     crowd = [];
     crowdEnd = -Infinity;

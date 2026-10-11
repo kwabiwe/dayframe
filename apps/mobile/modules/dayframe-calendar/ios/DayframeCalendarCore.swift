@@ -83,10 +83,13 @@ public struct DayframeCalendarVerticalMetrics: Equatable {
 }
 
 public enum DayframeCalendarVerticalMath {
+  /// The hit target is centred on the block, but kept inside the timeline (0…timelineHeight) so a
+  /// block at midnight still offers its whole target; the block itself is drawn at its real place.
   public static func metrics(
     semanticTop: Double,
     semanticHeight: Double,
-    hitHeight: Double
+    hitHeight: Double,
+    timelineHeight: Double = .infinity
   ) -> DayframeCalendarVerticalMetrics {
     let safeSemanticTop = semanticTop.isFinite ? semanticTop : 0
     let safeSemanticHeight = max(0, semanticHeight.isFinite ? semanticHeight : 0)
@@ -94,11 +97,14 @@ public enum DayframeCalendarVerticalMath {
       safeSemanticHeight,
       hitHeight.isFinite ? hitHeight : safeSemanticHeight
     )
+    let centredTop = safeSemanticTop - (safeHitHeight - safeSemanticHeight) / 2
+    let maximumTop = timelineHeight.isFinite ? max(0, timelineHeight - safeHitHeight) : Double.infinity
+    let hitTop = min(max(0, centredTop), maximumTop)
 
     return DayframeCalendarVerticalMetrics(
       hitHeight: safeHitHeight,
-      hitCenterY: safeSemanticTop + safeSemanticHeight / 2,
-      visualOffsetWithinHitTarget: (safeHitHeight - safeSemanticHeight) / 2
+      hitCenterY: hitTop + safeHitHeight / 2,
+      visualOffsetWithinHitTarget: safeSemanticTop - hitTop
     )
   }
 }
@@ -222,7 +228,8 @@ public enum DayframeCalendarEntryGeometryMath {
     offsetFraction: Double,
     widthFraction: Double,
     overlapCount: Int,
-    textDensity: String
+    textDensity: String,
+    timelineHeight: Double = .infinity
   ) -> DayframeCalendarEntryGeometryMetrics? {
     guard
       availableWidth.isFinite,
@@ -248,7 +255,8 @@ public enum DayframeCalendarEntryGeometryMath {
     let vertical = DayframeCalendarVerticalMath.metrics(
       semanticTop: semanticTop,
       semanticHeight: semanticHeight,
-      hitHeight: horizontal.hitHeight
+      hitHeight: horizontal.hitHeight,
+      timelineHeight: timelineHeight
     )
     let minX = hourLabelWidth + 8 + horizontal.offset
     let minY = vertical.hitCenterY - vertical.hitHeight / 2

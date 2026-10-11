@@ -339,6 +339,17 @@ final class DayframeCalendarCoreTests: XCTestCase {
     XCTAssertEqual(reconstructedVisualTop, 180)
   }
 
+  func testMidnightHitTargetsStayInsideTheTimeline() {
+    // 00:00–00:01 at 48 pt/hour: centred, the target would start 21 pt above the timeline.
+    let top = DayframeCalendarVerticalMath.metrics(semanticTop: 0, semanticHeight: 0.8, hitHeight: 44, timelineHeight: 24 * 48)
+    XCTAssertEqual(top.hitCenterY - top.hitHeight / 2, 0)
+    XCTAssertEqual(top.visualOffsetWithinHitTarget, 0)
+    // 23:59–24:00: the target ends at the bottom of the timeline, the block still at its time.
+    let bottom = DayframeCalendarVerticalMath.metrics(semanticTop: 24 * 48 - 0.8, semanticHeight: 0.8, hitHeight: 44, timelineHeight: 24 * 48)
+    XCTAssertEqual(bottom.hitCenterY + bottom.hitHeight / 2, 24 * 48, accuracy: 0.0001)
+    XCTAssertEqual(bottom.hitCenterY - bottom.hitHeight / 2 + bottom.visualOffsetWithinHitTarget, 24 * 48 - 0.8, accuracy: 0.0001)
+  }
+
   func testTinyAdjacentSlotsKeepExactBoundaryAndOnePointPaintGap() {
     let first = DayframeCalendarVerticalMath.metrics(
       semanticTop: 100,

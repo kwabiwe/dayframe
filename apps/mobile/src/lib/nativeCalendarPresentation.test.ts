@@ -500,16 +500,17 @@ describe("native Calendar Blocks presentation", () => {
       textColor: theme.textPrimary,
       warningOverlapCount: 0
     });
-    // Hit geometry still sees the overlap, so neither block grows a 44-point target over the other.
+    // The logged block keeps its exact target (it overlaps); the Review item, alone in its lane
+    // above it, gets its full 44-point target, and the logged block stays reachable to its left.
     expect(work?.overlapCount).toBe(1);
-    expect(review?.overlapCount).toBe(1);
+    expect(review?.overlapCount).toBe(0);
     expect(work?.accessibilityLabel).not.toContain("Overlaps");
     expect(review?.offsetFraction).toBeCloseTo(1 - REVIEW_LANE_WIDTH);
     expect(review?.widthFraction).toBeCloseTo(REVIEW_LANE_WIDTH);
     expect(review!.zIndex).toBeGreaterThan(work!.zIndex);
   });
 
-  it("keeps nested Review suggestions at their semantic hit height", () => {
+  it("gives nested Review suggestions full targets in their own lanes, and keeps logged overlaps (Codex r8)", () => {
     const now = localTime(2026, 7, 10, 12, 0);
     const suggestion = (id: string, start: number, stop: number) => entry({
       id,
@@ -525,8 +526,10 @@ describe("native Calendar Blocks presentation", () => {
     ]));
     const byId = new Map(state.model.entries.map((candidate) => [candidate.entryId, candidate]));
 
-    expect(byId.get("short")?.overlapCount).toBe(1);
-    expect(byId.get("long")?.overlapCount).toBe(1);
+    // Separate Review lanes, so iOS may give each its 44-point target.
+    expect(byId.get("short")?.overlapCount).toBe(0);
+    expect(byId.get("long")?.overlapCount).toBe(0);
+    expect(byId.get("short")?.offsetFraction).not.toBeCloseTo(byId.get("long")?.offsetFraction ?? 0);
     expect(byId.get("short")?.warningOverlapCount).toBe(0);
     expect(byId.get("logged-a")?.warningOverlapCount).toBe(1);
     expect(byId.get("logged-a")?.accessibilityLabel).toContain("Overlaps 1 other entry.");

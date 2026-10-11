@@ -468,7 +468,8 @@ private struct DayframeCalendarEntriesLayer: View {
           offsetFraction: entry.offsetFraction,
           widthFraction: entry.widthFraction,
           overlapCount: entry.overlapCount,
-          textDensity: entry.textDensity
+          textDensity: entry.textDensity,
+          timelineHeight: 24 * Double(hourHeight)
         ) {
           let visualMetrics = DayframeCalendarBlockVisualMath.metrics(
             semanticHeight: metrics.height,
