@@ -680,22 +680,30 @@ describe("location access that needs iOS Settings (UIA-111)", () => {
   });
 });
 
-describe("Always already declined, after a restart (UIA-111, Codex r3)", () => {
-  it("remembers a declined Always request, since iOS reports it askable again after a restart", async () => {
+describe("Always already asked, after a restart (UIA-111, Codex r3–r4)", () => {
+  const fg = (status: string) => locationMocks.getForegroundPermissionsAsync.mockResolvedValueOnce(
+    (status === "granted" ? { status, granted: true } : { status, granted: false, canAskAgain: true }) as never
+  );
+  const bgUndetermined = () => locationMocks.getBackgroundPermissionsAsync.mockResolvedValueOnce({ status: "undetermined", granted: false, canAskAgain: true } as never);
+
+  it("routes to iOS Settings once the one Always prompt was used, declined or later downgraded", async () => {
     locationMocks.requestBackgroundPermissionsAsync.mockResolvedValueOnce({ status: "denied", granted: false, canAskAgain: true } as never);
     await requestAlwaysLocationPermission();
-    // Cold restart: Expo says undetermined and askable.
-    locationMocks.getForegroundPermissionsAsync.mockResolvedValueOnce({ status: "granted", granted: true } as never);
-    locationMocks.getBackgroundPermissionsAsync.mockResolvedValueOnce({ status: "undetermined", granted: false, canAskAgain: true } as never);
+    fg("granted"); bgUndetermined(); // cold restart after declining
     expect(await locationAccessNeedsIosSettings()).toBe(true);
-    // Allow Once expired: the foreground prompt can show again, so no Settings.
-    locationMocks.getForegroundPermissionsAsync.mockResolvedValueOnce({ status: "undetermined", granted: false, canAskAgain: true } as never);
-    expect(await locationAccessNeedsIosSettings()).toBe(false);
-    // Granted later: the remembered decline no longer applies.
+    // Granted, then downgraded to While Using in iOS Settings, then a restart.
     locationMocks.requestBackgroundPermissionsAsync.mockResolvedValueOnce({ status: "granted", granted: true } as never);
     await requestAlwaysLocationPermission();
-    locationMocks.getForegroundPermissionsAsync.mockResolvedValueOnce({ status: "granted", granted: true } as never);
-    locationMocks.getBackgroundPermissionsAsync.mockResolvedValueOnce({ status: "undetermined", granted: false, canAskAgain: true } as never);
+    fg("granted"); bgUndetermined();
+    expect(await locationAccessNeedsIosSettings()).toBe(true);
+  });
+
+  it("forgets an Always request made under an Allow Once grant once that grant expires", async () => {
+    locationMocks.requestBackgroundPermissionsAsync.mockResolvedValueOnce({ status: "denied", granted: false, canAskAgain: true } as never);
+    await requestAlwaysLocationPermission(); // failed silently under Allow Once
+    fg("undetermined"); // the temporary grant expired
+    expect(await locationAccessNeedsIosSettings()).toBe(false);
+    fg("granted"); bgUndetermined(); // a permanent While Using grant later
     expect(await locationAccessNeedsIosSettings()).toBe(false);
   });
 });

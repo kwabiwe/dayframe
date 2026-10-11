@@ -12,7 +12,8 @@ describe("Settings › Location access action (UIA-111)", () => {
 
   it("says the same thing on screen and to VoiceOver", () => {
     expect(locationAccessLabels("settings")).toEqual({ label: "Open Settings", accessibilityLabel: "Open iPhone Settings to allow location" });
-    expect(locationAccessLabels("restart")).toEqual({ label: "Restart location", accessibilityLabel: "Restart location location access" });
+    expect(locationAccessLabels("restart")).toEqual({ label: "Restart location", accessibilityLabel: "Restart location" });
+    expect(locationAccessLabels("refresh").accessibilityLabel).toBe("Refresh location access");
     expect(locationAccessLabels("enable").accessibilityLabel).toBe("Enable location access");
   });
 

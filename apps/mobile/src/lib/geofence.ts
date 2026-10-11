@@ -310,24 +310,30 @@ async function hydrateLegacyCapture(capture: LocationCaptureSnapshot) {
 export async function locationAccessNeedsIosSettings() {
   const foreground = await Location.getForegroundPermissionsAsync();
   if (foreground.status === "denied") return !foreground.canAskAgain;
-  if (foreground.status !== "granted") return false;
+  if (foreground.status !== "granted") {
+    // An Allow Once grant expired (or nothing was ever granted): any Always request made under it
+    // failed without showing iOS's prompt, so it doesn't count as spent.
+    if (foreground.status === "undetermined") await AsyncStorage.removeItem(ALWAYS_LOCATION_REQUESTED_KEY).catch(() => undefined);
+    return false;
+  }
   const background = await Location.getBackgroundPermissionsAsync();
   if (background.granted) return false;
   if (background.status === "denied" && !background.canAskAgain) return true;
-  // iOS shows the Always upgrade once; after a restart Expo reports it askable again, so the
+  // iOS shows the Always upgrade once, whatever the answer (and a later downgrade to While Using
+  // in iOS Settings doesn't make it ask again); after a restart Expo reports it askable, so the
   // spent request is remembered on this iPhone.
-  return (await AsyncStorage.getItem(ALWAYS_LOCATION_REQUESTED_KEY).catch(() => null)) === "declined";
+  return (await AsyncStorage.getItem(ALWAYS_LOCATION_REQUESTED_KEY).catch(() => null)) === "asked";
 }
 
-const ALWAYS_LOCATION_REQUESTED_KEY = "dayframe.location.alwaysRequest.v1";
+const ALWAYS_LOCATION_REQUESTED_KEY = "dayframe.location.alwaysRequest.v2";
 
 /**
- * Asks iOS for Always location (shows its one-time upgrade prompt) and remembers a decline, so
+ * Asks iOS for Always location (its one-time upgrade prompt) and remembers that it was asked, so
  * later taps go to iOS Settings instead of a request that shows nothing.
  */
 export async function requestAlwaysLocationPermission() {
   const background = await Location.requestBackgroundPermissionsAsync();
-  await AsyncStorage.setItem(ALWAYS_LOCATION_REQUESTED_KEY, background.granted ? "granted" : "declined").catch(() => undefined);
+  await AsyncStorage.setItem(ALWAYS_LOCATION_REQUESTED_KEY, "asked").catch(() => undefined);
   return background;
 }
 

@@ -85,4 +85,11 @@ describe("onboarding contract (Blocks 8-1a)", () => {
     expect(screen).toContain("entering={reduceMotion ? localPresenceEntering(true) : stepEntering(direction)}");
     expect(screen).toContain("key={`${step}:${answers.locationStage}`}");
   });
+
+  it("offers iOS Settings when the one Always prompt was already used, and finishes on return (UIA-111)", () => {
+    expect(screen).toContain('label={alwaysNeedsSettings ? "Open Settings" : "Continue to iOS prompt"}');
+    expect(screen).toContain("const needed = await locationAccessNeedsIosSettings()");
+    expect(screen).toMatch(/if \(alwaysNeedsSettings\) \{\s*void Linking\.openSettings\(\);/);
+    expect(screen).toContain('if (state === "active") void check();');
+  });
 });

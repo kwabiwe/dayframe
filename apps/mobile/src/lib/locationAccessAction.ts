@@ -16,11 +16,12 @@ export function locationAccessAction(input: {
 }
 
 export function locationAccessLabels(action: LocationAccessAction) {
-  const label = { settings: "Open Settings", restart: "Restart location", refresh: "Refresh", enable: "Enable" }[action];
   return {
-    label,
-    accessibilityLabel: action === "settings" ? "Open iPhone Settings to allow location" : `${label} location access`
-  };
+    settings: { label: "Open Settings", accessibilityLabel: "Open iPhone Settings to allow location" },
+    restart: { label: "Restart location", accessibilityLabel: "Restart location" },
+    refresh: { label: "Refresh", accessibilityLabel: "Refresh location access" },
+    enable: { label: "Enable", accessibilityLabel: "Enable location access" }
+  }[action];
 }
 
 /** The suggestions switch's hint: turning it on opens iOS Settings when iOS won't ask again. */
