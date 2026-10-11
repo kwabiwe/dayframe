@@ -1,4 +1,5 @@
 import { memo, useEffect, useState, type Ref } from "react";
+import { DAYFRAME_BLOCKS } from "@dayframe/shared";
 import { Pressable, StyleSheet, Text, View, type LayoutChangeEvent } from "react-native";
 import Reanimated, {
   ReduceMotion,
@@ -10,7 +11,8 @@ import Reanimated, {
   type EntryAnimationsValues,
 } from "react-native-reanimated";
 import { DayframeIcon } from "../icons/DayframeIcon";
-import { colorWithAlpha, spokenDuration } from "../today/todayBlocksLayout";
+import { colorWithAlpha, compactDuration, spokenDuration } from "../today/todayBlocksLayout";
+import { spokenReportDuration } from "../../lib/reportsPresentation";
 import { BLOCKS_SPRING } from "../../lib/blocksMotion";
 import type { MobileTheme } from "../../lib/mobileTheme";
 import { localPresenceEntering } from "../../lib/motion";
@@ -336,17 +338,24 @@ export function ReportGoalStreak({
   goalLabel,
   reduceMotion,
   theme,
+  week,
 }: {
   days: readonly boolean[];
   goalLabel: string;
   reduceMotion: boolean;
   theme: MobileTheme;
+  /** The weekly goal (UIA-104 D4): goal time so far this week against it. */
+  week?: { seconds: number; goalSeconds: number } | null;
 }) {
   const met = days.filter(Boolean).length;
+  const weekLine = week ? `${compactDuration(week.seconds)} of your ${compactDuration(week.goalSeconds)} week` : null;
+  const weekSpoken = week
+    ? ` ${spokenReportDuration(week.seconds)} of your ${spokenReportDuration(week.goalSeconds)} weekly goal.`
+    : "";
   return (
     <Reanimated.View
       accessible
-      accessibilityLabel={`${met} of ${days.length} ${days.length === 1 ? "day" : "days"} on goal. Within 15 percent of your ${goalLabel} day.`}
+      accessibilityLabel={`${met} of ${days.length} ${days.length === 1 ? "day" : "days"} on goal. Within 15 percent of your ${goalLabel} day.${weekSpoken}`}
       entering={localPresenceEntering(reduceMotion)}
       style={[styles.streak, { backgroundColor: theme.surface }]}
       testID="reports-goal-streak"
@@ -359,6 +368,11 @@ export function ReportGoalStreak({
         <Text {...mobileTextProps("metadata")} style={{ color: theme.textSecondary, fontSize: 12.5 }}>
           Within 15% of your {goalLabel} day
         </Text>
+        {weekLine ? (
+          <Text {...mobileTextProps("metadata")} style={{ color: theme.textSecondary, fontSize: 12.5 }} testID="reports-weekly-goal">
+            {weekLine}
+          </Text>
+        ) : null}
       </View>
       <View style={styles.streakCells}>
         {days.map((on, index) => (
@@ -375,7 +389,8 @@ export function ReportGoalStreak({
 const styles = StyleSheet.create({
   switch: { alignSelf: "flex-start", maxWidth: "100%", flexDirection: "row", borderRadius: 999, padding: 3 },
   thumb: { position: "absolute", top: 3, bottom: 3, left: 0, borderRadius: 999, shadowColor: "#000", shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.18, shadowRadius: 2 },
-  segment: { flexShrink: 1, minHeight: 44, minWidth: 54, justifyContent: "center", alignItems: "center", paddingHorizontal: 12, borderRadius: 999 },
+  // 10-point sides so the switch fits beside "Reports" and the filter on one row (UIA-002).
+  segment: { flexShrink: 1, minHeight: 44, minWidth: 50, justifyContent: "center", alignItems: "center", paddingHorizontal: 10, borderRadius: 999 },
   segmentLabel: { fontSize: 14, fontWeight: "700" },
   hero: { gap: 6 },
   heroNumber: { fontFamily: MOBILE_DISPLAY_FONT.extraBold, fontSize: 52, fontVariant: ["tabular-nums"], letterSpacing: -2, lineHeight: 56 },
@@ -384,12 +399,12 @@ const styles = StyleSheet.create({
   delta: { overflow: "hidden", borderRadius: 999, paddingHorizontal: 9, paddingVertical: 3, fontSize: 12.5, fontWeight: "700", fontVariant: ["tabular-nums"] },
   // Columns touch (no gap) so each is a full-width, 208-point-tall target: at least 44 points wide
   // from a 375-point screen; Display Zoom at 320 points gives about 39, and nothing overflows.
-  weekCard: { flexDirection: "row", height: 236, borderRadius: 22, paddingHorizontal: 8, paddingTop: 16, paddingBottom: 12 },
+  weekCard: { flexDirection: "row", height: 236, borderRadius: DAYFRAME_BLOCKS.radius.phoneCard, paddingHorizontal: 8, paddingTop: 16, paddingBottom: 12 },
   weekColumn: { flex: 1, minWidth: 0, gap: 8, justifyContent: "flex-end", paddingHorizontal: 3.5 },
   weekStack: { flex: 1, flexDirection: "column-reverse", gap: 3 },
   weekBlock: { borderRadius: 6 },
   weekLabel: { fontSize: 11, fontWeight: "700", textAlign: "center" },
-  monthCard: { borderRadius: 22, padding: 14, gap: 6 },
+  monthCard: { borderRadius: DAYFRAME_BLOCKS.radius.phoneCard, padding: 14, gap: 6 },
   monthRow: { flexDirection: "row" },
   monthDow: { flex: 1, fontSize: 10.5, fontWeight: "700", textAlign: "center" },
   monthCells: { flexDirection: "row", flexWrap: "wrap", rowGap: 6 },
@@ -397,7 +412,7 @@ const styles = StyleSheet.create({
   monthCell: { height: 44, borderRadius: 9, padding: 3, overflow: "hidden", flexDirection: "column-reverse", gap: 2 },
   monthBlock: { borderRadius: 3 },
   monthDate: { position: "absolute", top: 3, left: 5, fontSize: 10, fontWeight: "700" },
-  streak: { flexDirection: "row", alignItems: "center", gap: 12, borderRadius: 22, paddingHorizontal: 16, paddingVertical: 14 },
+  streak: { flexDirection: "row", alignItems: "center", gap: 12, borderRadius: DAYFRAME_BLOCKS.radius.phoneCard, paddingHorizontal: 16, paddingVertical: 14 },
   streakText: { flex: 1, minWidth: 0, gap: 2 },
   streakTitle: { fontSize: 15, fontWeight: "700" },
   streakCells: { flexDirection: "row", gap: 4 },

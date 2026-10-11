@@ -44,9 +44,10 @@ import {
   SettingsBlockGroup,
   SettingsBlockRow,
   SettingsPillButton,
+  SettingsSegmented,
   SettingsSwitch
 } from "@/components/settings/SettingsBlocks";
-import { refreshGeofencesForPlaces } from "@/lib/geofence";
+import { refreshGeofencesForPlaces, requestForegroundLocationPermission } from "@/lib/geofence";
 import { mobileAccountKey, mobileAccountOwnersEqual, readActiveMobileAccount, type MobileAccountOwner } from "@/lib/mobileAccount";
 import { applyPlaceRoleLocally, notePlaceDeleted } from "@/lib/placesPage";
 import {
@@ -57,8 +58,8 @@ import {
   validatePlaceForm,
   withRole,
   DEFAULT_PLACE_RADIUS_METERS,
-  MAX_PLACE_RADIUS_METERS,
-  MIN_PLACE_RADIUS_METERS
+  PLACE_RADIUS_OPTIONS,
+  placeRadiusOffMenu
 } from "@/lib/places";
 import {
   createNativePlaceSearchProvider,
@@ -292,7 +293,7 @@ export default function PlaceEditorScreen() {
     try {
       let permission = await Location.getForegroundPermissionsAsync();
       if (!permission.granted && permission.canAskAgain) {
-        permission = await Location.requestForegroundPermissionsAsync();
+        permission = await requestForegroundLocationPermission();
       }
       const guidance = foregroundLocationPermissionGuidance(permission);
       if (guidance) {
@@ -427,7 +428,7 @@ export default function PlaceEditorScreen() {
     confirmSheet.confirm({
       eyebrow: "Place",
       title: `Delete ${placeDisplayName(withRole(place))}?`,
-      message: "Past entries keep their time but lose this place.",
+      message: "Past blocks keep their time but lose this place.",
       confirmLabel: "Delete",
       confirmHint: "This can't be undone.",
       // removePlace re-checks saveInFlight, so a save started meanwhile still wins.
@@ -733,13 +734,13 @@ export default function PlaceEditorScreen() {
             {newRole && roleHolder ? (
               <Reanimated.View layout={localLayoutTransition(reduceMotion)}>
                 <SettingsBlockGroup
-                  foot={`${placeRoleLabel(newRole)} moves to this new place. The old one keeps its entries under this name.`}
+                  foot={`${placeRoleLabel(newRole)} moves to this new place. The old one keeps its blocks under this name.`}
                   theme={theme}
                   title={`Old ${placeRoleLabel(newRole).toLowerCase()}`}
                 >
                   <TextInput
                     {...mobileTextProps("input")}
-                    accessibilityHint="Its past entries keep this name. Leave it blank to keep the current name."
+                    accessibilityHint="Its past blocks keep this name. Leave it blank to keep the current name."
                     accessibilityLabel={`Rename the old ${placeRoleLabel(newRole).toLowerCase()}`}
                     maxLength={120}
                     onChangeText={setPreviousRoleName}
@@ -756,24 +757,24 @@ export default function PlaceEditorScreen() {
 
             <Reanimated.View layout={localLayoutTransition(reduceMotion)}>
               <SettingsBlockGroup theme={theme} title="Size">
-                <View style={editorStyles.fieldRow}>
+                {/* UIA-088: three sizes to pick from instead of typing metres; a place saved with
+                    another size keeps it (no segment chosen, a note below) until one is picked. */}
+                <View style={editorStyles.radiusRow}>
                   <Text {...mobileTextProps("itemTitle")} style={[editorStyles.fieldLabel, { color: theme.textPrimary }]}>Radius</Text>
-                  <TextInput
-                    {...mobileTextProps("input")}
-                    accessibilityHint={`Between ${MIN_PLACE_RADIUS_METERS} and ${MAX_PLACE_RADIUS_METERS} metres`}
-                    accessibilityLabel="Place radius in metres"
-                    keyboardType="number-pad"
-                    maxLength={4}
-                    onChangeText={setRadiusMeters}
-                    placeholder={String(DEFAULT_PLACE_RADIUS_METERS)}
-                    placeholderTextColor={theme.textMuted}
-                    style={[editorStyles.radiusInput, { backgroundColor: theme.surfaceInset, color: theme.textPrimary }]}
-                    testID="place-editor-radius"
+                  <SettingsSegmented
+                    label="Place radius"
+                    onChange={setRadiusMeters}
+                    options={PLACE_RADIUS_OPTIONS}
+                    theme={theme}
                     value={radiusMeters}
                   />
-                  <Text {...mobileTextProps("body")} style={{ color: theme.textSecondary }}>m</Text>
                 </View>
               </SettingsBlockGroup>
+              {placeRadiusOffMenu(radiusMeters) !== null ? (
+                <Text {...mobileTextProps("metadata")} style={[editorStyles.note, { color: theme.textSecondary }]}>
+                  This place uses {placeRadiusOffMenu(radiusMeters)} m. Pick a size to change it.
+                </Text>
+              ) : null}
               {radiusProblem ? (
                 <Text {...mobileTextProps("metadata")} accessibilityLiveRegion="polite" style={[editorStyles.note, { color: theme.dangerText }]}>{radiusProblem}</Text>
               ) : null}
@@ -843,11 +844,11 @@ export default function PlaceEditorScreen() {
                       </Reanimated.View>
                     ) : null}
                     <Reanimated.View layout={localLayoutTransition(reduceMotion)} style={[editorStyles.fieldRow, { borderTopColor: theme.border, borderTopWidth: StyleSheet.hairlineWidth }]}>
-                      <Text {...mobileTextProps("itemTitle")} style={[editorStyles.fieldLabel, { color: theme.textPrimary }]}>Entry name</Text>
+                      <Text {...mobileTextProps("itemTitle")} style={[editorStyles.fieldLabel, { color: theme.textPrimary }]}>Block name</Text>
                       <TextInput
                         {...mobileTextProps("input")}
                         accessibilityHint="What a logged visit here is called. Optional."
-                        accessibilityLabel="Default task description"
+                        accessibilityLabel="Block name for visits here"
                         maxLength={240}
                         onChangeText={setDefaultActivityDescription}
                         placeholder="Optional"
@@ -1021,9 +1022,9 @@ const editorStyles = StyleSheet.create({
   scrollContent: { paddingBottom: 40, paddingTop: 14 },
   stack: { gap: 22 },
   mapCard: { gap: 8 },
-  map: { borderRadius: 22, height: 200, overflow: "hidden", width: "100%" },
+  map: { borderRadius: DAYFRAME_BLOCKS.radius.phoneCard, height: 200, overflow: "hidden", width: "100%" },
   mapFoot: { marginHorizontal: 4 },
-  mapPlaceholder: { alignItems: "center", borderRadius: 22, gap: 10, justifyContent: "center", minHeight: 140, padding: 20 },
+  mapPlaceholder: { alignItems: "center", borderRadius: DAYFRAME_BLOCKS.radius.phoneCard, gap: 10, justifyContent: "center", minHeight: 140, padding: 20 },
   mapPlaceholderText: { textAlign: "center" },
   searchRow: { alignItems: "center", flexDirection: "row", gap: 10, minHeight: 52, paddingLeft: 16, paddingRight: 4 },
   searchInput: { flex: 1, fontSize: 16, minHeight: 48, minWidth: 0, paddingVertical: 10 },
@@ -1043,9 +1044,10 @@ const editorStyles = StyleSheet.create({
   note: { marginHorizontal: 4, marginTop: 8 },
   fieldRow: { alignItems: "center", flexDirection: "row", gap: 12, minHeight: 52, paddingHorizontal: 16, paddingVertical: 6 },
   fieldLabel: { flex: 1, fontSize: 15, fontWeight: "600" },
+  // The label wraps above the segments when they don't fit beside it (large text, a fourth size).
+  radiusRow: { alignItems: "center", columnGap: 12, flexDirection: "row", flexWrap: "wrap", minHeight: 52, paddingHorizontal: 16, paddingVertical: 6, rowGap: 6 },
   fieldInput: { fontSize: 16, minHeight: 52, paddingHorizontal: 16, paddingVertical: 12 },
   inlineInput: { flex: 1.4, fontSize: 16, minHeight: 44, minWidth: 0, textAlign: "right" },
-  radiusInput: { borderRadius: 12, fontSize: 16, fontVariant: ["tabular-nums"], minHeight: 44, textAlign: "center", width: 84 },
   deleteButton: { alignItems: "center", borderRadius: DAYFRAME_BLOCKS.radius.pill, justifyContent: "center", minHeight: 50 },
   deleteText: { fontSize: 15, fontWeight: "700" }
 });

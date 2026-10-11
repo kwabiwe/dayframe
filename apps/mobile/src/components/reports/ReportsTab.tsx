@@ -28,7 +28,7 @@ import {
   weekGoalDays,
 } from "../../lib/reportsBlocks";
 import { REPORT_TEXT_CAP, reportCompactNumericColumns } from "@/lib/reportsTypography";
-import { paletteColorFor, type ReportSummary } from "@dayframe/shared";
+import { DAYFRAME_BLOCKS, paletteColorFor, type ReportSummary } from "@dayframe/shared";
 import type { MobileBootstrap } from "@/lib/api";
 import type { MobileStyles, MobileTheme } from "@/lib/mobileTheme";
 import { useResolvedReduceMotionPreference } from "@/lib/motion";
@@ -41,7 +41,6 @@ import {
 import {
   buildReportRange,
   formatLocalDateKey,
-  reportRangeDisplayTitle,
   type ReportRangeChoice,
 } from "@/lib/reportsRanges";
 import {
@@ -493,7 +492,6 @@ export function ReportsTab({
       : selection.mode === "include"
         ? selection.keys.length
         : null;
-  const rangeDisplayTitle = reportRangeDisplayTitle(range, choice);
   const todayKey = formatLocalDateKey(new Date(nowMs));
   // Day stacks for the week columns and month grid: one per day bucket, with the selected activities.
   const days: ReportDayStack[] =
@@ -563,23 +561,32 @@ export function ReportsTab({
     AccessibilityInfo.announceForAccessibility(heroSpokenLabel);
   }, [heroSpokenLabel, isFocused, foreground]);
   const dailyGoalMinutes = data.user.dailyGoalMinutes;
-  const goalDays =
+  // Goal time per day of the week (UIA-043): covered time in activities that count, never the
+  // logged sum — the same fresh report as the totals, or, from an older server, the phone's entries.
+  const weekGoalSeconds =
     choice === "week" && selection.mode === "all" && report
       ? (() => {
-          // Goal time is covered time in activities that count (UIA-043), never the logged sum: the
-          // same fresh report as the totals, or, from an older server without it, the phone's entries.
           const fromServer = report.buckets.every((bucket) => typeof bucket.goalSeconds === "number");
           const local = fromServer ? null : reportGoalSeconds(data, range.buckets, reportNow);
-          return weekGoalDays(
-            days.map((day, index) => ({
-              ...day,
-              goalSeconds: (fromServer ? report.buckets[index]?.goalSeconds : local?.[index]) ?? 0,
-            })),
-            nowMs,
-            dailyGoalMinutes,
-          );
+          return days.map((_, index) => (fromServer ? report.buckets[index]?.goalSeconds : local?.[index]) ?? 0);
         })()
-      : [];
+      : null;
+  const goalDays = weekGoalSeconds
+    ? weekGoalDays(
+        days.map((day, index) => ({ ...day, goalSeconds: weekGoalSeconds[index] ?? 0 })),
+        nowMs,
+        dailyGoalMinutes,
+      )
+    : [];
+  // The weekly goal on Week (UIA-104 D4): this week's goal time against it.
+  const weeklyGoalMinutes = data.user.weeklyGoalMinutes;
+  const weeklyGoal =
+    weekGoalSeconds && weeklyGoalMinutes && weeklyGoalMinutes > 0
+      ? {
+          goalSeconds: weeklyGoalMinutes * 60,
+          seconds: weekGoalSeconds.reduce((sum, seconds) => sum + seconds, 0),
+        }
+      : null;
   const playBlocks = Boolean(report) && !blocksAnimated.current && !reduceMotion && resolved && isFocused;
   if (playBlocks && choice === "week" && days.some((day) => day.segments.length))
     blocksAnimated.current = true;
@@ -589,8 +596,9 @@ export function ReportsTab({
       : choice === "today"
         ? "Today"
         : range.title;
-  const moreLabel =
-    choice === "week" || choice === "month" ? "More" : rangeDisplayTitle;
+  // More always says "More": the hero names the chosen range ("framed 1 Nov – 31 Jan"), so the
+  // one-row header never reflows when the range changes (UIA-002); VoiceOver hears the range.
+  const moreLabel = "More";
   const openFilters = () => {
     setTooltipOutsidePress((value) => value + 1);
     const id = ++presentationSequence.current;
@@ -617,6 +625,8 @@ export function ReportsTab({
         style={s.screen}
       >
         {measuredNumbers.probe}
+        {/* One row (UIA-002): the title, then the filter and Week · Month · More; on a narrow
+            screen or with large text the controls wrap under the title instead of shrinking. */}
         <View style={s.titleRow}>
           <Pressable
             accessible={false}
@@ -634,58 +644,62 @@ export function ReportsTab({
               Reports
             </Text>
           </Pressable>
-          <Pressable
-            ref={filterRef}
-            accessibilityRole="button"
-            accessibilityLabel={
-              filterCount === null
-                ? "Filter activities, all activities selected"
-                : `Filter activities, ${filterCount} ${filterCount === 1 ? "activity" : "activities"} selected`
-            }
-            onPress={openFilters}
-            style={[
-              s.iconAction,
-              {
-                backgroundColor:
-                  filterCount !== null ? theme.accentSoft : theme.surfaceMuted,
-              },
-            ]}
-            testID="reports-filter-button"
-          >
-            <CalendarGlyph kind="funnel" color={theme.textPrimary} />
-            {filterCount !== null ? (
-              <Text
-                maxFontSizeMultiplier={REPORT_TEXT_CAP.small}
-                style={[
-                  s.badge,
-                  {
-                    color: theme.textPrimary,
-                    backgroundColor: theme.surfaceInset,
-                  },
-                ]}
-              >
-                {filterCount}
-              </Text>
-            ) : null}
-          </Pressable>
+          <View style={s.headControls}>
+            <Pressable
+              ref={filterRef}
+              accessibilityRole="button"
+              accessibilityLabel={
+                filterCount === null
+                  ? "Filter activities, all activities selected"
+                  : `Filter activities, ${filterCount} ${filterCount === 1 ? "activity" : "activities"} selected`
+              }
+              onPress={openFilters}
+              style={[
+                s.iconAction,
+                {
+                  backgroundColor:
+                    filterCount !== null ? theme.accentSoft : theme.surfaceMuted,
+                },
+              ]}
+              testID="reports-filter-button"
+            >
+              <CalendarGlyph kind="funnel" color={theme.textPrimary} />
+              {filterCount !== null ? (
+                <Text
+                  maxFontSizeMultiplier={REPORT_TEXT_CAP.small}
+                  style={[
+                    s.badge,
+                    {
+                      color: theme.textPrimary,
+                      backgroundColor: theme.surfaceInset,
+                    },
+                  ]}
+                >
+                  {filterCount}
+                </Text>
+              ) : null}
+            </Pressable>
+            <View style={s.switchSlot}>
+            <ReportRangeSwitch
+              choice={choice}
+              moreAccessibilityLabel={`Choose report dates, ${range.title}`}
+              moreLabel={moreLabel}
+              moreRef={calendarRef}
+              onChoose={(value) => {
+                if (value === choice) return;
+                playHaptic("tick");
+                setTooltipOutsidePress((current) => current + 1);
+                announceHero.current = true;
+                setFocusedDayKey(null);
+                setChoice(value);
+              }}
+              onMore={openRanges}
+              reduceMotion={reduceMotion}
+              theme={theme}
+            />
+            </View>
+          </View>
         </View>
-        <ReportRangeSwitch
-          choice={choice}
-          moreAccessibilityLabel={`Choose report dates, ${range.title}`}
-          moreLabel={moreLabel}
-          moreRef={calendarRef}
-          onChoose={(value) => {
-            if (value === choice) return;
-            playHaptic("tick");
-            setTooltipOutsidePress((current) => current + 1);
-            announceHero.current = true;
-            setFocusedDayKey(null);
-            setChoice(value);
-          }}
-          onMore={openRanges}
-          reduceMotion={reduceMotion}
-          theme={theme}
-        />
         {report ? (
           <ReportHero
             delta={delta}
@@ -718,6 +732,7 @@ export function ReportsTab({
             days={goalDays}
             goalLabel={compactDuration(dailyGoalMinutes * 60)}
             reduceMotion={reduceMotion}
+            week={weeklyGoal}
             theme={theme}
           />
         ) : null}
@@ -800,8 +815,11 @@ export function ReportsTab({
 }
 const s = StyleSheet.create({
   screen: { gap: 14 },
-  titleRow: { flexDirection: "row", alignItems: "center", gap: 12 },
-  titlePress: { flex: 1, minWidth: 0 },
+  titleRow: { flexDirection: "row", flexWrap: "wrap", alignItems: "center", columnGap: 12, rowGap: 10 },
+  titlePress: { flexGrow: 1, flexShrink: 0 },
+  // The filter keeps its 44 points; the switch takes what is left and its labels shorten first.
+  headControls: { flexDirection: "row", alignItems: "center", gap: 8, maxWidth: "100%", flexShrink: 1, minWidth: 0 },
+  switchSlot: { flexShrink: 1, minWidth: 0 },
   title: { fontFamily: MOBILE_DISPLAY_FONT.bold, fontSize: 30, lineHeight: 36 },
   outsideDismissSurface: { gap: 14 },
   row: { flexDirection: "row", alignItems: "center", gap: 8 },
@@ -818,9 +836,10 @@ const s = StyleSheet.create({
   },
   rangeLabel: { flex: 1, minWidth: 0, fontSize: 15, fontWeight: "600" },
   iconAction: {
+    flexShrink: 0,
     width: 44,
     height: 44,
-    borderRadius: 22,
+    borderRadius: DAYFRAME_BLOCKS.radius.pill,
     alignItems: "center",
     justifyContent: "center",
   },

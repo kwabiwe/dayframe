@@ -614,7 +614,7 @@ export async function fetchTimerState(): Promise<TimerStateFingerprint> {
     throw new AuthRequiredError();
   }
   if (!response.ok) {
-    throw new Error(await errorMessage(response, "Unable to check timer state"));
+    throw new Error(await errorMessage(response, "Couldn't check what's recording"));
   }
   return readJsonResponse<TimerStateFingerprint>(response);
 }
@@ -1269,7 +1269,7 @@ async function syncQueueItems(
       }
       if (item.type === "timer_start") {
         if (typeof payload.timeEntryId !== "string" || !payload.timeEntryId) {
-          throw new Error("Synced timer start did not return its canonical time entry.");
+          throw new Error("The server didn't return the started block.");
         }
         await recordTimerEntryIdCorrelation(item.localId, payload.timeEntryId, owner);
         timerEntryIdCorrelations.push({
@@ -1426,7 +1426,7 @@ export async function deliverPendingTimerStop(
       return { status: "delivered", pendingStop };
     }
 
-    const message = await errorMessage(response, "Unable to sync timer Stop");
+    const message = await errorMessage(response, "Couldn't sync the Stop");
     const failureKind = permanentStatusCodes.has(response.status) ? "permanent" : "retryable";
     const updated = await markPendingTimerStopFailure(pendingStop.clientEventId, {
       message,
@@ -1468,7 +1468,7 @@ export async function deleteTimeEntry(id: string) {
   if (response.status === 401) {
     throw new AuthRequiredError();
   }
-  if (!response.ok) throw new Error(await errorMessage(response, "Unable to delete timer"));
+  if (!response.ok) throw new Error(await errorMessage(response, "Couldn't delete the block"));
   return readJsonResponse(response);
 }
 
@@ -1491,7 +1491,7 @@ export async function updateTimeEntry(id: string, patch: TimeEntryUpdatePatch) {
   if (response.status === 401) {
     throw new AuthRequiredError();
   }
-  if (!response.ok) throw new Error(await errorMessage(response, "Unable to update timer"));
+  if (!response.ok) throw new Error(await errorMessage(response, "Couldn't update the block"));
   return readJsonResponse(response);
 }
 
@@ -1514,7 +1514,7 @@ export async function createManualTimeEntry(input: ManualTimeEntryInput) {
   if (response.status === 401) {
     throw new AuthRequiredError();
   }
-  if (!response.ok) throw new Error(await errorMessage(response, "Unable to create time entry"));
+  if (!response.ok) throw new Error(await errorMessage(response, "Couldn't add the block"));
   return readJsonResponse(response);
 }
 
@@ -2426,7 +2426,7 @@ async function postTimerAction(body: Record<string, unknown>) {
   if (response.status === 401) {
     throw new AuthRequiredError();
   }
-  if (!response.ok) throw new Error(await errorMessage(response, "Timer action failed"));
+  if (!response.ok) throw new Error(await errorMessage(response, "The block action failed"));
   return readJsonResponse<TimerActionResult>(response);
 }
 
@@ -2470,9 +2470,23 @@ async function readPlaceResponse(response: Response, fallback: string): Promise<
 
 async function errorMessage(response: Response, fallback: string) {
   const result = await readApiJson<ApiErrorPayload>(response, fallback);
-  if (!result.ok) return result.message;
+  if (!result.ok) return blockWordingForServerMessage(result.message);
   const payload = result.payload;
-  return formatApiError(payload) ?? `${fallback}: ${response.status}`;
+  return blockWordingForServerMessage(formatApiError(payload) ?? `${fallback}: ${response.status}`);
+}
+
+/**
+ * Server messages reach alerts as they are; an older server may still say "time entry", "entry" or
+ * "timer", so the iPhone says block instead (UIA-100). Only these nouns change.
+ */
+export function blockWordingForServerMessage(message: string) {
+  return message
+    .replace(/\bTime entries\b/g, "Blocks").replace(/\btime entries\b/g, "blocks")
+    .replace(/\bTime entry\b/g, "Block").replace(/\btime entry\b/g, "block")
+    .replace(/\bEntries\b/g, "Blocks").replace(/\bentries\b/g, "blocks")
+    .replace(/\bEntry\b/g, "Block").replace(/\bentry\b/g, "block")
+    .replace(/\bTimers\b/g, "Blocks").replace(/\btimers\b/g, "blocks")
+    .replace(/\bTimer\b/g, "Block").replace(/\btimer\b/g, "block");
 }
 
 function formatApiError(payload: ApiErrorPayload) {
@@ -2499,7 +2513,7 @@ function formatApiError(payload: ApiErrorPayload) {
 function formatBlockingEntry(payload: ApiErrorPayload) {
   const blockingEntry = payload.blockingEntry;
   if (!blockingEntry) return undefined;
-  const label = blockingEntry.description?.trim() || blockingEntry.source || "existing entry";
+  const label = blockingEntry.description?.trim() || blockingEntry.source || "an existing block";
   const status = blockingEntry.reviewStatus ? ` (${blockingEntry.reviewStatus})` : "";
   return `Blocked by ${label}${status}.`;
 }

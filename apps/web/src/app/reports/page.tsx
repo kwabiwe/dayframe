@@ -1,6 +1,6 @@
+import { DayframeIcon } from "@/components/blocks/DayframeIcon";
 import Link from "next/link";
 import { redirect } from "next/navigation";
-import { Download } from "lucide-react";
 import { ReportDetailsTable } from "@/components/ReportDetailsTable";
 import { ReportFiltersPanel } from "@/components/ReportFiltersPanel";
 import { ReportRangeControls } from "@/components/ReportRangeControls";
@@ -67,7 +67,7 @@ export default async function ReportsPage({
             </Link>
           </nav>
           <Link aria-label="Export filtered report as CSV" className="df-rbtn df-rbtn--sm" href={reportExportHref(report.appliedFilters)}>
-            <Download aria-hidden="true" size={16} />
+            <DayframeIcon glyph="download" size={16}/>
             Export
           </Link>
         </div>

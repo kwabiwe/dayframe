@@ -1,3 +1,4 @@
+import { formatDuration } from "@dayframe/shared";
 import type { MobileTimeEntry } from "./api";
 import type { TodayActivity } from "./todayReviewPresentation";
 import { displayTimerDescription } from "./timerPresentation";
@@ -135,11 +136,7 @@ function clock(ms: number) {
 }
 
 function duration(ms: number) {
-  const minutes = Math.floor(Math.max(0, ms) / 60_000);
-  const hours = Math.floor(minutes / 60);
-  if (!hours) return `${minutes}m`;
-  const rest = minutes % 60;
-  return rest ? `${hours}h ${rest}m` : `${hours}h`;
+  return formatDuration(ms / 1000);
 }
 
 /** The scrub tooltip: the block's title and "08:13–10:00 · 1h 47m", or the time and "Untracked". */

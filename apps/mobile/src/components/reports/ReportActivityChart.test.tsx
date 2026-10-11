@@ -32,6 +32,7 @@ vi.mock(
   async () => import("../../lib/reportsPresentation"),
 );
 vi.mock("@/lib/reportPlot", async () => import("../../lib/reportPlot"));
+vi.mock("@/lib/reportsBlocks", async () => import("../../lib/reportsBlocks"));
 vi.mock(
   "@/lib/reportsTypography",
   async () => import("../../lib/reportsTypography"),
@@ -208,6 +209,82 @@ describe("Activity chart", () => {
       tree.root.findByProps({ accessibilityLabel: "Next bucket" }).props
         .disabled,
     ).toBe(true);
+    act(() => tree.unmount());
+  });
+  it("stacks each period's activities in their colours inside a card, never coral (UIA-025)", () => {
+    let tree!: ReturnType<typeof create>;
+    const stacked = [
+      { ...buckets[1], seconds: 5400, segments: [
+        { key: "work", seconds: 3600, color: "blue" },
+        { key: "walk", seconds: 1800, color: "lime" },
+      ] },
+    ];
+    act(() => {
+      tree = create(
+        <ReportActivityChart
+          buckets={stacked}
+          axisLayout="single-day"
+          theme={{ accent: "coral", surface: "card", textMuted: "muted" } as never}
+          reduceMotion
+          semanticContextKey="stack"
+          outsidePressDismissal={0}
+        />,
+      );
+    });
+    const card = tree.root.findByProps({ testID: "reports-activity-card" });
+    expect(card.props.style[1].backgroundColor).toBe("card");
+    const blocks = tree.root.findAllByProps({ testID: "report-activity-block" });
+    const heights = blocks.map((block) => block.props.style.flexGrow);
+    expect(blocks.map((block) => block.props.style.backgroundColor)).toEqual(["blue", "lime"]);
+    expect(heights[0]).toBeGreaterThan(heights[1]);
+    expect(JSON.stringify(tree.toJSON())).not.toContain("coral");
+    act(() => tree.unmount());
+  });
+  it("never clips a short column's blocks: the smallest are left out instead (Codex r1)", () => {
+    let tree!: ReturnType<typeof create>;
+    const tiny = [
+      { ...buckets[0], seconds: 12 * 3600, segments: [{ key: "work", seconds: 12 * 3600, color: "blue" }] },
+      { ...buckets[1], seconds: 600, segments: [
+        { key: "a", seconds: 240, color: "red" },
+        { key: "b", seconds: 240, color: "lime" },
+        { key: "c", seconds: 120, color: "teal" },
+      ] },
+    ];
+    act(() => {
+      tree = create(
+        <ReportActivityChart
+          buckets={tiny}
+          axisLayout="month"
+          theme={{ surface: "card", textMuted: "muted" } as never}
+          reduceMotion
+          semanticContextKey="tiny"
+          outsidePressDismissal={0}
+        />,
+      );
+    });
+    const columns = tree.root.findAllByProps({ testID: "report-activity-bar" });
+    const small = columns[1];
+    const columnHeight = small.props.style.at(-1).height;
+    const shown = small.findAllByProps({ testID: "report-activity-block" });
+    const used = shown.reduce((sum, block) => sum + block.props.style.flexGrow, 0) + Math.max(0, shown.length - 1) * small.props.style[1].gap;
+    expect(shown.length).toBeGreaterThan(0);
+    expect(used).toBeLessThanOrEqual(columnHeight + 0.01);
+    act(() => tree.unmount());
+  });
+  it("gives a sub-point column flex weights that fill it (Codex r3)", () => {
+    let tree!: ReturnType<typeof create>;
+    const sliver = [
+      { ...buckets[0], seconds: 20 * 3600, segments: [{ key: "work", seconds: 20 * 3600, color: "blue" }] },
+      { ...buckets[1], seconds: 180, segments: [{ key: "walk", seconds: 180, color: "lime" }] },
+    ];
+    act(() => {
+      tree = create(
+        <ReportActivityChart buckets={sliver} axisLayout="month" theme={{ surface: "card", textMuted: "muted" } as never} reduceMotion semanticContextKey="sliver" outsidePressDismissal={0} />,
+      );
+    });
+    const small = tree.root.findAllByProps({ testID: "report-activity-bar" })[1];
+    const weights = small.findAllByProps({ testID: "report-activity-block" }).map((block) => block.props.style.flexGrow);
+    expect(weights.reduce((sum, value) => sum + value, 0)).toBeGreaterThanOrEqual(1);
     act(() => tree.unmount());
   });
   it("keeps chart actions, live ticks, theme updates and vertical scrolling selected", () => {

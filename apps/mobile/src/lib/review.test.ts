@@ -594,7 +594,7 @@ describe("mobile review helpers", () => {
 
     expect(copy).toEqual(expect.arrayContaining([
       "Needs review",
-      "Suggested time entry",
+      "Suggested block",
       "Detected visit",
       "Edit before logging",
       "Skip"

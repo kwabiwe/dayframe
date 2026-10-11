@@ -1,10 +1,11 @@
 "use client";
 
+import { DayframeIcon } from "@/components/blocks/DayframeIcon";
 import type { CSSProperties, PointerEvent as ReactPointerEvent, ReactNode, UIEvent } from "react";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useTransition } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { CalendarDays, ChevronLeft, ChevronRight, List, Play } from "lucide-react";
+import { ChevronLeft, ChevronRight, List } from "lucide-react";
 import { analyzeTimeIntervals, calendarBlockContinuationEdges } from "@dayframe/shared";
 import { useAppShellRuntime, useRuntimePageData } from "@/components/AppShellRuntime";
 import { CalendarEntryCompactEditor } from "@/components/CalendarEntryCompactEditor";
@@ -88,7 +89,7 @@ type CalendarHoursMode = "fullDay";
 const NOW_PILL_HALF_HEIGHT = 10;
 
 const viewItems: Array<{ id: TimelineView; label: string; icon: ReactNode }> = [
-  { id: "calendar", label: "Calendar", icon: <CalendarDays size={16} /> },
+  { id: "calendar", label: "Calendar", icon: <DayframeIcon glyph="calendar-days" size={16}/> },
   { id: "list", label: "List", icon: <List size={16} /> }
 ];
 
@@ -1435,7 +1436,7 @@ export function CalendarReview({
                           }}
                           onDoubleClick={(event) => event.stopPropagation()}
                         >
-                          <Play size={13} fill="currentColor" strokeWidth={0} aria-hidden="true" />
+                          <DayframeIcon glyph="play" size={13} fill="currentColor" strokeWidth={0}/>
                         </button>
                       ) : null}
                       {entry.stoppedAt && density.canDirectResize && !startsBeforeDay ? (

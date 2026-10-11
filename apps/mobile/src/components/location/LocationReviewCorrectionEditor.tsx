@@ -1,3 +1,4 @@
+import { formatDuration } from "@dayframe/shared";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Alert,
@@ -14,6 +15,7 @@ import {
 import Reanimated from "react-native-reanimated";
 import Svg, { Circle as SvgCircle, Path, Rect } from "react-native-svg";
 import {
+  DAYFRAME_BLOCKS,
   paletteColorFor,
   placeDisplayName,
   travelModeLabel,
@@ -60,6 +62,7 @@ import {
   useReduceMotionPreference
 } from "@/lib/motion";
 import { LocationEvidenceMap } from "./LocationEvidenceMap";
+import { DayframeIcon } from "../icons/DayframeIcon";
 
 type Category = MobileBootstrap["categories"][number];
 type Place = MobileBootstrap["places"][number];
@@ -621,7 +624,7 @@ export function LocationReviewCorrectionEditor({
 
                   <Text {...mobileTextProps("metadata")} style={editorStyles.fieldLabel}>Search other places</Text>
                   <View style={editorStyles.searchField}>
-                    <SearchGlyph color={theme.textSecondary} />
+                    <DayframeIcon color={theme.textSecondary} glyph="search" size={18} />
                     <TextInput
                       ref={searchInputRef}
                       {...mobileTextProps("input")}
@@ -646,7 +649,7 @@ export function LocationReviewCorrectionEditor({
                         onPress={clearPlaceSearch}
                         style={pressable(editorStyles.iconButton, styles.buttonPressed)}
                       >
-                        <CloseGlyph color={theme.textSecondary} />
+                        <DayframeIcon color={theme.textSecondary} glyph="x" size={17} />
                       </Pressable>
                     ) : null}
                   </View>
@@ -1025,7 +1028,7 @@ function PlaceChoice({
         <Text {...mobileTextProps("itemTitle")} style={[placeChoiceStyles.name, { color: theme.textPrimary }]}>{name}</Text>
         <Text {...mobileTextProps("metadata")} style={[placeChoiceStyles.detail, { color: theme.textSecondary }]}>{detail}</Text>
       </View>
-      {selected ? <CheckGlyph color={theme.textPrimary} /> : null}
+      {selected ? <DayframeIcon color={theme.textPrimary} glyph="check" size={17} strokeWidth={2.2} /> : null}
     </Pressable>
   );
 }
@@ -1101,18 +1104,6 @@ function ActivityGlyph({ name, color }: { name: LocationActivityGlyphName; color
   return <Svg width={20} height={20} viewBox="0 0 24 24"><Path d="M12 21s6-5.2 6-11a6 6 0 1 0-12 0c0 5.8 6 11 6 11Z" fill="none" stroke={color} strokeLinejoin="round" strokeWidth={1.9} /><SvgCircle cx={12} cy={10} r={2} fill="none" stroke={color} strokeWidth={1.8} /></Svg>;
 }
 
-function SearchGlyph({ color }: { color: string }) {
-  return <Svg width={18} height={18} viewBox="0 0 24 24"><SvgCircle cx={11} cy={11} r={6} fill="none" stroke={color} strokeWidth={2} /><Path d="m16 16 4 4" stroke={color} strokeLinecap="round" strokeWidth={2} /></Svg>;
-}
-
-function CloseGlyph({ color }: { color: string }) {
-  return <Svg width={17} height={17} viewBox="0 0 24 24"><Path d="m7 7 10 10M17 7 7 17" stroke={color} strokeLinecap="round" strokeWidth={2} /></Svg>;
-}
-
-function CheckGlyph({ color }: { color: string }) {
-  return <Svg width={17} height={17} viewBox="0 0 24 24"><Path d="m5 12 4 4L19 6" fill="none" stroke={color} strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.2} /></Svg>;
-}
-
 function pointFromEvidence(evidence: LocationReviewEvidenceDto) {
   return evidence.map.centre ? {
     longitude: evidence.map.centre.coordinates[0],
@@ -1146,12 +1137,10 @@ function formatEvidenceTimeRange(evidence: LocationReviewEvidenceDto) {
   const date = new Intl.DateTimeFormat(undefined, { day: "numeric", month: "short" }).format(startedAt);
   const start = formatTime(evidence.segment.startedAt);
   const stop = stoppedAt && evidence.segment.stoppedAt ? formatTime(evidence.segment.stoppedAt) : "ongoing";
-  const durationMinutes = stoppedAt
-    ? Math.max(0, Math.round((stoppedAt.getTime() - startedAt.getTime()) / 60_000))
-    : null;
+  const durationSeconds = stoppedAt ? Math.max(0, (stoppedAt.getTime() - startedAt.getTime()) / 1000) : null;
   const approximateArrival = evidence.segment.approximateArrival;
   const prefix = approximateArrival ? "Approximate arrival · " : "";
-  const duration = durationMinutes === null ? "" : ` · ${durationMinutes}m${approximateArrival ? " estimated" : ""}`;
+  const duration = durationSeconds === null ? "" : ` · ${formatDuration(durationSeconds)}${approximateArrival ? " estimated" : ""}`;
   return `${prefix}${date} · ${start}–${stop}${duration}`;
 }
 
@@ -1160,15 +1149,7 @@ function formatTime(value: string) {
 }
 
 function formatLocationReviewDuration(startedAt: string, stoppedAt: string) {
-  const durationMinutes = Math.max(
-    0,
-    Math.round((Date.parse(stoppedAt) - Date.parse(startedAt)) / 60_000)
-  );
-  const hours = Math.floor(durationMinutes / 60);
-  const minutes = durationMinutes % 60;
-  if (hours === 0) return `${minutes}m`;
-  if (minutes === 0) return `${hours}h`;
-  return `${hours}h ${minutes}m`;
+  return formatDuration(Math.max(0, (Date.parse(stoppedAt) - Date.parse(startedAt)) / 1000));
 }
 
 function createEditorStyles(theme: MobileTheme) {
@@ -1240,7 +1221,7 @@ function createEditorStyles(theme: MobileTheme) {
       fontSize: 15,
       paddingVertical: 9
     },
-    iconButton: { width: 44, height: 44, borderRadius: 22, alignItems: "center", justifyContent: "center" },
+    iconButton: { width: 44, height: 44, borderRadius: DAYFRAME_BLOCKS.radius.pill, alignItems: "center", justifyContent: "center" },
     suggestionList: { borderRadius: 14, backgroundColor: theme.surfaceMuted, overflow: "hidden" },
     suggestionRow: {
       minHeight: 52,

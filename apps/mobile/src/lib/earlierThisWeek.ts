@@ -1,3 +1,4 @@
+import { formatDuration } from "@dayframe/shared";
 import type { HistoryDaySection } from "./historyPresentation";
 
 /**
@@ -24,13 +25,9 @@ function dayKeyOf(date: Date) {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
 }
 
-/** "2h05", "2h" or "35m", as the prototype's week rows write totals. */
+/** A day's total, written the one Dayframe way ("6h 25m", UIA-042). */
 export function shortDuration(seconds: number) {
-  const minutes = Math.floor(Math.max(0, seconds) / 60);
-  const hours = Math.floor(minutes / 60);
-  if (!hours) return `${minutes}m`;
-  const rest = minutes % 60;
-  return rest ? `${hours}h${String(rest).padStart(2, "0")}` : `${hours}h`;
+  return formatDuration(seconds);
 }
 
 export function buildEarlierThisWeek(sections: readonly HistoryDaySection[], nowMs: number): EarlierDay[] {

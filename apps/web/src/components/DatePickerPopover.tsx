@@ -1,7 +1,7 @@
 "use client";
 
+import { DayframeIcon } from "@/components/blocks/DayframeIcon";
 import type { CSSProperties, RefObject } from "react";
-import { CalendarDays } from "lucide-react";
 import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState, useSyncExternalStore } from "react";
 import { createPortal } from "react-dom";
 import { Button } from "@/components/ui/Primitives";
@@ -194,7 +194,7 @@ export function DatePickerPopover({
           title={iconOnly ? (ariaLabel ?? `Choose date, currently ${label}`) : undefined}
           type="button"
         >
-          <CalendarDays aria-hidden="true" size={16} />
+          <DayframeIcon glyph="calendar-days" size={16}/>
           {iconOnly ? null : <strong aria-atomic="true" aria-live="polite">{label}</strong>}
         </button>
       ) : null}

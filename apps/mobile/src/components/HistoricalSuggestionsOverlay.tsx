@@ -7,7 +7,6 @@ import {
   Text,
   View
 } from "react-native";
-import Svg, { Path } from "react-native-svg";
 import { ActivityBlockMark } from "./today/ActivityBlockMark";
 import type { RecentActivitySuggestion } from "@dayframe/shared";
 import { pressable, type MobileStyles, type MobileTheme } from "@/lib/mobileTheme";
@@ -21,6 +20,7 @@ import {
   recordHistoricalSuggestionsOverlayContinuity,
   resolveHistoricalSuggestionsOverlayMotionAction
 } from "@/lib/historicalSuggestionsOverlayContinuity";
+import { DayframeIcon } from "./icons/DayframeIcon";
 
 export type HistoricalSuggestionsOverlayRenderState = {
   containerVisible: boolean;
@@ -297,7 +297,7 @@ export function HistoricalSuggestionsOverlay({
             style={pressable(styles.historicalSuggestionsCloseButton, styles.buttonPressed)}
             testID="historical-suggestions-close"
           >
-            <CloseGlyph color={theme.textSecondary} />
+            <DayframeIcon color={theme.textSecondary} glyph="x" size={16} strokeWidth={2.2} />
           </Pressable>
         </View>
         <ScrollView
@@ -415,16 +415,3 @@ function HistoricalSuggestionRow({
   );
 }
 
-function CloseGlyph({ color }: { color: string }) {
-  return (
-    <Svg accessibilityElementsHidden width={16} height={16} viewBox="0 0 24 24">
-      <Path
-        d="m6 6 12 12M18 6 6 18"
-        fill="none"
-        stroke={color}
-        strokeLinecap="round"
-        strokeWidth={2.2}
-      />
-    </Svg>
-  );
-}

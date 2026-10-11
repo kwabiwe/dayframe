@@ -132,7 +132,7 @@ function QuickStartTileButton({
   const colors = blockColorsFor(tile.color ?? tile.id, theme.mode, tile.name);
   const recent = `${spokenDuration(tile.weekSeconds)} in the last 7 days`;
   const label = recording
-    ? `${tile.name}, recording. Edit running timer`
+    ? `${tile.name}, recording. Edit running block`
     : `${switching ? "Switch to" : "Start"} ${tile.name}, ${recent}`;
   return (
     <Pressable

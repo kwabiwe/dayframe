@@ -152,5 +152,17 @@ describe("Blocks Reports pieces", () => {
     expect(streak.props.accessibilityLabel).toBe("2 of 3 days on goal. Within 15 percent of your 6h day.");
     const cells = tree.root.findAll((node) => node.props.style?.[0]?.width === 14);
     expect(cells.map((node) => node.props.style[1].backgroundColor)).toEqual(["#20B978", "rgba(112, 123, 145, 0.18)", "#20B978"]);
+    expect(tree.root.findAllByProps({ testID: "reports-weekly-goal" })).toHaveLength(0);
+  });
+
+  it("adds the weekly goal on Week (UIA-104 D4)", () => {
+    let tree!: ReturnType<typeof create>;
+    act(() => {
+      tree = create(
+        <ReportGoalStreak days={[true, false]} goalLabel="8h" reduceMotion theme={theme} week={{ seconds: 30 * 3600, goalSeconds: 40 * 3600 }} />
+      );
+    });
+    expect(tree.root.findByProps({ testID: "reports-weekly-goal" }).props.children).toBe("30h of your 40h week");
+    expect(tree.root.findByProps({ testID: "reports-goal-streak" }).props.accessibilityLabel).toContain("of your 40 hours weekly goal.");
   });
 });

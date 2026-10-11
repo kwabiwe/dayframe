@@ -32,6 +32,7 @@ const ALLOWED_ALERTS: Record<string, string[]> = {
   ],
   "app/settings.tsx": [
     '"Unable to refresh Settings"',
+    '"Apple Health"', // mapping save failed (the one Health mapping writer)
     '"Evening reminder"', // change failed
     '"Your day"', // goal not saved
     '"Activities"', // restore failed
@@ -41,7 +42,6 @@ const ALLOWED_ALERTS: Record<string, string[]> = {
     '"Apple Health"', // permission request failed
     '"Apple Health"', // sync failed
     '"Apple Health"', // preference save failed
-    '"Apple Health"', // mapping save failed
     '"Apple Health"', // debug export failed
     '"Apple Health"', // follow-up: sleep permission guidance
     '"Apple Health"', // permission request failed
@@ -51,14 +51,14 @@ const ALLOWED_ALERTS: Record<string, string[]> = {
     '"Unable to refresh Dayframe"',
     '"Unable to add time"',
     '"Time not added"',
-    '"Timer not started"',
-    '"Timer not started"',
+    '"Block not started"',
+    '"Block not started"',
     "errorTitle",
     '"Change not saved"',
-    '"Timer not stopped"',
-    '"Timer Stop needs attention"',
-    'entries.length > 1 ? "Entries not deleted" : "Entry not deleted"',
-    'currentIds.length > 1 ? "Entries not deleted" : "Entry not deleted"'
+    '"Block not stopped"',
+    '"Stop needs attention"',
+    'entries.length > 1 ? "Blocks not deleted" : "Block not deleted"',
+    'currentIds.length > 1 ? "Blocks not deleted" : "Block not deleted"'
   ],
   "src/components/location/LocationReviewCorrectionEditor.tsx": [
     '"Place search"', // search failed

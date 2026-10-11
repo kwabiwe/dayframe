@@ -18,9 +18,9 @@ Use this when changing timer flows, dashboards, reports, entity management, onbo
 - Stopping a timer must close the authenticated user's active timer in the current workspace.
 - Active timer state must refresh correctly on web and mobile.
 - Manual completed entries should support category-only or uncategorized entries.
-- User-facing labels should say task, activity, entry, place, or source. Avoid project/client wording unless working on a compatibility or migration surface.
+- User-facing labels say block, activity, place or source — never timer, entry, time entry or task (audit UIA-100/UIA-206; guarded by `apps/mobile/src/components/blockWording.contract.test.ts`). Avoid project/client wording unless working on a compatibility or migration surface.
 - The interface says "activity" and "activities" everywhere on web and iPhone (owner-confirmed 6 Oct 2026; shipped app-wide rather than surface by surface). Database columns, API fields, code identifiers, tests and the report CSV export keep `category`, so nothing stored changes. `apps/web/src/app/activityWording.contract.test.ts` fails if interface text says "category" or "uncategorized".
-- Terms: an *activity* is what you start or file time under (Work, Sleep, Errands); an *entry* is a recorded stretch of time (a *time block* on Calendar); Apple Health records stay *workouts* or *sleep*; time with no activity reads "No activity". Title the list "Activities", never "Activity" alone, so it is not confused with Apple's Fitness "Activity". Library groups (Work and study, Body and mind…) may be called *life areas*.
+- Terms: an *activity* is what you start or file time under (Work, Sleep, Errands); a *block* is a recorded stretch of time (stored as a time entry; the interface never says entry); Apple Health records stay *workouts* or *sleep*; time with no activity reads "No activity". Title the list "Activities", never "Activity" alone, so it is not confused with Apple's Fitness "Activity". Library groups (Work and study, Body and mind…) may be called *life areas*.
 
 ## Automation Rules
 
@@ -48,7 +48,7 @@ Use this when changing timer flows, dashboards, reports, entity management, onbo
 - A time overlap is not a duplicate. Preserve source/client-event, Health sample, location segment, and Review mutation idempotency independently.
 - Only one active timer is allowed. Overlap support does not permit a second running timer.
 - Automatic Health allows overlaps subject to independent sample/session safety. Trusted stays allow manual/Health overlaps; commutes and conflicting location activities use an inclusive five-minute per-entry intersection tolerance. See the canonical automatic logging table in `docs/PRD.md`; presentation/report overlap thresholds remain separate.
-- Display both `Total logged` (sum of entry durations) and `Time covered` (interval union) where totals guide decisions. Goals use covered time; weekly activity totals and category allocation remain logged time.
+- Show one total wherever totals appear: `Total logged`, the sum of entry durations with overlaps included, so a day can pass 24h (owner decision UIA-305, 11 Oct 2026; replaces showing `Time covered` beside it). Goals still fill with covered time (interval union) in activities that count, and say so where the two differ; weekly activity totals and category allocation remain logged time.
 
 ## Standalone Product Copy
 

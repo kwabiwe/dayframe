@@ -40,7 +40,7 @@ describe("EarlierThisWeek", () => {
     });
     const texts = tree.root.findAllByType("Text" as never).map((node) => node.props.children);
     expect(texts.slice(0, 2)).toEqual(["Earlier this week", "Tap a day"]);
-    expect(texts).toContain("2h05");
+    expect(texts).toContain("2h 5m");
     expect(texts).toContain("0m");
 
     const first = tree.root.findByProps({ testID: "earlier-day-2026-10-06" });

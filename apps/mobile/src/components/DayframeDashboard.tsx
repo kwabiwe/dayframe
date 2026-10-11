@@ -2023,7 +2023,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
         description: suggestion.description,
         tagNames: suggestion.tagNames
       },
-      "Timer not saved"
+      "Block not saved"
     );
   }
 
@@ -2073,15 +2073,15 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
         requestImmediateDelivery: connectivityCurrent.current.isOnline
       });
       if (!queue.some((item) => item.localId === optimisticId && item.type === "timer_start")) {
-        throw new Error("The offline timer start could not be queued.");
+        throw new Error("The block couldn't be saved on this iPhone to send later.");
       }
     } catch {
       if (options.blankStartToken !== undefined) {
         blankTimerStartGate.current.release(options.blankStartToken);
       }
       Alert.alert(
-        "Timer not started",
-        "Dayframe could not save this timer on your iPhone. Check available storage and try again."
+        "Block not started",
+        "Dayframe could not save this block on your iPhone. Check available storage and try again."
       );
       return false;
     }
@@ -2167,8 +2167,8 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
       optimisticId
     ));
     Alert.alert(
-      "Timer not started",
-      "Dayframe could not start this timer because the saved request was rejected. Check Settings, Sync help for details."
+      "Block not started",
+      "Dayframe could not start this block because the saved request was rejected. Check Settings › Sync help for details."
     );
     setPresentedActiveEntry((current) => current?.id === optimisticId ? null : current);
   }
@@ -2177,7 +2177,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
     return saveTimeEntryOptimistically(
       entryId,
       patch,
-      "Timer not saved",
+      "Block not saved",
       { awaitPersistence: true }
     );
   }
@@ -2186,7 +2186,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
     return saveTimeEntryOptimistically(
       entryId,
       patch,
-      "Entry not saved",
+      "Block not saved",
       { awaitPersistence: true }
     );
   }
@@ -2322,15 +2322,15 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
       stopBackgroundReservation = persisted.backgroundReservation;
     } catch {
       Alert.alert(
-        "Timer not stopped",
+        "Block not stopped",
         "Dayframe could not save this Stop on your iPhone. Check available storage and try again."
       );
       return false;
     }
     if (pendingStop.failureKind === "permanent") {
       Alert.alert(
-        "Timer Stop needs attention",
-        "Open Settings > Sync help to retry or discard the rejected Stop."
+        "Stop needs attention",
+        "Open Settings › Sync help to retry or discard the Stop."
       );
       return false;
     }
@@ -2414,7 +2414,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
       await removeTimeEntryCommands(commandIds).catch(() => undefined);
       getDeletionCoordinator().invalidate(token);
       Alert.alert(
-        entries.length > 1 ? "Entries not deleted" : "Entry not deleted",
+        entries.length > 1 ? "Blocks not deleted" : "Block not deleted",
         "Dayframe could not save this deletion on your iPhone. Check available storage and try again."
       );
       return false;
@@ -2451,13 +2451,13 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
           optimisticTimerIds.current
         ));
         Alert.alert(
-          currentIds.length > 1 ? "Entries not deleted" : "Entry not deleted",
-          "Dayframe could not finish saving this deletion on your iPhone. The time entry was restored; check available storage and try again."
+          currentIds.length > 1 ? "Blocks not deleted" : "Block not deleted",
+          `Dayframe could not finish saving this deletion on your iPhone. ${currentIds.length > 1 ? "The blocks were" : "The block was"} restored; check available storage and try again.`
         );
         AccessibilityInfo.announceForAccessibility(
           currentIds.length > 1
-            ? "Time entries restored because deletion failed."
-            : "Time entry restored because deletion failed."
+            ? "Blocks restored because they couldn't be deleted."
+            : "Block restored because it couldn't be deleted."
         );
         return;
       }
@@ -2531,7 +2531,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
       playHaptic("undoRestore");
       setRowLanding(nextLandingRequest(pendingDeletion.entries.map((entry) => entry.id)));
       AccessibilityInfo.announceForAccessibility(
-        pendingDeletion.entries.length > 1 ? "Time entries restored." : "Time entry restored."
+        pendingDeletion.entries.length > 1 ? "Blocks restored." : "Block restored."
       );
     }
   }
@@ -2703,7 +2703,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
           >
             <Text style={styles.sectionTitle}>Opening Dayframe…</Text>
             <Text style={styles.muted}>
-              Loading your latest timers and saved activity.
+              Loading your latest blocks and saved activity.
             </Text>
           </View>
         </View>
@@ -2722,7 +2722,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
             <Text style={styles.authBody}>
               {authView === "signup"
                 ? "Create your Dayframe account and personal workspace."
-                : "Use your Dayframe account to sync timers, places and Apple Health with your workspace."}
+                : "Use your Dayframe account to sync blocks, places and Apple Health with your workspace."}
             </Text>
             {authView === "signup" ? (
               <>
@@ -2839,7 +2839,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
               onPress={submitAuth}
             >
               <Text style={[styles.primaryButtonText, styles.authPrimaryButtonText]}>
-                {authSubmitting ? "Working..." : authView === "signup" ? "Create account" : "Log in"}
+                {authSubmitting ? "Working…" : authView === "signup" ? "Create account" : "Log in"}
               </Text>
             </Pressable>
             <View style={styles.authSwitchRow}>

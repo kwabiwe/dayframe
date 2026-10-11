@@ -1,3 +1,5 @@
+import { formatDuration } from "../durations";
+
 /** A coordinate-free stop inside one trip, as carried in Review evidence. */
 export type TripStopForPresentation = {
   startedAt: string;
@@ -12,13 +14,12 @@ export type TripStopRow = {
   accessibilityLabel: string;
 };
 
+/** The shared duration ("5m", "1h 5m", "<1m"; UIA-042) and the same whole minutes spoken. */
 function minutesLabel(durationSeconds: number) {
-  const minutes = Math.max(1, Math.round(durationSeconds / 60));
-  const hours = Math.floor(minutes / 60);
-  const rest = minutes % 60;
+  const minutes = Math.floor(Math.max(0, durationSeconds) / 60);
   return {
-    short: hours === 0 ? `${minutes}m` : rest === 0 ? `${hours}h` : `${hours}h ${rest}m`,
-    spoken: `${minutes} minute${minutes === 1 ? "" : "s"}`
+    short: formatDuration(durationSeconds),
+    spoken: minutes < 1 ? "less than a minute" : `${minutes} minute${minutes === 1 ? "" : "s"}`
   };
 }
 

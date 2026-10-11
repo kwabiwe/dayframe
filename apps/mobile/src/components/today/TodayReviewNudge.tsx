@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef } from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 import Reanimated from "react-native-reanimated";
-import { blockColorsFor, DAYFRAME_APP_ICONS } from "@dayframe/shared";
+import { blockColorsFor, DAYFRAME_APP_ICONS, DAYFRAME_BLOCKS } from "@dayframe/shared";
 import { DayframeIcon } from "../icons/DayframeIcon";
 import { recordMobileLayout, recordMobileTextLayout, type MobileAccessibilityDiagnostic } from "../accessibility/diagnostics";
 import type { MobileTheme } from "../../lib/mobileTheme";
@@ -139,7 +139,7 @@ const STACK_POSES = [
 ] as const;
 
 const styles = StyleSheet.create({
-  card: { alignItems: "center", borderRadius: 22, flexDirection: "row", gap: 14, minHeight: 72, paddingHorizontal: 16, paddingVertical: 14 },
+  card: { alignItems: "center", borderRadius: DAYFRAME_BLOCKS.radius.phoneCard, flexDirection: "row", gap: 14, minHeight: 72, paddingHorizontal: 16, paddingVertical: 14 },
   pressed: { opacity: 0.82 },
   stack: { height: 44, width: 56 },
   stackBlock: { borderRadius: 8, height: 30, left: 6, position: "absolute", width: 40 },

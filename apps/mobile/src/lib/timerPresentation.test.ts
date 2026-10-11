@@ -62,7 +62,7 @@ describe("mobile timer presentation", () => {
       })
     ).toEqual({
       categoryLabel: "No activity",
-      title: "Add a task description"
+      title: "Add a description"
     });
   });
 
