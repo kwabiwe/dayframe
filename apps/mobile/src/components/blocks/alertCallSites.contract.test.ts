@@ -32,6 +32,7 @@ const ALLOWED_ALERTS: Record<string, string[]> = {
   ],
   "app/settings.tsx": [
     '"Unable to refresh Settings"',
+    '"Apple Health"', // mapping save failed (the one Health mapping writer)
     '"Evening reminder"', // change failed
     '"Your day"', // goal not saved
     '"Activities"', // restore failed
@@ -41,7 +42,6 @@ const ALLOWED_ALERTS: Record<string, string[]> = {
     '"Apple Health"', // permission request failed
     '"Apple Health"', // sync failed
     '"Apple Health"', // preference save failed
-    '"Apple Health"', // mapping save failed
     '"Apple Health"', // debug export failed
     '"Apple Health"', // follow-up: sleep permission guidance
     '"Apple Health"', // permission request failed
