@@ -14,6 +14,7 @@ import {
 import Reanimated from "react-native-reanimated";
 import Svg, { Circle as SvgCircle, Path, Rect } from "react-native-svg";
 import {
+  DAYFRAME_BLOCKS,
   paletteColorFor,
   placeDisplayName,
   travelModeLabel,
@@ -1229,7 +1230,7 @@ function createEditorStyles(theme: MobileTheme) {
       fontSize: 15,
       paddingVertical: 9
     },
-    iconButton: { width: 44, height: 44, borderRadius: 22, alignItems: "center", justifyContent: "center" },
+    iconButton: { width: 44, height: 44, borderRadius: DAYFRAME_BLOCKS.radius.pill, alignItems: "center", justifyContent: "center" },
     suggestionList: { borderRadius: 14, backgroundColor: theme.surfaceMuted, overflow: "hidden" },
     suggestionRow: {
       minHeight: 52,

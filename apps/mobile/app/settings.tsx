@@ -34,7 +34,6 @@ import {
   useWindowDimensions
 } from "react-native";
 import Reanimated from "react-native-reanimated";
-import Svg, { Path } from "react-native-svg";
 import { router, Stack, useFocusEffect, useLocalSearchParams } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
 import {
@@ -97,6 +96,7 @@ import {
 } from "@/lib/api";
 import {
   getLocationVisitDiagnostics,
+  locationAccessNeedsIosSettings,
   requestLocationAccess,
   refreshGeofencesForPlaces,
   setLocationLearningEnabled,
@@ -192,6 +192,7 @@ import {
 } from "@/lib/timerStopOutbox";
 import { syncHelpStatus } from "@/lib/settingsSyncDiagnostics";
 import { DAYFRAME_API_BASE } from "@/lib/config";
+import { createLatestRead, locationAccessAction, locationAccessLabels, locationSuggestionsSwitchHint } from "@/lib/locationAccessAction";
 import { healthMappingWriter } from "@/lib/healthMappingOwner";
 
 type Category = MobileBootstrap["categories"][number];
@@ -786,11 +787,43 @@ export default function SettingsScreen() {
   const locationMonitoringAllowed = locationDiagnostics?.backgroundPermission === "granted";
   const locationCaptureNeedsRetry = locationDiagnostics?.locationLearningEnabled === true &&
     locationDiagnostics.locationLearningCaptureState === "inactive";
-  const locationActionLabel = locationCaptureNeedsRetry ? "Restart location" : locationMonitoringAllowed
-    ? "Refresh"
-    : locationDiagnostics?.foregroundPermission === "denied"
-      ? "Review access"
-      : "Enable";
+  // UIA-111: once iOS won't ask again (Location denied or restricted, or Always already declined),
+  // the action opens this app's page in iOS Settings instead of a request that shows nothing. The
+  // live permission (canAskAgain) decides; it is read again whenever the diagnostics change and when
+  // Dayframe returns to the foreground (coming back from iOS Settings), without waiting for the
+  // network.
+  const [iosSettingsNeeded, setIosSettingsNeeded] = useState(false);
+  // Only the newest read publishes (an older answer arriving late never overwrites it), and none
+  // after Settings closes.
+  const [iosSettingsRead] = useState(createLatestRead);
+  useEffect(() => () => iosSettingsRead.invalidate(), [iosSettingsRead]);
+  const readIosSettingsNeed = useCallback(() => {
+    const read = iosSettingsRead.begin();
+    locationAccessNeedsIosSettings()
+      .then((needed) => {
+        if (iosSettingsRead.isLatest(read)) setIosSettingsNeeded(needed);
+      })
+      .catch(() => undefined);
+  }, [iosSettingsRead]);
+  useEffect(() => {
+    readIosSettingsNeed();
+  }, [locationDiagnostics?.foregroundPermission, locationDiagnostics?.backgroundPermission, readIosSettingsNeed]);
+  const refreshLocationOnReturn = useRef<() => void>(() => undefined);
+  useEffect(() => {
+    const subscription = AppState.addEventListener("change", (state) => {
+      if (state === "active") refreshLocationOnReturn.current();
+    });
+    return () => subscription.remove();
+  }, []);
+  const locationNeedsIosSettings = iosSettingsNeeded;
+  // One action drives the pill's label and what VoiceOver says; Settings comes first, because a
+  // restart can't succeed until iOS allows location again.
+  const locationAction = locationAccessAction({
+    needsIosSettings: locationNeedsIosSettings,
+    captureNeedsRetry: locationCaptureNeedsRetry,
+    monitoringAllowed: locationMonitoringAllowed
+  });
+  const { label: locationActionLabel, accessibilityLabel: locationActionAccessibilityLabel } = locationAccessLabels(locationAction);
   const motionFitness = motionFitnessStatus
     ? motionFitnessPresentation(motionFitnessStatus, locationDiagnostics?.locationLearningEnabled === true)
     : null;
@@ -858,7 +891,9 @@ export default function SettingsScreen() {
   // Settings › Location: the consent switch's plain state, kept apart from the iOS permission.
   const locationSuggestionsDetail = locationDiagnostics?.locationLearningCaptureState === "logout_cleanup"
     ? "Paused while signing out. Sign out again to finish."
-    : locationCaptureNeedsRetry
+    : locationAction === "settings" && locationDiagnostics?.locationLearningEnabled
+      ? "Paused. Allow location in iPhone Settings (Open Settings above)."
+      : locationCaptureNeedsRetry
       ? "Paused. Tap Restart location above to start it again."
       : locationDiagnostics?.locationLearningEnabled && !locationMonitoringAllowed
         ? "On, but needs Always location access"
@@ -1343,6 +1378,11 @@ export default function SettingsScreen() {
   }
 
   async function enableLocation() {
+    // The live permission decides, whatever the cached diagnostics say.
+    if (await locationAccessNeedsIosSettings().catch(() => false)) {
+      await Linking.openSettings();
+      return;
+    }
     if (locationCaptureNeedsRetry) {
       await toggleLocationLearning(true);
       return;
@@ -1373,6 +1413,11 @@ export default function SettingsScreen() {
   }
 
   async function toggleLocationLearning(enabled: boolean) {
+    if (enabled && await locationAccessNeedsIosSettings().catch(() => false)) {
+      // iOS won't ask again; Always can only be turned on in iOS Settings.
+      await Linking.openSettings();
+      return;
+    }
     if (enabled && !locationMonitoringAllowed) {
       const status = await requestLocationAccess();
       updateSettingsSnapshot({ locationStatus: status });
@@ -1400,6 +1445,11 @@ export default function SettingsScreen() {
       );
     }
   }
+
+  refreshLocationOnReturn.current = () => {
+    readIosSettingsNeed();
+    void refreshLocationDiagnostics().catch(() => undefined);
+  };
 
   async function refreshLocationDiagnostics(fallbackStatus?: string) {
     const diagnostics = await getLocationVisitDiagnostics();
@@ -1891,7 +1941,10 @@ export default function SettingsScreen() {
                 <SettingsBlockRow
                   control={
                     <SettingsSwitch
-                      accessibilityHint="Saves your choice for this account. Location access is set separately."
+                      accessibilityHint={locationSuggestionsSwitchHint({
+                        needsIosSettings: locationNeedsIosSettings,
+                        consentOn: locationDiagnostics?.locationLearningEnabled === true
+                      })}
                       disabled={locationDiagnostics === null}
                       label="Suggest visits and commutes"
                       onValueChange={toggleLocationLearning}
@@ -2401,7 +2454,7 @@ export default function SettingsScreen() {
                 <SettingsBlockRow
                   control={
                     <SettingsPillButton
-                      accessibilityLabel={`${locationActionLabel} location access`}
+                      accessibilityLabel={locationActionAccessibilityLabel}
                       label={locationActionLabel}
                       onPress={() => void enableLocation()}
                       theme={theme}
@@ -2420,7 +2473,10 @@ export default function SettingsScreen() {
                   control={
                     <SettingsSwitch
                       // Consent for this account, separate from the iOS permission above.
-                      accessibilityHint="Saves your choice for this account. Location access is set separately."
+                      accessibilityHint={locationSuggestionsSwitchHint({
+                        needsIosSettings: locationNeedsIosSettings,
+                        consentOn: locationDiagnostics?.locationLearningEnabled === true
+                      })}
                       disabled={locationDiagnostics === null}
                       label="Suggest visits and commutes"
                       onValueChange={toggleLocationLearning}
@@ -2778,7 +2834,7 @@ function HealthTypeSheet({
                 sheetRef.current?.dismiss();
               }}
             >
-              <CloseGlyph color={theme.textPrimary} />
+              <DayframeIcon color={theme.textPrimary} glyph={DAYFRAME_APP_ICONS.close} size={18} />
             </Pressable>
           </View>
           <ScrollView
@@ -2885,14 +2941,6 @@ const LOCATION_SUGGESTIONS_PRIVACY = {
   glyph: "shield" as const,
   text: "Location stays private to your account and is never used for ads or analytics. Recent points on this iPhone expire after seven days; upload copies can stay longer. Signing out clears them all."
 };
-
-function CloseGlyph({ color }: { color: string }) {
-  return (
-    <Svg width={18} height={18} viewBox="0 0 24 24">
-      <Path d="m7 7 10 10M17 7 7 17" stroke={color} strokeLinecap="round" strokeWidth={2} />
-    </Svg>
-  );
-}
 
 function normalizeSettingsSection(value: string | string[] | undefined): SettingsSection {
   const section = Array.isArray(value) ? value[0] : value;

@@ -3284,7 +3284,7 @@ kbd {
 .auth-card {
   border-radius: 22px;
   background: var(--surface);
-  box-shadow: inset 0 0 0 1px var(--border), var(--shadow-soft);
+  box-shadow: var(--shadow-soft);
 }
 
 .auth-card-head {
@@ -3592,7 +3592,6 @@ kbd {
   width: min(680px, 62%);
   height: min(560px, calc(100% - 56px));
   transform: translateY(-50%);
-  border: 1px solid var(--line);
   border-radius: 28px;
   background:
     linear-gradient(var(--line) 1px, transparent 1px),
@@ -3638,7 +3637,6 @@ kbd {
   right: 24px;
   display: grid;
   gap: 4px;
-  border: 1px solid var(--line-strong);
   border-radius: 16px;
   padding: 14px 16px;
   color: var(--block-text);
@@ -3699,7 +3697,6 @@ kbd {
 
 .landing-feature-strip article,
 .landing-assurance {
-  border: 1px solid var(--line);
   border-radius: 20px;
   background: color-mix(in srgb, var(--surface) 92%, transparent);
   box-shadow: 0 12px 32px color-mix(in srgb, var(--foreground) 6%, transparent);
@@ -10273,12 +10270,13 @@ dialog.ui-dialog.df-palette {
   padding: 20px 32px 32px;
 }
 
+/* Panels are fill-led (prototype web.html .card): no outline. Only floating chrome — the command
+   bar, the phone tab bar, popovers and dialogs — keeps a faint edge. */
 .df-card {
   min-width: 0;
   border-radius: 22px;
   padding: 18px 20px;
   background: var(--surface);
-  box-shadow: inset 0 0 0 1px var(--border);
 }
 
 .df-today-hero,
@@ -12326,7 +12324,6 @@ dialog.ui-dialog.df-ce-dialog {
 .df-library .places-list-section {
   border-radius: 22px;
   background: var(--surface);
-  box-shadow: inset 0 0 0 1px var(--border);
 }
 
 .df-library .places-list-section > header {

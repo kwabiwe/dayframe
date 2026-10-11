@@ -91,13 +91,14 @@ vi.mock("./config", () => ({
 vi.mock("./location/runtime", () => runtimeMocks);
 // These legacy classifier fixtures intentionally isolate the capture owner;
 // real account/task/SQLite admission is exercised in ownership.sqlite.test.ts.
+const captureState = vi.hoisted(() => ({ current: true }));
 vi.mock("./location/store", () => ({
   captureLocationOwnership: async () => ({ revision: 0, binding: {id:"capture-test", enabled:true, boundAt:"2020-01-01T00:00:00Z"},
     context: {userId:"user-geofence",workspaceId:"workspace-geofence",savedPlaces:{some:()=>true}} }),
   updateLocationCaptureCatalogue: async () => true,
   getLocationRolloutMode: async () => "v1",
   hasLegacyLocationOwner: async () => true,
-  isLocationCaptureSnapshotCurrent: () => true,
+  isLocationCaptureSnapshotCurrent: () => captureState.current,
   locationCaptureRevision: () => 0
 }));
 
@@ -109,7 +110,10 @@ const {
   recordGeofenceTransition,
   refreshGeofencesForPlaces,
   setLocationLearningEnabled,
-  startGeofences
+  startGeofences,
+  locationAccessNeedsIosSettings,
+  requestAlwaysLocationPermission,
+  requestForegroundLocationPermission
 } = await import("./geofence");
 const { readQueue, syncQueue } = await import("./api");
 const { __resetMobileAccountForTests, activateMobileAccount } = await import("./mobileAccount");
@@ -657,5 +661,123 @@ describe("mobile geofence visit candidates", () => {
         lastVisitQueuedAt: "2026-07-06T12:08:00.000Z"
       })
     );
+  });
+});
+
+describe("location access that needs iOS Settings (UIA-111)", () => {
+  it("is true only when iOS won't ask again", async () => {
+    const cases: Array<[unknown, unknown, boolean]> = [
+      [{ status: "denied", granted: false, canAskAgain: false }, null, true],
+      [{ status: "denied", granted: false, canAskAgain: true }, null, false],
+      [{ status: "undetermined", granted: false, canAskAgain: true }, null, false],
+      [{ status: "granted", granted: true }, { status: "denied", granted: false, canAskAgain: false }, true],
+      [{ status: "granted", granted: true }, { status: "denied", granted: false, canAskAgain: true }, false],
+      [{ status: "granted", granted: true }, { status: "granted", granted: true }, false],
+    ];
+    for (const [foreground, background, expected] of cases) {
+      locationMocks.getForegroundPermissionsAsync.mockResolvedValueOnce(foreground as never);
+      if (background) locationMocks.getBackgroundPermissionsAsync.mockResolvedValueOnce(background as never);
+      expect(await locationAccessNeedsIosSettings()).toBe(expected);
+    }
+  });
+});
+
+describe("Always already asked, after a restart (UIA-111, Codex r3–r4)", () => {
+  // Each case starts with no request history on this iPhone (Codex r6: no inherited "asked").
+  beforeEach(() => {
+    asyncStore.delete("dayframe.location.alwaysRequest.v2");
+  });
+  const fg = (status: string) => locationMocks.getForegroundPermissionsAsync.mockResolvedValueOnce(
+    (status === "granted" ? { status, granted: true } : { status, granted: false, canAskAgain: true }) as never
+  );
+  const bgUndetermined = () => locationMocks.getBackgroundPermissionsAsync.mockResolvedValueOnce({ status: "undetermined", granted: false, canAskAgain: true } as never);
+
+  it("routes to iOS Settings once the one Always prompt was used, declined or later downgraded", async () => {
+    locationMocks.requestBackgroundPermissionsAsync.mockResolvedValueOnce({ status: "denied", granted: false, canAskAgain: true } as never);
+    await requestAlwaysLocationPermission();
+    fg("granted"); bgUndetermined(); // cold restart after declining
+    expect(await locationAccessNeedsIosSettings()).toBe(true);
+    // Granted, then downgraded to While Using in iOS Settings, then a restart.
+    locationMocks.requestBackgroundPermissionsAsync.mockResolvedValueOnce({ status: "granted", granted: true } as never);
+    await requestAlwaysLocationPermission();
+    fg("granted"); bgUndetermined();
+    expect(await locationAccessNeedsIosSettings()).toBe(true);
+  });
+
+  it("forgets an Always request made under an Allow Once grant once that grant expires", async () => {
+    locationMocks.requestBackgroundPermissionsAsync.mockResolvedValueOnce({ status: "denied", granted: false, canAskAgain: true } as never);
+    await requestAlwaysLocationPermission(); // failed silently under Allow Once
+    fg("undetermined"); // the temporary grant expired
+    expect(await locationAccessNeedsIosSettings()).toBe(false);
+    fg("granted"); bgUndetermined(); // a permanent While Using grant later
+    expect(await locationAccessNeedsIosSettings()).toBe(false);
+  });
+
+  it("clears that record when the next While Using grant comes from onboarding or Places, before any check (Codex r5)", async () => {
+    locationMocks.requestBackgroundPermissionsAsync.mockResolvedValueOnce({ status: "denied", granted: false, canAskAgain: true } as never);
+    await requestAlwaysLocationPermission(); // failed silently under Allow Once
+    // The grant expired; the next request (onboarding, Places) renews it as While Using.
+    fg("undetermined");
+    locationMocks.requestForegroundPermissionsAsync.mockResolvedValueOnce({ status: "granted", granted: true } as never);
+    await requestForegroundLocationPermission();
+    fg("granted"); bgUndetermined();
+    expect(await locationAccessNeedsIosSettings()).toBe(false);
+  });
+
+  it("an Always grant from an older build counts as the used prompt once seen (Codex r5)", async () => {
+    // Always was granted before this build kept a record; Location's status is read once.
+    fg("granted");
+    locationMocks.getBackgroundPermissionsAsync.mockResolvedValueOnce({ status: "granted", granted: true } as never);
+    expect(await locationAccessNeedsIosSettings()).toBe(false);
+    // Downgraded to While Using in iOS Settings, then a restart: iOS will not ask again.
+    fg("granted"); bgUndetermined();
+    expect(await locationAccessNeedsIosSettings()).toBe(true);
+  });
+
+  it("the geofence refresh on an ordinary launch records a seen Always grant (Codex r6)", async () => {
+    locationMocks.getForegroundPermissionsAsync.mockResolvedValue({ status: "granted", granted: true } as never);
+    locationMocks.getBackgroundPermissionsAsync.mockResolvedValue({ status: "granted", granted: true } as never);
+    await refreshGeofencesForPlaces([place]);
+    locationMocks.getForegroundPermissionsAsync.mockReset();
+    locationMocks.getBackgroundPermissionsAsync.mockReset();
+    fg("granted"); bgUndetermined(); // downgraded to While Using, then a restart
+    expect(await locationAccessNeedsIosSettings()).toBe(true);
+  });
+
+  it("an ordinary launch records a seen Always grant even with suggestions off (Codex r7)", async () => {
+    captureState.current = false; // suggestions off: no enabled capture binding
+    try {
+      locationMocks.getForegroundPermissionsAsync.mockResolvedValue({ status: "granted", granted: true } as never);
+      locationMocks.getBackgroundPermissionsAsync.mockResolvedValue({ status: "granted", granted: true } as never);
+      await refreshGeofencesForPlaces([place]).catch(() => undefined);
+      await vi.waitFor(() => expect(asyncStore.get("dayframe.location.alwaysRequest.v2")).toBe("asked"));
+    } finally {
+      captureState.current = true;
+    }
+    locationMocks.getForegroundPermissionsAsync.mockReset();
+    locationMocks.getBackgroundPermissionsAsync.mockReset();
+    fg("granted"); bgUndetermined();
+    expect(await locationAccessNeedsIosSettings()).toBe(true);
+  });
+
+  it("in the same process, a renewed grant after Allow Once still routes to Settings: Expo won't ask twice (Codex r6)", async () => {
+    // expo-location's requester remembers it asked (until the app restarts) and then reports Always
+    // denied and not askable, so a request would show nothing: iOS Settings is the only way.
+    locationMocks.requestBackgroundPermissionsAsync.mockResolvedValueOnce({ status: "denied", granted: false, canAskAgain: true } as never);
+    await requestAlwaysLocationPermission(); // failed silently under Allow Once
+    fg("undetermined");
+    locationMocks.requestForegroundPermissionsAsync.mockResolvedValueOnce({ status: "granted", granted: true } as never);
+    await requestForegroundLocationPermission(); // our record is cleared
+    fg("granted");
+    locationMocks.getBackgroundPermissionsAsync.mockResolvedValueOnce({ status: "denied", granted: false, canAskAgain: false } as never);
+    expect(await locationAccessNeedsIosSettings()).toBe(true);
+  });
+
+  it("the diagnostics read records a seen Always grant too", async () => {
+    locationMocks.getForegroundPermissionsAsync.mockResolvedValueOnce({ status: "granted", granted: true } as never);
+    locationMocks.getBackgroundPermissionsAsync.mockResolvedValueOnce({ status: "granted", granted: true } as never);
+    await getLocationVisitDiagnostics();
+    fg("granted"); bgUndetermined();
+    expect(await locationAccessNeedsIosSettings()).toBe(true);
   });
 });
