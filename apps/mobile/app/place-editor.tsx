@@ -47,7 +47,7 @@ import {
   SettingsSegmented,
   SettingsSwitch
 } from "@/components/settings/SettingsBlocks";
-import { refreshGeofencesForPlaces } from "@/lib/geofence";
+import { refreshGeofencesForPlaces, requestForegroundLocationPermission } from "@/lib/geofence";
 import { mobileAccountKey, mobileAccountOwnersEqual, readActiveMobileAccount, type MobileAccountOwner } from "@/lib/mobileAccount";
 import { applyPlaceRoleLocally, notePlaceDeleted } from "@/lib/placesPage";
 import {
@@ -293,7 +293,7 @@ export default function PlaceEditorScreen() {
     try {
       let permission = await Location.getForegroundPermissionsAsync();
       if (!permission.granted && permission.canAskAgain) {
-        permission = await Location.requestForegroundPermissionsAsync();
+        permission = await requestForegroundLocationPermission();
       }
       const guidance = foregroundLocationPermissionGuidance(permission);
       if (guidance) {
@@ -1022,9 +1022,9 @@ const editorStyles = StyleSheet.create({
   scrollContent: { paddingBottom: 40, paddingTop: 14 },
   stack: { gap: 22 },
   mapCard: { gap: 8 },
-  map: { borderRadius: 22, height: 200, overflow: "hidden", width: "100%" },
+  map: { borderRadius: DAYFRAME_BLOCKS.radius.phoneCard, height: 200, overflow: "hidden", width: "100%" },
   mapFoot: { marginHorizontal: 4 },
-  mapPlaceholder: { alignItems: "center", borderRadius: 22, gap: 10, justifyContent: "center", minHeight: 140, padding: 20 },
+  mapPlaceholder: { alignItems: "center", borderRadius: DAYFRAME_BLOCKS.radius.phoneCard, gap: 10, justifyContent: "center", minHeight: 140, padding: 20 },
   mapPlaceholderText: { textAlign: "center" },
   searchRow: { alignItems: "center", flexDirection: "row", gap: 10, minHeight: 52, paddingLeft: 16, paddingRight: 4 },
   searchInput: { flex: 1, fontSize: 16, minHeight: 48, minWidth: 0, paddingVertical: 10 },

@@ -132,7 +132,7 @@ describe("Dayframe Blocks activity colours", () => {
   });
 
   it("defines the Blocks radius scale", () => {
-    expect(DAYFRAME_BLOCKS.radius).toEqual({ chip: 8, block: 10, card: 20, sheet: 28, pill: 999 });
+    expect(DAYFRAME_BLOCKS.radius).toEqual({ chip: 8, block: 10, card: 20, phoneCard: 22, sheet: 28, pill: 999 });
   });
 });
 

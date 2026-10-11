@@ -28,7 +28,7 @@ import {
   weekGoalDays,
 } from "../../lib/reportsBlocks";
 import { REPORT_TEXT_CAP, reportCompactNumericColumns } from "@/lib/reportsTypography";
-import { paletteColorFor, type ReportSummary } from "@dayframe/shared";
+import { DAYFRAME_BLOCKS, paletteColorFor, type ReportSummary } from "@dayframe/shared";
 import type { MobileBootstrap } from "@/lib/api";
 import type { MobileStyles, MobileTheme } from "@/lib/mobileTheme";
 import { useResolvedReduceMotionPreference } from "@/lib/motion";
@@ -839,7 +839,7 @@ const s = StyleSheet.create({
     flexShrink: 0,
     width: 44,
     height: 44,
-    borderRadius: 22,
+    borderRadius: DAYFRAME_BLOCKS.radius.pill,
     alignItems: "center",
     justifyContent: "center",
   },

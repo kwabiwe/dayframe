@@ -302,8 +302,73 @@ async function hydrateLegacyCapture(capture: LocationCaptureSnapshot) {
   return originalLifetime;
 }
 
+/**
+ * True when iOS will no longer show a location prompt (denied or restricted with no second ask,
+ * or Always already declined): only this app's page in iOS Settings can change it (UIA-111,
+ * mobile-permissions.md "denied and needs Settings").
+ */
+export async function locationAccessNeedsIosSettings() {
+  const foreground = await Location.getForegroundPermissionsAsync();
+  if (foreground.status === "denied") return !foreground.canAskAgain;
+  if (foreground.status !== "granted") {
+    // An Allow Once grant expired (or nothing was ever granted): any Always request made under it
+    // failed without showing iOS's prompt, so it doesn't count as spent.
+    if (foreground.status === "undetermined") await AsyncStorage.removeItem(ALWAYS_LOCATION_REQUESTED_KEY).catch(() => undefined);
+    return false;
+  }
+  const background = await readBackgroundLocationPermission();
+  if (background.granted) return false;
+  if (background.status === "denied" && !background.canAskAgain) return true;
+  // iOS shows the Always upgrade once, whatever the answer (and a later downgrade to While Using
+  // in iOS Settings doesn't make it ask again); after a restart Expo reports it askable, so the
+  // spent request is remembered on this iPhone.
+  return (await AsyncStorage.getItem(ALWAYS_LOCATION_REQUESTED_KEY).catch(() => null)) === "asked";
+}
+
+const ALWAYS_LOCATION_REQUESTED_KEY = "dayframe.location.alwaysRequest.v2";
+
+/**
+ * Every Always read in this module goes through here, so a grant seen on any path (launch, geofence
+ * refresh, Settings, diagnostics) records that iOS's one Always prompt has been used.
+ */
+async function readBackgroundLocationPermission() {
+  const background = await Location.getBackgroundPermissionsAsync();
+  if (background.granted) await rememberAlwaysGranted();
+  return background;
+}
+
+/**
+ * Always is allowed, so iOS's one-time upgrade prompt has been used (perhaps by an older build that
+ * kept no record): a later downgrade to While Using must route to iOS Settings.
+ */
+async function rememberAlwaysGranted() {
+  await AsyncStorage.setItem(ALWAYS_LOCATION_REQUESTED_KEY, "asked").catch(() => undefined);
+}
+
+/**
+ * Every While Using request goes through here. When the current grant has lapsed (an Allow Once
+ * that expired, or nothing yet), an Always request made under it failed without iOS's prompt, so
+ * that record is cleared before the new grant; otherwise a later upgrade would wrongly go to
+ * Settings.
+ */
+export async function requestForegroundLocationPermission() {
+  const current = await Location.getForegroundPermissionsAsync().catch(() => null);
+  if (!current?.granted) await AsyncStorage.removeItem(ALWAYS_LOCATION_REQUESTED_KEY).catch(() => undefined);
+  return Location.requestForegroundPermissionsAsync();
+}
+
+/**
+ * Asks iOS for Always location (its one-time upgrade prompt) and remembers that it was asked, so
+ * later taps go to iOS Settings instead of a request that shows nothing.
+ */
+export async function requestAlwaysLocationPermission() {
+  const background = await Location.requestBackgroundPermissionsAsync();
+  await AsyncStorage.setItem(ALWAYS_LOCATION_REQUESTED_KEY, "asked").catch(() => undefined);
+  return background;
+}
+
 export async function requestLocationAccess() {
-  const foreground = await Location.requestForegroundPermissionsAsync();
+  const foreground = await requestForegroundLocationPermission();
   if (!foreground.granted) {
     await updateLocationDiagnostics({
       foregroundPermission: permissionLabel(foreground.status),
@@ -316,7 +381,7 @@ export async function requestLocationAccess() {
       : "Location is denied. Open iOS Settings to allow Dayframe to use location.";
   }
 
-  const background = await Location.requestBackgroundPermissionsAsync();
+  const background = await requestAlwaysLocationPermission();
   await updateLocationDiagnostics({
     foregroundPermission: permissionLabel(foreground.status),
     backgroundPermission: permissionLabel(background.status),
@@ -414,7 +479,7 @@ export async function setLocationLearningEnabled(
   }
 
   const foreground = await Location.getForegroundPermissionsAsync();
-  const background = await Location.getBackgroundPermissionsAsync();
+  const background = await readBackgroundLocationPermission();
   if (revision !== locationCaptureRevision() || !mobileAccountOwnersEqual(getActiveMobileAccountSnapshot(), owner)) return "Location account changed.";
   if (foreground.status !== "granted" || background.status !== "granted") {
     await updateLocationDiagnostics({
@@ -457,6 +522,9 @@ export function startLocationLearning(places: Parameters<typeof startLocationLea
   return withLocationCaptureLifecycle(async () => startLocationLearningUnsafe(places, await captured));
 }
 export function refreshGeofencesForPlaces(places: Parameters<typeof refreshGeofencesForPlacesUnsafe>[0], owner?: MobileAccountOwner) {
+  // Every launch notes a seen Always grant, whatever this account's consent or binding: whether iOS
+  // will ask again belongs to the iPhone, not to capture (UIA-111).
+  void readBackgroundLocationPermission().catch(() => undefined);
   const captured = captureLocationOwnership();
   return withLocationCaptureLifecycle(async () => {
     const capture = await refreshCaptureCatalogue(places, owner, await captured);
@@ -617,7 +685,7 @@ async function refreshGeofencesForPlacesUnsafe(
 ) {
   if (!isLocationCaptureSnapshotCurrent(capture)) return 0;
   const foreground = await Location.getForegroundPermissionsAsync();
-  const background = await Location.getBackgroundPermissionsAsync();
+  const background = await readBackgroundLocationPermission();
   if (!isLocationCaptureSnapshotCurrent(capture)) return 0;
   const foregroundPermission = permissionLabel(foreground.status);
   const backgroundPermission = permissionLabel(background.status);
@@ -951,7 +1019,7 @@ export async function getLocationVisitDiagnostics(): Promise<LocationVisitDiagno
   const [stored, foreground, background, geofencingActive, learningEnabled, learningActive] = await Promise.all([
     readLocationDiagnostics(),
     Location.getForegroundPermissionsAsync().catch(() => null),
-    Location.getBackgroundPermissionsAsync().catch(() => null),
+    readBackgroundLocationPermission().catch(() => null),
     Location.hasStartedGeofencingAsync(DAYFRAME_GEOFENCE_TASK).catch(() => false),
     getLocationLearningEnabled().catch(() => false),
     Location.hasStartedLocationUpdatesAsync(DAYFRAME_LOCATION_LEARNING_TASK).catch(() => false)
