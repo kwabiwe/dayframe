@@ -32,23 +32,27 @@ export function GoalSettings({
   const router = useRouter();
   const { refresh } = useAppShellRuntime();
   const [draft, setDraft] = useState<TimeGoalMinutes | null>(null);
-  // A save the server acknowledged, shown until the page's own data catches up: the app's refresh
-  // can fall back to cached data, which must not put the old goal back on screen.
-  const [acknowledged, setAcknowledged] = useState<{ goals: TimeGoalMinutes; basis: TimeGoalMinutes } | null>(null);
+  // The last goals the server accepted, shown until the page's own data changes: the app's refresh
+  // can fall back to cached data, which must not put an older goal back on screen. Any change in
+  // the page's data is newer than this and retires it.
+  const [acknowledged, setAcknowledged] = useState<TimeGoalMinutes | null>(null);
   const [status, setStatus] = useState<{ kind: "saved" | "error"; text: string } | null>(null);
   const fromPage = { dailyGoalMinutes, weeklyGoalMinutes };
-  const stillAcknowledged = acknowledged !== null && sameGoals(acknowledged.basis, fromPage) ? acknowledged.goals : null;
-  const goals = draft ?? stillAcknowledged ?? fromPage;
+  const [seenPage, setSeenPage] = useState(fromPage);
+  if (!sameGoals(seenPage, fromPage)) {
+    setSeenPage(fromPage);
+    setAcknowledged(null);
+  }
+  const goals = draft ?? acknowledged ?? fromPage;
   // The latest app callbacks and edit revision, read by the saver after a save lands (also after
   // Settings has closed, so Today and Reports still pick up the new goal at once).
-  const latest = useRef({ mounted: false, pageGoals: fromPage, refresh, revision: 0, router });
+  const latest = useRef({ mounted: false, refresh, revision: 0, router });
   const saverRef = useRef<ReturnType<typeof createGoalSaver> | null>(null);
 
   useEffect(() => {
     latest.current.refresh = refresh;
     latest.current.router = router;
-    latest.current.pageGoals = { dailyGoalMinutes, weeklyGoalMinutes };
-  }, [dailyGoalMinutes, refresh, router, weeklyGoalMinutes]);
+  }, [refresh, router]);
 
   useEffect(() => {
     const state = latest.current;
@@ -64,10 +68,12 @@ export function GoalSettings({
         });
         if (!response.ok) throw new Error("not saved");
       },
-      onSaved: (saved, revision) => {
+      // Every accepted write (also one a newer change superseded) is what the account holds now.
+      onAccepted: (accepted) => {
+        if (state.mounted) setAcknowledged(accepted);
+      },
+      onSaved: (_saved, revision) => {
         if (state.mounted && state.revision === revision) {
-          // The page shows the saved goals from here on (until its data says otherwise).
-          setAcknowledged({ goals: saved, basis: state.pageGoals });
           setDraft(null);
           setStatus({ kind: "saved", text: "Saved" });
         }

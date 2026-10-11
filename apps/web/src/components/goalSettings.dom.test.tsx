@@ -14,6 +14,7 @@ vi.mock("@/components/AppShellRuntime", () => ({ useAppShellRuntime: () => ({ re
 vi.mock("@/lib/client-auth-fetch", () => ({ clientFetch: mocks.fetch }));
 
 const { GoalSettings } = await import("./GoalSettings");
+const { __resetGoalSaveQueueForTests } = await import("@/lib/goal-stepper");
 
 afterEach(async () => {
   cleanup();
@@ -23,6 +24,7 @@ afterEach(async () => {
 });
 
 beforeEach(() => {
+  __resetGoalSaveQueueForTests();
   mocks.fetch.mockClear();
   mocks.refresh.mockClear();
   mocks.routerRefresh.mockClear();
@@ -97,6 +99,24 @@ describe("Settings › Your day steppers (UIA-309)", () => {
     expect(view.getByRole("group", { name: "Daily goal: 9h" })).toBeTruthy();
     view.rerender(<GoalSettings dailyGoalMinutes={720} userId="user-1" weeklyGoalMinutes={2400} />);
     expect(view.getByRole("group", { name: "Daily goal: 12h" })).toBeTruthy();
+    // And back to an older value elsewhere: the page follows its data, not an old save (Codex r3).
+    view.rerender(<GoalSettings dailyGoalMinutes={480} userId="user-1" weeklyGoalMinutes={2400} />);
+    expect(view.getByRole("group", { name: "Daily goal: 8h" })).toBeTruthy();
+  });
+
+  it("a failed later save keeps an earlier accepted one on screen (Codex r3)", async () => {
+    vi.useFakeTimers();
+    let call = 0;
+    mocks.fetch.mockImplementation(async () => new Response("{}", { status: ++call === 1 ? 200 : 500 }));
+    const view = render(<GoalSettings dailyGoalMinutes={480} userId="user-1" weeklyGoalMinutes={2400} />);
+    fireEvent.click(view.getByRole("button", { name: "Increase daily goal" })); // 9h, saved
+    await act(async () => { await vi.advanceTimersByTimeAsync(600); });
+    fireEvent.click(view.getByRole("button", { name: "Increase weekly goal" })); // 45h, fails
+    await act(async () => { await vi.advanceTimersByTimeAsync(600); });
+    expect(view.getByRole("alert").textContent).toContain("not saved");
+    expect(view.getByRole("group", { name: "Daily goal: 9h" })).toBeTruthy();
+    expect(view.getByRole("group", { name: "Weekly goal: 40h" })).toBeTruthy();
+    mocks.fetch.mockImplementation(async () => new Response("{}", { status: 200 }));
   });
 
   it("leaving the page saves a pending change at once", async () => {

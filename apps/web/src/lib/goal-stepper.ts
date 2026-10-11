@@ -28,6 +28,16 @@ export type TimeGoalMinutes = { dailyGoalMinutes: number; weeklyGoalMinutes: num
 type TimerHandle = unknown;
 
 /**
+ * One queue for the whole tab: a save made on a later visit to Settings waits behind one still in
+ * flight from an earlier visit, so two writes of absolute goals land in the order they were made.
+ */
+let tabQueue: Promise<unknown> = Promise.resolve();
+
+export function __resetGoalSaveQueueForTests() {
+  tabQueue = Promise.resolve();
+}
+
+/**
  * Saves the latest goals after a quiet delay, one request at a time; only the latest save may
  * settle the page. Each change carries its edit revision, so the page can tell whether a landed
  * save is still what it shows.
@@ -35,6 +45,7 @@ type TimerHandle = unknown;
 export function createGoalSaver({
   clearTimer = (handle) => clearTimeout(handle as ReturnType<typeof setTimeout>),
   delayMs = GOAL_SAVE_DELAY_MS,
+  onAccepted,
   onFailed,
   onSaved,
   save,
@@ -43,6 +54,8 @@ export function createGoalSaver({
   clearTimer?: (handle: TimerHandle) => void;
   delayMs?: number;
   onFailed: (error: unknown, revision: number) => void;
+  /** Every write the server accepted, in order (also ones a newer change superseded). */
+  onAccepted?: (goals: TimeGoalMinutes) => void;
   onSaved: (goals: TimeGoalMinutes, revision: number) => void;
   save: (goals: TimeGoalMinutes) => Promise<void>;
   setTimer?: (callback: () => void, ms: number) => TimerHandle;
@@ -50,18 +63,20 @@ export function createGoalSaver({
   let timer: TimerHandle | null = null;
   let pending: { goals: TimeGoalMinutes; revision: number } | null = null;
   let sequence = 0;
-  let queue: Promise<unknown> = Promise.resolve();
 
   function settle(promise: Promise<unknown>, mine: number, change: { goals: TimeGoalMinutes; revision: number }) {
     return promise.then(
-      () => { if (mine === sequence) onSaved(change.goals, change.revision); },
+      () => {
+        onAccepted?.(change.goals);
+        if (mine === sequence) onSaved(change.goals, change.revision);
+      },
       (error: unknown) => { if (mine === sequence) onFailed(error, change.revision); }
     );
   }
 
   function send(change: { goals: TimeGoalMinutes; revision: number }) {
     const mine = ++sequence;
-    queue = queue.catch(() => undefined).then(() => (mine === sequence ? settle(save(change.goals), mine, change) : undefined));
+    tabQueue = tabQueue.catch(() => undefined).then(() => (mine === sequence ? settle(save(change.goals), mine, change) : undefined));
   }
 
   function stopTimer() {
