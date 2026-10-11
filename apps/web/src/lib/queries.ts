@@ -1048,22 +1048,8 @@ async function getReviewItems(session: RequestSession) {
      where ri.workspace_id = $1
        and ri.user_id = $2
        and ri.status = 'open'
-       and ri.id in (
-         -- The newest 100, as before, plus (after them, being older) up to 200 open suggestions
-         -- whose window falls in the last 14 days, so a day's calendar and ribbon never lose a
-         -- suggestion to a burst of newer imported ones.
-         (select recent.id from review_items recent
-           where recent.workspace_id = $1 and recent.user_id = $2 and recent.status = 'open'
-           order by recent.created_at desc
-           limit 100)
-         union
-         (select windowed.id from review_items windowed
-           where windowed.workspace_id = $1 and windowed.user_id = $2 and windowed.status = 'open'
-             and windowed.suggested_stopped_at >= now() - interval '14 days'
-           order by windowed.suggested_started_at desc
-           limit 200)
-       )
-     order by ri.created_at desc`,
+     order by ri.created_at desc
+     limit 100`,
     [session.workspaceId, session.userId]
   );
   return result.rows;

@@ -138,8 +138,9 @@ describe("native Calendar production contract", () => {
     expect(rootView).not.toContain("value: presentation.entries");
     // Within-day presence fades through the transition's own animation, never a subtree animation.
     expect(rootView).toContain(".opacity.animation(.easeOut(duration: 0.21))");
-    // Vertical and hit geometry never inherit the lane-width animation.
-    expect(rootView).toContain("transaction.animation = nil");
+    // The lane animation is scoped to the horizontal modifier (iOS 17), never the block's content.
+    expect(rootView).toContain("content.animation(animation) { view in");
+    expect(rootView).not.toContain("transaction.animation = nil");
   });
 
   it("passes semantic warning colours across the React-to-Swift boundary", () => {

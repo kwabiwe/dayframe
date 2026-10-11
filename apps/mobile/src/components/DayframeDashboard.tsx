@@ -51,6 +51,9 @@ import { subscribeSavedTimeGoals } from "@/lib/settingsGoals";
 import { applySavedActivity, subscribeSavedActivity } from "@/lib/settingsActivities";
 import { layoutQuickStartMosaic, rankQuickStartActivities, weeklySecondsByActivity } from "@/lib/quickStartMosaic";
 import { TodayReviewPresentationProvider } from "./today/TodayReviewPresentationContext";
+import { currentTimeZone, localDayKey, reviewOwner, windowScopeFor } from "./today/useTodayReviewPresentation";
+import { BOOTSTRAP_REVIEW_ITEM_CAP, calendarReviewItems, scopedOpenReviewItems } from "@/lib/calendarScopedReview";
+import { readReviewPresentationSnapshot } from "@/lib/reviewSyncStore";
 import { AccountAvatarButton } from "./today/AccountAvatarButton";
 import { TodayGoalFrame } from "./today/TodayGoalFrame";
 import { formatLiveClock } from "./today/todayBlocksLayout";
@@ -102,6 +105,7 @@ import {
   signup,
   syncQueue,
   type MobileBootstrap,
+  type MobileReviewItem,
   type SyncQueueResult,
   type TimeEntryUpdatePatch
 } from "@/lib/api";
@@ -1603,9 +1607,38 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
     [data?.activeEntry, data?.entries]
   );
   const hapticsEnabled = useHapticsPreference();
+  // UIA-060: once the bootstrap's open Review list is at its cap, the Calendar also draws open
+  // suggestions from Today's cached scoped Review window (60 days, its own completeness), so a
+  // burst of newer suggestions never hides a recent day's Review block.
+  const [scopedReviewItems, setScopedReviewItems] = useState<MobileReviewItem[]>([]);
+  const reviewListAtCap = (data?.reviewItems?.length ?? 0) >= BOOTSTRAP_REVIEW_ITEM_CAP;
+  useEffect(() => {
+    if (!reviewListAtCap) {
+      setScopedReviewItems([]);
+      return;
+    }
+    const owner = reviewOwner(data);
+    const timeZone = currentTimeZone();
+    if (!owner || !timeZone) return;
+    let current = true;
+    readReviewPresentationSnapshot({ owner, response: { scope: windowScopeFor(localDayKey(Date.now()), timeZone) } })
+      .then((snapshot) => {
+        if (current) setScopedReviewItems(scopedOpenReviewItems(snapshot));
+      })
+      .catch(() => undefined);
+    return () => {
+      current = false;
+    };
+  }, [data, reviewListAtCap]);
+  const calendarData = useMemo(
+    () => data && reviewListAtCap
+      ? { ...data, reviewItems: calendarReviewItems(data.reviewItems ?? [], scopedReviewItems) }
+      : data,
+    [data, reviewListAtCap, scopedReviewItems]
+  );
   const nativeCalendarBridge = useMemo(
     () => buildNativeCalendarBridgeState({
-      data,
+      data: calendarData,
       hapticsEnabled,
       // Whole minutes are all the Calendar shows; a per-second model made SwiftUI republish every second.
       now: minuteNow,
@@ -1618,7 +1651,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
     }),
     [
       calendarTransitionDirection,
-      data,
+      calendarData,
       hapticsEnabled,
       minuteNow,
       reduceMotion,
