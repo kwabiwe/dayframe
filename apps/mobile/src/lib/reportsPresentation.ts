@@ -102,24 +102,32 @@ export function reportGoalSeconds(
     reportEntryUnion(data).filter(eligible),
     withGoalExclusions(data.categories, data.goalExcludedCategoryIds),
   );
-  return windows.map((window) => {
-    const spans = counting
-      .map((entry) => {
-        const start = Math.max(Date.parse(entry.startedAt), +window.start);
-        const end = Math.min(entry.stoppedAt ? Date.parse(entry.stoppedAt) : nowMs, nowMs, +window.end);
-        return [start, end] as const;
-      })
-      .filter(([start, end]) => Number.isFinite(start) && Number.isFinite(end) && end > start)
-      .sort((a, b) => a[0] - b[0]);
-    let coveredMs = 0;
-    let coveredUntil = Number.NEGATIVE_INFINITY;
-    for (const [start, end] of spans) {
-      const from = Math.max(start, coveredUntil);
-      if (end > from) coveredMs += end - from;
-      coveredUntil = Math.max(coveredUntil, end);
-    }
-    return coveredMs / 1000;
-  });
+  return windows.map((window) =>
+    coveredSeconds(counting.map((entry) => entrySpan(entry, nowMs)), window),
+  );
+}
+
+function entrySpan(entry: Pick<MobileTimeEntry, "startedAt" | "stoppedAt">, nowMs: number) {
+  return [
+    Date.parse(entry.startedAt),
+    Math.min(entry.stoppedAt ? Date.parse(entry.stoppedAt) : nowMs, nowMs),
+  ] as const;
+}
+
+/** Seconds covered by the union of spans (ms), clipped to the window. */
+function coveredSeconds(spans: readonly (readonly [number, number])[], window: ReportWindow) {
+  const clipped = spans
+    .map(([start, end]) => [Math.max(start, +window.start), Math.min(end, +window.end)] as const)
+    .filter(([start, end]) => Number.isFinite(start) && Number.isFinite(end) && end > start)
+    .sort((a, b) => a[0] - b[0]);
+  let coveredMs = 0;
+  let coveredUntil = Number.NEGATIVE_INFINITY;
+  for (const [start, end] of clipped) {
+    const from = Math.max(start, coveredUntil);
+    if (end > from) coveredMs += end - from;
+    coveredUntil = Math.max(coveredUntil, end);
+  }
+  return coveredMs / 1000;
 }
 
 /** Replace only the server's current timer contribution with the existing Dashboard projection. */
@@ -139,12 +147,19 @@ export function buildReportsPresentation(input: {
   }));
   const entries = reportEntryUnion(data);
   const active = summary.active;
-  // Goal time per bucket (UIA-043) from the server's covered goal seconds, when it sends them:
-  // the server's running-timer share is swapped for the local projection, as for the totals.
+  // Goal time per bucket (UIA-043). Preferred: the server's merged covered intervals without the
+  // running entry, unioned with the phone's own projected timer (overlaps count once). From a server
+  // with only goalSeconds, its running-timer share is swapped for the projection instead.
   const goalExcluded = goalExcludedCategoryIds(
     withGoalExclusions(data.categories, data.goalExcludedCategoryIds),
   );
-  const goalSeconds = summary.buckets.every((b) => typeof b.goalSeconds === "number")
+  const goalIntervals = summary.buckets.every((b) => Array.isArray(b.goalIntervals))
+    ? summary.buckets.map((b) =>
+        (b.goalIntervals ?? []).map((interval) => [Date.parse(interval.start), Date.parse(interval.end)] as const),
+      )
+    : null;
+  const goalProjected: (readonly [number, number])[] = [];
+  const goalSeconds = !goalIntervals && summary.buckets.every((b) => typeof b.goalSeconds === "number")
     ? summary.buckets.map((b) => b.goalSeconds as number)
     : null;
   if (active && goalSeconds && categoryCountsTowardGoal(active.categoryId, goalExcluded)) {
@@ -194,6 +209,7 @@ export function buildReportsPresentation(input: {
       seconds: 0,
     });
     const countsTowardGoal = categoryCountsTowardGoal(entry.categoryId, goalExcluded);
+    if (countsTowardGoal) goalProjected.push(entrySpan(entry, nowMs));
     range.buckets.forEach((window, index) => {
       const seconds = entryOverlapMs(entry, window, nowMs) / 1000;
       buckets[index].byCategory.set(
@@ -279,7 +295,11 @@ export function buildReportsPresentation(input: {
     buckets: buckets.map((b, index) => ({
       ...range.buckets[index],
       /** Covered goal time from the server (all activities that count); undefined from older servers. */
-      goalSeconds: goalSeconds ? Math.max(0, goalSeconds[index] ?? 0) : undefined,
+      goalSeconds: goalIntervals
+        ? coveredSeconds([...(goalIntervals[index] ?? []), ...goalProjected], range.buckets[index])
+        : goalSeconds
+          ? Math.max(0, goalSeconds[index] ?? 0)
+          : undefined,
       seconds: [...b.byCategory].reduce(
         (sum, [key, seconds]) =>
           sum + (reportSelectionIncludes(selection, key) ? seconds : 0),

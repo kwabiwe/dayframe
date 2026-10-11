@@ -41,11 +41,29 @@ export function buildMobileReportSummaryQuery(
       from pieces group by category_key, category_id, name, color having sum(seconds) > 0
     ), allocations as (
       select key, category_key, sum(seconds) as seconds from pieces group by key, category_key
+    ), running as (
+      -- The running entry the phone replaces with its own projection ('active' below).
+      select e.id from eligible e where e.stopped_at is null order by e.started_at desc, e.id limit 1
     ), goal_spans as (
       -- Goal time (UIA-043): covered time (overlaps once) of activities that count, per bucket.
-      select p.key, greatest(p.started_at, b.start_at) as span_start, least(p.end_at, b.end_at) as span_end
+      select p.key, greatest(p.started_at, b.start_at) as span_start, least(p.end_at, b.end_at) as span_end,
+        p.id = (select id from running) is true as is_running
       from pieces p join bounds b on b.key = p.key
       where p.counts_toward_goal and least(p.end_at, b.end_at) > greatest(p.started_at, b.start_at)
+    ), fixed_marked as (
+      -- The same union without the running entry: the phone adds its projected timer to it.
+      select key, span_start, span_end,
+        case when span_start <= max(span_end) over (partition by key order by span_start, span_end
+          rows between unbounded preceding and 1 preceding) then 0 else 1 end as starts_island
+      from goal_spans where not is_running
+    ), fixed_islands as (
+      select key, min(span_start) as island_start, max(span_end) as island_end
+      from (select *, sum(starts_island) over (partition by key order by span_start, span_end
+        rows unbounded preceding) as island from fixed_marked) marked
+      group by key, island
+    ), fixed_intervals as (
+      select key, jsonb_agg(jsonb_build_object('start', island_start, 'end', island_end) order by island_start) as intervals
+      from fixed_islands group by key
     ), goal_marked as (
       select key, span_start, span_end,
         case when span_start <= max(span_end) over (partition by key order by span_start, span_end
@@ -63,7 +81,8 @@ export function buildMobileReportSummaryQuery(
       select b.key, b.ordinal, coalesce(sum(a.seconds), 0) as seconds,
         coalesce(jsonb_agg(jsonb_build_object('key', a.category_key, 'seconds', a.seconds) order by a.category_key)
           filter (where a.category_key is not null), '[]'::jsonb) as by_category,
-        coalesce((select g.seconds from goal_totals g where g.key = b.key), 0) as goal_seconds
+        coalesce((select g.seconds from goal_totals g where g.key = b.key), 0) as goal_seconds,
+        coalesce((select f.intervals from fixed_intervals f where f.key = b.key), '[]'::jsonb) as goal_intervals
       from bounds b left join allocations a on a.key = b.key group by b.key, b.ordinal
     ) select jsonb_build_object(
       'capturedNow', $3::text, 'range', jsonb_build_object('start', $4::text, 'end', $5::text),
@@ -71,7 +90,7 @@ export function buildMobileReportSummaryQuery(
       'categories', coalesce((select jsonb_agg(jsonb_build_object('key', category_key, 'categoryId', category_id,
         'name', name, 'color', color, 'seconds', seconds) order by seconds desc, category_key) from categories), '[]'::jsonb),
       'buckets', (select jsonb_agg(jsonb_build_object('key', key, 'seconds', seconds, 'byCategory', by_category,
-        'goalSeconds', goal_seconds) order by ordinal) from bucket_totals),
+        'goalSeconds', goal_seconds, 'goalIntervals', goal_intervals) order by ordinal) from bucket_totals),
       'active', (select jsonb_build_object('id', e.id, 'categoryId', e.category_id, 'startedAt', e.started_at,
         'buckets', coalesce((select jsonb_agg(jsonb_build_object('key', p.key, 'seconds', p.seconds) order by p.ordinal)
           from pieces p where p.id = e.id), '[]'::jsonb))

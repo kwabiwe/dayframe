@@ -35,7 +35,8 @@ describe("mobile aggregate SQL", () => {
     expect(sql.text).toContain("te.workspace_id = $1::uuid");
     expect(sql.text).toContain("c.workspace_id = te.workspace_id");
     expect(sql.text).toContain("coalesce(c.counts_toward_goal, true) as counts_toward_goal");
-    expect(sql.text).toContain("'goalSeconds', goal_seconds");
+    expect(sql.text).toContain("'goalSeconds', goal_seconds, 'goalIntervals', goal_intervals");
+    expect(sql.text).toContain("from goal_spans where not is_running");
     expect(sql.text).not.toMatch(
       /raw_payload|description|latitude|longitude|join projects|now\(\)/,
     );
@@ -128,6 +129,12 @@ describe("mobile aggregate SQL", () => {
         ).toBe(3600.5);
         // Goal time (UIA-043) is covered time: entries 1 and 2 overlap 00:30–01:00 and count once.
         expect(result.buckets.map((b) => b.goalSeconds)).toEqual([7200, 1800.5]);
+        // The merged intervals behind it leave out the running entry (3), which the phone projects.
+        expect(
+          result.buckets.map((b) =>
+            b.goalIntervals?.map((i) => [new Date(i.start).toISOString(), new Date(i.end).toISOString()]),
+          ),
+        ).toEqual([[["2026-09-09T00:00:00.000Z", "2026-09-09T01:30:00.000Z"]], []]);
         await client.query("update categories set counts_toward_goal = false");
         const switchedOff = ReportSummarySchema.parse(
           (await client.query<{ summary: ReportSummary }>(sql.text, sql.values)).rows[0].summary,
@@ -135,6 +142,7 @@ describe("mobile aggregate SQL", () => {
         // Work no longer counts; the uncategorized timer still does. Logged time is unchanged.
         expect(switchedOff.buckets.map((b) => b.goalSeconds)).toEqual([1800, 1800.5]);
         expect(switchedOff.buckets.map((b) => b.seconds)).toEqual([9000, 1800.5]);
+        expect(switchedOff.buckets.map((b) => b.goalIntervals)).toEqual([[], []]);
         await client.query("update categories set counts_toward_goal = true");
 
         const oneDayInput = {

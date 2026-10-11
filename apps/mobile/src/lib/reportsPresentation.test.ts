@@ -370,7 +370,41 @@ describe("goal streak time (UIA-043)", () => {
     expect(present(weekSummary(null)).buckets[0].goalSeconds).toBeUndefined();
   });
 
-  it("swaps the server's running-timer share for the local projection in goal time", () => {
+  it("unions the server's goal intervals with the locally projected timer (overlaps once)", () => {
+    // Codex repro: a counting block 08:00–15:00 and a server timer 09:00–16:00 whose Stop at 14:00
+    // is still queued. Real coverage is 08:00–15:00 = 7h, not 8h − 7h + 5h = 6h.
+    const day = week.buckets[0];
+    const at = (hour: number) => new Date(+day.start + hour * 3_600_000).toISOString();
+    const local = entry({ id: "timer", categoryId: "work", startedAt: at(9), stoppedAt: at(14) });
+    const withIntervals = (timerStart: number): ReportSummary => {
+      const base = weekSummary(week.buckets.map((_, index) => (index === 0 ? 8 * 3600 : 0)), {
+        id: "timer",
+        categoryId: "work",
+        startedAt: at(timerStart),
+        buckets: [{ key: day.key, seconds: (16 - timerStart) * 3600 }],
+      });
+      return {
+        ...base,
+        buckets: base.buckets.map((bucket, index) => ({
+          ...bucket,
+          goalIntervals: index === 0 ? [{ start: at(8), end: at(15) }] : [],
+        })),
+      };
+    };
+    const later = Date.parse(at(17));
+    const presentAt = (summary: ReportSummary, bootstrap: MobileBootstrap) =>
+      buildReportsPresentation({ data: bootstrap, summary, range: week, nowMs: Math.max(now, later), selection: { mode: "all" }, themeMode: "dark" });
+    const bootstrap = { ...data(), entries: [local] } as MobileBootstrap;
+    expect(presentAt(withIntervals(9), bootstrap).buckets[0].goalSeconds).toBe(7 * 3600);
+    // The timer's start corrected locally to 07:00: it now extends coverage to 07:00–15:00.
+    const corrected = { ...data(), entries: [{ ...local, startedAt: at(7) }] } as MobileBootstrap;
+    expect(presentAt(withIntervals(9), corrected).buckets[0].goalSeconds).toBe(8 * 3600);
+    // A timer in an activity that doesn’t count adds nothing beyond the server’s counting intervals.
+    const notCounting = { ...corrected, goalExcludedCategoryIds: ["work"] } as MobileBootstrap;
+    expect(presentAt(withIntervals(9), notCounting).buckets[0].goalSeconds).toBe(7 * 3600);
+  });
+
+  it("swaps the server's running-timer share for the local projection in goal time (goalSeconds only)", () => {
     const today = week.buckets.findIndex((b) => +b.start <= now && now < +b.end);
     const startedAt = new Date(now - 2 * 3_600_000).toISOString();
     const captured = 3600;
