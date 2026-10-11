@@ -515,7 +515,8 @@ describe("native Calendar Blocks presentation", () => {
       offsetFraction: 0,
       textColor: blockColorsFor("blue", "dark").text,
       warningOverlapCount: 0,
-      widthFraction: 1
+      // It shares time with a Review target, so it gives the Review lane its columns (Codex r10).
+      widthFraction: 1 - REVIEW_LANE_WIDTH
     });
     expect(review).toMatchObject({
       color: blockColorsFor("amber", "dark").fill,
@@ -523,7 +524,7 @@ describe("native Calendar Blocks presentation", () => {
       warningOverlapCount: 0
     });
     // The logged block keeps its exact target (it overlaps); the Review item, alone in its lane
-    // above it, gets its full 44-point target, and the logged block stays reachable to its left.
+    // beside it, gets its full 44-point target, and the logged block stays reachable to its left.
     expect(work?.overlapCount).toBe(1);
     expect(review?.overlapCount).toBe(0);
     expect(work?.accessibilityLabel).not.toContain("Overlaps");
@@ -555,6 +556,82 @@ describe("native Calendar Blocks presentation", () => {
     expect(byId.get("short")?.warningOverlapCount).toBe(0);
     expect(byId.get("logged-a")?.warningOverlapCount).toBe(1);
     expect(byId.get("logged-a")?.accessibilityLabel).toContain("Overlaps 1 other entry.");
+  });
+
+  describe("logged blocks beside the Review lane (Codex r10 on #317)", () => {
+    const now = localTime(2026, 7, 10, 23, 0);
+    const logged = (id: string, startHour: number, startMinute: number, minutes: number) => entry({
+      id,
+      startedAt: iso(localTime(2026, 7, 10, startHour, startMinute)),
+      stoppedAt: iso(localTime(2026, 7, 10, startHour, startMinute) + minutes * 60_000)
+    });
+    const suggestion = (id: string, startHour: number, startMinute: number, minutes: number) => entry({
+      id,
+      reviewStatus: "needs_review",
+      startedAt: iso(localTime(2026, 7, 10, startHour, startMinute)),
+      stoppedAt: iso(localTime(2026, 7, 10, startHour, startMinute) + minutes * 60_000)
+    });
+    const expectApart = (state: ReturnType<typeof build>, loggedIds: string[], reviewId: string) => {
+      const byId = new Map(state.model.entries.map((candidate) => [candidate.entryId, candidate]));
+      const review = byId.get(reviewId)!;
+      expect(review.offsetFraction).toBeCloseTo(1 - REVIEW_LANE_WIDTH);
+      expect(review.overlapCount).toBe(0);
+      for (const id of loggedIds) {
+        const block = byId.get(id)!;
+        expect(block.offsetFraction + block.widthFraction).toBeLessThanOrEqual(1 - REVIEW_LANE_WIDTH + 1e-9);
+      }
+    };
+
+    it("three logged 09:00–09:30 lanes and a 09:10–09:11 suggestion never share a target", () => {
+      const state = build(now, bootstrap([
+        logged("a", 9, 0, 30), logged("b", 9, 0, 30), logged("c", 9, 0, 30), suggestion("s", 9, 10, 1)
+      ]));
+      expectApart(state, ["a", "b", "c"], "s");
+    });
+
+    it("three logged 09:10–09:11 blocks under a suggestion at the same time stay tappable", () => {
+      const state = build(now, bootstrap([
+        logged("a", 9, 10, 1), logged("b", 9, 10, 1), logged("c", 9, 10, 1), suggestion("s", 9, 10, 1)
+      ]));
+      expectApart(state, ["a", "b", "c"], "s");
+    });
+
+    it("a whole group of overlapping logged blocks moves together, and time away from suggestions keeps the full width", () => {
+      const state = build(now, bootstrap([
+        // a's target meets the suggestion's; b overlaps a, so it moves too.
+        logged("a", 9, 40, 30), logged("b", 10, 0, 60), suggestion("s", 9, 0, 20),
+        logged("far", 14, 0, 30)
+      ]));
+      expectApart(state, ["a", "b"], "s");
+      const far = state.model.entries.find((candidate) => candidate.entryId === "far")!;
+      expect(far.offsetFraction).toBe(0);
+      expect(far.widthFraction).toBe(1);
+    });
+  });
+
+  it("reserves Review targets by the wall-clock time iOS draws, across a clock change (Codex r10)", () => {
+    const previousTz = process.env.TZ;
+    process.env.TZ = "Europe/London";
+    try {
+      // 25 Oct 2026: 00:00Z is 01:00 BST and 01:00Z is 01:00 GMT, so iOS draws both at 01:00.
+      const day = new Date(2026, 9, 25);
+      const at = (iso: string) => Date.parse(iso);
+      const dayStart = day.getTime();
+      const dayEnd = new Date(2026, 9, 26).getTime();
+      expect(reviewTargetEnvelope(at("2026-10-25T00:00:00Z"), at("2026-10-25T00:05:00Z"), dayStart, dayEnd))
+        .toEqual(reviewTargetEnvelope(at("2026-10-25T01:00:00Z"), at("2026-10-25T01:05:00Z"), dayStart, dayEnd));
+      const suggestion = (id: string, start: string, stop: string) => entry({ id, reviewStatus: "needs_review", startedAt: start, stoppedAt: stop });
+      const state = build(at("2026-10-25T20:00:00Z"), bootstrap([
+        suggestion("bst", "2026-10-25T00:00:00.000Z", "2026-10-25T00:05:00.000Z"),
+        suggestion("gmt", "2026-10-25T01:00:00.000Z", "2026-10-25T01:05:00.000Z")
+      ]), undefined, "2026-10-25");
+      const lane = state.model.entries.filter((candidate) => candidate.isReview);
+      expect(lane).toHaveLength(2);
+      expect(lane[0].offsetFraction).not.toBeCloseTo(lane[1].offsetFraction);
+    } finally {
+      if (previousTz === undefined) delete process.env.TZ;
+      else process.env.TZ = previousTz;
+    }
   });
 
   it("passes the Dayframe haptics setting to the native view", () => {
@@ -600,14 +677,14 @@ describe("native Calendar update cadence", () => {
   });
 });
 
-function build(now: number, data: MobileBootstrap, theme: MobileTheme = darkTheme()) {
+function build(now: number, data: MobileBootstrap, theme: MobileTheme = darkTheme(), selectedDayKey = "2026-07-10") {
   return buildNativeCalendarBridgeState({
     data,
     now,
     reduceMotion: false,
     reduceTransparency: false,
     refreshing: false,
-    selectedDayKey: "2026-07-10",
+    selectedDayKey,
     theme,
     transitionDirection: 1
   });

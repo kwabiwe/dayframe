@@ -274,40 +274,6 @@ public enum DayframeCalendarEntryGeometryMath {
   }
 }
 
-public extension DayframeCalendarEntryGeometryMetrics {
-  /// A Review suggestion's 44-point target is trimmed to the free space around it: wherever it would
-  /// reach over a logged block's target (same columns, overlapping rows) the logged block wins, so a
-  /// suggestion drawn on top of logged time never makes that time untappable. The suggestion always
-  /// keeps its own drawn block. Long-press creation is unaffected: the trimmed rows are inside the
-  /// logged targets, so the union of targets is the same.
-  func clippingReviewTarget(
-    semanticTop: Double,
-    semanticHeight: Double,
-    loggedTargets: [DayframeCalendarHitFrame]
-  ) -> DayframeCalendarEntryGeometryMetrics {
-    let visualTop = semanticTop
-    let visualBottom = semanticTop + max(0, semanticHeight)
-    var top = hitFrame.minY
-    var bottom = hitFrame.maxY
-    for target in loggedTargets
-    where target.minX < hitFrame.maxX && target.maxX > hitFrame.minX && target.minY < bottom && target.maxY > top {
-      if target.minY < visualTop { top = max(top, min(target.maxY, visualTop)) }
-      if target.maxY > visualBottom { bottom = min(bottom, max(target.minY, visualBottom)) }
-    }
-    guard top != hitFrame.minY || bottom != hitFrame.maxY else { return self }
-    let height = bottom - top
-    return DayframeCalendarEntryGeometryMetrics(
-      hitFrame: DayframeCalendarHitFrame(minX: hitFrame.minX, maxX: hitFrame.maxX, minY: top, maxY: bottom),
-      horizontal: horizontal,
-      vertical: DayframeCalendarVerticalMetrics(
-        hitHeight: height,
-        hitCenterY: top + height / 2,
-        visualOffsetWithinHitTarget: semanticTop - top
-      )
-    )
-  }
-}
-
 public enum DayframeCalendarLongPressMath {
   public static func slot(
     contentY: Double,

@@ -211,38 +211,6 @@ final class DayframeCalendarCoreTests: XCTestCase {
     }
   }
 
-  func testReviewTargetGivesWayToLoggedTargetsButKeepsItsBlock() {
-    // Three logged 09:00–09:30 lanes at 48 pt/h (432–456); a 09:10–09:11 suggestion over the right one.
-    let review = DayframeCalendarEntryGeometryMath.metrics(
-      availableWidth: 320,
-      hourLabelWidth: 44,
-      semanticTop: 9 * 48 + 8,
-      semanticHeight: 4,
-      offsetFraction: 0.56,
-      widthFraction: 0.44,
-      overlapCount: 0,
-      textDensity: "full"
-    )!
-    XCTAssertEqual(review.hitFrame.maxY - review.hitFrame.minY, 44, accuracy: 0.001)
-    let loggedRight = DayframeCalendarHitFrame(minX: 230, maxX: 310, minY: 432, maxY: 456)
-    let loggedLeft = DayframeCalendarHitFrame(minX: 52, maxX: 130, minY: 400, maxY: 500)
-    let clipped = review.clippingReviewTarget(semanticTop: 440, semanticHeight: 4, loggedTargets: [loggedRight, loggedLeft])
-    XCTAssertEqual(clipped.hitFrame.minY, 440, accuracy: 0.001)
-    XCTAssertEqual(clipped.hitFrame.maxY, 444, accuracy: 0.001)
-    XCTAssertEqual(clipped.vertical.visualOffsetWithinHitTarget, 0, accuracy: 0.001)
-    XCTAssertEqual(clipped.vertical.hitCenterY, 442, accuracy: 0.001)
-
-    // A logged target only above it trims the top; free space below stays the suggestion's.
-    let above = DayframeCalendarHitFrame(minX: 230, maxX: 310, minY: 400, maxY: 430)
-    let trimmed = review.clippingReviewTarget(semanticTop: 440, semanticHeight: 4, loggedTargets: [above])
-    XCTAssertEqual(trimmed.hitFrame.minY, 430, accuracy: 0.001)
-    XCTAssertEqual(trimmed.hitFrame.maxY, review.hitFrame.maxY, accuracy: 0.001)
-    XCTAssertEqual(trimmed.vertical.visualOffsetWithinHitTarget, 10, accuracy: 0.001)
-
-    // Nothing in its columns: unchanged.
-    XCTAssertEqual(review.clippingReviewTarget(semanticTop: 440, semanticHeight: 4, loggedTargets: [loggedLeft]), review)
-  }
-
   func testCompactAndTinyPresentationThresholdsStayNative() throws {
     var calendar = Calendar(identifier: .gregorian)
     calendar.timeZone = TimeZone(secondsFromGMT: 0)!

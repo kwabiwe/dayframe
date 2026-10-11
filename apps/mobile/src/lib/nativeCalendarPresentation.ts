@@ -148,24 +148,83 @@ export const REVIEW_LANE_MAX_LANES = 2;
 export const REVIEW_LANE_TARGET_MS = 55 * 60_000;
 /** iOS draws a block at least 4 points tall: 5 minutes at 48 points an hour. */
 export const REVIEW_LANE_MIN_VISIBLE_MS = 5 * 60_000;
+const DAY_MS = 24 * 60 * 60_000;
 
-/** The time a Review item's tap target covers at the most zoomed-out Calendar. */
+/**
+ * Where iOS draws a moment: the local wall-clock minute of the day (DayframeCalendarBlockMath's
+ * localMinute), as milliseconds after the day's start. On a clock-change day two different moments
+ * can share a wall-clock time and are then drawn in the same place.
+ */
+function wallClockOffsetMs(ms: number, dayStartMs: number, dayEndMs: number) {
+  if (ms <= dayStartMs) return 0;
+  if (ms >= dayEndMs) return DAY_MS;
+  const date = new Date(ms);
+  return ((date.getHours() * 60 + date.getMinutes()) * 60 + date.getSeconds()) * 1000 + date.getMilliseconds();
+}
+
+/**
+ * The span a tap target covers at the most zoomed-out Calendar, in drawn (wall-clock) time: the
+ * result is on a 24-hour axis starting at `dayStartMs`, so compare envelopes only with each other.
+ */
 export function reviewTargetEnvelope(startMs: number, endMs: number, dayStartMs: number, dayEndMs: number) {
-  const start = Math.max(dayStartMs, startMs);
-  const end = Math.min(dayEndMs, Math.max(start, endMs));
+  const start = dayStartMs + wallClockOffsetMs(startMs, dayStartMs, dayEndMs);
+  const end = Math.max(start, dayStartMs + wallClockOffsetMs(endMs, dayStartMs, dayEndMs));
   if (end - start >= REVIEW_LANE_TARGET_MS) return { start, end };
   // Centred on the drawn block, which starts at the real start and is at least 4 points tall.
   const middle = start + Math.max(end - start, REVIEW_LANE_MIN_VISIBLE_MS) / 2;
-  const envelopeStart = Math.min(Math.max(dayStartMs, middle - REVIEW_LANE_TARGET_MS / 2), dayEndMs - REVIEW_LANE_TARGET_MS);
+  const envelopeStart = Math.min(Math.max(dayStartMs, middle - REVIEW_LANE_TARGET_MS / 2), dayStartMs + DAY_MS - REVIEW_LANE_TARGET_MS);
   return { start: envelopeStart, end: envelopeStart + REVIEW_LANE_TARGET_MS };
 }
 
-function withReviewTargetSpan(entry: NativeCalendarEntry, now: number, dayStart: Date, dayEnd: Date): NativeCalendarEntry {
+function targetEnvelopeOf(entry: NativeCalendarEntry, now: number, dayStart: Date, dayEnd: Date) {
   const start = Date.parse(entry.startedAt);
   const end = entry.stoppedAt ? Date.parse(entry.stoppedAt) : now;
-  if (!Number.isFinite(start) || !Number.isFinite(end)) return entry;
-  const envelope = reviewTargetEnvelope(start, end, dayStart.getTime(), dayEnd.getTime());
+  if (!Number.isFinite(start) || !Number.isFinite(end)) return null;
+  return reviewTargetEnvelope(start, end, dayStart.getTime(), dayEnd.getTime());
+}
+
+function withReviewTargetSpan(entry: NativeCalendarEntry, now: number, dayStart: Date, dayEnd: Date): NativeCalendarEntry {
+  const envelope = targetEnvelopeOf(entry, now, dayStart, dayEnd);
+  if (!envelope) return entry;
   return { ...entry, startedAt: new Date(envelope.start).toISOString(), stoppedAt: new Date(envelope.end).toISOString() };
+}
+
+/**
+ * Logged blocks whose targets share any time with a Review target give the Review lane its columns:
+ * their whole group (blocks linked by overlapping targets, so lanes inside it stay consistent) is
+ * drawn in the left part of the day column. A Review target then never lies over a logged one, so
+ * both keep their full 44-point targets. Logged blocks away from suggestions keep the full width.
+ */
+function loggedIdsBesideReview(
+  confirmed: NativeCalendarEntry[],
+  review: NativeCalendarEntry[],
+  now: number,
+  dayStart: Date,
+  dayEnd: Date
+) {
+  const reviewSpans = review.flatMap((entry) => targetEnvelopeOf(entry, now, dayStart, dayEnd) ?? []);
+  const logged = confirmed
+    .map((entry) => ({ id: entry.id, span: targetEnvelopeOf(entry, now, dayStart, dayEnd) }))
+    .filter((item): item is { id: string; span: { start: number; end: number } } => item.span !== null)
+    .sort((left, right) => left.span.start - right.span.start);
+  const squeezed = new Set<string>();
+  let group: typeof logged = [];
+  let groupEnd = -Infinity;
+  const flush = () => {
+    const start = Math.min(...group.map((item) => item.span.start));
+    if (group.length && reviewSpans.some((span) => span.start < groupEnd && span.end > start)) {
+      for (const item of group) squeezed.add(item.id);
+    }
+    group = [];
+    groupEnd = -Infinity;
+  };
+  for (const item of logged) {
+    if (group.length && item.span.start >= groupEnd) flush();
+    group.push(item);
+    groupEnd = Math.max(groupEnd, item.span.end);
+  }
+  flush();
+  return squeezed;
 }
 const REVIEW_LANE_Z_INDEX = 1_000;
 
@@ -232,15 +291,22 @@ export function buildNativeCalendarBridgeState({
   const analysisById = new Map(allEntryAnalysis.entries.map((entry) => [entry.id, entry]));
   const warningById = new Map(confirmedAnalysis.entries.map((entry) => [entry.id, entry.overlapCount]));
   // Confirmed blocks overlap only each other; Review suggestions sit in their own lane on the right
-  // (REVIEW_LANE_WIDTH of the day column) above them, so a suggestion never squeezes logged time.
+  // (REVIEW_LANE_WIDTH of the day column). Logged blocks whose targets meet a Review target move to
+  // the left part (loggedIdsBesideReview), so neither covers the other's target.
   const reviewEntries = entries.filter((entry) => isCalendarReviewNeeded(entry));
+  const besideReview = loggedIdsBesideReview(confirmedEntries, reviewEntries, now, dayStart, dayEnd);
+  const reviewSpanDayEnd = new Date(dayStart.getTime() + DAY_MS);
   const layoutById = new Map([
-    ...layoutDayEntries(confirmedEntries, dayStart, dayEnd, now).map((layout) => [layout.id, layout] as const),
+    ...layoutDayEntries(confirmedEntries, dayStart, dayEnd, now).map((layout) => [layout.id, besideReview.has(layout.id) ? {
+      ...layout,
+      offsetFraction: layout.offsetFraction * (1 - REVIEW_LANE_WIDTH),
+      widthFraction: layout.widthFraction * (1 - REVIEW_LANE_WIDTH)
+    } : layout] as const),
     // The lane is narrow: overlapping Review items always sit side by side (never an inset over a
     // longer one, which would leave it a strip too thin to tap).
     // Any overlap at all, even under a minute, splits lanes here: two suggestions must never share
     // one tap target.
-    ...layoutDayEntries(reviewEntries.map((entry) => withReviewTargetSpan(entry, now, dayStart, dayEnd)), dayStart, dayEnd, now, { insetOverlays: false, minimumOverlapMs: 0 }).map((layout) => [layout.id, {
+    ...layoutDayEntries(reviewEntries.map((entry) => withReviewTargetSpan(entry, now, dayStart, dayEnd)), dayStart, reviewSpanDayEnd, now, { insetOverlays: false, minimumOverlapMs: 0 }).map((layout) => [layout.id, {
       ...layout,
       offsetFraction: 1 - REVIEW_LANE_WIDTH + layout.offsetFraction * REVIEW_LANE_WIDTH,
       widthFraction: layout.widthFraction * REVIEW_LANE_WIDTH,
