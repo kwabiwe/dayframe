@@ -2638,6 +2638,12 @@ export default function SettingsScreen() {
   );
 }
 
+let healthNameDraftVersion = 0;
+function nextHealthNameDraftVersion() {
+  healthNameDraftVersion += 1;
+  return healthNameDraftVersion;
+}
+
 /**
  * One Apple Health type's settings (UIA-085): the import switch, the activity it logs to (Use
  * default once mapped) and the name its blocks get. The activity picker opens over it.
@@ -2687,22 +2693,29 @@ function HealthTypeSheet({
   // Until the person types, the field follows the Name the writer shows (a change still on its
   // way when this sheet opened), so closing an untouched sheet never commits an older Name.
   const typedRef = useRef(false);
+  // Every edit gets an app-wide draft version, so a failed commit can tell whether anything was
+  // typed after it — even text that happens to match the failed Name.
+  const versionRef = useRef(nextHealthNameDraftVersion());
   const shownName = mapping.description ?? "";
   useEffect(() => {
     if (!typedRef.current && draftRef.current !== shownName) setNameDraft(shownName);
   }, [shownName]);
   function typeName(value: string) {
     typedRef.current = true;
+    versionRef.current = nextHealthNameDraftVersion();
     setNameDraft(value);
   }
   // The Name is written by the app's one Health mapping writer, queued with this type's other
-  // changes. From the moment this sheet opens it is told when a Name fails, and puts the saved
-  // Name back unless newer text was typed.
-  useEffect(() => healthMappingWriter.attach(healthKey, (savedName, failedName) => {
-    if (draftRef.current.trim() === failedName) setNameDraft(savedName);
+  // changes. From the moment this sheet opens it is told when a Name fails; it puts the saved Name
+  // back only when nothing was typed after that commit (then follows the writer again).
+  useEffect(() => healthMappingWriter.attach(healthKey, (savedName, _failedName, token) => {
+    if (token !== undefined && token === versionRef.current) {
+      typedRef.current = false;
+      setNameDraft(savedName);
+    }
   }), [healthKey]);
   function commitName() {
-    void healthMappingWriter.commitName(healthKey, draftRef.current);
+    void healthMappingWriter.commitName(healthKey, draftRef.current, versionRef.current);
   }
   return (
     <Modal

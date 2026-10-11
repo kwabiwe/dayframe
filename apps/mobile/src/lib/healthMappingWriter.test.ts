@@ -99,7 +99,7 @@ describe("Health mapping writer (UIA-085)", () => {
     t.writer.attach("walking", restore);
     t.failOnce();
     expect(await t.writer.commitName("walking", "New")).toBe(false);
-    expect(restore).toHaveBeenCalledWith("Old", "New");
+    expect(restore).toHaveBeenCalledWith("Old", "New", undefined);
     expect(t.lastShown().walking).toEqual({ description: "Old" });
     expect(await t.writer.commitName("walking", "New")).toBe(true);
     expect(t.stored().walking).toEqual({ description: "New" });
@@ -366,9 +366,32 @@ describe("Health mapping writer (UIA-085)", () => {
     const second = t.writer.commitName("walking", "B");
     t.readHolds[0].fail();
     expect(await first).toBe(false);
-    expect(restore).toHaveBeenCalledWith("Old", "A");
+    expect(restore).toHaveBeenCalledWith("Old", "A", undefined);
     expect(await second).toBe(true);
     await t.writer.idle("walking");
     expect(t.stored().walking).toEqual({ description: "B" });
+  });
+
+  it("Codex r9: an older failure never resets newer typing, even when it matches the failed text", async () => {
+    // The sheet's rule: restore only when nothing was typed after the failed commit.
+    const t = setup({ walking: { description: "Old" } });
+    await t.writer.refresh();
+    let version = 1;
+    let draft = "A";
+    t.writer.attach("walking", (saved, _failed, token) => {
+      if (token === version) draft = saved;
+    });
+    t.hold();
+    const first = t.writer.commitName("walking", draft, version);
+    await tick();
+    version = 2; draft = "B";
+    version = 3; draft = "A";
+    const second = t.writer.commitName("walking", draft, version);
+    t.holds[0].fail();
+    expect(await first).toBe(false);
+    expect(draft).toBe("A");
+    expect(await second).toBe(true);
+    await t.writer.idle("walking");
+    expect(t.stored().walking).toEqual({ description: "A" });
   });
 });

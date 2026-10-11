@@ -34,4 +34,11 @@ describe("Settings detail (audit A8b)", () => {
     expect(placeEditor).toContain("Pick a size to change it.");
     expect(placeEditor).not.toContain('testID="place-editor-radius"');
   });
+
+  it("restores a failed Health Name by draft version, never by matching text (Codex r9)", () => {
+    expect(settings).toContain("token !== undefined && token === versionRef.current");
+    expect(settings).toContain("versionRef.current = nextHealthNameDraftVersion();");
+    expect(settings).toContain("healthMappingWriter.commitName(healthKey, draftRef.current, versionRef.current)");
+    expect(settings).not.toContain("draftRef.current.trim() === failedName");
+  });
 });

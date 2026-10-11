@@ -25,7 +25,7 @@ type Entry<A> = {
 } & (
   | { kind: "patch"; patch: HealthAutoLogMapping }
   // `name` is this commit's Name, updated while it waits by newer commits it absorbs.
-  | { kind: "name"; started: boolean; name: string }
+  | { kind: "name"; started: boolean; name: string; token?: number }
 );
 
 export type HealthMappingWriterDeps<A> = {
@@ -59,7 +59,12 @@ export type HealthMappingListener = {
   settled?: () => void;
 };
 
-type Restorer = (savedName: string, failedName: string) => void;
+/**
+ * Told the saved Name when a commit's Name fails. `token` is that commit's draft version (as the
+ * sheet passed it), so the sheet puts the saved Name back only if nothing was typed since — even
+ * when newer typing happens to match the failed text.
+ */
+type Restorer = (savedName: string, failedName: string, token: number | undefined) => void;
 
 function merge(base: HealthAutoLogMapping | undefined, patch: HealthAutoLogMapping): HealthAutoLogMapping {
   return { ...(base ?? {}), ...patch };
@@ -148,6 +153,7 @@ export function createHealthMappingWriter<A>(deps: HealthMappingWriterDeps<A>) {
   async function run(type: HealthImportPreferenceKey, entry: Entry<A>) {
     let ok = false;
     let failedName: string | null = null;
+    let failedToken: number | undefined;
     let landed = false;
     if (entry.kind === "name") entry.started = true;
     // A change from an account that is no longer signed in is dropped: no write, alert or restore.
@@ -173,7 +179,10 @@ export function createHealthMappingWriter<A>(deps: HealthMappingWriterDeps<A>) {
           for (const listener of listeners) listener.failed?.(error);
           // A Name that could not be read or written: the sheet gets the saved Name back.
           // Only this commit's Name failed; a later queued Name is left to run.
-          if (entry.kind === "name") failedName = attempted ?? entry.name.trim();
+          if (entry.kind === "name") {
+            failedName = attempted ?? entry.name.trim();
+            failedToken = entry.token;
+          }
         }
       }
       if (landed && await current(entry)) wrote.add(type);
@@ -184,7 +193,7 @@ export function createHealthMappingWriter<A>(deps: HealthMappingWriterDeps<A>) {
       // Put the saved Name back where the open sheet shows it, unless something newer was typed.
       const savedName = nameOf(cache?.[type]);
       if ((names.get(type) ?? "").trim() === failedName) names.set(type, savedName);
-      restorers.get(type)?.(savedName, failedName);
+      restorers.get(type)?.(savedName, failedName, failedToken);
     }
     publish();
     entry.done(ok);
@@ -235,13 +244,16 @@ export function createHealthMappingWriter<A>(deps: HealthMappingWriterDeps<A>) {
       });
     },
     /** Commits a type's Name (the newest commit wins); true once it is saved. */
-    commitName(type: HealthImportPreferenceKey, name: string): Promise<boolean> {
+    commitName(type: HealthImportPreferenceKey, name: string, token?: number): Promise<boolean> {
       names.set(type, name);
       const waiting = queued(type).find((entry) => entry.kind === "name" && !entry.started && !entry.stale);
       const committed = waiting
         // A Name is already waiting its turn; it reads the newest Name when it runs.
         ? new Promise<boolean>((done) => {
-            if (waiting.kind === "name") waiting.name = name;
+            if (waiting.kind === "name") {
+              waiting.name = name;
+              waiting.token = token;
+            }
             const previous = waiting.done;
             waiting.done = (ok) => {
               previous(ok);
@@ -249,7 +261,7 @@ export function createHealthMappingWriter<A>(deps: HealthMappingWriterDeps<A>) {
             };
           })
         : new Promise<boolean>((done) => {
-            enqueue(type, { kind: "name", started: false, name, done, stale: false, authority: deps.capture() });
+            enqueue(type, { kind: "name", started: false, name, token, done, stale: false, authority: deps.capture() });
           });
       publish();
       return committed;
