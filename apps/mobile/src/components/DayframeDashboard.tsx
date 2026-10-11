@@ -2191,8 +2191,8 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
         }
         if (result.needsAttentionCount > 0) {
           Alert.alert(
-            "Time entry change not applied",
-            "The server rejected this change, so Dayframe restored the server version. You can retry or discard it in Settings > Sync help."
+            "Change not saved",
+            "Dayframe couldn't save this change, so the block is back as it was. Try again or discard it in Settings › Sync help."
           );
         }
       })().catch(() => undefined);

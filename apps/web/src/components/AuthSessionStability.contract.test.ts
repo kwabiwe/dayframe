@@ -48,7 +48,7 @@ describe("web auth session-stability contracts", () => {
     expect(authFormSource).toContain("value={email}");
     expect(authFormSource).toContain("value={password}");
     expect(authFormSource).toContain('setStatus("opening")');
-    expect(authFormSource).toContain('window.location.replace("/")');
+    expect(authFormSource).toContain('window.location.replace(next ? `${next}${window.location.hash}` : "/")');
     expect(authFormSource).not.toContain("window.location.assign");
     expect(authFormSource).not.toContain("action={submit}");
     expect(authFormSource).not.toContain("localStorage");

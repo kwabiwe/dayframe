@@ -2,7 +2,6 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { recordReviewDeckEvidenceDecision } from "@/lib/reviewDeckDecisions";
 import {
   AccessibilityInfo,
-  ActivityIndicator,
   AppState,
   Pressable,
   ScrollView,
@@ -450,7 +449,6 @@ export default function LocationReviewDetailScreen() {
             contentContainerStyle={styles.settingsScrollContent}
           >
             <View style={styles.panel}>
-              <ActivityIndicator color={theme.accent} />
               <Text {...mobileTextProps("body")} accessibilityLiveRegion="polite" style={styles.muted}>Loading private map evidence…</Text>
             </View>
           </ScrollView>

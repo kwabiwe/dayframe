@@ -297,3 +297,49 @@ function PickerHarness({
     <dialog aria-label="Add Time" onKeyDown={onOuterKeyDown} open>{form}</dialog>
   ) : form;
 }
+
+describe("CategoryPicker block variant (UIA-202)", () => {
+  afterEach(() => cleanup());
+
+  function BlockHarness({ onSelect }: { onSelect: (id: string) => void }) {
+    const [open, setOpen] = useState(false);
+    return (
+      <CategoryPicker
+        categories={[workCategory, writingCategory]}
+        menuId="block-menu"
+        onCreateCategory={vi.fn()}
+        onOpenChange={setOpen}
+        onSelect={onSelect}
+        open={open}
+        portal
+        selectedId={workCategory.id}
+        variant="block"
+      />
+    );
+  }
+
+  it("opens 'Activity for this block' as chips that arrow left to right, with a Close button", async () => {
+    const onSelect = vi.fn();
+    render(<BlockHarness onSelect={onSelect} />);
+    fireEvent.keyDown(screen.getByRole("button", { name: "Activity: Work" }), { key: "ArrowDown" });
+    const menu = await screen.findByRole("listbox", { name: "Activities" });
+    expect(document.getElementById("block-menu-title")?.textContent).toBe("Activity for this block");
+    const options = within(menu).getAllByRole("option");
+    expect(options.map((option) => option.textContent)).toEqual(["No activity", "Work", "Writing", "Create new activity"]);
+    // The chosen chip is the one tab stop and carries the selection; no coral check marks.
+    expect(options[1].getAttribute("aria-selected")).toBe("true");
+    expect(options[1].className).toContain("is-checked");
+    expect(options[1].getAttribute("tabindex")).toBe("0");
+    await waitFor(() => expect(document.activeElement).toBe(options[1]));
+    fireEvent.keyDown(options[1], { key: "ArrowRight" });
+    expect(document.activeElement).toBe(options[2]);
+    fireEvent.keyDown(options[2], { key: "ArrowLeft" });
+    expect(document.activeElement).toBe(options[1]);
+    // A modified arrow belongs to the browser.
+    fireEvent.keyDown(options[1], { key: "ArrowRight", altKey: true });
+    expect(document.activeElement).toBe(options[1]);
+    fireEvent.click(screen.getByRole("button", { name: "Close" }));
+    await waitFor(() => expect(screen.getByRole("button", { name: "Activity: Work" }).getAttribute("aria-expanded")).toBe("false"));
+    expect(onSelect).not.toHaveBeenCalled();
+  });
+});
