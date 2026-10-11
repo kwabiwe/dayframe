@@ -33,7 +33,7 @@ export const EarlierThisWeek = memo(function EarlierThisWeek({
         {days.map((day) => (
           <Pressable
             accessibilityHint="Opens this day in Calendar"
-            accessibilityLabel={`${day.spokenDate}, ${day.totalSeconds ? spokenDuration(day.totalSeconds) : "nothing tracked"}`}
+            accessibilityLabel={`${day.spokenDate}, ${day.totalSeconds ? spokenDuration(day.totalSeconds) : "nothing framed"}`}
             accessibilityRole="button"
             key={day.dayKey}
             onPress={() => onOpenDay(day.dayKey)}

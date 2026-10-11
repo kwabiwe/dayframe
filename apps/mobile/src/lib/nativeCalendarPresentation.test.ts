@@ -156,6 +156,27 @@ describe("native Calendar presentation boundary", () => {
     });
   });
 
+  it("shows every open suggestion with a time window in the Review lane, as the ribbon does (UIA-060)", () => {
+    const now = localTime(2026, 7, 10, 12, 0);
+    const item = (id: string, eventType: string, startHour: number, status = "open") => ({
+      categoryColor: "amber", categoryName: "Reading", confidence: "medium",
+      createdAt: iso(localTime(2026, 7, 10, startHour, 0)), eventSource: "health_workout", eventType, id,
+      notes: null, placeName: null, rawPayload: null, status, suggestedCategoryId: null, suggestedPlaceId: null,
+      suggestedStartedAt: iso(localTime(2026, 7, 10, startHour, 0)), suggestedStoppedAt: iso(localTime(2026, 7, 10, startHour, 45)),
+      title: "Reading", type: "review"
+    });
+    const state = build(now, bootstrap([], {
+      reviewItems: [
+        item("workout", "health_workout_import", 7),
+        item("visit", "learned_place_visit", 9),
+        item("closed", "learned_place_visit", 10, "accepted")
+      ]
+    }));
+    expect(state.model.entries.map((entry) => entry.actionId)).toEqual(["workout", "visit"]);
+    expect(state.model.entries.every((entry) => entry.actionKind === "review")).toBe(true);
+    expect(state.model.emptyState).toBe("Nothing framed yet.");
+  });
+
   it("presents one-time place labels as Calendar locations", () => {
     const now = localTime(2026, 7, 10, 12, 0);
     const state = build(now, bootstrap([entry({

@@ -67,10 +67,6 @@ export function isOpenReviewItem(item: Pick<MobileReviewItem, "status">) {
   return item.status === "open";
 }
 
-export function isCalendarPreviewReviewItem(item: Pick<MobileReviewItem, "eventType">) {
-  return item.eventType === "commute_detected";
-}
-
 export function isOneOffLocationReviewItem(
   item: Pick<MobileReviewItem, "rawPayload">
 ) {

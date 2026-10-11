@@ -10,7 +10,6 @@ import type { MobileTheme } from "./mobileTheme";
 import {
   REVIEW_COPY,
   buildReviewItemDraftEntry,
-  isCalendarPreviewReviewItem,
   isOpenReviewItem,
   isReviewNeededEntry
 } from "./review";
@@ -209,7 +208,7 @@ export function buildNativeCalendarBridgeState({
     model: {
       dayEndMs: dayEnd.getTime(),
       dayStartMs: dayStart.getTime(),
-      emptyState: "No tracked time for this day.",
+      emptyState: "Nothing framed yet.",
       framedLabel: formatFramedLabel(confirmedAnalysis.loggedSeconds, selectedDate),
       hapticsEnabled,
       entries: entries.map((entry) => serializeCalendarEntry(
@@ -374,7 +373,9 @@ function buildCalendarEntries(
   const reviewEntries: NativeCalendarEntry[] = [];
 
   for (const item of data.reviewItems ?? []) {
-    if (!isOpenReviewItem(item) || !isCalendarPreviewReviewItem(item)) continue;
+    // UIA-060: every open suggestion with a time window, as Today's ribbon and the web Calendar
+    // show them (hatched in the Review lane), not only commutes.
+    if (!isOpenReviewItem(item)) continue;
     const draft = buildReviewItemDraftEntry(item, data.categories, now);
     if (!draft) continue;
     const entry: NativeCalendarEntry = {
