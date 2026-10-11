@@ -49,21 +49,21 @@ describe("Review sync presentation", () => {
     }))).toBe("1 change saved on this iPhone · sign in to send");
     expect(reviewSyncStatusCopy(diagnostics({
       needsAttentionCount: 1
-    }))).toBe("1 change didn't save");
+    }))).toBe("1 change needs checking");
     expect(reviewSyncStatusCopy(diagnostics({
       needsAttentionCount: 2,
       waitingCount: 1
-    }))).toBe("2 changes didn't save · 1 still sending");
+    }))).toBe("2 changes need checking · 1 still sending");
     // Work that needs a sign-in is not "still sending".
     expect(reviewSyncStatusCopy(diagnostics({
       needsAttentionCount: 1,
       authenticationRequiredCount: 1,
       waitingCount: 1
-    }))).toBe("1 change didn't save · 1 needs you to sign in");
+    }))).toBe("1 change needs checking · 1 needs you to sign in");
     expect(reviewSyncStatusCopy(diagnostics({
       needsAttentionCount: 1,
       authenticationRequiredCount: 1,
       waitingCount: 3
-    }))).toBe("1 change didn't save · 1 needs you to sign in · 2 still sending");
+    }))).toBe("1 change needs checking · 1 needs you to sign in · 2 still sending");
   });
 });

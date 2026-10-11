@@ -2286,7 +2286,7 @@ export default function ReviewScreen() {
 
 /**
  * Review's sync line as the Settings status row (UIA-023): a status dot, one short sentence and,
- * when something didn't save, "Fix" with a chevron to Sync help.
+ * when something needs checking, "Fix" with a chevron to Sync help.
  */
 function ReviewSyncStatus({
   diagnostics,

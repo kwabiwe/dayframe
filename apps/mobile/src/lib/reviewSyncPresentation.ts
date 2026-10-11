@@ -2,10 +2,11 @@ import type { ReviewSyncDiagnostics } from "./reviewSyncStore";
 
 export function reviewSyncStatusCopy(diagnostics: ReviewSyncDiagnostics) {
   if (diagnostics.needsAttentionCount > 0) {
-    // Outcome words (UIA-023): what happened, not queue state.
+    // Plain words (UIA-023), and only what is known: an attention item may be a refusal or a
+    // delivery whose outcome Dayframe couldn't confirm, so it "needs checking", never "didn't save".
     const issueCopy = `${diagnostics.needsAttentionCount} ${
-      diagnostics.needsAttentionCount === 1 ? "change" : "changes"
-    } didn't save`;
+      diagnostics.needsAttentionCount === 1 ? "change needs" : "changes need"
+    } checking`;
     // Changes that need a sign-in aren't sending on their own: they get their own words.
     const signIn = diagnostics.authenticationRequiredCount;
     const sending = Math.max(0, diagnostics.waitingCount - signIn);

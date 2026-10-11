@@ -38,7 +38,9 @@ describe("time-entry sheet historical Suggestions contract", () => {
     expect(surface).toContain("borderRadius: 20");
     expect(surface).toContain('overflow: "hidden"');
     expect(surface).not.toContain("borderWidth");
-    expect(themeSource).toMatch(/historicalSuggestionsHeader:\s*\{[\s\S]*?backgroundColor: theme\.surfaceMuted/);
+    const header = themeSource.slice(themeSource.indexOf("historicalSuggestionsHeader: {"), themeSource.indexOf("},", themeSource.indexOf("historicalSuggestionsHeader: {")));
+    expect(header).toContain("minHeight: 44");
+    expect(header).not.toContain("backgroundColor");
     expect(themeSource).toMatch(/historicalSuggestionsList:\s*\{[\s\S]*?backgroundColor: "transparent"[\s\S]*?flexShrink: 1[\s\S]*?minHeight: 0/);
     expect(themeSource).not.toContain("historicalSuggestionsBackground");
     expect(themeSource).toMatch(/activeEditBodyKeyboard:\s*\{[\s\S]*?flex: 1[\s\S]*?minHeight: 0/);
