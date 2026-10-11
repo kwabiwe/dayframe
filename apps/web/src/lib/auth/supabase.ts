@@ -1,10 +1,11 @@
 import type pg from "pg";
-import { createClient } from "@supabase/supabase-js";
+import { createClient, isAuthRetryableFetchError, type User as SupabaseUser } from "@supabase/supabase-js";
 import {
   LoginInputSchema,
   SignupInputSchema,
-  createSession,
+  createSessionInTransaction,
   databaseNow,
+  endSignInsAfterPasswordChange,
   normalizeEmail,
   seedDefaultWorkspaceData,
   toAuthPayload,
@@ -42,6 +43,8 @@ export async function signupSupabaseAccount(
   const name = parsed.name?.trim() || email.split("@")[0] || "Dayframe user";
   const workspaceName = parsed.workspaceName?.trim() || "My Dayframe";
   const supabase = createSupabaseAuthClient();
+  // Taken before the account's password is set: a reset since then refuses this sign-in too.
+  const authenticatedAt = await databaseNow();
   const { data, error } = await supabase.auth.signUp({
     email,
     password: parsed.password,
@@ -67,7 +70,7 @@ export async function signupSupabaseAccount(
     };
   }
 
-  return createProviderAppSession(account.user, account.workspace, userAgent);
+  return createProviderAppSession(account.user, account.workspace, userAgent, authenticatedAt);
 }
 
 export async function loginSupabaseAccount(input: unknown, userAgent?: string | null): Promise<AuthPayload> {
@@ -84,13 +87,7 @@ export async function loginSupabaseAccount(input: unknown, userAgent?: string | 
   if (error) throw new AuthError(error.message, authStatus(error.status));
   if (!data.user?.id) throw new AuthError("Supabase did not return a user.", 502);
 
-  const metadata = data.user.user_metadata ?? {};
-  const account = await ensureDayframeAccountForProviderUser({
-    id: data.user.id,
-    email: data.user.email ?? email,
-    name: stringMetadata(metadata.name) ?? email.split("@")[0] ?? "Dayframe user",
-    workspaceName: stringMetadata(metadata.workspace_name) ?? "My Dayframe"
-  });
+  const account = await ensureDayframeAccountForProviderUser(providerIdentity(data.user, email));
 
   return createProviderAppSession(account.user, account.workspace, userAgent, authenticatedAt);
 }
@@ -132,13 +129,20 @@ export async function completeSupabasePasswordReset(input: { accessToken: string
     access_token: input.accessToken,
     refresh_token: input.refreshToken
   });
+  if (sessionError && (isAuthRetryableFetchError(sessionError) || (sessionError.status ?? 0) >= 500)) {
+    // The sign-in service didn't answer: nothing has changed and the same link can be tried again.
+    throw new AuthError("Dayframe couldn't reach the sign-in service. Try again in a moment.", 503);
+  }
   if (sessionError || !data.user?.id) {
     throw new AuthError("This reset link has expired or was already used. Ask for a new one.", 400);
   }
   const userId = data.user.id;
+  // The account needs its Dayframe row before the password changes, so the reset's fence has
+  // somewhere to live (a first sign-in would create the same row).
+  await ensureDayframeAccountForProviderUser(providerIdentity(data.user, data.user.email ?? ""));
   // Dayframe sign-ins end before the password changes: if this fails, nothing has changed and the
   // same link can be used again.
-  await endDayframeSignIns(userId);
+  await endSignInsAfterPasswordChange(userId);
   const { error: updateError } = await supabase.auth.updateUser({ password: input.password });
   // A retry after a later step failed: the password is already this one; carry on.
   if (updateError && (updateError as { code?: string }).code !== "same_password") {
@@ -146,7 +150,7 @@ export async function completeSupabasePasswordReset(input: { accessToken: string
   }
   // Again after the change: no sign-in that checked the old password can start a session now
   // (createSession refuses one authenticated before this), and any made meanwhile are revoked.
-  await endDayframeSignIns(userId);
+  await endSignInsAfterPasswordChange(userId);
   // The recovery session itself must end too, or its tokens could change the password again. A
   // failure is reported so the page can try again with the same link (each step above repeats safely).
   const { error: signOutError } = await supabase.auth.signOut({ scope: "global" })
@@ -156,23 +160,16 @@ export async function completeSupabasePasswordReset(input: { accessToken: string
   }
 }
 
-/**
- * Ends every Dayframe sign-in for a user and refuses any sign-in authenticated before now, in one
- * transaction: the user row's lock orders it against createSession.
- */
-async function endDayframeSignIns(userId: string) {
-  const client = await pool.connect();
-  try {
-    await client.query("begin");
-    await client.query("update users set sessions_valid_after = now() where id = $1", [userId]);
-    await client.query("update auth_sessions set revoked_at = now() where user_id = $1 and revoked_at is null", [userId]);
-    await client.query("commit");
-  } catch (error) {
-    await client.query("rollback").catch(() => undefined);
-    throw error;
-  } finally {
-    client.release();
-  }
+/** The Dayframe identity for a Supabase user, as a sign-in provisions it. */
+function providerIdentity(user: SupabaseUser, fallbackEmail: string): SupabaseUserIdentity {
+  const metadata = user.user_metadata ?? {};
+  const email = user.email ?? fallbackEmail;
+  return {
+    id: user.id,
+    email,
+    name: stringMetadata(metadata.name) ?? email.split("@")[0] ?? "Dayframe user",
+    workspaceName: stringMetadata(metadata.workspace_name) ?? "My Dayframe"
+  };
 }
 
 export function getSupabaseProviderEnvStatus() {
@@ -192,16 +189,11 @@ export function getSupabaseProviderEnvStatus() {
 async function createProviderAppSession(
   user: UserRow,
   workspace: WorkspaceRow,
-  userAgent?: string | null,
-  authenticatedAt?: Date
+  userAgent: string | null | undefined,
+  authenticatedAt: Date
 ) {
-  const client = await pool.connect();
-  try {
-    const session = await createSession(client, user.id, workspace.id, userAgent, authenticatedAt);
-    return toAuthPayload(session.token, session.expiresAt, user, workspace);
-  } finally {
-    client.release();
-  }
+  const session = await createSessionInTransaction(user.id, workspace.id, userAgent, authenticatedAt);
+  return toAuthPayload(session.token, session.expiresAt, user, workspace);
 }
 
 async function ensureDayframeAccountForProviderUser(identity: SupabaseUserIdentity) {

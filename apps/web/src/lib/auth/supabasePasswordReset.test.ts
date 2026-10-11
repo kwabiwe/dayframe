@@ -11,16 +11,28 @@ const mocks = vi.hoisted(() => ({
   steps: [] as string[]
 }));
 
-vi.mock("@supabase/supabase-js", () => ({ createClient: () => ({ auth: mocks.auth }) }));
-// endDayframeSignIns runs one transaction on a pooled client; record its statements in order.
-const client = {
-  query: vi.fn(async (sql: string) => {
-    if (/update users set sessions_valid_after/.test(sql)) mocks.steps.push("valid-after");
+vi.mock("@supabase/supabase-js", () => ({
+  createClient: () => ({ auth: mocks.auth }),
+  isAuthRetryableFetchError: (error: unknown) => (error as { name?: string } | null)?.name === "AuthRetryableFetchError"
+}));
+// Provisioning and endSignInsAfterPasswordChange run transactions on a pooled client; record the
+// statements that matter, in order. `userRows` is what the user row's lock finds.
+let userRows = 1;
+async function answer(sql: string) {
+  {
+    if (/insert into users/.test(sql)) {
+      mocks.steps.push("provision");
+      return { rows: [{ id: "00000000-0000-4000-8000-000000000001", email: "a@example.invalid", name: "A", passwordHash: null }], rowCount: 1 };
+    }
+    if (/from workspaces/.test(sql)) return { rows: [{ id: "w-1", name: "My Dayframe" }], rowCount: 1 };
+    if (/select id from users where id = \$1 for update/.test(sql)) return { rows: [], rowCount: userRows };
+    if (/insert into user_session_fences/.test(sql)) mocks.steps.push("fence");
     if (/update auth_sessions set revoked_at/.test(sql)) mocks.steps.push("revoke");
+    if (/where email = \$1 and id <> \$2/.test(sql)) return { rows: [], rowCount: 0 };
     return { rows: [], rowCount: 1 };
-  }),
-  release: vi.fn()
-};
+  }
+}
+const client = { query: vi.fn(answer), release: vi.fn() };
 vi.mock("@/lib/db", () => ({ pool: { query: mocks.query, connect: vi.fn(async () => client) } }));
 
 const { completeSupabasePasswordReset, requestSupabasePasswordReset } = await import("./supabase");
@@ -31,6 +43,8 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  userRows = 1;
+  client.query.mockImplementation(answer);
   vi.unstubAllEnvs();
   vi.clearAllMocks();
 });
@@ -54,14 +68,17 @@ describe("Supabase password reset (UIA-317)", () => {
     mocks.auth.updateUser.mockImplementationOnce(async () => { mocks.steps.push("password"); return { error: null }; });
     await completeSupabasePasswordReset({ accessToken: "access", refreshToken: "refresh", password: "a new password" });
     expect(mocks.auth.setSession).toHaveBeenCalledWith({ access_token: "access", refresh_token: "refresh" });
-    expect(mocks.steps).toEqual(["valid-after", "revoke", "password", "valid-after", "revoke"]);
+    expect(mocks.steps).toEqual(["provision", "fence", "revoke", "password", "fence", "revoke"]);
     expect(client.query).toHaveBeenCalledWith("begin");
     expect(client.query).toHaveBeenCalledWith("commit");
     expect(mocks.auth.signOut).toHaveBeenCalledWith({ scope: "global" });
   });
 
   it("changes nothing when ending the sign-ins fails first, so the link can be used again (Codex r1)", async () => {
-    client.query.mockRejectedValueOnce(new Error("db down"));
+    client.query.mockImplementation(async (sql: string) => {
+      if (/user_session_fences/.test(sql)) throw new Error("db down");
+      return { rows: [{ id: "00000000-0000-4000-8000-000000000001", name: "My Dayframe" }], rowCount: 1 };
+    });
     await expect(completeSupabasePasswordReset({ accessToken: "a", refreshToken: "r", password: "a new password" })).rejects.toThrow();
     expect(mocks.auth.updateUser).not.toHaveBeenCalled();
   });
@@ -84,5 +101,23 @@ describe("Supabase password reset (UIA-317)", () => {
       .rejects.toMatchObject({ status: 400 });
     expect(mocks.auth.updateUser).not.toHaveBeenCalled();
     expect(client.query).not.toHaveBeenCalled();
+  });
+
+  it("fails closed before the password changes when the account has no Dayframe row to fence (Codex r3)", async () => {
+    userRows = 0;
+    await expect(completeSupabasePasswordReset({ accessToken: "a", refreshToken: "r", password: "a new password" }))
+      .rejects.toMatchObject({ status: 503 });
+    expect(mocks.auth.updateUser).not.toHaveBeenCalled();
+  });
+
+  it("keeps the link usable when the sign-in service is briefly down (Codex r3)", async () => {
+    const retryable = Object.assign(new Error("fetch failed"), { name: "AuthRetryableFetchError", status: 0 });
+    mocks.auth.setSession.mockResolvedValueOnce({ data: { user: null }, error: retryable } as never);
+    await expect(completeSupabasePasswordReset({ accessToken: "a", refreshToken: "r", password: "a new password" }))
+      .rejects.toMatchObject({ status: 503 });
+    mocks.auth.setSession.mockResolvedValueOnce({ data: { user: null }, error: { message: "unavailable", status: 503 } } as never);
+    await expect(completeSupabasePasswordReset({ accessToken: "a", refreshToken: "r", password: "a new password" }))
+      .rejects.toMatchObject({ status: 503 });
+    expect(mocks.auth.updateUser).not.toHaveBeenCalled();
   });
 });
