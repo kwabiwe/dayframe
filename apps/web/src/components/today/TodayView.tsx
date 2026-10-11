@@ -1,6 +1,6 @@
-import { formatDuration as formatSharedDuration } from "@dayframe/shared";
 "use client";
 
+import { formatDuration as formatSharedDuration } from "@dayframe/shared";
 import Link from "next/link";
 import type { CSSProperties, KeyboardEvent as ReactKeyboardEvent, PointerEvent as ReactPointerEvent } from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
