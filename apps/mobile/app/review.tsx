@@ -2346,7 +2346,8 @@ export function reviewDeckCardForItem(
     eventSource: item.eventSource,
     eventType: item.eventType,
     isLocation: isLocationReviewItem(item),
-    isTimeAway: isTimeAwayReviewItem(item)
+    isTimeAway: isTimeAwayReviewItem(item),
+    workoutType: item.rawPayload?.workoutType
   };
   const confidence = reviewConfidencePresentation(item.confidence);
   const locationReason = locationReviewReasonCopy(item, context.overlapCount);

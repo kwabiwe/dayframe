@@ -159,6 +159,18 @@ export const ReviewDeckPictureView = memo(function ReviewDeckPictureView({
           <Circle cx={70} cy={160} fill={color} r={9} />
           <Circle cx={70} cy={160} fill={hole} r={4} />
         </>
+      ) : picture === "exercise" ? (
+        <>
+          {/* A workout without a route (UIA-070): the session as a block with a dumbbell. */}
+          <Rect fill={color} fillOpacity={0.16} height={110} rx={22} stroke={color} strokeWidth={2} width={180} x={90} y={50} />
+          <G fill={color}>
+            <Rect height={44} rx={6} width={16} x={130} y={83} />
+            <Rect height={60} rx={7} width={18} x={148} y={75} />
+            <Rect height={60} rx={7} width={18} x={194} y={75} />
+            <Rect height={44} rx={6} width={16} x={214} y={83} />
+            <Rect height={12} rx={6} width={30} x={166} y={99} />
+          </G>
+        </>
       ) : picture === "sleep" ? (
         <>
           {SLEEP_BARS.map((bar, index) => (
