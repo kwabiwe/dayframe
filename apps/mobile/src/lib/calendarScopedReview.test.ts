@@ -4,11 +4,24 @@ vi.mock("./reviewSyncStore", () => ({
   mobileReviewItemFromPresentation: (record: { reviewItemId: string; title: string }) => ({ id: record.reviewItemId, title: record.title, status: "open" })
 }));
 
-const { BOOTSTRAP_REVIEW_ITEM_CAP, bootstrapReviewListMayBeIncomplete, calendarReviewItems, scopedOpenReviewItems } = await import("./calendarScopedReview");
+const { BOOTSTRAP_REVIEW_ITEM_CAP, bootstrapReviewListMayBeIncomplete, calendarReviewItems, newestCachedReviewWindow, scopedOpenReviewItems } = await import("./calendarScopedReview");
 
 const record = (id: string, status = "open", canonicalEntryIds: string[] = []) => ({ kind: "review", reviewItemId: id, title: id, status, canonicalEntryIds });
 
 describe("Calendar's scoped Review items (UIA-060)", () => {
+  it("keeps the day before's window until today's is cached: midnight or offline (Codex r11)", async () => {
+    const cached = new Map([["2026-10-24", "window ending 24 Oct"]]);
+    const read = vi.fn(async (dayKey: string) => cached.get(dayKey) ?? null);
+    expect(await newestCachedReviewWindow("2026-10-25", read)).toBe("window ending 24 Oct");
+    expect(read.mock.calls.map(([dayKey]) => dayKey)).toEqual(["2026-10-25", "2026-10-24"]);
+    cached.set("2026-10-25", "window ending 25 Oct");
+    expect(await newestCachedReviewWindow("2026-10-25", read)).toBe("window ending 25 Oct");
+    // Across a month and year boundary.
+    cached.set("2026-12-31", "window ending 31 Dec");
+    expect(await newestCachedReviewWindow("2027-01-01", read)).toBe("window ending 31 Dec");
+    expect(await newestCachedReviewWindow("2026-03-01", async () => null)).toBeNull();
+  });
+
   it("takes open suggestions from the scoped snapshot, less ones decided on this iPhone", () => {
     const snapshot = {
       response: { records: [record("a"), record("b", "accepted"), record("c")], lookup: { reviewItems: [record("d")] } },

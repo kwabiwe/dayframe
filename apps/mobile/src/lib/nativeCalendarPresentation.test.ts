@@ -609,6 +609,30 @@ describe("native Calendar Blocks presentation", () => {
     });
   });
 
+  it("draws a crowd over its drawn (wall-clock) span across a clock change (Codex r11)", () => {
+    const previousTz = process.env.TZ;
+    process.env.TZ = "Europe/London";
+    try {
+      // 00:45Z is 01:45 BST; 01:00Z and 01:05Z are 01:00 and 01:05 GMT. Drawn: 01:00 to 01:50.
+      const suggestion = (id: string, start: string, stop: string) => entry({ id, reviewStatus: "needs_review", startedAt: start, stoppedAt: stop });
+      const state = build(Date.parse("2026-10-25T20:00:00Z"), bootstrap([
+        suggestion("a", "2026-10-25T00:45:00.000Z", "2026-10-25T00:50:00.000Z"),
+        suggestion("b", "2026-10-25T01:00:00.000Z", "2026-10-25T01:05:00.000Z"),
+        suggestion("c", "2026-10-25T01:05:00.000Z", "2026-10-25T01:10:00.000Z")
+      ]), undefined, "2026-10-25");
+      const crowd = state.model.entries.filter((candidate) => candidate.isReview);
+      expect(crowd).toHaveLength(1);
+      expect(crowd[0].stoppedAtMs).toBeGreaterThan(crowd[0].startedAtMs);
+      const clock = (ms: number) => new Date(ms).toTimeString().slice(0, 5);
+      expect(clock(crowd[0].startedAtMs)).toBe("01:00");
+      expect(clock(crowd[0].stoppedAtMs!)).toBe("01:50");
+      expect(crowd[0].accessibilityLabel).toContain("01:00 to 01:50");
+    } finally {
+      if (previousTz === undefined) delete process.env.TZ;
+      else process.env.TZ = previousTz;
+    }
+  });
+
   it("reserves Review targets by the wall-clock time iOS draws, across a clock change (Codex r10)", () => {
     const previousTz = process.env.TZ;
     process.env.TZ = "Europe/London";

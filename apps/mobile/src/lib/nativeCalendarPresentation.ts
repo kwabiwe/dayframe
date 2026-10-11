@@ -542,7 +542,11 @@ export function collapseCrowdedReviewLane(
       const envelope = Number.isFinite(dayStartMs) && Number.isFinite(dayEndMs)
         ? reviewTargetEnvelope(realStart, realEnd, dayStartMs, dayEndMs)
         : { start: realStart, end: Math.max(realEnd, realStart + REVIEW_LANE_TARGET_MS) };
-      return { entry, realStart, start: envelope.start, realEnd, end: envelope.end };
+      // Where iOS draws it (wall clock), for the crowd's bounds on a clock-change day.
+      const bounded = Number.isFinite(dayStartMs) && Number.isFinite(dayEndMs);
+      const drawnStart = bounded ? wallClockOffsetMs(realStart, dayStartMs, dayEndMs) : realStart;
+      const drawnEnd = bounded ? wallClockOffsetMs(realEnd, dayStartMs, dayEndMs) : realEnd;
+      return { entry, realStart, start: envelope.start, realEnd, end: envelope.end, drawnStart, drawnEnd };
     })
     .filter((item) => Number.isFinite(item.start) && Number.isFinite(item.end))
     .sort((left, right) => left.start - right.start || left.end - right.end);
@@ -554,11 +558,17 @@ export function collapseCrowdedReviewLane(
     if (maxConcurrent(crowd) <= REVIEW_LANE_MAX_LANES) {
       result.push(...crowd.map((item) => item.entry));
     } else {
-      // The crowd opens its earliest suggestion by real start time.
+      // The crowd opens its earliest suggestion by real start time, and is drawn from the earliest
+      // drawn start to the latest drawn end. On a clock-change day the earliest drawn start can be a
+      // later moment than the latest drawn end, so the end then keeps the drawn length instead.
+      const first = crowd.reduce((best, item) => item.drawnStart < best.drawnStart ? item : best);
+      const last = crowd.reduce((best, item) => item.drawnEnd > best.drawnEnd ? item : best);
+      const startMs = first.realStart;
+      const endMs = last.realEnd > startMs ? last.realEnd : startMs + (last.drawnEnd - first.drawnStart);
       result.push(reviewCrowdEntry(
         [...crowd].sort((left, right) => left.realStart - right.realStart).map((item) => item.entry),
-        Math.min(...crowd.map((item) => item.realStart)),
-        Math.max(...crowd.map((item) => item.realEnd))
+        startMs,
+        endMs
       ));
     }
     crowd = [];

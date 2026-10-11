@@ -52,7 +52,7 @@ import { applySavedActivity, subscribeSavedActivity } from "@/lib/settingsActivi
 import { layoutQuickStartMosaic, rankQuickStartActivities, weeklySecondsByActivity } from "@/lib/quickStartMosaic";
 import { TodayReviewPresentationProvider } from "./today/TodayReviewPresentationContext";
 import { currentTimeZone, localDayKey, reviewOwner, windowScopeFor } from "./today/useTodayReviewPresentation";
-import { bootstrapReviewListMayBeIncomplete, calendarReviewItems, scopedOpenReviewItems } from "@/lib/calendarScopedReview";
+import { bootstrapReviewListMayBeIncomplete, calendarReviewItems, newestCachedReviewWindow, scopedOpenReviewItems } from "@/lib/calendarScopedReview";
 import { readReviewPresentationSnapshot, readSuppressedReviewItemIds, subscribeReviewSync } from "@/lib/reviewSyncStore";
 import { AccountAvatarButton } from "./today/AccountAvatarButton";
 import { TodayGoalFrame } from "./today/TodayGoalFrame";
@@ -1629,7 +1629,9 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
     const read = () => {
       const mine = ++sequence;
       Promise.all([
-        readReviewPresentationSnapshot({ owner: scopedOwner, response: { scope: windowScopeFor(scopedDayKey, timeZone) } }),
+        // Today's window, or the day before's until Today caches the new one (midnight, offline).
+        newestCachedReviewWindow(scopedDayKey, (dayKey) =>
+          readReviewPresentationSnapshot({ owner: scopedOwner, response: { scope: windowScopeFor(dayKey, timeZone) } })),
         readSuppressedReviewItemIds(scopedOwner)
       ])
         .then(([snapshot, suppressed]) => {

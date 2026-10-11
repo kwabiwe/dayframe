@@ -55,6 +55,23 @@ export function bootstrapReviewListMayBeIncomplete(bootstrap: { reviewItems?: re
   return listed >= BOOTSTRAP_REVIEW_ITEM_CAP || (bootstrap.stats?.reviewCount ?? 0) > listed;
 }
 
+/**
+ * The newest cached Review window for this owner: today's, else the day before's. Just after
+ * midnight (or offline) Today may not have cached the new day's window yet, and the 60-day window
+ * ending yesterday covers the same older days, so the Calendar keeps its suggestions meanwhile.
+ */
+export async function newestCachedReviewWindow<T>(
+  dayKey: string,
+  read: (dayKey: string) => Promise<T | null>
+): Promise<T | null> {
+  const today = await read(dayKey);
+  if (today) return today;
+  const [year, month, day] = dayKey.split("-").map(Number);
+  const previous = new Date(year, month - 1, day - 1);
+  const previousKey = `${previous.getFullYear()}-${String(previous.getMonth() + 1).padStart(2, "0")}-${String(previous.getDate()).padStart(2, "0")}`;
+  return read(previousKey);
+}
+
 /** The bootstrap's items, plus scoped ones it lacks while it may be incomplete (the bootstrap wins). */
 export function calendarReviewItems(
   bootstrapItems: readonly MobileReviewItem[],
