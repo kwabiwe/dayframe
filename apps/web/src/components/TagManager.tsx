@@ -2,7 +2,7 @@
 
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { Pencil, Plus, Save, Tag, Trash2, X } from "lucide-react";
+import { Pencil, Plus, Tag, Trash2 } from "lucide-react";
 import { DestructiveConfirmationDialog } from "@/components/DestructiveConfirmationDialog";
 import { clientFetch } from "@/lib/client-auth-fetch";
 import type { TagRow } from "@/lib/queries";
@@ -32,14 +32,17 @@ export function TagManager({ tags }: { tags: TagRow[] }) {
     }
   }
 
+  /** True once created; a refused name stays in the field for another try. */
   async function createTag(formData: FormData) {
     const name = String(formData.get("name") ?? "").trim();
-    if (!name) return;
+    if (!name) return false;
     try {
       await mutate("/api/tags", "POST", name);
       refresh();
+      return true;
     } catch (nextError) {
       setError(nextError instanceof Error ? nextError.message : "Unable to create this tag.");
+      return false;
     }
   }
 
@@ -74,84 +77,73 @@ export function TagManager({ tags }: { tags: TagRow[] }) {
   }
 
   return (
-    <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_360px]">
-      <section className="industrial-panel overflow-hidden" aria-busy={isPending}>
-        <div className="border-b border-[var(--line)] px-4 py-3">
-          <h2 className="text-lg font-semibold">Tags</h2>
-          <p className="mt-1 text-sm text-[var(--muted)]">
-            Optional context for tracked tasks. Activities remain the primary classification.
-          </p>
-        </div>
-        {tags.length === 0 ? (
-          <div className="px-4 py-8 text-center">
-            <Tag className="mx-auto text-[var(--muted)]" size={22} />
-            <p className="mt-2 text-sm text-[var(--muted)]">No tags yet. Type # in a task or create one here.</p>
-          </div>
-        ) : (
-          <div className="divide-y divide-[var(--line)]">
-            {tags.map((tag) => editingId === tag.id ? (
-              <form
-                action={(formData) => renameTag(tag, formData)}
-                className="grid gap-3 px-4 py-4 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-end"
-                key={tag.id}
-              >
-                <label className="text-sm">
-                  <span className="industrial-field-label">Name</span>
-                  <input className="industrial-field focus-ring" defaultValue={tag.name} name="name" required />
-                </label>
-                <div className="flex gap-2">
-                  <button className="industrial-button-primary focus-ring text-sm" disabled={isPending}>
-                    <Save size={15} /> Save
-                  </button>
-                  <button className="industrial-button focus-ring text-sm" onClick={() => setEditingId(null)} type="button">
-                    <X size={15} /> Cancel
-                  </button>
-                </div>
-              </form>
-            ) : (
-              <div className="motion-row flex flex-col gap-3 px-4 py-4 sm:flex-row sm:items-center sm:justify-between" id={`tag-${tag.id}`} key={tag.id}>
-                <div className="flex min-w-0 items-center gap-3">
-                  <Tag aria-hidden="true" className="shrink-0 text-[var(--muted)]" size={17} />
-                  <div className="min-w-0">
-                    <h3 className="truncate text-sm font-semibold">{tag.name}</h3>
-                    <p className="text-xs text-[var(--muted)]">
-                      #{tag.normalizedName} · {tag.usageCount} {tag.usageCount === 1 ? "entry" : "entries"}
-                    </p>
-                  </div>
-                </div>
-                <div className="flex gap-2">
-                  <button className="industrial-button focus-ring text-sm" onClick={() => setEditingId(tag.id)} type="button">
-                    <Pencil size={15} /> Rename
-                  </button>
-                  <button className="industrial-button-danger focus-ring text-sm" onClick={() => setPendingDelete(tag)} type="button">
-                    <Trash2 size={15} /> Delete
-                  </button>
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
-        {isPending ? <p className="px-4 py-3 text-sm text-[var(--muted)]" role="status">Updating tags…</p> : null}
-      </section>
-
-      <form action={createTag} className="fill-inset-surface space-y-4 p-4">
-        <div>
-          <h2 className="text-base font-semibold">New tag</h2>
-          <p className="mt-1 text-sm text-[var(--muted)]">Names use letters, numbers, spaces, hyphens, or underscores.</p>
-        </div>
-        <label className="block text-sm">
-          <span className="industrial-field-label">Name</span>
-          <input className="industrial-field focus-ring" maxLength={48} name="name" placeholder="Planning" required />
+    <div className="df-tags">
+      <form
+        className="df-card df-tag-new"
+        onSubmit={(event) => {
+          event.preventDefault();
+          const form = event.currentTarget;
+          void createTag(new FormData(form)).then((created) => {
+            if (created) form.reset();
+          });
+        }}
+      >
+        <label className="df-tag-new-field">
+          <span className="df-srow-ic" aria-hidden="true"><Tag size={17} /></span>
+          <span className="sr-only">New tag name</span>
+          <input maxLength={48} name="name" placeholder="New tag, like Planning" required />
         </label>
-        {error && !pendingDelete ? <p className="swiss-inline-error" role="alert">{error}</p> : null}
-        <button className="industrial-button-primary focus-ring w-full text-sm" disabled={isPending} type="submit">
-          <Plus size={16} /> Create tag
+        <button className="df-rbtn df-rbtn--sm" disabled={isPending} type="submit">
+          <Plus size={15} aria-hidden="true" /> Create tag
         </button>
       </form>
+      {error && !pendingDelete ? <p className="df-review-error" role="alert"><span>{error}</span></p> : null}
+      <p className="df-faint df-tags-note">Tags add context to blocks; activities stay the main grouping. Names use letters, numbers, spaces, hyphens or underscores.</p>
+
+      {tags.length === 0 ? (
+        <p className="df-muted">No tags yet. Type # in the command bar or create one here.</p>
+      ) : (
+        <ul className="df-card df-simple-list" aria-busy={isPending}>
+          {tags.map((tag) => editingId === tag.id ? (
+            <li className="df-srow df-srow--edit" key={tag.id}>
+              <span className="df-srow-ic" aria-hidden="true"><Tag size={17} /></span>
+              <form
+                className="df-tag-rename"
+                onSubmit={(event) => {
+                  event.preventDefault();
+                  void renameTag(tag, new FormData(event.currentTarget));
+                }}
+              >
+                <label className="sr-only" htmlFor={`tag-name-${tag.id}`}>Name</label>
+                <input autoFocus defaultValue={tag.name} id={`tag-name-${tag.id}`} maxLength={48} name="name" required />
+                <button className="df-rbtn df-rbtn--sm df-rbtn--live" disabled={isPending} type="submit">Save</button>
+                <button className="df-rbtn df-rbtn--sm" onClick={() => setEditingId(null)} type="button">Cancel</button>
+              </form>
+            </li>
+          ) : (
+            <li className="df-srow df-srow--tag" id={`tag-${tag.id}`} key={tag.id}>
+              <span className="df-srow-ic" aria-hidden="true"><Tag size={17} /></span>
+              <span className="df-srow-text">
+                <b>#{tag.name}</b>
+                <small>{tag.usageCount} {tag.usageCount === 1 ? "block" : "blocks"}</small>
+              </span>
+              <span className="df-srow-acts">
+                <button aria-label={`Rename ${tag.name}`} className="df-rbtn df-rbtn--sm df-rbtn--ghost" onClick={() => setEditingId(tag.id)} type="button">
+                  <Pencil size={15} aria-hidden="true" /> Rename
+                </button>
+                <button aria-label={`Delete ${tag.name}`} className="df-icon-action df-icon-action--44" onClick={() => setPendingDelete(tag)} type="button">
+                  <Trash2 size={16} aria-hidden="true" />
+                </button>
+              </span>
+            </li>
+          ))}
+        </ul>
+      )}
+      {isPending ? <p className="df-faint" role="status">Updating tags…</p> : null}
 
       {pendingDelete ? (
         <DestructiveConfirmationDialog
-          body={`“${pendingDelete.name}” will be detached from ${pendingDelete.usageCount} ${pendingDelete.usageCount === 1 ? "entry" : "entries"}. The time entries will not be deleted.`}
+          body={`#${pendingDelete.name} will be removed from ${pendingDelete.usageCount} ${pendingDelete.usageCount === 1 ? "block" : "blocks"}. The blocks stay.`}
           dialogId="delete-tag"
           error={error}
           isBusy={deleting || isPending}
