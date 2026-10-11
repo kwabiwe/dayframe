@@ -213,9 +213,13 @@ export function createHealthMappingWriter<A>(deps: HealthMappingWriterDeps<A>) {
     }
   }
 
+  // Every type's mapping lives in one stored object that a write reads and replaces whole, so all
+  // writes (any type) run one at a time; per type they keep their order on this one chain.
+  let storageChain: Promise<void> = Promise.resolve();
   function enqueue(type: HealthImportPreferenceKey, entry: Entry<A>) {
     queued(type).push(entry);
-    const tail = (tails.get(type) ?? Promise.resolve()).then(() => run(type, entry));
+    const tail = storageChain.then(() => run(type, entry));
+    storageChain = tail.catch(() => undefined);
     tails.set(type, tail);
     void tail.finally(() => {
       if (tails.get(type) === tail) tails.delete(type);

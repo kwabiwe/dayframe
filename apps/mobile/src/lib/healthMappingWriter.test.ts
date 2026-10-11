@@ -198,15 +198,20 @@ describe("Health mapping writer (UIA-085)", () => {
     expect(sheetDraft).toBe("Newer");
   });
 
-  it("types queue separately", async () => {
+  it("writes every type on one chain (they share one stored object), showing each change at once", async () => {
     const t = setup({});
+    await t.writer.refresh();
     t.hold();
     void t.writer.patch("walking", { categoryId: "cat-1" });
     await tick();
-    await t.writer.patch("running", { categoryId: "cat-2" });
-    expect(t.stored().running).toEqual({ categoryId: "cat-2" });
+    const running = t.writer.patch("running", { categoryId: "cat-2" });
+    await tick();
+    expect(t.lastShown().running).toEqual({ categoryId: "cat-2" });
+    expect(t.writes.map((w) => w.type)).toEqual(["walking"]);
     t.holds[0].release();
-    await t.writer.idle("walking");
+    expect(await running).toBe(true);
+    expect(t.writes.map((w) => w.type)).toEqual(["walking", "running"]);
+    expect(t.stored()).toEqual({ walking: { categoryId: "cat-1" }, running: { categoryId: "cat-2" } });
   });
 
   it("Codex r6 (1): a queued Name is shown straight away, so a reopened sheet starts from it", async () => {
@@ -434,5 +439,37 @@ describe("Health mapping writer (UIA-085)", () => {
     expect(await second).toBe(true);
     await t.writer.idle("walking");
     expect(t.stored().walking).toBeUndefined();
+  });
+
+  it("Codex r12: writes for different types never overwrite each other's saved Names", async () => {
+    // Storage like the real one: a write reads the whole object, waits, then replaces it whole.
+    let stored: HealthAutoLogMappings = {};
+    const gates: Array<() => void> = [];
+    let holdNext = 0;
+    const writer = createHealthMappingWriter<string>({
+      readSaved: async () => stored,
+      write: async (type, mapping) => {
+        const snapshot = { ...stored };
+        if (holdNext > 0) {
+          holdNext -= 1;
+          await new Promise<void>((release) => gates.push(release));
+        }
+        stored = { ...snapshot, [type]: mapping };
+        return stored;
+      },
+      capture: async () => "A",
+      stillCurrent: async () => true,
+      onAccountChange: () => () => undefined
+    });
+    holdNext = 1;
+    void writer.commitName("walking", "A");
+    await tick();
+    void writer.commitName("walking", "B");
+    const running = writer.commitName("running", "Run");
+    gates[0]();
+    await running;
+    await writer.idle("walking");
+    await writer.idle("running");
+    expect(stored).toEqual({ walking: { description: "B" }, running: { description: "Run" } });
   });
 });
