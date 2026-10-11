@@ -10,24 +10,20 @@ const rangeSource = source("./ReportRangeControls.tsx");
 const styles = source("../app/globals.css");
 
 describe("Reports accessibility and responsive contracts", () => {
-  it("exposes named multi-select listboxes, removable chips, expansion state and Clear all", () => {
-    expect(filtersSource).toContain('role="listbox"');
-    expect(filtersSource).toContain('aria-multiselectable="true"');
-    expect(filtersSource).toContain('role="option"');
-    expect(filtersSource).toContain("aria-selected={checked}");
-    expect(filtersSource).toContain('event.key !== "Enter"');
+  it("exposes the Filter dialog, toggle chips, removable applied chips and Clear all", () => {
+    expect(filtersSource).toContain('aria-haspopup="dialog"');
+    expect(filtersSource).toContain("<ModalDialog");
+    expect(filtersSource).toContain("aria-pressed={on}");
+    expect(filtersSource).toContain("<fieldset");
     expect(filtersSource).toContain("Remove ${chip.label} filter");
     expect(filtersSource).toContain("Clear all report filters");
-    expect(filtersSource).toContain("aria-expanded={moreOpen}");
+    expect(filtersSource).toContain("Description contains");
   });
 
-  it("keeps every filter surface out of report layout flow", () => {
-    expect(filtersSource).toContain("ui-floating-surface report-multi-select-list");
-    expect(filtersSource).toContain("ui-floating-surface report-more-filter-grid");
-    expect(filtersSource).toContain("closeOutside");
-    expect(filtersSource).toContain('event.key !== "Escape"');
-    expect(styles).toMatch(/\.report-multi-select-list \{[^}]*position: absolute;/s);
-    expect(styles).toMatch(/\.report-more-filter-grid \{[^}]*position: absolute;/s);
+  it("keeps every filter kind reachable from the dialog", () => {
+    for (const label of ['label="Activities"', 'label="Tags"', 'label="Places"', 'label="Sources"']) {
+      expect(filtersSource).toContain(label);
+    }
   });
 
   it("provides exact table alternatives and keyboard actions for every visual chart", () => {
