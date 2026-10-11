@@ -13,7 +13,7 @@ const theme = readFileSync(
 describe("running timer suggestion metadata", () => {
   it("renders every suggested tag and includes it in the accessible action name", () => {
     expect(overlay).toContain("suggestion.tagNames.map((tag) => `#${tag}`)");
-    expect(overlay).toContain("style={styles.taskSuggestionTags}");
+    expect(overlay).toContain("style={styles.historicalSuggestionMeta}");
     expect(overlay).toContain("tagLabel ? `with ${tagLabel}` : null");
   });
 
