@@ -9,7 +9,7 @@ const day = (date: number) => ({ key: `d${date}`, label: `Day ${date}`, start: a
 function report(overrides: Partial<ReportResult> = {}): ReportResult {
   const days = [5, 6, 7, 8, 9, 10, 11].map(day);
   return {
-    range: { preset: "this-week" },
+    range: { preset: "this-week", dayCount: 7 },
     timeCoveredSeconds: 9 * 3600,
     totalLoggedSeconds: 10 * 3600,
     previousPeriodCoveredSeconds: 8 * 3600,
@@ -40,10 +40,12 @@ describe("Reports top", () => {
   });
 
   it("draws a month as a Monday-first grid and says how to see the goal without one", () => {
-    const html = renderToStaticMarkup(<ReportsTop dailyGoalMinutes={null} report={report({ range: { preset: "this-month" } as ReportResult["range"] })} />);
+    const html = renderToStaticMarkup(<ReportsTop dailyGoalMinutes={null} report={report({ range: { preset: "this-month", dayCount: 7 } as ReportResult["range"] })} />);
     expect(html).toContain("The month in blocks");
     // 5 Oct 2026 is a Monday: no blank cells before it.
     expect(html).not.toContain("df-mday is-empty");
     expect(html).toContain("Set a daily goal in Settings to see it here.");
+    // The comparison is the same number of days just before, not the calendar month.
+    expect(html).toContain("vs the 7 days before");
   });
 });

@@ -97,3 +97,14 @@ export function isTodayKey(day: { start: string; end: string }, capturedNow: str
   const now = Date.parse(capturedNow);
   return Date.parse(day.start) <= now && now < Date.parse(day.end);
 }
+
+/**
+ * A block height as CSS that fits any stack height: the share of the stack (after its gaps) that
+ * the block takes at the reference height. Gaps stay fixed, so a stack drawn shorter than the
+ * reference (phones) still holds every kept block.
+ */
+export function stackHeightCss(height: number, keptCount: number, referenceHeight: number, gap: number) {
+  const gaps = gap * Math.max(0, keptCount - 1);
+  const share = height / Math.max(1, referenceHeight - gaps);
+  return `calc((100% - ${gaps}px) * ${Number(share.toFixed(5))})`;
+}

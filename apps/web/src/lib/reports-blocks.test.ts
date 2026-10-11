@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { dailyActivitySeconds, type ReportResult } from "@/lib/report-service";
-import { reportBlocksLayout, reportHero, reportStackHeights } from "@/lib/reports-blocks";
+import { reportBlocksLayout, reportHero, reportStackHeights, stackHeightCss } from "@/lib/reports-blocks";
 
 const day = (date: number) => ({
   key: `2026-10-0${date}`,
@@ -76,5 +76,22 @@ describe("reportStackHeights", () => {
 
   it("leaves out the smallest blocks when not all fit at the minimum", () => {
     expect(reportStackHeights([3600, 60, 120], 3780, 15, 6, 3)).toEqual([expect.any(Number), 0, expect.any(Number)]);
+  });
+});
+
+describe("stackHeightCss", () => {
+  it("keeps every kept block inside a stack drawn shorter than the reference (phones)", () => {
+    // A 9h day plus seven 1h activities, drawn in a 160 px stack instead of 230 px.
+    const seconds = [9 * 3600, ...Array.from({ length: 7 }, () => 3600)];
+    const heights = reportStackHeights(seconds, 16 * 3600, 230, 6, 3);
+    const kept = heights.filter((height) => height > 0).length;
+    const resolve = (css: string, stack: number) => {
+      const match = /calc\(\(100% - (\d+)px\) \* ([\d.]+)\)/.exec(css)!;
+      return (stack - Number(match[1])) * Number(match[2]);
+    };
+    for (const stack of [230, 160, 37]) {
+      const total = heights.filter(Boolean).reduce((sum, height) => sum + resolve(stackHeightCss(height, kept, 230, 3), stack), 0);
+      expect(total + 3 * (kept - 1)).toBeLessThanOrEqual(stack + 0.01);
+    }
   });
 });

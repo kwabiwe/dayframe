@@ -12743,7 +12743,7 @@ dialog.ui-dialog.df-palette {
 }
 
 .df-wb.is-today .df-wb-label b {
-  color: var(--accent);
+  color: var(--accent-text);
 }
 
 .df-wb-label small {
@@ -12765,16 +12765,22 @@ dialog.ui-dialog.df-palette {
 }
 
 .df-mday {
-  display: flex;
+  position: relative;
+  display: grid;
   height: 78px;
   min-width: 0;
-  flex-direction: column-reverse;
-  gap: 2px;
   overflow: hidden;
   border-radius: 10px;
   padding: 18px 4px 4px;
   background: var(--surface-muted);
-  position: relative;
+}
+
+/* The blocks live under the date; heights are shares of this stack, so they always fit. */
+.df-mday-stack {
+  display: flex;
+  min-height: 0;
+  flex-direction: column-reverse;
+  gap: 2px;
 }
 
 .df-mday.is-empty {
@@ -12782,7 +12788,7 @@ dialog.ui-dialog.df-palette {
 }
 
 .df-mday.is-today {
-  box-shadow: inset 0 0 0 2px var(--accent);
+  box-shadow: inset 0 0 0 2px var(--border-strong);
 }
 
 .df-mday em {

@@ -9,11 +9,14 @@ import {
   monthGridLeadingBlanks,
   reportBlocksLayout,
   reportHero,
-  reportStackHeights
+  reportStackHeights,
+  stackHeightCss
 } from "@/lib/reports-blocks";
 
 const WEEK_COLUMN_HEIGHT = 230;
-const MONTH_CELL_HEIGHT = 52;
+const WEEK_GAP = 3;
+const MONTH_STACK_HEIGHT = 52;
+const MONTH_GAP = 2;
 const WEEKDAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 // Server-rendered, so the spring is the linear() easing; browsers without linear() fall back in CSS.
 const LAND = springLinearEasing("land");
@@ -27,7 +30,7 @@ const LAND = springLinearEasing("land");
 export function ReportsTop({ dailyGoalMinutes, report }: { dailyGoalMinutes: number | null; report: ReportResult }) {
   const hero = reportHero(report, dailyGoalMinutes);
   const layout = reportBlocksLayout(report);
-  const periodWord = previousWord(report.range.preset);
+  const periodWord = previousWord(report.range);
   const metGoal = hero.goalDays.filter(Boolean).length;
   return (
     <>
@@ -89,11 +92,14 @@ export function ReportsTop({ dailyGoalMinutes, report }: { dailyGoalMinutes: num
   );
 }
 
-function previousWord(preset: ReportResult["range"]["preset"]) {
-  if (preset === "this-week" || preset === "last-week") return "the week before";
-  if (preset === "this-month" || preset === "last-month") return "the month before";
-  if (preset === "today" || preset === "yesterday") return "the day before";
-  return "the period before";
+/**
+ * The comparison window is the same number of days just before the range (the report's previous
+ * period), so a month compares with the 31 days before it, not the calendar month.
+ */
+function previousWord(range: ReportResult["range"]) {
+  if (range.preset === "today" || range.preset === "yesterday") return "the day before";
+  if (range.preset === "this-week" || range.preset === "last-week" || range.preset === "last-7-days") return "the week before";
+  return `the ${range.dayCount} days before`;
 }
 
 function activityLookup(report: ReportResult) {
@@ -120,7 +126,8 @@ function WeekColumns({ report }: { report: ReportResult }) {
     >
       {report.dailyByActivity.map((day, index) => {
         const total = day.activities.reduce((sum, activity) => sum + activity.seconds, 0);
-        const heights = reportStackHeights(day.activities.map((activity) => activity.seconds), busiest, WEEK_COLUMN_HEIGHT, 6, 3);
+        const heights = reportStackHeights(day.activities.map((activity) => activity.seconds), busiest, WEEK_COLUMN_HEIGHT, 6, WEEK_GAP);
+        const kept = heights.filter((height) => height > 0).length;
         const covered = report.dailySeries[index]?.coveredSeconds ?? total;
         return (
           <li
@@ -138,7 +145,7 @@ function WeekColumns({ report }: { report: ReportResult }) {
                     className={block.style ? "df-block" : "df-wb-none"}
                     data-key={activity.id}
                     key={activity.id}
-                    style={{ ...block.style, height: `${(height / WEEK_COLUMN_HEIGHT) * 100}%` }}
+                    style={{ ...block.style, height: stackHeightCss(height, kept, WEEK_COLUMN_HEIGHT, WEEK_GAP) }}
                     title={`${block.name} · ${formatDuration(activity.seconds)}`}
                   />
                 );
@@ -155,10 +162,41 @@ function WeekColumns({ report }: { report: ReportResult }) {
   );
 }
 
+/** A day's blocks in its month cell, under the date, budgeted like a week column. */
+function MonthStack({
+  activities,
+  busiest,
+  lookup
+}: {
+  activities: ReportResult["dailyByActivity"][number]["activities"];
+  busiest: number;
+  lookup: Map<string, ReportBreakdownRow>;
+}) {
+  const heights = reportStackHeights(activities.map((activity) => activity.seconds), busiest, MONTH_STACK_HEIGHT, 3, MONTH_GAP);
+  const kept = heights.filter((height) => height > 0).length;
+  return (
+    <span aria-hidden="true" className="df-mday-stack">
+      {activities.map((activity, index) => {
+        if (!heights[index]) return null;
+        const block = blockFor(activity.id, lookup);
+        return (
+          <i
+            className={block.style ? "df-block" : "df-wb-none"}
+            data-key={activity.id}
+            key={activity.id}
+            style={{ ...block.style, height: stackHeightCss(heights[index], kept, MONTH_STACK_HEIGHT, MONTH_GAP) }}
+          />
+        );
+      })}
+    </span>
+  );
+}
+
 function MonthGrid({ report }: { report: ReportResult }) {
   const lookup = activityLookup(report);
   const first = report.dailyByActivity[0];
   const blanks = first ? monthGridLeadingBlanks(first.start) : 0;
+  const busiest = busiestDaySeconds(report.dailyByActivity);
   return (
     <div className="df-month">
       {WEEKDAYS.map((weekday) => <span aria-hidden="true" className="df-dow" key={weekday}>{weekday}</span>)}
@@ -173,18 +211,7 @@ function MonthGrid({ report }: { report: ReportResult }) {
             role="img"
           >
             <em aria-hidden="true">{new Date(day.start).getDate()}</em>
-            {day.activities.map((activity) => {
-              const block = blockFor(activity.id, lookup);
-              return (
-                <i
-                  aria-hidden="true"
-                  className={block.style ? "df-block" : "df-wb-none"}
-                  data-key={activity.id}
-                  key={activity.id}
-                  style={{ ...block.style, height: Math.max(3, (activity.seconds / (12 * 3600)) * MONTH_CELL_HEIGHT) }}
-                />
-              );
-            })}
+            <MonthStack activities={day.activities} busiest={busiest} lookup={lookup} />
           </span>
         );
       })}
