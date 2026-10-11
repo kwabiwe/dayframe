@@ -46,9 +46,13 @@ describe("Review sync presentation", () => {
     expect(reviewSyncStatusCopy(diagnostics({
       authenticationRequiredCount: 1,
       waitingCount: 1
-    }))).toContain("sign in to sync");
+    }))).toBe("1 change saved on this iPhone · sign in to send");
     expect(reviewSyncStatusCopy(diagnostics({
       needsAttentionCount: 1
-    }))).toContain("needs attention");
+    }))).toBe("1 change didn't save");
+    expect(reviewSyncStatusCopy(diagnostics({
+      needsAttentionCount: 2,
+      waitingCount: 1
+    }))).toBe("2 changes didn't save · 1 still sending");
   });
 });

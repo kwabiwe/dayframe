@@ -29,7 +29,12 @@ describe("mobile Review action contracts", () => {
     expect(deckSource).toContain('accessibilityLabel="Edit before logging"');
     expect(helperSource).toContain("Confirm commute");
     expect(reviewSource).toContain("<OverflowMenu");
-    expect(menuSource).toMatch(/Edit details[\s\S]*Dismiss suggestion/);
+    // More uses the deck's verbs (UIA-024): Edit before logging, Skip (not destructive), Clear the pile.
+    expect(menuSource).toMatch(/Edit before logging[\s\S]*>Skip<[\s\S]*Clear the pile/);
+    expect(menuSource).not.toContain("overflowMenuDangerText");
+    // Its Skip throws the top card like the deck's Skip; its Edit opens the pencil's editor.
+    expect(reviewSource).toMatch(/top\.item\.id === item\.id\) requestDeckThrow\(-1\);\s*else dismissItem\(item\);/);
+    expect(reviewSource).toMatch(/if \(hasV2LocationEvidence\(item\)\) \{\s*finishAction\(\);\s*router\.push\(\{ pathname: "\/review\/\[id\]"/);
     // Round actions keep at least 44-point targets (52, 64 and 72).
     expect(deckSource).toMatch(/size=\{64\}[\s\S]*size=\{52\}[\s\S]*size=\{72\}/);
   });
