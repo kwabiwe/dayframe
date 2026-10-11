@@ -20,7 +20,8 @@ describe("Blocks radius tokens on iPhone (UIA-103)", () => {
     const offenders = ["app", "src"]
       .flatMap((root) => files(join(mobileRoot, root)))
       .flatMap((path) => readFileSync(path, "utf8").split("\n").map((line, index) => ({ line, at: `${relative(mobileRoot, path)}:${index + 1}` })))
-      .filter(({ line }) => /border(?:Top(?:Left|Right))?Radius: (?:22|24)\b/.test(line))
+      .filter(({ line }) => !/^\s*(\/\/|\*)/.test(line))
+      .filter(({ line }) => /border(?:(?:Top|Bottom)(?:Left|Right)|(?:Top|Bottom)(?:Start|End)|Start(?:Start|End)|End(?:Start|End))?Radius\s*:\s*(?:22|24)\b/.test(line))
       .map(({ at }) => at);
     expect(offenders).toEqual([]);
   });
