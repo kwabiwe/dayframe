@@ -95,6 +95,7 @@ import {
 } from "@/lib/api";
 import {
   getLocationVisitDiagnostics,
+  locationAccessNeedsIosSettings,
   requestLocationAccess,
   refreshGeofencesForPlaces,
   setLocationLearningEnabled,
@@ -771,10 +772,26 @@ export default function SettingsScreen() {
   const locationMonitoringAllowed = locationDiagnostics?.backgroundPermission === "granted";
   const locationCaptureNeedsRetry = locationDiagnostics?.locationLearningEnabled === true &&
     locationDiagnostics.locationLearningCaptureState === "inactive";
+  // UIA-111: once iOS won't ask again (Location denied or restricted, or Always already declined),
+  // the action opens this app's page in iOS Settings instead of a request that shows nothing.
+  // Read live (canAskAgain) whenever the location diagnostics change.
+  const [iosSettingsNeeded, setIosSettingsNeeded] = useState(false);
+  useEffect(() => {
+    let current = true;
+    locationAccessNeedsIosSettings()
+      .then((needed) => {
+        if (current) setIosSettingsNeeded(needed);
+      })
+      .catch(() => undefined);
+    return () => {
+      current = false;
+    };
+  }, [locationDiagnostics?.foregroundPermission, locationDiagnostics?.backgroundPermission]);
+  const locationNeedsIosSettings = !locationMonitoringAllowed && iosSettingsNeeded;
   const locationActionLabel = locationCaptureNeedsRetry ? "Restart location" : locationMonitoringAllowed
     ? "Refresh"
-    : locationDiagnostics?.foregroundPermission === "denied"
-      ? "Review access"
+    : locationNeedsIosSettings
+      ? "Open Settings"
       : "Enable";
   const motionFitness = motionFitnessStatus
     ? motionFitnessPresentation(motionFitnessStatus, locationDiagnostics?.locationLearningEnabled === true)
@@ -1327,6 +1344,10 @@ export default function SettingsScreen() {
   }
 
   async function enableLocation() {
+    if (!locationMonitoringAllowed && !locationCaptureNeedsRetry && await locationAccessNeedsIosSettings().catch(() => false)) {
+      await Linking.openSettings();
+      return;
+    }
     if (locationCaptureNeedsRetry) {
       await toggleLocationLearning(true);
       return;
@@ -1357,6 +1378,11 @@ export default function SettingsScreen() {
   }
 
   async function toggleLocationLearning(enabled: boolean) {
+    if (enabled && !locationMonitoringAllowed && await locationAccessNeedsIosSettings().catch(() => false)) {
+      // iOS won't ask again; Always can only be turned on in iOS Settings.
+      await Linking.openSettings();
+      return;
+    }
     if (enabled && !locationMonitoringAllowed) {
       const status = await requestLocationAccess();
       updateSettingsSnapshot({ locationStatus: status });
@@ -2405,7 +2431,7 @@ export default function SettingsScreen() {
                 <SettingsBlockRow
                   control={
                     <SettingsPillButton
-                      accessibilityLabel={`${locationActionLabel} location access`}
+                      accessibilityLabel={locationNeedsIosSettings ? "Open iPhone Settings to allow location" : `${locationActionLabel} location access`}
                       label={locationActionLabel}
                       onPress={() => void enableLocation()}
                       theme={theme}

@@ -302,6 +302,19 @@ async function hydrateLegacyCapture(capture: LocationCaptureSnapshot) {
   return originalLifetime;
 }
 
+/**
+ * True when iOS will no longer show a location prompt (denied or restricted with no second ask,
+ * or Always already declined): only this app's page in iOS Settings can change it (UIA-111,
+ * mobile-permissions.md "denied and needs Settings").
+ */
+export async function locationAccessNeedsIosSettings() {
+  const foreground = await Location.getForegroundPermissionsAsync();
+  if (foreground.status === "denied") return !foreground.canAskAgain;
+  if (foreground.status !== "granted") return false;
+  const background = await Location.getBackgroundPermissionsAsync();
+  return background.status === "denied" && !background.canAskAgain;
+}
+
 export async function requestLocationAccess() {
   const foreground = await Location.requestForegroundPermissionsAsync();
   if (!foreground.granted) {

@@ -109,7 +109,8 @@ const {
   recordGeofenceTransition,
   refreshGeofencesForPlaces,
   setLocationLearningEnabled,
-  startGeofences
+  startGeofences,
+  locationAccessNeedsIosSettings
 } = await import("./geofence");
 const { readQueue, syncQueue } = await import("./api");
 const { __resetMobileAccountForTests, activateMobileAccount } = await import("./mobileAccount");
@@ -657,5 +658,23 @@ describe("mobile geofence visit candidates", () => {
         lastVisitQueuedAt: "2026-07-06T12:08:00.000Z"
       })
     );
+  });
+});
+
+describe("location access that needs iOS Settings (UIA-111)", () => {
+  it("is true only when iOS won't ask again", async () => {
+    const cases: Array<[unknown, unknown, boolean]> = [
+      [{ status: "denied", granted: false, canAskAgain: false }, null, true],
+      [{ status: "denied", granted: false, canAskAgain: true }, null, false],
+      [{ status: "undetermined", granted: false, canAskAgain: true }, null, false],
+      [{ status: "granted", granted: true }, { status: "denied", granted: false, canAskAgain: false }, true],
+      [{ status: "granted", granted: true }, { status: "denied", granted: false, canAskAgain: true }, false],
+      [{ status: "granted", granted: true }, { status: "granted", granted: true }, false],
+    ];
+    for (const [foreground, background, expected] of cases) {
+      locationMocks.getForegroundPermissionsAsync.mockResolvedValueOnce(foreground as never);
+      if (background) locationMocks.getBackgroundPermissionsAsync.mockResolvedValueOnce(background as never);
+      expect(await locationAccessNeedsIosSettings()).toBe(expected);
+    }
   });
 });
