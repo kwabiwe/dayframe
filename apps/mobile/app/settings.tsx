@@ -106,14 +106,12 @@ import {
 import {
   friendlyHealthKitError,
   exportHealthDebugSnapshot,
-  getHealthAutoLogMappings,
   getHealthImportPreferences,
   getHealthImportStatus,
   HEALTH_IMPORT_PREFERENCE_OPTIONS,
   isHealthKitAutomaticSyncEnabled,
   reprocessExistingHealthReviewItems,
   requestHealthKitPermissions,
-  setHealthAutoLogMapping,
   setHealthImportPreference,
   type HealthImportStatus
 } from "@/lib/health";
@@ -193,7 +191,7 @@ import {
 } from "@/lib/timerStopOutbox";
 import { syncHelpStatus } from "@/lib/settingsSyncDiagnostics";
 import { DAYFRAME_API_BASE } from "@/lib/config";
-import { createHealthMappingWriter, type HealthMappingWriter } from "@/lib/healthMappingWriter";
+import { healthMappingWriter } from "@/lib/healthMappingOwner";
 
 type Category = MobileBootstrap["categories"][number];
 // Settings › Your day goal ranges (hours): daily in 1 h steps, weekly in 5 h steps.
@@ -594,27 +592,18 @@ export default function SettingsScreen() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Apple Health mappings have one writer (UIA-085): Logs as, Use default and Name are queued per
-  // type and each merges into the saved mapping when it runs (healthMappingWriter).
-  const healthPreferencesRef = useRef(healthImportPreferences);
-  healthPreferencesRef.current = healthImportPreferences;
+  // Apple Health mappings have one app-wide writer (UIA-085, healthMappingWriter): Logs as, Use
+  // default and Name queue per type and merge into the saved mapping when they run. This screen
+  // shows its mappings (saved, with queued changes laid over them) while it is open.
   const loadRef = useRef(load);
   loadRef.current = load;
-  const [healthMappingWriter] = useState(() => createHealthMappingWriter({
-    readSaved: getHealthAutoLogMappings,
-    write: setHealthAutoLogMapping,
-    show: (mappings) => {
-      if (queueMounted.current) setHealthAutoLogMappingsAndCache(mappings);
-    },
-    settled: async (saved) => {
-      const preferences = healthPreferencesRef.current ?? await getHealthImportPreferences();
-      await reprocessExistingHealthReviewItems(preferences, { force: true, mappings: saved });
-      if (queueMounted.current) await loadRef.current({ silent: true });
-    },
+  useEffect(() => healthMappingWriter.subscribe({
+    show: setHealthAutoLogMappingsAndCache,
     failed: (error) => {
       Alert.alert("Apple Health", error instanceof Error ? error.message : "Unable to save Health mapping.");
-    }
-  }));
+    },
+    settled: () => void loadRef.current({ silent: true })
+  }), [setHealthAutoLogMappingsAndCache]);
 
   // A reconnect bootstrap is held to the same rule as load(): one fetched before an activity
   // answer may miss that change (a rename), so it is not shown; a fresh refresh follows instead.
@@ -752,7 +741,7 @@ export default function SettingsScreen() {
     // iOS never reveals read access, so "Connected" means Dayframe's access request was accepted.
     isHealthKitAutomaticSyncEnabled().then(setHealthAccessGranted).catch(() => undefined);
     getHealthImportPreferences().then(setHealthImportPreferencesAndCache).catch(() => undefined);
-    getHealthAutoLogMappings().then(setHealthAutoLogMappingsAndCache).catch(() => undefined);
+    void healthMappingWriter.refresh();
   }, [
     setHealthAutoLogMappingsAndCache,
     setHealthImportPreferencesAndCache,
@@ -2613,7 +2602,6 @@ export default function SettingsScreen() {
           }}
           onEnabledChange={(value) => void updateHealthImportPreference(healthDetailKey, value)}
           onMappingChange={(patch) => updateHealthAutoLogMapping(healthDetailKey, patch)}
-          nameWriter={healthMappingWriter}
           onPickActivity={() => setHealthPickerKey(healthDetailKey)}
           reduceMotion={reduceMotion}
           styles={styles}
@@ -2664,7 +2652,6 @@ function HealthTypeSheet({
   onClose,
   onEnabledChange,
   onMappingChange,
-  nameWriter,
   onPickActivity,
   reduceMotion,
   styles,
@@ -2679,7 +2666,6 @@ function HealthTypeSheet({
   onClose: () => void;
   onEnabledChange: (value: boolean) => void;
   onMappingChange: (patch: HealthAutoLogMapping) => Promise<boolean>;
-  nameWriter: HealthMappingWriter;
   onPickActivity: () => void;
   reduceMotion: boolean;
   styles: MobileStyles;
@@ -2698,14 +2684,14 @@ function HealthTypeSheet({
     draftRef.current = value;
     setNameDraftState(value);
   }
-  // The Name is written by the screen's one Health mapping owner (healthMappingWriter), queued
-  // with this type's other changes; a failure puts the saved Name back unless newer text was typed.
-  const [restoreName] = useState(() => (savedName: string, failedName: string) => {
+  // The Name is written by the app's one Health mapping writer, queued with this type's other
+  // changes. From the moment this sheet opens it is told when a Name fails, and puts the saved
+  // Name back unless newer text was typed.
+  useEffect(() => healthMappingWriter.attach(healthKey, (savedName, failedName) => {
     if (draftRef.current.trim() === failedName) setNameDraft(savedName);
-  });
-  useEffect(() => () => nameWriter.release(healthKey, restoreName), [healthKey, nameWriter, restoreName]);
+  }), [healthKey]);
   function commitName() {
-    void nameWriter.commitName(healthKey, draftRef.current, restoreName);
+    void healthMappingWriter.commitName(healthKey, draftRef.current);
   }
   return (
     <Modal

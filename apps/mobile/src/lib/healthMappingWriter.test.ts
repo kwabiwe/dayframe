@@ -5,14 +5,17 @@ import { createHealthMappingWriter } from "./healthMappingWriter";
 /** A fake mapping store whose writes can be held open, failed, or let through. */
 function setup(initial: HealthAutoLogMappings = {}) {
   let stored: HealthAutoLogMappings = initial;
+  let account: string | null = "A";
+  const accountListeners = new Set<() => void>();
   const writes: { type: HealthImportPreferenceKey; mapping: HealthAutoLogMapping }[] = [];
   const holds: Array<{ release: () => void; fail: () => void }> = [];
   let holdNext = 0;
   let failNext = 0;
   const shown: HealthAutoLogMappings[] = [];
+  const settles: { account: string | null; saved: HealthAutoLogMappings }[] = [];
   const settled = vi.fn();
   const failed = vi.fn();
-  const writer = createHealthMappingWriter({
+  const writer = createHealthMappingWriter<string>({
     readSaved: async () => stored,
     write: async (type, mapping) => {
       writes.push({ type, mapping });
@@ -29,21 +32,34 @@ function setup(initial: HealthAutoLogMappings = {}) {
       stored = next;
       return stored;
     },
-    show: (mappings) => shown.push(mappings),
-    settled,
-    failed
+    capture: async () => account,
+    stillCurrent: async (owner) => owner === account,
+    onAccountChange: (listener) => {
+      accountListeners.add(listener);
+      return () => accountListeners.delete(listener);
+    },
+    settle: (saved) => {
+      settles.push({ account, saved });
+    }
   });
+  const unsubscribe = writer.subscribe({ show: (mappings) => shown.push(mappings), settled, failed });
   return {
     writer,
     writes,
     holds,
     shown,
     settled,
+    settles,
     failed,
+    unsubscribe,
     hold: (count = 1) => { holdNext += count; },
     failOnce: () => { failNext += 1; },
     stored: () => stored,
-    lastShown: () => shown[shown.length - 1]
+    lastShown: () => shown[shown.length - 1],
+    switchAccount: (next: string | null) => {
+      account = next;
+      for (const listener of accountListeners) listener();
+    }
   };
 }
 
@@ -61,11 +77,12 @@ describe("Health mapping writer (UIA-085)", () => {
   it("a failed Name puts the saved Name back in the sheet and can be tried again", async () => {
     const t = setup({ walking: { description: "Old" } });
     const restore = vi.fn();
+    t.writer.attach("walking", restore);
     t.failOnce();
-    expect(await t.writer.commitName("walking", "New", restore)).toBe(false);
+    expect(await t.writer.commitName("walking", "New")).toBe(false);
     expect(restore).toHaveBeenCalledWith("Old", "New");
     expect(t.lastShown().walking).toEqual({ description: "Old" });
-    expect(await t.writer.commitName("walking", "New", restore)).toBe(true);
+    expect(await t.writer.commitName("walking", "New")).toBe(true);
     expect(t.stored().walking).toEqual({ description: "New" });
   });
 
@@ -152,8 +169,9 @@ describe("Health mapping writer (UIA-085)", () => {
     const restore = (saved: string, failedName: string) => {
       if (sheetDraft.trim() === failedName) sheetDraft = saved;
     };
+    t.writer.attach("walking", restore);
     t.hold();
-    const first = t.writer.commitName("walking", sheetDraft, restore);
+    const first = t.writer.commitName("walking", sheetDraft);
     await tick();
     sheetDraft = "Newer";
     t.holds[0].fail();
@@ -170,5 +188,81 @@ describe("Health mapping writer (UIA-085)", () => {
     expect(t.stored().running).toEqual({ categoryId: "cat-2" });
     t.holds[0].release();
     await t.writer.idle("walking");
+  });
+
+  it("Codex r6 (1): a queued Name is shown straight away, so a reopened sheet starts from it", async () => {
+    const t = setup({ walking: { description: "Old" } });
+    t.hold();
+    void t.writer.commitName("walking", "A");
+    await tick();
+    void t.writer.commitName("walking", "B");
+    await tick();
+    // The reopened sheet's draft starts from what is shown; closing it commits that.
+    const reopenedDraft = t.lastShown().walking?.description ?? "";
+    expect(reopenedDraft).toBe("B");
+    const closed = t.writer.commitName("walking", reopenedDraft);
+    t.holds[0].release();
+    await closed;
+    await t.writer.idle("walking");
+    expect(t.writes.map((w) => w.mapping.description)).toEqual(["A", "B"]);
+    expect(t.stored().walking).toEqual({ description: "B" });
+  });
+
+  it("Codex r6 (2): a sheet opened while a Name is queued is told when that Name fails", async () => {
+    const t = setup({ walking: { description: "A" } });
+    t.hold();
+    void t.writer.commitName("walking", "B");
+    await tick();
+    // Reopened: shows B, and attaches before it ever commits.
+    let draft = t.lastShown().walking?.description ?? "";
+    expect(draft).toBe("B");
+    t.writer.attach("walking", (saved, failedName) => {
+      if (draft.trim() === failedName) draft = saved;
+    });
+    t.holds[0].fail();
+    await t.writer.idle("walking");
+    expect(draft).toBe("A");
+    // Closing now commits the saved Name: nothing is retried.
+    await t.writer.commitName("walking", draft);
+    expect(t.writes.map((w) => w.mapping.description)).toEqual(["B"]);
+  });
+
+  it("Codex r6 (3): one writer for every screen lifetime keeps changes in the order made", async () => {
+    const t = setup({});
+    t.hold();
+    void t.writer.commitName("walking", "A");
+    await tick();
+    void t.writer.commitName("walking", "B");
+    t.unsubscribe(); // Settings closes
+    const shown: HealthAutoLogMappings[] = [];
+    t.writer.subscribe({ show: (mappings) => shown.push(mappings) }); // and opens again
+    await tick();
+    expect(shown[shown.length - 1].walking).toEqual({ description: "B" });
+    const last = t.writer.commitName("walking", "C");
+    t.holds[0].release();
+    await last;
+    await t.writer.idle("walking");
+    expect(t.writes.map((w) => w.mapping.description)).toEqual(["A", "C"]);
+    expect(t.stored().walking).toEqual({ description: "C" });
+  });
+
+  it("Codex r6 (4): changes queued by one account never write or reprocess under another", async () => {
+    const t = setup({});
+    t.hold();
+    void t.writer.commitName("walking", "A's name");
+    await tick();
+    void t.writer.patch("walking", { categoryId: "a-category" });
+    t.switchAccount(null); // sign out
+    t.switchAccount("B"); // B signs in
+    t.holds[0].release();
+    await t.writer.idle("walking");
+    // The write already on its way lands; nothing queued after it does, and nothing reprocesses as B.
+    expect(t.writes.map((w) => w.mapping)).toEqual([{ description: "A's name" }]);
+    expect(t.settles).toEqual([]);
+    expect(t.failed).not.toHaveBeenCalled();
+    // B's own changes still work.
+    expect(await t.writer.patch("walking", { categoryId: "b-category" })).toBe(true);
+    await t.writer.idle("walking");
+    expect(t.settles.map((entry) => entry.account)).toEqual(["B"]);
   });
 });
