@@ -67,3 +67,49 @@ export function OverlapNotice({
     </aside>
   );
 }
+
+/** An overlap that covers at least this share of the block gets the stronger cue. */
+export const LARGE_OVERLAP_SHARE = 0.5;
+
+/**
+ * One quiet line under a Review card's time (Trello, owner-approved; matches iPhone): "Overlaps
+ * Work by 10m". Overlapping is allowed, so there is no box or explanation; only an overlap
+ * covering most of the block gets a warning cue.
+ */
+export function OverlapLine({
+  candidate,
+  entries,
+  nowMs
+}: {
+  candidate: Omit<TimeIntervalInput, "id">;
+  entries: ReadonlyArray<OverlapPeerEntry>;
+  /** Where a running block (no stop) ends. */
+  nowMs: number;
+}) {
+  const overlap = overlapNoticeForCandidate({ candidate, entries });
+  if (!overlap?.overlapCount) return null;
+  const start = new Date(candidate.startedAt).getTime();
+  const stop = candidate.stoppedAt ? new Date(candidate.stoppedAt).getTime() : nowMs;
+  const peerById = new Map(entries.map((entry) => [entry.id, entry]));
+  const sharedMs = (entry: OverlapPeerEntry) => Math.min(stop, entry.stoppedAt ? new Date(entry.stoppedAt).getTime() : nowMs) -
+    Math.max(start, new Date(entry.startedAt).getTime());
+  // Name the block it overlaps most.
+  const first = overlap.overlappingEntryIds
+    .map((id) => peerById.get(id))
+    .filter((entry): entry is OverlapPeerEntry => Boolean(entry))
+    .sort((a, b) => sharedMs(b) - sharedMs(a))[0];
+  const firstName = first?.categoryName?.trim() || first?.description?.trim() || "another block";
+  const others = overlap.overlapCount - 1;
+  const what = others > 0 ? `${firstName} and ${others} more` : firstName;
+  const blockSeconds = Math.max(0, (stop - start) / 1000);
+  const large = blockSeconds > 0 && overlap.uniqueOverlapSeconds / blockSeconds >= LARGE_OVERLAP_SHARE;
+  return (
+    <p className={`df-roverlap df-tnum${large ? " is-large" : ""}`}>
+      {large ? <AlertTriangle aria-hidden="true" size={14} /> : null}
+      <span>
+        Overlaps {what} by {formatDuration(overlap.uniqueOverlapSeconds)}
+        {large ? " · most of this block" : ""}
+      </span>
+    </p>
+  );
+}
