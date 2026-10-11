@@ -4,7 +4,9 @@ import type { KeyboardEvent as ReactKeyboardEvent } from "react";
 import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import type { RecentActivitySuggestion } from "@dayframe/shared";
-import { Play, Trash2, X } from "lucide-react";
+import { X } from "lucide-react";
+import { ActivityChipGroup, editorChipCategories } from "@/components/blocks/ActivityChipGroup";
+import { DayframeIcon } from "@/components/blocks/DayframeIcon";
 import { CategoryPicker, type CreateCategoryOutcome } from "@/components/CategoryPicker";
 import { DatePickerPopover } from "@/components/DatePickerPopover";
 import { InlineTagInput } from "@/components/InlineTagInput";
@@ -651,11 +653,17 @@ export function TimeEntryQuickEditorPanel({
     visibleTaskSuggestions
   } = controller;
   const finishDescription = finishDayOffset === 1
-    ? "Finish time, one day after Start"
+    ? "End time, one day after Start"
     : finishDayOffset > 1
-      ? `Finish time, ${finishDayOffset} days after Start`
-      : "Finish time";
-  const editorHeading = props.mode === "entry" ? "Edit Entry" : "Calendar Entry";
+      ? `End time, ${finishDayOffset} days after Start`
+      : "End time";
+  // Blocks editor head (prototype "Edit block"): an eyebrow with the day (or Recording) and the title.
+  const editorHeading = props.mode === "entry" ? (isRunning ? "Running block" : "Edit block") : "New block";
+  const editorEyebrow = isRunning ? "Recording" : formatEyebrowDate(draft.startedAtDate);
+  // The chip set follows the last activity chosen, so clearing a chip chosen through "All
+  // activities" keeps it (and keyboard focus) in place instead of removing it.
+  const [chipAnchorId, setChipAnchorId] = useState(draft.categoryId);
+  if (draft.categoryId && draft.categoryId !== chipAnchorId) setChipAnchorId(draft.categoryId);
 
   function saveButton() {
     return (
@@ -666,7 +674,7 @@ export function TimeEntryQuickEditorPanel({
         disabled={isBusy || saveBlockedByTimer || !preview.plan}
         onClick={() => void controller.save()}
       >
-        Save
+        {entry ? "Save" : "Add block"}
       </button>
     );
   }
@@ -691,22 +699,23 @@ export function TimeEntryQuickEditorPanel({
       data-editor-surface={surface}
       data-testid="time-entry-quick-editor"
       role="dialog"
-      aria-label={entry ? `Edit ${title}` : "Create Calendar entry"}
+      aria-label={entry ? `Edit ${title}` : "New block"}
       aria-busy={isBusy || undefined}
       aria-modal={surface === "modal"}
     >
       {busyAction ? (
         <span className="sr-only" role="status" aria-live="polite">
-          {busyAction === "delete" ? "Deleting entry…" : busyAction === "start" ? "Starting entry…" : "Saving entry…"}
+          {busyAction === "delete" ? "Deleting block…" : busyAction === "start" ? "Starting block…" : "Saving block…"}
         </span>
       ) : null}
-      <div className="calendar-compact-editor-header">
+      <div className="calendar-compact-editor-header df-ed-head">
         <div>
-          <strong>{editorHeading}</strong>
-          {entry && !entry.stoppedAt ? (
-            <span className="calendar-compact-running-status">Running timer</span>
-          ) : null}
+          <p className="df-ed-eyebrow">{editorEyebrow}</p>
+          <h2>{editorHeading}</h2>
         </div>
+        {/* Start again and Delete sit in the head (not beside Save as in the prototype), so the
+            footer keeps its full width for errors, overlap and the discard prompt, and both stay
+            usable — and keep focus — while an error shows. */}
         <div className="calendar-compact-editor-icons">
           {entry?.stoppedAt && props.mode === "entry" && props.onStartAgain ? (
             <button
@@ -717,39 +726,39 @@ export function TimeEntryQuickEditorPanel({
               disabled={controlsDisabled || props.isTimerBusy}
               onClick={() => void controller.startAgain()}
             >
-              <Play size={16} fill="currentColor" strokeWidth={0} aria-hidden="true" />
+              <DayframeIcon glyph="rotate-ccw" size={17} />
             </button>
           ) : null}
           {props.mode === "entry" && props.onDelete ? (
             <button
               className="calendar-compact-icon-action is-danger"
               type="button"
-              aria-label={`Delete ${title}`}
+              aria-label={isRunning ? `Discard ${title}` : `Delete ${title}`}
               aria-busy={busyAction === "delete" || undefined}
               disabled={controlsDisabled}
               onClick={() => void controller.deleteEntry()}
             >
-              <Trash2 size={17} aria-hidden="true" />
+              <DayframeIcon glyph="trash-2" size={17} />
             </button>
           ) : null}
-          <button
-            className="calendar-compact-icon-action"
-            type="button"
-            aria-label="Close editor"
-            disabled={controlsDisabled}
-            onClick={() => controller.attemptDismiss(true)}
-          >
-            <X size={18} aria-hidden="true" />
-          </button>
+        <button
+          className="calendar-compact-icon-action"
+          type="button"
+          aria-label="Close editor"
+          disabled={controlsDisabled}
+          onClick={() => controller.attemptDismiss(true)}
+        >
+          <X size={18} aria-hidden="true" />
+        </button>
         </div>
       </div>
 
       <div className="calendar-compact-editor-fields">
         <div className="calendar-compact-editor-description time-entry-quick-description">
-          <label htmlFor="time-entry-quick-description">Description</label>
+          <label className="sr-only" htmlFor="time-entry-quick-description">Description</label>
           <div className="time-entry-quick-description-control" ref={descriptionInteractionRef}>
             <InlineTagInput
-              ariaLabel="Time entry description"
+              ariaLabel="Description"
               className="time-entry-quick-tags"
               closeSignal={controller.dismissTagPanelsSignal}
               disabled={controlsDisabled}
@@ -768,7 +777,7 @@ export function TimeEntryQuickEditorPanel({
               onInputKeyDown={controller.handleTaskSuggestionKeyDown}
               onEnter={controller.handleDescriptionEnter}
               onSelectedTagNamesChange={(tagNames) => controller.updateField("tagNames", tagNames)}
-              placeholder="Enter task description"
+              placeholder={isRunning ? "What are you working on?" : "What did you work on?"}
               portal
               selectedTagNames={draft.tagNames}
               tags={props.tags}
@@ -788,20 +797,27 @@ export function TimeEntryQuickEditorPanel({
           </div>
         </div>
 
-        <CategoryPicker
-          categories={props.categories}
+        <ActivityChipGroup
+          categories={editorChipCategories(props.categories, chipAnchorId)}
           disabled={controlsDisabled}
-          label="Activity"
-          menuId="time-entry-quick-category-menu"
-          onBeforeOpen={() => controller.setSuggestionsOpen(false)}
-          onCreateCategory={props.onCreateCategory}
-          onOpenChange={controller.setIsCategoryOpen}
           onSelect={(categoryId) => controller.updateField("categoryId", categoryId)}
-          open={isCategoryOpen}
-          portal={Boolean(props.onCreateCategory)}
           selectedId={draft.categoryId}
-          triggerRef={categoryButtonRef}
-          variant="quick"
+          trailing={
+            <CategoryPicker
+              categories={props.categories}
+              disabled={controlsDisabled}
+              menuId="time-entry-quick-category-menu"
+              onBeforeOpen={() => controller.setSuggestionsOpen(false)}
+              onCreateCategory={props.onCreateCategory}
+              onOpenChange={controller.setIsCategoryOpen}
+              onSelect={(categoryId) => controller.updateField("categoryId", categoryId)}
+              open={isCategoryOpen}
+              portal={Boolean(props.onCreateCategory)}
+              selectedId={draft.categoryId}
+              triggerRef={categoryButtonRef}
+              variant="more"
+            />
+          }
         />
 
         <div className="calendar-compact-temporal-fields">
@@ -842,7 +858,7 @@ export function TimeEntryQuickEditorPanel({
           </div>
 
           <div className="calendar-compact-moment-field">
-            <span className="calendar-compact-field-label">Finish</span>
+            <span className="calendar-compact-field-label">End</span>
             {isRunning ? (
               <div className="calendar-compact-running-value">Running</div>
             ) : (
@@ -863,7 +879,7 @@ export function TimeEntryQuickEditorPanel({
                   <span className="calendar-compact-day-offset" aria-hidden="true" title={finishDescription}>+{finishDayOffset}</span>
                 ) : null}
                 <DatePickerPopover
-                  ariaLabel={`Choose Finish date, currently ${formatAccessibleDate(draft.stoppedAtDate)}`}
+                  ariaLabel={`Choose End date, currently ${formatAccessibleDate(draft.stoppedAtDate)}`}
                   className="calendar-compact-date-picker"
                   disabled={controlsDisabled}
                   iconOnly
@@ -874,7 +890,7 @@ export function TimeEntryQuickEditorPanel({
                     controller.setOpenDatePicker((current) => open ? "finish" : current === "finish" ? null : current);
                   }}
                   panelClassName="calendar-compact-date-picker-panel time-entry-quick-editor-nested-surface"
-                  panelLabel="Choose Finish date"
+                  panelLabel="Choose End date"
                   portal
                   today={today}
                   triggerClassName="calendar-compact-date-trigger"
@@ -1059,4 +1075,10 @@ function formatAccessibleDate(value: string) {
     month: "long",
     year: "numeric"
   }).format(new Date(year, month - 1, day, 12));
+}
+
+function formatEyebrowDate(value: string) {
+  const [year, month, day] = value.split("-").map(Number);
+  if (!year || !month || !day) return value;
+  return new Intl.DateTimeFormat("en-GB", { weekday: "long", day: "numeric", month: "long" }).format(new Date(year, month - 1, day, 12));
 }
