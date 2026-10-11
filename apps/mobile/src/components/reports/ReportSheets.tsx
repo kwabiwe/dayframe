@@ -675,8 +675,8 @@ const s = StyleSheet.create({
   modal: { flex: 1, justifyContent: "flex-end" },
   sheet: {
     maxHeight: "90%",
-    borderTopLeftRadius: 24,
-    borderTopRightRadius: 24,
+    borderTopLeftRadius: DAYFRAME_BLOCKS.radius.sheet,
+    borderTopRightRadius: DAYFRAME_BLOCKS.radius.sheet,
     paddingHorizontal: 16,
     paddingTop: 8,
   },
