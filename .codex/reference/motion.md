@@ -96,7 +96,7 @@ Haptics:
 - Haptics are never the only feedback: the visible state change, Undo and VoiceOver announcement still happen.
 - Web has no haptics; the same moments use the landing motion only.
 
-Reduce Motion replaces every spring, drop-in, pop, rolling digit, flight, throw and bloom fly-out with an immediate hand-off or a short opacity fade; a released drag returns in a short 120 ms timing instead of a spring, and the breathing and live rings hold still at a fixed opacity. It keeps the same states, haptics, Undo and announcements; swipe and bloom gestures still work and VoiceOver has an equivalent action for each.
+Reduce Motion replaces every spring, drop-in, pop, rolling digit, flight, throw and bloom fly-out with an immediate hand-off or a short opacity fade; on Today a released row swipe or live-block pull returns in a short 120 ms timing instead of a spring, a released Review card resets to its place at once, and the breathing and live rings hold still at a fixed opacity. It keeps the same states, haptics, Undo and announcements; swipe and bloom gestures still work and VoiceOver has an equivalent action for each.
 
 ## Reduce Motion And Accessibility
 
