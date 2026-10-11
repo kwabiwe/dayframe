@@ -3,6 +3,8 @@ import MapView, { Circle, Marker, Polyline, type MapPressEvent } from "react-nat
 import type { LocationReviewEvidenceDto } from "@dayframe/shared";
 
 type Props = {
+  /** The map follows Dayframe's theme, so neutral overlays read on it (not the system's). */
+  appearance?: "light" | "dark";
   evidence: LocationReviewEvidenceDto;
   accentColor: string;
   surfaceColor: string;
@@ -17,6 +19,7 @@ type Props = {
 };
 
 export function LocationEvidenceMap({
+  appearance,
   evidence,
   accentColor,
   surfaceColor,
@@ -89,6 +92,7 @@ export function LocationEvidenceMap({
             ? `Approximate commute map with Start and End markers${usesApproximateFallback ? ". Detailed path unavailable" : ""}.`
             : "Map showing the detected visit location."}
         initialRegion={{ ...centre, latitudeDelta, longitudeDelta }}
+        userInterfaceStyle={appearance}
         onPress={onSelectPoint ? handlePress : undefined}
         pitchEnabled={false}
         rotateEnabled={false}

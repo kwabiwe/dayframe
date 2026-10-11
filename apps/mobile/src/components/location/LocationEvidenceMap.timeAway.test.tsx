@@ -46,3 +46,16 @@ describe("time away on the mobile evidence map", () => {
     expect(tree.root.findByType("MapView" as never).props.accessibilityLabel).toBe("Map of readings while you were away.");
   });
 });
+
+describe("map appearance (UIA-027)", () => {
+  it("follows Dayframe's theme, not the system's, so neutral overlays read on it", () => {
+    for (const appearance of ["light", "dark"] as const) {
+      let tree: ReactTestRenderer | undefined;
+      act(() => {
+        tree = create(<LocationEvidenceMap accentColor="#f00" appearance={appearance} dangerColor="#f00" evidence={evidence(true)}
+          showDetails={false} surfaceColor="#000" textColor="#fff" />);
+      });
+      expect(tree!.root.findByType("MapView" as never).props.userInterfaceStyle).toBe(appearance);
+    }
+  });
+});

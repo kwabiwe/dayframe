@@ -513,6 +513,7 @@ export function LocationReviewCorrectionEditor({
           ) : null}
           <Reanimated.View layout={localLayoutTransition(reduceMotion)} style={styles.panel}>
             <LocationEvidenceMap
+              appearance={theme.mode === "dark" ? "dark" : "light"}
               evidence={evidence}
               // Neutral map marks (UIA-027), as the place editor draws a place without an activity.
               accentColor={theme.textPrimary}

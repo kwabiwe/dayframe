@@ -9,6 +9,7 @@ describe("Location evidence editor in Blocks (UIA-027)", () => {
   it("selects neutrally and draws neutral map marks, never coral", () => {
     expect(editor).not.toMatch(/theme\.accent(Text|Soft)?\b/);
     expect(editor).toContain("accentColor={theme.textPrimary}");
+    expect(editor).toContain('appearance={theme.mode === "dark" ? "dark" : "light"}');
     expect(editor).toContain("{ backgroundColor: selected ? theme.textPrimary : theme.surfaceMuted }");
   });
 
