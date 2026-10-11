@@ -509,8 +509,9 @@ html.ui-dialog-open {
   color: var(--accent-text);
 }
 
-/* A dialog's close button stays neutral on hover: coral is kept for the primary action and recording. */
-.ui-dialog-header .ui-icon-button:hover:not(:disabled) {
+/* A dialog's close button stays neutral on hover, disabled (while saving) or not: coral is kept
+   for the primary action and recording. */
+.ui-dialog-header .ui-icon-button:hover {
   background: color-mix(in srgb, var(--foreground) 8%, var(--surface-muted));
   color: var(--foreground);
 }

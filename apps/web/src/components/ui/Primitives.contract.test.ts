@@ -21,7 +21,7 @@ const timelineDeleteSource = readFileSync(
 
 describe("web UI foundation contracts", () => {
   it("keeps the dialog close button neutral on hover (coral is for the primary action and recording)", () => {
-    const rule = globalStyles.match(/\.ui-dialog-header \.ui-icon-button:hover:not\(:disabled\) \{([^}]*)\}/)?.[1] ?? "";
+    const rule = globalStyles.match(/\.ui-dialog-header \.ui-icon-button:hover \{([^}]*)\}/)?.[1] ?? "";
     expect(rule).toContain("color: var(--foreground);");
     expect(rule).not.toMatch(/--accent|--live|--coral/);
   });
