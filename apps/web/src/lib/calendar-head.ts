@@ -43,8 +43,9 @@ export function calendarHeadModel({
   dayLoggedSeconds: number;
   entries: readonly TodayEntry[];
   /**
-   * Whether the browser has hydrated. "Today" depends on the browser's time zone, which the server
-   * render can't know, so the today mark and "this week" wait for hydration (both renders agree).
+   * Whether the browser has hydrated. "Today" and which day an entry falls on depend on the
+   * browser's time zone, which the server render can't know, so the today mark, "this week" and the
+   * per-day bars and totals wait for hydration (both renders agree).
    */
   hydrated?: boolean;
   nowMs: number;
@@ -60,7 +61,9 @@ export function calendarHeadModel({
     days: weekDays.map((day, index) => {
       const key = toTimelineDateKey(day);
       const end = index + 1 < weekDays.length ? weekDays[index + 1] : new Date(day.getFullYear(), day.getMonth(), day.getDate() + 1);
-      const totals = activityTotals(entries, day.getTime(), end.getTime(), nowMs);
+      // Which day an entry falls on depends on the browser's time zone too, so the bars and the
+      // per-day totals also wait for hydration.
+      const totals = hydrated ? activityTotals(entries, day.getTime(), end.getTime(), nowMs) : [];
       const seconds = totals.reduce((sum, total) => sum + total.seconds, 0);
       return {
         key,
@@ -69,7 +72,9 @@ export function calendarHeadModel({
         selected: key === selectedKey,
         isToday: key === todayKey,
         bars: totals.slice(0, 3).map((total) => ({ key: total.key, color: total.color, name: total.name })),
-        accessibleName: `${DAY_LONG.format(day)}, ${seconds > 0 ? `${formatDuration(seconds)} framed` : "nothing framed"}`
+        accessibleName: hydrated
+          ? `${DAY_LONG.format(day)}, ${seconds > 0 ? `${formatDuration(seconds)} framed` : "nothing framed"}`
+          : DAY_LONG.format(day)
       };
     }),
     weekTotal: weekDays.some((day) => toTimelineDateKey(day) === todayKey)

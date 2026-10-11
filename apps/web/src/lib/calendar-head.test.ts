@@ -63,7 +63,7 @@ describe("Calendar page head (Trello: Calendar page improvements)", () => {
   it("leaves today out until hydration, so the server render and the browser agree", () => {
     const beforeHydration = calendarHeadModel({
       dayLoggedSeconds: 0,
-      entries: [],
+      entries: entries as never,
       hydrated: false,
       nowMs: new Date(2026, 9, 11, 14, 48).getTime(),
       selectedDay: day(11),
@@ -71,6 +71,8 @@ describe("Calendar page head (Trello: Calendar page improvements)", () => {
       weekLoggedSeconds: 3600
     });
     expect(beforeHydration.days.some((d) => d.isToday)).toBe(false);
+    expect(beforeHydration.days.every((d) => d.bars.length === 0)).toBe(true);
+    expect(beforeHydration.days[0].accessibleName).toBe("Monday 5 October");
     expect(beforeHydration.weekTotal).toBe("1h 00m in the week of 5 Oct");
   });
 });
