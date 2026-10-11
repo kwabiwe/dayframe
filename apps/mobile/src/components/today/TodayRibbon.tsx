@@ -13,6 +13,7 @@ import { todayReviewNavigationTarget } from "../../lib/todayReviewNavigation";
 import {
   buildTodayRibbon,
   RIBBON_LABEL_HOURS,
+  RIBBON_BLOCK_GAP,
   RIBBON_MIN_BLOCK_WIDTH,
   ribbonBlockFrame,
   RIBBON_TICK_HOURS,
@@ -66,7 +67,7 @@ export const TodayRibbon = memo(function TodayRibbon({
 
   const scrubTo = useCallback((x: number, scrubbing: boolean) => {
     if (width <= 0) return;
-    const next = ribbonHitAt(modelRef.current, x / width, RIBBON_MIN_BLOCK_WIDTH / width);
+    const next = ribbonHitAt(modelRef.current, x / width, RIBBON_MIN_BLOCK_WIDTH / width, RIBBON_BLOCK_GAP / width);
     const key = next.kind === "block" ? next.block.key : "gap";
     if (key !== lastKey.current) {
       if (scrubbing && next.kind === "block") playHaptic("tick");
@@ -80,7 +81,7 @@ export const TodayRibbon = memo(function TodayRibbon({
   }, []);
   const tapAt = useCallback((x: number) => {
     if (width <= 0) return;
-    const next = ribbonHitAt(modelRef.current, x / width, RIBBON_MIN_BLOCK_WIDTH / width);
+    const next = ribbonHitAt(modelRef.current, x / width, RIBBON_MIN_BLOCK_WIDTH / width, RIBBON_BLOCK_GAP / width);
     if (next.kind === "block") onOpenBlock(next.block);
   }, [onOpenBlock, width]);
 
@@ -201,12 +202,15 @@ export const TodayRibbon = memo(function TodayRibbon({
                   // The full activity fill, then the faint inner edge over it (light on Midnight, dark on
                   // Daylight): a 1-pt stroke inset half a point, so all of it lies on the fill and
                   // never darkens the track around a dark activity colour.
+                  // Explicit corner radii (fill: up to 6, edge: half a point less) so a narrow block's
+                  // edge follows the fill's own curve instead of SVG's independently clamped one.
                   <G key={block.key}>
-                    <Rect fill={color} height={height} rx={6} width={w} x={x} y={y} />
+                    <Rect fill={color} height={height} rx={Math.min(6, w / 2)} ry={Math.min(6, w / 2)} width={w} x={x} y={y} />
                     <Rect
                       fill="none"
                       height={Math.max(0, height - 1)}
-                      rx={5.5}
+                      rx={Math.max(0, Math.min(6, w / 2) - 0.5)}
+                      ry={Math.max(0, Math.min(6, w / 2) - 0.5)}
                       stroke={colorWithAlpha(theme.textPrimary, RIBBON_EDGE_ALPHA)}
                       strokeWidth={1}
                       width={Math.max(0, w - 1)}

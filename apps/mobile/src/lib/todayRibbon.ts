@@ -133,12 +133,21 @@ export function ribbonHourFraction(model: Pick<RibbonModel, "dayStartMs" | "dayM
  * among overlapping logged blocks the one that started last (drawn on top) wins. `minFraction` is
  * the drawn minimum width, so a block drawn wider than its time is hit where it is drawn.
  */
-export function ribbonHitAt(model: RibbonModel, fraction: number, minFraction = 0): RibbonHit {
+/**
+ * The block under a point. What is drawn wins: a block whose drawn frame (ribbonBlockFrame: at
+ * least the minimum width, less half the gap each side) holds the point, the top one first (logged
+ * time over a suggestion, later over earlier, as drawn). Only in a gap between drawn frames does the
+ * nearest block's full frame answer, so a tap there still lands.
+ */
+export function ribbonHitAt(model: RibbonModel, fraction: number, minFraction = 0, gapFraction = 0): RibbonHit {
   const atMs = model.dayStartMs + Math.min(1, Math.max(0, fraction)) * model.dayMs;
   const minMs = minFraction * model.dayMs;
-  const covering = model.blocks.filter((block) => atMs >= block.startMs && atMs <= Math.max(block.endMs, block.startMs + minMs));
-  const top = covering.filter((block) => block.kind === "entry").pop() ?? covering.pop();
-  return top ? { kind: "block", block: top, atMs } : { kind: "gap", atMs };
+  const halfGapMs = (gapFraction * model.dayMs) / 2;
+  const top = (blocks: RibbonBlock[]) => blocks.filter((block) => block.kind === "entry").pop() ?? blocks.pop();
+  const reach = (block: RibbonBlock) => Math.max(block.endMs, block.startMs + minMs);
+  const drawn = model.blocks.filter((block) => atMs >= block.startMs + halfGapMs && atMs <= reach(block) - halfGapMs);
+  const hit = top(drawn) ?? top(model.blocks.filter((block) => atMs >= block.startMs && atMs <= reach(block)));
+  return hit ? { kind: "block", block: hit, atMs } : { kind: "gap", atMs };
 }
 
 function clock(ms: number) {
