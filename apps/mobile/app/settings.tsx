@@ -30,7 +30,8 @@ import {
   StyleSheet,
   Text,
   TextInput,
-  View
+  View,
+  useWindowDimensions
 } from "react-native";
 import Reanimated from "react-native-reanimated";
 import Svg, { Path } from "react-native-svg";
@@ -2643,7 +2644,20 @@ function HealthTypeSheet({
   theme: MobileTheme;
 }) {
   const sheetRef = useRef<SwipeDismissSheetHandle>(null);
+  const { height: windowHeight } = useWindowDimensions();
   const mappedCategory = categories.find((category) => category.id === mapping.categoryId) ?? null;
+  // Name is a draft saved once: when editing ends, or when the sheet starts to leave by any way
+  // (Close, backdrop, swipe, accessibility escape), so a focused edit is never lost.
+  const [nameDraft, setNameDraft] = useState(mapping.description ?? "");
+  const savedName = useRef(mapping.description ?? "");
+  const [closing, setClosing] = useState(false);
+  const closingRef = useRef(false);
+  function commitName() {
+    const next = nameDraft.trim();
+    if (next === savedName.current.trim()) return;
+    savedName.current = next;
+    onMappingChange({ description: next || null });
+  }
   return (
     <Modal
       animationType="none"
@@ -2660,10 +2674,26 @@ function HealthTypeSheet({
           backdropStyle={styles.sheetBackdrop}
           handleStyle={styles.sheetHandle}
           onDismiss={onClose}
+          onDismissStart={() => {
+            // Leaving: save the Name draft once and make the sheet inert, so a late tap (Logs as)
+            // can't present the picker over a sheet that is going away.
+            if (!closingRef.current) {
+              closingRef.current = true;
+              setClosing(true);
+              commitName();
+            }
+          }}
           reduceMotion={reduceMotion}
-          style={styles.activeEditSheet}
+          // Tall like the activity editor, so the scroll view can lift Name above the keyboard.
+          style={[styles.activeEditSheet, { height: Math.round(windowHeight * 0.7) }]}
           visible
         >
+          <View
+            accessibilityElementsHidden={closing}
+            importantForAccessibility={closing ? "no-hide-descendants" : "auto"}
+            pointerEvents={closing ? "none" : "auto"}
+            style={{ flex: 1, minHeight: 0 }}
+          >
           <View style={styles.sheetHeader}>
             <View style={{ flex: 1, minWidth: 0 }}>
               <Text {...mobileTextProps("metadata")} style={styles.muted}>APPLE HEALTH</Text>
@@ -2673,13 +2703,18 @@ function HealthTypeSheet({
               accessibilityLabel={`Close ${label}`}
               accessibilityRole="button"
               style={pressable(styles.iconButton, styles.buttonPressed)}
-              onPress={() => sheetRef.current?.dismiss()}
+              onPress={() => {
+                Keyboard.dismiss();
+                sheetRef.current?.dismiss();
+              }}
             >
               <CloseGlyph color={theme.textPrimary} />
             </Pressable>
           </View>
           <ScrollView
+            automaticallyAdjustKeyboardInsets
             contentContainerStyle={styles.activeEditContent}
+            keyboardDismissMode="on-drag"
             keyboardShouldPersistTaps="handled"
             style={styles.activeEditScroller}
           >
@@ -2705,7 +2740,9 @@ function HealthTypeSheet({
                 >
                 <SettingsBlockRow
                   accessibilityHint={`Chooses the activity ${label} logs to`}
-                  onPress={onPickActivity}
+                  onPress={() => {
+                    if (!closingRef.current) onPickActivity();
+                  }}
                   testID={`health-activity-${healthKey}`}
                   theme={theme}
                   title="Logs as"
@@ -2745,19 +2782,20 @@ function HealthTypeSheet({
                   <TextInput
                     accessibilityLabel={`${label} name`}
                     {...mobileTextProps("input")}
-                    key={`${healthKey}:${mapping.description ?? ""}`}
                     style={styles.healthNameInput}
-                    defaultValue={mapping.description ?? ""}
+                    onChangeText={setNameDraft}
                     placeholder={defaultHealthDescription(healthKey)}
                     placeholderTextColor={theme.textSecondary}
                     returnKeyType="done"
                     testID={`health-name-${healthKey}`}
-                    onEndEditing={(event) => onMappingChange({ description: event.nativeEvent.text.trim() || null })}
+                    onEndEditing={commitName}
+                    value={nameDraft}
                   />
                 </Reanimated.View>
               ) : null}
             </SettingsBlockGroup>
           </ScrollView>
+          </View>
           {children}
         </SwipeDismissSheet>
       </View>

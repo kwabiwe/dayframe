@@ -81,11 +81,12 @@ describe("mobile place helpers", () => {
 });
 
 describe("place radius choices (UIA-088)", () => {
-  it("offers 50, 100 and 200 m, keeping a place's own other size as a fourth choice", async () => {
-    const { placeRadiusOptions } = await import("./places");
-    expect(placeRadiusOptions("100").map((option) => option.label)).toEqual(["50 m", "100 m", "200 m"]);
-    expect(placeRadiusOptions("150").map((option) => option.value)).toEqual(["50", "100", "150", "200"]);
-    expect(placeRadiusOptions("400").map((option) => option.value)).toEqual(["50", "100", "200", "400"]);
-    expect(placeRadiusOptions("").map((option) => option.value)).toEqual(["50", "100", "200"]);
+  it("offers 50, 100 and 200 m, and names a place's own other size without changing it", async () => {
+    const { PLACE_RADIUS_OPTIONS, placeRadiusOffMenu } = await import("./places");
+    expect(PLACE_RADIUS_OPTIONS.map((option) => option.label)).toEqual(["50 m", "100 m", "200 m"]);
+    expect(placeRadiusOffMenu("100")).toBeNull();
+    expect(placeRadiusOffMenu("150")).toBe(150);
+    expect(placeRadiusOffMenu("2000")).toBe(2000);
+    expect(placeRadiusOffMenu("")).toBeNull();
   });
 });

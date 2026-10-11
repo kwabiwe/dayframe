@@ -58,7 +58,8 @@ import {
   validatePlaceForm,
   withRole,
   DEFAULT_PLACE_RADIUS_METERS,
-  placeRadiusOptions
+  PLACE_RADIUS_OPTIONS,
+  placeRadiusOffMenu
 } from "@/lib/places";
 import {
   createNativePlaceSearchProvider,
@@ -757,18 +758,23 @@ export default function PlaceEditorScreen() {
             <Reanimated.View layout={localLayoutTransition(reduceMotion)}>
               <SettingsBlockGroup theme={theme} title="Size">
                 {/* UIA-088: three sizes to pick from instead of typing metres; a place saved with
-                    another size keeps it as a fourth choice until a standard one is picked. */}
+                    another size keeps it (no segment chosen, a note below) until one is picked. */}
                 <View style={editorStyles.radiusRow}>
                   <Text {...mobileTextProps("itemTitle")} style={[editorStyles.fieldLabel, { color: theme.textPrimary }]}>Radius</Text>
                   <SettingsSegmented
                     label="Place radius"
                     onChange={setRadiusMeters}
-                    options={placeRadiusOptions(radiusMeters)}
+                    options={PLACE_RADIUS_OPTIONS}
                     theme={theme}
                     value={radiusMeters}
                   />
                 </View>
               </SettingsBlockGroup>
+              {placeRadiusOffMenu(radiusMeters) !== null ? (
+                <Text {...mobileTextProps("metadata")} style={[editorStyles.note, { color: theme.textSecondary }]}>
+                  This place uses {placeRadiusOffMenu(radiusMeters)} m. Pick a size to change it.
+                </Text>
+              ) : null}
               {radiusProblem ? (
                 <Text {...mobileTextProps("metadata")} accessibilityLiveRegion="polite" style={[editorStyles.note, { color: theme.dangerText }]}>{radiusProblem}</Text>
               ) : null}

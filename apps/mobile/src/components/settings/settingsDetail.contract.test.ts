@@ -30,7 +30,8 @@ describe("Settings detail (audit A8b)", () => {
   it("names a place's block and picks its radius from three sizes (UIA-088)", () => {
     expect(placeEditor).toContain(">Block name</Text>");
     expect(placeEditor).toContain('accessibilityLabel="Block name for visits here"');
-    expect(placeEditor).toContain("options={placeRadiusOptions(radiusMeters)}");
+    expect(placeEditor).toContain("options={PLACE_RADIUS_OPTIONS}");
+    expect(placeEditor).toContain("Pick a size to change it.");
     expect(placeEditor).not.toContain('testID="place-editor-radius"');
   });
 });
