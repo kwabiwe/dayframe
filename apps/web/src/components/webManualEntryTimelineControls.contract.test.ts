@@ -75,7 +75,7 @@ describe("web manual entry and Timeline control refinement", () => {
   });
 
   it("uses a neutral text selection globally, never coral (UIA-314)", () => {
-    expect(styles).toMatch(/::selection \{[^}]*background: color-mix\(in srgb, var\(--text-primary\) 22%, transparent\);[^}]*color: inherit;/s);
+    expect(styles).toMatch(/::selection \{[^}]*background: var\(--text-secondary\);[^}]*color: var\(--surface\);/s);
   });
 
   it("moves compact Add Time feedback onto its own row at common phone widths", () => {

@@ -81,7 +81,7 @@ describe("Blocks shell contract", () => {
 
   it("uses neutral selection and 44-pixel phone targets; coral only on the current page's icon (W10)", () => {
     const shellCss = styles.slice(styles.indexOf("Dayframe Blocks web shell"), styles.indexOf("Dayframe Blocks command timer"));
-    const currentIcon = /\.df-(?:nav a\[aria-current="page"\] > svg|tabbar a\[aria-current="page"\] \.df-tab-icon > svg) \{\s*color: var\(--accent\);\s*\}/g;
+    const currentIcon = /\.df-(?:nav a\[aria-current="page"\] > svg|tabbar a\[aria-current="page"\] \.df-tab-icon > svg) \{\s*color: var\(--accent-text\);\s*\}/g;
     expect(shellCss.match(currentIcon)).toHaveLength(2);
     expect(shellCss.replace(currentIcon, "")).not.toMatch(/var\(--accent/);
     expect(shellCss).toMatch(/\.df-tabbar a \{[^}]*min-height: 52px;/s);

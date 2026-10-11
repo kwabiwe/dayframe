@@ -370,11 +370,12 @@ a {
   text-decoration: none;
 }
 
-/* Text selection is neutral, never coral (UIA-314): a tint of the primary text that reads on both
-   canvases and keeps the text's own colour. */
+/* Text selection is neutral, never coral (UIA-314): the secondary text colour behind surface-
+   coloured text — 4.6:1 to 6.4:1 against the canvas and cards, and the selected text 5.0:1 (Daylight)
+   and 5.6:1 (Midnight) on it, whatever colour it had (coral, on-block). */
 ::selection {
-  background: color-mix(in srgb, var(--text-primary) 22%, transparent);
-  color: inherit;
+  background: var(--text-secondary);
+  color: var(--surface);
 }
 
 .tabular {
@@ -5567,7 +5568,7 @@ kbd {
 
 .place-search-option[aria-selected="true"],
 .place-search-option:hover {
-  background: var(--accent-soft);
+  background: var(--surface-muted);
 }
 
 .place-search-option-title,
@@ -9394,7 +9395,7 @@ dialog.ui-dialog.manual-entry-dialog {
 /* The current page's icon is coral (owner, 11 Oct; the iPhone's selected tab); the label and the
    sliding thumb stay neutral. */
 .df-nav a[aria-current="page"] > svg {
-  color: var(--accent);
+  color: var(--accent-text);
 }
 
 .df-nav-count,
@@ -9668,7 +9669,7 @@ dialog.ui-dialog.manual-entry-dialog {
   }
 
   .df-tabbar a[aria-current="page"] .df-tab-icon > svg {
-    color: var(--accent);
+    color: var(--accent-text);
   }
 
   .df-tab-icon {

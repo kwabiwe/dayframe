@@ -533,7 +533,7 @@ export function HelpSettings({ authMode, reviewCount }: { authMode: SettingsAuth
 
 /** The page's own Sign out, under the cards (the profile menu has another). */
 export function SettingsSignOut() {
-  return <SignOutControl className="df-rbtn df-set-signout" showIcon />;
+  return <SignOutControl className="df-rbtn df-set-signout" />;
 }
 
 function permissionCopy(state: PermissionState) {
