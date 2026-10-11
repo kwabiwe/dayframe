@@ -842,3 +842,19 @@ export function sortMobileCategoriesByUsage(
       a.category.name.localeCompare(b.category.name)
     );
 }
+
+/**
+ * Whether a sheet's entry id still names the running block. Right after a start, the sheet holds
+ * the optimistic id while the dashboard may already have swapped in the server id (or the other
+ * way round for a moment), so both ids are resolved through the start's id correlation before
+ * they are compared (UIA-053: a suggestion tapped in that window used to be dropped).
+ */
+export function isSameRunningEntry(
+  activeEntryId: string,
+  requestedEntryId: string,
+  persistedIdFor: (entryId: string) => string | null
+) {
+  if (activeEntryId === requestedEntryId) return true;
+  const active = persistedIdFor(activeEntryId);
+  return active !== null && active === persistedIdFor(requestedEntryId);
+}

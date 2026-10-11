@@ -5896,7 +5896,7 @@ kbd {
 .timeline-range-toolbar {
   display: grid;
   min-width: 0;
-  grid-template-columns: minmax(300px, 1fr) auto minmax(390px, auto);
+  grid-template-columns: minmax(300px, 1fr) minmax(390px, auto);
   align-items: center;
   gap: var(--web-gap-lg);
   border-top: 1px solid var(--line);
@@ -5982,40 +5982,6 @@ kbd {
   font-weight: 600;
 }
 
-.timeline-range-totals {
-  display: grid;
-  min-width: 200px;
-  grid-template-columns: repeat(2, minmax(92px, 1fr));
-  gap: var(--web-gap-sm);
-  margin: 0;
-}
-
-.timeline-range-totals > div {
-  display: grid;
-  min-height: var(--web-control-height);
-  align-content: center;
-  gap: 2px;
-  border-radius: var(--web-radius-control);
-  background: var(--surface-inset);
-  padding: 7px var(--web-control-padding-inline);
-}
-
-.timeline-range-totals dt,
-.timeline-range-totals dd {
-  margin: 0;
-}
-
-.timeline-range-totals dt {
-  color: var(--muted);
-  font-size: 10px;
-  font-weight: 600;
-}
-
-.timeline-range-totals dd {
-  color: var(--foreground);
-  font-size: 13px;
-  font-weight: 700;
-}
 
 .timeline-range-controls {
   display: flex;
@@ -7190,11 +7156,6 @@ kbd {
 
   .timeline-period-trigger strong {
     white-space: nowrap;
-  }
-
-  .timeline-range-totals {
-    width: 100%;
-    min-width: 0;
   }
 
   .timeline-range-controls {
@@ -9016,7 +8977,7 @@ dialog.ui-dialog.manual-entry-dialog {
 }
 
 .swiss-timeline-surface .timeline-range-toolbar {
-  grid-template-columns: max-content max-content minmax(0, 1fr);
+  grid-template-columns: max-content minmax(0, 1fr);
   gap: 12px;
   border-top: 0;
   border-bottom: 1px solid var(--line);
@@ -9049,42 +9010,6 @@ dialog.ui-dialog.manual-entry-dialog {
   border-color: var(--control-border);
 }
 
-.timeline-range-totals {
-  display: grid;
-  min-width: 0;
-  grid-template-columns: repeat(2, max-content);
-  gap: 0;
-  overflow: hidden;
-  border-radius: var(--web-radius-control);
-  background: var(--surface-inset);
-}
-
-.timeline-range-totals > a {
-  display: flex;
-  min-height: var(--web-control-height);
-  align-items: center;
-  gap: 8px;
-  padding: 0 11px;
-  color: var(--foreground);
-  text-decoration: none;
-}
-
-.timeline-range-totals > a + a {
-  border-left: 1px solid var(--line);
-}
-
-.timeline-range-totals span {
-  color: var(--muted);
-  font-size: 13px;
-  font-weight: 650;
-  text-transform: uppercase;
-}
-
-.timeline-range-totals strong {
-  font-size: 13px;
-  font-weight: 750;
-  white-space: nowrap;
-}
 
 .timeline-range-controls {
   justify-content: flex-end;
@@ -9408,10 +9333,6 @@ dialog.ui-dialog.manual-entry-dialog {
   .swiss-timeline-surface .timeline-range-navigation {
     width: 100%;
     grid-template-columns: var(--web-icon-button-size) minmax(0, 1fr) var(--web-icon-button-size);
-  }
-
-  .timeline-range-totals {
-    width: fit-content;
   }
 
   .swiss-timeline-surface .timeline-range-controls {
@@ -11286,9 +11207,11 @@ dialog.ui-dialog.df-palette {
   z-index: 14 !important;
 }
 
+/* The now line runs behind the blocks (Trello: it crossed the running block's text); its dot
+   stays at the left edge and the time shows in a pill in the time column. */
 .calendar-now-line {
   position: absolute;
-  z-index: 13;
+  z-index: 1;
   right: 0;
   left: 0;
   height: 2px;
@@ -11677,12 +11600,24 @@ dialog.ui-dialog.df-palette {
   font-size: 13px;
 }
 
-.df-rcard-overlap {
-  padding: 0 24px;
+/* Overlap on a Review card: one quiet line under the time; a warning cue only when the overlap
+   covers most of the block (Trello, owner-approved). */
+.df-roverlap {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 4px 0 0;
+  color: var(--text-secondary);
+  font-size: 13px;
 }
 
-.df-rcard-overlap:empty {
-  display: none;
+.df-roverlap.is-large {
+  color: var(--warning-text);
+  font-weight: 650;
+}
+
+.df-roverlap svg {
+  flex: none;
 }
 
 .df-ractions {
@@ -11856,10 +11791,6 @@ dialog.ui-dialog.df-palette {
 
   .df-rbody h2 {
     font-size: 28px;
-  }
-
-  .df-rcard-overlap {
-    padding: 0 16px;
   }
 
   .df-ractions {
@@ -13250,6 +13181,203 @@ dialog.ui-dialog.df-rf-dialog {
   .df-mday-stack > i,
   .df-donut-seg {
     transition: none;
+  }
+}
+
+.calendar-now-pill {
+  position: absolute;
+  z-index: 3;
+  right: 4px;
+  box-sizing: border-box;
+  height: 20px;
+  transform: translateY(-50%);
+  border-radius: 999px;
+  background: var(--accent);
+  padding: 2px 7px;
+  line-height: 16px;
+  color: var(--on-accent);
+  font-size: 11px;
+  font-weight: 750;
+  font-variant-numeric: tabular-nums;
+  pointer-events: none;
+}
+
+/* Calendar page head (Trello: Calendar page improvements + consistency): the month heading, the
+   chosen day's framed time, and the week strip with per-day activity bars and the week total. */
+.df-cal-head {
+  flex: none;
+  padding: 18px 18px 14px;
+}
+
+.df-cal-framed {
+  display: inline-flex;
+  min-height: 44px;
+  align-items: center;
+  color: inherit;
+  text-decoration: none;
+}
+
+.df-cal-framed:hover {
+  text-decoration: underline;
+}
+
+.df-cal-week {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 14px;
+}
+
+.df-cal-days {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(40px, 1fr));
+  gap: 4px;
+}
+
+.df-cal-day {
+  display: grid;
+  min-height: 44px;
+  justify-items: center;
+  gap: 3px;
+  border: 0;
+  border-radius: 14px;
+  background: transparent;
+  padding: 5px 0 6px;
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+
+.df-cal-day small {
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.df-cal-day b {
+  display: grid;
+  width: 30px;
+  height: 30px;
+  place-items: center;
+  border-radius: 50%;
+  color: var(--foreground);
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.df-cal-day.is-today b {
+  color: var(--accent-text);
+}
+
+.df-cal-day[aria-pressed="true"] b {
+  background: var(--foreground);
+  color: var(--background);
+}
+
+.df-cal-day:hover:not(:disabled) {
+  background: var(--surface-muted);
+}
+
+.df-cal-day:disabled {
+  cursor: progress;
+}
+
+.df-cal-day-bars {
+  display: flex;
+  height: 4px;
+  gap: 2px;
+}
+
+.df-cal-day-bars i {
+  width: 5px;
+  border-radius: 2px;
+}
+
+.df-cal-day-bars .df-cal-day-none {
+  background: var(--muted);
+}
+
+.df-cal-weektotal {
+  display: inline-flex;
+  min-height: 44px;
+  align-items: center;
+  color: var(--text-secondary);
+  font-size: 13px;
+  font-weight: 650;
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.df-cal-weektotal:hover {
+  color: var(--foreground);
+  text-decoration: underline;
+}
+
+/* Phones: a compact head so the calendar keeps its room. Title and week total share the first
+   row, the day strip (44 px targets) the second. */
+@media (max-width: 760px) {
+  .df-cal-head {
+    display: grid;
+    grid-template-areas: "title total" "framed framed" "days days";
+    grid-template-columns: auto minmax(0, 1fr);
+    align-items: center;
+    gap: 0 12px;
+    padding: 10px 12px 6px;
+  }
+
+  /* The month and the week total share the first row; the day's framed line gets its own row, and
+     a long past-week total wraps beside the month instead of overlapping it. */
+  .df-cal-head > div:first-child {
+    display: contents;
+  }
+
+  .df-cal-head h1 {
+    grid-area: title;
+  }
+
+  .df-cal-head > div:first-child > p {
+    grid-area: framed;
+  }
+
+  .df-cal-head h1 {
+    font-size: 24px;
+  }
+
+  .df-cal-head p {
+    margin-top: -8px;
+    font-size: 13px;
+  }
+
+  .df-cal-week {
+    display: contents;
+  }
+
+  /* Seven 44 px days need 308 px: no gaps (the buttons have no fill), and below that the strip
+     scrolls sideways inside itself rather than shrinking the targets or overflowing the page. */
+  .df-cal-days {
+    grid-area: days;
+    width: 100%;
+    grid-template-columns: repeat(7, minmax(44px, 1fr));
+    gap: 0;
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+
+  .df-cal-weektotal {
+    grid-area: total;
+    justify-self: end;
+    text-align: right;
+    white-space: normal;
+  }
+
+  .df-cal-day {
+    gap: 2px;
+    padding: 2px 0 4px;
+  }
+
+  .df-cal-day b {
+    width: 28px;
+    height: 28px;
   }
 }
 
