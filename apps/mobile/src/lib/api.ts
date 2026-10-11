@@ -2468,9 +2468,21 @@ async function readPlaceResponse(response: Response, fallback: string): Promise<
 
 async function errorMessage(response: Response, fallback: string) {
   const result = await readApiJson<ApiErrorPayload>(response, fallback);
-  if (!result.ok) return result.message;
+  if (!result.ok) return blockWordingForServerMessage(result.message);
   const payload = result.payload;
-  return formatApiError(payload) ?? `${fallback}: ${response.status}`;
+  return blockWordingForServerMessage(formatApiError(payload) ?? `${fallback}: ${response.status}`);
+}
+
+/**
+ * Server messages reach alerts as they are; an older server may still say "time entry" or
+ * "timer", so the iPhone says block instead (UIA-100). Only these nouns change.
+ */
+export function blockWordingForServerMessage(message: string) {
+  return message
+    .replace(/\bTime entries\b/g, "Blocks").replace(/\btime entries\b/g, "blocks")
+    .replace(/\bTime entry\b/g, "Block").replace(/\btime entry\b/g, "block")
+    .replace(/\bTimers\b/g, "Blocks").replace(/\btimers\b/g, "blocks")
+    .replace(/\bTimer\b/g, "Block").replace(/\btimer\b/g, "block");
 }
 
 function formatApiError(payload: ApiErrorPayload) {

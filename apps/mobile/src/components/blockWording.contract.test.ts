@@ -21,7 +21,7 @@ const VISIBLE_KEYS = new Set([
   "accessibilityLabel", "accessibilityHint", "placeholder", "title", "label", "message", "body",
   "subtitle", "hint", "lede", "emptyState", "detail", "text", "caption", "privacy", "accessibilityValue"
 ]);
-const VISIBLE_CALLS = /(^|\.)(alert|announceForAccessibility|showNotice|setNotice|setStatus|setMessage|setValidationError|setError|setNote|setSyncHelpNote|Alert\.alert)$/;
+const VISIBLE_CALLS = /(^|\.)(alert|announceForAccessibility|showNotice|setNotice|setStatus|setMessage|set[A-Za-z]*Error|setNote|set[A-Za-z]*Note|confirm|Alert\.alert)$/;
 
 /** Every piece of literal text an expression can evaluate to (both branches of a condition). */
 function texts(node: ts.Node): string[] {
@@ -40,6 +40,10 @@ function texts(node: ts.Node): string[] {
   }
   if (ts.isParenthesizedExpression(node) || ts.isJsxExpression(node)) return node.expression ? texts(node.expression) : [];
   if (ts.isArrayLiteralExpression(node)) return node.elements.flatMap(texts);
+  // An object passed to a visible attribute or call ({ text }, { title, message }) shows its values.
+  if (ts.isObjectLiteralExpression(node)) {
+    return node.properties.flatMap((property) => ts.isPropertyAssignment(property) ? texts(property.initializer) : []);
+  }
   return [];
 }
 
@@ -126,6 +130,9 @@ describe("block wording (UIA-100)", () => {
       "const j = <Text accessibilityLabel=\"timer\" />;",
       "const k = <Text>timer-entry</Text>;",
       "throw new Error(await errorMessage(response, \"Unable to update timer\"));",
+      "const l = <Text accessibilityValue={{ text: \"timer\" }} />;",
+      "confirmSheet.confirm({ title: \"timer\", message: \"task\" });",
+      "setCreateError(\"Unable to create timer\");",
     ].join("\n");
     expect(blockWordingOffenders(source)).toEqual([
       "file.tsx:1 Timer",
@@ -141,6 +148,10 @@ describe("block wording (UIA-100)", () => {
       "file.tsx:19 timer",
       "file.tsx:20 timer-entry",
       "file.tsx:21 Unable to update timer",
+      "file.tsx:22 timer",
+      "file.tsx:23 timer",
+      "file.tsx:23 task",
+      "file.tsx:24 Unable to create timer",
     ]);
   });
 

@@ -2894,3 +2894,13 @@ describe("evening Review reminder lifecycle", () => {
     await vi.waitFor(() => expect(reviewNudge.cancel).toHaveBeenCalled());
   });
 });
+
+describe("server messages in block wording (UIA-100)", () => {
+  it("says block where an older server says time entry or timer", async () => {
+    const { blockWordingForServerMessage } = await import("./api");
+    expect(blockWordingForServerMessage("Time entry not found.")).toBe("Block not found.");
+    expect(blockWordingForServerMessage("One or more time entries were not found.")).toBe("One or more blocks were not found.");
+    expect(blockWordingForServerMessage("There is no running timer to stop.")).toBe("There is no running block to stop.");
+    expect(blockWordingForServerMessage("Category not found.")).toBe("Category not found.");
+  });
+});
