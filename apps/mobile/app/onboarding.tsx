@@ -27,7 +27,7 @@ import {
 } from "@dayframe/shared";
 import { ActivityIcon, DayframeIcon } from "@/components/icons/DayframeIcon";
 import { AuthRequiredError, ensureAutomaticLoggingCategories, fetchBootstrap, updateCategory, type MobileBootstrap } from "@/lib/api";
-import { getLocationVisitDiagnostics, setLocationLearningEnabled } from "@/lib/geofence";
+import { getLocationVisitDiagnostics, requestAlwaysLocationPermission, setLocationLearningEnabled } from "@/lib/geofence";
 import { playHaptic } from "@/lib/haptics";
 import {
   getHealthImportPreferences,
@@ -211,7 +211,7 @@ export default function OnboardingScreen() {
   // Location, second ask: Always, so trips aren't missed with the phone locked.
   function askAlways() {
     void run(async (epoch) => {
-      const background = await Location.requestBackgroundPermissionsAsync().catch(() => null);
+      const background = await requestAlwaysLocationPermission().catch(() => null);
       if (!(await stillHere(epoch))) return;
       if (background?.granted) await finishAlways(epoch);
       else keepWhileUsing();

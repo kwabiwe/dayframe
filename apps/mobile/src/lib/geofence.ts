@@ -312,7 +312,23 @@ export async function locationAccessNeedsIosSettings() {
   if (foreground.status === "denied") return !foreground.canAskAgain;
   if (foreground.status !== "granted") return false;
   const background = await Location.getBackgroundPermissionsAsync();
-  return background.status === "denied" && !background.canAskAgain;
+  if (background.granted) return false;
+  if (background.status === "denied" && !background.canAskAgain) return true;
+  // iOS shows the Always upgrade once; after a restart Expo reports it askable again, so the
+  // spent request is remembered on this iPhone.
+  return (await AsyncStorage.getItem(ALWAYS_LOCATION_REQUESTED_KEY).catch(() => null)) === "declined";
+}
+
+const ALWAYS_LOCATION_REQUESTED_KEY = "dayframe.location.alwaysRequest.v1";
+
+/**
+ * Asks iOS for Always location (shows its one-time upgrade prompt) and remembers a decline, so
+ * later taps go to iOS Settings instead of a request that shows nothing.
+ */
+export async function requestAlwaysLocationPermission() {
+  const background = await Location.requestBackgroundPermissionsAsync();
+  await AsyncStorage.setItem(ALWAYS_LOCATION_REQUESTED_KEY, background.granted ? "granted" : "declined").catch(() => undefined);
+  return background;
 }
 
 export async function requestLocationAccess() {
@@ -329,7 +345,7 @@ export async function requestLocationAccess() {
       : "Location is denied. Open iOS Settings to allow Dayframe to use location.";
   }
 
-  const background = await Location.requestBackgroundPermissionsAsync();
+  const background = await requestAlwaysLocationPermission();
   await updateLocationDiagnostics({
     foregroundPermission: permissionLabel(foreground.status),
     backgroundPermission: permissionLabel(background.status),

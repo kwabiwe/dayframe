@@ -193,6 +193,7 @@ import {
 } from "@/lib/timerStopOutbox";
 import { syncHelpStatus } from "@/lib/settingsSyncDiagnostics";
 import { DAYFRAME_API_BASE } from "@/lib/config";
+import { createLatestRead, locationAccessAction, locationAccessLabels, locationSuggestionsSwitchHint } from "@/lib/locationAccessAction";
 
 type Category = MobileBootstrap["categories"][number];
 // Settings › Your day goal ranges (hours): daily in 1 h steps, weekly in 5 h steps.
@@ -781,18 +782,16 @@ export default function SettingsScreen() {
   const [iosSettingsNeeded, setIosSettingsNeeded] = useState(false);
   // Only the newest read publishes (an older answer arriving late never overwrites it), and none
   // after Settings closes.
-  const iosSettingsRead = useRef(0);
-  useEffect(() => () => {
-    iosSettingsRead.current += 1;
-  }, []);
+  const [iosSettingsRead] = useState(createLatestRead);
+  useEffect(() => () => iosSettingsRead.invalidate(), [iosSettingsRead]);
   const readIosSettingsNeed = useCallback(() => {
-    const read = ++iosSettingsRead.current;
+    const read = iosSettingsRead.begin();
     locationAccessNeedsIosSettings()
       .then((needed) => {
-        if (read === iosSettingsRead.current) setIosSettingsNeeded(needed);
+        if (iosSettingsRead.isLatest(read)) setIosSettingsNeeded(needed);
       })
       .catch(() => undefined);
-  }, []);
+  }, [iosSettingsRead]);
   useEffect(() => {
     readIosSettingsNeed();
   }, [locationDiagnostics?.foregroundPermission, locationDiagnostics?.backgroundPermission, readIosSettingsNeed]);
@@ -806,13 +805,12 @@ export default function SettingsScreen() {
   const locationNeedsIosSettings = iosSettingsNeeded;
   // One action drives the pill's label and what VoiceOver says; Settings comes first, because a
   // restart can't succeed until iOS allows location again.
-  const locationAction: "settings" | "restart" | "refresh" | "enable" = locationNeedsIosSettings
-    ? "settings"
-    : locationCaptureNeedsRetry ? "restart" : locationMonitoringAllowed ? "refresh" : "enable";
-  const locationActionLabel = { settings: "Open Settings", restart: "Restart location", refresh: "Refresh", enable: "Enable" }[locationAction];
-  const locationActionAccessibilityLabel = locationAction === "settings"
-    ? "Open iPhone Settings to allow location"
-    : `${locationActionLabel} location access`;
+  const locationAction = locationAccessAction({
+    needsIosSettings: locationNeedsIosSettings,
+    captureNeedsRetry: locationCaptureNeedsRetry,
+    monitoringAllowed: locationMonitoringAllowed
+  });
+  const { label: locationActionLabel, accessibilityLabel: locationActionAccessibilityLabel } = locationAccessLabels(locationAction);
   const motionFitness = motionFitnessStatus
     ? motionFitnessPresentation(motionFitnessStatus, locationDiagnostics?.locationLearningEnabled === true)
     : null;
@@ -1949,9 +1947,10 @@ export default function SettingsScreen() {
                 <SettingsBlockRow
                   control={
                     <SettingsSwitch
-                      accessibilityHint={locationNeedsIosSettings && !locationDiagnostics?.locationLearningEnabled
-                        ? "Opens iPhone Settings, where location must be allowed first."
-                        : "Saves your choice for this account. Location access is set separately."}
+                      accessibilityHint={locationSuggestionsSwitchHint({
+                        needsIosSettings: locationNeedsIosSettings,
+                        consentOn: locationDiagnostics?.locationLearningEnabled === true
+                      })}
                       disabled={locationDiagnostics === null}
                       label="Suggest visits and commutes"
                       onValueChange={toggleLocationLearning}
@@ -2480,9 +2479,10 @@ export default function SettingsScreen() {
                   control={
                     <SettingsSwitch
                       // Consent for this account, separate from the iOS permission above.
-                      accessibilityHint={locationNeedsIosSettings && !locationDiagnostics?.locationLearningEnabled
-                        ? "Opens iPhone Settings, where location must be allowed first."
-                        : "Saves your choice for this account. Location access is set separately."}
+                      accessibilityHint={locationSuggestionsSwitchHint({
+                        needsIosSettings: locationNeedsIosSettings,
+                        consentOn: locationDiagnostics?.locationLearningEnabled === true
+                      })}
                       disabled={locationDiagnostics === null}
                       label="Suggest visits and commutes"
                       onValueChange={toggleLocationLearning}

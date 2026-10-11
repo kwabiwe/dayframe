@@ -28,7 +28,8 @@ describe("onboarding contract (Blocks 8-1a)", () => {
 
   it("asks iOS for While Using first, then explains before asking for Always", () => {
     const foreground = screen.indexOf("requestForegroundPermissionsAsync");
-    const background = screen.indexOf("requestBackgroundPermissionsAsync");
+    // Always goes through the shared requester, which remembers a decline (UIA-111).
+    const background = screen.indexOf("requestAlwaysLocationPermission()");
     expect(foreground).toBeGreaterThan(-1);
     expect(background).toBeGreaterThan(foreground);
     expect(screen).toContain("One more step for drives");

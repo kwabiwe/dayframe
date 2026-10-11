@@ -45,7 +45,7 @@ describe("Settings in plain language (audit A8a)", () => {
 
   it("sends location access to iOS Settings when iOS won't ask again (UIA-111)", () => {
     // Settings first, one action for label and VoiceOver, the live permission decides taps.
-    expect(settings).toContain('const locationAction: "settings" | "restart" | "refresh" | "enable" = locationNeedsIosSettings');
+    expect(settings).toContain("const locationAction = locationAccessAction({");
     expect(settings).toContain("accessibilityLabel={locationActionAccessibilityLabel}");
     expect(settings).toContain("// The live permission decides, whatever the cached diagnostics say.");
     expect(settings).toContain("if (enabled && await locationAccessNeedsIosSettings().catch(() => false)) {");
