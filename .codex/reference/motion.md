@@ -312,7 +312,7 @@ Block pull-to-refresh:
 
 - Trigger: the Reports page loading a range (a server render).
 - Owner: CSS only. Each day column's activity blocks grow from the bottom (`scaleY` 0→1 with opacity) on the `land` spring as a `linear()` easing, once, as the page renders; month-grid cells and tiles appear in place.
-- Accessibility: Reduce Motion removes the growth. Each day column is one list item named with its date, framed total and per-activity times; month cells are images named with their date and total; the stacks are decorative.
+- Accessibility: Reduce Motion removes the growth. Each day column is one list item named with its date, framed total and per-activity times; month cells are images named with their date, framed total and per-activity times; the stacks are decorative.
 
 ## Web Library › Activities (Blocks parity step 14a-1)
 

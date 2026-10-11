@@ -63,6 +63,9 @@ export function ReportsTop({ dailyGoalMinutes, report }: { dailyGoalMinutes: num
         </div>
         <div className="df-card df-tile">
           <small>Days on goal</small>
+          {hero.goalDays.length || !dailyGoalMinutes ? null : (
+            <span className="df-delta">No days in this range yet.</span>
+          )}
           {hero.goalDays.length ? (
             <>
               <span className="df-stat-big df-tnum">
@@ -73,9 +76,9 @@ export function ReportsTop({ dailyGoalMinutes, report }: { dailyGoalMinutes: num
                 {hero.goalDays.slice(-14).map((met, index) => <i className={met ? "is-met" : undefined} key={index} />)}
               </span>
             </>
-          ) : (
+          ) : !dailyGoalMinutes ? (
             <span className="df-delta">Set a daily goal in Settings to see it here.</span>
-          )}
+          ) : null}
         </div>
       </section>
 
@@ -100,6 +103,16 @@ function previousWord(range: ReportResult["range"]) {
   if (range.preset === "today" || range.preset === "yesterday") return "the day before";
   if (range.preset === "this-week" || range.preset === "last-week" || range.preset === "last-7-days") return "the week before";
   return `the ${range.dayCount} days before`;
+}
+
+/** A day's name for assistive technology: date, framed total and each activity's time. */
+function dayAccessibleName(
+  day: ReportResult["dailyByActivity"][number],
+  coveredSeconds: number,
+  lookup: Map<string, ReportBreakdownRow>
+) {
+  const parts = day.activities.map((activity) => `${blockFor(activity.id, lookup).name} ${formatDuration(activity.seconds)}`);
+  return `${day.label}: ${formatDuration(coveredSeconds)} framed${parts.length ? `, ${parts.join(", ")}` : ""}`;
 }
 
 function activityLookup(report: ReportResult) {
@@ -131,7 +144,7 @@ function WeekColumns({ report }: { report: ReportResult }) {
         const covered = report.dailySeries[index]?.coveredSeconds ?? total;
         return (
           <li
-            aria-label={`${day.label}: ${formatDuration(covered)} framed${day.activities.length ? `, ${day.activities.map((activity) => `${blockFor(activity.id, lookup).name} ${formatDuration(activity.seconds)}`).join(", ")}` : ""}`}
+            aria-label={dayAccessibleName(day, covered, lookup)}
             className={`df-wb${isTodayKey(day, report.capturedNow) ? " is-today" : ""}`}
             key={day.key}
           >
@@ -205,7 +218,7 @@ function MonthGrid({ report }: { report: ReportResult }) {
         const covered = report.dailySeries[index]?.coveredSeconds ?? 0;
         return (
           <span
-            aria-label={`${day.label}: ${formatDuration(covered)} framed`}
+            aria-label={dayAccessibleName(day, covered, lookup)}
             className={`df-mday${isTodayKey(day, report.capturedNow) ? " is-today" : ""}`}
             key={day.key}
             role="img"
