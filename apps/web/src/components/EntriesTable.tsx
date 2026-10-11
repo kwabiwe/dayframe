@@ -289,6 +289,15 @@ export function EntriesTable({
     [capturedNow, displayRange, displayedEntries]
   );
   const categoriesById = useMemo(() => new Map(categories.map((category) => [category.id, category])), [categories]);
+  // Days that only continue a block started earlier (overnight, or still running) have time but no
+  // row of their own; they still get a heading with their total, in date order (newest first).
+  const continuedDays = useMemo(() => {
+    const groupDays = new Set(grouped.map((group) => group.day));
+    return [...dayTotals.entries()]
+      .filter(([label]) => !groupDays.has(label))
+      .map(([label, total]) => ({ label, ...total }))
+      .sort((left, right) => right.dayStartMs - left.dayStartMs);
+  }, [dayTotals, grouped]);
 
   useEffect(() => {
     if (!highlightedEntryId) return;
@@ -745,11 +754,17 @@ export function EntriesTable({
                 : undefined;
               return (
                 <Fragment key={group.key}>
+                  {shouldShowDate
+                    ? continuedDays
+                      .filter((day) => day.dayStartMs > (dayTotals.get(group.day)?.dayStartMs ?? 0) &&
+                        (previousDate === null || day.dayStartMs < (dayTotals.get(previousDate)?.dayStartMs ?? Infinity)))
+                      .map((day) => <ContinuedDayRows day={day} key={`continued-${day.label}`} />)
+                    : null}
                   {shouldShowDate ? (
                     <tr key={`${group.day}-${entry.id}-group`} className="timeline-list-day-heading">
                       <td colSpan={4}>
                         <span>{group.day}</span>
-                        <span className="tabular">{formatDuration(dayTotals.get(group.day) ?? 0)}</span>
+                        <span className="tabular">{formatDuration(dayTotals.get(group.day)?.seconds ?? 0)}</span>
                       </td>
                     </tr>
                   ) : null}
@@ -937,6 +952,11 @@ export function EntriesTable({
                 </Fragment>
               );
             })}
+            {groupByDay && grouped.length
+              ? continuedDays
+                .filter((day) => day.dayStartMs < (dayTotals.get(grouped[grouped.length - 1].day)?.dayStartMs ?? -Infinity))
+                .map((day) => <ContinuedDayRows day={day} key={`continued-${day.label}`} />)
+              : null}
           </tbody>
         </table>
       </div>
@@ -990,13 +1010,15 @@ function overlapMarkerDescription(
   }${peerDetail}. ${timeEntryTitle(entry)} still counts in full towards Total logged.`;
 }
 
-/** Seconds per local day (keyed by the List's day label) across intervals, each clipped to its days. */
+export type ListDayTotal = { dayStartMs: number; seconds: number };
+
+/** Time per local day (keyed by the List's day label) across intervals, each clipped to its days. */
 export function listDayTotals(
   intervals: ReadonlyArray<{ startedAt: string; stoppedAt: string | null }>,
   capturedNow: Date,
   dayLabel: (iso: string) => string
 ) {
-  const totals = new Map<string, number>();
+  const totals = new Map<string, ListDayTotal>();
   for (const interval of intervals) {
     const start = Date.parse(interval.startedAt);
     const end = interval.stoppedAt ? Date.parse(interval.stoppedAt) : capturedNow.getTime();
@@ -1010,12 +1032,31 @@ export function listDayTotals(
       const to = Math.min(end, next.getTime());
       if (to > from) {
         const key = dayLabel(new Date(from).toISOString());
-        totals.set(key, (totals.get(key) ?? 0) + Math.floor((to - from) / 1000));
+        const current = totals.get(key) ?? { dayStartMs: cursor.getTime(), seconds: 0 };
+        current.seconds += Math.floor((to - from) / 1000);
+        totals.set(key, current);
       }
       cursor.setTime(next.getTime());
     }
   }
   return totals;
+}
+
+/** A day that only continues an earlier block: its heading and total, and a note saying so. */
+function ContinuedDayRows({ day }: { day: { label: string; seconds: number } }) {
+  return (
+    <>
+      <tr className="timeline-list-day-heading">
+        <td colSpan={4}>
+          <span>{day.label}</span>
+          <span className="tabular">{formatDuration(day.seconds)}</span>
+        </td>
+      </tr>
+      <tr className="timeline-list-continued">
+        <td colSpan={4}>Continues from the day before</td>
+      </tr>
+    </>
+  );
 }
 
 /** The activity block with its icon (as on Today's rows); no activity is a neutral block. */

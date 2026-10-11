@@ -13387,3 +13387,9 @@ dialog.ui-dialog.df-rf-dialog {
     transition: none;
   }
 }
+
+.timeline-list-continued > td {
+  padding: 4px 8px 8px;
+  color: var(--text-secondary);
+  font-size: 13px;
+}
