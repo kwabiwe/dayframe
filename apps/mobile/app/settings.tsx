@@ -14,7 +14,7 @@ import type { ReviewNudgePermission } from "@/lib/reviewNudgeNative";
 import { synchroniseDeviceNow, getLastManualSyncResult } from "@/lib/manualSyncRuntime";
 import { createOwnerSyncCoalescer } from "@/lib/ownerSyncCoalescer";
 import { subscribeRecoveredDashboardBootstrap } from "@/lib/dashboardBootstrapChannel";
-import { useCallback, useEffect, useRef, useState, type SetStateAction } from "react";
+import { useCallback, useEffect, useRef, useState, type ReactNode, type SetStateAction } from "react";
 import {
   AccessibilityInfo,
   Alert,
@@ -27,6 +27,7 @@ import {
   RefreshControl,
   ScrollView,
   Share,
+  StyleSheet,
   Text,
   TextInput,
   View
@@ -859,6 +860,7 @@ export default function SettingsScreen() {
         ? "Allow Dayframe in the Health app"
         : "Not connected yet";
   const [healthPickerKey, setHealthPickerKey] = useState<HealthImportPreferenceKey | null>(null);
+  const [healthDetailKey, setHealthDetailKey] = useState<HealthImportPreferenceKey | null>(null);
   const [activityEditor, setActivityEditor] = useState<{ activity: Category | null } | null>(null);
   activityEditorOpen.current = activityEditor !== null;
   // Settings › Activities › Archived (Blocks 6b-2): read from the server when the page opens.
@@ -2498,81 +2500,28 @@ export default function SettingsScreen() {
                     const mapping = healthAutoLogMappings[option.key] ?? {};
                     const mappedCategory = data?.categories.find((category) => category.id === mapping.categoryId) ?? null;
                     const label = option.key === "other" ? "Other workouts" : option.label;
+                    // UIA-085: one row per type; its Logs as and Name live in the type's own sheet.
                     return (
-                      <Reanimated.View key={option.key} layout={localLayoutTransition(reduceMotion)}>
-                        <SettingsBlockRow
-                          control={
-                            <SettingsSwitch
-                              label={label}
-                              onValueChange={(value) => void updateHealthImportPreference(option.key, value)}
-                              theme={theme}
-                              value={enabled}
-                            />
-                          }
-                          divider={index > 0}
-                          // When on, the "Logs as" row below says where it goes.
-                          subtitle={enabled ? null : "Not imported"}
-                          testID={`health-type-${option.key}`}
-                          theme={theme}
-                          title={label}
-                        />
-                        {enabled ? (
-                          <Reanimated.View
-                            entering={localPresenceEntering(reduceMotion)}
-                            exiting={localPresenceExiting(reduceMotion)}
-                          >
-                            <SettingsBlockRow
-                              accessibilityHint={`Chooses the activity ${label} logs to`}
-                              onPress={() => setHealthPickerKey(option.key)}
-                              testID={`health-activity-${option.key}`}
-                              theme={theme}
-                              title="Logs as"
-                              value={mappedCategory?.name ?? `${defaultHealthCategoryLabel(option.key)} (default)`}
-                            />
-                            {mapping.categoryId ? (
-                              <Reanimated.View
-                                entering={localPresenceEntering(reduceMotion)}
-                                exiting={localPresenceExiting(reduceMotion)}
-                                layout={localLayoutTransition(reduceMotion)}
-                              >
-                              <SettingsBlockRow
-                                control={
-                                  <SettingsPillButton
-                                    accessibilityLabel={`Use the default activity for ${label}`}
-                                    label="Use default"
-                                    onPress={() => void updateHealthAutoLogMapping(option.key, { categoryId: null })}
-                                    theme={theme}
-                                  />
-                                }
-                                subtitle={`Logs as ${defaultHealthCategoryLabel(option.key)}`}
-                                testID={`health-default-${option.key}`}
-                                theme={theme}
-                                title="Default activity"
-                              />
-                              </Reanimated.View>
-                            ) : null}
-                            {/* Moves with the shared layout transition when Use default comes or goes. */}
-                            <Reanimated.View layout={localLayoutTransition(reduceMotion)} style={styles.healthNameRow}>
-                              <Text {...mobileTextProps("control")} style={styles.healthNameLabel}>Name</Text>
-                              <TextInput
-                                accessibilityLabel={`${label} name`}
-                                {...mobileTextProps("input")}
-                                key={`${option.key}:${mapping.description ?? ""}`}
-                                style={styles.healthNameInput}
-                                defaultValue={mapping.description ?? ""}
-                                placeholder={defaultHealthDescription(option.key)}
-                                placeholderTextColor={theme.textSecondary}
-                                returnKeyType="done"
-                                onEndEditing={(event) =>
-                                  void updateHealthAutoLogMapping(option.key, {
-                                    description: event.nativeEvent.text.trim() || null
-                                  })
-                                }
-                              />
-                            </Reanimated.View>
-                          </Reanimated.View>
-                        ) : null}
-                      </Reanimated.View>
+                      <SettingsBlockRow
+                        accessibilityHint={`Opens ${label}: the activity it logs to and its name`}
+                        control={
+                          <SettingsSwitch
+                            label={label}
+                            onValueChange={(value) => void updateHealthImportPreference(option.key, value)}
+                            theme={theme}
+                            value={enabled}
+                          />
+                        }
+                        divider={index > 0}
+                        key={option.key}
+                        onPress={() => setHealthDetailKey(option.key)}
+                        subtitle={enabled
+                          ? `Logs as ${mappedCategory?.name ?? defaultHealthCategoryLabel(option.key)}`
+                          : "Not imported"}
+                        testID={`health-type-${option.key}`}
+                        theme={theme}
+                        title={label}
+                      />
                     );
                   })}
                 </SettingsBlockGroup>
@@ -2607,17 +2556,42 @@ export default function SettingsScreen() {
         styles={styles}
         theme={theme}
       />
-      {healthPickerKey ? (
-        <ActivityPickerSheet
-          activities={data?.categories ?? []}
-          onClose={() => setHealthPickerKey(null)}
-          onPick={(activityId) => void updateHealthAutoLogMapping(healthPickerKey, { categoryId: activityId })}
-          recentIds={[]}
+      {healthDetailKey ? (
+        <HealthTypeSheet
+          categories={data?.categories ?? []}
+          enabled={healthImportPreferences?.[healthDetailKey]
+            ?? HEALTH_IMPORT_PREFERENCE_OPTIONS.find((option) => option.key === healthDetailKey)?.defaultEnabled
+            ?? false}
+          healthKey={healthDetailKey}
+          label={healthDetailKey === "other"
+            ? "Other workouts"
+            : HEALTH_IMPORT_PREFERENCE_OPTIONS.find((option) => option.key === healthDetailKey)?.label ?? "Workout"}
+          mapping={healthAutoLogMappings[healthDetailKey] ?? {}}
+          onClose={() => {
+            setHealthPickerKey(null);
+            setHealthDetailKey(null);
+          }}
+          onEnabledChange={(value) => void updateHealthImportPreference(healthDetailKey, value)}
+          onMappingChange={(patch) => void updateHealthAutoLogMapping(healthDetailKey, patch)}
+          onPickActivity={() => setHealthPickerKey(healthDetailKey)}
           reduceMotion={reduceMotion}
-          selectedId={healthAutoLogMappings[healthPickerKey]?.categoryId ?? null}
           styles={styles}
           theme={theme}
-        />
+        >
+          {/* The activity picker opens over the type's sheet. */}
+          {healthPickerKey ? (
+            <ActivityPickerSheet
+              activities={data?.categories ?? []}
+              onClose={() => setHealthPickerKey(null)}
+              onPick={(activityId) => void updateHealthAutoLogMapping(healthPickerKey, { categoryId: activityId })}
+              recentIds={[]}
+              reduceMotion={reduceMotion}
+              selectedId={healthAutoLogMappings[healthPickerKey]?.categoryId ?? null}
+              styles={styles}
+              theme={theme}
+            />
+          ) : null}
+        </HealthTypeSheet>
       ) : null}
       {settingsNotice.notice ? (
         <BlocksToast
@@ -2632,6 +2606,162 @@ export default function SettingsScreen() {
       ) : null}
       <BlocksConfirmHost controller={confirmSheet} reduceMotion={reduceMotion} styles={styles} theme={theme} />
     </SafeAreaView>
+  );
+}
+
+/**
+ * One Apple Health type's settings (UIA-085): the import switch, the activity it logs to (Use
+ * default once mapped) and the name its blocks get. The activity picker opens over it.
+ */
+function HealthTypeSheet({
+  categories,
+  children,
+  enabled,
+  healthKey,
+  label,
+  mapping,
+  onClose,
+  onEnabledChange,
+  onMappingChange,
+  onPickActivity,
+  reduceMotion,
+  styles,
+  theme
+}: {
+  categories: readonly { id: string; name: string }[];
+  children?: ReactNode;
+  enabled: boolean;
+  healthKey: HealthImportPreferenceKey;
+  label: string;
+  mapping: HealthAutoLogMapping;
+  onClose: () => void;
+  onEnabledChange: (value: boolean) => void;
+  onMappingChange: (patch: HealthAutoLogMapping) => void;
+  onPickActivity: () => void;
+  reduceMotion: boolean;
+  styles: MobileStyles;
+  theme: MobileTheme;
+}) {
+  const sheetRef = useRef<SwipeDismissSheetHandle>(null);
+  const mappedCategory = categories.find((category) => category.id === mapping.categoryId) ?? null;
+  return (
+    <Modal
+      animationType="none"
+      onRequestClose={() => sheetRef.current?.dismiss()}
+      presentationStyle="overFullScreen"
+      transparent
+      visible
+    >
+      <View accessibilityViewIsModal style={styles.sheetOverlay}>
+        <SwipeDismissSheet
+          ref={sheetRef}
+          accessibilityLabel={label}
+          backdropAccessibilityLabel={`Close ${label}`}
+          backdropStyle={styles.sheetBackdrop}
+          handleStyle={styles.sheetHandle}
+          onDismiss={onClose}
+          reduceMotion={reduceMotion}
+          style={styles.activeEditSheet}
+          visible
+        >
+          <View style={styles.sheetHeader}>
+            <View style={{ flex: 1, minWidth: 0 }}>
+              <Text {...mobileTextProps("metadata")} style={styles.muted}>APPLE HEALTH</Text>
+              <Text {...mobileTextProps("sectionHeading")} accessibilityRole="header" style={styles.sheetTitle}>{label}</Text>
+            </View>
+            <Pressable
+              accessibilityLabel={`Close ${label}`}
+              accessibilityRole="button"
+              style={pressable(styles.iconButton, styles.buttonPressed)}
+              onPress={() => sheetRef.current?.dismiss()}
+            >
+              <CloseGlyph color={theme.textPrimary} />
+            </Pressable>
+          </View>
+          <ScrollView
+            contentContainerStyle={styles.activeEditContent}
+            keyboardShouldPersistTaps="handled"
+            style={styles.activeEditScroller}
+          >
+            <SettingsBlockGroup
+              foot={enabled ? "Each one becomes a block you confirm in Review, or logs itself when Dayframe is sure." : undefined}
+              theme={theme}
+              title="Import"
+            >
+              <SettingsBlockRow
+                control={<SettingsSwitch label={`Import ${label}`} onValueChange={onEnabledChange} theme={theme} value={enabled} />}
+                divider={false}
+                subtitle={enabled ? null : "Not imported"}
+                testID={`health-detail-import-${healthKey}`}
+                theme={theme}
+                title="Import"
+              />
+              {/* Import on: the type's rows fade in and later rows move (Reduce Motion: no movement). */}
+              {enabled ? (
+                <Reanimated.View
+                  entering={localPresenceEntering(reduceMotion)}
+                  exiting={localPresenceExiting(reduceMotion)}
+                  layout={localLayoutTransition(reduceMotion)}
+                >
+                <SettingsBlockRow
+                  accessibilityHint={`Chooses the activity ${label} logs to`}
+                  onPress={onPickActivity}
+                  testID={`health-activity-${healthKey}`}
+                  theme={theme}
+                  title="Logs as"
+                  value={mappedCategory?.name ?? `${defaultHealthCategoryLabel(healthKey)} (default)`}
+                />
+                </Reanimated.View>
+              ) : null}
+              {enabled && mapping.categoryId ? (
+                <Reanimated.View
+                  entering={localPresenceEntering(reduceMotion)}
+                  exiting={localPresenceExiting(reduceMotion)}
+                  layout={localLayoutTransition(reduceMotion)}
+                >
+                <SettingsBlockRow
+                  control={
+                    <SettingsPillButton
+                      accessibilityLabel={`Use the default activity for ${label}`}
+                      label="Use default"
+                      onPress={() => onMappingChange({ categoryId: null })}
+                      theme={theme}
+                    />
+                  }
+                  subtitle={`Logs as ${defaultHealthCategoryLabel(healthKey)}`}
+                  testID={`health-default-${healthKey}`}
+                  theme={theme}
+                  title="Default activity"
+                />
+                </Reanimated.View>
+              ) : null}
+              {enabled ? (
+                <Reanimated.View
+                  entering={localPresenceEntering(reduceMotion)}
+                  exiting={localPresenceExiting(reduceMotion)}
+                  layout={localLayoutTransition(reduceMotion)}
+                  style={[styles.healthNameRow, { borderTopColor: theme.border, borderTopWidth: StyleSheet.hairlineWidth }]}>
+                  <Text {...mobileTextProps("control")} style={styles.healthNameLabel}>Name</Text>
+                  <TextInput
+                    accessibilityLabel={`${label} name`}
+                    {...mobileTextProps("input")}
+                    key={`${healthKey}:${mapping.description ?? ""}`}
+                    style={styles.healthNameInput}
+                    defaultValue={mapping.description ?? ""}
+                    placeholder={defaultHealthDescription(healthKey)}
+                    placeholderTextColor={theme.textSecondary}
+                    returnKeyType="done"
+                    testID={`health-name-${healthKey}`}
+                    onEndEditing={(event) => onMappingChange({ description: event.nativeEvent.text.trim() || null })}
+                  />
+                </Reanimated.View>
+              ) : null}
+            </SettingsBlockGroup>
+          </ScrollView>
+          {children}
+        </SwipeDismissSheet>
+      </View>
+    </Modal>
   );
 }
 
