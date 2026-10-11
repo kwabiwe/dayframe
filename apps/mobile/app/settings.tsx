@@ -2665,6 +2665,7 @@ function HealthTypeSheet({
   onMappingChangeRef.current = onMappingChange;
   // Saved once per value; a failure stays retryable and shows the saved Name again (healthNameDraft).
   const [commitName] = useState(() => createNameCommitter({
+    key: healthKey,
     initial: mapping.description ?? "",
     readDraft: () => draftRef.current,
     save: (name) => onMappingChangeRef.current({ description: name || null }),

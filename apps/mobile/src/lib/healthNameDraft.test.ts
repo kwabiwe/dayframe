@@ -5,6 +5,7 @@ function setup(results: boolean[]) {
   let draft = "Old";
   const save = vi.fn(async () => results.shift() ?? true);
   const commit = createNameCommitter({
+    key: "t1",
     initial: "Old",
     readDraft: () => draft,
     showDraft: (value) => { draft = value; },
@@ -40,6 +41,7 @@ describe("Health type Name draft (UIA-085)", () => {
     let resolve!: (ok: boolean) => void;
     let draft = "Old";
     const commit = createNameCommitter({
+      key: "t2",
       initial: "Old",
       readDraft: () => draft,
       showDraft: (value) => { draft = value; },
@@ -60,6 +62,7 @@ describe("Health type Name draft — latest wins (Codex r3)", () => {
     let draft = "Old";
     const saves: string[] = [];
     const commit = createNameCommitter({
+      key: "t2",
       initial: "Old",
       readDraft: () => draft,
       showDraft: (value) => { draft = value; },
@@ -76,5 +79,28 @@ describe("Health type Name draft — latest wins (Codex r3)", () => {
     await first;
     await closing;
     expect(saves).toEqual(["New", "Old"]);
+  });
+});
+
+describe("Health type Name draft — across sheets (Codex r4)", () => {
+  it("queues a reopened sheet's save behind the earlier sheet's, so the newest edit lands last", async () => {
+    let resolveFirst!: (ok: boolean) => void;
+    const saves: string[] = [];
+    const save = (name: string) => {
+      saves.push(name);
+      return saves.length === 1 ? new Promise<boolean>((done) => { resolveFirst = done; }) : Promise.resolve(true);
+    };
+    let first = "A";
+    const sheet1 = createNameCommitter({ key: "walking", initial: "", readDraft: () => first, showDraft: (v) => { first = v; }, save });
+    const p1 = sheet1();
+    first = "B";
+    void sheet1();
+    let second = "C";
+    const sheet2 = createNameCommitter({ key: "walking", initial: "", readDraft: () => second, showDraft: (v) => { second = v; }, save });
+    const p2 = sheet2();
+    resolveFirst(true);
+    await p1;
+    await p2;
+    expect(saves).toEqual(["A", "B", "C"]);
   });
 });
