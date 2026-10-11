@@ -30,6 +30,7 @@ describe("web Today hero (W9)", () => {
   it("separates activities inside a goal hour cell without changing their widths (Codex r1)", () => {
     expect(rule(".df-goal-cell")).not.toContain("gap:");
     expect(rule(".df-goal-cell > span + span")).toContain("box-shadow: inset 2px 0 0 var(--surface-muted);");
-    expect(rule(".df-goal-cell > span + span.is-live")).toContain("inset 2px 0 0 var(--surface-muted), inset -2px 0 0 var(--accent)");
+    // Coral first, so it paints on top of the separator on a very short live slice (Codex r2).
+    expect(rule(".df-goal-cell > span + span.is-live")).toContain("inset -2px 0 0 var(--accent), inset 2px 0 0 var(--surface-muted)");
   });
 });

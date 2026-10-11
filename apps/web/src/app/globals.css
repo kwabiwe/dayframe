@@ -10378,8 +10378,10 @@ dialog.ui-dialog.df-palette {
   box-shadow: inset 2px 0 0 var(--surface-muted);
 }
 
+/* The coral recording edge is listed first so it paints on top: a live slice under 2 px wide
+   still shows coral, not the separator. */
 .df-goal-cell > span + span.is-live {
-  box-shadow: inset 2px 0 0 var(--surface-muted), inset -2px 0 0 var(--accent);
+  box-shadow: inset -2px 0 0 var(--accent), inset 2px 0 0 var(--surface-muted);
 }
 
 .df-ribbon {
