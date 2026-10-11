@@ -11,9 +11,9 @@ type MobileTimeEntry = MobileBootstrap["entries"][number];
 
 export const OPTIMISTIC_TIMER_ID_PREFIX = "optimistic-active-timer:";
 export const MISSING_QUEUED_TIMER_START_MESSAGE =
-  "This timer start is no longer available to update.";
+  "This block's start is no longer available to update.";
 export const MISSING_QUEUED_TIMER_DELETE_MESSAGE =
-  "The timer you started couldn't be found to delete it.";
+  "The block you started couldn't be found to delete it.";
 
 export type BlankTimerStartClaim = {
   entryId: string | null;
@@ -246,14 +246,14 @@ export function activeTimerPresentation(entry: ActiveTimerEntry) {
   if (!entry) {
     return {
       categoryLabel: null,
-      title: "Start task below"
+      title: "Start a block below"
     };
   }
 
   const description = displayTimerDescription(entry);
   return {
     categoryLabel: entry.categoryName ?? "No activity",
-    title: description ?? "Add a task description"
+    title: description ?? "Add a description"
   };
 }
 

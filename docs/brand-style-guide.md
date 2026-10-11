@@ -123,7 +123,7 @@ Eight-digit HEX values below include alpha as the last two digits. RGB entries f
 | `surfaceRaised` | `#1B2230` | `27, 34, 48` | Menus, floating panels and sheets that need elevation. |
 | `surfaceInset` | `#101622` | `16, 22, 34` | Inputs, wells and inset regions. |
 | `surfaceMuted` | `#202838` | `32, 40, 56` | Selected or softly highlighted surfaces; retain a non-colour selection cue. |
-| `border` | `#2A3345` | `42, 51, 69` | Hairline dividers and web-only outlines; not a default iOS container treatment. |
+| `border` | `#2A3345` | `42, 51, 69` | Hairline dividers and the faint edge of floating web chrome (command bar, phone tab bar, popovers, dialogs). Panels and cards are fill-led on both platforms: no outline. |
 | `borderStrong` | `#3B465B` | `59, 70, 91` | Selected outlines where fill cannot communicate state. |
 | `controlBorder` | `#64718A` | `100, 113, 138` | Essential web input/control boundary; at least 3:1 against dark surface and inset roles. |
 | `textPrimary` | `#F7F8FB` | `247, 248, 251` | Main text and values; 18.73:1 on `background`. |
@@ -158,7 +158,7 @@ Eight-digit HEX values below include alpha as the last two digits. RGB entries f
 | `surfaceRaised` | `#FFFFFF` | `255, 255, 255` | Elevated menus, popovers and sheets; on iOS elevation comes from canvas contrast and restrained shadow. |
 | `surfaceInset` | `#F7F8FB` | `247, 248, 251` | Inputs and inset areas. |
 | `surfaceMuted` | `#EEF1F6` | `238, 241, 246` | Selected and muted surfaces; retain a non-colour cue. |
-| `border` | `#DDE2EA` | `221, 226, 234` | Hairline dividers and web-only outlines; not a default iOS container treatment. |
+| `border` | `#DDE2EA` | `221, 226, 234` | Hairline dividers and the faint edge of floating web chrome (command bar, phone tab bar, popovers, dialogs). Panels and cards are fill-led on both platforms: no outline. |
 | `borderStrong` | `#BCC5D2` | `188, 197, 210` | Selected outlines where fill cannot communicate state, such as palette swatches. |
 | `controlBorder` | `#7D8797` | `125, 135, 151` | Essential web input/control boundary; 3.63:1 against white. |
 | `textPrimary` | `#111827` | `17, 24, 39` | Main text and values; 16.39:1 on `background`. |
@@ -205,7 +205,7 @@ On surfaces not yet migrated to Blocks, category colour appears as a dot, border
 On Blocks surfaces, an entry is a solid block filled with its category colour, with its text on the block:
 
 - Each palette entry carries a display value per theme (`lightHex` and `darkHex` in `palette.ts`), more vivid than the stored identity `hex`. Every surface, migrated or not, uses the display value for the current theme, so an activity is the same colour everywhere. Live Activities and Shortcuts use the Midnight value. Stored keys and `hex` never change, so no data migration follows.
-- On-block text is white or a deep ink, whichever measures higher contrast. It must reach 4.5:1 for normal text and 3:1 for large text in both themes. `onBlockTextColor` and `blockColorsFor` in `packages/shared/src/blocks.ts` make this choice for web and iOS, and `blocks.test.ts` checks every palette entry in both themes, together with separation between activity colours and from live coral. `DAYFRAME_BLOCKS` there also holds the on-block white and ink and the radius scale (chip 8, block 10, card 20, sheet 28, pill). A display value that fails both options is adjusted; it is never shipped with failing text.
+- On-block text is white or a deep ink, whichever measures higher contrast. It must reach 4.5:1 for normal text and 3:1 for large text in both themes. `onBlockTextColor` and `blockColorsFor` in `packages/shared/src/blocks.ts` make this choice for web and iOS, and `blocks.test.ts` checks every palette entry in both themes, together with separation between activity colours and from live coral. `DAYFRAME_BLOCKS` there also holds the on-block white and ink and the radius scale (chip 8, block 10, card 20 on the web, phoneCard 22 for ordinary iPhone cards as the prototype's ios.html draws them (the live/idle card and Review deck card keep 26 and 28), sheet 28, pill — also every 44-point round button). A display value that fails both options is adjusted; it is never shipped with failing text.
 - Never place text over a palette colour without that measured choice, and never assume a palette colour is accessible body text on another surface.
 
 Colour remains supplementary: blocks still carry the activity name, duration and state as text.
@@ -235,7 +235,7 @@ Do not add Sofia Pro or any other font. The Dayframe wordmark is outline geometr
 | Timer numerals | Live block odometer 58 on iPhone (scaled to the numeric Dynamic Type cap, shrunk only to fit the card); duration dial up to 38 | 700–800 | Odometer: each digit is laid out on a 1.2 em native text line, centred inside a 1.04 em visual digit cell (0.62 em wide); dial and web timers 1.0–1.15 | `-0.02em` |
 | Report headline | Reports hero total 52 on iPhone; other report and goal totals 24–30 | 700–800 | 1.05–1.2 | `-0.04em` to `-0.02em` |
 
-Use `font-variant-numeric: tabular-nums` on timers, durations, clock labels and report figures. Do not force monospace typography across the interface. Allow Dynamic Type to grow without clipping; labels may wrap before touch targets shrink.
+Use `font-variant-numeric: tabular-nums` on timers, durations, clock labels and report figures. Write every duration one way, with the shared `formatDuration` (`packages/shared`): "6h 25m", "6h", "35m", "<1m" for a positive amount under a minute and "0m" for nothing (audit UIA-042/UIA-207); only a running clock ("0:04:09") and the duration dial keep the clock form. (Still to move: web's own duration helper and the native Calendar's block labels, which round to the nearest minute.) What people read or hear says block and activity — never timer, entry, time entry or task (UIA-100; guarded by `blockWording.contract.test.ts` on iPhone) — counts inside Review say moments ("Loaded 12 of 30 moments."), and paths read "Settings › Sync help" with a single-character ellipsis "…". Do not force monospace typography across the interface. Allow Dynamic Type to grow without clipping; labels may wrap before touch targets shrink.
 
 ### iOS Dynamic Type roles
 

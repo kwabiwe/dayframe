@@ -5,7 +5,10 @@ import type { DayframeThemeMode } from "./theme";
 export const DAYFRAME_BLOCKS = {
   // Text and icons on a solid activity block are white or deep ink, whichever measures higher.
   onBlock: { white: "#FFFFFF", ink: "#0B1020" },
-  radius: { chip: 8, block: 10, card: 20, sheet: 28, pill: 999 },
+  // `card` is the web card; ordinary iPhone cards are 22 (the prototype's ios.html draws them at
+  // 22 px against its shared 20 px token), so they read `phoneCard`. The live/idle card (26) and
+  // the Review deck card (28) keep their own sizes, as in the prototype.
+  radius: { chip: 8, block: 10, card: 20, phoneCard: 22, sheet: 28, pill: 999 },
   minimumTextContrast: 4.5
 } as const;
 

@@ -426,7 +426,7 @@ export function settingsInitials(value: string) {
 const blockStyles = StyleSheet.create({
   account: {
     alignItems: "center",
-    borderRadius: 22,
+    borderRadius: DAYFRAME_BLOCKS.radius.phoneCard,
     flexDirection: "row",
     gap: 14,
     minHeight: 72,

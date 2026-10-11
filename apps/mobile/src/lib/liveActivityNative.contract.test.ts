@@ -38,7 +38,7 @@ describe("native Live Activity presentation contract", () => {
     );
 
     expect(shortcuts).toContain('@Parameter(title: "Activity ID")');
-    expect(shortcuts).toContain('@Parameter(title: "Timer entry ID")');
+    expect(shortcuts).toContain('@Parameter(title: "Block ID")');
     expect(shortcuts).toContain('@Parameter(title: "API base")');
     expect(shortcuts).toContain('@Parameter(title: "Stop request ID")');
     expect(shortcuts).toContain(

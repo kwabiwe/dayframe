@@ -1,4 +1,5 @@
 import { formatDuration } from "../durations";
+
 /** A coordinate-free stop inside one trip, as carried in Review evidence. */
 export type TripStopForPresentation = {
   startedAt: string;
@@ -13,12 +14,12 @@ export type TripStopRow = {
   accessibilityLabel: string;
 };
 
+/** The shared duration ("5m", "1h 5m", "<1m"; UIA-042) and the same whole minutes spoken. */
 function minutesLabel(durationSeconds: number) {
-  // The one Dayframe duration ("6h 25m", "<1m"); the spoken form says the same whole minutes.
   const minutes = Math.floor(Math.max(0, durationSeconds) / 60);
   return {
     short: formatDuration(durationSeconds),
-    spoken: durationSeconds > 0 && minutes === 0 ? "less than a minute" : `${minutes} minute${minutes === 1 ? "" : "s"}`
+    spoken: minutes < 1 ? "less than a minute" : `${minutes} minute${minutes === 1 ? "" : "s"}`
   };
 }
 

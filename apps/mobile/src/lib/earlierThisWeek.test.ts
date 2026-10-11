@@ -46,10 +46,10 @@ describe("earlier this week", () => {
     expect(earlier([entry("old", at(8, 9), at(8, 10))]).every((day) => day.segments.length === 0)).toBe(true);
   });
 
-  it("writes totals the prototype's way", () => {
+  it("writes totals the one Dayframe way (UIA-042)", () => {
     expect(shortDuration(0)).toBe("0m");
     expect(shortDuration(35 * 60)).toBe("35m");
     expect(shortDuration(2 * 3600)).toBe("2h");
-    expect(shortDuration(125 * 60)).toBe("2h05");
+    expect(shortDuration(125 * 60)).toBe("2h 5m");
   });
 });

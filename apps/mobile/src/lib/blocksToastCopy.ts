@@ -1,3 +1,4 @@
+import { formatDuration } from "@dayframe/shared";
 import { paletteColorFor, type DayframeThemeMode } from "@dayframe/shared";
 import { displayTimerDescription } from "./timerPresentation";
 
@@ -30,11 +31,7 @@ export function toastSwatchColor(
 }
 
 function compactDuration(seconds: number) {
-  const minutes = Math.floor(Math.max(0, seconds) / 60);
-  const hours = Math.floor(minutes / 60);
-  if (!hours) return `${minutes}m`;
-  const rest = minutes % 60;
-  return rest ? `${hours}h ${rest}m` : `${hours}h`;
+  return formatDuration(seconds);
 }
 
 export function deletedToastMessage(entries: readonly Pick<ToastEntry, "categoryName" | "description">[]) {

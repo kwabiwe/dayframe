@@ -1,4 +1,5 @@
 import { memo, useEffect, useState, type Ref } from "react";
+import { DAYFRAME_BLOCKS } from "@dayframe/shared";
 import { Pressable, StyleSheet, Text, View, type LayoutChangeEvent } from "react-native";
 import Reanimated, {
   ReduceMotion,
@@ -398,12 +399,12 @@ const styles = StyleSheet.create({
   delta: { overflow: "hidden", borderRadius: 999, paddingHorizontal: 9, paddingVertical: 3, fontSize: 12.5, fontWeight: "700", fontVariant: ["tabular-nums"] },
   // Columns touch (no gap) so each is a full-width, 208-point-tall target: at least 44 points wide
   // from a 375-point screen; Display Zoom at 320 points gives about 39, and nothing overflows.
-  weekCard: { flexDirection: "row", height: 236, borderRadius: 22, paddingHorizontal: 8, paddingTop: 16, paddingBottom: 12 },
+  weekCard: { flexDirection: "row", height: 236, borderRadius: DAYFRAME_BLOCKS.radius.phoneCard, paddingHorizontal: 8, paddingTop: 16, paddingBottom: 12 },
   weekColumn: { flex: 1, minWidth: 0, gap: 8, justifyContent: "flex-end", paddingHorizontal: 3.5 },
   weekStack: { flex: 1, flexDirection: "column-reverse", gap: 3 },
   weekBlock: { borderRadius: 6 },
   weekLabel: { fontSize: 11, fontWeight: "700", textAlign: "center" },
-  monthCard: { borderRadius: 22, padding: 14, gap: 6 },
+  monthCard: { borderRadius: DAYFRAME_BLOCKS.radius.phoneCard, padding: 14, gap: 6 },
   monthRow: { flexDirection: "row" },
   monthDow: { flex: 1, fontSize: 10.5, fontWeight: "700", textAlign: "center" },
   monthCells: { flexDirection: "row", flexWrap: "wrap", rowGap: 6 },
@@ -411,7 +412,7 @@ const styles = StyleSheet.create({
   monthCell: { height: 44, borderRadius: 9, padding: 3, overflow: "hidden", flexDirection: "column-reverse", gap: 2 },
   monthBlock: { borderRadius: 3 },
   monthDate: { position: "absolute", top: 3, left: 5, fontSize: 10, fontWeight: "700" },
-  streak: { flexDirection: "row", alignItems: "center", gap: 12, borderRadius: 22, paddingHorizontal: 16, paddingVertical: 14 },
+  streak: { flexDirection: "row", alignItems: "center", gap: 12, borderRadius: DAYFRAME_BLOCKS.radius.phoneCard, paddingHorizontal: 16, paddingVertical: 14 },
   streakText: { flex: 1, minWidth: 0, gap: 2 },
   streakTitle: { fontSize: 15, fontWeight: "700" },
   streakCells: { flexDirection: "row", gap: 4 },
