@@ -70,7 +70,7 @@ describe("Blocks command timer", () => {
     render(<PersistentTimerBar />);
     const startTimer = runtime.startTimer as ReturnType<typeof vi.fn>;
 
-    fireEvent.keyDown(screen.getByLabelText("Task description"), { key: "1" });
+    fireEvent.keyDown(screen.getByLabelText("Description"), { key: "1" });
     expect(startTimer).not.toHaveBeenCalled();
 
     const popup = document.createElement("button");
@@ -97,6 +97,46 @@ describe("Blocks command timer", () => {
     expect(recording.getAttribute("style")).toContain("--block: light-dark(");
     expect(screen.getByRole("button", { name: "Start Focus (1)" })).not.toBeNull();
     expect(screen.getByRole("button", { name: "Stop timer" })).not.toBeNull();
+  });
+});
+
+describe("Command timer menus and switch toasts (UIA-202/209/210)", () => {
+  it("says Switched with the time logged to the block it replaced, without Undo", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-08-14T09:42:30.000Z"));
+    runtime = runtimeFixture({ activeEntry: timeEntry({ categoryId: "focus", categoryName: "Focus", description: "Plan launch" }) });
+    render(<PersistentTimerBar />);
+    await act(async () => { fireEvent.click(screen.getByRole("button", { name: "Start Writing (2)" })); });
+    expect(runtime.startTimer).toHaveBeenCalledWith({ categoryId: "write", description: "", tagNames: [] });
+    expect(screen.getByRole("status").textContent).toContain("Switched to Writing · 42m logged to Plan launch");
+    expect(screen.queryByRole("button", { name: "Undo" })).toBeNull();
+  });
+
+  it("says Already recording instead of restarting the same block", async () => {
+    runtime = runtimeFixture({ activeEntry: timeEntry({ categoryId: "focus", categoryName: "Focus" }) });
+    render(<PersistentTimerBar />);
+    await act(async () => { fireEvent.click(screen.getByRole("button", { name: "Recording Focus (1)" })); });
+    expect(runtime.startTimer).not.toHaveBeenCalled();
+    expect(screen.getByRole("status").textContent).toContain("Already recording Focus");
+  });
+
+  it("shows no toast for a start with nothing running, or a rejected switch", async () => {
+    runtime = runtimeFixture();
+    render(<PersistentTimerBar />);
+    await act(async () => { fireEvent.click(screen.getByRole("button", { name: "Start Focus (1)" })); });
+    expect(screen.queryByRole("status")).toBeNull();
+    cleanup();
+    runtime = runtimeFixture({ activeEntry: timeEntry({ categoryId: "focus", categoryName: "Focus" }) });
+    (runtime.startTimer as ReturnType<typeof vi.fn>).mockResolvedValue({ ok: false, error: "Offline" });
+    render(<PersistentTimerBar />);
+    await act(async () => { fireEvent.click(screen.getByRole("button", { name: "Start Writing (2)" })); });
+    expect(screen.queryByRole("status")).toBeNull();
+  });
+
+  it("names the running block's menu action Discard running block", () => {
+    runtime = runtimeFixture({ activeEntry: timeEntry({ categoryId: "focus", categoryName: "Focus" }) });
+    render(<PersistentTimerBar />);
+    expect(screen.getByRole("menuitem", { hidden: true }).textContent).toContain("Discard running block");
   });
 });
 

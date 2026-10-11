@@ -42,7 +42,7 @@ describe("persistent timer shell contract", () => {
     expect(styles).toMatch(/\.df-cmd-icon\.ui-icon-button \{[^}]*width: 44px;[^}]*height: 44px;/s);
     expect(styles).not.toContain(".swiss-entrybar-actions");
     expect(timer).toContain('label="More timer actions"');
-    expect(timer).toContain("Delete running task");
+    expect(timer).toContain("Discard running block");
     expect(timer).toContain("void deleteActiveTimer()");
   });
 

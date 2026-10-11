@@ -12,6 +12,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { normalizeTagName, resolveActivityIcon, type DayframeGlyph } from "@dayframe/shared";
 import { CalendarDays, Clock3, Ellipsis, Plus, Trash2 } from "lucide-react";
 import { useAppShellRuntime } from "@/components/AppShellRuntime";
+import { BlocksToast } from "@/components/blocks/BlocksToast";
 import { DayframeIcon } from "@/components/blocks/DayframeIcon";
 import { Odometer } from "@/components/blocks/Odometer";
 import { CategoryPicker, type CreateCategoryOutcome } from "@/components/CategoryPicker";
@@ -28,10 +29,15 @@ import type { BootstrapData } from "@/lib/queries";
 import { shouldStartTimerFromEntrySubmit } from "@/lib/timer-entry-draft";
 import { quickActionTimerDraft } from "@/lib/timer-runtime";
 import { blockStyle } from "@/lib/block-style";
+import { alreadyRecordingToastMessage, startMatchesRunning, switchedToastMessage } from "@/lib/blocks-toast-copy";
 import { parseCommand } from "@/lib/command-parse";
 import { hasOpenDialog, isTypingTarget } from "@/lib/keyboard-ownership";
 
 const TASK_SUGGESTION_LIMIT = 5;
+const NOTICE_MS = 5_000;
+const NOTICE_EXIT_MS = 160;
+
+type TimerNotice = { exiting: boolean; label: string; swatch?: CSSProperties; token: number };
 
 export function PersistentTimerBar({ workspaceMode = false }: { workspaceMode?: boolean }) {
   const {
@@ -53,6 +59,11 @@ export function PersistentTimerBar({ workspaceMode = false }: { workspaceMode?: 
     updateActiveStartTime
   } = useAppShellRuntime();
   const [categoryMenuOpen, setCategoryMenuOpen] = useState(false);
+  // "Switched to …" / "Already recording …" after a quick start (UIA-209; no Undo: no un-switch).
+  const [notice, setNotice] = useState<TimerNotice | null>(null);
+  const noticeSequence = useRef(0);
+  // Phones get the shorter idle prompt (UIA-210); measured after hydration.
+  const [narrowCommand, setNarrowCommand] = useState(false);
   const [suggestionsOpen, setSuggestionsOpen] = useState(false);
   const [hashtagSuggestionsOpen, setHashtagSuggestionsOpen] = useState(false);
   const [startEditorOpen, setStartEditorOpen] = useState(false);
@@ -108,6 +119,31 @@ export function PersistentTimerBar({ workspaceMode = false }: { workspaceMode?: 
         description: timerDraft.description.trim() || active.description
       })
     : undefined;
+
+  // The toast's own lifetime: it leaves after five seconds (160 ms exit), or when replaced.
+  useEffect(() => {
+    if (!notice || notice.exiting) return undefined;
+    const token = notice.token;
+    const leave = setTimeout(() => {
+      setNotice((current) => (current?.token === token ? { ...current, exiting: true } : current));
+    }, NOTICE_MS);
+    return () => clearTimeout(leave);
+  }, [notice]);
+  useEffect(() => {
+    if (!notice?.exiting) return undefined;
+    const token = notice.token;
+    const gone = setTimeout(() => setNotice((current) => (current?.token === token ? null : current)), NOTICE_EXIT_MS);
+    return () => clearTimeout(gone);
+  }, [notice]);
+
+  useEffect(() => {
+    if (typeof window.matchMedia !== "function") return undefined;
+    const media = window.matchMedia("(max-width: 560px)");
+    const update = () => setNarrowCommand(media.matches);
+    update();
+    media.addEventListener("change", update);
+    return () => media.removeEventListener("change", update);
+  }, []);
 
   useEffect(() => {
     if (!active) return undefined;
@@ -274,8 +310,21 @@ export function PersistentTimerBar({ workspaceMode = false }: { workspaceMode?: 
     const draft = quickActionTimerDraft(action.categoryId);
     setCategoryMenuOpen(false);
     setSuggestionsOpen(false);
+    const swatch = action.categoryId ? blockStyle(action.color, action.label) : undefined;
+    // Asking for exactly what is recording would only stop and restart it: say so instead.
+    if (startMatchesRunning(active, { ...draft, categoryId: draft.categoryId || null })) {
+      announce(alreadyRecordingToastMessage(active!), swatch);
+      return;
+    }
+    const previous = active;
     setTimerDraft(draft);
-    void startTimer(draft);
+    void startTimer(draft).then((outcome) => {
+      if (outcome.ok && previous) announce(switchedToastMessage(action.label, previous, Date.now()), swatch);
+    });
+  }
+
+  function announce(label: string, swatch?: CSSProperties) {
+    setNotice({ exiting: false, label, swatch, token: ++noticeSequence.current });
   }
 
   async function chooseTimerSuggestion(suggestion: BootstrapData["taskSuggestions"][number]) {
@@ -354,7 +403,7 @@ export function PersistentTimerBar({ workspaceMode = false }: { workspaceMode?: 
         style={liveCategory ? blockStyle(liveCategory.color, liveCategory.name) : undefined}
       >
         <label className="sr-only swiss-timer-description-label" htmlFor="persistent-timer-description">
-          Task description
+          Description
         </label>
         <span className="sr-only" id="persistent-timer-category-label">Activity</span>
 
@@ -378,7 +427,7 @@ export function PersistentTimerBar({ workspaceMode = false }: { workspaceMode?: 
 
         <div className="df-cmd-field swiss-timer-description-control" ref={suggestionsRef}>
           <InlineTagInput
-            ariaLabel="Task description"
+            ariaLabel="Description"
             className="df-cmd-tags"
             inputId="persistent-timer-description"
             inputRef={descriptionInputRef}
@@ -413,7 +462,7 @@ export function PersistentTimerBar({ workspaceMode = false }: { workspaceMode?: 
               }
             }}
             onSelectedTagNamesChange={(tagNames) => setTimerDraft((current) => ({ ...current, tagNames }))}
-            placeholder={active ? "Add a description" : "What are you working on?"}
+            placeholder={active ? "Add a description" : narrowCommand ? "What's this block?" : "What are you working on?"}
             selectedTagNames={timerDraft.tagNames}
             tags={data.tags}
             value={timerDraft.description}
@@ -600,7 +649,7 @@ export function PersistentTimerBar({ workspaceMode = false }: { workspaceMode?: 
                   type="button"
                 >
                   <Trash2 aria-hidden="true" size={16} />
-                  Delete running task
+                  Discard running block
                 </button>
               </div>
             </>
@@ -672,6 +721,10 @@ export function PersistentTimerBar({ workspaceMode = false }: { workspaceMode?: 
             );
           })}
         </div>
+      ) : null}
+
+      {notice ? (
+        <BlocksToast exiting={notice.exiting} key={notice.token} message={notice.label} swatchStyle={notice.swatch} />
       ) : null}
 
       {isManualEntryOpen ? (
