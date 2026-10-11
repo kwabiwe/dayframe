@@ -17,7 +17,8 @@ import type {
 } from "@dayframe/shared";
 import { LocationReviewCorrectionEditor } from "@/components/location/LocationReviewCorrectionEditor";
 import { mobileTextProps } from "@/lib/mobileTypography";
-import { MobileBackButton } from "@/components/MobileBackButton";
+import { BlocksNavHeader, usePreviousScreenLabel } from "@/components/BlocksNavHeader";
+import { blocksNavOrigin, evidenceBackLabel } from "@/lib/blocksNav";
 import {
   AuthRequiredError,
   fetchBootstrap,
@@ -61,7 +62,9 @@ type EvidenceScreenState =
   | { status: "unavailable"; message: string };
 
 export default function LocationReviewDetailScreen() {
-  const { id } = useLocalSearchParams<{ id: string }>();
+  const params = useLocalSearchParams<{ from?: string | string[]; id: string }>();
+  const { id } = params;
+  const backLabel = usePreviousScreenLabel() ?? evidenceBackLabel(blocksNavOrigin(params.from));
   const isFocused = useIsFocused();
   const { styles, theme } = useMobileTheme();
   const { isOffline, isOnline, reconnectEpoch } = useConnectivity();
@@ -438,15 +441,7 @@ export default function LocationReviewDetailScreen() {
 
   return (
     <SafeAreaView style={styles.safeArea}>
-      <View style={styles.settingsFloatingHeader}>
-        <View style={styles.settingsHeader}>
-          <MobileBackButton
-            accessibilityLabel="Back to Review"
-            onPress={() => router.back()}
-          />
-          <Text {...mobileTextProps("screenHeading")} style={styles.settingsTitle}>Location evidence</Text>
-        </View>
-      </View>
+      <BlocksNavHeader backLabel={backLabel} onBack={() => router.back()} title="Location evidence" />
 
       {screenState.status === "hydrating" ? (
         showHydrationFeedback ? (

@@ -130,6 +130,8 @@ import {
   shouldShowSettingsRefreshSpinner
 } from "@/lib/settingsRefresh";
 import { clampSettingsScrollOffset, settingsScrollNeedsClamp } from "@/lib/settingsScroll";
+import { BlocksNavHeader, usePreviousScreenLabel } from "@/components/BlocksNavHeader";
+import { blocksNavOrigin, settingsBackLabel, settingsSectionTitle } from "@/lib/blocksNav";
 import { mobileTextProps } from "@/lib/mobileTypography";
 import { createGoalSaver, publishSavedTimeGoals, type TimeGoals } from "@/lib/settingsGoals";
 import Constants from "expo-constants";
@@ -287,7 +289,7 @@ export default function SettingsScreen() {
     themePreference
   } = useMobileTheme();
   const hapticsEnabled = useHapticsPreference();
-  const params = useLocalSearchParams<{ section?: string | string[] }>();
+  const params = useLocalSearchParams<{ from?: string | string[]; section?: string | string[] }>();
   const routeSettingsSection = normalizeSettingsSection(params.section);
   const settingsSection = routeSettingsSection;
   const cachedSnapshot = readSettingsSnapshot();
@@ -753,6 +755,7 @@ export default function SettingsScreen() {
     ? motionFitnessPresentation(motionFitnessStatus, locationDiagnostics?.locationLearningEnabled === true)
     : null;
   const settingsTitle = settingsSectionTitle(settingsSection);
+  const backLabel = usePreviousScreenLabel() ?? settingsBackLabel(settingsSection, blocksNavOrigin(params.from));
   const categoryCount = data?.categories.length ?? 0;
   const workspaceLabel = data?.workspace?.name ?? "Default workspace";
   const pinnedCategoryCount = (data?.categories ?? []).filter((category) => category.isPinned).length;
@@ -1689,21 +1692,7 @@ export default function SettingsScreen() {
   return (
     <SafeAreaView style={styles.safeArea}>
       <Stack.Screen options={{ gestureEnabled: !signingOut }} />
-      <View style={styles.settingsFloatingHeader}>
-        <View style={styles.settingsHeader}>
-          <Pressable
-            accessibilityLabel="Back"
-            accessibilityRole="button"
-            accessibilityState={{ disabled: signingOut }}
-            disabled={signingOut}
-            style={pressable(styles.iconButton, styles.buttonPressed)}
-            onPress={goBack}
-          >
-            <BackGlyph color={theme.accent} />
-          </Pressable>
-          <Text {...mobileTextProps("screenHeading")} style={styles.settingsTitle}>{settingsTitle}</Text>
-        </View>
-      </View>
+      <BlocksNavHeader backDisabled={signingOut} backLabel={backLabel} onBack={goBack} title={settingsTitle} />
       <ScrollView
         key={settingsSection}
         ref={settingsScrollRef}
@@ -2627,30 +2616,12 @@ function LocationInformationSheet({
   );
 }
 
-
 function CloseGlyph({ color }: { color: string }) {
   return (
     <Svg width={18} height={18} viewBox="0 0 24 24">
       <Path d="m7 7 10 10M17 7 7 17" stroke={color} strokeLinecap="round" strokeWidth={2} />
     </Svg>
   );
-}
-
-function settingsSectionTitle(section: SettingsSection) {
-  switch (section) {
-    case "profile":
-      return "Account";
-    case "categories":
-      return "Activities";
-    case "automations":
-      return "Location";
-    case "health":
-      return "Apple Health";
-    case "sync":
-      return "Sync help";
-    case "index":
-      return "Settings";
-  }
 }
 
 function normalizeSettingsSection(value: string | string[] | undefined): SettingsSection {
@@ -2665,14 +2636,6 @@ function normalizeSettingsSection(value: string | string[] | undefined): Setting
     default:
       return "index";
   }
-}
-
-function BackGlyph({ color }: { color: string }) {
-  return (
-    <Svg width={20} height={20} viewBox="0 0 24 24">
-      <Path d="M15 5 8 12l7 7" fill="none" stroke={color} strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.3} />
-    </Svg>
-  );
 }
 
 function nextCategoryColor(categories: Category[]): DayframePaletteKey {
