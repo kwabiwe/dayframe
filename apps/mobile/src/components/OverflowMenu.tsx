@@ -265,28 +265,29 @@ export function OverflowMenu({
           <ScrollView alwaysBounceVertical={false} style={styles.overflowMenuScroll}>
             <Pressable
               ref={firstActionRef}
-              accessibilityLabel="Edit details"
+              accessibilityLabel="Edit before logging"
               accessibilityRole="button"
               disabled={disabled || !interactive}
               style={pressable(styles.overflowMenuRow, styles.buttonPressed)}
               onPress={() => select("edit")}
             >
-              <Text style={styles.overflowMenuRowText}>Edit details</Text>
+              <Text style={styles.overflowMenuRowText}>Edit before logging</Text>
             </Pressable>
             <View style={styles.overflowMenuDivider} />
             <Pressable
-              accessibilityLabel="Dismiss suggestion"
+              accessibilityLabel="Skip"
               accessibilityRole="button"
               disabled={disabled || !interactive}
               style={pressable(styles.overflowMenuRow, styles.buttonPressed)}
               onPress={() => select("dismiss")}
             >
-              <Text style={styles.overflowMenuDangerText}>Dismiss suggestion</Text>
+              {/* The deck's Skip (UIA-024): not destructive, it can be undone. */}
+              <Text style={styles.overflowMenuRowText}>Skip</Text>
             </Pressable>
             {bulkSkip ? (
               <>
                 <View style={styles.overflowMenuDivider} />
-                <Text accessibilityRole="header" style={styles.overflowMenuSectionLabel}>Review all</Text>
+                <Text accessibilityRole="header" style={styles.overflowMenuSectionLabel}>Clear the pile</Text>
                 <Pressable
                   accessibilityHint="Asks before skipping every moment older than 7 days."
                   accessibilityLabel="Skip older than 7 days"
