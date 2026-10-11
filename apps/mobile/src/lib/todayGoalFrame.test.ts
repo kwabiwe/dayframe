@@ -100,7 +100,7 @@ describe("buildTodayGoalFrame", () => {
     expect(buildTodayGoalFrame({ entries: [], goalMinutes: 20, nowMs: day }).cells).toHaveLength(1);
   });
 
-  it("counts overlapping time once, in the colour of the entry that started first", () => {
+  it("counts overlapping time once toward the goal, in the colour of the entry that started first; the total keeps every block's time (UIA-305)", () => {
     const frame = buildTodayGoalFrame({
       entries: [
         entry("work", at(9), at(11), "blue"),
@@ -110,7 +110,9 @@ describe("buildTodayGoalFrame", () => {
       goalMinutes: 480,
       nowMs: day + 12 * 3_600_000,
     });
-    expect(frame.totalSeconds).toBe(150 * 60);
+    // 2h + 1h + 30m logged; 2h 30m covered fills the goal.
+    expect(frame.totalSeconds).toBe(210 * 60);
+    expect(frame.goalSeconds).toBe(150 * 60);
     expect(frame.percent).toBe(31);
     expect(frame.cells[0]).toEqual([{ key: "work:0", color: "blue", fraction: 1, live: false }]);
     expect(frame.cells[1]).toEqual([{ key: "work:1", color: "blue", fraction: 1, live: false }]);

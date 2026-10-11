@@ -774,6 +774,8 @@ export async function reprocessExistingHealthReviewItems(
     mappings?: HealthAutoLogMappings;
     signal?: AbortSignal;
     deadlineAt?: number;
+    /** Checked before each batch request; false stops the run there (a session that changed). */
+    beforeRequest?: () => Promise<boolean>;
   } = {},
 ) {
   const now = Date.now();
@@ -813,7 +815,7 @@ async function reprocessHealthReviewItemBatches(
   preferences: HealthImportPreferences,
   mappings: HealthAutoLogMappings,
   force: boolean,
-  options: { signal?: AbortSignal; deadlineAt?: number } = {},
+  options: { signal?: AbortSignal; deadlineAt?: number; beforeRequest?: () => Promise<boolean> } = {},
 ) {
   const startedAt = Date.now();
   let combined: HealthReviewReprocessResult | null = null;
@@ -824,6 +826,13 @@ async function reprocessHealthReviewItemBatches(
   );
 
   for (let batch = 0; batch < HEALTH_REPROCESS_MAX_BATCHES; batch += 1) {
+    if (options.beforeRequest && !(await options.beforeRequest().catch(() => false))) {
+      if (combined) {
+        combined.partial = true;
+        combined.hasMore = true;
+      }
+      break;
+    }
     const result = await reprocessHealthReviewItems(preferences, {
       limit: HEALTH_REPROCESS_BATCH_SIZE,
       force,
