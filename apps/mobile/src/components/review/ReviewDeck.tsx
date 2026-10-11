@@ -1,3 +1,4 @@
+import { backActionLabel } from "@/lib/blocksNav";
 import { memo, useEffect, useState, type ReactNode } from "react";
 import { Pressable, StyleSheet, Text, TextInput, View } from "react-native";
 import { Gesture, GestureDetector } from "react-native-gesture-handler";
@@ -859,7 +860,7 @@ export function ReviewDeckFinished({
         testID="review-deck-back-to-today"
       >
         <Text {...mobileTextProps("control")} style={[deckStyles.finishedButtonText, { color: theme.onAccent }]}>
-          Back to {backLabel}
+          {backActionLabel(backLabel)}
         </Text>
       </Pressable>
       {footer}

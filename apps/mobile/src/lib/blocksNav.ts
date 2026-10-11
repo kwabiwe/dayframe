@@ -82,9 +82,21 @@ export function routeBackLabel(route: BlocksNavRoute | undefined): string | null
   }
 }
 
-/** The label for the route just below `key` in a stack's routes, if it can be named. */
+/** A back button that can't name its screen just says "Back" (never a wrong name). */
+export const GENERIC_BACK_LABEL = "Back";
+
+/**
+ * The label for the route just below `key` in a stack's routes: its name, or "Back" when the
+ * screen below can't be named (the place editor, onboarding, anything added later). Null only
+ * when nothing is below, so callers fall back to their `from` param or default.
+ */
 export function previousRouteBackLabel(routes: readonly BlocksNavRoute[] | undefined, key: string) {
   const all = routes ?? [];
   const index = all.findIndex((route) => route.key === key);
-  return index > 0 ? routeBackLabel(all[index - 1]) : null;
+  return index > 0 ? routeBackLabel(all[index - 1]) ?? GENERIC_BACK_LABEL : null;
+}
+
+/** "Back to Settings", or just "Back" for the generic label. */
+export function backActionLabel(label: string) {
+  return label === GENERIC_BACK_LABEL ? GENERIC_BACK_LABEL : `Back to ${label}`;
 }

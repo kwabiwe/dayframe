@@ -13,7 +13,7 @@ const pushedPages = {
 
 describe("Blocks navigation bar (UIA-001)", () => {
   it("is a text back naming the previous screen with a centred title", () => {
-    expect(header).toContain("accessibilityLabel={`Back to ${backLabel}`}");
+    expect(header).toContain("accessibilityLabel={backActionLabel(backLabel)}");
     expect(header).toContain('accessibilityRole="header"');
     expect(header).toContain("styles.blocksNavTrailing");
   });

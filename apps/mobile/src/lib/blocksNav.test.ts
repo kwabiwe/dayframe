@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { blocksNavOrigin, evidenceBackLabel, previousRouteBackLabel, settingsBackLabel, settingsSectionTitle } from "./blocksNav";
+import { backActionLabel, blocksNavOrigin, evidenceBackLabel, previousRouteBackLabel, settingsBackLabel, settingsSectionTitle } from "./blocksNav";
 
 describe("Blocks nav back labels", () => {
   it("names the screen the back button returns to", () => {
@@ -41,7 +41,12 @@ describe("back label from the navigation stack", () => {
     expect(previousRouteBackLabel([tabs("reports"), { key: "s", name: "settings" }], "s")).toBe("Reports");
     expect(previousRouteBackLabel([{ key: "r", name: "review" }, { key: "s", name: "settings", params: { section: "sync" } }], "s")).toBe("Review");
     expect(previousRouteBackLabel([{ key: "e", name: "review/[id]" }, { key: "s", name: "settings" }], "s")).toBe("Location evidence");
-    expect(previousRouteBackLabel([{ key: "o", name: "onboarding" }, { key: "s", name: "settings" }], "s")).toBeNull();
+    // A screen below that can't be named gives a plain "Back", never a wrong name (Review opened
+    // from the evening reminder over the place editor or onboarding).
+    expect(previousRouteBackLabel([{ key: "o", name: "onboarding" }, { key: "r", name: "review" }], "r")).toBe("Back");
+    expect(previousRouteBackLabel([tabs("today"), { key: "e", name: "place-editor" }, { key: "r", name: "review" }], "r")).toBe("Back");
+    expect(backActionLabel("Back")).toBe("Back");
+    expect(backActionLabel("Calendar")).toBe("Back to Calendar");
     expect(previousRouteBackLabel([{ key: "s", name: "settings" }], "s")).toBeNull();
     expect(previousRouteBackLabel(undefined, "s")).toBeNull();
     expect(settingsSectionTitle("toString")).toBe("Settings");

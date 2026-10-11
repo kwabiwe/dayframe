@@ -4,7 +4,7 @@ import Svg, { Path } from "react-native-svg";
 import { mobileTextProps } from "@/lib/mobileTypography";
 import { pressable, useMobileTheme } from "@/lib/mobileTheme";
 import { useNavigation, useRoute } from "expo-router";
-import { previousRouteBackLabel, type BlocksNavRoute } from "@/lib/blocksNav";
+import { backActionLabel, previousRouteBackLabel, type BlocksNavRoute } from "@/lib/blocksNav";
 
 /**
  * The name of the screen this one returns to, read from the route just below it in its stack
@@ -44,7 +44,7 @@ export function BlocksNavHeader({
   return (
     <View style={styles.blocksNav}>
       <Pressable
-        accessibilityLabel={`Back to ${backLabel}`}
+        accessibilityLabel={backActionLabel(backLabel)}
         accessibilityRole="button"
         accessibilityState={{ disabled: backDisabled }}
         disabled={backDisabled}
