@@ -744,7 +744,11 @@ export function CategoryPicker({
               }}
               onKeyDown={(event) => {
                 // Keys that drive an input method's candidates stay with the input method.
-                if (event.nativeEvent.isComposing || event.keyCode === 229) return;
+                // (Escape that cancels a candidate must not reach the menu's close handler either.)
+                if (event.nativeEvent.isComposing || event.keyCode === 229) {
+                  event.stopPropagation();
+                  return;
+                }
                 if (event.key === "ArrowDown") {
                   event.preventDefault();
                   categoryOptions()[listedCategories.length ? 1 : 0]?.focus();

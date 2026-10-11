@@ -362,6 +362,8 @@ describe("TimeEntryQuickEditorModal", () => {
     await userEvent.type(search, "nin{Enter}");
     const ninth = await screen.findByRole("radio", { name: "Ninth" });
     expect(ninth.getAttribute("aria-checked")).toBe("true");
+    // Choosing closes the picker, which hands focus back to All activities on the next frame.
+    await waitFor(() => expect(document.activeElement?.textContent).toContain("All activities"));
 
     ninth.focus();
     await userEvent.keyboard(" ");
@@ -380,6 +382,9 @@ describe("TimeEntryQuickEditorModal", () => {
     search.focus();
     fireEvent.keyDown(search, { key: "ArrowDown", keyCode: 229, isComposing: true });
     expect(document.activeElement).toBe(search);
+    fireEvent.keyDown(search, { key: "Escape", keyCode: 229, isComposing: true });
+    expect(document.activeElement).toBe(search);
+    expect(screen.getByRole("searchbox", { name: "Search activities" })).not.toBeNull();
 
     await userEvent.type(search, "nin{Enter}");
     await screen.findByRole("radio", { name: "Ninth" });
