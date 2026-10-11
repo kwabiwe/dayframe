@@ -182,7 +182,7 @@ describe("Live Activity durable remote sync", () => {
       activityId: "activity-attacker",
       activeEntryId: "80000000-0000-4000-8000-000000000001",
       environment: "production"
-    })).rejects.toThrow("The running timer is no longer active.");
+    })).rejects.toThrow("The running block is no longer active.");
 
     const write = database.writes[0];
     expect(write).toBeUndefined();

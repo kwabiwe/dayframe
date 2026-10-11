@@ -3408,7 +3408,7 @@ describe("grouped time entry descriptions", () => {
     await expect(updateTimeEntryDescriptions(["entry-1", "entry-2"], null, session))
       .rejects.toEqual(expect.objectContaining({
         name: "TimeEntryValidationError",
-        message: "Grouped descriptions can only update completed entries."
+        message: "Grouped descriptions can only update completed blocks."
       }));
     expect(client.query).toHaveBeenCalledWith("rollback");
     expect(client.query.mock.calls.some(([statement]) => String(statement).includes("set description"))).toBe(false);
@@ -3438,7 +3438,7 @@ describe("grouped time entry descriptions", () => {
 
   it("rejects a duplicate-only target before opening a transaction", async () => {
     await expect(updateTimeEntryDescriptions(["entry-1", "entry-1"], "Planning", session))
-      .rejects.toEqual(expect.objectContaining({ message: "Choose at least two grouped entries." }));
+      .rejects.toEqual(expect.objectContaining({ message: "Choose at least two grouped blocks." }));
     expect(mocks.pool.connect).not.toHaveBeenCalled();
   });
 });
