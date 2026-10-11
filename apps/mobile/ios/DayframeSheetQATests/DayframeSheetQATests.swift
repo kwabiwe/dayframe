@@ -619,7 +619,8 @@ final class DayframeSheetQATests: XCTestCase {
       state: deleted
     )
 
-    let closeSuggestions = elementWithLabel("Close Suggestions")
+    // The Recent list's Close (UIA-021), found by its test ID: "Close" alone is not unique.
+    let closeSuggestions = app.descendants(matching: .any)["historical-suggestions-close"]
     if closeSuggestions.waitForExistence(timeout: 2) {
       closeSuggestions.tap()
       _ = try waitForSheet("historical Suggestions closed before Add a tag") { state in
