@@ -27,7 +27,6 @@ import { pendingReviewSpans } from "@/lib/today-view";
 import {
   dateTimeLocalInputToIso,
   formatDate,
-  formatCompactHoursMinutes,
   formatDuration,
   formatTime
 } from "@/lib/format";
@@ -70,6 +69,8 @@ import {
   type TimelineView
 } from "@/lib/timeline-view";
 import { reportsHrefForCustomRange } from "@/lib/report-filters";
+import { calendarHeadModel } from "@/lib/calendar-head";
+import { CalendarHead } from "@/components/calendar/CalendarHead";
 import type {
   CalendarEntryCompactCreatePlan,
   CalendarEntryCompactSavePlan
@@ -396,11 +397,25 @@ export function TimeReviewViews({
   const dayReportTo = toTimelineDateKey(addDays(ranges.day.end, -1));
   const weekReportFrom = toTimelineDateKey(ranges.week.start);
   const weekReportTo = toTimelineDateKey(addDays(ranges.week.end, -1));
-  const dayTotalLabel = formatCompactHoursMinutes(dayAnalysis.totalLoggedSeconds);
-  const weekTotalLabel = formatCompactHoursMinutes(weekAnalysis.totalLoggedSeconds);
+
+  const headModel = calendarHeadModel({
+    dayLoggedSeconds: dayAnalysis.totalLoggedSeconds,
+    entries: visibleWeekEntries,
+    nowMs: capturedNow.getTime(),
+    selectedDay: ranges.day.start,
+    weekDays: ranges.weekDays,
+    weekLoggedSeconds: weekAnalysis.totalLoggedSeconds
+  });
 
   return (
     <section className="timeline-workspace">
+      <CalendarHead
+        dayReportHref={reportsHrefForCustomRange(dayReportFrom, dayReportTo)}
+        disabled={isDateLoading}
+        model={headModel}
+        onSelectDay={(date) => void navigate({ date })}
+        weekReportHref={reportsHrefForCustomRange(weekReportFrom, weekReportTo)}
+      />
       <section
         className="timeline-range-toolbar"
         aria-busy={isDateLoading}
@@ -441,23 +456,6 @@ export function TimeReviewViews({
             </button>
           )}
         </div>
-
-        <nav className="timeline-range-totals" aria-label="Open Timeline totals in Reports">
-          <Link
-            aria-label={`Open Day report for ${dayReportFrom}, total ${dayTotalLabel}`}
-            href={reportsHrefForCustomRange(dayReportFrom, dayReportTo)}
-          >
-            <span>Day</span>
-            <strong className="tabular">{dayTotalLabel}</strong>
-          </Link>
-          <Link
-            aria-label={`Open Week report for ${weekReportFrom} to ${weekReportTo}, total ${weekTotalLabel}`}
-            href={reportsHrefForCustomRange(weekReportFrom, weekReportTo)}
-          >
-            <span>Week</span>
-            <strong className="tabular">{weekTotalLabel}</strong>
-          </Link>
-        </nav>
 
         <div className="timeline-range-controls">
           <SegmentedControl
@@ -1145,6 +1143,15 @@ export function CalendarReview({
           })}
 
           <div className="calendar-time-axis" style={{ height: calendarHeight }}>
+            {visibleDays.some((day) => sameDay(day, today)) ? (
+              <span
+                aria-hidden="true"
+                className="calendar-now-pill"
+                style={{ top: Math.round(((minutesFromDate(capturedNow) - calendarHours.startHour * 60) / 60) * rowHeight) }}
+              >
+                {formatTime(capturedNow)}
+              </span>
+            ) : null}
             {axisMarks.map((mark) => (
               <div key={mark.key}>
                 <span

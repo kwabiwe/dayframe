@@ -5895,7 +5895,7 @@ kbd {
 .timeline-range-toolbar {
   display: grid;
   min-width: 0;
-  grid-template-columns: minmax(300px, 1fr) auto minmax(390px, auto);
+  grid-template-columns: minmax(300px, 1fr) minmax(390px, auto);
   align-items: center;
   gap: var(--web-gap-lg);
   border-top: 1px solid var(--line);
@@ -5981,40 +5981,6 @@ kbd {
   font-weight: 600;
 }
 
-.timeline-range-totals {
-  display: grid;
-  min-width: 200px;
-  grid-template-columns: repeat(2, minmax(92px, 1fr));
-  gap: var(--web-gap-sm);
-  margin: 0;
-}
-
-.timeline-range-totals > div {
-  display: grid;
-  min-height: var(--web-control-height);
-  align-content: center;
-  gap: 2px;
-  border-radius: var(--web-radius-control);
-  background: var(--surface-inset);
-  padding: 7px var(--web-control-padding-inline);
-}
-
-.timeline-range-totals dt,
-.timeline-range-totals dd {
-  margin: 0;
-}
-
-.timeline-range-totals dt {
-  color: var(--muted);
-  font-size: 10px;
-  font-weight: 600;
-}
-
-.timeline-range-totals dd {
-  color: var(--foreground);
-  font-size: 13px;
-  font-weight: 700;
-}
 
 .timeline-range-controls {
   display: flex;
@@ -7189,11 +7155,6 @@ kbd {
 
   .timeline-period-trigger strong {
     white-space: nowrap;
-  }
-
-  .timeline-range-totals {
-    width: 100%;
-    min-width: 0;
   }
 
   .timeline-range-controls {
@@ -9020,7 +8981,7 @@ dialog.ui-dialog.manual-entry-dialog {
 }
 
 .swiss-timeline-surface .timeline-range-toolbar {
-  grid-template-columns: max-content max-content minmax(0, 1fr);
+  grid-template-columns: max-content minmax(0, 1fr);
   gap: 12px;
   border-top: 0;
   border-bottom: 1px solid var(--line);
@@ -9053,42 +9014,6 @@ dialog.ui-dialog.manual-entry-dialog {
   border-color: var(--control-border);
 }
 
-.timeline-range-totals {
-  display: grid;
-  min-width: 0;
-  grid-template-columns: repeat(2, max-content);
-  gap: 0;
-  overflow: hidden;
-  border-radius: var(--web-radius-control);
-  background: var(--surface-inset);
-}
-
-.timeline-range-totals > a {
-  display: flex;
-  min-height: var(--web-control-height);
-  align-items: center;
-  gap: 8px;
-  padding: 0 11px;
-  color: var(--foreground);
-  text-decoration: none;
-}
-
-.timeline-range-totals > a + a {
-  border-left: 1px solid var(--line);
-}
-
-.timeline-range-totals span {
-  color: var(--muted);
-  font-size: 13px;
-  font-weight: 650;
-  text-transform: uppercase;
-}
-
-.timeline-range-totals strong {
-  font-size: 13px;
-  font-weight: 750;
-  white-space: nowrap;
-}
 
 .timeline-range-controls {
   justify-content: flex-end;
@@ -9412,10 +9337,6 @@ dialog.ui-dialog.manual-entry-dialog {
   .swiss-timeline-surface .timeline-range-navigation {
     width: 100%;
     grid-template-columns: var(--web-icon-button-size) minmax(0, 1fr) var(--web-icon-button-size);
-  }
-
-  .timeline-range-totals {
-    width: fit-content;
   }
 
   .swiss-timeline-surface .timeline-range-controls {
@@ -11290,9 +11211,11 @@ dialog.ui-dialog.df-palette {
   z-index: 14 !important;
 }
 
+/* The now line runs behind the blocks (Trello: it crossed the running block's text); its dot
+   stays at the left edge and the time shows in a pill in the time column. */
 .calendar-now-line {
   position: absolute;
-  z-index: 13;
+  z-index: 1;
   right: 0;
   left: 0;
   height: 2px;
@@ -13254,5 +13177,176 @@ dialog.ui-dialog.df-rf-dialog {
   .df-mday-stack > i,
   .df-donut-seg {
     transition: none;
+  }
+}
+
+.calendar-now-pill {
+  position: absolute;
+  z-index: 3;
+  right: 4px;
+  transform: translateY(-50%);
+  border-radius: 999px;
+  background: var(--accent);
+  padding: 2px 7px;
+  color: var(--on-accent);
+  font-size: 11px;
+  font-weight: 750;
+  font-variant-numeric: tabular-nums;
+  pointer-events: none;
+}
+
+/* Calendar page head (Trello: Calendar page improvements + consistency): the month heading, the
+   chosen day's framed time, and the week strip with per-day activity bars and the week total. */
+.df-cal-head {
+  flex: none;
+  padding: 18px 18px 14px;
+}
+
+.df-cal-framed {
+  color: inherit;
+  text-decoration: none;
+}
+
+.df-cal-framed:hover {
+  text-decoration: underline;
+}
+
+.df-cal-week {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 14px;
+}
+
+.df-cal-days {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(40px, 1fr));
+  gap: 4px;
+}
+
+.df-cal-day {
+  display: grid;
+  min-height: 44px;
+  justify-items: center;
+  gap: 3px;
+  border: 0;
+  border-radius: 14px;
+  background: transparent;
+  padding: 5px 0 6px;
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+
+.df-cal-day small {
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.df-cal-day b {
+  display: grid;
+  width: 30px;
+  height: 30px;
+  place-items: center;
+  border-radius: 50%;
+  color: var(--foreground);
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.df-cal-day.is-today b {
+  color: var(--accent-text);
+}
+
+.df-cal-day[aria-pressed="true"] b {
+  background: var(--foreground);
+  color: var(--background);
+}
+
+.df-cal-day:hover:not(:disabled) {
+  background: var(--surface-muted);
+}
+
+.df-cal-day:disabled {
+  cursor: progress;
+}
+
+.df-cal-day-bars {
+  display: flex;
+  height: 4px;
+  gap: 2px;
+}
+
+.df-cal-day-bars i {
+  width: 5px;
+  border-radius: 2px;
+}
+
+.df-cal-day-bars .df-cal-day-none {
+  background: var(--muted);
+}
+
+.df-cal-weektotal {
+  color: var(--text-secondary);
+  font-size: 13px;
+  font-weight: 650;
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.df-cal-weektotal:hover {
+  color: var(--foreground);
+  text-decoration: underline;
+}
+
+/* Phones: a compact head so the calendar keeps its room. Title and week total share the first
+   row, the day strip (44 px targets) the second. */
+@media (max-width: 760px) {
+  .df-cal-head {
+    display: grid;
+    grid-template-areas: "title total" "days days";
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: start;
+    gap: 6px 12px;
+    padding: 10px 12px 6px;
+  }
+
+  .df-cal-head > div:first-child {
+    grid-area: title;
+    min-width: 0;
+  }
+
+  .df-cal-head h1 {
+    font-size: 24px;
+  }
+
+  .df-cal-head p {
+    margin-top: 0;
+    font-size: 13px;
+  }
+
+  .df-cal-week {
+    display: contents;
+  }
+
+  .df-cal-days {
+    grid-area: days;
+    width: 100%;
+  }
+
+  .df-cal-weektotal {
+    grid-area: total;
+    padding-top: 6px;
+  }
+
+  .df-cal-day {
+    gap: 2px;
+    padding: 2px 0 4px;
+  }
+
+  .df-cal-day b {
+    width: 28px;
+    height: 28px;
   }
 }

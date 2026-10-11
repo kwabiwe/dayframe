@@ -11,14 +11,18 @@ describe("Calendar in Blocks contract", () => {
     expect(styles).toMatch(/\.calendar-time-block\.df-block \.calendar-entry-category,[\s\S]*?\{[^}]*color: color-mix\(in srgb, var\(--on-block\) 80%, transparent\);/);
   });
 
-  it("layers Review suggestions above entries' lanes but below a hovered, selected or resizing entry and the now line", () => {
+  it("layers Review suggestions above entries' lanes but below a hovered, selected or resizing entry; the now line runs behind every block", () => {
     const zOf = (selector: RegExp) => Number(styles.match(selector)?.[1]);
     const review = zOf(/\.calendar-review-block \{[^}]*z-index: (\d+);/);
     const raised = zOf(/\.calendar-time-block\.is-resizing,[\s\S]*?\{\s*z-index: (\d+) !important;/);
     const now = zOf(/\.calendar-now-line \{[^}]*z-index: (\d+);/);
     expect(review).toBeGreaterThan(10);
     expect(raised).toBeGreaterThan(review);
-    expect(now).toBeGreaterThan(review);
+    // Trello (Calendar page improvements): the now line no longer crosses a block's text. Entry
+    // lanes start at z-index 2, so the line sits under all of them; its time shows in the axis pill.
+    expect(now).toBeLessThan(2);
+    expect(styles).toMatch(/\.calendar-now-pill \{[^}]*position: absolute;/);
+    expect(timeline).toMatch(/className="calendar-now-pill"[\s\S]{0,200}?\{formatTime\(capturedNow\)\}/);
     // Sticky day headings stay above everything in the columns.
     expect(raised).toBeLessThan(40);
   });
