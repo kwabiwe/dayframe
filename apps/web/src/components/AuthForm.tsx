@@ -9,7 +9,7 @@ import { Button, Field, IconButton, TextField } from "@/components/ui/Primitives
 type AuthMode = "login" | "signup";
 type AuthFormStatus = "idle" | "submitting" | "opening" | "error" | "email-confirmation";
 
-export function AuthForm({ mode }: { mode: AuthMode }) {
+export function AuthForm({ mode, next = null }: { mode: AuthMode; next?: string | null }) {
   const [status, setStatus] = useState<AuthFormStatus>("idle");
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
@@ -29,8 +29,9 @@ export function AuthForm({ mode }: { mode: AuthMode }) {
   useEffect(() => {
     if (status !== "opening" || navigationStarted.current) return;
     navigationStarted.current = true;
-    window.location.replace("/");
-  }, [status]);
+    // Back to where sign-in was asked for (a checked same-site path), keeping its #section.
+    window.location.replace(next ? `${next}${window.location.hash}` : "/");
+  }, [next, status]);
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();

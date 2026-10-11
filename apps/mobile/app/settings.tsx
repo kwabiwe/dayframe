@@ -1198,7 +1198,7 @@ export default function SettingsScreen() {
     void confirmForSession({
       eyebrow: "Sync help",
       title: "Clear unreadable changes on this iPhone?",
-      message: "These changes couldn't be read and don't belong to any account, so they can't be sent. Clearing removes only them.",
+      message: "These changes couldn't be read, and Dayframe can't tell which account they belong to, so they can't be sent. Clearing removes only them.",
       confirmLabel: "Clear",
       confirmHint: "This can't be undone.",
       onConfirm: () => {
@@ -1692,7 +1692,7 @@ export default function SettingsScreen() {
     const unsynchronisedCount =
       diagnostics.waitingCount + diagnostics.needsAttentionCount;
     const reviewWarning = unsynchronisedCount > 0
-      ? `${unsynchronisedCount} Review ${unsynchronisedCount === 1 ? "choice" : "choices"} not yet sent will be removed from this iPhone. `
+      ? `${unsynchronisedCount} Review ${unsynchronisedCount === 1 ? "choice" : "choices"} Dayframe hasn't confirmed yet will be removed from this iPhone. `
       : "";
     void confirmForSession({
       eyebrow: "Account",
