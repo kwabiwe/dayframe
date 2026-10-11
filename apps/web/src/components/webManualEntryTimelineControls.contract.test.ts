@@ -74,8 +74,8 @@ describe("web manual entry and Timeline control refinement", () => {
     expect(styles).toMatch(/dialog\.ui-dialog:focus \{[^}]*outline: 0;/s);
   });
 
-  it("uses the contrast-safe Dayframe selection colour globally", () => {
-    expect(styles).toMatch(/::selection \{[^}]*background: var\(--accent\);[^}]*color: var\(--on-accent\);/s);
+  it("uses a neutral text selection globally, never coral (UIA-314)", () => {
+    expect(styles).toMatch(/::selection \{[^}]*background: color-mix\(in srgb, var\(--text-primary\) 22%, transparent\);[^}]*color: inherit;/s);
   });
 
   it("moves compact Add Time feedback onto its own row at common phone widths", () => {

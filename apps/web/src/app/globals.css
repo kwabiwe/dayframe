@@ -370,9 +370,11 @@ a {
   text-decoration: none;
 }
 
+/* Text selection is neutral, never coral (UIA-314): a tint of the primary text that reads on both
+   canvases and keeps the text's own colour. */
 ::selection {
-  background: var(--accent);
-  color: var(--on-accent);
+  background: color-mix(in srgb, var(--text-primary) 22%, transparent);
+  color: inherit;
 }
 
 .tabular {
@@ -9389,6 +9391,12 @@ dialog.ui-dialog.manual-entry-dialog {
   color: var(--text-primary);
 }
 
+/* The current page's icon is coral (owner, 11 Oct; the iPhone's selected tab); the label and the
+   sliding thumb stay neutral. */
+.df-nav a[aria-current="page"] > svg {
+  color: var(--accent);
+}
+
 .df-nav-count,
 .df-tab-count {
   display: grid;
@@ -9657,6 +9665,10 @@ dialog.ui-dialog.manual-entry-dialog {
   .df-tabbar a[aria-current="page"] {
     background: var(--surface-muted);
     color: var(--text-primary);
+  }
+
+  .df-tabbar a[aria-current="page"] .df-tab-icon > svg {
+    color: var(--accent);
   }
 
   .df-tab-icon {

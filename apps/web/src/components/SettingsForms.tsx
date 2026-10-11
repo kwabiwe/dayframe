@@ -1,10 +1,9 @@
 "use client";
 
-import { DayframeIcon } from "@/components/blocks/DayframeIcon";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useState, type FormEvent } from "react";
-import { ChevronDown, Folder, Plus, ShieldCheck } from "lucide-react";
+import { ChevronDown } from "lucide-react";
 import { useAppShellRuntime } from "@/components/AppShellRuntime";
 import { SignOutControl } from "@/components/SignOutControl";
 import {
@@ -202,16 +201,13 @@ export function AccountSettings({
       </span>
       <span className="df-set-acts">
         <button className="df-rbtn df-rbtn--sm" onClick={() => setDialog("profile")} type="button">
-          <DayframeIcon glyph="user-round" size={15} />
           Edit profile
         </button>
         <button className="df-rbtn df-rbtn--sm" onClick={() => setDialog("workspace")} type="button">
-          <Folder aria-hidden="true" size={15} />
           {workspaces.length > 1 ? "Switch workspace" : "Workspace"}
         </button>
         {canChangePassword ? (
           <button className="df-rbtn df-rbtn--sm df-rbtn--ghost" onClick={() => setDialog("password")} type="button">
-            <ShieldCheck aria-hidden="true" size={15} />
             Change password
           </button>
         ) : null}
@@ -267,7 +263,6 @@ export function AccountSettings({
                 onClick={() => setWorkspaceAction((current) => current === "rename" ? null : "rename")}
                 type="button"
               >
-                <DayframeIcon glyph="pencil" size={15}/>
                 Rename
               </Button>
               <Button
@@ -276,7 +271,6 @@ export function AccountSettings({
                 onClick={() => setWorkspaceAction((current) => current === "create" ? null : "create")}
                 type="button"
               >
-                <Plus aria-hidden="true" size={15} />
                 New workspace
               </Button>
             </div>
