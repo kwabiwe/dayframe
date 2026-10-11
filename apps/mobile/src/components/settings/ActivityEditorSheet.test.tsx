@@ -81,7 +81,28 @@ describe("ActivityEditorSheet", () => {
       byTestId("activity-editor-save").props.onPress();
     });
     expect(onSave).toHaveBeenCalledTimes(1);
-    expect(onSave).toHaveBeenCalledWith({ name: "Piano", color: "lime", icon: null, isPinned: true });
+    expect(onSave).toHaveBeenCalledWith({ name: "Piano", color: "lime", icon: null, isPinned: true, countsTowardGoal: true });
+  });
+
+  it("shows the Counts toward goal switch from the activity and saves its value (UIA-043)", () => {
+    const goalSwitch = () => tree!.root.find((node: ReactTestInstance) => node.props.accessibilityLabel === "Counts toward goal" && (node.type as unknown) === "Switch");
+    const { onSave } = render({ activity: { id: "s", name: "Sleep", color: "blue-bold", countsTowardGoal: false } });
+    expect(goalSwitch().props.value).toBe(false);
+    expect(JSON.stringify(byTestId("activity-editor-goal-row").props.children)).toContain("it just doesn’t fill the goal.");
+    act(() => goalSwitch().props.onValueChange(true));
+    expect(goalSwitch().props.value).toBe(true);
+    act(() => byTestId("activity-editor-save").props.onPress());
+    expect(onSave).toHaveBeenCalledWith(expect.objectContaining({ name: "Sleep", countsTowardGoal: true }));
+  });
+
+  it("starts an activity without the flag counting, and a new one can be switched off", () => {
+    const goalSwitch = () => tree!.root.find((node: ReactTestInstance) => node.props.accessibilityLabel === "Counts toward goal" && (node.type as unknown) === "Switch");
+    const { onSave } = render();
+    expect(goalSwitch().props.value).toBe(true);
+    act(() => goalSwitch().props.onValueChange(false));
+    act(() => byTestId("activity-editor-name").props.onChangeText("Nap"));
+    act(() => byTestId("activity-editor-save").props.onPress());
+    expect(onSave).toHaveBeenCalledWith(expect.objectContaining({ name: "Nap", countsTowardGoal: false }));
   });
 
   it("offers no pin until quick start has loaded, and never sends one", () => {

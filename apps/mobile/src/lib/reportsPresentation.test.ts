@@ -334,5 +334,18 @@ describe("Blocks day stacks", () => {
     });
     expect(gymOnly.buckets[1].segments.map((s) => s.key)).toEqual(["b"]);
     expect(gymOnly.buckets[1].seconds).toBe(1800);
+    // Every activity counts until one is switched off "Counts toward goal" (UIA-043).
+    expect(all.buckets[0].goalSeconds).toBe(all.buckets[0].seconds);
+    const sleepOff = buildReportsPresentation({
+      data: { ...data(), categories: [{ id: "a", name: "Sleep", color: "blue", isPinned: false, countsTowardGoal: false }] },
+      summary: weekSummary,
+      range: week,
+      nowMs: now,
+      selection: { mode: "all" },
+      themeMode: "dark",
+    });
+    expect(sleepOff.buckets[0].seconds).toBe(all.buckets[0].seconds);
+    expect(sleepOff.buckets[0].goalSeconds).toBe(all.buckets[0].seconds - 3600);
+    expect(sleepOff.buckets[1].goalSeconds).toBe(1800);
   });
 });

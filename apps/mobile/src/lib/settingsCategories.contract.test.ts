@@ -56,8 +56,8 @@ describe("mobile Activities page contract", () => {
 
   it("creates and edits through one editor sheet with name, icon and colour, and archives from it", () => {
     expect(settingsSource).toContain("<ActivityEditorSheet");
-    expect(settingsSource).toContain("? await updateCategory(activity.id, { name: draft.name, color: draft.color, icon: draft.icon })");
-    expect(settingsSource).toContain(": await createCategory(draft.name, { color: draft.color, icon: draft.icon, isPinned: pinned });");
+    expect(settingsSource).toContain("? await updateCategory(activity.id, { name: draft.name, color: draft.color, icon: draft.icon, countsTowardGoal: draft.countsTowardGoal })");
+    expect(settingsSource).toContain(": await createCategory(draft.name, { color: draft.color, icon: draft.icon, isPinned: pinned, countsTowardGoal: draft.countsTowardGoal });");
     // Accepted saves and archives show at once, even if the refresh after them fails.
     expect(settingsSource).toContain("// The accepted activity shows at once, even if the refresh below fails.");
     expect(settingsSource).toContain("applyActivityCategories((categories) => categories.filter((item) => item.id !== activity.id));");

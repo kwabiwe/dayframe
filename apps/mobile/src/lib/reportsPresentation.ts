@@ -1,4 +1,4 @@
-import { DAYFRAME_THEME, paletteColorFor, type ReportSummary } from "@dayframe/shared";
+import { DAYFRAME_THEME, goalCountingSeconds, paletteColorFor, type ReportSummary } from "@dayframe/shared";
 import type { MobileBootstrap, MobileTimeEntry } from "./api";
 import type { MobileTheme } from "./mobileTheme";
 import type { ReportRange, ReportWindow } from "./reportsRanges";
@@ -222,6 +222,12 @@ export function buildReportsPresentation(input: {
         (sum, [key, seconds]) =>
           sum + (reportSelectionIncludes(selection, key) ? seconds : 0),
         0,
+      ),
+      // The goal streak's time: the same seconds without activities switched off "Counts toward
+      // goal" (Sleep by default, UIA-043).
+      goalSeconds: goalCountingSeconds(
+        [...b.byCategory].filter(([key]) => reportSelectionIncludes(selection, key)),
+        data.categories,
       ),
       segments: [...b.byCategory]
         .filter(

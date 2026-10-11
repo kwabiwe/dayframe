@@ -86,6 +86,45 @@ describe("/api/categories", () => {
     expect(mocks.createCategory).not.toHaveBeenCalled();
   });
 
+  it("accepts Counts toward goal on create and update, and returns it (UIA-043)", async () => {
+    mocks.createCategory.mockResolvedValueOnce({ id: categoryId(), name: "Nap", color: "sky", isPinned: false, countsTowardGoal: false });
+    const created = await POST(jsonRequest({ name: "Nap", countsTowardGoal: false }));
+    expect(created.status).toBe(201);
+    expect(mocks.createCategory).toHaveBeenCalledWith({ name: "Nap", countsTowardGoal: false }, session);
+    expect((await created.json()).category.countsTowardGoal).toBe(false);
+
+    mocks.updateCategory.mockResolvedValueOnce({ id: categoryId(), name: "Sleep", color: "blue-bold", isPinned: false, countsTowardGoal: true });
+    const updated = await PATCH(new Request("https://dayframe.test/api/categories", {
+      method: "PATCH",
+      body: JSON.stringify({ id: categoryId(), countsTowardGoal: true })
+    }));
+    expect(updated.status).toBe(200);
+    expect(mocks.updateCategory).toHaveBeenCalledWith(categoryId(), { id: categoryId(), countsTowardGoal: true }, session);
+    expect((await updated.json()).category.countsTowardGoal).toBe(true);
+  });
+
+  it("leaves Counts toward goal out when an older client doesn't send it", async () => {
+    await POST(jsonRequest({ name: "Focus" }));
+    expect(mocks.createCategory.mock.calls[0][0]).not.toHaveProperty("countsTowardGoal");
+    await PATCH(new Request("https://dayframe.test/api/categories", {
+      method: "PATCH",
+      body: JSON.stringify({ id: categoryId(), name: "Deep work" })
+    }));
+    expect(mocks.updateCategory.mock.calls[0][1]).not.toHaveProperty("countsTowardGoal");
+  });
+
+  it("rejects a Counts toward goal that is not a boolean", async () => {
+    const created = await POST(jsonRequest({ name: "Nap", countsTowardGoal: "no" }));
+    expect(created.status).toBe(400);
+    const updated = await PATCH(new Request("https://dayframe.test/api/categories", {
+      method: "PATCH",
+      body: JSON.stringify({ id: categoryId(), countsTowardGoal: null })
+    }));
+    expect(updated.status).toBe(400);
+    expect(mocks.createCategory).not.toHaveBeenCalled();
+    expect(mocks.updateCategory).not.toHaveBeenCalled();
+  });
+
   it("lists categories for the active workspace", async () => {
     const response = await GET(new Request("https://dayframe.test/api/categories"));
     const payload = await response.json();

@@ -929,8 +929,8 @@ export default function SettingsScreen() {
       // Only counted from this visit's own refresh: an older cached copy may be missing a pin.
       const pinned = !activity && draft.isPinned && activityPinsFresh() && pinnedNow < QUICK_START_PIN_LIMIT;
       const result = activity
-        ? await updateCategory(activity.id, { name: draft.name, color: draft.color, icon: draft.icon })
-        : await createCategory(draft.name, { color: draft.color, icon: draft.icon, isPinned: pinned });
+        ? await updateCategory(activity.id, { name: draft.name, color: draft.color, icon: draft.icon, countsTowardGoal: draft.countsTowardGoal })
+        : await createCategory(draft.name, { color: draft.color, icon: draft.icon, isPinned: pinned, countsTowardGoal: draft.countsTowardGoal });
       if (!(await activityOwnerStill(owner))) return;
       if (!activity && pinned && !result.category.isPinned) {
         // The server's own quick-start cap won (another device pinned one meanwhile).

@@ -106,6 +106,35 @@ describe("Library › Activities", () => {
     expect(screen.getByRole("dialog")).toBeTruthy();
   });
 
+  it("shows Counts toward goal from the activity and saves the switch with the other fields (UIA-043)", async () => {
+    const user = userEvent.setup();
+    mount([activity(ID(1), "Sleep", { countsTowardGoal: false }), activity(ID(2), "Reading")]);
+    await user.click(await screen.findByRole("button", { name: "Edit Sleep" }));
+    const dialog = screen.getByRole("dialog");
+    const toggle = within(dialog).getByRole("switch", { name: /Counts toward goal/ }) as HTMLInputElement;
+    expect(toggle.checked).toBe(false);
+    expect(within(dialog).getByText("Time here still shows in your day; it just doesn’t fill the goal.")).toBeTruthy();
+    await user.click(toggle);
+    expect(toggle.checked).toBe(true);
+    await user.click(within(dialog).getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(changes()).toHaveLength(1));
+    expect(changes()[0]).toMatchObject({ method: "PATCH", body: { id: ID(1), name: "Sleep", countsTowardGoal: true } });
+  });
+
+  it("creates an activity that counts toward the goal unless switched off", async () => {
+    const user = userEvent.setup();
+    mount([activity(ID(1), "Reading")]);
+    await user.click(await screen.findByRole("button", { name: /New activity/ }));
+    const dialog = screen.getByRole("dialog");
+    const toggle = within(dialog).getByRole("switch", { name: /Counts toward goal/ }) as HTMLInputElement;
+    expect(toggle.checked).toBe(true);
+    await user.type(within(dialog).getByPlaceholderText("Name, like Gardening or Piano"), "Nap");
+    await user.click(toggle);
+    await user.click(within(dialog).getByRole("button", { name: "Create" }));
+    await waitFor(() => expect(changes()).toHaveLength(1));
+    expect(changes()[0]).toMatchObject({ method: "POST", body: { name: "Nap", countsTowardGoal: false } });
+  });
+
   it("archives from the editor with Undo, which restores and re-pins", async () => {
     const user = userEvent.setup();
     mount([activity(ID(1), "Reading", { isPinned: true })]);

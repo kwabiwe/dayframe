@@ -85,6 +85,22 @@ describe("Today", () => {
     await act(async () => root?.unmount());
   });
 
+  it("fills the goal only with activities that count toward it (UIA-043)", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(NOW);
+    const counting = await mount(bootstrap());
+    // Both hours count: the line reads as before.
+    expect(counting.container.querySelector(".df-today-sub")?.textContent).toBe("framed today · 25% of your 8h goal");
+    await act(async () => counting.root.unmount());
+
+    const data = bootstrap();
+    data.categories = data.categories.map((category) => category.id === "admin" ? { ...category, countsTowardGoal: false } : category);
+    const { container, root } = await mount(data);
+    expect(container.querySelector("#df-today-total")?.textContent).toContain("2h 00m");
+    expect(container.querySelector(".df-today-sub")?.textContent).toBe("framed today · 1h 00m toward your 8h goal (13%)");
+    await act(async () => root.unmount());
+  });
+
   it("deletes a finished block with Backspace, offers Undo on the toast and restores it", async () => {
     vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout", "setInterval", "clearInterval"] });
     vi.setSystemTime(NOW);

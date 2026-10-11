@@ -220,7 +220,7 @@ Mobile Reports:
 
 Mobile Today and integrated Review:
 
-- Today's top (Blocks parity step 2a-1) is the brand lock-up with the account avatar (opens Settings, where account and logout live), the date, and the goal frame: today's covered time (overlapping entries count once, the running timer up to now) against the daily goal from the profile, one cell per goal hour filled with activity colours in the order the time happened, and the percentage capped at 100 while the total keeps counting. Suggestions never count.
+- Today's top (Blocks parity step 2a-1) is the brand lock-up with the account avatar (opens Settings, where account and logout live), the date, and the goal frame: today's covered time (overlapping entries count once, the running timer up to now) against the daily goal from the profile, one cell per goal hour filled with activity colours in the order the time happened, and the percentage capped at 100 while the total keeps counting. Suggestions never count. Time in an activity switched off "Counts toward goal" (Sleep by default, D13) stays in the total but leaves the cells and percentage; the line then reads "framed · Xh toward 8h".
 - "Today's blocks" lists today's entries with a block as tall as each entry's time; swipe right to start one again, left to delete it (with Undo); repeats stay grouped. The mosaic heading reads "Start a block" (owner, 7 October 2026).
 - The timer card follows the prototype: idle it asks "What are you working on?" with a coral "Start a block" pill and an "Add past time" pill; running, it shows the activity, the description, a rolling H:MM:SS timer, the start time, Add past time and Stop. A coral Play orb sits beside the tab bar on every tab: tap to start a block (or stop the running one); hold it to fan out up to nine activities and slide to one. Pulling the running card left opens "Pick up something recent" (up to six recently finished blocks) to switch in one tap. Stop flies the block into Today's list. The block's sheet is headed like the prototype ("Running block" / "Edit block") and ends with Discard and Stop, or Delete and Start again. Stop has no Undo (owner decision 7 October 2026): a stopped entry is edited or started again instead.
 - A 24-hour ribbon shows today's logged time and, hatched, the time waiting in Review, with a now line; dragging along it scrubs through the day and tapping a block opens it.
@@ -251,6 +251,7 @@ Decisions where the prototype is ambiguous or drops a function:
 | D10 | Activities are archived with Restore, never deleted, so history is kept. |
 | D11 | iPhone tags stay free text with autocomplete, shown as chips. |
 | D12 | iPhone shows the daily goal (ribbon and goal frame) from the existing goal settings, edited with steppers under "Your day". |
+| D13 | Every activity has a "Counts toward goal" switch in its editor on iPhone and web ("Time here still shows in your day; it just doesn't fill the goal."), off for Sleep by default and on for everything else (owner decision UIA-043, option c, 11 October 2026). One rule drives all goal progress — Today's goal frame and Reports' days on goal / goal streak on both platforms: time in an activity that doesn't count is left out, time without an activity counts. That time still shows as framed time everywhere else (totals, ribbons, blocks, reports). |
 
 Mobile accessibility and Dynamic Type:
 

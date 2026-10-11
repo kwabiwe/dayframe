@@ -1,9 +1,12 @@
+import { goalCountingEntries, type GoalCountingCategory } from "@dayframe/shared";
+
 /**
  * Today's goal frame (Blocks prototype): the day's tracked total against the daily goal, drawn as
  * one cell per goal hour that fills with entries in the order they happened. Goals use covered
  * time, as on the web dashboard (product-model.md): time that overlapping entries share counts
  * once and is drawn in the colour of the entry that started first. Cells stop at the goal; the
- * total does not.
+ * total does not. The total is every framed minute; the cells and percent use only activities
+ * that count toward the goal (`goalCountingEntries`, UIA-043: Sleep does not by default).
  */
 type GoalFrameEntry = {
   id: string;
@@ -19,10 +22,13 @@ export const DEFAULT_DAILY_GOAL_MINUTES = 480;
 const HOUR_MS = 3_600_000;
 
 export function buildTodayGoalFrame({
+  categories,
   entries,
   goalMinutes,
   nowMs,
 }: {
+  /** The workspace's activities with their "Counts toward goal" switch; left out, all time counts. */
+  categories?: Iterable<GoalCountingCategory> | null;
   entries: readonly GoalFrameEntry[];
   goalMinutes: number | null | undefined;
   nowMs: number;
@@ -37,26 +43,9 @@ export function buildTodayGoalFrame({
   dayStart.setHours(0, 0, 0, 0);
   const startMs = dayStart.getTime();
 
-  const intervals = entries
-    .map((entry) => ({
-      entry,
-      startedMs: Date.parse(entry.startedAt),
-      from: Math.max(Date.parse(entry.startedAt), startMs),
-      to: Math.min(entry.stoppedAt ? Date.parse(entry.stoppedAt) : nowMs, nowMs),
-    }))
-    .filter((interval) => Number.isFinite(interval.from) && Number.isFinite(interval.to) && interval.to > interval.from)
-    .sort((a, b) => a.startedMs - b.startedMs || a.entry.id.localeCompare(b.entry.id));
-
-  // Union in start order: each entry contributes only the time no earlier entry already covers.
-  const pieces: { entry: GoalFrameEntry; ms: number }[] = [];
-  let coveredUntil = Number.NEGATIVE_INFINITY;
-  for (const { entry, from, to } of intervals) {
-    const ms = to - Math.max(from, coveredUntil);
-    if (ms > 0) pieces.push({ entry, ms });
-    coveredUntil = Math.max(coveredUntil, to);
-  }
-
-  const totalMs = pieces.reduce((sum, piece) => sum + piece.ms, 0);
+  const totalMs = coveredPieces(entries, startMs, nowMs).reduce((sum, piece) => sum + piece.ms, 0);
+  const pieces = coveredPieces(goalCountingEntries(entries, categories), startMs, nowMs);
+  const goalCountedMs = pieces.reduce((sum, piece) => sum + piece.ms, 0);
   const cells: GoalFrameSlice[][] = Array.from({ length: cellCount }, () => []);
   let cursor = 0;
   let index = 0;
@@ -81,7 +70,30 @@ export function buildTodayGoalFrame({
   return {
     cells,
     goalHours: minutes / 60,
-    percent: Math.min(100, Math.round((totalMs / goalMs) * 100)),
+    /** Framed time that fills the goal (all of it unless an activity is switched off). */
+    goalSeconds: Math.floor(goalCountedMs / 1000),
+    percent: Math.min(100, Math.round((goalCountedMs / goalMs) * 100)),
     totalSeconds: Math.floor(totalMs / 1000),
   };
+}
+
+/** Union in start order: each entry contributes only the time no earlier entry already covers. */
+function coveredPieces(entries: readonly GoalFrameEntry[], startMs: number, nowMs: number) {
+  const intervals = entries
+    .map((entry) => ({
+      entry,
+      startedMs: Date.parse(entry.startedAt),
+      from: Math.max(Date.parse(entry.startedAt), startMs),
+      to: Math.min(entry.stoppedAt ? Date.parse(entry.stoppedAt) : nowMs, nowMs),
+    }))
+    .filter((interval) => Number.isFinite(interval.from) && Number.isFinite(interval.to) && interval.to > interval.from)
+    .sort((a, b) => a.startedMs - b.startedMs || a.entry.id.localeCompare(b.entry.id));
+  const pieces: { entry: GoalFrameEntry; ms: number }[] = [];
+  let coveredUntil = Number.NEGATIVE_INFINITY;
+  for (const { entry, from, to } of intervals) {
+    const ms = to - Math.max(from, coveredUntil);
+    if (ms > 0) pieces.push({ entry, ms });
+    coveredUntil = Math.max(coveredUntil, to);
+  }
+  return pieces;
 }

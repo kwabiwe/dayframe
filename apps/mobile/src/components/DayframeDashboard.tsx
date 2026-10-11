@@ -1529,11 +1529,12 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
   // Whole minutes only, so the goal frame reads the per-minute clock (investigation 2026-10-07).
   const todayGoalFrame = useMemo(
     () => buildTodayGoalFrame({
+      categories: data?.categories,
       entries: loggedSourceEntries,
       goalMinutes: data?.user.dailyGoalMinutes,
       nowMs: minuteNow,
     }),
-    [data?.user.dailyGoalMinutes, loggedSourceEntries, minuteNow]
+    [data?.categories, data?.user.dailyGoalMinutes, loggedSourceEntries, minuteNow]
   );
   const activeCategoryColor = displayedActiveEntry?.categoryName
     ? paletteColorFor(

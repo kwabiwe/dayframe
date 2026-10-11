@@ -188,6 +188,37 @@ describe("report scope and response", () => {
     expect(Number.isFinite(report.comparison.absoluteDeltaSeconds)).toBe(true);
   });
 
+  it("gives each day its goal time without activities switched off Counts toward goal (UIA-043)", async () => {
+    const statement = buildReportDataQuery(session, input, input.filters, "2026-07-22T12:00:00.000Z");
+    expect(statement.text).toContain("coalesce(cat.counts_toward_goal, true) as category_counts_toward_goal");
+    expect(statement.text).toContain("'countsTowardGoal', fe.category_counts_toward_goal");
+
+    mocks.query.mockImplementation(async (sql: string) => {
+      if (sql.includes("from categories")) return { rows: options.categories };
+      if (sql.includes("from tags tag")) return { rows: options.tags };
+      if (sql.includes("from places pl")) return { rows: options.places };
+      const data = reportData(600);
+      data.dailySeries[0].seconds = 4_200;
+      data.dailySeries[0].coveredSeconds = 4_200;
+      data.analysisEntries = [
+        { ...data.analysisEntries[0], startedAt: "2026-07-20T12:00:00.000Z", stoppedAt: "2026-07-20T12:10:00.000Z" },
+        {
+          id: "sleep",
+          startedAt: "2026-07-20T10:00:00.000Z",
+          stoppedAt: "2026-07-20T11:00:00.000Z",
+          description: null,
+          categoryName: "Sleep",
+          countsTowardGoal: false
+        } as unknown as (typeof data.analysisEntries)[number]
+      ];
+      return { rows: [data] };
+    });
+    const report = await getReports(session, input);
+    expect(report.dailySeries[0].coveredSeconds).toBe(4_200);
+    expect(report.dailySeries[0].goalSeconds).toBe(600);
+    expect(report.dailySeries[1].goalSeconds).toBe(0);
+  });
+
   it("drops category, tag and place IDs that are outside the current workspace options", () => {
     const filters = parseReportQueryInput({
       categories: `${categoryId},${foreignCategoryId},uncategorized`,

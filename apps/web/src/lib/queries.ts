@@ -39,6 +39,8 @@ export type CategoryRow = {
   icon?: string | null;
   /** Starter activity key; set by Dayframe, never by clients. */
   starterKey?: string | null;
+  /** false leaves this activity's time out of goal progress (UIA-043; Sleep starts false). */
+  countsTowardGoal?: boolean;
 };
 
 export type ProjectRow = {
@@ -378,7 +380,8 @@ export async function getNormalizationContext(
       name: category.name,
       color: category.color,
       isPinned: category.isPinned,
-      starterKey: category.starterKey ?? null
+      starterKey: category.starterKey ?? null,
+      countsTowardGoal: category.countsTowardGoal
     })),
     places: places.map<PlaceSummary>((place) => ({
       id: place.id,
@@ -451,7 +454,8 @@ async function getClients(session: RequestSession) {
 async function getCategories(session: RequestSession, execute: typeof query = query) {
   try {
     const result = await execute<CategoryRow>(
-      `select id, name, color, is_pinned as "isPinned", icon, starter_key as "starterKey"
+      `select id, name, color, is_pinned as "isPinned", icon, starter_key as "starterKey",
+              counts_toward_goal as "countsTowardGoal"
        from categories
        where workspace_id = $1 and is_archived = false
        order by is_pinned desc, name`,
@@ -476,6 +480,14 @@ async function getCategories(session: RequestSession, execute: typeof query = qu
           error
         );
       }
+    }
+    if (isUndefinedColumnError(error, "counts_toward_goal")) {
+      throw missingRequiredColumnError(
+        "categories",
+        "counts_toward_goal",
+        "supabase/migrations/202610110001_category_counts_toward_goal.sql",
+        error
+      );
     }
     throw error;
   }

@@ -16,7 +16,7 @@ function fakeClient() {
       if (sql.startsWith("select id, name, starter_key")) return { rows: db.existing };
       if (sql.includes("insert into categories")) {
         const rows: Row[] = [];
-        for (let index = 1; index < params.length; index += 5) {
+        for (let index = 1; index < params.length; index += 6) {
           rows.push({ id: `new-${params[index + 4]}`, name: String(params[index]), starterKey: String(params[index + 4]) });
         }
         return { rows };
@@ -54,10 +54,14 @@ describe("starter activities service", () => {
     const created = await insertStarterActivities(client.current as never, session.workspaceId);
 
     const insert = db.statements.find((statement) => statement.sql.includes("insert into categories"));
-    expect(insert?.sql).toContain("(workspace_id, name, color, is_pinned, icon, starter_key)");
+    expect(insert?.sql).toContain("(workspace_id, name, color, is_pinned, icon, starter_key, counts_toward_goal)");
     expect(insert?.params[0]).toBe(session.workspaceId);
-    expect(insert?.params.slice(1, 6)).toEqual(["Work", "blue", true, "work", "work"]);
-    expect(insert?.params).toHaveLength(1 + 16 * 5);
+    expect(insert?.params.slice(1, 7)).toEqual(["Work", "blue", true, "work", "work", true]);
+    expect(insert?.params).toHaveLength(1 + 16 * 6);
+    // Counts toward goal (UIA-043): every starter but Sleep.
+    const counting = new Map(DAYFRAME_STARTER_ACTIVITIES.map((starter, index) => [starter.starterKey, insert?.params[1 + index * 6 + 5]]));
+    expect(counting.get("sleep")).toBe(false);
+    expect([...counting].filter(([, counts]) => counts !== true).map(([key]) => key)).toEqual(["sleep"]);
     expect(created.map((row) => row.starterKey)).toEqual(DAYFRAME_STARTER_ACTIVITIES.map((starter) => starter.starterKey));
   });
 
@@ -77,7 +81,7 @@ describe("starter activities service", () => {
     );
     // An existing workspace keeps its own pins: added starters arrive unpinned.
     const insert = db.statements.find((statement) => statement.sql.includes("insert into categories"));
-    const pins = (insert?.params ?? []).filter((_, index) => index > 0 && (index - 1) % 5 === 2);
+    const pins = (insert?.params ?? []).filter((_, index) => index > 0 && (index - 1) % 6 === 2);
     expect(pins.length).toBeGreaterThan(0);
     expect(pins.every((pinned) => pinned === false)).toBe(true);
     const link = db.statements.find((statement) => statement.sql.startsWith("update categories set starter_key"));

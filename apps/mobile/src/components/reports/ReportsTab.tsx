@@ -501,6 +501,7 @@ export function ReportsTab({
           key: formatLocalDateKey(range.buckets[index].start),
           start: range.buckets[index].start,
           seconds: bucket.seconds,
+          goalSeconds: bucket.goalSeconds,
           segments: bucket.segments,
         }))
       : [];

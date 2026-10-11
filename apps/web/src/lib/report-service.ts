@@ -26,6 +26,11 @@ export type ReportSeriesPoint = {
   label: string;
   seconds: number;
   coveredSeconds: number;
+  /**
+   * Covered time that fills the daily goal: coveredSeconds without activities switched off
+   * "Counts toward goal" (UIA-043). Days on goal use this; everything else shows coveredSeconds.
+   */
+  goalSeconds?: number;
   additionalOverlappingActivitySeconds: number;
 };
 
@@ -125,6 +130,8 @@ type ReportDataRow = {
     categoryName: string | null;
     /** The entry's activity id, or "uncategorized" (as in byCategory). */
     categoryId?: string;
+    /** false when the entry's activity is switched off "Counts toward goal". */
+    countsTowardGoal?: boolean;
   }>;
   totalEntries: number;
 };
@@ -152,6 +159,10 @@ export async function getReports(session: RequestSession, input: ReportQueryInpu
     0,
     totalSeconds - analysis.additionalOverlappingActivitySeconds
   );
+  const goalIntervals = analysisEntries
+    .filter((entry) => entry.countsTowardGoal !== false)
+    .map((entry) => ({ id: entry.id, startedAt: entry.startedAt, stoppedAt: entry.stoppedAt }));
+  const goalExcludesTime = goalIntervals.length !== analysisEntries.length;
   const dailySeries = arrayValue(row.dailySeries).map((point, index) => {
     const boundary = input.dayBoundaries[index];
     const pointSeconds = numberValue(point.seconds);
@@ -160,6 +171,7 @@ export async function getReports(session: RequestSession, input: ReportQueryInpu
         ...point,
         seconds: pointSeconds,
         coveredSeconds: pointSeconds,
+        goalSeconds: pointSeconds,
         additionalOverlappingActivitySeconds: 0
       };
     }
@@ -174,13 +186,23 @@ export async function getReports(session: RequestSession, input: ReportQueryInpu
         range: { start: boundary.start, end: boundary.end }
       }
     );
+    const coveredSeconds = Math.max(
+      0,
+      pointSeconds - dayAnalysis.additionalOverlappingActivitySeconds
+    );
     return {
       ...point,
       seconds: pointSeconds,
-      coveredSeconds: Math.max(
-        0,
-        pointSeconds - dayAnalysis.additionalOverlappingActivitySeconds
-      ),
+      coveredSeconds,
+      goalSeconds: goalExcludesTime
+        ? Math.min(
+          coveredSeconds,
+          analyzeTimeIntervals(goalIntervals, {
+            now: capturedNow,
+            range: { start: boundary.start, end: boundary.end }
+          }).timeCoveredSeconds
+        )
+        : coveredSeconds,
       additionalOverlappingActivitySeconds:
         dayAnalysis.additionalOverlappingActivitySeconds
     };
@@ -259,7 +281,8 @@ export async function getReportExportRows(session: RequestSession, input: Report
 export async function getReportFilterOptions(session: RequestSession): Promise<ReportFilterOptions> {
   const [categories, tags, places] = await Promise.all([
     query<CategoryRow>(
-      `select id, name, color, is_pinned as "isPinned", icon, starter_key as "starterKey"
+      `select id, name, color, is_pinned as "isPinned", icon, starter_key as "starterKey",
+              counts_toward_goal as "countsTowardGoal"
        from categories
        where workspace_id = $1 and is_archived = false
        order by is_pinned desc, name`,
@@ -624,7 +647,8 @@ export function buildReportDataQuery(
               'stoppedAt', ci.interval_end,
               'description', fe.description,
               'categoryName', fe.category_name,
-              'categoryId', coalesce(fe.category_id::text, 'uncategorized')
+              'categoryId', coalesce(fe.category_id::text, 'uncategorized'),
+              'countsTowardGoal', fe.category_counts_toward_goal
             )
             order by ci.interval_start, ci.interval_end, ci.id
           )
@@ -785,6 +809,7 @@ class ReportSqlBuilder {
              te.category_id,
              cat.name as category_name,
              cat.color as category_color,
+             coalesce(cat.counts_toward_goal, true) as category_counts_toward_goal,
              te.place_id,
              te.place_label,
              coalesce(${placeDisplayNameSql("pl")}, te.place_label) as place_name,
@@ -895,6 +920,7 @@ function emptyReportData(input: ReportQueryInput): ReportDataRow {
       label,
       seconds: 0,
       coveredSeconds: 0,
+      goalSeconds: 0,
       additionalOverlappingActivitySeconds: 0
     })),
     entries: [],

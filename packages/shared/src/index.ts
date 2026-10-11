@@ -67,6 +67,13 @@ export {
   type DayframeStarterActivityKey
 } from "./starterActivities";
 export {
+  categoryCountsTowardGoal,
+  goalCountingEntries,
+  goalCountingSeconds,
+  goalExcludedCategoryIds,
+  type GoalCountingCategory
+} from "./goalCounting";
+export {
   PLACE_ROLES,
   PlaceRoleSchema,
   isHomePlace,
@@ -714,6 +721,8 @@ export type CategorySummary = {
   isPinned?: boolean;
   /** Set on starter activities; survives renames (see starterActivities.ts). */
   starterKey?: string | null;
+  /** false leaves the activity's time out of goal progress (see goalCounting.ts). */
+  countsTowardGoal?: boolean;
 };
 
 export type RecentActivityEntry = {
