@@ -189,6 +189,8 @@ export function ReviewDeck({ initialData }: { initialData: BootstrapData }) {
     setMissingTargetId(null);
     setEmptiedByDecision(false);
     setEnter({ itemId: state.restored.itemId, from: "undo", dir: 1, key: ++enterSequence.current });
+    // The card is back: its outgoing copy (still flying) goes at once rather than overlapping it.
+    setGhost((current) => (current?.item.id === restoredId ? null : current));
     // Undo pressed from the keyboard leaves focus on a toast that is about to go: the card's
     // first action takes it.
     const frame = requestAnimationFrame(() => {
@@ -302,7 +304,7 @@ export function ReviewDeck({ initialData }: { initialData: BootstrapData }) {
       // Where the card is now: the ghost leaves from exactly there, also when the deck empties and
       // the ghost is drawn over the empty state (UIA-315: the phone queue bar sits above it).
       const box = cardRef.current?.getBoundingClientRect();
-      setGhost({ key: ++enterSequence.current, item, draft, dir, origin: box ? { top: box.top, left: box.left, width: box.width } : undefined });
+      setGhost({ key: ++enterSequence.current, item, draft, dir, origin: box ? { top: box.top, left: box.left, width: box.width } : undefined, overEmpty: next === null });
     }
   }, [categories, decide, drafts, evidenceOpenId, revived, visibleIds]);
 
@@ -460,7 +462,7 @@ export function ReviewDeck({ initialData }: { initialData: BootstrapData }) {
           moreComing={beyondLoaded > 0}
           takeFocus={hadCard}
         />
-        {ghost ? <GhostCard atOrigin ghost={ghost} categories={categories} nowMs={nowMs} onDone={() => setGhost(null)} /> : null}
+        {ghost?.overEmpty ? <GhostCard atOrigin ghost={ghost} categories={categories} nowMs={nowMs} onDone={() => setGhost(null)} /> : null}
         {toast}
       </div>
     );
@@ -621,7 +623,7 @@ export function ReviewDeck({ initialData }: { initialData: BootstrapData }) {
               </div>
             ) : null}
           </section>
-          {ghost ? <GhostCard ghost={ghost} categories={categories} nowMs={nowMs} onDone={() => setGhost(null)} /> : null}
+          {ghost && !ghost.overEmpty ? <GhostCard ghost={ghost} categories={categories} nowMs={nowMs} onDone={() => setGhost(null)} /> : null}
         </div>
       </div>
       {toast}
@@ -811,6 +813,12 @@ type ReviewGhost = {
   dir: 1 | -1;
   /** The card's viewport bounds when it was decided. */
   origin?: { top: number; left: number; width: number };
+  /**
+   * Drawn over the empty state (the last card was decided) rather than in the card slot. The copy
+   * flies only where it started: if the deck switches between card and empty state mid-flight (Undo
+   * brings the card back), the copy is dropped, never restarted from the card's place.
+   */
+  overEmpty: boolean;
 };
 
 function GhostCard({

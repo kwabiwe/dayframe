@@ -296,6 +296,28 @@ describe("Review review-round fixes", () => {
     await act(async () => root.unmount());
   });
 
+  it("drops the last card's flying copy when Undo brings the card back, never restarting it (Codex r3)", async () => {
+    const flights: Keyframe[][] = [];
+    const animate = vi.fn(function (this: HTMLElement, keyframes: Keyframe[]) {
+      if (this.classList.contains("df-rcard-ghost")) flights.push(keyframes);
+      return { cancel: () => undefined, onfinish: null } as unknown as Animation;
+    });
+    Object.defineProperty(HTMLElement.prototype, "animate", { configurable: true, value: animate });
+    try {
+      const { container, root } = await mount([review(WALK, "Morning walk", "focus")]);
+      await act(async () => container.querySelector<HTMLButtonElement>(".df-ractions button")!.click());
+      expect(container.querySelector(".df-rcard-ghost")).not.toBeNull();
+      expect(flights).toHaveLength(1);
+      await act(async () => container.querySelector<HTMLButtonElement>(".df-toast-action")!.click());
+      expect(title(container)).toBe("Morning walk");
+      expect(container.querySelector(".df-rcard-ghost")).toBeNull();
+      expect(flights).toHaveLength(1);
+      await act(async () => root.unmount());
+    } finally {
+      delete (HTMLElement.prototype as { animate?: unknown }).animate;
+    }
+  });
+
   it("leaves Y, N and ⌘Z to the evidence editor while it is open", async () => {
     const visit = { ...review(WALK, "Visit", "focus"), eventSource: "location_learning", eventType: "learned_place_visit", rawPayload: { algorithmVersion: "location-v2.0" } };
     const { container, root } = await mount([visit, review(READ, "Reading", "admin")]);
