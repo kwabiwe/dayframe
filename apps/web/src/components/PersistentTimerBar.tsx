@@ -780,7 +780,8 @@ function ManualEntryDialog({
     const stoppedAt = dateTimeLocalInputToIso(stoppedAtDraft);
     if (!startedAt || !stoppedAt) return "—";
     const seconds = Math.floor((Date.parse(stoppedAt) - Date.parse(startedAt)) / 1_000);
-    return seconds > 0 ? formatCalendarEntryCompactDuration(seconds) : "—";
+    // A read-only label, so the one Dayframe duration (the field itself takes H:MM).
+    return seconds > 0 ? formatDuration(seconds) : "—";
   }, [startedAtDraft, stoppedAtDraft]);
   const finishDayOffset = useMemo(() => calendarEntryLocalDayOffset(
     startedAtDraft.slice(0, 10),

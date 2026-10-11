@@ -281,7 +281,7 @@ export function TimerPanel({
       <div className="border-t border-[var(--line)] p-4">
         <div className="flex items-center justify-between gap-3">
           <h3 className="text-sm font-semibold">Continue</h3>
-          <span className="text-xs text-[var(--muted)]">{recentEntries.slice(0, 4).length} entries</span>
+          <span className="text-xs text-[var(--muted)]">{recentEntries.slice(0, 4).length} blocks</span>
         </div>
         <div className="mt-3 grid gap-2 md:grid-cols-2 xl:grid-cols-4">
           {recentEntries.slice(0, 4).map((entry) => (
