@@ -5,7 +5,7 @@ import type { DayframeGlyph } from "@dayframe/shared";
 import Link from "next/link";
 import type { CSSProperties, KeyboardEvent as ReactKeyboardEvent } from "react";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { Check, X } from "lucide-react";
+import { Check, ChevronLeft, ChevronRight, X } from "lucide-react";
 import { validReviewAcknowledgement, type ReviewMutationEnvelope } from "@dayframe/shared";
 import { useAppShellRuntime, useRuntimePageData } from "@/components/AppShellRuntime";
 import { BlocksToast } from "@/components/blocks/BlocksToast";
@@ -479,6 +479,34 @@ export function ReviewDeck({ initialData }: { initialData: BootstrapData }) {
         </section>
 
         <div className="df-rcard-slot">
+          {visible.length > 1 ? (
+            // Phones (UIA-315): where this card sits in the queue, with ‹ › to step through it
+            // (the full queue follows the card there). Hidden on wider screens, where the queue
+            // sits beside the card and ↑ ↓ step through it.
+            <nav aria-label="Queue position" className="df-rnav">
+              <button
+                aria-label="Previous moment"
+                className="df-rnav-btn"
+                disabled={evidenceOpen}
+                onClick={() => select(stepSelection(visibleIds, selected.id, -1))}
+                type="button"
+              >
+                <ChevronLeft aria-hidden="true" size={18} />
+              </button>
+              <span aria-live="polite" className="df-rnav-pos df-tnum">
+                {visible.findIndex((item) => item.id === selected.id) + 1} of {visible.length}
+              </span>
+              <button
+                aria-label="Next moment"
+                className="df-rnav-btn"
+                disabled={evidenceOpen}
+                onClick={() => select(stepSelection(visibleIds, selected.id, 1))}
+                type="button"
+              >
+                <ChevronRight aria-hidden="true" size={18} />
+              </button>
+            </nav>
+          ) : null}
           <section
             aria-labelledby="df-rcard-title"
             className="df-card df-rcard"

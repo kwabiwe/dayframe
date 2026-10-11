@@ -201,6 +201,21 @@ describe("Review", () => {
     ]);
   });
 
+  it("shows where the card sits in the queue, with ‹ › to step through it on phones (UIA-315)", async () => {
+    const { container } = await mount();
+    const nav = container.querySelector<HTMLElement>("nav[aria-label='Queue position']")!;
+    const position = () => nav.querySelector(".df-rnav-pos")?.textContent;
+    expect(position()).toMatch(/^1 of \d+$/);
+    const total = Number(position()!.split(" of ")[1]);
+    await act(async () => nav.querySelector<HTMLButtonElement>("[aria-label='Next moment']")!.click());
+    expect(title(container)).toBe("Reading");
+    expect(position()).toBe(`2 of ${total}`);
+    await act(async () => nav.querySelector<HTMLButtonElement>("[aria-label='Previous moment']")!.click());
+    await act(async () => nav.querySelector<HTMLButtonElement>("[aria-label='Previous moment']")!.click());
+    // ‹ on the first card goes round to the last, as ↑ does.
+    expect(position()).toBe(`${total} of ${total}`);
+  });
+
   it("cannot log a moment without a complete window but can skip it", async () => {
     const { container, root } = await mount([{ ...review(WALK, "Morning walk", "focus"), suggestedStoppedAt: null }]);
     const logIt = [...container.querySelectorAll<HTMLButtonElement>(".df-ractions button")].find((button) => button.textContent?.startsWith("Log it"))!;
