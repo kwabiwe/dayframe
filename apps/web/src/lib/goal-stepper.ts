@@ -24,12 +24,15 @@ export function canStepGoal(minutes: number, direction: -1 | 1, limits: Limits) 
 }
 
 export type TimeGoalMinutes = { dailyGoalMinutes: number; weeklyGoalMinutes: number };
+export type GoalField = keyof TimeGoalMinutes;
+/** Only the goals a person changed: a save never rewrites the other one. */
+export type GoalChanges = Partial<TimeGoalMinutes>;
 
 type TimerHandle = unknown;
 
 /**
  * One queue for the whole tab: a save made on a later visit to Settings waits behind one still in
- * flight from an earlier visit, so two writes of absolute goals land in the order they were made.
+ * flight from an earlier visit, so writes land in the order they were made.
  */
 let tabQueue: Promise<unknown> = Promise.resolve();
 
@@ -37,46 +40,51 @@ export function __resetGoalSaveQueueForTests() {
   tabQueue = Promise.resolve();
 }
 
+export type GoalSave<Context> = { changes: GoalChanges; context: Context };
+
 /**
- * Saves the latest goals after a quiet delay, one request at a time; only the latest save may
- * settle the page. Each change carries its edit revision, so the page can tell whether a landed
- * save is still what it shows.
+ * Saves the goals changed since the last save after a quiet delay (one request at a time, in the
+ * tab's queue). Each save carries its caller's context (edit revision, the page data it was made
+ * over); every outcome is reported with it, accepted or failed, and `onSettled` tells the caller
+ * when its latest save is done.
  */
-export function createGoalSaver({
+export function createGoalSaver<Context>({
   clearTimer = (handle) => clearTimeout(handle as ReturnType<typeof setTimeout>),
   delayMs = GOAL_SAVE_DELAY_MS,
   onAccepted,
   onFailed,
-  onSaved,
+  mergeContext = (_earlier: Context, later: Context) => later,
+  onSettled,
   save,
   setTimer = (callback, ms) => setTimeout(callback, ms)
 }: {
   clearTimer?: (handle: TimerHandle) => void;
   delayMs?: number;
-  onFailed: (error: unknown, revision: number) => void;
-  /** Every write the server accepted, in order (also ones a newer change superseded). */
-  onAccepted?: (goals: TimeGoalMinutes) => void;
-  onSaved: (goals: TimeGoalMinutes, revision: number) => void;
-  save: (goals: TimeGoalMinutes) => Promise<void>;
+  /** Two taps folded into one save: how their contexts combine (the later one by default). */
+  mergeContext?: (earlier: Context, later: Context) => Context;
+  onAccepted: (saved: GoalSave<Context>) => void;
+  onFailed: (failed: GoalSave<Context>, error: unknown) => void;
+  /** The latest scheduled save finished (accepted or not). */
+  onSettled?: (latest: GoalSave<Context>, accepted: boolean) => void;
+  save: (changes: GoalChanges) => Promise<void>;
   setTimer?: (callback: () => void, ms: number) => TimerHandle;
 }) {
   let timer: TimerHandle | null = null;
-  let pending: { goals: TimeGoalMinutes; revision: number } | null = null;
+  let pending: GoalSave<Context> | null = null;
   let sequence = 0;
 
-  function settle(promise: Promise<unknown>, mine: number, change: { goals: TimeGoalMinutes; revision: number }) {
-    return promise.then(
-      () => {
-        onAccepted?.(change.goals);
-        if (mine === sequence) onSaved(change.goals, change.revision);
-      },
-      (error: unknown) => { if (mine === sequence) onFailed(error, change.revision); }
-    );
-  }
-
-  function send(change: { goals: TimeGoalMinutes; revision: number }) {
+  function send(change: GoalSave<Context>) {
     const mine = ++sequence;
-    tabQueue = tabQueue.catch(() => undefined).then(() => (mine === sequence ? settle(save(change.goals), mine, change) : undefined));
+    tabQueue = tabQueue.catch(() => undefined).then(() => save(change.changes).then(
+      () => {
+        onAccepted(change);
+        if (mine === sequence) onSettled?.(change, true);
+      },
+      (error: unknown) => {
+        onFailed(change, error);
+        if (mine === sequence) onSettled?.(change, false);
+      }
+    ));
   }
 
   function stopTimer() {
@@ -85,10 +93,12 @@ export function createGoalSaver({
   }
 
   return {
-    schedule(goals: TimeGoalMinutes, revision = 0) {
-      pending = { goals, revision };
+    /** A stepper tap: its field joins the pending save, which goes after the quiet delay. */
+    schedule(changes: GoalChanges, context: Context) {
+      pending = pending
+        ? { changes: { ...pending.changes, ...changes }, context: mergeContext(pending.context, context) }
+        : { changes, context };
       stopTimer();
-      sequence += 1;
       timer = setTimer(() => {
         timer = null;
         const next = pending;
@@ -97,9 +107,8 @@ export function createGoalSaver({
       }, delayMs);
     },
     /**
-     * Leaving Settings or the page being hidden: save a pending change now, still in order behind
-     * any save in flight (two writes of absolute goals must land in the order they were made). A
-     * tab closed while an earlier save is still in flight can lose only the very last change.
+     * Leaving Settings or the page being hidden: send a pending change now, still in the tab's
+     * order. A tab closed while an earlier save is still in flight can lose only the last change.
      */
     flush() {
       if (timer === null || !pending) return;

@@ -119,6 +119,53 @@ describe("Settings › Your day steppers (UIA-309)", () => {
     mocks.fetch.mockImplementation(async () => new Response("{}", { status: 200 }));
   });
 
+  it("a later visit saves only the goal it changed, never undoing the earlier visit's (Codex r4)", async () => {
+    vi.useFakeTimers();
+    const first = render(<GoalSettings dailyGoalMinutes={480} userId="user-1" weeklyGoalMinutes={2400} />);
+    fireEvent.click(first.getByRole("button", { name: "Increase daily goal" }));
+    first.unmount(); // leaving Settings sends 9h
+    // Back again before the page data caught up (still 8h / 40h).
+    const second = render(<GoalSettings dailyGoalMinutes={480} userId="user-1" weeklyGoalMinutes={2400} />);
+    fireEvent.click(second.getByRole("button", { name: "Increase weekly goal" }));
+    await act(async () => { await vi.advanceTimersByTimeAsync(600); });
+    const bodies = mocks.fetch.mock.calls.map((call) => JSON.parse(String((call as unknown as [string, RequestInit])[1].body)));
+    expect(bodies).toEqual([
+      { dailyGoalMinutes: 540, expectedUserId: "user-1" },
+      { weeklyGoalMinutes: 2700, expectedUserId: "user-1" }
+    ]);
+  });
+
+  it("every accepted save updates the app, also one a later failed save followed (Codex r4)", async () => {
+    vi.useFakeTimers();
+    let call = 0;
+    mocks.fetch.mockImplementation(async () => new Response("{}", { status: ++call === 1 ? 200 : 500 }));
+    const view = render(<GoalSettings dailyGoalMinutes={480} userId="user-1" weeklyGoalMinutes={2400} />);
+    fireEvent.click(view.getByRole("button", { name: "Increase daily goal" }));
+    await act(async () => { await vi.advanceTimersByTimeAsync(600); });
+    fireEvent.click(view.getByRole("button", { name: "Increase weekly goal" }));
+    await act(async () => { await vi.advanceTimersByTimeAsync(600); });
+    expect(mocks.refresh).toHaveBeenCalledTimes(1);
+    expect(view.getByRole("group", { name: "Daily goal: 9h" })).toBeTruthy();
+    expect(view.getByRole("group", { name: "Weekly goal: 40h" })).toBeTruthy();
+    mocks.fetch.mockImplementation(async () => new Response("{}", { status: 200 }));
+  });
+
+  it("newer page data wins over a save acknowledged after it arrived (Codex r4)", async () => {
+    vi.useFakeTimers();
+    let release: () => void = () => undefined;
+    mocks.fetch.mockImplementationOnce(() => new Promise((resolve) => { release = () => resolve(new Response("{}", { status: 200 })); }));
+    const view = render(<GoalSettings dailyGoalMinutes={480} userId="user-1" weeklyGoalMinutes={2400} />);
+    fireEvent.click(view.getByRole("button", { name: "Increase daily goal" }));
+    await act(async () => { await vi.advanceTimersByTimeAsync(600); });
+    // A change made elsewhere arrives first.
+    view.rerender(<GoalSettings dailyGoalMinutes={720} userId="user-1" weeklyGoalMinutes={2400} />);
+    expect(view.getByRole("group", { name: "Daily goal: 12h" })).toBeTruthy();
+    await act(async () => { release(); await Promise.resolve(); await Promise.resolve(); });
+    expect(view.getByRole("group", { name: "Daily goal: 12h" })).toBeTruthy();
+    fireEvent.click(view.getByRole("button", { name: "Increase daily goal" }));
+    expect(view.getByRole("group", { name: "Daily goal: 13h" })).toBeTruthy();
+  });
+
   it("leaving the page saves a pending change at once", async () => {
     vi.useFakeTimers();
     const view = render(<GoalSettings dailyGoalMinutes={480} userId="user-1" weeklyGoalMinutes={2400} />);

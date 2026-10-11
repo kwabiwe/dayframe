@@ -22,102 +22,88 @@ describe("goal steppers (UIA-309)", () => {
     expect(nextGoalMinutes(20 * 60, -1, DAILY_GOAL_HOURS)).toBe(14 * 60);
   });
 
-  it("saves only the latest goals after the quiet delay, and only the latest save settles", async () => {
+  const stubTimers = { setTimer: () => 1, clearTimer: () => undefined };
+
+  it("folds taps into one save of only the changed goals, after the quiet delay", async () => {
     const timers: Array<() => void> = [];
-    const saved: unknown[] = [];
     const save = vi.fn(async () => undefined);
-    const saver = createGoalSaver({
+    const accepted: unknown[] = [];
+    const saver = createGoalSaver<number>({
+      onAccepted: ({ changes }) => accepted.push(changes),
       onFailed: () => undefined,
-      onSaved: (goals) => saved.push(goals),
       save,
       setTimer: (callback) => { timers.push(callback); return timers.length; },
       clearTimer: () => undefined
     });
-    saver.schedule({ dailyGoalMinutes: 540, weeklyGoalMinutes: 2400 });
-    saver.schedule({ dailyGoalMinutes: 600, weeklyGoalMinutes: 2400 });
+    saver.schedule({ dailyGoalMinutes: 540 }, 1);
+    saver.schedule({ dailyGoalMinutes: 600 }, 2);
+    saver.schedule({ weeklyGoalMinutes: 2700 }, 3);
     timers.at(-1)!();
-    await vi.waitFor(() => expect(saved).toEqual([{ dailyGoalMinutes: 600, weeklyGoalMinutes: 2400 }]));
+    await vi.waitFor(() => expect(accepted).toEqual([{ dailyGoalMinutes: 600, weeklyGoalMinutes: 2700 }]));
     expect(save).toHaveBeenCalledTimes(1);
+    expect(save).toHaveBeenCalledWith({ dailyGoalMinutes: 600, weeklyGoalMinutes: 2700 });
   });
 
-  it("flush sends a pending change at once; cancel drops it", async () => {
+  it("flush sends a pending change now; cancel drops it", async () => {
     const save = vi.fn(async () => undefined);
-    const saver = createGoalSaver({ onFailed: () => undefined, onSaved: () => undefined, save, setTimer: () => 1, clearTimer: () => undefined });
-    saver.schedule({ dailyGoalMinutes: 540, weeklyGoalMinutes: 2400 });
+    const saver = createGoalSaver<number>({ onAccepted: () => undefined, onFailed: () => undefined, save, ...stubTimers });
+    saver.schedule({ dailyGoalMinutes: 540 }, 1);
     saver.flush();
     await vi.waitFor(() => expect(save).toHaveBeenCalledTimes(1));
-    saver.schedule({ dailyGoalMinutes: 600, weeklyGoalMinutes: 2400 });
+    saver.schedule({ dailyGoalMinutes: 600 }, 2);
     saver.cancel();
     saver.flush();
     await Promise.resolve();
     expect(save).toHaveBeenCalledTimes(1);
   });
 
-  it("a flush keeps saves in the order they were made, behind one still in flight", async () => {
-    let release: () => void = () => undefined;
-    const order: number[] = [];
-    const save = vi.fn()
-      .mockImplementationOnce(async (goals: { dailyGoalMinutes: number }) => { await new Promise<void>((resolve) => { release = resolve; }); order.push(goals.dailyGoalMinutes); })
-      .mockImplementation(async (goals: { dailyGoalMinutes: number }) => { order.push(goals.dailyGoalMinutes); });
-    const saved: number[] = [];
-    const saver = createGoalSaver({ onFailed: () => undefined, onSaved: (_goals, revision) => saved.push(revision), save, setTimer: () => 1, clearTimer: () => undefined });
-    saver.schedule({ dailyGoalMinutes: 540, weeklyGoalMinutes: 2400 }, 1);
-    saver.flush();
-    await vi.waitFor(() => expect(save).toHaveBeenCalledTimes(1));
-    saver.schedule({ dailyGoalMinutes: 600, weeklyGoalMinutes: 2400 }, 2);
-    saver.flush();
-    expect(save).toHaveBeenCalledTimes(1); // waits its turn
-    release();
-    await vi.waitFor(() => expect(order).toEqual([540, 600]));
-    await vi.waitFor(() => expect(saved).toEqual([2]));
-  });
-
-  it("two savers (two visits to Settings) share one queue in the tab (Codex r3)", async () => {
+  it("two savers (two visits to Settings) share one queue in the tab", async () => {
     let release: () => void = () => undefined;
     let started = false;
-    const order: number[] = [];
-    const first = createGoalSaver({
-      onFailed: () => undefined, onSaved: () => undefined, setTimer: () => 1, clearTimer: () => undefined,
-      save: async (goals) => {
+    const order: unknown[] = [];
+    const first = createGoalSaver<number>({
+      onAccepted: () => undefined, onFailed: () => undefined, ...stubTimers,
+      save: async (changes) => {
         started = true;
         await new Promise<void>((resolve) => { release = resolve; });
-        order.push(goals.dailyGoalMinutes);
+        order.push(changes);
       }
     });
-    const second = createGoalSaver({
-      onFailed: () => undefined, onSaved: () => undefined, setTimer: () => 1, clearTimer: () => undefined,
-      save: async (goals) => { order.push(goals.dailyGoalMinutes); }
+    const second = createGoalSaver<number>({
+      onAccepted: () => undefined, onFailed: () => undefined, ...stubTimers,
+      save: async (changes) => { order.push(changes); }
     });
-    first.schedule({ dailyGoalMinutes: 540, weeklyGoalMinutes: 2400 }, 1);
+    first.schedule({ dailyGoalMinutes: 540 }, 1);
     first.flush();
-    // The first visit's save is in flight before the second visit saves.
     await vi.waitFor(() => expect(started).toBe(true));
-    second.schedule({ dailyGoalMinutes: 420, weeklyGoalMinutes: 2400 }, 1);
+    second.schedule({ weeklyGoalMinutes: 2700 }, 1);
     second.flush();
     await Promise.resolve();
     expect(order).toEqual([]);
     release();
-    await vi.waitFor(() => expect(order).toEqual([540, 420]));
+    // In order, and each only its own goal: the later visit never rewrites the daily goal.
+    await vi.waitFor(() => expect(order).toEqual([{ dailyGoalMinutes: 540 }, { weeklyGoalMinutes: 2700 }]));
   });
 
-  it("a failed later save does not undo an earlier accepted one (Codex r3)", async () => {
+  it("reports every outcome with its context, and settles only the latest", async () => {
     const accepted: number[] = [];
     const failed: number[] = [];
+    const settled: Array<[number, boolean]> = [];
     const save = vi.fn()
       .mockImplementationOnce(async () => undefined)
       .mockImplementationOnce(async () => { throw new Error("offline"); });
-    const saver = createGoalSaver({
-      onAccepted: (goals) => accepted.push(goals.dailyGoalMinutes),
-      onFailed: (_error, revision) => failed.push(revision),
-      onSaved: () => undefined,
-      save, setTimer: () => 1, clearTimer: () => undefined
+    const saver = createGoalSaver<number>({
+      onAccepted: ({ context }) => accepted.push(context),
+      onFailed: ({ context }) => failed.push(context),
+      onSettled: ({ context }, ok) => settled.push([context, ok]),
+      save, ...stubTimers
     });
-    saver.schedule({ dailyGoalMinutes: 540, weeklyGoalMinutes: 2400 }, 1);
+    saver.schedule({ dailyGoalMinutes: 540 }, 1);
     saver.flush();
-    await vi.waitFor(() => expect(accepted).toEqual([540]));
-    saver.schedule({ dailyGoalMinutes: 540, weeklyGoalMinutes: 2700 }, 2);
+    saver.schedule({ weeklyGoalMinutes: 2700 }, 2);
     saver.flush();
     await vi.waitFor(() => expect(failed).toEqual([2]));
-    expect(accepted).toEqual([540]);
+    expect(accepted).toEqual([1]);
+    expect(settled).toEqual([[2, false]]);
   });
 });
