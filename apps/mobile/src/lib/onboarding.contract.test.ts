@@ -99,6 +99,8 @@ describe("onboarding polish (UIA-090/091)", () => {
   it("previews Review with hatched blocks and ends with state pills and the quick-start tiles", () => {
     expect(source).toContain('<Pattern height={12} id={`onboarding-hatch-${color}`}');
     expect(source).toContain("styles.summaryPill");
+    expect(source).toContain("pinned={activities ? activities.filter((item) => item.isPinned) : initialPinned}");
+    expect(source).toContain("styles.summaryDot");
     expect(source).toContain('testID="onboarding-done-tiles"');
     expect(source).not.toContain("previewSwatch");
   });

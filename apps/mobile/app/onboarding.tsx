@@ -96,6 +96,8 @@ export default function OnboardingScreen() {
   // This account's activities for the quick-start step (null until read).
   const { from: openedFrom } = useLocalSearchParams<{ from?: string | string[] }>();
   const [activities, setActivities] = useState<Activity[] | null>(null);
+  // The pinned activities as first read, so Done shows the tiles even when setup is skipped (UIA-090).
+  const [initialPinned, setInitialPinned] = useState<Activity[]>([]);
   const [activitiesFailed, setActivitiesFailed] = useState(false);
   const [pinning, setPinning] = useState<string | null>(null);
   const [pinNote, setPinNote] = useState<string | null>(null);
@@ -135,6 +137,12 @@ export default function OnboardingScreen() {
       ]);
       const bootstrap = await fetchBootstrap().catch(() => null);
       if (!(await stillHere(epoch))) return;
+      if (
+        bootstrap && owner.current &&
+        bootstrap.user.id === owner.current.userId && bootstrap.workspace.id === owner.current.workspaceId
+      ) {
+        setInitialPinned([...bootstrap.categories].filter((item) => item.isPinned).sort((a, b) => a.name.localeCompare(b.name)));
+      }
       const location = foreground && !foreground.granted && !foreground.canAskAgain
         ? "off"
         : locationChoiceFromPermissions(Boolean(foreground?.granted), Boolean(background?.granted));
@@ -511,7 +519,7 @@ export default function OnboardingScreen() {
               <Text {...mobileTextProps("metadata")} style={[styles.privacyText, { color: theme.textSecondary }]}>{content.privacy}</Text>
             </View>
           ) : null}
-          {step === "done" ? <DoneSummary answers={answers} pinned={(activities ?? []).filter((item) => item.isPinned)} theme={theme} /> : null}
+          {step === "done" ? <DoneSummary answers={answers} pinned={activities ? activities.filter((item) => item.isPinned) : initialPinned} theme={theme} /> : null}
           {content.result ? (
             <Reanimated.View
               entering={localPresenceEntering(reduceMotion)}
@@ -907,7 +915,9 @@ function ReviewPreview({ theme }: { theme: MobileTheme }) {
       {rows.map(([color, time, title, meta]) => {
         const fill = blockColorsFor(color, theme.mode).fill;
         return (
-          <View key={title} style={[styles.previewRow, styles.previewHatched, { borderColor: colorWithAlpha(fill, 0.7) }]}>
+          <View key={title} style={styles.previewRow}>
+            {/* The hatched block (as on Today's ribbon); text stays on the plain surface for contrast. */}
+            <View style={[styles.previewHatched, { borderColor: colorWithAlpha(fill, 0.7) }]}>
             <Svg pointerEvents="none" style={StyleSheet.absoluteFill}>
               <Defs>
                 <Pattern height={12} id={`onboarding-hatch-${color}`} patternUnits="userSpaceOnUse" width={12}>
@@ -917,6 +927,7 @@ function ReviewPreview({ theme }: { theme: MobileTheme }) {
               </Defs>
               <Rect fill={`url(#onboarding-hatch-${color})`} height="100%" width="100%" />
             </Svg>
+            </View>
             <Text {...mobileTextProps("metadata")} style={[styles.previewTime, { color: theme.textSecondary }]}>{time}</Text>
             <Text {...mobileTextProps("itemTitle")} numberOfLines={1} style={[styles.previewTitle, { color: theme.textPrimary }]}>{title}</Text>
             <Text {...mobileTextProps("metadata")} style={{ color: theme.textSecondary }}>{meta}</Text>
@@ -976,8 +987,9 @@ function DoneSummary({ answers, pinned, theme }: { answers: OnboardingAnswers; p
             </View>
             {/* State as a pill (UIA-090): On in the success tint, Later neutral. */}
             {row.state === "none" ? null : (
-              <View style={[styles.summaryPill, { backgroundColor: row.state === "on" ? colorWithAlpha(theme.success, 0.16) : theme.surfaceMuted }]}>
-                <Text {...mobileTextProps("control")} style={[styles.summaryState, { color: row.state === "on" ? theme.success : theme.textSecondary }]}>
+              <View style={[styles.summaryPill, { backgroundColor: theme.surfaceMuted }]}>
+                <View style={[styles.summaryDot, { backgroundColor: row.state === "on" ? theme.success : theme.textMuted }]} />
+                <Text {...mobileTextProps("control")} style={[styles.summaryState, { color: theme.textPrimary }]}>
                   {row.state === "on" ? "On" : "Later"}
                 </Text>
               </View>
@@ -1225,7 +1237,7 @@ const styles = StyleSheet.create({
   preview: { borderRadius: 18, gap: 10, padding: 14 },
   previewEyebrow: { fontSize: 11, fontWeight: "700", letterSpacing: 0.9 },
   previewRow: { alignItems: "center", flexDirection: "row", gap: 10 },
-  previewHatched: { borderRadius: 10, borderWidth: 1, minHeight: 44, overflow: "hidden", paddingHorizontal: 10 },
+  previewHatched: { borderRadius: 8, borderWidth: 1, height: 30, overflow: "hidden", width: 34 },
   previewTime: { fontVariant: ["tabular-nums"], width: 44 },
   previewTitle: { flex: 1, fontSize: 15, fontWeight: "600" },
   motionBar: { borderRadius: 10, flexDirection: "row", gap: 3, height: 36, overflow: "hidden" },
@@ -1237,7 +1249,8 @@ const styles = StyleSheet.create({
   summaryText: { flex: 1, minWidth: 0 },
   summaryTitle: { fontSize: 15, fontWeight: "600" },
   summaryState: { fontSize: 13, fontWeight: "700" },
-  summaryPill: { alignItems: "center", borderRadius: 999, justifyContent: "center", minHeight: 28, paddingHorizontal: 12 },
+  summaryPill: { alignItems: "center", borderRadius: 999, flexDirection: "row", gap: 6, justifyContent: "center", minHeight: 28, paddingHorizontal: 12 },
+  summaryDot: { borderRadius: 4, height: 8, width: 8 },
   doneTiles: { borderTopWidth: StyleSheet.hairlineWidth, flexDirection: "row", flexWrap: "wrap", gap: 6, paddingTop: 12 },
   doneTile: { alignItems: "center", borderRadius: 10, flexDirection: "row", gap: 6, maxWidth: "100%", minHeight: 32, paddingHorizontal: 10 },
   doneTileText: { flexShrink: 1, fontSize: 12, fontWeight: "700" },
