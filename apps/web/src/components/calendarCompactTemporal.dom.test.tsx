@@ -29,7 +29,7 @@ describe("Calendar compact temporal DOM", () => {
   it("synchronizes complete Start, Finish, and Duration values before blur", async () => {
     renderCompletedEditor();
     const start = await screen.findByLabelText("Start time") as HTMLInputElement;
-    const finish = screen.getByLabelText("Finish time") as HTMLInputElement;
+    const finish = screen.getByLabelText("End time") as HTMLInputElement;
     const duration = screen.getByLabelText("Duration") as HTMLInputElement;
 
     fireEvent.change(start, { target: { value: "09:30" } });
@@ -50,7 +50,7 @@ describe("Calendar compact temporal DOM", () => {
   it("keeps incomplete time raw and delays its error until blur", async () => {
     renderCompletedEditor();
     const start = await screen.findByLabelText("Start time") as HTMLInputElement;
-    const finish = screen.getByLabelText("Finish time") as HTMLInputElement;
+    const finish = screen.getByLabelText("End time") as HTMLInputElement;
     const duration = screen.getByLabelText("Duration") as HTMLInputElement;
 
     fireEvent.change(start, { target: { value: "11:" } });
@@ -73,7 +73,7 @@ describe("Calendar compact temporal DOM", () => {
     renderCompletedEditor();
     const duration = await screen.findByLabelText("Duration") as HTMLInputElement;
     const start = screen.getByLabelText("Start time");
-    const finish = screen.getByLabelText("Finish time");
+    const finish = screen.getByLabelText("End time");
 
     fireEvent.change(duration, { target: { value: "" } });
     fireEvent.blur(duration);
@@ -85,14 +85,14 @@ describe("Calendar compact temporal DOM", () => {
     expect(start.getAttribute("aria-describedby")).toBeNull();
     expect(finish.getAttribute("aria-describedby")).toBeNull();
 
-    fireEvent.change(screen.getByLabelText("Time entry description"), { target: { value: "Still invalid" } });
+    fireEvent.change(screen.getByLabelText("Description"), { target: { value: "Still invalid" } });
     expect((await screen.findByRole("alert")).id).toBe(errorId);
   });
 
   it("keeps validation description ids unique across simultaneous editor instances", async () => {
     renderCompletedEditor();
     renderCompletedEditor();
-    const finishes = screen.getAllByLabelText("Finish time") as HTMLInputElement[];
+    const finishes = screen.getAllByLabelText("End time") as HTMLInputElement[];
 
     fireEvent.change(finishes[0], { target: { value: "09:00" } });
     fireEvent.blur(finishes[0]);
@@ -112,19 +112,19 @@ describe("Calendar compact temporal DOM", () => {
     const user = userEvent.setup();
     renderCompletedEditor();
     const startDate = await screen.findByRole("button", { name: /Choose Start date, currently 2 August 2026/ });
-    const finishDate = screen.getByRole("button", { name: /Choose Finish date, currently 2 August 2026/ });
+    const finishDate = screen.getByRole("button", { name: /Choose End date, currently 2 August 2026/ });
     expect(startDate.textContent).toBe("");
     expect(finishDate.textContent).toBe("");
 
     finishDate.focus();
     await user.keyboard("{Enter}");
-    expect(await screen.findByRole("dialog", { name: "Choose Finish date" })).not.toBeNull();
+    expect(await screen.findByRole("dialog", { name: "Choose End date" })).not.toBeNull();
     const nextDay = screen.getByRole("button", { name: /Monday, 3 August 2026/i });
     nextDay.focus();
     await user.keyboard("{Enter}");
 
     await waitFor(() => expect(finishDate.getAttribute("aria-label")).toContain("3 August 2026"));
-    expect(screen.getByText("+1").getAttribute("title")).toBe("Finish time, one day after Start");
+    expect(screen.getByText("+1").getAttribute("title")).toBe("End time, one day after Start");
     expect((screen.getByLabelText("Duration") as HTMLInputElement).value).toBe("24:30");
     expect(document.activeElement).toBe(finishDate);
   });
@@ -137,7 +137,7 @@ describe("Calendar compact temporal DOM", () => {
     expect(feedback.getAttribute("data-feedback-mode")).toBe("overlap");
     expect(screen.getByText("Overlaps one entry by 00:15")).not.toBeNull();
 
-    const finish = screen.getByLabelText("Finish time") as HTMLInputElement;
+    const finish = screen.getByLabelText("End time") as HTMLInputElement;
     fireEvent.change(finish, { target: { value: "09:00" } });
     fireEvent.blur(finish);
     expect(finish.value).toBe("09:00");
@@ -181,7 +181,7 @@ describe("Calendar compact temporal DOM", () => {
       capturedNow: new Date(2026, 7, 2, 10),
       sourceEntry: entry("2026-08-02T09:00", "2026-08-02T09:30")
     });
-    const finish = await screen.findByLabelText("Finish time") as HTMLInputElement;
+    const finish = await screen.findByLabelText("End time") as HTMLInputElement;
 
     fireEvent.change(finish, { target: { value: "11:00" } });
     fireEvent.blur(finish);
@@ -218,11 +218,11 @@ describe("Calendar compact temporal DOM", () => {
     await act(async () => vi.advanceTimersByTime(0));
     expect(screen.getByText("Running")).not.toBeNull();
     const editor = screen.getByTestId("calendar-compact-editor");
-    expect(editor.querySelector(".calendar-compact-editor-header .calendar-compact-running-status")?.textContent).toBe("Running timer");
-    expect(editor.querySelector(".calendar-compact-editor-footer")?.textContent).not.toContain("Running timer");
+    expect(editor.querySelector(".calendar-compact-editor-header .df-ed-eyebrow")?.textContent).toBe("Recording");
+    expect(editor.querySelector(".calendar-compact-editor-footer")?.textContent).not.toContain("Recording");
     expect(screen.getByRole("button", { name: "Cancel" })).not.toBeNull();
-    expect(screen.queryByLabelText("Finish time")).toBeNull();
-    expect(screen.queryByRole("button", { name: /Choose Finish date/ })).toBeNull();
+    expect(screen.queryByLabelText("End time")).toBeNull();
+    expect(screen.queryByRole("button", { name: /Choose End date/ })).toBeNull();
     expect(screen.queryByLabelText("Duration")).toBeNull();
     expect(screen.getByLabelText("Elapsed time").textContent).toContain("00:30");
 
@@ -239,8 +239,8 @@ describe("Calendar compact temporal DOM", () => {
 
     view.rerenderEntry(entry("2026-08-02T10:00", "2026-08-02T10:30"));
     await act(async () => Promise.resolve());
-    expect(screen.getByRole("button", { name: /Choose Finish date/ })).not.toBeNull();
-    expect(screen.getByLabelText("Finish time")).not.toBeNull();
+    expect(screen.getByRole("button", { name: /Choose End date/ })).not.toBeNull();
+    expect(screen.getByLabelText("End time")).not.toBeNull();
     expect(screen.getByLabelText("Duration")).not.toBeNull();
   });
 });

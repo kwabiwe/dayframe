@@ -32,7 +32,7 @@ export type HealthPick = { sleep: boolean; workouts: boolean };
 /**
  * The account's visit and journey suggestions, separate from iOS permission: "on" only while
  * capture is actually running; "paused" when the consent is saved but capture isn't running
- * (an interrupted switch-on; Settings calls it Retry capture).
+ * (an interrupted switch-on; Settings calls it Restart location).
  */
 export type SuggestionsState = "on" | "off" | "paused" | "failed";
 

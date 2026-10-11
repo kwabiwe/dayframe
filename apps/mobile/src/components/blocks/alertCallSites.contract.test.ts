@@ -45,7 +45,7 @@ const ALLOWED_ALERTS: Record<string, string[]> = {
     '"Apple Health"', // debug export failed
     '"Apple Health"', // follow-up: sleep permission guidance
     '"Apple Health"', // permission request failed
-    '"Unable to log out"'
+    '"Couldn\'t sign out"'
   ],
   "src/components/DayframeDashboard.tsx": [
     '"Unable to refresh Dayframe"',
@@ -54,7 +54,7 @@ const ALLOWED_ALERTS: Record<string, string[]> = {
     '"Timer not started"',
     '"Timer not started"',
     "errorTitle",
-    '"Time entry change not applied"',
+    '"Change not saved"',
     '"Timer not stopped"',
     '"Timer Stop needs attention"',
     'entries.length > 1 ? "Entries not deleted" : "Entry not deleted"',

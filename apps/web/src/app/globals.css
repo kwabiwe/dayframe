@@ -517,8 +517,8 @@ html.ui-dialog-open {
 }
 
 .ui-icon-button-selected {
-  background: var(--accent-soft);
-  color: var(--accent-text);
+  background: var(--surface-muted);
+  color: var(--foreground);
 }
 
 .ui-icon-button-danger,
@@ -649,9 +649,10 @@ textarea.ui-control {
   font-weight: 600;
 }
 
+/* UIA-205: selection is neutral in the shared controls; coral stays for the primary action and recording. */
 .ui-segmented-control button[aria-pressed="true"] {
-  background: var(--accent);
-  color: var(--on-accent);
+  background: var(--foreground);
+  color: var(--background);
 }
 
 .ui-segmented-control button:disabled {
@@ -1351,8 +1352,8 @@ textarea.ui-control {
 }
 
 .settings-workspace-switcher button[aria-pressed="true"] {
-  background: var(--accent-soft);
-  color: var(--accent-text);
+  background: var(--surface-muted);
+  color: var(--foreground);
 }
 
 .settings-security-form {
@@ -3091,7 +3092,7 @@ dialog.ui-popover-panel.bottom-left {
 }
 
 .swiss-menu-list button.is-selected {
-  color: var(--accent-text);
+  color: var(--foreground);
   font-weight: 700;
 }
 
@@ -6117,7 +6118,7 @@ kbd {
 .swiss-timer-actions-menu button {
   display: flex;
   width: 100%;
-  min-height: 40px;
+  min-height: 44px;
   align-items: center;
   gap: 8px;
   border: 0;
@@ -6281,7 +6282,7 @@ kbd {
 }
 
 .swiss-profile-section .swiss-menu-list button.is-selected {
-  background: var(--accent-soft);
+  background: var(--surface-muted);
   color: var(--foreground);
 }
 
@@ -6528,7 +6529,7 @@ kbd {
 
 .swiss-category-option.is-selected {
   border: 0;
-  background: var(--accent-soft);
+  background: var(--surface-muted);
 }
 
 .swiss-category-option.is-selected > svg {
@@ -7205,10 +7206,11 @@ kbd {
   transform: translateY(-50%);
 }
 
+/* UIA-202: neutral, never coral, when hovered or open. */
 .inline-tag-picker-trigger:hover,
 .inline-tag-picker-trigger.is-open {
   background: transparent;
-  color: var(--accent-text);
+  color: var(--foreground);
 }
 
 .inline-tag-picker {
@@ -7316,15 +7318,15 @@ kbd {
 }
 
 .inline-tag-check.is-selected {
-  border-color: var(--accent);
-  background: var(--accent);
-  color: var(--on-accent);
+  border-color: var(--foreground);
+  background: var(--foreground);
+  color: var(--background);
 }
 
 .inline-tag-picker-create {
   justify-content: center;
   border-top: 1px solid var(--line);
-  color: var(--accent-text);
+  color: var(--foreground);
   font-weight: 600;
 }
 
@@ -7578,8 +7580,8 @@ dialog.ui-dialog.manual-entry-dialog {
 }
 
 .dayframe-calendar-grid button[aria-pressed="true"] {
-  background: var(--accent);
-  color: var(--on-accent);
+  background: var(--foreground);
+  color: var(--background);
   font-weight: 700;
 }
 
@@ -8644,11 +8646,6 @@ dialog.ui-dialog.manual-entry-dialog {
 
 .calendar-compact-cancel:hover:not(:disabled) {
   background: var(--surface-muted);
-}
-
-.calendar-compact-discard-confirm {
-  background: var(--accent);
-  color: var(--on-accent);
 }
 
 .calendar-compact-editor-footer.is-confirming-discard .calendar-compact-editor-default-actions {
@@ -10011,19 +10008,34 @@ button.df-cmd-clock:hover {
     padding: 0;
   }
 
+  /* UIA-210: the quick starts wrap onto more rows rather than scrolling off the screen. */
   .df-quick {
-    flex-wrap: nowrap;
-    overflow-x: auto;
-    scrollbar-width: none;
+    flex-wrap: wrap;
   }
 
   .df-quick-button {
-    flex: 0 0 auto;
+    flex: 0 1 auto;
+    min-width: 0;
     min-height: 44px;
   }
 
   .df-quick-button kbd {
     display: none;
+  }
+}
+
+/* UIA-210: on phones the activity, description and Stop share the first row (the description
+   gets the room); the clock and the running block's ⋯ sit on the row below. */
+@media (max-width: 560px) {
+  .df-cmd {
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    grid-template-areas:
+      "activity description action"
+      "time time secondary";
+  }
+
+  .df-cmd-secondary {
+    justify-self: end;
   }
 }
 
@@ -13491,6 +13503,270 @@ dialog.ui-dialog.df-rf-dialog {
     width: 28px;
     height: 28px;
   }
+}
+
+/* Blocks entry editor (audit UIA-201; prototype "Edit block"): eyebrow and title head, a large
+   description, activity chips with "All activities", time cards, and Delete · Start again · Save. */
+.calendar-compact-editor-header.df-ed-head {
+  border-bottom: 0;
+  background: transparent;
+}
+
+.df-ed-eyebrow {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-weight: 650;
+}
+
+.df-ed-head h2 {
+  margin: 0;
+  overflow: hidden;
+  color: var(--foreground);
+  font-family: var(--font-display);
+  font-size: 18px;
+  font-weight: 750;
+  letter-spacing: -0.01em;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.calendar-compact-editor-panel .time-entry-quick-description-control input {
+  font-size: 17px;
+  font-weight: 600;
+}
+
+.df-ed-chips {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+.df-ed-chips {
+  min-width: 0;
+  max-width: 100%;
+}
+
+.df-ed-chips .df-rchips {
+  display: contents;
+}
+
+/* A long activity name wraps inside its chip instead of widening the editor (phone widths). */
+.df-ed-chips .df-rchip {
+  max-width: 100%;
+  min-width: 0;
+  flex: 0 1 auto;
+  overflow-wrap: anywhere;
+  text-align: start;
+}
+
+.df-ed-chips .df-rchip > i {
+  flex: none;
+}
+
+.df-rchip--more {
+  background: var(--surface-muted);
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+
+.df-rchip--more span {
+  color: var(--text-tertiary, var(--muted));
+}
+
+.df-rchip--more[aria-expanded="true"],
+.df-rchip--more:hover {
+  color: var(--foreground);
+}
+
+.df-ed-chips .df-rchip {
+  cursor: pointer;
+}
+
+.df-ed-chips .df-rchip:not(.is-checked) {
+  background: var(--surface-inset);
+}
+
+.df-ed-chips .df-rchip:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+
+.calendar-compact-editor-panel .calendar-compact-temporal-fields > * {
+  border-radius: 14px;
+  background: var(--surface-inset);
+  padding: 8px 10px;
+}
+
+
+/* UIA-205: discarding changes is destructive, so its confirm reads as danger, not coral. */
+.calendar-compact-discard-confirm {
+  background: var(--surface-muted);
+  color: var(--danger-text);
+}
+
+.calendar-compact-icon-action.is-danger {
+  color: var(--danger-text);
+}
+
+/* The editor's chips are 44 px wherever touch is the input, whatever the viewport width. */
+@media (any-pointer: coarse) {
+  .df-ed-chips .df-rchip {
+    min-height: 44px;
+  }
+}
+
+.category-picker-search {
+  width: calc(100% - 12px);
+  margin: 6px 6px 4px;
+}
+
+/* UIA-202: the command timer's "Activity for this block" — every activity as a chip, neutral
+   chrome; the chosen chip fills with its activity colour. Fits phones (portal width capped at the
+   viewport less 24 px, internal scrolling). */
+.category-picker-menu.is-portalled.df-actmenu {
+  display: grid;
+  gap: 12px;
+  border-radius: 20px;
+  padding: 16px;
+  max-height: min(420px, calc(100dvh - 24px));
+}
+
+.df-actmenu-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.df-actmenu-head strong {
+  color: var(--foreground);
+  font-family: var(--font-display);
+  font-size: 17px;
+  font-weight: 750;
+}
+
+.df-actmenu-head .df-icon-action {
+  width: 44px;
+  height: 44px;
+  margin: -8px -8px -8px 0;
+}
+
+.df-actmenu-chips {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+.df-actmenu-chips .df-rchip.category-picker-create-option {
+  width: auto;
+  min-height: 36px;
+  margin: 0;
+  border: 0;
+  padding: 0 12px 0 10px;
+}
+
+.df-actmenu-chips .df-rchip {
+  min-height: 36px;
+  max-width: 100%;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  text-align: start;
+  background: var(--surface-inset);
+  cursor: pointer;
+}
+
+.df-actmenu-chips .df-rchip.is-checked {
+  background: var(--block);
+}
+
+.df-actmenu-chips .df-rchip.is-none > i {
+  background: var(--text-muted);
+}
+
+.df-actmenu-chips .df-rchip.is-checked.is-neutral {
+  background: var(--text-primary);
+  color: var(--surface);
+}
+
+.df-actmenu-chips .df-rchip.is-checked.is-neutral > i {
+  background: var(--surface);
+}
+
+.df-actmenu-chips .df-rchip > i {
+  flex: none;
+}
+
+.df-actmenu-chips .df-rchip:not(.is-checked):hover {
+  background: var(--surface-muted);
+}
+
+@media (hover: none), (max-width: 760px) {
+  .df-actmenu-chips .df-rchip,
+  .df-actmenu-chips .df-rchip.category-picker-create-option {
+    min-height: 44px;
+  }
+}
+
+/* UIA-202: the command timer's start-time popover in Blocks: a display-type head without a rule,
+   and "Set to last stop time" as a neutral 44 px pill instead of a coral link. */
+.df-cmd-time .swiss-start-time-popover {
+  border-radius: 20px;
+}
+
+.df-cmd-time .swiss-start-time-popover-header {
+  min-height: 0;
+  border-bottom: 0;
+  padding: 16px var(--web-panel-padding) 0;
+}
+
+.df-cmd-time .swiss-start-time-popover-header strong {
+  color: var(--foreground);
+  font-family: var(--font-display);
+  font-size: 17px;
+  font-weight: 750;
+}
+
+.df-cmd-time .edit-entry-last-stop {
+  min-height: 44px;
+  align-items: center;
+  margin-top: 4px;
+  border-radius: 999px;
+  background: var(--surface-inset);
+  padding: 0 14px;
+  color: var(--text-primary);
+  font-size: 13px;
+}
+
+.df-cmd-time .edit-entry-last-stop span {
+  color: var(--text-secondary);
+}
+
+.df-cmd-time .edit-entry-last-stop:hover {
+  background: var(--surface-muted);
+  text-decoration: none;
+}
+
+.df-cmd-time .swiss-start-time-popover .ui-dialog-actions {
+  border-top: 0;
+}
+
+/* UIA-202: the tag picker's head in Blocks: display type, no rule under it. */
+.inline-tag-picker {
+  border-radius: 20px;
+}
+
+.inline-tag-picker-header {
+  border-bottom: 0;
+  padding-left: 16px;
+}
+
+.inline-tag-picker-header strong {
+  font-family: var(--font-display);
+  font-size: 15px;
+  font-weight: 750;
 }
 
 /* Calendar › List in Blocks (owner on UIA-203: like Today's blocks). Rows are fill rows with the
