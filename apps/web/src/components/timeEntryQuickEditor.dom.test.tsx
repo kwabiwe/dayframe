@@ -27,17 +27,18 @@ describe("TimeEntryQuickEditorModal", () => {
     document.body.innerHTML = "";
   });
 
-  it("uses one Edit Entry title without repeating completed or running descriptions", async () => {
+  it("titles the editor 'Edit block' or 'Running block' under a day or Recording eyebrow, never repeating the description", async () => {
     const completed = renderModal({ sourceEntry: timeEntry({ description: "Sleep" }) });
     const completedEditor = await screen.findByTestId("time-entry-quick-editor");
-    expect(completedEditor.querySelector(".calendar-compact-editor-header")?.textContent).toBe("Edit Entry");
-    expect((screen.getByLabelText("Time entry description") as HTMLInputElement).value).toBe("Sleep");
+    expect(completedEditor.querySelector(".calendar-compact-editor-header h2")?.textContent).toBe("Edit block");
+    expect(completedEditor.querySelector(".df-ed-eyebrow")?.textContent).toMatch(/^[A-Z][a-z]+day \d{1,2} [A-Z][a-z]+$/);
+    expect((screen.getByLabelText("Description") as HTMLInputElement).value).toBe("Sleep");
 
     completed.unmount();
     renderModal({ sourceEntry: timeEntry({ description: null, stoppedAt: null }) });
     const runningEditor = await screen.findByTestId("time-entry-quick-editor");
-    expect(runningEditor.querySelector(".calendar-compact-editor-header strong")?.textContent).toBe("Edit Entry");
-    expect(runningEditor.querySelector(".calendar-compact-running-status")?.textContent).toBe("Running timer");
+    expect(runningEditor.querySelector(".calendar-compact-editor-header h2")?.textContent).toBe("Running block");
+    expect(runningEditor.querySelector(".df-ed-eyebrow")?.textContent).toBe("Recording");
     expect(runningEditor.querySelector(".calendar-compact-editor-header")?.textContent).not.toContain("Untitled entry");
   });
 
@@ -46,7 +47,7 @@ describe("TimeEntryQuickEditorModal", () => {
       const view = renderModal({
         sourceEntry: timeEntry({ categoryId: null, categoryName: null, description: null, stoppedAt, tagNames: [], tags: [] })
       });
-      const description = await screen.findByLabelText("Time entry description") as HTMLInputElement;
+      const description = await screen.findByLabelText("Description") as HTMLInputElement;
       const suggestions = await screen.findByRole("listbox", { name: "Suggestions" });
 
       expect(description.value).toBe("");
@@ -58,7 +59,7 @@ describe("TimeEntryQuickEditorModal", () => {
 
       expect(description.value).toBe("Deep planning");
       expect(screen.getByRole("button", { name: "Remove tag Deep work" })).not.toBeNull();
-      expect(screen.getByRole("button", { name: /Focus/ })).not.toBeNull();
+      expect(screen.getByRole("radio", { name: /Focus/ }).getAttribute("aria-checked")).toBe("true");
       await waitFor(() => expect(screen.queryByRole("listbox", { name: "Suggestions" })).toBeNull());
       view.unmount();
     }
@@ -66,7 +67,7 @@ describe("TimeEntryQuickEditorModal", () => {
 
   it("reopens suggestions when an existing description is cleared", async () => {
     renderModal();
-    const description = await screen.findByLabelText("Time entry description") as HTMLInputElement;
+    const description = await screen.findByLabelText("Description") as HTMLInputElement;
 
     expect(screen.queryByRole("listbox", { name: "Suggestions" })).toBeNull();
     fireEvent.change(description, { target: { value: "" } });
@@ -82,7 +83,7 @@ describe("TimeEntryQuickEditorModal", () => {
     expect(await screen.findByTestId("time-entry-quick-editor-modal")).not.toBeNull();
     expect(screen.getByRole("button", { name: "Remove tag Planning" })).not.toBeNull();
     expect(screen.getByRole("button", { name: /Choose Start date/ }).textContent).toBe("");
-    expect(screen.getByRole("button", { name: /Choose Finish date/ }).textContent).toBe("");
+    expect(screen.getByRole("button", { name: /Choose End date/ }).textContent).toBe("");
 
     await userEvent.click(screen.getByRole("button", { name: "Remove tag Planning" }));
     await userEvent.click(screen.getByRole("button", { name: "Add or filter tags" }));
@@ -124,7 +125,7 @@ describe("TimeEntryQuickEditorModal", () => {
   it("routes dirty Cancel and backdrop dismissal through the same discard plane", async () => {
     const onClose = vi.fn();
     renderModal({ onClose });
-    const description = await screen.findByLabelText("Time entry description");
+    const description = await screen.findByLabelText("Description");
     await userEvent.type(description, " updated");
 
     await userEvent.click(screen.getByRole("button", { name: "Cancel" }));
@@ -143,7 +144,7 @@ describe("TimeEntryQuickEditorModal", () => {
     const onSave = vi.fn<SaveHandler>().mockResolvedValue({ ok: true });
     renderModal({ onClose, onSave });
     const start = await screen.findByLabelText("Start time");
-    const description = screen.getByLabelText("Time entry description");
+    const description = screen.getByLabelText("Description");
 
     fireEvent.change(start, { target: { value: "08:30" } });
     fireEvent.change(description, { target: { value: "Plan release follow-up" } });
@@ -162,7 +163,7 @@ describe("TimeEntryQuickEditorModal", () => {
     const onSave = vi.fn<SaveHandler>().mockResolvedValue({ ok: true });
     const user = userEvent.setup();
     renderModal({ onSave });
-    const finish = await screen.findByLabelText("Finish time") as HTMLInputElement;
+    const finish = await screen.findByLabelText("End time") as HTMLInputElement;
 
     await user.clear(finish);
     await user.type(finish, "1025");
@@ -195,7 +196,7 @@ describe("TimeEntryQuickEditorModal", () => {
     const onClose = vi.fn();
     const onSave = vi.fn<SaveHandler>().mockResolvedValue({ ok: true });
     renderModal({ onClose, onSave });
-    const description = await screen.findByLabelText("Time entry description");
+    const description = await screen.findByLabelText("Description");
 
     fireEvent.keyDown(description, { key: "Enter" });
 
@@ -207,7 +208,7 @@ describe("TimeEntryQuickEditorModal", () => {
     const onClose = vi.fn();
     const onSave = vi.fn<SaveHandler>().mockResolvedValue({ ok: false, error: "Server rejected the update." });
     renderModal({ onClose, onSave });
-    const description = await screen.findByLabelText("Time entry description") as HTMLInputElement;
+    const description = await screen.findByLabelText("Description") as HTMLInputElement;
     fireEvent.change(description, { target: { value: "Keep this draft" } });
     fireEvent.keyDown(description, { key: "Enter" });
 
@@ -219,7 +220,7 @@ describe("TimeEntryQuickEditorModal", () => {
   it("gives hashtag selection, modifiers, and IME composition precedence over Enter save", async () => {
     const onSave = vi.fn<SaveHandler>().mockResolvedValue({ ok: true });
     renderModal({ onSave });
-    const description = await screen.findByLabelText("Time entry description");
+    const description = await screen.findByLabelText("Description");
 
     for (const modifier of ["shiftKey", "ctrlKey", "altKey", "metaKey"] as const) {
       fireEvent.keyDown(description, { key: "Enter", [modifier]: true });
@@ -241,7 +242,7 @@ describe("TimeEntryQuickEditorModal", () => {
       resolveSave = resolve;
     }));
     renderModal({ onSave });
-    const description = await screen.findByLabelText("Time entry description");
+    const description = await screen.findByLabelText("Description");
     fireEvent.change(description, { target: { value: "Changed" } });
     fireEvent.keyDown(description, { key: "Enter" });
     fireEvent.keyDown(description, { key: "Enter" });
@@ -257,20 +258,20 @@ describe("TimeEntryQuickEditorModal", () => {
     const user = userEvent.setup();
     renderModal({ onClose, onDelete, onSave });
     const editor = await screen.findByTestId("time-entry-quick-editor");
-    const description = screen.getByLabelText("Time entry description") as HTMLInputElement;
+    const description = screen.getByLabelText("Description") as HTMLInputElement;
 
     await user.clear(description);
     await user.type(description, "Captured before save{Enter}");
     await waitFor(() => expect(onSave).toHaveBeenCalledOnce());
 
     expect(editor.getAttribute("aria-busy")).toBe("true");
-    expect(screen.getByRole("status").textContent).toBe("Saving entry…");
+    expect(screen.getByRole("status").textContent).toBe("Saving block…");
     expect(description.disabled).toBe(true);
     expect((screen.getByRole("button", { name: "Remove tag Planning" }) as HTMLButtonElement).disabled).toBe(true);
     expect((screen.getByRole("button", { name: "Add or filter tags" }) as HTMLButtonElement).disabled).toBe(true);
-    expect((screen.getByRole("button", { name: /No activity/ }) as HTMLButtonElement).disabled).toBe(true);
+    expect((screen.getByRole("button", { name: /All activities/ }) as HTMLButtonElement).disabled).toBe(true);
     expect((screen.getByLabelText("Start time") as HTMLInputElement).disabled).toBe(true);
-    expect((screen.getByLabelText("Finish time") as HTMLInputElement).disabled).toBe(true);
+    expect((screen.getByLabelText("End time") as HTMLInputElement).disabled).toBe(true);
     expect((screen.getByLabelText("Duration in hours and minutes") as HTMLInputElement).disabled).toBe(true);
     expect((screen.getByRole("button", { name: /Delete Plan release/ }) as HTMLButtonElement).disabled).toBe(true);
     expect((screen.getByRole("button", { name: "Close editor" }) as HTMLButtonElement).disabled).toBe(true);
@@ -302,8 +303,8 @@ describe("TimeEntryQuickEditorModal", () => {
     expect(editor.getAttribute("aria-busy")).toBe("true");
     expect(deleteButton.getAttribute("aria-busy")).toBe("true");
     expect(deleteButton.disabled).toBe(true);
-    expect(screen.getByRole("status").textContent).toBe("Deleting entry…");
-    expect((screen.getByLabelText("Time entry description") as HTMLInputElement).disabled).toBe(true);
+    expect(screen.getByRole("status").textContent).toBe("Deleting block…");
+    expect((screen.getByLabelText("Description") as HTMLInputElement).disabled).toBe(true);
     expect((screen.getByRole("button", { name: "Save" }) as HTMLButtonElement).disabled).toBe(true);
 
     fireEvent.click(deleteButton);

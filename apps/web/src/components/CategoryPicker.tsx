@@ -64,10 +64,14 @@ export function CategoryPicker({
   selectedId: string;
   triggerId?: string;
   triggerRef?: RefObject<HTMLButtonElement | null>;
-  /** "block" is the Blocks command timer: a solid activity square opening the timer menu. */
-  variant: "timer" | "quick" | "block";
+  /**
+   * "block" is the Blocks command timer: a solid activity square opening the timer menu. "more" is
+   * the entry editor's "All activities" chip after its activity chips: it opens the searchable
+   * menu (with Create) and shows no selection of its own.
+   */
+  variant: "timer" | "quick" | "block" | "more";
 }) {
-  const menuVariant = variant === "quick" ? "quick" : "timer";
+  const menuVariant = variant === "quick" || variant === "more" ? "quick" : "timer";
   const rootRef = useRef<HTMLDivElement | null>(null);
   const localTriggerRef = useRef<HTMLButtonElement | null>(null);
   const menuRef = useRef<HTMLDivElement | null>(null);
@@ -564,6 +568,29 @@ export function CategoryPicker({
             glyph={selectedCategory ? resolveActivityIcon(selectedCategory).glyph : DAYFRAME_APP_ICONS.tag}
             size={20}
           />
+        </button>
+      ) : variant === "more" ? (
+        <button
+          aria-controls={menuId}
+          aria-expanded={open}
+          aria-haspopup={isCreating ? "dialog" : "listbox"}
+          aria-label={`All activities, ${categories.length}`}
+          className="df-rchip df-rchip--more"
+          disabled={disabled}
+          id={triggerId}
+          onClick={() => {
+            if (open) {
+              if (!isCreateBusy) closePicker(false);
+              return;
+            }
+            openPicker();
+          }}
+          onKeyDown={handleTriggerKeyDown}
+          ref={assignTrigger}
+          type="button"
+        >
+          All activities
+          <span aria-hidden="true" className="df-tnum">{categories.length}</span>
         </button>
       ) : (
       <button
