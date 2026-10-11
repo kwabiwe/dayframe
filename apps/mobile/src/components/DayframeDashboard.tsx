@@ -99,6 +99,7 @@ import {
   readQueue,
   readTimerEntryIdCorrelations,
   resolveTimerEntryIdAfterQueueBarrier,
+  requestPasswordReset,
   signup,
   syncQueue,
   type MobileBootstrap,
@@ -243,7 +244,7 @@ import {
 } from "@/lib/timerPresentation";
 
 type TimeEntry = MobileBootstrap["entries"][number];
-type AuthView = "login" | "signup";
+type AuthView = "login" | "signup" | "reset";
 type AuthState = "checking" | "opening" | "authenticated" | "signedOut";
 type DashboardLoadOptions = {
   preserveAuthFormOnAuthRequired?: boolean;
@@ -322,7 +323,6 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
   const [authPassword, setAuthPassword] = useState("");
   const [authPasswordVisible, setAuthPasswordVisible] = useState(false);
   const [authName, setAuthName] = useState("");
-  const [authWorkspace, setAuthWorkspace] = useState("");
   const [authError, setAuthError] = useState<string | null>(null);
   const [authNotice, setAuthNotice] = useState<string | null>(null);
   const [now, setNow] = useState(() => Date.now());
@@ -449,7 +449,6 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
     void loadHapticsPreference();
   }, []);
   const authNameRef = useRef<TextInput>(null);
-  const authWorkspaceRef = useRef<TextInput>(null);
   const authEmailRef = useRef<TextInput>(null);
   const authPasswordRef = useRef<TextInput>(null);
   const preserveAuthPasswordOnSignedOut = useRef(false);
@@ -2589,13 +2588,13 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
     setAuthNotice(null);
     setAuthSubmitting(true);
     try {
+      if (authView === "reset") {
+        // Forgot password (UIA-317): the same reply for any address; the reset page is on the web.
+        setAuthNotice(await requestPasswordReset(authEmail.trim()));
+        return;
+      }
       const auth = authView === "signup"
-        ? await signup(
-          authEmail,
-          authPassword,
-          authName.trim() || undefined,
-          authWorkspace.trim() || undefined
-        )
+        ? await signup(authEmail, authPassword, authName.trim() || undefined)
         : await login(authEmail, authPassword);
       if ("requiresEmailConfirmation" in auth) {
         setAuthPassword("");
@@ -2619,7 +2618,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
       setAuthPassword("");
       void offerOnboardingAfterSignIn();
     } catch (error) {
-      setAuthError(error instanceof Error ? error.message : "Unable to authenticate");
+      setAuthError(error instanceof Error ? error.message : "Dayframe couldn't sign you in. Check your connection and try again.");
       setAuthState("signedOut");
     } finally {
       authSubmittingRef.current = false;
@@ -2645,15 +2644,14 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
           <View style={styles.header}>
             <DashboardBrandLockup styles={styles} theme={theme} />
           </View>
+          {/* The sign-in card's own look while the account loads (UIA-320). */}
           <View
             accessibilityLiveRegion="polite"
             accessibilityRole="progressbar"
-            style={styles.panel}
+            style={styles.authCard}
           >
-            <Text style={styles.sectionTitle}>Opening Dayframe…</Text>
-            <Text style={styles.muted}>
-              Loading your latest blocks and saved activity.
-            </Text>
+            <Text accessibilityRole="header" style={styles.authTitle}>Opening Dayframe…</Text>
+            <Text style={styles.authBody}>Getting your blocks, places and Apple Health ready.</Text>
           </View>
         </View>
       </SafeAreaView>
@@ -2667,65 +2665,66 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
             <DashboardBrandLockup styles={styles} theme={theme} />
           </View>
           <View style={styles.authCard}>
-            <Text accessibilityRole="header" style={styles.authTitle}>{authView === "signup" ? "Create account" : "Log in"}</Text>
+            <Text accessibilityRole="header" style={styles.authTitle}>
+              {authView === "signup" ? "Create account" : authView === "reset" ? "Reset password" : "Log in"}
+            </Text>
             <Text style={styles.authBody}>
               {authView === "signup"
-                ? "Create your Dayframe account and personal workspace."
-                : "Use your Dayframe account to sync blocks, places and Apple Health with your workspace."}
+                ? "Create your Dayframe account."
+                : authView === "reset"
+                  ? "We'll email you a link to choose a new password."
+                  : "Sign in to sync your blocks, places and Apple Health."}
             </Text>
             {authView === "signup" ? (
               <>
+                <Text style={styles.authLabel}>Name</Text>
                 <TextInput
                   ref={authNameRef}
+                  accessibilityLabel="Name"
                   style={[styles.textInput, styles.authInput]}
                   value={authName}
                   onChangeText={setAuthName}
-                  onSubmitEditing={() => authWorkspaceRef.current?.focus()}
-                  placeholder="Name"
-                  placeholderTextColor={theme.textSecondary}
-                  autoCapitalize="words"
-                  autoComplete="off"
-                  textContentType="none"
-                  returnKeyType="next"
-                  submitBehavior="submit"
-                />
-                <TextInput
-                  ref={authWorkspaceRef}
-                  style={[styles.textInput, styles.authInput]}
-                  value={authWorkspace}
-                  onChangeText={setAuthWorkspace}
                   onSubmitEditing={() => authEmailRef.current?.focus()}
-                  placeholder="Workspace"
+                  placeholder="Your name"
                   placeholderTextColor={theme.textSecondary}
                   autoCapitalize="words"
-                  autoComplete="off"
-                  textContentType="none"
+                  autoComplete="name"
+                  textContentType="name"
                   returnKeyType="next"
                   submitBehavior="submit"
                 />
               </>
             ) : null}
+            <Text style={styles.authLabel}>Email</Text>
             <TextInput
               ref={authEmailRef}
+              accessibilityLabel="Email"
               style={[styles.textInput, styles.authInput]}
               value={authEmail}
               onChangeText={setAuthEmail}
-              onSubmitEditing={() => authPasswordRef.current?.focus()}
-              placeholder="Email"
+              onSubmitEditing={() => (authView === "reset" ? submitAuth() : authPasswordRef.current?.focus())}
+              placeholder="you@example.com"
               placeholderTextColor={theme.textSecondary}
               autoCapitalize="none"
-              autoComplete="off"
+              // Password AutoFill and Keychain suggestions are on (UIA-321, owner): re-check the
+              // keyboard on a physical iPhone for the #160 frame change.
+              autoComplete="email"
               autoCorrect={false}
               keyboardType="email-address"
               spellCheck={false}
-              textContentType="none"
-              returnKeyType="next"
-              submitBehavior="submit"
+              textContentType="username"
+              returnKeyType={authView === "reset" ? "send" : "next"}
+              submitBehavior={authView === "reset" ? "blurAndSubmit" : "submit"}
             />
+            {authView === "reset" ? null : (
+            <>
+            <Text style={styles.authLabel}>Password</Text>
             <View style={styles.authPasswordField}>
               <View style={styles.authPasswordInputFrame}>
                 <TextInput
                   ref={authPasswordRef}
+                  accessibilityHint={authView === "signup" ? "At least 8 characters" : undefined}
+                  accessibilityLabel="Password"
                   style={[
                     styles.textInput,
                     styles.authInput,
@@ -2735,17 +2734,17 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
                   value={authPassword}
                   onChangeText={setAuthPassword}
                   onSubmitEditing={submitAuth}
-                  placeholder="Password"
+                  placeholder={authView === "signup" ? "At least 8 characters" : "Password"}
                   placeholderTextColor={theme.textSecondary}
                   autoCapitalize="none"
-                  autoComplete="off"
+                  autoComplete={authView === "signup" ? "new-password" : "current-password"}
                   autoCorrect={false}
                   caretHidden={authPasswordVisible}
                   returnKeyType="done"
                   secureTextEntry
                   spellCheck={false}
                   submitBehavior="blurAndSubmit"
-                  textContentType="none"
+                  textContentType={authView === "signup" ? "newPassword" : "password"}
                 />
                 {authPasswordVisible && authPassword ? (
                   <View
@@ -2776,6 +2775,23 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
                 />
               </Pressable>
             </View>
+            {authView === "signup" ? <Text style={styles.authHint}>At least 8 characters.</Text> : null}
+            {authView === "login" ? (
+              <Pressable
+                accessibilityRole="button"
+                onPress={() => {
+                  setAuthError(null);
+                  setAuthNotice(null);
+                  setAuthPasswordVisible(false);
+                  setAuthView("reset");
+                }}
+                style={pressable(styles.authTextLink, styles.buttonPressed)}
+              >
+                <Text style={styles.authTextLinkText}>Forgot password?</Text>
+              </Pressable>
+            ) : null}
+            </>
+            )}
             {authNotice ? <Text style={styles.statusText}>{authNotice}</Text> : null}
             {authError ? <Text style={styles.errorText}>{authError}</Text> : null}
             <Pressable
@@ -2788,24 +2804,27 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
               onPress={submitAuth}
             >
               <Text style={[styles.primaryButtonText, styles.authPrimaryButtonText]}>
-                {authSubmitting ? "Working…" : authView === "signup" ? "Create account" : "Log in"}
+                {authSubmitting
+                  ? authView === "signup" ? "Creating account…" : authView === "reset" ? "Sending…" : "Logging in…"
+                  : authView === "signup" ? "Create account" : authView === "reset" ? "Send reset link" : "Log in"}
               </Text>
             </Pressable>
             <View style={styles.authSwitchRow}>
               <Text style={styles.authSwitchText}>
-                {authView === "signup" ? "Already have an account?" : "New to Dayframe?"}
+                {authView === "login" ? "New to Dayframe?" : authView === "reset" ? "Remembered it?" : "Already have an account?"}
               </Text>
               <Pressable
-                accessibilityLabel={authView === "signup" ? "Log in with an existing account" : "Create an account"}
+                accessibilityLabel={authView === "login" ? "Create an account" : "Log in with an existing account"}
                 accessibilityRole="button"
                 style={pressable(styles.authSwitchLink, styles.buttonPressed)}
                 onPress={() => {
                   setAuthError(null);
+                  setAuthNotice(null);
                   setAuthPasswordVisible(false);
-                  setAuthView(authView === "signup" ? "login" : "signup");
+                  setAuthView(authView === "login" ? "signup" : "login");
                 }}
               >
-                <Text style={styles.authSwitchLinkText}>{authView === "signup" ? "Log in" : "Create one"}</Text>
+                <Text style={styles.authSwitchLinkText}>{authView === "login" ? "Create one" : "Log in"}</Text>
               </Pressable>
             </View>
           </View>
