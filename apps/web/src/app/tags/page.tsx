@@ -1,4 +1,4 @@
-import { PageHeader } from "@/components/PageHeader";
+import { LibraryHead } from "@/components/library/LibraryHead";
 import { TagManager } from "@/components/TagManager";
 import { resolvePageSession } from "@/lib/auth/server";
 import { getTags } from "@/lib/queries";
@@ -10,11 +10,9 @@ export default async function TagsPage() {
   const tags = await getTags(session);
 
   return (
-    <>
-      <PageHeader title="Tags" description="Manage reusable secondary context for tracked tasks and time entries." />
-      <div className="px-5 py-6 md:px-8">
-        <TagManager tags={tags} />
-      </div>
-    </>
+    <div className="df-library">
+      <LibraryHead current="/tags" />
+      <TagManager tags={tags} />
+    </div>
   );
 }

@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { Plus } from "lucide-react";
-import { PageHeader } from "@/components/PageHeader";
+import { LibraryHead } from "@/components/library/LibraryHead";
 import { PlacesManager } from "@/components/PlacesManager";
 import { resolvePageSession } from "@/lib/auth/server";
 import { getBootstrapData } from "@/lib/queries";
@@ -12,20 +12,17 @@ export default async function PlacesPage() {
   const data = await getBootstrapData(session);
 
   return (
-    <>
-      <PageHeader
-        title="Places"
-        description="Save locations and choose whether detected visits should appear in Review."
+    <div className="df-library">
+      <LibraryHead
         action={(
-          <Link className="ui-button ui-button-primary" href="/places/new">
-            <Plus aria-hidden="true" size={17} />
+          <Link className="df-rbtn df-rbtn--sm" href="/places/new">
+            <Plus aria-hidden="true" size={16} />
             Add place
           </Link>
         )}
+        current="/places"
       />
-      <div className="px-5 pb-8 md:px-8">
-        <PlacesManager learnedPlaces={data.learnedPlaces} places={data.places} />
-      </div>
-    </>
+      <PlacesManager learnedPlaces={data.learnedPlaces} places={data.places} />
+    </div>
   );
 }
