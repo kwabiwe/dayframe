@@ -298,10 +298,14 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
   const [reportsScrubbing, setReportsScrubbing] = useState(false);
   // A rejected change badges the avatar, which then opens Settings › Sync help.
   const syncAttentionCount = useSyncAttentionCount();
-  const openAccount = useCallback((target: "settings" | "sync") => {
-    if (target === "sync") router.push({ pathname: "/settings", params: { from: "today", section: "sync" } });
-    else router.push("/settings");
+  // Each tab's avatar names its tab, so the pushed page's back button says where it returns to.
+  const openAccountFrom = useCallback((from: "today" | "calendar" | "reports") => (target: "settings" | "sync") => {
+    if (target === "sync") router.push({ pathname: "/settings", params: { from, section: "sync" } });
+    else router.push({ pathname: "/settings", params: { from } });
   }, []);
+  const openAccountFromToday = useMemo(() => openAccountFrom("today"), [openAccountFrom]);
+  const openAccountFromCalendar = useMemo(() => openAccountFrom("calendar"), [openAccountFrom]);
+  const openAccountFromReports = useMemo(() => openAccountFrom("reports"), [openAccountFrom]);
   const [authView, setAuthView] = useState<AuthView>("login");
   const [authEmail, setAuthEmail] = useState("");
   const [authPassword, setAuthPassword] = useState("");
@@ -2778,7 +2782,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
                   attentionCount={syncAttentionCount}
                   email={data?.user.email}
                   name={data?.user.name}
-                  onPress={openAccount}
+                  onPress={openAccountFromToday}
                   theme={theme}
                 />
               </View>
@@ -2888,7 +2892,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
                 attentionCount={syncAttentionCount}
                 email={data?.user.email}
                 name={data?.user.name}
-                onPress={openAccount}
+                onPress={openAccountFromCalendar}
                 theme={theme}
               />
             </Animated.View>
@@ -2942,7 +2946,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
               attentionCount={syncAttentionCount}
               email={data?.user.email}
               name={data?.user.name}
-              onPress={openAccount}
+              onPress={openAccountFromReports}
               theme={theme}
             />
           </View>

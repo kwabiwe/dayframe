@@ -30,7 +30,14 @@ describe("Blocks navigation bar (UIA-001)", () => {
 
   it("tells Settings and Location evidence where they were opened from", () => {
     expect(pushedPages.review).toContain('params: { from: "review", section: "sync" }');
-    expect(read("./DayframeDashboard.tsx")).toContain('params: { from: "today", section: "sync" }');
+    const dashboard = read("./DayframeDashboard.tsx");
+    // Each tab's avatar names its own tab (Today, Calendar, Reports), for Settings and Sync help.
+    expect(dashboard).toContain('router.push({ pathname: "/settings", params: { from, section: "sync" } })');
+    expect(dashboard).toContain('router.push({ pathname: "/settings", params: { from } })');
+    for (const tab of ["Today", "Calendar", "Reports"]) {
+      expect(dashboard).toContain(`onPress={openAccountFrom${tab}}`);
+    }
+    expect(dashboard).not.toContain("onPress={openAccount}");
     expect(read("../lib/todayReviewNavigation.ts")).toContain('params: { from: "today", id: activity.source.reviewItemId }');
   });
 });
