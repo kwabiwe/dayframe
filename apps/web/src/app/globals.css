@@ -3320,17 +3320,23 @@ kbd {
   padding: 18px 24px 24px;
 }
 
+/* The inset surface keeps placeholders at AA contrast in both themes. */
 .auth-card .ui-control {
   min-height: 48px;
   border-color: transparent;
   border-radius: 12px;
-  background: var(--surface-muted);
+  background: var(--surface-inset);
 }
 
 .auth-card .auth-password-field {
   border-color: transparent;
   border-radius: 12px;
-  background: var(--surface-muted);
+  background: var(--surface-inset);
+}
+
+/* The password field's focus cue is its wrapper's shared neutral border. */
+.auth-card .auth-password-field:focus-within {
+  border-color: var(--web-focus-border);
 }
 
 .auth-card form > button[type="submit"] {
