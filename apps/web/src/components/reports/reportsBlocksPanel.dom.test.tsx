@@ -83,6 +83,26 @@ describe("Reports blocks and Where it went", () => {
     await act(async () => root.unmount());
   });
 
+  it("keeps the slices exposed to assistive technology and rings the one holding keyboard focus", async () => {
+    const container = document.createElement("div");
+    document.body.append(container);
+    const root = createRoot(container);
+    await act(async () => root.render(
+      <ReportsBlocksPanel blocks={reportBlocksModel(report(), formatDuration)} land={land} slices={slices} totalLabel="logged this week" totalSeconds={10 * 3600} />
+    ));
+    const svg = container.querySelector("svg.df-donut")!;
+    expect(svg.getAttribute("aria-hidden")).toBeNull();
+    expect(svg.getAttribute("role")).toBe("group");
+    const slice = container.querySelector<SVGCircleElement>('circle[aria-label^="Filter by Work"]')!;
+    expect(slice.getAttribute("role")).toBe("link");
+    expect(container.querySelector(".df-donut-focus")).toBeNull();
+    await act(async () => slice.focus());
+    expect(container.querySelectorAll(".df-donut-focus")).toHaveLength(1);
+    await act(async () => slice.blur());
+    expect(container.querySelector(".df-donut-focus")).toBeNull();
+    await act(async () => root.unmount());
+  });
+
   it("shows only Where it went for ranges without a blocks card", () => {
     const html = renderToStaticMarkup(<ReportsBlocksPanel blocks={null} land={land} slices={slices} totalLabel="logged in this range" totalSeconds={10 * 3600} />);
     expect(html).not.toContain("in blocks");

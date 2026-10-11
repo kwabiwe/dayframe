@@ -12998,10 +12998,14 @@ dialog.ui-dialog.df-rf-dialog {
   grid-template-columns: minmax(0, 1fr);
 }
 
+.df-wb-stack > span,
+.df-mday-stack > i {
+  transition: opacity 140ms ease-out;
+}
+
 .df-wblocks.has-hot .df-wb-stack > span,
 .df-month.has-hot .df-mday-stack > i {
   opacity: 0.22;
-  transition: opacity 140ms ease-out;
 }
 
 .df-wblocks.has-hot .df-wb-stack > span.is-hot,
@@ -13050,9 +13054,16 @@ dialog.ui-dialog.df-rf-dialog {
   stroke-width: 18;
 }
 
-.df-donut-seg:focus-visible {
+.df-donut-seg:focus {
   outline: none;
-  stroke-width: 18;
+}
+
+/* The keyboard focus ring: a neutral arc just outside the focused slice. */
+.df-donut-focus {
+  fill: none;
+  stroke: var(--focus);
+  stroke-width: 3;
+  pointer-events: none;
 }
 
 .df-donut-center {
@@ -13154,8 +13165,8 @@ dialog.ui-dialog.df-rf-dialog {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .df-wblocks.has-hot .df-wb-stack > span,
-  .df-month.has-hot .df-mday-stack > i,
+  .df-wb-stack > span,
+  .df-mday-stack > i,
   .df-donut-seg {
     transition: none;
   }

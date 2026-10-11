@@ -44,6 +44,8 @@ export function ReportsBlocksPanel({
   totalSeconds: number;
 }) {
   const [hot, setHot] = useState<AllocationSlice | null>(null);
+  // The slice holding keyboard focus gets its own neutral ring, independent of the highlight.
+  const [focusedId, setFocusedId] = useState<string | null>(null);
   const hotIds = hot ? new Set(hot.categoryIds) : null;
   const highlight = (slice: AllocationSlice) => (on: boolean) => setHot((current) => (on ? slice : current?.id === slice.id ? null : current));
 
@@ -118,8 +120,8 @@ export function ReportsBlocksPanel({
         {totalSeconds > 0 ? (
           <div className="df-alloc">
             <figure className="df-donut-wrap">
-              <svg aria-hidden="true" className={`df-donut${hot ? " has-hot" : ""}`} viewBox="0 0 120 120">
-                <circle className="df-donut-track" cx="60" cy="60" r={RADIUS} />
+              <svg aria-label="Where it went by activity" className={`df-donut${hot ? " has-hot" : ""}`} role="group" viewBox="0 0 120 120">
+                <circle aria-hidden="true" className="df-donut-track" cx="60" cy="60" r={RADIUS} />
                 {arcs.map(({ dash, offset, slice }) => (
                   <ReportDonutSegment
                     ariaLabel={`Filter by ${slice.name}, ${formatDuration(slice.seconds)}`}
@@ -128,12 +130,28 @@ export function ReportsBlocksPanel({
                     href={slice.href}
                     key={slice.id}
                     offset={offset}
+                    onFocusChange={(focused) => setFocusedId((current) => (focused ? slice.id : current === slice.id ? null : current))}
                     onHighlight={highlight(slice)}
                     radius={RADIUS}
                     stroke={categoryDisplay(slice.name, slice.color).color}
                     totalLength={CIRCUMFERENCE}
                   />
                 ))}
+                {arcs.map(({ dash, offset, slice }) =>
+                  slice.id === focusedId ? (
+                    <circle
+                      aria-hidden="true"
+                      className="df-donut-focus"
+                      cx="60"
+                      cy="60"
+                      key={`focus-${slice.id}`}
+                      pathLength={CIRCUMFERENCE}
+                      r={RADIUS + 11}
+                      strokeDasharray={`${dash} ${CIRCUMFERENCE - dash}`}
+                      strokeDashoffset={offset}
+                    />
+                  ) : null
+                )}
               </svg>
               <figcaption aria-live="polite" className="df-donut-center">
                 <b className="df-tnum">{formatDuration(hot ? hot.seconds : totalSeconds)}</b>
