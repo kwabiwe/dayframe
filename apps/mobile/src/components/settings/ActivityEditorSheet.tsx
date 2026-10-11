@@ -1,27 +1,45 @@
 import { useRef, useState } from "react";
-import { AccessibilityInfo, Alert, Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, View, useWindowDimensions } from "react-native";
+import { AccessibilityInfo, Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, View, useWindowDimensions } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import {
   DAYFRAME_ACTIVITY_ICONS,
   DAYFRAME_BLOCKS,
   DAYFRAME_PALETTE_PICKER,
   blockColorsFor,
+  defaultCountsTowardGoal,
   paletteColorFor,
   paletteKeyFor,
   resolveActivityIcon,
   type DayframePaletteKey
 } from "@dayframe/shared";
 import { SwipeDismissSheet, type SwipeDismissSheetHandle } from "../SwipeDismissSheet";
+import { BlocksConfirmHost, useBlocksConfirm } from "../blocks/BlocksConfirmSheet";
 import { ActivityIcon } from "../icons/DayframeIcon";
 import { SettingsSwitch } from "./SettingsBlocks";
 import { QUICK_START_PIN_LIMIT, activityNameProblem } from "../../lib/activitiesPage";
 import type { MobileStyles, MobileTheme } from "../../lib/mobileTheme";
 import { MOBILE_DISPLAY_FONT, mobileTextProps } from "../../lib/mobileTypography";
 
-/** isPinned is only used when creating; an existing activity's pin is the page's pin button. */
-export type ActivityEditorDraft = { name: string; color: DayframePaletteKey; icon: string | null; isPinned: boolean };
+/**
+ * isPinned is only used when creating; an existing activity's pin is the page's pin button.
+ * countsTowardGoal is the "Counts toward goal" switch (UIA-043), saved with the other fields.
+ */
+export type ActivityEditorDraft = {
+  name: string;
+  color: DayframePaletteKey;
+  icon: string | null;
+  isPinned: boolean;
+  countsTowardGoal: boolean;
+};
 
-type EditableActivity = { id: string; name: string; color: string; icon?: string | null; starterKey?: string | null };
+type EditableActivity = {
+  id: string;
+  name: string;
+  color: string;
+  icon?: string | null;
+  starterKey?: string | null;
+  countsTowardGoal?: boolean;
+};
 
 /**
  * Blocks parity step 6b-1 (prototype openActivityEditor): New activity / Edit activity as a tall
@@ -60,6 +78,7 @@ export function ActivityEditorSheet({
   theme: MobileTheme;
 }) {
   const sheetRef = useRef<SwipeDismissSheetHandle>(null);
+  const confirmSheet = useBlocksConfirm();
   const insets = useSafeAreaInsets();
   // A percentage height resolves against the sheet's auto-height wrapper, which left a gap under
   // the sheet; a measured height keeps it flush with the bottom of the screen.
@@ -79,6 +98,10 @@ export function ActivityEditorSheet({
   const quickStartFull = pinnedCount >= QUICK_START_PIN_LIMIT;
   // A new activity joins quick start by default while there is room (as before this page).
   const [pinNew, setPinNew] = useState(!quickStartFull);
+  // An existing activity keeps its stored choice (only an explicit false leaves it out); a new one
+  // follows its name (Sleep starts off) until the switch is touched.
+  const [goalChoice, setCountsTowardGoal] = useState<boolean | null>(activity ? activity.countsTowardGoal !== false : null);
+  const countsTowardGoal = goalChoice ?? defaultCountsTowardGoal(name);
   const [problem, setProblemState] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const done = useRef(false);
@@ -103,7 +126,13 @@ export function ActivityEditorSheet({
     busy.current = true;
     setSaving(true);
     setProblem(null);
-    const result = await onSave({ name: name.trim(), color, icon, isPinned: !activity && pinNew && pinReady && !quickStartFull })
+    const result = await onSave({
+      name: name.trim(),
+      color,
+      icon,
+      isPinned: !activity && pinNew && pinReady && !quickStartFull,
+      countsTowardGoal
+    })
       .catch(() => "Couldn't save. Check your connection and try again.");
     busy.current = false;
     if (done.current) return;
@@ -118,34 +147,33 @@ export function ActivityEditorSheet({
 
   function archive(target: EditableActivity) {
     if (busy.current || done.current) return;
-    Alert.alert(`Archive ${target.name}?`, "It leaves your lists and quick start. Its history stays.", [
-      { style: "cancel", text: "Cancel" },
-      {
-        style: "destructive",
-        text: "Archive",
-        onPress: () => {
-          // Re-checked: a save may have started while the confirmation was up.
-          if (busy.current || done.current) return;
-          busy.current = true;
-          setSaving(true);
-          setProblem(null);
-          void onArchive(target)
-            .catch(() => "Couldn't archive. Check your connection and try again.")
-            .then((result) => {
-              busy.current = false;
-              if (done.current) return;
-              setSaving(false);
-              if (result) {
-                setProblem(result);
-                return;
-              }
-              // Archived: the sheet leaves with its own exit motion.
-              done.current = true;
-              sheetRef.current?.dismiss();
-            });
-        }
+    confirmSheet.confirm({
+      eyebrow: "Activity",
+      title: `Archive ${target.name}?`,
+      message: "It leaves your lists and quick start. Its history stays.",
+      confirmLabel: "Archive",
+      onConfirm: () => {
+        // Re-checked: a save may have started while the confirmation was up.
+        if (busy.current || done.current) return;
+        busy.current = true;
+        setSaving(true);
+        setProblem(null);
+        void onArchive(target)
+          .catch(() => "Couldn't archive. Check your connection and try again.")
+          .then((result) => {
+            busy.current = false;
+            if (done.current) return;
+            setSaving(false);
+            if (result) {
+              setProblem(result);
+              return;
+            }
+            // Archived: the sheet leaves with its own exit motion.
+            done.current = true;
+            sheetRef.current?.dismiss();
+          });
       }
-    ]);
+    });
   }
 
   function cancel() {
@@ -263,6 +291,23 @@ export function ActivityEditorSheet({
               </View>
             )}
 
+            <View style={styles.pinRow} testID="activity-editor-goal-row">
+              <View style={styles.pinText}>
+                <Text {...mobileTextProps("itemTitle")} style={{ color: theme.textPrimary, fontSize: 15, fontWeight: "600" }}>Counts toward goal</Text>
+                <Text {...mobileTextProps("metadata")} style={{ color: theme.textMuted }}>
+                  When off, time here still shows in your day but doesn’t fill the goal.
+                </Text>
+              </View>
+              <SettingsSwitch
+                disabled={saving}
+                accessibilityHint="When off, time here still shows in your day but doesn’t fill the goal."
+                label="Counts toward goal"
+                onValueChange={setCountsTowardGoal}
+                theme={theme}
+                value={countsTowardGoal}
+              />
+            </View>
+
             <Text {...mobileTextProps("counter")} accessibilityRole="header" style={[styles.eyebrow, { color: theme.textMuted }]}>ICON</Text>
             <View accessibilityLabel="Icon" accessibilityRole="radiogroup" style={[styles.iconGrid, { gap: iconGap }]}>
               {DAYFRAME_ACTIVITY_ICONS.map((option) => {
@@ -327,6 +372,8 @@ export function ActivityEditorSheet({
           </ScrollView>
         </SwipeDismissSheet>
       </View>
+      {/* Presented over this sheet's own modal. */}
+      <BlocksConfirmHost controller={confirmSheet} reduceMotion={reduceMotion} styles={shared} theme={theme} />
     </Modal>
   );
 }

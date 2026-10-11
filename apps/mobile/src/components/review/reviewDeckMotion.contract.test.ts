@@ -28,7 +28,7 @@ describe("Review deck motion contract (Blocks parity step 5b)", () => {
     expect(screen).toContain("deckHold.hold({");
     expect(screen).toMatch(/return \(\) => \{\s*deckScreenFocused\.current = false;\s*deckScreenActive\.current = false;\s*deckHold\.flush\(\);\s*\};\s*\}, \[deckHold\]\)/);
     expect(screen).toMatch(/if \(state !== "active"\) deckHold\.flush\(\);/);
-    expect(screen).toContain('testID="review-deck-undo"');
+    expect(screen).toContain('actionTestID="review-deck-undo"');
     expect(screen).toContain("unrecordDeckDecision(");
   });
 

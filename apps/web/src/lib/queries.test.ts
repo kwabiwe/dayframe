@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { placeDisplayNameSql } from "./place-display";
 import {
   buildTimeEntriesQuery,
+  getBootstrapData,
   getCategoryUsageRanks,
   getNormalizationContext,
   getTaskSuggestions
@@ -47,6 +48,45 @@ describe("query normalization context", () => {
     expect(context.categories).toEqual([
       { id: "category-1", name: "Bedtime", color: "blue-bold", isPinned: false, starterKey: "sleep" }
     ]);
+  });
+
+  it("reads Counts toward goal and names its migration when the column is missing (UIA-043)", async () => {
+    mocks.query.mockImplementation(async (statement: string) => {
+      if (statement.includes("from categories")) {
+        expect(statement).toContain('counts_toward_goal as "countsTowardGoal"');
+        return { rows: [{ id: "category-1", name: "Sleep", color: "blue-bold", isPinned: false, starterKey: "sleep", countsTowardGoal: false }] };
+      }
+      return { rows: [] };
+    });
+    const context = await getNormalizationContext(session);
+    expect(context.categories[0]).toMatchObject({ id: "category-1", countsTowardGoal: false });
+
+    const db = await import("./db");
+    vi.mocked(db.isUndefinedColumnError).mockImplementation((_error, column) => column === "counts_toward_goal");
+    mocks.query.mockImplementation(async (statement: string) => {
+      if (statement.includes("from categories")) throw Object.assign(new Error('column "counts_toward_goal" does not exist'), { code: "42703" });
+      return { rows: [] };
+    });
+    await expect(getNormalizationContext(session)).rejects.toThrow("categories.counts_toward_goal missing");
+    expect(db.missingRequiredColumnError).toHaveBeenCalledWith(
+      "categories",
+      "counts_toward_goal",
+      "supabase/migrations/202610110001_category_counts_toward_goal.sql",
+      expect.any(Error)
+    );
+  });
+
+  it("sends every activity that doesn't count, archived ones included, with bootstrap (UIA-043)", async () => {
+    mocks.query.mockImplementation(async (statement: string) => {
+      if (statement.includes("counts_toward_goal = false")) {
+        // No is_archived filter: an archived Sleep must keep its history out of the goal.
+        expect(statement).not.toContain("is_archived");
+        return { rows: [{ id: "archived-sleep" }, { id: "nap" }] };
+      }
+      return { rows: [] };
+    });
+    const data = await getBootstrapData(session);
+    expect(data.goalExcludedCategoryIds).toEqual(["archived-sleep", "nap"]);
   });
 
   it("reads automation rule references from workspace-joined rows", async () => {

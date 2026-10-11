@@ -131,6 +131,21 @@ describe("EntriesTable grouped-description editing", () => {
       });
     }
   });
+
+  it("gives a day that only continues an overnight block its own heading and total (Codex r2 on #304)", () => {
+    const overnight = {
+      ...entry("entry-a", "Night shift"),
+      startedAt: new Date(2026, 7, 10, 23, 30).toISOString(),
+      stoppedAt: new Date(2026, 7, 11, 1, 30).toISOString(),
+      durationSeconds: 7_200
+    };
+    renderTable({ entries: [overnight] });
+    const headings = [...document.querySelectorAll(".timeline-list-day-heading td")].map((cell) => cell.textContent);
+    expect(headings).toHaveLength(2);
+    expect(headings[0]).toMatch(/1h 30m$/);
+    expect(headings[1]).toMatch(/30m$/);
+    expect(screen.getByText("Continues from the day before")).not.toBeNull();
+  });
 });
 
 function renderTable({

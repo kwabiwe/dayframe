@@ -207,7 +207,7 @@ describe("time-entry sheet historical Suggestions contract", () => {
     expect(qaSource).toContain("createDeletionCoordinator<");
     expect(qaSource).toContain("filterPendingDeletedTimeEntries(");
     expect(qaSource).toContain('testID="deletion-undo-toast"');
-    expect(qaSource).toContain('testID="deletion-undo-action"');
+    expect(qaSource).toContain('actionTestID="deletion-undo-action"');
     expect(qaSource).toContain("testID={`sheet-qa-${key}`}");
     expect(qaSource).toContain('["second-delete", "Delete a second entry", prepareSecondDeletion]');
     expect(qaSource).toContain("secondDeletionCount");

@@ -70,7 +70,7 @@ Local auth modes and first-user setup are documented in [`docs/local-auth-and-ho
 Web includes:
 
 - one persistent shell-owned timer shared by Dashboard and Timeline;
-- Calendar, List, and Timesheet Timeline views;
+- Calendar and List views (weekly totals live in Reports);
 - Calendar click-to-create, eligible pointer resize, and the shared compact entry editor;
 - grouped List editing, intentional-overlap handling, deletion with Undo, reports, search, Review, Categories, Tags, Places, Settings, and export;
 - Supabase provider auth with Dayframe app sessions and workspace/user scoping.

@@ -2,7 +2,8 @@ import type { ReportDayActivities, ReportResult } from "@/lib/report-service";
 
 // Web Reports top (Blocks parity step 15a): the hero tiles and the week/month blocks, from the
 // report's daily series. Mirrors apps/mobile/src/lib/reportsBlocks.ts (goal cells within 15% of the
-// daily goal; stacks scaled to 12 hours unless a busier day needs more).
+// daily goal, from time in activities that count toward it; stacks scaled to 12 hours unless a
+// busier day needs more).
 
 export const REPORT_STACK_MIN_SCALE_SECONDS = 12 * 3600;
 const GOAL_MET_SHARE = 0.85;
@@ -19,7 +20,11 @@ export type ReportHero = {
   dailyAverageSeconds: number;
   elapsedDayCount: number;
   best: { label: string; seconds: number } | null;
-  /** One cell per elapsed day: met, or not (empty when there is no daily goal). */
+  /**
+   * One cell per elapsed day: met, or not (empty when there is no daily goal). Met uses the day's
+   * goal time (`goalSeconds`): activities switched off "Counts toward goal" (Sleep by default)
+   * never fill it.
+   */
   goalDays: boolean[];
 };
 
@@ -40,7 +45,9 @@ export function reportHero(report: ReportResult, dailyGoalMinutes: number | null
     dailyAverageSeconds: elapsed.length ? Math.round(framedSeconds / elapsed.length) : 0,
     elapsedDayCount: elapsed.length,
     best,
-    goalDays: goalSeconds ? elapsed.map((day) => day.coveredSeconds >= goalSeconds * GOAL_MET_SHARE) : []
+    goalDays: goalSeconds
+      ? elapsed.map((day) => (day.goalSeconds ?? day.coveredSeconds) >= goalSeconds * GOAL_MET_SHARE)
+      : []
   };
 }
 

@@ -91,6 +91,17 @@ describe("Blocks Reports helpers", () => {
     expect(weekGoalDays(buckets, now, 0)).toEqual([]);
   });
 
+  it("meets a goal day only with time that counts toward the goal (UIA-043)", () => {
+    const range = buildReportRange("week", now);
+    // Monday: 8h framed but 7h of it is Sleep, which doesn't count. Tuesday: no goal time given.
+    const buckets = range.buckets.map((b, i) => ({
+      start: b.start,
+      seconds: i < 2 ? 8 * 3600 : 0,
+      ...(i === 0 ? { goalSeconds: 3600 } : {}),
+    }));
+    expect(weekGoalDays(buckets, now, 480)).toEqual([false, true, false, false, false]);
+  });
+
   it("places the first of the month under its Monday-first weekday", () => {
     expect(monthGridLeadingBlanks(new Date(2026, 9, 1))).toBe(3); // Thursday
     expect(monthGridLeadingBlanks(new Date(2026, 1, 1))).toBe(6); // Sunday

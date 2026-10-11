@@ -16,11 +16,18 @@ async function insertStarters(
   const params: unknown[] = [workspaceId];
   const values = starters.map((starter) => {
     const base = params.length;
-    params.push(starter.name, starter.color, keepDefaultPins && starter.isPinned, starter.icon, starter.starterKey);
-    return `($1, $${base + 1}, $${base + 2}, $${base + 3}, $${base + 4}, $${base + 5})`;
+    params.push(
+      starter.name,
+      starter.color,
+      keepDefaultPins && starter.isPinned,
+      starter.icon,
+      starter.starterKey,
+      starter.countsTowardGoal
+    );
+    return `($1, $${base + 1}, $${base + 2}, $${base + 3}, $${base + 4}, $${base + 5}, $${base + 6})`;
   });
   const result = await client.query<StarterRow>(
-    `insert into categories (workspace_id, name, color, is_pinned, icon, starter_key)
+    `insert into categories (workspace_id, name, color, is_pinned, icon, starter_key, counts_toward_goal)
      values ${values.join(", ")}
      returning id, name, starter_key as "starterKey"`,
     params

@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useReducer, useRef, useState } from "react";
 import {
   AccessibilityInfo,
-  Alert,
   Animated,
   AppState,
   Dimensions,
@@ -42,6 +41,7 @@ import {
 import { PrimaryTimerGlyph } from "@/components/PrimaryTimerAction";
 import { ActivityIcon, DayframeIcon } from "@/components/icons/DayframeIcon";
 import { ActivityPickerSheet } from "@/components/ActivityPickerSheet";
+import { BlocksConfirmHost, useBlocksConfirm } from "@/components/blocks/BlocksConfirmSheet";
 import { activityChips, chipsThatFit, recentActivityIds } from "@/lib/activityChoice";
 import { playHaptic } from "@/lib/haptics";
 import { dialTrackColor, TimeEntryDurationDial } from "@/components/TimeEntryDurationDial";
@@ -238,6 +238,8 @@ export function ActiveTimerEditSheet({
   const sheetRef = useRef<SwipeDismissSheetHandle>(null);
   const sheetDismissGestureRef = useRef<GestureType | undefined>(undefined);
   const discardPromptPresentationIdRef = useRef<number | null>(null);
+  // "Discard changes?" is a Blocks confirm sheet over this sheet's modal (UIA-005).
+  const discardConfirm = useBlocksConfirm();
   const discardBypassPresentationIdRef = useRef<number | null>(null);
   const presentedEntryRef = useRef<MobileTimeEntry | null>(currentEntry);
   const keyboardMotionFrozen = useRef(false);
@@ -1658,38 +1660,28 @@ export function ActiveTimerEditSheet({
     const promptPresentationId = presentationRef.current.id;
     if (discardPromptPresentationIdRef.current === promptPresentationId) return;
     discardPromptPresentationIdRef.current = promptPresentationId;
-    Alert.alert(
-      "Discard changes?",
-      "Your unsaved changes will be lost.",
-      [
-        {
-          text: "Keep editing",
-          style: "cancel",
-          onPress: () => {
-            if (discardPromptPresentationIdRef.current === promptPresentationId) {
-              discardPromptPresentationIdRef.current = null;
-            }
-          }
-        },
-        {
-          text: "Discard",
-          style: "destructive",
-          onPress: () => {
-            if (presentationRef.current.id !== promptPresentationId) return;
-            discardPromptPresentationIdRef.current = null;
-            requestCoordinatedDismiss({ bypassDiscardConfirmation: true });
-          }
+    const shown = discardConfirm.confirm({
+      eyebrow: "Unsaved changes",
+      title: "Discard changes?",
+      message: "Your unsaved changes will be lost.",
+      cancelLabel: "Keep editing",
+      confirmLabel: "Discard",
+      confirmHint: "Your unsaved changes can't be recovered.",
+      // Keep editing, a swipe down, a backdrop tap or VoiceOver escape.
+      onCancel: () => {
+        if (discardPromptPresentationIdRef.current === promptPresentationId) {
+          discardPromptPresentationIdRef.current = null;
         }
-      ],
-      {
-        cancelable: true,
-        onDismiss: () => {
-          if (discardPromptPresentationIdRef.current === promptPresentationId) {
-            discardPromptPresentationIdRef.current = null;
-          }
-        }
+      },
+      onConfirm: () => {
+        if (presentationRef.current.id !== promptPresentationId) return;
+        discardPromptPresentationIdRef.current = null;
+        requestCoordinatedDismiss({ bypassDiscardConfirmation: true });
       }
-    );
+    });
+    if (!shown && discardPromptPresentationIdRef.current === promptPresentationId) {
+      discardPromptPresentationIdRef.current = null;
+    }
   }
 
   function requestUserDismiss() {
@@ -3000,6 +2992,13 @@ export function ActiveTimerEditSheet({
             theme={theme}
           />
         ) : null}
+        <BlocksConfirmHost
+          controller={discardConfirm}
+          reduceMotion={reduceMotion}
+          styles={styles}
+          testID="entry-sheet-discard-confirm"
+          theme={theme}
+        />
         <FloatingDatePicker
           // A block's start and end are never in the future (UIA-011): later days can't be chosen.
           maxDate={new Date()}

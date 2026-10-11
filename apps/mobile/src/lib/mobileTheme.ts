@@ -944,6 +944,7 @@ function createStyles(theme: MobileTheme) {
       zIndex: 20
     },
     reviewDeckToast: {
+      position: "absolute",
       bottom: "100%",
       left: 0,
       marginBottom: 12,
@@ -956,21 +957,6 @@ function createStyles(theme: MobileTheme) {
     reviewDeckToastUnderButton: {
       bottom: 0,
       marginBottom: 0
-    },
-    reviewDeckToastLabel: {
-      alignItems: "center",
-      flex: 1,
-      flexDirection: "row",
-      gap: 10,
-      minWidth: 0
-    },
-    reviewDeckToastSwatch: {
-      borderRadius: 4,
-      height: 14,
-      width: 14
-    },
-    reviewDeckToastText: {
-      flexShrink: 1
     },
     // Blocks navigation bar for pushed pages (BlocksNavHeader; UIA-001): text back, centred title,
     // trailing slot. The side slots flex equally so the title stays centred.
@@ -2634,48 +2620,22 @@ function createStyles(theme: MobileTheme) {
       alignItems: "center",
       zIndex: 3
     },
-    historyDeleteUndoToast: {
+    // The shared Blocks toast (BlocksToast) on a pushed page: above the home indicator, full width
+    // less the 16-point gutters, over the content (out of flow, so its exit moves nothing).
+    blocksToastOverlay: {
+      position: "absolute",
+      left: 16,
+      right: 16,
+      bottom: 24,
+      zIndex: 30
+    },
+    // Today's toast place (BlocksToast: delete Undo, Switched, Already recording): above the
+    // tab bar, out of flow, so its entrance and exit move nothing.
+    todayToast: {
       position: "absolute",
       left: 20,
       right: 20,
-      bottom: 92,
-      minHeight: 52,
-      flexDirection: "row",
-      alignItems: "center",
-      justifyContent: "space-between",
-      gap: 16,
-      backgroundColor: theme.textPrimary,
-      borderRadius: 999,
-      paddingLeft: 16,
-      paddingRight: 8,
-      paddingVertical: 8,
-      shadowColor: theme.shadow,
-      shadowOpacity: 1,
-      shadowRadius: 12,
-      shadowOffset: { width: 0, height: 6 },
-      elevation: 5
-    },
-    historyDeleteUndoText: {
-      flex: 1,
-      color: theme.background,
-      fontFamily: monoFont,
-      fontSize: 13,
-      fontWeight: "600"
-    },
-    historyDeleteUndoButton: {
-      minWidth: 64,
-      minHeight: 40,
-      alignItems: "center",
-      justifyContent: "center",
-      backgroundColor: theme.accent,
-      borderRadius: 999,
-      paddingHorizontal: 10
-    },
-    historyDeleteUndoButtonText: {
-      color: theme.onAccent,
-      fontFamily: monoFont,
-      fontSize: 13,
-      fontWeight: "700"
+      bottom: 92
     },
     accountValue: {
       color: theme.textPrimary,

@@ -41,8 +41,9 @@ describe("Timeline range and toolbar contract", () => {
     expect(runtime).toContain("shellData: data");
     expect(runtime).toContain("data: selectedData");
     expect(source("./PersistentTimerBar.tsx")).toContain("shellData: data");
-    expect(timeline).toContain('view === "timesheet" ? "week" : preferenceRef.current?.preferredScope ?? state.scope');
-    expect(timeline).toContain('isDateLoading || (state.view === "timesheet" && item.id === "day")');
+    // Timesheet left Calendar (owner, 11 Oct): views restore the preferred scope, nothing is forced.
+    expect(timeline).toContain("scope: preferenceRef.current?.preferredScope ?? state.scope");
+    expect(timeline).not.toMatch(/timesheet/i);
     expect(runtime).toContain("Couldn’t load that period. Your current view is unchanged.");
   });
 
@@ -57,7 +58,7 @@ describe("Timeline range and toolbar contract", () => {
     expect(timeline).toContain("formatTimelinePeriodLabel(state.scope, ranges, capturedNow)");
   });
 
-  it("gives all views the same clipped period data while limiting covered copy to Timesheet", () => {
+  it("gives all views the same clipped period data", () => {
     expect(timeline).toContain("clipTimelineEntries(mergeTimelineEntries(");
     expect(timeline).toContain("data.dayEntries");
     expect(timeline).toContain("data.weekEntries");
@@ -72,7 +73,6 @@ describe("Timeline range and toolbar contract", () => {
     expect(timeline).toContain("weekReportHref={reportsHrefForCustomRange(weekReportFrom, weekReportTo)}");
     expect(timeline).toContain("dayAnalysis.totalLoggedSeconds");
     expect(timeline).not.toContain("dayAnalysis.timeCoveredSeconds");
-    expect(timeline).toContain("dailyCoverage[index].timeCoveredSeconds");
     expect(timeline).not.toContain("forwardVerticalCalendarWheel");
     expect(timeline).toContain('aria-label="Timeline period and view controls"');
     expect(timeline).toContain('ariaLabel="Timeline view"');
@@ -121,9 +121,7 @@ describe("Timeline range and toolbar contract", () => {
     expect(styles).toContain(".timeline-view-stage");
     expect(styles).toContain(".calendar-grid-scroller");
     expect(styles).toContain(".timeline-list-scroll");
-    expect(styles).toContain(".timeline-timesheet-scroll");
     expect(styles).toContain(".calendar-time-axis");
-    expect(styles).toContain(".timeline-timesheet-activity-cell");
     expect(styles).toContain(".df-quick");
     expect(styles).toContain("flex-wrap: nowrap");
     expect(styles).toContain("overflow-x: auto");
@@ -131,8 +129,7 @@ describe("Timeline range and toolbar contract", () => {
     expect(entries).toContain('className="timeline-list-workspace"');
     expect(entries).toContain('className="timeline-list-scroll"');
     expect(entries).not.toContain("FilterSelect");
-    expect(timeline).toContain('className="timeline-timesheet-workspace"');
-    expect(timeline).not.toContain("Timesheet totals count every entry in full.");
+    expect(styles).not.toContain(".timeline-timesheet");
     expect(styles).toMatch(/\.swiss-timeline-surface \.timeline-range-toolbar \{[^}]*grid-template-columns: max-content minmax\(0, 1fr\);/);
     expect(styles).toMatch(/\.swiss-timeline-surface \.timeline-range-navigation \{[^}]*grid-template-columns: var\(--web-icon-button-size\) max-content var\(--web-icon-button-size\);/s);
     expect(styles).toMatch(/\.swiss-timeline-surface \.timeline-date-picker \{[^}]*min-width: 120px;[^}]*justify-self: stretch;/s);

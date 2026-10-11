@@ -50,7 +50,7 @@ Core Functionality:
 
 - ✅ Web and mobile manual timer start/stop/switch with live active timer sync. Mobile Stop is accepted only after an exact, account-owned Stop intent is durable on device; server delivery is entry-scoped, idempotent, bounded, and safe to replay after relaunch. Already-started durable timer saves receive best-effort finite iOS background time, while offline, expiry and force-quit continue through the same durable recovery path.
 - ✅ Description, category, place, source, confidence, and review status on time entries.
-- ✅ Calendar, List, and Timesheet review views.
+- ✅ Calendar and List review views (Timesheet removed 11 Oct 2026, owner decision: Reports covers weekly totals and the CSV export).
 - ✅ Review inbox for ambiguous geofence/health/location suggestions.
 - ✅ Auto-start for trusted places only.
 - ✅ Conservative suggestions for broad/ambiguous places.
@@ -119,7 +119,7 @@ Deployment:
    - Example: Review opens from the last account-owned snapshot, cached private Location Evidence remains usable for up to seven days, and every resolving/structural Location action (including save-place, record-once, split and merge), Confirm, Dismiss, or complete Edit-and-confirm disappears after its account-owned SQLite commit while Dayframe retries the canonical server mutation later.
    - Nearby/search lookup and the compatibility-only pure place-change action require a bounded live connection. Resolving and structural corrections preserve the exact selected action in the account-owned outbox; offline support must never substitute a different action or expose another account's cached Review/location evidence.
 
-7. As a user reviewing time, I want Calendar, List, and Timesheet views, so that I can edit precise entries and understand daily/weekly totals.
+7. As a user reviewing time, I want Calendar and List views, so that I can edit precise entries and understand daily/weekly totals (the Calendar head shows the day's framed time and the week's total).
    - Example: Resize/edit a time block, delete an accidental entry, and review weekly totals by category.
 
 8. As the product owner, I want an explainable way to assess automation quality without exposing sensitive context.
@@ -204,7 +204,7 @@ Timeline/review:
 
 - Calendar view with time blocks.
 - List view with chronological grouped entries and edit/delete/start-again actions.
-- Timesheet view with weekly grouped totals.
+- Weekly grouped totals live in Reports (the Calendar Timesheet view was removed on 11 Oct 2026).
 - Review inbox for suggestions, ignored items, and rule creation.
 
 Mobile Reports:
@@ -220,7 +220,7 @@ Mobile Reports:
 
 Mobile Today and integrated Review:
 
-- Today's top (Blocks parity step 2a-1) is the brand lock-up with the account avatar (opens Settings, where account and logout live), the date, and the goal frame: today's covered time (overlapping entries count once, the running timer up to now) against the daily goal from the profile, one cell per goal hour filled with activity colours in the order the time happened, and the percentage capped at 100 while the total keeps counting. Suggestions never count.
+- Today's top (Blocks parity step 2a-1) is the brand lock-up with the account avatar (opens Settings, where account and logout live), the date, and the goal frame: today's covered time (overlapping entries count once, the running timer up to now) against the daily goal from the profile, one cell per goal hour filled with activity colours in the order the time happened, and the percentage capped at 100 while the total keeps counting. Suggestions never count. Time in an activity switched off "Counts toward goal" (Sleep by default, D13) stays in the total but leaves the cells and percentage; the line then reads "framed · Xh toward 8h".
 - "Today's blocks" lists today's entries with a block as tall as each entry's time; swipe right to start one again, left to delete it (with Undo); repeats stay grouped. The mosaic heading reads "Start a block" (owner, 7 October 2026).
 - The timer card follows the prototype: idle it asks "What are you working on?" with a coral "Start a block" pill and an "Add past time" pill; running, it shows the activity, the description, a rolling H:MM:SS timer, the start time, Add past time and Stop. A coral Play orb sits beside the tab bar on every tab: tap to start a block (or stop the running one); hold it to fan out up to nine activities and slide to one. Pulling the running card left opens "Pick up something recent" (up to six recently finished blocks) to switch in one tap. Stop flies the block into Today's list. The block's sheet is headed like the prototype ("Running block" / "Edit block") and ends with Discard and Stop, or Delete and Start again. Stop has no Undo (owner decision 7 October 2026): a stopped entry is edited or started again instead.
 - A 24-hour ribbon shows today's logged time and, hatched, the time waiting in Review, with a now line; dragging along it scrubs through the day and tapping a block opens it.
@@ -251,6 +251,7 @@ Decisions where the prototype is ambiguous or drops a function:
 | D10 | Activities are archived with Restore, never deleted, so history is kept. |
 | D11 | iPhone tags stay free text with autocomplete, shown as chips. |
 | D12 | iPhone shows the daily goal (ribbon and goal frame) from the existing goal settings, edited with steppers under "Your day". |
+| D13 | Every activity has a "Counts toward goal" switch in its editor on iPhone and web ("When off, time here still shows in your day but doesn't fill the goal."), off for Sleep by default and on for everything else (owner decision UIA-043, option c, 11 October 2026). A new activity named Sleep also starts off (the editors follow the name until the switch is touched; the API defaults an omitted value the same way); linking an existing activity to the Sleep starter keeps its switch. One rule drives all goal progress — Today's goal frame and Reports' days on goal / goal streak on both platforms: time in an activity that doesn't count is left out, time without an activity counts, and an archived activity keeps its switch for its history. Goal time is covered time (overlapping blocks count once) on both platforms. That time still shows as framed time everywhere else (totals, ribbons, blocks, reports). |
 
 Mobile accessibility and Dynamic Type:
 
