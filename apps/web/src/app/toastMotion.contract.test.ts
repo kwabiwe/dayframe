@@ -10,7 +10,9 @@ describe("web Undo toast motion (X4)", () => {
     expect(css).toMatch(/@keyframes df-toast-in \{\s*from \{\s*opacity: 0;\s*transform: translateY\(16px\) scale\(0\.96\);/);
   });
 
-  it("only fades under Reduce Motion", () => {
-    expect(css).toMatch(/@media \(prefers-reduced-motion: reduce\) \{\s*\.df-toast \{\s*animation: df-toast-fade-in 140ms ease-out both;\s*\}\s*\.df-toast\.is-exiting \{\s*animation: df-toast-fade-out 80ms ease-in both;/);
+  it("only fades under Reduce Motion, from one set of rules", () => {
+    expect(css).toMatch(/\.df-toast \{\s*animation-name: df-toast-fade-in;\s*animation-duration: 140ms;/);
+    expect(css).toMatch(/\.df-toast\.is-exiting \{\s*animation-name: df-toast-fade-out;\s*animation-duration: 80ms;/);
+    expect(css.match(/@keyframes df-toast-fade-in/g)).toHaveLength(1);
   });
 });

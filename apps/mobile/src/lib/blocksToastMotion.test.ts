@@ -29,6 +29,16 @@ describe("the Undo toast's motion (X4)", () => {
     expect(translate.translateY.config).toMatchObject({ stiffness: BLOCKS_SPRING.pop.stiffness, damping: BLOCKS_SPRING.pop.damping });
   });
 
+  it("exits from wherever the toast is, replacing the entrance springs (Codex r1)", () => {
+    const exit = (blocksToastExiting(false) as unknown as () => { initialValues: Record<string, unknown>; animations: Record<string, unknown> })();
+    expect(exit.initialValues).toEqual({});
+    expect(Object.keys(exit.animations).sort()).toEqual(["opacity", "transform"]);
+    const reduced = (blocksToastExiting(true) as unknown as () => { initialValues: Record<string, unknown>; animations: { transform: Array<Record<string, { timing: number; config: { duration: number } }>> } })();
+    expect(reduced.initialValues).toEqual({});
+    // The transform settles at once; only opacity animates.
+    expect(reduced.animations.transform.map((track) => Object.values(track)[0].config.duration)).toEqual([0, 0]);
+  });
+
   it("drops away in 160 ms", () => {
     const exit = (blocksToastExiting(false) as unknown as () => { animations: { opacity: { timing: number; config: { duration: number } } } })();
     expect(exit.animations.opacity).toMatchObject({ timing: 0, config: { duration: TOAST_MOTION.exitMs } });
@@ -36,9 +46,7 @@ describe("the Undo toast's motion (X4)", () => {
 
   it("only fades under Reduce Motion", () => {
     const enter = (blocksToastEntering(true) as unknown as () => { initialValues: Record<string, unknown>; animations: Record<string, unknown> })();
-    const exit = (blocksToastExiting(true) as unknown as () => { initialValues: Record<string, unknown>; animations: Record<string, unknown> })();
     expect(Object.keys(enter.initialValues)).toEqual(["opacity"]);
     expect(Object.keys(enter.animations)).toEqual(["opacity"]);
-    expect(Object.keys(exit.animations)).toEqual(["opacity"]);
   });
 });

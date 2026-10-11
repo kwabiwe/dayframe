@@ -67,13 +67,22 @@ export function blocksToastEntering(reduceMotion: boolean) {
   };
 }
 
+/**
+ * The exit starts from wherever the toast is (no initial values), so a toast replaced or undone
+ * mid-entrance never jumps back to rest first; its animations replace the entrance springs, so
+ * nothing from the entrance keeps running. Reduce Motion settles the transform at once and fades.
+ */
 export function blocksToastExiting(reduceMotion: boolean) {
   if (reduceMotion) {
     return () => {
       "worklet";
+      const settle = { duration: 0, reduceMotion: ReduceMotion.Never };
       return {
-        initialValues: { opacity: 1 },
-        animations: { opacity: withTiming(0, { duration: TOAST_MOTION.reducedExitMs, reduceMotion: ReduceMotion.Never }) },
+        initialValues: {},
+        animations: {
+          opacity: withTiming(0, { duration: TOAST_MOTION.reducedExitMs, reduceMotion: ReduceMotion.Never }),
+          transform: [{ translateY: withTiming(0, settle) }, { scale: withTiming(1, settle) }],
+        },
       };
     };
   }
@@ -81,7 +90,7 @@ export function blocksToastExiting(reduceMotion: boolean) {
     "worklet";
     const timing = { duration: TOAST_MOTION.exitMs, easing: Easing.in(Easing.quad), reduceMotion: ReduceMotion.Never };
     return {
-      initialValues: { opacity: 1, transform: [{ translateY: 0 }, { scale: 1 }] },
+      initialValues: {},
       animations: {
         opacity: withTiming(0, timing),
         transform: [{ translateY: withTiming(TOAST_MOTION.exitTo.translateY, timing) }, { scale: withTiming(TOAST_MOTION.exitTo.scale, timing) }],
