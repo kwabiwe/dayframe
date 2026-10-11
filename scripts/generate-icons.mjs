@@ -25,7 +25,7 @@ const GLYPHS = [
   "car", "chart-column", "check", "chef-hat", "chevron-right", "circle-dot", "circle-user-round", "cloud-alert", "cloud-check",
   "cloud-off", "code-xml", "coffee", "download", "dumbbell", "ellipsis", "flame", "flower-2", "footprints", "gamepad-2",
   "git-merge", "graduation-cap", "guitar", "hand-heart", "heart", "heart-pulse", "house", "inbox", "languages",
-  "laptop", "library", "list-checks", "mail", "map-pin", "message-circle", "moon", "mountain", "music", "palette",
+  "laptop", "library", "list-checks", "log-out", "mail", "map-pin", "message-circle", "moon", "mountain", "music", "palette",
   "party-popper", "paw-print", "pen-line", "pencil", "person-standing", "phone", "pill", "pin", "plane", "play",
   "plus", "presentation", "refresh-cw", "rotate-ccw", "route", "scissors", "search", "settings", "ship", "shirt", "shopping-bag",
   "shield", "shopping-cart", "sprout", "square", "stethoscope", "sun", "tag", "tent", "timer", "train-front", "trash-2", "tv",

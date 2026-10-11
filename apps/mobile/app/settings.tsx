@@ -190,6 +190,7 @@ import {
   subscribeTimerStopOutbox
 } from "@/lib/timerStopOutbox";
 import { syncHelpStatus } from "@/lib/settingsSyncDiagnostics";
+import { DAYFRAME_API_BASE } from "@/lib/config";
 
 type Category = MobileBootstrap["categories"][number];
 // Settings › Your day goal ranges (hours): daily in 1 h steps, weekly in 5 h steps.
@@ -770,7 +771,7 @@ export default function SettingsScreen() {
   const locationMonitoringAllowed = locationDiagnostics?.backgroundPermission === "granted";
   const locationCaptureNeedsRetry = locationDiagnostics?.locationLearningEnabled === true &&
     locationDiagnostics.locationLearningCaptureState === "inactive";
-  const locationActionLabel = locationCaptureNeedsRetry ? "Retry capture" : locationMonitoringAllowed
+  const locationActionLabel = locationCaptureNeedsRetry ? "Restart location" : locationMonitoringAllowed
     ? "Refresh"
     : locationDiagnostics?.foregroundPermission === "denied"
       ? "Review access"
@@ -843,7 +844,7 @@ export default function SettingsScreen() {
   const locationSuggestionsDetail = locationDiagnostics?.locationLearningCaptureState === "logout_cleanup"
     ? "Paused while signing out. Sign out again to finish."
     : locationCaptureNeedsRetry
-      ? "Paused. Tap Retry capture above to restart it."
+      ? "Paused. Tap Restart location above to start it again."
       : locationDiagnostics?.locationLearningEnabled && !locationMonitoringAllowed
         ? "On, but needs Always location access"
         : locationDiagnostics?.locationLearningActive
@@ -1074,7 +1075,7 @@ export default function SettingsScreen() {
         const result = await updateCategory(category.id, { isPinned: nextPinned });
         if (!(await activityOwnerStill(owner))) return;
         if (result.category.isPinned !== nextPinned) {
-          throw new Error("The activity pin was not saved. Check that the Dayframe server is up to date, then try again.");
+          throw new Error("Dayframe couldn't save the pin. Try again in a moment.");
         }
         await load({ silent: true });
       } catch (error) {
@@ -1110,8 +1111,8 @@ export default function SettingsScreen() {
   function confirmDiscardReviewIssue(clientMutationId: string) {
     void confirmForSession({
       eyebrow: "Sync help",
-      title: "Discard saved Review change?",
-      message: "This removes only the permanently failed local Review change. Pending changes are not affected.",
+      title: "Discard this change?",
+      message: "Only this change is removed. Anything still sending is kept.",
       confirmLabel: "Discard",
       confirmHint: "This can't be undone.",
       onConfirm: () => {
@@ -1126,8 +1127,8 @@ export default function SettingsScreen() {
   function confirmDiscardTimeEntryIssue(clientCommandId: string) {
     void confirmForSession({
       eyebrow: "Sync help",
-      title: "Discard failed time entry change?",
-      message: "The server version is already restored. This removes the rejected local change from diagnostics.",
+      title: "Discard this block change?",
+      message: "Your account already shows the earlier version. Only this change is removed from this iPhone.",
       confirmLabel: "Discard",
       confirmHint: "This can't be undone.",
       onConfirm: () => {
@@ -1153,8 +1154,8 @@ export default function SettingsScreen() {
   function confirmDiscardTimerStopIssue(clientEventId: string) {
     void confirmForSession({
       eyebrow: "Sync help",
-      title: "Discard rejected timer Stop?",
-      message: "The server timer will stay unchanged. This removes only the rejected Stop saved on this iPhone.",
+      title: "Discard this Stop?",
+      message: "The timer stays as your account has it. Only this Stop is removed from this iPhone.",
       confirmLabel: "Discard Stop",
       confirmHint: "This can't be undone.",
       onConfirm: () => {
@@ -1180,8 +1181,8 @@ export default function SettingsScreen() {
   function confirmClearTimeEntryQuarantine() {
     void confirmForSession({
       eyebrow: "Sync help",
-      title: "Clear unreadable local sync data?",
-      message: "These records cannot be replayed. Clearing them removes only quarantined diagnostics.",
+      title: "Clear unreadable changes?",
+      message: "Dayframe couldn't read these changes, so they can't be sent. Clearing removes only them.",
       confirmLabel: "Clear",
       confirmHint: "This can't be undone.",
       onConfirm: () => {
@@ -1196,8 +1197,8 @@ export default function SettingsScreen() {
   function confirmClearDeviceTimeEntryQuarantine() {
     void confirmForSession({
       eyebrow: "Sync help",
-      title: "Clear unreadable device-wide sync data?",
-      message: "The damaged data has no recoverable account owner and cannot be replayed. Clearing it removes only device-wide quarantine diagnostics.",
+      title: "Clear unreadable changes on this iPhone?",
+      message: "These changes couldn't be read, and Dayframe can't tell which account they belong to, so they can't be sent. Clearing removes only them.",
       confirmLabel: "Clear",
       confirmHint: "This can't be undone.",
       onConfirm: () => {
@@ -1234,9 +1235,9 @@ export default function SettingsScreen() {
   function confirmClearFailedQueue() {
     void confirmForSession({
       eyebrow: "Sync help",
-      title: "Clear failed queued events?",
-      message: "Failed queued events that Dayframe has marked invalid will be removed from this device. Queued events that are still retryable will stay queued.",
-      confirmLabel: "Clear failed",
+      title: "Clear changes that can't be sent?",
+      message: "Dayframe can't send these changes, so they'll be removed from this iPhone. Anything still sending is kept.",
+      confirmLabel: "Clear",
       confirmHint: "This can't be undone.",
       onConfirm: () => {
         void clearFailedQueue();
@@ -1658,6 +1659,15 @@ export default function SettingsScreen() {
     setDataAndCache((current) => current ? { ...current, categories: change(current.categories) } : current);
   }
 
+  /** Opens a Dayframe web page in Safari; a failure says so instead of doing nothing. */
+  async function openOnWeb(path: string) {
+    try {
+      await Linking.openURL(`${DAYFRAME_API_BASE}${path}`);
+    } catch {
+      settingsNotice.show("Couldn't open Safari. Try again.");
+    }
+  }
+
   async function signOut() {
     // Log out is never a silent no-op: a sign-in that can't be read (the Keychain locked or
     // failing) says so and how to retry.
@@ -1682,13 +1692,13 @@ export default function SettingsScreen() {
     const unsynchronisedCount =
       diagnostics.waitingCount + diagnostics.needsAttentionCount;
     const reviewWarning = unsynchronisedCount > 0
-      ? `${unsynchronisedCount} unsynchronised Review ${unsynchronisedCount === 1 ? "change" : "changes"} will be removed from this iPhone. `
+      ? `${unsynchronisedCount} Review ${unsynchronisedCount === 1 ? "choice" : "choices"} Dayframe hasn't confirmed yet will be removed from this iPhone. `
       : "";
     void confirmForSession({
       eyebrow: "Account",
-      title: "Log out and remove saved changes?",
-      message: `${reviewWarning}Unsynchronised Location evidence will be removed from this iPhone. Synced history stays in your account.`,
-      confirmLabel: "Log out",
+      title: "Sign out?",
+      message: `${reviewWarning}Location points not yet sent from this iPhone will be removed. Everything already synced stays in your account.`,
+      confirmLabel: "Sign out",
       confirmHint: "Changes not yet synced can't be recovered.",
       onConfirm: () => { void completeSignOut(); }
     }, authority);
@@ -1704,7 +1714,7 @@ export default function SettingsScreen() {
   async function offerLogoutRecovery() {
     const recovery = await captureLogoutRecovery();
     if (!recovery) {
-      settingsNotice.show("Your sign-in is changing. Try Log out again in a moment.");
+      settingsNotice.show("Your sign-in is changing. Try Sign out again in a moment.");
       return;
     }
     if (recovery.kind === "signed_out") {
@@ -1713,9 +1723,9 @@ export default function SettingsScreen() {
     }
     confirmSheet.confirm({
       eyebrow: "Account",
-      title: "Finish logging out?",
-      message: "Dayframe couldn't finish logging out. This removes the sign-in still saved on this iPhone and anything left unsynchronised. Synced history stays in your account.",
-      confirmLabel: "Log out",
+      title: "Finish signing out?",
+      message: "Dayframe couldn't finish signing out. This removes the sign-in still saved on this iPhone and anything not yet sent. Everything already synced stays in your account.",
+      confirmLabel: "Sign out",
       confirmHint: "Changes not yet synced can't be recovered.",
       onConfirm: () => {
         void logoutRecoveryStillCurrent(recovery).then(
@@ -1765,8 +1775,8 @@ export default function SettingsScreen() {
       signingOutRef.current = false;
       setSigningOut(false);
       Alert.alert(
-        "Unable to log out",
-        error instanceof Error ? error.message : "Dayframe could not finish logging out."
+        "Couldn't sign out",
+        error instanceof Error ? error.message : "Dayframe couldn't finish signing out."
       );
     }
   }
@@ -1898,9 +1908,16 @@ export default function SettingsScreen() {
                   theme={theme}
                   title="Suggest visits and commutes"
                 />
+                {/* UIA-086: Motion & Fitness is a status with its own action, not a page. */}
                 <SettingsBlockRow
-                  onPress={() => openSettingsSection("automations")}
-                  subtitle={motionFitness?.label ?? null}
+                  control={motionFitness?.action ? (
+                    <SettingsPillButton
+                      label={motionFitness.action.label}
+                      onPress={() => void handleMotionFitnessAction()}
+                      theme={theme}
+                    />
+                  ) : undefined}
+                  subtitle={motionFitness?.label ?? "Checking…"}
                   testID="settings-motion"
                   theme={theme}
                   title="Motion & Fitness"
@@ -2026,9 +2043,18 @@ export default function SettingsScreen() {
                 theme={theme}
                 title="Privacy and data"
               >
+                {/* UIA-080: export lives on the web (every block, activity and place as a file). */}
+                <SettingsBlockRow
+                  accessibilityHint="Opens Dayframe's export in Safari"
+                  divider={false}
+                  onPress={() => void openOnWeb("/settings#privacy-data")}
+                  subtitle="Every block, activity and place"
+                  testID="settings-export-data"
+                  theme={theme}
+                  title="Export your data"
+                />
                 <SettingsBlockRow
                   danger
-                  divider={false}
                   onPress={confirmDeleteLocationEvidence}
                   subtitle="Recent location points. Logged blocks stay."
                   testID="settings-clear-location"
@@ -2070,6 +2096,7 @@ export default function SettingsScreen() {
                 style={({ pressed }) => [styles.settingsSignOut, pressed ? styles.buttonPressed : null]}
                 testID="settings-sign-out"
               >
+                <DayframeIcon color={theme.textPrimary} glyph={DAYFRAME_APP_ICONS.signOut} size={18} />
                 <Text {...mobileTextProps("control")} style={styles.settingsSignOutText}>
                   {signingOut ? "Signing out…" : "Sign out"}
                 </Text>
@@ -2180,7 +2207,7 @@ export default function SettingsScreen() {
           {settingsSection === "profile" ? (
             <View style={styles.settingsBlocksStack}>
               <SettingsBlockGroup
-                foot="Change your name, password or workspace on the web."
+                foot="Edit your name, password or workspace on the web."
                 theme={theme}
                 title="Signed in as"
               >
@@ -2198,6 +2225,14 @@ export default function SettingsScreen() {
                   theme={theme}
                   title="Workspace"
                 />
+                {/* UIA-084: the footnote's "on the web" is one tap away. */}
+                <SettingsBlockRow
+                  accessibilityHint="Opens Dayframe in Safari"
+                  onPress={() => void openOnWeb("/settings")}
+                  testID="settings-account-open-web"
+                  theme={theme}
+                  title="Open Dayframe on the web"
+                />
               </SettingsBlockGroup>
               <Pressable
                 accessibilityRole="button"
@@ -2207,6 +2242,7 @@ export default function SettingsScreen() {
                 style={({ pressed }) => [styles.settingsSignOut, pressed ? styles.buttonPressed : null]}
                 testID="settings-account-sign-out"
               >
+                <DayframeIcon color={theme.textPrimary} glyph={DAYFRAME_APP_ICONS.signOut} size={18} />
                 <Text {...mobileTextProps("control")} style={styles.settingsSignOutText}>
                   {signingOut ? "Signing out…" : "Sign out"}
                 </Text>
@@ -2229,49 +2265,49 @@ export default function SettingsScreen() {
 
               {syncStatus.issueCount > 0 ? (
                 <SettingsBlockGroup
-                  foot="Retry sends a change again. Discard keeps what your account already has."
+                  foot="Try again resends it. Discard keeps your account as it is."
                   theme={theme}
                   title="Needs attention"
                 >
                   {timerStopSyncIssues.map((issue, index) => (
                     <SettingsIssueRow
-                      detail={`Stopped ${formatQueueTime(issue.failedAt ?? issue.queuedAt)}. The server didn't accept it, so the timer still shows as running there.`}
+                      detail={`Stopped ${formatQueueTime(issue.failedAt ?? issue.queuedAt)}. Dayframe couldn't save the Stop, so your account still shows the timer running.`}
                       divider={index > 0}
                       key={issue.clientEventId}
                       theme={theme}
-                      title="Timer stop not accepted"
+                      title="Couldn't stop the timer"
                     >
-                      <SettingsPillButton accessibilityLabel="Retry rejected timer Stop" label="Retry" onPress={() => retryTimerStopIssue(issue.clientEventId)} theme={theme} />
-                      <SettingsPillButton accessibilityLabel="Discard rejected timer Stop" danger label="Discard" onPress={() => confirmDiscardTimerStopIssue(issue.clientEventId)} theme={theme} />
+                      <SettingsPillButton accessibilityLabel="Try stopping the timer again" label="Try again" onPress={() => retryTimerStopIssue(issue.clientEventId)} theme={theme} />
+                      <SettingsPillButton accessibilityLabel="Discard this Stop" danger label="Discard" onPress={() => confirmDiscardTimerStopIssue(issue.clientEventId)} theme={theme} />
                     </SettingsIssueRow>
                   ))}
                   {timeEntrySyncIssues.map((issue, index) => (
                     <SettingsIssueRow
-                      detail={`Saved ${formatQueueTime(issue.updatedAt)}. The server didn't accept it, so your account keeps the earlier version.`}
+                      detail={`From ${formatQueueTime(issue.updatedAt)}. Dayframe couldn't save it, so your account keeps the earlier version.`}
                       divider={timerStopSyncIssues.length + index > 0}
                       key={issue.clientCommandId}
                       theme={theme}
-                      title={issue.operation === "delete" ? "Delete not accepted" : "Edit not accepted"}
+                      title={issue.operation === "delete" ? "Couldn't delete a block" : "Couldn't save an edit"}
                     >
-                      <SettingsPillButton accessibilityLabel={`Retry rejected ${issue.operation === "delete" ? "delete" : "edit"}`} label="Retry" onPress={() => retryTimeEntryIssue(issue.clientCommandId)} theme={theme} />
-                      <SettingsPillButton accessibilityLabel={`Discard rejected ${issue.operation === "delete" ? "delete" : "edit"}`} danger label="Discard" onPress={() => confirmDiscardTimeEntryIssue(issue.clientCommandId)} theme={theme} />
+                      <SettingsPillButton accessibilityLabel={`Try the ${issue.operation === "delete" ? "delete" : "edit"} again`} label="Try again" onPress={() => retryTimeEntryIssue(issue.clientCommandId)} theme={theme} />
+                      <SettingsPillButton accessibilityLabel={`Discard this ${issue.operation === "delete" ? "delete" : "edit"}`} danger label="Discard" onPress={() => confirmDiscardTimeEntryIssue(issue.clientCommandId)} theme={theme} />
                     </SettingsIssueRow>
                   ))}
                   {reviewSyncIssues.map((issue, index) => (
                     <SettingsIssueRow
                       detail={issue.resolutionStatus === "resolution_unknown"
                         ? `Saved ${formatQueueTime(issue.createdAt)}. Dayframe is still checking whether it reached your account; your choice is kept.`
-                        : `Saved ${formatQueueTime(issue.createdAt)}. The server didn't accept this Review choice.`}
+                        : `From ${formatQueueTime(issue.createdAt)}. Dayframe couldn't save it.`}
                       divider={timerStopSyncIssues.length + timeEntrySyncIssues.length + index > 0}
                       key={issue.clientMutationId}
                       theme={theme}
                       title={issue.resolutionStatus === "resolution_unknown"
                         ? `${formatReviewMutationAction(issue.action)} · checking`
-                        : `${formatReviewMutationAction(issue.action)} not accepted`}
+                        : `Couldn't ${formatReviewMutationAction(issue.action).toLowerCase()}`}
                     >
                       <SettingsPillButton
-                        accessibilityLabel="Check saved Review change again"
-                        label="Check again"
+                        accessibilityLabel="Try this Review choice again"
+                        label="Try again"
                         onPress={() => void synchroniseReviewMutations({ force: true, clientMutationId: issue.clientMutationId })
                           .then((result) => {
                             if (result.outcome === "transport_failure" || result.outcome === "server_busy") {
@@ -2283,7 +2319,7 @@ export default function SettingsScreen() {
                         theme={theme}
                       />
                       {issue.resolutionStatus !== "resolution_unknown" ? (
-                        <SettingsPillButton accessibilityLabel="Discard rejected Review change" danger label="Discard" onPress={() => confirmDiscardReviewIssue(issue.clientMutationId)} theme={theme} />
+                        <SettingsPillButton accessibilityLabel="Discard this Review choice" danger label="Discard" onPress={() => confirmDiscardReviewIssue(issue.clientMutationId)} theme={theme} />
                       ) : null}
                     </SettingsIssueRow>
                   ))}
@@ -2291,12 +2327,12 @@ export default function SettingsScreen() {
                     <SettingsIssueRow
                       // Items still retrying on their own are only "waiting" (background, AGENTS rule);
                       // this row is for items the server will not accept as they are.
-                      detail={`${queueDiagnostics.permanentFailedCount} ${queueDiagnostics.permanentFailedCount === 1 ? "item" : "items"} from this iPhone can't be accepted as ${queueDiagnostics.permanentFailedCount === 1 ? "it is" : "they are"}. Updating Dayframe and retrying may help; clearing removes ${queueDiagnostics.permanentFailedCount === 1 ? "it" : "them"} from this iPhone.`}
+                      detail={`${queueDiagnostics.permanentFailedCount} ${queueDiagnostics.permanentFailedCount === 1 ? "item" : "items"} from this iPhone couldn't be saved. Updating Dayframe and trying again may help; clearing removes ${queueDiagnostics.permanentFailedCount === 1 ? "it" : "them"} from this iPhone.`}
                       divider={timerStopSyncIssues.length + timeEntrySyncIssues.length + reviewSyncIssues.length > 0}
                       theme={theme}
                       title="Couldn't be sent"
                     >
-                      <SettingsPillButton accessibilityLabel="Retry sending items from this iPhone" disabled={!canRetryFailed} label="Retry" onPress={retryFailedAndReload} theme={theme} />
+                      <SettingsPillButton accessibilityLabel="Try sending these again" disabled={!canRetryFailed} label="Try again" onPress={retryFailedAndReload} theme={theme} />
                       <SettingsPillButton accessibilityLabel="Clear items that can't be sent" danger disabled={!canClearFailed} label="Clear" onPress={confirmClearFailedQueue} theme={theme} />
                     </SettingsIssueRow>
                   ) : null}
@@ -2747,11 +2783,11 @@ function nextCategoryColor(categories: Category[]): DayframePaletteKey {
 }
 
 function locationStatusText(diagnostics: LocationVisitDiagnostics) {
-  if (diagnostics.locationLearningCaptureState === "logout_cleanup") return "Location capture is paused. Retry signing out to finish local cleanup.";
+  if (diagnostics.locationLearningCaptureState === "logout_cleanup") return "Location is paused. Sign out again to finish signing out.";
   if (diagnostics.foregroundPermission !== "granted") return "Location permission is not enabled.";
   if (diagnostics.backgroundPermission !== "granted") return "Enable Always access to monitor saved places.";
   if (!diagnostics.locationLearningEnabled) return "Location access is allowed. Turn on commute and regular-place learning to capture.";
-  if (!diagnostics.locationLearningActive) return "Location consent is saved, but capture is inactive. Retry capture to start it.";
+  if (!diagnostics.locationLearningActive) return "Location is allowed but not running. Tap Restart location to start it.";
   if (diagnostics.geofencingActive && diagnostics.activeMonitorCount > 0) return "Place monitoring is enabled.";
   return "Location learning is enabled. No saved-place monitors are active.";
 }
@@ -2773,14 +2809,14 @@ function formatReviewMutationAction(value: string) {
   switch (value) {
     case "accept":
     case "confirm":
-      return "Confirm";
+      return "Log a moment";
     case "ignore_once":
     case "ignore_once_location":
-      return "Dismiss";
+      return "Skip a moment";
     case "edit_and_confirm":
-      return "Edit and confirm";
+      return "Log an edited moment";
     default:
-      return "Review change";
+      return "Save a Review choice";
   }
 }
 

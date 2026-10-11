@@ -65,7 +65,7 @@ describe("PersistentTimerBar task suggestions", () => {
     });
     render(<PersistentTimerBar />);
 
-    const description = screen.getByLabelText("Task description") as HTMLInputElement;
+    const description = screen.getByLabelText("Description") as HTMLInputElement;
     fireEvent.focus(description);
     expect(await screen.findByRole("listbox", { name: "Suggestions" })).not.toBeNull();
     await userEvent.click(screen.getByRole("option", { name: /Deep planning/ }));

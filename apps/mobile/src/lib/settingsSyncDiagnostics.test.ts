@@ -6,14 +6,14 @@ describe("Settings sync diagnostics summary", () => {
     expect(deviceSyncAttentionStatus({
       timerStopNeedsAttentionCount: 1,
       timeEntryNeedsAttentionCount: 2
-    })).toBe("1 timer Stop and 2 time entry changes need attention");
+    })).toBe("1 timer Stop and 2 block changes need attention");
   });
 
   it("keeps singular and empty attention summaries clear", () => {
     expect(deviceSyncAttentionStatus({
       timerStopNeedsAttentionCount: 0,
       timeEntryNeedsAttentionCount: 1
-    })).toBe("1 time entry change needs attention");
+    })).toBe("1 block change needs attention");
     expect(deviceSyncAttentionStatus({
       timerStopNeedsAttentionCount: undefined,
       timeEntryNeedsAttentionCount: null

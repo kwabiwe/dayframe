@@ -142,7 +142,7 @@ describe("AppShellRuntime rejected Start", () => {
         </AppShellRuntimeProvider>
       );
       fireEvent.click(screen.getByRole("button", { name: "Hydrate timer A" }));
-      const description = await screen.findByLabelText("Task description") as HTMLInputElement;
+      const description = await screen.findByLabelText("Description") as HTMLInputElement;
       fireEvent.change(description, { target: { value: "Plan @focus" } });
       fireEvent.click(screen.getByRole("button", { name: "Start timer" }));
       await waitFor(() => expect(rejectStart).toBeDefined());
@@ -151,7 +151,7 @@ describe("AppShellRuntime rejected Start", () => {
 
       await act(async () => { rejectStart?.(); });
       await waitFor(() => expect(screen.getByTestId("active-timer").textContent).toBe("idle"));
-      await waitFor(() => expect((screen.getByLabelText("Task description") as HTMLInputElement).value)
+      await waitFor(() => expect((screen.getByLabelText("Description") as HTMLInputElement).value)
         .toBe(typeMeanwhile ? "Updated plan" : "Plan"));
       expect(screen.getByRole("button", { name: "Activity: Focus" })).not.toBeNull();
     });

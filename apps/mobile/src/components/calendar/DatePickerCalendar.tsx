@@ -11,6 +11,7 @@ import { formatLocalDateKey, parseLocalDate } from "@/lib/reportsRanges";
 import { REPORT_TEXT_CAP } from "@/lib/reportsTypography";
 import { MOBILE_MOTION } from "@/lib/motion";
 import type { MobileTheme } from "@/lib/mobileTheme";
+import { MOBILE_DISPLAY_FONT } from "../../lib/mobileTypography";
 
 export function CalendarGlyph({
   kind,
@@ -224,7 +225,8 @@ export function DatePickerCalendar({
                           style={[
                             s.band,
                             {
-                              backgroundColor: theme.accentSoft,
+                              // Neutral selection (UIA-011): coral marks live time only.
+                              backgroundColor: theme.surfaceMuted,
                               left: cell.band === "start" ? "50%" : 0,
                               right: cell.band === "end" ? "50%" : 0,
                               borderTopLeftRadius: cell.column === 0 ? 6 : 0,
@@ -243,10 +245,8 @@ export function DatePickerCalendar({
                           s.circle,
                           {
                             backgroundColor: cell.endpoint
-                              ? theme.accent
-                              : cell.today && !cell.selected
-                                ? theme.surfaceMuted
-                                : "transparent",
+                              ? theme.textPrimary
+                              : "transparent",
                           },
                         ]}
                       >
@@ -255,12 +255,17 @@ export function DatePickerCalendar({
                           numberOfLines={1}
                           style={[
                             s.day,
+                            cell.today || cell.endpoint ? s.dayStrong : null,
+                            cell.disabled ? s.dayDisabled : null,
                             {
+                              // Today is coral text, never a fill (brand guide, Coral means live).
                               color: cell.endpoint
-                                ? theme.onAccent
+                                ? theme.background
                                 : cell.disabled || !cell.inMonth
                                   ? theme.textSecondary
-                                  : theme.textPrimary,
+                                  : cell.today
+                                    ? theme.accentText
+                                    : theme.textPrimary,
                             },
                           ]}
                         >
@@ -291,8 +296,8 @@ const s = StyleSheet.create({
     flex: 1,
     minWidth: 0,
     textAlign: "center",
-    fontSize: 16,
-    fontWeight: "600",
+    fontFamily: MOBILE_DISPLAY_FONT.bold,
+    fontSize: 17,
   },
   week: { flexDirection: "row", flexWrap: "nowrap", paddingVertical: 8 },
   weekday: {
@@ -330,5 +335,7 @@ const s = StyleSheet.create({
     justifyContent: "center",
   },
   band: { position: "absolute", top: 4, height: 36 },
-  day: { fontSize: 14, fontWeight: "500", fontVariant: ["tabular-nums"] },
+  day: { fontSize: 15, fontWeight: "500", fontVariant: ["tabular-nums"] },
+  dayStrong: { fontWeight: "700" },
+  dayDisabled: { opacity: 0.4 },
 });

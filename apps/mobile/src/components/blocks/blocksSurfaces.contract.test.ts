@@ -20,21 +20,21 @@ function between(source: string, start: string, end: string) {
 describe("Blocks confirm sheet and toast call sites (UIA-003/004/005)", () => {
   it("routes every destructive confirmation through the Blocks confirm sheet", () => {
     for (const title of [
-      '"Discard saved Review change?"',
-      '"Discard failed time entry change?"',
-      '"Discard rejected timer Stop?"',
-      '"Clear unreadable local sync data?"',
-      '"Clear unreadable device-wide sync data?"',
-      '"Clear failed queued events?"',
+      '"Discard this change?"',
+      '"Discard this block change?"',
+      '"Discard this Stop?"',
+      '"Clear unreadable changes?"',
+      '"Clear unreadable changes on this iPhone?"',
+      '"Clear changes that can\'t be sent?"',
       '"Clear recent location history?"',
-      '"Log out and remove saved changes?"'
+      '"Sign out?"'
     ]) {
       expect(settings).toContain(`title: ${title}`);
     }
     // The unsynced-data warning keeps its meaning and Log out still runs the same sign-out.
     const signOut = between(settings, "async function signOutChecked()", "async function completeSignOut()");
     expect(signOut).toContain("void confirmForSession({");
-    expect(signOut).toContain("${reviewWarning}Unsynchronised Location evidence will be removed from this iPhone. Synced history stays in your account.");
+    expect(signOut).toContain("${reviewWarning}Location points not yet sent from this iPhone will be removed. Everything already synced stays in your account.");
     expect(signOut).toContain("onConfirm: () => { void completeSignOut(); }");
     expect(settings).toContain("<BlocksConfirmHost controller={confirmSheet}");
     expect(places).toContain('title: "Ignore learned place?"');
@@ -69,7 +69,7 @@ describe("Blocks confirm sheet and toast call sites (UIA-003/004/005)", () => {
     const recovery = between(settings, "async function offerLogoutRecovery()", "async function confirmForSession(");
     expect(recovery).toContain("const recovery = await captureLogoutRecovery();");
     // Never silent: a session change in progress says so; nothing left goes to sign-in.
-    expect(recovery).toContain('settingsNotice.show("Your sign-in is changing. Try Log out again in a moment.");');
+    expect(recovery).toContain('settingsNotice.show("Your sign-in is changing. Try Sign out again in a moment.");');
     expect(recovery).toMatch(/if \(recovery\.kind === "signed_out"\) \{\s*finishSignedOutNavigation\(\);/);
     // The cleanup runs through the same logout path, only while the recovered state is still current.
     expect(recovery).toContain("void logoutRecoveryStillCurrent(recovery).then(");

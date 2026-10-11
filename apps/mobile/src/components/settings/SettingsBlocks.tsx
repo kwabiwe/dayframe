@@ -337,7 +337,13 @@ export function SettingsSegmented<T extends string>({
   value: T;
 }) {
   return (
-    <View accessibilityLabel={label} accessibilityRole="radiogroup" style={[blockStyles.segmented, { backgroundColor: theme.surfaceInset }]}>
+    // One segmented style across the app (UIA-081): the Reports switch's inset track and lighter
+    // neutral segment, in both themes.
+    <View
+      accessibilityLabel={label}
+      accessibilityRole="radiogroup"
+      style={[blockStyles.segmented, { backgroundColor: theme.mode === "dark" ? theme.surfaceInset : theme.surfaceMuted }]}
+    >
       {options.map((option) => {
         const selected = option.value === value;
         return (
@@ -348,9 +354,9 @@ export function SettingsSegmented<T extends string>({
             hitSlop={{ bottom: 4, top: 4 }}
             key={option.value}
             onPress={() => onChange(option.value)}
-            style={[blockStyles.segment, selected ? { backgroundColor: theme.textPrimary } : null]}
+            style={[blockStyles.segment, selected ? { backgroundColor: theme.mode === "dark" ? theme.surfaceMuted : theme.surface } : null]}
           >
-            <Text {...mobileTextProps("metadata")} style={[blockStyles.segmentText, { color: selected ? theme.background : theme.textSecondary }]}>
+            <Text {...mobileTextProps("metadata")} style={[blockStyles.segmentText, { color: selected ? theme.textPrimary : theme.textSecondary }]}>
               {option.label}
             </Text>
           </Pressable>
