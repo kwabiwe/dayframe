@@ -214,6 +214,9 @@ describe("Review", () => {
     await act(async () => nav.querySelector<HTMLButtonElement>("[aria-label='Previous moment']")!.click());
     // ‹ on the first card goes round to the last, as ↑ does.
     expect(position()).toBe(`${total} of ${total}`);
+    // A sibling of the card slot, so the card and a decided card's ghost keep their origin (Codex r1).
+    expect(nav.parentElement?.classList.contains("df-review")).toBe(true);
+    expect(nav.querySelector("[aria-live]")?.getAttribute("aria-atomic")).toBe("true");
   });
 
   it("cannot log a moment without a complete window but can skip it", async () => {

@@ -11745,9 +11745,10 @@ dialog.ui-dialog.df-palette {
 
   .df-rnav {
     display: flex;
+    /* Above the card (which comes first on phones), as its own row: the card keeps its origin. */
+    order: -2;
     align-items: center;
     justify-content: space-between;
-    margin-bottom: 8px;
   }
 
   .df-rnav-btn {

@@ -106,6 +106,16 @@ export function ReviewDeck({ initialData }: { initialData: BootstrapData }) {
   const enterSequence = useRef(0);
   const nameInputRef = useRef<HTMLInputElement | null>(null);
   const cardRef = useRef<HTMLElement | null>(null);
+  const navRef = useRef<HTMLElement | null>(null);
+  // A refresh or decision can leave one moment (or the evidence editor opens): the focused ‹ ›
+  // button is then disabled, so focus moves to the card's first action rather than the page.
+  const navDisabled = visible.length < 2 || evidenceOpenId !== null;
+  useEffect(() => {
+    if (!navDisabled) return;
+    const active = document.activeElement;
+    if (!active || !navRef.current?.contains(active)) return;
+    cardRef.current?.querySelector<HTMLElement>(".df-ractions button:not(:disabled)")?.focus();
+  }, [navDisabled]);
 
   // The card whose evidence editor is open stays the card, whatever the queue order becomes.
   const selected = visible.find((item) => item.id === (evidenceOpenId ?? selectedId)) ?? visible[0] ?? null;
@@ -478,35 +488,35 @@ export function ReviewDeck({ initialData }: { initialData: BootstrapData }) {
           })}
         </section>
 
+        {/* Phones (UIA-315): where this card sits in the queue, with ‹ › to step through it (the
+            full queue follows the card there). A sibling of the card slot, so the card (and a
+            decided card's ghost) keeps its origin; shown whenever a card is, so deciding down to
+            one moment never moves the card. Hidden on wider screens, where ↑ ↓ step through the
+            queue beside the card. */}
+        <nav aria-label="Queue position" className="df-rnav" ref={navRef}>
+          <button
+            aria-label="Previous moment"
+            className="df-rnav-btn"
+            disabled={evidenceOpen || visible.length < 2}
+            onClick={() => select(stepSelection(visibleIds, selected.id, -1))}
+            type="button"
+          >
+            <ChevronLeft aria-hidden="true" size={18} />
+          </button>
+          <span aria-atomic="true" aria-live="polite" className="df-rnav-pos df-tnum">
+            {visible.findIndex((item) => item.id === selected.id) + 1} of {visible.length}{visible.length < (total ?? 0) ? " shown" : ""}
+          </span>
+          <button
+            aria-label="Next moment"
+            className="df-rnav-btn"
+            disabled={evidenceOpen || visible.length < 2}
+            onClick={() => select(stepSelection(visibleIds, selected.id, 1))}
+            type="button"
+          >
+            <ChevronRight aria-hidden="true" size={18} />
+          </button>
+        </nav>
         <div className="df-rcard-slot">
-          {visible.length > 1 ? (
-            // Phones (UIA-315): where this card sits in the queue, with ‹ › to step through it
-            // (the full queue follows the card there). Hidden on wider screens, where the queue
-            // sits beside the card and ↑ ↓ step through it.
-            <nav aria-label="Queue position" className="df-rnav">
-              <button
-                aria-label="Previous moment"
-                className="df-rnav-btn"
-                disabled={evidenceOpen}
-                onClick={() => select(stepSelection(visibleIds, selected.id, -1))}
-                type="button"
-              >
-                <ChevronLeft aria-hidden="true" size={18} />
-              </button>
-              <span aria-live="polite" className="df-rnav-pos df-tnum">
-                {visible.findIndex((item) => item.id === selected.id) + 1} of {visible.length}
-              </span>
-              <button
-                aria-label="Next moment"
-                className="df-rnav-btn"
-                disabled={evidenceOpen}
-                onClick={() => select(stepSelection(visibleIds, selected.id, 1))}
-                type="button"
-              >
-                <ChevronRight aria-hidden="true" size={18} />
-              </button>
-            </nav>
-          ) : null}
           <section
             aria-labelledby="df-rcard-title"
             className="df-card df-rcard"
