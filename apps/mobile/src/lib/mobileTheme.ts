@@ -1425,9 +1425,63 @@ function createStyles(theme: MobileTheme) {
       paddingHorizontal: 12,
       paddingVertical: 10
     },
+    // Sign in and sign up in Blocks (parity step 16b): one card, a display title, filled fields in
+    // the system face, the coral pill and a plain switch line.
+    authCard: {
+      backgroundColor: theme.surface,
+      borderRadius: 22,
+      gap: 12,
+      padding: 20
+    },
+    authTitle: {
+      color: theme.textPrimary,
+      fontFamily: MOBILE_DISPLAY_FONT.bold,
+      fontSize: 30,
+      lineHeight: 34
+    },
+    authBody: {
+      color: theme.textSecondary,
+      fontSize: 15,
+      lineHeight: 21,
+      marginBottom: 4
+    },
+    authInput: {
+      backgroundColor: theme.surfaceInset,
+      fontFamily: undefined,
+      fontSize: 16
+    },
+    authPrimaryButton: {
+      minHeight: 54
+    },
+    authPrimaryButtonText: {
+      fontSize: 17,
+      fontWeight: "700"
+    },
+    authSwitchRow: {
+      flexDirection: "row",
+      flexWrap: "wrap",
+      alignItems: "center",
+      justifyContent: "center",
+      gap: 4
+    },
+    authSwitchText: {
+      color: theme.textSecondary,
+      fontSize: 15
+    },
+    authSwitchLink: {
+      minHeight: 44,
+      justifyContent: "center",
+      paddingHorizontal: 4
+    },
+    authSwitchLinkText: {
+      color: theme.textPrimary,
+      fontSize: 15,
+      fontWeight: "700",
+      textDecorationLine: "underline"
+    },
     authPasswordField: {
       minHeight: 48,
-      backgroundColor: theme.surfaceMuted,
+      backgroundColor: theme.surfaceInset,
       borderRadius: 14,
       flexDirection: "row",
       alignItems: "center",
@@ -1471,7 +1525,7 @@ function createStyles(theme: MobileTheme) {
       justifyContent: "center"
     },
     authPasswordVisibilityPressed: {
-      backgroundColor: theme.surfaceInset
+      backgroundColor: theme.surfaceMuted
     },
     primaryButton: {
       marginTop: 8,
@@ -2483,11 +2537,6 @@ function createStyles(theme: MobileTheme) {
       alignItems: "center",
       justifyContent: "center"
     },
-    authSecondaryButton: {
-      minHeight: 44,
-      alignItems: "center",
-      justifyContent: "center"
-    },
     toggleSelected: {
       borderColor: theme.accent,
       backgroundColor: theme.accentSoft
@@ -2498,10 +2547,6 @@ function createStyles(theme: MobileTheme) {
       fontFamily: monoFont,
       fontSize: 13,
       lineHeight: 17,
-      textAlign: "center"
-    },
-    authSecondaryButtonText: {
-      lineHeight: 18,
       textAlign: "center"
     },
     row: {

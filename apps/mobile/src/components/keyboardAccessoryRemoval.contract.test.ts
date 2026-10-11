@@ -1,6 +1,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
+import { DAYFRAME_THEME } from "@dayframe/shared";
 
 const componentRoot = fileURLToPath(new URL("./", import.meta.url));
 const dashboard = readFileSync(`${componentRoot}DayframeDashboard.tsx`, "utf8");
@@ -44,4 +45,24 @@ describe("auth keyboard navigation contract", () => {
     expect(mobileTheme).toMatch(/authPasswordField:\s*\{[\s\S]*?minHeight: 48,[\s\S]*?overflow: "hidden"/);
     expect(mobileTheme).toMatch(/authPasswordVisibilityButton:\s*\{[\s\S]*?width: 44,[\s\S]*?height: 44,[\s\S]*?borderRadius: 999/);
   });
+
+  it("keeps auth placeholders at AA contrast on the inset field fill", () => {
+    expect(mobileTheme).toMatch(/authInput:\s*\{[^}]*backgroundColor: theme\.surfaceInset[^}]*\}/);
+    expect(mobileTheme).toMatch(/authPasswordField:\s*\{[^}]*backgroundColor: theme\.surfaceInset[^}]*\}/);
+    for (const mode of ["light", "dark"] as const) {
+      const palette = DAYFRAME_THEME[mode];
+      expect(contrast(palette.textSecondary, palette.surfaceInset)).toBeGreaterThanOrEqual(4.5);
+    }
+  });
 });
+
+function luminance(hex: string) {
+  const channels = [1, 3, 5].map((index) => parseInt(hex.slice(index, index + 2), 16) / 255);
+  const [r, g, b] = channels.map((value) => (value <= 0.03928 ? value / 12.92 : ((value + 0.055) / 1.055) ** 2.4));
+  return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+}
+
+function contrast(a: string, b: string) {
+  const [high, low] = [luminance(a), luminance(b)].sort((x, y) => y - x);
+  return (high + 0.05) / (low + 0.05);
+}
