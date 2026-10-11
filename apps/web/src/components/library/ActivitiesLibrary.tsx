@@ -273,7 +273,15 @@ export function ActivitiesLibrary({ initialData }: { initialData: BootstrapData 
                   <b>{activity.name}</b>
                   <small>Archived</small>
                 </span>
-                <button className="df-rbtn df-rbtn--sm" disabled={busy} onClick={() => void restore(activity)} type="button">
+                <button
+                  className="df-rbtn df-rbtn--sm"
+                  disabled={busy}
+                  onClick={async () => {
+                    // The Archived row goes away: focus moves to the restored card's Edit.
+                    if (await restore(activity)) focusCardEdit(activity.id);
+                  }}
+                  type="button"
+                >
                   Restore
                 </button>
               </li>

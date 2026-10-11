@@ -200,6 +200,32 @@ describe("Library › Activities", () => {
     await waitFor(() => expect((screen.getByRole("button", { name: "Edit Reading" }) as HTMLButtonElement).disabled).toBe(false));
   });
 
+  it("moves focus to the restored card's Edit when an Archived row is restored", async () => {
+    const user = userEvent.setup();
+    let restored = false;
+    answer = (call) => {
+      if (call.url.startsWith("/api/categories?archived=1")) {
+        return new Response(JSON.stringify({ categories: restored ? [] : [activity(ID(2), "Old hobby")] }), { status: 200 });
+      }
+      if (call.method === "PATCH") {
+        restored = true;
+        return undefined;
+      }
+      if (call.url.startsWith("/api/bootstrap") && restored) {
+        const refreshed = bootstrap([activity(ID(1), "Reading"), activity(ID(2), "Old hobby")]);
+        const date = new URL(call.url, "http://localhost").searchParams.get("date") ?? "";
+        return new Response(JSON.stringify({ ...refreshed, dateRange: { ...refreshed.dateRange, selectedDate: date } }), { status: 200 });
+      }
+      return undefined;
+    };
+    mount([activity(ID(1), "Reading")]);
+    const row = (await screen.findByText("Old hobby")).closest("li")!;
+    const restoreButton = within(row as HTMLElement).getByRole("button", { name: "Restore" });
+    restoreButton.focus();
+    await user.click(restoreButton);
+    await waitFor(() => expect(document.activeElement?.getAttribute("aria-label")).toBe("Edit Old hobby"));
+  });
+
   it("lists archived activities with Restore", async () => {
     const user = userEvent.setup();
     answer = (call) => call.url.startsWith("/api/categories?archived=1")
