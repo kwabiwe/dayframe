@@ -61,6 +61,11 @@ describe("mobile Activities page contract", () => {
     // Today and Reports hear about the accepted activity (UIA-043), ordered by a sequence taken before sending.
     expect(settingsSource.indexOf("const sequence = beginSavedActivityChange();")).toBeLessThan(settingsSource.indexOf("? await updateCategory(activity.id"));
     expect(settingsSource).toContain("publishSavedActivity({ userId: owner.userId, workspaceId: owner.workspaceId, category: result.category, sequence });");
+    // Published on account/workspace ownership alone, before the Settings-mounted check, so closing
+    // Settings during Save still updates Today and Reports.
+    const save = settingsSource.slice(settingsSource.indexOf("async function saveActivityFromEditor"));
+    expect(save.indexOf("if (owner && ownerNow && mobileAccountOwnersEqual(owner, ownerNow))")).toBeGreaterThan(0);
+    expect(save.indexOf("publishSavedActivity(")).toBeLessThan(save.indexOf("if (!(await activityOwnerStill(owner))) return;"));
     // Accepted saves and archives show at once, even if the refresh after them fails.
     expect(settingsSource).toContain("// The accepted activity shows at once, even if the refresh below fails.");
     expect(settingsSource).toContain("applyActivityCategories((categories) => categories.filter((item) => item.id !== activity.id));");

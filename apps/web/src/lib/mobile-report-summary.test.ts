@@ -34,6 +34,8 @@ describe("mobile aggregate SQL", () => {
     expect(sql.text).toContain("te.user_id = $2::uuid");
     expect(sql.text).toContain("te.workspace_id = $1::uuid");
     expect(sql.text).toContain("c.workspace_id = te.workspace_id");
+    expect(sql.text).toContain("coalesce(c.counts_toward_goal, true) as counts_toward_goal");
+    expect(sql.text).toContain("'goalSeconds', goal_seconds");
     expect(sql.text).not.toMatch(
       /raw_payload|description|latitude|longitude|join projects|now\(\)/,
     );
@@ -49,7 +51,7 @@ describe("mobile aggregate SQL", () => {
       try {
         await client.query("begin");
         await client.query(
-          "create temporary table categories (id uuid, workspace_id uuid, name text, color text); create temporary table time_entries (id uuid, workspace_id uuid, user_id uuid, category_id uuid, started_at timestamptz, stopped_at timestamptz, review_status text)",
+          "create temporary table categories (id uuid, workspace_id uuid, name text, color text, counts_toward_goal boolean not null default true); create temporary table time_entries (id uuid, workspace_id uuid, user_id uuid, category_id uuid, started_at timestamptz, stopped_at timestamptz, review_status text)",
         );
         const category = "20000000-0000-4000-8000-000000000001";
         await client.query(
@@ -124,6 +126,16 @@ describe("mobile aggregate SQL", () => {
         expect(
           result.categories.find((c) => c.key === "uncategorized")?.seconds,
         ).toBe(3600.5);
+        // Goal time (UIA-043) is covered time: entries 1 and 2 overlap 00:30–01:00 and count once.
+        expect(result.buckets.map((b) => b.goalSeconds)).toEqual([7200, 1800.5]);
+        await client.query("update categories set counts_toward_goal = false");
+        const switchedOff = ReportSummarySchema.parse(
+          (await client.query<{ summary: ReportSummary }>(sql.text, sql.values)).rows[0].summary,
+        );
+        // Work no longer counts; the uncategorized timer still does. Logged time is unchanged.
+        expect(switchedOff.buckets.map((b) => b.goalSeconds)).toEqual([1800, 1800.5]);
+        expect(switchedOff.buckets.map((b) => b.seconds)).toEqual([9000, 1800.5]);
+        await client.query("update categories set counts_toward_goal = true");
 
         const oneDayInput = {
           start,

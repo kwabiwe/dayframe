@@ -933,6 +933,13 @@ export default function SettingsScreen() {
       const result = activity
         ? await updateCategory(activity.id, { name: draft.name, color: draft.color, icon: draft.icon, countsTowardGoal: draft.countsTowardGoal })
         : await createCategory(draft.name, { color: draft.color, icon: draft.icon, isPinned: pinned, countsTowardGoal: draft.countsTowardGoal });
+      // Today and Reports (the Dashboard's bootstrap) pick it up too, e.g. a "Counts toward goal"
+      // change, whenever the account and workspace are unchanged, even if Settings closed meanwhile.
+      const ownerNow = await readActiveMobileAccount();
+      if (owner && ownerNow && mobileAccountOwnersEqual(owner, ownerNow)) {
+        publishSavedActivity({ userId: owner.userId, workspaceId: owner.workspaceId, category: result.category, sequence });
+      }
+      // Settings' own state only while Settings is still open for that account.
       if (!(await activityOwnerStill(owner))) return;
       if (!activity && pinned && !result.category.isPinned) {
         // The server's own quick-start cap won (another device pinned one meanwhile).
@@ -942,8 +949,6 @@ export default function SettingsScreen() {
       applyActivityCategories((categories) => categories.some((item) => item.id === result.category.id)
         ? categories.map((item) => item.id === result.category.id ? { ...item, ...result.category } : item)
         : [...categories, result.category]);
-      // Today and Reports (the Dashboard's bootstrap) pick it up too, e.g. a "Counts toward goal" change.
-      if (owner) publishSavedActivity({ userId: owner.userId, workspaceId: owner.workspaceId, category: result.category, sequence });
       await load({ silent: true });
     }).catch((error: unknown) => ({ ran: true as const, error }));
     if (!change.ran) return ACTIVITY_CHANGE_BUSY_MESSAGE;

@@ -1,4 +1,12 @@
-import { DAYFRAME_THEME, goalCountingEntries, paletteColorFor, withGoalExclusions, type ReportSummary } from "@dayframe/shared";
+import {
+  DAYFRAME_THEME,
+  categoryCountsTowardGoal,
+  goalCountingEntries,
+  goalExcludedCategoryIds,
+  paletteColorFor,
+  withGoalExclusions,
+  type ReportSummary,
+} from "@dayframe/shared";
 import type { MobileBootstrap, MobileTimeEntry } from "./api";
 import type { MobileTheme } from "./mobileTheme";
 import type { ReportRange, ReportWindow } from "./reportsRanges";
@@ -131,6 +139,20 @@ export function buildReportsPresentation(input: {
   }));
   const entries = reportEntryUnion(data);
   const active = summary.active;
+  // Goal time per bucket (UIA-043) from the server's covered goal seconds, when it sends them:
+  // the server's running-timer share is swapped for the local projection, as for the totals.
+  const goalExcluded = goalExcludedCategoryIds(
+    withGoalExclusions(data.categories, data.goalExcludedCategoryIds),
+  );
+  const goalSeconds = summary.buckets.every((b) => typeof b.goalSeconds === "number")
+    ? summary.buckets.map((b) => b.goalSeconds as number)
+    : null;
+  if (active && goalSeconds && categoryCountsTowardGoal(active.categoryId, goalExcluded)) {
+    for (const contribution of active.buckets) {
+      const index = summary.buckets.findIndex((b) => b.key === contribution.key);
+      if (index >= 0) goalSeconds[index] -= contribution.seconds;
+    }
+  }
   if (active) {
     const key = active.categoryId || "uncategorized";
     for (const contribution of active.buckets) {
@@ -171,12 +193,14 @@ export function buildReportsPresentation(input: {
       color: entry.categoryColor ?? null,
       seconds: 0,
     });
+    const countsTowardGoal = categoryCountsTowardGoal(entry.categoryId, goalExcluded);
     range.buckets.forEach((window, index) => {
       const seconds = entryOverlapMs(entry, window, nowMs) / 1000;
       buckets[index].byCategory.set(
         key,
         (buckets[index].byCategory.get(key) ?? 0) + seconds,
       );
+      if (goalSeconds && countsTowardGoal) goalSeconds[index] += seconds;
     });
   }
   // Sum the same unrounded pieces for every view; round only duration labels.
@@ -254,6 +278,8 @@ export function buildReportsPresentation(input: {
     ),
     buckets: buckets.map((b, index) => ({
       ...range.buckets[index],
+      /** Covered goal time from the server (all activities that count); undefined from older servers. */
+      goalSeconds: goalSeconds ? Math.max(0, goalSeconds[index] ?? 0) : undefined,
       seconds: [...b.byCategory].reduce(
         (sum, [key, seconds]) =>
           sum + (reportSelectionIncludes(selection, key) ? seconds : 0),

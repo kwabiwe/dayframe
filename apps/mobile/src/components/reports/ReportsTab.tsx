@@ -566,10 +566,15 @@ export function ReportsTab({
   const goalDays =
     choice === "week" && selection.mode === "all" && report
       ? (() => {
-          // Goal time is covered time in activities that count (UIA-043), never the logged sum.
-          const goalSeconds = reportGoalSeconds(data, range.buckets, reportNow);
+          // Goal time is covered time in activities that count (UIA-043), never the logged sum: the
+          // same fresh report as the totals, or, from an older server without it, the phone's entries.
+          const fromServer = report.buckets.every((bucket) => typeof bucket.goalSeconds === "number");
+          const local = fromServer ? null : reportGoalSeconds(data, range.buckets, reportNow);
           return weekGoalDays(
-            days.map((day, index) => ({ ...day, goalSeconds: goalSeconds[index] ?? 0 })),
+            days.map((day, index) => ({
+              ...day,
+              goalSeconds: (fromServer ? report.buckets[index]?.goalSeconds : local?.[index]) ?? 0,
+            })),
             nowMs,
             dailyGoalMinutes,
           );

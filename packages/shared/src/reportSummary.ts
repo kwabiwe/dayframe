@@ -58,7 +58,14 @@ export const ReportSummarySchema = z.object({
     }),
   ),
   buckets: z.array(
-    z.object({ key: z.string(), seconds, byCategory: z.array(allocation) }),
+    z.object({
+      key: z.string(),
+      seconds,
+      byCategory: z.array(allocation),
+      // Covered time (overlaps once) in activities that count toward the goal (UIA-043). Older
+      // servers leave it out; the phone then works it out from the entries it holds.
+      goalSeconds: seconds.optional(),
+    }),
   ),
   // Only the current timer's bounded contribution, never historical entry payloads.
   active: z

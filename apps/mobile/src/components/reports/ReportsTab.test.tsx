@@ -586,6 +586,16 @@ describe("Blocks Reports owner (parity step 10a)", () => {
     const overlapping = await week({ user: { id: "u", dailyGoalMinutes: 60 }, historyEntries: [half("x"), half("y")] } as never);
     expect(overlapping.root.findByType("ReportGoalStreak" as never).props.days).toEqual([false, false, false]);
     act(() => overlapping.unmount());
+    // A server that sends goal time wins over the phone's (possibly stale) entries: Monday's fresh
+    // report has no goal time even though the cached bootstrap still holds an hour.
+    mocks.fetch.mockImplementation(async (input: ReportSummaryRequest) => {
+      const fresh = result(input);
+      return { ...fresh, buckets: fresh.buckets.map((bucket, index) => ({ ...bucket, goalSeconds: index === 1 ? 3600 : 0 })) };
+    });
+    const fromServer = await week({ user: { id: "u", dailyGoalMinutes: 60 }, historyEntries: [block("one", 7, "a")] } as never);
+    expect(fromServer.root.findByType("ReportGoalStreak" as never).props.days).toEqual([false, true, false]);
+    act(() => fromServer.unmount());
+    mocks.fetch.mockImplementation(async (input: ReportSummaryRequest) => result(input));
     const filtered = await week({ user: { id: "u", dailyGoalMinutes: 60 }, historyEntries: [block("one", 7, "a")] } as never);
     expect(filtered.root.findByType("ReportGoalStreak" as never).props.goalLabel).toBe("1h");
     await act(async () =>

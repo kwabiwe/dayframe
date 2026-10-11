@@ -345,6 +345,45 @@ describe("goal streak time (UIA-043)", () => {
   const withEntries = (entries: MobileTimeEntry[], extra: Partial<MobileBootstrap> = {}) =>
     ({ ...data(), entries, ...extra }) as MobileBootstrap;
 
+  const weekSummary = (goalSeconds: number[] | null, active: ReportSummary["active"] = null): ReportSummary => ({
+    capturedNow: new Date(now).toISOString(),
+    range: week.request,
+    totalSeconds: 8 * 3600,
+    categories: [{ key: "work", categoryId: "work", name: "Work", color: "blue", seconds: 8 * 3600 }],
+    buckets: week.buckets.map((b, index) => ({
+      key: b.key,
+      seconds: index === 0 ? 8 * 3600 : 0,
+      byCategory: index === 0 ? [{ key: "work", seconds: 8 * 3600 }] : [],
+      ...(goalSeconds ? { goalSeconds: goalSeconds[index] ?? 0 } : {}),
+    })),
+    active,
+  });
+  const present = (summary: ReportSummary, bootstrap: MobileBootstrap = data()) =>
+    buildReportsPresentation({ data: bootstrap, summary, range: week, nowMs: now, selection: { mode: "all" }, themeMode: "dark" });
+
+  it("takes covered goal time from the fresh report, not the logged sum", () => {
+    // Two overlapping 4h Work blocks: 8h logged, 4h covered goal time.
+    const presented = present(weekSummary([4 * 3600]));
+    expect(presented.buckets[0].seconds).toBe(8 * 3600);
+    expect(presented.buckets[0].goalSeconds).toBe(4 * 3600);
+    // An older server without goal time: the streak falls back to the phone's entries.
+    expect(present(weekSummary(null)).buckets[0].goalSeconds).toBeUndefined();
+  });
+
+  it("swaps the server's running-timer share for the local projection in goal time", () => {
+    const today = week.buckets.findIndex((b) => +b.start <= now && now < +b.end);
+    const startedAt = new Date(now - 2 * 3_600_000).toISOString();
+    const captured = 3600;
+    const goal = week.buckets.map((_, index) => (index === today ? captured : 0));
+    const active = { id: "timer", categoryId: "work", startedAt, buckets: [{ key: week.buckets[today].key, seconds: captured }] };
+    const running = entry({ id: "timer", categoryId: "work", startedAt, stoppedAt: null });
+    // The server read an hour of the timer; locally it has run two.
+    expect(present(weekSummary(goal, active), data(running)).buckets[today].goalSeconds).toBe(2 * 3600);
+    // A timer in an activity that doesn't count never adds goal time.
+    const sleeping = { ...data(running), goalExcludedCategoryIds: ["work"] } as MobileBootstrap;
+    expect(present(weekSummary(week.buckets.map(() => 0), active), sleeping).buckets[today].goalSeconds).toBe(0);
+  });
+
   it("counts overlapping goal time once, as Today and web Reports do", () => {
     const work = (id: string) => entry({ id, categoryId: "work", startedAt: at(8), stoppedAt: at(12) });
     const seconds = reportGoalSeconds(withEntries([work("one"), work("two")]), week.buckets, now);
