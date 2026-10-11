@@ -108,3 +108,60 @@ export function stackHeightCss(height: number, keptCount: number, referenceHeigh
   const share = height / Math.max(1, referenceHeight - gaps);
   return `calc((100% - ${gaps}px) * ${Number(share.toFixed(5))})`;
 }
+
+export type ReportBlocksBlock = { id: string; name: string; color: string | null; seconds: number; height: string };
+export type ReportBlocksDay = {
+  key: string;
+  label: string;
+  /** The day of the month, worked out where the report's days were (the server). */
+  dateNumber: number;
+  isToday: boolean;
+  coveredSeconds: number;
+  accessibleName: string;
+  blocks: ReportBlocksBlock[];
+};
+export type ReportBlocksModel = { layout: "week" | "month"; leadingBlanks: number; days: ReportBlocksDay[] };
+
+const WEEK_COLUMN = { height: 230, minimum: 6, gap: 3 };
+const MONTH_STACK = { height: 52, minimum: 3, gap: 2 };
+
+/**
+ * Everything the blocks card draws, computed with the report so the browser never re-derives a
+ * date (its time zone can differ from the report's): labels, day numbers, leading blanks, today,
+ * each block's height as a share of its stack and each day's accessible name.
+ */
+export function reportBlocksModel(
+  report: ReportResult,
+  formatDuration: (seconds: number) => string
+): ReportBlocksModel | null {
+  const layout = reportBlocksLayout(report);
+  if (!layout) return null;
+  const lookup = new Map(report.byCategory.map((row) => [row.id, row]));
+  const busiest = busiestDaySeconds(report.dailyByActivity);
+  const sizing = layout === "week" ? WEEK_COLUMN : MONTH_STACK;
+  const days = report.dailyByActivity.map((day, index) => {
+    const covered = report.dailySeries[index]?.coveredSeconds ?? 0;
+    const heights = reportStackHeights(day.activities.map((activity) => activity.seconds), busiest, sizing.height, sizing.minimum, sizing.gap);
+    const kept = heights.filter((height) => height > 0).length;
+    const named = day.activities.map((activity) => {
+      const row = lookup.get(activity.id);
+      return { ...activity, name: row?.name ?? "No activity", color: activity.id === "uncategorized" ? null : row?.color ?? null };
+    });
+    const parts = named.map((activity) => `${activity.name} ${formatDuration(activity.seconds)}`);
+    return {
+      key: day.key,
+      label: day.label,
+      dateNumber: new Date(day.start).getDate(),
+      isToday: isTodayKey(day, report.capturedNow),
+      coveredSeconds: covered,
+      accessibleName: `${day.label}: ${formatDuration(covered)} framed${parts.length ? `, ${parts.join(", ")}` : ""}`,
+      blocks: named.flatMap((activity, activityIndex) =>
+        heights[activityIndex]
+          ? [{ id: activity.id, name: activity.name, color: activity.color, seconds: activity.seconds, height: stackHeightCss(heights[activityIndex], kept, sizing.height, sizing.gap) }]
+          : []
+      )
+    };
+  });
+  const first = report.dailyByActivity[0];
+  return { layout, leadingBlanks: first ? monthGridLeadingBlanks(first.start) : 0, days };
+}

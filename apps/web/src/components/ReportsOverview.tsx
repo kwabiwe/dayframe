@@ -1,34 +1,35 @@
 import type { CSSProperties } from "react";
 import Link from "next/link";
-import { ArrowRight, ChevronDown, Tags } from "lucide-react";
-import { ReportDonutSegment } from "@/components/ReportDonutSegment";
-import { categoryDisplay } from "@/lib/display";
+import { ChevronDown, Tags } from "lucide-react";
 import { formatDuration, formatSourceLabel } from "@/lib/format";
 import {
-  buildReportCategoryAllocation,
   buildReportTrendSeries,
   percentageOf
 } from "@/lib/report-calculations";
 import { reportsHref } from "@/lib/report-filters";
 import type { ReportBreakdownRow, ReportResult } from "@/lib/report-service";
 
-const donutRadius = 44;
-const donutCircumference = 2 * Math.PI * donutRadius;
 
 /**
- * The analysis below the Blocks top (step 15a): the daily trend for ranges the blocks card does not
- * draw, time by activity, tags and the secondary breakdowns. The summary numbers moved to the
- * hero tiles.
+ * The analysis below the Blocks top: the daily trend for ranges without a blocks card (15a), the
+ * exact activity table (the donut and its rows are "Where it went", 15b-2), tags and the secondary
+ * breakdowns.
  */
 export function ReportsOverview({ report, showTrend = true }: { report: ReportResult; showTrend?: boolean }) {
-  const allocation = buildReportCategoryAllocation(report.byCategory, report.totalSeconds);
-
   return (
     <>
       {showTrend ? <DailyTrend report={report} /> : null}
 
       <div className="report-analysis-grid">
-        <CategoryAllocation report={report} allocation={allocation} />
+        <section className="fill-group-surface report-allocation" aria-labelledby="report-allocation-title">
+          <header className="report-section-header">
+            <div>
+              <h2 id="report-allocation-title">Time by activity</h2>
+              <p>Activity totals divide Total logged. Overlapping entries count in each activity.</p>
+            </div>
+          </header>
+          <AccessibleBreakdownTable caption="Exact time by activity" rows={report.byCategory} totalSeconds={report.totalSeconds} />
+        </section>
         <TagBreakdown report={report} />
       </div>
 
@@ -107,88 +108,6 @@ function DailyTrend({ report }: { report: ReportResult }) {
           </table>
         </div>
       </details>
-    </section>
-  );
-}
-
-function CategoryAllocation({
-  allocation,
-  report
-}: {
-  allocation: ReturnType<typeof buildReportCategoryAllocation>;
-  report: ReportResult;
-}) {
-  const slices = allocation.visibleCategories.map((category, index, categories) => {
-    const consumedSeconds = categories
-      .slice(0, index)
-      .reduce((sum, previousCategory) => sum + previousCategory.seconds, 0);
-    const fraction = allocation.totalSeconds > 0 ? category.seconds / allocation.totalSeconds : 0;
-    return {
-      ...category,
-      dash: fraction * donutCircumference,
-      offset: -(consumedSeconds / Math.max(1, allocation.totalSeconds)) * donutCircumference,
-      color: categoryDisplay(category.name, category.color).color,
-      href: reportsHref(report.appliedFilters, { categories: category.categoryIds, page: 1 })
-    };
-  });
-
-  return (
-    <section className="fill-group-surface report-allocation" aria-labelledby="report-allocation-title">
-      <header className="report-section-header">
-        <div>
-          <h2 id="report-allocation-title">Time by activity</h2>
-          <p>Activity totals divide Total logged. Overlapping entries count in each activity.</p>
-        </div>
-      </header>
-
-      {report.totalSeconds > 0 ? (
-        <div className="report-allocation-layout">
-          <figure className="report-donut-figure">
-            <svg viewBox="0 0 120 120" className="report-donut" role="img" aria-labelledby="report-donut-title report-donut-desc">
-              <title id="report-donut-title">Time by activity</title>
-              <desc id="report-donut-desc">{buildAllocationSummary(report.byCategory, report.totalSeconds)}</desc>
-              <circle className="report-donut-track" cx="60" cy="60" r={donutRadius} />
-              {slices.map((slice) => (
-                <ReportDonutSegment
-                  key={slice.id}
-                  ariaLabel={`Filter by ${slice.name}, ${formatDuration(slice.seconds)}`}
-                  className={`report-donut-segment${slice.isUncategorized ? " is-uncategorized" : ""}`}
-                  dash={slice.dash}
-                  href={slice.href}
-                  offset={slice.offset}
-                  radius={donutRadius}
-                  stroke={slice.color}
-                  totalLength={donutCircumference}
-                />
-              ))}
-            </svg>
-            <figcaption>
-              <span>Total logged</span>
-              <strong>{formatDuration(report.totalSeconds)}</strong>
-            </figcaption>
-          </figure>
-
-          <div className="report-allocation-legend" aria-label="Time by activity actions">
-            {slices.map((slice) => (
-              <Link key={slice.id} href={slice.href} className="report-allocation-row">
-                <span
-                  className={`report-category-marker${slice.isUncategorized ? " is-uncategorized" : ""}`}
-                  style={{ "--category-color": slice.color } as CSSProperties}
-                  aria-hidden="true"
-                />
-                <span>{slice.name}</span>
-                <strong>{formatDuration(slice.seconds)}</strong>
-                <small>{slice.percentage}%</small>
-                <ArrowRight aria-hidden="true" size={15} />
-              </Link>
-            ))}
-          </div>
-        </div>
-      ) : (
-        <EmptyAnalysis title="No activity time" body="Change the filters or track time to build an allocation." />
-      )}
-
-      <AccessibleBreakdownTable caption="Exact time by activity" rows={report.byCategory} totalSeconds={report.totalSeconds} />
     </section>
   );
 }
@@ -330,9 +249,4 @@ function buildTrendSummary(points: Array<{ label: string; seconds: number }>) {
   return points.length === 0
     ? "No tracked time in this period."
     : points.map((point) => `${point.label} ${formatDuration(point.seconds)}`).join(", ");
-}
-
-function buildAllocationSummary(rows: ReportBreakdownRow[], totalSeconds: number) {
-  if (totalSeconds <= 0) return "No tracked activity time.";
-  return `Time by activity totals ${formatDuration(totalSeconds)}. ${rows.map((row) => `${row.name} ${formatDuration(row.seconds)}, ${percentageOf(row.seconds, totalSeconds)}%`).join("; ")}.`;
 }

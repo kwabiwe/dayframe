@@ -311,8 +311,9 @@ Block pull-to-refresh:
 ## Web Reports top (Blocks parity step 15a)
 
 - Trigger: the Reports page loading a range (a server render).
-- Owner: CSS only. Each day column's activity blocks grow from the bottom (`scaleY` 0→1 with opacity) on the `land` spring as a `linear()` easing, once, as the page renders; month-grid cells and tiles appear in place.
-- Accessibility: Reduce Motion removes the growth. Each day column is one list item named with its date, framed total and per-activity times; month cells are images named with their date, framed total and per-activity times; the stacks are decorative.
+- Owner: CSS only. Each day column's activity blocks grow from the bottom (`scaleY` 0→1, transform only so the highlight's fading is never overridden) on the `land` spring as a `linear()` easing, once, as the page renders; month-grid cells and tiles appear in place.
+- Cross-highlight (15b-2): hovering or focusing an activity's donut slice or "Where it went" row fades every other block to 22 % (140 ms), thickens that slice and puts its time and name in the donut's centre (a polite live region); leaving or blurring restores (the fade runs both ways). Slices and rows stay links that filter by the activity; a slice holding keyboard focus also gets a neutral focus arc just outside it, independent of the highlight.
+- Accessibility: Reduce Motion removes the growth and the highlight's transitions (the fading still happens, at once). Each day column is one list item named with its date, framed total and per-activity times; month cells are images named with their date, framed total and per-activity times; the stacks are decorative.
 
 ## Web Library › Activities (Blocks parity step 14a-1)
 

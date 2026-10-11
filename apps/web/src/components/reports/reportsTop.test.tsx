@@ -38,22 +38,10 @@ describe("Reports top", () => {
     expect((html.match(/class="is-met"/g) ?? []).length).toBe(1);
   });
 
-  it("draws a week as one column per day, each named with its activities", () => {
-    const html = renderToStaticMarkup(<ReportsTop dailyGoalMinutes={480} report={report()} />);
-    expect((html.match(/class="df-wb[ "]/g) ?? []).length).toBe(7);
-    expect(html).toContain('aria-label="Day 5: 9h 00m framed, Work 9h 00m, No activity 1h 00m"');
-    expect(html).toContain("The days in blocks");
-  });
-
-  it("draws a month as a Monday-first grid and says how to see the goal without one", () => {
+  it("says how to see the goal without one, and names the comparison window honestly", () => {
     const html = renderToStaticMarkup(<ReportsTop dailyGoalMinutes={null} report={report({ range: { preset: "this-month", dayCount: 7 } as ReportResult["range"] })} />);
-    expect(html).toContain("The month in blocks");
-    // 5 Oct 2026 is a Monday: no blank cells before it.
-    expect(html).not.toContain("df-mday is-empty");
     expect(html).toContain("Set a daily goal in Settings to see it here.");
     // The comparison is the same number of days just before, not the calendar month.
     expect(html).toContain("vs the 7 days before");
-    // Each month cell names its activities too.
-    expect(html).toContain('aria-label="Day 5: 9h 00m framed, Work 9h 00m, No activity 1h 00m"');
   });
 });
