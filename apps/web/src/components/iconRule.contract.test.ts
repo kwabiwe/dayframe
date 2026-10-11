@@ -1,5 +1,6 @@
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join, relative } from "node:path";
+import ts from "typescript";
 import { describe, expect, it } from "vitest";
 
 // UIA-212 (owner option c): anything that stands for a Dayframe thing or action draws its glyph
@@ -23,20 +24,26 @@ function files(directory: string): string[] {
   });
 }
 
-/** Names imported from lucide-react (any quotes, aliases kept by their lucide name); a namespace import is an offender itself. */
+/**
+ * Names imported from lucide-react, read from the syntax tree (comments and quotes don't matter),
+ * normalised to lucide's base name ("PlayIcon" and "LucidePlay" are Play). A namespace import is an
+ * offender itself, since it can reach any icon.
+ */
 export function lucideImports(source: string) {
+  const file = ts.createSourceFile("file.tsx", source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
   const names: string[] = [];
-  for (const match of source.matchAll(/import\s+(type\s+)?([^;]*?)\s+from\s+["']lucide-react["']/g)) {
-    const clause = match[2].trim();
-    if (clause.startsWith("*")) {
+  for (const statement of file.statements) {
+    if (!ts.isImportDeclaration(statement) || !ts.isStringLiteral(statement.moduleSpecifier)) continue;
+    if (statement.moduleSpecifier.text !== "lucide-react") continue;
+    const bindings = statement.importClause?.namedBindings;
+    if (!bindings) continue;
+    if (ts.isNamespaceImport(bindings)) {
       names.push("* (namespace import)");
       continue;
     }
-    const braces = clause.match(/\{([^}]*)\}/);
-    if (!braces) continue;
-    for (const part of braces[1].split(",")) {
-      const name = part.trim().replace(/^type\s+/, "").split(/\s+as\s+/)[0];
-      if (name) names.push(name);
+    for (const element of bindings.elements) {
+      const imported = (element.propertyName ?? element.name).text;
+      names.push(imported.replace(/^Lucide(?=[A-Z])/, "").replace(/Icon$/, "") || imported);
     }
   }
   return names;
@@ -63,5 +70,9 @@ describe("icon rule (UIA-212)", () => {
     expect(offendersIn('import * as Icons from "lucide-react";', false)).toEqual(["* (namespace import)"]);
     expect(offendersIn('import { Moon, Sun, Monitor } from "lucide-react";', true)).toEqual([]);
     expect(offendersIn('import { X, ChevronDown, Search, Check, Plus } from "lucide-react";', false)).toEqual([]);
+    expect(offendersIn('import { /* recording */ Play } from "lucide-react";', false)).toEqual(["Play"]);
+    expect(offendersIn('import /* icons */ * as Icons from "lucide-react";', false)).toEqual(["* (namespace import)"]);
+    expect(offendersIn('import { PlayIcon, LucidePlay, MapPinIcon } from "lucide-react";', false)).toEqual(["Play", "Play", "MapPin"]);
+    expect(offendersIn('import { XIcon, LucideChevronDown } from "lucide-react";', false)).toEqual([]);
   });
 });
