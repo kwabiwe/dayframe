@@ -21,6 +21,7 @@ import {
   type PlaceRole,
   type placeRoleRequest
 } from "@dayframe/shared";
+import { BlocksNavHeader } from "@/components/BlocksNavHeader";
 import { DayframeIcon } from "@/components/icons/DayframeIcon";
 import { PlaceRoleSheet, type PlaceRoleSheetMode } from "@/components/places/PlaceRoleSheet";
 import { SettingsBlockGroup, SettingsPillButton } from "@/components/settings/SettingsBlocks";
@@ -353,19 +354,7 @@ export default function PlacesScreen() {
 
   return (
     <SafeAreaView style={styles.safeArea}>
-      <View style={styles.settingsFloatingHeader}>
-        <View style={styles.settingsHeader}>
-          <Pressable
-            accessibilityLabel="Back"
-            accessibilityRole="button"
-            style={pressable(styles.iconButton, styles.buttonPressed)}
-            onPress={() => router.back()}
-          >
-            <BackGlyph color={theme.accent} />
-          </Pressable>
-          <Text style={styles.settingsTitle} numberOfLines={1}>Places</Text>
-        </View>
-      </View>
+      <BlocksNavHeader backLabel="Settings" onBack={() => router.back()} title="Saved places" />
       <ScrollView
         style={styles.settingsScrollView}
         contentContainerStyle={styles.settingsScrollContent}
@@ -876,14 +865,6 @@ function formatShortDateTime(value: string) {
     month: "short",
     day: "numeric"
   });
-}
-
-function BackGlyph({ color }: { color: string }) {
-  return (
-    <Svg width={20} height={20} viewBox="0 0 24 24">
-      <Path d="M15 5 8 12l7 7" fill="none" stroke={color} strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.3} />
-    </Svg>
-  );
 }
 
 function CopyGlyph({ color }: { color: string }) {

@@ -299,7 +299,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
   // A rejected change badges the avatar, which then opens Settings › Sync help.
   const syncAttentionCount = useSyncAttentionCount();
   const openAccount = useCallback((target: "settings" | "sync") => {
-    if (target === "sync") router.push({ pathname: "/settings", params: { section: "sync" } });
+    if (target === "sync") router.push({ pathname: "/settings", params: { from: "today", section: "sync" } });
     else router.push("/settings");
   }, []);
   const [authView, setAuthView] = useState<AuthView>("login");

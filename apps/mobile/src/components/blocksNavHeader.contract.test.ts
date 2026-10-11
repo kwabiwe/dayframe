@@ -1,0 +1,36 @@
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+import { describe, expect, it } from "vitest";
+
+const read = (path: string) => readFileSync(fileURLToPath(new URL(path, import.meta.url)), "utf8");
+const header = read("./BlocksNavHeader.tsx");
+const pushedPages = {
+  places: read("../../app/places.tsx"),
+  review: read("../../app/review.tsx"),
+  evidence: read("../../app/review/[id].tsx"),
+  settings: read("../../app/settings.tsx")
+};
+
+describe("Blocks navigation bar (UIA-001)", () => {
+  it("is a text back naming the previous screen with a centred title", () => {
+    expect(header).toContain("accessibilityLabel={`Back to ${backLabel}`}");
+    expect(header).toContain('accessibilityRole="header"');
+    expect(header).toContain("styles.blocksNavTrailing");
+  });
+
+  it("is the only back control on every pushed page", () => {
+    for (const [name, source] of Object.entries(pushedPages)) {
+      expect(source, name).toContain("<BlocksNavHeader");
+      expect(source, name).not.toContain("MobileBackButton");
+      expect(source, name).not.toContain("styles.settingsTitle");
+      expect(source, name).not.toContain('accessibilityLabel="Back"');
+    }
+    expect(pushedPages.places).toContain('title="Saved places"');
+  });
+
+  it("tells Settings and Location evidence where they were opened from", () => {
+    expect(pushedPages.review).toContain('params: { from: "review", section: "sync" }');
+    expect(read("./DayframeDashboard.tsx")).toContain('params: { from: "today", section: "sync" }');
+    expect(read("../lib/todayReviewNavigation.ts")).toContain('params: { from: "today", id: activity.source.reviewItemId }');
+  });
+});
