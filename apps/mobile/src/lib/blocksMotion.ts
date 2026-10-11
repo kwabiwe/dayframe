@@ -27,6 +27,69 @@ export const BLOCKS_SPRING = {
   roll: { stiffness: 260, damping: 26, mass: 1 },
 } as const;
 
+/**
+ * The Undo toast (prototype DF.toast): it pops in from 16 points below at 96 % with the bouncy
+ * `pop` spring and leaves in 160 ms (down 10 points, 98 %). Reduce Motion: opacity only, 90 ms in
+ * and 70 ms out. Reanimated layout animations, so the toast's own mount and unmount own the motion.
+ */
+export const TOAST_MOTION = {
+  enterFrom: { translateY: 16, scale: 0.96 },
+  enterOpacityMs: 120,
+  exitMs: 160,
+  exitTo: { translateY: 10, scale: 0.98 },
+  reducedEnterMs: 90,
+  reducedExitMs: 70,
+} as const;
+
+export function blocksToastEntering(reduceMotion: boolean) {
+  if (reduceMotion) {
+    return () => {
+      "worklet";
+      return {
+        initialValues: { opacity: 0 },
+        animations: { opacity: withTiming(1, { duration: TOAST_MOTION.reducedEnterMs, reduceMotion: ReduceMotion.Never }) },
+      };
+    };
+  }
+  return () => {
+    "worklet";
+    const spring = { ...BLOCKS_SPRING.pop, reduceMotion: ReduceMotion.Never };
+    return {
+      initialValues: {
+        opacity: 0,
+        transform: [{ translateY: TOAST_MOTION.enterFrom.translateY }, { scale: TOAST_MOTION.enterFrom.scale }],
+      },
+      animations: {
+        opacity: withTiming(1, { duration: TOAST_MOTION.enterOpacityMs, reduceMotion: ReduceMotion.Never }),
+        transform: [{ translateY: withSpring(0, spring) }, { scale: withSpring(1, spring) }],
+      },
+    };
+  };
+}
+
+export function blocksToastExiting(reduceMotion: boolean) {
+  if (reduceMotion) {
+    return () => {
+      "worklet";
+      return {
+        initialValues: { opacity: 1 },
+        animations: { opacity: withTiming(0, { duration: TOAST_MOTION.reducedExitMs, reduceMotion: ReduceMotion.Never }) },
+      };
+    };
+  }
+  return () => {
+    "worklet";
+    const timing = { duration: TOAST_MOTION.exitMs, easing: Easing.in(Easing.quad), reduceMotion: ReduceMotion.Never };
+    return {
+      initialValues: { opacity: 1, transform: [{ translateY: 0 }, { scale: 1 }] },
+      animations: {
+        opacity: withTiming(0, timing),
+        transform: [{ translateY: withTiming(TOAST_MOTION.exitTo.translateY, timing) }, { scale: withTiming(TOAST_MOTION.exitTo.scale, timing) }],
+      },
+    };
+  };
+}
+
 /** The live block's breathing ring: one opacity cycle of about 2.4 s. Nothing else loops. */
 export const BREATHING_RING = { cycleMs: 2400, minOpacity: 0.14, maxOpacity: 0.5, reducedOpacity: 0.32 } as const;
 

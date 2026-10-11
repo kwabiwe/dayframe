@@ -10861,6 +10861,37 @@ dialog.ui-dialog.df-palette {
   animation: df-toast-out 160ms ease-in both;
 }
 
+/* Reduce Motion: the toast only fades (prototype DF.animate: opacity, 140 ms in, 80 ms out). */
+@media (prefers-reduced-motion: reduce) {
+  .df-toast {
+    animation: df-toast-fade-in 140ms ease-out both;
+  }
+
+  .df-toast.is-exiting {
+    animation: df-toast-fade-out 80ms ease-in both;
+  }
+}
+
+@keyframes df-toast-fade-in {
+  from {
+    opacity: 0;
+  }
+
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes df-toast-fade-out {
+  from {
+    opacity: 1;
+  }
+
+  to {
+    opacity: 0;
+  }
+}
+
 .df-toast-swatch {
   width: 12px;
   height: 12px;

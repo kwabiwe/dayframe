@@ -3,7 +3,7 @@ import { AccessibilityInfo, Pressable, StyleSheet, Text, View, type StyleProp, t
 import Reanimated from "react-native-reanimated";
 import { DAYFRAME_BLOCKS } from "@dayframe/shared";
 import { colorWithAlpha } from "../today/todayBlocksLayout";
-import { localPresenceEntering, localPresenceExiting } from "../../lib/motion";
+import { blocksToastEntering, blocksToastExiting } from "../../lib/blocksMotion";
 import type { MobileTheme } from "../../lib/mobileTheme";
 import { mobileTextProps } from "../../lib/mobileTypography";
 
@@ -49,8 +49,8 @@ export function BlocksToast({
   return (
     <Reanimated.View
       accessibilityLiveRegion="polite"
-      entering={localPresenceEntering(reduceMotion, "rise")}
-      exiting={localPresenceExiting(reduceMotion)}
+      entering={blocksToastEntering(reduceMotion)}
+      exiting={blocksToastExiting(reduceMotion)}
       style={[toastStyles.toast, { backgroundColor: theme.textPrimary, shadowColor: theme.shadow }, style]}
       testID={testID}
     >
