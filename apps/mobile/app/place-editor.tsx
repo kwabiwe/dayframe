@@ -46,7 +46,7 @@ import {
   SettingsPillButton,
   SettingsSwitch
 } from "@/components/settings/SettingsBlocks";
-import { refreshGeofencesForPlaces } from "@/lib/geofence";
+import { refreshGeofencesForPlaces, requestForegroundLocationPermission } from "@/lib/geofence";
 import { mobileAccountKey, mobileAccountOwnersEqual, readActiveMobileAccount, type MobileAccountOwner } from "@/lib/mobileAccount";
 import { applyPlaceRoleLocally, notePlaceDeleted } from "@/lib/placesPage";
 import {
@@ -292,7 +292,7 @@ export default function PlaceEditorScreen() {
     try {
       let permission = await Location.getForegroundPermissionsAsync();
       if (!permission.granted && permission.canAskAgain) {
-        permission = await Location.requestForegroundPermissionsAsync();
+        permission = await requestForegroundLocationPermission();
       }
       const guidance = foregroundLocationPermissionGuidance(permission);
       if (guidance) {

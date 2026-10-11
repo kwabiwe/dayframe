@@ -317,7 +317,10 @@ export async function locationAccessNeedsIosSettings() {
     return false;
   }
   const background = await Location.getBackgroundPermissionsAsync();
-  if (background.granted) return false;
+  if (background.granted) {
+    await rememberAlwaysGranted();
+    return false;
+  }
   if (background.status === "denied" && !background.canAskAgain) return true;
   // iOS shows the Always upgrade once, whatever the answer (and a later downgrade to While Using
   // in iOS Settings doesn't make it ask again); after a restart Expo reports it askable, so the
@@ -326,6 +329,26 @@ export async function locationAccessNeedsIosSettings() {
 }
 
 const ALWAYS_LOCATION_REQUESTED_KEY = "dayframe.location.alwaysRequest.v2";
+
+/**
+ * Always is allowed, so iOS's one-time upgrade prompt has been used (perhaps by an older build that
+ * kept no record): a later downgrade to While Using must route to iOS Settings.
+ */
+async function rememberAlwaysGranted() {
+  await AsyncStorage.setItem(ALWAYS_LOCATION_REQUESTED_KEY, "asked").catch(() => undefined);
+}
+
+/**
+ * Every While Using request goes through here. When the current grant has lapsed (an Allow Once
+ * that expired, or nothing yet), an Always request made under it failed without iOS's prompt, so
+ * that record is cleared before the new grant; otherwise a later upgrade would wrongly go to
+ * Settings.
+ */
+export async function requestForegroundLocationPermission() {
+  const current = await Location.getForegroundPermissionsAsync().catch(() => null);
+  if (!current?.granted) await AsyncStorage.removeItem(ALWAYS_LOCATION_REQUESTED_KEY).catch(() => undefined);
+  return Location.requestForegroundPermissionsAsync();
+}
 
 /**
  * Asks iOS for Always location (its one-time upgrade prompt) and remembers that it was asked, so
@@ -338,7 +361,7 @@ export async function requestAlwaysLocationPermission() {
 }
 
 export async function requestLocationAccess() {
-  const foreground = await Location.requestForegroundPermissionsAsync();
+  const foreground = await requestForegroundLocationPermission();
   if (!foreground.granted) {
     await updateLocationDiagnostics({
       foregroundPermission: permissionLabel(foreground.status),
@@ -991,6 +1014,7 @@ export async function getLocationVisitDiagnostics(): Promise<LocationVisitDiagno
     getLocationLearningEnabled().catch(() => false),
     Location.hasStartedLocationUpdatesAsync(DAYFRAME_LOCATION_LEARNING_TASK).catch(() => false)
   ]);
+  if (background?.granted) await rememberAlwaysGranted();
   const foregroundPermission = permissionLabel(foreground?.status);
   const backgroundPermission = permissionLabel(background?.status);
   const capture = await captured;

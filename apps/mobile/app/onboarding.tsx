@@ -27,7 +27,7 @@ import {
 } from "@dayframe/shared";
 import { ActivityIcon, DayframeIcon } from "@/components/icons/DayframeIcon";
 import { AuthRequiredError, ensureAutomaticLoggingCategories, fetchBootstrap, updateCategory, type MobileBootstrap } from "@/lib/api";
-import { getLocationVisitDiagnostics, locationAccessNeedsIosSettings, requestAlwaysLocationPermission, setLocationLearningEnabled } from "@/lib/geofence";
+import { getLocationVisitDiagnostics, locationAccessNeedsIosSettings, requestAlwaysLocationPermission, requestForegroundLocationPermission, setLocationLearningEnabled } from "@/lib/geofence";
 import { playHaptic } from "@/lib/haptics";
 import {
   getHealthImportPreferences,
@@ -178,12 +178,17 @@ export default function OnboardingScreen() {
     playHaptic("tick");
   }
 
+  // One step at a time. A ref, not `busy`: callbacks kept by effects (the return from iOS
+  // Settings or from the permission sheet) would otherwise read a stale `busy` and run twice.
+  const running = useRef(false);
   async function run(work: (epoch: number) => Promise<void>) {
-    if (busy) return;
+    if (running.current) return;
+    running.current = true;
     setBusy(true);
     try {
       await work(sessionEpoch.current);
     } finally {
+      running.current = false;
       if (mounted.current) setBusy(false);
     }
   }
@@ -191,7 +196,7 @@ export default function OnboardingScreen() {
   // Location, first ask: While Using. iOS shows its own prompt; ours explains first.
   function allowLocation() {
     void run(async (epoch) => {
-      const foreground = await Location.requestForegroundPermissionsAsync().catch(() => null);
+      const foreground = await requestForegroundLocationPermission().catch(() => null);
       if (!(await stillHere(epoch))) return;
       if (!foreground?.granted) {
         setAnswers((current) => ({ ...current, location: "off" }));
@@ -217,8 +222,11 @@ export default function OnboardingScreen() {
     if (!awaitingAlways) return;
     let current = true;
     const check = async () => {
+      // While a step is running (the Always sheet itself makes the app inactive, then active) that
+      // step finishes the answer; this check is for coming back from iOS Settings.
+      if (running.current) return;
       const background = await Location.getBackgroundPermissionsAsync().catch(() => null);
-      if (!current) return;
+      if (!current || running.current) return;
       if (background?.granted) {
         turnOnSuggestions();
         return;

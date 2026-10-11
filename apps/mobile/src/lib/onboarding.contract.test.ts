@@ -1,6 +1,7 @@
 /// <reference types="node" />
 
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync, statSync } from "node:fs";
+import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
@@ -27,7 +28,7 @@ describe("onboarding contract (Blocks 8-1a)", () => {
   });
 
   it("asks iOS for While Using first, then explains before asking for Always", () => {
-    const foreground = screen.indexOf("requestForegroundPermissionsAsync");
+    const foreground = screen.indexOf("requestForegroundLocationPermission()");
     // Always goes through the shared requester, which remembers a decline (UIA-111).
     const background = screen.indexOf("requestAlwaysLocationPermission()");
     expect(foreground).toBeGreaterThan(-1);
@@ -91,5 +92,25 @@ describe("onboarding contract (Blocks 8-1a)", () => {
     expect(screen).toContain("const needed = await locationAccessNeedsIosSettings()");
     expect(screen).toMatch(/if \(alwaysNeedsSettings\) \{\s*void Linking\.openSettings\(\);/);
     expect(screen).toContain('if (state === "active") void check();');
+  });
+
+  it("runs one step at a time, so the return from the Always sheet can't switch on twice (Codex r5 on #324)", () => {
+    expect(screen).toContain("const running = useRef(false);");
+    expect(screen).toMatch(/if \(running\.current\) return;\s*running\.current = true;/);
+    expect(screen).not.toMatch(/if \(busy\) return;/);
+    // The Settings-return check stands aside while a step owns the answer.
+    expect(screen).toMatch(/const check = async \(\) => \{[\s\S]*?if \(running\.current\) return;/);
+  });
+
+  it("every While Using request goes through the one requester that reconciles Always history (Codex r5 on #324)", () => {
+    const root = fileURLToPath(new URL("../../", import.meta.url));
+    const walk = (directory: string): string[] => readdirSync(join(root, directory)).flatMap((name) => {
+      const path = join(directory, name);
+      if (statSync(join(root, path)).isDirectory()) return walk(path);
+      return /\.(ts|tsx)$/.test(name) && !/\.test\.(ts|tsx)$/.test(name) ? [path] : [];
+    });
+    const callers = ["app", "src"].flatMap(walk)
+      .filter((path) => readFileSync(join(root, path), "utf8").includes("Location.requestForegroundPermissionsAsync"));
+    expect(callers).toEqual([join("src", "lib", "geofence.ts")]);
   });
 });
