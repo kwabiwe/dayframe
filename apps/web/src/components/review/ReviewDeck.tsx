@@ -101,7 +101,7 @@ export function ReviewDeck({ initialData }: { initialData: BootstrapData }) {
   // "All framed" celebrates only when this visit's own decision emptied the queue.
   const [emptiedByDecision, setEmptiedByDecision] = useState(false);
   const [drafts, setDrafts] = useState<ReadonlyMap<string, ReviewLogAsDraft>>(() => new Map());
-  const [ghost, setGhost] = useState<{ key: number; item: ReviewItemRow; draft?: ReviewLogAsDraft; dir: 1 | -1 } | null>(null);
+  const [ghost, setGhost] = useState<ReviewGhost | null>(null);
   const [enter, setEnter] = useState<{ itemId: string; from: "decision" | "undo" | "select"; dir: 1 | -1; key: number } | null>(null);
   const enterSequence = useRef(0);
   const nameInputRef = useRef<HTMLInputElement | null>(null);
@@ -110,10 +110,22 @@ export function ReviewDeck({ initialData }: { initialData: BootstrapData }) {
   // A refresh or decision can leave one moment (or the evidence editor opens): the focused ‹ ›
   // button is then disabled, so focus moves to the card's first action rather than the page.
   const navDisabled = visible.length < 2 || evidenceOpenId !== null;
+  // Whether focus is in the bar, remembered until focus lands somewhere else: a browser that blurs
+  // a button as it is disabled has already moved focus to the page by the time the effect runs.
+  const navHadFocus = useRef(false);
   useEffect(() => {
-    if (!navDisabled) return;
+    const onFocusIn = (event: FocusEvent) => {
+      navHadFocus.current = Boolean(navRef.current && event.target instanceof Node && navRef.current.contains(event.target));
+    };
+    document.addEventListener("focusin", onFocusIn);
+    return () => document.removeEventListener("focusin", onFocusIn);
+  }, []);
+  useEffect(() => {
+    if (!navDisabled || !navHadFocus.current) return;
     const active = document.activeElement;
-    if (!active || !navRef.current?.contains(active)) return;
+    const inBar = active instanceof Node && navRef.current?.contains(active);
+    if (active && active !== document.body && !inBar) return;
+    navHadFocus.current = false;
     cardRef.current?.querySelector<HTMLElement>(".df-ractions button:not(:disabled)")?.focus();
   }, [navDisabled]);
 
@@ -286,7 +298,12 @@ export function ReviewDeck({ initialData }: { initialData: BootstrapData }) {
     setEvidenceOpenId(null);
     setEmptiedByDecision(next === null);
     if (next) setEnter({ itemId: next, from: "decision", dir, key: ++enterSequence.current });
-    if (!prefersReducedMotion()) setGhost({ key: ++enterSequence.current, item, draft, dir });
+    if (!prefersReducedMotion()) {
+      // Where the card is now: the ghost leaves from exactly there, also when the deck empties and
+      // the ghost is drawn over the empty state (UIA-315: the phone queue bar sits above it).
+      const box = cardRef.current?.getBoundingClientRect();
+      setGhost({ key: ++enterSequence.current, item, draft, dir, origin: box ? { top: box.top, left: box.left, width: box.width } : undefined });
+    }
   }, [categories, decide, drafts, evidenceOpenId, revived, visibleIds]);
 
   // An editor's close is fenced to the opening it belongs to. Focus inside the closing editor
@@ -443,7 +460,7 @@ export function ReviewDeck({ initialData }: { initialData: BootstrapData }) {
           moreComing={beyondLoaded > 0}
           takeFocus={hadCard}
         />
-        {ghost ? <GhostCard ghost={ghost} categories={categories} nowMs={nowMs} onDone={() => setGhost(null)} /> : null}
+        {ghost ? <GhostCard atOrigin ghost={ghost} categories={categories} nowMs={nowMs} onDone={() => setGhost(null)} /> : null}
         {toast}
       </div>
     );
@@ -787,16 +804,28 @@ function CardFace({
 }
 
 /** The decided card flying out (prototype throw): a still copy, inert and hidden from assistive tech. */
+type ReviewGhost = {
+  key: number;
+  item: ReviewItemRow;
+  draft?: ReviewLogAsDraft;
+  dir: 1 | -1;
+  /** The card's viewport bounds when it was decided. */
+  origin?: { top: number; left: number; width: number };
+};
+
 function GhostCard({
+  atOrigin = false,
   categories,
   ghost,
   nowMs,
   onDone
 }: {
   categories: readonly CategoryRow[];
-  ghost: { key: number; item: ReviewItemRow; draft?: ReviewLogAsDraft; dir: 1 | -1 };
+  ghost: ReviewGhost;
   nowMs: number;
   onDone: () => void;
+  /** Drawn over the empty state (not inside the card slot): placed at the card's last bounds. */
+  atOrigin?: boolean;
 }) {
   const ref = useRef<HTMLDivElement | null>(null);
   const doneRef = useRef(onDone);
@@ -832,7 +861,12 @@ function GhostCard({
       inert
       key={ghost.key}
       ref={ref}
-      style={category ? blockStyle(category.color, category.name) : undefined}
+      style={{
+        ...(category ? blockStyle(category.color, category.name) : {}),
+        ...(atOrigin && ghost.origin
+          ? { top: ghost.origin.top, left: ghost.origin.left, width: ghost.origin.width, marginLeft: 0, right: "auto" }
+          : {})
+      }}
     >
       <CardFace categories={categories} draft={ghost.draft} inert item={ghost.item} nowMs={nowMs} />
     </div>

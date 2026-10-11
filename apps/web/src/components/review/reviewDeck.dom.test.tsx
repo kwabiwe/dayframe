@@ -427,6 +427,18 @@ describe("Review round-4 fixes", () => {
     return { container, root, render };
   }
 
+  it("moves focus from the queue bar to the card when a refresh leaves one moment, also where disabling blurs (Codex r2)", async () => {
+    const { container, render } = await controllable([review(WALK, "Morning walk", "focus"), review(READ, "Reading", "admin")]);
+    const next = container.querySelector<HTMLButtonElement>("[aria-label='Next moment']")!;
+    await act(async () => next.focus());
+    // A browser that blurs a button as it is disabled: focus is already on the page.
+    await act(async () => next.blur());
+    await render([review(WALK, "Morning walk", "focus")]);
+    await act(async () => { await Promise.resolve(); });
+    expect(document.activeElement?.closest(".df-ractions")).not.toBeNull();
+    expect(container.querySelector(".df-rnav-pos")?.textContent).toBe("1 of 1");
+  });
+
   it("logs once for a held Enter", async () => {
     const { container, root } = await mount();
     const input = container.querySelector<HTMLInputElement>("#df-logas-name")!;
