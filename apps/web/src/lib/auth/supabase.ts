@@ -108,6 +108,36 @@ export async function changeSupabasePassword(
   if (updateError) throw new AuthError(updateError.message, authStatus(updateError.status));
 }
 
+/**
+ * Forgot password (UIA-317): Supabase emails a recovery link that returns to Dayframe's
+ * /reset-password page. The caller always answers the same way whether or not an account uses the
+ * address, so the reply never reveals who has an account.
+ */
+export async function requestSupabasePasswordReset(email: string, redirectTo: string) {
+  const supabase = createSupabaseAuthClient();
+  const { error } = await supabase.auth.resetPasswordForEmail(normalizeEmail(email), { redirectTo });
+  if (error) throw new AuthError(error.status === 429 ? "Too many reset emails. Wait a minute, then try again." : "Dayframe couldn't send the reset email. Try again later.", error.status === 429 ? 429 : 502);
+}
+
+/**
+ * Sets the new password from a recovery link's session, then ends every Dayframe sign-in for that
+ * account (web and iPhone), since a reset is often about a password someone else may know.
+ */
+export async function completeSupabasePasswordReset(input: { accessToken: string; refreshToken: string; password: string }) {
+  const supabase = createSupabaseAuthClient();
+  const { data, error: sessionError } = await supabase.auth.setSession({
+    access_token: input.accessToken,
+    refresh_token: input.refreshToken
+  });
+  if (sessionError || !data.user?.id) {
+    throw new AuthError("This reset link has expired or was already used. Ask for a new one.", 400);
+  }
+  const { error: updateError } = await supabase.auth.updateUser({ password: input.password });
+  if (updateError) throw new AuthError(updateError.message, authStatus(updateError.status));
+  await pool.query("update auth_sessions set revoked_at = now() where user_id = $1 and revoked_at is null", [data.user.id]);
+  await supabase.auth.signOut().catch(() => undefined);
+}
+
 export function getSupabaseProviderEnvStatus() {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL ?? process.env.SUPABASE_URL;
   const publicKey = getSupabasePublicApiKey();

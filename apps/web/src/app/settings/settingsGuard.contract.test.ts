@@ -12,7 +12,7 @@ describe("Settings for a visitor without a session", () => {
     expect(layout).toContain('if (!isAuthenticatedPageSession(session)) redirect("/login?next=%2Fsettings");');
     expect(login).toContain("const next = safeNextPath((await searchParams).next);");
     expect(login).toContain('if (session) redirect(next ?? "/");');
-    expect(login).toContain('<AuthForm mode="login" next={next} />');
+    expect(login).toContain('<AuthForm allowPasswordReset={getAuthMode() === "provider"} mode="login" next={next} />');
     expect(authForm).toContain('window.location.replace(next ? `${next}${window.location.hash}` : "/");');
   });
 

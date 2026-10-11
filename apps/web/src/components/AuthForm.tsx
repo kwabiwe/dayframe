@@ -10,14 +10,23 @@ import { Button, Field, IconButton, TextField } from "@/components/ui/Primitives
 type AuthMode = "login" | "signup";
 type AuthFormStatus = "idle" | "submitting" | "opening" | "error" | "email-confirmation";
 
-export function AuthForm({ mode, next = null }: { mode: AuthMode; next?: string | null }) {
+export function AuthForm({
+  allowPasswordReset = false,
+  mode,
+  next = null
+}: {
+  /** Hosted (provider) sign-in only: "Forgot password?" sends a Supabase reset email (UIA-317). */
+  allowPasswordReset?: boolean;
+  mode: AuthMode;
+  next?: string | null;
+}) {
+  const [resetting, setResetting] = useState(false);
   const [status, setStatus] = useState<AuthFormStatus>("idle");
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [name, setName] = useState("");
-  const [workspaceName, setWorkspaceName] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const submissionStarted = useRef(false);
   const navigationStarted = useRef(false);
@@ -51,8 +60,8 @@ export function AuthForm({ mode, next = null }: { mode: AuthMode; next?: string 
         body: JSON.stringify({
           email,
           password,
-          name: name || undefined,
-          workspaceName: workspaceName || undefined
+          // A new account gets its personal workspace (renamed in Settings; UIA-318).
+          name: name || undefined
         })
       });
       const payload = await readAuthResponse(response);
@@ -75,6 +84,10 @@ export function AuthForm({ mode, next = null }: { mode: AuthMode; next?: string 
       setStatus("error");
       submissionStarted.current = false;
     }
+  }
+
+  if (resetting) {
+    return <PasswordResetRequest initialEmail={email} onBack={() => setResetting(false)} />;
   }
 
   if (status === "opening") {
@@ -108,16 +121,6 @@ export function AuthForm({ mode, next = null }: { mode: AuthMode; next?: string 
               disabled={formLocked}
               onChange={(event) => setName(event.target.value)}
             />
-            <TextField
-              id="auth-workspace"
-              label="Workspace"
-              name="workspaceName"
-              autoComplete="organization"
-              placeholder="Personal workspace"
-              value={workspaceName}
-              disabled={formLocked}
-              onChange={(event) => setWorkspaceName(event.target.value)}
-            />
           </>
         ) : null}
         <TextField
@@ -135,6 +138,7 @@ export function AuthForm({ mode, next = null }: { mode: AuthMode; next?: string 
         <Field htmlFor="auth-password" label="Password">
           <span className="ui-compound-control auth-password-field">
             <input
+              aria-describedby={isSignup ? "auth-password-hint" : undefined}
               className="ui-control"
               id="auth-password"
               name="password"
@@ -155,6 +159,12 @@ export function AuthForm({ mode, next = null }: { mode: AuthMode; next?: string 
             </IconButton>
           </span>
         </Field>
+        {isSignup ? <p className="auth-hint" id="auth-password-hint">At least 8 characters.</p> : null}
+        {!isSignup && allowPasswordReset ? (
+          <button className="auth-forgot" disabled={formLocked} onClick={() => setResetting(true)} type="button">
+            Forgot password?
+          </button>
+        ) : null}
 
         {error ? (
           <p className="auth-message is-error" role="alert">
@@ -217,4 +227,70 @@ async function readAuthResponse(response: Response) {
       error: response.ok ? undefined : "Authentication failed. Please try again."
     };
   }
+}
+
+/** "Forgot password?": ask for a reset email. The reply is the same for any address (UIA-317). */
+function PasswordResetRequest({ initialEmail, onBack }: { initialEmail: string; onBack: () => void }) {
+  const [email, setEmail] = useState(initialEmail);
+  const [status, setStatus] = useState<"idle" | "sending" | "sent">("idle");
+  const [message, setMessage] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  async function send(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (status === "sending") return;
+    setStatus("sending");
+    setError(null);
+    try {
+      const response = await fetch("/api/auth/password-reset", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email })
+      });
+      const payload = (await response.json().catch(() => ({}))) as { error?: string; message?: string };
+      if (!response.ok) {
+        setError(payload.error ?? "Dayframe couldn't send the reset email. Try again later.");
+        setStatus("idle");
+        return;
+      }
+      setMessage(payload.message ?? "If an account uses that email, a reset link is on its way. Check your email.");
+      setStatus("sent");
+    } catch {
+      setError("Dayframe couldn't send the reset email. Check your connection and try again.");
+      setStatus("idle");
+    }
+  }
+
+  return (
+    <section className="auth-card mx-auto w-full max-w-[440px]">
+      <div className="auth-card-head">
+        <h1>Reset password</h1>
+        <p>We’ll email you a link to choose a new password.</p>
+      </div>
+      <form className="auth-card-form" onSubmit={send} aria-busy={status === "sending"}>
+        <TextField
+          id="reset-email"
+          label="Email"
+          name="email"
+          type="email"
+          autoComplete="email"
+          placeholder="you@example.com"
+          required
+          value={email}
+          disabled={status !== "idle"}
+          onChange={(event) => setEmail(event.target.value)}
+        />
+        {error ? <p className="auth-message is-error" role="alert">{error}</p> : null}
+        {message ? <p className="auth-message" role="status">{message}</p> : null}
+        {status === "sent" ? null : (
+          <Button className="w-full" disabled={status === "sending"} type="submit" variant="primary">
+            {status === "sending" ? "Sending…" : "Send reset link"}
+          </Button>
+        )}
+        <p className="auth-switch">
+          <button className="auth-link-button" onClick={onBack} type="button">Back to Log in</button>
+        </p>
+      </form>
+    </section>
+  );
 }

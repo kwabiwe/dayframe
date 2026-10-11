@@ -150,6 +150,12 @@ For mobile builds, set `EXPO_PUBLIC_DAYFRAME_API_BASE` to the environment's Verc
 
 See `docs/ios-hosted-supabase-runbook.md` for the iOS/EAS setup and physical-device validation checklist.
 
+### Forgot password (UIA-317)
+
+Log in offers "Forgot password?" in provider mode. `POST /api/auth/password-reset` asks Supabase Auth (`resetPasswordForEmail`) to email a recovery link back to the same deployment's `/reset-password` page, and always answers with the same "check your email" reply. The page reads the recovery session from the link's fragment, removes it from the address bar, and posts the new password to `POST /api/auth/password-reset/complete`. That route sets the password through the recovery session and revokes every Dayframe app session for that user, on web and iPhone. Dev and local auth answer 404.
+
+Hosted prerequisite (owner, Supabase dashboard, per project): Authentication › URL Configuration › Redirect URLs must allow `https://dayframe-web.vercel.app/reset-password` (production) and `https://dayframe-staging.vercel.app/reset-password` (staging; add the Preview pattern if Previews are tested). Supabase sends any other redirect to the project's Site URL instead. The default "Reset Password" email template works as-is (implicit flow; the link carries the session in its fragment). Until the URLs are allowed, the email arrives but its link lands on the Site URL rather than the reset page.
+
 ## Personal Beta Defaults
 
 - Single-user/friends testing.
