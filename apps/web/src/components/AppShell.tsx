@@ -372,15 +372,15 @@ function ProfileWorkspacePopover({
 
   return (
     <PopoverPanel title="Profile & workspace" onClose={onClose} align="bottom-left" busy={isBusy}>
-      <div className="df-profile">
-        <div className="df-profile-card">
+      <div className="df-profile-pop">
+        <div className="df-profile-pop-card">
           <span aria-hidden="true">{initials(data.user.name)}</span>
           <div><strong>{data.user.name}</strong><small>{data.user.email}</small></div>
         </div>
 
         <section aria-labelledby="workspace-switcher-heading">
           <h3 id="workspace-switcher-heading">Workspaces</h3>
-          <div className="df-profile-rows">
+          <div className="df-profile-pop-rows">
             {data.workspaces.map((workspace) => {
               const current = workspace.id === data.workspace.id;
               return (
@@ -401,7 +401,7 @@ function ProfileWorkspacePopover({
           {error ? <p className="swiss-inline-error" role="alert">{error}</p> : null}
         </section>
 
-        <div className="df-profile-rows">
+        <div className="df-profile-pop-rows">
           <Link href="/settings#account" onClick={onClose}><Settings aria-hidden="true" size={17} />Settings</Link>
           <SignOutControl className="" showIcon />
         </div>

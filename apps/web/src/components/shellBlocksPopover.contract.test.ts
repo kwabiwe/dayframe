@@ -13,10 +13,12 @@ describe("web shell popover, shortcuts and touch targets (audit UIA-204, UIA-208
   });
 
   it("draws Profile & workspace in Blocks with 44 px rows, a neutral current workspace and Sign out", () => {
-    expect(shell).toContain('<div className="df-profile">');
+    expect(shell).toContain('<div className="df-profile-pop">');
+    // The sidebar's avatar button keeps its own .df-profile class and styles.
+    expect(styles.match(/^\.df-profile \{/gm)).toHaveLength(1);
     expect(shell).toContain("aria-current={current || undefined}");
-    expect(styles).toMatch(/\.df-profile-rows > button,[\s\S]*?\{[^}]*min-height: 44px;/);
-    expect(styles).toMatch(/\.df-profile-rows > button\[aria-current="true"\] \{[^}]*background: var\(--surface-muted\);/);
+    expect(styles).toMatch(/\.df-profile-pop-rows > button,[\s\S]*?\{[^}]*min-height: 44px;/);
+    expect(styles).toMatch(/\.df-profile-pop-rows > button\[aria-current="true"\] \{[^}]*background: var\(--surface-muted\);/);
     expect(signOut).toContain('"Sign out"');
     expect(signOut).not.toContain('"Log out"');
   });
@@ -27,7 +29,8 @@ describe("web shell popover, shortcuts and touch targets (audit UIA-204, UIA-208
   });
 
   it("shows Today's row actions on touch at 44 px, and the sidebar controls are 44 px", () => {
-    expect(styles).toMatch(/@media \(hover: none\) \{[\s\S]*?\.df-erow-acts \{\s*opacity: 1;[\s\S]*?\.df-erow-acts \.df-icon-action \{\s*width: 44px;\s*height: 44px;/);
+    // Only where the row has its actions column (above 860 px); phones keep tap-to-edit.
+    expect(styles).toMatch(/@media \(hover: none\) and \(min-width: 861px\) \{[\s\S]*?\.df-erow-acts \{\s*opacity: 1;[\s\S]*?\.df-erow-acts \.df-icon-action \{\s*width: 44px;\s*height: 44px;/);
     expect(styles).toMatch(/\.df-side-row \.swiss-theme-toggle \{\s*width: 44px;\s*height: 44px;/);
     expect(styles).toMatch(/\.df-side-search,\s*\.df-side-shortcuts \{[^}]*min-height: 44px;/);
   });

@@ -13257,9 +13257,10 @@ dialog.ui-dialog.df-rf-dialog {
   }
 }
 
-/* UIA-208: on touch screens Today's row actions are always visible (there is no hover to reveal
-   them) and 44 px. */
-@media (hover: none) {
+/* UIA-208: on touch screens with the full row layout (above 860 px), Today's row actions are
+   always visible (there is no hover to reveal them) and 44 px. Phones keep tap-to-edit: the
+   editor has Start again and Delete. */
+@media (hover: none) and (min-width: 861px) {
   .df-erow {
     grid-template-columns: minmax(0, 1fr) 156px;
   }
@@ -13284,12 +13285,12 @@ dialog.ui-dialog.df-rf-dialog {
 
 /* Profile & workspace in Blocks: the account card, workspaces as 44 px rows with a neutral check,
    Settings and Sign out as rows. */
-.df-profile {
+.df-profile-pop {
   display: grid;
   gap: 14px;
 }
 
-.df-profile-card {
+.df-profile-pop-card {
   display: flex;
   align-items: center;
   gap: 12px;
@@ -13298,7 +13299,7 @@ dialog.ui-dialog.df-rf-dialog {
   padding: 12px;
 }
 
-.df-profile-card > span {
+.df-profile-pop-card > span {
   display: grid;
   width: 40px;
   height: 40px;
@@ -13310,40 +13311,40 @@ dialog.ui-dialog.df-rf-dialog {
   font-weight: 750;
 }
 
-.df-profile-card > div {
+.df-profile-pop-card > div {
   display: grid;
   min-width: 0;
 }
 
-.df-profile-card strong {
+.df-profile-pop-card strong {
   overflow: hidden;
   color: var(--foreground);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.df-profile-card small {
+.df-profile-pop-card small {
   overflow: hidden;
   color: var(--text-secondary);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.df-profile h3 {
+.df-profile-pop h3 {
   margin: 0 0 6px;
   color: var(--text-secondary);
   font-size: 12px;
   font-weight: 700;
 }
 
-.df-profile-rows {
+.df-profile-pop-rows {
   display: grid;
   gap: 2px;
 }
 
-.df-profile-rows > button,
-.df-profile-rows > a,
-.df-profile-rows > form > button {
+.df-profile-pop-rows > button,
+.df-profile-pop-rows > a,
+.df-profile-pop-rows > form > button {
   display: flex;
   width: 100%;
   min-height: 44px;
@@ -13361,17 +13362,17 @@ dialog.ui-dialog.df-rf-dialog {
   cursor: pointer;
 }
 
-.df-profile-rows > button:hover:not(:disabled),
-.df-profile-rows > a:hover,
-.df-profile-rows > form > button:hover:not(:disabled) {
+.df-profile-pop-rows > button:hover:not(:disabled),
+.df-profile-pop-rows > a:hover,
+.df-profile-pop-rows > form > button:hover:not(:disabled) {
   background: var(--surface-muted);
 }
 
-.df-profile-rows > button[aria-current="true"] {
+.df-profile-pop-rows > button[aria-current="true"] {
   background: var(--surface-muted);
 }
 
-.df-profile-rows > button > span {
+.df-profile-pop-rows > button > span {
   flex: 1 1 auto;
   min-width: 0;
   overflow: hidden;
@@ -13379,7 +13380,7 @@ dialog.ui-dialog.df-rf-dialog {
   white-space: nowrap;
 }
 
-.df-profile-rows :focus-visible {
+.df-profile-pop-rows :focus-visible {
   outline: 2px solid var(--focus);
   outline-offset: 2px;
 }
