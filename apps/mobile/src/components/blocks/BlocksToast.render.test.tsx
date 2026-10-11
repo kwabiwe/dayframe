@@ -17,7 +17,7 @@ vi.mock("react-native", () => ({
   Text: "Text",
   View: "View"
 }));
-vi.mock("react-native-reanimated", () => ({ default: { View: "ReanimatedView" } }));
+vi.mock("react-native-reanimated", () => ({ default: { View: "ReanimatedView" }, useSharedValue: (value: unknown) => ({ value }) }));
 vi.mock("../../lib/blocksMotion", () => ({
   blocksToastEntering: (reduceMotion: boolean) => ({ kind: "entering", spring: reduceMotion ? null : "pop", reduceMotion }),
   blocksToastExiting: (reduceMotion: boolean) => ({ kind: "exiting", reduceMotion })
