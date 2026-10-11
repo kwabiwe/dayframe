@@ -24,8 +24,6 @@ import type { BootstrapData } from "@/lib/queries";
 import { hasOpenDialog, isTypingTarget } from "@/lib/keyboard-ownership";
 import {
   GO_TO_SEQUENCE_MS,
-  LIBRARY_TABS,
-  activeLibraryTab,
   activeShellSection,
   goToTarget,
   startsGoToSequence
@@ -81,7 +79,6 @@ function AppShellContent({ children }: { children: ReactNode }) {
   const goToTimer = useRef<number | undefined>(undefined);
   const isTimeline = pathname === "/timeline";
   const activeSection = activeShellSection(pathname);
-  const libraryTab = activeLibraryTab(pathname);
   const reviewCount = data?.stats.reviewCount ?? 0;
   const resolvedTheme = useSyncExternalStore(subscribeToThemeChoice, getResolvedThemeChoice, () => "light" as const);
   const paletteCommands = useMemo(
@@ -281,7 +278,6 @@ function AppShellContent({ children }: { children: ReactNode }) {
               {persistentTimer}
             </div>
             <main>
-              {libraryTab ? <LibraryTabs activeHref={libraryTab.href} /> : null}
               {children}
             </main>
           </>
@@ -317,7 +313,6 @@ function AppShellContent({ children }: { children: ReactNode }) {
   );
 }
 
-/** Activities, Tags and Places stay separate pages, reached as the three Library tabs. */
 function focusCommandInput() {
   window.requestAnimationFrame(() => document.getElementById("persistent-timer-description")?.focus());
 }
@@ -327,17 +322,6 @@ function isPressableTarget(target: EventTarget | null) {
     && Boolean(target.closest("button, a[href], summary, [role='button'], [role='option'], [role='menuitem'], [role='tab'], [role='switch'], [role='checkbox']"));
 }
 
-function LibraryTabs({ activeHref }: { activeHref: string }) {
-  return (
-    <nav className="df-library-tabs" aria-label="Library">
-      {LIBRARY_TABS.map((tab) => (
-        <Link key={tab.href} href={tab.href} aria-current={tab.href === activeHref ? "page" : undefined}>
-          {tab.label}
-        </Link>
-      ))}
-    </nav>
-  );
-}
 
 
 function ProfileWorkspacePopover({

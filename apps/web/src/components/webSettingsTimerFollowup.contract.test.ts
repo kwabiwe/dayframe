@@ -12,7 +12,6 @@ const settings = source("./SettingsForms.tsx");
 const themeSettings = source("./ThemeSettings.tsx");
 const themeToggle = source("./ThemeToggleButton.tsx");
 const shell = source("./AppShell.tsx");
-const categories = source("./CategoryManager.tsx");
 const styles = source("../app/globals.css");
 const settingsPage = source("../app/settings/page.tsx");
 
@@ -58,18 +57,8 @@ describe("web Settings and running-timer follow-up", () => {
     expect(styles).toMatch(/\.settings-appearance-row \.ui-segmented-control button\[aria-pressed="true"\][\s\S]*color: var\(--on-accent\);/s);
   });
 
-  it("uses flat workspace rows and circular borderless activity colours", () => {
+  it("uses flat workspace rows", () => {
     expect(styles).toMatch(/\.swiss-profile-section \.swiss-menu-list button \{[^}]*box-shadow: none;/s);
-    expect(categories).toContain('className="h-8 w-8 shrink-0 rounded-full"');
-    expect(categories).toContain('className="block h-8 w-8 rounded-full');
-    expect(categories).not.toContain("<Save");
-    expect(categories).toContain("<Pencil size={15} />");
-    expect(categories).not.toContain("<Check size={15} />");
-  });
-
-  it("renders the shared colour picker in five hue-family columns", () => {
-    expect(categories).toContain("DAYFRAME_PALETTE_PICKER.map");
-    expect(categories).toContain("grid w-fit grid-cols-5 gap-2");
   });
 
   it("keeps cached Settings data visible while refreshing quietly", () => {

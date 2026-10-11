@@ -308,6 +308,14 @@ Block pull-to-refresh:
 - Owner: CSS only. The running block's on-block ring breathes on opacity over 2.4 s (the live ring); hovered blocks brighten in place (no lift, so lanes and the drag-to-create surface never move); selection is an instant outline. Drag-to-create, resize, zoom and the compact editor keep their existing owners and motion. The Delete Undo toast is the Blocks toast (`pop` in, 160 ms out) and takes focus as it appears, since the editor that held focus has closed.
 - Accessibility: Reduce Motion stops the ring's breathing (a static ring). Review suggestion blocks are links named with the title, "needs review" and their times; the now line is decorative.
 
+## Web Library › Activities (Blocks parity step 14a-1)
+
+- Trigger: pin or unpin, save or create in the editor, archive (and its Undo), restore.
+- Owner: CSS and the existing dialog. Cards and rows appear in place with the refreshed data (no list animation); the editor is the shared `ModalDialog`; the Blocks toast ("X pinned to quick start", "X archived. Its history stays." with Undo, "X restored", "X created") pops in and leaves as on Today (5 s, 160 ms exit).
+- Interruption: one change saves at a time — pins, Edit, New activity and Restore are disabled while one is saving, and a change asked for meanwhile is refused with a message, except Undo, which then waits and runs as soon as that change finishes; a refused change (taken name, quick start full) is shown and the editor keeps what was typed. Undo of archiving a pinned activity restores it and then re-pins it (two requests: the server restores unpinned).
+- Focus: archiving closes the editor, so focus moves to the toast's Undo; when that toast leaves with focus on it, focus moves to New activity (or the Library heading while New activity is disabled). Saving returns focus to that activity's Edit even when the card moved to another group; creating returns it to New activity (the dialog's opener); restoring from Archived moves it to the restored card's Edit. Cards keep their `#category-<id>` anchors for ⌘K links. A restore whose re-pin is refused still refreshes the shell.
+- Accessibility: Reduce Motion follows the toast's own path. Pins are toggle buttons named "Pin/Unpin X to/from quick start"; each Edit is named for its activity; the editor's icon and colour choices are radio groups with roving focus (arrow keys without modifiers); sparklines are decorative.
+
 ## Web Review (Blocks parity step 13)
 
 - Trigger: Log it / Skip (buttons, Y / N, Enter in "Log as"), a queue row or ↑ ↓ choosing a card, Undo (toast button or ⌘Z/Ctrl+Z), a held save failing or finding the suggestion changed, the queue emptying.
