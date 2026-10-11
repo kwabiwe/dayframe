@@ -79,3 +79,14 @@ describe("mobile place helpers", () => {
     expect(suggestedPlaceNameFromGeocode({})).toBe("");
   });
 });
+
+describe("place radius choices (UIA-088)", () => {
+  it("offers 50, 100 and 200 m, and names a place's own other size without changing it", async () => {
+    const { PLACE_RADIUS_OPTIONS, placeRadiusOffMenu } = await import("./places");
+    expect(PLACE_RADIUS_OPTIONS.map((option) => option.label)).toEqual(["50 m", "100 m", "200 m"]);
+    expect(placeRadiusOffMenu("100")).toBeNull();
+    expect(placeRadiusOffMenu("150")).toBe(150);
+    expect(placeRadiusOffMenu("2000")).toBe(2000);
+    expect(placeRadiusOffMenu("")).toBeNull();
+  });
+});

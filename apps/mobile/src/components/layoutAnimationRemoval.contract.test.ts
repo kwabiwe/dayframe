@@ -33,12 +33,13 @@ describe("no inert LayoutAnimation", () => {
     expect(offenders).toEqual([]);
   });
 
-  it("opens Apple Health's per-type rows with the shared Reanimated presence and layout (6a-3)", () => {
-    // Sync help (6a-2) and the Location page (6a-3) have no disclosure any more.
+  it("opens an Apple Health type's rows in its sheet with the shared Reanimated presence and layout (UIA-085)", () => {
+    // Sync help (6a-2) and the Location page (6a-3) have no disclosure any more. Health types are
+    // one row each (6a-3, UIA-085); the type's sheet (SwipeDismissSheet) presents its rows.
     const settings = readFileSync(join(mobileRoot, "app/settings.tsx"), "utf8");
-    expect(settings).toMatch(/\{enabled \? \(\s*<Reanimated\.View\s+entering=\{localPresenceEntering\(reduceMotion\)\}\s+exiting=\{localPresenceExiting\(reduceMotion\)\}/);
-    expect(settings).toContain("<Reanimated.View key={option.key} layout={localLayoutTransition(reduceMotion)}>");
-    expect(settings).toContain("<Reanimated.View key={group.title} layout={localLayoutTransition(reduceMotion)}>");
+    const sheet = settings.slice(settings.indexOf("function HealthTypeSheet("), settings.indexOf("function LocationInformationSheet("));
+    expect(sheet).toContain("<SwipeDismissSheet");
+    expect(sheet.match(/<Reanimated\.View\s+entering=\{localPresenceEntering\(reduceMotion\)\}\s+exiting=\{localPresenceExiting\(reduceMotion\)\}\s+layout=\{localLayoutTransition\(reduceMotion\)\}/g)).toHaveLength(3);
     expect(settings).not.toContain("showLocationTroubleshooting");
   });
 });
