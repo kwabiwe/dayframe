@@ -1999,13 +1999,12 @@ function createStyles(theme: MobileTheme) {
       shadowOpacity: 1,
       shadowRadius: 18
     },
+    // UIA-021: a fill-led raised list (no outline), like the Switch sheet's rows.
     historicalSuggestionsSurface: {
       flex: 1,
       minHeight: 0,
       backgroundColor: theme.surfaceRaised,
-      borderWidth: 1,
-      borderColor: theme.borderStrong,
-      borderRadius: 14,
+      borderRadius: 20,
       overflow: "hidden"
     },
     historicalSuggestionsHeader: {
@@ -2013,8 +2012,26 @@ function createStyles(theme: MobileTheme) {
       flexDirection: "row",
       alignItems: "center",
       justifyContent: "space-between",
-      paddingLeft: 12,
-      backgroundColor: theme.surfaceMuted
+      paddingLeft: 14
+    },
+    historicalSuggestionsTitle: {
+      color: theme.textSecondary,
+      fontSize: 13,
+      fontWeight: "600"
+    },
+    historicalSuggestionText: {
+      flex: 1,
+      minWidth: 0,
+      gap: 1
+    },
+    historicalSuggestionName: {
+      color: theme.textPrimary,
+      fontSize: 15,
+      fontWeight: "600"
+    },
+    historicalSuggestionMeta: {
+      color: theme.textSecondary,
+      fontSize: 12
     },
     historicalSuggestionsCloseButton: {
       width: 44,

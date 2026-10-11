@@ -8,10 +8,8 @@ import {
   View
 } from "react-native";
 import Svg, { Path } from "react-native-svg";
-import {
-  paletteColorFor,
-  type RecentActivitySuggestion
-} from "@dayframe/shared";
+import { ActivityBlockMark } from "./today/ActivityBlockMark";
+import type { RecentActivitySuggestion } from "@dayframe/shared";
 import { pressable, type MobileStyles, type MobileTheme } from "@/lib/mobileTheme";
 import { MOBILE_MOTION } from "@/lib/motion";
 import {
@@ -249,7 +247,7 @@ export function HistoricalSuggestionsOverlay({
 
   return (
     <Animated.View
-      accessibilityLabel="Historical Suggestions"
+      accessibilityLabel="Recent"
       accessibilityLiveRegion="polite"
       accessibilityElementsHidden={!containerVisible}
       importantForAccessibility={containerVisible ? "auto" : "no-hide-descendants"}
@@ -288,10 +286,10 @@ export function HistoricalSuggestionsOverlay({
           }}
           style={styles.historicalSuggestionsHeader}
         >
-          <Text style={styles.taskSuggestionsTitle}>SUGGESTIONS</Text>
+          <Text accessibilityRole="header" style={styles.historicalSuggestionsTitle}>Recent</Text>
           <Pressable
             accessibilityHint="Keeps the Description field and keyboard active"
-            accessibilityLabel="Close Suggestions"
+            accessibilityLabel="Close"
             accessibilityRole="button"
             disabled={disabled}
             hitSlop={6}
@@ -303,7 +301,7 @@ export function HistoricalSuggestionsOverlay({
           </Pressable>
         </View>
         <ScrollView
-          accessibilityLabel="Historical Suggestions results"
+          accessibilityLabel="Recent blocks"
           keyboardShouldPersistTaps="always"
           nestedScrollEnabled
           showsVerticalScrollIndicator
@@ -337,6 +335,7 @@ export function HistoricalSuggestionsOverlay({
                 disabled={disabled}
                 index={index}
                 onPress={() => onSelect(suggestion)}
+                reduceMotion={reduceMotion}
                 styles={styles}
                 suggestion={suggestion}
                 theme={theme}
@@ -353,6 +352,7 @@ function HistoricalSuggestionRow({
   disabled,
   index,
   onPress,
+  reduceMotion,
   styles,
   suggestion,
   theme
@@ -360,15 +360,13 @@ function HistoricalSuggestionRow({
   disabled: boolean;
   index: number;
   onPress: () => void;
+  reduceMotion: boolean;
   styles: MobileStyles;
   suggestion: RecentActivitySuggestion;
   theme: MobileTheme;
 }) {
   const categoryName = suggestion.categoryName;
   const tagLabel = suggestion.tagNames.map((tag) => `#${tag}`).join(" ");
-  const color = categoryName
-    ? paletteColorFor(suggestion.categoryColor ?? null, categoryName, theme.mode)
-    : null;
 
   return (
     <Pressable
@@ -392,18 +390,25 @@ function HistoricalSuggestionRow({
       {index > 0 ? (
         <View pointerEvents="none" style={styles.taskSuggestionRowDivider} />
       ) : null}
-      <View style={styles.taskSuggestionTextStack}>
-        <Text style={styles.taskSuggestionTitle} numberOfLines={1}>
+      {/* UIA-021: the Switch sheet's row — the activity as a small block, the name, then the
+          activity and tags — on a fill-led list. */}
+      <ActivityBlockMark
+        categoryColor={suggestion.categoryColor}
+        categoryIcon={null}
+        categoryName={categoryName}
+        entryId={suggestion.key}
+        landing={null}
+        reduceMotion={reduceMotion}
+        theme={theme}
+      />
+      <View style={styles.historicalSuggestionText}>
+        <Text style={styles.historicalSuggestionName} numberOfLines={1}>
           {suggestion.description}
         </Text>
-        {categoryName && color ? (
-          <View style={styles.taskSuggestionMetaRow}>
-            <View style={[styles.colorDot, { backgroundColor: color }]} />
-            <Text style={styles.taskSuggestionMeta} numberOfLines={1}>{categoryName}</Text>
-          </View>
-        ) : null}
-        {tagLabel ? (
-          <Text style={styles.taskSuggestionTags} numberOfLines={1}>{tagLabel}</Text>
+        {categoryName || tagLabel ? (
+          <Text style={styles.historicalSuggestionMeta} numberOfLines={1}>
+            {[categoryName, tagLabel].filter(Boolean).join(" · ")}
+          </Text>
         ) : null}
       </View>
     </Pressable>
