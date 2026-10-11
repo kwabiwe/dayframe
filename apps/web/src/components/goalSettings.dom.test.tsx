@@ -86,24 +86,6 @@ describe("Settings › Your day steppers (UIA-309)", () => {
     expect(view.getByRole("group", { name: "Daily goal: 11h" })).toBeTruthy();
   });
 
-  it("keeps a saved goal on screen when the refresh falls back to cached data, and follows newer data (Codex r2)", async () => {
-    vi.useFakeTimers();
-    const view = render(<GoalSettings dailyGoalMinutes={480} userId="user-1" weeklyGoalMinutes={2400} />);
-    fireEvent.click(view.getByRole("button", { name: "Increase daily goal" }));
-    await act(async () => { await vi.advanceTimersByTimeAsync(600); });
-    // The page still has the old data (the refresh used its cache): the saved 9h stays.
-    view.rerender(<GoalSettings dailyGoalMinutes={480} userId="user-1" weeklyGoalMinutes={2400} />);
-    expect(view.getByRole("group", { name: "Daily goal: 9h" })).toBeTruthy();
-    // Fresh data, then a change made elsewhere: the page follows its data.
-    view.rerender(<GoalSettings dailyGoalMinutes={540} userId="user-1" weeklyGoalMinutes={2400} />);
-    expect(view.getByRole("group", { name: "Daily goal: 9h" })).toBeTruthy();
-    view.rerender(<GoalSettings dailyGoalMinutes={720} userId="user-1" weeklyGoalMinutes={2400} />);
-    expect(view.getByRole("group", { name: "Daily goal: 12h" })).toBeTruthy();
-    // And back to an older value elsewhere: the page follows its data, not an old save (Codex r3).
-    view.rerender(<GoalSettings dailyGoalMinutes={480} userId="user-1" weeklyGoalMinutes={2400} />);
-    expect(view.getByRole("group", { name: "Daily goal: 8h" })).toBeTruthy();
-  });
-
   it("a failed later save keeps an earlier accepted one on screen (Codex r3)", async () => {
     vi.useFakeTimers();
     let call = 0;
@@ -135,35 +117,54 @@ describe("Settings › Your day steppers (UIA-309)", () => {
     ]);
   });
 
-  it("every accepted save updates the app, also one a later failed save followed (Codex r4)", async () => {
+  it("keeps tapped goals on screen until fresh data arrives after the last save (Codex r5)", async () => {
     vi.useFakeTimers();
-    let call = 0;
-    mocks.fetch.mockImplementation(async () => new Response("{}", { status: ++call === 1 ? 200 : 500 }));
     const view = render(<GoalSettings dailyGoalMinutes={480} userId="user-1" weeklyGoalMinutes={2400} />);
     fireEvent.click(view.getByRole("button", { name: "Increase daily goal" }));
-    await act(async () => { await vi.advanceTimersByTimeAsync(600); });
-    fireEvent.click(view.getByRole("button", { name: "Increase weekly goal" }));
+    // The refresh after the save only had cached data (null): the tapped 9h stays.
     await act(async () => { await vi.advanceTimersByTimeAsync(600); });
     expect(mocks.refresh).toHaveBeenCalledTimes(1);
+    view.rerender(<GoalSettings dailyGoalMinutes={480} userId="user-1" weeklyGoalMinutes={2400} />);
     expect(view.getByRole("group", { name: "Daily goal: 9h" })).toBeTruthy();
-    expect(view.getByRole("group", { name: "Weekly goal: 40h" })).toBeTruthy();
-    mocks.fetch.mockImplementation(async () => new Response("{}", { status: 200 }));
+    // Next time the refresh is fresh: the page's data shows from then on.
+    mocks.refresh.mockResolvedValueOnce({} as never);
+    fireEvent.click(view.getByRole("button", { name: "Increase daily goal" }));
+    await act(async () => { await vi.advanceTimersByTimeAsync(600); });
+    view.rerender(<GoalSettings dailyGoalMinutes={600} userId="user-1" weeklyGoalMinutes={2400} />);
+    expect(view.getByRole("group", { name: "Daily goal: 10h" })).toBeTruthy();
+    view.rerender(<GoalSettings dailyGoalMinutes={720} userId="user-1" weeklyGoalMinutes={2400} />);
+    expect(view.getByRole("group", { name: "Daily goal: 12h" })).toBeTruthy();
   });
 
-  it("newer page data wins over a save acknowledged after it arrived (Codex r4)", async () => {
+  it("a page refresh while saving never takes back a newer tap (Codex r5)", async () => {
     vi.useFakeTimers();
     let release: () => void = () => undefined;
     mocks.fetch.mockImplementationOnce(() => new Promise((resolve) => { release = () => resolve(new Response("{}", { status: 200 })); }));
     const view = render(<GoalSettings dailyGoalMinutes={480} userId="user-1" weeklyGoalMinutes={2400} />);
-    fireEvent.click(view.getByRole("button", { name: "Increase daily goal" }));
+    fireEvent.click(view.getByRole("button", { name: "Increase daily goal" })); // 9h, in flight
     await act(async () => { await vi.advanceTimersByTimeAsync(600); });
-    // A change made elsewhere arrives first.
-    view.rerender(<GoalSettings dailyGoalMinutes={720} userId="user-1" weeklyGoalMinutes={2400} />);
-    expect(view.getByRole("group", { name: "Daily goal: 12h" })).toBeTruthy();
-    await act(async () => { release(); await Promise.resolve(); await Promise.resolve(); });
-    expect(view.getByRole("group", { name: "Daily goal: 12h" })).toBeTruthy();
+    fireEvent.click(view.getByRole("button", { name: "Increase daily goal" })); // 10h, pending
+    // Data from an earlier refresh arrives meanwhile: the taps stay.
+    view.rerender(<GoalSettings dailyGoalMinutes={540} userId="user-1" weeklyGoalMinutes={2400} />);
+    expect(view.getByRole("group", { name: "Daily goal: 10h" })).toBeTruthy();
+    await act(async () => { release(); await vi.advanceTimersByTimeAsync(600); });
     fireEvent.click(view.getByRole("button", { name: "Increase daily goal" }));
-    expect(view.getByRole("group", { name: "Daily goal: 13h" })).toBeTruthy();
+    expect(view.getByRole("group", { name: "Daily goal: 11h" })).toBeTruthy();
+  });
+
+  it("a failed save takes back the goals it carried; the app reloads once everything is done (Codex r4–r5)", async () => {
+    vi.useFakeTimers();
+    mocks.fetch.mockImplementation(async () => new Response("{}", { status: 500 }));
+    const view = render(<GoalSettings dailyGoalMinutes={480} userId="user-1" weeklyGoalMinutes={2400} />);
+    fireEvent.click(view.getByRole("button", { name: "Increase daily goal" }));
+    fireEvent.click(view.getByRole("button", { name: "Increase weekly goal" }));
+    await act(async () => { await vi.advanceTimersByTimeAsync(600); });
+    // One save carried both and failed: both go back; one reload when idle.
+    expect(view.getByRole("alert").textContent).toContain("not saved");
+    expect(view.getByRole("group", { name: "Daily goal: 8h" })).toBeTruthy();
+    expect(view.getByRole("group", { name: "Weekly goal: 40h" })).toBeTruthy();
+    expect(mocks.refresh).toHaveBeenCalledTimes(1);
+    mocks.fetch.mockImplementation(async () => new Response("{}", { status: 200 }));
   });
 
   it("leaving the page saves a pending change at once", async () => {

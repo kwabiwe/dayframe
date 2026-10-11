@@ -54,7 +54,7 @@ export function createGoalSaver<Context>({
   onAccepted,
   onFailed,
   mergeContext = (_earlier: Context, later: Context) => later,
-  onSettled,
+  onBusyChange,
   save,
   setTimer = (callback, ms) => setTimeout(callback, ms)
 }: {
@@ -62,27 +62,41 @@ export function createGoalSaver<Context>({
   delayMs?: number;
   /** Two taps folded into one save: how their contexts combine (the later one by default). */
   mergeContext?: (earlier: Context, later: Context) => Context;
-  onAccepted: (saved: GoalSave<Context>) => void;
+  onAccepted?: (saved: GoalSave<Context>) => void;
   onFailed: (failed: GoalSave<Context>, error: unknown) => void;
-  /** The latest scheduled save finished (accepted or not). */
-  onSettled?: (latest: GoalSave<Context>, accepted: boolean) => void;
+  /**
+   * Nothing pending and nothing in flight any more (`busy` false), or work began again (true).
+   * `lastAccepted` tells whether the save that finished last was accepted.
+   */
+  onBusyChange?: (busy: boolean, lastAccepted: boolean) => void;
   save: (changes: GoalChanges) => Promise<void>;
   setTimer?: (callback: () => void, ms: number) => TimerHandle;
 }) {
   let timer: TimerHandle | null = null;
   let pending: GoalSave<Context> | null = null;
-  let sequence = 0;
+  let inFlight = 0;
+  let busy = false;
+  let cancelled = false;
+
+  function updateBusy(lastAccepted: boolean) {
+    const next = pending !== null || inFlight > 0;
+    if (next === busy) return;
+    busy = next;
+    if (!cancelled) onBusyChange?.(busy, lastAccepted);
+  }
 
   function send(change: GoalSave<Context>) {
-    const mine = ++sequence;
+    inFlight += 1;
     tabQueue = tabQueue.catch(() => undefined).then(() => save(change.changes).then(
       () => {
-        onAccepted(change);
-        if (mine === sequence) onSettled?.(change, true);
+        inFlight -= 1;
+        onAccepted?.(change);
+        updateBusy(true);
       },
       (error: unknown) => {
+        inFlight -= 1;
         onFailed(change, error);
-        if (mine === sequence) onSettled?.(change, false);
+        updateBusy(false);
       }
     ));
   }
@@ -99,6 +113,7 @@ export function createGoalSaver<Context>({
         ? { changes: { ...pending.changes, ...changes }, context: mergeContext(pending.context, context) }
         : { changes, context };
       stopTimer();
+      updateBusy(true);
       timer = setTimer(() => {
         timer = null;
         const next = pending;
@@ -120,7 +135,8 @@ export function createGoalSaver<Context>({
     cancel() {
       stopTimer();
       pending = null;
-      sequence += 1;
-    }
+      cancelled = true;
+    },
+    isBusy: () => busy
   };
 }

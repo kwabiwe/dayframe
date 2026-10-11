@@ -85,17 +85,17 @@ describe("goal steppers (UIA-309)", () => {
     await vi.waitFor(() => expect(order).toEqual([{ dailyGoalMinutes: 540 }, { weeklyGoalMinutes: 2700 }]));
   });
 
-  it("reports every outcome with its context, and settles only the latest", async () => {
+  it("reports each failure with its context, and goes idle once nothing is pending or in flight", async () => {
     const accepted: number[] = [];
     const failed: number[] = [];
-    const settled: Array<[number, boolean]> = [];
+    const busy: Array<[boolean, boolean]> = [];
     const save = vi.fn()
       .mockImplementationOnce(async () => undefined)
       .mockImplementationOnce(async () => { throw new Error("offline"); });
     const saver = createGoalSaver<number>({
       onAccepted: ({ context }) => accepted.push(context),
       onFailed: ({ context }) => failed.push(context),
-      onSettled: ({ context }, ok) => settled.push([context, ok]),
+      onBusyChange: (isBusy, lastAccepted) => busy.push([isBusy, lastAccepted]),
       save, ...stubTimers
     });
     saver.schedule({ dailyGoalMinutes: 540 }, 1);
@@ -104,6 +104,8 @@ describe("goal steppers (UIA-309)", () => {
     saver.flush();
     await vi.waitFor(() => expect(failed).toEqual([2]));
     expect(accepted).toEqual([1]);
-    expect(settled).toEqual([[2, false]]);
+    // Busy from the first tap until both saves are done; the last one failed.
+    expect(busy).toEqual([[true, true], [false, false]]);
+    expect(saver.isBusy()).toBe(false);
   });
 });
