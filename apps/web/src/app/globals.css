@@ -11681,12 +11681,24 @@ dialog.ui-dialog.df-palette {
   font-size: 13px;
 }
 
-.df-rcard-overlap {
-  padding: 0 24px;
+/* Overlap on a Review card: one quiet line under the time; a warning cue only when the overlap
+   covers most of the block (Trello, owner-approved). */
+.df-roverlap {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 4px 0 0;
+  color: var(--text-secondary);
+  font-size: 13px;
 }
 
-.df-rcard-overlap:empty {
-  display: none;
+.df-roverlap.is-large {
+  color: var(--warning-text);
+  font-weight: 650;
+}
+
+.df-roverlap svg {
+  flex: none;
 }
 
 .df-ractions {
@@ -11860,10 +11872,6 @@ dialog.ui-dialog.df-palette {
 
   .df-rbody h2 {
     font-size: 28px;
-  }
-
-  .df-rcard-overlap {
-    padding: 0 16px;
   }
 
   .df-ractions {
