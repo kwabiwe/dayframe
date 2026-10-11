@@ -1,6 +1,5 @@
 import { afterAll, describe, expect, it } from "vitest";
 import {
-  DEFAULT_TIMELINE_PREFERENCE,
   formatTimelinePeriodLabel,
   resetTimelineState,
   resolveTimelineRanges,

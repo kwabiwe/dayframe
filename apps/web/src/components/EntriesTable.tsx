@@ -282,12 +282,12 @@ export function EntriesTable({
       )
     }));
   }, [capturedNow, displayRange, displayedEntries]);
-  // Each day heading carries the day's total (every block counted in full, as the rows are).
-  const dayTotals = useMemo(() => {
-    const totals = new Map<string, number>();
-    for (const group of grouped) totals.set(group.day, (totals.get(group.day) ?? 0) + group.totalSeconds);
-    return totals;
-  }, [grouped]);
+  // Each day heading carries that day's time: every block's shown interval clipped to the local day
+  // (an overnight block counts on both days; a running one up to the captured time).
+  const dayTotals = useMemo(
+    () => listDayTotals(displayedEntries.map((entry) => timelineEntryDisplayInterval(entry, displayRange, capturedNow)), capturedNow, formatDate),
+    [capturedNow, displayRange, displayedEntries]
+  );
   const categoriesById = useMemo(() => new Map(categories.map((category) => [category.id, category])), [categories]);
 
   useEffect(() => {
@@ -705,6 +705,13 @@ export function EntriesTable({
       >
         <table className="timeline-list-table">
           {/* Column names stay for screen readers; the rows read as Blocks rows (as on Today). */}
+          {/* Column widths live here: the header row is visually hidden, so it can't size the columns. */}
+          <colgroup>
+            <col className="timeline-list-col-block" />
+            <col className="timeline-list-col-time" />
+            <col className="timeline-list-col-duration" />
+            <col className="timeline-list-col-actions" />
+          </colgroup>
           <thead className="timeline-list-head">
             <tr>
               <th>Block</th>
@@ -981,6 +988,34 @@ function overlapMarkerDescription(
   return `Overlap: ${formatDuration(overlap.uniqueOverlapSeconds)} shared with ${overlap.overlapCount} other ${
     overlap.overlapCount === 1 ? "entry" : "entries"
   }${peerDetail}. ${timeEntryTitle(entry)} still counts in full towards Total logged.`;
+}
+
+/** Seconds per local day (keyed by the List's day label) across intervals, each clipped to its days. */
+export function listDayTotals(
+  intervals: ReadonlyArray<{ startedAt: string; stoppedAt: string | null }>,
+  capturedNow: Date,
+  dayLabel: (iso: string) => string
+) {
+  const totals = new Map<string, number>();
+  for (const interval of intervals) {
+    const start = Date.parse(interval.startedAt);
+    const end = interval.stoppedAt ? Date.parse(interval.stoppedAt) : capturedNow.getTime();
+    if (!(end > start)) continue;
+    const cursor = new Date(start);
+    cursor.setHours(0, 0, 0, 0);
+    while (cursor.getTime() < end) {
+      const next = new Date(cursor);
+      next.setDate(next.getDate() + 1);
+      const from = Math.max(start, cursor.getTime());
+      const to = Math.min(end, next.getTime());
+      if (to > from) {
+        const key = dayLabel(new Date(from).toISOString());
+        totals.set(key, (totals.get(key) ?? 0) + Math.floor((to - from) / 1000));
+      }
+      cursor.setTime(next.getTime());
+    }
+  }
+  return totals;
 }
 
 /** The activity block with its icon (as on Today's rows); no activity is a neutral block. */
