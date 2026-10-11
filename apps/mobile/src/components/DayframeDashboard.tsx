@@ -221,6 +221,7 @@ import {
   optimisticRestoreTimeEntries,
   optimisticStartTimer,
   optimisticStopActiveTimer,
+  isSameRunningEntry,
   OPTIMISTIC_TIMER_ID_PREFIX,
   replaceOptimisticTimeEntryId,
   restoreDeletedTimeEntriesSafely,
@@ -1878,9 +1879,10 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
 
   async function applyRunningTimerSuggestion(entryId: string, suggestion: RecentActivitySuggestion) {
     const activeEntry = latestData.current?.activeEntry;
-    if (!activeEntry || activeEntry.id !== entryId) return false;
+    if (!activeEntry || !isSameRunningEntry(activeEntry.id, entryId, persistedTimerEntryId)) return false;
+    // Save against the id the dashboard holds now (the sheet may still hold the optimistic one).
     return saveTimeEntryOptimistically(
-      entryId,
+      activeEntry.id,
       {
         categoryId: suggestion.categoryId,
         description: suggestion.description,

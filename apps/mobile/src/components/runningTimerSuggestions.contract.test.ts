@@ -234,3 +234,14 @@ describe("time-entry sheet historical Suggestions contract", () => {
     expect(editSheetSource).not.toContain("setOverlayUpdateVisibilityDropCount(0)");
   });
 });
+
+describe("suggestion tap right after a start (UIA-053)", () => {
+  it("matches the running block through the start's id correlation and saves against the current id", () => {
+    expect(dashboardSource).toContain("!isSameRunningEntry(activeEntry.id, entryId, persistedTimerEntryId)");
+    expect(dashboardSource).not.toContain("if (!activeEntry || activeEntry.id !== entryId) return false;");
+  });
+
+  it("never leaves the keyboard behind when the sheet goes away", () => {
+    expect(editSheetSource).toContain("useEffect(() => () => Keyboard.dismiss(), []);");
+  });
+});
