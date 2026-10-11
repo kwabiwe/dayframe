@@ -2954,8 +2954,11 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
               presentActiveEditor("existing_active_timer");
             },
             onOpenCompleted: presentCompletedEntry,
-            // UIA-063: that suggestion on top of the deck, as a ribbon tap opens it.
-            onOpenReview: (reviewItemId) => router.push({ pathname: "/review", params: { focusReviewId: reviewItemId } })
+            // UIA-063: that suggestion on top of the deck, as a ribbon tap opens it; a crowd of
+            // only older needs-review entries ("") opens the Review list.
+            onOpenReview: (reviewItemId) => reviewItemId
+              ? router.push({ pathname: "/review", params: { focusReviewId: reviewItemId } })
+              : router.push("/review")
           }
         );
       };

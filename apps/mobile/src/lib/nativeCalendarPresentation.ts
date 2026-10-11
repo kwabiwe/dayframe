@@ -133,6 +133,8 @@ export type NativeCalendarOpenHandlers = {
 
 /** Review suggestions take the right 44% of the day column (Blocks prototype). */
 export const REVIEW_LANE_WIDTH = 0.44;
+/** At most two side by side in the Review lane keeps every target 44 points wide at 320 points. */
+export const REVIEW_LANE_MAX_LANES = 2;
 const REVIEW_LANE_Z_INDEX = 1_000;
 
 function layoutDayEntries(entries: NativeCalendarEntry[], dayStart: Date, dayEnd: Date, now: number) {
@@ -299,7 +301,7 @@ function serializeCalendarEntry(
     stoppedAt: effectiveStoppedAtMs
   });
   const title = displayEntryTitle(entry);
-  const actionKind: NativeCalendarActionKind = entry.reviewItemId
+  const actionKind: NativeCalendarActionKind = entry.reviewItemId !== undefined
     ? "review"
     : entry.isActive ? "active" : "completed";
   const actionId = entry.reviewItemId ?? entry.id;
@@ -369,8 +371,10 @@ function buildCalendarEntries(
   now: number
 ) {
   if (!data) return [];
-  const timeEntries = allTimeEntries.filter((entry) => entryOverlapsDay(entry, selectedDayKey, now));
   const reviewEntries: NativeCalendarEntry[] = [];
+  // A suggestion and the needs-review entry created from it are one moment: the suggestion draws
+  // (it opens that Review card) and its linked entry does not. Unlinked entries still draw.
+  const linkedEntryIds = new Set<string>();
 
   for (const item of data.reviewItems ?? []) {
     // UIA-060: every open suggestion with a time window, as Today's ribbon and the web Calendar
@@ -385,11 +389,96 @@ function buildCalendarEntries(
       isReviewSuggestion: true,
       reviewItemId: item.id
     };
-    if (entryOverlapsDay(entry, selectedDayKey, now)) reviewEntries.push(entry);
+      if (!entryOverlapsDay(entry, selectedDayKey, now)) continue;
+    for (const entryId of item.linkedEntryIds ?? []) linkedEntryIds.add(entryId);
+    reviewEntries.push(entry);
   }
+  const timeEntries = allTimeEntries.filter((entry) =>
+    entryOverlapsDay(entry, selectedDayKey, now)
+    && !(linkedEntryIds.has(entry.id) && isCalendarReviewNeeded(entry))
+  );
 
-  return [...timeEntries, ...reviewEntries]
+  const laneEntries = collapseCrowdedReviewLane(
+    [...timeEntries.filter(isCalendarReviewNeeded), ...reviewEntries],
+    now
+  );
+  return [...timeEntries.filter((entry) => !isCalendarReviewNeeded(entry)), ...laneEntries]
     .sort((left, right) => Date.parse(left.startedAt) - Date.parse(right.startedAt));
+}
+
+/**
+ * The Review lane is 44% of the day column, so more than REVIEW_LANE_MAX_LANES side by side would
+ * give targets under 44 points with no room for titles. Such a crowd becomes one hatched
+ * "N suggestions" block over the whole crowd that opens Review on its earliest suggestion
+ * (or the Review list when the crowd holds only older needs-review entries).
+ */
+export function collapseCrowdedReviewLane(entries: NativeCalendarEntry[], now: number): NativeCalendarEntry[] {
+  const timed = entries
+    .map((entry) => {
+      const start = Date.parse(entry.startedAt);
+      const end = entry.stoppedAt ? Date.parse(entry.stoppedAt) : now;
+      return { entry, start, end: Math.max(start, end) };
+    })
+    .filter((item) => Number.isFinite(item.start) && Number.isFinite(item.end))
+    .sort((left, right) => left.start - right.start || left.end - right.end);
+  const result: NativeCalendarEntry[] = entries.filter((entry) => !Number.isFinite(Date.parse(entry.startedAt)));
+  let crowd: typeof timed = [];
+  let crowdEnd = -Infinity;
+  const flush = () => {
+    if (!crowd.length) return;
+    if (maxConcurrent(crowd) <= REVIEW_LANE_MAX_LANES) {
+      result.push(...crowd.map((item) => item.entry));
+    } else {
+      result.push(reviewCrowdEntry(crowd.map((item) => item.entry), crowd[0].start, crowdEnd));
+    }
+    crowd = [];
+    crowdEnd = -Infinity;
+  };
+  for (const item of timed) {
+    if (crowd.length && item.start >= crowdEnd) flush();
+    crowd.push(item);
+    crowdEnd = Math.max(crowdEnd, item.end);
+  }
+  flush();
+  return result;
+}
+
+function maxConcurrent(items: { start: number; end: number }[]) {
+  const edges = items.flatMap((item) => [
+    { at: item.start, delta: 1 },
+    { at: Math.max(item.end, item.start + 1), delta: -1 }
+  ]).sort((left, right) => left.at - right.at || left.delta - right.delta);
+  let current = 0;
+  let max = 0;
+  for (const edge of edges) {
+    current += edge.delta;
+    max = Math.max(max, current);
+  }
+  return max;
+}
+
+function reviewCrowdEntry(entries: NativeCalendarEntry[], startMs: number, endMs: number): NativeCalendarEntry {
+  const first = entries.find((entry) => entry.reviewItemId) ?? null;
+  const label = `${entries.length} suggestions`;
+  return {
+    ...entries[0],
+    id: `review-crowd:${entries[0].id}`,
+    categoryColor: null,
+    categoryId: null,
+    categoryName: null,
+    description: label,
+    durationSeconds: Math.max(0, Math.round((endMs - startMs) / 1000)),
+    isActive: false,
+    isReviewSuggestion: true,
+    placeName: null,
+    // "" opens the Review list rather than one card.
+    reviewItemId: first?.reviewItemId ?? "",
+    reviewStatus: "needs_review",
+    startedAt: new Date(startMs).toISOString(),
+    stoppedAt: new Date(endMs).toISOString(),
+    tagNames: [],
+    tags: []
+  };
 }
 
 /**

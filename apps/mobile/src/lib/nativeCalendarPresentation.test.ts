@@ -177,6 +177,95 @@ describe("native Calendar presentation boundary", () => {
     expect(state.model.emptyState).toBe("Nothing framed yet.");
   });
 
+  describe("Review lane density and linkage (Codex r1 on #317)", () => {
+    const suggestion = (id: string, startHour: number, startMinute: number, minutes: number, linkedEntryIds?: string[]) => ({
+      categoryColor: null, categoryName: null, confidence: "medium",
+      createdAt: iso(localTime(2026, 7, 10, startHour, startMinute)), eventSource: "health_workout",
+      eventType: "health_workout_import", id, notes: null, placeName: null, rawPayload: null, status: "open",
+      suggestedCategoryId: null, suggestedPlaceId: null,
+      suggestedStartedAt: iso(localTime(2026, 7, 10, startHour, startMinute)),
+      suggestedStoppedAt: iso(localTime(2026, 7, 10, startHour, startMinute) + minutes * 60_000),
+      title: `Suggestion ${id}`, type: "review",
+      ...(linkedEntryIds ? { linkedEntryIds } : {})
+    });
+    const needsReview = (id: string, startHour: number, minutes: number) => entry({
+      id, reviewStatus: "needs_review", source: "health_workout",
+      startedAt: iso(localTime(2026, 7, 10, startHour, 0)),
+      stoppedAt: iso(localTime(2026, 7, 10, startHour, 0) + minutes * 60_000)
+    });
+    const now = localTime(2026, 7, 10, 23, 0);
+
+    it("draws a linked suggestion and its needs-review entry once, as the suggestion", () => {
+      const state = build(now, bootstrap([needsReview("entry-linked", 7, 45)], {
+        reviewItems: [suggestion("workout", 7, 0, 45, ["entry-linked"])]
+      }));
+      expect(state.model.entries.map((item) => [item.entryId, item.actionKind, item.actionId])).toEqual([
+        ["review:workout", "review", "workout"]
+      ]);
+    });
+
+    it("keeps unlinked needs-review entries and confirmed time that overlap a suggestion", () => {
+      const state = build(now, bootstrap([
+        needsReview("entry-legacy", 7, 30),
+        entry({ id: "entry-work", startedAt: iso(localTime(2026, 7, 10, 7, 0)), stoppedAt: iso(localTime(2026, 7, 10, 8, 0)) })
+      ], {
+        reviewItems: [suggestion("workout", 7, 0, 45, ["some-other-entry"])]
+      }));
+      expect(state.model.entries.map((item) => item.entryId).sort()).toEqual(["entry-legacy", "entry-work", "review:workout"]);
+    });
+
+    it("an older server without links still draws both (no dedupe guess)", () => {
+      const state = build(now, bootstrap([needsReview("entry-legacy", 7, 45)], {
+        reviewItems: [suggestion("workout", 7, 0, 45)]
+      }));
+      expect(state.model.entries).toHaveLength(2);
+    });
+
+    it("keeps two overlapping Review items side by side", () => {
+      const state = build(now, bootstrap([], {
+        reviewItems: [suggestion("a", 9, 0, 60), suggestion("b", 9, 15, 60)]
+      }));
+      const lane = state.model.entries;
+      expect(lane.map((item) => item.actionId)).toEqual(["a", "b"]);
+      for (const item of lane) expect(item.widthFraction).toBeCloseTo(REVIEW_LANE_WIDTH / 2);
+    });
+
+    it("collapses three or more side by side into one 'N suggestions' block over the whole crowd", () => {
+      const state = build(now, bootstrap([needsReview("entry-legacy", 9, 50)], {
+        reviewItems: [suggestion("a", 9, 10, 60), suggestion("b", 9, 20, 60), suggestion("c", 9, 30, 15), suggestion("later", 13, 0, 30)]
+      }));
+      const lane = state.model.entries;
+      expect(lane.map((item) => [item.title, item.actionKind, item.actionId])).toEqual([
+        ["4 suggestions", "review", "a"],
+        ["Suggestion later", "review", "later"]
+      ]);
+      const crowd = lane[0];
+      expect(crowd.startedAtMs).toBe(localTime(2026, 7, 10, 9, 0));
+      expect(crowd.stoppedAtMs).toBe(localTime(2026, 7, 10, 10, 20));
+      expect(crowd.widthFraction).toBeCloseTo(REVIEW_LANE_WIDTH);
+      expect(crowd.isReview).toBe(true);
+    });
+
+    it("a chain that never has three at once stays as separate blocks", () => {
+      const state = build(now, bootstrap([], {
+        reviewItems: [suggestion("a", 9, 0, 40), suggestion("b", 9, 30, 40), suggestion("c", 10, 0, 40)]
+      }));
+      expect(state.model.entries.map((item) => item.actionId)).toEqual(["a", "b", "c"]);
+    });
+
+    it("a crowd of only older needs-review entries opens the Review list", () => {
+      const state = build(now, bootstrap([needsReview("x", 9, 60), needsReview("y", 9, 60), needsReview("z", 9, 60)]));
+      expect(state.model.entries.map((item) => [item.title, item.actionKind, item.actionId])).toEqual([
+        ["3 suggestions", "review", ""]
+      ]);
+      const onOpenReview = vi.fn();
+      routeNativeCalendarOpenEvent({ actionId: "", kind: "review" }, state.actionEntries, {
+        onOpenActive: vi.fn(), onOpenCompleted: vi.fn(), onOpenReview
+      });
+      expect(onOpenReview).toHaveBeenCalledWith("");
+    });
+  });
+
   it("presents one-time place labels as Calendar locations", () => {
     const now = localTime(2026, 7, 10, 12, 0);
     const state = build(now, bootstrap([entry({
