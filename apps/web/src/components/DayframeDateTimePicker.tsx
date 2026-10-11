@@ -1,6 +1,7 @@
 "use client";
 
-import { CalendarDays, Clock3 } from "lucide-react";
+import { DayframeIcon } from "@/components/blocks/DayframeIcon";
+import { Clock3 } from "lucide-react";
 import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { DayframeCalendar } from "@/components/DayframeCalendar";
 import { maskTimeInput, parseTimeInput } from "@/lib/calendar-grid";
@@ -115,7 +116,7 @@ export function DayframeDateTimePicker({
         {dayOffset > 0 ? (
           <span aria-hidden="true" className="dayframe-date-time-day-offset">+{dayOffset}</span>
         ) : null}
-        <CalendarDays aria-hidden="true" size={17} />
+        <DayframeIcon glyph="calendar-days" size={17}/>
       </button>
       <section
         aria-hidden={!open}

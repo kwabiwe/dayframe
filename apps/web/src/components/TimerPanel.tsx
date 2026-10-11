@@ -1,9 +1,9 @@
 "use client";
 
+import { DayframeIcon } from "@/components/blocks/DayframeIcon";
 import { useEffect, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { paletteCssColorFor, placeDisplayName } from "@dayframe/shared";
-import { Play, Square, Trash2 } from "lucide-react";
 import { DestructiveConfirmationDialog } from "@/components/DestructiveConfirmationDialog";
 import { clientFetch } from "@/lib/client-auth-fetch";
 import { timeEntryCategoryColor, timeEntryCategoryLabel, timeEntryTitle } from "@/lib/display";
@@ -247,7 +247,7 @@ export function TimerPanel({
                 disabled={isBusy}
                 onClick={() => submit("stop")}
               >
-                <Square size={16} />
+                <DayframeIcon glyph="square" size={16}/>
                 Stop
               </button>
               <button
@@ -261,7 +261,7 @@ export function TimerPanel({
                   setDeleteDialogEntryId(activeEntry.id);
                 }}
               >
-                <Trash2 size={16} />
+                <DayframeIcon glyph="trash-2" size={16}/>
               </button>
             </div>
           ) : (
@@ -271,7 +271,7 @@ export function TimerPanel({
               disabled={isBusy}
               onClick={() => submit("start")}
             >
-              <Play size={16} />
+              <DayframeIcon glyph="play" size={16}/>
               Start
             </button>
           )}
@@ -299,7 +299,7 @@ export function TimerPanel({
                   {timeEntryCategoryLabel(entry)}
                 </span>
               </span>
-              <Play size={15} fill="currentColor" strokeWidth={0} />
+              <DayframeIcon glyph="play" size={15} fill="currentColor" strokeWidth={0}/>
             </button>
           ))}
         </div>
