@@ -68,9 +68,11 @@ export {
 } from "./starterActivities";
 export {
   categoryCountsTowardGoal,
+  defaultCountsTowardGoal,
   goalCountingEntries,
   goalCountingSeconds,
   goalExcludedCategoryIds,
+  withGoalExclusions,
   type GoalCountingCategory
 } from "./goalCounting";
 export {

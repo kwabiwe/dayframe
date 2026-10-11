@@ -34,6 +34,7 @@ import type { MobileStyles, MobileTheme } from "@/lib/mobileTheme";
 import { useResolvedReduceMotionPreference } from "@/lib/motion";
 import {
   buildReportsPresentation,
+  reportGoalSeconds,
   reportTrackedSeconds,
   spokenReportDuration,
 } from "@/lib/reportsPresentation";
@@ -501,7 +502,6 @@ export function ReportsTab({
           key: formatLocalDateKey(range.buckets[index].start),
           start: range.buckets[index].start,
           seconds: bucket.seconds,
-          goalSeconds: bucket.goalSeconds,
           segments: bucket.segments,
         }))
       : [];
@@ -565,7 +565,15 @@ export function ReportsTab({
   const dailyGoalMinutes = data.user.dailyGoalMinutes;
   const goalDays =
     choice === "week" && selection.mode === "all" && report
-      ? weekGoalDays(days, nowMs, dailyGoalMinutes)
+      ? (() => {
+          // Goal time is covered time in activities that count (UIA-043), never the logged sum.
+          const goalSeconds = reportGoalSeconds(data, range.buckets, reportNow);
+          return weekGoalDays(
+            days.map((day, index) => ({ ...day, goalSeconds: goalSeconds[index] ?? 0 })),
+            nowMs,
+            dailyGoalMinutes,
+          );
+        })()
       : [];
   const playBlocks = Boolean(report) && !blocksAnimated.current && !reduceMotion && resolved && isFocused;
   if (playBlocks && choice === "week" && days.some((day) => day.segments.length))

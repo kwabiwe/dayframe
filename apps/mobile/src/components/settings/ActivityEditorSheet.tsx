@@ -6,6 +6,7 @@ import {
   DAYFRAME_BLOCKS,
   DAYFRAME_PALETTE_PICKER,
   blockColorsFor,
+  defaultCountsTowardGoal,
   paletteColorFor,
   paletteKeyFor,
   resolveActivityIcon,
@@ -95,8 +96,10 @@ export function ActivityEditorSheet({
   const quickStartFull = pinnedCount >= QUICK_START_PIN_LIMIT;
   // A new activity joins quick start by default while there is room (as before this page).
   const [pinNew, setPinNew] = useState(!quickStartFull);
-  // Only an explicit false leaves the activity out of goal progress.
-  const [countsTowardGoal, setCountsTowardGoal] = useState(activity?.countsTowardGoal !== false);
+  // An existing activity keeps its stored choice (only an explicit false leaves it out); a new one
+  // follows its name (Sleep starts off) until the switch is touched.
+  const [goalChoice, setCountsTowardGoal] = useState<boolean | null>(activity ? activity.countsTowardGoal !== false : null);
+  const countsTowardGoal = goalChoice ?? defaultCountsTowardGoal(name);
   const [problem, setProblemState] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const done = useRef(false);
@@ -291,12 +294,12 @@ export function ActivityEditorSheet({
               <View style={styles.pinText}>
                 <Text {...mobileTextProps("itemTitle")} style={{ color: theme.textPrimary, fontSize: 15, fontWeight: "600" }}>Counts toward goal</Text>
                 <Text {...mobileTextProps("metadata")} style={{ color: theme.textMuted }}>
-                  Time here still shows in your day; it just doesn’t fill the goal.
+                  When off, time here still shows in your day but doesn’t fill the goal.
                 </Text>
               </View>
               <SettingsSwitch
                 disabled={saving}
-                accessibilityHint="Time here still shows in your day; it just doesn’t fill the goal."
+                accessibilityHint="When off, time here still shows in your day but doesn’t fill the goal."
                 label="Counts toward goal"
                 onValueChange={setCountsTowardGoal}
                 theme={theme}

@@ -1,6 +1,7 @@
 import { inspectHealthSourceRevision, type HealthSourceDecision } from "./health-source-provenance";
 import { withSyncTransaction, setSyncPhase, syncFailureMetadata, SyncOperationError, type SyncTransactionOptions } from "./sync-transaction";
 import {
+  defaultCountsTowardGoal,
   ActivityEventInputSchema,
   hasAutomaticConfidence,
   classifyLocationLearningEvidence,
@@ -1246,7 +1247,7 @@ export async function createCategory(
     color?: string | null;
     isPinned?: boolean;
     icon?: string | null;
-    /** Left out, a new activity counts toward the goal. */
+    /** Left out, a new activity counts toward the goal unless it is named Sleep. */
     countsTowardGoal?: boolean;
   },
   session: RequestSession = getDevSession()
@@ -1290,7 +1291,7 @@ export async function createCategory(
         color,
         pin,
         icon,
-        input.countsTowardGoal !== false
+        input.countsTowardGoal ?? defaultCountsTowardGoal(name)
       ]
     );
 

@@ -566,24 +566,41 @@ describe("Blocks Reports owner (parity step 10a)", () => {
     const withoutGoal = await week();
     expect(withoutGoal.root.findAllByType("ReportGoalStreak" as never)).toHaveLength(0);
     act(() => withoutGoal.unmount());
-    const tree = await week({ user: { id: "u", dailyGoalMinutes: 60 } } as never);
+    // The streak reads covered goal time from the entries the phone holds (UIA-043): two
+    // overlapping Monday hours count once, and Tuesday's Sleep doesn't count at all.
+    const block = (id: string, day: number, categoryId: string) => ({
+      id, categoryId, reviewStatus: "confirmed",
+      startedAt: new Date(2026, 8, day, 9).toISOString(), stoppedAt: new Date(2026, 8, day, 10).toISOString(),
+    });
+    const tree = await week({
+      user: { id: "u", dailyGoalMinutes: 60 },
+      historyEntries: [block("one", 7, "a"), block("two", 7, "a"), block("night", 8, "sleep"), block("nap", 8, "sleep")],
+      goalExcludedCategoryIds: ["sleep"],
+    } as never);
     const streak = tree.root.findByType("ReportGoalStreak" as never);
-    // Monday met (1h of a 1h goal); Tuesday and Wednesday (today) not.
+    // Monday met (1h of a 1h goal); Tuesday (only Sleep) and Wednesday (today) not.
     expect(streak.props.days).toEqual([true, false, false]);
-    expect(streak.props.goalLabel).toBe("1h");
+    act(() => tree.unmount());
+    // Two overlapping half hours on Monday stay half an hour: not met against a 1h goal.
+    const half = (id: string) => ({ ...block(id, 7, "a"), stoppedAt: new Date(2026, 8, 7, 9, 30).toISOString() });
+    const overlapping = await week({ user: { id: "u", dailyGoalMinutes: 60 }, historyEntries: [half("x"), half("y")] } as never);
+    expect(overlapping.root.findByType("ReportGoalStreak" as never).props.days).toEqual([false, false, false]);
+    act(() => overlapping.unmount());
+    const filtered = await week({ user: { id: "u", dailyGoalMinutes: 60 }, historyEntries: [block("one", 7, "a")] } as never);
+    expect(filtered.root.findByType("ReportGoalStreak" as never).props.goalLabel).toBe("1h");
     await act(async () =>
-      tree.root
+      filtered.root
         .findByProps({ accessibilityLabel: "Filter activities, all activities selected" })
         .props.onPress(),
     );
-    const sheet = tree.root.findByType("ReportFiltersSheet" as never);
+    const sheet = filtered.root.findByType("ReportFiltersSheet" as never);
     await act(async () =>
       sheet.props.onChange({ mode: "include", keys: ["a"], universe: ["a", "uncategorized"] }),
     );
     await act(async () => sheet.props.onApply());
     await act(async () => sheet.props.onDismissed(sheet.props.presentationId));
-    expect(tree.root.findAllByType("ReportGoalStreak" as never)).toHaveLength(0);
-    act(() => tree.unmount());
+    expect(filtered.root.findAllByType("ReportGoalStreak" as never)).toHaveLength(0);
+    act(() => filtered.unmount());
   });
 
   it("compares like with like: time since the shared cutoff does not count as a gain", async () => {

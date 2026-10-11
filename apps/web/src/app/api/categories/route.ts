@@ -26,7 +26,7 @@ const createCategorySchema = z.object({
   color: z.string().trim().optional(),
   isPinned: z.boolean().optional(),
   icon: activityIconSchema,
-  // Left out (older clients), a new activity counts toward the daily goal.
+  // Left out (older clients), a new activity counts toward the daily goal unless it is named Sleep.
   countsTowardGoal: z.boolean().optional()
 });
 

@@ -113,12 +113,29 @@ describe("Library › Activities", () => {
     const dialog = screen.getByRole("dialog");
     const toggle = within(dialog).getByRole("switch", { name: /Counts toward goal/ }) as HTMLInputElement;
     expect(toggle.checked).toBe(false);
-    expect(within(dialog).getByText("Time here still shows in your day; it just doesn’t fill the goal.")).toBeTruthy();
+    expect(within(dialog).getByText("When off, time here still shows in your day but doesn’t fill the goal.")).toBeTruthy();
     await user.click(toggle);
     expect(toggle.checked).toBe(true);
     await user.click(within(dialog).getByRole("button", { name: "Save" }));
     await waitFor(() => expect(changes()).toHaveLength(1));
     expect(changes()[0]).toMatchObject({ method: "PATCH", body: { id: ID(1), name: "Sleep", countsTowardGoal: true } });
+  });
+
+  it("starts a new activity named Sleep switched off until the switch is touched", async () => {
+    const user = userEvent.setup();
+    mount([activity(ID(1), "Reading")]);
+    await user.click(await screen.findByRole("button", { name: /New activity/ }));
+    const dialog = screen.getByRole("dialog");
+    const toggle = within(dialog).getByRole("switch", { name: /Counts toward goal/ }) as HTMLInputElement;
+    const name = within(dialog).getByPlaceholderText("Name, like Gardening or Piano");
+    await user.type(name, "Sleep");
+    expect(toggle.checked).toBe(false);
+    await user.type(name, "y");
+    expect(toggle.checked).toBe(true);
+    await user.type(name, "{Backspace}");
+    await user.click(within(dialog).getByRole("button", { name: "Create" }));
+    await waitFor(() => expect(changes()).toHaveLength(1));
+    expect(changes()[0]).toMatchObject({ method: "POST", body: { name: "Sleep", countsTowardGoal: false } });
   });
 
   it("creates an activity that counts toward the goal unless switched off", async () => {

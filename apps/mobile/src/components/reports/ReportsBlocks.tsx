@@ -25,8 +25,6 @@ export type ReportDayStack = {
   key: string;
   start: Date;
   seconds: number;
-  /** The day's time that fills the goal (see goalCounting.ts); seconds when left out. */
-  goalSeconds?: number;
   segments: readonly { key: string; seconds: number; color: string }[];
 };
 

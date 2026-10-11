@@ -87,6 +87,8 @@ describe("starter activities service", () => {
     const link = db.statements.find((statement) => statement.sql.startsWith("update categories set starter_key"));
     expect(link?.params).toEqual(["sleep", "my-sleep", session.workspaceId]);
     expect(link?.sql).toContain("starter_key is null");
+    // Linking keeps the person's own "Counts toward goal" choice (UIA-043).
+    expect(link?.sql).not.toContain("counts_toward_goal");
     expect(db.statements.some((statement) => /set (name|color|icon|is_pinned)/.test(statement.sql))).toBe(false);
     expect(db.statements.map((statement) => statement.sql)).toEqual(expect.arrayContaining(["begin", "commit"]));
   });

@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { withGoalExclusions } from "@dayframe/shared";
 import { buildTodayGoalFrame } from "./todayGoalFrame";
 
 const day = new Date(2026, 9, 7).getTime();
@@ -30,6 +31,19 @@ describe("buildTodayGoalFrame", () => {
     expect(on.goalSeconds).toBe(9 * 3600);
     expect(on.percent).toBe(100);
     expect(buildTodayGoalFrame({ entries, goalMinutes: 480, nowMs: day + 12 * 3_600_000 }).goalSeconds).toBe(9 * 3600);
+  });
+
+  it("keeps an archived non-counting activity out through the bootstrap's exclusion list", () => {
+    const entries = [entry("night", at(0), at(7), "sleep"), entry("work", at(9), at(10), "blue")];
+    const frame = buildTodayGoalFrame({
+      // Sleep is archived: only the exclusion list knows it doesn't count.
+      categories: withGoalExclusions([{ id: "cat-blue", countsTowardGoal: true }], ["cat-sleep"]),
+      entries,
+      goalMinutes: 480,
+      nowMs: day + 12 * 3_600_000,
+    });
+    expect(frame.totalSeconds).toBe(8 * 3600);
+    expect(frame.goalSeconds).toBe(3600);
   });
 
   it("counts time without an activity toward the goal", () => {

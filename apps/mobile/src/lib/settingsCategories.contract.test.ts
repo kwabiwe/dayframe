@@ -58,6 +58,9 @@ describe("mobile Activities page contract", () => {
     expect(settingsSource).toContain("<ActivityEditorSheet");
     expect(settingsSource).toContain("? await updateCategory(activity.id, { name: draft.name, color: draft.color, icon: draft.icon, countsTowardGoal: draft.countsTowardGoal })");
     expect(settingsSource).toContain(": await createCategory(draft.name, { color: draft.color, icon: draft.icon, isPinned: pinned, countsTowardGoal: draft.countsTowardGoal });");
+    // Today and Reports hear about the accepted activity (UIA-043), ordered by a sequence taken before sending.
+    expect(settingsSource.indexOf("const sequence = beginSavedActivityChange();")).toBeLessThan(settingsSource.indexOf("? await updateCategory(activity.id"));
+    expect(settingsSource).toContain("publishSavedActivity({ userId: owner.userId, workspaceId: owner.workspaceId, category: result.category, sequence });");
     // Accepted saves and archives show at once, even if the refresh after them fails.
     expect(settingsSource).toContain("// The accepted activity shows at once, even if the refresh below fails.");
     expect(settingsSource).toContain("applyActivityCategories((categories) => categories.filter((item) => item.id !== activity.id));");

@@ -99,6 +99,14 @@ describe("Today", () => {
     expect(container.querySelector("#df-today-total")?.textContent).toContain("2h 00m");
     expect(container.querySelector(".df-today-sub")?.textContent).toBe("framed today · 1h 00m toward your 8h goal (13%)");
     await act(async () => root.unmount());
+
+    // Admin archived: gone from `categories`, still listed as not counting.
+    const archived = bootstrap();
+    archived.categories = archived.categories.filter((category) => category.id !== "admin");
+    archived.goalExcludedCategoryIds = ["admin"];
+    const after = await mount(archived);
+    expect(after.container.querySelector(".df-today-sub")?.textContent).toBe("framed today · 1h 00m toward your 8h goal (13%)");
+    await act(async () => after.root.unmount());
   });
 
   it("deletes a finished block with Backspace, offers Undo on the toast and restores it", async () => {

@@ -4,9 +4,40 @@
  * Time in an activity that does not count still shows as framed time everywhere else (totals,
  * ribbons, reports); only goal progress leaves it out: Today's goal frame on web and iPhone and
  * Reports' days on goal. Time without an activity counts, and so does an activity this list
- * does not know (an older client, or one archived since): only an explicit `false` excludes.
+ * does not know (an older server): only an explicit `false` excludes. Bootstrap's active
+ * `categories` leave out archived activities, so it also sends `goalExcludedCategoryIds` (every
+ * activity, active or archived, that does not count); `withGoalExclusions` merges the two so an
+ * archived Sleep keeps its history out of the goal.
  */
 export type GoalCountingCategory = { id: string; countsTowardGoal?: boolean | null };
+
+/**
+ * The active activities plus every other activity known not to count (archived ones). An active
+ * activity's own flag wins over the list, so a list from an older bootstrap never overrides a
+ * switch changed since.
+ */
+export function withGoalExclusions(
+  categories: Iterable<GoalCountingCategory> | null | undefined,
+  excludedIds: Iterable<string> | null | undefined
+): GoalCountingCategory[] {
+  const merged: GoalCountingCategory[] = [...(categories ?? [])];
+  const known = new Set(merged.map((category) => category.id));
+  for (const id of excludedIds ?? []) {
+    if (!known.has(id)) {
+      known.add(id);
+      merged.push({ id, countsTowardGoal: false });
+    }
+  }
+  return merged;
+}
+
+/**
+ * Whether a new activity counts toward the goal before anyone touches its switch: everything but
+ * Sleep (by name, ignoring case and spaces), as the Sleep starter.
+ */
+export function defaultCountsTowardGoal(name: string | null | undefined) {
+  return (name ?? "").trim().toLocaleLowerCase("en") !== "sleep";
+}
 
 /** The ids of the activities whose time does not count toward the goal. */
 export function goalExcludedCategoryIds(categories: Iterable<GoalCountingCategory> | null | undefined): Set<string> {

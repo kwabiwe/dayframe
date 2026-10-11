@@ -1,4 +1,4 @@
-import { DAYFRAME_THEME, goalCountingSeconds, paletteColorFor, type ReportSummary } from "@dayframe/shared";
+import { DAYFRAME_THEME, goalCountingEntries, paletteColorFor, withGoalExclusions, type ReportSummary } from "@dayframe/shared";
 import type { MobileBootstrap, MobileTimeEntry } from "./api";
 import type { MobileTheme } from "./mobileTheme";
 import type { ReportRange, ReportWindow } from "./reportsRanges";
@@ -76,6 +76,42 @@ export function reportTrackedSeconds(
         : sum,
     0,
   );
+}
+
+/**
+ * Each window's goal time for the goal streak: covered time (overlapping entries count once, as on
+ * Today and web Reports) of confirmed entries in activities that count toward the goal (UIA-043;
+ * archived activities that don't count stay out through `goalExcludedCategoryIds`), from the
+ * entries the phone holds (bootstrap plus the running timer). Recent windows only, like
+ * `reportTrackedSeconds`: the streak covers the current week.
+ */
+export function reportGoalSeconds(
+  data: MobileBootstrap,
+  windows: readonly ReportWindow[],
+  nowMs: number,
+) {
+  const counting = goalCountingEntries(
+    reportEntryUnion(data).filter(eligible),
+    withGoalExclusions(data.categories, data.goalExcludedCategoryIds),
+  );
+  return windows.map((window) => {
+    const spans = counting
+      .map((entry) => {
+        const start = Math.max(Date.parse(entry.startedAt), +window.start);
+        const end = Math.min(entry.stoppedAt ? Date.parse(entry.stoppedAt) : nowMs, nowMs, +window.end);
+        return [start, end] as const;
+      })
+      .filter(([start, end]) => Number.isFinite(start) && Number.isFinite(end) && end > start)
+      .sort((a, b) => a[0] - b[0]);
+    let coveredMs = 0;
+    let coveredUntil = Number.NEGATIVE_INFINITY;
+    for (const [start, end] of spans) {
+      const from = Math.max(start, coveredUntil);
+      if (end > from) coveredMs += end - from;
+      coveredUntil = Math.max(coveredUntil, end);
+    }
+    return coveredMs / 1000;
+  });
 }
 
 /** Replace only the server's current timer contribution with the existing Dashboard projection. */
@@ -222,12 +258,6 @@ export function buildReportsPresentation(input: {
         (sum, [key, seconds]) =>
           sum + (reportSelectionIncludes(selection, key) ? seconds : 0),
         0,
-      ),
-      // The goal streak's time: the same seconds without activities switched off "Counts toward
-      // goal" (Sleep by default, UIA-043).
-      goalSeconds: goalCountingSeconds(
-        [...b.byCategory].filter(([key]) => reportSelectionIncludes(selection, key)),
-        data.categories,
       ),
       segments: [...b.byCategory]
         .filter(

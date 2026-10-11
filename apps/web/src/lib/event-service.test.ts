@@ -618,12 +618,17 @@ describe("category persistence", () => {
 
     await createCategory({ name: "Garden" }, session);
     const nap = await createCategory({ name: "Nap", countsTowardGoal: false }, session);
+    // A new activity named Sleep starts off unless the request says otherwise.
+    await createCategory({ name: " sleep " }, session);
+    await createCategory({ name: "Sleep", countsTowardGoal: true }, session);
 
     expect(String(client.query.mock.calls.find(([statement]) => String(statement).includes("insert into categories"))?.[0]))
       .toContain("is_pinned, icon, counts_toward_goal)");
     expect(inserts[0][5]).toBe(true);
     expect(inserts[1][5]).toBe(false);
     expect(nap).toMatchObject({ countsTowardGoal: false });
+    expect(inserts[2][5]).toBe(false);
+    expect(inserts[3][5]).toBe(true);
   });
 
   it("creates missing automatic logging categories and reuses existing names case-insensitively", async () => {

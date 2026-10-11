@@ -6,6 +6,7 @@ import { buildReportRange } from "./reportsRanges";
 import {
   buildReportsPresentation,
   entryOverlapMs,
+  reportGoalSeconds,
   formatReportPercent,
   reportAxis,
 } from "./reportsPresentation";
@@ -334,18 +335,38 @@ describe("Blocks day stacks", () => {
     });
     expect(gymOnly.buckets[1].segments.map((s) => s.key)).toEqual(["b"]);
     expect(gymOnly.buckets[1].seconds).toBe(1800);
-    // Every activity counts until one is switched off "Counts toward goal" (UIA-043).
-    expect(all.buckets[0].goalSeconds).toBe(all.buckets[0].seconds);
-    const sleepOff = buildReportsPresentation({
-      data: { ...data(), categories: [{ id: "a", name: "Sleep", color: "blue", isPinned: false, countsTowardGoal: false }] },
-      summary: weekSummary,
-      range: week,
-      nowMs: now,
-      selection: { mode: "all" },
-      themeMode: "dark",
+  });
+});
+
+describe("goal streak time (UIA-043)", () => {
+  const week = buildReportRange("week", now);
+  const monday = +week.buckets[0].start;
+  const at = (hour: number) => new Date(monday + hour * 3_600_000).toISOString();
+  const withEntries = (entries: MobileTimeEntry[], extra: Partial<MobileBootstrap> = {}) =>
+    ({ ...data(), entries, ...extra }) as MobileBootstrap;
+
+  it("counts overlapping goal time once, as Today and web Reports do", () => {
+    const work = (id: string) => entry({ id, categoryId: "work", startedAt: at(8), stoppedAt: at(12) });
+    const seconds = reportGoalSeconds(withEntries([work("one"), work("two")]), week.buckets, now);
+    expect(seconds[0]).toBe(4 * 3600);
+  });
+
+  it("leaves out Sleep, even archived, and keeps time without an activity", () => {
+    const entries = [
+      entry({ id: "night", categoryId: "sleep", startedAt: at(0), stoppedAt: at(7) }),
+      entry({ id: "work", categoryId: "work", startedAt: at(9), stoppedAt: at(10) }),
+      entry({ id: "bare", categoryId: null, startedAt: at(10), stoppedAt: at(11) }),
+      entry({ id: "suggested", categoryId: "work", reviewStatus: "needs_review", startedAt: at(13), stoppedAt: at(14) }),
+    ];
+    // Sleep archived: not in `categories`, but in the bootstrap's exclusion list.
+    expect(reportGoalSeconds(withEntries(entries, { goalExcludedCategoryIds: ["sleep"] }), week.buckets, now)[0]).toBe(2 * 3600);
+    // An older bootstrap without the list counts everything.
+    expect(reportGoalSeconds(withEntries(entries), week.buckets, now)[0]).toBe(9 * 3600);
+    // The active activity's own switch wins over a stale list.
+    const switchedOn = withEntries(entries, {
+      categories: [{ id: "sleep", name: "Sleep", color: "blue", isPinned: false, countsTowardGoal: true }],
+      goalExcludedCategoryIds: ["sleep"],
     });
-    expect(sleepOff.buckets[0].seconds).toBe(all.buckets[0].seconds);
-    expect(sleepOff.buckets[0].goalSeconds).toBe(all.buckets[0].seconds - 3600);
-    expect(sleepOff.buckets[1].goalSeconds).toBe(1800);
+    expect(reportGoalSeconds(switchedOn, week.buckets, now)[0]).toBe(9 * 3600);
   });
 });

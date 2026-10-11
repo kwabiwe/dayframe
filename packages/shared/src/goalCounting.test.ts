@@ -2,9 +2,11 @@ import { describe, expect, it } from "vitest";
 import {
   DAYFRAME_STARTER_ACTIVITIES,
   categoryCountsTowardGoal,
+  defaultCountsTowardGoal,
   goalCountingEntries,
   goalCountingSeconds,
-  goalExcludedCategoryIds
+  goalExcludedCategoryIds,
+  withGoalExclusions
 } from "./index";
 
 const categories = [
@@ -47,6 +49,21 @@ describe("goal counting (UIA-043)", () => {
     expect(goalCountingEntries(entries, [{ id: "sleep", countsTowardGoal: true }])).toEqual(entries);
     expect(goalCountingSeconds([["sleep", 60]], [{ id: "sleep", countsTowardGoal: true }])).toBe(60);
     expect(goalCountingEntries(entries, null)).toEqual(entries);
+  });
+
+  it("keeps archived activities that don't count out, while an active switch wins", () => {
+    const entries = [{ id: "a", categoryId: "archived-sleep" }, { id: "b", categoryId: "sleep" }, { id: "c", categoryId: "work" }];
+    const merged = withGoalExclusions([{ id: "sleep", countsTowardGoal: true }, { id: "work" }], ["archived-sleep", "sleep"]);
+    expect(goalCountingEntries(entries, merged).map((entry) => entry.id)).toEqual(["b", "c"]);
+    expect(withGoalExclusions(null, undefined)).toEqual([]);
+  });
+
+  it("starts a new activity named Sleep not counting", () => {
+    expect(defaultCountsTowardGoal("Sleep")).toBe(false);
+    expect(defaultCountsTowardGoal("  sLEEP ")).toBe(false);
+    expect(defaultCountsTowardGoal("Sleep in")).toBe(true);
+    expect(defaultCountsTowardGoal("")).toBe(true);
+    expect(defaultCountsTowardGoal(null)).toBe(true);
   });
 
   it("starts Sleep, and only Sleep, not counting", () => {

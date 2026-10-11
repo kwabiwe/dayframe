@@ -5,6 +5,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   DAYFRAME_ACTIVITY_ICONS,
   DAYFRAME_PALETTE_PICKER,
+  defaultCountsTowardGoal,
   paletteKeyFor,
   resolveActivityIcon,
   type DayframePaletteKey
@@ -415,7 +416,10 @@ function ActivityEditor({
   const icon = resolved.key ?? "";
   const setIcon = (key: string) => setPickedIcon(key);
   // UIA-043: only an explicit false leaves the activity out of goal progress.
-  const [countsTowardGoal, setCountsTowardGoal] = useState(target?.countsTowardGoal !== false);
+  // An existing activity keeps its stored choice; a new one follows its name (Sleep starts off)
+  // until the switch is touched.
+  const [goalChoice, setCountsTowardGoal] = useState<boolean | null>(target ? target.countsTowardGoal !== false : null);
+  const countsTowardGoal = goalChoice ?? defaultCountsTowardGoal(name);
   const [problem, setProblem] = useState<string | null>(null);
   const nameRef = useRef<HTMLInputElement | null>(null);
   const iconGlyph = resolved.glyph;
@@ -535,7 +539,7 @@ function ActivityEditor({
         <label className="place-suggestion-toggle df-ce-toggle">
           <span>
             <strong>Counts toward goal</strong>
-            <small id="df-ce-goal-hint">Time here still shows in your day; it just doesn’t fill the goal.</small>
+            <small id="df-ce-goal-hint">When off, time here still shows in your day but doesn’t fill the goal.</small>
           </span>
           <input
             aria-describedby="df-ce-goal-hint"
