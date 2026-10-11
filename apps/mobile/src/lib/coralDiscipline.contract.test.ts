@@ -15,7 +15,7 @@ function styleBlock(name: string) {
 describe("Coral discipline on iPhone (audit A4)", () => {
   it("keeps secondary buttons, Done and today markers neutral, and destructive text red", () => {
     expect(styleBlock("secondaryButtonText")).toContain("color: theme.textPrimary");
-    expect(styleBlock("activeEditDeleteText")).toContain("color: theme.danger");
+    expect(styleBlock("activeEditDeleteText")).toContain("color: theme.dangerText");
     expect(styleBlock("datePickerDoneButton")).toContain("backgroundColor: theme.textPrimary");
     expect(styleBlock("datePickerDoneText")).toContain("color: theme.background");
     expect(reports).toContain('<DayframeIcon color={theme.textPrimary} glyph="flame" size={22} />');

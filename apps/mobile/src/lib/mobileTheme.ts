@@ -1077,7 +1077,7 @@ function createStyles(theme: MobileTheme) {
       fontWeight: "600"
     },
     overflowMenuDangerText: {
-      color: theme.danger,
+      color: theme.dangerText,
       fontFamily: monoFont,
       fontSize: 15,
       fontWeight: "600"
@@ -1866,7 +1866,7 @@ function createStyles(theme: MobileTheme) {
     },
     // Destructive text is danger red, never coral (UIA-014).
     activeEditDeleteText: {
-      color: theme.danger,
+      color: theme.dangerText,
       fontFamily: monoFont,
       fontSize: 13,
       fontWeight: "600"
