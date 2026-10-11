@@ -6,7 +6,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { AccessibilityInfo, Pressable, ScrollView, StyleSheet, Text, View, findNodeHandle } from "react-native";
 import * as Location from "expo-location";
-import { router, useFocusEffect } from "expo-router";
+import { router, useFocusEffect, useLocalSearchParams } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
 import Reanimated, {
   ReduceMotion,
@@ -25,7 +25,9 @@ import {
   type DayframePaletteKey,
   type HealthImportPreferences
 } from "@dayframe/shared";
+import Svg, { Defs, Path, Pattern, Rect } from "react-native-svg";
 import { ActivityIcon, DayframeIcon } from "@/components/icons/DayframeIcon";
+import { colorWithAlpha } from "@/components/today/todayBlocksLayout";
 import { AuthRequiredError, ensureAutomaticLoggingCategories, fetchBootstrap, updateCategory, type MobileBootstrap } from "@/lib/api";
 import { getLocationVisitDiagnostics, setLocationLearningEnabled } from "@/lib/geofence";
 import { playHaptic } from "@/lib/haptics";
@@ -92,7 +94,10 @@ export default function OnboardingScreen() {
   // Picks the person changed win over a late first read of the saved ones.
   const pickEdited = useRef(false);
   // This account's activities for the quick-start step (null until read).
+  const { from: openedFrom } = useLocalSearchParams<{ from?: string | string[] }>();
   const [activities, setActivities] = useState<Activity[] | null>(null);
+  // The pinned activities as first read, so Done shows the tiles even when setup is skipped (UIA-090).
+  const [initialPinned, setInitialPinned] = useState<Activity[]>([]);
   const [activitiesFailed, setActivitiesFailed] = useState(false);
   const [pinning, setPinning] = useState<string | null>(null);
   const [pinNote, setPinNote] = useState<string | null>(null);
@@ -132,6 +137,12 @@ export default function OnboardingScreen() {
       ]);
       const bootstrap = await fetchBootstrap().catch(() => null);
       if (!(await stillHere(epoch))) return;
+      if (
+        bootstrap && owner.current &&
+        bootstrap.user.id === owner.current.userId && bootstrap.workspace.id === owner.current.workspaceId
+      ) {
+        setInitialPinned([...bootstrap.categories].filter((item) => item.isPinned).sort((a, b) => a.name.localeCompare(b.name)));
+      }
       const location = foreground && !foreground.granted && !foreground.canAskAgain
         ? "off"
         : locationChoiceFromPermissions(Boolean(foreground?.granted), Boolean(background?.granted));
@@ -417,12 +428,25 @@ export default function OnboardingScreen() {
 
   const chrome = onboardingChrome(step);
   const content = stepContent(step, answers);
+  // Opened again from Settings: the first step can be closed (UIA-091); first sign-in has no way out.
+  const fromSettings = [openedFrom].flat()[0] === "settings";
 
   return (
     <SafeAreaView style={[styles.safe, { backgroundColor: theme.background }]}>
       <View style={styles.top}>
         <View style={styles.topSide}>
-          {chrome.back ? (
+          {fromSettings && step === "welcome" ? (
+            <Pressable
+              accessibilityLabel="Close"
+              accessibilityHint="Back to Settings"
+              accessibilityRole="button"
+              onPress={() => router.back()}
+              style={({ pressed }) => [styles.back, { backgroundColor: theme.surface }, pressed ? styles.pressed : null]}
+              testID="onboarding-close"
+            >
+              <DayframeIcon color={theme.textPrimary} glyph={DAYFRAME_APP_ICONS.close} size={20} />
+            </Pressable>
+          ) : chrome.back ? (
             <Pressable
               accessibilityLabel="Previous step"
               accessibilityRole="button"
@@ -495,7 +519,7 @@ export default function OnboardingScreen() {
               <Text {...mobileTextProps("metadata")} style={[styles.privacyText, { color: theme.textSecondary }]}>{content.privacy}</Text>
             </View>
           ) : null}
-          {step === "done" ? <DoneSummary answers={answers} theme={theme} /> : null}
+          {step === "done" ? <DoneSummary answers={answers} pinned={activities ? activities.filter((item) => item.isPinned) : initialPinned} theme={theme} /> : null}
           {content.result ? (
             <Reanimated.View
               entering={localPresenceEntering(reduceMotion)}
@@ -620,7 +644,7 @@ function stepContent(step: OnboardingStep, answers: OnboardingAnswers): StepCont
       return {
         glyph: null,
         title: "Pick your quick starts",
-        lede: "These become the tiles on Today. Tap one to start timing it. Rename, recolour or add your own any time in Settings › Activities.",
+        lede: "Pin up to 6. They become your tiles on Today. Change them any time in Settings › Activities.",
         bullets: [],
         privacy: null,
         result: null
@@ -879,7 +903,7 @@ function WelcomeBlock({ color, index, name, play, theme, weight }: { color: Dayf
   );
 }
 
-/** What Location suggestions look like in Review (sample). */
+/** What Location suggestions look like in Review (sample): hatched blocks, as on Today's ribbon (UIA-090). */
 function ReviewPreview({ theme }: { theme: MobileTheme }) {
   const rows: [DayframePaletteKey, string, string, string][] = [
     ["graphite", "08:36", "Drive to School", "2 min · 0.8 km"],
@@ -888,14 +912,28 @@ function ReviewPreview({ theme }: { theme: MobileTheme }) {
   return (
     <View accessibilityLabel="Example: what you'll see in Review" accessible style={[styles.preview, { backgroundColor: theme.surface }]}>
       <Text {...mobileTextProps("counter")} style={[styles.previewEyebrow, { color: theme.textMuted }]}>WHAT YOU&apos;LL SEE IN REVIEW</Text>
-      {rows.map(([color, time, title, meta]) => (
-        <View key={title} style={styles.previewRow}>
-          <View style={[styles.previewSwatch, { backgroundColor: blockColorsFor(color, theme.mode).fill }]} />
-          <Text {...mobileTextProps("metadata")} style={[styles.previewTime, { color: theme.textMuted }]}>{time}</Text>
-          <Text {...mobileTextProps("itemTitle")} numberOfLines={1} style={[styles.previewTitle, { color: theme.textPrimary }]}>{title}</Text>
-          <Text {...mobileTextProps("metadata")} style={{ color: theme.textMuted }}>{meta}</Text>
-        </View>
-      ))}
+      {rows.map(([color, time, title, meta]) => {
+        const fill = blockColorsFor(color, theme.mode).fill;
+        return (
+          <View key={title} style={styles.previewRow}>
+            {/* The hatched block (as on Today's ribbon); text stays on the plain surface for contrast. */}
+            <View style={[styles.previewHatched, { borderColor: colorWithAlpha(fill, 0.7) }]}>
+            <Svg pointerEvents="none" style={StyleSheet.absoluteFill}>
+              <Defs>
+                <Pattern height={12} id={`onboarding-hatch-${color}`} patternUnits="userSpaceOnUse" width={12}>
+                  <Rect fill={colorWithAlpha(fill, 0.16)} height={12} width={12} />
+                  <Path d="M-3 9 9 -3M3 15 15 3" stroke={colorWithAlpha(fill, 0.4)} strokeWidth={4.2} />
+                </Pattern>
+              </Defs>
+              <Rect fill={`url(#onboarding-hatch-${color})`} height="100%" width="100%" />
+            </Svg>
+            </View>
+            <Text {...mobileTextProps("metadata")} style={[styles.previewTime, { color: theme.textSecondary }]}>{time}</Text>
+            <Text {...mobileTextProps("itemTitle")} numberOfLines={1} style={[styles.previewTitle, { color: theme.textPrimary }]}>{title}</Text>
+            <Text {...mobileTextProps("metadata")} style={{ color: theme.textSecondary }}>{meta}</Text>
+          </View>
+        );
+      })}
     </View>
   );
 }
@@ -920,7 +958,7 @@ function MotionPreview({ theme }: { theme: MobileTheme }) {
   );
 }
 
-function DoneSummary({ answers, theme }: { answers: OnboardingAnswers; theme: MobileTheme }) {
+function DoneSummary({ answers, pinned, theme }: { answers: OnboardingAnswers; pinned: Activity[]; theme: MobileTheme }) {
   const glyphs: Record<string, [DayframeGlyph, DayframePaletteKey]> = {
     location: [DAYFRAME_APP_ICONS.places, "red"],
     motion: ["footprints", "amber"],
@@ -947,14 +985,37 @@ function DoneSummary({ answers, theme }: { answers: OnboardingAnswers; theme: Mo
               <Text {...mobileTextProps("itemTitle")} style={[styles.summaryTitle, { color: theme.textPrimary }]}>{row.title}</Text>
               <Text {...mobileTextProps("metadata")} style={{ color: theme.textMuted }}>{row.detail}</Text>
             </View>
+            {/* State as a pill (UIA-090): On in the success tint, Later neutral. */}
             {row.state === "none" ? null : (
-              <Text {...mobileTextProps("control")} style={[styles.summaryState, { color: row.state === "on" ? theme.success : theme.textMuted }]}>
-                {row.state === "on" ? "On" : "Later"}
-              </Text>
+              <View style={[styles.summaryPill, { backgroundColor: theme.surfaceMuted }]}>
+                <View style={[styles.summaryDot, { backgroundColor: row.state === "on" ? theme.success : theme.textMuted }]} />
+                <Text {...mobileTextProps("control")} style={[styles.summaryState, { color: theme.textPrimary }]}>
+                  {row.state === "on" ? "On" : "Later"}
+                </Text>
+              </View>
             )}
           </View>
         );
       })}
+      {/* The quick starts as they'll look on Today (UIA-090). */}
+      {pinned.length ? (
+        <View
+          accessibilityLabel={`Quick starts on Today: ${pinned.map((item) => item.name).join(", ")}`}
+          accessible
+          style={[styles.doneTiles, { borderTopColor: theme.border }]}
+          testID="onboarding-done-tiles"
+        >
+          {pinned.map((item) => {
+            const block = blockColorsFor(item.color ?? item.id, theme.mode, item.name);
+            return (
+              <View key={item.id} style={[styles.doneTile, { backgroundColor: block.fill }]}>
+                <ActivityIcon color={block.text} icon={item.icon ?? null} name={item.name} size={14} />
+                <Text {...mobileTextProps("counter")} numberOfLines={1} style={[styles.doneTileText, { color: block.text }]}>{item.name}</Text>
+              </View>
+            );
+          })}
+        </View>
+      ) : null}
     </View>
   );
 }
@@ -1176,7 +1237,7 @@ const styles = StyleSheet.create({
   preview: { borderRadius: 18, gap: 10, padding: 14 },
   previewEyebrow: { fontSize: 11, fontWeight: "700", letterSpacing: 0.9 },
   previewRow: { alignItems: "center", flexDirection: "row", gap: 10 },
-  previewSwatch: { borderRadius: 6, height: 24, width: 24 },
+  previewHatched: { borderRadius: 8, borderWidth: 1, height: 30, overflow: "hidden", width: 34 },
   previewTime: { fontVariant: ["tabular-nums"], width: 44 },
   previewTitle: { flex: 1, fontSize: 15, fontWeight: "600" },
   motionBar: { borderRadius: 10, flexDirection: "row", gap: 3, height: 36, overflow: "hidden" },
@@ -1187,7 +1248,12 @@ const styles = StyleSheet.create({
   summaryGlyph: { alignItems: "center", borderRadius: 10, height: 36, justifyContent: "center", width: 36 },
   summaryText: { flex: 1, minWidth: 0 },
   summaryTitle: { fontSize: 15, fontWeight: "600" },
-  summaryState: { fontSize: 15, fontWeight: "700" },
+  summaryState: { fontSize: 13, fontWeight: "700" },
+  summaryPill: { alignItems: "center", borderRadius: 999, flexDirection: "row", gap: 6, justifyContent: "center", minHeight: 28, paddingHorizontal: 12 },
+  summaryDot: { borderRadius: 4, height: 8, width: 8 },
+  doneTiles: { borderTopWidth: StyleSheet.hairlineWidth, flexDirection: "row", flexWrap: "wrap", gap: 6, paddingTop: 12 },
+  doneTile: { alignItems: "center", borderRadius: 10, flexDirection: "row", gap: 6, maxWidth: "100%", minHeight: 32, paddingHorizontal: 10 },
+  doneTileText: { flexShrink: 1, fontSize: 12, fontWeight: "700" },
   check: { alignItems: "center", borderRadius: 12, height: 24, justifyContent: "center", width: 24 },
   tilesWrap: { gap: 10 },
   tiles: { flexDirection: "row", flexWrap: "wrap", gap: 8 },

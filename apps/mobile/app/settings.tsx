@@ -2082,7 +2082,7 @@ export default function SettingsScreen() {
                 />
                 <SettingsBlockRow
                   accessibilityHint="Walks through location, motion and the other permissions again"
-                  onPress={() => router.push("/onboarding")}
+                  onPress={() => router.push({ pathname: "/onboarding", params: { from: "settings" } })}
                   testID="settings-setup-again"
                   theme={theme}
                   title="Set up Dayframe again"
