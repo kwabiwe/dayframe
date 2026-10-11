@@ -13184,10 +13184,13 @@ dialog.ui-dialog.df-rf-dialog {
   position: absolute;
   z-index: 3;
   right: 4px;
+  box-sizing: border-box;
+  height: 20px;
   transform: translateY(-50%);
   border-radius: 999px;
   background: var(--accent);
   padding: 2px 7px;
+  line-height: 16px;
   color: var(--on-accent);
   font-size: 11px;
   font-weight: 750;
@@ -13311,16 +13314,25 @@ dialog.ui-dialog.df-rf-dialog {
 @media (max-width: 760px) {
   .df-cal-head {
     display: grid;
-    grid-template-areas: "title total" "days days";
-    grid-template-columns: minmax(0, 1fr) auto;
-    align-items: start;
-    gap: 6px 12px;
+    grid-template-areas: "title total" "framed framed" "days days";
+    grid-template-columns: auto minmax(0, 1fr);
+    align-items: center;
+    gap: 0 12px;
     padding: 10px 12px 6px;
   }
 
+  /* The month and the week total share the first row; the day's framed line gets its own row, and
+     a long past-week total wraps beside the month instead of overlapping it. */
   .df-cal-head > div:first-child {
+    display: contents;
+  }
+
+  .df-cal-head h1 {
     grid-area: title;
-    min-width: 0;
+  }
+
+  .df-cal-head > div:first-child > p {
+    grid-area: framed;
   }
 
   .df-cal-head h1 {
@@ -13349,7 +13361,9 @@ dialog.ui-dialog.df-rf-dialog {
 
   .df-cal-weektotal {
     grid-area: total;
-    padding-top: 6px;
+    justify-self: end;
+    text-align: right;
+    white-space: normal;
   }
 
   .df-cal-day {

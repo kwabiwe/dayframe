@@ -404,6 +404,7 @@ export function TimeReviewViews({
   const headModel = calendarHeadModel({
     dayLoggedSeconds: dayAnalysis.totalLoggedSeconds,
     entries: visibleWeekEntries,
+    hydrated,
     nowMs: capturedNow.getTime(),
     selectedDay: ranges.day.start,
     weekDays: ranges.weekDays,

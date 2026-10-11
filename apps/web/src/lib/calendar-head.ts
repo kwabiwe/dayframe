@@ -34,6 +34,7 @@ const WEEK_OF = new Intl.DateTimeFormat("en-GB", { day: "numeric", month: "short
 export function calendarHeadModel({
   dayLoggedSeconds,
   entries,
+  hydrated = true,
   nowMs,
   selectedDay,
   weekDays,
@@ -41,13 +42,18 @@ export function calendarHeadModel({
 }: {
   dayLoggedSeconds: number;
   entries: readonly TodayEntry[];
+  /**
+   * Whether the browser has hydrated. "Today" depends on the browser's time zone, which the server
+   * render can't know, so the today mark and "this week" wait for hydration (both renders agree).
+   */
+  hydrated?: boolean;
   nowMs: number;
   selectedDay: Date;
   weekDays: readonly Date[];
   weekLoggedSeconds: number;
 }): CalendarHeadModel {
   const selectedKey = toTimelineDateKey(selectedDay);
-  const todayKey = toTimelineDateKey(new Date(nowMs));
+  const todayKey = hydrated ? toTimelineDateKey(new Date(nowMs)) : null;
   return {
     month: MONTH.format(selectedDay),
     framedLine: `${formatDuration(dayLoggedSeconds)} framed on ${WEEKDAY_LONG.format(selectedDay)}`,
