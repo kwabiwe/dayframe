@@ -2022,7 +2022,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
         requestImmediateDelivery: connectivityCurrent.current.isOnline
       });
       if (!queue.some((item) => item.localId === optimisticId && item.type === "timer_start")) {
-        throw new Error("The offline timer start could not be queued.");
+        throw new Error("The block couldn't be saved on this iPhone to send later.");
       }
     } catch {
       if (options.blankStartToken !== undefined) {

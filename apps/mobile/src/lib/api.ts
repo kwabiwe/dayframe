@@ -612,7 +612,7 @@ export async function fetchTimerState(): Promise<TimerStateFingerprint> {
     throw new AuthRequiredError();
   }
   if (!response.ok) {
-    throw new Error(await errorMessage(response, "Unable to check timer state"));
+    throw new Error(await errorMessage(response, "Couldn't check what's recording"));
   }
   return readJsonResponse<TimerStateFingerprint>(response);
 }
@@ -1267,7 +1267,7 @@ async function syncQueueItems(
       }
       if (item.type === "timer_start") {
         if (typeof payload.timeEntryId !== "string" || !payload.timeEntryId) {
-          throw new Error("Synced timer start did not return its canonical time entry.");
+          throw new Error("The server didn't return the started block.");
         }
         await recordTimerEntryIdCorrelation(item.localId, payload.timeEntryId, owner);
         timerEntryIdCorrelations.push({
@@ -1466,7 +1466,7 @@ export async function deleteTimeEntry(id: string) {
   if (response.status === 401) {
     throw new AuthRequiredError();
   }
-  if (!response.ok) throw new Error(await errorMessage(response, "Unable to delete timer"));
+  if (!response.ok) throw new Error(await errorMessage(response, "Couldn't delete the block"));
   return readJsonResponse(response);
 }
 
@@ -1489,7 +1489,7 @@ export async function updateTimeEntry(id: string, patch: TimeEntryUpdatePatch) {
   if (response.status === 401) {
     throw new AuthRequiredError();
   }
-  if (!response.ok) throw new Error(await errorMessage(response, "Unable to update timer"));
+  if (!response.ok) throw new Error(await errorMessage(response, "Couldn't update the block"));
   return readJsonResponse(response);
 }
 
@@ -1512,7 +1512,7 @@ export async function createManualTimeEntry(input: ManualTimeEntryInput) {
   if (response.status === 401) {
     throw new AuthRequiredError();
   }
-  if (!response.ok) throw new Error(await errorMessage(response, "Unable to create time entry"));
+  if (!response.ok) throw new Error(await errorMessage(response, "Couldn't add the block"));
   return readJsonResponse(response);
 }
 
@@ -2424,7 +2424,7 @@ async function postTimerAction(body: Record<string, unknown>) {
   if (response.status === 401) {
     throw new AuthRequiredError();
   }
-  if (!response.ok) throw new Error(await errorMessage(response, "Timer action failed"));
+  if (!response.ok) throw new Error(await errorMessage(response, "The block action failed"));
   return readJsonResponse<TimerActionResult>(response);
 }
 

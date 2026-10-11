@@ -2779,7 +2779,7 @@ describe("mobile API client", () => {
 
   it("recognizes network failures as timer-queue fallback candidates", () => {
     expect(isNetworkTimerError(new TypeError("Network request failed"))).toBe(true);
-    expect(isNetworkTimerError(new Error("Timer action failed: 500"))).toBe(false);
+    expect(isNetworkTimerError(new Error("The block action failed: 500"))).toBe(false);
   });
 });
 

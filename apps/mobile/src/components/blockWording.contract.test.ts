@@ -55,7 +55,9 @@ export function blockWordingOffenders(source: string, fileName = "file.tsx") {
     if (!reads) return;
     for (const text of candidates) {
       const token = text.trim();
-      if (!/\s/.test(token) && /^[a-z]+[A-Z]|[a-z0-9]+[-_./][a-z0-9]+/.test(token)) continue;
+      // Explicitly visible text (JSX, a visible attribute, an alert) is always copy; elsewhere a
+      // single identifier-like token (camelCase, a path, a kebab key) is code.
+      if (!alwaysVisible && !/\s/.test(token) && /^[a-z]+[A-Z]|[a-z0-9]+[-_./][a-z0-9]+/.test(token)) continue;
       if (BLOCK_WORDING_NOUN.test(text)) {
         const { line } = file.getLineAndCharacterOfPosition(node.getStart());
         found.push(`${fileName}:${line + 1} ${text.trim()}`);
@@ -65,13 +67,18 @@ export function blockWordingOffenders(source: string, fileName = "file.tsx") {
   const visit = (node: ts.Node) => {
     if (ts.isJsxText(node)) check(node, [node.text], true);
     else if (ts.isJsxExpression(node) && node.parent && (ts.isJsxElement(node.parent) || ts.isJsxFragment(node.parent))) {
-      check(node, texts(node));
+      check(node, texts(node), true);
     } else if (ts.isJsxAttribute(node) && node.initializer && VISIBLE_KEYS.has(node.name.getText())) {
-      check(node, texts(node.initializer));
+      check(node, texts(node.initializer), true);
     } else if (ts.isPropertyAssignment(node) && VISIBLE_KEYS.has(node.name.getText().replace(/["']/g, ""))) {
       check(node, texts(node.initializer));
     } else if (ts.isCallExpression(node) && VISIBLE_CALLS.test(node.expression.getText())) {
-      check(node, node.arguments.flatMap(texts));
+      check(node, node.arguments.flatMap(texts), true);
+    } else if (ts.isCallExpression(node) && /(^|\.)errorMessage$/.test(node.expression.getText())) {
+      // Fallback messages that reach alerts when a request fails.
+      check(node, node.arguments.slice(1).flatMap(texts));
+    } else if (ts.isNewExpression(node) && /Error$/.test(node.expression.getText())) {
+      check(node, (node.arguments ?? []).flatMap(texts));
     }
     ts.forEachChild(node, visit);
   };
@@ -115,6 +122,10 @@ describe("block wording (UIA-100)", () => {
       "const g = <Text>Timer is read-only</Text>;",
       "const h = <Text>{kind === \"timer\" && \"Recording\"}</Text>;",
       "setValidationError(\"Timers can be no longer than 24 hours.\");",
+      "const i = <Text>{\"timer\"}</Text>;",
+      "const j = <Text accessibilityLabel=\"timer\" />;",
+      "const k = <Text>timer-entry</Text>;",
+      "throw new Error(await errorMessage(response, \"Unable to update timer\"));",
     ].join("\n");
     expect(blockWordingOffenders(source)).toEqual([
       "file.tsx:1 Timer",
@@ -126,6 +137,10 @@ describe("block wording (UIA-100)", () => {
       "file.tsx:13 Stop\n  timer",
       "file.tsx:15 Timer is read-only",
       "file.tsx:17 Timers can be no longer than 24 hours.",
+      "file.tsx:18 timer",
+      "file.tsx:19 timer",
+      "file.tsx:20 timer-entry",
+      "file.tsx:21 Unable to update timer",
     ]);
   });
 

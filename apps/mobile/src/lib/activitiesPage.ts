@@ -56,8 +56,7 @@ export function activityWeekSeconds<E extends WeekEntry>(
 
 /** "2h 30m in the last 7 days", or a plain line when the activity wasn't used. */
 export function formatActivityWeek(seconds: number) {
-  const minutes = Math.floor(seconds / 60);
-  if (minutes < 1) return "Not used in the last 7 days";
+  if (!(seconds > 0)) return "Not used in the last 7 days";
   return `${formatDuration(seconds)} in the last 7 days`;
 }
 
