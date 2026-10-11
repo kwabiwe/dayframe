@@ -69,6 +69,16 @@ import { LIVE_FLIGHT_NODE, STOP_FLIGHT, measureFlightNode, rowFlightNode, stopFl
 import { switchRecents, type SwitchRecent } from "../lib/todaySwitch";
 import { TodayReviewNudge } from "./today/TodayReviewNudge";
 import { TodayBlockRows } from "./today/TodayBlockRows";
+import { BlocksToast, useBlocksNotice } from "./blocks/BlocksToast";
+import {
+  alreadyRecordingToastMessage,
+  deletedToastAnnouncement,
+  deletedToastMessage,
+  startMatchesRunning,
+  switchedToastMessage,
+  toastSwatchColor,
+  undoDeleteAccessibilityLabel
+} from "../lib/blocksToastCopy";
 import { EarlierThisWeek } from "./today/EarlierThisWeek";
 import { TodayRibbonSection } from "./today/TodayRibbon";
 import { buildEarlierThisWeek, EARLIER_DAYS } from "@/lib/earlierThisWeek";
@@ -199,8 +209,6 @@ import { drainNativeShortcutQueue, syncShortcutCatalog } from "@/lib/shortcuts";
 import {
   MOBILE_MOTION,
   localLayoutTransition,
-  localPresenceEntering,
-  localPresenceExiting,
   useResolvedReduceMotionPreference,
   useReduceTransparencyPreference
 } from "@/lib/motion";
@@ -333,6 +341,13 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
     reduceMotion,
     resolved: reduceMotionPreferenceResolved
   } = useResolvedReduceMotionPreference();
+  // Today's notices without an action (UIA-004: "Switched to …", "Already recording …"). They share
+  // the delete Undo toast's place; that Undo toast always wins it.
+  const todayNotice = useBlocksNotice();
+  const clearTodayNotice = todayNotice.clear;
+  // Notices belong to the session that raised them: a sign-out bumps this, so a start that is
+  // accepted after the account left never shows its "Switched to …" over sign-in or another account.
+  const noticeSessionGeneration = useRef(0);
   const reduceTransparency = useReduceTransparencyPreference();
   const refreshInFlight = useRef(false);
   const refreshQueued = useRef(false);
@@ -430,6 +445,8 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
   const transitionToSignedOut = useCallback((options?: SignedOutTransitionOptions) => {
     void endAllTimerBackgroundExecution("logout");
     authStateCurrent.current = "signedOut";
+    noticeSessionGeneration.current += 1;
+    clearTodayNotice();
     const signedOutOwner = latestData.current
       ? timerStopOwner(latestData.current)
       : undefined;
@@ -488,7 +505,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
     setLiveLanding(null);
     setPendingTimerStops([]);
     setAuthState("signedOut");
-  }, []);
+  }, [clearTodayNotice]);
 
   useEffect(() => subscribeMobileSignedOut(() => transitionToSignedOut({
     preserveAuthPassword: preserveAuthPasswordOnSignedOut.current
@@ -1668,12 +1685,58 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
   }
 
   // Today's Start/Stop: haptic and landing only after the local action is accepted (motion.md).
+  // A start that replaces a running block says so ("Switched to …", no Undo: there is no un-switch
+  // contract); a start of exactly what is recording does nothing but say "Already recording".
   function startFromToday(categoryId: string | null, description = "", tagNames: string[] = []) {
+    const running = isActiveEntryPendingDeletion() ? null : latestData.current?.activeEntry ?? null;
+    if (running && startMatchesRunning(running, { categoryId, description, tagNames })) {
+      showTodayNotice(alreadyRecordingToastMessage(running), toastSwatchColor(running, theme.mode));
+      return;
+    }
+    const switching = Boolean(running) && Boolean(categoryId || description.trim());
+    const category = categoryId ? latestData.current?.categories.find((item) => item.id === categoryId) ?? null : null;
+    const noticeOwner = todayNoticeOwner();
     void startTask(categoryId, description, tagNames).then((accepted) => {
       if (!accepted) return;
       playHaptic("start");
       setLiveLanding(nextLandingRequest());
+      if (!switching || !running) return;
+      // Dropped when the account or session changed while the start was being accepted.
+      if (!todayNoticeOwnerStill(noticeOwner)) return;
+      const nextName = description.trim() || category?.name || "No activity";
+      showTodayNotice(
+        switchedToastMessage(nextName, running, Date.now()),
+        category ? toastSwatchColor({ categoryColor: category.color, categoryId: category.id, categoryName: category.name }, theme.mode) : null
+      );
     });
+  }
+
+  function todayNoticeOwner() {
+    const current = latestData.current;
+    return {
+      generation: noticeSessionGeneration.current,
+      userId: current?.user.id ?? null,
+      workspaceId: current?.workspace.id ?? null
+    };
+  }
+
+  function todayNoticeOwnerStill(owner: ReturnType<typeof todayNoticeOwner>) {
+    const current = latestData.current;
+    return authStateCurrent.current === "authenticated" &&
+      owner.generation === noticeSessionGeneration.current &&
+      owner.userId !== null &&
+      owner.userId === (current?.user.id ?? null) &&
+      owner.workspaceId === (current?.workspace.id ?? null);
+  }
+
+  function showTodayNotice(message: string, swatchColor: string | null) {
+    if (authStateCurrent.current !== "authenticated") return;
+    // The delete Undo toast holds the place: VoiceOver still hears the notice, nothing is drawn.
+    if (deletionCoordinator.current?.current()?.phase === "active") {
+      AccessibilityInfo.announceForAccessibility(message);
+      return;
+    }
+    todayNotice.show(message, swatchColor);
   }
 
   function stopFromToday() {
@@ -2387,11 +2450,8 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
         coordinator.pendingEntryIds()
       ));
       if (coordinator.activate(prepared.token)) playHaptic("delete");
-      AccessibilityInfo.announceForAccessibility(
-        entries.length > 1
-          ? `${entries.length} time entries deleted. Undo available for five seconds.`
-          : "Time entry deleted. Undo available for five seconds."
-      );
+      todayNotice.clear();
+      AccessibilityInfo.announceForAccessibility(deletedToastAnnouncement(entries));
     } finally {
       deletionPreparationInFlight.current = false;
     }
@@ -2449,12 +2509,9 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
     tokenRef.current = null;
     if (!getDeletionCoordinator().activate(pendingSheetDeletion.token)) return;
     playHaptic("delete");
+    todayNotice.clear();
     const active = getDeletionCoordinator().current();
-    AccessibilityInfo.announceForAccessibility(
-      active && active.entries.length > 1
-        ? `${active.entries.length} time entries deleted. Undo available for five seconds.`
-        : "Time entry deleted. Undo available for five seconds."
-    );
+    if (active) AccessibilityInfo.announceForAccessibility(deletedToastAnnouncement(active.entries));
   }
 
   function clearSheetDeletionToken(token: number) {
@@ -2974,28 +3031,31 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
     <DashboardContext.Provider value={{ renderTab: renderDashboardTab }}>
       {children}
       {pendingDeletion?.phase === "active" ? (
-        <Reanimated.View
-          key={pendingDeletion.token}
-          accessibilityLiveRegion="polite"
-          entering={localPresenceEntering(reduceMotion, "rise")}
-          exiting={localPresenceExiting(reduceMotion)}
-          layout={localLayoutTransition(reduceMotion)}
-          style={styles.historyDeleteUndoToast}
-        >
-          <Text style={styles.historyDeleteUndoText}>
-            {pendingDeletion.entries.length === 1
-              ? "Time entry deleted"
-              : `${pendingDeletion.entries.length} time entries deleted`}
-          </Text>
-          <Pressable
-            accessibilityLabel="Undo deleting time entries"
-            accessibilityRole="button"
-            onPress={undoDeletion}
-            style={({ pressed }) => [styles.historyDeleteUndoButton, pressed ? styles.buttonPressed : null]}
-          >
-            <Text style={styles.historyDeleteUndoButtonText}>Undo</Text>
-          </Pressable>
-        </Reanimated.View>
+        // The shared Blocks toast (UIA-003): "Deleted Deep work" with its swatch and a neutral
+        // 44-point Undo. The deletion coordinator owns the 5 s window; the token re-mounts it.
+        <BlocksToast
+          key={`deleted-${pendingDeletion.token}`}
+          actionAccessibilityLabel={undoDeleteAccessibilityLabel(pendingDeletion.entries)}
+          actionLabel="Undo"
+          actionTestID="today-delete-undo"
+          message={deletedToastMessage(pendingDeletion.entries)}
+          onAction={undoDeletion}
+          reduceMotion={reduceMotion}
+          style={styles.todayToast}
+          swatchColor={pendingDeletion.entries.length === 1 ? toastSwatchColor(pendingDeletion.entries[0], theme.mode) : null}
+          testID="today-delete-toast"
+          theme={theme}
+        />
+      ) : todayNotice.notice && authState === "authenticated" ? (
+        <BlocksToast
+          key={`notice-${todayNotice.notice.token}`}
+          message={todayNotice.notice.message}
+          reduceMotion={reduceMotion}
+          style={styles.todayToast}
+          swatchColor={todayNotice.notice.swatchColor}
+          testID="today-notice-toast"
+          theme={theme}
+        />
       ) : null}
       <PlayOrb
         activities={bloomActivityList}

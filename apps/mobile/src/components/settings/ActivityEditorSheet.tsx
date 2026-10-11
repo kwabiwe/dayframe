@@ -1,5 +1,5 @@
 import { useRef, useState } from "react";
-import { AccessibilityInfo, Alert, Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, View, useWindowDimensions } from "react-native";
+import { AccessibilityInfo, Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, View, useWindowDimensions } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import {
   DAYFRAME_ACTIVITY_ICONS,
@@ -12,6 +12,7 @@ import {
   type DayframePaletteKey
 } from "@dayframe/shared";
 import { SwipeDismissSheet, type SwipeDismissSheetHandle } from "../SwipeDismissSheet";
+import { BlocksConfirmHost, useBlocksConfirm } from "../blocks/BlocksConfirmSheet";
 import { ActivityIcon } from "../icons/DayframeIcon";
 import { SettingsSwitch } from "./SettingsBlocks";
 import { QUICK_START_PIN_LIMIT, activityNameProblem } from "../../lib/activitiesPage";
@@ -60,6 +61,7 @@ export function ActivityEditorSheet({
   theme: MobileTheme;
 }) {
   const sheetRef = useRef<SwipeDismissSheetHandle>(null);
+  const confirmSheet = useBlocksConfirm();
   const insets = useSafeAreaInsets();
   // A percentage height resolves against the sheet's auto-height wrapper, which left a gap under
   // the sheet; a measured height keeps it flush with the bottom of the screen.
@@ -118,34 +120,33 @@ export function ActivityEditorSheet({
 
   function archive(target: EditableActivity) {
     if (busy.current || done.current) return;
-    Alert.alert(`Archive ${target.name}?`, "It leaves your lists and quick start. Its history stays.", [
-      { style: "cancel", text: "Cancel" },
-      {
-        style: "destructive",
-        text: "Archive",
-        onPress: () => {
-          // Re-checked: a save may have started while the confirmation was up.
-          if (busy.current || done.current) return;
-          busy.current = true;
-          setSaving(true);
-          setProblem(null);
-          void onArchive(target)
-            .catch(() => "Couldn't archive. Check your connection and try again.")
-            .then((result) => {
-              busy.current = false;
-              if (done.current) return;
-              setSaving(false);
-              if (result) {
-                setProblem(result);
-                return;
-              }
-              // Archived: the sheet leaves with its own exit motion.
-              done.current = true;
-              sheetRef.current?.dismiss();
-            });
-        }
+    confirmSheet.confirm({
+      eyebrow: "Activity",
+      title: `Archive ${target.name}?`,
+      message: "It leaves your lists and quick start. Its history stays.",
+      confirmLabel: "Archive",
+      onConfirm: () => {
+        // Re-checked: a save may have started while the confirmation was up.
+        if (busy.current || done.current) return;
+        busy.current = true;
+        setSaving(true);
+        setProblem(null);
+        void onArchive(target)
+          .catch(() => "Couldn't archive. Check your connection and try again.")
+          .then((result) => {
+            busy.current = false;
+            if (done.current) return;
+            setSaving(false);
+            if (result) {
+              setProblem(result);
+              return;
+            }
+            // Archived: the sheet leaves with its own exit motion.
+            done.current = true;
+            sheetRef.current?.dismiss();
+          });
       }
-    ]);
+    });
   }
 
   function cancel() {
@@ -327,6 +328,8 @@ export function ActivityEditorSheet({
           </ScrollView>
         </SwipeDismissSheet>
       </View>
+      {/* Presented over this sheet's own modal. */}
+      <BlocksConfirmHost controller={confirmSheet} reduceMotion={reduceMotion} styles={shared} theme={theme} />
     </Modal>
   );
 }

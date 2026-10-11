@@ -8,10 +8,9 @@ vi.mock("react", async () => {
 vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
 
 const announce = vi.fn();
-const alert = vi.fn();
 vi.mock("react-native", () => ({
   AccessibilityInfo: { announceForAccessibility: (message: string) => announce(message) },
-  Alert: { alert: (...args: unknown[]) => alert(...args) },
+  Keyboard: { dismiss: vi.fn() },
   Modal: "Modal", Pressable: "Pressable", ScrollView: "ScrollView", Switch: "Switch",
   Text: "Text", TextInput: "TextInput", View: "View",
   StyleSheet: { create: (value: unknown) => value, hairlineWidth: 1 },
@@ -44,7 +43,6 @@ afterEach(() => {
   if (tree) act(() => tree!.unmount());
   tree = undefined;
   announce.mockReset();
-  alert.mockReset();
 });
 
 function render(props: Partial<Parameters<typeof ActivityEditorSheet>[0]> = {}) {
@@ -112,10 +110,32 @@ describe("ActivityEditorSheet", () => {
   it("does not archive while a save is running, even from a confirmation already on screen", () => {
     const { onArchive, onSave } = render({ activity: { id: "a", name: "Reading", color: "lime" } });
     act(() => byTestId("activity-editor-archive").props.onPress());
-    const confirm = (alert.mock.calls[0][2] as { text: string; onPress?: () => void }[]).find((button) => button.text === "Archive")!;
+    // UIA-005: the Blocks confirm sheet asks, not a system alert.
+    const texts = tree!.root.findAll((node: ReactTestInstance) => (node.type as unknown) === "Text").map((node) => node.children.join(""));
+    expect(texts).toContain("Archive Reading?");
     act(() => byTestId("activity-editor-save").props.onPress());
-    act(() => confirm.onPress!());
+    act(() => byTestId("blocks-confirm-sheet-confirm").props.onPress());
     expect(onSave).toHaveBeenCalledTimes(1);
     expect(onArchive).not.toHaveBeenCalled();
+  });
+
+  it("archives once from the confirm sheet, however fast its danger pill is tapped", () => {
+    const { onArchive } = render({ activity: { id: "a", name: "Reading", color: "lime" } });
+    act(() => byTestId("activity-editor-archive").props.onPress());
+    act(() => {
+      const pill = byTestId("blocks-confirm-sheet-confirm");
+      pill.props.onPress();
+      pill.props.onPress();
+    });
+    expect(onArchive).toHaveBeenCalledTimes(1);
+    expect(() => byTestId("blocks-confirm-sheet-confirm")).toThrow();
+  });
+
+  it("archives nothing when the confirm sheet is cancelled", () => {
+    const { onArchive } = render({ activity: { id: "a", name: "Reading", color: "lime" } });
+    act(() => byTestId("activity-editor-archive").props.onPress());
+    act(() => byTestId("blocks-confirm-sheet-cancel").props.onPress());
+    expect(onArchive).not.toHaveBeenCalled();
+    expect(() => byTestId("blocks-confirm-sheet-cancel")).toThrow();
   });
 });

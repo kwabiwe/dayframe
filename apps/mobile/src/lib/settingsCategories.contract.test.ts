@@ -67,7 +67,8 @@ describe("mobile Activities page contract", () => {
     expect(editorSource).toContain('accessibilityRole="radiogroup"');
     expect(editorSource).toContain("activityNameProblem(activities, name, activity?.id ?? null)");
     // Archive asks first, and the sheet leaves with its own exit motion once archived.
-    expect(editorSource).toMatch(/Alert\.alert\(`Archive \$\{target\.name\}\?`/);
+    expect(editorSource).toContain("title: `Archive ${target.name}?`");
+    expect(editorSource).toContain("<BlocksConfirmHost");
     expect(editorSource).toContain("sheetRef.current?.dismiss();");
     expect(editorSource).toContain("<SwipeDismissSheet");
   });
