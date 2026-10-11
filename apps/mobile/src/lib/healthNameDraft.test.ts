@@ -53,3 +53,28 @@ describe("Health type Name draft (UIA-085)", () => {
     expect(draft).toBe("Newer");
   });
 });
+
+describe("Health type Name draft — latest wins (Codex r3)", () => {
+  it("saves a return to the original Name typed while another save was pending", async () => {
+    let resolveFirst!: (ok: boolean) => void;
+    let draft = "Old";
+    const saves: string[] = [];
+    const commit = createNameCommitter({
+      initial: "Old",
+      readDraft: () => draft,
+      showDraft: (value) => { draft = value; },
+      save: (name) => {
+        saves.push(name);
+        return saves.length === 1 ? new Promise((done) => { resolveFirst = done; }) : Promise.resolve(true);
+      }
+    });
+    draft = "New";
+    const first = commit();
+    draft = "Old";
+    const closing = commit();
+    resolveFirst(true);
+    await first;
+    await closing;
+    expect(saves).toEqual(["New", "Old"]);
+  });
+});
