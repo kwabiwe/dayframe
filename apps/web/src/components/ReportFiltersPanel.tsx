@@ -1,16 +1,24 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
+import { useMemo, useState, type FormEvent } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { Check, ChevronDown, X } from "lucide-react";
-import { Button, Field } from "@/components/ui/Primitives";
+import { SlidersHorizontal, X } from "lucide-react";
+import { ModalDialog } from "@/components/ui/Primitives";
+import { blockStyle } from "@/lib/block-style";
 import { defaultReportFilters, reportsHref, type ReportFilters } from "@/lib/report-filters";
 import type { ReportFilterOptions } from "@/lib/report-service";
-import { categoryDisplay } from "@/lib/display";
 
 type FilterOption = { id: string; name: string; color?: string | null };
+type Draft = Pick<ReportFilters, "categories" | "tags" | "places" | "sources" | "description">;
 
+/**
+ * Reports filters in Blocks (parity step 15b-1): a Filter button with the number of active
+ * filters, the active filters as removable chips (activities as solid blocks) and Clear all; the
+ * Filter dialog edits a draft of every filter — activities, tags, places, sources and
+ * "Description contains" — and applies it in one navigation. An empty list means "all", as the
+ * report URL has always meant.
+ */
 export function ReportFiltersPanel({
   filters,
   options,
@@ -21,10 +29,7 @@ export function ReportFiltersPanel({
   rangeLabel: string;
 }) {
   const router = useRouter();
-  const [descriptionDraft, setDescriptionDraft] = useState(filters.description);
-  const [moreOpen, setMoreOpen] = useState(false);
-  const moreRef = useRef<HTMLDivElement | null>(null);
-  const moreTriggerRef = useRef<HTMLButtonElement | null>(null);
+  const [open, setOpen] = useState(false);
   const categories = useMemo<FilterOption[]>(() => [
     { id: "uncategorized", name: "No activity", color: null },
     ...options.categories
@@ -34,225 +39,209 @@ export function ReportFiltersPanel({
     ...options.places
   ], [options.places]);
 
-  function navigate(overrides: Partial<ReportFilters>) {
-    router.push(reportsHref(filters, { ...overrides, page: 1 }));
-  }
-
-  function submitDescription(event: FormEvent) {
-    event.preventDefault();
-    navigate({ description: descriptionDraft.trim() });
-  }
-
   const chips = buildFilterChips(filters, options, categories, places);
   const summary = chips.length > 0
     ? `${rangeLabel}. Applied filters: ${chips.map((chip) => chip.label).join(", ")}.`
     : `${rangeLabel}. No additional filters applied.`;
 
-  useEffect(() => {
-    if (!moreOpen) return undefined;
-    function closeOutside(event: MouseEvent) {
-      if (!moreRef.current?.contains(event.target as Node)) setMoreOpen(false);
-    }
-    function closeEscape(event: KeyboardEvent) {
-      if (event.key !== "Escape") return;
-      setMoreOpen(false);
-      moreTriggerRef.current?.focus();
-    }
-    document.addEventListener("mousedown", closeOutside);
-    document.addEventListener("keydown", closeEscape);
-    return () => {
-      document.removeEventListener("mousedown", closeOutside);
-      document.removeEventListener("keydown", closeEscape);
-    };
-  }, [moreOpen]);
-
   return (
-    <section className="fill-group-surface report-filter-panel" aria-labelledby="report-filters-title">
-      <div className="report-filter-heading">
-        <div>
-          <h2 id="report-filters-title">Filters</h2>
-          <p>Activities and tags match any selected option.</p>
-        </div>
-        <Link className="ui-button ui-button-ghost" href={reportsHref(defaultReportFilters())} aria-label="Clear all report filters">
-          Clear all
-        </Link>
-      </div>
-
+    <section className="df-report-filters" aria-label="Report filters">
       <p className="sr-only" role="status">{summary}</p>
-
-      <div className="report-primary-filters">
-        <ReportMultiSelect
-          label="Activities"
-          options={categories}
-          selected={filters.categories}
-          onToggle={(id) => navigate({ categories: toggleValue(filters.categories, id) })}
-          categoryMarkers
-        />
-        <ReportMultiSelect
-          label="Tags"
-          options={options.tags}
-          selected={filters.tags}
-          onToggle={(id) => navigate({ tags: toggleValue(filters.tags, id) })}
-        />
-      </div>
-
+      <button aria-haspopup="dialog" className="df-rbtn df-rbtn--sm" onClick={() => setOpen(true)} type="button">
+        <SlidersHorizontal aria-hidden="true" size={15} />
+        Filter{chips.length ? ` · ${chips.length}` : ""}
+      </button>
       {chips.length > 0 ? (
-        <div className="report-filter-chips" aria-label="Applied report filters">
+        <div className="df-fchips" aria-label="Applied report filters">
+          <span className="df-faint">Showing</span>
           {chips.map((chip) => (
             <Link
-              key={`${chip.kind}-${chip.id}`}
-              className="report-filter-chip"
-              href={reportsHref(filters, { [chip.kind]: chip.remaining, page: 1 })}
               aria-label={`Remove ${chip.label} filter`}
+              className={`df-fchip${chip.color ? " df-block" : ""}`}
+              href={reportsHref(filters, { [chip.kind]: chip.remaining, page: 1 })}
+              key={`${chip.kind}-${chip.id}`}
+              style={chip.color ? blockStyle(chip.color, chip.name) : undefined}
             >
-              {chip.color ? <span className="report-filter-chip-dot" style={{ backgroundColor: chip.color }} aria-hidden="true" /> : null}
               <span>{chip.label}</span>
-              <X aria-hidden="true" size={14} />
+              <X aria-hidden="true" size={13} />
             </Link>
           ))}
+          <Link aria-label="Clear all report filters" className="df-rbtn df-rbtn--sm df-rbtn--ghost" href={reportsHref(defaultReportFiltersFor(filters))}>
+            Clear all
+          </Link>
         </div>
       ) : null}
-
-      <div className={`report-more-filters${moreOpen ? " is-open" : ""}`} ref={moreRef}>
-        <button
-          aria-controls="report-more-filters-panel"
-          aria-expanded={moreOpen}
-          aria-haspopup="dialog"
-          className="report-more-filters-trigger"
-          onClick={() => setMoreOpen((current) => !current)}
-          ref={moreTriggerRef}
-          type="button"
-        >
-          <span>More filters</span>
-          <ChevronDown aria-hidden="true" size={18} />
-        </button>
-        <div
-          aria-label="More filters"
-          className={`ui-floating-surface report-more-filter-grid${moreOpen ? " is-open" : ""}`}
-          hidden={!moreOpen}
-          id="report-more-filters-panel"
-          role="dialog"
-        >
-          <ReportMultiSelect
-            label="Place"
-            options={places}
-            selected={filters.places}
-            onToggle={(id) => navigate({ places: toggleValue(filters.places, id) })}
-          />
-          <ReportMultiSelect
-            label="Source"
-            options={options.sources}
-            selected={filters.sources}
-            onToggle={(id) => navigate({ sources: toggleValue(filters.sources, id) })}
-          />
-          <form className="report-description-filter" onSubmit={submitDescription}>
-            <Field htmlFor="report-description-search" label="Description contains">
-              <input
-                className="ui-control"
-                id="report-description-search"
-                maxLength={160}
-                placeholder="Search task descriptions"
-                value={descriptionDraft}
-                onChange={(event) => setDescriptionDraft(event.target.value)}
-              />
-            </Field>
-            <Button type="submit">Apply search</Button>
-          </form>
-        </div>
-      </div>
+      {open ? (
+        <ReportFilterDialog
+          categories={categories}
+          filters={filters}
+          onApply={(draft) => {
+            setOpen(false);
+            router.push(reportsHref(filters, { ...draft, page: 1 }));
+          }}
+          onClose={() => setOpen(false)}
+          options={options}
+          places={places}
+        />
+      ) : null}
     </section>
   );
 }
 
-function ReportMultiSelect({
-  categoryMarkers = false,
+/** Clear all keeps the range the report shows and drops every filter. */
+function defaultReportFiltersFor(filters: ReportFilters): ReportFilters {
+  const blank = defaultReportFilters();
+  return { ...filters, categories: blank.categories, tags: blank.tags, places: blank.places, sources: blank.sources, description: blank.description, page: 1 };
+}
+
+function ReportFilterDialog({
+  categories,
+  filters,
+  onApply,
+  onClose,
+  options,
+  places
+}: {
+  categories: FilterOption[];
+  filters: ReportFilters;
+  onApply: (draft: Draft) => void;
+  onClose: () => void;
+  options: ReportFilterOptions;
+  places: FilterOption[];
+}) {
+  const [draft, setDraft] = useState<Draft>({
+    categories: filters.categories,
+    tags: filters.tags,
+    places: filters.places,
+    sources: filters.sources,
+    description: filters.description
+  });
+  const toggle = (kind: "categories" | "tags" | "places" | "sources", id: string) => {
+    setDraft((current) => ({
+      ...current,
+      [kind]: current[kind].includes(id) ? current[kind].filter((value) => value !== id) : [...current[kind], id]
+    }));
+  };
+  const submit = (event?: FormEvent) => {
+    event?.preventDefault();
+    onApply({ ...draft, description: draft.description.trim().slice(0, 160) });
+  };
+
+  return (
+    <ModalDialog
+      className="df-rf-dialog"
+      description="Each group matches any selected option. Nothing selected means all."
+      footer={(
+        <>
+          <button
+            className="df-rbtn df-rbtn--ghost"
+            onClick={() => setDraft({ categories: [], tags: [], places: [], sources: [], description: "" })}
+            type="button"
+          >
+            Reset
+          </button>
+          <span className="df-spacer" />
+          <button className="df-rbtn" onClick={onClose} type="button">Cancel</button>
+          <button className="df-rbtn df-rbtn--live" onClick={() => submit()} type="button">Apply</button>
+        </>
+      )}
+      onClose={onClose}
+      title="Filter"
+    >
+      <form className="df-rf" onSubmit={submit}>
+        <ChipGroup
+          label="Activities"
+          onClear={() => setDraft((current) => ({ ...current, categories: [] }))}
+          onToggle={(id) => toggle("categories", id)}
+          options={categories}
+          selected={draft.categories}
+          solid
+        />
+        <ChipGroup
+          empty="No tags yet."
+          label="Tags"
+          onClear={() => setDraft((current) => ({ ...current, tags: [] }))}
+          onToggle={(id) => toggle("tags", id)}
+          options={options.tags}
+          selected={draft.tags}
+        />
+        <ChipGroup
+          label="Places"
+          onClear={() => setDraft((current) => ({ ...current, places: [] }))}
+          onToggle={(id) => toggle("places", id)}
+          options={places}
+          selected={draft.places}
+        />
+        <ChipGroup
+          label="Sources"
+          onClear={() => setDraft((current) => ({ ...current, sources: [] }))}
+          onToggle={(id) => toggle("sources", id)}
+          options={options.sources}
+          selected={draft.sources}
+        />
+        <label className="df-rf-description">
+          <span>Description contains</span>
+          <input
+            className="ui-control"
+            maxLength={160}
+            onChange={(event) => setDraft((current) => ({ ...current, description: event.target.value }))}
+            placeholder="Search task descriptions"
+            type="search"
+            value={draft.description}
+          />
+        </label>
+      </form>
+    </ModalDialog>
+  );
+}
+
+function ChipGroup({
+  empty = "Nothing to choose yet.",
   label,
+  onClear,
   onToggle,
   options,
-  selected
+  selected,
+  solid = false
 }: {
-  categoryMarkers?: boolean;
+  empty?: string;
   label: string;
+  onClear: () => void;
   onToggle: (id: string) => void;
   options: FilterOption[];
   selected: string[];
+  solid?: boolean;
 }) {
-  const [open, setOpen] = useState(false);
-  const rootRef = useRef<HTMLDivElement | null>(null);
-  const triggerRef = useRef<HTMLButtonElement | null>(null);
-  useEffect(() => {
-    if (!open) return undefined;
-    function closeOutside(event: MouseEvent) {
-      if (!rootRef.current?.contains(event.target as Node)) setOpen(false);
-    }
-    function closeEscape(event: KeyboardEvent) {
-      if (event.key !== "Escape") return;
-      setOpen(false);
-      triggerRef.current?.focus();
-    }
-    document.addEventListener("mousedown", closeOutside);
-    document.addEventListener("keydown", closeEscape);
-    return () => {
-      document.removeEventListener("mousedown", closeOutside);
-      document.removeEventListener("keydown", closeEscape);
-    };
-  }, [open]);
   return (
-    <div className={`report-multi-select${open ? " is-open" : ""}`} ref={rootRef}>
-      <button
-        aria-expanded={open}
-        aria-haspopup="listbox"
-        className="report-multi-select-trigger"
-        onClick={() => setOpen((current) => !current)}
-        ref={triggerRef}
-        type="button"
-      >
-        <span>
-          <strong>{label}</strong>
-          <small>{selected.length > 0 ? `${selected.length} selected` : "All"}</small>
-        </span>
-        <ChevronDown aria-hidden="true" size={18} />
-      </button>
-      <div
-        className={`ui-floating-surface report-multi-select-list${open ? " is-open" : ""}`}
-        hidden={!open}
-        role="listbox"
-        aria-label={`Select ${label.toLocaleLowerCase()}`}
-        aria-multiselectable="true"
-      >
-        {options.length === 0 ? <p>No options available.</p> : null}
+    <fieldset className="df-rf-sec">
+      <legend>
+        <b>{label}</b>
+        <small className="df-faint">{selected.length ? `${selected.length} selected` : "All"}</small>
+        {selected.length ? (
+          <button className="df-rbtn df-rbtn--sm df-rbtn--ghost" onClick={onClear} type="button">All</button>
+        ) : null}
+      </legend>
+      {options.length === 0 ? <p className="df-muted">{empty}</p> : null}
+      <div className="df-rf-chips">
         {options.map((option) => {
-          const checked = selected.includes(option.id);
-          const display = categoryMarkers ? categoryDisplay(option.name, option.color ?? null) : null;
+          const on = selected.includes(option.id);
+          const styled = solid && option.color ? blockStyle(option.color, option.name) : undefined;
           return (
             <button
+              aria-pressed={on}
+              className={`df-rchip${on ? ` is-checked${styled ? " df-block" : " is-neutral"}` : ""}`}
               key={option.id}
-              type="button"
-              role="option"
-              aria-selected={checked}
               onClick={() => onToggle(option.id)}
-              onKeyDown={(event) => {
-                if (event.key !== "Enter" && event.key !== " ") return;
-                event.preventDefault();
-                onToggle(option.id);
-              }}
+              style={styled}
+              type="button"
             >
-              <span className="report-filter-option-label">
-                {display ? (
-                  <span
-                    className={`report-filter-option-dot${display.isUncategorized ? " is-uncategorized" : ""}`}
-                    style={{ backgroundColor: display.color }}
-                    aria-hidden="true"
-                  />
-                ) : null}
-                <span>{option.name}</span>
-              </span>
-              {checked ? <Check aria-hidden="true" size={16} /> : null}
+              {solid ? <i aria-hidden="true" /> : null}
+              {option.name}
             </button>
           );
         })}
       </div>
-    </div>
+    </fieldset>
   );
 }
 
@@ -266,7 +255,9 @@ function buildFilterChips(
     id: string;
     kind: "categories" | "tags" | "places" | "sources" | "description";
     label: string;
-    color?: string;
+    name: string;
+    /** Activity chips carry their colour (null for No activity); others have none. */
+    color?: string | null;
     remaining: string[] | string;
   }> = [];
   const categoryMap = new Map(categories.map((option) => [option.id, option]));
@@ -277,27 +268,22 @@ function buildFilterChips(
   for (const id of filters.categories) {
     const option = categoryMap.get(id);
     if (!option) continue;
-    const display = categoryDisplay(option.name, option.color ?? null);
-    chips.push({ id, kind: "categories", label: `Activity: ${option.name}`, color: display.color, remaining: filters.categories.filter((value) => value !== id) });
+    chips.push({ id, kind: "categories", label: option.name, name: option.name, color: option.color ?? null, remaining: filters.categories.filter((value) => value !== id) });
   }
   for (const id of filters.tags) {
     const option = tagMap.get(id);
-    if (option) chips.push({ id, kind: "tags", label: `Tag: ${option.name}`, remaining: filters.tags.filter((value) => value !== id) });
+    if (option) chips.push({ id, kind: "tags", label: `#${option.name}`, name: option.name, remaining: filters.tags.filter((value) => value !== id) });
   }
   for (const id of filters.places) {
     const option = placeMap.get(id);
-    if (option) chips.push({ id, kind: "places", label: `Place: ${option.name}`, remaining: filters.places.filter((value) => value !== id) });
+    if (option) chips.push({ id, kind: "places", label: `Place: ${option.name}`, name: option.name, remaining: filters.places.filter((value) => value !== id) });
   }
   for (const id of filters.sources) {
     const option = sourceMap.get(id);
-    if (option) chips.push({ id, kind: "sources", label: `Source: ${option.name}`, remaining: filters.sources.filter((value) => value !== id) });
+    if (option) chips.push({ id, kind: "sources", label: `Source: ${option.name}`, name: option.name, remaining: filters.sources.filter((value) => value !== id) });
   }
   if (filters.description) {
-    chips.push({ id: filters.description, kind: "description", label: `Description: ${filters.description}`, remaining: "" });
+    chips.push({ id: filters.description, kind: "description", label: `Description: ${filters.description}`, name: filters.description, remaining: "" });
   }
   return chips;
-}
-
-function toggleValue(values: string[], value: string) {
-  return values.includes(value) ? values.filter((item) => item !== value) : [...values, value];
 }

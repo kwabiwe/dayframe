@@ -42,11 +42,14 @@ describe("hasOpenDialog", () => {
 });
 
 describe("hasOpenDialog with real popups", () => {
-  it("sees the Reports More filters popup through its trigger", async () => {
+  it("sees the Reports Filter dialog while it is open", async () => {
     const { readFileSync } = await import("node:fs");
     const panel = readFileSync(`${process.cwd()}/src/components/ReportFiltersPanel.tsx`, "utf8");
-    expect(panel).toMatch(/aria-expanded=\{moreOpen\}\s*aria-haspopup="dialog"/);
-    document.body.innerHTML = `<button aria-haspopup="dialog" aria-expanded="true">More filters</button>`;
+    // The Filter dialog is the shared ModalDialog (a visible role="dialog").
+    expect(panel).toContain("<ModalDialog");
+    document.body.innerHTML = `<dialog open role="dialog" aria-modal="true"><p>Filter</p></dialog>`;
+    const dialog = document.querySelector("dialog")!;
+    dialog.getClientRects = () => [{ width: 1, height: 1 }] as unknown as DOMRectList;
     expect(hasOpenDialog()).toBe(true);
   });
 });

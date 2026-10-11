@@ -12852,3 +12852,120 @@ dialog.ui-dialog.df-palette {
     padding-top: 15px;
   }
 }
+
+/*
+ * Reports filters in Blocks (parity step 15b-1): a Filter button, the active filters as removable
+ * chips (activities as solid blocks) and the Filter dialog of chip groups.
+ */
+.df-report-filters {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+}
+
+.df-fchips {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+.df-fchip {
+  display: inline-flex;
+  min-height: 32px;
+  max-width: 100%;
+  align-items: center;
+  gap: 6px;
+  border-radius: 999px;
+  padding: 0 10px 0 12px;
+  background: var(--surface-muted);
+  color: var(--text-primary);
+  font-size: 13px;
+  font-weight: 650;
+  text-decoration: none;
+}
+
+.df-fchip span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.df-fchip.df-block {
+  background: var(--block);
+  color: var(--on-block);
+}
+
+.df-rf-dialog {
+  width: min(620px, calc(100vw - 24px));
+}
+
+.df-rf-dialog .ui-dialog-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.df-rf {
+  display: grid;
+  gap: 18px;
+}
+
+.df-rf-sec {
+  display: grid;
+  min-width: 0;
+  gap: 8px;
+  margin: 0;
+  border: 0;
+  padding: 0;
+}
+
+.df-rf-sec legend {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+  padding: 0;
+}
+
+.df-rf-sec legend .df-rbtn {
+  margin-left: auto;
+}
+
+.df-rf-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.df-rchip.is-neutral {
+  background: var(--text-primary);
+  color: var(--surface);
+}
+
+.df-rf-description {
+  display: grid;
+  gap: 6px;
+}
+
+.df-rf-description span {
+  color: var(--text-muted);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.df-rf-description input {
+  min-height: 44px;
+}
+
+@media (max-width: 860px) {
+  .df-fchip,
+  .df-rf-chips .df-rchip {
+    min-height: 44px;
+  }
+}
