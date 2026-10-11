@@ -83,7 +83,7 @@ describe("web Settings contracts", () => {
   it("hides keyboard shortcuts on touch-only devices (UIA-313)", () => {
     expect(settingsFormsSource).toContain('className="df-shortcuts-row"');
     expect(readFileSync(new URL("../app/globals.css", import.meta.url), "utf8"))
-      .toMatch(/@media \(hover: none\) and \(pointer: coarse\) \{\s*\.df-shortcuts-row,\s*\.df-side-shortcuts \{\s*display: none;/);
+      .toMatch(/@media \(hover: none\) and \(pointer: coarse\) \{\s*\.df-shortcuts-row,\s*\.df-set-card \.ui-settings-row\.df-shortcuts-row,\s*\.df-side-shortcuts \{\s*display: none;/);
   });
 
   it("converts compact hour and minute controls to the existing minute contract", () => {

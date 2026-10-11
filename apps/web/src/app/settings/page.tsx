@@ -52,6 +52,7 @@ export default function SettingsPage() {
           <SetCard glyph="timer" id="your-day" title="Your day">
             <GoalSettings
               dailyGoalMinutes={data.user.dailyGoalMinutes}
+              userId={data.user.id}
               weeklyGoalMinutes={data.user.weeklyGoalMinutes}
             />
           </SetCard>

@@ -63,6 +63,14 @@ describe("PATCH /api/profile", () => {
     expect(mocks.query).not.toHaveBeenCalled();
   });
 
+  it("refuses a goal change made for another account than the one signed in now (UIA-309)", async () => {
+    const response = await PATCH(jsonRequest({ dailyGoalMinutes: 600, expectedUserId: "someone-else" }));
+    expect(response.status).toBe(409);
+    expect(mocks.query).not.toHaveBeenCalled();
+    const ok = await PATCH(jsonRequest({ dailyGoalMinutes: 600, expectedUserId: baseSession.userId }));
+    expect(ok.status).toBe(200);
+  });
+
   it("reauthenticates provider sessions before changing their Supabase password", async () => {
     mocks.query.mockResolvedValueOnce({
       rows: [{ email: "kb@example.com", passwordHash: null }]

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Minus, Plus } from "lucide-react";
 import { SettingsRow } from "@/components/ui/Primitives";
@@ -19,70 +19,86 @@ import {
  * Settings › Your day (UIA-309): the iPhone's goal steppers. A tap changes the goal at once; it is
  * saved a moment after the last tap (no Save button), and leaving the page saves a pending change.
  */
-export function GoalSettings({ dailyGoalMinutes, weeklyGoalMinutes }: { dailyGoalMinutes: number; weeklyGoalMinutes: number }) {
+export function GoalSettings({
+  dailyGoalMinutes,
+  userId,
+  weeklyGoalMinutes
+}: {
+  dailyGoalMinutes: number;
+  /** The account these goals belong to: a save never lands on another account signed in since. */
+  userId: string;
+  weeklyGoalMinutes: number;
+}) {
   const router = useRouter();
   const { refresh } = useAppShellRuntime();
   const [draft, setDraft] = useState<TimeGoalMinutes | null>(null);
   const [status, setStatus] = useState<{ kind: "saved" | "error"; text: string } | null>(null);
   const goals = draft ?? { dailyGoalMinutes, weeklyGoalMinutes };
-  // Bumped when a save lands; the effect below reloads the account so Today and Reports follow.
-  const [savedCount, setSavedCount] = useState(0);
-  const [saver] = useState(() => createGoalSaver({
-    save: async (next) => {
-      const response = await clientFetch("/api/profile", {
-        method: "PATCH",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify(next)
-      });
-      if (!response.ok) throw new Error("not saved");
-    },
-    onSaved: () => {
-      setStatus({ kind: "saved", text: "Saved" });
-      setSavedCount((count) => count + 1);
-    },
-    onFailed: () => {
-      // Show what the account holds again.
-      setDraft(null);
-      setStatus({ kind: "error", text: "Your goal was not saved. Check your connection and try again." });
-    }
-  }));
+  // The latest app callbacks and edit revision, read by the saver after a save lands (also after
+  // Settings has closed, so Today and Reports still pick up the new goal at once).
+  const latest = useRef({ mounted: false, refresh, revision: 0, router });
+  const saverRef = useRef<ReturnType<typeof createGoalSaver> | null>(null);
 
   useEffect(() => {
-    if (savedCount === 0) return;
-    let current = true;
-    void refresh({ force: true }).then(() => {
-      if (!current) return;
-      setDraft(null);
-      router.refresh();
+    latest.current.refresh = refresh;
+    latest.current.router = router;
+  }, [refresh, router]);
+
+  useEffect(() => {
+    const state = latest.current;
+    state.mounted = true;
+    const saver = createGoalSaver({
+      save: async (next) => {
+        const response = await clientFetch("/api/profile", {
+          method: "PATCH",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ ...next, expectedUserId: userId }),
+          // Survives the page closing or reloading right after the last tap.
+          keepalive: true
+        });
+        if (!response.ok) throw new Error("not saved");
+      },
+      onSaved: (_saved, revision) => {
+        if (state.mounted) setStatus({ kind: "saved", text: "Saved" });
+        void state.refresh({ force: true }).then(() => {
+          state.router.refresh();
+          // A newer tap since this save keeps its draft until its own save lands.
+          if (state.mounted && state.revision === revision) setDraft(null);
+        }).catch(() => undefined);
+      },
+      onFailed: (_error, revision) => {
+        if (!state.mounted || state.revision !== revision) return;
+        // Show what the account holds again.
+        setDraft(null);
+        setStatus({ kind: "error", text: "Your goal was not saved. Check your connection and try again." });
+      }
     });
-    return () => {
-      current = false;
-    };
-  }, [refresh, router, savedCount]);
-
-  useEffect(() => {
-    const flush = () => saver.flush();
+    saverRef.current = saver;
+    const leave = () => saver.flush({ immediately: true });
     const onVisibility = () => {
-      if (document.visibilityState === "hidden") saver.flush();
+      if (document.visibilityState === "hidden") saver.flush({ immediately: true });
     };
-    window.addEventListener("pagehide", flush);
+    window.addEventListener("pagehide", leave);
     document.addEventListener("visibilitychange", onVisibility);
     return () => {
-      window.removeEventListener("pagehide", flush);
+      window.removeEventListener("pagehide", leave);
       document.removeEventListener("visibilitychange", onVisibility);
+      state.mounted = false;
       // Leaving Settings inside the app saves a pending change at once.
       saver.flush();
+      saverRef.current = null;
     };
-  }, [saver]);
+  }, [userId]);
 
   function step(kind: keyof TimeGoalMinutes, direction: -1 | 1) {
     const limits = kind === "dailyGoalMinutes" ? DAILY_GOAL_HOURS : WEEKLY_GOAL_HOURS;
     const value = nextGoalMinutes(goals[kind], direction, limits);
     if (value === goals[kind]) return;
     const next = { ...goals, [kind]: value };
+    latest.current.revision += 1;
     setDraft(next);
     setStatus(null);
-    saver.schedule(next);
+    saverRef.current?.schedule(next, latest.current.revision);
   }
 
   return (
@@ -151,7 +167,7 @@ function GoalStepper({
       >
         <Minus aria-hidden="true" size={16} />
       </button>
-      <output className="df-stepper-value df-tnum" aria-live="polite">{value}</output>
+      <output aria-label={`${label[0].toUpperCase()}${label.slice(1)} ${value}`} aria-live="polite" className="df-stepper-value df-tnum">{value}</output>
       <button
         aria-label={`Increase ${label}`}
         className="df-stepper-btn"

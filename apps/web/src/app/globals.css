@@ -12353,8 +12353,10 @@ dialog.ui-dialog.df-ce-dialog {
   gap: 6px;
 }
 
-.df-export-more {
-  position: relative;
+.df-export-more[open] {
+  flex-basis: 100%;
+  display: grid;
+  justify-items: end;
 }
 
 .df-export-more > summary {
@@ -12365,18 +12367,23 @@ dialog.ui-dialog.df-ce-dialog {
   display: none;
 }
 
+/* The other formats open in the row's own flow (no floating layer), so they fit any width. */
+.df-export {
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.df-export .df-rbtn {
+  min-height: 44px;
+}
+
 .df-export-menu {
-  position: absolute;
-  z-index: 20;
-  right: 0;
-  top: calc(100% + 6px);
   display: grid;
-  min-width: 240px;
-  max-width: calc(100vw - 24px);
+  width: 100%;
+  margin-top: 6px;
   border-radius: 14px;
-  padding: 6px;
-  background: var(--surface-raised);
-  box-shadow: var(--shadow-floating);
+  padding: 4px;
+  background: var(--surface-muted);
 }
 
 .df-export-menu a {
@@ -12397,6 +12404,7 @@ dialog.ui-dialog.df-ce-dialog {
 /* No keyboard shortcuts on touch-only devices (UIA-313): the Help row and the sidebar entry hide. */
 @media (hover: none) and (pointer: coarse) {
   .df-shortcuts-row,
+  .df-set-card .ui-settings-row.df-shortcuts-row,
   .df-side-shortcuts {
     display: none;
   }

@@ -15,7 +15,12 @@ export async function PATCH(request: Request) {
       weeklyGoalMinutes?: number;
       currentPassword?: string;
       newPassword?: string;
+      /** A change made for one account (Settings › Your day) never lands on another signed in since. */
+      expectedUserId?: string;
     };
+    if (body.expectedUserId !== undefined && body.expectedUserId !== session.userId) {
+      return NextResponse.json({ error: "You're signed in to a different account now. Reload Settings." }, { status: 409 });
+    }
     const name = body.name?.trim();
     const workspaceName = body.workspaceName?.trim();
     const currentPassword = body.currentPassword ?? "";

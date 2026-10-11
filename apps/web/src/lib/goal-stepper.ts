@@ -27,7 +27,11 @@ export type TimeGoalMinutes = { dailyGoalMinutes: number; weeklyGoalMinutes: num
 
 type TimerHandle = unknown;
 
-/** Saves the latest goals after a quiet delay, one request at a time, latest wins. */
+/**
+ * Saves the latest goals after a quiet delay, one request at a time; only the latest save may
+ * settle the page. Each change carries its edit revision, so the page can tell whether a landed
+ * save is still what it shows.
+ */
 export function createGoalSaver({
   clearTimer = (handle) => clearTimeout(handle as ReturnType<typeof setTimeout>),
   delayMs = GOAL_SAVE_DELAY_MS,
@@ -38,22 +42,26 @@ export function createGoalSaver({
 }: {
   clearTimer?: (handle: TimerHandle) => void;
   delayMs?: number;
-  onFailed: (error: unknown) => void;
-  onSaved: (goals: TimeGoalMinutes) => void;
+  onFailed: (error: unknown, revision: number) => void;
+  onSaved: (goals: TimeGoalMinutes, revision: number) => void;
   save: (goals: TimeGoalMinutes) => Promise<void>;
   setTimer?: (callback: () => void, ms: number) => TimerHandle;
 }) {
   let timer: TimerHandle | null = null;
-  let pending: TimeGoalMinutes | null = null;
+  let pending: { goals: TimeGoalMinutes; revision: number } | null = null;
   let sequence = 0;
   let queue: Promise<unknown> = Promise.resolve();
 
-  function send(goals: TimeGoalMinutes) {
-    const mine = ++sequence;
-    queue = queue.catch(() => undefined).then(() => (mine === sequence ? save(goals) : undefined)).then(
-      () => { if (mine === sequence) onSaved(goals); },
-      (error: unknown) => { if (mine === sequence) onFailed(error); }
+  function settle(promise: Promise<unknown>, mine: number, change: { goals: TimeGoalMinutes; revision: number }) {
+    return promise.then(
+      () => { if (mine === sequence) onSaved(change.goals, change.revision); },
+      (error: unknown) => { if (mine === sequence) onFailed(error, change.revision); }
     );
+  }
+
+  function send(change: { goals: TimeGoalMinutes; revision: number }) {
+    const mine = ++sequence;
+    queue = queue.catch(() => undefined).then(() => (mine === sequence ? settle(save(change.goals), mine, change) : undefined));
   }
 
   function stopTimer() {
@@ -62,8 +70,8 @@ export function createGoalSaver({
   }
 
   return {
-    schedule(goals: TimeGoalMinutes) {
-      pending = goals;
+    schedule(goals: TimeGoalMinutes, revision = 0) {
+      pending = { goals, revision };
       stopTimer();
       sequence += 1;
       timer = setTimer(() => {
@@ -73,13 +81,22 @@ export function createGoalSaver({
         if (next) send(next);
       }, delayMs);
     },
-    /** Leaving the page: save a pending change now. */
-    flush() {
+    /**
+     * Leaving Settings: save a pending change now. `immediately` (the page itself is going away)
+     * sends it at once rather than behind a request still in flight, which the page may not
+     * outlive; the request is a keepalive one.
+     */
+    flush({ immediately = false }: { immediately?: boolean } = {}) {
       if (timer === null || !pending) return;
       stopTimer();
       const next = pending;
       pending = null;
-      send(next);
+      if (!immediately) {
+        send(next);
+        return;
+      }
+      const mine = ++sequence;
+      queue = settle(save(next.goals), mine, next);
     },
     cancel() {
       stopTimer();
