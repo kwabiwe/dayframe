@@ -12266,7 +12266,8 @@ dialog.ui-dialog.df-palette {
   min-width: 0;
   min-height: 44px;
   flex: 1;
-  border: 0;
+  /* Transparent until focused: the shared neutral focus border then shows. */
+  border: 1px solid transparent;
   border-radius: 10px;
   padding: 0 10px;
   background: var(--surface-muted);
