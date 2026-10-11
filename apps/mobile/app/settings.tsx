@@ -136,6 +136,7 @@ import { BlocksNavHeader, usePreviousScreenLabel } from "@/components/BlocksNavH
 import { BlocksConfirmHost, useBlocksConfirm, type BlocksConfirmRequest } from "@/components/blocks/BlocksConfirmSheet";
 import { bindConfirmToSession, captureConfirmAuthority, captureLogoutRecovery, confirmAuthorityStillCurrent, logoutRecoveryStillCurrent, type ConfirmAuthority } from "@/lib/confirmAuthority";
 import { BlocksToast, useBlocksNotice } from "@/components/blocks/BlocksToast";
+import { BlocksInfoSheet, type BlocksInfoRow } from "@/components/blocks/BlocksInfoSheet";
 import { blocksNavOrigin, settingsBackLabel, settingsSectionTitle } from "@/lib/blocksNav";
 import { mobileTextProps } from "@/lib/mobileTypography";
 import { createGoalSaver, publishSavedTimeGoals, type TimeGoals } from "@/lib/settingsGoals";
@@ -341,7 +342,7 @@ export default function SettingsScreen() {
   const [timerStopSyncIssues, setTimerStopSyncIssues] = useState<
     Awaited<ReturnType<typeof listTimerStopSyncIssues>>
   >([]);
-  const [locationInfoSheet, setLocationInfoSheet] = useState<"places" | "suggestions" | null>(null);
+  const [locationInfoSheet, setLocationInfoSheet] = useState<"suggestions" | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   const [locationStatus, setLocationStatus] = useState(cachedSnapshot?.locationStatus ?? "Not requested");
   const [locationDiagnostics, setLocationDiagnostics] = useState<LocationVisitDiagnostics | null>(
@@ -2680,13 +2681,19 @@ export default function SettingsScreen() {
           theme={theme}
         />
       ) : null}
-      <LocationInformationSheet
-        kind={locationInfoSheet}
-        onClose={() => setLocationInfoSheet(null)}
-        reduceMotion={reduceMotion}
-        styles={styles}
-        theme={theme}
-      />
+      {locationInfoSheet === "suggestions" ? (
+        <BlocksInfoSheet
+          eyebrow="Location"
+          note={LOCATION_SUGGESTIONS_PRIVACY}
+          onClose={() => setLocationInfoSheet(null)}
+          reduceMotion={reduceMotion}
+          rows={LOCATION_SUGGESTION_ROWS}
+          styles={styles}
+          testID="location-suggestions-info"
+          theme={theme}
+          title="How suggestions work"
+        />
+      ) : null}
       {healthPickerKey ? (
         <ActivityPickerSheet
           activities={data?.categories ?? []}
@@ -2715,83 +2722,18 @@ export default function SettingsScreen() {
   );
 }
 
-function LocationInformationSheet({
-  kind,
-  onClose,
-  reduceMotion,
-  styles,
-  theme
-}: {
-  kind: "places" | "suggestions" | null;
-  onClose: () => void;
-  reduceMotion: boolean;
-  styles: MobileStyles;
-  theme: MobileTheme;
-}) {
-  const sheetRef = useRef<SwipeDismissSheetHandle>(null);
-  if (!kind) return null;
-  const isPlaces = kind === "places";
-  return (
-    <Modal
-      animationType="none"
-      onRequestClose={() => sheetRef.current?.dismiss()}
-      presentationStyle="overFullScreen"
-      transparent
-      visible
-    >
-      <View accessibilityViewIsModal style={styles.sheetOverlay}>
-        <SwipeDismissSheet
-          ref={sheetRef}
-          accessibilityLabel={isPlaces ? "About saved places" : "About location suggestions"}
-          backdropAccessibilityLabel="Close information"
-          backdropStyle={styles.sheetBackdrop}
-          handleStyle={styles.sheetHandle}
-          onDismiss={onClose}
-          reduceMotion={reduceMotion}
-          style={styles.activeEditSheet}
-          visible
-        >
-          <View style={styles.sheetHeader}>
-            <Text {...mobileTextProps("sectionHeading")} style={styles.sheetTitle}>{isPlaces ? "About saved places" : "About location suggestions"}</Text>
-            <Pressable
-              accessibilityLabel="Close information"
-              accessibilityRole="button"
-              style={pressable(styles.iconButton, styles.buttonPressed)}
-              onPress={() => sheetRef.current?.dismiss()}
-            >
-              <CloseGlyph color={theme.accent} />
-            </Pressable>
-          </View>
-          <ScrollView
-            contentContainerStyle={styles.activeEditContent}
-            style={styles.activeEditScroller}
-          >
-            {isPlaces ? (
-              <>
-                <Text {...mobileTextProps("body")} style={styles.muted}>
-                  Saved places help Dayframe recognise where you spent time. Detected visits appear in Review before they become time entries.
-                </Text>
-                <Text {...mobileTextProps("body")} style={styles.muted}>You can edit a saved name and radius at any time.</Text>
-              </>
-            ) : (
-              <>
-                <Text {...mobileTextProps("body")} style={styles.muted}>
-                  Dayframe uses background location to suggest visits and journeys. Suggestions go to Review before becoming time entries.
-                </Text>
-                <Text {...mobileTextProps("body")} style={styles.muted}>
-                  Location data is private. Motion & Fitness activity (still, walking, driving) is kept with it and never leaves Dayframe. Local journal samples expire after seven days. Upload copies, cached places and summaries can stay on this iPhone longer, even after upload or signing back in. Signing out clears this account’s local Location data; synced entries and saved places stay in your account.
-                </Text>
-                <Text {...mobileTextProps("body")} style={styles.muted}>
-                  iOS can pause or limit background updates, so Dayframe may not capture every movement.
-                </Text>
-              </>
-            )}
-          </ScrollView>
-        </SwipeDismissSheet>
-      </View>
-    </Modal>
-  );
-}
+/** Settings › Location › How suggestions work (UIA-022). */
+const LOCATION_SUGGESTION_ROWS: readonly BlocksInfoRow[] = [
+  { glyph: "inbox", lead: "Suggestions wait in Review.", text: "Dayframe notices visits and journeys and shows them as blocks for you to confirm." },
+  { glyph: "check", lead: "Only saved places log on their own.", text: "A clear stay at a place you saved can be logged straight away; anything less certain waits in Review." },
+  { glyph: "footprints", lead: "Motion helps with trips.", text: "Motion & Fitness tells walking from driving. It stays with your location and never leaves Dayframe." },
+  { glyph: "refresh-cw", lead: "iOS may pause updates.", text: "iOS can pause or limit background location, so a movement can be missed." }
+];
+
+const LOCATION_SUGGESTIONS_PRIVACY = {
+  glyph: "shield" as const,
+  text: "Location stays private to your account and is never used for ads or analytics. Recent points on this iPhone expire after seven days; upload copies can stay longer. Signing out clears them all."
+};
 
 function CloseGlyph({ color }: { color: string }) {
   return (
