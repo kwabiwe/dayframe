@@ -414,4 +414,25 @@ describe("Health mapping writer (UIA-085)", () => {
     await t.writer.idle("walking");
     expect(t.stored().walking).toEqual({ description: "A" });
   });
+
+  it("Codex r11: a failed clear with a later identical clear queued leaves the field empty", async () => {
+    const t = setup({ walking: { description: "Old" } });
+    await t.writer.refresh();
+    const version = 9;
+    let draft = "";
+    t.writer.attach("walking", (saved, _failed, token) => {
+      const shown = t.writer.shown();
+      if (token === version) draft = shown ? shown.walking?.description ?? "" : saved;
+    });
+    t.hold();
+    const first = t.writer.commitName("walking", "", version);
+    await tick();
+    const second = t.writer.commitName("walking", "", version);
+    t.holds[0].fail();
+    expect(await first).toBe(false);
+    expect(draft).toBe("");
+    expect(await second).toBe(true);
+    await t.writer.idle("walking");
+    expect(t.stored().walking).toBeUndefined();
+  });
 });

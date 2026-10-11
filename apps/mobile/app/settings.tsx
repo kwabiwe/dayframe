@@ -2713,7 +2713,9 @@ function HealthTypeSheet({
       // Back to what the writer shows now: the saved Name with any later queued Name over it
       // (an identical commit still on its way keeps the field on it).
       typedRef.current = false;
-      setNameDraft(healthMappingWriter.shown()?.[healthKey]?.description ?? savedName);
+      // An empty Name is a Name (a queued clear); only a missing snapshot falls back to the saved one.
+      const shown = healthMappingWriter.shown();
+      setNameDraft(shown ? shown[healthKey]?.description ?? "" : savedName);
     }
   }), [healthKey]);
   function commitName() {
