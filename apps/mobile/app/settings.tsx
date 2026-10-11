@@ -779,8 +779,19 @@ export default function SettingsScreen() {
   // Dayframe returns to the foreground (coming back from iOS Settings), without waiting for the
   // network.
   const [iosSettingsNeeded, setIosSettingsNeeded] = useState(false);
+  // Only the newest read publishes (an older answer arriving late never overwrites it), and none
+  // after Settings closes.
+  const iosSettingsRead = useRef(0);
+  useEffect(() => () => {
+    iosSettingsRead.current += 1;
+  }, []);
   const readIosSettingsNeed = useCallback(() => {
-    locationAccessNeedsIosSettings().then(setIosSettingsNeeded).catch(() => undefined);
+    const read = ++iosSettingsRead.current;
+    locationAccessNeedsIosSettings()
+      .then((needed) => {
+        if (read === iosSettingsRead.current) setIosSettingsNeeded(needed);
+      })
+      .catch(() => undefined);
   }, []);
   useEffect(() => {
     readIosSettingsNeed();
@@ -869,7 +880,9 @@ export default function SettingsScreen() {
   // Settings › Location: the consent switch's plain state, kept apart from the iOS permission.
   const locationSuggestionsDetail = locationDiagnostics?.locationLearningCaptureState === "logout_cleanup"
     ? "Paused while signing out. Sign out again to finish."
-    : locationCaptureNeedsRetry
+    : locationAction === "settings" && locationDiagnostics?.locationLearningEnabled
+      ? "Paused. Allow location in iPhone Settings (Open Settings above)."
+      : locationCaptureNeedsRetry
       ? "Paused. Tap Restart location above to start it again."
       : locationDiagnostics?.locationLearningEnabled && !locationMonitoringAllowed
         ? "On, but needs Always location access"
@@ -1936,7 +1949,7 @@ export default function SettingsScreen() {
                 <SettingsBlockRow
                   control={
                     <SettingsSwitch
-                      accessibilityHint={locationNeedsIosSettings
+                      accessibilityHint={locationNeedsIosSettings && !locationDiagnostics?.locationLearningEnabled
                         ? "Opens iPhone Settings, where location must be allowed first."
                         : "Saves your choice for this account. Location access is set separately."}
                       disabled={locationDiagnostics === null}
@@ -2467,7 +2480,7 @@ export default function SettingsScreen() {
                   control={
                     <SettingsSwitch
                       // Consent for this account, separate from the iOS permission above.
-                      accessibilityHint={locationNeedsIosSettings
+                      accessibilityHint={locationNeedsIosSettings && !locationDiagnostics?.locationLearningEnabled
                         ? "Opens iPhone Settings, where location must be allowed first."
                         : "Saves your choice for this account. Location access is set separately."}
                       disabled={locationDiagnostics === null}
