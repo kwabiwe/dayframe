@@ -29,6 +29,14 @@ export type ReportSeriesPoint = {
   additionalOverlappingActivitySeconds: number;
 };
 
+export type ReportDayActivities = {
+  key: string;
+  label: string;
+  start: string;
+  end: string;
+  activities: Array<{ id: string; seconds: number }>;
+};
+
 export type ReportEntryRow = TimeEntryRow & {
   isRunning: boolean;
   overlapCount: number;
@@ -63,6 +71,8 @@ export type ReportResult = {
   byPlace: ReportBreakdownRow[];
   bySource: ReportBreakdownRow[];
   dailySeries: ReportSeriesPoint[];
+  /** Each day's logged seconds per activity (ids as in byCategory), for the blocks card. */
+  dailyByActivity: ReportDayActivities[];
   entries: ReportEntryRow[];
   overlapCandidates: Array<{
     id: string;
@@ -113,6 +123,8 @@ type ReportDataRow = {
     stoppedAt: string;
     description: string | null;
     categoryName: string | null;
+    /** The entry's activity id, or "uncategorized" (as in byCategory). */
+    categoryId?: string;
   }>;
   totalEntries: number;
 };
@@ -199,6 +211,7 @@ export async function getReports(session: RequestSession, input: ReportQueryInpu
     byPlace: normalizeBreakdown(row.byPlace),
     bySource: normalizeBreakdown(row.bySource),
     dailySeries,
+    dailyByActivity: dailyActivitySeconds(analysisEntries, input.dayBoundaries, capturedNow),
     entries: arrayValue(row.entries).map((entry) => {
       const entryAnalysis = analysisById.get(entry.id);
       return {
@@ -610,7 +623,8 @@ export function buildReportDataQuery(
               'startedAt', ci.interval_start,
               'stoppedAt', ci.interval_end,
               'description', fe.description,
-              'categoryName', fe.category_name
+              'categoryName', fe.category_name,
+              'categoryId', coalesce(fe.category_id::text, 'uncategorized')
             )
             order by ci.interval_start, ci.interval_end, ci.id
           )
@@ -814,6 +828,45 @@ class ReportSqlBuilder {
         and ce.effective_stopped_at > ${previousStart}::timestamptz
     )`;
   }
+}
+
+/**
+ * Seconds per activity for each report day, from the range's intervals (already clipped to the
+ * range) clipped again to the day. Logged time, like dailySeries.seconds: overlapping entries
+ * each count.
+ */
+export function dailyActivitySeconds(
+  intervals: ReadonlyArray<{ startedAt: string; stoppedAt: string | null; categoryId?: string }>,
+  days: ReadonlyArray<{ key: string; label: string; start: string; end: string }>,
+  capturedNow: string
+): ReportDayActivities[] {
+  const nowMs = Date.parse(capturedNow);
+  const spans = intervals.flatMap((interval) => {
+    const from = Date.parse(interval.startedAt);
+    const to = interval.stoppedAt ? Date.parse(interval.stoppedAt) : nowMs;
+    return Number.isFinite(from) && Number.isFinite(to) && to > from
+      ? [{ from, to, id: interval.categoryId ?? "uncategorized" }]
+      : [];
+  });
+  return days.map((day) => {
+    const dayStart = Date.parse(day.start);
+    const dayEnd = Date.parse(day.end);
+    const byId = new Map<string, number>();
+    for (const span of spans) {
+      const overlap = Math.min(span.to, dayEnd) - Math.max(span.from, dayStart);
+      if (overlap > 0) byId.set(span.id, (byId.get(span.id) ?? 0) + overlap / 1000);
+    }
+    return {
+      key: day.key,
+      label: day.label,
+      start: day.start,
+      end: day.end,
+      activities: [...byId.entries()]
+        .map(([id, seconds]) => ({ id, seconds: Math.round(seconds) }))
+        .filter((activity) => activity.seconds > 0)
+        .sort((left, right) => right.seconds - left.seconds || left.id.localeCompare(right.id))
+    };
+  });
 }
 
 function normalizeBreakdown(value: ReportBreakdownRow[] | null | undefined) {
