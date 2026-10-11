@@ -187,8 +187,9 @@ export function AuthForm({ mode, next = null }: { mode: AuthMode; next?: string 
           <Link
             href={otherModeHref}
             onClick={(event) => {
-              // Keep a #section (Settings › Privacy and data) across the switch too.
-              if (!window.location.hash) return;
+              // Keep a #section (Settings › Privacy and data) across the switch too; a modified
+              // click (new tab or window) keeps the browser's own behaviour.
+              if (!window.location.hash || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey || event.button !== 0) return;
               event.preventDefault();
               router.push(`${otherModeHref}${window.location.hash}`);
             }}
