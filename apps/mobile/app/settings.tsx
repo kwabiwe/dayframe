@@ -192,6 +192,7 @@ import {
   subscribeTimerStopOutbox
 } from "@/lib/timerStopOutbox";
 import { syncHelpStatus } from "@/lib/settingsSyncDiagnostics";
+import { createNameCommitter } from "@/lib/healthNameDraft";
 
 type Category = MobileBootstrap["categories"][number];
 // Settings › Your day goal ranges (hours): daily in 1 h steps, weekly in 5 h steps.
@@ -1553,7 +1554,8 @@ export default function SettingsScreen() {
     }
   }
 
-  async function updateHealthAutoLogMapping(type: HealthImportPreferenceKey, patch: HealthAutoLogMapping) {
+  /** Saves a Health type's mapping; true once the server has it (a failure rolls back and alerts). */
+  async function updateHealthAutoLogMapping(type: HealthImportPreferenceKey, patch: HealthAutoLogMapping): Promise<boolean> {
     const current = healthAutoLogMappings;
     const nextMapping = {
       ...(current[type] ?? {}),
@@ -1572,9 +1574,11 @@ export default function SettingsScreen() {
       const preferences = healthImportPreferences ?? await getHealthImportPreferences();
       await reprocessExistingHealthReviewItems(preferences, { force: true, mappings: saved });
       await load({ silent: true });
+      return true;
     } catch (error) {
       setHealthAutoLogMappingsAndCache(current);
       Alert.alert("Apple Health", error instanceof Error ? error.message : "Unable to save Health mapping.");
+      return false;
     }
   }
 
@@ -2573,7 +2577,7 @@ export default function SettingsScreen() {
             setHealthDetailKey(null);
           }}
           onEnabledChange={(value) => void updateHealthImportPreference(healthDetailKey, value)}
-          onMappingChange={(patch) => void updateHealthAutoLogMapping(healthDetailKey, patch)}
+          onMappingChange={(patch) => updateHealthAutoLogMapping(healthDetailKey, patch)}
           onPickActivity={() => setHealthPickerKey(healthDetailKey)}
           reduceMotion={reduceMotion}
           styles={styles}
@@ -2637,7 +2641,7 @@ function HealthTypeSheet({
   mapping: HealthAutoLogMapping;
   onClose: () => void;
   onEnabledChange: (value: boolean) => void;
-  onMappingChange: (patch: HealthAutoLogMapping) => void;
+  onMappingChange: (patch: HealthAutoLogMapping) => Promise<boolean>;
   onPickActivity: () => void;
   reduceMotion: boolean;
   styles: MobileStyles;
@@ -2648,16 +2652,24 @@ function HealthTypeSheet({
   const mappedCategory = categories.find((category) => category.id === mapping.categoryId) ?? null;
   // Name is a draft saved once: when editing ends, or when the sheet starts to leave by any way
   // (Close, backdrop, swipe, accessibility escape), so a focused edit is never lost.
-  const [nameDraft, setNameDraft] = useState(mapping.description ?? "");
-  const savedName = useRef(mapping.description ?? "");
+  const [nameDraft, setNameDraftState] = useState(mapping.description ?? "");
+  const draftRef = useRef(mapping.description ?? "");
   const [closing, setClosing] = useState(false);
   const closingRef = useRef(false);
-  function commitName() {
-    const next = nameDraft.trim();
-    if (next === savedName.current.trim()) return;
-    savedName.current = next;
-    onMappingChange({ description: next || null });
+  function setNameDraft(value: string) {
+    draftRef.current = value;
+    setNameDraftState(value);
   }
+  // The latest parent callback (it merges into the current mapping), never the first render's.
+  const onMappingChangeRef = useRef(onMappingChange);
+  onMappingChangeRef.current = onMappingChange;
+  // Saved once per value; a failure stays retryable and shows the saved Name again (healthNameDraft).
+  const [commitName] = useState(() => createNameCommitter({
+    initial: mapping.description ?? "",
+    readDraft: () => draftRef.current,
+    save: (name) => onMappingChangeRef.current({ description: name || null }),
+    showDraft: setNameDraft
+  }));
   return (
     <Modal
       animationType="none"
@@ -2761,7 +2773,7 @@ function HealthTypeSheet({
                     <SettingsPillButton
                       accessibilityLabel={`Use the default activity for ${label}`}
                       label="Use default"
-                      onPress={() => onMappingChange({ categoryId: null })}
+                      onPress={() => void onMappingChange({ categoryId: null })}
                       theme={theme}
                     />
                   }
