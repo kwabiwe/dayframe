@@ -9,9 +9,10 @@ function read(relativePath: string) {
 const sheetSource = read("./SwipeDismissSheet.tsx");
 const editSource = read("./ActiveTimerEditSheet.tsx");
 const placesSource = read("../../app/places.tsx");
-const settingsSource = read("../../app/settings.tsx");
+// Settings' sheets: the Location explanation (BlocksInfoSheet, UIA-022).
+const infoSheetSource = read("./blocks/BlocksInfoSheet.tsx");
 const reportsSource = read("./reports/ReportSheets.tsx");
-const consumerSources = [editSource, placesSource, settingsSource];
+const consumerSources = [editSource, placesSource, infoSheetSource];
 
 describe("shared swipe-dismiss ownership integration", () => {
   it("uses no native slide animation around a shared custom transition", () => {

@@ -2568,39 +2568,6 @@ function createStyles(theme: MobileTheme) {
       paddingVertical: 8,
       gap: 2
     },
-    learnedPlaceDetailHeader: {
-      minHeight: 44,
-      flexDirection: "row",
-      alignItems: "center",
-      justifyContent: "space-between",
-      gap: 8
-    },
-    learnedPlaceMetricGrid: {
-      flexDirection: "row",
-      flexWrap: "wrap",
-      gap: 8
-    },
-    learnedPlaceMetricCell: {
-      flexBasis: "47%",
-      flexGrow: 1,
-      minWidth: 112
-    },
-    learnedPlaceCopyButton: {
-      minHeight: 44,
-      minWidth: 72,
-      flexDirection: "row",
-      alignItems: "center",
-      justifyContent: "center",
-      gap: 6,
-      borderRadius: 999,
-      paddingHorizontal: 10
-    },
-    learnedPlaceCopyText: {
-      color: theme.accentText,
-      fontFamily: monoFont,
-      fontSize: 12,
-      fontWeight: "600"
-    },
     copyToast: {
       alignSelf: "center",
       backgroundColor: theme.surfaceRaised,
