@@ -4,7 +4,7 @@ This guide defines the Midnight Core visual system for Dayframe across web and i
 
 ## Brand character
 
-Dayframe should feel dark, calm, premium and useful. Dark mode begins with a near-black midnight navy rather than flat black. Light mode is a deliberately designed companion. Both modes stay compact enough for dense time data, use restrained elevation and make the next action easy to find.
+Dayframe should feel dark, calm, premium and useful. The dark theme (Midnight in the appearance setting) begins with a near-black midnight navy rather than flat black. The light theme (Daylight) is a deliberately designed companion. Both modes stay compact enough for dense time data, use restrained elevation and make the next action easy to find.
 
 The signature treatment is a vivid, unchanged six-colour symbol paired with a single-colour outlined wordmark on quiet navy or neutral surfaces. Coral identifies the primary action and live recording; it does not replace category colours or semantic success, warning and danger colours.
 
@@ -20,10 +20,10 @@ Six decisions depart from the earlier Midnight Core rules:
 
 | Decision | Rule | Where it is defined |
 | --- | --- | --- |
-| Coral means live | Coral marks recording, the single primary action on a screen and the selected tab in the iPhone tab bar (owner decision 7 October 2026: a neutral tint washed out over Liquid Glass when bright activity blocks scrolled beneath it). Other selected navigation uses a neutral fill; durations, totals, chart marks and map pins never use coral. Browser text selection keeps its contrast-safe coral highlight, because it is a system affordance rather than an interface state. | Colour system |
+| Coral means live | Coral marks recording, the single primary action on a screen and the selected tab in the iPhone tab bar (owner decision 7 October 2026: a neutral tint washed out over Liquid Glass when bright activity blocks scrolled beneath it). Other selected navigation uses a neutral fill; durations, totals, chart marks and map pins never use coral. Browser text selection keeps its contrast-safe coral highlight, because it is a system affordance rather than an interface state. One accepted exception (owner decision 11 October 2026): on idle iPhone Today the idle card's coral `Start a block` pill and the coral Play orb appear together; no other screen shows two coral primary actions. | Colour system |
 | Colour is the data | Entries render as solid category blocks with measured text on them, using per-theme display values for the same stored keys. | Category and chart palette |
-| One display face | Bricolage Grotesque for headlines and large numerals only; the system font for everything people read or type. | Typography |
-| Every action lands | Start, stop, log and delete share one landing spring with one small overshoot, one haptic each and an Undo. Migrated surfaces move the way the prototype moves (owner decision 7 October 2026): drop-ins, pops, rolling timer digits, the Stop flight into the list, row swipes, Review card throws and the Play orb bloom. The live block carries one slow breathing ring. Reduce Motion keeps opacity only. | Motion; `.codex/reference/motion.md` |
+| One display face | Bricolage Grotesque for display roles only (screen and sheet titles, headline prompts, card titles, the timer and large totals; see Typography for the shipped list); the system font for everything people read or type. | Typography |
+| Every action lands | Start, stop, log and delete share one landing spring with one small overshoot, one haptic each and an Undo. Migrated surfaces move the way the prototype moves (owner decision 7 October 2026): drop-ins, pops, rolling timer digits, the Stop flight into the list, row swipes, Review card throws and the Play orb bloom. The live block carries one slow breathing ring. Reduce Motion removes the springs and travel: hand-offs happen at once, a released drag returns in a short 120 ms timing, live rings hold still, and presence changes use short opacity fades. | Motion; `.codex/reference/motion.md` |
 | Activities | The interface says "activity" and "activities" where it said "category", on every surface (shipped app-wide 6 Oct 2026). Database columns, API fields, code identifiers, tests and the report CSV keep `category`. | `.codex/reference/product-model.md` |
 | New layouts | Today gets a quick-start mosaic of pinned activities. Activities, Tags and Places merge into one Library page on web and Settings › Activities on iPhone. The press-and-hold Play orb with its activity bloom is approved (7 October 2026) and built on iPhone (parity step 3): it sits in the tab bar's own trailing slot, so it never covers the tabs, and VoiceOver reaches it through that native item. | The redesign phase PR for each surface |
 
@@ -114,7 +114,7 @@ Eight-digit HEX values below include alpha as the last two digits. RGB entries f
 | `wordmarkLight` | `#F7F8FB` | `247, 248, 251` | Fill-only derived wordmark for dark surfaces. Keep it on a sufficiently dark, quiet surface and never use it as live UI text. |
 | `wordmarkDark` | `#111827` | `17, 24, 39` | Fill-only derived wordmark for light surfaces. Keep it on a sufficiently light, quiet surface and never recolour the symbol to match. |
 
-### Dark mode
+### Dark mode (Midnight)
 
 | Token | HEX | RGB | Purpose and accessibility guidance |
 | --- | --- | --- | --- |
@@ -149,7 +149,7 @@ Eight-digit HEX values below include alpha as the last two digits. RGB entries f
 | `overlay` | `#0000008F` | `rgba(0, 0, 0, 0.56)` | Modal scrim; content beneath must not remain interactive. |
 | `shadow` | `#00000052` | `rgba(0, 0, 0, 0.32)` | Restrained floating-surface shadow colour. |
 
-### Light mode
+### Light mode (Daylight)
 
 | Token | HEX | RGB | Purpose and accessibility guidance |
 | --- | --- | --- | --- |
@@ -214,7 +214,7 @@ Colour remains supplementary: blocks still carry the activity name, duration and
 
 Everything people read or type uses system fonts. On iOS use San Francisco through React Native’s `System` family and favour its lighter regular/semi-bold hierarchy instead of uniformly heavy text. On web use the existing system-first stack: `-apple-system`, `BlinkMacSystemFont`, `"SF Pro Text"`, `"Segoe UI"`, sans-serif.
 
-Blocks adds one display face, Bricolage Grotesque (SIL Open Font License). It is used only for screen titles, report headlines, the timer and large totals:
+Blocks adds one display face, Bricolage Grotesque (SIL Open Font License). It is used only in display roles. On iPhone, as shipped: screen and sheet titles (Today, Calendar, Reports, onboarding step titles, sign-in, the Activities, Places and place-editor sheet titles, Location evidence), the idle card's `What are you working on?` prompt, the Play orb bloom's `Slide to a block` label, Review card titles, stamps and "All framed", the live timer (`LiveOdometer`), the duration dial's duration, the Reports hero total and donut centre value, Today's goal-frame total and the activity editor's preview name. Never body copy, labels, buttons, inputs or list rows:
 
 - Bundle the font files with each app (on iOS, Bold and ExtraBold in `apps/mobile/ios/Dayframe/Fonts` with their OFL licence, listed in `UIAppFonts` and named by PostScript name through `MOBILE_DISPLAY_FONT`; self-hosted at build time on web). The apps must not request fonts from a third-party server at runtime.
 - Body text, labels, buttons, inputs and lists stay on the system font.
@@ -226,12 +226,14 @@ Do not add Sofia Pro or any other font. The Dayframe wordmark is outline geometr
 | Role | Size | Weight | Line height | Letter spacing |
 | --- | ---: | ---: | ---: | ---: |
 | Screen title | 28–32 | 700–800 | 1.15–1.25 | `-0.02em` to `0` |
+| Sheet title | 20 | 700 | 1.2–1.3 | `0` |
+| Display prompt or card title (idle prompt 28, Review card title 30, bloom label 40) | 28–40 | 700 | 1.0–1.15 | `-0.03em` to `-0.02em` |
 | Panel title | 17–20 | 700 | 1.25–1.35 | `-0.01em` to `0` |
 | Body | 14–16 | 400–500 | 1.45–1.6 | `0` |
 | Label | 11–13 | 600–700 | 1.3–1.45 | `0.01em` only for short labels |
 | Button/navigation | 14–16 | 600–700 | 1.2–1.35 | `0` |
-| Timer numerals | 28–36 mobile; larger where space permits on web | 700–800 | 1.0–1.15 | `-0.02em` |
-| Report headline | 24–36 | 700–800 | 1.05–1.2 | `-0.02em` |
+| Timer numerals | Live block odometer 58 on iPhone (scaled to the numeric Dynamic Type cap, shrunk only to fit the card); duration dial up to 38 | 700–800 | 1.0–1.15 | `-0.02em` |
+| Report headline | Reports hero total 52 on iPhone; other report and goal totals 24–30 | 700–800 | 1.05–1.2 | `-0.04em` to `-0.02em` |
 
 Use `font-variant-numeric: tabular-nums` on timers, durations, clock labels and report figures. Do not force monospace typography across the interface. Allow Dynamic Type to grow without clipping; labels may wrap before touch targets shrink.
 
@@ -329,7 +331,7 @@ Dayframe has one icon geometry on web and iOS: Lucide's 24-point grid with 2-poi
 - Sizes: 16 inline with text, 20 in lists, chips and blocks, 24 for navigation and icon buttons, 32 for empty states. Icon buttons keep 44-point targets.
 - Selected state is a neutral fill or tint (the iPhone tab bar's coral selected tab, below, is the one exception), never a filled glyph. Play and Stop are the only solid glyphs: on the coral control where it is the screen's primary action, and on the live block's on-block Stop control (in the block's text colour) on Blocks surfaces.
 - The iOS tab bar uses Dayframe glyphs rendered as template images (`apps/mobile/assets/tab-icons`, generated with the registry) inside the system tab bar, so UIKit keeps Liquid Glass, tinting, the selection highlight and minimisation. Today is the sun, Calendar the calendar and Reports the column chart. The selected tab's icon and label use `accentText` (coral; deeper in Light for contrast on the glass) and unselected tabs `textSecondary`, so the selection stays visible whatever scrolls beneath the glass.
-- Do not use SF Symbols, emoji or Unicode characters as icons, and do not add another icon package. Surfaces not yet migrated to Blocks may keep their existing `lucide-react` imports, mobile glyphs and SF Symbols (the iPhone connectivity slot via `expo-symbols`, the Live Activity, and the native Calendar and duration dial); a migrated surface draws from the registry.
+- Do not use SF Symbols, emoji or Unicode characters as icons, and do not add another icon package. Surfaces not yet migrated to Blocks may keep their existing `lucide-react` imports, mobile glyphs and SF Symbols (the Live Activity, and the native Calendar and duration dial); a migrated surface draws from the registry. Current exception: the iPhone connectivity slot (`ConnectivityStatusStrip`) still draws the SF Symbols `icloud.slash` (offline) and `checkmark.icloud` (back online) through `expo-symbols`, including in the headers of migrated Today, Calendar and Reports. It is accepted as is until a registry glyph replaces it; do not copy it to other icons.
 
 ### Component states
 
@@ -352,7 +354,7 @@ Use the shared palette, `chartTrack`, stable segment ordering and exact value la
 
 Motion is short, purposeful, and consistent across a complete interaction: approximately 120–220 ms for control feedback and 180–300 ms for panels or chart reveals. Use standard ease-out timing and provide a reduced-motion path that removes nonessential transitions without hiding state changes.
 
-Surfaces migrated to Blocks use the prototype's motion instead, defined in `.codex/reference/motion.md`: named springs (snap, sheet, land, pop, roll), drop-ins, pops, rolling timer digits, the Stop flight, swipes, card throws and the Play orb bloom. When an entry is started, stopped, logged or deleted, its block lands with one small spring overshoot and a matching haptic. The one live block carries a slow breathing ring. No glow, confetti, parallax or idle loop. Reduce Motion keeps opacity only and the same states, haptics and Undo.
+Surfaces migrated to Blocks use the prototype's motion instead, defined in `.codex/reference/motion.md`: named springs (snap, sheet, land, pop, roll), drop-ins, pops, rolling timer digits, the Stop flight, swipes, card throws and the Play orb bloom. When an entry is started, stopped, logged or deleted, its block lands with one small spring overshoot and a matching haptic. The one live block carries a slow breathing ring. No glow, confetti, parallax or idle loop. Reduce Motion keeps the same states, haptics and Undo without springs or travel: hand-offs (a thrown card, a swiped row, a bloom pick) happen at once, a released drag returns in a short 120 ms timing, the live ring holds still, and presence changes use short opacity fades.
 
 Every new feature with visible movement must define the trigger, one animation owner, entrance/update/exit behaviour, surrounding layout response, interruption, async success/Undo/failure states, and Reduce Motion path before implementation. A transition is not complete when the initiating gesture is smooth but the resulting content, feedback, dismissal, or rollback jumps. Use the canonical implementation and validation rules in `.codex/reference/motion.md`.
 
@@ -370,7 +372,7 @@ Web may remain denser and uses hover, keyboard focus and responsive dialogs, whi
 - A lock-up exposes one accessible name; decorative artwork exposes none.
 - No primary application surface references the legacy PNG banner.
 - Favicon and app icon use the symbol only; the iOS icon is opaque.
-- System, Light and Dark appearances are checked without a wrong-tone flash.
+- System, Midnight and Daylight appearances are checked without a wrong-tone flash.
 - Web SVGs load at desktop and phone widths; iOS bundles exact SVG components.
 - Typography remains system-first: only bundled, openly licensed Bricolage Grotesque files are present, used for display roles only and never fetched from a third-party server at runtime.
 - Focus, contrast, Dynamic Type, VoiceOver, Reduce Motion and Reduce Transparency are checked.
