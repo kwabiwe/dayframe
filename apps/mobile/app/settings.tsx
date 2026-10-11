@@ -2680,8 +2680,8 @@ export default function SettingsScreen() {
 
 /** Settings › Location › How suggestions work (UIA-022). */
 const LOCATION_SUGGESTION_ROWS: readonly BlocksInfoRow[] = [
-  { glyph: "inbox", lead: "Suggestions wait in Review.", text: "Dayframe notices visits and journeys and shows them as blocks for you to confirm. Nothing is logged until you say so." },
-  { glyph: "check", lead: "Only trusted places log on their own,", text: "and only when you turn that on for the place." },
+  { glyph: "inbox", lead: "Suggestions wait in Review.", text: "Dayframe notices visits and journeys and shows them as blocks for you to confirm." },
+  { glyph: "check", lead: "Only saved places log on their own.", text: "A clear stay at a place you saved can be logged straight away; anything less certain waits in Review." },
   { glyph: "footprints", lead: "Motion helps with trips.", text: "Motion & Fitness tells walking from driving. It stays with your location and never leaves Dayframe." },
   { glyph: "refresh-cw", lead: "iOS may pause updates.", text: "iOS can pause or limit background location, so a movement can be missed." }
 ];

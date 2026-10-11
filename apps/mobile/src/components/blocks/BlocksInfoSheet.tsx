@@ -96,7 +96,7 @@ export function BlocksInfoSheet({
             {note ? (
               <View accessible style={[sheetStyles.note, { backgroundColor: theme.surfaceInset }]}>
                 <DayframeIcon color={theme.textSecondary} glyph={note.glyph} size={18} />
-                <Text {...mobileTextProps("metadata")} style={[sheetStyles.noteText, { color: theme.textSecondary }]}>{note.text}</Text>
+                <Text {...mobileTextProps("body")} style={[sheetStyles.noteText, { color: theme.textSecondary }]}>{note.text}</Text>
               </View>
             ) : null}
           </ScrollView>
