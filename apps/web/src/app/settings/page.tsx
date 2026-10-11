@@ -51,6 +51,8 @@ export default function SettingsPage() {
         <div className="df-set-col">
           <SetCard glyph="timer" id="your-day" title="Your day">
             <GoalSettings
+              // A different account gets a fresh control: no draft or save crosses over.
+              key={data.user.id}
               dailyGoalMinutes={data.user.dailyGoalMinutes}
               userId={data.user.id}
               weeklyGoalMinutes={data.user.weeklyGoalMinutes}

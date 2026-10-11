@@ -4,7 +4,7 @@ This guide defines the Midnight Core visual system for Dayframe across web and i
 
 ## Brand character
 
-Dayframe should feel dark, calm, premium and useful. The dark theme begins with a near-black midnight navy rather than flat black. The light theme is a deliberately designed companion. On iPhone the appearance setting names them Midnight, Daylight and System, which is also the PRD's intended naming for both platforms (D1); the web still labels them Light and Dark (its theme settings and the shell toggle's "Switch to light/dark mode" name), a known gap until the web is renamed. Both modes stay compact enough for dense time data, use restrained elevation and make the next action easy to find.
+Dayframe should feel dark, calm, premium and useful. The dark theme begins with a near-black midnight navy rather than flat black. The light theme is a deliberately designed companion. Both platforms name them Midnight, Daylight and System (D1): the iPhone appearance setting, web Settings › Appearance (Midnight · Daylight · System, System the default) and the web shell toggle ("Switch to Daylight" / "Switch to Midnight"). Both modes stay compact enough for dense time data, use restrained elevation and make the next action easy to find.
 
 The signature treatment is a vivid, unchanged six-colour symbol paired with a single-colour outlined wordmark on quiet navy or neutral surfaces. Coral identifies the primary action and live recording; it does not replace category colours or semantic success, warning and danger colours.
 

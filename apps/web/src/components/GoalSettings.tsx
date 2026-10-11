@@ -32,17 +32,23 @@ export function GoalSettings({
   const router = useRouter();
   const { refresh } = useAppShellRuntime();
   const [draft, setDraft] = useState<TimeGoalMinutes | null>(null);
+  // A save the server acknowledged, shown until the page's own data catches up: the app's refresh
+  // can fall back to cached data, which must not put the old goal back on screen.
+  const [acknowledged, setAcknowledged] = useState<{ goals: TimeGoalMinutes; basis: TimeGoalMinutes } | null>(null);
   const [status, setStatus] = useState<{ kind: "saved" | "error"; text: string } | null>(null);
-  const goals = draft ?? { dailyGoalMinutes, weeklyGoalMinutes };
+  const fromPage = { dailyGoalMinutes, weeklyGoalMinutes };
+  const stillAcknowledged = acknowledged !== null && sameGoals(acknowledged.basis, fromPage) ? acknowledged.goals : null;
+  const goals = draft ?? stillAcknowledged ?? fromPage;
   // The latest app callbacks and edit revision, read by the saver after a save lands (also after
   // Settings has closed, so Today and Reports still pick up the new goal at once).
-  const latest = useRef({ mounted: false, refresh, revision: 0, router });
+  const latest = useRef({ mounted: false, pageGoals: fromPage, refresh, revision: 0, router });
   const saverRef = useRef<ReturnType<typeof createGoalSaver> | null>(null);
 
   useEffect(() => {
     latest.current.refresh = refresh;
     latest.current.router = router;
-  }, [refresh, router]);
+    latest.current.pageGoals = { dailyGoalMinutes, weeklyGoalMinutes };
+  }, [dailyGoalMinutes, refresh, router, weeklyGoalMinutes]);
 
   useEffect(() => {
     const state = latest.current;
@@ -58,13 +64,14 @@ export function GoalSettings({
         });
         if (!response.ok) throw new Error("not saved");
       },
-      onSaved: (_saved, revision) => {
-        if (state.mounted) setStatus({ kind: "saved", text: "Saved" });
-        void state.refresh({ force: true }).then(() => {
-          state.router.refresh();
-          // A newer tap since this save keeps its draft until its own save lands.
-          if (state.mounted && state.revision === revision) setDraft(null);
-        }).catch(() => undefined);
+      onSaved: (saved, revision) => {
+        if (state.mounted && state.revision === revision) {
+          // The page shows the saved goals from here on (until its data says otherwise).
+          setAcknowledged({ goals: saved, basis: state.pageGoals });
+          setDraft(null);
+          setStatus({ kind: "saved", text: "Saved" });
+        }
+        void state.refresh({ force: true }).then(() => state.router.refresh()).catch(() => undefined);
       },
       onFailed: (_error, revision) => {
         if (!state.mounted || state.revision !== revision) return;
@@ -74,9 +81,9 @@ export function GoalSettings({
       }
     });
     saverRef.current = saver;
-    const leave = () => saver.flush({ immediately: true });
+    const leave = () => saver.flush();
     const onVisibility = () => {
-      if (document.visibilityState === "hidden") saver.flush({ immediately: true });
+      if (document.visibilityState === "hidden") saver.flush();
     };
     window.addEventListener("pagehide", leave);
     document.addEventListener("visibilitychange", onVisibility);
@@ -187,4 +194,8 @@ function goalLabel(minutes: number) {
   const hours = Math.floor(minutes / 60);
   const rest = minutes % 60;
   return rest ? `${hours}h ${rest}m` : `${hours}h`;
+}
+
+function sameGoals(a: TimeGoalMinutes, b: TimeGoalMinutes) {
+  return a.dailyGoalMinutes === b.dailyGoalMinutes && a.weeklyGoalMinutes === b.weeklyGoalMinutes;
 }

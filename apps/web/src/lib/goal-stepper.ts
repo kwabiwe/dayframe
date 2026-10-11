@@ -82,21 +82,16 @@ export function createGoalSaver({
       }, delayMs);
     },
     /**
-     * Leaving Settings: save a pending change now. `immediately` (the page itself is going away)
-     * sends it at once rather than behind a request still in flight, which the page may not
-     * outlive; the request is a keepalive one.
+     * Leaving Settings or the page being hidden: save a pending change now, still in order behind
+     * any save in flight (two writes of absolute goals must land in the order they were made). A
+     * tab closed while an earlier save is still in flight can lose only the very last change.
      */
-    flush({ immediately = false }: { immediately?: boolean } = {}) {
+    flush() {
       if (timer === null || !pending) return;
       stopTimer();
       const next = pending;
       pending = null;
-      if (!immediately) {
-        send(next);
-        return;
-      }
-      const mine = ++sequence;
-      queue = settle(save(next.goals), mine, next);
+      send(next);
     },
     cancel() {
       stopTimer();

@@ -51,21 +51,22 @@ describe("goal steppers (UIA-309)", () => {
     expect(save).toHaveBeenCalledTimes(1);
   });
 
-  it("a page going away sends the latest change at once, not behind a request still in flight", async () => {
+  it("a flush keeps saves in the order they were made, behind one still in flight", async () => {
     let release: () => void = () => undefined;
+    const order: number[] = [];
     const save = vi.fn()
-      .mockImplementationOnce(() => new Promise<void>((resolve) => { release = resolve; }))
-      .mockImplementation(async () => undefined);
+      .mockImplementationOnce(async (goals: { dailyGoalMinutes: number }) => { await new Promise<void>((resolve) => { release = resolve; }); order.push(goals.dailyGoalMinutes); })
+      .mockImplementation(async (goals: { dailyGoalMinutes: number }) => { order.push(goals.dailyGoalMinutes); });
     const saved: number[] = [];
     const saver = createGoalSaver({ onFailed: () => undefined, onSaved: (_goals, revision) => saved.push(revision), save, setTimer: () => 1, clearTimer: () => undefined });
     saver.schedule({ dailyGoalMinutes: 540, weeklyGoalMinutes: 2400 }, 1);
     saver.flush();
-    await vi.waitFor(() => expect(save).toHaveBeenCalledTimes(1)); // in flight, unresolved
+    await vi.waitFor(() => expect(save).toHaveBeenCalledTimes(1));
     saver.schedule({ dailyGoalMinutes: 600, weeklyGoalMinutes: 2400 }, 2);
-    saver.flush({ immediately: true });
-    expect(save).toHaveBeenCalledTimes(2);
-    expect(save).toHaveBeenLastCalledWith({ dailyGoalMinutes: 600, weeklyGoalMinutes: 2400 });
+    saver.flush();
+    expect(save).toHaveBeenCalledTimes(1); // waits its turn
     release();
+    await vi.waitFor(() => expect(order).toEqual([540, 600]));
     await vi.waitFor(() => expect(saved).toEqual([2]));
   });
 });

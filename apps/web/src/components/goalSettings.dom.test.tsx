@@ -84,6 +84,21 @@ describe("Settings › Your day steppers (UIA-309)", () => {
     expect(view.getByRole("group", { name: "Daily goal: 11h" })).toBeTruthy();
   });
 
+  it("keeps a saved goal on screen when the refresh falls back to cached data, and follows newer data (Codex r2)", async () => {
+    vi.useFakeTimers();
+    const view = render(<GoalSettings dailyGoalMinutes={480} userId="user-1" weeklyGoalMinutes={2400} />);
+    fireEvent.click(view.getByRole("button", { name: "Increase daily goal" }));
+    await act(async () => { await vi.advanceTimersByTimeAsync(600); });
+    // The page still has the old data (the refresh used its cache): the saved 9h stays.
+    view.rerender(<GoalSettings dailyGoalMinutes={480} userId="user-1" weeklyGoalMinutes={2400} />);
+    expect(view.getByRole("group", { name: "Daily goal: 9h" })).toBeTruthy();
+    // Fresh data, then a change made elsewhere: the page follows its data.
+    view.rerender(<GoalSettings dailyGoalMinutes={540} userId="user-1" weeklyGoalMinutes={2400} />);
+    expect(view.getByRole("group", { name: "Daily goal: 9h" })).toBeTruthy();
+    view.rerender(<GoalSettings dailyGoalMinutes={720} userId="user-1" weeklyGoalMinutes={2400} />);
+    expect(view.getByRole("group", { name: "Daily goal: 12h" })).toBeTruthy();
+  });
+
   it("leaving the page saves a pending change at once", async () => {
     vi.useFakeTimers();
     const view = render(<GoalSettings dailyGoalMinutes={480} userId="user-1" weeklyGoalMinutes={2400} />);

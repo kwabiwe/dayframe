@@ -73,6 +73,10 @@ describe("web Settings contracts", () => {
     expect(settingsFormsSource).not.toContain('label="Location access"');
   });
 
+  it("gives each account its own goal control, so no draft or save crosses accounts (Codex r2 on #332)", () => {
+    expect(settingsPageSource).toMatch(/<GoalSettings[\s\S]*?key=\{data\.user\.id\}/);
+  });
+
   it("offers one Export with the other files in a small menu (UIA-312)", () => {
     expect(settingsFormsSource).toContain('href="/api/export?kind=workspace_json" download>Export</a>');
     expect(settingsFormsSource).toContain('aria-label="More export formats"');
