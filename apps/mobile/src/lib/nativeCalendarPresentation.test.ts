@@ -763,6 +763,20 @@ describe("native Calendar Blocks presentation", () => {
       expect(crowd?.accessibilityLabel).toContain("5 suggestions");
     }));
 
+    it("a day that starts at 01:00 ends at the next local midnight, so the next day's first hour stays out (Codex r16)", () => withTz("America/Santiago", () => {
+      const state = build(Date.parse("2026-09-07T20:00:00Z"), bootstrap([
+        suggestion("a", "2026-09-06T04:00:00.000Z", "2026-09-06T04:01:00.000Z"),
+        suggestion("b", "2026-09-06T04:15:00.000Z", "2026-09-06T04:16:00.000Z"),
+        // 7 Sep 00:30 local: the next day.
+        suggestion("c", "2026-09-07T03:30:00.000Z", "2026-09-07T03:31:00.000Z")
+      ]), undefined, "2026-09-06");
+      expect(new Date(state.model.dayEndMs).getDate()).toBe(7);
+      expect(new Date(state.model.dayEndMs).getHours()).toBe(0);
+      const lane = expectApart(state, "2026-09-06");
+      expect(lane.every((item) => item.startedAtMs < state.model.dayEndMs)).toBe(true);
+      expect(lane.map((item) => item.actionId).sort()).toEqual(["a", "b"]);
+    }));
+
     it("a day that starts at 01:00 is drawn from 01:00 (America/Santiago, 6 Sep 2026)", () => withTz("America/Santiago", () => {
       // Clocks go from 00:00 to 01:00; 04:00Z is 01:00 local.
       const state = build(Date.parse("2026-09-06T20:00:00Z"), bootstrap([

@@ -270,7 +270,7 @@ export function buildNativeCalendarBridgeState({
 }): NativeCalendarBridgeState {
   const selectedDate = dateFromKey(selectedDayKey);
   const dayStart = startOfLocalDay(selectedDate);
-  const dayEnd = addDays(dayStart, 1);
+  const dayEnd = localDayEnd(dayStart);
   const todayKey = formatDateKey(new Date(now));
   const timeEntries = buildTimeEntries(data);
   const entries = buildCalendarEntries(data, timeEntries, selectedDayKey, now);
@@ -518,7 +518,7 @@ function buildCalendarEntries(
   // holds more than REVIEW_LANE_MAX_LANES side by side.
   let laneEntries = [...timeEntries.filter(isCalendarReviewNeeded), ...reviewEntries];
   for (let pass = 0; pass < 8; pass += 1) {
-    const next = collapseCrowdedReviewLane(laneEntries, now, dayStartMs, addDays(new Date(dayStartMs), 1).getTime());
+    const next = collapseCrowdedReviewLane(laneEntries, now, dayStartMs, localDayEnd(new Date(dayStartMs)).getTime());
     const settled = next.length === laneEntries.length;
     laneEntries = next;
     if (settled) break;
@@ -731,7 +731,7 @@ function dedupeEntriesById(entries: MobileTimeEntry[]) {
 
 function entryOverlapsDay(entry: MobileTimeEntry, dayKey: string, now: number) {
   const dayStart = startOfLocalDay(dateFromKey(dayKey));
-  const dayEnd = addDays(dayStart, 1);
+  const dayEnd = localDayEnd(dayStart);
   const startedAt = Date.parse(entry.startedAt);
   const stoppedAt = entry.stoppedAt ? Date.parse(entry.stoppedAt) : now;
   return Number.isFinite(startedAt) && Number.isFinite(stoppedAt) && startedAt < dayEnd.getTime() && stoppedAt > dayStart.getTime();
@@ -811,6 +811,14 @@ function startOfWeek(date: Date) {
   const mondayOffset = (start.getDay() + 6) % 7;
   start.setDate(start.getDate() - mondayOffset);
   return start;
+}
+
+/**
+ * The next local midnight: the day's exclusive end. Not "start + one day", which on a day that
+ * starts at 01:00 (a clock change at midnight) would reach 01:00 the next day.
+ */
+function localDayEnd(dayStart: Date) {
+  return startOfLocalDay(addDays(dayStart, 1));
 }
 
 function addDays(date: Date, days: number) {
