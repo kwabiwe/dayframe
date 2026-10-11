@@ -2474,13 +2474,15 @@ async function errorMessage(response: Response, fallback: string) {
 }
 
 /**
- * Server messages reach alerts as they are; an older server may still say "time entry" or
+ * Server messages reach alerts as they are; an older server may still say "time entry", "entry" or
  * "timer", so the iPhone says block instead (UIA-100). Only these nouns change.
  */
 export function blockWordingForServerMessage(message: string) {
   return message
     .replace(/\bTime entries\b/g, "Blocks").replace(/\btime entries\b/g, "blocks")
     .replace(/\bTime entry\b/g, "Block").replace(/\btime entry\b/g, "block")
+    .replace(/\bEntries\b/g, "Blocks").replace(/\bentries\b/g, "blocks")
+    .replace(/\bEntry\b/g, "Block").replace(/\bentry\b/g, "block")
     .replace(/\bTimers\b/g, "Blocks").replace(/\btimers\b/g, "blocks")
     .replace(/\bTimer\b/g, "Block").replace(/\btimer\b/g, "block");
 }

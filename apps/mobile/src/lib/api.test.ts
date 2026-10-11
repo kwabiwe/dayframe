@@ -2902,5 +2902,13 @@ describe("server messages in block wording (UIA-100)", () => {
     expect(blockWordingForServerMessage("One or more time entries were not found.")).toBe("One or more blocks were not found.");
     expect(blockWordingForServerMessage("There is no running timer to stop.")).toBe("There is no running block to stop.");
     expect(blockWordingForServerMessage("Category not found.")).toBe("Category not found.");
+    expect(blockWordingForServerMessage("Entries can be no longer than 24 hours.")).toBe("Blocks can be no longer than 24 hours.");
+    expect(blockWordingForServerMessage("This entry overlaps 2 entries.")).toBe("This block overlaps 2 blocks.");
+  });
+
+  it("an edit the server rejects with an entry message reaches the alert as block wording (Codex r5)", async () => {
+    storeBoundSession("session-token");
+    vi.stubGlobal("fetch", vi.fn(() => Promise.resolve(jsonResponse({ error: "Entries can be no longer than 24 hours." }, 400))));
+    await expect(updateTimeEntry("entry-1", { description: "Long" })).rejects.toThrow("Blocks can be no longer than 24 hours.");
   });
 });

@@ -75,7 +75,8 @@ export function blockWordingOffenders(source: string, fileName = "file.tsx") {
     } else if (ts.isJsxAttribute(node) && node.initializer && VISIBLE_KEYS.has(node.name.getText())) {
       check(node, texts(node.initializer), true);
     } else if (ts.isPropertyAssignment(node) && VISIBLE_KEYS.has(node.name.getText().replace(/["']/g, ""))) {
-      check(node, texts(node.initializer));
+      // A visible field is copy wherever the object is built (inline or hoisted, then passed on).
+      check(node, texts(node.initializer), true);
     } else if (ts.isCallExpression(node) && VISIBLE_CALLS.test(node.expression.getText())) {
       check(node, node.arguments.flatMap(texts), true);
     } else if (ts.isCallExpression(node) && /(^|\.)errorMessage$/.test(node.expression.getText())) {
@@ -87,7 +88,8 @@ export function blockWordingOffenders(source: string, fileName = "file.tsx") {
     ts.forEachChild(node, visit);
   };
   visit(file);
-  return found;
+  // A visible field inside a visible call is read by both rules; report it once.
+  return [...new Set(found)];
 }
 
 function files(directory: string): string[] {
@@ -133,6 +135,8 @@ describe("block wording (UIA-100)", () => {
       "const l = <Text accessibilityValue={{ text: \"timer\" }} />;",
       "confirmSheet.confirm({ title: \"timer\", message: \"task\" });",
       "setCreateError(\"Unable to create timer\");",
+      "const copy = { title: \"timer\", message: \"task\" };",
+      "confirmSheet.confirm(copy);",
     ].join("\n");
     expect(blockWordingOffenders(source)).toEqual([
       "file.tsx:1 Timer",
@@ -152,6 +156,9 @@ describe("block wording (UIA-100)", () => {
       "file.tsx:23 timer",
       "file.tsx:23 task",
       "file.tsx:24 Unable to create timer",
+      // Hoisted visible fields count too (Codex r5).
+      "file.tsx:25 timer",
+      "file.tsx:25 task",
     ]);
   });
 
