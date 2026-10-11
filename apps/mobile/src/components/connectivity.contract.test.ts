@@ -92,12 +92,12 @@ describe("connectivity status ownership", () => {
 
     expect(status).toContain("durableWork.timerStopNeedsAttentionCount");
     expect(projection).toContain('stop.failureKind !== "permanent"');
-    expect(settings).toContain("Timer stop not accepted");
+    expect(settings).toContain("Couldn't stop the timer");
     expect(settings).toContain("retryTimerStopSyncIssue");
     expect(settings).toContain("discardTimerStopSyncIssue");
-    // Each rejected Stop keeps its own Retry and Discard (Sync help › Needs attention).
-    expect(settings).toContain('accessibilityLabel="Retry rejected timer Stop"');
-    expect(settings).toContain('accessibilityLabel="Discard rejected timer Stop"');
+    // Each rejected Stop keeps its own Try again and Discard (Sync help › Needs attention).
+    expect(settings).toContain('accessibilityLabel="Try stopping the timer again"');
+    expect(settings).toContain('accessibilityLabel="Discard this Stop"');
     expect(settings).toContain("onPress={() => retryTimerStopIssue(issue.clientEventId)}");
     expect(settings).toContain("onPress={() => confirmDiscardTimerStopIssue(issue.clientEventId)}");
   });

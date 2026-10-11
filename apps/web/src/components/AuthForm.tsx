@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { Eye, EyeOff } from "lucide-react";
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { AppLoadingState } from "@/components/AppLoadingState";
@@ -9,7 +10,7 @@ import { Button, Field, IconButton, TextField } from "@/components/ui/Primitives
 type AuthMode = "login" | "signup";
 type AuthFormStatus = "idle" | "submitting" | "opening" | "error" | "email-confirmation";
 
-export function AuthForm({ mode }: { mode: AuthMode }) {
+export function AuthForm({ mode, next = null }: { mode: AuthMode; next?: string | null }) {
   const [status, setStatus] = useState<AuthFormStatus>("idle");
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
@@ -20,7 +21,10 @@ export function AuthForm({ mode }: { mode: AuthMode }) {
   const [showPassword, setShowPassword] = useState(false);
   const submissionStarted = useRef(false);
   const navigationStarted = useRef(false);
+  const router = useRouter();
   const isSignup = mode === "signup";
+  // Switching between sign-in and sign-up keeps where to go afterwards.
+  const otherModeHref = `${isSignup ? "/login" : "/signup"}${next ? `?next=${encodeURIComponent(next)}` : ""}`;
   const formLocked =
     status === "submitting" ||
     status === "opening" ||
@@ -29,8 +33,9 @@ export function AuthForm({ mode }: { mode: AuthMode }) {
   useEffect(() => {
     if (status !== "opening" || navigationStarted.current) return;
     navigationStarted.current = true;
-    window.location.replace("/");
-  }, [status]);
+    // Back to where sign-in was asked for (a checked same-site path), keeping its #section.
+    window.location.replace(next ? `${next}${window.location.hash}` : "/");
+  }, [next, status]);
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -179,7 +184,16 @@ export function AuthForm({ mode }: { mode: AuthMode }) {
 
         <p className="auth-switch">
           {isSignup ? "Already have an account?" : "New to Dayframe?"}{" "}
-          <Link href={isSignup ? "/login" : "/signup"}>
+          <Link
+            href={otherModeHref}
+            onClick={(event) => {
+              // Keep a #section (Settings › Privacy and data) across the switch too; a modified
+              // click (new tab or window) keeps the browser's own behaviour.
+              if (!window.location.hash || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey || event.button !== 0) return;
+              event.preventDefault();
+              router.push(`${otherModeHref}${window.location.hash}`);
+            }}
+          >
             {isSignup ? "Log in" : "Create one"}
           </Link>
         </p>

@@ -48,7 +48,7 @@ Persist an already authorised owner's off decision in the lifecycle lane even if
 
 After a logout attempt definitively fails, release only its active request gate so fresh valid-session Dashboard/Settings reads work. Keep unresolved Location cleanup/admission fenced, including after legacy owner binding. Never revalidate a previously invalidated bootstrap when that transient gate releases.
 
-The Location switch represents saved account consent. Adjacent status separately reports effective active/inactive capture or pending logout cleanup; iOS permission and saved true alone cannot establish working capture. Reuse the existing Settings action for explicit current-owner Retry capture when activation is inactive. Refresh effective diagnostics after activation failure, keep actual consent, and recheck generation/consent after OS awaits before returning success. Later off, logout, 401 or replacement lifetime wins over stale completion.
+The Location switch represents saved account consent. Adjacent status separately reports effective active/inactive capture or pending logout cleanup; iOS permission and saved true alone cannot establish working capture. Reuse the existing Settings action for explicit current-owner Restart location when activation is inactive. Refresh effective diagnostics after activation failure, keep actual consent, and recheck generation/consent after OS awaits before returning success. Later off, logout, 401 or replacement lifetime wins over stale completion.
 
 ## Geofence Runtime Guardrails
 
@@ -62,7 +62,7 @@ The Location switch represents saved account consent. Adjacent status separately
 
 ## Motion & Fitness State
 
-Motion & Fitness (Core Motion) is offered in Settings > Location under Suggestions (the Settings index also shows its state on a Motion & Fitness row that opens that page); onboarding will offer it later. Show iOS permission separately from Location consent: it is read only while Location suggestions are on, and capture needs both. States: not available (simulator, unsupported device), not requested (Allow Motion & Fitness, which shows the system prompt through a one-minute history query), allowed, off (Open iOS Settings), restricted (Open iOS Settings), and unknown. Re-read the status whenever the app returns to the foreground. Never show raw `CMAuthorizationStatus` values or native error codes. `NSMotionUsageDescription` is set in `app.json` and the checked-in `Info.plist` with Dayframe's own wording; real prompts and history need a physical iPhone.
+Motion & Fitness (Core Motion) is offered in Settings > Location under Suggestions (the Settings index also shows its state and action on a Motion & Fitness row of its own); onboarding will offer it later. Show iOS permission separately from Location consent: it is read only while Location suggestions are on, and capture needs both. States: not available (simulator, unsupported device), not requested (Allow Motion & Fitness, which shows the system prompt through a one-minute history query), allowed, off (Open iOS Settings), restricted (Open iOS Settings), and unknown. Re-read the status whenever the app returns to the foreground. Never show raw `CMAuthorizationStatus` values or native error codes. `NSMotionUsageDescription` is set in `app.json` and the checked-in `Info.plist` with Dayframe's own wording; real prompts and history need a physical iPhone.
 
 ## HealthKit State
 

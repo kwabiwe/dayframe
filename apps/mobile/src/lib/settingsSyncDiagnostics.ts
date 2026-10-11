@@ -9,7 +9,7 @@ export function deviceSyncAttentionStatus(input: {
       ? `${timerStops} timer ${timerStops === 1 ? "Stop" : "Stops"}`
       : null,
     timeEntries > 0
-      ? `${timeEntries} time entry ${timeEntries === 1 ? "change" : "changes"}`
+      ? `${timeEntries} block ${timeEntries === 1 ? "change" : "changes"}`
       : null
   ].filter((message): message is string => Boolean(message));
 

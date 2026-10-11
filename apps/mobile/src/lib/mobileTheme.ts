@@ -212,6 +212,8 @@ function createStyles(theme: MobileTheme) {
       alignItems: "center",
       backgroundColor: theme.surface,
       borderRadius: 999,
+      flexDirection: "row",
+      gap: 8,
       justifyContent: "center",
       minHeight: 50,
       paddingHorizontal: 20

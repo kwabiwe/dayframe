@@ -97,7 +97,7 @@ async function clearRuntimeContextIfCurrent(token: string) {
 
 export class SecureSessionUnavailableError extends Error {
   constructor() {
-    super("Secure session is temporarily unavailable. Unlock your iPhone, then reopen Dayframe.");
+    super("Dayframe can't read your sign-in right now. Unlock your iPhone, then reopen Dayframe.");
     this.name = "SecureSessionUnavailableError";
   }
 }
