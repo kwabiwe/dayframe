@@ -43,11 +43,14 @@ export function ReportsBlocksPanel({
   totalLabel: string;
   totalSeconds: number;
 }) {
-  const [hot, setHot] = useState<AllocationSlice | null>(null);
+  // Ids, resolved against the current slices each render: a slice that a filter navigation took
+  // away (Other splitting into its activities) simply stops being highlighted.
+  const [hotId, setHotId] = useState<string | null>(null);
+  const hot = slices.find((slice) => slice.id === hotId) ?? null;
   // The slice holding keyboard focus gets its own neutral ring, independent of the highlight.
   const [focusedId, setFocusedId] = useState<string | null>(null);
   const hotIds = hot ? new Set(hot.categoryIds) : null;
-  const highlight = (slice: AllocationSlice) => (on: boolean) => setHot((current) => (on ? slice : current?.id === slice.id ? null : current));
+  const highlight = (slice: AllocationSlice) => (on: boolean) => setHotId((current) => (on ? slice.id : current === slice.id ? null : current));
 
   const arcs = slices.map((slice, index) => {
     const before = slices.slice(0, index).reduce((sum, previous) => sum + previous.seconds, 0);

@@ -103,6 +103,24 @@ describe("Reports blocks and Where it went", () => {
     await act(async () => root.unmount());
   });
 
+  it("drops a highlight whose slice a filter navigation removed", async () => {
+    const container = document.createElement("div");
+    document.body.append(container);
+    const root = createRoot(container);
+    const other = { id: "other", categoryIds: ["a", "b"], name: "Other", color: null, seconds: 3600, percentage: 10, isUncategorized: false, href: "/reports?categories=a,b" };
+    const render = (current: typeof slices) => act(async () => root.render(
+      <ReportsBlocksPanel blocks={reportBlocksModel(report(), formatDuration)} land={land} slices={current} totalLabel="logged this week" totalSeconds={10 * 3600} />
+    ));
+    await render([slices[0], other]);
+    await act(async () => container.querySelector<HTMLAnchorElement>('a[aria-label^="Filter by Other"]')!.focus());
+    expect(container.querySelector(".df-donut-center")?.textContent).toBe("1h 00mOther");
+    // The filtered report replaces Other with its activities; the same panel stays mounted.
+    await render([slices[0], { ...other, id: "a", categoryIds: ["a"], name: "A" }]);
+    expect(container.querySelector(".df-wblocks")?.classList.contains("has-hot")).toBe(false);
+    expect(container.querySelector(".df-donut-center")?.textContent).toBe("10h 00mlogged this week");
+    await act(async () => root.unmount());
+  });
+
   it("shows only Where it went for ranges without a blocks card", () => {
     const html = renderToStaticMarkup(<ReportsBlocksPanel blocks={null} land={land} slices={slices} totalLabel="logged in this range" totalSeconds={10 * 3600} />);
     expect(html).not.toContain("in blocks");
