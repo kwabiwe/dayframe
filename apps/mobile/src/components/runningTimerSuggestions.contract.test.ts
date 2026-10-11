@@ -32,7 +32,12 @@ describe("time-entry sheet historical Suggestions contract", () => {
     expect(sheetHeadIndex).toBeLessThan(formIndex);
     expect(themeSource).toMatch(/historicalSuggestionsOverlay:\s*\{[\s\S]*?position: "absolute"/);
     expect(themeSource).toMatch(/historicalSuggestionsOverlay:\s*\{[\s\S]*?backgroundColor: "transparent"/);
-    expect(themeSource).toMatch(/historicalSuggestionsSurface:\s*\{[\s\S]*?backgroundColor: theme\.surfaceRaised[\s\S]*?borderWidth: 1[\s\S]*?borderColor: theme\.borderStrong[\s\S]*?borderRadius: 14[\s\S]*?overflow: "hidden"/);
+    // A fill-led raised list with no outline (UIA-021), bounded to its own block.
+    const surface = themeSource.slice(themeSource.indexOf("historicalSuggestionsSurface: {"), themeSource.indexOf("},", themeSource.indexOf("historicalSuggestionsSurface: {")));
+    expect(surface).toContain("backgroundColor: theme.surfaceRaised");
+    expect(surface).toContain("borderRadius: 20");
+    expect(surface).toContain('overflow: "hidden"');
+    expect(surface).not.toContain("borderWidth");
     expect(themeSource).toMatch(/historicalSuggestionsHeader:\s*\{[\s\S]*?backgroundColor: theme\.surfaceMuted/);
     expect(themeSource).toMatch(/historicalSuggestionsList:\s*\{[\s\S]*?backgroundColor: "transparent"[\s\S]*?flexShrink: 1[\s\S]*?minHeight: 0/);
     expect(themeSource).not.toContain("historicalSuggestionsBackground");

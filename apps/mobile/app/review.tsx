@@ -1756,11 +1756,11 @@ export default function ReviewScreen() {
 
     if (pendingAction.action === "dismiss") {
       finishAction();
-      // UIA-024: More › Skip is the deck's Skip — the top card is thrown (haptic, held with
-      // Undo); any other card is skipped as before.
+      // UIA-024: More › Skip is the deck's Skip: the top card is thrown (haptic, held with Undo).
+      // More only opens on the top card; if it is no longer on top (or a card is flying), the
+      // stale choice is dropped rather than skipping a card without Undo.
       const top = deckSources[0];
-      if (top && top.kind !== "legacy_entry" && top.item.id === item.id) requestDeckThrow(-1);
-      else dismissItem(item);
+      if (!deckFlying && top && top.kind !== "legacy_entry" && top.item.id === item.id) requestDeckThrow(-1);
       return;
     }
 

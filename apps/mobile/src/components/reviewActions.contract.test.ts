@@ -33,7 +33,9 @@ describe("mobile Review action contracts", () => {
     expect(menuSource).toMatch(/Edit before logging[\s\S]*>Skip<[\s\S]*Clear the pile/);
     expect(menuSource).not.toContain("overflowMenuDangerText");
     // Its Skip throws the top card like the deck's Skip; its Edit opens the pencil's editor.
-    expect(reviewSource).toMatch(/top\.item\.id === item\.id\) requestDeckThrow\(-1\);\s*else dismissItem\(item\);/);
+    // A stale (no longer top) or mid-flight choice is dropped: never a skip without Undo.
+    expect(reviewSource).toMatch(/if \(!deckFlying && top && top\.kind !== "legacy_entry" && top\.item\.id === item\.id\) requestDeckThrow\(-1\);\s*return;/);
+    expect(reviewSource.slice(reviewSource.indexOf('if (pendingAction.action === "dismiss")'), reviewSource.indexOf('if (pendingAction.action === "skip_older"'))).not.toContain("dismissItem(");
     expect(reviewSource).toMatch(/if \(hasV2LocationEvidence\(item\)\) \{\s*finishAction\(\);\s*router\.push\(\{ pathname: "\/review\/\[id\]"/);
     // Round actions keep at least 44-point targets (52, 64 and 72).
     expect(deckSource).toMatch(/size=\{64\}[\s\S]*size=\{52\}[\s\S]*size=\{72\}/);

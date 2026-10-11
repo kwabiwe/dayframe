@@ -54,5 +54,16 @@ describe("Review sync presentation", () => {
       needsAttentionCount: 2,
       waitingCount: 1
     }))).toBe("2 changes didn't save · 1 still sending");
+    // Work that needs a sign-in is not "still sending".
+    expect(reviewSyncStatusCopy(diagnostics({
+      needsAttentionCount: 1,
+      authenticationRequiredCount: 1,
+      waitingCount: 1
+    }))).toBe("1 change didn't save · 1 needs you to sign in");
+    expect(reviewSyncStatusCopy(diagnostics({
+      needsAttentionCount: 1,
+      authenticationRequiredCount: 1,
+      waitingCount: 3
+    }))).toBe("1 change didn't save · 1 needs you to sign in · 2 still sending");
   });
 });

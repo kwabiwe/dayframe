@@ -6,9 +6,14 @@ export function reviewSyncStatusCopy(diagnostics: ReviewSyncDiagnostics) {
     const issueCopy = `${diagnostics.needsAttentionCount} ${
       diagnostics.needsAttentionCount === 1 ? "change" : "changes"
     } didn't save`;
-    return diagnostics.waitingCount > 0
-      ? `${issueCopy} · ${diagnostics.waitingCount} still sending`
-      : issueCopy;
+    // Changes that need a sign-in aren't sending on their own: they get their own words.
+    const signIn = diagnostics.authenticationRequiredCount;
+    const sending = Math.max(0, diagnostics.waitingCount - signIn);
+    return [
+      issueCopy,
+      signIn > 0 ? `${signIn} need${signIn === 1 ? "s" : ""} you to sign in` : null,
+      sending > 0 ? `${sending} still sending` : null
+    ].filter(Boolean).join(" · ");
   }
   if (diagnostics.authenticationRequiredCount > 0) {
     const count = diagnostics.authenticationRequiredCount;

@@ -2011,6 +2011,10 @@ function createStyles(theme: MobileTheme) {
       fontSize: 15,
       fontWeight: "600"
     },
+    historicalSuggestionMeta: {
+      color: theme.textSecondary,
+      fontSize: 12
+    },
     historicalSuggestionsCloseButton: {
       width: 44,
       height: 44,

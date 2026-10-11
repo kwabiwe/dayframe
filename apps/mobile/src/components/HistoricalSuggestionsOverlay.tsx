@@ -406,7 +406,7 @@ function HistoricalSuggestionRow({
           {suggestion.description}
         </Text>
         {categoryName || tagLabel ? (
-          <Text style={styles.taskSuggestionTags} numberOfLines={1}>
+          <Text style={styles.historicalSuggestionMeta} numberOfLines={1}>
             {[categoryName, tagLabel].filter(Boolean).join(" · ")}
           </Text>
         ) : null}
