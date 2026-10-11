@@ -34,6 +34,7 @@ import {
   type RecentActivitySuggestion
 } from "@dayframe/shared";
 import { FloatingDatePicker } from "@/components/FloatingDatePicker";
+import { entryDatePickerMaxDate } from "@/lib/entryDatePickerLimit";
 import {
   HistoricalSuggestionsOverlay,
   type HistoricalSuggestionsOverlayRenderState
@@ -3000,6 +3001,7 @@ export function ActiveTimerEditSheet({
           theme={theme}
         />
         <FloatingDatePicker
+          maxDate={entryDatePickerMaxDate({ running: isRunningMode, target: datePickerTarget, now: new Date() })}
           onClose={() => {
             closeDatePickerAfterTouch();
           }}
