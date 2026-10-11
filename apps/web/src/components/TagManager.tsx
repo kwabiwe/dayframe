@@ -3,7 +3,6 @@
 import { DayframeIcon } from "@/components/blocks/DayframeIcon";
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { Plus } from "lucide-react";
 import { DestructiveConfirmationDialog } from "@/components/DestructiveConfirmationDialog";
 import { clientFetch } from "@/lib/client-auth-fetch";
 import type { TagRow } from "@/lib/queries";
@@ -95,7 +94,7 @@ export function TagManager({ tags }: { tags: TagRow[] }) {
           <input maxLength={48} name="name" placeholder="New tag, like Planning" required />
         </label>
         <button className="df-rbtn df-rbtn--sm" disabled={isPending} type="submit">
-          <Plus size={15} aria-hidden="true" /> Create tag
+          Create tag
         </button>
       </form>
       {error && !pendingDelete ? <p className="df-review-error" role="alert"><span>{error}</span></p> : null}
@@ -130,7 +129,7 @@ export function TagManager({ tags }: { tags: TagRow[] }) {
               </span>
               <span className="df-srow-acts">
                 <button aria-label={`Rename ${tag.name}`} className="df-rbtn df-rbtn--sm df-rbtn--ghost" onClick={() => setEditingId(tag.id)} type="button">
-                  <DayframeIcon glyph="pencil" size={15}/> Rename
+                  Rename
                 </button>
                 <button aria-label={`Delete ${tag.name}`} className="df-icon-action df-icon-action--44" onClick={() => setPendingDelete(tag)} type="button">
                   <DayframeIcon glyph="trash-2" size={16}/>

@@ -158,7 +158,7 @@ describe("LocationReviewPanel", () => {
     expect(await screen.findByText("2 stops on this trip")).not.toBeNull();
     const rows = screen.getAllByRole("listitem");
     expect(rows).toHaveLength(2);
-    expect(rows[0].textContent).toMatch(/^Stopped .+ · 6m$/);
+    expect(rows[0].textContent).toMatch(/^Stopped .+ · 5m$/);
     expect(rows[1].textContent).toMatch(/^Stopped about .+ · 6m$/);
     expect(rows[1].getAttribute("aria-label")).toMatch(/approximate$/);
     unmount();

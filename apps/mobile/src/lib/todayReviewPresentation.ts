@@ -257,7 +257,7 @@ export function projectTodayReviewPresentation(input: TodayReviewProjectionInput
       placeLabel: record.place.label,
       awaitingDecision: true,
       countsAsLogged: false,
-      quickConfirm: { eligible: false, reason: "This older entry needs its existing editor." },
+      quickConfirm: { eligible: false, reason: "This older block needs its own editor." },
       resolution: "none"
     });
     if (clipped) {
@@ -339,7 +339,7 @@ function mobileEntry(entry: MobileTimeEntry): CanonicalEntry {
   const endMs = entry.stoppedAt ? Date.parse(entry.stoppedAt) : Number.NaN;
   return {
     id: entry.id,
-    title: entry.description?.trim() || entry.categoryName || "Untitled entry",
+    title: entry.description?.trim() || entry.categoryName || "Untitled block",
     category: { id: entry.categoryId, name: entry.categoryName, color: entry.categoryColor ?? null },
     placeLabel: entry.placeName,
     startMs,

@@ -62,7 +62,7 @@ describe("ConnectivityStatusProvider attention announcements", () => {
     // The old one is discarded while a new one is rejected: the count stays 1.
     act(() => publish({ accountKey: "a", attentionIds: ["entry:new"], timeEntryNeedsAttentionCount: 1, timerStopNeedsAttentionCount: 0 }));
     expect(mocks.announce).toHaveBeenCalledTimes(1);
-    expect(mocks.announce).toHaveBeenCalledWith("A change couldn't be saved. Open Sync help from the account button.");
+    expect(mocks.announce).toHaveBeenCalledWith("A change couldn't be saved. Open Settings › Sync help.");
     // Resolving it announces nothing; another account's rejections are a fresh baseline.
     act(() => publish({ accountKey: "a", attentionIds: [], timeEntryNeedsAttentionCount: 0, timerStopNeedsAttentionCount: 0 }));
     act(() => publish({ accountKey: "b", attentionIds: ["stop:b1"], timeEntryNeedsAttentionCount: 0, timerStopNeedsAttentionCount: 1 }));

@@ -87,7 +87,7 @@ describe("Sync attention on the avatar", () => {
   it("is nothing without rejected changes and names the count otherwise", () => {
     expect(syncAttentionPresentation(0)).toBeNull();
     expect(syncAttentionPresentation(1)).toEqual({
-      accessibilityHint: "Opens Sync help in Settings",
+      accessibilityHint: "Opens Settings › Sync help",
       accessibilityLabel: "Account and settings. A change couldn't be saved and needs your attention.",
       count: 1
     });

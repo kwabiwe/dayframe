@@ -54,7 +54,7 @@ describe("onboarding answers", () => {
 
   it("says plainly that suggestions need Always, and that everything else still works without location", () => {
     expect(locationResultText("while")).toMatch(/need Always/);
-    expect(locationResultText("off")).toMatch(/Timers, Review and Apple Health still work/);
+    expect(locationResultText("off")).toMatch(/Blocks, Review and Apple Health still work/);
     expect(motionResultText("unavailable")).toMatch(/doesn't record motion/);
   });
 

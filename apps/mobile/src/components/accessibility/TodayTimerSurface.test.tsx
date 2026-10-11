@@ -180,14 +180,14 @@ describe("TodayTimerSurface (Blocks)", () => {
   it("keeps Edit, Stop and Add past time as separate VoiceOver actions", () => {
     const input = props({ active: running, runningActivityId: "work" });
     const { byLabel, tree } = render(input);
-    expect(byLabel("Edit running timer").props.accessibilityValue).toEqual({
+    expect(byLabel("Edit running block").props.accessibilityValue).toEqual({
       text: "Work. A long running timer title. 1 hour 2 minutes so far.",
     });
     const stopEvent = { stopPropagation: vi.fn() };
-    act(() => byLabel("Stop current timer").props.onPress(stopEvent));
+    act(() => byLabel("Stop recording").props.onPress(stopEvent));
     const addEvent = { stopPropagation: vi.fn() };
     act(() => tree.root.findByProps({ testID: "active-timer-add-past-time" }).props.onPress(addEvent));
-    act(() => byLabel("Edit running timer").props.onPress());
+    act(() => byLabel("Edit running block").props.onPress());
     expect(stopEvent.stopPropagation).toHaveBeenCalledOnce();
     expect(addEvent.stopPropagation).toHaveBeenCalledOnce();
     expect(input.onStop).toHaveBeenCalledOnce();
@@ -200,7 +200,7 @@ describe("TodayTimerSurface (Blocks)", () => {
     const input = props({ active: running, runningActivityId: "work" });
     const { byLabel, text, tree } = render(input);
     expect(text("Switch to").props.accessibilityRole).toBe("header");
-    act(() => byLabel("Work, recording. Edit running timer").props.onPress());
+    act(() => byLabel("Work, recording. Edit running block").props.onPress());
     act(() => byLabel("Switch to Gym, 30 minutes in the last 7 days").props.onPress());
     expect(input.onOpenActiveTimer).toHaveBeenCalledOnce();
     expect(input.onStartActivity).toHaveBeenCalledOnce();
@@ -332,7 +332,7 @@ describe("TodayTimerSurface (Blocks)", () => {
   it("offers Switch as a VoiceOver action on the running block", () => {
     const input = props({ active: running, runningActivityId: "work" });
     const { byLabel, tree } = render(input);
-    const block = byLabel("Edit running timer");
+    const block = byLabel("Edit running block");
     expect(block.props.accessibilityActions).toEqual([{ label: "Switch", name: "switch" }]);
     act(() => block.props.onAccessibilityAction({ nativeEvent: { actionName: "switch" } }));
     expect(input.onSwitch).toHaveBeenCalledOnce();
@@ -343,7 +343,7 @@ describe("TodayTimerSurface (Blocks)", () => {
     gestures.pans.length = 0;
     const { byLabel, tree } = render(props({ active: { ...running, hasLiveActiveTimer: false }, runningActivityId: "work" }));
     expect(gestures.pans.at(-1).isEnabled).toBe(false);
-    expect(byLabel("Edit running timer").props.accessibilityActions).toBeUndefined();
+    expect(byLabel("Edit running block").props.accessibilityActions).toBeUndefined();
     act(() => tree.unmount());
   });
 
