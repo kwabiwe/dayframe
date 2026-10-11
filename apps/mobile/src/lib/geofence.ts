@@ -316,11 +316,8 @@ export async function locationAccessNeedsIosSettings() {
     if (foreground.status === "undetermined") await AsyncStorage.removeItem(ALWAYS_LOCATION_REQUESTED_KEY).catch(() => undefined);
     return false;
   }
-  const background = await Location.getBackgroundPermissionsAsync();
-  if (background.granted) {
-    await rememberAlwaysGranted();
-    return false;
-  }
+  const background = await readBackgroundLocationPermission();
+  if (background.granted) return false;
   if (background.status === "denied" && !background.canAskAgain) return true;
   // iOS shows the Always upgrade once, whatever the answer (and a later downgrade to While Using
   // in iOS Settings doesn't make it ask again); after a restart Expo reports it askable, so the
@@ -329,6 +326,16 @@ export async function locationAccessNeedsIosSettings() {
 }
 
 const ALWAYS_LOCATION_REQUESTED_KEY = "dayframe.location.alwaysRequest.v2";
+
+/**
+ * Every Always read in this module goes through here, so a grant seen on any path (launch, geofence
+ * refresh, Settings, diagnostics) records that iOS's one Always prompt has been used.
+ */
+async function readBackgroundLocationPermission() {
+  const background = await Location.getBackgroundPermissionsAsync();
+  if (background.granted) await rememberAlwaysGranted();
+  return background;
+}
 
 /**
  * Always is allowed, so iOS's one-time upgrade prompt has been used (perhaps by an older build that
@@ -472,7 +479,7 @@ export async function setLocationLearningEnabled(
   }
 
   const foreground = await Location.getForegroundPermissionsAsync();
-  const background = await Location.getBackgroundPermissionsAsync();
+  const background = await readBackgroundLocationPermission();
   if (revision !== locationCaptureRevision() || !mobileAccountOwnersEqual(getActiveMobileAccountSnapshot(), owner)) return "Location account changed.";
   if (foreground.status !== "granted" || background.status !== "granted") {
     await updateLocationDiagnostics({
@@ -675,7 +682,7 @@ async function refreshGeofencesForPlacesUnsafe(
 ) {
   if (!isLocationCaptureSnapshotCurrent(capture)) return 0;
   const foreground = await Location.getForegroundPermissionsAsync();
-  const background = await Location.getBackgroundPermissionsAsync();
+  const background = await readBackgroundLocationPermission();
   if (!isLocationCaptureSnapshotCurrent(capture)) return 0;
   const foregroundPermission = permissionLabel(foreground.status);
   const backgroundPermission = permissionLabel(background.status);
@@ -1009,12 +1016,11 @@ export async function getLocationVisitDiagnostics(): Promise<LocationVisitDiagno
   const [stored, foreground, background, geofencingActive, learningEnabled, learningActive] = await Promise.all([
     readLocationDiagnostics(),
     Location.getForegroundPermissionsAsync().catch(() => null),
-    Location.getBackgroundPermissionsAsync().catch(() => null),
+    readBackgroundLocationPermission().catch(() => null),
     Location.hasStartedGeofencingAsync(DAYFRAME_GEOFENCE_TASK).catch(() => false),
     getLocationLearningEnabled().catch(() => false),
     Location.hasStartedLocationUpdatesAsync(DAYFRAME_LOCATION_LEARNING_TASK).catch(() => false)
   ]);
-  if (background?.granted) await rememberAlwaysGranted();
   const foregroundPermission = permissionLabel(foreground?.status);
   const backgroundPermission = permissionLabel(background?.status);
   const capture = await captured;

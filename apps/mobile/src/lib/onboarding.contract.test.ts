@@ -112,5 +112,9 @@ describe("onboarding contract (Blocks 8-1a)", () => {
     const callers = ["app", "src"].flatMap(walk)
       .filter((path) => readFileSync(join(root, path), "utf8").includes("Location.requestForegroundPermissionsAsync"));
     expect(callers).toEqual([join("src", "lib", "geofence.ts")]);
+    // Inside geofence.ts, one reader sees Always and records it (Codex r6 on #324).
+    const geofence = readFileSync(join(root, "src", "lib", "geofence.ts"), "utf8");
+    expect(geofence.match(/Location\.getBackgroundPermissionsAsync\(/g)).toHaveLength(1);
+    expect(geofence).toMatch(/async function readBackgroundLocationPermission\(\) \{\s*const background = await Location\.getBackgroundPermissionsAsync\(\);\s*if \(background\.granted\) await rememberAlwaysGranted\(\);/);
   });
 });
