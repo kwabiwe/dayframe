@@ -47,8 +47,8 @@ describe("auth keyboard navigation contract", () => {
   });
 
   it("keeps auth placeholders at AA contrast on the inset field fill", () => {
-    expect(mobileTheme).toMatch(/authInput:\s*\{[\s\S]*?backgroundColor: theme\.surfaceInset/);
-    expect(mobileTheme).toMatch(/authPasswordField:\s*\{[\s\S]*?backgroundColor: theme\.surfaceInset/);
+    expect(mobileTheme).toMatch(/authInput:\s*\{[^}]*backgroundColor: theme\.surfaceInset[^}]*\}/);
+    expect(mobileTheme).toMatch(/authPasswordField:\s*\{[^}]*backgroundColor: theme\.surfaceInset[^}]*\}/);
     for (const mode of ["light", "dark"] as const) {
       const palette = DAYFRAME_THEME[mode];
       expect(contrast(palette.textSecondary, palette.surfaceInset)).toBeGreaterThanOrEqual(4.5);
