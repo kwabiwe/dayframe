@@ -133,7 +133,7 @@ import {
 import { clampSettingsScrollOffset, settingsScrollNeedsClamp } from "@/lib/settingsScroll";
 import { BlocksNavHeader, usePreviousScreenLabel } from "@/components/BlocksNavHeader";
 import { BlocksConfirmHost, useBlocksConfirm, type BlocksConfirmRequest } from "@/components/blocks/BlocksConfirmSheet";
-import { bindConfirmToSession, captureConfirmAuthority, confirmAuthorityStillCurrent, type ConfirmAuthority } from "@/lib/confirmAuthority";
+import { bindConfirmToSession, captureConfirmAuthority, captureLogoutRecovery, confirmAuthorityStillCurrent, logoutRecoveryStillCurrent, type ConfirmAuthority } from "@/lib/confirmAuthority";
 import { BlocksToast, useBlocksNotice } from "@/components/blocks/BlocksToast";
 import { blocksNavOrigin, settingsBackLabel, settingsSectionTitle } from "@/lib/blocksNav";
 import { mobileTextProps } from "@/lib/mobileTypography";
@@ -1650,7 +1650,11 @@ export default function SettingsScreen() {
   async function signOut() {
     // Consent to log out is for this account's session only: pinned before anything is read.
     const authority = await captureConfirmAuthority();
-    if (!authority) return;
+    if (!authority) {
+      // Log out is never a silent no-op: finish a logout that failed partway, or go to sign-in.
+      await offerLogoutRecovery();
+      return;
+    }
     // A goal change still waiting is saved while the session is valid.
     goalSaver.flush();
     const diagnostics = await getReviewSyncDiagnostics();
@@ -1667,6 +1671,41 @@ export default function SettingsScreen() {
       confirmHint: "Changes not yet synced can't be recovered.",
       onConfirm: () => { void completeSignOut(); }
     }, authority);
+  }
+
+  /**
+   * No live session could be pinned for Log out. A logout whose Keychain deletion failed leaves
+   * this process signed out (or, after a restart, a session whose account was already removed)
+   * while the sign-in is still stored: offer to finish it through the same logout path, bound to
+   * that state so it can never log out a session that signed in since. With nothing left to clean
+   * up, go to sign-in.
+   */
+  async function offerLogoutRecovery() {
+    const recovery = await captureLogoutRecovery();
+    if (!recovery) {
+      settingsNotice.show("Your sign-in is changing. Try Log out again in a moment.");
+      return;
+    }
+    if (recovery.kind === "signed_out") {
+      finishSignedOutNavigation();
+      return;
+    }
+    confirmSheet.confirm({
+      eyebrow: "Account",
+      title: "Finish logging out?",
+      message: "Dayframe couldn't finish logging out. This removes the sign-in still saved on this iPhone and anything left unsynchronised. Synced history stays in your account.",
+      confirmLabel: "Log out",
+      confirmHint: "Changes not yet synced can't be recovered.",
+      onConfirm: () => {
+        void logoutRecoveryStillCurrent(recovery).then(
+          (current) => {
+            if (current) void completeSignOut();
+            else settingsNotice.show("Your account changed, so nothing was changed.");
+          },
+          () => settingsNotice.show("Your account changed, so nothing was changed.")
+        );
+      }
+    });
   }
 
   /**

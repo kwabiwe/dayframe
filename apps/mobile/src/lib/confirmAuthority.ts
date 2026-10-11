@@ -1,5 +1,7 @@
 import { mobileAccountOwnersEqual, readActiveMobileAccount, type MobileAccountOwner } from "./mobileAccount";
 import {
+  currentSessionGeneration,
+  hasPersistedSessionToken,
   isAuthenticatedSessionSnapshotCurrent,
   readAuthenticatedSessionSnapshot,
   type AuthenticatedSessionSnapshot
@@ -55,4 +57,46 @@ export function bindConfirmToSession<T extends { onConfirm: () => void }>(
       );
     }
   };
+}
+
+/**
+ * Log out must always be reachable. When no live session can be pinned, this says what is left:
+ * - "stored": this process is signed out but the Keychain still holds a sign-in (a logout whose
+ *   Keychain deletion failed); bound to the session generation it saw.
+ * - "orphaned": a loaded session whose account was already deactivated (the same failure, read
+ *   back after a restart); bound to that exact session.
+ * - "signed_out": nothing left to clean up (go to sign-in).
+ * Null while a session change is in progress (the caller says so; the person can try again).
+ */
+export type LogoutRecovery =
+  | { kind: "stored"; generation: number }
+  | { kind: "orphaned"; snapshot: AuthenticatedSessionSnapshot }
+  | { kind: "signed_out" };
+
+export async function captureLogoutRecovery(): Promise<LogoutRecovery | null> {
+  const generation = currentSessionGeneration();
+  const session = await readAuthenticatedSessionSnapshot();
+  if (session.status === "changed") return null;
+  if (session.status === "authenticated") {
+    // A session with a live account is the normal Log out path, not a recovery.
+    if (await readActiveMobileAccount()) return null;
+    return isAuthenticatedSessionSnapshotCurrent(session.snapshot) ? { kind: "orphaned", snapshot: session.snapshot } : null;
+  }
+  // If the Keychain can't be read, offer the cleanup anyway: logout() is fenced to this state.
+  const stored = await hasPersistedSessionToken().catch(() => true);
+  if (generation !== currentSessionGeneration()) return null;
+  return stored ? { kind: "stored", generation } : { kind: "signed_out" };
+}
+
+/** False once anyone has signed in (or the session otherwise changed) since the recovery was offered. */
+export async function logoutRecoveryStillCurrent(recovery: LogoutRecovery) {
+  if (recovery.kind === "signed_out") return false;
+  if (recovery.kind === "orphaned") {
+    if (!isAuthenticatedSessionSnapshotCurrent(recovery.snapshot)) return false;
+    const owner = await readActiveMobileAccount();
+    return owner === null && isAuthenticatedSessionSnapshotCurrent(recovery.snapshot);
+  }
+  if (recovery.generation !== currentSessionGeneration()) return false;
+  const session = await readAuthenticatedSessionSnapshot();
+  return session.status === "signed_out" && recovery.generation === currentSessionGeneration();
 }

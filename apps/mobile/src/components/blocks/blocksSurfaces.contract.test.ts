@@ -49,8 +49,9 @@ describe("Blocks confirm sheet and toast call sites (UIA-003/004/005)", () => {
   });
 
   it("binds every destructive Settings confirmation to the session it was asked in (Codex r1 #1)", () => {
-    // Only the session-bound wrapper opens the sheet.
-    expect(settings.match(/confirmSheet\.confirm\(/g)).toHaveLength(1);
+    // Only the session-bound wrapper (and the bound logout recovery below) opens the sheet.
+    expect(settings.match(/confirmSheet\.confirm\(/g)).toHaveLength(2);
+    expect(between(settings, "async function offerLogoutRecovery()", "async function confirmForSession(")).toContain("confirmSheet.confirm({");
     expect(settings.match(/void confirmForSession\(\{/g)).toHaveLength(8);
     const wrapper = between(settings, "async function confirmForSession(", "\n  }\n");
     expect(wrapper).toContain("const authority = captured ?? await captureConfirmAuthority();");
@@ -60,6 +61,20 @@ describe("Blocks confirm sheet and toast call sites (UIA-003/004/005)", () => {
     const signOut = between(settings, "async function signOut()", "async function completeSignOut()");
     expect(signOut.indexOf("const authority = await captureConfirmAuthority();")).toBeLessThan(signOut.indexOf("getReviewSyncDiagnostics()"));
     expect(signOut).toContain("}, authority);");
+  });
+
+  it("keeps Log out reachable after a logout that failed partway, bound to that state (Codex r2)", () => {
+    const signOut = between(settings, "async function signOut()", "async function completeSignOut()");
+    expect(signOut).toMatch(/if \(!authority\) \{\s*\/\/[^\n]*\n\s*await offerLogoutRecovery\(\);\s*return;\s*\}/);
+    const recovery = between(settings, "async function offerLogoutRecovery()", "async function confirmForSession(");
+    expect(recovery).toContain("const recovery = await captureLogoutRecovery();");
+    // Never silent: a session change in progress says so; nothing left goes to sign-in.
+    expect(recovery).toContain('settingsNotice.show("Your sign-in is changing. Try Log out again in a moment.");');
+    expect(recovery).toMatch(/if \(recovery\.kind === "signed_out"\) \{\s*finishSignedOutNavigation\(\);/);
+    // The cleanup runs through the same logout path, only while the recovered state is still current.
+    expect(recovery).toContain("void logoutRecoveryStillCurrent(recovery).then(");
+    expect(recovery).toContain("if (current) void completeSignOut();");
+    expect(recovery).toContain('else settingsNotice.show("Your account changed, so nothing was changed.");');
   });
 
   it("starts the 'created but not pinned' notice only after the activity editor has left (Codex r1 #2)", () => {
