@@ -177,4 +177,10 @@ describe("Blocks Reports helpers", () => {
     expect(reportFilterApplyLabel({ mode: "include", keys: ["a", "b"], universe })).toBe("Show 2 activities");
     expect(reportFilterApplyLabel({ mode: "include", keys: ["a", "b", "c"], universe })).toBe("Show all activities");
   });
+
+  it("keeps a kept block's sliver instead of rounding it away (Codex r2)", () => {
+    const [height] = reportStackHeights([180], 180, 0.42, 1, 1, 0);
+    expect(height).toBeGreaterThan(0);
+    expect(height).toBeLessThanOrEqual(0.42);
+  });
 });

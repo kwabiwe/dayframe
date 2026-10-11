@@ -2,7 +2,7 @@ import { formatDuration } from "@dayframe/shared";
 // Blocks parity step 5a: the pure presentation model behind the iPhone Review deck.
 // The deck shows one Review card at a time over at most two cards beneath it.
 
-export type ReviewDeckPicture = "place" | "commute" | "workout" | "sleep" | "suggestion";
+export type ReviewDeckPicture = "place" | "commute" | "workout" | "exercise" | "sleep" | "suggestion";
 export type ReviewDeckSourceIcon = "pin" | "route" | "walk" | "moon" | "spark";
 
 export const REVIEW_DECK_VISIBLE_CARDS = 3;
@@ -34,7 +34,12 @@ export function reviewDeckArmDirection(cardX: number, fingerTravel: number): -1 
 type ReviewKindInput = {
   eventSource: string | null;
   eventType: string | null;
+  /** Apple Health's workout type, when the event carries one ("walking", "strength_training"…). */
+  workoutType?: unknown;
 };
+
+/** Workouts that cover ground get the route picture; the rest (strength, swimming, other) don't. */
+const ROUTE_WORKOUT_TYPES = new Set(["walking", "running", "cycling"]);
 
 function isHealth(input: ReviewKindInput) {
   return Boolean(input.eventSource?.startsWith("health_") || input.eventType?.startsWith("health_"));
@@ -47,7 +52,10 @@ function isSleep(input: ReviewKindInput) {
 export function reviewDeckPicture(input: ReviewKindInput & { isLocation: boolean; isTimeAway: boolean }): ReviewDeckPicture {
   if (input.eventType === "commute_detected" && !input.isTimeAway) return "commute";
   if (isSleep(input)) return "sleep";
-  if (isHealth(input)) return "workout";
+  // UIA-070: a strength session isn't a route; only workouts that cover ground draw one.
+  if (isHealth(input)) {
+    return typeof input.workoutType === "string" && !ROUTE_WORKOUT_TYPES.has(input.workoutType) ? "exercise" : "workout";
+  }
   if (input.isLocation || input.isTimeAway) return "place";
   return "suggestion";
 }
@@ -58,7 +66,7 @@ export function reviewDeckSource(input: ReviewKindInput & { isLocation: boolean;
 } {
   const picture = reviewDeckPicture(input);
   if (picture === "sleep") return { icon: "moon", label: "Apple Health" };
-  if (picture === "workout") return { icon: "walk", label: "Apple Health" };
+  if (picture === "workout" || picture === "exercise") return { icon: "walk", label: "Apple Health" };
   if (picture === "commute") return { icon: "route", label: "Location" };
   if (picture === "place") return { icon: "pin", label: "Location" };
   return { icon: "spark", label: "Suggestion" };
