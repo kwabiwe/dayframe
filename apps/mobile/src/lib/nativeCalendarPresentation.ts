@@ -144,7 +144,7 @@ function layoutDayEntries(
   dayStart: Date,
   dayEnd: Date,
   now: number,
-  options?: { insetOverlays?: boolean }
+  options?: { insetOverlays?: boolean; minimumOverlapMs?: number }
 ) {
   return layoutTimeIntervals(
     entries.map((entry) => ({
@@ -208,7 +208,9 @@ export function buildNativeCalendarBridgeState({
     ...layoutDayEntries(confirmedEntries, dayStart, dayEnd, now).map((layout) => [layout.id, layout] as const),
     // The lane is narrow: overlapping Review items always sit side by side (never an inset over a
     // longer one, which would leave it a strip too thin to tap).
-    ...layoutDayEntries(reviewEntries, dayStart, dayEnd, now, { insetOverlays: false }).map((layout) => [layout.id, {
+    // Any overlap at all, even under a minute, splits lanes here: two suggestions must never share
+    // one tap target.
+    ...layoutDayEntries(reviewEntries, dayStart, dayEnd, now, { insetOverlays: false, minimumOverlapMs: 0 }).map((layout) => [layout.id, {
       ...layout,
       offsetFraction: 1 - REVIEW_LANE_WIDTH + layout.offsetFraction * REVIEW_LANE_WIDTH,
       widthFraction: layout.widthFraction * REVIEW_LANE_WIDTH,
