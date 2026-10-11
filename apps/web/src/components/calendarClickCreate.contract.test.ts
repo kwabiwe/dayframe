@@ -40,7 +40,7 @@ describe("Calendar click-to-create contract", () => {
     expect(quickEditor).toContain("formatCalendarEntryCompactDuration(preview.plan.durationSeconds)");
     expect(quickEditor.match(/<DatePickerPopover/g)).toHaveLength(2);
     expect(quickEditor.match(/iconOnly/g)).toHaveLength(2);
-    expect(quickEditor).toMatch(/\{props\.mode === "entry" && props\.onDelete \? \([\s\S]*aria-label=\{`Delete \$\{title\}`\}/s);
+    expect(quickEditor).toMatch(/\{props\.mode === "entry" && props\.onDelete \? \([\s\S]*aria-label=\{isRunning \? `Discard \$\{title\}` : `Delete \$\{title\}`\}/s);
   });
 
   it("saves through the existing manual-entry runtime with no hidden metadata", () => {

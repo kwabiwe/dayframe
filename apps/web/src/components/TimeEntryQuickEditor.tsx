@@ -660,6 +660,10 @@ export function TimeEntryQuickEditorPanel({
   // Blocks editor head (prototype "Edit block"): an eyebrow with the day (or Recording) and the title.
   const editorHeading = props.mode === "entry" ? (isRunning ? "Running block" : "Edit block") : "New block";
   const editorEyebrow = isRunning ? "Recording" : formatEyebrowDate(draft.startedAtDate);
+  // The chip set follows the last activity chosen, so clearing a chip chosen through "All
+  // activities" keeps it (and keyboard focus) in place instead of removing it.
+  const [chipAnchorId, setChipAnchorId] = useState(draft.categoryId);
+  if (draft.categoryId && draft.categoryId !== chipAnchorId) setChipAnchorId(draft.categoryId);
 
   function saveButton() {
     return (
@@ -709,6 +713,34 @@ export function TimeEntryQuickEditorPanel({
           <p className="df-ed-eyebrow">{editorEyebrow}</p>
           <h2>{editorHeading}</h2>
         </div>
+        {/* Start again and Delete sit in the head (not beside Save as in the prototype), so the
+            footer keeps its full width for errors, overlap and the discard prompt, and both stay
+            usable — and keep focus — while an error shows. */}
+        <div className="calendar-compact-editor-icons">
+          {entry?.stoppedAt && props.mode === "entry" && props.onStartAgain ? (
+            <button
+              className="calendar-compact-icon-action"
+              type="button"
+              aria-label={`Start ${title} again`}
+              aria-busy={busyAction === "start" || undefined}
+              disabled={controlsDisabled || props.isTimerBusy}
+              onClick={() => void controller.startAgain()}
+            >
+              <DayframeIcon glyph="rotate-ccw" size={17} />
+            </button>
+          ) : null}
+          {props.mode === "entry" && props.onDelete ? (
+            <button
+              className="calendar-compact-icon-action is-danger"
+              type="button"
+              aria-label={isRunning ? `Discard ${title}` : `Delete ${title}`}
+              aria-busy={busyAction === "delete" || undefined}
+              disabled={controlsDisabled}
+              onClick={() => void controller.deleteEntry()}
+            >
+              <DayframeIcon glyph="trash-2" size={17} />
+            </button>
+          ) : null}
         <button
           className="calendar-compact-icon-action"
           type="button"
@@ -718,6 +750,7 @@ export function TimeEntryQuickEditorPanel({
         >
           <X size={18} aria-hidden="true" />
         </button>
+        </div>
       </div>
 
       <div className="calendar-compact-editor-fields">
@@ -765,7 +798,7 @@ export function TimeEntryQuickEditorPanel({
         </div>
 
         <ActivityChipGroup
-          categories={editorChipCategories(props.categories, draft.categoryId)}
+          categories={editorChipCategories(props.categories, chipAnchorId)}
           disabled={controlsDisabled}
           onSelect={(categoryId) => controller.updateField("categoryId", categoryId)}
           selectedId={draft.categoryId}
@@ -904,38 +937,6 @@ export function TimeEntryQuickEditorPanel({
         ].join(" ")}
         data-feedback-mode={feedbackMode}
       >
-        {/* Delete and Start again stay outside the swapping action planes, so they remain usable
-            (and keep focus) while an error shows; only the discard prompt makes them inert. */}
-        {(props.mode === "entry" && props.onDelete) || (entry?.stoppedAt && props.mode === "entry" && props.onStartAgain) ? (
-          <div className="df-ed-lead" aria-hidden={Boolean(discardPrompt) || undefined} inert={Boolean(discardPrompt)}>
-            {props.mode === "entry" && props.onDelete ? (
-              <button
-                className="df-ed-action is-danger"
-                type="button"
-                aria-label={`Delete ${title}`}
-                aria-busy={busyAction === "delete" || undefined}
-                disabled={controlsDisabled}
-                onClick={() => void controller.deleteEntry()}
-              >
-                <DayframeIcon glyph="trash-2" size={16} />
-                <span className="df-ed-action-label">{isRunning ? "Discard" : "Delete"}</span>
-              </button>
-            ) : null}
-            {entry?.stoppedAt && props.mode === "entry" && props.onStartAgain ? (
-              <button
-                className="df-ed-action"
-                type="button"
-                aria-label={`Start ${title} again`}
-                aria-busy={busyAction === "start" || undefined}
-                disabled={controlsDisabled || props.isTimerBusy}
-                onClick={() => void controller.startAgain()}
-              >
-                <DayframeIcon glyph="rotate-ccw" size={16} />
-                <span className="df-ed-action-label">Start again</span>
-              </button>
-            ) : null}
-          </div>
-        ) : null}
         <div className="calendar-compact-editor-default-actions" aria-hidden={feedbackMode !== "default"} inert={feedbackMode !== "default"}>
           {cancelButton()}
           {saveButton()}

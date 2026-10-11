@@ -31,6 +31,7 @@ describe("TimeEntryQuickEditorModal", () => {
     const completed = renderModal({ sourceEntry: timeEntry({ description: "Sleep" }) });
     const completedEditor = await screen.findByTestId("time-entry-quick-editor");
     expect(completedEditor.querySelector(".calendar-compact-editor-header h2")?.textContent).toBe("Edit block");
+    expect(completedEditor.querySelector(".calendar-compact-editor-header")?.textContent).not.toContain("Sleep");
     expect(completedEditor.querySelector(".df-ed-eyebrow")?.textContent).toMatch(/^[A-Z][a-z]+day \d{1,2} [A-Z][a-z]+$/);
     expect((screen.getByLabelText("Description") as HTMLInputElement).value).toBe("Sleep");
 
@@ -347,14 +348,37 @@ describe("TimeEntryQuickEditorModal", () => {
     expect(await screen.findByRole("alertdialog", { name: "Discard changes?" })).not.toBeNull();
     expect(dirtyClose).not.toHaveBeenCalled();
   });
+
+  it("keeps a chip chosen through All activities, and its focus, when it is cleared (Codex r1 on #305)", async () => {
+    const names = ["Alpha", "Bravo", "Charlie", "Delta", "Echo", "Foxtrot", "Golf", "Hotel", "Ninth"];
+    renderModal({ categories: names.map((name) => ({ id: name.toLowerCase(), name, color: "mint", isPinned: false })) });
+    await screen.findByTestId("time-entry-quick-editor");
+    const menu = document.getElementById("time-entry-quick-category-menu") as HTMLElement;
+    expect(menu.hidden).toBe(true);
+    expect(screen.queryByRole("radio", { name: "Ninth" })).toBeNull();
+
+    await userEvent.click(screen.getByRole("button", { name: /All activities/ }));
+    const search = await screen.findByRole("searchbox", { name: "Search activities" });
+    await userEvent.type(search, "nin{Enter}");
+    const ninth = await screen.findByRole("radio", { name: "Ninth" });
+    expect(ninth.getAttribute("aria-checked")).toBe("true");
+
+    ninth.focus();
+    await userEvent.keyboard(" ");
+    const kept = screen.getByRole("radio", { name: "Ninth" });
+    expect(kept.getAttribute("aria-checked")).toBe("false");
+    expect(document.activeElement).toBe(kept);
+  });
 });
 
 function renderModal({
+  categories = [{ id: "focus", name: "Focus", color: "mint", isPinned: false }],
   onClose = vi.fn(),
   onDelete,
   onSave = vi.fn<SaveHandler>().mockResolvedValue({ ok: true }),
   sourceEntry = timeEntry()
 }: {
+  categories?: Array<{ id: string; name: string; color: string; isPinned: boolean }>;
   onClose?: () => void;
   onDelete?: DeleteHandler;
   onSave?: SaveHandler;
@@ -362,7 +386,7 @@ function renderModal({
 } = {}) {
   return render(createElement(TimeEntryQuickEditorModal, {
     capturedNow: new Date("2026-08-04T12:00:00.000Z"),
-    categories: [{ id: "focus", name: "Focus", color: "mint", isPinned: false }],
+    categories,
     entry: sourceEntry,
     isTimerBusy: false,
     onClose,

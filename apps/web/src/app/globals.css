@@ -13329,79 +13329,25 @@ dialog.ui-dialog.df-rf-dialog {
   padding: 8px 10px;
 }
 
-/* With Delete / Start again, the footer is two columns: that lead group, then the stacked action
-   planes (default, feedback, discard) in the second column. */
-.calendar-compact-editor-footer:has(> .df-ed-lead) {
-  grid-template-columns: auto minmax(0, 1fr);
-  column-gap: 8px;
-}
-
-.calendar-compact-editor-footer:has(> .df-ed-lead) > :not(.df-ed-lead) {
-  grid-area: 1 / 2;
-}
-
-.df-ed-lead {
-  display: flex;
-  grid-area: 1 / 1;
-  align-items: center;
-  gap: 8px;
-}
-
-.df-ed-action {
-  display: inline-flex;
-  min-height: var(--web-control-height);
-  align-items: center;
-  gap: 6px;
-  border: 0;
-  border-radius: 999px;
-  background: var(--surface-muted);
-  padding: 0 14px;
-  color: var(--foreground);
-  font: inherit;
-  font-size: 13px;
-  font-weight: 650;
-  cursor: pointer;
-}
-
-.df-ed-action.is-danger {
-  color: var(--danger-text);
-}
-
-.df-ed-action:hover:not(:disabled) {
-  background: color-mix(in srgb, var(--foreground) 8%, var(--surface-muted));
-}
-
-.df-ed-action:focus-visible {
-  outline: 2px solid var(--focus);
-  outline-offset: 2px;
-}
-
-.df-ed-action:disabled {
-  cursor: default;
-  opacity: 0.55;
-}
-
-/* A narrow editor keeps Delete and Start again as icons (labels stay for assistive tech). */
-@container time-entry-editor (max-width: 459px) {
-  .df-ed-action {
-    width: 44px;
-    min-width: 44px;
-    justify-content: center;
-    padding: 0;
-  }
-
-  .df-ed-action-label {
-    position: absolute;
-    width: 1px;
-    height: 1px;
-    overflow: hidden;
-    clip: rect(0 0 0 0);
-    white-space: nowrap;
-  }
-}
 
 /* UIA-205: discarding changes is destructive, so its confirm reads as danger, not coral. */
 .calendar-compact-discard-confirm {
-  background: color-mix(in srgb, var(--danger) 14%, var(--surface-muted));
+  background: var(--surface-muted);
   color: var(--danger-text);
+}
+
+.calendar-compact-icon-action.is-danger {
+  color: var(--danger-text);
+}
+
+/* The editor's chips are 44 px wherever touch is the input, whatever the viewport width. */
+@media (hover: none), (pointer: coarse) {
+  .df-ed-chips .df-rchip {
+    min-height: 44px;
+  }
+}
+
+.category-picker-search {
+  width: calc(100% - 12px);
+  margin: 6px 6px 4px;
 }

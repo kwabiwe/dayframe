@@ -100,9 +100,9 @@ describe("shared web time-entry quick editor", () => {
     expect(timeline).toContain("useTimelineDeleteUndo");
   });
 
-  it("puts Delete (danger) and Start again in the footer beside Save, and neutral selection in shared controls (UIA-201, UIA-205)", () => {
-    expect(quick).toMatch(/className="df-ed-action is-danger"[\s\S]*?glyph="trash-2"[\s\S]*?\{isRunning \? "Discard" : "Delete"\}/);
-    expect(quick).toMatch(/className="df-ed-action"[\s\S]*?glyph="rotate-ccw"[\s\S]*?Start again/);
+  it("puts Start again and Delete (danger) in the head beside Close, and neutral selection in shared controls (UIA-201, UIA-205)", () => {
+    expect(quick).toMatch(/className="calendar-compact-editor-icons"[\s\S]*?glyph="rotate-ccw"[\s\S]*?className="calendar-compact-icon-action is-danger"[\s\S]*?glyph="trash-2"[\s\S]*?aria-label="Close editor"/);
+    expect(quick).not.toContain("df-ed-lead");
     expect(quick).toContain('{entry ? "Save" : "Add block"}');
     expect(quick).toContain("<ActivityChipGroup");
     expect(quick).toContain('variant="more"');
