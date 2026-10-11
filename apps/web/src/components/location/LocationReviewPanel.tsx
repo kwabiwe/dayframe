@@ -1,5 +1,7 @@
 "use client";
 
+import { formatDuration } from "@dayframe/shared";
+
 import { useEffect, useState, useTransition } from "react";
 import { Check, GitMerge, MapPin, RotateCw, Scissors, X } from "lucide-react";
 import dynamic from "next/dynamic";
@@ -175,7 +177,7 @@ export function LocationReviewPanel({
             ) : null}
             {evidence.map.gaps.map((gap) => (
               <p key={`${gap.startedAt}-${gap.stoppedAt}`} className="mt-2 text-sm text-[var(--warning)]">
-                Evidence gap · {Math.round(gap.durationSeconds / 60)} minutes
+                Evidence gap · {formatDuration(gap.durationSeconds)}
               </p>
             ))}
           </section>

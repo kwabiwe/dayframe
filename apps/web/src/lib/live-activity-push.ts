@@ -160,7 +160,7 @@ export async function registerLiveActivity(
     ]
   );
   if (!result.rowCount) {
-    throw new LiveActivityRegistrationError("The running timer is no longer active.");
+    throw new LiveActivityRegistrationError("The running block is no longer active.");
   }
 }
 

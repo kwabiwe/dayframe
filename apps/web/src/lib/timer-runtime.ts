@@ -350,7 +350,7 @@ export function timerStartErrorMessage(error: unknown) {
     return "Unable to start right now. Check your connection and try again.";
   }
   if (error instanceof Error && error.message.trim()) return error.message;
-  return "Unable to start the timer.";
+  return "Unable to start the block.";
 }
 
 export function applyOptimisticTimerStart(
@@ -543,7 +543,7 @@ export async function runActiveEntryCompactMutation({
 
 export function timerCompactEditErrorMessage(error: unknown) {
   if (error instanceof Error && error.message.trim()) return error.message;
-  return "Timer details were not saved. Your previous values were restored.";
+  return "Block details were not saved. Your previous values were restored.";
 }
 
 export function applyAuthoritativeActiveEntryVersion(

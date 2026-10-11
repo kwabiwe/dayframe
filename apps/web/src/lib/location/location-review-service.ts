@@ -571,7 +571,7 @@ async function confirmReview(
     entryId = existing.rows[0]?.id;
   }
   if (!entryId) {
-    throw new ReviewResolutionError("database_constraint", "Unable to create the confirmed location entry.", { status: 409 });
+    throw new ReviewResolutionError("database_constraint", "Unable to create the confirmed location block.", { status: 409 });
   }
   await syncTimeEntryTags(client, entryId, edit?.tags ?? [], session);
   await resolveReviewAndEvent(client, item, session, "accepted");

@@ -13,8 +13,9 @@ const webRoot = process.cwd();
 const roots = ["src/components", "src/app", "src/lib"];
 const exempt = new Set([
   "src/lib/report-csv.ts", // export columns stay stable for existing spreadsheets
-  "src/lib/event-service.ts", // stored event payload defaults, not interface text
 ]);
+// Stored defaults (not interface text) that the guard must not read as copy.
+const exemptText = new Set(["Manual entry"]);
 // The public integrations API keeps its documented wording for external clients.
 const exemptDirectories = ["src/app/api/integrations/"];
 const noun = /\b(timers?|entry|entries|time entr(?:y|ies)|tasks?|timeline)\b/i;
@@ -22,7 +23,7 @@ const VISIBLE_KEYS = new Set([
   "aria-label", "ariaLabel", "title", "placeholder", "label", "description", "help", "detail", "body",
   "error", "message", "caption", "data-label", "alt", "lede", "subtitle", "hint", "emptyState"
 ]);
-const VISIBLE_CALLS = /(^|\.)(setInlineStatus|recoverMutation|setError|setStatus|setMessage|showToast|announce|errorMessage|responseError)$/;
+const VISIBLE_CALLS = /(^super$)|(^|\.)(setInlineStatus|recoverMutation|setError|setStatus|setMessage|showToast|announce|errorMessage|responseError)$/;
 
 function texts(node: ts.Node): string[] {
   if (ts.isStringLiteral(node) || ts.isNoSubstitutionTemplateLiteral(node)) return [node.text];
@@ -45,7 +46,8 @@ export function webWordingOffenders(source: string, fileName = "file.tsx") {
     const whole = candidates.join(" ");
     if (!/[A-Za-z] +[A-Za-z]/.test(whole) && !/^[A-Z][a-z]+$/.test(whole.trim())) return;
     for (const text of candidates) {
-      if (/^\/|^[a-z]+[A-Z]|[a-z0-9]+[-_./][a-z0-9]+/.test(text.trim())) continue;
+      if (/^\/|^[a-z]+[A-Z]|[a-z0-9]+[-_./][a-z0-9]+/.test(text.trim()) || exemptText.has(text.trim())) continue;
+      if (/\b(select|insert|update|delete)\b[\s\S]*\b(from|into|set|where)\b/i.test(whole)) continue;
       if (noun.test(text)) {
         const { line } = file.getLineAndCharacterOfPosition(node.getStart());
         found.push(`${fileName}:${line + 1} ${text.trim()}`);
@@ -60,8 +62,12 @@ export function webWordingOffenders(source: string, fileName = "file.tsx") {
       check(node, texts(node.initializer));
     } else if (ts.isPropertyAssignment(node) && VISIBLE_KEYS.has(node.name.getText().replace(/["']/g, ""))) {
       check(node, texts(node.initializer));
-    } else if (ts.isNewExpression(node) && node.expression.getText() === "Error") {
+    } else if (ts.isNewExpression(node) && /Error$/.test(node.expression.getText())) {
+      // Error and its subclasses: their messages reach people through API responses and toasts.
       check(node, (node.arguments ?? []).flatMap(texts));
+    } else if (ts.isReturnStatement(node) && node.expression) {
+      // Copy a presentation helper returns.
+      check(node, texts(node.expression));
     } else if (ts.isCallExpression(node) && VISIBLE_CALLS.test(node.expression.getText())) {
       check(node, node.arguments.flatMap(texts));
     }
@@ -98,6 +104,8 @@ describe("block wording on web (UIA-206)", () => {
       ");",
       "throw new Error(`Unable to save this entry: ${status}`);",
       "const c = { error: \"This entry has no task\", key: \"timer start\" };",
+      "function label() { return \"Time entry restored\"; }",
+      "throw new ValidationError(\"Entries can be no longer than 24 hours.\");",
     ].join("\n");
     expect(webWordingOffenders(source)).toEqual([
       "file.tsx:1 Enter starts the timer",
@@ -105,6 +113,8 @@ describe("block wording on web (UIA-206)", () => {
       "file.tsx:4 entries",
       "file.tsx:7 Unable to save this entry:",
       "file.tsx:8 This entry has no task",
+      "file.tsx:9 Time entry restored",
+      "file.tsx:10 Entries can be no longer than 24 hours.",
     ]);
   });
 });

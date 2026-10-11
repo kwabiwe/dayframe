@@ -237,5 +237,5 @@ function uniqueEntries(entries: readonly TimeEntryRow[]) {
 function friendlyDeleteError(error: unknown) {
   return error instanceof Error && error.message
     ? error.message
-    : "Unable to delete this time entry. It has been restored.";
+    : "Unable to delete this block. It has been restored.";
 }

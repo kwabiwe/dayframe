@@ -1006,7 +1006,7 @@ function overlapMarkerDescription(
       }`
     : "";
   return `Overlap: ${formatDuration(overlap.uniqueOverlapSeconds)} shared with ${overlap.overlapCount} other ${
-    overlap.overlapCount === 1 ? "entry" : "entries"
+    overlap.overlapCount === 1 ? "block" : "blocks"
   }${peerDetail}. ${timeEntryTitle(entry)} still counts in full towards Total logged.`;
 }
 

@@ -2037,7 +2037,7 @@ export async function updateTimeEntry(
 
 export class TimeEntryNotFoundError extends Error {
   constructor() {
-    super("Time entry not found.");
+    super("Block not found.");
     this.name = "TimeEntryNotFoundError";
   }
 }
@@ -2079,7 +2079,7 @@ function validateResolvedTimeEntryWindow({
     throw new TimeEntryValidationError("Finish time must be after the start time.");
   }
   if (stopped.getTime() - started.getTime() > 24 * 60 * 60 * 1_000) {
-    throw new TimeEntryValidationError("Entries can be no longer than 24 hours.");
+    throw new TimeEntryValidationError("A block can be no longer than 24 hours.");
   }
 }
 
@@ -2128,7 +2128,7 @@ export async function updateTimeEntryDescriptions(
 ) {
   const uniqueIds = [...new Set(ids)];
   if (uniqueIds.length < 2) {
-    throw new TimeEntryValidationError("Choose at least two grouped entries.");
+    throw new TimeEntryValidationError("Choose at least two grouped blocks.");
   }
 
   const client = await pool.connect();
@@ -2143,7 +2143,7 @@ export async function updateTimeEntryDescriptions(
     );
     if (existing.rows.length !== uniqueIds.length) throw new TimeEntryNotFoundError();
     if (existing.rows.some((entry) => entry.stoppedAt === null)) {
-      throw new TimeEntryValidationError("Grouped descriptions can only update completed entries.");
+      throw new TimeEntryValidationError("Grouped descriptions can only update completed blocks.");
     }
 
     const updated = await client.query<{ id: string }>(
@@ -2198,7 +2198,7 @@ export async function splitActiveEntry(session: RequestSession = getDevSession()
       [session.workspaceId, session.userId]
     );
     const row = active.rows[0];
-    if (!row) throw new Error("No block is recording to split.");
+    if (!row) throw new Error("There is no running block to split.");
 
     const eventResult = await client.query<{ id: string }>(
       `insert into activity_events (
@@ -2501,7 +2501,7 @@ function reviewResolutionErrorForDatabaseError(error: unknown) {
   if (isUniqueViolationError(error)) {
     return new ReviewResolutionError(
       "duplicate_entry",
-      "A time entry already exists for this activity.",
+      "A block already exists for this activity.",
       {
         status: 409,
         cause: error
