@@ -183,7 +183,9 @@ export const TodayRibbon = memo(function TodayRibbon({
                 const height = (TRACK_HEIGHT - BLOCK_INSET * 2) * (hot ? HOT_SCALE : 1);
                 const y = BLEED + TRACK_HEIGHT / 2 - height / 2;
                 // 1 pt between neighbours: each block gives up half a point on either side.
-                const { x, width: w } = ribbonBlockFrame(block.left, block.width, width);
+                const { x, width: w } = ribbonBlockFrame(model, block, width);
+                // A block squeezed out by its neighbour's start (a minute just before another) is not drawn.
+                if (w <= 0) return null;
                 return block.kind === "pending" ? (
                   // The hatch's stroke is centred on its path, so the path is inset by half the stroke
                   // and the whole outline stays inside the block's drawn bounds.

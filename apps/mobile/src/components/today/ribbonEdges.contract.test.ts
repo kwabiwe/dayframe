@@ -7,17 +7,25 @@ import { RIBBON_BLOCK_GAP, RIBBON_MIN_BLOCK_WIDTH, ribbonBlockFrame, ribbonHitAt
 const source = readFileSync(new URL("./TodayRibbon.tsx", import.meta.url), "utf8");
 
 describe("iPhone Today ribbon blocks (X2)", () => {
-  it("neighbours are 1 pt apart, and a minimum-width block keeps its gap inside its hit width", () => {
+  it("neighbours are 1 pt apart, also after a minimum-width block (X2, Codex r3)", () => {
     const track = 300;
-    const a = ribbonBlockFrame(0.1, 0.1, track); // 30..60
-    const b = ribbonBlockFrame(0.2, 0.1, track); // 60..90
-    expect(b.x - (a.x + a.width)).toBeCloseTo(1);
-    // A block shorter than the minimum: drawn inside [left, left + min] with half a point clear each side.
-    const tiny = ribbonBlockFrame(0.5, 0.001, track);
-    expect(tiny.x).toBeCloseTo(150.5);
-    expect(tiny.x + tiny.width).toBeCloseTo(150 + RIBBON_MIN_BLOCK_WIDTH - 0.5);
-    const next = ribbonBlockFrame(0.5 + RIBBON_MIN_BLOCK_WIDTH / track, 0.1, track);
-    expect(next.x - (tiny.x + tiny.width)).toBeCloseTo(1);
+    const dayMs = 86_400_000;
+    const at = (hour: number, minute: number) => (hour * 60 + minute) * 60_000;
+    const blocks = [
+      { startMs: at(2, 24), endMs: at(4, 48) },
+      { startMs: at(4, 48), endMs: at(7, 12) },
+      { startMs: at(12, 0), endMs: at(12, 1) },
+      { startMs: at(12, 1), endMs: at(13, 0) },
+      { startMs: at(18, 0), endMs: at(18, 1) }
+    ];
+    const model = { blocks, dayStartMs: 0, dayMs } as never;
+    const frame = (index: number) => ribbonBlockFrame(model, blocks[index], track);
+    expect(frame(1).x - (frame(0).x + frame(0).width)).toBeCloseTo(RIBBON_BLOCK_GAP);
+    // The exact fixture: 12:00–12:01 reaches only to 12:01 (0.2 pt), so after the gap it is not
+    // drawn at all, rather than drawn under 12:01–13:00 (as before, when only 0.2 pt of it showed).
+    expect(frame(2).width).toBe(0);
+    // Alone, a short block keeps the minimum width (less the gap).
+    expect(frame(4).width).toBeCloseTo(RIBBON_MIN_BLOCK_WIDTH - RIBBON_BLOCK_GAP);
   });
 
   it("a tap selects the block drawn under it, even where a minimum-width block meets its neighbour (Codex r2)", () => {
@@ -31,15 +39,14 @@ describe("iPhone Today ribbon blocks (X2)", () => {
       const result = ribbonHitAt(model, x / track, RIBBON_MIN_BLOCK_WIDTH / track, RIBBON_BLOCK_GAP / track);
       return result.kind === "block" ? (result.block as { key: string }).key : null;
     };
-    const a = ribbonBlockFrame(0.5, 60_000 / dayMs, track);
-    const b = ribbonBlockFrame((at(12, 1) - day) / dayMs, 59 * 60_000 / dayMs, track);
-    // Only a is drawn at 150.6 (b's drawn frame starts after its half-point gap).
-    expect(150.6).toBeGreaterThanOrEqual(a.x);
-    expect(150.6).toBeLessThan(b.x);
-    expect(hit(150.6)).toBe("a");
-    // Where both are drawn, the later one is on top, as drawn.
-    expect(hit(151.5)).toBe("b");
+    const b = ribbonBlockFrame(model, { startMs: at(12, 1), endMs: at(13, 0) }, track);
+    // Nothing of a is drawn; b's fill starts after its half-point gap.
+    expect(ribbonBlockFrame(model, { startMs: at(12, 0), endMs: at(12, 1) }, track).width).toBe(0);
+    expect(hit(b.x + 0.1)).toBe("b");
     expect(hit(160)).toBe("b");
+    // Between them (the gap), the nearest reach still answers.
+    expect(hit(150.6)).toBe("b");
+    expect(hit(150.1)).toBe("a");
   });
 
   it("draws the full fill, then a faint inset edge on it; pending outlines stay inside the block", () => {

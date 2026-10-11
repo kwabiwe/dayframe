@@ -45,13 +45,26 @@ export const RIBBON_MIN_BLOCK_WIDTH = 3;
 export const RIBBON_BLOCK_GAP = 1;
 
 /**
- * Where a ribbon block is drawn: its time span, at least RIBBON_MIN_BLOCK_WIDTH wide (the hit
- * width), less half the gap on each side, so neighbours never touch and what is drawn always lies
- * inside what a tap selects.
+ * A block's reach: its time, at least the minimum width, but never past where the next block starts
+ * when that one starts after this one ends (blocks that overlap in time stack instead).
  */
-export function ribbonBlockFrame(left: number, widthFraction: number, trackWidth: number) {
-  const hitWidth = Math.max(RIBBON_MIN_BLOCK_WIDTH, widthFraction * trackWidth);
-  return { x: left * trackWidth + RIBBON_BLOCK_GAP / 2, width: Math.max(0, hitWidth - RIBBON_BLOCK_GAP) };
+export function ribbonBlockReachMs(model: Pick<RibbonModel, "blocks">, block: Pick<RibbonBlock, "startMs" | "endMs">, minimumMs: number) {
+  let next = Number.POSITIVE_INFINITY;
+  for (const other of model.blocks) {
+    if (other.startMs >= block.endMs && other.startMs > block.startMs && other.startMs < next) next = other.startMs;
+  }
+  return Math.min(Math.max(block.endMs, block.startMs + minimumMs), next);
+}
+
+/**
+ * Where a ribbon block is drawn: its reach, less half the gap on each side, so neighbours never
+ * touch and what is drawn always lies inside what a tap selects.
+ */
+export function ribbonBlockFrame(model: Pick<RibbonModel, "blocks" | "dayStartMs" | "dayMs">, block: Pick<RibbonBlock, "startMs" | "endMs">, trackWidth: number) {
+  const perMs = trackWidth / model.dayMs;
+  const reach = ribbonBlockReachMs(model, block, RIBBON_MIN_BLOCK_WIDTH / perMs);
+  const start = (block.startMs - model.dayStartMs) * perMs;
+  return { x: start + RIBBON_BLOCK_GAP / 2, width: Math.max(0, (reach - block.startMs) * perMs - RIBBON_BLOCK_GAP) };
 }
 
 export function buildTodayRibbon({
@@ -144,7 +157,7 @@ export function ribbonHitAt(model: RibbonModel, fraction: number, minFraction = 
   const minMs = minFraction * model.dayMs;
   const halfGapMs = (gapFraction * model.dayMs) / 2;
   const top = (blocks: RibbonBlock[]) => blocks.filter((block) => block.kind === "entry").pop() ?? blocks.pop();
-  const reach = (block: RibbonBlock) => Math.max(block.endMs, block.startMs + minMs);
+  const reach = (block: RibbonBlock) => ribbonBlockReachMs(model, block, minMs);
   const drawn = model.blocks.filter((block) => atMs >= block.startMs + halfGapMs && atMs <= reach(block) - halfGapMs);
   const hit = top(drawn) ?? top(model.blocks.filter((block) => atMs >= block.startMs && atMs <= reach(block)));
   return hit ? { kind: "block", block: hit, atMs } : { kind: "gap", atMs };
