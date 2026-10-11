@@ -7,7 +7,6 @@ import {
   Text,
   View
 } from "react-native";
-import Svg, { Path } from "react-native-svg";
 import { ActivityBlockMark } from "./today/ActivityBlockMark";
 import type { RecentActivitySuggestion } from "@dayframe/shared";
 import { pressable, type MobileStyles, type MobileTheme } from "@/lib/mobileTheme";
@@ -298,7 +297,7 @@ export function HistoricalSuggestionsOverlay({
             style={pressable(styles.historicalSuggestionsCloseButton, styles.buttonPressed)}
             testID="historical-suggestions-close"
           >
-            <DayframeIcon color={theme.textSecondary} glyph="x" size={16} />
+            <DayframeIcon color={theme.textSecondary} glyph="x" size={16} strokeWidth={2.2} />
           </Pressable>
         </View>
         <ScrollView

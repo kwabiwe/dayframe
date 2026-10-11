@@ -1026,7 +1026,7 @@ function PlaceChoice({
         <Text {...mobileTextProps("itemTitle")} style={[placeChoiceStyles.name, { color: theme.textPrimary }]}>{name}</Text>
         <Text {...mobileTextProps("metadata")} style={[placeChoiceStyles.detail, { color: theme.textSecondary }]}>{detail}</Text>
       </View>
-      {selected ? <DayframeIcon color={theme.textPrimary} glyph="check" size={17} /> : null}
+      {selected ? <DayframeIcon color={theme.textPrimary} glyph="check" size={17} strokeWidth={2.2} /> : null}
     </Pressable>
   );
 }
