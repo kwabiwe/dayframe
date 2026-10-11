@@ -43,7 +43,7 @@ export function CategoryPicker({
   onOpenChange,
   onSelect,
   open,
-  portal = false,
+  portal: portalProp = false,
   selectedId,
   triggerId,
   triggerRef: externalTriggerRef,
@@ -64,10 +64,17 @@ export function CategoryPicker({
   selectedId: string;
   triggerId?: string;
   triggerRef?: RefObject<HTMLButtonElement | null>;
-  /** "block" is the Blocks command timer: a solid activity square opening the timer menu. */
-  variant: "timer" | "quick" | "block";
+  /**
+   * "block" is the Blocks command timer: a solid activity square opening the timer menu. "more" is
+   * the entry editor's "All activities" chip after its activity chips: it opens the searchable
+   * menu (with Create) and shows no selection of its own.
+   */
+  variant: "timer" | "quick" | "block" | "more";
 }) {
-  const menuVariant = variant === "quick" ? "quick" : "timer";
+  const menuVariant = variant === "quick" || variant === "more" ? "quick" : "timer";
+  // The editor's "All activities" menu always floats over the page (a portal) at its own width, so
+  // it is never as narrow as its chip, with or without Create.
+  const portal = portalProp || variant === "more";
   const rootRef = useRef<HTMLDivElement | null>(null);
   const localTriggerRef = useRef<HTMLButtonElement | null>(null);
   const menuRef = useRef<HTMLDivElement | null>(null);
@@ -86,10 +93,18 @@ export function CategoryPicker({
   const [createError, setCreateError] = useState<string | null>(null);
   const [portalPosition, setPortalPosition] = useState<CSSProperties | null>(null);
   const [colorMenuPosition, setColorMenuPosition] = useState<CSSProperties | null>(null);
+  // The editor's "All activities" menu searches; the other variants list every activity.
+  const searchable = variant === "more";
+  const [query, setQuery] = useState("");
+  const searchRef = useRef<HTMLInputElement | null>(null);
   const selectedCategory = categories.find((category) => category.id === selectedId) ?? null;
+  const listedCategories = useMemo(() => {
+    const needle = query.trim().toLocaleLowerCase();
+    return searchable && needle ? categories.filter((category) => category.name.toLocaleLowerCase().includes(needle)) : categories;
+  }, [categories, query, searchable]);
   const optionValues = useMemo(
-    () => ["", ...categories.map((category) => category.id), ...(onCreateCategory ? ["create"] : [])],
-    [categories, onCreateCategory]
+    () => ["", ...listedCategories.map((category) => category.id), ...(onCreateCategory ? ["create"] : [])],
+    [listedCategories, onCreateCategory]
   );
   const selectedIndex = Math.max(0, optionValues.indexOf(selectedId));
   const triggerRef = externalTriggerRef ?? localTriggerRef;
@@ -222,7 +237,8 @@ export function CategoryPicker({
       const triggerRect = trigger.getBoundingClientRect();
       const rootRect = root.getBoundingClientRect();
       const availableWidth = Math.max(0, viewportWidth - margin * 2);
-      const width = Math.min(rootRect.width || triggerRect.width, availableWidth);
+      // The "All activities" chip is narrow; its menu takes a comfortable width of its own.
+      const width = Math.min(searchable ? Math.max(300, rootRect.width) : rootRect.width || triggerRect.width, availableWidth);
       const left = Math.min(
         Math.max(viewportLeft + margin, rootRect.left),
         Math.max(viewportLeft + margin, viewportLeft + viewportWidth - width - margin)
@@ -264,7 +280,7 @@ export function CategoryPicker({
       window.visualViewport?.removeEventListener("resize", updatePosition);
       window.visualViewport?.removeEventListener("scroll", updatePosition);
     };
-  }, [open, portal, triggerRef]);
+  }, [open, portal, searchable, triggerRef]);
 
   function assignTrigger(node: HTMLButtonElement | null) {
     localTriggerRef.current = node;
@@ -294,12 +310,16 @@ export function CategoryPicker({
     setCreateError(null);
     setPortalPosition(null);
     setColorMenuPosition(null);
-    setActiveIndex(focus === "last" ? optionValues.length - 1 : selectedIndex);
+    // Reopening clears the search, so the selected activity is found in the full list.
+    const fullIndex = Math.max(0, ["", ...categories.map((category) => category.id)].indexOf(selectedId));
+    setActiveIndex(focus === "last" ? optionValues.length - 1 : searchable ? fullIndex : selectedIndex);
+    setQuery("");
     onOpenChange(true);
+    if (searchable && !focus) window.requestAnimationFrame(() => searchRef.current?.focus());
     if (focus) {
       window.requestAnimationFrame(() => {
         const options = categoryOptions();
-        options[focus === "last" ? options.length - 1 : selectedIndex]?.focus();
+        options[focus === "last" ? options.length - 1 : searchable ? fullIndex : selectedIndex]?.focus();
       });
     }
   }
@@ -398,7 +418,8 @@ export function CategoryPicker({
   function beginCreate() {
     if (!onCreateCategory || isCreateBusy) return;
     setIsCreating(true);
-    setCreateName("");
+    // Create starts from what was searched for.
+    setCreateName(searchable ? query.trim() : "");
     setCreateColor(null);
     setIsColorMenuOpen(false);
     setCreateError(null);
@@ -565,6 +586,29 @@ export function CategoryPicker({
             size={20}
           />
         </button>
+      ) : variant === "more" ? (
+        <button
+          aria-controls={menuId}
+          aria-expanded={open}
+          aria-haspopup={isCreating ? "dialog" : "listbox"}
+          aria-label={`All activities, ${categories.length}`}
+          className="df-rchip df-rchip--more"
+          disabled={disabled}
+          id={triggerId}
+          onClick={() => {
+            if (open) {
+              if (!isCreateBusy) closePicker(false);
+              return;
+            }
+            openPicker();
+          }}
+          onKeyDown={handleTriggerKeyDown}
+          ref={assignTrigger}
+          type="button"
+        >
+          All activities
+          <span aria-hidden="true" className="df-tnum">{categories.length}</span>
+        </button>
       ) : (
       <button
         aria-controls={menuId}
@@ -601,7 +645,7 @@ export function CategoryPicker({
       {mountMenu(<div
         aria-hidden={!open}
         className={`${menuClass} category-picker-menu${portal ? " is-portalled time-entry-quick-editor-nested-surface" : ""}`}
-        hidden={variant === "quick" && !open}
+        hidden={(variant === "quick" || variant === "more") && !open}
         id={menuId}
         inert={!open}
         onBlur={closeOnFocusLeave}
@@ -687,9 +731,42 @@ export function CategoryPicker({
             </div>
           </div>
         ) : (
+          <>
+          {searchable ? (
+            <input
+              aria-controls={`${menuId}-options`}
+              aria-label="Search activities"
+              autoComplete="off"
+              className="ui-control category-picker-search"
+              onChange={(event) => {
+                setQuery(event.target.value);
+                setActiveIndex(0);
+              }}
+              onKeyDown={(event) => {
+                // Keys that drive an input method's candidates stay with the input method.
+                // (Escape that cancels a candidate must not reach the menu's close handler either.)
+                if (event.nativeEvent.isComposing || event.keyCode === 229) {
+                  event.stopPropagation();
+                  return;
+                }
+                if (event.key === "ArrowDown") {
+                  event.preventDefault();
+                  categoryOptions()[listedCategories.length ? 1 : 0]?.focus();
+                } else if (event.key === "Enter" && !event.nativeEvent.isComposing) {
+                  event.preventDefault();
+                  if (listedCategories.length && query.trim()) chooseCategory(listedCategories[0].id);
+                }
+              }}
+              placeholder="Search activities"
+              ref={searchRef}
+              type="search"
+              value={query}
+            />
+          ) : null}
           <div
             aria-label="Activities"
             className="category-picker-options"
+            id={`${menuId}-options`}
             onKeyDown={handleOptionsKeyDown}
             ref={optionsRef}
             role="listbox"
@@ -702,7 +779,7 @@ export function CategoryPicker({
               selected={!selectedId}
               variant={menuVariant}
             />
-            {categories.map((category, index) => (
+            {listedCategories.map((category, index) => (
               <CategoryOption
                 active={activeIndex === index + 1}
                 category={category}
@@ -726,10 +803,11 @@ export function CategoryPicker({
                 type="button"
               >
                 <Plus aria-hidden="true" size={15} />
-                <span>Create new activity</span>
+                <span>{searchable && query.trim() ? `Create “${query.trim()}”` : "Create new activity"}</span>
               </button>
             ) : null}
           </div>
+          </>
         )}
       </div>)}
       {isColorMenuOpen && colorPortalTarget ? createPortal(

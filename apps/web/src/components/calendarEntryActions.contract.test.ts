@@ -54,8 +54,10 @@ describe("shared web time-entry quick editor", () => {
   });
 
   it("uses one fixed feedback plane with danger discard copy and equal action sizing", () => {
-    expect(quick).toContain('const editorHeading = props.mode === "entry" ? "Edit Entry" : "Calendar Entry";');
-    expect(quick).toContain("<strong>{editorHeading}</strong>");
+    // Blocks editor head (UIA-201): "Edit block" / "Running block" / "New block" under an eyebrow.
+    expect(quick).toContain('const editorHeading = props.mode === "entry" ? (isRunning ? "Running block" : "Edit block") : "New block";');
+    expect(quick).toContain("<h2>{editorHeading}</h2>");
+    expect(quick).toContain('<p className="df-ed-eyebrow">{editorEyebrow}</p>');
     expect(quick).not.toContain('className="calendar-compact-editor-kicker"');
     expect(quick).toContain('data-feedback-mode={feedbackMode}');
     expect(quick).toContain("Discard changes?");
@@ -96,6 +98,24 @@ describe("shared web time-entry quick editor", () => {
     expect(entries).toContain('continueEntry(editingEntry, "editor")');
     expect(entries).toContain("onDeleteEntries([entry])");
     expect(timeline).toContain("useTimelineDeleteUndo");
+  });
+
+  it("puts Start again and Delete (danger) in the head beside Close, and neutral selection in shared controls (UIA-201, UIA-205)", () => {
+    expect(quick).toMatch(/className="calendar-compact-editor-icons"[\s\S]*?glyph="rotate-ccw"[\s\S]*?className="calendar-compact-icon-action is-danger"[\s\S]*?glyph="trash-2"[\s\S]*?aria-label="Close editor"/);
+    expect(quick).not.toContain("df-ed-lead");
+    expect(quick).toContain('{entry ? "Save" : "Add block"}');
+    expect(quick).toContain("<ActivityChipGroup");
+    expect(quick).toContain('variant="more"');
+    expect(styles).toMatch(/\.calendar-compact-discard-confirm \{[^}]*color: var\(--danger-text\);/);
+    for (const selected of [
+      /\.ui-segmented-control button\[aria-pressed="true"\] \{([^}]*)\}/,
+      /\.dayframe-calendar-grid button\[aria-pressed="true"\] \{([^}]*)\}/,
+      /\.inline-tag-check\.is-selected \{([^}]*)\}/,
+      /\.swiss-category-option\.is-selected \{([^}]*)\}/,
+      /\.settings-workspace-switcher button\[aria-pressed="true"\] \{([^}]*)\}/
+    ]) {
+      expect(styles.match(selected)?.[1] ?? "missing").not.toMatch(/--accent/);
+    }
   });
 });
 

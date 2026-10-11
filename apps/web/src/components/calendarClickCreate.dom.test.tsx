@@ -60,7 +60,7 @@ describe("Calendar click-to-create DOM interactions", () => {
     const anchor = document.querySelector<HTMLElement>("[data-calendar-draft]");
     expect(anchor).not.toBeNull();
 
-    await userEvent.click(screen.getByRole("button", { name: "Save" }));
+    await userEvent.click(screen.getByRole("button", { name: "Add block" }));
     await waitFor(() => expect(editor.getAttribute("aria-busy")).toBe("true"));
 
     anchorIsOffscreen = true;
@@ -111,7 +111,7 @@ describe("Calendar click-to-create DOM interactions", () => {
     await openCreateAt(8 * 60);
     const description = screen.getByLabelText("Description");
     const tags = screen.getByRole("button", { name: "Add or filter tags" });
-    const category = screen.getByRole("button", { name: /No activity/ });
+    const category = screen.getByRole("button", { name: /All activities/ });
     await waitFor(() => expect(document.activeElement).toBe(description));
 
     await userEvent.tab();
@@ -141,7 +141,7 @@ describe("Calendar click-to-create DOM interactions", () => {
     const search = within(picker).getByRole("textbox", { name: "Add or filter tags" });
     await userEvent.type(search, "New tag");
     await userEvent.click(within(picker).getByRole("button", { name: /Create “New tag”/ }));
-    await userEvent.click(screen.getByRole("button", { name: "Save" }));
+    await userEvent.click(screen.getByRole("button", { name: "Add block" }));
 
     await waitFor(() => expect(runtime.createManualEntry).toHaveBeenCalledOnce());
     expect(runtime.createManualEntry).toHaveBeenCalledWith(expect.objectContaining({ tagNames: ["New tag"] }));
@@ -152,7 +152,7 @@ describe("Calendar click-to-create DOM interactions", () => {
     const block = document.querySelector<HTMLButtonElement>(".calendar-entry-primary") as HTMLButtonElement;
     await userEvent.click(block);
     const editor = await screen.findByTestId("calendar-compact-editor");
-    const description = screen.getByLabelText("Time entry description") as HTMLInputElement;
+    const description = screen.getByLabelText("Description") as HTMLInputElement;
     await userEvent.clear(description);
     await userEvent.type(description, "Dirty draft");
 
@@ -188,7 +188,7 @@ describe("Calendar click-to-create DOM interactions", () => {
     const initialHeight = Number.parseFloat(anchor.style.height);
 
     fireEvent.change(screen.getByLabelText("Start time"), { target: { value: "11:00" } });
-    fireEvent.change(screen.getByLabelText("Finish time"), { target: { value: "11:30" } });
+    fireEvent.change(screen.getByLabelText("End time"), { target: { value: "11:30" } });
     await waitFor(() => expect(Number.parseFloat(anchor.style.top)).toBe(11 * 64));
     await waitFor(() => expect(Number.parseFloat(editor.style.top)).toBeGreaterThan(initialEditorTop));
     expect(Number.parseFloat(anchor.style.height)).toBe(initialHeight);
