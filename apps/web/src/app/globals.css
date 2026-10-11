@@ -13291,8 +13291,26 @@ dialog.ui-dialog.df-rf-dialog {
   gap: 6px;
 }
 
+.df-ed-chips {
+  min-width: 0;
+  max-width: 100%;
+}
+
 .df-ed-chips .df-rchips {
   display: contents;
+}
+
+/* A long activity name wraps inside its chip instead of widening the editor (phone widths). */
+.df-ed-chips .df-rchip {
+  max-width: 100%;
+  min-width: 0;
+  flex: 0 1 auto;
+  overflow-wrap: anywhere;
+  text-align: start;
+}
+
+.df-ed-chips .df-rchip > i {
+  flex: none;
 }
 
 .df-rchip--more {
