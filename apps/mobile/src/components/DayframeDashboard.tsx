@@ -52,8 +52,8 @@ import { applySavedActivity, subscribeSavedActivity } from "@/lib/settingsActivi
 import { layoutQuickStartMosaic, rankQuickStartActivities, weeklySecondsByActivity } from "@/lib/quickStartMosaic";
 import { TodayReviewPresentationProvider } from "./today/TodayReviewPresentationContext";
 import { currentTimeZone, localDayKey, reviewOwner, windowScopeFor } from "./today/useTodayReviewPresentation";
-import { BOOTSTRAP_REVIEW_ITEM_CAP, calendarReviewItems, scopedOpenReviewItems } from "@/lib/calendarScopedReview";
-import { readReviewPresentationSnapshot } from "@/lib/reviewSyncStore";
+import { bootstrapReviewListMayBeIncomplete, calendarReviewItems, scopedOpenReviewItems } from "@/lib/calendarScopedReview";
+import { readReviewPresentationSnapshot, subscribeReviewSync } from "@/lib/reviewSyncStore";
 import { AccountAvatarButton } from "./today/AccountAvatarButton";
 import { TodayGoalFrame } from "./today/TodayGoalFrame";
 import { formatLiveClock } from "./today/todayBlocksLayout";
@@ -1611,28 +1611,41 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
   // suggestions from Today's cached scoped Review window (60 days, its own completeness), so a
   // burst of newer suggestions never hides a recent day's Review block.
   const [scopedReviewItems, setScopedReviewItems] = useState<MobileReviewItem[]>([]);
-  const reviewListAtCap = (data?.reviewItems?.length ?? 0) >= BOOTSTRAP_REVIEW_ITEM_CAP;
+  const reviewListAtCap = bootstrapReviewListMayBeIncomplete(data);
+  const scopedOwner = useMemo(() => reviewOwner(data), [data]);
+  const scopedOwnerKey = scopedOwner ? `${scopedOwner.backendId}:${scopedOwner.workspaceId}:${scopedOwner.userId}` : null;
+  const scopedDayKey = localDayKey(minuteNow);
   useEffect(() => {
-    if (!reviewListAtCap) {
+    if (!reviewListAtCap || !scopedOwner) {
       setScopedReviewItems([]);
       return;
     }
-    const owner = reviewOwner(data);
     const timeZone = currentTimeZone();
-    if (!owner || !timeZone) return;
+    if (!timeZone) return;
     let current = true;
-    readReviewPresentationSnapshot({ owner, response: { scope: windowScopeFor(localDayKey(Date.now()), timeZone) } })
-      .then((snapshot) => {
-        if (current) setScopedReviewItems(scopedOpenReviewItems(snapshot));
-      })
-      .catch(() => undefined);
+    let sequence = 0;
+    // Re-read whenever Review's cache or local decisions change (Today caching a newer window, a
+    // decision made here), always for today's window scope.
+    const read = () => {
+      const mine = ++sequence;
+      readReviewPresentationSnapshot({ owner: scopedOwner, response: { scope: windowScopeFor(scopedDayKey, timeZone) } })
+        .then((snapshot) => {
+          if (current && mine === sequence) setScopedReviewItems(scopedOpenReviewItems(snapshot));
+        })
+        .catch(() => undefined);
+    };
+    read();
+    const unsubscribe = subscribeReviewSync(read);
     return () => {
       current = false;
+      unsubscribe();
     };
-  }, [data, reviewListAtCap]);
+    // scopedOwner is keyed by scopedOwnerKey.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [reviewListAtCap, scopedOwnerKey, scopedDayKey]);
   const calendarData = useMemo(
     () => data && reviewListAtCap
-      ? { ...data, reviewItems: calendarReviewItems(data.reviewItems ?? [], scopedReviewItems) }
+      ? { ...data, reviewItems: calendarReviewItems(data.reviewItems ?? [], scopedReviewItems, true) }
       : data,
     [data, reviewListAtCap, scopedReviewItems]
   );
