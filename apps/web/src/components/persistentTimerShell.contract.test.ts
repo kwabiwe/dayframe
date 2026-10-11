@@ -93,7 +93,7 @@ describe("persistent timer shell contract", () => {
   });
 
   it("keeps the normal list to ordinary tracking fields", () => {
-    expect(entries).toContain(">Task<");
+    expect(entries).toContain(">Block<");
     expect(entries).not.toContain(">Source<");
     expect(entries).not.toContain(">Confidence<");
     expect(entries).not.toContain(">Review<");

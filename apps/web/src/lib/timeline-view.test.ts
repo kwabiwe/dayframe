@@ -62,14 +62,14 @@ describe("Timeline URL state", () => {
     });
   });
 
-  it("normalizes Timesheet to Week", () => {
+  it("opens an old Timesheet link as the Calendar, keeping the date and scope", () => {
     expect(timelineStateFromSearchParams(
       new URLSearchParams("date=2026-07-22&scope=day&view=timesheet"),
       { now }
     )).toEqual({
       date: "2026-07-22",
-      scope: "week",
-      view: "timesheet"
+      scope: "day",
+      view: "calendar"
     });
   });
 
@@ -95,16 +95,6 @@ describe("Timeline URL state", () => {
       view: "calendar"
     });
   });
-
-  it("normalizes Timesheet overrides in the serializer", () => {
-    expect(timelineHref("", {
-      date: "2026-07-23",
-      scope: "day",
-      view: "calendar"
-    }, { view: "timesheet" })).toBe(
-      "/timeline?date=2026-07-23&scope=week&view=timesheet"
-    );
-  });
 });
 
 describe("Timeline view and scope preference", () => {
@@ -123,7 +113,7 @@ describe("Timeline view and scope preference", () => {
       scope: "day",
       view: "list"
     });
-    expect(updateTimelinePreference(preference, { scope: "day", view: "list" })).toEqual(preference);
+    expect(updateTimelinePreference({ scope: "day", view: "list" })).toEqual(preference);
   });
 
   it("lets a valid explicit URL override the saved view and scope", () => {
@@ -137,32 +127,12 @@ describe("Timeline view and scope preference", () => {
     });
   });
 
-  it("keeps the non-Timesheet scope through a Timesheet visit", () => {
-    const dayPreference = updateTimelinePreference(DEFAULT_TIMELINE_PREFERENCE, {
-      scope: "day",
-      view: "calendar"
-    });
-    const afterTimesheet = updateTimelinePreference(dayPreference, {
-      scope: "week",
-      view: "timesheet"
-    });
-    expect(afterTimesheet).toEqual({ lastView: "timesheet", preferredScope: "day" });
-    expect(timelineStateFromSearchParams(new URLSearchParams("view=list"), {
-      now,
-      preference: afterTimesheet
-    })).toEqual({ date: "2026-07-23", scope: "day", view: "list" });
-  });
 
-  it("restores Timesheet in Week while retaining the previous non-Timesheet scope", () => {
-    const preference = { lastView: "timesheet" as const, preferredScope: "day" as const };
-    expect(timelineStateFromSearchParams(new URLSearchParams(), { now, preference })).toEqual({
+  it("ignores a saved Timesheet preference (the view was removed)", () => {
+    expect(timelinePreferenceFromCookieValue("timesheet:day")).toBeNull();
+    expect(timelineStateFromSearchParams(new URLSearchParams(), { now, preference: timelinePreferenceFromCookieValue("timesheet:day") })).toEqual({
       date: "2026-07-23",
       scope: "week",
-      view: "timesheet"
-    });
-    expect(timelineStateFromSearchParams(new URLSearchParams("view=calendar"), { now, preference })).toEqual({
-      date: "2026-07-23",
-      scope: "day",
       view: "calendar"
     });
   });

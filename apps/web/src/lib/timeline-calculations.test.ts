@@ -1,10 +1,8 @@
 import { describe, expect, it } from "vitest";
 import type { TimeEntryRow } from "./queries";
 import {
-  buildTimelineTimesheetRows,
   clipTimelineEntries,
   mergeTimelineEntries,
-  timelineDailyTotals,
   timelineEntryDisplayInterval
 } from "./timeline-calculations";
 
@@ -37,15 +35,6 @@ describe("Timeline period calculations", () => {
     expect(mergeTimelineEntries([cached], [current])).toEqual([current]);
   });
 
-  it("splits a cross-midnight entry across both Timesheet days", () => {
-    const rows = buildTimelineTimesheetRows([
-      entry("crossing", localDate(2026, 7, 22, 23, 30), localDate(2026, 7, 23, 1, 30))
-    ], weekDays, capturedNow);
-
-    expect(rows[0].days).toEqual([0, 0, 1800, 5400, 0, 0, 0]);
-    expect(rows[0].total).toBe(7200);
-    expect(timelineDailyTotals(rows, 7)).toEqual([0, 0, 1800, 5400, 0, 0, 0]);
-  });
 
   it("clips List display times without changing the editable entry interval", () => {
     const crossing = entry(
@@ -74,23 +63,7 @@ describe("Timeline period calculations", () => {
     expect(interval.stoppedAt).toBe(localDate(2026, 7, 23).toISOString());
   });
 
-  it("uses the same captured current time for running row and daily totals", () => {
-    const rows = buildTimelineTimesheetRows([
-      entry("running", localDate(2026, 7, 23, 16), null)
-    ], weekDays, capturedNow);
-    expect(rows[0].total).toBe(7200);
-    expect(timelineDailyTotals(rows, 7)[3]).toBe(7200);
-  });
 
-  it("keeps category totals internally consistent", () => {
-    const rows = buildTimelineTimesheetRows([
-      entry("one", localDate(2026, 7, 23, 9), localDate(2026, 7, 23, 10)),
-      entry("two", localDate(2026, 7, 24, 9), localDate(2026, 7, 24, 10))
-    ], weekDays, capturedNow);
-    const dailyTotals = timelineDailyTotals(rows, 7);
-    expect(rows[0].total).toBe(7200);
-    expect(dailyTotals.reduce((sum, seconds) => sum + seconds, 0)).toBe(rows[0].total);
-  });
 });
 
 function entry(id: string, startedAt: Date, stoppedAt: Date | null): TimeEntryRow {

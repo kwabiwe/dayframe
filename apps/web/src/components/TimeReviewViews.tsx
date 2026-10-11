@@ -4,7 +4,7 @@ import type { CSSProperties, PointerEvent as ReactPointerEvent, ReactNode, UIEve
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useTransition } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { CalendarDays, ChevronLeft, ChevronRight, List, Play, Table2 } from "lucide-react";
+import { CalendarDays, ChevronLeft, ChevronRight, List, Play } from "lucide-react";
 import { analyzeTimeIntervals, calendarBlockContinuationEdges } from "@dayframe/shared";
 import { useAppShellRuntime, useRuntimePageData } from "@/components/AppShellRuntime";
 import { CalendarEntryCompactEditor } from "@/components/CalendarEntryCompactEditor";
@@ -15,12 +15,7 @@ import { EntriesTable } from "@/components/EntriesTable";
 import { useTimelineDeleteUndo } from "@/components/useTimelineDeleteUndo";
 import { IconButton, SegmentedControl } from "@/components/ui/Primitives";
 import { clientFetch } from "@/lib/client-auth-fetch";
-import {
-  timeEntryAccentColor,
-  timeEntryCategoryColor,
-  timeEntryCategoryLabel,
-  timeEntryTitle
-} from "@/lib/display";
+import { timeEntryAccentColor, timeEntryTitle } from "@/lib/display";
 import { blockStyle as activityBlockStyle } from "@/lib/block-style";
 import type { BootstrapData, CategoryRow, PlaceRow, ReviewItemRow, TimeEntryRow } from "@/lib/queries";
 import { pendingReviewSpans } from "@/lib/today-view";
@@ -45,10 +40,8 @@ import {
   type TimeBlockLane
 } from "@/lib/time-block-display";
 import {
-  buildTimelineTimesheetRows,
   clipTimelineEntries,
-  mergeTimelineEntries,
-  timelineDailyTotals
+  mergeTimelineEntries
 } from "@/lib/timeline-calculations";
 import { entryOverlapSeconds } from "@/lib/time-entry-overlap";
 import {
@@ -93,8 +86,7 @@ type CalendarHoursMode = "fullDay";
 
 const viewItems: Array<{ id: TimelineView; label: string; icon: ReactNode }> = [
   { id: "calendar", label: "Calendar", icon: <CalendarDays size={16} /> },
-  { id: "list", label: "List", icon: <List size={16} /> },
-  { id: "timesheet", label: "Timesheet", icon: <Table2 size={16} /> }
+  { id: "list", label: "List", icon: <List size={16} /> }
 ];
 
 const scopeItems: Array<{ id: TimelineScope; label: string }> = [
@@ -204,8 +196,7 @@ export function TimeReviewViews({
   // Calendar starts unset so CalendarReview can open near now; later visits restore where it was left.
   const scrollPositionsRef = useRef<Record<TimelineView, TimelineScrollPosition | null>>({
     calendar: null,
-    list: { left: 0, top: 0 },
-    timesheet: { left: 0, top: 0 }
+    list: { left: 0, top: 0 }
   });
   const activeScrollContainerRef = useRef<HTMLDivElement | null>(null);
   const timelineStateRef = useRef(state);
@@ -230,7 +221,7 @@ export function TimeReviewViews({
   }, []);
 
   const persistPreference = useCallback((nextState: Pick<TimelineState, "scope" | "view">) => {
-    const nextPreference = updateTimelinePreference(preferenceRef.current, nextState);
+    const nextPreference = updateTimelinePreference(nextState);
     preferenceRef.current = nextPreference;
     document.cookie = `${TIMELINE_PREFERENCE_COOKIE}=${timelinePreferenceCookieValue(nextPreference)}; Path=/; Max-Age=31536000; SameSite=Lax`;
   }, []);
@@ -337,13 +328,12 @@ export function TimeReviewViews({
     if (isDateLoading) return;
     navigate({
       view,
-      scope: view === "timesheet" ? "week" : preferenceRef.current?.preferredScope ?? state.scope
+      scope: preferenceRef.current?.preferredScope ?? state.scope
     });
   }
 
   function updateScope(scope: TimelineScope) {
     if (isDateLoading) return;
-    if (state.view === "timesheet" && scope === "day") return;
     navigate({ scope });
   }
 
@@ -475,7 +465,7 @@ export function TimeReviewViews({
             options={scopeItems.map((item) => ({
               value: item.id,
               label: item.label,
-              disabled: isDateLoading || (state.view === "timesheet" && item.id === "day")
+              disabled: isDateLoading
             }))}
             value={state.scope}
           />
@@ -526,15 +516,6 @@ export function TimeReviewViews({
             onScroll={(event) => rememberScrollPosition("list", event)}
             scrollContainerRef={registerScrollContainer}
             tags={data.tags}
-          />
-        ) : null}
-        {state.view === "timesheet" ? (
-          <TimesheetView
-            capturedNow={capturedNow}
-            entries={visibleWeekEntries}
-            onScroll={(event) => rememberScrollPosition("timesheet", event)}
-            scrollContainerRef={registerScrollContainer}
-            weekDays={ranges.weekDays}
           />
         ) : null}
       </div>
@@ -1579,98 +1560,6 @@ function CalendarBlockPrimaryLine({
         </span>
       ) : null}
     </span>
-  );
-}
-
-function TimesheetView({
-  capturedNow,
-  entries,
-  onScroll,
-  scrollContainerRef,
-  weekDays
-}: {
-  capturedNow: Date;
-  entries: TimeEntryRow[];
-  onScroll: (event: UIEvent<HTMLDivElement>) => void;
-  scrollContainerRef: (element: HTMLDivElement | null) => void;
-  weekDays: Date[];
-}) {
-  const rows = buildTimelineTimesheetRows(entries, weekDays, capturedNow);
-  const dailyTotals = timelineDailyTotals(rows, weekDays.length);
-  const dailyCoverage = weekDays.map((day) => analyzeTimeIntervals(
-    entries.map((entry) => ({
-      id: entry.id,
-      startedAt: entry.startedAt,
-      stoppedAt: entry.stoppedAt
-    })),
-    {
-      range: { start: day, end: addDays(day, 1) },
-      now: capturedNow
-    }
-  ));
-  return (
-    <section className="timeline-timesheet-workspace">
-      <div className="timeline-timesheet-scroll" onScroll={onScroll} ref={scrollContainerRef}>
-      <table className="timeline-timesheet-table">
-        <thead className="bg-[var(--surface-inset)] text-left text-xs text-[var(--muted)]">
-          <tr>
-            <th className="timeline-timesheet-activity-cell">Activity</th>
-            {weekDays.map((day) => (
-              <th key={day.toISOString()}>
-                {formatDate(day)}
-              </th>
-            ))}
-            <th>Total</th>
-          </tr>
-        </thead>
-        <tbody>
-          {rows.length === 0 ? (
-            <tr>
-              <td colSpan={9} className="px-4 py-6 text-sm text-[var(--muted)]">No time entries for this week.</td>
-            </tr>
-          ) : null}
-          {rows.map((row) => (
-            <tr key={row.id} className="border-b border-[var(--line)] last:border-b-0">
-              <td className="timeline-timesheet-activity-cell">
-                <span className="flex items-center gap-2 font-semibold">
-                  <span
-                    className={`category-data-marker${row.categoryName ? "" : " is-uncategorized"}`}
-                    style={{ backgroundColor: timeEntryCategoryColor(row) }}
-                  />
-                  {timeEntryCategoryLabel(row)}
-                </span>
-                <span className="mt-1 block text-xs text-[var(--muted)]">
-                  {row.categoryName ? "Activity total" : "Time with no activity"}
-                </span>
-              </td>
-              {row.days.map((seconds, index) => (
-                <td key={`${row.id}-${index}`} className="tabular">
-                  {seconds > 0 ? formatDuration(seconds) : "-"}
-                </td>
-              ))}
-              <td className="tabular timeline-timesheet-total">{formatDuration(row.total)}</td>
-            </tr>
-          ))}
-          <tr className="bg-[var(--surface-inset)] font-semibold">
-            <td className="timeline-timesheet-activity-cell">Daily total</td>
-            {dailyTotals.map((seconds, index) => (
-              <td key={weekDays[index].toISOString()} className="tabular">
-                {formatDuration(seconds)}
-                {dailyCoverage[index]?.hasOverlap ? (
-                  <span className="mt-1 block text-xs font-normal text-[var(--warning-text)]">
-                    {formatDuration(dailyCoverage[index].timeCoveredSeconds)} covered
-                  </span>
-                ) : null}
-              </td>
-            ))}
-            <td className="tabular timeline-timesheet-total">
-              {formatDuration(dailyTotals.reduce((sum, seconds) => sum + seconds, 0))}
-            </td>
-          </tr>
-        </tbody>
-      </table>
-      </div>
-    </section>
   );
 }
 

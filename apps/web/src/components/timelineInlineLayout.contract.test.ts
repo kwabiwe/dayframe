@@ -17,7 +17,7 @@ describe("Timeline inline row layout contract", () => {
     expect(styles).toMatch(/\.timeline-inline-description\.is-editing \{[^}]*width: auto;[^}]*flex: 1 1 auto;/s);
     expect(styles).toMatch(/\.timeline-task-cell \{[^}]*--timeline-task-primary-height: var\(--web-control-height\);[^}]*min-height: var\(--timeline-task-primary-height\);[^}]*align-items: start;/s);
     expect(styles).toMatch(/\.timeline-group-count \{[^}]*height: 28px;[^}]*margin-top: calc\(\(var\(--timeline-task-primary-height\) - 28px\) \/ 2\);[^}]*align-self: start;/s);
-    expect(styles).toMatch(/\.timeline-task-category-dot \{[^}]*height: 12px;[^}]*margin: calc\(\(var\(--timeline-task-primary-height\) - 12px\) \/ 2\) 0 0;[^}]*align-self: start;/s);
+    expect(styles).toMatch(/\.timeline-task-block \{[^}]*height: 30px;[^}]*margin-top: calc\(\(var\(--timeline-task-primary-height\) - 30px\) \/ 2\);[^}]*align-self: start;/s);
     expect(styles).toMatch(/\.timeline-task-primary-line \{[^}]*display: flex;[^}]*height: var\(--timeline-task-primary-height\);[^}]*align-items: baseline;[^}]*gap: 8px;/s);
     expect(styles).toMatch(/\.timeline-task-primary-line \.timeline-task-meta,[\s\S]*\.timeline-task-primary-line \.tag-metadata \{[^}]*height: auto;[^}]*min-height: 0;[^}]*align-items: baseline;[^}]*line-height: var\(--timeline-task-text-line-height\);/s);
     expect(styles).toMatch(/\.timeline-inline-description-input \{[^}]*height: var\(--timeline-task-primary-height\);[^}]*padding: calc\(\(var\(--timeline-task-primary-height\) - var\(--timeline-task-text-line-height\)\) \/ 2\) 0;[^}]*line-height: var\(--timeline-task-text-line-height\);/s);
