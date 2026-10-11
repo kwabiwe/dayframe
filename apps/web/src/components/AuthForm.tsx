@@ -74,23 +74,23 @@ export function AuthForm({ mode }: { mode: AuthMode }) {
 
   if (status === "opening") {
     return (
-      <section className="industrial-panel auth-card mx-auto w-full max-w-[440px]">
+      <section className="auth-card mx-auto w-full max-w-[440px]">
         <AppLoadingState embedded message="Opening Dayframe…" />
       </section>
     );
   }
 
   return (
-    <section className="industrial-panel auth-card mx-auto w-full max-w-[440px]">
-      <div className="border-b border-[var(--line)] px-5 py-4">
-        <h1 className="text-2xl font-semibold">{isSignup ? "Create account" : "Log in"}</h1>
-        <p className="mt-2 text-sm leading-6 text-[var(--muted)]">
+    <section className="auth-card mx-auto w-full max-w-[440px]">
+      <div className="auth-card-head">
+        <h1>{isSignup ? "Create account" : "Log in"}</h1>
+        <p>
           {isSignup
             ? "Create your Dayframe account and personal workspace."
             : "Use your Dayframe account to open your workspace."}
         </p>
       </div>
-      <form className="grid gap-4 p-5" onSubmit={submit} aria-busy={status === "submitting"}>
+      <form className="auth-card-form" onSubmit={submit} aria-busy={status === "submitting"}>
         {isSignup ? (
           <>
             <TextField
@@ -152,13 +152,13 @@ export function AuthForm({ mode }: { mode: AuthMode }) {
         </Field>
 
         {error ? (
-          <p className="border border-[var(--danger)] bg-[var(--surface-inset)] px-3 py-2 text-sm text-[var(--danger-text)]" role="alert">
+          <p className="auth-message is-error" role="alert">
             {error}
           </p>
         ) : null}
 
         {notice ? (
-          <p className="border border-[var(--accent)] bg-[var(--surface-inset)] px-3 py-2 text-sm text-[var(--accent-text)]" role="status">
+          <p className="auth-message" role="status">
             {notice}
           </p>
         ) : null}
@@ -177,9 +177,9 @@ export function AuthForm({ mode }: { mode: AuthMode }) {
               : isSignup ? "Create account" : "Log in"}
         </Button>
 
-        <p className="text-sm text-[var(--muted)]">
+        <p className="auth-switch">
           {isSignup ? "Already have an account?" : "New to Dayframe?"}{" "}
-          <Link className="font-semibold text-[var(--accent-text)]" href={isSignup ? "/login" : "/signup"}>
+          <Link href={isSignup ? "/login" : "/signup"}>
             {isSignup ? "Log in" : "Create one"}
           </Link>
         </p>

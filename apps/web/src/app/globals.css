@@ -3285,10 +3285,79 @@ kbd {
   font-weight: 700;
 }
 
+/*
+ * Sign in and sign up in Blocks (parity step 16a): the logo, one card with a Bricolage title,
+ * filled fields (neutral focus border), the coral primary button and a plain switch link.
+ */
 .auth-card {
-  border-radius: 20px;
-  background: var(--surface-raised);
-  box-shadow: var(--shadow-floating);
+  border-radius: 22px;
+  background: var(--surface);
+  box-shadow: inset 0 0 0 1px var(--border), var(--shadow-soft);
+}
+
+.auth-card-head {
+  padding: 24px 24px 4px;
+}
+
+.auth-card-head h1 {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: 30px;
+  font-weight: 750;
+  letter-spacing: -0.03em;
+}
+
+.auth-card-head p {
+  margin: 6px 0 0;
+  color: var(--text-secondary);
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+.auth-card-form {
+  display: grid;
+  gap: 14px;
+  padding: 18px 24px 24px;
+}
+
+.auth-card .ui-control {
+  min-height: 48px;
+  border-color: transparent;
+  border-radius: 12px;
+  background: var(--surface-muted);
+}
+
+.auth-card .auth-password-field {
+  border-color: transparent;
+  border-radius: 12px;
+  background: var(--surface-muted);
+}
+
+.auth-card form > button[type="submit"] {
+  min-height: 48px;
+  border-radius: 999px;
+  font-size: 15px;
+  font-weight: 750;
+}
+
+.auth-message {
+  margin: 0;
+  border-radius: 12px;
+  padding: 10px 12px;
+  background: var(--surface-muted);
+  color: var(--text-primary);
+  font-size: 14px;
+}
+
+.auth-message.is-error {
+  background: color-mix(in oklab, var(--danger) 12%, var(--surface));
+  color: var(--danger-text);
+}
+
+.auth-switch {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: 14px;
 }
 
 .auth-page {
@@ -3297,10 +3366,7 @@ kbd {
   grid-template-rows: auto 1fr;
   gap: 24px;
   place-items: center;
-  background:
-    radial-gradient(circle at 78% 12%, color-mix(in srgb, var(--info) 12%, transparent), transparent 32%),
-    radial-gradient(circle at 16% 80%, color-mix(in srgb, var(--accent) 9%, transparent), transparent 36%),
-    var(--background);
+  background: var(--background);
 }
 
 .auth-home-link {
@@ -3321,7 +3387,10 @@ kbd {
 }
 
 .auth-card form > p a {
-  color: var(--accent-text);
+  color: var(--text-primary);
+  font-weight: 700;
+  text-decoration: underline;
+  text-underline-offset: 3px;
 }
 
 .auth-password-field {
