@@ -13341,7 +13341,7 @@ dialog.ui-dialog.df-rf-dialog {
 }
 
 /* The editor's chips are 44 px wherever touch is the input, whatever the viewport width. */
-@media (hover: none), (pointer: coarse) {
+@media (any-pointer: coarse) {
   .df-ed-chips .df-rchip {
     min-height: 44px;
   }

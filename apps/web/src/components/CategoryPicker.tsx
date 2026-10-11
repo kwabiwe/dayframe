@@ -43,7 +43,7 @@ export function CategoryPicker({
   onOpenChange,
   onSelect,
   open,
-  portal = false,
+  portal: portalProp = false,
   selectedId,
   triggerId,
   triggerRef: externalTriggerRef,
@@ -72,6 +72,9 @@ export function CategoryPicker({
   variant: "timer" | "quick" | "block" | "more";
 }) {
   const menuVariant = variant === "quick" || variant === "more" ? "quick" : "timer";
+  // The editor's "All activities" menu always floats over the page (a portal) at its own width, so
+  // it is never as narrow as its chip, with or without Create.
+  const portal = portalProp || variant === "more";
   const rootRef = useRef<HTMLDivElement | null>(null);
   const localTriggerRef = useRef<HTMLButtonElement | null>(null);
   const menuRef = useRef<HTMLDivElement | null>(null);
@@ -307,14 +310,16 @@ export function CategoryPicker({
     setCreateError(null);
     setPortalPosition(null);
     setColorMenuPosition(null);
-    setActiveIndex(focus === "last" ? optionValues.length - 1 : selectedIndex);
+    // Reopening clears the search, so the selected activity is found in the full list.
+    const fullIndex = Math.max(0, ["", ...categories.map((category) => category.id)].indexOf(selectedId));
+    setActiveIndex(focus === "last" ? optionValues.length - 1 : searchable ? fullIndex : selectedIndex);
     setQuery("");
     onOpenChange(true);
     if (searchable && !focus) window.requestAnimationFrame(() => searchRef.current?.focus());
     if (focus) {
       window.requestAnimationFrame(() => {
         const options = categoryOptions();
-        options[focus === "last" ? options.length - 1 : selectedIndex]?.focus();
+        options[focus === "last" ? options.length - 1 : searchable ? fullIndex : selectedIndex]?.focus();
       });
     }
   }
@@ -738,6 +743,8 @@ export function CategoryPicker({
                 setActiveIndex(0);
               }}
               onKeyDown={(event) => {
+                // Keys that drive an input method's candidates stay with the input method.
+                if (event.nativeEvent.isComposing || event.keyCode === 229) return;
                 if (event.key === "ArrowDown") {
                   event.preventDefault();
                   categoryOptions()[listedCategories.length ? 1 : 0]?.focus();

@@ -369,6 +369,24 @@ describe("TimeEntryQuickEditorModal", () => {
     expect(kept.getAttribute("aria-checked")).toBe("false");
     expect(document.activeElement).toBe(kept);
   });
+
+  it("leaves input-method keys to the input method and reopens All activities on the chosen one (Codex r2 on #305)", async () => {
+    const names = ["Alpha", "Bravo", "Charlie", "Delta", "Echo", "Foxtrot", "Golf", "Hotel", "Ninth"];
+    renderModal({ categories: names.map((name) => ({ id: name.toLowerCase(), name, color: "mint", isPinned: false })) });
+    await screen.findByTestId("time-entry-quick-editor");
+    const trigger = screen.getByRole("button", { name: /All activities/ });
+    await userEvent.click(trigger);
+    const search = await screen.findByRole("searchbox", { name: "Search activities" });
+    search.focus();
+    fireEvent.keyDown(search, { key: "ArrowDown", keyCode: 229, isComposing: true });
+    expect(document.activeElement).toBe(search);
+
+    await userEvent.type(search, "nin{Enter}");
+    await screen.findByRole("radio", { name: "Ninth" });
+    trigger.focus();
+    fireEvent.keyDown(trigger, { key: "ArrowDown" });
+    await waitFor(() => expect(document.activeElement?.textContent).toContain("Ninth"));
+  });
 });
 
 function renderModal({
