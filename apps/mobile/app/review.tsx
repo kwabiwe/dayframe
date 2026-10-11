@@ -104,7 +104,7 @@ import {
   type ReviewMenuEvent
 } from "@/lib/review";
 import { mobileTextProps } from "@/lib/mobileTypography";
-import { BlocksNavHeader } from "@/components/BlocksNavHeader";
+import { BlocksNavHeader, usePreviousScreenLabel } from "@/components/BlocksNavHeader";
 import {
   cacheReviewPresentation,
   recordReviewPresentationRead,
@@ -289,6 +289,8 @@ export default function ReviewScreen() {
   ).current;
   const now = Date.now();
   const navigation = useNavigation<NativeStackNavigationProp<ReactNavigation.RootParamList>>();
+  // Review opens from Today and from Calendar; the back button names the screen it returns to.
+  const backLabel = usePreviousScreenLabel() ?? "Today";
   const peerEntries = useMemo(() => reviewPeerEntries(data), [data]);
   const overlapCounts = useMemo(() => prepareReviewOverlapCounts(data?.reviewItems ?? [], peerEntries, Date.now()), [data, peerEntries]);
   const recentLogAsActivityIds = useMemo(() => recentActivityIds(peerEntries), [peerEntries]);
@@ -2049,7 +2051,7 @@ export default function ReviewScreen() {
   return (
     <SafeAreaView style={styles.safeArea}>
       <BlocksNavHeader
-        backLabel="Today"
+        backLabel={backLabel}
         backTestID="review-deck-back"
         onBack={() => router.back()}
         title="Review"
@@ -2103,6 +2105,7 @@ export default function ReviewScreen() {
 
         {deckFinished ? (
           <ReviewDeckFinished
+            backLabel={backLabel}
             blocks={deckVisit.logged.map((block) => block.color)}
             copy={deckFinishedCopy(deckVisit.logged, deckVisit.decided)}
             celebrate={celebrateDeckFinish.current}

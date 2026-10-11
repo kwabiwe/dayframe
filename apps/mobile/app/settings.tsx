@@ -130,8 +130,8 @@ import {
   shouldShowSettingsRefreshSpinner
 } from "@/lib/settingsRefresh";
 import { clampSettingsScrollOffset, settingsScrollNeedsClamp } from "@/lib/settingsScroll";
-import { BlocksNavHeader } from "@/components/BlocksNavHeader";
-import { blocksNavOrigin, settingsBackLabel } from "@/lib/blocksNav";
+import { BlocksNavHeader, usePreviousScreenLabel } from "@/components/BlocksNavHeader";
+import { blocksNavOrigin, settingsBackLabel, settingsSectionTitle } from "@/lib/blocksNav";
 import { mobileTextProps } from "@/lib/mobileTypography";
 import { createGoalSaver, publishSavedTimeGoals, type TimeGoals } from "@/lib/settingsGoals";
 import Constants from "expo-constants";
@@ -755,7 +755,7 @@ export default function SettingsScreen() {
     ? motionFitnessPresentation(motionFitnessStatus, locationDiagnostics?.locationLearningEnabled === true)
     : null;
   const settingsTitle = settingsSectionTitle(settingsSection);
-  const backLabel = settingsBackLabel(settingsSection, blocksNavOrigin(params.from));
+  const backLabel = usePreviousScreenLabel() ?? settingsBackLabel(settingsSection, blocksNavOrigin(params.from));
   const categoryCount = data?.categories.length ?? 0;
   const workspaceLabel = data?.workspace?.name ?? "Default workspace";
   const pinnedCategoryCount = (data?.categories ?? []).filter((category) => category.isPinned).length;
@@ -2622,23 +2622,6 @@ function CloseGlyph({ color }: { color: string }) {
       <Path d="m7 7 10 10M17 7 7 17" stroke={color} strokeLinecap="round" strokeWidth={2} />
     </Svg>
   );
-}
-
-function settingsSectionTitle(section: SettingsSection) {
-  switch (section) {
-    case "profile":
-      return "Account";
-    case "categories":
-      return "Activities";
-    case "automations":
-      return "Location";
-    case "health":
-      return "Apple Health";
-    case "sync":
-      return "Sync help";
-    case "index":
-      return "Settings";
-  }
 }
 
 function normalizeSettingsSection(value: string | string[] | undefined): SettingsSection {

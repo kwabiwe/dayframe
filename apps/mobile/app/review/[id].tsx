@@ -17,7 +17,7 @@ import type {
 } from "@dayframe/shared";
 import { LocationReviewCorrectionEditor } from "@/components/location/LocationReviewCorrectionEditor";
 import { mobileTextProps } from "@/lib/mobileTypography";
-import { BlocksNavHeader } from "@/components/BlocksNavHeader";
+import { BlocksNavHeader, usePreviousScreenLabel } from "@/components/BlocksNavHeader";
 import { blocksNavOrigin, evidenceBackLabel } from "@/lib/blocksNav";
 import {
   AuthRequiredError,
@@ -64,6 +64,7 @@ type EvidenceScreenState =
 export default function LocationReviewDetailScreen() {
   const params = useLocalSearchParams<{ from?: string | string[]; id: string }>();
   const { id } = params;
+  const backLabel = usePreviousScreenLabel() ?? evidenceBackLabel(blocksNavOrigin(params.from));
   const isFocused = useIsFocused();
   const { styles, theme } = useMobileTheme();
   const { isOffline, isOnline, reconnectEpoch } = useConnectivity();
@@ -440,7 +441,7 @@ export default function LocationReviewDetailScreen() {
 
   return (
     <SafeAreaView style={styles.safeArea}>
-      <BlocksNavHeader backLabel={evidenceBackLabel(blocksNavOrigin(params.from))} onBack={() => router.back()} title="Location evidence" />
+      <BlocksNavHeader backLabel={backLabel} onBack={() => router.back()} title="Location evidence" />
 
       {screenState.status === "hydrating" ? (
         showHydrationFeedback ? (

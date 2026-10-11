@@ -21,7 +21,7 @@ import {
   type PlaceRole,
   type placeRoleRequest
 } from "@dayframe/shared";
-import { BlocksNavHeader } from "@/components/BlocksNavHeader";
+import { BlocksNavHeader, usePreviousScreenLabel } from "@/components/BlocksNavHeader";
 import { DayframeIcon } from "@/components/icons/DayframeIcon";
 import { PlaceRoleSheet, type PlaceRoleSheetMode } from "@/components/places/PlaceRoleSheet";
 import { SettingsBlockGroup, SettingsPillButton } from "@/components/settings/SettingsBlocks";
@@ -62,6 +62,7 @@ import {
 type Category = MobileBootstrap["categories"][number];
 
 export default function PlacesScreen() {
+  const backLabel = usePreviousScreenLabel() ?? "Settings";
   const reduceMotion = useReduceMotionPreference();
   const { styles, theme } = useMobileTheme();
   const [data, setData] = useState<MobileBootstrap | null>(null);
@@ -354,7 +355,7 @@ export default function PlacesScreen() {
 
   return (
     <SafeAreaView style={styles.safeArea}>
-      <BlocksNavHeader backLabel="Settings" onBack={() => router.back()} title="Saved places" />
+      <BlocksNavHeader backLabel={backLabel} onBack={() => router.back()} title="Saved places" />
       <ScrollView
         style={styles.settingsScrollView}
         contentContainerStyle={styles.settingsScrollContent}

@@ -3,6 +3,20 @@ import { Pressable, Text, View } from "react-native";
 import Svg, { Path } from "react-native-svg";
 import { mobileTextProps } from "@/lib/mobileTypography";
 import { pressable, useMobileTheme } from "@/lib/mobileTheme";
+import { useNavigation, useRoute } from "expo-router";
+import { previousRouteBackLabel, type BlocksNavRoute } from "@/lib/blocksNav";
+
+/**
+ * The name of the screen this one returns to, read from the route just below it in its stack
+ * (a tab, a Settings section, Saved places, Review…). Null when the stack can't name it; callers
+ * fall back to their `from` param or default.
+ */
+export function usePreviousScreenLabel(): string | null {
+  const navigation = useNavigation();
+  const route = useRoute();
+  const state = navigation.getState() as { routes?: readonly BlocksNavRoute[] } | undefined;
+  return previousRouteBackLabel(state?.routes, route.key);
+}
 
 /**
  * The Blocks navigation bar for pushed pages (prototype; first shipped on the Review deck):

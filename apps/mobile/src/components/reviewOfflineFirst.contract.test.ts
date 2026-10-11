@@ -20,7 +20,7 @@ describe("offline-first Review screen contracts", () => {
     expect(reviewSource).toContain('navigation.addListener("beforeRemove", stopReviewPresentationWork)');
     expect(reviewSource).toContain('if (event.data.closing) stopReviewPresentationWork();');
     // The Review deck's "‹ Today" back (Blocks step 5a) only navigates; beforeRemove stops the work.
-    expect(reviewSource).toMatch(/<BlocksNavHeader[\s\S]*?backLabel="Today"[\s\S]*?backTestID="review-deck-back"[\s\S]*?onBack=\{\(\) => router\.back\(\)\}/);
+    expect(reviewSource).toMatch(/<BlocksNavHeader[\s\S]*?backLabel=\{backLabel\}[\s\S]*?backTestID="review-deck-back"[\s\S]*?onBack=\{\(\) => router\.back\(\)\}/);
     expect(reviewSource).not.toContain("stopReviewPresentationWork(); router.back()");
     expect(reviewSource).not.toContain('onPress={() => { stopReviewPresentationWork(); router.back(); }}');
   });
@@ -47,7 +47,7 @@ describe("offline-first Review screen contracts", () => {
 
   it("uses the Blocks nav titles and delays cold evidence feedback", () => {
     // Both use the shared Blocks navigation bar (UIA-001): text back, centred compact title.
-    expect(reviewSource).toMatch(/<BlocksNavHeader[\s\S]*?backLabel="Today"[\s\S]*?title="Review"/);
+    expect(reviewSource).toMatch(/<BlocksNavHeader[\s\S]*?backLabel=\{backLabel\}[\s\S]*?title="Review"/);
     expect(detailSource).toMatch(/<BlocksNavHeader[\s\S]*?title="Location evidence" \/>/);
     expect(reviewSource).not.toContain('style={styles.settingsTitle} numberOfLines={1}');
     expect(detailSource).not.toContain('style={styles.settingsTitle} numberOfLines={1}');

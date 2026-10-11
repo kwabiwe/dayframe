@@ -18,6 +18,14 @@ describe("Blocks navigation bar (UIA-001)", () => {
     expect(header).toContain("styles.blocksNavTrailing");
   });
 
+  it("labels the back button from the screen below in the stack, on every pushed page", () => {
+    expect(header).toContain("export function usePreviousScreenLabel()");
+    for (const [name, source] of Object.entries(pushedPages)) {
+      expect(source, name).toContain("usePreviousScreenLabel()");
+    }
+    expect(pushedPages.review).toMatch(/<ReviewDeckFinished\s+backLabel=\{backLabel\}/);
+  });
+
   it("is the only back control on every pushed page", () => {
     for (const [name, source] of Object.entries(pushedPages)) {
       expect(source, name).toContain("<BlocksNavHeader");
