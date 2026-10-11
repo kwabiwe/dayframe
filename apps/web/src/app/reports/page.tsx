@@ -5,12 +5,16 @@ import { ReportDetailsTable } from "@/components/ReportDetailsTable";
 import { ReportFiltersPanel } from "@/components/ReportFiltersPanel";
 import { ReportRangeControls } from "@/components/ReportRangeControls";
 import { ReportsOverview } from "@/components/ReportsOverview";
+import { ReportsBlocksPanel } from "@/components/reports/ReportsBlocksPanel";
 import { ReportsTop } from "@/components/reports/ReportsTop";
+import { springLinearEasing } from "@/lib/blocks-motion";
+import { formatDuration } from "@/lib/format";
+import { buildReportCategoryAllocation } from "@/lib/report-calculations";
 import { resolvePageSession } from "@/lib/auth/server";
 import { getUser } from "@/lib/queries";
 import { filtersForPreset, parseReportQueryInput, reportExportHref, reportsHref } from "@/lib/report-filters";
 import { getReports } from "@/lib/report-service";
-import { reportBlocksLayout } from "@/lib/reports-blocks";
+import { reportBlocksLayout, reportBlocksModel } from "@/lib/reports-blocks";
 
 export const dynamic = "force-dynamic";
 
@@ -34,6 +38,17 @@ export default async function ReportsPage({
 
   const [report, user] = await Promise.all([getReports(session, input), getUser(session)]);
   const preset = report.appliedFilters.range;
+  const allocation = buildReportCategoryAllocation(report.byCategory, report.totalSeconds, 8);
+  const slices = allocation.visibleCategories.map((category) => ({
+    id: category.id,
+    categoryIds: category.categoryIds,
+    name: category.name,
+    color: category.color,
+    seconds: category.seconds,
+    percentage: category.percentage,
+    isUncategorized: category.isUncategorized,
+    href: reportsHref(report.appliedFilters, { categories: category.categoryIds, page: 1 })
+  }));
 
   return (
     <div className="df-reports-page">
@@ -69,6 +84,13 @@ export default async function ReportsPage({
         rangeLabel={report.range.label}
       />
       <ReportsTop dailyGoalMinutes={user.dailyGoalMinutes} report={report} />
+      <ReportsBlocksPanel
+        blocks={reportBlocksModel(report, formatDuration)}
+        land={springLinearEasing("land")}
+        slices={slices}
+        totalLabel={preset === "this-week" ? "logged this week" : preset === "this-month" ? "logged this month" : "logged in this range"}
+        totalSeconds={report.totalSeconds}
+      />
       {report.additionalOverlappingActivitySeconds > 0 ? (
         <p className="report-metric-explainer">
           Total logged counts every entry in full; Total framed (time covered) counts overlapping time once.

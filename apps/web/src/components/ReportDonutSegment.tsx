@@ -9,6 +9,7 @@ export function ReportDonutSegment({
   dash,
   href,
   offset,
+  onHighlight,
   radius,
   stroke,
   totalLength
@@ -18,6 +19,8 @@ export function ReportDonutSegment({
   dash: number;
   href: string;
   offset: number;
+  /** Hover or focus (true) and their end (false), for cross-highlighting. */
+  onHighlight?: (on: boolean) => void;
   radius: number;
   stroke: string;
   totalLength: number;
@@ -47,8 +50,12 @@ export function ReportDonutSegment({
       stroke={stroke}
       strokeDasharray={`${dash} ${totalLength - dash}`}
       strokeDashoffset={offset}
+      onBlur={() => onHighlight?.(false)}
       onClick={activate}
+      onFocus={() => onHighlight?.(true)}
       onKeyDown={handleKeyDown}
+      onMouseEnter={() => onHighlight?.(true)}
+      onMouseLeave={() => onHighlight?.(false)}
     />
   );
 }

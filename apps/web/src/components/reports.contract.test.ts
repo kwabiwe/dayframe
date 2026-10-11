@@ -5,6 +5,7 @@ import { describe, expect, it } from "vitest";
 const filtersSource = source("./ReportFiltersPanel.tsx");
 const overviewSource = source("./ReportsOverview.tsx");
 const donutSegmentSource = source("./ReportDonutSegment.tsx");
+const panelSource = source("./reports/ReportsBlocksPanel.tsx");
 const detailsSource = source("./ReportDetailsTable.tsx");
 const rangeSource = source("./ReportRangeControls.tsx");
 const styles = source("../app/globals.css");
@@ -30,7 +31,7 @@ describe("Reports accessibility and responsive contracts", () => {
     expect(overviewSource).toContain('tabIndex={0}');
     expect(overviewSource).toContain("View exact trend data");
     expect(overviewSource).toContain("AccessibleBreakdownTable");
-    expect(overviewSource).toContain("Filter by ${slice.name}");
+    expect(panelSource).toContain("Filter by ${slice.name}");
     expect(donutSegmentSource).toContain('role="link"');
     expect(donutSegmentSource).toContain("event.key !== \"Enter\"");
     expect(donutSegmentSource).toContain("router.push(href)");
