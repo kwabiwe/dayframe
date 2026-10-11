@@ -111,6 +111,7 @@ import {
   reportSheetBottomGeometry,
 } from "./ReportSheets";
 import { DatePickerCalendar } from "../calendar/DatePickerCalendar";
+import { DAYFRAME_THEME } from "@dayframe/shared";
 const theme = { borderStrong: "strong-handle" } as never;
 const options = ["Work", "Rest"].map((name) => ({
   key: name,
@@ -627,5 +628,96 @@ describe("Reports sheet interactions", () => {
     press("Done");
     expect(onApply).not.toHaveBeenCalled();
     act(() => tree.unmount());
+  });
+});
+
+describe("Neutral selection in Reports sheets and the date picker (UIA-010/011/026)", () => {
+  const dark = { ...DAYFRAME_THEME.dark, mode: "dark", pressed: "x" } as unknown as Record<string, string>;
+  const styleOf = (node: { props: Record<string, unknown> }) =>
+    Object.assign({}, ...([node.props.style].flat(3).filter(Boolean) as object[])) as Record<string, unknown>;
+
+  it("fills the chosen day and range neutrally, keeps today as coral text and stops at maxDate", () => {
+    const { tree } = mount(
+      <DatePickerCalendar
+        month="2026-09-01"
+        onMonthChange={vi.fn()}
+        start="2026-09-07"
+        end="2026-09-09"
+        today="2026-09-14"
+        maxDate="2026-09-14"
+        onSelect={vi.fn()}
+        theme={dark as never}
+        reduceMotion
+      />,
+    );
+    const byId = (id: string) => tree.root.find((node) => node.props.testID === id);
+    expect(styleOf(byId("calendar-circle-2026-09-07")).backgroundColor).toBe(dark.textPrimary);
+    expect(styleOf(byId("calendar-band-2026-09-08")).backgroundColor).toBe(dark.surfaceMuted);
+    const todayText = byId("calendar-circle-2026-09-14").findByType("Text" as never);
+    expect(styleOf(todayText).color).toBe(dark.accentText);
+    expect(styleOf(byId("calendar-circle-2026-09-14")).backgroundColor).toBe("transparent");
+    expect(byId("calendar-day-2026-09-15").props.disabled).toBe(true);
+    const json = JSON.stringify(tree.toJSON());
+    expect(json).not.toContain(dark.accentSoft);
+  });
+
+  it("checks filter rows neutrally inside section cards", () => {
+    const { tree } = mount(
+      <ReportFiltersSheet
+        presentationId={1}
+        draft={{ mode: "all", universe: ["Work", "Rest"] } as ReportFilterDraft}
+        options={options as never}
+        theme={dark as never}
+        reduceMotion
+        onChange={vi.fn()}
+        onApply={vi.fn()}
+        onDismissed={vi.fn()}
+      />,
+    );
+    const work = tree.root.findAll((node) => node.props.accessibilityRole === "checkbox" && node.props.accessibilityLabel === "Work")[0];
+    const check = work.findAll((node) => (node.type as unknown) === "View").at(-1)!;
+    expect(styleOf(check).backgroundColor).toBe(dark.textPrimary);
+  });
+
+  it("titles the date sheet and makes its presets and Done neutral", () => {
+    const { tree, button } = mount(
+      <ReportDateSheet
+        presentationId={1}
+        initial="week"
+        nowMs={Date.parse("2026-09-16T12:00:00")}
+        theme={dark as never}
+        reduceMotion={false}
+        onApply={vi.fn()}
+        onDismissed={vi.fn()}
+      />,
+    );
+    const texts = tree.root.findAllByType("Text" as never).map((node) => node.props.children);
+    expect(texts).toContain("REPORTS");
+    expect(texts).toContain("Choose dates");
+    const week = button("Week").findByType("View" as never);
+    expect(styleOf(week).backgroundColor).toBe(dark.textPrimary);
+    expect(styleOf(button("Done")).backgroundColor).toBe(dark.textPrimary);
+  });
+
+  it("leaves the head out on the smallest phones so every date row and Done fit", () => {
+    const previous = mockLayout.windowHeight;
+    mockLayout.windowHeight = 568;
+    try {
+      const { tree } = mount(
+        <ReportDateSheet
+          presentationId={1}
+          initial="week"
+          nowMs={Date.parse("2026-09-16T12:00:00")}
+          theme={dark as never}
+          reduceMotion={false}
+          onApply={vi.fn()}
+          onDismissed={vi.fn()}
+        />,
+      );
+      const texts = tree.root.findAllByType("Text" as never).map((node) => node.props.children);
+      expect(texts).not.toContain("Choose dates");
+    } finally {
+      mockLayout.windowHeight = previous;
+    }
   });
 });

@@ -243,7 +243,7 @@ export const ReportWeekColumns = memo(function ReportWeekColumns({
               {...mobileTextProps("metadata")}
               style={[
                 styles.weekLabel,
-                { color: focused ? theme.textPrimary : day.key === todayKey ? theme.accent : theme.textMuted },
+                { color: focused ? theme.textPrimary : day.key === todayKey ? theme.accentText : theme.textMuted },
               ]}
             >
               {day.start.toLocaleDateString(undefined, { weekday: "narrow" })}
@@ -304,7 +304,8 @@ export const ReportMonthGrid = memo(function ReportMonthGrid({
                 style={[
                   styles.monthCell,
                   { backgroundColor: theme.surfaceMuted },
-                  day.key === todayKey ? { borderColor: theme.accent, borderWidth: 1.5 } : null,
+                  // Today: a neutral ring; coral is only ever today's text (UIA-013).
+                  day.key === todayKey ? { borderColor: theme.textPrimary, borderWidth: 1.5 } : null,
                 ]}
               >
                 {day.segments.map((segment, index) =>
@@ -350,7 +351,7 @@ export function ReportGoalStreak({
       style={[styles.streak, { backgroundColor: theme.surface }]}
       testID="reports-goal-streak"
     >
-      <DayframeIcon color={theme.accent} glyph="flame" size={22} />
+      <DayframeIcon color={theme.textPrimary} glyph="flame" size={22} />
       <View style={styles.streakText}>
         <Text {...mobileTextProps("itemTitle")} style={[styles.streakTitle, { color: theme.textPrimary }]}>
           {met} of {days.length} {days.length === 1 ? "day" : "days"} on goal
