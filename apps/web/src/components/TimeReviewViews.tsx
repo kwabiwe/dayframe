@@ -27,7 +27,6 @@ import { pendingReviewSpans } from "@/lib/today-view";
 import {
   dateTimeLocalInputToIso,
   formatDate,
-  formatCompactHoursMinutes,
   formatDuration,
   formatTime
 } from "@/lib/format";
@@ -70,6 +69,8 @@ import {
   type TimelineView
 } from "@/lib/timeline-view";
 import { reportsHrefForCustomRange } from "@/lib/report-filters";
+import { calendarHeadModel } from "@/lib/calendar-head";
+import { CalendarHead } from "@/components/calendar/CalendarHead";
 import type {
   CalendarEntryCompactCreatePlan,
   CalendarEntryCompactSavePlan
@@ -89,6 +90,9 @@ import { calendarInitialScrollHour } from "@/lib/calendar-initial-scroll";
 import { useIsHydrated } from "@/components/useHydrationSafeNow";
 
 type CalendarHoursMode = "fullDay";
+
+/** Half the now pill's height (11 px text + 2 px padding each side), for clamping it inside the axis. */
+const NOW_PILL_HALF_HEIGHT = 10;
 
 const viewItems: Array<{ id: TimelineView; label: string; icon: ReactNode }> = [
   { id: "calendar", label: "Calendar", icon: <CalendarDays size={16} /> },
@@ -396,11 +400,26 @@ export function TimeReviewViews({
   const dayReportTo = toTimelineDateKey(addDays(ranges.day.end, -1));
   const weekReportFrom = toTimelineDateKey(ranges.week.start);
   const weekReportTo = toTimelineDateKey(addDays(ranges.week.end, -1));
-  const dayTotalLabel = formatCompactHoursMinutes(dayAnalysis.totalLoggedSeconds);
-  const weekTotalLabel = formatCompactHoursMinutes(weekAnalysis.totalLoggedSeconds);
+
+  const headModel = calendarHeadModel({
+    dayLoggedSeconds: dayAnalysis.totalLoggedSeconds,
+    entries: visibleWeekEntries,
+    hydrated,
+    nowMs: capturedNow.getTime(),
+    selectedDay: ranges.day.start,
+    weekDays: ranges.weekDays,
+    weekLoggedSeconds: weekAnalysis.totalLoggedSeconds
+  });
 
   return (
     <section className="timeline-workspace">
+      <CalendarHead
+        dayReportHref={reportsHrefForCustomRange(dayReportFrom, dayReportTo)}
+        disabled={isDateLoading}
+        model={headModel}
+        onSelectDay={(date) => void navigate({ date })}
+        weekReportHref={reportsHrefForCustomRange(weekReportFrom, weekReportTo)}
+      />
       <section
         className="timeline-range-toolbar"
         aria-busy={isDateLoading}
@@ -441,23 +460,6 @@ export function TimeReviewViews({
             </button>
           )}
         </div>
-
-        <nav className="timeline-range-totals" aria-label="Open Timeline totals in Reports">
-          <Link
-            aria-label={`Open Day report for ${dayReportFrom}, total ${dayTotalLabel}`}
-            href={reportsHrefForCustomRange(dayReportFrom, dayReportTo)}
-          >
-            <span>Day</span>
-            <strong className="tabular">{dayTotalLabel}</strong>
-          </Link>
-          <Link
-            aria-label={`Open Week report for ${weekReportFrom} to ${weekReportTo}, total ${weekTotalLabel}`}
-            href={reportsHrefForCustomRange(weekReportFrom, weekReportTo)}
-          >
-            <span>Week</span>
-            <strong className="tabular">{weekTotalLabel}</strong>
-          </Link>
-        </nav>
 
         <div className="timeline-range-controls">
           <SegmentedControl
@@ -644,6 +646,9 @@ export function CalendarReview({
   const [zoomLevel, setZoomLevel] = useState<CalendarZoom>("hour");
   const [calendarScroller, setCalendarScroller] = useState<HTMLDivElement | null>(null);
   const today = capturedNow;
+  // The now pill shows a clock time in the browser's time zone, which the server render can't know;
+  // it appears once the page has hydrated so both renders agree (Codex r1 on #303).
+  const nowPillHydrated = useIsHydrated();
   const zoom = calendarZooms[zoomLevel];
   const calendarHours = calendarHourModes[calendarHoursMode];
   const zoomKeys = Object.keys(calendarZooms) as CalendarZoom[];
@@ -1145,6 +1150,17 @@ export function CalendarReview({
           })}
 
           <div className="calendar-time-axis" style={{ height: calendarHeight }}>
+            {nowPillHydrated && visibleDays.some((day) => sameDay(day, today)) ? (
+              <span
+                aria-hidden="true"
+                className="calendar-now-pill"
+                // Clamped so the pill stays inside the axis at midnight and at the day's end; the
+                // line keeps the exact time.
+                style={{ top: Math.min(calendarHeight - NOW_PILL_HALF_HEIGHT, Math.max(NOW_PILL_HALF_HEIGHT, Math.round(((minutesFromDate(capturedNow) - calendarHours.startHour * 60) / 60) * rowHeight))) }}
+              >
+                {formatTime(capturedNow)}
+              </span>
+            ) : null}
             {axisMarks.map((mark) => (
               <div key={mark.key}>
                 <span
