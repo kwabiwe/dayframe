@@ -257,10 +257,6 @@ export function ActiveTimerEditSheet({
   ) => void>(() => undefined);
   const hashtagPanelProgress = useRef(new Animated.Value(0)).current;
   const descriptionInputRef = useRef<TextInput>(null);
-  // The sheet owns the keyboard while it is up. However it goes away (coordinated exit or not),
-  // the keyboard must not outlive it: a keyboard left over a removed Modal kept the app from
-  // taking touches (UIA-053).
-  useEffect(() => () => Keyboard.dismiss(), []);
   const descriptionValueRef = useRef("");
   const descriptionSelectionRef = useRef<DescriptionSelection>({ start: 0, end: 0 });
   const pendingDescriptionSelectionSyncRef =

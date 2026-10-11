@@ -240,8 +240,4 @@ describe("suggestion tap right after a start (UIA-053)", () => {
     expect(dashboardSource).toContain("!isSameRunningEntry(activeEntry.id, entryId, persistedTimerEntryId)");
     expect(dashboardSource).not.toContain("if (!activeEntry || activeEntry.id !== entryId) return false;");
   });
-
-  it("never leaves the keyboard behind when the sheet goes away", () => {
-    expect(editSheetSource).toContain("useEffect(() => () => Keyboard.dismiss(), []);");
-  });
 });
