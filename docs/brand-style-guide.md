@@ -123,7 +123,7 @@ Eight-digit HEX values below include alpha as the last two digits. RGB entries f
 | `surfaceRaised` | `#1B2230` | `27, 34, 48` | Menus, floating panels and sheets that need elevation. |
 | `surfaceInset` | `#101622` | `16, 22, 34` | Inputs, wells and inset regions. |
 | `surfaceMuted` | `#202838` | `32, 40, 56` | Selected or softly highlighted surfaces; retain a non-colour selection cue. |
-| `border` | `#2A3345` | `42, 51, 69` | Hairline dividers and web-only outlines; not a default iOS container treatment. |
+| `border` | `#2A3345` | `42, 51, 69` | Hairline dividers and the faint edge of floating web chrome (command bar, phone tab bar, popovers, dialogs). Panels and cards are fill-led on both platforms: no outline. |
 | `borderStrong` | `#3B465B` | `59, 70, 91` | Selected outlines where fill cannot communicate state. |
 | `controlBorder` | `#64718A` | `100, 113, 138` | Essential web input/control boundary; at least 3:1 against dark surface and inset roles. |
 | `textPrimary` | `#F7F8FB` | `247, 248, 251` | Main text and values; 18.73:1 on `background`. |
@@ -158,7 +158,7 @@ Eight-digit HEX values below include alpha as the last two digits. RGB entries f
 | `surfaceRaised` | `#FFFFFF` | `255, 255, 255` | Elevated menus, popovers and sheets; on iOS elevation comes from canvas contrast and restrained shadow. |
 | `surfaceInset` | `#F7F8FB` | `247, 248, 251` | Inputs and inset areas. |
 | `surfaceMuted` | `#EEF1F6` | `238, 241, 246` | Selected and muted surfaces; retain a non-colour cue. |
-| `border` | `#DDE2EA` | `221, 226, 234` | Hairline dividers and web-only outlines; not a default iOS container treatment. |
+| `border` | `#DDE2EA` | `221, 226, 234` | Hairline dividers and the faint edge of floating web chrome (command bar, phone tab bar, popovers, dialogs). Panels and cards are fill-led on both platforms: no outline. |
 | `borderStrong` | `#BCC5D2` | `188, 197, 210` | Selected outlines where fill cannot communicate state, such as palette swatches. |
 | `controlBorder` | `#7D8797` | `125, 135, 151` | Essential web input/control boundary; 3.63:1 against white. |
 | `textPrimary` | `#111827` | `17, 24, 39` | Main text and values; 16.39:1 on `background`. |
