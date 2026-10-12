@@ -10,7 +10,7 @@ vi.mock("next/link", () => ({
 }));
 
 const { AuthForm } = await import("./AuthForm");
-const { readRecoveryTokens } = await import("./PasswordResetForm");
+const { PasswordResetForm, readRecoveryTokens } = await import("./PasswordResetForm");
 
 afterEach(() => {
   cleanup();
@@ -51,6 +51,21 @@ describe("Forgot password and sign-up (UIA-317, UIA-318)", () => {
     const password = screen.getByLabelText("Password");
     expect(password.getAttribute("aria-describedby")).toBe("auth-password-hint");
     expect(document.getElementById("auth-password-hint")?.textContent).toBe("At least 8 characters.");
+  });
+
+  it("keeps the form and the link when the server is throttling (Codex r7)", async () => {
+    window.history.replaceState(null, "", "/reset-password#access_token=a&refresh_token=r&type=recovery");
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({ error: "Too many tries just now. Wait a minute, then try again." }), { status: 429 }));
+    vi.stubGlobal("fetch", fetchMock);
+    render(createElement(PasswordResetForm));
+    fireEvent.change(screen.getByLabelText("New password"), { target: { value: "a new password" } });
+    fireEvent.click(screen.getByRole("button", { name: "Set password" }));
+    await waitFor(() => expect(screen.getByRole("alert").textContent).toContain("Too many tries"));
+    // Still the form, so the same link can be tried again.
+    expect((screen.getByRole("button", { name: "Set password" }) as HTMLButtonElement).disabled).toBe(false);
+    fireEvent.click(screen.getByRole("button", { name: "Set password" }));
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+    expect(JSON.parse(String((fetchMock.mock.calls[1] as unknown as [string, RequestInit])[1].body))).toMatchObject({ accessToken: "a", refreshToken: "r" });
   });
 
   it("reads only a recovery link's tokens", () => {

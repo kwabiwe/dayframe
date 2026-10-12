@@ -110,6 +110,16 @@ describe("Supabase password reset (UIA-317)", () => {
     expect(mocks.auth.updateUser).not.toHaveBeenCalled();
   });
 
+  it("keeps the link usable when Supabase throttles the session check (Codex r7)", async () => {
+    mocks.auth.setSession.mockResolvedValueOnce({ data: { user: null }, error: { message: "Request rate limit reached", status: 429 } } as never);
+    await expect(completeSupabasePasswordReset({ accessToken: "a", refreshToken: "r", password: "a new password" }))
+      .rejects.toMatchObject({ status: 429 });
+    mocks.auth.setSession.mockResolvedValueOnce({ data: { user: null }, error: { message: "rate limited", code: "over_request_rate_limit", status: 400 } } as never);
+    await expect(completeSupabasePasswordReset({ accessToken: "a", refreshToken: "r", password: "a new password" }))
+      .rejects.toMatchObject({ status: 429 });
+    expect(mocks.auth.updateUser).not.toHaveBeenCalled();
+  });
+
   it("keeps the link usable when the sign-in service is briefly down (Codex r3)", async () => {
     const retryable = Object.assign(new Error("fetch failed"), { name: "AuthRetryableFetchError", status: 0 });
     mocks.auth.setSession.mockResolvedValueOnce({ data: { user: null }, error: retryable } as never);

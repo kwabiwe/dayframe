@@ -129,6 +129,11 @@ export async function completeSupabasePasswordReset(input: { accessToken: string
     access_token: input.accessToken,
     refresh_token: input.refreshToken
   });
+  if (sessionError && (sessionError.status === 429 || (sessionError as { code?: string }).code === "over_request_rate_limit")) {
+    // Supabase is throttling (https://supabase.com/docs/guides/auth/rate-limits): the link is still
+    // good, so the form stays and the same link can be tried again once the limit clears.
+    throw new AuthError("Too many tries just now. Wait a minute, then try again.", 429);
+  }
   if (sessionError && (isAuthRetryableFetchError(sessionError) || (sessionError.status ?? 0) >= 500)) {
     // The sign-in service didn't answer: nothing has changed and the same link can be tried again.
     throw new AuthError("Dayframe couldn't reach the sign-in service. Try again in a moment.", 503);
