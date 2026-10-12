@@ -28,6 +28,9 @@ const KEYBOARD_EASING = Easing.bezier(0.17, 0.59, 0.4, 0.77);
  * - `keyboardInset` rises as soon as a keyboard frame arrives, and drops to zero only once the
  *   keyboard has gone (`keyboardDidHide`) and the space has finished shrinking, so a drag never
  *   resumes while keyboard-driven layout is still moving.
+ * - Each "did" event is tied to the keyboard's current transition: a `keyboardDidHide` that lands
+ *   after a newer show has begun, or a `keyboardDidShow` after a newer hide, is stale and ignored
+ *   (Codex r3 on #355).
  * - `onReveal` runs once the sheet's layout has settled with the keyboard up: when the animated
  *   space finishes, or — for an immediate update — on the scroll view's next layout
  *   (`onScrollLayout`) and two frames later, whichever lands; also after `keyboardDidShow` and
@@ -52,6 +55,8 @@ export function useContentSizedSheetKeyboard({
   // While the keyboard is leaving: whether it has gone, and whether the space has settled.
   const leaving = useRef({ keyboardGone: true, spaceSettled: true });
   const pendingReveal = useRef(false);
+  // The keyboard's current transition, from the "will" events; "did" events only complete it.
+  const transition = useRef<"hidden" | "showing" | "shown" | "hiding">("hidden");
   const onRevealRef = useRef(onReveal);
   onRevealRef.current = onReveal;
 
@@ -89,7 +94,20 @@ export function useContentSizedSheetKeyboard({
 
   useEffect(() => {
     const follow = (event: KeyboardEvent, nextInset: number, phase: "will" | "didShow" | "didHide") => {
-      if (phase === "didHide") leaving.current.keyboardGone = true;
+      if (phase === "didHide") {
+        // A hide that a newer show has already overtaken.
+        if (transition.current === "showing") return;
+        transition.current = "hidden";
+        leaving.current.keyboardGone = true;
+      } else if (phase === "didShow") {
+        // A show that a newer hide has already overtaken.
+        if (transition.current === "hiding") return;
+        transition.current = "shown";
+      } else if (nextInset > 0) {
+        if (transition.current !== "shown") transition.current = "showing";
+      } else {
+        transition.current = "hiding";
+      }
       if (nextInset > 0) {
         // The hand-off holds a drag from the first keyboard frame.
         leaving.current = { keyboardGone: false, spaceSettled: false };

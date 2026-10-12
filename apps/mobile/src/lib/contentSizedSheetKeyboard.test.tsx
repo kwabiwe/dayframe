@@ -183,4 +183,30 @@ describe("content-sized sheet keyboard (Apple Health type sheet; Codex r1–r2 o
     expect(onReveal).toHaveBeenCalledTimes(2);
     tree.unmount();
   });
+
+  it("ignores a stale didHide that lands after the keyboard came back, and a stale didShow after a newer hide (Codex r3)", () => {
+    const { onReveal, seen, tree } = mount();
+    emit("keyboardWillChangeFrame", 336);
+    finishTiming();
+    emit("keyboardDidShow", 336);
+    emit("keyboardWillHide", 0);
+    // The keyboard is restored before the hide completes; the earlier hide's didHide lands late.
+    emit("keyboardWillChangeFrame", 336);
+    const grow = timings.length - 1;
+    emit("keyboardDidHide", 0);
+    expect(timings).toHaveLength(grow + 1);
+    expect(timings.at(-1)?.to).toBe(310);
+    expect(seen.keyboardInset).toBe(336);
+    const reveals = onReveal.mock.calls.length;
+    finishTiming(grow);
+    expect(onReveal).toHaveBeenCalledTimes(reveals + 1);
+    // Now hide for real; a didShow from the earlier show lands late and is ignored.
+    emit("keyboardWillHide", 0);
+    emit("keyboardDidShow", 336);
+    expect(timings.at(-1)?.to).toBe(0);
+    finishTiming();
+    emit("keyboardDidHide", 0);
+    expect(seen.keyboardInset).toBe(0);
+    tree.unmount();
+  });
 });

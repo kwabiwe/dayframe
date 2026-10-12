@@ -1,4 +1,3 @@
-import type { SetStateAction } from "react";
 import { act, create, type ReactTestRenderer } from "react-test-renderer";
 import { describe, expect, it, vi } from "vitest";
 
@@ -8,9 +7,21 @@ vi.mock("react", async () => {
 });
 
 type Owner = { userId: string; workspaceId: string } | null;
-const account = vi.hoisted(() => ({ owner: { userId: "u1", workspaceId: "w1" } as Owner, listeners: new Set<() => void>() }));
+const account = vi.hoisted(() => ({
+  owner: { userId: "u1", workspaceId: "w1" } as Owner,
+  // An owner the next readActiveMobileAccount loads silently (no notification), as on startup.
+  lazy: null as Owner,
+  listeners: new Set<() => void>()
+}));
 vi.mock("./mobileAccount", () => ({
   getActiveMobileAccountSnapshot: () => account.owner,
+  readActiveMobileAccount: async () => {
+    if (account.lazy) {
+      account.owner = account.lazy;
+      account.lazy = null;
+    }
+    return account.owner;
+  },
   subscribeActiveMobileAccount: (listener: () => void) => {
     account.listeners.add(listener);
     return () => account.listeners.delete(listener);
@@ -28,10 +39,12 @@ vi.mock("./secure-session", () => ({
 
 import { publishMobileSignedOut } from "./mobileSessionTransition";
 import {
+  beginRememberedSettingsRead,
   captureRememberedSettingsBinding,
   readRememberedSetting,
   useRememberedSettingsState,
-  writeRememberedSetting
+  writeRememberedSetting,
+  type RememberedSettingsSetter
 } from "./settingsRemembered";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -60,7 +73,7 @@ function signOut() {
 }
 
 function mountHook(key = "healthAccessGranted") {
-  const seen: { value: boolean | null; set: (action: SetStateAction<boolean | null>) => void } = {} as never;
+  const seen: { value: boolean | null; set: RememberedSettingsSetter<boolean | null> } = {} as never;
   function Probe() {
     const [value, set] = useRememberedSettingsState<boolean | null>(key, null);
     seen.value = value;
@@ -79,7 +92,8 @@ describe("Settings' remembered states (owner, 12 Oct: nothing flips on open)", (
     expect(readRememberedSetting("healthAccessGranted")).toBe(true);
     const { seen, tree } = mountHook();
     expect(seen.value).toBe(true);
-    act(() => seen.set(false));
+    act(() => seen.set(false, captureRememberedSettingsBinding()));
+    expect(seen.value).toBe(false);
     expect(readRememberedSetting("healthAccessGranted")).toBe(false);
     tree.unmount();
   });
@@ -106,19 +120,18 @@ describe("Settings' remembered states (owner, 12 Oct: nothing flips on open)", (
   });
 });
 
-describe("remembered states belong to the account and session they were read in (Codex r1 on #355)", () => {
+describe("remembered states belong to the account and session their read started for (Codex r1–r3 on #355)", () => {
   it("drops a late result from account A that lands after switching to B", () => {
     signIn(A);
     const { seen, tree } = mountHook();
-    const setFromA = seen.set;
+    const readForA = captureRememberedSettingsBinding();
     signIn(B);
-    act(() => setFromA(true));
+    act(() => seen.set(true, readForA));
     expect(readRememberedSetting("healthAccessGranted")).toBeUndefined();
     expect(seen.value).toBeNull();
-    // A direct write bound to A is refused too.
-    expect(writeRememberedSetting("healthAccessGranted", true, { generation: session.generation - 1, ownerKey: "u1:w1" })).toBe(false);
-    // B's own setter still works.
-    act(() => seen.set(false));
+    expect(writeRememberedSetting("healthAccessGranted", true, readForA)).toBe(false);
+    // B's own read lands.
+    act(() => seen.set(false, captureRememberedSettingsBinding()));
     expect(seen.value).toBe(false);
     expect(readRememberedSetting("healthAccessGranted")).toBe(false);
     tree.unmount();
@@ -127,10 +140,10 @@ describe("remembered states belong to the account and session they were read in 
   it("drops a late result from A's first session after A → B → A", () => {
     signIn(A);
     const { seen, tree } = mountHook();
-    const setFromFirstA = seen.set;
+    const readForFirstA = captureRememberedSettingsBinding();
     signIn(B);
     signIn(A);
-    act(() => setFromFirstA(true));
+    act(() => seen.set(true, readForFirstA));
     expect(readRememberedSetting("healthAccessGranted")).toBeUndefined();
     expect(seen.value).toBeNull();
     tree.unmount();
@@ -139,13 +152,13 @@ describe("remembered states belong to the account and session they were read in 
   it("never refills the cache after sign-out (even when the same account signs back in)", () => {
     signIn(A);
     const { seen, tree } = mountHook();
-    const setBeforeSignOut = seen.set;
+    const readBeforeSignOut = captureRememberedSettingsBinding();
     signOut();
-    act(() => setBeforeSignOut(true));
+    act(() => seen.set(true, readBeforeSignOut));
     expect(readRememberedSetting("healthAccessGranted")).toBeUndefined();
     expect(seen.value).toBeNull();
     signIn(A);
-    act(() => setBeforeSignOut(true));
+    act(() => seen.set(true, readBeforeSignOut));
     expect(readRememberedSetting("healthAccessGranted")).toBeUndefined();
     expect(seen.value).toBeNull();
     tree.unmount();
@@ -156,12 +169,13 @@ describe("remembered states belong to the account and session they were read in 
     writeRememberedSetting("healthAccessGranted", false, captureRememberedSettingsBinding());
     signIn(A);
     const { seen, tree } = mountHook();
-    act(() => seen.set(true));
+    act(() => seen.set(true, captureRememberedSettingsBinding()));
     expect(seen.value).toBe(true);
     signIn(B);
     // B remembered nothing in this session (its earlier value was from an earlier sign-in).
     expect(seen.value).toBeNull();
-    act(() => seen.set(false));
+    act(() => seen.set(false, captureRememberedSettingsBinding()));
+    expect(seen.value).toBe(false);
     signOut();
     expect(seen.value).toBeNull();
     tree.unmount();
@@ -170,7 +184,7 @@ describe("remembered states belong to the account and session they were read in 
   it("shows nothing from the earlier account between a change and its notification", () => {
     signIn(A);
     const { rerender, seen, tree } = mountHook();
-    act(() => seen.set(true));
+    act(() => seen.set(true, captureRememberedSettingsBinding()));
     expect(seen.value).toBe(true);
     // The generation moves before the session notifies its listeners.
     session.generation += 1;
@@ -180,62 +194,53 @@ describe("remembered states belong to the account and session they were read in 
     tree.unmount();
   });
 
-  it("keeps a value read before the active account had loaded, within the same session", () => {
-    signIn(null);
-    const { seen, tree } = mountHook();
-    act(() => seen.set(true));
-    expect(seen.value).toBe(true);
-    // The account snapshot loads lazily (no new sign-in): the value stays and now publishes.
-    account.owner = A;
-    act(() => seen.set(true));
-    expect(seen.value).toBe(true);
-    expect(readRememberedSetting("healthAccessGranted")).toBe(true);
-    tree.unmount();
-  });
-
-  it("lets a binding made before the account loaded claim only the first owner: null → A → B (Codex r2)", () => {
+  it("binds a read to the owner it resolved for: null → silently loaded A → B drops A's late result (Codex r3)", async () => {
     signIn(null);
     const { rerender, seen, tree } = mountHook();
-    const setBeforeOwner = seen.set;
-    // The active account loads (no new sign-in): the setter publishes under A.
-    account.owner = A;
-    act(() => setBeforeOwner(true));
-    expect(seen.value).toBe(true);
-    expect(readRememberedSetting("healthAccessGranted")).toBe(true);
-    // Startup reconciliation replaces the owner within the same session, before any notification.
+    // The read starts before the active account is known; it loads A without any notification.
+    account.lazy = A;
+    const readForA = await beginRememberedSettingsRead();
+    expect(readForA.ownerKey).toBe("u1:w1");
+    // Startup reconciliation then activates B within the same session.
     account.owner = B;
-    act(() => setBeforeOwner(false));
-    expect(readRememberedSetting("healthAccessGranted")).toBeUndefined();
-    rerender();
-    expect(seen.value).toBeNull();
-    // And after B's notification: the earlier setter stays spent, B starts from initial.
     act(() => {
       for (const listener of [...account.listeners]) listener();
     });
-    act(() => setBeforeOwner(false));
+    act(() => seen.set(true, readForA));
     expect(readRememberedSetting("healthAccessGranted")).toBeUndefined();
+    rerender();
     expect(seen.value).toBeNull();
-    act(() => seen.set(false));
+    // A read started for B lands.
+    const readForB = await beginRememberedSettingsRead();
+    act(() => seen.set(false, readForB));
+    expect(seen.value).toBe(false);
     expect(readRememberedSetting("healthAccessGranted")).toBe(false);
     tree.unmount();
   });
 
-  it("lets an unclaimed binding claim the owner it first resolves to on notification, then holds it", () => {
+  it("drops A's late result after a silent A → B replacement with no notification at all", async () => {
     signIn(null);
     const { rerender, seen, tree } = mountHook();
-    const setBeforeOwner = seen.set;
+    account.lazy = A;
+    const readForA = await beginRememberedSettingsRead();
     account.owner = B;
-    act(() => {
-      for (const listener of [...account.listeners]) listener();
-    });
-    act(() => setBeforeOwner(true));
-    expect(readRememberedSetting("healthAccessGranted")).toBe(true);
-    account.owner = A;
-    act(() => setBeforeOwner(false));
+    act(() => seen.set(true, readForA));
     rerender();
     expect(seen.value).toBeNull();
-    account.owner = B;
-    expect(readRememberedSetting("healthAccessGranted")).toBe(true);
+    expect(readRememberedSetting("healthAccessGranted")).toBeUndefined();
+    tree.unmount();
+  });
+
+  it("never lands a read started before any account was known", () => {
+    signIn(null);
+    const { rerender, seen, tree } = mountHook();
+    const readForNobody = captureRememberedSettingsBinding();
+    act(() => seen.set(true, readForNobody));
+    account.owner = A;
+    act(() => seen.set(true, readForNobody));
+    rerender();
+    expect(seen.value).toBeNull();
+    expect(readRememberedSetting("healthAccessGranted")).toBeUndefined();
     tree.unmount();
   });
 });

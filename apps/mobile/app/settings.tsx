@@ -137,7 +137,7 @@ import {
   settingsGeofenceKey
 } from "@/lib/settingsRefresh";
 import { readTodayBootstrapForSettings } from "@/lib/settingsSeed";
-import { useRememberedSettingsState } from "@/lib/settingsRemembered";
+import { beginRememberedSettingsRead, useRememberedSettingsState } from "@/lib/settingsRemembered";
 import { useContentSizedSheetKeyboard } from "@/lib/contentSizedSheetKeyboard";
 import { clampSettingsScrollOffset, settingsScrollNeedsClamp } from "@/lib/settingsScroll";
 import { BlocksNavHeader, usePreviousScreenLabel } from "@/components/BlocksNavHeader";
@@ -531,32 +531,36 @@ export default function SettingsScreen() {
     });
   }, []);
 
+  // Each read is bound to the account it started for (settingsRemembered, Codex r3 on #355).
   const refreshReviewDiagnostics = useCallback(async () => {
+    const startedFor = await beginRememberedSettingsRead();
     const [diagnostics, issues] = await Promise.all([
       getReviewSyncDiagnostics(),
       listReviewSyncIssues()
     ]);
     // The store lists real rejections only; unknown outcomes are in diagnostics.waitingCount (I1).
-    setReviewSyncDiagnostics(diagnostics);
-    setReviewSyncIssues(splitReviewSyncIssues(issues).rejected);
+    setReviewSyncDiagnostics(diagnostics, startedFor);
+    setReviewSyncIssues(splitReviewSyncIssues(issues).rejected, startedFor);
   }, []);
 
   const refreshTimeEntryDiagnostics = useCallback(async () => {
+    const startedFor = await beginRememberedSettingsRead();
     const [diagnostics, issues] = await Promise.all([
       getTimeEntryOutboxDiagnostics(),
       listTimeEntrySyncIssues()
     ]);
-    setTimeEntrySyncDiagnostics(diagnostics);
-    setTimeEntrySyncIssues(issues);
+    setTimeEntrySyncDiagnostics(diagnostics, startedFor);
+    setTimeEntrySyncIssues(issues, startedFor);
   }, []);
 
   const refreshTimerStopDiagnostics = useCallback(async () => {
+    const startedFor = await beginRememberedSettingsRead();
     const [diagnostics, issues] = await Promise.all([
       getTimerStopOutboxDiagnostics(),
       listTimerStopSyncIssues()
     ]);
-    setTimerStopSyncDiagnostics(diagnostics);
-    setTimerStopSyncIssues(issues);
+    setTimerStopSyncDiagnostics(diagnostics, startedFor);
+    setTimerStopSyncIssues(issues, startedFor);
   }, []);
 
   // Queue reads: the latest one started wins (load() and the live subscription share the
@@ -726,6 +730,7 @@ export default function SettingsScreen() {
   const [nudgePermission, setNudgePermission] = useRememberedSettingsState<ReviewNudgePermission | null>("nudgePermission", null);
   const [nudgeBusy, setNudgeBusy] = useState(false);
   const refreshReviewNudge = useCallback(async () => {
+    const startedFor = await beginRememberedSettingsRead();
     const owner = await readActiveMobileAccount();
     if (!owner) return;
     const [state, permission] = await Promise.all([
@@ -733,8 +738,8 @@ export default function SettingsScreen() {
       import("@/lib/reviewNudgeNative").then(({ readReviewNudgePermission }) => readReviewNudgePermission()).catch(() => null)
     ]);
     if (!mobileAccountOwnersEqual(owner, await readActiveMobileAccount())) return;
-    setReviewNudge(state);
-    setNudgePermission(permission);
+    setReviewNudge(state, startedFor);
+    setNudgePermission(permission, startedFor);
   }, []);
   useEffect(() => {
     if (!transitionReady) return;
@@ -749,10 +754,11 @@ export default function SettingsScreen() {
     if (nudgeBusy) return;
     setNudgeBusy(true);
     try {
+      const startedFor = await beginRememberedSettingsRead();
       const owner = await readActiveMobileAccount();
       if (!owner) return;
       const next = await change(owner);
-      if (mobileAccountOwnersEqual(owner, await readActiveMobileAccount())) setReviewNudge(next);
+      if (mobileAccountOwnersEqual(owner, await readActiveMobileAccount())) setReviewNudge(next, startedFor);
     } catch {
       Alert.alert("Evening reminder", "The reminder couldn't be changed. Try again.");
     } finally {
@@ -766,11 +772,12 @@ export default function SettingsScreen() {
       return;
     }
     // iOS asks once; after that the choice lives in iPhone Settings.
+    const startedFor = await beginRememberedSettingsRead();
     const nativeModule = await import("@/lib/reviewNudgeNative").catch(() => null);
     if (!nativeModule) return;
     let permission = await nativeModule.readReviewNudgePermission().catch(() => "denied" as const);
     if (permission === "undetermined") permission = await nativeModule.requestReviewNudgePermission().catch(() => "denied" as const);
-    setNudgePermission(permission);
+    setNudgePermission(permission, startedFor);
     if (permission !== "granted") return;
     // Plans from the latest count the reminder heard (with its time), never this page's cache.
     await changeReviewNudge((owner) => setReviewNudgeEnabled(owner, true));
@@ -779,7 +786,10 @@ export default function SettingsScreen() {
   // Motion & Fitness is changed in iOS Settings: re-read it whenever the app returns.
   useEffect(() => {
     if (!transitionReady) return;
-    const refreshMotion = () => void readMotionFitnessStatus().then(setMotionFitnessStatus);
+    const refreshMotion = () => void (async () => {
+      const startedFor = await beginRememberedSettingsRead();
+      setMotionFitnessStatus(await readMotionFitnessStatus(), startedFor);
+    })().catch(() => undefined);
     refreshMotion();
     const subscription = AppState.addEventListener("change", (state) => { if (state === "active") refreshMotion(); });
     return () => subscription.remove();
@@ -818,7 +828,10 @@ export default function SettingsScreen() {
         ]));
       });
     // iOS never reveals read access, so "Connected" means Dayframe's access request was accepted.
-    isHealthKitAutomaticSyncEnabled().then(setHealthAccessGranted).catch(() => undefined);
+    void (async () => {
+      const startedFor = await beginRememberedSettingsRead();
+      setHealthAccessGranted(await isHealthKitAutomaticSyncEnabled(), startedFor);
+    })().catch(() => undefined);
     getHealthImportPreferences().then(setHealthImportPreferencesAndCache).catch(() => undefined);
     void healthMappingWriter.refresh();
   }, [
@@ -887,11 +900,11 @@ export default function SettingsScreen() {
   useEffect(() => () => iosSettingsRead.invalidate(), [iosSettingsRead]);
   const readIosSettingsNeed = useCallback(() => {
     const read = iosSettingsRead.begin();
-    locationAccessNeedsIosSettings()
-      .then((needed) => {
-        if (iosSettingsRead.isLatest(read)) setIosSettingsNeeded(needed);
-      })
-      .catch(() => undefined);
+    void (async () => {
+      const startedFor = await beginRememberedSettingsRead();
+      const needed = await locationAccessNeedsIosSettings();
+      if (iosSettingsRead.isLatest(read)) setIosSettingsNeeded(needed, startedFor);
+    })().catch(() => undefined);
   }, [iosSettingsRead]);
   useEffect(() => {
     if (transitionReady) readIosSettingsNeed();
@@ -1507,7 +1520,8 @@ export default function SettingsScreen() {
 
   async function handleMotionFitnessAction() {
     if (motionFitness?.action?.kind === "request") {
-      setMotionFitnessStatus(await requestMotionFitness());
+      const startedFor = await beginRememberedSettingsRead();
+      setMotionFitnessStatus(await requestMotionFitness(), startedFor);
     } else if (motionFitness?.action?.kind === "open_settings") {
       await Linking.openSettings();
     }
@@ -1566,6 +1580,7 @@ export default function SettingsScreen() {
 
   async function refreshLocationV2Diagnostics() {
     try {
+      const startedFor = await beginRememberedSettingsRead();
       const owner = await readActiveMobileAccount();
       const session = owner ? await readOwnedAuthenticatedSessionSnapshot(owner) : null;
       const [, native] = await Promise.all([
@@ -1574,7 +1589,7 @@ export default function SettingsScreen() {
       ]);
       if (!mobileAccountOwnersEqual(owner, await readActiveMobileAccount())) return;
       if (session?.status === "authenticated" && !isAuthenticatedSessionSnapshotCurrent(session.snapshot)) return;
-      setNativeLocationStatus(native);
+      setNativeLocationStatus(native, startedFor);
     } catch (error) {
       await recordLocationStoreError(error);
     }
@@ -1665,9 +1680,10 @@ export default function SettingsScreen() {
 
   async function connectAppleHealth() {
     try {
+      const startedFor = await beginRememberedSettingsRead();
       const permissions = await requestHealthKitPermissions();
       updateHealthStatus(permissions);
-      if (permissions.status === "available") setHealthAccessGranted(true);
+      if (permissions.status === "available") setHealthAccessGranted(true, startedFor);
       if (permissions.status === "available") {
         const preferences = healthImportPreferences ?? await getHealthImportPreferences();
         const kinds = healthAutomaticCategoryKinds(preferences);
