@@ -6,8 +6,9 @@ vi.mock("react", async () => {
   return import("../../../../../node_modules/react/index.js");
 });
 const timing = vi.hoisted(() => vi.fn(() => ({ start() {}, stop() {} })));
+const animatedValues = vi.hoisted(() => [] as Array<{ value: number }>);
 vi.mock("react-native", () => ({
-  Animated: { Value: class { constructor(public value: number) {} setValue(next: number) { this.value = next; } interpolate() { return 0; } }, View: "AnimatedView", timing },
+  Animated: { Value: class { constructor(public value: number) { animatedValues.push(this); } setValue(next: number) { this.value = next; } interpolate() { return 0; } }, View: "AnimatedView", timing },
   Easing: { cubic: () => 0, out: (easing: unknown) => easing },
   Pressable: "Pressable", Text: "Text", View: "View",
   StyleSheet: { create: <T,>(styles: T) => styles, flatten: (style: unknown) => style, hairlineWidth: 1 }
@@ -56,6 +57,22 @@ describe("the drawn Settings switch (owner, 12 Oct: centred in its row on every 
     const reduced = render(false);
     act(() => reduced.tree.update(<SettingsSwitch label="Haptics" onValueChange={vi.fn()} theme={theme} value />));
     expect(timing).not.toHaveBeenCalled();
+  });
+
+  it("settles the thumb at its end when Reduce Motion turns on mid-slide (Codex r1)", () => {
+    motion.reduce = false;
+    timing.mockClear();
+    animatedValues.length = 0;
+    const { tree } = render(false);
+    const position = animatedValues[0];
+    act(() => tree.update(<SettingsSwitch label="Haptics" onValueChange={vi.fn()} theme={theme} value />));
+    expect(timing).toHaveBeenCalledTimes(1);
+    // The mocked slide never moves the value: the thumb is "half-way" when the preference flips.
+    expect(position.value).toBe(0);
+    motion.reduce = true;
+    act(() => tree.update(<SettingsSwitch label="Haptics" onValueChange={vi.fn()} theme={theme} value />));
+    expect(position.value).toBe(1);
+    motion.reduce = false;
   });
 
   it("can't be changed while disabled", () => {

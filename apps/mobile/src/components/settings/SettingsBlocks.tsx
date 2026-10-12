@@ -279,13 +279,15 @@ export function SettingsSwitch({
   const [position] = useState(() => new Animated.Value(value ? 1 : 0));
   const shownValue = useRef(value);
   useEffect(() => {
-    // Only a change moves the thumb (the first render already shows it in place).
-    if (shownValue.current === value) return;
-    shownValue.current = value;
     if (reduceMotion) {
+      // Jumps. Also settles a slide that Reduce Motion turning on stopped half-way (Codex r1).
+      shownValue.current = value;
       position.setValue(value ? 1 : 0);
       return;
     }
+    // Only a change moves the thumb (the first render already shows it in place).
+    if (shownValue.current === value) return;
+    shownValue.current = value;
     const animation = Animated.timing(position, {
       duration: SWITCH_SLIDE_MS,
       easing: Easing.out(Easing.cubic),
