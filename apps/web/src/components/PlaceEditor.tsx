@@ -3,7 +3,6 @@
 import { DayframeIcon } from "@/components/blocks/DayframeIcon";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { LocateFixed } from "lucide-react";
 import { useCallback, useMemo, useRef, useState } from "react";
 import {
   leavingRoleHolder,
@@ -317,7 +316,6 @@ export function PlaceEditor({
             variant="secondary"
             onClick={useCurrentLocation}
           >
-            <LocateFixed aria-hidden="true" size={18} />
             {locating ? "Finding…" : "Current location"}
           </Button>
           <div className="place-radius-field">

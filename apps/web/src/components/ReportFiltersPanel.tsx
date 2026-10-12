@@ -3,7 +3,7 @@
 import { useMemo, useState, type FormEvent } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { SlidersHorizontal, X } from "lucide-react";
+import { X } from "lucide-react";
 import { ModalDialog } from "@/components/ui/Primitives";
 import { blockStyle } from "@/lib/block-style";
 import { defaultReportFilters, reportsHref, type ReportFilters } from "@/lib/report-filters";
@@ -48,7 +48,6 @@ export function ReportFiltersPanel({
     <section className="df-report-filters" aria-label="Report filters">
       <p className="sr-only" role="status">{summary}</p>
       <button aria-haspopup="dialog" className="df-rbtn df-rbtn--sm" onClick={() => setOpen(true)} type="button">
-        <SlidersHorizontal aria-hidden="true" size={15} />
         Filter{chips.length ? ` · ${chips.length}` : ""}
       </button>
       {chips.length > 0 ? (

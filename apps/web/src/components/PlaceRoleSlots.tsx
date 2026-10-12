@@ -3,7 +3,6 @@
 import { DayframeIcon } from "@/components/blocks/DayframeIcon";
 
 import Link from "next/link";
-import { Plus } from "lucide-react";
 import { useRef, useState } from "react";
 import {
   initialPreviousPlaceName,
@@ -190,7 +189,6 @@ export function PlaceRoleSlots({
                   </p>
                 ) : null}
                 <Link className="place-role-new-link" href={`/places/new?role=${editing.role}`}>
-                  <Plus aria-hidden="true" size={16} />
                   Add a new place as {editingSlot.label}
                 </Link>
               </>

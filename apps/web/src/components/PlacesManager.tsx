@@ -125,7 +125,6 @@ export function PlacesManager({
                   className="ui-button ui-button-secondary is-compact"
                   href={`/places/${encodeURIComponent(place.id)}/edit`}
                 >
-                  <DayframeIcon glyph="pencil" size={16}/>
                   Edit
                 </Link>
                 <IconButton

@@ -1,4 +1,3 @@
-import { DayframeIcon } from "@/components/blocks/DayframeIcon";
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { ReportDetailsTable } from "@/components/ReportDetailsTable";
@@ -67,7 +66,6 @@ export default async function ReportsPage({
             </Link>
           </nav>
           <Link aria-label="Export filtered report as CSV" className="df-rbtn df-rbtn--sm" href={reportExportHref(report.appliedFilters)}>
-            <DayframeIcon glyph="download" size={16}/>
             Export
           </Link>
         </div>
