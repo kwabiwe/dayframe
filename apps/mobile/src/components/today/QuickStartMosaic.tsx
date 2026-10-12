@@ -5,14 +5,14 @@ import { blockColorsFor, DAYFRAME_BLOCKS } from "@dayframe/shared";
 import { ActivityIcon } from "../icons/DayframeIcon";
 import type { MobileTheme } from "../../lib/mobileTheme";
 import { mobileTextProps } from "../../lib/mobileTypography";
-import { localLayoutTransition, localPresenceEntering, localPresenceExiting } from "../../lib/motion";
+import { localLayoutTransition, localPresenceExiting } from "../../lib/motion";
 import {
   QUICK_START_MOSAIC,
   quickStartTileFrames,
   type QuickStartColumn,
   type QuickStartTile,
 } from "../../lib/quickStartMosaic";
-import { useDropIn } from "../../lib/blocksMotion";
+import { useDropIn, useTileFadeIn } from "../../lib/blocksMotion";
 import { compactDuration, spokenDuration } from "./todayBlocksLayout";
 
 /**
@@ -53,7 +53,6 @@ export function QuickStartMosaic({
   const [width, setWidth] = useState(0);
   // Memoised so the 1 s timer tick does not re-register a layout config on every tile.
   const tileLayout = useMemo(() => localLayoutTransition(reduceMotion), [reduceMotion]);
-  const tileEntering = useMemo(() => localPresenceEntering(reduceMotion), [reduceMotion]);
   const tileExiting = useMemo(() => localPresenceExiting(reduceMotion), [reduceMotion]);
   // No entrance on first paint; a tile that arrives later (a newly pinned activity) fades in.
   const painted = useRef(false);
@@ -89,13 +88,17 @@ export function QuickStartMosaic({
       >
         {frames.map((tile, index) => (
           <Reanimated.View
-            entering={painted.current && AppState.currentState === "active" ? tileEntering : undefined}
             exiting={tileExiting}
             key={tile.id}
             layout={tileLayout}
             style={[styles.slot, { height: tile.height, left: tile.x, top: tile.y, width: tile.width }]}
           >
-            <DropInTile index={index} play={Boolean(dropIn.current) && !painted.current}>
+            <DropInTile
+              arrived={painted.current && AppState.currentState === "active"}
+              index={index}
+              play={Boolean(dropIn.current) && !painted.current}
+              reduceMotion={reduceMotion}
+            >
               <QuickStartTileButton
                 onPress={() => (tile.id === runningActivityId ? onOpenRunning() : onStartActivity(tile.id))}
                 recording={tile.id === runningActivityId}
@@ -111,10 +114,19 @@ export function QuickStartMosaic({
   );
 }
 
-/** The drop-in moves the tile inside its slot; the slot keeps its own layout transition. */
-function DropInTile({ children, index, play }: { children: ReactNode; index: number; play: boolean }) {
-  const style = useDropIn({ index, play });
-  return <Reanimated.View style={[styles.dropIn, style]}>{children}</Reanimated.View>;
+/**
+ * The drop-in (first paint) or the arrival fade (a tile pinned later) plays inside the tile's
+ * slot; the slot keeps its own layout transition and exit. Both settle visible on their own even
+ * if their frames never run (Trello 210).
+ */
+function DropInTile({ arrived, children, index, play, reduceMotion }: { arrived: boolean; children: ReactNode; index: number; play: boolean; reduceMotion: boolean }) {
+  const drop = useDropIn({ index, play });
+  const fade = useTileFadeIn({ play: arrived && !play, reduceMotion });
+  return (
+    <Reanimated.View style={[styles.dropIn, fade]} testID="quick-start-tile-fade">
+      <Reanimated.View style={[styles.dropIn, drop]} testID="quick-start-tile-drop">{children}</Reanimated.View>
+    </Reanimated.View>
+  );
 }
 
 function QuickStartTileButton({

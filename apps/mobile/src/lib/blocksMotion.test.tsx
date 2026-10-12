@@ -39,6 +39,7 @@ import {
   useBlockPop,
   useBreathingRing,
   useDropIn,
+  useTileFadeIn,
   DROP_IN_SETTLE_MS,
   type LandingRequest,
 } from "./blocksMotion";
@@ -193,6 +194,46 @@ describe("useBlockPop", () => {
     expect(scale.value).toBe(1);
     act(() => tree.update(<Pop entryId="entry-a" request={{ ...request, requestedAt: Date.now() - 5000, token: 13 }} />));
     expect(scale.value).toBe(1);
+    act(() => tree.unmount());
+  });
+});
+
+describe("useTileFadeIn", () => {
+  function Fade(props: Parameters<typeof useTileFadeIn>[0]) {
+    useTileFadeIn(props);
+    return null;
+  }
+
+  it("fades an arriving tile in, and forces it visible if its frames never run", () => {
+    vi.useFakeTimers();
+    try {
+      assigned.length = 0;
+      initialValues.length = 0;
+      let tree!: ReturnType<typeof create>;
+      act(() => {
+        tree = create(<Fade play reduceMotion={false} />);
+      });
+      expect(initialValues).toEqual([0]);
+      const [opacity] = assigned;
+      expect(opacity.value).toMatchObject({ kind: "timing", to: 1 });
+      act(() => { vi.advanceTimersByTime(140 + DROP_IN_SETTLE_MS); });
+      expect(opacity.value).toBe(1);
+      act(() => tree.unmount());
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("shows a tile at rest when it is not arriving", () => {
+    assigned.length = 0;
+    initialValues.length = 0;
+    let tree!: ReturnType<typeof create>;
+    act(() => {
+      tree = create(<Fade play={false} reduceMotion={false} />);
+    });
+    expect(initialValues).toEqual([1]);
+    // Never animated: its one shared value stays at 1.
+    expect(assigned.map((shared) => shared.value)).toEqual([1]);
     act(() => tree.unmount());
   });
 });

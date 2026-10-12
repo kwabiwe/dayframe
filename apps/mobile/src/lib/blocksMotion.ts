@@ -272,6 +272,32 @@ export const DROP_IN_SETTLE_MS = 900;
  * Drops one tile into place once, staggered by its order. `play` is decided by the caller when the
  * tile mounts (first paint of the process only), so refreshes, hydration and remounts never replay it.
  */
+/**
+ * A tile that arrives after first paint (a newly pinned activity) fades in over the control
+ * duration (90 ms under Reduce Motion), owned here rather than by a Reanimated entering animation,
+ * so the same safety net applies: it is forced to full opacity shortly after, frames or not.
+ */
+export function useTileFadeIn({ play, reduceMotion }: { play: boolean; reduceMotion: boolean }) {
+  const playing = useRef(play).current;
+  const opacity = useSharedValue(playing ? 0 : 1);
+  useEffect(() => {
+    if (!playing) return undefined;
+    const duration = reduceMotion ? 90 : MOBILE_MOTION.control;
+    opacity.value = withTiming(1, { duration, reduceMotion: ReduceMotion.Never });
+    const settle = () => {
+      cancelAnimation(opacity);
+      opacity.value = 1;
+    };
+    const fallback = setTimeout(settle, duration + DROP_IN_SETTLE_MS);
+    return () => {
+      clearTimeout(fallback);
+      settle();
+    };
+    // Plays once per mount.
+  }, []);
+  return useAnimatedStyle(() => ({ opacity: opacity.value }));
+}
+
 export function useDropIn({ index, play }: { index: number; play: boolean }) {
   const playing = useRef(play).current;
   const translateY = useSharedValue(playing ? DROP_IN.distance : 0);
