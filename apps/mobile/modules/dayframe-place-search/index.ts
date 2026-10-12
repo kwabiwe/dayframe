@@ -9,6 +9,7 @@ import type {
   PlaceSearchResolutionRequest,
   PlaceSearchSuggestionsResult,
   NearbyPointOfInterestQuery,
+  NearbyPointOfInterestResolutionRequest,
   NearbyPointOfInterestResult,
   ResolvedPlaceSearchResult
 } from "./src/DayframePlaceSearch.types";
@@ -26,6 +27,7 @@ declare class DayframePlaceSearchNativeModule extends NativeModule<DayframePlace
     requestId: string
   ): Promise<ResolvedPlaceSearchResult>;
   searchNearby(request: NearbyPointOfInterestQuery): Promise<NearbyPointOfInterestResult>;
+  resolveNearby(id: string, requestId: string): Promise<ResolvedPlaceSearchResult>;
   cancelNearby(): Promise<void>;
 }
 
@@ -64,6 +66,15 @@ export const searchNearby = (request: NearbyPointOfInterestQuery) => {
   return nativeModule.searchNearby(request);
 };
 
+export const resolveNearby = (request: NearbyPointOfInterestResolutionRequest) => {
+  if (!nativeModule) {
+    return Promise.reject(Object.assign(new Error("Nearby place search is unavailable."), {
+      code: "search_unavailable"
+    }));
+  }
+  return nativeModule.resolveNearby(request.id, request.requestId);
+};
+
 export const cancelNearby = () => nativeModule?.cancelNearby() ?? Promise.resolve();
 
 export const addSuggestionsListener = (
@@ -79,6 +90,7 @@ export type {
   PlaceSearchBias,
   NearbyPointOfInterest,
   NearbyPointOfInterestQuery,
+  NearbyPointOfInterestResolutionRequest,
   NearbyPointOfInterestResult,
   PlaceSearchErrorResult,
   PlaceSearchQuery,

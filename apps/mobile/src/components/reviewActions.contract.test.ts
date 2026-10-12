@@ -99,29 +99,32 @@ describe("mobile Review action contracts", () => {
     expect(evidenceSource).toContain("resolveLocationReviewItem(id, action)");
   });
 
-  it("keeps evidence fields visible above the keyboard and uses compact category visuals", () => {
-    const categoryChoiceSource = evidenceEditorSource
-      .split("function CategoryChoice")[1]
-      ?.split("function ActivityGlyph")[0] ?? "";
+  it("keeps evidence fields visible above the keyboard and uses the shared activity chips", () => {
+    const chipsSource = source("./ActivityChips.tsx");
     expect(evidenceEditorSource).toContain('automaticallyAdjustKeyboardInsets={Platform.OS === "ios"}');
     expect(evidenceEditorSource).toContain("keyboardRevealScrollOffset");
     expect(evidenceEditorSource).toContain("revealGenerationRef");
-    expect(evidenceEditorSource).toContain('placeholder={journeyCopy?.placeholder ?? "Add activity (optional)"}');
+    expect(evidenceEditorSource).toContain('placeholder={journeyCopy?.placeholder ?? "Add a name (optional)"}');
     expect(evidenceEditorSource).toContain("initialLocationReviewDescription");
-    expect(evidenceEditorSource).toMatch(/touch:\s*\{\s*minHeight:\s*44/);
-    expect(evidenceEditorSource).toMatch(/visual:\s*\{\s*minHeight:\s*32/);
-    expect(categoryChoiceSource).not.toContain("CheckGlyph");
+    // 38-point chips with 6 points of slop above and below: at least 44-point targets.
+    expect(chipsSource).toContain("minHeight: 38");
+    expect(chipsSource).toContain("const CHIP_HIT_SLOP = { top: 6, bottom: 6 };");
+    expect(chipsSource).not.toContain("CheckGlyph");
   });
 
-  it("loads nearby POIs for saved and unknown stays and keeps typed search as the fallback", () => {
+  it("lists nearby POIs under the empty search field for every stay and keeps typed search as the fallback", () => {
     expect(evidenceEditorSource).toContain("createNativeNearbyPointOfInterestProvider");
-    expect(evidenceEditorSource).toContain('!isFocused || !nearbyProvider || evidence.segment.kind !== "stay" || baselinePlaceId || !centre');
-    expect(evidenceEditorSource).toContain("void controller.load(centre)");
-    expect(evidenceEditorSource).toContain("Nearby places");
-    expect(evidenceEditorSource).toContain("Search other places");
-    expect(evidenceEditorSource).toContain("searchQuery.trim().length < 2");
+    // D3: a saved match no longer hides nearby places.
+    expect(evidenceEditorSource).toContain("if (!isFocused || !nearbyProvider || visitLatitude === null || visitLongitude === null) return;");
+    expect(evidenceEditorSource).not.toContain("|| baselinePlaceId || !centre");
+    expect(evidenceEditorSource).toContain("void controller.load({ latitude: visitLatitude, longitude: visitLongitude });");
+    expect(evidenceEditorSource).toContain(">Nearby</Text>");
+    expect(evidenceEditorSource).toContain('accessibilityLabel="Search places"');
+    expect(evidenceEditorSource).toContain('const showNearby = searchQuery.trim().length < 2 && nearbyState.status !== "idle" &&');
     expect(evidenceEditorSource).toContain("nearbyChoices.map");
-    expect(evidenceEditorSource).toContain("setSelectedPoint({ latitude: place.latitude, longitude: place.longitude })");
+    // The coordinate of a nearby place crosses only when it is picked.
+    expect(evidenceEditorSource).toContain("const result = await controller.resolve(place);");
+    expect(evidenceEditorSource.indexOf('accessibilityLabel="Search places"')).toBeLessThan(evidenceEditorSource.indexOf(">Nearby</Text>"));
   });
 
   it("defaults POI selection to one-time recording with an explicit save toggle", () => {

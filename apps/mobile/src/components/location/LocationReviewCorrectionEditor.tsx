@@ -1,4 +1,4 @@
-import { activityMarkerRadius, formatDuration } from "@dayframe/shared";
+import { formatDuration } from "@dayframe/shared";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Alert,
@@ -16,7 +16,6 @@ import Reanimated from "react-native-reanimated";
 import Svg, { Circle as SvgCircle, Path, Rect } from "react-native-svg";
 import {
   DAYFRAME_BLOCKS,
-  paletteColorFor,
   placeDisplayName,
   travelModeLabel,
   tripStopRows,
@@ -55,6 +54,9 @@ import {
 import { pressable, useMobileTheme, type MobileTheme } from "@/lib/mobileTheme";
 import { MOBILE_DISPLAY_FONT, mobileTextProps } from "@/lib/mobileTypography";
 import { SettingsBlockGroup, SettingsBlockRow, SettingsPillButton, SettingsSwitch } from "../settings/SettingsBlocks";
+import { ActivityChip, ActivityChipRow, AllActivitiesChip } from "../ActivityChips";
+import { ActivityPickerSheet } from "../ActivityPickerSheet";
+import { activityChips } from "../../lib/activityChoice";
 import {
   localLayoutTransition,
   localPresenceEntering,
@@ -87,8 +89,10 @@ export function LocationReviewCorrectionEditor({
   categories,
   evidence,
   isFocused,
+  onCreateActivity,
   onResolve,
   places,
+  recentActivityIds = [],
   reviewItem,
   saving,
   statusMessage
@@ -97,8 +101,12 @@ export function LocationReviewCorrectionEditor({
   categories: Category[];
   evidence: LocationReviewEvidenceDto;
   isFocused: boolean;
+  /** All activities' Create: resolves to the new activity's id, or a message to show. */
+  onCreateActivity?: (name: string) => Promise<{ id: string } | { error: string }>;
   onResolve: (action: LocationReviewAction, successMessage: string) => Promise<void>;
   places: Place[];
+  /** Activities used most recently first, for the chips and the picker's Recent. */
+  recentActivityIds?: readonly string[];
   reviewItem: MobileReviewItem | undefined;
   saving: boolean;
   statusMessage?: string | null;
@@ -143,6 +151,10 @@ export function LocationReviewCorrectionEditor({
   }));
   const [selectedCategoryId, setSelectedCategoryId] = useState<string | null>(baselineCategoryId);
   const [categoryTouched, setCategoryTouched] = useState(false);
+  // The chips keep their order while the person taps them (the entry sheet's anchor): only a pick
+  // from All activities moves the chosen activity to the front.
+  const [chipAnchorId, setChipAnchorId] = useState<string | null>(baselineCategoryId);
+  const [activityPickerOpen, setActivityPickerOpen] = useState(false);
   const [selectedSavedPlaceId, setSelectedSavedPlaceId] = useState<string | null>(baselinePlaceId);
   const [newPlace, setNewPlace] = useState<LocationReviewNewPlace | null>(null);
   const [selectedPoint, setSelectedPoint] = useState(() => pointFromEvidence(evidence));
@@ -233,32 +245,53 @@ export function LocationReviewCorrectionEditor({
     };
   }, [isFocused, provider]);
 
+  const baselinePlace = placeForSelection(baselinePlaceId, evidence.map.nearbySavedPlaces, places);
+  const baselinePlaceName = evidence.display.placeName || baselinePlace?.name || "Saved place";
+  // Saved places already listed under Where; a nearby place with the same name is not repeated.
+  const listedSavedPlaceNames = useMemo(
+    () => [
+      ...(baselinePlaceId ? [baselinePlaceName] : []),
+      ...evidence.map.nearbySavedPlaces.map((place) => place.name)
+    ],
+    [baselinePlaceId, baselinePlaceName, evidence.map.nearbySavedPlaces]
+  );
+  const listedSavedPlaceNamesRef = useRef(listedSavedPlaceNames);
+  listedSavedPlaceNamesRef.current = listedSavedPlaceNames;
+
+  // D3: every stay (a saved match included) lists the nearest few Apple places around the visit
+  // under the empty search field. The search runs once per visit centre while the screen is focused;
+  // the coordinate goes to MapKit only and is never logged or kept.
+  const visitCentre = pointFromEvidence(evidence);
+  const visitLatitude = evidence.segment.kind === "stay" ? visitCentre?.latitude ?? null : null;
+  const visitLongitude = evidence.segment.kind === "stay" ? visitCentre?.longitude ?? null : null;
   useEffect(() => {
-    const centre = pointFromEvidence(evidence);
-    if (!isFocused || !nearbyProvider || evidence.segment.kind !== "stay" || baselinePlaceId || !centre) return;
-    const controller = new NearbyPointOfInterestController(nearbyProvider, setNearbyState);
+    if (!isFocused || !nearbyProvider || visitLatitude === null || visitLongitude === null) return;
+    const controller = new NearbyPointOfInterestController(
+      nearbyProvider,
+      setNearbyState,
+      () => listedSavedPlaceNamesRef.current
+    );
     nearbyControllerRef.current = controller;
-    void controller.load(centre);
+    void controller.load({ latitude: visitLatitude, longitude: visitLongitude });
     return () => {
       controller.dispose();
       nearbyControllerRef.current = null;
+      setNearbyState(emptyNearbyState);
     };
-  }, [baselinePlaceId, evidence, isFocused, nearbyProvider]);
+  }, [isFocused, nearbyProvider, visitLatitude, visitLongitude]);
 
-  const baselinePlace = placeForSelection(baselinePlaceId, evidence.map.nearbySavedPlaces, places);
-  const nearbyChoices = visibleNearbyPlaces(nearbyState.places, baselinePlace);
+  // The chosen new place is the selected row above, so the list under the field does not repeat it.
+  const nearbyChoices = visibleNearbyPlaces(
+    nearbyState.places,
+    newPlace ? [...listedSavedPlaceNames, newPlace.name] : listedSavedPlaceNames
+  );
+  const chipActivities = useMemo(
+    () => activityChips(categories, chipAnchorId, recentActivityIds),
+    [categories, chipAnchorId, recentActivityIds]
+  );
+  // A journey with no suggested activity is filed as Commute unless the person picks one.
+  const automaticCommute = isJourney && baselineCategoryId === null && !categoryTouched;
 
-  const selectedPlace = placeForSelection(
-    selectedSavedPlaceId,
-    evidence.map.nearbySavedPlaces,
-    places
-  );
-  const placeAnswer = newPlace?.name || selectedPlace?.name || (
-    selectedSavedPlaceId === baselinePlaceId ? evidence.display.placeName : null
-  );
-  const placeDetail = newPlace?.formattedAddress || (
-    selectedSavedPlaceId === baselinePlaceId ? evidence.display.addressSummary : null
-  );
   const editableWindow = stopAt
     ? parseLocationReviewWindow({
         baselineStartedAt: evidence.segment.startedAt,
@@ -274,8 +307,8 @@ export function LocationReviewCorrectionEditor({
     : "—";
 
   function changeSearchQuery(value: string) {
+    // Typing never drops a place already chosen; it stays the selected row until another is picked.
     setSearchQuery(value);
-    if (newPlace) setNewPlace(null);
     const bias = selectPlaceSearchBias({
       selectedCoordinate: selectedPoint,
       existingCoordinate: pointFromEvidence(evidence),
@@ -304,7 +337,9 @@ export function LocationReviewCorrectionEditor({
       setSaveForFuture(false);
       setSelectedSavedPlaceId(null);
       setSelectedPoint({ latitude: result.latitude, longitude: result.longitude });
-      setSearchQuery(result.title);
+      // The chosen place is now the selected row above; the field empties so nearby places return.
+      setSearchQuery("");
+      setSearchState(emptySearchState);
       setEditingCentre(false);
     } catch (error) {
       const message = friendlyPlaceSearchError(error);
@@ -314,25 +349,37 @@ export function LocationReviewCorrectionEditor({
     }
   }
 
-  function chooseNearbyPlace(place: NearbyPointOfInterestState["places"][number]) {
-    setNewPlace({
-      name: place.name.trim(),
-      formattedAddress: place.formattedAddress,
-      latitude: place.latitude,
-      longitude: place.longitude
-    });
-    setSaveForFuture(false);
-    setSelectedSavedPlaceId(null);
-    setSelectedPoint({ latitude: place.latitude, longitude: place.longitude });
-    setSearchQuery("");
-    setSearchState(emptySearchState);
-    void controllerRef.current?.cancel();
-    setEditingCentre(false);
+  async function chooseNearbyPlace(place: NearbyPointOfInterestState["places"][number]) {
+    const controller = nearbyControllerRef.current;
+    if (!controller || resolvingSuggestion) return;
+    setResolvingSuggestion(true);
+    try {
+      // The coordinate crosses from MapKit only now, for the one place picked.
+      const result = await controller.resolve(place);
+      setNewPlace({
+        name: result.name?.trim() || result.title.trim(),
+        formattedAddress: result.formattedAddress || result.subtitle,
+        latitude: result.latitude,
+        longitude: result.longitude
+      });
+      setSaveForFuture(false);
+      setSelectedSavedPlaceId(null);
+      setSelectedPoint({ latitude: result.latitude, longitude: result.longitude });
+      setSearchQuery("");
+      setSearchState(emptySearchState);
+      void controllerRef.current?.cancel();
+      setEditingCentre(false);
+    } catch (error) {
+      // Said inline under Nearby (never a system alert): the list was replaced while picking.
+      const message = friendlyPlaceSearchError(error);
+      if (message) setNearbyState((current) => ({ ...current, message }));
+    } finally {
+      setResolvingSuggestion(false);
+    }
   }
 
   function clearPlaceSearch() {
     setSearchQuery("");
-    setNewPlace(null);
     setSearchState(emptySearchState);
     void controllerRef.current?.cancel();
   }
@@ -344,12 +391,27 @@ export function LocationReviewCorrectionEditor({
     setEditingCentre(false);
     clearPlaceSearch();
     const place = evidence.map.nearbySavedPlaces.find((candidate) => candidate.id === placeId);
-    if (place) {
-      setSelectedPoint({
-        longitude: place.point.coordinates[0],
-        latitude: place.point.coordinates[1]
-      });
+    const point = place
+      ? { longitude: place.point.coordinates[0], latitude: place.point.coordinates[1] }
+      : pointFromEvidence(evidence);
+    if (point) setSelectedPoint(point);
+  }
+
+  /** A saved place row: picks it, or (tapped again) goes back to the matched place. */
+  function toggleSavedPlace(placeId: string) {
+    const selected = !newPlace && selectedSavedPlaceId === placeId;
+    chooseSavedPlace(selected && placeId !== baselinePlaceId ? baselinePlaceId : placeId);
+  }
+
+  /** Activity chips: a tap picks; a tap on the chosen chip clears it (a journey goes back to Commute automatically). */
+  function toggleActivity(categoryId: string) {
+    if (selectedCategoryId === categoryId) {
+      setSelectedCategoryId(null);
+      setCategoryTouched(!(isJourney && baselineCategoryId === null));
+      return;
     }
+    setSelectedCategoryId(categoryId);
+    setCategoryTouched(true);
   }
 
   function useManualMapPin() {
@@ -424,6 +486,22 @@ export function LocationReviewCorrectionEditor({
     );
   }
 
+  async function recordWithoutPlace() {
+    if (saving) return;
+    Keyboard.dismiss();
+    const edit = parsedEdit();
+    if (!edit) return;
+    await onResolve(
+      buildLocationReviewResolutionAction({
+        baselinePlaceId,
+        edit,
+        newPlace: null,
+        selectedSavedPlaceId: null
+      }),
+      "The visit was recorded without a place."
+    );
+  }
+
   async function recordOnce() {
     if (saving) return;
     const edit = parsedEdit();
@@ -449,6 +527,13 @@ export function LocationReviewCorrectionEditor({
         : selectedSavedPlaceId !== baselinePlaceId
           ? "Use place and record"
           : "Record visit";
+  const placeRowCount = (newPlace ? 1 : 0) +
+    (baselinePlaceId ? 1 : 0) +
+    evidence.map.nearbySavedPlaces.filter((place) => place.id !== baselinePlaceId).length;
+  // Nearby shows under an empty (or one-letter) field once a search has started, unless every
+  // result is already on screen above.
+  const showNearby = searchQuery.trim().length < 2 && nearbyState.status !== "idle" &&
+    (nearbyState.status !== "results" || nearbyChoices.length > 0);
 
   return (
     <>
@@ -504,7 +589,7 @@ export function LocationReviewCorrectionEditor({
             ) : null}
           </Reanimated.View>
 
-          {statusMessage ? (
+          {statusMessage?.trim() ? (
             <Reanimated.View
               entering={localPresenceEntering(reduceMotion)}
               exiting={localPresenceExiting(reduceMotion)}
@@ -514,7 +599,9 @@ export function LocationReviewCorrectionEditor({
               <Text {...mobileTextProps("body")} accessibilityLiveRegion="polite" style={styles.reviewMetaLine}>{statusMessage}</Text>
             </Reanimated.View>
           ) : null}
-          <Reanimated.View layout={localLayoutTransition(reduceMotion)} style={styles.panel}>
+          {/* The map is its own rounded surface: no framing card around it, so no empty band of
+              card shows above Where when the page is scrolled (staging feedback, 12 October). */}
+          <Reanimated.View layout={localLayoutTransition(reduceMotion)}>
             <LocationEvidenceMap
               appearance={theme.mode === "dark" ? "dark" : "light"}
               evidence={evidence}
@@ -536,106 +623,91 @@ export function LocationReviewCorrectionEditor({
             <Reanimated.View layout={localLayoutTransition(reduceMotion)}>
               <SettingsBlockGroup theme={theme} title="Where were you?">
                 <View style={editorStyles.section}>
-                  {placeAnswer ? (
-                    <View style={editorStyles.answerRow}>
-                      <View style={editorStyles.answerIcon}>
-                        <ActivityGlyph name="place" color={theme.textPrimary} />
-                      </View>
-                      <View style={editorStyles.answerText}>
-                        <Text {...mobileTextProps("itemTitle")} style={editorStyles.answerTitle}>{placeAnswer}</Text>
-                        {placeDetail ? <Text {...mobileTextProps("body")} style={editorStyles.answerMeta}>{placeDetail}</Text> : null}
-                        {newPlace ? (
-                          <Text {...mobileTextProps("body")} style={editorStyles.answerMeta}>
-                            {saveForFuture
-                              ? "This place will be saved for future visits."
-                              : "This name will be used for this visit only."}
-                          </Text>
-                        ) : null}
-                      </View>
-                    </View>
-                  ) : null}
-
-                  {evidence.map.nearbySavedPlaces.length > 0 || baselinePlaceId ? (
-                    <View style={editorStyles.placeChoices}>
-                      {baselinePlaceId ? (
+                  {/* Always mounted, so a row leaving (the last one included) can fade out in place; empty,
+                      it cancels the section gap so nothing is reserved. */}
+                  <Reanimated.View
+                    accessibilityRole="radiogroup"
+                    layout={localLayoutTransition(reduceMotion)}
+                    style={[editorStyles.placeChoices, placeRowCount === 0 ? editorStyles.placeChoicesEmpty : null]}
+                  >
+                    {newPlace ? (
+                      <Reanimated.View
+                        entering={localPresenceEntering(reduceMotion)}
+                        exiting={localPresenceExiting(reduceMotion)}
+                        key="new-place"
+                        layout={localLayoutTransition(reduceMotion)}
+                      >
                         <PlaceChoice
-                          detail="Current match"
-                          name={evidence.display.placeName || "Current saved place"}
-                          onPress={() => chooseSavedPlace(baselinePlaceId)}
+                          detail={newPlace.formattedAddress || "Pinned on the map"}
+                          name={newPlace.name}
+                          onPress={() => undefined}
+                          onRemove={saving ? undefined : () => chooseSavedPlace(baselinePlaceId)}
+                          selected
+                          theme={theme}
+                        />
+                      </Reanimated.View>
+                    ) : null}
+                    {baselinePlaceId ? (
+                      <Reanimated.View key={`saved-${baselinePlaceId}`} layout={localLayoutTransition(reduceMotion)}>
+                        <PlaceChoice
+                          detail="Matched place"
+                          name={baselinePlaceName}
+                          onPress={() => toggleSavedPlace(baselinePlaceId)}
                           selected={!newPlace && selectedSavedPlaceId === baselinePlaceId}
                           theme={theme}
                         />
-                      ) : null}
-                      {evidence.map.nearbySavedPlaces.filter((place) => place.id !== baselinePlaceId).map((place) => (
+                      </Reanimated.View>
+                    ) : null}
+                    {evidence.map.nearbySavedPlaces.filter((place) => place.id !== baselinePlaceId).map((place) => (
+                      <Reanimated.View key={`saved-${place.id}`} layout={localLayoutTransition(reduceMotion)}>
                         <PlaceChoice
-                          detail={`${place.distanceMeters} m away`}
-                          key={place.id}
+                          detail={`Saved place · ${formatNearbyDistance(place.distanceMeters)}`}
                           name={place.name}
-                          onPress={() => chooseSavedPlace(place.id)}
+                          onPress={() => toggleSavedPlace(place.id)}
                           selected={!newPlace && selectedSavedPlaceId === place.id}
                           theme={theme}
                         />
-                      ))}
-                      <PlaceChoice
-                        detail="Record without a saved-place match"
-                        name="Record without choosing a place"
-                        onPress={() => chooseSavedPlace(null)}
-                        selected={!newPlace && selectedSavedPlaceId === null}
-                        theme={theme}
-                      />
-                    </View>
-                  ) : null}
+                      </Reanimated.View>
+                    ))}
+                  </Reanimated.View>
 
-                  {searchQuery.trim().length < 2 && nearbyState.status !== "idle" ? (
+                  {newPlace ? (
                     <Reanimated.View
-                      entering={localPresenceEntering(reduceMotion, "rise")}
+                      entering={localPresenceEntering(reduceMotion)}
                       exiting={localPresenceExiting(reduceMotion)}
                       layout={localLayoutTransition(reduceMotion)}
-                      style={editorStyles.resultSection}
+                      style={editorStyles.toggleRow}
                     >
-                      <Text {...mobileTextProps("metadata")} style={editorStyles.fieldLabel}>Nearby places</Text>
-                      {nearbyState.status === "loading" ? (
-                        <Text {...mobileTextProps("body")} accessibilityLiveRegion="polite" style={editorStyles.helperText}>Finding nearby places…</Text>
-                      ) : null}
-                      {nearbyState.message ? (
-                        <Text {...mobileTextProps("body")} accessibilityLiveRegion="polite" style={editorStyles.helperText}>{nearbyState.message}</Text>
-                      ) : null}
-                      {nearbyChoices.length > 0 ? (
-                        <View accessibilityLabel={`${nearbyChoices.length} nearby places`} style={editorStyles.placeChoices}>
-                          {nearbyChoices.map((place) => (
-                            <PlaceChoice
-                              detail={`${place.distanceMeters} m away`}
-                              key={`${place.name}:${place.latitude}:${place.longitude}`}
-                              name={place.name}
-                              onPress={() => chooseNearbyPlace(place)}
-                              selected={Boolean(
-                                newPlace &&
-                                newPlace.name === place.name &&
-                                newPlace.latitude === place.latitude &&
-                                newPlace.longitude === place.longitude
-                              )}
-                              theme={theme}
-                            />
-                          ))}
-                        </View>
-                      ) : null}
+                      <View style={editorStyles.answerText}>
+                        <Text {...mobileTextProps("control")} style={editorStyles.toggleTitle}>Save for future visits</Text>
+                        <Text {...mobileTextProps("body")} style={editorStyles.answerMeta}>
+                          {saveForFuture ? "Saved as a place Dayframe can recognise next time." : "Used for this visit only."}
+                        </Text>
+                      </View>
+                      <SettingsSwitch
+                        disabled={saving}
+                        label="Save for future visits"
+                        onValueChange={setSaveForFuture}
+                        theme={theme}
+                        value={saveForFuture}
+                      />
                     </Reanimated.View>
                   ) : null}
 
-                  <Text {...mobileTextProps("metadata")} style={editorStyles.fieldLabel}>Search other places</Text>
-                  <View style={editorStyles.searchField}>
+                  <Reanimated.View layout={localLayoutTransition(reduceMotion)} style={editorStyles.searchField}>
                     <DayframeIcon color={theme.textSecondary} glyph="search" size={18} />
                     <TextInput
                       ref={searchInputRef}
                       {...mobileTextProps("input")}
-                      accessibilityLabel="Search other places"
+                      accessibilityHint="Nearby places are listed below while the field is empty"
+                      accessibilityLabel="Search places"
                       autoCapitalize="words"
                       autoCorrect={false}
                       editable={Boolean(provider) && !saving}
                       onChangeText={changeSearchQuery}
                       onBlur={() => blurRevealControl(searchInputRef.current)}
                       onFocus={() => focusRevealControl(searchInputRef.current)}
-                      placeholder={provider ? "Search address or place" : "Place search unavailable in this build"}
+                      placeholder={provider ? "Search for a place or address" : "Place search unavailable in this build"}
                       placeholderTextColor={theme.textSecondary}
                       returnKeyType="search"
                       style={editorStyles.searchInput}
@@ -652,7 +724,44 @@ export function LocationReviewCorrectionEditor({
                         <DayframeIcon color={theme.textSecondary} glyph="x" size={17} />
                       </Pressable>
                     ) : null}
-                  </View>
+                  </Reanimated.View>
+
+                  {showNearby ? (
+                    // Under the empty field: the nearest few places around the visit (D3). A query of
+                    // two characters replaces them with search results; clearing brings them back.
+                    <Reanimated.View
+                      entering={localPresenceEntering(reduceMotion, "rise")}
+                      exiting={localPresenceExiting(reduceMotion)}
+                      layout={localLayoutTransition(reduceMotion)}
+                      style={editorStyles.resultSection}
+                      testID="location-evidence-nearby"
+                    >
+                      <Text {...mobileTextProps("metadata")} style={editorStyles.fieldLabel}>Nearby</Text>
+                      {nearbyState.status === "loading" ? (
+                        <Text {...mobileTextProps("body")} accessibilityLiveRegion="polite" style={editorStyles.helperText}>Finding places nearby…</Text>
+                      ) : null}
+                      {nearbyState.message ? (
+                        <Text {...mobileTextProps("body")} accessibilityLiveRegion="polite" style={editorStyles.helperText}>{nearbyState.message}</Text>
+                      ) : null}
+                      {nearbyChoices.length > 0 ? (
+                        <View accessibilityLabel={`${nearbyChoices.length} places nearby`} style={editorStyles.suggestionList}>
+                          {nearbyChoices.map((place, index) => (
+                            <ResultRow
+                              detail={[formatNearbyDistance(place.distanceMeters), place.subtitle].filter(Boolean).join(" · ")}
+                              disabled={resolvingSuggestion || saving}
+                              divider={index > 0}
+                              key={place.id}
+                              onPress={() => void chooseNearbyPlace(place)}
+                              testID={`location-evidence-nearby-${index}`}
+                              theme={theme}
+                              title={place.title}
+                            />
+                          ))}
+                        </View>
+                      ) : null}
+                    </Reanimated.View>
+                  ) : null}
+
                   {searchState.status === "loading" ? (
                     <Text {...mobileTextProps("body")} accessibilityLiveRegion="polite" style={editorStyles.helperText}>Searching…</Text>
                   ) : null}
@@ -671,43 +780,17 @@ export function LocationReviewCorrectionEditor({
                       style={editorStyles.suggestionList}
                     >
                       {searchState.suggestions.map((suggestion, index) => (
-                        <Pressable
-                          accessibilityLabel={[suggestion.title, suggestion.subtitle].filter(Boolean).join(", ")}
-                          accessibilityRole="button"
+                        <ResultRow
+                          detail={suggestion.subtitle}
                           disabled={resolvingSuggestion || saving}
+                          divider={index > 0}
                           key={suggestion.id}
                           onPress={() => void chooseSuggestion(suggestion)}
-                          style={({ pressed }) => [
-                            editorStyles.suggestionRow,
-                            index > 0 ? editorStyles.dividerTop : null,
-                            pressed ? styles.buttonPressed : null
-                          ]}
-                        >
-                          <ActivityGlyph name="place" color={theme.textPrimary} />
-                          <View style={editorStyles.answerText}>
-                            <Text {...mobileTextProps("itemTitle")} style={editorStyles.suggestionTitle}>{suggestion.title}</Text>
-                            {suggestion.subtitle ? (
-                              <Text {...mobileTextProps("metadata")} style={editorStyles.suggestionSubtitle} numberOfLines={2}>{suggestion.subtitle}</Text>
-                            ) : null}
-                          </View>
-                        </Pressable>
+                          theme={theme}
+                          title={suggestion.title}
+                        />
                       ))}
                     </Reanimated.View>
-                  ) : null}
-                  {newPlace ? (
-                    <View style={editorStyles.toggleRow}>
-                      <View style={editorStyles.answerText}>
-                        <Text {...mobileTextProps("control")} style={editorStyles.toggleTitle}>Save for future visits</Text>
-                        <Text {...mobileTextProps("body")} style={editorStyles.answerMeta}>Creates a saved place that Dayframe can learn from later.</Text>
-                      </View>
-                      <SettingsSwitch
-                        disabled={saving}
-                        label="Save for future visits"
-                        onValueChange={setSaveForFuture}
-                        theme={theme}
-                        value={saveForFuture}
-                      />
-                    </View>
                   ) : null}
                 </View>
               </SettingsBlockGroup>
@@ -720,60 +803,53 @@ export function LocationReviewCorrectionEditor({
               <TextInput
                 ref={activityInputRef}
                 {...mobileTextProps("input")}
-                accessibilityLabel="Activity"
+                accessibilityLabel="Name"
                 editable={!saving}
                 maxLength={500}
                 onChangeText={setDescription}
                 onBlur={() => blurRevealControl(activityInputRef.current)}
                 onFocus={() => focusRevealControl(activityInputRef.current)}
-                placeholder={journeyCopy?.placeholder ?? "Add activity (optional)"}
+                placeholder={journeyCopy?.placeholder ?? "Add a name (optional)"}
                 placeholderTextColor={theme.textSecondary}
                 style={styles.textInput}
                 value={description}
               />
-              <Text {...mobileTextProps("metadata")} style={editorStyles.fieldLabel}>Activity</Text>
-              <ScrollView
-                contentContainerStyle={editorStyles.categoryScroller}
-                horizontal
-                keyboardShouldPersistTaps="handled"
-                showsHorizontalScrollIndicator={false}
-              >
-                {isJourney && baselineCategoryId === null ? (
-                  <CategoryChoice
-                    category={null}
-                    label="Commute automatically"
-                    onPress={() => {
-                      setSelectedCategoryId(null);
-                      setCategoryTouched(false);
-                    }}
-                    selected={!categoryTouched}
-                    theme={theme}
-                  />
-                ) : null}
-                <CategoryChoice
-                  category={null}
-                  onPress={() => {
-                    setSelectedCategoryId(null);
-                    setCategoryTouched(true);
-                  }}
-                  selected={selectedCategoryId === null && (
-                    categoryTouched || !isJourney || baselineCategoryId !== null
-                  )}
-                  theme={theme}
-                />
-                {categories.map((category) => (
-                  <CategoryChoice
-                    category={category}
+              {/* D1: the entry sheet's Blocks chips (chosen, pinned, recent; wrapped, never a
+                  sideways scroller), then All activities with search and Create. */}
+              <ActivityChipRow testID="location-evidence-activity-chips">
+                {chipActivities.map((category) => (
+                  <ActivityChip
+                    activity={category}
                     key={category.id}
-                    onPress={() => {
-                      setSelectedCategoryId(category.id);
-                      setCategoryTouched(true);
-                    }}
+                    onPress={() => toggleActivity(category.id)}
                     selected={selectedCategoryId === category.id}
+                    testID={`location-evidence-activity-${category.id}`}
                     theme={theme}
                   />
                 ))}
-              </ScrollView>
+                <AllActivitiesChip
+                  count={categories.length}
+                  disabled={saving}
+                  onPress={() => {
+                    Keyboard.dismiss();
+                    setActivityPickerOpen(true);
+                  }}
+                  pressedStyle={styles.buttonPressed}
+                  testID="location-evidence-activity-all"
+                  theme={theme}
+                />
+              </ActivityChipRow>
+              {automaticCommute ? (
+                <Reanimated.View
+                  entering={localPresenceEntering(reduceMotion)}
+                  exiting={localPresenceExiting(reduceMotion)}
+                  layout={localLayoutTransition(reduceMotion)}
+                >
+                  <Text {...mobileTextProps("body")} style={editorStyles.helperText}>
+                    Commute automatically, unless you choose an activity.
+                  </Text>
+                </Reanimated.View>
+              ) : null}
             </View>
             </SettingsBlockGroup>
           </Reanimated.View>
@@ -968,12 +1044,29 @@ export function LocationReviewCorrectionEditor({
                 </Reanimated.View>
               ) : null}
 
+              {baselinePlaceId && evidence.segment.kind === "stay" ? (
+                <Reanimated.View
+                  entering={localPresenceEntering(reduceMotion)}
+                  exiting={localPresenceExiting(reduceMotion)}
+                  layout={localLayoutTransition(reduceMotion)}
+                >
+                <SettingsBlockRow
+                  disabled={saving}
+                  onPress={() => void recordWithoutPlace()}
+                  subtitle={`Logs this time, not at ${baselinePlaceName}`}
+                  testID="location-evidence-record-without-place"
+                  theme={theme}
+                  title="Record without a place"
+                />
+                </Reanimated.View>
+              ) : null}
+
               <Reanimated.View layout={localLayoutTransition(reduceMotion)}>
               <SettingsBlockRow
                 disabled={saving}
                 divider={evidence.segment.kind === "stay" || evidence.suggestedSplitPoints.length > 0 || Boolean(adjacentReview)}
                 onPress={() => void recordOnce()}
-                subtitle="Logs this time without saving a new place"
+                subtitle="Logs this time without changing or saving a place"
                 testID="location-evidence-record-once"
                 theme={theme}
                 title="Record once"
@@ -994,6 +1087,23 @@ export function LocationReviewCorrectionEditor({
           </Reanimated.View>
         </View>
       </ScrollView>
+      {activityPickerOpen ? (
+        <ActivityPickerSheet
+          activities={categories}
+          onClose={() => setActivityPickerOpen(false)}
+          onCreate={onCreateActivity}
+          onPick={(categoryId) => {
+            setSelectedCategoryId(categoryId);
+            setCategoryTouched(true);
+            setChipAnchorId(categoryId);
+          }}
+          recentIds={recentActivityIds}
+          reduceMotion={reduceMotion}
+          selectedId={selectedCategoryId}
+          styles={styles}
+          theme={theme}
+        />
+      ) : null}
     </>
   );
 }
@@ -1002,78 +1112,102 @@ function PlaceChoice({
   detail,
   name,
   onPress,
+  onRemove,
   selected,
   theme
 }: {
   detail: string;
   name: string;
   onPress: () => void;
+  /** A chosen new place can be removed, which goes back to the matched place (or none). */
+  onRemove?: () => void;
   selected: boolean;
   theme: MobileTheme;
 }) {
   return (
-    <Pressable
-      accessibilityLabel={`${name}, ${detail}`}
-      accessibilityRole="button"
-      accessibilityState={{ selected }}
-      onPress={onPress}
-      style={({ pressed }) => [
+    <View
+      style={[
         placeChoiceStyles.row,
         // Neutral selection (UIA-027): the chosen row is raised and checked, never coral.
-        { backgroundColor: selected ? theme.surfaceMuted : theme.surfaceInset },
-        pressed ? { opacity: 0.72 } : null
+        { backgroundColor: selected ? theme.surfaceMuted : theme.surfaceInset }
       ]}
     >
-      <View style={placeChoiceStyles.text}>
-        <Text {...mobileTextProps("itemTitle")} style={[placeChoiceStyles.name, { color: theme.textPrimary }]}>{name}</Text>
-        <Text {...mobileTextProps("metadata")} style={[placeChoiceStyles.detail, { color: theme.textSecondary }]}>{detail}</Text>
+      <Pressable
+        accessibilityLabel={`${name}, ${detail}`}
+        accessibilityRole="radio"
+        accessibilityState={{ checked: selected, selected }}
+        onPress={onPress}
+        style={({ pressed }) => [placeChoiceStyles.main, pressed ? { opacity: 0.72 } : null]}
+      >
+        <View style={placeChoiceStyles.text}>
+          <Text {...mobileTextProps("itemTitle")} style={[placeChoiceStyles.name, { color: theme.textPrimary }]}>{name}</Text>
+          <Text {...mobileTextProps("metadata")} numberOfLines={2} style={[placeChoiceStyles.detail, { color: theme.textSecondary }]}>{detail}</Text>
+        </View>
+        {selected ? <DayframeIcon color={theme.textPrimary} glyph="check" size={17} strokeWidth={2.2} /> : null}
+      </Pressable>
+      {onRemove ? (
+        <Pressable
+          accessibilityLabel={`Remove ${name}`}
+          accessibilityRole="button"
+          hitSlop={4}
+          onPress={onRemove}
+          style={({ pressed }) => [placeChoiceStyles.remove, pressed ? { opacity: 0.72 } : null]}
+          testID="location-evidence-remove-place"
+        >
+          <DayframeIcon color={theme.textSecondary} glyph="x" size={16} />
+        </Pressable>
+      ) : null}
+    </View>
+  );
+}
+
+/** One row of the nearby or search list: a place glyph, the title and a detail line. */
+function ResultRow({
+  detail,
+  disabled,
+  divider,
+  onPress,
+  testID,
+  theme,
+  title
+}: {
+  detail: string | null;
+  disabled: boolean;
+  divider: boolean;
+  onPress: () => void;
+  testID?: string;
+  theme: MobileTheme;
+  title: string;
+}) {
+  return (
+    <Pressable
+      accessibilityLabel={[title, detail].filter(Boolean).join(", ")}
+      accessibilityRole="button"
+      disabled={disabled}
+      onPress={onPress}
+      style={({ pressed }) => [
+        resultRowStyles.row,
+        divider ? { borderTopColor: theme.border, borderTopWidth: StyleSheet.hairlineWidth } : null,
+        pressed ? { opacity: 0.72 } : null
+      ]}
+      testID={testID}
+    >
+      <ActivityGlyph name="place" color={theme.textPrimary} />
+      <View style={resultRowStyles.text}>
+        <Text {...mobileTextProps("itemTitle")} numberOfLines={1} style={[resultRowStyles.title, { color: theme.textPrimary }]}>{title}</Text>
+        {detail ? (
+          <Text {...mobileTextProps("metadata")} numberOfLines={1} style={[resultRowStyles.detail, { color: theme.textSecondary }]}>{detail}</Text>
+        ) : null}
       </View>
-      {selected ? <DayframeIcon color={theme.textPrimary} glyph="check" size={17} strokeWidth={2.2} /> : null}
     </Pressable>
   );
 }
 
-function CategoryChoice({
-  category,
-  label: labelOverride,
-  onPress,
-  selected,
-  theme
-}: {
-  category: Category | null;
-  label?: string;
-  onPress: () => void;
-  selected: boolean;
-  theme: MobileTheme;
-}) {
-  const label = labelOverride ?? category?.name ?? "No activity";
-  const color = category
-    ? paletteColorFor(category.color, category.name, theme.mode)
-    : theme.textSecondary;
-  return (
-    <Pressable
-      accessibilityLabel={`Activity ${label}`}
-      accessibilityRole="button"
-      accessibilityState={{ selected }}
-      onPress={onPress}
-      style={({ pressed }) => [
-        categoryChoiceStyles.touch,
-        pressed ? { opacity: 0.72 } : null
-      ]}
-    >
-      <View
-        style={[
-          categoryChoiceStyles.visual,
-          { backgroundColor: selected ? theme.textPrimary : theme.surfaceMuted }
-        ]}
-      >
-        <View style={[categoryChoiceStyles.dot, { backgroundColor: color }]} />
-        <Text {...mobileTextProps("control")} style={[categoryChoiceStyles.text, { color: selected ? theme.background : theme.textPrimary }]}>
-          {label}
-        </Text>
-      </View>
-    </Pressable>
-  );
+/** "40 m away", "1.2 km away": distances from the visit, rounded for reading. */
+function formatNearbyDistance(meters: number) {
+  if (!Number.isFinite(meters) || meters < 0) return "";
+  if (meters < 1000) return `${Math.max(10, Math.round(meters / 10) * 10)} m away`;
+  return `${(meters / 1000).toFixed(1)} km away`;
 }
 
 function ActivityGlyph({ name, color }: { name: LocationActivityGlyphName; color: string }) {
@@ -1188,20 +1322,13 @@ function createEditorStyles(theme: MobileTheme) {
       backgroundColor: theme.surfaceMuted,
       padding: 11
     },
-    answerIcon: {
-      width: 38,
-      height: 38,
-      borderRadius: 19,
-      alignItems: "center",
-      justifyContent: "center",
-      backgroundColor: theme.surfaceMuted
-    },
     answerText: { flex: 1, minWidth: 0, gap: 2 },
-    answerTitle: { color: theme.textPrimary, fontSize: 16, lineHeight: 21, fontWeight: "700" },
     answerMeta: { color: theme.textSecondary, fontSize: 12, lineHeight: 17 },
     helperText: { color: theme.textSecondary, fontSize: 12, lineHeight: 17 },
     fieldLabel: { color: theme.textSecondary, fontSize: 12, lineHeight: 16, fontWeight: "700" },
     placeChoices: { gap: 7 },
+    // The section's 12-point gap, taken back while there is no place row.
+    placeChoicesEmpty: { marginBottom: -12 },
     resultSection: { gap: 8 },
     searchField: {
       minHeight: 48,
@@ -1223,17 +1350,6 @@ function createEditorStyles(theme: MobileTheme) {
     },
     iconButton: { width: 44, height: 44, borderRadius: DAYFRAME_BLOCKS.radius.pill, alignItems: "center", justifyContent: "center" },
     suggestionList: { borderRadius: 14, backgroundColor: theme.surfaceMuted, overflow: "hidden" },
-    suggestionRow: {
-      minHeight: 52,
-      flexDirection: "row",
-      alignItems: "center",
-      gap: 10,
-      paddingHorizontal: 12,
-      paddingVertical: 9
-    },
-    dividerTop: { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: theme.border },
-    suggestionTitle: { color: theme.textPrimary, fontSize: 14, fontWeight: "700", lineHeight: 18 },
-    suggestionSubtitle: { color: theme.textSecondary, fontSize: 12, lineHeight: 16 },
     toggleRow: {
       minHeight: 56,
       flexDirection: "row",
@@ -1245,7 +1361,6 @@ function createEditorStyles(theme: MobileTheme) {
       paddingVertical: 8
     },
     toggleTitle: { color: theme.textPrimary, fontSize: 14, lineHeight: 18, fontWeight: "700" },
-    categoryScroller: { gap: 8, paddingRight: 4 },
     timeGroups: { flexDirection: "row", gap: 10 },
     timeGroupsStacked: { flexDirection: "column" },
     timeGroup: { flex: 1, minWidth: 0, gap: 6 },
@@ -1278,16 +1393,17 @@ function createEditorStyles(theme: MobileTheme) {
 }
 
 const placeChoiceStyles = StyleSheet.create({
-  row: { minHeight: 54, flexDirection: "row", alignItems: "center", gap: 10, borderRadius: 14, paddingHorizontal: 12, paddingVertical: 8 },
+  row: { minHeight: 54, flexDirection: "row", alignItems: "center", borderRadius: 14 },
+  main: { flex: 1, minHeight: 54, flexDirection: "row", alignItems: "center", gap: 10, paddingHorizontal: 12, paddingVertical: 8 },
   text: { flex: 1, minWidth: 0, gap: 2 },
   name: { fontSize: 14, lineHeight: 18, fontWeight: "700" },
-  detail: { fontSize: 12, lineHeight: 16 }
+  detail: { fontSize: 12, lineHeight: 16 },
+  remove: { width: 44, height: 44, marginRight: 4, borderRadius: DAYFRAME_BLOCKS.radius.pill, alignItems: "center", justifyContent: "center" }
 });
 
-const categoryChoiceStyles = StyleSheet.create({
-  touch: { minHeight: 44, justifyContent: "center" },
-  visual: { minHeight: 32, flexDirection: "row", alignItems: "center", gap: 7, borderRadius: 999, paddingHorizontal: 11, paddingVertical: 4 },
-  // X3: activity markers are small rounded-square blocks, never round dots.
-  dot: { width: 8, height: 8, borderRadius: activityMarkerRadius(8) },
-  text: { fontSize: 12, lineHeight: 16, fontWeight: "600" }
+const resultRowStyles = StyleSheet.create({
+  row: { minHeight: 52, flexDirection: "row", alignItems: "center", gap: 10, paddingHorizontal: 12, paddingVertical: 9 },
+  text: { flex: 1, minWidth: 0, gap: 2 },
+  title: { fontSize: 14, fontWeight: "700", lineHeight: 18 },
+  detail: { fontSize: 12, lineHeight: 16 }
 });

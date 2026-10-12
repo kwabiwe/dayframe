@@ -6,10 +6,15 @@ const read = (path: string) => readFileSync(new URL(path, import.meta.url), "utf
 
 describe("iPhone activity markers are blocks (X3)", () => {
   it.each([
-    ["./location/LocationReviewCorrectionEditor.tsx", "dot: { width: 8, height: 8, borderRadius: activityMarkerRadius(8) }"],
     ["./settings/ActivityEditorSheet.tsx", "swatch: { borderColor: \"transparent\", borderRadius: activityMarkerRadius(36), borderWidth: 0, height: 36, width: 36 }"]
   ])("%s uses the shared block marker radius", (path, rule) => {
     expect(read(path)).toContain(rule);
+  });
+
+  it("Location evidence draws the entry sheet's activity chips (icon on a tint), not dots of its own", () => {
+    const editor = read("./location/LocationReviewCorrectionEditor.tsx");
+    expect(editor).toContain("<ActivityChip");
+    expect(editor).not.toMatch(/dot: \{ width: 8/);
   });
 
   it("native Calendar weekday activity bars use the block corner, not a capsule", () => {

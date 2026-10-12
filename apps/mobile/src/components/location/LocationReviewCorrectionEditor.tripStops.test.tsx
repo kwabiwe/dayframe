@@ -43,6 +43,8 @@ vi.mock("@/lib/placeSearch", () => ({
 }));
 vi.mock("@/components/location/LocationEvidenceMap", () => ({ LocationEvidenceMap: () => null }));
 vi.mock("./LocationEvidenceMap", () => ({ LocationEvidenceMap: () => null }));
+// All activities is a native sheet; these tests never open it.
+vi.mock("../ActivityPickerSheet", () => ({ ActivityPickerSheet: () => null }));
 // The real draft and typography helpers, reached by relative path.
 vi.mock("@/lib/locationReviewDraft", () => import("../../lib/locationReviewDraft"));
 vi.mock("@/lib/mobileTypography", () => import("../../lib/mobileTypography"));

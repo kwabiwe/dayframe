@@ -61,13 +61,24 @@ struct NearbyPointOfInterestValue: Equatable {
   let category: MKPointOfInterestCategory?
   let source: Source
   let localityNames: [String]
+}
+
+/// What crosses the bridge for one nearby place: an opaque id for the current generation, the
+/// title, an address line and the rounded distance. The coordinate stays in the native registry
+/// until the person picks the place (`NearbyPointOfInterestCoordinator.resolve`).
+struct NearbyPointOfInterestSuggestionValue: Equatable {
+  let id: String
+  let requestId: String
+  let title: String
+  let subtitle: String?
+  let distanceMeters: Int
 
   var dictionary: [String: Any] {
     [
-      "name": name,
-      "formattedAddress": formattedAddress as Any,
-      "latitude": latitude,
-      "longitude": longitude,
+      "id": id,
+      "requestId": requestId,
+      "title": title,
+      "subtitle": subtitle as Any,
       "distanceMeters": distanceMeters
     ]
   }
@@ -99,24 +110,93 @@ protocol NearbyPointOfInterestSearching: AnyObject {
 
 @MainActor
 final class NearbyPointOfInterestCoordinator {
+  /// The most places one search may return; callers ask for fewer.
+  nonisolated static let maximumLimit = 8
+  nonisolated static let defaultLimit = 3
+
   private let searcher: NearbyPointOfInterestSearching
+  private let idFactory: () -> String
   private var activeRequestId: String?
   private var pending: (
     requestId: String,
     continuation: CheckedContinuation<[NearbyPointOfInterestValue], Error>
   )?
+  /// The last published generation: opaque id -> place. Replaced by the next search and cleared
+  /// by cancel and teardown, so an id from an older list never resolves.
+  private var registryRequestId: String?
+  private var registry: [String: NearbyPointOfInterestValue] = [:]
+  /// The newest search asked for; an older search that finishes late never publishes.
+  private var latestRequestId: String?
 
-  init(searcher: NearbyPointOfInterestSearching) {
+  init(
+    searcher: NearbyPointOfInterestSearching,
+    idFactory: @escaping () -> String = { String(UUID().uuidString.prefix(12)) }
+  ) {
     self.searcher = searcher
+    self.idFactory = idFactory
+  }
+
+  /// Searches around the centre and publishes at most `limit` places, nearest first, as opaque
+  /// suggestions. Coordinates never leave this coordinator until `resolve`.
+  func suggestions(
+    requestId: String,
+    latitude: Double,
+    longitude: Double,
+    radiusMeters: Double,
+    limit: Int = NearbyPointOfInterestCoordinator.defaultLimit
+  ) async throws -> [NearbyPointOfInterestSuggestionValue] {
+    let places = try await search(
+      requestId: requestId,
+      latitude: latitude,
+      longitude: longitude,
+      radiusMeters: radiusMeters,
+      limit: limit
+    )
+    guard latestRequestId == requestId else {
+      throw PlaceSearchCoordinatorError.cancelled
+    }
+    registry.removeAll(keepingCapacity: true)
+    registryRequestId = requestId
+    return places.map { place in
+      let id = idFactory()
+      registry[id] = place
+      return NearbyPointOfInterestSuggestionValue(
+        id: id,
+        requestId: requestId,
+        title: place.name,
+        subtitle: place.formattedAddress,
+        distanceMeters: place.distanceMeters
+      )
+    }
+  }
+
+  /// The picked place of the current generation, with its coordinate. A stale or unknown id is
+  /// rejected. The registry stays until the next search, so another place from the same list
+  /// can still be picked.
+  func resolve(id: String, requestId: String) throws -> ResolvedPlaceSearchValue {
+    guard requestId == registryRequestId, let place = registry[id] else {
+      throw PlaceSearchCoordinatorError.staleSuggestion
+    }
+    return ResolvedPlaceSearchValue(
+      title: place.name,
+      subtitle: place.formattedAddress,
+      name: place.name,
+      formattedAddress: place.formattedAddress,
+      latitude: place.latitude,
+      longitude: place.longitude
+    )
   }
 
   func search(
     requestId: String,
     latitude: Double,
     longitude: Double,
-    radiusMeters: Double
+    radiusMeters: Double,
+    limit: Int = NearbyPointOfInterestCoordinator.defaultLimit
   ) async throws -> [NearbyPointOfInterestValue] {
     cancel()
+    latestRequestId = requestId
+    let cappedLimit = min(max(limit, 1), Self.maximumLimit)
     guard latitude.isFinite,
           longitude.isFinite,
           (-90.0 ... 90.0).contains(latitude),
@@ -143,7 +223,7 @@ final class NearbyPointOfInterestCoordinator {
           guard let context = Self.contextQuery(from: nearby) else {
             self.finish(
               requestId: requestId,
-              result: .success(Self.normalized(nearby, maximumDistanceMeters: radiusMeters))
+              result: .success(Self.presented(nearby, maximumDistanceMeters: radiusMeters, limit: cappedLimit))
             )
             return
           }
@@ -164,7 +244,7 @@ final class NearbyPointOfInterestCoordinator {
             }
             self.finish(
               requestId: requestId,
-              result: .success(Self.normalized(values, maximumDistanceMeters: radiusMeters))
+              result: .success(Self.presented(values, maximumDistanceMeters: radiusMeters, limit: cappedLimit))
             )
           }
         }
@@ -175,6 +255,9 @@ final class NearbyPointOfInterestCoordinator {
   func cancel() {
     searcher.cancel()
     activeRequestId = nil
+    latestRequestId = nil
+    registryRequestId = nil
+    registry.removeAll(keepingCapacity: false)
     guard let pending else { return }
     self.pending = nil
     pending.continuation.resume(throwing: PlaceSearchCoordinatorError.cancelled)
@@ -217,15 +300,40 @@ final class NearbyPointOfInterestCoordinator {
       .first?.key
   }
 
+  /// The places to show: the `normalized` choice, nearest first (ties by name), so the list
+  /// reads as "what is around this visit" rather than a ranking.
+  static func presented(
+    _ values: [NearbyPointOfInterestValue],
+    maximumDistanceMeters: Double? = nil,
+    limit: Int = defaultLimit
+  ) -> [NearbyPointOfInterestValue] {
+    normalized(values, maximumDistanceMeters: maximumDistanceMeters, limit: limit)
+      .sorted { left, right in
+        if left.distanceMeters != right.distanceMeters {
+          return left.distanceMeters < right.distanceMeters
+        }
+        return left.name.localizedCaseInsensitiveCompare(right.name) == .orderedAscending
+      }
+  }
+
+  /// Categories that are never somewhere a person spends a visit (parking, cash machines,
+  /// chargers, toilets). MapKit is asked to leave them out, and they are dropped here too.
+  static let excludedCategories: [MKPointOfInterestCategory] = [
+    .parking, .atm, .evCharger, .restroom
+  ]
+
   static func normalized(
     _ values: [NearbyPointOfInterestValue],
-    maximumDistanceMeters: Double? = nil
+    maximumDistanceMeters: Double? = nil,
+    limit: Int = defaultLimit
   ) -> [NearbyPointOfInterestValue] {
+    let cappedLimit = min(max(limit, 1), maximumLimit)
     let distanceLimit = maximumDistanceMeters.map { max(0, Int($0.rounded(.up))) }
     var bestByName: [String: NearbyPointOfInterestValue] = [:]
     for value in values {
       let key = normalizedName(value.name)
       guard !key.isEmpty,
+            !(value.category.map(excludedCategories.contains) ?? false),
             value.distanceMeters >= 0,
             distanceLimit.map({ value.distanceMeters <= $0 }) ?? true else { continue }
       if let existing = bestByName[key] {
@@ -245,7 +353,7 @@ final class NearbyPointOfInterestCoordinator {
     var selectedGroups = Set<DestinationGroup>()
 
     func append(_ candidate: NearbyPointOfInterestValue?) {
-      guard selected.count < 3, let candidate else { return }
+      guard selected.count < cappedLimit, let candidate else { return }
       let name = normalizedName(candidate.name)
       guard selectedNames.insert(name).inserted else { return }
       selected.append(candidate)
@@ -261,21 +369,21 @@ final class NearbyPointOfInterestCoordinator {
       return tokens(in: value.name).contains(anchor)
     }) {
       append(primary)
-      for group in contextualGroupPreference where selected.count < 3 && !selectedGroups.contains(group) {
+      for group in contextualGroupPreference where selected.count < cappedLimit && !selectedGroups.contains(group) {
         append(candidates.first { destinationGroup(for: $0) == group && !isUtility($0) })
       }
     }
 
-    for candidate in candidates where selected.count < 3 && !isUtility(candidate) {
+    for candidate in candidates where selected.count < cappedLimit && !isUtility(candidate) {
       let group = destinationGroup(for: candidate)
       if !selectedGroups.contains(group) {
         append(candidate)
       }
     }
-    for candidate in candidates where selected.count < 3 && !isUtility(candidate) {
+    for candidate in candidates where selected.count < cappedLimit && !isUtility(candidate) {
       append(candidate)
     }
-    for candidate in candidates where selected.count < 3 {
+    for candidate in candidates where selected.count < cappedLimit {
       append(candidate)
     }
     return selected
@@ -386,6 +494,9 @@ final class MapKitNearbyPointOfInterestSearcher: NearbyPointOfInterestSearching 
   ) {
     cancel()
     let request = MKLocalPointsOfInterestRequest(center: center, radius: radiusMeters)
+    request.pointOfInterestFilter = MKPointOfInterestFilter(
+      excluding: NearbyPointOfInterestCoordinator.excludedCategories
+    )
     let localSearch = MKLocalSearch(request: request)
     nearbySearch = localSearch
     let origin = CLLocation(latitude: center.latitude, longitude: center.longitude)
@@ -420,6 +531,9 @@ final class MapKitNearbyPointOfInterestSearcher: NearbyPointOfInterestSearching 
       longitudinalMeters: radiusMeters * 2
     )
     request.resultTypes = [.pointOfInterest]
+    request.pointOfInterestFilter = MKPointOfInterestFilter(
+      excluding: NearbyPointOfInterestCoordinator.excludedCategories
+    )
     if #available(iOS 18.0, macOS 15.0, *) {
       request.regionPriority = .required
     }

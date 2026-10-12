@@ -36,7 +36,7 @@ export type ParsedLocationReviewWindow = {
 export function locationReviewJourneyCopy(segment: { kind: "stay" | "commute"; timeAway?: boolean }) {
   if (segment.kind !== "commute") return null;
   return segment.timeAway
-    ? { journey: false, primaryLabel: "Record time away", recorded: "The time away was recorded.", placeholder: "Add activity (optional)" }
+    ? { journey: false, primaryLabel: "Record time away", recorded: "The time away was recorded.", placeholder: "Add a name (optional)" }
     : { journey: true, primaryLabel: "Record commute", recorded: "The commute was recorded.", placeholder: "Add commute details (optional)" };
 }
 

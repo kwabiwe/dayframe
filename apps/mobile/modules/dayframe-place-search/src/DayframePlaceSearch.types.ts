@@ -48,17 +48,29 @@ export type NearbyPointOfInterestQuery = {
   latitude: number;
   longitude: number;
   radiusMeters: number;
+  /** At most this many places (the native side caps it at 8). */
+  limit: number;
 };
 
+/**
+ * One nearby point of interest as it crosses the bridge: an opaque id for this generation, the
+ * title, an address line and the rounded distance. The coordinate stays native until the place
+ * is picked (`resolveNearby`).
+ */
 export type NearbyPointOfInterest = {
-  name: string;
-  formattedAddress: string | null;
-  latitude: number;
-  longitude: number;
+  id: string;
+  requestId: string;
+  title: string;
+  subtitle: string | null;
   distanceMeters: number;
 };
 
 export type NearbyPointOfInterestResult = {
   requestId: string;
   places: NearbyPointOfInterest[];
+};
+
+export type NearbyPointOfInterestResolutionRequest = {
+  id: string;
+  requestId: string;
 };
