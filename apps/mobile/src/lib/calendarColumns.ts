@@ -10,8 +10,13 @@ import { MINIMUM_MEANINGFUL_OVERLAP_MS } from "@dayframe/shared";
  *   blocks is drawn as touching, as before.
  * - Colliding blocks form clusters (blocks linked by collisions, so a chain A–B–C is one cluster).
  * - Inside a cluster, blocks are taken by start, then longer first, then id, and each goes in the
- *   leftmost column whose last block has ended by its start (greedy interval partitioning); a block
- *   that follows another without overlapping shares its column.
+ *   leftmost column whose last block is no longer drawn by its start (greedy interval partitioning).
+ *   A block occupies its column for at least `minimumDrawnMs` (5 minutes: iOS's 4-point minimum
+ *   height at the most zoomed-out 48 points an hour), so a short block's painted minimum height
+ *   never runs into the next block in its column, and a block whose drawn interval collapsed to
+ *   nothing (a clock change: 01:45 BST to 01:15 GMT is drawn as one 4-point block at 01:45) still
+ *   takes its own column beside another block drawn at the same place. A block drawn after that
+ *   shares the column.
  * - Every block in a cluster is 1 / columns of the width, at column / columns; a block that collides
  *   with nothing keeps the full width.
  */
@@ -32,9 +37,15 @@ export type CalendarColumnLayout = {
   zIndex: number;
 };
 
+/** iOS draws a block at least 4 points tall: 5 minutes at the most zoomed-out 48 points an hour. */
+export const CALENDAR_MINIMUM_DRAWN_MS = 5 * 60_000;
+
 export function layoutCalendarColumns(
   input: ReadonlyArray<CalendarColumnInput>,
-  { minimumOverlapMs = MINIMUM_MEANINGFUL_OVERLAP_MS }: { minimumOverlapMs?: number } = {}
+  {
+    minimumOverlapMs = MINIMUM_MEANINGFUL_OVERLAP_MS,
+    minimumDrawnMs = CALENDAR_MINIMUM_DRAWN_MS
+  }: { minimumOverlapMs?: number; minimumDrawnMs?: number } = {}
 ): CalendarColumnLayout[] {
   const seen = new Set<string>();
   const blocks: CalendarColumnInput[] = [];
@@ -72,12 +83,13 @@ export function layoutCalendarColumns(
 
     const columnEnds: number[] = [];
     const assigned = cluster.map((block) => {
+      const occupiedEnd = Math.max(block.endMs, block.startMs + Math.max(0, minimumDrawnMs));
       let columnIndex = columnEnds.findIndex((columnEnd) => columnEnd <= block.startMs);
       if (columnIndex < 0) {
         columnIndex = columnEnds.length;
-        columnEnds.push(block.endMs);
+        columnEnds.push(occupiedEnd);
       } else {
-        columnEnds[columnIndex] = block.endMs;
+        columnEnds[columnIndex] = occupiedEnd;
       }
       return { block, columnIndex };
     });

@@ -54,6 +54,21 @@ describe("layoutCalendarColumns (Trello 210)", () => {
     ])).toEqual({ a: [0, 1], b: [0, 1], c: [0, 1], d: [0, 1] });
   });
 
+  it("keeps a short block's column for its minimum drawn height before the next block reuses it", () => {
+    // s1 is drawn 5 minutes tall at the most zoomed-out Calendar: s2 a minute later takes a new column,
+    // s3 after that reuses s1's.
+    expect(columns([block("long", 540, 720), block("s1", 570, 572), block("s2", 573, 580), block("s3", 576, 590)]))
+      .toEqual({ long: [0, 3], s1: [1, 3], s2: [2, 3], s3: [1, 3] });
+  });
+
+  it("gives blocks whose drawn intervals collapse to the same moment (a clock change) a column each", () => {
+    const at = 105 * minute;
+    expect(columns([
+      { id: "a", startMs: at, endMs: at },
+      { id: "b", startMs: at, endMs: at - 10 * minute }
+    ])).toEqual({ a: [0, 2], b: [1, 2] });
+  });
+
   it("collides two identical short blocks", () => {
     expect(columns([
       { id: "x", startMs: 0, endMs: 20_000 },

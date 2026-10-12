@@ -62,9 +62,11 @@ export type NativeCalendarPresentationEntry = {
   meta: string;
   offsetFraction: number;
   /**
-   * Overlaps that could share a tap target: drives hit geometry (no 44-pt expansion while > 0).
+   * Blocks that could share a tap target: drives hit geometry (no 44-pt expansion while > 0).
    * Every Review suggestion it overlaps counts; a logged block counts only while the two share
-   * horizontal space, so a short block in its own overlap column keeps its 44-point target there.
+   * horizontal space. A block in an overlap column also counts every block sharing its horizontal
+   * space whose target envelope (at the most zoomed-out Calendar, so at every zoom) meets its own,
+   * so a short block keeps its 44-point target in its column only where that space is free.
    */
   overlapCount: number;
   overlapSeconds: number;
@@ -358,19 +360,32 @@ export function buildNativeCalendarBridgeState({
   ]);
 
   const reviewIds = new Set(reviewEntries.map((entry) => entry.id));
+  const envelopeById = new Map(confirmedEntries.map((entry) => [entry.id, targetEnvelopeOf(entry, now, dayStart, dayEnd)] as const));
   // A logged block's hit geometry counts every Review suggestion it overlaps, and the logged blocks
   // it overlaps only while they share horizontal space: overlap columns put them side by side, so a
   // short block's 44-point target stays inside its own column and never covers its neighbour.
+  // Inside an overlap column the target must also stay clear of the blocks above and below it in
+  // that column (a reused column, Codex r1 on #357): any block sharing its horizontal space whose
+  // target envelope meets its own counts too, so neither grows over the other at any zoom. (The
+  // envelope is the target at the most zoomed-out Calendar; closer zooms keep the target inside it.)
+  // Full-width blocks keep their earlier rule; a column block draws above them (zIndex).
   const hitAnalysis = (id: string) => {
     const analysis = analysisById.get(id);
     if (!analysis) return undefined;
     const own = layoutById.get(id);
-    return {
-      overlapCount: analysis.overlappingEntryIds.filter((otherId) =>
-        reviewIds.has(otherId) || sharesHorizontalSpace(own, layoutById.get(otherId))
-      ).length,
-      overlapSeconds: analysis.overlapSeconds
-    };
+    const counted = new Set(analysis.overlappingEntryIds.filter((otherId) =>
+      reviewIds.has(otherId) || sharesHorizontalSpace(own, layoutById.get(otherId))
+    ));
+    const envelope = envelopeById.get(id);
+    if ((own?.laneCount ?? 1) > 1 && envelope) {
+      for (const other of confirmedEntries) {
+        if (other.id === id || counted.has(other.id)) continue;
+        if (!sharesHorizontalSpace(own, layoutById.get(other.id))) continue;
+        const otherEnvelope = envelopeById.get(other.id);
+        if (otherEnvelope && envelope.start < otherEnvelope.end && otherEnvelope.start < envelope.end) counted.add(other.id);
+      }
+    }
+    return { overlapCount: counted.size, overlapSeconds: analysis.overlapSeconds };
   };
 
   return {

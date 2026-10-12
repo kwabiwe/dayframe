@@ -544,6 +544,69 @@ describe("native Calendar presentation boundary", () => {
       }
     });
 
+    it("short blocks sharing a reused column never grow targets over each other at any zoom (Codex r1 on #357)", () => {
+      const close = build(now, bootstrap([
+        block("long", at(9, 0), at(12, 0)),
+        block("s1", at(9, 30), at(9, 35)),
+        block("s2", at(9, 36), at(9, 41))
+      ]));
+      const items = byId(close);
+      expect([items.get("s1")?.laneIndex, items.get("s2")?.laneIndex]).toEqual([1, 1]);
+      // Their targets would meet: neither grows past its painted block.
+      expect(items.get("s1")?.overlapCount).toBeGreaterThan(0);
+      expect(items.get("s2")?.overlapCount).toBeGreaterThan(0);
+      expectTapsResolve(close);
+
+      // Far apart in the same column, both keep the 44-point target.
+      const apart = build(now, bootstrap([
+        block("long", at(9, 0), at(12, 0)),
+        block("s1", at(9, 30), at(9, 35)),
+        block("s2", at(10, 40), at(10, 45))
+      ]));
+      const apartItems = byId(apart);
+      expect([apartItems.get("s1")?.laneIndex, apartItems.get("s2")?.laneIndex]).toEqual([1, 1]);
+      expect([apartItems.get("s1")?.overlapCount, apartItems.get("s2")?.overlapCount]).toEqual([0, 0]);
+      expectTapsResolve(apart);
+    });
+
+    it("the owner's case resolves every tap to the block under the finger at any zoom", () => {
+      expectTapsResolve(build(now, bootstrap([
+        block("gym", at(6, 59), at(8, 4)),
+        block("manual", at(7, 0), at(7, 5)),
+        block("after", at(8, 30), at(9, 0))
+      ])));
+    });
+
+    it("blocks drawn at the same place after the autumn clock change get a column each (Codex r1 on #357)", () => withTz("Europe/London", () => {
+      // 25 Oct 2026: 00:45Z is 01:45 BST; 01:15Z and 01:20Z are 01:15 and 01:20 GMT. iOS draws both
+      // at 01:45, 4 points tall.
+      const state = build(Date.parse("2026-10-25T20:00:00Z"), bootstrap([
+        entry({ id: "a", startedAt: "2026-10-25T00:45:00.000Z", stoppedAt: "2026-10-25T01:15:00.000Z" }),
+        entry({ id: "b", startedAt: "2026-10-25T00:45:00.000Z", stoppedAt: "2026-10-25T01:20:00.000Z" })
+      ]), undefined, "2026-10-25");
+      const items = byId(state);
+      expect(items.get("a")?.laneCount).toBe(2);
+      expect(items.get("b")?.laneCount).toBe(2);
+      expect(items.get("a")?.laneIndex).not.toBe(items.get("b")?.laneIndex);
+      expectSideBySide(state, ["a", "b"]);
+      expectTapsResolve(state);
+    }));
+
+    it("a block stretched across the spring clock change lanes with what is drawn beside it (Codex r1 on #357)", () => withTz("Europe/London", () => {
+      // 29 Mar 2026: 01:00Z is 02:00 BST. "gap" is drawn 00:50–02:10, "inside" 02:05–02:08 and
+      // "after" 02:10–02:30, back to back with "gap".
+      const state = build(Date.parse("2026-03-29T20:00:00Z"), bootstrap([
+        entry({ id: "gap", startedAt: "2026-03-29T00:50:00.000Z", stoppedAt: "2026-03-29T01:10:00.000Z" }),
+        entry({ id: "inside", startedAt: "2026-03-29T01:05:00.000Z", stoppedAt: "2026-03-29T01:08:00.000Z" }),
+        entry({ id: "after", startedAt: "2026-03-29T01:10:00.000Z", stoppedAt: "2026-03-29T01:30:00.000Z" })
+      ]), undefined, "2026-03-29");
+      const items = byId(state);
+      expect([items.get("gap")?.laneIndex, items.get("inside")?.laneIndex]).toEqual([0, 1]);
+      expect(items.get("inside")?.laneCount).toBe(2);
+      expect(items.get("after")).toMatchObject({ laneCount: 1, widthFraction: 1 });
+      expectTapsResolve(state);
+    }));
+
     it("an overlapping pair beside the Review lane stays side by side inside the logged part", () => {
       const state = build(now, bootstrap([
         block("gym", at(6, 59), at(8, 4)),
@@ -999,6 +1062,66 @@ describe("native Calendar update cadence", () => {
     expect(JSON.stringify(later.model)).toBe(JSON.stringify(state.model));
   });
 });
+
+/** The zooms iOS supports: the most zoomed-out, the default and the closest (hour heights). */
+const CALENDAR_ZOOMS = [48, 72, 128];
+
+/**
+ * Where iOS draws each block and its tap target at one zoom, mirroring DayframeCalendarBlockMath,
+ * DayframeCalendarHorizontalMath and DayframeCalendarVerticalMath (horizontal in column fractions).
+ */
+function nativeFrames(state: ReturnType<typeof build>, hourHeight: number) {
+  const { dayEndMs, dayStartMs, nowMs } = state.model;
+  const minuteOf = (ms: number) => {
+    if (ms >= dayEndMs) return 24 * 60;
+    const date = new Date(ms);
+    return date.getHours() * 60 + date.getMinutes() + date.getSeconds() / 60 + date.getMilliseconds() / 60_000;
+  };
+  return state.model.entries.flatMap((item, order) => {
+    const visibleStart = Math.max(item.startedAtMs, dayStartMs);
+    const visibleEnd = Math.min(item.stoppedAtMs ?? nowMs, dayEndMs);
+    if (!(visibleEnd > visibleStart)) return [];
+    const startMinute = minuteOf(visibleStart);
+    const height = Math.max(4, (Math.max(1, minuteOf(visibleEnd) - startMinute) / 60) * hourHeight);
+    const top = (startMinute / 60) * hourHeight;
+    const hitHeight = item.overlapCount > 0 ? height : Math.max(44, height);
+    const hitTop = Math.min(Math.max(0, top - (hitHeight - height) / 2), Math.max(0, 24 * hourHeight - hitHeight));
+    return [{
+      id: item.entryId,
+      order,
+      zIndex: item.zIndex,
+      minX: item.offsetFraction,
+      maxX: item.offsetFraction + item.widthFraction,
+      paintedCentreY: top + height / 2,
+      minY: hitTop,
+      maxY: hitTop + hitHeight
+    }];
+  });
+}
+
+/** At every zoom, a tap on the middle of any painted block opens that block and nothing else. */
+function expectTapsResolve(state: ReturnType<typeof build>) {
+  for (const hourHeight of CALENDAR_ZOOMS) {
+    const frames = nativeFrames(state, hourHeight);
+    for (const frame of frames) {
+      const x = (frame.minX + frame.maxX) / 2;
+      const y = frame.paintedCentreY;
+      const under = frames.filter((other) => other.minX <= x && x <= other.maxX && other.minY <= y && y <= other.maxY);
+      const top = Math.max(...under.map((other) => other.zIndex));
+      const winners = under.filter((other) => other.zIndex === top);
+      expect(winners.map((other) => other.id), `tap on ${frame.id} at ${hourHeight} points an hour`).toEqual([frame.id]);
+    }
+  }
+}
+
+function withTz(tz: string, run: () => void) {
+  const previousTz = process.env.TZ;
+  process.env.TZ = tz;
+  try { run(); } finally {
+    if (previousTz === undefined) delete process.env.TZ;
+    else process.env.TZ = previousTz;
+  }
+}
 
 function build(now: number, data: MobileBootstrap, theme: MobileTheme = darkTheme(), selectedDayKey = "2026-07-10") {
   return buildNativeCalendarBridgeState({
