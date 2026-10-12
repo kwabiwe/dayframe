@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { deviceSyncAttentionStatus, syncHelpStatus } from "./settingsSyncDiagnostics";
+import { deviceSyncAttentionStatus, splitReviewSyncIssues, syncHelpStatus } from "./settingsSyncDiagnostics";
 
 describe("Settings sync diagnostics summary", () => {
   it("reports block Stop and time-entry attention together", () => {
@@ -51,5 +51,36 @@ describe("syncHelpStatus", () => {
 
   it("does not count sign-in Review changes as waiting", () => {
     expect(syncHelpStatus({ ...none, queuedCount: 1, reviewWaitingCount: 2, reviewSignInCount: 2 }).kind).toBe("sign_in");
+  });
+});
+
+describe("offline is never 'needs your attention' (I1)", () => {
+  const none = {
+    timerStopIssueCount: 0, timeEntryIssueCount: 0, reviewIssueCount: 0, permanentFailedCount: 0,
+    quarantinedCount: 0, deviceQuarantinedCount: 0, queuedCount: 0, timerStopPendingCount: 0,
+    timeEntryPendingCount: 0, reviewWaitingCount: 0, reviewSignInCount: 0
+  };
+
+  it("counts a Review change with an unknown outcome as waiting, not a rejection", () => {
+    const { rejected, checkingCount } = splitReviewSyncIssues([
+      { id: "a", resolutionStatus: "resolution_unknown" },
+      { id: "b", resolutionStatus: "resolution_conflict" },
+      { id: "c", resolutionStatus: null }
+    ]);
+    expect(rejected.map((issue) => issue.id)).toEqual(["b", "c"]);
+    expect(checkingCount).toBe(1);
+  });
+
+  it("shows only 'waiting' while offline with retryable work and unknown Review outcomes", () => {
+    const status = syncHelpStatus({ ...none, queuedCount: 2, timerStopPendingCount: 1, timeEntryPendingCount: 1, reviewWaitingCount: 1, reviewCheckingCount: 1 });
+    expect(status.kind).toBe("waiting");
+    expect(status.title).toBe("6 changes waiting to send");
+    expect(status.indexTitle).not.toContain("attention");
+  });
+
+  it("still asks for attention for a real permanent rejection", () => {
+    for (const rejection of [{ timerStopIssueCount: 1 }, { timeEntryIssueCount: 1 }, { reviewIssueCount: 1 }, { permanentFailedCount: 1 }]) {
+      expect(syncHelpStatus({ ...none, queuedCount: 3, reviewCheckingCount: 2, ...rejection }).kind).toBe("attention");
+    }
   });
 });

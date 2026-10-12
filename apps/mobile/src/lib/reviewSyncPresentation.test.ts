@@ -67,3 +67,14 @@ describe("Review sync presentation", () => {
     }))).toBe("1 change needs checking · 1 needs you to sign in · 2 still sending");
   });
 });
+
+describe("Review → Sync help agree on unknown outcomes (I1)", () => {
+  it("shows no 'needs checking' and no Fix for a change Dayframe is still checking", () => {
+    // getReviewSyncDiagnostics counts an unknown outcome in checkingCount and waitingCount only.
+    expect(reviewSyncStatusCopy(diagnostics({ checkingCount: 1, waitingCount: 1 }))).toBeNull();
+  });
+
+  it("offers Fix only when Sync help has a matching rejection to show", () => {
+    expect(reviewSyncStatusCopy(diagnostics({ needsAttentionCount: 1, checkingCount: 1, waitingCount: 1 }))).toBe("1 change needs checking · 1 still sending");
+  });
+});

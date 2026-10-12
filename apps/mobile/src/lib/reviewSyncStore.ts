@@ -58,6 +58,14 @@ const SYNC_STATES = [
 ] as const;
 
 export type ReviewMutationState = typeof SYNC_STATES[number];
+/**
+ * I1: a needs_attention row whose outcome is only unknown (or whose re-check was interrupted) is
+ * not a rejection. Every surface treats it as waiting, it is re-checked on its own, and it is never
+ * discardable. SQL predicate over review_mutation_outbox (optionally aliased).
+ */
+function unknownOutcomeSql(alias = "") {
+  return `(${alias}state = 'needs_attention' and coalesce(${alias}resolution_status,'') in ('resolution_unknown','reconciling'))`;
+}
 export type ReviewItemSyncState = {
   action: string;
   state: ReviewMutationState;
@@ -68,7 +76,10 @@ export type ReviewSyncDiagnostics = {
   pendingCount: number;
   retryWaitCount: number;
   authenticationRequiredCount: number;
+  /** Real rejections only (unknown outcomes are in checkingCount and waitingCount). */
   needsAttentionCount: number;
+  /** Unknown outcomes Dayframe re-checks on its own (I1). */
+  checkingCount?: number;
   acknowledgedCount: number;
   waitingCount: number;
   oldestQueuedAt: string | null;
@@ -171,6 +182,8 @@ type CountRow = {
   oldest_queued_at: string | null;
   next_retry_at: string | null;
   last_error: string | null;
+  checking_count?: number;
+  checking_due_at?: string | null;
 };
 
 type CachedEvidenceRow = {
@@ -1863,6 +1876,10 @@ export async function enqueueReviewMutation(input: {
 }
 
 export type ReviewSyncOptions = { force?: boolean; signal?: AbortSignal; deadlineAt?: number; clientMutationId?: string };
+// An outcome left unknown (a reconcile that timed out or got no proof, e.g. while connectivity
+// dropped) is not a rejection: it is re-checked on ordinary passes after this pause, so it
+// settles on its own instead of waiting for the person (I1).
+export const REVIEW_UNKNOWN_RECHECK_MS = 5 * 60_000;
 export const REVIEW_RECONCILE_AGE_MS = 10 * 60_000;
 export const REVIEW_CONTENTION_LIMIT = 3;
 const reviewCoalescer = createOwnerSyncCoalescer<ReviewSyncResult>();
@@ -1897,15 +1914,18 @@ async function synchroniseReviewMutationsUnsafe(account: AccountRow, options: Re
   if (!await isCurrent()) return {acknowledgedCount:0,waitingCount:0,needsAttentionCount:0,stopped:true,outcome:"cancelled"};
   if (options.force) await serialiseReviewMutation(() => setMetadata(accountMetadataKey("manual_reconciliation_requested",account.account_key), "false"));
   const deadlineAt = Math.min(options.deadlineAt ?? Infinity, Date.now() + 45_000);
+  await restoreInterruptedReconciliation(db, account.account_key);
   // Snapshot selection prevents force from consuming a newly written backoff.
   const rows = await db.getAllAsync<MutationRow>(
     `select * from review_mutation_outbox where account_key=?
        and (? is null or client_mutation_id=?)
        and (state in ('pending','in_flight') or (state='needs_attention' and ?=1)
+         or (${unknownOutcomeSql()} and updated_at<=?)
          or (state='retry_wait' and (?=1 or next_attempt_at is null or next_attempt_at<=?
            or (reconciliation_attempt_count=0 and (contention_count>=3 or created_at<=?)))))
      order by created_at,client_mutation_id limit 25`,
-    account.account_key,options.clientMutationId??null,options.clientMutationId??null,options.force?1:0,options.force?1:0,new Date().toISOString(),new Date(Date.now()-REVIEW_RECONCILE_AGE_MS).toISOString());
+    account.account_key,options.clientMutationId??null,options.clientMutationId??null,options.force?1:0,
+    new Date(Date.now()-REVIEW_UNKNOWN_RECHECK_MS).toISOString(),options.force?1:0,new Date().toISOString(),new Date(Date.now()-REVIEW_RECONCILE_AGE_MS).toISOString());
   let acknowledgedCount=0;
   let outcome: SyncLaneOutcome="complete";
   let stopped=false;
@@ -1973,6 +1993,9 @@ async function synchroniseReviewMutationsUnsafe(account: AccountRow, options: Re
       else {await scheduleRetry(row,null,error instanceof MobileRequestTimeoutError?error.message:"Server response unavailable. Saved action retained.");if(outcome!=="needs_attention")outcome="server_busy";}
     }
   }
+  // A re-check cancelled, signed out (401) or cut off mid-request leaves the row unknown again:
+  // retry-eligible on the next pass, never a discardable rejection (I1).
+  await restoreInterruptedReconciliation(db, account.account_key);
   if ((await activeAccount(db))?.account_key !== account.account_key) return {acknowledgedCount,waitingCount:0,needsAttentionCount:0,stopped:true,outcome:"cancelled"};
   const diagnostics=await getReviewSyncDiagnostics();
   if(outcome==="complete") outcome=diagnostics.needsAttentionCount>0?"needs_attention":diagnostics.waitingCount>0?"backoff":"complete";
@@ -2034,6 +2057,14 @@ export function canonicalOpenEffectIds(body: Record<string, unknown> | null, pri
   return body?.canonicalStatus === "open" ? [primaryId] : [];
 }
 
+async function restoreInterruptedReconciliation(db: SQLite.SQLiteDatabase, accountKeyValue: string) {
+  await serialiseReviewMutation(() => db.runAsync(
+    `update review_mutation_outbox set resolution_status = 'resolution_unknown'
+     where account_key = ? and state = 'needs_attention' and resolution_status = 'reconciling'`,
+    accountKeyValue
+  ));
+}
+
 async function markMutation(
   clientMutationId: string, state: ReviewMutationState, status: number | null,
   error: string | null, nextAttemptAt: string | null, localEffect: "hidden" | "restore",
@@ -2083,7 +2114,9 @@ export async function getReviewSyncDiagnostics(): Promise<ReviewSyncDiagnostics>
        count(*) filter (where state in ('pending', 'in_flight')) as pending_count,
        count(*) filter (where state = 'retry_wait') as retry_wait_count,
        count(*) filter (where state = 'auth_required') as auth_required_count,
-       count(*) filter (where state = 'needs_attention') as needs_attention_count,
+       count(*) filter (where state = 'needs_attention' and not ${unknownOutcomeSql()}) as needs_attention_count,
+       count(*) filter (where ${unknownOutcomeSql()}) as checking_count,
+       min(strftime('%Y-%m-%dT%H:%M:%fZ', updated_at, '+${REVIEW_UNKNOWN_RECHECK_MS / 1000} seconds')) filter (where ${unknownOutcomeSql()}) as checking_due_at,
        count(*) filter (where state = 'acknowledged') as acknowledged_count,
        min(created_at) filter (
          where state in ('pending', 'in_flight', 'retry_wait', 'auth_required')
@@ -2110,7 +2143,8 @@ export async function getReviewSyncDiagnostics(): Promise<ReviewSyncDiagnostics>
   const escalation=await db.getFirstAsync<{due:string|null}>(`select min(case when contention_count>=3 then updated_at
     else strftime('%Y-%m-%dT%H:%M:%fZ',created_at,'+10 minutes') end) as due from review_mutation_outbox
     where account_key=? and state='retry_wait' and reconciliation_attempt_count=0`,account.account_key);
-  const dueDates=[diagnostics.next_retry_at,escalation?.due].filter((value):value is string=>Boolean(value)).sort();
+  const checkingCount = Number(diagnostics.checking_count) || 0;
+  const dueDates=[diagnostics.next_retry_at,escalation?.due,diagnostics.checking_due_at].filter((value):value is string=>Boolean(value)).sort();
   const evidenceCache = await getLocationReviewEvidenceCacheDiagnostics();
   return {
     pendingCount,
@@ -2121,7 +2155,8 @@ export async function getReviewSyncDiagnostics(): Promise<ReviewSyncDiagnostics>
     authenticationRequiredCount,
     needsAttentionCount: Number(diagnostics.needs_attention_count) || 0,
     acknowledgedCount: Number(diagnostics.acknowledged_count) || 0,
-    waitingCount: pendingCount + retryWaitCount + authenticationRequiredCount,
+    checkingCount,
+    waitingCount: pendingCount + retryWaitCount + authenticationRequiredCount + checkingCount,
     oldestQueuedAt: diagnostics.oldest_queued_at,
     lastSuccessfulSyncAt: await metadata(
       accountMetadataKey(
@@ -2160,7 +2195,8 @@ export async function getReviewItemSyncStates() {
     review_item_id: string;
     state: ReviewMutationState;
   }>(
-    `select e.review_item_id, o.action_kind, o.state
+    `select e.review_item_id, o.action_kind,
+            case when ${unknownOutcomeSql("o.")} then 'retry_wait' else o.state end as state
      from review_mutation_effects e join review_mutation_outbox o
        on o.client_mutation_id = e.client_mutation_id and o.account_key = e.account_key
      where e.account_key = ? and o.state != 'acknowledged'
@@ -2195,7 +2231,7 @@ export async function listReviewSyncIssues() {
             last_http_status as "lastHttpStatus",
             last_error as "lastError", resolution_status as "resolutionStatus"
      from review_mutation_outbox
-     where account_key = ? and state = 'needs_attention'
+     where account_key = ? and state = 'needs_attention' and not ${unknownOutcomeSql()}
      order by created_at`,
     account.account_key
   );
@@ -2240,14 +2276,14 @@ export async function discardReviewSyncIssue(clientMutationId: string) {
         select e.review_item_id from review_mutation_effects e
         join review_mutation_outbox o on o.client_mutation_id = e.client_mutation_id
         where e.account_key = ? and o.client_mutation_id = ?
-          and o.state = 'needs_attention' and coalesce(o.resolution_status,'') != 'resolution_unknown' and e.local_effect = 'hidden'
+          and o.state = 'needs_attention' and not ${unknownOutcomeSql("o.")} and e.local_effect = 'hidden'
       )`, account.account_key, account.account_key, clientMutationId
     );
     const result = await transaction.runAsync(
       `delete from review_mutation_outbox
        where client_mutation_id = ?
          and account_key = ?
-         and state = 'needs_attention' and coalesce(resolution_status,'') != 'resolution_unknown'`,
+         and state = 'needs_attention' and not ${unknownOutcomeSql()}`,
       clientMutationId,
       account.account_key
     );
