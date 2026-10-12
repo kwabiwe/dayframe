@@ -22,3 +22,19 @@ export function shouldRefreshSettingsSnapshot(
 export function shouldShowSettingsRefreshSpinner(trigger: SettingsRefreshTrigger) {
   return trigger === "pull";
 }
+
+/**
+ * Identity of the saved places Settings last handed to the location catalogue and region
+ * registration (I1: skip identical refreshes). Every field of every place is included, so a change
+ * to anything the catalogue consumes (name, role, default activity or description, radius, logging)
+ * refreshes it; only a byte-identical list is skipped.
+ */
+export function settingsGeofenceKey(userId: string, workspaceId: string, places: ReadonlyArray<object>) {
+  return JSON.stringify([userId, workspaceId, places.map(stableJson)]);
+}
+
+function stableJson(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(stableJson);
+  if (!value || typeof value !== "object") return value ?? null;
+  return Object.keys(value).sort().map((key) => [key, stableJson((value as Record<string, unknown>)[key])]);
+}

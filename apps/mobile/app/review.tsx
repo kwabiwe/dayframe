@@ -894,6 +894,7 @@ export default function ReviewScreen() {
     reviewSyncDiagnostics.retryWaitCount +
     reviewSyncDiagnostics.authenticationRequiredCount +
     reviewSyncDiagnostics.needsAttentionCount +
+    (reviewSyncDiagnostics.checkingCount ?? 0) +
     reviewSyncDiagnostics.acknowledgedCount > 0
   ));
   const reviewCountIsExact = reviewBacklog !== null && !hasUnmaterialisedReviewEffects;
@@ -2637,7 +2638,7 @@ function reviewItemSyncStatusCopy(syncState: ReviewItemSyncState | null) {
   if (syncState.state === "needs_attention") {
     return {
       badge: "Sync issue",
-      detail: "This saved change needs attention in Settings before it can reach Dayframe."
+      detail: "Dayframe couldn't save this change. Tap Fix above to choose what to do in Sync help."
     };
   }
   if (syncState.state === "auth_required") {
