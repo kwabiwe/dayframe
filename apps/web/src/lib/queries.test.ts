@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { placeDisplayNameSql } from "./place-display";
 import {
   buildTimeEntriesQuery,
+  confirmedInReviewSql,
   getBootstrapData,
   getCategoryUsageRanks,
   getNormalizationContext,
@@ -273,6 +274,26 @@ describe("time-entry range query", () => {
       "2026-07-27T00:00:00.000Z",
       300
     ]);
+  });
+});
+
+describe("confirmed-in-Review flag on history entries (E1)", () => {
+  it("marks blocks created by an accepted Review item or a Review correction, scoped to the session", () => {
+    const statement = buildTimeEntriesQuery(session, { limit: 2000 });
+
+    expect(statement.text).toContain(confirmedInReviewSql);
+    expect(confirmedInReviewSql).toContain('as "confirmedInReview"');
+    // Accepted Review items of this workspace and user only: auto-logged blocks have none, and
+    // open or skipped suggestions are never `accepted`.
+    expect(confirmedInReviewSql).toContain("te.created_from_event_id in (");
+    expect(confirmedInReviewSql).toContain("accepted_review.workspace_id = $1");
+    expect(confirmedInReviewSql).toContain("accepted_review.user_id = $2");
+    expect(confirmedInReviewSql).toContain("accepted_review.status = 'accepted'");
+    // Split/merge-and-confirm children come from correction events created only by Review.
+    expect(confirmedInReviewSql).toContain("te.source = 'location_learning'");
+    expect(confirmedInReviewSql).toContain("correction_event.client_event_id like 'location-correction:%'");
+    expect(confirmedInReviewSql).toContain("correction_event.user_id = te.user_id");
+    expect(statement.values.slice(0, 2)).toEqual([session.workspaceId, session.userId]);
   });
 });
 

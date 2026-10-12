@@ -744,6 +744,12 @@ export type RecentActivityEntry = {
   stoppedAt?: string | null;
   durationSeconds?: number | null;
   userConfirmed?: boolean;
+  /**
+   * Server-verified: the block was created by an owner decision in Review (its source event's
+   * Review item was accepted, or it came from a Review split/merge correction). Auto-logged
+   * blocks and unresolved suggestions never carry it. See `historicalSuggestionLearningTier`.
+   */
+  confirmedInReview?: boolean;
   tagNames?: string[];
 };
 
@@ -859,6 +865,8 @@ const DEFAULT_HISTORICAL_SUGGESTION_LIMIT = 12;
 const MAX_HISTORICAL_SUGGESTION_LIMIT = 50;
 
 type HistoricalSuggestionCandidate = {
+  /** 1: typed or started by the owner; 2: a location visit the owner confirmed in Review. */
+  learningTier: HistoricalSuggestionLearningTier;
   categoryColor: string | null;
   categoryId: string | null;
   categoryName: string | null;
@@ -876,6 +884,7 @@ type HistoricalSuggestionCandidate = {
 
 type HistoricalScoredRecentActivitySuggestion = ScoredRecentActivitySuggestion & {
   historicalPresentationKey: string;
+  learningTier: HistoricalSuggestionLearningTier;
 };
 
 /**
@@ -883,6 +892,11 @@ type HistoricalScoredRecentActivitySuggestion = ScoredRecentActivitySuggestion &
  * suggestion cap. Results are semantic variants: identical Description,
  * category and tag combinations aggregate, while different category/tag
  * metadata remains separately selectable.
+ *
+ * Two learning tiers (owner decision E1, 12 Oct 2026): blocks the owner typed or
+ * started (tier 1) always rank before location visits the owner confirmed in
+ * Review (tier 2) within the same match tier. A Description the owner has typed
+ * themselves suppresses every confirmed-visit variant with the same Description.
  */
 export function buildHistoricalEntrySuggestions(
   entries: RecentActivityEntry[],
@@ -898,6 +912,15 @@ export function buildHistoricalEntrySuggestions(
     .map((entry) => historicalSuggestionCandidate(entry, currentEntryId))
     .filter((candidate): candidate is HistoricalSuggestionCandidate => candidate !== null);
   if (candidates.length === 0) return [];
+  // A Description the owner typed or started wins: confirmed visits never add a second row for it.
+  const typedDescriptionKeys = new Set(
+    candidates
+      .filter((candidate) => candidate.learningTier === 1)
+      .map((candidate) => candidate.descriptionKey)
+  );
+  const rankedCandidates = candidates.filter((candidate) =>
+    candidate.learningTier === 1 || !typedDescriptionKeys.has(candidate.descriptionKey)
+  );
 
   const contextMs = historicalSuggestionContextMs(options.contextDate, candidates);
   const contextDate = new Date(contextMs);
@@ -906,7 +929,7 @@ export function buildHistoricalEntrySuggestions(
   const contextDayKind = dayKind(contextDate);
   const aggregates = new Map<string, HistoricalScoredRecentActivitySuggestion>();
 
-  for (const candidate of candidates) {
+  for (const candidate of rankedCandidates) {
     const key = historicalSuggestionKey(candidate);
     const startedAt = new Date(candidate.startedAtMs);
     const lastSeenInRecentWindow = (
@@ -932,7 +955,8 @@ export function buildHistoricalEntrySuggestions(
         timeBucketMatches: timeOfDayBucket(startedAt) === contextBucket ? 1 : 0,
         totalSeconds: candidate.durationSeconds,
         useCount: 1,
-        historicalPresentationKey: candidate.presentationKey
+        historicalPresentationKey: candidate.presentationKey,
+        learningTier: candidate.learningTier
       });
       continue;
     }
@@ -963,8 +987,12 @@ export function buildHistoricalEntrySuggestions(
 
   const query = normalizeHistoricalSearchText(options.query);
   return [...aggregates.values()]
-    .map((aggregate) => scoreRecentActivitySuggestion(aggregate, contextMs))
-    .map((suggestion) => ({
+    .map((aggregate) => ({
+      learningTier: aggregate.learningTier,
+      suggestion: scoreRecentActivitySuggestion(aggregate, contextMs)
+    }))
+    .map(({ learningTier, suggestion }) => ({
+      learningTier,
       suggestion,
       tier: historicalSuggestionMatchTier(
         normalizeHistoricalSearchText(suggestion.description),
@@ -974,6 +1002,7 @@ export function buildHistoricalEntrySuggestions(
     .filter((result) => query.length === 0 || result.tier !== null)
     .sort((left, right) =>
       (left.tier ?? 0) - (right.tier ?? 0) ||
+      left.learningTier - right.learningTier ||
       right.suggestion.score - left.suggestion.score ||
       right.suggestion.useCount - left.suggestion.useCount ||
       Date.parse(right.suggestion.lastSeenAt) - Date.parse(left.suggestion.lastSeenAt) ||
@@ -1001,7 +1030,8 @@ function historicalSuggestionCandidate(
 ): HistoricalSuggestionCandidate | null {
   if (!entry || typeof entry !== "object") return null;
   if (currentEntryId !== null && entry.id === currentEntryId) return null;
-  if (!isManualLearningEntryEligible(entry)) return null;
+  const learningTier = historicalSuggestionLearningTier(entry);
+  if (learningTier === null) return null;
 
   const description = normalizeHistoricalDisplayText(entry.description);
   if (!description || normalizeHistoricalSearchText(description) === "start activity") return null;
@@ -1034,6 +1064,7 @@ function historicalSuggestionCandidate(
   ]);
 
   return {
+    learningTier,
     categoryColor,
     categoryId,
     categoryName,
@@ -1228,12 +1259,63 @@ const excludedSuggestionEventTypes = new Set([
   "health_workout_import"
 ]);
 
+// Sources and event types of location visits and journeys (saved-place geofences and Location
+// Intelligence stays/commutes). Health is never a location visit.
+const locationVisitSources = new Set([
+  "location_learning",
+  "geofence_specific",
+  "geofence_broad",
+  "ha_geofence"
+]);
+const locationVisitEventTypes = new Set([
+  "geofence_enter",
+  "geofence_exit",
+  "unknown_stay",
+  "commute_detected",
+  "learned_place_visit"
+]);
+
 function isManualLearningEntryEligible(entry: RecentActivityEntry) {
   if (entry.reviewStatus !== "confirmed") return false;
   if (entry.userConfirmed) return true;
+  return isTypedOrStartedEntry(entry);
+}
+
+/** A confirmed block the owner typed or started themselves (web, iPhone, timer or Add time). */
+function isTypedOrStartedEntry(entry: RecentActivityEntry) {
+  if (entry.reviewStatus !== "confirmed") return false;
   if (!entry.source || !manualSuggestionSources.has(entry.source)) return false;
   if (entry.eventType && excludedSuggestionEventTypes.has(entry.eventType)) return false;
   return true;
+}
+
+/**
+ * A location visit or journey the owner confirmed through a Review decision. Auto-logged
+ * trusted-place visits (confirmed without a Review decision), open or skipped Review items and
+ * Health imports never qualify.
+ */
+export function isReviewConfirmedLocationVisit(entry: RecentActivityEntry) {
+  if (!entry || entry.reviewStatus !== "confirmed") return false;
+  // `userConfirmed` is the compact suggestion query's name for the same accepted-Review fact.
+  if (entry.confirmedInReview !== true && entry.userConfirmed !== true) return false;
+  if (!entry.source || !locationVisitSources.has(entry.source)) return false;
+  if (entry.eventType && !locationVisitEventTypes.has(entry.eventType)) return false;
+  return true;
+}
+
+export type HistoricalSuggestionLearningTier = 1 | 2;
+
+/**
+ * Which tier of the Recent description suggestions a completed block feeds: 1 for blocks the
+ * owner typed or started, 2 for location visits confirmed in Review, null for everything else.
+ */
+export function historicalSuggestionLearningTier(
+  entry: RecentActivityEntry
+): HistoricalSuggestionLearningTier | null {
+  if (!entry || typeof entry !== "object") return null;
+  if (isTypedOrStartedEntry(entry)) return 1;
+  if (isReviewConfirmedLocationVisit(entry)) return 2;
+  return null;
 }
 
 export function isRecentActivitySuggestionEligible(entry: RecentActivityEntry) {

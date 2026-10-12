@@ -9,6 +9,7 @@ Use this when changing timer flows, dashboards, reports, entity management, onbo
 - Task title is optional.
 - Category is optional and can be added while a task is running.
 - Quick actions should show user-pinned categories only. Learned or recent tasks belong in task-entry suggestions, not the pinned category strip.
+- Recent description suggestions (iPhone entry sheet; `buildHistoricalEntrySuggestions`) learn in two tiers (owner decision E1, 12 Oct 2026). Tier 1 is every confirmed block the owner typed or started (`manual_app`/`mobile_app`, no automatic event type). Tier 2 is a location visit or journey the owner confirmed through a Review decision: the bootstrap's server-computed `confirmedInReview` (its source event's Review item was accepted, or it is a Review split/merge-and-confirm child) on a `location_learning`/geofence block. Auto-logged trusted-place visits, open or skipped Review items and Health imports never feed Recent. Within each match tier (exact, prefix, word, substring), tier 1 always precedes tier 2, existing scoring orders each tier, a Description the owner typed suppresses confirmed-visit rows with the same Description, and the result limit is shared. The web command timer's Suggestions use the separate compact `taskSuggestions` builder and are unchanged.
 - Existing projects may be converted into categories.
 - Projects and clients are legacy/internal compatibility until explicitly approved for user-facing UX again.
 

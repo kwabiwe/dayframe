@@ -137,6 +137,8 @@ export type TimeEntryRow = {
   source: string;
   confidence: string;
   reviewStatus: string;
+  /** True when an owner decision in Review created the block (see `confirmedInReviewSql`). */
+  confirmedInReview?: boolean;
   description: string | null;
   startedAt: string;
   stoppedAt: string | null;
@@ -744,6 +746,38 @@ async function getAutomationRules(session: RequestSession, execute: typeof query
   }
 }
 
+/**
+ * Whether the block came from an owner decision in Review: its source event's Review item was
+ * accepted (accept, edit and confirm, record once, save place and confirm…), or it is a child of a
+ * Review split/merge correction (those events exist only for Review decisions). Auto-logged blocks
+ * have no Review item, so they read false, as do open and skipped suggestions (no block, or a
+ * needs-review one). The accepted-item list is uncorrelated, so it is read once per query.
+ * Recent description suggestions learn from location visits only when this is true (E1).
+ * Uses $1 (workspace) and $2 (user) of the surrounding statement.
+ */
+export const confirmedInReviewSql = `coalesce(
+              te.created_from_event_id in (
+                select accepted_review.event_id
+                from review_items accepted_review
+                where accepted_review.workspace_id = $1
+                  and accepted_review.user_id = $2
+                  and accepted_review.status = 'accepted'
+                  and accepted_review.event_id is not null
+              )
+              or (
+                te.source = 'location_learning'
+                and exists (
+                  select 1
+                  from activity_events correction_event
+                  where correction_event.id = te.created_from_event_id
+                    and correction_event.workspace_id = te.workspace_id
+                    and correction_event.user_id = te.user_id
+                    and correction_event.client_event_id like 'location-correction:%'
+                )
+              ),
+              false
+            ) as "confirmedInReview"`;
+
 export type TimeEntryQueryOptions = {
   capturedNow?: string;
   overlappingFrom?: string;
@@ -793,6 +827,7 @@ export function buildTimeEntriesQuery(
             te.source,
             te.confidence,
             te.review_status as "reviewStatus",
+            ${confirmedInReviewSql},
             te.description,
             te.started_at as "startedAt",
             te.stopped_at as "stoppedAt",
