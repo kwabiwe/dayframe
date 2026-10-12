@@ -22,6 +22,7 @@ const server = {
   patchUrls: [] as string[],
   posts: [] as Record<string, unknown>[],
   rejectPatches: false,
+  rejectStart: false,
   /** The next PATCH or Start waits (the request is recorded) until `release()`. */
   holdNext: null as "patch" | "start" | null,
   release: null as (() => void) | null
@@ -59,6 +60,7 @@ vi.mock("@/lib/client-auth-fetch", () => ({
       const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
       server.posts.push(body);
       await maybeHold("start");
+      if (server.rejectStart) return reply(false, { error: "Start rejected" });
       if (server.entry) server.completed = { ...server.entry, stoppedAt: new Date().toISOString() };
       server.entry = {
         ...(server.entry ?? entry()),
@@ -75,6 +77,9 @@ vi.mock("@/lib/client-auth-fetch", () => ({
   })
 }));
 
+// These tests wait on the real 650 ms autosave debounce and deferred requests, several times each.
+vi.setConfig({ testTimeout: 20_000 });
+
 const { AppShellRuntimeProvider, useAppShellRuntime } = await import("./AppShellRuntime");
 const { PersistentTimerBar } = await import("./PersistentTimerBar");
 
@@ -86,6 +91,7 @@ beforeEach(() => {
   server.posts = [];
   server.holdNext = null;
   server.release = null;
+  server.rejectStart = false;
   server.rejectPatches = false;
 });
 
@@ -425,6 +431,68 @@ describe("Codex r7: acknowledgements and handoffs keep newer edits", () => {
     await act(async () => { server.release?.(); });
     await waitFor(() => expect(descriptions()).toEqual(["Plan more"]), { timeout: 3_000 });
     expect(input.value).toBe("Plan more");
+  });
+});
+
+describe("Codex r8: a genuine change of block starts completion clean", () => {
+  async function rejectedSwitch(saved: string, knownTags: string[] = []) {
+    const { input } = await renderShell(entry({ description: saved }, knownTags));
+    const user = userEvent.setup();
+    server.holdNext = "start";
+    server.rejectStart = true;
+    await user.click(screen.getByRole("button", { name: "Start Writing (2)" }));
+    await waitFor(() => expect(server.posts).toHaveLength(1));
+    // The optimistic Writing block is on screen; type the restored block's own text into it.
+    await user.click(input);
+    await user.keyboard(saved);
+    expect(input.value).toBe(saved);
+    return { input, user };
+  }
+
+  it("a rejected switch does not keep the failed block's Activities list", async () => {
+    const { input, user } = await rejectedSwitch("Plan @wri");
+    expect(screen.queryByRole("listbox", { name: "Activities" })).not.toBeNull();
+    await act(async () => { server.release?.(); });
+    await waitFor(() => expect(screen.getByRole("button", { name: "Activity: Focus" })).not.toBeNull());
+    expect(input.value).toBe("Plan @wri");
+    expect(screen.queryByRole("listbox", { name: "Activities" })).toBeNull();
+    await user.keyboard("{Enter}");
+    await wait(1_000);
+    expect(server.patches).toEqual([]);
+    expect(server.entry).toMatchObject({ id: "active", categoryId: "focus", description: "Plan @wri" });
+  });
+
+  it("a rejected switch does not keep the failed block's Tags list", async () => {
+    const { input, user } = await rejectedSwitch("Plan #urgent", ["urgent"]);
+    expect(screen.queryByRole("listbox", { name: "Tags" })).not.toBeNull();
+    await act(async () => { server.release?.(); });
+    await waitFor(() => expect(screen.getByRole("button", { name: "Activity: Focus" })).not.toBeNull());
+    expect(input.value).toBe("Plan #urgent");
+    expect(screen.queryByRole("listbox", { name: "Tags" })).toBeNull();
+    await user.keyboard("{Enter}");
+    await wait(1_000);
+    expect(server.patches).toEqual([]);
+    expect(server.entry).toMatchObject({ id: "active", description: "Plan #urgent", tagNames: [] });
+  });
+
+  it("returning to an earlier block with the same text does not reopen its old list", async () => {
+    const { input, refresh } = await renderShell(entry({ description: "Fix bug" }));
+    const user = userEvent.setup();
+    await user.click(input);
+    await user.keyboard("{End} @wri");
+    expect(screen.queryByRole("listbox", { name: "Activities" })).not.toBeNull();
+    const original = server.entry!;
+    server.entry = entry({ id: "next", description: "Call", updatedAt: "2026-08-17T06:00:00.000Z" });
+    await refresh();
+    await waitFor(() => expect(input.value).toBe("Call"));
+    server.entry = { ...original, description: "Fix bug @wri", updatedAt: "2026-08-17T07:00:00.000Z" };
+    await refresh();
+    await waitFor(() => expect(input.value).toBe("Fix bug @wri"));
+    expect(screen.queryByRole("listbox", { name: "Activities" })).toBeNull();
+    await user.keyboard("{Enter}");
+    await wait(1_000);
+    expect(server.patches.filter((patch) => patch.categoryId === "write")).toEqual([]);
+    expect(server.entry).toMatchObject({ id: "active", categoryId: "focus", description: "Fix bug @wri" });
   });
 });
 

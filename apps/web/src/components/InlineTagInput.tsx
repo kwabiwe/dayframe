@@ -159,7 +159,16 @@ export function InlineTagInput({
   // (another block, or idle) closes both lists, even when the text reads the same, and they stay
   // closed through the runtime reconciling the new block's text until the user acts in the field
   // again; a pick from either list only applies in the scope it was opened in.
-  const [interactionScope, setInteractionScope] = useState(completionScope);
+  const [interactionScope, setInteractionScope] = useState<string | null>(completionScope);
+  // A new scope clears what the field owned (the typed `@` anchor, the dismissed `#` token, the
+  // interaction scope), so returning to an earlier scope starts clean (Codex r8).
+  const [ownedScope, setOwnedScope] = useState(completionScope);
+  if (ownedScope !== completionScope) {
+    setOwnedScope(completionScope);
+    setTypedMention(null);
+    setDismissedTagStart(null);
+    setInteractionScope(null);
+  }
   const shouldOpen = !disabled && focused && Boolean(active) && active?.start !== dismissedTagStart && !pickerOpen
     && interactionScope === completionScope;
   const caretMention = activities && !disabled && focused && !pickerOpen

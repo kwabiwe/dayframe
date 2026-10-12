@@ -74,7 +74,10 @@ type RuntimeContext = {
   startTimer: (input?: TimerDraftInput, options?: { dedupeRunning?: boolean }) => Promise<TimerStartOutcome>;
   stopTimer: (input?: TimerDraftInput) => Promise<MutationOutcome>;
   timerDraft: TimerDraft;
-  /** The block the draft belongs to (its id, or "idle"); kept across an accepted Start's handoff. */
+  /**
+   * The block the draft belongs to: a fresh token on every genuine change of block (a rollback and
+   * a return to an earlier block included); kept only across an accepted Start's handoff.
+   */
   timerDraftScope: string;
   timerError: string | null;
   toggleTimer: () => Promise<MutationOutcome>;
@@ -107,9 +110,14 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
   // Set by a rejected Start: the next active-entry identity change keeps this draft instead of
   // resetting the bar to the restored entry's details.
   const rollbackDraftRef = useRef<{ draft: TimerDraft; entryId: string | null } | null>(null);
-  // Which block the draft belongs to: the running block's id, or "idle". It changes with the
-  // block, except when an accepted Start hands its optimistic block over to the real one.
-  const [timerDraftScope, setTimerDraftScope] = useState("idle");
+  // Which block the draft belongs to: a fresh token for every genuine change of block (a new
+  // block, going idle, a rejected Start's rollback, a return to an earlier block), so stale
+  // completion state can never match it again. Only an accepted Start's handoff from its
+  // optimistic block to the real one keeps the token.
+  const scopeCounterRef = useRef(0);
+  const [timerDraftScope, setTimerDraftScope] = useState("idle#0");
+  // The optimistic block of a Start the server accepted; its real block is the same block.
+  const acceptedStartIdRef = useRef<string | null>(null);
   const refreshRequestRef = useRef(0);
   const dateLoadRequestRef = useRef(0);
   const isDateLoadingRef = useRef(false);
@@ -175,16 +183,23 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
     const canonicalDraft = timerDraftForEntry(data?.activeEntry);
     const previousEntryId = timerDraftEntryIdRef.current;
     const activeEntryChanged = previousEntryId !== activeEntryId;
-    // An accepted Start replaces its optimistic block with the real one: the same block, so edits
-    // made while the Start was pending are reconciled like any other, not reset (Codex r7).
-    const startAccepted = activeEntryChanged && isOptimisticTimerId(previousEntryId)
-      && activeEntryId !== null && !isOptimisticTimerId(activeEntryId);
     const rollbackDraft = rollbackDraftRef.current;
     rollbackDraftRef.current = null;
-    const nextDraft = activeEntryChanged && rollbackDraft?.entryId === activeEntryId
-      ? rollbackDraft.draft
+    const rolledBack = activeEntryChanged && rollbackDraft?.entryId === activeEntryId;
+    // A Start the server accepted replaces its optimistic block with the real one: the same block,
+    // so edits made while the Start was pending are reconciled like any other, not reset (Codex
+    // r7). A rejected Start's rollback is a genuine change of block (Codex r8).
+    const startAccepted = activeEntryChanged && !rolledBack && previousEntryId !== null
+      && previousEntryId === acceptedStartIdRef.current
+      && activeEntryId !== null && !isOptimisticTimerId(activeEntryId);
+    if (activeEntryChanged && previousEntryId === acceptedStartIdRef.current) acceptedStartIdRef.current = null;
+    const nextDraft = rolledBack
+      ? rollbackDraft!.draft
       : reconcileTimerDraft(activeEntryChanged && !startAccepted, draftRef.current, canonicalTimerDraftRef.current, canonicalDraft);
-    if (activeEntryChanged && !startAccepted) setTimerDraftScope(activeEntryId ?? "idle");
+    if (activeEntryChanged && !startAccepted) {
+      scopeCounterRef.current += 1;
+      setTimerDraftScope(`${activeEntryId ?? "idle"}#${scopeCounterRef.current}`);
+    }
     timerDraftEntryIdRef.current = activeEntryId;
     canonicalTimerDraftRef.current = canonicalDraft;
     if (!timerDraftsEqual(nextDraft, draftRef.current)) setTimerDraft(nextDraft);
@@ -373,6 +388,9 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
           body: JSON.stringify(payload)
         });
         if (!response.ok) throw new Error(await responseError(response, `Unable to start the block: ${response.status}`));
+        // Accepted: the optimistic block on screen is handed over to the real one on refresh.
+        const running = dataRef.current?.activeEntry?.id ?? null;
+        acceptedStartIdRef.current = isOptimisticTimerId(running) ? running : null;
       },
       refresh: async () => {
         await refresh({ force: true });
