@@ -13,6 +13,7 @@ vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
 
 vi.mock("react-native", () => ({
   Alert: { alert: vi.fn() },
+  Animated: { Value: class { setValue() {} interpolate() { return 0; } }, View: "AnimatedView", timing: () => ({ start() {}, stop() {} }) },
   Keyboard: { addListener: () => ({ remove() {} }), dismiss: vi.fn() },
   Platform: { OS: "ios" },
   Pressable: "Pressable", ScrollView: "ScrollView", Switch: "Switch",
