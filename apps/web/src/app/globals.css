@@ -1319,7 +1319,6 @@ textarea.ui-control {
 .settings-troubleshooting-copy {
   display: grid;
   gap: 10px;
-  padding: 16px;
 }
 
 .settings-confirm-copy p,
@@ -1480,6 +1479,8 @@ dialog.ui-dialog::backdrop {
   overflow-x: hidden;
   overflow-y: auto;
   overscroll-behavior: contain;
+  /* The dialog's own inner padding, like its header and actions (UIA-301). */
+  padding: var(--web-gap-md) var(--web-dialog-padding-inline);
 }
 
 .ui-dialog .swiss-form-grid {
@@ -1518,6 +1519,8 @@ dialog.ui-popover-panel.bottom-left {
 
 .ui-popover-content {
   display: grid;
+  /* Popover rows lay out their own edges. */
+  padding: 0;
 }
 
 @media (max-width: 1180px) {
@@ -3111,7 +3114,6 @@ dialog.ui-popover-panel.bottom-left {
 .swiss-confirm-body {
   display: grid;
   gap: 16px;
-  padding: 16px;
 }
 
 .swiss-confirm-body p {
@@ -5311,7 +5313,6 @@ kbd {
 
 .place-dialog-copy {
   margin: 0;
-  padding: 18px;
   color: var(--muted);
   font-size: 14px;
   line-height: 1.55;
@@ -5320,7 +5321,6 @@ kbd {
 .place-role-dialog {
   display: grid;
   gap: 16px;
-  padding: 18px;
 }
 
 .place-role-note {
@@ -5352,7 +5352,6 @@ kbd {
   display: grid;
   gap: 1px;
   margin: 0;
-  padding: 16px;
 }
 
 .place-learned-details > div {
@@ -7367,6 +7366,8 @@ dialog.ui-dialog.manual-entry-dialog {
 
 .manual-entry-dialog-content {
   overflow: visible;
+  /* The manual entry form lays out its own edges. */
+  padding: 0;
 }
 
 .manual-entry-dialog .manual-entry-form {
@@ -10007,6 +10008,8 @@ dialog.ui-dialog.df-palette {
   display: flex;
   min-height: 0;
   flex-direction: column;
+  /* The palette pads the dialog itself. */
+  padding: 0;
 }
 
 .df-palette-input {
@@ -10827,6 +10830,7 @@ dialog.ui-dialog.df-palette {
   animation: df-toast-out 160ms ease-in both;
 }
 
+
 .df-toast-swatch {
   width: 12px;
   height: 12px;
@@ -11247,6 +11251,11 @@ dialog.ui-dialog.df-palette {
   background: color-mix(in oklab, var(--danger) 12%, var(--surface));
   color: var(--text-primary);
   font-size: 14px;
+}
+
+/* Phones only (UIA-315): "‹ 2 of 4 ›" above the Review card. */
+.df-rnav {
+  display: none;
 }
 
 .df-review-queue {
@@ -11704,6 +11713,35 @@ dialog.ui-dialog.df-palette {
     order: -1;
   }
 
+  .df-rnav {
+    display: flex;
+    /* Above the card (which comes first on phones), as its own row: the card keeps its origin. */
+    order: -2;
+    align-items: center;
+    justify-content: space-between;
+  }
+
+  .df-rnav-btn {
+    display: grid;
+    width: 44px;
+    height: 44px;
+    place-items: center;
+    border: 0;
+    border-radius: 999px;
+    background: var(--surface);
+    color: var(--text-primary);
+  }
+
+  .df-rnav-btn:disabled {
+    opacity: 0.5;
+  }
+
+  .df-rnav-pos {
+    color: var(--text-secondary);
+    font-size: 14px;
+    font-weight: 650;
+  }
+
   .df-review-queue {
     max-height: none;
   }
@@ -11943,8 +11981,10 @@ dialog.ui-dialog.df-palette {
   opacity: 0.85;
 }
 
+/* The card's Edit spans the card, as in the prototype (UIA-316). */
 .df-lcard > .df-rbtn {
-  justify-self: start;
+  justify-self: stretch;
+  justify-content: center;
 }
 
 .df-lnew {
@@ -12197,6 +12237,16 @@ dialog.ui-dialog.df-ce-dialog {
   padding: 10px 14px;
 }
 
+.df-place-new .df-srow-text {
+  display: grid;
+  min-width: 0;
+}
+
+.df-place-new .df-srow-text small {
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
 .df-tag-new-field {
   display: flex;
   min-width: min(100%, 220px);
@@ -12367,8 +12417,31 @@ dialog.ui-dialog.df-ce-dialog {
   margin: 0;
 }
 
+/* Settings dialogs (UIA-301): fields stacked full width; the action is in the dialog footer. */
 .df-set-dialog-form {
-  align-items: end;
+  display: grid;
+  gap: 12px;
+}
+
+.df-set-dialog-form .ui-control.is-compact {
+  width: 100%;
+}
+
+.ui-dialog .settings-workspace-actions.df-set-dialog-workspace {
+  min-width: 0;
+  justify-items: stretch;
+}
+
+.df-set-dialog-workspace .settings-workspace-toolbar {
+  justify-content: flex-start;
+}
+
+.df-set-dialog-workspace .settings-workspace-select {
+  flex: 1 1 200px;
+}
+
+.df-set-dialog-workspace .settings-workspace-detail-form {
+  justify-content: flex-start;
 }
 
 .df-settings {

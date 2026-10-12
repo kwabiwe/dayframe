@@ -1190,39 +1190,6 @@ function createStyles(theme: MobileTheme) {
       flexWrap: "wrap",
       gap: 6
     },
-    tagMetadataRow: {
-      minWidth: 0,
-      flexDirection: "row",
-      alignItems: "center",
-      flexWrap: "wrap",
-      gap: 5
-    },
-    tagMetadataTagGroup: {
-      minWidth: 0,
-      flexDirection: "row",
-      alignItems: "center",
-      gap: 5
-    },
-    tagMetadataTagButton: {
-      minWidth: 44,
-      minHeight: 44,
-      justifyContent: "center",
-      paddingHorizontal: 4
-    },
-    tagMetadataSeparator: {
-      color: theme.textSecondary,
-      fontFamily: monoFont,
-      fontSize: 12,
-      fontWeight: "400"
-    },
-    tagMetadataText: {
-      minWidth: 0,
-      flexShrink: 1,
-      color: theme.textSecondary,
-      fontFamily: monoFont,
-      fontSize: 12,
-      fontWeight: "400"
-    },
     activeEditTimeGroups: {
       flexDirection: "row",
       alignItems: "flex-start",
