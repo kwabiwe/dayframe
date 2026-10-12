@@ -468,7 +468,8 @@ private struct DayframeCalendarEntriesLayer: View {
           offsetFraction: entry.offsetFraction,
           widthFraction: entry.widthFraction,
           overlapCount: entry.overlapCount,
-          textDensity: entry.textDensity
+          textDensity: entry.textDensity,
+          timelineHeight: 24 * Double(hourHeight)
         ) {
           let visualMetrics = DayframeCalendarBlockVisualMath.metrics(
             semanticHeight: metrics.height,
@@ -501,14 +502,22 @@ private struct DayframeCalendarEntriesLayer: View {
           }
           .buttonStyle(.plain)
           .contentShape(Rectangle())
-          .modifier(DayframeCalendarHorizontalGeometry(
+          // Lane reflow: only the horizontal modifier eases (iOS 17 scoped animation), so the block's
+          // heights, hit height, zoom geometry and the running ring's own breathing are untouched.
+          .modifier(DayframeCalendarLaneGeometry(
+            animation: presentation.reduceMotion ? nil : .easeOut(duration: 0.21),
             width: resolvedWidth,
             x: CGFloat((entryGeometry.hitFrame.minX + entryGeometry.hitFrame.maxX) / 2),
             y: CGFloat(vertical.hitCenterY)
           ))
-          .animation(
-            presentation.reduceMotion ? nil : .easeOut(duration: 0.21),
-            value: "\(entry.offsetFraction):\(entry.widthFraction)"
+          // A block that arrives or leaves within the day (a new suggestion, a crowd of Review
+          // suggestions forming or splitting) fades. The animation belongs to this transition only,
+          // so blocks that stay keep their own geometry rules (model updates arrive unanimated) and
+          // nothing else in the timeline eases. Reduce Motion: it simply appears or goes.
+          .transition(
+            presentation.reduceMotion
+              ? .identity
+              : .opacity.animation(.easeOut(duration: 0.21))
           )
           .zIndex(Double(entry.zIndex))
           .accessibilityLabel(entry.accessibilityLabel)
@@ -655,6 +664,28 @@ private struct DayframeCalendarLiveRing: View {
     bright = false
     withAnimation(.easeInOut(duration: 1.2).repeatForever(autoreverses: true)) {
       bright = true
+    }
+  }
+}
+
+/**
+ * Applies a block's lane width and position. On iOS 17 and later the lane animation is scoped to
+ * this modifier alone (`animation(_:body:)`), never the block's content; on iOS 16 lane changes
+ * settle at once rather than letting the animation reach vertical geometry.
+ */
+private struct DayframeCalendarLaneGeometry: ViewModifier {
+  let animation: Animation?
+  let width: CGFloat
+  let x: CGFloat
+  let y: CGFloat
+
+  func body(content: Content) -> some View {
+    if #available(iOS 17.0, *) {
+      content.animation(animation) { view in
+        view.modifier(DayframeCalendarHorizontalGeometry(width: width, x: x, y: y))
+      }
+    } else {
+      content.modifier(DayframeCalendarHorizontalGeometry(width: width, x: x, y: y))
     }
   }
 }

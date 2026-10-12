@@ -31,8 +31,8 @@ describe("Reports top", () => {
   it("shows the four tiles with Total logged beside Total framed", () => {
     const html = renderToStaticMarkup(<ReportsTop dailyGoalMinutes={480} report={report()} />);
     expect(html).toContain("Total framed");
-    expect(html).toContain("10h 00m logged · overlaps count once above");
-    expect(html).toContain("+1h 00m vs the week before");
+    expect(html).toContain("10h logged · overlaps count once above");
+    expect(html).toContain("+1h vs the week before");
     expect(html).toContain("across 2 days so far");
     expect(html).toContain("Days on goal");
     expect((html.match(/class="is-met"/g) ?? []).length).toBe(1);

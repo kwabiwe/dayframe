@@ -5,7 +5,7 @@ import type { DayframeGlyph } from "@dayframe/shared";
 import Link from "next/link";
 import type { CSSProperties, KeyboardEvent as ReactKeyboardEvent } from "react";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { Check, X } from "lucide-react";
+import { Check, ChevronLeft, ChevronRight, X } from "lucide-react";
 import { validReviewAcknowledgement, type ReviewMutationEnvelope } from "@dayframe/shared";
 import { useAppShellRuntime, useRuntimePageData } from "@/components/AppShellRuntime";
 import { BlocksToast } from "@/components/blocks/BlocksToast";
@@ -101,11 +101,33 @@ export function ReviewDeck({ initialData }: { initialData: BootstrapData }) {
   // "All framed" celebrates only when this visit's own decision emptied the queue.
   const [emptiedByDecision, setEmptiedByDecision] = useState(false);
   const [drafts, setDrafts] = useState<ReadonlyMap<string, ReviewLogAsDraft>>(() => new Map());
-  const [ghost, setGhost] = useState<{ key: number; item: ReviewItemRow; draft?: ReviewLogAsDraft; dir: 1 | -1 } | null>(null);
+  const [ghost, setGhost] = useState<ReviewGhost | null>(null);
   const [enter, setEnter] = useState<{ itemId: string; from: "decision" | "undo" | "select"; dir: 1 | -1; key: number } | null>(null);
   const enterSequence = useRef(0);
   const nameInputRef = useRef<HTMLInputElement | null>(null);
   const cardRef = useRef<HTMLElement | null>(null);
+  const navRef = useRef<HTMLElement | null>(null);
+  // A refresh or decision can leave one moment (or the evidence editor opens): the focused ‹ ›
+  // button is then disabled, so focus moves to the card's first action rather than the page.
+  const navDisabled = visible.length < 2 || evidenceOpenId !== null;
+  // Whether focus is in the bar, remembered until focus lands somewhere else: a browser that blurs
+  // a button as it is disabled has already moved focus to the page by the time the effect runs.
+  const navHadFocus = useRef(false);
+  useEffect(() => {
+    const onFocusIn = (event: FocusEvent) => {
+      navHadFocus.current = Boolean(navRef.current && event.target instanceof Node && navRef.current.contains(event.target));
+    };
+    document.addEventListener("focusin", onFocusIn);
+    return () => document.removeEventListener("focusin", onFocusIn);
+  }, []);
+  useEffect(() => {
+    if (!navDisabled || !navHadFocus.current) return;
+    const active = document.activeElement;
+    const inBar = active instanceof Node && navRef.current?.contains(active);
+    if (active && active !== document.body && !inBar) return;
+    navHadFocus.current = false;
+    cardRef.current?.querySelector<HTMLElement>(".df-ractions button:not(:disabled)")?.focus();
+  }, [navDisabled]);
 
   // The card whose evidence editor is open stays the card, whatever the queue order becomes.
   const selected = visible.find((item) => item.id === (evidenceOpenId ?? selectedId)) ?? visible[0] ?? null;
@@ -114,6 +136,10 @@ export function ReviewDeck({ initialData }: { initialData: BootstrapData }) {
   if (selected && !hadCard) setHadCard(true);
   // A refill (refresh, Undo) ends this visit's "emptied" state; a later empty queue is not ours.
   if (emptiedByDecision && visible.length > 0) setEmptiedByDecision(false);
+  // A decided card's copy flies only where it started (card slot or empty state): once the deck
+  // leaves that branch (Undo, a refill, a refresh that empties it) the copy is gone for good, so
+  // coming back to the branch later never starts its flight again.
+  if (ghost && ghost.overEmpty !== !selected) setGhost(null);
   const openIdsRef = useRef<ReadonlySet<string>>(new Set());
   useLayoutEffect(() => {
     openIdsRef.current = new Set(openItems.map((item) => item.id));
@@ -167,6 +193,8 @@ export function ReviewDeck({ initialData }: { initialData: BootstrapData }) {
     setMissingTargetId(null);
     setEmptiedByDecision(false);
     setEnter({ itemId: state.restored.itemId, from: "undo", dir: 1, key: ++enterSequence.current });
+    // The card is back: its outgoing copy (still flying) goes at once rather than overlapping it.
+    setGhost((current) => (current?.item.id === restoredId ? null : current));
     // Undo pressed from the keyboard leaves focus on a toast that is about to go: the card's
     // first action takes it.
     const frame = requestAnimationFrame(() => {
@@ -276,7 +304,12 @@ export function ReviewDeck({ initialData }: { initialData: BootstrapData }) {
     setEvidenceOpenId(null);
     setEmptiedByDecision(next === null);
     if (next) setEnter({ itemId: next, from: "decision", dir, key: ++enterSequence.current });
-    if (!prefersReducedMotion()) setGhost({ key: ++enterSequence.current, item, draft, dir });
+    if (!prefersReducedMotion()) {
+      // Where the card is now: the ghost leaves from exactly there, also when the deck empties and
+      // the ghost is drawn over the empty state (UIA-315: the phone queue bar sits above it).
+      const box = cardRef.current?.getBoundingClientRect();
+      setGhost({ key: ++enterSequence.current, item, draft, dir, origin: box ? { top: box.top, left: box.left, width: box.width } : undefined, overEmpty: next === null });
+    }
   }, [categories, decide, drafts, evidenceOpenId, revived, visibleIds]);
 
   // An editor's close is fenced to the opening it belongs to. Focus inside the closing editor
@@ -433,7 +466,7 @@ export function ReviewDeck({ initialData }: { initialData: BootstrapData }) {
           moreComing={beyondLoaded > 0}
           takeFocus={hadCard}
         />
-        {ghost ? <GhostCard ghost={ghost} categories={categories} nowMs={nowMs} onDone={() => setGhost(null)} /> : null}
+        {ghost?.overEmpty ? <GhostCard atOrigin ghost={ghost} categories={categories} nowMs={nowMs} onDone={() => setGhost(null)} /> : null}
         {toast}
       </div>
     );
@@ -478,6 +511,34 @@ export function ReviewDeck({ initialData }: { initialData: BootstrapData }) {
           })}
         </section>
 
+        {/* Phones (UIA-315): where this card sits in the queue, with ‹ › to step through it (the
+            full queue follows the card there). A sibling of the card slot, so the card (and a
+            decided card's ghost) keeps its origin; shown whenever a card is, so deciding down to
+            one moment never moves the card. Hidden on wider screens, where ↑ ↓ step through the
+            queue beside the card. */}
+        <nav aria-label="Queue position" className="df-rnav" ref={navRef}>
+          <button
+            aria-label="Previous moment"
+            className="df-rnav-btn"
+            disabled={evidenceOpen || visible.length < 2}
+            onClick={() => select(stepSelection(visibleIds, selected.id, -1))}
+            type="button"
+          >
+            <ChevronLeft aria-hidden="true" size={18} />
+          </button>
+          <span aria-atomic="true" aria-live="polite" className="df-rnav-pos df-tnum">
+            {visible.findIndex((item) => item.id === selected.id) + 1} of {visible.length}{visible.length < (total ?? 0) ? " shown" : ""}
+          </span>
+          <button
+            aria-label="Next moment"
+            className="df-rnav-btn"
+            disabled={evidenceOpen || visible.length < 2}
+            onClick={() => select(stepSelection(visibleIds, selected.id, 1))}
+            type="button"
+          >
+            <ChevronRight aria-hidden="true" size={18} />
+          </button>
+        </nav>
         <div className="df-rcard-slot">
           <section
             aria-labelledby="df-rcard-title"
@@ -566,7 +627,7 @@ export function ReviewDeck({ initialData }: { initialData: BootstrapData }) {
               </div>
             ) : null}
           </section>
-          {ghost ? <GhostCard ghost={ghost} categories={categories} nowMs={nowMs} onDone={() => setGhost(null)} /> : null}
+          {ghost && !ghost.overEmpty ? <GhostCard ghost={ghost} categories={categories} nowMs={nowMs} onDone={() => setGhost(null)} /> : null}
         </div>
       </div>
       {toast}
@@ -749,16 +810,34 @@ function CardFace({
 }
 
 /** The decided card flying out (prototype throw): a still copy, inert and hidden from assistive tech. */
+type ReviewGhost = {
+  key: number;
+  item: ReviewItemRow;
+  draft?: ReviewLogAsDraft;
+  dir: 1 | -1;
+  /** The card's viewport bounds when it was decided. */
+  origin?: { top: number; left: number; width: number };
+  /**
+   * Drawn over the empty state (the last card was decided) rather than in the card slot. The copy
+   * flies only where it started: if the deck switches between card and empty state mid-flight (Undo
+   * brings the card back), the copy is dropped, never restarted from the card's place.
+   */
+  overEmpty: boolean;
+};
+
 function GhostCard({
+  atOrigin = false,
   categories,
   ghost,
   nowMs,
   onDone
 }: {
   categories: readonly CategoryRow[];
-  ghost: { key: number; item: ReviewItemRow; draft?: ReviewLogAsDraft; dir: 1 | -1 };
+  ghost: ReviewGhost;
   nowMs: number;
   onDone: () => void;
+  /** Drawn over the empty state (not inside the card slot): placed at the card's last bounds. */
+  atOrigin?: boolean;
 }) {
   const ref = useRef<HTMLDivElement | null>(null);
   const doneRef = useRef(onDone);
@@ -794,7 +873,12 @@ function GhostCard({
       inert
       key={ghost.key}
       ref={ref}
-      style={category ? blockStyle(category.color, category.name) : undefined}
+      style={{
+        ...(category ? blockStyle(category.color, category.name) : {}),
+        ...(atOrigin && ghost.origin
+          ? { top: ghost.origin.top, left: ghost.origin.left, width: ghost.origin.width, marginLeft: 0, right: "auto" }
+          : {})
+      }}
     >
       <CardFace categories={categories} draft={ghost.draft} inert item={ghost.item} nowMs={nowMs} />
     </div>

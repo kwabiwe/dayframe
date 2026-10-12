@@ -1,4 +1,4 @@
-import { goalCountingEntries, type GoalCountingCategory } from "@dayframe/shared";
+import { formatDuration, goalCountingEntries, type GoalCountingCategory } from "@dayframe/shared";
 import type { ReviewItemRow, TimeEntryRow } from "@/lib/queries";
 
 /**
@@ -125,9 +125,9 @@ export function buildGoalFrame({
   };
 }
 
+/** The goal reads like every other duration ("8h", "7h 30m", "30m"; UIA-207). */
 export function formatGoalHours(minutes: number) {
-  const hours = minutes / 60;
-  return Number.isInteger(hours) ? `${hours}h` : `${Math.floor(hours)}h ${Math.round(minutes % 60)}m`;
+  return formatDuration(minutes * 60);
 }
 
 /** Entries that overlap the day, newest first, with their clipped interval. */

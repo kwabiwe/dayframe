@@ -216,8 +216,22 @@ export function AccountSettings({
       {error && !dialog ? <p className="settings-section-feedback is-error df-set-feedback" role="alert">{error}</p> : null}
 
       {dialog === "profile" ? (
-        <ModalDialog busy={busyAction === "profile"} description={user.email} onClose={closeDialog} title="Edit profile">
-          <form className="settings-inline-form df-set-dialog-form" onSubmit={saveProfile}>
+        <ModalDialog
+          busy={busyAction === "profile"}
+          description={user.email}
+          // The action sits in the dialog's footer, like every confirmation (UIA-301).
+          footer={(
+            <>
+              <Button compact disabled={Boolean(busyAction)} onClick={closeDialog} type="button">Cancel</Button>
+              <Button compact disabled={Boolean(busyAction)} form="settings-profile-form" type="submit" variant="primary">
+                {busyAction === "profile" ? "Saving…" : "Save profile"}
+              </Button>
+            </>
+          )}
+          onClose={closeDialog}
+          title="Edit profile"
+        >
+          <form className="df-set-dialog-form" id="settings-profile-form" onSubmit={saveProfile}>
             <TextField
               compact
               id="settings-profile-name"
@@ -227,9 +241,6 @@ export function AccountSettings({
               value={name}
               onChange={(event) => setName(event.target.value)}
             />
-            <Button variant="primary" compact type="submit" disabled={Boolean(busyAction)}>
-              {busyAction === "profile" ? "Saving…" : "Save profile"}
-            </Button>
           </form>
           {dialogError}
         </ModalDialog>
@@ -237,7 +248,7 @@ export function AccountSettings({
 
       {dialog === "workspace" ? (
         <ModalDialog busy={Boolean(busyAction)} description={`Currently using ${workspace.name}`} onClose={closeDialog} title="Workspace">
-          <div className="settings-workspace-actions">
+          <div className="settings-workspace-actions df-set-dialog-workspace">
             <div className="settings-workspace-toolbar">
               <label className="settings-workspace-select">
                 <span className="sr-only">Active workspace</span>
@@ -311,8 +322,21 @@ export function AccountSettings({
       ) : null}
 
       {dialog === "password" && canChangePassword ? (
-        <ModalDialog busy={busyAction === "password"} description={securitySummary(authMode)} onClose={closeDialog} title="Change password">
-          <form className="settings-security-form df-set-dialog-form" onSubmit={changePassword}>
+        <ModalDialog
+          busy={busyAction === "password"}
+          description={securitySummary(authMode)}
+          footer={(
+            <>
+              <Button compact disabled={Boolean(busyAction)} onClick={closeDialog} type="button">Cancel</Button>
+              <Button compact disabled={Boolean(busyAction)} form="settings-password-form" type="submit" variant="primary">
+                {busyAction === "password" ? "Saving…" : "Change password"}
+              </Button>
+            </>
+          )}
+          onClose={closeDialog}
+          title="Change password"
+        >
+          <form className="df-set-dialog-form" id="settings-password-form" onSubmit={changePassword}>
             <TextField
               compact
               autoComplete="current-password"
@@ -345,9 +369,6 @@ export function AccountSettings({
               value={confirmPassword}
               onChange={(event) => setConfirmPassword(event.target.value)}
             />
-            <Button compact variant="primary" type="submit" disabled={Boolean(busyAction)}>
-              {busyAction === "password" ? "Saving…" : "Change password"}
-            </Button>
           </form>
           {dialogError}
         </ModalDialog>
@@ -459,7 +480,7 @@ export function DataPrivacySettings() {
         action={(
           <div className="settings-export-actions">
             <a className="ui-button ui-button-secondary" href="/api/export?kind=workspace_json" download>Dayframe data</a>
-            <a className="ui-button ui-button-secondary" href="/api/export?kind=time_entries_csv" download>Time entries</a>
+            <a className="ui-button ui-button-secondary" href="/api/export?kind=time_entries_csv" download>Blocks</a>
             <a className="ui-button ui-button-secondary" href="/api/export?kind=activity_events_json" download>Activity history</a>
           </div>
         )}
@@ -467,7 +488,7 @@ export function DataPrivacySettings() {
       <SettingsRow
         glyph="trash-2"
         label="Recent location evidence"
-        detail="Raw map evidence is normally deleted after seven days. Confirmed time entries and saved places are kept."
+        detail="Raw map evidence is normally deleted after seven days. Confirmed blocks and saved places are kept."
         action={(
           <Button variant="danger" compact onClick={() => setConfirmDelete(true)}>
             Delete recent evidence
@@ -493,7 +514,7 @@ export function DataPrivacySettings() {
           title="Delete recent location evidence?"
         >
           <div className="settings-confirm-copy">
-            <p>Confirmed time entries and saved places will remain.</p>
+            <p>Confirmed blocks and saved places will remain.</p>
             <p>This cannot be undone.</p>
           </div>
         </ModalDialog>

@@ -102,6 +102,8 @@ describe("goal frame", () => {
     expect(frame.cells).toHaveLength(8);
     expect(formatGoalHours(frame.goalMinutes)).toBe("8h");
     expect(formatGoalHours(450)).toBe("7h 30m");
+    expect(formatGoalHours(30)).toBe("30m");
+    expect(formatGoalHours(45)).toBe("45m");
   });
 });
 

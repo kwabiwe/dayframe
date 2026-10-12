@@ -79,8 +79,8 @@ describe("Today", () => {
     expect(consoleError.mock.calls.flat().map(String).join("\n")).not.toMatch(/hydrat/i);
     expect(recoverable).toEqual([]);
 
-    // Inbox 09:00–10:00 plus Deep work running since 11:00: 2h 00m framed at 12:00.
-    expect(container.querySelector("#df-today-total")?.textContent).toContain("2h 00m");
+    // Inbox 09:00–10:00 plus Deep work running since 11:00: 2h framed at 12:00.
+    expect(container.querySelector("#df-today-total")?.textContent).toContain("2h");
     expect(rowLabels(container)).toEqual(["Deep work", "Inbox"]);
     await act(async () => root?.unmount());
   });
@@ -96,8 +96,8 @@ describe("Today", () => {
     const data = bootstrap();
     data.categories = data.categories.map((category) => category.id === "admin" ? { ...category, countsTowardGoal: false } : category);
     const { container, root } = await mount(data);
-    expect(container.querySelector("#df-today-total")?.textContent).toContain("2h 00m");
-    expect(container.querySelector(".df-today-sub")?.textContent).toBe("framed today · 1h 00m toward your 8h goal (13%)");
+    expect(container.querySelector("#df-today-total")?.textContent).toContain("2h");
+    expect(container.querySelector(".df-today-sub")?.textContent).toBe("framed today · 1h toward your 8h goal (13%)");
     await act(async () => root.unmount());
 
     // Admin archived: gone from `categories`, still listed as not counting.
@@ -105,7 +105,7 @@ describe("Today", () => {
     archived.categories = archived.categories.filter((category) => category.id !== "admin");
     archived.goalExcludedCategoryIds = ["admin"];
     const after = await mount(archived);
-    expect(after.container.querySelector(".df-today-sub")?.textContent).toBe("framed today · 1h 00m toward your 8h goal (13%)");
+    expect(after.container.querySelector(".df-today-sub")?.textContent).toBe("framed today · 1h toward your 8h goal (13%)");
     await act(async () => after.root.unmount());
   });
 
@@ -175,8 +175,8 @@ describe("Today", () => {
     const { container, root } = await mount(data);
     const row = [...container.querySelectorAll(".df-erow-main")].find((button) =>
       button.getAttribute("aria-label")?.startsWith("Late shift"));
-    expect(row?.getAttribute("aria-label")).toContain("23:00 to 01:00, 2h 00m");
-    expect(row?.querySelector(".df-erow-dur")?.textContent).toBe("2h 00m");
+    expect(row?.getAttribute("aria-label")).toContain("23:00 to 01:00, 2h");
+    expect(row?.querySelector(".df-erow-dur")?.textContent).toBe("2h");
     await act(async () => root.unmount());
   });
 

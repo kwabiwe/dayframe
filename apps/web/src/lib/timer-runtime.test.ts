@@ -189,7 +189,7 @@ describe("shell timer runtime", () => {
     gate.dispose();
     await expect(queuedStart).resolves.toEqual({
       ok: false,
-      error: "Timer update was cancelled."
+      error: "The block update was cancelled."
     });
     expect(send).not.toHaveBeenCalled();
 
@@ -320,7 +320,7 @@ describe("shell timer runtime", () => {
     });
 
     const first = run();
-    await expect(run()).resolves.toEqual({ ok: false, error: "A timer update is already in progress." });
+    await expect(run()).resolves.toEqual({ ok: false, error: "A block update is already in progress." });
     expect(requests).toEqual([{
       entryId: "active-calendar",
       payload: {
@@ -684,7 +684,7 @@ describe("shell timer runtime", () => {
       tagNames: ["tag-only"]
     }))).toEqual({
       ok: false,
-      error: "This entry does not have a task or activity to start."
+      error: "This block has no description or activity to start."
     });
   });
 

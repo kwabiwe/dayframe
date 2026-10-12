@@ -481,7 +481,7 @@ export function useTimeEntryQuickEditor(props: TimeEntryQuickEditorProps) {
         ? await props.onSave(plan as CalendarEntryCompactSavePlan)
         : await props.onSave(plan as CalendarEntryCompactCreatePlan);
     } catch {
-      outcome = { ok: false, error: "Unable to save this entry. Check your connection and try again." };
+      outcome = { ok: false, error: "Unable to save this block. Check your connection and try again." };
     }
     if (!outcome.ok) {
       recoverMutation(outcome.error);
@@ -506,7 +506,7 @@ export function useTimeEntryQuickEditor(props: TimeEntryQuickEditorProps) {
     try {
       outcome = await props.onStartAgain();
     } catch {
-      outcome = { ok: false, error: "Unable to start this entry again. Check your connection and try again." };
+      outcome = { ok: false, error: "Unable to start this block again. Check your connection and try again." };
     }
     if (!outcome.ok) {
       recoverMutation(outcome.error);
@@ -526,12 +526,12 @@ export function useTimeEntryQuickEditor(props: TimeEntryQuickEditorProps) {
       }
       finishDismiss(false);
     } catch {
-      recoverMutation("Unable to delete this entry. Check your connection and try again.");
+      recoverMutation("Unable to delete this block. Check your connection and try again.");
     }
   }
 
   const title = entry
-    ? entry.description?.trim() || entry.categoryName?.trim() || "Untitled entry"
+    ? entry.description?.trim() || entry.categoryName?.trim() || "Untitled block"
     : draft.description.trim() || selectedCategory?.name || "No activity";
   const previewError = activeTemporalOwner ? null : preview.error;
   const displayError = error ?? previewError;
@@ -1052,7 +1052,7 @@ export async function saveTimeEntryQuickEdit(entryId: string, plan: CalendarEntr
       body: JSON.stringify(plan.payload)
     });
     if (!response.ok) {
-      let message = `Unable to save this entry: ${response.status}`;
+      let message = `Unable to save this block: ${response.status}`;
       try {
         const payload = (await response.json()) as { error?: string };
         message = payload.error ?? message;
@@ -1063,7 +1063,7 @@ export async function saveTimeEntryQuickEdit(entryId: string, plan: CalendarEntr
     }
     return { ok: true } as const;
   } catch {
-    return { ok: false, error: "Unable to save this entry. Check your connection and try again." } as const;
+    return { ok: false, error: "Unable to save this block. Check your connection and try again." } as const;
   }
 }
 

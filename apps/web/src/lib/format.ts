@@ -1,17 +1,22 @@
+import { formatDuration as formatSharedDuration } from "@dayframe/shared";
+/**
+ * Every web duration ("6h 25m", "35m", "<1m", "0m") is the shared `formatDuration` (audit
+ * UIA-207, the same as iPhone's UIA-042); only running clocks use `formatClockDuration`.
+ */
 export function formatDuration(seconds: number) {
+  return formatSharedDuration(seconds);
+}
+
+/**
+ * The report CSV's duration cell ("1h 05m", "59m"), unchanged so existing spreadsheets keep
+ * reading; the interface uses `formatDuration`.
+ */
+export function formatExportDuration(seconds: number) {
   const safe = Math.max(0, Math.round(seconds));
   const hours = Math.floor(safe / 3600);
   const minutes = Math.floor((safe % 3600) / 60);
   if (hours === 0) return `${minutes}m`;
   return `${hours}h ${minutes.toString().padStart(2, "0")}m`;
-}
-
-/** Dense Timeline total with stable H:MM geometry and no hour wrapping. */
-export function formatCompactHoursMinutes(seconds: number) {
-  const safe = Math.max(0, Math.floor(seconds));
-  const hours = Math.floor(safe / 3600);
-  const minutes = Math.floor((safe % 3600) / 60);
-  return `${hours}:${minutes.toString().padStart(2, "0")}`;
 }
 
 export function formatClockDuration(seconds: number) {

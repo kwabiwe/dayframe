@@ -76,7 +76,7 @@ describe("EntriesTable grouped-description editing", () => {
     await waitFor(() => expect(onChanged).toHaveBeenCalledOnce());
     const merged = sharedDescription("Planning", 3);
     await waitFor(() => expect(document.activeElement).toBe(merged));
-    expect(screen.getByRole("button", { name: "Expand 3 Planning entries" })).not.toBeNull();
+    expect(screen.getByRole("button", { name: "Expand 3 Planning blocks" })).not.toBeNull();
     expect(screen.queryByLabelText(/Uncategorized shared description/)).toBeNull();
   });
 
@@ -172,7 +172,7 @@ function renderTable({
 
 function sharedDescription(description: string, count: number) {
   return screen.getByLabelText(
-    `${description} shared description for ${count} grouped entries. Click to edit all occurrences.`
+    `${description} shared description for ${count} grouped blocks. Click to edit all occurrences.`
   ) as HTMLInputElement;
 }
 

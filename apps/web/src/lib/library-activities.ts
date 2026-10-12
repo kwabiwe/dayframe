@@ -1,3 +1,4 @@
+import { formatDuration } from "@dayframe/shared";
 import { DAYFRAME_ACTIVITY_ICON_GROUPS, activityGroupFor } from "@dayframe/shared";
 import type { CategoryRow, TimeEntryRow } from "@/lib/queries";
 
@@ -73,10 +74,6 @@ export function activityWeeks(lists: readonly (readonly TimeEntryRow[] | null | 
 
 /** "2h 30m in the last 7 days", or a plain line when the activity wasn't used. */
 export function formatActivityWeek(seconds: number) {
-  const minutes = Math.floor(seconds / 60);
-  if (minutes < 1) return "Not used in the last 7 days";
-  const hours = Math.floor(minutes / 60);
-  const rest = minutes % 60;
-  const amount = hours === 0 ? `${rest}m` : rest === 0 ? `${hours}h` : `${hours}h ${rest}m`;
-  return `${amount} in the last 7 days`;
+  if (!(seconds > 0)) return "Not used in the last 7 days";
+  return `${formatDuration(seconds)} in the last 7 days`;
 }

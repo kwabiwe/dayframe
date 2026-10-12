@@ -120,7 +120,7 @@ export async function POST(request: Request) {
     return NextResponse.json(
       {
         error:
-          "Unable to save this time entry. Confirm the hosted database migrations are applied, then try again."
+          "Unable to save this block. Confirm the hosted database migrations are applied, then try again."
       },
       { status: 500 }
     );

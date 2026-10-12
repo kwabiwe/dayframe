@@ -121,7 +121,7 @@ export const TodayRibbon = memo(function TodayRibbon({
   const pendingCount = model.blocks.length - loggedCount;
   const summary = model.blocks.length
     ? `${loggedCount} ${loggedCount === 1 ? "block" : "blocks"}${pendingCount ? `, ${pendingCount} waiting for review` : ""}. Swipe up or down to step through them.`
-    : "Nothing tracked yet today.";
+    : "Nothing framed yet today.";
   const ordered = useMemo(() => [...model.blocks].sort((a, b) => a.startMs - b.startMs), [model.blocks]);
 
   return (

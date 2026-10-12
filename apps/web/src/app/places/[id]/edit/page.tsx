@@ -21,7 +21,7 @@ export default async function EditPlacePage({
     <>
       <PageHeader
         title="Edit place"
-        description="Update the location and visit-suggestion defaults without changing existing time entries."
+        description="Update the location and visit-suggestion defaults without changing existing blocks."
       />
       <div className="place-editor-page px-5 pb-8 md:px-8">
         <PlaceEditor

@@ -17,10 +17,10 @@ vi.mock("react-native", () => ({
   Text: "Text",
   View: "View"
 }));
-vi.mock("react-native-reanimated", () => ({ default: { View: "ReanimatedView" } }));
-vi.mock("../../lib/motion", () => ({
-  localPresenceEntering: (reduceMotion: boolean, presence: string) => ({ kind: "entering", presence, reduceMotion }),
-  localPresenceExiting: (reduceMotion: boolean) => ({ kind: "exiting", reduceMotion })
+vi.mock("react-native-reanimated", () => ({ default: { View: "ReanimatedView" }, useSharedValue: (value: unknown) => ({ value }) }));
+vi.mock("../../lib/blocksMotion", () => ({
+  blocksToastEntering: (reduceMotion: boolean) => ({ kind: "entering", spring: reduceMotion ? null : "pop", reduceMotion }),
+  blocksToastExiting: (reduceMotion: boolean) => ({ kind: "exiting", reduceMotion })
 }));
 vi.mock("../../lib/mobileTypography", () => ({ mobileTextProps: () => ({}) }));
 
@@ -92,16 +92,16 @@ describe("BlocksToast (UIA-003)", () => {
     expect(tree!.root.findAll((node: ReactTestInstance) => (node.type as unknown) === "Pressable")).toHaveLength(0);
   });
 
-  it("rises in and fades out, and only fades under Reduce Motion", () => {
+  it("pops in with the prototype's spring and drops away, and only fades under Reduce Motion (X4)", () => {
     act(() => {
       tree = create(<BlocksToast message="Logged Deep work" reduceMotion={false} theme={theme} />);
     });
-    expect(host().props.entering).toEqual({ kind: "entering", presence: "rise", reduceMotion: false });
+    expect(host().props.entering).toEqual({ kind: "entering", spring: "pop", reduceMotion: false });
     expect(host().props.exiting).toEqual({ kind: "exiting", reduceMotion: false });
     act(() => {
       tree!.update(<BlocksToast message="Logged Deep work" reduceMotion theme={theme} />);
     });
-    expect(host().props.entering).toEqual({ kind: "entering", presence: "rise", reduceMotion: true });
+    expect(host().props.entering).toEqual({ kind: "entering", spring: null, reduceMotion: true });
     expect(host().props.exiting).toEqual({ kind: "exiting", reduceMotion: true });
   });
 

@@ -48,7 +48,7 @@ describe("Reports blocks and Where it went", () => {
       <ReportsBlocksPanel blocks={reportBlocksModel(report(), formatDuration)} land={land} slices={slices} totalLabel="logged this week" totalSeconds={10 * 3600} />
     );
     expect((html.match(/class="df-wb[ "]/g) ?? []).length).toBe(7);
-    expect(html).toContain('aria-label="Day 5: 9h 00m framed, Work 9h 00m, No activity 1h 00m"');
+    expect(html).toContain('aria-label="Day 5: 9h framed, Work 9h, No activity 1h"');
     expect(html).toContain("The days in blocks");
     expect(html).toContain("Where it went");
   });
@@ -61,7 +61,7 @@ describe("Reports blocks and Where it went", () => {
     expect(model.days.map((entry) => entry.dateNumber)).toEqual([5, 6, 7, 8, 9, 10, 11]);
     const html = renderToStaticMarkup(<ReportsBlocksPanel blocks={model} land={land} slices={slices} totalLabel="logged this month" totalSeconds={10 * 3600} />);
     expect(html).toContain("The month in blocks");
-    expect(html).toContain('aria-label="Day 5: 9h 00m framed, Work 9h 00m, No activity 1h 00m"');
+    expect(html).toContain('aria-label="Day 5: 9h framed, Work 9h, No activity 1h"');
   });
 
   it("highlights an activity's blocks and shows its time in the centre while its row is hovered or focused", async () => {
@@ -76,10 +76,10 @@ describe("Reports blocks and Where it went", () => {
     await act(async () => row.focus());
     expect(container.querySelector(".df-wblocks")?.classList.contains("has-hot")).toBe(true);
     expect([...container.querySelectorAll(".df-wb-stack .is-hot")].map((block) => block.getAttribute("data-key"))).toEqual(["work"]);
-    expect(container.querySelector(".df-donut-center")?.textContent).toBe("9h 00mWork");
+    expect(container.querySelector(".df-donut-center")?.textContent).toBe("9hWork");
     await act(async () => row.blur());
     expect(container.querySelector(".df-wblocks")?.classList.contains("has-hot")).toBe(false);
-    expect(container.querySelector(".df-donut-center")?.textContent).toBe("10h 00mlogged this week");
+    expect(container.querySelector(".df-donut-center")?.textContent).toBe("10hlogged this week");
     await act(async () => root.unmount());
   });
 
@@ -114,16 +114,16 @@ describe("Reports blocks and Where it went", () => {
     await render([slices[0], other]);
     // Keyboard focus on Other's donut slice: highlighted and ringed.
     await act(async () => container.querySelector<SVGCircleElement>('circle[aria-label^="Filter by Other"]')!.focus());
-    expect(container.querySelector(".df-donut-center")?.textContent).toBe("1h 00mOther");
+    expect(container.querySelector(".df-donut-center")?.textContent).toBe("1hOther");
     expect(container.querySelectorAll(".df-donut-focus")).toHaveLength(1);
     // The filtered report replaces Other with its activities; the same panel stays mounted.
     await render([slices[0], { ...other, id: "a", categoryIds: ["a"], name: "A" }]);
     expect(container.querySelector(".df-wblocks")?.classList.contains("has-hot")).toBe(false);
-    expect(container.querySelector(".df-donut-center")?.textContent).toBe("10h 00mlogged this week");
+    expect(container.querySelector(".df-donut-center")?.textContent).toBe("10hlogged this week");
     // Back to the unfiltered report: Other returns, but nothing is focused or hovered, so it stays plain.
     await render([slices[0], other]);
     expect(container.querySelector(".df-wblocks")?.classList.contains("has-hot")).toBe(false);
-    expect(container.querySelector(".df-donut-center")?.textContent).toBe("10h 00mlogged this week");
+    expect(container.querySelector(".df-donut-center")?.textContent).toBe("10hlogged this week");
     expect(container.querySelector(".df-donut-focus")).toBeNull();
     await act(async () => root.unmount());
   });

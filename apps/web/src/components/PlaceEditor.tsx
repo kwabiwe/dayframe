@@ -284,7 +284,7 @@ export function PlaceEditor({
           <TextField
             id="dayframe-place-previous-role-name"
             label={`Rename the old ${placeRoleLabel(newRole).toLowerCase()}`}
-            help="Its past entries keep this name, so they don't read as an address. Leave it blank to keep the current name."
+            help="Its past blocks keep this name, so they don't read as an address. Leave it blank to keep the current name."
             maxLength={120}
             value={previousPlaceName}
             onChange={(event) => setPreviousPlaceName(event.target.value)}
@@ -410,7 +410,7 @@ export function PlaceEditor({
             />
             <TextField
               id="place-default-activity"
-              label="Default task description"
+              label="Block name for visits here"
               maxLength={240}
               placeholder="School drop-off/pickup"
               value={defaultActivityDescription}
