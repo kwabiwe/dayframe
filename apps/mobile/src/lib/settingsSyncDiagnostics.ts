@@ -22,6 +22,21 @@ function nonNegativeCount(value: number | null | undefined) {
 }
 
 /**
+ * A Review change whose outcome is only unknown (a check that timed out or lost connectivity) is
+ * not a rejection: Dayframe re-checks it on its own (reviewSyncStore REVIEW_UNKNOWN_RECHECK_MS), and
+ * it can't be discarded, so it counts as waiting, never as "needs your attention" (I1).
+ */
+export function splitReviewSyncIssues<T extends { resolutionStatus: string | null }>(issues: T[]) {
+  const rejected: T[] = [];
+  let checkingCount = 0;
+  for (const issue of issues) {
+    if (issue.resolutionStatus === "resolution_unknown") checkingCount += 1;
+    else rejected.push(issue);
+  }
+  return { rejected, checkingCount };
+}
+
+/**
  * Settings › Help and Sync help: one plain status for everything waiting on this iPhone.
  * Only changes that need a choice (permanent rejections, unconfirmed Review choices, unreadable
  * records) are "attention"; anything still retrying on its own is "waiting" (AGENTS: background).
@@ -49,6 +64,8 @@ export function syncHelpStatus(input: {
   timeEntryPendingCount: number;
   reviewWaitingCount: number;
   reviewSignInCount: number;
+  /** Review changes Dayframe is still checking on its own (splitReviewSyncIssues). */
+  reviewCheckingCount?: number;
 }): SyncHelpStatus {
   const count = nonNegativeCount;
   const issueCount =
@@ -63,7 +80,8 @@ export function syncHelpStatus(input: {
     count(input.queuedCount) +
     count(input.timerStopPendingCount) +
     count(input.timeEntryPendingCount) +
-    Math.max(0, count(input.reviewWaitingCount) - signIn);
+    Math.max(0, count(input.reviewWaitingCount) - signIn) +
+    count(input.reviewCheckingCount);
   if (issueCount > 0) {
     return {
       kind: "attention",

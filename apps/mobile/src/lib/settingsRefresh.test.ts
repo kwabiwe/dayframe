@@ -22,3 +22,13 @@ describe("settings refresh behaviour", () => {
     expect(shouldRefreshSettingsSnapshot(1_000, 40_001, 30_000)).toBe(true);
   });
 });
+
+describe("settingsGeofenceKey (I1)", () => {
+  const place = { id: "p1", latitude: 1, longitude: 2, radiusMeters: 100, priority: 0, loggingEnabled: true, role: null };
+  it("is stable for the same places and changes when a monitored field changes", async () => {
+    const { settingsGeofenceKey } = await import("./settingsRefresh");
+    expect(settingsGeofenceKey("u", "w", [place])).toBe(settingsGeofenceKey("u", "w", [{ ...place }]));
+    expect(settingsGeofenceKey("u", "w", [place])).not.toBe(settingsGeofenceKey("u", "w", [{ ...place, radiusMeters: 200 }]));
+    expect(settingsGeofenceKey("u", "w", [place])).not.toBe(settingsGeofenceKey("u2", "w", [place]));
+  });
+});

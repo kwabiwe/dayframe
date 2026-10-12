@@ -108,6 +108,22 @@ describe("Review real SQLite transactions", () => {
     expect(count("review_mutation_outbox")).toBe(1);
     expect((await store.loadCachedReviewBootstrap())?.bootstrap.reviewItems.some(item => item.id === data.reviewItems[0].id)).toBe(false);
   });
+  it("re-checks an unknown outcome on an ordinary pass after the pause, never immediately (I1)", async () => {
+    const data = bootstrap();
+    const clientMutationId = syntheticId(94);
+    await store.enqueueReviewMutation({ bootstrap: data, item: data.reviewItems[0], clientMutationId, mutation: { action: "accept" } });
+    db.exec(`update review_mutation_outbox set state='needs_attention',resolution_status='resolution_unknown',updated_at='${new Date().toISOString()}'`);
+    await store.synchroniseReviewMutations();
+    expect(mocks.fetch).not.toHaveBeenCalled();
+    const old = new Date(Date.now() - store.REVIEW_UNKNOWN_RECHECK_MS - 1000).toISOString();
+    db.exec(`update review_mutation_outbox set updated_at='${old}'`);
+    mocks.fetch.mockRejectedValue(new TypeError("Network request failed"));
+    await store.synchroniseReviewMutations();
+    expect(String(mocks.fetch.mock.calls[0]?.[0])).toContain("/api/review/mutations/reconcile");
+    // Still offline: the change is kept and waits for an ordinary retry, not the person.
+    expect(count("review_mutation_outbox")).toBe(1);
+    expect(db.prepare("select state from review_mutation_outbox").get()!.state).toBe("retry_wait");
+  });
   it("treats session generation replacement separately from rejected authentication", async () => {
     const data = bootstrap();
     await store.enqueueReviewMutation({ bootstrap: data, item: data.reviewItems[0], clientMutationId: syntheticId(93), mutation: { action: "accept" } });

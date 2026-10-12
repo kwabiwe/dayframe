@@ -1863,6 +1863,10 @@ export async function enqueueReviewMutation(input: {
 }
 
 export type ReviewSyncOptions = { force?: boolean; signal?: AbortSignal; deadlineAt?: number; clientMutationId?: string };
+// An outcome left unknown (a reconcile that timed out or got no proof, e.g. while connectivity
+// dropped) is not a rejection: it is re-checked on ordinary passes after this pause, so it
+// settles on its own instead of waiting for the person (I1).
+export const REVIEW_UNKNOWN_RECHECK_MS = 5 * 60_000;
 export const REVIEW_RECONCILE_AGE_MS = 10 * 60_000;
 export const REVIEW_CONTENTION_LIMIT = 3;
 const reviewCoalescer = createOwnerSyncCoalescer<ReviewSyncResult>();
@@ -1902,10 +1906,12 @@ async function synchroniseReviewMutationsUnsafe(account: AccountRow, options: Re
     `select * from review_mutation_outbox where account_key=?
        and (? is null or client_mutation_id=?)
        and (state in ('pending','in_flight') or (state='needs_attention' and ?=1)
+         or (state='needs_attention' and resolution_status='resolution_unknown' and updated_at<=?)
          or (state='retry_wait' and (?=1 or next_attempt_at is null or next_attempt_at<=?
            or (reconciliation_attempt_count=0 and (contention_count>=3 or created_at<=?)))))
      order by created_at,client_mutation_id limit 25`,
-    account.account_key,options.clientMutationId??null,options.clientMutationId??null,options.force?1:0,options.force?1:0,new Date().toISOString(),new Date(Date.now()-REVIEW_RECONCILE_AGE_MS).toISOString());
+    account.account_key,options.clientMutationId??null,options.clientMutationId??null,options.force?1:0,
+    new Date(Date.now()-REVIEW_UNKNOWN_RECHECK_MS).toISOString(),options.force?1:0,new Date().toISOString(),new Date(Date.now()-REVIEW_RECONCILE_AGE_MS).toISOString());
   let acknowledgedCount=0;
   let outcome: SyncLaneOutcome="complete";
   let stopped=false;

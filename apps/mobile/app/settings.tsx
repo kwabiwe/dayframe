@@ -19,6 +19,7 @@ import {
   AccessibilityInfo,
   Alert,
   AppState,
+  InteractionManager,
   Keyboard,
   Linking,
   Modal,
@@ -128,7 +129,8 @@ import {
   SETTINGS_HEALTH_SNAPSHOT_TTL_MS,
   SETTINGS_SNAPSHOT_TTL_MS,
   shouldRefreshSettingsSnapshot,
-  shouldShowSettingsRefreshSpinner
+  shouldShowSettingsRefreshSpinner,
+  settingsGeofenceKey
 } from "@/lib/settingsRefresh";
 import { clampSettingsScrollOffset, settingsScrollNeedsClamp } from "@/lib/settingsScroll";
 import { BlocksNavHeader, usePreviousScreenLabel } from "@/components/BlocksNavHeader";
@@ -190,7 +192,7 @@ import {
   retryTimerStopSyncIssue,
   subscribeTimerStopOutbox
 } from "@/lib/timerStopOutbox";
-import { syncHelpStatus } from "@/lib/settingsSyncDiagnostics";
+import { splitReviewSyncIssues, syncHelpStatus } from "@/lib/settingsSyncDiagnostics";
 import { DAYFRAME_API_BASE } from "@/lib/config";
 import { createLatestRead, locationAccessAction, locationAccessLabels, locationSuggestionsSwitchHint } from "@/lib/locationAccessAction";
 import { healthMappingWriter } from "@/lib/healthMappingOwner";
@@ -272,7 +274,10 @@ function clearSettingsSnapshot() {
 
 // Any sign-out (Settings, Today's own 401 handling) drops the cached account, so the next account
 // never sees, or edits, the previous one's settings.
-subscribeMobileSignedOut(() => clearSettingsSnapshot());
+subscribeMobileSignedOut(() => {
+  clearSettingsSnapshot();
+  lastSettingsGeofenceKey = null;
+});
 
 function isSettingsSnapshotFresh(now = Date.now()) {
   return !shouldRefreshSettingsSnapshot(cachedSettingsSnapshot?.updatedAt, now, SETTINGS_SNAPSHOT_TTL_MS);
@@ -284,6 +289,19 @@ function isSettingsHealthSnapshotFresh(now = Date.now()) {
     now,
     SETTINGS_HEALTH_SNAPSHOT_TTL_MS
   );
+}
+
+// I1: the last set of monitored places Settings re-registered this app session (cleared on sign-out).
+let lastSettingsGeofenceKey: string | null = null;
+
+/** True once the screen's push (or first) transition has settled (InteractionManager). */
+function useSettingsTransitionReady() {
+  const [ready, setReady] = useState(false);
+  useEffect(() => {
+    const task = InteractionManager.runAfterInteractions(() => setReady(true));
+    return () => task.cancel();
+  }, []);
+  return ready;
 }
 
 function resolveStateAction<T>(action: SetStateAction<T>, current: T): T {
@@ -331,6 +349,7 @@ export default function SettingsScreen() {
   const [reviewSyncIssues, setReviewSyncIssues] = useState<
     Awaited<ReturnType<typeof listReviewSyncIssues>>
   >([]);
+  const [reviewCheckingCount, setReviewCheckingCount] = useState(0);
   const [timeEntrySyncDiagnostics, setTimeEntrySyncDiagnostics] = useState<
     Awaited<ReturnType<typeof getTimeEntryOutboxDiagnostics>> | null
   >(null);
@@ -373,6 +392,10 @@ export default function SettingsScreen() {
   const [healthAccessGranted, setHealthAccessGranted] = useState<boolean | null>(null);
   const [exportingHealthDebug, setExportingHealthDebug] = useState(false);
   const refreshes = useRef(createOwnerSyncCoalescer<void>());
+  // I1: every Settings page paints from its cached snapshot first. Mount-time reads (SQLite and
+  // AsyncStorage outboxes, native permission/HealthKit/geofence reads, the bootstrap refresh) start
+  // only after the push transition settles, so they never hold the first frame or the Back gesture.
+  const transitionReady = useSettingsTransitionReady();
   const settingsScrollRef = useRef<ScrollView>(null);
   const settingsScrollOffsetRef = useRef(0);
   const settingsScrollContentHeightRef = useRef(0);
@@ -465,8 +488,10 @@ export default function SettingsScreen() {
       getReviewSyncDiagnostics(),
       listReviewSyncIssues()
     ]);
+    const { rejected, checkingCount } = splitReviewSyncIssues(issues);
     setReviewSyncDiagnostics(diagnostics);
-    setReviewSyncIssues(issues);
+    setReviewSyncIssues(rejected);
+    setReviewCheckingCount(checkingCount);
   }, []);
 
   const refreshTimeEntryDiagnostics = useCallback(async () => {
@@ -578,9 +603,7 @@ export default function SettingsScreen() {
   // the Help row and Sync help never say "up to date" with something waiting.
   useEffect(() => {
     queueMounted.current = true;
-    // Read once on opening (a timer action may have queued while Settings was closed) and on
-    // every change after.
-    void refreshQueueLatest();
+    // Every change is read at once; the opening read waits for the transition (below).
     const unsubscribe = subscribeActivityQueue(() => {
       void refreshQueueLatest();
     });
@@ -627,30 +650,28 @@ export default function SettingsScreen() {
     setDataAndCache(event.bootstrap);
   }), [setDataAndCache]);
 
+  // Opening reads, after the transition (a timer action may have queued while Settings was closed).
   useEffect(() => {
-    if (!isSettingsSnapshotFresh()) void load({ silent: true });
-  }, [load]);
-
-  useEffect(() => {
+    if (!transitionReady) return;
+    void refreshQueueLatest();
     void refreshReviewDiagnostics();
-    return subscribeReviewSync(() => {
-      void refreshReviewDiagnostics();
-    });
-  }, [refreshReviewDiagnostics]);
-
-  useEffect(() => {
     void refreshTimeEntryDiagnostics();
-    return subscribeTimeEntryOutbox(() => {
-      void refreshTimeEntryDiagnostics();
-    });
-  }, [refreshTimeEntryDiagnostics]);
-
-  useEffect(() => {
     void refreshTimerStopDiagnostics();
-    return subscribeTimerStopOutbox(() => {
-      void refreshTimerStopDiagnostics();
-    });
-  }, [refreshTimerStopDiagnostics]);
+    // refreshQueueLatest only reads refs and stable setters.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [transitionReady, refreshReviewDiagnostics, refreshTimeEntryDiagnostics, refreshTimerStopDiagnostics]);
+
+  useEffect(() => subscribeReviewSync(() => {
+    void refreshReviewDiagnostics();
+  }), [refreshReviewDiagnostics]);
+
+  useEffect(() => subscribeTimeEntryOutbox(() => {
+    void refreshTimeEntryDiagnostics();
+  }), [refreshTimeEntryDiagnostics]);
+
+  useEffect(() => subscribeTimerStopOutbox(() => {
+    void refreshTimerStopDiagnostics();
+  }), [refreshTimerStopDiagnostics]);
 
   // The evening Review reminder: this account's choice plus the iOS notification permission,
   // re-read whenever the app returns (the permission is changed in iOS Settings).
@@ -669,10 +690,11 @@ export default function SettingsScreen() {
     setNudgePermission(permission);
   }, []);
   useEffect(() => {
+    if (!transitionReady) return;
     void refreshReviewNudge();
     const subscription = AppState.addEventListener("change", (state) => { if (state === "active") void refreshReviewNudge(); });
     return () => subscription.remove();
-  }, [refreshReviewNudge]);
+  }, [refreshReviewNudge, transitionReady]);
 
   const reviewNudgeOn = Boolean(reviewNudge?.enabled) && nudgePermission === "granted";
 
@@ -709,22 +731,31 @@ export default function SettingsScreen() {
 
   // Motion & Fitness is changed in iOS Settings: re-read it whenever the app returns.
   useEffect(() => {
+    if (!transitionReady) return;
     const refreshMotion = () => void readMotionFitnessStatus().then(setMotionFitnessStatus);
     refreshMotion();
     const subscription = AppState.addEventListener("change", (state) => { if (state === "active") refreshMotion(); });
     return () => subscription.remove();
-  }, []);
+  }, [transitionReady]);
 
   useFocusEffect(
     useCallback(() => {
-      void reloadThemePreference();
-      // Activities always refreshes on open: pins are only counted from this visit's own data.
-      if (!isSettingsSnapshotFresh() || settingsSection === "categories") void load({ silent: true, trigger: "focus" });
-      if (settingsSection === "categories") void refreshArchivedActivities();
+      // Opening and coming Back both animate: the refresh waits until the transition has settled,
+      // and a page left before then never starts one (I1).
+      const task = InteractionManager.runAfterInteractions(() => {
+        void reloadThemePreference();
+        // Activities always refreshes on open: pins are only counted from this visit's own data.
+        if (!isSettingsSnapshotFresh() || settingsSection === "categories") void load({ silent: true, trigger: "focus" });
+        if (settingsSection === "categories") void refreshArchivedActivities();
+      });
+      return () => task.cancel();
+      // refreshArchivedActivities only reads refs and stable setters.
+      // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [load, reloadThemePreference, settingsSection])
   );
 
   useEffect(() => {
+    if (!transitionReady) return;
     if (settingsSection !== "index" && settingsSection !== "health") return;
     if (settingsSection === "index" && isSettingsHealthSnapshotFresh()) return;
 
@@ -748,25 +779,36 @@ export default function SettingsScreen() {
     setHealthAutoLogMappingsAndCache,
     setHealthImportPreferencesAndCache,
     setHealthStatusAndCache,
-    settingsSection
+    settingsSection,
+    transitionReady
   ]);
 
   useEffect(() => {
+    if (!transitionReady) return;
     if (settingsSection !== "index" && settingsSection !== "automations") return;
 
     if (!data?.places.length) {
       void refreshLocationDiagnostics();
       return;
     }
+    // Re-registering monitored places is native work: done once per set of places this app session
+    // (launch and place edits refresh it too), not on every Settings page or bootstrap refresh.
+    const geofenceKey = settingsGeofenceKey(data.user.id, data.workspace.id, data.places);
+    if (geofenceKey === lastSettingsGeofenceKey) {
+      void refreshLocationDiagnostics();
+      return;
+    }
     refreshGeofencesForPlaces(data.places, { userId: data.user.id, workspaceId: data.workspace.id })
       .then((count) => {
+        if (count > 0) lastSettingsGeofenceKey = geofenceKey;
         void refreshLocationDiagnostics(count > 0 ? `Monitoring ${count} saved ${count === 1 ? "place" : "places"}.` : undefined);
       })
       .catch(async (error) => {
         await recordLocationStoreError(error);
         await refreshLocationDiagnostics("Location monitoring could not be refreshed. Open diagnostics for details.");
       });
-  }, [data?.places, settingsSection]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [data?.places, settingsSection, transitionReady]);
 
   const healthAvailability =
     healthStatus.find((item) => item.provider === "healthkit" && item.kind === "availability") ??
@@ -806,8 +848,8 @@ export default function SettingsScreen() {
       .catch(() => undefined);
   }, [iosSettingsRead]);
   useEffect(() => {
-    readIosSettingsNeed();
-  }, [locationDiagnostics?.foregroundPermission, locationDiagnostics?.backgroundPermission, readIosSettingsNeed]);
+    if (transitionReady) readIosSettingsNeed();
+  }, [locationDiagnostics?.foregroundPermission, locationDiagnostics?.backgroundPermission, readIosSettingsNeed, transitionReady]);
   const refreshLocationOnReturn = useRef<() => void>(() => undefined);
   useEffect(() => {
     const subscription = AppState.addEventListener("change", (state) => {
@@ -962,7 +1004,8 @@ export default function SettingsScreen() {
     timerStopPendingCount: timerStopSyncDiagnostics?.pendingCount ?? 0,
     timeEntryPendingCount: timeEntrySyncDiagnostics?.pendingCount ?? 0,
     reviewWaitingCount: reviewSyncDiagnostics?.waitingCount ?? 0,
-    reviewSignInCount: reviewSyncDiagnostics?.authenticationRequiredCount ?? 0
+    reviewSignInCount: reviewSyncDiagnostics?.authenticationRequiredCount ?? 0,
+    reviewCheckingCount
   });
   const syncNeedsAttention = syncStatus.kind === "attention";
 

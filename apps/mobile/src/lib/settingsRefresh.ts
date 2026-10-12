@@ -22,3 +22,15 @@ export function shouldRefreshSettingsSnapshot(
 export function shouldShowSettingsRefreshSpinner(trigger: SettingsRefreshTrigger) {
   return trigger === "pull";
 }
+
+/** Identity of the monitored places Settings last re-registered (I1: skip identical refreshes). */
+export function settingsGeofenceKey(
+  userId: string,
+  workspaceId: string,
+  places: ReadonlyArray<{ id: string; latitude?: number | null; longitude?: number | null; radiusMeters: number; priority?: number; loggingEnabled?: boolean; role?: string | null }>
+) {
+  return JSON.stringify([userId, workspaceId, places.map((place) => [
+    place.id, place.latitude ?? null, place.longitude ?? null, place.radiusMeters, place.priority ?? null,
+    place.loggingEnabled ?? null, place.role ?? null
+  ])]);
+}
