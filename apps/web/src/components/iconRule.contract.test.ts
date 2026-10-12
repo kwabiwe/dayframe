@@ -7,10 +7,10 @@ import { DAYFRAME_GLYPHS } from "@dayframe/shared";
 
 // UIA-212 (owner option c): anything that stands for a Dayframe thing or action draws its glyph
 // from the shared registry (DayframeIcon); lucide stays for generic controls (close, chevrons,
-// check, add, search, show/hide, theme). These lucide icons have registry glyphs and mean Dayframe
+// check, add, remove, search, show/hide, theme). These lucide icons have registry glyphs and mean Dayframe
 // things, so they must not come back from lucide-react.
 // Every registry glyph names a Dayframe thing unless it is listed here as a generic control.
-const GENERIC_CONTROLS = new Set(["X", "Check", "ChevronRight", "Search", "Plus", "Ellipsis"]);
+const GENERIC_CONTROLS = new Set(["X", "Check", "ChevronRight", "Search", "Plus", "Minus", "Ellipsis"]);
 const pascal = (kebab: string) => kebab.split("-").map((part) => part[0].toUpperCase() + part.slice(1)).join("");
 // Lucide icons with no registry glyph that still stand for Dayframe things.
 const EXTRA_THINGS = ["Sparkles", "AlarmClock", "Stopwatch", "Map", "MapPinned", "Library", "ListChecks", "PinOff", "Tags"];

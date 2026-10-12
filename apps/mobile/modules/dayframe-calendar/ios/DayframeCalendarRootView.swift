@@ -75,8 +75,7 @@ struct DayframeCalendarRootView: View {
       playSelectionHaptic()
       model.requestZoom(direction: direction)
     } label: {
-      Image(systemName: direction > 0 ? "plus" : "minus")
-        .font(.system(size: 17, weight: .semibold))
+      DayframeCalendarGlyph(name: direction > 0 ? "zoom-in" : "zoom-out", size: 18)
         .foregroundStyle(Color(dayframeCSS: theme.textPrimary))
         .frame(width: 44, height: 44)
         .contentShape(Circle())
@@ -586,8 +585,7 @@ private struct DayframeCalendarBlockView: View {
 
           if metrics.showMeta, horizontal.showMeta, let placeText = entry.placeText, !placeText.isEmpty {
             HStack(spacing: 4) {
-              Image(systemName: "mappin.and.ellipse")
-                .font(.caption2)
+              DayframeCalendarGlyph(name: "place", size: 11)
                 .accessibilityHidden(true)
               Text(placeText)
                 .font(.caption2)
@@ -598,8 +596,7 @@ private struct DayframeCalendarBlockView: View {
 
           if metrics.showMeta, horizontal.showMeta, let tagText = entry.tagText, !tagText.isEmpty {
             HStack(spacing: 4) {
-              Image(systemName: "tag.fill")
-                .font(.caption2)
+              DayframeCalendarGlyph(name: "tag", size: 11)
                 .accessibilityHidden(true)
               Text(tagText)
                 .font(.caption2)

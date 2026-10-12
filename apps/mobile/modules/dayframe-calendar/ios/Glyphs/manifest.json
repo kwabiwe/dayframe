@@ -1,0 +1,42 @@
+{
+  "place": {
+    "glyph": "map-pin",
+    "points": 24,
+    "svgSha256": "2e269956529c1c85424257672fb000db44526112aab756aa33824bd61e7863e6",
+    "images": {
+      "place.png": "0b05e02d5bb25c7aea96b0b6bced32d177ec14b30212118433f362ed258a3d0a",
+      "place@2x.png": "df693004d761831c241d65d6675272eeb2230049c3060f645dcfc95fd0de77e5",
+      "place@3x.png": "5e09277193f7034550e576bb8839a34948b5015d8d6a959ae395c02d1db2c9ef"
+    }
+  },
+  "tag": {
+    "glyph": "tag",
+    "points": 24,
+    "svgSha256": "0c2078150962384e998aa1bad1a7e525ae9156a382484764e1288c82a788466b",
+    "images": {
+      "tag.png": "3560f4bc2a07f6320a934e24e3bd6f0f8b2f48359d6af067aa96e9a9fce64741",
+      "tag@2x.png": "cca537ed9cab5855b2b408d43fbe6aef38a38066d1a8c97a90ff875847cc76da",
+      "tag@3x.png": "3ca400562ebc0d39d7bb117bf1833361fe6d2f711ebc4562adcf08a9f1bf2a41"
+    }
+  },
+  "zoom-in": {
+    "glyph": "plus",
+    "points": 24,
+    "svgSha256": "e07b322d73852efa142b643a7110e11d3836e79a9799c1f7344c3a5286875424",
+    "images": {
+      "zoom-in.png": "a1977e7400781b6cbfc89cee0cad5dcba8207580c4dc45339eac7e1d447e0af8",
+      "zoom-in@2x.png": "5b7230ec75419b034a277925cf077e28d7cf3bf08220208b2d006606b795fd98",
+      "zoom-in@3x.png": "295a70642735b4a1d4f9d163e9a09d01dd080707f9cb8cc8b88383c8f7e6a793"
+    }
+  },
+  "zoom-out": {
+    "glyph": "minus",
+    "points": 24,
+    "svgSha256": "d87fffaa8313263d6a46f422c79f2d9ccaa003534209b4dd1c72f80a21d5a5d9",
+    "images": {
+      "zoom-out.png": "dec9e540dbaf7719eac90e2bff955f7af7c9a77837d32b841891d82d31f6cb34",
+      "zoom-out@2x.png": "ee4b08005b092a21e2a7b4085dd481693ce32de0070c0b8da4201d64e457886e",
+      "zoom-out@3x.png": "364318b8252ea4d1456afa084106f8a2f2bb110351e358651882ab6643110bbf"
+    }
+  }
+}
