@@ -10,7 +10,6 @@ import type { MobileTheme } from "./mobileTheme";
 import {
   REVIEW_COPY,
   buildReviewItemDraftEntry,
-  isCalendarPreviewReviewItem,
   isOpenReviewItem,
   isReviewNeededEntry
 } from "./review";
@@ -22,6 +21,8 @@ export type NativeCalendarEntry = MobileTimeEntry & {
   isActive: boolean;
   isReviewSuggestion?: boolean;
   reviewItemId?: string;
+  /** A crowd of Review items drawn as one block: how many, and the suggestion it opens. */
+  reviewCrowd?: { count: number; opensTitle: string | null };
 };
 
 export type NativeCalendarTheme = Pick<
@@ -134,16 +135,115 @@ export type NativeCalendarOpenHandlers = {
 
 /** Review suggestions take the right 44% of the day column (Blocks prototype). */
 export const REVIEW_LANE_WIDTH = 0.44;
+/** At most two side by side in the Review lane keeps every target 44 points wide at 320 points. */
+export const REVIEW_LANE_MAX_LANES = 2;
+/**
+ * A short block's tap target is 44 points tall, centred on its drawn block (and kept inside the day
+ * at midnight). For the Review lane's lanes and crowds an item counts as covering that whole target
+ * at the most zoomed-out Calendar (48 points an hour), where it spans 55 minutes; at every closer
+ * zoom the target is inside that span, so two Review items never share one at any zoom. What is
+ * drawn keeps the real times. This mirrors DayframeCalendarBlockMath / VerticalMath in
+ * DayframeCalendarCore.swift exactly (DayframeCalendarCoreTests checks the same boundary cases).
+ */
+export const REVIEW_LANE_TARGET_MS = 55 * 60_000;
+/** iOS draws a block at least 4 points tall: 5 minutes at 48 points an hour. */
+export const REVIEW_LANE_MIN_VISIBLE_MS = 5 * 60_000;
+const DAY_MS = 24 * 60 * 60_000;
+
+/**
+ * Where iOS draws a moment: the local wall-clock minute of the day (DayframeCalendarBlockMath's
+ * localMinute), as milliseconds after the day's start. On a clock-change day two different moments
+ * can share a wall-clock time and are then drawn in the same place.
+ */
+function wallClockOffsetMs(ms: number, dayStartMs: number, dayEndMs: number) {
+  if (ms >= dayEndMs) return DAY_MS;
+  // Clipped to the day, then its real local time: a day that starts at 01:00 (a clock change at
+  // midnight) is drawn from 01:00, as iOS's localMinute does.
+  const date = new Date(Math.max(ms, dayStartMs));
+  return ((date.getHours() * 60 + date.getMinutes()) * 60 + date.getSeconds()) * 1000 + date.getMilliseconds();
+}
+
+/**
+ * The span a tap target covers at the most zoomed-out Calendar, in drawn (wall-clock) time: the
+ * result is on a 24-hour axis starting at `dayStartMs`, so compare envelopes only with each other.
+ */
+export function reviewTargetEnvelope(startMs: number, endMs: number, dayStartMs: number, dayEndMs: number) {
+  const start = dayStartMs + wallClockOffsetMs(startMs, dayStartMs, dayEndMs);
+  const end = Math.max(start, dayStartMs + wallClockOffsetMs(endMs, dayStartMs, dayEndMs));
+  if (end - start >= REVIEW_LANE_TARGET_MS) return { start, end };
+  // Centred on the drawn block, which starts at the real start and is at least 4 points tall.
+  const middle = start + Math.max(end - start, REVIEW_LANE_MIN_VISIBLE_MS) / 2;
+  const envelopeStart = Math.min(Math.max(dayStartMs, middle - REVIEW_LANE_TARGET_MS / 2), dayStartMs + DAY_MS - REVIEW_LANE_TARGET_MS);
+  return { start: envelopeStart, end: envelopeStart + REVIEW_LANE_TARGET_MS };
+}
+
+function targetEnvelopeOf(entry: NativeCalendarEntry, now: number, dayStart: Date, dayEnd: Date) {
+  const start = Date.parse(entry.startedAt);
+  const end = entry.stoppedAt ? Date.parse(entry.stoppedAt) : now;
+  if (!Number.isFinite(start) || !Number.isFinite(end)) return null;
+  return reviewTargetEnvelope(start, end, dayStart.getTime(), dayEnd.getTime());
+}
+
+function withReviewTargetSpan(entry: NativeCalendarEntry, now: number, dayStart: Date, dayEnd: Date): NativeCalendarEntry {
+  const envelope = targetEnvelopeOf(entry, now, dayStart, dayEnd);
+  if (!envelope) return entry;
+  return { ...entry, startedAt: new Date(envelope.start).toISOString(), stoppedAt: new Date(envelope.end).toISOString() };
+}
+
+/**
+ * Logged blocks whose targets share any time with a Review target give the Review lane its columns:
+ * their whole group (blocks linked by overlapping targets, so lanes inside it stay consistent) is
+ * drawn in the left part of the day column. A Review target then never lies over a logged one, so
+ * both keep their full 44-point targets. Logged blocks away from suggestions keep the full width.
+ */
+function loggedIdsBesideReview(
+  confirmed: NativeCalendarEntry[],
+  review: NativeCalendarEntry[],
+  now: number,
+  dayStart: Date,
+  dayEnd: Date
+) {
+  const reviewSpans = review.flatMap((entry) => targetEnvelopeOf(entry, now, dayStart, dayEnd) ?? []);
+  const logged = confirmed
+    .map((entry) => ({ id: entry.id, span: targetEnvelopeOf(entry, now, dayStart, dayEnd) }))
+    .filter((item): item is { id: string; span: { start: number; end: number } } => item.span !== null)
+    .sort((left, right) => left.span.start - right.span.start);
+  const squeezed = new Set<string>();
+  let group: typeof logged = [];
+  let groupEnd = -Infinity;
+  const flush = () => {
+    const start = Math.min(...group.map((item) => item.span.start));
+    if (group.length && reviewSpans.some((span) => span.start < groupEnd && span.end > start)) {
+      for (const item of group) squeezed.add(item.id);
+    }
+    group = [];
+    groupEnd = -Infinity;
+  };
+  for (const item of logged) {
+    if (group.length && item.span.start >= groupEnd) flush();
+    group.push(item);
+    groupEnd = Math.max(groupEnd, item.span.end);
+  }
+  flush();
+  return squeezed;
+}
 const REVIEW_LANE_Z_INDEX = 1_000;
 
-function layoutDayEntries(entries: NativeCalendarEntry[], dayStart: Date, dayEnd: Date, now: number) {
+function layoutDayEntries(
+  entries: NativeCalendarEntry[],
+  dayStart: Date,
+  dayEnd: Date,
+  now: number,
+  options?: { insetOverlays?: boolean; minimumOverlapMs?: number }
+) {
   return layoutTimeIntervals(
     entries.map((entry) => ({
       id: entry.id,
       startedAt: Math.max(dayStart.getTime(), Date.parse(entry.startedAt)),
       stoppedAt: Math.min(dayEnd.getTime(), entry.stoppedAt ? Date.parse(entry.stoppedAt) : now)
     })),
-    now
+    now,
+    options
   );
 }
 
@@ -170,7 +270,7 @@ export function buildNativeCalendarBridgeState({
 }): NativeCalendarBridgeState {
   const selectedDate = dateFromKey(selectedDayKey);
   const dayStart = startOfLocalDay(selectedDate);
-  const dayEnd = addDays(dayStart, 1);
+  const dayEnd = localDayEnd(dayStart);
   const todayKey = formatDateKey(new Date(now));
   const timeEntries = buildTimeEntries(data);
   const entries = buildCalendarEntries(data, timeEntries, selectedDayKey, now);
@@ -192,11 +292,22 @@ export function buildNativeCalendarBridgeState({
   const analysisById = new Map(allEntryAnalysis.entries.map((entry) => [entry.id, entry]));
   const warningById = new Map(confirmedAnalysis.entries.map((entry) => [entry.id, entry.overlapCount]));
   // Confirmed blocks overlap only each other; Review suggestions sit in their own lane on the right
-  // (REVIEW_LANE_WIDTH of the day column) above them, so a suggestion never squeezes logged time.
+  // (REVIEW_LANE_WIDTH of the day column). Logged blocks whose targets meet a Review target move to
+  // the left part (loggedIdsBesideReview), so neither covers the other's target.
   const reviewEntries = entries.filter((entry) => isCalendarReviewNeeded(entry));
+  const besideReview = loggedIdsBesideReview(confirmedEntries, reviewEntries, now, dayStart, dayEnd);
+  const reviewSpanDayEnd = new Date(dayStart.getTime() + DAY_MS);
   const layoutById = new Map([
-    ...layoutDayEntries(confirmedEntries, dayStart, dayEnd, now).map((layout) => [layout.id, layout] as const),
-    ...layoutDayEntries(reviewEntries, dayStart, dayEnd, now).map((layout) => [layout.id, {
+    ...layoutDayEntries(confirmedEntries, dayStart, dayEnd, now).map((layout) => [layout.id, besideReview.has(layout.id) ? {
+      ...layout,
+      offsetFraction: layout.offsetFraction * (1 - REVIEW_LANE_WIDTH),
+      widthFraction: layout.widthFraction * (1 - REVIEW_LANE_WIDTH)
+    } : layout] as const),
+    // The lane is narrow: overlapping Review items always sit side by side (never an inset over a
+    // longer one, which would leave it a strip too thin to tap).
+    // Any overlap at all, even under a minute, splits lanes here: two suggestions must never share
+    // one tap target.
+    ...layoutDayEntries(reviewEntries.map((entry) => withReviewTargetSpan(entry, now, dayStart, dayEnd)), dayStart, reviewSpanDayEnd, now, { insetOverlays: false, minimumOverlapMs: 0 }).map((layout) => [layout.id, {
       ...layout,
       offsetFraction: 1 - REVIEW_LANE_WIDTH + layout.offsetFraction * REVIEW_LANE_WIDTH,
       widthFraction: layout.widthFraction * REVIEW_LANE_WIDTH,
@@ -209,7 +320,7 @@ export function buildNativeCalendarBridgeState({
     model: {
       dayEndMs: dayEnd.getTime(),
       dayStartMs: dayStart.getTime(),
-      emptyState: "No tracked time for this day.",
+      emptyState: "Nothing framed yet.",
       framedLabel: formatFramedLabel(confirmedAnalysis.loggedSeconds, selectedDate),
       hapticsEnabled,
       entries: entries.map((entry) => serializeCalendarEntry(
@@ -219,7 +330,9 @@ export function buildNativeCalendarBridgeState({
         now,
         theme,
         layoutById.get(entry.id),
-        analysisById.get(entry.id),
+        // Review-lane items never share a target (their lanes and crowds already use the target
+        // envelope), so iOS gives each its full 44-point height even when the times overlap.
+        isCalendarReviewNeeded(entry) ? { overlapCount: 0, overlapSeconds: 0 } : analysisById.get(entry.id),
         isCalendarReviewNeeded(entry) ? 0 : warningById.get(entry.id) ?? 0
       )),
       modelVersion: 4,
@@ -300,7 +413,7 @@ function serializeCalendarEntry(
     stoppedAt: effectiveStoppedAtMs
   });
   const title = displayEntryTitle(entry);
-  const actionKind: NativeCalendarActionKind = entry.reviewItemId
+  const actionKind: NativeCalendarActionKind = entry.reviewItemId !== undefined
     ? "review"
     : entry.isActive ? "active" : "completed";
   const actionId = entry.reviewItemId ?? entry.id;
@@ -319,7 +432,9 @@ function serializeCalendarEntry(
   return {
     actionId,
     actionKind,
-    accessibilityLabel: `${reviewNeeded ? REVIEW_COPY.needsReview : entry.isActive ? "Edit running timer" : "Open time block"}: ${title}${entry.placeName ? `. Place: ${entry.placeName}` : ""}${tagText ? `. Tags: ${tagText}` : ""}${warningOverlapCount ? `. Overlaps ${warningOverlapCount} other ${warningOverlapCount === 1 ? "entry" : "entries"}.` : ""}`,
+    accessibilityLabel: entry.reviewCrowd
+      ? reviewCrowdAccessibilityLabel(entry.reviewCrowd, startedAtMs, effectiveStoppedAtMs)
+      : `${reviewNeeded ? REVIEW_COPY.needsReview : entry.isActive ? "Edit running timer" : "Open time block"}: ${title}${entry.placeName ? `. Place: ${entry.placeName}` : ""}${tagText ? `. Tags: ${tagText}` : ""}${warningOverlapCount ? `. Overlaps ${warningOverlapCount} other ${warningOverlapCount === 1 ? "entry" : "entries"}.` : ""}`,
     color,
     continuesIntoNextDay: continuation.continuesIntoNextDay,
     entryId: entry.id,
@@ -370,11 +485,15 @@ function buildCalendarEntries(
   now: number
 ) {
   if (!data) return [];
-  const timeEntries = allTimeEntries.filter((entry) => entryOverlapsDay(entry, selectedDayKey, now));
   const reviewEntries: NativeCalendarEntry[] = [];
+  // A suggestion and the needs-review entry created from it are one moment: the suggestion draws
+  // (it opens that Review card) and its linked entry does not. Unlinked entries still draw.
+  const linkedEntryIds = new Set<string>();
 
   for (const item of data.reviewItems ?? []) {
-    if (!isOpenReviewItem(item) || !isCalendarPreviewReviewItem(item)) continue;
+    // UIA-060: every open suggestion with a time window, as Today's ribbon and the web Calendar
+    // show them (hatched in the Review lane), not only commutes.
+    if (!isOpenReviewItem(item)) continue;
     const draft = buildReviewItemDraftEntry(item, data.categories, now);
     if (!draft) continue;
     const entry: NativeCalendarEntry = {
@@ -384,11 +503,179 @@ function buildCalendarEntries(
       isReviewSuggestion: true,
       reviewItemId: item.id
     };
-    if (entryOverlapsDay(entry, selectedDayKey, now)) reviewEntries.push(entry);
+      if (!entryOverlapsDay(entry, selectedDayKey, now)) continue;
+    for (const entryId of item.linkedEntryIds ?? []) linkedEntryIds.add(entryId);
+    reviewEntries.push(entry);
   }
+  const timeEntries = allTimeEntries.filter((entry) =>
+    entryOverlapsDay(entry, selectedDayKey, now)
+    && !(linkedEntryIds.has(entry.id) && isCalendarReviewNeeded(entry))
+  );
 
-  return [...timeEntries, ...reviewEntries]
+  const dayStartMs = startOfLocalDay(dateFromKey(selectedDayKey)).getTime();
+  // A crowd's own span can reach further than its members (iOS's minimum height, a clock change),
+  // meeting more suggestions: crowds are formed again until nothing changes, so the lane never
+  // holds more than REVIEW_LANE_MAX_LANES side by side.
+  let laneEntries = [...timeEntries.filter(isCalendarReviewNeeded), ...reviewEntries];
+  for (let pass = 0; pass < 8; pass += 1) {
+    const next = collapseCrowdedReviewLane(laneEntries, now, dayStartMs, localDayEnd(new Date(dayStartMs)).getTime());
+    const settled = next.length === laneEntries.length;
+    laneEntries = next;
+    if (settled) break;
+  }
+  return [...timeEntries.filter((entry) => !isCalendarReviewNeeded(entry)), ...laneEntries]
     .sort((left, right) => Date.parse(left.startedAt) - Date.parse(right.startedAt));
+}
+
+/**
+ * The Review lane is 44% of the day column, so more than REVIEW_LANE_MAX_LANES side by side would
+ * give targets under 44 points with no room for titles. Such a crowd becomes one hatched
+ * "N suggestions" block over the whole crowd that opens Review on its earliest suggestion
+ * (or the Review list when the crowd holds only older needs-review entries).
+ */
+export function collapseCrowdedReviewLane(
+  entries: NativeCalendarEntry[],
+  now: number,
+  dayStartMs = Number.NEGATIVE_INFINITY,
+  dayEndMs = Number.POSITIVE_INFINITY
+): NativeCalendarEntry[] {
+  const timed = entries
+    .map((entry) => {
+      const realStart = Date.parse(entry.startedAt);
+      const realEnd = Math.max(realStart, entry.stoppedAt ? Date.parse(entry.stoppedAt) : now);
+      // Clustering uses the tap-target envelope; the crowd is drawn over the real times.
+      const envelope = Number.isFinite(dayStartMs) && Number.isFinite(dayEndMs)
+        ? reviewTargetEnvelope(realStart, realEnd, dayStartMs, dayEndMs)
+        : { start: realStart, end: Math.max(realEnd, realStart + REVIEW_LANE_TARGET_MS) };
+      // Where iOS draws it (wall clock), for the crowd's bounds on a clock-change day.
+      const bounded = Number.isFinite(dayStartMs) && Number.isFinite(dayEndMs);
+      const drawnStart = bounded ? wallClockOffsetMs(realStart, dayStartMs, dayEndMs) : realStart;
+      const rawDrawnEnd = bounded ? wallClockOffsetMs(realEnd, dayStartMs, dayEndMs) : realEnd;
+      // iOS draws at least 4 points (5 minutes at the widest zoom) from the drawn start, also when
+      // the clock folds back inside the item and its drawn end comes before its start.
+      const drawnEnd = drawnStart + Math.max(rawDrawnEnd - drawnStart, REVIEW_LANE_MIN_VISIBLE_MS);
+      return { entry, realStart, start: envelope.start, realEnd, end: envelope.end, drawnStart, drawnEnd, rawDrawnEnd };
+    })
+    .filter((item) => Number.isFinite(item.start) && Number.isFinite(item.end))
+    .sort((left, right) => left.start - right.start || left.end - right.end);
+  const result: NativeCalendarEntry[] = entries.filter((entry) => !Number.isFinite(Date.parse(entry.startedAt)));
+  let crowd: typeof timed = [];
+  let crowdEnd = -Infinity;
+  const flush = () => {
+    if (!crowd.length) return;
+    if (maxConcurrent(crowd) <= REVIEW_LANE_MAX_LANES) {
+      result.push(...crowd.map((item) => item.entry));
+    } else {
+      // The crowd opens its earliest suggestion by real start time, and is drawn from the earliest
+      // drawn start to the latest drawn end. On a clock-change day the earliest drawn start can be a
+      // later moment than the latest drawn end, so the end then keeps the drawn length instead.
+      const first = crowd.reduce((best, item) => item.drawnStart < best.drawnStart ? item : best);
+      const last = crowd.reduce((best, item) => item.drawnEnd > best.drawnEnd ? item : best);
+      // Anchored to the visible day: a crowd starting the night before starts at midnight.
+      const startMs = Number.isFinite(dayStartMs) ? Math.max(first.realStart, dayStartMs) : first.realStart;
+      const endMs = last.drawnEnd === last.rawDrawnEnd && last.realEnd > startMs
+        ? last.realEnd
+        : Number.isFinite(dayStartMs) && Number.isFinite(dayEndMs)
+          ? momentAtWallClock(startMs, last.drawnEnd, dayStartMs, dayEndMs)
+          : startMs + (last.drawnEnd - first.drawnStart);
+      result.push(reviewCrowdEntry(
+        [...crowd].sort((left, right) => left.realStart - right.realStart).map((item) => item.entry),
+        startMs,
+        endMs
+      ));
+    }
+    crowd = [];
+    crowdEnd = -Infinity;
+  };
+  for (const item of timed) {
+    if (crowd.length && item.start >= crowdEnd) flush();
+    crowd.push(item);
+    crowdEnd = Math.max(crowdEnd, item.end);
+  }
+  flush();
+  return result;
+}
+
+/**
+ * The first moment after `afterMs` that iOS draws at `wallOffsetMs` into the day: elapsed time is
+ * corrected by how far the wall clock is off, so the result lands on the intended drawn time even
+ * across a clock change.
+ */
+function momentAtWallClock(afterMs: number, wallOffsetMs: number, dayStartMs: number, dayEndMs: number) {
+  const wall = (ms: number) => wallClockOffsetMs(ms, dayStartMs, dayEndMs);
+  let moment = afterMs + (wallOffsetMs - wall(afterMs));
+  for (let step = 0; step < 3; step += 1) {
+    const off = wallOffsetMs - wall(moment);
+    if (Math.abs(off) < 1_000) return Math.min(dayEndMs, Math.max(afterMs + 60_000, moment));
+    moment += off;
+  }
+  // No moment shows that time (it falls in the hour skipped when clocks go forward): the earliest
+  // moment drawn at or after it, so the crowd still covers every member. Drawn time only moves
+  // forward between the start and the day's end apart from a fold, which the corrections handle.
+  let low = afterMs;
+  let high = dayEndMs;
+  while (high - low > 1_000) {
+    const middle = low + (high - low) / 2;
+    if (wall(middle) >= wallOffsetMs) high = middle;
+    else low = middle;
+  }
+  return Math.min(dayEndMs, Math.max(afterMs + 60_000, high));
+}
+
+/** "Needs review: 3 suggestions, 09:00 to 10:20. Opens Gym first." — distinct per crowd. */
+function reviewCrowdAccessibilityLabel(
+  crowd: NonNullable<NativeCalendarEntry["reviewCrowd"]>,
+  startMs: number,
+  endMs: number
+) {
+  const opens = crowd.opensTitle ? `Opens ${crowd.opensTitle} first.` : "Opens the Review list.";
+  return `${REVIEW_COPY.needsReview}: ${crowd.count} suggestions, ${clockText(startMs)} to ${clockText(endMs)}. ${opens}`;
+}
+
+function clockText(ms: number) {
+  const date = new Date(ms);
+  return `${String(date.getHours()).padStart(2, "0")}:${String(date.getMinutes()).padStart(2, "0")}`;
+}
+
+function maxConcurrent(items: { start: number; end: number }[]) {
+  const edges = items.flatMap((item) => [
+    { at: item.start, delta: 1 },
+    { at: Math.max(item.end, item.start + 1), delta: -1 }
+  ]).sort((left, right) => left.at - right.at || left.delta - right.delta);
+  let current = 0;
+  let max = 0;
+  for (const edge of edges) {
+    current += edge.delta;
+    max = Math.max(max, current);
+  }
+  return max;
+}
+
+function reviewCrowdEntry(entries: NativeCalendarEntry[], startMs: number, endMs: number): NativeCalendarEntry {
+  const first = entries.find((entry) => entry.reviewItemId) ?? null;
+  // A crowd formed again around an earlier crowd counts that crowd's members.
+  const count = entries.reduce((total, entry) => total + (entry.reviewCrowd?.count ?? 1), 0);
+  const label = `${count} suggestions`;
+  return {
+    ...entries[0],
+    id: entries[0].id.startsWith("review-crowd:") ? entries[0].id : `review-crowd:${entries[0].id}`,
+    categoryColor: null,
+    categoryId: null,
+    categoryName: null,
+    description: label,
+    durationSeconds: Math.max(0, Math.round((endMs - startMs) / 1000)),
+    isActive: false,
+    isReviewSuggestion: true,
+    placeName: null,
+    // "" opens the Review list rather than one card.
+    reviewItemId: first?.reviewItemId ?? "",
+    reviewCrowd: { count, opensTitle: first ? first.reviewCrowd?.opensTitle ?? displayEntryTitle(first) : null },
+    reviewStatus: "needs_review",
+    startedAt: new Date(startMs).toISOString(),
+    stoppedAt: new Date(endMs).toISOString(),
+    tagNames: [],
+    tags: []
+  };
 }
 
 /**
@@ -444,7 +731,7 @@ function dedupeEntriesById(entries: MobileTimeEntry[]) {
 
 function entryOverlapsDay(entry: MobileTimeEntry, dayKey: string, now: number) {
   const dayStart = startOfLocalDay(dateFromKey(dayKey));
-  const dayEnd = addDays(dayStart, 1);
+  const dayEnd = localDayEnd(dayStart);
   const startedAt = Date.parse(entry.startedAt);
   const stoppedAt = entry.stoppedAt ? Date.parse(entry.stoppedAt) : now;
   return Number.isFinite(startedAt) && Number.isFinite(stoppedAt) && startedAt < dayEnd.getTime() && stoppedAt > dayStart.getTime();
@@ -524,6 +811,14 @@ function startOfWeek(date: Date) {
   const mondayOffset = (start.getDay() + 6) % 7;
   start.setDate(start.getDate() - mondayOffset);
   return start;
+}
+
+/**
+ * The next local midnight: the day's exclusive end. Not "start + one day", which on a day that
+ * starts at 01:00 (a clock change at midnight) would reach 01:00 the next day.
+ */
+function localDayEnd(dayStart: Date) {
+  return startOfLocalDay(addDays(dayStart, 1));
 }
 
 function addDays(date: Date, days: number) {

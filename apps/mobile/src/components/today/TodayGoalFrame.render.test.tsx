@@ -61,7 +61,7 @@ describe("TodayGoalFrame", () => {
     expect(texts[0].props).toMatchObject({ accessibilityLabel: "Today, Wednesday 7 October", accessibilityRole: "header" });
     const summary = tree.root.findAll((node) => node.props.accessible === true && typeof node.props.accessibilityLabel === "string");
     expect(summary).toHaveLength(1);
-    expect(summary[0].props.accessibilityLabel).toBe("2 hours 30 minutes tracked. Daily goal 8 hours, 31 percent.");
+    expect(summary[0].props.accessibilityLabel).toBe("2 hours 30 minutes framed. Daily goal 8 hours, 31 percent.");
   });
 
   it("says how much fills the goal when an activity doesn't count (UIA-043)", () => {
@@ -82,7 +82,7 @@ describe("TodayGoalFrame", () => {
       [25, "%"],
     ]);
     const summary = tree.root.findAll((node) => node.props.accessible === true && typeof node.props.accessibilityLabel === "string");
-    expect(summary[0].props.accessibilityLabel).toBe("9 hours tracked, 2 hours toward your daily goal of 8 hours, 25 percent.");
+    expect(summary[0].props.accessibilityLabel).toBe("9 hours framed, 2 hours toward your daily goal of 8 hours, 25 percent.");
   });
 
   it("draws one cell per goal hour and marks the live slice with the recording colour", () => {

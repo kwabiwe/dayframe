@@ -166,6 +166,11 @@ export type ReviewItemRow = {
   notes: string | null;
   rawPayload: Record<string, unknown> | null;
   createdAt: string;
+  /**
+   * Needs-review entries created from this suggestion's event (the same link the Review
+   * presentation uses), so a calendar draws that moment once. Only the bootstrap list sets it.
+   */
+  linkedEntryIds?: string[];
 };
 
 export type ActivityRow = {
@@ -1026,7 +1031,14 @@ async function getReviewItems(session: RequestSession) {
             ri.status,
             ri.notes,
             ae.raw_payload as "rawPayload",
-            ri.created_at as "createdAt"
+            ri.created_at as "createdAt",
+            coalesce((
+              select array_agg(te.id::text order by te.id)
+              from time_entries te
+              where te.workspace_id = ri.workspace_id and te.user_id = ri.user_id
+                and te.created_from_event_id = ri.event_id
+                and te.review_status = 'needs_review'
+            ), array[]::text[]) as "linkedEntryIds"
      from review_items ri
      left join activity_events ae
        on ae.id = ri.event_id and ae.workspace_id = ri.workspace_id and ae.user_id = ri.user_id
