@@ -32,11 +32,46 @@ function activityForMention<T extends CommandActivity>(word: string, activities:
   return word ? activitiesForMention(word, activities)[0] ?? null : null;
 }
 
-/** How many times each `@word` occurs in `text` (the literal ones a parse leaves alone). */
-function mentionCounts(text: string) {
+/** Every `@word` token in `text`, in order (a bare `@` included). */
+export function mentionTokens(text: string): string[] {
+  return [...text.matchAll(MENTION_TOKEN)].map((match) => match[2]);
+}
+
+/** How many times each token occurs: protected (literal) `@words` are a multiset of exact strings. */
+function tokenCounts(tokens: readonly string[]) {
   const counts = new Map<string, number>();
-  for (const [, , token] of text.matchAll(MENTION_TOKEN)) counts.set(token, (counts.get(token) ?? 0) + 1);
+  for (const token of tokens) counts.set(token, (counts.get(token) ?? 0) + 1);
   return counts;
+}
+
+/**
+ * The protected `@words` still in `text` after an edit, each kept as often as it still occurs
+ * (a multiset intersection): deleting or changing one token unprotects only that token.
+ * The same array comes back when nothing was lost.
+ */
+export function retainMentions(protectedTokens: readonly string[], text: string): readonly string[] {
+  if (!protectedTokens.length) return protectedTokens;
+  const left = tokenCounts(mentionTokens(text));
+  const kept = protectedTokens.filter((token) => {
+    const count = left.get(token) ?? 0;
+    if (!count) return false;
+    left.set(token, count - 1);
+    return true;
+  });
+  return kept.length === protectedTokens.length ? protectedTokens : kept;
+}
+
+/** Whether the token starting at `start` is one of the protected occurrences (earliest first). */
+function isProtectedAt(text: string, start: number, token: string, protectedTokens: readonly string[]) {
+  const allowed = tokenCounts(protectedTokens).get(token) ?? 0;
+  if (!allowed) return false;
+  let before = 0;
+  for (const match of text.matchAll(MENTION_TOKEN)) {
+    const at = match.index + match[1].length;
+    if (at >= start) break;
+    if (match[2] === token) before += 1;
+  }
+  return before < allowed;
 }
 
 /**
@@ -44,8 +79,8 @@ function mentionCounts(text: string) {
  * text. `@words` that `literal` already holds (text kept when an activity was picked from the
  * list) stay as text and never pick an activity.
  */
-function takeMentions(text: string, activities: readonly CommandActivity[], literal = "") {
-  const kept = mentionCounts(literal);
+function takeMentions(text: string, activities: readonly CommandActivity[], literal: readonly string[] = []) {
+  const kept = tokenCounts(literal);
   let categoryId: string | null = null;
   const rest = text.replace(MENTION, (match, space: string, word: string) => {
     const left = kept.get(`@${word}`) ?? 0;
@@ -68,15 +103,17 @@ const MENTION_CHAR = /[\p{L}\p{N}_-]/u;
 /**
  * The `@word` the caret is in or just after (as `findActiveHashtag` does for `#tags`): it opens
  * the Activities list. An `@` only starts a mention at the start of the text or after a space, so
- * an email address never does.
+ * an email address never does. A protected (literal) `@word` is never a mention: it opens no
+ * list, and Enter, Tab and Escape leave it alone.
  */
-export function findActiveMention(text: string, caret: number): ActiveMention | null {
+export function findActiveMention(text: string, caret: number, protectedTokens: readonly string[] = []): ActiveMention | null {
   const safeCaret = Math.max(0, Math.min(caret, text.length));
   const match = /(^|\s)@([\p{L}\p{N}_-]*)$/u.exec(text.slice(0, safeCaret));
   if (!match) return null;
   const start = match.index + match[1].length;
   let end = safeCaret;
   while (end < text.length && MENTION_CHAR.test(text[end] ?? "")) end += 1;
+  if (isProtectedAt(text, start, text.slice(start, end), protectedTokens)) return null;
   return { start, end, query: text.slice(start + 1, end) };
 }
 
@@ -100,12 +137,6 @@ export function activitiesForMention<T extends CommandActivity>(query: string, a
  * `@`) at the start or after a space is removed, except those the saved description already had
  * (a block named "Call @mum" elsewhere keeps it). Unchanged text comes back as it was.
  */
-/** Whether `text` still holds every `@word` of `literal` (else the literal set no longer applies). */
-export function keepsMentions(text: string, literal: string) {
-  const present = mentionCounts(text);
-  return [...mentionCounts(literal)].every(([token, count]) => (present.get(token) ?? 0) >= count);
-}
-
 export function withoutPendingMentions(text: string, saved = "") {
   return takePendingMentions(text, saved, []).description;
 }
@@ -120,7 +151,7 @@ export function pendingMentionActivity(text: string, saved: string, activities: 
 }
 
 function takePendingMentions(text: string, saved: string, activities: readonly CommandActivity[]) {
-  const kept = mentionCounts(saved);
+  const kept = tokenCounts(mentionTokens(saved));
   let removed = false;
   let categoryId: string | null = null;
   const next = text.replace(MENTION_TOKEN, (match, space: string, token: string) => {
@@ -139,7 +170,7 @@ function takePendingMentions(text: string, saved: string, activities: readonly C
   };
 }
 
-export function parseCommand(text: string, activities: readonly CommandActivity[], literal = ""): ParsedCommand {
+export function parseCommand(text: string, activities: readonly CommandActivity[], literal: readonly string[] = []): ParsedCommand {
   const mentions = takeMentions(text, activities, literal);
   const categoryId = mentions.categoryId;
   let rest = mentions.rest;

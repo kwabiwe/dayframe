@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { activitiesForMention, findActiveMention, keepsMentions, parseCommand, pendingMentionActivity, withoutPendingMentions } from "./command-parse";
+import { activitiesForMention, findActiveMention, mentionTokens, parseCommand, pendingMentionActivity, retainMentions, withoutPendingMentions } from "./command-parse";
 
 const activities = [
   { id: "deep", name: "Deep work" },
@@ -105,10 +105,29 @@ describe("the @ Activities list", () => {
   });
 
   it("leaves literal @words alone after an activity was picked from the list", () => {
-    expect(parseCommand("Plan @admin 45m", activities, "Plan @admin")).toEqual({ description: "Plan @admin", categoryId: null, durationSeconds: 2700 });
+    expect(parseCommand("Plan @admin 45m", activities, ["@admin"])).toEqual({ description: "Plan @admin", categoryId: null, durationSeconds: 2700 });
     // A newly typed one still parses.
-    expect(parseCommand("Plan @admin @deep", activities, "Plan @admin").categoryId).toBe("deep");
-    expect(keepsMentions("Plan @admin more", "Plan @admin")).toBe(true);
-    expect(keepsMentions("Plan more", "Plan @admin")).toBe(false);
+    expect(parseCommand("Plan @admin @deep", activities, ["@admin"]).categoryId).toBe("deep");
+    // Only as many occurrences as are protected stay literal.
+    expect(parseCommand("Plan @admin @admin", activities, ["@admin"])).toMatchObject({ categoryId: "admin", description: "Plan @admin" });
+  });
+
+  it("tracks protected @words per token across edits (a multiset)", () => {
+    const literal = mentionTokens("Plan @foc @other");
+    expect(literal).toEqual(["@foc", "@other"]);
+    // Deleting @other unprotects only @other.
+    expect(retainMentions(literal, "Plan @foc ")).toEqual(["@foc"]);
+    // Editing a token unprotects that token.
+    expect(retainMentions(literal, "Plan @focus @other")).toEqual(["@other"]);
+    expect(retainMentions(["@a", "@a"], "x @a")).toEqual(["@a"]);
+    // Unchanged: the same array.
+    expect(retainMentions(literal, "Plan @foc @other more")).toBe(literal);
+  });
+
+  it("never opens the list on a protected @word, only on a new occurrence", () => {
+    expect(findActiveMention("Plan @foc", 9, ["@foc"])).toBeNull();
+    expect(findActiveMention("Plan @foc @foc", 14, ["@foc"])).toEqual({ start: 10, end: 14, query: "foc" });
+    expect(findActiveMention("Plan @foc @fo", 13, ["@foc"])).toEqual({ start: 10, end: 13, query: "fo" });
+    expect(findActiveMention("Discuss @writing", 16, mentionTokens("Discuss @writing"))).toBeNull();
   });
 });

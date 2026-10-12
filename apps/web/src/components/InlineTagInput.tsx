@@ -58,6 +58,7 @@ export function InlineTagInput({
   onSelectedTagNamesChange,
   placeholder,
   portal = false,
+  protectedMentions,
   selectedTagNames,
   tags,
   value
@@ -88,6 +89,11 @@ export function InlineTagInput({
   onSelectedTagNamesChange: (tagNames: string[]) => void;
   placeholder?: string;
   portal?: boolean;
+  /**
+   * Literal `@words` (exact strings, as a multiset): they never open the Activities list and are
+   * never consumed by Enter, Tab or Escape.
+   */
+  protectedMentions?: readonly string[];
   selectedTagNames: string[];
   tags: TagRow[];
   value: string;
@@ -144,7 +150,7 @@ export function InlineTagInput({
     [createName, matches]
   );
   const shouldOpen = !disabled && focused && Boolean(active) && active?.start !== dismissedTagStart && !pickerOpen;
-  const mention = activities && !disabled && focused && !pickerOpen ? findActiveMention(value, caret) : null;
+  const mention = activities && !disabled && focused && !pickerOpen ? findActiveMention(value, caret, protectedMentions) : null;
   const activityOpen = Boolean(mention);
   const activityMatches = mention && activities ? activitiesForMention(mention.query, activities) : [];
   const activeActivityIndex = Math.min(activityIndex, Math.max(0, activityMatches.length - 1));

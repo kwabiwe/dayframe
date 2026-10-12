@@ -386,6 +386,79 @@ function expectRunningBlockKept(calls: Spies, literal: string[] = []) {
   }
 }
 
+describe("literal @words are protected in the list as in the parser (Codex r3)", () => {
+  it("idle: after Tab picks Writing, the leftover @foc opens no list and Enter starts Writing", async () => {
+    const { calls, input } = renderBar();
+    const user = await typeInto(input, "Plan @foc @wri");
+    await user.keyboard("{Tab}");
+    expect(input.value).toBe("Plan @foc");
+    expect(screen.queryByRole("listbox", { name: "Activities" })).toBeNull();
+    expect(input.getAttribute("aria-expanded")).toBe("false");
+    await user.keyboard("{Enter}");
+    expect(calls.startTimer).toHaveBeenCalledWith({ categoryId: "write", description: "Plan @foc", tagNames: [] });
+  });
+
+  it("idle: Escape and Tab never consume a protected @word", async () => {
+    const { calls, input } = renderBar();
+    const user = await typeInto(input, "Plan @foc @wri");
+    await user.keyboard("{Tab}");
+    await waitFor(() => expect(document.activeElement).toBe(input));
+    await user.keyboard("{Escape}");
+    expect(input.value).toBe("Plan @foc");
+    expect(screen.getByRole("button", { name: "Activity: Writing" })).not.toBeNull();
+    expect(calls.startTimer).not.toHaveBeenCalled();
+  });
+
+  it("idle: deleting one literal @word keeps the others protected", async () => {
+    const { calls, input } = renderBar();
+    const user = await typeInto(input, "Plan @foc @other @wri");
+    await user.keyboard("{Tab}");
+    expect(input.value).toBe("Plan @foc @other");
+    await act(() => new Promise((resolve) => requestAnimationFrame(resolve)));
+    await user.keyboard("{End}{Backspace}{Backspace}{Backspace}{Backspace}{Backspace}{Backspace}{Backspace} ");
+    expect(input.value).toBe("Plan @foc ");
+    expect(screen.queryByRole("listbox", { name: "Activities" })).toBeNull();
+    await act(async () => { await user.click(screen.getByRole("button", { name: "Start a block" })); });
+    expect(calls.startTimer).toHaveBeenCalledWith({ categoryId: "write", description: "Plan @foc", tagNames: [] });
+  });
+
+  it("idle: editing a literal @word makes it a command again", async () => {
+    const { input } = renderBar();
+    const user = await typeInto(input, "Plan @foc @wri");
+    await user.keyboard("{Tab}");
+    await act(() => new Promise((resolve) => requestAnimationFrame(resolve)));
+    await user.keyboard("{End}us");
+    expect(input.value).toBe("Plan @focus");
+    expect(optionNames(activities())).toEqual(["Focus"]);
+  });
+
+  it("recording: a saved @word opens no list at the caret and Enter changes nothing", async () => {
+    const { calls, input } = renderBar({ activeEntry: running({ description: "Discuss @writing" }) });
+    const user = userEvent.setup();
+    await user.click(input);
+    await user.keyboard("{End}");
+    expect(screen.queryByRole("listbox", { name: "Activities" })).toBeNull();
+    await user.keyboard("{Enter}");
+    expect(input.value).toBe("Discuss @writing");
+    expect(screen.getByRole("button", { name: "Activity: Focus" })).not.toBeNull();
+    await act(() => new Promise((resolve) => setTimeout(resolve, 900)));
+    expect(calls.updateActiveDetails).not.toHaveBeenCalled();
+  });
+
+  it("recording: a new occurrence of a saved @word still opens the list and switches", async () => {
+    const { calls, input } = renderBar({ activeEntry: running({ description: "Discuss @writing" }) });
+    const user = await typeInto(input, " @writing");
+    expect(optionNames(activities())).toEqual(["Writing"]);
+    await user.keyboard("{Enter}");
+    expect(input.value).toBe("Discuss @writing");
+    await waitFor(() => expect(calls.updateActiveDetails).toHaveBeenCalledWith({
+      categoryId: "write",
+      description: "Discuss @writing",
+      tagNames: []
+    }), { timeout: 2_000 });
+  });
+});
+
 describe("an unfinished @ is never saved to the running block", () => {
   const wait = (ms: number) => act(() => new Promise((resolve) => setTimeout(resolve, ms)));
 

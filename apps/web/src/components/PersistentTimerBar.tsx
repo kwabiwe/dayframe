@@ -31,7 +31,7 @@ import { shouldStartTimerFromEntrySubmit } from "@/lib/timer-entry-draft";
 import { quickActionTimerDraft } from "@/lib/timer-runtime";
 import { blockStyle } from "@/lib/block-style";
 import { alreadyRecordingToastMessage, switchedToastMessage } from "@/lib/blocks-toast-copy";
-import { keepsMentions, parseCommand, pendingMentionActivity, withoutPendingMentions } from "@/lib/command-parse";
+import { mentionTokens, parseCommand, pendingMentionActivity, retainMentions, withoutPendingMentions } from "@/lib/command-parse";
 import { hasOpenDialog, isTypingTarget } from "@/lib/keyboard-ownership";
 
 const TASK_SUGGESTION_LIMIT = 5;
@@ -67,10 +67,11 @@ export function PersistentTimerBar({ workspaceMode = false }: { workspaceMode?: 
   const [narrowCommand, setNarrowCommand] = useState(false);
   const [suggestionsOpen, setSuggestionsOpen] = useState(false);
   const [hashtagSuggestionsOpen, setHashtagSuggestionsOpen] = useState(false);
-  // Idle: the text left when an activity was picked from the `@` list. Its `@words` are literal
-  // (the picked activity wins); a newly typed `@activity` still parses. Dropped once the text no
-  // longer holds them.
-  const [literalMentions, setLiteralMentions] = useState("");
+  // Idle: the `@words` left in the text when an activity was picked from the `@` list, a multiset
+  // of exact strings. They are literal (the picked activity wins): they never parse, open the
+  // list or get consumed; a newly typed `@activity` still does. Each one stays protected until it
+  // is itself edited or deleted (`retainMentions`).
+  const [literalMentions, setLiteralMentions] = useState<readonly string[]>([]);
   const [startEditorOpen, setStartEditorOpen] = useState(false);
   const [timerActionsOpen, setTimerActionsOpen] = useState(false);
   const [startDateDraft, setStartDateDraft] = useState("");
@@ -118,6 +119,8 @@ export function PersistentTimerBar({ workspaceMode = false }: { workspaceMode?: 
     () => active ? null : parseCommand(timerDraft.description, data?.categories ?? [], literalMentions),
     [active, data?.categories, literalMentions, timerDraft.description]
   );
+  // Recording, the `@words` the saved description already has are literal text.
+  const savedMentions = useMemo(() => mentionTokens(active?.description ?? ""), [active?.description]);
   const activeAccent = active
     ? timeEntryAccentColor({
         ...active,
@@ -336,11 +339,11 @@ export function PersistentTimerBar({ workspaceMode = false }: { workspaceMode?: 
   function chooseActivity(categoryId: string, description: string, trigger: ActivityChoiceTrigger) {
     setCommandNotice(null);
     setSuggestionsOpen(false);
-    if (!active) setLiteralMentions(description);
+    if (!active) setLiteralMentions(mentionTokens(description));
     if (trigger === "enter" && !active) {
       const draft = { ...timerDraft, categoryId, description };
       setTimerDraft(draft);
-      void runCommand(draft, description);
+      void runCommand(draft, mentionTokens(description));
       return;
     }
     setTimerDraft((current) => ({ ...current, categoryId, description }));
@@ -481,6 +484,7 @@ export function PersistentTimerBar({ workspaceMode = false }: { workspaceMode?: 
             inputRef={descriptionInputRef}
             name="timer-description"
             onActivityChoose={chooseActivity}
+            protectedMentions={active ? savedMentions : literalMentions}
             onBlur={() => {
               // Leaving the field while recording drops an unfinished `@…` from the text.
               if (!active) return;
@@ -491,7 +495,7 @@ export function PersistentTimerBar({ workspaceMode = false }: { workspaceMode?: 
             }}
             onChange={(description) => {
               setCommandNotice(null);
-              setLiteralMentions((literal) => (literal && !keepsMentions(description, literal) ? "" : literal));
+              setLiteralMentions((literal) => retainMentions(literal, description));
               setTimerDraft((current) => ({ ...current, description }));
               setSuggestionsOpen(true);
             }}
