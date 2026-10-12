@@ -132,6 +132,7 @@ import {
   shouldShowSettingsRefreshSpinner,
   settingsGeofenceKey
 } from "@/lib/settingsRefresh";
+import { readTodayBootstrapForSettings } from "@/lib/settingsSeed";
 import { clampSettingsScrollOffset, settingsScrollNeedsClamp } from "@/lib/settingsScroll";
 import { BlocksNavHeader, usePreviousScreenLabel } from "@/components/BlocksNavHeader";
 import { BlocksConfirmHost, useBlocksConfirm, type BlocksConfirmRequest } from "@/components/blocks/BlocksConfirmSheet";
@@ -366,7 +367,11 @@ export default function SettingsScreen() {
   const routeSettingsSection = normalizeSettingsSection(params.section);
   const settingsSection = routeSettingsSection;
   const cachedSnapshot = readSettingsSnapshot();
-  const [data, setData] = useState<MobileBootstrap | null>(cachedSnapshot?.data ?? null);
+  // First open of the session: Today's bootstrap for the same account draws the first frame; the
+  // usual refresh after the opening transition still runs (the snapshot stays stale).
+  const [data, setData] = useState<MobileBootstrap | null>(
+    () => cachedSnapshot?.data ?? readTodayBootstrapForSettings(getActiveMobileAccountSnapshot())
+  );
   const [queue, setQueue] = useState<QueuedEvent[]>(cachedSnapshot?.queue ?? []);
   const [lastSyncResult, setLastSyncResult] = useState<SyncQueueResult | null>(cachedSnapshot?.lastSyncResult ?? null);
   const [syncingQueue, setSyncingQueue] = useState(false);

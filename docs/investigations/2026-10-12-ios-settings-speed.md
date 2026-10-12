@@ -49,7 +49,7 @@ Regression tests: `settingsSpeed.contract.test.ts` (no await before first effect
 ## Deferred (follow-ups)
 
 - Split `SettingsScreen` into per-section components so a sub-page mounts only its own state and effects, and pause covered instances' subscriptions while unfocused.
-- Reuse Today's in-memory bootstrap for Settings instead of a 30 s TTL refetch.
+- Reuse Today's in-memory bootstrap for Settings instead of a 30 s TTL refetch. **Partly done (`agent/settings-seed-from-today`):** the session's first Settings open draws its first frame from Today's last bootstrap for the same account (`src/lib/settingsSeed.ts`; in memory only, dropped on sign-out), so the account card, goals and activities no longer start from empty defaults. The refresh after the opening transition still runs: skipping it would also skip the location diagnostics it reads, and a Today bootstrap can predate a Settings change.
 
 ## Proposed wording (less technical, follow-up)
 

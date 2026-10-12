@@ -204,6 +204,7 @@ import {
   type MobileTheme
 } from "@/lib/mobileTheme";
 import { subscribeMobileSignedOut } from "@/lib/mobileSessionTransition";
+import { publishTodayBootstrapForSettings } from "@/lib/settingsSeed";
 import {
   buildNativeCalendarBridgeState,
   routeNativeCalendarOpenEvent,
@@ -852,6 +853,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
         liveActivityReconciliationDeferred.current = pendingQueue.some((event) => event.source === "shortcut");
       }
       void cacheDashboardBootstrap(serverBootstrap).catch(() => undefined);
+      publishTodayBootstrapForSettings(serverBootstrap);
       const owner = timerStopOwner(serverBootstrap);
       const durableWork = await readDurableLocalWork(owner);
       for (const [localId, timeEntryId] of durableWork.correlations) {
@@ -1168,6 +1170,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
         let filtered = cached.bootstrap;
         let durableWork = null;
         await activateMobileAccount(owner);
+        publishTodayBootstrapForSettings(cached.bootstrap);
         durableWork = await readDurableLocalWork(owner);
         for (const [localId, timeEntryId] of durableWork.correlations) {
           optimisticTimerIds.current.set(localId, timeEntryId);
