@@ -54,6 +54,7 @@ Do not stop at the first plausible explanation if another layer could still be b
 - A hybrid Calendar bug appears visual but is actually a stale prop/event contract, a recreated hosting controller, or competing React Native and native scroll/gesture owners.
 - A web style looks dropped but the local Next dev server is still serving the stylesheet compiled before a `globals.css` edit (same chunk URL and size). Restart the dev server and compare the rule against a fresh `npm run build` before diagnosing a bundling defect.
 - A server-rendered client component reads the clock (`new Date()`, `Date.now()`) during render, so a running timer's derived values differ between the server HTML and hydration. Render from the server's `renderedAt` until hydrated (`useHydrationSafeNow`) and cover it with a hydrate-later DOM test.
+- A server-rendered client component formats a browser-local date or clock time (`formatTime`, `formatDate`, `Intl.DateTimeFormat` without a fixed `timeZone`). Vercel renders in UTC, so the text differs from the browser's first render (React #418, `args[]=text`), as Reports' block rows did. Gate that text on `useIsHydrated()` and cover it with a `renderToString` + `hydrateRoot` DOM test. To find the text in production, fetch the page HTML and diff its text nodes against the live DOM.
 
 ## Before A Fix Branch
 

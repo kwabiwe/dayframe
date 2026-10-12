@@ -10,6 +10,7 @@ import { resolveActivityIcon } from "@dayframe/shared";
 import { blockStyle } from "@/lib/block-style";
 import { timeEntryCategoryLabel, timeEntryTitle } from "@/lib/display";
 import { formatDate, formatDuration, formatTime } from "@/lib/format";
+import { useIsHydrated } from "@/components/useHydrationSafeNow";
 import { reportsHref, type ReportSort } from "@/lib/report-filters";
 import type { ReportResult } from "@/lib/report-service";
 
@@ -107,7 +108,7 @@ export function ReportDetailsTable({ report }: { report: ReportResult }) {
   );
 }
 
-function ReportBlockRow({
+export function ReportBlockRow({
   disabled,
   entry,
   icon,
@@ -123,7 +124,11 @@ function ReportBlockRow({
   const tags = entry.tagNames.map((tag) => `#${tag}`).join(" ");
   // Place only when this block has one: never a repeated empty place (UIA-303).
   const meta = [activity, tags, entry.placeName ?? ""].filter(Boolean).join(" · ");
-  const when = `${formatTime(entry.startedAt)}–${entry.stoppedAt ? formatTime(entry.stoppedAt) : "now"}`;
+  // Date and clock time are the browser's local ones, so they wait for hydration: the server's
+  // UTC copy would mismatch (React #418).
+  const hydrated = useIsHydrated();
+  const day = hydrated ? formatDate(entry.startedAt) : "";
+  const when = hydrated ? `${formatTime(entry.startedAt)}–${entry.stoppedAt ? formatTime(entry.stoppedAt) : "now"}` : "";
   const duration = reportRowDuration(entry);
   const glyph = resolveActivityIcon({ icon, name: entry.categoryName }).glyph;
   const overlap = entry.overlapCount > 0
@@ -133,7 +138,7 @@ function ReportBlockRow({
   return (
     <li className={`df-erow df-report-row${entry.isRunning ? " is-live" : ""}`}>
       <button
-        aria-label={`${title}, ${meta}, ${formatDate(entry.startedAt)} ${when}, ${duration}${entry.isRunning ? ", running" : ""}${overlap ? `, ${overlap}` : ""}. Edit.`}
+        aria-label={`${title}, ${meta}, ${hydrated ? `${day} ${when}, ` : ""}${duration}${entry.isRunning ? ", running" : ""}${overlap ? `, ${overlap}` : ""}. Edit.`}
         className="df-erow-main"
         disabled={disabled}
         onClick={onEdit}
@@ -153,7 +158,7 @@ function ReportBlockRow({
           </span>
         </span>
         <span className="df-erow-when df-report-row-when">
-          <small>{formatDate(entry.startedAt)}</small>
+          <small>{day}</small>
           <span>{when}</span>
         </span>
         <span className="df-erow-dur">{duration}</span>
