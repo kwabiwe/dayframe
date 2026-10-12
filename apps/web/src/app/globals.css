@@ -13493,7 +13493,7 @@ dialog.ui-dialog.df-rf-dialog {
 
 .df-cal-day-bars i {
   width: 5px;
-  border-radius: 2px;
+  border-radius: var(--activity-marker-radius);
 }
 
 .df-cal-day-bars .df-cal-day-none {

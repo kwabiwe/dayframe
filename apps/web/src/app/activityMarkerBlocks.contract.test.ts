@@ -13,6 +13,7 @@ const ACTIVITY_MARKERS = [
   ".category-picker-color-swatch",
   ".swiss-focus-dot",
   ".calendar-compact-category-dot",
+  ".df-cal-day-bars i",
 ];
 
 function rulesFor(selector: string) {
