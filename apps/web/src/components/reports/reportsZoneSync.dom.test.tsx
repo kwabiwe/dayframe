@@ -8,9 +8,17 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { formatDuration } from "@/lib/format";
 import type { ReportResult } from "@/lib/report-service";
 import { reportBlocksModel } from "@/lib/reports-blocks";
-import { clearReportsZoneSyncRefresh, isReportsZoneSyncRefresh, markReportsZoneSyncRefresh } from "@/lib/reports-zone-sync";
+import { clearReportsZoneSyncRefresh, isReportsZoneSyncRefresh, markReportsZoneSyncRefresh, reportsRouteHref } from "@/lib/reports-zone-sync";
 
-vi.mock("next/navigation", () => ({ useRouter: () => ({ push: vi.fn() }) }));
+// The route a render is for, as Next's router holds it. Next writes the address bar only after
+// the new route has rendered (HistoryUpdater in a layout effect), so tests move `route` first and
+// the address afterwards.
+const route = vi.hoisted(() => ({ pathname: "/reports", search: "range=this-week" }));
+vi.mock("next/navigation", () => ({
+  usePathname: () => route.pathname,
+  useRouter: () => ({ push: vi.fn() }),
+  useSearchParams: () => new URLSearchParams(route.search)
+}));
 vi.mock("next/link", () => ({
   default: ({ href, children, ...props }: { href: string; children: React.ReactNode }) => <a href={href} {...props}>{children}</a>
 }));
@@ -45,46 +53,63 @@ afterEach(() => {
   window.history.replaceState(null, "", "/");
 });
 
-describe("Reports after a time zone reconciliation (Codex r1 on #367)", () => {
-  it("draws the blocks of the shell's zone refresh at rest, and lands the next report the user asks for", async () => {
-    window.history.replaceState(null, "", "/reports?range=this-week");
+describe("Reports after a time zone reconciliation (Codex r1 and r2 on #367)", () => {
+  const THIS_WEEK = "/reports?range=this-week";
+
+  /** Renders the panel for `search`, then (as Next's HistoryUpdater does) writes the address. */
+  async function renderRoute(root: ReturnType<typeof createRoot>, search: string, blocks: ReturnType<typeof week>) {
+    route.search = search;
+    await act(async () => root.render(
+      <ReportsBlocksPanel blocks={blocks} land={land} slices={slices} totalLabel="logged this week" totalSeconds={3600} />
+    ));
+    const settled = document.querySelector(".df-wblocks")!.classList.contains("is-settled");
+    window.history.replaceState(null, "", `/reports?${search}`);
+    return settled;
+  }
+
+  function mount() {
+    route.search = "range=this-week";
+    window.history.replaceState(null, "", THIS_WEEK);
     const container = document.createElement("div");
     document.body.append(container);
-    const root = createRoot(container);
-    const panel = (blocks: ReturnType<typeof week>) => (
-      <ReportsBlocksPanel blocks={blocks} land={land} slices={slices} totalLabel="logged this week" totalSeconds={3600} />
-    );
-    const list = () => container.querySelector(".df-wblocks")!;
+    return createRoot(container);
+  }
 
+  it("draws the blocks of the shell's zone refresh at rest, and lands the next report the user asks for", async () => {
+    const root = mount();
     // The server drew the week in UTC; the first render lands as before.
-    await act(async () => root.render(panel(week(5))));
-    expect(list().classList.contains("is-settled")).toBe(false);
+    expect(await renderRoute(root, "range=this-week", week(5))).toBe(false);
 
-    // The shell wrote the zone cookie and refreshed: the viewer's week arrives at rest.
-    markReportsZoneSyncRefresh("/reports?range=this-week");
-    await act(async () => root.render(panel(week(12))));
-    expect(list().classList.contains("is-settled")).toBe(true);
-    expect(isReportsZoneSyncRefresh("/reports?range=this-week")).toBe(false);
+    // The shell wrote the zone cookie and refreshed the same route: the viewer's week arrives at rest.
+    markReportsZoneSyncRefresh(reportsRouteHref(window.location.pathname, window.location.search));
+    expect(await renderRoute(root, "range=this-week", week(12))).toBe(true);
+    expect(isReportsZoneSyncRefresh(THIS_WEEK)).toBe(false);
 
-    // The user's next range lands again.
-    window.history.replaceState(null, "", "/reports?range=last-week");
-    await act(async () => root.render(panel(week(5))));
-    expect(list().classList.contains("is-settled")).toBe(false);
+    // The user's next range lands again, although it renders while the address still shows this week.
+    expect(window.location.search).toBe("?range=this-week");
+    expect(await renderRoute(root, "range=last-week", week(5))).toBe(false);
     await act(async () => root.unmount());
   });
 
-  it("never treats a navigation to another page of Reports as the zone refresh", async () => {
-    window.history.replaceState(null, "", "/reports?range=this-week");
-    const container = document.createElement("div");
-    document.body.append(container);
-    const root = createRoot(container);
-    await act(async () => root.render(<ReportsBlocksPanel blocks={week(5)} land={land} slices={slices} totalLabel="logged" totalSeconds={3600} />));
-    markReportsZoneSyncRefresh("/reports?range=this-week");
-    // The user chose another range before the refresh arrived.
-    window.history.replaceState(null, "", "/reports?range=last-week");
-    await act(async () => root.render(<ReportsBlocksPanel blocks={week(12)} land={land} slices={slices} totalLabel="logged" totalSeconds={3600} />));
-    expect(container.querySelector(".df-wblocks")?.classList.contains("is-settled")).toBe(false);
+  it("never mistakes a navigation that renders before the address changes for the zone refresh", async () => {
+    const root = mount();
+    await renderRoute(root, "range=this-week", week(5));
+    markReportsZoneSyncRefresh(reportsRouteHref(window.location.pathname, window.location.search));
+    // The user picks another range before the refresh arrives. It renders while the address bar
+    // still reads the marked page, and keeps its landing.
+    expect(await renderRoute(root, "range=last-week&categories=work", week(12))).toBe(false);
+    // The navigation superseded the refresh: the mark is spent, so returning to the marked page
+    // lands too.
+    expect(isReportsZoneSyncRefresh(THIS_WEEK)).toBe(false);
+    expect(await renderRoute(root, "range=this-week", week(19))).toBe(false);
     await act(async () => root.unmount());
+  });
+
+  it("names a route the same way from the address bar and from the router", () => {
+    expect(reportsRouteHref("/reports", "?range=custom&from=2026-10-01&categories=a,b")).toBe(
+      reportsRouteHref("/reports", new URLSearchParams("range=custom&from=2026-10-01&categories=a%2Cb").toString())
+    );
+    expect(reportsRouteHref("/reports", "")).toBe("/reports");
   });
 
   it("lets a mark lapse", () => {
@@ -97,6 +122,10 @@ describe("Reports after a time zone reconciliation (Codex r1 on #367)", () => {
     const styles = readFileSync(join(process.cwd(), "src/app/globals.css"), "utf8");
     expect(styles).toMatch(/\.df-wblocks\.is-settled \.df-wb-stack > \.df-tblock \{\s*animation-duration: 0s;\s*\}/);
     const shell = readFileSync(join(process.cwd(), "src/components/AppShell.tsx"), "utf8");
-    expect(shell).toMatch(/markReportsZoneSyncRefresh\(currentReportsHref\(\)\);\s*router\.refresh\(\);/);
+    expect(shell).toMatch(/markReportsZoneSyncRefresh\(reportsRouteHref\(window\.location\.pathname, window\.location\.search\)\);\s*router\.refresh\(\);/);
+    // The panel compares the route its render is for, never the address bar.
+    const panel = readFileSync(join(process.cwd(), "src/components/reports/ReportsBlocksPanel.tsx"), "utf8");
+    expect(panel).toContain("isReportsZoneSyncRefresh(routeHref)");
+    expect(panel).not.toContain("window.location");
   });
 });

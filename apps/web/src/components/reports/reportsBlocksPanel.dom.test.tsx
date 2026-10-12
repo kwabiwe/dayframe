@@ -8,7 +8,11 @@ import { formatDuration } from "@/lib/format";
 import type { ReportResult } from "@/lib/report-service";
 import { DONUT_GAP, donutArcs, reportBlocksModel } from "@/lib/reports-blocks";
 
-vi.mock("next/navigation", () => ({ useRouter: () => ({ push: vi.fn() }) }));
+vi.mock("next/navigation", () => ({
+  usePathname: () => "/reports",
+  useRouter: () => ({ push: vi.fn() }),
+  useSearchParams: () => new URLSearchParams()
+}));
 vi.mock("next/link", () => ({
   default: ({ href, children, ...props }: { href: string; children: React.ReactNode }) => <a href={href} {...props}>{children}</a>
 }));

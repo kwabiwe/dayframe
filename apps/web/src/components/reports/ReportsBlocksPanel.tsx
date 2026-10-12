@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { usePathname, useSearchParams } from "next/navigation";
 import type { CSSProperties, KeyboardEvent, PointerEvent as ReactPointerEvent } from "react";
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { X } from "lucide-react";
@@ -11,7 +12,7 @@ import { blockStyle } from "@/lib/block-style";
 import { categoryDisplay } from "@/lib/display";
 import { formatDuration } from "@/lib/format";
 import { donutArcs, type ReportBlocksDay, type ReportBlocksModel } from "@/lib/reports-blocks";
-import { clearReportsZoneSyncRefresh, currentReportsHref, isReportsZoneSyncRefresh } from "@/lib/reports-zone-sync";
+import { clearReportsZoneSyncRefresh, isReportsZoneSyncRefresh, reportsRouteHref } from "@/lib/reports-zone-sync";
 
 const WEEKDAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 const RADIUS = 46;
@@ -127,11 +128,16 @@ export function ReportsBlocksPanel({
   // slice element, which survives while its slice does.
   const [seenData, setSeenData] = useState({ blocks, slices });
   // Blocks a time zone reconciliation redrew (the shell's refresh after the zone cookie changed)
-  // stand at rest instead of landing; the next report the user asks for lands as usual.
+  // stand at rest instead of landing; the next report the user asks for lands as usual. The route
+  // this render is for comes from the router, not the address bar, which Next updates only after
+  // a navigation has rendered.
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
+  const routeHref = reportsRouteHref(pathname, searchParams?.toString());
   const [settledBlocks, setSettledBlocks] = useState<ReportBlocksModel | null>(null);
   if (seenData.slices !== slices || seenData.blocks !== blocks) {
     if (seenData.blocks !== blocks) {
-      setSettledBlocks(blocks && isReportsZoneSyncRefresh(currentReportsHref()) ? blocks : null);
+      setSettledBlocks(blocks && isReportsZoneSyncRefresh(routeHref) ? blocks : null);
     }
     setSeenData({ blocks, slices });
     setTrace(NO_TRACE);
@@ -139,9 +145,12 @@ export function ReportsBlocksPanel({
     if (focusedId !== null && !slices.some((slice) => slice.id === focusedId)) setFocusedId(null);
   }
   const settled = blocks !== null && settledBlocks === blocks;
+  // The first report data after a mark settles it, whether it was the refresh or a navigation that
+  // superseded it, so no later report is ever mistaken for the refresh.
+  const firstBlocksRef = useRef(blocks);
   useEffect(() => {
-    if (settledBlocks) clearReportsZoneSyncRefresh();
-  }, [settledBlocks]);
+    if (blocks !== firstBlocksRef.current) clearReportsZoneSyncRefresh();
+  }, [blocks]);
   const hotIds = hot ? new Set(hot.categoryIds) : null;
   /** Start (`on`) or end one source's trace of a slice; ending only clears that source's own trace. */
   const setSource = (source: TraceSource, sliceId: string | null, on = true) =>

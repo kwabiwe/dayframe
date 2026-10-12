@@ -23,7 +23,7 @@ import { basePaletteCommands, type PaletteCommand } from "@/lib/command-palette"
 import { isSearchShortcut, SEARCH_SHORTCUT_LABEL } from "@/lib/keyboard-shortcuts";
 import type { BootstrapData } from "@/lib/queries";
 import { hasOpenDialog, isTypingTarget } from "@/lib/keyboard-ownership";
-import { currentReportsHref, markReportsZoneSyncRefresh } from "@/lib/reports-zone-sync";
+import { markReportsZoneSyncRefresh, reportsRouteHref } from "@/lib/reports-zone-sync";
 import { syncViewerTimeZoneCookie } from "@/lib/viewer-time-zone";
 import {
   GO_TO_SEQUENCE_MS,
@@ -121,7 +121,9 @@ function AppShellContent({ children }: { children: ReactNode }) {
   useEffect(() => {
     if (!syncViewerTimeZoneCookie(document, window.location.protocol === "https:")) return;
     if (!window.location.pathname.startsWith("/reports")) return;
-    markReportsZoneSyncRefresh(currentReportsHref());
+    // Marked with the route the refresh will render, in the router's terms (the panel compares
+    // `usePathname()`/`useSearchParams()`, never the address bar).
+    markReportsZoneSyncRefresh(reportsRouteHref(window.location.pathname, window.location.search));
     router.refresh();
   }, [router]);
 
