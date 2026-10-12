@@ -13,7 +13,7 @@ vi.mock("next/link", () => ({
   default: ({ href, children, ...props }: { href: string; children: React.ReactNode }) => <a href={href} {...props}>{children}</a>
 }));
 
-const { ReportsBlocksPanel, traceBlockAt } = await import("./ReportsBlocksPanel");
+const { ReportsBlocksPanel, traceBlockAt, traceDayAt } = await import("./ReportsBlocksPanel");
 
 const at = (date: number, hour = 0) => new Date(2026, 9, date, hour).toISOString();
 const day = (date: number) => ({ key: `d${date}`, label: `Day ${date}`, start: at(date), end: at(date + 1) });
@@ -103,7 +103,7 @@ describe("Reports blocks and Where it went", () => {
     expect(html).toContain("The days in blocks");
     // UIA-306: a short label for narrow columns and tap wording for coarse pointers.
     expect(html).toContain('<span class="df-wb-label-short">Day 5</span>');
-    expect(html).toContain("Tap an activity to trace it");
+    expect(html).toContain("Tap a day, then an activity, to trace it");
     expect(html).toContain("Where it went");
   });
 
@@ -221,40 +221,108 @@ describe("Reports blocks and Where it went", () => {
     await act(async () => view.root.unmount());
   });
 
-  it("gives touch the whole day as the hit area and pins the trace until a tap outside (review 1, 3)", async () => {
+  it("gives touch a day to pick, then 44 px activity rows to pin a trace (review 3)", async () => {
     const view = await mount(week());
-    const list = view.container.querySelector(".df-wblocks")!;
-    // 3 px slivers are not the target: a finger in the gap beside Day 7's column (x 141, 3 px right
-    // of it) and 60 px above its blocks takes the day's nearest block.
-    await pointer(list, "pointerdown", 141, 120, "touch");
-    await pointer(list, "pointerup", 141, 120, "touch");
+    const { container } = view;
+    const list = container.querySelector(".df-wblocks")!;
+    const panel = container.querySelector(".df-day-pick")!;
+    expect(panel.classList.contains("is-open")).toBe(false);
+    expect(panel.hasAttribute("inert")).toBe(true);
+    const tap = async (x: number, y: number) => {
+      await pointer(list, "pointerdown", x, y, "touch");
+      await pointer(list, "pointerup", x, y, "touch");
+    };
+    // A finger in the gap beside Day 7's column (x 141–150 is within its slop) picks the day; a
+    // touch never traces a 3 px block directly.
+    await tap(147, 120);
+    expect(panel.classList.contains("is-open")).toBe(true);
+    expect(panel.hasAttribute("inert")).toBe(false);
+    expect(container.querySelector('li[data-trace-day="d7"]')?.classList.contains("is-picked")).toBe(true);
+    expect(list.classList.contains("has-hot")).toBe(false);
+    const rows = [...panel.querySelectorAll<HTMLButtonElement>(".df-day-pick-row")];
+    expect(rows.map((row) => row.textContent)).toEqual(["No activity30m", "Work2h"]);
+    expect(panel.querySelector("ul")?.getAttribute("aria-label")).toBe("Activities on Day 7");
+    // Touch never leaves a hover behind.
+    await pointer(list, "pointerout", 147, 120, "touch", document.body);
+    // Tapping a row pins its activity; tapping it again unpins.
+    await act(async () => rows[1].click());
     expect(view.centre()).toBe("9hWork");
-    // Touch never leaves a hover behind, and the pinned tap survives the finger lifting away.
-    await pointer(list, "pointerout", 141, 120, "touch", document.body);
-    expect(view.centre()).toBe("9hWork");
-    // Another tap inside moves the pin.
-    await pointer(list, "pointerdown", 20, 199, "touch");
-    await pointer(list, "pointerup", 20, 199, "touch");
-    expect(view.centre()).toBe("9hWork");
-    await pointer(list, "pointerdown", 120, 199, "touch");
-    await pointer(list, "pointerup", 120, 199, "touch");
+    expect(rows[1].getAttribute("aria-pressed")).toBe("true");
+    expect(view.hotKeys()).toEqual(["Work, 9h, Day 5", "Work, 2h, Day 7"]);
+    await act(async () => rows[1].click());
+    expect(view.centre()).toBe("10hlogged this week");
+    await act(async () => rows[0].click());
     expect(view.centre()).toBe("1hNo activity");
-    // A tap anywhere outside the blocks clears it.
+    // Another day switches the panel and keeps the pin.
+    await tap(20, 100);
+    expect(panel.querySelector("b")?.textContent).toBe("Day 5");
+    expect(view.centre()).toBe("1hNo activity");
+    // The picked day again, or an empty day, closes the panel and ends the pin.
+    await tap(20, 100);
+    expect(panel.classList.contains("is-open")).toBe(false);
+    expect(view.centre()).toBe("10hlogged this week");
+    // The collapsing panel keeps the last day's rows (no blank mid-exit), inert.
+    expect(panel.querySelector("b")?.textContent).toBe("Day 5");
+    await tap(20, 100);
+    await tap(70, 100);
+    expect(panel.classList.contains("is-open")).toBe(false);
+    // Close ends the panel and its pin.
+    await tap(20, 100);
+    await act(async () => panel.querySelector<HTMLButtonElement>(".df-day-pick-row")!.click());
+    expect(view.centre()).toBe("9hWork");
+    await act(async () => panel.querySelector<HTMLButtonElement>('button[aria-label="Close Day 5"]')!.click());
+    expect(panel.classList.contains("is-open")).toBe(false);
+    expect(view.centre()).toBe("10hlogged this week");
+    // A pointer down outside the card ends both; one inside the panel does not.
+    await tap(20, 100);
+    await act(async () => panel.querySelector<HTMLButtonElement>(".df-day-pick-row")!.click());
+    await pointer(panel, "pointerdown", 0, 0, "touch");
+    expect(view.centre()).toBe("9hWork");
     await pointer(document.body, "pointerdown", 600, 600, "touch");
-    expect(view.container.querySelector(".df-wblocks")?.classList.contains("has-hot")).toBe(false);
-    // A touch the page takes for a scroll (pointercancel) traces nothing.
-    await pointer(list, "pointerdown", 20, 199, "touch");
-    await pointer(list, "pointercancel", 20, 199, "touch");
-    await pointer(list, "pointerup", 20, 199, "touch");
+    expect(panel.classList.contains("is-open")).toBe(false);
     expect(view.centre()).toBe("10hlogged this week");
-    // A tap past the last column, beyond the slop of any day, traces nothing.
-    await pointer(list, "pointerdown", 400, 100, "touch");
-    await pointer(list, "pointerup", 400, 100, "touch");
-    expect(view.centre()).toBe("10hlogged this week");
+    // A touch the page takes for a scroll (pointercancel) picks nothing.
+    await pointer(list, "pointerdown", 20, 100, "touch");
+    await pointer(list, "pointercancel", 20, 100, "touch");
+    await pointer(list, "pointerup", 20, 100, "touch");
+    expect(panel.classList.contains("is-open")).toBe(false);
     await act(async () => view.root.unmount());
   });
 
-  it("pins an activation that does not move focus, cleared by a pointer down outside or Escape (review 1)", async () => {
+  it("ends a pin made without focus, and the day panel, on Escape anywhere (review 2)", async () => {
+    const view = await mount(week());
+    const list = view.container.querySelector(".df-wblocks")!;
+    await pointer(list, "pointerdown", 20, 100, "touch");
+    await pointer(list, "pointerup", 20, 100, "touch");
+    await act(async () => view.container.querySelector<HTMLButtonElement>(".df-day-pick-row")!.click());
+    expect(view.centre()).toBe("9hWork");
+    expect(document.activeElement).toBe(document.body);
+    await act(async () => {
+      document.body.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, key: "Escape" }));
+    });
+    expect(view.centre()).toBe("10hlogged this week");
+    expect(view.container.querySelector(".df-day-pick")?.classList.contains("is-open")).toBe(false);
+    await act(async () => view.root.unmount());
+  });
+
+  it("ignores a touch whose report data changed before it was released (review 3)", async () => {
+    const view = await mount(week());
+    const list = () => view.container.querySelector(".df-wblocks")!;
+    await pointer(list(), "pointerdown", 20, 100, "touch");
+    await view.rerender(week(true, slices.map((slice) => ({ ...slice }))));
+    await pointer(list(), "pointerup", 20, 100, "touch");
+    expect(view.container.querySelector(".df-day-pick")?.classList.contains("is-open")).toBe(false);
+    // A fresh touch on the new data works.
+    await pointer(list(), "pointerdown", 20, 100, "touch");
+    await pointer(list(), "pointerup", 20, 100, "touch");
+    expect(view.container.querySelector(".df-day-pick")?.classList.contains("is-open")).toBe(true);
+    // New data closes an open panel too.
+    await view.rerender(week(true, slices.map((slice) => ({ ...slice }))));
+    expect(view.container.querySelector(".df-day-pick")?.classList.contains("is-open")).toBe(false);
+    await act(async () => view.root.unmount());
+  });
+
+  it("pins an activation that does not move focus (VoiceOver), cleared by a pointer down outside or Escape (review 1)", async () => {
     const view = await mount(week());
     const work = view.container.querySelector<HTMLButtonElement>('button[aria-label="Work, 9h, Day 5"]')!;
     await act(async () => work.click());
@@ -293,20 +361,21 @@ describe("Reports blocks and Where it went", () => {
     await act(async () => view.root.unmount());
   });
 
-  it("finds the block under a finger from its day, but under a mouse only on the block (hit targets, review 3)", async () => {
+  it("finds a day under a finger and a block under a mouse, 2 px either way (hit targets, review 3, 4)", async () => {
     const view = await mount(week());
     const list = view.container.querySelector<HTMLElement>(".df-wblocks")!;
     // Day 7's column spans x 100–144; its blocks are 3 px slivers at y 197–200 and 187–190.
-    expect(traceBlockAt(list, 141, 20, true)).toBe("work");
-    expect(traceBlockAt(list, 146, 199, true)).toBe("uncategorized");
-    // Nearer the empty Day 8 (x 150–194), or on it, a finger is on a day without blocks.
-    expect(traceBlockAt(list, 148, 199, true)).toBeNull();
-    expect(traceBlockAt(list, 151, 199, true)).toBeNull();
-    expect(traceBlockAt(list, 141, 20, false)).toBeNull();
-    expect(traceBlockAt(list, 141, 191.5, false)).toBe("work");
-    expect(traceBlockAt(list, 146, 199, false)).toBeNull();
-    // The drawn blocks never take pointers themselves.
-    expect([...view.container.querySelectorAll("[data-trace-day]")]).toHaveLength(7);
+    expect(traceDayAt(list, 120, 20)).toBe("d7");
+    expect(traceDayAt(list, 147, 199)).toBe("d7");
+    // Nearer the empty Day 8 (x 150–194), or on it, a finger is on Day 8.
+    expect(traceDayAt(list, 148, 199)).toBe("d8");
+    expect(traceDayAt(list, 400, 100)).toBeNull();
+    // A mouse is on a block only within 2 px of it, vertically and horizontally.
+    expect(traceBlockAt(list, 141, 20)).toBeNull();
+    expect(traceBlockAt(list, 141, 191.5)).toBe("work");
+    expect(traceBlockAt(list, 141, 192.5)).toBeNull();
+    expect(traceBlockAt(list, 146, 199)).toBe("uncategorized");
+    expect(traceBlockAt(list, 147, 199)).toBeNull();
     await act(async () => view.root.unmount());
   });
 

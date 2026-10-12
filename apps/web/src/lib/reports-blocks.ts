@@ -132,6 +132,8 @@ export type ReportBlocksDay = {
   totalSeconds: number;
   accessibleName: string;
   blocks: ReportBlocksBlock[];
+  /** Every activity that day, drawn or too small to draw: the touch day panel lists them all. */
+  activities: Omit<ReportBlocksBlock, "height">[];
 };
 export type ReportBlocksModel = { layout: "week" | "month"; leadingBlanks: number; days: ReportBlocksDay[] };
 
@@ -169,6 +171,7 @@ export function reportBlocksModel(
       isToday: isTodayKey(day, report.capturedNow),
       totalSeconds: logged,
       accessibleName: `${day.label}: ${formatDuration(logged)} logged${parts.length ? `, ${parts.join(", ")}` : ""}`,
+      activities: named.map(({ id, name, color, seconds }) => ({ id, name, color, seconds })),
       blocks: named.flatMap((activity, activityIndex) =>
         heights[activityIndex]
           ? [{ id: activity.id, name: activity.name, color: activity.color, seconds: activity.seconds, height: stackHeightCss(heights[activityIndex], kept, sizing.height, sizing.gap) }]

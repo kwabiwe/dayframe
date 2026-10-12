@@ -113,6 +113,12 @@ describe("Reports staging feedback I1–I3", () => {
     // The day column or month cell is the hit area, never the 2–3 px block (review 3).
     expect(rule(".df-tblock")).toContain("pointer-events: none");
     expect(panelSource).toContain("{...pointerProps}");
+    // Touch picks a day; its activities are 44 px rows in a panel that collapses at once under
+    // Reduce Motion (review 3).
+    expect(rule(".df-day-pick-row")).toContain("min-height: 44px");
+    expect(rule(".df-day-pick-close")).toContain("height: 44px");
+    expect(styles).toMatch(/@media \(prefers-reduced-motion: reduce\) \{\s*\.df-day-pick \{\s*transition: none;/);
+    expect(panelSource).toContain("inert={!pickedDay}");
     expect(rule(".df-tblock:focus-visible")).toContain("outline: 2px solid var(--focus)");
     expect(rule(".df-tblock:focus-visible")).toContain("outline-offset: -2px");
     expect(rule(".df-wblocks.has-hot .df-tblock,\n.df-month.has-hot .df-tblock")).toContain("opacity: 0.22");
