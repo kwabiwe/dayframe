@@ -3,6 +3,7 @@ import { dateTimeLocal, dateTimeLocalInputToIso } from "@/lib/format";
 import {
   calculateCalendarClickCreateSlot,
   calculateCalendarDraftAnchorGeometry,
+  calendarCreateGhostGeometry,
   calendarCreateLimitMinutes,
   calendarCreateMinuteIsFuture,
   calendarCreatePointerSequenceAccepted,
@@ -258,20 +259,59 @@ describe("Calendar create stops at now (owner decision 12 Oct 2026, option B)", 
 
   it("holds a drag range at the limit in either direction and keeps the 5-minute steps below it", () => {
     const axis = { endHour: 24, startHour: 0 };
-    // No limit: unchanged behaviour.
+    // No limit: unchanged behaviour (main's axis-end rule included).
     expect(calendarDragCreateRange({ ...axis, anchorMinutes: 600, currentMinutes: 700 }))
-      .toEqual({ startMinutes: 600, endMinutes: 700 });
+      .toEqual({ startMinutes: 600, endMinutes: 700, heldAtLimit: false });
+    expect(calendarDragCreateRange({ ...axis, anchorMinutes: 1440, currentMinutes: 1440 }))
+      .toEqual({ startMinutes: 1435, endMinutes: 1440, heldAtLimit: false });
     // Past → future: the end stops at now.
     expect(calendarDragCreateRange({ ...axis, anchorMinutes: 600, currentMinutes: 900, limitMinutes: 637 }))
-      .toEqual({ startMinutes: 600, endMinutes: 637 });
+      .toEqual({ startMinutes: 600, endMinutes: 637, heldAtLimit: true });
     // Dragging upward from a press that rounded past now.
     expect(calendarDragCreateRange({ ...axis, anchorMinutes: 640, currentMinutes: 600, limitMinutes: 637 }))
-      .toEqual({ startMinutes: 600, endMinutes: 637 });
-    // Shorter than one step at the limit: a 5-minute range ending at now.
-    expect(calendarDragCreateRange({ ...axis, anchorMinutes: 635, currentMinutes: 700, limitMinutes: 637 }))
-      .toEqual({ startMinutes: 632, endMinutes: 637 });
+      .toEqual({ startMinutes: 600, endMinutes: 637, heldAtLimit: true });
     expect(calendarDragCreateRange({ ...axis, anchorMinutes: 0, currentMinutes: 30, limitMinutes: 2 }))
-      .toEqual({ startMinutes: 0, endMinutes: 2 });
+      .toEqual({ startMinutes: 0, endMinutes: 2, heldAtLimit: true });
+    expect(calendarDragCreateRange({ ...axis, anchorMinutes: 600, currentMinutes: 620, limitMinutes: 637 }))
+      .toEqual({ startMinutes: 600, endMinutes: 620, heldAtLimit: false });
+  });
+
+  it("keeps the start on the 5-minute grid when a full step no longer fits before now (Codex r1 on #369)", () => {
+    const axis = { endHour: 24, startHour: 0 };
+    // Now 10:37, press snapped to 10:35: 10:35–10:37, never 10:32–10:37.
+    expect(calendarDragCreateRange({ ...axis, anchorMinutes: 635, currentMinutes: 700, limitMinutes: 637 }))
+      .toEqual({ startMinutes: 635, endMinutes: 637, heldAtLimit: true });
+    // Now exactly on a step (10:35): a full step ending at now.
+    expect(calendarDragCreateRange({ ...axis, anchorMinutes: 640, currentMinutes: 700, limitMinutes: 635 }))
+      .toEqual({ startMinutes: 630, endMinutes: 635, heldAtLimit: true });
+    for (let limit = 1; limit < 24 * 60; limit += 1) {
+      for (const [anchor, current] of [[limit - 3, limit + 40], [limit + 5, limit + 10], [limit - 1, limit - 1], [limit - 40, limit + 2]]) {
+        const range = calendarDragCreateRange({
+          ...axis,
+          anchorMinutes: Math.round(anchor / 5) * 5,
+          currentMinutes: Math.round(current / 5) * 5,
+          limitMinutes: limit
+        });
+        expect(range.startMinutes % 5).toBe(0);
+        expect(range.endMinutes).toBeLessThanOrEqual(limit);
+        expect(range.endMinutes - range.startMinutes).toBeGreaterThanOrEqual(1);
+      }
+    }
+  });
+
+  it("never draws the ghost past the now line, growing a too-short ghost upward instead (Codex r1 on #369)", () => {
+    const axis = { rowHeight: 64, startHour: 0 };
+    const nowLineY = (12 * 60 / 60) * 64;
+    // 11:55 → 12:00 at default zoom: the 12px minimum used to reach 774.7px, past the line at 768px.
+    const held = calendarCreateGhostGeometry({ ...axis, endMinutes: 720, heldAtLimit: true, startMinutes: 715 });
+    expect(held.height).toBe(12);
+    expect(held.top + held.height).toBeLessThanOrEqual(nowLineY);
+    expect(held.top + held.height + 2).toBe(nowLineY);
+    // A tall held ghost keeps its true geometry; past ghosts keep the old downward minimum.
+    expect(calendarCreateGhostGeometry({ ...axis, endMinutes: 720, heldAtLimit: true, startMinutes: 660 }))
+      .toEqual({ height: 62, top: 704 });
+    expect(calendarCreateGhostGeometry({ ...axis, endMinutes: 545, heldAtLimit: false, startMinutes: 540 }))
+      .toEqual({ height: 12, top: 576 });
   });
 
   it("creates a dragged range ending where the ghost stops, and nothing that starts at or after now", () => {

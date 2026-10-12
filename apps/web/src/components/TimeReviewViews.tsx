@@ -72,13 +72,14 @@ import type {
 import {
   calculateCalendarClickCreateSlot,
   calculateCalendarDraftAnchorGeometry,
+  calendarCreateGhostGeometry,
   calendarCreateLimitMinutes,
   calendarCreateMinuteIsFuture,
   calendarCreatePointerSequenceAccepted,
   calendarDragCreateRange,
+  calendarDragCreateSeconds,
   calendarDragCreateSlot,
   calendarDragMinutesAt,
-  calendarDragRangeSeconds,
   calendarPointHitsSemanticBlock,
   calendarPointerMatchesConsumed,
   calendarPointerMinutesAt,
@@ -644,7 +645,14 @@ export function CalendarReview({
   const [resizeError, setResizeError] = useState<string | null>(null);
   const [resizeTip, setResizeTip] = useState<{ flip: boolean; label: string; x: number; y: number } | null>(null);
   // Drag on empty time: the day body owns the pointer (capture) from press to release.
-  const [createGhost, setCreateGhost] = useState<{ dayKey: string; endMinutes: number; startMinutes: number } | null>(null);
+  // `nowMs`: the displayed now the range was clamped against; `heldAtLimit`: it ends at that now.
+  const [createGhost, setCreateGhost] = useState<{
+    dayKey: string;
+    endMinutes: number;
+    heldAtLimit: boolean;
+    nowMs: number;
+    startMinutes: number;
+  } | null>(null);
   // Decided once at pointerdown against the layout at that moment: whether the press may become a
   // drag (it is outside every block's semantic time) and the 5-minute anchor it pressed on.
   // `future`: the press is at or after now, where no block can start — no ghost, a not-allowed
@@ -691,6 +699,7 @@ export function CalendarReview({
     anchorMinutes: number;
     dayKey: string;
     endMinutes: number;
+    nowMs: number;
     pointerId: number;
     startMinutes: number;
   } | null>(null);
@@ -1104,7 +1113,10 @@ export function CalendarReview({
       startHour: calendarHours.startHour
     };
     const dragAllowed = !dayBodyPointHitsSemanticBlock(dayBody, event.clientX, event.clientY);
-    const future = calendarCreateMinuteIsFuture({ day, minutes: calendarPointerMinutesAt(axis), now: new Date() });
+    // Decided against the now the Calendar shows (`capturedNow`: the now line and the
+    // not-allowed zone), never a fresher clock, so what the user sees and what release does agree.
+    // `capturedNow` never runs ahead of the real clock, so anything allowed here is in the past.
+    const future = calendarCreateMinuteIsFuture({ day, minutes: calendarPointerMinutesAt(axis), now: capturedNow });
     createPressRef.current = {
       anchorMinutes: calendarDragMinutesAt(axis),
       dragAllowed,
@@ -1132,22 +1144,26 @@ export function CalendarReview({
         anchorMinutes,
         dayKey: sequence.dayKey,
         endMinutes: anchorMinutes,
+        nowMs: capturedNow.getTime(),
         pointerId: event.pointerId,
         startMinutes: anchorMinutes
       };
       createDragRef.current = drag;
     }
-    // Held at now: the ghost stops at the now line, exactly where release will finish the block.
+    // Held at the displayed now: the ghost stops at the now line, exactly where release will
+    // finish the block.
     const range = calendarDragCreateRange({
       ...axis,
       anchorMinutes: drag.anchorMinutes,
       currentMinutes: calendarDragMinutesAt({ ...axis, clientY: event.clientY, dayBodyTop }),
-      limitMinutes: calendarCreateLimitMinutes(day, new Date())
+      limitMinutes: calendarCreateLimitMinutes(day, capturedNow)
     });
+    // Same range means the same now minute when held, so the ghost and the block still agree.
+    drag.nowMs = capturedNow.getTime();
     if (range.startMinutes === drag.startMinutes && range.endMinutes === drag.endMinutes && createGhost) return;
     drag.startMinutes = range.startMinutes;
     drag.endMinutes = range.endMinutes;
-    setCreateGhost({ dayKey: formatCalendarDateKey(day), ...range });
+    setCreateGhost({ dayKey: formatCalendarDateKey(day), nowMs: drag.nowMs, ...range });
   }
 
   function abortCalendarCreateDrag() {
@@ -1204,7 +1220,7 @@ export function CalendarReview({
       const slot = calendarDragCreateSlot({
         day,
         endMinutes: drag.endMinutes,
-        now: new Date(),
+        now: new Date(drag.nowMs),
         startMinutes: drag.startMinutes
       });
       if (slot) createCalendarDraft(day, slot);
@@ -1237,7 +1253,7 @@ export function CalendarReview({
       day,
       dayBodyRect,
       endHour: calendarHours.endHour,
-      now: new Date(),
+      now: capturedNow,
       rowHeight,
       startHour: calendarHours.startHour
     });
@@ -1449,19 +1465,33 @@ export function CalendarReview({
                   </Link>
                 );
               })}
-              {createGhost?.dayKey === formatCalendarDateKey(day) ? (
-                <div
-                  aria-hidden="true"
-                  className="calendar-create-ghost tabular"
-                  data-calendar-create-ghost
-                  style={{
-                    height: Math.max(12, ((createGhost.endMinutes - createGhost.startMinutes) / 60) * rowHeight - 2),
-                    top: ((createGhost.startMinutes - calendarHours.startHour * 60) / 60) * rowHeight
-                  }}
-                >
-                  {`${formatCalendarAxisMinutes(createGhost.startMinutes)}–${formatCalendarAxisMinutes(createGhost.endMinutes)} · ${formatDuration(calendarDragRangeSeconds(day, createGhost.startMinutes, createGhost.endMinutes) ?? 0)}`}
-                </div>
-              ) : null}
+              {createGhost?.dayKey === formatCalendarDateKey(day) ? (() => {
+                const geometry = calendarCreateGhostGeometry({
+                  endMinutes: createGhost.endMinutes,
+                  heldAtLimit: createGhost.heldAtLimit,
+                  rowHeight,
+                  startHour: calendarHours.startHour,
+                  startMinutes: createGhost.startMinutes
+                });
+                // The label's duration is the block release creates (DST-safe, ending at the
+                // displayed now when held there).
+                const seconds = calendarDragCreateSeconds({
+                  day,
+                  endMinutes: createGhost.endMinutes,
+                  now: new Date(createGhost.nowMs),
+                  startMinutes: createGhost.startMinutes
+                });
+                return (
+                  <div
+                    aria-hidden="true"
+                    className="calendar-create-ghost tabular"
+                    data-calendar-create-ghost
+                    style={geometry}
+                  >
+                    {`${formatCalendarAxisMinutes(createGhost.startMinutes)}–${formatCalendarAxisMinutes(createGhost.endMinutes)} · ${formatDuration(seconds)}`}
+                  </div>
+                );
+              })() : null}
               {visibleSelectedTarget?.kind === "create" && visibleSelectedTarget.dayKey === formatCalendarDateKey(day) ? (() => {
                 const geometry = calculateCalendarDraftAnchorGeometry({
                   day,

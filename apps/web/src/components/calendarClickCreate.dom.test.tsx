@@ -320,7 +320,8 @@ function renderCalendar(entries: TimeEntryRow[] = [], tags: Array<{
 }> = []) {
   return render(createElement(CalendarReview, {
     calendarHoursMode: "fullDay",
-    capturedNow: new Date("2026-08-02T12:00:00.000Z"),
+    // Late on the shown day in every time zone: Calendar creates only before the now it shows.
+    capturedNow: new Date(2026, 7, 2, 23, 0, 0, 0),
     categories: [],
     entries,
     onDeleteEntries: vi.fn(),
@@ -907,6 +908,68 @@ describe("Calendar create in future time (owner decision 12 Oct 2026, option B)"
     expect(document.querySelector("[data-calendar-create-ghost]")).toBeNull();
     await screen.findByTestId("calendar-compact-editor");
     expect(toast()).toBeNull();
+    await flushDocumentListeners();
+    await userEvent.click(screen.getByRole("button", { name: "Add block" }));
+    await waitFor(() => expect(runtime.createManualEntry).toHaveBeenCalledOnce());
+    expect(runtime.createManualEntry).toHaveBeenCalledWith(expect.objectContaining({
+      startedAt: new Date(2026, 7, 2, 11, 0).toISOString(),
+      stoppedAt: new Date(2026, 7, 2, 12, 0).toISOString()
+    }));
+  });
+
+  it("keeps a ghost that ends at now above the now line, even at its 12px minimum (Codex r1 on #369)", async () => {
+    const { today } = renderWeek();
+    pointTarget = today;
+    await act(async () => {
+      fireEvent.pointerDown(today, pointer(61, y(11 * 60 + 55)));
+      fireEvent.pointerMove(today, pointer(61, y(12 * 60 + 30)));
+    });
+    const ghost = document.querySelector<HTMLElement>("[data-calendar-create-ghost]");
+    expect(ghost?.textContent).toMatch(/^11:55–12:00 · 5m/);
+    const bottom = Number.parseFloat(ghost?.style.top ?? "") + Number.parseFloat(ghost?.style.height ?? "");
+    expect(bottom).toBeLessThanOrEqual(y(12 * 60));
+    expect(Number.parseFloat(ghost?.style.height ?? "")).toBe(12);
+    await act(async () => {
+      fireEvent.pointerUp(today, pointer(61, y(12 * 60 + 30)));
+    });
+    await screen.findByTestId("calendar-compact-editor");
+    await flushDocumentListeners();
+    await userEvent.click(screen.getByRole("button", { name: "Add block" }));
+    await waitFor(() => expect(runtime.createManualEntry).toHaveBeenCalledOnce());
+    expect(runtime.createManualEntry).toHaveBeenCalledWith(expect.objectContaining({
+      startedAt: new Date(2026, 7, 2, 11, 55).toISOString(),
+      stoppedAt: new Date(2026, 7, 2, 12, 0).toISOString()
+    }));
+  });
+
+  it("decides against the now line it shows, not a fresher clock (Codex r1 on #369)", async () => {
+    // The page last ticked at 12:00 (the line and the not-allowed zone are there); the clock says 12:20.
+    vi.setSystemTime(new Date(2026, 7, 2, 12, 20, 0, 0));
+    const { today } = renderWeek();
+    expect(today.querySelector<HTMLElement>("[data-calendar-future-zone]")?.style.top).toBe(`${y(12 * 60)}px`);
+
+    // A click below the shown line (where the cursor says not-allowed) opens nothing.
+    const zone = today.querySelector<HTMLElement>("[data-calendar-future-zone]") as HTMLElement;
+    pointTarget = zone;
+    await act(async () => {
+      fireEvent.pointerDown(zone, pointer(62, y(12 * 60 + 10)));
+      fireEvent.pointerUp(zone, pointer(62, y(12 * 60 + 10)));
+    });
+    await flushDocumentListeners();
+    expect(screen.queryByTestId("calendar-compact-editor")).toBeNull();
+    expect(toast()?.textContent).toBe(notice);
+
+    // A drag across it stops at the shown line and creates exactly that.
+    pointTarget = today;
+    await act(async () => {
+      fireEvent.pointerDown(today, pointer(63, y(11 * 60)));
+      fireEvent.pointerMove(today, pointer(63, y(12 * 60 + 15)));
+    });
+    expect(document.querySelector("[data-calendar-create-ghost]")?.textContent).toMatch(/^11:00–12:00 · 1h/);
+    await act(async () => {
+      fireEvent.pointerUp(today, pointer(63, y(12 * 60 + 15)));
+    });
+    await screen.findByTestId("calendar-compact-editor");
     await flushDocumentListeners();
     await userEvent.click(screen.getByRole("button", { name: "Add block" }));
     await waitFor(() => expect(runtime.createManualEntry).toHaveBeenCalledOnce());

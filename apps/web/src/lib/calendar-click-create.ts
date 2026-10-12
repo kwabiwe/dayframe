@@ -389,7 +389,11 @@ export function calendarDragMinutesAt({
  * The range a drag on empty Calendar time describes: from the press to the pointer, in either
  * direction, never shorter than one 5-minute step and never past the visible axis. `limitMinutes`
  * (see `calendarCreateLimitMinutes`) holds the range at now, so the ghost never runs into the
- * future and always matches what release creates.
+ * future and always matches what release creates. The start always stays on the 5-minute grid:
+ * when a full step no longer fits before the limit, the range starts at the last step before it
+ * and ends at the limit, so a block near now may be shorter than 5 minutes (at least 1). Main's
+ * axis-end rule (a full step ending at midnight) is the same rule with an on-grid limit.
+ * `heldAtLimit` says the end is now rather than a grid time.
  */
 export function calendarDragCreateRange({
   anchorMinutes,
@@ -404,20 +408,55 @@ export function calendarDragCreateRange({
   limitMinutes?: number;
   startHour: number;
 }) {
+  const step = calendarDragSnapMinutes;
   const lower = startHour * 60;
-  const upper = Math.max(lower, Math.min(endHour * 60, limitMinutes));
+  const axisUpper = endHour * 60;
+  const upper = Math.max(lower, Math.min(axisUpper, limitMinutes));
   const anchor = clamp(anchorMinutes, lower, upper);
   const current = clamp(currentMinutes, lower, upper);
   let startMinutes = Math.min(anchor, current);
   let endMinutes = Math.max(anchor, current);
-  if (endMinutes - startMinutes < calendarDragSnapMinutes) {
-    endMinutes = startMinutes + calendarDragSnapMinutes;
+  if (endMinutes - startMinutes < step) {
+    endMinutes = startMinutes + step;
     if (endMinutes > upper) {
       endMinutes = upper;
-      startMinutes = upper - calendarDragSnapMinutes;
+      // The last grid step strictly before the limit (the limit itself is now, or midnight).
+      startMinutes = Math.min(startMinutes, Math.ceil(upper / step) * step - step);
     }
   }
-  return { endMinutes: clamp(endMinutes, lower, upper), startMinutes: clamp(startMinutes, lower, upper) };
+  return {
+    endMinutes: clamp(endMinutes, lower, upper),
+    heldAtLimit: upper < axisUpper && endMinutes >= upper,
+    startMinutes: clamp(startMinutes, lower, upper)
+  };
+}
+
+export const calendarCreateGhostMinHeightPx = 12;
+
+/**
+ * Where the drag ghost draws. It keeps a 12px minimum so its label stays legible, growing down
+ * from the start as before — except when the range is held at now, where it grows upward from
+ * the now line instead, so the ghost never draws past now (its 2px gap above the line is kept).
+ */
+export function calendarCreateGhostGeometry({
+  endMinutes,
+  heldAtLimit,
+  rowHeight,
+  startHour,
+  startMinutes
+}: {
+  endMinutes: number;
+  heldAtLimit: boolean;
+  rowHeight: number;
+  startHour: number;
+  startMinutes: number;
+}) {
+  const top = ((startMinutes - startHour * 60) / 60) * rowHeight;
+  const span = ((endMinutes - startMinutes) / 60) * rowHeight;
+  const height = Math.max(calendarCreateGhostMinHeightPx, span - 2);
+  if (!heldAtLimit || height === span - 2) return { height, top };
+  const bottom = ((endMinutes - startHour * 60) / 60) * rowHeight - 2;
+  return { height, top: bottom - height };
 }
 
 /** Real elapsed seconds of a dragged local range (DST-safe); null if either bound is nonexistent. */
@@ -434,8 +473,9 @@ export function calendarDragRangeSeconds(day: Date, startMinutes: number, endMin
 }
 
 /**
- * ISO bounds for a dragged range; null when it starts in the future. The end is held at now
- * (floored to the minute, where the ghost stops).
+ * ISO bounds for a dragged range; null when it starts in the future. A range that reaches now
+ * (`endMinutes` at or past today's limit) ends at the exact current instant floored to the
+ * minute — never at a wall time, which on a DST fall-back day would pick the wrong 01:30.
  */
 export function calendarDragCreateSlot({
   day,
@@ -449,15 +489,40 @@ export function calendarDragCreateSlot({
   startMinutes: number;
 }) {
   const startedAt = isoForLocalDateMinutes(day, startMinutes);
-  const stoppedAtRaw = isoForLocalDateMinutes(day, Math.min(endMinutes, 24 * 60 - 1));
-  const stoppedAtMs = endMinutes >= 24 * 60
-    ? new Date(isoForLocalDateMinutes(day, 24 * 60 - 1) ?? "").getTime() + 60_000
-    : new Date(stoppedAtRaw ?? "").getTime();
-  if (!startedAt || !Number.isFinite(stoppedAtMs)) return null;
+  if (!startedAt) return null;
   const startedAtMs = new Date(startedAt).getTime();
   const nowMs = now.getTime();
-  if (startedAtMs >= nowMs) return null;
-  const endMs = Math.min(stoppedAtMs, floorToMinuteMs(nowMs));
+  if (!Number.isFinite(startedAtMs) || startedAtMs >= nowMs) return null;
+  const limitMinutes = calendarCreateLimitMinutes(day, now);
+  const nowFloorMs = floorToMinuteMs(nowMs);
+  let endMs = nowFloorMs;
+  if (limitMinutes >= 24 * 60 || endMinutes < limitMinutes) {
+    const stoppedAtMs = endMinutes >= 24 * 60
+      ? new Date(isoForLocalDateMinutes(day, 24 * 60 - 1) ?? "").getTime() + 60_000
+      : new Date(isoForLocalDateMinutes(day, endMinutes) ?? "").getTime();
+    if (!Number.isFinite(stoppedAtMs)) return null;
+    endMs = Math.min(stoppedAtMs, nowFloorMs);
+  }
   if (endMs - startedAtMs < 60_000) return null;
   return { startedAt, stoppedAt: new Date(endMs).toISOString() };
+}
+
+/**
+ * The duration the drag ghost labels: the block release creates (exact, DST-safe bounds, ending at
+ * the shown now when held there); the plain range when nothing would be created.
+ */
+export function calendarDragCreateSeconds({
+  day,
+  endMinutes,
+  now,
+  startMinutes
+}: {
+  day: Date;
+  endMinutes: number;
+  now: Date;
+  startMinutes: number;
+}) {
+  const slot = calendarDragCreateSlot({ day, endMinutes, now, startMinutes });
+  if (!slot) return calendarDragRangeSeconds(day, startMinutes, endMinutes) ?? 0;
+  return Math.round((new Date(slot.stoppedAt).getTime() - new Date(slot.startedAt).getTime()) / 1_000);
 }

@@ -2,6 +2,10 @@ import { afterAll, describe, expect, it } from "vitest";
 import {
   calculateCalendarClickCreateSlot,
   calculateCalendarDraftAnchorGeometry,
+  calendarCreateLimitMinutes,
+  calendarDragCreateRange,
+  calendarDragCreateSeconds,
+  calendarDragCreateSlot,
   calendarDragRangeSeconds
 } from "./calendar-click-create";
 import {
@@ -134,6 +138,30 @@ describe.each([
     expect(editedFinish.resolved.startedAt).toBe(fallStartIso);
     expect(editedFinish.resolved.stoppedAt).toBe(fallEditedStopIso);
     expect(editedFinish.durationSeconds).toBeGreaterThan(0);
+  });
+
+  it("ends a drag held at now on the exact instant at both 01:30s of the fall-back hour (Codex r1 on #369)", () => {
+    process.env.TZ = timezone;
+    const day = new Date(fallDate[0], fallDate[1], fallDate[2], 12);
+    // fallEditedStartIso is the first 01:30, fallEditedStopIso the second, an hour later.
+    for (const [nowIso, expectedSeconds] of [[fallEditedStartIso, 90 * 60], [fallEditedStopIso, 150 * 60]] as const) {
+      const now = new Date(nowIso);
+      const limitMinutes = calendarCreateLimitMinutes(day, now);
+      expect(limitMinutes).toBe(90);
+      const range = calendarDragCreateRange({
+        anchorMinutes: 0,
+        currentMinutes: 4 * 60,
+        endHour: 24,
+        limitMinutes,
+        startHour: 0
+      });
+      expect(range).toEqual({ startMinutes: 0, endMinutes: 90, heldAtLimit: true });
+      const slot = calendarDragCreateSlot({ day, endMinutes: range.endMinutes, now, startMinutes: range.startMinutes });
+      expect(slot?.stoppedAt).toBe(nowIso);
+      expect(durationSeconds(slot)).toBe(expectedSeconds);
+      // The ghost's label says the same duration.
+      expect(calendarDragCreateSeconds({ day, endMinutes: 90, now, startMinutes: 0 })).toBe(expectedSeconds);
+    }
   });
 
   it("preserves ordinary and midnight wall-clock output while holding a future Finish at now", () => {
