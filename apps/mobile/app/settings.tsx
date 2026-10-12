@@ -36,7 +36,7 @@ import {
 } from "react-native";
 import Reanimated from "react-native-reanimated";
 import { router, Stack, useFocusEffect, useLocalSearchParams, useNavigation } from "expo-router";
-import { SafeAreaView } from "react-native-safe-area-context";
+import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 import {
   SwipeDismissSheet,
   type SwipeDismissSheetHandle
@@ -137,6 +137,8 @@ import {
   settingsGeofenceKey
 } from "@/lib/settingsRefresh";
 import { readTodayBootstrapForSettings } from "@/lib/settingsSeed";
+import { beginRememberedSettingsRead, useRememberedSettingsState } from "@/lib/settingsRemembered";
+import { useContentSizedSheetKeyboard } from "@/lib/contentSizedSheetKeyboard";
 import { clampSettingsScrollOffset, settingsScrollNeedsClamp } from "@/lib/settingsScroll";
 import { BlocksNavHeader, usePreviousScreenLabel } from "@/components/BlocksNavHeader";
 import { BlocksConfirmHost, useBlocksConfirm, type BlocksConfirmRequest } from "@/components/blocks/BlocksConfirmSheet";
@@ -175,8 +177,9 @@ import type { DayframeMotionAuthorizationStatus } from "../modules/dayframe-moti
 import {
   discardReviewSyncIssue,
   getReviewSyncDiagnostics,
-  listReviewSyncDiagnosticMutations,
   listReviewSyncIssues,
+  readReviewSupportExportForOwner,
+  readReviewSyncStateForOwner,
   subscribeReviewSync,
   synchroniseReviewMutations,
   type ReviewSyncDiagnostics
@@ -337,6 +340,7 @@ function resolveStateAction<T>(action: SetStateAction<T>, current: T): T {
   return typeof action === "function" ? (action as (value: T) => T)(current) : action;
 }
 
+
 export default function SettingsScreen() {
   const reduceMotion = useReduceMotionPreference();
   const {
@@ -390,30 +394,30 @@ export default function SettingsScreen() {
   const [syncingQueue, setSyncingQueue] = useState(false);
   const [signingOut, setSigningOut] = useState(false);
   const [reviewSyncDiagnostics, setReviewSyncDiagnostics] =
-    useState<ReviewSyncDiagnostics | null>(null);
-  const [reviewSyncIssues, setReviewSyncIssues] = useState<
+    useRememberedSettingsState<ReviewSyncDiagnostics | null>("reviewSyncDiagnostics", null);
+  const [reviewSyncIssues, setReviewSyncIssues] = useRememberedSettingsState<
     Awaited<ReturnType<typeof listReviewSyncIssues>>
-  >([]);
-  const [timeEntrySyncDiagnostics, setTimeEntrySyncDiagnostics] = useState<
+  >("reviewSyncIssues", []);
+  const [timeEntrySyncDiagnostics, setTimeEntrySyncDiagnostics] = useRememberedSettingsState<
     Awaited<ReturnType<typeof getTimeEntryOutboxDiagnostics>> | null
-  >(null);
-  const [timeEntrySyncIssues, setTimeEntrySyncIssues] = useState<
+  >("timeEntrySyncDiagnostics", null);
+  const [timeEntrySyncIssues, setTimeEntrySyncIssues] = useRememberedSettingsState<
     Awaited<ReturnType<typeof listTimeEntrySyncIssues>>
-  >([]);
-  const [timerStopSyncDiagnostics, setTimerStopSyncDiagnostics] = useState<
+  >("timeEntrySyncIssues", []);
+  const [timerStopSyncDiagnostics, setTimerStopSyncDiagnostics] = useRememberedSettingsState<
     Awaited<ReturnType<typeof getTimerStopOutboxDiagnostics>> | null
-  >(null);
-  const [timerStopSyncIssues, setTimerStopSyncIssues] = useState<
+  >("timerStopSyncDiagnostics", null);
+  const [timerStopSyncIssues, setTimerStopSyncIssues] = useRememberedSettingsState<
     Awaited<ReturnType<typeof listTimerStopSyncIssues>>
-  >([]);
+  >("timerStopSyncIssues", []);
   const [locationInfoSheet, setLocationInfoSheet] = useState<"suggestions" | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   const [locationStatus, setLocationStatus] = useState(cachedSnapshot?.locationStatus ?? "Not requested");
   const [locationDiagnostics, setLocationDiagnostics] = useState<LocationVisitDiagnostics | null>(
     cachedSnapshot?.locationDiagnostics ?? null
   );
-  const [motionFitnessStatus, setMotionFitnessStatus] = useState<DayframeMotionAuthorizationStatus | null>(null);
-  const [nativeLocationStatus, setNativeLocationStatus] = useState<{
+  const [motionFitnessStatus, setMotionFitnessStatus] = useRememberedSettingsState<DayframeMotionAuthorizationStatus | null>("motionFitnessStatus", null);
+  const [nativeLocationStatus, setNativeLocationStatus] = useRememberedSettingsState<{
     authorizationStatus: string;
     accuracyAuthorization: string;
     locationServicesEnabled: boolean;
@@ -423,7 +427,7 @@ export default function SettingsScreen() {
     monitoringSignificantChanges: boolean;
     restoredForLocationRelaunch: boolean;
     nativeStoreErrorCode?: string | null;
-  } | null>(null);
+  } | null>("nativeLocationStatus", null);
   const [healthStatus, setHealthStatus] = useState<HealthImportStatus[]>(cachedSnapshot?.healthStatus ?? []);
   const [healthImportPreferences, setHealthImportPreferences] = useState<HealthImportPreferences | null>(
     cachedSnapshot?.healthImportPreferences ?? null
@@ -433,7 +437,7 @@ export default function SettingsScreen() {
   );
   // Settings › Apple Health: the last Sync now result (never cached).
   const [healthSyncNoteText, setHealthSyncNote] = useState<string | null>(null);
-  const [healthAccessGranted, setHealthAccessGranted] = useState<boolean | null>(null);
+  const [healthAccessGranted, setHealthAccessGranted] = useRememberedSettingsState<boolean | null>("healthAccessGranted", null);
   const [exportingHealthDebug, setExportingHealthDebug] = useState(false);
   const refreshes = useRef(createOwnerSyncCoalescer<void>());
   // I1: every Settings page paints from its cached snapshot first. Mount-time reads (SQLite and
@@ -528,32 +532,39 @@ export default function SettingsScreen() {
     });
   }, []);
 
+  // Each read is bound to the account it started for (settingsRemembered, Codex r3 on #355), and
+  // every account-scoped store is read for exactly that owner (Codex r4): the Review store keeps its
+  // own active account, which can differ from the app's while accounts reconcile.
   const refreshReviewDiagnostics = useCallback(async () => {
-    const [diagnostics, issues] = await Promise.all([
-      getReviewSyncDiagnostics(),
-      listReviewSyncIssues()
-    ]);
+    const startedFor = await beginRememberedSettingsRead();
+    if (!startedFor.owner) return;
+    const state = await readReviewSyncStateForOwner(startedFor.owner);
+    if (!state) return;
     // The store lists real rejections only; unknown outcomes are in diagnostics.waitingCount (I1).
-    setReviewSyncDiagnostics(diagnostics);
-    setReviewSyncIssues(splitReviewSyncIssues(issues).rejected);
+    setReviewSyncDiagnostics(state.diagnostics, startedFor);
+    setReviewSyncIssues(splitReviewSyncIssues(state.issues).rejected, startedFor);
   }, []);
 
   const refreshTimeEntryDiagnostics = useCallback(async () => {
+    const startedFor = await beginRememberedSettingsRead();
+    if (!startedFor.owner) return;
     const [diagnostics, issues] = await Promise.all([
-      getTimeEntryOutboxDiagnostics(),
-      listTimeEntrySyncIssues()
+      getTimeEntryOutboxDiagnostics(startedFor.owner),
+      listTimeEntrySyncIssues(startedFor.owner)
     ]);
-    setTimeEntrySyncDiagnostics(diagnostics);
-    setTimeEntrySyncIssues(issues);
+    setTimeEntrySyncDiagnostics(diagnostics, startedFor);
+    setTimeEntrySyncIssues(issues, startedFor);
   }, []);
 
   const refreshTimerStopDiagnostics = useCallback(async () => {
+    const startedFor = await beginRememberedSettingsRead();
+    if (!startedFor.owner) return;
     const [diagnostics, issues] = await Promise.all([
-      getTimerStopOutboxDiagnostics(),
-      listTimerStopSyncIssues()
+      getTimerStopOutboxDiagnostics(startedFor.owner),
+      listTimerStopSyncIssues(startedFor.owner)
     ]);
-    setTimerStopSyncDiagnostics(diagnostics);
-    setTimerStopSyncIssues(issues);
+    setTimerStopSyncDiagnostics(diagnostics, startedFor);
+    setTimerStopSyncIssues(issues, startedFor);
   }, []);
 
   // Queue reads: the latest one started wins (load() and the live subscription share the
@@ -719,19 +730,20 @@ export default function SettingsScreen() {
 
   // The evening Review reminder: this account's choice plus the iOS notification permission,
   // re-read whenever the app returns (the permission is changed in iOS Settings).
-  const [reviewNudge, setReviewNudge] = useState<ReviewNudgeState | null>(null);
-  const [nudgePermission, setNudgePermission] = useState<ReviewNudgePermission | null>(null);
+  const [reviewNudge, setReviewNudge] = useRememberedSettingsState<ReviewNudgeState | null>("reviewNudge", null);
+  const [nudgePermission, setNudgePermission] = useRememberedSettingsState<ReviewNudgePermission | null>("nudgePermission", null);
   const [nudgeBusy, setNudgeBusy] = useState(false);
   const refreshReviewNudge = useCallback(async () => {
-    const owner = await readActiveMobileAccount();
+    const startedFor = await beginRememberedSettingsRead();
+    const owner = startedFor.owner;
     if (!owner) return;
     const [state, permission] = await Promise.all([
       readReviewNudgeState(owner),
       import("@/lib/reviewNudgeNative").then(({ readReviewNudgePermission }) => readReviewNudgePermission()).catch(() => null)
     ]);
     if (!mobileAccountOwnersEqual(owner, await readActiveMobileAccount())) return;
-    setReviewNudge(state);
-    setNudgePermission(permission);
+    setReviewNudge(state, startedFor);
+    setNudgePermission(permission, startedFor);
   }, []);
   useEffect(() => {
     if (!transitionReady) return;
@@ -746,10 +758,11 @@ export default function SettingsScreen() {
     if (nudgeBusy) return;
     setNudgeBusy(true);
     try {
-      const owner = await readActiveMobileAccount();
+      const startedFor = await beginRememberedSettingsRead();
+      const owner = startedFor.owner;
       if (!owner) return;
       const next = await change(owner);
-      if (mobileAccountOwnersEqual(owner, await readActiveMobileAccount())) setReviewNudge(next);
+      if (mobileAccountOwnersEqual(owner, await readActiveMobileAccount())) setReviewNudge(next, startedFor);
     } catch {
       Alert.alert("Evening reminder", "The reminder couldn't be changed. Try again.");
     } finally {
@@ -763,11 +776,12 @@ export default function SettingsScreen() {
       return;
     }
     // iOS asks once; after that the choice lives in iPhone Settings.
+    const startedFor = await beginRememberedSettingsRead();
     const nativeModule = await import("@/lib/reviewNudgeNative").catch(() => null);
     if (!nativeModule) return;
     let permission = await nativeModule.readReviewNudgePermission().catch(() => "denied" as const);
     if (permission === "undetermined") permission = await nativeModule.requestReviewNudgePermission().catch(() => "denied" as const);
-    setNudgePermission(permission);
+    setNudgePermission(permission, startedFor);
     if (permission !== "granted") return;
     // Plans from the latest count the reminder heard (with its time), never this page's cache.
     await changeReviewNudge((owner) => setReviewNudgeEnabled(owner, true));
@@ -776,7 +790,10 @@ export default function SettingsScreen() {
   // Motion & Fitness is changed in iOS Settings: re-read it whenever the app returns.
   useEffect(() => {
     if (!transitionReady) return;
-    const refreshMotion = () => void readMotionFitnessStatus().then(setMotionFitnessStatus);
+    const refreshMotion = () => void (async () => {
+      const startedFor = await beginRememberedSettingsRead();
+      setMotionFitnessStatus(await readMotionFitnessStatus(), startedFor);
+    })().catch(() => undefined);
     refreshMotion();
     const subscription = AppState.addEventListener("change", (state) => { if (state === "active") refreshMotion(); });
     return () => subscription.remove();
@@ -815,7 +832,10 @@ export default function SettingsScreen() {
         ]));
       });
     // iOS never reveals read access, so "Connected" means Dayframe's access request was accepted.
-    isHealthKitAutomaticSyncEnabled().then(setHealthAccessGranted).catch(() => undefined);
+    void (async () => {
+      const startedFor = await beginRememberedSettingsRead();
+      setHealthAccessGranted(await isHealthKitAutomaticSyncEnabled(), startedFor);
+    })().catch(() => undefined);
     getHealthImportPreferences().then(setHealthImportPreferencesAndCache).catch(() => undefined);
     void healthMappingWriter.refresh();
   }, [
@@ -877,18 +897,18 @@ export default function SettingsScreen() {
   // live permission (canAskAgain) decides; it is read again whenever the diagnostics change and when
   // Dayframe returns to the foreground (coming back from iOS Settings), without waiting for the
   // network.
-  const [iosSettingsNeeded, setIosSettingsNeeded] = useState(false);
+  const [iosSettingsNeeded, setIosSettingsNeeded] = useRememberedSettingsState("iosSettingsNeeded", false);
   // Only the newest read publishes (an older answer arriving late never overwrites it), and none
   // after Settings closes.
   const [iosSettingsRead] = useState(createLatestRead);
   useEffect(() => () => iosSettingsRead.invalidate(), [iosSettingsRead]);
   const readIosSettingsNeed = useCallback(() => {
     const read = iosSettingsRead.begin();
-    locationAccessNeedsIosSettings()
-      .then((needed) => {
-        if (iosSettingsRead.isLatest(read)) setIosSettingsNeeded(needed);
-      })
-      .catch(() => undefined);
+    void (async () => {
+      const startedFor = await beginRememberedSettingsRead();
+      const needed = await locationAccessNeedsIosSettings();
+      if (iosSettingsRead.isLatest(read)) setIosSettingsNeeded(needed, startedFor);
+    })().catch(() => undefined);
   }, [iosSettingsRead]);
   useEffect(() => {
     if (transitionReady) readIosSettingsNeed();
@@ -914,9 +934,12 @@ export default function SettingsScreen() {
     : null;
   const settingsTitle = settingsSectionTitle(settingsSection);
   const backLabel = usePreviousScreenLabel() ?? settingsBackLabel(settingsSection, blocksNavOrigin(params.from));
-  const categoryCount = data?.categories.length ?? 0;
   const workspaceLabel = (data ?? todaySeed)?.workspace?.name ?? "Default workspace";
-  const pinnedCategoryCount = (data?.categories ?? []).filter((category) => category.isPinned).length;
+  // The index's Activities summary draws from Today's copy until Settings' own data lands (display
+  // only, like the account card; the Activities page itself still waits for `data`).
+  const shownCategories = (data ?? todaySeed)?.categories ?? [];
+  const categoryCount = shownCategories.length;
+  const pinnedCategoryCount = shownCategories.filter((category) => category.isPinned).length;
   // Settings › Your day: shown at once, saved to the account a moment after the last tap.
   const [goalDraft, setGoalDraft] = useState<TimeGoals | null>(null);
   // The account whose goals are on screen (Today is told only about the same account).
@@ -992,13 +1015,17 @@ export default function SettingsScreen() {
           : "Off";
   // Settings › Apple Health: one plain access line (the notes behind it stay in the details).
   const healthConnected = healthAccessGranted === true || healthPermissionStatus?.status === "available";
+  // Known once this account has read its Apple Health access on any Settings page (remembered).
+  const healthAccessKnown = healthAccessGranted !== null || healthPermissionStatus !== undefined;
   const healthAccessSummary = healthAvailability?.status === "unavailable"
     ? "Apple Health isn't available on this iPhone"
     : healthConnected
       ? "Connected"
-      : healthPermissionStatus
-        ? "Allow Dayframe in the Health app"
-        : "Not connected yet";
+      : !healthAccessKnown
+        ? "Checking…"
+        : healthPermissionStatus
+          ? "Allow Dayframe in the Health app"
+          : "Not connected yet";
   const [healthPickerKey, setHealthPickerKey] = useState<HealthImportPreferenceKey | null>(null);
   const [healthDetailKey, setHealthDetailKey] = useState<HealthImportPreferenceKey | null>(null);
   const [activityEditor, setActivityEditor] = useState<{ activity: Category | null } | null>(null);
@@ -1401,18 +1428,21 @@ export default function SettingsScreen() {
 
   async function exportQueueDiagnostics() {
     try {
+      // Every account-scoped section is read for this one owner (Codex r6 on #355): the Review and
+      // Location stores keep their own active account, which can differ while accounts reconcile.
       const owner = await readActiveMobileAccount();
+      if (!owner) return;
       const [
-        latestQueue, latestReviewDiagnostics, reviewMutations, location, native, health, manual,
+        latestQueue, review, location, native, health, manual,
         timeEntryDiagnostics, timeEntryIssues, timerStopDiagnostics, timerStopIssues
       ] = await Promise.all([
-        readQueue(), getReviewSyncDiagnostics(), listReviewSyncDiagnosticMutations(),
-        getLocationStoreDiagnostics(), getNativeLocationIntelligenceStatus().catch(() => null),
-        getHealthImportStatus(), getLastManualSyncResult(),
-        getTimeEntryOutboxDiagnostics(), listTimeEntrySyncIssues(),
-        getTimerStopOutboxDiagnostics(), listTimerStopSyncIssues()
+        readQueue(owner), readReviewSupportExportForOwner(owner),
+        getLocationStoreDiagnostics(owner), getNativeLocationIntelligenceStatus().catch(() => null),
+        getHealthImportStatus(), getLastManualSyncResult(owner),
+        getTimeEntryOutboxDiagnostics(owner), listTimeEntrySyncIssues(owner),
+        getTimerStopOutboxDiagnostics(owner), listTimerStopSyncIssues(owner)
       ]);
-      if (!owner || !mobileAccountOwnersEqual(owner, await readActiveMobileAccount())) return;
+      if (!mobileAccountOwnersEqual(owner, await readActiveMobileAccount())) return;
       const snapshot = {
         exportedAt: new Date().toISOString(),
         build: mobileBuildDiagnostics(),
@@ -1420,7 +1450,8 @@ export default function SettingsScreen() {
         owner: { workspace: owner.workspaceId.slice(0, 8), user: owner.userId.slice(0, 8) },
         activity: supportQueueDiagnostics(latestQueue),
         health,
-        reviewSync: { diagnostics: latestReviewDiagnostics, mutations: reviewMutations },
+        // Null while the Review store still holds another account.
+        reviewSync: review ? { diagnostics: review.diagnostics, mutations: review.mutations } : null,
         // Rejected Edits/Deletes and Stops: status codes and errors left the Sync help screen, so
         // support still gets them here (IDs shortened as elsewhere).
         timeEntrySync: {
@@ -1453,7 +1484,7 @@ export default function SettingsScreen() {
           monitoringSignificantChanges: native.monitoringSignificantChanges,
           nativeStoreErrorCode: native.nativeStoreErrorCode
         } : null,
-        presentationCache: getLocationReviewEvidencePrefetchDiagnostics(),
+        presentationCache: getLocationReviewEvidencePrefetchDiagnostics(owner),
         manualSync: manual,
         selectedDate: data?.dateRange?.selectedDate ?? null,
         timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone
@@ -1497,7 +1528,8 @@ export default function SettingsScreen() {
 
   async function handleMotionFitnessAction() {
     if (motionFitness?.action?.kind === "request") {
-      setMotionFitnessStatus(await requestMotionFitness());
+      const startedFor = await beginRememberedSettingsRead();
+      setMotionFitnessStatus(await requestMotionFitness(), startedFor);
     } else if (motionFitness?.action?.kind === "open_settings") {
       await Linking.openSettings();
     }
@@ -1556,7 +1588,8 @@ export default function SettingsScreen() {
 
   async function refreshLocationV2Diagnostics() {
     try {
-      const owner = await readActiveMobileAccount();
+      const startedFor = await beginRememberedSettingsRead();
+      const owner = startedFor.owner;
       const session = owner ? await readOwnedAuthenticatedSessionSnapshot(owner) : null;
       const [, native] = await Promise.all([
         getLocationStoreDiagnostics(),
@@ -1564,7 +1597,7 @@ export default function SettingsScreen() {
       ]);
       if (!mobileAccountOwnersEqual(owner, await readActiveMobileAccount())) return;
       if (session?.status === "authenticated" && !isAuthenticatedSessionSnapshotCurrent(session.snapshot)) return;
-      setNativeLocationStatus(native);
+      setNativeLocationStatus(native, startedFor);
     } catch (error) {
       await recordLocationStoreError(error);
     }
@@ -1655,9 +1688,10 @@ export default function SettingsScreen() {
 
   async function connectAppleHealth() {
     try {
+      const startedFor = await beginRememberedSettingsRead();
       const permissions = await requestHealthKitPermissions();
       updateHealthStatus(permissions);
-      if (permissions.status === "available") setHealthAccessGranted(true);
+      if (permissions.status === "available") setHealthAccessGranted(true, startedFor);
       if (permissions.status === "available") {
         const preferences = healthImportPreferences ?? await getHealthImportPreferences();
         const kinds = healthAutomaticCategoryKinds(preferences);
@@ -2013,7 +2047,7 @@ export default function SettingsScreen() {
                   title="Activities"
                   value={String(categoryCount)}
                 />
-                <SettingsActivityStrip activities={data?.categories ?? []} theme={theme} />
+                <SettingsActivityStrip activities={shownCategories} theme={theme} />
               </SettingsBlockGroup>
 
               <SettingsBlockGroup
@@ -2643,14 +2677,20 @@ export default function SettingsScreen() {
                 title="Apple Health"
               >
                 <SettingsBlockRow
-                  control={healthConnected ? undefined : (
-                    <SettingsPillButton
-                      accessibilityLabel="Connect Apple Health"
-                      disabled={healthAvailability?.status === "unavailable"}
-                      label="Connect"
-                      onPress={() => void connectAppleHealth()}
-                      theme={theme}
-                    />
+                  control={(
+                    // The slot keeps its height either way, so the row never shifts when Connect
+                    // goes; Connect shows only once access is known to be missing (owner, 12 Oct).
+                    <View style={styles.settingsControlSlot}>
+                      {healthAccessKnown && !healthConnected ? (
+                        <SettingsPillButton
+                          accessibilityLabel="Connect Apple Health"
+                          disabled={healthAvailability?.status === "unavailable"}
+                          label="Connect"
+                          onPress={() => void connectAppleHealth()}
+                          theme={theme}
+                        />
+                      ) : null}
+                    </View>
                   )}
                   divider={false}
                   subtitle={healthAccessSummary}
@@ -2834,6 +2874,24 @@ function HealthTypeSheet({
   const sheetRef = useRef<SwipeDismissSheetHandle>(null);
   const { height: windowHeight } = useWindowDimensions();
   const mappedCategory = categories.find((category) => category.id === mapping.categoryId) ?? null;
+  // The sheet is as tall as its rows (owner, 12 Oct: no empty space under them), at most 85 % of
+  // the screen. The keyboard is its bottom occlusion boundary (useContentSizedSheetKeyboard): a
+  // keyboard-high space at the sheet's foot moves with the keyboard (Reduce Motion: at once), and
+  // `keyboardInset` drives SwipeDismissSheet's keyboard hand-off, released only once the keyboard
+  // has gone and the space has settled. A focused Name is scrolled into view whenever the layout
+  // settles with the keyboard up (Codex r1–r2 on #355).
+  const bottomInset = useSafeAreaInsets().bottom;
+  const scrollRef = useRef<ScrollView>(null);
+  const nameFocused = useRef(false);
+  const sheetKeyboard = useContentSizedSheetKeyboard({
+    bottomInset,
+    onReveal: () => {
+      if (!nameFocused.current || closingRef.current) return;
+      scrollRef.current?.scrollToEnd({ animated: !reduceMotion });
+    },
+    reduceMotion,
+    windowHeight
+  });
   // Name is a draft saved once: when editing ends, or when the sheet starts to leave by any way
   // (Close, backdrop, swipe, accessibility escape), so a focused edit is never lost.
   const [nameDraft, setNameDraftState] = useState(mapping.description ?? "");
@@ -2890,6 +2948,7 @@ function HealthTypeSheet({
           backdropAccessibilityLabel={`Close ${label}`}
           backdropStyle={styles.sheetBackdrop}
           handleStyle={styles.sheetHandle}
+          keyboardInset={sheetKeyboard.keyboardInset}
           onDismiss={onClose}
           onDismissStart={() => {
             // Leaving: save the Name draft once and make the sheet inert, so a late tap (Logs as)
@@ -2899,17 +2958,20 @@ function HealthTypeSheet({
               setClosing(true);
               commitName();
             }
+            Keyboard.dismiss();
           }}
+          // A drag first hands over to the keyboard: it is dismissed, and the sheet only follows
+          // the finger once the keyboard has gone (SwipeDismissSheet's keyboard hand-off).
+          onGestureStart={() => Keyboard.dismiss()}
           reduceMotion={reduceMotion}
-          // Tall like the activity editor, so the scroll view can lift Name above the keyboard.
-          style={[styles.activeEditSheet, { height: Math.round(windowHeight * 0.7) }]}
+          style={[styles.activeEditSheet, { maxHeight: sheetKeyboard.sheetMaxHeight }]}
           visible
         >
           <View
             accessibilityElementsHidden={closing}
             importantForAccessibility={closing ? "no-hide-descendants" : "auto"}
             pointerEvents={closing ? "none" : "auto"}
-            style={{ flex: 1, minHeight: 0 }}
+            style={{ flexShrink: 1, minHeight: 0 }}
           >
           <View style={styles.sheetHeader}>
             <View style={{ flex: 1, minWidth: 0 }}>
@@ -2929,10 +2991,11 @@ function HealthTypeSheet({
             </Pressable>
           </View>
           <ScrollView
-            automaticallyAdjustKeyboardInsets
-            contentContainerStyle={styles.activeEditContent}
+            ref={scrollRef}
+            contentContainerStyle={[styles.activeEditContent, { paddingBottom: sheetKeyboard.contentPaddingBottom }]}
             keyboardDismissMode="on-drag"
             keyboardShouldPersistTaps="handled"
+            onLayout={sheetKeyboard.onScrollLayout}
             style={styles.activeEditScroller}
           >
             <SettingsBlockGroup
@@ -3005,7 +3068,15 @@ function HealthTypeSheet({
                     placeholderTextColor={theme.textSecondary}
                     returnKeyType="done"
                     testID={`health-name-${healthKey}`}
+                    onBlur={() => {
+                      nameFocused.current = false;
+                    }}
                     onEndEditing={commitName}
+                    onFocus={() => {
+                      nameFocused.current = true;
+                      // Focus moved here with the keyboard already up.
+                      sheetKeyboard.revealWhenSettled();
+                    }}
                     value={nameDraft}
                   />
                 </Reanimated.View>
@@ -3013,6 +3084,8 @@ function HealthTypeSheet({
             </SettingsBlockGroup>
           </ScrollView>
           </View>
+          {/* The keyboard's space at the sheet's foot (zero while it is down). */}
+          <Reanimated.View pointerEvents="none" style={[{ flexShrink: 0 }, sheetKeyboard.keyboardSpaceStyle]} testID={`health-keyboard-space-${healthKey}`} />
           {children}
         </SwipeDismissSheet>
       </View>

@@ -57,6 +57,17 @@ describe("Location real SQLite drain results",()=>{
   expect(db.prepare("select count(*) n from location_account_context").get()!.n).toBe(1);
   expect(db.prepare("select count(*) n from location_engine_state").get()!.n).toBe(1);
  });
+ it("reads the support export's location numbers only for the requested owner (Codex r6 on #355)",async()=>{
+  await seed(2);
+  expect((await store.getLocationStoreDiagnostics(owner)).pendingEvidenceCount).toBe(2);
+  const other={userId:"91000000-0000-4000-8000-000000000003",workspaceId:owner.workspaceId};
+  // The store holds this owner: another account's export reads none of its evidence.
+  expect(await store.getLocationStoreDiagnostics(other)).toMatchObject({accountConfigured:false,pendingEvidenceCount:0,outboxCount:0,segmentCount:0,lastAcceptedEvidenceAt:null});
+  // The app moves to the other account before the location store follows: still nothing of the first account's.
+  mocks.owner={...other};
+  expect(await store.getLocationStoreDiagnostics(other)).toMatchObject({accountConfigured:false,pendingEvidenceCount:0});
+  expect(await store.getLocationStoreDiagnostics(owner)).toMatchObject({accountConfigured:false,pendingEvidenceCount:0});
+ });
  it("does not attribute legacy unscoped replay errors to the active owner",async()=>{
   db.exec("insert into location_store_metadata(key,value,updated_at) values('last_server_replay_error','old account failure','2026-08-01'),('last_upload_error','older failure','2026-08-01')");
   expect(await store.getLocationStoreDiagnostics()).toMatchObject({lastServerReplayError:null,lastUploadError:null});

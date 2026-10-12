@@ -9,6 +9,7 @@ import {
 import {
   mobileAccountKey,
   mobileAccountOwnersEqual,
+  type MobileAccountOwner,
   readActiveMobileAccount,
 } from "./mobileAccount";
 import {
@@ -40,8 +41,9 @@ import { createOwnerSyncCoalescer } from "./ownerSyncCoalescer";
 
 const manualPasses = createOwnerSyncCoalescer<ManualSyncResult>();
 let lastManualResult: { key: string; result: ManualSyncResult } | null = null;
-export async function getLastManualSyncResult() {
-  const owner = await readActiveMobileAccount();
+/** The last manual sync of `owner` (default: the active account), never another account's. */
+export async function getLastManualSyncResult(forOwner?: MobileAccountOwner) {
+  const owner = forOwner ?? await readActiveMobileAccount();
   return owner && lastManualResult?.key === mobileAccountKey(owner)
     ? lastManualResult.result
     : null;

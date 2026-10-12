@@ -1,10 +1,11 @@
 // Blocks parity step 6a-1: the Settings page's grouped lists (prototype ios.html openSettings).
 // Presentational only: the Settings screen owns data, permissions and every action.
-import type { ReactNode } from "react";
-import { Pressable, StyleSheet, Switch, Text, View } from "react-native";
+import { useEffect, useRef, useState, type ReactNode } from "react";
+import { Animated, Easing, Pressable, StyleSheet, Text, View } from "react-native";
 import { DAYFRAME_APP_ICONS, DAYFRAME_BLOCKS, blockColorsFor } from "@dayframe/shared";
 import { ActivityIcon, DayframeIcon } from "../icons/DayframeIcon";
 import type { MobileTheme } from "../../lib/mobileTheme";
+import { useReduceMotionPreference } from "../../lib/motion";
 import { mobileTextProps } from "../../lib/mobileTypography";
 import { recordMobileLayout, recordMobileTextLayout, type MobileAccessibilityDiagnostic } from "../accessibility/diagnostics";
 
@@ -253,7 +254,12 @@ export function SettingsPillButton({
   );
 }
 
-/** The prototype switch: green when on. */
+/**
+ * The prototype switch: a drawn 51×31 track, green when on, with a white 27-point thumb. Drawn
+ * rather than UISwitch so it sits centred in its row and looks the same on every iOS version
+ * (owner, 12 Oct: the iOS 26 switch rendered higher than its frame on device). VoiceOver reads it
+ * as a switch with its on/off state; the thumb slides in 160 ms, or jumps under Reduce Motion.
+ */
 export function SettingsSwitch({
   accessibilityHint,
   disabled = false,
@@ -269,20 +275,52 @@ export function SettingsSwitch({
   theme: Theme;
   value: boolean;
 }) {
+  const reduceMotion = useReduceMotionPreference();
+  const [position] = useState(() => new Animated.Value(value ? 1 : 0));
+  const shownValue = useRef(value);
+  useEffect(() => {
+    if (reduceMotion) {
+      // Jumps. Also settles a slide that Reduce Motion turning on stopped half-way (Codex r1).
+      shownValue.current = value;
+      position.setValue(value ? 1 : 0);
+      return;
+    }
+    // Only a change moves the thumb (the first render already shows it in place).
+    if (shownValue.current === value) return;
+    shownValue.current = value;
+    const animation = Animated.timing(position, {
+      duration: SWITCH_SLIDE_MS,
+      easing: Easing.out(Easing.cubic),
+      toValue: value ? 1 : 0,
+      useNativeDriver: true
+    });
+    animation.start();
+    return () => animation.stop();
+  }, [position, reduceMotion, value]);
   return (
-    <Switch
+    <Pressable
       accessibilityHint={accessibilityHint}
       accessibilityLabel={label}
+      accessibilityRole="switch"
+      accessibilityState={{ checked: value, disabled }}
       disabled={disabled}
-      ios_backgroundColor={theme.surfaceMuted}
-      onValueChange={onValueChange}
-      style={{ flexShrink: 0 }}
-      thumbColor="#FFFFFF"
-      trackColor={{ false: theme.surfaceMuted, true: theme.success }}
-      value={value}
-    />
+      hitSlop={{ bottom: 7, left: 4, right: 4, top: 7 }}
+      onPress={() => onValueChange(!value)}
+      style={[blockStyles.switchTrack, { backgroundColor: value ? theme.success : theme.borderStrong, opacity: disabled ? 0.45 : 1 }]}
+      testID={`switch-${label}`}
+    >
+      <Animated.View
+        style={[
+          blockStyles.switchThumb,
+          { transform: [{ translateX: position.interpolate({ inputRange: [0, 1], outputRange: [0, SWITCH_TRAVEL] }) }] }
+        ]}
+      />
+    </Pressable>
   );
 }
+
+const SWITCH_SLIDE_MS = 160;
+const SWITCH_TRAVEL = 20;
 
 /** − value + with 44-point targets (36-point circles plus slop). */
 export function SettingsStepper({
@@ -467,5 +505,16 @@ const blockStyles = StyleSheet.create({
   stepper: { alignItems: "center", flexDirection: "row", flexShrink: 0, gap: 6 },
   stepValue: { fontVariant: ["tabular-nums"], minWidth: 40, textAlign: "center" },
   strip: { flexDirection: "row", flexWrap: "wrap", gap: 6, paddingBottom: 14, paddingHorizontal: 16, paddingTop: 4 },
-  stripBlock: { alignItems: "center", borderRadius: 9, height: 30, justifyContent: "center", width: 30 }
+  stripBlock: { alignItems: "center", borderRadius: 9, height: 30, justifyContent: "center", width: 30 },
+  switchThumb: {
+    backgroundColor: "#FFFFFF",
+    borderRadius: 13.5,
+    height: 27,
+    shadowColor: "#000000",
+    shadowOffset: { height: 1, width: 0 },
+    shadowOpacity: 0.18,
+    shadowRadius: 2,
+    width: 27
+  },
+  switchTrack: { borderRadius: 15.5, flexShrink: 0, height: 31, justifyContent: "center", paddingHorizontal: 2, width: 51 }
 });

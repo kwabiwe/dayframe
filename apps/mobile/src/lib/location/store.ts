@@ -1452,8 +1452,9 @@ async function deleteRetainedLocationEvidenceUnsafe() {
   return { deletedCount };
 }
 
-export async function getLocationStoreDiagnostics(): Promise<LocationStoreDiagnostics> {
-  const current = await currentContext();
+/** With `owner`, only that account's location data is read (nothing when the store holds another). */
+export async function getLocationStoreDiagnostics(owner?: MobileAccountOwner): Promise<LocationStoreDiagnostics> {
+  const current = owner ? await currentContextForOwner(owner) : await currentContext();
   const diagnosticSession = current ? await readOwnedAuthenticatedSessionSnapshot(current.context) : null;
   const db = await database();
   const counts = current

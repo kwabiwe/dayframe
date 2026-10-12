@@ -54,7 +54,7 @@ export function BlocksNavHeader({
         testID={backTestID}
       >
         <Svg accessibilityElementsHidden height={22} viewBox="0 0 24 24" width={22}>
-          <Path d="M15 5 8 12l7 7" fill="none" stroke={theme.accent} strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.3} />
+          <Path d="M15 5 8 12l7 7" fill="none" stroke={theme.accentText} strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.3} />
         </Svg>
         <Text {...mobileTextProps("control")} numberOfLines={1} style={[styles.blocksNavBackText, { color: theme.accentText }]}>
           {backLabel}

@@ -9,6 +9,9 @@ vi.mock("react", async () => {
 vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
 
 vi.mock("react-native", () => ({
+  AccessibilityInfo: { addEventListener: () => ({ remove() {} }), isReduceMotionEnabled: async () => true },
+  Animated: { Value: class { setValue() {} interpolate() { return 0; } }, View: "AnimatedView", timing: () => ({ start() {}, stop() {} }) },
+  Easing: { cubic: () => 0, out: (easing: unknown) => easing },
   Alert: { alert: vi.fn() },
   Keyboard: { addListener: () => ({ remove() {} }) },
   Platform: { OS: "ios" },

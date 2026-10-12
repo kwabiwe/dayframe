@@ -41,13 +41,18 @@ type InFlightEvidenceRequest = {
 
 const inFlightEvidenceRequests = new Map<string, InFlightEvidenceRequest>();
 let lastEvidenceCacheWriteMilliseconds = Number.NEGATIVE_INFINITY;
-let prefetchDiagnostics: PrefetchDiagnostics = {
+const EMPTY_PREFETCH_DIAGNOSTICS: PrefetchDiagnostics = {
   attempted: 0,
   completed: 0,
   stopped: 0,
   idleStopped: 0,
   lastOutcome: "idle"
 };
+let prefetchDiagnostics: PrefetchDiagnostics = { ...EMPTY_PREFETCH_DIAGNOSTICS };
+// The account the prefetch counters describe: they start over when a prefetch starts for another
+// one, and a run for an earlier account never adds to them (Codex r6 on #355).
+let prefetchDiagnosticsOwnerKey: string | null = null;
+const prefetchOwnerKey = (owner: { workspaceId: string; userId: string }) => `${owner.workspaceId}:${owner.userId}`;
 
 export async function readLocationReviewEvidence(
   input: EvidenceOwner
@@ -95,6 +100,7 @@ export function createLocationReviewEvidencePrefetcher() {
   let generation = 0;
   let controller: AbortController | null = null;
   let attemptedForRun=false;
+  let runOwnerKey: string | null = null;
 
   return {
     start(input: {
@@ -110,6 +116,12 @@ export function createLocationReviewEvidencePrefetcher() {
       controller = new AbortController();
       attemptedForRun=false;
       const signal = controller.signal;
+      const ownerKey = prefetchOwnerKey(input);
+      if (prefetchDiagnosticsOwnerKey !== ownerKey) {
+        prefetchDiagnostics = { ...EMPTY_PREFETCH_DIAGNOSTICS };
+        prefetchDiagnosticsOwnerKey = ownerKey;
+      }
+      runOwnerKey = ownerKey;
       prefetchDiagnostics = {
         ...prefetchDiagnostics,
         lastOutcome: "running"
@@ -126,6 +138,7 @@ export function createLocationReviewEvidencePrefetcher() {
       }).then((outcome) => {
         if (generation !== ownerGeneration) return;
         controller=null;
+        if (prefetchDiagnosticsOwnerKey !== ownerKey) return;
         prefetchDiagnostics = {
           ...prefetchDiagnostics,
           lastOutcome: outcome
@@ -137,6 +150,7 @@ export function createLocationReviewEvidencePrefetcher() {
       const cancelled=Boolean(controller && attemptedForRun);
       controller?.abort();
       controller = null;
+      if (runOwnerKey !== null && runOwnerKey !== prefetchDiagnosticsOwnerKey) return;
       prefetchDiagnostics = {
         ...prefetchDiagnostics,
         stopped: prefetchDiagnostics.stopped + (cancelled?1:0),
@@ -147,7 +161,9 @@ export function createLocationReviewEvidencePrefetcher() {
   };
 }
 
-export function getLocationReviewEvidencePrefetchDiagnostics() {
+/** With `owner`, the counters only when they describe that account (empty otherwise). */
+export function getLocationReviewEvidencePrefetchDiagnostics(owner?: { workspaceId: string; userId: string }) {
+  if (owner && prefetchDiagnosticsOwnerKey !== prefetchOwnerKey(owner)) return { ...EMPTY_PREFETCH_DIAGNOSTICS };
   return { ...prefetchDiagnostics };
 }
 
@@ -175,20 +191,24 @@ async function runPrefetch(input: {
         return "complete";
       }
       input.onAttempt();
-      prefetchDiagnostics = {
-        ...prefetchDiagnostics,
-        attempted: prefetchDiagnostics.attempted + 1
-      };
+      if (prefetchDiagnosticsOwnerKey === prefetchOwnerKey(input)) {
+        prefetchDiagnostics = {
+          ...prefetchDiagnostics,
+          attempted: prefetchDiagnostics.attempted + 1
+        };
+      }
       await revalidateLocationReviewEvidence({
         reviewItemId,
         workspaceId: input.workspaceId,
         userId: input.userId,
         signal: input.signal
       });
-      prefetchDiagnostics = {
-        ...prefetchDiagnostics,
-        completed: prefetchDiagnostics.completed + 1
-      };
+      if (prefetchDiagnosticsOwnerKey === prefetchOwnerKey(input)) {
+        prefetchDiagnostics = {
+          ...prefetchDiagnostics,
+          completed: prefetchDiagnostics.completed + 1
+        };
+      }
       await delay(input.yieldMilliseconds ?? 250, input.signal);
     }
     return "complete";

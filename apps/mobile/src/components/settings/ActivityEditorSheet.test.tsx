@@ -9,6 +9,8 @@ vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
 
 const announce = vi.fn();
 vi.mock("react-native", () => ({
+  Animated: { Value: class { setValue() {} interpolate() { return 0; } }, View: "AnimatedView", timing: () => ({ start() {}, stop() {} }) },
+  Easing: { cubic: () => 0, out: (easing: unknown) => easing },
   AccessibilityInfo: { announceForAccessibility: (message: string) => announce(message) },
   Keyboard: { dismiss: vi.fn() },
   Modal: "Modal", Pressable: "Pressable", ScrollView: "ScrollView", Switch: "Switch",
@@ -28,6 +30,8 @@ vi.mock("../SwipeDismissSheet", async () => {
     })
   };
 });
+// The drawn switch reads Reduce Motion (settled at once here).
+vi.mock("../../lib/motion", () => ({ useReduceMotionPreference: () => true }));
 vi.mock("../../lib/mobileTypography", () => import("../../lib/mobileTypography"));
 
 const { ActivityEditorSheet } = await import("./ActivityEditorSheet");
@@ -68,7 +72,7 @@ function render(props: Partial<Parameters<typeof ActivityEditorSheet>[0]> = {}) 
   return { onArchive, onSave };
 }
 const byTestId = (id: string) => tree!.root.find((node: ReactTestInstance) => node.props.testID === id && typeof node.type === "string");
-const pinSwitch = () => tree!.root.find((node: ReactTestInstance) => node.props.accessibilityLabel === "Pin to quick start" && (node.type as unknown) === "Switch");
+const pinSwitch = () => tree!.root.find((node: ReactTestInstance) => node.props.label === "Pin to quick start" && (node.type as { name?: string }).name === "SettingsSwitch");
 
 describe("ActivityEditorSheet", () => {
   it("saves once however fast Create is tapped, pinned by default while quick start has room", () => {
@@ -83,7 +87,7 @@ describe("ActivityEditorSheet", () => {
   });
 
   it("shows the Counts toward goal switch from the activity and saves its value (UIA-043)", () => {
-    const goalSwitch = () => tree!.root.find((node: ReactTestInstance) => node.props.accessibilityLabel === "Counts toward goal" && (node.type as unknown) === "Switch");
+    const goalSwitch = () => tree!.root.find((node: ReactTestInstance) => node.props.label === "Counts toward goal" && (node.type as { name?: string }).name === "SettingsSwitch");
     const { onSave } = render({ activity: { id: "s", name: "Sleep", color: "blue-bold", countsTowardGoal: false } });
     expect(goalSwitch().props.value).toBe(false);
     expect(JSON.stringify(byTestId("activity-editor-goal-row").props.children)).toContain("When off, time here still shows in your day but doesn’t fill the goal.");
@@ -94,7 +98,7 @@ describe("ActivityEditorSheet", () => {
   });
 
   it("starts an activity without the flag counting, and a new one can be switched off", () => {
-    const goalSwitch = () => tree!.root.find((node: ReactTestInstance) => node.props.accessibilityLabel === "Counts toward goal" && (node.type as unknown) === "Switch");
+    const goalSwitch = () => tree!.root.find((node: ReactTestInstance) => node.props.label === "Counts toward goal" && (node.type as { name?: string }).name === "SettingsSwitch");
     const { onSave } = render();
     expect(goalSwitch().props.value).toBe(true);
     act(() => goalSwitch().props.onValueChange(false));
@@ -104,7 +108,7 @@ describe("ActivityEditorSheet", () => {
   });
 
   it("starts a new activity named Sleep switched off until the switch is touched", () => {
-    const goalSwitch = () => tree!.root.find((node: ReactTestInstance) => node.props.accessibilityLabel === "Counts toward goal" && (node.type as unknown) === "Switch");
+    const goalSwitch = () => tree!.root.find((node: ReactTestInstance) => node.props.label === "Counts toward goal" && (node.type as { name?: string }).name === "SettingsSwitch");
     const { onSave } = render();
     act(() => byTestId("activity-editor-name").props.onChangeText(" sleep "));
     expect(goalSwitch().props.value).toBe(false);
@@ -120,7 +124,7 @@ describe("ActivityEditorSheet", () => {
   });
 
   it("keeps an existing activity's stored switch whatever its name", () => {
-    const goalSwitch = () => tree!.root.find((node: ReactTestInstance) => node.props.accessibilityLabel === "Counts toward goal" && (node.type as unknown) === "Switch");
+    const goalSwitch = () => tree!.root.find((node: ReactTestInstance) => node.props.label === "Counts toward goal" && (node.type as { name?: string }).name === "SettingsSwitch");
     render({ activity: { id: "s", name: "Sleep", color: "blue-bold", countsTowardGoal: true } });
     expect(goalSwitch().props.value).toBe(true);
   });

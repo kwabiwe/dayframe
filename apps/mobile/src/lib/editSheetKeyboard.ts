@@ -75,3 +75,44 @@ export function keyboardLiftAnimationDuration({
   if (platform === "ios") return Math.max(1, clampedDuration);
   return Math.max(MIN_ANDROID_KEYBOARD_ANIMATION_DURATION, clampedDuration);
 }
+
+export type ContentSizedSheetKeyboardInput = {
+  bottomInset: number;
+  keyboardInset: number;
+  windowHeight: number;
+};
+
+export type ContentSizedSheetKeyboardLayout = {
+  contentPaddingBottom: number;
+  keyboardOpen: boolean;
+  keyboardSpace: number;
+  sheetMaxHeight: number;
+};
+
+const CONTENT_SIZED_SHEET_MAX_HEIGHT = 0.85;
+const CONTENT_SIZED_SHEET_KEYBOARD_GAP = 12;
+
+/**
+ * A sheet as tall as its rows (at most 85 % of the window), its rows ending over the bottom safe
+ * area. The keyboard is the sheet's own bottom occlusion boundary: a space at the foot of the sheet
+ * (`keyboardSpace`) keeps the last row 12 points above the keyboard, so the sheet grows upward
+ * inside the same cap and its scroll view (shrinking first) stays fully visible. The content
+ * padding never changes, so the space is the only thing that moves with the keyboard.
+ * `SwipeDismissSheet` keeps owning translation and the keyboard hand-off.
+ */
+export function contentSizedSheetKeyboardLayout({
+  bottomInset,
+  keyboardInset,
+  windowHeight
+}: ContentSizedSheetKeyboardInput): ContentSizedSheetKeyboardLayout {
+  const keyboardOpen = keyboardInset > 0.5;
+  const contentPaddingBottom = Math.max(bottomInset, CONTENT_SIZED_SHEET_KEYBOARD_GAP) + 4;
+  return {
+    contentPaddingBottom,
+    keyboardOpen,
+    keyboardSpace: keyboardOpen
+      ? Math.max(0, keyboardInset + CONTENT_SIZED_SHEET_KEYBOARD_GAP - contentPaddingBottom)
+      : 0,
+    sheetMaxHeight: Math.round(windowHeight * CONTENT_SIZED_SHEET_MAX_HEIGHT)
+  };
+}

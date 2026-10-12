@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  contentSizedSheetKeyboardLayout,
   editSheetKeyboardLayout,
   keyboardInsetFromScreenY,
   keyboardLiftAnimationDuration
@@ -92,5 +93,27 @@ describe("edit sheet keyboard layout", () => {
       eventDuration: 0,
       platform: "android"
     })).toBe(120);
+  });
+});
+
+describe("content-sized sheet keyboard layout (Apple Health type sheet, Codex r1 on #355)", () => {
+  it("keeps the sheet as tall as its rows over the bottom safe area while the keyboard is down", () => {
+    expect(contentSizedSheetKeyboardLayout({ bottomInset: 34, keyboardInset: 0, windowHeight: 844 })).toEqual({
+      contentPaddingBottom: 38,
+      keyboardOpen: false,
+      keyboardSpace: 0,
+      sheetMaxHeight: 717
+    });
+    expect(contentSizedSheetKeyboardLayout({ bottomInset: 0, keyboardInset: 0, windowHeight: 667 }).contentPaddingBottom).toBe(16);
+  });
+
+  it("holds a keyboard-high space inside the same 85 % cap while the keyboard is up", () => {
+    // The padding stays; the space keeps the last row 12 points above the keyboard.
+    expect(contentSizedSheetKeyboardLayout({ bottomInset: 34, keyboardInset: 336, windowHeight: 844 })).toEqual({
+      contentPaddingBottom: 38,
+      keyboardOpen: true,
+      keyboardSpace: 310,
+      sheetMaxHeight: 717
+    });
   });
 });
