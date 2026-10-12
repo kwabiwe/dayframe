@@ -72,7 +72,10 @@ export function ReportsBlocksPanel({
         <section aria-labelledby="df-report-blocks-title" className="df-card df-report-blocks">
           <div className="df-card-head">
             <h2 id="df-report-blocks-title">{blocks.layout === "month" ? "The month in blocks" : "The days in blocks"}</h2>
-            <span className="df-faint">Hover an activity to trace it</span>
+            <span className="df-faint">
+              <span className="df-hint-fine">Hover an activity to trace it</span>
+              <span className="df-hint-coarse">Tap an activity to trace it</span>
+            </span>
           </div>
           {blocks.layout === "week" ? (
             <ol
@@ -93,8 +96,11 @@ export function ReportsBlocksPanel({
                     ))}
                   </span>
                   <span aria-hidden="true" className="df-wb-label">
-                    <b>{day.label}</b>
-                    <small className="df-tnum">{formatDuration(day.coveredSeconds)}</small>
+                    <b>
+                      <span className="df-wb-label-full">{day.label}</span>
+                      <span className="df-wb-label-short">{day.shortLabel}</span>
+                    </b>
+                    <small className="df-tnum">{formatDuration(day.totalSeconds)}</small>
                   </span>
                 </li>
               ))}

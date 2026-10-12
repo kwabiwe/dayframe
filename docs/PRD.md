@@ -205,6 +205,7 @@ Timeline/review:
 - Calendar view with time blocks.
 - List view with chronological grouped entries and edit/delete/start-again actions.
 - Weekly grouped totals live in Reports (the Calendar Timesheet view was removed on 11 Oct 2026).
+- Web Reports shows one total everywhere (hero Total, Daily average, Best day, change against the period before, the day columns, the donut centre and the daily trend): time logged, every block counted in full, overlaps included, so a day can pass 24h (owner decision UIA-305, 12 Oct 2026). There is no second "covered"/"framed" total on web Reports; a footnote under the hero tiles says overlaps count in full only when the range has overlap. Days on goal keep goal coverage semantics.
 - Review inbox for suggestions, ignored items, and rule creation.
 
 Mobile Reports:

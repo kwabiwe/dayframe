@@ -93,7 +93,8 @@ Review this checklist before and after changes that touch Dayframe UI, timer beh
 - Overlaps of at least one minute save from web/mobile Add and Edit, Calendar resize, every explicit Review confirmation path, and offline Review replay. Warnings explain the automatically detected overlap without disabling the primary action; shorter intersections are boundary noise.
 - Boundary-touching entries have no overlap marker. Contained, partial, chained, cross-midnight, running, and dense overlaps show deterministic markers and Calendar geometry.
 - Calendar taps open the visible intended block in contained and dense collisions; enlarged hidden hit targets do not cover neighbouring blocks.
-- Timeline/History and web Reports distinguish Total logged from Time covered; mobile Reports shows summed Total only. Daily/weekly goals retain covered-time semantics.
+- Web and mobile Reports show one total: time logged, overlaps included (a day can pass 24h; UIA-305) — no second covered/framed total on web Reports. Daily/weekly goals retain covered-time semantics.
+- Web Reports head is one row (title with ‹ range ›, the range menu holding every preset and Custom…; Filter · Week · Month · Export on the right); the range menu fits a 390px viewport as a bottom sheet with 44px items; no coral on durations, bars, disclosures or pagination.
 - Automatic Health and location overlap decisions remain Review-first and explicitly say the user can still confirm.
 - Selected time blocks can be deleted from edit controls, context actions, or keyboard delete/backspace where supported.
 - Calendar zoom controls change time granularity without breaking layout.
