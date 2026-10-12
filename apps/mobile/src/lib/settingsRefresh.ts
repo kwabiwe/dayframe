@@ -23,14 +23,18 @@ export function shouldShowSettingsRefreshSpinner(trigger: SettingsRefreshTrigger
   return trigger === "pull";
 }
 
-/** Identity of the monitored places Settings last re-registered (I1: skip identical refreshes). */
-export function settingsGeofenceKey(
-  userId: string,
-  workspaceId: string,
-  places: ReadonlyArray<{ id: string; latitude?: number | null; longitude?: number | null; radiusMeters: number; priority?: number; loggingEnabled?: boolean; role?: string | null }>
-) {
-  return JSON.stringify([userId, workspaceId, places.map((place) => [
-    place.id, place.latitude ?? null, place.longitude ?? null, place.radiusMeters, place.priority ?? null,
-    place.loggingEnabled ?? null, place.role ?? null
-  ])]);
+/**
+ * Identity of the saved places Settings last handed to the location catalogue and region
+ * registration (I1: skip identical refreshes). Every field of every place is included, so a change
+ * to anything the catalogue consumes (name, role, default activity or description, radius, logging)
+ * refreshes it; only a byte-identical list is skipped.
+ */
+export function settingsGeofenceKey(userId: string, workspaceId: string, places: ReadonlyArray<object>) {
+  return JSON.stringify([userId, workspaceId, places.map(stableJson)]);
+}
+
+function stableJson(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(stableJson);
+  if (!value || typeof value !== "object") return value ?? null;
+  return Object.keys(value).sort().map((key) => [key, stableJson((value as Record<string, unknown>)[key])]);
 }

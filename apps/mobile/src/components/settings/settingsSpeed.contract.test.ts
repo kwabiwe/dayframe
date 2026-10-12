@@ -22,7 +22,10 @@ describe("Settings opens instantly (I1)", () => {
   });
 
   it("defers every mount-time read until the transition settles", () => {
-    expect(settings).toContain("InteractionManager.runAfterInteractions(() => setReady(true))");
+    // Behaviour of the gate itself: src/lib/settingsTransition.test.ts.
+    expect(settings).toContain("useEffect(() => afterSettingsTransition(gate(), () => setReady(true)), [gate]);");
+    expect(settings).toContain('navigation.addListener("transitionEnd"');
+    expect(settings).not.toContain("InteractionManager");
     for (const marker of [
       "if (!transitionReady) return;\n    void refreshQueueLatest();",
       "if (!transitionReady) return;\n    void refreshReviewNudge();",
@@ -44,11 +47,10 @@ describe("Settings opens instantly (I1)", () => {
     }
   });
 
-  it("refreshes on focus (open and Back) only after interactions, cancelled when the page leaves", () => {
+  it("refreshes on focus (open and Back) only after the transition, cancelled when the page leaves", () => {
     const focus = body.slice(body.indexOf("useFocusEffect("), body.indexOf("[load, reloadThemePreference, settingsSection]"));
-    expect(focus).toContain("InteractionManager.runAfterInteractions(");
-    expect(focus).toContain("return () => task.cancel();");
-    expect(focus.indexOf("runAfterInteractions")).toBeLessThan(focus.indexOf("load({ silent: true, trigger: \"focus\" })"));
+    expect(focus).toContain("return afterSettingsTransition(transitionGate(), () => {");
+    expect(focus.indexOf("afterSettingsTransition")).toBeLessThan(focus.indexOf("load({ silent: true, trigger: \"focus\" })"));
   });
 
   it("re-registers monitored places only when the set changes", () => {
@@ -58,5 +60,16 @@ describe("Settings opens instantly (I1)", () => {
 
   it("keeps the Back control free of async guards", () => {
     expect(body).toMatch(/function goBack\(\) \{\s*router\.back\(\);\s*\}/);
+  });
+});
+
+describe("Review Fix opens Sync help, which lists the same rejections (I1)", () => {
+  const review = readFileSync(resolve(__dirname, "../../../app/review.tsx"), "utf8");
+  it("routes Fix to Sync help and names it in the card copy", () => {
+    expect(review).toContain('router.push({ pathname: "/settings", params: { from: "review", section: "sync" } })');
+    expect(review).not.toContain("needs attention in Settings");
+    expect(review).toContain("Tap Fix above to choose what to do in Sync help.");
+    // Fix shows only for real rejections, the same set Sync help lists (listReviewSyncIssues).
+    expect(review).toContain("const attention = diagnostics.needsAttentionCount > 0;");
   });
 });

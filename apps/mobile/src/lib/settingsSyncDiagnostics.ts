@@ -64,7 +64,10 @@ export function syncHelpStatus(input: {
   timeEntryPendingCount: number;
   reviewWaitingCount: number;
   reviewSignInCount: number;
-  /** Review changes Dayframe is still checking on its own (splitReviewSyncIssues). */
+  /**
+   * Review changes still being checked that are not already in reviewWaitingCount. The store's
+   * diagnostics count them as waiting, so Settings leaves this at 0 (I1).
+   */
   reviewCheckingCount?: number;
 }): SyncHelpStatus {
   const count = nonNegativeCount;

@@ -30,5 +30,12 @@ describe("settingsGeofenceKey (I1)", () => {
     expect(settingsGeofenceKey("u", "w", [place])).toBe(settingsGeofenceKey("u", "w", [{ ...place }]));
     expect(settingsGeofenceKey("u", "w", [place])).not.toBe(settingsGeofenceKey("u", "w", [{ ...place, radiusMeters: 200 }]));
     expect(settingsGeofenceKey("u", "w", [place])).not.toBe(settingsGeofenceKey("u2", "w", [place]));
+    // Catalogue-only fields count too (Codex r1 #4).
+    const named = { ...place, name: "A", defaultCategoryId: "c1", defaultDescription: "d" };
+    for (const change of [{ name: "B" }, { defaultCategoryId: "c2" }, { defaultDescription: "e" }, { role: "work" }]) {
+      expect(settingsGeofenceKey("u", "w", [named])).not.toBe(settingsGeofenceKey("u", "w", [{ ...named, ...change }]));
+    }
+    // Key order alone doesn't change it.
+    expect(settingsGeofenceKey("u", "w", [{ b: 1, a: 2 }])).toBe(settingsGeofenceKey("u", "w", [{ a: 2, b: 1 }]));
   });
 });

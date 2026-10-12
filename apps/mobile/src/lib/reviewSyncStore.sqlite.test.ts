@@ -124,6 +124,52 @@ describe("Review real SQLite transactions", () => {
     expect(count("review_mutation_outbox")).toBe(1);
     expect(db.prepare("select state from review_mutation_outbox").get()!.state).toBe("retry_wait");
   });
+  it("restores an unknown outcome when its re-check is signed out (401): retryable, never discardable (I1)", async () => {
+    const data = bootstrap();
+    const clientMutationId = syntheticId(95);
+    await store.enqueueReviewMutation({ bootstrap: data, item: data.reviewItems[0], clientMutationId, mutation: { action: "accept" } });
+    const old = new Date(Date.now() - store.REVIEW_UNKNOWN_RECHECK_MS - 1000).toISOString();
+    db.exec(`update review_mutation_outbox set state='needs_attention',resolution_status='resolution_unknown',updated_at='${old}'`);
+    mocks.fetch.mockResolvedValue({ status: 401, json: async () => ({}) });
+    expect((await store.synchroniseReviewMutations()).outcome).toBe("authentication_required");
+    expect(db.prepare("select state,resolution_status from review_mutation_outbox").get()).toEqual({ state: "needs_attention", resolution_status: "resolution_unknown" });
+    expect(await store.listReviewSyncIssues()).toEqual([]);
+    expect(await store.discardReviewSyncIssue(clientMutationId)).toBe(false);
+    expect(count("review_mutation_outbox")).toBe(1);
+  });
+  it("restores an unknown outcome when its re-check is cancelled mid-request (I1)", async () => {
+    const data = bootstrap();
+    const clientMutationId = syntheticId(96);
+    await store.enqueueReviewMutation({ bootstrap: data, item: data.reviewItems[0], clientMutationId, mutation: { action: "accept" } });
+    const old = new Date(Date.now() - store.REVIEW_UNKNOWN_RECHECK_MS - 1000).toISOString();
+    db.exec(`update review_mutation_outbox set state='needs_attention',resolution_status='resolution_unknown',updated_at='${old}'`);
+    const abort = Object.assign(new Error("aborted"), { name: "AbortError" });
+    mocks.fetch.mockRejectedValue(abort);
+    expect((await store.synchroniseReviewMutations()).outcome).toBe("cancelled");
+    expect(db.prepare("select resolution_status from review_mutation_outbox").get()!.resolution_status).toBe("resolution_unknown");
+    expect(await store.discardReviewSyncIssue(clientMutationId)).toBe(false);
+    // A row left 'reconciling' by a crash is treated the same and repaired on the next pass.
+    db.exec("update review_mutation_outbox set resolution_status='reconciling'");
+    expect(await store.discardReviewSyncIssue(clientMutationId)).toBe(false);
+    expect((await store.getReviewSyncDiagnostics()).needsAttentionCount).toBe(0);
+  });
+  it("counts an unknown outcome as waiting with a re-check deadline, not attention (I1)", async () => {
+    const data = bootstrap();
+    const clientMutationId = syntheticId(97);
+    await store.enqueueReviewMutation({ bootstrap: data, item: data.reviewItems[0], clientMutationId, mutation: { action: "accept" } });
+    const updatedAt = "2026-10-12T10:00:00.000Z";
+    db.exec(`update review_mutation_outbox set state='needs_attention',resolution_status='resolution_unknown',updated_at='${updatedAt}'`);
+    const diagnostics = await store.getReviewSyncDiagnostics();
+    expect(diagnostics.needsAttentionCount).toBe(0);
+    expect(diagnostics.checkingCount).toBe(1);
+    expect(diagnostics.waitingCount).toBe(1);
+    expect(diagnostics.nextRetryAt).toBe(new Date(Date.parse(updatedAt) + store.REVIEW_UNKNOWN_RECHECK_MS).toISOString());
+    expect((await store.getReviewItemSyncStates()).get(data.reviewItems[0].id)?.state).toBe("retry_wait");
+    // A real rejection still needs attention.
+    db.exec("update review_mutation_outbox set resolution_status='resolution_conflict'");
+    expect((await store.getReviewSyncDiagnostics()).needsAttentionCount).toBe(1);
+    expect((await store.getReviewItemSyncStates()).get(data.reviewItems[0].id)?.state).toBe("needs_attention");
+  });
   it("treats session generation replacement separately from rejected authentication", async () => {
     const data = bootstrap();
     await store.enqueueReviewMutation({ bootstrap: data, item: data.reviewItems[0], clientMutationId: syntheticId(93), mutation: { action: "accept" } });

@@ -1,7 +1,8 @@
 import { readOwnedAuthenticatedSessionSnapshot, isAuthenticatedSessionSnapshotCurrent } from "@/lib/secure-session";
 import { mobileBuildDiagnostics } from "@/lib/mobileBuildDiagnostics";
 import { supportQueueDiagnostics } from "@/lib/supportSyncDiagnostics";
-import { readActiveMobileAccount, mobileAccountOwnersEqual, type MobileAccountOwner } from "@/lib/mobileAccount";
+import { getActiveMobileAccountSnapshot, readActiveMobileAccount, mobileAccountOwnersEqual, type MobileAccountOwner } from "@/lib/mobileAccount";
+import { afterSettingsTransition, type TransitionGate } from "@/lib/settingsTransition";
 import {
   REVIEW_NUDGE_MINUTES,
   formatReviewNudgeTime,
@@ -19,7 +20,6 @@ import {
   AccessibilityInfo,
   Alert,
   AppState,
-  InteractionManager,
   Keyboard,
   Linking,
   Modal,
@@ -35,7 +35,7 @@ import {
   useWindowDimensions
 } from "react-native";
 import Reanimated from "react-native-reanimated";
-import { router, Stack, useFocusEffect, useLocalSearchParams } from "expo-router";
+import { router, Stack, useFocusEffect, useLocalSearchParams, useNavigation } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
 import {
   SwipeDismissSheet,
@@ -294,13 +294,31 @@ function isSettingsHealthSnapshotFresh(now = Date.now()) {
 // I1: the last set of monitored places Settings re-registered this app session (cleared on sign-out).
 let lastSettingsGeofenceKey: string | null = null;
 
-/** True once the screen's push (or first) transition has settled (InteractionManager). */
-function useSettingsTransitionReady() {
+type TransitionEndNavigation = {
+  addListener: (type: "transitionEnd", listener: (event: { data?: { closing?: boolean } }) => void) => () => void;
+};
+
+/**
+ * The gate for this Settings screen: its native-stack opening `transitionEnd` (push, or reveal on
+ * Back), a timer fallback, and the account that scheduled the work (afterSettingsTransition).
+ */
+function useSettingsTransitionGate() {
+  const navigation = useNavigation() as unknown as TransitionEndNavigation;
+  return useCallback((): TransitionGate => {
+    const owner = getActiveMobileAccountSnapshot();
+    return {
+      subscribeTransitionEnd: (listener) => navigation.addListener("transitionEnd", (event) => {
+        if (!event.data?.closing) listener();
+      }),
+      isCurrent: () => mobileAccountOwnersEqual(owner, getActiveMobileAccountSnapshot())
+    };
+  }, [navigation]);
+}
+
+/** True once the screen's opening transition has ended (never set after unmount). */
+function useSettingsTransitionReady(gate: () => TransitionGate) {
   const [ready, setReady] = useState(false);
-  useEffect(() => {
-    const task = InteractionManager.runAfterInteractions(() => setReady(true));
-    return () => task.cancel();
-  }, []);
+  useEffect(() => afterSettingsTransition(gate(), () => setReady(true)), [gate]);
   return ready;
 }
 
@@ -349,7 +367,6 @@ export default function SettingsScreen() {
   const [reviewSyncIssues, setReviewSyncIssues] = useState<
     Awaited<ReturnType<typeof listReviewSyncIssues>>
   >([]);
-  const [reviewCheckingCount, setReviewCheckingCount] = useState(0);
   const [timeEntrySyncDiagnostics, setTimeEntrySyncDiagnostics] = useState<
     Awaited<ReturnType<typeof getTimeEntryOutboxDiagnostics>> | null
   >(null);
@@ -395,7 +412,8 @@ export default function SettingsScreen() {
   // I1: every Settings page paints from its cached snapshot first. Mount-time reads (SQLite and
   // AsyncStorage outboxes, native permission/HealthKit/geofence reads, the bootstrap refresh) start
   // only after the push transition settles, so they never hold the first frame or the Back gesture.
-  const transitionReady = useSettingsTransitionReady();
+  const transitionGate = useSettingsTransitionGate();
+  const transitionReady = useSettingsTransitionReady(transitionGate);
   const settingsScrollRef = useRef<ScrollView>(null);
   const settingsScrollOffsetRef = useRef(0);
   const settingsScrollContentHeightRef = useRef(0);
@@ -488,10 +506,9 @@ export default function SettingsScreen() {
       getReviewSyncDiagnostics(),
       listReviewSyncIssues()
     ]);
-    const { rejected, checkingCount } = splitReviewSyncIssues(issues);
+    // The store lists real rejections only; unknown outcomes are in diagnostics.waitingCount (I1).
     setReviewSyncDiagnostics(diagnostics);
-    setReviewSyncIssues(rejected);
-    setReviewCheckingCount(checkingCount);
+    setReviewSyncIssues(splitReviewSyncIssues(issues).rejected);
   }, []);
 
   const refreshTimeEntryDiagnostics = useCallback(async () => {
@@ -742,16 +759,15 @@ export default function SettingsScreen() {
     useCallback(() => {
       // Opening and coming Back both animate: the refresh waits until the transition has settled,
       // and a page left before then never starts one (I1).
-      const task = InteractionManager.runAfterInteractions(() => {
+      return afterSettingsTransition(transitionGate(), () => {
         void reloadThemePreference();
         // Activities always refreshes on open: pins are only counted from this visit's own data.
         if (!isSettingsSnapshotFresh() || settingsSection === "categories") void load({ silent: true, trigger: "focus" });
         if (settingsSection === "categories") void refreshArchivedActivities();
       });
-      return () => task.cancel();
       // refreshArchivedActivities only reads refs and stable setters.
       // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [load, reloadThemePreference, settingsSection])
+    }, [load, reloadThemePreference, settingsSection, transitionGate])
   );
 
   useEffect(() => {
@@ -1004,8 +1020,7 @@ export default function SettingsScreen() {
     timerStopPendingCount: timerStopSyncDiagnostics?.pendingCount ?? 0,
     timeEntryPendingCount: timeEntrySyncDiagnostics?.pendingCount ?? 0,
     reviewWaitingCount: reviewSyncDiagnostics?.waitingCount ?? 0,
-    reviewSignInCount: reviewSyncDiagnostics?.authenticationRequiredCount ?? 0,
-    reviewCheckingCount
+    reviewSignInCount: reviewSyncDiagnostics?.authenticationRequiredCount ?? 0
   });
   const syncNeedsAttention = syncStatus.kind === "attention";
 
