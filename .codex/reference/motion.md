@@ -231,7 +231,7 @@ First-paint drop-in:
 
 - Trigger: the first time the quick-start tiles appear in the app process.
 - Owner: `useDropIn` on an inner view of each tile; the tile's slot keeps its own layout transition. Tiles fall from 18 points below at 92 % scale with `land`, fading in over 160 ms, staggered 80 ms + 45 ms per tile.
-- Entrance/update/exit: once per process (`mosaicDroppedIn`); a later mount of Today, a refresh, hydration, an account switch or a tile pinned later shows tiles at rest (or with the existing pin fade). An interrupted drop-in settles at rest.
+- Entrance/update/exit: once per process (`mosaicDroppedIn`); a later mount of Today, a refresh, hydration, an account switch or a tile pinned later shows tiles at rest (or with the existing pin fade). An interrupted drop-in settles at rest, and so does one whose frames never run: each tile is forced to rest 900 ms after its delay (`DROP_IN_SETTLE_MS`) so it can never stay invisible. A tile pinned later fades in through its own `useTileFadeIn` (control duration; 90 ms under Reduce Motion), not the slot's entering animation, with the same safety net. Today drawn while the app isn't active (a location relaunch, or an `inactive` cold start, which then shows the tiles at rest without the drop-in — the conservative trade-off) plays neither. Trello 210 ("Switch to" tiles blank on a slow, Low Power Mode phone) is the reason for the safety net; its root cause is not proven (entrance never run while unseen is the leading theory; a missing layout width would also show an empty mosaic), so record the mosaic's measured width and tile count if it recurs.
 - Accessibility: Reduce Motion shows the tiles at rest at once.
 
 Block pull-to-refresh:
