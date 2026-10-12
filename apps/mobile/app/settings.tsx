@@ -65,7 +65,10 @@ import { setHapticsEnabled, useHapticsPreference } from "@/lib/haptics";
 import {
   DAYFRAME_PALETTE,
   DAYFRAME_APP_ICONS,
+  DAILY_GOAL_HOURS,
+  WEEKLY_GOAL_HOURS,
   blockColorsFor,
+  nextGoalMinutes,
   paletteColorFor,
   type DayframePaletteKey,
   type HealthAutoLogMapping,
@@ -198,9 +201,6 @@ import { createLatestRead, locationAccessAction, locationAccessLabels, locationS
 import { healthMappingWriter } from "@/lib/healthMappingOwner";
 
 type Category = MobileBootstrap["categories"][number];
-// Settings › Your day goal ranges (hours): daily in 1 h steps, weekly in 5 h steps.
-const DAILY_GOAL_HOURS = { min: 1, max: 14, step: 1 } as const;
-const WEEKLY_GOAL_HOURS = { min: 5, max: 80, step: 5 } as const;
 const GOAL_SAVE_DELAY_MS = 600;
 const ACCOUNT_CHANGED_NOTICE = "Your account changed, so nothing was changed.";
 const SIGN_IN_UNREADABLE_NOTICE = "Unlock your iPhone and try again.";
@@ -1037,7 +1037,7 @@ export default function SettingsScreen() {
     if (!data) return;
     const limits = kind === "daily" ? DAILY_GOAL_HOURS : WEEKLY_GOAL_HOURS;
     const current = { daily: dailyGoalHours, weekly: weeklyGoalHours };
-    const nextValue = Math.min(limits.max, Math.max(limits.min, current[kind] + direction * limits.step));
+    const nextValue = nextGoalMinutes(current[kind] * 60, direction, limits) / 60;
     if (nextValue === current[kind]) return;
     const next = { ...current, [kind]: nextValue };
     setGoalDraft(next);

@@ -1,32 +1,8 @@
 // UIA-309: Settings › Your day uses the iPhone's goal steppers (Blocks 6a-1): whole hours, saved to
 // the account a moment after the last tap; only the latest save settles the page.
 
-export const DAILY_GOAL_HOURS = { min: 1, max: 14, step: 1 } as const;
-export const WEEKLY_GOAL_HOURS = { min: 5, max: 80, step: 5 } as const;
+export { DAILY_GOAL_HOURS, WEEKLY_GOAL_HOURS, canStepGoal, nextGoalMinutes } from "@dayframe/shared";
 export const GOAL_SAVE_DELAY_MS = 600;
-
-type Limits = { min: number; max: number; step: number };
-
-/**
- * One stepper tap. A goal on the step grid moves by one step; one between steps (set elsewhere,
- * say 42 h a week) moves to the nearest step in that direction (45 h or 40 h). Clamped to the limits;
- * a goal outside them only steps back towards them.
- */
-export function nextGoalMinutes(minutes: number, direction: -1 | 1, limits: Limits) {
-  const hours = minutes / 60;
-  // A goal at or beyond a limit (set elsewhere, say 24 h a day) never steps further out, and the
-  // step never lands on the opposite side: Increase at 24 h does nothing; Decrease brings it in.
-  if (direction > 0 && hours >= limits.max) return minutes;
-  if (direction < 0 && hours <= limits.min) return minutes;
-  const next = direction > 0
-    ? Math.floor(hours / limits.step + 1e-9) * limits.step + limits.step
-    : Math.ceil(hours / limits.step - 1e-9) * limits.step - limits.step;
-  return Math.min(limits.max, Math.max(limits.min, next)) * 60;
-}
-
-export function canStepGoal(minutes: number, direction: -1 | 1, limits: Limits) {
-  return nextGoalMinutes(minutes, direction, limits) !== minutes;
-}
 
 export type TimeGoalMinutes = { dailyGoalMinutes: number; weeklyGoalMinutes: number };
 export type GoalField = keyof TimeGoalMinutes;

@@ -10065,6 +10065,15 @@ dialog.ui-dialog.df-palette {
   background: var(--surface-muted);
 }
 
+/* Goals over 14 h (up to 24 cells): tighter gaps and corners so the cells stay blocks, not dots. */
+.df-goal-cells[data-dense] {
+  gap: 3px;
+}
+
+.df-goal-cells[data-dense] > .df-goal-cell {
+  border-radius: 3px;
+}
+
 .df-goal-cell > span {
   height: 100%;
   transition: width 220ms cubic-bezier(0.22, 1, 0.36, 1);
