@@ -28,7 +28,7 @@ import {
   weekGoalDays,
 } from "../../lib/reportsBlocks";
 import { REPORT_TEXT_CAP, reportCompactNumericColumns } from "@/lib/reportsTypography";
-import { DAYFRAME_BLOCKS, paletteColorFor, type ReportSummary } from "@dayframe/shared";
+import { activityMarkerRadius, DAYFRAME_BLOCKS, paletteColorFor, type ReportSummary } from "@dayframe/shared";
 import type { MobileBootstrap } from "@/lib/api";
 import type { MobileStyles, MobileTheme } from "@/lib/mobileTheme";
 import { useResolvedReduceMotionPreference } from "@/lib/motion";
@@ -869,7 +869,8 @@ const s = StyleSheet.create({
     gap: 10,
     borderBottomWidth: StyleSheet.hairlineWidth,
   },
-  dot: { height: 10, width: 10, borderRadius: 5 },
+  // X3: activity markers are small rounded-square blocks, never round dots.
+  dot: { height: 10, width: 10, borderRadius: activityMarkerRadius(10) },
   name: { flex: 1, minWidth: 0, fontSize: 14 },
   numbers: {
     flexDirection: "row",

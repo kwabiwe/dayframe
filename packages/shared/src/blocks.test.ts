@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  activityMarkerRadius,
   DAYFRAME_BLOCKS,
   DAYFRAME_PALETTE,
   DAYFRAME_PALETTE_PICKER_KEYS,
@@ -129,6 +130,12 @@ describe("Dayframe Blocks activity colours", () => {
   it("measures contrast the WCAG way", () => {
     expect(contrastRatio("#FFFFFF", "#000000")).toBeCloseTo(21, 5);
     expect(contrastRatio("#777777", "#FFFFFF")).toBeCloseTo(4.48, 2);
+  });
+
+  it("shapes activity markers as small rounded squares, never round dots (X3)", () => {
+    expect(activityMarkerRadius(10)).toBe(3);
+    expect(activityMarkerRadius(8)).toBe(2.5);
+    expect(activityMarkerRadius(12)).toBeLessThan(12 / 2);
   });
 
   it("defines the Blocks radius scale", () => {

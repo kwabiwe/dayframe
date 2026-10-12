@@ -93,6 +93,8 @@ export {
 } from "./placeRoles";
 export {
   ACTIVITY_CONTROL_MINIMUM_CONTRAST,
+  ACTIVITY_MARKER_RADIUS_RATIO,
+  activityMarkerRadius,
   DAYFRAME_BLOCKS,
   activityControlColor,
   blockColorsFor,

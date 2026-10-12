@@ -123,7 +123,8 @@ struct DayframeCalendarRootView: View {
             .frame(width: 32, height: 32)
             HStack(spacing: 2) {
               ForEach(Array(day.bars.enumerated()), id: \.offset) { _, color in
-                RoundedRectangle(cornerRadius: 2, style: .continuous)
+                // X3: a block marker (30% of the 4 pt side, activityMarkerRadius), not a capsule.
+                RoundedRectangle(cornerRadius: 1.2, style: .continuous)
                   .fill(Color(dayframeCSS: color))
                   .frame(width: 5, height: 4)
               }
