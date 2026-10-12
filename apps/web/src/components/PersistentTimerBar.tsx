@@ -31,7 +31,17 @@ import { shouldStartTimerFromEntrySubmit } from "@/lib/timer-entry-draft";
 import { quickActionTimerDraft } from "@/lib/timer-runtime";
 import { blockStyle } from "@/lib/block-style";
 import { alreadyRecordingToastMessage, switchedToastMessage } from "@/lib/blocks-toast-copy";
-import { mentionTokens, parseCommand, pendingMentionActivity, retainMentions, withoutPendingMentions } from "@/lib/command-parse";
+import {
+  mentionGuardFor,
+  mentionMarks,
+  parseCommand,
+  pendingMentionActivity,
+  shiftMentionMarks,
+  syncMentionGuard,
+  withoutPendingMentions,
+  type MentionGuard,
+  type MentionMark
+} from "@/lib/command-parse";
 import { hasOpenDialog, isTypingTarget } from "@/lib/keyboard-ownership";
 
 const TASK_SUGGESTION_LIMIT = 5;
@@ -67,11 +77,6 @@ export function PersistentTimerBar({ workspaceMode = false }: { workspaceMode?: 
   const [narrowCommand, setNarrowCommand] = useState(false);
   const [suggestionsOpen, setSuggestionsOpen] = useState(false);
   const [hashtagSuggestionsOpen, setHashtagSuggestionsOpen] = useState(false);
-  // Idle: the `@words` left in the text when an activity was picked from the `@` list, a multiset
-  // of exact strings. They are literal (the picked activity wins): they never parse, open the
-  // list or get consumed; a newly typed `@activity` still does. Each one stays protected until it
-  // is itself edited or deleted (`retainMentions`).
-  const [literalMentions, setLiteralMentions] = useState<readonly string[]>([]);
   const [startEditorOpen, setStartEditorOpen] = useState(false);
   const [timerActionsOpen, setTimerActionsOpen] = useState(false);
   const [startDateDraft, setStartDateDraft] = useState("");
@@ -115,12 +120,25 @@ export function PersistentTimerBar({ workspaceMode = false }: { workspaceMode?: 
       .slice(0, TASK_SUGGESTION_LIMIT);
   }, [taskSuggestions, timerDraft.description]);
   const quickActions = useMemo(() => data ? buildLearnedQuickActions(data) : [], [data]);
-  const parsedCommand = useMemo(
-    () => active ? null : parseCommand(timerDraft.description, data?.categories ?? [], literalMentions),
-    [active, data?.categories, literalMentions, timerDraft.description]
+  // The literal `@words` in the description, by occurrence (`MentionGuard`). Idle: those left
+  // when an activity was picked from the `@` list (the picked activity wins). Recording: those the
+  // saved description already had. They never parse, open the list or get consumed, and they
+  // follow every edit by position: a newly typed `@word`, even one spelled the same before or
+  // after them, is a command. Each stays protected until it is itself edited or deleted.
+  const mentionScope = active?.id ?? null;
+  const savedText = active?.description ?? "";
+  const [mentionGuardState, setMentionGuard] = useState<MentionGuard>(
+    () => mentionGuardFor(mentionScope, savedText, timerDraft.description)
   );
-  // Recording, the `@words` the saved description already has are literal text.
-  const savedMentions = useMemo(() => mentionTokens(active?.description ?? ""), [active?.description]);
+  // Any change the field did not report with its caret (the runtime, a rollback, a new block)
+  // is followed here, during render, so the marks always describe the text on screen.
+  const mentionGuard = syncMentionGuard(mentionGuardState, mentionScope, savedText, timerDraft.description);
+  if (mentionGuard !== mentionGuardState) setMentionGuard(mentionGuard);
+  const literalMarks = mentionGuard.marks;
+  const parsedCommand = useMemo(
+    () => active ? null : parseCommand(timerDraft.description, data?.categories ?? [], literalMarks),
+    [active, data?.categories, literalMarks, timerDraft.description]
+  );
   const activeAccent = active
     ? timeEntryAccentColor({
         ...active,
@@ -164,11 +182,17 @@ export function PersistentTimerBar({ workspaceMode = false }: { workspaceMode?: 
   // While recording, an `@…` typed into the description is a command, never details: autosave,
   // Stop and leaving the field save the description without it (an `@word` the running block
   // already had stays). See `withoutPendingMentions`.
-  const savedDescription = (description: string) => withoutPendingMentions(description, active?.description ?? "");
+  const savedDescription = (description: string) => withoutPendingMentions(description, literalMarks);
+
+  /** The description and its literal `@words` change together. */
+  function setDescription(description: string, marks: readonly MentionMark[]) {
+    setMentionGuard({ scope: mentionScope, saved: savedText, text: description, marks });
+    setTimerDraft((current) => ({ ...current, description }));
+  }
 
   useEffect(() => {
     if (!active) return undefined;
-    const draft = { ...timerDraft, description: withoutPendingMentions(timerDraft.description, active.description ?? "") };
+    const draft = { ...timerDraft, description: withoutPendingMentions(timerDraft.description, literalMarks) };
     const nextCategoryId = draft.categoryId || null;
     const nextDescription = draft.description.trim() || null;
     const draftTags = timerDraft.tagNames.map((name) => normalizeTagName(name).normalizedName).sort();
@@ -184,7 +208,7 @@ export function PersistentTimerBar({ workspaceMode = false }: { workspaceMode?: 
       void updateActiveDetails(draft);
     }, 650);
     return () => window.clearTimeout(handle);
-  }, [active, timerDraft, updateActiveDetails]);
+  }, [active, literalMarks, timerDraft, updateActiveDetails]);
 
   useEffect(() => {
     if (!suggestionsOpen) return undefined;
@@ -283,8 +307,8 @@ export function PersistentTimerBar({ workspaceMode = false }: { workspaceMode?: 
     // in place (the same debounced update as the activity block) and the new `@…` leave the text;
     // `@words` the saved description already had are literal text.
     if (active) {
-      const mention = pendingMentionActivity(timerDraft.description, active.description ?? "", data!.categories);
-      if (mention.categoryId) chooseActivity(mention.categoryId, mention.description, "select");
+      const mention = pendingMentionActivity(timerDraft.description, literalMarks, data!.categories);
+      if (mention.categoryId) chooseActivity(mention.categoryId, mention.description, "select", mention.marks);
       return;
     }
     if (!shouldStartTimerFromEntrySubmit({
@@ -297,7 +321,7 @@ export function PersistentTimerBar({ workspaceMode = false }: { workspaceMode?: 
 
   // Idle Start: `@activity` picks the activity and a trailing duration logs a finished block
   // ending now (through the manual-entry path) instead of starting the timer.
-  async function runCommand(submitted = timerDraft, literal = literalMentions) {
+  async function runCommand(submitted = timerDraft, literal = literalMarks) {
     const command = parseCommand(submitted.description, data!.categories, literal);
     const categoryId = command.categoryId ?? submitted.categoryId;
     // Only the command that was sent is cleared or restored: text typed while it was in flight wins.
@@ -336,14 +360,27 @@ export function PersistentTimerBar({ workspaceMode = false }: { workspaceMode?: 
   // Only the chosen `@query` leaves the text: other `@words` stay as written. Idle, they become
   // literal so the chosen activity wins (a trailing duration still parses); recording, ones the
   // saved description had stay and new ones are never saved (`withoutPendingMentions`).
-  function chooseActivity(categoryId: string, description: string, trigger: ActivityChoiceTrigger) {
+  function chooseActivity(
+    categoryId: string,
+    description: string,
+    trigger: ActivityChoiceTrigger,
+    marks: number | readonly MentionMark[] | undefined
+  ) {
     setCommandNotice(null);
     setSuggestionsOpen(false);
-    if (!active) setLiteralMentions(mentionTokens(description));
+    // Idle, every `@word` left becomes literal. Recording, the saved occurrences follow the
+    // removed `@query` by position (`marks` is the caret where it was, or the marks already worked
+    // out for a typed `@activity` + Enter).
+    const nextMarks = !active
+      ? mentionMarks(description)
+      : Array.isArray(marks)
+        ? marks
+        : shiftMentionMarks(literalMarks, timerDraft.description, description, typeof marks === "number" ? marks : undefined);
+    setMentionGuard({ scope: mentionScope, saved: savedText, text: description, marks: nextMarks });
     if (trigger === "enter" && !active) {
       const draft = { ...timerDraft, categoryId, description };
       setTimerDraft(draft);
-      void runCommand(draft, mentionTokens(description));
+      void runCommand(draft, nextMarks);
       return;
     }
     setTimerDraft((current) => ({ ...current, categoryId, description }));
@@ -484,18 +521,21 @@ export function PersistentTimerBar({ workspaceMode = false }: { workspaceMode?: 
             inputRef={descriptionInputRef}
             name="timer-description"
             onActivityChoose={chooseActivity}
-            protectedMentions={active ? savedMentions : literalMentions}
+            protectedMentions={literalMarks}
             onBlur={() => {
               // Leaving the field while recording drops an unfinished `@…` from the text.
               if (!active) return;
-              setTimerDraft((current) => {
-                const description = savedDescription(current.description);
-                return description === current.description ? current : { ...current, description };
-              });
+              const { description, marks } = pendingMentionActivity(timerDraft.description, literalMarks, []);
+              if (description !== timerDraft.description) setDescription(description, marks);
             }}
-            onChange={(description) => {
+            onChange={(description, caret) => {
               setCommandNotice(null);
-              setLiteralMentions((literal) => retainMentions(literal, description));
+              // The caret places the edit, so the literal `@words` move with the text around them.
+              setMentionGuard((guard) => ({
+                ...guard,
+                text: description,
+                marks: shiftMentionMarks(guard.marks, guard.text, description, caret)
+              }));
               setTimerDraft((current) => ({ ...current, description }));
               setSuggestionsOpen(true);
             }}

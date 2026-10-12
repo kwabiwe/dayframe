@@ -25,7 +25,7 @@ import { DayframeIcon } from "@/components/blocks/DayframeIcon";
 import { FloatingList } from "@/components/FloatingList";
 import { TagIcon } from "@/components/TagIcon";
 import { blockStyle } from "@/lib/block-style";
-import { activitiesForMention, findActiveMention } from "@/lib/command-parse";
+import { activitiesForMention, findActiveMention, type MentionMark } from "@/lib/command-parse";
 import { selectVisibleTags, TAG_SELECTION_MAX_COUNT } from "@/lib/tag-display";
 
 /** An activity the description's `@` list can offer (the command timer passes its activities). */
@@ -75,12 +75,14 @@ export function InlineTagInput({
   name?: string;
   /**
    * An activity chosen from the `@` list, with the description as it reads once the `@query`
-   * has left it. The owner sets both (the input does not call `onChange` for it).
+   * has left it and the caret where it was. The owner sets both (the input does not call
+   * `onChange` for it).
    */
-  onActivityChoose?: (activityId: string, description: string, trigger: ActivityChoiceTrigger) => void;
+  onActivityChoose?: (activityId: string, description: string, trigger: ActivityChoiceTrigger, caret: number) => void;
   /** The description field lost focus. */
   onBlur?: () => void;
-  onChange: (value: string) => void;
+  /** The new text, and where the caret sits after the edit (it places the edit for the owner). */
+  onChange: (value: string, caret?: number) => void;
   onClick?: () => void;
   onEnter?: (event: KeyboardEvent<HTMLInputElement>) => void;
   onFocus?: () => void;
@@ -90,10 +92,10 @@ export function InlineTagInput({
   placeholder?: string;
   portal?: boolean;
   /**
-   * Literal `@words` (exact strings, as a multiset): they never open the Activities list and are
-   * never consumed by Enter, Tab or Escape.
+   * Literal `@word` occurrences in `value`, by position: they never open the Activities list and
+   * are never consumed by Enter, Tab or Escape. Another `@word` spelled the same still is a mention.
    */
-  protectedMentions?: readonly string[];
+  protectedMentions?: readonly MentionMark[];
   selectedTagNames: string[];
   tags: TagRow[];
   value: string;
@@ -346,7 +348,7 @@ export function InlineTagInput({
     if (disabled || !active) return;
     if (!addSelectedTag(action.label)) return;
     const replacement = consumeActiveHashtag(value, active);
-    onChange(replacement.text);
+    onChange(replacement.text, replacement.caret);
     setCaret(replacement.caret);
     window.requestAnimationFrame(() => {
       const input = localInputRef.current;
@@ -358,7 +360,7 @@ export function InlineTagInput({
   function chooseActivity(activity: MentionActivity, trigger: ActivityChoiceTrigger) {
     if (disabled || !mention) return;
     const replacement = consumeActiveHashtag(value, mention);
-    onActivityChoose?.(activity.id, replacement.text, trigger);
+    onActivityChoose?.(activity.id, replacement.text, trigger, replacement.caret);
     placeCaret(replacement.caret);
   }
 
@@ -367,7 +369,7 @@ export function InlineTagInput({
   function cancelMention() {
     if (disabled || !mention) return;
     const replacement = consumeActiveHashtag(value, mention);
-    onChange(replacement.text);
+    onChange(replacement.text, replacement.caret);
     placeCaret(replacement.caret);
   }
 
@@ -462,7 +464,7 @@ export function InlineTagInput({
           }}
           onChange={(event) => {
             const nextCaret = event.target.selectionStart ?? event.target.value.length;
-            onChange(event.target.value);
+            onChange(event.target.value, nextCaret);
             setCaret(nextCaret);
             setHighlightedIndex(0);
             setActivityIndex(0);

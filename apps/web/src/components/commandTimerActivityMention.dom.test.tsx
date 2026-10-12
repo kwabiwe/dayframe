@@ -459,6 +459,119 @@ describe("literal @words are protected in the list as in the parser (Codex r3)",
   });
 });
 
+describe("protection belongs to the saved occurrence, not its spelling (Codex r4)", () => {
+  const wait = (ms: number) => act(() => new Promise((resolve) => setTimeout(resolve, ms)));
+  const activitiesOpen = () => screen.queryByRole("listbox", { name: "Activities" }) !== null;
+
+  async function fromHome(input: HTMLInputElement) {
+    const user = userEvent.setup();
+    await user.click(input);
+    await user.keyboard("{Home}");
+    return user;
+  }
+
+  it("recording: @writing typed before a saved \"Discuss @writing\" is the command; End + Escape keeps the saved one", async () => {
+    const { calls, input } = renderBar({ activeEntry: running({ description: "Discuss @writing" }) });
+    const user = await fromHome(input);
+    await user.keyboard("@writing ");
+    expect(input.value).toBe("@writing Discuss @writing");
+    // Back in the new occurrence, the list opens on it.
+    await user.keyboard("{ArrowLeft}");
+    expect(optionNames(activities())).toEqual(["Writing"]);
+    await user.keyboard("{End}");
+    // The saved occurrence at the caret is literal: no list, and Escape leaves it.
+    expect(activitiesOpen()).toBe(false);
+    await user.keyboard("{Escape}");
+    expect(input.value).toBe("@writing Discuss @writing");
+    await wait(900);
+    // Autosave never saves "@writing Discuss": the saved text is unchanged, so nothing is sent.
+    expect(calls.updateActiveDetails).not.toHaveBeenCalled();
+    expect(screen.getByRole("button", { name: "Activity: Focus" })).not.toBeNull();
+    // Leaving the field drops only the new command.
+    await user.click(document.body);
+    expect(input.value).toBe("Discuss @writing");
+    await wait(900);
+    expect(calls.updateActiveDetails).not.toHaveBeenCalled();
+  });
+
+  it("recording: Enter on that text switches to Writing and keeps the saved @writing", async () => {
+    const { calls, input } = renderBar({ activeEntry: running({ description: "Discuss @writing" }) });
+    const user = await fromHome(input);
+    await user.keyboard("@writing {End}{Enter}");
+    expect(input.value).toBe("Discuss @writing");
+    await waitFor(() => expect(calls.updateActiveDetails).toHaveBeenCalledWith({
+      categoryId: "write",
+      description: "Discuss @writing",
+      tagNames: []
+    }), { timeout: 2_000 });
+    expectRunningBlockKept(calls, ["Discuss @writing"]);
+  });
+
+  it("recording: a new @writing after the saved one is the one Escape removes", async () => {
+    const { calls, input } = renderBar({ activeEntry: running({ description: "Discuss @writing" }) });
+    const user = await typeInto(input, " @writing");
+    expect(optionNames(activities())).toEqual(["Writing"]);
+    await user.keyboard("{Escape}");
+    expect(input.value).toBe("Discuss @writing");
+    await wait(900);
+    expect(calls.updateActiveDetails).not.toHaveBeenCalled();
+  });
+
+  it("recording: with two identical saved @words, a third typed first is the only command", async () => {
+    const { calls, input } = renderBar({ activeEntry: running({ description: "@writing vs @writing" }) });
+    const user = await fromHome(input);
+    // Neither saved occurrence opens the list.
+    await user.keyboard("{ArrowRight}{ArrowRight}{ArrowRight}{ArrowRight}{ArrowRight}{ArrowRight}{ArrowRight}{ArrowRight}");
+    expect(activitiesOpen()).toBe(false);
+    await user.keyboard("{End}");
+    expect(activitiesOpen()).toBe(false);
+    await user.keyboard("{Home}@writing ");
+    expect(input.value).toBe("@writing @writing vs @writing");
+    await user.keyboard("{End}{Escape}");
+    expect(input.value).toBe("@writing @writing vs @writing");
+    await user.keyboard("{Enter}");
+    expect(input.value).toBe("@writing vs @writing");
+    await waitFor(() => expect(calls.updateActiveDetails).toHaveBeenCalledWith({
+      categoryId: "write",
+      description: "@writing vs @writing",
+      tagNames: []
+    }), { timeout: 2_000 });
+  });
+
+  it("recording: deleting text before the saved @word keeps it protected where it moved", async () => {
+    const { calls, input } = renderBar({ activeEntry: running({ description: "Discuss @writing" }) });
+    const user = await fromHome(input);
+    await user.keyboard("{Delete}{Delete}{Delete}{Delete}{Delete}{Delete}{Delete}{Delete}");
+    expect(input.value).toBe("@writing");
+    await user.keyboard("{End}");
+    expect(activitiesOpen()).toBe(false);
+    await user.keyboard("{Escape}");
+    expect(input.value).toBe("@writing");
+    await waitFor(() => expect(calls.updateActiveDetails).toHaveBeenCalledWith({
+      categoryId: "focus",
+      description: "@writing",
+      tagNames: []
+    }), { timeout: 2_000 });
+  });
+
+  it("idle: @foc typed before the literal @foc left by a pick is a new command", async () => {
+    const { calls, input } = renderBar();
+    const user = await typeInto(input, "Plan @foc @wri");
+    await user.keyboard("{Tab}");
+    expect(input.value).toBe("Plan @foc");
+    await act(() => new Promise((resolve) => requestAnimationFrame(resolve)));
+    await user.keyboard("{Home}@foc {ArrowLeft}");
+    expect(input.value).toBe("@foc Plan @foc");
+    expect(optionNames(activities())).toEqual(["Focus"]);
+    await user.keyboard("{End}");
+    expect(activitiesOpen()).toBe(false);
+    await user.keyboard("{Escape}");
+    expect(input.value).toBe("@foc Plan @foc");
+    await user.keyboard("{Enter}");
+    expect(calls.startTimer).toHaveBeenCalledWith({ categoryId: "focus", description: "Plan @foc", tagNames: [] });
+  });
+});
+
 describe("an unfinished @ is never saved to the running block", () => {
   const wait = (ms: number) => act(() => new Promise((resolve) => setTimeout(resolve, ms)));
 
@@ -635,6 +748,19 @@ describe("on phones the lists are sheets", () => {
     await user.type(input, " @wr", { skipClick: true });
     expect(input.value).toBe("Plan #dee @wr");
     expect(optionNames(activities())).toEqual(["Writing"]);
+  });
+
+  it("Close with a suggestion focused by ↓ hands focus back to Description (Codex r4)", async () => {
+    phone();
+    const { input } = renderBar();
+    const user = userEvent.setup();
+    await user.click(input);
+    const suggestions = screen.getByRole("listbox", { name: "Suggestions" }).closest<HTMLElement>(".df-flist")!;
+    await user.keyboard("{ArrowDown}");
+    expect(document.activeElement).toBe(within(suggestions).getAllByRole("option")[0]);
+    await user.click(within(suggestions).getByRole("button", { name: "Close suggestions" }));
+    expect(screen.queryByRole("listbox", { name: "Suggestions" })).toBeNull();
+    expect(document.activeElement).toBe(input);
   });
 
   it("Suggestions reopen after Close once you type again", async () => {

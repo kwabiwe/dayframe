@@ -30,7 +30,8 @@ export type FloatingListHeading = "Suggestions" | "Tags" | "Activities";
  * On phones (560 px and below) with an `anchorRef` it is a full-width sheet: fixed 12 px from the
  * screen edges, just below the field (above it when the keyboard leaves no room), its height
  * bounded by the visual viewport, so it stays above the on-screen keyboard, scrolling inside,
- * with a visible 44 px Close (`onClose`). It stays mounted while closed (hidden, inert) so it can
+ * with a visible 44 px Close (`onClose`; a focused row hands focus back to the anchor's
+ * combobox field first). It stays mounted while closed (hidden, inert) so it can
  * fade: opacity only, none under Reduce Motion.
  */
 export function FloatingList({
@@ -81,7 +82,15 @@ export function FloatingList({
           hidden={!sheet}
           // The field keeps focus (and the keyboard stays up) when Close is pressed.
           onMouseDown={(event) => event.preventDefault()}
-          onClick={onClose}
+          onClick={(event) => {
+            // A row ↓ moved focus to is about to be hidden: focus goes back to the field (the
+            // anchor's combobox) first, so it is never lost and the list stays closed.
+            const surface = event.currentTarget.closest(".df-flist");
+            if (surface?.contains(document.activeElement)) {
+              anchorRef?.current?.querySelector<HTMLElement>('[role="combobox"]')?.focus();
+            }
+            onClose();
+          }}
           tabIndex={-1}
           type="button"
         >
