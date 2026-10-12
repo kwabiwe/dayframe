@@ -71,7 +71,7 @@ Prototype moves allowed on migrated surfaces:
 - **Rolling digits.** The live timer's changing digits roll with `roll`; unchanged digits stay still.
 - **Stop flight.** On Stop the live block shrinks and flies into its row in Today's list (the prototype uses 620 ms, `cubic-bezier(.3,.7,.2,1)`), then the row block pops and the row briefly highlights.
 - **Swipes and throws.** Rows swipe (right: Start again; left: Delete) and Review cards throw off-screen with LOG IT / SKIP stamps, tracking the finger and rotating slightly; a released row or card that does not commit springs back with `land`.
-- **Bloom.** Holding the Play orb for about 360 ms opens the activity bloom; its tiles fly out from the orb with `pop`, staggered by about 18 ms.
+- **Bloom.** Holding the Play orb for about 360 ms opens the activity bloom; its tiles fly out from the orb with `pop`, staggered by about 18 ms. Behind the bloom the screen is blurred (expo-blur `BlurView`, intensity 24, under the scrim; Trello 211) and both fade with the bloom; under Reduce Transparency there is no blur and the scrim is a little more opaque.
 - **Breathing ring.** Only the single live block carries it: an opacity-only cycle of about 2.4 s on its inner edge.
 - **Block pull-to-refresh.** The refresh indicator is a row of six small blocks that pulse while a deliberate pull refreshes.
 

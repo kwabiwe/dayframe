@@ -14,9 +14,11 @@ import Reanimated, {
 } from "react-native-reanimated";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import Svg, { Circle } from "react-native-svg";
+import { BlurView } from "expo-blur";
 import { blockColorsFor } from "@dayframe/shared";
 import { BLOCKS_SPRING } from "../../lib/blocksMotion";
 import { playHaptic } from "../../lib/haptics";
+import { useReduceTransparencyPreference } from "../../lib/motion";
 import type { MobileTheme } from "../../lib/mobileTheme";
 import { MOBILE_DISPLAY_FONT } from "../../lib/mobileTypography";
 import { PLAY_ORB, bloomHit, bloomSpots, playOrbFrame, type BloomActivity, type BloomSpot } from "../../lib/playOrb";
@@ -25,6 +27,10 @@ import { ActivityIcon } from "../icons/DayframeIcon";
 
 const RING = { inset: 5, stroke: 3, opacity: 0.55 } as const;
 const SCRIM = { dark: "rgba(3, 6, 14, 0.66)", light: "rgba(17, 20, 29, 0.55)" } as const;
+/** Under Reduce Transparency there is no blur; the scrim alone hides what's behind a little more. */
+const SCRIM_SOLID = { dark: "rgba(3, 6, 14, 0.8)", light: "rgba(17, 20, 29, 0.7)" } as const;
+/** expo-blur intensity (0–100) matching the prototype's 10 px backdrop blur under the scrim. */
+const BLOOM_BLUR_INTENSITY = 24;
 
 /**
  * The Play orb (Blocks prototype): a 64-point coral orb in the tab bar's trailing slot. Tap starts a
@@ -276,12 +282,19 @@ function BloomLayer({
   const fadeIn = useMemo(() => FadeIn.duration(reduceMotion ? 90 : 200).reduceMotion(ReduceMotion.Never), [reduceMotion]);
   const fadeOut = useMemo(() => FadeOut.duration(reduceMotion ? 60 : 160).reduceMotion(ReduceMotion.Never), [reduceMotion]);
   const verb = running ? "switch" : "start";
+  // Trello 211: the prototype blurs what's behind the bloom (backdrop blur 10 px under the scrim).
+  // Reduce Transparency keeps the plain scrim, made a little more opaque instead.
+  const reduceTransparency = useReduceTransparencyPreference();
+  const scheme = theme.mode === "dark" ? "dark" : "light";
   return (
     <Reanimated.View entering={fadeIn} exiting={fadeOut} pointerEvents={sticky ? "auto" : "none"} style={StyleSheet.absoluteFill} testID="play-orb-bloom">
+      {reduceTransparency ? null : (
+        <BlurView intensity={BLOOM_BLUR_INTENSITY} pointerEvents="none" style={StyleSheet.absoluteFill} testID="play-orb-blur" tint={scheme} />
+      )}
       <Pressable
         accessibilityLabel="Close"
         onPress={onClose}
-        style={[StyleSheet.absoluteFill, { backgroundColor: SCRIM[theme.mode === "dark" ? "dark" : "light"] }]}
+        style={[StyleSheet.absoluteFill, { backgroundColor: reduceTransparency ? SCRIM_SOLID[scheme] : SCRIM[scheme] }]}
         testID="play-orb-scrim"
       />
       <View pointerEvents="none" style={[styles.label, { top: topInset + 120 }]}>
