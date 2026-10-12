@@ -170,10 +170,13 @@ const RESIZE_TIP_ROOM = 150;
 export function TimeReviewViews({
   initialData,
   initialPreference,
+  initialTodayKey = null,
   renderedAt
 }: {
   initialData: BootstrapData;
   initialPreference: TimelinePreference | null;
+  /** Today's date key in the viewer's zone as the server saw it; used until hydration. */
+  initialTodayKey?: string | null;
   renderedAt: string;
 }) {
   const data = useRuntimePageData(initialData);
@@ -392,9 +395,12 @@ export function TimeReviewViews({
     })),
     { range: ranges.week, now: capturedNow }
   );
-  const periodLabel = formatTimelinePeriodLabel(state.scope, ranges, capturedNow);
-  const todayKey = toTimelineDateKey(capturedNow);
-  const showsToday = capturedNow >= ranges.active.start && capturedNow < ranges.active.end;
+  // Which day is today depends on the browser's time zone. The server render and the hydration
+  // pass use the server's guess for the viewer's zone (null: none), then the browser's clock.
+  const todayKey = hydrated ? toTimelineDateKey(capturedNow) : initialTodayKey;
+  const periodLabel = formatTimelinePeriodLabel(state.scope, ranges, todayKey);
+  const showsToday = todayKey === null
+    || (todayKey >= toTimelineDateKey(ranges.active.start) && todayKey < toTimelineDateKey(ranges.active.end));
   const dayReportFrom = toTimelineDateKey(ranges.day.start);
   const dayReportTo = toTimelineDateKey(addDays(ranges.day.end, -1));
   const weekReportFrom = toTimelineDateKey(ranges.week.start);
@@ -406,6 +412,7 @@ export function TimeReviewViews({
     hydrated,
     nowMs: capturedNow.getTime(),
     selectedDay: ranges.day.start,
+    todayKeyHint: initialTodayKey,
     weekDays: ranges.weekDays,
     weekLoggedSeconds: weekAnalysis.totalLoggedSeconds
   });
@@ -438,7 +445,7 @@ export function TimeReviewViews({
             onChange={(date) => void navigate({ date })}
             portal
             portalAlign="center"
-            today={todayKey}
+            today={todayKey ?? state.date}
             value={state.date}
           />
           <IconButton
@@ -514,6 +521,7 @@ export function TimeReviewViews({
             reviewItems={data.reviewItems}
             scrollContainerRef={registerScrollContainer}
             tags={data.tags}
+            todayKeyHint={initialTodayKey}
             visibleDays={state.scope === "day" ? [ranges.day.start] : ranges.weekDays}
           />
         ) : null}
@@ -571,6 +579,7 @@ export function CalendarReview({
   reviewItems = [],
   scrollContainerRef,
   tags,
+  todayKeyHint = null,
   visibleDays
 }: {
   calendarHoursMode: CalendarHoursMode;
@@ -587,6 +596,8 @@ export function CalendarReview({
   reviewItems?: readonly ReviewItemRow[];
   scrollContainerRef: (element: HTMLDivElement | null) => void;
   tags: BootstrapData["tags"];
+  /** Before hydration, today's date key as the server saw it in the viewer's zone (null: none). */
+  todayKeyHint?: string | null;
   visibleDays: Date[];
 }) {
   const router = useRouter();
@@ -648,10 +659,15 @@ export function CalendarReview({
   const [continuingEntryId, setContinuingEntryId] = useState<string | null>(null);
   const [zoomLevel, setZoomLevel] = useState<CalendarZoom>("hour");
   const [calendarScroller, setCalendarScroller] = useState<HTMLDivElement | null>(null);
-  const today = capturedNow;
-  // The now pill shows a clock time in the browser's time zone, which the server render can't know;
-  // it appears once the page has hydrated so both renders agree (Codex r1 on #303).
-  const nowPillHydrated = useIsHydrated();
+  // Where a block sits, the now line and pill, the Review spans and each day's total all depend on
+  // the browser's time zone, which the server render can't know (Vercel renders in UTC). The server
+  // render and the hydration pass draw the same frame (the axis, day headings and an empty grid);
+  // the blocks appear once the page has hydrated, without motion (React #418, Codex r1 on #303).
+  const localTimeReady = useIsHydrated();
+  const todayKey = localTimeReady ? formatCalendarDateKey(capturedNow) : todayKeyHint;
+  const isToday = (day: Date) => formatCalendarDateKey(day) === todayKey;
+  const gridEntries = localTimeReady ? entries : NO_TIMELINE_ENTRIES;
+  const gridReviewItems = localTimeReady ? reviewItems : NO_REVIEW_ITEMS;
   const zoom = calendarZooms[zoomLevel];
   const calendarHours = calendarHourModes[calendarHoursMode];
   const zoomKeys = Object.keys(calendarZooms) as CalendarZoom[];
@@ -692,12 +708,13 @@ export function CalendarReview({
   const initialScrollAppliedRef = useRef(false);
   useLayoutEffect(() => {
     const scroller = calendarScrollerRef.current;
-    if (!calendarScroller || !scroller || initialScrollAppliedRef.current) return;
+    // The opening position is a local hour, so it waits for the browser's clock (hydration).
+    if (!localTimeReady || !calendarScroller || !scroller || initialScrollAppliedRef.current) return;
     initialScrollAppliedRef.current = true;
     if (hasRememberedScroll?.()) return;
     const hour = calendarInitialScrollHour({ entries, now: capturedNow, visibleDays });
     scroller.scrollTop = Math.max(0, (hour - calendarHours.startHour) * rowHeight);
-  }, [calendarHours.startHour, calendarScroller, capturedNow, entries, hasRememberedScroll, rowHeight, visibleDays]);
+  }, [calendarHours.startHour, calendarScroller, capturedNow, entries, hasRememberedScroll, localTimeReady, rowHeight, visibleDays]);
 
   useEffect(() => {
     const clearConsumedPointer = (event: PointerEvent) => {
@@ -1180,6 +1197,7 @@ export function CalendarReview({
   return (
     <section className="timeline-calendar-workspace">
       <div
+        aria-busy={localTimeReady ? undefined : true}
         aria-label="Calendar time grid"
         className="calendar-grid-scroller"
         onScroll={onScroll}
@@ -1213,7 +1231,7 @@ export function CalendarReview({
           {visibleDays.map((day) => {
             const dayStart = startOfDay(day);
             const total = analyzeTimeIntervals(
-              entries.map((entry) => ({
+              gridEntries.map((entry) => ({
                 id: entry.id,
                 startedAt: entry.startedAt,
                 stoppedAt: entry.stoppedAt
@@ -1229,7 +1247,7 @@ export function CalendarReview({
                 key={day.toISOString()}
                 className={[
                   "calendar-day-heading",
-                  sameDay(day, today) ? "is-today" : ""
+                  isToday(day) ? "is-today" : ""
                 ].join(" ")}
               >
                 <div className="calendar-day-date" aria-label={formatDate(day)}>
@@ -1237,7 +1255,8 @@ export function CalendarReview({
                   <b aria-hidden="true">{day.getDate()}</b>
                 </div>
                 <div
-                  aria-label={`${loggedLabel} logged`}
+                  aria-hidden={localTimeReady ? undefined : true}
+                  aria-label={localTimeReady ? `${loggedLabel} logged` : undefined}
                   className="calendar-day-total tabular"
                 >
                   {total.loggedSeconds > 0 ? loggedLabel : "–"}
@@ -1247,7 +1266,7 @@ export function CalendarReview({
           })}
 
           <div className="calendar-time-axis" style={{ height: calendarHeight }}>
-            {nowPillHydrated && visibleDays.some((day) => sameDay(day, today)) ? (
+            {localTimeReady && visibleDays.some(isToday) ? (
               <span
                 aria-hidden="true"
                 className="calendar-now-pill"
@@ -1293,14 +1312,14 @@ export function CalendarReview({
                 backgroundImage: `repeating-linear-gradient(to bottom, transparent 0, transparent ${Math.max(0, gridLineSpacing - 1)}px, var(--line) ${gridLineSpacing}px)`
               }}
             >
-              {sameDay(day, today) ? (
+              {localTimeReady && isToday(day) ? (
                 <span
                   aria-hidden="true"
                   className="calendar-now-line"
                   style={{ top: Math.round(((minutesFromDate(capturedNow) - calendarHours.startHour * 60) / 60) * rowHeight) }}
                 />
               ) : null}
-              {pendingReviewSpans(reviewItems, startOfDay(day).getTime(), addDays(startOfDay(day), 1).getTime(), capturedNow.getTime()).map((item) => {
+              {pendingReviewSpans(gridReviewItems, startOfDay(day).getTime(), addDays(startOfDay(day), 1).getTime(), capturedNow.getTime()).map((item) => {
                 const geometry = calendarBlockStyle(
                   { startedAt: new Date(item.fromMs).toISOString(), stoppedAt: new Date(item.toMs).toISOString() },
                   null,
@@ -1389,7 +1408,7 @@ export function CalendarReview({
                 );
               })() : null}
               {(() => {
-                const blocks = entries
+                const blocks = gridEntries
                   .filter((entry) => entryOverlapsDay(entry, day, capturedNow))
                   .map((entry) => {
                     const activeDraft = resizeDraft?.entryId === entry.id ? resizeDraft : null;
@@ -1771,6 +1790,9 @@ function calendarBlockStyle(
     continuesIntoNextDay: continuation.continuesIntoNextDay
   };
 }
+
+const NO_TIMELINE_ENTRIES: TimeEntryRow[] = [];
+const NO_REVIEW_ITEMS: readonly ReviewItemRow[] = [];
 
 function calendarBlockKey(entryId: string, day: Date) {
   return `${entryId}:${formatCalendarDateKey(day)}`;

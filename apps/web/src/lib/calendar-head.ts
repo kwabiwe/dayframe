@@ -37,6 +37,7 @@ export function calendarHeadModel({
   hydrated = true,
   nowMs,
   selectedDay,
+  todayKeyHint = null,
   weekDays,
   weekLoggedSeconds
 }: {
@@ -44,20 +45,28 @@ export function calendarHeadModel({
   entries: readonly TodayEntry[];
   /**
    * Whether the browser has hydrated. "Today" and which day an entry falls on depend on the
-   * browser's time zone, which the server render can't know, so the today mark, "this week" and the
-   * per-day bars and totals wait for hydration (both renders agree).
+   * browser's time zone, which the server render can't know, so the per-day bars and every total
+   * wait for hydration (both renders agree); until then the totals read "–".
    */
   hydrated?: boolean;
   nowMs: number;
   selectedDay: Date;
+  /**
+   * Before hydration, today's date key as the server worked it out in the viewer's zone (the
+   * `dayframe_tz` cookie), so the today mark and "this week" need not change once the browser
+   * takes over. Null marks no day as today.
+   */
+  todayKeyHint?: string | null;
   weekDays: readonly Date[];
   weekLoggedSeconds: number;
 }): CalendarHeadModel {
   const selectedKey = toTimelineDateKey(selectedDay);
-  const todayKey = hydrated ? toTimelineDateKey(new Date(nowMs)) : null;
+  const todayKey = hydrated ? toTimelineDateKey(new Date(nowMs)) : todayKeyHint;
+  // A total depends on where the browser's days start, so the server render shows a dash.
+  const total = (seconds: number) => (hydrated ? formatDuration(seconds) : "–");
   return {
     month: MONTH.format(selectedDay),
-    framedLine: `${formatDuration(dayLoggedSeconds)} framed on ${WEEKDAY_LONG.format(selectedDay)}`,
+    framedLine: `${total(dayLoggedSeconds)} framed on ${WEEKDAY_LONG.format(selectedDay)}`,
     days: weekDays.map((day, index) => {
       const key = toTimelineDateKey(day);
       const end = index + 1 < weekDays.length ? weekDays[index + 1] : new Date(day.getFullYear(), day.getMonth(), day.getDate() + 1);
@@ -78,7 +87,7 @@ export function calendarHeadModel({
       };
     }),
     weekTotal: weekDays.some((day) => toTimelineDateKey(day) === todayKey)
-      ? `${formatDuration(weekLoggedSeconds)} this week`
-      : `${formatDuration(weekLoggedSeconds)} in the week of ${WEEK_OF.format(weekDays[0] ?? selectedDay)}`
+      ? `${total(weekLoggedSeconds)} this week`
+      : `${total(weekLoggedSeconds)} in the week of ${WEEK_OF.format(weekDays[0] ?? selectedDay)}`
   };
 }

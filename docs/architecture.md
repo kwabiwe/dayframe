@@ -61,6 +61,8 @@ Dayframe has three server auth modes:
 
 Web stores the Dayframe token in an HTTP-only `dayframe_session` cookie. iOS stores the same app-session token in SecureStore and sends it as a bearer token. Integration/ingest tokens are separate, hashed server-side, scoped, and must never substitute for a user app session. The shared lightweight `/api/timer-state` read accepts app sessions and an explicitly opted-in `x-dayframe-ingest-token` with `time:read`; its query stays workspace/user scoped, side-effect free apart from rate-limited token-use bookkeeping, and never waits for APNs.
 
+Web pages that work out calendar days on the server (Reports' days and CSV times, the Calendar's default date and first-render "today") use the viewer's IANA zone from the first-party `dayframe_tz` cookie, which the web app shell writes from the browser; the server validates it against the runtime's zone data and falls back to UTC. It is not an auth or identity signal, and iOS never sends it, so the mobile API keeps its behaviour. Values the server cannot know (local clock times, where a block sits on a local day) render only after hydration.
+
 Every protected route resolves a `RequestSession` before data access. Personal reads and writes use both `workspace_id` and `user_id` where the record is user-owned; shared catalogue data remains workspace-scoped. Supabase RLS is defense in depth, not a replacement for application scoping.
 
 ## Mobile ownership boundaries

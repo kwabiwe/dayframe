@@ -55,7 +55,7 @@ describe("Calendar range and toolbar contract", () => {
     expect(timeline).toContain('window.addEventListener("focus", handleFocus)');
     expect(timeline).toContain('document.addEventListener("visibilitychange", handleVisibilityChange)');
     expect(timeline).toContain("resetTimelineState(currentState, now)");
-    expect(timeline).toContain("formatTimelinePeriodLabel(state.scope, ranges, capturedNow)");
+    expect(timeline).toContain("formatTimelinePeriodLabel(state.scope, ranges, todayKey)");
   });
 
   it("gives all views the same clipped period data", () => {
@@ -82,7 +82,7 @@ describe("Calendar range and toolbar contract", () => {
   it("canonicalizes direct URLs before one selected-date bootstrap read", () => {
     expect(page).toContain("await cookies()");
     expect(page).toContain("timelinePreferenceFromCookieValue");
-    expect(page).toContain("timelineStateFromSearchParams(params, { preference })");
+    expect(page).toContain("timelineStateFromSearchParams(params, { preference, today: todayKey })");
     expect(page).toContain("if (currentHref !== canonicalHref) redirect(canonicalHref)");
     expect(page).toContain("getBootstrapData(session, { selectedDate: state.date })");
     expect(page).not.toContain("PageHeader");
@@ -144,7 +144,7 @@ describe("Calendar range and toolbar contract", () => {
     expect(entries).not.toContain('className="timeline-view-title-row"');
     expect(timeline).toContain('className="calendar-corner-zoom"');
     expect(timeline).not.toContain("<span>Time</span>");
-    expect(timeline).toContain('aria-label={`${loggedLabel} logged`}');
+    expect(timeline).toContain('aria-label={localTimeReady ? `${loggedLabel} logged` : undefined}');
     expect(timeline).toContain("{loggedLabel}");
     expect(styles).toMatch(/\.calendar-grid-corner,[\s\S]*\.calendar-day-heading \{[^}]*min-height: 52px;/);
     expect(styles).toContain("--timeline-list-column-header-height: 40px");

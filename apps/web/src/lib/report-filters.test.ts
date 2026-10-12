@@ -9,6 +9,9 @@ import {
   serializeReportFilters,
   shiftReportRange
 } from "./report-filters";
+import type { ReportResult } from "./report-service";
+import { reportBlocksModel } from "./reports-blocks";
+import { normalizeViewerTimeZone } from "./viewer-time-zone";
 
 const now = new Date(2026, 6, 22, 12);
 const categoryA = "20000000-0000-4000-8000-000000000001";
@@ -162,5 +165,73 @@ describe("report filter URL model", () => {
     expect(reportsHrefForCustomRange("2026-07-20", "2026-07-26")).toBe(
       "/reports?range=custom&from=2026-07-20&to=2026-07-26"
     );
+  });
+});
+
+describe("report days in the viewer's zone (the server renders in UTC)", () => {
+  // 00:30 BST on Monday 12 October 2026 is 23:30 UTC on Sunday the 11th.
+  const lateNight = new Date("2026-10-11T23:30:00Z");
+
+  it("puts a block at 00:30 BST on its own day and treats it as today", () => {
+    process.env.TZ = "UTC";
+    const input = parseReportQueryInput({ range: "today" }, { now: lateNight, timeZone: "Europe/London" });
+    expect(input.range.from).toBe("2026-10-12");
+    expect(input.range.label).toBe("12 October 2026");
+    expect(input.range.start).toBe("2026-10-11T23:00:00.000Z");
+    expect(input.range.end).toBe("2026-10-12T23:00:00.000Z");
+    const [day] = input.dayBoundaries;
+    expect(day.key).toBe("2026-10-12");
+    expect(day.label).toBe("Mon 12 Oct");
+    expect(Date.parse(day.start)).toBeLessThanOrEqual(lateNight.getTime());
+    expect(lateNight.getTime()).toBeLessThan(Date.parse(day.end));
+    expect(input.previousRange).toEqual(expect.objectContaining({
+      from: "2026-10-11",
+      start: "2026-10-10T23:00:00.000Z",
+      end: "2026-10-11T23:00:00.000Z"
+    }));
+  });
+
+  it("starts this week on the viewer's Monday for the page's Week link", () => {
+    process.env.TZ = "UTC";
+    const filters = filtersForPreset(defaultReportFilters(lateNight), "this-week", lateNight, "Europe/London");
+    expect([filters.from, filters.to]).toEqual(["2026-10-12", "2026-10-18"]);
+    expect(filtersForPreset(defaultReportFilters(lateNight), "this-week", lateNight, "UTC").from).toBe("2026-10-05");
+  });
+
+  it.each([
+    ["2026-03-29", "2026-03-29T00:00:00.000Z", 23],
+    ["2026-10-25", "2026-10-24T23:00:00.000Z", 25]
+  ])("gives the clock-change day %s its true length", (key, start, hours) => {
+    process.env.TZ = "UTC";
+    const input = parseReportQueryInput({ range: "custom", from: key, to: key }, { now: lateNight, timeZone: "Europe/London" });
+    expect(input.dayBoundaries[0].start).toBe(start);
+    expect((Date.parse(input.dayBoundaries[0].end) - Date.parse(input.dayBoundaries[0].start)) / 3_600_000).toBe(hours);
+  });
+
+  it.each([
+    ["a missing cookie", undefined],
+    ["an invalid cookie", "Not/AZone"]
+  ])("keeps UTC days with %s", (_label, cookie) => {
+    process.env.TZ = "UTC";
+    const input = parseReportQueryInput({ range: "today" }, { now: lateNight, timeZone: normalizeViewerTimeZone(cookie) });
+    expect(input.range.from).toBe("2026-10-11");
+    expect(input.dayBoundaries[0].start).toBe("2026-10-11T00:00:00.000Z");
+  });
+
+  it("draws the month grid and day numbers from the days' dates, not their UTC instants", () => {
+    process.env.TZ = "UTC";
+    const input = parseReportQueryInput({ range: "custom", from: "2026-10-01", to: "2026-10-31" }, { now: lateNight, timeZone: "Europe/London" });
+    const report = {
+      range: { preset: "this-month", dayCount: input.range.dayCount },
+      capturedNow: lateNight.toISOString(),
+      byCategory: [],
+      dailySeries: input.dayBoundaries.map(({ key, label }) => ({ key, label, seconds: 0 })),
+      dailyByActivity: input.dayBoundaries.map((day) => ({ ...day, activities: [] }))
+    } as unknown as ReportResult;
+    const model = reportBlocksModel(report, (seconds) => `${seconds}s`)!;
+    // 1 October 2026 is a Thursday: three blanks before it in a Monday-first grid.
+    expect(model.leadingBlanks).toBe(3);
+    expect(model.days.slice(0, 3).map((day) => day.dateNumber)).toEqual([1, 2, 3]);
+    expect(model.days.filter((day) => day.isToday).map((day) => day.key)).toEqual(["2026-10-12"]);
   });
 });

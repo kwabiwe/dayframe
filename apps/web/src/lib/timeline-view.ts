@@ -39,11 +39,15 @@ export type TimelineSearchInput =
   | Pick<URLSearchParams, "get" | "toString">
   | Record<string, SearchValue>;
 
+/**
+ * The Calendar state from its URL. A missing or invalid date opens today: `today` (a date key the
+ * server worked out in the viewer's zone) when given, otherwise today in the process's own zone.
+ */
 export function timelineStateFromSearchParams(
   input: TimelineSearchInput,
-  options: { now?: Date; preference?: TimelinePreference | null } = {}
+  options: { now?: Date; preference?: TimelinePreference | null; today?: string | null } = {}
 ): TimelineState {
-  const now = startOfLocalDay(options.now ?? new Date());
+  const now = parseTimelineDateKey(options.today) ?? startOfLocalDay(options.now ?? new Date());
   const date = toTimelineDateKey(parseTimelineDateKey(searchValue(input, "date")) ?? now);
   const requestedScope = searchValue(input, "scope");
   const requestedView = searchValue(input, "view");
@@ -148,13 +152,18 @@ export function shouldAdvanceStaleTimelineToToday(
   return currentTodayKey !== previousTodayKey && state.date === previousTodayKey;
 }
 
+/**
+ * "Today", "Sun 12 Oct 2026" or a week's span. `now` is the current time, or today's date key
+ * (null when today is not known yet, which never reads "Today").
+ */
 export function formatTimelinePeriodLabel(
   scope: TimelineScope,
   ranges: TimelineRanges,
-  now = new Date()
+  now: Date | string | null = new Date()
 ) {
   if (scope === "day") {
-    if (toTimelineDateKey(ranges.day.start) === toTimelineDateKey(startOfLocalDay(now))) return "Today";
+    const todayKey = now instanceof Date ? toTimelineDateKey(startOfLocalDay(now)) : now;
+    if (toTimelineDateKey(ranges.day.start) === todayKey) return "Today";
     return new Intl.DateTimeFormat("en-GB", {
       weekday: "short",
       day: "numeric",

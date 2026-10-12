@@ -14,6 +14,7 @@ import { getUser } from "@/lib/queries";
 import { filtersForPreset, parseReportQueryInput, reportExportHref, reportsHref } from "@/lib/report-filters";
 import { getReports } from "@/lib/report-service";
 import { reportBlocksLayout, reportBlocksModel } from "@/lib/reports-blocks";
+import { getViewerTimeZone } from "@/lib/viewer-time-zone-server";
 
 export const dynamic = "force-dynamic";
 
@@ -30,7 +31,10 @@ export default async function ReportsPage({
 }) {
   const session = await resolvePageSession();
   const params = await searchParams;
-  const input = parseReportQueryInput(params);
+  // Days, "today" and the range label are the viewer's (the app shell's `dayframe_tz` cookie), not
+  // the server's: Vercel renders in UTC, which put a block at 00:30 BST on the previous day.
+  const timeZone = await getViewerTimeZone();
+  const input = parseReportQueryInput(params, { timeZone });
 
   if (!params.range && params.period) {
     redirect(reportsHref(input.filters));
@@ -76,10 +80,10 @@ export default async function ReportsPage({
             sourcesInRange={report.sourcesInRange}
           />
           <nav aria-label="Report period" className="df-seg">
-            <Link aria-current={preset === "this-week" ? "page" : undefined} href={reportsHref(filtersForPreset(report.appliedFilters, "this-week"))}>
+            <Link aria-current={preset === "this-week" ? "page" : undefined} href={reportsHref(filtersForPreset(report.appliedFilters, "this-week", new Date(), timeZone))}>
               Week
             </Link>
-            <Link aria-current={preset === "this-month" ? "page" : undefined} href={reportsHref(filtersForPreset(report.appliedFilters, "this-month"))}>
+            <Link aria-current={preset === "this-month" ? "page" : undefined} href={reportsHref(filtersForPreset(report.appliedFilters, "this-month", new Date(), timeZone))}>
               Month
             </Link>
           </nav>
