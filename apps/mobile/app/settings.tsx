@@ -1,7 +1,7 @@
-import { readOwnedAuthenticatedSessionSnapshot, isAuthenticatedSessionSnapshotCurrent } from "@/lib/secure-session";
+import { readOwnedAuthenticatedSessionSnapshot, isAuthenticatedSessionSnapshotCurrent, subscribeAuthenticatedSession } from "@/lib/secure-session";
 import { mobileBuildDiagnostics } from "@/lib/mobileBuildDiagnostics";
 import { supportQueueDiagnostics } from "@/lib/supportSyncDiagnostics";
-import { getActiveMobileAccountSnapshot, readActiveMobileAccount, mobileAccountOwnersEqual, type MobileAccountOwner } from "@/lib/mobileAccount";
+import { getActiveMobileAccountSnapshot, readActiveMobileAccount, mobileAccountOwnersEqual, subscribeActiveMobileAccount, type MobileAccountOwner } from "@/lib/mobileAccount";
 import { afterSettingsTransition, createFocusedTransitionReady, type TransitionGate } from "@/lib/settingsTransition";
 import {
   REVIEW_NUDGE_MINUTES,
@@ -371,7 +371,18 @@ export default function SettingsScreen() {
   // First open of the session: Today's bootstrap for the same account shows the account card and
   // goal numbers at once. Display only: `data` stays null (no stepper, place or location writes)
   // until Settings' own refresh lands.
-  const [todaySeed] = useState(() => cachedSnapshot?.data ? null : readTodayBootstrapForSettings(getActiveMobileAccountSnapshot()));
+  const [initialSeed, setTodaySeed] = useState(() => cachedSnapshot?.data ? null : readTodayBootstrapForSettings(getActiveMobileAccountSnapshot()));
+  // Dropped for good on any sign-out, session or account change while Settings is open, and
+  // re-checked on every render, so a departed account's details never stay on screen.
+  useEffect(() => {
+    if (!initialSeed) return;
+    const drop = () => setTodaySeed(null);
+    const unsubscribes = [subscribeMobileSignedOut(drop), subscribeAuthenticatedSession(drop), subscribeActiveMobileAccount(drop)];
+    // A change between the first render and this subscription.
+    if (readTodayBootstrapForSettings(getActiveMobileAccountSnapshot()) !== initialSeed) drop();
+    return () => unsubscribes.forEach((unsubscribe) => unsubscribe());
+  }, [initialSeed]);
+  const todaySeed = initialSeed && readTodayBootstrapForSettings(getActiveMobileAccountSnapshot()) === initialSeed ? initialSeed : null;
   const shownUser = (data ?? todaySeed)?.user;
   const [queue, setQueue] = useState<QueuedEvent[]>(cachedSnapshot?.queue ?? []);
   const [lastSyncResult, setLastSyncResult] = useState<SyncQueueResult | null>(cachedSnapshot?.lastSyncResult ?? null);
