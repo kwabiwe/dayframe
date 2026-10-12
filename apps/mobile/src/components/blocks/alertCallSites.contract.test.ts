@@ -20,7 +20,7 @@ const ALLOWED_ALERTS: Record<string, string[]> = {
     '"Places"' // delete failed
   ],
   "app/places.tsx": [
-    '"Places"', // load failed
+    // Load failed is the in-page Blocks state with Try again (staging feedback B2), not an alert.
     '"Places"', // ignore failed
     '"Places"' // forget failed
   ],

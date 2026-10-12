@@ -25,10 +25,11 @@ import {
 } from "@dayframe/shared";
 import { BlocksNavHeader, usePreviousScreenLabel } from "@/components/BlocksNavHeader";
 import { BlocksConfirmHost, useBlocksConfirm, type BlocksConfirmController } from "@/components/blocks/BlocksConfirmSheet";
+import { BlocksEmptyState } from "@/components/blocks/BlocksEmptyState";
 import { DayframeIcon } from "@/components/icons/DayframeIcon";
 import { PlaceRoleSheet, type PlaceRoleSheetMode } from "@/components/places/PlaceRoleSheet";
 import { SettingsBlockGroup, SettingsBlockRow, SettingsPillButton } from "@/components/settings/SettingsBlocks";
-import { applyPlaceRoleLocally, learnedPlaceSubtitle, placeRowSubtitle, subscribeDeletedPlaces, takeDeletedPlaces } from "@/lib/placesPage";
+import { applyPlaceRoleLocally, learnedPlaceSubtitle, placeRowSubtitle, placesPageState, subscribeDeletedPlaces, takeDeletedPlaces } from "@/lib/placesPage";
 import { mobileAccountKey, mobileAccountOwnersEqual, readActiveMobileAccount } from "@/lib/mobileAccount";
 import { MOBILE_DISPLAY_FONT, mobileTextProps } from "@/lib/mobileTypography";
 import {
@@ -45,6 +46,7 @@ import {
   type MobileLearnedPlace,
   type MobilePlace
 } from "@/lib/api";
+import { friendlyMobileErrorMessage, mobileFailureKind } from "@/lib/friendlyError";
 import { refreshGeofencesForPlaces } from "@/lib/geofence";
 import { backfillLearnedPlaceLocations } from "@/lib/locationGeocoding";
 import { applyAfterSuccessfulMutation } from "@/lib/localMutation";
@@ -78,6 +80,11 @@ export default function PlacesScreen() {
   const [forgettingLearnedId, setForgettingLearnedId] = useState<string | null>(null);
   const [selectedLearnedPlace, setSelectedLearnedPlace] = useState<MobileLearnedPlace | null>(null);
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
+  // The newest page read failed before any list was shown (staging feedback B2): an in-page state
+  // with Try again instead of a system alert, and never "Nothing saved yet" for a list not read.
+  const [loadFailure, setLoadFailure] = useState<{ offline: boolean } | null>(null);
+  // The status line a failed pull-to-refresh showed, cleared by the next read that lands.
+  const refreshFailureMessage = useRef<string | null>(null);
   // Home and Work (Blocks 7a): which slot's sheet is open, and whether it sets or clears.
   const [roleSheet, setRoleSheet] = useState<{ role: PlaceRole; mode: PlaceRoleSheetMode } | null>(null);
   // One Home/Work change at a time across the page (a second sheet can't open mid-save).
@@ -91,7 +98,9 @@ export default function PlacesScreen() {
     mounted.current = false;
   }, []);
 
-  const load = useCallback(async (options?: { refresh?: boolean; silent?: boolean }) => {
+  // `refresh` is the person's own pull-to-refresh; every other read (opening, focus, Try again)
+  // fails quietly over the list already shown.
+  const load = useCallback(async (options?: { refresh?: boolean }) => {
     if (options?.refresh) setRefreshing(true);
     const epoch = changeEpoch.current;
     const read = ++readSequence.current;
@@ -102,6 +111,10 @@ export default function PlacesScreen() {
       const bootstrap = takeDeletedPlaces(mobileAccountKey({ userId: fetched.user.id, workspaceId: fetched.workspace.id }))
         .reduce((next, id) => reconcileBootstrapPlaces(next, { removePlaceId: id }), fetched);
       setData(bootstrap);
+      setLoadFailure(null);
+      const failedRefresh = refreshFailureMessage.current;
+      refreshFailureMessage.current = null;
+      if (failedRefresh) setStatusMessage((current) => (current === failedRefresh ? null : current));
       void backfillLearnedPlaceLocations(bootstrap.learnedPlaces ?? []).then((resolved) => {
         if (resolved.length === 0) return;
         setData((current) => current ? mergeLearnedPlaceResolutions(current, resolved) : current);
@@ -111,8 +124,14 @@ export default function PlacesScreen() {
         router.replace("/");
         return;
       }
-      if (!options?.silent) {
-        Alert.alert("Places", error instanceof Error ? error.message : "Unable to load places.");
+      if (!mounted.current || read !== readSequence.current) return;
+      if (!dataRef.current) {
+        setLoadFailure({ offline: mobileFailureKind(error) === "offline" });
+      } else if (options?.refresh) {
+        // The list already shown stays; only an asked-for refresh says why it didn't update.
+        const message = friendlyMobileErrorMessage(error, "Couldn't refresh your places. Try again.");
+        refreshFailureMessage.current = message;
+        setStatusMessage(message);
       }
     } finally {
       if (options?.refresh) setRefreshing(false);
@@ -146,7 +165,7 @@ export default function PlacesScreen() {
   useFocusEffect(
     useCallback(() => {
       void applyDeletedPlaces().finally(() => {
-        void load({ silent: true });
+        void load();
       });
     }, [applyDeletedPlaces, load])
   );
@@ -204,7 +223,7 @@ export default function PlacesScreen() {
         router.replace("/");
         return;
       }
-      Alert.alert("Places", error instanceof Error ? error.message : "Unable to ignore learned place.");
+      Alert.alert("Places", friendlyMobileErrorMessage(error, "Couldn't ignore this suggestion. Try again."));
       return false;
     } finally {
       setIgnoringLearnedId(null);
@@ -246,7 +265,7 @@ export default function PlacesScreen() {
         router.replace("/");
         return;
       }
-      Alert.alert("Places", error instanceof Error ? error.message : "Unable to forget learned place.");
+      Alert.alert("Places", friendlyMobileErrorMessage(error, "Couldn't forget this suggestion. Try again."));
       return false;
     } finally {
       setForgettingLearnedId(null);
@@ -303,8 +322,11 @@ export default function PlacesScreen() {
   const slots = placeRoleSlots(rolePlaces);
   const editingSlot = roleSheet ? slots.find((slot) => slot.role === roleSheet.role) ?? null : null;
 
+  const pageState = placesPageState(Boolean(data), Boolean(loadFailure));
+
   function openRole(role: PlaceRole, mode: PlaceRoleSheetMode) {
-    if (roleSaving.current) return;
+    // Only from a list that was read: an unknown list never sends Set straight to adding a place.
+    if (roleSaving.current || !dataRef.current) return;
     setStatusMessage(null);
     // Nothing saved to choose from yet: go straight to adding the place into the slot.
     if (mode === "choose" && places.length === 0) {
@@ -330,7 +352,7 @@ export default function PlacesScreen() {
           router.replace("/");
           return null;
         }
-        return error instanceof Error ? error.message : "Couldn't update this place. Try again.";
+        return friendlyMobileErrorMessage(error, "Couldn't update this place. Try again.");
       }
       // Accepted: shown at once (only for the account that asked, while Places is open), and any
       // read that started before this answer is dropped.
@@ -388,6 +410,35 @@ export default function PlacesScreen() {
             </Reanimated.View>
           ) : null}
 
+          {pageState === "pending" ? (
+            // Before the first read settles: a quiet line in the groups' place (no spinner, and
+            // never "Not set" or "Nothing saved yet" for places not yet known).
+            <Text
+              {...mobileTextProps("body")}
+              accessibilityLiveRegion="polite"
+              style={[styles.placesStatus, styles.placesPending]}
+              testID="places-pending"
+            >
+              Loading your places…
+            </Text>
+          ) : pageState === "failed" && loadFailure ? (
+            <BlocksEmptyState
+              actionAccessibilityLabel="Try loading your places again"
+              actionLabel="Try again"
+              actionTestID="places-unavailable-retry"
+              glyph={loadFailure.offline ? DAYFRAME_APP_ICONS.syncOffline : DAYFRAME_APP_ICONS.places}
+              message={
+                loadFailure.offline
+                  ? "Connect to the internet to see your saved places."
+                  : "Dayframe couldn't load your places. Try again in a moment."
+              }
+              onAction={() => void load()}
+              testID="places-unavailable"
+              theme={theme}
+              title={loadFailure.offline ? "You're offline" : "Places didn't load"}
+            />
+          ) : (
+          <>
           <SettingsBlockGroup foot="Trips and time away are named after these." theme={theme} title="Home and Work">
             {slots.map((slot, index) => (
               <View key={slot.role} style={[styles.placesRow, index > 0 ? styles.settingsActivityRowDivider : null]} testID={`places-role-${slot.role}`}>
@@ -509,6 +560,8 @@ export default function PlacesScreen() {
               ))}
             </SettingsBlockGroup>
           ) : null}
+          </>
+          )}
         </View>
       </ScrollView>
       <LearnedPlaceDetailSheet

@@ -22,6 +22,7 @@ import {
 } from "@dayframe/shared";
 import { DAYFRAME_API_BASE } from "./config";
 import {
+  MobileApiResponseError,
   MobileHttpResponseError,
   MobileRequestTimeoutError,
   StaleMobileSessionResponseError,
@@ -614,7 +615,7 @@ export async function fetchTimerState(): Promise<TimerStateFingerprint> {
     throw new AuthRequiredError();
   }
   if (!response.ok) {
-    throw new Error(await errorMessage(response, "Couldn't check what's recording"));
+    throw await apiResponseError(response, "Couldn't check what's recording");
   }
   return readJsonResponse<TimerStateFingerprint>(response);
 }
@@ -637,7 +638,7 @@ export async function registerLiveActivity(input: {
     throw new AuthRequiredError();
   }
   if (!response.ok) {
-    throw new Error(await errorMessage(response, "Unable to register Live Activity"));
+    throw await apiResponseError(response, "Unable to register Live Activity");
   }
 }
 
@@ -661,8 +662,10 @@ export async function requestPasswordReset(email: string) {
     { timeoutMilliseconds: MOBILE_OPENING_REQUEST_TIMEOUT_MS, timeoutMessage: "This is taking too long. Check your connection and try again." }
   );
   const payload = await readJsonResponse<{ message?: string; error?: string }>(response).catch(() => ({} as { message?: string; error?: string }));
-  if (response.status === 404) throw new Error("Password reset isn't available here.");
-  if (!response.ok) throw new Error(payload.error ?? "Dayframe couldn't send the reset email. Try again.");
+  if (response.status === 404) throw new MobileApiResponseError(404, "Password reset isn't available here.", true);
+  if (!response.ok) {
+    throw new MobileApiResponseError(response.status, payload.error ?? "Dayframe couldn't send the reset email. Try again.", Boolean(payload.error));
+  }
   return payload.message ?? "If an account uses that email, a reset link is on its way. Check your email.";
 }
 
@@ -1500,7 +1503,7 @@ export async function deleteTimeEntry(id: string) {
   if (response.status === 401) {
     throw new AuthRequiredError();
   }
-  if (!response.ok) throw new Error(await errorMessage(response, "Couldn't delete the block"));
+  if (!response.ok) throw await apiResponseError(response, "Couldn't delete the block");
   return readJsonResponse(response);
 }
 
@@ -1523,7 +1526,7 @@ export async function updateTimeEntry(id: string, patch: TimeEntryUpdatePatch) {
   if (response.status === 401) {
     throw new AuthRequiredError();
   }
-  if (!response.ok) throw new Error(await errorMessage(response, "Couldn't update the block"));
+  if (!response.ok) throw await apiResponseError(response, "Couldn't update the block");
   return readJsonResponse(response);
 }
 
@@ -1546,7 +1549,7 @@ export async function createManualTimeEntry(input: ManualTimeEntryInput) {
   if (response.status === 401) {
     throw new AuthRequiredError();
   }
-  if (!response.ok) throw new Error(await errorMessage(response, "Couldn't add the block"));
+  if (!response.ok) throw await apiResponseError(response, "Couldn't add the block");
   return readJsonResponse(response);
 }
 
@@ -1573,7 +1576,7 @@ export async function resolveReviewItem(id: string, action: ReviewItemAction) {
     }
     throw new Error(result.ok ? formatApiError(result.payload) ?? "Unable to update review item" : result.message);
   }
-  if (!response.ok) throw new Error(await errorMessage(response, "Unable to update review item"));
+  if (!response.ok) throw await apiResponseError(response, "Unable to update review item");
   return readJsonResponse(response);
 }
 
@@ -1596,7 +1599,7 @@ export async function resolveLocationReviewItem(id: string, action: LocationRevi
   if (response.status === 401) {
     throw new AuthRequiredError();
   }
-  if (!response.ok) throw new Error(await errorMessage(response, "Unable to update location review"));
+  if (!response.ok) throw await apiResponseError(response, "Unable to update location review");
   return readJsonResponse(response);
 }
 
@@ -1649,7 +1652,7 @@ export async function deleteRecentLocationEvidence() {
   if (response.status === 401) {
     throw new AuthRequiredError();
   }
-  if (!response.ok) throw new Error(await errorMessage(response, "Unable to delete recent location evidence"));
+  if (!response.ok) throw await apiResponseError(response, "Unable to delete recent location evidence");
   const server = await readJsonResponse<{ ok: true; deletedEvidenceCount: number }>(response);
   const local = await import("./location/store").then(({ deleteRetainedLocationEvidence }) =>
     deleteRetainedLocationEvidence()
@@ -1711,7 +1714,7 @@ export async function saveEditedReviewItem(
   if (response.status === 401) {
     throw new AuthRequiredError();
   }
-  if (!response.ok) throw new Error(await errorMessage(response, "Unable to save reviewed activity"));
+  if (!response.ok) throw await apiResponseError(response, "Unable to save reviewed activity");
   return readJsonResponse(response);
 }
 
@@ -1740,7 +1743,7 @@ export async function createCategory(
     throw new AuthRequiredError();
   }
   if (response.status === 409) throw new ActivityNameTakenError(await errorMessage(response, "An activity with that name already exists."));
-  if (!response.ok) throw new Error(await errorMessage(response, "Unable to create activity"));
+  if (!response.ok) throw await apiResponseError(response, "Unable to create activity");
   return readJsonResponse(response);
 }
 
@@ -1756,7 +1759,7 @@ export async function createTag(name: string): Promise<MobileTagResponse> {
   if (response.status === 401) {
     throw new AuthRequiredError();
   }
-  if (!response.ok) throw new Error(await errorMessage(response, "Unable to create tag"));
+  if (!response.ok) throw await apiResponseError(response, "Unable to create tag");
   return readJsonResponse(response);
 }
 
@@ -1775,7 +1778,7 @@ export async function ensureAutomaticLoggingCategories(
     throw new AuthRequiredError();
   }
   if (!response.ok) {
-    throw new Error(await errorMessage(response, "Unable to prepare automatic logging activities"));
+    throw await apiResponseError(response, "Unable to prepare automatic logging activities");
   }
   const payload = await readJsonResponse<{ categories: MobileCategoryResponse[] }>(response);
   return payload.categories;
@@ -1796,7 +1799,7 @@ export async function updateCategory(
   if (response.status === 401) {
     throw new AuthRequiredError();
   }
-  if (!response.ok) throw new Error(await errorMessage(response, "Unable to update activity"));
+  if (!response.ok) throw await apiResponseError(response, "Unable to update activity");
   return readJsonResponse(response);
 }
 
@@ -1813,7 +1816,7 @@ export async function updateTimeGoals(goals: { dailyGoalMinutes?: number; weekly
   if (response.status === 401) {
     throw new AuthRequiredError();
   }
-  if (!response.ok) throw new Error(await errorMessage(response, "Unable to save your goal"));
+  if (!response.ok) throw await apiResponseError(response, "Unable to save your goal");
 }
 
 /** Settings › Activities › Archived (Blocks 6b-2): the workspace's archived activities. */
@@ -1824,7 +1827,7 @@ export async function listArchivedCategories(): Promise<MobileBootstrap["categor
   if (response.status === 401) {
     throw new AuthRequiredError();
   }
-  if (!response.ok) throw new Error(await errorMessage(response, "Unable to load archived activities"));
+  if (!response.ok) throw await apiResponseError(response, "Unable to load archived activities");
   const body = await readJsonResponse<{ categories: MobileBootstrap["categories"] }>(response);
   return body.categories;
 }
@@ -1842,7 +1845,7 @@ export async function restoreCategory(id: string): Promise<MobileCategoryRespons
   if (response.status === 401) {
     throw new AuthRequiredError();
   }
-  if (!response.ok) throw new Error(await errorMessage(response, "Unable to restore the activity"));
+  if (!response.ok) throw await apiResponseError(response, "Unable to restore the activity");
   return readJsonResponse(response);
 }
 
@@ -1854,7 +1857,7 @@ export async function archiveCategory(id: string) {
   if (response.status === 401) {
     throw new AuthRequiredError();
   }
-  if (!response.ok) throw new Error(await errorMessage(response, "Unable to delete activity"));
+  if (!response.ok) throw await apiResponseError(response, "Unable to delete activity");
   return readJsonResponse(response);
 }
 
@@ -1890,7 +1893,7 @@ export async function createPlace(input: { name: string } & PlaceMutationInput, 
     throw new AuthRequiredError();
   }
   const fallback = input.learnedPlaceId ? "Unable to save learned place" : "Unable to save place";
-  if (!response.ok) throw new Error(await errorMessage(response, fallback));
+  if (!response.ok) throw await apiResponseError(response, fallback);
   return readPlaceResponse(response, fallback);
 }
 
@@ -1907,7 +1910,7 @@ export async function setPlaceRole(input: { role: PlaceRole; placeId: string | n
   if (response.status === 401) {
     throw new AuthRequiredError();
   }
-  if (!response.ok) throw new Error(await errorMessage(response, "Unable to update this place"));
+  if (!response.ok) throw await apiResponseError(response, "Unable to update this place");
   const result = await readApiJson<{ role: PlaceRole; placeId: string | null; previousPlaceId: string | null }>(
     response,
     "Unable to update this place"
@@ -1928,7 +1931,7 @@ export async function ignoreLearnedPlace(id: string) {
   if (response.status === 401) {
     throw new AuthRequiredError();
   }
-  if (!response.ok) throw new Error(await errorMessage(response, "Unable to ignore learned place"));
+  if (!response.ok) throw await apiResponseError(response, "Unable to ignore learned place");
   return readApiJson<{ ok: true; id: string; status: "ignored" }>(response, "Unable to ignore learned place");
 }
 
@@ -1944,7 +1947,7 @@ export async function resolveLearnedPlaceLocation(id: string, address: LocationD
   if (response.status === 401) {
     throw new AuthRequiredError();
   }
-  if (!response.ok) throw new Error(await errorMessage(response, "Unable to resolve learned place"));
+  if (!response.ok) throw await apiResponseError(response, "Unable to resolve learned place");
   return readJsonResponse<{
     ok: true;
     learnedPlace: Pick<
@@ -1962,7 +1965,7 @@ export async function forgetLearnedPlace(id: string) {
   if (response.status === 401) {
     throw new AuthRequiredError();
   }
-  if (!response.ok) throw new Error(await errorMessage(response, "Unable to forget learned place"));
+  if (!response.ok) throw await apiResponseError(response, "Unable to forget learned place");
   return readApiJson<{ ok: true; id: string; status: "forgotten" }>(response, "Unable to forget learned place");
 }
 
@@ -1982,7 +1985,7 @@ export async function updatePlace(id: string, input: PlaceMutationInput) {
   if (response.status === 401) {
     throw new AuthRequiredError();
   }
-  if (!response.ok) throw new Error(await errorMessage(response, "Unable to update place"));
+  if (!response.ok) throw await apiResponseError(response, "Unable to update place");
   return readPlaceResponse(response, "Unable to update place");
 }
 
@@ -1994,7 +1997,7 @@ export async function deletePlace(id: string) {
   if (response.status === 401) {
     throw new AuthRequiredError();
   }
-  if (!response.ok) throw new Error(await errorMessage(response, "Unable to delete place"));
+  if (!response.ok) throw await apiResponseError(response, "Unable to delete place");
   const payload = await readApiJson<{ ok?: boolean } & ApiErrorPayload>(response, "Unable to delete place");
   if (!payload.ok) throw new Error(payload.message);
   const apiError = formatApiError(payload.payload);
@@ -2417,7 +2420,8 @@ async function authenticate(path: string, body: Record<string, unknown>): Promis
     }
   );
   const payload = await readJsonResponse<MobileAuthResult & { error?: string }>(response);
-  if (!response.ok) throw new Error(plainAuthError(payload.error, response.status));
+  // Already plain words (UIA-320), so they are shown as they are.
+  if (!response.ok) throw new MobileApiResponseError(response.status, plainAuthError(payload.error, response.status), true);
   if ("requiresEmailConfirmation" in payload) return payload;
   const owner = {
     userId: payload.user.id,
@@ -2458,7 +2462,7 @@ async function postTimerAction(body: Record<string, unknown>) {
   if (response.status === 401) {
     throw new AuthRequiredError();
   }
-  if (!response.ok) throw new Error(await errorMessage(response, "The block action failed"));
+  if (!response.ok) throw await apiResponseError(response, "The block action failed");
   return readJsonResponse<TimerActionResult>(response);
 }
 
@@ -2498,6 +2502,20 @@ async function readPlaceResponse(response: Response, fallback: string): Promise<
     throw new Error(formatApiError(payload) ?? fallback);
   }
   return payload as MobilePlaceResponse;
+}
+
+/**
+ * A failed reply as an error: the server's own sentence (from its JSON error body) when it gave
+ * one, otherwise this call's fallback, marked so the iPhone shows only the server's words as they are.
+ */
+async function apiResponseError(response: Response, fallback: string) {
+  const result = await readApiJson<ApiErrorPayload>(response, fallback);
+  const serverMessage = result.ok ? formatApiError(result.payload) : undefined;
+  return new MobileApiResponseError(
+    response.status,
+    blockWordingForServerMessage(serverMessage ?? (result.ok ? `${fallback}: ${response.status}` : result.message)),
+    Boolean(serverMessage)
+  );
 }
 
 async function errorMessage(response: Response, fallback: string) {
