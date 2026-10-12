@@ -6499,7 +6499,7 @@ kbd {
   width: 8px;
   height: 8px;
   flex: 0 0 auto;
-  border-radius: 999px;
+  border-radius: var(--activity-marker-radius);
 }
 
 .swiss-task-suggestions-list svg {

@@ -5,11 +5,10 @@ import { describe, expect, it } from "vitest";
 // round dot. Non-activity dots (status, now line, goal dots, avatars) are deliberately not covered.
 const css = readFileSync(new URL("./globals.css", import.meta.url), "utf8");
 
+// Markers rendered today (each is used by a component; see the rendered-use test below).
 const ACTIVITY_MARKERS = [
   ".category-data-marker",
-  ".report-filter-option-dot",
-  ".report-filter-chip-dot",
-  ".report-category-marker",
+  ".swiss-task-suggestions-list i",
   ".report-entry-category i",
   ".category-picker-color-swatch",
   ".swiss-focus-dot",
