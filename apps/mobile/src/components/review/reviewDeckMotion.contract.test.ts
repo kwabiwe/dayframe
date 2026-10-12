@@ -8,6 +8,13 @@ function source(relativePath: string) {
 
 const deck = source("./ReviewDeck.tsx");
 const screen = source("../../../app/review.tsx");
+const theme = source("../../lib/mobileTheme.ts");
+
+function styleBlock(name: string) {
+  const start = theme.indexOf(`${name}: {`);
+  expect(start, name).toBeGreaterThanOrEqual(0);
+  return theme.slice(start, theme.indexOf("}", start) + 1);
+}
 
 describe("Review deck motion contract (Blocks parity step 5b)", () => {
   it("gives the top card one pan owner that leaves the vertical axis to pull-to-refresh", () => {
@@ -62,6 +69,35 @@ describe("Review deck motion contract (Blocks parity step 5b)", () => {
     expect(screen).toContain("logDisabled={topDeckControlsDisabled || deckFlying}");
     expect(screen).toContain("skipDisabled={deckFlying || (topDeckSkipDefers && deckSources.length <= 1)}");
     expect(deck).toContain("reviewDeckArmDirection(dragX.value, event.translationX)");
+  });
+
+  it("hangs the Undo toast below the round actions, never over the card (staging feedback C1)", () => {
+    const reserve = Number(deck.match(/export const REVIEW_DECK_TOAST_RESERVE = (\d+);/)?.[1]);
+    expect(reserve).toBeGreaterThanOrEqual(52 + 12);
+    // The anchor around the actions always reserves the toast's room under itself.
+    const anchor = styleBlock("reviewDeckActionsAnchor");
+    expect(anchor).toContain(`marginBottom: ${reserve}`);
+    expect(anchor).toContain('position: "relative"');
+    // The toast starts 12 points under the actions' bottom edge, out of flow.
+    const toast = styleBlock("reviewDeckToast");
+    expect(toast).toContain('position: "absolute"');
+    expect(toast).toContain('top: "100%"');
+    expect(toast).toContain("marginTop: 12");
+    expect(toast).not.toContain("bottom:");
+    // Rendered after the actions inside their anchor (below them for VoiceOver too).
+    expect(screen).toMatch(/<View style=\{styles\.reviewDeckActionsAnchor\}>\s*<ReviewDeckActions[\s\S]*?\/>\s*\{\/\*[^*]*\*\/\}\s*\{renderDeckToast\("actions"\)\}\s*<\/View>/);
+    expect(screen).toContain('placement === "under" ? styles.reviewDeckToastUnderButton : styles.reviewDeckToast');
+    expect(styleBlock("reviewDeckWaitingContent")).toContain(`paddingBottom: ${reserve}`);
+  });
+
+  it("names a logged card's toast by its Log as name (staging feedback C2)", () => {
+    expect(screen).toMatch(/const decisionName = reviewDeckDecisionName\(\{\s*logged,\s*cardTitle: [^\n]*\n\s*edit: logged \? deckLogAsEdit\(item\) : null,\s*isLocationV2Commute: isLocationV2Commute\(item\),/);
+    // The toast's name and the saved edit come from the same edit.
+    expect(screen).toContain("const edit = held.logged ? deckLogAsEdit(item) : null;");
+    expect(screen).toContain("AccessibilityInfo.announceForAccessibility(`${held.title} is back.`);");
+    expect(screen).toContain("title: decisionName,");
+    expect(screen).toContain('`${logged ? "Logged" : "Skipped"} ${decisionName}. Undo is available for a few seconds.`');
+    expect(screen).not.toContain("title: card?.title ?? reviewItemTitle(item),");
   });
 
   it("keeps Undo in every deck state and never decides a cancelled gesture (r3 1, 2)", () => {
@@ -122,7 +158,8 @@ describe("Review deck live Log as (Blocks parity step 5c-1)", () => {
     expect(deck).toContain('testID="review-deck-log-as-activity"');
     expect(screen).toContain("<ActivityPickerSheet");
     // The edit is decided when the hold ends, from what really changed (src/lib/reviewLogAs.ts).
-    expect(screen).toMatch(/const edit = held\.logged\s*\? reviewLogAsEdit\(/);
+    expect(screen).toContain("const edit = held.logged ? deckLogAsEdit(item) : null;");
+    expect(screen).toMatch(/function deckLogAsEdit\(item: MobileReviewItem\) \{\s*return reviewLogAsEdit\(\{/);
     expect(screen).toContain('resolveItem(item, { action: "edit_and_confirm", edit }');
     // The field is uncontrolled and its touches never start a throw.
     expect(deck).toContain("defaultValue={card.logAsName}");
