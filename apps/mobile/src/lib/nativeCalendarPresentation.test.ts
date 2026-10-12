@@ -399,12 +399,24 @@ describe("native Calendar presentation boundary", () => {
         stoppedAt: iso(localTime(2026, 7, 10, 10, 30))
       })
     ]));
+    // Side by side, never an inset over the longer block (Trello 210): the longer block keeps the
+    // left column with its text, the short one the right. Apart horizontally, so the short block's
+    // hit geometry no longer counts the longer one.
+    expect(contained.model.entries.find((item) => item.entryId === "base")).toMatchObject({
+      layoutMode: "lane",
+      offsetFraction: 0,
+      widthFraction: 0.5,
+      overlapCount: 0,
+      warningOverlapCount: 1
+    });
     expect(contained.model.entries.find((item) => item.entryId === "short")).toMatchObject({
-      layoutMode: "insetOverlay",
-      offsetFraction: 0.18,
-      widthFraction: 0.8200000000000001,
-      overlapCount: 1,
-      overlapSeconds: 1_800
+      layoutMode: "lane",
+      offsetFraction: 0.5,
+      widthFraction: 0.5,
+      overlapCount: 0,
+      overlapSeconds: 1_800,
+      textDensity: "full",
+      warningOverlapCount: 1
     });
     expect(contained.model).toMatchObject({
       loggedSeconds: 12_600,
@@ -417,8 +429,140 @@ describe("native Calendar presentation boundary", () => {
       entry({ id: "b", startedAt: iso(localTime(2026, 7, 10, 10, 0)), stoppedAt: iso(localTime(2026, 7, 10, 13, 0)) }),
       entry({ id: "c", startedAt: iso(localTime(2026, 7, 10, 11, 0)), stoppedAt: iso(localTime(2026, 7, 10, 14, 0)) })
     ]));
-    expect(dense.model.entries.every((item) => item.layoutMode === "compactLane")).toBe(true);
-    expect(dense.model.entries.every((item) => item.textDensity === "none")).toBe(true);
+    // Three columns; iOS measures each column and shows the title wherever it fits.
+    expect(dense.model.entries.map((item) => [item.entryId, item.laneIndex, item.laneCount])).toEqual([
+      ["a", 0, 3], ["b", 1, 3], ["c", 2, 3]
+    ]);
+    expect(dense.model.entries.every((item) => item.layoutMode === "lane" && item.textDensity === "full")).toBe(true);
+  });
+
+  describe("overlap columns (Trello 210)", () => {
+    const now = localTime(2026, 7, 10, 23, 0);
+    const at = (hour: number, minute: number, second = 0) => localTime(2026, 7, 10, hour, minute) + second * 1000;
+    const block = (id: string, start: number, stop: number | null, overrides: Partial<MobileTimeEntry> = {}) =>
+      entry({ id, startedAt: iso(start), stoppedAt: stop === null ? null : iso(stop), ...overrides });
+    const byId = (state: ReturnType<typeof build>) => new Map(state.model.entries.map((item) => [item.entryId, item]));
+    const expectSideBySide = (state: ReturnType<typeof build>, ids: string[]) => {
+      const items = byId(state);
+      for (const [index, left] of ids.entries()) {
+        for (const right of ids.slice(index + 1)) {
+          const a = items.get(left)!;
+          const b = items.get(right)!;
+          const apart = a.offsetFraction + a.widthFraction <= b.offsetFraction + 1e-9
+            || b.offsetFraction + b.widthFraction <= a.offsetFraction + 1e-9;
+          expect(apart, `${left} and ${right} share horizontal space`).toBe(true);
+        }
+      }
+    };
+
+    it("the owner's Gym block and a 07:00–07:05 manual block sit side by side, the Gym block on the left", () => {
+      const state = build(now, bootstrap([
+        block("gym", at(6, 59), at(8, 4), { categoryName: "Gym", categoryColor: "green", placeName: "PureGym" }),
+        block("manual", at(7, 0), at(7, 5), { categoryColor: "green" })
+      ]));
+      const items = byId(state);
+      expect(items.get("gym")).toMatchObject({ laneIndex: 0, laneCount: 2, offsetFraction: 0, widthFraction: 0.5, textDensity: "full", placeText: "PureGym" });
+      expect(items.get("manual")).toMatchObject({ laneIndex: 1, laneCount: 2, offsetFraction: 0.5, widthFraction: 0.5, textDensity: "full" });
+      // Apart, so the short block keeps its 44-point target inside its own column.
+      expect(items.get("manual")?.overlapCount).toBe(0);
+      expect(items.get("gym")?.overlapCount).toBe(0);
+      // The overlap dot and VoiceOver note still say they overlap.
+      expect(items.get("manual")?.warningOverlapCount).toBe(1);
+      expect(items.get("manual")?.accessibilityLabel).toContain("Overlaps 1 other entry.");
+      expectSideBySide(state, ["gym", "manual"]);
+    });
+
+    it("blocks starting together put the longer one on the left", () => {
+      const state = build(now, bootstrap([
+        block("short", at(7, 0), at(7, 5)),
+        block("long", at(7, 0), at(8, 0))
+      ]));
+      const items = byId(state);
+      expect(items.get("long")?.laneIndex).toBe(0);
+      expect(items.get("short")?.laneIndex).toBe(1);
+    });
+
+    it("a nested pair inside a longer block takes three columns", () => {
+      const state = build(now, bootstrap([
+        block("outer", at(9, 0), at(12, 0)),
+        block("middle", at(9, 30), at(11, 0)),
+        block("inner", at(10, 0), at(10, 30))
+      ]));
+      const items = byId(state);
+      expect(["outer", "middle", "inner"].map((id) => [items.get(id)?.laneIndex, items.get(id)?.laneCount])).toEqual([[0, 3], [1, 3], [2, 3]]);
+      expectSideBySide(state, ["outer", "middle", "inner"]);
+    });
+
+    it("a chain of overlaps is one cluster of two columns, and a later block reuses a free column", () => {
+      const state = build(now, bootstrap([
+        block("a", at(9, 0), at(10, 0)),
+        block("b", at(9, 30), at(11, 0)),
+        block("c", at(10, 30), at(12, 0)),
+        block("apart", at(14, 0), at(15, 0))
+      ]));
+      const items = byId(state);
+      expect(["a", "b", "c"].map((id) => [items.get(id)?.laneIndex, items.get(id)?.laneCount])).toEqual([[0, 2], [1, 2], [0, 2]]);
+      expectSideBySide(state, ["a", "b"]);
+      expectSideBySide(state, ["b", "c"]);
+      expect(items.get("apart")).toMatchObject({ layoutMode: "full", offsetFraction: 0, widthFraction: 1, laneCount: 1, zIndex: 0 });
+    });
+
+    it("lays the running block out to now, keeping it active and side by side", () => {
+      const running = block("running", at(22, 0), null, { durationSeconds: 1 });
+      const state = build(now, bootstrap([
+        running,
+        block("added", at(22, 30), at(22, 40))
+      ], { activeEntry: running }));
+      const items = byId(state);
+      expect(items.get("running")).toMatchObject({ actionKind: "active", isActive: true, laneIndex: 0, laneCount: 2, stoppedAtMs: null });
+      expect(items.get("added")).toMatchObject({ laneIndex: 1, laneCount: 2 });
+      // Before the running block reaches 22:30 the two do not overlap and both keep the full width.
+      const earlier = byId(build(at(22, 20), bootstrap([running, block("added", at(22, 30), at(22, 40))], { activeEntry: running })));
+      expect(earlier.get("running")).toMatchObject({ laneCount: 1, widthFraction: 1 });
+    });
+
+    it("a very short block inside a longer one still gets its own column, and keeps a full target there", () => {
+      // 30 seconds: under the one-minute overlap rule, but iOS draws it at least 4 points tall.
+      const state = build(now, bootstrap([
+        block("gym", at(6, 59), at(8, 0)),
+        block("blip", at(7, 0), at(7, 0, 30))
+      ]));
+      const items = byId(state);
+      expect(items.get("blip")).toMatchObject({ laneIndex: 1, laneCount: 2, overlapCount: 0, warningOverlapCount: 0 });
+      expectSideBySide(state, ["gym", "blip"]);
+    });
+
+    it("back-to-back and sub-minute brushes stay full width", () => {
+      const state = build(now, bootstrap([
+        block("first", at(7, 0), at(7, 2)),
+        block("next", at(7, 2), at(8, 0)),
+        // Shares 30 seconds with "next" at its end: drawn as touching, as before.
+        block("brush", at(7, 59, 30), at(8, 30))
+      ]));
+      for (const item of state.model.entries) {
+        expect(item).toMatchObject({ layoutMode: "full", offsetFraction: 0, widthFraction: 1 });
+      }
+    });
+
+    it("an overlapping pair beside the Review lane stays side by side inside the logged part", () => {
+      const state = build(now, bootstrap([
+        block("gym", at(6, 59), at(8, 4)),
+        block("manual", at(7, 0), at(7, 5)),
+        entry({ id: "suggestion", reviewStatus: "needs_review", startedAt: iso(at(7, 30)), stoppedAt: iso(at(7, 50)) })
+      ]));
+      const items = byId(state);
+      const loggedWidth = 1 - REVIEW_LANE_WIDTH;
+      expect(items.get("gym")?.offsetFraction).toBeCloseTo(0);
+      expect(items.get("gym")?.widthFraction).toBeCloseTo(loggedWidth / 2);
+      expect(items.get("manual")?.offsetFraction).toBeCloseTo(loggedWidth / 2);
+      expect(items.get("manual")?.widthFraction).toBeCloseTo(loggedWidth / 2);
+      expect(items.get("suggestion")?.offsetFraction).toBeCloseTo(1 - REVIEW_LANE_WIDTH);
+      expect(items.get("suggestion")?.overlapCount).toBe(0);
+      // The Gym block overlaps the suggestion, so it keeps its exact (semantic) target.
+      expect(items.get("gym")?.overlapCount).toBe(1);
+      expect(items.get("manual")?.overlapCount).toBe(0);
+      expectSideBySide(state, ["gym", "manual", "suggestion"]);
+    });
   });
 });
 

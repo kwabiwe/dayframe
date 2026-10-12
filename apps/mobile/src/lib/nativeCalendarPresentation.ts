@@ -6,6 +6,7 @@ import {
   type TimeIntervalLayout
 } from "@dayframe/shared";
 import type { MobileBootstrap, MobileTimeEntry } from "./api";
+import { layoutCalendarColumns } from "./calendarColumns";
 import type { MobileTheme } from "./mobileTheme";
 import {
   REVIEW_COPY,
@@ -60,7 +61,11 @@ export type NativeCalendarPresentationEntry = {
   layoutMode: TimeIntervalLayout["mode"];
   meta: string;
   offsetFraction: number;
-  /** Overlaps with any shown block, Review included: drives hit geometry (no 44-pt expansion). */
+  /**
+   * Overlaps that could share a tap target: drives hit geometry (no 44-pt expansion while > 0).
+   * Every Review suggestion it overlaps counts; a logged block counts only while the two share
+   * horizontal space, so a short block in its own overlap column keeps its 44-point target there.
+   */
   overlapCount: number;
   overlapSeconds: number;
   placeText: string | null;
@@ -229,6 +234,43 @@ function loggedIdsBesideReview(
 }
 const REVIEW_LANE_Z_INDEX = 1_000;
 
+/**
+ * Logged blocks: overlap columns side by side (Trello 210, `layoutCalendarColumns`), laid out where
+ * iOS draws them (the wall-clock minute, clipped to the day; a running block ends now). Never an
+ * inset over a longer block, which covered its title. Text density is left to iOS, which shows the
+ * title and the time/place lines only where the measured column width and height allow them.
+ */
+function layoutLoggedColumns(entries: NativeCalendarEntry[], dayStart: Date, dayEnd: Date, now: number): TimeIntervalLayout[] {
+  const dayStartMs = dayStart.getTime();
+  const dayEndMs = dayEnd.getTime();
+  return layoutCalendarColumns(entries.flatMap((entry) => {
+    const start = Date.parse(entry.startedAt);
+    const end = entry.stoppedAt ? Date.parse(entry.stoppedAt) : now;
+    if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start) return [];
+    const drawnStart = dayStartMs + wallClockOffsetMs(start, dayStartMs, dayEndMs);
+    return [{ id: entry.id, startMs: drawnStart, endMs: Math.max(drawnStart, dayStartMs + wallClockOffsetMs(end, dayStartMs, dayEndMs)) }];
+  })).map((column) => ({
+    id: column.id,
+    groupId: column.clusterId,
+    mode: column.columnCount === 1 ? "full" : "lane",
+    laneIndex: column.columnIndex,
+    laneCount: column.columnCount,
+    offsetFraction: column.offsetFraction,
+    widthFraction: column.widthFraction,
+    zIndex: column.zIndex,
+    textDensity: "full"
+  }));
+}
+
+/** Two laid-out blocks share horizontal space (a missing layout counts as the full width). */
+function sharesHorizontalSpace(left: TimeIntervalLayout | undefined, right: TimeIntervalLayout | undefined) {
+  const leftStart = left?.offsetFraction ?? 0;
+  const rightStart = right?.offsetFraction ?? 0;
+  const epsilon = 1e-9;
+  return leftStart < rightStart + (right?.widthFraction ?? 1) - epsilon
+    && rightStart < leftStart + (left?.widthFraction ?? 1) - epsilon;
+}
+
 function layoutDayEntries(
   entries: NativeCalendarEntry[],
   dayStart: Date,
@@ -297,8 +339,8 @@ export function buildNativeCalendarBridgeState({
   const reviewEntries = entries.filter((entry) => isCalendarReviewNeeded(entry));
   const besideReview = loggedIdsBesideReview(confirmedEntries, reviewEntries, now, dayStart, dayEnd);
   const reviewSpanDayEnd = new Date(dayStart.getTime() + DAY_MS);
-  const layoutById = new Map([
-    ...layoutDayEntries(confirmedEntries, dayStart, dayEnd, now).map((layout) => [layout.id, besideReview.has(layout.id) ? {
+  const layoutById = new Map<string, TimeIntervalLayout>([
+    ...layoutLoggedColumns(confirmedEntries, dayStart, dayEnd, now).map((layout) => [layout.id, besideReview.has(layout.id) ? {
       ...layout,
       offsetFraction: layout.offsetFraction * (1 - REVIEW_LANE_WIDTH),
       widthFraction: layout.widthFraction * (1 - REVIEW_LANE_WIDTH)
@@ -314,6 +356,22 @@ export function buildNativeCalendarBridgeState({
       zIndex: REVIEW_LANE_Z_INDEX + layout.zIndex
     }] as const)
   ]);
+
+  const reviewIds = new Set(reviewEntries.map((entry) => entry.id));
+  // A logged block's hit geometry counts every Review suggestion it overlaps, and the logged blocks
+  // it overlaps only while they share horizontal space: overlap columns put them side by side, so a
+  // short block's 44-point target stays inside its own column and never covers its neighbour.
+  const hitAnalysis = (id: string) => {
+    const analysis = analysisById.get(id);
+    if (!analysis) return undefined;
+    const own = layoutById.get(id);
+    return {
+      overlapCount: analysis.overlappingEntryIds.filter((otherId) =>
+        reviewIds.has(otherId) || sharesHorizontalSpace(own, layoutById.get(otherId))
+      ).length,
+      overlapSeconds: analysis.overlapSeconds
+    };
+  };
 
   return {
     actionEntries: entries,
@@ -332,7 +390,7 @@ export function buildNativeCalendarBridgeState({
         layoutById.get(entry.id),
         // Review-lane items never share a target (their lanes and crowds already use the target
         // envelope), so iOS gives each its full 44-point height even when the times overlap.
-        isCalendarReviewNeeded(entry) ? { overlapCount: 0, overlapSeconds: 0 } : analysisById.get(entry.id),
+        isCalendarReviewNeeded(entry) ? { overlapCount: 0, overlapSeconds: 0 } : hitAnalysis(entry.id),
         isCalendarReviewNeeded(entry) ? 0 : warningById.get(entry.id) ?? 0
       )),
       modelVersion: 4,
