@@ -1,4 +1,3 @@
-import { DayframeIcon } from "@/components/blocks/DayframeIcon";
 import type { CSSProperties } from "react";
 import Link from "next/link";
 import { ChevronDown } from "lucide-react";
@@ -12,27 +11,16 @@ import type { ReportBreakdownRow, ReportResult } from "@/lib/report-service";
 
 
 /**
- * The analysis below the Blocks top: the daily trend for ranges without a blocks card (15a), the
- * exact activity table (the donut and its rows are "Where it went", 15b-2), tags and the secondary
- * breakdowns.
+ * The analysis below the Blocks top: the daily trend for ranges without a blocks card (15a), then
+ * Tags and More insights, both collapsed by default (UIA-303). The exact activity table is a
+ * disclosure under "Where it went"; the old "Time by activity" card is gone.
  */
 export function ReportsOverview({ report, showTrend = true }: { report: ReportResult; showTrend?: boolean }) {
   return (
     <>
       {showTrend ? <DailyTrend report={report} /> : null}
 
-      <div className="report-analysis-grid">
-        <section className="fill-group-surface report-allocation" aria-labelledby="report-allocation-title">
-          <header className="report-section-header">
-            <div>
-              <h2 id="report-allocation-title">Time by activity</h2>
-              <p>Overlapping blocks count in each activity, the same rule as the total.</p>
-            </div>
-          </header>
-          <AccessibleBreakdownTable caption="Exact time by activity" rows={report.byCategory} totalSeconds={report.totalSeconds} />
-        </section>
-        <TagBreakdown report={report} />
-      </div>
+      <TagBreakdown report={report} />
 
       <SecondaryInsights report={report} />
     </>
@@ -108,14 +96,18 @@ function DailyTrend({ report }: { report: ReportResult }) {
 
 function TagBreakdown({ report }: { report: ReportResult }) {
   return (
-    <section className="fill-group-surface report-ranked-card" aria-labelledby="report-tags-title">
-      <header className="report-section-header">
-        <div>
-          <h2 id="report-tags-title">Tags</h2>
-          <p>Blocks can contain multiple tags, so tag totals may overlap.</p>
-        </div>
-        <DayframeIcon glyph="tag" size={19}/>
-      </header>
+    <details className="fill-group-surface report-secondary-insights report-tags" aria-labelledby="report-tags-title">
+      <summary>
+        <span>
+          <strong id="report-tags-title">Tags</strong>
+          <small>
+            {report.byTag.length > 0
+              ? `${report.byTag.length} ${report.byTag.length === 1 ? "tag" : "tags"} · totals may overlap`
+              : "No tags in this result"}
+          </small>
+        </span>
+        <ChevronIndicator />
+      </summary>
       {report.byTag.length > 0 ? (
         <div className="report-ranked-list">
           {report.byTag.map((row) => (
@@ -125,7 +117,7 @@ function TagBreakdown({ report }: { report: ReportResult }) {
               className="report-ranked-row"
               aria-label={`Filter by tag ${row.name}, ${formatDuration(row.seconds)}`}
             >
-              <span className="report-ranked-name">{row.name}</span>
+              <span className="report-ranked-name">#{row.name}</span>
               <strong>{formatDuration(row.seconds)}</strong>
               <small>{percentageOf(row.seconds, report.totalSeconds)}% · {row.entryCount} {row.entryCount === 1 ? "block" : "blocks"}</small>
               <span className="report-ranked-track" aria-hidden="true">
@@ -135,10 +127,10 @@ function TagBreakdown({ report }: { report: ReportResult }) {
           ))}
         </div>
       ) : (
-        <EmptyAnalysis title="No tags in this result" body="Tagged blocks will appear here when they match the selected filters." />
+        <p className="report-secondary-empty">Tagged blocks appear here when they match the filters.</p>
       )}
       <AccessibleBreakdownTable caption="Exact tag totals; totals may overlap" rows={report.byTag} totalSeconds={report.totalSeconds} />
-    </section>
+    </details>
   );
 }
 
@@ -196,21 +188,23 @@ function RankedBreakdown({
   );
 }
 
-function AccessibleBreakdownTable({
+export function AccessibleBreakdownTable({
   caption,
   friendlySources = false,
   rows,
+  summary = "View exact data",
   totalSeconds
 }: {
   caption: string;
   friendlySources?: boolean;
+  summary?: string;
   rows: ReportBreakdownRow[];
   totalSeconds: number;
 }) {
   if (rows.length === 0) return null;
   return (
     <details className="report-data-table">
-      <summary>View exact data</summary>
+      <summary>{summary}</summary>
       <div className="report-data-table-scroll">
         <table>
           <caption>{caption}</caption>
@@ -229,10 +223,6 @@ function AccessibleBreakdownTable({
       </div>
     </details>
   );
-}
-
-function EmptyAnalysis({ body, title }: { body: string; title: string }) {
-  return <div className="report-empty-analysis"><strong>{title}</strong><p>{body}</p></div>;
 }
 
 function ChevronIndicator() {

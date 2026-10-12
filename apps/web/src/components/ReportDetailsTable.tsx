@@ -6,96 +6,68 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useAppShellRuntime } from "@/components/AppShellRuntime";
 import { saveTimeEntryQuickEdit, TimeEntryQuickEditorModal } from "@/components/TimeEntryQuickEditor";
-import { TagMetadata } from "@/components/TagMetadata";
-import { IconButton } from "@/components/ui/Primitives";
-import { timeEntryCategoryColor, timeEntryCategoryLabel, timeEntryTitle } from "@/lib/display";
+import { resolveActivityIcon } from "@dayframe/shared";
+import { blockStyle } from "@/lib/block-style";
+import { timeEntryCategoryLabel, timeEntryTitle } from "@/lib/display";
 import { formatDate, formatDuration, formatTime } from "@/lib/format";
 import { reportsHref, type ReportSort } from "@/lib/report-filters";
 import type { ReportResult } from "@/lib/report-service";
 
+type ReportEntry = ReportResult["entries"][number];
+
+/**
+ * A block's duration for its row (UIA-303): a positive block shorter than a minute — including one
+ * stored as 0 seconds although it ended after it started — reads "<1m", never "0m".
+ */
+export function reportRowDuration(entry: Pick<ReportEntry, "durationSeconds" | "startedAt" | "stoppedAt">) {
+  if (entry.durationSeconds > 0) return formatDuration(entry.durationSeconds);
+  const spanMs = entry.stoppedAt ? Date.parse(entry.stoppedAt) - Date.parse(entry.startedAt) : 0;
+  return spanMs > 0 ? "<1m" : formatDuration(0);
+}
+
+/**
+ * Matching blocks in Blocks (audit W8b, UIA-303): Today's block rows — activity block, description
+ * with activity, tags and (only when the block has one) place, date and time range, duration and
+ * Edit — with Sort and pagination kept.
+ */
 export function ReportDetailsTable({ report }: { report: ReportResult }) {
   const router = useRouter();
   const { isTimerBusy, shellData, updateActiveEntryFromCalendar } = useAppShellRuntime();
   const [isPending, startTransition] = useTransition();
   const [editingEntry, setEditingEntry] = useState<ReportResult["entries"][number] | null>(null);
 
+  const iconsById = new Map(report.filterOptions.categories.map((category) => [category.id, category.icon ?? null]));
+
   function changeSort(sort: ReportSort) {
     router.push(reportsHref(report.appliedFilters, { sort, page: 1 }));
   }
 
   return (
-    <section className="fill-group-surface report-details" aria-labelledby="report-details-title">
-      <header className="report-section-header report-details-header">
-        <div>
-          <h2 id="report-details-title">Matching blocks</h2>
-          <p>{report.pagination.totalEntries === 1 ? "1 block makes" : `${report.pagination.totalEntries} blocks make`} up these totals.</p>
-        </div>
-        <label className="report-sort-control">
-          <span>Sort</span>
+    <section className="df-card df-report-details" aria-labelledby="report-details-title">
+      <div className="df-card-head">
+        <h2 id="report-details-title">Matching blocks</h2>
+        <span className="df-faint df-tnum">{report.pagination.totalEntries} {report.pagination.totalEntries === 1 ? "block" : "blocks"}</span>
+        <label className="df-report-sort">
+          <span className="sr-only">Sort blocks</span>
           <select className="ui-control" value={report.appliedFilters.sort} onChange={(event) => changeSort(event.target.value as ReportSort)}>
             <option value="newest">Newest first</option>
             <option value="duration">Longest first</option>
           </select>
         </label>
-      </header>
+      </div>
 
       {report.entries.length > 0 ? (
-        <div className="report-detail-table-scroll">
-          <table className="report-detail-table">
-            <caption>Individual blocks matching the active report filters</caption>
-            <thead>
-              <tr>
-                <th>Date and time</th>
-                <th>Description and tags</th>
-                <th>Activity</th>
-                <th>Place</th>
-                <th>Duration</th>
-                <th>Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              {report.entries.map((entry) => (
-                <tr key={entry.id}>
-                  <td data-label="Date and time" className="report-entry-time">
-                    <strong>{formatDate(entry.startedAt)}</strong>
-                    <span>{formatTime(entry.startedAt)}–{entry.stoppedAt ? formatTime(entry.stoppedAt) : "now"}</span>
-                  </td>
-                  <td data-label="Description and tags" className="report-entry-task">
-                    <strong>{timeEntryTitle(entry)}</strong>
-                    <TagMetadata tagNames={entry.tagNames} />
-                    {entry.isRunning ? <span className="report-running-pill">Running</span> : null}
-                    {entry.overlapCount > 0 ? (
-                      <span
-                        className="overlap-marker"
-                        title={`${formatDuration(entry.overlapSeconds)} overlaps ${entry.overlapCount} other ${entry.overlapCount === 1 ? "block" : "blocks"}`}
-                        aria-label={`Overlap: ${formatDuration(entry.overlapSeconds)} shared with ${entry.overlapCount} other ${entry.overlapCount === 1 ? "block" : "blocks"}`}
-                      >
-                        Overlap · {formatDuration(entry.overlapSeconds)}
-                      </span>
-                    ) : null}
-                  </td>
-                  <td data-label="Activity">
-                    <span className="report-entry-category">
-                      <i
-                        className={entry.categoryId ? "" : "is-uncategorized"}
-                        style={{ backgroundColor: timeEntryCategoryColor(entry) }}
-                        aria-hidden="true"
-                      />
-                      {timeEntryCategoryLabel(entry)}
-                    </span>
-                  </td>
-                  <td data-label="Place">{entry.placeName ?? "No place"}</td>
-                  <td data-label="Duration" className="report-entry-duration">{formatDuration(entry.durationSeconds)}</td>
-                  <td data-label="Actions">
-                    <IconButton label={`Edit ${timeEntryTitle(entry)}`} onClick={() => setEditingEntry(entry)} disabled={isPending}>
-                      <DayframeIcon glyph="pencil" size={16}/>
-                    </IconButton>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+        <ul aria-label="Blocks matching the report filters" className="df-rows df-report-rows">
+          {report.entries.map((entry) => (
+            <ReportBlockRow
+              disabled={isPending}
+              entry={entry}
+              icon={iconsById.get(entry.categoryId ?? "") ?? null}
+              key={entry.id}
+              onEdit={() => setEditingEntry(entry)}
+            />
+          ))}
+        </ul>
       ) : (
         <div className="report-empty-details">
           <strong>No matching blocks</strong>
@@ -135,5 +107,65 @@ export function ReportDetailsTable({ report }: { report: ReportResult }) {
         />
       ) : null}
     </section>
+  );
+}
+
+function ReportBlockRow({
+  disabled,
+  entry,
+  icon,
+  onEdit
+}: {
+  disabled: boolean;
+  entry: ReportEntry;
+  icon: string | null;
+  onEdit: () => void;
+}) {
+  const title = timeEntryTitle(entry);
+  const activity = timeEntryCategoryLabel(entry);
+  const tags = entry.tagNames.map((tag) => `#${tag}`).join(" ");
+  // Place only when this block has one: never a repeated empty place (UIA-303).
+  const meta = [activity, tags, entry.placeName ?? ""].filter(Boolean).join(" · ");
+  const when = `${formatTime(entry.startedAt)}–${entry.stoppedAt ? formatTime(entry.stoppedAt) : "now"}`;
+  const duration = reportRowDuration(entry);
+  const glyph = resolveActivityIcon({ icon, name: entry.categoryName }).glyph;
+  const overlap = entry.overlapCount > 0
+    ? `${formatDuration(entry.overlapSeconds)} overlaps ${entry.overlapCount} other ${entry.overlapCount === 1 ? "block" : "blocks"}`
+    : null;
+
+  return (
+    <li className={`df-erow df-report-row${entry.isRunning ? " is-live" : ""}`}>
+      <button
+        aria-label={`${title}, ${meta}, ${formatDate(entry.startedAt)} ${when}, ${duration}${entry.isRunning ? ", running" : ""}${overlap ? `, ${overlap}` : ""}. Edit.`}
+        className="df-erow-main"
+        disabled={disabled}
+        onClick={onEdit}
+        type="button"
+      >
+        <span
+          className={`df-erow-block${entry.categoryId ? " df-block" : ""}`}
+          style={entry.categoryId ? blockStyle(entry.categoryColor, entry.categoryName ?? "") : undefined}
+        >
+          <DayframeIcon glyph={entry.categoryId ? glyph : "tag"} size={16} />
+        </span>
+        <span className="df-erow-text">
+          <b>{title}</b>
+          <span>
+            {meta}
+            {overlap ? <em className="df-report-row-flag" title={overlap}> · Overlap {formatDuration(entry.overlapSeconds)}</em> : null}
+          </span>
+        </span>
+        <span className="df-erow-when df-report-row-when">
+          <small>{formatDate(entry.startedAt)}</small>
+          <span>{when}</span>
+        </span>
+        <span className="df-erow-dur">{duration}</span>
+      </button>
+      <span className="df-erow-acts">
+        <button aria-label={`Edit ${title}`} className="df-icon-action" disabled={disabled} onClick={onEdit} type="button">
+          <DayframeIcon glyph="pencil" size={16} />
+        </button>
+      </span>
+    </li>
   );
 }

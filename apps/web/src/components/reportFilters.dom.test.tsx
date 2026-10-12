@@ -44,8 +44,10 @@ describe("Reports filters", () => {
     render(<ReportFiltersPanel filters={filters()} options={options} rangeLabel="This week" />);
     await user.click(screen.getByRole("button", { name: "Filter" }));
     const dialog = screen.getByRole("dialog");
+    await user.click(within(dialog).getByRole("button", { name: "None" }));
     await user.click(within(dialog).getByRole("button", { name: "Work" }));
-    await user.click(within(dialog).getByRole("button", { name: "acme" }));
+    await user.click(within(dialog).getByRole("button", { name: "#acme" }));
+    await user.click(within(dialog).getByText("More filters"));
     await user.click(within(dialog).getByRole("button", { name: "Apple Health sleep" }));
     await user.type(within(dialog).getByLabelText("Description contains"), "  launch ");
     expect(push).not.toHaveBeenCalled();
@@ -76,10 +78,51 @@ describe("Reports filters", () => {
     await user.click(screen.getByRole("button", { name: "Filter · 1" }));
     const dialog = screen.getByRole("dialog");
     expect(within(dialog).getByRole("button", { name: "Work" }).getAttribute("aria-pressed")).toBe("true");
+    expect(within(dialog).getByRole("button", { name: "No activity" }).getAttribute("aria-pressed")).toBe("false");
     await user.click(within(dialog).getByRole("button", { name: "Reset" }));
-    expect(within(dialog).getByRole("button", { name: "Work" }).getAttribute("aria-pressed")).toBe("false");
+    // Reset means every activity, shown as all chips chosen.
+    expect(within(dialog).getByRole("button", { name: "No activity" }).getAttribute("aria-pressed")).toBe("true");
     expect(push).not.toHaveBeenCalled();
     await user.click(within(dialog).getByRole("button", { name: "Cancel" }));
     expect(push).not.toHaveBeenCalled();
+  });
+
+  it("selects All · None, waits for one activity and counts the blocks Apply will show (UIA-307)", async () => {
+    const user = userEvent.setup();
+    const counts = { totalEntries: 7, byCategory: { [WORK]: 5, uncategorized: 2 } };
+    render(<ReportFiltersPanel counts={counts} filters={filters()} options={options} rangeLabel="This week" sourcesInRange={["manual_app"]} />);
+    await user.click(screen.getByRole("button", { name: "Filter" }));
+    const dialog = screen.getByRole("dialog");
+    expect(within(dialog).getByRole("button", { name: "Show 7 blocks" })).toBeTruthy();
+    await user.click(within(dialog).getByRole("button", { name: "None" }));
+    expect(within(dialog).getByText("Choose at least one activity.")).toBeTruthy();
+    expect((within(dialog).getByRole("button", { name: "Show 0 blocks" }) as HTMLButtonElement).disabled).toBe(true);
+    await user.click(within(dialog).getByRole("button", { name: "Work" }));
+    expect(within(dialog).getByRole("button", { name: "Work" }).className).toContain("df-block");
+    await user.click(within(dialog).getByRole("button", { name: "Show 5 blocks" }));
+    expect(new URL(push.mock.calls[0][0], "http://localhost").searchParams.get("categories")).toBe(WORK);
+  });
+
+  it("hides sources with no time in the range and keeps More filters closed until used (UIA-307)", async () => {
+    const user = userEvent.setup();
+    render(<ReportFiltersPanel filters={filters()} options={options} rangeLabel="This week" sourcesInRange={[]} />);
+    await user.click(screen.getByRole("button", { name: "Filter" }));
+    const dialog = screen.getByRole("dialog");
+    const more = dialog.querySelector("details.df-rf-more") as HTMLDetailsElement;
+    expect(more.open).toBe(false);
+    expect(within(dialog).queryByRole("button", { name: "Apple Health sleep" })).toBeNull();
+    expect(within(dialog).getByText("No sources have time in this range.")).toBeTruthy();
+    // A tag change makes the count unknown, so Apply says Apply.
+    await user.click(within(dialog).getByRole("button", { name: "#acme" }));
+    expect(within(dialog).getByRole("button", { name: "Apply" })).toBeTruthy();
+  });
+
+  it("opens More filters when a place, source or description is applied", async () => {
+    const user = userEvent.setup();
+    render(<ReportFiltersPanel filters={filters({ sources: ["health_sleep"] })} options={options} rangeLabel="This week" sourcesInRange={[]} />);
+    await user.click(screen.getByRole("button", { name: "Filter · 1" }));
+    const dialog = screen.getByRole("dialog");
+    expect((dialog.querySelector("details.df-rf-more") as HTMLDetailsElement).open).toBe(true);
+    expect(within(dialog).getByRole("button", { name: "Apple Health sleep" }).getAttribute("aria-pressed")).toBe("true");
   });
 });
