@@ -37,11 +37,12 @@ export function browserTimeZone(): string | null {
 }
 
 /**
- * The cookie string the app shell writes (a year, first-party, Lax). A zone name only holds
- * characters a cookie value allows, so it is written as it is.
+ * The cookie string the app shell writes (a year, first-party, Lax; `Secure` on HTTPS, left off
+ * for plain-HTTP local development). A zone name only holds characters a cookie value allows, so
+ * it is written as it is.
  */
-export function viewerTimeZoneCookie(zone: string) {
-  return `${VIEWER_TIME_ZONE_COOKIE}=${zone}; Path=/; Max-Age=31536000; SameSite=Lax`;
+export function viewerTimeZoneCookie(zone: string, secure = false) {
+  return `${VIEWER_TIME_ZONE_COOKIE}=${zone}; Path=/; Max-Age=31536000; SameSite=Lax${secure ? "; Secure" : ""}`;
 }
 
 /** The raw zone from a `Cookie` header or `document.cookie`; validate it before use. */
@@ -125,9 +126,9 @@ export function zonedStartOfDay(dateKey: string, timeZone: string): Date {
  * Writes the browser's zone to the cookie when it is missing or different (client only).
  * Returns true when it changed, so a page the server drew for another zone can redraw.
  */
-export function syncViewerTimeZoneCookie(doc: Pick<Document, "cookie">): boolean {
+export function syncViewerTimeZoneCookie(doc: Pick<Document, "cookie">, secure = false): boolean {
   const zone = browserTimeZone();
   if (!zone || viewerTimeZoneFromCookieHeader(doc.cookie) === zone) return false;
-  doc.cookie = viewerTimeZoneCookie(zone);
+  doc.cookie = viewerTimeZoneCookie(zone, secure);
   return true;
 }

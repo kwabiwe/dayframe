@@ -23,6 +23,7 @@ import { basePaletteCommands, type PaletteCommand } from "@/lib/command-palette"
 import { isSearchShortcut, SEARCH_SHORTCUT_LABEL } from "@/lib/keyboard-shortcuts";
 import type { BootstrapData } from "@/lib/queries";
 import { hasOpenDialog, isTypingTarget } from "@/lib/keyboard-ownership";
+import { currentReportsHref, markReportsZoneSyncRefresh } from "@/lib/reports-zone-sync";
 import { syncViewerTimeZoneCookie } from "@/lib/viewer-time-zone";
 import {
   GO_TO_SEQUENCE_MS,
@@ -115,9 +116,13 @@ function AppShellContent({ children }: { children: ReactNode }) {
 
 
   // The browser's time zone, for the days the server works out (Reports). A Reports page drawn
-  // before the cookie existed, or for another zone, redraws once with the viewer's days.
+  // before the cookie existed, or for another zone, redraws once with the viewer's days, at rest
+  // (no landing on reconciliation).
   useEffect(() => {
-    if (syncViewerTimeZoneCookie(document) && window.location.pathname.startsWith("/reports")) router.refresh();
+    if (!syncViewerTimeZoneCookie(document, window.location.protocol === "https:")) return;
+    if (!window.location.pathname.startsWith("/reports")) return;
+    markReportsZoneSyncRefresh(currentReportsHref());
+    router.refresh();
   }, [router]);
 
   useEffect(() => {

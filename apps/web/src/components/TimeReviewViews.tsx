@@ -215,8 +215,9 @@ export function TimeReviewViews({
   });
   const activeScrollContainerRef = useRef<HTMLDivElement | null>(null);
   const timelineStateRef = useRef(state);
-  const navigateRef = useRef<(overrides: Partial<TimelineState>) => Promise<void>>(async () => undefined);
+  const navigateRef = useRef<(overrides: Partial<TimelineState>, options?: { replace?: boolean }) => Promise<void>>(async () => undefined);
   const todayKeyRef = useRef(toTimelineDateKey(new Date()));
+  const initialTodayKeyRef = useRef(initialTodayKey);
 
   const refreshData = useCallback(async () => {
     await refresh();
@@ -260,7 +261,7 @@ export function TimeReviewViews({
     container.scrollTop = position.top;
   }, [state.date, state.scope, state.view]);
 
-  async function navigate(overrides: Partial<typeof state>) {
+  async function navigate(overrides: Partial<typeof state>, options: { replace?: boolean } = {}) {
     const nextState = { ...state, ...overrides };
     const href = timelineHref(searchParams.toString(), state, nextState);
     const originSearch = searchParams.toString();
@@ -284,7 +285,8 @@ export function TimeReviewViews({
     const outcome = await loadDate(nextState.date);
     if (!outcome.ok) return;
     if (window.location.search.slice(1) !== originSearch) return;
-    window.history.pushState(null, "", href);
+    if (options.replace) window.history.replaceState(null, "", href);
+    else window.history.pushState(null, "", href);
     persistPreference(nextState);
   }
 
@@ -303,11 +305,16 @@ export function TimeReviewViews({
       rolloverTimeout = window.setTimeout(reconcileToday, Math.max(250, nextMidnight.getTime() - now.getTime() + 100));
     };
 
+    // The first visible check after the page loads corrects the date the server picked with a
+    // replacement, so Back never returns to it; later ones (midnight) add a history entry.
+    let landed = false;
     const reconcileToday = () => {
       if (document.visibilityState !== "visible") {
         scheduleRollover();
         return;
       }
+      const landing = !landed;
+      landed = true;
       const now = new Date();
       const previousTodayKey = todayKeyRef.current;
       const currentTodayKey = toTimelineDateKey(now);
@@ -317,7 +324,7 @@ export function TimeReviewViews({
         setPresentationNow(now.getTime());
         const currentState = timelineStateRef.current;
         if (shouldAdvanceStaleTimelineToToday(currentState, previousTodayKey, now)) {
-          void navigateRef.current(resetTimelineState(currentState, now));
+          void navigateRef.current(resetTimelineState(currentState, now), { replace: landing });
         }
       }
       scheduleRollover();
@@ -327,8 +334,13 @@ export function TimeReviewViews({
     const handleVisibilityChange = () => {
       if (document.visibilityState === "visible") reconcileToday();
     };
+    // The day this page last treated as today: this tab's own record, otherwise the server's guess
+    // in the viewer's zone. A first visit without the zone cookie (or with a stale one) can open
+    // the server's "today" (UTC on Vercel) just after local midnight; a page showing that day then
+    // moves to the browser's today, as it does when midnight passes (Codex r1 on #367).
     const storedTodayKey = readTimelineTodaySessionKey();
-    if (storedTodayKey) todayKeyRef.current = storedTodayKey;
+    const landingTodayKey = storedTodayKey ?? initialTodayKeyRef.current;
+    if (landingTodayKey) todayKeyRef.current = landingTodayKey;
     reconcileToday();
     window.addEventListener("focus", handleFocus);
     document.addEventListener("visibilitychange", handleVisibilityChange);

@@ -11,6 +11,7 @@ import { blockStyle } from "@/lib/block-style";
 import { categoryDisplay } from "@/lib/display";
 import { formatDuration } from "@/lib/format";
 import { donutArcs, type ReportBlocksDay, type ReportBlocksModel } from "@/lib/reports-blocks";
+import { clearReportsZoneSyncRefresh, currentReportsHref, isReportsZoneSyncRefresh } from "@/lib/reports-zone-sync";
 
 const WEEKDAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 const RADIUS = 46;
@@ -125,12 +126,22 @@ export function ReportsBlocksPanel({
   // that started it may be gone without a blur or leave (I1 review). The focus ring follows the
   // slice element, which survives while its slice does.
   const [seenData, setSeenData] = useState({ blocks, slices });
+  // Blocks a time zone reconciliation redrew (the shell's refresh after the zone cookie changed)
+  // stand at rest instead of landing; the next report the user asks for lands as usual.
+  const [settledBlocks, setSettledBlocks] = useState<ReportBlocksModel | null>(null);
   if (seenData.slices !== slices || seenData.blocks !== blocks) {
+    if (seenData.blocks !== blocks) {
+      setSettledBlocks(blocks && isReportsZoneSyncRefresh(currentReportsHref()) ? blocks : null);
+    }
     setSeenData({ blocks, slices });
     setTrace(NO_TRACE);
     setPickedKey(null);
     if (focusedId !== null && !slices.some((slice) => slice.id === focusedId)) setFocusedId(null);
   }
+  const settled = blocks !== null && settledBlocks === blocks;
+  useEffect(() => {
+    if (settledBlocks) clearReportsZoneSyncRefresh();
+  }, [settledBlocks]);
   const hotIds = hot ? new Set(hot.categoryIds) : null;
   /** Start (`on`) or end one source's trace of a slice; ending only clears that source's own trace. */
   const setSource = (source: TraceSource, sliceId: string | null, on = true) =>
@@ -392,7 +403,7 @@ export function ReportsBlocksPanel({
           </div>
           {blocks.layout === "week" ? (
             <ol
-              className={`df-wblocks${blocks.days.length > 7 ? " is-long" : ""}${hotIds ? " has-hot" : ""}`}
+              className={`df-wblocks${blocks.days.length > 7 ? " is-long" : ""}${hotIds ? " has-hot" : ""}${settled ? " is-settled" : ""}`}
               ref={(node) => {
                 blocksRef.current = node;
               }}

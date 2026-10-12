@@ -75,8 +75,10 @@ async function serverHtml(zone: string, initialTodayKey: string | null) {
   }));
 }
 
-async function hydrateFromUtc(view: "calendar" | "list", initialTodayKey: string | null) {
-  navigation.search = `date=2026-10-12&scope=week&view=${view}`;
+async function hydrateFromUtc(view: "calendar" | "list", initialTodayKey: string | null, date = "2026-10-12") {
+  navigation.search = `date=${date}&scope=week&view=${view}`;
+  window.history.replaceState(null, "", `/timeline?${navigation.search}`);
+  window.sessionStorage.clear();
   installDom();
   vi.useFakeTimers({ toFake: ["Date"] });
   vi.setSystemTime(new Date(RENDERED_AT));
@@ -164,6 +166,39 @@ describe("/timeline renders browser-local times after hydration (UTC server, Lon
     // The browser knows better once hydrated: this week holds today, so no Today button.
     expect(container.querySelector(".timeline-today-button")).toBeNull();
     expect(container.querySelector('[data-calendar-day-key="2026-10-12"] .calendar-now-line')).not.toBeNull();
+    await unmount();
+  });
+});
+
+describe("a first visit just after local midnight without the zone cookie (Codex r1 on #367)", () => {
+  it("moves a bare /timeline from the server's UTC day to the browser's today, replacing the history entry", async () => {
+    const loadDate = runtime.loadDate as ReturnType<typeof vi.fn>;
+    loadDate.mockClear();
+    // No cookie: the server assumed UTC, so bare /timeline was canonicalised to Sunday the 11th.
+    const historyLength = window.history.length;
+    const { recoverable, unmount } = await hydrateFromUtc("calendar", "2026-10-11", "2026-10-11");
+    expect(recoverable).toEqual([]);
+    expect(loadDate).toHaveBeenCalledWith("2026-10-12");
+    expect(new URLSearchParams(window.location.search).get("date")).toBe("2026-10-12");
+    expect(window.history.length).toBe(historyLength);
+    await unmount();
+  });
+
+  it("leaves a date the server did not pick as today where it is", async () => {
+    const loadDate = runtime.loadDate as ReturnType<typeof vi.fn>;
+    loadDate.mockClear();
+    const { recoverable, unmount } = await hydrateFromUtc("calendar", "2026-10-11", "2026-10-05");
+    expect(recoverable).toEqual([]);
+    expect(loadDate).not.toHaveBeenCalled();
+    expect(new URLSearchParams(window.location.search).get("date")).toBe("2026-10-05");
+    await unmount();
+  });
+
+  it("keeps the date when the cookie gave the server the viewer's today", async () => {
+    const loadDate = runtime.loadDate as ReturnType<typeof vi.fn>;
+    loadDate.mockClear();
+    const { unmount } = await hydrateFromUtc("calendar", "2026-10-12", "2026-10-12");
+    expect(loadDate).not.toHaveBeenCalled();
     await unmount();
   });
 });

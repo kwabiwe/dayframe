@@ -32,6 +32,7 @@ describe("the viewer's time zone cookie", () => {
 
   it("reads and writes the first-party cookie", () => {
     expect(viewerTimeZoneCookie("Europe/London")).toBe("dayframe_tz=Europe/London; Path=/; Max-Age=31536000; SameSite=Lax");
+    expect(viewerTimeZoneCookie("Europe/London", true)).toBe("dayframe_tz=Europe/London; Path=/; Max-Age=31536000; SameSite=Lax; Secure");
     expect(viewerTimeZoneFromCookieHeader("theme=dark; dayframe_tz=Europe/London; other=1")).toBe("Europe/London");
     expect(viewerTimeZoneFromCookieHeader("theme=dark")).toBeNull();
     expect(viewerTimeZoneFromCookieHeader(null)).toBeNull();
@@ -46,7 +47,9 @@ describe("the viewer's time zone cookie", () => {
     expect(syncViewerTimeZoneCookie(current)).toBe(false);
     expect(current.cookie).toBe("dayframe_tz=Europe/London");
     const travelled = { cookie: "dayframe_tz=America/New_York" };
-    expect(syncViewerTimeZoneCookie(travelled)).toBe(true);
+    expect(syncViewerTimeZoneCookie(travelled, true)).toBe(true);
+    // Secure over HTTPS; plain-HTTP local development keeps a cookie it can send.
+    expect(travelled.cookie).toBe("dayframe_tz=Europe/London; Path=/; Max-Age=31536000; SameSite=Lax; Secure");
   });
 });
 

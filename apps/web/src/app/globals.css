@@ -12664,6 +12664,13 @@ dialog.ui-dialog.df-ce-dialog {
   }
 }
 
+/* A time zone reconciliation (the shell's refresh after the zone cookie changed) redraws the
+   blocks at rest. Only the duration is zeroed, never the animation itself, so dropping the class
+   on the next report never replays a landing on blocks that stay. */
+.df-wblocks.is-settled .df-wb-stack > .df-tblock {
+  animation-duration: 0s;
+}
+
 /* Only transform animates: a filled opacity would override the cross-highlight's fading. */
 @keyframes df-wb-grow {
   from {
