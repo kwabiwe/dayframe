@@ -350,11 +350,14 @@ export async function endSignInsAfterPasswordChange(userId: string) {
     await client.query("begin");
     const user = await client.query("select id from users where id = $1 for update", [userId]);
     if (user.rowCount === 0) throw new AuthError("Dayframe couldn't finish the reset. Try again.", 503);
+    // The time is read after the lock (clock_timestamp, not the transaction's start), and a fence
+    // only ever moves forward: a slower reset that began earlier can never pull a newer one back.
     await client.query(
       `insert into user_session_fences (user_id, sessions_valid_after, updated_at)
-       values ($1, now(), now())
+       values ($1, clock_timestamp(), clock_timestamp())
        on conflict (user_id) do update
-       set sessions_valid_after = excluded.sessions_valid_after, updated_at = excluded.updated_at`,
+       set sessions_valid_after = greatest(user_session_fences.sessions_valid_after, excluded.sessions_valid_after),
+           updated_at = excluded.updated_at`,
       [userId]
     );
     await client.query("update auth_sessions set revoked_at = now() where user_id = $1 and revoked_at is null", [userId]);

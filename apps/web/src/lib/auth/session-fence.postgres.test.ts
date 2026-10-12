@@ -93,6 +93,36 @@ describeWithDatabase("the password-reset session fence on disposable PostgreSQL 
     }
   });
 
+  it("never moves a fence back: a slower reset that began earlier keeps the newer fence (Codex r4)", async () => {
+    // The fence is written with the time after the lock and only moves forward: a later write of
+    // an earlier time (a slower reset that began first) keeps the newer fence.
+    await endSignInsAfterPasswordChange(userId);
+    const far = new Date(Date.now() + 60_000);
+    await database!.query("update user_session_fences set sessions_valid_after = $2 where user_id = $1", [userId, far]);
+    await endSignInsAfterPasswordChange(userId);
+    const kept = (await database!.query<{ at: Date }>("select sessions_valid_after as at from user_session_fences where user_id = $1", [userId])).rows[0].at;
+    expect(kept.getTime()).toBe(far.getTime());
+    // A sign-in authenticated between the two resets is still refused.
+    await expect(createSessionInTransaction(userId, workspaceId, null, new Date(far.getTime() - 1_000))).rejects.toBeInstanceOf(AuthError);
+  });
+
+  it("records a waiting reset's fence at the time it got the lock, not when it began (Codex r4)", async () => {
+    const holder = await database!.connect();
+    try {
+      await holder.query("begin");
+      await holder.query("select id from users where id = $1 for share", [userId]);
+      const reset = endSignInsAfterPasswordChange(userId);
+      await new Promise((resolve) => setTimeout(resolve, 150));
+      const released = (await holder.query<{ at: Date }>("select clock_timestamp() as at")).rows[0].at;
+      await holder.query("commit");
+      await reset;
+      const fence = (await database!.query<{ at: Date }>("select sessions_valid_after as at from user_session_fences where user_id = $1", [userId])).rows[0].at;
+      expect(fence.getTime()).toBeGreaterThanOrEqual(released.getTime());
+    } finally {
+      holder.release();
+    }
+  });
+
   it("fails closed for an account without a Dayframe row", async () => {
     await expect(endSignInsAfterPasswordChange(unprovisionedId)).rejects.toMatchObject({ status: 503 });
     const fence = await database!.query("select 1 from user_session_fences where user_id = $1", [unprovisionedId]);
