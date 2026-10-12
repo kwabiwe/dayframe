@@ -1,5 +1,6 @@
 "use client";
 
+import { isSignedOutPath } from "@/lib/signed-out-paths";
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import type { ReactNode } from "react";
@@ -53,7 +54,7 @@ const isStaging = process.env.NEXT_PUBLIC_DAYFRAME_DEPLOYMENT_ENV === "staging";
 
 export function AppShell({ children }: { children: ReactNode }) {
   const pathname = usePathname();
-  if (pathname === "/login" || pathname === "/signup") return <>{children}</>;
+  if (isSignedOutPath(pathname)) return <>{children}</>;
 
   return (
     <AppShellRuntimeProvider>

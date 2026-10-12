@@ -3,13 +3,13 @@
 import { DayframeIcon } from "@/components/blocks/DayframeIcon";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { Info, Plus } from "lucide-react";
+import { Info } from "lucide-react";
 import { useState, useTransition } from "react";
 import { placeDisplayName, placeRoleLabel, placeSecondaryName } from "@dayframe/shared";
 import type { LearnedPlaceRow, PlaceRow } from "@/lib/queries";
 import { clientFetch } from "@/lib/client-auth-fetch";
 import { PlaceRoleSlots } from "./PlaceRoleSlots";
-import { Button, IconButton, ModalDialog } from "./ui/Primitives";
+import { Button, ModalDialog } from "./ui/Primitives";
 
 export function PlacesManager({
   learnedPlaces,
@@ -88,6 +88,18 @@ export function PlacesManager({
     <div className="places-manager">
       {status ? <p className="places-manager-status" role="status">{status}</p> : null}
 
+      {/* Adding a place is the first row of this Library tab, as on the other tabs (UIA-316). */}
+      <div className="df-card df-tag-new df-place-new">
+        <span className="df-tag-new-field">
+          <span className="df-srow-ic" aria-hidden="true"><DayframeIcon glyph="map-pin" size={17}/></span>
+          <span className="df-srow-text">
+            <b>Add a place</b>
+            <small>Search for an address, or use where you are now.</small>
+          </span>
+        </span>
+        <Link className="df-rbtn df-rbtn--sm" href="/places/new">Add place</Link>
+      </div>
+
       <PlaceRoleSlots places={places} onChanged={refresh} />
 
       <section className="places-list-section">
@@ -122,18 +134,19 @@ export function PlacesManager({
               <div className="place-list-actions">
                 <Link
                   aria-label={`Edit ${placeDisplayName(place)}`}
-                  className="ui-button ui-button-secondary is-compact"
+                  className="df-rbtn df-rbtn--sm df-rbtn--ghost"
                   href={`/places/${encodeURIComponent(place.id)}/edit`}
                 >
                   Edit
                 </Link>
-                <IconButton
-                  label={`Delete ${placeDisplayName(place)}`}
-                  variant="danger"
+                <button
+                  aria-label={`Delete ${placeDisplayName(place)}`}
+                  className="df-icon-action df-icon-action--44"
                   onClick={() => setDeletingPlace(place)}
+                  type="button"
                 >
-                  <DayframeIcon glyph="trash-2" size={17}/>
-                </IconButton>
+                  <DayframeIcon glyph="trash-2" size={16}/>
+                </button>
               </div>
             </article>
           ))}
@@ -142,7 +155,6 @@ export function PlacesManager({
               <DayframeIcon glyph="map-pin" size={22}/>
               <strong>No saved places yet</strong>
               <span>Search for a place to add your first one.</span>
-              <Link className="ui-button ui-button-primary" href="/places/new">Add place</Link>
             </div>
           ) : null}
         </div>
@@ -168,27 +180,28 @@ export function PlacesManager({
                 ) : null}
               </div>
               <div className="place-list-actions">
-                <IconButton
-                  label={`View details for ${learnedPlace.name}`}
+                <button
+                  aria-label={`View details for ${learnedPlace.name}`}
+                  className="df-icon-action df-icon-action--44"
                   onClick={() => setSelectedLearnedPlace(learnedPlace)}
+                  type="button"
                 >
-                  <Info aria-hidden="true" size={17} />
-                </IconButton>
+                  <Info aria-hidden="true" size={16} />
+                </button>
                 <Link
-                  className="ui-button ui-button-primary is-compact"
+                  className="df-rbtn df-rbtn--sm"
                   href={`/places/new?learnedPlaceId=${encodeURIComponent(learnedPlace.id)}`}
                 >
-                  <Plus aria-hidden="true" size={16} />
                   Save as place
                 </Link>
-                <Button
-                  compact
+                <button
+                  className="df-rbtn df-rbtn--sm df-rbtn--ghost"
                   disabled={busyId === learnedPlace.id}
-                  variant="ghost"
                   onClick={() => void ignoreLearnedPlace(learnedPlace)}
+                  type="button"
                 >
                   Ignore
-                </Button>
+                </button>
               </div>
             </article>
           ))}

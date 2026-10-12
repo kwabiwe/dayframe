@@ -1379,7 +1379,6 @@ textarea.ui-control {
 .settings-troubleshooting-copy {
   display: grid;
   gap: 10px;
-  padding: 16px;
 }
 
 .settings-confirm-copy p,
@@ -1554,6 +1553,8 @@ dialog.ui-dialog::backdrop {
   overflow-x: hidden;
   overflow-y: auto;
   overscroll-behavior: contain;
+  /* The dialog's own inner padding, like its header and actions (UIA-301). */
+  padding: var(--web-gap-md) var(--web-dialog-padding-inline);
 }
 
 .ui-dialog .swiss-form-grid {
@@ -1592,6 +1593,8 @@ dialog.ui-popover-panel.bottom-left {
 
 .ui-popover-content {
   display: grid;
+  /* Popover rows lay out their own edges. */
+  padding: 0;
 }
 
 @media (max-width: 1180px) {
@@ -3185,7 +3188,6 @@ dialog.ui-popover-panel.bottom-left {
 .swiss-confirm-body {
   display: grid;
   gap: 16px;
-  padding: 16px;
 }
 
 .swiss-confirm-body p {
@@ -3360,6 +3362,35 @@ kbd {
   font-size: 14px;
 }
 
+/* Sign-up's password rule and the quiet "Forgot password?" under Log in's password (UIA-317/318). */
+.auth-hint {
+  margin: -6px 0 0;
+  color: var(--text-secondary);
+  font-size: 13px;
+}
+
+.auth-forgot,
+.auth-link-button {
+  justify-self: start;
+  min-height: 44px;
+  margin: -6px 0 0;
+  border: 0;
+  padding: 0;
+  background: none;
+  color: var(--text-secondary);
+  font: inherit;
+  font-size: 14px;
+  font-weight: 600;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  cursor: pointer;
+}
+
+.auth-link-button {
+  margin: 0;
+  color: var(--text-primary);
+}
+
 .auth-page {
   display: grid;
   min-height: 100vh;
@@ -3378,6 +3409,7 @@ kbd {
 }
 
 .auth-card form > p a,
+.auth-switch--standalone a,
 .landing-footer a {
   display: inline-flex;
   min-width: 44px;
@@ -3386,7 +3418,8 @@ kbd {
   justify-content: center;
 }
 
-.auth-card form > p a {
+.auth-card form > p a,
+.auth-switch--standalone a {
   color: var(--text-primary);
   font-weight: 700;
   text-decoration: underline;
@@ -3414,7 +3447,8 @@ kbd {
   place-items: center;
   transform: translateY(-50%);
   border: 0;
-  border-radius: 10px;
+  /* Icon-only actions are round (UIA-319). */
+  border-radius: 999px;
   background: transparent;
   color: var(--muted);
 }
@@ -5316,7 +5350,6 @@ kbd {
 
 .place-dialog-copy {
   margin: 0;
-  padding: 18px;
   color: var(--muted);
   font-size: 14px;
   line-height: 1.55;
@@ -5325,7 +5358,6 @@ kbd {
 .place-role-dialog {
   display: grid;
   gap: 16px;
-  padding: 18px;
 }
 
 .place-role-note {
@@ -5357,7 +5389,6 @@ kbd {
   display: grid;
   gap: 1px;
   margin: 0;
-  padding: 16px;
 }
 
 .place-learned-details > div {
@@ -7365,6 +7396,8 @@ dialog.ui-dialog.manual-entry-dialog {
 
 .manual-entry-dialog-content {
   overflow: visible;
+  /* The manual entry form lays out its own edges. */
+  padding: 0;
 }
 
 .manual-entry-dialog .manual-entry-form {
@@ -10003,6 +10036,8 @@ dialog.ui-dialog.df-palette {
   display: flex;
   min-height: 0;
   flex-direction: column;
+  /* The palette pads the dialog itself. */
+  padding: 0;
 }
 
 .df-palette-input {
@@ -11973,8 +12008,10 @@ dialog.ui-dialog.df-palette {
   opacity: 0.85;
 }
 
+/* The card's Edit spans the card, as in the prototype (UIA-316). */
 .df-lcard > .df-rbtn {
-  justify-self: start;
+  justify-self: stretch;
+  justify-content: center;
 }
 
 .df-lnew {
@@ -12227,6 +12264,16 @@ dialog.ui-dialog.df-ce-dialog {
   padding: 10px 14px;
 }
 
+.df-place-new .df-srow-text {
+  display: grid;
+  min-width: 0;
+}
+
+.df-place-new .df-srow-text small {
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
 .df-tag-new-field {
   display: flex;
   min-width: min(100%, 220px);
@@ -12397,8 +12444,31 @@ dialog.ui-dialog.df-ce-dialog {
   margin: 0;
 }
 
+/* Settings dialogs (UIA-301): fields stacked full width; the action is in the dialog footer. */
 .df-set-dialog-form {
-  align-items: end;
+  display: grid;
+  gap: 12px;
+}
+
+.df-set-dialog-form .ui-control.is-compact {
+  width: 100%;
+}
+
+.ui-dialog .settings-workspace-actions.df-set-dialog-workspace {
+  min-width: 0;
+  justify-items: stretch;
+}
+
+.df-set-dialog-workspace .settings-workspace-toolbar {
+  justify-content: flex-start;
+}
+
+.df-set-dialog-workspace .settings-workspace-select {
+  flex: 1 1 200px;
+}
+
+.df-set-dialog-workspace .settings-workspace-detail-form {
+  justify-content: flex-start;
 }
 
 .df-settings {
