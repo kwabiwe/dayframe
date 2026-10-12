@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { syntheticId, syntheticReviewBootstrap } from "../../../../scripts/fixtures/review-performance";
 
-const mocks = vi.hoisted(() => ({ open: vi.fn(), fetch: vi.fn(), session: vi.fn(), current: vi.fn(), failItem: "" }));
+const mocks = vi.hoisted(() => ({ open: vi.fn(), fetch: vi.fn(), session: vi.fn(), current: vi.fn(), failItem: "", interleave: [] as Array<{ match: string; run: () => void }> }));
 vi.mock("expo-sqlite", () => ({ openDatabaseAsync: mocks.open }));
 vi.mock("./backendIdentity", () => ({ DAYFRAME_BACKEND_ID: "dayframe-staging" }));
 vi.mock("./secure-session", () => ({ readOwnedAuthenticatedSessionSnapshot: mocks.session, invalidateMobileSessionIfCurrent: vi.fn(), isAuthenticatedSessionSnapshotCurrent: mocks.current }));
@@ -23,7 +23,11 @@ const mergeInput = () => {
 function adapter() {
   const value = {
     execAsync: async (sql: string) => { db.exec(sql); },
-    getFirstAsync: async (sql: string, ...args: never[]) => db.prepare(sql).get(...args) ?? null,
+    getFirstAsync: async (sql: string, ...args: never[]) => {
+      const step = mocks.interleave.findIndex(({ match }) => sql.includes(match));
+      if (step >= 0) mocks.interleave.splice(step, 1)[0].run();
+      return db.prepare(sql).get(...args) ?? null;
+    },
     getAllAsync: async (sql: string, ...args: never[]) => db.prepare(sql).all(...args),
     runAsync: async (sql: string, ...args: never[]) => {
       if (mocks.failItem && sql.includes("insert into review_mutation_effects") && args.includes(mocks.failItem as never)) throw new Error("simulated disk failure");
@@ -42,7 +46,7 @@ async function reopen() {
   store = await import("./reviewSyncStore");
 }
 beforeEach(async () => {
-  vi.resetAllMocks(); mocks.failItem = "";
+  vi.resetAllMocks(); mocks.failItem = ""; mocks.interleave = [];
   directory = mkdtempSync(join(tmpdir(), "dayframe-review-test-"));
   db = new DatabaseSync(join(directory, "review.db"));
   mocks.open.mockImplementation(async () => adapter());
@@ -91,6 +95,48 @@ describe("Review real SQLite transactions", () => {
     const forB = await store.readReviewSyncStateForOwner(ownerB);
     expect(forB?.issues).toEqual([]);
     expect(forB?.diagnostics.needsAttentionCount).toBe(0);
+  });
+  it("keys the evidence-cache numbers to the read's account, and drops a read the store switched under (Codex r5 on #355)", async () => {
+    const data = bootstrap();
+    const ownerA = { userId: data.user.id, workspaceId: data.workspace.id };
+    const keyA = `${ownerA.workspaceId}:${ownerA.userId}`;
+    const keyB = `${syntheticId(902)}:${syntheticId(901)}`;
+    const now = new Date().toISOString();
+    const later = new Date(Date.now() + 3_600_000).toISOString();
+    const evidence = db.prepare("insert into location_review_evidence_cache (account_key, review_item_id, evidence_json, fetched_at, expires_at, byte_size, last_accessed_at) values (?, ?, '{}', ?, ?, ?, ?)");
+    evidence.run(keyA, syntheticId(70), now, later, 100, now);
+    db.prepare("insert into review_account_context (account_key, workspace_id, user_id, workspace_name, configured_at, updated_at) values (?, ?, ?, 'B', ?, ?)")
+      .run(keyB, syntheticId(902), syntheticId(901), now, now);
+    for (let n = 0; n < 3; n++) evidence.run(keyB, syntheticId(80 + n), now, later, 1000, now);
+    // A's own read: A's evidence only.
+    const forA = await store.readReviewSyncStateForOwner(ownerA);
+    expect(forA?.diagnostics.evidenceCacheItemCount).toBe(1);
+    expect(forA?.diagnostics.evidenceCacheBytes).toBe(100);
+    const activate = (key: string) => () => {
+      db.prepare("update review_store_metadata set value = ? where key = 'active_account'").run(key);
+    };
+    // The store moves to B mid-read and back to A before the read ends: the evidence numbers are
+    // still A's, because every query is keyed to the account the read captured.
+    mocks.interleave = [
+      { match: "count(*) filter (where state in ('pending', 'in_flight'))", run: activate(keyB) },
+      { match: "from location_review_evidence_cache", run: () => queueMicrotask(activate(keyA)) }
+    ];
+    const switchedAndBack = await store.readReviewSyncStateForOwner(ownerA);
+    expect(mocks.interleave).toEqual([]);
+    expect(switchedAndBack?.diagnostics.evidenceCacheItemCount).toBe(1);
+    expect(switchedAndBack?.diagnostics.evidenceCacheBytes).toBe(100);
+    // The store moves to B mid-read and stays there: nothing is published for A.
+    mocks.interleave = [{ match: "from location_review_evidence_cache", run: activate(keyB) }];
+    expect(await store.readReviewSyncStateForOwner(ownerA)).toBeNull();
+    expect(mocks.interleave).toEqual([]);
+  });
+  it("starts the in-process cache and mutation counters over when the store's account changes (Codex r5 on #355)", async () => {
+    expect(await store.loadCachedReviewBootstrap()).not.toBeNull();
+    expect((await store.getReviewSyncDiagnostics()).reviewCacheHitCount).toBeGreaterThan(0);
+    await store.activateReviewAccount({ userId: syntheticId(901), workspaceId: syntheticId(902), workspaceName: "B" });
+    const forB = await store.getReviewSyncDiagnostics();
+    expect(forB.reviewCacheHitCount).toBe(0);
+    expect(forB.lastLocalMutationAction).toBeNull();
   });
   it("selects the latest failure by timestamp rather than alphabetic error text", async () => {
     const data=bootstrap();
