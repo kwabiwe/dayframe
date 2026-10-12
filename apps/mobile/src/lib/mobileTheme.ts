@@ -680,10 +680,36 @@ function createStyles(theme: MobileTheme) {
       left: 12,
       justifyContent: "center"
     },
+    // The reveal mirrors the field in its own system face and size (UIA-320).
     authPasswordRevealText: {
       color: theme.textPrimary,
-      fontFamily: monoFont,
-      fontSize: 15
+      fontSize: 16
+    },
+    /** A group inside the sign-in card (an animated wrapper): keeps the card's own 12-point rhythm. */
+    authGroup: {
+      gap: 12
+    },
+    authLabel: {
+      color: theme.textSecondary,
+      fontSize: 13,
+      fontWeight: "600",
+      marginBottom: -6
+    },
+    authHint: {
+      color: theme.textSecondary,
+      fontSize: 13,
+      marginTop: -4
+    },
+    authTextLink: {
+      alignSelf: "flex-start",
+      justifyContent: "center",
+      minHeight: 44
+    },
+    authTextLinkText: {
+      color: theme.textSecondary,
+      fontSize: 14,
+      fontWeight: "600",
+      textDecorationLine: "underline"
     },
     authPasswordVisibilityButton: {
       width: 44,

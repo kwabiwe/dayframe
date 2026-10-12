@@ -292,10 +292,30 @@ describe("mobile API client", () => {
       )
     );
 
-    const result = await signup("user@example.com", "password", "User", "Workspace");
+    const result = await signup("user@example.com", "password", "User");
 
     expect("requiresEmailConfirmation" in result && result.requiresEmailConfirmation).toBe(true);
     await expect(getSessionToken()).resolves.toBeNull();
+  });
+
+  it("asks for a reset email and says sign-in failures in plain words (UIA-317, UIA-320)", async () => {
+    const { plainAuthError, requestPasswordReset } = await import("./api");
+    const fetchMock = vi.fn(() => Promise.resolve(jsonResponse({ ok: true, message: "If an account uses that email, a reset link is on its way. Check your email." }, 200)));
+    vi.stubGlobal("fetch", fetchMock);
+    await expect(requestPasswordReset("someone@example.invalid")).resolves.toContain("Check your email");
+    expect(fetchMock).toHaveBeenCalledWith("https://dayframe.test/api/auth/password-reset", expect.objectContaining({
+      method: "POST",
+      body: JSON.stringify({ email: "someone@example.invalid" })
+    }));
+    vi.stubGlobal("fetch", vi.fn(() => Promise.resolve(jsonResponse({ error: "Password reset is not available here." }, 404))));
+    await expect(requestPasswordReset("someone@example.invalid")).rejects.toThrow("Password reset isn't available here.");
+    expect(plainAuthError("Invalid login credentials", 400)).toBe("That email and password don't match.");
+    expect(plainAuthError("Email not confirmed", 400)).toBe("Confirm your email first, then log in.");
+    expect(plainAuthError(undefined, 502)).toBe("Dayframe couldn't sign you in. Try again in a moment.");
+    expect(plainAuthError("Enter a valid email and password.", 400)).toBe("Enter a valid email and password.");
+    expect(plainAuthError("Enter a valid email and a password of at least 8 characters.", 400))
+      .toBe("Enter a valid email and a password of at least 8 characters.");
+    expect(plainAuthError("Password should be at least 8 characters.", 422)).toBe("Use at least 8 characters for the password.");
   });
 
   it("clears the session token when bootstrap returns 401", async () => {
