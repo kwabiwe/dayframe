@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { Eye, EyeOff } from "lucide-react";
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { AppLoadingState } from "@/components/AppLoadingState";
+import { AuthCardMotion } from "@/components/AuthCardMotion";
 import { Button, Field, IconButton, TextField } from "@/components/ui/Primitives";
 
 type AuthMode = "login" | "signup";
@@ -92,154 +93,160 @@ export function AuthForm({
     }
   }
 
-  if (resetting) {
-    return (
-      <PasswordResetRequest
-        initialEmail={email}
-        onBack={() => {
-          setReturnedFromReset(true);
-          setResetting(false);
-        }}
-      />
-    );
-  }
+  // One motion owner for every view of the card (AuthCardMotion).
+  const view = resetting ? "reset" : status === "opening" ? "opening" : isSignup ? "signup" : "login";
+  return <AuthCardMotion view={view}>{renderView()}</AuthCardMotion>;
 
-  if (status === "opening") {
+  function renderView() {
+    if (resetting) {
+      return (
+        <PasswordResetRequest
+          initialEmail={email}
+          onBack={() => {
+            setReturnedFromReset(true);
+            setResetting(false);
+          }}
+        />
+      );
+    }
+
+    if (status === "opening") {
+      return (
+        <section className="auth-card mx-auto w-full max-w-[440px]">
+          <AppLoadingState embedded message="Opening Dayframe…" />
+        </section>
+      );
+    }
+
     return (
       <section className="auth-card mx-auto w-full max-w-[440px]">
-        <AppLoadingState embedded message="Opening Dayframe…" />
+        <div className="auth-card-head">
+          <h1 ref={headingRef} tabIndex={-1}>{isSignup ? "Create account" : "Log in"}</h1>
+          <p>
+            {isSignup
+              ? "Create your Dayframe account and personal workspace."
+              : "Use your Dayframe account to open your workspace."}
+          </p>
+        </div>
+        <form className="auth-card-form" onSubmit={submit} aria-busy={status === "submitting"}>
+          {isSignup ? (
+            <>
+              <TextField
+                id="auth-name"
+                label="Name"
+                name="name"
+                autoComplete="name"
+                placeholder="Your name"
+                value={name}
+                disabled={formLocked}
+                onChange={(event) => setName(event.target.value)}
+              />
+            </>
+          ) : null}
+          <TextField
+            id="auth-email"
+            label="Email"
+            name="email"
+            type="email"
+            autoComplete="email"
+            placeholder="you@example.com"
+            required
+            value={email}
+            disabled={formLocked}
+            onChange={(event) => setEmail(event.target.value)}
+          />
+          <Field htmlFor="auth-password" label="Password">
+            <span className="ui-compound-control auth-password-field">
+              <input
+                aria-describedby={isSignup ? "auth-password-hint" : undefined}
+                className="ui-control"
+                id="auth-password"
+                name="password"
+                type={showPassword ? "text" : "password"}
+                autoComplete={isSignup ? "new-password" : "current-password"}
+                minLength={8}
+                required
+                value={password}
+                disabled={formLocked}
+                onChange={(event) => setPassword(event.target.value)}
+              />
+              <IconButton
+                label={showPassword ? "Hide password" : "Show password"}
+                disabled={formLocked}
+                onClick={() => setShowPassword((value) => !value)}
+              >
+                {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
+              </IconButton>
+            </span>
+          </Field>
+          {isSignup ? <p className="auth-hint" id="auth-password-hint">At least 8 characters.</p> : null}
+          {!isSignup && allowPasswordReset ? (
+            <button className="auth-forgot" disabled={formLocked} onClick={() => setResetting(true)} type="button">
+              Forgot password?
+            </button>
+          ) : null}
+
+          {error ? (
+            <p className="auth-message is-error" role="alert">
+              {error}
+            </p>
+          ) : null}
+
+          {notice ? (
+            <p className="auth-message" role="status">
+              {notice}
+            </p>
+          ) : null}
+
+          <Button
+            className="w-full"
+            variant="primary"
+            type="submit"
+            disabled={formLocked}
+            aria-live="polite"
+          >
+            {status === "submitting"
+              ? isSignup ? "Creating account…" : "Logging in…"
+              : status === "email-confirmation"
+                ? "Check your email"
+                : isSignup ? "Create account" : "Log in"}
+          </Button>
+
+          <p className="auth-switch">
+            {isSignup ? "Already have an account?" : "New to Dayframe?"}{" "}
+            <Link
+              href={otherModeHref}
+              onClick={(event) => {
+                // Keep a #section (Settings › Privacy and data) across the switch too; a modified
+                // click (new tab or window) keeps the browser's own behaviour.
+                if (!window.location.hash || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey || event.button !== 0) return;
+                event.preventDefault();
+                router.push(`${otherModeHref}${window.location.hash}`);
+              }}
+            >
+              {isSignup ? "Log in" : "Create one"}
+            </Link>
+          </p>
+        </form>
       </section>
     );
   }
 
-  return (
-    <section className="auth-card mx-auto w-full max-w-[440px]">
-      <div className="auth-card-head">
-        <h1 ref={headingRef} tabIndex={-1}>{isSignup ? "Create account" : "Log in"}</h1>
-        <p>
-          {isSignup
-            ? "Create your Dayframe account and personal workspace."
-            : "Use your Dayframe account to open your workspace."}
-        </p>
-      </div>
-      <form className="auth-card-form" onSubmit={submit} aria-busy={status === "submitting"}>
-        {isSignup ? (
-          <>
-            <TextField
-              id="auth-name"
-              label="Name"
-              name="name"
-              autoComplete="name"
-              placeholder="Your name"
-              value={name}
-              disabled={formLocked}
-              onChange={(event) => setName(event.target.value)}
-            />
-          </>
-        ) : null}
-        <TextField
-          id="auth-email"
-          label="Email"
-          name="email"
-          type="email"
-          autoComplete="email"
-          placeholder="you@example.com"
-          required
-          value={email}
-          disabled={formLocked}
-          onChange={(event) => setEmail(event.target.value)}
-        />
-        <Field htmlFor="auth-password" label="Password">
-          <span className="ui-compound-control auth-password-field">
-            <input
-              aria-describedby={isSignup ? "auth-password-hint" : undefined}
-              className="ui-control"
-              id="auth-password"
-              name="password"
-              type={showPassword ? "text" : "password"}
-              autoComplete={isSignup ? "new-password" : "current-password"}
-              minLength={8}
-              required
-              value={password}
-              disabled={formLocked}
-              onChange={(event) => setPassword(event.target.value)}
-            />
-            <IconButton
-              label={showPassword ? "Hide password" : "Show password"}
-              disabled={formLocked}
-              onClick={() => setShowPassword((value) => !value)}
-            >
-              {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
-            </IconButton>
-          </span>
-        </Field>
-        {isSignup ? <p className="auth-hint" id="auth-password-hint">At least 8 characters.</p> : null}
-        {!isSignup && allowPasswordReset ? (
-          <button className="auth-forgot" disabled={formLocked} onClick={() => setResetting(true)} type="button">
-            Forgot password?
-          </button>
-        ) : null}
+  async function readAuthResponse(response: Response) {
+    const text = await response.text();
+    if (!text) {
+      return {
+        error: response.ok ? undefined : "Authentication failed. Please try again."
+      };
+    }
 
-        {error ? (
-          <p className="auth-message is-error" role="alert">
-            {error}
-          </p>
-        ) : null}
-
-        {notice ? (
-          <p className="auth-message" role="status">
-            {notice}
-          </p>
-        ) : null}
-
-        <Button
-          className="w-full"
-          variant="primary"
-          type="submit"
-          disabled={formLocked}
-          aria-live="polite"
-        >
-          {status === "submitting"
-            ? isSignup ? "Creating account…" : "Logging in…"
-            : status === "email-confirmation"
-              ? "Check your email"
-              : isSignup ? "Create account" : "Log in"}
-        </Button>
-
-        <p className="auth-switch">
-          {isSignup ? "Already have an account?" : "New to Dayframe?"}{" "}
-          <Link
-            href={otherModeHref}
-            onClick={(event) => {
-              // Keep a #section (Settings › Privacy and data) across the switch too; a modified
-              // click (new tab or window) keeps the browser's own behaviour.
-              if (!window.location.hash || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey || event.button !== 0) return;
-              event.preventDefault();
-              router.push(`${otherModeHref}${window.location.hash}`);
-            }}
-          >
-            {isSignup ? "Log in" : "Create one"}
-          </Link>
-        </p>
-      </form>
-    </section>
-  );
-}
-
-async function readAuthResponse(response: Response) {
-  const text = await response.text();
-  if (!text) {
-    return {
-      error: response.ok ? undefined : "Authentication failed. Please try again."
-    };
-  }
-
-  try {
-    return JSON.parse(text) as { error?: string; message?: string; requiresEmailConfirmation?: boolean };
-  } catch {
-    return {
-      error: response.ok ? undefined : "Authentication failed. Please try again."
-    };
+    try {
+      return JSON.parse(text) as { error?: string; message?: string; requiresEmailConfirmation?: boolean };
+    } catch {
+      return {
+        error: response.ok ? undefined : "Authentication failed. Please try again."
+      };
+    }
   }
 }
 
@@ -250,8 +257,8 @@ function PasswordResetRequest({ initialEmail, onBack }: { initialEmail: string; 
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const headingRef = useRef<HTMLHeadingElement | null>(null);
-  // The card replaces Log in: focus moves to its heading (instant swap, nothing animates), and
-  // back there once the sent reply replaces the Send button.
+  // The card replaces Log in (AuthCardMotion fades it in): focus moves to its heading, and back
+  // there once the sent reply replaces the Send button.
   useEffect(() => {
     if (status === "idle" || status === "sent") headingRef.current?.focus();
     // On mount and once sent; an error keeps focus where it is (the alert announces it).

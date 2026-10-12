@@ -4,6 +4,7 @@ import Link from "next/link";
 import { Eye, EyeOff } from "lucide-react";
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { Button, Field, IconButton } from "@/components/ui/Primitives";
+import { AuthCardMotion } from "@/components/AuthCardMotion";
 
 type RecoveryTokens = { accessToken: string; refreshToken: string };
 type Status = "reading" | "ready" | "saving" | "done" | "invalid";
@@ -33,7 +34,7 @@ export function PasswordResetForm() {
     if (window.location.hash) window.history.replaceState(null, "", window.location.pathname);
   }, []);
   // When the form gives way to the outcome (changed, or the link no longer works), focus moves to
-  // the heading and the outcome is announced (instant swap, nothing animates).
+  // the heading and the outcome is announced; AuthCardMotion fades the outcome in and resizes the card.
   const headingRef = useRef<HTMLHeadingElement | null>(null);
   useEffect(() => {
     if (status === "done" || status === "invalid") headingRef.current?.focus();
@@ -69,6 +70,7 @@ export function PasswordResetForm() {
   }
 
   return (
+    <AuthCardMotion view={status === "done" || status === "invalid" ? status : "form"}>
     <section className="auth-card mx-auto w-full max-w-[440px]">
       <div className="auth-card-head">
         <h1 ref={headingRef} tabIndex={-1}>{status === "done" ? "Password changed" : "New password"}</h1>
@@ -119,5 +121,6 @@ export function PasswordResetForm() {
         </p>
       ) : null}
     </section>
+    </AuthCardMotion>
   );
 }
