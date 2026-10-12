@@ -30,6 +30,21 @@ describe("report CSV", () => {
     expect(csv).toContain(",1h 00m,");
   });
 
+  it("writes dates and times in the viewer's zone when the export knows it", () => {
+    const row = {
+      startedAt: "2026-10-11T23:30:00.000Z",
+      stoppedAt: "2026-10-12T00:15:00.000Z",
+      durationSeconds: 2_700,
+      description: "Late call",
+      tagNames: [],
+      categoryName: "Work",
+      placeName: null,
+      source: "manual_app"
+    };
+    expect(buildReportCsv([row], { timeZone: "Europe/London" }).split("\r\n")[1]).toMatch(/^12\/10\/2026,00:30,01:15,/);
+    expect(buildReportCsv([row], { timeZone: "UTC" }).split("\r\n")[1]).toMatch(/^11\/10\/2026,23:30,00:15,/);
+  });
+
   it("labels a running row without inventing a finish time", () => {
     const csv = buildReportCsv([{
       startedAt: "2026-07-22T09:00:00.000Z",

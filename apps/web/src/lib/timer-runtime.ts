@@ -73,6 +73,14 @@ export function createTimerMutationGate() {
   } | null = null;
 
   const cancelled = (): GateCancellation => ({ ran: false, cancelled: true });
+  // Callers waiting for the gate to be free (nothing running and nothing queued).
+  let idleWaiters: Array<() => void> = [];
+  const settleIdle = () => {
+    if (activeGeneration !== null || queuedLatest) return;
+    const waiters = idleWaiters;
+    idleWaiters = [];
+    for (const resolve of waiters) resolve();
+  };
 
   const execute = async <T>(
     mutation: () => Promise<T>,
@@ -89,6 +97,7 @@ export function createTimerMutationGate() {
         queuedLatest?.generation === executionGeneration
         ? queuedLatest
         : null;
+      if (!pending) settleIdle();
       if (pending) {
         queuedLatest = null;
         const pendingRun = execute(pending.mutation, executionGeneration);
@@ -131,6 +140,17 @@ export function createTimerMutationGate() {
       enabled = false;
       generation += 1;
       cancelQueuedLatest();
+      const waiters = idleWaiters;
+      idleWaiters = [];
+      for (const resolve of waiters) resolve();
+    },
+    /**
+     * Resolves once nothing is running or queued: an action that must follow an in-flight Start
+     * (a Stop of its optimistic block) waits here, then runs with what that Start settled.
+     */
+    whenIdle(): Promise<void> {
+      if (!enabled || (activeGeneration !== generation && !queuedLatest)) return Promise.resolve();
+      return new Promise<void>((resolve) => { idleWaiters.push(resolve); });
     },
     isActive() {
       return enabled && activeGeneration === generation;
@@ -176,6 +196,16 @@ export function timerDraftForEntry(entry: TimeEntryRow | null | undefined): Time
     description: entry?.description ?? "",
     tagNames: entry?.tagNames ?? []
   };
+}
+
+/** Whether saving `draft` would change `entry` (the autosave's own comparison). */
+export function timerDraftDiffersFromEntry(draft: TimerDraft, entry: TimeEntryRow) {
+  const draftTags = draft.tagNames.map((name) => normalizeTagName(name).normalizedName).sort();
+  const entryTags = (entry.tags?.map((tag) => tag.normalizedName)
+    ?? entry.tagNames.map((name) => normalizeTagName(name).normalizedName)).sort();
+  return (draft.categoryId || null) !== entry.categoryId
+    || (draft.description.trim() || null) !== (entry.description ?? null)
+    || JSON.stringify(draftTags) !== JSON.stringify(entryTags);
 }
 
 export function timerDraftsEqual(left: TimerDraft, right: TimerDraft) {
@@ -245,6 +275,7 @@ export async function runTimerStartMutation({
   setError,
   send,
   refresh,
+  beforeStart,
   dedupeRunning = false
 }: {
   gate: TimerMutationGate;
@@ -264,6 +295,8 @@ export async function runTimerStartMutation({
   setError: (error: string | null) => void;
   send: (payload: TimerStartRequestPayload) => Promise<void>;
   refresh: () => Promise<void>;
+  /** Runs first inside the gate: saves the outgoing block's pending edits before it is replaced. */
+  beforeStart?: () => Promise<void>;
   /**
    * A quick start for exactly the block that is running when this Start runs (not when it was
    * asked for) changes nothing instead of stopping and restarting it.
@@ -271,6 +304,7 @@ export async function runTimerStartMutation({
   dedupeRunning?: boolean;
 }): Promise<TimerStartOutcome> {
   const result = await gate.runLatest(async (): Promise<TimerStartOutcome> => {
+    if (beforeStart) await beforeStart();
     const acceptedSnapshot = getCurrentSnapshot?.() ?? snapshot;
     const acceptedDraft = getCurrentDraft?.() ?? currentDraft;
     const draft = mergeTimerDraft(acceptedDraft, input);

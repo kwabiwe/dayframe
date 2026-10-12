@@ -13,7 +13,13 @@ const csvHeaders = [
   "Source"
 ] as const;
 
-export function buildReportCsv(rows: ReadonlyArray<ReportExportRow>) {
+/**
+ * The report CSV. Dates and times are written in `timeZone` (the viewer's zone) when given,
+ * otherwise in the process's own zone.
+ */
+export function buildReportCsv(rows: ReadonlyArray<ReportExportRow>, options: { timeZone?: string } = {}) {
+  const dateFormatter = new Intl.DateTimeFormat("en-GB", { ...dateFormat, timeZone: options.timeZone });
+  const timeFormatter = new Intl.DateTimeFormat("en-GB", { ...timeFormat, timeZone: options.timeZone });
   return [
     csvHeaders.join(","),
     ...rows.map((row) => {
@@ -37,13 +43,13 @@ export function escapeCsvCell(value: string) {
   return /[",\r\n]/.test(value) ? `"${value.replaceAll('"', '""')}"` : value;
 }
 
-const dateFormatter = new Intl.DateTimeFormat("en-GB", {
+const dateFormat: Intl.DateTimeFormatOptions = {
   day: "2-digit",
   month: "2-digit",
   year: "numeric"
-});
+};
 
-const timeFormatter = new Intl.DateTimeFormat("en-GB", {
+const timeFormat: Intl.DateTimeFormatOptions = {
   hour: "2-digit",
   minute: "2-digit"
-});
+};

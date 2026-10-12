@@ -19,8 +19,8 @@ afterEach(() => {
 });
 
 describe("Blocks command block", () => {
-  it("logs a finished block ending now for a trailing duration, with the @activity", async () => {
-    runtime = runtimeFixture({ description: "Plan launch @foc 45m", tagNames: ["Deep work"] });
+  it("logs a finished block ending now for a trailing duration, with the chosen activity", async () => {
+    runtime = runtimeFixture({ categoryId: "focus", description: "Plan launch 45m", tagNames: ["Deep work"] });
     render(<PersistentTimerBar />);
 
     const add = screen.getByRole("button", { name: "Add 45m ending now" });
@@ -34,7 +34,7 @@ describe("Blocks command block", () => {
     expect(Date.parse(input.stoppedAt) - Date.parse(input.startedAt)).toBe(45 * 60 * 1000);
     expect(runtime.startTimer).not.toHaveBeenCalled();
     const clear = (runtime.setTimerDraft as ReturnType<typeof vi.fn>).mock.calls.at(-1)![0] as (draft: unknown) => unknown;
-    const submitted = { categoryId: "", description: "Plan launch @foc 45m", tagNames: ["Deep work"] };
+    const submitted = { categoryId: "focus", description: "Plan launch 45m", tagNames: ["Deep work"] };
     expect(clear(submitted)).toEqual({ categoryId: "", description: "", tagNames: [] });
     // Text typed while the add was in flight is kept.
     const newer = { categoryId: "", description: "Next block", tagNames: [] };
@@ -42,17 +42,19 @@ describe("Blocks command block", () => {
     expect(screen.getByText("Added 45m to Focus.")).not.toBeNull();
   });
 
-  it("shows the typed @activity on the activity square", () => {
+  // Codex r5 on #361: only a choice from the `@` Activities list sets the activity and removes
+  // its `@query`; an `@word` left in the text is description text, saved as written.
+  it("a typed @word left in the text does not change the activity square", () => {
     runtime = runtimeFixture({ description: "Plan @writ" });
     render(<PersistentTimerBar />);
-    expect(screen.getByRole("button", { name: "Activity: Writing" })).not.toBeNull();
+    expect(screen.getByRole("button", { name: "Activity: No activity" })).not.toBeNull();
   });
 
-  it("starts the block with the @activity removed from the description", async () => {
+  it("starts the block with a typed @word kept as description text", async () => {
     runtime = runtimeFixture({ description: "Plan launch @focus" });
     render(<PersistentTimerBar />);
     await act(async () => { fireEvent.click(screen.getByRole("button", { name: "Start a block" })); });
-    expect(runtime.startTimer).toHaveBeenCalledWith({ categoryId: "focus", description: "Plan launch", tagNames: [] });
+    expect(runtime.startTimer).toHaveBeenCalledWith({ categoryId: "", description: "Plan launch @focus", tagNames: [] });
     expect(runtime.createManualEntry).not.toHaveBeenCalled();
   });
 
@@ -167,6 +169,7 @@ describe("Command block menus and switch toasts (UIA-202/209/210)", () => {
 
 function runtimeFixture(overrides: {
   activeEntry?: TimeEntryRow | null;
+  categoryId?: string;
   description?: string;
   tagNames?: string[];
 } = {}) {
@@ -197,7 +200,7 @@ function runtimeFixture(overrides: {
     startTimer: vi.fn().mockResolvedValue({ ok: true }),
     stopTimer: vi.fn().mockResolvedValue({ ok: true }),
     timerDraft: {
-      categoryId: activeEntry?.categoryId ?? "",
+      categoryId: overrides.categoryId ?? activeEntry?.categoryId ?? "",
       description: overrides.description ?? "",
       tagNames: overrides.tagNames ?? []
     },

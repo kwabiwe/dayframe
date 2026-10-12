@@ -8,7 +8,11 @@ import { formatDuration } from "@/lib/format";
 import type { ReportResult } from "@/lib/report-service";
 import { DONUT_GAP, donutArcs, reportBlocksModel } from "@/lib/reports-blocks";
 
-vi.mock("next/navigation", () => ({ useRouter: () => ({ push: vi.fn() }) }));
+vi.mock("next/navigation", () => ({
+  usePathname: () => "/reports",
+  useRouter: () => ({ push: vi.fn() }),
+  useSearchParams: () => new URLSearchParams()
+}));
 vi.mock("next/link", () => ({
   default: ({ href, children, ...props }: { href: string; children: React.ReactNode }) => <a href={href} {...props}>{children}</a>
 }));
@@ -16,7 +20,8 @@ vi.mock("next/link", () => ({
 const { ReportsBlocksPanel, traceBlockAt, traceDayAt } = await import("./ReportsBlocksPanel");
 
 const at = (date: number, hour = 0) => new Date(2026, 9, date, hour).toISOString();
-const day = (date: number) => ({ key: `d${date}`, label: `Day ${date}`, start: at(date), end: at(date + 1) });
+// Day keys are calendar dates: the model reads day numbers and the month grid's blanks from them.
+const day = (date: number) => ({ key: `2026-10-${`${date}`.padStart(2, "0")}`, label: `Day ${date}`, start: at(date), end: at(date + 1) });
 
 function report(preset = "this-week", secondDay = false, dayCount = 7, fillDay6 = false): ReportResult {
   const days = Array.from({ length: dayCount }, (_, index) => day(5 + index));
@@ -238,7 +243,7 @@ describe("Reports blocks and Where it went", () => {
     await tap(147, 120);
     expect(panel.classList.contains("is-open")).toBe(true);
     expect(panel.hasAttribute("inert")).toBe(false);
-    expect(container.querySelector('li[data-trace-day="d7"]')?.classList.contains("is-picked")).toBe(true);
+    expect(container.querySelector('li[data-trace-day="2026-10-07"]')?.classList.contains("is-picked")).toBe(true);
     expect(list.classList.contains("has-hot")).toBe(false);
     const rows = [...panel.querySelectorAll<HTMLButtonElement>(".df-day-pick-row")];
     expect(rows.map((row) => row.textContent)).toEqual(["No activity30m", "Work2h"]);
@@ -336,7 +341,7 @@ describe("Reports blocks and Where it went", () => {
     await open(120);
     await act(async () => container.querySelector<HTMLButtonElement>(".df-day-pick-row")!.focus());
     await view.rerender(week(false));
-    expect(document.activeElement).toBe(container.querySelector('li[data-trace-day="d7"]'));
+    expect(document.activeElement).toBe(container.querySelector('li[data-trace-day="2026-10-07"]'));
     await act(async () => view.root.unmount());
   });
 
@@ -473,7 +478,7 @@ describe("Reports blocks and Where it went", () => {
         <ReportsBlocksPanel blocks={reportBlocksModel(report(preset, true, 7, fill), formatDuration)} land={land} slices={slices} totalLabel="logged" totalSeconds={10 * 3600} />
       );
       const view = await mount(panel(false));
-      const day6 = view.container.querySelector<HTMLElement>('[data-trace-day="d6"]')!;
+      const day6 = view.container.querySelector<HTMLElement>('[data-trace-day="2026-10-06"]')!;
       await act(async () => day6.focus());
       expect(document.activeElement).toBe(day6);
       await view.rerender(panel(true));
@@ -565,10 +570,10 @@ describe("Reports blocks and Where it went", () => {
     const view = await mount(week());
     const list = view.container.querySelector<HTMLElement>(".df-wblocks")!;
     // Day 7's column spans x 100–144; its blocks are 3 px slivers at y 197–200 and 187–190.
-    expect(traceDayAt(list, 120, 20)).toBe("d7");
-    expect(traceDayAt(list, 147, 199)).toBe("d7");
+    expect(traceDayAt(list, 120, 20)).toBe("2026-10-07");
+    expect(traceDayAt(list, 147, 199)).toBe("2026-10-07");
     // Nearer the empty Day 8 (x 150–194), or on it, a finger is on Day 8.
-    expect(traceDayAt(list, 148, 199)).toBe("d8");
+    expect(traceDayAt(list, 148, 199)).toBe("2026-10-08");
     expect(traceDayAt(list, 400, 100)).toBeNull();
     // A mouse is on a block only within 2 px of it, vertically and horizontally.
     expect(traceBlockAt(list, 141, 20)).toBeNull();

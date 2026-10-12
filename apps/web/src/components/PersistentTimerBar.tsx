@@ -16,7 +16,7 @@ import { BlocksToast } from "@/components/blocks/BlocksToast";
 import { DayframeIcon } from "@/components/blocks/DayframeIcon";
 import { Odometer } from "@/components/blocks/Odometer";
 import { CategoryPicker, type CreateCategoryOutcome } from "@/components/CategoryPicker";
-import { InlineTagInput } from "@/components/InlineTagInput";
+import { InlineTagInput, type ActivityChoiceTrigger } from "@/components/InlineTagInput";
 import { DayframeDateTimePicker } from "@/components/DayframeDateTimePicker";
 import { OverlapNotice } from "@/components/OverlapNotice";
 import { TaskSuggestionsPanel } from "@/components/TaskSuggestionsPanel";
@@ -55,6 +55,7 @@ export function PersistentTimerBar({ workspaceMode = false }: { workspaceMode?: 
     startTimer,
     stopTimer,
     timerDraft,
+    timerDraftScope,
     timerError,
     updateActiveDetails,
     updateActiveStartTime
@@ -110,9 +111,13 @@ export function PersistentTimerBar({ workspaceMode = false }: { workspaceMode?: 
       .slice(0, TASK_SUGGESTION_LIMIT);
   }, [taskSuggestions, timerDraft.description]);
   const quickActions = useMemo(() => data ? buildLearnedQuickActions(data) : [], [data]);
+  // The block the description's `#`/`@` lists belong to (the runtime's draft scope: the running
+  // block, or idle, kept across an accepted Start's optimistic-to-real handoff). A different block
+  // closes them, even when the text reads the same.
+  const completionScope = timerDraftScope ?? active?.id ?? "idle";
   const parsedCommand = useMemo(
-    () => active ? null : parseCommand(timerDraft.description, data?.categories ?? []),
-    [active, data?.categories, timerDraft.description]
+    () => active ? null : parseCommand(timerDraft.description),
+    [active, timerDraft.description]
   );
   const activeAccent = active
     ? timeEntryAccentColor({
@@ -154,6 +159,10 @@ export function PersistentTimerBar({ workspaceMode = false }: { workspaceMode?: 
     return () => window.clearInterval(interval);
   }, [active]);
 
+  // Autosave sends the description exactly as shown, on its usual debounce, whether or not a list
+  // is open: nothing is parsed, stripped or held. A half-typed `@wri` may be saved for a moment;
+  // picking an activity then removes it and the next autosave sends the cleaned text. The runtime
+  // saves to the block's real id, including a just-started block still shown optimistically.
   useEffect(() => {
     if (!active) return undefined;
     const nextCategoryId = timerDraft.categoryId || null;
@@ -266,6 +275,9 @@ export function PersistentTimerBar({ workspaceMode = false }: { workspaceMode?: 
   function startFromEnter(event: ReactKeyboardEvent<HTMLInputElement>) {
     if (event.key !== "Enter" || event.nativeEvent.isComposing) return;
     event.preventDefault();
+    // While recording, Enter with no list open changes nothing: the description autosaves as
+    // written. (With the `@` list open, the list takes Enter and switches the activity.)
+    if (active) return;
     if (!shouldStartTimerFromEntrySubmit({
       hasActiveTimer: Boolean(active),
       isBusy: isTimerBusy && Boolean(active)
@@ -274,12 +286,11 @@ export function PersistentTimerBar({ workspaceMode = false }: { workspaceMode?: 
     void runCommand();
   }
 
-  // Idle Start: `@activity` picks the activity and a trailing duration logs a finished block
-  // ending now (through the manual-entry path) instead of starting the timer.
-  async function runCommand() {
-    const submitted = timerDraft;
-    const command = parseCommand(submitted.description, data!.categories);
-    const categoryId = command.categoryId ?? submitted.categoryId;
+  // Idle Start: a trailing duration logs a finished block ending now (through the manual-entry
+  // path) instead of starting the timer. The description is otherwise sent as written.
+  async function runCommand(submitted = timerDraft) {
+    const command = parseCommand(submitted.description);
+    const categoryId = submitted.categoryId;
     // Only the command that was sent is cleared or restored: text typed while it was in flight wins.
     const isUntouched = (current: typeof submitted) => current.description === submitted.description
       && current.categoryId === submitted.categoryId
@@ -309,16 +320,37 @@ export function PersistentTimerBar({ workspaceMode = false }: { workspaceMode?: 
     await startTimer({ categoryId, description: command.description, tagNames: submitted.tagNames });
   }
 
+  // An activity chosen from the description's `@` list: the only way typed `@` text leaves the
+  // description (exactly the `@query` the list was open for; every other `@word` is text).
+  // Recording: the running block's activity changes in place through the usual debounced
+  // autosave, never a Stop or new block. Idle: Enter also starts the block; Tab, a click or a tap
+  // only picks the activity.
+  function chooseActivity(categoryId: string, description: string, trigger: ActivityChoiceTrigger, scope: string) {
+    // A pick only ever changes the block the list was opened for.
+    if (scope !== completionScope) return;
+    setCommandNotice(null);
+    setSuggestionsOpen(false);
+    if (trigger === "enter" && !active) {
+      const draft = { ...timerDraft, categoryId, description };
+      setTimerDraft(draft);
+      void runCommand(draft);
+      return;
+    }
+    setTimerDraft((current) => ({ ...current, categoryId, description }));
+  }
+
   function startQuickAction(action: QuickAction) {
     const draft = quickActionTimerDraft(action.categoryId);
     setCategoryMenuOpen(false);
     setSuggestionsOpen(false);
     const swatch = action.categoryId ? blockStyle(action.color, action.label) : undefined;
-    setTimerDraft(draft);
     // The Start decides when it runs (a queued Start can run after earlier ones settle): asking for
     // exactly the running block changes nothing and says so; a switch names the block it actually
-    // replaced, timed to the switch. A Start superseded by a later one announces nothing.
-    void startTimer(draft, { dedupeRunning: true }).then((outcome) => {
+    // replaced, timed to the switch. A Start superseded by a later one announces nothing. It is
+    // asked for before the bar shows its draft, so the runtime keeps the outgoing block's edits.
+    const started = startTimer(draft, { dedupeRunning: true });
+    setTimerDraft(draft);
+    void started.then((outcome) => {
       if (!outcome.ok || !outcome.own) return;
       if (outcome.alreadyRunning) {
         if (outcome.unchanged) announce(alreadyRecordingToastMessage(outcome.unchanged), swatch);
@@ -380,11 +412,10 @@ export function PersistentTimerBar({ workspaceMode = false }: { workspaceMode?: 
   }
 
   const liveCategory = active ? data.categories.find((category) => category.id === (timerDraft.categoryId || active.categoryId)) ?? null : null;
-  const previewCategory = parsedCommand?.categoryId
-    ? data.categories.find((category) => category.id === parsedCommand.categoryId) ?? null
-    : null;
-  const commandHasShorthand = Boolean(parsedCommand && timerDraft.description.trim() && (parsedCommand.categoryId || parsedCommand.durationSeconds));
-  const exampleActivity = data.categories.find((category) => category.isPinned)?.name ?? data.categories[0]?.name ?? "work";
+  // The preview line shows the activity the block will log to (chosen with the block or the `@`
+  // list) beside a trailing duration.
+  const previewCategory = parsedCommand?.durationSeconds ? selectedCategory : null;
+  const commandHasShorthand = Boolean(parsedCommand && timerDraft.description.trim() && parsedCommand.durationSeconds);
   const goLabel = parsedCommand?.durationSeconds
     ? `Add ${formatDuration(parsedCommand.durationSeconds)}`
     : "Start";
@@ -426,7 +457,7 @@ export function PersistentTimerBar({ workspaceMode = false }: { workspaceMode?: 
           }}
           open={categoryMenuOpen}
           portal
-          selectedId={parsedCommand?.categoryId ?? timerDraft.categoryId}
+          selectedId={timerDraft.categoryId}
           variant="block"
         />
 
@@ -437,11 +468,14 @@ export function PersistentTimerBar({ workspaceMode = false }: { workspaceMode?: 
           {...descriptionFocusRing.handlers}
         >
           <InlineTagInput
+            activities={data.categories}
             ariaLabel="Description"
             className="df-cmd-tags"
             inputId="persistent-timer-description"
             inputRef={descriptionInputRef}
             name="timer-description"
+            onActivityChoose={chooseActivity}
+            completionScope={completionScope}
             onChange={(description) => {
               setCommandNotice(null);
               setTimerDraft((current) => ({ ...current, description }));
@@ -479,8 +513,10 @@ export function PersistentTimerBar({ workspaceMode = false }: { workspaceMode?: 
           />
           {visibleTaskSuggestions.length ? (
             <TaskSuggestionsPanel
+              anchorRef={suggestionsRef}
               isBusy={isTimerBusy}
               isOpen={suggestionsOpen && !hashtagSuggestionsOpen}
+              onClose={() => setSuggestionsOpen(false)}
               onSelect={(suggestion) => void chooseTimerSuggestion(suggestion)}
               suggestions={visibleTaskSuggestions}
             />
@@ -698,8 +734,8 @@ export function PersistentTimerBar({ workspaceMode = false }: { workspaceMode?: 
         ) : !active && commandFocused && !timerDraft.description ? (
           <>
             <span className="df-cmd-hint">Try</span>
-            <span className="df-cmd-chip">Write proposal @{exampleActivity.replace(/\s+/g, "").toLocaleLowerCase()} 45m</span>
-            <span className="df-cmd-hint">@ picks an activity, # adds tags, a trailing duration logs time you already spent.</span>
+            <span className="df-cmd-chip">Write proposal 45m</span>
+            <span className="df-cmd-hint">@ opens your activities, # adds tags, a trailing duration logs time you already spent.</span>
           </>
         ) : null}
       </div>
@@ -931,7 +967,9 @@ function ManualEntryDialog({
             {visibleTaskSuggestions.length ? (
               <TaskSuggestionsPanel
                 isBusy={isBusy}
+                anchorRef={descriptionInteractionRef}
                 isOpen={suggestionsOpen && !tagPanelOpen}
+                onClose={() => setSuggestionsOpen(false)}
                 onSelect={chooseSuggestion}
                 panelRef={suggestionsRef}
                 suggestions={visibleTaskSuggestions}

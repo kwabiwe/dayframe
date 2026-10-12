@@ -18,6 +18,7 @@ import { analyzeTimeIntervals, resolveActivityIcon, type TimeIntervalAnalysisEnt
 import { DayframeIcon } from "@/components/blocks/DayframeIcon";
 import { blockStyle } from "@/lib/block-style";
 import { useAppShellRuntime } from "@/components/AppShellRuntime";
+import { useIsHydrated } from "@/components/useHydrationSafeNow";
 import { DatePickerPopover } from "@/components/DatePickerPopover";
 import { saveTimeEntryQuickEdit, TimeEntryQuickEditorModal } from "@/components/TimeEntryQuickEditor";
 import { TagMetadata } from "@/components/TagMetadata";
@@ -234,14 +235,19 @@ export function EntriesTable({
   const [openInlineDatePickerKey, setOpenInlineDatePickerKey] = useState<string | null>(null);
   const inlineSessionRef = useRef(0);
   const highlightedEntryId = searchParams.get("entry");
+  // Every row is grouped under, and shows times in, the browser's local days, which the server
+  // render can't know (Vercel renders in UTC). The server render and the hydration pass draw the
+  // empty list; the rows appear once the page has hydrated, without motion (React #418).
+  const localTimeReady = useIsHydrated();
+  const listEntries = localTimeReady ? entries : NO_LIST_ENTRIES;
 
   useEffect(() => {
     inlineEditorRef.current = inlineEditor;
   }, [inlineEditor]);
 
   const displayedEntries = useMemo(() => {
-    if (!optimisticDescriptions.size) return entries;
-    return entries.map((entry) => {
+    if (!optimisticDescriptions.size) return listEntries;
+    return listEntries.map((entry) => {
       const optimistic = optimisticDescriptions.get(entry.id);
       return optimistic &&
         entry.description === optimistic.sourceDescription &&
@@ -249,7 +255,7 @@ export function EntriesTable({
         ? { ...entry, description: optimistic.description }
         : entry;
     });
-  }, [entries, optimisticDescriptions]);
+  }, [listEntries, optimisticDescriptions]);
 
   const overlapAnalysis = useMemo(
     () => analyzeTimeIntervals(
@@ -705,6 +711,7 @@ export function EntriesTable({
       {inlineStatus ? <p className="sr-only" aria-live="polite" role="status">{inlineStatus}</p> : null}
 
       <div
+        aria-busy={localTimeReady ? undefined : true}
         className="timeline-list-scroll"
         onScroll={onScroll}
         ref={(element) => {
@@ -1009,6 +1016,8 @@ function overlapMarkerDescription(
     overlap.overlapCount === 1 ? "block" : "blocks"
   }${peerDetail}. ${timeEntryTitle(entry)} still counts in full towards Total logged.`;
 }
+
+const NO_LIST_ENTRIES: TimeEntryRow[] = [];
 
 export type ListDayTotal = { dayStartMs: number; seconds: number };
 

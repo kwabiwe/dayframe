@@ -6121,22 +6121,178 @@ kbd {
   padding: 6px;
 }
 
+/*
+ * One floating list (FloatingList): the description's Suggestions, its # Tags and its @ Activities
+ * share this surface, a sentence-case heading (never an all-caps eyebrow), 44 px rows with one inset,
+ * radius and type size, and one neutral highlight for the pointer, the keyboard (aria-selected /
+ * aria-activedescendant) and focus. Each row keeps its own content. It appears with opacity only
+ * (no slide) and at once under Reduce Motion (motion.md). Positioning stays with each list.
+ */
+.df-flist {
+  display: flex;
+  max-width: calc(100vw - 24px);
+  flex-direction: column;
+  padding: 4px;
+  overscroll-behavior: contain;
+}
+
+.df-flist.ui-floating-surface,
+.df-flist.ui-floating-surface.is-open {
+  transform: none;
+}
+
+.df-flist.ui-floating-surface {
+  transition: opacity 120ms ease-out, visibility 0s linear 120ms;
+}
+
+.df-flist.ui-floating-surface.is-open {
+  transition: opacity 120ms ease-out, visibility 0s linear 0s;
+}
+
+.df-flist-head {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 10px 4px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0;
+  line-height: 16px;
+  text-transform: none;
+}
+
+.df-flist-rows {
+  display: grid;
+  min-height: 0;
+}
+
+.df-flist-close {
+  display: none;
+}
+
+/*
+ * Phones (560 px and below): the list is a full-width sheet fixed 12 px from the screen edges
+ * just under the field (above it when the keyboard leaves no room). FloatingList sets its top or
+ * bottom and its max-height from the visual viewport, so it stays above the keyboard; the rows
+ * scroll inside and a visible 44 px Close sits in the head.
+ */
+.df-flist.ui-floating-surface.is-sheet {
+  position: fixed;
+  z-index: 130;
+  max-width: calc(100vw - 24px);
+  overflow: hidden;
+}
+
+.df-flist.is-sheet .df-flist-head {
+  padding: 2px 2px 0 10px;
+}
+
+.df-flist.is-sheet .df-flist-close {
+  display: inline-grid;
+  width: 44px;
+  height: 44px;
+  flex: 0 0 auto;
+  place-items: center;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--muted);
+}
+
+.df-flist.is-sheet .df-flist-close:hover {
+  background: var(--surface-muted);
+}
+
+.df-flist.is-sheet .df-flist-close:focus-visible {
+  outline: 0;
+  box-shadow: inset 0 0 0 2px var(--web-focus-border);
+}
+
+.df-flist.is-sheet .df-flist-rows {
+  max-height: none;
+  flex: 1 1 auto;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+/* The command timer's sticky shell (z-index 25) sits under the phone tab bar (40); while one of
+   its lists is a sheet the shell rises above the bar so the sheet is never covered. */
+.swiss-persistent-timer-shell:has(.df-flist.is-sheet.is-open) {
+  z-index: 45;
+}
+
+.df-flist .df-flist-row {
+  display: flex;
+  width: 100%;
+  min-width: 0;
+  min-height: 44px;
+  align-items: center;
+  gap: 10px;
+  border: 0;
+  border-radius: 10px;
+  background: transparent;
+  padding: 6px 10px;
+  color: var(--foreground);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 18px;
+  text-align: left;
+}
+
+.df-flist .df-flist-row:hover,
+.df-flist .df-flist-row.is-highlighted,
+.df-flist .df-flist-row:focus-visible {
+  background: var(--surface-muted);
+}
+
+.df-flist .df-flist-row:focus-visible {
+  outline: 0;
+  box-shadow: inset 0 0 0 2px var(--web-focus-border);
+}
+
+.df-flist-empty {
+  display: flex;
+  min-height: 44px;
+  align-items: center;
+  padding: 6px 10px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+/* The @ Activities row: the activity's solid block with its icon, then its name. */
+.df-flist-block {
+  display: inline-grid;
+  width: 24px;
+  height: 24px;
+  flex: 0 0 auto;
+  place-items: center;
+  border-radius: 7px;
+}
+
+.df-flist-row--activity > span:last-child {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .swiss-task-suggestions {
   --task-suggestion-count: 5;
-  --task-suggestion-header-height: 36px;
-  --task-suggestion-row-height: 56px;
+  --task-suggestion-header-height: 28px;
+  --task-suggestion-row-height: 48px;
   position: absolute;
   top: calc(100% + var(--web-field-gap));
   left: 0;
   z-index: 60;
-  display: grid;
   width: 100%;
-  max-width: 100%;
   max-height: min(
     calc(
       var(--task-suggestion-header-height) +
       (var(--task-suggestion-count) * var(--task-suggestion-row-height)) +
-      6px
+      8px
     ),
     calc(100dvh - 96px)
   );
@@ -6153,49 +6309,21 @@ kbd {
   max-width: calc(100vw - 24px);
 }
 
-.swiss-task-suggestions-header {
-  display: flex;
-  min-height: 36px;
-  align-items: center;
-  border-bottom: 1px solid var(--line);
-  padding: 0 var(--web-control-padding-inline);
-}
-
-.swiss-task-suggestions-header span {
-  color: var(--muted);
-  font-size: 12px;
-  font-weight: 600;
-}
-
 .swiss-task-suggestions-list {
-  display: grid;
   grid-auto-rows: minmax(var(--task-suggestion-row-height), auto);
   max-height: calc(var(--task-suggestion-count) * var(--task-suggestion-row-height));
   overflow-y: auto;
   overscroll-behavior: contain;
-  padding-block: 2px;
 }
 
-.swiss-task-suggestions-list button {
+/* A suggestion row: description over "activity · #tags", and the coral Start arrow. */
+.swiss-task-suggestions-list .df-flist-row {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
   min-height: var(--task-suggestion-row-height);
-  align-items: center;
-  gap: var(--web-gap-sm);
-  border: 0;
-  border-radius: 0;
-  background: transparent;
-  padding: 7px var(--web-control-padding-inline);
-  color: var(--foreground);
-  text-align: left;
 }
 
-.swiss-task-suggestions-list button:hover,
-.swiss-task-suggestions-list button:focus-visible {
-  background: var(--surface-muted);
-}
-
-.swiss-task-suggestions-list button > span {
+.swiss-task-suggestions-list .df-flist-row > span {
   display: grid;
   min-width: 0;
   gap: 2px;
@@ -6210,7 +6338,8 @@ kbd {
 
 .swiss-task-suggestions-list b {
   font-size: 13px;
-  font-weight: 650;
+  font-weight: 600;
+  line-height: 18px;
 }
 
 .swiss-task-suggestions-list small {
@@ -6219,8 +6348,9 @@ kbd {
   align-items: center;
   gap: 5px;
   color: var(--muted);
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 500;
+  line-height: 16px;
 }
 
 .swiss-task-suggestions-list i {
@@ -7034,6 +7164,13 @@ kbd {
   background: var(--surface-muted);
 }
 
+.inline-tag-picker-list .inline-tag-empty {
+  display: flex;
+  min-height: 44px;
+  align-items: center;
+  padding: 0.55rem 0.75rem;
+}
+
 .inline-tag-check {
   display: inline-flex;
   width: 1rem;
@@ -7058,7 +7195,9 @@ kbd {
   font-weight: 600;
 }
 
-.inline-tag-suggestions {
+/* The # Tags and @ Activities lists sit under the description (FloatingList draws them). */
+.inline-tag-suggestions,
+.inline-activity-suggestions {
   position: absolute;
   top: calc(100% + 0.35rem);
   left: 0;
@@ -7067,57 +7206,9 @@ kbd {
   max-height: min(19rem, calc(100dvh - 10rem));
   overflow-x: hidden;
   overflow-y: auto;
-  overscroll-behavior: contain;
-  opacity: 0;
-  pointer-events: none;
-  visibility: hidden;
-  transform: translateY(-4px);
-  transition: opacity 140ms ease-out, transform 140ms ease-out, visibility 0s linear 140ms;
 }
 
-.inline-tag-suggestions.is-open {
-  opacity: 1;
-  pointer-events: auto;
-  visibility: visible;
-  transform: translateY(0);
-  transition-delay: 0s;
-}
-
-.inline-tag-suggestions-title {
-  display: block;
-  padding: 0.5rem 0.75rem;
-  color: var(--muted);
-  font-size: 0.6875rem;
-  font-weight: 600;
-  letter-spacing: 0.08em;
-}
-
-.inline-tag-suggestions > div {
-  padding-block: 2px;
-}
-
-.inline-tag-suggestions button,
-.inline-tag-empty {
-  display: flex;
-  width: 100%;
-  min-height: 44px;
-  align-items: center;
-  border: 0;
-  border-radius: var(--web-radius-control);
-  background: transparent;
-  padding: 0.55rem 0.75rem;
-  color: var(--foreground);
-  font: inherit;
-  font-size: 0.8125rem;
-  text-align: left;
-}
-
-.inline-tag-suggestions button.is-highlighted {
-  background: var(--surface-muted);
-  transition: background-color 120ms ease-out;
-}
-
-.inline-tag-suggestions button.is-create {
+.inline-tag-suggestions .df-flist-row.is-create {
   color: var(--accent-text);
   font-weight: 600;
 }
@@ -7399,14 +7490,13 @@ dialog.ui-dialog.manual-entry-dialog {
 
 @media (prefers-reduced-motion: reduce) {
   .ui-floating-surface,
-  .ui-floating-surface.is-open,
-  .inline-tag-suggestions,
-  .inline-tag-suggestions.is-open {
+  .ui-floating-surface.is-open {
     transform: none;
     transition: opacity 140ms linear;
   }
 
-  .inline-tag-suggestions button.is-highlighted {
+  .df-flist.ui-floating-surface,
+  .df-flist.ui-floating-surface.is-open {
     transition: none;
   }
 }
@@ -8164,7 +8254,8 @@ dialog.ui-dialog.manual-entry-dialog {
 }
 
 .inline-tag-picker.is-portalled,
-.inline-tag-suggestions.is-portalled {
+.inline-tag-suggestions.is-portalled,
+.inline-activity-suggestions.is-portalled {
   position: fixed;
   right: auto;
   bottom: auto;
@@ -12681,6 +12772,13 @@ dialog.ui-dialog.df-ce-dialog {
   .df-wb-stack > .df-tblock {
     animation-timing-function: cubic-bezier(0.22, 1, 0.36, 1);
   }
+}
+
+/* A time zone reconciliation (the shell's refresh after the zone cookie changed) redraws the
+   blocks at rest. Only the duration is zeroed, never the animation itself, so dropping the class
+   on the next report never replays a landing on blocks that stay. */
+.df-wblocks.is-settled .df-wb-stack > .df-tblock {
+  animation-duration: 0s;
 }
 
 /* Only transform animates: a filled opacity would override the cross-highlight's fading. */

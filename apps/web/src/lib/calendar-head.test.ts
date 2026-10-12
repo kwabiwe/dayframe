@@ -73,6 +73,23 @@ describe("Calendar page head (Trello: Calendar page improvements)", () => {
     expect(beforeHydration.days.some((d) => d.isToday)).toBe(false);
     expect(beforeHydration.days.every((d) => d.bars.length === 0)).toBe(true);
     expect(beforeHydration.days[0].accessibleName).toBe("Monday 5 October");
-    expect(beforeHydration.weekTotal).toBe("1h in the week of 5 Oct");
+    // Totals depend on where the browser's days start, so the server render shows a dash.
+    expect(beforeHydration.framedLine).toBe("– framed on Sunday");
+    expect(beforeHydration.weekTotal).toBe("– in the week of 5 Oct");
+  });
+
+  it("marks the server's guess at today (the viewer's zone) until hydration", () => {
+    const beforeHydration = calendarHeadModel({
+      dayLoggedSeconds: 0,
+      entries: entries as never,
+      hydrated: false,
+      nowMs: new Date(2026, 9, 11, 14, 48).getTime(),
+      selectedDay: day(11),
+      todayKeyHint: "2026-10-11",
+      weekDays,
+      weekLoggedSeconds: 3600
+    });
+    expect(beforeHydration.days.filter((d) => d.isToday).map((d) => d.dateNumber)).toEqual([11]);
+    expect(beforeHydration.weekTotal).toBe("– this week");
   });
 });

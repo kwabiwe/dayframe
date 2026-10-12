@@ -788,6 +788,7 @@ export function TimeEntryQuickEditorPanel({
                 anchorRef={descriptionInteractionRef}
                 isBusy={isBusy}
                 isOpen={suggestionsOpen}
+                onClose={() => controller.setSuggestionsOpen(false)}
                 onSelect={controller.applyTaskSuggestion}
                 panelRef={suggestionsRef}
                 portal

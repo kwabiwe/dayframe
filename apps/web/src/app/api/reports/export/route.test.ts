@@ -60,4 +60,25 @@ describe("GET /api/reports/export", () => {
     expect(body).toContain('"School, notes ""final""\nCafé 日本語"');
     expect(body).not.toMatch(/workspaceId|userId|confidence|rawPayload|reviewStatus/);
   });
+
+  it("uses the viewer's zone from the web app's cookie for the days and the times", async () => {
+    const response = await GET(new Request("https://dayframe.test/api/reports/export?range=custom&from=2026-07-20&to=2026-07-20", {
+      headers: { cookie: "theme=dark; dayframe_tz=Europe/London" }
+    }));
+    const body = await response.text();
+    const input = mocks.getReportExportRows.mock.calls[0][1];
+    expect(input.range.start).toBe("2026-07-19T23:00:00.000Z");
+    expect(input.dayBoundaries[0]).toEqual(expect.objectContaining({ key: "2026-07-20", start: "2026-07-19T23:00:00.000Z", end: "2026-07-20T23:00:00.000Z" }));
+    expect(body.split("\r\n")[1]).toMatch(/^20\/07\/2026,10:00,11:00,/);
+  });
+
+  it("keeps UTC days without the cookie or with an unknown zone", async () => {
+    for (const headers of [{}, { cookie: "dayframe_tz=Not/AZone" }] as Record<string, string>[]) {
+      mocks.getReportExportRows.mockClear();
+      const response = await GET(new Request("https://dayframe.test/api/reports/export?range=custom&from=2026-07-20&to=2026-07-20", { headers }));
+      const body = await response.text();
+      expect(mocks.getReportExportRows.mock.calls[0][1].range.start).toBe("2026-07-20T00:00:00.000Z");
+      expect(body.split("\r\n")[1]).toMatch(/^20\/07\/2026,09:00,10:00,/);
+    }
+  });
 });

@@ -178,10 +178,13 @@ const RESIZE_TIP_ROOM = 150;
 export function TimeReviewViews({
   initialData,
   initialPreference,
+  initialTodayKey = null,
   renderedAt
 }: {
   initialData: BootstrapData;
   initialPreference: TimelinePreference | null;
+  /** Today's date key in the viewer's zone as the server saw it; used until hydration. */
+  initialTodayKey?: string | null;
   renderedAt: string;
 }) {
   const data = useRuntimePageData(initialData);
@@ -220,8 +223,9 @@ export function TimeReviewViews({
   });
   const activeScrollContainerRef = useRef<HTMLDivElement | null>(null);
   const timelineStateRef = useRef(state);
-  const navigateRef = useRef<(overrides: Partial<TimelineState>) => Promise<void>>(async () => undefined);
+  const navigateRef = useRef<(overrides: Partial<TimelineState>, options?: { replace?: boolean }) => Promise<void>>(async () => undefined);
   const todayKeyRef = useRef(toTimelineDateKey(new Date()));
+  const initialTodayKeyRef = useRef(initialTodayKey);
 
   const refreshData = useCallback(async () => {
     await refresh();
@@ -265,7 +269,7 @@ export function TimeReviewViews({
     container.scrollTop = position.top;
   }, [state.date, state.scope, state.view]);
 
-  async function navigate(overrides: Partial<typeof state>) {
+  async function navigate(overrides: Partial<typeof state>, options: { replace?: boolean } = {}) {
     const nextState = { ...state, ...overrides };
     const href = timelineHref(searchParams.toString(), state, nextState);
     const originSearch = searchParams.toString();
@@ -289,7 +293,8 @@ export function TimeReviewViews({
     const outcome = await loadDate(nextState.date);
     if (!outcome.ok) return;
     if (window.location.search.slice(1) !== originSearch) return;
-    window.history.pushState(null, "", href);
+    if (options.replace) window.history.replaceState(null, "", href);
+    else window.history.pushState(null, "", href);
     persistPreference(nextState);
   }
 
@@ -308,11 +313,16 @@ export function TimeReviewViews({
       rolloverTimeout = window.setTimeout(reconcileToday, Math.max(250, nextMidnight.getTime() - now.getTime() + 100));
     };
 
+    // The first visible check after the page loads corrects the date the server picked with a
+    // replacement, so Back never returns to it; later ones (midnight) add a history entry.
+    let landed = false;
     const reconcileToday = () => {
       if (document.visibilityState !== "visible") {
         scheduleRollover();
         return;
       }
+      const landing = !landed;
+      landed = true;
       const now = new Date();
       const previousTodayKey = todayKeyRef.current;
       const currentTodayKey = toTimelineDateKey(now);
@@ -322,7 +332,7 @@ export function TimeReviewViews({
         setPresentationNow(now.getTime());
         const currentState = timelineStateRef.current;
         if (shouldAdvanceStaleTimelineToToday(currentState, previousTodayKey, now)) {
-          void navigateRef.current(resetTimelineState(currentState, now));
+          void navigateRef.current(resetTimelineState(currentState, now), { replace: landing });
         }
       }
       scheduleRollover();
@@ -332,8 +342,13 @@ export function TimeReviewViews({
     const handleVisibilityChange = () => {
       if (document.visibilityState === "visible") reconcileToday();
     };
+    // The day this page last treated as today: this tab's own record, otherwise the server's guess
+    // in the viewer's zone. A first visit without the zone cookie (or with a stale one) can open
+    // the server's "today" (UTC on Vercel) just after local midnight; a page showing that day then
+    // moves to the browser's today, as it does when midnight passes (Codex r1 on #367).
     const storedTodayKey = readTimelineTodaySessionKey();
-    if (storedTodayKey) todayKeyRef.current = storedTodayKey;
+    const landingTodayKey = storedTodayKey ?? initialTodayKeyRef.current;
+    if (landingTodayKey) todayKeyRef.current = landingTodayKey;
     reconcileToday();
     window.addEventListener("focus", handleFocus);
     document.addEventListener("visibilitychange", handleVisibilityChange);
@@ -400,9 +415,12 @@ export function TimeReviewViews({
     })),
     { range: ranges.week, now: capturedNow }
   );
-  const periodLabel = formatTimelinePeriodLabel(state.scope, ranges, capturedNow);
-  const todayKey = toTimelineDateKey(capturedNow);
-  const showsToday = capturedNow >= ranges.active.start && capturedNow < ranges.active.end;
+  // Which day is today depends on the browser's time zone. The server render and the hydration
+  // pass use the server's guess for the viewer's zone (null: none), then the browser's clock.
+  const todayKey = hydrated ? toTimelineDateKey(capturedNow) : initialTodayKey;
+  const periodLabel = formatTimelinePeriodLabel(state.scope, ranges, todayKey);
+  const showsToday = todayKey === null
+    || (todayKey >= toTimelineDateKey(ranges.active.start) && todayKey < toTimelineDateKey(ranges.active.end));
   const dayReportFrom = toTimelineDateKey(ranges.day.start);
   const dayReportTo = toTimelineDateKey(addDays(ranges.day.end, -1));
   const weekReportFrom = toTimelineDateKey(ranges.week.start);
@@ -414,6 +432,7 @@ export function TimeReviewViews({
     hydrated,
     nowMs: capturedNow.getTime(),
     selectedDay: ranges.day.start,
+    todayKeyHint: initialTodayKey,
     weekDays: ranges.weekDays,
     weekLoggedSeconds: weekAnalysis.totalLoggedSeconds
   });
@@ -446,7 +465,7 @@ export function TimeReviewViews({
             onChange={(date) => void navigate({ date })}
             portal
             portalAlign="center"
-            today={todayKey}
+            today={todayKey ?? state.date}
             value={state.date}
           />
           <IconButton
@@ -522,6 +541,7 @@ export function TimeReviewViews({
             reviewItems={data.reviewItems}
             scrollContainerRef={registerScrollContainer}
             tags={data.tags}
+            todayKeyHint={initialTodayKey}
             undoToastVisible={Boolean(pendingNotice)}
             visibleDays={state.scope === "day" ? [ranges.day.start] : ranges.weekDays}
           />
@@ -580,6 +600,7 @@ export function CalendarReview({
   reviewItems = [],
   scrollContainerRef,
   tags,
+  todayKeyHint = null,
   undoToastVisible = false,
   visibleDays
 }: {
@@ -597,6 +618,8 @@ export function CalendarReview({
   reviewItems?: readonly ReviewItemRow[];
   scrollContainerRef: (element: HTMLDivElement | null) => void;
   tags: BootstrapData["tags"];
+  /** Before hydration, today's date key as the server saw it in the viewer's zone (null: none). */
+  todayKeyHint?: string | null;
   /** The Timeline's Delete Undo toast is up: it keeps the toast place, so Calendar notices are only announced. */
   undoToastVisible?: boolean;
   visibleDays: Date[];
@@ -707,10 +730,15 @@ export function CalendarReview({
   const [continuingEntryId, setContinuingEntryId] = useState<string | null>(null);
   const [zoomLevel, setZoomLevel] = useState<CalendarZoom>("hour");
   const [calendarScroller, setCalendarScroller] = useState<HTMLDivElement | null>(null);
-  const today = capturedNow;
-  // The now pill shows a clock time in the browser's time zone, which the server render can't know;
-  // it appears once the page has hydrated so both renders agree (Codex r1 on #303).
-  const nowPillHydrated = useIsHydrated();
+  // Where a block sits, the now line and pill, the Review spans and each day's total all depend on
+  // the browser's time zone, which the server render can't know (Vercel renders in UTC). The server
+  // render and the hydration pass draw the same frame (the axis, day headings and an empty grid);
+  // the blocks appear once the page has hydrated, without motion (React #418, Codex r1 on #303).
+  const localTimeReady = useIsHydrated();
+  const todayKey = localTimeReady ? formatCalendarDateKey(capturedNow) : todayKeyHint;
+  const isToday = (day: Date) => formatCalendarDateKey(day) === todayKey;
+  const gridEntries = localTimeReady ? entries : NO_TIMELINE_ENTRIES;
+  const gridReviewItems = localTimeReady ? reviewItems : NO_REVIEW_ITEMS;
   const zoom = calendarZooms[zoomLevel];
   const calendarHours = calendarHourModes[calendarHoursMode];
   const zoomKeys = Object.keys(calendarZooms) as CalendarZoom[];
@@ -751,12 +779,13 @@ export function CalendarReview({
   const initialScrollAppliedRef = useRef(false);
   useLayoutEffect(() => {
     const scroller = calendarScrollerRef.current;
-    if (!calendarScroller || !scroller || initialScrollAppliedRef.current) return;
+    // The opening position is a local hour, so it waits for the browser's clock (hydration).
+    if (!localTimeReady || !calendarScroller || !scroller || initialScrollAppliedRef.current) return;
     initialScrollAppliedRef.current = true;
     if (hasRememberedScroll?.()) return;
     const hour = calendarInitialScrollHour({ entries, now: capturedNow, visibleDays });
     scroller.scrollTop = Math.max(0, (hour - calendarHours.startHour) * rowHeight);
-  }, [calendarHours.startHour, calendarScroller, capturedNow, entries, hasRememberedScroll, rowHeight, visibleDays]);
+  }, [calendarHours.startHour, calendarScroller, capturedNow, entries, hasRememberedScroll, localTimeReady, rowHeight, visibleDays]);
 
   useEffect(() => {
     const clearConsumedPointer = (event: PointerEvent) => {
@@ -1091,7 +1120,9 @@ export function CalendarReview({
       pointerType: event.pointerType,
       resizeActive: Boolean(resizingId),
       targetKind
-    })) {
+    }) || !localTimeReady) {
+      // Until hydration the grid draws no blocks, now line or future zone (#367), so there is
+      // nothing a press could be judged against.
       createPointerSequenceRef.current = null;
       return;
     }
@@ -1274,6 +1305,7 @@ export function CalendarReview({
   return (
     <section className="timeline-calendar-workspace">
       <div
+        aria-busy={localTimeReady ? undefined : true}
         aria-label="Calendar time grid"
         className="calendar-grid-scroller"
         onScroll={onScroll}
@@ -1307,7 +1339,7 @@ export function CalendarReview({
           {visibleDays.map((day) => {
             const dayStart = startOfDay(day);
             const total = analyzeTimeIntervals(
-              entries.map((entry) => ({
+              gridEntries.map((entry) => ({
                 id: entry.id,
                 startedAt: entry.startedAt,
                 stoppedAt: entry.stoppedAt
@@ -1323,7 +1355,7 @@ export function CalendarReview({
                 key={day.toISOString()}
                 className={[
                   "calendar-day-heading",
-                  sameDay(day, today) ? "is-today" : ""
+                  isToday(day) ? "is-today" : ""
                 ].join(" ")}
               >
                 <div className="calendar-day-date" aria-label={formatDate(day)}>
@@ -1331,7 +1363,8 @@ export function CalendarReview({
                   <b aria-hidden="true">{day.getDate()}</b>
                 </div>
                 <div
-                  aria-label={`${loggedLabel} logged`}
+                  aria-hidden={localTimeReady ? undefined : true}
+                  aria-label={localTimeReady ? `${loggedLabel} logged` : undefined}
                   className="calendar-day-total tabular"
                 >
                   {total.loggedSeconds > 0 ? loggedLabel : "–"}
@@ -1341,7 +1374,7 @@ export function CalendarReview({
           })}
 
           <div className="calendar-time-axis" style={{ height: calendarHeight }}>
-            {nowPillHydrated && visibleDays.some((day) => sameDay(day, today)) ? (
+            {localTimeReady && visibleDays.some(isToday) ? (
               <span
                 aria-hidden="true"
                 className="calendar-now-pill"
@@ -1374,9 +1407,10 @@ export function CalendarReview({
           {visibleDays.map((day) => {
             const dayKey = formatCalendarDateKey(day);
             // Where a block can't start: a whole later day, or today below the now line. CSS gives
-            // both the not-allowed cursor, so hovering costs no render. Local-time dependent, so
-            // drawn once hydrated (as the now pill) and the server render never disagrees.
-            const createLimitMinutes = nowPillHydrated
+            // both the not-allowed cursor, so hovering costs no render. Local-time dependent, so it
+            // follows the same post-hydration now as the now line, blocks and "today" (#367), and
+            // the server render and the hydration pass draw none of it.
+            const createLimitMinutes = localTimeReady
               ? calendarCreateLimitMinutes(day, capturedNow)
               : 24 * 60;
             const dayIsFuture = createLimitMinutes <= calendarHours.startHour * 60;
@@ -1411,14 +1445,14 @@ export function CalendarReview({
                   style={{ top: futureZoneTop }}
                 />
               ) : null}
-              {sameDay(day, today) ? (
+              {localTimeReady && isToday(day) ? (
                 <span
                   aria-hidden="true"
                   className="calendar-now-line"
                   style={{ top: Math.round(((minutesFromDate(capturedNow) - calendarHours.startHour * 60) / 60) * rowHeight) }}
                 />
               ) : null}
-              {pendingReviewSpans(reviewItems, startOfDay(day).getTime(), addDays(startOfDay(day), 1).getTime(), capturedNow.getTime()).map((item) => {
+              {pendingReviewSpans(gridReviewItems, startOfDay(day).getTime(), addDays(startOfDay(day), 1).getTime(), capturedNow.getTime()).map((item) => {
                 const geometry = calendarBlockStyle(
                   { startedAt: new Date(item.fromMs).toISOString(), stoppedAt: new Date(item.toMs).toISOString() },
                   null,
@@ -1522,7 +1556,7 @@ export function CalendarReview({
                 );
               })() : null}
               {(() => {
-                const blocks = entries
+                const blocks = gridEntries
                   .filter((entry) => entryOverlapsDay(entry, day, capturedNow))
                   .map((entry) => {
                     const activeDraft = resizeDraft?.entryId === entry.id ? resizeDraft : null;
@@ -1917,6 +1951,9 @@ function calendarBlockStyle(
     continuesIntoNextDay: continuation.continuesIntoNextDay
   };
 }
+
+const NO_TIMELINE_ENTRIES: TimeEntryRow[] = [];
+const NO_REVIEW_ITEMS: readonly ReviewItemRow[] = [];
 
 function calendarBlockKey(entryId: string, day: Date) {
   return `${entryId}:${formatCalendarDateKey(day)}`;

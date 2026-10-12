@@ -266,3 +266,19 @@ describe("Timeline period labels", () => {
 function localDate(year: number, month: number, day: number, hour = 0) {
   return new Date(year, month - 1, day, hour);
 }
+
+describe("Calendar today from the viewer's zone (the server renders in UTC)", () => {
+  it("opens a bare /timeline on the date the server worked out for the viewer", () => {
+    expect(timelineStateFromSearchParams(new URLSearchParams(), { now, today: "2026-07-24" }).date).toBe("2026-07-24");
+    // An explicit date still wins, and an invalid hint falls back to the clock.
+    expect(timelineStateFromSearchParams(new URLSearchParams("date=2026-07-01"), { now, today: "2026-07-24" }).date).toBe("2026-07-01");
+    expect(timelineStateFromSearchParams(new URLSearchParams(), { now, today: "24/07/2026" }).date).toBe("2026-07-23");
+  });
+
+  it("reads Today from a date key, and never while today is unknown", () => {
+    const ranges = resolveTimelineRanges({ date: "2026-07-23", scope: "day", view: "calendar" });
+    expect(formatTimelinePeriodLabel("day", ranges, "2026-07-23")).toBe("Today");
+    expect(formatTimelinePeriodLabel("day", ranges, null)).toBe("Thu, 23 Jul 2026");
+    expect(formatTimelinePeriodLabel("day", ranges, "2026-07-24")).toBe("Thu, 23 Jul 2026");
+  });
+});

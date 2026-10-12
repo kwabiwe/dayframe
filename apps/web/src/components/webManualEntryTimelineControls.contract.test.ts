@@ -38,7 +38,7 @@ describe("web manual entry and Timeline control refinement", () => {
     expect(timer).toContain(".slice(0, TASK_SUGGESTION_LIMIT)");
     expect(styles).toMatch(/\.swiss-task-suggestions \{[^}]*--task-suggestion-count: 5;/s);
     expect(styles).toMatch(/\.swiss-task-suggestions-list \{[^}]*grid-auto-rows: minmax\(var\(--task-suggestion-row-height\), auto\);[^}]*max-height: calc\(var\(--task-suggestion-count\) \* var\(--task-suggestion-row-height\)\);/s);
-    expect(styles).toMatch(/\.swiss-task-suggestions-list button \{[^}]*min-height: var\(--task-suggestion-row-height\);/s);
+    expect(styles).toMatch(/\.swiss-task-suggestions-list \.df-flist-row \{[^}]*min-height: var\(--task-suggestion-row-height\);/s);
   });
 
   it("uses the shared quick-editor anatomy and borderless date-time controls", () => {
@@ -89,9 +89,10 @@ describe("web manual entry and Timeline control refinement", () => {
 
   it("uses divider-free compact suggestion and tag rows", () => {
     const suggestionRows = styles.slice(
-      styles.indexOf(".swiss-task-suggestions-list button {"),
-      styles.indexOf(".swiss-task-suggestions-list button:hover")
+      styles.indexOf(".df-flist .df-flist-row {"),
+      styles.indexOf(".df-flist .df-flist-row:hover")
     );
+    expect(suggestionRows.length).toBeGreaterThan(0);
     const tagRows = styles.slice(
       styles.indexOf(".inline-tag-picker-list button,"),
       styles.indexOf(".inline-tag-picker-list button:hover")
@@ -109,7 +110,7 @@ describe("web manual entry and Timeline control refinement", () => {
     expect(datePicker).toContain("<DayframeCalendar");
     expect(datePicker).not.toContain('type="date"');
     expect(datePicker).toContain("onChange(date)");
-    expect(timeline).toMatch(/<DatePickerPopover[\s\S]*?portal[\s\S]*?portalAlign="center"[\s\S]*?today=\{todayKey\}/);
+    expect(timeline).toMatch(/<DatePickerPopover[\s\S]*?portal[\s\S]*?portalAlign="center"[\s\S]*?today=\{todayKey \?\? state\.date\}/);
     expect(datePicker).toContain('portalAlign?: "center" | "start"');
     expect(datePicker).toContain('triggerRect.left + (triggerRect.width - width) / 2');
     expect(styles).toMatch(/\.timeline-range-navigation \{[^}]*grid-template-columns: var\(--web-icon-button-size\) minmax\(160px, 1fr\) var\(--web-icon-button-size\);/s);
