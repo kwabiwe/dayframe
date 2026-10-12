@@ -135,6 +135,8 @@ type ActiveTimerEditSheetProps = {
   elapsedSeconds: number;
   entry: MobileTimeEntry | null;
   historicalEntries?: MobileTimeEntry[];
+  /** Saved and learned place names; Recent never offers a confirmed visit's description naming one. */
+  historicalPlaceNames?: readonly string[];
   lastStoppedAt: string | null;
   onCancel: (presentationId: number) => void;
   onCreateTag: (name: string) => Promise<MobileTag | null>;
@@ -167,6 +169,7 @@ export function ActiveTimerEditSheet({
   elapsedSeconds,
   entry: currentEntry,
   historicalEntries = [],
+  historicalPlaceNames,
   lastStoppedAt,
   mode = "running",
   onCancel,
@@ -739,9 +742,10 @@ export function ActiveTimerEditSheet({
       contextDate: entryStartedAt ?? undefined,
       currentEntryId: entry?.id ?? null,
       limit: HISTORICAL_SUGGESTION_LIMIT,
+      placeNames: historicalPlaceNames,
       query: description
     }),
-    [description, entry?.id, entryStartedAt, normalizedHistoricalEntries]
+    [description, entry?.id, entryStartedAt, historicalPlaceNames, normalizedHistoricalEntries]
   );
   const historicalSuggestionResultSignature = JSON.stringify(
     historicalSuggestions.map((suggestion) => [

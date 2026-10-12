@@ -3,6 +3,7 @@ import { placeDisplayNameSql } from "./place-display";
 import {
   buildTimeEntriesQuery,
   confirmedInReviewSql,
+  generatedDescriptionSql,
   getBootstrapData,
   getCategoryUsageRanks,
   getNormalizationContext,
@@ -294,6 +295,17 @@ describe("confirmed-in-Review flag on history entries (E1)", () => {
     expect(confirmedInReviewSql).toContain("correction_event.client_event_id like 'location-correction:%'");
     expect(confirmedInReviewSql).toContain("correction_event.user_id = te.user_id");
     expect(statement.values.slice(0, 2)).toEqual([session.workspaceId, session.userId]);
+  });
+
+  it("marks descriptions equal to a Dayframe-generated Review title of this user (Codex r1)", () => {
+    const statement = buildTimeEntriesQuery(session, { limit: 2000 });
+
+    expect(statement.text).toContain(generatedDescriptionSql);
+    expect(generatedDescriptionSql).toContain('as "generatedDescription"');
+    expect(generatedDescriptionSql).toContain("generated_review.workspace_id = $1");
+    expect(generatedDescriptionSql).toContain("generated_review.user_id = $2");
+    expect(generatedDescriptionSql).toContain("generated_review.type <> 'location_manual_correction'");
+    expect(generatedDescriptionSql).toContain("regexp_replace(lower(btrim(te.description)), '\\s+', ' ', 'g')");
   });
 });
 

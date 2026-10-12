@@ -46,6 +46,7 @@ import { DayframeBrand } from "@/components/brand";
 import { TodayTimerSurface, type TodayActiveTimerPresentation } from "@/components/accessibility/TodayTimerSurface";
 import type { LandingRequest } from "@/lib/blocksMotion";
 import { minuteClock, newestShownTimestamp } from "@/lib/frameClock";
+import { historicalPlaceNames } from "@/lib/historicalPlaceNames";
 import { loadHapticsPreference, playHaptic, useHapticsPreference } from "@/lib/haptics";
 import { subscribeSavedTimeGoals } from "@/lib/settingsGoals";
 import { applySavedActivity, subscribeSavedActivity } from "@/lib/settingsActivities";
@@ -1485,6 +1486,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
     ? activeDurationSeconds
     : activeTimerElapsedSeconds(retainedActiveEntryForSheet, now);
   const todayKey = useMemo(() => formatDateKey(new Date(now)), [now]);
+  const historyPlaceNames = useMemo(() => historicalPlaceNames(data), [data]);
   const historySourceEntries = useMemo(() => {
     if (!data) return [];
     return mergeActiveEntry(
@@ -3227,6 +3229,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
         elapsedSeconds={manualDraftEntry?.durationSeconds ?? 0}
         entry={manualDraftEntry}
         historicalEntries={historySourceEntries}
+        historicalPlaceNames={historyPlaceNames}
         lastStoppedAt={recentStoppedAt}
         mode="add"
         onCancel={completeManualEntryExit}
@@ -3248,6 +3251,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
         elapsedSeconds={displayedActiveDurationSeconds}
         entry={retainedActiveEntryForSheet}
         historicalEntries={historySourceEntries}
+        historicalPlaceNames={historyPlaceNames}
         lastStoppedAt={recentStoppedAt}
         onApplySuggestion={applyRunningTimerSuggestion}
         onCancel={completeActiveEditorExit}
@@ -3272,6 +3276,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
         elapsedSeconds={calendarEditEntry ? entryDurationSeconds(calendarEditEntry, now) : 0}
         entry={calendarEditEntry}
         historicalEntries={historySourceEntries}
+        historicalPlaceNames={historyPlaceNames}
         lastStoppedAt={null}
         mode="entry"
         onCancel={completeCalendarEntryExit}

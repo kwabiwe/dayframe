@@ -3,6 +3,7 @@ import {
   buildHistoricalEntrySuggestions,
   historicalSuggestionLearningTier,
   historicalSuggestionPatch,
+  isGeneratedLocationTitle,
   isReviewConfirmedLocationVisit,
   type RecentActivityEntry,
   type RecentActivitySuggestion
@@ -227,6 +228,7 @@ describe("historical entry suggestions", () => {
     const results = search([
       historyEntry("accepted-place", "School pickup", {
         eventType: "geofence_exit",
+        generatedDescription: false,
         source: "location_learning",
         userConfirmed: true
       }),
@@ -285,6 +287,7 @@ function confirmedVisit(
     categoryId: "exercise",
     categoryName: "Exercise",
     confirmedInReview: true,
+    generatedDescription: false,
     source: "location_learning",
     ...overrides
   });
@@ -325,6 +328,63 @@ describe("Recent learns from visits confirmed in Review (E1)", () => {
     }))).toBeNull();
     expect(isReviewConfirmedLocationVisit(confirmedVisit("visit", "Gym"))).toBe(true);
     expect(isReviewConfirmedLocationVisit(historyEntry("typed", "Gym", { confirmedInReview: true }))).toBe(false);
+  });
+
+  it("admits only descriptions the owner wrote, never a generated Review title (Codex r1)", () => {
+    // Kept under the suggested title (confirm without a rename): the server flags it generated.
+    expect(historicalSuggestionLearningTier(confirmedVisit("kept", "Lunch with friends", {
+      generatedDescription: true
+    }))).toBeNull();
+    // An older server or cache without the flag proves nothing.
+    expect(historicalSuggestionLearningTier(confirmedVisit("unknown", "Lunch with friends", {
+      generatedDescription: undefined
+    }))).toBeNull();
+    // Generated templates stay out even if a row claims otherwise.
+    for (const title of [
+      "Visit Example Clinic",
+      "Visit 12 Example Street",
+      "visit near saved places",
+      "Time away from Home",
+      "Time away",
+      "Commute",
+      "Entered Example Park",
+      "Possible commute from Example Street to Sample Road",
+      "Review unknown stay"
+    ]) {
+      expect(isGeneratedLocationTitle(title)).toBe(true);
+      expect(historicalSuggestionLearningTier(confirmedVisit(title, title))).toBeNull();
+    }
+    for (const owned of ["Visiting hours", "Commute reading", "Time awayday prep", "Gym"]) {
+      expect(isGeneratedLocationTitle(owned)).toBe(false);
+    }
+    // Renamed in Review (edit and confirm, or a split/merge part given a new title).
+    expect(historicalSuggestionLearningTier(confirmedVisit("renamed", "Lunch with friends"))).toBe(2);
+    // Typed blocks are the owner's own words and are never filtered by these rules.
+    expect(historicalSuggestionLearningTier(historyEntry("typed", "Visit Example Clinic"))).toBe(1);
+  });
+
+  it("never offers a confirmed visit's description that names a saved or learned place", () => {
+    const entries = [
+      confirmedVisit("named", "Dentist at Example Clinic"),
+      confirmedVisit("one-time", "Coffee at Sample Cafe", { placeName: "Sample Cafe" }),
+      confirmedVisit("role", "Homework club"),
+      confirmedVisit("clean", "Swimming lesson"),
+      historyEntry("typed", "Example Clinic paperwork")
+    ];
+
+    expect(search(entries, "", { placeNames: ["Example Clinic", "Home", "  "] })
+      .map((result) => result.description)).toEqual([
+      "Example Clinic paperwork",
+      "Homework club",
+      "Swimming lesson"
+    ]);
+    // Without bootstrap names, the history's own place names still apply.
+    expect(search(entries, "").map((result) => result.description)).toEqual([
+      "Example Clinic paperwork",
+      "Dentist at Example Clinic",
+      "Homework club",
+      "Swimming lesson"
+    ]);
   });
 
   it("keeps unconfirmed, auto-logged, skipped and Health blocks out of Recent", () => {
@@ -415,7 +475,7 @@ describe("Recent learns from visits confirmed in Review (E1)", () => {
 
   it("keeps the limit across both tiers", () => {
     const typed = Array.from({ length: 10 }, (_, index) => historyEntry(`typed-${index}`, `Typed ${index}`));
-    const visits = Array.from({ length: 10 }, (_, index) => confirmedVisit(`visit-${index}`, `Visit ${index}`, {
+    const visits = Array.from({ length: 10 }, (_, index) => confirmedVisit(`visit-${index}`, `Outing ${index}`, {
       durationSeconds: 7_200,
       stoppedAt: "2026-08-07T11:00:00.000Z"
     }));
@@ -423,7 +483,7 @@ describe("Recent learns from visits confirmed in Review (E1)", () => {
 
     expect(results).toHaveLength(12);
     expect(results.slice(0, 10).every((result) => result.description.startsWith("Typed"))).toBe(true);
-    expect(results.slice(10).every((result) => result.description.startsWith("Visit"))).toBe(true);
+    expect(results.slice(10).every((result) => result.description.startsWith("Outing"))).toBe(true);
     expect(search([...visits, ...typed], "", { limit: 4 }).map((result) => result.description.split(" ")[0]))
       .toEqual(["Typed", "Typed", "Typed", "Typed"]);
   });

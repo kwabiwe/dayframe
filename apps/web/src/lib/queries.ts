@@ -139,6 +139,8 @@ export type TimeEntryRow = {
   reviewStatus: string;
   /** True when an owner decision in Review created the block (see `confirmedInReviewSql`). */
   confirmedInReview?: boolean;
+  /** True when the description is a Dayframe-generated Review title (see `generatedDescriptionSql`). */
+  generatedDescription?: boolean;
   description: string | null;
   startedAt: string;
   stoppedAt: string | null;
@@ -778,6 +780,27 @@ export const confirmedInReviewSql = `coalesce(
               false
             ) as "confirmedInReview"`;
 
+/**
+ * Whether the block's description is a title Dayframe generated for a Review suggestion rather
+ * than the owner's words: it equals (ignoring case and repeated spaces) the title of any of this
+ * user's system-created Review items ("Visit …", "Time away from …", "Commute", a place's default
+ * description, a learned place's address…). Review correction items are left out because their
+ * titles are either inherited from such an item (already in the set) or typed by the owner.
+ * A confirmed visit kept under its suggested title therefore reads true; one renamed in Review
+ * reads false. Uses $1 (workspace) and $2 (user) of the surrounding statement.
+ */
+export const generatedDescriptionSql = `coalesce(
+              regexp_replace(lower(btrim(te.description)), '\\s+', ' ', 'g') in (
+                select regexp_replace(lower(btrim(generated_review.title)), '\\s+', ' ', 'g')
+                from review_items generated_review
+                where generated_review.workspace_id = $1
+                  and generated_review.user_id = $2
+                  and generated_review.type <> 'location_manual_correction'
+                  and generated_review.title is not null
+              ),
+              false
+            ) as "generatedDescription"`;
+
 export type TimeEntryQueryOptions = {
   capturedNow?: string;
   overlappingFrom?: string;
@@ -828,6 +851,7 @@ export function buildTimeEntriesQuery(
             te.confidence,
             te.review_status as "reviewStatus",
             ${confirmedInReviewSql},
+            ${generatedDescriptionSql},
             te.description,
             te.started_at as "startedAt",
             te.stopped_at as "stoppedAt",
