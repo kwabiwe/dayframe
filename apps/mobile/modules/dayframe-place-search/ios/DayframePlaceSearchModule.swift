@@ -26,7 +26,8 @@ private struct NearbyPointOfInterestQueryRecord: Record {
   @Field var requestId: String = ""
   @Field var latitude: Double = 0
   @Field var longitude: Double = 0
-  @Field var radiusMeters: Double = 750
+  @Field var radiusMeters: Double = 400
+  @Field var limit: Int = 5
 }
 
 private final class PlaceSearchException: GenericException<String>, @unchecked Sendable {
@@ -108,11 +109,14 @@ public final class DayframePlaceSearchModule: Module {
     AsyncFunction("searchNearby") { (request: NearbyPointOfInterestQueryRecord, promise: Promise) in
       Task { @MainActor in
         do {
-          let places = try await self.nearbyCoordinator.search(
+          // Only opaque ids, titles, address lines and distances cross the bridge; the
+          // coordinate of a place is returned by resolveNearby once it is picked.
+          let places = try await self.nearbyCoordinator.suggestions(
             requestId: request.requestId,
             latitude: request.latitude,
             longitude: request.longitude,
-            radiusMeters: request.radiusMeters
+            radiusMeters: request.radiusMeters,
+            limit: request.limit
           )
           promise.resolve([
             "requestId": request.requestId,
@@ -122,6 +126,27 @@ public final class DayframePlaceSearchModule: Module {
           promise.reject(PlaceSearchException(error.rawValue))
         } catch {
           promise.reject(PlaceSearchException(PlaceSearchCoordinatorError.searchUnavailable.rawValue))
+        }
+      }
+    }.runOnQueue(.main)
+
+    AsyncFunction("resolveNearby") { (id: String, requestId: String, promise: Promise) in
+      Task { @MainActor in
+        do {
+          let result = try self.nearbyCoordinator.resolve(id: id, requestId: requestId)
+          promise.resolve([
+            "suggestionId": id,
+            "title": result.title,
+            "subtitle": result.subtitle as Any,
+            "name": result.name as Any,
+            "formattedAddress": result.formattedAddress as Any,
+            "latitude": result.latitude,
+            "longitude": result.longitude
+          ])
+        } catch let error as PlaceSearchCoordinatorError {
+          promise.reject(PlaceSearchException(error.rawValue))
+        } catch {
+          promise.reject(PlaceSearchException(PlaceSearchCoordinatorError.staleSuggestion.rawValue))
         }
       }
     }.runOnQueue(.main)
