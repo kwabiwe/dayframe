@@ -23,6 +23,8 @@ import { basePaletteCommands, type PaletteCommand } from "@/lib/command-palette"
 import { isSearchShortcut, SEARCH_SHORTCUT_LABEL } from "@/lib/keyboard-shortcuts";
 import type { BootstrapData } from "@/lib/queries";
 import { hasOpenDialog, isTypingTarget } from "@/lib/keyboard-ownership";
+import { markReportsZoneSyncRefresh, reportsRouteHref } from "@/lib/reports-zone-sync";
+import { syncViewerTimeZoneCookie } from "@/lib/viewer-time-zone";
 import {
   GO_TO_SEQUENCE_MS,
   activeShellSection,
@@ -112,6 +114,18 @@ function AppShellContent({ children }: { children: ReactNode }) {
     [searchParams]
   );
 
+
+  // The browser's time zone, for the days the server works out (Reports). A Reports page drawn
+  // before the cookie existed, or for another zone, redraws once with the viewer's days, at rest
+  // (no landing on reconciliation).
+  useEffect(() => {
+    if (!syncViewerTimeZoneCookie(document, window.location.protocol === "https:")) return;
+    if (!window.location.pathname.startsWith("/reports")) return;
+    // Marked with the route the refresh will render, in the router's terms (the panel compares
+    // `usePathname()`/`useSearchParams()`, never the address bar).
+    markReportsZoneSyncRefresh(reportsRouteHref(window.location.pathname, window.location.search));
+    router.refresh();
+  }, [router]);
 
   useEffect(() => {
     const media = window.matchMedia("(prefers-color-scheme: dark)");

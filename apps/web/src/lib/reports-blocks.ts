@@ -98,9 +98,17 @@ export function busiestDaySeconds(days: readonly ReportDayActivities[]) {
   return days.reduce((top, day) => Math.max(top, day.activities.reduce((sum, activity) => sum + activity.seconds, 0)), 0);
 }
 
-/** Empty cells before the first day in a Monday-first month grid. */
-export function monthGridLeadingBlanks(firstDayStart: string) {
-  return (new Date(firstDayStart).getDay() + 6) % 7;
+/**
+ * Empty cells before the first day in a Monday-first month grid, from the day's calendar date
+ * ("2026-10-01"): a day's start instant is in the viewer's zone, which need not be the server's.
+ */
+export function monthGridLeadingBlanks(firstDayKey: string) {
+  return (dateKeyUtc(firstDayKey).getUTCDay() + 6) % 7;
+}
+
+function dateKeyUtc(key: string) {
+  const [year, month, day] = key.split("-").map(Number);
+  return new Date(Date.UTC(year, month - 1, day));
 }
 
 export function isTodayKey(day: { start: string; end: string }, capturedNow: string) {
@@ -125,7 +133,7 @@ export type ReportBlocksDay = {
   label: string;
   /** 'Mon 5' (weekday and day number) for narrow columns (UIA-306). */
   shortLabel: string;
-  /** The day of the month, worked out where the report's days were (the server). */
+  /** The day of the month, from the day's calendar date (never its start instant). */
   dateNumber: number;
   isToday: boolean;
   /** Time logged that day, overlaps included (may exceed 24h). */
@@ -167,7 +175,7 @@ export function reportBlocksModel(
       key: day.key,
       label: day.label,
       shortLabel: day.label.replace(/,/g, "").split(/\s+/).slice(0, 2).join(" "),
-      dateNumber: new Date(day.start).getDate(),
+      dateNumber: dateKeyUtc(day.key).getUTCDate(),
       isToday: isTodayKey(day, report.capturedNow),
       totalSeconds: logged,
       accessibleName: `${day.label}: ${formatDuration(logged)} logged${parts.length ? `, ${parts.join(", ")}` : ""}`,
@@ -180,7 +188,7 @@ export function reportBlocksModel(
     };
   });
   const first = report.dailyByActivity[0];
-  return { layout, leadingBlanks: first ? monthGridLeadingBlanks(first.start) : 0, days };
+  return { layout, leadingBlanks: first ? monthGridLeadingBlanks(first.key) : 0, days };
 }
 
 /**

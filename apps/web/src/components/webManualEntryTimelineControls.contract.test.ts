@@ -110,7 +110,7 @@ describe("web manual entry and Timeline control refinement", () => {
     expect(datePicker).toContain("<DayframeCalendar");
     expect(datePicker).not.toContain('type="date"');
     expect(datePicker).toContain("onChange(date)");
-    expect(timeline).toMatch(/<DatePickerPopover[\s\S]*?portal[\s\S]*?portalAlign="center"[\s\S]*?today=\{todayKey\}/);
+    expect(timeline).toMatch(/<DatePickerPopover[\s\S]*?portal[\s\S]*?portalAlign="center"[\s\S]*?today=\{todayKey \?\? state\.date\}/);
     expect(datePicker).toContain('portalAlign?: "center" | "start"');
     expect(datePicker).toContain('triggerRect.left + (triggerRect.width - width) / 2');
     expect(styles).toMatch(/\.timeline-range-navigation \{[^}]*grid-template-columns: var\(--web-icon-button-size\) minmax\(160px, 1fr\) var\(--web-icon-button-size\);/s);

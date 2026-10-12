@@ -1,3 +1,5 @@
+import { zonedDateKey, zonedStartOfDay } from "@/lib/viewer-time-zone";
+
 export const REPORT_RANGE_PRESETS = [
   "today",
   "yesterday",
@@ -84,13 +86,19 @@ const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}
 const sourceValues = new Set<string>(REPORT_SOURCE_VALUES);
 const rangePresets = new Set<string>(REPORT_RANGE_PRESETS);
 
+/**
+ * The report's range from the URL. `timeZone` (the viewer's IANA zone, server only) decides which
+ * calendar day "today" is and where each day starts and ends; without it the process's own zone
+ * is used, which is right in the browser and UTC on Vercel.
+ */
 export function parseReportQueryInput(
   input: SearchInput,
-  options: { now?: Date; pageSize?: number } = {}
+  options: { now?: Date; pageSize?: number; timeZone?: string } = {}
 ): ReportQueryInput {
-  const now = startOfLocalDay(options.now ?? new Date());
+  const zone = options.timeZone;
+  const now = todayInZone(options.now ?? new Date(), zone);
   const parsed = parseRangeIntent(input, now);
-  const normalizedRange = normalizeRange(parsed.preset, parsed.from, parsed.to, now);
+  const normalizedRange = normalizeRange(parsed.preset, parsed.from, parsed.to, now, zone);
   const filters: ReportFilters = {
     range: parsed.preset,
     from: normalizedRange.from,
@@ -110,11 +118,11 @@ export function parseReportQueryInput(
     previousRange: {
       from: normalizedRange.previousFrom,
       to: normalizedRange.previousTo,
-      start: localDateKeyToDate(normalizedRange.previousFrom).toISOString(),
-      end: addDays(localDateKeyToDate(normalizedRange.previousTo), 1).toISOString(),
+      start: dayStartIso(localDateKeyToDate(normalizedRange.previousFrom), zone),
+      end: dayStartIso(addDays(localDateKeyToDate(normalizedRange.previousTo), 1), zone),
       dayCount: normalizedRange.dayCount
     },
-    dayBoundaries: buildDayBoundaries(normalizedRange.from, normalizedRange.to),
+    dayBoundaries: buildDayBoundaries(normalizedRange.from, normalizedRange.to, zone),
     pageSize: options.pageSize ?? REPORT_PAGE_SIZE
   };
 }
@@ -156,9 +164,10 @@ export function reportExportHref(filters: ReportFilters) {
 export function filtersForPreset(
   filters: ReportFilters,
   preset: Exclude<ReportRangePreset, "custom">,
-  now = new Date()
+  now = new Date(),
+  timeZone?: string
 ): ReportFilters {
-  const range = resolvePresetRange(preset, startOfLocalDay(now));
+  const range = resolvePresetRange(preset, todayInZone(now, timeZone));
   return {
     ...filters,
     range: preset,
@@ -261,7 +270,7 @@ function parseRangeIntent(input: SearchInput, now: Date) {
   };
 }
 
-function normalizeRange(preset: ReportRangePreset, fromValue: string, toValue: string, now: Date) {
+function normalizeRange(preset: ReportRangePreset, fromValue: string, toValue: string, now: Date, timeZone?: string) {
   const fallback = preset === "custom"
     ? { start: startOfLocalDay(now), endInclusive: startOfLocalDay(now) }
     : resolvePresetRange(preset, startOfLocalDay(now));
@@ -284,8 +293,8 @@ function normalizeRange(preset: ReportRangePreset, fromValue: string, toValue: s
     preset,
     from: toDateKey(start),
     to: toDateKey(endInclusive),
-    start: start.toISOString(),
-    end: addDays(endInclusive, 1).toISOString(),
+    start: dayStartIso(start, timeZone),
+    end: dayStartIso(addDays(endInclusive, 1), timeZone),
     label: formatRangeLabel(start, endInclusive),
     dayCount,
     previousFrom: toDateKey(previousStart),
@@ -323,7 +332,7 @@ function resolvePresetRange(preset: Exclude<ReportRangePreset, "custom">, now: D
   return { start: addDays(now, -29), endInclusive: now };
 }
 
-function buildDayBoundaries(from: string, to: string) {
+function buildDayBoundaries(from: string, to: string, timeZone?: string) {
   const start = localDateKeyToDate(from);
   const endInclusive = localDateKeyToDate(to);
   const dayFormatter = new Intl.DateTimeFormat("en-GB", { weekday: "short", day: "numeric", month: "short" });
@@ -332,8 +341,8 @@ function buildDayBoundaries(from: string, to: string) {
     boundaries.push({
       key: toDateKey(cursor),
       label: dayFormatter.format(cursor),
-      start: cursor.toISOString(),
-      end: addDays(cursor, 1).toISOString()
+      start: dayStartIso(cursor, timeZone),
+      end: dayStartIso(addDays(cursor, 1), timeZone)
     });
   }
   return boundaries;
@@ -371,6 +380,19 @@ function parseDateKey(value?: string | null) {
 
 function localDateKeyToDate(value: string) {
   return parseDateKey(value) ?? startOfLocalDay(new Date());
+}
+
+/**
+ * Today's calendar date as a process-local midnight. The date arithmetic below works on these
+ * "floating" dates; only `dayStartIso` turns one into an instant.
+ */
+function todayInZone(now: Date, timeZone?: string) {
+  return timeZone ? localDateKeyToDate(zonedDateKey(now, timeZone)) : startOfLocalDay(now);
+}
+
+/** The instant a floating date's day starts, in the viewer's zone when there is one. */
+function dayStartIso(date: Date, timeZone?: string) {
+  return timeZone ? zonedStartOfDay(toDateKey(date), timeZone).toISOString() : date.toISOString();
 }
 
 function startOfLocalDay(date: Date) {

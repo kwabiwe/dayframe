@@ -25,7 +25,7 @@ describe("Calendar in Blocks contract", () => {
     expect(timeline).toMatch(/className="calendar-now-pill"[\s\S]{0,500}?\{formatTime\(capturedNow\)\}/);
     // The pill's clock time is the browser's, so it only renders after hydration, and it is clamped
     // inside the axis at midnight and at the day's end.
-    expect(timeline).toContain("nowPillHydrated && visibleDays.some((day) => sameDay(day, today))");
+    expect(timeline).toContain("localTimeReady && visibleDays.some(isToday)");
     expect(timeline).toContain("Math.min(calendarHeight - NOW_PILL_HALF_HEIGHT, Math.max(NOW_PILL_HALF_HEIGHT,");
     // Sticky day headings stay above everything in the columns.
     expect(raised).toBeLessThan(40);
