@@ -31,17 +31,7 @@ import { shouldStartTimerFromEntrySubmit } from "@/lib/timer-entry-draft";
 import { quickActionTimerDraft } from "@/lib/timer-runtime";
 import { blockStyle } from "@/lib/block-style";
 import { alreadyRecordingToastMessage, switchedToastMessage } from "@/lib/blocks-toast-copy";
-import {
-  mentionGuardFor,
-  mentionMarks,
-  parseCommand,
-  pendingMentionActivity,
-  shiftMentionMarks,
-  syncMentionGuard,
-  withoutPendingMentions,
-  type MentionGuard,
-  type MentionMark
-} from "@/lib/command-parse";
+import { parseCommand } from "@/lib/command-parse";
 import { hasOpenDialog, isTypingTarget } from "@/lib/keyboard-ownership";
 
 const TASK_SUGGESTION_LIMIT = 5;
@@ -77,6 +67,8 @@ export function PersistentTimerBar({ workspaceMode = false }: { workspaceMode?: 
   const [narrowCommand, setNarrowCommand] = useState(false);
   const [suggestionsOpen, setSuggestionsOpen] = useState(false);
   const [hashtagSuggestionsOpen, setHashtagSuggestionsOpen] = useState(false);
+  // A `#` Tags or `@` Activities list is open for a query being typed: autosave waits for it.
+  const [queryListOpen, setQueryListOpen] = useState(false);
   const [startEditorOpen, setStartEditorOpen] = useState(false);
   const [timerActionsOpen, setTimerActionsOpen] = useState(false);
   const [startDateDraft, setStartDateDraft] = useState("");
@@ -120,24 +112,9 @@ export function PersistentTimerBar({ workspaceMode = false }: { workspaceMode?: 
       .slice(0, TASK_SUGGESTION_LIMIT);
   }, [taskSuggestions, timerDraft.description]);
   const quickActions = useMemo(() => data ? buildLearnedQuickActions(data) : [], [data]);
-  // The literal `@words` in the description, by occurrence (`MentionGuard`). Idle: those left
-  // when an activity was picked from the `@` list (the picked activity wins). Recording: those the
-  // saved description already had. They never parse, open the list or get consumed, and they
-  // follow every edit by position: a newly typed `@word`, even one spelled the same before or
-  // after them, is a command. Each stays protected until it is itself edited or deleted.
-  const mentionScope = active?.id ?? null;
-  const savedText = active?.description ?? "";
-  const [mentionGuardState, setMentionGuard] = useState<MentionGuard>(
-    () => mentionGuardFor(mentionScope, savedText, timerDraft.description)
-  );
-  // Any change the field did not report with its caret (the runtime, a rollback, a new block)
-  // is followed here, during render, so the marks always describe the text on screen.
-  const mentionGuard = syncMentionGuard(mentionGuardState, mentionScope, savedText, timerDraft.description);
-  if (mentionGuard !== mentionGuardState) setMentionGuard(mentionGuard);
-  const literalMarks = mentionGuard.marks;
   const parsedCommand = useMemo(
-    () => active ? null : parseCommand(timerDraft.description, data?.categories ?? [], literalMarks),
-    [active, data?.categories, literalMarks, timerDraft.description]
+    () => active ? null : parseCommand(timerDraft.description),
+    [active, timerDraft.description]
   );
   const activeAccent = active
     ? timeEntryAccentColor({
@@ -179,22 +156,14 @@ export function PersistentTimerBar({ workspaceMode = false }: { workspaceMode?: 
     return () => window.clearInterval(interval);
   }, [active]);
 
-  // While recording, an `@…` typed into the description is a command, never details: autosave,
-  // Stop and leaving the field save the description without it (an `@word` the running block
-  // already had stays). See `withoutPendingMentions`.
-  const savedDescription = (description: string) => withoutPendingMentions(description, literalMarks);
-
-  /** The description and its literal `@words` change together. */
-  function setDescription(description: string, marks: readonly MentionMark[]) {
-    setMentionGuard({ scope: mentionScope, saved: savedText, text: description, marks });
-    setTimerDraft((current) => ({ ...current, description }));
-  }
-
+  // Autosave sends the description exactly as shown: nothing is parsed or stripped. While a `#`
+  // or `@` list is open for a query being typed it waits, so a half-typed `@wri` is not saved,
+  // and saves as usual once the list closes. A new block resets the draft (which closes the
+  // list), so nothing is held over.
   useEffect(() => {
-    if (!active) return undefined;
-    const draft = { ...timerDraft, description: withoutPendingMentions(timerDraft.description, literalMarks) };
-    const nextCategoryId = draft.categoryId || null;
-    const nextDescription = draft.description.trim() || null;
+    if (!active || queryListOpen) return undefined;
+    const nextCategoryId = timerDraft.categoryId || null;
+    const nextDescription = timerDraft.description.trim() || null;
     const draftTags = timerDraft.tagNames.map((name) => normalizeTagName(name).normalizedName).sort();
     const activeTags = (active.tags?.map((tag) => tag.normalizedName)
       ?? active.tagNames.map((name) => normalizeTagName(name).normalizedName)).sort();
@@ -205,10 +174,10 @@ export function PersistentTimerBar({ workspaceMode = false }: { workspaceMode?: 
     ) return undefined;
 
     const handle = window.setTimeout(() => {
-      void updateActiveDetails(draft);
+      void updateActiveDetails(timerDraft);
     }, 650);
     return () => window.clearTimeout(handle);
-  }, [active, literalMarks, timerDraft, updateActiveDetails]);
+  }, [active, queryListOpen, timerDraft, updateActiveDetails]);
 
   useEffect(() => {
     if (!suggestionsOpen) return undefined;
@@ -303,14 +272,9 @@ export function PersistentTimerBar({ workspaceMode = false }: { workspaceMode?: 
   function startFromEnter(event: ReactKeyboardEvent<HTMLInputElement>) {
     if (event.key !== "Enter" || event.nativeEvent.isComposing) return;
     event.preventDefault();
-    // While recording, Enter on a newly typed `@activity` switches the running block's activity
-    // in place (the same debounced update as the activity block) and the new `@…` leave the text;
-    // `@words` the saved description already had are literal text.
-    if (active) {
-      const mention = pendingMentionActivity(timerDraft.description, literalMarks, data!.categories);
-      if (mention.categoryId) chooseActivity(mention.categoryId, mention.description, "select", mention.marks);
-      return;
-    }
+    // While recording, Enter with no list open changes nothing: the description autosaves as
+    // written. (With the `@` list open, the list takes Enter and switches the activity.)
+    if (active) return;
     if (!shouldStartTimerFromEntrySubmit({
       hasActiveTimer: Boolean(active),
       isBusy: isTimerBusy && Boolean(active)
@@ -319,11 +283,11 @@ export function PersistentTimerBar({ workspaceMode = false }: { workspaceMode?: 
     void runCommand();
   }
 
-  // Idle Start: `@activity` picks the activity and a trailing duration logs a finished block
-  // ending now (through the manual-entry path) instead of starting the timer.
-  async function runCommand(submitted = timerDraft, literal = literalMarks) {
-    const command = parseCommand(submitted.description, data!.categories, literal);
-    const categoryId = command.categoryId ?? submitted.categoryId;
+  // Idle Start: a trailing duration logs a finished block ending now (through the manual-entry
+  // path) instead of starting the timer. The description is otherwise sent as written.
+  async function runCommand(submitted = timerDraft) {
+    const command = parseCommand(submitted.description);
+    const categoryId = submitted.categoryId;
     // Only the command that was sent is cleared or restored: text typed while it was in flight wins.
     const isUntouched = (current: typeof submitted) => current.description === submitted.description
       && current.categoryId === submitted.categoryId
@@ -353,34 +317,18 @@ export function PersistentTimerBar({ workspaceMode = false }: { workspaceMode?: 
     await startTimer({ categoryId, description: command.description, tagNames: submitted.tagNames });
   }
 
-  // An activity chosen from the description's `@` list (or a typed `@activity` + Enter while
-  // recording). Recording: the running block's activity changes in place, never a new block.
-  // Idle: Enter also starts the block, as `@activity` + Enter always has; Tab, a click or a tap
+  // An activity chosen from the description's `@` list: the only way typed `@` text leaves the
+  // description (exactly the `@query` the list was open for; every other `@word` is text).
+  // Recording: the running block's activity changes in place through the usual debounced
+  // autosave, never a Stop or new block. Idle: Enter also starts the block; Tab, a click or a tap
   // only picks the activity.
-  // Only the chosen `@query` leaves the text: other `@words` stay as written. Idle, they become
-  // literal so the chosen activity wins (a trailing duration still parses); recording, ones the
-  // saved description had stay and new ones are never saved (`withoutPendingMentions`).
-  function chooseActivity(
-    categoryId: string,
-    description: string,
-    trigger: ActivityChoiceTrigger,
-    marks: number | readonly MentionMark[] | undefined
-  ) {
+  function chooseActivity(categoryId: string, description: string, trigger: ActivityChoiceTrigger) {
     setCommandNotice(null);
     setSuggestionsOpen(false);
-    // Idle, every `@word` left becomes literal. Recording, the saved occurrences follow the
-    // removed `@query` by position (`marks` is the caret where it was, or the marks already worked
-    // out for a typed `@activity` + Enter).
-    const nextMarks = !active
-      ? mentionMarks(description)
-      : Array.isArray(marks)
-        ? marks
-        : shiftMentionMarks(literalMarks, timerDraft.description, description, typeof marks === "number" ? marks : undefined);
-    setMentionGuard({ scope: mentionScope, saved: savedText, text: description, marks: nextMarks });
     if (trigger === "enter" && !active) {
       const draft = { ...timerDraft, categoryId, description };
       setTimerDraft(draft);
-      void runCommand(draft, nextMarks);
+      void runCommand(draft);
       return;
     }
     setTimerDraft((current) => ({ ...current, categoryId, description }));
@@ -457,11 +405,10 @@ export function PersistentTimerBar({ workspaceMode = false }: { workspaceMode?: 
   }
 
   const liveCategory = active ? data.categories.find((category) => category.id === (timerDraft.categoryId || active.categoryId)) ?? null : null;
-  const previewCategory = parsedCommand?.categoryId
-    ? data.categories.find((category) => category.id === parsedCommand.categoryId) ?? null
-    : null;
-  const commandHasShorthand = Boolean(parsedCommand && timerDraft.description.trim() && (parsedCommand.categoryId || parsedCommand.durationSeconds));
-  const exampleActivity = data.categories.find((category) => category.isPinned)?.name ?? data.categories[0]?.name ?? "work";
+  // The preview line shows the activity the block will log to (chosen with the block or the `@`
+  // list) beside a trailing duration.
+  const previewCategory = parsedCommand?.durationSeconds ? selectedCategory : null;
+  const commandHasShorthand = Boolean(parsedCommand && timerDraft.description.trim() && parsedCommand.durationSeconds);
   const goLabel = parsedCommand?.durationSeconds
     ? `Add ${formatDuration(parsedCommand.durationSeconds)}`
     : "Start";
@@ -503,7 +450,7 @@ export function PersistentTimerBar({ workspaceMode = false }: { workspaceMode?: 
           }}
           open={categoryMenuOpen}
           portal
-          selectedId={parsedCommand?.categoryId ?? timerDraft.categoryId}
+          selectedId={timerDraft.categoryId}
           variant="block"
         />
 
@@ -521,21 +468,8 @@ export function PersistentTimerBar({ workspaceMode = false }: { workspaceMode?: 
             inputRef={descriptionInputRef}
             name="timer-description"
             onActivityChoose={chooseActivity}
-            protectedMentions={literalMarks}
-            onBlur={() => {
-              // Leaving the field while recording drops an unfinished `@…` from the text.
-              if (!active) return;
-              const { description, marks } = pendingMentionActivity(timerDraft.description, literalMarks, []);
-              if (description !== timerDraft.description) setDescription(description, marks);
-            }}
-            onChange={(description, caret) => {
+            onChange={(description) => {
               setCommandNotice(null);
-              // The caret places the edit, so the literal `@words` move with the text around them.
-              setMentionGuard((guard) => ({
-                ...guard,
-                text: description,
-                marks: shiftMentionMarks(guard.marks, guard.text, description, caret)
-              }));
               setTimerDraft((current) => ({ ...current, description }));
               setSuggestionsOpen(true);
             }}
@@ -553,6 +487,7 @@ export function PersistentTimerBar({ workspaceMode = false }: { workspaceMode?: 
               setHashtagSuggestionsOpen(open);
               if (open) setSuggestionsOpen(false);
             }}
+            onQueryListChange={setQueryListOpen}
             onInputKeyDown={(event) => {
               if (!suggestionsOpen || hashtagSuggestionsOpen || !visibleTaskSuggestions.length) return;
               if (event.key === "Escape") {
@@ -709,8 +644,7 @@ export function PersistentTimerBar({ workspaceMode = false }: { workspaceMode?: 
           aria-busy={(Boolean(active) && isTimerBusy) || undefined}
           aria-label={active ? "Stop recording" : parsedCommand?.durationSeconds ? `${goLabel} ending now` : "Start a block"}
           onClick={() => {
-            // Stop saves the details without an unfinished `@…`.
-            if (active) void stopTimer({ description: savedDescription(timerDraft.description) });
+            if (active) void stopTimer();
           }}
         >
           {active ? (
@@ -793,8 +727,8 @@ export function PersistentTimerBar({ workspaceMode = false }: { workspaceMode?: 
         ) : !active && commandFocused && !timerDraft.description ? (
           <>
             <span className="df-cmd-hint">Try</span>
-            <span className="df-cmd-chip">Write proposal @{exampleActivity.replace(/\s+/g, "").toLocaleLowerCase()} 45m</span>
-            <span className="df-cmd-hint">@ picks an activity, # adds tags, a trailing duration logs time you already spent.</span>
+            <span className="df-cmd-chip">Write proposal 45m</span>
+            <span className="df-cmd-hint">@ opens your activities, # adds tags, a trailing duration logs time you already spent.</span>
           </>
         ) : null}
       </div>

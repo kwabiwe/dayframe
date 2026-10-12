@@ -143,8 +143,10 @@ describe("AppShellRuntime rejected Start", () => {
       );
       fireEvent.click(screen.getByRole("button", { name: "Hydrate block A" }));
       const description = await screen.findByLabelText("Description") as HTMLInputElement;
+      // Typing "@focus" opens the Activities list; Enter on it picks Focus and starts.
+      act(() => description.focus());
       fireEvent.change(description, { target: { value: "Plan @focus" } });
-      fireEvent.click(screen.getByRole("button", { name: "Start a block" }));
+      fireEvent.keyDown(description, { key: "Enter" });
       await waitFor(() => expect(rejectStart).toBeDefined());
       await waitFor(() => expect(screen.getByTestId("active-timer").textContent).toBe("Focus"));
       if (typeMeanwhile) fireEvent.change(description, { target: { value: "Updated plan" } });

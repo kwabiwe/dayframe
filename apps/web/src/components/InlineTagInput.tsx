@@ -25,7 +25,7 @@ import { DayframeIcon } from "@/components/blocks/DayframeIcon";
 import { FloatingList } from "@/components/FloatingList";
 import { TagIcon } from "@/components/TagIcon";
 import { blockStyle } from "@/lib/block-style";
-import { activitiesForMention, findActiveMention, type MentionMark } from "@/lib/command-parse";
+import { activitiesForMention, findActiveMention } from "@/lib/command-parse";
 import { selectVisibleTags, TAG_SELECTION_MAX_COUNT } from "@/lib/tag-display";
 
 /** An activity the description's `@` list can offer (the command timer passes its activities). */
@@ -54,11 +54,11 @@ export function InlineTagInput({
   onEnter,
   onFocus,
   onHashtagPanelChange,
+  onQueryListChange,
   onInputKeyDown,
   onSelectedTagNamesChange,
   placeholder,
   portal = false,
-  protectedMentions,
   selectedTagNames,
   tags,
   value
@@ -75,27 +75,25 @@ export function InlineTagInput({
   name?: string;
   /**
    * An activity chosen from the `@` list, with the description as it reads once the `@query`
-   * has left it and the caret where it was. The owner sets both (the input does not call
-   * `onChange` for it).
+   * has left it. The owner sets both (the input does not call `onChange` for it).
    */
-  onActivityChoose?: (activityId: string, description: string, trigger: ActivityChoiceTrigger, caret: number) => void;
+  onActivityChoose?: (activityId: string, description: string, trigger: ActivityChoiceTrigger) => void;
   /** The description field lost focus. */
   onBlur?: () => void;
-  /** The new text, and where the caret sits after the edit (it places the edit for the owner). */
-  onChange: (value: string, caret?: number) => void;
+  onChange: (value: string) => void;
   onClick?: () => void;
   onEnter?: (event: KeyboardEvent<HTMLInputElement>) => void;
   onFocus?: () => void;
   onHashtagPanelChange?: (open: boolean) => void;
+  /**
+   * Whether a `#` Tags or `@` Activities list is open for a query being typed (the tag picker
+   * does not count). The command timer holds its autosave while one is.
+   */
+  onQueryListChange?: (open: boolean) => void;
   onInputKeyDown?: (event: KeyboardEvent<HTMLInputElement>) => void;
   onSelectedTagNamesChange: (tagNames: string[]) => void;
   placeholder?: string;
   portal?: boolean;
-  /**
-   * Literal `@word` occurrences in `value`, by position: they never open the Activities list and
-   * are never consumed by Enter, Tab or Escape. Another `@word` spelled the same still is a mention.
-   */
-  protectedMentions?: readonly MentionMark[];
   selectedTagNames: string[];
   tags: TagRow[];
   value: string;
@@ -152,7 +150,15 @@ export function InlineTagInput({
     [createName, matches]
   );
   const shouldOpen = !disabled && focused && Boolean(active) && active?.start !== dismissedTagStart && !pickerOpen;
-  const mention = activities && !disabled && focused && !pickerOpen ? findActiveMention(value, caret, protectedMentions) : null;
+  // The `@` Activities list opens only for an `@word` being typed (it was the token at the caret
+  // when the text last changed in this field). Escape, Close, leaving the field, moving the caret
+  // out of it or any other change of the text closes it and leaves the `@word` as written; placing
+  // the caret on existing text never opens it.
+  const [typedMention, setTypedMention] = useState<{ start: number; value: string } | null>(null);
+  const caretMention = activities && !disabled && focused && !pickerOpen && typedMention?.value === value
+    ? findActiveMention(value, caret)
+    : null;
+  const mention = caretMention && caretMention.start === typedMention?.start ? caretMention : null;
   const activityOpen = Boolean(mention);
   const activityMatches = mention && activities ? activitiesForMention(mention.query, activities) : [];
   const activeActivityIndex = Math.min(activityIndex, Math.max(0, activityMatches.length - 1));
@@ -218,6 +224,10 @@ export function InlineTagInput({
   useEffect(() => {
     onHashtagPanelChange?.(shouldOpen || effectivePickerOpen || activityOpen);
   }, [activityOpen, effectivePickerOpen, onHashtagPanelChange, shouldOpen]);
+
+  useEffect(() => {
+    onQueryListChange?.(shouldOpen || activityOpen);
+  }, [activityOpen, onQueryListChange, shouldOpen]);
 
   // The highlighted activity stays in view while ↑/↓ walk a list longer than the panel.
   useEffect(() => {
@@ -319,7 +329,11 @@ export function InlineTagInput({
 
   function updateCaret() {
     const input = localInputRef.current;
-    if (input) setCaret(input.selectionStart ?? input.value.length);
+    if (!input) return;
+    const nextCaret = input.selectionStart ?? input.value.length;
+    setCaret(nextCaret);
+    // Moving the caret out of the `@word` being typed closes its list for good.
+    if (typedMention && findActiveMention(input.value, nextCaret)?.start !== typedMention.start) setTypedMention(null);
   }
 
   function addSelectedTag(tagName: string) {
@@ -348,7 +362,7 @@ export function InlineTagInput({
     if (disabled || !active) return;
     if (!addSelectedTag(action.label)) return;
     const replacement = consumeActiveHashtag(value, active);
-    onChange(replacement.text, replacement.caret);
+    onChange(replacement.text);
     setCaret(replacement.caret);
     window.requestAnimationFrame(() => {
       const input = localInputRef.current;
@@ -357,20 +371,19 @@ export function InlineTagInput({
     });
   }
 
+  // The one way typed `@` text leaves the description: an explicit choice from the list removes
+  // exactly the `@query` it was opened for.
   function chooseActivity(activity: MentionActivity, trigger: ActivityChoiceTrigger) {
     if (disabled || !mention) return;
+    setTypedMention(null);
     const replacement = consumeActiveHashtag(value, mention);
-    onActivityChoose?.(activity.id, replacement.text, trigger, replacement.caret);
+    onActivityChoose?.(activity.id, replacement.text, trigger);
     placeCaret(replacement.caret);
   }
 
-  // Escape or Close cancels only this `@…`: it leaves the text, the rest of the description and
-  // the activity stay as they were.
-  function cancelMention() {
-    if (disabled || !mention) return;
-    const replacement = consumeActiveHashtag(value, mention);
-    onChange(replacement.text, replacement.caret);
-    placeCaret(replacement.caret);
+  // Escape or Close closes the list and leaves the `@word` as typed: it is description text.
+  function dismissMention() {
+    setTypedMention(null);
   }
 
   function placeCaret(position: number) {
@@ -405,7 +418,7 @@ export function InlineTagInput({
       }
       if (event.key === "Escape") {
         event.preventDefault();
-        cancelMention();
+        dismissMention();
         return;
       }
     }
@@ -460,11 +473,14 @@ export function InlineTagInput({
           name={name}
           onBlur={() => {
             setFocused(false);
+            setTypedMention(null);
             onBlur?.();
           }}
           onChange={(event) => {
             const nextCaret = event.target.selectionStart ?? event.target.value.length;
-            onChange(event.target.value, nextCaret);
+            onChange(event.target.value);
+            const typed = activities ? findActiveMention(event.target.value, nextCaret) : null;
+            setTypedMention(typed ? { start: typed.start, value: event.target.value } : null);
             setCaret(nextCaret);
             setHighlightedIndex(0);
             setActivityIndex(0);
@@ -584,7 +600,7 @@ export function InlineTagInput({
           heading="Activities"
           id={activityListId}
           isOpen={activityOpen}
-          onClose={cancelMention}
+          onClose={dismissMention}
           panelRef={activityPanelRef}
           style={portal ? { ...suggestionsPosition, visibility: suggestionsPosition ? "visible" : "hidden" } : undefined}
         >
