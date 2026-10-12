@@ -150,6 +150,12 @@ For mobile builds, set `EXPO_PUBLIC_DAYFRAME_API_BASE` to the environment's Verc
 
 See `docs/ios-hosted-supabase-runbook.md` for the iOS/EAS setup and physical-device validation checklist.
 
+### Forgot password (UIA-317)
+
+Log in offers "Forgot password?" in provider mode. `POST /api/auth/password-reset` answers at once with the same "check your email" reply for any well-formed address, then (after the response, through Next's `after`) asks Supabase Auth (`resetPasswordForEmail`) to email a recovery link back to the same deployment's `/reset-password` page. Neither an account's cooldown, a delivery failure nor Supabase's timing changes the reply; failures are logged without the address. The page is a signed-out page (no app shell and no automatic redirect to Log in, like Log in and Sign up), so ending the visitor's own sessions never takes it away mid-reset. It reads the recovery session from the link's fragment, removes it from the address bar, and posts the new password to `POST /api/auth/password-reset/complete`. That route first makes sure the account has its Dayframe row (as a first sign-in would), then ends every Dayframe sign-in for the user (web and iPhone) — recording the reset time in the server-only `user_session_fences` table and revoking sessions in one transaction under the user row's lock — then sets the password through the recovery session, ends sign-ins again, and signs out the user's Supabase sessions (the recovery session's tokens could otherwise change the password again). Creating a session (log in or sign up) takes the same row's share lock and refuses one whose password check came at or before the recorded reset, so a sign-in with the old password that was still finishing cannot survive. Each step repeats safely: a failure returns an error and the same page can try again (a repeat password change counts as done; a sign-in service outage keeps the link usable). Dev and local auth answer 404.
+
+Hosted prerequisite (owner, Supabase dashboard, per project): Authentication › URL Configuration › Redirect URLs must allow `https://dayframe-web.vercel.app/reset-password` (production) and `https://dayframe-staging.vercel.app/reset-password` (staging; add the Preview pattern if Previews are tested). Supabase sends any other redirect to the project's Site URL instead. The default "Reset Password" email template works as-is (implicit flow; the link carries the session in its fragment). Until the URLs are allowed, the email arrives but its link lands on the Site URL rather than the reset page.
+
 ## Personal Beta Defaults
 
 - Single-user/friends testing.
@@ -165,6 +171,10 @@ The server that reads activity icons, seeds starter activities for new workspace
 ### Place role schema prerequisite
 
 The server that reads Home and Work place roles requires `supabase/migrations/202610070001_place_role.sql` (local `packages/db/migrations/009_place_role.sql`) before its Preview or production deployment. It adds a nullable `places.role` column with a `home`/`work` check and a partial unique index on `(workspace_id, role)`; no existing row changes and nothing is backfilled. Every place-name read selects the column, so without it bootstrap, entries, Review, Reports, search, exports and integrations fail: bootstrap and place writes name this migration, other reads fail with a Postgres undefined-column error. Staging validation is not production authorization.
+
+### Password reset schema prerequisite
+
+The server with Forgot password requires `supabase/migrations/202610120001_user_session_fences.sql` (local `packages/db/migrations/011_user_session_fences.sql`) before its Preview or production deployment. It adds the empty `user_session_fences` table (user id, reset time) with RLS on, no policies and every `anon`/`authenticated` grant revoked, so only the server can read or write it; no existing row changes. Every sign-in reads it, so without it every sign-in fails. Apply it to staging before the Preview, then to production before the server change merges. Older servers ignore the table.
 
 ### Counts toward goal schema prerequisite
 

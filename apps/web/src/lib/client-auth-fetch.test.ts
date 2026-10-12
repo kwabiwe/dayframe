@@ -49,6 +49,14 @@ describe("client authentication response handling", () => {
     ).resolves.toBe(true);
     expect(redirect).not.toHaveBeenCalled();
   });
+
+  it("never takes the password reset page away while it ends the visitor's sessions (Codex r4)", async () => {
+    const redirect = vi.fn();
+    await expect(
+      handleClientAuthResponse(authResponse(401, "session_revoked"), { pathname: "/reset-password", redirect })
+    ).resolves.toBe(true);
+    expect(redirect).not.toHaveBeenCalled();
+  });
 });
 
 function authResponse(status: number, code?: string) {

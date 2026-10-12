@@ -3363,6 +3363,35 @@ kbd {
   font-size: 14px;
 }
 
+/* Sign-up's password rule and the quiet "Forgot password?" under Log in's password (UIA-317/318). */
+.auth-hint {
+  margin: -6px 0 0;
+  color: var(--text-secondary);
+  font-size: 13px;
+}
+
+.auth-forgot,
+.auth-link-button {
+  justify-self: start;
+  min-height: 44px;
+  margin: -6px 0 0;
+  border: 0;
+  padding: 0;
+  background: none;
+  color: var(--text-secondary);
+  font: inherit;
+  font-size: 14px;
+  font-weight: 600;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  cursor: pointer;
+}
+
+.auth-link-button {
+  margin: 0;
+  color: var(--text-primary);
+}
+
 .auth-page {
   display: grid;
   min-height: 100vh;
@@ -3381,6 +3410,7 @@ kbd {
 }
 
 .auth-card form > p a,
+.auth-switch--standalone a,
 .landing-footer a {
   display: inline-flex;
   min-width: 44px;
@@ -3389,7 +3419,8 @@ kbd {
   justify-content: center;
 }
 
-.auth-card form > p a {
+.auth-card form > p a,
+.auth-switch--standalone a {
   color: var(--text-primary);
   font-weight: 700;
   text-decoration: underline;
@@ -3417,7 +3448,8 @@ kbd {
   place-items: center;
   transform: translateY(-50%);
   border: 0;
-  border-radius: 10px;
+  /* Icon-only actions are round (UIA-319). */
+  border-radius: 999px;
   background: transparent;
   color: var(--muted);
 }
