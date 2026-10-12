@@ -1,13 +1,14 @@
 import { useRef } from "react";
 import { Modal, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { DAYFRAME_APP_ICONS } from "@dayframe/shared";
+import { DAYFRAME_BLOCKS } from "@dayframe/shared";
 import type { MobileTimeEntry } from "../../lib/api";
 import type { MobileStyles, MobileTheme } from "../../lib/mobileTheme";
 import { mobileTextProps } from "../../lib/mobileTypography";
 import { switchRecentMeta, type SwitchRecent } from "../../lib/todaySwitch";
 import { SwipeDismissSheet, type SwipeDismissSheetHandle } from "../SwipeDismissSheet";
-import { DayframeIcon } from "../icons/DayframeIcon";
+import { PrimaryTimerGlyph } from "../PrimaryTimerAction";
+import { BlocksSheetHead } from "../blocks/BlocksSheetHead";
 import { ActivityBlockMark } from "./ActivityBlockMark";
 
 const SWITCH_BLOCK_HEIGHT = 34;
@@ -67,19 +68,17 @@ export function TodaySwitchSheet({
           visible
         >
           <View style={styles.head}>
-            <Text {...mobileTextProps("counter")} style={[styles.eyebrow, { color: theme.textMuted }]}>
-              SWITCH
-            </Text>
-            <Text {...mobileTextProps("sectionHeading")} accessibilityRole="header" style={[styles.title, { color: theme.textPrimary }]}>
-              Pick up something recent
-            </Text>
+            <BlocksSheetHead eyebrow="SWITCH" theme={theme} title="Pick up something recent" />
           </View>
           <ScrollView contentContainerStyle={[styles.list, { paddingBottom: Math.max(insets.bottom, 16) }]}>
             {recents.length === 0 ? (
               <Text {...mobileTextProps("body")} style={[styles.empty, { color: theme.textSecondary }]}>
                 Finished blocks with a description show up here.
               </Text>
-            ) : recents.map(({ entry, title }, index) => {
+            ) : (
+              // The prototype's card (.rows): the recent blocks grouped on the sheet (UIA-054).
+              <View style={[styles.card, { backgroundColor: theme.surface }]} testID="today-switch-card">
+              {recents.map(({ entry, title }, index) => {
               const meta = switchRecentMeta(entry, nowMs);
               return (
                 <Pressable
@@ -120,10 +119,15 @@ export function TodaySwitchSheet({
                       {meta}
                     </Text>
                   </View>
-                  <DayframeIcon color={theme.textSecondary} glyph={DAYFRAME_APP_ICONS.start} size={20} />
+                  {/* A solid play glyph, as in the prototype (UIA-054). */}
+                  <View style={styles.play}>
+                    <PrimaryTimerGlyph color={theme.textSecondary} mode="play" />
+                  </View>
                 </Pressable>
               );
-            })}
+              })}
+              </View>
+            )}
           </ScrollView>
         </SwipeDismissSheet>
       </View>
@@ -132,12 +136,12 @@ export function TodaySwitchSheet({
 }
 
 const styles = StyleSheet.create({
-  head: { gap: 2, paddingHorizontal: 4, paddingTop: 8 },
-  eyebrow: { fontSize: 11, fontWeight: "600", letterSpacing: 0.9 },
-  title: { fontSize: 17, fontWeight: "700" },
+  head: { paddingHorizontal: 4, paddingTop: 4 },
   list: { paddingTop: 10 },
   empty: { fontSize: 15, lineHeight: 21, paddingHorizontal: 4, paddingVertical: 12 },
-  row: { alignItems: "center", flexDirection: "row", gap: 12, minHeight: 56, paddingHorizontal: 4, paddingVertical: 10 },
+  card: { borderRadius: DAYFRAME_BLOCKS.radius.phoneCard, overflow: "hidden" },
+  row: { alignItems: "center", flexDirection: "row", gap: 12, minHeight: 56, paddingHorizontal: 14, paddingVertical: 10 },
+  play: { alignItems: "center", height: 24, justifyContent: "center", width: 24 },
   pressed: { opacity: 0.7 },
   text: { flex: 1, gap: 2, minWidth: 0 },
   rowTitle: { fontSize: 15, fontWeight: "600" },

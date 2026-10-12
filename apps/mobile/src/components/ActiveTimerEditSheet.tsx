@@ -43,6 +43,7 @@ import { PrimaryTimerGlyph } from "@/components/PrimaryTimerAction";
 import { ActivityIcon, DayframeIcon } from "@/components/icons/DayframeIcon";
 import { ActivityPickerSheet } from "@/components/ActivityPickerSheet";
 import { BlocksConfirmHost, useBlocksConfirm } from "@/components/blocks/BlocksConfirmSheet";
+import { BlocksSheetHead } from "@/components/blocks/BlocksSheetHead";
 import { activityChips, chipsThatFit, recentActivityIds } from "@/lib/activityChoice";
 import { playHaptic } from "@/lib/haptics";
 import { dialTrackColor, TimeEntryDurationDial } from "@/components/TimeEntryDurationDial";
@@ -2313,43 +2314,22 @@ export function ActiveTimerEditSheet({
                 style={sheetStyles.head}
                 testID="time-entry-sheet-upper-dismiss-area"
               >
-                <View style={sheetStyles.headText} testID="time-entry-sheet-hero">
-                  <Text
-                    {...mobileTextProps("counter")}
-                    numberOfLines={1}
-                    style={[sheetStyles.headEyebrow, { color: theme.textMuted }]}
-                    testID="time-entry-sheet-elapsed"
-                  >
-                    {headEyebrow}
-                  </Text>
-                  <Text
-                    {...mobileTextProps("sectionHeading")}
-                    accessibilityRole="header"
-                    numberOfLines={1}
-                    style={[sheetStyles.headTitle, { color: theme.textPrimary }]}
-                  >
-                    {headTitle}
-                  </Text>
-                </View>
-                {showDoneButton ? (
-                  <Pressable
-                    accessibilityLabel={saveLabel}
-                    accessibilityRole="button"
-                    disabled={busy}
-                    onPress={() => {
+                <BlocksSheetHead
+                  action={showDoneButton ? {
+                    accessibilityLabel: saveLabel,
+                    busy,
+                    label: "Done",
+                    onPress: () => {
                       void saveChanges();
-                    }}
-                    style={({ pressed }) => [
-                      sheetStyles.donePill,
-                      { backgroundColor: theme.surfaceMuted },
-                      pressed && !busy ? styles.buttonPressed : null,
-                      busy ? styles.buttonDisabled : null
-                    ]}
-                    testID="time-entry-sheet-done"
-                  >
-                    <Text {...mobileTextProps("control")} style={[sheetStyles.donePillText, { color: theme.textPrimary }]}>Done</Text>
-                  </Pressable>
-                ) : null}
+                    },
+                    testID: "time-entry-sheet-done"
+                  } : null}
+                  eyebrow={headEyebrow}
+                  eyebrowTestID="time-entry-sheet-elapsed"
+                  textTestID="time-entry-sheet-hero"
+                  theme={theme}
+                  title={headTitle}
+                />
               </Pressable>
 
               <Pressable
@@ -2564,62 +2544,6 @@ export function ActiveTimerEditSheet({
                       </ScrollView>
                     </Animated.View>
                   </View>
-                  <View
-                    accessibilityElementsHidden={suggestionsObscureFormAccessibility}
-                    importantForAccessibility={
-                      suggestionsObscureFormAccessibility ? "no-hide-descendants" : "auto"
-                    }
-                    style={styles.tagEditorFooter}
-                    testID="time-entry-description-obscured-footer"
-                  >
-                    {appliedTagNames.map((tagName, index) => (
-                      <Pressable
-                        accessibilityHint="Removes this tag from the draft; save the block to confirm"
-                        accessibilityLabel={`Remove tag ${tagName}`}
-                        accessibilityRole="button"
-                        disabled={busy}
-                        key={`${tagName}:${index}`}
-                        onPress={() => {
-                          const normalizedName = normalizeTagName(tagName).normalizedName;
-                          setSelectedTagNames((current) => current.filter(
-                            (name) => normalizeTagName(name).normalizedName !== normalizedName
-                          ));
-                          setValidationError(null);
-                        }}
-                        hitSlop={{ top: 6, bottom: 6 }}
-                        style={({ pressed }) => [
-                          sheetStyles.tagChip,
-                          { backgroundColor: theme.surfaceMuted },
-                          pressed && !busy ? styles.buttonPressed : null,
-                          busy ? styles.buttonDisabled : null
-                        ]}
-                        testID={`time-entry-tag-${index}`}
-                      >
-                        <Text {...mobileTextProps("metadata")} numberOfLines={1} style={[sheetStyles.tagChipText, sheetStyles.tagChipName, { color: theme.textPrimary }]}>
-                          #{tagName}
-                        </Text>
-                        <Text {...mobileTextProps("metadata")} style={[sheetStyles.tagChipText, { color: theme.textSecondary }]}> ×</Text>
-                      </Pressable>
-                    ))}
-                    <Pressable
-                      accessibilityHint="Focuses Description and starts adding a tag"
-                      accessibilityLabel="Add a tag"
-                      accessibilityRole="button"
-                      disabled={busy}
-                      hitSlop={{ top: 6, bottom: 6 }}
-                      onPress={startTagEntry}
-                      onPressIn={beginTagEntryPress}
-                      style={({ pressed }) => [
-                        sheetStyles.tagChip,
-                        { borderColor: theme.borderStrong, borderWidth: 1.5 },
-                        pressed && !busy ? styles.buttonPressed : null,
-                        busy ? styles.buttonDisabled : null
-                      ]}
-                      testID="time-entry-tag-add"
-                    >
-                      <Text {...mobileTextProps("metadata")} style={[sheetStyles.tagChipText, { color: theme.textSecondary }]}>+ Tag</Text>
-                    </Pressable>
-                  </View>
                 </View>
 
                 <View
@@ -2701,6 +2625,65 @@ export function ActiveTimerEditSheet({
                       <DayframeIcon color={theme.textPrimary} glyph={DAYFRAME_APP_ICONS.search} size={16} />
                       <Text {...mobileTextProps("control")} style={[sheetStyles.chipText, { color: theme.textPrimary }]}>All activities</Text>
                       <Text {...mobileTextProps("counter")} style={[sheetStyles.chipCount, { color: theme.textSecondary }]}>{categories.length}</Text>
+                    </Pressable>
+                  </View>
+                  {/* Tags follow Activity, as in the prototype (UIA-050). */}
+                  <View
+                    accessibilityElementsHidden={suggestionsObscureFormAccessibility}
+                    importantForAccessibility={
+                      suggestionsObscureFormAccessibility ? "no-hide-descendants" : "auto"
+                    }
+                    style={styles.tagEditorFooter}
+                    testID="time-entry-description-obscured-footer"
+                  >
+                    {appliedTagNames.map((tagName, index) => (
+                      <Pressable
+                        accessibilityHint="Removes this tag from the draft; save the block to confirm"
+                        accessibilityLabel={`Remove tag ${tagName}`}
+                        accessibilityRole="button"
+                        disabled={busy}
+                        key={`${tagName}:${index}`}
+                        onPress={() => {
+                          const normalizedName = normalizeTagName(tagName).normalizedName;
+                          setSelectedTagNames((current) => current.filter(
+                            (name) => normalizeTagName(name).normalizedName !== normalizedName
+                          ));
+                          setValidationError(null);
+                        }}
+                        hitSlop={{ top: 6, bottom: 6 }}
+                        style={({ pressed }) => [
+                          sheetStyles.tagChip,
+                          { backgroundColor: theme.surfaceMuted },
+                          pressed && !busy ? styles.buttonPressed : null,
+                          busy ? styles.buttonDisabled : null
+                        ]}
+                        testID={`time-entry-tag-${index}`}
+                      >
+                        <Text {...mobileTextProps("metadata")} numberOfLines={1} style={[sheetStyles.tagChipText, sheetStyles.tagChipName, { color: theme.textPrimary }]}>
+                          #{tagName}
+                        </Text>
+                        <Text {...mobileTextProps("metadata")} style={[sheetStyles.tagChipText, { color: theme.textSecondary }]}> ×</Text>
+                      </Pressable>
+                    ))}
+                    <Pressable
+                      accessibilityHint="Focuses Description and starts adding a tag"
+                      accessibilityLabel="Add a tag"
+                      accessibilityRole="button"
+                      disabled={busy}
+                      hitSlop={{ top: 6, bottom: 6 }}
+                      onPress={startTagEntry}
+                      onPressIn={beginTagEntryPress}
+                      style={({ pressed }) => [
+                        sheetStyles.tagChip,
+                        sheetStyles.tagAdd,
+                        { backgroundColor: theme.surfaceMuted },
+                        pressed && !busy ? styles.buttonPressed : null,
+                        busy ? styles.buttonDisabled : null
+                      ]}
+                      testID="time-entry-tag-add"
+                    >
+                      <DayframeIcon color={theme.textSecondary} glyph={DAYFRAME_APP_ICONS.add} size={14} />
+                      <Text {...mobileTextProps("metadata")} style={[sheetStyles.tagChipText, { color: theme.textSecondary }]}>Tag</Text>
                     </Pressable>
                   </View>
                 </View>
@@ -2897,6 +2880,29 @@ export function ActiveTimerEditSheet({
                       >
                         <PrimaryTimerGlyph color={theme.onAccent} mode="stop" />
                         <Text {...mobileTextProps("control")} numberOfLines={1} style={[sheetStyles.actionText, { color: theme.onAccent }]}>Stop</Text>
+                      </Pressable>
+                    ) : null}
+                    {isAddMode && onSave ? (
+                      // The add sheet's single primary action (UIA-052): saves the new block, the same
+                      // commit as Done in the head; it closes optimistically with no spinner.
+                      <Pressable
+                        accessibilityHint="Saves this time as a new block"
+                        accessibilityLabel="Add block"
+                        accessibilityRole="button"
+                        disabled={busy}
+                        onPress={() => {
+                          void saveChanges();
+                        }}
+                        onTouchStart={(event) => event.stopPropagation()}
+                        style={({ pressed }) => [
+                          sheetStyles.actionPill,
+                          { backgroundColor: pressed && !busy ? theme.accentPressed : theme.accent },
+                          busy ? styles.buttonDisabled : null
+                        ]}
+                        testID="time-entry-sheet-add"
+                      >
+                        <DayframeIcon color={theme.onAccent} glyph={DAYFRAME_APP_ICONS.add} size={18} />
+                        <Text {...mobileTextProps("control")} numberOfLines={1} style={[sheetStyles.actionText, { color: theme.onAccent }]}>Add block</Text>
                       </Pressable>
                     ) : null}
                     {canStartAgain ? (
@@ -3204,26 +3210,8 @@ function formatSheetDay(date: Date) {
 
 // The prototype's sheet head and action row (design/blocks/ios.html .sheet-head, .sheet-actions).
 const sheetStyles = StyleSheet.create({
-  head: {
-    alignItems: "center",
-    flexDirection: "row",
-    gap: 12,
-    justifyContent: "space-between",
-    minHeight: 52,
-    paddingTop: 4
-  },
-  headText: { flexShrink: 1, gap: 2, minWidth: 0 },
-  headEyebrow: { fontSize: 11, fontWeight: "600", letterSpacing: 0.9 },
-  headTitle: { fontSize: 17, fontWeight: "700" },
-  donePill: {
-    alignItems: "center",
-    borderRadius: 999,
-    justifyContent: "center",
-    minHeight: 44,
-    minWidth: 64,
-    paddingHorizontal: 16
-  },
-  donePillText: { fontSize: 14, fontWeight: "600" },
+  // The shared BlocksSheetHead (UIA-006) inside a tap target that dismisses the keyboard.
+  head: { alignSelf: "stretch" },
   sectionEyebrow: { fontSize: 11, fontWeight: "600", letterSpacing: 0.9 },
   chipWrap: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
   chipMeasure: { flexDirection: "row", left: 0, opacity: 0, position: "absolute", top: 0 },
@@ -3232,6 +3220,8 @@ const sheetStyles = StyleSheet.create({
   tagChipText: { fontSize: 13, fontWeight: "600" },
   // A long name truncates; the × after it always stays visible.
   tagChipName: { flexShrink: 1, minWidth: 0 },
+  // "+ Tag" is a filled chip with the add glyph, never an outline (UIA-050).
+  tagAdd: { gap: 4 },
   chip: {
     alignItems: "center",
     borderRadius: 999,

@@ -26,6 +26,7 @@ vi.mock("../SwipeDismissSheet", async () => {
   };
 });
 vi.mock("../icons/DayframeIcon", () => ({ DayframeIcon: () => null }));
+vi.mock("../PrimaryTimerAction", () => ({ PrimaryTimerGlyph: (props: { mode: string }) => `glyph:${props.mode}` }));
 vi.mock("./ActivityBlockMark", () => ({ ActivityBlockMark: () => null }));
 vi.mock("../../lib/mobileTypography", () => ({ mobileTextProps: () => ({}) }));
 
@@ -72,6 +73,15 @@ describe("TodaySwitchSheet", () => {
     const row = tree.root.findByProps({ testID: "today-switch-a" });
     expect(row.props.accessibilityLabel).toBe("Start Deep work, Work, yesterday");
     expect(row.props.accessibilityHint).toBe("Starts this block");
+    act(() => tree.unmount());
+  });
+
+  it("groups the rows in one surface card with a solid play glyph (UIA-054)", () => {
+    const { tree } = render([recent("a", "Deep work"), recent("b", "Inbox zero")]);
+    const card = tree.root.findByProps({ testID: "today-switch-card" });
+    expect(card.findAllByProps({ testID: "today-switch-a" }).length).toBeGreaterThan(0);
+    expect(card.findAllByProps({ testID: "today-switch-b" }).length).toBeGreaterThan(0);
+    expect(JSON.stringify(tree.toJSON())).toContain("glyph:play");
     act(() => tree.unmount());
   });
 

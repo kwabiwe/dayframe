@@ -54,7 +54,7 @@ describe("mobile place editor contract", () => {
     expect(editorSource).toContain("<SettingsBlockGroup");
     expect(editorSource).toContain("<ActivityPickerSheet");
     expect(editorSource).toContain('title="Logs as"');
-    expect(editorSource).toContain('testID="place-editor-save"');
+    expect(editorSource).toContain('testID: "place-editor-save"');
     // The horizontal chip scroller is gone; every activity is one search away.
     expect(editorSource).not.toContain("CategoryChoice");
     // An accepted create never depends on a later read (a retry would add the place twice).
