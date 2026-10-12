@@ -177,8 +177,8 @@ import type { DayframeMotionAuthorizationStatus } from "../modules/dayframe-moti
 import {
   discardReviewSyncIssue,
   getReviewSyncDiagnostics,
-  listReviewSyncDiagnosticMutations,
   listReviewSyncIssues,
+  readReviewSupportExportForOwner,
   readReviewSyncStateForOwner,
   subscribeReviewSync,
   synchroniseReviewMutations,
@@ -1428,18 +1428,21 @@ export default function SettingsScreen() {
 
   async function exportQueueDiagnostics() {
     try {
+      // Every account-scoped section is read for this one owner (Codex r6 on #355): the Review and
+      // Location stores keep their own active account, which can differ while accounts reconcile.
       const owner = await readActiveMobileAccount();
+      if (!owner) return;
       const [
-        latestQueue, latestReviewDiagnostics, reviewMutations, location, native, health, manual,
+        latestQueue, review, location, native, health, manual,
         timeEntryDiagnostics, timeEntryIssues, timerStopDiagnostics, timerStopIssues
       ] = await Promise.all([
-        readQueue(), getReviewSyncDiagnostics(), listReviewSyncDiagnosticMutations(),
-        getLocationStoreDiagnostics(), getNativeLocationIntelligenceStatus().catch(() => null),
-        getHealthImportStatus(), getLastManualSyncResult(),
-        getTimeEntryOutboxDiagnostics(), listTimeEntrySyncIssues(),
-        getTimerStopOutboxDiagnostics(), listTimerStopSyncIssues()
+        readQueue(owner), readReviewSupportExportForOwner(owner),
+        getLocationStoreDiagnostics(owner), getNativeLocationIntelligenceStatus().catch(() => null),
+        getHealthImportStatus(), getLastManualSyncResult(owner),
+        getTimeEntryOutboxDiagnostics(owner), listTimeEntrySyncIssues(owner),
+        getTimerStopOutboxDiagnostics(owner), listTimerStopSyncIssues(owner)
       ]);
-      if (!owner || !mobileAccountOwnersEqual(owner, await readActiveMobileAccount())) return;
+      if (!mobileAccountOwnersEqual(owner, await readActiveMobileAccount())) return;
       const snapshot = {
         exportedAt: new Date().toISOString(),
         build: mobileBuildDiagnostics(),
@@ -1447,7 +1450,8 @@ export default function SettingsScreen() {
         owner: { workspace: owner.workspaceId.slice(0, 8), user: owner.userId.slice(0, 8) },
         activity: supportQueueDiagnostics(latestQueue),
         health,
-        reviewSync: { diagnostics: latestReviewDiagnostics, mutations: reviewMutations },
+        // Null while the Review store still holds another account.
+        reviewSync: review ? { diagnostics: review.diagnostics, mutations: review.mutations } : null,
         // Rejected Edits/Deletes and Stops: status codes and errors left the Sync help screen, so
         // support still gets them here (IDs shortened as elsewhere).
         timeEntrySync: {
@@ -1480,7 +1484,7 @@ export default function SettingsScreen() {
           monitoringSignificantChanges: native.monitoringSignificantChanges,
           nativeStoreErrorCode: native.nativeStoreErrorCode
         } : null,
-        presentationCache: getLocationReviewEvidencePrefetchDiagnostics(),
+        presentationCache: getLocationReviewEvidencePrefetchDiagnostics(owner),
         manualSync: manual,
         selectedDate: data?.dateRange?.selectedDate ?? null,
         timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone

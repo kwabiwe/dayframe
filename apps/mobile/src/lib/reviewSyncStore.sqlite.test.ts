@@ -3,9 +3,9 @@ import { DatabaseSync } from "node:sqlite";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { syntheticId, syntheticReviewBootstrap } from "../../../../scripts/fixtures/review-performance";
+import { syntheticId, syntheticReviewBootstrap, syntheticReviewEvidence } from "../../../../scripts/fixtures/review-performance";
 
-const mocks = vi.hoisted(() => ({ open: vi.fn(), fetch: vi.fn(), session: vi.fn(), current: vi.fn(), failItem: "", interleave: [] as Array<{ match: string; run: () => void }> }));
+const mocks = vi.hoisted(() => ({ open: vi.fn(), fetch: vi.fn(), session: vi.fn(), current: vi.fn(), failItem: "", interleave: [] as Array<{ match: string; run: () => void | Promise<void>; after?: boolean }> }));
 vi.mock("expo-sqlite", () => ({ openDatabaseAsync: mocks.open }));
 vi.mock("./backendIdentity", () => ({ DAYFRAME_BACKEND_ID: "dayframe-staging" }));
 vi.mock("./secure-session", () => ({ readOwnedAuthenticatedSessionSnapshot: mocks.session, invalidateMobileSessionIfCurrent: vi.fn(), isAuthenticatedSessionSnapshotCurrent: mocks.current }));
@@ -20,15 +20,20 @@ const mergeInput = () => {
   return { bootstrap: data, item: data.reviewItems[2], affectedItems: data.reviewItems.slice(2),
     clientMutationId: syntheticId(10), mutation: { action: "merge" as const, adjacentReviewItemId: data.reviewItems[3].id, acknowledgeContradictoryEvidence: false } };
 };
+/** Runs a scripted step before (or, with `after`, after) the first query matching it. */
+async function interleaved<Result>(sql: string, query: () => Result) {
+  const index = mocks.interleave.findIndex(({ match }) => sql.includes(match));
+  const step = index >= 0 ? mocks.interleave.splice(index, 1)[0] : null;
+  if (step && !step.after) await step.run();
+  const result = query();
+  if (step?.after) await step.run();
+  return result;
+}
 function adapter() {
   const value = {
     execAsync: async (sql: string) => { db.exec(sql); },
-    getFirstAsync: async (sql: string, ...args: never[]) => {
-      const step = mocks.interleave.findIndex(({ match }) => sql.includes(match));
-      if (step >= 0) mocks.interleave.splice(step, 1)[0].run();
-      return db.prepare(sql).get(...args) ?? null;
-    },
-    getAllAsync: async (sql: string, ...args: never[]) => db.prepare(sql).all(...args),
+    getFirstAsync: (sql: string, ...args: never[]) => interleaved(sql, () => db.prepare(sql).get(...args) ?? null),
+    getAllAsync: (sql: string, ...args: never[]) => interleaved(sql, () => db.prepare(sql).all(...args)),
     runAsync: async (sql: string, ...args: never[]) => {
       if (mocks.failItem && sql.includes("insert into review_mutation_effects") && args.includes(mocks.failItem as never)) throw new Error("simulated disk failure");
       return db.prepare(sql).run(...args);
@@ -137,6 +142,67 @@ describe("Review real SQLite transactions", () => {
     const forB = await store.getReviewSyncDiagnostics();
     expect(forB.reviewCacheHitCount).toBe(0);
     expect(forB.lastLocalMutationAction).toBeNull();
+  });
+  it("never lets a late cache read or mutation from A write into B's in-process counters (Codex r6 on #355)", async () => {
+    const data = bootstrap();
+    const ownerB = { userId: syntheticId(901), workspaceId: syntheticId(902), workspaceName: "B" };
+    const evidence = syntheticReviewEvidence(data)[0];
+    await store.cacheLocationReviewEvidence({ expectedWorkspaceId: data.workspace.id, expectedUserId: data.user.id, reviewItemId: evidence.reviewItemId, evidence, fetchedAt: new Date().toISOString() });
+    db.prepare("update location_review_evidence_cache set byte_size = 12345, expires_at = ?").run(new Date(Date.now() + 3_600_000).toISOString());
+    // A's evidence hit: its row is read, then the store moves to B before the read finishes.
+    mocks.interleave = [{ match: "select evidence_json", after: true, run: () => store.activateReviewAccount(ownerB) }];
+    expect(await store.loadCachedLocationReviewEvidence(evidence.reviewItemId)).not.toBeNull();
+    expect(mocks.interleave).toEqual([]);
+    let forB = await store.getReviewSyncDiagnostics();
+    expect(forB.evidenceCacheHitCount).toBe(0);
+    expect(forB.lastEvidencePayloadBytes).toBeNull();
+    expect(forB.lastEvidenceCacheAgeMs).toBeNull();
+    // A's Review cache read, overtaken by the move to B mid-read: no miss or hit lands for B.
+    await reopen(); await store.processReviewBootstrap(data);
+    mocks.interleave = [{ match: "from review_item_cache", after: true, run: () => store.activateReviewAccount(ownerB) }];
+    await store.loadCachedReviewBootstrap();
+    expect(mocks.interleave).toEqual([]);
+    forB = await store.getReviewSyncDiagnostics();
+    expect(forB.reviewCacheHitCount + forB.reviewCacheMissCount).toBe(0);
+    expect(forB.lastReviewCacheAgeMs).toBeNull();
+    // A's evidence read overtaken by a clear: nothing lands after it.
+    await reopen(); await store.processReviewBootstrap(data);
+    await store.cacheLocationReviewEvidence({ expectedWorkspaceId: data.workspace.id, expectedUserId: data.user.id, reviewItemId: evidence.reviewItemId, evidence, fetchedAt: new Date().toISOString() });
+    db.prepare("update location_review_evidence_cache set expires_at = ?").run(new Date(Date.now() + 3_600_000).toISOString());
+    mocks.interleave = [{ match: "select evidence_json", after: true, run: () => store.clearActiveReviewAccountData() }];
+    await store.loadCachedLocationReviewEvidence(evidence.reviewItemId);
+    await store.activateReviewAccount(ownerB);
+    forB = await store.getReviewSyncDiagnostics();
+    expect(forB.evidenceCacheHitCount + forB.evidenceCacheMissCount).toBe(0);
+    expect(forB.lastEvidencePayloadBytes).toBeNull();
+    // A mutation whose commit is overtaken by a clear leaves no trace for B.
+    await reopen(); await store.processReviewBootstrap(data);
+    mocks.interleave = [{ match: "select account_key, review_item_id, request_json from review_mutation_outbox", run: () => { void store.clearActiveReviewAccountData(); } }];
+    await store.enqueueReviewMutation({ bootstrap: data, item: data.reviewItems[0], clientMutationId: syntheticId(95), mutation: { action: "accept" } });
+    await store.activateReviewAccount(ownerB);
+    forB = await store.getReviewSyncDiagnostics();
+    expect(forB.lastLocalMutationAction).toBeNull();
+    expect(forB.lastLocalMutationCommittedAt).toBeNull();
+  });
+  it("exports Review support details only for the exporting account (Codex r6 on #355)", async () => {
+    const data = bootstrap();
+    const ownerA = { userId: data.user.id, workspaceId: data.workspace.id };
+    const ownerB = { userId: syntheticId(901), workspaceId: syntheticId(902) };
+    await store.enqueueReviewMutation({ bootstrap: data, item: data.reviewItems[0], clientMutationId: syntheticId(96), mutation: { action: "accept" } });
+    db.exec("update review_mutation_outbox set state='needs_attention',resolution_status=null,last_http_status=422,last_error='A private detail'");
+    const forA = await store.readReviewSupportExportForOwner(ownerA);
+    expect(forA?.mutations.map((mutation) => mutation.clientMutationId)).toEqual([syntheticId(96)]);
+    expect(forA?.diagnostics.needsAttentionCount).toBe(1);
+    // The app is already B's while this store still holds A: B's export gets nothing of A's.
+    expect(await store.readReviewSupportExportForOwner(ownerB)).toBeNull();
+    // A switch to B in the middle of A's export drops it.
+    mocks.interleave = [{ match: "reconciliation_attempt_count as \"reconciliationAttemptCount\"", after: true, run: () => { db.prepare("update review_store_metadata set value = ? where key = 'active_account'").run(`${ownerB.workspaceId}:${ownerB.userId}`); } }];
+    expect(await store.readReviewSupportExportForOwner(ownerA)).toBeNull();
+    expect(mocks.interleave).toEqual([]);
+    await store.activateReviewAccount({ ...ownerB, workspaceName: "B" });
+    const forB = await store.readReviewSupportExportForOwner(ownerB);
+    expect(forB?.mutations).toEqual([]);
+    expect(forB?.diagnostics.needsAttentionCount).toBe(0);
   });
   it("selects the latest failure by timestamp rather than alphabetic error text", async () => {
     const data=bootstrap();
