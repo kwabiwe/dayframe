@@ -364,6 +364,19 @@ export function calendarDragCreateRange({
   return { endMinutes: clamp(endMinutes, lower, upper), startMinutes: clamp(startMinutes, lower, upper) };
 }
 
+/** Real elapsed seconds of a dragged local range (DST-safe); null if either bound is nonexistent. */
+export function calendarDragRangeSeconds(day: Date, startMinutes: number, endMinutes: number) {
+  const startedAt = isoForLocalDateMinutes(day, startMinutes);
+  const endIso = endMinutes >= 24 * 60
+    ? (() => {
+      const lastMinute = isoForLocalDateMinutes(day, 24 * 60 - 1);
+      return lastMinute ? new Date(new Date(lastMinute).getTime() + 60_000).toISOString() : null;
+    })()
+    : isoForLocalDateMinutes(day, endMinutes);
+  if (!startedAt || !endIso) return null;
+  return Math.max(0, Math.round((new Date(endIso).getTime() - new Date(startedAt).getTime()) / 1_000));
+}
+
 /** ISO bounds for a dragged range; null when it starts in the future. The end is held at now. */
 export function calendarDragCreateSlot({
   day,

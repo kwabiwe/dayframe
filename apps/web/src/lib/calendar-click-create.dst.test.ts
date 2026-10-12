@@ -1,7 +1,8 @@
 import { afterAll, describe, expect, it } from "vitest";
 import {
   calculateCalendarClickCreateSlot,
-  calculateCalendarDraftAnchorGeometry
+  calculateCalendarDraftAnchorGeometry,
+  calendarDragRangeSeconds
 } from "./calendar-click-create";
 import {
   buildCalendarEntryCompactCreatePlan,
@@ -58,6 +59,13 @@ describe.each([
   springStopIso,
   timezone
 }) => {
+  it("measures a dragged range across the spring-forward gap in real elapsed time", () => {
+    process.env.TZ = timezone;
+    const day = new Date(springDate[0], springDate[1], springDate[2], 12);
+    // e.g. London 00:30–02:20 on 29 March: 1h 50m of wall clock, 50 real minutes.
+    expect(calendarDragRangeSeconds(day, springGapMinute - 30, springGapMinute + 80)).toBe(50 * 60);
+  });
+
   it("rejects nonexistent spring-forward rows and preserves exact instants around the gap", () => {
     process.env.TZ = timezone;
     const day = new Date(springDate[0], springDate[1], springDate[2], 12);

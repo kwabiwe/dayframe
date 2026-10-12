@@ -76,6 +76,7 @@ import {
   calendarDragCreateRange,
   calendarDragCreateSlot,
   calendarDragMinutesAt,
+  calendarDragRangeSeconds,
   calendarPointHitsSemanticBlock,
   calendarPointerMatchesConsumed,
   isEligibleCalendarCreatePointer,
@@ -630,6 +631,9 @@ export function CalendarReview({
   const [resizeTip, setResizeTip] = useState<{ label: string; x: number; y: number } | null>(null);
   // Drag on empty time: the day body owns the pointer (capture) from press to release.
   const [createGhost, setCreateGhost] = useState<{ dayKey: string; endMinutes: number; startMinutes: number } | null>(null);
+  // Decided once at pointerdown against the layout at that moment: whether the press may become a
+  // drag (it is outside every block's semantic time) and the 5-minute anchor it pressed on.
+  const createPressRef = useRef<{ anchorMinutes: number; dragAllowed: boolean; pointerId: number } | null>(null);
   const createDragRef = useRef<{
     anchorMinutes: number;
     dayKey: string;
@@ -1037,6 +1041,17 @@ export function CalendarReview({
       scrollLeft: calendarScroller?.scrollLeft ?? 0,
       scrollTop: calendarScroller?.scrollTop ?? 0
     };
+    createPressRef.current = {
+      anchorMinutes: calendarDragMinutesAt({
+        clientY: event.clientY,
+        dayBodyTop: dayBody.getBoundingClientRect().top,
+        endHour: calendarHours.endHour,
+        rowHeight,
+        startHour: calendarHours.startHour
+      }),
+      dragAllowed: !dayBodyPointHitsSemanticBlock(dayBody, event.clientX, event.clientY),
+      pointerId: event.pointerId
+    };
     dayBody.setPointerCapture(event.pointerId);
   }
 
@@ -1044,19 +1059,14 @@ export function CalendarReview({
     const sequence = createPointerSequenceRef.current;
     if (!sequence || sequence.pointerId !== event.pointerId) return;
     const dayBodyTop = event.currentTarget.getBoundingClientRect().top;
-    if (!createDragRef.current && dayBodyPointHitsSemanticBlock(event.currentTarget, sequence.clientX, sequence.clientY)) {
-      // A press inside a block's semantic time (including its visual gap) never starts a create drag.
-      createPointerSequenceRef.current = null;
-      return;
-    }
+    const press = createPressRef.current;
+    // A press inside a block's semantic time (including its visual gap) never becomes a drag.
+    if (!press || press.pointerId !== event.pointerId || !press.dragAllowed) return;
     const axis = { endHour: calendarHours.endHour, rowHeight, startHour: calendarHours.startHour };
     let drag = createDragRef.current;
     if (!drag) {
       if (Math.hypot(event.clientX - sequence.clientX, event.clientY - sequence.clientY) < resizeDragThresholdPx) return;
-      // The press position is read against today's scroll, so a scroll between press and
-      // threshold still anchors on the time the pointer went down on.
-      const scrollShift = (calendarScroller?.scrollTop ?? 0) - sequence.scrollTop;
-      const anchorMinutes = calendarDragMinutesAt({ ...axis, clientY: sequence.clientY - scrollShift, dayBodyTop });
+      const anchorMinutes = press.anchorMinutes;
       drag = {
         anchorMinutes,
         dayKey: sequence.dayKey,
@@ -1078,6 +1088,7 @@ export function CalendarReview({
   }
 
   function abortCalendarCreateDrag() {
+    createPressRef.current = null;
     createDragRef.current = null;
     createPointerSequenceRef.current = null;
     setCreateGhost(null);
@@ -1105,6 +1116,7 @@ export function CalendarReview({
     if (dayBody.hasPointerCapture(event.pointerId)) {
       dayBody.releasePointerCapture(event.pointerId);
     }
+    createPressRef.current = null;
     const drag = createDragRef.current;
     if (drag && drag.pointerId === event.pointerId) {
       createDragRef.current = null;
@@ -1340,7 +1352,7 @@ export function CalendarReview({
                     top: ((createGhost.startMinutes - calendarHours.startHour * 60) / 60) * rowHeight
                   }}
                 >
-                  {`${formatCalendarAxisMinutes(createGhost.startMinutes)}–${formatCalendarAxisMinutes(createGhost.endMinutes)} · ${formatDuration((createGhost.endMinutes - createGhost.startMinutes) * 60)}`}
+                  {`${formatCalendarAxisMinutes(createGhost.startMinutes)}–${formatCalendarAxisMinutes(createGhost.endMinutes)} · ${formatDuration(calendarDragRangeSeconds(day, createGhost.startMinutes, createGhost.endMinutes) ?? 0)}`}
                 </div>
               ) : null}
               {visibleSelectedTarget?.kind === "create" && visibleSelectedTarget.dayKey === formatCalendarDateKey(day) ? (() => {

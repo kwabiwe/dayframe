@@ -28,6 +28,7 @@ const { CalendarEntryCompactEditor } = await import("./CalendarEntryCompactEdito
 const { CalendarReview } = await import("./TimeReviewViews");
 
 let anchorIsOffscreen = false;
+let dayBodyTop = 0;
 let pointTarget: Element | null = null;
 const capturedPointers = new WeakMap<Element, Set<number>>();
 const outsidePointerListeners = new Set<EventListenerOrEventListenerObject>();
@@ -62,6 +63,7 @@ describe("Calendar click-to-create DOM interactions", () => {
     runtime.updateActiveEntryFromCalendar.mockReset().mockResolvedValue({ ok: true });
     runtime.isTimerBusy = false;
     anchorIsOffscreen = false;
+    dayBodyTop = 0;
     pointTarget = null;
     installDomGeometry();
   });
@@ -450,7 +452,7 @@ function installDomGeometry() {
   });
   vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function rect(this: HTMLElement) {
     if (this.classList.contains("calendar-grid-scroller")) return domRect(0, 0, 1_000, 850);
-    if (this.matches("[data-calendar-day-body]")) return domRect(104, 0, 800, 1_536);
+    if (this.matches("[data-calendar-day-body]")) return domRect(104, dayBodyTop, 800, 1_536);
     if (this.matches("[data-calendar-draft]")) {
       const top = anchorIsOffscreen ? 2_000 : Number.parseFloat(this.style.top || "0");
       return domRect(120, top, 760, Number.parseFloat(this.style.height || "1"));
@@ -531,6 +533,7 @@ describe("Calendar drag-to-create and 5-minute resize (W13)", () => {
     runtime.createManualEntry.mockReset().mockResolvedValue({ ok: true });
     fetchMock.clientFetch.mockReset().mockResolvedValue({ ok: true, status: 200 });
     anchorIsOffscreen = false;
+    dayBodyTop = 0;
     pointTarget = null;
     installDomGeometry();
   });
@@ -635,6 +638,35 @@ describe("Calendar drag-to-create and 5-minute resize (W13)", () => {
     });
     await flushDocumentListeners();
     expect(screen.queryByTestId("calendar-compact-editor")).toBeNull();
+  });
+
+  it("decides block occupancy at the press, so scrolling before the drag never changes it", async () => {
+    renderCalendar([entryAt(new Date(2026, 7, 2, 8, 0).toISOString(), new Date(2026, 7, 2, 9, 0).toISOString())]);
+    const dayBody = document.querySelector<HTMLElement>("[data-calendar-day-body]") as HTMLElement;
+    pointTarget = dayBody;
+    // Press in the block's gap, then the grid scrolls an hour before the pointer moves.
+    await act(async () => {
+      fireEvent.pointerDown(dayBody, pointer(37, y(8 * 60 + 59.5)));
+    });
+    dayBodyTop = -64;
+    await act(async () => {
+      fireEvent.pointerMove(dayBody, pointer(37, y(10 * 60)));
+      fireEvent.pointerUp(dayBody, pointer(37, y(10 * 60)));
+    });
+    await flushDocumentListeners();
+    expect(document.querySelector("[data-calendar-create-ghost]")).toBeNull();
+    expect(screen.queryByTestId("calendar-compact-editor")).toBeNull();
+
+    // A valid press on empty time stays valid even if the scroll would now put a block under it.
+    dayBodyTop = 0;
+    await act(async () => {
+      fireEvent.pointerDown(dayBody, pointer(38, y(9 * 60 + 30)));
+    });
+    dayBodyTop = 64;
+    await act(async () => {
+      fireEvent.pointerMove(dayBody, pointer(38, y(9 * 60 + 50)));
+    });
+    expect(document.querySelector("[data-calendar-create-ghost]")?.textContent).toMatch(/^08:50–09:30 · /);
   });
 
   it("shows the real duration of an overnight block in the resize tip", async () => {
