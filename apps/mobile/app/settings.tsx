@@ -1,7 +1,7 @@
-import { readOwnedAuthenticatedSessionSnapshot, isAuthenticatedSessionSnapshotCurrent } from "@/lib/secure-session";
+import { readOwnedAuthenticatedSessionSnapshot, isAuthenticatedSessionSnapshotCurrent, subscribeAuthenticatedSession } from "@/lib/secure-session";
 import { mobileBuildDiagnostics } from "@/lib/mobileBuildDiagnostics";
 import { supportQueueDiagnostics } from "@/lib/supportSyncDiagnostics";
-import { getActiveMobileAccountSnapshot, readActiveMobileAccount, mobileAccountOwnersEqual, type MobileAccountOwner } from "@/lib/mobileAccount";
+import { getActiveMobileAccountSnapshot, readActiveMobileAccount, mobileAccountOwnersEqual, subscribeActiveMobileAccount, type MobileAccountOwner } from "@/lib/mobileAccount";
 import { afterSettingsTransition, createFocusedTransitionReady, type TransitionGate } from "@/lib/settingsTransition";
 import {
   REVIEW_NUDGE_MINUTES,
@@ -136,6 +136,7 @@ import {
   shouldShowSettingsRefreshSpinner,
   settingsGeofenceKey
 } from "@/lib/settingsRefresh";
+import { readTodayBootstrapForSettings } from "@/lib/settingsSeed";
 import { clampSettingsScrollOffset, settingsScrollNeedsClamp } from "@/lib/settingsScroll";
 import { BlocksNavHeader, usePreviousScreenLabel } from "@/components/BlocksNavHeader";
 import { BlocksConfirmHost, useBlocksConfirm, type BlocksConfirmRequest } from "@/components/blocks/BlocksConfirmSheet";
@@ -368,6 +369,22 @@ export default function SettingsScreen() {
   const settingsSection = routeSettingsSection;
   const cachedSnapshot = readSettingsSnapshot();
   const [data, setData] = useState<MobileBootstrap | null>(cachedSnapshot?.data ?? null);
+  // First open of the session: Today's bootstrap for the same account shows the account card and
+  // goal numbers at once. Display only: `data` stays null (no stepper, place or location writes)
+  // until Settings' own refresh lands.
+  const [initialSeed, setTodaySeed] = useState(() => cachedSnapshot?.data ? null : readTodayBootstrapForSettings(getActiveMobileAccountSnapshot()));
+  // Dropped for good on any sign-out, session or account change while Settings is open, and
+  // re-checked on every render, so a departed account's details never stay on screen.
+  useEffect(() => {
+    if (!initialSeed) return;
+    const drop = () => setTodaySeed(null);
+    const unsubscribes = [subscribeMobileSignedOut(drop), subscribeAuthenticatedSession(drop), subscribeActiveMobileAccount(drop)];
+    // A change between the first render and this subscription.
+    if (readTodayBootstrapForSettings(getActiveMobileAccountSnapshot()) !== initialSeed) drop();
+    return () => unsubscribes.forEach((unsubscribe) => unsubscribe());
+  }, [initialSeed]);
+  const todaySeed = initialSeed && readTodayBootstrapForSettings(getActiveMobileAccountSnapshot()) === initialSeed ? initialSeed : null;
+  const shownUser = (data ?? todaySeed)?.user;
   const [queue, setQueue] = useState<QueuedEvent[]>(cachedSnapshot?.queue ?? []);
   const [lastSyncResult, setLastSyncResult] = useState<SyncQueueResult | null>(cachedSnapshot?.lastSyncResult ?? null);
   const [syncingQueue, setSyncingQueue] = useState(false);
@@ -898,7 +915,7 @@ export default function SettingsScreen() {
   const settingsTitle = settingsSectionTitle(settingsSection);
   const backLabel = usePreviousScreenLabel() ?? settingsBackLabel(settingsSection, blocksNavOrigin(params.from));
   const categoryCount = data?.categories.length ?? 0;
-  const workspaceLabel = data?.workspace?.name ?? "Default workspace";
+  const workspaceLabel = (data ?? todaySeed)?.workspace?.name ?? "Default workspace";
   const pinnedCategoryCount = (data?.categories ?? []).filter((category) => category.isPinned).length;
   // Settings › Your day: shown at once, saved to the account a moment after the last tap.
   const [goalDraft, setGoalDraft] = useState<TimeGoals | null>(null);
@@ -938,8 +955,8 @@ export default function SettingsScreen() {
   })).current;
   // Steps start from the stored minutes, as on web (a 7h30 goal steps to 8h or 7h); shown rounded.
   const goalMinutes = {
-    daily: goalDraft ? goalDraft.daily * 60 : data?.user.dailyGoalMinutes ?? 480,
-    weekly: goalDraft ? goalDraft.weekly * 60 : data?.user.weeklyGoalMinutes ?? 2400
+    daily: goalDraft ? goalDraft.daily * 60 : shownUser?.dailyGoalMinutes ?? 480,
+    weekly: goalDraft ? goalDraft.weekly * 60 : shownUser?.weeklyGoalMinutes ?? 2400
   };
   const dailyGoalHours = Math.round(goalMinutes.daily / 60);
   const weeklyGoalHours = Math.round(goalMinutes.weekly / 60);
@@ -1940,8 +1957,8 @@ export default function SettingsScreen() {
           {settingsSection === "index" ? (
             <View style={styles.settingsBlocksStack}>
               <SettingsAccountCard
-                email={data?.user.email ?? ""}
-                name={data?.user.name ?? ""}
+                email={shownUser?.email ?? ""}
+                name={shownUser?.name ?? ""}
                 onPress={() => openSettingsSection("profile")}
                 theme={theme}
                 workspace={workspaceLabel}
@@ -2336,10 +2353,10 @@ export default function SettingsScreen() {
               >
                 <SettingsBlockRow
                   divider={false}
-                  subtitle={data?.user.email ?? null}
+                  subtitle={shownUser?.email ?? null}
                   testID="settings-account-user"
                   theme={theme}
-                  title={data?.user.name || data?.user.email || "Your account"}
+                  title={shownUser?.name || shownUser?.email || "Your account"}
                 />
                 <SettingsBlockRow
                   // A row without onPress shows no value column, so the name is the subtitle.

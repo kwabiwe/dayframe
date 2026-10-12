@@ -17,7 +17,17 @@ function effectStarting(marker: string) {
 describe("Settings opens instantly (I1)", () => {
   it("starts from the cached snapshot, never an awaited fetch, in first render", () => {
     expect(body).toContain("useState<MobileBootstrap | null>(cachedSnapshot?.data ?? null)");
-    const beforeFirstEffect = body.slice(0, body.indexOf("useEffect("));
+    // The session's first open shows Today's bootstrap for the same account, display only: never
+    // `data`, so steppers, places and location writes wait for Settings' own refresh (Codex r1);
+    // dropped on any sign-out, session or account change while open, and re-checked each render (r2).
+    expect(body).toContain("const [initialSeed, setTodaySeed] = useState(() => cachedSnapshot?.data ? null : readTodayBootstrapForSettings(getActiveMobileAccountSnapshot()));");
+    expect(body).toContain("[subscribeMobileSignedOut(drop), subscribeAuthenticatedSession(drop), subscribeActiveMobileAccount(drop)]");
+    expect(body).toContain("const todaySeed = initialSeed && readTodayBootstrapForSettings(getActiveMobileAccountSnapshot()) === initialSeed ? initialSeed : null;");
+    expect(body.match(/todaySeed\b/g)).toHaveLength(3);
+    expect(body).not.toMatch(/setData(AndCache)?\((initialSeed|todaySeed)/);
+    // Up to the first effect after the seed's subscription effect.
+    const seedEffect = body.indexOf("useEffect(", body.indexOf("const [initialSeed"));
+    const beforeFirstEffect = body.slice(0, body.indexOf("useEffect(", seedEffect + 1));
     expect(beforeFirstEffect).not.toMatch(/await\s/);
   });
 
