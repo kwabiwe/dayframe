@@ -3,9 +3,14 @@ import { dateTimeLocal, dateTimeLocalInputToIso } from "@/lib/format";
 import {
   calculateCalendarClickCreateSlot,
   calculateCalendarDraftAnchorGeometry,
+  calendarCreateLimitMinutes,
+  calendarCreateMinuteIsFuture,
   calendarCreatePointerSequenceAccepted,
+  calendarDragCreateRange,
+  calendarDragCreateSlot,
   calendarPointHitsSemanticBlock,
   calendarPointerMatchesConsumed,
+  calendarPointerMinutesAt,
   isEligibleCalendarCreatePointer,
   type CalendarCreatePointerSequence
 } from "./calendar-click-create";
@@ -223,6 +228,58 @@ describe("Calendar click-to-create pointer intent", () => {
     expect(calendarPointHitsSemanticBlock({ blocks, clientX: 60, clientY: 129.5, dayBodyTop: 0 })).toBe(true);
     expect(calendarPointHitsSemanticBlock({ blocks, clientX: 60, clientY: 130, dayBodyTop: 0 })).toBe(false);
     expect(calendarPointHitsSemanticBlock({ blocks, clientX: 140, clientY: 129.5, dayBodyTop: 0 })).toBe(false);
+  });
+});
+
+describe("Calendar create stops at now (owner decision 12 Oct 2026, option B)", () => {
+  const today = new Date(2026, 9, 12, 12);
+  const now = new Date(2026, 9, 12, 10, 37, 40);
+
+  it("allows a whole past day, today up to now (floored to the minute) and none of a future day", () => {
+    expect(calendarCreateLimitMinutes(new Date(2026, 9, 11, 23), now)).toBe(24 * 60);
+    expect(calendarCreateLimitMinutes(today, now)).toBe(10 * 60 + 37);
+    expect(calendarCreateLimitMinutes(new Date(2026, 9, 13, 0), now)).toBe(0);
+  });
+
+  it("treats a point at or after now as future time, and never any point of a past day", () => {
+    expect(calendarCreateMinuteIsFuture({ day: today, minutes: 10 * 60 + 36.9, now })).toBe(false);
+    expect(calendarCreateMinuteIsFuture({ day: today, minutes: 10 * 60 + 37, now })).toBe(true);
+    expect(calendarCreateMinuteIsFuture({ day: today, minutes: 23 * 60, now })).toBe(true);
+    expect(calendarCreateMinuteIsFuture({ day: new Date(2026, 9, 13, 12), minutes: 0, now })).toBe(true);
+    expect(calendarCreateMinuteIsFuture({ day: new Date(2026, 9, 11, 12), minutes: 24 * 60, now })).toBe(false);
+  });
+
+  it("reads the unsnapped minute under the pointer, clamped to the axis", () => {
+    const axis = { dayBodyTop: 100, endHour: 24, rowHeight: 64, startHour: 0 };
+    expect(calendarPointerMinutesAt({ ...axis, clientY: 100 + (10 * 60 + 37.5) / 60 * 64 })).toBeCloseTo(10 * 60 + 37.5);
+    expect(calendarPointerMinutesAt({ ...axis, clientY: 0 })).toBe(0);
+    expect(calendarPointerMinutesAt({ ...axis, clientY: 100_000 })).toBe(24 * 60);
+  });
+
+  it("holds a drag range at the limit in either direction and keeps the 5-minute steps below it", () => {
+    const axis = { endHour: 24, startHour: 0 };
+    // No limit: unchanged behaviour.
+    expect(calendarDragCreateRange({ ...axis, anchorMinutes: 600, currentMinutes: 700 }))
+      .toEqual({ startMinutes: 600, endMinutes: 700 });
+    // Past → future: the end stops at now.
+    expect(calendarDragCreateRange({ ...axis, anchorMinutes: 600, currentMinutes: 900, limitMinutes: 637 }))
+      .toEqual({ startMinutes: 600, endMinutes: 637 });
+    // Dragging upward from a press that rounded past now.
+    expect(calendarDragCreateRange({ ...axis, anchorMinutes: 640, currentMinutes: 600, limitMinutes: 637 }))
+      .toEqual({ startMinutes: 600, endMinutes: 637 });
+    // Shorter than one step at the limit: a 5-minute range ending at now.
+    expect(calendarDragCreateRange({ ...axis, anchorMinutes: 635, currentMinutes: 700, limitMinutes: 637 }))
+      .toEqual({ startMinutes: 632, endMinutes: 637 });
+    expect(calendarDragCreateRange({ ...axis, anchorMinutes: 0, currentMinutes: 30, limitMinutes: 2 }))
+      .toEqual({ startMinutes: 0, endMinutes: 2 });
+  });
+
+  it("creates a dragged range ending where the ghost stops, and nothing that starts at or after now", () => {
+    const held = calendarDragCreateSlot({ day: today, endMinutes: 10 * 60 + 37, now, startMinutes: 10 * 60 });
+    expect(held?.startedAt).toBe(new Date(2026, 9, 12, 10, 0).toISOString());
+    expect(held?.stoppedAt).toBe(new Date(2026, 9, 12, 10, 37).toISOString());
+    expect(calendarDragCreateSlot({ day: today, endMinutes: 11 * 60, now, startMinutes: 10 * 60 + 37 })).toBeNull();
+    expect(calendarDragCreateSlot({ day: new Date(2026, 9, 13, 12), endMinutes: 600, now, startMinutes: 540 })).toBeNull();
   });
 });
 

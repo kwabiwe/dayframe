@@ -136,7 +136,7 @@ describe.each([
     expect(editedFinish.durationSeconds).toBeGreaterThan(0);
   });
 
-  it("preserves ordinary and midnight wall-clock output while rejecting future Finish", () => {
+  it("preserves ordinary and midnight wall-clock output while holding a future Finish at now", () => {
     process.env.TZ = timezone;
     const ordinaryDay = new Date(2026, 1, 10, 12);
     const ordinary = slotAt(ordinaryDay, 10 * 60 + 7, new Date(2026, 1, 10, 18));
@@ -157,8 +157,16 @@ describe.each([
     });
 
     const futureDay = new Date(2026, 1, 10, 12);
-    expect(slotAt(futureDay, 10 * 60, new Date(2026, 1, 10, 10, 20))).toBeNull();
+    // Owner decision 12 Oct 2026 (option B): a slot running past now finishes at now (floored to
+    // the minute) instead of silently creating nothing; a slot that can't start before now is null.
+    const heldAtNow = slotAt(futureDay, 10 * 60, new Date(2026, 1, 10, 10, 20, 40));
+    expect(dateTimeLocal(heldAtNow?.startedAt).slice(11)).toBe("10:00");
+    expect(dateTimeLocal(heldAtNow?.stoppedAt).slice(11)).toBe("10:20");
+    expect(durationSeconds(heldAtNow)).toBe(1_200);
+    expect(heldAtNow?.height).toBeCloseTo((20 / 60) * 64);
     expect(slotAt(futureDay, 10 * 60, new Date(2026, 1, 10, 10, 31))).not.toBeNull();
+    expect(slotAt(futureDay, 10 * 60, new Date(2026, 1, 10, 10, 0, 50))).toBeNull();
+    expect(slotAt(futureDay, 10 * 60 + 20, new Date(2026, 1, 10, 10, 0))).toBeNull();
   });
 });
 

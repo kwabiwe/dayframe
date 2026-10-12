@@ -775,3 +775,248 @@ describe("Calendar drag-to-create and 5-minute resize (W13)", () => {
     expect(fetchMock.clientFetch).not.toHaveBeenCalled();
   });
 });
+
+describe("Calendar create in future time (owner decision 12 Oct 2026, option B)", () => {
+  // Today is Sunday 2 August 2026, 12:00 local; Monday 3 August is entirely in the future.
+  const now = new Date(2026, 7, 2, 12, 0, 0, 0);
+  const notice = "Blocks can't start in the future";
+
+  beforeEach(() => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(now);
+    runtime.createManualEntry.mockReset().mockResolvedValue({ ok: true });
+    anchorIsOffscreen = false;
+    dayBodyTop = 0;
+    pointTarget = null;
+    installDomGeometry();
+  });
+
+  afterEach(() => {
+    window.dispatchEvent(new PointerEvent("pointercancel", { pointerId: 0 }));
+    cleanup();
+    outsidePointerListeners.clear();
+    document.body.innerHTML = "";
+    vi.useRealTimers();
+    vi.restoreAllMocks();
+  });
+
+  const y = (minute: number) => (minute / 60) * 64;
+  const pointer = (pointerId: number, clientY: number) => ({
+    button: 0, clientX: 300, clientY, isPrimary: true, pointerId, pointerType: "mouse"
+  });
+
+  function weekProps(undoToastVisible: boolean): Parameters<typeof CalendarReview>[0] {
+    return {
+      calendarHoursMode: "fullDay",
+      capturedNow: now,
+      categories: [],
+      entries: [],
+      onDeleteEntries: vi.fn(),
+      onScroll: vi.fn(),
+      onSynced: vi.fn().mockResolvedValue(undefined),
+      places: [],
+      scrollContainerRef: vi.fn(),
+      tags: [],
+      undoToastVisible,
+      visibleDays: [new Date(2026, 7, 2, 12), new Date(2026, 7, 3, 12)]
+    };
+  }
+
+  function renderWeek({ undoToastVisible = false }: { undoToastVisible?: boolean } = {}) {
+    const { rerender } = render(createElement(CalendarReview, weekProps(undoToastVisible)));
+    const setUndoToastVisible = (visible: boolean) => rerender(createElement(CalendarReview, weekProps(visible)));
+    const [today, tomorrow] = Array.from(document.querySelectorAll<HTMLElement>("[data-calendar-day-body]"));
+    return { setUndoToastVisible, today, tomorrow };
+  }
+
+  function toast() {
+    return document.querySelector<HTMLElement>(".df-toast");
+  }
+
+  it("marks future time for the not-allowed cursor without a render per move", () => {
+    const { today, tomorrow } = renderWeek();
+    expect(tomorrow.classList.contains("is-future")).toBe(true);
+    expect(today.classList.contains("is-future")).toBe(false);
+    const zone = today.querySelector<HTMLElement>("[data-calendar-future-zone]");
+    // The zone starts exactly at the now line and runs to the end of the day.
+    expect(zone?.style.top).toBe(`${y(12 * 60)}px`);
+    expect(today.querySelector<HTMLElement>(".calendar-now-line")?.style.top).toBe(`${y(12 * 60)}px`);
+    expect(tomorrow.querySelector("[data-calendar-future-zone]")).toBeNull();
+  });
+
+  it("draws no ghost for a drag that starts in the future, creates nothing and says why", async () => {
+    const { today, tomorrow } = renderWeek();
+    const zone = today.querySelector<HTMLElement>("[data-calendar-future-zone]") as HTMLElement;
+    pointTarget = zone;
+    await act(async () => {
+      fireEvent.pointerDown(zone, pointer(51, y(13 * 60)));
+      fireEvent.pointerMove(today, pointer(51, y(14 * 60)));
+    });
+    expect(document.querySelector("[data-calendar-create-ghost]")).toBeNull();
+    expect(today.classList.contains("is-future-press")).toBe(true);
+    // Dragging back up into the past still draws nothing: the press decided.
+    await act(async () => {
+      fireEvent.pointerMove(today, pointer(51, y(10 * 60)));
+    });
+    expect(document.querySelector("[data-calendar-create-ghost]")).toBeNull();
+    expect(toast()).toBeNull();
+    await act(async () => {
+      fireEvent.pointerUp(today, pointer(51, y(10 * 60)));
+    });
+    await flushDocumentListeners();
+    expect(today.classList.contains("is-future-press")).toBe(false);
+    expect(screen.queryByTestId("calendar-compact-editor")).toBeNull();
+    expect(runtime.createManualEntry).not.toHaveBeenCalled();
+    const status = toast();
+    expect(status?.textContent).toBe(notice);
+    expect(status?.getAttribute("role")).toBe("status");
+    expect(status?.getAttribute("aria-live")).toBe("polite");
+
+    // A drag on a later day does the same.
+    pointTarget = tomorrow;
+    await act(async () => {
+      fireEvent.pointerDown(tomorrow, pointer(52, y(9 * 60)));
+      fireEvent.pointerMove(tomorrow, pointer(52, y(10 * 60)));
+    });
+    expect(document.querySelector("[data-calendar-create-ghost]")).toBeNull();
+    await act(async () => {
+      fireEvent.pointerUp(tomorrow, pointer(52, y(10 * 60)));
+    });
+    await flushDocumentListeners();
+    expect(screen.queryByTestId("calendar-compact-editor")).toBeNull();
+    expect(toast()?.textContent).toBe(notice);
+
+    // The notice leaves by itself shortly after.
+    await waitFor(() => expect(toast()).toBeNull(), { timeout: 5_000 });
+  }, 15_000);
+
+  it("stops the ghost of a past-to-future drag at now and creates a block ending at now", async () => {
+    const { today } = renderWeek();
+    pointTarget = today;
+    await act(async () => {
+      fireEvent.pointerDown(today, pointer(53, y(11 * 60)));
+      fireEvent.pointerMove(today, pointer(53, y(14 * 60 + 10)));
+    });
+    const ghost = document.querySelector<HTMLElement>("[data-calendar-create-ghost]");
+    expect(ghost?.textContent).toMatch(/^11:00–12:00 · /);
+    expect(Number.parseFloat(ghost?.style.top ?? "") + Number.parseFloat(ghost?.style.height ?? "") + 2)
+      .toBe(y(12 * 60));
+    await act(async () => {
+      fireEvent.pointerUp(today, pointer(53, y(14 * 60 + 10)));
+    });
+    expect(document.querySelector("[data-calendar-create-ghost]")).toBeNull();
+    await screen.findByTestId("calendar-compact-editor");
+    expect(toast()).toBeNull();
+    await flushDocumentListeners();
+    await userEvent.click(screen.getByRole("button", { name: "Add block" }));
+    await waitFor(() => expect(runtime.createManualEntry).toHaveBeenCalledOnce());
+    expect(runtime.createManualEntry).toHaveBeenCalledWith(expect.objectContaining({
+      startedAt: new Date(2026, 7, 2, 11, 0).toISOString(),
+      stoppedAt: new Date(2026, 7, 2, 12, 0).toISOString()
+    }));
+  });
+
+  it("keeps an ordinary past drag working on today", async () => {
+    const { today } = renderWeek();
+    pointTarget = today;
+    await act(async () => {
+      fireEvent.pointerDown(today, pointer(54, y(9 * 60)));
+      fireEvent.pointerMove(today, pointer(54, y(9 * 60 + 44)));
+    });
+    expect(document.querySelector("[data-calendar-create-ghost]")?.textContent).toMatch(/^09:00–09:45 · /);
+    await act(async () => {
+      fireEvent.pointerUp(today, pointer(54, y(9 * 60 + 44)));
+    });
+    await screen.findByTestId("calendar-compact-editor");
+    await flushDocumentListeners();
+    await userEvent.click(screen.getByRole("button", { name: "Add block" }));
+    await waitFor(() => expect(runtime.createManualEntry).toHaveBeenCalledOnce());
+    expect(runtime.createManualEntry).toHaveBeenCalledWith(expect.objectContaining({
+      startedAt: new Date(2026, 7, 2, 9, 0).toISOString(),
+      stoppedAt: new Date(2026, 7, 2, 9, 45).toISOString()
+    }));
+    expect(toast()).toBeNull();
+  });
+
+  it("shows the notice for a click in future time, and holds a click just before now at now", async () => {
+    const { today } = renderWeek();
+    const zone = today.querySelector<HTMLElement>("[data-calendar-future-zone]") as HTMLElement;
+    pointTarget = zone;
+    await act(async () => {
+      fireEvent.pointerDown(zone, pointer(55, y(15 * 60)));
+      fireEvent.pointerUp(zone, pointer(55, y(15 * 60)));
+    });
+    await flushDocumentListeners();
+    expect(screen.queryByTestId("calendar-compact-editor")).toBeNull();
+    expect(toast()?.textContent).toBe(notice);
+
+    // 11:50 floors to 11:45; its 30-minute slot would end in the future, so it finishes at now.
+    pointTarget = today;
+    await act(async () => {
+      fireEvent.pointerDown(today, pointer(56, y(11 * 60 + 50)));
+      fireEvent.pointerUp(today, pointer(56, y(11 * 60 + 50)));
+    });
+    await screen.findByTestId("calendar-compact-editor");
+    await flushDocumentListeners();
+    await userEvent.click(screen.getByRole("button", { name: "Add block" }));
+    await waitFor(() => expect(runtime.createManualEntry).toHaveBeenCalledOnce());
+    expect(runtime.createManualEntry).toHaveBeenCalledWith(expect.objectContaining({
+      startedAt: new Date(2026, 7, 2, 11, 45).toISOString(),
+      stoppedAt: new Date(2026, 7, 2, 12, 0).toISOString()
+    }));
+  });
+
+  it("cancels a future press quietly on Escape or pointer cancel", async () => {
+    const { tomorrow } = renderWeek();
+    pointTarget = tomorrow;
+    await act(async () => {
+      fireEvent.pointerDown(tomorrow, pointer(57, y(9 * 60)));
+      fireEvent.pointerMove(tomorrow, pointer(57, y(10 * 60)));
+    });
+    expect(tomorrow.classList.contains("is-future-press")).toBe(true);
+    await act(async () => {
+      fireEvent.keyDown(window, { key: "Escape" });
+    });
+    expect(tomorrow.classList.contains("is-future-press")).toBe(false);
+    await act(async () => {
+      fireEvent.pointerUp(tomorrow, pointer(57, y(10 * 60)));
+    });
+    await act(async () => {
+      fireEvent.pointerDown(tomorrow, pointer(58, y(9 * 60)));
+      fireEvent.pointerCancel(tomorrow, pointer(58, y(9 * 60)));
+      fireEvent.pointerUp(tomorrow, pointer(58, y(9 * 60)));
+    });
+    await flushDocumentListeners();
+    expect(toast()).toBeNull();
+    expect(screen.queryByTestId("calendar-compact-editor")).toBeNull();
+  });
+
+  it("only announces the notice while the Delete Undo toast holds the place", async () => {
+    const { tomorrow } = renderWeek({ undoToastVisible: true });
+    pointTarget = tomorrow;
+    await act(async () => {
+      fireEvent.pointerDown(tomorrow, pointer(59, y(9 * 60)));
+      fireEvent.pointerUp(tomorrow, pointer(59, y(9 * 60)));
+    });
+    await flushDocumentListeners();
+    expect(toast()).toBeNull();
+    const announcer = document.querySelector<HTMLElement>("p.sr-only[role='status']");
+    expect(announcer?.getAttribute("aria-live")).toBe("polite");
+    expect(announcer?.textContent).toBe(notice);
+  });
+
+  it("gives the place to a delete's Undo toast and never pops the notice back afterwards", async () => {
+    const { setUndoToastVisible, tomorrow } = renderWeek();
+    pointTarget = tomorrow;
+    await act(async () => {
+      fireEvent.pointerDown(tomorrow, pointer(60, y(9 * 60)));
+      fireEvent.pointerUp(tomorrow, pointer(60, y(9 * 60)));
+    });
+    expect(toast()?.textContent).toBe(notice);
+    await act(async () => setUndoToastVisible(true));
+    expect(toast()).toBeNull();
+    await act(async () => setUndoToastVisible(false));
+    expect(toast()).toBeNull();
+    expect(document.querySelector<HTMLElement>("p.sr-only[role='status']")?.textContent).toBe("");
+  });
+});

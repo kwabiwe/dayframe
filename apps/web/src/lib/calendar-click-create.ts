@@ -103,15 +103,17 @@ export function calculateCalendarClickCreateSlot({
   if (!startedAt) return null;
 
   const startedAtMs = new Date(startedAt).getTime();
-  const stoppedAtMs = startedAtMs + defaultDurationMinutes * 60_000;
-  if (!Number.isFinite(startedAtMs) || !Number.isFinite(stoppedAtMs)) return null;
-  const nowMs = now.getTime();
-  if (startedAtMs > nowMs || stoppedAtMs > nowMs) return null;
+  const proposedStopMs = startedAtMs + defaultDurationMinutes * 60_000;
+  if (!Number.isFinite(startedAtMs) || !Number.isFinite(proposedStopMs)) return null;
+  // Blocks never start in the future; a slot that would run past now is held at now (floored to
+  // the minute, as the drag ghost is), so a click just before the now line still creates.
+  const stoppedAtMs = Math.min(proposedStopMs, floorToMinuteMs(now.getTime()));
+  if (stoppedAtMs - startedAtMs < 60_000) return null;
   const stoppedAt = new Date(stoppedAtMs).toISOString();
   const stoppedAtDate = new Date(stoppedAt);
   const continuesIntoNextDay = formatLocalDate(stoppedAtDate) !== formatLocalDate(day);
   const visibleDurationMinutes = Math.min(
-    defaultDurationMinutes,
+    (stoppedAtMs - startedAtMs) / 60_000,
     endBoundaryMinutes - startMinutes
   );
 
@@ -314,6 +316,54 @@ function clamp(value: number, minimum: number, maximum: number) {
   return Math.min(maximum, Math.max(minimum, value));
 }
 
+function floorToMinuteMs(ms: number) {
+  return Math.floor(ms / 60_000) * 60_000;
+}
+
+/**
+ * The latest local minute of `day` a new block may reach (owner decision, 12 Oct 2026: Calendar
+ * creates past time only). A past day allows all of it, today stops at now (floored to the
+ * minute) and a future day allows none.
+ */
+export function calendarCreateLimitMinutes(day: Date, now: Date) {
+  const dayKey = formatLocalDate(day);
+  const nowKey = formatLocalDate(now);
+  if (dayKey < nowKey) return 24 * 60;
+  if (dayKey > nowKey) return 0;
+  return now.getHours() * 60 + now.getMinutes();
+}
+
+/** Whether a point on `day`'s minute axis lies in time a block can't start in (at or after now). */
+export function calendarCreateMinuteIsFuture({
+  day,
+  minutes,
+  now
+}: {
+  day: Date;
+  minutes: number;
+  now: Date;
+}) {
+  const limit = calendarCreateLimitMinutes(day, now);
+  return limit < 24 * 60 && minutes >= limit;
+}
+
+/** Unsnapped minute-of-day under a pointer, clamped to the visible axis. */
+export function calendarPointerMinutesAt({
+  clientY,
+  dayBodyTop,
+  endHour,
+  rowHeight,
+  startHour
+}: {
+  clientY: number;
+  dayBodyTop: number;
+  endHour: number;
+  rowHeight: number;
+  startHour: number;
+}) {
+  return clamp(startHour * 60 + ((clientY - dayBodyTop) / rowHeight) * 60, startHour * 60, endHour * 60);
+}
+
 export const calendarDragSnapMinutes = 5;
 
 /** Snapped (5-minute) minute-of-day under a pointer, clamped to the visible axis. */
@@ -337,23 +387,29 @@ export function calendarDragMinutesAt({
 
 /**
  * The range a drag on empty Calendar time describes: from the press to the pointer, in either
- * direction, never shorter than one 5-minute step and never past the visible axis.
+ * direction, never shorter than one 5-minute step and never past the visible axis. `limitMinutes`
+ * (see `calendarCreateLimitMinutes`) holds the range at now, so the ghost never runs into the
+ * future and always matches what release creates.
  */
 export function calendarDragCreateRange({
   anchorMinutes,
   currentMinutes,
   endHour,
+  limitMinutes = Number.POSITIVE_INFINITY,
   startHour
 }: {
   anchorMinutes: number;
   currentMinutes: number;
   endHour: number;
+  limitMinutes?: number;
   startHour: number;
 }) {
   const lower = startHour * 60;
-  const upper = endHour * 60;
-  let startMinutes = Math.min(anchorMinutes, currentMinutes);
-  let endMinutes = Math.max(anchorMinutes, currentMinutes);
+  const upper = Math.max(lower, Math.min(endHour * 60, limitMinutes));
+  const anchor = clamp(anchorMinutes, lower, upper);
+  const current = clamp(currentMinutes, lower, upper);
+  let startMinutes = Math.min(anchor, current);
+  let endMinutes = Math.max(anchor, current);
   if (endMinutes - startMinutes < calendarDragSnapMinutes) {
     endMinutes = startMinutes + calendarDragSnapMinutes;
     if (endMinutes > upper) {
@@ -377,7 +433,10 @@ export function calendarDragRangeSeconds(day: Date, startMinutes: number, endMin
   return Math.max(0, Math.round((new Date(endIso).getTime() - new Date(startedAt).getTime()) / 1_000));
 }
 
-/** ISO bounds for a dragged range; null when it starts in the future. The end is held at now. */
+/**
+ * ISO bounds for a dragged range; null when it starts in the future. The end is held at now
+ * (floored to the minute, where the ghost stops).
+ */
 export function calendarDragCreateSlot({
   day,
   endMinutes,
@@ -398,7 +457,7 @@ export function calendarDragCreateSlot({
   const startedAtMs = new Date(startedAt).getTime();
   const nowMs = now.getTime();
   if (startedAtMs >= nowMs) return null;
-  const endMs = Math.min(stoppedAtMs, nowMs);
+  const endMs = Math.min(stoppedAtMs, floorToMinuteMs(nowMs));
   if (endMs - startedAtMs < 60_000) return null;
   return { startedAt, stoppedAt: new Date(endMs).toISOString() };
 }

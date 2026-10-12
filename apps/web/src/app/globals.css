@@ -10973,6 +10973,25 @@ dialog.ui-dialog.df-palette {
 }
 
 /*
+ * Owner decision 12 Oct 2026 (option B): blocks can't start in the future. A later day, today
+ * below the now line (an empty, transparent zone under every block and suggestion) and a press
+ * that began there show the not-allowed cursor. Pure CSS, so hovering never re-renders.
+ */
+.calendar-day-body.is-future,
+.calendar-day-body.is-future-press,
+.calendar-future-zone {
+  cursor: not-allowed;
+}
+
+.calendar-future-zone {
+  position: absolute;
+  z-index: 0;
+  right: 0;
+  bottom: 0;
+  left: 0;
+}
+
+/*
  * Layers in a day column: entries (lane z-index 2 + lane), then Review suggestions in their lane,
  * then the now line; a hovered, selected or resizing entry rises above the suggestions.
  */
