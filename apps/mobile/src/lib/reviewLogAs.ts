@@ -2,6 +2,8 @@
 // edit_and_confirm only when the user really changed something; otherwise the plain confirm/accept
 // keeps the item's own source and confidence (an edit is stored as a manual entry).
 
+import { rowTitle } from "./todayBlockRows";
+
 export type ReviewLogAsEdit = {
   categoryId: string | null;
   description?: string;
@@ -63,4 +65,33 @@ export function reviewLogAsEditorName(input: {
   return input.typedName?.trim() ||
     input.builtDescription?.trim() ||
     (input.isLocationV2 ? null : input.defaultName.trim() || null);
+}
+
+/**
+ * The name the Review deck's toast, its Undo label and the announcements use for a thrown card
+ * (staging feedback C2, Codex r1). A logged card is named the way the saved block will be listed
+ * (`rowTitle`: its description, else its activity), from what this decision actually sends:
+ * - `edit` is the `reviewLogAsEdit` result the hold will send (null for a plain confirm/accept);
+ * - a Location V2 commute is stored with only a typed name, else no description, so an
+ *   activity-only change to "Driving" is listed (and toasted) as "Driving", not "Commute";
+ * - every other moment keeps the sent name, else the suggestion's own title (what the server
+ *   stores for a plain confirm), e.g. "School run".
+ * A skipped card names the card's heading ("Skipped Commute detected"), whatever was typed.
+ */
+export function reviewDeckDecisionName(input: {
+  logged: boolean;
+  /** The card's heading ("Commute detected", "Outdoor Walk"). */
+  cardTitle: string;
+  edit: ReviewLogAsEdit | null;
+  /** A Location V2 journey (not time away): the server keeps only a typed name. */
+  isLocationV2Commute: boolean;
+  /** The suggestion's own title, which the server stores when no name is sent. */
+  suggestionTitle: string | null | undefined;
+  /** The activity the block is logged with (the card's live "Log as" activity). */
+  activityName: string | null | undefined;
+}) {
+  if (!input.logged) return input.cardTitle;
+  const sent = input.edit?.description?.trim() || null;
+  const description = input.isLocationV2Commute ? sent : sent || input.suggestionTitle?.trim() || null;
+  return rowTitle({ description, categoryName: input.activityName?.trim() || null });
 }

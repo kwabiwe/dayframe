@@ -156,6 +156,8 @@ Log in offers "Forgot password?" in provider mode. `POST /api/auth/password-rese
 
 Hosted prerequisite (owner, Supabase dashboard, per project): Authentication › URL Configuration › Redirect URLs must allow `https://dayframe-web.vercel.app/reset-password` (production) and `https://dayframe-staging.vercel.app/reset-password` (staging; add the Preview pattern if Previews are tested). Supabase sends any other redirect to the project's Site URL instead. The default "Reset Password" email template works as-is (implicit flow; the link carries the session in its fragment). Until the URLs are allowed, the email arrives but its link lands on the Site URL rather than the reset page.
 
+Auth email delivery (owner decision, 12 Oct 2026: deferred). Both projects still send auth email (password reset, confirmation) through Supabase's built-in mailer (Supabase's own sender address). It only delivers to members of the Supabase organisation's team — the Dayframe signup allowlist does not change that, so a friend on the allowlist gets no reset or confirmation email until custom SMTP is set up — and it is rate-limited (a repeat request within the cooldown returns `over_email_send_rate_limit`, which the app hides behind its uniform reply) and its mail often lands in spam, so a reset can look as if it never arrived even when the auth logs show `mail.send` (staging, 12 Oct). The owner plans to move Dayframe to its own domain and may later self-host Supabase; custom SMTP from that domain (with branded templates) is set up then, in the Supabase Auth dashboard by the owner. Until then, check spam and the project's auth logs before treating a missing reset email as a code fault.
+
 ## Personal Beta Defaults
 
 - Single-user/friends testing.

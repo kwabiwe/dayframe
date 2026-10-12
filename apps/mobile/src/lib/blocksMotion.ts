@@ -265,11 +265,39 @@ export function useBlockPop({ entryId, request }: { entryId: string; request: La
 
 /** The first-paint drop-in (Blocks prototype): tiles fall 18 points from 92 % with a short stagger. */
 export const DROP_IN = { distance: 18, fromScale: 0.92, firstDelayMs: 80, staggerMs: 45, fadeMs: 160 } as const;
+/** After its delay, a drop-in is forced to rest this long later whether or not its frames ran. */
+export const DROP_IN_SETTLE_MS = 900;
 
 /**
  * Drops one tile into place once, staggered by its order. `play` is decided by the caller when the
  * tile mounts (first paint of the process only), so refreshes, hydration and remounts never replay it.
  */
+/**
+ * A tile that arrives after first paint (a newly pinned activity) fades in over the control
+ * duration (90 ms under Reduce Motion), owned here rather than by a Reanimated entering animation,
+ * so the same safety net applies: it is forced to full opacity shortly after, frames or not.
+ */
+export function useTileFadeIn({ play, reduceMotion }: { play: boolean; reduceMotion: boolean }) {
+  const playing = useRef(play).current;
+  const opacity = useSharedValue(playing ? 0 : 1);
+  useEffect(() => {
+    if (!playing) return undefined;
+    const duration = reduceMotion ? 90 : MOBILE_MOTION.control;
+    opacity.value = withTiming(1, { duration, reduceMotion: ReduceMotion.Never });
+    const settle = () => {
+      cancelAnimation(opacity);
+      opacity.value = 1;
+    };
+    const fallback = setTimeout(settle, duration + DROP_IN_SETTLE_MS);
+    return () => {
+      clearTimeout(fallback);
+      settle();
+    };
+    // Plays once per mount.
+  }, []);
+  return useAnimatedStyle(() => ({ opacity: opacity.value }));
+}
+
 export function useDropIn({ index, play }: { index: number; play: boolean }) {
   const playing = useRef(play).current;
   const translateY = useSharedValue(playing ? DROP_IN.distance : 0);
@@ -283,14 +311,22 @@ export function useDropIn({ index, play }: { index: number; play: boolean }) {
     translateY.value = withDelay(delay, withSpring(0, spring));
     scale.value = withDelay(delay, withSpring(1, spring));
     opacity.value = withDelay(delay, withTiming(1, { duration: DROP_IN.fadeMs, reduceMotion: ReduceMotion.Never }));
-    return () => {
+    // An interrupted drop-in settles at rest rather than leaving a tile hidden.
+    const settle = () => {
       cancelAnimation(translateY);
       cancelAnimation(scale);
       cancelAnimation(opacity);
-      // An interrupted drop-in settles at rest rather than leaving a tile hidden.
       translateY.value = 0;
       scale.value = 1;
       opacity.value = 1;
+    };
+    // Safety net (Trello 210, the "Switch to" tiles once stayed invisible): if the frames never
+    // run — the app was drawn in the background or the phone dropped frames — the tile is at rest
+    // shortly after the drop-in should have ended, so it can never stay hidden.
+    const fallback = setTimeout(settle, delay + DROP_IN_SETTLE_MS);
+    return () => {
+      clearTimeout(fallback);
+      settle();
     };
     // Plays once per mount; the index is fixed at that moment.
   }, []);

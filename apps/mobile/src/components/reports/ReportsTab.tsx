@@ -28,7 +28,9 @@ import {
   weekGoalDays,
 } from "../../lib/reportsBlocks";
 import { REPORT_TEXT_CAP, reportCompactNumericColumns } from "@/lib/reportsTypography";
-import { activityMarkerRadius, DAYFRAME_BLOCKS, paletteColorFor, type ReportSummary } from "@dayframe/shared";
+import { activityMarkerRadius, DAYFRAME_APP_ICONS, DAYFRAME_BLOCKS, paletteColorFor, type ReportSummary } from "@dayframe/shared";
+import { BlocksEmptyState } from "@/components/blocks/BlocksEmptyState";
+import { mobileFailureKind } from "@/lib/friendlyError";
 import type { MobileBootstrap } from "@/lib/api";
 import type { MobileStyles, MobileTheme } from "@/lib/mobileTheme";
 import { useResolvedReduceMotionPreference } from "@/lib/motion";
@@ -113,7 +115,9 @@ export function ReportsTab({
     key: string;
     summary: ReportSummary;
   } | null>(null);
-  const [failedKey, setFailedKey] = useState<string | null>(null);
+  // The range whose last read failed, and whether it failed for want of a connection. It stays
+  // through a retry (no loading line in between) and clears when a read lands.
+  const [failure, setFailure] = useState<{ key: string; offline: boolean } | null>(null);
   const [previousLoaded, setPreviousLoaded] = useState<{
     key: string;
     summary: ReportSummary;
@@ -186,6 +190,7 @@ export function ReportsTab({
         activeDatePresentation.current = null;
         setLoaded(null);
         setPreviousLoaded(null);
+        setFailure(null);
         setFocusedDayKey(null);
         setSelection({ mode: "all" });
         setFilterPresentation(null);
@@ -206,7 +211,6 @@ export function ReportsTab({
         return;
       }
       running = true;
-      setFailedKey(null);
       try {
         const result = await fetchReportSummary(
           range.request,
@@ -216,10 +220,11 @@ export function ReportsTab({
         if (!controller.signal.aborted && current === generation.current) {
           cache.current.put(requestKey, result);
           setLoaded({ key: requestKey, summary: result });
+          setFailure(null);
         }
-      } catch {
+      } catch (error) {
         if (!controller.signal.aborted && current === generation.current)
-          setFailedKey(requestKey);
+          setFailure({ key: requestKey, offline: mobileFailureKind(error) === "offline" });
       } finally {
         running = false;
         if (queued) {
@@ -289,6 +294,7 @@ export function ReportsTab({
       setDatePresentation(null);
     }
   }, [isFocused]);
+  const rangeFailure = failure?.key === requestKey ? failure : null;
   const report = useMemo(
     () =>
       summary
@@ -736,25 +742,31 @@ export function ReportsTab({
             theme={theme}
           />
         ) : null}
-        {!report ? (
+        {!report && rangeFailure ? (
+          // Staging feedback B1: the Blocks unavailable state (no cached report for this range).
+          <BlocksEmptyState
+            actionAccessibilityLabel="Try loading this report range again"
+            actionLabel="Try again"
+            actionTestID="reports-unavailable-retry"
+            glyph={rangeFailure.offline ? DAYFRAME_APP_ICONS.syncOffline : DAYFRAME_APP_ICONS.reports}
+            message={
+              rangeFailure.offline
+                ? "Connect to the internet to load this range."
+                : "Dayframe couldn't load this range. Try again in a moment."
+            }
+            onAction={() => setReload((value) => value + 1)}
+            testID="reports-unavailable"
+            theme={theme}
+            title={rangeFailure.offline ? "You're offline" : "Report didn't load"}
+          />
+        ) : !report ? (
           <View style={s.unavailable}>
             <Text
               accessibilityLiveRegion="polite"
               style={{ color: theme.textSecondary }}
             >
-              {failedKey === requestKey
-                ? "Connect to load this report range"
-                : "Loading report range…"}
+              Loading report range…
             </Text>
-            {failedKey === requestKey ? (
-              <Pressable
-                accessibilityRole="button"
-                onPress={() => setReload((value) => value + 1)}
-                style={s.retry}
-              >
-                <Text style={{ color: theme.textPrimary }}>Retry</Text>
-              </Pressable>
-            ) : null}
           </View>
         ) : (
           <Pressable
@@ -763,9 +775,11 @@ export function ReportsTab({
             style={s.outsideDismissSurface}
             testID="report-tooltip-outside-summary"
           >
-            {failedKey === requestKey ? (
+            {rangeFailure ? (
               <Text style={{ color: theme.textSecondary }}>
-                Saved report for this range. Connect to refresh.
+                {rangeFailure.offline
+                  ? "Saved report for this range. Connect to refresh."
+                  : "Saved report for this range. It couldn't refresh just now."}
               </Text>
             ) : null}
             <ReportDonutCard
@@ -880,5 +894,4 @@ const s = StyleSheet.create({
   },
   number: { textAlign: "right", fontVariant: ["tabular-nums"], flexShrink: 0 },
   unavailable: { paddingVertical: 24, gap: 12 },
-  retry: { minHeight: 44, justifyContent: "center" },
 });

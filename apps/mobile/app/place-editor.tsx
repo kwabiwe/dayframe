@@ -48,6 +48,7 @@ import {
   SettingsSegmented,
   SettingsSwitch
 } from "@/components/settings/SettingsBlocks";
+import { friendlyMobileErrorMessage } from "@/lib/friendlyError";
 import { refreshGeofencesForPlaces, requestForegroundLocationPermission } from "@/lib/geofence";
 import { mobileAccountKey, mobileAccountOwnersEqual, readActiveMobileAccount, type MobileAccountOwner } from "@/lib/mobileAccount";
 import { applyPlaceRoleLocally, notePlaceDeleted } from "@/lib/placesPage";
@@ -204,7 +205,7 @@ export default function PlaceEditorScreen() {
         router.replace("/");
         return;
       }
-      Alert.alert("Places", error instanceof Error ? error.message : "Unable to load this place.", [
+      Alert.alert("Places", friendlyMobileErrorMessage(error, "Couldn't open this place. Try again."), [
         { text: "Back", onPress: () => router.back() }
       ]);
     } finally {
@@ -382,7 +383,7 @@ export default function PlaceEditorScreen() {
       }
       if (!(await editorStillFor(owner))) return;
       setSaving(false);
-      Alert.alert("Places", error instanceof Error ? error.message : "Unable to save place.");
+      Alert.alert("Places", friendlyMobileErrorMessage(error, "Couldn't save this place. Try again."));
       return;
     }
     // Accepted. Save stays locked (a retry would create the place again), and a refresh that
@@ -454,7 +455,7 @@ export default function PlaceEditorScreen() {
       }
       if (!(await editorStillFor(owner))) return;
       setDeleting(false);
-      Alert.alert("Places", error instanceof Error ? error.message : "Unable to delete place.");
+      Alert.alert("Places", friendlyMobileErrorMessage(error, "Couldn't delete this place. Try again."));
       return;
     }
     // Accepted: Places drops the row when it is shown again, even if its own refresh fails.

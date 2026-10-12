@@ -50,7 +50,8 @@ import {
 } from "@/lib/reviewBulkSkip";
 import { ActivityPickerSheet } from "@/components/ActivityPickerSheet";
 import { recentActivityIds } from "@/lib/activityChoice";
-import { activeLogAsCategoryId, reviewLogAsEdit, reviewLogAsEditorName } from "@/lib/reviewLogAs";
+import { activeLogAsCategoryId, reviewDeckDecisionName, reviewLogAsEdit, reviewLogAsEditorName } from "@/lib/reviewLogAs";
+import { friendlyMobileErrorMessage } from "@/lib/friendlyError";
 import { playHaptic } from "@/lib/haptics";
 import {
   OverflowMenu,
@@ -1124,6 +1125,16 @@ export default function ReviewScreen() {
     const item = source.item;
     const logged = direction === 1;
     const block = deckLoggedBlock(item);
+    // C2: a logged card's toast names the block as it will be listed, from what this decision
+    // sends (the same edit the hold saves), not the detector title.
+    const decisionName = reviewDeckDecisionName({
+      logged,
+      cardTitle: card?.title ?? reviewItemTitle(item),
+      edit: logged ? deckLogAsEdit(item) : null,
+      isLocationV2Commute: isLocationV2Commute(item),
+      suggestionTitle: item.title,
+      activityName: card?.activityName ?? reviewItemCategoryName(item)
+    });
     deckTokenSequence.current += 1;
     recordDeckDecision(logged ? { ...block, color: card?.color ?? block.color } : null);
     deckHold.hold({
@@ -1133,7 +1144,7 @@ export default function ReviewScreen() {
       itemId: item.id,
       logged,
       direction,
-      title: card?.title ?? reviewItemTitle(item),
+      title: decisionName,
       // The colour the card showed (a live "Log as" activity included).
       color: card?.color ?? block.color,
       seconds: block.seconds,
@@ -1144,8 +1155,23 @@ export default function ReviewScreen() {
     if (!deckScreenActive.current) deckHold.flush();
     playHaptic(logged ? "reviewLog" : "reviewSkip");
     AccessibilityInfo.announceForAccessibility(
-      `${logged ? "Logged" : "Skipped"} ${card?.title ?? reviewItemTitle(item)}. Undo is available for a few seconds.`
+      `${logged ? "Logged" : "Skipped"} ${decisionName}. Undo is available for a few seconds.`
     );
+  }
+
+  // What logging this card sends: an edit only when its "Log as" name or activity really changed
+  // (reviewLogAs.ts). The toast's name (at the throw) and the saved edit (when the hold ends) both
+  // read it, so they agree.
+  function deckLogAsEdit(item: MobileReviewItem) {
+    return reviewLogAsEdit({
+      draftName: logAsNames.current.get(item.id),
+      draftCategoryId: activeLogAsCategoryId(logAsDraftsRef.current.get(item.id)?.categoryId, dataRef.current?.categories),
+      defaultName: item.title?.trim() || reviewItemTitle(item),
+      suggestedCategoryId: item.suggestedCategoryId,
+      isLocationV2: hasV2LocationEvidence(item),
+      startedAt: hasSuggestedTimeWindow(item) ? item.suggestedStartedAt : null,
+      stoppedAt: hasSuggestedTimeWindow(item) ? item.suggestedStoppedAt : null
+    });
   }
 
   function requestDeckThrow(direction: ReviewDeckDirection) {
@@ -1485,17 +1511,7 @@ export default function ReviewScreen() {
       undoCount();
     };
     let started: boolean;
-    const edit = held.logged
-      ? reviewLogAsEdit({
-          draftName: logAsNames.current.get(item.id),
-          draftCategoryId: activeLogAsCategoryId(logAsDraftsRef.current.get(item.id)?.categoryId, dataRef.current?.categories),
-          defaultName: item.title?.trim() || reviewItemTitle(item),
-          suggestedCategoryId: item.suggestedCategoryId,
-          isLocationV2: hasV2LocationEvidence(item),
-          startedAt: hasSuggestedTimeWindow(item) ? item.suggestedStartedAt : null,
-          stoppedAt: hasSuggestedTimeWindow(item) ? item.suggestedStoppedAt : null
-        })
-      : null;
+    const edit = held.logged ? deckLogAsEdit(item) : null;
     if (edit) {
       started = resolveItem(item, { action: "edit_and_confirm", edit }, "Logged. Saved on this iPhone. Waiting to sync.", settled, failed, { unlisted });
     } else if (held.logged) {
@@ -1844,9 +1860,7 @@ export default function ReviewScreen() {
         );
         Alert.alert(
           "Review",
-          error instanceof Error
-            ? error.message
-            : "Couldn’t save this Review choice on this iPhone."
+          friendlyMobileErrorMessage(error, "Couldn’t save this Review choice on this iPhone.")
         );
       });
     return true;
@@ -2011,7 +2025,7 @@ export default function ReviewScreen() {
         router.replace("/");
         return false;
       }
-      Alert.alert("Edit", error instanceof Error ? error.message : "Unable to save this activity.");
+      Alert.alert("Edit", friendlyMobileErrorMessage(error, "Couldn't save this block. Try again."));
       return false;
     } finally {
       setEditSaving(false);
@@ -2029,12 +2043,13 @@ export default function ReviewScreen() {
     }
   }
 
-  // The Undo toast sits just above the round actions (or hangs under Back to Today once all is
-  // framed, out of flow),
-  // so it never covers the controls whatever the phone height or text size.
+  // The Undo toast hangs 12 points below the round actions, in space reserved under them (staging
+  // feedback C1: it used to sit above them, over the bottom of the card), or under Back to Today
+  // once all is framed / under the waiting copy, always out of flow, so it never covers the card or
+  // the controls whatever the phone height or text size, and its exit moves nothing.
   function renderDeckToast(placement: "actions" | "under") {
     const held = heldDeckDecision;
-    const placementStyle = [styles.reviewDeckToast, placement === "under" ? styles.reviewDeckToastUnderButton : null];
+    const placementStyle = placement === "under" ? styles.reviewDeckToastUnderButton : styles.reviewDeckToast;
     if (!held) {
       const notice = deckNotice.notice;
       return notice ? (
@@ -2175,7 +2190,6 @@ export default function ReviewScreen() {
               throwRequest={deckThrowRequest}
             />
             <View style={styles.reviewDeckActionsAnchor}>
-              {renderDeckToast("actions")}
             <ReviewDeckActions
               logDisabled={topDeckControlsDisabled || deckFlying}
               skipDisabled={deckFlying || (topDeckSkipDefers && deckSources.length <= 1)}
@@ -2199,6 +2213,8 @@ export default function ReviewScreen() {
               skipLabel={topDeckSkipDefers ? "Skip for now" : "Skip"}
               theme={theme}
             />
+              {/* After the actions: below them on screen and after them for VoiceOver. */}
+              {renderDeckToast("actions")}
             </View>
           </>
         ) : (
@@ -2576,6 +2592,11 @@ function reviewItemSummary(item: MobileReviewItem) {
   if (notes) return blockWordingForServerMessage(notes);
   if (isHealthReviewItem(item)) return "Review this Health activity before it is added.";
   return "Review this suggested time before it is added.";
+}
+
+/** A Location V2 journey (not time away): the server stores it with only a typed name. */
+function isLocationV2Commute(item: MobileReviewItem) {
+  return hasV2LocationEvidence(item) && item.eventType === "commute_detected" && !isTimeAwayReviewItem(item);
 }
 
 function reviewItemCategoryName(item: MobileReviewItem) {

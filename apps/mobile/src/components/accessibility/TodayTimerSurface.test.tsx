@@ -9,6 +9,7 @@ vi.mock("react", async () => {
 });
 vi.mock("react-native", () => ({
   Animated: { View: "AnimatedView" },
+  AppState: { currentState: "active" },
   Pressable: "Pressable",
   StyleSheet: { create: (styles: unknown) => styles },
   Text: "Text",
@@ -351,9 +352,8 @@ describe("TodayTimerSurface (Blocks)", () => {
     resetMosaicDropInForTests();
     const tileOpacities = (tree: ReturnType<typeof create>) =>
       tree.root.findAllByType("ReanimatedView" as never)
-        .map((node) => flatStyle(node.props.style))
-        .filter((style) => style.flex === 1 && "opacity" in style)
-        .map((style) => style.opacity);
+        .filter((node) => node.props.testID === "quick-start-tile-drop")
+        .map((node) => flatStyle(node.props.style).opacity);
     const first = render(props());
     expect(tileOpacities(first.tree)).toEqual([0, 0]);
     act(() => first.tree.unmount());
@@ -361,6 +361,21 @@ describe("TodayTimerSurface (Blocks)", () => {
     const again = render(props());
     expect(tileOpacities(again.tree)).toEqual([1, 1]);
     act(() => again.tree.unmount());
+  });
+
+  it("fades a tile pinned later in through its own owner, never the slot's entering animation (Trello 210)", () => {
+    resetMosaicDropInForTests();
+    const fadeOpacities = (tree: ReturnType<typeof create>) =>
+      tree.root.findAllByType("ReanimatedView" as never)
+        .filter((node) => node.props.testID === "quick-start-tile-fade")
+        .map((node) => flatStyle(node.props.style).opacity);
+    const first = render(props());
+    // First paint: the drop-in owns the entrance; the arrival fade stays at rest.
+    expect(fadeOpacities(first.tree)).toEqual([1, 1]);
+    for (const slot of first.tree.root.findAllByType("ReanimatedView" as never).filter((node) => node.props.layout !== undefined && node.props.exiting !== undefined)) {
+      expect(slot.props.entering).toBeUndefined();
+    }
+    act(() => first.tree.unmount());
   });
 
   it("hides the live block at once while the Stop flight's ghost holds its place", () => {
