@@ -67,7 +67,13 @@ vi.mock("../ActivityPickerSheet", () => ({
     return null;
   }
 }));
-vi.mock("./LocationEvidenceMap", () => ({ LocationEvidenceMap: () => null }));
+const map = vi.hoisted(() => ({ props: null as null | Record<string, unknown> }));
+vi.mock("./LocationEvidenceMap", () => ({
+  LocationEvidenceMap: (props: Record<string, unknown>) => {
+    map.props = props;
+    return null;
+  }
+}));
 vi.mock("@/lib/locationReviewDraft", () => import("../../lib/locationReviewDraft"));
 vi.mock("@/lib/mobileTypography", () => import("../../lib/mobileTypography"));
 
@@ -245,6 +251,57 @@ describe("Where were you? (D2, D3)", () => {
     expect(byLabel("Search places")[0].props.value).toBe("Lib");
     expect(byLabel("Remove Example Bakery")).toHaveLength(0);
     expect(texts("Record visit")).toHaveLength(1);
+  });
+
+  // Codex r2 on #358: a map-pin correction made while a pick resolves wins over the late pick.
+  const pinName = () => byLabel("New saved place name")[0];
+  const movePin = async (point: { latitude: number; longitude: number }) => {
+    await act(async () => (map.props!.onSelectPoint as (value: typeof point) => void)(point));
+  };
+  const moved = { latitude: 10.002, longitude: 20.003 };
+
+  it("drops a late nearby pick after the pin is moved, keeping the moved pin and pin editing", async () => {
+    await render(stay({ matched: false }));
+    await press(byTestId("location-evidence-map-pin")[0]);
+    const finish = deferNearbyResolution();
+    let pick!: Promise<void>;
+    act(() => { pick = byTestId("location-evidence-nearby-0")[0].props.onPress(); });
+    await movePin(moved);
+    await act(async () => { finish(); await pick; });
+    expect(map.props!.selectedPoint).toEqual(moved);
+    expect(typeof map.props!.onSelectPoint).toBe("function");
+    expect(byLabel("Remove Example Bakery")).toHaveLength(0);
+  });
+
+  it("drops a late nearby pick after the pin is renamed, and saves the pin's own name and coordinate", async () => {
+    await render(stay({ matched: false }));
+    await press(byTestId("location-evidence-map-pin")[0]);
+    await movePin(moved);
+    const finish = deferNearbyResolution();
+    let pick!: Promise<void>;
+    act(() => { pick = byTestId("location-evidence-nearby-0")[0].props.onPress(); });
+    await act(async () => pinName().props.onChangeText("Corner spot"));
+    await act(async () => { finish(); await pick; });
+    expect(byLabel("Remove Example Bakery")).toHaveLength(0);
+    expect(map.props!.selectedPoint).toEqual(moved);
+    await press(tree!.root.find((node) => node.props.label === "Use this pin"));
+    const save = tree!.root.findAll((node) => node.props.label === "Save for future visits" && typeof node.props.onValueChange === "function")[0];
+    await act(async () => save.props.onValueChange(true));
+    await press(primary());
+    expect(onResolve.mock.calls[0][0]).toMatchObject({
+      action: "save_place_and_confirm", name: "Corner spot", latitude: moved.latitude, longitude: moved.longitude
+    });
+  });
+
+  it("drops a late nearby pick when the pin editor is opened", async () => {
+    await render(stay({ matched: false }));
+    const finish = deferNearbyResolution();
+    let pick!: Promise<void>;
+    act(() => { pick = byTestId("location-evidence-nearby-0")[0].props.onPress(); });
+    await press(byTestId("location-evidence-map-pin")[0]);
+    await act(async () => { finish(); await pick; });
+    expect(byLabel("Remove Example Bakery")).toHaveLength(0);
+    expect(typeof map.props!.onSelectPoint).toBe("function");
   });
 
   it("keeps recording without the matched place, behind More options", async () => {

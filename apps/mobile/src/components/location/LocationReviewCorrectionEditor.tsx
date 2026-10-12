@@ -309,10 +309,32 @@ export function LocationReviewCorrectionEditor({
     ? formatLocationReviewDuration(editableWindow.value.startedAt, editableWindow.value.stoppedAt)
     : "—";
 
-  /** A later place or search interaction: any pick still resolving is dropped when it lands. */
+  /**
+   * The single entry point every user-initiated place or search change calls first (search
+   * typing and clearing, a saved choice, Remove, the map pin: opening it, moving it, naming it,
+   * using it, and the record actions). It supersedes any nearby or search pick still resolving,
+   * so a pick that lands late never overwrites newer input (Codex r1–r2 on #358).
+   */
   function supersedePlacePick() {
     placePickTokenRef.current += 1;
     setResolvingSuggestion(false);
+  }
+
+  /** Map pin handlers: each is a user place edit, so each supersedes a pending pick. */
+  function togglePinEditor() {
+    supersedePlacePick();
+    setPinEditorOpen(true);
+    setEditingCentre((current) => !current);
+  }
+
+  function moveMapPin(point: { latitude: number; longitude: number }) {
+    supersedePlacePick();
+    setSelectedPoint(point);
+  }
+
+  function renameMapPin(name: string) {
+    supersedePlacePick();
+    setManualPlaceName(name);
   }
 
   function changeSearchQuery(value: string) {
@@ -636,7 +658,7 @@ export function LocationReviewCorrectionEditor({
               selectedPointRadiusMeters={evidence.segment.kind === "stay" ? 80 : undefined}
               selectedSavedPlaceId={selectedSavedPlaceId}
               showDetails={false}
-              onSelectPoint={evidence.segment.kind === "stay" && editingCentre ? setSelectedPoint : undefined}
+              onSelectPoint={evidence.segment.kind === "stay" && editingCentre ? moveMapPin : undefined}
               onSelectSavedPlace={evidence.segment.kind === "stay" ? chooseSavedPlace : undefined}
             />
           </Reanimated.View>
@@ -974,10 +996,7 @@ export function LocationReviewCorrectionEditor({
                     accessibilityHint={editingCentre ? "Stops moving the pin" : "Lets you tap the map to place a pin"}
                     disabled={saving}
                     divider={false}
-                    onPress={() => {
-                      setPinEditorOpen(true);
-                      setEditingCentre((current) => !current);
-                    }}
+                    onPress={togglePinEditor}
                     subtitle={editingCentre ? "Tap the map to move the pin, then name it below" : "Name a spot on the map yourself"}
                     testID="location-evidence-map-pin"
                     theme={theme}
@@ -994,7 +1013,7 @@ export function LocationReviewCorrectionEditor({
                         accessibilityLabel="New saved place name"
                         {...mobileTextProps("input")}
                         editable={!saving}
-                        onChangeText={setManualPlaceName}
+                        onChangeText={renameMapPin}
                         placeholder="Place name"
                         placeholderTextColor={theme.textSecondary}
                         style={editorStyles.inlineInput}

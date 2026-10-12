@@ -27,6 +27,20 @@ describe("Location evidence editor in Blocks (UIA-027)", () => {
     expect(screen).toContain("recentActivityIds={recentActivities}");
   });
 
+  // Codex r1–r2 on #358: every user place edit supersedes a nearby/search pick still resolving, so
+  // no control may hand a raw state setter to the map or the pin's name field.
+  it("routes map-pin edits through the pick-superseding handlers", () => {
+    expect(editor).toContain("editingCentre ? moveMapPin : undefined");
+    expect(editor).toContain("onChangeText={renameMapPin}");
+    expect(editor).toContain("onPress={togglePinEditor}");
+    expect(editor).not.toMatch(/onSelectPoint=\{[^}]*setSelectedPoint/);
+    expect(editor).not.toContain("onChangeText={setManualPlaceName}");
+    for (const handler of ["togglePinEditor", "moveMapPin", "renameMapPin", "useManualMapPin", "changeSearchQuery", "clearPlaceSearch"]) {
+      const body = editor.slice(editor.indexOf(`function ${handler}(`));
+      expect(body.slice(0, body.indexOf("\n  }\n")), handler).toContain("supersedePlacePick();");
+    }
+  });
+
   it("uses the shared Settings switch and no spinner", () => {
     expect(editor).not.toMatch(/<Switch\b/);
     expect(editor).toContain('label="Save for future visits"');
