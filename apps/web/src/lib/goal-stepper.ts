@@ -9,10 +9,15 @@ type Limits = { min: number; max: number; step: number };
 
 /**
  * One stepper tap. A goal on the step grid moves by one step; one between steps (set elsewhere,
- * say 42 h a week) moves to the nearest step in that direction (45 h or 40 h). Clamped to the limits.
+ * say 42 h a week) moves to the nearest step in that direction (45 h or 40 h). Clamped to the limits;
+ * a goal outside them only steps back towards them.
  */
 export function nextGoalMinutes(minutes: number, direction: -1 | 1, limits: Limits) {
   const hours = minutes / 60;
+  // A goal at or beyond a limit (set elsewhere, say 24 h a day) never steps further out, and the
+  // step never lands on the opposite side: Increase at 24 h does nothing; Decrease brings it in.
+  if (direction > 0 && hours >= limits.max) return minutes;
+  if (direction < 0 && hours <= limits.min) return minutes;
   const next = direction > 0
     ? Math.floor(hours / limits.step + 1e-9) * limits.step + limits.step
     : Math.ceil(hours / limits.step - 1e-9) * limits.step - limits.step;

@@ -110,6 +110,20 @@ describe("goal steppers (UIA-309)", () => {
   });
 });
 
+describe("goals outside the stepper limits (Codex r11)", () => {
+  it("never steps further out or across to the other side", () => {
+    expect(nextGoalMinutes(24 * 60, 1, DAILY_GOAL_HOURS)).toBe(24 * 60);
+    expect(canStepGoal(24 * 60, 1, DAILY_GOAL_HOURS)).toBe(false);
+    expect(nextGoalMinutes(24 * 60, -1, DAILY_GOAL_HOURS)).toBe(14 * 60);
+    expect(nextGoalMinutes(168 * 60, 1, WEEKLY_GOAL_HOURS)).toBe(168 * 60);
+    expect(nextGoalMinutes(30, -1, DAILY_GOAL_HOURS)).toBe(30);
+    expect(canStepGoal(30, -1, DAILY_GOAL_HOURS)).toBe(false);
+    expect(nextGoalMinutes(30, 1, DAILY_GOAL_HOURS)).toBe(60);
+    expect(nextGoalMinutes(60, -1, WEEKLY_GOAL_HOURS)).toBe(60);
+    expect(nextGoalMinutes(60, 1, WEEKLY_GOAL_HOURS)).toBe(5 * 60);
+  });
+});
+
 describe("the tab's goal drafts (Codex r7, r9)", () => {
   beforeEach(() => __resetGoalDraftsForTests());
   const goals = (daily: number, revision: number) => ({ dailyGoalMinutes: daily, weeklyGoalMinutes: 2400, goalsRevision: revision });
