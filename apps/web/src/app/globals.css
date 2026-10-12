@@ -13999,6 +13999,13 @@ dialog.ui-dialog.df-rf-dialog {
   text-transform: uppercase;
 }
 
+/* Inset fields without idle outlines (UIA-308); focus keeps its neutral border and an invalid
+   field its danger border. */
+.df-pe .ui-control:not(:focus):not([aria-invalid="true"]),
+.df-pe .place-search-control:not(:focus-within) {
+  border-color: transparent;
+}
+
 .df-pe .place-selected-result {
   background: var(--surface-inset);
 }
@@ -14021,30 +14028,43 @@ dialog.ui-dialog.df-rf-dialog {
   background: var(--surface-inset);
 }
 
-.df-pe-seg button {
-  min-width: 72px;
-  min-height: 36px;
-  border: 0;
-  border-radius: 999px;
-  padding: 0 14px;
-  background: transparent;
-  color: var(--text-secondary);
-  font: inherit;
-  font-size: 13px;
-  font-weight: 650;
+.df-pe-seg label {
+  position: relative;
+  display: inline-flex;
+}
+
+/* The radio itself is visually hidden but stays focusable for keyboards and screen readers. */
+.df-pe-seg input {
+  position: absolute;
+  inset: 0;
+  margin: 0;
+  opacity: 0;
   cursor: pointer;
 }
 
-.df-pe-seg button:hover,
-.df-pe-seg button[aria-checked="true"] {
+.df-pe-seg span {
+  display: inline-flex;
+  min-width: 72px;
+  min-height: 36px;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  padding: 0 14px;
+  color: var(--text-secondary);
+  font-size: 13px;
+  font-weight: 650;
+}
+
+.df-pe-seg label:hover span,
+.df-pe-seg input:checked + span {
   color: var(--text-primary);
 }
 
-.df-pe-seg button[aria-checked="true"] {
+.df-pe-seg input:checked + span {
   background: var(--surface-raised);
 }
 
-.df-pe-seg button:focus-visible {
+.df-pe-seg input:focus-visible + span {
   outline: 2px solid var(--focus);
   outline-offset: 2px;
 }
@@ -14070,7 +14090,7 @@ dialog.ui-dialog.df-rf-dialog {
     padding: 12px 16px 120px;
   }
 
-  .df-pe-seg button {
+  .df-pe-seg span {
     min-height: 44px;
   }
 }

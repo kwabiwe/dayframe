@@ -50,12 +50,15 @@ describe("Place editor in Blocks (UIA-308)", () => {
   it("picks a size from 50, 100 and 200 m and keeps another saved size until one is picked", () => {
     render(<PlaceEditor categories={categories} mode="edit" place={place({ radiusMeters: 150 })} places={[place()]} />);
     const sizes = within(screen.getByRole("radiogroup", { name: "Place radius" }));
-    expect(sizes.getAllByRole("radio").map((radio) => radio.getAttribute("aria-checked"))).toEqual(["false", "false", "false"]);
+    expect(sizes.getAllByRole("radio").map((radio) => (radio as HTMLInputElement).checked)).toEqual([false, false, false]);
     expect(screen.getByText(/This place uses 150 m/)).toBeTruthy();
     expect((screen.getByLabelText("Exact size") as HTMLInputElement).value).toBe("150");
     fireEvent.click(sizes.getByRole("radio", { name: "200 m" }));
-    expect(sizes.getByRole("radio", { name: "200 m" }).getAttribute("aria-checked")).toBe("true");
+    expect((sizes.getByRole("radio", { name: "200 m" }) as HTMLInputElement).checked).toBe(true);
     expect((screen.getByLabelText("Exact size") as HTMLInputElement).value).toBe("200");
     expect(screen.queryByText(/This place uses/)).toBeNull();
+    // Native radios share one name, so arrow keys move between sizes.
+    expect(new Set(sizes.getAllByRole("radio").map((radio) => (radio as HTMLInputElement).name))).toEqual(new Set(["df-pe-radius"]));
   });
+
 });

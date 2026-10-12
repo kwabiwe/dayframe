@@ -60,6 +60,8 @@ describe("web Places list and editor contracts", () => {
     expect(editor).toContain('title="Advanced"');
     expect(editor).toContain('label="Latitude"');
     expect(mapPreview).toContain("Map preview unavailable");
+    // UIA-308: the map pin and area are never coral.
+    expect(mapPreview).not.toContain('"--accent"');
     expect(mapPreview).toContain('attributionControl: { compact: false }');
     expect(combobox).toContain("Geoapify");
     expect(combobox).toContain("OpenStreetMap");

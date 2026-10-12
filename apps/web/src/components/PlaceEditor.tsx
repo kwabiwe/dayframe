@@ -323,17 +323,19 @@ export function PlaceEditor({
       </EditorGroup>
 
       <EditorGroup id="df-pe-size" title="Size">
+        {/* Native radios: arrow keys move between sizes, Tab enters and leaves the group. */}
         <div aria-label="Place radius" className="df-pe-seg" role="radiogroup">
           {PLACE_RADIUS_CHOICES.map((meters) => (
-            <button
-              aria-checked={radiusMeters.trim() === String(meters)}
-              key={meters}
-              onClick={() => setRadiusMeters(String(meters))}
-              role="radio"
-              type="button"
-            >
-              {meters} m
-            </button>
+            <label key={meters}>
+              <input
+                checked={radiusMeters.trim() === String(meters)}
+                name="df-pe-radius"
+                onChange={() => setRadiusMeters(String(meters))}
+                type="radio"
+                value={meters}
+              />
+              <span>{meters} m</span>
+            </label>
           ))}
         </div>
         {/* A place saved with another size keeps it until a size is picked (as on iPhone). */}
