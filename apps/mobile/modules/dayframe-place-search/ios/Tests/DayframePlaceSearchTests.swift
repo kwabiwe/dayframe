@@ -70,14 +70,45 @@ final class DayframePlaceSearchTests: XCTestCase {
 
   func testNearbyRankingDemotesUtilitiesAndEnforcesRadius() {
     let values = [
-      nearby("Nearest parking", distance: 5, relevance: 0, category: .parking),
+      nearby("Nearest fuel", distance: 5, relevance: 0, category: .gasStation),
       nearby("Cafe", distance: 80, relevance: 1, category: .cafe),
       nearby("Outside venue", distance: 751, relevance: 2, category: .movieTheater)
     ]
     XCTAssertEqual(
       NearbyPointOfInterestCoordinator.normalized(values, maximumDistanceMeters: 750).map(\.name),
-      ["Cafe", "Nearest parking"]
+      ["Cafe", "Nearest fuel"]
     )
+  }
+
+  func testNearbyDropsPlacesNobodyVisitsEvenAsFallback() {
+    let values = [
+      nearby("Corner car park", distance: 5, relevance: 0, category: .parking),
+      nearby("Cash machine", distance: 6, relevance: 1, category: .atm),
+      nearby("Charge point", distance: 7, relevance: 2, category: .evCharger),
+      nearby("Public toilets", distance: 8, relevance: 3, category: .restroom),
+      nearby("Bakery", distance: 90, relevance: 4, category: .bakery)
+    ]
+    XCTAssertEqual(
+      NearbyPointOfInterestCoordinator.normalized(values, maximumDistanceMeters: 400, limit: 5).map(\.name),
+      ["Bakery"]
+    )
+  }
+
+  func testPresentedListHonoursLimitAndReadsNearestFirst() {
+    let values = [
+      nearby("Gallery", distance: 210, relevance: 0, category: .museum),
+      nearby("Noodle bar", distance: 60, relevance: 1, category: .restaurant),
+      nearby("Bookshop", distance: 140, relevance: 2, category: .store),
+      nearby("Climbing wall", distance: 30, relevance: 3, category: .fitnessCenter),
+      nearby("Guest house", distance: 300, relevance: 4, category: .hotel),
+      nearby("Launderette", distance: 20, relevance: 5, category: .laundry),
+      nearby("Sixth", distance: 10, relevance: 6, category: .cafe)
+    ]
+    let five = NearbyPointOfInterestCoordinator.presented(values, maximumDistanceMeters: 400, limit: 5)
+    XCTAssertEqual(five.count, 5)
+    XCTAssertEqual(five.map(\.distanceMeters), five.map(\.distanceMeters).sorted())
+    XCTAssertEqual(NearbyPointOfInterestCoordinator.presented(values, limit: 50).count, NearbyPointOfInterestCoordinator.maximumLimit - 1)
+    XCTAssertEqual(NearbyPointOfInterestCoordinator.presented(values, limit: 0).count, 1)
   }
 
   func testNearbySearchPropagatesRequestAndResults() async throws {
@@ -158,7 +189,8 @@ final class DayframePlaceSearchTests: XCTestCase {
       nearby("wagamama", distance: 320, relevance: 4, category: .restaurant, source: .contextual(anchor: "lakeside"))
     ]))
     let result = try await task.value
-    XCTAssertEqual(result.map(\.name), ["Lakeside Shopping Centre", "wagamama", "Apple Lakeside"])
+    // The same three places as before, now nearest first.
+    XCTAssertEqual(result.map(\.name), ["Apple Lakeside", "Lakeside Shopping Centre", "wagamama"])
   }
 
   func testContextFailureFallsBackToBaseNearbyResults() async throws {
@@ -208,6 +240,122 @@ final class DayframePlaceSearchTests: XCTestCase {
     await XCTAssertThrowsErrorAsync(try await task.value) { error in
       XCTAssertEqual(error as? PlaceSearchCoordinatorError, .cancelled)
     }
+  }
+
+  func testNearbySuggestionsCrossTheBridgeWithoutCoordinates() async throws {
+    let searcher = FakeNearbySearcher()
+    var ids = ["poi-1", "poi-2"].makeIterator()
+    let coordinator = NearbyPointOfInterestCoordinator(searcher: searcher, idFactory: { ids.next() ?? "fallback" })
+    let task = Task {
+      try await coordinator.suggestions(requestId: "nearby-1", latitude: 10, longitude: 20, radiusMeters: 400, limit: 5)
+    }
+    await Task.yield()
+    searcher.completeNearby(.success([
+      nearby("Far bakery", distance: 300, relevance: 0, category: .bakery, address: "1 Example Road"),
+      nearby("Near cafe", distance: 40, relevance: 1, category: .cafe)
+    ]))
+    let suggestions = try await task.value
+    XCTAssertEqual(suggestions, [
+      NearbyPointOfInterestSuggestionValue(id: "poi-1", requestId: "nearby-1", title: "Near cafe", subtitle: nil, distanceMeters: 40),
+      NearbyPointOfInterestSuggestionValue(id: "poi-2", requestId: "nearby-1", title: "Far bakery", subtitle: "1 Example Road", distanceMeters: 300)
+    ])
+    for suggestion in suggestions {
+      let dictionary = suggestion.dictionary
+      XCTAssertEqual(Set(dictionary.keys), ["id", "requestId", "title", "subtitle", "distanceMeters"])
+      XCTAssertNoThrow(try JSONSerialization.data(withJSONObject: dictionary))
+    }
+    let resolved = try coordinator.resolve(id: "poi-2", requestId: "nearby-1")
+    XCTAssertEqual(resolved.name, "Far bakery")
+    XCTAssertEqual(resolved.formattedAddress, "1 Example Road")
+    XCTAssertEqual(resolved.latitude, 51.5)
+    // Another place from the same list can still be picked.
+    XCTAssertEqual(try coordinator.resolve(id: "poi-1", requestId: "nearby-1").name, "Near cafe")
+  }
+
+  func testNearbyIdsFromAnOlderListOrAfterCancelNeverResolve() async throws {
+    let searcher = FakeNearbySearcher()
+    var ids = ["old-id", "new-id"].makeIterator()
+    let coordinator = NearbyPointOfInterestCoordinator(searcher: searcher, idFactory: { ids.next() ?? "fallback" })
+    let first = Task {
+      try await coordinator.suggestions(requestId: "nearby-1", latitude: 10, longitude: 20, radiusMeters: 400, limit: 5)
+    }
+    await Task.yield()
+    searcher.completeNearby(.success([nearby("First cafe", distance: 40, relevance: 0, category: .cafe)]))
+    _ = try await first.value
+
+    let second = Task {
+      try await coordinator.suggestions(requestId: "nearby-2", latitude: 10, longitude: 20, radiusMeters: 400, limit: 5)
+    }
+    await Task.yield()
+    // A new search drops the old list at once, before it answers.
+    XCTAssertThrowsError(try coordinator.resolve(id: "old-id", requestId: "nearby-1")) { error in
+      XCTAssertEqual(error as? PlaceSearchCoordinatorError, .staleSuggestion)
+    }
+    searcher.completeNearby(.success([nearby("Second cafe", distance: 50, relevance: 0, category: .cafe)]))
+    _ = try await second.value
+    XCTAssertThrowsError(try coordinator.resolve(id: "new-id", requestId: "nearby-1"))
+    XCTAssertEqual(try coordinator.resolve(id: "new-id", requestId: "nearby-2").name, "Second cafe")
+
+    coordinator.cancel()
+    XCTAssertThrowsError(try coordinator.resolve(id: "new-id", requestId: "nearby-2")) { error in
+      XCTAssertEqual(error as? PlaceSearchCoordinatorError, .staleSuggestion)
+    }
+  }
+
+  // Codex r1 on #358: a list that finished just before a cancel resumes after a reopened screen
+  // has started again with the same request id. It must neither publish nor resolve.
+  func testListFinishedBeforeCancelNeverPublishesUnderAReusedRequestId() async throws {
+    let searcher = FakeNearbySearcher()
+    var ids = ["stale-id", "fresh-id"].makeIterator() // the stale list would take the first
+    let coordinator = NearbyPointOfInterestCoordinator(searcher: searcher, idFactory: { ids.next() ?? "fallback" })
+    let first = Task {
+      try await coordinator.suggestions(requestId: "nearby-1", latitude: 10, longitude: 20, radiusMeters: 400, limit: 5)
+    }
+    await Task.yield()
+    // The reopened screen's search is queued before the old list's answer resumes its task.
+    let second = Task {
+      try await coordinator.suggestions(requestId: "nearby-1", latitude: 10, longitude: 20, radiusMeters: 400, limit: 5)
+    }
+    searcher.completeNearby(.success([nearby("Old cafe", distance: 40, relevance: 0, category: .cafe)]))
+    coordinator.cancel()
+    await XCTAssertThrowsErrorAsync(try await first.value) { error in
+      XCTAssertEqual(error as? PlaceSearchCoordinatorError, .cancelled)
+    }
+    // The stale list registered nothing, so its pick cannot resolve under the reused id.
+    XCTAssertThrowsError(try coordinator.resolve(id: "stale-id", requestId: "nearby-1")) { error in
+      XCTAssertEqual(error as? PlaceSearchCoordinatorError, .staleSuggestion)
+    }
+    searcher.completeNearby(.success([nearby("New cafe", distance: 50, relevance: 0, category: .cafe)]))
+    let fresh = try await second.value
+    XCTAssertEqual(fresh.map(\.title), ["New cafe"])
+    XCTAssertEqual(try coordinator.resolve(id: fresh[0].id, requestId: "nearby-1").name, "New cafe")
+  }
+
+  func testPickFromACancelledListNeverResolvesAfterARestartWithTheSameRequestId() async throws {
+    let searcher = FakeNearbySearcher()
+    var ids = ["old-id", "new-id"].makeIterator()
+    let coordinator = NearbyPointOfInterestCoordinator(searcher: searcher, idFactory: { ids.next() ?? "fallback" })
+    let first = Task {
+      try await coordinator.suggestions(requestId: "nearby-1", latitude: 10, longitude: 20, radiusMeters: 400, limit: 5)
+    }
+    await Task.yield()
+    searcher.completeNearby(.success([nearby("Old cafe", distance: 40, relevance: 0, category: .cafe)]))
+    _ = try await first.value
+    XCTAssertEqual(try coordinator.resolve(id: "old-id", requestId: "nearby-1").name, "Old cafe")
+
+    coordinator.cancel()
+    let second = Task {
+      try await coordinator.suggestions(requestId: "nearby-1", latitude: 10, longitude: 20, radiusMeters: 400, limit: 5)
+    }
+    await Task.yield()
+    // Still loading under the same request id: the old pick is refused.
+    XCTAssertThrowsError(try coordinator.resolve(id: "old-id", requestId: "nearby-1")) { error in
+      XCTAssertEqual(error as? PlaceSearchCoordinatorError, .staleSuggestion)
+    }
+    searcher.completeNearby(.success([nearby("New cafe", distance: 50, relevance: 0, category: .cafe)]))
+    _ = try await second.value
+    XCTAssertThrowsError(try coordinator.resolve(id: "old-id", requestId: "nearby-1"))
+    XCTAssertEqual(try coordinator.resolve(id: "new-id", requestId: "nearby-1").name, "New cafe")
   }
 
   func testRequestIdPropagationAndSerializableSuggestionDTO() {
@@ -457,11 +605,12 @@ private func nearby(
   relevance: Int,
   category: MKPointOfInterestCategory? = nil,
   source: NearbyPointOfInterestValue.Source = .nearby,
-  localityNames: [String] = []
+  localityNames: [String] = [],
+  address: String? = nil
 ) -> NearbyPointOfInterestValue {
   NearbyPointOfInterestValue(
     name: name,
-    formattedAddress: nil,
+    formattedAddress: address,
     latitude: 51.5,
     longitude: 0.4,
     distanceMeters: distance,

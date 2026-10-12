@@ -30,7 +30,6 @@ import {
   normalizeTagName,
   DAYFRAME_APP_ICONS,
   activityControlColor,
-  blockColorsFor,
   type RecentActivitySuggestion
 } from "@dayframe/shared";
 import { FloatingDatePicker } from "@/components/FloatingDatePicker";
@@ -40,8 +39,9 @@ import {
   type HistoricalSuggestionsOverlayRenderState
 } from "@/components/HistoricalSuggestionsOverlay";
 import { PrimaryTimerGlyph } from "@/components/PrimaryTimerAction";
-import { ActivityIcon, DayframeIcon } from "@/components/icons/DayframeIcon";
+import { DayframeIcon } from "@/components/icons/DayframeIcon";
 import { ActivityPickerSheet } from "@/components/ActivityPickerSheet";
+import { ActivityChip, AllActivitiesChip } from "@/components/ActivityChips";
 import { BlocksConfirmHost, useBlocksConfirm } from "@/components/blocks/BlocksConfirmSheet";
 import { BlocksSheetHead } from "@/components/blocks/BlocksSheetHead";
 import { activityChips, chipsThatFit, recentActivityIds } from "@/lib/activityChoice";
@@ -2583,15 +2583,16 @@ export function ActiveTimerEditSheet({
                     >
                       {chipCandidates.map((category) => (
                         <View key={category.id} onLayout={(event) => recordChipWidth(category.id, event.nativeEvent.layout.width)}>
-                          <CategoryChip category={category} selected={selectedCategoryId === category.id} theme={theme} onPress={() => undefined} />
+                          <ActivityChip activity={category} selected={selectedCategoryId === category.id} theme={theme} onPress={() => undefined} />
                         </View>
                       ))}
                     </View>
                     {chipActivities.map((category) => (
-                      <CategoryChip
+                      <ActivityChip
                         key={category.id}
-                        category={category}
+                        activity={category}
                         selected={selectedCategoryId === category.id}
+                        testID={`time-entry-category-${category.id}`}
                         theme={theme}
                         onPress={() => {
                           dismissTransientEditingSurfaces();
@@ -2601,11 +2602,8 @@ export function ActiveTimerEditSheet({
                         }}
                       />
                     ))}
-                    <Pressable
-                      accessibilityHint="Search every activity, or create one"
-                      accessibilityLabel={`All activities, ${categories.length}`}
-                      accessibilityRole="button"
-                      hitSlop={{ top: 6, bottom: 6 }}
+                    <AllActivitiesChip
+                      count={categories.length}
                       onLayout={(event) => {
                         const width = Math.ceil(event.nativeEvent.layout.width);
                         setChipPillWidth((current) => (current === width ? current : width));
@@ -2614,18 +2612,10 @@ export function ActiveTimerEditSheet({
                         dismissTransientEditingSurfaces();
                         setActivityPickerOpen(true);
                       }}
-                      style={({ pressed }) => [
-                        sheetStyles.chip,
-                        sheetStyles.chipMore,
-                        { backgroundColor: theme.surfaceMuted },
-                        pressed ? styles.buttonPressed : null
-                      ]}
+                      pressedStyle={styles.buttonPressed}
                       testID="time-entry-category-all"
-                    >
-                      <DayframeIcon color={theme.textPrimary} glyph={DAYFRAME_APP_ICONS.search} size={16} />
-                      <Text {...mobileTextProps("control")} style={[sheetStyles.chipText, { color: theme.textPrimary }]}>All activities</Text>
-                      <Text {...mobileTextProps("counter")} style={[sheetStyles.chipCount, { color: theme.textSecondary }]}>{categories.length}</Text>
-                    </Pressable>
+                      theme={theme}
+                    />
                   </View>
                   {/* Tags follow Activity, as in the prototype (UIA-050). */}
                   <View
@@ -3089,47 +3079,6 @@ function HashtagSuggestionRow({
   );
 }
 
-/**
- * One activity chip (Blocks prototype .chip): the activity's icon and name on a tint of its
- * colour, solid in the activity colour with measured on-block text when chosen.
- */
-function CategoryChip({
-  category,
-  onPress,
-  selected,
-  theme
-}: {
-  category: Category;
-  onPress: () => void;
-  selected: boolean;
-  theme: MobileTheme;
-}) {
-  const colors = blockColorsFor(category.color ?? category.id, theme.mode, category.name);
-  const textColor = selected ? colors.text : theme.textPrimary;
-
-  return (
-    <Pressable
-      accessibilityHint={selected ? "Double tap to clear the activity" : undefined}
-      accessibilityLabel={`Set activity to ${category.name}`}
-      accessibilityRole="button"
-      accessibilityState={{ selected }}
-      hitSlop={{ top: 6, bottom: 6 }}
-      onPress={onPress}
-      testID={`time-entry-category-${category.id}`}
-      style={({ pressed }) => [
-        sheetStyles.chip,
-        { backgroundColor: selected ? colors.fill : colorWithAlpha(colors.fill, theme.mode === "dark" ? 0.24 : 0.18) },
-        pressed ? { opacity: 0.82 } : null
-      ]}
-    >
-      <ActivityIcon color={textColor} icon={category.icon ?? null} name={category.name} size={16} />
-      <Text {...mobileTextProps("control")} numberOfLines={1} style={[sheetStyles.chipText, { color: textColor }]}>
-        {category.name}
-      </Text>
-    </Pressable>
-  );
-}
-
 function formatPickerDate(date: Date) {
   if (isToday(date)) return "Today";
   return date.toLocaleDateString(undefined, {
@@ -3223,19 +3172,7 @@ const sheetStyles = StyleSheet.create({
   tagChipName: { flexShrink: 1, minWidth: 0 },
   // "+ Tag" is a filled chip with the add glyph, never an outline (UIA-050).
   tagAdd: { gap: 4 },
-  chip: {
-    alignItems: "center",
-    borderRadius: 999,
-    flexDirection: "row",
-    gap: 6,
-    maxWidth: "100%",
-    minHeight: 38,
-    paddingLeft: 10,
-    paddingRight: 14
-  },
-  chipMore: { paddingLeft: 11 },
-  chipText: { flexShrink: 1, fontSize: 13.5, fontWeight: "600" },
-  chipCount: { fontSize: 12, fontWeight: "600" },
+  // The chips themselves are the shared ActivityChip / AllActivitiesChip (ActivityChips.tsx).
   actions: { flexDirection: "row", gap: 8, marginTop: 4 },
   actionPill: {
     alignItems: "center",

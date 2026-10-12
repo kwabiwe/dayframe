@@ -1,11 +1,11 @@
 import * as Location from "expo-location";
-import { distanceMeters } from "@dayframe/shared";
 import {
   addSearchErrorListener,
   addSuggestionsListener,
   cancelNearby as cancelNativeNearbySearch,
   cancel as cancelNativeSearch,
   isAvailable as isNativePlaceSearchAvailable,
+  resolveNearby as resolveNativeNearby,
   resolveSuggestion as resolveNativeSuggestion,
   searchNearby as searchNativeNearby,
   setQuery as setNativeQuery,
@@ -23,20 +23,34 @@ export const PLACE_SEARCH_MAX_VISIBLE_RESULTS = 6;
 export const PLACE_SEARCH_DEBOUNCE_MS = 250;
 export const PLACE_SEARCH_MAX_LOCATION_AGE_MS = 24 * 60 * 60 * 1000;
 export const PLACE_SEARCH_REQUIRED_ACCURACY_METERS = 5_000;
-export const NEARBY_POI_RADIUS_METERS = 750;
-export const NEARBY_POI_MAX_VISIBLE_RESULTS = 3;
+/** A small circle around the visit: the places someone was most likely at. */
+export const NEARBY_POI_RADIUS_METERS = 400;
+/** Location evidence lists at most five nearby places under the empty search field. */
+export const NEARBY_POI_MAX_VISIBLE_RESULTS = 5;
 
-/** Presentation-only deduplication. Never changes saved radii or engine matching. */
+const normalisePlaceName = (name: string) => name.trim().replace(/\s+/g, " ").toLocaleLowerCase();
+
+/**
+ * Presentation-only filtering of the native list (already nearest first): drops malformed rows,
+ * anything outside the radius, repeated names and names already on screen as saved places
+ * (`hiddenNames`), and keeps at most five. Never changes saved radii or engine matching.
+ */
 export function visibleNearbyPlaces(
-  places: NearbyPointOfInterest[],
-  baseline: { name: string; latitude?: number | null; longitude?: number | null } | null = null
+  places: readonly NearbyPointOfInterest[],
+  hiddenNames: readonly string[] = []
 ) {
-  const normalise = (name: string) => name.trim().replace(/\s+/g, " ").toLocaleLowerCase();
+  const seen = new Set(hiddenNames.map(normalisePlaceName).filter(Boolean));
   const unique: NearbyPointOfInterest[] = [];
   for (const place of places) {
-    if (!isCoordinate(place) || !Number.isFinite(place.distanceMeters) || place.distanceMeters < 0 || place.distanceMeters > NEARBY_POI_RADIUS_METERS) continue;
-    const duplicates = [...unique, ...(baseline && isCoordinate(baseline) ? [baseline] : [])];
-    if (duplicates.some((other) => normalise(other.name) === normalise(place.name) && distanceMeters(other, place) <= 25)) continue;
+    if (
+      typeof place.id !== "string" || !place.id ||
+      typeof place.title !== "string" || !place.title.trim() ||
+      !Number.isFinite(place.distanceMeters) || place.distanceMeters < 0 ||
+      place.distanceMeters > NEARBY_POI_RADIUS_METERS
+    ) continue;
+    const key = normalisePlaceName(place.title);
+    if (seen.has(key)) continue;
+    seen.add(key);
     unique.push(place);
     if (unique.length === NEARBY_POI_MAX_VISIBLE_RESULTS) break;
   }
@@ -67,7 +81,10 @@ export type NearbyPointOfInterestProvider = {
     latitude: number;
     longitude: number;
     radiusMeters: number;
+    limit: number;
   }): Promise<NearbyPointOfInterestResult>;
+  /** The picked place's name, address and coordinate, from the current generation only. */
+  resolve(place: Pick<NearbyPointOfInterest, "id" | "requestId">): Promise<ResolvedPlaceSearchResult>;
   cancel(): Promise<void>;
 };
 
@@ -266,50 +283,74 @@ export class PlaceSearchController {
   }
 }
 
+/**
+ * Nearby request ids are unique across every controller in the process, so a reopened screen never
+ * reuses one (the native side also keeps its own generation; Codex r1 on #358).
+ */
+let nearbyRequestCounter = 0;
+function nextNearbyRequestId() {
+  nearbyRequestCounter += 1;
+  return `nearby-${nearbyRequestCounter}`;
+}
+
 export class NearbyPointOfInterestController {
-  private requestSequence = 0;
+  private currentRequestId: string | null = null;
   private disposed = false;
 
   constructor(
     private readonly provider: NearbyPointOfInterestProvider,
-    private readonly onStateChange: (state: NearbyPointOfInterestState) => void
+    private readonly onStateChange: (state: NearbyPointOfInterestState) => void,
+    private readonly hiddenNames: () => readonly string[] = () => []
   ) {}
 
   async load(center: PlaceSearchCoordinate) {
     if (this.disposed || !isCoordinate(center)) return;
-    const requestId = `nearby-${++this.requestSequence}`;
+    const requestId = nextNearbyRequestId();
+    this.currentRequestId = requestId;
     this.onStateChange({ requestId, status: "loading", places: [], message: null });
     try {
       const result = await this.provider.search({
         requestId,
         latitude: center.latitude,
         longitude: center.longitude,
-        radiusMeters: NEARBY_POI_RADIUS_METERS
+        radiusMeters: NEARBY_POI_RADIUS_METERS,
+        limit: NEARBY_POI_MAX_VISIBLE_RESULTS
       });
-      if (this.disposed || result.requestId !== requestId || requestId !== `nearby-${this.requestSequence}`) return;
-      const places = visibleNearbyPlaces(result.places);
+      if (this.disposed || result.requestId !== requestId || !this.isCurrent(requestId)) return;
+      const places = visibleNearbyPlaces(
+        result.places.filter((place) => place.requestId === requestId),
+        this.hiddenNames()
+      );
       this.onStateChange({
         requestId,
         status: places.length > 0 ? "results" : "no-results",
         places,
-        message: places.length > 0 ? null : "No nearby places found. Search for another place below."
+        message: places.length > 0 ? null : "Nothing found nearby. Search for the place instead."
       });
     } catch (error) {
-      if (this.disposed || requestId !== `nearby-${this.requestSequence}`) return;
+      if (this.disposed || !this.isCurrent(requestId)) return;
       const message = friendlyPlaceSearchError(error);
       if (!message) return;
       this.onStateChange({
         requestId,
         status: "error",
         places: [],
-        message: "Nearby places are unavailable. You can still search or record this as unknown."
+        message: "Nearby places aren't available right now. You can still search."
       });
     }
   }
 
+  /** Resolves a place from the list on screen; a place from an older list is refused. */
+  async resolve(place: NearbyPointOfInterest) {
+    if (this.disposed || !this.isCurrent(place.requestId)) throw staleNearbyPlace();
+    const result = await this.provider.resolve(place);
+    if (this.disposed || !this.isCurrent(place.requestId)) throw staleNearbyPlace();
+    return result;
+  }
+
   cancel() {
     if (this.disposed) return Promise.resolve();
-    this.requestSequence += 1;
+    this.currentRequestId = null;
     this.onStateChange({ requestId: null, status: "idle", places: [], message: null });
     return this.provider.cancel();
   }
@@ -317,9 +358,17 @@ export class NearbyPointOfInterestController {
   dispose() {
     if (this.disposed) return;
     this.disposed = true;
-    this.requestSequence += 1;
+    this.currentRequestId = null;
     void this.provider.cancel();
   }
+
+  private isCurrent(requestId: string) {
+    return requestId === this.currentRequestId;
+  }
+}
+
+function staleNearbyPlace() {
+  return Object.assign(new Error("That place is no longer current."), { code: "stale_suggestion" });
 }
 
 export function createNativePlaceSearchProvider(): PlaceSearchProvider | null {
@@ -346,6 +395,7 @@ export function createNativeNearbyPointOfInterestProvider(): NearbyPointOfIntere
   if (!isNativePlaceSearchAvailable()) return null;
   return {
     search: searchNativeNearby,
+    resolve: ({ id, requestId }) => resolveNativeNearby({ id, requestId }),
     cancel: cancelNativeNearbySearch
   };
 }

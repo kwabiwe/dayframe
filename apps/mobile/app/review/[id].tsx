@@ -19,7 +19,9 @@ import { mobileTextProps } from "@/lib/mobileTypography";
 import { BlocksNavHeader, usePreviousScreenLabel } from "@/components/BlocksNavHeader";
 import { blocksNavOrigin, evidenceBackLabel } from "@/lib/blocksNav";
 import {
+  ActivityNameTakenError,
   AuthRequiredError,
+  createCategory,
   fetchBootstrap,
   normaliseLocationReviewRequestError,
   resolveLocationReviewItem,
@@ -47,6 +49,8 @@ import {
   synchroniseReviewMutations
 } from "@/lib/reviewSyncStore";
 import { DAYFRAME_BACKEND_ID } from "@/lib/backendIdentity";
+import { recentActivityIds } from "@/lib/activityChoice";
+import { reviewPeerEntries } from "@/lib/reviewPresentation";
 import { fetchReviewPresentationSnapshot } from "@/lib/reviewPresentationClient";
 
 type EvidenceScreenState =
@@ -120,6 +124,8 @@ export default function LocationReviewDetailScreen() {
 
   const evidence = screenState.status === "ready" ? screenState.evidence : null;
   const reviewItem = data?.reviewItems.find((item) => item.id === id);
+  // Location evidence's activity chips and All activities' Recent, as on the Review deck.
+  const recentActivities = useMemo(() => recentActivityIds(reviewPeerEntries(data)), [data]);
   const adjacentReview = useMemo(
     () => evidence && data ? adjacentLocationReview(data.reviewItems, id, evidence) : undefined,
     [data, evidence, id]
@@ -434,6 +440,25 @@ export default function LocationReviewDetailScreen() {
     }
   }
 
+  // All activities' Create (as in the entry sheet): the server picks the colour, and the new
+  // activity joins this screen's bootstrap so it can be chosen at once.
+  async function createActivity(name: string): Promise<{ id: string } | { error: string }> {
+    try {
+      const response = await createCategory(name);
+      setData((current) => current
+        ? { ...current, categories: [...current.categories.filter((category) => category.id !== response.category.id), response.category] }
+        : current);
+      return { id: response.category.id };
+    } catch (error) {
+      if (error instanceof AuthRequiredError) {
+        router.replace("/");
+        return { error: "Sign in again to create activities." };
+      }
+      if (error instanceof ActivityNameTakenError) return { error: error.message };
+      return { error: `Couldn't create "${name}". Check your connection and try again.` };
+    }
+  }
+
   function isCurrent(generation: number, signal: AbortSignal) {
     return generation === loadGenerationRef.current && !signal.aborted;
   }
@@ -475,8 +500,10 @@ export default function LocationReviewDetailScreen() {
           categories={data?.categories ?? []}
           evidence={evidence}
           isFocused={isFocused}
+          onCreateActivity={createActivity}
           onResolve={perform}
           places={data?.places ?? []}
+          recentActivityIds={recentActivities}
           reviewItem={reviewItem}
           saving={saving}
           statusMessage={actionMessage ?? screenState.refreshMessage}

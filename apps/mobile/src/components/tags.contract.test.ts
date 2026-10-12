@@ -91,7 +91,9 @@ describe("mobile tag interaction contract", () => {
     expect(sheet.indexOf("#{tagName}")).toBeLessThan(sheet.indexOf('accessibilityLabel="Add a tag"'));
     // Each chip and + Tag keep a 44-point effective target (32 points plus 6 above and below).
     expect(sheet).toMatch(/tagChip: \{[^}]*minHeight: 32, minWidth: 44/);
-    expect(sheet.match(/hitSlop=\{\{ top: 6, bottom: 6 \}\}/g)?.length).toBeGreaterThanOrEqual(4);
+    // (The activity chips and All activities moved to the shared ActivityChips.tsx, with the same slop.)
+    expect(sheet.match(/hitSlop=\{\{ top: 6, bottom: 6 \}\}/g)?.length).toBeGreaterThanOrEqual(2);
+    expect(readFileSync(new URL("./ActivityChips.tsx", import.meta.url), "utf8")).toContain("const CHIP_HIT_SLOP = { top: 6, bottom: 6 };");
     expect(sheet).toContain("tagNames: appliedTagNames");
   });
 
