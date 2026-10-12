@@ -435,18 +435,20 @@ export const calendarCreateGhostMinHeightPx = 12;
 
 /**
  * Where the drag ghost draws. It keeps a 12px minimum so its label stays legible, growing down
- * from the start as before — except when the range is held at now, where it grows upward from
- * the now line instead, so the ghost never draws past now (its 2px gap above the line is kept).
+ * from the start as before — but never past the now line: on today (`limitMinutes`, see
+ * `calendarCreateLimitMinutes`, for the shown now) a ghost whose minimum would cross the line
+ * grows upward from just above it instead (its 2px gap kept), or as far up as the axis allows.
+ * This covers a range ending at now and a short range ending just before it alike.
  */
 export function calendarCreateGhostGeometry({
   endMinutes,
-  heldAtLimit,
+  limitMinutes = Number.POSITIVE_INFINITY,
   rowHeight,
   startHour,
   startMinutes
 }: {
   endMinutes: number;
-  heldAtLimit: boolean;
+  limitMinutes?: number;
   rowHeight: number;
   startHour: number;
   startMinutes: number;
@@ -454,9 +456,10 @@ export function calendarCreateGhostGeometry({
   const top = ((startMinutes - startHour * 60) / 60) * rowHeight;
   const span = ((endMinutes - startMinutes) / 60) * rowHeight;
   const height = Math.max(calendarCreateGhostMinHeightPx, span - 2);
-  if (!heldAtLimit || height === span - 2) return { height, top };
-  const bottom = ((endMinutes - startHour * 60) / 60) * rowHeight - 2;
-  return { height, top: bottom - height };
+  if (!Number.isFinite(limitMinutes)) return { height, top };
+  const maxBottom = ((limitMinutes - startHour * 60) / 60) * rowHeight - 2;
+  if (top + height <= maxBottom) return { height, top };
+  return { height, top: Math.max(0, maxBottom - height) };
 }
 
 /** Real elapsed seconds of a dragged local range (DST-safe); null if either bound is nonexistent. */

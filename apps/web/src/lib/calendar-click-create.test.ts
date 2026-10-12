@@ -303,15 +303,44 @@ describe("Calendar create stops at now (owner decision 12 Oct 2026, option B)", 
     const axis = { rowHeight: 64, startHour: 0 };
     const nowLineY = (12 * 60 / 60) * 64;
     // 11:55 → 12:00 at default zoom: the 12px minimum used to reach 774.7px, past the line at 768px.
-    const held = calendarCreateGhostGeometry({ ...axis, endMinutes: 720, heldAtLimit: true, startMinutes: 715 });
+    const held = calendarCreateGhostGeometry({ ...axis, endMinutes: 720, limitMinutes: 720, startMinutes: 715 });
     expect(held.height).toBe(12);
-    expect(held.top + held.height).toBeLessThanOrEqual(nowLineY);
     expect(held.top + held.height + 2).toBe(nowLineY);
-    // A tall held ghost keeps its true geometry; past ghosts keep the old downward minimum.
-    expect(calendarCreateGhostGeometry({ ...axis, endMinutes: 720, heldAtLimit: true, startMinutes: 660 }))
+    // A tall ghost keeps its true geometry; with no limit (a past day) the old downward minimum stays.
+    expect(calendarCreateGhostGeometry({ ...axis, endMinutes: 720, limitMinutes: 720, startMinutes: 660 }))
       .toEqual({ height: 62, top: 704 });
-    expect(calendarCreateGhostGeometry({ ...axis, endMinutes: 545, heldAtLimit: false, startMinutes: 540 }))
+    expect(calendarCreateGhostGeometry({ ...axis, endMinutes: 545, startMinutes: 540 }))
       .toEqual({ height: 12, top: 576 });
+    // Far enough above now, a short ghost still grows downward.
+    expect(calendarCreateGhostGeometry({ ...axis, endMinutes: 545, limitMinutes: 720, startMinutes: 540 }))
+      .toEqual({ height: 12, top: 576 });
+  });
+
+  it("keeps short ghosts ending before now above the now line too (Codex r2 on #369)", () => {
+    const axis = { rowHeight: 64, startHour: 0 };
+    // At 11:56, an 11:50–11:55 ghost used to reach 769.33px with the now line at 764px.
+    const nowLineY = ((11 * 60 + 56) / 60) * 64;
+    const ghost = calendarCreateGhostGeometry({ ...axis, endMinutes: 715, limitMinutes: 716, startMinutes: 710 });
+    expect(ghost.top + ghost.height).toBeLessThanOrEqual(nowLineY - 2);
+    expect(ghost.height).toBe(12);
+    // Sweep: every short range (5–15 minutes) ending up to 15 minutes before now, at every zoom.
+    for (const rowHeight of [48, 64, 92, 128, 192]) {
+      for (let limit = 30; limit <= 24 * 60; limit += 7) {
+        for (let endGap = 0; endGap <= 15; endGap += 1) {
+          for (const length of [1, 2, 4, 5, 10, 15]) {
+            const endMinutes = limit - endGap;
+            const startMinutes = endMinutes - length;
+            const geometry = calendarCreateGhostGeometry({ endMinutes, limitMinutes: limit, rowHeight, startHour: 0, startMinutes });
+            const lineY = (limit / 60) * rowHeight;
+            expect(geometry.top + geometry.height).toBeLessThanOrEqual(lineY - 2 + 1e-9);
+            expect(geometry.height).toBeGreaterThanOrEqual(12);
+            expect(geometry.top).toBeGreaterThanOrEqual(0);
+            // Never drawn lower than the range itself starts.
+            expect(geometry.top).toBeLessThanOrEqual((startMinutes / 60) * rowHeight + 1e-9);
+          }
+        }
+      }
+    }
   });
 
   it("creates a dragged range ending where the ghost stops, and nothing that starts at or after now", () => {

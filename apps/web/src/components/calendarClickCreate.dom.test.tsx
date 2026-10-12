@@ -806,10 +806,10 @@ describe("Calendar create in future time (owner decision 12 Oct 2026, option B)"
     button: 0, clientX: 300, clientY, isPrimary: true, pointerId, pointerType: "mouse"
   });
 
-  function weekProps(undoToastVisible: boolean): Parameters<typeof CalendarReview>[0] {
+  function weekProps(undoToastVisible: boolean, shownNow: Date = now): Parameters<typeof CalendarReview>[0] {
     return {
       calendarHoursMode: "fullDay",
-      capturedNow: now,
+      capturedNow: shownNow,
       categories: [],
       entries: [],
       onDeleteEntries: vi.fn(),
@@ -823,8 +823,8 @@ describe("Calendar create in future time (owner decision 12 Oct 2026, option B)"
     };
   }
 
-  function renderWeek({ undoToastVisible = false }: { undoToastVisible?: boolean } = {}) {
-    const { rerender } = render(createElement(CalendarReview, weekProps(undoToastVisible)));
+  function renderWeek({ shownNow = now, undoToastVisible = false }: { shownNow?: Date; undoToastVisible?: boolean } = {}) {
+    const { rerender } = render(createElement(CalendarReview, weekProps(undoToastVisible, shownNow)));
     const setUndoToastVisible = (visible: boolean) => rerender(createElement(CalendarReview, weekProps(visible)));
     const [today, tomorrow] = Array.from(document.querySelectorAll<HTMLElement>("[data-calendar-day-body]"));
     return { setUndoToastVisible, today, tomorrow };
@@ -940,6 +940,27 @@ describe("Calendar create in future time (owner decision 12 Oct 2026, option B)"
       startedAt: new Date(2026, 7, 2, 11, 55).toISOString(),
       stoppedAt: new Date(2026, 7, 2, 12, 0).toISOString()
     }));
+  });
+
+  it("keeps a short ghost ending just before now above the now line (Codex r2 on #369)", async () => {
+    const shownNow = new Date(2026, 7, 2, 11, 56, 0, 0);
+    vi.setSystemTime(shownNow);
+    const { today } = renderWeek({ shownNow });
+    pointTarget = today;
+    await act(async () => {
+      fireEvent.pointerDown(today, pointer(64, y(11 * 60 + 49)));
+      fireEvent.pointerMove(today, pointer(64, y(11 * 60 + 55)));
+    });
+    const ghost = document.querySelector<HTMLElement>("[data-calendar-create-ghost]");
+    expect(ghost?.textContent).toMatch(/^11:50–11:55 · 5m/);
+    const bottom = Number.parseFloat(ghost?.style.top ?? "") + Number.parseFloat(ghost?.style.height ?? "");
+    const line = Number.parseFloat(today.querySelector<HTMLElement>(".calendar-now-line")?.style.top ?? "");
+    expect(line).toBe(Math.round(y(11 * 60 + 56)));
+    expect(bottom).toBeLessThan(line);
+    expect(Number.parseFloat(ghost?.style.height ?? "")).toBe(12);
+    await act(async () => {
+      fireEvent.keyDown(window, { key: "Escape" });
+    });
   });
 
   it("decides against the now line it shows, not a fresher clock (Codex r1 on #369)", async () => {

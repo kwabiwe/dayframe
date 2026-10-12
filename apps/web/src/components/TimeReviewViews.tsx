@@ -1466,9 +1466,10 @@ export function CalendarReview({
                 );
               })}
               {createGhost?.dayKey === formatCalendarDateKey(day) ? (() => {
+                const ghostLimitMinutes = calendarCreateLimitMinutes(day, new Date(createGhost.nowMs));
                 const geometry = calendarCreateGhostGeometry({
                   endMinutes: createGhost.endMinutes,
-                  heldAtLimit: createGhost.heldAtLimit,
+                  limitMinutes: ghostLimitMinutes < 24 * 60 ? ghostLimitMinutes : undefined,
                   rowHeight,
                   startHour: calendarHours.startHour,
                   startMinutes: createGhost.startMinutes
