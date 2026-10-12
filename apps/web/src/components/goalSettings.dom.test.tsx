@@ -68,7 +68,7 @@ describe("Settings › Your day steppers (UIA-309)", () => {
     view.unmount();
     await act(async () => { await vi.runAllTimersAsync(); });
     expect(mocks.fetch).toHaveBeenCalledTimes(1);
-    expect(mocks.refresh).toHaveBeenCalledWith({ force: true });
+    expect(mocks.refresh).toHaveBeenCalledWith({ force: true, freshOnly: true });
     expect(mocks.routerRefresh).toHaveBeenCalled();
   });
 
@@ -165,6 +165,24 @@ describe("Settings › Your day steppers (UIA-309)", () => {
     expect(view.getByRole("group", { name: "Weekly goal: 40h" })).toBeTruthy();
     expect(mocks.refresh).toHaveBeenCalledTimes(1);
     mocks.fetch.mockImplementation(async () => new Response("{}", { status: 200 }));
+  });
+
+  it("a failed newer save of the same goal falls back to the value the account accepted (Codex r6)", async () => {
+    vi.useFakeTimers();
+    let release: () => void = () => undefined;
+    mocks.fetch
+      .mockImplementationOnce(() => new Promise((resolve) => { release = () => resolve(new Response("{}", { status: 200 })); }))
+      .mockImplementationOnce(async () => new Response("{}", { status: 500 }));
+    const view = render(<GoalSettings dailyGoalMinutes={480} userId="user-1" weeklyGoalMinutes={2400} />);
+    fireEvent.click(view.getByRole("button", { name: "Increase daily goal" })); // 9h, held in flight
+    await act(async () => { await vi.advanceTimersByTimeAsync(600); });
+    fireEvent.click(view.getByRole("button", { name: "Increase daily goal" })); // 10h, queued
+    await act(async () => { release(); await vi.advanceTimersByTimeAsync(600); }); // 9h accepted, 10h rejected
+    expect(view.getByRole("alert").textContent).toContain("not saved");
+    // The account holds 9h, not the page's cached 8h.
+    expect(view.getByRole("group", { name: "Daily goal: 9h" })).toBeTruthy();
+    fireEvent.click(view.getByRole("button", { name: "Increase daily goal" }));
+    expect(view.getByRole("group", { name: "Daily goal: 10h" })).toBeTruthy();
   });
 
   it("leaving the page saves a pending change at once", async () => {

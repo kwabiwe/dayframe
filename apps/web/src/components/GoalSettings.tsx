@@ -20,7 +20,11 @@ import {
  * Settings › Your day (UIA-309): the iPhone's goal steppers. A tap changes the goal at once; it is
  * saved a moment after the last tap (no Save button), and leaving the page saves a pending change.
  */
-type Override = { value: number; revision: number };
+/**
+ * What a tap set for a goal (`value`, numbered by `revision`), and the last value the account
+ * accepted from this page for it (`accepted`), which a later failed save falls back to.
+ */
+type Override = { value: number; revision: number; accepted?: number };
 type SaveContext = { revisions: Partial<Record<GoalField, number>> };
 
 export function GoalSettings({
@@ -69,13 +73,29 @@ export function GoalSettings({
         if (!response.ok) throw new Error("not saved");
       },
       mergeContext: (earlier, later) => ({ revisions: { ...earlier.revisions, ...later.revisions } }),
+      onAccepted: ({ changes }) => {
+        if (!state.mounted) return;
+        // The account now holds these values, whatever is tapped since.
+        setOverrides((current) => {
+          const next = { ...current };
+          for (const [field, value] of Object.entries(changes) as Array<[GoalField, number]>) {
+            const override = current[field];
+            if (override) next[field] = { ...override, accepted: value };
+          }
+          return next;
+        });
+      },
       onFailed: ({ changes, context }) => {
         if (!state.mounted) return;
-        // Only the goals this save carried, and only if no newer tap changed them since.
+        // Only the goals this save carried, and only if no newer tap changed them since: each goes
+        // back to the last value the account accepted from here, or to the page's value.
         setOverrides((current) => {
           const next = { ...current };
           for (const field of Object.keys(changes) as GoalField[]) {
-            if (current[field]?.revision === context.revisions[field]) delete next[field];
+            const override = current[field];
+            if (!override || override.revision !== context.revisions[field]) continue;
+            if (override.accepted === undefined) delete next[field];
+            else next[field] = { ...override, value: override.accepted };
           }
           return next;
         });
@@ -86,7 +106,8 @@ export function GoalSettings({
         if (state.mounted && lastAccepted) setStatus({ kind: "saved", text: "Saved" });
         // Everything is saved (or failed): reload once, so every accepted write reaches the app.
         const revision = state.revision;
-        void state.refresh({ force: true }).then((fresh) => {
+        // Only newly loaded data may replace the taps: a failed or superseded load keeps them.
+        void state.refresh({ force: true, freshOnly: true }).then((fresh) => {
           state.router.refresh();
           // Fresh data now shows what the account holds; a newer tap keeps its own values.
           if (fresh && state.mounted && state.revision === revision && !saver.isBusy()) setOverrides({});
@@ -115,7 +136,7 @@ export function GoalSettings({
     const value = nextGoalMinutes(goals[field], direction, limits);
     if (value === goals[field]) return;
     const revision = ++latest.current.revision;
-    setOverrides((current) => ({ ...current, [field]: { value, revision } }));
+    setOverrides((current) => ({ ...current, [field]: { ...current[field], value, revision } }));
     setStatus(null);
     saverRef.current?.schedule({ [field]: value }, { revisions: { [field]: revision } });
   }

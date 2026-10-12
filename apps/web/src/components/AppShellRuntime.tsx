@@ -65,7 +65,11 @@ type RuntimeContext = {
   isTimerBusy: boolean;
   loadDate: (date: string) => Promise<DateLoadOutcome>;
   openManualEntry: () => void;
-  refresh: (options?: { force?: boolean }) => Promise<BootstrapData | null>;
+  /**
+   * Reloads the app's data. Resolves with the data now shown; with `freshOnly`, with the newly
+   * loaded data or null when nothing new was loaded (a failure, or a newer load superseded it).
+   */
+  refresh: (options?: { force?: boolean; freshOnly?: boolean }) => Promise<BootstrapData | null>;
   selectedDate: string;
   setTimerDraft: (draft: TimerDraft | ((current: TimerDraft) => TimerDraft)) => void;
   shellData: BootstrapData | null;
@@ -169,17 +173,21 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
     if (!timerDraftsEqual(nextDraft, draftRef.current)) setTimerDraft(nextDraft);
   }, [data?.activeEntry, setTimerDraft]);
 
-  const refresh = useCallback(async ({ force = false }: { force?: boolean } = {}) => {
-    if (!force && mutationGateRef.current.isActive()) return dataRef.current;
+  const refresh = useCallback(async ({ force = false, freshOnly = false }: { force?: boolean; freshOnly?: boolean } = {}) => {
+    const unchanged = () => (freshOnly ? null : dataRef.current);
+    if (!force && mutationGateRef.current.isActive()) return unchanged();
     const requestId = ++refreshRequestRef.current;
     try {
       const response = await clientFetch(`/api/bootstrap?date=${selectedDate}`, { cache: "no-store" });
-      if (!response.ok || requestId !== refreshRequestRef.current) return dataRef.current;
+      if (!response.ok || requestId !== refreshRequestRef.current) return unchanged();
       const payload = (await response.json()) as BootstrapData;
+      // A newer load (or a mutation's own data) may have landed while this body was read: an
+      // older answer never replaces it.
+      if (requestId !== refreshRequestRef.current) return unchanged();
       commitData(payload, "canonical");
       return payload;
     } catch {
-      return dataRef.current;
+      return unchanged();
     }
   }, [commitData, selectedDate]);
 
