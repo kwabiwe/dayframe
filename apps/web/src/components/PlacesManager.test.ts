@@ -55,8 +55,10 @@ describe("web Places list and editor contracts", () => {
 
   it("keeps save idempotence, fallback editing and attribution explicit", () => {
     expect(editor).toContain("saveInFlight.current");
-    expect(editor).toContain("Current location");
-    expect(editor).toContain("Advanced coordinates");
+    expect(editor).toContain("Use current location");
+    // Exact size and coordinates stay editable in the Advanced group (UIA-308).
+    expect(editor).toContain('title="Advanced"');
+    expect(editor).toContain('label="Latitude"');
     expect(mapPreview).toContain("Map preview unavailable");
     expect(mapPreview).toContain('attributionControl: { compact: false }');
     expect(combobox).toContain("Geoapify");

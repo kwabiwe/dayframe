@@ -26,9 +26,12 @@ import {
   validateWebPlaceForm,
   type WebPlaceCoordinate
 } from "@/lib/web-place-editor";
-import { Button, Disclosure, SelectField, TextField } from "./ui/Primitives";
+import { Button, SelectField, TextField } from "./ui/Primitives";
 import { PlaceMapPreview } from "./PlaceMapPreview";
 import { PlaceSearchCombobox } from "./PlaceSearchCombobox";
+
+/** The size choices, as on iPhone (UIA-088); any other size stays exact under Advanced. */
+const PLACE_RADIUS_CHOICES = [50, 100, 200] as const;
 
 type PlaceEditorMode = "create" | "edit" | "learned";
 
@@ -232,9 +235,12 @@ export function PlaceEditor({
     ? validation.message
     : null;
 
+  const radiusError = submitAttempted && !validation.ok && validation.field === "radiusMeters" ? validation.message : null;
+  const offMenuRadius = PLACE_RADIUS_CHOICES.some((meters) => String(meters) === radiusMeters.trim()) ? null : radiusMeters.trim();
+
   return (
-    <form className="place-editor" onSubmit={submit}>
-      <section className="place-editor-panel place-editor-search-panel">
+    <form className="place-editor df-pe" onSubmit={submit}>
+      <EditorGroup id="df-pe-where" title="Where" className="place-editor-search-panel">
         <PlaceSearchCombobox
           key={searchVersion}
           getBias={getBias}
@@ -250,47 +256,18 @@ export function PlaceEditor({
                 <span>{selectedResult.formattedAddress || selectedResult.subtitle}</span>
               ) : null}
             </span>
-            <Button
-              compact
-              variant="ghost"
+            <button
+              className="df-rbtn df-rbtn--sm df-rbtn--ghost"
               onClick={() => {
                 setSelectedResult(null);
                 setSearchVersion((value) => value + 1);
               }}
+              type="button"
             >
               Change
-            </Button>
+            </button>
           </div>
         ) : null}
-      </section>
-
-      <section className="place-editor-panel">
-        <TextField
-          id="dayframe-place-name"
-          label={shownRole ? "Address or name" : "Name in Dayframe"}
-          help={shownRole ? `Dayframe shows this place as ${placeRoleLabel(shownRole)}; this name appears under it.` : undefined}
-          placeholder={shownRole ? "The street address" : "Home, Gym, Mum's house…"}
-          value={name}
-          error={submitAttempted && !validation.ok && validation.field === "name"
-            ? validation.message
-            : null}
-          onChange={(event) => {
-            nameTouched.current = true;
-            setName(event.target.value);
-          }}
-        />
-
-        {newRole && roleHolder ? (
-          <TextField
-            id="dayframe-place-previous-role-name"
-            label={`Rename the old ${placeRoleLabel(newRole).toLowerCase()}`}
-            help="Its past blocks keep this name, so they don't read as an address. Leave it blank to keep the current name."
-            maxLength={120}
-            value={previousPlaceName}
-            onChange={(event) => setPreviousPlaceName(event.target.value)}
-          />
-        ) : null}
-
         <PlaceMapPreview
           coordinate={coordinate}
           onChange={(next) => {
@@ -308,71 +285,65 @@ export function PlaceEditor({
           }}
           radiusMeters={Number.isFinite(numericRadius) ? numericRadius : 0}
         />
+        <button
+          className="df-rbtn df-rbtn--sm place-current-location"
+          disabled={locating}
+          onClick={useCurrentLocation}
+          type="button"
+        >
+          {locating ? "Finding…" : "Use current location"}
+        </button>
+      </EditorGroup>
 
-        <div className="place-location-radius-row">
-          <Button
-            className="place-current-location"
-            disabled={locating}
-            variant="secondary"
-            onClick={useCurrentLocation}
-          >
-            {locating ? "Finding…" : "Current location"}
-          </Button>
-          <div className="place-radius-field">
-            <label htmlFor="place-radius">Radius</label>
-            <span>
-              <input
-                id="place-radius"
-                aria-describedby={submitAttempted && !validation.ok && validation.field === "radiusMeters"
-                  ? "place-radius-error"
-                  : undefined}
-                aria-invalid={submitAttempted && !validation.ok && validation.field === "radiusMeters"
-                  ? true
-                  : undefined}
-                className="ui-control"
-                inputMode="numeric"
-                min={25}
-                max={2000}
-                type="number"
-                value={radiusMeters}
-                onChange={(event) => setRadiusMeters(event.target.value)}
-              />
-              <em>m</em>
-            </span>
-            {submitAttempted && !validation.ok && validation.field === "radiusMeters" ? (
-              <small id="place-radius-error">{validation.message}</small>
-            ) : null}
-          </div>
+      <EditorGroup id="df-pe-name" title="Name">
+        <TextField
+          id="dayframe-place-name"
+          label={shownRole ? "Address or name" : "Name in Dayframe"}
+          help={shownRole ? `Dayframe shows this place as ${placeRoleLabel(shownRole)}; this name appears under it.` : undefined}
+          placeholder={shownRole ? "The street address" : "Home, Gym, Mum's house…"}
+          value={name}
+          error={submitAttempted && !validation.ok && validation.field === "name"
+            ? validation.message
+            : null}
+          onChange={(event) => {
+            nameTouched.current = true;
+            setName(event.target.value);
+          }}
+        />
+        {newRole && roleHolder ? (
+          <TextField
+            id="dayframe-place-previous-role-name"
+            label={`Rename the old ${placeRoleLabel(newRole).toLowerCase()}`}
+            help="Its past blocks keep this name, so they don't read as an address. Leave it blank to keep the current name."
+            maxLength={120}
+            value={previousPlaceName}
+            onChange={(event) => setPreviousPlaceName(event.target.value)}
+          />
+        ) : null}
+      </EditorGroup>
+
+      <EditorGroup id="df-pe-size" title="Size">
+        <div aria-label="Place radius" className="df-pe-seg" role="radiogroup">
+          {PLACE_RADIUS_CHOICES.map((meters) => (
+            <button
+              aria-checked={radiusMeters.trim() === String(meters)}
+              key={meters}
+              onClick={() => setRadiusMeters(String(meters))}
+              role="radio"
+              type="button"
+            >
+              {meters} m
+            </button>
+          ))}
         </div>
+        {/* A place saved with another size keeps it until a size is picked (as on iPhone). */}
+        <p className="df-muted df-pe-note">
+          {offMenuRadius ? `This place uses ${offMenuRadius} m. Pick a size to change it, or set an exact size under Advanced.` : "How close counts as being here."}
+        </p>
+        {radiusError ? <p className="df-pe-error" role="alert">{radiusError}</p> : null}
+      </EditorGroup>
 
-        <Disclosure summary="Advanced coordinates">
-          <div className="place-coordinate-grid">
-            <TextField
-              id="place-latitude"
-              label="Latitude"
-              inputMode="decimal"
-              value={latitude}
-              error={coordinateError}
-              onChange={(event) => {
-                setLatitude(event.target.value);
-                setCoordinateTouched(true);
-              }}
-            />
-            <TextField
-              id="place-longitude"
-              label="Longitude"
-              inputMode="decimal"
-              value={longitude}
-              onChange={(event) => {
-                setLongitude(event.target.value);
-                setCoordinateTouched(true);
-              }}
-            />
-          </div>
-        </Disclosure>
-      </section>
-
-      <section className="place-editor-panel">
+      <EditorGroup id="df-pe-visits" title="Visits">
         <label className="place-suggestion-toggle">
           <span>
             <strong>Suggest visits here</strong>
@@ -410,7 +381,7 @@ export function PlaceEditor({
             />
             <TextField
               id="place-default-activity"
-              label="Block name for visits here"
+              label="Default description"
               maxLength={240}
               placeholder="School drop-off/pickup"
               value={defaultActivityDescription}
@@ -418,7 +389,52 @@ export function PlaceEditor({
             />
           </div>
         ) : null}
-      </section>
+      </EditorGroup>
+
+      <EditorGroup id="df-pe-advanced" title="Advanced">
+        <div className="place-radius-field">
+          <label htmlFor="place-radius">Exact size</label>
+          <span>
+            <input
+              id="place-radius"
+              aria-describedby={radiusError ? "place-radius-error" : undefined}
+              aria-invalid={radiusError ? true : undefined}
+              className="ui-control"
+              inputMode="numeric"
+              min={25}
+              max={2000}
+              type="number"
+              value={radiusMeters}
+              onChange={(event) => setRadiusMeters(event.target.value)}
+            />
+            <em>m</em>
+          </span>
+          {radiusError ? <small id="place-radius-error">{radiusError}</small> : null}
+        </div>
+        <div className="place-coordinate-grid">
+          <TextField
+            id="place-latitude"
+            label="Latitude"
+            inputMode="decimal"
+            value={latitude}
+            error={coordinateError}
+            onChange={(event) => {
+              setLatitude(event.target.value);
+              setCoordinateTouched(true);
+            }}
+          />
+          <TextField
+            id="place-longitude"
+            label="Longitude"
+            inputMode="decimal"
+            value={longitude}
+            onChange={(event) => {
+              setLongitude(event.target.value);
+              setCoordinateTouched(true);
+            }}
+          />
+        </div>
+      </EditorGroup>
 
       {status ? (
         <p
@@ -430,12 +446,22 @@ export function PlaceEditor({
       ) : null}
 
       <div className="place-editor-actions">
-        <Link className="ui-button ui-button-secondary" href="/places">Cancel</Link>
+        <Link className="df-rbtn df-rbtn--ghost" href="/places">Cancel</Link>
         <Button disabled={saving} type="submit" variant="primary">
           {saving ? "Saving…" : "Save"}
         </Button>
       </div>
     </form>
+  );
+}
+
+/** One titled group of the editor, as iPhone's place editor groups it (7b). */
+function EditorGroup({ children, className, id, title }: { children: React.ReactNode; className?: string; id: string; title: string }) {
+  return (
+    <section aria-labelledby={`${id}-title`} className={`df-card df-pe-group${className ? ` ${className}` : ""}`}>
+      <h2 id={`${id}-title`}>{title}</h2>
+      {children}
+    </section>
   );
 }
 
