@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState, type SetStateAction } from "react";
 import {
+  currentMobileAccountEpoch,
   getActiveMobileAccountSnapshot,
   readActiveMobileAccount,
   subscribeActiveMobileAccount,
@@ -11,16 +12,21 @@ import { currentSessionGeneration, subscribeAuthenticatedSession } from "./secur
 /**
  * Last-known values of states each Settings page reads after it opens (permissions, Apple Health
  * access, the evening reminder, sync diagnostics), so a newly pushed page starts from them instead
- * of empty and nothing visibly flips on open (owner, 12 Oct). In memory only, dropped on sign-out,
- * and bound to one account (user and workspace) in one authenticated session
+ * of empty and nothing visibly flips on open (owner, 12 Oct). In memory, dropped on sign-out,
+ * and bound to one account (user and workspace) in one account lifetime (`currentMobileAccountEpoch`,
+ * advanced by every activation or removal, so A→B→A is a new lifetime) and one authenticated session
  * (`currentSessionGeneration`, bumped by every sign-in, sign-out and invalidation): a value is only
  * handed out to that same account in that same session, and a late result that started in an
  * earlier account or session never lands (Codex r1–r3 on #355). Every read is bound to the account
  * it was started for (`beginRememberedSettingsRead`), never to whichever account a page later
  * belongs to: the active account can load silently and then be replaced within one session.
+ * Across launches, `settingsLastKnown.ts` keeps a display-only projection of these values on the
+ * device (A4), fed by `subscribeRememberedSettingWrites`; it never feeds values back in here.
  */
 export type RememberedSettingsBinding = {
   generation: number;
+  /** The account lifetime (`currentMobileAccountEpoch`): A→B→A starts a new one. */
+  accountEpoch: number;
   /** The account a read is for: account-scoped stores are read for exactly this owner. */
   owner: MobileAccountOwner | null;
   ownerKey: string | null;
@@ -33,13 +39,18 @@ export function captureRememberedSettingsBinding(): RememberedSettingsBinding {
   const owner = getActiveMobileAccountSnapshot();
   return {
     generation: currentSessionGeneration(),
+    accountEpoch: currentMobileAccountEpoch(),
     owner: owner ? { userId: owner.userId, workspaceId: owner.workspaceId } : null,
     ownerKey: owner ? `${owner.userId}:${owner.workspaceId}` : null
   };
 }
 
+export function sameRememberedSettingsBinding(left: RememberedSettingsBinding, right: RememberedSettingsBinding) {
+  return sameBinding(left, right);
+}
+
 function sameBinding(left: RememberedSettingsBinding, right: RememberedSettingsBinding) {
-  return left.ownerKey === right.ownerKey && left.generation === right.generation;
+  return left.ownerKey === right.ownerKey && left.generation === right.generation && left.accountEpoch === right.accountEpoch;
 }
 
 /**
@@ -62,11 +73,26 @@ export function readRememberedSetting<T>(key: string): T | undefined {
   return remembered.values.get(key) as T | undefined;
 }
 
+type RememberedSettingWriteListener = (key: string, value: unknown, binding: RememberedSettingsBinding) => void;
+const writeListeners = new Set<RememberedSettingWriteListener>();
+
+/**
+ * Hears every value that lands (only ever for the current account and session). The on-device
+ * last-known store (`settingsLastKnown.ts`) keeps a display-only projection of some of them.
+ */
+export function subscribeRememberedSettingWrites(listener: RememberedSettingWriteListener) {
+  writeListeners.add(listener);
+  return () => {
+    writeListeners.delete(listener);
+  };
+}
+
 /** Publishes only while `binding` is still the current account and session; returns whether it did. */
 export function writeRememberedSetting(key: string, value: unknown, binding: RememberedSettingsBinding) {
   if (!isRememberedSettingsBindingCurrent(binding)) return false;
   if (!remembered || !sameBinding(remembered.binding, binding)) remembered = { binding, values: new Map() };
   remembered.values.set(key, value);
+  for (const listener of [...writeListeners]) listener(key, value, binding);
   return true;
 }
 

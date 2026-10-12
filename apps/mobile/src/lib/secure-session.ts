@@ -26,6 +26,17 @@ type StoredMobileSession = {
 
 let cachedSession: StoredMobileSession | null | undefined;
 let sessionRevision = 0;
+/**
+ * The latest sign-in's hand-over: whose session it replaced (as this process had loaded it;
+ * undefined when it had not been read) and whose it installed. Lets a listener tell a same-account
+ * renewal from a replacement without trusting the active account alone (Codex r2 on #365).
+ */
+export type SessionHandOver = {
+  generation: number;
+  outgoingOwner: MobileAccountOwner | null | undefined;
+  incomingOwner: MobileAccountOwner | null;
+};
+let lastHandOver: SessionHandOver | null = null;
 let sessionOperations: Promise<void> = Promise.resolve();
 const sessionListeners = new Set<() => void>();
 
@@ -48,6 +59,7 @@ export type OwnedSessionSnapshotRead =
 
 export function resetSessionTokenCacheForTesting() {
   cachedSession = undefined;
+  lastHandOver = null;
   sessionRevision += 1;
   sessionOperations = Promise.resolve();
   sessionListeners.clear();
@@ -205,8 +217,10 @@ export function isAuthenticatedSessionSnapshotCurrent(
 }
 
 export async function setSessionToken(token: string, owner?: MobileAccountOwner) {
+  const outgoingOwner = cachedSession === undefined ? undefined : cachedSession?.owner ?? null;
   const revision = ++sessionRevision;
   cachedSession = null;
+  lastHandOver = { generation: revision, outgoingOwner, incomingOwner: owner ?? null };
   return serialiseSessionOperation(async () => {
     const session = { owner: owner ?? null, token } satisfies StoredMobileSession;
     await withInteractionRetry(() =>
@@ -249,6 +263,20 @@ export async function bindAuthenticatedSessionOwner(
     emitSessionChange();
     return true;
   });
+}
+
+/**
+ * The owner of the session this process has loaded, without touching the Keychain: undefined until
+ * it has been read, null when signed out or not yet bound to an account (a legacy token).
+ */
+export function peekAuthenticatedSessionOwner(): MobileAccountOwner | null | undefined {
+  if (cachedSession === undefined) return undefined;
+  return cachedSession?.owner ?? null;
+}
+
+/** The hand-over of the current generation's sign-in, or null when the generation came from anything else. */
+export function peekSessionHandOver(): SessionHandOver | null {
+  return lastHandOver && lastHandOver.generation === sessionRevision ? lastHandOver : null;
 }
 
 /** Bumped by every sign-in, sign-out and invalidation; a recovery is bound to the one it saw. */
