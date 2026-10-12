@@ -73,6 +73,9 @@ import {
   calculateCalendarClickCreateSlot,
   calculateCalendarDraftAnchorGeometry,
   calendarCreatePointerSequenceAccepted,
+  calendarDragCreateRange,
+  calendarDragCreateSlot,
+  calendarDragMinutesAt,
   calendarPointHitsSemanticBlock,
   calendarPointerMatchesConsumed,
   isEligibleCalendarCreatePointer,
@@ -101,7 +104,8 @@ const scopeItems: Array<{ id: TimelineScope; label: string }> = [
 const calendarHourModes: Record<CalendarHoursMode, { label: string; startHour: number; endHour: number }> = {
   fullDay: { label: "24h", startHour: 0, endHour: 24 }
 };
-const calendarSnapMinutes = 15;
+// Resize and drag-create both move in 5-minute steps (prototype web.html beginResize).
+const calendarSnapMinutes = 5;
 const calendarZooms = {
   hour: { label: "1h", intervalMinutes: 60, pixelsPerHour: 64 },
   half: { label: "30m", intervalMinutes: 30, pixelsPerHour: 92 },
@@ -623,6 +627,16 @@ export function CalendarReview({
   const [resizeDraft, setResizeDraft] = useState<CalendarResizeDraft | null>(null);
   const [resizingId, setResizingId] = useState<string | null>(null);
   const [resizeError, setResizeError] = useState<string | null>(null);
+  const [resizeTip, setResizeTip] = useState<{ label: string; x: number; y: number } | null>(null);
+  // Drag on empty time: the day body owns the pointer (capture) from press to release.
+  const [createGhost, setCreateGhost] = useState<{ dayKey: string; endMinutes: number; startMinutes: number } | null>(null);
+  const createDragRef = useRef<{
+    anchorMinutes: number;
+    dayKey: string;
+    endMinutes: number;
+    pointerId: number;
+    startMinutes: number;
+  } | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const [continuingEntryId, setContinuingEntryId] = useState<string | null>(null);
   const [zoomLevel, setZoomLevel] = useState<CalendarZoom>("hour");
@@ -717,7 +731,7 @@ export function CalendarReview({
     setSelectedTarget(null);
   }
 
-  function createCalendarDraft(day: Date, slot: NonNullable<ReturnType<typeof calculateCalendarClickCreateSlot>>) {
+  function createCalendarDraft(day: Date, slot: { startedAt: string; stoppedAt: string }) {
     const nextTarget: CalendarCreateEditorTarget = {
       anchor: null,
       dayKey: formatCalendarDateKey(day),
@@ -902,16 +916,24 @@ export function CalendarReview({
       const rawMinutes = timelineStart + (relativeY / rowHeight) * 60;
       const snappedMinutes = clampMinutes(snapCalendarMinutes(rawMinutes), timelineStart, timelineEnd);
       const nextStartMinutes =
-        edge === "start" ? clampMinutes(snappedMinutes, timelineStart, originalEnd - 15) : originalStart;
+        edge === "start" ? clampMinutes(snappedMinutes, timelineStart, originalEnd - calendarSnapMinutes) : originalStart;
       const nextEndMinutes =
-        edge === "end" ? clampMinutes(snappedMinutes, originalStart + 15, timelineEnd) : originalEnd;
+        edge === "end" ? clampMinutes(snappedMinutes, originalStart + calendarSnapMinutes, timelineEnd) : originalEnd;
       finalDraft = {
         entryId: entry.id,
         startedAt: edge === "start" ? isoForDateMinutes(day, nextStartMinutes) : entry.startedAt,
         stoppedAt: edge === "end" ? isoForDateMinutes(day, nextEndMinutes) : entry.stoppedAt as string
       };
       setResizeDraft(finalDraft);
+      const edgeMinutes = edge === "start" ? nextStartMinutes : nextEndMinutes;
+      const durationSeconds = Math.max(0, (nextEndMinutes - nextStartMinutes) * 60);
+      setResizeTip({
+        label: `${formatCalendarAxisMinutes(edgeMinutes)} · ${formatDuration(durationSeconds)}`,
+        x: lastClientX + 14,
+        y: clientY + 10
+      });
     };
+    let lastClientX = event.clientX;
 
     const beginResize = () => {
       if (hasStartedResize) return;
@@ -926,20 +948,31 @@ export function CalendarReview({
         if (Math.abs(moveEvent.clientY - startClientY) < resizeDragThresholdPx) return;
         beginResize();
       }
+      lastClientX = moveEvent.clientX;
       updateDraft(moveEvent.clientY);
     };
     const cancelResize = () => {
       window.removeEventListener("pointermove", moveResize);
       window.removeEventListener("pointerup", stopResize);
       window.removeEventListener("pointercancel", cancelResize);
+      window.removeEventListener("keydown", escapeResize, true);
       setResizingId(null);
       setResizeDraft(null);
+      setResizeTip(null);
+    };
+    const escapeResize = (keyEvent: KeyboardEvent) => {
+      if (keyEvent.key !== "Escape") return;
+      keyEvent.preventDefault();
+      keyEvent.stopPropagation();
+      cancelResize();
     };
     const stopResize = async () => {
       window.removeEventListener("pointermove", moveResize);
       window.removeEventListener("pointerup", stopResize);
       window.removeEventListener("pointercancel", cancelResize);
+      window.removeEventListener("keydown", escapeResize, true);
       setResizingId(null);
+      setResizeTip(null);
 
       if (!hasStartedResize || !finalDraft) {
         setResizeDraft(null);
@@ -958,6 +991,7 @@ export function CalendarReview({
     window.addEventListener("pointermove", moveResize);
     window.addEventListener("pointerup", stopResize, { once: true });
     window.addEventListener("pointercancel", cancelResize, { once: true });
+    window.addEventListener("keydown", escapeResize, true);
   }
 
   function startCalendarCreatePointer(
@@ -994,6 +1028,56 @@ export function CalendarReview({
     dayBody.setPointerCapture(event.pointerId);
   }
 
+  function moveCalendarCreatePointer(day: Date, event: ReactPointerEvent<HTMLDivElement>) {
+    const sequence = createPointerSequenceRef.current;
+    if (!sequence || sequence.pointerId !== event.pointerId) return;
+    const dayBodyTop = event.currentTarget.getBoundingClientRect().top;
+    const axis = { endHour: calendarHours.endHour, rowHeight, startHour: calendarHours.startHour };
+    let drag = createDragRef.current;
+    if (!drag) {
+      if (Math.hypot(event.clientX - sequence.clientX, event.clientY - sequence.clientY) < resizeDragThresholdPx) return;
+      // The press position is read against today's scroll, so a scroll between press and
+      // threshold still anchors on the time the pointer went down on.
+      const scrollShift = (calendarScroller?.scrollTop ?? 0) - sequence.scrollTop;
+      const anchorMinutes = calendarDragMinutesAt({ ...axis, clientY: sequence.clientY - scrollShift, dayBodyTop });
+      drag = {
+        anchorMinutes,
+        dayKey: sequence.dayKey,
+        endMinutes: anchorMinutes,
+        pointerId: event.pointerId,
+        startMinutes: anchorMinutes
+      };
+      createDragRef.current = drag;
+    }
+    const range = calendarDragCreateRange({
+      ...axis,
+      anchorMinutes: drag.anchorMinutes,
+      currentMinutes: calendarDragMinutesAt({ ...axis, clientY: event.clientY, dayBodyTop })
+    });
+    if (range.startMinutes === drag.startMinutes && range.endMinutes === drag.endMinutes && createGhost) return;
+    drag.startMinutes = range.startMinutes;
+    drag.endMinutes = range.endMinutes;
+    setCreateGhost({ dayKey: formatCalendarDateKey(day), ...range });
+  }
+
+  function abortCalendarCreateDrag() {
+    createDragRef.current = null;
+    createPointerSequenceRef.current = null;
+    setCreateGhost(null);
+  }
+
+  useEffect(() => {
+    if (!createGhost) return;
+    const escape = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      event.preventDefault();
+      event.stopPropagation();
+      abortCalendarCreateDrag();
+    };
+    window.addEventListener("keydown", escape, true);
+    return () => window.removeEventListener("keydown", escape, true);
+  }, [createGhost]);
+
   function finishCalendarCreatePointer(
     day: Date,
     event: ReactPointerEvent<HTMLDivElement>
@@ -1003,6 +1087,20 @@ export function CalendarReview({
     createPointerSequenceRef.current = null;
     if (dayBody.hasPointerCapture(event.pointerId)) {
       dayBody.releasePointerCapture(event.pointerId);
+    }
+    const drag = createDragRef.current;
+    if (drag && drag.pointerId === event.pointerId) {
+      createDragRef.current = null;
+      setCreateGhost(null);
+      if (!sequence || drag.dayKey !== formatCalendarDateKey(day)) return;
+      const slot = calendarDragCreateSlot({
+        day,
+        endMinutes: drag.endMinutes,
+        now: new Date(),
+        startMinutes: drag.startMinutes
+      });
+      if (slot) createCalendarDraft(day, slot);
+      return;
     }
 
     const underlyingTarget = document.elementFromPoint(event.clientX, event.clientY);
@@ -1060,6 +1158,7 @@ export function CalendarReview({
     if (createPointerSequenceRef.current?.pointerId === event.pointerId) {
       createPointerSequenceRef.current = null;
     }
+    if (createDragRef.current?.pointerId === event.pointerId) abortCalendarCreateDrag();
   }
 
   return (
@@ -1171,6 +1270,7 @@ export function CalendarReview({
               onLostPointerCapture={cancelCalendarCreatePointer}
               onPointerCancel={cancelCalendarCreatePointer}
               onPointerDown={(event) => startCalendarCreatePointer(day, event)}
+              onPointerMove={(event) => moveCalendarCreatePointer(day, event)}
               onPointerUp={(event) => finishCalendarCreatePointer(day, event)}
               style={{
                 height: calendarHeight,
@@ -1231,6 +1331,19 @@ export function CalendarReview({
                   </Link>
                 );
               })}
+              {createGhost?.dayKey === formatCalendarDateKey(day) ? (
+                <div
+                  aria-hidden="true"
+                  className="calendar-create-ghost tabular"
+                  data-calendar-create-ghost
+                  style={{
+                    height: Math.max(12, ((createGhost.endMinutes - createGhost.startMinutes) / 60) * rowHeight - 2),
+                    top: ((createGhost.startMinutes - calendarHours.startHour * 60) / 60) * rowHeight
+                  }}
+                >
+                  {`${formatCalendarAxisMinutes(createGhost.startMinutes)}–${formatCalendarAxisMinutes(createGhost.endMinutes)} · ${formatDuration((createGhost.endMinutes - createGhost.startMinutes) * 60)}`}
+                </div>
+              ) : null}
               {visibleSelectedTarget?.kind === "create" && visibleSelectedTarget.dayKey === formatCalendarDateKey(day) ? (() => {
                 const geometry = calculateCalendarDraftAnchorGeometry({
                   day,
@@ -1527,6 +1640,16 @@ export function CalendarReview({
             entries={entries}
             excludeEntryId={resizeDraft.entryId}
           />
+        </div>
+      ) : null}
+      {resizeTip ? (
+        <div
+          aria-hidden="true"
+          className="calendar-resize-tip tabular"
+          data-calendar-resize-tip
+          style={{ left: resizeTip.x, top: resizeTip.y }}
+        >
+          {resizeTip.label}
         </div>
       ) : null}
       {resizeError ? (

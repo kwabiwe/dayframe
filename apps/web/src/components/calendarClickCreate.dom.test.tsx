@@ -484,3 +484,151 @@ function entryAt(
     ...overrides
   };
 }
+
+const fetchMock = vi.hoisted(() => ({ clientFetch: vi.fn() }));
+vi.mock("@/lib/client-auth-fetch", () => fetchMock);
+
+describe("Calendar drag-to-create and 5-minute resize (W13)", () => {
+  beforeEach(() => {
+    runtime.createManualEntry.mockReset().mockResolvedValue({ ok: true });
+    fetchMock.clientFetch.mockReset().mockResolvedValue({ ok: true, status: 200 });
+    anchorIsOffscreen = false;
+    pointTarget = null;
+    installDomGeometry();
+  });
+
+  afterEach(() => {
+    cleanup();
+    document.body.innerHTML = "";
+    vi.restoreAllMocks();
+  });
+
+  const y = (minute: number) => (minute / 60) * 64;
+  const pointer = (pointerId: number, clientY: number) => ({
+    button: 0, clientX: 300, clientY, isPrimary: true, pointerId, pointerType: "mouse"
+  });
+
+  it("follows the pointer with a 5-minute ghost and opens the create flow with the dragged times", async () => {
+    renderCalendar();
+    const dayBody = document.querySelector<HTMLElement>("[data-calendar-day-body]") as HTMLElement;
+    pointTarget = dayBody;
+    await act(async () => {
+      fireEvent.pointerDown(dayBody, pointer(31, y(9 * 60 + 2)));
+      fireEvent.pointerMove(dayBody, pointer(31, y(9 * 60 + 23)));
+    });
+    const ghost = document.querySelector<HTMLElement>("[data-calendar-create-ghost]");
+    expect(ghost?.textContent).toMatch(/^09:00–09:25 · /);
+    await act(async () => {
+      fireEvent.pointerMove(dayBody, pointer(31, y(9 * 60 + 47)));
+    });
+    expect(document.querySelector("[data-calendar-create-ghost]")?.textContent).toMatch(/^09:00–09:45 · /);
+    expect(screen.queryByTestId("calendar-compact-editor")).toBeNull();
+    await act(async () => {
+      fireEvent.pointerUp(dayBody, pointer(31, y(9 * 60 + 47)));
+    });
+    expect(document.querySelector("[data-calendar-create-ghost]")).toBeNull();
+    await screen.findByTestId("calendar-compact-editor");
+    await flushDocumentListeners();
+    await userEvent.click(screen.getByRole("button", { name: "Add block" }));
+    await waitFor(() => expect(runtime.createManualEntry).toHaveBeenCalledOnce());
+    expect(runtime.createManualEntry).toHaveBeenCalledWith(expect.objectContaining({
+      startedAt: new Date(2026, 7, 2, 9, 0).toISOString(),
+      stoppedAt: new Date(2026, 7, 2, 9, 45).toISOString()
+    }));
+  });
+
+  it("drags upward from the press and aborts cleanly on Escape and pointer cancel", async () => {
+    renderCalendar();
+    const dayBody = document.querySelector<HTMLElement>("[data-calendar-day-body]") as HTMLElement;
+    pointTarget = dayBody;
+    await act(async () => {
+      fireEvent.pointerDown(dayBody, pointer(32, y(10 * 60)));
+      fireEvent.pointerMove(dayBody, pointer(32, y(9 * 60 + 31)));
+    });
+    expect(document.querySelector("[data-calendar-create-ghost]")?.textContent).toMatch(/^09:30–10:00 · /);
+    await act(async () => {
+      fireEvent.keyDown(window, { key: "Escape" });
+    });
+    expect(document.querySelector("[data-calendar-create-ghost]")).toBeNull();
+    await act(async () => {
+      fireEvent.pointerUp(dayBody, pointer(32, y(9 * 60 + 31)));
+    });
+    await flushDocumentListeners();
+    expect(screen.queryByTestId("calendar-compact-editor")).toBeNull();
+
+    await act(async () => {
+      fireEvent.pointerDown(dayBody, pointer(33, y(11 * 60)));
+      fireEvent.pointerMove(dayBody, pointer(33, y(11 * 60 + 30)));
+    });
+    expect(document.querySelector("[data-calendar-create-ghost]")).not.toBeNull();
+    await act(async () => {
+      fireEvent.pointerCancel(dayBody, pointer(33, y(11 * 60 + 30)));
+    });
+    expect(document.querySelector("[data-calendar-create-ghost]")).toBeNull();
+    await flushDocumentListeners();
+    expect(screen.queryByTestId("calendar-compact-editor")).toBeNull();
+  });
+
+  it("ignores touch presses so the page keeps scrolling", async () => {
+    renderCalendar();
+    const dayBody = document.querySelector<HTMLElement>("[data-calendar-day-body]") as HTMLElement;
+    pointTarget = dayBody;
+    await act(async () => {
+      fireEvent.pointerDown(dayBody, { ...pointer(34, y(9 * 60)), pointerType: "touch" });
+      fireEvent.pointerMove(dayBody, { ...pointer(34, y(10 * 60)), pointerType: "touch" });
+    });
+    expect(document.querySelector("[data-calendar-create-ghost]")).toBeNull();
+  });
+
+  it("resizes an edge in 5-minute steps with a live time tip and saves through the update path", async () => {
+    const entry = entryAt(
+      new Date(2026, 7, 2, 8, 0).toISOString(),
+      new Date(2026, 7, 2, 9, 0).toISOString(),
+      { id: "resize-me" }
+    );
+    renderCalendar([entry]);
+    const handle = document.querySelector<HTMLElement>(".swiss-resize-handle.bottom") as HTMLElement;
+    expect(handle).not.toBeNull();
+    await act(async () => {
+      fireEvent.pointerDown(handle, pointer(41, y(9 * 60)));
+      window.dispatchEvent(new PointerEvent("pointermove", pointer(41, y(9 * 60 + 12))));
+    });
+    expect(document.querySelector("[data-calendar-resize-tip]")?.textContent).toMatch(/^09:10 · /);
+    await act(async () => {
+      window.dispatchEvent(new PointerEvent("pointermove", pointer(41, y(9 * 60 + 23))));
+    });
+    expect(document.querySelector("[data-calendar-resize-tip]")?.textContent).toMatch(/^09:25 · /);
+    await act(async () => {
+      window.dispatchEvent(new PointerEvent("pointerup", pointer(41, y(9 * 60 + 23))));
+    });
+    expect(document.querySelector("[data-calendar-resize-tip]")).toBeNull();
+    await waitFor(() => expect(fetchMock.clientFetch).toHaveBeenCalledOnce());
+    const body = JSON.parse(fetchMock.clientFetch.mock.calls[0][1].body as string);
+    expect(body.stoppedAt).toBe(new Date(2026, 7, 2, 9, 25).toISOString());
+    expect(body.startedAt).toBe(entry.startedAt);
+  });
+
+  it("keeps a 5-minute minimum and Escape aborts a resize without saving", async () => {
+    const entry = entryAt(
+      new Date(2026, 7, 2, 8, 0).toISOString(),
+      new Date(2026, 7, 2, 9, 0).toISOString(),
+      { id: "resize-escape" }
+    );
+    renderCalendar([entry]);
+    const handle = document.querySelector<HTMLElement>(".swiss-resize-handle.bottom") as HTMLElement;
+    await act(async () => {
+      fireEvent.pointerDown(handle, pointer(42, y(9 * 60)));
+      window.dispatchEvent(new PointerEvent("pointermove", pointer(42, y(7 * 60))));
+    });
+    expect(document.querySelector("[data-calendar-resize-tip]")?.textContent).toMatch(/^08:05 · /);
+    await act(async () => {
+      fireEvent.keyDown(window, { key: "Escape" });
+    });
+    expect(document.querySelector("[data-calendar-resize-tip]")).toBeNull();
+    await act(async () => {
+      window.dispatchEvent(new PointerEvent("pointerup", pointer(42, y(7 * 60))));
+    });
+    await flushDocumentListeners();
+    expect(fetchMock.clientFetch).not.toHaveBeenCalled();
+  });
+});

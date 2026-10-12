@@ -313,3 +313,79 @@ function isoForLocalDateMinutes(day: Date, minutes: number) {
 function clamp(value: number, minimum: number, maximum: number) {
   return Math.min(maximum, Math.max(minimum, value));
 }
+
+export const calendarDragSnapMinutes = 5;
+
+/** Snapped (5-minute) minute-of-day under a pointer, clamped to the visible axis. */
+export function calendarDragMinutesAt({
+  clientY,
+  dayBodyTop,
+  endHour,
+  rowHeight,
+  startHour
+}: {
+  clientY: number;
+  dayBodyTop: number;
+  endHour: number;
+  rowHeight: number;
+  startHour: number;
+}) {
+  const raw = startHour * 60 + ((clientY - dayBodyTop) / rowHeight) * 60;
+  const snapped = Math.round(raw / calendarDragSnapMinutes) * calendarDragSnapMinutes;
+  return clamp(snapped, startHour * 60, endHour * 60);
+}
+
+/**
+ * The range a drag on empty Calendar time describes: from the press to the pointer, in either
+ * direction, never shorter than one 5-minute step and never past the visible axis.
+ */
+export function calendarDragCreateRange({
+  anchorMinutes,
+  currentMinutes,
+  endHour,
+  startHour
+}: {
+  anchorMinutes: number;
+  currentMinutes: number;
+  endHour: number;
+  startHour: number;
+}) {
+  const lower = startHour * 60;
+  const upper = endHour * 60;
+  let startMinutes = Math.min(anchorMinutes, currentMinutes);
+  let endMinutes = Math.max(anchorMinutes, currentMinutes);
+  if (endMinutes - startMinutes < calendarDragSnapMinutes) {
+    endMinutes = startMinutes + calendarDragSnapMinutes;
+    if (endMinutes > upper) {
+      endMinutes = upper;
+      startMinutes = upper - calendarDragSnapMinutes;
+    }
+  }
+  return { endMinutes: clamp(endMinutes, lower, upper), startMinutes: clamp(startMinutes, lower, upper) };
+}
+
+/** ISO bounds for a dragged range; null when it starts in the future. The end is held at now. */
+export function calendarDragCreateSlot({
+  day,
+  endMinutes,
+  now,
+  startMinutes
+}: {
+  day: Date;
+  endMinutes: number;
+  now: Date;
+  startMinutes: number;
+}) {
+  const startedAt = isoForLocalDateMinutes(day, startMinutes);
+  const stoppedAtRaw = isoForLocalDateMinutes(day, Math.min(endMinutes, 24 * 60 - 1));
+  const stoppedAtMs = endMinutes >= 24 * 60
+    ? new Date(isoForLocalDateMinutes(day, 24 * 60 - 1) ?? "").getTime() + 60_000
+    : new Date(stoppedAtRaw ?? "").getTime();
+  if (!startedAt || !Number.isFinite(stoppedAtMs)) return null;
+  const startedAtMs = new Date(startedAt).getTime();
+  const nowMs = now.getTime();
+  if (startedAtMs >= nowMs) return null;
+  const endMs = Math.min(stoppedAtMs, nowMs);
+  if (endMs - startedAtMs < 60_000) return null;
+  return { startedAt, stoppedAt: new Date(endMs).toISOString() };
+}
