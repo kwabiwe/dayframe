@@ -153,13 +153,25 @@ export function ReportsBlocksPanel({
     cardRef.current = node;
     if (!node) return;
     return () => {
-      if (document.activeElement instanceof Node && node.contains(document.activeElement)) whereRef.current?.focus();
+      if (document.activeElement instanceof Node && node.contains(document.activeElement)) whereRef.current?.focus({ preventScroll: true });
       cardRef.current = null;
     };
   }, []);
   // Whether focus is in the blocks card, to bring it back when new data removes the focused
   // block without a blur.
   const cardHasFocus = useRef(false);
+  // Focus the program moves (recovery after new data, the panel closing) never traces (review r5):
+  // only a person's keyboard or pointer focus does. Focus events fire inside focus().
+  const silentFocus = useRef(false);
+  const focusQuietly = (element: HTMLElement | null | undefined) => {
+    if (!element) return;
+    silentFocus.current = true;
+    try {
+      element.focus();
+    } finally {
+      silentFocus.current = false;
+    }
+  };
   const pickedDay = blocks?.days.find((day) => day.key === pickedKey) ?? null;
   const panelRef = useRef<HTMLDivElement | null>(null);
   // Closing makes the panel inert; focus inside it (a row or Close) returns to the picked day's
@@ -172,7 +184,7 @@ export function ReportsBlocksPanel({
     const dayKey = panel.dataset.dayKey;
     const day = [...(blocksRef.current?.querySelectorAll<HTMLElement>("[data-trace-day]") ?? [])].find((element) => element.dataset.traceDay === dayKey);
     const target = day?.querySelector<HTMLElement>("[data-roving-key]") ?? (day?.matches("[data-roving-key]") ? day : null) ?? cardRef.current;
-    target?.focus();
+    focusQuietly(target);
   };
   const restoreFocusRef = useRef(restoreFocus);
   const panelOpen = pickedDay !== null;
@@ -189,10 +201,14 @@ export function ReportsBlocksPanel({
       }
     }
     // A focused block that new data removed takes focus with it: hand it to the card's tab stop.
+    const items = [...(blocksRef.current?.querySelectorAll<HTMLElement>("[data-roving-key]") ?? [])];
     const active = document.activeElement;
     if (cardHasFocus.current && (active === null || active === document.body)) {
-      const items = [...(blocksRef.current?.querySelectorAll<HTMLElement>("[data-roving-key]") ?? [])];
-      (items.find((element) => element.tabIndex === 0) ?? cardRef.current)?.focus();
+      focusQuietly(items.find((element) => element.tabIndex === 0) ?? cardRef.current);
+    } else if (active instanceof HTMLElement && blocksRef.current?.contains(active) && !active.hasAttribute("data-roving-key")) {
+      // A focused empty day that new data filled is no longer a stop (its blocks are, review r5):
+      // move to its first block so arrows and Home/End keep working, without tracing.
+      focusQuietly(active.querySelector<HTMLElement>("[data-roving-key]") ?? items.find((element) => element.tabIndex === 0) ?? cardRef.current);
     }
   });
   const closeDay = () => {
@@ -271,6 +287,7 @@ export function ReportsBlocksPanel({
     ? blocks.days.flatMap((day) => (day.blocks.length ? day.blocks.map((block) => blockKey(day, block.id)) : [dayItemKey(day)]))
     : [];
   const tabKey = rovingKey !== null && rovingKeys.includes(rovingKey) ? rovingKey : rovingKeys[0] ?? null;
+  const carriedActivity = useRef<{ dayKey: string; activityId: string | null } | null>(null);
   const moveFocus = (event: KeyboardEvent<HTMLElement>, day: ReportBlocksDay, index: number) => {
     if (!blocks) return;
     const at = blocks.days.findIndex((entry) => entry.key === day.key);
@@ -282,9 +299,16 @@ export function ReportsBlocksPanel({
     } else if (event.key === "ArrowLeft" || event.key === "ArrowRight") {
       const other = blocks.days[at + (event.key === "ArrowRight" ? 1 : -1)];
       if (other) {
-        const same = other.blocks.find((block) => block.id === day.blocks[index]?.id);
+        // The activity carries across empty days (review r5): Work → empty day → Work again.
+        const carried = carriedActivity.current;
+        const wanted = day.blocks[index]?.id ?? (carried?.dayKey === day.key ? carried.activityId : null);
+        const same = other.blocks.find((block) => block.id === wanted);
         const fallback = other.blocks[Math.min(index, other.blocks.length - 1)];
-        target = same || fallback ? blockKey(other, (same ?? fallback).id) : dayItemKey(other);
+        if (same || fallback) target = blockKey(other, (same ?? fallback).id);
+        else {
+          target = dayItemKey(other);
+          carriedActivity.current = { dayKey: other.key, activityId: wanted };
+        }
       }
     } else if (event.key === "Home" || event.key === "End") {
       target = (event.key === "Home" ? rovingKeys[0] : rovingKeys[rovingKeys.length - 1]) ?? null;
@@ -330,7 +354,7 @@ export function ReportsBlocksPanel({
       onClick: () => setSource("tap", sliceId),
       onFocus: () => {
         setRovingKey(key);
-        setSource("focus", sliceId);
+        if (!silentFocus.current) setSource("focus", sliceId);
       },
       onKeyDown: (event: KeyboardEvent<HTMLElement>) => moveFocus(event, day, index),
       style: { ...(block.color ? blockStyle(block.color, block.name) : {}), height: block.height },
