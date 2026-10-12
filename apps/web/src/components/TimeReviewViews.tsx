@@ -414,7 +414,7 @@ export function TimeReviewViews({
       <section
         className="timeline-range-toolbar"
         aria-busy={isDateLoading}
-        aria-label="Timeline period and view controls"
+        aria-label="Calendar period and view controls"
       >
         <div className="timeline-range-navigation">
           <IconButton
@@ -454,7 +454,7 @@ export function TimeReviewViews({
 
         <div className="timeline-range-controls">
           <SegmentedControl
-            ariaLabel="Timeline view"
+            ariaLabel="Calendar view"
             onChange={updateView}
             options={viewItems.map((item) => ({
               value: item.id,
@@ -465,7 +465,7 @@ export function TimeReviewViews({
             value={state.view}
           />
           <SegmentedControl
-            ariaLabel="Timeline scope"
+            ariaLabel="Calendar scope"
             onChange={updateScope}
             options={scopeItems.map((item) => ({
               value: item.id,
@@ -542,7 +542,7 @@ export function TimeReviewViews({
 
 function timelineDeleteNoticeLabel(entries: readonly TimeEntryRow[]) {
   const entry = entries[0];
-  if (!entry) return "Time entry deleted";
+  if (!entry) return "Block deleted";
   const title = `“${timeEntryTitle(entry)}”`;
   return entries.length > 1
     ? `${entries.length} ${title} occurrences deleted`
@@ -746,7 +746,7 @@ export function CalendarReview({
 
   async function continueCalendarEntry(entry: TimeEntryRow, surface: "editor" | "inline" = "editor") {
     if (continuingEntryId || isTimerBusy || !entry.stoppedAt) {
-      const outcome = { ok: false, error: "A timer update is already in progress." } as const;
+      const outcome = { ok: false, error: "A block update is already in progress." } as const;
       if (surface === "inline") setActionError(outcome.error);
       return outcome;
     }
@@ -834,7 +834,7 @@ export function CalendarReview({
         body: JSON.stringify(plan.payload)
       });
       if (!response.ok) {
-        let message = `Unable to save this entry: ${response.status}`;
+        let message = `Unable to save this block: ${response.status}`;
         try {
           const payload = (await response.json()) as { error?: string };
           message = payload.error ?? message;
@@ -847,7 +847,7 @@ export function CalendarReview({
       startTransition(() => router.refresh());
       return { ok: true } as const;
     } catch {
-      return { ok: false, error: "Unable to save this entry. Check your connection and try again." } as const;
+      return { ok: false, error: "Unable to save this block. Check your connection and try again." } as const;
     }
   }
 
@@ -864,7 +864,7 @@ export function CalendarReview({
       })
     });
 
-    if (!response.ok) throw new Error(`Unable to resize entry: ${response.status}`);
+    if (!response.ok) throw new Error(`Unable to resize the block: ${response.status}`);
     await onSynced();
     startTransition(() => router.refresh());
   }

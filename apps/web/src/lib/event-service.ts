@@ -202,7 +202,7 @@ export class ReviewResolutionError extends Error {
 export class TimerReplacementWindowError extends Error {
   status = 409;
 
-  constructor(message = "Start time must be after the currently running timer's start time.") {
+  constructor(message = "Start time must be after the running block's start time.") {
     super(message);
     this.name = "TimerReplacementWindowError";
   }
@@ -212,7 +212,7 @@ export class TimerMutationBusyError extends Error {
   readonly code = "timer_busy";
   readonly status = 503;
 
-  constructor(message = "This timer is busy. Dayframe will retry the Stop shortly.") {
+  constructor(message = "This block is busy. Dayframe will retry the Stop shortly.") {
     super(message);
     this.name = "TimerMutationBusyError";
   }
@@ -543,7 +543,7 @@ async function processActivityEventWithClient(
       ...candidate,
       action: "record_only",
       reviewStatus: "confirmed",
-      reason: "An unscoped legacy iOS Stop was recorded but could not target a newer timer."
+      reason: "An unscoped legacy iOS Stop was recorded but could not target a newer block."
     };
   }
   if (fastDuplicate) {
@@ -619,9 +619,9 @@ async function processActivityEventWithClient(
         action:sourceDecision.kind==="needs_review"?"create_review_item":"record_only",
         reviewStatus:sourceDecision.kind==="ignored"?"ignored":sourceDecision.kind==="needs_review"?"needs_review":"confirmed",
         reason:sourceDecision.kind==="ignored" ? "These Apple Health source samples were previously ignored; their decision is preserved."
-          : sourceDecision.kind==="resolution_unavailable" ? "These source samples were previously resolved, but their recorded entry is unavailable. No replacement was created."
+          : sourceDecision.kind==="resolution_unavailable" ? "These source samples were previously resolved, but their recorded block is unavailable. No replacement was created."
           : sourceDecision.kind==="existing_workout" ? "This Apple Health source revision refers to the existing workout; later edits are preserved."
-          : "This Health source revision needs review because its prior decisions or entry links are ambiguous."
+          : "This Health source revision needs review because its prior decisions or block links are ambiguous."
       };
     }
 
@@ -2037,7 +2037,7 @@ export async function updateTimeEntry(
 
 export class TimeEntryNotFoundError extends Error {
   constructor() {
-    super("Time entry not found.");
+    super("Block not found.");
     this.name = "TimeEntryNotFoundError";
   }
 }
@@ -2079,7 +2079,7 @@ function validateResolvedTimeEntryWindow({
     throw new TimeEntryValidationError("Finish time must be after the start time.");
   }
   if (stopped.getTime() - started.getTime() > 24 * 60 * 60 * 1_000) {
-    throw new TimeEntryValidationError("Entries can be no longer than 24 hours.");
+    throw new TimeEntryValidationError("A block can be no longer than 24 hours.");
   }
 }
 
@@ -2128,7 +2128,7 @@ export async function updateTimeEntryDescriptions(
 ) {
   const uniqueIds = [...new Set(ids)];
   if (uniqueIds.length < 2) {
-    throw new TimeEntryValidationError("Choose at least two grouped entries.");
+    throw new TimeEntryValidationError("Choose at least two grouped blocks.");
   }
 
   const client = await pool.connect();
@@ -2143,7 +2143,7 @@ export async function updateTimeEntryDescriptions(
     );
     if (existing.rows.length !== uniqueIds.length) throw new TimeEntryNotFoundError();
     if (existing.rows.some((entry) => entry.stoppedAt === null)) {
-      throw new TimeEntryValidationError("Grouped descriptions can only update completed entries.");
+      throw new TimeEntryValidationError("Grouped descriptions can only update completed blocks.");
     }
 
     const updated = await client.query<{ id: string }>(
@@ -2198,7 +2198,7 @@ export async function splitActiveEntry(session: RequestSession = getDevSession()
       [session.workspaceId, session.userId]
     );
     const row = active.rows[0];
-    if (!row) throw new Error("No active timer is available to split.");
+    if (!row) throw new Error("There is no running block to split.");
 
     const eventResult = await client.query<{ id: string }>(
       `insert into activity_events (
@@ -2501,7 +2501,7 @@ function reviewResolutionErrorForDatabaseError(error: unknown) {
   if (isUniqueViolationError(error)) {
     return new ReviewResolutionError(
       "duplicate_entry",
-      "A time entry already exists for this activity.",
+      "A block already exists for this activity.",
       {
         status: 409,
         cause: error

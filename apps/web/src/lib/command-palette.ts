@@ -128,7 +128,7 @@ export function searchResultCommand(result: GlobalSearchResult): PaletteCommand 
     review: DAYFRAME_APP_ICONS.review
   };
   const kindLabel: Record<Exclude<GlobalSearchResult["kind"], "activity">, string> = {
-    entry: "Entry",
+    entry: "Block",
     place: "Place",
     category: "Activity",
     tag: "Tag",

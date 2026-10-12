@@ -56,7 +56,7 @@ describe("Calendar page head (Trello: Calendar page improvements)", () => {
       weekDays: [28, 29, 30].map((date) => new Date(2026, 8, date)).concat([1, 2, 3, 4].map(day)),
       weekLoggedSeconds: 3600
     });
-    expect(past.weekTotal).toBe("1h 00m in the week of 28 Sept");
+    expect(past.weekTotal).toBe("1h in the week of 28 Sept");
     expect(past.days.some((d) => d.isToday)).toBe(false);
   });
 
@@ -73,6 +73,6 @@ describe("Calendar page head (Trello: Calendar page improvements)", () => {
     expect(beforeHydration.days.some((d) => d.isToday)).toBe(false);
     expect(beforeHydration.days.every((d) => d.bars.length === 0)).toBe(true);
     expect(beforeHydration.days[0].accessibleName).toBe("Monday 5 October");
-    expect(beforeHydration.weekTotal).toBe("1h 00m in the week of 5 Oct");
+    expect(beforeHydration.weekTotal).toBe("1h in the week of 5 Oct");
   });
 });

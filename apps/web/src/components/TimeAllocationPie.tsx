@@ -66,7 +66,7 @@ export function TimeAllocationPie({ entries }: { entries: TimeEntryRow[] }) {
         </div>
         <div className="space-y-3">
           {segments.length === 0 ? (
-            <p className="text-sm text-[var(--muted)]">No time entries yet.</p>
+            <p className="text-sm text-[var(--muted)]">Nothing framed yet.</p>
           ) : null}
           {segments.map((segment) => {
             const share = total > 0 ? Math.round((segment.seconds / total) * 100) : 0;

@@ -1,3 +1,4 @@
+import { formatDuration as formatSharedDuration } from "@dayframe/shared";
 /**
  * Copy for the web Blocks switch toasts (UIA-209, the same wording as the iPhone's UIA-004):
  * "Switched to Work · 42m logged to Client Work" and "Already recording Deep work". Neither has
@@ -17,11 +18,7 @@ export function toastBlockName(entry: Pick<ToastEntry, "categoryName" | "descrip
 }
 
 function compactDuration(seconds: number) {
-  const minutes = Math.floor(Math.max(0, seconds) / 60);
-  const hours = Math.floor(minutes / 60);
-  if (!hours) return `${minutes}m`;
-  const rest = minutes % 60;
-  return rest ? `${hours}h ${rest}m` : `${hours}h`;
+  return formatSharedDuration(seconds);
 }
 
 /**

@@ -279,7 +279,7 @@ describe("Calendar click-to-create DOM interactions", () => {
     expect(full.dataset.calendarSemanticHeight).toBe("64");
     expect(short.querySelector(".calendar-entry-secondary-line")).toBeNull();
     expect(medium.querySelector(".calendar-entry-secondary-line")).toBeNull();
-    expect(full.querySelector(".calendar-entry-secondary-line")?.textContent).toMatch(/^1h 00m \(.+ – .+\)$/);
+    expect(full.querySelector(".calendar-entry-secondary-line")?.textContent).toMatch(/^1h \(.+ – .+\)$/);
   });
 });
 

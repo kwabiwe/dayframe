@@ -1,3 +1,4 @@
+import { formatDuration as formatSharedDuration } from "@dayframe/shared";
 import type { ReviewMutation, ReviewMutationEdit } from "@dayframe/shared";
 import type { CategoryRow, ReviewItemRow } from "@/lib/queries";
 
@@ -174,12 +175,7 @@ export function reviewDayLabel(ms: number, nowMs: number) {
 }
 
 export function formatReviewDuration(ms: number) {
-  const minutesTotal = Math.max(0, Math.round(ms / 60_000));
-  const hours = Math.floor(minutesTotal / 60);
-  const minutes = minutesTotal % 60;
-  if (hours === 0) return `${minutes}m`;
-  if (minutes === 0) return `${hours}h`;
-  return `${hours}h ${minutes}m`;
+  return formatSharedDuration(ms / 1000);
 }
 
 /** "Today · 21:19–21:26"; a range over midnight names the end's day too. Null without a window. */

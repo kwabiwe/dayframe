@@ -14,7 +14,7 @@ const page = source("../app/timeline/page.tsx");
 const styles = source("../app/globals.css");
 const queries = source("../lib/queries.ts");
 
-describe("Timeline range and toolbar contract", () => {
+describe("Calendar range and toolbar contract", () => {
   it("keeps one URL-owned range/view toolbar with one cookie-backed preference owner", () => {
     expect(timeline.match(/className="timeline-range-toolbar"/g)).toHaveLength(1);
     expect(timeline).toContain("timelineStateFromSearchParams(searchParams, { preference: initialPreference })");
@@ -74,9 +74,9 @@ describe("Timeline range and toolbar contract", () => {
     expect(timeline).toContain("dayAnalysis.totalLoggedSeconds");
     expect(timeline).not.toContain("dayAnalysis.timeCoveredSeconds");
     expect(timeline).not.toContain("forwardVerticalCalendarWheel");
-    expect(timeline).toContain('aria-label="Timeline period and view controls"');
-    expect(timeline).toContain('ariaLabel="Timeline view"');
-    expect(timeline).toContain('ariaLabel="Timeline scope"');
+    expect(timeline).toContain('aria-label="Calendar period and view controls"');
+    expect(timeline).toContain('ariaLabel="Calendar view"');
+    expect(timeline).toContain('ariaLabel="Calendar scope"');
   });
 
   it("canonicalizes direct URLs before one selected-date bootstrap read", () => {
@@ -153,7 +153,7 @@ describe("Timeline range and toolbar contract", () => {
     expect(styles).toMatch(/\.calendar-day-body \{[^}]*isolation: isolate;/s);
   });
 
-  it("keeps timer Suggestions above sticky Calendar chrome and the complete Undo bean on the responsive control contract", () => {
+  it("keeps block Suggestions above sticky Calendar chrome and the complete Undo bean on the responsive control contract", () => {
     expect(styles).toMatch(/\.swiss-timeline-surface \.swiss-persistent-timer-shell \{[^}]*z-index: 50;/s);
     expect(styles).toMatch(/\.calendar-grid-corner,[\s\S]*\.calendar-day-heading \{[^}]*z-index: 40;/s);
     expect(styles).toMatch(/:root \{[^}]*--web-control-height: 44px;/s);
