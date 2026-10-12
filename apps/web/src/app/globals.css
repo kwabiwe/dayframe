@@ -5832,7 +5832,8 @@ kbd {
     grid-template-columns: 44px minmax(0, 1fr);
   }
 
-  .place-selected-result .ui-button {
+  .place-selected-result .ui-button,
+  .place-selected-result .df-rbtn {
     grid-column: 2;
     justify-self: start;
   }
