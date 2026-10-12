@@ -108,16 +108,27 @@ PR #197 reconciliation: current main verified at `a48abcc4ca55de68009b33a401f367
 
 - Safe restore/import and larger-data reporting confidence.
 - Token-management UI and deliberately scoped Home Assistant/local bridge inputs.
-- Calendar integration hints and realtime transport. (Automation-rule management UI was removed on 8 Oct 2026; any return needs a new owner decision.)
+- Calendar integration hints and realtime transport, including live web ↔ iPhone updates without a refresh. (Automation-rule management UI was removed on 8 Oct 2026; any return needs a new owner decision.)
 - Voice/diary correction intake through a review-first audit trail.
 - Location timing after two weeks of non-beta data: a finalisation lag of about five minutes, and automatic logging for commutes.
 - Journey and errand labels (owner-agreed 6 Oct that "Commute" for every journey is wrong): Commute only for Home ↔ Work once roles exist; other journeys named by travel mode and endpoints ("Drive · Home → Gym"); time away keeps its observed title, with what it was for (for example an errand) as a suggested category. Owner decided 6 Oct: add "Errands" to the starter categories for new workspaces (done in the Blocks Phase 1b starter activities) and suggest it for short time away with a stop (Review-only, option a; still to build); learning suggestions from confirmations can follow later.
 - Location queue after #229/#230 (owner, 6 Oct), in order:
   1. The 5 Oct follow-ups: a Visit-supported ~294 s stop promoted to a known stay splitting A→B→A; an edge stay ending about two minutes early at the midpoint of the silence; the #223 Home-Visit and constant-distance loop limitation.
-  2. Apple Health background sync on a real iPhone: on 6 Oct a walk reached the server only once the app was opened (app backgrounded, not force-quit). Find whether iOS wakes Dayframe for new workouts and sleep and whether that wake uploads, then fix it.
+  2. Apple Health background sync on a real iPhone: on 6 Oct a walk reached the server only once the app was opened (app backgrounded, not force-quit). Find whether iOS wakes Dayframe for new workouts and sleep and whether that wake uploads, then fix it. Sleep shows the same symptom: it also only syncs once the app opens.
   3. Unknown stops of 10 minutes or more become their own visit Review item (now 20; owner-approved 6 Oct after a 16-minute house viewing was kept inside a trip).
 - Later: a confirmed Motion & Fitness walking or driving block between two stays at the same place could count as leaving for time away (6 Oct: a 12-minute walk had one clear reading 254 m out and one at 149 m net, so nothing was offered). Judge it on non-beta data.
 - Force-quit notice (owner-agreed 6 Oct, for the redesign onboarding/Settings work): when iOS ends Dayframe while location is on, one calm local notification ("Dayframe isn't tracking locations — open it to resume"), at most once a day, with an off switch; verify on a physical iPhone that the termination is reported.
+- Live Activity reliability: Stop and Switch on the Lock Screen work without opening the app, and the Live Activity catches up quickly when the timer changes on the web.
+- Owner-only write RLS on `activity_events` and `time_entries`, matching the location tables (owner-approved 12 Oct; its own PR with a `supabase/migrations` file, applied to staging and production only after the owner says so).
+- Quick Track and one shared tracking-command / App Intent layer behind Siri, NFC v2 and smart buttons.
+- Adaptive forgotten-timer alerts: learn each activity's typical duration and send one local notification when a running block runs well past it.
+- Context-aware suggestions (time of day, current place) beyond recency and frequency.
+- Add time for the future as well as the past, on web and iPhone.
+- Review on web: save a visit as a place, place-name and address autocomplete, and Review split/merge.
+- Clearer short durations in compact formats, so 10 minutes and 10 seconds can't be confused.
+- A privacy-safe diagnostics export and a full accessibility pass.
+- Ideas, unscheduled: iOS widgets, Apple Watch, a Mac companion, a browser extension, an AI time coach, a weekly "wrapped" summary, import from other trackers, splitting a running timer, multi-activity timers.
+- Owner actions (outside the code): make the GitHub repository private (it is currently public), set up SMTP for password-reset emails with the owner's own domain, and act on the S2 security brief.
 - Billing, teams, and non-iOS mobile remain out of scope unless the PRD changes.
 
 ## Maintenance rules
