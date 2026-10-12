@@ -4255,7 +4255,8 @@ kbd {
   width: 100%;
   min-height: 0;
   border-radius: 8px 8px 3px 3px;
-  background: var(--accent);
+  /* UIA-302: chart marks are never coral. */
+  background: var(--text-secondary);
 }
 
 .report-trend-column strong,
@@ -4428,7 +4429,8 @@ kbd {
   display: block;
   height: 100%;
   border-radius: inherit;
-  background: var(--accent);
+  /* UIA-302: tags, places and sources have no activity colour, so their bars are neutral. */
+  background: var(--text-secondary);
 }
 
 .report-empty-analysis,
@@ -4480,7 +4482,9 @@ kbd {
   display: inline-flex;
   min-height: 44px;
   align-items: center;
-  color: var(--accent-text);
+  color: var(--text-secondary);
+  text-decoration: underline;
+  text-underline-offset: 3px;
   cursor: pointer;
   font-size: 12px;
   font-weight: 600;
@@ -4590,7 +4594,7 @@ kbd {
 }
 
 .report-entry-duration {
-  color: var(--accent-text);
+  color: var(--text-primary);
   font-variant-numeric: tabular-nums;
   font-weight: 650;
 }
@@ -4691,7 +4695,7 @@ kbd {
   display: inline-flex;
   min-height: 44px;
   align-items: center;
-  color: var(--accent-text);
+  color: var(--text-primary);
   font-weight: 600;
 }
 
@@ -12725,9 +12729,7 @@ dialog.ui-dialog.df-ce-dialog {
   padding: 6px 4px 4px;
 }
 
-.df-wb.is-today {
-  background: var(--surface-muted);
-}
+/* UIA-306: today is drawn like any other day; only its label is highlighted (neutral pill). */
 
 .df-wb-stack {
   display: flex;
@@ -12790,7 +12792,35 @@ dialog.ui-dialog.df-ce-dialog {
 }
 
 .df-wb.is-today .df-wb-label b {
-  color: var(--accent-text);
+  border-radius: 999px;
+  padding: 0 6px;
+  background: var(--surface-muted);
+  color: var(--text-primary);
+}
+
+.df-wb-label-short,
+.df-hint-coarse {
+  display: none;
+}
+
+@media (pointer: coarse) {
+  .df-hint-fine {
+    display: none;
+  }
+
+  .df-hint-coarse {
+    display: inline;
+  }
+}
+
+@media (max-width: 640px) {
+  .df-wb-label-full {
+    display: none;
+  }
+
+  .df-wb-label-short {
+    display: inline;
+  }
 }
 
 .df-wb-label small {
@@ -13038,7 +13068,8 @@ dialog.ui-dialog.df-rf-dialog {
 .df-report-panel {
   display: grid;
   grid-template-columns: minmax(0, 7fr) minmax(0, 5fr);
-  align-items: start;
+  /* UIA-304: the blocks card stretches to the row height. */
+  align-items: stretch;
   gap: 16px;
 }
 
@@ -13936,4 +13967,175 @@ dialog.ui-dialog.df-rf-dialog {
   padding: 4px 8px 8px;
   color: var(--text-secondary);
   font-size: 13px;
+}
+
+/*
+ * Reports head (audit W8, UIA-304): one row — title with ‹ range › on the left; Filter · Week ·
+ * Month · Export on the right. Applied filter chips wrap onto their own line below. The range menu
+ * is a fill-led popover on desktop and a bottom sheet on phones; it fades (opacity only) and has no
+ * animation under Reduce Motion.
+ */
+.df-report-head {
+  align-items: center;
+}
+
+.df-report-head-title {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+}
+
+.df-report-head .df-report-filters {
+  display: contents;
+}
+
+.df-report-head .df-fchips {
+  order: 10;
+  flex-basis: 100%;
+}
+
+.df-report-head .df-page-head-actions {
+  justify-content: flex-end;
+}
+
+.df-range {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 2px;
+  margin-left: -8px;
+}
+
+.df-range-nav,
+.df-range-trigger {
+  display: inline-flex;
+  min-height: 36px;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--text-secondary);
+  font: inherit;
+  font-size: 14px;
+  cursor: pointer;
+}
+
+.df-range-nav {
+  width: 36px;
+}
+
+.df-range-nav.is-disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.df-range-trigger {
+  gap: 4px;
+  padding: 0 8px;
+  color: var(--text-primary);
+  font-weight: 600;
+}
+
+.df-range-nav:not(.is-disabled):hover,
+.df-range-trigger:hover {
+  background: var(--surface-muted);
+}
+
+.df-range-menu-wrap {
+  position: relative;
+}
+
+.df-range-menu {
+  position: absolute;
+  z-index: 40;
+  top: calc(100% + 6px);
+  left: 0;
+  display: grid;
+  min-width: 200px;
+  max-width: calc(100vw - 24px);
+  max-height: min(420px, 70vh);
+  overflow-y: auto;
+  border-radius: 14px;
+  padding: 6px;
+  background: var(--surface-raised, var(--surface));
+  box-shadow: 0 12px 32px rgb(0 0 0 / 0.28);
+  animation: df-range-menu-in 120ms ease-out both;
+}
+
+.df-range-menu button {
+  min-height: 36px;
+  border: 0;
+  border-radius: 9px;
+  padding: 0 12px;
+  background: transparent;
+  color: var(--text-primary);
+  font: inherit;
+  font-size: 14px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.df-range-menu button:hover {
+  background: var(--surface-muted);
+}
+
+.df-range-menu button[aria-checked="true"] {
+  background: var(--surface-muted);
+  font-weight: 700;
+}
+
+@keyframes df-range-menu-in {
+  from {
+    opacity: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .df-range-menu {
+    animation: none;
+  }
+}
+
+.df-range-note {
+  flex-basis: 100%;
+  padding-left: 8px;
+  font-size: 12px;
+}
+
+.df-report-footnote {
+  margin: -6px 0 0;
+  font-size: 12px;
+}
+
+@media (max-width: 640px) {
+  .df-report-head .df-page-head-actions {
+    justify-content: flex-start;
+  }
+
+  .df-range-nav,
+  .df-range-trigger,
+  .df-range-menu button {
+    min-height: 44px;
+  }
+
+  .df-range-nav {
+    width: 44px;
+  }
+
+  .df-range-menu {
+    position: fixed;
+    top: auto;
+    right: 12px;
+    bottom: 12px;
+    left: 12px;
+    max-width: calc(100vw - 24px);
+  }
+}
+
+.df-range-nav:focus-visible,
+.df-range-trigger:focus-visible,
+.df-range-menu button:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
 }

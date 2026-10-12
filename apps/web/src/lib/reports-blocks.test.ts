@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { dailyActivitySeconds, type ReportResult } from "@/lib/report-service";
-import { reportBlocksLayout, reportHero, reportStackHeights, stackHeightCss } from "@/lib/reports-blocks";
+import { reportBlocksLayout, reportBlocksModel, reportHero, reportStackHeights, stackHeightCss } from "@/lib/reports-blocks";
 
 const day = (date: number) => ({
   key: `2026-10-0${date}`,
@@ -31,10 +31,13 @@ function report(overrides: Partial<ReportResult> = {}): ReportResult {
   const days = [day(5), day(6), day(7)];
   return {
     range: { preset: "this-week" },
-    timeCoveredSeconds: 10 * 3600,
-    previousPeriodCoveredSeconds: 12 * 3600,
+    // UIA-305: the hero uses time logged (overlaps included), never covered time.
+    totalLoggedSeconds: 10 * 3600,
+    timeCoveredSeconds: 9 * 3600,
+    previousPeriodSeconds: 12 * 3600,
+    previousPeriodCoveredSeconds: 1 * 3600,
     capturedNow: at(6, 12),
-    dailySeries: days.map((entry, index) => ({ key: entry.key, label: entry.label, seconds: 0, coveredSeconds: [6, 4, 0][index] * 3600, additionalOverlappingActivitySeconds: 0 })),
+    dailySeries: days.map((entry, index) => ({ key: entry.key, label: entry.label, seconds: [6, 4, 0][index] * 3600, coveredSeconds: [6, 4, 0][index] * 3600, additionalOverlappingActivitySeconds: 0 })),
     dailyByActivity: days.map((entry) => ({ ...entry, activities: [] })),
     ...overrides
   } as unknown as ReportResult;
@@ -57,22 +60,42 @@ describe("reportHero", () => {
       dailySeries: days.map((entry, index) => ({
         key: entry.key,
         label: entry.label,
-        seconds: 0,
+        seconds: 9 * 3600,
         coveredSeconds: 9 * 3600,
-        // Day 5: 9h framed, 7h of it Sleep. Day 6: all of it counts.
+        // Day 5: 9h logged, 7h of it Sleep. Day 6: all of it counts.
         goalSeconds: [2, 9, 0][index] * 3600,
         additionalOverlappingActivitySeconds: 0
       }))
     }), 420);
     expect(hero.goalDays).toEqual([false, true]);
-    // Framed time is unchanged everywhere else.
+    // Logged time is unchanged everywhere else.
     expect(hero.best).toEqual({ label: "Day 5", seconds: 9 * 3600 });
+  });
+
+  it("counts overlaps in every total, so a day may exceed 24h (UIA-305)", () => {
+    const days = [day(5), day(6), day(7)];
+    const hero = reportHero(report({
+      totalLoggedSeconds: 30 * 3600,
+      timeCoveredSeconds: 24 * 3600,
+      dailySeries: days.map((entry, index) => ({ key: entry.key, label: entry.label, seconds: [26, 4, 0][index] * 3600, coveredSeconds: [24, 4, 0][index] * 3600, additionalOverlappingActivitySeconds: [2, 0, 0][index] * 3600 }))
+    }), null);
+    expect(hero.totalSeconds).toBe(30 * 3600);
+    expect(hero.best).toEqual({ label: "Day 5", seconds: 26 * 3600 });
+    expect(hero.dailyAverageSeconds).toBe(15 * 3600);
   });
 
   it("has no goal cells without a goal and no change for a custom range", () => {
     const hero = reportHero(report({ range: { preset: "custom" } as ReportResult["range"] }), 0);
     expect(hero.goalDays).toEqual([]);
     expect(hero.deltaSeconds).toBeNull();
+  });
+});
+
+describe("reportBlocksModel short labels (UIA-306)", () => {
+  it("keeps the weekday and day number for narrow columns", () => {
+    const days = [{ ...day(5), label: "Mon 5 Oct" }, { ...day(6), label: "Tue, 6 Oct" }];
+    const model = reportBlocksModel(report({ byCategory: [], dailyByActivity: days.map((entry) => ({ ...entry, activities: [] })) } as Partial<ReportResult>), (seconds) => `${seconds}s`)!;
+    expect(model.days.map((entry) => entry.shortLabel)).toEqual(["Mon 5", "Tue 6"]);
   });
 });
 

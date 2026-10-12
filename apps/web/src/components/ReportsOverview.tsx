@@ -26,7 +26,7 @@ export function ReportsOverview({ report, showTrend = true }: { report: ReportRe
           <header className="report-section-header">
             <div>
               <h2 id="report-allocation-title">Time by activity</h2>
-              <p>Activity totals divide Total logged. Overlapping blocks count in each activity.</p>
+              <p>Overlapping blocks count in each activity, the same rule as the total.</p>
             </div>
           </header>
           <AccessibleBreakdownTable caption="Exact time by activity" rows={report.byCategory} totalSeconds={report.totalSeconds} />
@@ -59,7 +59,7 @@ function DailyTrend({ report }: { report: ReportResult }) {
               : "Ranges longer than 62 days are grouped into seven-day bars for readability."}
           </p>
         </div>
-        <strong>{formatDuration(report.totalLoggedSeconds)} logged</strong>
+        <strong className="df-tnum">{formatDuration(report.totalLoggedSeconds)}</strong>
       </header>
 
       <div className={`report-trend-scroll${scrollable ? " is-scrollable" : ""}`}>
@@ -71,19 +71,14 @@ function DailyTrend({ report }: { report: ReportResult }) {
                 className="report-trend-column"
                 key={point.key}
                 tabIndex={0}
-                aria-label={`${point.label}: ${formatDuration(point.seconds)} logged, ${formatDuration(point.coveredSeconds)} covered`}
-                title={`${point.label}: ${formatDuration(point.seconds)} logged, ${formatDuration(point.coveredSeconds)} covered`}
+                aria-label={`${point.label}: ${formatDuration(point.seconds)} logged`}
+                title={`${point.label}: ${formatDuration(point.seconds)} logged`}
               >
                 <div className="report-trend-track">
                   <span style={{ height: `${height}%` }} />
                 </div>
                 <strong>{point.label}</strong>
-                <em>
-                  {formatDuration(point.seconds)} logged
-                  {point.additionalOverlappingActivitySeconds > 0
-                    ? ` · ${formatDuration(point.coveredSeconds)} covered`
-                    : ""}
-                </em>
+                <em className="df-tnum">{formatDuration(point.seconds)}</em>
               </div>
             );
           })}
@@ -94,15 +89,13 @@ function DailyTrend({ report }: { report: ReportResult }) {
         <summary>View exact trend data</summary>
         <div className="report-data-table-scroll">
           <table>
-            <caption>Exact logged and covered time for each {trend.granularity}</caption>
-            <thead><tr><th>Period</th><th>Total logged</th><th>Time covered</th><th>Additional overlap</th></tr></thead>
+            <caption>Exact time logged for each {trend.granularity}, overlaps included</caption>
+            <thead><tr><th>Period</th><th>Time logged</th></tr></thead>
             <tbody>
               {trend.points.map((point) => (
                 <tr key={point.key}>
                   <td>{point.label}</td>
                   <td>{formatDuration(point.seconds)}</td>
-                  <td>{formatDuration(point.coveredSeconds)}</td>
-                  <td>{formatDuration(point.additionalOverlappingActivitySeconds)}</td>
                 </tr>
               ))}
             </tbody>

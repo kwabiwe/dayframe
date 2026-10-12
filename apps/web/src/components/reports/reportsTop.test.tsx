@@ -12,10 +12,12 @@ function report(overrides: Partial<ReportResult> = {}): ReportResult {
     range: { preset: "this-week", dayCount: 7 },
     timeCoveredSeconds: 9 * 3600,
     totalLoggedSeconds: 10 * 3600,
+    previousPeriodSeconds: 9 * 3600,
     previousPeriodCoveredSeconds: 8 * 3600,
+    additionalOverlappingActivitySeconds: 3600,
     capturedNow: at(6, 12),
     byCategory: [{ id: "work", name: "Work", color: "blue", seconds: 9 * 3600, entryCount: 3 }],
-    dailySeries: days.map((entry, index) => ({ key: entry.key, label: entry.label, seconds: 0, coveredSeconds: index === 0 ? 9 * 3600 : 0, additionalOverlappingActivitySeconds: 0 })),
+    dailySeries: days.map((entry, index) => ({ key: entry.key, label: entry.label, seconds: index === 0 ? 10 * 3600 : 0, coveredSeconds: index === 0 ? 9 * 3600 : 0, additionalOverlappingActivitySeconds: 0 })),
     dailyByActivity: days.map((entry, index) => ({ ...entry, activities: index === 0 ? [{ id: "work", seconds: 9 * 3600 }, { id: "uncategorized", seconds: 3600 }] : [] })),
     ...overrides
   } as unknown as ReportResult;
@@ -28,14 +30,22 @@ describe("Reports top", () => {
     expect(html).not.toContain("Set a daily goal");
   });
 
-  it("shows the four tiles with Total logged beside Total framed", () => {
+  it("shows one total — time logged, overlaps included — and no second covered total (UIA-305)", () => {
     const html = renderToStaticMarkup(<ReportsTop dailyGoalMinutes={480} report={report()} />);
-    expect(html).toContain("Total framed");
-    expect(html).toContain("10h logged · overlaps count once above");
+    expect(html).toContain("<small>Total</small>");
+    expect(html).toContain('<span class="df-stat-big df-tnum">10h</span>');
+    expect(html).not.toContain("framed");
+    expect(html).not.toContain("9h");
+    expect(html).toContain("Overlapping blocks count in full");
     expect(html).toContain("+1h vs the week before");
     expect(html).toContain("across 2 days so far");
     expect(html).toContain("Days on goal");
     expect((html.match(/class="is-met"/g) ?? []).length).toBe(1);
+  });
+
+  it("shows the overlap footnote only when the range has overlap", () => {
+    const html = renderToStaticMarkup(<ReportsTop dailyGoalMinutes={480} report={report({ additionalOverlappingActivitySeconds: 0 })} />);
+    expect(html).not.toContain("Overlapping blocks count in full");
   });
 
   it("says how to see the goal without one, and names the comparison window honestly", () => {

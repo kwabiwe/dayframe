@@ -27,7 +27,7 @@ function report(preset = "this-week"): ReportResult {
       { id: "work", name: "Work", color: "blue", seconds: 9 * 3600, entryCount: 3 },
       { id: "uncategorized", name: "No activity", color: null, seconds: 3600, entryCount: 1 }
     ],
-    dailySeries: days.map((entry, index) => ({ key: entry.key, label: entry.label, seconds: 0, coveredSeconds: index === 0 ? 9 * 3600 : 0, additionalOverlappingActivitySeconds: 0 })),
+    dailySeries: days.map((entry, index) => ({ key: entry.key, label: entry.label, seconds: index === 0 ? 10 * 3600 : 0, coveredSeconds: index === 0 ? 9 * 3600 : 0, additionalOverlappingActivitySeconds: 0 })),
     dailyByActivity: days.map((entry, index) => ({ ...entry, activities: index === 0 ? [{ id: "work", seconds: 9 * 3600 }, { id: "uncategorized", seconds: 3600 }] : [] }))
   } as unknown as ReportResult;
 }
@@ -48,8 +48,11 @@ describe("Reports blocks and Where it went", () => {
       <ReportsBlocksPanel blocks={reportBlocksModel(report(), formatDuration)} land={land} slices={slices} totalLabel="logged this week" totalSeconds={10 * 3600} />
     );
     expect((html.match(/class="df-wb[ "]/g) ?? []).length).toBe(7);
-    expect(html).toContain('aria-label="Day 5: 9h framed, Work 9h, No activity 1h"');
+    expect(html).toContain('aria-label="Day 5: 10h logged, Work 9h, No activity 1h"');
     expect(html).toContain("The days in blocks");
+    // UIA-306: a short label for narrow columns and tap wording for coarse pointers.
+    expect(html).toContain('<span class="df-wb-label-short">Day 5</span>');
+    expect(html).toContain("Tap an activity to trace it");
     expect(html).toContain("Where it went");
   });
 
@@ -61,7 +64,7 @@ describe("Reports blocks and Where it went", () => {
     expect(model.days.map((entry) => entry.dateNumber)).toEqual([5, 6, 7, 8, 9, 10, 11]);
     const html = renderToStaticMarkup(<ReportsBlocksPanel blocks={model} land={land} slices={slices} totalLabel="logged this month" totalSeconds={10 * 3600} />);
     expect(html).toContain("The month in blocks");
-    expect(html).toContain('aria-label="Day 5: 9h framed, Work 9h, No activity 1h"');
+    expect(html).toContain('aria-label="Day 5: 10h logged, Work 9h, No activity 1h"');
   });
 
   it("highlights an activity's blocks and shows its time in the centre while its row is hovered or focused", async () => {

@@ -15,7 +15,8 @@ export function elapsedDays<T extends { start: string }>(days: readonly T[], cap
 }
 
 export type ReportHero = {
-  framedSeconds: number;
+  /** Time logged in the range, overlaps included (the page's only total, UIA-305). */
+  totalSeconds: number;
   deltaSeconds: number | null;
   dailyAverageSeconds: number;
   elapsedDayCount: number;
@@ -29,20 +30,22 @@ export type ReportHero = {
 };
 
 export function reportHero(report: ReportResult, dailyGoalMinutes: number | null | undefined): ReportHero {
-  const framedSeconds = report.timeCoveredSeconds;
+  // UIA-305 (owner decision): web Reports has one total — time logged, overlaps included, so a
+  // day may exceed 24h. Every total, average, best day and comparison uses that same rule.
+  const totalSeconds = report.totalLoggedSeconds;
   const elapsed = elapsedDays(
     report.dailySeries.map((point, index) => ({ ...point, start: report.dailyByActivity[index]?.start ?? "" })),
     report.capturedNow
   );
   const best = elapsed.reduce<{ label: string; seconds: number } | null>(
-    (top, day) => (day.coveredSeconds > (top?.seconds ?? 0) ? { label: day.label, seconds: day.coveredSeconds } : top),
+    (top, day) => (day.seconds > (top?.seconds ?? 0) ? { label: day.label, seconds: day.seconds } : top),
     null
   );
   const goalSeconds = dailyGoalMinutes && dailyGoalMinutes > 0 ? dailyGoalMinutes * 60 : null;
   return {
-    framedSeconds,
-    deltaSeconds: report.range.preset === "custom" ? null : framedSeconds - report.previousPeriodCoveredSeconds,
-    dailyAverageSeconds: elapsed.length ? Math.round(framedSeconds / elapsed.length) : 0,
+    totalSeconds,
+    deltaSeconds: report.range.preset === "custom" ? null : totalSeconds - report.previousPeriodSeconds,
+    dailyAverageSeconds: elapsed.length ? Math.round(totalSeconds / elapsed.length) : 0,
     elapsedDayCount: elapsed.length,
     best,
     goalDays: goalSeconds
@@ -120,10 +123,13 @@ export type ReportBlocksBlock = { id: string; name: string; color: string | null
 export type ReportBlocksDay = {
   key: string;
   label: string;
+  /** 'Mon 5' (weekday and day number) for narrow columns (UIA-306). */
+  shortLabel: string;
   /** The day of the month, worked out where the report's days were (the server). */
   dateNumber: number;
   isToday: boolean;
-  coveredSeconds: number;
+  /** Time logged that day, overlaps included (may exceed 24h). */
+  totalSeconds: number;
   accessibleName: string;
   blocks: ReportBlocksBlock[];
 };
@@ -147,7 +153,7 @@ export function reportBlocksModel(
   const busiest = busiestDaySeconds(report.dailyByActivity);
   const sizing = layout === "week" ? WEEK_COLUMN : MONTH_STACK;
   const days = report.dailyByActivity.map((day, index) => {
-    const covered = report.dailySeries[index]?.coveredSeconds ?? 0;
+    const logged = report.dailySeries[index]?.seconds ?? 0;
     const heights = reportStackHeights(day.activities.map((activity) => activity.seconds), busiest, sizing.height, sizing.minimum, sizing.gap);
     const kept = heights.filter((height) => height > 0).length;
     const named = day.activities.map((activity) => {
@@ -158,10 +164,11 @@ export function reportBlocksModel(
     return {
       key: day.key,
       label: day.label,
+      shortLabel: day.label.replace(/,/g, "").split(/\s+/).slice(0, 2).join(" "),
       dateNumber: new Date(day.start).getDate(),
       isToday: isTodayKey(day, report.capturedNow),
-      coveredSeconds: covered,
-      accessibleName: `${day.label}: ${formatDuration(covered)} framed${parts.length ? `, ${parts.join(", ")}` : ""}`,
+      totalSeconds: logged,
+      accessibleName: `${day.label}: ${formatDuration(logged)} logged${parts.length ? `, ${parts.join(", ")}` : ""}`,
       blocks: named.flatMap((activity, activityIndex) =>
         heights[activityIndex]
           ? [{ id: activity.id, name: activity.name, color: activity.color, seconds: activity.seconds, height: stackHeightCss(heights[activityIndex], kept, sizing.height, sizing.gap) }]

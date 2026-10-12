@@ -18,9 +18,10 @@ import { reportBlocksLayout, reportBlocksModel } from "@/lib/reports-blocks";
 export const dynamic = "force-dynamic";
 
 /**
- * Reports in Blocks (parity step 15a): the page head with Week · Month and Export, the range
- * controls (every preset, custom dates, previous / next), filters, the hero tiles and the range in
- * activity blocks, then the analysis and the entries table.
+ * Reports in Blocks (parity step 15a, audit W8): one head row (title, ‹ range › with every preset
+ * and custom dates in its menu; Filter · Week · Month · Export), the hero tiles and the range in
+ * activity blocks, then the analysis and the entries table. One total everywhere: time logged,
+ * overlaps included (UIA-305).
  */
 export default async function ReportsPage({
   searchParams
@@ -51,13 +52,25 @@ export default async function ReportsPage({
 
   return (
     <div className="df-reports-page">
-      <div className="df-page-head">
-        <div>
+      {/* UIA-304: one head row — title with ‹ range › (presets and Custom… in the range menu) on
+          the left; Filter · Week · Month · Export on the right; applied filter chips wrap below. */}
+      <div className="df-page-head df-report-head">
+        <div className="df-report-head-title">
           <h1>Reports</h1>
-          <p>{report.range.label}</p>
+          <ReportRangeControls
+            key={`range-${report.appliedFilters.range}-${report.appliedFilters.from}-${report.appliedFilters.to}`}
+            filters={report.appliedFilters}
+            range={report.range}
+          />
         </div>
         <div className="df-page-head-actions">
-          <nav aria-label="Report range" className="df-seg">
+          <ReportFiltersPanel
+            key={`filters-${JSON.stringify(report.appliedFilters)}`}
+            filters={report.appliedFilters}
+            options={report.filterOptions}
+            rangeLabel={report.range.label}
+          />
+          <nav aria-label="Report period" className="df-seg">
             <Link aria-current={preset === "this-week" ? "page" : undefined} href={reportsHref(filtersForPreset(report.appliedFilters, "this-week"))}>
               Week
             </Link>
@@ -70,17 +83,6 @@ export default async function ReportsPage({
           </Link>
         </div>
       </div>
-      <ReportRangeControls
-        key={`range-${report.appliedFilters.range}-${report.appliedFilters.from}-${report.appliedFilters.to}`}
-        filters={report.appliedFilters}
-        range={report.range}
-      />
-      <ReportFiltersPanel
-        key={`filters-${JSON.stringify(report.appliedFilters)}`}
-        filters={report.appliedFilters}
-        options={report.filterOptions}
-        rangeLabel={report.range.label}
-      />
       <ReportsTop dailyGoalMinutes={user.dailyGoalMinutes} report={report} />
       <ReportsBlocksPanel
         blocks={reportBlocksModel(report, formatDuration)}
@@ -89,11 +91,6 @@ export default async function ReportsPage({
         totalLabel={preset === "this-week" ? "logged this week" : preset === "this-month" ? "logged this month" : "logged in this range"}
         totalSeconds={report.totalSeconds}
       />
-      {report.additionalOverlappingActivitySeconds > 0 ? (
-        <p className="report-metric-explainer">
-          Total logged counts every block in full; Total framed (time covered) counts overlapping time once.
-        </p>
-      ) : null}
       <ReportsOverview report={report} showTrend={reportBlocksLayout(report) === null} />
       <ReportDetailsTable report={report} />
     </div>

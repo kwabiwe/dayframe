@@ -3,8 +3,9 @@ import type { ReportResult } from "@/lib/report-service";
 import { reportHero } from "@/lib/reports-blocks";
 
 /**
- * Reports hero tiles (Blocks parity step 15a): Total framed (with Total logged and the change
- * against the days before), Daily average, Best day and Days on goal. The range in blocks and
+ * Reports hero tiles (Blocks parity step 15a): Total (with the change against the days before),
+ * Daily average, Best day and Days on goal. UIA-305: one total only — time logged, overlaps
+ * included (a day may exceed 24h); the footnote under the tiles says so only when there is overlap. The range in blocks and
  * "Where it went" are `ReportsBlocksPanel` (15b-2).
  */
 export function ReportsTop({ dailyGoalMinutes, report }: { dailyGoalMinutes: number | null; report: ReportResult }) {
@@ -12,15 +13,11 @@ export function ReportsTop({ dailyGoalMinutes, report }: { dailyGoalMinutes: num
   const periodWord = previousWord(report.range);
   const metGoal = hero.goalDays.filter(Boolean).length;
   return (
+    <>
     <section className="df-report-tiles" aria-label="Report summary">
         <div className="df-card df-tile">
-          <small>Total framed</small>
-          <span className="df-stat-big df-tnum">{formatDuration(hero.framedSeconds)}</span>
-          {/* Product rule: web Reports shows Total logged beside Time covered (framed). */}
-          <span className="df-delta df-tnum">
-            {formatDuration(report.totalLoggedSeconds)} logged
-            {report.totalLoggedSeconds > hero.framedSeconds ? " · overlaps count once above" : ""}
-          </span>
+          <small>Total</small>
+          <span className="df-stat-big df-tnum">{formatDuration(hero.totalSeconds)}</span>
           {hero.deltaSeconds !== null ? (
             <span className="df-delta df-tnum">
               {hero.deltaSeconds === 0
@@ -37,7 +34,7 @@ export function ReportsTop({ dailyGoalMinutes, report }: { dailyGoalMinutes: num
         <div className="df-card df-tile">
           <small>Best day</small>
           <span className="df-stat-big df-tnum">{formatDuration(hero.best?.seconds ?? 0)}</span>
-          <span className="df-delta">{hero.best ? hero.best.label : "Nothing framed yet"}</span>
+          <span className="df-delta">{hero.best ? hero.best.label : "Nothing logged yet"}</span>
         </div>
         <div className="df-card df-tile">
           <small>Days on goal</small>
@@ -59,6 +56,10 @@ export function ReportsTop({ dailyGoalMinutes, report }: { dailyGoalMinutes: num
           ) : null}
         </div>
     </section>
+    {report.additionalOverlappingActivitySeconds > 0 ? (
+      <p className="df-report-footnote df-faint">Overlapping blocks count in full, so a day can add up to more than 24h.</p>
+    ) : null}
+    </>
   );
 }
 
