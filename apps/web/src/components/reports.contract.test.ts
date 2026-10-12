@@ -110,6 +110,9 @@ describe("Reports in Blocks audit fixes (W8)", () => {
 
 describe("Reports staging feedback I1–I3", () => {
   it("traces from blocks with a neutral inner focus ring and no transitions under Reduce Motion (I1)", () => {
+    // The day column or month cell is the hit area, never the 2–3 px block (review 3).
+    expect(rule(".df-tblock")).toContain("pointer-events: none");
+    expect(panelSource).toContain("{...pointerProps}");
     expect(rule(".df-tblock:focus-visible")).toContain("outline: 2px solid var(--focus)");
     expect(rule(".df-tblock:focus-visible")).toContain("outline-offset: -2px");
     expect(rule(".df-wblocks.has-hot .df-tblock,\n.df-month.has-hot .df-tblock")).toContain("opacity: 0.22");

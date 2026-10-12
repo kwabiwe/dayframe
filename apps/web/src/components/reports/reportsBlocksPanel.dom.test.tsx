@@ -13,7 +13,7 @@ vi.mock("next/link", () => ({
   default: ({ href, children, ...props }: { href: string; children: React.ReactNode }) => <a href={href} {...props}>{children}</a>
 }));
 
-const { ReportsBlocksPanel } = await import("./ReportsBlocksPanel");
+const { ReportsBlocksPanel, traceBlockAt } = await import("./ReportsBlocksPanel");
 
 const at = (date: number, hour = 0) => new Date(2026, 9, date, hour).toISOString();
 const day = (date: number) => ({ key: `d${date}`, label: `Day ${date}`, start: at(date), end: at(date + 1) });
@@ -42,6 +42,52 @@ const slices = [
   { id: "uncategorized", categoryIds: ["uncategorized"], name: "No activity", color: null, seconds: 3600, percentage: 10, isUncategorized: true, href: "/reports?categories=uncategorized" }
 ];
 const land = { easing: "ease-out", durationMs: 300 };
+
+/**
+ * jsdom has no layout: give each day a 44 px wide, 200 px tall box 50 px apart, and each block a
+ * 3 px sliver stacked up from the day's bottom 10 px apart, as small as the month grid's blocks.
+ */
+function layOut(container: HTMLElement) {
+  const box = (left: number, top: number, width: number, height: number) => () =>
+    ({ left, top, right: left + width, bottom: top + height, width, height, x: left, y: top, toJSON: () => ({}) }) as DOMRect;
+  container.querySelectorAll<HTMLElement>("[data-trace-day]").forEach((day, dayIndex) => {
+    Object.defineProperty(day, "getBoundingClientRect", { configurable: true, value: box(dayIndex * 50, 0, 44, 200) });
+    day.querySelectorAll<HTMLElement>("[data-block-key]").forEach((block, blockIndex) => {
+      Object.defineProperty(block, "getBoundingClientRect", { configurable: true, value: box(dayIndex * 50, 197 - blockIndex * 10, 44, 3) });
+    });
+  });
+}
+
+/** A pointer event React sees, with its pointer type (jsdom has no PointerEvent). */
+function pointer(target: EventTarget, type: string, x: number, y: number, pointerType = "mouse", relatedTarget: EventTarget | null = null) {
+  const event = new MouseEvent(type, { bubbles: true, cancelable: true, clientX: x, clientY: y, relatedTarget });
+  Object.defineProperty(event, "pointerType", { value: pointerType });
+  return act(async () => {
+    target.dispatchEvent(event);
+  });
+}
+
+async function mount(element: React.ReactElement) {
+  const container = document.createElement("div");
+  document.body.append(container);
+  const root = createRoot(container);
+  await act(async () => root.render(element));
+  layOut(container);
+  return {
+    container,
+    root,
+    centre: () => container.querySelector(".df-donut-center")?.textContent,
+    hotKeys: () => [...container.querySelectorAll(".df-tblock.is-hot")].map((block) => block.getAttribute("aria-label")),
+    rerender: async (next: React.ReactElement) => {
+      await act(async () => root.render(next));
+      layOut(container);
+    }
+  };
+}
+
+const week = (secondDay = true, current = slices) => (
+  <ReportsBlocksPanel blocks={reportBlocksModel(report("this-week", secondDay), formatDuration)} land={land} slices={current} totalLabel="logged this week" totalSeconds={10 * 3600} />
+);
 
 afterEach(() => {
   document.body.innerHTML = "";
@@ -111,12 +157,8 @@ describe("Reports blocks and Where it went", () => {
   });
 
   it("traces an activity from a hovered or focused block: its blocks, slice and row, with the others faded (I1)", async () => {
-    const container = document.createElement("div");
-    document.body.append(container);
-    const root = createRoot(container);
-    await act(async () => root.render(
-      <ReportsBlocksPanel blocks={reportBlocksModel(report("this-week", true), formatDuration)} land={land} slices={slices} totalLabel="logged this week" totalSeconds={10 * 3600} />
-    ));
+    const view = await mount(week());
+    const { container } = view;
     const blocks = [...container.querySelectorAll<HTMLButtonElement>(".df-wb-stack button.df-tblock")];
     expect(blocks.map((block) => block.getAttribute("aria-label"))).toEqual([
       "Work, 9h, Day 5",
@@ -129,29 +171,143 @@ describe("Reports blocks and Where it went", () => {
     // The stacks are no longer hidden from assistive technology: the blocks are its controls.
     expect(container.querySelector(".df-wb-stack")?.getAttribute("aria-hidden")).toBeNull();
 
-    // Pointer: hovering a Work block traces Work everywhere.
-    await act(async () => blocks[3].dispatchEvent(new MouseEvent("mouseover", { bubbles: true, relatedTarget: document.body })));
-    expect(container.querySelector(".df-wblocks")?.classList.contains("has-hot")).toBe(true);
-    expect([...container.querySelectorAll(".df-wb-stack .is-hot")].map((block) => block.getAttribute("aria-label"))).toEqual(["Work, 9h, Day 5", "Work, 2h, Day 7"]);
+    // Pointer: on Day 7's Work block (the second sliver up in the third column) traces Work everywhere.
+    const list = container.querySelector(".df-wblocks")!;
+    await pointer(list, "pointermove", 120, 188);
+    expect(list.classList.contains("has-hot")).toBe(true);
+    expect(view.hotKeys()).toEqual(["Work, 9h, Day 5", "Work, 2h, Day 7"]);
     expect(container.querySelector('circle[aria-label^="Filter by Work"]')?.classList.contains("is-hot")).toBe(true);
     expect(container.querySelector('a[aria-label^="Filter by Work"]')?.classList.contains("is-hot")).toBe(true);
-    expect(container.querySelector(".df-donut-center")?.textContent).toBe("9hWork");
-    await act(async () => blocks[3].dispatchEvent(new MouseEvent("mouseout", { bubbles: true, relatedTarget: document.body })));
-    expect(container.querySelector(".df-wblocks")?.classList.contains("has-hot")).toBe(false);
-    expect(container.querySelector(".df-donut-center")?.textContent).toBe("10hlogged this week");
+    expect(view.centre()).toBe("9hWork");
+    // Over the empty top of a column, a mouse is on no block.
+    await pointer(list, "pointermove", 120, 40);
+    expect(list.classList.contains("has-hot")).toBe(false);
+    await pointer(list, "pointermove", 120, 198);
+    expect(view.centre()).toBe("1hNo activity");
+    await pointer(list, "pointerout", 120, 198, "mouse", document.body);
+    expect(list.classList.contains("has-hot")).toBe(false);
+    expect(view.centre()).toBe("10hlogged this week");
 
     // Keyboard: one tab stop, focus traces, blur clears.
     expect(blocks.map((block) => block.tabIndex)).toEqual([0, -1, -1, -1]);
     await act(async () => blocks[1].focus());
-    expect(container.querySelector(".df-donut-center")?.textContent).toBe("1hNo activity");
+    expect(view.centre()).toBe("1hNo activity");
     expect(blocks.map((block) => block.tabIndex)).toEqual([-1, 0, -1, -1]);
     await act(async () => blocks[1].blur());
-    expect(container.querySelector(".df-wblocks")?.classList.contains("has-hot")).toBe(false);
+    expect(list.classList.contains("has-hot")).toBe(false);
+    await act(async () => view.root.unmount());
+  });
 
-    // Touch and Safari: a click traces even without focus.
-    await act(async () => blocks[0].click());
-    expect(container.querySelector(".df-donut-center")?.textContent).toBe("9hWork");
-    await act(async () => root.unmount());
+  it("keeps a focused block's trace when a hover over another block ends (review 2)", async () => {
+    const view = await mount(week());
+    const list = view.container.querySelector(".df-wblocks")!;
+    const noActivity = view.container.querySelector<HTMLButtonElement>('button[aria-label="No activity, 1h, Day 5"]')!;
+    await act(async () => noActivity.focus());
+    // Hover wins while it lasts …
+    await pointer(list, "pointermove", 20, 198);
+    expect(view.centre()).toBe("9hWork");
+    // … and leaving hands the trace back to focus instead of clearing it.
+    await pointer(list, "pointerout", 20, 198, "mouse", document.body);
+    expect(view.centre()).toBe("1hNo activity");
+    expect(view.hotKeys()).toEqual(["No activity, 1h, Day 5", "No activity, 30m, Day 7"]);
+    // A row's hover ending does not clear it either.
+    const row = view.container.querySelector('a[aria-label^="Filter by Work"]')!;
+    await act(async () => row.dispatchEvent(new MouseEvent("mouseover", { bubbles: true, relatedTarget: document.body })));
+    expect(view.centre()).toBe("9hWork");
+    await act(async () => row.dispatchEvent(new MouseEvent("mouseout", { bubbles: true, relatedTarget: document.body })));
+    expect(view.centre()).toBe("1hNo activity");
+    await act(async () => noActivity.blur());
+    expect(view.centre()).toBe("10hlogged this week");
+    await act(async () => view.root.unmount());
+  });
+
+  it("gives touch the whole day as the hit area and pins the trace until a tap outside (review 1, 3)", async () => {
+    const view = await mount(week());
+    const list = view.container.querySelector(".df-wblocks")!;
+    // 3 px slivers are not the target: a finger in the gap beside Day 7's column (x 141, 3 px right
+    // of it) and 60 px above its blocks takes the day's nearest block.
+    await pointer(list, "pointerdown", 141, 120, "touch");
+    await pointer(list, "pointerup", 141, 120, "touch");
+    expect(view.centre()).toBe("9hWork");
+    // Touch never leaves a hover behind, and the pinned tap survives the finger lifting away.
+    await pointer(list, "pointerout", 141, 120, "touch", document.body);
+    expect(view.centre()).toBe("9hWork");
+    // Another tap inside moves the pin.
+    await pointer(list, "pointerdown", 20, 199, "touch");
+    await pointer(list, "pointerup", 20, 199, "touch");
+    expect(view.centre()).toBe("9hWork");
+    await pointer(list, "pointerdown", 120, 199, "touch");
+    await pointer(list, "pointerup", 120, 199, "touch");
+    expect(view.centre()).toBe("1hNo activity");
+    // A tap anywhere outside the blocks clears it.
+    await pointer(document.body, "pointerdown", 600, 600, "touch");
+    expect(view.container.querySelector(".df-wblocks")?.classList.contains("has-hot")).toBe(false);
+    // A touch the page takes for a scroll (pointercancel) traces nothing.
+    await pointer(list, "pointerdown", 20, 199, "touch");
+    await pointer(list, "pointercancel", 20, 199, "touch");
+    await pointer(list, "pointerup", 20, 199, "touch");
+    expect(view.centre()).toBe("10hlogged this week");
+    // A tap past the last column, beyond the slop of any day, traces nothing.
+    await pointer(list, "pointerdown", 400, 100, "touch");
+    await pointer(list, "pointerup", 400, 100, "touch");
+    expect(view.centre()).toBe("10hlogged this week");
+    await act(async () => view.root.unmount());
+  });
+
+  it("pins an activation that does not move focus, cleared by a pointer down outside or Escape (review 1)", async () => {
+    const view = await mount(week());
+    const work = view.container.querySelector<HTMLButtonElement>('button[aria-label="Work, 9h, Day 5"]')!;
+    await act(async () => work.click());
+    expect(view.centre()).toBe("9hWork");
+    await pointer(document.body, "pointerdown", 600, 600);
+    expect(view.centre()).toBe("10hlogged this week");
+    await act(async () => work.click());
+    await act(async () => work.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, key: "Escape" })));
+    expect(view.centre()).toBe("10hlogged this week");
+    await act(async () => view.root.unmount());
+  });
+
+  it("clears every trace when the report data or filters change, even when the activity remains (review 1)", async () => {
+    const view = await mount(week());
+    const work = view.container.querySelector<HTMLButtonElement>('button[aria-label="Work, 9h, Day 5"]')!;
+    await act(async () => work.click());
+    expect(view.centre()).toBe("9hWork");
+    // A filter navigation: the same activities arrive as new data.
+    await view.rerender(week(true, slices.map((slice) => ({ ...slice, href: `${slice.href}&tags=a` }))));
+    expect(view.container.querySelector(".df-wblocks")?.classList.contains("has-hot")).toBe(false);
+    expect(view.centre()).toBe("10hlogged this week");
+    await act(async () => view.root.unmount());
+  });
+
+  it("drops the trace of a focused block that a report update removed without a blur (review 1)", async () => {
+    const view = await mount(week());
+    const daySeven = view.container.querySelector<HTMLButtonElement>('button[aria-label="No activity, 30m, Day 7"]')!;
+    await act(async () => daySeven.focus());
+    expect(view.centre()).toBe("1hNo activity");
+    await view.rerender(week(false));
+    expect(view.container.querySelector('button[aria-label="No activity, 30m, Day 7"]')).toBeNull();
+    expect(view.container.querySelector(".df-wblocks")?.classList.contains("has-hot")).toBe(false);
+    expect(view.centre()).toBe("10hlogged this week");
+    // The roving tab stop falls back to the first block that is still there.
+    expect(view.container.querySelector<HTMLButtonElement>('button[aria-label="Work, 9h, Day 5"]')?.tabIndex).toBe(0);
+    await act(async () => view.root.unmount());
+  });
+
+  it("finds the block under a finger from its day, but under a mouse only on the block (hit targets, review 3)", async () => {
+    const view = await mount(week());
+    const list = view.container.querySelector<HTMLElement>(".df-wblocks")!;
+    // Day 7's column spans x 100–144; its blocks are 3 px slivers at y 197–200 and 187–190.
+    expect(traceBlockAt(list, 141, 20, true)).toBe("work");
+    expect(traceBlockAt(list, 146, 199, true)).toBe("uncategorized");
+    // Nearer the empty Day 8 (x 150–194), or on it, a finger is on a day without blocks.
+    expect(traceBlockAt(list, 148, 199, true)).toBeNull();
+    expect(traceBlockAt(list, 151, 199, true)).toBeNull();
+    expect(traceBlockAt(list, 141, 20, false)).toBeNull();
+    expect(traceBlockAt(list, 141, 191.5, false)).toBe("work");
+    expect(traceBlockAt(list, 146, 199, false)).toBeNull();
+    // The drawn blocks never take pointers themselves.
+    expect([...view.container.querySelectorAll("[data-trace-day]")]).toHaveLength(7);
+    await act(async () => view.root.unmount());
   });
 
   it("moves between blocks with arrow keys, keeping the activity across days", async () => {
@@ -184,21 +340,20 @@ describe("Reports blocks and Where it went", () => {
   });
 
   it("traces from month-grid blocks too, each day a named group of focusable blocks", async () => {
-    const container = document.createElement("div");
-    document.body.append(container);
-    const root = createRoot(container);
-    await act(async () => root.render(
+    const view = await mount(
       <ReportsBlocksPanel blocks={reportBlocksModel(report("this-month"), formatDuration)} land={land} slices={slices} totalLabel="logged this month" totalSeconds={10 * 3600} />
-    ));
-    const cell = container.querySelector(".df-mday:not(.is-empty)")!;
+    );
+    const cell = view.container.querySelector(".df-mday:not(.is-empty)")!;
     expect(cell.getAttribute("role")).toBe("group");
-    const block = container.querySelector<HTMLButtonElement>('.df-mday-stack button[aria-label="Work, 9h, Day 5"]')!;
-    await act(async () => block.dispatchEvent(new MouseEvent("mouseover", { bubbles: true, relatedTarget: document.body })));
-    expect(container.querySelector(".df-month")?.classList.contains("has-hot")).toBe(true);
-    expect([...container.querySelectorAll(".df-mday-stack .is-hot")].map((entry) => entry.getAttribute("data-key"))).toEqual(["work"]);
-    await act(async () => block.dispatchEvent(new MouseEvent("mouseout", { bubbles: true, relatedTarget: document.body })));
-    expect(container.querySelector(".df-month")?.classList.contains("has-hot")).toBe(false);
-    await act(async () => root.unmount());
+    expect(cell.hasAttribute("data-trace-day")).toBe(true);
+    expect(view.container.querySelector('.df-mday-stack button[aria-label="Work, 9h, Day 5"]')).not.toBeNull();
+    const grid = view.container.querySelector(".df-month")!;
+    await pointer(grid, "pointermove", 20, 199);
+    expect(grid.classList.contains("has-hot")).toBe(true);
+    expect([...view.container.querySelectorAll(".df-mday-stack .is-hot")].map((entry) => entry.getAttribute("data-key"))).toEqual(["work"]);
+    await pointer(grid, "pointerout", 20, 199, "mouse", document.body);
+    expect(grid.classList.contains("has-hot")).toBe(false);
+    await act(async () => view.root.unmount());
   });
 
   it("leaves a slight gap after each donut slice, and a single activity as a full ring (I2)", () => {

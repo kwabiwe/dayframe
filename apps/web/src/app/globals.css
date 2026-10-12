@@ -12588,6 +12588,8 @@ dialog.ui-dialog.df-ce-dialog {
   padding: 0;
   font: inherit;
   cursor: default;
+  /* The day column or month cell is the hit area (traceBlockAt), never the 2–3 px block. */
+  pointer-events: none;
 }
 
 /* Inside the clipped stacks the neutral focus ring sits on the block's inner edge. */
