@@ -49,5 +49,8 @@ describe("iPhone sign-in (A15)", () => {
     expect(card.match(/entering=\{localPresenceEntering\(reduceMotion\)\}/g)?.length).toBe(4);
     expect(card).toContain("accessibilityState={{ busy: authSubmitting, disabled: authSubmitting }}");
     expect(card).not.toMatch(/LayoutAnimation\./);
+    // Each animated group keeps the card's 12-point rhythm inside it (labels tuck -6 under it).
+    expect(card.match(/style=\{styles\.authGroup\}/g)?.length).toBe(4);
+    expect(theme).toMatch(/authGroup: \{\s*gap: 12\s*\}/);
   });
 });

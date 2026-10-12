@@ -2685,6 +2685,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
                 entering={localPresenceEntering(reduceMotion)}
                 exiting={localPresenceExiting(reduceMotion)}
                 layout={localLayoutTransition(reduceMotion)}
+                style={styles.authGroup}
               >
                 <Text style={styles.authLabel}>Name</Text>
                 <TextInput
@@ -2704,7 +2705,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
                 />
               </Reanimated.View>
             ) : null}
-            <Reanimated.View layout={localLayoutTransition(reduceMotion)}>
+            <Reanimated.View layout={localLayoutTransition(reduceMotion)} style={styles.authGroup}>
             <Text style={styles.authLabel}>Email</Text>
             <TextInput
               ref={authEmailRef}
@@ -2732,6 +2733,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
               entering={localPresenceEntering(reduceMotion)}
               exiting={localPresenceExiting(reduceMotion)}
               layout={localLayoutTransition(reduceMotion)}
+              style={styles.authGroup}
             >
             <Text style={styles.authLabel}>Password</Text>
             <View style={styles.authPasswordField}>
@@ -2829,7 +2831,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
                 {authError}
               </Reanimated.Text>
             ) : null}
-            <Reanimated.View layout={localLayoutTransition(reduceMotion)}>
+            <Reanimated.View layout={localLayoutTransition(reduceMotion)} style={styles.authGroup}>
             <Pressable
               accessibilityRole="button"
               accessibilityState={{ busy: authSubmitting, disabled: authSubmitting }}

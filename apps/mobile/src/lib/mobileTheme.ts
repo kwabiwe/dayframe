@@ -685,6 +685,10 @@ function createStyles(theme: MobileTheme) {
       color: theme.textPrimary,
       fontSize: 16
     },
+    /** A group inside the sign-in card (an animated wrapper): keeps the card's own 12-point rhythm. */
+    authGroup: {
+      gap: 12
+    },
     authLabel: {
       color: theme.textSecondary,
       fontSize: 13,
