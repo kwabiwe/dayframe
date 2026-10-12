@@ -1107,8 +1107,13 @@ function createStyles(theme: MobileTheme) {
       height: 1,
       backgroundColor: theme.border
     },
+    // The prototype's description field (UIA-050): a darker inset with 20-point semibold text.
     activeEditDescriptionInput: {
-      minHeight: 48
+      // Daylight's inset is nearly white on the white sheet; the muted fill keeps the field visible.
+      backgroundColor: theme.mode === "dark" ? theme.surfaceInset : theme.surfaceMuted,
+      fontSize: 20,
+      fontWeight: "600",
+      minHeight: 52
     },
     activeEditDescriptionField: {
       position: "relative",

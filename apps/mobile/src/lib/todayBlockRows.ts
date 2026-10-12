@@ -33,13 +33,22 @@ export function rowTimeRange(entry: RowEntry, nowMs: number) {
   return `${clock(entry.startedAt, nowMs)}–${entry.stoppedAt ? clock(entry.stoppedAt, nowMs) : "now"}`;
 }
 
+/**
+ * The activity for the meta line, or null when the row's title already is the activity (a block
+ * without a description), so "Exercise" is not repeated under "Exercise" (UIA-041).
+ */
+function metaActivity(entry: RowEntry) {
+  if (!entry.categoryName) return null;
+  return displayTimerDescription(entry)?.trim() ? entry.categoryName : null;
+}
+
 /** The row's second line: time, how many repeats a group holds, then the activity. */
 export function rowMeta(group: HistoryEntryGroup, nowMs: number) {
   const { entry } = group.representative;
   return [
     rowTimeRange(entry, nowMs),
     group.entries.length > 1 ? `${group.entries.length} blocks` : null,
-    entry.categoryName ?? null,
+    metaActivity(entry),
   ].filter(Boolean).join(" · ");
 }
 
@@ -54,14 +63,18 @@ export function rowSpokenLabel(group: HistoryEntryGroup, nowMs: number, { omitCo
     rowTitle(entry),
     `${clock(entry.startedAt, nowMs)} to ${entry.stoppedAt ? clock(entry.stoppedAt, nowMs) : "now"}`,
     group.entries.length > 1 && !omitCount ? `${group.entries.length} blocks` : null,
-    entry.categoryName ?? null,
+    metaActivity(entry),
     entry.placeName ? `at ${entry.placeName}` : null,
     tags.length ? `tags: ${tags.join(", ")}` : null,
   ].filter(Boolean).join(", ");
 }
 
-/** "4h 12m", "35m", "<1m" or "0m" (the shared `formatDuration`). */
+/**
+ * "4h 12m", "35m" or "<1m" (the shared `formatDuration`). A recorded block always took some time,
+ * so anything under a minute, including a block stopped in the same second, reads "<1m" (UIA-041).
+ */
 export function rowDuration(seconds: number) {
+  if (Number.isFinite(seconds) && seconds >= 0 && seconds < 60) return "<1m";
   return formatDuration(seconds);
 }
 

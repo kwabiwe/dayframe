@@ -39,6 +39,7 @@ import {
 } from "@/lib/api";
 import { BlocksConfirmHost, useBlocksConfirm } from "@/components/blocks/BlocksConfirmSheet";
 import { ActivityPickerSheet } from "@/components/ActivityPickerSheet";
+import { BlocksSheetHead } from "@/components/blocks/BlocksSheetHead";
 import { DayframeIcon } from "@/components/icons/DayframeIcon";
 import {
   SettingsBlockGroup,
@@ -486,39 +487,35 @@ export default function PlaceEditorScreen() {
 
   return (
     <SafeAreaView style={styles.safeArea}>
-      {/* A sheet-like head on the pushed route: Cancel, the title and the coral Save. It stays put. */}
+      {/* The shared sheet head (UIA-006) on the pushed route: eyebrow and title, the coral Save. A
+          pushed page has no sheet to swipe, so a circular close control leads; it stays put. */}
       <View style={[editorStyles.head, { borderBottomColor: theme.border }]}>
-        <Pressable
-          accessibilityLabel="Cancel place editing"
-          accessibilityRole="button"
-          onPress={() => router.back()}
-          style={({ pressed }) => [editorStyles.headButton, pressed ? styles.buttonPressed : null]}
-          testID="place-editor-cancel"
-        >
-          <Text {...mobileTextProps("control")} style={[editorStyles.cancelText, { color: theme.textSecondary }]}>Cancel</Text>
-        </Pressable>
-        <View style={editorStyles.headTitle}>
-          <Text {...mobileTextProps("counter")} numberOfLines={1} style={[editorStyles.eyebrow, { color: theme.textMuted }]}>{eyebrow}</Text>
-          <Text {...mobileTextProps("screenHeading")} accessibilityRole="header" numberOfLines={1} style={[editorStyles.title, { color: theme.textPrimary }]}>
-            {title}
-          </Text>
-        </View>
-        <Pressable
-          accessibilityHint={validation.ok ? undefined : validation.message}
-          accessibilityLabel={saving ? "Saving place" : "Save place"}
-          accessibilityRole="button"
-          accessibilityState={{ busy: saving, disabled: !canSave }}
-          disabled={!canSave}
-          onPress={() => void savePlace()}
-          style={({ pressed }) => [
-            editorStyles.savePill,
-            { backgroundColor: theme.accent, opacity: canSave || saving ? 1 : 0.45 },
-            pressed ? styles.buttonPressed : null
-          ]}
-          testID="place-editor-save"
-        >
-          <Text {...mobileTextProps("control")} style={[editorStyles.saveText, { color: theme.onAccent }]}>{saving ? "Saving…" : "Save"}</Text>
-        </Pressable>
+        <BlocksSheetHead
+          action={{
+            accessibilityHint: validation.ok ? undefined : validation.message,
+            accessibilityLabel: saving ? "Saving place" : "Save place",
+            busy: saving,
+            disabled: !canSave,
+            label: saving ? "Saving…" : "Save",
+            onPress: () => void savePlace(),
+            testID: "place-editor-save",
+            tone: "primary"
+          }}
+          eyebrow={eyebrow}
+          leading={(
+            <Pressable
+              accessibilityLabel="Cancel place editing"
+              accessibilityRole="button"
+              onPress={() => router.back()}
+              style={({ pressed }) => [editorStyles.close, { backgroundColor: theme.surfaceMuted }, pressed ? styles.buttonPressed : null]}
+              testID="place-editor-cancel"
+            >
+              <DayframeIcon color={theme.textPrimary} glyph={DAYFRAME_APP_ICONS.close} size={18} />
+            </Pressable>
+          )}
+          theme={theme}
+          title={title}
+        />
       </View>
 
       <ScrollView
@@ -1004,21 +1001,12 @@ function formatOptionalCoordinate(value?: number | null) {
 
 const editorStyles = StyleSheet.create({
   head: {
-    alignItems: "center",
     borderBottomWidth: StyleSheet.hairlineWidth,
-    flexDirection: "row",
-    gap: 8,
     paddingBottom: 8,
     paddingHorizontal: 16,
     paddingTop: 6
   },
-  headButton: { alignItems: "flex-start", justifyContent: "center", minHeight: 44, minWidth: 64, paddingHorizontal: 6 },
-  headTitle: { alignItems: "center", flex: 1, minWidth: 0 },
-  cancelText: { fontSize: 15, fontWeight: "600" },
-  eyebrow: { fontSize: 11, fontWeight: "700", letterSpacing: 0.9 },
-  title: { fontFamily: MOBILE_DISPLAY_FONT.bold, fontSize: 20 },
-  savePill: { alignItems: "center", borderRadius: DAYFRAME_BLOCKS.radius.pill, justifyContent: "center", minHeight: 44, minWidth: 64, paddingHorizontal: 16 },
-  saveText: { fontSize: 15, fontWeight: "700" },
+  close: { alignItems: "center", borderRadius: DAYFRAME_BLOCKS.radius.pill, height: 44, justifyContent: "center", width: 44 },
   scrollContent: { paddingBottom: 40, paddingTop: 14 },
   stack: { gap: 22 },
   mapCard: { gap: 8 },

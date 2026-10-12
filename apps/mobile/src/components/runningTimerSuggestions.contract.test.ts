@@ -22,7 +22,7 @@ describe("time-entry sheet historical Suggestions contract", () => {
     const overlayIndex = editSheetSource.indexOf("<HistoricalSuggestionsOverlay\n");
     const formCloseIndex = editSheetSource.lastIndexOf("</ScrollView>", overlayIndex);
     // The prototype's sheet head (eyebrow, title, Done) sits above the form.
-    const sheetHeadIndex = editSheetSource.indexOf("testID=\"time-entry-sheet-hero\"");
+    const sheetHeadIndex = editSheetSource.indexOf("textTestID=\"time-entry-sheet-hero\"");
     const formIndex = editSheetSource.indexOf("testID=\"time-entry-sheet-form\"");
 
     expect(overlayIndex).toBeGreaterThan(-1);
