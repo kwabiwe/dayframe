@@ -645,8 +645,40 @@ export async function login(email: string, password: string) {
   return authenticate("/api/auth/login", { email, password });
 }
 
-export async function signup(email: string, password: string, name?: string, workspaceName?: string) {
-  return authenticate("/api/auth/signup", { email, password, name, workspaceName });
+/** A new account gets its personal workspace, renamed later on the web (UIA-318). */
+export async function signup(email: string, password: string, name?: string) {
+  return authenticate("/api/auth/signup", { email, password, name });
+}
+
+/**
+ * Forgot password (UIA-317): the server asks Supabase to email a reset link (the reset page is on
+ * the web) and answers the same way for any address.
+ */
+export async function requestPasswordReset(email: string) {
+  const response = await mobileFetchWithTimeout(
+    `${DAYFRAME_API_BASE}/api/auth/password-reset`,
+    { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ email }) },
+    { timeoutMilliseconds: MOBILE_OPENING_REQUEST_TIMEOUT_MS, timeoutMessage: "This is taking too long. Check your connection and try again." }
+  );
+  const payload = await readJsonResponse<{ message?: string; error?: string }>(response).catch(() => ({} as { message?: string; error?: string }));
+  if (response.status === 404) throw new Error("Password reset isn't available here.");
+  if (!response.ok) throw new Error(payload.error ?? "Dayframe couldn't send the reset email. Try again.");
+  return payload.message ?? "If an account uses that email, a reset link is on its way. Check your email.";
+}
+
+/** Sign-in failures in plain words (UIA-320); anything unrecognised keeps the server's sentence. */
+export function plainAuthError(message: string | undefined, status: number) {
+  const text = message ?? "";
+  if (/invalid login credentials|invalid email or password/i.test(text)) return "That email and password don't match.";
+  if (/email not confirmed/i.test(text)) return "Confirm your email first, then log in.";
+  if (/already registered|already exists/i.test(text)) return "An account already uses that email. Log in instead.";
+  // Only a password-only rule is rephrased; a combined email-and-password message stays whole.
+  if (/password should be at least/i.test(text) || (/at least 8/i.test(text) && !/email/i.test(text))) {
+    return "Use at least 8 characters for the password.";
+  }
+  if (status === 429) return "Too many tries. Wait a minute, then try again.";
+  if (status >= 500 || !text) return "Dayframe couldn't sign you in. Try again in a moment.";
+  return text;
 }
 
 // Any way the session ends (sign-out, expiry, a revoked session) takes the evening Review reminder
@@ -2385,7 +2417,7 @@ async function authenticate(path: string, body: Record<string, unknown>): Promis
     }
   );
   const payload = await readJsonResponse<MobileAuthResult & { error?: string }>(response);
-  if (!response.ok) throw new Error(payload.error ?? `Authentication failed: ${response.status}`);
+  if (!response.ok) throw new Error(plainAuthError(payload.error, response.status));
   if ("requiresEmailConfirmation" in payload) return payload;
   const owner = {
     userId: payload.user.id,

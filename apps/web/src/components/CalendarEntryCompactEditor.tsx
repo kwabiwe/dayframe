@@ -148,8 +148,16 @@ export function CalendarEntryCompactEditor(props: CalendarEntryCompactEditorProp
     return () => window.cancelAnimationFrame(frame);
   }, [controller.descriptionRef, focusOnOpen]);
 
+  // The outside-press listener is installed once per open editor and reads the latest values
+  // through a ref, so a re-render (new controller object, moved anchor) never leaves a gap in
+  // which an outside press is missed.
+  const outsidePressRef = useRef({ anchor, controller, onOutsidePointerDown });
+  useLayoutEffect(() => {
+    outsidePressRef.current = { anchor, controller, onOutsidePointerDown };
+  });
   useEffect(() => {
     const handlePointerDown = (event: PointerEvent) => {
+      const { anchor, controller, onOutsidePointerDown } = outsidePressRef.current;
       const surface = surfaceRef.current;
       if (!surface) return;
       const path = event.composedPath();
@@ -178,7 +186,7 @@ export function CalendarEntryCompactEditor(props: CalendarEntryCompactEditorProp
       window.clearTimeout(timeout);
       document.removeEventListener("pointerdown", handlePointerDown, true);
     };
-  }, [anchor, controller, onOutsidePointerDown]);
+  }, []);
 
   useEffect(() => {
     const blockNavigationWhileOwned = (event: KeyboardEvent) => {

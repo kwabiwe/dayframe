@@ -73,6 +73,10 @@ import {
   calculateCalendarClickCreateSlot,
   calculateCalendarDraftAnchorGeometry,
   calendarCreatePointerSequenceAccepted,
+  calendarDragCreateRange,
+  calendarDragCreateSlot,
+  calendarDragMinutesAt,
+  calendarDragRangeSeconds,
   calendarPointHitsSemanticBlock,
   calendarPointerMatchesConsumed,
   isEligibleCalendarCreatePointer,
@@ -101,7 +105,8 @@ const scopeItems: Array<{ id: TimelineScope; label: string }> = [
 const calendarHourModes: Record<CalendarHoursMode, { label: string; startHour: number; endHour: number }> = {
   fullDay: { label: "24h", startHour: 0, endHour: 24 }
 };
-const calendarSnapMinutes = 15;
+// Resize and drag-create both move in 5-minute steps (prototype web.html beginResize).
+const calendarSnapMinutes = 5;
 const calendarZooms = {
   hour: { label: "1h", intervalMinutes: 60, pixelsPerHour: 64 },
   half: { label: "30m", intervalMinutes: 30, pixelsPerHour: 92 },
@@ -159,6 +164,9 @@ type CalendarCreateEditorTarget = {
 
 type CalendarEditorTarget = CalendarEntryEditorTarget | CalendarCreateEditorTarget;
 
+
+/** Room the resize tip needs to the pointer's right before it flips to the left (W13). */
+const RESIZE_TIP_ROOM = 150;
 export function TimeReviewViews({
   initialData,
   initialPreference,
@@ -623,6 +631,19 @@ export function CalendarReview({
   const [resizeDraft, setResizeDraft] = useState<CalendarResizeDraft | null>(null);
   const [resizingId, setResizingId] = useState<string | null>(null);
   const [resizeError, setResizeError] = useState<string | null>(null);
+  const [resizeTip, setResizeTip] = useState<{ flip: boolean; label: string; x: number; y: number } | null>(null);
+  // Drag on empty time: the day body owns the pointer (capture) from press to release.
+  const [createGhost, setCreateGhost] = useState<{ dayKey: string; endMinutes: number; startMinutes: number } | null>(null);
+  // Decided once at pointerdown against the layout at that moment: whether the press may become a
+  // drag (it is outside every block's semantic time) and the 5-minute anchor it pressed on.
+  const createPressRef = useRef<{ anchorMinutes: number; dragAllowed: boolean; pointerId: number } | null>(null);
+  const createDragRef = useRef<{
+    anchorMinutes: number;
+    dayKey: string;
+    endMinutes: number;
+    pointerId: number;
+    startMinutes: number;
+  } | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const [continuingEntryId, setContinuingEntryId] = useState<string | null>(null);
   const [zoomLevel, setZoomLevel] = useState<CalendarZoom>("hour");
@@ -717,7 +738,7 @@ export function CalendarReview({
     setSelectedTarget(null);
   }
 
-  function createCalendarDraft(day: Date, slot: NonNullable<ReturnType<typeof calculateCalendarClickCreateSlot>>) {
+  function createCalendarDraft(day: Date, slot: { startedAt: string; stoppedAt: string }) {
     const nextTarget: CalendarCreateEditorTarget = {
       anchor: null,
       dayKey: formatCalendarDateKey(day),
@@ -895,23 +916,38 @@ export function CalendarReview({
     let finalDraft: CalendarResizeDraft | null = null;
     let hasStartedResize = false;
 
-    event.currentTarget.setPointerCapture(event.pointerId);
+    const handle = event.currentTarget;
+    const resizePointerId = event.pointerId;
+    handle.setPointerCapture(resizePointerId);
 
     const updateDraft = (clientY: number) => {
       const relativeY = clientY - columnRect.top;
       const rawMinutes = timelineStart + (relativeY / rowHeight) * 60;
       const snappedMinutes = clampMinutes(snapCalendarMinutes(rawMinutes), timelineStart, timelineEnd);
       const nextStartMinutes =
-        edge === "start" ? clampMinutes(snappedMinutes, timelineStart, originalEnd - 15) : originalStart;
+        edge === "start" ? clampMinutes(snappedMinutes, timelineStart, originalEnd - calendarSnapMinutes) : originalStart;
       const nextEndMinutes =
-        edge === "end" ? clampMinutes(snappedMinutes, originalStart + 15, timelineEnd) : originalEnd;
+        edge === "end" ? clampMinutes(snappedMinutes, originalStart + calendarSnapMinutes, timelineEnd) : originalEnd;
       finalDraft = {
         entryId: entry.id,
         startedAt: edge === "start" ? isoForDateMinutes(day, nextStartMinutes) : entry.startedAt,
         stoppedAt: edge === "end" ? isoForDateMinutes(day, nextEndMinutes) : entry.stoppedAt as string
       };
       setResizeDraft(finalDraft);
+      const edgeMinutes = edge === "start" ? nextStartMinutes : nextEndMinutes;
+      const durationSeconds = Math.max(
+        0,
+        Math.round((new Date(finalDraft.stoppedAt).getTime() - new Date(finalDraft.startedAt).getTime()) / 1_000)
+      );
+      setResizeTip({
+        label: `${formatCalendarAxisMinutes(edgeMinutes)} · ${formatDuration(durationSeconds)}`,
+        // Near the right edge (a phone, a narrow window) the tip flips to the pointer's left.
+        flip: lastClientX + 14 + RESIZE_TIP_ROOM > window.innerWidth,
+        x: lastClientX + 14 + RESIZE_TIP_ROOM > window.innerWidth ? lastClientX - 14 : lastClientX + 14,
+        y: clientY + 10
+      });
     };
+    let lastClientX = event.clientX;
 
     const beginResize = () => {
       if (hasStartedResize) return;
@@ -926,20 +962,37 @@ export function CalendarReview({
         if (Math.abs(moveEvent.clientY - startClientY) < resizeDragThresholdPx) return;
         beginResize();
       }
+      lastClientX = moveEvent.clientX;
       updateDraft(moveEvent.clientY);
     };
     const cancelResize = () => {
       window.removeEventListener("pointermove", moveResize);
       window.removeEventListener("pointerup", stopResize);
       window.removeEventListener("pointercancel", cancelResize);
+      window.removeEventListener("keydown", escapeResize, true);
+      handle.removeEventListener("lostpointercapture", lostResize);
+      if (handle.hasPointerCapture?.(resizePointerId)) handle.releasePointerCapture(resizePointerId);
       setResizingId(null);
       setResizeDraft(null);
+      setResizeTip(null);
+    };
+    const lostResize = (lostEvent: PointerEvent) => {
+      if (lostEvent.pointerId === resizePointerId) cancelResize();
+    };
+    const escapeResize = (keyEvent: KeyboardEvent) => {
+      if (keyEvent.key !== "Escape") return;
+      keyEvent.preventDefault();
+      keyEvent.stopPropagation();
+      cancelResize();
     };
     const stopResize = async () => {
       window.removeEventListener("pointermove", moveResize);
       window.removeEventListener("pointerup", stopResize);
       window.removeEventListener("pointercancel", cancelResize);
+      window.removeEventListener("keydown", escapeResize, true);
+      handle.removeEventListener("lostpointercapture", lostResize);
       setResizingId(null);
+      setResizeTip(null);
 
       if (!hasStartedResize || !finalDraft) {
         setResizeDraft(null);
@@ -958,6 +1011,8 @@ export function CalendarReview({
     window.addEventListener("pointermove", moveResize);
     window.addEventListener("pointerup", stopResize, { once: true });
     window.addEventListener("pointercancel", cancelResize, { once: true });
+    window.addEventListener("keydown", escapeResize, true);
+    handle.addEventListener("lostpointercapture", lostResize);
   }
 
   function startCalendarCreatePointer(
@@ -991,8 +1046,70 @@ export function CalendarReview({
       scrollLeft: calendarScroller?.scrollLeft ?? 0,
       scrollTop: calendarScroller?.scrollTop ?? 0
     };
+    createPressRef.current = {
+      anchorMinutes: calendarDragMinutesAt({
+        clientY: event.clientY,
+        dayBodyTop: dayBody.getBoundingClientRect().top,
+        endHour: calendarHours.endHour,
+        rowHeight,
+        startHour: calendarHours.startHour
+      }),
+      dragAllowed: !dayBodyPointHitsSemanticBlock(dayBody, event.clientX, event.clientY),
+      pointerId: event.pointerId
+    };
     dayBody.setPointerCapture(event.pointerId);
   }
+
+  function moveCalendarCreatePointer(day: Date, event: ReactPointerEvent<HTMLDivElement>) {
+    const sequence = createPointerSequenceRef.current;
+    if (!sequence || sequence.pointerId !== event.pointerId) return;
+    const dayBodyTop = event.currentTarget.getBoundingClientRect().top;
+    const press = createPressRef.current;
+    // A press inside a block's semantic time (including its visual gap) never becomes a drag.
+    if (!press || press.pointerId !== event.pointerId || !press.dragAllowed) return;
+    const axis = { endHour: calendarHours.endHour, rowHeight, startHour: calendarHours.startHour };
+    let drag = createDragRef.current;
+    if (!drag) {
+      if (Math.hypot(event.clientX - sequence.clientX, event.clientY - sequence.clientY) < resizeDragThresholdPx) return;
+      const anchorMinutes = press.anchorMinutes;
+      drag = {
+        anchorMinutes,
+        dayKey: sequence.dayKey,
+        endMinutes: anchorMinutes,
+        pointerId: event.pointerId,
+        startMinutes: anchorMinutes
+      };
+      createDragRef.current = drag;
+    }
+    const range = calendarDragCreateRange({
+      ...axis,
+      anchorMinutes: drag.anchorMinutes,
+      currentMinutes: calendarDragMinutesAt({ ...axis, clientY: event.clientY, dayBodyTop })
+    });
+    if (range.startMinutes === drag.startMinutes && range.endMinutes === drag.endMinutes && createGhost) return;
+    drag.startMinutes = range.startMinutes;
+    drag.endMinutes = range.endMinutes;
+    setCreateGhost({ dayKey: formatCalendarDateKey(day), ...range });
+  }
+
+  function abortCalendarCreateDrag() {
+    createPressRef.current = null;
+    createDragRef.current = null;
+    createPointerSequenceRef.current = null;
+    setCreateGhost(null);
+  }
+
+  useEffect(() => {
+    if (!createGhost) return;
+    const escape = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      event.preventDefault();
+      event.stopPropagation();
+      abortCalendarCreateDrag();
+    };
+    window.addEventListener("keydown", escape, true);
+    return () => window.removeEventListener("keydown", escape, true);
+  }, [createGhost]);
 
   function finishCalendarCreatePointer(
     day: Date,
@@ -1003,6 +1120,21 @@ export function CalendarReview({
     createPointerSequenceRef.current = null;
     if (dayBody.hasPointerCapture(event.pointerId)) {
       dayBody.releasePointerCapture(event.pointerId);
+    }
+    createPressRef.current = null;
+    const drag = createDragRef.current;
+    if (drag && drag.pointerId === event.pointerId) {
+      createDragRef.current = null;
+      setCreateGhost(null);
+      if (!sequence || drag.dayKey !== formatCalendarDateKey(day)) return;
+      const slot = calendarDragCreateSlot({
+        day,
+        endMinutes: drag.endMinutes,
+        now: new Date(),
+        startMinutes: drag.startMinutes
+      });
+      if (slot) createCalendarDraft(day, slot);
+      return;
     }
 
     const underlyingTarget = document.elementFromPoint(event.clientX, event.clientY);
@@ -1024,25 +1156,7 @@ export function CalendarReview({
     if (!accepted) return;
 
     const dayBodyRect = dayBody.getBoundingClientRect();
-    const semanticBlocks = Array.from(
-      dayBody.querySelectorAll<HTMLElement>("[data-calendar-block-key]")
-    ).map((block) => {
-      const rect = block.getBoundingClientRect();
-      return {
-        height: Number(block.dataset.calendarSemanticHeight),
-        left: rect.left,
-        right: rect.right,
-        top: Number(block.dataset.calendarSemanticTop)
-      };
-    }).filter((block) => Number.isFinite(block.top) && Number.isFinite(block.height));
-    if (calendarPointHitsSemanticBlock({
-      blocks: semanticBlocks,
-      clientX: event.clientX,
-      clientY: event.clientY,
-      dayBodyTop: dayBodyRect.top
-    })) {
-      return;
-    }
+    if (dayBodyPointHitsSemanticBlock(dayBody, event.clientX, event.clientY)) return;
 
     const slot = calculateCalendarClickCreateSlot({
       clientY: event.clientY,
@@ -1060,6 +1174,7 @@ export function CalendarReview({
     if (createPointerSequenceRef.current?.pointerId === event.pointerId) {
       createPointerSequenceRef.current = null;
     }
+    if (createDragRef.current?.pointerId === event.pointerId) abortCalendarCreateDrag();
   }
 
   return (
@@ -1171,6 +1286,7 @@ export function CalendarReview({
               onLostPointerCapture={cancelCalendarCreatePointer}
               onPointerCancel={cancelCalendarCreatePointer}
               onPointerDown={(event) => startCalendarCreatePointer(day, event)}
+              onPointerMove={(event) => moveCalendarCreatePointer(day, event)}
               onPointerUp={(event) => finishCalendarCreatePointer(day, event)}
               style={{
                 height: calendarHeight,
@@ -1231,6 +1347,19 @@ export function CalendarReview({
                   </Link>
                 );
               })}
+              {createGhost?.dayKey === formatCalendarDateKey(day) ? (
+                <div
+                  aria-hidden="true"
+                  className="calendar-create-ghost tabular"
+                  data-calendar-create-ghost
+                  style={{
+                    height: Math.max(12, ((createGhost.endMinutes - createGhost.startMinutes) / 60) * rowHeight - 2),
+                    top: ((createGhost.startMinutes - calendarHours.startHour * 60) / 60) * rowHeight
+                  }}
+                >
+                  {`${formatCalendarAxisMinutes(createGhost.startMinutes)}–${formatCalendarAxisMinutes(createGhost.endMinutes)} · ${formatDuration(calendarDragRangeSeconds(day, createGhost.startMinutes, createGhost.endMinutes) ?? 0)}`}
+                </div>
+              ) : null}
               {visibleSelectedTarget?.kind === "create" && visibleSelectedTarget.dayKey === formatCalendarDateKey(day) ? (() => {
                 const geometry = calculateCalendarDraftAnchorGeometry({
                   day,
@@ -1529,6 +1658,16 @@ export function CalendarReview({
           />
         </div>
       ) : null}
+      {resizeTip ? (
+        <div
+          aria-hidden="true"
+          className="calendar-resize-tip tabular"
+          data-calendar-resize-tip
+          style={{ left: resizeTip.x, top: resizeTip.y, transform: resizeTip.flip ? "translateX(-100%)" : undefined }}
+        >
+          {resizeTip.label}
+        </div>
+      ) : null}
       {resizeError ? (
         <p className="border-t border-[var(--line)] px-4 py-2 text-sm text-[var(--danger-text)]" role="alert">
           {resizeError}
@@ -1707,6 +1846,26 @@ function calendarDurationSeconds(
 
 function formatCalendarWeekday(day: Date) {
   return new Intl.DateTimeFormat("en-GB", { weekday: "short" }).format(day);
+}
+
+function dayBodyPointHitsSemanticBlock(dayBody: HTMLElement, clientX: number, clientY: number) {
+  const blocks = Array.from(
+    dayBody.querySelectorAll<HTMLElement>("[data-calendar-block-key]")
+  ).map((block) => {
+    const rect = block.getBoundingClientRect();
+    return {
+      height: Number(block.dataset.calendarSemanticHeight),
+      left: rect.left,
+      right: rect.right,
+      top: Number(block.dataset.calendarSemanticTop)
+    };
+  }).filter((block) => Number.isFinite(block.top) && Number.isFinite(block.height));
+  return calendarPointHitsSemanticBlock({
+    blocks,
+    clientX,
+    clientY,
+    dayBodyTop: dayBody.getBoundingClientRect().top
+  });
 }
 
 function minutesFromDate(date: Date) {
