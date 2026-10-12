@@ -55,6 +55,7 @@ export function PersistentTimerBar({ workspaceMode = false }: { workspaceMode?: 
     startTimer,
     stopTimer,
     timerDraft,
+    timerDraftScope,
     timerError,
     updateActiveDetails,
     updateActiveStartTime
@@ -110,9 +111,10 @@ export function PersistentTimerBar({ workspaceMode = false }: { workspaceMode?: 
       .slice(0, TASK_SUGGESTION_LIMIT);
   }, [taskSuggestions, timerDraft.description]);
   const quickActions = useMemo(() => data ? buildLearnedQuickActions(data) : [], [data]);
-  // The block the description's `#`/`@` lists belong to: a different running block (or going
-  // idle) closes them, even when the text reads the same.
-  const completionScope = active?.id ?? "idle";
+  // The block the description's `#`/`@` lists belong to (the runtime's draft scope: the running
+  // block, or idle, kept across an accepted Start's optimistic-to-real handoff). A different block
+  // closes them, even when the text reads the same.
+  const completionScope = timerDraftScope ?? active?.id ?? "idle";
   const parsedCommand = useMemo(
     () => active ? null : parseCommand(timerDraft.description),
     [active, timerDraft.description]

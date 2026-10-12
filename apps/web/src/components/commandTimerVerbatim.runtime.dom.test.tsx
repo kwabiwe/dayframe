@@ -21,8 +21,17 @@ const server = {
   patches: [] as Patch[],
   patchUrls: [] as string[],
   posts: [] as Record<string, unknown>[],
-  rejectPatches: false
+  rejectPatches: false,
+  /** The next PATCH or Start waits (the request is recorded) until `release()`. */
+  holdNext: null as "patch" | "start" | null,
+  release: null as (() => void) | null
 };
+
+async function maybeHold(kind: "patch" | "start") {
+  if (server.holdNext !== kind) return;
+  server.holdNext = null;
+  await new Promise<void>((resolve) => { server.release = resolve; });
+}
 
 vi.mock("next/navigation", () => ({
   useSearchParams: () => new URLSearchParams("date=2026-08-17")
@@ -40,6 +49,7 @@ vi.mock("@/lib/client-auth-fetch", () => ({
       const body = JSON.parse(String(init?.body)) as Patch;
       server.patches.push(body);
       server.patchUrls.push(url);
+      await maybeHold("patch");
       if (server.rejectPatches) return reply(false, { error: "Rejected" });
       const updatedAt = new Date(Date.parse(server.entry!.updatedAt) + 60_000).toISOString();
       server.entry = { ...server.entry!, description: body.description, categoryId: body.categoryId, tagNames: body.tagNames, updatedAt };
@@ -48,6 +58,7 @@ vi.mock("@/lib/client-auth-fetch", () => ({
     if (method === "POST" && url === "/api/time-entries") {
       const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
       server.posts.push(body);
+      await maybeHold("start");
       if (server.entry) server.completed = { ...server.entry, stoppedAt: new Date().toISOString() };
       server.entry = {
         ...(server.entry ?? entry()),
@@ -73,6 +84,8 @@ beforeEach(() => {
   server.patches = [];
   server.patchUrls = [];
   server.posts = [];
+  server.holdNext = null;
+  server.release = null;
   server.rejectPatches = false;
 });
 
@@ -307,6 +320,111 @@ describe("Codex r6: no autosave hold; lists belong to their block", () => {
     // Typing again in the new block opens its own list.
     await user.keyboard("{Backspace}");
     expect(optionNames()).toEqual(["Writing"]);
+  });
+});
+
+describe("Codex r7: acknowledgements and handoffs keep newer edits", () => {
+  const activityLabel = () => screen.getByRole("button", { name: /^Activity:/ }).getAttribute("aria-label");
+
+  it("a pick while the autosave PATCH is pending survives its acknowledgement", async () => {
+    const { input } = await renderShell(entry({ description: "Fix bug" }));
+    const user = userEvent.setup();
+    await user.click(input);
+    server.holdNext = "patch";
+    await user.keyboard("{End} @wri");
+    await waitFor(() => expect(server.patches).toHaveLength(1), { timeout: 2_000 });
+    expect(server.patches[0]).toMatchObject({ categoryId: "focus", description: "Fix bug @wri" });
+    await user.keyboard("{Enter}");
+    expect(input.value).toBe("Fix bug");
+    await act(async () => { server.release?.(); });
+    await waitFor(() => expect(server.patches).toHaveLength(2), { timeout: 2_000 });
+    expect(server.patches[1]).toMatchObject({ categoryId: "write", description: "Fix bug" });
+    await wait(1_000);
+    expect(input.value).toBe("Fix bug");
+    expect(server.patches).toHaveLength(2);
+    expect(server.entry).toMatchObject({ categoryId: "write", description: "Fix bug" });
+  });
+
+  it("a plain edit back to the saved text while a PATCH is pending is kept and saved", async () => {
+    const { input } = await renderShell(entry({ description: "Fix bug" }));
+    const user = userEvent.setup();
+    await user.click(input);
+    server.holdNext = "patch";
+    await user.keyboard("{End} x");
+    await waitFor(() => expect(server.patches).toHaveLength(1), { timeout: 2_000 });
+    await user.keyboard("{Backspace}{Backspace}");
+    await act(async () => { server.release?.(); });
+    await waitFor(() => expect(descriptions()).toEqual(["Fix bug x", "Fix bug"]), { timeout: 2_000 });
+    expect(input.value).toBe("Fix bug");
+  });
+
+  it("Tags never reopen on a replacement block's text, and Enter cannot tag it", async () => {
+    const { input, refresh } = await renderShell(entry({ description: "Fix bug" }, ["urgent"]));
+    const user = userEvent.setup();
+    await user.click(input);
+    await user.keyboard("{End} #ur");
+    expect(screen.queryByRole("listbox", { name: "Tags" })).not.toBeNull();
+    server.entry = entry({ id: "next", description: "Call #urgent", updatedAt: "2026-08-17T06:00:00.000Z" }, ["urgent"]);
+    await refresh();
+    await waitFor(() => expect(input.value).toBe("Call #urgent"));
+    expect(screen.queryByRole("listbox", { name: "Tags" })).toBeNull();
+    await user.keyboard("{Enter}");
+    await wait(1_000);
+    expect(server.patchUrls.filter((url) => url.endsWith("/next"))).toEqual([]);
+    expect(server.entry).toMatchObject({ id: "next", description: "Call #urgent", tagNames: [] });
+  });
+
+  it("a pick while a Start is pending is kept when the real block arrives, and saved to it", async () => {
+    const { input } = await renderShell(null);
+    const user = userEvent.setup();
+    await user.click(input);
+    await user.keyboard("Plan @foc{Tab}");
+    expect(input.value).toBe("Plan");
+    server.holdNext = "start";
+    await user.click(input);
+    await user.keyboard("{End}{Enter}");
+    await waitFor(() => expect(server.posts).toHaveLength(1));
+    expect(server.posts[0]).toMatchObject({ categoryId: "focus", description: "Plan" });
+    await user.keyboard(" @wri{Enter}");
+    expect(input.value).toBe("Plan");
+    expect(activityLabel()).toBe("Activity: Writing");
+    await act(async () => { server.release?.(); });
+    await waitFor(() => expect(server.patches).toHaveLength(1), { timeout: 3_000 });
+    expect(server.patchUrls[0]).toBe("/api/time-entries/started-1");
+    expect(server.patches[0]).toMatchObject({ categoryId: "write", description: "Plan" });
+    expect(activityLabel()).toBe("Activity: Writing");
+    expect(server.posts).toHaveLength(1);
+  });
+
+  it("an activity block change while a Start is pending is kept and saved to the real block", async () => {
+    const { input } = await renderShell(null);
+    const user = userEvent.setup();
+    await user.click(input);
+    await user.keyboard("Plan");
+    server.holdNext = "start";
+    await user.keyboard("{Enter}");
+    await waitFor(() => expect(server.posts).toHaveLength(1));
+    await user.click(screen.getByRole("button", { name: /^Activity:/ }));
+    await user.click(await screen.findByRole("option", { name: /Writing/ }));
+    expect(activityLabel()).toBe("Activity: Writing");
+    await act(async () => { server.release?.(); });
+    await waitFor(() => expect(server.patches).toHaveLength(1), { timeout: 3_000 });
+    expect(server.patches[0]).toMatchObject({ categoryId: "write", description: "Plan" });
+    expect(activityLabel()).toBe("Activity: Writing");
+  });
+
+  it("a plain edit while a Start is pending is kept and saved to the real block", async () => {
+    const { input } = await renderShell(null);
+    const user = userEvent.setup();
+    await user.click(input);
+    await user.keyboard("Plan");
+    server.holdNext = "start";
+    await user.keyboard("{Enter}");
+    await waitFor(() => expect(server.posts).toHaveLength(1));
+    await user.keyboard(" more");
+    await act(async () => { server.release?.(); });
+    await waitFor(() => expect(descriptions()).toEqual(["Plan more"]), { timeout: 3_000 });
+    expect(input.value).toBe("Plan more");
   });
 });
 

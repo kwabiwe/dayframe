@@ -74,6 +74,8 @@ type RuntimeContext = {
   startTimer: (input?: TimerDraftInput, options?: { dedupeRunning?: boolean }) => Promise<TimerStartOutcome>;
   stopTimer: (input?: TimerDraftInput) => Promise<MutationOutcome>;
   timerDraft: TimerDraft;
+  /** The block the draft belongs to (its id, or "idle"); kept across an accepted Start's handoff. */
+  timerDraftScope: string;
   timerError: string | null;
   toggleTimer: () => Promise<MutationOutcome>;
   updateActiveDetails: (draft: TimerDraft) => Promise<MutationOutcome>;
@@ -105,6 +107,9 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
   // Set by a rejected Start: the next active-entry identity change keeps this draft instead of
   // resetting the bar to the restored entry's details.
   const rollbackDraftRef = useRef<{ draft: TimerDraft; entryId: string | null } | null>(null);
+  // Which block the draft belongs to: the running block's id, or "idle". It changes with the
+  // block, except when an accepted Start hands its optimistic block over to the real one.
+  const [timerDraftScope, setTimerDraftScope] = useState("idle");
   const refreshRequestRef = useRef(0);
   const dateLoadRequestRef = useRef(0);
   const isDateLoadingRef = useRef(false);
@@ -168,12 +173,18 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
     activeEntryVersionRef.current = activeEntryVersion;
     const activeEntryId = data?.activeEntry?.id ?? null;
     const canonicalDraft = timerDraftForEntry(data?.activeEntry);
-    const activeEntryChanged = timerDraftEntryIdRef.current !== activeEntryId;
+    const previousEntryId = timerDraftEntryIdRef.current;
+    const activeEntryChanged = previousEntryId !== activeEntryId;
+    // An accepted Start replaces its optimistic block with the real one: the same block, so edits
+    // made while the Start was pending are reconciled like any other, not reset (Codex r7).
+    const startAccepted = activeEntryChanged && isOptimisticTimerId(previousEntryId)
+      && activeEntryId !== null && !isOptimisticTimerId(activeEntryId);
     const rollbackDraft = rollbackDraftRef.current;
     rollbackDraftRef.current = null;
     const nextDraft = activeEntryChanged && rollbackDraft?.entryId === activeEntryId
       ? rollbackDraft.draft
-      : reconcileTimerDraft(activeEntryChanged, draftRef.current, canonicalTimerDraftRef.current, canonicalDraft);
+      : reconcileTimerDraft(activeEntryChanged && !startAccepted, draftRef.current, canonicalTimerDraftRef.current, canonicalDraft);
+    if (activeEntryChanged && !startAccepted) setTimerDraftScope(activeEntryId ?? "idle");
     timerDraftEntryIdRef.current = activeEntryId;
     canonicalTimerDraftRef.current = canonicalDraft;
     if (!timerDraftsEqual(nextDraft, draftRef.current)) setTimerDraft(nextDraft);
@@ -342,7 +353,7 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
       currentDraft: draftRef.current,
       input,
       now: () => new Date().toISOString(),
-      createOptimisticId: (startedAt) => `optimistic-timer:${startedAt}:${++optimisticIdRef.current}`,
+      createOptimisticId: (startedAt) => `${OPTIMISTIC_TIMER_ID_PREFIX}${startedAt}:${++optimisticIdRef.current}`,
       getCurrentDraft: () => draftRef.current,
       getCurrentSnapshot: () => dataRef.current ?? snapshot,
       onAccepted: () => {
@@ -476,7 +487,11 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
       setIsTimerBusy(true);
       setTimerError(null);
       refreshRequestRef.current += 1;
-      commitData(applyOptimisticActiveEntryPatch(snapshot, draft), "optimistic");
+      const optimistic = applyOptimisticActiveEntryPatch(snapshot, draft);
+      commitData(optimistic, "optimistic");
+      // What is being saved is now the canonical draft, so an edit made while the save is pending
+      // (even one back to the previous text) is newer and survives its acknowledgement (Codex r7).
+      canonicalTimerDraftRef.current = timerDraftForEntry(optimistic.activeEntry);
       try {
         const response = await clientFetch(`/api/time-entries/${snapshot.activeEntry!.id}`, {
           method: "PATCH",
@@ -499,6 +514,7 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
         return { ok: true } as const;
       } catch {
         commitData(snapshot, "optimistic");
+        canonicalTimerDraftRef.current = timerDraftForEntry(snapshot.activeEntry);
         setTimerDraft(timerDraftForEntry(snapshot.activeEntry));
         const message = "Block details were not saved. Your previous values were restored.";
         setTimerError(message);
@@ -678,6 +694,7 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
     startTimer,
     stopTimer,
     timerDraft,
+    timerDraftScope,
     timerError,
     toggleTimer,
     updateActiveDetails,
@@ -702,6 +719,7 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
     startTimer,
     stopTimer,
     timerDraft,
+    timerDraftScope,
     timerError,
     toggleTimer,
     updateActiveDetails,
@@ -710,6 +728,12 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
   ]);
 
   return <AppShellRuntimeContext.Provider value={value}>{children}</AppShellRuntimeContext.Provider>;
+}
+
+const OPTIMISTIC_TIMER_ID_PREFIX = "optimistic-timer:";
+
+function isOptimisticTimerId(id: string | null) {
+  return id?.startsWith(OPTIMISTIC_TIMER_ID_PREFIX) ?? false;
 }
 
 export function useAppShellRuntime() {

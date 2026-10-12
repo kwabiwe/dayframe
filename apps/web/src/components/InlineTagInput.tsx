@@ -155,16 +155,13 @@ export function InlineTagInput({
   // the field, moving the caret out of it, any other change of the text or a new scope closes it
   // and leaves the `@word` as written; placing the caret on existing text never opens it.
   const [typedMention, setTypedMention] = useState<{ start: number; value: string; scope: string } | null>(null);
-  // A new scope (another block, or idle) closes both lists, even when the text reads the same:
-  // the `@` anchor is cleared and the `#` token at the caret is dismissed.
-  const [seenScope, setSeenScope] = useState(completionScope);
-  if (seenScope !== completionScope) {
-    setSeenScope(completionScope);
-    setTypedMention(null);
-    setDismissedTagStart(active?.start ?? null);
-  }
+  // The scope of the user's last keystroke, click or caret move in the field. A new scope
+  // (another block, or idle) closes both lists, even when the text reads the same, and they stay
+  // closed through the runtime reconciling the new block's text until the user acts in the field
+  // again; a pick from either list only applies in the scope it was opened in.
+  const [interactionScope, setInteractionScope] = useState(completionScope);
   const shouldOpen = !disabled && focused && Boolean(active) && active?.start !== dismissedTagStart && !pickerOpen
-    && seenScope === completionScope;
+    && interactionScope === completionScope;
   const caretMention = activities && !disabled && focused && !pickerOpen
     && typedMention?.value === value && typedMention.scope === completionScope
     ? findActiveMention(value, caret)
@@ -334,9 +331,11 @@ export function InlineTagInput({
     };
   }, [activityOpen, effectivePickerOpen, portal, shouldOpen]);
 
-  function updateCaret() {
+  /** Reads the caret after a key or click (a user action in this scope) or on focus (not one). */
+  function updateCaret(userAction = true) {
     const input = localInputRef.current;
     if (!input) return;
+    if (userAction) setInteractionScope(completionScope);
     const nextCaret = input.selectionStart ?? input.value.length;
     setCaret(nextCaret);
     // Moving the caret out of the `@word` being typed closes its list for good.
@@ -366,7 +365,7 @@ export function InlineTagInput({
   }
 
   function selectAction(action: (typeof actions)[number]) {
-    if (disabled || !active) return;
+    if (disabled || !active || interactionScope !== completionScope) return;
     if (!addSelectedTag(action.label)) return;
     const replacement = consumeActiveHashtag(value, active);
     onChange(replacement.text);
@@ -486,6 +485,7 @@ export function InlineTagInput({
           onChange={(event) => {
             const nextCaret = event.target.selectionStart ?? event.target.value.length;
             onChange(event.target.value);
+            setInteractionScope(completionScope);
             const typed = activities ? findActiveMention(event.target.value, nextCaret) : null;
             setTypedMention(typed ? { start: typed.start, value: event.target.value, scope: completionScope } : null);
             setCaret(nextCaret);
@@ -501,11 +501,11 @@ export function InlineTagInput({
           }}
           onFocus={() => {
             setFocused(true);
-            updateCaret();
+            updateCaret(false);
             onFocus?.();
           }}
           onKeyDown={onKeyDown}
-          onKeyUp={updateCaret}
+          onKeyUp={() => updateCaret()}
           placeholder={placeholder}
           ref={(node) => {
             localInputRef.current = node;
