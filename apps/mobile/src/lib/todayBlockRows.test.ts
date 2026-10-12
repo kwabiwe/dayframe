@@ -43,6 +43,12 @@ describe("today block rows", () => {
     expect(rowMeta(group(entry("a", at(8), at(9), { categoryName: null, categoryId: null })), day)).toBe("08:00–09:00");
   });
 
+  it("drops the activity from the meta line when the title already is the activity (UIA-041)", () => {
+    expect(rowMeta(group(entry("a", at(8), at(9), { description: null })), day)).toBe("08:00–09:00");
+    expect(rowMeta(group(entry("a", at(8), at(9), { description: "  " })), day)).toBe("08:00–09:00");
+    expect(rowSpokenLabel(group(entry("a", at(8), at(9), { description: null })), day)).not.toMatch(/Focus.*Focus/);
+  });
+
   it("titles a row by description, else activity, else No activity", () => {
     expect(rowTitle(entry("a", at(8), at(9)))).toBe("Deep work");
     expect(rowTitle(entry("a", at(8), at(9), { description: "  " }))).toBe("Focus");
@@ -51,7 +57,7 @@ describe("today block rows", () => {
 
   it("formats durations and the caption", () => {
     expect(rowDuration(59)).toBe("<1m");
-    expect(rowDuration(0)).toBe("0m");
+    expect(rowDuration(0)).toBe("<1m");
     expect(rowDuration(107 * 60)).toBe("1h 47m");
     expect(rowDuration(2 * 3600)).toBe("2h");
     expect(todayBlocksCaption([group(entry("a", at(8), at(9)), entry("b", at(10), at(11))), group(entry("c", at(12), at(13)))])).toBe("3 · swipe a row");

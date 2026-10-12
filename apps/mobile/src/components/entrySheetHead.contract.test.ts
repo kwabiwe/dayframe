@@ -72,3 +72,45 @@ describe("time-entry sheet activity chips", () => {
     expect(create).toMatch(/if \(error instanceof ActivityNameTakenError\) \{\s*\/\/[^\n]*\n\s*void load\(\);/);
   });
 });
+
+// Audit fix A11a (UIA-050, UIA-052, UIA-006).
+describe("time-entry sheet polish (A11a)", () => {
+  const head = readFileSync(new URL("./blocks/BlocksSheetHead.tsx", import.meta.url), "utf8");
+  const theme = readFileSync(new URL("../lib/mobileTheme.ts", import.meta.url), "utf8");
+
+  it("uses the one shared sheet head, keeping the native QA identifiers", () => {
+    expect(sheet).toContain("<BlocksSheetHead");
+    expect(sheet).toContain('eyebrowTestID="time-entry-sheet-elapsed"');
+    expect(sheet).toContain('textTestID="time-entry-sheet-hero"');
+    expect(sheet).toContain('testID: "time-entry-sheet-done"');
+    expect(head).toMatch(/title: \{ fontSize: 17, fontWeight: "700" \}/);
+    expect(head).toMatch(/pill: \{[^}]*minHeight: 44/);
+  });
+
+  it("puts the tag row under Activity, as a filled chip with the add glyph (UIA-050)", () => {
+    const activity = sheet.indexOf('testID="time-entry-activity-chips"');
+    const tags = sheet.indexOf('testID="time-entry-description-obscured-footer"');
+    const times = sheet.indexOf("styles.activeEditTimeGroups,");
+    expect(sheet.indexOf('testID="time-entry-description"')).toBeLessThan(activity);
+    expect(activity).toBeLessThan(tags);
+    expect(tags).toBeLessThan(times);
+    const add = sheet.slice(sheet.indexOf('accessibilityLabel="Add a tag"'), sheet.indexOf('testID="time-entry-tag-add"') + 400);
+    expect(add).not.toContain("borderWidth");
+    expect(add).toContain("{ backgroundColor: theme.surfaceMuted }");
+    expect(add).toContain("glyph={DAYFRAME_APP_ICONS.add}");
+    expect(sheet).not.toContain(">+ Tag<");
+    expect(theme).toMatch(/activeEditDescriptionInput: \{[^}]*backgroundColor: theme\.mode === "dark" \? theme\.surfaceInset : theme\.surfaceMuted,[^}]*fontSize: 20,[^}]*fontWeight: "600"/);
+  });
+
+  it("offers a coral Add block next to Discard when adding past time (UIA-052)", () => {
+    const start = sheet.indexOf('testID="time-entry-sheet-actions"');
+    const actions = sheet.slice(start, sheet.indexOf("<HistoricalSuggestionsOverlay", start));
+    expect(actions).toContain("{isAddMode && onSave ? (");
+    expect(actions.indexOf('testID="time-entry-sheet-delete"')).toBeLessThan(actions.indexOf('testID="time-entry-sheet-add"'));
+    const add = actions.slice(actions.indexOf("{isAddMode && onSave ? ("), actions.indexOf('testID="time-entry-sheet-add"'));
+    expect(add).toContain('accessibilityLabel="Add block"');
+    expect(add).toContain("void saveChanges();");
+    expect(add).toContain("theme.accent");
+    expect(add).not.toContain("ActivityIndicator");
+  });
+});

@@ -1,5 +1,11 @@
 @import "tailwindcss";
 
+/* X3: every activity/category marker is a small rounded-square block, never a round dot.
+   Percentage keeps the Blocks chip proportion (~4px on a 12px marker) at any marker size. */
+:root {
+  --activity-marker-radius: 30%;
+}
+
 :root,
 :root[data-theme="light"] {
   --background: #f4f6f9;
@@ -841,62 +847,6 @@ textarea.ui-control {
   color: var(--on-accent);
 }
 
-.settings-goal-control {
-  display: grid;
-  min-width: min(100%, 440px);
-  grid-template-columns: repeat(2, minmax(172px, 1fr));
-  gap: 10px 14px;
-}
-
-.settings-duration-control {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-  gap: 8px;
-  margin: 0;
-  border: 0;
-  padding: 0;
-}
-
-.settings-duration-control legend {
-  grid-column: 1 / -1;
-  margin-bottom: 2px;
-  color: var(--muted);
-  font-size: 12px;
-  font-weight: 650;
-}
-
-.settings-duration-control label {
-  display: grid;
-  grid-template-columns: 58px auto;
-  align-items: center;
-  gap: 6px;
-  color: var(--muted);
-  font-size: 12px;
-  font-weight: 600;
-}
-
-.settings-duration-control .ui-control {
-  width: 58px;
-  padding: 0 8px;
-  text-align: center;
-}
-
-.settings-save-row {
-  display: flex;
-  grid-column: 1 / -1;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 8px 12px;
-}
-
-.settings-save-row-goals {
-  justify-content: flex-end;
-}
-
-.settings-save-row-goals .ui-button {
-  min-width: 104px;
-}
-
 .settings-inline-form > .ui-button {
   min-width: 104px;
 }
@@ -968,7 +918,7 @@ textarea.ui-control {
   height: 12px;
   flex: 0 0 auto;
   border: 0;
-  border-radius: 999px;
+  border-radius: var(--activity-marker-radius);
 }
 
 .category-data-marker.is-uncategorized {
@@ -1289,7 +1239,6 @@ textarea.ui-control {
 }
 
 .settings-workspace-toolbar,
-.settings-export-actions,
 .settings-troubleshooting-actions {
   display: flex;
   flex-wrap: wrap;
@@ -1371,10 +1320,6 @@ textarea.ui-control {
   max-width: none;
 }
 
-.settings-export-actions .ui-button {
-  min-width: 0;
-}
-
 .settings-confirm-copy,
 .settings-troubleshooting-copy {
   display: grid;
@@ -1436,15 +1381,6 @@ textarea.ui-control {
     justify-self: stretch;
   }
 
-  .settings-goal-control {
-    min-width: 0;
-    grid-template-columns: minmax(0, 1fr);
-  }
-
-  .settings-save-row {
-    grid-column: 1;
-  }
-
   .settings-inline-form,
   .settings-security-form {
     display: grid;
@@ -1466,8 +1402,7 @@ textarea.ui-control {
     justify-items: stretch;
   }
 
-  .settings-workspace-toolbar,
-  .settings-export-actions {
+  .settings-workspace-toolbar {
     justify-content: flex-start;
   }
 
@@ -1476,10 +1411,6 @@ textarea.ui-control {
   .settings-workspace-select,
   .settings-workspace-select .ui-control {
     width: 100%;
-  }
-
-  .settings-export-actions .ui-button {
-    flex: 1 1 140px;
   }
 }
 
@@ -4058,14 +3989,14 @@ kbd {
 .report-filter-chip-dot {
   width: 10px;
   height: 10px;
-  border-radius: 999px;
+  border-radius: var(--activity-marker-radius);
 }
 
 .report-filter-option-dot.is-uncategorized,
 .report-category-marker.is-uncategorized,
 .report-entry-category i.is-uncategorized {
   border: 1px solid var(--text-secondary);
-  border-radius: 2px;
+  border-radius: var(--activity-marker-radius);
   background: repeating-linear-gradient(45deg, var(--surface-muted) 0 2px, var(--text-secondary) 2px 3px) !important;
 }
 
@@ -4348,7 +4279,7 @@ kbd {
 .report-category-marker {
   width: 10px;
   height: 10px;
-  border-radius: 999px;
+  border-radius: var(--activity-marker-radius);
   background: var(--category-color);
 }
 
@@ -4559,7 +4490,7 @@ kbd {
   width: 10px;
   height: 10px;
   flex: 0 0 auto;
-  border-radius: 999px;
+  border-radius: var(--activity-marker-radius);
 }
 
 .report-entry-duration {
@@ -6453,7 +6384,7 @@ kbd {
   width: 8px;
   height: 8px;
   flex: 0 0 auto;
-  border-radius: 999px;
+  border-radius: var(--activity-marker-radius);
 }
 
 .swiss-task-suggestions-list svg {
@@ -6601,7 +6532,7 @@ kbd {
   height: 20px;
   flex: 0 0 auto;
   border: 0;
-  border-radius: 999px;
+  border-radius: var(--activity-marker-radius);
   box-shadow: none;
 }
 
@@ -6736,7 +6667,7 @@ kbd {
   width: 9px;
   height: 9px;
   flex: 0 0 auto;
-  border-radius: 999px;
+  border-radius: var(--activity-marker-radius);
 }
 
 .swiss-focus-dot.is-muted {
@@ -8225,7 +8156,7 @@ dialog.ui-dialog.manual-entry-dialog {
   height: 9px;
   flex: 0 0 auto;
   border: 0;
-  border-radius: 999px;
+  border-radius: var(--activity-marker-radius);
   box-shadow: none;
 }
 
@@ -12484,6 +12415,116 @@ dialog.ui-dialog.df-ce-dialog {
   gap: 16px;
 }
 
+/* Settings › Export data (UIA-312): one Export, with a small menu for the other files. */
+.df-export {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.df-export-more[open] {
+  flex-basis: 100%;
+  display: grid;
+  justify-items: end;
+}
+
+.df-export-more > summary {
+  list-style: none;
+}
+
+.df-export-more > summary::-webkit-details-marker {
+  display: none;
+}
+
+/* The other formats open in the row's own flow (no floating layer), so they fit any width. */
+.df-export {
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.df-export .df-rbtn {
+  min-height: 44px;
+}
+
+.df-export-menu {
+  display: grid;
+  width: 100%;
+  margin-top: 6px;
+  border-radius: 14px;
+  padding: 4px;
+  background: var(--surface-muted);
+}
+
+.df-export-menu a {
+  display: flex;
+  align-items: center;
+  min-height: 44px;
+  border-radius: 10px;
+  padding: 0 12px;
+  color: var(--text-primary);
+  font-size: 14px;
+  text-decoration: none;
+}
+
+.df-export-menu a:hover {
+  background: var(--surface-muted);
+}
+
+/* No keyboard shortcuts on touch-only devices (UIA-313): the Help row and the sidebar entry hide. */
+@media (hover: none) and (pointer: coarse) {
+  .df-shortcuts-row,
+  .df-set-card .ui-settings-row.df-shortcuts-row,
+  .df-side-shortcuts {
+    display: none;
+  }
+}
+
+/* Settings › Your day (UIA-309): the iPhone's goal steppers — 36 px circles, 44 px targets on touch. */
+.df-stepper {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.df-stepper-btn {
+  display: grid;
+  width: 36px;
+  height: 36px;
+  place-items: center;
+  border: 0;
+  border-radius: 999px;
+  background: var(--surface-muted);
+  color: var(--text-primary);
+  cursor: pointer;
+}
+
+.df-stepper-btn:disabled {
+  color: var(--text-muted);
+  cursor: default;
+  opacity: 0.55;
+}
+
+.df-stepper-value {
+  min-width: 56px;
+  font-family: var(--font-display);
+  font-size: 17px;
+  font-weight: 750;
+  text-align: center;
+}
+
+.df-goal-status:empty {
+  display: none;
+}
+
+@media (pointer: coarse) {
+  .df-stepper-btn {
+    /* The circle stays 36 px; the touch target is 44 px. */
+    width: 44px;
+    height: 44px;
+    background: radial-gradient(circle, var(--surface-muted) 17.5px, transparent 18px);
+  }
+}
+
 .df-set-card {
   display: grid;
   gap: 6px;
@@ -12529,18 +12570,6 @@ dialog.ui-dialog.df-ce-dialog {
 
 .df-set-card .ui-settings-row-action {
   margin-left: auto;
-}
-
-/* Goals take the full card width under their label and stack when the card is narrow. */
-.df-set-card .settings-goals-row .ui-settings-row-action {
-  flex: 1 1 100%;
-  margin-left: 0;
-}
-
-.df-set-card .settings-goal-control {
-  width: 100%;
-  min-width: 0;
-  grid-template-columns: repeat(auto-fit, minmax(172px, 1fr));
 }
 
 /* Selection is neutral in Blocks: coral stays for recording and the one primary action. */
@@ -13504,7 +13533,7 @@ dialog.ui-dialog.df-rf-dialog {
 
 .df-cal-day-bars i {
   width: 5px;
-  border-radius: 2px;
+  border-radius: var(--activity-marker-radius);
 }
 
 .df-cal-day-bars .df-cal-day-none {
@@ -14161,4 +14190,59 @@ dialog.ui-dialog.df-rf-dialog {
 .df-range-menu button:focus-visible {
   outline: 2px solid var(--focus);
   outline-offset: 2px;
+
+ * W13: Calendar drag-to-create ghost and resize tip (prototype web.html .cal-ghost / .resize-tip).
+ * Neutral, not coral: coral stays for recording and the one primary action. No transition — the
+ * ghost and tip follow the pointer frame for frame, so Reduce Motion needs no separate path.
+ */
+.calendar-create-ghost {
+  position: absolute;
+  right: 8px;
+  left: 8px;
+  z-index: 4;
+  box-sizing: border-box;
+  overflow: hidden;
+  border-radius: 9px;
+  padding: 4px 8px;
+  background: color-mix(in srgb, var(--text) 10%, var(--surface));
+  box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--text) 45%, transparent);
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1.3;
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+.calendar-resize-tip {
+  position: fixed;
+  z-index: 90;
+  border-radius: 10px;
+  padding: 6px 10px;
+  background: var(--text);
+  color: var(--surface);
+  font-size: 12px;
+  font-weight: 700;
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+/* W13: the Calendar sits in its own fill card (no outline), like the other Blocks pages. */
+.swiss-main-frame.is-timeline .swiss-timeline-surface {
+  gap: 16px;
+  background: transparent;
+}
+
+.swiss-main-frame.is-timeline .swiss-timeline-surface .swiss-timeline-main {
+  display: flex;
+  min-height: 0;
+  flex: 1 1 auto;
+  flex-direction: column;
+  border-radius: 22px;
+  background: var(--surface);
+}
+
+.swiss-main-frame.is-timeline .timeline-calendar-workspace,
+.swiss-main-frame.is-timeline .timeline-list-workspace {
+  border-radius: 0 0 22px 22px;
 }

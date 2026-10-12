@@ -4,7 +4,7 @@ This guide defines the Midnight Core visual system for Dayframe across web and i
 
 ## Brand character
 
-Dayframe should feel dark, calm, premium and useful. The dark theme begins with a near-black midnight navy rather than flat black. The light theme is a deliberately designed companion. On iPhone the appearance setting names them Midnight, Daylight and System, which is also the PRD's intended naming for both platforms (D1); the web still labels them Light and Dark (its theme settings and the shell toggle's "Switch to light/dark mode" name), a known gap until the web is renamed. Both modes stay compact enough for dense time data, use restrained elevation and make the next action easy to find.
+Dayframe should feel dark, calm, premium and useful. The dark theme begins with a near-black midnight navy rather than flat black. The light theme is a deliberately designed companion. Both platforms name them Midnight, Daylight and System (D1): the iPhone appearance setting, web Settings › Appearance (Midnight · Daylight · System, System the default) and the web shell toggle ("Switch to Daylight" / "Switch to Midnight"). Both modes stay compact enough for dense time data, use restrained elevation and make the next action easy to find.
 
 The signature treatment is a vivid, unchanged six-colour symbol paired with a single-colour outlined wordmark on quiet navy or neutral surfaces. Coral identifies the primary action and live recording; it does not replace category colours or semantic success, warning and danger colours.
 
@@ -200,7 +200,9 @@ Changing the picker must preserve all of these independently:
 - legacy key/HEX normalization without rewriting stored category assignments;
 - identical shared values on web and iOS.
 
-On surfaces not yet migrated to Blocks, category colour appears as a dot, border, soft fill, hatch, or chart mark beside semantic text.
+On surfaces not yet migrated to Blocks, category colour appears as a small block marker, border, soft fill, hatch, or chart mark beside semantic text.
+
+One activity marker shape (X3, owner decision 12 October 2026): wherever a small mark stands for an activity or category (legends, filter chips, pickers, report rows, review editor choices) it is a rounded-square block with a 30% corner (web `--activity-marker-radius`; iPhone `activityMarkerRadius(size)` in `@dayframe/shared`), never a round dot. Round dots remain only for non-activity meaning: status, the now line, goal progress, avatars and pagination.
 
 On Blocks surfaces, an entry is a solid block filled with its category colour, with its text on the block:
 
@@ -301,7 +303,7 @@ For compact embedded web forms, use these fixed semantic roles rather than nearb
 
 Use sentence case for headings and actions. Preserve hierarchy through role, weight and colour; do not invent a one-off font size inside one host of a shared component.
 
-Compound web fields reserve one 2 px perimeter and 12 px of content inset. A leading icon or colour action keeps at least a 44 × 44 px target while its visual mark remains independently sized. For the contextual category-create field, the visible swatch is 20 px: centred in the 44 px leading target, its edge is 14 px and its centre is 24 px from the field's outer edge. Category markers in closed fields and option rows remain compact, circular, borderless and shadowless.
+Compound web fields reserve one 2 px perimeter and 12 px of content inset. A leading icon or colour action keeps at least a 44 × 44 px target while its visual mark remains independently sized. For the contextual category-create field, the visible swatch is 20 px: centred in the 44 px leading target, its edge is 14 px and its centre is 24 px from the field's outer edge. Category markers in closed fields and option rows remain compact, borderless and shadowless rounded-square blocks (the X3 activity marker rule), never circles.
 
 List separators and rounded actions are separate layers. Use a 1 px semantic `border` line inset 12 px from the option surface, with 6 px of clear space before the independently rounded action row. Do not use a rounded button's border or inset shadow as the divider. Hover, selection and neutral keyboard focus remain independent states, and host-specific styles must not change the shared control's internal geometry.
 

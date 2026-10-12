@@ -6,21 +6,22 @@ import { SegmentedControl, SettingsRow } from "@/components/ui/Primitives";
 
 export type ThemeChoice = "system" | "light" | "dark";
 
+// D1 (UIA-310): Midnight · Daylight · System on both platforms; System stays the default.
 const choices: Array<{ value: ThemeChoice; label: string; icon: React.ReactNode }> = [
+  {
+    value: "dark",
+    label: "Midnight",
+    icon: <Moon size={16} />
+  },
+  {
+    value: "light",
+    label: "Daylight",
+    icon: <Sun size={16} />
+  },
   {
     value: "system",
     label: "System",
     icon: <Monitor size={16} />
-  },
-  {
-    value: "light",
-    label: "Light",
-    icon: <Sun size={16} />
-  },
-  {
-    value: "dark",
-    label: "Dark",
-    icon: <Moon size={16} />
   }
 ];
 
@@ -37,7 +38,7 @@ export function ThemeSettings() {
       label="Appearance"
       detail={choice === "system"
         ? "Follows your browser and operating system."
-        : `Uses Dayframe’s ${choice} appearance on this browser.`}
+        : `Uses Dayframe’s ${choice === "dark" ? "Midnight" : "Daylight"} appearance on this browser.`}
       action={(
         <SegmentedControl
           ariaLabel="Appearance"

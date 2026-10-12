@@ -5,6 +5,7 @@ import {
   DAYFRAME_ACTIVITY_ICONS,
   DAYFRAME_BLOCKS,
   DAYFRAME_PALETTE_PICKER,
+  activityMarkerRadius,
   blockColorsFor,
   defaultCountsTowardGoal,
   paletteColorFor,
@@ -12,6 +13,7 @@ import {
   resolveActivityIcon,
   type DayframePaletteKey
 } from "@dayframe/shared";
+import { BlocksSheetHead } from "../blocks/BlocksSheetHead";
 import { SwipeDismissSheet, type SwipeDismissSheetHandle } from "../SwipeDismissSheet";
 import { BlocksConfirmHost, useBlocksConfirm } from "../blocks/BlocksConfirmSheet";
 import { ActivityIcon } from "../icons/DayframeIcon";
@@ -200,34 +202,18 @@ export function ActivityEditorSheet({
           visible
         >
           <View style={styles.head}>
-            <Pressable
-              accessibilityRole="button"
-              onPress={cancel}
-              style={({ pressed }) => [styles.headButton, pressed ? styles.pressed : null]}
-              testID="activity-editor-cancel"
-            >
-              <Text {...mobileTextProps("control")} style={[styles.cancelText, { color: theme.textSecondary }]}>Cancel</Text>
-            </Pressable>
-            <View style={styles.headTitle}>
-              <Text {...mobileTextProps("counter")} style={[styles.eyebrow, { color: theme.textMuted }]}>
-                {activity ? (activity.starterKey ? "STARTER ACTIVITY" : "YOUR ACTIVITY") : "NEW"}
-              </Text>
-              <Text {...mobileTextProps("screenHeading")} accessibilityRole="header" style={[styles.title, { color: theme.textPrimary }]}>
-                {activity ? "Edit activity" : "New activity"}
-              </Text>
-            </View>
-            <Pressable
-              accessibilityRole="button"
-              accessibilityState={{ disabled: saving, busy: saving }}
-              disabled={saving}
-              onPress={() => void save()}
-              style={({ pressed }) => [styles.savePill, { backgroundColor: theme.accent }, pressed ? styles.pressed : null]}
-              testID="activity-editor-save"
-            >
-              <Text {...mobileTextProps("control")} style={[styles.saveText, { color: theme.onAccent }]}>
-                {saving ? "Saving…" : activity ? "Save" : "Create"}
-              </Text>
-            </Pressable>
+            <BlocksSheetHead
+              action={{
+                busy: saving,
+                label: saving ? "Saving…" : activity ? "Save" : "Create",
+                onPress: () => void save(),
+                testID: "activity-editor-save",
+                tone: "primary"
+              }}
+              eyebrow={activity ? (activity.starterKey ? "STARTER ACTIVITY" : "YOUR ACTIVITY") : "NEW"}
+              theme={theme}
+              title={activity ? "Edit activity" : "New activity"}
+            />
           </View>
 
           <ScrollView
@@ -381,14 +367,8 @@ export function ActivityEditorSheet({
 const ICON_GAP = 8;
 
 const styles = StyleSheet.create({
-  head: { alignItems: "center", flexDirection: "row", gap: 8, paddingBottom: 8, paddingTop: 6 },
-  headButton: { alignItems: "center", justifyContent: "center", minHeight: 44, minWidth: 64, paddingHorizontal: 6 },
-  headTitle: { alignItems: "center", flex: 1 },
-  cancelText: { fontSize: 15, fontWeight: "600" },
+  head: { paddingBottom: 8, paddingHorizontal: 4 },
   eyebrow: { fontSize: 11, fontWeight: "700", letterSpacing: 0.9 },
-  title: { fontFamily: MOBILE_DISPLAY_FONT.bold, fontSize: 20 },
-  savePill: { alignItems: "center", borderRadius: DAYFRAME_BLOCKS.radius.pill, justifyContent: "center", minHeight: 44, minWidth: 64, paddingHorizontal: 16 },
-  saveText: { fontSize: 15, fontWeight: "700" },
   scroll: { flex: 1 },
   body: { gap: 14, paddingHorizontal: 4, paddingTop: 6 },
   preview: { borderRadius: DAYFRAME_BLOCKS.radius.phoneCard, gap: 10, justifyContent: "flex-end", minHeight: 120, padding: 18 },
@@ -399,7 +379,7 @@ const styles = StyleSheet.create({
   iconCell: { alignItems: "center", borderRadius: 12, justifyContent: "center" },
   swatches: { flexDirection: "row", flexWrap: "wrap", gap: 4 },
   swatchTarget: { alignItems: "center", height: 44, justifyContent: "center", width: 44 },
-  swatch: { borderColor: "transparent", borderRadius: 18, borderWidth: 0, height: 36, width: 36 },
+  swatch: { borderColor: "transparent", borderRadius: activityMarkerRadius(36), borderWidth: 0, height: 36, width: 36 },
   pinRow: { alignItems: "center", flexDirection: "row", gap: 12, minHeight: 52, paddingHorizontal: 4 },
   pinText: { flex: 1, gap: 2 },
   archive: { alignItems: "center", borderRadius: DAYFRAME_BLOCKS.radius.pill, justifyContent: "center", marginTop: 8, minHeight: 48 },

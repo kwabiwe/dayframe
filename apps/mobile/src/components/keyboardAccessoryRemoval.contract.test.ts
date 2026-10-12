@@ -14,9 +14,9 @@ describe("auth keyboard navigation contract", () => {
   });
 
   it("keeps Return-key navigation and final-field submission", () => {
-    expect(dashboard).toContain("onSubmitEditing={() => authWorkspaceRef.current?.focus()}");
+    expect(dashboard).not.toContain("authWorkspaceRef");
     expect(dashboard).toContain("onSubmitEditing={() => authEmailRef.current?.focus()}");
-    expect(dashboard).toContain("onSubmitEditing={() => authPasswordRef.current?.focus()}");
+    expect(dashboard).toContain('onSubmitEditing={() => (authView === "reset" ? submitAuth() : authPasswordRef.current?.focus())}');
     expect(dashboard).toContain("onSubmitEditing={submitAuth}");
     expect(dashboard).toContain('returnKeyType="done"');
     expect(dashboard).toContain('submitBehavior="submit"');
@@ -25,16 +25,16 @@ describe("auth keyboard navigation contract", () => {
     expect(dashboard).toContain("if (authSubmittingRef.current) return;");
   });
 
-  it("prevents the iOS Password AutoFill bar from rebuilding between auth fields", () => {
-    expect(dashboard.match(/textContentType="none"/g)).toHaveLength(4);
-    expect(dashboard.match(/autoComplete="off"/g)).toHaveLength(4);
-    expect(dashboard).not.toContain('textContentType="emailAddress"');
-    expect(dashboard).not.toMatch(/textContentType=.*(?:newPassword|password)/);
+  it("turns Password AutoFill and Keychain suggestions on (UIA-321, owner; #160's opt-out re-checked on device)", () => {
+    expect(dashboard).not.toContain('textContentType="none"');
+    expect(dashboard).toContain('textContentType="username"');
+    expect(dashboard).toContain('textContentType={authView === "signup" ? "newPassword" : "password"}');
+    expect(dashboard).toContain('autoComplete={authView === "signup" ? "new-password" : "current-password"}');
   });
 
   it("keeps one fixed password field while exposing an accessible visibility action", () => {
     expect(dashboard).toContain("const [authPasswordVisible, setAuthPasswordVisible] = useState(false)");
-    expect(dashboard).toMatch(/<TextInput[\s\S]*?caretHidden=\{authPasswordVisible\}[\s\S]*?secureTextEntry[\s\S]*?textContentType="none"/);
+    expect(dashboard).toMatch(/<TextInput[\s\S]*?caretHidden=\{authPasswordVisible\}[\s\S]*?secureTextEntry[\s\S]*?textContentType=\{authView/);
     expect(dashboard).not.toContain("secureTextEntry={!authPasswordVisible}");
     expect(dashboard).toContain("styles.authPasswordRevealOverlay");
     expect(dashboard).toContain('pointerEvents="none"');
