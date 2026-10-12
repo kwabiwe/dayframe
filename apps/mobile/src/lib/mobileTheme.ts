@@ -314,26 +314,32 @@ function createStyles(theme: MobileTheme) {
       gap: 2
     },
     // Review deck (Blocks parity step 5a): prototype `.push` nav and padding.
-    // Anchored to the round actions: the toast's bottom edge sits 12 points above them.
+    // Anchored to the round actions (staging feedback C1): the Undo toast hangs 12 points BELOW
+    // them, in space this anchor always reserves under itself (marginBottom = REVIEW_DECK_TOAST_RESERVE
+    // in ReviewDeck.tsx), so it never covers the card or the actions and its exit moves nothing.
     // Above the deck's cards (their zIndex sets a layer position), so the toast is never hidden.
     reviewDeckActionsAnchor: {
+      marginBottom: 84,
       position: "relative",
       zIndex: 20
     },
     reviewDeckToast: {
       position: "absolute",
-      bottom: "100%",
       left: 0,
-      marginBottom: 12,
+      marginTop: 12,
       right: 0,
+      top: "100%",
       zIndex: 20
     },
-    // Under Back to Today once all is framed.
-    // Under Back to Today, out of flow: the summary stays readable and nothing moves on timeout.
+    // Under Back to Today once all is framed, or under the waiting copy.
+    // Out of flow: the summary stays readable and nothing moves on timeout.
     // Sits in the space its parent reserves below the last control (paddingBottom 84).
     reviewDeckToastUnderButton: {
+      position: "absolute",
       bottom: 0,
-      marginBottom: 0
+      left: 0,
+      right: 0,
+      zIndex: 20
     },
     // Blocks navigation bar for pushed pages (BlocksNavHeader; UIA-001): text back, centred title,
     // trailing slot. The side slots flex equally so the title stays centred.
@@ -486,6 +492,7 @@ function createStyles(theme: MobileTheme) {
     placesBlockSuggested: { opacity: 0.75 },
     placesEmpty: { minHeight: 52, justifyContent: "center", paddingHorizontal: 16 },
     placesStatus: { color: theme.textSecondary, fontFamily: monoFont, fontSize: 13, textAlign: "center" },
+    placesPending: { paddingVertical: 32 },
     settingsActivityPin: { alignItems: "center", borderRadius: DAYFRAME_BLOCKS.radius.pill, height: 44, justifyContent: "center", width: 44 },
     settingsActivityPinOn: { backgroundColor: theme.surfaceInset },
     healthNameRow: {

@@ -18,7 +18,8 @@ export function rowBlockHeight(seconds: number) {
 
 type RowEntry = HistoryEntryGroup["representative"]["entry"];
 
-export function rowTitle(entry: RowEntry) {
+/** A block's display name everywhere it is listed: its description, else its activity. */
+export function rowTitle(entry: Pick<RowEntry, "description" | "categoryName">) {
   return displayTimerDescription(entry)?.trim() || entry.categoryName || "No activity";
 }
 

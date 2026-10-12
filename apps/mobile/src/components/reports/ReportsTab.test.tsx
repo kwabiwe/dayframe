@@ -108,6 +108,14 @@ vi.mock(
 vi.mock("@/components/calendar/DatePickerCalendar", () => ({
   CalendarGlyph: "CalendarGlyph",
 }));
+vi.mock("@/components/blocks/BlocksEmptyState", () => ({
+  BlocksEmptyState: "BlocksEmptyState",
+}));
+// A transport failure (TypeError) is "offline"; anything else is a failed read.
+vi.mock("@/lib/friendlyError", () => ({
+  mobileFailureKind: (error: unknown) =>
+    error instanceof TypeError ? "offline" : "other",
+}));
 import { ReportsTab } from "./ReportsTab";
 const data = {
   activeEntry: null,
@@ -420,12 +428,46 @@ describe("Revision 3 Reports owner", () => {
       tree.root.findByType("ReportMonthGrid" as never).props.days,
     ).toHaveLength(30);
     expect(tree.root.findAllByType("ReportActivityChart" as never)).toHaveLength(0);
-    mocks.fetch.mockRejectedValue(new Error("offline"));
+    mocks.fetch.mockRejectedValue(new TypeError("Network request failed"));
     await chooseRange(tree, "week");
     expect(tree.root.findAllByType("ReportDonutCard" as never)).toHaveLength(0);
-    expect(JSON.stringify(tree.toJSON())).toContain(
-      "Connect to load this report range",
+    // Staging feedback B1: the Blocks offline state, not a plain line and a text Retry.
+    const offline = tree.root.findByType("BlocksEmptyState" as never);
+    expect(offline.props).toMatchObject({
+      title: "You're offline",
+      message: "Connect to the internet to load this range.",
+      actionLabel: "Try again",
+      glyph: "cloud-off",
+    });
+    expect(JSON.stringify(tree.toJSON())).not.toContain("Retry");
+    // Try again keeps the state in place while it reads again (no loading line in between).
+    const pending: Array<() => void> = [];
+    mocks.fetch.mockImplementation(
+      (input: ReportSummaryRequest) =>
+        new Promise<ReportSummary>((resolve) => {
+          pending.push(() => resolve(result(input)));
+        }),
     );
+    await act(async () => offline.props.onAction());
+    expect(tree.root.findAllByType("BlocksEmptyState" as never)).toHaveLength(1);
+    expect(JSON.stringify(tree.toJSON())).not.toContain("Loading report range");
+    expect(pending.length).toBeGreaterThan(0);
+    await act(async () => pending.forEach((finish) => finish()));
+    expect(tree.root.findAllByType("BlocksEmptyState" as never)).toHaveLength(0);
+    expect(tree.root.findAllByType("ReportDonutCard" as never)).toHaveLength(1);
+    act(() => tree.unmount());
+  });
+  it("says a failed read plainly when the connection is not the cause", async () => {
+    const tree = await render();
+    mocks.fetch.mockRejectedValue(new Error("Unable to load report range"));
+    await chooseRange(tree, "week");
+    expect(
+      tree.root.findByType("BlocksEmptyState" as never).props,
+    ).toMatchObject({
+      title: "Report didn't load",
+      message: "Dayframe couldn't load this range. Try again in a moment.",
+      actionLabel: "Try again",
+    });
     act(() => tree.unmount());
   });
   it("clears account results and rejects late responses after session change", async () => {

@@ -30,6 +30,24 @@ export class MobileHttpResponseError extends Error {
   }
 }
 
+/**
+ * A Dayframe API reply that was not OK, carrying the server's own words when its JSON error body
+ * had them (`fromServerBody`). Kept apart from MobileHttpResponseError on purpose: callers that
+ * decide retries on that class never start retrying these. Only a message from our server's
+ * validated error body is ever shown as it is (friendlyMobileErrorMessage).
+ */
+export class MobileApiResponseError extends Error {
+  readonly statusCode: number;
+  readonly fromServerBody: boolean;
+
+  constructor(statusCode: number, message: string, fromServerBody: boolean) {
+    super(message);
+    this.name = "MobileApiResponseError";
+    this.statusCode = statusCode;
+    this.fromServerBody = fromServerBody;
+  }
+}
+
 type MobileRequestDeadline = {
   timeoutMilliseconds: number;
   timeoutMessage: string;

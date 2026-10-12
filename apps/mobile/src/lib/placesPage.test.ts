@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { applyPlaceRoleLocally, learnedPlaceSubtitle, notePlaceDeleted, placeRowSubtitle, subscribeDeletedPlaces, takeDeletedPlaces } from "./placesPage";
+import { applyPlaceRoleLocally, learnedPlaceSubtitle, notePlaceDeleted, placeRowSubtitle, placesPageState, subscribeDeletedPlaces, takeDeletedPlaces } from "./placesPage";
 
 const categories = [{ id: "c1", name: "Exercise" }];
 
@@ -103,5 +103,18 @@ describe("deleted places hand-off", () => {
     expect(takeDeletedPlaces("w:u")).toEqual(["p1", "p2"]);
     expect(takeDeletedPlaces("w:u")).toEqual([]);
     expect(takeDeletedPlaces("w:other")).toEqual(["p3"]);
+  });
+});
+
+describe("placesPageState (staging feedback B2, Codex r1)", () => {
+  it("draws the groups only from a list that was read", () => {
+    expect(placesPageState(true, false)).toBe("ready");
+    // A list already shown stays even when a later read fails.
+    expect(placesPageState(true, true)).toBe("ready");
+  });
+
+  it("is pending before the first read settles and failed when it did not land", () => {
+    expect(placesPageState(false, false)).toBe("pending");
+    expect(placesPageState(false, true)).toBe("failed");
   });
 });
