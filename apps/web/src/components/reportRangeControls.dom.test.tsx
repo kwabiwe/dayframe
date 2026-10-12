@@ -113,6 +113,14 @@ describe("Reports range menu (W8, menu pattern and motion)", () => {
     expect(document.activeElement).toBe(trigger());
   });
 
+  it("returns focus to the trigger when the checked preset is picked again (Codex r3)", () => {
+    act(() => trigger().click());
+    expect(document.activeElement?.textContent).toBe("This week");
+    act(() => (document.activeElement as HTMLButtonElement).click());
+    expect(document.activeElement).toBe(trigger());
+    expect(push).toHaveBeenCalledTimes(1);
+  });
+
   it("closes at once under Reduce Motion", () => {
     reduce = true;
     act(() => trigger().click());

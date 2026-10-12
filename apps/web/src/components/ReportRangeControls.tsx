@@ -205,8 +205,12 @@ export function ReportRangeControls({
                   aria-checked={filters.range === preset}
                   key={preset}
                   onClick={() => {
-                    closeMenu();
-                    router.push(reportsHref(filtersForPreset(filters, preset)));
+                    // Focus goes back to the range trigger whether or not the range changes: an
+                    // unchanged range keeps this instance; a new one remounts and focuses on mount.
+                    const next = filtersForPreset(filters, preset);
+                    focusTriggerAfterNavigation = rangeKey(next) === rangeKey(filters) ? null : rangeKey(next);
+                    closeMenu({ restoreFocus: true });
+                    router.push(reportsHref(next));
                   }}
                   role="menuitemradio"
                   type="button"
