@@ -6,7 +6,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { formatDuration } from "@/lib/format";
 import type { ReportResult } from "@/lib/report-service";
-import { reportBlocksModel } from "@/lib/reports-blocks";
+import { DONUT_GAP, donutArcs, reportBlocksModel } from "@/lib/reports-blocks";
 
 vi.mock("next/navigation", () => ({ useRouter: () => ({ push: vi.fn() }) }));
 vi.mock("next/link", () => ({
@@ -18,7 +18,7 @@ const { ReportsBlocksPanel } = await import("./ReportsBlocksPanel");
 const at = (date: number, hour = 0) => new Date(2026, 9, date, hour).toISOString();
 const day = (date: number) => ({ key: `d${date}`, label: `Day ${date}`, start: at(date), end: at(date + 1) });
 
-function report(preset = "this-week"): ReportResult {
+function report(preset = "this-week", secondDay = false): ReportResult {
   const days = [5, 6, 7, 8, 9, 10, 11].map(day);
   return {
     range: { preset, dayCount: 7 },
@@ -28,7 +28,12 @@ function report(preset = "this-week"): ReportResult {
       { id: "uncategorized", name: "No activity", color: null, seconds: 3600, entryCount: 1 }
     ],
     dailySeries: days.map((entry, index) => ({ key: entry.key, label: entry.label, seconds: index === 0 ? 10 * 3600 : 0, coveredSeconds: index === 0 ? 9 * 3600 : 0, additionalOverlappingActivitySeconds: 0 })),
-    dailyByActivity: days.map((entry, index) => ({ ...entry, activities: index === 0 ? [{ id: "work", seconds: 9 * 3600 }, { id: "uncategorized", seconds: 3600 }] : [] }))
+    dailyByActivity: days.map((entry, index) => ({
+      ...entry,
+      activities: index === 0
+        ? [{ id: "work", seconds: 9 * 3600 }, { id: "uncategorized", seconds: 3600 }]
+        : index === 2 && secondDay ? [{ id: "uncategorized", seconds: 1800 }, { id: "work", seconds: 2 * 3600 }] : []
+    }))
   } as unknown as ReportResult;
 }
 
@@ -84,6 +89,133 @@ describe("Reports blocks and Where it went", () => {
     expect(container.querySelector(".df-wblocks")?.classList.contains("has-hot")).toBe(false);
     expect(container.querySelector(".df-donut-center")?.textContent).toBe("10hlogged this week");
     await act(async () => root.unmount());
+  });
+
+  it("traces an activity from the row under the pointer as well as from focus", async () => {
+    const container = document.createElement("div");
+    document.body.append(container);
+    const root = createRoot(container);
+    await act(async () => root.render(
+      <ReportsBlocksPanel blocks={reportBlocksModel(report(), formatDuration)} land={land} slices={slices} totalLabel="logged this week" totalSeconds={10 * 3600} />
+    ));
+    const row = container.querySelector<HTMLAnchorElement>('a[aria-label^="Filter by No activity"]')!;
+    await act(async () => row.dispatchEvent(new MouseEvent("mouseover", { bubbles: true, relatedTarget: document.body })));
+    expect([...container.querySelectorAll(".df-wb-stack .is-hot")].map((block) => block.getAttribute("data-key"))).toEqual(["uncategorized"]);
+    expect(container.querySelector(".df-donut")?.classList.contains("has-hot")).toBe(true);
+    expect(container.querySelector('circle[aria-label^="Filter by No activity"]')?.classList.contains("is-hot")).toBe(true);
+    expect(row.classList.contains("is-hot")).toBe(true);
+    await act(async () => row.dispatchEvent(new MouseEvent("mouseout", { bubbles: true, relatedTarget: document.body })));
+    expect(container.querySelector(".df-wblocks")?.classList.contains("has-hot")).toBe(false);
+    expect(container.querySelector(".df-donut")?.classList.contains("has-hot")).toBe(false);
+    await act(async () => root.unmount());
+  });
+
+  it("traces an activity from a hovered or focused block: its blocks, slice and row, with the others faded (I1)", async () => {
+    const container = document.createElement("div");
+    document.body.append(container);
+    const root = createRoot(container);
+    await act(async () => root.render(
+      <ReportsBlocksPanel blocks={reportBlocksModel(report("this-week", true), formatDuration)} land={land} slices={slices} totalLabel="logged this week" totalSeconds={10 * 3600} />
+    ));
+    const blocks = [...container.querySelectorAll<HTMLButtonElement>(".df-wb-stack button.df-tblock")];
+    expect(blocks.map((block) => block.getAttribute("aria-label"))).toEqual([
+      "Work, 9h, Day 5",
+      "No activity, 1h, Day 5",
+      "No activity, 30m, Day 7",
+      "Work, 2h, Day 7"
+    ]);
+    expect(blocks.every((block) => block.getAttribute("aria-describedby") === "df-report-blocks-hint")).toBe(true);
+    expect(container.querySelector("#df-report-blocks-hint")?.textContent).toContain("arrow keys");
+    // The stacks are no longer hidden from assistive technology: the blocks are its controls.
+    expect(container.querySelector(".df-wb-stack")?.getAttribute("aria-hidden")).toBeNull();
+
+    // Pointer: hovering a Work block traces Work everywhere.
+    await act(async () => blocks[3].dispatchEvent(new MouseEvent("mouseover", { bubbles: true, relatedTarget: document.body })));
+    expect(container.querySelector(".df-wblocks")?.classList.contains("has-hot")).toBe(true);
+    expect([...container.querySelectorAll(".df-wb-stack .is-hot")].map((block) => block.getAttribute("aria-label"))).toEqual(["Work, 9h, Day 5", "Work, 2h, Day 7"]);
+    expect(container.querySelector('circle[aria-label^="Filter by Work"]')?.classList.contains("is-hot")).toBe(true);
+    expect(container.querySelector('a[aria-label^="Filter by Work"]')?.classList.contains("is-hot")).toBe(true);
+    expect(container.querySelector(".df-donut-center")?.textContent).toBe("9hWork");
+    await act(async () => blocks[3].dispatchEvent(new MouseEvent("mouseout", { bubbles: true, relatedTarget: document.body })));
+    expect(container.querySelector(".df-wblocks")?.classList.contains("has-hot")).toBe(false);
+    expect(container.querySelector(".df-donut-center")?.textContent).toBe("10hlogged this week");
+
+    // Keyboard: one tab stop, focus traces, blur clears.
+    expect(blocks.map((block) => block.tabIndex)).toEqual([0, -1, -1, -1]);
+    await act(async () => blocks[1].focus());
+    expect(container.querySelector(".df-donut-center")?.textContent).toBe("1hNo activity");
+    expect(blocks.map((block) => block.tabIndex)).toEqual([-1, 0, -1, -1]);
+    await act(async () => blocks[1].blur());
+    expect(container.querySelector(".df-wblocks")?.classList.contains("has-hot")).toBe(false);
+
+    // Touch and Safari: a click traces even without focus.
+    await act(async () => blocks[0].click());
+    expect(container.querySelector(".df-donut-center")?.textContent).toBe("9hWork");
+    await act(async () => root.unmount());
+  });
+
+  it("moves between blocks with arrow keys, keeping the activity across days", async () => {
+    const container = document.createElement("div");
+    document.body.append(container);
+    const root = createRoot(container);
+    await act(async () => root.render(
+      <ReportsBlocksPanel blocks={reportBlocksModel(report("this-week", true), formatDuration)} land={land} slices={slices} totalLabel="logged this week" totalSeconds={10 * 3600} />
+    ));
+    const key = (name: string) => act(async () => {
+      document.activeElement!.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, key: name }));
+    });
+    const blocks = [...container.querySelectorAll<HTMLButtonElement>(".df-wb-stack button.df-tblock")];
+    await act(async () => blocks[0].focus());
+    // Up is the next block in the stack (stacks grow upwards).
+    await key("ArrowUp");
+    expect(document.activeElement?.getAttribute("aria-label")).toBe("No activity, 1h, Day 5");
+    // Right goes to the next day with blocks (Day 6 is empty) and keeps the activity.
+    await key("ArrowRight");
+    expect(document.activeElement?.getAttribute("aria-label")).toBe("No activity, 30m, Day 7");
+    expect(container.querySelector(".df-donut-center")?.textContent).toBe("1hNo activity");
+    await key("ArrowUp");
+    expect(document.activeElement?.getAttribute("aria-label")).toBe("Work, 2h, Day 7");
+    await key("Home");
+    expect(document.activeElement?.getAttribute("aria-label")).toBe("Work, 9h, Day 5");
+    await key("End");
+    expect(document.activeElement?.getAttribute("aria-label")).toBe("Work, 2h, Day 7");
+    expect(blocks.map((block) => block.tabIndex)).toEqual([-1, -1, -1, 0]);
+    await act(async () => root.unmount());
+  });
+
+  it("traces from month-grid blocks too, each day a named group of focusable blocks", async () => {
+    const container = document.createElement("div");
+    document.body.append(container);
+    const root = createRoot(container);
+    await act(async () => root.render(
+      <ReportsBlocksPanel blocks={reportBlocksModel(report("this-month"), formatDuration)} land={land} slices={slices} totalLabel="logged this month" totalSeconds={10 * 3600} />
+    ));
+    const cell = container.querySelector(".df-mday:not(.is-empty)")!;
+    expect(cell.getAttribute("role")).toBe("group");
+    const block = container.querySelector<HTMLButtonElement>('.df-mday-stack button[aria-label="Work, 9h, Day 5"]')!;
+    await act(async () => block.dispatchEvent(new MouseEvent("mouseover", { bubbles: true, relatedTarget: document.body })));
+    expect(container.querySelector(".df-month")?.classList.contains("has-hot")).toBe(true);
+    expect([...container.querySelectorAll(".df-mday-stack .is-hot")].map((entry) => entry.getAttribute("data-key"))).toEqual(["work"]);
+    await act(async () => block.dispatchEvent(new MouseEvent("mouseout", { bubbles: true, relatedTarget: document.body })));
+    expect(container.querySelector(".df-month")?.classList.contains("has-hot")).toBe(false);
+    await act(async () => root.unmount());
+  });
+
+  it("leaves a slight gap after each donut slice, and a single activity as a full ring (I2)", () => {
+    const circumference = 100;
+    expect(donutArcs([75, 25], 100, circumference)).toEqual([
+      { dash: 75 - DONUT_GAP, offset: -0 },
+      { dash: 25 - DONUT_GAP, offset: -75 }
+    ]);
+    // A sliver never goes negative.
+    expect(donutArcs([99.5, 0.5], 100, circumference)[1].dash).toBe(0.01);
+    expect(donutArcs([100], 100, circumference)).toEqual([{ dash: 100, offset: -0 }]);
+    expect(donutArcs([100, 0], 100, circumference)[0].dash).toBe(100);
+    const html = renderToStaticMarkup(
+      <ReportsBlocksPanel blocks={null} land={land} slices={[slices[0]]} totalLabel="logged this week" totalSeconds={9 * 3600} />
+    );
+    const full = 2 * Math.PI * 46;
+    expect(html).toContain(`stroke-dasharray="${full} 0"`);
   });
 
   it("keeps the slices exposed to assistive technology and rings the one holding keyboard focus", async () => {

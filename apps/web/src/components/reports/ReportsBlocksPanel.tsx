@@ -1,19 +1,20 @@
 "use client";
 
 import Link from "next/link";
-import type { CSSProperties } from "react";
-import { useState } from "react";
+import type { CSSProperties, KeyboardEvent } from "react";
+import { useRef, useState } from "react";
 import { ReportDonutSegment } from "@/components/ReportDonutSegment";
 import { AccessibleBreakdownTable } from "@/components/ReportsOverview";
 import type { ReportBreakdownRow } from "@/lib/report-service";
 import { blockStyle } from "@/lib/block-style";
 import { categoryDisplay } from "@/lib/display";
 import { formatDuration } from "@/lib/format";
-import type { ReportBlocksModel } from "@/lib/reports-blocks";
+import { donutArcs, type ReportBlocksDay, type ReportBlocksModel } from "@/lib/reports-blocks";
 
 const WEEKDAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 const RADIUS = 46;
 const CIRCUMFERENCE = 2 * Math.PI * RADIUS;
+const blockKey = (day: ReportBlocksDay, blockId: string) => `${day.key}|${blockId}`;
 
 export type AllocationSlice = {
   id: string;
@@ -28,9 +29,11 @@ export type AllocationSlice = {
 
 /**
  * The range in blocks beside "Where it went" (Blocks parity step 15b-2): hovering or focusing an
- * activity in the donut or its table highlights that activity's blocks (the others fade) and puts
- * its time in the donut's centre. Slices and rows stay links that filter by the activity. Every
- * date-derived value arrives computed with the report (`reportBlocksModel`).
+ * activity anywhere — its donut slice, its row, or any of its blocks in the day columns or month
+ * grid (staging feedback I1) — traces it: its blocks and slice stay, every other block and slice
+ * fades, its row is marked and its time is in the donut's centre. Slices and rows stay links that
+ * filter by the activity; blocks are one tab stop (arrow keys move between them) and only trace.
+ * Every date-derived value arrives computed with the report (`reportBlocksModel`).
  */
 export function ReportsBlocksPanel({
   blocks,
@@ -64,12 +67,68 @@ export function ReportsBlocksPanel({
   }
   const hotIds = hot ? new Set(hot.categoryIds) : null;
   const highlight = (slice: AllocationSlice) => (on: boolean) => setHotId((current) => (on ? slice.id : current === slice.id ? null : current));
+  // A block traces the slice holding its activity (Other for an activity folded into it).
+  const sliceByActivity = new Map(slices.flatMap((slice) => slice.categoryIds.map((id) => [id, slice] as const)));
+  const traceBlock = (blockId: string, on: boolean) => {
+    const slice = sliceByActivity.get(blockId);
+    if (slice) highlight(slice)(on);
+  };
 
-  const arcs = slices.map((slice, index) => {
-    const before = slices.slice(0, index).reduce((sum, previous) => sum + previous.seconds, 0);
-    const fraction = totalSeconds > 0 ? slice.seconds / totalSeconds : 0;
-    return { slice, dash: fraction * CIRCUMFERENCE, offset: -(before / Math.max(1, totalSeconds)) * CIRCUMFERENCE };
-  });
+  // The blocks are one tab stop: the last block focused (else the first) takes Tab, and arrow keys
+  // move between days (left/right) and within a day's stack (up/down), Home/End to the ends.
+  const blocksRef = useRef<HTMLElement | null>(null);
+  const [rovingKey, setRovingKey] = useState<string | null>(null);
+  const blockKeys = blocks ? blocks.days.flatMap((day) => day.blocks.map((block) => blockKey(day, block.id))) : [];
+  const tabKey = rovingKey !== null && blockKeys.includes(rovingKey) ? rovingKey : blockKeys[0] ?? null;
+  const moveFocus = (event: KeyboardEvent<HTMLElement>, day: ReportBlocksDay, index: number) => {
+    if (!blocks) return;
+    const days = blocks.days.filter((entry) => entry.blocks.length > 0);
+    const at = days.findIndex((entry) => entry.key === day.key);
+    let target: string | null = null;
+    if (event.key === "ArrowUp" || event.key === "ArrowDown") {
+      // Stacks grow upwards (column-reverse): up is the next block in the day.
+      const next = day.blocks[index + (event.key === "ArrowUp" ? 1 : -1)];
+      target = next ? blockKey(day, next.id) : null;
+    } else if (event.key === "ArrowLeft" || event.key === "ArrowRight") {
+      const other = days[at + (event.key === "ArrowRight" ? 1 : -1)];
+      if (other) {
+        const same = other.blocks.find((block) => block.id === day.blocks[index]?.id);
+        target = blockKey(other, (same ?? other.blocks[Math.min(index, other.blocks.length - 1)]).id);
+      }
+    } else if (event.key === "Home" || event.key === "End") {
+      target = (event.key === "Home" ? blockKeys[0] : blockKeys[blockKeys.length - 1]) ?? null;
+    } else return;
+    event.preventDefault();
+    if (!target) return;
+    setRovingKey(target);
+    const blocksInView = blocksRef.current?.querySelectorAll<HTMLElement>("[data-block-key]") ?? [];
+    [...blocksInView].find((element) => element.dataset.blockKey === target)?.focus();
+  };
+  const traceProps = (day: ReportBlocksDay, block: ReportBlocksDay["blocks"][number], index: number) => {
+    const key = blockKey(day, block.id);
+    return {
+      "aria-describedby": "df-report-blocks-hint",
+      "aria-label": `${block.name}, ${formatDuration(block.seconds)}, ${day.label}`,
+      className: `df-tblock ${block.color ? "df-block" : "df-wb-none"}${hotIds?.has(block.id) ? " is-hot" : ""}`,
+      "data-block-key": key,
+      "data-key": block.id,
+      onBlur: () => traceBlock(block.id, false),
+      // Safari and touch screens do not focus a button on click: the click traces it too.
+      onClick: () => traceBlock(block.id, true),
+      onFocus: () => {
+        setRovingKey(key);
+        traceBlock(block.id, true);
+      },
+      onKeyDown: (event: KeyboardEvent<HTMLElement>) => moveFocus(event, day, index),
+      onMouseEnter: () => traceBlock(block.id, true),
+      onMouseLeave: () => traceBlock(block.id, false),
+      style: { ...(block.color ? blockStyle(block.color, block.name) : {}), height: block.height },
+      tabIndex: key === tabKey ? 0 : -1,
+      type: "button" as const
+    };
+  };
+
+  const arcs = donutArcs(slices.map((slice) => slice.seconds), totalSeconds, CIRCUMFERENCE).map((arc, index) => ({ ...arc, slice: slices[index] }));
 
   return (
     <div className={`df-report-panel${blocks ? "" : " is-single"}`}>
@@ -81,23 +140,23 @@ export function ReportsBlocksPanel({
               <span className="df-hint-fine">Hover an activity to trace it</span>
               <span className="df-hint-coarse">Tap an activity to trace it</span>
             </span>
+            <span className="sr-only" id="df-report-blocks-hint">
+              Focus a block to trace its activity in Where it went; arrow keys move between blocks.
+            </span>
           </div>
           {blocks.layout === "week" ? (
             <ol
               className={`df-wblocks${hotIds ? " has-hot" : ""}`}
+              ref={(node) => {
+                blocksRef.current = node;
+              }}
               style={{ "--df-wb-height": "230px", "--df-land": land.easing, "--df-land-ms": `${land.durationMs}ms` } as CSSProperties}
             >
               {blocks.days.map((day) => (
                 <li aria-label={day.accessibleName} className={`df-wb${day.isToday ? " is-today" : ""}`} key={day.key}>
-                  <span aria-hidden="true" className="df-wb-stack">
-                    {day.blocks.map((block) => (
-                      <span
-                        className={`${block.color ? "df-block" : "df-wb-none"}${hotIds?.has(block.id) ? " is-hot" : ""}`}
-                        data-key={block.id}
-                        key={block.id}
-                        style={{ ...(block.color ? blockStyle(block.color, block.name) : {}), height: block.height }}
-                        title={`${block.name} · ${formatDuration(block.seconds)}`}
-                      />
+                  <span className="df-wb-stack">
+                    {day.blocks.map((block, index) => (
+                      <button key={block.id} title={`${block.name} · ${formatDuration(block.seconds)}`} {...traceProps(day, block, index)} />
                     ))}
                   </span>
                   <span aria-hidden="true" className="df-wb-label">
@@ -111,20 +170,20 @@ export function ReportsBlocksPanel({
               ))}
             </ol>
           ) : (
-            <div className={`df-month${hotIds ? " has-hot" : ""}`}>
+            <div
+              className={`df-month${hotIds ? " has-hot" : ""}`}
+              ref={(node) => {
+                blocksRef.current = node;
+              }}
+            >
               {WEEKDAYS.map((weekday) => <span aria-hidden="true" className="df-dow" key={weekday}>{weekday}</span>)}
               {Array.from({ length: blocks.leadingBlanks }, (_, index) => <span aria-hidden="true" className="df-mday is-empty" key={`blank-${index}`} />)}
               {blocks.days.map((day) => (
-                <span aria-label={day.accessibleName} className={`df-mday${day.isToday ? " is-today" : ""}`} key={day.key} role="img">
+                <span aria-label={day.accessibleName} className={`df-mday${day.isToday ? " is-today" : ""}`} key={day.key} role="group">
                   <em aria-hidden="true">{day.dateNumber}</em>
-                  <span aria-hidden="true" className="df-mday-stack">
-                    {day.blocks.map((block) => (
-                      <i
-                        className={`${block.color ? "df-block" : "df-wb-none"}${hotIds?.has(block.id) ? " is-hot" : ""}`}
-                        data-key={block.id}
-                        key={block.id}
-                        style={{ ...(block.color ? blockStyle(block.color, block.name) : {}), height: block.height }}
-                      />
+                  <span className="df-mday-stack">
+                    {day.blocks.map((block, index) => (
+                      <button key={block.id} {...traceProps(day, block, index)} />
                     ))}
                   </span>
                 </span>

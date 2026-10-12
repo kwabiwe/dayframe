@@ -108,6 +108,22 @@ describe("Reports in Blocks audit fixes (W8)", () => {
   });
 });
 
+describe("Reports staging feedback I1–I3", () => {
+  it("traces from blocks with a neutral inner focus ring and no transitions under Reduce Motion (I1)", () => {
+    expect(rule(".df-tblock:focus-visible")).toContain("outline: 2px solid var(--focus)");
+    expect(rule(".df-tblock:focus-visible")).toContain("outline-offset: -2px");
+    expect(rule(".df-wblocks.has-hot .df-tblock,\n.df-month.has-hot .df-tblock")).toContain("opacity: 0.22");
+    expect(styles).toMatch(/@media \(prefers-reduced-motion: reduce\) \{\s*\.df-tblock,\s*\.df-donut-seg \{\s*transition: none;/);
+    expect(styles).toMatch(/@media \(prefers-reduced-motion: reduce\) \{\s*\.df-wb-stack > \.df-tblock \{\s*animation: none;/);
+  });
+
+  it("draws the Filter button with a generic funnel before its label (I3)", () => {
+    expect(filtersSource).toMatch(/import \{[^}]*\bFunnel\b[^}]*\} from "lucide-react"/);
+    expect(filtersSource).toMatch(/className="df-rbtn df-rbtn--sm df-report-filter-button"/);
+    expect(filtersSource).toMatch(/<Funnel aria-hidden="true" size=\{16\} \/>\s*Filter\{/);
+  });
+});
+
 describe("Reports rows and Filter dialog in Blocks (W8b)", () => {
   it("ends Reports at Where it went, collapsed Tags and More insights, and Blocks rows (UIA-303)", () => {
     expect(overviewSource).not.toContain("report-allocation-title");

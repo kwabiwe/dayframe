@@ -12577,15 +12577,33 @@ dialog.ui-dialog.df-ce-dialog {
   overflow: hidden;
 }
 
-.df-wb-stack > span {
+/* Each block is a button that traces its activity (staging feedback I1). */
+.df-tblock {
+  display: block;
   flex: none;
+  width: 100%;
+  min-width: 0;
+  margin: 0;
+  border: 0;
+  padding: 0;
+  font: inherit;
+  cursor: default;
+}
+
+/* Inside the clipped stacks the neutral focus ring sits on the block's inner edge. */
+.df-tblock:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: -2px;
+}
+
+.df-wb-stack > .df-tblock {
   border-radius: 7px;
   transform-origin: bottom;
   animation: df-wb-grow var(--df-land-ms, 600ms) var(--df-land, cubic-bezier(0.22, 1, 0.36, 1)) both;
 }
 
 @supports not (transition-timing-function: linear(0, 1)) {
-  .df-wb-stack > span {
+  .df-wb-stack > .df-tblock {
     animation-timing-function: cubic-bezier(0.22, 1, 0.36, 1);
   }
 }
@@ -12602,7 +12620,7 @@ dialog.ui-dialog.df-ce-dialog {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .df-wb-stack > span {
+  .df-wb-stack > .df-tblock {
     animation: none;
   }
 }
@@ -12716,8 +12734,7 @@ dialog.ui-dialog.df-ce-dialog {
   font-weight: 700;
 }
 
-.df-mday i {
-  flex: none;
+.df-mday-stack > .df-tblock {
   border-radius: 3px;
 }
 
@@ -12915,18 +12932,17 @@ dialog.ui-dialog.df-rf-dialog {
   grid-template-columns: minmax(0, 1fr);
 }
 
-.df-wb-stack > span,
-.df-mday-stack > i {
+.df-tblock {
   transition: opacity 140ms ease-out;
 }
 
-.df-wblocks.has-hot .df-wb-stack > span,
-.df-month.has-hot .df-mday-stack > i {
+.df-wblocks.has-hot .df-tblock,
+.df-month.has-hot .df-tblock {
   opacity: 0.22;
 }
 
-.df-wblocks.has-hot .df-wb-stack > span.is-hot,
-.df-month.has-hot .df-mday-stack > i.is-hot {
+.df-wblocks.has-hot .df-tblock.is-hot,
+.df-month.has-hot .df-tblock.is-hot {
   opacity: 1;
 }
 
@@ -13082,8 +13098,7 @@ dialog.ui-dialog.df-rf-dialog {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .df-wb-stack > span,
-  .df-mday-stack > i,
+  .df-tblock,
   .df-donut-seg {
     transition: none;
   }
