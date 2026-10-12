@@ -15,7 +15,7 @@ const mocks = vi.hoisted(() => ({
   scheduleLiveActivityNotification: vi.fn(),
   TimeEntryNotFoundError: class TimeEntryNotFoundError extends Error {
     constructor() {
-      super("Time entry not found.");
+      super("Block not found.");
       this.name = "TimeEntryNotFoundError";
     }
   },
@@ -199,7 +199,7 @@ describe("DELETE /api/time-entries/[id]", () => {
     const response = await DELETE(deleteRequest("missing-entry"), routeContext("missing-entry"));
 
     expect(response.status).toBe(404);
-    await expect(response.json()).resolves.toEqual({ error: "Time entry not found." });
+    await expect(response.json()).resolves.toEqual({ error: "Block not found." });
   });
 
   it("returns the auth error when the user is unauthenticated", async () => {

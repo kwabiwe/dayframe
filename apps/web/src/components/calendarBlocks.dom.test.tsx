@@ -199,7 +199,7 @@ describe("Calendar in Blocks", () => {
     const heading = document.querySelector(".calendar-day-heading")!;
     expect(heading.querySelector(".calendar-day-date small")?.textContent).toBe("Sun");
     expect(heading.querySelector(".calendar-day-date b")?.textContent).toBe("2");
-    expect(heading.querySelector(".calendar-day-total")?.getAttribute("aria-label")).toBe("1h 00m logged");
+    expect(heading.querySelector(".calendar-day-total")?.getAttribute("aria-label")).toBe("1h logged");
   });
 });
 

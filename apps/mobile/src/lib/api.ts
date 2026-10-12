@@ -180,6 +180,8 @@ export type MobileReviewItem = {
   notes: string | null;
   rawPayload: Record<string, unknown> | null;
   createdAt: string;
+  /** Needs-review entries created from this suggestion (newer servers only). */
+  linkedEntryIds?: string[];
 };
 
 export type MobileBootstrap = {

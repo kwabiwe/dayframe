@@ -56,7 +56,7 @@ export function GoalSettings({ dailyGoalMinutes, weeklyGoalMinutes }: { dailyGoa
     <SettingsRow
       className="settings-goals-row"
       label="Time goals"
-      detail="Daily and weekly progress uses unique clock time covered. Overlapping entries do not advance a goal twice."
+      detail="Daily and weekly progress uses unique clock time covered. Overlapping blocks do not advance a goal twice."
       action={
         <form className="settings-goal-control" noValidate onSubmit={save}>
           <DurationControl

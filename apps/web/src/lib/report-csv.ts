@@ -1,4 +1,4 @@
-import { formatDuration, formatSourceLabel } from "@/lib/format";
+import { formatExportDuration, formatSourceLabel } from "@/lib/format";
 import type { ReportExportRow } from "@/lib/report-service";
 
 const csvHeaders = [
@@ -22,7 +22,7 @@ export function buildReportCsv(rows: ReadonlyArray<ReportExportRow>) {
         dateFormatter.format(startedAt),
         timeFormatter.format(startedAt),
         row.stoppedAt ? timeFormatter.format(new Date(row.stoppedAt)) : "Running",
-        formatDuration(row.durationSeconds),
+        formatExportDuration(row.durationSeconds),
         row.description ?? "",
         row.tagNames.join(", "),
         row.categoryName ?? "Uncategorized",

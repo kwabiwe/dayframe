@@ -201,6 +201,24 @@ describe("Review", () => {
     ]);
   });
 
+  it("shows where the card sits in the queue, with ‹ › to step through it on phones (UIA-315)", async () => {
+    const { container } = await mount();
+    const nav = container.querySelector<HTMLElement>("nav[aria-label='Queue position']")!;
+    const position = () => nav.querySelector(".df-rnav-pos")?.textContent;
+    expect(position()).toMatch(/^1 of \d+$/);
+    const total = Number(position()!.split(" of ")[1]);
+    await act(async () => nav.querySelector<HTMLButtonElement>("[aria-label='Next moment']")!.click());
+    expect(title(container)).toBe("Reading");
+    expect(position()).toBe(`2 of ${total}`);
+    await act(async () => nav.querySelector<HTMLButtonElement>("[aria-label='Previous moment']")!.click());
+    await act(async () => nav.querySelector<HTMLButtonElement>("[aria-label='Previous moment']")!.click());
+    // ‹ on the first card goes round to the last, as ↑ does.
+    expect(position()).toBe(`${total} of ${total}`);
+    // A sibling of the card slot, so the card and a decided card's ghost keep their origin (Codex r1).
+    expect(nav.parentElement?.classList.contains("df-review")).toBe(true);
+    expect(nav.querySelector("[aria-live]")?.getAttribute("aria-atomic")).toBe("true");
+  });
+
   it("cannot log a moment without a complete window but can skip it", async () => {
     const { container, root } = await mount([{ ...review(WALK, "Morning walk", "focus"), suggestedStoppedAt: null }]);
     const logIt = [...container.querySelectorAll<HTMLButtonElement>(".df-ractions button")].find((button) => button.textContent?.startsWith("Log it"))!;
@@ -276,6 +294,65 @@ describe("Review review-round fixes", () => {
     await act(async () => vi.advanceTimersByTimeAsync(20));
     expect(document.activeElement?.textContent).toContain("Log it");
     await act(async () => root.unmount());
+  });
+
+  it("drops the last card's flying copy when Undo brings the card back, never restarting it (Codex r3)", async () => {
+    const flights: Keyframe[][] = [];
+    const animate = vi.fn(function (this: HTMLElement, keyframes: Keyframe[]) {
+      if (this.classList.contains("df-rcard-ghost")) flights.push(keyframes);
+      return { cancel: () => undefined, onfinish: null } as unknown as Animation;
+    });
+    Object.defineProperty(HTMLElement.prototype, "animate", { configurable: true, value: animate });
+    try {
+      const { container, root } = await mount([review(WALK, "Morning walk", "focus")]);
+      await act(async () => container.querySelector<HTMLButtonElement>(".df-ractions button")!.click());
+      expect(container.querySelector(".df-rcard-ghost")).not.toBeNull();
+      expect(flights).toHaveLength(1);
+      await act(async () => container.querySelector<HTMLButtonElement>(".df-toast-action")!.click());
+      expect(title(container)).toBe("Morning walk");
+      expect(container.querySelector(".df-rcard-ghost")).toBeNull();
+      expect(flights).toHaveLength(1);
+      await act(async () => root.unmount());
+    } finally {
+      delete (HTMLElement.prototype as { animate?: unknown }).animate;
+    }
+  });
+
+  it("never flies a copy twice when a refill and a later empty take the deck away and back (Codex r4)", async () => {
+    const flights: Keyframe[][] = [];
+    Object.defineProperty(HTMLElement.prototype, "animate", {
+      configurable: true,
+      value: function (this: HTMLElement, keyframes: Keyframe[]) {
+        if (this.classList.contains("df-rcard-ghost")) flights.push(keyframes);
+        return { cancel: () => undefined, onfinish: null } as unknown as Animation;
+      }
+    });
+    try {
+      vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout", "setInterval", "clearInterval"] });
+      vi.setSystemTime(NOW);
+      fakeFrames();
+      const container = document.createElement("div");
+      document.body.append(container);
+      const root = trackedRoot(container);
+      const render = (items: ReviewItemRow[]) => act(async () => root.render(
+        <AppShellRuntimeProvider>
+          <ReviewDeck initialData={bootstrap(items)} />
+        </AppShellRuntimeProvider>
+      ));
+      await render([review(WALK, "Morning walk", "focus")]);
+      await key("y");
+      expect(flights).toHaveLength(1);
+      // A refill mid-flight: the deck shows a card, and the copy is gone.
+      await render([review(WALK, "Morning walk", "focus"), review(READ, "Reading", "admin")]);
+      expect(container.querySelector(".df-rcard-ghost")).toBeNull();
+      // Empty again later: the old copy does not come back and fly again.
+      await render([review(WALK, "Morning walk", "focus")]);
+      expect(container.querySelector(".df-rcard-ghost")).toBeNull();
+      expect(flights).toHaveLength(1);
+      await act(async () => root.unmount());
+    } finally {
+      delete (HTMLElement.prototype as { animate?: unknown }).animate;
+    }
   });
 
   it("leaves Y, N and ⌘Z to the evidence editor while it is open", async () => {
@@ -408,6 +485,18 @@ describe("Review round-4 fixes", () => {
     await render(items);
     return { container, root, render };
   }
+
+  it("moves focus from the queue bar to the card when a refresh leaves one moment, also where disabling blurs (Codex r2)", async () => {
+    const { container, render } = await controllable([review(WALK, "Morning walk", "focus"), review(READ, "Reading", "admin")]);
+    const next = container.querySelector<HTMLButtonElement>("[aria-label='Next moment']")!;
+    await act(async () => next.focus());
+    // A browser that blurs a button as it is disabled: focus is already on the page.
+    await act(async () => next.blur());
+    await render([review(WALK, "Morning walk", "focus")]);
+    await act(async () => { await Promise.resolve(); });
+    expect(document.activeElement?.closest(".df-ractions")).not.toBeNull();
+    expect(container.querySelector(".df-rnav-pos")?.textContent).toBe("1 of 1");
+  });
 
   it("logs once for a held Enter", async () => {
     const { container, root } = await mount();

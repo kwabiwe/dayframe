@@ -18,7 +18,7 @@ afterEach(() => {
   document.body.innerHTML = "";
 });
 
-describe("Blocks command timer", () => {
+describe("Blocks command block", () => {
   it("logs a finished block ending now for a trailing duration, with the @activity", async () => {
     runtime = runtimeFixture({ description: "Plan launch @foc 45m", tagNames: ["Deep work"] });
     render(<PersistentTimerBar />);
@@ -37,7 +37,7 @@ describe("Blocks command timer", () => {
     const submitted = { categoryId: "", description: "Plan launch @foc 45m", tagNames: ["Deep work"] };
     expect(clear(submitted)).toEqual({ categoryId: "", description: "", tagNames: [] });
     // Text typed while the add was in flight is kept.
-    const newer = { categoryId: "", description: "Next task", tagNames: [] };
+    const newer = { categoryId: "", description: "Next block", tagNames: [] };
     expect(clear(newer)).toBe(newer);
     expect(screen.getByText("Added 45m to Focus.")).not.toBeNull();
   });
@@ -48,10 +48,10 @@ describe("Blocks command timer", () => {
     expect(screen.getByRole("button", { name: "Activity: Writing" })).not.toBeNull();
   });
 
-  it("starts the timer with the @activity removed from the description", async () => {
+  it("starts the block with the @activity removed from the description", async () => {
     runtime = runtimeFixture({ description: "Plan launch @focus" });
     render(<PersistentTimerBar />);
-    await act(async () => { fireEvent.click(screen.getByRole("button", { name: "Start timer" })); });
+    await act(async () => { fireEvent.click(screen.getByRole("button", { name: "Start a block" })); });
     expect(runtime.startTimer).toHaveBeenCalledWith({ categoryId: "focus", description: "Plan launch", tagNames: [] });
     expect(runtime.createManualEntry).not.toHaveBeenCalled();
   });
@@ -60,7 +60,7 @@ describe("Blocks command timer", () => {
     runtime = runtimeFixture({ description: "Plan 1h" });
     (runtime.createManualEntry as ReturnType<typeof vi.fn>).mockResolvedValue({ ok: false, error: "That time overlaps." });
     render(<PersistentTimerBar />);
-    await act(async () => { fireEvent.click(screen.getByRole("button", { name: "Add 1h 00m ending now" })); });
+    await act(async () => { fireEvent.click(screen.getByRole("button", { name: "Add 1h ending now" })); });
     expect(runtime.setTimerDraft).not.toHaveBeenCalled();
     expect(screen.getByText("That time overlaps.")).not.toBeNull();
   });
@@ -96,11 +96,11 @@ describe("Blocks command timer", () => {
     expect(recording.className).toContain("is-recording");
     expect(recording.getAttribute("style")).toContain("--block: light-dark(");
     expect(screen.getByRole("button", { name: "Start Focus (1)" })).not.toBeNull();
-    expect(screen.getByRole("button", { name: "Stop timer" })).not.toBeNull();
+    expect(screen.getByRole("button", { name: "Stop recording" })).not.toBeNull();
   });
 });
 
-describe("Command timer menus and switch toasts (UIA-202/209/210)", () => {
+describe("Command block menus and switch toasts (UIA-202/209/210)", () => {
   it("says Switched with the time logged to the block it replaced, without Undo", async () => {
     const running = timeEntry({ categoryId: "focus", categoryName: "Focus", description: "Plan launch" });
     runtime = runtimeFixture({ activeEntry: running });
@@ -234,7 +234,7 @@ function timeEntry(overrides: Partial<TimeEntryRow> = {}): TimeEntryRow {
 }
 
 describe("Space shortcut contract", () => {
-  it("ignores a held Space so one press makes one timer change", async () => {
+  it("ignores a held Space so one press makes one block change", async () => {
     const { readFileSync } = await import("node:fs");
     const shell = readFileSync(`${process.cwd()}/src/components/AppShell.tsx`, "utf8");
     expect(shell).toMatch(/if \(bare && event\.code === "Space"\) \{[\s\S]*?if \(event\.repeat\) return;[\s\S]*?void toggleTimer\(\);/);

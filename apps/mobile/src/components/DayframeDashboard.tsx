@@ -51,6 +51,9 @@ import { subscribeSavedTimeGoals } from "@/lib/settingsGoals";
 import { applySavedActivity, subscribeSavedActivity } from "@/lib/settingsActivities";
 import { layoutQuickStartMosaic, rankQuickStartActivities, weeklySecondsByActivity } from "@/lib/quickStartMosaic";
 import { TodayReviewPresentationProvider } from "./today/TodayReviewPresentationContext";
+import { currentTimeZone, localDayKey, reviewOwner, windowScopeFor } from "./today/useTodayReviewPresentation";
+import { bootstrapReviewListMayBeIncomplete, calendarReviewItems, newestCachedReviewWindow, scopedOpenReviewItems } from "@/lib/calendarScopedReview";
+import { readReviewPresentationSnapshot, readSuppressedReviewItemIds, subscribeReviewSync } from "@/lib/reviewSyncStore";
 import { AccountAvatarButton } from "./today/AccountAvatarButton";
 import { TodayGoalFrame } from "./today/TodayGoalFrame";
 import { formatLiveClock } from "./today/todayBlocksLayout";
@@ -103,6 +106,7 @@ import {
   signup,
   syncQueue,
   type MobileBootstrap,
+  type MobileReviewItem,
   type SyncQueueResult,
   type TimeEntryUpdatePatch
 } from "@/lib/api";
@@ -1604,9 +1608,56 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
     [data?.activeEntry, data?.entries]
   );
   const hapticsEnabled = useHapticsPreference();
+  // UIA-060: once the bootstrap's open Review list is at its cap, the Calendar also draws open
+  // suggestions from Today's cached scoped Review window (60 days, its own completeness), so a
+  // burst of newer suggestions never hides a recent day's Review block.
+  const [scopedReviewItems, setScopedReviewItems] = useState<MobileReviewItem[]>([]);
+  const reviewListAtCap = bootstrapReviewListMayBeIncomplete(data);
+  const scopedOwner = useMemo(() => reviewOwner(data), [data]);
+  const scopedOwnerKey = scopedOwner ? `${scopedOwner.backendId}:${scopedOwner.workspaceId}:${scopedOwner.userId}` : null;
+  const scopedDayKey = localDayKey(minuteNow);
+  useEffect(() => {
+    if (!reviewListAtCap || !scopedOwner) {
+      setScopedReviewItems([]);
+      return;
+    }
+    const timeZone = currentTimeZone();
+    if (!timeZone) return;
+    let current = true;
+    let sequence = 0;
+    // Re-read whenever Review's cache or local decisions change (Today caching a newer window, a
+    // decision made here), always for today's window scope.
+    const read = () => {
+      const mine = ++sequence;
+      Promise.all([
+        // Today's window, or the day before's until Today caches the new one (midnight, offline).
+        newestCachedReviewWindow(scopedDayKey, (dayKey) =>
+          readReviewPresentationSnapshot({ owner: scopedOwner, response: { scope: windowScopeFor(dayKey, timeZone) } })),
+        readSuppressedReviewItemIds(scopedOwner)
+      ])
+        .then(([snapshot, suppressed]) => {
+          if (current && mine === sequence) setScopedReviewItems(scopedOpenReviewItems(snapshot, suppressed));
+        })
+        .catch(() => undefined);
+    };
+    read();
+    const unsubscribe = subscribeReviewSync(read);
+    return () => {
+      current = false;
+      unsubscribe();
+    };
+    // scopedOwner is keyed by scopedOwnerKey.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [reviewListAtCap, scopedOwnerKey, scopedDayKey]);
+  const calendarData = useMemo(
+    () => data && reviewListAtCap
+      ? { ...data, reviewItems: calendarReviewItems(data.reviewItems ?? [], scopedReviewItems, true) }
+      : data,
+    [data, reviewListAtCap, scopedReviewItems]
+  );
   const nativeCalendarBridge = useMemo(
     () => buildNativeCalendarBridgeState({
-      data,
+      data: calendarData,
       hapticsEnabled,
       // Whole minutes are all the Calendar shows; a per-second model made SwiftUI republish every second.
       now: minuteNow,
@@ -1619,7 +1670,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
     }),
     [
       calendarTransitionDirection,
-      data,
+      calendarData,
       hapticsEnabled,
       minuteNow,
       reduceMotion,
@@ -3016,7 +3067,11 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
               presentActiveEditor("existing_active_timer");
             },
             onOpenCompleted: presentCompletedEntry,
-            onOpenReview: () => router.push("/review")
+            // UIA-063: that suggestion on top of the deck, as a ribbon tap opens it; a crowd of
+            // only older needs-review entries ("") opens the Review list.
+            onOpenReview: (reviewItemId) => reviewItemId
+              ? router.push({ pathname: "/review", params: { focusReviewId: reviewItemId } })
+              : router.push("/review")
           }
         );
       };

@@ -26,7 +26,7 @@ vi.mock("react-native-gesture-handler", () => {
   };
 });
 vi.mock("react-native-reanimated", () => ({ runOnJS: (fn: (...args: unknown[]) => unknown) => fn }));
-vi.mock("react-native-svg", () => ({ default: "Svg", Circle: "Circle", Defs: "Defs", Line: "Line", Path: "Path", Pattern: "Pattern", Rect: "Rect" }));
+vi.mock("react-native-svg", () => ({ default: "Svg", Circle: "Circle", Defs: "Defs", G: "G", Line: "Line", Path: "Path", Pattern: "Pattern", Rect: "Rect" }));
 vi.mock("../../lib/haptics", () => ({ playHaptic: mocks.haptic }));
 vi.mock("../../lib/mobileTypography", () => ({ mobileTextProps: () => ({}) }));
 vi.mock("./TodayReviewPresentationContext", () => ({ useTodayReviewPresentationContext: () => null }));

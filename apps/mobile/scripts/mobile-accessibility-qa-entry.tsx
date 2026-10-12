@@ -31,7 +31,6 @@ import { ReviewDeckStack } from "../src/components/review/ReviewDeck";
 import { SettingsBlockGroup, SettingsBlockRow } from "../src/components/settings/SettingsBlocks";
 import { MobileThemeProvider, useMobileTheme } from "../src/lib/mobileTheme";
 import { mobileTextProps } from "../src/lib/mobileTypography";
-import { TagMetadata } from "../src/components/TagMetadata";
 
 const frames: Record<string, unknown> = {};
 const widths = [320, 375, 390, 430];
@@ -247,43 +246,7 @@ function Probe() {
       if (reviewCount > 0) {
         requiredMeasurements.push("review-nudge.card", "review-nudge.title.frame", "review-nudge.title.text", "review-nudge.detail.frame", "review-nudge.detail.text");
       }
-      for (const id of [
-        "tags.removable",
-        "tags.removable.group.0",
-        "tags.removable.group.1",
-        "tags.removable.remove.0",
-        "tags.removable.remove.1",
-        "tags.removable.text.0.frame",
-        "tags.removable.text.0.text",
-        "tags.removable.text.1.frame",
-        "tags.removable.text.1.text",
-      ]) requiredMeasurements.push(id);
       const missingMeasurementIds = [...new Set(requiredMeasurements)].filter((id) => !(id in frames));
-      const removableTagTargetIds = ["tags.removable.remove.0", "tags.removable.remove.1"];
-      const removableTagTargets = removableTagTargetIds.map((id) => frames[id] as {
-        x: number; y: number; width: number; height: number;
-      } | undefined);
-      const removableTagAbsoluteTargets = removableTagTargets.map((frame, index) => {
-        const tagRow = frames["tags.removable"] as { x: number; y: number } | undefined;
-        const group = frames[`tags.removable.group.${index}`] as { x: number; y: number } | undefined;
-        if (!frame || !tagRow || !group) return undefined;
-        return {
-          x: tagRow.x + group.x + frame.x,
-          y: tagRow.y + group.y + frame.y,
-          width: frame.width,
-          height: frame.height,
-        };
-      });
-      const removableTagTargetsMeasured = removableTagAbsoluteTargets.every(Boolean);
-      const removableTagTargetsAtLeast44 = removableTagTargetsMeasured && removableTagTargets.every((frame) =>
-        Boolean(frame && frame.width >= 44 && frame.height >= 44),
-      );
-      const removableTagTargetsDoNotOverlap = removableTagTargetsMeasured && (() => {
-        const [first, second] = removableTagAbsoluteTargets;
-        if (!first || !second) return false;
-        return first.x + first.width <= second.x || second.x + second.width <= first.x ||
-          first.y + first.height <= second.y || second.y + second.height <= first.y;
-      })();
       const result = {
         source: "synthetic native accessibility probe",
         viewport: { width: deviceWidth, height: deviceHeight },
@@ -328,16 +291,6 @@ function Probe() {
         },
         diagnosticComplete: missingMeasurementIds.length === 0,
         missingMeasurementIds,
-        interactiveTargetAudit: {
-          removableTagTargetsAtLeast44,
-          removableTagTargetsDoNotOverlap,
-          coordinateSpace: "tag targets translated through measured row and tag-group ancestors",
-          targets: removableTagTargetIds.map((id, index) => ({
-            id,
-            localFrame: frames[id] ?? null,
-            frame: removableTagAbsoluteTargets[index] ?? null,
-          })),
-        },
         report: "geometry contains fixture IDs and line metrics only; text values are omitted",
         frames,
       };
@@ -439,18 +392,6 @@ function Probe() {
               rowLanding={null}
               theme={theme}
             />
-            <View style={{ width: hostWidth }}>
-              <Text {...mobileTextProps("counter")} style={styles.quickCategoryHint}>H05 REMOVABLE TAGS</Text>
-              <TagMetadata
-                active
-                diagnostic={diagnostic}
-                diagnosticPrefix="tags.removable"
-                onPressTag={(tagName) => setActionResult(`Local remove-tag callback: ${tagName}`)}
-                styles={styles}
-                tagNames={["synthetic-remove-one", "synthetic-remove-long-tag-name"]}
-                theme={theme}
-              />
-            </View>
             <View style={{ gap: 8 }}>
               <Text {...mobileTextProps("sectionHeading")} style={styles.sectionTitle}>Settings</Text>
               <SettingsBlockGroup theme={theme} title="Automatic tracking">

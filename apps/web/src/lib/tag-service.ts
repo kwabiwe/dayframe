@@ -174,7 +174,7 @@ export async function attachTagToTimeEntry(
        ) as exists`,
       [session.workspaceId, timeEntryId, tagId, session.userId]
     );
-    if (!existing.rows[0]?.exists) throw new TagNotFoundError("Tag or time entry not found.");
+    if (!existing.rows[0]?.exists) throw new TagNotFoundError("Tag or block not found.");
   }
   return { timeEntryId, tagId, attached: true };
 }

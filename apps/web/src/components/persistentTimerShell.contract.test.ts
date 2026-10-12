@@ -17,8 +17,8 @@ const entriesRedirect = source("../app/entries/page.tsx");
 const automationRedirect = source("../app/automation/page.tsx");
 const styles = source("../app/globals.css");
 
-describe("persistent timer shell contract", () => {
-  it("mounts one timer owner in the persistent shell and none in either page", () => {
+describe("persistent block shell contract", () => {
+  it("mounts one block owner in the persistent shell and none in either page", () => {
     expect(shell.match(/<PersistentTimerBar/g)).toHaveLength(1);
     expect(shell).toContain("<AppShellRuntimeProvider>");
     expect(today).not.toContain("CurrentTimerPanel");
@@ -41,12 +41,12 @@ describe("persistent timer shell contract", () => {
     expect(styles).toMatch(/\.df-cmd-secondary \{[^}]*grid-area: secondary;/s);
     expect(styles).toMatch(/\.df-cmd-icon\.ui-icon-button \{[^}]*width: 44px;[^}]*height: 44px;/s);
     expect(styles).not.toContain(".swiss-entrybar-actions");
-    expect(timer).toContain('label="More timer actions"');
+    expect(timer).toContain('label="More block actions"');
     expect(timer).toContain("Discard running block");
     expect(timer).toContain("void deleteActiveTimer()");
   });
 
-  it("keeps tags inside the task compound control and exposes the row to assistive technology", () => {
+  it("keeps tags inside the block compound control and exposes the row to assistive technology", () => {
     const compoundControl = inlineTags.slice(
       inlineTags.indexOf('className="ui-compound-control inline-tag-input-anchor"'),
       inlineTags.indexOf('<span className="sr-only"')
@@ -56,8 +56,8 @@ describe("persistent timer shell contract", () => {
     expect(timer).toContain('className="sr-only swiss-timer-description-label"');
     expect(timer).toContain('ariaLabelledBy="persistent-timer-category-label"');
     expect(categoryPicker).toContain("aria-labelledby={ariaLabelledBy}");
-    expect(timer).toContain('aria-label="Timer is idle. Elapsed time 00:00."');
-    expect(timer).toContain('aria-label={active ? "Stop timer" : parsedCommand?.durationSeconds ? `${goLabel} ending now` : "Start timer"}');
+    expect(timer).toContain('aria-label="Nothing is recording. Elapsed time 00:00."');
+    expect(timer).toContain('aria-label={active ? "Stop recording" : parsedCommand?.durationSeconds ? `${goLabel} ending now` : "Start a block"}');
     expect(timer).toContain("disabled={Boolean(active) && isTimerBusy}");
     expect(inlineTags).toContain("selectedTagNames.map");
     expect(inlineTags).toContain("Remove tag ${tagName}");
@@ -65,7 +65,7 @@ describe("persistent timer shell contract", () => {
     expect(compoundControl).toContain('className="inline-selected-tag-overflow"');
   });
 
-  it("keeps compact overlays and the timer row usable at phone widths", () => {
+  it("keeps compact overlays and the block row usable at phone widths", () => {
     expect(styles).toMatch(/@media \(max-width: 860px\)[\s\S]*\.df-cmd \{[^}]*"activity description action secondary"[^}]*"time time time time";/);
     expect(styles).toMatch(/@media \(max-width: 860px\)[\s\S]*\.df-quick-button \{[^}]*min-height: 44px;/);
     expect(styles).toMatch(/\.swiss-category-menu \{[^}]*max-width: calc\(100vw - 24px\);[^}]*max-height: min\(232px, calc\(100dvh - 96px\)\);/s);

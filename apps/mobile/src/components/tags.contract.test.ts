@@ -4,7 +4,6 @@ import { describe, expect, it } from "vitest";
 
 const sheet = readFileSync(fileURLToPath(new URL("./ActiveTimerEditSheet.tsx", import.meta.url)), "utf8");
 const dashboard = readFileSync(fileURLToPath(new URL("./DayframeDashboard.tsx", import.meta.url)), "utf8");
-const metadata = readFileSync(fileURLToPath(new URL("./TagMetadata.tsx", import.meta.url)), "utf8");
 const api = readFileSync(fileURLToPath(new URL("../lib/api.ts", import.meta.url)), "utf8");
 const theme = readFileSync(fileURLToPath(new URL("../lib/mobileTheme.ts", import.meta.url)), "utf8");
 
@@ -85,9 +84,6 @@ describe("mobile tag interaction contract", () => {
     expect(sheet).toContain('pointerEvents={hashtagPanelVisible ? "auto" : "none"}');
     expect(sheet).not.toContain("highlightedTagAction");
     expect(sheet).not.toContain('outputRange: ["transparent", theme.surfaceMuted]');
-    expect(metadata).toContain('fill={color}');
-    expect(metadata).toContain('fillRule="evenodd"');
-    expect(metadata).toContain('accessibilityLabel={`Remove tag ${tagName}`}');
     // The sheet shows the prototype's "#tag ×" chips (draft-only removal), then "+ Tag".
     expect(sheet).toContain("accessibilityLabel={`Remove tag ${tagName}`}");
     expect(sheet).toContain("#{tagName}");

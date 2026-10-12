@@ -2377,6 +2377,14 @@ async function hiddenReviewItemIds(accountKeyValue: string) {
   return new Set(rows.map((row) => row.review_item_id));
 }
 
+/**
+ * Review items this account must not show again: hidden by a local decision, or terminal in a
+ * newer read (the same suppression the cached bootstrap uses), for that backend.
+ */
+export async function readSuppressedReviewItemIds(owner: ReviewPresentationOwner) {
+  return suppressedReviewItemIds(accountKey(owner), owner.backendId);
+}
+
 async function suppressedReviewItemIds(accountKeyValue: string, backendId: string | null) {
   const [hidden, terminal] = await Promise.all([
     hiddenReviewItemIds(accountKeyValue),

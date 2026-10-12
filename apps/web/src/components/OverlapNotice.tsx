@@ -22,12 +22,11 @@ export function OverlapNotice({
   const overlap = overlapNoticeForCandidate({ candidate, entries, excludeEntryId });
   if (!overlap?.overlapCount) return null;
   if (compact) {
-    const totalMinutes = Math.max(0, Math.round(overlap.uniqueOverlapSeconds / 60));
-    const duration = `${String(Math.floor(totalMinutes / 60)).padStart(2, "0")}:${String(totalMinutes % 60).padStart(2, "0")}`;
+    const duration = formatDuration(overlap.uniqueOverlapSeconds);
     return (
       <aside className="overlap-notice is-compact" role="status" aria-live="polite">
         <p>
-          Overlaps {overlap.overlapCount === 1 ? "one entry" : `${overlap.overlapCount} entries`} by {duration}
+          Overlaps {overlap.overlapCount === 1 ? "one block" : `${overlap.overlapCount} blocks`} by {duration}
         </p>
       </aside>
     );
@@ -46,7 +45,7 @@ export function OverlapNotice({
         <span className="overlap-notice-badge">Overlap</span>
         <p>
           <strong>
-            Overlaps {overlap.overlapCount} {overlap.overlapCount === 1 ? "entry" : "entries"}{" "}
+            Overlaps {overlap.overlapCount} {overlap.overlapCount === 1 ? "block" : "blocks"}{" "}
             {overlap.overlapCount === 1 ? "by" : "across"} {duration}
           </strong>
         </p>
@@ -54,7 +53,7 @@ export function OverlapNotice({
           <ul>
             {visiblePeers.map((entry) => (
               <li key={entry.id}>
-                {entry.description?.trim() || entry.categoryName?.trim() || "Untitled entry"}
+                {entry.description?.trim() || entry.categoryName?.trim() || "Untitled block"}
                 {" · "}{formatTime(entry.startedAt)}–{entry.stoppedAt ? formatTime(entry.stoppedAt) : "now"}
               </li>
             ))}

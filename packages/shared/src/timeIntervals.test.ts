@@ -324,6 +324,17 @@ describe("layoutTimeIntervals", () => {
     });
   });
 
+  it("keeps a contained pair in side-by-side lanes when inset overlays are off", () => {
+    const result = layoutTimeIntervals([
+      interval("base", 9, 12),
+      { id: "short", startedAt: at(10), stoppedAt: at(10, 30) }
+    ], new Date(), { insetOverlays: false });
+    expect(result.map((layout) => [layout.id, layout.mode, layout.widthFraction])).toEqual([
+      ["base", "lane", 0.5],
+      ["short", "lane", 0.5]
+    ]);
+  });
+
   it("uses lanes for partial, identical, or similarly sized contained overlaps", () => {
     const result = layoutTimeIntervals([interval("a", 9, 11), interval("b", 10, 12)]);
     expect(result.map((layout) => layout.mode)).toEqual(["lane", "lane"]);

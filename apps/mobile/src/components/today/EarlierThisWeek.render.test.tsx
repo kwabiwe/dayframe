@@ -46,7 +46,7 @@ describe("EarlierThisWeek", () => {
     const first = tree.root.findByProps({ testID: "earlier-day-2026-10-06" });
     expect(first.props.accessibilityLabel).toBe("Tuesday 6 October, 2 hours 5 minutes");
     expect(first.props.accessibilityHint).toBe("Opens this day in Calendar");
-    expect(tree.root.findByProps({ testID: "earlier-day-2026-10-05" }).props.accessibilityLabel).toBe("Tuesday 6 October, nothing tracked");
+    expect(tree.root.findByProps({ testID: "earlier-day-2026-10-05" }).props.accessibilityLabel).toBe("Tuesday 6 October, nothing framed");
 
     const segments = first.findAll((node) => node.type === ("View" as never) && Array.isArray(node.props.style) && node.props.style[1]?.left !== undefined);
     expect(segments.map((node) => [node.props.style[1].left, node.props.style[1].width])).toEqual([["25%", "25%"], ["75%", "5%"]]);

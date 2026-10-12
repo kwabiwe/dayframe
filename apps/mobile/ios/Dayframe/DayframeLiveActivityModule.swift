@@ -8,7 +8,7 @@ class DayframeLiveActivityModule: NSObject {
     false
   }
 
-  @objc(start:entryId:apiBase:categoryName:categoryColor:startedAt:resolver:rejecter:)
+  @objc(start:entryId:apiBase:categoryName:categoryColor:startedAt:categoryColorLight:resolver:rejecter:)
   func start(
     title: String,
     entryId: String?,
@@ -16,6 +16,7 @@ class DayframeLiveActivityModule: NSObject {
     categoryName: String?,
     categoryColor: String?,
     startedAt: String?,
+    categoryColorLight: String?,
     resolve: @escaping RCTPromiseResolveBlock,
     reject: @escaping RCTPromiseRejectBlock
   ) {
@@ -26,6 +27,7 @@ class DayframeLiveActivityModule: NSObject {
         title: title,
         categoryName: categoryName,
         categoryColor: categoryColor,
+        categoryColorLight: categoryColorLight,
         startedAt: Self.date(from: startedAt) ?? Date()
       )
       let payload: [String: Any] = [

@@ -18,10 +18,10 @@ export async function POST(request: Request) {
     const response = authErrorResponse(error);
     if (response) return response;
     if (error instanceof ZodError) {
-      return NextResponse.json({ error: "Choose between 2 and 100 valid entries." }, { status: 400 });
+      return NextResponse.json({ error: "Choose between 2 and 100 valid blocks." }, { status: 400 });
     }
     if (error instanceof TimeEntryNotFoundError) {
-      return NextResponse.json({ error: "One or more time entries were not found." }, { status: 404 });
+      return NextResponse.json({ error: "One or more blocks were not found." }, { status: 404 });
     }
     throw error;
   }

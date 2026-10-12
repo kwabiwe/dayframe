@@ -1,5 +1,6 @@
 "use client";
 
+import { isSignedOutPath } from "@/lib/signed-out-paths";
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import type { ReactNode } from "react";
@@ -41,7 +42,7 @@ const shortcuts = [
   [SEARCH_SHORTCUT_LABEL, "Open search"],
   ["?", "Keyboard shortcuts"],
   ["G then T, C, R, P, L, S", "Go to Today, Calendar, Review, Reports, Library, Settings"],
-  ["Space", "Start or stop the timer"],
+  ["Space", "Start or stop recording"],
   ["N", "Type what you're working on"],
   ["1–6", "Start a pinned activity"],
   ["Alt+Left", "Previous day or week"],
@@ -53,7 +54,7 @@ const isStaging = process.env.NEXT_PUBLIC_DAYFRAME_DEPLOYMENT_ENV === "staging";
 
 export function AppShell({ children }: { children: ReactNode }) {
   const pathname = usePathname();
-  if (pathname === "/login" || pathname === "/signup") return <>{children}</>;
+  if (isSignedOutPath(pathname)) return <>{children}</>;
 
   return (
     <AppShellRuntimeProvider>
@@ -273,7 +274,7 @@ function AppShellContent({ children }: { children: ReactNode }) {
 
       <div className={`swiss-main-frame${isTimeline ? " is-timeline" : ""}`}>
         {isTimeline ? (
-          <section className="swiss-timeline-surface" aria-label="Timeline workspace">
+          <section className="swiss-timeline-surface" aria-label="Calendar">
             <div className="swiss-persistent-timer-shell">
               {persistentTimer}
             </div>

@@ -3,7 +3,6 @@
 import { DayframeIcon } from "@/components/blocks/DayframeIcon";
 
 import Link from "next/link";
-import { Plus } from "lucide-react";
 import { useRef, useState } from "react";
 import {
   initialPreviousPlaceName,
@@ -121,22 +120,22 @@ export function PlaceRoleSlots({
               <div className="place-list-actions">
                 {slot.place ? (
                   <>
-                    <Button compact variant="secondary" aria-label={`Change ${slot.label}`} onClick={() => open(slot.role, "choose")}>
+                    <button aria-label={`Change ${slot.label}`} className="df-rbtn df-rbtn--sm df-rbtn--ghost" onClick={() => open(slot.role, "choose")} type="button">
                       Change
-                    </Button>
-                    <Button compact variant="ghost" aria-label={`Clear ${slot.label}`} onClick={() => open(slot.role, "clear")}>
+                    </button>
+                    <button aria-label={`Clear ${slot.label}`} className="df-rbtn df-rbtn--sm df-rbtn--ghost" onClick={() => open(slot.role, "clear")} type="button">
                       Clear
-                    </Button>
+                    </button>
                   </>
                 ) : places.length === 0 ? (
                   // Nothing saved to choose from yet: go straight to adding the place.
-                  <Link className="ui-button ui-button-secondary is-compact" href={`/places/new?role=${slot.role}`}>
+                  <Link className="df-rbtn df-rbtn--sm df-rbtn--ghost" href={`/places/new?role=${slot.role}`}>
                     Set {slot.label}
                   </Link>
                 ) : (
-                  <Button compact variant="secondary" onClick={() => open(slot.role, "choose")}>
+                  <button className="df-rbtn df-rbtn--sm df-rbtn--ghost" onClick={() => open(slot.role, "choose")} type="button">
                     Set {slot.label}
-                  </Button>
+                  </button>
                 )}
               </div>
             </article>
@@ -149,8 +148,8 @@ export function PlaceRoleSlots({
           busy={saving}
           title={editing.mode === "clear" ? `Clear ${editingSlot.label}?` : `Set ${editingSlot.label}`}
           description={editing.mode === "clear"
-            ? `The place stays saved and keeps its entries; it just stops being ${editingSlot.label}.`
-            : `Choose the saved place that is your ${editingSlot.label.toLowerCase()}. Past entries stay where they were recorded.`}
+            ? `The place stays saved and keeps its blocks; it just stops being ${editingSlot.label}.`
+            : `Choose the saved place that is your ${editingSlot.label.toLowerCase()}. Past blocks stay where they were recorded.`}
           footer={(
             <>
               <Button disabled={saving} onClick={() => setEditing(null)}>Cancel</Button>
@@ -190,7 +189,6 @@ export function PlaceRoleSlots({
                   </p>
                 ) : null}
                 <Link className="place-role-new-link" href={`/places/new?role=${editing.role}`}>
-                  <Plus aria-hidden="true" size={16} />
                   Add a new place as {editingSlot.label}
                 </Link>
               </>
@@ -199,7 +197,7 @@ export function PlaceRoleSlots({
               <TextField
                 id="place-role-previous-name"
                 label={editing.mode === "clear" ? "Name for this place" : `Rename the old ${editingSlot.label.toLowerCase()}`}
-                help="Its past entries keep this name, so they don't read as an address. Leave it blank to keep the current name."
+                help="Its past blocks keep this name, so they don't read as an address. Leave it blank to keep the current name."
                 maxLength={120}
                 value={editing.previousPlaceName}
                 onChange={(event) => {

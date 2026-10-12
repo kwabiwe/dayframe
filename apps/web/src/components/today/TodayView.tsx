@@ -1,5 +1,6 @@
 "use client";
 
+import { formatDuration as formatSharedDuration } from "@dayframe/shared";
 import Link from "next/link";
 import type { CSSProperties, KeyboardEvent as ReactKeyboardEvent, PointerEvent as ReactPointerEvent } from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -29,11 +30,12 @@ import {
   pendingReviewSeconds,
   pendingReviewSpans,
   previousDays,
-  ribbonHitAt,
+  RIBBON_GAP_PX,
   RIBBON_MIN_BLOCK_PX,
+  ribbonDrawnHitAt,
+  ribbonNextStartMs,
   staleEditError,
   todayBlocks,
-  withMinimumSpan,
   type GoalCellSlice
 } from "@/lib/today-view";
 
@@ -136,7 +138,7 @@ export function TodayView({ initialData }: { initialData: BootstrapData; rendere
 
   const startAgain = useCallback(async (entry: TimeEntryRow) => {
     if (startingId || isTimerBusy) {
-      return { ok: false, error: "A timer update is already in progress." } as const;
+      return { ok: false, error: "A block update is already in progress." } as const;
     }
     setStartingId(entry.id);
     setActionError(null);
@@ -447,14 +449,20 @@ function TodayRibbon({
   const trackRef = useRef<HTMLDivElement | null>(null);
   const [tip, setTip] = useState<{ x: number; atMs: number; width: number } | null>(null);
 
-  // Hit-test what is drawn: a block is at least 3 px wide however short its time.
-  const hitAt = (atMs: number, width: number) => {
-    const minimumMs = (RIBBON_MIN_BLOCK_PX / width) * span;
-    return ribbonHitAt(
-      atMs,
-      withMinimumSpan(blocks.map(({ entry, clip }) => ({ id: entry.id, startedMs: Date.parse(entry.startedAt), ...clip })), minimumMs),
-      withMinimumSpan(pending, minimumMs)
-    );
+  // Hit-test what is drawn: a block is at least 3 px wide however short its time (never past the
+  // next block), less half a pixel of gap on each side. Only in a gap does the full reach answer.
+  const allSpans = [...blocks.map(({ clip }) => clip), ...pending];
+  const hitAt = (atMs: number, width: number) => ribbonDrawnHitAt(
+    atMs,
+    blocks.map(({ entry, clip }) => ({ id: entry.id, startedMs: Date.parse(entry.startedAt), ...clip })),
+    pending,
+    { minimumMs: (RIBBON_MIN_BLOCK_PX / width) * span, halfGapMs: (RIBBON_GAP_PX / 2 / width) * span }
+  );
+  // The drawn width: at least 3 px, never past where the next block starts.
+  const widthFor = (item: { fromMs: number; toMs: number }) => {
+    const next = ribbonNextStartMs(item, allSpans);
+    const own = `max(${RIBBON_MIN_BLOCK_PX}px, ${pct(item.toMs) - pct(item.fromMs)}%)`;
+    return next === null ? own : `min(${own}, ${pct(next) - pct(item.fromMs)}%)`;
   };
   const hitFor = (clientX: number) => {
     const rect = trackRef.current?.getBoundingClientRect();
@@ -498,7 +506,7 @@ function TodayRibbon({
             style={{
               ...(item.color ? blockStyle(item.color, item.name) : {}),
               left: `${pct(item.fromMs)}%`,
-              width: `max(3px, ${pct(item.toMs) - pct(item.fromMs)}%)`
+              width: widthFor(item)
             }}
           />
         ))}
@@ -509,7 +517,7 @@ function TodayRibbon({
             style={{
               ...(entry.categoryId ? blockStyle(entry.categoryColor, entry.categoryName ?? "") : {}),
               left: `${pct(clip.fromMs)}%`,
-              width: `max(3px, ${pct(clip.toMs) - pct(clip.fromMs)}%)`
+              width: widthFor(clip)
             }}
           />
         ))}
@@ -726,11 +734,7 @@ function formatWeekdayLong(ms: number) {
 }
 
 function formatShortDuration(seconds: number) {
-  const minutes = Math.floor(seconds / 60);
-  if (minutes < 60) return `${minutes}m`;
-  const hours = Math.floor(minutes / 60);
-  const rest = minutes % 60;
-  return rest ? `${hours}h ${rest}m` : `${hours}h`;
+  return formatSharedDuration(seconds);
 }
 
 /** Durations as Dayframe writes them, with "<1m" for a block shorter than a minute. */

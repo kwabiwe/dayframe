@@ -4,6 +4,7 @@ import { AuthForm } from "@/components/AuthForm";
 import { DayframeBrand } from "@/components/brand/DayframeBrand";
 import { getOptionalPageSession } from "@/lib/auth/server";
 import { safeNextPath } from "@/lib/auth/next-path";
+import { getAuthMode } from "@/lib/session";
 
 export const dynamic = "force-dynamic";
 
@@ -22,7 +23,7 @@ export default async function LoginPage({
       <Link href="/" className="auth-home-link" aria-label="Dayframe home">
         <DayframeBrand decorative size="lg" />
       </Link>
-      <AuthForm mode="login" next={next} />
+      <AuthForm allowPasswordReset={getAuthMode() === "provider"} mode="login" next={next} />
     </main>
   );
 }

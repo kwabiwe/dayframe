@@ -160,7 +160,7 @@ export async function registerLiveActivity(
     ]
   );
   if (!result.rowCount) {
-    throw new LiveActivityRegistrationError("The running timer is no longer active.");
+    throw new LiveActivityRegistrationError("The running block is no longer active.");
   }
 }
 
@@ -710,6 +710,10 @@ function contentState(active: ActiveTimerRow, isRunning: boolean) {
     categoryColor: categoryName
       ? paletteColorFor(active.categoryColor ?? categoryName, categoryName, "dark")
       : null,
+    // The light-palette fill; the Live Activity follows the phone's appearance.
+    categoryColorLight: categoryName
+      ? paletteColorFor(active.categoryColor ?? categoryName, categoryName, "light")
+      : null,
     // Swift's default Codable Date representation is seconds since 2001-01-01.
     startedAt: startedAt.getTime() / 1000 - 978_307_200,
     elapsedSeconds: Math.max(0, Math.floor((Date.now() - startedAt.getTime()) / 1000)),
@@ -723,6 +727,7 @@ function stoppedContentState() {
     title: "No activity",
     categoryName: null,
     categoryColor: null,
+    categoryColorLight: null,
     startedAt: null,
     elapsedSeconds: 0,
     isRunning: false,

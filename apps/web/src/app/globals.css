@@ -370,9 +370,12 @@ a {
   text-decoration: none;
 }
 
+/* Text selection is neutral, never coral (UIA-314): the secondary text colour behind surface-
+   coloured text — 4.6:1 to 6.4:1 against the canvas and cards, and the selected text 5.0:1 (Daylight)
+   and 5.6:1 (Midnight) on it, whatever colour it had (coral, on-block). */
 ::selection {
-  background: var(--accent);
-  color: var(--on-accent);
+  background: var(--text-secondary);
+  color: var(--surface);
 }
 
 .tabular {
@@ -1377,7 +1380,6 @@ textarea.ui-control {
 .settings-troubleshooting-copy {
   display: grid;
   gap: 10px;
-  padding: 16px;
 }
 
 .settings-confirm-copy p,
@@ -1552,6 +1554,8 @@ dialog.ui-dialog::backdrop {
   overflow-x: hidden;
   overflow-y: auto;
   overscroll-behavior: contain;
+  /* The dialog's own inner padding, like its header and actions (UIA-301). */
+  padding: var(--web-gap-md) var(--web-dialog-padding-inline);
 }
 
 .ui-dialog .swiss-form-grid {
@@ -1590,6 +1594,8 @@ dialog.ui-popover-panel.bottom-left {
 
 .ui-popover-content {
   display: grid;
+  /* Popover rows lay out their own edges. */
+  padding: 0;
 }
 
 @media (max-width: 1180px) {
@@ -3183,7 +3189,6 @@ dialog.ui-popover-panel.bottom-left {
 .swiss-confirm-body {
   display: grid;
   gap: 16px;
-  padding: 16px;
 }
 
 .swiss-confirm-body p {
@@ -3358,6 +3363,35 @@ kbd {
   font-size: 14px;
 }
 
+/* Sign-up's password rule and the quiet "Forgot password?" under Log in's password (UIA-317/318). */
+.auth-hint {
+  margin: -6px 0 0;
+  color: var(--text-secondary);
+  font-size: 13px;
+}
+
+.auth-forgot,
+.auth-link-button {
+  justify-self: start;
+  min-height: 44px;
+  margin: -6px 0 0;
+  border: 0;
+  padding: 0;
+  background: none;
+  color: var(--text-secondary);
+  font: inherit;
+  font-size: 14px;
+  font-weight: 600;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  cursor: pointer;
+}
+
+.auth-link-button {
+  margin: 0;
+  color: var(--text-primary);
+}
+
 .auth-page {
   display: grid;
   min-height: 100vh;
@@ -3376,6 +3410,7 @@ kbd {
 }
 
 .auth-card form > p a,
+.auth-switch--standalone a,
 .landing-footer a {
   display: inline-flex;
   min-width: 44px;
@@ -3384,7 +3419,8 @@ kbd {
   justify-content: center;
 }
 
-.auth-card form > p a {
+.auth-card form > p a,
+.auth-switch--standalone a {
   color: var(--text-primary);
   font-weight: 700;
   text-decoration: underline;
@@ -3412,7 +3448,8 @@ kbd {
   place-items: center;
   transform: translateY(-50%);
   border: 0;
-  border-radius: 10px;
+  /* Icon-only actions are round (UIA-319). */
+  border-radius: 999px;
   background: transparent;
   color: var(--muted);
 }
@@ -5383,7 +5420,6 @@ kbd {
 
 .place-dialog-copy {
   margin: 0;
-  padding: 18px;
   color: var(--muted);
   font-size: 14px;
   line-height: 1.55;
@@ -5392,7 +5428,6 @@ kbd {
 .place-role-dialog {
   display: grid;
   gap: 16px;
-  padding: 18px;
 }
 
 .place-role-note {
@@ -5424,7 +5459,6 @@ kbd {
   display: grid;
   gap: 1px;
   margin: 0;
-  padding: 16px;
 }
 
 .place-learned-details > div {
@@ -5562,7 +5596,7 @@ kbd {
 
 .place-search-option[aria-selected="true"],
 .place-search-option:hover {
-  background: var(--accent-soft);
+  background: var(--surface-muted);
 }
 
 .place-search-option-title,
@@ -7439,6 +7473,8 @@ dialog.ui-dialog.manual-entry-dialog {
 
 .manual-entry-dialog-content {
   overflow: visible;
+  /* The manual entry form lays out its own edges. */
+  padding: 0;
 }
 
 .manual-entry-dialog .manual-entry-form {
@@ -9386,6 +9422,12 @@ dialog.ui-dialog.manual-entry-dialog {
   color: var(--text-primary);
 }
 
+/* The current page's icon is coral (owner, 11 Oct; the iPhone's selected tab); the label and the
+   sliding thumb stay neutral. */
+.df-nav a[aria-current="page"] > svg {
+  color: var(--accent-text);
+}
+
 .df-nav-count,
 .df-tab-count {
   display: grid;
@@ -9654,6 +9696,10 @@ dialog.ui-dialog.manual-entry-dialog {
   .df-tabbar a[aria-current="page"] {
     background: var(--surface-muted);
     color: var(--text-primary);
+  }
+
+  .df-tabbar a[aria-current="page"] .df-tab-icon > svg {
+    color: var(--accent-text);
   }
 
   .df-tab-icon {
@@ -10069,6 +10115,8 @@ dialog.ui-dialog.df-palette {
   display: flex;
   min-height: 0;
   flex-direction: column;
+  /* The palette pads the dialog itself. */
+  padding: 0;
 }
 
 .df-palette-input {
@@ -10296,11 +10344,15 @@ dialog.ui-dialog.df-palette {
   font-variant-numeric: tabular-nums;
 }
 
+/* The prototype's eyebrow (blocks.css .eyebrow): small capitals over the hero, in the secondary
+   text colour (the prototype's text-3 measures 4.05:1 on a Midnight card, under 4.5:1). */
 .df-eyebrow {
   margin: 0 0 8px;
   color: var(--text-secondary);
-  font-size: 13px;
+  font-size: 11px;
   font-weight: 650;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
 }
 
 .df-today-hero {
@@ -10327,10 +10379,14 @@ dialog.ui-dialog.df-palette {
   letter-spacing: -0.035em;
 }
 
+/* The prototype's hero-sub: 14 px in its --text-2, which sits between our secondary and primary
+   text (#A3ACC1 in Midnight, #586176 in Daylight), straight under the total. */
 .df-today-sub {
-  margin: 6px 0 0;
-  color: var(--text-secondary);
+  margin: 2px 0 0;
+  color: color-mix(in srgb, var(--text-primary) 28%, var(--text-secondary));
   font-size: 14px;
+  font-weight: 400;
+  line-height: 1.45;
 }
 
 .df-goal-cells {
@@ -10361,6 +10417,19 @@ dialog.ui-dialog.df-palette {
   box-shadow: inset -2px 0 0 var(--accent);
 }
 
+/* Activities inside an hour cell never touch (owner, Trello): each one after the first starts with
+   a 2 px strip in the cell's own colour, drawn inside its width so every slice keeps its exact
+   share of the hour and the live edge stays where the time is. */
+.df-goal-cell > span + span {
+  box-shadow: inset 2px 0 0 var(--surface-muted);
+}
+
+/* The coral recording edge is listed first so it paints on top: a live slice under 2 px wide
+   still shows coral, not the separator. */
+.df-goal-cell > span + span.is-live {
+  box-shadow: inset -2px 0 0 var(--accent), inset 2px 0 0 var(--surface-muted);
+}
+
 .df-ribbon {
   position: relative;
   padding-bottom: 22px;
@@ -10386,16 +10455,23 @@ dialog.ui-dialog.df-palette {
   background: var(--border-strong);
 }
 
+/* Ribbon blocks never touch: a 1 px gap (each block clipped half a pixel in on either side — a clip,
+   not a border, so it is never snapped to a whole device pixel and matches ribbonDrawnHitAt) and a
+   very faint inner edge, light on Midnight and dark on Daylight, so dark activity colours never get
+   a darker outline (owner, Trello; X2). */
 .df-ribbon-block {
   position: absolute;
   top: 4px;
   bottom: 4px;
   border-radius: 6px;
+  clip-path: inset(0 0.5px round 6px);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--text-primary) 14%, transparent);
   transition: transform 140ms cubic-bezier(0.22, 1, 0.36, 1), filter 140ms cubic-bezier(0.22, 1, 0.36, 1);
 }
 
 .df-ribbon-block.is-none {
-  background: var(--uncategorized-color, var(--text-muted));
+  /* background-color, not the shorthand, so the padding-box clip (the 1 px gap) survives. */
+  background-color: var(--uncategorized-color, var(--text-muted));
 }
 
 .df-ribbon-block.is-pending {
@@ -10861,6 +10937,7 @@ dialog.ui-dialog.df-palette {
   animation: df-toast-out 160ms ease-in both;
 }
 
+
 .df-toast-swatch {
   width: 12px;
   height: 12px;
@@ -11281,6 +11358,11 @@ dialog.ui-dialog.df-palette {
   background: color-mix(in oklab, var(--danger) 12%, var(--surface));
   color: var(--text-primary);
   font-size: 14px;
+}
+
+/* Phones only (UIA-315): "‹ 2 of 4 ›" above the Review card. */
+.df-rnav {
+  display: none;
 }
 
 .df-review-queue {
@@ -11738,6 +11820,35 @@ dialog.ui-dialog.df-palette {
     order: -1;
   }
 
+  .df-rnav {
+    display: flex;
+    /* Above the card (which comes first on phones), as its own row: the card keeps its origin. */
+    order: -2;
+    align-items: center;
+    justify-content: space-between;
+  }
+
+  .df-rnav-btn {
+    display: grid;
+    width: 44px;
+    height: 44px;
+    place-items: center;
+    border: 0;
+    border-radius: 999px;
+    background: var(--surface);
+    color: var(--text-primary);
+  }
+
+  .df-rnav-btn:disabled {
+    opacity: 0.5;
+  }
+
+  .df-rnav-pos {
+    color: var(--text-secondary);
+    font-size: 14px;
+    font-weight: 650;
+  }
+
   .df-review-queue {
     max-height: none;
   }
@@ -11977,8 +12088,10 @@ dialog.ui-dialog.df-palette {
   opacity: 0.85;
 }
 
+/* The card's Edit spans the card, as in the prototype (UIA-316). */
 .df-lcard > .df-rbtn {
-  justify-self: start;
+  justify-self: stretch;
+  justify-content: center;
 }
 
 .df-lnew {
@@ -12231,6 +12344,16 @@ dialog.ui-dialog.df-ce-dialog {
   padding: 10px 14px;
 }
 
+.df-place-new .df-srow-text {
+  display: grid;
+  min-width: 0;
+}
+
+.df-place-new .df-srow-text small {
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
 .df-tag-new-field {
   display: flex;
   min-width: min(100%, 220px);
@@ -12401,8 +12524,31 @@ dialog.ui-dialog.df-ce-dialog {
   margin: 0;
 }
 
+/* Settings dialogs (UIA-301): fields stacked full width; the action is in the dialog footer. */
 .df-set-dialog-form {
-  align-items: end;
+  display: grid;
+  gap: 12px;
+}
+
+.df-set-dialog-form .ui-control.is-compact {
+  width: 100%;
+}
+
+.ui-dialog .settings-workspace-actions.df-set-dialog-workspace {
+  min-width: 0;
+  justify-items: stretch;
+}
+
+.df-set-dialog-workspace .settings-workspace-toolbar {
+  justify-content: flex-start;
+}
+
+.df-set-dialog-workspace .settings-workspace-select {
+  flex: 1 1 200px;
+}
+
+.df-set-dialog-workspace .settings-workspace-detail-form {
+  justify-content: flex-start;
 }
 
 .df-settings {

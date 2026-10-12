@@ -207,7 +207,7 @@ export async function emitReviewSemanticSegments(
       notes: overlapsConfirmedTime
         ? `Automatic logging paused because this ${segment.kind === "commute" ? "commute" : "visit"} conflicts with tracked time by more than five minutes. You can still confirm it from Review.`
         : segment.continuityStatus === "uncertain_gap"
-        ? "The boundary includes an evidence gap; inspect the timeline before confirming."
+        ? "The boundary includes an evidence gap; check the Calendar before confirming."
         : "Ordered location evidence supports this suggestion." };
   });
   const eventIds = new Map<string, string>();
