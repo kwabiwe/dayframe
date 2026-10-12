@@ -124,7 +124,8 @@ describe("Live Activity sync", () => {
       "https://dayframe-staging.vercel.app",
       null,
       null,
-      "2026-07-12T06:45:00.000Z"
+      "2026-07-12T06:45:00.000Z",
+      null
     );
   });
 
@@ -368,7 +369,9 @@ describe("Live Activity sync", () => {
       "https://dayframe-staging.vercel.app",
       "Health",
       "#1E9C68",
-      entry.startedAt
+      entry.startedAt,
+      // The light-palette fill, so the Live Activity follows the phone's appearance (UIA-028).
+      "#13804F"
     );
   });
 

@@ -242,7 +242,7 @@ describe("Live Activity durable remote sync", () => {
       id: "entry-1",
       description: "Architecture",
       categoryName: "Work",
-      categoryColor: "#123456",
+      categoryColor: "green",
       startedAt: "2026-08-06T05:00:00.000Z"
     }];
 
@@ -256,7 +256,10 @@ describe("Live Activity durable remote sync", () => {
     expect(JSON.parse(String(outboxWrite?.params[4]))).toMatchObject({
       aps: {
         event: "update",
-        "content-state": { title: "Architecture", isRunning: true, canStop: true }
+        // Both palettes' fills: the Live Activity follows the phone's appearance (UIA-028).
+        "content-state": {
+          title: "Architecture", categoryColor: "#1E9C68", categoryColorLight: "#13804F", isRunning: true, canStop: true
+        }
       }
     });
     expect(result.missingConfiguration).toEqual([

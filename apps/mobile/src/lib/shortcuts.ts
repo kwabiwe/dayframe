@@ -47,6 +47,7 @@ export function syncShortcutCatalog(
       .map((category) => ({
         color: paletteColorFor(category.color, category.name, "dark"),
         id: category.id,
+        lightColor: paletteColorFor(category.color, category.name, "light"),
         name: category.name
       }))
       .filter((category) => category.name.trim().length > 0)
