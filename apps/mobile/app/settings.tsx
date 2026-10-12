@@ -137,12 +137,13 @@ import {
   settingsGeofenceKey
 } from "@/lib/settingsRefresh";
 import { readTodayBootstrapForSettings } from "@/lib/settingsSeed";
-import { beginRememberedSettingsRead, useRememberedSettingsState } from "@/lib/settingsRemembered";
+import { beginRememberedSettingsRead, isRememberedSettingsBindingCurrent, useRememberedSettingsState } from "@/lib/settingsRemembered";
 import {
   recordSettingsLastKnown,
   settingsLocationDisplay,
   shownSyncHelpCounts,
   useSettingsLastKnown,
+  useSettingsLastKnownReady,
   type SettingsLastKnownDisplay
 } from "@/lib/settingsLastKnown";
 import { useContentSizedSheetKeyboard } from "@/lib/contentSizedSheetKeyboard";
@@ -214,6 +215,8 @@ import { healthMappingWriter } from "@/lib/healthMappingOwner";
 
 type Category = MobileBootstrap["categories"][number];
 const GOAL_SAVE_DELAY_MS = 600;
+// A Settings page opened during launch hydration holds its rows out of sight until it settles.
+const HIDDEN_UNTIL_HYDRATED = { opacity: 0 } as const;
 const ACCOUNT_CHANGED_NOTICE = "Your account changed, so nothing was changed.";
 const SIGN_IN_UNREADABLE_NOTICE = "Unlock your iPhone and try again.";
 // D1: the same theme names on iPhone and web.
@@ -459,6 +462,9 @@ export default function SettingsScreen() {
   // the first open after a launch paints at once. DISPLAY ONLY: it feeds the `shown…` values below,
   // which only rows, labels and switch positions read; every action reads the live state instead.
   const lastKnown = useSettingsLastKnown();
+  // Opened while launch hydration is still running (rare: it starts before any screen renders),
+  // the rows wait for it (bounded) and then show once, instead of flipping from empty.
+  const lastKnownReady = useSettingsLastKnownReady();
   const [exportingHealthDebug, setExportingHealthDebug] = useState(false);
   const refreshes = useRef(createOwnerSyncCoalescer<void>());
   // I1: every Settings page paints from its cached snapshot first. Mount-time reads (SQLite and
@@ -597,11 +603,15 @@ export default function SettingsScreen() {
     try {
       const startedFor = await beginRememberedSettingsRead();
       const owner = startedFor.owner;
-      const queued = await readQueue();
-      if (!queueMounted.current || mine !== queueReadSequence.current || !owner) return;
+      if (!owner) return;
+      // This account's queue only (Codex r1 on #365: never whichever account is active by then).
+      const queued = await readQueue(owner);
+      if (!queueMounted.current || mine !== queueReadSequence.current) return;
       const stillOwner = await readActiveMobileAccount();
-      // Re-checked right before publishing: Settings may have closed during the owner read.
+      // Re-checked right before publishing: Settings may have closed during the owner read, and the
+      // read must still belong to the account lifetime and session it started in (A→B→A is not).
       if (!queueMounted.current || !stillOwner || !mobileAccountOwnersEqual(owner, stillOwner) || mine !== queueReadSequence.current) return;
+      if (!isRememberedSettingsBindingCurrent(startedFor)) return;
       setQueueAndCache(queued);
       setQueueKnown(true);
       const counts = getQueueDiagnostics(queued);
@@ -2070,7 +2080,12 @@ export default function SettingsScreen() {
           />
         }
       >
-        <View style={styles.contentStack}>
+        <View
+          accessibilityElementsHidden={!lastKnownReady}
+          importantForAccessibility={lastKnownReady ? "auto" : "no-hide-descendants"}
+          pointerEvents={lastKnownReady ? "auto" : "none"}
+          style={[styles.contentStack, lastKnownReady ? null : HIDDEN_UNTIL_HYDRATED]}
+        >
           {settingsSection === "index" ? (
             <View style={styles.settingsBlocksStack}>
               <SettingsAccountCard

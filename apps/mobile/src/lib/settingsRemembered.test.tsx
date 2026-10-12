@@ -9,11 +9,14 @@ vi.mock("react", async () => {
 type Owner = { userId: string; workspaceId: string } | null;
 const account = vi.hoisted(() => ({
   owner: { userId: "u1", workspaceId: "w1" } as Owner,
+  // The account lifetime: every activation or removal starts a new one.
+  epoch: 0,
   // An owner the next readActiveMobileAccount loads silently (no notification), as on startup.
   lazy: null as Owner,
   listeners: new Set<() => void>()
 }));
 vi.mock("./mobileAccount", () => ({
+  currentMobileAccountEpoch: () => account.epoch,
   getActiveMobileAccountSnapshot: () => account.owner,
   readActiveMobileAccount: async () => {
     if (account.lazy) {
@@ -56,6 +59,7 @@ const B = { userId: "u2", workspaceId: "w1" };
 function signIn(owner: Owner) {
   session.generation += 1;
   account.owner = owner;
+  account.epoch += 1;
   act(() => {
     for (const listener of [...session.listeners]) listener();
     for (const listener of [...account.listeners]) listener();
@@ -65,6 +69,7 @@ function signIn(owner: Owner) {
 function signOut() {
   session.generation += 1;
   account.owner = null;
+  account.epoch += 1;
   act(() => {
     publishMobileSignedOut();
     for (const listener of [...session.listeners]) listener();
@@ -143,6 +148,27 @@ describe("remembered states belong to the account and session their read started
     const readForFirstA = captureRememberedSettingsBinding();
     signIn(B);
     signIn(A);
+    act(() => seen.set(true, readForFirstA));
+    expect(readRememberedSetting("healthAccessGranted")).toBeUndefined();
+    expect(seen.value).toBeNull();
+    tree.unmount();
+  });
+
+  it("drops a read captured before an A → B → A account replacement in one session (Codex r1 on #365)", () => {
+    signIn(A);
+    const { seen, tree } = mountHook();
+    const readForFirstA = captureRememberedSettingsBinding();
+    // Replacements that keep the session generation: only the account lifetime moves on.
+    const replace = (owner: Owner) => {
+      account.owner = owner;
+      account.epoch += 1;
+      act(() => {
+        for (const listener of [...account.listeners]) listener();
+      });
+    };
+    replace(B);
+    replace(A);
+    expect(writeRememberedSetting("healthAccessGranted", true, readForFirstA)).toBe(false);
     act(() => seen.set(true, readForFirstA));
     expect(readRememberedSetting("healthAccessGranted")).toBeUndefined();
     expect(seen.value).toBeNull();

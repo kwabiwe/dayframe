@@ -51,7 +51,7 @@ describe("Settings' last-known values are display only (A4)", () => {
   it("reads last-known values only in Settings' display layer", () => {
     const readers = sourceFiles(join(mobileRoot, "app"))
       .concat(sourceFiles(join(mobileRoot, "src")))
-      .filter((path) => /useSettingsLastKnown|readSettingsLastKnown/.test(readFileSync(path, "utf8")))
+      .filter((path) => /useSettingsLastKnown\(\)|readSettingsLastKnown\(\)/.test(readFileSync(path, "utf8")))
       .map((path) => relative(mobileRoot, path))
       .sort();
     expect(readers).toEqual(["app/settings.tsx", "src/lib/settingsLastKnown.ts"]);
@@ -60,7 +60,21 @@ describe("Settings' last-known values are display only (A4)", () => {
     expect(settings).toContain("const syncStatus = syncHelpStatus(shownSyncHelpCounts({");
   });
 
-  it("is primed at app start, before Settings opens", () => {
-    expect(layout).toContain("void primeSettingsLastKnown();");
+  it("is primed when the root layout module is evaluated, and Settings never paints mid-hydration", () => {
+    // Module scope, not an effect: it starts before any screen can render (Codex r1 on #365).
+    const prime = layout.indexOf("void primeSettingsLastKnown();");
+    expect(prime).toBeGreaterThan(-1);
+    expect(prime).toBeLessThan(layout.indexOf("export default function RootLayout()"));
+    expect(settings).toContain("const lastKnownReady = useSettingsLastKnownReady();");
+    expect(settings).toContain("style={[styles.contentStack, lastKnownReady ? null : HIDDEN_UNTIL_HYDRATED]}");
+    expect(settings).toContain('importantForAccessibility={lastKnownReady ? "auto" : "no-hide-descendants"}');
+  });
+
+  it("reads the activity queue for the account its read started for (Codex r1 on #365)", () => {
+    const refresh = functionBody("async function refreshQueueLatest()");
+    expect(refresh).toContain("const queued = await readQueue(owner);");
+    expect(refresh).toContain("if (!isRememberedSettingsBindingCurrent(startedFor)) return;");
+    expect(refresh.indexOf("if (!isRememberedSettingsBindingCurrent(startedFor)) return;"))
+      .toBeLessThan(refresh.indexOf("setQueueAndCache(queued);"));
   });
 });

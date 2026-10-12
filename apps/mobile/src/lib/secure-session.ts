@@ -251,6 +251,15 @@ export async function bindAuthenticatedSessionOwner(
   });
 }
 
+/**
+ * The owner of the session this process has loaded, without touching the Keychain: undefined until
+ * it has been read, null when signed out or not yet bound to an account (a legacy token).
+ */
+export function peekAuthenticatedSessionOwner(): MobileAccountOwner | null | undefined {
+  if (cachedSession === undefined) return undefined;
+  return cachedSession?.owner ?? null;
+}
+
 /** Bumped by every sign-in, sign-out and invalidation; a recovery is bound to the one it saw. */
 export function currentSessionGeneration() {
   return sessionRevision;

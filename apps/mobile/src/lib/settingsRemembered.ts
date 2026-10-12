@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState, type SetStateAction } from "react";
 import {
+  currentMobileAccountEpoch,
   getActiveMobileAccountSnapshot,
   readActiveMobileAccount,
   subscribeActiveMobileAccount,
@@ -12,7 +13,8 @@ import { currentSessionGeneration, subscribeAuthenticatedSession } from "./secur
  * Last-known values of states each Settings page reads after it opens (permissions, Apple Health
  * access, the evening reminder, sync diagnostics), so a newly pushed page starts from them instead
  * of empty and nothing visibly flips on open (owner, 12 Oct). In memory, dropped on sign-out,
- * and bound to one account (user and workspace) in one authenticated session
+ * and bound to one account (user and workspace) in one account lifetime (`currentMobileAccountEpoch`,
+ * advanced by every activation or removal, so A→B→A is a new lifetime) and one authenticated session
  * (`currentSessionGeneration`, bumped by every sign-in, sign-out and invalidation): a value is only
  * handed out to that same account in that same session, and a late result that started in an
  * earlier account or session never lands (Codex r1–r3 on #355). Every read is bound to the account
@@ -23,6 +25,8 @@ import { currentSessionGeneration, subscribeAuthenticatedSession } from "./secur
  */
 export type RememberedSettingsBinding = {
   generation: number;
+  /** The account lifetime (`currentMobileAccountEpoch`): A→B→A starts a new one. */
+  accountEpoch: number;
   /** The account a read is for: account-scoped stores are read for exactly this owner. */
   owner: MobileAccountOwner | null;
   ownerKey: string | null;
@@ -35,6 +39,7 @@ export function captureRememberedSettingsBinding(): RememberedSettingsBinding {
   const owner = getActiveMobileAccountSnapshot();
   return {
     generation: currentSessionGeneration(),
+    accountEpoch: currentMobileAccountEpoch(),
     owner: owner ? { userId: owner.userId, workspaceId: owner.workspaceId } : null,
     ownerKey: owner ? `${owner.userId}:${owner.workspaceId}` : null
   };
@@ -45,7 +50,7 @@ export function sameRememberedSettingsBinding(left: RememberedSettingsBinding, r
 }
 
 function sameBinding(left: RememberedSettingsBinding, right: RememberedSettingsBinding) {
-  return left.ownerKey === right.ownerKey && left.generation === right.generation;
+  return left.ownerKey === right.ownerKey && left.generation === right.generation && left.accountEpoch === right.accountEpoch;
 }
 
 /**

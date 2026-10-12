@@ -7,6 +7,8 @@ const disk = vi.hoisted(() => ({
   heldReads: new Map<string, Promise<void>>()
 }));
 const keychain = vi.hoisted(() => new Map<string, string>());
+// A locked iPhone: Keychain reads fail as iOS reports it.
+const keychainState = vi.hoisted(() => ({ locked: false }));
 
 vi.mock("react", async () => {
   // @ts-expect-error Renderer peer lives at the repository root.
@@ -34,7 +36,10 @@ vi.mock("@react-native-async-storage/async-storage", () => ({
 
 vi.mock("expo-secure-store", () => ({
   AFTER_FIRST_UNLOCK_THIS_DEVICE_ONLY: 1,
-  getItemAsync: async (key: string) => keychain.get(key) ?? null,
+  getItemAsync: async (key: string) => {
+    if (keychainState.locked) throw new Error("User interaction is not allowed.");
+    return keychain.get(key) ?? null;
+  },
   setItemAsync: async (key: string, value: string) => {
     keychain.set(key, value);
   },
@@ -144,6 +149,7 @@ beforeEach(() => {
   disk.values.clear();
   disk.heldReads.clear();
   keychain.clear();
+  keychainState.locked = false;
 });
 
 afterEach(() => {
@@ -187,7 +193,8 @@ describe("Settings' last-known values on the device (A4)", () => {
     let release!: () => void;
     disk.heldReads.set(storedKeys()[0], new Promise<void>((resolve) => { release = resolve; }));
     const priming = app.lastKnown.primeSettingsLastKnown();
-    // A live read lands while the stored payload is still being read.
+    // A live read lands while the stored payload is still being read (the session is loaded by then).
+    await app.session.readAuthenticatedSessionSnapshot();
     const binding = await app.remembered.beginRememberedSettingsRead();
     app.remembered.writeRememberedSetting("motionFitnessStatus", "authorized", binding);
     release();
@@ -449,5 +456,206 @@ describe("Settings' last-known values on the device (A4)", () => {
     }
     // Nothing reached the Keychain from here: only the session token lives there.
     expect([...keychain.keys()].every((key) => key.startsWith("dayframe.localSessionToken"))).toBe(true);
+  });
+});
+
+describe("Codex r1 on #365: ownership, account lifetimes, renewal and first-frame hydration", () => {
+  it("never shows A's stored values to a restored session of B (interrupted replacement)", async () => {
+    await persistFor(A, { healthAccessGranted: true, activities: { count: 7, pinned: 3 } });
+    // B's sign-in wrote its session, then the app ended before anything else ran (A's account and
+    // stored values are still on the device).
+    const storedA = new Map(disk.values);
+    const interrupted = await launch();
+    await interrupted.session.setSessionToken("token-b", B);
+    for (const [key, value] of storedA) disk.values.set(key, value);
+    expect(storedPayload(A)?.values).toEqual({ healthAccessGranted: true, activities: { count: 7, pinned: 3 } });
+    const app = await launch();
+    expect(await app.account.readActiveMobileAccount()).toEqual(A);
+    const session = await app.session.readAuthenticatedSessionSnapshot();
+    expect(session).toMatchObject({ status: "authenticated", snapshot: { owner: B } });
+    await app.lastKnown.primeSettingsLastKnown();
+    await app.settle();
+    const page = app.mount();
+    expect(app.lastKnown.readSettingsLastKnown()).toBeNull();
+    expect(page.renders.every((value) => value === null)).toBe(true);
+    // A write bound to A while B's session is loaded records nothing either.
+    expect(app.lastKnown.recordSettingsLastKnown({ placesCount: 1 }, app.remembered.captureRememberedSettingsBinding())).toBe(false);
+    // B's bootstrap then activates B: A's values are cleared, never shown.
+    await app.account.activateMobileAccount(B);
+    await app.settle();
+    expect(app.lastKnown.readSettingsLastKnown()).toBeNull();
+    expect(storedPayload(A)).toBeNull();
+    page.unmount();
+  });
+
+  it("keeps the stored values but shows nothing while the Keychain can't be read", async () => {
+    await persistFor(A, { healthAccessGranted: true });
+    const app = await launch();
+    keychainState.locked = true;
+    await app.lastKnown.primeSettingsLastKnown();
+    await app.settle();
+    expect(app.lastKnown.readSettingsLastKnown()).toBeNull();
+    expect(storedPayload(A)?.values).toEqual({ healthAccessGranted: true });
+    // Once the session is read and proves to be A's, they show.
+    keychainState.locked = false;
+    await app.session.readAuthenticatedSessionSnapshot();
+    expect(app.lastKnown.readSettingsLastKnown()).toEqual({ healthAccessGranted: true });
+  });
+
+  it("rejects a read captured before an A→B→A replacement", async () => {
+    const app = await launch();
+    await app.signIn(A);
+    const oldRead = await app.remembered.beginRememberedSettingsRead();
+    await app.account.activateMobileAccount(B);
+    await app.account.activateMobileAccount(A);
+    await app.settle();
+    expect(app.lastKnown.recordSettingsLastKnown({ healthAccessGranted: true }, oldRead)).toBe(false);
+    expect(storedKeys()).toEqual([]);
+  });
+
+  it("keeps the values through a same-account session renewal and fences the old session's work", async () => {
+    const app = await persistFor(A, { healthAccessGranted: true });
+    const readBeforeRenewal = await app.remembered.beginRememberedSettingsRead();
+    await app.session.setSessionToken("refreshed-token-a", A);
+    await app.settle();
+    expect(app.lastKnown.readSettingsLastKnown()).toEqual({ healthAccessGranted: true });
+    expect(storedPayload(A)?.values).toEqual({ healthAccessGranted: true });
+    // Work started in the previous session never lands.
+    expect(app.lastKnown.recordSettingsLastKnown({ placesCount: 5 }, readBeforeRenewal)).toBe(false);
+    // Work in the renewed session does.
+    await app.remember("motionFitnessStatus", "authorized");
+    expect(storedPayload(A)?.values).toEqual({ healthAccessGranted: true, motionFitnessStatus: "authorized" });
+  });
+
+  it("still clears when a different account's session replaces the active one", async () => {
+    const app = await persistFor(A, { healthAccessGranted: true });
+    await app.session.setSessionToken("token-b", B);
+    await app.settle();
+    expect(app.lastKnown.readSettingsLastKnown()).toBeNull();
+    expect(storedKeys()).toEqual([]);
+  });
+
+  it("keeps the values through a restored same-account launch, owner binding and bootstrap activation", async () => {
+    await persistFor(A, { healthAccessGranted: true });
+    const app = await launch();
+    const session = await app.session.readAuthenticatedSessionSnapshot();
+    expect(session).toMatchObject({ status: "authenticated", snapshot: { owner: A } });
+    await app.lastKnown.primeSettingsLastKnown();
+    if (session.status === "authenticated") await app.session.bindAuthenticatedSessionOwner(session.snapshot, A);
+    await app.account.activateMobileAccount(A);
+    await app.settle();
+    expect(app.lastKnown.readSettingsLastKnown()).toEqual({ healthAccessGranted: true });
+    expect(storedPayload(A)?.values).toEqual({ healthAccessGranted: true });
+  });
+
+  /** A Settings page: what it would show on each render (nothing while it holds its rows). */
+  function mountSettingsPage(app: Awaited<ReturnType<typeof launch>>, waitMs?: number) {
+    const shown: Array<{ ready: boolean; values: ReturnType<typeof app.lastKnown.readSettingsLastKnown> }> = [];
+    function Page() {
+      const values = app.lastKnown.useSettingsLastKnown();
+      const ready = app.lastKnown.useSettingsLastKnownReady(waitMs);
+      shown.push({ ready, values });
+      return null;
+    }
+    let tree!: import("react-test-renderer").ReactTestRenderer;
+    app.renderer.act(() => {
+      tree = app.renderer.create(app.react.createElement(Page));
+    });
+    return { shown, visible: () => shown.filter((render) => render.ready).map((render) => render.values), unmount: () => app.renderer.act(() => tree.unmount()) };
+  }
+
+  it("mounted during launch hydration, Settings holds its rows and then shows the stored values once (no flip)", async () => {
+    await persistFor(A, { healthAccessGranted: true, motionFitnessStatus: "authorized" });
+    let release!: () => void;
+    disk.heldReads.set(storedKeys()[0], new Promise<void>((resolve) => { release = resolve; }));
+    const app = await launch();
+    // The root layout starts hydration when its module is evaluated...
+    const priming = app.lastKnown.primeSettingsLastKnown();
+    expect(app.lastKnown.isSettingsLastKnownSettled()).toBe(false);
+    // ...and a deep link opens Settings before the stored read returns.
+    const page = mountSettingsPage(app);
+    expect(page.shown[0]).toEqual({ ready: false, values: null });
+    await app.renderer.act(async () => {
+      release();
+      await priming;
+      await app.settle();
+    });
+    const visible = page.visible();
+    expect(visible.length).toBeGreaterThan(0);
+    // Every render the user could see shows the stored values: never empty first.
+    expect(visible.every((values) => JSON.stringify(values) === JSON.stringify({ healthAccessGranted: true, motionFitnessStatus: "authorized" }))).toBe(true);
+    page.unmount();
+  });
+
+  it("opened after hydration, Settings is ready with the stored values on its first render", async () => {
+    await persistFor(A, { healthAccessGranted: true });
+    const app = await launch();
+    await app.lastKnown.primeSettingsLastKnown();
+    await app.settle();
+    const page = mountSettingsPage(app);
+    expect(page.shown[0]).toEqual({ ready: true, values: { healthAccessGranted: true } });
+    page.unmount();
+  });
+
+  it("does not hold Settings for longer than the bound when hydration stalls", async () => {
+    await persistFor(A, { healthAccessGranted: true });
+    disk.heldReads.set(storedKeys()[0], new Promise<void>(() => undefined));
+    const app = await launch();
+    void app.lastKnown.primeSettingsLastKnown();
+    const page = mountSettingsPage(app, 20);
+    expect(page.shown[0].ready).toBe(false);
+    await app.renderer.act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 40));
+    });
+    expect(page.shown.at(-1)?.ready).toBe(true);
+    page.unmount();
+  });
+
+  it("Settings' queue read never stores another account's counts after an A→B→A race", async () => {
+    const app = await launch();
+    await app.signIn(A);
+    const { readFileSync } = await import("node:fs");
+    const { resolve } = await import("node:path");
+    const source = readFileSync(resolve(__dirname, "../../app/settings.tsx"), "utf8");
+    const start = source.indexOf("  async function refreshQueueLatest() {");
+    const body = source.slice(start, source.indexOf("\n  const load =", start));
+    const create = new Function(
+      "beginRememberedSettingsRead", "readQueue", "readActiveMobileAccount", "mobileAccountOwnersEqual",
+      "isRememberedSettingsBindingCurrent", "setQueueAndCache", "setQueueKnown", "getQueueDiagnostics",
+      "recordSettingsLastKnown", "queueMounted", "queueReadSequence",
+      `${body}; return refreshQueueLatest;`
+    );
+    const readOwners: unknown[] = [];
+    const published: unknown[] = [];
+    const refresh = create(
+      async () => {
+        const startedFor = await app.remembered.beginRememberedSettingsRead();
+        // A replacement commits right after the read was bound to A.
+        await app.account.activateMobileAccount(B);
+        return startedFor;
+      },
+      async (owner: unknown) => {
+        readOwners.push(owner);
+        // A second replacement brings A back while the read is in flight.
+        await app.account.activateMobileAccount(A);
+        return [{ id: "q1" }, { id: "q2" }];
+      },
+      app.account.readActiveMobileAccount,
+      app.account.mobileAccountOwnersEqual,
+      app.remembered.isRememberedSettingsBindingCurrent,
+      (queue: unknown) => published.push(queue),
+      () => undefined,
+      (items: unknown[]) => ({ queuedCount: items.length, permanentFailedCount: 0 }),
+      app.lastKnown.recordSettingsLastKnown,
+      { current: true },
+      { current: 0 }
+    );
+    await refresh();
+    await app.settle();
+    // The queue was read for A (the account the read started for), not the active B...
+    expect(readOwners).toEqual([A]);
+    // ...and nothing from that earlier A lifetime reached the screen or the device.
+    expect(published).toEqual([]);
+    expect(storedPayload(A)).toBeNull();
   });
 });

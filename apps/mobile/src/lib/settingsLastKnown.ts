@@ -1,20 +1,27 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import { useEffect, useSyncExternalStore } from "react";
+import { useEffect, useState, useSyncExternalStore } from "react";
 import { HEALTH_IMPORT_PREFERENCE_OPTIONS, type HealthImportPreferenceKey } from "@dayframe/shared";
 import type { DayframeMotionAuthorizationStatus } from "../../modules/dayframe-motion-activity";
 import { DAYFRAME_API_BASE } from "./config";
 import type { LocationPermissionLabel, LocationVisitDiagnostics } from "./geofence";
 import {
   getActiveMobileAccountSnapshot,
+  mobileAccountOwnersEqual,
   subscribeActiveMobileAccount,
   type MobileAccountOwner
 } from "./mobileAccount";
 import { subscribeMobileSignedOut } from "./mobileSessionTransition";
 import { REVIEW_NUDGE_MINUTES } from "./reviewNudge";
 import type { ReviewNudgePermission } from "./reviewNudgeNative";
-import { currentSessionGeneration, subscribeAuthenticatedSession } from "./secure-session";
+import {
+  currentSessionGeneration,
+  peekAuthenticatedSessionOwner,
+  readAuthenticatedSessionSnapshot,
+  subscribeAuthenticatedSession
+} from "./secure-session";
 import {
   beginRememberedSettingsRead,
+  captureRememberedSettingsBinding,
   isRememberedSettingsBindingCurrent,
   sameRememberedSettingsBinding,
   subscribeRememberedSettingWrites,
@@ -35,12 +42,14 @@ import {
  *   schema version. Never tokens, coordinates, place names, entry or item IDs or free text: every
  *   write and every read goes through `sanitizeSettingsLastKnown`, which rebuilds the value from an
  *   allow-list.
- * - Bound like the remembered values: a value is handed out only to the account and authenticated
- *   session (`currentSessionGeneration`) it is held for, and a read or write started for another
- *   account or session never lands (late launch reads included).
- * - Cleared, in memory and on disk, on sign-out, on any new authenticated session (every sign-in,
- *   sign-out and invalidation bumps the generation) and when the active account or workspace is
- *   replaced; values survive only an app relaunch of the same signed-in account.
+ * - Bound like the remembered values: a value is handed out only to the account lifetime
+ *   (`currentMobileAccountEpoch`) and authenticated session (`currentSessionGeneration`) it is held
+ *   for, and a read or write started in another never lands (late launch reads and A→B→A included).
+ * - Shown and recorded only while the restored session is proven to be that account's
+ *   (`peekAuthenticatedSessionOwner`): the active account alone is not proof (Codex r1 on #365).
+ * - Cleared, in memory and on disk, on sign-out, on any new session other than the active account's
+ *   own renewal, and when the active account or workspace is replaced; a same-account renewal keeps
+ *   them (rebound to the new session). Values otherwise survive only an app relaunch.
  * - A corrupt, foreign or old-schema payload is ignored (and removed).
  * - Display only: `SettingsLastKnownDisplay` is read through `useSettingsLastKnown` by the Settings
  *   display layer. Actions never read it; they keep reading the live permission and state.
@@ -306,12 +315,17 @@ type HeldValues = {
   primed: boolean;
 };
 
+/** How long a Settings page opened during launch hydration holds its rows before showing them. */
+export const SETTINGS_LAST_KNOWN_FIRST_PAINT_WAIT_MS = 300;
+
 let held: HeldValues | null = null;
-/** Bumped by every clear: storage work started before it never writes or publishes. */
+/** Bumped by every clear and renewal: storage work started before it never writes or publishes. */
 let epoch = 0;
 let storageTail: Promise<void> = Promise.resolve();
 let persistQueued = false;
 let emitQueued = false;
+/** Primes still running; Settings opened meanwhile waits (bounded) before its first paint. */
+let primesInFlight = 0;
 const listeners = new Set<() => void>();
 let observedOwnerKey: string | null | undefined;
 let observedGeneration = currentSessionGeneration();
@@ -338,13 +352,31 @@ function scheduleEmit() {
   void Promise.resolve().then(emit);
 }
 
-function heldIsCurrent(target: HeldValues) {
-  return isRememberedSettingsBindingCurrent(target.binding);
+/**
+ * Whether the authenticated session this process has loaded belongs to `owner` (Codex r1 on #365:
+ * the active account alone is not proof; an interrupted replacement can leave account A active with
+ * B's session). Undefined (Keychain not read yet or unavailable) and unbound sessions prove nothing.
+ */
+function sessionBelongsTo(owner: MobileAccountOwner) {
+  const sessionOwner = peekAuthenticatedSessionOwner();
+  return Boolean(sessionOwner) && mobileAccountOwnersEqual(sessionOwner, owner);
 }
 
-/** This account's last-known values in this session, or null when there are none. Display only. */
+function heldIsCurrent(target: HeldValues) {
+  return isRememberedSettingsBindingCurrent(target.binding) && sessionBelongsTo(target.binding.owner);
+}
+
+/**
+ * This account's last-known values in this account lifetime and session, or null when there are
+ * none or the restored session is not proven to be this account's. Display only.
+ */
 export function readSettingsLastKnown(): SettingsLastKnownDisplay | null {
   return held && heldIsCurrent(held) && Object.keys(held.values).length > 0 ? held.values : null;
+}
+
+/** False while a launch (or account) hydration read is still running. */
+export function isSettingsLastKnownSettled() {
+  return primesInFlight === 0;
 }
 
 function schedulePersist() {
@@ -364,16 +396,21 @@ function schedulePersist() {
   });
 }
 
+function heldBinding(binding: RememberedSettingsBinding, owner: MobileAccountOwner, ownerKey: string): HeldValues["binding"] {
+  return { generation: binding.generation, accountEpoch: binding.accountEpoch, owner, ownerKey };
+}
+
 /**
- * Records display values for the account and session `binding` was taken in (a read's
- * `beginRememberedSettingsRead`); a binding that is no longer current records nothing.
+ * Records display values for the account lifetime and session `binding` was taken in (a read's
+ * `beginRememberedSettingsRead`), and only while the loaded session is that account's; anything
+ * else records nothing.
  */
 export function recordSettingsLastKnown(patch: SettingsLastKnownDisplay, binding: RememberedSettingsBinding) {
   const owner = binding.owner;
-  if (!owner || binding.ownerKey === null || !isRememberedSettingsBindingCurrent(binding)) return false;
+  if (!owner || binding.ownerKey === null || !isRememberedSettingsBindingCurrent(binding) || !sessionBelongsTo(owner)) return false;
   const clean = sanitizeSettingsLastKnown(patch);
   if (Object.keys(clean).length === 0) return false;
-  const target: HeldValues["binding"] = { generation: binding.generation, owner, ownerKey: binding.ownerKey };
+  const target = heldBinding(binding, owner, binding.ownerKey);
   if (!held || !sameRememberedSettingsBinding(held.binding, target)) held = { binding: target, values: {}, primed: false };
   const values = mergeSettingsLastKnown(held.values, clean);
   if (JSON.stringify(values) === JSON.stringify(held.values)) return true;
@@ -384,18 +421,40 @@ export function recordSettingsLastKnown(patch: SettingsLastKnownDisplay, binding
 }
 
 /**
- * Reads this account's stored values into memory (app start, a new active account, and Settings'
- * first render as a fallback), so Settings can paint them on its first frame. Bound to the account
- * and session it started in: a read that finishes after a switch, sign-out or new sign-in never
- * lands. Also removes any other account's or schema's leftovers.
+ * Reads this account's stored values into memory, so Settings can paint them on its first frame.
+ * Started when the root layout module is evaluated (before any screen renders), again when a new
+ * account becomes active or a session is renewed, and on Settings' first render as a fallback.
+ * Bound to the account lifetime and session it started in: a read that finishes after a switch,
+ * sign-out or new sign-in never lands. The stored values are read only once the restored session
+ * is proven to be this account's; when the Keychain can't be read yet they are held but not shown
+ * until it can. Also removes any other account's or schema's leftovers.
  */
-export async function primeSettingsLastKnown() {
+export function primeSettingsLastKnown(): Promise<void> {
+  const now = captureRememberedSettingsBinding();
+  if (held?.primed && sameRememberedSettingsBinding(held.binding, now) && sessionBelongsTo(held.binding.owner)) {
+    return Promise.resolve();
+  }
+  primesInFlight += 1;
+  return primeUnsafe().finally(() => {
+    primesInFlight -= 1;
+    scheduleEmit();
+  });
+}
+
+async function primeUnsafe() {
   const startedIn = epoch;
   const binding = await beginRememberedSettingsRead();
   const owner = binding.owner;
   if (observedOwnerKey === undefined) observedOwnerKey = binding.ownerKey;
   if (!owner || binding.ownerKey === null) return;
+  const ownerKey = binding.ownerKey;
   if (held?.primed && sameRememberedSettingsBinding(held.binding, binding)) return;
+  // Who owns the restored session? Another account's session never reads this account's values.
+  // A Keychain that can't be read yet (locked) proves nothing either way: the values are held and
+  // shown once the session is read (sessionBelongsTo), never before.
+  const session = await readAuthenticatedSessionSnapshot().catch(() => null);
+  if (session?.status === "signed_out" || session?.status === "changed") return;
+  if (session?.status === "authenticated" && session.snapshot.owner && !mobileAccountOwnersEqual(session.snapshot.owner, owner)) return;
   await withStorage(async () => {
     if (startedIn !== epoch || !isRememberedSettingsBindingCurrent(binding)) return;
     const key = settingsLastKnownStorageKey(owner);
@@ -406,11 +465,7 @@ export async function primeSettingsLastKnown() {
     const stored = parseSettingsLastKnown(raw, owner);
     // Values that landed during the read are newer than the stored ones.
     const pending = held && sameRememberedSettingsBinding(held.binding, binding) ? held.values : {};
-    held = {
-      binding: { generation: binding.generation, owner, ownerKey: binding.ownerKey! },
-      values: mergeSettingsLastKnown(stored ?? {}, pending),
-      primed: true
-    };
+    held = { binding: heldBinding(binding, owner, ownerKey), values: mergeSettingsLastKnown(stored ?? {}, pending), primed: true };
     scheduleEmit();
     if (Object.keys(pending).length > 0) schedulePersist();
     // A corrupt, foreign or old-schema payload is ignored and dropped, as is anything left by
@@ -460,17 +515,63 @@ export function useSettingsLastKnown(): SettingsLastKnownDisplay | null {
   return values;
 }
 
+/**
+ * Whether a Settings page may show its rows (Codex r1 on #365: first-frame hydration must be
+ * deterministic). Hydration starts when the root layout module is evaluated, so a page opened by
+ * the user finds it settled and is ready on its first render. A page that mounts while it is still
+ * running (a deep link at launch) holds its rows hidden — no row shows a placeholder that then
+ * flips — until it settles or `waitMs` passes, then shows them once. It never goes back to hidden.
+ */
+export function useSettingsLastKnownReady(waitMs = SETTINGS_LAST_KNOWN_FIRST_PAINT_WAIT_MS) {
+  const [ready, setReady] = useState(isSettingsLastKnownSettled);
+  useEffect(() => {
+    if (ready) return;
+    const done = () => setReady(true);
+    const timer = setTimeout(done, waitMs);
+    const listener = () => {
+      if (isSettingsLastKnownSettled()) done();
+    };
+    listeners.add(listener);
+    listener();
+    return () => {
+      clearTimeout(timer);
+      listeners.delete(listener);
+    };
+  }, [ready, waitMs]);
+  return ready;
+}
+
 // Sign-out (every path publishes it) clears everything.
 subscribeMobileSignedOut(() => {
   void clearSettingsLastKnown();
 });
 
-// Every sign-in, sign-out and invalidation is a new authenticated lifetime: nothing carries over.
+// A new authenticated session. Renewing the same account's session (a new token for the account
+// that is already active) is not a sign-out (mobile-permissions: same-owner refresh): its values
+// stay, rebound to the new session, while work started in the old one stays fenced (its bindings
+// carry the old generation, and the storage epoch moves on). Any other new session — a sign-in
+// after a sign-out, another account's token, a sign-out or invalidation — clears.
 subscribeAuthenticatedSession(() => {
   const generation = currentSessionGeneration();
   if (generation === observedGeneration) return;
   observedGeneration = generation;
-  void clearSettingsLastKnown();
+  const sessionOwner = peekAuthenticatedSessionOwner();
+  const activeOwner = getActiveMobileAccountSnapshot();
+  const renewal = Boolean(sessionOwner) && Boolean(activeOwner) && mobileAccountOwnersEqual(sessionOwner, activeOwner) &&
+    (!held || mobileAccountOwnersEqual(held.binding.owner, sessionOwner));
+  if (!renewal) {
+    void clearSettingsLastKnown();
+    return;
+  }
+  epoch += 1;
+  persistQueued = false;
+  if (held) {
+    // Only the session moves on; the account lifetime must still be the one the values belong to.
+    held = { ...held, binding: { ...held.binding, generation } };
+    scheduleEmit();
+    if (held.primed) schedulePersist();
+  }
+  if (!held?.primed) void primeSettingsLastKnown();
 });
 
 // Account or workspace replacement (or the account leaving) clears; a newly known account primes.
@@ -497,6 +598,7 @@ export function __resetSettingsLastKnownForTests() {
   storageTail = Promise.resolve();
   persistQueued = false;
   emitQueued = false;
+  primesInFlight = 0;
   listeners.clear();
   observedOwnerKey = undefined;
   observedGeneration = currentSessionGeneration();
