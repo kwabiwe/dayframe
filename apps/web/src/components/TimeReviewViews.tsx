@@ -909,7 +909,9 @@ export function CalendarReview({
     let finalDraft: CalendarResizeDraft | null = null;
     let hasStartedResize = false;
 
-    event.currentTarget.setPointerCapture(event.pointerId);
+    const handle = event.currentTarget;
+    const resizePointerId = event.pointerId;
+    handle.setPointerCapture(resizePointerId);
 
     const updateDraft = (clientY: number) => {
       const relativeY = clientY - columnRect.top;
@@ -926,7 +928,10 @@ export function CalendarReview({
       };
       setResizeDraft(finalDraft);
       const edgeMinutes = edge === "start" ? nextStartMinutes : nextEndMinutes;
-      const durationSeconds = Math.max(0, (nextEndMinutes - nextStartMinutes) * 60);
+      const durationSeconds = Math.max(
+        0,
+        Math.round((new Date(finalDraft.stoppedAt).getTime() - new Date(finalDraft.startedAt).getTime()) / 1_000)
+      );
       setResizeTip({
         label: `${formatCalendarAxisMinutes(edgeMinutes)} · ${formatDuration(durationSeconds)}`,
         x: lastClientX + 14,
@@ -956,9 +961,14 @@ export function CalendarReview({
       window.removeEventListener("pointerup", stopResize);
       window.removeEventListener("pointercancel", cancelResize);
       window.removeEventListener("keydown", escapeResize, true);
+      handle.removeEventListener("lostpointercapture", lostResize);
+      if (handle.hasPointerCapture?.(resizePointerId)) handle.releasePointerCapture(resizePointerId);
       setResizingId(null);
       setResizeDraft(null);
       setResizeTip(null);
+    };
+    const lostResize = (lostEvent: PointerEvent) => {
+      if (lostEvent.pointerId === resizePointerId) cancelResize();
     };
     const escapeResize = (keyEvent: KeyboardEvent) => {
       if (keyEvent.key !== "Escape") return;
@@ -971,6 +981,7 @@ export function CalendarReview({
       window.removeEventListener("pointerup", stopResize);
       window.removeEventListener("pointercancel", cancelResize);
       window.removeEventListener("keydown", escapeResize, true);
+      handle.removeEventListener("lostpointercapture", lostResize);
       setResizingId(null);
       setResizeTip(null);
 
@@ -992,6 +1003,7 @@ export function CalendarReview({
     window.addEventListener("pointerup", stopResize, { once: true });
     window.addEventListener("pointercancel", cancelResize, { once: true });
     window.addEventListener("keydown", escapeResize, true);
+    handle.addEventListener("lostpointercapture", lostResize);
   }
 
   function startCalendarCreatePointer(
@@ -1032,6 +1044,11 @@ export function CalendarReview({
     const sequence = createPointerSequenceRef.current;
     if (!sequence || sequence.pointerId !== event.pointerId) return;
     const dayBodyTop = event.currentTarget.getBoundingClientRect().top;
+    if (!createDragRef.current && dayBodyPointHitsSemanticBlock(event.currentTarget, sequence.clientX, sequence.clientY)) {
+      // A press inside a block's semantic time (including its visual gap) never starts a create drag.
+      createPointerSequenceRef.current = null;
+      return;
+    }
     const axis = { endHour: calendarHours.endHour, rowHeight, startHour: calendarHours.startHour };
     let drag = createDragRef.current;
     if (!drag) {
@@ -1122,25 +1139,7 @@ export function CalendarReview({
     if (!accepted) return;
 
     const dayBodyRect = dayBody.getBoundingClientRect();
-    const semanticBlocks = Array.from(
-      dayBody.querySelectorAll<HTMLElement>("[data-calendar-block-key]")
-    ).map((block) => {
-      const rect = block.getBoundingClientRect();
-      return {
-        height: Number(block.dataset.calendarSemanticHeight),
-        left: rect.left,
-        right: rect.right,
-        top: Number(block.dataset.calendarSemanticTop)
-      };
-    }).filter((block) => Number.isFinite(block.top) && Number.isFinite(block.height));
-    if (calendarPointHitsSemanticBlock({
-      blocks: semanticBlocks,
-      clientX: event.clientX,
-      clientY: event.clientY,
-      dayBodyTop: dayBodyRect.top
-    })) {
-      return;
-    }
+    if (dayBodyPointHitsSemanticBlock(dayBody, event.clientX, event.clientY)) return;
 
     const slot = calculateCalendarClickCreateSlot({
       clientY: event.clientY,
@@ -1830,6 +1829,26 @@ function calendarDurationSeconds(
 
 function formatCalendarWeekday(day: Date) {
   return new Intl.DateTimeFormat("en-GB", { weekday: "short" }).format(day);
+}
+
+function dayBodyPointHitsSemanticBlock(dayBody: HTMLElement, clientX: number, clientY: number) {
+  const blocks = Array.from(
+    dayBody.querySelectorAll<HTMLElement>("[data-calendar-block-key]")
+  ).map((block) => {
+    const rect = block.getBoundingClientRect();
+    return {
+      height: Number(block.dataset.calendarSemanticHeight),
+      left: rect.left,
+      right: rect.right,
+      top: Number(block.dataset.calendarSemanticTop)
+    };
+  }).filter((block) => Number.isFinite(block.top) && Number.isFinite(block.height));
+  return calendarPointHitsSemanticBlock({
+    blocks,
+    clientX,
+    clientY,
+    dayBodyTop: dayBody.getBoundingClientRect().top
+  });
 }
 
 function minutesFromDate(date: Date) {

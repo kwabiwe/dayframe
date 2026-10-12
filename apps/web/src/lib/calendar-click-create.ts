@@ -210,7 +210,7 @@ export function isEligibleCalendarCreatePointer({
 }) {
   return (
     button === 0 &&
-    pointerType === "mouse" &&
+    (pointerType === "mouse" || pointerType === "pen") &&
     isPrimary &&
     !ctrlKey &&
     !defaultPrevented &&

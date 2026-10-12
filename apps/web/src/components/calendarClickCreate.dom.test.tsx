@@ -30,6 +30,29 @@ const { CalendarReview } = await import("./TimeReviewViews");
 let anchorIsOffscreen = false;
 let pointTarget: Element | null = null;
 const capturedPointers = new WeakMap<Element, Set<number>>();
+const outsidePointerListeners = new Set<EventListenerOrEventListenerObject>();
+const nativeDocumentAdd = Document.prototype.addEventListener;
+const nativeDocumentRemove = Document.prototype.removeEventListener;
+const isCapture = (options?: boolean | AddEventListenerOptions | EventListenerOptions) =>
+  options === true || (typeof options === "object" && Boolean(options.capture));
+Document.prototype.addEventListener = function addEventListener(
+  this: Document,
+  type: string,
+  listener: EventListenerOrEventListenerObject | null,
+  options?: boolean | AddEventListenerOptions
+) {
+  if (type === "pointerdown" && listener && isCapture(options)) outsidePointerListeners.add(listener);
+  return nativeDocumentAdd.call(this, type, listener as EventListenerOrEventListenerObject, options);
+};
+Document.prototype.removeEventListener = function removeEventListener(
+  this: Document,
+  type: string,
+  listener: EventListenerOrEventListenerObject | null,
+  options?: boolean | EventListenerOptions
+) {
+  if (type === "pointerdown" && listener && isCapture(options)) outsidePointerListeners.delete(listener);
+  return nativeDocumentRemove.call(this, type, listener as EventListenerOrEventListenerObject, options);
+};
 
 describe("Calendar click-to-create DOM interactions", () => {
   beforeEach(() => {
@@ -44,7 +67,10 @@ describe("Calendar click-to-create DOM interactions", () => {
   });
 
   afterEach(() => {
+    // End any gesture a test left open so its window listeners never reach the next test.
+    window.dispatchEvent(new PointerEvent("pointercancel", { pointerId: 0 }));
     cleanup();
+    outsidePointerListeners.clear();
     document.body.innerHTML = "";
     vi.restoreAllMocks();
   });
@@ -61,7 +87,8 @@ describe("Calendar click-to-create DOM interactions", () => {
     expect(anchor).not.toBeNull();
 
     await userEvent.click(screen.getByRole("button", { name: "Add block" }));
-    await waitFor(() => expect(editor.getAttribute("aria-busy")).toBe("true"));
+    await waitFor(() => expect(editor.getAttribute("aria-busy")).toBe("true"), { timeout: 5_000 });
+    await flushDocumentListeners();
 
     anchorIsOffscreen = true;
     fireEvent.scroll(screen.getByLabelText("Calendar time grid"));
@@ -83,7 +110,7 @@ describe("Calendar click-to-create DOM interactions", () => {
     expect(description.value).toBe("Failure probe");
     expect(alert.textContent).toContain("The entry could not be saved.");
     expect(alert.getAttribute("aria-live")).toBe("assertive");
-  });
+   }, 15_000);
 
   it("routes dirty scroll-away through one discard decision and restores the edited field focus", async () => {
     renderCalendar();
@@ -335,8 +362,19 @@ async function clickDay(dayBody: HTMLElement, minute: number, pointerId: number)
   });
 }
 
+// The compact editor installs its outside-press listener (document, capture) one macrotask after
+// it opens. Wait for that exact registration instead of a timer race, so busy/parallel runs are
+// deterministic.
 async function flushDocumentListeners() {
-  await act(async () => new Promise((resolve) => window.setTimeout(resolve, 1)));
+  if (!editorIsOpen()) {
+    await act(async () => new Promise((resolve) => window.setTimeout(resolve, 0)));
+    return;
+  }
+  await waitFor(() => expect(outsidePointerListeners.size).toBeGreaterThan(0), { timeout: 5_000 });
+}
+
+function editorIsOpen() {
+  return Boolean(document.querySelector("[data-testid='calendar-compact-editor']"));
 }
 
 function installDomGeometry() {
@@ -498,7 +536,10 @@ describe("Calendar drag-to-create and 5-minute resize (W13)", () => {
   });
 
   afterEach(() => {
+    // End any gesture a test left open so its window listeners never reach the next test.
+    window.dispatchEvent(new PointerEvent("pointercancel", { pointerId: 0 }));
     cleanup();
+    outsidePointerListeners.clear();
     document.body.innerHTML = "";
     vi.restoreAllMocks();
   });
@@ -567,6 +608,76 @@ describe("Calendar drag-to-create and 5-minute resize (W13)", () => {
     expect(document.querySelector("[data-calendar-create-ghost]")).toBeNull();
     await flushDocumentListeners();
     expect(screen.queryByTestId("calendar-compact-editor")).toBeNull();
+  });
+
+  it("accepts pen drags like mouse drags", async () => {
+    renderCalendar();
+    const dayBody = document.querySelector<HTMLElement>("[data-calendar-day-body]") as HTMLElement;
+    pointTarget = dayBody;
+    await act(async () => {
+      fireEvent.pointerDown(dayBody, { ...pointer(35, y(9 * 60)), pointerType: "pen" });
+      fireEvent.pointerMove(dayBody, { ...pointer(35, y(9 * 60 + 20)), pointerType: "pen" });
+    });
+    expect(document.querySelector("[data-calendar-create-ghost]")?.textContent).toMatch(/^09:00–09:20 · /);
+  });
+
+  it("never starts a drag from inside an existing block's semantic time (its visual gap included)", async () => {
+    renderCalendar([entryAt(new Date(2026, 7, 2, 8, 0).toISOString(), new Date(2026, 7, 2, 9, 0).toISOString())]);
+    const dayBody = document.querySelector<HTMLElement>("[data-calendar-day-body]") as HTMLElement;
+    pointTarget = dayBody;
+    await act(async () => {
+      fireEvent.pointerDown(dayBody, pointer(36, y(8 * 60 + 59.5)));
+      fireEvent.pointerMove(dayBody, pointer(36, y(10 * 60)));
+    });
+    expect(document.querySelector("[data-calendar-create-ghost]")).toBeNull();
+    await act(async () => {
+      fireEvent.pointerUp(dayBody, pointer(36, y(10 * 60)));
+    });
+    await flushDocumentListeners();
+    expect(screen.queryByTestId("calendar-compact-editor")).toBeNull();
+  });
+
+  it("shows the real duration of an overnight block in the resize tip", async () => {
+    const entry = entryAt(
+      new Date(2026, 7, 1, 20, 0).toISOString(),
+      new Date(2026, 7, 2, 7, 0).toISOString(),
+      { id: "overnight" }
+    );
+    renderCalendar([entry]);
+    const handle = document.querySelector<HTMLElement>(".swiss-resize-handle.bottom") as HTMLElement;
+    await act(async () => {
+      fireEvent.pointerDown(handle, pointer(43, y(7 * 60)));
+      window.dispatchEvent(new PointerEvent("pointermove", pointer(43, y(7 * 60 + 25))));
+    });
+    expect(document.querySelector("[data-calendar-resize-tip]")?.textContent).toMatch(/^07:25 · 11h ?25/);
+    // End the gesture so no window listener outlives this test.
+    await act(async () => {
+      fireEvent.keyDown(window, { key: "Escape" });
+    });
+  });
+
+  it("cancels a resize when pointer capture is lost, without saving", async () => {
+    const entry = entryAt(
+      new Date(2026, 7, 2, 8, 0).toISOString(),
+      new Date(2026, 7, 2, 9, 0).toISOString(),
+      { id: "resize-lost" }
+    );
+    renderCalendar([entry]);
+    const handle = document.querySelector<HTMLElement>(".swiss-resize-handle.bottom") as HTMLElement;
+    await act(async () => {
+      fireEvent.pointerDown(handle, pointer(44, y(9 * 60)));
+      window.dispatchEvent(new PointerEvent("pointermove", pointer(44, y(9 * 60 + 30))));
+    });
+    expect(document.querySelector("[data-calendar-resize-tip]")).not.toBeNull();
+    await act(async () => {
+      handle.dispatchEvent(new PointerEvent("lostpointercapture", pointer(44, y(9 * 60 + 30))));
+    });
+    expect(document.querySelector("[data-calendar-resize-tip]")).toBeNull();
+    await act(async () => {
+      window.dispatchEvent(new PointerEvent("pointerup", pointer(44, y(9 * 60 + 30))));
+    });
+    await flushDocumentListeners();
+    expect(fetchMock.clientFetch).not.toHaveBeenCalled();
   });
 
   it("ignores touch presses so the page keeps scrolling", async () => {

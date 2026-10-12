@@ -178,7 +178,7 @@ describe("Calendar click-to-create pointer intent", () => {
     expect(isEligibleCalendarCreatePointer({ ...basePointer, button: 1 })).toBe(false);
     expect(isEligibleCalendarCreatePointer({ ...basePointer, button: 2 })).toBe(false);
     expect(isEligibleCalendarCreatePointer({ ...basePointer, pointerType: "touch" })).toBe(false);
-    expect(isEligibleCalendarCreatePointer({ ...basePointer, pointerType: "pen" })).toBe(false);
+    expect(isEligibleCalendarCreatePointer({ ...basePointer, pointerType: "pen" })).toBe(true);
     expect(isEligibleCalendarCreatePointer({ ...basePointer, ctrlKey: true })).toBe(false);
     expect(isEligibleCalendarCreatePointer({ ...basePointer, defaultPrevented: true })).toBe(false);
     expect(isEligibleCalendarCreatePointer({ ...basePointer, resizeActive: true })).toBe(false);
