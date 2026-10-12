@@ -11324,6 +11324,11 @@ dialog.ui-dialog.df-palette {
   font-size: 14px;
 }
 
+/* Phones only (UIA-315): "‹ 2 of 4 ›" above the Review card. */
+.df-rnav {
+  display: none;
+}
+
 .df-review-queue {
   display: grid;
   max-height: calc(100vh - 220px);
@@ -11777,6 +11782,35 @@ dialog.ui-dialog.df-palette {
 
   .df-rcard-slot {
     order: -1;
+  }
+
+  .df-rnav {
+    display: flex;
+    /* Above the card (which comes first on phones), as its own row: the card keeps its origin. */
+    order: -2;
+    align-items: center;
+    justify-content: space-between;
+  }
+
+  .df-rnav-btn {
+    display: grid;
+    width: 44px;
+    height: 44px;
+    place-items: center;
+    border: 0;
+    border-radius: 999px;
+    background: var(--surface);
+    color: var(--text-primary);
+  }
+
+  .df-rnav-btn:disabled {
+    opacity: 0.5;
+  }
+
+  .df-rnav-pos {
+    color: var(--text-secondary);
+    font-size: 14px;
+    font-weight: 650;
   }
 
   .df-review-queue {
