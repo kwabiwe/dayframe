@@ -5755,15 +5755,37 @@ kbd {
   border-radius: 999px;
 }
 
+/*
+ * Staging feedback H2: the command bar sits at one inset on every page, Calendar included. The
+ * shell owns the inset (no page or Calendar padding adds to it) and draws no rule under the quick
+ * starts. Desktop 12px/24px; at 860px and below the side inset matches the page content (12px);
+ * phones use 10px above.
+ */
+.swiss-app-shell {
+  --df-cmd-inset-top: 12px;
+  --df-cmd-inset-x: 24px;
+}
+
+@media (max-width: 860px) {
+  .swiss-app-shell {
+    --df-cmd-inset-x: 12px;
+  }
+}
+
+@media (max-width: 760px) {
+  .swiss-app-shell {
+    --df-cmd-inset-top: 10px;
+  }
+}
+
 .swiss-persistent-timer-shell {
   position: sticky;
   top: 0;
   z-index: 25;
   display: grid;
   gap: 8px;
-  border-bottom: 1px solid var(--line);
   background: var(--background);
-  padding: 16px 32px 0;
+  padding: var(--df-cmd-inset-top) var(--df-cmd-inset-x) 0;
 }
 
 .is-timeline .swiss-persistent-timer-shell {
@@ -5997,8 +6019,16 @@ kbd {
   border-color: transparent;
 }
 
+/*
+ * Trello 213: the Description draws no box at rest or after a click or tap, idle or running.
+ * `:focus-visible` also matches pointer focus on text inputs, so `useKeyboardFocusRing` marks
+ * keyboard, shortcut, programmatic and assistive-technology focus with `data-focus-ring`; only
+ * then, and only while the Description input itself has focus, does its compound wrapper show the
+ * shared neutral perimeter (rules below the invalid ones). The tag picker's search field nested in
+ * the wrapper keeps the ordinary field focus border.
+ */
 .swiss-timer-description-control .ui-compound-control:focus-within {
-  border-color: var(--focus);
+  border-color: transparent;
 }
 
 .swiss-timer-description-control .ui-compound-control:has(input[aria-invalid="true"]) {
@@ -6006,8 +6036,13 @@ kbd {
 }
 
 .swiss-timer-description-control .ui-compound-control:has(input[aria-invalid="true"]):focus-within {
-  border-color: var(--focus);
+  border-color: transparent;
   box-shadow: inset 0 -2px 0 var(--danger);
+}
+
+.swiss-timer-description-control .inline-tag-picker-search:focus-within,
+.swiss-timer-description-control[data-focus-ring="keyboard"] .inline-tag-input-anchor:has(.inline-tag-description-input:focus) {
+  border-color: var(--focus);
 }
 
 .edit-time-entry-dialog .ui-control:focus-visible,
@@ -6770,7 +6805,6 @@ kbd {
 
   .swiss-persistent-timer-shell {
     gap: 6px;
-    padding: 10px 12px 0;
   }
 
   .swiss-timeline-main {
@@ -7671,10 +7705,6 @@ dialog.ui-dialog.manual-entry-dialog {
     --web-table-cell-padding-inline: 12px;
     --web-touch-size: 38px;
     --web-text-action-height: 44px;
-  }
-
-  .swiss-persistent-timer-shell {
-    padding: 12px 24px 0;
   }
 
   .fill-page-header {
@@ -8615,7 +8645,8 @@ dialog.ui-dialog.manual-entry-dialog {
   display: block;
   border: 0;
   background: transparent;
-  padding: 0;
+  /* The Calendar frame supplies the side inset (--df-cmd-inset-x); the shell adds only the top. */
+  padding: var(--df-cmd-inset-top) 0 0;
 }
 
 .swiss-timeline-surface .swiss-timeline-main {
@@ -9674,10 +9705,6 @@ button.df-cmd-clock:hover {
   font-family: inherit;
   font-size: 11px;
   font-weight: 700;
-}
-
-.swiss-timeline-surface .df-cmd-wrap {
-  padding: 12px 12px 10px;
 }
 
 @media (max-width: 860px) {
@@ -10855,10 +10882,12 @@ dialog.ui-dialog.df-palette {
   font-size: 12px;
 }
 
+/* Trello 213: Calendar blocks are flat fills — no inner highlight or shade. Adjacent blocks stay
+   apart through the visual gap in calendarBlockVisualGeometry, not an inner stroke. */
 .calendar-time-block.df-block {
   --calendar-block-radius: 8px;
   border-color: transparent;
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.2), inset 0 -1px 0 rgba(0, 0, 0, 0.1);
+  box-shadow: none;
 }
 
 /* Everything drawn on a solid block uses its measured on-block colour; metadata at 80 %. */
@@ -12091,18 +12120,43 @@ dialog.ui-dialog.df-ce-dialog {
   background: var(--surface);
 }
 
+/*
+ * Staging feedback H1: dividers are inset from both card edges, like every other Blocks list
+ * (.df-simple-list, .df-erow). The rule sits on a pseudo-element aligned with the 18px content
+ * inset instead of a full-width border.
+ */
 .df-library .places-list-section > header {
+  position: relative;
   min-height: 60px;
-  border-bottom-color: var(--border);
+  border-bottom: 0;
+}
+
+.df-library .places-list-section > header::after,
+.df-library .place-list-row + .place-list-row::before {
+  position: absolute;
+  right: 18px;
+  left: 18px;
+  height: 1px;
+  background: var(--border);
+  content: "";
+}
+
+.df-library .places-list-section > header::after {
+  bottom: 0;
 }
 
 .df-library .place-list-row {
+  position: relative;
   min-height: 64px;
   padding: 10px 18px;
 }
 
 .df-library .place-list-row + .place-list-row {
-  border-top-color: var(--border);
+  border-top: 0;
+}
+
+.df-library .place-list-row + .place-list-row::before {
+  top: 0;
 }
 
 .df-library .place-list-icon {
@@ -14207,6 +14261,13 @@ dialog.ui-dialog.df-rf-dialog {
   font-weight: 700;
   white-space: nowrap;
   pointer-events: none;
+}
+
+/* H2: the Calendar frame adds no top inset and uses the command bar's side inset, so the bar sits
+   exactly where it does on every other page and the Calendar card lines up with it. */
+.swiss-main-frame.is-timeline {
+  padding-top: 0;
+  padding-inline: var(--df-cmd-inset-x);
 }
 
 /* W13: the Calendar sits in its own fill card (no outline), like the other Blocks pages. */

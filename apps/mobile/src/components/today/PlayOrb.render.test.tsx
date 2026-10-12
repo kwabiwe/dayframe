@@ -6,7 +6,9 @@ vi.mock("react", async () => {
   // @ts-expect-error Renderer peer lives at the repository root.
   return import("../../../../../node_modules/react/index.js");
 });
-const mocks = vi.hoisted(() => ({ gestures: [] as any[], haptic: vi.fn() }));
+const mocks = vi.hoisted(() => ({ gestures: [] as any[], haptic: vi.fn(), reduceTransparency: false }));
+vi.mock("expo-blur", () => ({ BlurView: "BlurView" }));
+vi.mock("../../lib/motion", () => ({ useReduceTransparencyPreference: () => mocks.reduceTransparency }));
 vi.mock("react-native", () => ({
   Pressable: "Pressable",
   StyleSheet: { absoluteFill: { position: "absolute" }, create: <T,>(styles: T) => styles },
@@ -154,6 +156,25 @@ describe("PlayOrb", () => {
     expect(bloom()).toBeUndefined();
     expect(props.onChoose).toHaveBeenCalledOnce();
     act(() => tree.unmount());
+  });
+
+  it("blurs what's behind the bloom, and falls back to a plain, darker scrim under Reduce Transparency (Trello 211)", () => {
+    for (const reduceTransparency of [false, true]) {
+      mocks.reduceTransparency = reduceTransparency;
+      const { hold, tree } = render({ running: false });
+      act(() => {
+        hold().handlers.onStart({});
+        hold().handlers.onEnd({}, true);
+      });
+      const blur = tree.root.findAll((node) => node.props.testID === "play-orb-blur");
+      expect(blur).toHaveLength(reduceTransparency ? 0 : 1);
+      if (!reduceTransparency) expect(blur[0].props).toMatchObject({ pointerEvents: "none", tint: expect.any(String) });
+      const scrim = tree.root.findByProps({ testID: "play-orb-scrim" });
+      const color = (scrim.props.style as Array<{ backgroundColor?: string }>)[1].backgroundColor;
+      expect(color).toMatch(reduceTransparency ? /0\.(8|7)\)$/ : /0\.(66|55)\)$/);
+      act(() => tree.unmount());
+    }
+    mocks.reduceTransparency = false;
   });
 
   it("closes without choosing when the finger slides away or the system cancels the hold", () => {

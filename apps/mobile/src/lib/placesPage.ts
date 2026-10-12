@@ -97,3 +97,16 @@ export function takeDeletedPlaces(accountKey: string) {
   deletedPlaceIds.delete(accountKey);
   return ids ? [...ids] : [];
 }
+
+export type PlacesPageState = "ready" | "pending" | "failed";
+
+/**
+ * What the Places page draws (staging feedback B2, Codex r1): the Home/Work and place groups only
+ * from a list that was actually read, so "Not set", "Nothing saved yet" and Set-goes-straight-to-
+ * adding never appear for places not yet known. Before the first read settles it is a quiet
+ * pending line (no spinner); a failed first read is the Blocks unavailable state.
+ */
+export function placesPageState(hasData: boolean, loadFailed: boolean): PlacesPageState {
+  if (hasData) return "ready";
+  return loadFailed ? "failed" : "pending";
+}

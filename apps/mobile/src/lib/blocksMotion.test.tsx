@@ -39,6 +39,8 @@ import {
   useBlockPop,
   useBreathingRing,
   useDropIn,
+  useTileFadeIn,
+  DROP_IN_SETTLE_MS,
   type LandingRequest,
 } from "./blocksMotion";
 
@@ -196,6 +198,46 @@ describe("useBlockPop", () => {
   });
 });
 
+describe("useTileFadeIn", () => {
+  function Fade(props: Parameters<typeof useTileFadeIn>[0]) {
+    useTileFadeIn(props);
+    return null;
+  }
+
+  it("fades an arriving tile in, and forces it visible if its frames never run", () => {
+    vi.useFakeTimers();
+    try {
+      assigned.length = 0;
+      initialValues.length = 0;
+      let tree!: ReturnType<typeof create>;
+      act(() => {
+        tree = create(<Fade play reduceMotion={false} />);
+      });
+      expect(initialValues).toEqual([0]);
+      const [opacity] = assigned;
+      expect(opacity.value).toMatchObject({ kind: "timing", to: 1 });
+      act(() => { vi.advanceTimersByTime(140 + DROP_IN_SETTLE_MS); });
+      expect(opacity.value).toBe(1);
+      act(() => tree.unmount());
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("shows a tile at rest when it is not arriving", () => {
+    assigned.length = 0;
+    initialValues.length = 0;
+    let tree!: ReturnType<typeof create>;
+    act(() => {
+      tree = create(<Fade play={false} reduceMotion={false} />);
+    });
+    expect(initialValues).toEqual([1]);
+    // Never animated: its one shared value stays at 1.
+    expect(assigned.map((shared) => shared.value)).toEqual([1]);
+    act(() => tree.unmount());
+  });
+});
+
 describe("useDropIn", () => {
   function Drop(props: Parameters<typeof useDropIn>[0]) {
     useDropIn(props);
@@ -218,6 +260,26 @@ describe("useDropIn", () => {
     act(() => tree.unmount());
     // An interrupted drop-in settles at rest.
     expect([translateY.value, scale.value, opacity.value]).toEqual([0, 1, 1]);
+  });
+
+  it("settles at rest if its frames never run (drawn in the background, dropped frames; Trello 210)", () => {
+    vi.useFakeTimers();
+    try {
+      assigned.length = 0;
+      initialValues.length = 0;
+      let tree!: ReturnType<typeof create>;
+      act(() => {
+        tree = create(<Drop index={1} play />);
+      });
+      const [translateY, scale, opacity] = assigned;
+      act(() => { vi.advanceTimersByTime(DROP_IN.firstDelayMs + DROP_IN.staggerMs + DROP_IN_SETTLE_MS - 1); });
+      expect(opacity.value).toMatchObject({ kind: "timing" });
+      act(() => { vi.advanceTimersByTime(1); });
+      expect([translateY.value, scale.value, opacity.value]).toEqual([0, 1, 1]);
+      act(() => tree.unmount());
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("shows a tile at rest when it is not the app's first paint", () => {

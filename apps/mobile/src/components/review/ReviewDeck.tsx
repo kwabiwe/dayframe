@@ -36,7 +36,12 @@ import {
   type ReviewDeckSourceIcon
 } from "@/lib/reviewDeck";
 
-/** Height kept free under the last control for the Undo toast (52-point toast, 12 gap, slack for large text). */
+/**
+ * Height kept free under the last control for the Undo toast (52-point toast, 12 gap, slack for
+ * large text): under the round actions (`reviewDeckActionsAnchor`'s marginBottom in mobileTheme.ts),
+ * under Back to Today and under the waiting copy. Always reserved, so the toast never covers the
+ * card and its entrance and exit move nothing.
+ */
 export const REVIEW_DECK_TOAST_RESERVE = 84;
 
 export type ReviewDeckDirection = 1 | -1;

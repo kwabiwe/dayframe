@@ -399,12 +399,24 @@ describe("native Calendar presentation boundary", () => {
         stoppedAt: iso(localTime(2026, 7, 10, 10, 30))
       })
     ]));
+    // Side by side, never an inset over the longer block (Trello 210): the longer block keeps the
+    // left column with its text, the short one the right. Apart horizontally, so the short block's
+    // hit geometry no longer counts the longer one.
+    expect(contained.model.entries.find((item) => item.entryId === "base")).toMatchObject({
+      layoutMode: "lane",
+      offsetFraction: 0,
+      widthFraction: 0.5,
+      overlapCount: 0,
+      warningOverlapCount: 1
+    });
     expect(contained.model.entries.find((item) => item.entryId === "short")).toMatchObject({
-      layoutMode: "insetOverlay",
-      offsetFraction: 0.18,
-      widthFraction: 0.8200000000000001,
-      overlapCount: 1,
-      overlapSeconds: 1_800
+      layoutMode: "lane",
+      offsetFraction: 0.5,
+      widthFraction: 0.5,
+      overlapCount: 0,
+      overlapSeconds: 1_800,
+      textDensity: "full",
+      warningOverlapCount: 1
     });
     expect(contained.model).toMatchObject({
       loggedSeconds: 12_600,
@@ -417,8 +429,203 @@ describe("native Calendar presentation boundary", () => {
       entry({ id: "b", startedAt: iso(localTime(2026, 7, 10, 10, 0)), stoppedAt: iso(localTime(2026, 7, 10, 13, 0)) }),
       entry({ id: "c", startedAt: iso(localTime(2026, 7, 10, 11, 0)), stoppedAt: iso(localTime(2026, 7, 10, 14, 0)) })
     ]));
-    expect(dense.model.entries.every((item) => item.layoutMode === "compactLane")).toBe(true);
-    expect(dense.model.entries.every((item) => item.textDensity === "none")).toBe(true);
+    // Three columns; iOS measures each column and shows the title wherever it fits.
+    expect(dense.model.entries.map((item) => [item.entryId, item.laneIndex, item.laneCount])).toEqual([
+      ["a", 0, 3], ["b", 1, 3], ["c", 2, 3]
+    ]);
+    expect(dense.model.entries.every((item) => item.layoutMode === "lane" && item.textDensity === "full")).toBe(true);
+  });
+
+  describe("overlap columns (Trello 210)", () => {
+    const now = localTime(2026, 7, 10, 23, 0);
+    const at = (hour: number, minute: number, second = 0) => localTime(2026, 7, 10, hour, minute) + second * 1000;
+    const block = (id: string, start: number, stop: number | null, overrides: Partial<MobileTimeEntry> = {}) =>
+      entry({ id, startedAt: iso(start), stoppedAt: stop === null ? null : iso(stop), ...overrides });
+    const byId = (state: ReturnType<typeof build>) => new Map(state.model.entries.map((item) => [item.entryId, item]));
+    const expectSideBySide = (state: ReturnType<typeof build>, ids: string[]) => {
+      const items = byId(state);
+      for (const [index, left] of ids.entries()) {
+        for (const right of ids.slice(index + 1)) {
+          const a = items.get(left)!;
+          const b = items.get(right)!;
+          const apart = a.offsetFraction + a.widthFraction <= b.offsetFraction + 1e-9
+            || b.offsetFraction + b.widthFraction <= a.offsetFraction + 1e-9;
+          expect(apart, `${left} and ${right} share horizontal space`).toBe(true);
+        }
+      }
+    };
+
+    it("the owner's Gym block and a 07:00–07:05 manual block sit side by side, the Gym block on the left", () => {
+      const state = build(now, bootstrap([
+        block("gym", at(6, 59), at(8, 4), { categoryName: "Gym", categoryColor: "green", placeName: "PureGym" }),
+        block("manual", at(7, 0), at(7, 5), { categoryColor: "green" })
+      ]));
+      const items = byId(state);
+      expect(items.get("gym")).toMatchObject({ laneIndex: 0, laneCount: 2, offsetFraction: 0, widthFraction: 0.5, textDensity: "full", placeText: "PureGym" });
+      expect(items.get("manual")).toMatchObject({ laneIndex: 1, laneCount: 2, offsetFraction: 0.5, widthFraction: 0.5, textDensity: "full" });
+      // Apart, so the short block keeps its 44-point target inside its own column.
+      expect(items.get("manual")?.overlapCount).toBe(0);
+      expect(items.get("gym")?.overlapCount).toBe(0);
+      // The overlap dot and VoiceOver note still say they overlap.
+      expect(items.get("manual")?.warningOverlapCount).toBe(1);
+      expect(items.get("manual")?.accessibilityLabel).toContain("Overlaps 1 other entry.");
+      expectSideBySide(state, ["gym", "manual"]);
+    });
+
+    it("blocks starting together put the longer one on the left", () => {
+      const state = build(now, bootstrap([
+        block("short", at(7, 0), at(7, 5)),
+        block("long", at(7, 0), at(8, 0))
+      ]));
+      const items = byId(state);
+      expect(items.get("long")?.laneIndex).toBe(0);
+      expect(items.get("short")?.laneIndex).toBe(1);
+    });
+
+    it("a nested pair inside a longer block takes three columns", () => {
+      const state = build(now, bootstrap([
+        block("outer", at(9, 0), at(12, 0)),
+        block("middle", at(9, 30), at(11, 0)),
+        block("inner", at(10, 0), at(10, 30))
+      ]));
+      const items = byId(state);
+      expect(["outer", "middle", "inner"].map((id) => [items.get(id)?.laneIndex, items.get(id)?.laneCount])).toEqual([[0, 3], [1, 3], [2, 3]]);
+      expectSideBySide(state, ["outer", "middle", "inner"]);
+    });
+
+    it("a chain of overlaps is one cluster of two columns, and a later block reuses a free column", () => {
+      const state = build(now, bootstrap([
+        block("a", at(9, 0), at(10, 0)),
+        block("b", at(9, 30), at(11, 0)),
+        block("c", at(10, 30), at(12, 0)),
+        block("apart", at(14, 0), at(15, 0))
+      ]));
+      const items = byId(state);
+      expect(["a", "b", "c"].map((id) => [items.get(id)?.laneIndex, items.get(id)?.laneCount])).toEqual([[0, 2], [1, 2], [0, 2]]);
+      expectSideBySide(state, ["a", "b"]);
+      expectSideBySide(state, ["b", "c"]);
+      expect(items.get("apart")).toMatchObject({ layoutMode: "full", offsetFraction: 0, widthFraction: 1, laneCount: 1, zIndex: 0 });
+    });
+
+    it("lays the running block out to now, keeping it active and side by side", () => {
+      const running = block("running", at(22, 0), null, { durationSeconds: 1 });
+      const state = build(now, bootstrap([
+        running,
+        block("added", at(22, 30), at(22, 40))
+      ], { activeEntry: running }));
+      const items = byId(state);
+      expect(items.get("running")).toMatchObject({ actionKind: "active", isActive: true, laneIndex: 0, laneCount: 2, stoppedAtMs: null });
+      expect(items.get("added")).toMatchObject({ laneIndex: 1, laneCount: 2 });
+      // Before the running block reaches 22:30 the two do not overlap and both keep the full width.
+      const earlier = byId(build(at(22, 20), bootstrap([running, block("added", at(22, 30), at(22, 40))], { activeEntry: running })));
+      expect(earlier.get("running")).toMatchObject({ laneCount: 1, widthFraction: 1 });
+    });
+
+    it("a very short block inside a longer one still gets its own column, and keeps a full target there", () => {
+      // 30 seconds: under the one-minute overlap rule, but iOS draws it at least 4 points tall.
+      const state = build(now, bootstrap([
+        block("gym", at(6, 59), at(8, 0)),
+        block("blip", at(7, 0), at(7, 0, 30))
+      ]));
+      const items = byId(state);
+      expect(items.get("blip")).toMatchObject({ laneIndex: 1, laneCount: 2, overlapCount: 0, warningOverlapCount: 0 });
+      expectSideBySide(state, ["gym", "blip"]);
+    });
+
+    it("back-to-back and sub-minute brushes stay full width", () => {
+      const state = build(now, bootstrap([
+        block("first", at(7, 0), at(7, 2)),
+        block("next", at(7, 2), at(8, 0)),
+        // Shares 30 seconds with "next" at its end: drawn as touching, as before.
+        block("brush", at(7, 59, 30), at(8, 30))
+      ]));
+      for (const item of state.model.entries) {
+        expect(item).toMatchObject({ layoutMode: "full", offsetFraction: 0, widthFraction: 1 });
+      }
+    });
+
+    it("short blocks sharing a reused column never grow targets over each other at any zoom (Codex r1 on #357)", () => {
+      const close = build(now, bootstrap([
+        block("long", at(9, 0), at(12, 0)),
+        block("s1", at(9, 30), at(9, 35)),
+        block("s2", at(9, 36), at(9, 41))
+      ]));
+      const items = byId(close);
+      expect([items.get("s1")?.laneIndex, items.get("s2")?.laneIndex]).toEqual([1, 1]);
+      // Their targets would meet: neither grows past its painted block.
+      expect(items.get("s1")?.overlapCount).toBeGreaterThan(0);
+      expect(items.get("s2")?.overlapCount).toBeGreaterThan(0);
+      expectTapsResolve(close);
+
+      // Far apart in the same column, both keep the 44-point target.
+      const apart = build(now, bootstrap([
+        block("long", at(9, 0), at(12, 0)),
+        block("s1", at(9, 30), at(9, 35)),
+        block("s2", at(10, 40), at(10, 45))
+      ]));
+      const apartItems = byId(apart);
+      expect([apartItems.get("s1")?.laneIndex, apartItems.get("s2")?.laneIndex]).toEqual([1, 1]);
+      expect([apartItems.get("s1")?.overlapCount, apartItems.get("s2")?.overlapCount]).toEqual([0, 0]);
+      expectTapsResolve(apart);
+    });
+
+    it("the owner's case resolves every tap to the block under the finger at any zoom", () => {
+      expectTapsResolve(build(now, bootstrap([
+        block("gym", at(6, 59), at(8, 4)),
+        block("manual", at(7, 0), at(7, 5)),
+        block("after", at(8, 30), at(9, 0))
+      ])));
+    });
+
+    it("blocks drawn at the same place after the autumn clock change get a column each (Codex r1 on #357)", () => withTz("Europe/London", () => {
+      // 25 Oct 2026: 00:45Z is 01:45 BST; 01:15Z and 01:20Z are 01:15 and 01:20 GMT. iOS draws both
+      // at 01:45, 4 points tall.
+      const state = build(Date.parse("2026-10-25T20:00:00Z"), bootstrap([
+        entry({ id: "a", startedAt: "2026-10-25T00:45:00.000Z", stoppedAt: "2026-10-25T01:15:00.000Z" }),
+        entry({ id: "b", startedAt: "2026-10-25T00:45:00.000Z", stoppedAt: "2026-10-25T01:20:00.000Z" })
+      ]), undefined, "2026-10-25");
+      const items = byId(state);
+      expect(items.get("a")?.laneCount).toBe(2);
+      expect(items.get("b")?.laneCount).toBe(2);
+      expect(items.get("a")?.laneIndex).not.toBe(items.get("b")?.laneIndex);
+      expectSideBySide(state, ["a", "b"]);
+      expectTapsResolve(state);
+    }));
+
+    it("a block stretched across the spring clock change lanes with what is drawn beside it (Codex r1 on #357)", () => withTz("Europe/London", () => {
+      // 29 Mar 2026: 01:00Z is 02:00 BST. "gap" is drawn 00:50–02:10, "inside" 02:05–02:08 and
+      // "after" 02:10–02:30, back to back with "gap".
+      const state = build(Date.parse("2026-03-29T20:00:00Z"), bootstrap([
+        entry({ id: "gap", startedAt: "2026-03-29T00:50:00.000Z", stoppedAt: "2026-03-29T01:10:00.000Z" }),
+        entry({ id: "inside", startedAt: "2026-03-29T01:05:00.000Z", stoppedAt: "2026-03-29T01:08:00.000Z" }),
+        entry({ id: "after", startedAt: "2026-03-29T01:10:00.000Z", stoppedAt: "2026-03-29T01:30:00.000Z" })
+      ]), undefined, "2026-03-29");
+      const items = byId(state);
+      expect([items.get("gap")?.laneIndex, items.get("inside")?.laneIndex]).toEqual([0, 1]);
+      expect(items.get("inside")?.laneCount).toBe(2);
+      expect(items.get("after")).toMatchObject({ laneCount: 1, widthFraction: 1 });
+      expectTapsResolve(state);
+    }));
+
+    it("an overlapping pair beside the Review lane stays side by side inside the logged part", () => {
+      const state = build(now, bootstrap([
+        block("gym", at(6, 59), at(8, 4)),
+        block("manual", at(7, 0), at(7, 5)),
+        entry({ id: "suggestion", reviewStatus: "needs_review", startedAt: iso(at(7, 30)), stoppedAt: iso(at(7, 50)) })
+      ]));
+      const items = byId(state);
+      const loggedWidth = 1 - REVIEW_LANE_WIDTH;
+      expect(items.get("gym")?.offsetFraction).toBeCloseTo(0);
+      expect(items.get("gym")?.widthFraction).toBeCloseTo(loggedWidth / 2);
+      expect(items.get("manual")?.offsetFraction).toBeCloseTo(loggedWidth / 2);
+      expect(items.get("manual")?.widthFraction).toBeCloseTo(loggedWidth / 2);
+      expect(items.get("suggestion")?.offsetFraction).toBeCloseTo(1 - REVIEW_LANE_WIDTH);
+      expect(items.get("suggestion")?.overlapCount).toBe(0);
+      // The Gym block overlaps the suggestion, so it keeps its exact (semantic) target.
+      expect(items.get("gym")?.overlapCount).toBe(1);
+      expect(items.get("manual")?.overlapCount).toBe(0);
+      expectSideBySide(state, ["gym", "manual", "suggestion"]);
+    });
   });
 });
 
@@ -855,6 +1062,66 @@ describe("native Calendar update cadence", () => {
     expect(JSON.stringify(later.model)).toBe(JSON.stringify(state.model));
   });
 });
+
+/** The zooms iOS supports: the most zoomed-out, the default and the closest (hour heights). */
+const CALENDAR_ZOOMS = [48, 72, 128];
+
+/**
+ * Where iOS draws each block and its tap target at one zoom, mirroring DayframeCalendarBlockMath,
+ * DayframeCalendarHorizontalMath and DayframeCalendarVerticalMath (horizontal in column fractions).
+ */
+function nativeFrames(state: ReturnType<typeof build>, hourHeight: number) {
+  const { dayEndMs, dayStartMs, nowMs } = state.model;
+  const minuteOf = (ms: number) => {
+    if (ms >= dayEndMs) return 24 * 60;
+    const date = new Date(ms);
+    return date.getHours() * 60 + date.getMinutes() + date.getSeconds() / 60 + date.getMilliseconds() / 60_000;
+  };
+  return state.model.entries.flatMap((item, order) => {
+    const visibleStart = Math.max(item.startedAtMs, dayStartMs);
+    const visibleEnd = Math.min(item.stoppedAtMs ?? nowMs, dayEndMs);
+    if (!(visibleEnd > visibleStart)) return [];
+    const startMinute = minuteOf(visibleStart);
+    const height = Math.max(4, (Math.max(1, minuteOf(visibleEnd) - startMinute) / 60) * hourHeight);
+    const top = (startMinute / 60) * hourHeight;
+    const hitHeight = item.overlapCount > 0 ? height : Math.max(44, height);
+    const hitTop = Math.min(Math.max(0, top - (hitHeight - height) / 2), Math.max(0, 24 * hourHeight - hitHeight));
+    return [{
+      id: item.entryId,
+      order,
+      zIndex: item.zIndex,
+      minX: item.offsetFraction,
+      maxX: item.offsetFraction + item.widthFraction,
+      paintedCentreY: top + height / 2,
+      minY: hitTop,
+      maxY: hitTop + hitHeight
+    }];
+  });
+}
+
+/** At every zoom, a tap on the middle of any painted block opens that block and nothing else. */
+function expectTapsResolve(state: ReturnType<typeof build>) {
+  for (const hourHeight of CALENDAR_ZOOMS) {
+    const frames = nativeFrames(state, hourHeight);
+    for (const frame of frames) {
+      const x = (frame.minX + frame.maxX) / 2;
+      const y = frame.paintedCentreY;
+      const under = frames.filter((other) => other.minX <= x && x <= other.maxX && other.minY <= y && y <= other.maxY);
+      const top = Math.max(...under.map((other) => other.zIndex));
+      const winners = under.filter((other) => other.zIndex === top);
+      expect(winners.map((other) => other.id), `tap on ${frame.id} at ${hourHeight} points an hour`).toEqual([frame.id]);
+    }
+  }
+}
+
+function withTz(tz: string, run: () => void) {
+  const previousTz = process.env.TZ;
+  process.env.TZ = tz;
+  try { run(); } finally {
+    if (previousTz === undefined) delete process.env.TZ;
+    else process.env.TZ = previousTz;
+  }
+}
 
 function build(now: number, data: MobileBootstrap, theme: MobileTheme = darkTheme(), selectedDayKey = "2026-07-10") {
   return buildNativeCalendarBridgeState({

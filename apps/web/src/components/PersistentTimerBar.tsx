@@ -20,6 +20,7 @@ import { InlineTagInput } from "@/components/InlineTagInput";
 import { DayframeDateTimePicker } from "@/components/DayframeDateTimePicker";
 import { OverlapNotice } from "@/components/OverlapNotice";
 import { TaskSuggestionsPanel } from "@/components/TaskSuggestionsPanel";
+import { useKeyboardFocusRing } from "@/components/useKeyboardFocusRing";
 import { Button, Field, IconButton, ModalDialog } from "@/components/ui/Primitives";
 import { calendarEntryLocalDayOffset } from "@/lib/calendar-entry-compact-editor";
 import { timeEntryAccentColor } from "@/lib/display";
@@ -77,6 +78,8 @@ export function PersistentTimerBar({ workspaceMode = false }: { workspaceMode?: 
   const descriptionInputRef = useRef<HTMLInputElement | null>(null);
   const suppressSuggestionFocusRef = useRef(false);
   const suggestionsRef = useRef<HTMLDivElement | null>(null);
+  // Trello 213: the Description's neutral perimeter shows for keyboard focus only, never a click.
+  const descriptionFocusRing = useKeyboardFocusRing();
   const startDateInputRef = useRef<HTMLInputElement | null>(null);
   const startTimeInputRef = useRef<HTMLInputElement | null>(null);
   const startEditorRef = useRef<HTMLDivElement | null>(null);
@@ -427,7 +430,12 @@ export function PersistentTimerBar({ workspaceMode = false }: { workspaceMode?: 
           variant="block"
         />
 
-        <div className="df-cmd-field swiss-timer-description-control" ref={suggestionsRef}>
+        <div
+          className="df-cmd-field swiss-timer-description-control"
+          data-focus-ring={descriptionFocusRing.focusRing}
+          ref={suggestionsRef}
+          {...descriptionFocusRing.handlers}
+        >
           <InlineTagInput
             ariaLabel="Description"
             className="df-cmd-tags"
