@@ -71,7 +71,7 @@ export function PasswordResetForm() {
 
   return (
     <AuthCardMotion view={status === "done" || status === "invalid" ? status : "form"}>
-    <section className="auth-card mx-auto w-full max-w-[440px]">
+    <section className="auth-card-view">
       <div className="auth-card-head">
         <h1 ref={headingRef} tabIndex={-1}>{status === "done" ? "Password changed" : "New password"}</h1>
         <p aria-live="polite">

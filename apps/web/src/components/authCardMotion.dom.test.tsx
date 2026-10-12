@@ -9,7 +9,7 @@ vi.mock("@/lib/blocks-motion", () => ({
   springTransition: () => ({ easing: "spring", durationMs: 300 })
 }));
 
-const { AuthCardMotion } = await import("./AuthCardMotion");
+const { AuthCardMotion, __resetAuthCardShownForTests } = await import("./AuthCardMotion");
 
 type Call = { element: HTMLElement; keyframes: Keyframe[]; cancel: ReturnType<typeof vi.fn> };
 let calls: Call[] = [];
@@ -18,6 +18,7 @@ let observed: { callback: ResizeObserverCallback; target: Element } | null = nul
 let naturalHeight = 100;
 
 beforeEach(() => {
+  __resetAuthCardShownForTests();
   calls = [];
   reduced.value = false;
   naturalHeight = 100;
@@ -35,7 +36,7 @@ beforeEach(() => {
     disconnect() { observed = null; }
   });
   vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (this: HTMLElement) {
-    return { height: this.className === "auth-card-motion" ? 80 : naturalHeight } as DOMRect;
+    return { height: this.classList.contains("auth-card") ? 80 : naturalHeight } as DOMRect;
   });
 });
 
@@ -61,7 +62,7 @@ describe("the sign-in card's motion (UIA-317)", () => {
     expect(enter.keyframes[0]).toMatchObject({ opacity: 0, transform: "translateY(6px)" });
     resize(140);
     const grow = calls.at(-1)!;
-    expect(grow.element.className).toBe("auth-card-motion");
+    expect(grow.element.classList.contains("auth-card")).toBe(true);
     expect(grow.keyframes.map((frame) => frame.height)).toEqual(["100px", "140px"]);
   });
 
@@ -92,5 +93,20 @@ describe("the sign-in card's motion (UIA-317)", () => {
     resize(60);
     expect(calls).toHaveLength(1);
     expect(calls[0].keyframes).toEqual([{ opacity: 0 }, { opacity: 1 }]);
+  });
+
+  it("is the card itself, so the visible surface resizes (Codex r6)", () => {
+    const view = render(<AuthCardMotion view="login"><section className="auth-card-view">Log in</section></AuthCardMotion>);
+    expect(view.container.firstElementChild?.classList.contains("auth-card")).toBe(true);
+    expect(view.container.querySelectorAll(".auth-card")).toHaveLength(1);
+  });
+
+  it("a card reached by client navigation fades in; the first card of a page load does not (Codex r6)", () => {
+    const first = render(<AuthCardMotion view="login"><p>Log in</p></AuthCardMotion>);
+    expect(calls).toHaveLength(0);
+    first.unmount();
+    render(<AuthCardMotion view="signup"><p>Create account</p></AuthCardMotion>);
+    expect(calls).toHaveLength(1);
+    expect(calls[0].keyframes[0]).toMatchObject({ opacity: 0 });
   });
 });

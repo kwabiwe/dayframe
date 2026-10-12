@@ -112,14 +112,14 @@ export function AuthForm({
 
     if (status === "opening") {
       return (
-        <section className="auth-card mx-auto w-full max-w-[440px]">
+        <section className="auth-card-view">
           <AppLoadingState embedded message="Opening Dayframe…" />
         </section>
       );
     }
 
     return (
-      <section className="auth-card mx-auto w-full max-w-[440px]">
+      <section className="auth-card-view">
         <div className="auth-card-head">
           <h1 ref={headingRef} tabIndex={-1}>{isSignup ? "Create account" : "Log in"}</h1>
           <p>
@@ -291,7 +291,7 @@ function PasswordResetRequest({ initialEmail, onBack }: { initialEmail: string; 
   }
 
   return (
-    <section className="auth-card mx-auto w-full max-w-[440px]">
+    <section className="auth-card-view">
       <div className="auth-card-head">
         <h1 ref={headingRef} tabIndex={-1}>Reset password</h1>
         <p>We’ll email you a link to choose a new password.</p>
