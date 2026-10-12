@@ -6020,9 +6020,10 @@ kbd {
 }
 
 /*
- * Trello 213: the Description never draws its own box, idle or running, focused or not. The
- * command bar owns the neutral keyboard focus ring (`.df-cmd:has(...:focus-visible)`), so the
- * text sits on the bar like the prototype.
+ * Trello 213: the Description draws no box at rest or after a click or tap, idle or running.
+ * `:focus-visible` also matches pointer focus on text inputs, so `useKeyboardFocusRing` marks
+ * keyboard, shortcut, programmatic and assistive-technology focus with `data-focus-ring` and only
+ * that shows the shared neutral perimeter (rules below the invalid ones).
  */
 .swiss-timer-description-control .ui-compound-control:focus-within {
   border-color: transparent;
@@ -6035,6 +6036,11 @@ kbd {
 .swiss-timer-description-control .ui-compound-control:has(input[aria-invalid="true"]):focus-within {
   border-color: transparent;
   box-shadow: inset 0 -2px 0 var(--danger);
+}
+
+.swiss-timer-description-control[data-focus-ring="keyboard"] .ui-compound-control:focus-within,
+.swiss-timer-description-control[data-focus-ring="keyboard"] .ui-compound-control:has(input[aria-invalid="true"]):focus-within {
+  border-color: var(--focus);
 }
 
 .edit-time-entry-dialog .ui-control:focus-visible,
@@ -9440,13 +9446,6 @@ dialog.ui-dialog.manual-entry-dialog {
 
 .df-cmd.is-live {
   box-shadow: var(--shadow-soft), inset 0 0 0 2px color-mix(in oklab, var(--block, var(--text-muted)) 70%, transparent);
-}
-
-/* Trello 213: keyboard focus in the Description rings the whole bar in the shared neutral focus
-   colour, outside the live ring, instead of a grey box around the text. */
-.df-cmd:has(.df-cmd-field .inline-tag-description-input:focus-visible) {
-  outline: 2px solid var(--focus);
-  outline-offset: 2px;
 }
 
 .df-cmd-activity-field {

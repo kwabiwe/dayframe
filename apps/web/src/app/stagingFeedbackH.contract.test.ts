@@ -51,17 +51,31 @@ describe("command timer placement (H2)", () => {
 });
 
 describe("command timer Description (H3, Trello 213)", () => {
-  it("never draws a grey box around the Description, idle or running", () => {
+  it("draws no grey box at rest or after pointer focus, idle or running", () => {
     expect(rule(".swiss-timer-description-control .ui-compound-control:focus-within")).toContain("border-color: transparent;");
     expect(rule(".df-cmd-field .inline-tag-input-anchor")).toContain("border-color: transparent;");
     expect(css).not.toMatch(/\.df-cmd\.is-live[^{]*\.(?:inline-tag-input-anchor|ui-compound-control)[^{]*\{/);
+    // The earlier whole-bar ring (Codex r1: :focus-visible also matches clicks on text inputs) is gone.
+    expect(css).not.toContain(".df-cmd:has(");
   });
 
-  it("keeps the live ring and moves keyboard focus to a neutral ring around the whole bar", () => {
-    expect(rule(".df-cmd.is-live")).toMatch(/inset 0 0 0 2px color-mix\(in oklab, var\(--block/);
-    expect(rule(".df-cmd:has(.df-cmd-field .inline-tag-description-input:focus-visible)")).toMatch(
-      /outline: 2px solid var\(--focus\);[\s\S]*outline-offset: 2px;/
+  it("shows the shared neutral perimeter on the compound wrapper for keyboard-origin focus only", () => {
+    const keyboard = rule(
+      '.swiss-timer-description-control[data-focus-ring="keyboard"] .ui-compound-control:focus-within,\n' +
+        '.swiss-timer-description-control[data-focus-ring="keyboard"] .ui-compound-control:has(input[aria-invalid="true"]):focus-within'
     );
+    expect(keyboard).toContain("border-color: var(--focus);");
+    // It must follow the transparent and invalid rules it overrides.
+    expect(css.indexOf('[data-focus-ring="keyboard"] .ui-compound-control:focus-within')).toBeGreaterThan(
+      css.indexOf('.swiss-timer-description-control .ui-compound-control:has(input[aria-invalid="true"]):focus-within {')
+    );
+    expect(rule('.swiss-timer-description-control .ui-compound-control:has(input[aria-invalid="true"]):focus-within')).toContain(
+      "box-shadow: inset 0 -2px 0 var(--danger);"
+    );
+  });
+
+  it("keeps the live ring on the bar", () => {
+    expect(rule(".df-cmd.is-live")).toMatch(/inset 0 0 0 2px color-mix\(in oklab, var\(--block/);
   });
 });
 
