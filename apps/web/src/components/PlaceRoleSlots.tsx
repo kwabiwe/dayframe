@@ -120,22 +120,22 @@ export function PlaceRoleSlots({
               <div className="place-list-actions">
                 {slot.place ? (
                   <>
-                    <Button compact variant="secondary" aria-label={`Change ${slot.label}`} onClick={() => open(slot.role, "choose")}>
+                    <button aria-label={`Change ${slot.label}`} className="df-rbtn df-rbtn--sm df-rbtn--ghost" onClick={() => open(slot.role, "choose")} type="button">
                       Change
-                    </Button>
-                    <Button compact variant="ghost" aria-label={`Clear ${slot.label}`} onClick={() => open(slot.role, "clear")}>
+                    </button>
+                    <button aria-label={`Clear ${slot.label}`} className="df-rbtn df-rbtn--sm df-rbtn--ghost" onClick={() => open(slot.role, "clear")} type="button">
                       Clear
-                    </Button>
+                    </button>
                   </>
                 ) : places.length === 0 ? (
                   // Nothing saved to choose from yet: go straight to adding the place.
-                  <Link className="ui-button ui-button-secondary is-compact" href={`/places/new?role=${slot.role}`}>
+                  <Link className="df-rbtn df-rbtn--sm df-rbtn--ghost" href={`/places/new?role=${slot.role}`}>
                     Set {slot.label}
                   </Link>
                 ) : (
-                  <Button compact variant="secondary" onClick={() => open(slot.role, "choose")}>
+                  <button className="df-rbtn df-rbtn--sm df-rbtn--ghost" onClick={() => open(slot.role, "choose")} type="button">
                     Set {slot.label}
-                  </Button>
+                  </button>
                 )}
               </div>
             </article>

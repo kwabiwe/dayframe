@@ -1,13 +1,14 @@
 import Link from "next/link";
-import type { ReactNode } from "react";
 import { LIBRARY_TABS } from "@/lib/shell-nav";
 
 /**
  * The Library page head (Blocks parity step 14): the title, one line of context and the
  * Activities · Tags · Places switch. The three stay separate pages, so the switch is links
- * (the current one marked with aria-current), drawn as the neutral segmented control.
+ * (the current one marked with aria-current), drawn as the neutral segmented control. The switch
+ * stays in the same place on every tab: each tab adds things in its own content's first row,
+ * never up here (UIA-316).
  */
-export function LibraryHead({ action, current }: { action?: ReactNode; current: (typeof LIBRARY_TABS)[number]["href"] }) {
+export function LibraryHead({ current }: { current: (typeof LIBRARY_TABS)[number]["href"] }) {
   return (
     <div className="df-page-head">
       <div>
@@ -22,7 +23,6 @@ export function LibraryHead({ action, current }: { action?: ReactNode; current: 
             </Link>
           ))}
         </nav>
-        {action}
       </div>
     </div>
   );
