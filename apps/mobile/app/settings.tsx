@@ -367,11 +367,12 @@ export default function SettingsScreen() {
   const routeSettingsSection = normalizeSettingsSection(params.section);
   const settingsSection = routeSettingsSection;
   const cachedSnapshot = readSettingsSnapshot();
-  // First open of the session: Today's bootstrap for the same account draws the first frame; the
-  // usual refresh after the opening transition still runs (the snapshot stays stale).
-  const [data, setData] = useState<MobileBootstrap | null>(
-    () => cachedSnapshot?.data ?? readTodayBootstrapForSettings(getActiveMobileAccountSnapshot())
-  );
+  const [data, setData] = useState<MobileBootstrap | null>(cachedSnapshot?.data ?? null);
+  // First open of the session: Today's bootstrap for the same account shows the account card and
+  // goal numbers at once. Display only: `data` stays null (no stepper, place or location writes)
+  // until Settings' own refresh lands.
+  const [todaySeed] = useState(() => cachedSnapshot?.data ? null : readTodayBootstrapForSettings(getActiveMobileAccountSnapshot()));
+  const shownUser = (data ?? todaySeed)?.user;
   const [queue, setQueue] = useState<QueuedEvent[]>(cachedSnapshot?.queue ?? []);
   const [lastSyncResult, setLastSyncResult] = useState<SyncQueueResult | null>(cachedSnapshot?.lastSyncResult ?? null);
   const [syncingQueue, setSyncingQueue] = useState(false);
@@ -902,7 +903,7 @@ export default function SettingsScreen() {
   const settingsTitle = settingsSectionTitle(settingsSection);
   const backLabel = usePreviousScreenLabel() ?? settingsBackLabel(settingsSection, blocksNavOrigin(params.from));
   const categoryCount = data?.categories.length ?? 0;
-  const workspaceLabel = data?.workspace?.name ?? "Default workspace";
+  const workspaceLabel = (data ?? todaySeed)?.workspace?.name ?? "Default workspace";
   const pinnedCategoryCount = (data?.categories ?? []).filter((category) => category.isPinned).length;
   // Settings › Your day: shown at once, saved to the account a moment after the last tap.
   const [goalDraft, setGoalDraft] = useState<TimeGoals | null>(null);
@@ -940,8 +941,8 @@ export default function SettingsScreen() {
       );
     }
   })).current;
-  const dailyGoalHours = goalDraft?.daily ?? Math.round((data?.user.dailyGoalMinutes ?? 480) / 60);
-  const weeklyGoalHours = goalDraft?.weekly ?? Math.round((data?.user.weeklyGoalMinutes ?? 2400) / 60);
+  const dailyGoalHours = goalDraft?.daily ?? Math.round((shownUser?.dailyGoalMinutes ?? 480) / 60);
+  const weeklyGoalHours = goalDraft?.weekly ?? Math.round((shownUser?.weeklyGoalMinutes ?? 2400) / 60);
   const locationAccessSummary = locationDiagnostics?.locationLearningCaptureState === "logout_cleanup"
     ? "Paused while signing out"
     : locationMonitoringAllowed
@@ -1938,8 +1939,8 @@ export default function SettingsScreen() {
           {settingsSection === "index" ? (
             <View style={styles.settingsBlocksStack}>
               <SettingsAccountCard
-                email={data?.user.email ?? ""}
-                name={data?.user.name ?? ""}
+                email={shownUser?.email ?? ""}
+                name={shownUser?.name ?? ""}
                 onPress={() => openSettingsSection("profile")}
                 theme={theme}
                 workspace={workspaceLabel}
@@ -2334,10 +2335,10 @@ export default function SettingsScreen() {
               >
                 <SettingsBlockRow
                   divider={false}
-                  subtitle={data?.user.email ?? null}
+                  subtitle={shownUser?.email ?? null}
                   testID="settings-account-user"
                   theme={theme}
-                  title={data?.user.name || data?.user.email || "Your account"}
+                  title={shownUser?.name || shownUser?.email || "Your account"}
                 />
                 <SettingsBlockRow
                   // A row without onPress shows no value column, so the name is the subtitle.

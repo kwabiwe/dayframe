@@ -16,8 +16,12 @@ function effectStarting(marker: string) {
 
 describe("Settings opens instantly (I1)", () => {
   it("starts from the cached snapshot, never an awaited fetch, in first render", () => {
-    // The session's first open falls back to Today's bootstrap for the same account (settingsSeed).
-    expect(body).toContain("() => cachedSnapshot?.data ?? readTodayBootstrapForSettings(getActiveMobileAccountSnapshot())");
+    expect(body).toContain("useState<MobileBootstrap | null>(cachedSnapshot?.data ?? null)");
+    // The session's first open shows Today's bootstrap for the same account, display only: never
+    // `data`, so steppers, places and location writes wait for Settings' own refresh (Codex r1).
+    expect(body).toContain("const [todaySeed] = useState(() => cachedSnapshot?.data ? null : readTodayBootstrapForSettings(getActiveMobileAccountSnapshot()));");
+    expect(body.match(/todaySeed/g)).toHaveLength(3);
+    expect(body).not.toMatch(/setData(AndCache)?\(todaySeed/);
     const beforeFirstEffect = body.slice(0, body.indexOf("useEffect("));
     expect(beforeFirstEffect).not.toMatch(/await\s/);
   });

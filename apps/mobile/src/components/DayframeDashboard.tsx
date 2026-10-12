@@ -204,7 +204,7 @@ import {
   type MobileTheme
 } from "@/lib/mobileTheme";
 import { subscribeMobileSignedOut } from "@/lib/mobileSessionTransition";
-import { publishTodayBootstrapForSettings } from "@/lib/settingsSeed";
+import { captureSettingsSeedGeneration, publishTodayBootstrapForSettings } from "@/lib/settingsSeed";
 import {
   buildNativeCalendarBridgeState,
   routeNativeCalendarOpenEvent,
@@ -823,6 +823,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
       return;
     }
     refreshInFlight.current = true;
+    const settingsSeedGeneration = captureSettingsSeedGeneration();
     const refreshGuard = captureDashboardRefreshGuard({
       currentRevision: dashboardMutationRevision.current,
       timerMutationsInFlight: timerMutationCount.current
@@ -853,7 +854,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
         liveActivityReconciliationDeferred.current = pendingQueue.some((event) => event.source === "shortcut");
       }
       void cacheDashboardBootstrap(serverBootstrap).catch(() => undefined);
-      publishTodayBootstrapForSettings(serverBootstrap);
+      publishTodayBootstrapForSettings(serverBootstrap, settingsSeedGeneration);
       const owner = timerStopOwner(serverBootstrap);
       const durableWork = await readDurableLocalWork(owner);
       for (const [localId, timeEntryId] of durableWork.correlations) {
@@ -1159,6 +1160,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
 
   useEffect(() => {
     const openDashboard = async () => {
+      const settingsSeedGeneration = captureSettingsSeedGeneration();
       const cached = await loadCachedDashboardBootstrap().catch(() => null);
       if (cached && !latestData.current) {
         const owner = timerStopOwner(cached.bootstrap);
@@ -1170,7 +1172,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
         let filtered = cached.bootstrap;
         let durableWork = null;
         await activateMobileAccount(owner);
-        publishTodayBootstrapForSettings(cached.bootstrap);
+        publishTodayBootstrapForSettings(cached.bootstrap, settingsSeedGeneration);
         durableWork = await readDurableLocalWork(owner);
         for (const [localId, timeEntryId] of durableWork.correlations) {
           optimisticTimerIds.current.set(localId, timeEntryId);
