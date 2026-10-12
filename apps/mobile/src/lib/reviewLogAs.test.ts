@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { activeLogAsCategoryId, reviewLogAsEdit, reviewLogAsEditorName } from "./reviewLogAs";
+import { activeLogAsCategoryId, reviewDeckDecisionName, reviewLogAsEdit, reviewLogAsEditorName } from "./reviewLogAs";
 
 const base = {
   draftName: undefined,
@@ -83,5 +83,28 @@ describe("reviewLogAsEditorName (details sheet hand-off)", () => {
 
   it("leaves a Location visit unnamed so the server names it", () => {
     expect(reviewLogAsEditorName({ ...base, isLocationV2: true })).toBeNull();
+  });
+});
+
+describe("reviewDeckDecisionName (staging feedback C2)", () => {
+  const commute = { defaultName: "School run", cardTitle: "Commute detected" };
+
+  it("names a logged card by the name it was logged as, not the detector title", () => {
+    expect(reviewDeckDecisionName({ ...commute, logged: true, typedName: undefined })).toBe("School run");
+    expect(reviewDeckDecisionName({ ...commute, logged: true, typedName: "  Drop-off  " })).toBe("Drop-off");
+  });
+
+  it("falls back to the default name when the field was cleared, then to the card title", () => {
+    expect(reviewDeckDecisionName({ ...commute, logged: true, typedName: "   " })).toBe("School run");
+    expect(reviewDeckDecisionName({ logged: true, typedName: undefined, defaultName: null, cardTitle: "Commute detected" })).toBe(
+      "Commute detected"
+    );
+    expect(reviewDeckDecisionName({ logged: true, typedName: "", defaultName: "  ", cardTitle: "Suggested activity" })).toBe(
+      "Suggested activity"
+    );
+  });
+
+  it("names a skipped card by its title, whatever was typed", () => {
+    expect(reviewDeckDecisionName({ ...commute, logged: false, typedName: "Drop-off" })).toBe("Commute detected");
   });
 });

@@ -135,6 +135,7 @@ import {
   StaleMobileSessionResponseError,
   isRetryableMobileConnectivityFailure
 } from "@/lib/mobile-network";
+import { friendlyMobileErrorMessage } from "@/lib/friendlyError";
 import {
   activateMobileAccount,
   deactivateMobileAccount
@@ -2676,7 +2677,8 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
       setAuthPassword("");
       void offerOnboardingAfterSignIn();
     } catch (error) {
-      setAuthError(error instanceof Error ? error.message : "Dayframe couldn't sign you in. Check your connection and try again.");
+      // A native offline exception is never shown on the sign-in screen (staging feedback B2 sweep).
+      setAuthError(friendlyMobileErrorMessage(error, "Dayframe couldn't sign you in. Check your connection and try again."));
       setAuthState("signedOut");
     } finally {
       authSubmittingRef.current = false;

@@ -64,3 +64,22 @@ export function reviewLogAsEditorName(input: {
     input.builtDescription?.trim() ||
     (input.isLocationV2 ? null : input.defaultName.trim() || null);
 }
+
+/**
+ * The name the Review deck's toast and announcement use for a thrown card (staging feedback C2).
+ * A logged card names what was logged, as its "Log as" field showed it: a typed name, else the
+ * suggestion's own title (a Location visit's server name such as "School run"), else the card's
+ * title. A skipped card names the card ("Skipped Commute detected"), whatever was typed.
+ */
+export function reviewDeckDecisionName(input: {
+  logged: boolean;
+  /** What the user typed in "Log as", or undefined when the field was never edited. */
+  typedName: string | undefined;
+  /** The name "Log as" shows by default (the suggestion's title). */
+  defaultName: string | null | undefined;
+  /** The card's heading ("Commute detected", "Outdoor Walk"). */
+  cardTitle: string;
+}) {
+  if (!input.logged) return input.cardTitle;
+  return input.typedName?.trim() || input.defaultName?.trim() || input.cardTitle;
+}
