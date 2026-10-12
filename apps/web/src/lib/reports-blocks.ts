@@ -132,6 +132,8 @@ export type ReportBlocksDay = {
   totalSeconds: number;
   accessibleName: string;
   blocks: ReportBlocksBlock[];
+  /** Every activity that day, drawn or too small to draw: the touch day panel lists them all. */
+  activities: Omit<ReportBlocksBlock, "height">[];
 };
 export type ReportBlocksModel = { layout: "week" | "month"; leadingBlanks: number; days: ReportBlocksDay[] };
 
@@ -169,6 +171,7 @@ export function reportBlocksModel(
       isToday: isTodayKey(day, report.capturedNow),
       totalSeconds: logged,
       accessibleName: `${day.label}: ${formatDuration(logged)} logged${parts.length ? `, ${parts.join(", ")}` : ""}`,
+      activities: named.map(({ id, name, color, seconds }) => ({ id, name, color, seconds })),
       blocks: named.flatMap((activity, activityIndex) =>
         heights[activityIndex]
           ? [{ id: activity.id, name: activity.name, color: activity.color, seconds: activity.seconds, height: stackHeightCss(heights[activityIndex], kept, sizing.height, sizing.gap) }]
@@ -178,4 +181,24 @@ export function reportBlocksModel(
   });
   const first = report.dailyByActivity[0];
   return { layout, leadingBlanks: first ? monthGridLeadingBlanks(first.start) : 0, days };
+}
+
+/**
+ * The slight gap after each slice (staging feedback I2), the Blocks prototype's approach
+ * (`DF.donut`: each slice drawn `gap` shorter than its share, never below 0.01): 2.2 px there at
+ * 190 px, which is 1.4 units of the web donut's 120-unit view box. A single slice stays a full ring.
+ */
+export const DONUT_GAP = 1.4;
+
+/** Each slice's drawn length and start, in circumference units, with the gap after each one. */
+export function donutArcs(seconds: readonly number[], totalSeconds: number, circumference: number, gap = DONUT_GAP) {
+  const total = Math.max(1, totalSeconds);
+  const gapped = seconds.filter((value) => value > 0).length > 1;
+  let before = 0;
+  return seconds.map((value) => {
+    const share = totalSeconds > 0 ? (value / total) * circumference : 0;
+    const arc = { dash: gapped && share > 0 ? Math.max(0.01, share - gap) : share, offset: -before };
+    before += share;
+    return arc;
+  });
 }

@@ -12631,15 +12631,35 @@ dialog.ui-dialog.df-ce-dialog {
   overflow: hidden;
 }
 
-.df-wb-stack > span {
+/* Each block is a button that traces its activity (staging feedback I1). */
+.df-tblock {
+  display: block;
   flex: none;
+  width: 100%;
+  min-width: 0;
+  margin: 0;
+  border: 0;
+  padding: 0;
+  font: inherit;
+  cursor: default;
+  /* The day column or month cell is the hit area (traceBlockAt), never the 2–3 px block. */
+  pointer-events: none;
+}
+
+/* Inside the clipped stacks the neutral focus ring sits on the block's inner edge. */
+.df-tblock:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: -2px;
+}
+
+.df-wb-stack > .df-tblock {
   border-radius: 7px;
   transform-origin: bottom;
   animation: df-wb-grow var(--df-land-ms, 600ms) var(--df-land, cubic-bezier(0.22, 1, 0.36, 1)) both;
 }
 
 @supports not (transition-timing-function: linear(0, 1)) {
-  .df-wb-stack > span {
+  .df-wb-stack > .df-tblock {
     animation-timing-function: cubic-bezier(0.22, 1, 0.36, 1);
   }
 }
@@ -12656,7 +12676,7 @@ dialog.ui-dialog.df-ce-dialog {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .df-wb-stack > span {
+  .df-wb-stack > .df-tblock {
     animation: none;
   }
 }
@@ -12770,8 +12790,7 @@ dialog.ui-dialog.df-ce-dialog {
   font-weight: 700;
 }
 
-.df-mday i {
-  flex: none;
+.df-mday-stack > .df-tblock {
   border-radius: 3px;
 }
 
@@ -12969,19 +12988,180 @@ dialog.ui-dialog.df-rf-dialog {
   grid-template-columns: minmax(0, 1fr);
 }
 
-.df-wb-stack > span,
-.df-mday-stack > i {
+.df-tblock {
   transition: opacity 140ms ease-out;
 }
 
-.df-wblocks.has-hot .df-wb-stack > span,
-.df-month.has-hot .df-mday-stack > i {
+.df-wblocks.has-hot .df-tblock,
+.df-month.has-hot .df-tblock {
   opacity: 0.22;
 }
 
-.df-wblocks.has-hot .df-wb-stack > span.is-hot,
-.df-month.has-hot .df-mday-stack > i.is-hot {
+.df-wblocks.has-hot .df-tblock.is-hot,
+.df-month.has-hot .df-tblock.is-hot {
   opacity: 1;
+}
+
+/*
+ * The touch day panel (review 3): a touch picks a day column or month cell, and its activities
+ * open under the blocks as 44 px rows that pin a trace. It expands and collapses like More
+ * filters (grid rows 0fr ↔ 1fr with opacity), at once under Reduce Motion.
+ */
+.df-wb.is-picked {
+  background: var(--surface-muted);
+}
+
+.df-mday.is-picked {
+  box-shadow: inset 0 0 0 2px var(--text-muted);
+}
+
+.df-day-pick {
+  display: grid;
+  grid-template-rows: 0fr;
+  opacity: 0;
+  transition: grid-template-rows 200ms cubic-bezier(0.22, 1, 0.36, 1), opacity 160ms ease-out;
+}
+
+.df-day-pick.is-open {
+  grid-template-rows: 1fr;
+  opacity: 1;
+}
+
+.df-day-pick-body {
+  min-height: 0;
+  overflow: hidden;
+}
+
+.df-day-pick-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 12px 0 4px 8px;
+  font-size: 14px;
+}
+
+.df-day-pick-head h3 {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.df-report-blocks:focus {
+  outline: none;
+}
+
+.df-day-pick-close {
+  display: grid;
+  width: 44px;
+  height: 44px;
+  place-items: center;
+  border: 0;
+  border-radius: 999px;
+  padding: 0;
+  background: var(--surface-muted);
+  color: var(--text-primary);
+}
+
+.df-day-pick-rows {
+  display: grid;
+  gap: 2px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.df-day-pick-row {
+  display: grid;
+  width: 100%;
+  min-height: 44px;
+  grid-template-columns: 12px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  border: 0;
+  border-radius: 10px;
+  padding: 0 8px;
+  background: transparent;
+  color: var(--text-primary);
+  text-align: left;
+}
+
+.df-day-pick-row > i {
+  width: 12px;
+  height: 12px;
+  border-radius: 4px;
+  background: var(--block);
+}
+
+.df-day-pick-row > i.is-none {
+  background: var(--border-strong);
+}
+
+.df-day-pick-row b {
+  overflow: hidden;
+  font-size: 14px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.df-day-pick-row span {
+  font-size: 13px;
+  font-weight: 650;
+}
+
+.df-day-pick-row.is-hot,
+.df-day-pick-row[aria-pressed="true"] {
+  background: var(--surface-muted);
+}
+
+/*
+ * Touch targets for picking a day (review r3, r4): under 640 px every day column and month cell
+ * is at least 44 px wide, with 2 px gaps and 14 px card sides so a week and a month still fit at
+ * 375 px (7 × 44 + 6 × 2 = 320 of 323 px); narrower screens and ranges of more than seven days
+ * scroll sideways inside the card. The page itself never scrolls sideways.
+ */
+@media (max-width: 640px) {
+  .df-report-blocks {
+    padding-right: 14px;
+    padding-left: 14px;
+  }
+
+  .df-wblocks {
+    grid-auto-columns: minmax(44px, 1fr);
+    gap: 2px;
+    overflow-x: auto;
+    overscroll-behavior-x: contain;
+  }
+
+  .df-wblocks.is-long {
+    padding-bottom: 6px;
+  }
+
+  .df-month {
+    grid-template-columns: repeat(7, minmax(44px, 1fr));
+    gap: 2px;
+    overflow-x: auto;
+    overscroll-behavior-x: contain;
+  }
+}
+
+/* An empty day is a keyboard stop too (review r4): the neutral ring sits inside its column. */
+.df-wb[data-roving-key]:focus-visible,
+.df-mday[data-roving-key]:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: -2px;
+}
+
+.df-wb[data-roving-key]:focus:not(:focus-visible),
+.df-mday[data-roving-key]:focus:not(:focus-visible),
+.df-where:focus {
+  outline: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .df-day-pick {
+    transition: none;
+  }
 }
 
 .df-alloc {
@@ -13136,8 +13316,7 @@ dialog.ui-dialog.df-rf-dialog {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .df-wb-stack > span,
-  .df-mday-stack > i,
+  .df-tblock,
   .df-donut-seg {
     transition: none;
   }

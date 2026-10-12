@@ -1,19 +1,74 @@
 "use client";
 
 import Link from "next/link";
-import type { CSSProperties } from "react";
-import { useState } from "react";
+import type { CSSProperties, KeyboardEvent, PointerEvent as ReactPointerEvent } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { X } from "lucide-react";
 import { ReportDonutSegment } from "@/components/ReportDonutSegment";
 import { AccessibleBreakdownTable } from "@/components/ReportsOverview";
 import type { ReportBreakdownRow } from "@/lib/report-service";
 import { blockStyle } from "@/lib/block-style";
 import { categoryDisplay } from "@/lib/display";
 import { formatDuration } from "@/lib/format";
-import type { ReportBlocksModel } from "@/lib/reports-blocks";
+import { donutArcs, type ReportBlocksDay, type ReportBlocksModel } from "@/lib/reports-blocks";
 
 const WEEKDAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 const RADIUS = 46;
 const CIRCUMFERENCE = 2 * Math.PI * RADIUS;
+const blockKey = (day: ReportBlocksDay, blockId: string) => `${day.key}|${blockId}`;
+/** A day without blocks is a keyboard stop itself, so arrows reach every day (review r4). */
+const dayItemKey = (day: ReportBlocksDay) => `${day.key}|`;
+
+/**
+ * What is tracing an activity, each tracked apart so ending one never clears another: a pointer
+ * hovering it, keyboard focus on it, or a pin (an activity picked in the touch day panel, or an
+ * activation that did not move focus). Hover wins over focus, focus over a pin.
+ */
+type TraceSource = "hover" | "focus" | "tap";
+type Trace = Record<TraceSource, string | null>;
+const NO_TRACE: Trace = { hover: null, focus: null, tap: null };
+/** A touch within this distance of a day still lands on it (half the widest column gap). */
+const TOUCH_SLOP = 6;
+/** A mouse within this distance of a block, either way, is on it (the stack gaps are 2–3 px). */
+const POINTER_SLOP = 2;
+
+function distanceToRect(x: number, y: number, rect: DOMRect) {
+  const dx = x < rect.left ? rect.left - x : x > rect.right ? x - rect.right : 0;
+  const dy = y < rect.top ? rect.top - y : y > rect.bottom ? y - rect.bottom : 0;
+  return Math.hypot(dx, dy);
+}
+
+function nearest(elements: Iterable<HTMLElement>, x: number, y: number, slop: number) {
+  let found: HTMLElement | null = null;
+  let best = Infinity;
+  for (const element of elements) {
+    const distance = distanceToRect(x, y, element.getBoundingClientRect());
+    if (distance <= slop && distance < best) {
+      found = element;
+      best = distance;
+    }
+  }
+  return found;
+}
+
+/**
+ * The block under a mouse (review 4: within 2 px horizontally and vertically), found from the
+ * card because the drawn blocks take no pointer events.
+ */
+export function traceBlockAt(root: HTMLElement, x: number, y: number) {
+  const day = nearest(root.querySelectorAll<HTMLElement>("[data-trace-day]"), x, y, POINTER_SLOP);
+  const block = day ? nearest(day.querySelectorAll<HTMLElement>("[data-block-key]"), x, y, POINTER_SLOP) : null;
+  return block?.dataset.key ?? null;
+}
+
+/**
+ * The day under a finger (review 3): the whole day column or month cell, plus its share of the
+ * gaps, is the touch target, about 45 px wide on a phone. A 2–3 px block is never a touch target
+ * itself; the day panel lists the day's activities as 44 px rows instead.
+ */
+export function traceDayAt(root: HTMLElement, x: number, y: number) {
+  return nearest(root.querySelectorAll<HTMLElement>("[data-trace-day]"), x, y, TOUCH_SLOP)?.dataset.traceDay ?? null;
+}
 
 export type AllocationSlice = {
   id: string;
@@ -28,9 +83,15 @@ export type AllocationSlice = {
 
 /**
  * The range in blocks beside "Where it went" (Blocks parity step 15b-2): hovering or focusing an
- * activity in the donut or its table highlights that activity's blocks (the others fade) and puts
- * its time in the donut's centre. Slices and rows stay links that filter by the activity. Every
- * date-derived value arrives computed with the report (`reportBlocksModel`).
+ * activity anywhere — its donut slice, its row, or any of its blocks in the day columns or month
+ * grid (staging feedback I1) — traces it: its blocks and slice stay, every other block and slice
+ * fades, its row is marked and its time is in the donut's centre. Hover, focus and a pin are
+ * tracked apart. A mouse traces the block it is on (`traceBlockAt`); a touch picks a day
+ * (`traceDayAt`) and opens the day panel under the blocks, whose 44 px activity rows pin a trace.
+ * A pin and the panel end on Close, a pointer down outside the card, Escape or new report data.
+ * Slices and rows stay links that filter by the activity; blocks only trace and are one tab stop
+ * (arrow keys move between them).
+ * Every date-derived value arrives computed with the report (`reportBlocksModel`).
  */
 export function ReportsBlocksPanel({
   blocks,
@@ -48,56 +109,301 @@ export function ReportsBlocksPanel({
   totalLabel: string;
   totalSeconds: number;
 }) {
-  // Ids, resolved against the current slices each render: a slice that a filter navigation took
-  // away (Other splitting into its activities) simply stops being highlighted.
-  const [hotId, setHotId] = useState<string | null>(null);
+  // Slice ids per source, resolved against the current slices each render.
+  const [trace, setTrace] = useState<Trace>(NO_TRACE);
+  const hotId = trace.hover ?? trace.focus ?? trace.tap;
   const hot = slices.find((slice) => slice.id === hotId) ?? null;
   // The slice holding keyboard focus gets its own neutral ring, independent of the highlight.
   const [focusedId, setFocusedId] = useState<string | null>(null);
-  // When a filter navigation brings new slices, drop ids they no longer contain, so a slice that
-  // went away and later comes back (filtered out, then the filter removed) returns unhighlighted.
-  const [seenSlices, setSeenSlices] = useState(slices);
-  if (seenSlices !== slices) {
-    setSeenSlices(slices);
-    if (hotId !== null && !slices.some((slice) => slice.id === hotId)) setHotId(null);
+  // The touch day panel (review 3): the day a touch picked, and the day it last showed, kept while
+  // the panel collapses so its rows never blank mid-exit.
+  const [pickedKey, setPickedKey] = useState<string | null>(null);
+  // A snapshot of the day the panel shows (review r3): a report that drops that day must not blank
+  // the rows while the panel collapses.
+  const [shownDay, setShownDay] = useState<ReportBlocksDay | null>(null);
+  // New report data (a filter, range or refresh navigation) invalidates every trace: the element
+  // that started it may be gone without a blur or leave (I1 review). The focus ring follows the
+  // slice element, which survives while its slice does.
+  const [seenData, setSeenData] = useState({ blocks, slices });
+  if (seenData.slices !== slices || seenData.blocks !== blocks) {
+    setSeenData({ blocks, slices });
+    setTrace(NO_TRACE);
+    setPickedKey(null);
     if (focusedId !== null && !slices.some((slice) => slice.id === focusedId)) setFocusedId(null);
   }
   const hotIds = hot ? new Set(hot.categoryIds) : null;
-  const highlight = (slice: AllocationSlice) => (on: boolean) => setHotId((current) => (on ? slice.id : current === slice.id ? null : current));
+  /** Start (`on`) or end one source's trace of a slice; ending only clears that source's own trace. */
+  const setSource = (source: TraceSource, sliceId: string | null, on = true) =>
+    setTrace((current) => {
+      const next = on ? sliceId : current[source] === sliceId ? null : current[source];
+      return next === current[source] ? current : { ...current, [source]: next };
+    });
+  const highlight = (slice: AllocationSlice) => (on: boolean, source: TraceSource) => setSource(source, slice.id, on);
+  // A block traces the slice holding its activity (Other for an activity folded into it).
+  const sliceByActivity = new Map(slices.flatMap((slice) => slice.categoryIds.map((id) => [id, slice] as const)));
+  const sliceIdFor = (blockId: string | null) => (blockId === null ? null : sliceByActivity.get(blockId)?.id ?? null);
 
-  const arcs = slices.map((slice, index) => {
-    const before = slices.slice(0, index).reduce((sum, previous) => sum + previous.seconds, 0);
-    const fraction = totalSeconds > 0 ? slice.seconds / totalSeconds : 0;
-    return { slice, dash: fraction * CIRCUMFERENCE, offset: -(before / Math.max(1, totalSeconds)) * CIRCUMFERENCE };
+  const blocksRef = useRef<HTMLElement | null>(null);
+  const cardRef = useRef<HTMLElement | null>(null);
+  const whereRef = useRef<HTMLElement | null>(null);
+  // When new data takes the whole blocks card away (a range with no blocks card), focus inside it
+  // moves to "Where it went" before the card leaves the document (review r4): React runs a ref's
+  // cleanup before it removes the node. Stable, so it never runs on an ordinary re-render.
+  const cardRefCallback = useCallback((node: HTMLElement | null) => {
+    cardRef.current = node;
+    if (!node) return;
+    return () => {
+      if (document.activeElement instanceof Node && node.contains(document.activeElement)) whereRef.current?.focus({ preventScroll: true });
+      cardRef.current = null;
+    };
+  }, []);
+  // Whether focus is in the blocks card, to bring it back when new data removes the focused
+  // block without a blur.
+  const cardHasFocus = useRef(false);
+  // Focus the program moves (recovery after new data, the panel closing) never traces (review r5):
+  // only a person's keyboard or pointer focus does. Focus events fire inside focus().
+  const silentFocus = useRef(false);
+  const focusQuietly = (element: HTMLElement | null | undefined) => {
+    if (!element) return;
+    silentFocus.current = true;
+    try {
+      element.focus();
+    } finally {
+      silentFocus.current = false;
+    }
+  };
+  const pickedDay = blocks?.days.find((day) => day.key === pickedKey) ?? null;
+  const panelRef = useRef<HTMLDivElement | null>(null);
+  // Closing makes the panel inert; focus inside it (a row or Close) returns to the picked day's
+  // first block, or to the blocks card when that day is gone (review r3), whatever closed it.
+  // Close and Escape move it before the panel turns inert; the layout effect covers the closes
+  // that come with new report data.
+  const restoreFocus = () => {
+    const panel = panelRef.current;
+    if (!panel || !(document.activeElement instanceof Node) || !panel.contains(document.activeElement)) return;
+    const dayKey = panel.dataset.dayKey;
+    const day = [...(blocksRef.current?.querySelectorAll<HTMLElement>("[data-trace-day]") ?? [])].find((element) => element.dataset.traceDay === dayKey);
+    const target = day?.querySelector<HTMLElement>("[data-roving-key]") ?? (day?.matches("[data-roving-key]") ? day : null) ?? cardRef.current;
+    focusQuietly(target);
+  };
+  const restoreFocusRef = useRef(restoreFocus);
+  const panelOpen = pickedDay !== null;
+  // The panel's `inert` is set here, after focus has left it (review r4): set by React, it would
+  // land in the commit before any effect could move focus out.
+  useLayoutEffect(() => {
+    restoreFocusRef.current = restoreFocus;
+    const panel = panelRef.current;
+    if (panel) {
+      if (panelOpen) panel.removeAttribute("inert");
+      else {
+        restoreFocus();
+        if (!panel.hasAttribute("inert")) panel.setAttribute("inert", "");
+      }
+    }
+    // A focused block that new data removed takes focus with it: hand it to the card's tab stop.
+    const items = [...(blocksRef.current?.querySelectorAll<HTMLElement>("[data-roving-key]") ?? [])];
+    const active = document.activeElement;
+    if (cardHasFocus.current && (active === null || active === document.body)) {
+      focusQuietly(items.find((element) => element.tabIndex === 0) ?? cardRef.current);
+    } else if (active instanceof HTMLElement && blocksRef.current?.contains(active) && !active.hasAttribute("data-roving-key")) {
+      // A focused empty day that new data filled is no longer a stop (its blocks are, review r5):
+      // move to its first block so arrows and Home/End keep working, without tracing.
+      focusQuietly(active.querySelector<HTMLElement>("[data-roving-key]") ?? items.find((element) => element.tabIndex === 0) ?? cardRef.current);
+    }
   });
+  const closeDay = () => {
+    restoreFocus();
+    setPickedKey(null);
+    setSource("tap", null);
+  };
+  // While a pin or the day panel is up, a pointer down outside the card or Escape anywhere ends
+  // them (review 2: Escape works without focus on a block); nothing listens otherwise.
+  const engaged = trace.tap !== null || pickedKey !== null;
+  useEffect(() => {
+    if (!engaged) return;
+    const end = () => {
+      setPickedKey(null);
+      setTrace((current) => (current.tap === null ? current : { ...current, tap: null }));
+    };
+    const onPointerDown = (event: Event) => {
+      if (event.target instanceof Node && cardRef.current?.contains(event.target)) return;
+      // Focus goes where the pointer lands, never back into the blocks (a focused block would
+      // keep tracing after the dismissal).
+      const active = document.activeElement;
+      if (active instanceof HTMLElement && panelRef.current?.contains(active)) active.blur();
+      end();
+    };
+    const onKeyDown = (event: globalThis.KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      restoreFocusRef.current();
+      end();
+    };
+    document.addEventListener("pointerdown", onPointerDown, true);
+    document.addEventListener("keydown", onKeyDown);
+    return () => {
+      document.removeEventListener("pointerdown", onPointerDown, true);
+      document.removeEventListener("keydown", onKeyDown);
+    };
+  }, [engaged]);
+
+  // A touch picks its day on release, and only if the page did not take it for a scroll
+  // (pointercancel) and no new report data arrived in between (review 3: the gesture remembers the
+  // data it started on).
+  const touchDown = useRef<{ dayKey: string | null; data: typeof seenData } | null>(null);
+  const pointerProps = {
+    onPointerCancel: () => {
+      touchDown.current = null;
+    },
+    onPointerDown: (event: ReactPointerEvent<HTMLElement>) => {
+      if (event.pointerType !== "touch" || !blocksRef.current) return;
+      touchDown.current = { dayKey: traceDayAt(blocksRef.current, event.clientX, event.clientY), data: seenData };
+    },
+    onPointerLeave: (event: ReactPointerEvent<HTMLElement>) => {
+      if (event.pointerType !== "touch") setSource("hover", null);
+    },
+    onPointerMove: (event: ReactPointerEvent<HTMLElement>) => {
+      if (event.pointerType === "touch" || !blocksRef.current) return;
+      setSource("hover", sliceIdFor(traceBlockAt(blocksRef.current, event.clientX, event.clientY)));
+    },
+    onPointerUp: (event: ReactPointerEvent<HTMLElement>) => {
+      const down = touchDown.current;
+      touchDown.current = null;
+      if (event.pointerType !== "touch" || !down || down.data !== seenData) return;
+      const day = blocks?.days.find((entry) => entry.key === down.dayKey);
+      // A day without time, the space around the days, or the picked day again closes the panel.
+      if (!day || day.activities.length === 0 || day.key === pickedKey) closeDay();
+      else {
+        setPickedKey(day.key);
+        setShownDay(day);
+      }
+    }
+  };
+  // The blocks are one tab stop: the last block focused (else the first) takes Tab, and arrow keys
+  // move between days (left/right) and within a day's stack (up/down), Home/End to the ends.
+  // Days without blocks are stops too, so every day — trailing empty days included — is reachable
+  // and scrolled into view by focus in the phone strip and month grid (review r4).
+  const [rovingKey, setRovingKey] = useState<string | null>(null);
+  const rovingKeys = blocks
+    ? blocks.days.flatMap((day) => (day.blocks.length ? day.blocks.map((block) => blockKey(day, block.id)) : [dayItemKey(day)]))
+    : [];
+  const tabKey = rovingKey !== null && rovingKeys.includes(rovingKey) ? rovingKey : rovingKeys[0] ?? null;
+  const carriedActivity = useRef<{ dayKey: string; activityId: string | null } | null>(null);
+  const moveFocus = (event: KeyboardEvent<HTMLElement>, day: ReportBlocksDay, index: number) => {
+    if (!blocks) return;
+    const at = blocks.days.findIndex((entry) => entry.key === day.key);
+    let target: string | null = null;
+    if (event.key === "ArrowUp" || event.key === "ArrowDown") {
+      // Stacks grow upwards (column-reverse): up is the next block in the day.
+      const next = day.blocks[index + (event.key === "ArrowUp" ? 1 : -1)];
+      target = next ? blockKey(day, next.id) : null;
+    } else if (event.key === "ArrowLeft" || event.key === "ArrowRight") {
+      const other = blocks.days[at + (event.key === "ArrowRight" ? 1 : -1)];
+      if (other) {
+        // The activity carries across empty days (review r5): Work → empty day → Work again.
+        const carried = carriedActivity.current;
+        const wanted = day.blocks[index]?.id ?? (carried?.dayKey === day.key ? carried.activityId : null);
+        const same = other.blocks.find((block) => block.id === wanted);
+        const fallback = other.blocks[Math.min(index, other.blocks.length - 1)];
+        if (same || fallback) target = blockKey(other, (same ?? fallback).id);
+        else {
+          target = dayItemKey(other);
+          carriedActivity.current = { dayKey: other.key, activityId: wanted };
+        }
+      }
+    } else if (event.key === "Home" || event.key === "End") {
+      target = (event.key === "Home" ? rovingKeys[0] : rovingKeys[rovingKeys.length - 1]) ?? null;
+    } else return;
+    event.preventDefault();
+    if (!target) return;
+    setRovingKey(target);
+    const items = blocksRef.current?.querySelectorAll<HTMLElement>("[data-roving-key]") ?? [];
+    const element = [...items].find((item) => item.dataset.rovingKey === target);
+    element?.focus();
+    element?.scrollIntoView?.({ block: "nearest", inline: "nearest" });
+  };
+  /** An empty day's own keyboard stop: named by its day, it traces nothing. */
+  const emptyDayProps = (day: ReportBlocksDay) => {
+    if (day.blocks.length) return {};
+    const key = dayItemKey(day);
+    return {
+      "data-roving-key": key,
+      onFocus: () => setRovingKey(key),
+      onKeyDown: (event: KeyboardEvent<HTMLElement>) => moveFocus(event, day, 0),
+      tabIndex: key === tabKey ? 0 : -1
+    };
+  };
+  const traceProps = (day: ReportBlocksDay, block: ReportBlocksDay["blocks"][number], index: number) => {
+    const key = blockKey(day, block.id);
+    const sliceId = sliceIdFor(block.id);
+    return {
+      "aria-describedby": "df-report-blocks-hint",
+      "aria-label": `${block.name}, ${formatDuration(block.seconds)}, ${day.label}`,
+      className: `df-tblock ${block.color ? "df-block" : "df-wb-none"}${hotIds?.has(block.id) ? " is-hot" : ""}`,
+      "data-block-key": key,
+      "data-key": block.id,
+      "data-roving-key": key,
+      // Blocks take no pointer events (the day is the hit area); focus and activation come from
+      // the keyboard and assistive technology. Leaving a block ends its focus and any pin it set.
+      onBlur: () =>
+        setTrace((current) => ({
+          ...current,
+          focus: current.focus === sliceId ? null : current.focus,
+          tap: current.tap === sliceId ? null : current.tap
+        })),
+      // An activation that does not move focus (VoiceOver on iPhone) pins the trace like a tap.
+      onClick: () => setSource("tap", sliceId),
+      onFocus: () => {
+        setRovingKey(key);
+        if (!silentFocus.current) setSource("focus", sliceId);
+      },
+      onKeyDown: (event: KeyboardEvent<HTMLElement>) => moveFocus(event, day, index),
+      style: { ...(block.color ? blockStyle(block.color, block.name) : {}), height: block.height },
+      tabIndex: key === tabKey ? 0 : -1,
+      type: "button" as const
+    };
+  };
+
+  const arcs = donutArcs(slices.map((slice) => slice.seconds), totalSeconds, CIRCUMFERENCE).map((arc, index) => ({ ...arc, slice: slices[index] }));
 
   return (
     <div className={`df-report-panel${blocks ? "" : " is-single"}`}>
       {blocks ? (
-        <section aria-labelledby="df-report-blocks-title" className="df-card df-report-blocks">
+        <section
+          aria-labelledby="df-report-blocks-title"
+          className="df-card df-report-blocks"
+          onBlur={(event) => {
+            if (!(event.relatedTarget instanceof Node && event.currentTarget.contains(event.relatedTarget))) cardHasFocus.current = false;
+          }}
+          onFocus={() => {
+            cardHasFocus.current = true;
+          }}
+          ref={cardRefCallback}
+          tabIndex={-1}
+        >
           <div className="df-card-head">
             <h2 id="df-report-blocks-title">{blocks.layout === "month" ? "The month in blocks" : "The days in blocks"}</h2>
             <span className="df-faint">
               <span className="df-hint-fine">Hover an activity to trace it</span>
-              <span className="df-hint-coarse">Tap an activity to trace it</span>
+              <span className="df-hint-coarse">Tap a day, then an activity, to trace it</span>
+            </span>
+            <span className="sr-only" id="df-report-blocks-hint">
+              Focus a block to trace its activity in Where it went; arrow keys move between blocks.
             </span>
           </div>
           {blocks.layout === "week" ? (
             <ol
-              className={`df-wblocks${hotIds ? " has-hot" : ""}`}
+              className={`df-wblocks${blocks.days.length > 7 ? " is-long" : ""}${hotIds ? " has-hot" : ""}`}
+              ref={(node) => {
+                blocksRef.current = node;
+              }}
+              {...pointerProps}
               style={{ "--df-wb-height": "230px", "--df-land": land.easing, "--df-land-ms": `${land.durationMs}ms` } as CSSProperties}
             >
               {blocks.days.map((day) => (
-                <li aria-label={day.accessibleName} className={`df-wb${day.isToday ? " is-today" : ""}`} key={day.key}>
-                  <span aria-hidden="true" className="df-wb-stack">
-                    {day.blocks.map((block) => (
-                      <span
-                        className={`${block.color ? "df-block" : "df-wb-none"}${hotIds?.has(block.id) ? " is-hot" : ""}`}
-                        data-key={block.id}
-                        key={block.id}
-                        style={{ ...(block.color ? blockStyle(block.color, block.name) : {}), height: block.height }}
-                        title={`${block.name} · ${formatDuration(block.seconds)}`}
-                      />
+                <li aria-label={day.accessibleName} className={`df-wb${day.isToday ? " is-today" : ""}${day.key === pickedKey ? " is-picked" : ""}`} data-trace-day={day.key} key={day.key} {...emptyDayProps(day)}>
+                  <span className="df-wb-stack">
+                    {day.blocks.map((block, index) => (
+                      <button key={block.id} {...traceProps(day, block, index)} />
                     ))}
                   </span>
                   <span aria-hidden="true" className="df-wb-label">
@@ -111,30 +417,70 @@ export function ReportsBlocksPanel({
               ))}
             </ol>
           ) : (
-            <div className={`df-month${hotIds ? " has-hot" : ""}`}>
+            <div
+              className={`df-month${hotIds ? " has-hot" : ""}`}
+              ref={(node) => {
+                blocksRef.current = node;
+              }}
+              {...pointerProps}
+            >
               {WEEKDAYS.map((weekday) => <span aria-hidden="true" className="df-dow" key={weekday}>{weekday}</span>)}
               {Array.from({ length: blocks.leadingBlanks }, (_, index) => <span aria-hidden="true" className="df-mday is-empty" key={`blank-${index}`} />)}
               {blocks.days.map((day) => (
-                <span aria-label={day.accessibleName} className={`df-mday${day.isToday ? " is-today" : ""}`} key={day.key} role="img">
+                <span aria-label={day.accessibleName} className={`df-mday${day.isToday ? " is-today" : ""}${day.key === pickedKey ? " is-picked" : ""}`} data-trace-day={day.key} key={day.key} role="group" {...emptyDayProps(day)}>
                   <em aria-hidden="true">{day.dateNumber}</em>
-                  <span aria-hidden="true" className="df-mday-stack">
-                    {day.blocks.map((block) => (
-                      <i
-                        className={`${block.color ? "df-block" : "df-wb-none"}${hotIds?.has(block.id) ? " is-hot" : ""}`}
-                        data-key={block.id}
-                        key={block.id}
-                        style={{ ...(block.color ? blockStyle(block.color, block.name) : {}), height: block.height }}
-                      />
+                  <span className="df-mday-stack">
+                    {day.blocks.map((block, index) => (
+                      <button key={block.id} {...traceProps(day, block, index)} />
                     ))}
                   </span>
                 </span>
               ))}
             </div>
           )}
+          <div className={`df-day-pick${pickedDay ? " is-open" : ""}`} data-day-key={shownDay?.key} ref={panelRef}>
+            <div className="df-day-pick-body">
+              {shownDay ? (
+                <>
+                  <div className="df-day-pick-head">
+                    <h3>{shownDay.label}</h3>
+                    <button aria-label={`Close ${shownDay.label}`} className="df-day-pick-close" onClick={closeDay} type="button">
+                      <X aria-hidden="true" size={18} />
+                    </button>
+                  </div>
+                  <ul aria-label={`Activities on ${shownDay.label}`} className="df-day-pick-rows">
+                    {shownDay.activities.map((activity) => {
+                      const sliceId = sliceIdFor(activity.id);
+                      const pressed = sliceId !== null && trace.tap === sliceId;
+                      return (
+                        <li key={activity.id}>
+                          <button
+                            aria-pressed={pressed}
+                            className={`df-day-pick-row${hotIds?.has(activity.id) ? " is-hot" : ""}`}
+                            disabled={sliceId === null}
+                            onClick={() => setSource("tap", pressed ? null : sliceId)}
+                            type="button"
+                          >
+                            <i
+                              aria-hidden="true"
+                              className={activity.color ? undefined : "is-none"}
+                              style={activity.color ? blockStyle(activity.color, activity.name) : undefined}
+                            />
+                            <b>{activity.name}</b>
+                            <span className="df-tnum">{formatDuration(activity.seconds)}</span>
+                          </button>
+                        </li>
+                      );
+                    })}
+                  </ul>
+                </>
+              ) : null}
+            </div>
+          </div>
         </section>
       ) : null}
 
-      <section aria-labelledby="df-where-title" className="df-card df-where">
+      <section aria-labelledby="df-where-title" className="df-card df-where" ref={whereRef} tabIndex={-1}>
         <div className="df-card-head">
           <h2 id="df-where-title">Where it went</h2>
           <span className="df-faint">{slices.length} {slices.length === 1 ? "activity" : "activities"}</span>
@@ -187,10 +533,10 @@ export function ReportsBlocksPanel({
                     aria-label={`Filter by ${slice.name}, ${formatDuration(slice.seconds)}, ${slice.percentage}%`}
                     className={`df-crow${hot?.id === slice.id ? " is-hot" : ""}`}
                     href={slice.href}
-                    onBlur={() => highlight(slice)(false)}
-                    onFocus={() => highlight(slice)(true)}
-                    onMouseEnter={() => highlight(slice)(true)}
-                    onMouseLeave={() => highlight(slice)(false)}
+                    onBlur={() => highlight(slice)(false, "focus")}
+                    onFocus={() => highlight(slice)(true, "focus")}
+                    onMouseEnter={() => highlight(slice)(true, "hover")}
+                    onMouseLeave={() => highlight(slice)(false, "hover")}
                     style={slice.color && !slice.isUncategorized ? blockStyle(slice.color, slice.name) : undefined}
                   >
                     <i aria-hidden="true" className={slice.color && !slice.isUncategorized ? undefined : "is-none"} />
