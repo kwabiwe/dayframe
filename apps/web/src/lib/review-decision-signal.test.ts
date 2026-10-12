@@ -24,11 +24,21 @@ describe("owner-authored Review description signal (E1)", () => {
     expect(isOwnerAuthoredReviewDescription("Dentist at Example Clinic", suggested)).toBe(true);
   });
 
-  it("uses the correction chain's suggested titles, else the item's own title", () => {
-    expect(reviewSuggestedTitles(["Visit Example Clinic", "Visit Example Clinic", " ", 4], "Football practice"))
-      .toEqual(["Visit Example Clinic"]);
+  it("compares with the full suggested-title history, never a correction part's own title", () => {
+    // A Dayframe suggestion: every recorded title (replay retitles) plus the current one.
+    expect(reviewSuggestedTitles(["Visit Example Clinic", " ", 4], "Visit New Clinic"))
+      .toEqual(["Visit Example Clinic", "Visit New Clinic"]);
     expect(reviewSuggestedTitles(undefined, "Visit Example Clinic")).toEqual(["Visit Example Clinic"]);
-    expect(reviewSuggestedTitles([], "Visit Example Clinic")).toEqual(["Visit Example Clinic"]);
+    // A correction part: only the chain's history; its own title may be the owner's words.
+    expect(reviewSuggestedTitles(["Visit Example Clinic", "Visit Example Clinic"], "Football practice", { correction: true }))
+      .toEqual(["Visit Example Clinic"]);
+    // Correction events from before the history existed fall back to the title.
+    expect(reviewSuggestedTitles([], "Visit Example Clinic", { correction: true })).toEqual(["Visit Example Clinic"]);
+    // A stale editor confirming the old prefilled title after a replay retitle is not the owner's.
+    expect(isOwnerAuthoredReviewDescription(
+      "Visit Example Clinic",
+      reviewSuggestedTitles(["Visit Example Clinic", "Visit New Clinic"], "Visit New Clinic")
+    )).toBe(false);
   });
 
   it("strips both server-only keys from client payloads and leaves others untouched", () => {

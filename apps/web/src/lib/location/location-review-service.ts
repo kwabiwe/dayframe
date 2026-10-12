@@ -50,13 +50,14 @@ type LockedReview = {
   eventType: string | null;
   semanticRevision: Date | string | null;
   /**
-   * Every title Dayframe suggested for this item (its own title, or for a correction part the
-   * titles of the items it came from). A description equal to one of them is not the owner's.
+   * Every title Dayframe ever suggested for this item: its event's recorded history (replay
+   * retitles included) plus its current title, or for a correction part the history carried from
+   * the items it came from. A description equal to one of them is not the owner's.
    */
   suggestedTitles: string[];
 };
 
-type LockedReviewRow = Omit<LockedReview, "suggestedTitles"> & { reviewSuggestedTitles: unknown };
+type LockedReviewRow = Omit<LockedReview, "suggestedTitles"> & { reviewSuggestedTitles: unknown; correctionEvent: boolean };
 
 type ConfirmedPlaceIdentity = {
   placeId: string | null;
@@ -242,6 +243,7 @@ async function lockLocationReviews(
             ae.source as "eventSource",
             ae.event_type as "eventType",
             ae.raw_payload -> '${REVIEW_SUGGESTED_TITLES_PAYLOAD_KEY}' as "reviewSuggestedTitles",
+            coalesce(ae.client_event_id like 'location-correction:%', false) as "correctionEvent",
             coalesce(st.updated_at, cs.updated_at, ri.resolved_at, ri.created_at) as "semanticRevision"
      from review_items ri
      join activity_events ae
@@ -259,9 +261,9 @@ async function lockLocationReviews(
   if (result.rows.length !== uniqueIds.length) {
     throw new ReviewResolutionError("review_item_not_found", "Location review item not found.", { status: 404 });
   }
-  return result.rows.map(({ reviewSuggestedTitles: payloadTitles, ...row }) => ({
+  return result.rows.map(({ reviewSuggestedTitles: payloadTitles, correctionEvent, ...row }) => ({
     ...row,
-    suggestedTitles: reviewSuggestedTitles(payloadTitles, row.title)
+    suggestedTitles: reviewSuggestedTitles(payloadTitles, row.title, { correction: correctionEvent })
   }));
 }
 

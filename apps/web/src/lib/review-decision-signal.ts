@@ -36,13 +36,18 @@ export function isOwnerAuthoredReviewDescription(
   return !suggestedTitles.some((title) => normalizedReviewText(title) === key);
 }
 
-/** The Dayframe-suggested titles a locked Review item stands for. */
-export function reviewSuggestedTitles(payloadTitles: unknown, itemTitle: string) {
-  if (Array.isArray(payloadTitles)) {
-    const titles = payloadTitles.filter((title): title is string => typeof title === "string" && title.trim().length > 0);
-    if (titles.length > 0) return [...new Set(titles)];
-  }
-  return [itemTitle];
+/**
+ * The Dayframe-suggested titles a locked Review item stands for: every title recorded in its
+ * event's history (replay retitles included) plus, for a Dayframe suggestion, its current title.
+ * A correction part's own title may be the owner's words, so for corrections only the chain's
+ * recorded history counts (falling back to the title for correction events from before it).
+ */
+export function reviewSuggestedTitles(payloadTitles: unknown, itemTitle: string, options: { correction?: boolean } = {}) {
+  const history = Array.isArray(payloadTitles)
+    ? payloadTitles.filter((title): title is string => typeof title === "string" && title.trim().length > 0)
+    : [];
+  if (options.correction) return history.length > 0 ? [...new Set(history)] : [itemTitle];
+  return [...new Set([...history, itemTitle])];
 }
 
 /** Removes the server-only Review decision keys from a client-supplied event payload. */

@@ -1,4 +1,5 @@
 import type pg from "pg";
+import { PRESERVE_REVIEW_TITLE_HISTORY_SQL, recordReviewTitleHistory } from "./review-title-history";
 import {
   AUTOMATIC_LOCATION_POLICY_VERSION, LOCATION_ENGINE_V2_CONFIG, assessAutomaticOverlap,
   type CommuteSegment, type LocationSegment, type StaySegment
@@ -230,7 +231,7 @@ export async function emitReviewSemanticSegments(
          else activity_events.confidence
        end,
        raw_payload = case
-         when activity_events.review_status = 'needs_review' then excluded.raw_payload
+         when activity_events.review_status = 'needs_review' then ${PRESERVE_REVIEW_TITLE_HISTORY_SQL}
          else activity_events.raw_payload
        end,
        suggested_category_id = case
@@ -255,6 +256,9 @@ export async function emitReviewSemanticSegments(
       from jsonb_to_recordset($3::jsonb) as r(event_id uuid,segment_id uuid,event_type text,title text,
         category_id uuid,place_id uuid,occurred_at timestamptz,stopped_at timestamptz,confidence text,notes text)
       where not exists (select 1 from review_items where workspace_id=$1 and user_id=$2 and event_id=r.event_id)`, parameters);
+    // Keep every title Dayframe suggested (E1): the outgoing one before a retitle, the new one after.
+    const batchEventIds = batch.map(row => row.event_id);
+    await recordReviewTitleHistory(client, session, batchEventIds);
     // Preserve the original update list: in particular type and status are never changed.
     await client.query(`update review_items target set location_segment_id=r.segment_id,title=r.title,
       suggested_category_id=r.category_id,suggested_place_id=r.place_id,suggested_started_at=r.occurred_at,
@@ -262,6 +266,7 @@ export async function emitReviewSemanticSegments(
       from jsonb_to_recordset($3::jsonb) as r(event_id uuid,segment_id uuid,title text,category_id uuid,place_id uuid,
         occurred_at timestamptz,stopped_at timestamptz,confidence text,notes text)
       where target.workspace_id=$1 and target.user_id=$2 and target.event_id=r.event_id and target.status='open'`, parameters);
+    await recordReviewTitleHistory(client, session, batchEventIds);
   }
   for (const batch of chunks(linked.filter(row => row.kind === "stay"))) {
     await client.query(`update stay_segments target set created_from_event_id=r.event_id,

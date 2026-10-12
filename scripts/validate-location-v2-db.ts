@@ -601,6 +601,92 @@ async function validateRecentOwnerAuthoredSignal() {
   assert.equal(markers.rows[0].count, 4, "Owner-authored markers were written to unexpected events.");
 }
 
+/**
+ * E1 (Codex r3): replay can retitle an open suggestion while an editor prefilled with the old
+ * title is still open, and older clients send no proposal hash. Every title Dayframe ever
+ * suggested must stay Dayframe's, through split corrections too.
+ */
+async function validateRecentTitleHistoryAcrossReplay() {
+  await clearDerivedLocationState();
+  process.env.DAYFRAME_LOCATION_ROLLOUT_MODE = "v2_review";
+  const fixture = locationAcceptanceFixture();
+  const evidenceBatch = batch("db-recent-title-history", fixture.evidence, "v2_review", fixture.evidence[0].occurredAt);
+  await ingestLocationEvidence(evidenceBatch, session, PROCESSING_AT);
+  const openStays = async () => pool.query<{ id: string; title: string; startedAt: string; stoppedAt: string }>(
+    `select id, title, suggested_started_at as "startedAt", suggested_stopped_at as "stoppedAt"
+     from review_items
+     where workspace_id = $1 and user_id = $2 and status = 'open' and location_segment_id in (
+       select id from stay_segments where workspace_id = $1 and user_id = $2
+     ) order by suggested_started_at, id`,
+    [WORKSPACE_ID, USER_ID]
+  );
+  const savedNames = new Set(LOCATION_ACCEPTANCE_PLACES.map((place) => `Visit ${place.name}`));
+  const before = (await openStays()).rows.filter((row) => savedNames.has(row.title));
+  assert(before.length >= 3, "Three saved-place visit suggestions are required for title-history validation.");
+
+  // Rename every saved place, then replay: the open suggestions are retitled in place.
+  const renamed = " (renamed)";
+  await pool.query("update places set name = name || $2 where workspace_id = $1", [WORKSPACE_ID, renamed]);
+  try {
+    await ingestLocationEvidence(evidenceBatch, session, PROCESSING_AT);
+    const after = new Map((await openStays()).rows.map((row) => [row.id, row]));
+    for (const row of before) {
+      assert.equal(after.get(row.id)?.title, `${row.title}${renamed}`, "Replay did not retitle the open suggestion.");
+    }
+    const [stale, chained, control] = before;
+    const midpoint = (row: { startedAt: string; stoppedAt: string }) => new Date(
+      (Date.parse(row.startedAt) + Date.parse(row.stoppedAt)) / 2
+    ).toISOString();
+
+    // A stale editor (or an older client without a proposal hash) confirms the old prefilled title.
+    const staleResult = await resolveLocationReviewAction(stale.id, {
+      action: "edit_and_confirm",
+      edit: { description: stale.title }
+    }, session);
+    // Replay before a split: the owner splits, keeping the old title on the left part, then
+    // confirms it; the right part goes through split and confirm with an inherited and an old title.
+    const split = await resolveLocationReviewAction(chained.id, {
+      action: "split",
+      splitAt: midpoint(after.get(chained.id)!),
+      left: { description: chained.title }
+    }, session);
+    assert("childSegmentIds" in split && split.childSegmentIds.length === 2);
+    const parts = await pool.query<{ id: string; startedAt: string; stoppedAt: string }>(
+      `select id, suggested_started_at as "startedAt", suggested_stopped_at as "stoppedAt" from review_items
+       where workspace_id = $1 and user_id = $2 and status = 'open' and location_segment_id = any($3::uuid[])
+       order by suggested_started_at`,
+      [WORKSPACE_ID, USER_ID, split.childSegmentIds]
+    );
+    const oldTitledPart = await resolveLocationReviewAction(parts.rows[0].id, { action: "confirm" }, session);
+    const splitAndConfirm = await resolveLocationReviewAction(parts.rows[1].id, {
+      action: "split_and_confirm",
+      splitAt: midpoint(parts.rows[1]),
+      left: { description: `  ${chained.title.toLowerCase()} ` }
+    }, session);
+    // Control: the owner's own words after the same replay still count.
+    const controlResult = await resolveLocationReviewAction(control.id, {
+      action: "edit_and_confirm",
+      edit: { description: "Dentist appointment" }
+    }, session);
+
+    const statement = buildTimeEntriesQuery(session, { limit: 100 });
+    const history = await pool.query<{ id: string; ownerAuthoredInReview: boolean }>(statement.text, statement.values);
+    const owned = (entryId: unknown) => history.rows.find((row) => row.id === entryId)?.ownerAuthoredInReview;
+    assert("entryId" in staleResult && "entryId" in oldTitledPart && "entryId" in controlResult);
+    assert("entryIds" in splitAndConfirm && splitAndConfirm.entryIds?.length === 2);
+    assert.equal(owned(staleResult.entryId), false, "A stale editor's pre-replay title counted as the owner's words.");
+    assert.equal(owned(oldTitledPart.entryId), false, "A split part keeping a pre-replay title counted as the owner's words.");
+    assert.equal(owned(splitAndConfirm.entryIds[0]), false, "A split-and-confirm part with a pre-replay title counted as the owner's words.");
+    assert.equal(owned(splitAndConfirm.entryIds[1]), false, "An inherited post-replay title counted as the owner's words.");
+    assert.equal(owned(controlResult.entryId), true, "The owner's own words after a replay were not recorded.");
+  } finally {
+    await pool.query(
+      "update places set name = left(name, length(name) - length($2)) where workspace_id = $1 and right(name, length($2)) = $2",
+      [WORKSPACE_ID, renamed]
+    );
+  }
+}
+
 async function validateCommuteReviewCategoryAndDescription() {
   await clearDerivedLocationState();
   process.env.DAYFRAME_LOCATION_ROLLOUT_MODE = "v2_review";
@@ -1586,12 +1672,13 @@ async function main() {
     await validateSemanticIdempotencyAndRollback();
     await validateCommuteReviewCategoryAndDescription();
     await validateRecentOwnerAuthoredSignal();
+    await validateRecentTitleHistoryAcrossReplay();
     await validateEnabledTrustedPlaceAutomation();
     await validateEnabledTrustedCommuteAutomation();
     await validateFinalisationWithoutNewEvidence();
     await validateSupersededReviewReactivation();
     await validateV1Compatibility();
-    console.log("Location V2 database validation passed: ordered replay, duplicate ingest, coordinate-free Motion & Fitness evidence, time away from a saved place, shadow cutover, no-new-evidence finalisation, semantic idempotency, Commute category concurrency/emission/replay/confirmation, uncertainty bounds, description semantics, isolation, trusted-place and trusted-commute automation, deliberate advisory/Review-row/exact-segment contention bounds, overlap fallback, terminal-decision preservation, superseded-Review reactivation, automatic-entry deletion safety, automatic-entry idempotency, atomic rollback, concurrent retry, split, merge, incompatible-merge rejection, the Recent owner-authored signal for every Review decision path, and V1 compatibility.");
+    console.log("Location V2 database validation passed: ordered replay, duplicate ingest, coordinate-free Motion & Fitness evidence, time away from a saved place, shadow cutover, no-new-evidence finalisation, semantic idempotency, Commute category concurrency/emission/replay/confirmation, uncertainty bounds, description semantics, isolation, trusted-place and trusted-commute automation, deliberate advisory/Review-row/exact-segment contention bounds, overlap fallback, terminal-decision preservation, superseded-Review reactivation, automatic-entry deletion safety, automatic-entry idempotency, atomic rollback, concurrent retry, split, merge, incompatible-merge rejection, the Recent owner-authored signal for every Review decision path and across replay retitles, and V1 compatibility.");
   } finally {
     if (process.env.KEEP_LOCATION_V2_DB_FIXTURE !== "1") {
       await pool.query("delete from workspaces where id = $1", [WORKSPACE_ID]).catch(() => undefined);
