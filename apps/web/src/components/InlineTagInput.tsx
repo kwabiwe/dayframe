@@ -48,7 +48,7 @@ export function InlineTagInput({
   inputRef: externalInputRef,
   name = "description",
   onActivityChoose,
-  onActivityListChange,
+  onBlur,
   onChange,
   onClick,
   onEnter,
@@ -77,7 +77,8 @@ export function InlineTagInput({
    * has left it. The owner sets both (the input does not call `onChange` for it).
    */
   onActivityChoose?: (activityId: string, description: string, trigger: ActivityChoiceTrigger) => void;
-  onActivityListChange?: (open: boolean) => void;
+  /** The description field lost focus. */
+  onBlur?: () => void;
   onChange: (value: string) => void;
   onClick?: () => void;
   onEnter?: (event: KeyboardEvent<HTMLInputElement>) => void;
@@ -102,8 +103,6 @@ export function InlineTagInput({
   const [caret, setCaret] = useState(value.length);
   const [highlightedIndex, setHighlightedIndex] = useState(0);
   const [activityIndex, setActivityIndex] = useState(0);
-  // Escape closes the Activities list for the `@` it was open for, until that mention is gone.
-  const [dismissedMentionStart, setDismissedMentionStart] = useState<number | null>(null);
   const activityPanelRef = useRef<HTMLDivElement | null>(null);
   const [pickerOpen, setPickerOpen] = useState(false);
   const [pickerQuery, setPickerQuery] = useState("");
@@ -143,7 +142,7 @@ export function InlineTagInput({
   );
   const shouldOpen = !disabled && focused && Boolean(active) && !pickerOpen;
   const mention = activities && !disabled && focused && !pickerOpen ? findActiveMention(value, caret) : null;
-  const activityOpen = Boolean(mention) && mention?.start !== dismissedMentionStart;
+  const activityOpen = Boolean(mention);
   const activityMatches = mention && activities ? activitiesForMention(mention.query, activities) : [];
   const activeActivityIndex = Math.min(activityIndex, Math.max(0, activityMatches.length - 1));
   const tagListId = `${name}-tag-suggestions`;
@@ -208,10 +207,6 @@ export function InlineTagInput({
   useEffect(() => {
     onHashtagPanelChange?.(shouldOpen || effectivePickerOpen || activityOpen);
   }, [activityOpen, effectivePickerOpen, onHashtagPanelChange, shouldOpen]);
-
-  useEffect(() => {
-    onActivityListChange?.(activityOpen);
-  }, [activityOpen, onActivityListChange]);
 
   // The highlighted activity stays in view while ↑/↓ walk a list longer than the panel.
   useEffect(() => {
@@ -355,11 +350,24 @@ export function InlineTagInput({
     if (disabled || !mention) return;
     const replacement = consumeActiveHashtag(value, mention);
     onActivityChoose?.(activity.id, replacement.text, trigger);
-    setCaret(replacement.caret);
+    placeCaret(replacement.caret);
+  }
+
+  // Escape or Close cancels only this `@…`: it leaves the text, the rest of the description and
+  // the activity stay as they were.
+  function cancelMention() {
+    if (disabled || !mention) return;
+    const replacement = consumeActiveHashtag(value, mention);
+    onChange(replacement.text);
+    placeCaret(replacement.caret);
+  }
+
+  function placeCaret(position: number) {
+    setCaret(position);
     window.requestAnimationFrame(() => {
       const input = localInputRef.current;
       input?.focus();
-      input?.setSelectionRange(replacement.caret, replacement.caret);
+      input?.setSelectionRange(position, position);
     });
   }
 
@@ -386,8 +394,7 @@ export function InlineTagInput({
       }
       if (event.key === "Escape") {
         event.preventDefault();
-        event.stopPropagation();
-        setDismissedMentionStart(mention?.start ?? null);
+        cancelMention();
         return;
       }
     }
@@ -436,16 +443,16 @@ export function InlineTagInput({
           disabled={disabled}
           id={inputId}
           name={name}
-          onBlur={() => setFocused(false)}
+          onBlur={() => {
+            setFocused(false);
+            onBlur?.();
+          }}
           onChange={(event) => {
             const nextCaret = event.target.selectionStart ?? event.target.value.length;
             onChange(event.target.value);
             setCaret(nextCaret);
             setHighlightedIndex(0);
             setActivityIndex(0);
-            if (dismissedMentionStart !== null && findActiveMention(event.target.value, nextCaret)?.start !== dismissedMentionStart) {
-              setDismissedMentionStart(null);
-            }
           }}
           onClick={() => {
             updateCaret();
@@ -524,10 +531,12 @@ export function InlineTagInput({
           <TagIcon size={15} />
         </button>
         {maybePortal(<FloatingList
+          anchorRef={anchorRef}
           className={`inline-tag-suggestions${portal ? " is-portalled time-entry-quick-editor-nested-surface" : ""}`}
           heading="Tags"
           id={tagListId}
           isOpen={shouldOpen}
+          onClose={() => setFocused(false)}
           panelRef={suggestionsPanelRef}
           style={portal ? { ...suggestionsPosition, visibility: suggestionsPosition ? "visible" : "hidden" } : undefined}
         >
@@ -552,10 +561,12 @@ export function InlineTagInput({
           {actions.length === 0 ? <span className="df-flist-empty inline-tag-empty">Type a name to search or create</span> : null}
         </FloatingList>)}
         {activities ? maybePortal(<FloatingList
+          anchorRef={anchorRef}
           className={`inline-activity-suggestions${portal ? " is-portalled time-entry-quick-editor-nested-surface" : ""}`}
           heading="Activities"
           id={activityListId}
           isOpen={activityOpen}
+          onClose={cancelMention}
           panelRef={activityPanelRef}
           style={portal ? { ...suggestionsPosition, visibility: suggestionsPosition ? "visible" : "hidden" } : undefined}
         >

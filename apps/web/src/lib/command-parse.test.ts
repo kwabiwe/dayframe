@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { activitiesForMention, findActiveMention, parseActivityMention, parseCommand } from "./command-parse";
+import { activitiesForMention, findActiveMention, parseActivityMention, parseCommand, withoutPendingMentions } from "./command-parse";
 
 const activities = [
   { id: "deep", name: "Deep work" },
@@ -64,6 +64,28 @@ describe("the @ Activities list", () => {
     expect(activitiesForMention("pwo", activities).map((activity) => activity.id)).toEqual(["deep"]);
     expect(activitiesForMention("", activities)).toHaveLength(activities.length);
     expect(activitiesForMention("zzz", activities)).toEqual([]);
+  });
+
+  it("ranks the exact name first, as the parser picks it, then prefixes, then contains", () => {
+    const pinnedFirst = [
+      { id: "focused", name: "Focused work" },
+      { id: "refocus", name: "Refocus" },
+      { id: "focus", name: "Focus" }
+    ];
+    expect(activitiesForMention("focus", pinnedFirst).map((activity) => activity.id)).toEqual(["focus", "focused", "refocus"]);
+    expect(activitiesForMention("FOCUS", pinnedFirst)[0].id).toBe(parseCommand("@focus", pinnedFirst).categoryId);
+    expect(activitiesForMention("focu", pinnedFirst)[0].id).toBe(parseCommand("@focu", pinnedFirst).categoryId);
+  });
+
+  it("leaves unfinished @ commands out of a running block's saved description", () => {
+    expect(withoutPendingMentions("Fix bug @wri", "Fix bug")).toBe("Fix bug");
+    expect(withoutPendingMentions("Fix bug @", "Fix bug")).toBe("Fix bug");
+    expect(withoutPendingMentions("Fix @a more @b ", "Fix")).toBe("Fix more");
+    // An @word the block already had stays; unchanged text is returned as it was.
+    expect(withoutPendingMentions("Call @mum today", "Call @mum")).toBe("Call @mum today");
+    expect(withoutPendingMentions("Call @mum @mum", "Call @mum")).toBe("Call @mum");
+    expect(withoutPendingMentions("  spaced  text ", "")).toBe("  spaced  text ");
+    expect(withoutPendingMentions("mail me@example.com", "")).toBe("mail me@example.com");
   });
 
   it("parses only the @activity while recording, leaving a duration as text", () => {

@@ -30,7 +30,7 @@ import { shouldStartTimerFromEntrySubmit } from "@/lib/timer-entry-draft";
 import { quickActionTimerDraft } from "@/lib/timer-runtime";
 import { blockStyle } from "@/lib/block-style";
 import { alreadyRecordingToastMessage, switchedToastMessage } from "@/lib/blocks-toast-copy";
-import { parseActivityMention, parseCommand } from "@/lib/command-parse";
+import { parseActivityMention, parseCommand, withoutPendingMentions } from "@/lib/command-parse";
 import { hasOpenDialog, isTypingTarget } from "@/lib/keyboard-ownership";
 
 const TASK_SUGGESTION_LIMIT = 5;
@@ -66,8 +66,6 @@ export function PersistentTimerBar({ workspaceMode = false }: { workspaceMode?: 
   const [narrowCommand, setNarrowCommand] = useState(false);
   const [suggestionsOpen, setSuggestionsOpen] = useState(false);
   const [hashtagSuggestionsOpen, setHashtagSuggestionsOpen] = useState(false);
-  // The `@` Activities list is open: a half-typed `@wri` is not saved to the running block.
-  const [activityListOpen, setActivityListOpen] = useState(false);
   const [startEditorOpen, setStartEditorOpen] = useState(false);
   const [timerActionsOpen, setTimerActionsOpen] = useState(false);
   const [startDateDraft, setStartDateDraft] = useState("");
@@ -153,10 +151,16 @@ export function PersistentTimerBar({ workspaceMode = false }: { workspaceMode?: 
     return () => window.clearInterval(interval);
   }, [active]);
 
+  // While recording, an `@…` typed into the description is a command, never details: autosave,
+  // Stop and leaving the field save the description without it (an `@word` the running block
+  // already had stays). See `withoutPendingMentions`.
+  const savedDescription = (description: string) => withoutPendingMentions(description, active?.description ?? "");
+
   useEffect(() => {
-    if (!active || activityListOpen) return undefined;
-    const nextCategoryId = timerDraft.categoryId || null;
-    const nextDescription = timerDraft.description.trim() || null;
+    if (!active) return undefined;
+    const draft = { ...timerDraft, description: withoutPendingMentions(timerDraft.description, active.description ?? "") };
+    const nextCategoryId = draft.categoryId || null;
+    const nextDescription = draft.description.trim() || null;
     const draftTags = timerDraft.tagNames.map((name) => normalizeTagName(name).normalizedName).sort();
     const activeTags = (active.tags?.map((tag) => tag.normalizedName)
       ?? active.tagNames.map((name) => normalizeTagName(name).normalizedName)).sort();
@@ -167,10 +171,10 @@ export function PersistentTimerBar({ workspaceMode = false }: { workspaceMode?: 
     ) return undefined;
 
     const handle = window.setTimeout(() => {
-      void updateActiveDetails(timerDraft);
+      void updateActiveDetails(draft);
     }, 650);
     return () => window.clearTimeout(handle);
-  }, [active, activityListOpen, timerDraft, updateActiveDetails]);
+  }, [active, timerDraft, updateActiveDetails]);
 
   useEffect(() => {
     if (!suggestionsOpen) return undefined;
@@ -318,9 +322,12 @@ export function PersistentTimerBar({ workspaceMode = false }: { workspaceMode?: 
   // recording). Recording: the running block's activity changes in place, never a new block.
   // Idle: Enter also starts the block, as `@activity` + Enter always has; Tab, a click or a tap
   // only picks the activity.
-  function chooseActivity(categoryId: string, description: string, trigger: ActivityChoiceTrigger) {
+  function chooseActivity(categoryId: string, text: string, trigger: ActivityChoiceTrigger) {
     setCommandNotice(null);
     setSuggestionsOpen(false);
+    // The chosen activity wins: any other `@activity` still in the text leaves it too, so
+    // nothing re-parses it (a trailing duration is still parsed when the block starts).
+    const description = parseActivityMention(text, data!.categories).description;
     if (trigger === "enter" && !active) {
       const draft = { ...timerDraft, categoryId, description };
       setTimerDraft(draft);
@@ -460,7 +467,14 @@ export function PersistentTimerBar({ workspaceMode = false }: { workspaceMode?: 
             inputRef={descriptionInputRef}
             name="timer-description"
             onActivityChoose={chooseActivity}
-            onActivityListChange={setActivityListOpen}
+            onBlur={() => {
+              // Leaving the field while recording drops an unfinished `@…` from the text.
+              if (!active) return;
+              setTimerDraft((current) => {
+                const description = savedDescription(current.description);
+                return description === current.description ? current : { ...current, description };
+              });
+            }}
             onChange={(description) => {
               setCommandNotice(null);
               setTimerDraft((current) => ({ ...current, description }));
@@ -498,8 +512,10 @@ export function PersistentTimerBar({ workspaceMode = false }: { workspaceMode?: 
           />
           {visibleTaskSuggestions.length ? (
             <TaskSuggestionsPanel
+              anchorRef={suggestionsRef}
               isBusy={isTimerBusy}
               isOpen={suggestionsOpen && !hashtagSuggestionsOpen}
+              onClose={() => setSuggestionsOpen(false)}
               onSelect={(suggestion) => void chooseTimerSuggestion(suggestion)}
               suggestions={visibleTaskSuggestions}
             />
@@ -634,7 +650,8 @@ export function PersistentTimerBar({ workspaceMode = false }: { workspaceMode?: 
           aria-busy={(Boolean(active) && isTimerBusy) || undefined}
           aria-label={active ? "Stop recording" : parsedCommand?.durationSeconds ? `${goLabel} ending now` : "Start a block"}
           onClick={() => {
-            if (active) void stopTimer();
+            // Stop saves the details without an unfinished `@…`.
+            if (active) void stopTimer({ description: savedDescription(timerDraft.description) });
           }}
         >
           {active ? (
@@ -950,7 +967,9 @@ function ManualEntryDialog({
             {visibleTaskSuggestions.length ? (
               <TaskSuggestionsPanel
                 isBusy={isBusy}
+                anchorRef={descriptionInteractionRef}
                 isOpen={suggestionsOpen && !tagPanelOpen}
+                onClose={() => setSuggestionsOpen(false)}
                 onSelect={chooseSuggestion}
                 panelRef={suggestionsRef}
                 suggestions={visibleTaskSuggestions}

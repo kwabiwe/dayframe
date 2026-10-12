@@ -21,7 +21,7 @@ describe("one floating list (FloatingList)", () => {
     expect(tagInput).toContain('heading="Activities"');
     expect(tagInput).not.toContain(">TAGS<");
     expect(tagInput).not.toContain("inline-tag-suggestions-title");
-    expect(source("FloatingList.tsx")).toContain('heading: "Suggestions" | "Tags" | "Activities"');
+    expect(source("FloatingList.tsx")).toContain('export type FloatingListHeading = "Suggestions" | "Tags" | "Activities";');
   });
 
   it("shares one container, heading and row treatment", () => {
@@ -49,6 +49,24 @@ describe("one floating list (FloatingList)", () => {
     expect(rule(".df-flist.ui-floating-surface,\n.df-flist.ui-floating-surface.is-open")).toMatch(/transform: none;/);
     expect(rule(".df-flist.ui-floating-surface")).toMatch(/transition: opacity 120ms ease-out, visibility 0s linear 120ms;/);
     expect(css).toMatch(/@media \(prefers-reduced-motion: reduce\) \{[^@]*\.df-flist\.ui-floating-surface,\n\s*\.df-flist\.ui-floating-surface\.is-open \{\s*transition: none;/);
+  });
+
+  it("is a full-width phone sheet with a 44 px Close and rows scrolling inside (AGENTS phone overlay rule)", () => {
+    const sheet = rule(".df-flist.ui-floating-surface.is-sheet");
+    expect(sheet).toMatch(/position: fixed;/);
+    expect(sheet).toMatch(/max-width: calc\(100vw - 24px\);/);
+    const close = rule(".df-flist.is-sheet .df-flist-close");
+    expect(close).toMatch(/width: 44px;/);
+    expect(close).toMatch(/height: 44px;/);
+    expect(rule(".df-flist.is-sheet .df-flist-rows")).toMatch(/overflow-y: auto;/);
+    const list = source("FloatingList.tsx");
+    expect(list).toContain('FLOATING_LIST_PHONE_QUERY = "(max-width: 560px)"');
+    // Height from the visual viewport, so the sheet stays above the on-screen keyboard.
+    expect(list).toContain("window.visualViewport");
+    expect(list).toContain("maxHeight:");
+    for (const host of ["TaskSuggestionsPanel.tsx", "InlineTagInput.tsx"]) expect(source(host)).toContain("anchorRef={anchorRef}");
+    // The timer's sticky shell rises above the phone tab bar while one of its sheets is open.
+    expect(rule(".swiss-persistent-timer-shell:has(.df-flist.is-sheet.is-open)")).toMatch(/z-index: 45;/);
   });
 
   it("keeps the Tags and Activities lists inside the viewport with internal scrolling", () => {

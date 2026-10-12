@@ -21,6 +21,7 @@ const { PersistentTimerBar } = await import("./PersistentTimerBar");
 
 afterEach(() => {
   cleanup();
+  vi.unstubAllGlobals();
   document.body.innerHTML = "";
 });
 
@@ -37,14 +38,20 @@ function spies() {
 }
 
 /** The bar with a real draft, as the shell runtime keeps it. */
-function renderBar({ activeEntry = null, description = "" }: { activeEntry?: TimeEntryRow | null; description?: string } = {}) {
+const ACTIVITIES = [
+  { id: "focus", name: "Focus", color: "mint", isPinned: true },
+  { id: "write", name: "Writing", color: "blue", isPinned: true }
+];
+
+function renderBar({ activeEntry = null, categories = ACTIVITIES, description = "" }: {
+  activeEntry?: TimeEntryRow | null;
+  categories?: typeof ACTIVITIES;
+  description?: string;
+} = {}) {
   const calls = spies();
   const data = {
     activeEntry,
-    categories: [
-      { id: "focus", name: "Focus", color: "mint", isPinned: true },
-      { id: "write", name: "Writing", color: "blue", isPinned: true }
-    ],
+    categories,
     categoryUsage: [],
     dateRange: { selectedDate: "2026-08-14" },
     entries: activeEntry ? [activeEntry] : [],
@@ -195,13 +202,27 @@ describe("@ opens the Activities list", () => {
     expect(calls.startTimer).not.toHaveBeenCalled();
   });
 
-  it("Escape closes the list and keeps the text", async () => {
+  it("Escape cancels only that @…: the token leaves, the rest of the text and the activity stay", async () => {
     const { input } = renderBar();
     const user = await typeInto(input, "Plan @wri");
     await user.keyboard("{Escape}");
     expect(screen.queryByRole("listbox", { name: "Activities" })).toBeNull();
     expect(input.getAttribute("aria-expanded")).toBe("false");
-    expect(input.value).toBe("Plan @wri");
+    expect(input.value).toBe("Plan");
+    expect(screen.getByRole("button", { name: "Activity: No activity" })).not.toBeNull();
+  });
+
+  it("puts the exact name first, as the parser does, even after a longer pinned name", async () => {
+    const { calls, input } = renderBar({
+      categories: [
+        { id: "focused", name: "Focused work", color: "violet", isPinned: true },
+        { id: "focus", name: "Focus", color: "mint", isPinned: true }
+      ]
+    });
+    const user = await typeInto(input, "@focus");
+    expect(optionNames(activities())).toEqual(["Focus", "Focused work"]);
+    await user.keyboard("{Enter}");
+    expect(calls.startTimer).toHaveBeenCalledWith({ categoryId: "focus", description: "", tagNames: [] });
   });
 
   it("does not start pinned quick starts while typing digits or with the list open", async () => {
@@ -222,6 +243,24 @@ describe("@activity + Enter", () => {
     expect(calls.startTimer).toHaveBeenCalledTimes(1);
     expect(calls.startTimer).toHaveBeenCalledWith({ categoryId: "write", description: "Plan launch", tagNames: [] });
     expect(calls.createManualEntry).not.toHaveBeenCalled();
+  });
+
+  it("idle: the activity picked from the list wins over an earlier @activity", async () => {
+    const { calls, input } = renderBar();
+    const user = await typeInto(input, "Plan @foc @wri");
+    await user.keyboard("{Enter}");
+    expect(calls.startTimer).toHaveBeenCalledWith({ categoryId: "write", description: "Plan", tagNames: [] });
+  });
+
+  it("idle: the picked activity wins and a trailing duration is still parsed", async () => {
+    const { calls, input } = renderBar();
+    const user = await typeInto(input, "Plan @foc 45m @wri");
+    await act(async () => { await user.keyboard("{Enter}"); });
+    expect(calls.createManualEntry).toHaveBeenCalledTimes(1);
+    const entry = calls.createManualEntry.mock.calls[0][0];
+    expect(entry).toMatchObject({ categoryId: "write", description: "Plan" });
+    expect(Date.parse(entry.stoppedAt) - Date.parse(entry.startedAt)).toBe(45 * 60 * 1000);
+    expect(calls.startTimer).not.toHaveBeenCalled();
   });
 
   it("idle: a trailing duration still logs a finished block ending now", async () => {
@@ -256,7 +295,9 @@ describe("@activity + Enter", () => {
   it("recording: a typed @activity + Enter with the list closed still switches", async () => {
     const { calls, input } = renderBar({ activeEntry: running() });
     const user = await typeInto(input, " @writing");
-    await user.keyboard("{Escape}");
+    // The caret leaves the word, so the list closes with the text kept.
+    await user.keyboard("{Home}");
+    expect(screen.queryByRole("listbox", { name: "Activities" })).toBeNull();
     await user.keyboard("{Enter}");
 
     expect(input.value).toBe("Fix bug");
@@ -287,6 +328,55 @@ function expectRunningBlockKept(calls: Spies) {
   for (const [draft] of calls.updateActiveDetails.mock.calls) expect((draft as TimerDraft).description).not.toContain("@");
 }
 
+describe("an unfinished @ is never saved to the running block", () => {
+  const wait = (ms: number) => act(() => new Promise((resolve) => setTimeout(resolve, ms)));
+
+  it("Escape removes the @… and nothing is saved", async () => {
+    const { calls, input } = renderBar({ activeEntry: running() });
+    const user = await typeInto(input, " @wri");
+    await user.keyboard("{Escape}");
+    expect(input.value).toBe("Fix bug");
+    await wait(900);
+    expect(calls.updateActiveDetails).not.toHaveBeenCalled();
+    expect(screen.getByRole("button", { name: "Activity: Focus" })).not.toBeNull();
+  });
+
+  it("a trailing space closes the list, but autosave leaves the @… out", async () => {
+    const { calls, input } = renderBar({ activeEntry: running() });
+    await typeInto(input, " more @wri ");
+    expect(screen.queryByRole("listbox", { name: "Activities" })).toBeNull();
+    await waitFor(() => expect(calls.updateActiveDetails).toHaveBeenCalled(), { timeout: 2_000 });
+    expect(calls.updateActiveDetails).toHaveBeenLastCalledWith({ categoryId: "focus", description: "Fix bug more", tagNames: [] });
+    expectRunningBlockKept(calls);
+  });
+
+  it("leaving the field drops the @… from the text without changing the activity", async () => {
+    const { calls, input } = renderBar({ activeEntry: running() });
+    const user = await typeInto(input, " @wri");
+    await user.click(document.body);
+    expect(input.value).toBe("Fix bug");
+    await wait(900);
+    expect(calls.updateActiveDetails).not.toHaveBeenCalled();
+    expect(screen.getByRole("button", { name: "Activity: Focus" })).not.toBeNull();
+  });
+
+  it("Stop saves the details without the @…", async () => {
+    const { calls, input } = renderBar({ activeEntry: running() });
+    const user = await typeInto(input, " @wri");
+    await user.click(screen.getByRole("button", { name: "Stop recording" }));
+    expect(calls.stopTimer).toHaveBeenCalledTimes(1);
+    expect(calls.stopTimer).toHaveBeenCalledWith({ description: "Fix bug" });
+  });
+
+  it("keeps an @word the running block already had", async () => {
+    const { calls, input } = renderBar({ activeEntry: running({ description: "Call @mum" }) });
+    await typeInto(input, " today");
+    await waitFor(() => expect(calls.updateActiveDetails).toHaveBeenCalledWith(
+      expect.objectContaining({ description: "Call @mum today" })
+    ), { timeout: 2_000 });
+  });
+});
+
 describe("# Tags stay as they were", () => {
   it("opens the Tags list on #, and Enter adds the tag and removes the #query", async () => {
     const { input } = renderBar();
@@ -306,11 +396,14 @@ describe("one floating list style", () => {
   it("draws Suggestions, Tags and Activities as the same surface, heading and rows", async () => {
     const { input } = renderBar();
     const user = userEvent.setup();
-    const expectOneStyle = (surface: HTMLElement, heading: string) => {
+    const expectOneStyle = (listbox: HTMLElement, heading: string) => {
+      const surface = listbox.closest<HTMLElement>(".df-flist")!;
       expect(surface.className).toContain("ui-floating-surface df-flist");
-      const head = surface.querySelector(".df-flist-head");
+      const head = surface.querySelector(".df-flist-head > span");
       expect(head?.textContent).toBe(heading);
       expect(head?.getAttribute("aria-hidden")).toBe("true");
+      // The Close control is the phone sheet's; on wider screens it is not shown.
+      expect((surface.querySelector(".df-flist-close") as HTMLButtonElement).hidden).toBe(true);
       const rows = surface.querySelectorAll('[role="option"]');
       expect(rows.length).toBeGreaterThan(0);
       for (const row of rows) expect(row.className).toContain("df-flist-row");
@@ -344,5 +437,54 @@ describe("the activity block's empty state", () => {
     await user.keyboard("{Tab}");
     const chosen = screen.getByRole("button", { name: "Activity: Writing" });
     expect(chosen.querySelector("svg")?.getAttribute("data-glyph")).toBe("pen-line");
+  });
+});
+
+describe("on phones the lists are sheets", () => {
+  function phone() {
+    vi.stubGlobal("matchMedia", (query: string) => ({
+      matches: query === "(max-width: 560px)",
+      media: query,
+      addEventListener: () => undefined,
+      removeEventListener: () => undefined
+    }));
+  }
+
+  it("draws the Activities list as a full-width sheet bounded by the visual viewport, with a 44 px Close", async () => {
+    phone();
+    const { calls, input } = renderBar();
+    const user = await typeInto(input, "Plan @wri");
+    const surface = activities().closest<HTMLElement>(".df-flist")!;
+    expect(surface.className).toContain("is-sheet");
+    expect(surface.style.left).toBe("12px");
+    expect(surface.style.right).toBe("12px");
+    expect(surface.style.width).toBe("auto");
+    expect(surface.style.maxHeight).toMatch(/px$/);
+    const close = within(surface).getByRole("button", { name: "Close activities" });
+    expect((close as HTMLButtonElement).hidden).toBe(false);
+
+    // Close cancels only this @…, like Escape, and the field keeps focus.
+    await user.click(close);
+    expect(input.value).toBe("Plan");
+    expect(screen.queryByRole("listbox", { name: "Activities" })).toBeNull();
+    expect(document.activeElement).toBe(input);
+    expect(calls.startTimer).not.toHaveBeenCalled();
+  });
+
+  it("gives Suggestions and Tags the same sheet and Close", async () => {
+    phone();
+    const { input } = renderBar();
+    const user = userEvent.setup();
+    await user.click(input);
+    const suggestions = screen.getByRole("listbox", { name: "Suggestions" }).closest<HTMLElement>(".df-flist")!;
+    expect(suggestions.className).toContain("is-sheet");
+    await user.click(within(suggestions).getByRole("button", { name: "Close suggestions" }));
+    expect(screen.queryByRole("listbox", { name: "Suggestions" })).toBeNull();
+
+    await user.type(input, "#", { skipClick: true });
+    const tags = screen.getByRole("listbox", { name: "Tags" }).closest<HTMLElement>(".df-flist")!;
+    expect(tags.className).toContain("is-sheet");
+    await user.click(within(tags).getByRole("button", { name: "Close tags" }));
+    expect(screen.queryByRole("listbox", { name: "Tags" })).toBeNull();
   });
 });

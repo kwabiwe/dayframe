@@ -69,15 +69,41 @@ export function findActiveMention(text: string, caret: number): ActiveMention | 
 }
 
 /**
- * The activities an `@query` offers, best first: names that start with it, then names that
- * contain it (spaces ignored, as the parser does). An empty query offers every activity.
+ * The activities an `@query` offers, best first, in the parser's order: the exact name, then
+ * names that start with it, then names that contain it (case and spaces ignored). So the
+ * highlighted first row is always what `@query` + Enter would have parsed to. An empty query
+ * offers every activity.
  */
 export function activitiesForMention<T extends CommandActivity>(query: string, activities: readonly T[]): T[] {
   const wanted = squash(query);
   if (!wanted) return [...activities];
-  const starts = activities.filter((activity) => squash(activity.name).startsWith(wanted));
-  const contains = activities.filter((activity) => !starts.includes(activity) && squash(activity.name).includes(wanted));
-  return [...starts, ...contains];
+  const exact = activities.filter((activity) => squash(activity.name) === wanted);
+  const starts = activities.filter((activity) => !exact.includes(activity) && squash(activity.name).startsWith(wanted));
+  const contains = activities.filter((activity) => !exact.includes(activity) && !starts.includes(activity) && squash(activity.name).includes(wanted));
+  return [...exact, ...starts, ...contains];
+}
+
+const MENTION_TOKEN = /(^|\s)(@[\p{L}\p{N}_-]*)/gu;
+
+/**
+ * A running block's description without the `@…` commands typed into it: every `@word` (or bare
+ * `@`) at the start or after a space is removed, except those the saved description already had
+ * (a block named "Call @mum" elsewhere keeps it). Unchanged text comes back as it was.
+ */
+export function withoutPendingMentions(text: string, saved = "") {
+  const kept = new Map<string, number>();
+  for (const [, , token] of saved.matchAll(MENTION_TOKEN)) kept.set(token, (kept.get(token) ?? 0) + 1);
+  let removed = false;
+  const next = text.replace(MENTION_TOKEN, (match, space: string, token: string) => {
+    const left = kept.get(token) ?? 0;
+    if (left > 0) {
+      kept.set(token, left - 1);
+      return match;
+    }
+    removed = true;
+    return space;
+  });
+  return removed ? next.replace(/\s+/g, " ").trim() : text;
 }
 
 export function parseCommand(text: string, activities: readonly CommandActivity[]): ParsedCommand {

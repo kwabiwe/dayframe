@@ -11,6 +11,7 @@ export function TaskSuggestionsPanel({
   anchorRef,
   isBusy,
   isOpen,
+  onClose,
   onSelect,
   panelRef,
   portal = false,
@@ -19,6 +20,8 @@ export function TaskSuggestionsPanel({
   anchorRef?: RefObject<HTMLElement | null>;
   isBusy: boolean;
   isOpen: boolean;
+  /** Closes Suggestions (the phone sheet's Close control). */
+  onClose: () => void;
   onSelect: (suggestion: RecentActivitySuggestion) => void;
   panelRef?: RefObject<HTMLDivElement | null>;
   portal?: boolean;
@@ -90,10 +93,12 @@ export function TaskSuggestionsPanel({
 
   const panel = (
     <FloatingList
+      anchorRef={anchorRef}
       className={`swiss-task-suggestions${portal ? " is-portalled time-entry-quick-editor-nested-surface" : ""}`}
       headClassName="swiss-task-suggestions-header"
       heading="Suggestions"
       isOpen={isOpen}
+      onClose={onClose}
       onKeyDown={(event) => {
         if (!["ArrowDown", "ArrowUp", "Home", "End"].includes(event.key)) return;
         const options = [...event.currentTarget.querySelectorAll<HTMLButtonElement>('[role="option"]:not(:disabled)')];
