@@ -55,6 +55,15 @@ function mount(categories: CategoryRow[]) {
 const changes = () => calls.filter((call) => call.method !== "GET");
 
 describe("Library › Activities", () => {
+  it("puts New activity first in Your own, before existing activities (UIA-316)", async () => {
+    mount([activity(ID(1), "Pottery"), activity(ID(2), "Chess")]);
+    const add = await screen.findByRole("button", { name: /New activity/ });
+    const grid = add.parentElement!;
+    expect(grid.firstElementChild).toBe(add);
+    expect(grid.textContent).toContain("Pottery");
+    expect(grid.textContent).toContain("Chess");
+  });
+
   it("pins to quick start and says so on the toast", async () => {
     const user = userEvent.setup();
     const pinned = Array.from({ length: 5 }, (_, index) => activity(ID(index), `Pinned ${index}`, { isPinned: true }));
