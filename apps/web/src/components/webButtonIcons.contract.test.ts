@@ -52,8 +52,10 @@ function iconTextButtons(path: string) {
       const tag = opening.tagName.getText();
       const own = `${attribute(opening, "className")} role=${attribute(opening, "role")}`;
       next = `${context} ${own}`;
-      // A <summary> is a disclosure (with its chevron) unless it is styled as a button.
-      const disclosure = tag === "summary" && !/\b(?:df-rbtn|ui-button)\b/.test(own);
+      // A <summary>, or a button with aria-expanded + aria-controls, is a disclosure (with its
+      // chevron) unless it is styled as a button.
+      const ariaDisclosure = tag === "button" && attribute(opening, "aria-expanded") !== "" && attribute(opening, "aria-controls") !== "";
+      const disclosure = (tag === "summary" || ariaDisclosure) && !/\b(?:df-rbtn|ui-button)\b/.test(own);
       if (CANDIDATES.has(tag) && !disclosure && !PRIMARY.test(own) && !NOT_A_TEXT_BUTTON.test(next) && !/role=("|\{")?(?:menu|menuitem|option|listbox)/.test(next) &&
           !(tag === "Button" && /"(?:primary|danger)"/.test(attribute(opening, "variant")))) {
         const hasText = node.children.some((child) => (ts.isJsxText(child) && child.text.trim().length > 0) ||

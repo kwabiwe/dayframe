@@ -4,6 +4,8 @@ import Link from "next/link";
 import type { CSSProperties } from "react";
 import { useState } from "react";
 import { ReportDonutSegment } from "@/components/ReportDonutSegment";
+import { AccessibleBreakdownTable } from "@/components/ReportsOverview";
+import type { ReportBreakdownRow } from "@/lib/report-service";
 import { blockStyle } from "@/lib/block-style";
 import { categoryDisplay } from "@/lib/display";
 import { formatDuration } from "@/lib/format";
@@ -32,12 +34,15 @@ export type AllocationSlice = {
  */
 export function ReportsBlocksPanel({
   blocks,
+  exactRows = [],
   land,
   slices,
   totalLabel,
   totalSeconds
 }: {
   blocks: ReportBlocksModel | null;
+  /** Every activity's exact time, shown as a disclosure under the donut (UIA-303). */
+  exactRows?: ReportBreakdownRow[];
   land: { easing: string; durationMs: number };
   slices: AllocationSlice[];
   totalLabel: string;
@@ -200,6 +205,12 @@ export function ReportsBlocksPanel({
         ) : (
           <p className="df-muted">Nothing tracked in this range. Change the range or filters, or track time to fill it.</p>
         )}
+        <AccessibleBreakdownTable
+          caption="Exact time by activity; overlapping blocks count in each activity, the same rule as the total"
+          rows={exactRows}
+          summary="Exact time by activity"
+          totalSeconds={totalSeconds}
+        />
       </section>
     </div>
   );

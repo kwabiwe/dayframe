@@ -167,6 +167,9 @@ describe("report scope and response", () => {
     expect(reportB.totalSeconds).toBe(1_200);
     expect(reportB.byCategory[0].seconds).toBe(1_200);
     expect(reportB.entries).toHaveLength(1);
+    // The Filter dialog's sources with time in the range stay per user (UIA-307).
+    expect(reportA.sourcesInRange).toEqual(["manual_app"]);
+    expect(reportB.sourcesInRange).toEqual(["health_sleep"]);
   });
 
   it("computes daily average, active days, pagination and running details without NaN", async () => {
@@ -262,6 +265,10 @@ function mockOptionsAndReportData() {
     if (statement.includes("from categories")) return { rows: options.categories };
     if (statement.includes("from tags tag")) return { rows: options.tags };
     if (statement.includes("from places pl")) return { rows: options.places };
+    if (statement.includes("select distinct te.source")) {
+      // Scoped by workspace ($1) and user ($2), like every report query.
+      return { rows: values[1] === userAId ? [{ source: "manual_app" }] : [{ source: "health_sleep" }] };
+    }
     if (!statement.includes("with candidate_entries as")) throw new Error(`Unexpected query: ${statement}`);
 
     const userPlaceholder = Number(statement.match(/te\.user_id = \$(\d+)/)?.[1]);

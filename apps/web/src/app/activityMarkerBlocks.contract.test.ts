@@ -9,7 +9,7 @@ const css = readFileSync(new URL("./globals.css", import.meta.url), "utf8");
 const ACTIVITY_MARKERS = [
   ".category-data-marker",
   ".swiss-task-suggestions-list i",
-  ".report-entry-category i",
+  ".df-report-row .df-erow-block",
   ".category-picker-color-swatch",
   ".swiss-focus-dot",
   ".calendar-compact-category-dot",

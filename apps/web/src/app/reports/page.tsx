@@ -20,7 +20,7 @@ export const dynamic = "force-dynamic";
 /**
  * Reports in Blocks (parity step 15a, audit W8): one head row (title, ‹ range › with every preset
  * and custom dates in its menu; Filter · Week · Month · Export), the hero tiles and the range in
- * activity blocks, then the analysis and the entries table. One total everywhere: time logged,
+ * activity blocks, then Tags and More insights (collapsed) and the matching blocks as Blocks rows (W8b). One total everywhere: time logged,
  * overlaps included (UIA-305).
  */
 export default async function ReportsPage({
@@ -65,10 +65,15 @@ export default async function ReportsPage({
         </div>
         <div className="df-page-head-actions">
           <ReportFiltersPanel
+            counts={{
+              totalEntries: report.pagination.totalEntries,
+              byCategory: Object.fromEntries(report.byCategory.map((row) => [row.id, row.entryCount]))
+            }}
             key={`filters-${JSON.stringify(report.appliedFilters)}`}
             filters={report.appliedFilters}
             options={report.filterOptions}
             rangeLabel={report.range.label}
+            sourcesInRange={report.sourcesInRange}
           />
           <nav aria-label="Report period" className="df-seg">
             <Link aria-current={preset === "this-week" ? "page" : undefined} href={reportsHref(filtersForPreset(report.appliedFilters, "this-week"))}>
@@ -86,6 +91,7 @@ export default async function ReportsPage({
       <ReportsTop dailyGoalMinutes={user.dailyGoalMinutes} report={report} />
       <ReportsBlocksPanel
         blocks={reportBlocksModel(report, formatDuration)}
+        exactRows={report.byCategory}
         land={springLinearEasing("land")}
         slices={slices}
         totalLabel={preset === "this-week" ? "logged this week" : preset === "this-month" ? "logged this month" : "logged in this range"}

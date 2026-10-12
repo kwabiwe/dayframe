@@ -59,6 +59,11 @@ export type ReportResult = {
   range: ReportRangeMetadata;
   appliedFilters: ReportFilters;
   filterOptions: ReportFilterOptions;
+  /**
+   * Sources with tracked time in the range, ignoring the other filters (UIA-307): the Filter
+   * dialog hides sources that could only ever match nothing.
+   */
+  sourcesInRange: string[];
   totalLoggedSeconds: number;
   timeCoveredSeconds: number;
   additionalOverlappingActivitySeconds: number;
@@ -141,7 +146,10 @@ export async function getReports(session: RequestSession, input: ReportQueryInpu
   const filterOptions = await getReportFilterOptions(session);
   const appliedFilters = sanitizeReportFilters(input.filters, filterOptions);
   const statement = buildReportDataQuery(session, input, appliedFilters, capturedNow);
-  const result = await query<ReportDataRow>(statement.text, statement.values);
+  const [result, sourcesInRange] = await Promise.all([
+    query<ReportDataRow>(statement.text, statement.values),
+    getReportSourcesInRange(session, input.range, capturedNow)
+  ]);
   const row = result.rows[0] ?? emptyReportData(input);
   const totalSeconds = numberValue(row.totalSeconds);
   const previousPeriodSeconds = numberValue(row.previousPeriodSeconds);
@@ -215,6 +223,7 @@ export async function getReports(session: RequestSession, input: ReportQueryInpu
     range: input.range,
     appliedFilters,
     filterOptions,
+    sourcesInRange,
     totalLoggedSeconds: totalSeconds,
     timeCoveredSeconds,
     additionalOverlappingActivitySeconds:
@@ -276,6 +285,26 @@ export async function getReportExportRows(session: RequestSession, input: Report
     rows: result.rows.map((row) => ({ ...row, durationSeconds: numberValue(row.durationSeconds) })),
     capturedNow
   };
+}
+
+/** Distinct entry sources with time in the range, scoped to the session's workspace and user. */
+async function getReportSourcesInRange(
+  session: RequestSession,
+  range: Pick<ReportRangeMetadata, "start" | "end">,
+  capturedNow: string
+): Promise<string[]> {
+  const result = await query<{ source: string }>(
+    `select distinct te.source
+     from time_entries te
+     where te.workspace_id = $1
+       and te.user_id = $2
+       and te.review_status in ('confirmed', 'accepted')
+       and te.started_at < $4::timestamptz
+       and coalesce(te.stopped_at, $5::timestamptz) > $3::timestamptz
+       and te.source is not null`,
+    [session.workspaceId, session.userId, range.start, range.end, capturedNow]
+  );
+  return result.rows.map((row) => row.source);
 }
 
 export async function getReportFilterOptions(session: RequestSession): Promise<ReportFilterOptions> {

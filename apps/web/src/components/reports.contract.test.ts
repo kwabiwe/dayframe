@@ -30,7 +30,7 @@ describe("Reports accessibility and responsive contracts", () => {
   });
 
   it("keeps every filter kind reachable from the dialog", () => {
-    for (const label of ['label="Activities"', 'label="Tags"', 'label="Places"', 'label="Sources"']) {
+    for (const label of ["<b>Activities</b>", 'label="Tags"', 'label="Places"', 'label="Sources"']) {
       expect(filtersSource).toContain(label);
     }
   });
@@ -43,7 +43,8 @@ describe("Reports accessibility and responsive contracts", () => {
     expect(donutSegmentSource).toContain('role="link"');
     expect(donutSegmentSource).toContain("event.key !== \"Enter\"");
     expect(donutSegmentSource).toContain("router.push(href)");
-    expect(overviewSource).toContain("Blocks can contain multiple tags, so tag totals may overlap.");
+    expect(overviewSource).toContain("totals may overlap");
+    expect(panelSource).toContain('summary="Exact time by activity"');
   });
 
   it("keeps dates explicit, inclusive and cancellable", () => {
@@ -53,7 +54,7 @@ describe("Reports accessibility and responsive contracts", () => {
     expect(rangeSource).toContain("Apply");
   });
 
-  it("preserves the active URL on edit refresh and adapts detail rows below 760px", () => {
+  it("preserves the active URL on edit refresh", () => {
     expect(detailsSource).toContain("startTransition(() => router.refresh())");
     expect(detailsSource).toContain("<TimeEntryQuickEditorModal");
     expect(detailsSource).not.toContain("EditTimeEntryDialog");
@@ -61,17 +62,17 @@ describe("Reports accessibility and responsive contracts", () => {
     expect(detailsSource).toContain("Running");
     expect(detailsSource).not.toContain("Confidence");
     expect(detailsSource).not.toContain("Review status");
-    expect(styles).toMatch(/@media \(max-width: 760px\)[\s\S]*\.report-detail-table td::before/s);
-    expect(styles).toContain("content: attr(data-label);");
   });
 });
 
 describe("Reports in Blocks audit fixes (W8)", () => {
   it("never paints data, disclosures or pagination coral (UIA-302)", () => {
-    for (const selector of [".report-entry-duration", ".report-ranked-track i", ".report-trend-track span", ".report-data-table > summary", ".report-pagination a,\n.report-pagination > span"]) {
+    for (const selector of [".report-ranked-track i", ".report-trend-track span", ".report-data-table > summary", ".report-pagination a,\n.report-pagination > span"]) {
       expect(rule(selector)).not.toMatch(/--accent/);
     }
-    expect(rule(".report-entry-duration")).toContain("var(--text-primary)");
+    expect(rule(".df-erow-dur")).not.toMatch(/--accent/);
+    // A running row in Reports overrides Today's coral live duration (Codex r2).
+    expect(rule(".df-report-row.df-erow.is-live .df-erow-dur")).toContain("var(--text-primary)");
     expect(rule(".overlap-marker")).toContain("--warning");
   });
 
@@ -104,6 +105,43 @@ describe("Reports in Blocks audit fixes (W8)", () => {
     expect(rule(".df-wb.is-today .df-wb-label b")).not.toMatch(/--accent/);
     expect(styles).toMatch(/@media \(pointer: coarse\) \{\s*\.df-hint-fine \{\s*display: none;/);
     expect(styles).toMatch(/@media \(max-width: 640px\) \{\s*\.df-wb-label-full \{\s*display: none;/);
+  });
+});
+
+describe("Reports rows and Filter dialog in Blocks (W8b)", () => {
+  it("ends Reports at Where it went, collapsed Tags and More insights, and Blocks rows (UIA-303)", () => {
+    expect(overviewSource).not.toContain("report-allocation-title");
+    expect(overviewSource).not.toContain("report-analysis-grid");
+    expect(overviewSource).toMatch(/<details className="fill-group-surface report-secondary-insights report-tags"/);
+    expect(overviewSource).not.toMatch(/<details[^>]*\bopen\b/);
+    expect(pageSource).toContain("exactRows={report.byCategory}");
+    expect(detailsSource).not.toContain("<table");
+    expect(detailsSource).not.toContain("No place");
+    expect(detailsSource).toContain('className="df-rows df-report-rows"');
+    expect(detailsSource).toContain("df-erow df-report-row");
+    expect(rule(".df-report-row .df-erow-block")).toContain("var(--activity-marker-radius)");
+    // Phones keep the date and range (Today hides its time column there).
+    expect(styles).toMatch(/\.df-report-row \.df-erow-when \{\s*display: block;/);
+  });
+
+  it("matches the prototype Filter dialog and keeps every filter (UIA-307)", () => {
+    expect(filtersSource).toContain(">None</button>");
+    expect(filtersSource).toContain("df-rf-more${moreOpen");
+    expect(filtersSource).toContain("inert={!moreOpen}");
+    expect(filtersSource).not.toContain("<details");
+    expect(filtersSource).toContain("More filters");
+    expect(filtersSource).toContain("sourcesInRange.includes(source.id) || draft.sources.includes(source.id)");
+    expect(filtersSource).toContain("Show ${count}");
+    expect(filtersSource).not.toContain("df-rbtn\" onClick={onClose}");
+    expect(rule(".df-rf-more-toggle")).toContain("min-height: 44px");
+    // One transition owner for expand/collapse: the panel's grid rows with opacity.
+    expect(rule(".df-rf-more-panel")).toMatch(/grid-template-rows: 0fr;[\s\S]*transition: grid-template-rows/);
+    expect(rule(".df-rf-more.is-open .df-rf-more-panel")).toContain("grid-template-rows: 1fr");
+    expect(styles).toMatch(/@media \(prefers-reduced-motion: reduce\) \{\s*\.df-rf-more-chevron,\s*\.df-rf-more-panel \{\s*transition: none;/);
+    // The old matching table's styles are gone; the shared exact-data table stays.
+    expect(styles).not.toMatch(/\.report-(detail-table|entry-|running-pill|sort-control|allocation)/);
+    expect(styles).toContain(".report-data-table table {");
+    expect(pageSource).toContain("sourcesInRange={report.sourcesInRange}");
   });
 });
 
