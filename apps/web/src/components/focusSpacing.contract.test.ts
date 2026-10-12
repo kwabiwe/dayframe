@@ -47,8 +47,11 @@ describe("web focus and control contracts", () => {
     expect(focusIndicators).not.toMatch(/#2563eb|#71c5f4|var\(--info\)|var\(--accent(?:-text|-strong)?\)/i);
   });
 
-  it("keeps the persistent timer Description perimeter neutral without hiding validation", () => {
-    expect(styles).toMatch(/\.swiss-timer-description-control \.ui-compound-control:focus-within \{[^}]*border-color:\s*var\(--focus\);/s);
-    expect(styles).toMatch(/\.swiss-timer-description-control \.ui-compound-control:has\(input\[aria-invalid="true"\]\):focus-within \{[^}]*border-color:\s*var\(--focus\);[^}]*box-shadow:\s*inset 0 -2px 0 var\(--danger\);/s);
+  it("gives the persistent timer Description's focus to the command bar without hiding validation (Trello 213)", () => {
+    // The Description draws no box of its own; the whole bar takes the neutral offset focus ring.
+    expect(styles).toMatch(/\.swiss-timer-description-control \.ui-compound-control:focus-within \{[^}]*border-color:\s*transparent;/s);
+    expect(styles).toMatch(/\.df-cmd:has\(\.df-cmd-field \.inline-tag-description-input:focus-visible\) \{[^}]*outline: 2px solid var\(--focus\);[^}]*outline-offset: 2px;/s);
+    expect(styles).toMatch(/\.swiss-timer-description-control \.ui-compound-control:has\(input\[aria-invalid="true"\]\) \{[^}]*border-color:\s*var\(--danger\);/s);
+    expect(styles).toMatch(/\.swiss-timer-description-control \.ui-compound-control:has\(input\[aria-invalid="true"\]\):focus-within \{[^}]*box-shadow:\s*inset 0 -2px 0 var\(--danger\);/s);
   });
 });
