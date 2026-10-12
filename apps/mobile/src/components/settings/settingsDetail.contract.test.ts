@@ -50,6 +50,20 @@ describe("Settings detail (audit A8b)", () => {
     expect(hook).toContain("if (target.current === 0 && leaving.current.keyboardGone && leaving.current.spaceSettled) {");
   });
 
+  it("reads every remembered account-scoped store for the owner its read started for (Codex r3–r4 on #355)", () => {
+    const reads = settings.slice(settings.indexOf("const refreshReviewDiagnostics = useCallback("), settings.indexOf("// Queue reads: the latest one started wins"));
+    expect(reads.match(/const startedFor = await beginRememberedSettingsRead\(\);/g)).toHaveLength(3);
+    expect(reads).toContain("const state = await readReviewSyncStateForOwner(startedFor.owner);");
+    expect(reads).not.toContain("getReviewSyncDiagnostics()");
+    expect(reads).not.toContain("listReviewSyncIssues()");
+    expect(reads).toContain("getTimeEntryOutboxDiagnostics(startedFor.owner)");
+    expect(reads).toContain("listTimeEntrySyncIssues(startedFor.owner)");
+    expect(reads).toContain("getTimerStopOutboxDiagnostics(startedFor.owner)");
+    expect(reads).toContain("listTimerStopSyncIssues(startedFor.owner)");
+    const nudge = settings.slice(settings.indexOf("const refreshReviewNudge = useCallback("), settings.indexOf("async function toggleReviewNudge("));
+    expect(nudge.match(/const owner = startedFor\.owner;/g)).toHaveLength(2);
+  });
+
   it("keeps a row's switch separate from the text that opens more", () => {
     expect(blocks).toContain("if (onPress && control) {");
     expect(blocks).toContain("rowPressArea:");

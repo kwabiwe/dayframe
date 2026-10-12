@@ -1,5 +1,10 @@
 import { useCallback, useEffect, useRef, useState, type SetStateAction } from "react";
-import { getActiveMobileAccountSnapshot, readActiveMobileAccount, subscribeActiveMobileAccount } from "./mobileAccount";
+import {
+  getActiveMobileAccountSnapshot,
+  readActiveMobileAccount,
+  subscribeActiveMobileAccount,
+  type MobileAccountOwner
+} from "./mobileAccount";
 import { subscribeMobileSignedOut } from "./mobileSessionTransition";
 import { currentSessionGeneration, subscribeAuthenticatedSession } from "./secure-session";
 
@@ -14,7 +19,12 @@ import { currentSessionGeneration, subscribeAuthenticatedSession } from "./secur
  * it was started for (`beginRememberedSettingsRead`), never to whichever account a page later
  * belongs to: the active account can load silently and then be replaced within one session.
  */
-export type RememberedSettingsBinding = { generation: number; ownerKey: string | null };
+export type RememberedSettingsBinding = {
+  generation: number;
+  /** The account a read is for: account-scoped stores are read for exactly this owner. */
+  owner: MobileAccountOwner | null;
+  ownerKey: string | null;
+};
 
 let remembered: { binding: RememberedSettingsBinding; values: Map<string, unknown> } | null = null;
 
@@ -23,6 +33,7 @@ export function captureRememberedSettingsBinding(): RememberedSettingsBinding {
   const owner = getActiveMobileAccountSnapshot();
   return {
     generation: currentSessionGeneration(),
+    owner: owner ? { userId: owner.userId, workspaceId: owner.workspaceId } : null,
     ownerKey: owner ? `${owner.userId}:${owner.workspaceId}` : null
   };
 }

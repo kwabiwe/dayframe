@@ -74,6 +74,24 @@ describe("Review real SQLite transactions", () => {
     expect(diagnostics.waitingCount).toBe(0);
     expect(count("review_mutation_outbox")).toBe(0);
   });
+  it("reads Settings' remembered Review state only for the store's own active account (Codex r4 on #355)", async () => {
+    const data = bootstrap();
+    const ownerA = { userId: data.user.id, workspaceId: data.workspace.id };
+    const ownerB = { userId: syntheticId(901), workspaceId: syntheticId(902) };
+    await store.enqueueReviewMutation({ bootstrap: data, item: data.reviewItems[0], clientMutationId: syntheticId(90), mutation: { action: "accept" } });
+    db.exec("update review_mutation_outbox set state='needs_attention',resolution_status=null,last_http_status=422");
+    const forA = await store.readReviewSyncStateForOwner(ownerA);
+    expect(forA?.issues.map((issue) => issue.clientMutationId)).toEqual([syntheticId(90)]);
+    expect(forA?.diagnostics.needsAttentionCount).toBe(1);
+    // The app already belongs to B while this store still holds A: nothing of A's is read for B.
+    expect(await store.readReviewSyncStateForOwner(ownerB)).toBeNull();
+    // Once the store reconciles to B, A's reads come back empty-handed and B reads only its own.
+    await store.activateReviewAccount({ ...ownerB, workspaceName: "B" });
+    expect(await store.readReviewSyncStateForOwner(ownerA)).toBeNull();
+    const forB = await store.readReviewSyncStateForOwner(ownerB);
+    expect(forB?.issues).toEqual([]);
+    expect(forB?.diagnostics.needsAttentionCount).toBe(0);
+  });
   it("selects the latest failure by timestamp rather than alphabetic error text", async () => {
     const data=bootstrap();
     for(let n=0;n<2;n++) await store.enqueueReviewMutation({bootstrap:data,item:data.reviewItems[n],clientMutationId:syntheticId(94+n),mutation:{action:"accept"}});

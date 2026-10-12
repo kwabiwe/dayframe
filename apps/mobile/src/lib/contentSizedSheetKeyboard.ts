@@ -28,9 +28,10 @@ const KEYBOARD_EASING = Easing.bezier(0.17, 0.59, 0.4, 0.77);
  * - `keyboardInset` rises as soon as a keyboard frame arrives, and drops to zero only once the
  *   keyboard has gone (`keyboardDidHide`) and the space has finished shrinking, so a drag never
  *   resumes while keyboard-driven layout is still moving.
- * - Each "did" event is tied to the keyboard's current transition: a `keyboardDidHide` that lands
- *   after a newer show has begun, or a `keyboardDidShow` after a newer hide, is stale and ignored
- *   (Codex r3 on #355).
+ * - Each "did" event completes only the transition the latest "will" event started (Codex r3–r4 on
+ *   #355): a `keyboardDidHide` while the latest will-event was a show, or a `keyboardDidShow` while
+ *   it was a hide, is stale and ignored, also after the newer transition has settled. A
+ *   `keyboardDidShow` before any will-event (a restored keyboard) still counts.
  * - `onReveal` runs once the sheet's layout has settled with the keyboard up: when the animated
  *   space finishes, or — for an immediate update — on the scroll view's next layout
  *   (`onScrollLayout`) and two frames later, whichever lands; also after `keyboardDidShow` and
@@ -55,8 +56,8 @@ export function useContentSizedSheetKeyboard({
   // While the keyboard is leaving: whether it has gone, and whether the space has settled.
   const leaving = useRef({ keyboardGone: true, spaceSettled: true });
   const pendingReveal = useRef(false);
-  // The keyboard's current transition, from the "will" events; "did" events only complete it.
-  const transition = useRef<"hidden" | "showing" | "shown" | "hiding">("hidden");
+  // The direction of the latest "will" event (null before any); "did" events only complete it.
+  const latestWill = useRef<"show" | "hide" | null>(null);
   const onRevealRef = useRef(onReveal);
   onRevealRef.current = onReveal;
 
@@ -95,18 +96,14 @@ export function useContentSizedSheetKeyboard({
   useEffect(() => {
     const follow = (event: KeyboardEvent, nextInset: number, phase: "will" | "didShow" | "didHide") => {
       if (phase === "didHide") {
-        // A hide that a newer show has already overtaken.
-        if (transition.current === "showing") return;
-        transition.current = "hidden";
+        // The completion of a hide that a newer show has replaced.
+        if (latestWill.current === "show") return;
         leaving.current.keyboardGone = true;
       } else if (phase === "didShow") {
-        // A show that a newer hide has already overtaken.
-        if (transition.current === "hiding") return;
-        transition.current = "shown";
-      } else if (nextInset > 0) {
-        if (transition.current !== "shown") transition.current = "showing";
+        // The completion of a show that a newer hide has replaced.
+        if (latestWill.current === "hide") return;
       } else {
-        transition.current = "hiding";
+        latestWill.current = nextInset > 0 ? "show" : "hide";
       }
       if (nextInset > 0) {
         // The hand-off holds a drag from the first keyboard frame.
@@ -143,6 +140,7 @@ export function useContentSizedSheetKeyboard({
     }), phase);
     const subscriptions = [
       Keyboard.addListener("keyboardWillChangeFrame", frame("will")),
+      Keyboard.addListener("keyboardWillShow", frame("will")),
       // Some restored keyboards skip the frame change; didShow also marks the keyboard settled.
       Keyboard.addListener("keyboardDidShow", frame("didShow")),
       Keyboard.addListener("keyboardWillHide", (event) => follow(event, 0, "will")),

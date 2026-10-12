@@ -179,6 +179,7 @@ import {
   getReviewSyncDiagnostics,
   listReviewSyncDiagnosticMutations,
   listReviewSyncIssues,
+  readReviewSyncStateForOwner,
   subscribeReviewSync,
   synchroniseReviewMutations,
   type ReviewSyncDiagnostics
@@ -531,23 +532,25 @@ export default function SettingsScreen() {
     });
   }, []);
 
-  // Each read is bound to the account it started for (settingsRemembered, Codex r3 on #355).
+  // Each read is bound to the account it started for (settingsRemembered, Codex r3 on #355), and
+  // every account-scoped store is read for exactly that owner (Codex r4): the Review store keeps its
+  // own active account, which can differ from the app's while accounts reconcile.
   const refreshReviewDiagnostics = useCallback(async () => {
     const startedFor = await beginRememberedSettingsRead();
-    const [diagnostics, issues] = await Promise.all([
-      getReviewSyncDiagnostics(),
-      listReviewSyncIssues()
-    ]);
+    if (!startedFor.owner) return;
+    const state = await readReviewSyncStateForOwner(startedFor.owner);
+    if (!state) return;
     // The store lists real rejections only; unknown outcomes are in diagnostics.waitingCount (I1).
-    setReviewSyncDiagnostics(diagnostics, startedFor);
-    setReviewSyncIssues(splitReviewSyncIssues(issues).rejected, startedFor);
+    setReviewSyncDiagnostics(state.diagnostics, startedFor);
+    setReviewSyncIssues(splitReviewSyncIssues(state.issues).rejected, startedFor);
   }, []);
 
   const refreshTimeEntryDiagnostics = useCallback(async () => {
     const startedFor = await beginRememberedSettingsRead();
+    if (!startedFor.owner) return;
     const [diagnostics, issues] = await Promise.all([
-      getTimeEntryOutboxDiagnostics(),
-      listTimeEntrySyncIssues()
+      getTimeEntryOutboxDiagnostics(startedFor.owner),
+      listTimeEntrySyncIssues(startedFor.owner)
     ]);
     setTimeEntrySyncDiagnostics(diagnostics, startedFor);
     setTimeEntrySyncIssues(issues, startedFor);
@@ -555,9 +558,10 @@ export default function SettingsScreen() {
 
   const refreshTimerStopDiagnostics = useCallback(async () => {
     const startedFor = await beginRememberedSettingsRead();
+    if (!startedFor.owner) return;
     const [diagnostics, issues] = await Promise.all([
-      getTimerStopOutboxDiagnostics(),
-      listTimerStopSyncIssues()
+      getTimerStopOutboxDiagnostics(startedFor.owner),
+      listTimerStopSyncIssues(startedFor.owner)
     ]);
     setTimerStopSyncDiagnostics(diagnostics, startedFor);
     setTimerStopSyncIssues(issues, startedFor);
@@ -731,7 +735,7 @@ export default function SettingsScreen() {
   const [nudgeBusy, setNudgeBusy] = useState(false);
   const refreshReviewNudge = useCallback(async () => {
     const startedFor = await beginRememberedSettingsRead();
-    const owner = await readActiveMobileAccount();
+    const owner = startedFor.owner;
     if (!owner) return;
     const [state, permission] = await Promise.all([
       readReviewNudgeState(owner),
@@ -755,7 +759,7 @@ export default function SettingsScreen() {
     setNudgeBusy(true);
     try {
       const startedFor = await beginRememberedSettingsRead();
-      const owner = await readActiveMobileAccount();
+      const owner = startedFor.owner;
       if (!owner) return;
       const next = await change(owner);
       if (mobileAccountOwnersEqual(owner, await readActiveMobileAccount())) setReviewNudge(next, startedFor);
@@ -1581,7 +1585,7 @@ export default function SettingsScreen() {
   async function refreshLocationV2Diagnostics() {
     try {
       const startedFor = await beginRememberedSettingsRead();
-      const owner = await readActiveMobileAccount();
+      const owner = startedFor.owner;
       const session = owner ? await readOwnedAuthenticatedSessionSnapshot(owner) : null;
       const [, native] = await Promise.all([
         getLocationStoreDiagnostics(),

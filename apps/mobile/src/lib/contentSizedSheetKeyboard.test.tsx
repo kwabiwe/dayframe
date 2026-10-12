@@ -209,4 +209,42 @@ describe("content-sized sheet keyboard (Apple Health type sheet; Codex r1–r2 o
     expect(seen.keyboardInset).toBe(0);
     tree.unmount();
   });
+
+  it("ignores a stale didHide even after the restored keyboard has settled (Codex r4)", () => {
+    const { seen, tree } = mount();
+    emit("keyboardWillShow", 336);
+    finishTiming();
+    emit("keyboardWillHide", 0);
+    emit("keyboardWillShow", 336);
+    finishTiming();
+    emit("keyboardDidShow", 336);
+    const settled = timings.length;
+    // The replaced hide's completion lands after the new show has fully settled.
+    emit("keyboardDidHide", 0);
+    expect(timings).toHaveLength(settled);
+    expect((space.shared?.value as { to: number }).to).toBe(310);
+    expect(seen.keyboardInset).toBe(336);
+    tree.unmount();
+  });
+
+  it("ignores a stale didShow after the hide has completed, but keeps a didShow-only keyboard working (Codex r4)", () => {
+    const { onReveal, seen, tree } = mount();
+    // A restored keyboard that sends only didShow (no will-event yet) still lifts the sheet.
+    emit("keyboardDidShow", 336, 0);
+    expect(space.shared?.value).toBe(310);
+    flushFrames();
+    expect(onReveal).toHaveBeenCalledTimes(1);
+    emit("keyboardWillHide", 0);
+    finishTiming();
+    emit("keyboardDidHide", 0);
+    expect(seen.keyboardInset).toBe(0);
+    const hidden = timings.length;
+    // The earlier show's completion lands late.
+    emit("keyboardDidShow", 336);
+    expect(timings).toHaveLength(hidden);
+    expect(seen.keyboardInset).toBe(0);
+    flushFrames();
+    expect(onReveal).toHaveBeenCalledTimes(1);
+    tree.unmount();
+  });
 });

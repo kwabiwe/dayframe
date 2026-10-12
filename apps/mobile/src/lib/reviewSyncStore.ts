@@ -2109,6 +2109,13 @@ export async function getReviewSyncDiagnostics(): Promise<ReviewSyncDiagnostics>
   const db = await database();
   const account = await activeAccount(db);
   if (!account) return emptyDiagnostics();
+  return reviewSyncDiagnosticsForAccount(db, account);
+}
+
+async function reviewSyncDiagnosticsForAccount(
+  db: SQLite.SQLiteDatabase,
+  account: AccountRow
+): Promise<ReviewSyncDiagnostics> {
   const row = await db.getFirstAsync<CountRow>(
     `select
        count(*) filter (where state in ('pending', 'in_flight')) as pending_count,
@@ -2215,6 +2222,25 @@ export async function listReviewSyncIssues() {
   const db = await database();
   const account = await activeAccount(db);
   if (!account) return [];
+  return reviewSyncIssuesForAccount(db, account);
+}
+
+/**
+ * Settings' remembered reads (Codex r4 on #355): this store keeps its own active account, which can
+ * differ from the app's active account while accounts reconcile. The diagnostics and rejected
+ * issues are read only when the store's active account is `owner`, every query keyed to that one
+ * account; otherwise null (nothing to show for `owner` here).
+ */
+export async function readReviewSyncStateForOwner(owner: { userId: string; workspaceId: string }) {
+  const db = await database();
+  const account = await activeAccount(db);
+  if (!account || account.account_key !== accountKey(owner)) return null;
+  const diagnostics = await reviewSyncDiagnosticsForAccount(db, account);
+  const issues = await reviewSyncIssuesForAccount(db, account);
+  return { diagnostics, issues };
+}
+
+async function reviewSyncIssuesForAccount(db: SQLite.SQLiteDatabase, account: AccountRow) {
   return await db.getAllAsync<{
     clientMutationId: string;
     reviewItemId: string;
