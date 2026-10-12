@@ -19,6 +19,8 @@ import {
 } from "../apps/web/src/lib/location/location-ingest-service";
 import { resolveLocationReviewAction } from "../apps/web/src/lib/location/location-review-service";
 import type { RequestSession } from "../apps/web/src/lib/session";
+import { buildTimeEntriesQuery } from "../apps/web/src/lib/queries";
+import { REVIEW_DECISION_PAYLOAD_KEY } from "../apps/web/src/lib/review-decision-signal";
 
 const databaseUrl = process.env.DATABASE_URL;
 assert(databaseUrl, "DATABASE_URL is required.");
@@ -472,6 +474,131 @@ async function validateSemanticIdempotencyAndRollback() {
     [[reviews.rows[0].id, reviews.rows[3].id]]
   );
   assert(incompatibleStatuses.rows.every((row) => row.status === "open"), "Rejected merge changed source review state.");
+}
+
+/**
+ * E1 (Codex r2): Recent learns only descriptions the owner typed while deciding in Review. Each
+ * real Review action records (or withholds) the owner-authored signal, and the bootstrap history
+ * query reads it back.
+ */
+async function validateRecentOwnerAuthoredSignal() {
+  await clearDerivedLocationState();
+  process.env.DAYFRAME_LOCATION_ROLLOUT_MODE = "v2_review";
+  const fixture = locationAcceptanceFixture();
+  await ingestLocationEvidence(
+    batch("db-recent-owner-authored", fixture.evidence, "v2_review", fixture.evidence[0].occurredAt),
+    session,
+    PROCESSING_AT
+  );
+  const reviews = await pool.query<{ id: string; title: string; startedAt: string; stoppedAt: string }>(
+    `select id, title, suggested_started_at as "startedAt", suggested_stopped_at as "stoppedAt"
+     from review_items
+     where workspace_id = $1 and user_id = $2 and status = 'open' and location_segment_id in (
+       select id from stay_segments where workspace_id = $1 and user_id = $2
+     ) order by suggested_started_at, id`,
+    [WORKSPACE_ID, USER_ID]
+  );
+  assert(reviews.rows.length >= 6, "Six stay reviews are required for owner-authored validation.");
+  const [kept, editedBack, renamed, splitSource, mergeKept, mergeRenamed] = reviews.rows;
+  const midpoint = (row: { startedAt: string; stoppedAt: string }) => new Date(
+    (Date.parse(row.startedAt) + Date.parse(row.stoppedAt)) / 2
+  ).toISOString();
+
+  // Accepted as suggested, and edited back to the suggestion: Dayframe's words.
+  const keptResult = await resolveLocationReviewAction(kept.id, { action: "confirm" }, session);
+  const editedBackResult = await resolveLocationReviewAction(editedBack.id, {
+    action: "edit_and_confirm",
+    edit: { description: `  ${editedBack.title.toUpperCase()}  ` }
+  }, session);
+  // Renamed in Review: the owner's words.
+  const renamedResult = await resolveLocationReviewAction(renamed.id, {
+    action: "edit_and_confirm",
+    edit: { description: "Lunch with friends" }
+  }, session);
+  // Split for Review only, the left part titled by the owner; then confirm each part unchanged.
+  const split = await resolveLocationReviewAction(splitSource.id, {
+    action: "split",
+    splitAt: midpoint(splitSource),
+    left: { description: "Football practice" }
+  }, session);
+  assert("childSegmentIds" in split && split.childSegmentIds.length === 2, "Split did not create two parts.");
+  const parts = await pool.query<{ id: string; title: string }>(
+    `select id, title from review_items
+     where workspace_id = $1 and user_id = $2 and status = 'open' and location_segment_id = any($3::uuid[])
+     order by suggested_started_at`,
+    [WORKSPACE_ID, USER_ID, split.childSegmentIds]
+  );
+  assert.deepEqual(parts.rows.map((row) => row.title), ["Football practice", splitSource.title]);
+  const typedPart = await resolveLocationReviewAction(parts.rows[0].id, { action: "confirm" }, session);
+  // The inherited part goes through split and confirm again: one half renamed, one inherited.
+  const inheritedPart = await pool.query<{ startedAt: string; stoppedAt: string }>(
+    `select suggested_started_at as "startedAt", suggested_stopped_at as "stoppedAt" from review_items where id = $1`,
+    [parts.rows[1].id]
+  );
+  const splitAndConfirm = await resolveLocationReviewAction(parts.rows[1].id, {
+    action: "split_and_confirm",
+    splitAt: midpoint(inheritedPart.rows[0]),
+    left: { description: "Picnic" }
+  }, session);
+  assert("entryIds" in splitAndConfirm && splitAndConfirm.entryIds?.length === 2, "Split and confirm created no parts.");
+  // Merge and confirm two parts of one visit: kept under the inherited title, or renamed.
+  const mergeParts = async (source: typeof mergeKept, description?: string) => {
+    const pieces = await resolveLocationReviewAction(source.id, { action: "split", splitAt: midpoint(source) }, session);
+    assert("childSegmentIds" in pieces);
+    const items = await pool.query<{ id: string }>(
+      `select id from review_items
+       where workspace_id = $1 and user_id = $2 and status = 'open' and location_segment_id = any($3::uuid[])
+       order by suggested_started_at`,
+      [WORKSPACE_ID, USER_ID, pieces.childSegmentIds]
+    );
+    const merged = await resolveLocationReviewAction(items.rows[0].id, {
+      action: "merge_and_confirm",
+      adjacentReviewItemId: items.rows[1].id,
+      acknowledgeContradictoryEvidence: false,
+      ...(description ? { edit: { description } } : {})
+    }, session);
+    assert("entryId" in merged && merged.entryId, "Merge and confirm created no entry.");
+    return merged.entryId;
+  };
+  const mergedKept = await mergeParts(mergeKept);
+  const mergedRenamed = await mergeParts(mergeRenamed, "Band rehearsal");
+
+  const statement = buildTimeEntriesQuery(session, { limit: 100 });
+  const history = await pool.query<{
+    id: string;
+    description: string | null;
+    confirmedInReview: boolean;
+    ownerAuthoredInReview: boolean;
+  }>(statement.text, statement.values);
+  const flags = (entryId: unknown) => {
+    const row = history.rows.find((candidate) => candidate.id === entryId);
+    assert(row, `History is missing entry ${String(entryId)}.`);
+    return [row.confirmedInReview, row.ownerAuthoredInReview];
+  };
+  assert("entryId" in keptResult && "entryId" in editedBackResult && "entryId" in renamedResult && "entryId" in typedPart);
+  assert.deepEqual(flags(keptResult.entryId), [true, false], "A suggestion accepted as is counted as the owner's words.");
+  assert.deepEqual(flags(editedBackResult.entryId), [true, false], "A suggestion edited back to itself counted as the owner's words.");
+  assert.deepEqual(flags(renamedResult.entryId), [true, true], "A description typed in Review was not recorded as the owner's.");
+  assert.deepEqual(flags(typedPart.entryId), [true, true], "A split part titled by the owner lost its owner-authored signal.");
+  assert.deepEqual(flags(splitAndConfirm.entryIds[0]), [true, true], "A split-and-confirm part renamed by the owner was not recorded.");
+  assert.deepEqual(flags(splitAndConfirm.entryIds[1]), [true, false], "An inherited split-and-confirm title counted as the owner's words.");
+  assert.deepEqual(flags(mergedKept), [true, false], "A merge kept under its suggested title counted as the owner's words.");
+  assert.deepEqual(flags(mergedRenamed), [true, true], "A merge renamed by the owner was not recorded.");
+
+  // Repeating the decision is idempotent and never flips the signal.
+  await resolveLocationReviewAction(kept.id, { action: "confirm" }, session);
+  const repeated = await pool.query<{ ownerAuthoredInReview: boolean }>(statement.text, statement.values);
+  assert.equal(
+    repeated.rows.filter((row) => row.ownerAuthoredInReview).length,
+    4,
+    "Repeating a decision changed the owner-authored signal."
+  );
+  const markers = await pool.query<{ count: number }>(
+    `select count(*)::integer as count from activity_events
+     where workspace_id = $1 and user_id = $2 and raw_payload ? $3`,
+    [WORKSPACE_ID, USER_ID, REVIEW_DECISION_PAYLOAD_KEY]
+  );
+  assert.equal(markers.rows[0].count, 4, "Owner-authored markers were written to unexpected events.");
 }
 
 async function validateCommuteReviewCategoryAndDescription() {
@@ -1458,12 +1585,13 @@ async function main() {
     await validateShadowToReviewCutover();
     await validateSemanticIdempotencyAndRollback();
     await validateCommuteReviewCategoryAndDescription();
+    await validateRecentOwnerAuthoredSignal();
     await validateEnabledTrustedPlaceAutomation();
     await validateEnabledTrustedCommuteAutomation();
     await validateFinalisationWithoutNewEvidence();
     await validateSupersededReviewReactivation();
     await validateV1Compatibility();
-    console.log("Location V2 database validation passed: ordered replay, duplicate ingest, coordinate-free Motion & Fitness evidence, time away from a saved place, shadow cutover, no-new-evidence finalisation, semantic idempotency, Commute category concurrency/emission/replay/confirmation, uncertainty bounds, description semantics, isolation, trusted-place and trusted-commute automation, deliberate advisory/Review-row/exact-segment contention bounds, overlap fallback, terminal-decision preservation, superseded-Review reactivation, automatic-entry deletion safety, automatic-entry idempotency, atomic rollback, concurrent retry, split, merge, incompatible-merge rejection, and V1 compatibility.");
+    console.log("Location V2 database validation passed: ordered replay, duplicate ingest, coordinate-free Motion & Fitness evidence, time away from a saved place, shadow cutover, no-new-evidence finalisation, semantic idempotency, Commute category concurrency/emission/replay/confirmation, uncertainty bounds, description semantics, isolation, trusted-place and trusted-commute automation, deliberate advisory/Review-row/exact-segment contention bounds, overlap fallback, terminal-decision preservation, superseded-Review reactivation, automatic-entry deletion safety, automatic-entry idempotency, atomic rollback, concurrent retry, split, merge, incompatible-merge rejection, the Recent owner-authored signal for every Review decision path, and V1 compatibility.");
   } finally {
     if (process.env.KEEP_LOCATION_V2_DB_FIXTURE !== "1") {
       await pool.query("delete from workspaces where id = $1", [WORKSPACE_ID]).catch(() => undefined);

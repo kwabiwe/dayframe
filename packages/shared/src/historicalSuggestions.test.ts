@@ -3,7 +3,6 @@ import {
   buildHistoricalEntrySuggestions,
   historicalSuggestionLearningTier,
   historicalSuggestionPatch,
-  isGeneratedLocationTitle,
   isReviewConfirmedLocationVisit,
   type RecentActivityEntry,
   type RecentActivitySuggestion
@@ -224,13 +223,13 @@ describe("historical entry suggestions", () => {
     ]);
   });
 
-  it("includes explicitly confirmed non-health history while rejecting unresolved automation", () => {
+  it("includes owner-described Review confirmations while rejecting unresolved automation", () => {
     const results = search([
       historyEntry("accepted-place", "School pickup", {
+        confirmedInReview: true,
         eventType: "geofence_exit",
-        generatedDescription: false,
-        source: "location_learning",
-        userConfirmed: true
+        ownerAuthoredInReview: true,
+        source: "location_learning"
       }),
       historyEntry("unresolved-place", "Office visit", {
         eventType: "geofence_exit",
@@ -287,7 +286,7 @@ function confirmedVisit(
     categoryId: "exercise",
     categoryName: "Exercise",
     confirmedInReview: true,
-    generatedDescription: false,
+    ownerAuthoredInReview: true,
     source: "location_learning",
     ...overrides
   });
@@ -330,61 +329,27 @@ describe("Recent learns from visits confirmed in Review (E1)", () => {
     expect(isReviewConfirmedLocationVisit(historyEntry("typed", "Gym", { confirmedInReview: true }))).toBe(false);
   });
 
-  it("admits only descriptions the owner wrote, never a generated Review title (Codex r1)", () => {
-    // Kept under the suggested title (confirm without a rename): the server flags it generated.
+  it("admits only descriptions the owner typed in Review, never Dayframe-supplied text (Codex r2)", () => {
+    // Suggested title accepted as is or edited back to it, default description substitution,
+    // legacy geofence acceptance: confirmed in Review, but no owner-authored signal.
     expect(historicalSuggestionLearningTier(confirmedVisit("kept", "Lunch with friends", {
-      generatedDescription: true
+      ownerAuthoredInReview: false
     }))).toBeNull();
-    // An older server or cache without the flag proves nothing.
+    // Older servers, caches and historical rows without the signal stay out.
     expect(historicalSuggestionLearningTier(confirmedVisit("unknown", "Lunch with friends", {
-      generatedDescription: undefined
+      ownerAuthoredInReview: undefined
     }))).toBeNull();
-    // Generated templates stay out even if a row claims otherwise.
-    for (const title of [
-      "Visit Example Clinic",
-      "Visit 12 Example Street",
-      "visit near saved places",
-      "Time away from Home",
-      "Time away",
-      "Commute",
-      "Entered Example Park",
-      "Possible commute from Example Street to Sample Road",
-      "Review unknown stay"
-    ]) {
-      expect(isGeneratedLocationTitle(title)).toBe(true);
-      expect(historicalSuggestionLearningTier(confirmedVisit(title, title))).toBeNull();
-    }
-    for (const owned of ["Visiting hours", "Commute reading", "Time awayday prep", "Gym"]) {
-      expect(isGeneratedLocationTitle(owned)).toBe(false);
-    }
-    // Renamed in Review (edit and confirm, or a split/merge part given a new title).
-    expect(historicalSuggestionLearningTier(confirmedVisit("renamed", "Lunch with friends"))).toBe(2);
-    // Typed blocks are the owner's own words and are never filtered by these rules.
-    expect(historicalSuggestionLearningTier(historyEntry("typed", "Visit Example Clinic"))).toBe(1);
-  });
-
-  it("never offers a confirmed visit's description that names a saved or learned place", () => {
-    const entries = [
-      confirmedVisit("named", "Dentist at Example Clinic"),
-      confirmedVisit("one-time", "Coffee at Sample Cafe", { placeName: "Sample Cafe" }),
-      confirmedVisit("role", "Homework club"),
-      confirmedVisit("clean", "Swimming lesson"),
-      historyEntry("typed", "Example Clinic paperwork")
-    ];
-
-    expect(search(entries, "", { placeNames: ["Example Clinic", "Home", "  "] })
-      .map((result) => result.description)).toEqual([
-      "Example Clinic paperwork",
-      "Homework club",
-      "Swimming lesson"
-    ]);
-    // Without bootstrap names, the history's own place names still apply.
-    expect(search(entries, "").map((result) => result.description)).toEqual([
-      "Example Clinic paperwork",
-      "Dentist at Example Clinic",
-      "Homework club",
-      "Swimming lesson"
-    ]);
+    // The old compact-query flag is not enough on its own.
+    expect(historicalSuggestionLearningTier(confirmedVisit("compact", "Lunch with friends", {
+      confirmedInReview: undefined,
+      userConfirmed: true
+    }))).toBeNull();
+    // An owner-authored signal without a Review confirmation proves nothing.
+    expect(historicalSuggestionLearningTier(confirmedVisit("unconfirmed", "Lunch with friends", {
+      confirmedInReview: false
+    }))).toBeNull();
+    // Owner-typed text is the owner's own words, like a typed block: not filtered further.
+    expect(historicalSuggestionLearningTier(confirmedVisit("renamed", "Visit grandma at Example Street"))).toBe(2);
   });
 
   it("keeps unconfirmed, auto-logged, skipped and Health blocks out of Recent", () => {

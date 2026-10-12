@@ -50,7 +50,6 @@ import {
 } from "@/lib/reviewBulkSkip";
 import { ActivityPickerSheet } from "@/components/ActivityPickerSheet";
 import { recentActivityIds } from "@/lib/activityChoice";
-import { historicalPlaceNames } from "@/lib/historicalPlaceNames";
 import { activeLogAsCategoryId, reviewDeckDecisionName, reviewLogAsEdit, reviewLogAsEditorName } from "@/lib/reviewLogAs";
 import { friendlyMobileErrorMessage } from "@/lib/friendlyError";
 import { playHaptic } from "@/lib/haptics";
@@ -304,7 +303,6 @@ export default function ReviewScreen() {
   // Review opens from Today and from Calendar; the back button names the screen it returns to.
   const backLabel = usePreviousScreenLabel() ?? "Today";
   const peerEntries = useMemo(() => reviewPeerEntries(data), [data]);
-  const peerPlaceNames = useMemo(() => historicalPlaceNames(data), [data]);
   const overlapCounts = useMemo(() => prepareReviewOverlapCounts(data?.reviewItems ?? [], peerEntries, Date.now()), [data, peerEntries]);
   const recentLogAsActivityIds = useMemo(() => recentActivityIds(peerEntries), [peerEntries]);
   connectivityRef.current = { isOffline, isOnline, reconnectEpoch };
@@ -2283,7 +2281,6 @@ export default function ReviewScreen() {
           elapsedSeconds={editingEntry ? entryDurationSeconds(editingEntry, now) : 0}
           entry={editingEntry}
           historicalEntries={peerEntries}
-          historicalPlaceNames={peerPlaceNames}
           lastStoppedAt={null}
           mode="entry"
           onCancel={cancelEdit}

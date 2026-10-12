@@ -121,10 +121,6 @@ describe("time-entry sheet historical Suggestions contract", () => {
     expect(editSheetSource).toContain("tagNames: candidate.tagNames ?? candidate.tags?.map");
     expect(editSheetSource).toContain("currentEntryId: entry?.id ?? null");
     expect(editSheetSource).toContain("query: description");
-    // E1: confirmed-visit descriptions naming a saved or learned place never reach Recent.
-    expect(editSheetSource).toContain("placeNames: historicalPlaceNames");
-    expect(dashboardSource.match(/historicalPlaceNames=\{historyPlaceNames\}/g)).toHaveLength(3);
-    expect(reviewSource).toContain("historicalPlaceNames={peerPlaceNames}");
     expect(editSheetSource).toContain("queryActive: value.trim().length > 0");
     expect(editSheetSource).toContain("const HISTORICAL_SUGGESTION_LIMIT = 12");
     expect(editSheetSource).toContain("historicalSuggestionResultSignature");

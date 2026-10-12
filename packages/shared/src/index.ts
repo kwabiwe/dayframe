@@ -751,13 +751,11 @@ export type RecentActivityEntry = {
    */
   confirmedInReview?: boolean;
   /**
-   * Server-verified: the description equals a title Dayframe generated for a Review suggestion
-   * ("Visit …", "Time away from …", a place's default description…), so the owner did not write
-   * it. Tier 2 of Recent needs this to be explicitly false.
+   * Server-verified: the owner typed this description while making the Review decision (recorded
+   * at decision time; a suggested title accepted as is, or edited back to it, never counts).
+   * Tier 2 of Recent needs this to be true; a missing flag excludes the block.
    */
-  generatedDescription?: boolean;
-  /** The block's saved or one-time place name; Recent never offers a visit description naming it. */
-  placeName?: string | null;
+  ownerAuthoredInReview?: boolean;
   tagNames?: string[];
 };
 
@@ -778,11 +776,6 @@ export type RecentActivitySuggestion = {
 };
 
 export type HistoricalSuggestionSearchOptions = {
-  /**
-   * Saved and learned place names. A confirmed-visit (tier 2) description that contains one is
-   * never offered; the history's own place names are always included too.
-   */
-  placeNames?: readonly (string | null | undefined)[];
   query: string;
   currentEntryId?: string | null;
   contextDate?: Date | string;
@@ -931,13 +924,8 @@ export function buildHistoricalEntrySuggestions(
       .filter((candidate) => candidate.learningTier === 1)
       .map((candidate) => candidate.descriptionKey)
   );
-  // Recent never shows a place name from a confirmed visit (owner rule), even owner-written.
-  const placeKeys = historicalPlaceNameKeys(entries, options.placeNames);
   const rankedCandidates = candidates.filter((candidate) =>
-    candidate.learningTier === 1 || (
-      !typedDescriptionKeys.has(candidate.descriptionKey) &&
-      !containsHistoricalPlaceName(candidate.descriptionKey, placeKeys)
-    )
+    candidate.learningTier === 1 || !typedDescriptionKeys.has(candidate.descriptionKey)
   );
 
   const contextMs = historicalSuggestionContextMs(options.contextDate, candidates);
@@ -1129,47 +1117,6 @@ function historicalSuggestionKey(candidate: HistoricalSuggestionCandidate) {
   ])}`;
 }
 
-function historicalPlaceNameKeys(
-  entries: RecentActivityEntry[],
-  placeNames: HistoricalSuggestionSearchOptions["placeNames"]
-) {
-  const keys = new Set<string>();
-  const add = (value: unknown) => {
-    const key = normalizeHistoricalSearchText(value);
-    if (key) keys.add(key);
-  };
-  if (Array.isArray(placeNames)) placeNames.forEach(add);
-  for (const entry of entries) {
-    if (entry && typeof entry === "object") add(entry.placeName);
-  }
-  return [...keys];
-}
-
-/** Whole-word (or whole-phrase) containment, so a place called "Home" leaves "Homework" alone. */
-function containsHistoricalPlaceName(descriptionKey: string, placeKeys: string[]) {
-  return placeKeys.some((placeKey) => {
-    let index = descriptionKey.indexOf(placeKey);
-    while (index >= 0) {
-      const before = index > 0 ? descriptionKey[index - 1] ?? "" : "";
-      const after = descriptionKey[index + placeKey.length] ?? "";
-      if (!isHistoricalWordCharacter(before) && !isHistoricalWordCharacter(after)) return true;
-      index = descriptionKey.indexOf(placeKey, index + 1);
-    }
-    return false;
-  });
-}
-
-// Titles Dayframe writes for location suggestions (stays, journeys, time away, legacy geofence
-// and unknown-stay items). The server's `generatedDescription` is authoritative; this is a
-// second line for rows from servers or caches that predate it.
-const generatedLocationTitlePattern =
-  /^(?:visit(?:$|[^\p{L}\p{N}])|time away(?:$| from )|commute$|entered |possible commute from |review unknown stay$|record short unknown stay$)/u;
-
-export function isGeneratedLocationTitle(description: unknown) {
-  const key = normalizeHistoricalSearchText(description);
-  return key.length > 0 && generatedLocationTitlePattern.test(key);
-}
-
 function historicalSuggestionMatchTier(description: string, query: string) {
   if (!query) return null;
   if (description === query) return 0;
@@ -1349,18 +1296,16 @@ function isTypedOrStartedEntry(entry: RecentActivityEntry) {
 }
 
 /**
- * A location visit or journey the owner confirmed through a Review decision, described in the
- * owner's own words. Auto-logged trusted-place visits (confirmed without a Review decision), open
- * or skipped Review items, Health imports and any title Dayframe generated ("Visit …",
- * "Time away from …") never qualify.
+ * A location visit or journey the owner confirmed through a Review decision, described in words
+ * the owner typed while deciding. Dayframe-supplied text (a suggested title accepted as is or
+ * edited back to it, a place's default description, legacy geofence acceptance), auto-logged
+ * trusted-place visits, open or skipped Review items and Health imports never qualify. Like a
+ * typed block, owner-typed text is the owner's own words and is not filtered further.
  */
 export function isReviewConfirmedLocationVisit(entry: RecentActivityEntry) {
   if (!entry || entry.reviewStatus !== "confirmed") return false;
-  // `userConfirmed` is the compact suggestion query's name for the same accepted-Review fact.
-  if (entry.confirmedInReview !== true && entry.userConfirmed !== true) return false;
-  // Only an explicit server "the owner wrote this" counts; a missing flag is not proof.
-  if (entry.generatedDescription !== false) return false;
-  if (isGeneratedLocationTitle(entry.description)) return false;
+  if (entry.confirmedInReview !== true) return false;
+  if (entry.ownerAuthoredInReview !== true) return false;
   if (!entry.source || !locationVisitSources.has(entry.source)) return false;
   if (entry.eventType && !locationVisitEventTypes.has(entry.eventType)) return false;
   return true;

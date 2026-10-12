@@ -8,6 +8,7 @@ import type {
   ProjectSummary,
   RecentActivitySuggestion
 } from "@dayframe/shared";
+import { REVIEW_DECISION_PAYLOAD_KEY } from "./review-decision-signal";
 import {
   analyzeTimeIntervals,
   buildCategoryUsageRanks,
@@ -139,8 +140,8 @@ export type TimeEntryRow = {
   reviewStatus: string;
   /** True when an owner decision in Review created the block (see `confirmedInReviewSql`). */
   confirmedInReview?: boolean;
-  /** True when the description is a Dayframe-generated Review title (see `generatedDescriptionSql`). */
-  generatedDescription?: boolean;
+  /** True when the owner typed the description in the Review decision (see `ownerAuthoredInReviewSql`). */
+  ownerAuthoredInReview?: boolean;
   description: string | null;
   startedAt: string;
   stoppedAt: string | null;
@@ -781,25 +782,21 @@ export const confirmedInReviewSql = `coalesce(
             ) as "confirmedInReview"`;
 
 /**
- * Whether the block's description is a title Dayframe generated for a Review suggestion rather
- * than the owner's words: it equals (ignoring case and repeated spaces) the title of any of this
- * user's system-created Review items ("Visit …", "Time away from …", "Commute", a place's default
- * description, a learned place's address…). Review correction items are left out because their
- * titles are either inherited from such an item (already in the set) or typed by the owner.
- * A confirmed visit kept under its suggested title therefore reads true; one renamed in Review
- * reads false. Uses $1 (workspace) and $2 (user) of the surrounding statement.
+ * Whether the owner typed the block's description while making the Review decision that created
+ * it (E1, Codex r2). Location Review actions record this on the block's source event at decision
+ * time (`recordOwnerAuthoredDescription` / split and merge parts in `location-review-service.ts`)
+ * under a key client-ingested payloads can never carry. A suggested title accepted as is or edited
+ * back to it, a place's default description, legacy geofence acceptance, auto-logged visits and
+ * rows from before the signal existed all read false. A primary-key lookup per block.
  */
-export const generatedDescriptionSql = `coalesce(
-              regexp_replace(lower(btrim(te.description)), '\\s+', ' ', 'g') in (
-                select regexp_replace(lower(btrim(generated_review.title)), '\\s+', ' ', 'g')
-                from review_items generated_review
-                where generated_review.workspace_id = $1
-                  and generated_review.user_id = $2
-                  and generated_review.type <> 'location_manual_correction'
-                  and generated_review.title is not null
-              ),
-              false
-            ) as "generatedDescription"`;
+export const ownerAuthoredInReviewSql = `coalesce((
+              select (owner_event.raw_payload -> '${REVIEW_DECISION_PAYLOAD_KEY}' ->> 'ownerAuthoredDescription') = 'true'
+              from activity_events owner_event
+              where owner_event.id = te.created_from_event_id
+                and owner_event.workspace_id = te.workspace_id
+                and owner_event.user_id = te.user_id
+                and owner_event.source = 'location_learning'
+            ), false) as "ownerAuthoredInReview"`;
 
 export type TimeEntryQueryOptions = {
   capturedNow?: string;
@@ -851,7 +848,7 @@ export function buildTimeEntriesQuery(
             te.confidence,
             te.review_status as "reviewStatus",
             ${confirmedInReviewSql},
-            ${generatedDescriptionSql},
+            ${ownerAuthoredInReviewSql},
             te.description,
             te.started_at as "startedAt",
             te.stopped_at as "stoppedAt",

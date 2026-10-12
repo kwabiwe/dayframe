@@ -1,6 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import pg from "pg";
 import { buildTimeEntriesQuery } from "./queries";
+import { REVIEW_DECISION_PAYLOAD_KEY } from "./review-decision-signal";
 import type { RequestSession } from "./session";
 
 // Run with DAYFRAME_HISTORY_FLAGS_TEST_DATABASE_URL pointing at a disposable local *_test database
@@ -16,7 +17,7 @@ let sequence = 0;
 
 const describeWithDatabase = databaseUrl ? describe : describe.skip;
 
-type Flags = { confirmedInReview: boolean; generatedDescription: boolean };
+type Flags = { confirmedInReview: boolean; ownerAuthoredInReview: boolean };
 
 describeWithDatabase("history entry Review flags on disposable PostgreSQL (E1)", () => {
   beforeAll(async () => {
@@ -49,53 +50,54 @@ describeWithDatabase("history entry Review flags on disposable PostgreSQL (E1)",
     }
   });
 
-  it("flags only owner-renamed Review confirmations as owner-written, scoped to the session", async () => {
+  it("reads the owner-authored signal recorded at decision time, scoped to the session", async () => {
     const statement = buildTimeEntriesQuery(session, { limit: 100 });
     const result = await database!.query<{ description: string | null } & Flags>(statement.text, statement.values);
     const flags = Object.fromEntries(result.rows.map((row) => [
       row.description,
-      { confirmedInReview: row.confirmedInReview, generatedDescription: row.generatedDescription }
+      { confirmedInReview: row.confirmedInReview, ownerAuthoredInReview: row.ownerAuthoredInReview }
     ]));
 
     expect(flags).toEqual({
-      // Confirmed in Review under the suggested title: confirmed, but the words are Dayframe's.
-      "Visit Example Clinic": { confirmedInReview: true, generatedDescription: true },
-      // Renamed in Review (edit and confirm), even with different case and spacing elsewhere.
-      "Lunch with friends": { confirmedInReview: true, generatedDescription: false },
-      // Auto-logged at a saved place: no Review item at all.
-      "Auto logged visit": { confirmedInReview: false, generatedDescription: false },
-      // Split and confirm: one part keeps the parent's generated title, the other was renamed.
-      "Visit Sample Park": { confirmedInReview: true, generatedDescription: true },
-      "Picnic": { confirmedInReview: true, generatedDescription: false },
-      // A correction Review item renamed by the owner and then accepted.
-      "Football practice": { confirmedInReview: true, generatedDescription: false },
-      // A suggestion still open in Review: its needs-review block is not confirmed.
-      "Open suggestion": { confirmedInReview: false, generatedDescription: true },
-      // Typed by the owner: no Review involved.
-      "Typed block": { confirmedInReview: false, generatedDescription: false },
-      // Another user's Review titles in the same workspace never mark this user's words generated.
-      "Shared words": { confirmedInReview: true, generatedDescription: false }
+      // Confirmed in Review under the suggested title: no signal was recorded.
+      "Visit Example Clinic": { confirmedInReview: true, ownerAuthoredInReview: false },
+      // Renamed in Review (edit and confirm): the decision recorded the signal.
+      "Lunch with friends": { confirmedInReview: true, ownerAuthoredInReview: true },
+      // Auto-logged at a saved place: no Review item and no signal.
+      "Auto logged visit": { confirmedInReview: false, ownerAuthoredInReview: false },
+      // Split and confirm: the owner-titled part carries the signal, the inherited one does not.
+      "Visit Sample Park": { confirmedInReview: true, ownerAuthoredInReview: false },
+      "Picnic": { confirmedInReview: true, ownerAuthoredInReview: true },
+      // Legacy geofence acceptance substituting a place's default description (an address):
+      // Dayframe's text, and a geofence event never carries the signal even if its payload did.
+      "12 Example Street": { confirmedInReview: true, ownerAuthoredInReview: false },
+      // A suggestion still open in Review.
+      "Open suggestion": { confirmedInReview: false, ownerAuthoredInReview: false },
+      // Typed by the owner: tier 1, no Review involved.
+      "Typed block": { confirmedInReview: false, ownerAuthoredInReview: false },
+      // A block linked to another user's marked event never borrows that signal.
+      "Borrowed words": { confirmedInReview: false, ownerAuthoredInReview: false }
     });
   });
 
-  it("never reads another user's or workspace's Review items", async () => {
+  it("never reads another user's or workspace's Review decisions", async () => {
     const otherSession: RequestSession = { ...session, userId: otherUserId };
     const statement = buildTimeEntriesQuery(otherSession, { limit: 100 });
     const result = await database!.query<{ description: string | null } & Flags>(statement.text, statement.values);
-    expect(result.rows.map((row) => [row.description, row.confirmedInReview, row.generatedDescription])).toEqual([
-      // This user's own block with no Review decision of theirs; their own suggestion titles
-      // (not the first user's) decide whether the words are generated.
-      ["Lunch with friends", false, true]
+    expect(result.rows.map((row) => [row.description, row.confirmedInReview, row.ownerAuthoredInReview])).toEqual([
+      ["Their renamed visit", true, true]
     ]);
 
     const elsewhere = buildTimeEntriesQuery({ ...session, workspaceId: otherWorkspaceId }, { limit: 100 });
     const rows = await database!.query<{ description: string | null } & Flags>(elsewhere.text, elsewhere.values);
-    expect(rows.rows.map((row) => [row.description, row.confirmedInReview, row.generatedDescription])).toEqual([
-      ["Visit Example Clinic", false, false]
+    // That workspace reads only its own events: its block keeps its own signal, and nothing from
+    // the first workspace's Review items makes it "confirmed in Review" there.
+    expect(rows.rows.map((row) => [row.description, row.confirmedInReview, row.ownerAuthoredInReview])).toEqual([
+      ["Lunch with friends", false, true]
     ]);
   });
 
-  it("reads each accepted-item and generated-title list once per query, not once per row", async () => {
+  it("reads the accepted-item list once per query and the signal by primary key", async () => {
     const db = database!;
     // Realistic volumes so the planner's choice is the one a real account gets.
     await db.query(
@@ -121,61 +123,58 @@ describeWithDatabase("history entry Review flags on disposable PostgreSQL (E1)",
     const statement = buildTimeEntriesQuery(session, { limit: 2000 });
     const plan = await db.query<{ "QUERY PLAN": string }>(`explain (verbose) ${statement.text}`, statement.values);
     const text = plan.rows.map((row) => row["QUERY PLAN"]).join("\n");
-    // Both uncorrelated lists (accepted items, generated titles) are built once and probed as
-    // hash tables ("hashed SubPlan" in the verbose output), never re-scanned per block.
-    const hashed = new Set([...text.matchAll(/hashed SubPlan (\d+)/g)].map((match) => match[1]));
-    expect(hashed.size).toBeGreaterThanOrEqual(2);
+    // The accepted-item list is built once and probed as a hash table, never re-scanned per block;
+    // the owner-authored signal is a primary-key lookup of the block's own event.
     expect(text).toMatch(/COALESCE\(\(\(hashed SubPlan \d+\)/);
-    expect(text).toMatch(/COALESCE\(\(hashed SubPlan \d+\)/);
+    expect(text).toMatch(/owner_event/);
+    expect(text).not.toMatch(/Seq Scan on public\.activity_events owner_event/);
   });
 });
 
 async function seed(db: pg.Pool) {
-  // Renamed confirmation, kept-title confirmation.
+  const marked = { [REVIEW_DECISION_PAYLOAD_KEY]: { ownerAuthoredDescription: true } };
+
   const kept = await event(db, "location_learning", "learned_place_visit");
   await review(db, kept, "location_stay", "Visit Example Clinic", "accepted");
   await entry(db, "location_learning", "Visit Example Clinic", kept);
 
-  const renamed = await event(db, "location_learning", "unknown_stay");
+  const renamed = await event(db, "location_learning", "unknown_stay", null, userId, workspaceId, marked);
   await review(db, renamed, "location_stay", "Visit at an unknown place", "accepted");
   await entry(db, "location_learning", "Lunch with friends", renamed);
 
-  // Auto-logged: confirmed block, no Review item.
   const automatic = await event(db, "location_learning", "geofence_exit");
   await entry(db, "location_learning", "Auto logged visit", automatic);
 
-  // Split and confirm: parent item accepted, children from correction events without items.
+  // Split and confirm: parent item accepted, parts from correction events without items.
   const parent = await event(db, "location_learning", "geofence_exit");
-  await review(db, parent, "location_stay", "Visit  sample park", "accepted");
+  await review(db, parent, "location_stay", "Visit Sample Park", "accepted");
   const left = await event(db, "location_learning", "unknown_stay", "location-correction:left");
   await entry(db, "location_learning", "Visit Sample Park", left);
-  const right = await event(db, "location_learning", "unknown_stay", "location-correction:right");
+  const right = await event(db, "location_learning", "unknown_stay", "location-correction:right", userId, workspaceId, marked);
   await entry(db, "location_learning", "Picnic", right);
 
-  // Split, then the owner renamed the part's correction item and accepted it.
-  const corrected = await event(db, "location_learning", "unknown_stay", "location-correction:renamed");
-  await review(db, corrected, "location_manual_correction", "Football practice", "accepted");
-  await entry(db, "location_learning", "Football practice", corrected);
+  // Legacy geofence acceptance: the item suggested the place name, the block saved the place's
+  // default description. Even a (client-shaped) marker on a geofence event is ignored.
+  const legacy = await event(db, "geofence_specific", "geofence_exit", null, userId, workspaceId, marked);
+  await review(db, legacy, "geofence_visit", "Example Clinic", "accepted");
+  await entry(db, "geofence_specific", "12 Example Street", legacy);
 
-  // Open suggestion with a needs-review block.
   const open = await event(db, "location_learning", "unknown_stay");
   await review(db, open, "location_stay", "Open suggestion", "open");
   await entry(db, "location_learning", "Open suggestion", open, "needs_review");
 
   await entry(db, "mobile_app", "Typed block", null);
 
-  // The other user in the same workspace has a generated title equal to this user's words.
-  const foreign = await event(db, "location_learning", "unknown_stay", null, otherUserId);
-  await review(db, foreign, "location_stay", "Shared words", "accepted", otherUserId);
-  await review(db, foreign, "location_stay", "Lunch with friends", "accepted", otherUserId);
-  await entry(db, "location_learning", "Lunch with friends", null, "confirmed", otherUserId);
-  const mine = await event(db, "location_learning", "unknown_stay");
-  await review(db, mine, "location_stay", "Visit at an unknown place", "accepted");
-  await entry(db, "location_learning", "Shared words", mine);
+  // Another user in the same workspace renamed a visit; this user's block pointing at that event
+  // (never produced by the app) must not borrow the signal.
+  const theirs = await event(db, "location_learning", "unknown_stay", null, otherUserId, workspaceId, marked);
+  await review(db, theirs, "location_stay", "Visit at an unknown place", "accepted", otherUserId);
+  await entry(db, "location_learning", "Their renamed visit", theirs, "confirmed", otherUserId);
+  await entry(db, "location_learning", "Borrowed words", theirs);
 
-  // Another workspace of the same user, with an accepted item whose title is generated there.
-  const elsewhere = await event(db, "location_learning", "unknown_stay", null, userId, otherWorkspaceId);
-  await entry(db, "location_learning", "Visit Example Clinic", elsewhere, "confirmed", userId, otherWorkspaceId);
+  // The same user's other workspace: its marked event belongs to that workspace only.
+  const elsewhere = await event(db, "location_learning", "unknown_stay", null, userId, otherWorkspaceId, marked);
+  await entry(db, "location_learning", "Lunch with friends", elsewhere, "confirmed", userId, otherWorkspaceId);
 }
 
 async function event(
@@ -184,13 +183,14 @@ async function event(
   eventType: string,
   clientEventId: string | null = null,
   owner = userId,
-  workspace = workspaceId
+  workspace = workspaceId,
+  payload: Record<string, unknown> = {}
 ) {
   sequence += 1;
   const result = await db.query<{ id: string }>(
     `insert into activity_events (workspace_id, user_id, client_event_id, source, event_type, occurred_at, confidence, raw_payload, review_status)
-     values ($1, $2, $3, $4, $5, now() - make_interval(hours => $6), 'medium', '{}'::jsonb, 'confirmed') returning id`,
-    [workspace, owner, clientEventId ?? `history-flags:${sequence}`, source, eventType, sequence]
+     values ($1, $2, $3, $4, $5, now() - make_interval(hours => $6), 'medium', $7::jsonb, 'confirmed') returning id`,
+    [workspace, owner, clientEventId ?? `history-flags:${sequence}`, source, eventType, sequence, JSON.stringify(payload)]
   );
   return result.rows[0].id;
 }

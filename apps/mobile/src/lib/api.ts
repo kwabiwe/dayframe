@@ -155,8 +155,8 @@ export type MobileTimeEntry = {
   reviewStatus: string;
   /** Server-verified: an owner decision in Review created this block (Recent learns from such visits). */
   confirmedInReview?: boolean;
-  /** Server-verified: the description is a Dayframe-generated Review title, not the owner's words. */
-  generatedDescription?: boolean;
+  /** Server-verified: the owner typed this description while making the Review decision. */
+  ownerAuthoredInReview?: boolean;
   description: string | null;
   startedAt: string;
   stoppedAt: string | null;
