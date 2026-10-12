@@ -242,6 +242,14 @@ export function ActivitiesLibrary({ initialData }: { initialData: BootstrapData 
             {group.ownGroup ? <span className="df-faint">Activities you created</span> : null}
           </h2>
           <div className="df-lib-grid">
+            {/* Adding is the group's first tile, so it never moves as activities are added (UIA-316). */}
+            {group.ownGroup ? (
+              <button className="df-lnew" disabled={busy} onClick={() => setEditing("new")} type="button">
+                <DayframeIcon glyph="plus" size={26} />
+                New activity
+                <small>Pick a name, icon and colour</small>
+              </button>
+            ) : null}
             {group.activities.map((activity) => (
               <ActivityCard
                 activity={activity}
@@ -252,13 +260,6 @@ export function ActivitiesLibrary({ initialData }: { initialData: BootstrapData 
                 weeks={weeks.get(activity.id)}
               />
             ))}
-            {group.ownGroup ? (
-              <button className="df-lnew" disabled={busy} onClick={() => setEditing("new")} type="button">
-                <DayframeIcon glyph="plus" size={26} />
-                New activity
-                <small>Pick a name, icon and colour</small>
-              </button>
-            ) : null}
           </div>
         </section>
       ))}

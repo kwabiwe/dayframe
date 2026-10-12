@@ -15,7 +15,11 @@ describe("Library actions (UIA-316)", () => {
   it("keeps the tab switch alone in the head; Add place is the Places tab's first row", () => {
     expect(head).not.toContain("{action}");
     expect(placesPage).toContain('<LibraryHead current="/places" />');
-    expect(places.indexOf('href="/places/new">Add place</Link>')).toBeLessThan(places.indexOf("<PlaceRoleSlots"));
+    const addPlace = places.indexOf('href="/places/new">Add place</Link>');
+    const roleSlots = places.indexOf("<PlaceRoleSlots");
+    expect(addPlace).toBeGreaterThan(-1);
+    expect(roleSlots).toBeGreaterThan(-1);
+    expect(addPlace).toBeLessThan(roleSlots);
   });
 
   it("uses the simple ghost row actions and a neutral delete icon, like Tags", () => {
