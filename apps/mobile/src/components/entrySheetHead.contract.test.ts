@@ -99,7 +99,7 @@ describe("time-entry sheet polish (A11a)", () => {
     expect(add).toContain("{ backgroundColor: theme.surfaceMuted }");
     expect(add).toContain("glyph={DAYFRAME_APP_ICONS.add}");
     expect(sheet).not.toContain(">+ Tag<");
-    expect(theme).toMatch(/activeEditDescriptionInput: \{[^}]*backgroundColor: theme\.surfaceInset,[^}]*fontSize: 20,[^}]*fontWeight: "600"/);
+    expect(theme).toMatch(/activeEditDescriptionInput: \{[^}]*backgroundColor: theme\.mode === "dark" \? theme\.surfaceInset : theme\.surfaceMuted,[^}]*fontSize: 20,[^}]*fontWeight: "600"/);
   });
 
   it("offers a coral Add block next to Discard when adding past time (UIA-052)", () => {
