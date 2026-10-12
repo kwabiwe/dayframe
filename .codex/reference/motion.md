@@ -328,10 +328,10 @@ Block pull-to-refresh:
 - Trigger: the range text button under the Reports title (‹ range ›). Single owner: `ReportRangeControls`' `menu` state (`closed` / `open` / `closing`); nothing else animates it.
 - Entrance: opacity 0 → 1 over 120ms (ease-out). Desktop: a popover under the trigger; under 640px a bottom sheet above the phone tab bar (z-index 70 over the bar's 40, `bottom: calc(12px + env(safe-area-inset-bottom))`, 44px items, visible 44px close control).
 - Update: choosing a preset closes the menu and navigates; the head row and the page around the trigger never move.
-- Exit: state `closing` keeps it mounted while it fades 1 → 0 over 120ms (ease-in, pointer-events off), then unmounts on `animationend` with a timer fallback. Escape and the close control return focus to the trigger; Tab and outside clicks close without moving focus; "Custom…" closes it and opens the dates dialog, whose Cancel/Escape/Apply return focus to the trigger.
+- Exit: state `closing` keeps it mounted while it fades 1 → 0 over 120ms (ease-in, pointer-events off), then unmounts on `animationend` with a timer fallback. The closing menu is `inert`, so its items leave the tab order as the fade starts. Escape and the close control return focus to the trigger; Tab moves focus to the next focusable element after the trigger and Shift+Tab to the trigger; outside clicks close without moving focus. "Custom…" closes it and opens the dates dialog, whose Cancel/Escape return focus to the trigger; Apply does too, and when its navigation remounts the controls the new instance focuses its trigger on mount (a module flag keyed to the applied range).
 - Interruption: reopening mid-exit returns to `open` and cancels the pending unmount; rapid toggles never leave a stale menu.
 - Reduce Motion: no entrance or exit animation; open and close are immediate.
-- Evidence: `reportRangeControls.dom.test.tsx` (focus, arrows/Home/End/Escape/Tab, mid-exit reopen, Reduce Motion, dialog focus return) and `reports.contract.test.ts` (Reduce Motion CSS, phone sheet over the tab bar).
+- Evidence: `reportRangeControls.dom.test.tsx` (focus, arrows/Home/End/Escape, real Tab/Shift+Tab with user-event and the inert closing menu, mid-exit reopen, Reduce Motion, Cancel and Apply focus return across the remount) and `reports.contract.test.ts` (Reduce Motion CSS, phone sheet over the tab bar).
 
 ## Web Review (Blocks parity step 13)
 

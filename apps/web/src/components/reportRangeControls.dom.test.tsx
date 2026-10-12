@@ -3,9 +3,11 @@
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { defaultReportFilters, type ReportRangeMetadata } from "@/lib/report-filters";
+import userEvent from "@testing-library/user-event";
+import { defaultReportFilters, type ReportFilters, type ReportRangeMetadata } from "@/lib/report-filters";
 
-vi.mock("next/navigation", () => ({ useRouter: () => ({ push: vi.fn() }) }));
+const push = vi.fn();
+vi.mock("next/navigation", () => ({ useRouter: () => ({ push }) }));
 vi.mock("next/link", () => ({
   default: ({ href, children, ...props }: { href: string; children: React.ReactNode }) => <a href={href} {...props}>{children}</a>
 }));
@@ -27,10 +29,20 @@ beforeEach(() => {
   container = document.createElement("div");
   document.body.append(container);
   root = createRoot(container);
-  const filters = { ...defaultReportFilters(new Date(2026, 9, 7)), range: "this-week" as const };
-  const range = { preset: "this-week", label: "5 – 11 Oct", dayCount: 7, canNavigateNext: false, wasClamped: false } as unknown as ReportRangeMetadata;
-  act(() => root.render(<ReportRangeControls filters={filters} range={range} />));
+  push.mockReset();
+  render({ ...defaultReportFilters(new Date(2026, 9, 7)), range: "this-week" });
 });
+
+/** Renders as the page does: the range is in the key, so a new range remounts the controls. */
+function render(filters: ReportFilters) {
+  const range = { preset: filters.range, label: "5 – 11 Oct", dayCount: 7, canNavigateNext: true, wasClamped: false } as unknown as ReportRangeMetadata;
+  act(() => root.render(
+    <>
+      <ReportRangeControls filters={filters} key={`${filters.range}-${filters.from}-${filters.to}`} range={range} />
+      <button type="button">After</button>
+    </>
+  ));
+}
 
 afterEach(() => {
   act(() => root.unmount());
@@ -68,9 +80,37 @@ describe("Reports range menu (W8, menu pattern and motion)", () => {
     expect(menu()?.dataset.state).toBe("open");
     act(() => { vi.advanceTimersByTime(500); });
     expect(menu()?.dataset.state).toBe("open");
-    key("Tab");
+    key("Escape");
     act(() => { vi.advanceTimersByTime(500); });
     expect(menu()).toBeNull();
+  });
+
+  it("makes a closing menu inert and moves real Tab focus past the trigger, Shift+Tab to the trigger", async () => {
+    const user = userEvent.setup();
+    await user.click(trigger());
+    expect(document.activeElement?.textContent).toBe("This week");
+    await user.tab();
+    expect(menu()?.hasAttribute("inert")).toBe(true);
+    // Next after the trigger is the "Next report period" link, never another preset or <body>.
+    expect(document.activeElement?.getAttribute("aria-label")).toBe("Next report period");
+    await user.click(trigger());
+    expect(document.activeElement?.textContent).toBe("This week");
+    await user.tab({ shift: true });
+    expect(document.activeElement).toBe(trigger());
+  });
+
+  it("returns focus to the trigger after Apply, across the navigation remount", async () => {
+    const user = userEvent.setup();
+    await user.click(trigger());
+    key("End");
+    await user.click(document.activeElement as HTMLElement);
+    // The dialog starts with the week's dates; applying them as a custom range is a new range.
+    await user.click(Array.from(document.querySelectorAll("button")).find((button) => button.textContent === "Apply")!);
+    expect(push).toHaveBeenCalledTimes(1);
+    const href = new URL(push.mock.calls[0][0], "http://x").searchParams;
+    render({ ...defaultReportFilters(new Date(2026, 9, 7)), range: "custom", from: href.get("from")!, to: href.get("to")! });
+    await act(async () => { await new Promise((resolve) => requestAnimationFrame(() => resolve(null))); });
+    expect(document.activeElement).toBe(trigger());
   });
 
   it("closes at once under Reduce Motion", () => {

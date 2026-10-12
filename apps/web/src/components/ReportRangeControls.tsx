@@ -31,6 +31,13 @@ import {
  * with wrap, Home/End jump; Escape closes and returns focus to the trigger; Tab closes.
  */
 type MenuState = "closed" | "open" | "closing";
+/**
+ * Set when Apply navigates to a new custom range: the page remounts this component (its key holds
+ * the range), so the new instance takes focus back to the range trigger on mount.
+ */
+let focusTriggerAfterNavigation: string | null = null;
+const rangeKey = (filters: Pick<ReportFilters, "range" | "from" | "to">) => `${filters.range}:${filters.from}:${filters.to}`;
+const FOCUSABLE = 'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
 const EXIT_MS = 120;
 
 function prefersReducedMotion() {
@@ -83,6 +90,28 @@ export function ReportRangeControls({
   useEffect(() => clearExitTimer, []);
 
   useEffect(() => {
+    const target = focusTriggerAfterNavigation;
+    focusTriggerAfterNavigation = null;
+    if (target !== null && target === rangeKey(filters)) triggerRef.current?.focus();
+    // Mount only: the flag belongs to the navigation that created this instance.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  /** Tab out of the menu: focus the element after the trigger (Shift+Tab: the trigger itself). */
+  function tabOut(backwards: boolean) {
+    const trigger = triggerRef.current;
+    if (!trigger) return;
+    if (backwards) {
+      trigger.focus();
+      return;
+    }
+    const order = Array.from(document.querySelectorAll<HTMLElement>(FOCUSABLE)).filter(
+      (element) => !menuRef.current?.contains(element) && !element.closest("[inert]")
+    );
+    (order[order.indexOf(trigger) + 1] ?? trigger).focus();
+  }
+
+  useEffect(() => {
     if (!isOpen) return;
     const onPointer = (event: PointerEvent) => {
       if (!wrapRef.current?.contains(event.target as Node)) closeMenu();
@@ -108,7 +137,12 @@ export function ReportRangeControls({
     else if (event.key === "Escape") {
       event.preventDefault();
       closeMenu({ restoreFocus: true });
-    } else if (event.key === "Tab") closeMenu();
+    } else if (event.key === "Tab") {
+      // The closing menu is inert, so focus must move now rather than fall to <body> on unmount.
+      event.preventDefault();
+      closeMenu();
+      tabOut(event.shiftKey);
+    }
   }
 
   function openCustom() {
@@ -147,6 +181,7 @@ export function ReportRangeControls({
             aria-label="Choose a date range"
             className={`df-range-menu${menu === "closing" ? " is-closing" : ""}`}
             data-state={menu}
+            inert={menu === "closing" ? true : undefined}
             onAnimationEnd={(event) => {
               if (event.animationName === "df-range-menu-out") {
                 clearExitTimer();
@@ -205,8 +240,13 @@ export function ReportRangeControls({
                 className="df-rbtn df-rbtn--live"
                 disabled={!fromDraft || !toDraft}
                 onClick={() => {
-                  setCustomOpen(false);
-                  router.push(reportsHref(filtersForCustomRange(filters, fromDraft, toDraft)));
+                  // Focus returns to the range trigger now and, after the navigation remounts this
+                  // component, on the new instance's mount.
+                  const next = filtersForCustomRange(filters, fromDraft, toDraft);
+                  // Same range: no remount, so closeCustom's focus is the only one needed.
+                  focusTriggerAfterNavigation = rangeKey(next) === rangeKey(filters) ? null : rangeKey(next);
+                  closeCustom();
+                  router.push(reportsHref(next));
                 }}
                 type="button"
               >
