@@ -12,6 +12,7 @@ import {
 import { clientFetch } from "@/lib/client-auth-fetch";
 import type { BootstrapData, CategoryRow, TimeEntryRow } from "@/lib/queries";
 import { timelineStateFromSearchParams } from "@/lib/timeline-view";
+import { goalDrafts } from "@/lib/goal-stepper";
 import {
   applyAuthoritativeActiveEntryVersion,
   applyOptimisticActiveEntryPatch,
@@ -125,6 +126,15 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
       : null;
     dataRef.current = nextData;
     lastCommitAtRef.current = nextData ? Date.now() : 0;
+    // Every server copy of the goals joins the tab's goal record (kept only if its revision is
+    // newer), whether or not Settings is open, so a later stale snapshot never wins (UIA-309).
+    if (nextData?.user && typeof nextData.user.goalsRevision === "number") {
+      goalDrafts.observe(nextData.user.id, {
+        dailyGoalMinutes: nextData.user.dailyGoalMinutes,
+        weeklyGoalMinutes: nextData.user.weeklyGoalMinutes,
+        goalsRevision: nextData.user.goalsRevision
+      });
+    }
     if (nextData && source !== "optimistic") {
       timerStateRef.current = {
         activeEntryId: nextData.activeEntry?.id ?? null,
@@ -176,6 +186,9 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
       const response = await clientFetch(`/api/bootstrap?date=${selectedDate}`, { cache: "no-store" });
       if (!response.ok || requestId !== refreshRequestRef.current) return dataRef.current;
       const payload = (await response.json()) as BootstrapData;
+      // A newer load (or a mutation's own data) may have landed while this body was read: an
+      // older answer never replaces it.
+      if (requestId !== refreshRequestRef.current) return dataRef.current;
       commitData(payload, "canonical");
       return payload;
     } catch {

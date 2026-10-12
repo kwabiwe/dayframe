@@ -51,7 +51,11 @@ export default function SettingsPage() {
         <div className="df-set-col">
           <SetCard glyph="timer" id="your-day" title="Your day">
             <GoalSettings
+              // A different account gets a fresh control: no draft or save crosses over.
+              key={data.user.id}
               dailyGoalMinutes={data.user.dailyGoalMinutes}
+              goalsRevision={data.user.goalsRevision ?? 0}
+              userId={data.user.id}
               weeklyGoalMinutes={data.user.weeklyGoalMinutes}
             />
           </SetCard>
@@ -66,7 +70,7 @@ export default function SettingsPage() {
           <SetCard
             glyph="map-pin"
             id="automatic-tracking"
-            note="Dayframe only logs on its own at places you trust. Anything it isn’t sure about waits in Review for you."
+            note="Dayframe only logs on its own at places you trust. Anything it isn’t sure about waits in Review for you. Visit suggestions are set for each saved place; background location is managed in the iPhone app, and the web only asks for this browser’s location when you choose Current location for a place."
             title="Automatic tracking"
           >
             <PlacesLocationSettings />

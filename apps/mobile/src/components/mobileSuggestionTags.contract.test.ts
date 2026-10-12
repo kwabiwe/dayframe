@@ -20,11 +20,13 @@ describe("running timer suggestion metadata", () => {
   it("puts the same Done pill in the sheet head for every time-entry sheet", () => {
     const sheet = readFileSync(new URL("./ActiveTimerEditSheet.tsx", import.meta.url), "utf8");
     const head = sheet.indexOf('testID="time-entry-sheet-upper-dismiss-area"');
-    const done = sheet.indexOf('testID="time-entry-sheet-done"');
+    const done = sheet.indexOf('testID: "time-entry-sheet-done"');
     expect(head).toBeGreaterThan(-1);
     expect(done).toBeGreaterThan(head);
     expect(done).toBeLessThan(sheet.indexOf('testID="time-entry-sheet-form"'));
-    expect(sheet).toMatch(/donePill: \{[\s\S]*?minHeight: 44/);
+    // The shared BlocksSheetHead pill (UIA-006) keeps the 44-point target.
+    const sharedHead = readFileSync(new URL("./blocks/BlocksSheetHead.tsx", import.meta.url), "utf8");
+    expect(sharedHead).toMatch(/pill: \{[^}]*minHeight: 44/);
     expect(theme).not.toContain("sheetHeaderRunning:");
     expect(theme).not.toContain("sheetDoneButtonRunning:");
   });

@@ -13,6 +13,7 @@ import {
   type PlaceRole,
   type PlaceRoleSlot
 } from "@dayframe/shared";
+import { BlocksSheetHead } from "../blocks/BlocksSheetHead";
 import { SwipeDismissSheet, type SwipeDismissSheetHandle } from "../SwipeDismissSheet";
 import { DayframeIcon } from "../icons/DayframeIcon";
 import type { MobileStyles, MobileTheme } from "../../lib/mobileTheme";
@@ -147,38 +148,18 @@ export function PlaceRoleSheet({
           visible
         >
           <View style={sheetStyles.head}>
-            <Pressable
-              accessibilityRole="button"
-              accessibilityState={{ disabled: saving }}
-              disabled={saving}
-              onPress={cancel}
-              style={({ pressed }) => [sheetStyles.headButton, pressed ? sheetStyles.pressed : null]}
-              testID="place-role-cancel"
-            >
-              <Text {...mobileTextProps("control")} style={[sheetStyles.cancelText, { color: theme.textSecondary }]}>Cancel</Text>
-            </Pressable>
-            <View style={sheetStyles.headTitle}>
-              <Text {...mobileTextProps("counter")} style={[sheetStyles.eyebrow, { color: theme.textMuted }]}>HOME AND WORK</Text>
-              <Text {...mobileTextProps("screenHeading")} accessibilityRole="header" numberOfLines={1} style={[sheetStyles.title, { color: theme.textPrimary }]}>
-                {title}
-              </Text>
-            </View>
-            <Pressable
-              accessibilityRole="button"
-              accessibilityState={{ busy: saving, disabled: saving }}
-              disabled={saving}
-              onPress={() => void save()}
-              style={({ pressed }) => [
-                sheetStyles.savePill,
-                { backgroundColor: clearing ? theme.surfaceMuted : theme.accent },
-                pressed ? sheetStyles.pressed : null
-              ]}
-              testID="place-role-save"
-            >
-              <Text {...mobileTextProps("control")} style={[sheetStyles.saveText, { color: clearing ? theme.dangerText : theme.onAccent }]}>
-                {saving ? "Saving…" : clearing ? "Clear" : "Save"}
-              </Text>
-            </Pressable>
+            <BlocksSheetHead
+              action={{
+                busy: saving,
+                label: saving ? "Saving…" : clearing ? "Clear" : "Save",
+                onPress: () => void save(),
+                testID: "place-role-save",
+                tone: clearing ? "danger" : "primary"
+              }}
+              eyebrow="HOME AND WORK"
+              theme={theme}
+              title={title}
+            />
           </View>
 
           <ScrollView
@@ -295,14 +276,8 @@ export function PlaceRoleSheet({
 }
 
 const sheetStyles = StyleSheet.create({
-  head: { alignItems: "center", flexDirection: "row", gap: 8, paddingBottom: 8, paddingTop: 6 },
-  headButton: { alignItems: "center", justifyContent: "center", minHeight: 44, minWidth: 64, paddingHorizontal: 6 },
-  headTitle: { alignItems: "center", flex: 1 },
-  cancelText: { fontSize: 15, fontWeight: "600" },
+  head: { paddingBottom: 8, paddingHorizontal: 4 },
   eyebrow: { fontSize: 11, fontWeight: "700", letterSpacing: 0.9 },
-  title: { fontFamily: MOBILE_DISPLAY_FONT.bold, fontSize: 20 },
-  savePill: { alignItems: "center", borderRadius: DAYFRAME_BLOCKS.radius.pill, justifyContent: "center", minHeight: 44, minWidth: 64, paddingHorizontal: 16 },
-  saveText: { fontSize: 15, fontWeight: "700" },
   scroll: { flex: 1 },
   body: { gap: 14, paddingHorizontal: 4, paddingTop: 6 },
   lead: { fontSize: 15 },

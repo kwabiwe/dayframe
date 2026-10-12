@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useCallback, useEffect, useState, type FormEvent } from "react";
+import { useCallback, useState, type FormEvent } from "react";
 import { ChevronDown } from "lucide-react";
 import { useAppShellRuntime } from "@/components/AppShellRuntime";
 import { SignOutControl } from "@/components/SignOutControl";
@@ -392,57 +392,7 @@ export function PlacesLocationSettings() {
         detail="Places Dayframe recognises, and whether visits there are suggested."
         action={<Link className="df-rbtn df-rbtn--sm" href="/places">Manage</Link>}
       />
-      <SettingsRow
-        label="Suggest visits"
-        detail="Visit suggestions are controlled for each saved place. Background visit detection is managed in the iPhone app."
-      />
-      <LocationAccessRow />
     </>
-  );
-}
-
-function LocationAccessRow() {
-  const [permission, setPermission] = useState("Check this browser’s site settings.");
-
-  useEffect(() => {
-    let active = true;
-    let status: PermissionStatus | null = null;
-
-    function update(nextState: PermissionState) {
-      if (!active) return;
-      setPermission(permissionCopy(nextState));
-    }
-
-    if (!navigator.permissions?.query) {
-      return () => {
-        active = false;
-      };
-    }
-
-    void navigator.permissions.query({ name: "geolocation" }).then((nextStatus) => {
-      status = nextStatus;
-      update(nextStatus.state);
-      nextStatus.addEventListener("change", handlePermissionChange);
-    }).catch(() => {
-      if (active) setPermission("Check this browser’s site settings.");
-    });
-
-    function handlePermissionChange() {
-      if (status) update(status.state);
-    }
-
-    return () => {
-      active = false;
-      status?.removeEventListener("change", handlePermissionChange);
-      status = null;
-    };
-  }, []);
-
-  return (
-    <SettingsRow
-      label="Location access"
-      detail={`${permission} Dayframe only asks for browser location when you choose Current location while editing a place.`}
-    />
   );
 }
 
@@ -476,12 +426,18 @@ export function DataPrivacySettings() {
       <SettingsRow
         glyph="download"
         label="Export data"
-        detail="Download a copy of your Dayframe information."
+        detail="Every block, activity and place in one file."
         action={(
-          <div className="settings-export-actions">
-            <a className="ui-button ui-button-secondary" href="/api/export?kind=workspace_json" download>Dayframe data</a>
-            <a className="ui-button ui-button-secondary" href="/api/export?kind=time_entries_csv" download>Blocks</a>
-            <a className="ui-button ui-button-secondary" href="/api/export?kind=activity_events_json" download>Activity history</a>
+          // UIA-312: one Export; the spreadsheet and the raw history sit in a small menu beside it.
+          <div className="df-export">
+            <a className="df-rbtn df-rbtn--sm" href="/api/export?kind=workspace_json" download>Export</a>
+            <details className="df-export-more">
+              <summary className="df-rbtn df-rbtn--sm df-rbtn--ghost" aria-label="More export formats">More formats</summary>
+              <div className="df-export-menu">
+                <a href="/api/export?kind=time_entries_csv" download>Blocks as a spreadsheet (CSV)</a>
+                <a href="/api/export?kind=activity_events_json" download>Activity history (JSON)</a>
+              </div>
+            </details>
           </div>
         )}
       />
@@ -533,6 +489,7 @@ export function HelpSettings({ authMode, reviewCount }: { authMode: SettingsAuth
         action={<Link className="df-rbtn df-rbtn--sm" href="/review">Open Review</Link>}
       />
       <SettingsRow
+        className="df-shortcuts-row"
         label="Keyboard shortcuts"
         detail="Start, stop, jump between pages and more."
         action={(
@@ -555,17 +512,6 @@ export function HelpSettings({ authMode, reviewCount }: { authMode: SettingsAuth
 /** The page's own Sign out, under the cards (the profile menu has another). */
 export function SettingsSignOut() {
   return <SignOutControl className="df-rbtn df-set-signout" />;
-}
-
-function permissionCopy(state: PermissionState) {
-  switch (state) {
-    case "granted":
-      return "Allowed in this browser.";
-    case "denied":
-      return "Blocked in this browser. Change it in your browser’s site settings.";
-    case "prompt":
-      return "Not decided in this browser.";
-  }
 }
 
 function securitySummary(authMode: SettingsAuthMode) {

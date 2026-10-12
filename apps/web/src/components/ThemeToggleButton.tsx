@@ -15,7 +15,7 @@ export function ThemeToggleButton() {
     () => "light"
   );
   const nextTheme = resolvedTheme === "dark" ? "light" : "dark";
-  const label = `Switch to ${nextTheme} mode`;
+  const label = nextTheme === "dark" ? "Switch to Midnight" : "Switch to Daylight";
 
   return (
     <button
