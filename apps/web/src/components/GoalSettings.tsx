@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { useRouter } from "next/navigation";
 import { Minus, Plus } from "lucide-react";
 import { SettingsRow } from "@/components/ui/Primitives";
@@ -11,7 +11,9 @@ import {
   WEEKLY_GOAL_HOURS,
   canStepGoal,
   createGoalSaver,
+  goalDrafts,
   nextGoalMinutes,
+  shownGoal,
   type GoalField,
   type TimeGoalMinutes
 } from "@/lib/goal-stepper";
@@ -19,12 +21,9 @@ import {
 /**
  * Settings › Your day (UIA-309): the iPhone's goal steppers. A tap changes the goal at once; it is
  * saved a moment after the last tap (no Save button), and leaving the page saves a pending change.
+ * What is shown comes from the tab-wide goal drafts (`goalDrafts`): a tap until its save settles,
+ * then the value the account accepted until page data read after it arrives, then the page's data.
  */
-/**
- * What a tap set for a goal (`value`, numbered by `revision`), and the last value the account
- * accepted from this page for it (`accepted`), which a later failed save falls back to.
- */
-type Override = { value: number; revision: number; accepted?: number };
 type SaveContext = { revisions: Partial<Record<GoalField, number>> };
 
 export function GoalSettings({
@@ -38,25 +37,27 @@ export function GoalSettings({
   weeklyGoalMinutes: number;
 }) {
   const router = useRouter();
-  const { refresh } = useAppShellRuntime();
-  // What a tap set for each goal. It stays on screen while anything is still being saved (a
-  // person's latest tap wins over a change made elsewhere meanwhile) and until the app has
-  // reloaded fresh data after the last save; a refresh that only had cached data keeps it.
-  const [overrides, setOverrides] = useState<Partial<Record<GoalField, Override>>>({});
+  const { dataReadAt, refresh } = useAppShellRuntime();
+  const drafts = useSyncExternalStore(goalDrafts.subscribe, () => goalDrafts.get(userId), () => goalDrafts.get(userId));
   const [status, setStatus] = useState<{ kind: "saved" | "error"; text: string } | null>(null);
   const goals: TimeGoalMinutes = {
-    dailyGoalMinutes: overrides.dailyGoalMinutes?.value ?? dailyGoalMinutes,
-    weeklyGoalMinutes: overrides.weeklyGoalMinutes?.value ?? weeklyGoalMinutes
+    dailyGoalMinutes: shownGoal(drafts.dailyGoalMinutes, dailyGoalMinutes, dataReadAt),
+    weeklyGoalMinutes: shownGoal(drafts.weeklyGoalMinutes, weeklyGoalMinutes, dataReadAt)
   };
   // Read by the saver after a save lands (also after Settings closed: Today and Reports still
   // pick up the new goal at once).
-  const latest = useRef({ mounted: false, refresh, revision: 0, router });
+  const latest = useRef({ mounted: false, refresh, router });
   const saverRef = useRef<ReturnType<typeof createGoalSaver<SaveContext>> | null>(null);
 
   useEffect(() => {
     latest.current.refresh = refresh;
     latest.current.router = router;
   }, [refresh, router]);
+
+  // Page data read after an accepted save shows from then on (also a change made elsewhere since).
+  useEffect(() => {
+    goalDrafts.retire(userId, dataReadAt);
+  }, [dataReadAt, userId]);
 
   useEffect(() => {
     const state = latest.current;
@@ -73,45 +74,19 @@ export function GoalSettings({
         if (!response.ok) throw new Error("not saved");
       },
       mergeContext: (earlier, later) => ({ revisions: { ...earlier.revisions, ...later.revisions } }),
-      onAccepted: ({ changes }) => {
-        if (!state.mounted) return;
-        // The account now holds these values, whatever is tapped since.
-        setOverrides((current) => {
-          const next = { ...current };
-          for (const [field, value] of Object.entries(changes) as Array<[GoalField, number]>) {
-            const override = current[field];
-            if (override) next[field] = { ...override, accepted: value };
-          }
-          return next;
-        });
-      },
+      // The tab's drafts outlive this visit: a save that lands after Settings closed still counts.
+      onAccepted: ({ changes, context }) => goalDrafts.accept(userId, changes, context.revisions, Date.now()),
       onFailed: ({ changes, context }) => {
-        if (!state.mounted) return;
-        // Only the goals this save carried, and only if no newer tap changed them since: each goes
-        // back to the last value the account accepted from here, or to the page's value.
-        setOverrides((current) => {
-          const next = { ...current };
-          for (const field of Object.keys(changes) as GoalField[]) {
-            const override = current[field];
-            if (!override || override.revision !== context.revisions[field]) continue;
-            if (override.accepted === undefined) delete next[field];
-            else next[field] = { ...override, value: override.accepted };
-          }
-          return next;
-        });
-        setStatus({ kind: "error", text: "Your goal was not saved. Check your connection and try again." });
+        // Only the goals this save carried, and only if no newer tap changed them since: each
+        // falls back to the value the account last accepted from this tab, or the page's.
+        goalDrafts.fail(userId, changes, context.revisions);
+        if (state.mounted) setStatus({ kind: "error", text: "Your goal was not saved. Check your connection and try again." });
       },
       onBusyChange: (busy, lastAccepted) => {
         if (busy) return;
         if (state.mounted && lastAccepted) setStatus({ kind: "saved", text: "Saved" });
         // Everything is saved (or failed): reload once, so every accepted write reaches the app.
-        const revision = state.revision;
-        // Only newly loaded data may replace the taps: a failed or superseded load keeps them.
-        void state.refresh({ force: true, freshOnly: true }).then((fresh) => {
-          state.router.refresh();
-          // Fresh data now shows what the account holds; a newer tap keeps its own values.
-          if (fresh && state.mounted && state.revision === revision && !saver.isBusy()) setOverrides({});
-        }).catch(() => undefined);
+        void state.refresh({ force: true }).then(() => state.router.refresh()).catch(() => undefined);
       }
     });
     saverRef.current = saver;
@@ -135,8 +110,7 @@ export function GoalSettings({
     const limits = field === "dailyGoalMinutes" ? DAILY_GOAL_HOURS : WEEKLY_GOAL_HOURS;
     const value = nextGoalMinutes(goals[field], direction, limits);
     if (value === goals[field]) return;
-    const revision = ++latest.current.revision;
-    setOverrides((current) => ({ ...current, [field]: { ...current[field], value, revision } }));
+    const revision = goalDrafts.tap(userId, field, value);
     setStatus(null);
     saverRef.current?.schedule({ [field]: value }, { revisions: { [field]: revision } });
   }

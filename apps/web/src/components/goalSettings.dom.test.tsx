@@ -6,15 +6,19 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 const mocks = vi.hoisted(() => ({
   fetch: vi.fn(async () => new Response("{}", { status: 200 })),
   refresh: vi.fn(async () => null),
-  routerRefresh: vi.fn()
+  routerRefresh: vi.fn(),
+  /** When the page data now shown was read (the runtime's dataReadAt). */
+  runtime: { dataReadAt: 0 }
 }));
 
 vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh: mocks.routerRefresh }) }));
-vi.mock("@/components/AppShellRuntime", () => ({ useAppShellRuntime: () => ({ refresh: mocks.refresh }) }));
+vi.mock("@/components/AppShellRuntime", () => ({
+  useAppShellRuntime: () => ({ dataReadAt: mocks.runtime.dataReadAt, refresh: mocks.refresh })
+}));
 vi.mock("@/lib/client-auth-fetch", () => ({ clientFetch: mocks.fetch }));
 
 const { GoalSettings } = await import("./GoalSettings");
-const { __resetGoalSaveQueueForTests } = await import("@/lib/goal-stepper");
+const { __resetGoalDraftsForTests, __resetGoalSaveQueueForTests } = await import("@/lib/goal-stepper");
 
 afterEach(async () => {
   cleanup();
@@ -25,6 +29,8 @@ afterEach(async () => {
 
 beforeEach(() => {
   __resetGoalSaveQueueForTests();
+  __resetGoalDraftsForTests();
+  mocks.runtime.dataReadAt = 0;
   mocks.fetch.mockClear();
   mocks.refresh.mockClear();
   mocks.routerRefresh.mockClear();
@@ -68,7 +74,7 @@ describe("Settings › Your day steppers (UIA-309)", () => {
     view.unmount();
     await act(async () => { await vi.runAllTimersAsync(); });
     expect(mocks.fetch).toHaveBeenCalledTimes(1);
-    expect(mocks.refresh).toHaveBeenCalledWith({ force: true, freshOnly: true });
+    expect(mocks.refresh).toHaveBeenCalledWith({ force: true });
     expect(mocks.routerRefresh).toHaveBeenCalled();
   });
 
@@ -117,23 +123,40 @@ describe("Settings › Your day steppers (UIA-309)", () => {
     ]);
   });
 
-  it("keeps tapped goals on screen until fresh data arrives after the last save (Codex r5)", async () => {
+  it("shows the accepted goal until page data read after the save arrives, then the page's (Codex r5–r7)", async () => {
     vi.useFakeTimers();
     const view = render(<GoalSettings dailyGoalMinutes={480} userId="user-1" weeklyGoalMinutes={2400} />);
     fireEvent.click(view.getByRole("button", { name: "Increase daily goal" }));
-    // The refresh after the save only had cached data (null): the tapped 9h stays.
-    await act(async () => { await vi.advanceTimersByTimeAsync(600); });
-    expect(mocks.refresh).toHaveBeenCalledTimes(1);
+    await act(async () => { await vi.advanceTimersByTimeAsync(600); }); // 9h accepted
+    // The reload after the save failed or was superseded: the page still has 8h, read earlier.
     view.rerender(<GoalSettings dailyGoalMinutes={480} userId="user-1" weeklyGoalMinutes={2400} />);
     expect(view.getByRole("group", { name: "Daily goal: 9h" })).toBeTruthy();
-    // Next time the refresh is fresh: the page's data shows from then on.
-    mocks.refresh.mockResolvedValueOnce({} as never);
-    fireEvent.click(view.getByRole("button", { name: "Increase daily goal" }));
-    await act(async () => { await vi.advanceTimersByTimeAsync(600); });
-    view.rerender(<GoalSettings dailyGoalMinutes={600} userId="user-1" weeklyGoalMinutes={2400} />);
-    expect(view.getByRole("group", { name: "Daily goal: 10h" })).toBeTruthy();
+    // Any later load from the server (here 12h, changed elsewhere since) shows from then on.
+    mocks.runtime.dataReadAt = Date.now() + 1;
     view.rerender(<GoalSettings dailyGoalMinutes={720} userId="user-1" weeklyGoalMinutes={2400} />);
     expect(view.getByRole("group", { name: "Daily goal: 12h" })).toBeTruthy();
+    fireEvent.click(view.getByRole("button", { name: "Increase daily goal" }));
+    expect(view.getByRole("group", { name: "Daily goal: 13h" })).toBeTruthy();
+  });
+
+  it("remembers an accepted goal across visits to Settings (Codex r7)", async () => {
+    vi.useFakeTimers();
+    let release: () => void = () => undefined;
+    mocks.fetch
+      .mockImplementationOnce(() => new Promise((resolve) => { release = () => resolve(new Response("{}", { status: 200 })); }))
+      .mockImplementationOnce(async () => new Response("{}", { status: 500 }));
+    const first = render(<GoalSettings dailyGoalMinutes={480} userId="user-1" weeklyGoalMinutes={2400} />);
+    fireEvent.click(first.getByRole("button", { name: "Increase daily goal" })); // 9h
+    first.unmount(); // sends 9h, held in flight
+    await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+    expect(mocks.fetch).toHaveBeenCalledTimes(1);
+    const second = render(<GoalSettings dailyGoalMinutes={480} userId="user-1" weeklyGoalMinutes={2400} />);
+    expect(second.getByRole("group", { name: "Daily goal: 9h" })).toBeTruthy();
+    fireEvent.click(second.getByRole("button", { name: "Decrease daily goal" })); // 8h, queued
+    await act(async () => { release(); await vi.advanceTimersByTimeAsync(600); }); // 9h accepted, 8h rejected
+    expect(second.getByRole("alert").textContent).toContain("not saved");
+    // The account holds 9h; the page's data (8h) was read before that.
+    expect(second.getByRole("group", { name: "Daily goal: 9h" })).toBeTruthy();
   });
 
   it("a page refresh while saving never takes back a newer tap (Codex r5)", async () => {

@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { DAILY_GOAL_HOURS, WEEKLY_GOAL_HOURS, __resetGoalSaveQueueForTests, canStepGoal, createGoalSaver, nextGoalMinutes } from "./goal-stepper";
+import { DAILY_GOAL_HOURS, WEEKLY_GOAL_HOURS, __resetGoalDraftsForTests, __resetGoalSaveQueueForTests, canStepGoal, createGoalSaver, goalDrafts, nextGoalMinutes, shownGoal } from "./goal-stepper";
 
 beforeEach(() => __resetGoalSaveQueueForTests());
 
@@ -107,5 +107,43 @@ describe("goal steppers (UIA-309)", () => {
     // Busy from the first tap until both saves are done; the last one failed.
     expect(busy).toEqual([[true, true], [false, false]]);
     expect(saver.isBusy()).toBe(false);
+  });
+});
+
+describe("the tab's goal drafts (Codex r7)", () => {
+  beforeEach(() => __resetGoalDraftsForTests());
+
+  it("shows a tap, then the accepted value until page data read after it, then the page's", () => {
+    const tap = goalDrafts.tap("user-1", "dailyGoalMinutes", 540);
+    expect(shownGoal(goalDrafts.get("user-1").dailyGoalMinutes, 480, 0)).toBe(540);
+    goalDrafts.accept("user-1", { dailyGoalMinutes: 540 }, { dailyGoalMinutes: tap }, 1_000);
+    expect(goalDrafts.get("user-1").dailyGoalMinutes?.tap).toBeUndefined();
+    // Page data read before the save (500) still shows the accepted 9h; read after it (1 500), the page's.
+    expect(shownGoal(goalDrafts.get("user-1").dailyGoalMinutes, 480, 500)).toBe(540);
+    expect(shownGoal(goalDrafts.get("user-1").dailyGoalMinutes, 720, 1_500)).toBe(720);
+    goalDrafts.retire("user-1", 1_500);
+    expect(goalDrafts.get("user-1").dailyGoalMinutes).toBeUndefined();
+  });
+
+  it("a failure drops only its own tap; a newer tap and the accepted value stay", () => {
+    const first = goalDrafts.tap("user-1", "dailyGoalMinutes", 540);
+    goalDrafts.accept("user-1", { dailyGoalMinutes: 540 }, { dailyGoalMinutes: first }, 1_000);
+    const second = goalDrafts.tap("user-1", "dailyGoalMinutes", 600);
+    const third = goalDrafts.tap("user-1", "dailyGoalMinutes", 660);
+    goalDrafts.fail("user-1", { dailyGoalMinutes: 600 }, { dailyGoalMinutes: second });
+    expect(goalDrafts.get("user-1").dailyGoalMinutes?.tap?.value).toBe(660);
+    goalDrafts.fail("user-1", { dailyGoalMinutes: 660 }, { dailyGoalMinutes: third });
+    expect(shownGoal(goalDrafts.get("user-1").dailyGoalMinutes, 480, 0)).toBe(540);
+  });
+
+  it("keeps each account's drafts apart and tells listeners about changes", () => {
+    const listener = vi.fn();
+    const unsubscribe = goalDrafts.subscribe(listener);
+    goalDrafts.tap("user-1", "weeklyGoalMinutes", 2700);
+    expect(listener).toHaveBeenCalledTimes(1);
+    expect(goalDrafts.get("user-2")).toEqual({});
+    unsubscribe();
+    goalDrafts.tap("user-1", "weeklyGoalMinutes", 3000);
+    expect(listener).toHaveBeenCalledTimes(1);
   });
 });

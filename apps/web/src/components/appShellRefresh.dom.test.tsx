@@ -35,44 +35,43 @@ afterEach(() => {
 });
 
 describe("AppShellRuntime refresh", () => {
-  it("never lets an older answer replace a newer one, and says which loads were fresh (Codex r6)", async () => {
-    const results: Array<BootstrapData | null> = [];
-    render(<AppShellRuntimeProvider><Harness results={results} /></AppShellRuntimeProvider>);
+  it("never lets an older answer replace a newer one (Codex r6)", async () => {
+    render(<AppShellRuntimeProvider><Harness /></AppShellRuntimeProvider>);
     fireEvent.click(screen.getByRole("button", { name: "Hydrate" }));
     fireEvent.click(screen.getByRole("button", { name: "Refresh" })); // first: its body is held
     fireEvent.click(screen.getByRole("button", { name: "Refresh" })); // second
     await waitFor(() => expect(answers).toHaveLength(2));
     await act(async () => answers[1]?.(bootstrap(600)));
     await waitFor(() => expect(screen.getByTestId("goal").textContent).toBe("600"));
+    const readAt = Number(screen.getByTestId("read-at").textContent);
+    expect(readAt).toBeGreaterThan(0);
     await act(async () => answers[0]?.(bootstrap(540)));
-    await waitFor(() => expect(results).toHaveLength(2));
-    // The older body arrived last: it is dropped, and reported as not fresh.
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 20)); });
+    // The older body arrived last: it is dropped.
     expect(screen.getByTestId("goal").textContent).toBe("600");
-    expect(results.map((result) => result?.user.dailyGoalMinutes ?? null).sort()).toEqual([600, null].sort());
+    expect(Number(screen.getByTestId("read-at").textContent)).toBe(readAt);
   });
 
-  it("reports a failed load as not fresh, and as the data shown without freshOnly", async () => {
-    const results: Array<BootstrapData | null> = [];
-    render(<AppShellRuntimeProvider><Harness results={results} /></AppShellRuntimeProvider>);
+  it("moves the read time only for a load from the server, never for a failure or hydration (Codex r7)", async () => {
+    render(<AppShellRuntimeProvider><Harness /></AppShellRuntimeProvider>);
     fireEvent.click(screen.getByRole("button", { name: "Hydrate" }));
+    expect(screen.getByTestId("read-at").textContent).toBe("0");
     fireEvent.click(screen.getByRole("button", { name: "Refresh" }));
     await waitFor(() => expect(answers).toHaveLength(1));
     await act(async () => answers[0]?.(null));
-    await waitFor(() => expect(results).toEqual([null]));
-    fireEvent.click(screen.getByRole("button", { name: "Refresh shown" }));
-    await waitFor(() => expect(answers).toHaveLength(2));
-    await act(async () => answers[1]?.(null));
-    await waitFor(() => expect(results[1]?.user.dailyGoalMinutes).toBe(480));
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 20)); });
+    expect(screen.getByTestId("read-at").textContent).toBe("0");
+    expect(screen.getByTestId("goal").textContent).toBe("480");
   });
 });
 
-function Harness({ results }: { results: Array<BootstrapData | null> }) {
-  const { data, hydrate, refresh } = useAppShellRuntime();
+function Harness() {
+  const { data, dataReadAt, hydrate, refresh } = useAppShellRuntime();
   return <>
     <button onClick={() => hydrate(bootstrap(480))}>Hydrate</button>
-    <button onClick={() => void refresh({ force: true, freshOnly: true }).then((result) => { results.push(result); })}>Refresh</button>
-    <button onClick={() => void refresh({ force: true }).then((result) => { results.push(result); })}>Refresh shown</button>
+    <button onClick={() => void refresh({ force: true })}>Refresh</button>
     <output data-testid="goal">{data?.user.dailyGoalMinutes ?? ""}</output>
+    <output data-testid="read-at">{dataReadAt}</output>
   </>;
 }
 

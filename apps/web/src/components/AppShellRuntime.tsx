@@ -66,10 +66,12 @@ type RuntimeContext = {
   loadDate: (date: string) => Promise<DateLoadOutcome>;
   openManualEntry: () => void;
   /**
-   * Reloads the app's data. Resolves with the data now shown; with `freshOnly`, with the newly
-   * loaded data or null when nothing new was loaded (a failure, or a newer load superseded it).
+   * When the request behind the data now shown was sent (ms since the epoch; 0 until one has
+   * loaded here). Only loads from the server move it; optimistic, cached and server-rendered data
+   * keep it. Something saved before this time is in `data`.
    */
-  refresh: (options?: { force?: boolean; freshOnly?: boolean }) => Promise<BootstrapData | null>;
+  dataReadAt: number;
+  refresh: (options?: { force?: boolean }) => Promise<BootstrapData | null>;
   selectedDate: string;
   setTimerDraft: (draft: TimerDraft | ((current: TimerDraft) => TimerDraft)) => void;
   shellData: BootstrapData | null;
@@ -148,6 +150,11 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
     setData(nextData);
   }, []);
 
+  const [dataReadAt, setDataReadAt] = useState(0);
+  const markDataRead = useCallback((sentAt: number) => {
+    setDataReadAt((current) => Math.max(current, sentAt));
+  }, []);
+
   const setTimerDraft = useCallback((draft: TimerDraft | ((current: TimerDraft) => TimerDraft)) => {
     setTimerDraftState((current) => {
       const nextDraft = typeof draft === "function" ? draft(current) : draft;
@@ -173,23 +180,24 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
     if (!timerDraftsEqual(nextDraft, draftRef.current)) setTimerDraft(nextDraft);
   }, [data?.activeEntry, setTimerDraft]);
 
-  const refresh = useCallback(async ({ force = false, freshOnly = false }: { force?: boolean; freshOnly?: boolean } = {}) => {
-    const unchanged = () => (freshOnly ? null : dataRef.current);
-    if (!force && mutationGateRef.current.isActive()) return unchanged();
+  const refresh = useCallback(async ({ force = false }: { force?: boolean } = {}) => {
+    if (!force && mutationGateRef.current.isActive()) return dataRef.current;
     const requestId = ++refreshRequestRef.current;
+    const sentAt = Date.now();
     try {
       const response = await clientFetch(`/api/bootstrap?date=${selectedDate}`, { cache: "no-store" });
-      if (!response.ok || requestId !== refreshRequestRef.current) return unchanged();
+      if (!response.ok || requestId !== refreshRequestRef.current) return dataRef.current;
       const payload = (await response.json()) as BootstrapData;
       // A newer load (or a mutation's own data) may have landed while this body was read: an
       // older answer never replaces it.
-      if (requestId !== refreshRequestRef.current) return unchanged();
+      if (requestId !== refreshRequestRef.current) return dataRef.current;
       commitData(payload, "canonical");
+      markDataRead(sentAt);
       return payload;
     } catch {
-      return unchanged();
+      return dataRef.current;
     }
-  }, [commitData, selectedDate]);
+  }, [commitData, markDataRead, selectedDate]);
 
   const loadDate = useCallback(async (date: string): Promise<DateLoadOutcome> => {
     const cached = dateDataCacheRef.current.get(date);
@@ -204,6 +212,7 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
 
     refreshRequestRef.current += 1;
     const requestId = ++dateLoadRequestRef.current;
+    const sentAt = Date.now();
     isDateLoadingRef.current = true;
     setIsDateLoading(true);
     setDateLoadError(null);
@@ -215,6 +224,7 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
         throw new Error("The period response did not match the requested date.");
       }
       commitData(payload, "canonical");
+      markDataRead(sentAt);
       return { ok: true };
     } catch {
       const error = "Couldn’t load that period. Your current view is unchanged.";
@@ -226,7 +236,7 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
         setIsDateLoading(false);
       }
     }
-  }, [commitData]);
+  }, [commitData, markDataRead]);
 
   useLayoutEffect(() => {
     const cached = dateDataCacheRef.current.get(selectedDate);
@@ -658,6 +668,7 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
     createManualEntry,
     deleteActiveTimer,
     data: selectedData,
+    dataReadAt,
     dateLoadError,
     hydrate,
     isDateLoading,
@@ -683,6 +694,7 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
     createManualEntry,
     deleteActiveTimer,
     data,
+    dataReadAt,
     dateLoadError,
     hydrate,
     isDateLoading,

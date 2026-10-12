@@ -140,3 +140,100 @@ export function createGoalSaver<Context>({
     isBusy: () => busy
   };
 }
+
+/**
+ * What this tab knows about one goal beyond the page's data: the latest tap not yet settled
+ * (`tap`, numbered by `revision`), and the last value the account accepted from this tab with the
+ * time it was accepted (`accepted`). Kept for the whole tab, per account, so leaving and reopening
+ * Settings never forgets either.
+ */
+export type GoalDraft = {
+  tap?: { value: number; revision: number };
+  accepted?: { value: number; at: number };
+};
+export type GoalDrafts = Readonly<Partial<Record<GoalField, GoalDraft>>>;
+
+const EMPTY_DRAFTS: GoalDrafts = Object.freeze({});
+let draftsByUser = new Map<string, GoalDrafts>();
+let draftRevision = 0;
+const draftListeners = new Set<() => void>();
+
+function updateDrafts(userId: string, update: (current: GoalDrafts) => GoalDrafts) {
+  const current = draftsByUser.get(userId) ?? EMPTY_DRAFTS;
+  const next = update(current);
+  if (next === current) return;
+  draftsByUser = new Map(draftsByUser).set(userId, next);
+  for (const listener of draftListeners) listener();
+}
+
+function withField(drafts: GoalDrafts, field: GoalField, draft: GoalDraft): GoalDrafts {
+  const next = { ...drafts };
+  if (draft.tap || draft.accepted) next[field] = draft;
+  else delete next[field];
+  return next;
+}
+
+export const goalDrafts = {
+  get: (userId: string): GoalDrafts => draftsByUser.get(userId) ?? EMPTY_DRAFTS,
+  subscribe(listener: () => void) {
+    draftListeners.add(listener);
+    return () => {
+      draftListeners.delete(listener);
+    };
+  },
+  /** A stepper tap: shown at once, until its save settles. Returns the tap's revision. */
+  tap(userId: string, field: GoalField, value: number) {
+    const revision = ++draftRevision;
+    updateDrafts(userId, (drafts) => withField(drafts, field, { ...drafts[field], tap: { value, revision } }));
+    return revision;
+  },
+  /** A save the account accepted: its values are the account's from `at`; their taps are settled. */
+  accept(userId: string, changes: GoalChanges, revisions: Partial<Record<GoalField, number>>, at: number) {
+    updateDrafts(userId, (drafts) => {
+      let next = drafts;
+      for (const [field, value] of Object.entries(changes) as Array<[GoalField, number]>) {
+        const draft = next[field] ?? {};
+        const settled = draft.tap?.revision === revisions[field];
+        next = withField(next, field, { tap: settled ? undefined : draft.tap, accepted: { value, at } });
+      }
+      return next;
+    });
+  },
+  /** A save that failed: its taps (unless a newer tap replaced them) go, so the goal falls back. */
+  fail(userId: string, changes: GoalChanges, revisions: Partial<Record<GoalField, number>>) {
+    updateDrafts(userId, (drafts) => {
+      let next = drafts;
+      for (const field of Object.keys(changes) as GoalField[]) {
+        const draft = next[field];
+        if (draft?.tap && draft.tap.revision === revisions[field]) next = withField(next, field, { ...draft, tap: undefined });
+      }
+      return next;
+    });
+  },
+  /** Page data read after an accepted value replaces it: that value is retired. */
+  retire(userId: string, dataReadAt: number) {
+    updateDrafts(userId, (drafts) => {
+      let next = drafts;
+      for (const field of Object.keys(drafts) as GoalField[]) {
+        const draft = next[field];
+        if (draft?.accepted && draft.accepted.at < dataReadAt) next = withField(next, field, { ...draft, accepted: undefined });
+      }
+      return next;
+    });
+  }
+};
+
+/**
+ * The goal Settings shows: the latest tap still being saved; else the account's value as last
+ * accepted from this tab, while the page's data was read before that; else the page's data.
+ */
+export function shownGoal(draft: GoalDraft | undefined, pageValue: number, dataReadAt: number) {
+  if (draft?.tap) return draft.tap.value;
+  if (draft?.accepted && draft.accepted.at >= dataReadAt) return draft.accepted.value;
+  return pageValue;
+}
+
+export function __resetGoalDraftsForTests() {
+  draftsByUser = new Map();
+  draftRevision = 0;
+}
