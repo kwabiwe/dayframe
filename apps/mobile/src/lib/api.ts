@@ -153,6 +153,10 @@ export type MobileTimeEntry = {
   source: string;
   confidence: string;
   reviewStatus: string;
+  /** Server-verified: an owner decision in Review created this block (Recent learns from such visits). */
+  confirmedInReview?: boolean;
+  /** Server-verified: the owner typed this description while making the Review decision. */
+  ownerAuthoredInReview?: boolean;
   description: string | null;
   startedAt: string;
   stoppedAt: string | null;

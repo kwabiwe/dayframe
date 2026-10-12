@@ -726,6 +726,39 @@ describe("category persistence", () => {
     expect(client.release).toHaveBeenCalled();
   });
 
+  it("never stores the server-only Review decision keys from a client event payload (E1)", async () => {
+    const client = {
+      query: vi.fn(async (statement: string, values?: unknown[]) => {
+        void values;
+        if (statement.includes("insert into activity_events")) return { rows: [{ id: "event-forged" }] };
+        return { rows: [] };
+      }),
+      release: vi.fn()
+    };
+    mocks.pool.connect.mockResolvedValueOnce(client);
+
+    await processActivityEvent(
+      {
+        source: "location_learning",
+        type: "unknown_stay",
+        occurredAt: new Date("2026-07-05T09:30:00.000Z"),
+        description: "Lunch with friends",
+        rawPayload: {
+          durationMinutes: 45,
+          dayframeReviewDecision: { ownerAuthoredDescription: true },
+          reviewSuggestedTitles: ["Something else"]
+        }
+      },
+      session
+    );
+
+    const insertEventCall = client.query.mock.calls.find(([statement]) =>
+      String(statement).includes("insert into activity_events")
+    );
+    const storedPayload = JSON.parse(String((insertEventCall?.[1] as unknown[])[8]));
+    expect(storedPayload).toEqual({ durationMinutes: 45 });
+  });
+
   it("creates a review-only commute candidate from location learning", async () => {
     const client = {
       query: vi.fn(async (statement: string, values?: unknown[]) => {

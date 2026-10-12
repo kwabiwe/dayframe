@@ -8,6 +8,7 @@ import type {
   ProjectSummary,
   RecentActivitySuggestion
 } from "@dayframe/shared";
+import { REVIEW_DECISION_PAYLOAD_KEY } from "./review-decision-signal";
 import {
   analyzeTimeIntervals,
   buildCategoryUsageRanks,
@@ -137,6 +138,10 @@ export type TimeEntryRow = {
   source: string;
   confidence: string;
   reviewStatus: string;
+  /** True when an owner decision in Review created the block (see `confirmedInReviewSql`). */
+  confirmedInReview?: boolean;
+  /** True when the owner typed the description in the Review decision (see `ownerAuthoredInReviewSql`). */
+  ownerAuthoredInReview?: boolean;
   description: string | null;
   startedAt: string;
   stoppedAt: string | null;
@@ -744,6 +749,55 @@ async function getAutomationRules(session: RequestSession, execute: typeof query
   }
 }
 
+/**
+ * Whether the block came from an owner decision in Review: its source event's Review item was
+ * accepted (accept, edit and confirm, record once, save place and confirm…), or it is a child of a
+ * Review split/merge correction (those events exist only for Review decisions). Auto-logged blocks
+ * have no Review item, so they read false, as do open and skipped suggestions (no block, or a
+ * needs-review one). The accepted-item list is uncorrelated, so it is read once per query.
+ * Recent description suggestions learn from location visits only when this is true (E1).
+ * Uses $1 (workspace) and $2 (user) of the surrounding statement.
+ */
+export const confirmedInReviewSql = `coalesce(
+              te.created_from_event_id in (
+                select accepted_review.event_id
+                from review_items accepted_review
+                where accepted_review.workspace_id = $1
+                  and accepted_review.user_id = $2
+                  and accepted_review.status = 'accepted'
+                  and accepted_review.event_id is not null
+              )
+              or (
+                te.source = 'location_learning'
+                and exists (
+                  select 1
+                  from activity_events correction_event
+                  where correction_event.id = te.created_from_event_id
+                    and correction_event.workspace_id = te.workspace_id
+                    and correction_event.user_id = te.user_id
+                    and correction_event.client_event_id like 'location-correction:%'
+                )
+              ),
+              false
+            ) as "confirmedInReview"`;
+
+/**
+ * Whether the owner typed the block's description while making the Review decision that created
+ * it (E1, Codex r2). Location Review actions record this on the block's source event at decision
+ * time (`recordOwnerAuthoredDescription` / split and merge parts in `location-review-service.ts`)
+ * under a key client-ingested payloads can never carry. A suggested title accepted as is or edited
+ * back to it, a place's default description, legacy geofence acceptance, auto-logged visits and
+ * rows from before the signal existed all read false. A primary-key lookup per block.
+ */
+export const ownerAuthoredInReviewSql = `coalesce((
+              select (owner_event.raw_payload -> '${REVIEW_DECISION_PAYLOAD_KEY}' ->> 'ownerAuthoredDescription') = 'true'
+              from activity_events owner_event
+              where owner_event.id = te.created_from_event_id
+                and owner_event.workspace_id = te.workspace_id
+                and owner_event.user_id = te.user_id
+                and owner_event.source = 'location_learning'
+            ), false) as "ownerAuthoredInReview"`;
+
 export type TimeEntryQueryOptions = {
   capturedNow?: string;
   overlappingFrom?: string;
@@ -793,6 +847,8 @@ export function buildTimeEntriesQuery(
             te.source,
             te.confidence,
             te.review_status as "reviewStatus",
+            ${confirmedInReviewSql},
+            ${ownerAuthoredInReviewSql},
             te.description,
             te.started_at as "startedAt",
             te.stopped_at as "stoppedAt",

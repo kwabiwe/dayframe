@@ -13,6 +13,13 @@ import { withSyncTransaction, setSyncPhase, syncFailureMetadata, SyncOperationEr
 import { ReviewResolutionError } from "../event-service";
 import type { RequestSession } from "../session";
 import { syncTimeEntryTags } from "../tag-service";
+import {
+  REVIEW_DECISION_PAYLOAD_KEY,
+  REVIEW_SUGGESTED_TITLES_PAYLOAD_KEY,
+  isOwnerAuthoredReviewDescription,
+  reviewSuggestedTitles,
+  type ReviewDecisionPayload
+} from "../review-decision-signal";
 import { ensureCommuteCategoryId } from "../automatic-category-service";
 import { reviewProposalHash } from "../review-proposal-hash";
 import { SUPERSEDED_REVIEW_SCOPE } from "./location-review-supersession";
@@ -42,7 +49,15 @@ type LockedReview = {
   eventSource: string | null;
   eventType: string | null;
   semanticRevision: Date | string | null;
+  /**
+   * Every title Dayframe ever suggested for this item: its event's recorded history (replay
+   * retitles included) plus its current title, or for a correction part the history carried from
+   * the items it came from. A description equal to one of them is not the owner's.
+   */
+  suggestedTitles: string[];
 };
+
+type LockedReviewRow = Omit<LockedReview, "suggestedTitles"> & { reviewSuggestedTitles: unknown; correctionEvent: boolean };
 
 type ConfirmedPlaceIdentity = {
   placeId: string | null;
@@ -204,7 +219,7 @@ async function lockLocationReviews(
   session: RequestSession
 ) {
   const uniqueIds = [...new Set(ids)].sort();
-  const result = await client.query<LockedReview>(
+  const result = await client.query<LockedReviewRow>(
     `select ri.id,
             ri.event_id as "eventId",
             ri.status,
@@ -227,6 +242,8 @@ async function lockLocationReviews(
             case when st.centre is null then null else ST_X(st.centre::geometry) end as "centreLongitude",
             ae.source as "eventSource",
             ae.event_type as "eventType",
+            ae.raw_payload -> '${REVIEW_SUGGESTED_TITLES_PAYLOAD_KEY}' as "reviewSuggestedTitles",
+            coalesce(ae.client_event_id like 'location-correction:%', false) as "correctionEvent",
             coalesce(st.updated_at, cs.updated_at, ri.resolved_at, ri.created_at) as "semanticRevision"
      from review_items ri
      join activity_events ae
@@ -244,7 +261,10 @@ async function lockLocationReviews(
   if (result.rows.length !== uniqueIds.length) {
     throw new ReviewResolutionError("review_item_not_found", "Location review item not found.", { status: 404 });
   }
-  return result.rows;
+  return result.rows.map(({ reviewSuggestedTitles: payloadTitles, correctionEvent, ...row }) => ({
+    ...row,
+    suggestedTitles: reviewSuggestedTitles(payloadTitles, row.title, { correction: correctionEvent })
+  }));
 }
 
 async function lockLocationSegments(
@@ -541,6 +561,7 @@ async function confirmReview(
       : item.suggestedPlaceId;
   const placeLabel = placeIdentity?.placeLabel ?? null;
   await validateReferences(client, session, categoryId, placeId);
+  const description = confirmedLocationDescription(entryKind(item), item.title, edit);
   const entry = await client.query<{ id: string }>(
     `insert into time_entries (
        workspace_id, user_id, category_id, place_id, place_label, source, confidence, review_status,
@@ -555,13 +576,17 @@ async function confirmReview(
       placeId,
       placeLabel,
       item.confidence,
-      confirmedLocationDescription(entryKind(item), item.title, edit),
+      description,
       window.startedAt,
       window.stoppedAt,
       item.eventId
     ]
   );
   let entryId = entry.rows[0]?.id;
+  // Recent (E1) learns only words the owner typed in this decision, recorded on the block's event.
+  if (entryId && isOwnerAuthoredReviewDescription(description, item.suggestedTitles)) {
+    await recordOwnerAuthoredDescription(client, session, item.eventId);
+  }
   if (!entryId) {
     const existing = await client.query<{ id: string }>(
       `select id from time_entries
@@ -952,7 +977,7 @@ async function mergeReviews(
     const entryId = await createChildEntry(
       client,
       session,
-      item,
+      { ...item, suggestedTitles: [...new Set([...item.suggestedTitles, ...adjacent.suggestedTitles])] },
       mergedId,
       new Date(ordered[0].suggestedStartedAt).toISOString(),
       new Date(ordered[1].suggestedStoppedAt).toISOString(),
@@ -964,7 +989,7 @@ async function mergeReviews(
   await createChildReview(
     client,
     session,
-    item,
+    { ...item, suggestedTitles: [...new Set([...item.suggestedTitles, ...adjacent.suggestedTitles])] },
     mergedId,
     new Date(ordered[0].suggestedStartedAt).toISOString(),
     new Date(ordered[1].suggestedStoppedAt).toISOString(),
@@ -1027,7 +1052,10 @@ async function createChildEntry(
   edit?: ReviewEntryEdit
 ) {
   await validateReferences(client, session, edit?.categoryId, edit?.placeId);
-  const event = await createChildEvent(client, session, item, segmentId, startedAt, stoppedAt, edit);
+  const description = edit?.description ?? item.title;
+  const event = await createChildEvent(client, session, item, segmentId, startedAt, stoppedAt, edit, {
+    ownerAuthoredDescription: isOwnerAuthoredReviewDescription(description, item.suggestedTitles)
+  });
   const entry = await client.query<{ id: string }>(
     `insert into time_entries (
        workspace_id, user_id, category_id, place_id, source, confidence, review_status,
@@ -1040,7 +1068,7 @@ async function createChildEntry(
       edit?.categoryId ?? item.suggestedCategoryId,
       edit?.placeId ?? item.suggestedPlaceId,
       item.confidence,
-      edit?.description ?? item.title,
+      description,
       startedAt,
       stoppedAt,
       event
@@ -1089,7 +1117,8 @@ async function createChildEvent(
   segmentId: string,
   startedAt: string,
   stoppedAt: string,
-  edit?: ReviewEntryEdit
+  edit?: ReviewEntryEdit,
+  decision: { ownerAuthoredDescription: boolean } = { ownerAuthoredDescription: false }
 ) {
   const event = await client.query<{ id: string }>(
     `insert into activity_events (
@@ -1103,7 +1132,17 @@ async function createChildEvent(
       `location-correction:${segmentId}`.slice(0, 160),
       startedAt,
       item.confidence,
-      JSON.stringify({ segmentId, startedAt, stoppedAt, correction: true }),
+      JSON.stringify({
+        segmentId,
+        startedAt,
+        stoppedAt,
+        correction: true,
+        // The titles Dayframe suggested along this correction chain, never the owner's own.
+        [REVIEW_SUGGESTED_TITLES_PAYLOAD_KEY]: item.suggestedTitles,
+        ...(decision.ownerAuthoredDescription
+          ? { [REVIEW_DECISION_PAYLOAD_KEY]: { ownerAuthoredDescription: true } satisfies ReviewDecisionPayload }
+          : {})
+      }),
       edit?.categoryId ?? item.suggestedCategoryId,
       edit?.placeId ?? item.suggestedPlaceId
     ]
@@ -1113,6 +1152,17 @@ async function createChildEvent(
     [event.rows[0].id, segmentId, session.workspaceId, session.userId]
   );
   return event.rows[0].id;
+}
+
+/** Marks the block's source event: the owner typed its description in this Review decision. */
+async function recordOwnerAuthoredDescription(client: pg.PoolClient, session: RequestSession, eventId: string) {
+  const decision: ReviewDecisionPayload = { ownerAuthoredDescription: true };
+  await client.query(
+    `update activity_events
+     set raw_payload = coalesce(raw_payload, '{}'::jsonb) || jsonb_build_object($4::text, $5::jsonb)
+     where id = $1 and workspace_id = $2 and user_id = $3`,
+    [eventId, session.workspaceId, session.userId, REVIEW_DECISION_PAYLOAD_KEY, JSON.stringify(decision)]
+  );
 }
 
 async function auditCorrection(

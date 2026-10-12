@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
   buildHistoricalEntrySuggestions,
+  historicalSuggestionLearningTier,
   historicalSuggestionPatch,
+  isReviewConfirmedLocationVisit,
   type RecentActivityEntry,
   type RecentActivitySuggestion
 } from "./index";
@@ -221,12 +223,13 @@ describe("historical entry suggestions", () => {
     ]);
   });
 
-  it("includes explicitly confirmed non-health history while rejecting unresolved automation", () => {
+  it("includes owner-described Review confirmations while rejecting unresolved automation", () => {
     const results = search([
       historyEntry("accepted-place", "School pickup", {
+        confirmedInReview: true,
         eventType: "geofence_exit",
-        source: "location_learning",
-        userConfirmed: true
+        ownerAuthoredInReview: true,
+        source: "location_learning"
       }),
       historyEntry("unresolved-place", "Office visit", {
         eventType: "geofence_exit",
@@ -270,6 +273,184 @@ describe("historical entry suggestions", () => {
         query: ""
       })
     );
+  });
+});
+
+function confirmedVisit(
+  id: string,
+  description: string | null,
+  overrides: Partial<RecentActivityEntry> = {}
+): RecentActivityEntry {
+  return historyEntry(id, description, {
+    categoryColor: "teal",
+    categoryId: "exercise",
+    categoryName: "Exercise",
+    confirmedInReview: true,
+    ownerAuthoredInReview: true,
+    source: "location_learning",
+    ...overrides
+  });
+}
+
+describe("Recent learns from visits confirmed in Review (E1)", () => {
+  it("admits only location visits confirmed through a Review decision as tier 2", () => {
+    expect(historicalSuggestionLearningTier(historyEntry("typed", "Planning"))).toBe(1);
+    expect(historicalSuggestionLearningTier(historyEntry("started", "Planning", { source: "mobile_app" }))).toBe(1);
+    expect(historicalSuggestionLearningTier(confirmedVisit("visit", "Gym"))).toBe(2);
+    expect(historicalSuggestionLearningTier(confirmedVisit("journey", "School run", {
+      eventType: "commute_detected"
+    }))).toBe(2);
+    expect(historicalSuggestionLearningTier(confirmedVisit("geofence", "Gym", {
+      eventType: "geofence_exit",
+      source: "geofence_specific"
+    }))).toBe(2);
+
+    // Auto-logged trusted-place visit: confirmed block, but no Review decision.
+    expect(historicalSuggestionLearningTier(confirmedVisit("auto", "Gym", { confirmedInReview: false }))).toBeNull();
+    expect(historicalSuggestionLearningTier(confirmedVisit("auto-legacy", "Gym", { confirmedInReview: undefined }))).toBeNull();
+    // Open suggestion (needs-review block) and a skipped one (ignored).
+    expect(historicalSuggestionLearningTier(confirmedVisit("open", "Gym", { reviewStatus: "needs_review" }))).toBeNull();
+    expect(historicalSuggestionLearningTier(confirmedVisit("skipped", "Gym", { reviewStatus: "ignored" }))).toBeNull();
+    // Health stays out even when confirmed in Review.
+    expect(historicalSuggestionLearningTier(confirmedVisit("sleep", "Sleep", {
+      eventType: "health_sleep_import",
+      source: "health_sleep"
+    }))).toBeNull();
+    expect(historicalSuggestionLearningTier(confirmedVisit("walk", "Walk", {
+      eventType: "health_workout_import",
+      source: "location_learning"
+    }))).toBeNull();
+    // Other accepted Review items (shortcuts, calendar hints) are not location visits.
+    expect(historicalSuggestionLearningTier(confirmedVisit("shortcut", "Focus", {
+      eventType: "shortcut_action",
+      source: "shortcut"
+    }))).toBeNull();
+    expect(isReviewConfirmedLocationVisit(confirmedVisit("visit", "Gym"))).toBe(true);
+    expect(isReviewConfirmedLocationVisit(historyEntry("typed", "Gym", { confirmedInReview: true }))).toBe(false);
+  });
+
+  it("admits only descriptions the owner typed in Review, never Dayframe-supplied text (Codex r2)", () => {
+    // Suggested title accepted as is or edited back to it, default description substitution,
+    // legacy geofence acceptance: confirmed in Review, but no owner-authored signal.
+    expect(historicalSuggestionLearningTier(confirmedVisit("kept", "Lunch with friends", {
+      ownerAuthoredInReview: false
+    }))).toBeNull();
+    // Older servers, caches and historical rows without the signal stay out.
+    expect(historicalSuggestionLearningTier(confirmedVisit("unknown", "Lunch with friends", {
+      ownerAuthoredInReview: undefined
+    }))).toBeNull();
+    // The old compact-query flag is not enough on its own.
+    expect(historicalSuggestionLearningTier(confirmedVisit("compact", "Lunch with friends", {
+      confirmedInReview: undefined,
+      userConfirmed: true
+    }))).toBeNull();
+    // An owner-authored signal without a Review confirmation proves nothing.
+    expect(historicalSuggestionLearningTier(confirmedVisit("unconfirmed", "Lunch with friends", {
+      confirmedInReview: false
+    }))).toBeNull();
+    // Owner-typed text is the owner's own words, like a typed block: not filtered further.
+    expect(historicalSuggestionLearningTier(confirmedVisit("renamed", "Visit grandma at Example Street"))).toBe(2);
+  });
+
+  it("keeps unconfirmed, auto-logged, skipped and Health blocks out of Recent", () => {
+    const results = search([
+      confirmedVisit("auto", "Auto visit", { confirmedInReview: false }),
+      confirmedVisit("open", "Open visit", { reviewStatus: "needs_review" }),
+      confirmedVisit("skipped", "Skipped visit", { reviewStatus: "ignored" }),
+      confirmedVisit("health", "Night", { eventType: "health_sleep_import", source: "health_sleep" }),
+      confirmedVisit("confirmed", "Confirmed visit")
+    ], "");
+
+    expect(results.map((result) => result.description)).toEqual(["Confirmed visit"]);
+  });
+
+  it("ranks every typed or started block before confirmed visits without a query", () => {
+    const frequentVisit = Array.from({ length: 6 }, (_, index) => confirmedVisit(
+      `gym-${index}`,
+      "Gym",
+      {
+        durationSeconds: 7_200,
+        startedAt: `2026-08-07T0${index}:00:00.000Z`,
+        stoppedAt: `2026-08-07T0${index}:50:00.000Z`
+      }
+    ));
+    const results = search([
+      ...frequentVisit,
+      historyEntry("old-typed", "Quarterly planning", {
+        durationSeconds: 120,
+        startedAt: "2026-06-01T09:00:00.000Z",
+        stoppedAt: "2026-06-01T09:02:00.000Z"
+      }),
+      historyEntry("typed", "Design review")
+    ], "");
+
+    expect(results.map((result) => result.description)).toEqual([
+      "Design review",
+      "Quarterly planning",
+      "Gym"
+    ]);
+  });
+
+  it("keeps the match tiers and puts typed blocks first inside each tier", () => {
+    const results = search([
+      confirmedVisit("visit-exact", "Run"),
+      confirmedVisit("visit-prefix", "Running club"),
+      historyEntry("typed-prefix", "Run notes"),
+      historyEntry("typed-substring", "Morning run"),
+      confirmedVisit("visit-substring", "School run", { eventType: "commute_detected" })
+    ], "run");
+
+    expect(results.map((result) => result.description)).toEqual([
+      "Run",
+      "Run notes",
+      "Running club",
+      "Morning run",
+      "School run"
+    ]);
+  });
+
+  it("keeps existing scoring order inside the confirmed-visit tier", () => {
+    const results = search([
+      confirmedVisit("once", "Library"),
+      ...Array.from({ length: 4 }, (_, index) => confirmedVisit(`pool-${index}`, "Pool", {
+        startedAt: `2026-08-0${index + 3}T09:00:00.000Z`,
+        stoppedAt: `2026-08-0${index + 3}T09:45:00.000Z`
+      }))
+    ], "");
+
+    expect(results.map((result) => result.description)).toEqual(["Pool", "Library"]);
+    expect(results[0]).toEqual(expect.objectContaining({ useCount: 4 }));
+  });
+
+  it("lets a typed Description win over a confirmed visit with the same Description", () => {
+    const results = search([
+      confirmedVisit("visit-a", "Gym", { stoppedAt: "2026-08-07T11:00:00.000Z", startedAt: "2026-08-07T10:00:00.000Z" }),
+      confirmedVisit("visit-b", "gym ", { categoryId: "health", categoryName: "Health" }),
+      historyEntry("typed", "GYM", { categoryId: "focus", tagNames: ["Strength"] })
+    ], "");
+
+    expect(results).toHaveLength(1);
+    expect(results[0]).toEqual(expect.objectContaining({
+      categoryId: "focus",
+      description: "GYM",
+      tagNames: ["Strength"],
+      useCount: 1
+    }));
+  });
+
+  it("keeps the limit across both tiers", () => {
+    const typed = Array.from({ length: 10 }, (_, index) => historyEntry(`typed-${index}`, `Typed ${index}`));
+    const visits = Array.from({ length: 10 }, (_, index) => confirmedVisit(`visit-${index}`, `Outing ${index}`, {
+      durationSeconds: 7_200,
+      stoppedAt: "2026-08-07T11:00:00.000Z"
+    }));
+    const results = search([...visits, ...typed], "");
+
+    expect(results).toHaveLength(12);
+    expect(results.slice(0, 10).every((result) => result.description.startsWith("Typed"))).toBe(true);
+    expect(results.slice(10).every((result) => result.description.startsWith("Outing"))).toBe(true);
+    expect(search([...visits, ...typed], "", { limit: 4 }).map((result) => result.description.split(" ")[0]))
+      .toEqual(["Typed", "Typed", "Typed", "Typed"]);
   });
 });
 

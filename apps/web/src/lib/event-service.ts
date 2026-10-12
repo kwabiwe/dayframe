@@ -1,4 +1,5 @@
 import { inspectHealthSourceRevision, type HealthSourceDecision } from "./health-source-provenance";
+import { withoutServerReviewDecision } from "./review-decision-signal";
 import { withSyncTransaction, setSyncPhase, syncFailureMetadata, SyncOperationError, type SyncTransactionOptions } from "./sync-transaction";
 import {
   defaultCountsTowardGoal,
@@ -737,7 +738,8 @@ async function processActivityEventWithClient(
         parsed.type,
         parsed.occurredAt,
         candidate.confidence,
-        JSON.stringify(parsed.rawPayload),
+        // Review decision keys are written only by the server's Review actions (E1).
+        JSON.stringify(withoutServerReviewDecision(parsed.rawPayload)),
         candidate.projectId ?? null,
         candidate.categoryId ?? null,
         candidate.placeId ?? null,

@@ -1,4 +1,5 @@
 import { emitReviewSemanticSegments, timeAwayPlaceName } from "./location-review-semantic-batch";
+import { PRESERVE_REVIEW_TITLE_HISTORY_SQL, recordReviewTitleHistory } from "./review-title-history";
 import { reopenSupersededReviews } from "./location-review-supersession";
 import { observeLocationStage, observeLocationTiming, type LocationObservation } from "./location-sync-diagnostics";
 import {
@@ -532,7 +533,7 @@ async function emitSemanticSegment(
          else activity_events.confidence
        end,
        raw_payload = case
-         when activity_events.review_status = 'needs_review' then excluded.raw_payload
+         when activity_events.review_status = 'needs_review' then ${PRESERVE_REVIEW_TITLE_HISTORY_SQL}
          else activity_events.raw_payload
        end,
        suggested_category_id = case
@@ -625,6 +626,8 @@ async function emitSemanticSegment(
         notes
       ]
     );
+    // Keep every title Dayframe suggested (E1): the outgoing one before a retitle, the new one after.
+    await recordReviewTitleHistory(client, session, [event.rows[0].id]);
     await client.query(
       `update review_items
        set location_segment_id = $1,
@@ -650,6 +653,7 @@ async function emitSemanticSegment(
         event.rows[0].id
       ]
     );
+    await recordReviewTitleHistory(client, session, [event.rows[0].id]);
   }
   if (segment.kind === "stay") {
     const segmentReviewStatus = preserveTerminalDecision
