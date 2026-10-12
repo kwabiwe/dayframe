@@ -14190,7 +14190,10 @@ dialog.ui-dialog.df-rf-dialog {
 .df-range-menu button:focus-visible {
   outline: 2px solid var(--focus);
   outline-offset: 2px;
+}
 
+
+/*
  * W13: Calendar drag-to-create ghost and resize tip (prototype web.html .cal-ghost / .resize-tip).
  * Neutral, not coral: coral stays for recording and the one primary action. No transition — the
  * ghost and tip follow the pointer frame for frame, so Reduce Motion needs no separate path.
