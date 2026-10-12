@@ -20,7 +20,6 @@ import {
   AccessibilityInfo,
   Alert,
   AppState,
-  Dimensions,
   Keyboard,
   Linking,
   Modal,
@@ -33,17 +32,9 @@ import {
   Text,
   TextInput,
   View,
-  useWindowDimensions,
-  type KeyboardEvent
+  useWindowDimensions
 } from "react-native";
-import Reanimated, {
-  Easing as ReanimatedEasing,
-  cancelAnimation,
-  runOnJS,
-  useAnimatedStyle,
-  useSharedValue,
-  withTiming
-} from "react-native-reanimated";
+import Reanimated from "react-native-reanimated";
 import { router, Stack, useFocusEffect, useLocalSearchParams, useNavigation } from "expo-router";
 import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 import {
@@ -147,11 +138,7 @@ import {
 } from "@/lib/settingsRefresh";
 import { readTodayBootstrapForSettings } from "@/lib/settingsSeed";
 import { useRememberedSettingsState } from "@/lib/settingsRemembered";
-import {
-  contentSizedSheetKeyboardLayout,
-  keyboardInsetFromScreenY,
-  keyboardLiftAnimationDuration
-} from "@/lib/editSheetKeyboard";
+import { useContentSizedSheetKeyboard } from "@/lib/contentSizedSheetKeyboard";
 import { clampSettingsScrollOffset, settingsScrollNeedsClamp } from "@/lib/settingsScroll";
 import { BlocksNavHeader, usePreviousScreenLabel } from "@/components/BlocksNavHeader";
 import { BlocksConfirmHost, useBlocksConfirm, type BlocksConfirmRequest } from "@/components/blocks/BlocksConfirmSheet";
@@ -2864,63 +2851,23 @@ function HealthTypeSheet({
   const { height: windowHeight } = useWindowDimensions();
   const mappedCategory = categories.find((category) => category.id === mapping.categoryId) ?? null;
   // The sheet is as tall as its rows (owner, 12 Oct: no empty space under them), at most 85 % of
-  // the screen. The keyboard is its bottom occlusion boundary: `keyboardInset` goes to
-  // SwipeDismissSheet (which owns translation and hands a handle drag over to the keyboard
-  // dismissal), and a keyboard-high space at the sheet's foot grows on the keyboard's own duration
-  // (Reduce Motion: at once), so the rows ride above the keyboard and the list scrolls inside the
-  // cap. Once the keyboard settles, Name is scrolled into view (Codex r1 on #355).
+  // the screen. The keyboard is its bottom occlusion boundary (useContentSizedSheetKeyboard): a
+  // keyboard-high space at the sheet's foot moves with the keyboard (Reduce Motion: at once), and
+  // `keyboardInset` drives SwipeDismissSheet's keyboard hand-off, released only once the keyboard
+  // has gone and the space has settled. A focused Name is scrolled into view whenever the layout
+  // settles with the keyboard up (Codex r1–r2 on #355).
   const bottomInset = useSafeAreaInsets().bottom;
-  const [keyboardInset, setKeyboardInset] = useState(0);
-  const keyboardLayout = contentSizedSheetKeyboardLayout({ bottomInset, keyboardInset, windowHeight });
-  const keyboardSpace = useSharedValue(0);
-  const keyboardSpaceStyle = useAnimatedStyle(() => ({ height: keyboardSpace.value }));
-  const keyboardTarget = useRef(0);
   const scrollRef = useRef<ScrollView>(null);
   const nameFocused = useRef(false);
-  const revealName = useCallback(() => {
-    if (!nameFocused.current || closingRef.current || keyboardTarget.current <= 0) return;
-    scrollRef.current?.scrollToEnd({ animated: !reduceMotion });
-  }, [reduceMotion]);
-  useEffect(() => {
-    const follow = (event: KeyboardEvent, nextInset: number, settled: boolean) => {
-      setKeyboardInset(nextInset);
-      if (nextInset === keyboardTarget.current) {
-        // keyboardDidShow: the keyboard has settled where the space already is.
-        if (settled) revealName();
-        return;
-      }
-      keyboardTarget.current = nextInset;
-      cancelAnimation(keyboardSpace);
-      const duration = keyboardLiftAnimationDuration({ eventDuration: event.duration, platform: Platform.OS });
-      if (reduceMotion || duration === null) {
-        keyboardSpace.value = nextInset;
-        return;
-      }
-      keyboardSpace.value = withTiming(
-        nextInset,
-        { duration, easing: ReanimatedEasing.bezier(0.17, 0.59, 0.4, 0.77) },
-        (finished) => {
-          if (finished && nextInset > 0) runOnJS(revealName)();
-        }
-      );
-    };
-    const frame = (settled: boolean) => (event: KeyboardEvent) => follow(event, keyboardInsetFromScreenY({
-      keyboardScreenY: event.endCoordinates.screenY,
-      screenHeight: Dimensions.get("screen").height,
-      windowHeight: Dimensions.get("window").height
-    }), settled);
-    const hidden = (event: KeyboardEvent) => follow(event, 0, true);
-    const subscriptions = [
-      Keyboard.addListener("keyboardWillChangeFrame", frame(false)),
-      // Some restored keyboards skip the frame change; didShow also marks the keyboard settled.
-      Keyboard.addListener("keyboardDidShow", frame(true)),
-      Keyboard.addListener("keyboardWillHide", hidden),
-      Keyboard.addListener("keyboardDidHide", hidden)
-    ];
-    return () => {
-      for (const subscription of subscriptions) subscription.remove();
-    };
-  }, [keyboardSpace, reduceMotion, revealName]);
+  const sheetKeyboard = useContentSizedSheetKeyboard({
+    bottomInset,
+    onReveal: () => {
+      if (!nameFocused.current || closingRef.current) return;
+      scrollRef.current?.scrollToEnd({ animated: !reduceMotion });
+    },
+    reduceMotion,
+    windowHeight
+  });
   // Name is a draft saved once: when editing ends, or when the sheet starts to leave by any way
   // (Close, backdrop, swipe, accessibility escape), so a focused edit is never lost.
   const [nameDraft, setNameDraftState] = useState(mapping.description ?? "");
@@ -2977,7 +2924,7 @@ function HealthTypeSheet({
           backdropAccessibilityLabel={`Close ${label}`}
           backdropStyle={styles.sheetBackdrop}
           handleStyle={styles.sheetHandle}
-          keyboardInset={keyboardInset}
+          keyboardInset={sheetKeyboard.keyboardInset}
           onDismiss={onClose}
           onDismissStart={() => {
             // Leaving: save the Name draft once and make the sheet inert, so a late tap (Logs as)
@@ -2993,7 +2940,7 @@ function HealthTypeSheet({
           // the finger once the keyboard has gone (SwipeDismissSheet's keyboard hand-off).
           onGestureStart={() => Keyboard.dismiss()}
           reduceMotion={reduceMotion}
-          style={[styles.activeEditSheet, { maxHeight: keyboardLayout.sheetMaxHeight }]}
+          style={[styles.activeEditSheet, { maxHeight: sheetKeyboard.sheetMaxHeight }]}
           visible
         >
           <View
@@ -3021,9 +2968,10 @@ function HealthTypeSheet({
           </View>
           <ScrollView
             ref={scrollRef}
-            contentContainerStyle={[styles.activeEditContent, { paddingBottom: keyboardLayout.contentPaddingBottom }]}
+            contentContainerStyle={[styles.activeEditContent, { paddingBottom: sheetKeyboard.contentPaddingBottom }]}
             keyboardDismissMode="on-drag"
             keyboardShouldPersistTaps="handled"
+            onLayout={sheetKeyboard.onScrollLayout}
             style={styles.activeEditScroller}
           >
             <SettingsBlockGroup
@@ -3102,8 +3050,8 @@ function HealthTypeSheet({
                     onEndEditing={commitName}
                     onFocus={() => {
                       nameFocused.current = true;
-                      // Focus moved here with the keyboard already up: reveal at once.
-                      if (keyboardTarget.current > 0) requestAnimationFrame(revealName);
+                      // Focus moved here with the keyboard already up.
+                      sheetKeyboard.revealWhenSettled();
                     }}
                     value={nameDraft}
                   />
@@ -3113,7 +3061,7 @@ function HealthTypeSheet({
           </ScrollView>
           </View>
           {/* The keyboard's space at the sheet's foot (zero while it is down). */}
-          <Reanimated.View pointerEvents="none" style={[{ flexShrink: 0 }, keyboardSpaceStyle]} testID={`health-keyboard-space-${healthKey}`} />
+          <Reanimated.View pointerEvents="none" style={[{ flexShrink: 0 }, sheetKeyboard.keyboardSpaceStyle]} testID={`health-keyboard-space-${healthKey}`} />
           {children}
         </SwipeDismissSheet>
       </View>

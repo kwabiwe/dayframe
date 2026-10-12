@@ -90,14 +90,15 @@ export type ContentSizedSheetKeyboardLayout = {
 };
 
 const CONTENT_SIZED_SHEET_MAX_HEIGHT = 0.85;
-const CONTENT_SIZED_SHEET_MIN_PADDING = 12;
+const CONTENT_SIZED_SHEET_KEYBOARD_GAP = 12;
 
 /**
- * A sheet as tall as its rows (at most 85 % of the window). The keyboard is the sheet's own bottom
- * occlusion boundary: a keyboard-high space at the foot of the sheet keeps every row above it, so
- * the sheet grows upward inside the same 85 % cap and its scroll view (shrinking first) stays fully
- * visible. `SwipeDismissSheet` keeps owning translation and the keyboard hand-off from the same
- * `keyboardInset`. With the keyboard down the rows end at the bottom safe area.
+ * A sheet as tall as its rows (at most 85 % of the window), its rows ending over the bottom safe
+ * area. The keyboard is the sheet's own bottom occlusion boundary: a space at the foot of the sheet
+ * (`keyboardSpace`) keeps the last row 12 points above the keyboard, so the sheet grows upward
+ * inside the same cap and its scroll view (shrinking first) stays fully visible. The content
+ * padding never changes, so the space is the only thing that moves with the keyboard.
+ * `SwipeDismissSheet` keeps owning translation and the keyboard hand-off.
  */
 export function contentSizedSheetKeyboardLayout({
   bottomInset,
@@ -105,12 +106,13 @@ export function contentSizedSheetKeyboardLayout({
   windowHeight
 }: ContentSizedSheetKeyboardInput): ContentSizedSheetKeyboardLayout {
   const keyboardOpen = keyboardInset > 0.5;
+  const contentPaddingBottom = Math.max(bottomInset, CONTENT_SIZED_SHEET_KEYBOARD_GAP) + 4;
   return {
-    contentPaddingBottom: keyboardOpen
-      ? CONTENT_SIZED_SHEET_MIN_PADDING
-      : Math.max(bottomInset, CONTENT_SIZED_SHEET_MIN_PADDING) + 4,
+    contentPaddingBottom,
     keyboardOpen,
-    keyboardSpace: keyboardOpen ? keyboardInset : 0,
+    keyboardSpace: keyboardOpen
+      ? Math.max(0, keyboardInset + CONTENT_SIZED_SHEET_KEYBOARD_GAP - contentPaddingBottom)
+      : 0,
     sheetMaxHeight: Math.round(windowHeight * CONTENT_SIZED_SHEET_MAX_HEIGHT)
   };
 }

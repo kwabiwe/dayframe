@@ -192,4 +192,50 @@ describe("remembered states belong to the account and session they were read in 
     expect(readRememberedSetting("healthAccessGranted")).toBe(true);
     tree.unmount();
   });
+
+  it("lets a binding made before the account loaded claim only the first owner: null → A → B (Codex r2)", () => {
+    signIn(null);
+    const { rerender, seen, tree } = mountHook();
+    const setBeforeOwner = seen.set;
+    // The active account loads (no new sign-in): the setter publishes under A.
+    account.owner = A;
+    act(() => setBeforeOwner(true));
+    expect(seen.value).toBe(true);
+    expect(readRememberedSetting("healthAccessGranted")).toBe(true);
+    // Startup reconciliation replaces the owner within the same session, before any notification.
+    account.owner = B;
+    act(() => setBeforeOwner(false));
+    expect(readRememberedSetting("healthAccessGranted")).toBeUndefined();
+    rerender();
+    expect(seen.value).toBeNull();
+    // And after B's notification: the earlier setter stays spent, B starts from initial.
+    act(() => {
+      for (const listener of [...account.listeners]) listener();
+    });
+    act(() => setBeforeOwner(false));
+    expect(readRememberedSetting("healthAccessGranted")).toBeUndefined();
+    expect(seen.value).toBeNull();
+    act(() => seen.set(false));
+    expect(readRememberedSetting("healthAccessGranted")).toBe(false);
+    tree.unmount();
+  });
+
+  it("lets an unclaimed binding claim the owner it first resolves to on notification, then holds it", () => {
+    signIn(null);
+    const { rerender, seen, tree } = mountHook();
+    const setBeforeOwner = seen.set;
+    account.owner = B;
+    act(() => {
+      for (const listener of [...account.listeners]) listener();
+    });
+    act(() => setBeforeOwner(true));
+    expect(readRememberedSetting("healthAccessGranted")).toBe(true);
+    account.owner = A;
+    act(() => setBeforeOwner(false));
+    rerender();
+    expect(seen.value).toBeNull();
+    account.owner = B;
+    expect(readRememberedSetting("healthAccessGranted")).toBe(true);
+    tree.unmount();
+  });
 });

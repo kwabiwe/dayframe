@@ -63,40 +63,51 @@ function rememberedOr<T>(key: string, initial: T) {
   return known === undefined ? initial : known;
 }
 
-type BoundState<T> = { binding: RememberedSettingsBinding; value: T };
+type EpochState<T> = { epoch: number; value: T };
 
 /**
- * Whether state bound to `from` still belongs to `to`: the same session, and the same account — or
- * an account that was not known yet when the state was bound (the active account loads lazily; a
- * different account always arrives with a new sign-in, so a new generation).
- */
-function continues(from: RememberedSettingsBinding, to: RememberedSettingsBinding) {
-  return from.generation === to.generation && (from.ownerKey === to.ownerKey || from.ownerKey === null);
-}
-
-/**
- * useState that starts from this account's last-known value and remembers every change. The state
- * is bound to the account and session it was read in: when either changes (account switch,
- * sign-out, a new sign-in of the same account) it goes back to `initial` (or what the new account
- * already remembers), and a setter handed out before the change is spent — a late result from the
- * earlier account or session neither reaches the module nor shows on screen.
+ * useState that starts from this account's last-known value and remembers every change. Each hook
+ * holds one binding per epoch: the account and session it was read in. A binding made before the
+ * active account had loaded (no owner yet) is claimed once, by the first owner it resolves to in
+ * that session; any other owner afterwards, a new session or sign-out ends the epoch (Codex r2 on
+ * #355: the session and the active account are stored separately, so an owner can be replaced
+ * within one session during startup reconciliation). Ending an epoch puts the state back to
+ * `initial` (or what the new account already remembers) and spends every setter handed out in it:
+ * a late result from the earlier account or session neither reaches the module nor shows on screen.
  */
 export function useRememberedSettingsState<T>(key: string, initial: T): [T, (action: SetStateAction<T>) => void] {
   const initialRef = useRef(initial);
   initialRef.current = initial;
-  const [state, setState] = useState<BoundState<T>>(() => ({
-    binding: captureRememberedSettingsBinding(),
-    value: rememberedOr(key, initial)
-  }));
+  const bindingRef = useRef<RememberedSettingsBinding | null>(null);
+  if (bindingRef.current === null) bindingRef.current = captureRememberedSettingsBinding();
+  const epochRef = useRef(0);
+  const [state, setState] = useState<EpochState<T>>(() => ({ epoch: 0, value: rememberedOr(key, initial) }));
+
+  /** Whether `epoch` still holds; read-only (render). */
+  const holds = useCallback((epoch: number) => {
+    const bound = bindingRef.current!;
+    const now = captureRememberedSettingsBinding();
+    return epoch === epochRef.current && (
+      sameBinding(bound, now) ||
+      (bound.ownerKey === null && bound.generation === now.generation)
+    );
+  }, []);
+
+  /** The binding to publish under while `epoch` holds (claiming a not-yet-known owner once), or null. */
+  const claim = useCallback((epoch: number) => {
+    if (!holds(epoch)) return null;
+    const now = captureRememberedSettingsBinding();
+    if (bindingRef.current!.ownerKey === null && now.ownerKey !== null) bindingRef.current = now;
+    return now;
+  }, [holds]);
 
   useEffect(() => {
     const rebind = () => {
-      setState((previous) => {
-        const now = captureRememberedSettingsBinding();
-        if (sameBinding(previous.binding, now)) return previous;
-        if (continues(previous.binding, now)) return { binding: now, value: previous.value };
-        return { binding: now, value: rememberedOr(key, initialRef.current) };
-      });
+      if (claim(epochRef.current)) return;
+      epochRef.current += 1;
+      bindingRef.current = captureRememberedSettingsBinding();
+      const epoch = epochRef.current;
+      setState({ epoch, value: rememberedOr(key, initialRef.current) });
     };
     const unsubscribes = [
       subscribeActiveMobileAccount(rebind),
@@ -108,23 +119,22 @@ export function useRememberedSettingsState<T>(key: string, initial: T): [T, (act
     return () => {
       for (const unsubscribe of unsubscribes) unsubscribe();
     };
-  }, [key]);
+  }, [claim, key]);
 
-  const { generation, ownerKey } = state.binding;
+  const { epoch } = state;
   const set = useCallback((action: SetStateAction<T>) => {
-    const bound = { generation, ownerKey };
-    // Spent: this setter belongs to an account or session that is no longer current.
-    if (!continues(bound, captureRememberedSettingsBinding())) return;
+    // Spent: this setter's epoch ended (another account or session).
+    if (!claim(epoch)) return;
     setState((previous) => {
-      const now = captureRememberedSettingsBinding();
-      if (!continues(bound, now) || !continues(previous.binding, now)) return previous;
+      if (previous.epoch !== epoch) return previous;
+      const binding = claim(epoch);
+      if (!binding) return previous;
       const value = resolve(action, previous.value);
-      writeRememberedSetting(key, value, now);
-      return { binding: now, value };
+      writeRememberedSetting(key, value, binding);
+      return { epoch, value };
     });
-  }, [generation, key, ownerKey]);
+  }, [claim, epoch, key]);
 
   // Between a change and its notification, nothing from the earlier account or session shows.
-  const now = captureRememberedSettingsBinding();
-  return [continues(state.binding, now) ? state.value : rememberedOr(key, initial), set];
+  return [state.epoch === epochRef.current && holds(state.epoch) ? state.value : rememberedOr(key, initial), set];
 }

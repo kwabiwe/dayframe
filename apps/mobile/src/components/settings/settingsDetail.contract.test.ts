@@ -24,26 +24,30 @@ describe("Settings detail (audit A8b)", () => {
 
   it("lifts the Apple Health type sheet through SwipeDismissSheet's keyboard hand-off, not a separate offset (Codex r1 on #355)", () => {
     const sheet = settings.slice(settings.indexOf("function HealthTypeSheet("), settings.indexOf("function LocationInformationSheet("));
-    // The keyboard geometry is the shared one, handed to the sheet that owns translation.
-    expect(sheet).toContain("keyboardInsetFromScreenY({");
-    expect(sheet).toContain("keyboardInset={keyboardInset}");
+    // The keyboard geometry is the shared one (useContentSizedSheetKeyboard, unit-tested in
+    // contentSizedSheetKeyboard.test.tsx), handed to the sheet that owns translation.
+    expect(sheet).toContain("const sheetKeyboard = useContentSizedSheetKeyboard({");
+    expect(sheet).toContain("keyboardInset={sheetKeyboard.keyboardInset}");
     expect(sheet).toContain("onGestureStart={() => Keyboard.dismiss()}");
     expect(sheet).not.toContain("translateYOffset");
     expect(sheet).not.toContain("Animated.timing");
+    expect(sheet).not.toContain("automaticallyAdjustKeyboardInsets");
     // Content-sized: a max height (85 % via the shared layout), never a fixed height.
-    expect(sheet).toContain("contentSizedSheetKeyboardLayout({ bottomInset, keyboardInset, windowHeight })");
-    expect(sheet).toContain("style={[styles.activeEditSheet, { maxHeight: keyboardLayout.sheetMaxHeight }]}");
+    expect(sheet).toContain("style={[styles.activeEditSheet, { maxHeight: sheetKeyboard.sheetMaxHeight }]}");
     expect(sheet).not.toMatch(/\{ height: Math\.round\(windowHeight/);
-    expect(sheet).toContain("paddingBottom: keyboardLayout.contentPaddingBottom");
-    // The keyboard's space grows on the keyboard's own duration, at once under Reduce Motion.
-    expect(sheet).toContain("if (reduceMotion || duration === null) {");
-    expect(sheet).toContain("keyboardSpace.value = nextInset;");
-    expect(sheet).toContain("keyboardSpace.value = withTiming(");
-    // Name is revealed once the keyboard settles, without animation under Reduce Motion.
+    expect(sheet).toContain("paddingBottom: sheetKeyboard.contentPaddingBottom");
+    expect(sheet).toContain("sheetKeyboard.keyboardSpaceStyle");
+    // Name is revealed whenever the layout settles with the keyboard up, unanimated under Reduce Motion.
     expect(sheet).toContain("scrollRef.current?.scrollToEnd({ animated: !reduceMotion });");
-    expect(sheet).toContain('Keyboard.addListener("keyboardDidShow", frame(true))');
-    expect(sheet).toContain("runOnJS(revealName)()");
+    expect(sheet).toContain("onLayout={sheetKeyboard.onScrollLayout}");
+    expect(sheet).toContain("sheetKeyboard.revealWhenSettled();");
     expect(sheet).toContain("ref={scrollRef}");
+    const hook = readFileSync(resolve(__dirname, "../../lib/contentSizedSheetKeyboard.ts"), "utf8");
+    expect(hook).toContain("keyboardInsetFromScreenY({");
+    expect(hook).toContain('Keyboard.addListener("keyboardDidHide"');
+    expect(hook).toContain("if (reduceMotion || duration === null) {");
+    // The hand-off is released only once the keyboard has gone and the space has settled.
+    expect(hook).toContain("if (target.current === 0 && leaving.current.keyboardGone && leaving.current.spaceSettled) {");
   });
 
   it("keeps a row's switch separate from the text that opens more", () => {

@@ -108,10 +108,11 @@ describe("content-sized sheet keyboard layout (Apple Health type sheet, Codex r1
   });
 
   it("holds a keyboard-high space inside the same 85 % cap while the keyboard is up", () => {
+    // The padding stays; the space keeps the last row 12 points above the keyboard.
     expect(contentSizedSheetKeyboardLayout({ bottomInset: 34, keyboardInset: 336, windowHeight: 844 })).toEqual({
-      contentPaddingBottom: 12,
+      contentPaddingBottom: 38,
       keyboardOpen: true,
-      keyboardSpace: 336,
+      keyboardSpace: 310,
       sheetMaxHeight: 717
     });
   });
