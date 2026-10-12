@@ -411,7 +411,7 @@ function TodayFrame() {
 
 function GoalCells({ cells }: { cells: GoalCellSlice[][] }) {
   return (
-    <div className="df-goal-cells" style={{ "--cells": cells.length } as CSSProperties} aria-hidden="true">
+    <div className="df-goal-cells" data-dense={cells.length > 14 ? "" : undefined} style={{ "--cells": cells.length } as CSSProperties} aria-hidden="true">
       {cells.map((slices, index) => (
         <span className="df-goal-cell" key={index}>
           {slices.map((slice) => (

@@ -85,6 +85,23 @@ describe("TodayGoalFrame", () => {
     expect(summary[0].props.accessibilityLabel).toBe("9 hours framed, 2 hours toward your daily goal of 8 hours, 25 percent.");
   });
 
+  it("draws goals over 14 hours with tighter gaps and corners, and 14 or fewer unchanged", () => {
+    const cellsFor = (goalHours: number) => {
+      const tree = render(buildTodayGoalFrame({ entries: [], goalMinutes: goalHours * 60, nowMs: day + 12 * 3_600_000 }));
+      const frame = tree.root.findByProps({ testID: "today-goal-frame" });
+      const row = frame.findAll((node) => node.type === ("View" as never) && Array.isArray(node.props.style) && node.props.style[0]?.height === 18)[0];
+      const cells = frame.findAll((node) => node.type === ("View" as never) && Array.isArray(node.props.style) && node.props.style[0]?.flex === 1);
+      return { cells, row };
+    };
+    const flat = (style: unknown[]) => Object.assign({}, ...style.filter(Boolean)) as Record<string, unknown>;
+    for (const [hours, dense] of [[14, false], [15, true], [24, true]] as const) {
+      const { cells, row } = cellsFor(hours);
+      expect(cells).toHaveLength(hours);
+      expect(flat(row.props.style).columnGap).toBe(dense ? 2 : 4);
+      expect(flat(cells[0].props.style).borderRadius).toBe(dense ? 3 : 5);
+    }
+  });
+
   it("draws one cell per goal hour and marks the live slice with the recording colour", () => {
     const tree = render(buildTodayGoalFrame({
       entries: [{ id: "live", startedAt: at(9), stoppedAt: null, categoryColor: "lime" }],

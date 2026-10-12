@@ -7,6 +7,9 @@ import { MOBILE_DISPLAY_FONT, mobileTextProps } from "../../lib/mobileTypography
 import type { GoalFrameSlice } from "../../lib/todayGoalFrame";
 import { compactDuration, spokenDuration } from "./todayBlocksLayout";
 
+// Goals over 14 h (up to 24 cells) draw with tighter gaps and corners so the cells stay blocks.
+const DENSE_GOAL_CELLS = 14;
+
 function goalLabel(hours: number) {
   return Number.isInteger(hours) ? `${hours}h` : compactDuration(hours * 3600);
 }
@@ -91,10 +94,10 @@ export const TodayGoalFrame = memo(function TodayGoalFrame({
         </View>
         <View
           onLayout={(event) => recordMobileLayout(diagnostic, "today.goal.cells", event)}
-          style={styles.cells}
+          style={[styles.cells, cells.length > DENSE_GOAL_CELLS && styles.cellsDense]}
         >
           {cells.map((cell, index) => (
-            <View key={index} style={[styles.cell, { backgroundColor: theme.surfaceMuted }]}>
+            <View key={index} style={[styles.cell, cells.length > DENSE_GOAL_CELLS && styles.cellDense, { backgroundColor: theme.surfaceMuted }]}>
               {cell.map((slice) => (
                 <View
                   key={slice.key}
@@ -122,6 +125,8 @@ const styles = StyleSheet.create({
   of: { flexShrink: 1, fontSize: 14 },
   percent: { fontSize: 13, fontWeight: "600", marginLeft: "auto" },
   cells: { columnGap: 4, flexDirection: "row", height: 18 },
+  cellsDense: { columnGap: 2 },
   cell: { borderRadius: 5, flex: 1, flexDirection: "row", overflow: "hidden" },
+  cellDense: { borderRadius: 3 },
   live: { borderRightWidth: 2 },
 });
