@@ -12,6 +12,15 @@ export const DAYFRAME_BLOCKS = {
   minimumTextContrast: 4.5
 } as const;
 
+/** Corner share of a small activity marker (X3): a rounded-square block, never a round dot. Web uses
+ * the same 30% as `--activity-marker-radius`. */
+export const ACTIVITY_MARKER_RADIUS_RATIO = 0.3;
+
+/** Corner radius for a small activity/category marker of the given side length. */
+export function activityMarkerRadius(size: number) {
+  return Math.round(size * ACTIVITY_MARKER_RADIUS_RATIO * 2) / 2;
+}
+
 export type DayframeOnBlockColor = (typeof DAYFRAME_BLOCKS.onBlock)[keyof typeof DAYFRAME_BLOCKS.onBlock];
 
 /** WCAG 2.x contrast ratio between two #RRGGBB colours. */

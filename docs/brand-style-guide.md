@@ -200,7 +200,9 @@ Changing the picker must preserve all of these independently:
 - legacy key/HEX normalization without rewriting stored category assignments;
 - identical shared values on web and iOS.
 
-On surfaces not yet migrated to Blocks, category colour appears as a dot, border, soft fill, hatch, or chart mark beside semantic text.
+On surfaces not yet migrated to Blocks, category colour appears as a small block marker, border, soft fill, hatch, or chart mark beside semantic text.
+
+One activity marker shape (X3, owner decision 12 October 2026): wherever a small mark stands for an activity or category (legends, filter chips, pickers, report rows, review editor choices) it is a rounded-square block with a 30% corner (web `--activity-marker-radius`; iPhone `activityMarkerRadius(size)` in `@dayframe/shared`), never a round dot. Round dots remain only for non-activity meaning: status, the now line, goal progress, avatars and pagination.
 
 On Blocks surfaces, an entry is a solid block filled with its category colour, with its text on the block:
 

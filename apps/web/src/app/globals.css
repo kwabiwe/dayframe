@@ -1,5 +1,11 @@
 @import "tailwindcss";
 
+/* X3: every activity/category marker is a small rounded-square block, never a round dot.
+   Percentage keeps the Blocks chip proportion (~4px on a 12px marker) at any marker size. */
+:root {
+  --activity-marker-radius: 30%;
+}
+
 :root,
 :root[data-theme="light"] {
   --background: #f4f6f9;
@@ -969,7 +975,7 @@ textarea.ui-control {
   height: 12px;
   flex: 0 0 auto;
   border: 0;
-  border-radius: 999px;
+  border-radius: var(--activity-marker-radius);
 }
 
 .category-data-marker.is-uncategorized {
@@ -4089,14 +4095,14 @@ kbd {
 .report-filter-chip-dot {
   width: 10px;
   height: 10px;
-  border-radius: 999px;
+  border-radius: var(--activity-marker-radius);
 }
 
 .report-filter-option-dot.is-uncategorized,
 .report-category-marker.is-uncategorized,
 .report-entry-category i.is-uncategorized {
   border: 1px solid var(--text-secondary);
-  border-radius: 2px;
+  border-radius: var(--activity-marker-radius);
   background: repeating-linear-gradient(45deg, var(--surface-muted) 0 2px, var(--text-secondary) 2px 3px) !important;
 }
 
@@ -4378,7 +4384,7 @@ kbd {
 .report-category-marker {
   width: 10px;
   height: 10px;
-  border-radius: 999px;
+  border-radius: var(--activity-marker-radius);
   background: var(--category-color);
 }
 
@@ -4586,7 +4592,7 @@ kbd {
   width: 10px;
   height: 10px;
   flex: 0 0 auto;
-  border-radius: 999px;
+  border-radius: var(--activity-marker-radius);
 }
 
 .report-entry-duration {
@@ -6641,7 +6647,7 @@ kbd {
   height: 20px;
   flex: 0 0 auto;
   border: 0;
-  border-radius: 999px;
+  border-radius: var(--activity-marker-radius);
   box-shadow: none;
 }
 
@@ -6776,7 +6782,7 @@ kbd {
   width: 9px;
   height: 9px;
   flex: 0 0 auto;
-  border-radius: 999px;
+  border-radius: var(--activity-marker-radius);
 }
 
 .swiss-focus-dot.is-muted {
@@ -8269,7 +8275,7 @@ dialog.ui-dialog.manual-entry-dialog {
   height: 9px;
   flex: 0 0 auto;
   border: 0;
-  border-radius: 999px;
+  border-radius: var(--activity-marker-radius);
   box-shadow: none;
 }
 

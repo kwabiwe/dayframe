@@ -117,7 +117,7 @@ calendar 1.25. Explanations retain system scaling. Never stack category numeric
 columns, truncate durations/percentages or manually scale a font twice.
 Numeric columns use intrinsic native measurements for the currently required
 hour-digit capacity, not a four-digit minimum, with a 6-point inter-column gap.
-Current-label axis measurements grow and shrink; labels share the category-dot
+Current-label axis measurements grow and shrink; labels share the category-marker
 and heading left anchor. Width/font-scale/Bold Text changes invalidate measurements;
 zero-size hidden probes never affect scrolling, focus or touch targets.
 

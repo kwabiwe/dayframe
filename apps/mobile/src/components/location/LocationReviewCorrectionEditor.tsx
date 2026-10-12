@@ -1,4 +1,4 @@
-import { formatDuration } from "@dayframe/shared";
+import { activityMarkerRadius, formatDuration } from "@dayframe/shared";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Alert,
@@ -1287,6 +1287,7 @@ const placeChoiceStyles = StyleSheet.create({
 const categoryChoiceStyles = StyleSheet.create({
   touch: { minHeight: 44, justifyContent: "center" },
   visual: { minHeight: 32, flexDirection: "row", alignItems: "center", gap: 7, borderRadius: 999, paddingHorizontal: 11, paddingVertical: 4 },
-  dot: { width: 8, height: 8, borderRadius: 4 },
+  // X3: activity markers are small rounded-square blocks, never round dots.
+  dot: { width: 8, height: 8, borderRadius: activityMarkerRadius(8) },
   text: { fontSize: 12, lineHeight: 16, fontWeight: "600" }
 });
