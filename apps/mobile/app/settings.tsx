@@ -68,6 +68,7 @@ import {
   DAILY_GOAL_HOURS,
   WEEKLY_GOAL_HOURS,
   blockColorsFor,
+  canStepGoal,
   nextGoalMinutes,
   paletteColorFor,
   type DayframePaletteKey,
@@ -908,11 +909,11 @@ export default function SettingsScreen() {
   goalReload.current = load;
   const goalSaver = useRef(createGoalSaver({
     delayMs: GOAL_SAVE_DELAY_MS,
-    save: (goals) => updateTimeGoals({ dailyGoalMinutes: goals.daily * 60, weeklyGoalMinutes: goals.weekly * 60 }),
+    save: (goals) => updateTimeGoals({ dailyGoalMinutes: Math.round(goals.daily * 60), weeklyGoalMinutes: Math.round(goals.weekly * 60) }),
     onSaved: (goals) => {
       const userId = goalUserId.current;
       const withGoals = (currentData: MobileBootstrap | null) => currentData && currentData.user.id === userId
-        ? { ...currentData, user: { ...currentData.user, dailyGoalMinutes: goals.daily * 60, weeklyGoalMinutes: goals.weekly * 60 } }
+        ? { ...currentData, user: { ...currentData.user, dailyGoalMinutes: Math.round(goals.daily * 60), weeklyGoalMinutes: Math.round(goals.weekly * 60) } }
         : currentData;
       // The module snapshot is updated directly, so reopening Settings shows the saved goals even
       // when this save finished after Settings closed.
@@ -920,7 +921,7 @@ export default function SettingsScreen() {
       if (snapshotData) updateSettingsSnapshot({ data: withGoals(snapshotData) });
       setDataAndCache(withGoals);
       setGoalDraft(null);
-      if (userId) publishSavedTimeGoals({ userId, dailyGoalMinutes: goals.daily * 60, weeklyGoalMinutes: goals.weekly * 60 });
+      if (userId) publishSavedTimeGoals({ userId, dailyGoalMinutes: Math.round(goals.daily * 60), weeklyGoalMinutes: Math.round(goals.weekly * 60) });
     },
     onFailed: (error) => {
       setGoalDraft(null);
@@ -935,8 +936,13 @@ export default function SettingsScreen() {
       );
     }
   })).current;
-  const dailyGoalHours = goalDraft?.daily ?? Math.round((data?.user.dailyGoalMinutes ?? 480) / 60);
-  const weeklyGoalHours = goalDraft?.weekly ?? Math.round((data?.user.weeklyGoalMinutes ?? 2400) / 60);
+  // Steps start from the stored minutes, as on web (a 7h30 goal steps to 8h or 7h); shown rounded.
+  const goalMinutes = {
+    daily: goalDraft ? goalDraft.daily * 60 : data?.user.dailyGoalMinutes ?? 480,
+    weekly: goalDraft ? goalDraft.weekly * 60 : data?.user.weeklyGoalMinutes ?? 2400
+  };
+  const dailyGoalHours = Math.round(goalMinutes.daily / 60);
+  const weeklyGoalHours = Math.round(goalMinutes.weekly / 60);
   const locationAccessSummary = locationDiagnostics?.locationLearningCaptureState === "logout_cleanup"
     ? "Paused while signing out"
     : locationMonitoringAllowed
@@ -1036,10 +1042,11 @@ export default function SettingsScreen() {
   function changeGoal(kind: "daily" | "weekly", direction: -1 | 1) {
     if (!data) return;
     const limits = kind === "daily" ? DAILY_GOAL_HOURS : WEEKLY_GOAL_HOURS;
-    const current = { daily: dailyGoalHours, weekly: weeklyGoalHours };
-    const nextValue = nextGoalMinutes(current[kind] * 60, direction, limits) / 60;
-    if (nextValue === current[kind]) return;
-    const next = { ...current, [kind]: nextValue };
+    const minutes = goalMinutes[kind];
+    const nextMinutes = nextGoalMinutes(minutes, direction, limits);
+    if (nextMinutes === minutes) return;
+    // The untouched goal keeps its stored minutes (the save sends both).
+    const next = { daily: goalMinutes.daily / 60, weekly: goalMinutes.weekly / 60, [kind]: nextMinutes / 60 };
     setGoalDraft(next);
     goalSaver.schedule(next);
   }
@@ -1944,8 +1951,8 @@ export default function SettingsScreen() {
                 <SettingsBlockRow
                   control={
                     <SettingsStepper
-                      canDecrease={data !== null && dailyGoalHours > DAILY_GOAL_HOURS.min}
-                      canIncrease={data !== null && dailyGoalHours < DAILY_GOAL_HOURS.max}
+                      canDecrease={data !== null && canStepGoal(goalMinutes.daily, -1, DAILY_GOAL_HOURS)}
+                      canIncrease={data !== null && canStepGoal(goalMinutes.daily, 1, DAILY_GOAL_HOURS)}
                       hint={`From ${DAILY_GOAL_HOURS.min} to ${DAILY_GOAL_HOURS.max} hours`}
                       label="daily goal"
                       onDecrease={() => changeGoal("daily", -1)}
@@ -1963,8 +1970,8 @@ export default function SettingsScreen() {
                 <SettingsBlockRow
                   control={
                     <SettingsStepper
-                      canDecrease={data !== null && weeklyGoalHours > WEEKLY_GOAL_HOURS.min}
-                      canIncrease={data !== null && weeklyGoalHours < WEEKLY_GOAL_HOURS.max}
+                      canDecrease={data !== null && canStepGoal(goalMinutes.weekly, -1, WEEKLY_GOAL_HOURS)}
+                      canIncrease={data !== null && canStepGoal(goalMinutes.weekly, 1, WEEKLY_GOAL_HOURS)}
                       hint={`From ${WEEKLY_GOAL_HOURS.min} to ${WEEKLY_GOAL_HOURS.max} hours, in steps of ${WEEKLY_GOAL_HOURS.step}`}
                       label="weekly goal"
                       onDecrease={() => changeGoal("weekly", -1)}
