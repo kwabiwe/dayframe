@@ -6022,8 +6022,10 @@ kbd {
 /*
  * Trello 213: the Description draws no box at rest or after a click or tap, idle or running.
  * `:focus-visible` also matches pointer focus on text inputs, so `useKeyboardFocusRing` marks
- * keyboard, shortcut, programmatic and assistive-technology focus with `data-focus-ring` and only
- * that shows the shared neutral perimeter (rules below the invalid ones).
+ * keyboard, shortcut, programmatic and assistive-technology focus with `data-focus-ring`; only
+ * then, and only while the Description input itself has focus, does its compound wrapper show the
+ * shared neutral perimeter (rules below the invalid ones). The tag picker's search field nested in
+ * the wrapper keeps the ordinary field focus border.
  */
 .swiss-timer-description-control .ui-compound-control:focus-within {
   border-color: transparent;
@@ -6038,8 +6040,8 @@ kbd {
   box-shadow: inset 0 -2px 0 var(--danger);
 }
 
-.swiss-timer-description-control[data-focus-ring="keyboard"] .ui-compound-control:focus-within,
-.swiss-timer-description-control[data-focus-ring="keyboard"] .ui-compound-control:has(input[aria-invalid="true"]):focus-within {
+.swiss-timer-description-control .inline-tag-picker-search:focus-within,
+.swiss-timer-description-control[data-focus-ring="keyboard"] .inline-tag-input-anchor:has(.inline-tag-description-input:focus) {
   border-color: var(--focus);
 }
 

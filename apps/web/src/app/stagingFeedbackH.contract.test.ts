@@ -60,13 +60,15 @@ describe("command timer Description (H3, Trello 213)", () => {
   });
 
   it("shows the shared neutral perimeter on the compound wrapper for keyboard-origin focus only", () => {
+    // Only while the Description input itself has keyboard-origin focus; the nested tag picker's
+    // search keeps the ordinary field border (Codex r2).
     const keyboard = rule(
-      '.swiss-timer-description-control[data-focus-ring="keyboard"] .ui-compound-control:focus-within,\n' +
-        '.swiss-timer-description-control[data-focus-ring="keyboard"] .ui-compound-control:has(input[aria-invalid="true"]):focus-within'
+      ".swiss-timer-description-control .inline-tag-picker-search:focus-within,\n" +
+        '.swiss-timer-description-control[data-focus-ring="keyboard"] .inline-tag-input-anchor:has(.inline-tag-description-input:focus)'
     );
     expect(keyboard).toContain("border-color: var(--focus);");
     // It must follow the transparent and invalid rules it overrides.
-    expect(css.indexOf('[data-focus-ring="keyboard"] .ui-compound-control:focus-within')).toBeGreaterThan(
+    expect(css.indexOf('[data-focus-ring="keyboard"] .inline-tag-input-anchor:has(')).toBeGreaterThan(
       css.indexOf('.swiss-timer-description-control .ui-compound-control:has(input[aria-invalid="true"]):focus-within {')
     );
     expect(rule('.swiss-timer-description-control .ui-compound-control:has(input[aria-invalid="true"]):focus-within')).toContain(

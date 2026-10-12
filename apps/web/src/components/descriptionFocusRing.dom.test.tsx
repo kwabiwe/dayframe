@@ -1,11 +1,11 @@
 // @vitest-environment jsdom
 
-import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { BootstrapData, TimeEntryRow } from "@/lib/queries";
 
-// Trello 213 (Codex r1): the command timer's Description shows its neutral perimeter for keyboard,
+// Trello 213 (Codex r1, r2): the command timer's Description shows its neutral perimeter for keyboard,
 // shortcut, programmatic and assistive-technology focus only — never after a click or tap.
 let runtime: Record<string, unknown>;
 
@@ -20,6 +20,10 @@ afterEach(() => {
   document.body.innerHTML = "";
 });
 
+// The pointer modality lasts through the gesture's focus hand-off: two frames and a task after
+// pointerup. Waiting this long lets it expire.
+const afterPointerGesture = () => act(() => new Promise((resolve) => setTimeout(resolve, 80)));
+
 describe.each([
   ["idle", null],
   ["running", runningEntry()]
@@ -33,7 +37,7 @@ describe.each([
     return { description, field };
   }
 
-  it("a click or tap focuses the field without the keyboard ring, and typing keeps it off", async () => {
+  it("a click focuses the field without the keyboard ring, and typing keeps it off", async () => {
     const user = userEvent.setup();
     const { description, field } = setup();
 
@@ -43,6 +47,21 @@ describe.each([
 
     await user.type(description, "Plan");
     expect(field.dataset.focusRing).toBeUndefined();
+  });
+
+  it("a touch tap focuses the field without the keyboard ring", async () => {
+    const { description, field } = setup();
+
+    fireEvent.pointerDown(description, { pointerType: "touch" });
+    act(() => description.focus());
+    fireEvent.pointerUp(description, { pointerType: "touch" });
+    expect(field.dataset.focusRing).toBeUndefined();
+
+    // Once the tap is over, focus that arrives without a pointer shows the ring again.
+    await afterPointerGesture();
+    act(() => description.blur());
+    act(() => description.focus());
+    expect(field.dataset.focusRing).toBe("keyboard");
   });
 
   it("Tab focus shows the keyboard ring; a later click hides it; leaving clears it", async () => {
@@ -71,7 +90,7 @@ describe.each([
     const { description, field } = setup();
 
     // The N shortcut: a keydown, then the shell focuses the field.
-    fireEvent.keyDown(window, { key: "n" });
+    fireEvent.keyDown(document, { key: "n" });
     act(() => description.focus());
     expect(field.dataset.focusRing).toBe("keyboard");
 
@@ -81,15 +100,54 @@ describe.each([
     expect(field.dataset.focusRing).toBe("keyboard");
   });
 
-  it("a keydown after a pointer press that focused nothing restores keyboard focus visibility", () => {
+  it("a click on the wrapper's gutter, which focuses nothing, leaves no stale pointer mark (Codex r2)", async () => {
+    const user = userEvent.setup();
     const { description, field } = setup();
 
-    fireEvent.pointerDown(field);
-    fireEvent.keyDown(window, { key: "Tab" });
+    await user.click(field);
+    expect(document.activeElement).not.toBe(description);
+    await afterPointerGesture();
+
+    // A later script or assistive-technology focus still shows the ring.
     act(() => description.focus());
     expect(field.dataset.focusRing).toBe("keyboard");
   });
+
+  it("WebKit's Tags click (blur to body, then the picker's scheduled search focus) stays pointer focus (Codex r2)", async () => {
+    const user = userEvent.setup();
+    const { description, field } = setup();
+    await user.click(description);
+    const trigger = screen.getByRole("button", { name: "Add or filter tags" });
+
+    // WebKit does not focus a clicked button: the Description blurs to body first.
+    fireEvent.pointerDown(trigger, { pointerType: "mouse" });
+    act(() => description.blur());
+    expect(document.activeElement).toBe(document.body);
+    fireEvent.pointerUp(trigger, { pointerType: "mouse" });
+    fireEvent.click(trigger);
+    // The picker focuses its search in a later frame, inside the same gesture's hand-off.
+    const search = pickerSearch(field);
+    await waitFor(() => expect(document.activeElement).toBe(search));
+    expect(field.dataset.focusRing).toBeUndefined();
+  });
+
+  it("opening Tags with the mouse never brings the keyboard ring back", async () => {
+    const user = userEvent.setup();
+    const { description, field } = setup();
+    await user.click(description);
+
+    await user.click(screen.getByRole("button", { name: "Add or filter tags" }));
+    const search = pickerSearch(field);
+    await waitFor(() => expect(document.activeElement).toBe(search));
+    expect(field.dataset.focusRing).toBeUndefined();
+  });
 });
+
+function pickerSearch(field: HTMLElement) {
+  const search = field.querySelector<HTMLInputElement>(".inline-tag-picker-search input");
+  if (!search) throw new Error("Missing tag picker search");
+  return search;
+}
 
 function runtimeFixture(activeEntry: TimeEntryRow | null) {
   const data = {
